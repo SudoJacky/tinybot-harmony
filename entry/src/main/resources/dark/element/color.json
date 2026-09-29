@@ -1,0 +1,13 @@
+{
+  "color": [
+    { "name": "start_window_background", "value": "#121A18" },
+    { "name": "page_background", "value": "#121A18" },
+    { "name": "surface", "value": "#1D2824" },
+    { "name": "text_primary", "value": "#EAF1ED" },
+    { "name": "text_secondary", "value": "#A8B8AE" },
+    { "name": "accent", "value": "#A2D8B9" },
+    { "name": "on_accent", "value": "#143528" },
+    { "name": "user_bubble", "value": "#293C31" },
+    { "name": "danger", "value": "#FFA7A0" }
+  ]
+}
