@@ -40,7 +40,11 @@ export function builtinProviderInfos(): ProviderInfo[] {
       noApiKey: true, endpointPlaceholder: 'http://192.168.1.100:11434/v1',
       description: '填写手机可访问的 Ollama 服务器地址和已安装的模型名称。127.0.0.1 指手机自身。HTTP 未加密，请在可信网络中使用。' },
     { id: LEGACY_PROVIDER_ID, name: '自定义兼容服务', protocol: 'chat-completions',
-      defaultBaseUrl: '', defaultModel: '', models: [] }
+      defaultBaseUrl: '', defaultModel: '', models: [] },
+    { id: 'openai-responses', name: 'OpenAI Responses', protocol: 'responses',
+      defaultBaseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4.1', models: ['gpt-4.1'] },
+    { id: 'anthropic', name: 'Anthropic', protocol: 'anthropic-messages',
+      defaultBaseUrl: 'https://api.anthropic.com/v1', defaultModel: '', models: [] }
   ];
 }
 

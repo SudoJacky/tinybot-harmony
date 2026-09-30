@@ -19,6 +19,7 @@ export interface ChatRequest {
   stream: boolean;
   tools?: ToolDefinition[];
   tool_choice?: string;
+  max_tokens?: number;
 }
 
 export function completionUrl(baseUrl: string, allowHttp: boolean = false): string {
@@ -31,8 +32,9 @@ export function completionUrl(baseUrl: string, allowHttp: boolean = false): stri
 }
 
 export function chatRequest(model: string, messages: ModelMessage[], tools: ToolDefinition[],
-  options: ChatCompletionsOptions = {}): ChatRequest {
+  options: ChatCompletionsOptions = {}, maxOutputTokens?: number): ChatRequest {
   return { model: model, stream: true, tools: tools.length > 0 ? tools : undefined,
+    max_tokens: maxOutputTokens,
     tool_choice: tools.length > 0 ? 'auto' : undefined,
     messages: messages.map((message: ModelMessage): ChatWireMessage => {
       return { role: message.role, content: message.content,

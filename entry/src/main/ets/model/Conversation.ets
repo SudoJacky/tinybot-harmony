@@ -1,5 +1,7 @@
 import { AgentStep, ModelMessage, interruptTools, stepMessages, validateSteps } from './Agent';
 import { builtinProviderInfos, DEFAULT_PROVIDER_ID, LEGACY_PROVIDER_ID } from './Provider';
+import { contextSettings, validateCompaction } from './ConversationContext';
+import { ModelReference, ProviderProfile, validateProfile, validateReference } from './ProviderProfiles';
 
 const LEGACY_SYSTEM_PROMPT: string = '你是 Tinybot，一个运行在 HarmonyOS 手机上的个人 AI 助手。请用清晰、自然的语言帮助用户。你目前只能对话，不能访问手机文件、执行命令或操作其他应用。不要声称执行了未提供的工具。';
 const DEFAULT_SYSTEM_PROMPT: string = '你是 Tinybot，一个运行在 HarmonyOS 手机上的个人 AI 助手。请用清晰、自然的语言帮助用户，并使用提供的工具完成任务。不要声称执行了未提供的工具。';
@@ -11,6 +13,8 @@ export interface ModelConfig {
   model: string;
   systemPrompt: string;
   credentialAlias: string;
+  contextWindow?: number;
+  autoCompact?: boolean;
 }
 
 export interface MessageData {
@@ -20,6 +24,20 @@ export interface MessageData {
   status: string;
   error: string;
   steps?: AgentStep[];
+  modelRef?: ModelReference;
+}
+
+export interface CompactionData {
+  summary: string;
+  firstKeptMessageId: string;
+  tokensBefore: number;
+  createdAt: number;
+}
+
+export function copyModelConfig(config: ModelConfig, configured: boolean = config.configured): ModelConfig {
+  return { configured: configured, providerId: config.providerId, baseUrl: config.baseUrl, model: config.model,
+    systemPrompt: config.systemPrompt, credentialAlias: config.credentialAlias,
+    contextWindow: config.contextWindow, autoCompact: config.autoCompact };
 }
 
 export interface ThreadData {
@@ -27,6 +45,12 @@ export interface ThreadData {
   title: string;
   updatedAt: number;
   messages: MessageData[];
+  pinned?: boolean;
+  archived?: boolean;
+  titleEdited?: boolean;
+  draft?: string;
+  compaction?: CompactionData;
+  modelRef?: ModelReference;
 }
 
 export interface AppData {
@@ -34,6 +58,7 @@ export interface AppData {
   config: ModelConfig;
   threads: ThreadData[];
   activeThreadId: string;
+  providerProfiles?: ProviderProfile[];
 }
 
 export function defaultConfig(): ModelConfig {
@@ -44,7 +69,7 @@ export function defaultConfig(): ModelConfig {
     baseUrl: provider.defaultBaseUrl,
     model: provider.defaultModel,
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
-    credentialAlias: ''
+    credentialAlias: '', contextWindow: 32768, autoCompact: true
   };
 }
 
@@ -99,6 +124,20 @@ export function parseAppData(text: string): AppData {
     throw new Error('本地数据格式不受支持，原文件已保留。');
   }
   const threadIds = new Set<string>();
+  contextSettings(data.config);
+  if (data.providerProfiles !== undefined) {
+    if (!Array.isArray(data.providerProfiles)) { throw new Error('模型服务列表损坏。'); }
+    const ids = new Set<string>();
+    const aliases = new Set<string>();
+    for (const profile of data.providerProfiles) {
+      validateProfile(profile);
+      if (ids.has(profile.id) || (profile.credentialAlias.length > 0 && aliases.has(profile.credentialAlias))) {
+        throw new Error('模型服务 ID 或密钥别名重复。');
+      }
+      ids.add(profile.id);
+      if (profile.credentialAlias.length > 0) { aliases.add(profile.credentialAlias); }
+    }
+  }
   if (data.config.providerId === undefined) {
     // Every existing endpoint used this protocol. Preserve arbitrary user endpoints and keys.
     data.config.providerId = LEGACY_PROVIDER_ID;
@@ -115,6 +154,13 @@ export function parseAppData(text: string): AppData {
       throw new Error('本地会话数据损坏，原文件已保留。');
     }
     threadIds.add(thread.id);
+    if (thread.modelRef !== undefined) { validateReference(thread.modelRef); }
+    if ((thread.pinned !== undefined && typeof thread.pinned !== 'boolean') ||
+      (thread.archived !== undefined && typeof thread.archived !== 'boolean') ||
+      (thread.titleEdited !== undefined && typeof thread.titleEdited !== 'boolean') ||
+      (thread.draft !== undefined && (typeof thread.draft !== 'string' || thread.draft.length > 24000))) {
+      throw new Error('本地会话管理数据损坏，原文件已保留。');
+    }
     const messageIds = new Set<string>();
     for (let index = 0; index < thread.messages.length; index++) {
       const message = thread.messages[index];
@@ -126,6 +172,7 @@ export function parseAppData(text: string): AppData {
         throw new Error('本地消息数据损坏，原文件已保留。');
       }
       messageIds.add(message.id);
+      if (message.modelRef !== undefined) { validateReference(message.modelRef); }
       if (message.steps !== undefined) {
         validateSteps(message.steps);
         if (message.role !== 'assistant' && message.steps.length > 0) {
@@ -138,6 +185,7 @@ export function parseAppData(text: string): AppData {
         message.error = '应用退出时执行尚未完成。已完成的文件操作会保留；可继续发送指令。';
       }
     }
+    if (thread.compaction !== undefined) { validateCompaction(thread.compaction, thread); }
   }
   if (data.activeThreadId.length > 0 && !threadIds.has(data.activeThreadId)) {
     throw new Error('找不到上次打开的会话，原文件已保留。');

@@ -2,6 +2,7 @@ import { AgentStep, AgentTurn, MAX_AGENT_STEPS, ModelMessage, ToolCall, ToolDefi
   interruptTools, stepMessages, toolError, validateToolCalls } from '../model/Agent';
 import { Cancellation, RunCancelledError } from './Cancellation';
 import { ModelSession } from './providers/Provider';
+import { OUTPUT_RESERVE, estimateContextTokens } from '../model/ConversationContext';
 
 export interface AgentTools {
   definitions(): ToolDefinition[];
@@ -28,6 +29,7 @@ export interface LoopContext {
   messages: ModelMessage[];
   turn: AgentTurn;
   maxSteps: number;
+  contextWindow?: number;
 }
 
 // No UI, credentials, provider routing or run-lifecycle ownership in the loop.
@@ -44,6 +46,9 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
   try {
     for (let round = 0; round < limit; round++) {
       cancellation.check();
+      if (context.contextWindow !== undefined && estimateContextTokens(messages, definitions) > context.contextWindow - OUTPUT_RESERVE) {
+        throw new Error('本轮内容超过上下文预算，执行已停止。已完成的工具结果已保留；请压缩历史、缩小任务或提高窗口设置。');
+      }
       const step: AgentStep = { content: '', tools: [] };
       turn.steps = turn.steps.concat([step]);
       observer.event({ type: 'step_start', step: round });
@@ -58,7 +63,8 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
         step.content += text;
         turn.content += text;
         observer.event({ type: 'text_delta', step: round, delta: text });
-      }).finally(() => { acceptingText = false; });
+      }, context.contextWindow === undefined ? undefined : { maxOutputTokens: OUTPUT_RESERVE })
+        .finally(() => { acceptingText = false; });
       cancellation.check();
       // The provider's final message is authoritative even when it emitted no deltas.
       step.content = response.content;

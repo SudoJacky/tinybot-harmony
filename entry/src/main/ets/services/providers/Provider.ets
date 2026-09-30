@@ -12,6 +12,11 @@ export interface ProviderRequest {
   apiKey: string;
   messages: ModelMessage[];
   tools: ToolDefinition[];
+  maxOutputTokens?: number;
+}
+
+export interface ModelRequestOptions {
+  maxOutputTokens?: number;
 }
 
 // Providers own endpoint rules and protocol encoding; each request owns its transport.
@@ -25,5 +30,5 @@ export interface ModelProvider {
 // A provider/model/configuration snapshot bound for one Agent run. No credentials in events.
 export interface ModelSession {
   stream(messages: ModelMessage[], tools: ToolDefinition[], cancellation: Cancellation,
-    onText: (text: string) => void): Promise<ModelTurn>;
+    onText: (text: string) => void, options?: ModelRequestOptions): Promise<ModelTurn>;
 }

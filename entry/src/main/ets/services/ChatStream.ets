@@ -1,4 +1,5 @@
 import { MAX_REASONING_CONTENT, MAX_TOOL_ARGUMENTS, MAX_TOOL_CALLS, ModelTurn, ToolCall, validateToolCalls } from '../model/Agent';
+import { ModelStream } from './providers/EventStreams';
 
 interface StreamToolFunction {
   name?: string;
@@ -30,7 +31,7 @@ interface StreamChunk {
 }
 
 // SSE framing survives arbitrary transport chunk boundaries, including CRLF splits.
-export class ChatStream {
+export class ChatStream implements ModelStream {
   private pending: string = '';
   private lines: string[] = [];
   private terminal: string = '';

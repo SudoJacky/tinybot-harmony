@@ -6,7 +6,7 @@ import { AgentTools } from '../main/ets/services/AgentLoop';
 import { AgentEvent, AgentRunHooks, AgentRunRequest, AgentRuntime } from '../main/ets/services/AgentRuntime';
 import { Cancellation, RunCancelledError } from '../main/ets/services/Cancellation';
 import { chatRequest, completionUrl } from '../main/ets/services/providers/ChatCompletionsProtocol';
-import { CredentialReader, ModelProvider, ProviderRequest } from '../main/ets/services/providers/Provider';
+import { CredentialReader, ModelProvider, ModelSession, ProviderRequest } from '../main/ets/services/providers/Provider';
 import { ProviderRegistry } from '../main/ets/services/providers/ProviderRegistry';
 
 class Gate {
@@ -176,6 +176,73 @@ export default function runtimeTests(): void {
   });
 
   describe('AgentRuntime', () => {
+    it('preparesCompactedContextWithTheSameBoundModelBeforeTheAgentRequest', 0, async () => {
+      const provider = new TestProvider('test', [answer('summary'), answer('final')]);
+      const agent = new AgentRuntime(registry(provider), new TestCredentials());
+      const result = await agent.run(request(), { prepare: async () => {}, checkpoint: async () => {},
+        prepareContext: async (model: ModelSession, messages: ModelMessage[], cancellation: Cancellation) => {
+          const summary = await model.stream([{ role: 'user', content: 'summarize history' }], [], cancellation,
+            () => {}, { maxOutputTokens: 4096 });
+          const prepared: ModelMessage[] = [{ role: 'user', content: summary.content }];
+          return prepared.concat(messages);
+        }
+      });
+      expect(result.status).assertEqual('complete');
+      expect(provider.inputs.length).assertEqual(2);
+      expect(provider.inputs[0].tools.length).assertEqual(0);
+      expect(provider.inputs[0].maxOutputTokens).assertEqual(4096);
+      expect(provider.inputs[1].messages[0].content).assertEqual('summary');
+      expect(provider.inputs[1].messages[1].content).assertEqual('test prompt');
+      expect(result.turn.content).assertEqual('final');
+    });
+    it('manualCompactionDoesNotGenerateAnExtraAssistantTurn', 0, async () => {
+      const provider = new TestProvider('test', [answer('summary')]);
+      const agent = new AgentRuntime(registry(provider), new TestCredentials());
+      const input = request();
+      input.contextOnly = true;
+      let saves = 0;
+      const result = await agent.run(input, { prepare: async () => {}, checkpoint: async () => { saves++; },
+        prepareContext: async (model: ModelSession, messages: ModelMessage[], cancellation: Cancellation) => {
+          await model.stream(messages, [], cancellation, () => {});
+          return messages;
+        }
+      });
+      expect(result.status).assertEqual('complete');
+      expect(provider.inputs.length).assertEqual(1);
+      expect(result.turn.steps.length).assertEqual(0);
+      expect(saves).assertEqual(2);
+    });
+    it('failedCompactionDoesNotDispatchTheNormalModelRequest', 0, async () => {
+      const provider = new TestProvider('test', [answer()]);
+      const agent = new AgentRuntime(registry(provider), new TestCredentials());
+      const result = await agent.run(request(), { prepare: async () => {}, checkpoint: async () => {},
+        prepareContext: async () => { throw new Error('summary persistence failed'); }
+      });
+      expect(result.status).assertEqual('failed');
+      expect(result.error).assertEqual('summary persistence failed');
+      expect(provider.inputs.length).assertEqual(0);
+      expect(agent.isRunning).assertFalse();
+    });
+    it('cancelsSummaryRequestsThroughTheRuntimeSignal', 0, async () => {
+      const provider = new TestProvider('test', [answer()]);
+      const started = new Gate();
+      provider.onStream = async (signal: Cancellation) => {
+        started.open();
+        await new Promise<void>((_resolve, reject) => { signal.onCancel(() => reject(new RunCancelledError())); });
+      };
+      const agent = new AgentRuntime(registry(provider), new TestCredentials());
+      const pending = agent.run(request(), { prepare: async () => {}, checkpoint: async () => {},
+        prepareContext: async (model: ModelSession, messages: ModelMessage[], cancellation: Cancellation) => {
+          await model.stream(messages, [], cancellation, () => {});
+          return messages;
+        }
+      });
+      await started.promise;
+      agent.abort();
+      expect((await pending).status).assertEqual('stopped');
+      expect(provider.inputs.length).assertEqual(1);
+      expect(agent.isRunning).assertFalse();
+    });
     it('emitsOrderedLifecycleEventsAndKeepsCredentialsOutOfThem', 0, async () => {
       const provider = new TestProvider('test', [toolAnswer(), answer()]);
       const keys = new TestCredentials();
