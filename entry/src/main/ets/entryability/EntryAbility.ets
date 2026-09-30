@@ -13,13 +13,29 @@
  * limitations under the License.
  */
 
-import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
+import { AbilityConstant, Configuration, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 
 const DOMAIN = 0x0000;
 
 export default class EntryAbility extends UIAbility {
+  private mainWindow?: window.Window;
+
+  // Pages extend their backgrounds under the system bars, so match the status bar text to the theme.
+  private applySystemBars(): void {
+    if (!this.mainWindow) {
+      return;
+    }
+    const dark = this.context.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
+    this.mainWindow.setWindowSystemBarProperties({ statusBarContentColor: dark ? '#FFFFFF' : '#000000' })
+      .catch((err: Error) => hilog.error(DOMAIN, 'testTag', 'Failed to set bar color. Cause: %{public}s', err.message));
+  }
+
+  onConfigurationUpdate(_config: Configuration): void {
+    this.applySystemBars();
+  }
+
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     try {
       this.context.getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
@@ -43,6 +59,8 @@ export default class EntryAbility extends UIAbility {
         return;
       }
       hilog.info(DOMAIN, 'testTag', 'Succeeded in loading the content.');
+      this.mainWindow = windowStage.getMainWindowSync();
+      this.applySystemBars();
     });
   }
 

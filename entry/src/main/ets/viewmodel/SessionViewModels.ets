@@ -1,0 +1,80 @@
+import { AgentStep, ToolCall, ToolExecution } from '../model/Agent';
+import { CompactionData, MessageData, ThreadData } from '../model/Conversation';
+import { ModelReference } from '../model/ProviderProfiles';
+import { PendingInput } from '../model/PendingInput';
+
+@Observed
+export class ToolExecutionViewModel {
+  call: ToolCall;
+  status: string;
+  output: string;
+  constructor(data: ToolExecution) { this.call = data.call; this.status = data.status; this.output = data.output; }
+}
+
+@Observed
+export class AgentStepViewModel {
+  content: string = '';
+  steering?: PendingInput;
+  tools: ToolExecutionViewModel[] = [];
+  constructor(data: AgentStep) { this.update(data); }
+  update(data: AgentStep): void {
+    this.content = data.content; this.steering = data.steering;
+    this.tools = data.tools.map((tool: ToolExecution, index: number) => {
+      const existing = this.tools[index];
+      if (existing && existing.call.id === tool.call.id) { existing.status = tool.status; existing.output = tool.output; return existing; }
+      return new ToolExecutionViewModel(tool);
+    });
+  }
+}
+
+@Observed
+export class MessageViewModel {
+  id: string = '';
+  role: string = '';
+  content: string = '';
+  status: string = '';
+  error: string = '';
+  steps: AgentStep[] = [];
+  stepViews: AgentStepViewModel[] = [];
+  modelRef?: ModelReference;
+  constructor(data: MessageData) { this.update(data); }
+  update(data: MessageData): void {
+    this.id = data.id; this.role = data.role; this.content = data.content; this.status = data.status; this.error = data.error;
+    this.modelRef = data.modelRef; this.steps = data.steps || [];
+    this.stepViews = this.steps.map((step: AgentStep, index: number) => {
+      const existing = this.stepViews[index];
+      if (existing) { existing.update(step); return existing; }
+      return new AgentStepViewModel(step);
+    });
+  }
+}
+
+@Observed
+export class ThreadViewModel {
+  id: string = '';
+  title: string = '';
+  updatedAt: number = 0;
+  messages: MessageViewModel[] = [];
+  pinned: boolean = false;
+  archived: boolean = false;
+  titleEdited: boolean = false;
+  draft: string = '';
+  compaction?: CompactionData;
+  modelRef?: ModelReference;
+  pendingInputs: PendingInput[] = [];
+  queuePaused: boolean = false;
+  constructor(data: ThreadData) { this.update(data); }
+  update(data: ThreadData): void {
+    this.id = data.id; this.title = data.title; this.updatedAt = data.updatedAt;
+    this.pinned = data.pinned === true; this.archived = data.archived === true; this.titleEdited = data.titleEdited === true;
+    this.draft = data.draft || ''; this.compaction = data.compaction; this.modelRef = data.modelRef;
+    this.pendingInputs = data.pendingInputs || []; this.queuePaused = data.queuePaused === true;
+    const existing = new Map<string, MessageViewModel>();
+    for (const message of this.messages) { existing.set(message.id, message); }
+    this.messages = data.messages.map((message: MessageData) => {
+      const view = existing.get(message.id);
+      if (view) { view.update(message); return view; }
+      return new MessageViewModel(message);
+    });
+  }
+}

@@ -10,7 +10,9 @@ export function matchingThreads(threads: ThreadData[], query: string, archived: 
   const needle = query.trim().toLocaleLowerCase();
   return threads.filter((thread: ThreadData) => (thread.archived === true) === archived &&
     (needle.length === 0 || thread.title.toLocaleLowerCase().includes(needle) ||
-      thread.messages.some((message) => message.content.toLocaleLowerCase().includes(needle))))
+      thread.messages.some((message) => message.content.toLocaleLowerCase().includes(needle) ||
+        (message.steps || []).some((step) => step.steering?.text.toLocaleLowerCase().includes(needle))) ||
+      (thread.pendingInputs || []).some((input) => input.text.toLocaleLowerCase().includes(needle))))
     .sort((left: ThreadData, right: ThreadData) => {
       const pinned = Number(right.pinned === true) - Number(left.pinned === true);
       return pinned !== 0 ? pinned : right.updatedAt - left.updatedAt;

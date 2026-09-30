@@ -2,9 +2,9 @@ import { asset } from '@kit.AssetStoreKit';
 import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
 
-import { CredentialReader } from './providers/Provider';
+import { CredentialVault } from './ProfileSettings';
 
-export class CredentialStore implements CredentialReader {
+export class CredentialStore implements CredentialVault {
   async read(alias: string): Promise<string> {
     if (alias.length === 0) {
       return '';

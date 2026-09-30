@@ -1,80 +1,111 @@
 import { ChatViewModel, SettingsViewModel } from '../viewmodel/ChatViewModel';
 import { ProviderInfo } from '../model/Provider';
 import { ProviderProfile } from '../model/ProviderProfiles';
+import { Btn, Font, Space, Styles, protocolName } from '../common/Theme';
+import { Banner, BottomBar, GroupCard, NavRow, RowDivider, SectionHeader, SwitchRow } from '../common/Widgets';
 
 @Component
 export struct SettingsPanel {
   @ObjectLink app: ChatViewModel;
   @ObjectLink settings: SettingsViewModel;
   onEditProvider: (id: string, preset: string) => void = () => {};
+  onSkills: () => void = () => {};
+  onPrompt: () => void = () => {};
 
-  @Builder
-  profileCard(profile: ProviderProfile) {
-    Column({ space: 8 }) {
-      Row({ space: 8 }) {
-        Text(profile.name).fontSize(18).fontWeight(FontWeight.Medium).layoutWeight(1).fontColor($r('app.color.text_primary'))
-        Text(profile.enabled ? '已启用' : '已停用').fontSize(12).fontColor($r('app.color.text_secondary'))
-      }.width('100%')
-      Text(`${profile.protocol} · ${profile.models.length} 个模型`).fontSize(12).fontColor($r('app.color.text_secondary')).width('100%')
-      Text(profile.baseUrl).fontSize(12).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-        .fontColor($r('app.color.text_secondary')).width('100%')
-      Row({ space: 12 }) {
-        Button('编辑').id('edit-provider-' + profile.id).fontSize(13).height(34).enabled(!this.app.busy)
-          .onClick(() => this.onEditProvider(profile.id, ''))
-        Button('删除').id('delete-provider-' + profile.id).fontSize(13).height(34)
-          .backgroundColor(Color.Transparent).fontColor($r('app.color.danger')).enabled(!this.app.busy)
-          .onClick(() => {
-            this.getUIContext().showAlertDialog({ title: '删除模型服务？',
-              message: '删除这份服务配置及其密钥，保留完整对话。使用它的会话需要重新选择模型。',
-              primaryButton: { value: '取消', action: () => {} },
-              secondaryButton: { value: '删除', action: () => { this.app.deleteProvider(profile.id); } } });
-          })
-      }.width('100%')
-    }.padding(16).borderRadius(16).width('100%').backgroundColor($r('app.color.surface'))
+  // Toggles persist immediately; revert the switch when the save fails.
+  private async saveToggle(apply: (value: boolean) => void, value: boolean): Promise<void> {
+    apply(value);
+    if (!await this.app.saveSettings()) { apply(!value); }
+  }
+
+  private promptPreview(): string {
+    const prompt = this.app.config.systemPrompt.trim();
+    return prompt.length > 0 ? prompt.replace(/\s+/g, ' ') : '未设置，使用默认行为';
   }
 
   build() {
     Scroll() {
-      Column({ space: 16 }) {
-        Row({ space: 8 }) {
-          Text('模型服务').fontSize(24).fontWeight(FontWeight.Bold).layoutWeight(1).fontColor($r('app.color.text_primary'))
-          Button('＋ 添加').id('add-provider').fontSize(14).height(40).enabled(!this.app.busy).onClick(() => this.onEditProvider('', ''))
-        }.width('100%')
-        Text('添加多个服务，在每段对话中选择服务与模型。密钥分别保存在系统安全存储中。')
-          .fontSize(13).lineHeight(21).fontColor($r('app.color.text_secondary')).width('100%')
-        ForEach(this.app.providerProfiles, (profile: ProviderProfile) => { this.profileCard(profile) },
-          (profile: ProviderProfile) => JSON.stringify(profile))
-        if (this.app.providerProfiles.length === 0) {
-          Text('尚未添加服务，选择下方预设或点击添加。').fontSize(14).fontColor($r('app.color.text_secondary'))
+      Column() {
+        SectionHeader({ title: '模型服务', caption: '在每段对话中选择服务与模型，密钥保存在系统安全存储中。' })
+        GroupCard() {
+          Column() {
+            ForEach(this.app.providerProfiles, (profile: ProviderProfile) => {
+              NavRow({ title: profile.name, compId: 'edit-provider-' + profile.id, icon: $r('sys.symbol.cloud'),
+                subtitle: `${protocolName(profile.protocol)} · ${profile.models.length} 个模型`,
+                value: profile.enabled ? '' : '已停用', disabled: this.app.busy,
+                onTap: () => this.onEditProvider(profile.id, '') })
+              RowDivider()
+            }, (profile: ProviderProfile) => JSON.stringify(profile))
+            NavRow({ title: '添加自定义服务', compId: 'add-provider', icon: $r('sys.symbol.plus'), accent: true,
+              disabled: this.app.busy, onTap: () => this.onEditProvider('', '') })
+          }
         }
-        Text('内置服务').fontSize(18).fontWeight(FontWeight.Medium).width('100%').fontColor($r('app.color.text_primary'))
-        Grid() {
-          ForEach(this.app.providerPresets, (preset: ProviderInfo) => {
-            GridItem() {
-              Button({ type: ButtonType.Normal }) {
-                Column({ space: 6 }) {
-                  Text(preset.name).fontSize(15).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
-                  Text(preset.protocol).fontSize(10).fontColor($r('app.color.text_secondary'))
-                }.padding(12).width('100%')
-              }.id('preset-' + preset.id).width('100%').height(86).borderRadius(14)
-                .backgroundColor($r('app.color.surface')).enabled(!this.app.busy).onClick(() => this.onEditProvider('', preset.id))
-            }
-          }, (preset: ProviderInfo) => preset.id)
-        }.columnsTemplate('1fr 1fr').columnsGap(12).rowsGap(12).height(Math.ceil(this.app.providerPresets.length / 2) * 98).width('100%')
-        Text('助手设置').fontSize(18).fontWeight(FontWeight.Medium).width('100%').fontColor($r('app.color.text_primary'))
+        SectionHeader({ title: '快速添加' })
+        GroupCard() {
+          Column() {
+            ForEach(this.app.providerPresets, (preset: ProviderInfo, index: number) => {
+              if (index > 0) { RowDivider() }
+              NavRow({ title: preset.name, subtitle: protocolName(preset.protocol), compId: 'preset-' + preset.id,
+                disabled: this.app.busy, onTap: () => this.onEditProvider('', preset.id) })
+            }, (preset: ProviderInfo) => preset.id)
+          }
+        }
+        SectionHeader({ title: '助手' })
+        GroupCard() {
+          Column() {
+            NavRow({ title: '系统提示', subtitle: this.promptPreview(), compId: 'open-system-prompt',
+              icon: $r('sys.symbol.square_and_pencil'), disabled: this.app.busy, onTap: () => this.onPrompt() })
+            RowDivider()
+            NavRow({ title: 'Skills', compId: 'open-skills', icon: $r('sys.symbol.wand_and_stars'),
+              value: `${this.app.extensions.skills.filter((skill) => skill.enabled).length} 个已启用`,
+              disabled: this.app.busy || this.app.saveError.length > 0, onTap: () => this.onSkills() })
+            RowDivider()
+            SwitchRow({ title: '允许读取网页', compId: 'web-enabled', isOn: this.settings.webEnabled,
+              subtitle: '读取指定链接的静态正文，内容会发送给当前模型。', disabled: this.app.busy,
+              onChange: (value: boolean) => { this.saveToggle((v: boolean) => { this.settings.webEnabled = v; }, value); } })
+            RowDivider()
+            SwitchRow({ title: '自动压缩历史', compId: 'auto-compact', isOn: this.settings.autoCompact,
+              subtitle: '接近上下文预算时，用当前模型生成摘要，完整记录保留。', disabled: this.app.busy,
+              onChange: (value: boolean) => { this.saveToggle((v: boolean) => { this.settings.autoCompact = v; }, value); } })
+          }
+        }
+        if (this.settings.error.length > 0) {
+          Banner({ text: this.settings.error, compId: 'settings-error' }).margin({ top: Space.md })
+        } else if (this.app.error.length > 0) {
+          Banner({ text: this.app.error, compId: 'provider-list-error' }).margin({ top: Space.md })
+        }
+        Text('会话与文件保存在本机 · 消息和工具结果会发送给所选模型服务')
+          .fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).textAlign(TextAlign.Center)
+          .width('100%').margin({ top: Space.xl })
+      }.padding({ left: Space.page, right: Space.page, bottom: Space.xl }).width('100%')
+    }.height('100%').width('100%').scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring).align(Alignment.Top)
+  }
+}
+
+@Component
+export struct SystemPromptPanel {
+  @ObjectLink app: ChatViewModel;
+  @ObjectLink settings: SettingsViewModel;
+  onSaved: () => void = () => {};
+
+  build() {
+    Column() {
+      Column({ space: Space.md }) {
+        Text('告诉 Tinybot 你希望它如何回答，例如语气、格式或需要遵守的约定。').fontSize(13).lineHeight(20)
+          .fontColor($r('app.color.text_secondary')).width('100%')
         TextArea({ text: this.settings.systemPrompt, placeholder: '希望 Tinybot 如何回答？' }).id('system-prompt')
-          .height(132).fontSize(14).maxLength(4000).backgroundColor($r('app.color.surface'))
-          .fontColor($r('app.color.text_primary')).onChange((value: string) => { this.settings.systemPrompt = value; })
-        Row({ space: 16 }) {
-          Text('接近预算时自动压缩历史').fontSize(14).layoutWeight(1).fontColor($r('app.color.text_primary'))
-          Toggle({ type: ToggleType.Switch, isOn: this.settings.autoCompact }).id('auto-compact')
-            .selectedColor($r('app.color.accent')).onChange((value: boolean) => { this.settings.autoCompact = value; })
-        }.width('100%')
-        Text('压缩使用当前会话的模型，完整记录保留。').fontSize(12).width('100%').fontColor($r('app.color.text_secondary'))
-        if (this.settings.error.length > 0) { Text(this.settings.error).id('settings-error').fontColor($r('app.color.danger')).width('100%') }
-        if (this.app.error.length > 0) { Text(this.app.error).id('provider-list-error').fontColor($r('app.color.danger')).width('100%') }
-        Button('保存助手设置').id('save-settings').width('100%').height(48).enabled(!this.app.busy).onClick(() => { this.app.saveSettings(); })
-      }.padding(24).width('100%').alignItems(HorizontalAlign.Start)
-    }.height('100%').width('100%').scrollBar(BarState.Auto)
+          .attributeModifier(Styles.area).layoutWeight(1).maxLength(4000).showCounter(true)
+          .backgroundColor($r('app.color.surface'))
+          .onChange((value: string) => { this.settings.systemPrompt = value; })
+        if (this.settings.error.length > 0) {
+          Banner({ text: this.settings.error })
+        }
+      }.layoutWeight(1).padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.md })
+      BottomBar() {
+        Button(this.app.busy ? '正在保存…' : '保存').id('save-settings').attributeModifier(Btn.primary).width('100%')
+          .enabled(!this.app.busy)
+          .onClick(async () => { if (await this.app.saveSettings()) { this.onSaved(); } })
+      }
+    }.width('100%').height('100%')
   }
 }

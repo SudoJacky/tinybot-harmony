@@ -1,5 +1,6 @@
 import { ProviderProfile } from '../model/ProviderProfiles';
 import { ProviderInfo } from '../model/Provider';
+import { ProviderDraft } from '../services/ProfileSettings';
 
 @Observed
 export class ProviderEditorViewModel {
@@ -15,6 +16,11 @@ export class ProviderEditorViewModel {
   models: string = '';
   contextWindow: string = '32768';
   error: string = '';
+
+  snapshot(): ProviderDraft {
+    return { id: this.id, name: this.name, presetId: this.presetId, protocol: this.protocol, baseUrl: this.baseUrl,
+      apiKey: this.apiKey, noApiKey: this.noApiKey, enabled: this.enabled, models: this.models, contextWindow: this.contextWindow };
+  }
 
   reset(profile?: ProviderProfile, preset?: ProviderInfo): void {
     this.id = profile?.id || '';
