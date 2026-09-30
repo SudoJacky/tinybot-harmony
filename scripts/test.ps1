@@ -15,7 +15,7 @@ $env:JAVA_HOME = Join-Path $StudioPath 'jbr'
 $startedAt = Get-Date
 Push-Location -LiteralPath $projectPath
 try {
-    & $nodePath $hvigorPath test -p module=entry -p coverage=true
+    & $nodePath $hvigorPath test -p module=entry -p coverage=true --no-daemon --no-parallel
     if ($LASTEXITCODE -ne 0) { throw "Local tests failed: $LASTEXITCODE" }
     $resultPath = Join-Path $projectPath 'entry\.test\default\intermediates\test\coverage_data\test_result.txt'
     $resultFile = Get-Item -LiteralPath $resultPath

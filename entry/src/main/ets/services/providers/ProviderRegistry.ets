@@ -2,7 +2,7 @@ import { ModelMessage, ModelTurn, ToolDefinition } from '../../model/Agent';
 import { ModelConfig } from '../../model/Conversation';
 import { copyProviderInfo, ProviderInfo } from '../../model/Provider';
 import { Cancellation } from '../Cancellation';
-import { CredentialReader, ModelProvider, ModelSession } from './Provider';
+import { CredentialReader, ModelProvider, ModelRequestOptions, ModelSession } from './Provider';
 
 class BoundModel implements ModelSession {
   private provider: ModelProvider;
@@ -20,13 +20,13 @@ class BoundModel implements ModelSession {
   }
 
   async stream(messages: ModelMessage[], tools: ToolDefinition[], cancellation: Cancellation,
-    onText: (text: string) => void): Promise<ModelTurn> {
+    onText: (text: string) => void, options?: ModelRequestOptions): Promise<ModelTurn> {
     cancellation.check();
     // Resolve on every request, allowing later credential rotation without caching secrets.
     const key = await this.credentials.read(this.alias);
     cancellation.check();
     return this.provider.stream({ baseUrl: this.baseUrl, model: this.model, apiKey: key,
-      messages: messages, tools: tools }, cancellation, onText);
+      messages: messages, tools: tools, maxOutputTokens: options?.maxOutputTokens }, cancellation, onText);
   }
 }
 

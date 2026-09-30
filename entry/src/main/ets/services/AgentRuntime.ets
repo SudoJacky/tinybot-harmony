@@ -4,6 +4,7 @@ import { AgentTools, LoopEvent, LoopEventType, runAgentLoop } from './AgentLoop'
 import { Cancellation, RunCancelledError } from './Cancellation';
 import { CredentialReader, ModelSession } from './providers/Provider';
 import { ProviderRegistry } from './providers/ProviderRegistry';
+import { contextSettings } from '../model/ConversationContext';
 
 export type RunStatus = 'running' | 'complete' | 'stopped' | 'failed';
 export type RunPhase = 'preparing' | 'executing' | 'finalizing';
@@ -32,11 +33,13 @@ export interface AgentRunRequest {
   messages: ModelMessage[];
   tools: AgentTools;
   maxSteps?: number;
+  contextOnly?: boolean;
 }
 
 export interface AgentRunHooks {
   prepare: (cancellation: Cancellation) => Promise<void>;
   checkpoint: () => Promise<void>;
+  prepareContext?: (model: ModelSession, messages: ModelMessage[], cancellation: Cancellation) => Promise<ModelMessage[]>;
 }
 
 interface ActiveRun {
@@ -104,9 +107,11 @@ export class AgentRuntime {
         } catch (error) {
           bindingError = error as Error;
         }
-        const messages = JSON.parse(JSON.stringify(request.messages)) as ModelMessage[];
+        let messages = JSON.parse(JSON.stringify(request.messages)) as ModelMessage[];
+        const window = contextSettings(request.config).window;
         const limit = request.maxSteps === undefined ? MAX_AGENT_STEPS : request.maxSteps;
         const tools = request.tools;
+        const contextOnly = request.contextOnly === true;
         this.emit({ type: 'run_start', run: active.state });
         if (bindingError) {
           throw bindingError;
@@ -118,17 +123,23 @@ export class AgentRuntime {
         active.cancellation.check();
         await hooks.prepare(active.cancellation);
         active.cancellation.check();
+        if (hooks.prepareContext) {
+          messages = await hooks.prepareContext(model, messages, active.cancellation);
+          active.cancellation.check();
+        }
         active.state.phase = 'executing';
-        await runAgentLoop({ model: model, messages: messages, tools: tools,
-          turn: active.state.turn, maxSteps: limit }, active.cancellation, {
-          event: (event: LoopEvent) => {
-            if (this.active === active) {
-              this.emit({ type: event.type, run: active.state, step: event.step,
-                toolCallId: event.toolCallId, delta: event.delta });
-            }
-          },
-          checkpoint: hooks.checkpoint
-        });
+        if (!contextOnly) {
+          await runAgentLoop({ model: model, messages: messages, tools: tools,
+            turn: active.state.turn, maxSteps: limit, contextWindow: window }, active.cancellation, {
+            event: (event: LoopEvent) => {
+              if (this.active === active) {
+                this.emit({ type: event.type, run: active.state, step: event.step,
+                  toolCallId: event.toolCallId, delta: event.delta });
+              }
+            },
+            checkpoint: hooks.checkpoint
+          });
+        }
         active.state.status = 'complete';
       } catch (error) {
         active.state.status = error instanceof RunCancelledError ? 'stopped' : 'failed';

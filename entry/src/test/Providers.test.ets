@@ -15,7 +15,7 @@ export default function providerTests(): void {
   describe('BuiltInProviders', () => {
     it('registersDesktopPresetsAndKeepsUserFacingCatalogIndependent', 0, () => {
       const registry = createProviderRegistry();
-      expect(registry.list().map((info) => info.id).join(',')).assertEqual('deepseek,dashscope,openai,zai,ollama,openai-compatible');
+      expect(registry.list().map((info) => info.id).join(',')).assertEqual('deepseek,dashscope,openai,zai,ollama,openai-compatible,openai-responses,anthropic');
       const info = registry.require(defaultConfig().providerId).info;
       expect(defaultConfig().baseUrl).assertEqual(info.defaultBaseUrl);
       expect(defaultConfig().model).assertEqual(info.defaultModel);

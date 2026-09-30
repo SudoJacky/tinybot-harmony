@@ -73,6 +73,10 @@ export struct MessageBubble {
         }
         Text(this.message.role === 'user' ? '你' : 'Tinybot')
           .fontSize(12).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_secondary'))
+        if (this.message.modelRef) {
+          Text(this.message.modelRef.modelId).fontSize(10).maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_secondary'))
+        }
         Blank()
         if (this.message.status === 'generating') {
           LoadingProgress().width(16).height(16).color($r('app.color.accent'))

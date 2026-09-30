@@ -1,8 +1,11 @@
 import { common } from '@kit.AbilityKit';
+import { KeyboardAvoidMode } from '@kit.ArkUI';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { ChatPanel } from '../views/ChatPanel';
 import { SettingsPanel } from '../views/SettingsPanel';
 import { ThreadList } from '../views/ThreadList';
+import { ProviderEditorPanel } from '../views/ProviderEditorPanel';
+import { ModelPickerPanel } from '../views/ModelPickerPanel';
 
 @Entry
 @Component
@@ -11,13 +14,15 @@ struct Index {
   private paths: NavPathStack = new NavPathStack();
 
   onPageShow(): void {
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     this.app.initialize(context.filesDir, context.getApplicationContext().filesDir);
   }
 
   aboutToDisappear(): void {
     this.app.stop();
-    this.app.settings.apiKey = '';
+    this.app.flushDraft();
+    this.app.providerEditor.apiKey = '';
   }
 
   private openSettings(): void {
@@ -29,9 +34,20 @@ struct Index {
   destination(name: string) {
     if (name === 'settings') {
       NavDestination() {
-        SettingsPanel({ app: this.app, settings: this.app.settings, onSaved: () => { this.paths.pop(); } })
+        SettingsPanel({ app: this.app, settings: this.app.settings, onEditProvider: (id: string, preset: string) => {
+          this.app.beginProvider(preset, id);
+          this.paths.pushPath({ name: 'provider' });
+        } })
       }.title('模型设置').backgroundColor($r('app.color.page_background'))
-        .onHidden(() => { this.app.settings.apiKey = ''; })
+    } else if (name === 'provider') {
+      NavDestination() {
+        ProviderEditorPanel({ app: this.app, editor: this.app.providerEditor, onSaved: () => { this.paths.pop(); } })
+      }.title(this.app.providerEditor.id.length > 0 ? '编辑服务' : '添加服务').backgroundColor($r('app.color.page_background'))
+        .onHidden(() => { this.app.providerEditor.apiKey = ''; })
+    } else if (name === 'models') {
+      NavDestination() {
+        ModelPickerPanel({ app: this.app, onSelected: () => { this.paths.pop(); }, onSettings: () => this.openSettings() })
+      }.title('选择模型').backgroundColor($r('app.color.page_background'))
     } else if (name === 'history') {
       NavDestination() {
         ThreadList({ app: this.app, onSelected: () => { this.paths.pop(); } })
@@ -60,7 +76,8 @@ struct Index {
             .enabled(this.app.ready).onClick(() => this.openSettings())
         }.width('100%').padding({ left: 8, right: 8, top: 8, bottom: 8 })
         if (this.app.ready) {
-          ChatPanel({ app: this.app, thread: this.app.active, onSettings: () => this.openSettings() })
+          ChatPanel({ app: this.app, thread: this.app.active, onSettings: () => this.openSettings(),
+            onModels: () => { this.paths.pushPath({ name: 'models' }); } })
             .layoutWeight(1)
         } else {
           Column({ space: 16 }) {

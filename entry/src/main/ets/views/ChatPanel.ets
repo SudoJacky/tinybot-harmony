@@ -6,7 +6,9 @@ export struct ChatPanel {
   @ObjectLink app: ChatViewModel;
   @ObjectLink thread: ThreadViewModel;
   onSettings: () => void = () => {};
+  onModels: () => void = () => {};
   @State private followOutput: boolean = true;
+  @State private showSummary: boolean = false;
   private scroller: Scroller = new Scroller();
   private scrollTimer: number = -1;
 
@@ -40,7 +42,7 @@ export struct ChatPanel {
       }.width('100%')
     }
     .width('100%').padding(16).borderRadius(16).backgroundColor($r('app.color.surface'))
-    .onClick(() => { this.app.draft = prompt; })
+    .onClick(() => { this.app.setDraft(prompt); })
   }
 
   @Builder
@@ -66,11 +68,24 @@ export struct ChatPanel {
 
   build() {
     Column({ space: 0 }) {
+      if (this.thread.archived) {
+        Row({ space: 10 }) {
+          Text('这段对话已归档').fontSize(13).layoutWeight(1).fontColor($r('app.color.text_secondary'))
+          Button('恢复对话').fontSize(13).enabled(!this.app.busy && this.app.saveError.length === 0)
+            .onClick(() => this.app.archiveThread(this.thread.id))
+        }.padding(12).width('100%')
+      }
       if (this.thread.messages.length === 0) {
         this.welcome()
       } else {
         List({ space: 14, scroller: this.scroller }) {
-          ForEach(this.thread.messages, (message: MessageViewModel) => {
+          if (this.app.visibleMessageCount < this.thread.messages.length) {
+            ListItem() {
+              Button('加载更早的消息').id('load-earlier-messages').fontSize(13).width('100%')
+                .onClick(() => { this.app.visibleMessageCount += 60; })
+            }
+          }
+          ForEach(this.app.visibleMessages, (message: MessageViewModel) => {
             ListItem() { MessageBubble({ message: message }) }
           }, (message: MessageViewModel) => message.id)
         }
@@ -101,15 +116,48 @@ export struct ChatPanel {
         }.padding(12).width('100%')
       }
       Column({ space: 10 }) {
+        Row({ space: 8 }) {
+          Text(this.app.contextLabel).id('context-usage').fontSize(11).layoutWeight(1)
+            .fontColor($r('app.color.text_secondary'))
+          Button('压缩历史').id('compact-history').fontSize(12).height(30)
+            .backgroundColor(Color.Transparent).fontColor($r('app.color.accent'))
+            .enabled(this.app.configured && !this.app.busy && !this.thread.archived && this.app.saveError.length === 0)
+            .onClick(() => {
+              this.getUIContext().showAlertDialog({
+                title: '压缩较早对话？',
+                message: '将调用当前模型生成摘要，消耗 Token。完整记录保留，之后请求使用摘要和最近消息。',
+                primaryButton: { value: '取消', action: () => {} },
+                secondaryButton: { value: '压缩', action: () => { this.app.compactHistory(); } }
+              });
+            })
+        }.width('100%')
+        if (this.app.contextStatus.length > 0) {
+          Text(this.app.contextStatus).id('context-status').fontSize(12).width('100%')
+            .fontColor($r('app.color.text_secondary'))
+        } else if (this.thread.compaction) {
+          Text('较早对话使用摘要 · 完整记录保留').fontSize(11).width('100%')
+            .fontColor($r('app.color.text_secondary'))
+        }
+        if (this.thread.compaction) {
+          Button(this.showSummary ? '收起上下文摘要' : '查看上下文摘要').fontSize(11).height(28)
+            .backgroundColor(Color.Transparent).fontColor($r('app.color.accent'))
+            .onClick(() => { this.showSummary = !this.showSummary; })
+          if (this.showSummary) {
+            Scroll() {
+              Text(this.thread.compaction.summary).fontSize(12).lineHeight(19).width('100%')
+                .copyOption(CopyOptions.LocalDevice).fontColor($r('app.color.text_primary'))
+            }.height(160).width('100%')
+          }
+        }
         TextArea({ text: this.app.draft, placeholder: '有什么想一起做的？' })
           .id('composer').fontSize(16).fontColor($r('app.color.text_primary'))
           .placeholderColor($r('app.color.text_secondary')).backgroundColor(Color.Transparent)
           .height(76).maxLength(24000).padding({ left: 4, right: 4, top: 8, bottom: 4 })
-          .onChange((value: string) => { this.app.draft = value; })
+          .enabled(!this.thread.archived).onChange((value: string) => { this.app.setDraft(value); })
         Row({ space: 12 }) {
-          Text(this.app.configured ? this.app.config.model : '尚未连接模型')
-            .fontSize(12).fontColor($r('app.color.text_secondary')).maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+          Button(this.app.currentModelLabel + ' ▾').id('open-model-picker').fontSize(12)
+            .backgroundColor(Color.Transparent).fontColor($r('app.color.text_secondary'))
+            .layoutWeight(1).height(40).enabled(!this.app.busy && !this.thread.archived).onClick(this.onModels)
           if (this.app.generating) {
             Button('停止').id('stop-generation').height(40).fontSize(14)
               .fontColor($r('app.color.on_accent')).backgroundColor($r('app.color.accent'))
@@ -117,7 +165,7 @@ export struct ChatPanel {
           } else {
             Button('发送 ↑').id('send-message').height(40).fontSize(14)
               .fontColor($r('app.color.on_accent')).backgroundColor($r('app.color.accent'))
-              .enabled(this.app.ready && !this.app.busy && this.app.draft.trim().length > 0 && this.app.saveError.length === 0)
+              .enabled(this.app.ready && !this.app.busy && !this.thread.archived && this.app.draft.trim().length > 0 && this.app.saveError.length === 0)
               .onClick(() => this.send())
           }
         }.width('100%')
