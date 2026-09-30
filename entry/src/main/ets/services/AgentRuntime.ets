@@ -1,6 +1,6 @@
 import { AgentTurn, MAX_AGENT_STEPS, ModelMessage } from '../model/Agent';
 import { ModelConfig } from '../model/Conversation';
-import { AgentTools, LoopEvent, LoopEventType, runAgentLoop } from './AgentLoop';
+import { AgentTools, LoopEvent, LoopEventType, SteeringInput, runAgentLoop } from './AgentLoop';
 import { Cancellation, RunCancelledError } from './Cancellation';
 import { CredentialReader, ModelSession } from './providers/Provider';
 import { ProviderRegistry } from './providers/ProviderRegistry';
@@ -39,6 +39,7 @@ export interface AgentRunRequest {
 export interface AgentRunHooks {
   prepare: (cancellation: Cancellation) => Promise<void>;
   checkpoint: () => Promise<void>;
+  steering?: SteeringInput;
   prepareContext?: (model: ModelSession, messages: ModelMessage[], cancellation: Cancellation) => Promise<ModelMessage[]>;
 }
 
@@ -64,6 +65,10 @@ export class AgentRuntime {
 
   get isRunning(): boolean {
     return this.active !== undefined;
+  }
+
+  get acceptsSteering(): boolean {
+    return this.active !== undefined && this.active.state.phase !== 'finalizing' && !this.active.cancellation.cancelled;
   }
 
   // UI subscriptions are synchronous. Durable work belongs in the awaited checkpoint hook.
@@ -137,7 +142,7 @@ export class AgentRuntime {
                   toolCallId: event.toolCallId, delta: event.delta });
               }
             },
-            checkpoint: hooks.checkpoint
+            checkpoint: hooks.checkpoint, steering: hooks.steering
           });
         }
         active.state.status = 'complete';

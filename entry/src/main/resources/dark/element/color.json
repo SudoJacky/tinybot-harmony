@@ -3,11 +3,18 @@
     { "name": "start_window_background", "value": "#121A18" },
     { "name": "page_background", "value": "#121A18" },
     { "name": "surface", "value": "#1D2824" },
+    { "name": "surface_variant", "value": "#27342F" },
+    { "name": "divider", "value": "#2F3D37" },
     { "name": "text_primary", "value": "#EAF1ED" },
     { "name": "text_secondary", "value": "#A8B8AE" },
+    { "name": "text_tertiary", "value": "#7C8C84" },
     { "name": "accent", "value": "#A2D8B9" },
     { "name": "on_accent", "value": "#143528" },
-    { "name": "user_bubble", "value": "#293C31" },
-    { "name": "danger", "value": "#FFA7A0" }
+    { "name": "accent_container", "value": "#244A3A" },
+    { "name": "on_accent_container", "value": "#CDEBD9" },
+    { "name": "user_bubble", "value": "#2A4638" },
+    { "name": "danger", "value": "#FFA7A0" },
+    { "name": "danger_container", "value": "#40231F" },
+    { "name": "scrim", "value": "#99000000" }
   ]
 }

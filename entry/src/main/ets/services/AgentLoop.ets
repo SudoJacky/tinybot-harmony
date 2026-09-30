@@ -3,6 +3,12 @@ import { AgentStep, AgentTurn, MAX_AGENT_STEPS, ModelMessage, ToolCall, ToolDefi
 import { Cancellation, RunCancelledError } from './Cancellation';
 import { ModelSession } from './providers/Provider';
 import { OUTPUT_RESERVE, estimateContextTokens } from '../model/ConversationContext';
+import { PendingInput, validatePendingInput } from '../model/PendingInput';
+
+export interface SteeringInput {
+  peek: () => PendingInput | undefined;
+  consume: (id: string) => void;
+}
 
 export interface AgentTools {
   definitions(): ToolDefinition[];
@@ -21,6 +27,7 @@ export interface LoopEvent {
 export interface LoopObserver {
   event: (event: LoopEvent) => void;
   checkpoint: () => Promise<void>;
+  steering?: SteeringInput;
 }
 
 export interface LoopContext {
@@ -46,12 +53,26 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
   try {
     for (let round = 0; round < limit; round++) {
       cancellation.check();
-      if (context.contextWindow !== undefined && estimateContextTokens(messages, definitions) > context.contextWindow - OUTPUT_RESERVE) {
+      const pending = observer.steering?.peek();
+      if (pending) {
+        validatePendingInput(pending);
+        if (pending.mode !== 'steer') { throw new Error('本轮只能接收追加指令。'); }
+      }
+      const input: PendingInput | undefined = pending ? { id: pending.id, mode: pending.mode, text: pending.text } : undefined;
+      const requestMessages: ModelMessage[] = input ? messages.concat([{ role: 'user', content: input.text }]) : messages;
+      if (context.contextWindow !== undefined && estimateContextTokens(requestMessages, definitions) > context.contextWindow - OUTPUT_RESERVE) {
         throw new Error('本轮内容超过上下文预算，执行已停止。已完成的工具结果已保留；请压缩历史、缩小任务或提高窗口设置。');
       }
-      const step: AgentStep = { content: '', tools: [] };
+      const step: AgentStep = { content: '', tools: [], steering: input };
       turn.steps = turn.steps.concat([step]);
       observer.event({ type: 'step_start', step: round });
+      if (input) {
+        // Record input in the transcript and remove it from the outbox in one checkpoint.
+        observer.steering?.consume(input.id);
+        await observer.checkpoint();
+        cancellation.check();
+        messages.push({ role: 'user', content: input.text });
+      }
       let acceptingText = true;
       const response = await context.model.stream(messages, definitions, cancellation, (text: string) => {
         if (!acceptingText || cancellation.cancelled) {
@@ -83,7 +104,10 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
       observer.event({ type: 'model_end', step: round });
       if (step.tools.length === 0) {
         observer.event({ type: 'step_end', step: round });
-        return;
+        if (!observer.steering?.peek()) { return; }
+        if (round === limit - 1) { throw new Error('本轮已达到模型调用上限，待发送指令已保留。请继续队列。'); }
+        messages.push(...stepMessages(step, false));
+        continue;
       }
       if (round === limit - 1) {
         for (const tool of step.tools) {
@@ -112,7 +136,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
         await observer.checkpoint();
         cancellation.check();
       }
-      messages.push(...stepMessages(step));
+      messages.push(...stepMessages(step, false));
       observer.event({ type: 'step_end', step: round });
     }
   } finally {

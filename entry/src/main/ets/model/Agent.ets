@@ -1,3 +1,5 @@
+import { PendingInput, validatePendingInput } from './PendingInput';
+
 export const MAX_TOOL_CALLS: number = 8;
 export const MAX_TOOL_ARGUMENTS: number = 96 * 1024;
 export const MAX_AGENT_STEPS: number = 8;
@@ -61,6 +63,7 @@ export interface AgentStep {
   content: string;
   tools: ToolExecution[];
   reasoningContent?: string;
+  steering?: PendingInput;
 }
 
 export interface AgentTurn {
@@ -88,9 +91,10 @@ export function toolError(message: string): string {
   return JSON.stringify({ error: message });
 }
 
-export function stepMessages(step: AgentStep): ModelMessage[] {
+export function stepMessages(step: AgentStep, includeSteering: boolean = true): ModelMessage[] {
+  const prefix: ModelMessage[] = includeSteering && step.steering ? [{ role: 'user', content: step.steering.text }] : [];
   if (step.tools.length === 0) {
-    return [{ role: 'assistant', content: step.content, reasoningContent: step.reasoningContent }];
+    return prefix.concat([{ role: 'assistant', content: step.content, reasoningContent: step.reasoningContent }]);
   }
   const result: ModelMessage[] = [{
     role: 'assistant', content: step.content, reasoningContent: step.reasoningContent,
@@ -99,7 +103,7 @@ export function stepMessages(step: AgentStep): ModelMessage[] {
   for (const tool of step.tools) {
     result.push({ role: 'tool', toolCallId: tool.call.id, content: tool.output });
   }
-  return result;
+  return prefix.concat(result);
 }
 
 // Pending calls were never started; running calls may already have changed files.
@@ -122,11 +126,17 @@ export function validateSteps(steps: AgentStep[]): void {
     throw new Error('本地工具记录损坏，原文件已保留。');
   }
   const ids = new Set<string>();
+  const inputIds = new Set<string>();
   for (const step of steps) {
     if (!step || typeof step.content !== 'string' || !Array.isArray(step.tools) ||
       (step.reasoningContent !== undefined && (typeof step.reasoningContent !== 'string' ||
         step.reasoningContent.length > MAX_REASONING_CONTENT))) {
       throw new Error('本地工具记录损坏，原文件已保留。');
+    }
+    if (step.steering !== undefined) {
+      validatePendingInput(step.steering);
+      if (step.steering.mode !== 'steer' || inputIds.has(step.steering.id)) { throw new Error('本地追加指令记录损坏。'); }
+      inputIds.add(step.steering.id);
     }
     validateToolCalls(step.tools.map((tool: ToolExecution) => tool?.call));
     for (const tool of step.tools) {

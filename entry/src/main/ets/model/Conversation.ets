@@ -2,6 +2,8 @@ import { AgentStep, ModelMessage, interruptTools, stepMessages, validateSteps } 
 import { builtinProviderInfos, DEFAULT_PROVIDER_ID, LEGACY_PROVIDER_ID } from './Provider';
 import { contextSettings, validateCompaction } from './ConversationContext';
 import { ModelReference, ProviderProfile, validateProfile, validateReference } from './ProviderProfiles';
+import { ExtensionSettings, validateExtensions } from './Skills';
+import { PendingInput, validatePendingInputs } from './PendingInput';
 
 const LEGACY_SYSTEM_PROMPT: string = '你是 Tinybot，一个运行在 HarmonyOS 手机上的个人 AI 助手。请用清晰、自然的语言帮助用户。你目前只能对话，不能访问手机文件、执行命令或操作其他应用。不要声称执行了未提供的工具。';
 const DEFAULT_SYSTEM_PROMPT: string = '你是 Tinybot，一个运行在 HarmonyOS 手机上的个人 AI 助手。请用清晰、自然的语言帮助用户，并使用提供的工具完成任务。不要声称执行了未提供的工具。';
@@ -51,6 +53,8 @@ export interface ThreadData {
   draft?: string;
   compaction?: CompactionData;
   modelRef?: ModelReference;
+  pendingInputs?: PendingInput[];
+  queuePaused?: boolean;
 }
 
 export interface AppData {
@@ -59,6 +63,7 @@ export interface AppData {
   threads: ThreadData[];
   activeThreadId: string;
   providerProfiles?: ProviderProfile[];
+  extensions?: ExtensionSettings;
 }
 
 export function defaultConfig(): ModelConfig {
@@ -94,7 +99,8 @@ export function requestHistory(messages: MessageData[], systemPrompt: string): M
     } else if (answer.role === 'assistant') {
       const steps = answer.steps || [];
       const hasTools = steps.some((step: AgentStep) => step.tools.length > 0);
-      if (answer.status !== 'complete' && !hasTools) {
+      const hasSteering = steps.some((step: AgentStep) => step.steering !== undefined);
+      if (answer.status !== 'complete' && !hasTools && !hasSteering) {
         continue;
       }
       result.push({ role: 'user', content: message.content });
@@ -104,10 +110,12 @@ export function requestHistory(messages: MessageData[], systemPrompt: string): M
         for (const step of steps) {
           if (step.tools.length > 0 || (answer.status === 'complete' && step.content.length > 0)) {
             result.push(...stepMessages(step));
+          } else if (step.steering) {
+            result.push({ role: 'user', content: step.steering.text });
           }
         }
         if (answer.status !== 'complete') {
-          result.push({ role: 'assistant', content: '上轮执行已中断。以上工具结果仍有效；不要假设文件操作已经回滚。' });
+          result.push({ role: 'assistant', content: '上轮执行已中断。已接收的追加指令和以上工具结果仍保留；不要假设文件操作已经回滚。' });
         }
       }
     }
@@ -124,6 +132,7 @@ export function parseAppData(text: string): AppData {
     throw new Error('本地数据格式不受支持，原文件已保留。');
   }
   const threadIds = new Set<string>();
+  if (data.extensions !== undefined) { validateExtensions(data.extensions); }
   contextSettings(data.config);
   if (data.providerProfiles !== undefined) {
     if (!Array.isArray(data.providerProfiles)) { throw new Error('模型服务列表损坏。'); }
@@ -154,6 +163,10 @@ export function parseAppData(text: string): AppData {
       throw new Error('本地会话数据损坏，原文件已保留。');
     }
     threadIds.add(thread.id);
+    if (thread.pendingInputs !== undefined) { validatePendingInputs(thread.pendingInputs); }
+    if (thread.queuePaused !== undefined && typeof thread.queuePaused !== 'boolean') { throw new Error('本地队列状态损坏。'); }
+    // Loading never authorizes autonomous execution after a process exit.
+    if ((thread.pendingInputs || []).length > 0) { thread.queuePaused = true; }
     if (thread.modelRef !== undefined) { validateReference(thread.modelRef); }
     if ((thread.pinned !== undefined && typeof thread.pinned !== 'boolean') ||
       (thread.archived !== undefined && typeof thread.archived !== 'boolean') ||
@@ -179,6 +192,11 @@ export function parseAppData(text: string): AppData {
           throw new Error('本地工具记录损坏，原文件已保留。');
         }
         interruptTools(message.steps);
+        for (const step of message.steps) {
+          if (step.steering && (thread.pendingInputs || []).some((input: PendingInput) => input.id === step.steering?.id)) {
+            throw new Error('追加指令同时出现在历史和待发送队列中。');
+          }
+        }
       }
       if (message.status === 'generating') {
         message.status = 'stopped';
