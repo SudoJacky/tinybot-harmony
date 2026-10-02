@@ -1,0 +1,247 @@
+// Platform-adapter integration tests with real temporary files and a scripted HTTP transport.
+// Run: node scripts/test-productivity-native.cjs
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const zlib = require('node:zlib');
+const studio = process.env.DEVECO_STUDIO_HOME || 'D:/DevEco Studio';
+const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
+const source = path.resolve(__dirname, '../entry/src/main/ets');
+const fixture = path.resolve(__dirname, '../.hvigor/native-productivity-' + crypto.randomUUID());
+fs.mkdirSync(fixture, { recursive: true });
+const handles = new Map(); let failManifest = false;
+const nativePath = p => p.startsWith('/sandbox/') ? path.join(fixture, p.slice(1)) : p;
+const fileIo = {
+  OpenMode: { READ_ONLY: 1, CREATE: 2, WRITE_ONLY: 4, TRUNC: 8, NOFOLLOW: 16 },
+  access: async p => fs.existsSync(nativePath(p)), mkdir: p => fs.promises.mkdir(nativePath(p)), readText: p => fs.promises.readFile(nativePath(p), 'utf8'),
+  listFile: async p => fs.promises.readdir(nativePath(p)),
+  open: async (p, flags) => { const h = await fs.promises.open(nativePath(p), flags & 4 ? 'w' : 'r'); handles.set(h.fd, h); return { fd: h.fd }; },
+  read: async (fd, bytes) => (await handles.get(fd).read(new Uint8Array(bytes))).bytesRead,
+  write: async (fd, bytes, options) => (await handles.get(fd).write(new Uint8Array(bytes), 0, bytes.byteLength, options.offset)).bytesWritten,
+  close: async file => { const fd = typeof file === 'number' ? file : file.fd; await handles.get(fd).close(); handles.delete(fd); },
+  stat: async fd => typeof fd === 'number' ? handles.get(fd).stat() : fs.promises.stat(nativePath(fd)),
+  lstat: async p => { try { return await fs.promises.lstat(nativePath(p)); } catch(e) { if(e.code==='ENOENT')e.code=13900002;throw e; } },
+  fsync: fd => handles.get(fd).sync(), unlink: p => fs.promises.unlink(nativePath(p)),
+  rename: async (a,b) => { if (failManifest && b.endsWith('/index.json')) { throw new Error('injected manifest failure'); } await fs.promises.rename(nativePath(a),nativePath(b)); }
+};
+// Reproduce the empty-input behavior observed on the physical HarmonyOS device.
+class Encoder { encodeInto(s) { return s === '' ? undefined : new TextEncoder().encode(s); } }
+class Decoder { constructor(encoding, opts) { this.decoder = new TextDecoder(encoding, opts); } decodeToString(bytes, opts) { return this.decoder.decode(bytes, opts); } }
+const cache = new Map(); const calls = []; let httpScript = () => {}; let destroyed = 0; let jsonScript = () => { throw Error('Unexpected JSON request'); };
+let selectedFile = '/sandbox/backup-export.json';
+const http = { RequestMethod: { POST: 'POST', GET: 'GET' }, HttpDataType: { STRING: 'string', ARRAY_BUFFER: 'buffer' }, createHttp: () => {
+  const handlers = {}; let closed = false;
+  return { on: (name, fn) => { handlers[name] = fn; }, destroy: () => { closed = true; destroyed++; },
+    request: async (url, options) => jsonScript(url, options),
+    requestInStream: (url, options, callback) => {
+      calls.push({ url, options, body: JSON.parse(options.extraData) });
+      httpScript({ url, options, callback, emit: (name, value) => { if (!closed) handlers[name]?.(value); } });
+    } };
+} };
+const kits = {
+  '@kit.CoreFileKit': { fileIo, picker: { DocumentViewPicker: class { async save() {return [selectedFile];} async select() {return [selectedFile];} } } }, '@kit.ImageKit': { image: {} }, '@kit.NetworkKit': { http },
+  '@kit.MediaLibraryKit': {}, '@kit.ShareKit': {},
+  '@kit.ArkTS': { util: { generateRandomUUID: () => crypto.randomUUID(), TextEncoder: Encoder, TextDecoder: Decoder,
+    Base64Helper: class { async encodeToString(bytes) { return Buffer.from(bytes).toString('base64'); } encodeToStringSync(bytes) { return Buffer.from(bytes).toString('base64'); } decodeSync(text) { return Uint8Array.from(Buffer.from(text,'base64')); } } } },
+  '@kit.AssetStoreKit': { asset: {} }, '@kit.BasicServicesKit': { zlib: {
+    ReturnStatus: { STREAM_END: 1 }, CompressFlushMode: { FINISH: 4 }, createZipSync: () => { let current; return {
+      inflateInit2: async()=>{}, inflateEnd: async()=>{}, getZStream:async()=>current,
+      inflate:async stream=>{const bytes=zlib.inflateRawSync(Buffer.from(stream.nextIn),{maxOutputLength:stream.availableOut});new Uint8Array(stream.nextOut).set(bytes);current={totalOut:bytes.length};return 1;}
+    }; }
+  } },
+  '@kit.PDFKit': { pdfService: {} },
+  '@kit.CryptoArchitectureKit': { cryptoFramework: { createRandom:()=>({generateRandom:async n=>({data:Uint8Array.from(crypto.randomBytes(n))})}),
+    createMd:()=>{const hash=crypto.createHash('sha256');return{update:async blob=>hash.update(blob.data),digest:async()=>({data:Uint8Array.from(hash.digest())})};} } },
+};
+function load(file) {
+  file = path.resolve(file.endsWith('.ets') ? file : file + '.ets');
+  if (cache.has(file)) return cache.get(file);
+  const exports = {}; cache.set(file, exports);
+  const compiled = ts.transpileModule(fs.readFileSync(file,'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021, experimentalDecorators: true } }).outputText;
+  vm.runInNewContext(compiled, { exports, require: id => id.startsWith('.') ? load(path.resolve(path.dirname(file), id)) : kits[id],
+    Observed: cls => cls, setTimeout, clearTimeout, Uint8Array, ArrayBuffer, DataView, Map, Set, Object, JSON, Error, console }, { filename: file });
+  return exports;
+}
+const model = load(path.join(source, 'model/Conversation'));
+const { ConversationStore } = load(path.join(source,'model/ConversationStore'));
+const { Attachments } = load(path.join(source,'services/Attachments'));
+const { Cancellation } = load(path.join(source,'services/Cancellation'));
+const { McpClient } = load(path.join(source,'services/McpClient'));
+const { McpTools } = load(path.join(source,'services/McpTools'));
+const { ToolApproval } = load(path.join(source,'services/ToolApproval'));
+const { CredentialStore } = load(path.join(source,'services/CredentialStore'));
+const { NativeWorkspaceFiles } = load(path.join(source,'services/NativeWorkspaceFiles'));
+const secrets = new Map();
+CredentialStore.prototype.read = async alias => secrets.get(alias) || (alias ? 'fixture-secret' : '');
+CredentialStore.prototype.write = async (alias, secret) => { if (secrets.has(alias)) throw Error('duplicate secret'); secrets.set(alias,secret); };
+CredentialStore.prototype.update = async (alias, secret) => { assert.ok(secrets.has(alias)); secrets.set(alias,secret); };
+CredentialStore.prototype.remove = async alias => { secrets.delete(alias); };
+const server = { id:'s',name:'Fixture',url:'https://fixture.invalid/mcp',enabled:true,credentialAlias:'fixture-key' };
+function respond(request, result, sse = false) {
+  const value = JSON.stringify({ jsonrpc:'2.0',id:JSON.parse(request.options.extraData).id,result });
+  request.emit('headersReceive', { 'Mcp-Session-Id':'fixture-session' }); request.callback(null,200);
+  const text = sse ? 'event: message\r\ndata: '+value+'\r\n\r\n' : value;
+  const bytes = Buffer.from(text);
+  for (let i=0; i<bytes.length; i+=7) request.emit('dataReceive', Uint8Array.from(bytes.subarray(i,i+7)).buffer);
+  request.emit('dataEnd');
+}
+async function test(name, run) { await run(); console.log('PASS '+name); }
+(async () => {
+  let store;
+  await test('atomic legacy migration, unchanged thread reuse and interrupted commit recovery', async () => {
+    const data=model.emptyData(); data.activeThreadId='legacy'; data.threads=[{id:'legacy',title:'original',updatedAt:1,messages:[]}];
+    const legacy=JSON.stringify(data); fs.writeFileSync(path.join(fixture,'tinybot-v1.json'),legacy);
+    store=new ConversationStore(fixture); const loaded=await store.load(); assert.equal(loaded.threads[0].title,'original');
+    const index=()=>JSON.parse(fs.readFileSync(path.join(fixture,'sessions-v2/index.json'),'utf8'));
+    const first=index().threads[0].file; await store.save(loaded); assert.equal(index().threads[0].file,first);
+    loaded.threads[0].title='changed'; failManifest=true; await assert.rejects(store.save(loaded),/injected/); failManifest=false;
+    assert.equal((await new ConversationStore(fixture).load()).threads[0].title,'original');
+    assert.equal(fs.readFileSync(path.join(fixture,'tinybot-v1.json'),'utf8'),legacy);
+    await store.save(loaded); assert.equal((await new ConversationStore(fixture).load()).threads[0].title,'changed');
+  });
+  await test('ordered saves capture the call-time snapshot',async()=>{
+    const data=await store.load(); data.threads[0].title='first'; const a=store.save(data);
+    data.threads[0].title='second'; const b=store.save(data); data.threads[0].title='not saved'; await Promise.all([a,b]);
+    assert.equal((await new ConversationStore(fixture).load()).threads[0].title,'second');
+  });
+  await test('managed text attachments hydrate without mutating persisted history',async()=>{
+    Attachments.configure(fixture);const incoming=path.join(fixture,'input.txt');fs.writeFileSync(incoming,'材料内容');
+    const item=await Attachments.import(incoming,false);const messages=[{role:'user',content:'总结',attachments:[item]}];
+    const hydrated=await Attachments.hydrate(messages);assert.match(hydrated[0].content,/材料内容/);assert.equal(messages[0].content,'总结');
+    fs.writeFileSync(incoming,Buffer.from([0xff,0xff]));await assert.rejects(Attachments.import(incoming,false));
+  });
+  await test('empty workspace files round-trip with device encoder behavior',async()=>{
+    fs.mkdirSync(nativePath('/sandbox/workspace/thread'),{recursive:true});
+    const files=new NativeWorkspaceFiles('/sandbox/workspace/thread'), signal=new Cancellation();
+    await files.write('empty.md','',signal);assert.equal(JSON.parse(await files.read('empty.md',signal)).content,'');
+    await files.write('empty.md','# note',signal);assert.equal(JSON.parse(await files.read('empty.md',signal)).content,'# note');
+    await assert.rejects(files.checkedPath('../escape'));
+  });
+  await test('MCP initializes, negotiates session headers, reads JSON/SSE and paginates',async()=>{
+    calls.length=0;httpScript=req=>{ const body=JSON.parse(req.options.extraData);
+      assert.equal(req.options.maxRedirects,0);assert.equal(req.options.header.Authorization,'Bearer fixture-secret');
+      if(body.method==='initialize')respond(req,{protocolVersion:'2025-06-18'});
+      else {assert.equal(req.options.header['Mcp-Session-Id'],'fixture-session');
+        if(body.method==='notifications/initialized')req.callback(null,202);
+        else if(body.params.cursor)respond(req,{tools:[{name:'b',inputSchema:{type:'object'}}]},true);
+        else respond(req,{tools:[{name:'a',inputSchema:{type:'object'}}],nextCursor:'next'},true); }
+    };
+    const tools=await new McpClient(server).list(new Cancellation());assert.equal(tools.length,2);assert.equal(calls.length,4);
+  });
+  await test('remote tools cannot execute before discovery and explicit approval',async()=>{
+    httpScript=req=>{const b=JSON.parse(req.options.extraData);if(b.method==='initialize')respond(req,{protocolVersion:'2025-06-18'});
+      else if(b.method==='notifications/initialized')req.callback(null,202);
+      else if(b.method==='tools/list')respond(req,{tools:[{name:'read',inputSchema:{type:'object'}}]});
+      else respond(req,{content:[{type:'text',text:'done'}]},true);};
+    const approval=new ToolApproval(),tools=new McpTools([server],approval),signal=new Cancellation();
+    const call=(name,args)=>({id:'c',type:'function',function:{name,arguments:JSON.stringify(args)}});
+    const action=call('mcp_call',{server:'s',tool:'read',arguments:'{}'});
+    await assert.rejects(tools.execute(action,signal),/mcp_list_tools/);
+    await tools.execute(call('mcp_list_tools',{server:'s'}),signal);
+    const before=calls.length;const denied=tools.execute(action,signal);await new Promise(r=>setTimeout(r,0));
+    assert.equal(calls.length,before);assert.match(approval.title,/Fixture/);approval.respond(false);await assert.rejects(denied,/拒绝/);
+    const allowed=tools.execute(action,signal);await new Promise(r=>setTimeout(r,0));approval.respond(true);assert.match(await allowed,/done/);
+  });
+  await test('canceling approval clears the UI and sends no tool call',async()=>{
+    const approval=new ToolApproval(),signal=new Cancellation();const pending=approval.request('tool','{}',signal);signal.cancel();
+    await assert.rejects(pending);assert.equal(approval.title,'');
+  });
+  await test('HTTP failures are not replayed and cancellation destroys pending requests',async()=>{
+    let n=0;httpScript=req=>{n++;req.callback(null,401);};await assert.rejects(new McpClient(server).list(new Cancellation()),/401/);assert.equal(n,1);
+    httpScript=()=>{}; const signal=new Cancellation();const before=destroyed; const pending=new McpClient(server).list(signal);
+    await new Promise(r=>setTimeout(r,0));signal.cancel();await assert.rejects(pending);assert.ok(destroyed>before);
+  });
+  await test('baseline persists, hides metadata, detects stale restore and preserves original',async()=>{
+    const root='/sandbox/workspace/review';fs.mkdirSync(nativePath(root),{recursive:true});fs.writeFileSync(nativePath(root+'/note.txt'),'before');
+    const files=new NativeWorkspaceFiles(root),signal=new Cancellation();await files.write('note.txt','after',signal);
+    assert.equal((await new NativeWorkspaceFiles(root).baseline('note.txt')).content,'before');
+    await files.write('note.txt','later',signal);assert.equal((await files.baseline('note.txt')).content,'before');
+    assert.ok(!JSON.parse(await files.list('.',signal)).entries.some(e=>e.name.startsWith('.tinybot-')));
+    await assert.rejects(files.restore('note.txt','after'),/变化/);await files.restore('note.txt','later');
+    assert.equal(fs.readFileSync(nativePath(root+'/note.txt'),'utf8'),'before');assert.equal(await files.baseline('note.txt'),undefined);
+    await files.write('new.txt','new',signal);await files.restore('new.txt','new');assert.ok(!fs.existsSync(nativePath(root+'/new.txt')));
+  });
+  await test('image hydration awaits actual base64 encoding',async()=>{
+    const id=crypto.randomUUID(),bytes=Buffer.from([255,216,255,217]);fs.writeFileSync(path.join(fixture,'attachments',id+'.jpg'),bytes);
+    const item={id,name:'image.jpg',mime:'image/jpeg',path:id+'.jpg',size:bytes.length};
+    const output=await Attachments.hydrate([{role:'user',content:'look',attachments:[item]}]);assert.equal(output[0].images[0],'data:image/jpeg;base64,'+bytes.toString('base64'));
+  });
+  await test('Office ZIP extraction is bounded and keeps paragraph and cell positions',async()=>{
+    function zip(name,text){const filename=Buffer.from(name),raw=Buffer.from(text),packed=zlib.deflateRawSync(raw);const local=Buffer.alloc(30);local.writeUInt32LE(0x04034b50);local.writeUInt16LE(8,8);local.writeUInt32LE(packed.length,18);local.writeUInt32LE(raw.length,22);local.writeUInt16LE(filename.length,26);
+      const directory=Buffer.alloc(46);directory.writeUInt32LE(0x02014b50);directory.writeUInt16LE(8,10);directory.writeUInt32LE(packed.length,20);directory.writeUInt32LE(raw.length,24);directory.writeUInt16LE(filename.length,28);
+      const end=Buffer.alloc(22);end.writeUInt32LE(0x06054b50);end.writeUInt16LE(1,8);end.writeUInt16LE(1,10);end.writeUInt32LE(directory.length+filename.length,12);end.writeUInt32LE(local.length+filename.length+packed.length,16);return Uint8Array.from(Buffer.concat([local,filename,packed,directory,filename,end])).buffer;}
+    const {officeText,zipEntries}=load(path.join(source,'services/DocumentText'));
+    assert.match(await officeText(zip('word/document.xml','<w:document><w:p><w:t>中文 &amp; text</w:t></w:p></w:document>')),/中文 & text/);
+    assert.match(await officeText(zip('xl/worksheets/sheet1.xml','<worksheet><row><c r="A1" t="inlineStr"><is><t>Title</t></is></c><c r="B1"><v>42</v></c></row></worksheet>')),/A1: Title\nB1: 42/);
+    assert.throws(()=>zipEntries(new ArrayBuffer(1)));
+  });
+  await test('OAuth validates resource, uses PKCE, binds tokens and refreshes securely',async()=>{
+    const {McpOAuth}=load(path.join(source,'services/McpOAuth'));let challenge='',tokenRequests=0;
+    const json=value=>({responseCode:200,header:{},result:JSON.stringify(value)});
+    jsonScript=(url,options)=>{
+      assert.equal(options.maxRedirects,0);
+      if(url===server.url)return{responseCode:401,header:{'www-authenticate':'Bearer resource_metadata="https://fixture.invalid/resource"'},result:''};
+      if(url.endsWith('/resource'))return json({resource:server.url,authorization_servers:['https://auth.invalid']});
+      if(url.includes('.well-known'))return json({issuer:'https://auth.invalid',authorization_endpoint:'https://auth.invalid/authorize',token_endpoint:'https://auth.invalid/token',registration_endpoint:'https://auth.invalid/register',code_challenge_methods_supported:['S256']});
+      if(url.endsWith('/register')){const body=JSON.parse(options.extraData);assert.equal(body.token_endpoint_auth_method,'none');return json({client_id:'native-app'});}
+      if(url.endsWith('/token')){tokenRequests++;const params=new URLSearchParams(options.extraData);assert.equal(params.get('resource'),server.url);
+        if(params.get('grant_type')==='authorization_code'){assert.equal(crypto.createHash('sha256').update(params.get('code_verifier')).digest('base64url'),challenge);return json({access_token:'first',refresh_token:'refresh',expires_in:1,token_type:'Bearer'});}
+        assert.equal(params.get('refresh_token'),'refresh');return json({access_token:'second',expires_in:3600,token_type:'Bearer'});}
+      throw Error('unexpected '+url);
+    };
+    const context={startAbility:async want=>{const url=new URL(want.uri);challenge=url.searchParams.get('code_challenge');assert.equal(url.searchParams.get('code_challenge_method'),'S256');
+      McpOAuth.receive('tinybot-harmony://oauth/callback?state=wrong&code=ignored');
+      setTimeout(()=>McpOAuth.receive('tinybot-harmony://oauth/callback?state='+url.searchParams.get('state')+'&code=valid'),0);}};
+    const alias=await McpOAuth.login(server,context);assert.equal(tokenRequests,1);
+    const authenticated={...server,credentialAlias:alias,authType:'oauth'};const tokens=await Promise.all([McpOAuth.bearer(authenticated),McpOAuth.bearer(authenticated)]);
+    assert.deepEqual(tokens,['second','second']);assert.equal(tokenRequests,2);await assert.rejects(McpOAuth.bearer({...authenticated,url:'https://other.invalid/mcp'}),/不匹配/);
+  });
+  await test('backup restores independent conversations, attachments, files and scoped memory without secrets',async()=>{
+    const {exportBackup,readBackup}=load(path.join(source,'services/Backup'));
+    const root='/sandbox/backup-app';fs.mkdirSync(nativePath(root+'/workspace/thread'),{recursive:true});fs.mkdirSync(nativePath(root+'/cache'));fs.mkdirSync(nativePath(root+'/attachments'));
+    Attachments.configure(root);const id=crypto.randomUUID();fs.writeFileSync(nativePath(root+'/attachments/'+id+'.txt'),'sample');fs.writeFileSync(nativePath(root+'/workspace/thread/note.txt'),'workspace');
+    const data=model.emptyData();data.activeThreadId='thread';const attachment={id,name:'input.txt',mime:'text/plain',path:id+'.txt',size:6,text:'sample'};
+    data.threads=[{id:'thread',title:'source',updatedAt:1,messages:[{id:'u',role:'user',content:'hello',status:'complete',error:'',attachments:[attachment]},{id:'a',role:'assistant',content:'answer',status:'complete',error:''}],modelRef:{providerId:'provider',modelId:'model'}}];
+    data.providerProfiles=[{id:'provider',name:'Provider',protocol:'chat-completions',baseUrl:'https://api.invalid/v1',credentialAlias:'SECRET-ALIAS',noApiKey:false,enabled:true,models:['model'],contextWindow:32768}];
+    data.productivity={memories:[{id:'m',content:'fact',threadId:'thread',updatedAt:1,sourceThreadId:'thread',sourceMessageId:'u'}],templates:[],servers:[]};
+    const context={cacheDir:root+'/cache',getApplicationContext:()=>({filesDir:root})};await exportBackup(context,JSON.parse(JSON.stringify(data)));
+    const exported=fs.readFileSync(nativePath(selectedFile),'utf8');assert.ok(!exported.includes('SECRET-ALIAS'));
+    const restored=await readBackup(context);assert.notEqual(restored.threads[0].id,'thread');assert.equal(restored.providerProfiles[0].enabled,false);
+    assert.equal(restored.productivity.memories[0].threadId,restored.threads[0].id);assert.equal(restored.productivity.memories[0].sourceMessageId,restored.threads[0].messages[0].id);
+    assert.equal(fs.readFileSync(nativePath(root+'/workspace/'+restored.threads[0].id+'/note.txt'),'utf8'),'workspace');
+    const restoredAttachment=restored.threads[0].messages[0].attachments[0];assert.notEqual(restoredAttachment.id,id);assert.equal(fs.readFileSync(nativePath(root+'/attachments/'+restoredAttachment.path),'utf8'),'sample');
+    model.parseAppData(JSON.stringify(restored));const bad=JSON.parse(exported);bad.files[0].path='../escape';fs.writeFileSync(nativePath(selectedFile),JSON.stringify(bad));await assert.rejects(readBackup(context),/路径/);
+  });
+  await test('image generation and edits require approval, persist outputs and send binary multipart',async()=>{
+    const {ImageTools}=load(path.join(source,'services/ImageTools'));const root='/sandbox/workspace/images';fs.mkdirSync(nativePath(root),{recursive:true});Attachments.configure('/sandbox/backup-app');
+    const jpeg=Uint8Array.from([255,216,255,217]).buffer;
+    kits['@kit.ImageKit'].image={createImageSource:()=>({getImageInfo:async()=>({size:{width:1,height:1}}),createPixelMap:async()=>({release:async()=>{}}),release:async()=>{}}),createImagePacker:()=>({packing:async()=>jpeg,release:async()=>{}})};
+    const approval=new ToolApproval();const profile={id:'image-provider',protocol:'chat-completions',baseUrl:'https://images.invalid/v1',credentialAlias:'fixture-key'};
+    const tools=new ImageTools(profile,{providerId:profile.id,modelId:'image-test'},root,approval,[]);let requests=0;
+    jsonScript=(url,options)=>{requests++;assert.equal(options.header.Authorization,'Bearer fixture-secret');
+      if(url.endsWith('/generations')){assert.equal(JSON.parse(options.extraData).model,'image-test');}
+      else {assert.equal(url,'https://images.invalid/v1/images/edits');assert.match(options.header['Content-Type'],/multipart/);const body=Buffer.from(options.extraData);assert.ok(body.includes(Buffer.from('name="image"')));assert.ok(body.includes(Buffer.from(jpeg)));}
+      return{responseCode:200,result:JSON.stringify({data:[{b64_json:Buffer.from(jpeg).toString('base64')}]})};};
+    const call=args=>({id:'image',type:'function',function:{name:'generate_image',arguments:JSON.stringify(args)}});
+    const denied=tools.execute(call({prompt:'a circle'}),new Cancellation());approval.respond(false);await assert.rejects(denied);assert.equal(requests,0);
+    const generated=tools.execute(call({prompt:'a circle'}),new Cancellation());approval.respond(true);const first=JSON.parse(await generated);assert.ok(fs.existsSync(nativePath(root+'/'+first.path)));
+    const edited=tools.execute(call({prompt:'make it blue',source:first.path}),new Cancellation());approval.respond(true);const second=JSON.parse(await edited);assert.notEqual(second.path,first.path);assert.equal(requests,2);
+  });
+  await test('model discovery validates credential origin and uses the protocol endpoint',async()=>{
+    const {discoverModels}=load(path.join(source,'services/ModelDiscovery'));let requests=0;
+    jsonScript=(url,options)=>{requests++;assert.equal(url,'https://models.invalid/v1/models');assert.equal(options.header.Authorization,'Bearer fixture-secret');return{responseCode:200,result:JSON.stringify({data:[{id:'one'},{id:'one'},{id:'two'}]})};};
+    const profile={id:'p',protocol:'responses',baseUrl:'https://models.invalid/v1',credentialAlias:'fixture-key'};
+    const draft={...profile,apiKey:'',noApiKey:false};assert.equal((await discoverModels(draft,[profile])).join(','),'one,two');
+    await assert.rejects(discoverModels({...draft,baseUrl:'https://other.invalid/v1'},[profile]),/API Key/);assert.equal(requests,1);
+  });
+  await test('usage ledger preserves new requests while restoring persisted records',async()=>{
+    const {UsageLedger}=load(path.join(source,'services/UsageLedger'));const root='/sandbox/ledger';fs.mkdirSync(nativePath(root),{recursive:true});
+    fs.writeFileSync(nativePath(root+'/usage-ledger.json'),JSON.stringify([{id:'old',model:'old'}]));
+    const ready=UsageLedger.configure(root);UsageLedger.record({id:'new',model:'new',status:'running_or_unknown'});await ready;
+    UsageLedger.record({id:'new',model:'new',status:'complete'});await UsageLedger.queue;
+    const records=JSON.parse(fs.readFileSync(nativePath(root+'/usage-ledger.json'),'utf8'));assert.equal(records.length,2);assert.equal(records.find(x=>x.id==='new').status,'complete');
+  });
+  console.log('16 native adapter integration checks passed. Fixtures: '+fixture);
+})().catch(error=>{console.error(error);process.exitCode=1;});

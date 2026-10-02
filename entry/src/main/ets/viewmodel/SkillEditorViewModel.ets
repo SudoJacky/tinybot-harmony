@@ -1,3 +1,4 @@
+import { t } from '../model/I18n';
 import { MAX_SKILL_TEXT, SkillData, SkillFile, skillPath } from '../model/Skills';
 
 @Observed
@@ -23,10 +24,10 @@ export class SkillEditorViewModel {
     try {
       const path = skillPath(this.referencePath.trim());
       if (path === 'SKILL.md' || this.files.some((file: SkillFile) => file.path === path)) {
-        throw new Error('路径已存在；请先移除旧参考文件，SKILL.md 请在上方编辑。');
+        throw new Error(t("路径已存在；请先移除旧参考文件，SKILL.md 请在上方编辑。"));
       }
       if (this.files.length >= 16 || this.referenceText.length > MAX_SKILL_TEXT || this.referenceText.includes('\u0000')) {
-        throw new Error('最多添加 16 个参考文件，每个文件最多 32000 字符，且必须是文本。');
+        throw new Error(t("最多添加 16 个参考文件，每个文件最多 32000 字符，且必须是文本。"));
       }
       this.files = this.files.concat([{ path: path, content: this.referenceText }]);
       this.referencePath = '';

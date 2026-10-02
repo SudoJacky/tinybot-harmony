@@ -1,3 +1,4 @@
+import { t } from './I18n';
 import { ModelConfig } from './Conversation';
 import { builtinProviderInfos } from './Provider';
 import { contextSettings } from './ConversationContext';
@@ -29,7 +30,7 @@ export interface ModelChoice extends ModelReference {
 export function modelIds(value: string): string[] {
   const ids = value.split(/[\n,，]/).map((id: string) => id.trim()).filter((id: string) => id.length > 0);
   if (ids.length === 0 || ids.some((id: string) => id.length > 200) || new Set(ids).size !== ids.length) {
-    throw new Error('请填写至少一个模型 ID，每行一个或用逗号分隔，不能重复。');
+    throw new Error(t("请填写至少一个模型 ID，每行一个或用逗号分隔，不能重复。"));
   }
   return ids;
 }
@@ -43,7 +44,7 @@ export function validateProfile(profile: ProviderProfile): void {
     profile.models.some((id: string) => typeof id !== 'string' || id.trim() !== id || id.length === 0) ||
     (profile.noApiKey ? profile.credentialAlias.length > 0 : profile.credentialAlias.length === 0) ||
     (profile.presetId !== undefined && !builtinProviderInfos().some((info) => info.id === profile.presetId))) {
-    throw new Error('模型服务配置无效，名称、协议、凭据或模型列表需要检查。');
+    throw new Error(t("模型服务配置无效，名称、协议、凭据或模型列表需要检查。"));
   }
   protocolUrl(profile.protocol, profile.baseUrl, true);
   modelIds(profile.models.join('\n'));
@@ -55,7 +56,7 @@ export function validateReference(reference: ModelReference): void {
   if (!reference || typeof reference.providerId !== 'string' ||
     !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(reference.providerId) || typeof reference.modelId !== 'string' ||
     reference.modelId.trim().length === 0 || reference.modelId.length > 200) {
-    throw new Error('会话的模型选择数据损坏。');
+    throw new Error(t("会话的模型选择数据损坏。"));
   }
 }
 
@@ -85,7 +86,7 @@ export function modelConfig(profiles: ProviderProfile[], reference: ModelReferen
   validateReference(reference);
   const profile = profiles.find((item: ProviderProfile) => item.id === reference.providerId);
   if (!profile || !profile.enabled || !profile.models.includes(reference.modelId)) {
-    throw new Error('这段对话选择的模型服务已停用、删除或移除该模型，请重新选择。');
+    throw new Error(t("这段对话选择的模型服务已停用、删除或移除该模型，请重新选择。"));
   }
   return { configured: true, providerId: profile.id, baseUrl: profile.baseUrl, model: reference.modelId,
     credentialAlias: profile.credentialAlias, contextWindow: profile.contextWindow,

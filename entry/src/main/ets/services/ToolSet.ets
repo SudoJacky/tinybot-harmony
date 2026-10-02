@@ -1,3 +1,4 @@
+import { t } from '../model/I18n';
 import { ToolCall, ToolDefinition } from '../model/Agent';
 import { AgentTools } from './AgentLoop';
 import { Cancellation } from './Cancellation';
@@ -11,7 +12,7 @@ export class ToolSet implements AgentTools {
     for (const group of groups) {
       for (const definition of group.definitions()) {
         const name = definition.function.name;
-        if (this.entries.has(name)) { throw new Error('工具名称重复：' + name); }
+        if (this.entries.has(name)) { throw new Error(t("工具名称重复：") + name); }
         this.entries.set(name, group);
         this.catalog.push(definition);
       }
@@ -23,7 +24,7 @@ export class ToolSet implements AgentTools {
   async execute(call: ToolCall, cancellation: Cancellation): Promise<string> {
     cancellation.check();
     const group = this.entries.get(call.function.name);
-    if (!group) { throw new Error('工具未启用或不存在：' + call.function.name); }
+    if (!group) { throw new Error(t("工具未启用或不存在：") + call.function.name); }
     return group.execute(call, cancellation);
   }
 }

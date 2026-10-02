@@ -1,7 +1,7 @@
 /node_modules
 /oh_modules
 /local.properties
-/.idea
+**/.idea/
 **/build
 /.hvigor
 .cxx
@@ -13,6 +13,10 @@
 /.cache
 /docs/local/
 /.codex/
+/.agents/
+/.shots/
+/artifacts/
+/design-qa.md
 **/oh_modules/
 **/node_modules/
 /DESIGN.md

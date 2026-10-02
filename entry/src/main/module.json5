@@ -24,6 +24,12 @@
         "startWindowBackground": "$color:start_window_background",
         "exported": true,
         "skills": [
+          { "actions": ["ohos.want.action.viewData"], "entities": ["entity.system.browsable"], "uris": [{ "scheme": "tinybot-harmony", "host": "oauth", "path": "/callback" }] },
+          { "actions": ["ohos.want.action.sendData"], "uris": [
+            { "scheme": "file", "utd": "general.text", "maxFileSupported": 4 },
+            { "scheme": "file", "utd": "general.hyperlink", "maxFileSupported": 4 },
+            { "scheme": "file", "utd": "general.image", "maxFileSupported": 4 }
+          ] },
           {
             "entities": [
               "entity.system.home"

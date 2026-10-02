@@ -1,3 +1,7 @@
+import { t } from '../../model/I18n';
+import { Attachments } from '../Attachments';
+import { UsageStream, RequestUsage } from '../../model/Usage';
+import { UsageLedger } from '../UsageLedger';
 import { http } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -7,9 +11,9 @@ import { copyProviderInfo, ProviderInfo } from '../../model/Provider';
 import { Cancellation, RunCancelledError } from '../Cancellation';
 import { ChatStream } from '../ChatStream';
 import { ModelStream, ResponsesStream, AnthropicStream } from './EventStreams';
-import { protocolUrl, protocolHeaders, responsesRequest, anthropicRequest } from './WireProtocols';
+import { protocolUrl, protocolHeaders, responsesRequest, anthropicRequest, ResponsesRequest } from './WireProtocols';
 import { ModelProvider, ProviderRequest } from './Provider';
-import { ChatCompletionsOptions, chatRequest } from './ChatCompletionsProtocol';
+import { ChatCompletionsOptions, chatRequest, ChatRequest } from './ChatCompletionsProtocol';
 
 export class ProtocolProvider implements ModelProvider {
   readonly info: ProviderInfo;
@@ -25,17 +29,29 @@ export class ProtocolProvider implements ModelProvider {
   }
 
   async stream(input: ProviderRequest, cancellation: Cancellation,
-    onText: (text: string) => void): Promise<ModelTurn> {
+    onText: (text: string) => void, onReasoning?: (text: string) => void): Promise<ModelTurn> {
     cancellation.check();
     const endpoint = this.endpoint(input.baseUrl);
+    const messages = await Attachments.hydrate(input.messages);
+    cancellation.check();
     const request = http.createHttp();
+    const usage = new UsageStream(); let firstToken: number | undefined = undefined;
+    const receiveText = (text: string): void => { if (text && firstToken === undefined) { firstToken = Date.now(); } onText(text); };
     const decoder = new util.TextDecoder('utf-8');
-    const parser: ModelStream = this.info.protocol === 'responses' ? new ResponsesStream(onText) :
-      this.info.protocol === 'anthropic-messages' ? new AnthropicStream(onText) : new ChatStream(onText);
-    const body: Object = this.info.protocol === 'responses' ? responsesRequest(input.model, input.messages, input.tools, input.maxOutputTokens) :
-      this.info.protocol === 'anthropic-messages' ? anthropicRequest(input.model, input.messages, input.tools, input.maxOutputTokens) :
-      chatRequest(input.model, input.messages, input.tools, this.options, input.maxOutputTokens);
+    const parser: ModelStream = this.info.protocol === 'responses' ? new ResponsesStream(receiveText) :
+      this.info.protocol === 'anthropic-messages' ? new AnthropicStream(receiveText) : new ChatStream(receiveText, onReasoning);
+    const body: Object = this.info.protocol === 'responses' ? responsesRequest(input.model, messages, input.tools, input.maxOutputTokens) :
+      this.info.protocol === 'anthropic-messages' ? anthropicRequest(input.model, messages, input.tools, input.maxOutputTokens) :
+      chatRequest(input.model, messages, input.tools, this.options, input.maxOutputTokens);
+    if (input.requestUsage && this.info.protocol === 'chat-completions') { (body as ChatRequest).stream_options = { include_usage: true }; }
+    if (input.reasoning && input.reasoning !== 'default') {
+      if (this.info.protocol === 'responses') { (body as ResponsesRequest).reasoning = { effort: input.reasoning }; }
+      else if (this.info.protocol === 'chat-completions') { (body as ChatRequest).reasoning_effort = input.reasoning; }
+      else { request.destroy(); throw new Error(t("此协议暂不支持当前思考强度选项，请使用服务默认。")); }
+    }
     const startedAt = Date.now();
+    const usageId = util.generateRandomUUID();
+    UsageLedger.record({ id: usageId, provider: this.info.id, model: input.model, startedAt: startedAt, durationMs: 0, status: 'running_or_unknown' });
     hilog.info(0x0000, 'TinybotNetwork', 'Request start provider=%{public}s protocol=%{public}s model=%{public}s messages=%{public}d tools=%{public}d',
       this.info.id, this.info.protocol, input.model, input.messages.length, input.tools.length);
     return new Promise<ModelTurn>((resolve, reject) => {
@@ -55,6 +71,10 @@ export class ProtocolProvider implements ModelProvider {
         clearTimeout(timer);
         removeCancel();
         request.destroy();
+        const record: RequestUsage = { id: usageId, provider: this.info.id, model: input.model,
+          startedAt: startedAt, durationMs: Date.now() - startedAt, firstTokenMs: firstToken === undefined ? undefined : firstToken - startedAt,
+          status: error ? cancellation.cancelled ? 'cancelled' : 'failed' : 'complete', tokens: usage.result() };
+        UsageLedger.record(record); if (result) { result.usage = record; }
         hilog.info(0x0000, 'TinybotNetwork', 'Request ended elapsedMs=%{public}d bytes=%{public}d http=%{public}d failed=%{public}s',
           Date.now() - startedAt, receivedBytes, responseCode, (error !== undefined).toString());
         if (error) {
@@ -62,7 +82,7 @@ export class ProtocolProvider implements ModelProvider {
         } else if (result) {
           resolve(result);
         } else {
-          reject(new Error('模型没有返回完整结果。'));
+          reject(new Error(t("模型没有返回完整结果。")));
         }
       };
       const finish = (): void => {
@@ -70,7 +90,7 @@ export class ProtocolProvider implements ModelProvider {
           return;
         }
         if (responseCode !== 200) {
-          settle(new Error(`模型服务返回 HTTP ${responseCode}，请检查地址、API Key、模型名称和额度。`));
+          settle(new Error(t("模型服务返回 HTTP {0}，请检查地址、API Key、模型名称和额度。", [responseCode])));
           return;
         }
         if (parseError) {
@@ -88,7 +108,7 @@ export class ProtocolProvider implements ModelProvider {
           settle(error as Error);
         }
       };
-      timer = setTimeout(() => settle(new Error('本次请求超过 3 分钟，请检查网络或稍后重试。')), 180000);
+      timer = setTimeout(() => settle(new Error(t("本次请求超过 3 分钟，请检查网络或稍后重试。"))), 180000);
       removeCancel = cancellation.onCancel(() => settle(new RunCancelledError() as Error));
       if (settled) {
         return;
@@ -103,11 +123,11 @@ export class ProtocolProvider implements ModelProvider {
           }
           receivedBytes += data.byteLength;
           if (receivedBytes > 2 * 1024 * 1024) {
-            settle(new Error('单次回答超过 2 MB，请缩小问题范围。'));
+            settle(new Error(t("单次回答超过 2 MB，请缩小问题范围。")));
             return;
           }
           try {
-            parser.push(decoder.decodeToString(new Uint8Array(data), { stream: true }));
+            const text = decoder.decodeToString(new Uint8Array(data), { stream: true }); usage.push(text); parser.push(text);
           } catch (error) {
             parseError = error as Error;
             finish();
@@ -129,14 +149,14 @@ export class ProtocolProvider implements ModelProvider {
           if (error) {
             hilog.error(0x0000, 'TinybotNetwork', 'Request error code=%{public}d elapsedMs=%{public}d bytes=%{public}d',
               error.code, Date.now() - startedAt, receivedBytes);
-            settle(new Error(`网络请求失败（${error.code}），请检查连接和服务地址。`));
+            settle(new Error(t("网络请求失败（{0}），请检查连接和服务地址。", [error.code])));
             return;
           }
           responseCode = code;
           finish();
         });
       } catch (_) {
-        settle(new Error('无法创建网络请求，请检查模型配置。'));
+        settle(new Error(t("无法创建网络请求，请检查模型配置。")));
       }
     });
   }

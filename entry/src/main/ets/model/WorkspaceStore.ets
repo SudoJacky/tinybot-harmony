@@ -1,3 +1,4 @@
+import { t } from './I18n';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { threadWorkspacePath } from './Workspace';
 
@@ -25,7 +26,7 @@ export class WorkspaceStore {
     }
     const stat = await fs.lstat(path);
     if (!stat.isDirectory() || stat.isSymbolicLink()) {
-      throw new Error('工作区路径必须是目录，不能是文件或符号链接：' + path);
+      throw new Error(t("工作区路径必须是目录，不能是文件或符号链接：") + path);
     }
   }
 }

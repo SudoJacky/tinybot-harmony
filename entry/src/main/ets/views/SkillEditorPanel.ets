@@ -1,3 +1,4 @@
+import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
 import { picker } from '@kit.CoreFileKit';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
@@ -15,7 +16,7 @@ export struct SkillEditorPanel {
   @State private importing: boolean = false;
   @State private expandedPath: string = '';
 
-  private get idle(): boolean {
+  private idle(): boolean {
     return !this.importing && !this.app.busy;
   }
 
@@ -32,7 +33,7 @@ export struct SkillEditorPanel {
       const text = await readSkillImport(selected[0]);
       if (reference) { this.editor.referenceText = text; }
       else { this.editor.document = text; }
-    } catch (error) { this.editor.error = '导入失败：' + (error as Error).message; }
+    } catch (error) { this.editor.error = t("导入失败：") + (error as Error).message; }
     finally { this.importing = false; }
   }
 
@@ -41,16 +42,16 @@ export struct SkillEditorPanel {
       Scroll() {
         Column() {
           Row() {
-            SectionHeader({ title: 'SKILL.md', caption: '包含 name、description 和指令正文。' }).layoutWeight(1)
-            Button(this.importing ? '导入中…' : '从文件导入').id('import-skill').attributeModifier(Btn.textSmall)
-              .enabled(this.idle).onClick(() => this.importText(false))
+            SectionHeader({ title: 'SKILL.md', caption: t("包含 name、description 和指令正文。") }).layoutWeight(1)
+            Button(this.importing ? t("导入中…") : t("从文件导入")).id('import-skill').attributeModifier(Btn.textSmall)
+              .enabled(this.idle()).onClick(() => this.importText(false))
           }.width('100%').alignItems(VerticalAlign.Bottom)
-          TextArea({ text: this.editor.document, placeholder: '---\nname: my-skill\ndescription: …\n---\n\n指令正文' })
+          TextArea({ text: this.editor.document, placeholder: t("---\nname: my-skill\ndescription: …\n---\n\n指令正文") })
             .id('skill-document').attributeModifier(Styles.area).backgroundColor($r('app.color.surface'))
-            .fontFamily('monospace').fontSize(13).height(280).maxLength(32000).enabled(this.idle)
+            .fontFamily('monospace').fontSize(13).height(280).maxLength(32000).enabled(this.idle())
             .onChange((value: string) => { this.editor.document = value; })
-          SectionHeader({ title: `参考文件 · ${this.editor.files.length}`,
-            caption: '使用与指令一致的相对路径。脚本仅作为文本保存，不会执行。' })
+          SectionHeader({ title: t("参考文件 · {0}", [this.editor.files.length]),
+            caption: t("使用与指令一致的相对路径。脚本仅作为文本保存，不会执行。") })
           Column() {
             ForEach(this.editor.files, (file: SkillFile, index: number) => {
               Column({ space: Space.sm }) {
@@ -62,8 +63,8 @@ export struct SkillEditorPanel {
                     .fontSize(14).fontColor([$r('app.color.text_tertiary')])
                   Button({ type: ButtonType.Circle }) {
                     SymbolGlyph($r('sys.symbol.xmark')).fontSize(16).fontColor([$r('app.color.text_secondary')])
-                  }.width(32).height(32).backgroundColor(Color.Transparent).accessibilityText('移除')
-                  .enabled(this.idle)
+                  }.width(32).height(32).backgroundColor(Color.Transparent).accessibilityText(t("移除"))
+                  .enabled(this.idle())
                   .onClick(() => { this.editor.files = this.editor.files.filter((item: SkillFile) => item.path !== file.path); })
                 }.width('100%').height(44)
                 .onClick(() => { this.expandedPath = this.expandedPath === file.path ? '' : file.path; })
@@ -83,21 +84,21 @@ export struct SkillEditorPanel {
               Divider().strokeWidth(0.5).color($r('app.color.divider'))
             }
             Column({ space: Space.sm }) {
-              TextInput({ text: this.editor.referencePath, placeholder: '相对路径，例如 references/guide.md' })
-                .id('skill-reference-path').attributeModifier(Styles.input).maxLength(256).enabled(this.idle)
+              TextInput({ text: this.editor.referencePath, placeholder: t("相对路径，例如 references/guide.md") })
+                .id('skill-reference-path').attributeModifier(Styles.input).maxLength(256).enabled(this.idle())
                 .onChange((value: string) => { this.editor.referencePath = value; })
-              TextArea({ text: this.editor.referenceText, placeholder: '粘贴参考内容，或从文件导入' })
-                .id('skill-reference-text').attributeModifier(Styles.area).height(110).maxLength(32000).enabled(this.idle)
+              TextArea({ text: this.editor.referenceText, placeholder: t("粘贴参考内容，或从文件导入") })
+                .id('skill-reference-text').attributeModifier(Styles.area).height(110).maxLength(32000).enabled(this.idle())
                 .onChange((value: string) => { this.editor.referenceText = value; })
               Row({ space: Space.sm }) {
-                Button('从文件导入').attributeModifier(Btn.textSmall).enabled(this.idle).onClick(() => this.importText(true))
+                Button(t("从文件导入")).attributeModifier(Btn.textSmall).enabled(this.idle()).onClick(() => this.importText(true))
                 Blank()
-                Button('添加文件').attributeModifier(Btn.tonalSmall).enabled(this.idle)
+                Button(t("添加文件")).attributeModifier(Btn.tonalSmall).enabled(this.idle())
                   .onClick(() => this.editor.addReference())
               }.width('100%')
             }.padding({ top: this.editor.files.length > 0 ? Space.md : 0 })
           }.padding(Space.lg).borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
-          Text('启用的 Skill 名称和简介会提供给模型；正文与参考内容只在读取时发送。最多保存 20 个 Skills。')
+          Text(t("启用的 Skill 名称和简介会提供给模型；正文与参考内容只在读取时发送。最多保存 20 个 Skills。"))
             .fontSize(Font.caption).lineHeight(18).fontColor($r('app.color.text_tertiary')).width('100%')
             .padding({ left: 4, right: 4, top: Space.md })
         }.padding({ left: Space.page, right: Space.page, bottom: Space.xl }).width('100%')
@@ -105,8 +106,8 @@ export struct SkillEditorPanel {
       BottomBar() {
         Column({ space: Space.sm }) {
           if (this.editor.error.length > 0) { Banner({ text: this.editor.error, compId: 'skill-error' }) }
-          Button('保存 Skill').id('save-skill').attributeModifier(Btn.primary).width('100%')
-            .enabled(this.idle && this.app.saveError.length === 0)
+          Button(t("保存 Skill")).id('save-skill').attributeModifier(Btn.primary).width('100%')
+            .enabled(this.idle() && this.app.saveError.length === 0)
             .onClick(async () => { if (await this.app.saveSkill()) { this.onSaved(); } })
         }
       }

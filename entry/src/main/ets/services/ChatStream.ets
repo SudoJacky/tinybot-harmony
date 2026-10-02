@@ -1,3 +1,4 @@
+import { t } from '../model/I18n';
 import { MAX_REASONING_CONTENT, MAX_TOOL_ARGUMENTS, MAX_TOOL_CALLS, ModelTurn, ToolCall, validateToolCalls } from '../model/Agent';
 import { ModelStream } from './providers/EventStreams';
 
@@ -41,15 +42,17 @@ export class ChatStream implements ModelStream {
   private calls: Map<number, ToolCall> = new Map<number, ToolCall>();
   private frameSize: number = 0;
   private onText: (text: string) => void;
+  private onReasoning?: (text: string) => void;
 
-  constructor(onText: (text: string) => void) {
+  constructor(onText: (text: string) => void, onReasoning?: (text: string) => void) {
     this.onText = onText;
+    this.onReasoning = onReasoning;
   }
 
   push(text: string): void {
     this.pending += text;
     if (this.pending.length > 1024 * 1024) {
-      throw new Error('模型服务返回的数据帧过大。');
+      throw new Error(t("模型服务返回的数据帧过大。"));
     }
     let newline = this.pending.indexOf('\n');
     while (newline >= 0) {
@@ -60,7 +63,7 @@ export class ChatStream implements ModelStream {
       } else if (line.startsWith('data:')) {
         this.frameSize += line.length;
         if (this.frameSize > 1024 * 1024) {
-          throw new Error('模型服务返回的数据帧过大。');
+          throw new Error(t("模型服务返回的数据帧过大。"));
         }
         this.lines.push(line.slice(5).replace(/^ /, ''));
       }
@@ -72,27 +75,27 @@ export class ChatStream implements ModelStream {
     if (!this.done || (this.terminal !== 'stop' && this.terminal !== 'tool_calls') ||
       this.pending.trim().length > 0 || this.lines.length > 0) {
       if (this.terminal === 'length') {
-        throw new Error('回答达到模型输出上限，内容不完整。');
+        throw new Error(t("回答达到模型输出上限，内容不完整。"));
       }
       if (this.terminal === 'content_filter') {
-        throw new Error('模型服务因内容过滤中止了回答。');
+        throw new Error(t("模型服务因内容过滤中止了回答。"));
       }
-      throw new Error('连接结束，但未收到完整回答的结束标记。');
+      throw new Error(t("连接结束，但未收到完整回答的结束标记。"));
     }
     const calls: ToolCall[] = [];
     for (let index = 0; index < this.calls.size; index++) {
       const call = this.calls.get(index);
       if (!call) {
-        throw new Error('模型返回了不连续的工具调用索引。');
+        throw new Error(t("模型返回了不连续的工具调用索引。"));
       }
       calls.push(call);
     }
     validateToolCalls(calls);
     if ((this.terminal === 'tool_calls') !== (calls.length > 0)) {
-      throw new Error('工具调用与模型结束原因不匹配。');
+      throw new Error(t("工具调用与模型结束原因不匹配。"));
     }
     if (calls.length === 0 && this.content.trim().length === 0) {
-      throw new Error('模型没有返回可显示的文本。');
+      throw new Error(t("模型没有返回可显示的文本。"));
     }
     return { content: this.content, toolCalls: calls,
       reasoningContent: this.reasoningContent.length > 0 ? this.reasoningContent : undefined };
@@ -106,7 +109,7 @@ export class ChatStream implements ModelStream {
     this.lines = [];
     this.frameSize = 0;
     if (this.done) {
-      throw new Error('模型在结束标记后继续返回数据。');
+      throw new Error(t("模型在结束标记后继续返回数据。"));
     }
     if (payload === '[DONE]') {
       this.done = true;
@@ -116,39 +119,40 @@ export class ChatStream implements ModelStream {
     try {
       chunk = JSON.parse(payload) as StreamChunk;
     } catch (_) {
-      throw new Error('模型返回了无效的流式 JSON。');
+      throw new Error(t("模型返回了无效的流式 JSON。"));
     }
     if (!chunk || chunk.error) {
-      throw new Error('模型服务在生成过程中返回错误。');
+      throw new Error(t("模型服务在生成过程中返回错误。"));
     }
     if (!Array.isArray(chunk.choices)) {
-      throw new Error('模型返回的流式数据格式不受支持。');
+      throw new Error(t("模型返回的流式数据格式不受支持。"));
     }
     for (const choice of chunk.choices) {
       if (!choice || typeof choice.index !== 'number') {
-        throw new Error('模型返回了无效的候选回答。');
+        throw new Error(t("模型返回了无效的候选回答。"));
       }
       if (choice.index !== 0) {
         continue;
       }
       const reasoning = choice.delta?.reasoning_content;
       if (reasoning !== undefined && reasoning !== null && typeof reasoning !== 'string') {
-        throw new Error('模型返回了无效的推理内容。');
+        throw new Error(t("模型返回了无效的推理内容。"));
       }
       if (reasoning) {
         if (this.terminal.length > 0 || this.reasoningContent.length + reasoning.length > MAX_REASONING_CONTENT) {
-          throw new Error('模型返回的推理内容已结束或超出长度限制。');
+          throw new Error(t("模型返回的推理内容已结束或超出长度限制。"));
         }
-        // Protocol context for subsequent tool rounds; never mix it into the visible final answer.
+        // Display model-provided reasoning separately, preserving it for protocol replay.
         this.reasoningContent += reasoning;
+        this.onReasoning?.(reasoning);
       }
       const content = choice.delta?.content;
       if (content !== undefined && content !== null && typeof content !== 'string') {
-        throw new Error('模型返回了非文本内容。');
+        throw new Error(t("模型返回了非文本内容。"));
       }
       if (content) {
         if (this.terminal.length > 0) {
-          throw new Error('模型在完成回答后继续返回文本。');
+          throw new Error(t("模型在完成回答后继续返回文本。"));
         }
         this.content += content;
         this.onText(content);
@@ -156,7 +160,7 @@ export class ChatStream implements ModelStream {
       const calls = choice.delta?.tool_calls;
       if (calls !== undefined && calls !== null) {
         if (!Array.isArray(calls) || this.terminal.length > 0) {
-          throw new Error('模型返回了无效或已经结束的工具调用。');
+          throw new Error(t("模型返回了无效或已经结束的工具调用。"));
         }
         for (const delta of calls) {
           this.mergeTool(delta);
@@ -164,7 +168,7 @@ export class ChatStream implements ModelStream {
       }
       if (choice.finish_reason) {
         if (this.terminal.length > 0 || typeof choice.finish_reason !== 'string') {
-          throw new Error('模型重复返回了结束原因。');
+          throw new Error(t("模型重复返回了结束原因。"));
         }
         this.terminal = choice.finish_reason;
       }
@@ -177,7 +181,7 @@ export class ChatStream implements ModelStream {
       (delta.type !== undefined && delta.type !== 'function') ||
       (delta.function?.name !== undefined && typeof delta.function.name !== 'string') ||
       (delta.function?.arguments !== undefined && typeof delta.function.arguments !== 'string')) {
-      throw new Error('模型返回了无效的工具调用片段。');
+      throw new Error(t("模型返回了无效的工具调用片段。"));
     }
     let call = this.calls.get(delta.index);
     if (!call) {
@@ -189,7 +193,7 @@ export class ChatStream implements ModelStream {
     call.function.name += delta.function?.name || '';
     call.function.arguments += delta.function?.arguments || '';
     if (call.id.length > 128 || call.function.name.length > 64 || call.function.arguments.length > MAX_TOOL_ARGUMENTS) {
-      throw new Error('模型返回的工具调用过大。');
+      throw new Error(t("模型返回的工具调用过大。"));
     }
   }
 }

@@ -3,7 +3,8 @@ import { AgentStep, AgentTurn, ModelTurn, ToolCall, ToolDefinition, ModelMessage
 import { emptyData, parseAppData, requestHistory } from '../main/ets/model/Conversation';
 import { runAgentLoop, LoopObserver, AgentTools } from '../main/ets/services/AgentLoop';
 import { Cancellation } from '../main/ets/services/Cancellation';
-import { ModelSession } from '../main/ets/services/providers/Provider';
+import { ModelSession, ModelRequestOptions } from '../main/ets/services/providers/Provider';
+import { toolPreview } from '../main/ets/model/ToolPresentation';
 import { ChatStream } from '../main/ets/services/ChatStream';
 import { chatRequest } from '../main/ets/services/providers/ChatCompletionsProtocol';
 import { WorkspaceFiles, WorkspaceTools, workspaceRelativePath } from '../main/ets/services/WorkspaceTools';
@@ -55,11 +56,11 @@ class ScriptModel implements ModelSession {
   constructor(scripts: string[]) { this.scripts = scripts; }
 
   async stream(messages: ModelMessage[], tools: ToolDefinition[], cancellation: Cancellation,
-    onText: (text: string) => void): Promise<ModelTurn> {
+    onText: (text: string) => void, options?: ModelRequestOptions): Promise<ModelTurn> {
     const unsubscribe = cancellation.onCancel(() => { this.cancelled = true; });
     this.requests.push(JSON.parse(JSON.stringify(messages)) as ModelMessage[]);
     this.schemas.push(tools);
-    const stream = new ChatStream(onText);
+    const stream = new ChatStream(onText, options?.onReasoning);
     const wire = this.scripts[this.requests.length - 1];
     if (!wire) { throw new Error('Unexpected extra provider request'); }
     for (let offset = 0; offset < wire.length; offset += 7) {
@@ -115,7 +116,37 @@ async function runLoop(model: ModelSession, tools: AgentTools, result: AgentTurn
 }
 
 export default function agentTests(): void {
+  describe('InlineToolPreview', () => {
+    it('onlyShowsSuccessfulEditsAsChangesAndPreservesEmptyReplacements', 0, () => {
+      const args = '{"path":"a.txt","oldText":"old","newText":""}';
+      const success = toolPreview('edit_file', args, '{"written":true}', 'complete');
+      expect(success.changed).assertTrue();
+      expect(success.before).assertEqual('old');
+      expect(success.after).assertEqual('');
+      const failure = toolPreview('edit_file', args, '{"error":"missing"}', 'failed');
+      expect(failure.changed).assertFalse();
+      expect(failure.content).assertEqual('missing');
+    });
+    it('handlesMalformedResultsAndReturnsActualReadContent', 0, () => {
+      expect(toolPreview('read_file', 'null', '{"content":null}', 'complete').content).assertEqual('{\n  "content": null\n}');
+      expect(toolPreview('read_file', '{}', 'not json', 'complete').content).assertEqual('not json');
+      const read = toolPreview('read_file', '{"path":"a"}', '{"content":"hello\\nworld","truncated":true}', 'complete');
+      expect(read.content).assertEqual('hello\nworld');
+      expect(read.truncated).assertTrue();
+    });
+  });
   describe('ToolStream', () => {
+    it('streamsReasoningSeparatelyBeforeFinalResponse', 0, () => {
+      let thoughts = ''; let answer = '';
+      const stream = new ChatStream((text: string) => { answer += text; }, (text: string) => { thoughts += text; });
+      const wire = 'data: {"choices":[{"index":0,"delta":{"reasoning_content":"正在分析"}}]}\n\n';
+      for (const character of wire) { stream.push(character); }
+      expect(thoughts).assertEqual('正在分析');
+      expect(answer).assertEqual('');
+      stream.push(textWire('answer'));
+      expect(stream.finish().reasoningContent).assertEqual(thoughts);
+      expect(answer).assertEqual('answer');
+    });
     it('rejectsInvalidOrLateReasoningInsteadOfSilentlyDiscardingIt', 0, () => {
       const invalid = 'data: {"choices":[{"index":0,"delta":{"reasoning_content":42}}]}\n\n';
       rejects(() => { new ChatStream(() => {}).push(invalid); }, '推理');
@@ -164,6 +195,20 @@ export default function agentTests(): void {
   });
 
   describe('AgentLoop', () => {
+    it('emitsReasoningBeforeModelEndAndKeepsPartialReasoningOnCancellation', 0, async () => {
+      const wire = 'data: {"choices":[{"index":0,"delta":{"reasoning_content":"partial thought"}}]}\n\n';
+      const model = new ScriptModel([wire + textWire('answer')]);
+      const result = turn(); const cancellation = new Cancellation();
+      let seen = '';
+      const observe = observer();
+      observe.event = (event) => {
+        if (event.type === 'reasoning_delta') { seen = result.steps[0].reasoningContent || ''; cancellation.cancel(); }
+      };
+      try { await runLoop(model, new WorkspaceTools(new MemoryFiles()), result, observe, cancellation); } catch (_) {}
+      expect(seen).assertEqual('partial thought');
+      expect(result.steps[0].reasoningContent).assertEqual('partial thought');
+      expect(result.content).assertEqual('');
+    });
     it('preservesStreamedReasoningAcrossToolRoundsAndReloadWithoutDisplayingIt', 0, async () => {
       const reasoning = 'data: {"choices":[{"index":0,"delta":{"reasoning_content":"fixture "}}]}\n\n' +
         'data: {"choices":[{"index":0,"delta":{"reasoning_content":"context"}}]}\n\n';
@@ -207,7 +252,8 @@ export default function agentTests(): void {
       expect(model.requests[1][1].toolCalls?.[0].id).assertEqual('write');
       expect(model.requests[1][2].toolCallId).assertEqual('write');
       expect(model.requests[2][4].content).assertEqual('{"content":"你好🌱"}');
-      expect(model.schemas[0].length).assertEqual(3);
+      expect(model.schemas[0].some((tool) => tool.function.name === 'write_file')).assertTrue();
+      expect(model.schemas[0].some((tool) => tool.function.name === 'search_file_content')).assertTrue();
     });
     it('runsBatchSequentiallyAndReturnsErrorsForModelCorrection', 0, async () => {
       const model = new ScriptModel([
