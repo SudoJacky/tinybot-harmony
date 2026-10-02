@@ -1,3 +1,4 @@
+import { t } from '../model/I18n';
 import { AgentTurn, MAX_AGENT_STEPS, ModelMessage } from '../model/Agent';
 import { ModelConfig } from '../model/Conversation';
 import { AgentTools, LoopEvent, LoopEventType, SteeringInput, runAgentLoop } from './AgentLoop';
@@ -63,6 +64,8 @@ export class AgentRuntime {
     this.credentials = credentials;
   }
 
+  fork(): AgentRuntime { return new AgentRuntime(this.providers, this.credentials); }
+
   get isRunning(): boolean {
     return this.active !== undefined;
   }
@@ -92,7 +95,7 @@ export class AgentRuntime {
 
   async run(request: AgentRunRequest, hooks: AgentRunHooks): Promise<AgentRunState> {
     if (this.active) {
-      throw new Error('Agent 正在执行，请等待本轮结束。');
+      throw new Error(t("Agent 正在执行，请等待本轮结束。"));
     }
     let resolveIdle = (): void => {};
     const idle = new Promise<void>((resolve) => { resolveIdle = resolve; });
@@ -122,7 +125,7 @@ export class AgentRuntime {
           throw bindingError;
         }
         if (!model) {
-          throw new Error('模型服务未能完成绑定。');
+          throw new Error(t("模型服务未能完成绑定。"));
         }
         await hooks.checkpoint();
         active.cancellation.check();

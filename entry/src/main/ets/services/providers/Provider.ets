@@ -7,6 +7,8 @@ export interface CredentialReader {
 }
 
 export interface ProviderRequest {
+  reasoning?: string;
+  requestUsage?: boolean;
   baseUrl: string;
   model: string;
   apiKey: string;
@@ -17,6 +19,7 @@ export interface ProviderRequest {
 
 export interface ModelRequestOptions {
   maxOutputTokens?: number;
+  onReasoning?: (text: string) => void;
 }
 
 // Providers own endpoint rules and protocol encoding; each request owns its transport.
@@ -24,7 +27,7 @@ export interface ModelProvider {
   readonly info: ProviderInfo;
   endpoint(baseUrl: string): string;
   stream(request: ProviderRequest, cancellation: Cancellation,
-    onText: (text: string) => void): Promise<ModelTurn>;
+    onText: (text: string) => void, onReasoning?: (text: string) => void): Promise<ModelTurn>;
 }
 
 // A provider/model/configuration snapshot bound for one Agent run. No credentials in events.

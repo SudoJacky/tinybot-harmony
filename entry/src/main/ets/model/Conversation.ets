@@ -1,3 +1,6 @@
+import { t } from './I18n';
+import { TeamRun, recoverTeams } from './Team';
+import { Attachment, ProductivityData, validateAttachments, validateProductivity } from './Productivity';
 import { AgentStep, ModelMessage, interruptTools, stepMessages, validateSteps } from './Agent';
 import { builtinProviderInfos, DEFAULT_PROVIDER_ID, LEGACY_PROVIDER_ID } from './Provider';
 import { contextSettings, validateCompaction } from './ConversationContext';
@@ -5,10 +8,12 @@ import { ModelReference, ProviderProfile, validateProfile, validateReference } f
 import { ExtensionSettings, validateExtensions } from './Skills';
 import { PendingInput, validatePendingInputs } from './PendingInput';
 
-const LEGACY_SYSTEM_PROMPT: string = '你是 Tinybot，一个运行在 HarmonyOS 手机上的个人 AI 助手。请用清晰、自然的语言帮助用户。你目前只能对话，不能访问手机文件、执行命令或操作其他应用。不要声称执行了未提供的工具。';
-const DEFAULT_SYSTEM_PROMPT: string = '你是 Tinybot，一个运行在 HarmonyOS 手机上的个人 AI 助手。请用清晰、自然的语言帮助用户，并使用提供的工具完成任务。不要声称执行了未提供的工具。';
+import { DEFAULT_SYSTEM_PROMPT, migrateSystemPrompt } from './SystemPrompt';
 
 export interface ModelConfig {
+  reasoning?: string;
+  requestUsage?: boolean;
+  images?: boolean;
   configured: boolean;
   providerId: string;
   baseUrl: string;
@@ -25,6 +30,7 @@ export interface MessageData {
   content: string;
   status: string;
   error: string;
+  attachments?: Attachment[];
   steps?: AgentStep[];
   modelRef?: ModelReference;
 }
@@ -39,10 +45,12 @@ export interface CompactionData {
 export function copyModelConfig(config: ModelConfig, configured: boolean = config.configured): ModelConfig {
   return { configured: configured, providerId: config.providerId, baseUrl: config.baseUrl, model: config.model,
     systemPrompt: config.systemPrompt, credentialAlias: config.credentialAlias,
-    contextWindow: config.contextWindow, autoCompact: config.autoCompact };
+    contextWindow: config.contextWindow, autoCompact: config.autoCompact, reasoning: config.reasoning, requestUsage: config.requestUsage, images: config.images };
 }
 
 export interface ThreadData {
+  teamEnabled?: boolean;
+  teams?: TeamRun[];
   id: string;
   title: string;
   updatedAt: number;
@@ -51,6 +59,10 @@ export interface ThreadData {
   archived?: boolean;
   titleEdited?: boolean;
   draft?: string;
+  attachments?: Attachment[];
+  parentThreadId?: string;
+  parentMessageId?: string;
+  disabledMcpIds?: string[];
   compaction?: CompactionData;
   modelRef?: ModelReference;
   pendingInputs?: PendingInput[];
@@ -64,6 +76,7 @@ export interface AppData {
   activeThreadId: string;
   providerProfiles?: ProviderProfile[];
   extensions?: ExtensionSettings;
+  productivity?: ProductivityData;
 }
 
 export function defaultConfig(): ModelConfig {
@@ -95,7 +108,7 @@ export function requestHistory(messages: MessageData[], systemPrompt: string): M
     }
     const answer = messages[index + 1];
     if (!answer) {
-      result.push({ role: 'user', content: message.content });
+      result.push({ role: 'user', content: message.content, attachments: message.attachments });
     } else if (answer.role === 'assistant') {
       const steps = answer.steps || [];
       const hasTools = steps.some((step: AgentStep) => step.tools.length > 0);
@@ -103,7 +116,7 @@ export function requestHistory(messages: MessageData[], systemPrompt: string): M
       if (answer.status !== 'complete' && !hasTools && !hasSteering) {
         continue;
       }
-      result.push({ role: 'user', content: message.content });
+      result.push({ role: 'user', content: message.content, attachments: message.attachments });
       if (steps.length === 0) {
         result.push({ role: 'assistant', content: answer.content });
       } else {
@@ -129,19 +142,20 @@ export function parseAppData(text: string): AppData {
     typeof data.activeThreadId !== 'string' || typeof data.config.configured !== 'boolean' || typeof data.config.baseUrl !== 'string' ||
     typeof data.config.model !== 'string' || typeof data.config.systemPrompt !== 'string' ||
     typeof data.config.credentialAlias !== 'string') {
-    throw new Error('本地数据格式不受支持，原文件已保留。');
+    throw new Error(t("本地数据格式不受支持，原文件已保留。"));
   }
+  if (data.productivity) { validateProductivity(data.productivity); }
   const threadIds = new Set<string>();
   if (data.extensions !== undefined) { validateExtensions(data.extensions); }
   contextSettings(data.config);
   if (data.providerProfiles !== undefined) {
-    if (!Array.isArray(data.providerProfiles)) { throw new Error('模型服务列表损坏。'); }
+    if (!Array.isArray(data.providerProfiles)) { throw new Error(t("模型服务列表损坏。")); }
     const ids = new Set<string>();
     const aliases = new Set<string>();
     for (const profile of data.providerProfiles) {
       validateProfile(profile);
       if (ids.has(profile.id) || (profile.credentialAlias.length > 0 && aliases.has(profile.credentialAlias))) {
-        throw new Error('模型服务 ID 或密钥别名重复。');
+        throw new Error(t("模型服务 ID 或密钥别名重复。"));
       }
       ids.add(profile.id);
       if (profile.credentialAlias.length > 0) { aliases.add(profile.credentialAlias); }
@@ -151,20 +165,21 @@ export function parseAppData(text: string): AppData {
     // Every existing endpoint used this protocol. Preserve arbitrary user endpoints and keys.
     data.config.providerId = LEGACY_PROVIDER_ID;
   } else if (typeof data.config.providerId !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(data.config.providerId)) {
-    throw new Error('本地模型服务配置损坏，原文件已保留。');
+    throw new Error(t("本地模型服务配置损坏，原文件已保留。"));
   }
-  if (data.config.systemPrompt === LEGACY_SYSTEM_PROMPT) {
-    data.config.systemPrompt = DEFAULT_SYSTEM_PROMPT;
-  }
+  data.config.systemPrompt = migrateSystemPrompt(data.config.systemPrompt);
   for (const thread of data.threads) {
     if (!thread || typeof thread.id !== 'string' || thread.id.length === 0 || threadIds.has(thread.id) ||
       typeof thread.title !== 'string' || typeof thread.updatedAt !== 'number' ||
       !Number.isFinite(thread.updatedAt) || !Array.isArray(thread.messages) || thread.messages.length % 2 !== 0) {
-      throw new Error('本地会话数据损坏，原文件已保留。');
+      throw new Error(t("本地会话数据损坏，原文件已保留。"));
     }
     threadIds.add(thread.id);
+    if (thread.teamEnabled !== undefined && typeof thread.teamEnabled !== 'boolean') { throw new Error(t("团队模式设置损坏。")); }
+    if (thread.teams !== undefined) { recoverTeams(thread.teams); }
+    if (thread.attachments) { validateAttachments(thread.attachments); }
     if (thread.pendingInputs !== undefined) { validatePendingInputs(thread.pendingInputs); }
-    if (thread.queuePaused !== undefined && typeof thread.queuePaused !== 'boolean') { throw new Error('本地队列状态损坏。'); }
+    if (thread.queuePaused !== undefined && typeof thread.queuePaused !== 'boolean') { throw new Error(t("本地队列状态损坏。")); }
     // Loading never authorizes autonomous execution after a process exit.
     if ((thread.pendingInputs || []).length > 0) { thread.queuePaused = true; }
     if (thread.modelRef !== undefined) { validateReference(thread.modelRef); }
@@ -172,7 +187,7 @@ export function parseAppData(text: string): AppData {
       (thread.archived !== undefined && typeof thread.archived !== 'boolean') ||
       (thread.titleEdited !== undefined && typeof thread.titleEdited !== 'boolean') ||
       (thread.draft !== undefined && (typeof thread.draft !== 'string' || thread.draft.length > 24000))) {
-      throw new Error('本地会话管理数据损坏，原文件已保留。');
+      throw new Error(t("本地会话管理数据损坏，原文件已保留。"));
     }
     const messageIds = new Set<string>();
     for (let index = 0; index < thread.messages.length; index++) {
@@ -182,19 +197,20 @@ export function parseAppData(text: string): AppData {
         (message.role === 'user' && message.status !== 'complete') ||
         typeof message.content !== 'string' || typeof message.error !== 'string' ||
         ['complete', 'generating', 'stopped', 'failed'].indexOf(message.status) < 0) {
-        throw new Error('本地消息数据损坏，原文件已保留。');
+        throw new Error(t("本地消息数据损坏，原文件已保留。"));
       }
       messageIds.add(message.id);
+      if (message.attachments) { validateAttachments(message.attachments); }
       if (message.modelRef !== undefined) { validateReference(message.modelRef); }
       if (message.steps !== undefined) {
         validateSteps(message.steps);
         if (message.role !== 'assistant' && message.steps.length > 0) {
-          throw new Error('本地工具记录损坏，原文件已保留。');
+          throw new Error(t("本地工具记录损坏，原文件已保留。"));
         }
         interruptTools(message.steps);
         for (const step of message.steps) {
           if (step.steering && (thread.pendingInputs || []).some((input: PendingInput) => input.id === step.steering?.id)) {
-            throw new Error('追加指令同时出现在历史和待发送队列中。');
+            throw new Error(t("追加指令同时出现在历史和待发送队列中。"));
           }
         }
       }
@@ -206,7 +222,7 @@ export function parseAppData(text: string): AppData {
     if (thread.compaction !== undefined) { validateCompaction(thread.compaction, thread); }
   }
   if (data.activeThreadId.length > 0 && !threadIds.has(data.activeThreadId)) {
-    throw new Error('找不到上次打开的会话，原文件已保留。');
+    throw new Error(t("找不到上次打开的会话，原文件已保留。"));
   }
   return data;
 }

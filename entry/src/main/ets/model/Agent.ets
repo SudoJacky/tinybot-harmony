@@ -1,3 +1,6 @@
+import { t } from './I18n';
+import { Attachment } from './Productivity';
+import { RequestUsage } from './Usage';
 import { PendingInput, validatePendingInput } from './PendingInput';
 
 export const MAX_TOOL_CALLS: number = 8;
@@ -19,6 +22,13 @@ export interface ToolCall {
 export interface ToolProperty {
   type: string;
   description: string;
+  properties?: Record<string, ToolProperty>;
+  items?: ToolProperty;
+  required?: string[];
+  additionalProperties?: boolean;
+  enum?: string[];
+  minimum?: number;
+  maximum?: number;
 }
 
 export interface ToolParameters {
@@ -40,6 +50,8 @@ export interface ToolDefinition {
 }
 
 export interface ModelMessage {
+  attachments?: Attachment[];
+  images?: string[];
   role: string;
   content: string;
   toolCalls?: ToolCall[];
@@ -48,6 +60,7 @@ export interface ModelMessage {
 }
 
 export interface ModelTurn {
+  usage?: RequestUsage;
   content: string;
   toolCalls: ToolCall[];
   reasoningContent?: string;
@@ -60,6 +73,7 @@ export interface ToolExecution {
 }
 
 export interface AgentStep {
+  usage?: RequestUsage;
   content: string;
   tools: ToolExecution[];
   reasoningContent?: string;
@@ -73,7 +87,7 @@ export interface AgentTurn {
 
 export function validateToolCalls(calls: ToolCall[]): void {
   if (!Array.isArray(calls) || calls.length > MAX_TOOL_CALLS) {
-    throw new Error('单步工具调用数量超出限制。');
+    throw new Error(t("单步工具调用数量超出限制。"));
   }
   const ids = new Set<string>();
   for (const call of calls) {
@@ -81,7 +95,7 @@ export function validateToolCalls(calls: ToolCall[]): void {
       ids.has(call.id) || call.type !== 'function' || !call.function ||
       typeof call.function.name !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(call.function.name) ||
       typeof call.function.arguments !== 'string' || call.function.arguments.length > MAX_TOOL_ARGUMENTS) {
-      throw new Error('模型返回了无效或重复的工具调用。');
+      throw new Error(t("模型返回了无效或重复的工具调用。"));
     }
     ids.add(call.id);
   }
@@ -123,7 +137,7 @@ export function interruptTools(steps: AgentStep[]): void {
 
 export function validateSteps(steps: AgentStep[]): void {
   if (!Array.isArray(steps) || steps.length > MAX_AGENT_STEPS) {
-    throw new Error('本地工具记录损坏，原文件已保留。');
+    throw new Error(t("本地工具记录损坏，原文件已保留。"));
   }
   const ids = new Set<string>();
   const inputIds = new Set<string>();
@@ -131,18 +145,18 @@ export function validateSteps(steps: AgentStep[]): void {
     if (!step || typeof step.content !== 'string' || !Array.isArray(step.tools) ||
       (step.reasoningContent !== undefined && (typeof step.reasoningContent !== 'string' ||
         step.reasoningContent.length > MAX_REASONING_CONTENT))) {
-      throw new Error('本地工具记录损坏，原文件已保留。');
+      throw new Error(t("本地工具记录损坏，原文件已保留。"));
     }
     if (step.steering !== undefined) {
       validatePendingInput(step.steering);
-      if (step.steering.mode !== 'steer' || inputIds.has(step.steering.id)) { throw new Error('本地追加指令记录损坏。'); }
+      if (step.steering.mode !== 'steer' || inputIds.has(step.steering.id)) { throw new Error(t("本地追加指令记录损坏。")); }
       inputIds.add(step.steering.id);
     }
     validateToolCalls(step.tools.map((tool: ToolExecution) => tool?.call));
     for (const tool of step.tools) {
       if (ids.has(tool.call.id) || typeof tool.output !== 'string' ||
         ['pending', 'running', 'complete', 'failed', 'cancelled', 'interrupted'].indexOf(tool.status) < 0) {
-        throw new Error('本地工具记录损坏，原文件已保留。');
+        throw new Error(t("本地工具记录损坏，原文件已保留。"));
       }
       ids.add(tool.call.id);
     }

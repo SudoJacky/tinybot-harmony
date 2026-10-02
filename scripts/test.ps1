@@ -10,6 +10,8 @@ $hvigorPath = Join-Path $StudioPath 'tools\hvigor\bin\hvigorw.js'
 if (-not (Test-Path -LiteralPath $nodePath) -or -not (Test-Path -LiteralPath $hvigorPath)) {
     throw 'DevEco Studio not found. Set DEVECO_STUDIO_HOME or pass -StudioPath.'
 }
+& $nodePath (Join-Path $projectPath 'scripts/build-locales.cjs') --check
+if ($LASTEXITCODE -ne 0) { throw 'Locale validation failed. Run node scripts/build-locales.cjs after editing translations.' }
 $env:DEVECO_SDK_HOME = Join-Path $StudioPath 'sdk'
 $env:JAVA_HOME = Join-Path $StudioPath 'jbr'
 $startedAt = Get-Date

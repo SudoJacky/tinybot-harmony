@@ -1,3 +1,4 @@
+import { t } from './I18n';
 import { ModelMessage, ToolDefinition } from './Agent';
 import { CompactionData, ModelConfig, ThreadData, requestHistory } from './Conversation';
 
@@ -21,7 +22,7 @@ export function contextSettings(config: ModelConfig): ContextSettings {
   const window = config.contextWindow === undefined ? DEFAULT_CONTEXT_WINDOW : config.contextWindow;
   const autoCompact = config.autoCompact === undefined ? true : config.autoCompact;
   if (!Number.isInteger(window) || window < 8192 || window > 2000000 || typeof autoCompact !== 'boolean') {
-    throw new Error('上下文窗口必须是 8192 至 2000000 的整数，自动压缩设置必须是布尔值。');
+    throw new Error(t("上下文窗口必须是 8192 至 2000000 的整数，自动压缩设置必须是布尔值。"));
   }
   return { window: window, autoCompact: autoCompact, keepRecent: Math.min(8192, Math.floor(window / 4)) };
 }
@@ -40,6 +41,7 @@ export function estimateContextTokens(messages: ModelMessage[], tools: ToolDefin
   let tokens = 3 + (tools.length > 0 ? estimateTextTokens(JSON.stringify(tools)) : 0);
   for (const message of messages) {
     tokens += 8 + estimateTextTokens(message.content) + estimateTextTokens(message.reasoningContent || '');
+    for (const attachment of message.attachments || []) { tokens += attachment.mime === 'image/jpeg' ? 1800 : estimateTextTokens(attachment.text || ''); }
     if (message.toolCalls) { tokens += estimateTextTokens(JSON.stringify(message.toolCalls)); }
     if (message.toolCallId) { tokens += estimateTextTokens(message.toolCallId); }
   }
@@ -50,7 +52,7 @@ export function threadHistory(thread: ThreadData, instructions: string): ModelMe
   let messages = thread.messages;
   if (thread.compaction) {
     const index = messages.findIndex((message) => message.id === thread.compaction?.firstKeptMessageId);
-    if (index < 0 || index % 2 !== 0) { throw new Error('上下文摘要的保留边界无效，原历史已保留。'); }
+    if (index < 0 || index % 2 !== 0) { throw new Error(t("上下文摘要的保留边界无效，原历史已保留。")); }
     messages = messages.slice(index);
   }
   // Keep the current prompt; its active reply is not history yet.
@@ -71,7 +73,7 @@ export function threadHistory(thread: ThreadData, instructions: string): ModelMe
 export function prepareCompaction(thread: ThreadData, settings: ContextSettings): CompactionPlan | undefined {
   const messages = thread.messages;
   const start = thread.compaction ? messages.findIndex((message) => message.id === thread.compaction?.firstKeptMessageId) : 0;
-  if (start < 0 || start % 2 !== 0) { throw new Error('上下文摘要的保留边界无效。'); }
+  if (start < 0 || start % 2 !== 0) { throw new Error(t("上下文摘要的保留边界无效。")); }
   let end = messages.length - messages.length % 2;
   if (end >= 2 && messages[end - 1].status === 'generating') { end -= 2; }
   if (end - start < 4) { return undefined; }
@@ -93,8 +95,8 @@ export function validateCompaction(compaction: CompactionData, thread: ThreadDat
     compaction.summary.length > 32768 || typeof compaction.firstKeptMessageId !== 'string' ||
     !Number.isInteger(compaction.tokensBefore) || compaction.tokensBefore < 0 ||
     !Number.isFinite(compaction.createdAt) || compaction.createdAt < 0) {
-    throw new Error('本地上下文摘要损坏，原文件已保留。');
+    throw new Error(t("本地上下文摘要损坏，原文件已保留。"));
   }
   const index = thread.messages.findIndex((message) => message.id === compaction.firstKeptMessageId);
-  if (index < 0 || index % 2 !== 0) { throw new Error('本地上下文摘要边界损坏，原文件已保留。'); }
+  if (index < 0 || index % 2 !== 0) { throw new Error(t("本地上下文摘要边界损坏，原文件已保留。")); }
 }

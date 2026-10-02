@@ -1,3 +1,6 @@
+import { t } from '../model/I18n';
+import { TeamMember, TeamPlan, TeamRun } from '../model/Team';
+import { Attachment, ProductivityData, defaultProductivity, expandTemplate } from '../model/Productivity';
 import { AppData, ModelConfig, defaultConfig, copyModelConfig } from '../model/Conversation';
 import { contextSettings, estimateTextTokens } from '../model/ConversationContext';
 import { ModelChoice, ProviderProfile, availableModels } from '../model/ProviderProfiles';
@@ -28,7 +31,14 @@ export class SettingsViewModel {
 // ArkUI projection and editor drafts only. Durable data and execution belong to SessionService.
 @Observed
 export class ChatViewModel {
+  productivity: ProductivityData = defaultProductivity();
   ready: boolean = false;
+  searchQuery: string = '';
+  searchMessageId: string = '';
+  async openMessage(threadId: string, messageId: string, query: string = ''): Promise<boolean> {
+    if (!await this.selectThread(threadId)) { return false; }
+    this.visibleMessageCount = this.active.messages.length; this.searchQuery = query; this.searchMessageId = messageId; return true;
+  }
   loading: boolean = false;
   busy: boolean = false;
   generating: boolean = false;
@@ -47,16 +57,25 @@ export class ChatViewModel {
   skillEditor: SkillEditorViewModel = new SkillEditorViewModel();
   extensions: ExtensionSettings = defaultExtensions();
   providerProfiles: ProviderProfile[] = [];
-  providerPresets: ProviderInfo[] = builtinProviderInfos();
+  get providerPresets(): ProviderInfo[] { return builtinProviderInfos(); }
   private session?: SessionService;
   private phase: SessionPhase = 'idle';
+  teams: TeamRun[] = [];
+  setTeamEnabled(enabled: boolean): Promise<boolean> { return this.requireSession().setTeamEnabled(enabled); }
+  get teamBusy(): boolean { return this.phase === 'team'; }
+  prepareTeam(goal: string, members: TeamMember[], concurrency: number): Promise<boolean> { return this.requireSession().prepareTeam(goal, members, concurrency); }
+  reviseTeam(id: string, revision: number, plan: TeamPlan): Promise<boolean> { return this.requireSession().reviseTeam(id, revision, plan); }
+  executeTeam(id: string, revision: number): Promise<void> { return this.requireSession().executeTeam(id, revision); }
+  retryTeamTask(id: string, revision: number, taskId: string): Promise<boolean> { return this.requireSession().retryTeamTask(id, revision, taskId); }
+  pauseTeam(): void { this.requireSession().pauseTeam(); }
+  stopTeam(): void { this.requireSession().stopTeam(); }
   private selectedConfig: ModelConfig = defaultConfig();
   private draftTimer: number = -1;
   private onOutput: () => void = () => {};
 
   async initialize(session: SessionService): Promise<void> {
     if (!this.session) { this.session = session; session.subscribe((event: SessionEvent) => this.project(event)); }
-    if (this.session !== session) { throw new Error('当前界面已经绑定会话服务。'); }
+    if (this.session !== session) { throw new Error(t("当前界面已经绑定会话服务。")); }
     await session.initialize();
   }
 
@@ -69,6 +88,14 @@ export class ChatViewModel {
     if (event.kind === 'message' && event.message) {
       this.threads.find((thread) => thread.id === event.threadId)?.messages.find((message) => message.id === event.message?.id)?.update(event.message);
     }
+    if (event.kind === 'reasoning') {
+      const message = this.threads.find((thread) => thread.id === event.threadId)?.messages.find((item) => item.id === event.messageId);
+      if (message) {
+        const step = message.stepViews[event.step || 0];
+        if (step) { step.reasoningContent = event.stepContent || ''; }
+        message.reasoningContent = message.stepViews.map((item) => item.reasoningContent).filter((text) => text.length > 0).join('\n\n');
+      }
+    }
     if (event.kind === 'text') {
       const message = this.threads.find((thread) => thread.id === event.threadId)?.messages.find((item) => item.id === event.messageId);
       if (message) {
@@ -77,7 +104,7 @@ export class ChatViewModel {
         if (step) { step.content = event.stepContent || ''; }
       }
     }
-    if (event.kind === 'text' || event.kind === 'message' || event.kind === 'snapshot') { this.onOutput(); }
+    if (['text', 'reasoning', 'message', 'snapshot'].includes(event.kind)) { this.onOutput(); }
   }
   private projectState(state: SessionState): void {
     this.phase = state.phase;
@@ -87,6 +114,8 @@ export class ChatViewModel {
     this.contextStatus = state.contextStatus; this.contextTokens = state.contextTokens;
   }
   private projectData(data: AppData): void {
+    this.teams = data.threads.find((thread) => thread.id === data.activeThreadId)?.teams || [];
+    this.productivity = data.productivity || defaultProductivity();
     this.config = data.config; this.extensions = data.extensions || defaultExtensions(); this.providerProfiles = data.providerProfiles || [];
     const existing = new Map<string, ThreadViewModel>();
     for (const thread of this.threads) { existing.set(thread.id, thread); }
@@ -97,7 +126,7 @@ export class ChatViewModel {
     });
     const active = this.threads.find((thread) => thread.id === data.activeThreadId);
     if (active) {
-      if (this.active.id !== active.id) { this.visibleMessageCount = 60; }
+      if (this.active.id !== active.id) { this.visibleMessageCount = 60; this.searchQuery = ''; this.searchMessageId = ''; }
       this.active = active; this.draft = active.draft;
       this.selectedConfig = this.requireSession().currentConfig;
     }
@@ -108,19 +137,34 @@ export class ChatViewModel {
   get modelChoices(): ModelChoice[] { return availableModels(this.providerProfiles); }
   get currentModelLabel(): string {
     const ref = this.active.modelRef;
-    if (!ref) { return '选择模型'; }
-    const name = this.providerProfiles.find((item) => item.id === ref.providerId)?.name || '已删除服务';
-    return name + ' · ' + ref.modelId + (this.configured ? '' : ' · 不可用');
+    if (!ref) { return t('选择模型'); }
+    const name = this.providerProfiles.find((item) => item.id === ref.providerId)?.name || t('已删除服务');
+    return name + ' · ' + ref.modelId + (this.configured ? '' : t(' · 不可用'));
   }
   get visibleMessages(): MessageViewModel[] { return this.active.messages.slice(-this.visibleMessageCount); }
   get contextUsed(): number { return this.contextTokens + estimateTextTokens(this.draft); }
   get contextWindow(): number { return contextSettings(this.currentConfig).window; }
-  get contextLabel(): string { return '上下文约 ' + this.contextUsed + ' / ' + this.contextWindow + ' tokens'; }
+  get contextLabel(): string { return t('上下文约 {0} / {1} tokens', [this.contextUsed, this.contextWindow]); }
   get canQueueInput(): boolean {
     return this.ready && !this.active.archived && this.saveError.length === 0 && (this.phase === 'idle' || this.phase === 'running');
   }
   filteredThreads(query: string, archived: boolean): ThreadViewModel[] { return matchingThreads(this.threads, query, archived) as ThreadViewModel[]; }
 
+  saveProductivity(value: ProductivityData): Promise<boolean> { return this.requireSession().saveProductivity(value); }
+  proposeMemory(messageId: string): Promise<string[]> { return this.requireSession().proposeMemory(messageId); }
+  cancelMemoryDraft(): void { this.requireSession().cancelMemoryDraft(); }
+  saveMemoryDraft(threadId: string, messageId: string, items: string[], global: boolean): Promise<number> { return this.requireSession().saveMemoryDraft(threadId, messageId, items, global); }
+  exportSnapshot(): AppData { return this.requireSession().snapshot(); }
+  importSnapshot(data: AppData): Promise<boolean> { return this.requireSession().importSnapshot(data); }
+  setThreadMcp(id: string, enabled: boolean): Promise<boolean> { return this.requireSession().setThreadMcp(id, enabled); }
+  setAttachments(items: Attachment[]): Promise<boolean> { return this.requireSession().setAttachments(items); }
+  forkThread(messageId: string = ''): Promise<boolean> { return this.requireSession().forkThread(messageId); }
+  useTemplate(id: string): void {
+    try {
+      const item = this.productivity.templates.find((item) => item.id === id);
+      if (item) { this.setDraft(expandTemplate(item, this.draft)); }
+    } catch (error) { this.error = (error as Error).message; }
+  }
   newThread(): Promise<boolean> { return this.requireSession().newThread(); }
   selectThread(id: string): Promise<boolean> { return this.requireSession().selectThread(id); }
   deleteThread(id: string): Promise<boolean> { return this.requireSession().deleteThread(id); }
@@ -134,6 +178,7 @@ export class ChatViewModel {
   removePendingInput(id: string, edit: boolean = false): Promise<void> { return this.requireSession().removePendingInput(id, edit); }
   compactHistory(): Promise<void> { return this.requireSession().compactHistory(); }
   retrySave(): Promise<void> { return this.requireSession().retrySave(); }
+  resumeForm(messageId: string, callId: string): Promise<void> { return this.requireSession().resumeForm(messageId, callId); }
 
   setDraft(text: string): void {
     if (!this.ready) { return; }
@@ -156,7 +201,7 @@ export class ChatViewModel {
   async stop(): Promise<void> { if (this.session) { await this.session.stop(); } }
   retryPrompt(): void {
     if (!this.requireSession().canMutate) { return; }
-    if (this.active.messages.length >= 2) { this.setDraft(this.active.messages[this.active.messages.length - 2].content); }
+    if (this.active.messages.length >= 2) { this.setDraft(this.active.messages[this.active.messages.length - 2].content); this.setAttachments(this.active.messages[this.active.messages.length - 2].attachments); }
   }
 
   openSettings(): void { this.settings.reset(this.config, this.extensions.webEnabled); }
@@ -167,7 +212,7 @@ export class ChatViewModel {
   beginProvider(presetId: string = '', profileId: string = ''): void {
     if (!this.requireSession().canMutate) { return; }
     const profile = this.providerProfiles.find((item) => item.id === profileId);
-    if (profileId.length > 0 && !profile) { throw new Error('模型服务不存在。'); }
+    if (profileId.length > 0 && !profile) { throw new Error(t("模型服务不存在。")); }
     this.providerEditor.reset(profile, this.providerPresets.find((preset) => preset.id === presetId));
   }
   async saveProvider(): Promise<boolean> {
@@ -179,12 +224,12 @@ export class ChatViewModel {
   beginSkill(name: string = ''): void {
     if (!this.requireSession().canMutate) { return; }
     const skill = this.extensions.skills.find((item: SkillData) => item.name === name);
-    if (name.length > 0 && !skill) { throw new Error('Skill 不存在。'); }
+    if (name.length > 0 && !skill) { throw new Error(t("Skill 不存在。")); }
     this.skillEditor.reset(skill);
   }
   async saveSkill(): Promise<boolean> {
     if (this.skillEditor.referencePath.trim().length > 0 || this.skillEditor.referenceText.length > 0) {
-      this.skillEditor.error = '下方还有未添加的参考内容，请先点击“添加参考文件”或清空草稿。'; return false;
+      this.skillEditor.error = t('下方还有未添加的参考内容，请先点击“添加参考文件”或清空草稿。'); return false;
     }
     const saved = await this.requireSession().saveSkill(this.skillEditor.originalName, this.skillEditor.document, this.skillEditor.files);
     this.skillEditor.error = saved ? '' : this.error; return saved;
@@ -194,7 +239,7 @@ export class ChatViewModel {
     this.setDraft('/skill:' + name + ' ' + this.draft.replace(/^\/skill:[^\s]+\s*/, '')); return true;
   }
   private requireSession(): SessionService {
-    if (!this.session) { throw new Error('会话服务尚未就绪。'); }
+    if (!this.session) { throw new Error(t("会话服务尚未就绪。")); }
     return this.session;
   }
 }

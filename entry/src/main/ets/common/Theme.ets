@@ -1,4 +1,38 @@
+import { t, getLocale } from '../model/I18n';
+import { common } from '@kit.AbilityKit';
+import { curves, window } from '@kit.ArkUI';
 // Shared design tokens and control styles for the phone UI. Colors live in resources (light/dark).
+
+// Motion tokens mirrored from the desktop workbench so both clients move alike. The system
+// "animation scale" setting (including turning animations off) applies to every curve below.
+export class Motion {
+  static readonly fast: number = 160;
+  static readonly medium: number = 220;
+  static readonly drawer: number = 280;
+  // Settles quickly without overshoot; the default for state changes.
+  static readonly standard: ICurve = curves.cubicBezierCurve(0.2, 0, 0, 1);
+  // Sheet-like panels that follow a finger.
+  static readonly drawerCurve: ICurve = curves.cubicBezierCurve(0.32, 0.72, 0, 1);
+  // Content entering the screen: fast start, long soft landing.
+  static readonly enter: ICurve = curves.cubicBezierCurve(0.16, 1, 0.3, 1);
+  // Sliding selection thumbs (desktop uses a framer spring with the same parameters).
+  static readonly thumb: ICurve = curves.interpolatingSpring(0, 0.9, 170, 21.5);
+  // Press feedback: the desktop scales pressed controls to 0.97.
+  static readonly press: ClickEffect = { level: ClickEffectLevel.LIGHT, scale: 0.97 };
+  static readonly pressSmall: ClickEffect = { level: ClickEffectLevel.LIGHT, scale: 0.92 };
+
+  // Fade up into place; index staggers siblings 40 ms apart (desktop list-enter).
+  static rise(index: number = 0, distance: number = 8): TransitionEffect {
+    return TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: distance }))
+      .animation({ duration: Motion.medium, curve: Motion.enter, delay: index * 40 });
+  }
+
+  // Pops in from a slightly smaller size, for floating controls.
+  static pop(): TransitionEffect {
+    return TransitionEffect.OPACITY.combine(TransitionEffect.scale({ x: 0.8, y: 0.8 }))
+      .animation({ duration: Motion.fast, curve: Motion.standard });
+  }
+}
 
 export class Space {
   static readonly xs: number = 4;
@@ -110,16 +144,44 @@ export function shortTime(time: number, now: number = Date.now()): string {
   const date = new Date(time);
   const today = startOfDay(now);
   if (time >= today) { return pad(date.getHours()) + ':' + pad(date.getMinutes()); }
-  if (time >= today - DAY) { return '昨天'; }
-  if (date.getFullYear() === new Date(now).getFullYear()) { return (date.getMonth() + 1) + '月' + date.getDate() + '日'; }
+  if (time >= today - DAY) { return t("昨天"); }
+  if (date.getFullYear() === new Date(now).getFullYear()) {
+    return getLocale() === 'zh-CN' ? t('{0}月{1}日', [date.getMonth() + 1, date.getDate()]) :
+      date.toLocaleDateString('en', { month: 'short', day: 'numeric' });
+  }
   return date.getFullYear() + '/' + (date.getMonth() + 1) + '/' + date.getDate();
 }
 
 export function dayGroup(time: number, now: number = Date.now()): string {
   const today = startOfDay(now);
-  if (time >= today) { return '今天'; }
-  if (time >= today - DAY) { return '昨天'; }
-  if (time >= today - 7 * DAY) { return '7 天内'; }
-  if (time >= today - 30 * DAY) { return '30 天内'; }
-  return '更早';
+  if (time >= today) { return t("今天"); }
+  if (time >= today - DAY) { return t("昨天"); }
+  if (time >= today - 7 * DAY) { return t("7 天内"); }
+  if (time >= today - 30 * DAY) { return t("30 天内"); }
+  return t("更早");
+}
+
+export function fileSize(bytes: number): string {
+  if (bytes < 1024) { return bytes + ' B'; }
+  if (bytes < 1024 * 1024) { return (bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0) + ' KB'; }
+  return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+// Token counts and other large integers: 980 / 12.4K / 3.1M.
+export function compactNumber(value: number): string {
+  if (value < 1000) { return Math.round(value).toString(); }
+  if (value < 1000000) { return (value / 1000).toFixed(value < 10000 ? 1 : 0) + 'K'; }
+  return (value / 1000000).toFixed(1) + 'M';
+}
+
+// Full-screen modals (bindContentCover) are laid out edge to edge; read the system bar insets in vp.
+export async function systemInsets(ui: UIContext): Promise<number[]> {
+  try {
+    const host = await window.getLastWindow(ui.getHostContext() as common.UIAbilityContext);
+    const area = host.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
+    const indicator = host.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR);
+    return [ui.px2vp(area.topRect.height), ui.px2vp(indicator.bottomRect.height)];
+  } catch (_) {
+    return [36, 24];
+  }
 }

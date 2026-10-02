@@ -1,0 +1,71 @@
+Tinybot 0.1.0 · 发布 / 云测试准备说明
+准备日期：2026-10-02
+
+一、这次准备了什么
+
+packages/Tinybot-0.1.0-10000-release-UNSIGNED.app：Release 模式完整应用包，等待云签名。
+packages/Tinybot-0.1.0-10000-release-UNSIGNED.hap：同一 APP 内的 entry 模块，供检查或后续签名使用。
+symbols/app-symbol.zip：本版本符号表，供 DevEco Studio 上传及问题定位。
+assets/tinybot-icon-1024.png：1024×1024 PNG 商店图标，来自软件包实际使用的图标。
+screenshots/：本机真实界面截图；上传前按 AGC 当前字段要求选择、预览。
+STORE-LISTING.txt：应用介绍、版本说明和待填字段。
+CLOUD-TEST.txt：云测试环境选择、功能验证步骤、审核体验说明。
+PRIVACY-DRAFT.txt：按当前实现整理的隐私政策草稿，含待补充项，不能原样发布。
+RELEASE-GAPS.txt：正式提交前仍需完成的项目。
+package-info.json、SHA256SUMS.txt：从最终包读取的配置、文件大小和校验码。
+licenses/：工程 Apache-2.0 与 Tinybot 品牌资源的 MIT 许可说明。
+
+二、软件包当前状态（务必区分）
+
+包名：com.sudojacky.tinybot
+应用名称：Tinybot
+版本：0.1.0，versionCode=10000
+设备类型：phone
+最低 / 目标 API：26；当前使用 SDK 26.0.0.105 Release。
+构建模式：release，包内 app.debug=false。
+本次交付：未签名，不是可直接安装或直接在 AGC 网页提交的最终发布签名包。
+
+原工程的自动签名为 debug Profile，仅授权一台本机测试设备。
+即使采用 Release 编译模式，调试证书也不会自动变成发布证书。
+因此请使用下面的云签名流程，不要拿 entry-default-signed.hap 当作云测试或上架发布包。
+交付目录不包含私钥、密钥库、签名密码、模型 API Key 或手机中的对话数据。
+
+三、推荐：在 DevEco Studio 26 中上传并使用云管理证书
+
+1. 打开 D:\Study\coding\tinybot-harmony。
+2. 使用已登录的个人开发者账号，确认 AGC 应用绑定的包名为 com.sudojacky.tinybot。
+3. 菜单 Build > Upload Product，选择 default 产品的 Release APP。
+   原始构建产物位于 build\outputs\default\tinybot-harmony-default-unsigned.app。
+   该上传入口要求从工程 build/outputs 下选择包；不要只保留交付目录中的副本。
+4. 仅测试选择 Testing Only；准备兼用于测试与发布选择 AppGallery Connect。
+5. 检查账号、团队、应用名称、包名、分类、设备类型和语言。
+   未关联应用时，在界面中关联已有的 com.sudojacky.tinybot，避免误建另一个包名。
+6. 使用云管理签名；Custom 模式对应 Automatically manage signing。
+   DevEco Studio 会重新签名，生成后缀 re-signed.app 的包；上传符号表。
+7. 检查最终包信息后再点击 Upload；到 AGC 确认上传、合法性检测与测试结果。
+8. 在 AGC 云测试中使用已重新签名并通过校验的软件包。
+   如果某入口要求本地上传，选择这一步产生的发布签名包，而不是本资料包的 UNSIGNED 文件。
+
+本次仅完成本地准备，没有替你在 AGC 创建应用、申请云证书或上传软件包。
+如果设备池没有 API 26 手机，此版本无法安装；需等待适配设备或另行评估降低最低 API，不能只修改清单数字。
+如果 AGC 已存在 versionCode=10000 的版本，先增加版本号重新构建，或明确使用上传向导的 Manage Build Version。
+上传向导更改构建号或重新签名后，最终文件的哈希值会变化，需以最终包重新记录校验信息。
+
+四、以后如何重新准备
+
+在工程根目录运行：
+  powershell -ExecutionPolicy Bypass -File scripts\prepare-distribution.ps1
+
+脚本会使用 devecocli 先检查 ArkTS，再构建 release APP；校验包名、版本、debug 标志和包内容，生成独立目录和 ZIP。
+已有相同输出目录时脚本会停止，避免覆盖。可通过 -OutputDirectory 指定新的输出目录。
+只打包已经构建的产物时可使用 -SkipBuild；脚本仍会检查包结构，但不会保证产物包含最新源代码。
+
+五、官方依据
+
+发布应用（26.0.0 起支持上传时云签名、Testing Only / AppGallery Connect）：
+https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-publish-app
+提交 HarmonyOS 应用（测试、资料与资质）：
+https://developer.huawei.com/consumer/cn/app/submit
+在应用市场分发（软件包检测、邀请/公开测试、隐私声明）：
+https://developer.huawei.com/consumer/cn/appgallery/devstart/
+以当前 AGC 控制台及上述官方文档要求为准。本资料不表示已经通过华为审核。

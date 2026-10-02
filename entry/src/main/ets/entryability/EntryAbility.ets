@@ -1,3 +1,6 @@
+import { ShareInbox } from '../services/NativeActions';
+import { LanguagePreferences } from '../services/LanguagePreferences';
+import { McpOAuth } from '../services/McpOAuth';
 /*
  * Copyright (c) 2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -33,16 +36,24 @@ export default class EntryAbility extends UIAbility {
   }
 
   onConfigurationUpdate(_config: Configuration): void {
+    LanguagePreferences.refresh();
     this.applySystemBars();
   }
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    LanguagePreferences.initialize(this.context);
+    ShareInbox.receive(want, this.context.getApplicationContext().filesDir);
     try {
       this.context.getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
     } catch (err) {
       hilog.error(DOMAIN, 'testTag', 'Failed to set colorMode. Cause: %{public}s', JSON.stringify(err));
     }
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
+  }
+
+  onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+    McpOAuth.receive(want.uri || '');
+    ShareInbox.receive(want, this.context.getApplicationContext().filesDir);
   }
 
   onDestroy(): void {
@@ -70,6 +81,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onForeground(): void {
+    LanguagePreferences.refresh();
     // Ability has brought to foreground
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onForeground');
   }

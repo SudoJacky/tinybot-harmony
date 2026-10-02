@@ -1,8 +1,9 @@
+import { t } from './I18n';
 import { ThreadData } from './Conversation';
 
 export function threadTitle(value: string): string {
   const title = value.trim();
-  if (title.length === 0 || title.length > 80) { throw new Error('对话名称需要 1 至 80 个字符。'); }
+  if (title.length === 0 || title.length > 80) { throw new Error(t("对话名称需要 1 至 80 个字符。")); }
   return title;
 }
 

@@ -1,3 +1,4 @@
+import { t } from '../model/I18n';
 import { AgentStep, AgentTurn, MAX_AGENT_STEPS, ModelMessage, ToolCall, ToolDefinition, ToolExecution,
   interruptTools, stepMessages, toolError, validateToolCalls } from '../model/Agent';
 import { Cancellation, RunCancelledError } from './Cancellation';
@@ -13,9 +14,10 @@ export interface SteeringInput {
 export interface AgentTools {
   definitions(): ToolDefinition[];
   execute(call: ToolCall, cancellation: Cancellation): Promise<string>;
+  beforeFinish?(cancellation: Cancellation): Promise<string | undefined>;
 }
 
-export type LoopEventType = 'step_start' | 'text_delta' | 'model_end' | 'tool_start' | 'tool_end' | 'step_end';
+export type LoopEventType = 'step_start' | 'text_delta' | 'reasoning_delta' | 'model_end' | 'tool_start' | 'tool_end' | 'step_end';
 
 export interface LoopEvent {
   type: LoopEventType;
@@ -44,7 +46,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
   observer: LoopObserver): Promise<void> {
   const limit = context.maxSteps;
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_AGENT_STEPS) {
-    throw new Error(`执行步数必须在 1 至 ${MAX_AGENT_STEPS} 之间。`);
+    throw new Error(t("执行步数必须在 1 至 {0} 之间。", [MAX_AGENT_STEPS]));
   }
   const messages = context.messages.slice();
   const definitions = context.tools.definitions();
@@ -56,12 +58,12 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
       const pending = observer.steering?.peek();
       if (pending) {
         validatePendingInput(pending);
-        if (pending.mode !== 'steer') { throw new Error('本轮只能接收追加指令。'); }
+        if (pending.mode !== 'steer') { throw new Error(t("本轮只能接收追加指令。")); }
       }
       const input: PendingInput | undefined = pending ? { id: pending.id, mode: pending.mode, text: pending.text } : undefined;
       const requestMessages: ModelMessage[] = input ? messages.concat([{ role: 'user', content: input.text }]) : messages;
       if (context.contextWindow !== undefined && estimateContextTokens(requestMessages, definitions) > context.contextWindow - OUTPUT_RESERVE) {
-        throw new Error('本轮内容超过上下文预算，执行已停止。已完成的工具结果已保留；请压缩历史、缩小任务或提高窗口设置。');
+        throw new Error(t("本轮内容超过上下文预算，执行已停止。已完成的工具结果已保留；请压缩历史、缩小任务或提高窗口设置。"));
       }
       const step: AgentStep = { content: '', tools: [], steering: input };
       turn.steps = turn.steps.concat([step]);
@@ -84,17 +86,23 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
         step.content += text;
         turn.content += text;
         observer.event({ type: 'text_delta', step: round, delta: text });
-      }, context.contextWindow === undefined ? undefined : { maxOutputTokens: OUTPUT_RESERVE })
+      }, { maxOutputTokens: context.contextWindow === undefined ? undefined : OUTPUT_RESERVE,
+        onReasoning: (text: string) => {
+          if (!acceptingText || cancellation.cancelled) { return; }
+          step.reasoningContent = (step.reasoningContent || '') + text;
+          observer.event({ type: 'reasoning_delta', step: round, delta: text });
+        } })
         .finally(() => { acceptingText = false; });
       cancellation.check();
       // The provider's final message is authoritative even when it emitted no deltas.
       step.content = response.content;
       step.reasoningContent = response.reasoningContent;
+      step.usage = response.usage;
       turn.content = turn.steps.map((item: AgentStep) => item.content).filter((content: string) => content.length > 0).join('\n\n');
       validateToolCalls(response.toolCalls);
       for (const call of response.toolCalls) {
         if (seen.has(call.id)) {
-          throw new Error('模型重复使用了工具调用 ID，已停止本轮执行。');
+          throw new Error(t("模型重复使用了工具调用 ID，已停止本轮执行。"));
         }
         seen.add(call.id);
       }
@@ -104,8 +112,15 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
       observer.event({ type: 'model_end', step: round });
       if (step.tools.length === 0) {
         observer.event({ type: 'step_end', step: round });
+        const continuation = await context.tools.beforeFinish?.(cancellation);
+        cancellation.check();
+        if (continuation) {
+          if (round === limit - 1) { throw new Error(t("团队结果已保存，但本轮达到模型调用上限，请继续汇总。")); }
+          messages.push(...stepMessages(step, false), { role: 'user', content: continuation });
+          continue;
+        }
         if (!observer.steering?.peek()) { return; }
-        if (round === limit - 1) { throw new Error('本轮已达到模型调用上限，待发送指令已保留。请继续队列。'); }
+        if (round === limit - 1) { throw new Error(t("本轮已达到模型调用上限，待发送指令已保留。请继续队列。")); }
         messages.push(...stepMessages(step, false));
         continue;
       }
@@ -114,7 +129,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
           tool.status = 'cancelled';
           tool.output = toolError(`已达到本轮 ${limit} 次模型调用上限，此工具未执行。`);
         }
-        throw new Error(`已达到本轮 ${limit} 次模型调用上限，执行已停止。你可以继续发送指令。`);
+        throw new Error(t("已达到本轮 {0} 次模型调用上限，执行已停止。你可以继续发送指令。", [limit]));
       }
       // Tools run sequentially, including multiple calls in one provider response.
       for (const tool of step.tools) {

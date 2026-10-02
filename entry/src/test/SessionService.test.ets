@@ -10,8 +10,14 @@ import { Cancellation, RunCancelledError } from '../main/ets/services/Cancellati
 import { CredentialVault, ProviderDraft } from '../main/ets/services/ProfileSettings';
 import { SessionEvent, SessionRepository, SessionResources } from '../main/ets/services/SessionContracts';
 import { SessionService } from '../main/ets/services/SessionService';
+import { Attachment, defaultProductivity } from '../main/ets/model/Productivity';
 import { ModelProvider, ProviderRequest } from '../main/ets/services/providers/Provider';
 import { ProviderRegistry } from '../main/ets/services/providers/ProviderRegistry';
+import { defaultAssistantOptions } from '../main/ets/model/AssistantOptions';
+import { InteractionTools } from '../main/ets/services/InteractionTools';
+import { ToolApproval } from '../main/ets/services/ToolApproval';
+import { InputForm } from '../main/ets/model/RichArtifacts';
+import { TeamPlan, defaultTeamMembers, teamPlan } from '../main/ets/model/Team';
 
 class Gate {
   private release: () => void = () => {};
@@ -68,12 +74,13 @@ class EmptyTools implements AgentTools {
   async execute(_call: ToolCall, cancellation: Cancellation): Promise<string> { cancellation.check(); return 'ok'; }
 }
 class Resources implements SessionResources {
+  agentTools: AgentTools = new EmptyTools();
   ids: number = 100;
   workspaces: string[] = [];
   errors: string[] = [];
   createId(): string { return 'id-' + ++this.ids; }
   async ensureWorkspace(id: string): Promise<void> { this.workspaces.push(id); }
-  tools(_id: string, _extensions: ExtensionSettings, _selected: string): AgentTools { return new EmptyTools(); }
+  tools(_id: string, _extensions: ExtensionSettings, _selected: string): AgentTools { return this.agentTools; }
   configureProviders(_profiles: ProviderProfile[]): void {}
   reportError(message: string): void { this.errors.push(message); }
 }
@@ -119,6 +126,196 @@ function historySeed(): AppData {
 
 export default function sessionServiceTests(): void {
   describe('SessionService', () => {
+    it('slashTeamEnablesModeWithoutCallingModelUntilThereIsATask', 0, async () => {
+      const f = new Fixture(); await f.session.initialize(); f.session.setDraft('/team'); await f.session.send();
+      expect(f.provider.requests.length).assertEqual(0); expect(active(await f.repository.load()).teamEnabled).assertTrue();
+      expect(active(f.session.snapshot()).draft).assertEqual('');
+      f.session.setDraft('简单回答即可'); await f.session.send();
+      expect(f.provider.requests[0].tools.some((tool) => tool.function.name === 'team_recruit')).assertTrue();
+      expect(await f.session.setTeamEnabled(false)).assertTrue(); f.session.setDraft('普通模式'); await f.session.send();
+      expect(f.provider.requests[1].tools.some((tool) => tool.function.name === 'team_recruit')).assertFalse();
+    });
+    it('chatCoordinatorRecruitsAndIntegratesWithoutManualPlanOrSecondTurn', 0, async () => {
+      const f = new Fixture(); await f.session.initialize(); let parentRequests = 0;
+      f.provider.respond = async (index) => {
+        const request = f.provider.requests[index];
+        if (request.tools.some((tool) => tool.function.name === 'team_complete_task')) {
+          expect(request.tools.some((tool) => tool.function.name === 'team_recruit')).assertFalse();
+          if (request.messages.some((message) => message.role === 'tool')) { return reply('内部草稿'); }
+          return { content: '', toolCalls: [{ id: 'handoff', type: 'function', function: { name: 'team_complete_task', arguments: '{"summary":"研究证据已整理","unresolved":[],"artifacts":[]}' } }] };
+        }
+        parentRequests++;
+        if (parentRequests === 1) { return { content: '我来招募研究员。', toolCalls: [{ id: 'recruit', type: 'function', function: { name: 'team_recruit', arguments: '{"goal":"研究","members":[{"id":"researcher","displayName":"研究员","instructions":"查证"}],"tasks":[{"id":"facts","title":"整理证据","memberId":"researcher","instructions":"整理后交接","dependencies":[]}]}' } }] }; }
+        // The finish guard must turn a premature answer into integration inside this same turn.
+        if (parentRequests === 2) { return reply('正在等待。'); }
+        expect(JSON.stringify(request.messages).includes('研究证据已整理')).assertTrue(); return reply('根据员工证据，最终结论如下。');
+      };
+      f.session.setDraft('/team 请招募员工研究'); await f.session.send();
+      const thread = active(f.session.snapshot());
+      expect(thread.messages.length).assertEqual(2); expect(thread.messages[0].content).assertEqual('请招募员工研究');
+      expect(thread.messages[1].status).assertEqual('complete'); expect(thread.messages[1].content.includes('最终结论')).assertTrue();
+      expect(thread.teams![0].status).assertEqual('completed'); expect(thread.teams![0].ownerMessageId).assertEqual(thread.messages[1].id);
+      expect(active(await f.repository.load()).teams![0].tasks[0].attempts[0].handoff?.summary).assertEqual('研究证据已整理');
+    });
+    it('teamPlansRequireConfirmationAndRejectStaleEdits', 0, async () => {
+      const f = new Fixture(); await f.session.initialize();
+      const plan: TeamPlan = { tasks: [{ id: 'final', title: '报告', memberId: 'editor', instructions: '输出报告', dependencies: [] }], finalTaskId: 'final' };
+      f.provider.respond = async () => reply(JSON.stringify(plan));
+      expect(await f.session.prepareTeam('测试团队', defaultTeamMembers(), 2)).assertTrue();
+      const run = f.session.snapshot().threads[0].teams![0];
+      expect(f.provider.requests.length).assertEqual(1); expect(run.status).assertEqual('planned');
+      expect(f.provider.requests[0].tools.length).assertEqual(0);
+      expect(await f.session.reviseTeam(run.id, run.revision + 1, plan)).assertFalse();
+      expect(f.session.state.error.includes('更新')).assertTrue();
+      f.provider.respond = async () => reply('报告完成'); await f.session.executeTeam(run.id, run.revision);
+      const completed = f.session.snapshot().threads[0].teams![0]; expect(completed.status).assertEqual('completed');
+      const changed = teamPlan(completed); changed.tasks[0].instructions = '改动已执行任务';
+      expect(await f.session.reviseTeam(run.id, completed.revision, changed)).assertFalse();
+      expect((await f.repository.load()).threads[0].teams![0].tasks[0].attempts[0].turn.content).assertEqual('报告完成');
+    });
+    it('teamPlanningFailureDoesNotCreateRunnablePlan', 0, async () => {
+      const f = new Fixture(); await f.session.initialize(); f.provider.respond = async () => reply('not JSON');
+      expect(await f.session.prepareTeam('测试团队', defaultTeamMembers(), 2)).assertFalse();
+      expect((f.session.snapshot().threads[0].teams || []).length).assertEqual(0); expect(f.session.canMutate).assertTrue();
+    });
+    it('teamExecutionLocksChatAndCanBeStoppedFromSession', 0, async () => {
+      const f = new Fixture(); await f.session.initialize();
+      const plan: TeamPlan = { tasks: [{ id: 'final', title: '报告', memberId: 'editor', instructions: '输出报告', dependencies: [] }], finalTaskId: 'final' };
+      f.provider.respond = async () => reply(JSON.stringify(plan)); await f.session.prepareTeam('测试团队', defaultTeamMembers(), 1);
+      const run = f.session.snapshot().threads[0].teams![0]; const entered = new Gate();
+      f.provider.respond = async (_index, signal) => { entered.open(); await new Promise<void>((resolve) => { signal.onCancel(resolve); }); signal.check(); return reply(); };
+      const work = f.session.executeTeam(run.id, run.revision); await entered.promise;
+      expect(f.session.canMutate).assertFalse(); expect(await f.session.newThread()).assertFalse();
+      await f.session.stop(); await work;
+      expect(f.session.snapshot().threads[0].teams![0].status).assertEqual('cancelled'); expect(f.session.canMutate).assertTrue();
+    });
+    it('memoryProposalDoesNotSaveOrCopyLongAnswersAndIncludesRoleEvidence', 0, async () => {
+      const data = seed(); const thread = data.threads[0]; thread.draft = 'keep draft';
+      thread.messages = [{ id: 'u', role: 'user', content: '我偏好中文和简短回答', status: 'complete', error: '' },
+        { id: 'a', role: 'assistant', content: '回复内容'.repeat(800), status: 'complete', error: '' }];
+      data.productivity = defaultProductivity(); data.productivity.memories = [{ id: 'existing', content: '偏好中文', threadId: '', updatedAt: 1 }];
+      const f = new Fixture(data); await f.session.initialize(); const before = JSON.stringify(f.session.snapshot()); const writes = f.repository.writes.length;
+      f.provider.respond = async () => reply('[" 偏好中文 ","偏好简短回答","偏好简短回答"]');
+      const proposed = await f.session.proposeMemory('a'); expect(proposed.join(',')).assertEqual('偏好简短回答');
+      expect(f.provider.requests[0].messages[1].content.includes('precedingUserMessage')).assertTrue();
+      expect(f.provider.requests[0].messages[1].content.includes('assistant')).assertTrue();
+      expect(JSON.stringify(f.session.snapshot())).assertEqual(before); expect(f.repository.writes.length).assertEqual(writes); expect(f.session.state.phase).assertEqual('idle');
+      expect(await f.session.saveMemoryDraft('thread-1', 'a', ['偏好简短回答'], false)).assertEqual(1);
+      const saved = await f.repository.load(); const memory = saved.productivity?.memories[1];
+      expect(memory?.threadId).assertEqual('thread-1'); expect(memory?.sourceMessageId).assertEqual('a'); expect(memory?.automatic).assertFalse();
+      expect(active(saved).draft).assertEqual('keep draft'); expect(active(saved).messages.length).assertEqual(2);
+      expect(await f.session.saveMemoryDraft('thread-1', 'a', ['偏好简短回答'], false)).assertEqual(0);
+    });
+    it('emptyOrInvalidMemorySuggestionsNeverFallBackToTheSourceText', 0, async () => {
+      const f = new Fixture(historySeed()); await f.session.initialize(); const before = f.repository.saved;
+      f.provider.respond = async () => reply('[]'); expect((await f.session.proposeMemory('answer-0')).length).assertEqual(0);
+      for (const output of ['not json', '["' + 'x'.repeat(201) + '"]', '[""]']) {
+        f.provider.respond = async () => reply(output); let rejected = false;
+        try { await f.session.proposeMemory('answer-0'); } catch (_) { rejected = true; }
+        expect(rejected).assertTrue(); expect(f.session.state.phase).assertEqual('idle');
+      }
+      expect(f.repository.saved).assertEqual(before);
+    });
+    it('cancelsMemoryProposalWithoutSavingOrChangingConversationQueue', 0, async () => {
+      const f = new Fixture(historySeed()); await f.session.initialize(); const before = JSON.stringify(f.session.snapshot()); const entered = new Gate();
+      f.provider.respond = async (_index, signal) => { entered.open(); await new Promise<void>((resolve) => signal.onCancel(resolve)); signal.check(); return reply('[]'); };
+      const proposal = f.session.proposeMemory('answer-0'); await entered.promise;
+      expect(f.session.canQueueInput).assertFalse(); f.session.cancelMemoryDraft(); let cancelled = false;
+      try { await proposal; } catch (_) { cancelled = true; }
+      expect(cancelled).assertTrue(); expect(JSON.stringify(f.session.snapshot())).assertEqual(before); expect(f.session.state.phase).assertEqual('idle');
+    });
+    it('confirmedMemorySaveIsAtomicAndChecksScopeAndSource', 0, async () => {
+      const f = new Fixture(historySeed()); await f.session.initialize(); const before = JSON.stringify(f.session.snapshot());
+      f.repository.beforeSave = async () => { throw new Error('disk failed'); }; let rejected = false;
+      try { await f.session.saveMemoryDraft('thread-1', 'answer-0', ['short fact'], true); } catch (_) { rejected = true; }
+      expect(rejected).assertTrue(); expect(JSON.stringify(f.session.snapshot())).assertEqual(before);
+      f.repository.beforeSave = async () => {}; expect(await f.session.saveMemoryDraft('thread-1', 'answer-0', ['short fact'], true)).assertEqual(1);
+      expect(f.session.snapshot().productivity?.memories[0].threadId).assertEqual('');
+      expect(await f.session.saveMemoryDraft('thread-1', 'answer-0', [' short   fact '], false)).assertEqual(0);
+      rejected = false; try { await f.session.saveMemoryDraft('thread-1', 'deleted', ['fact'], false); } catch (_) { rejected = true; }
+      expect(rejected).assertTrue(); expect(f.session.snapshot().productivity?.memories.length).assertEqual(1);
+    });
+    it('resumesInterruptedFormWithoutReplayingWritesOrConsumingDraftAndWaitsThroughContinuation', 0, async () => {
+      const data = seed(); const thread = data.threads[0]; thread.draft = 'unsent draft';
+      const definition: InputForm = { title: 'Choose', fields: [{ name: 'choice', label: 'Choice', type: 'text', required: true }] };
+      const form: ToolCall = { id: 'ask', type: 'function', function: { name: 'request_user_input', arguments: JSON.stringify({ data: JSON.stringify(definition) }) } };
+      const write: ToolCall = { id: 'write', type: 'function', function: { name: 'write_file', arguments: '{"path":"a.txt","content":"saved"}' } };
+      thread.messages = [{ id: 'u', role: 'user', content: 'task', status: 'complete', error: '' },
+        { id: 'a', role: 'assistant', content: '', status: 'stopped', error: '', steps: [{ content: '', tools: [
+          { call: write, status: 'complete', output: 'saved' }, { call: form, status: 'interrupted', output: '' }] }] }];
+      const f = new Fixture(data); const approval = new ToolApproval(); f.resources.agentTools = new InteractionTools(approval); await f.session.initialize();
+      const entered = new Gate(); const release = new Gate(); f.provider.respond = async () => { entered.open(); await release.promise; return reply('continued'); };
+      const resume = f.session.resumeForm('a', 'ask'); let idle = false; const waiting = f.session.waitForIdle().then(() => { idle = true; });
+      approval.submit(['yes']); await entered.promise; expect(idle).assertFalse();
+      expect(f.provider.requests[0].messages.some((item) => item.toolCallId === 'ask' && item.content.includes('yes'))).assertTrue();
+      release.open(); await resume; await waiting; const saved = await f.repository.load();
+      expect(active(saved).draft).assertEqual('unsent draft'); expect(active(saved).messages[1].steps?.[0].tools[0].output).assertEqual('saved');
+      expect(active(saved).messages[1].steps?.[0].tools[1].status).assertEqual('complete'); expect(active(saved).messages[3].content).assertEqual('continued');
+    });
+    it('automaticMemoryUsesUserEvidenceAfterDurableSuccessAndPreservesManualFacts', 0, async () => {
+      const data = seed(); data.productivity = defaultProductivity(); data.productivity.options = defaultAssistantOptions(); data.productivity.options.autoMemory = true;
+      data.productivity.memories = [{ id: 'manual', content: '用户偏好中文', threadId: '', updatedAt: 1 }];
+      const f = new Fixture(data); await f.session.initialize(); f.provider.respond = async (index) => reply(index === 0 ? 'assistant assertion' : '["用户偏好中文","用户喜欢简短回答"]');
+      f.session.setDraft('请记住我喜欢简短回答'); await f.session.send();
+      expect(f.provider.requests.length).assertEqual(2);
+      expect(f.provider.requests[1].messages[1].content.includes('assistant assertion')).assertFalse();
+      const saved = parseAppData(f.repository.saved); expect(saved.productivity?.memories.length).assertEqual(2);
+      expect(saved.productivity?.memories[0].id).assertEqual('manual'); expect(saved.productivity?.memories[1].automatic).assertTrue();
+      expect(saved.productivity?.memories[1].sourceMessageId).assertEqual(saved.threads[0].messages[0].id);
+    });
+    it('failedTurnsDoNotTriggerAutomaticMemory', 0, async () => {
+      const data = seed(); data.productivity = defaultProductivity(); data.productivity.options = defaultAssistantOptions(); data.productivity.options.autoMemory = true;
+      const f = new Fixture(data); await f.session.initialize(); f.provider.respond = async () => { throw new Error('offline'); };
+      f.session.setDraft('fact'); await f.session.send(); expect(f.provider.requests.length).assertEqual(1); expect(f.session.snapshot().productivity?.memories.length).assertEqual(0);
+    });
+    it('routingRecordsPhysicalModelWithoutChangingConversationChoice', 0, async () => {
+      const data = seed(); data.productivity = defaultProductivity(); data.productivity.options = defaultAssistantOptions(); data.productivity.options.autoRoute = true;
+      data.productivity.options.deep = { providerId: 'test', modelId: 'deep' }; data.providerProfiles?.[0].models.push('deep');
+      const f = new Fixture(data); await f.session.initialize(); f.session.setDraft('详细分析这个问题'); await f.session.send();
+      expect(f.provider.requests[0].model).assertEqual('deep'); expect(active(f.session.snapshot()).modelRef?.modelId).assertEqual('model');
+      expect(active(f.session.snapshot()).messages[1].modelRef?.modelId).assertEqual('deep');
+    });
+    it('sendsAttachmentsWithoutTextAndRetainsThemForHistory', 0, async () => {
+      const f = new Fixture(); await f.session.initialize();
+      const attachment: Attachment = { id: 'photo', name: 'photo', path: 'photo.jpg', mime: 'image/jpeg', size: 12 };
+      expect(await f.session.setAttachments([attachment])).assertTrue();
+      await f.session.send();
+      expect(f.provider.requests.length).assertEqual(1);
+      expect(f.provider.requests[0].messages[1].attachments?.[0].id).assertEqual('photo');
+      expect(active(f.session.snapshot()).attachments?.length).assertEqual(0);
+      expect(active(f.session.snapshot()).messages[0].attachments?.length).assertEqual(1);
+      const restored = parseAppData(f.repository.saved);
+      expect(active(restored).messages[0].attachments?.[0].path).assertEqual('photo.jpg');
+    });
+    it('forksBeforeSelectedUserAndPreservesOriginalAndDraftAttachment', 0, async () => {
+      const data = historySeed();
+      data.threads[0].messages[2].attachments = [{ id: 'photo', name: 'photo', path: 'photo.jpg', mime: 'image/jpeg', size: 12 }];
+      const f = new Fixture(data); await f.session.initialize();
+      expect(await f.session.forkThread('user-1')).assertTrue();
+      const snapshot = f.session.snapshot(); const branch = active(snapshot);
+      expect(branch.parentThreadId).assertEqual('thread-1'); expect(branch.messages.length).assertEqual(2);
+      expect(branch.draft).assertEqual(data.threads[0].messages[2].content);
+      expect(branch.attachments?.[0].id).assertEqual('photo');
+      expect(snapshot.threads.find((item) => item.id === 'thread-1')?.messages.length).assertEqual(8);
+      parseAppData(f.repository.saved);
+    });
+    it('injectsOnlyApplicableMemoryIntoTheNextModelRequest', 0, async () => {
+      const f = new Fixture(); await f.session.initialize(); const data = defaultProductivity();
+      data.memories = [{ id: 'g', content: 'global fact', threadId: '', updatedAt: 1 },
+        { id: 'p', content: 'other secret', threadId: 'other', updatedAt: 1 }];
+      expect(await f.session.saveProductivity(data)).assertTrue();
+      f.session.setDraft('hello'); await f.session.send();
+      expect(f.provider.requests[0].messages[0].content.includes('global fact')).assertTrue();
+      expect(f.provider.requests[0].messages[0].content.includes('other secret')).assertFalse();
+    });
+    it('keepsAttachmentsOutOfTextOnlyQueueAndRetainsDraft', 0, async () => {
+      const f = new Fixture(); await f.session.initialize();
+      await f.session.setAttachments([{ id: 'photo', name: 'photo', path: 'photo.jpg', mime: 'image/jpeg', size: 12 }]);
+      f.session.setDraft('image task'); await f.session.enqueueInput('followUp');
+      expect(active(f.session.snapshot()).pendingInputs?.length).assertEqual(0);
+      expect(active(f.session.snapshot()).draft).assertEqual('image task');
+      expect(active(f.session.snapshot()).attachments?.length).assertEqual(1);
+    });
     it('runsSteeringAndQueuedTasksThroughTheRealRuntimeWithoutUi', 0, async () => {
       const f = new Fixture(); await f.session.initialize();
       const entered = new Gate(); const release = new Gate();
@@ -342,6 +539,33 @@ export default function sessionServiceTests(): void {
       expect(await f.session.saveProvider(draft)).assertFalse();
       expect(f.session.snapshot().providerProfiles?.[0].baseUrl).assertEqual('https://example.com/v1');
       expect(await f.keys.read(alias)).assertEqual('new-secret');
+    });
+
+    it('requiresReplacingAMissingSavedKeyBeforeKeepingItsAlias', 0, async () => {
+      const f = new Fixture(); await f.session.initialize();
+      const draft = providerDraft(); draft.noApiKey = false; draft.apiKey = 'old-secret';
+      expect(await f.session.saveProvider(draft)).assertTrue();
+      const oldAlias = f.session.snapshot().providerProfiles?.[0].credentialAlias || '';
+      f.keys.values.delete(oldAlias);
+      const before = JSON.stringify(f.session.snapshot());
+      const writes = f.repository.writes.length;
+      draft.apiKey = ''; draft.name = 'Renamed';
+      expect(await f.session.saveProvider(draft)).assertFalse();
+      expect(JSON.stringify(f.session.snapshot())).assertEqual(before);
+      expect(f.repository.writes.length).assertEqual(writes);
+      expect(await f.session.selectModel('test', 'model')).assertFalse();
+      draft.apiKey = 'replacement-secret';
+      expect(await f.session.saveProvider(draft)).assertTrue();
+      const alias = f.session.snapshot().providerProfiles?.[0].credentialAlias || '';
+      expect(alias === oldAlias).assertFalse();
+      expect(await f.keys.read(alias)).assertEqual('replacement-secret');
+      expect(await f.session.selectModel('test', 'model')).assertTrue();
+      draft.apiKey = ''; draft.name = 'Retain valid key';
+      expect(await f.session.saveProvider(draft)).assertTrue();
+      expect(f.session.snapshot().providerProfiles?.[0].credentialAlias).assertEqual(alias);
+      f.session.setDraft('recovered'); await f.session.send();
+      expect(f.provider.requests.length).assertEqual(1);
+      expect(f.provider.requests[0].apiKey).assertEqual('replacement-secret');
     });
 
     it('persistsSkillsAndRejectsTheirMutationDuringExecution', 0, async () => {

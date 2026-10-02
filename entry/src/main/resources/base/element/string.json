@@ -2,11 +2,11 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "Tinybot 原生个人 AI 助手"
+      "value": "Tinybot personal AI assistant"
     },
     {
       "name": "EntryAbility_desc",
-      "value": "Tinybot 原生个人 AI 助手"
+      "value": "Tinybot personal AI assistant"
     },
     {
       "name": "EntryAbility_label",

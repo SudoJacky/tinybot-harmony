@@ -15,6 +15,21 @@
     { "name": "user_bubble", "value": "#D9ECE1" },
     { "name": "danger", "value": "#B43535" },
     { "name": "danger_container", "value": "#FBE6E3" },
-    { "name": "scrim", "value": "#52000000" }
+    { "name": "scrim", "value": "#52000000" },
+    { "name": "accent_tint", "value": "#24216451" },
+    { "name": "accent_glow", "value": "#2E216451" },
+    { "name": "accent_outline", "value": "#66216451" },
+    { "name": "warning", "value": "#9A6200" },
+    { "name": "warning_container", "value": "#FBEFD6" },
+    { "name": "avatar_1_bg", "value": "#D9ECE1" },
+    { "name": "avatar_1_fg", "value": "#1D5A47" },
+    { "name": "avatar_2_bg", "value": "#DCE7F7" },
+    { "name": "avatar_2_fg", "value": "#2D5487" },
+    { "name": "avatar_3_bg", "value": "#F5E3D3" },
+    { "name": "avatar_3_fg", "value": "#8A4B1C" },
+    { "name": "avatar_4_bg", "value": "#EADFF4" },
+    { "name": "avatar_4_fg", "value": "#5E3B83" },
+    { "name": "avatar_5_bg", "value": "#F6DDE3" },
+    { "name": "avatar_5_fg", "value": "#8C2F48" }
   ]
 }

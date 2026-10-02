@@ -1,3 +1,4 @@
+import { t } from '../model/I18n';
 import { AppData, copyModelConfig } from '../model/Conversation';
 import { ProviderProfile, modelConfig, modelIds, validateProfile } from '../model/ProviderProfiles';
 import { CredentialReader } from './providers/Provider';
@@ -33,18 +34,23 @@ export class ProfileSettings {
   async save(data: AppData, draft: ProviderDraft, commit: (data: AppData) => Promise<void>): Promise<string> {
     const profiles = data.providerProfiles || [];
     const previous = profiles.find((item: ProviderProfile) => item.id === draft.id);
-    if (draft.id.length > 0 && !previous) { throw new Error('模型服务不存在。'); }
+    if (draft.id.length > 0 && !previous) { throw new Error(t("模型服务不存在。")); }
     const key = draft.apiKey.trim();
     const sameScope = previous?.protocol === draft.protocol &&
       protocolUrl(previous.protocol, previous.baseUrl, true) === protocolUrl(draft.protocol, draft.baseUrl, true);
     if (!draft.noApiKey && key.length === 0 && (!previous?.credentialAlias || !sameScope)) {
-      throw new Error('请填写 API Key；修改协议或服务地址时需要重新填写，其他服务的密钥不会被复用。');
+      throw new Error(t("请填写 API Key；修改协议或服务地址时需要重新填写，其他服务的密钥不会被复用。"));
     }
     const profile: ProviderProfile = { id: previous?.id || 'provider-' + this.createId(), name: draft.name.trim(),
       presetId: draft.presetId, protocol: draft.protocol, baseUrl: draft.baseUrl.trim().replace(/\/+$/, ''),
       credentialAlias: draft.noApiKey ? '' : key.length > 0 ? 'pending-key' : previous?.credentialAlias || '',
       noApiKey: draft.noApiKey, enabled: draft.enabled, models: modelIds(draft.models), contextWindow: Number(draft.contextWindow) };
     validateProfile(profile);
+    // An alias can survive a restore/signing change while its secure asset is unavailable.
+    // Do not report a successful save when a blank editor would retain a missing key.
+    if (!profile.noApiKey && key.length === 0) {
+      await this.credentials.read(profile.credentialAlias);
+    }
     let createdAlias = '';
     try {
       if (!profile.noApiKey && key.length > 0) {
@@ -79,7 +85,7 @@ export class ProfileSettings {
 
   async remove(data: AppData, id: string, commit: (data: AppData) => Promise<void>): Promise<string> {
     const profile = (data.providerProfiles || []).find((item: ProviderProfile) => item.id === id);
-    if (!profile) { throw new Error('模型服务不存在。'); }
+    if (!profile) { throw new Error(t("模型服务不存在。")); }
     data.providerProfiles = (data.providerProfiles || []).filter((item: ProviderProfile) => item.id !== id);
     if (data.config.providerId === id) { data.config = copyModelConfig(data.config, false); data.config.credentialAlias = ''; }
     await commit(data);
