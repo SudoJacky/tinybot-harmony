@@ -2,8 +2,8 @@
   "app": {
     "bundleName": "com.sudojacky.tinybot",
     "vendor": "SudoJacky",
-    "versionCode": 10000,
-    "versionName": "0.1.0",
+    "versionCode": 10001,
+    "versionName": "0.1.1",
     "icon": "$media:tinybot_icon",
     "label": "$string:app_name"
   }

@@ -1,10 +1,11 @@
-Tinybot 0.1.0 · 发布 / 云测试准备说明
-准备日期：2026-10-02
+Tinybot 0.1.1 · 发布 / 云测试准备说明
+更新日期：2026-10-03
+本文描述 0.1.1 的目标交付内容；版本更新后需重新运行准备脚本生成软件包、符号表和校验信息，旧版本产物不能直接作为本版本提交。
 
 一、这次准备了什么
 
-packages/Tinybot-0.1.0-10000-release-UNSIGNED.app：Release 模式完整应用包，等待云签名。
-packages/Tinybot-0.1.0-10000-release-UNSIGNED.hap：同一 APP 内的 entry 模块，供检查或后续签名使用。
+packages/Tinybot-0.1.1-10001-release-UNSIGNED.app：Release 模式完整应用包，等待云签名。
+packages/Tinybot-0.1.1-10001-release-UNSIGNED.hap：同一 APP 内的 entry 模块，供检查或后续签名使用。
 symbols/app-symbol.zip：本版本符号表，供 DevEco Studio 上传及问题定位。
 assets/tinybot-icon-1024.png：1024×1024 PNG 商店图标，来自软件包实际使用的图标。
 screenshots/：本机真实界面截图；上传前按 AGC 当前字段要求选择、预览。
@@ -19,7 +20,7 @@ licenses/：工程 Apache-2.0 与 Tinybot 品牌资源的 MIT 许可说明。
 
 包名：com.sudojacky.tinybot
 应用名称：Tinybot
-版本：0.1.0，versionCode=10000
+版本：0.1.1，versionCode=10001
 设备类型：phone
 最低 / 目标 API：26；当前使用 SDK 26.0.0.105 Release。
 构建模式：release，包内 app.debug=false。
@@ -48,7 +49,7 @@ licenses/：工程 Apache-2.0 与 Tinybot 品牌资源的 MIT 许可说明。
 
 本次仅完成本地准备，没有替你在 AGC 创建应用、申请云证书或上传软件包。
 如果设备池没有 API 26 手机，此版本无法安装；需等待适配设备或另行评估降低最低 API，不能只修改清单数字。
-如果 AGC 已存在 versionCode=10000 的版本，先增加版本号重新构建，或明确使用上传向导的 Manage Build Version。
+如果 AGC 已存在 versionCode=10001 的版本，先增加版本号重新构建，或明确使用上传向导的 Manage Build Version。
 上传向导更改构建号或重新签名后，最终文件的哈希值会变化，需以最终包重新记录校验信息。
 
 四、以后如何重新准备
