@@ -1,4 +1,5 @@
 import { t } from '../../model/I18n';
+import { AnthropicContentBlock, validateAnthropicContent } from '../../model/AnthropicContent';
 import { ModelMessage, ToolDefinition, ToolParameters } from '../../model/Agent';
 import { completionUrl } from './ChatCompletionsProtocol';
 
@@ -24,6 +25,16 @@ export function protocolUrl(protocol: string, baseUrl: string, allowHttp: boolea
   if (base.endsWith(suffix)) { return base; }
   if (protocol === 'anthropic-messages' && /^https?:\/\/[^/]+$/.test(base)) { return base + '/v1/messages'; }
   return base + suffix;
+}
+
+// Credentials belong to the API service root, not its request wire format.
+// Keep scheme, host, port and base path scoped; strip only the protocol's endpoint.
+export function sameCredentialScope(oldProtocol: string, oldUrl: string, protocol: string, baseUrl: string): boolean {
+  try {
+    const previous = protocolUrl(oldProtocol, oldUrl, true).replace(/\/(chat\/completions|responses|messages)$/, '');
+    const next = protocolUrl(protocol, baseUrl, true).replace(/\/(chat\/completions|responses|messages)$/, '');
+    return previous === next;
+  } catch (_) { return false; }
 }
 
 interface ResponsesContent { type: string; text?: string; image_url?: string; }
@@ -86,6 +97,9 @@ export function responsesRequest(model: string, messages: ModelMessage[], tools:
 
 interface ImageSource { type: string; media_type: string; data: string; }
 export interface AnthropicBlock {
+  thinking?: string;
+  signature?: string;
+  data?: string;
   source?: ImageSource;
   type: string;
   text?: string;
@@ -105,6 +119,8 @@ interface AnthropicTool {
   input_schema: ToolParameters;
 }
 export interface AnthropicRequest {
+  output_config?: ReasoningOptions;
+  thinking?: AnthropicThinkingOptions;
   model: string;
   stream: boolean;
   max_tokens: number;
@@ -113,12 +129,23 @@ export interface AnthropicRequest {
   tools?: AnthropicTool[];
 }
 
+interface AnthropicThinkingOptions { type: string; }
+
 export function anthropicRequest(model: string, messages: ModelMessage[], tools: ToolDefinition[],
   maxOutput: number = 4096): AnthropicRequest {
   const result: AnthropicMessage[] = [];
   const system: string[] = [];
   for (const message of messages) {
     if (message.role === 'system') { system.push(message.content); continue; }
+    if (message.role === 'assistant' && message.anthropicContent && message.anthropicContent.length > 0) {
+      validateAnthropicContent(message.anthropicContent);
+      // Replay signed blocks verbatim, in order, rather than regenerating thinking/text/tool blocks.
+      const content = JSON.parse(JSON.stringify(message.anthropicContent)) as AnthropicContentBlock[];
+      const previous = result[result.length - 1];
+      if (previous?.role === 'assistant') previous.content = previous.content.concat(content);
+      else result.push({ role: 'assistant', content: content });
+      continue;
+    }
     const blocks: AnthropicBlock[] = [];
     const role = message.role === 'tool' ? 'user' : message.role;
     if (role !== 'user' && role !== 'assistant') { throw new Error(t("不支持的消息角色。")); }

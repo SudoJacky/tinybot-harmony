@@ -1,4 +1,6 @@
 import { t } from './I18n';
+import { REASONING_EFFORTS } from './ReasoningEffort';
+import { ThreadReference, referenceContext, validateThreadReferences } from './ThreadReferences';
 import { TeamRun, recoverTeams } from './Team';
 import { Attachment, ProductivityData, validateAttachments, validateProductivity } from './Productivity';
 import { AgentStep, ModelMessage, interruptTools, stepMessages, validateSteps } from './Agent';
@@ -25,6 +27,7 @@ export interface ModelConfig {
 }
 
 export interface MessageData {
+  references?: ThreadReference[];
   id: string;
   role: string;
   content: string;
@@ -49,6 +52,9 @@ export function copyModelConfig(config: ModelConfig, configured: boolean = confi
 }
 
 export interface ThreadData {
+  // Absent means follow the selected model's assistant settings.
+  reasoningEffort?: string;
+  references?: ThreadReference[];
   teamEnabled?: boolean;
   teams?: TeamRun[];
   id: string;
@@ -108,7 +114,7 @@ export function requestHistory(messages: MessageData[], systemPrompt: string): M
     }
     const answer = messages[index + 1];
     if (!answer) {
-      result.push({ role: 'user', content: message.content, attachments: message.attachments });
+      result.push({ role: 'user', content: message.content + referenceContext(message.references), attachments: message.attachments });
     } else if (answer.role === 'assistant') {
       const steps = answer.steps || [];
       const hasTools = steps.some((step: AgentStep) => step.tools.length > 0);
@@ -116,7 +122,7 @@ export function requestHistory(messages: MessageData[], systemPrompt: string): M
       if (answer.status !== 'complete' && !hasTools && !hasSteering) {
         continue;
       }
-      result.push({ role: 'user', content: message.content, attachments: message.attachments });
+      result.push({ role: 'user', content: message.content + referenceContext(message.references), attachments: message.attachments });
       if (steps.length === 0) {
         result.push({ role: 'assistant', content: answer.content });
       } else {
@@ -175,10 +181,14 @@ export function parseAppData(text: string): AppData {
       throw new Error(t("本地会话数据损坏，原文件已保留。"));
     }
     threadIds.add(thread.id);
+    if (thread.reasoningEffort !== undefined && !REASONING_EFFORTS.includes(thread.reasoningEffort)) {
+      throw new Error(t('推理强度设置无效。'));
+    }
     if (thread.teamEnabled !== undefined && typeof thread.teamEnabled !== 'boolean') { throw new Error(t("团队模式设置损坏。")); }
     if (thread.teams !== undefined) { recoverTeams(thread.teams); }
     if (thread.attachments) { validateAttachments(thread.attachments); }
     if (thread.pendingInputs !== undefined) { validatePendingInputs(thread.pendingInputs); }
+    if (thread.references !== undefined) { validateThreadReferences(thread.references); }
     if (thread.queuePaused !== undefined && typeof thread.queuePaused !== 'boolean') { throw new Error(t("本地队列状态损坏。")); }
     // Loading never authorizes autonomous execution after a process exit.
     if ((thread.pendingInputs || []).length > 0) { thread.queuePaused = true; }
@@ -201,6 +211,7 @@ export function parseAppData(text: string): AppData {
       }
       messageIds.add(message.id);
       if (message.attachments) { validateAttachments(message.attachments); }
+      if (message.references !== undefined) { validateThreadReferences(message.references); }
       if (message.modelRef !== undefined) { validateReference(message.modelRef); }
       if (message.steps !== undefined) {
         validateSteps(message.steps);

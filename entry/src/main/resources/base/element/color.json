@@ -14,6 +14,7 @@
     { "name": "on_accent_container", "value": "#10392C" },
     { "name": "user_bubble", "value": "#D9ECE1" },
     { "name": "danger", "value": "#B43535" },
+    { "name": "on_danger", "value": "#FFFFFF" },
     { "name": "danger_container", "value": "#FBE6E3" },
     { "name": "scrim", "value": "#52000000" },
     { "name": "accent_tint", "value": "#24216451" },

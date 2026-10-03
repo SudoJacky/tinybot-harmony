@@ -1,4 +1,5 @@
 import { t } from '../../model/I18n';
+import { applyReasoningEffort } from './ReasoningRequest';
 import { Attachments } from '../Attachments';
 import { UsageStream, RequestUsage } from '../../model/Usage';
 import { UsageLedger } from '../UsageLedger';
@@ -34,21 +35,17 @@ export class ProtocolProvider implements ModelProvider {
     const endpoint = this.endpoint(input.baseUrl);
     const messages = await Attachments.hydrate(input.messages);
     cancellation.check();
-    const request = http.createHttp();
     const usage = new UsageStream(); let firstToken: number | undefined = undefined;
     const receiveText = (text: string): void => { if (text && firstToken === undefined) { firstToken = Date.now(); } onText(text); };
     const decoder = new util.TextDecoder('utf-8');
     const parser: ModelStream = this.info.protocol === 'responses' ? new ResponsesStream(receiveText) :
-      this.info.protocol === 'anthropic-messages' ? new AnthropicStream(receiveText) : new ChatStream(receiveText, onReasoning);
+      this.info.protocol === 'anthropic-messages' ? new AnthropicStream(receiveText, onReasoning) : new ChatStream(receiveText, onReasoning);
     const body: Object = this.info.protocol === 'responses' ? responsesRequest(input.model, messages, input.tools, input.maxOutputTokens) :
       this.info.protocol === 'anthropic-messages' ? anthropicRequest(input.model, messages, input.tools, input.maxOutputTokens) :
       chatRequest(input.model, messages, input.tools, this.options, input.maxOutputTokens);
     if (input.requestUsage && this.info.protocol === 'chat-completions') { (body as ChatRequest).stream_options = { include_usage: true }; }
-    if (input.reasoning && input.reasoning !== 'default') {
-      if (this.info.protocol === 'responses') { (body as ResponsesRequest).reasoning = { effort: input.reasoning }; }
-      else if (this.info.protocol === 'chat-completions') { (body as ChatRequest).reasoning_effort = input.reasoning; }
-      else { request.destroy(); throw new Error(t("此协议暂不支持当前思考强度选项，请使用服务默认。")); }
-    }
+    applyReasoningEffort(this.info.protocol, input.model, input.reasoning, body);
+    const request = http.createHttp();
     const startedAt = Date.now();
     const usageId = util.generateRandomUUID();
     UsageLedger.record({ id: usageId, provider: this.info.id, model: input.model, startedAt: startedAt, durationMs: 0, status: 'running_or_unknown' });

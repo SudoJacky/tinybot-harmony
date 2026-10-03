@@ -1,5 +1,7 @@
 import { ProductivityData, Attachment } from '../model/Productivity';
 import { ImageTools } from './ImageTools';
+import { CodeExecutionTools } from './CodeExecutionTools';
+import { NativeCodeExecutor } from './NativeCodeExecutor';
 import { InteractionTools } from './InteractionTools';
 import { UsageLedger } from './UsageLedger';
 import { Cancellation } from './Cancellation';
@@ -39,6 +41,7 @@ class NativeSessionResources implements SessionResources {
   ensureWorkspace(id: string): Promise<void> { return this.workspaces.ensureThread(id); }
   tools(id: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments: Attachment[] = []): AgentTools {
     const groups: AgentTools[] = [new WorkspaceTools(new NativeWorkspaceFiles(this.workspaces.pathFor(id))), new SkillTools(extensions.skills, selected), new InteractionTools(this.approval)];
+    groups.push(new CodeExecutionTools(new NativeCodeExecutor()));
     if (extensions.webEnabled) { groups.push(new WebTools(new NativeWebTransport())); }
     if (productivity) { groups.push(new McpTools(productivity.servers, this.approval)); }
     const reference = productivity?.options?.image; const profile = this.profiles.find((item) => item.id === reference?.providerId && item.enabled);

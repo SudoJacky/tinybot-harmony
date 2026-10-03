@@ -234,7 +234,11 @@ async function test(name, run) { await run(); console.log('PASS '+name); }
     jsonScript=(url,options)=>{requests++;assert.equal(url,'https://models.invalid/v1/models');assert.equal(options.header.Authorization,'Bearer fixture-secret');return{responseCode:200,result:JSON.stringify({data:[{id:'one'},{id:'one'},{id:'two'}]})};};
     const profile={id:'p',protocol:'responses',baseUrl:'https://models.invalid/v1',credentialAlias:'fixture-key'};
     const draft={...profile,apiKey:'',noApiKey:false};assert.equal((await discoverModels(draft,[profile])).join(','),'one,two');
-    await assert.rejects(discoverModels({...draft,baseUrl:'https://other.invalid/v1'},[profile]),/API Key/);assert.equal(requests,1);
+    assert.equal((await discoverModels({...draft,protocol:'chat-completions',baseUrl:'https://models.invalid/v1/chat/completions/'},[profile])).join(','),'one,two');
+    for (const baseUrl of ['https://other.invalid/v1','https://models.invalid/other/v1','https://models.invalid:8443/v1','http://models.invalid/v1']) {
+      await assert.rejects(discoverModels({...draft,baseUrl},[profile]),/API Key/);
+    }
+    assert.equal(requests,2);
   });
   await test('usage ledger preserves new requests while restoring persisted records',async()=>{
     const {UsageLedger}=load(path.join(source,'services/UsageLedger'));const root='/sandbox/ledger';fs.mkdirSync(nativePath(root),{recursive:true});

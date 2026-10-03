@@ -1,8 +1,8 @@
 import { t } from '../model/I18n';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { ChatViewModel, ThreadViewModel } from '../viewmodel/ChatViewModel';
-import { Btn, Font, Motion, Radius, Space, dayGroup, shortTime } from '../common/Theme';
-import { Banner, IconButton } from '../common/Widgets';
+import { Btn, Font, Radius, Space, dayGroup, shortTime } from '../common/Theme';
+import { Banner, IconButton, Segmented } from '../common/Widgets';
 
 class ThreadSection {
   title: string;
@@ -150,16 +150,6 @@ export struct ThreadList {
       .backgroundColor($r('app.color.page_background'))
   }
 
-  @Builder
-  tab(label: string, compId: string, archived: boolean) {
-    Text(label).id(compId).fontSize(13).layoutWeight(1).height(32).textAlign(TextAlign.Center).borderRadius(16)
-      .fontWeight(this.archived === archived ? FontWeight.Medium : FontWeight.Normal)
-      .fontColor(this.archived === archived ? $r('app.color.text_primary') : $r('app.color.text_secondary'))
-      .backgroundColor(this.archived === archived ? $r('app.color.surface') : Color.Transparent)
-      .animation({ duration: Motion.fast, curve: Motion.standard })
-      .onClick(() => { this.archived = archived; this.visibleCount = 40; })
-  }
-
   build() {
     Column({ space: Space.md }) {
       Row({ space: Space.sm }) {
@@ -177,10 +167,10 @@ export struct ThreadList {
       Search({ value: this.query, placeholder: t("搜索对话") }).id('search-threads').height(40)
         .backgroundColor($r('app.color.surface_variant')).placeholderColor($r('app.color.text_tertiary'))
         .onChange((value: string) => { this.query = value; this.visibleCount = 40; })
-      Row({ space: 2 }) {
-        this.tab(t("对话"), 'active-threads', false)
-        this.tab(t("已归档"), 'archived-threads', true)
-      }.width('100%').padding(3).borderRadius(19).backgroundColor($r('app.color.surface_variant'))
+      Segmented({ options: [t("对话"), t("已归档")], selected: this.archived ? 1 : 0,
+        optionIds: ['active-threads', 'archived-threads'], controlHeight: 38, labelSize: 13,
+        trackRadius: 19, thumbRadius: 16, gap: 2, thumbShadow: false,
+        onSelect: (index: number) => { this.archived = index === 1; this.visibleCount = 40; } })
       if (this.app.filteredThreads(this.query, this.archived).length === 0) {
         Column({ space: Space.sm }) {
           SymbolGlyph(this.query.trim().length > 0 ? $r('sys.symbol.magnifyingglass') : $r('sys.symbol.ellipsis_message'))

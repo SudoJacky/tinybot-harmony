@@ -1,4 +1,9 @@
 import { t } from '../model/I18n';
+import { supportsReasoningEffort, reasoningEfforts, reasoningEffortName, isHighestReasoningEffort } from '../model/ReasoningEffort';
+import { ComposerGlow } from '../common/ComposerGlow';
+import { ReasoningEffortPicker } from './ReasoningEffortPicker';
+import { ThreadReference, referenceQuery } from '../model/ThreadReferences';
+import { ThreadReferenceCard } from './ThreadReferenceCard';
 import { curves } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { Attachment, PromptTemplate } from '../model/Productivity';
@@ -40,6 +45,7 @@ export struct ChatPanel {
   @ObjectLink app: ChatViewModel;
   @ObjectLink thread: ThreadViewModel;
   onSettings: () => void = () => {};
+  onOpenHistory: () => void = () => {};
   onFiles: () => void = () => {};
   onTools: (tab: string) => void = () => {};
   @ObjectLink approval: ToolApproval;
@@ -58,6 +64,7 @@ export struct ChatPanel {
   @State private memoryMessageId: string = '';
   @State private memoryThreadId: string = '';
   @State private composerFocused: boolean = false;
+  @State private showReasoning: boolean = false;
   private scroller: Scroller = new Scroller();
   private scrollTimer: number = -1;
   // Messages already on screen when a thread opens render in place; only later ones animate in.
@@ -103,7 +110,7 @@ export struct ChatPanel {
 
   // Use methods: ordinary accessors in a V1 @Component are omitted by the ArkUI compiler.
   private hasDraft(): boolean {
-    return this.app.draft.trim().length > 0 || this.thread.attachments.length > 0;
+    return this.app.draft.trim().length > 0 || this.thread.attachments.length > 0 || this.thread.references.length > 0;
   }
 
   private canSend(): boolean {
@@ -375,6 +382,12 @@ export struct ChatPanel {
         }.width('100%').alignItems(VerticalAlign.Top)
         Text(this.thread.attachments.length >= 4 ? t("已达到每条消息 4 个附件的上限") : t("图片需模型支持视觉输入 · 文本文件最多 64 KB"))
           .fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).width('100%').textAlign(TextAlign.Center)
+        Button(t('引用其他会话')).id('add-thread-reference').attributeModifier(Btn.tonal).width('100%')
+          .enabled(this.canAttach() && this.thread.references.length < 4)
+          .onClick(() => this.fromSheet(() => {
+            if (referenceQuery(this.app.draft) === undefined) { this.app.setDraft(this.app.draft + (this.app.draft ? ' @' : '@')); }
+            this.getUIContext().getFocusController().requestFocus('composer');
+          }))
         Column() {
           Row() {
             Text(t("提示词模板")).fontSize(13).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_secondary'))
@@ -466,7 +479,58 @@ export struct ChatPanel {
   }
 
   private teamSuggested(): boolean {
-    return !this.app.busy && !this.thread.teamEnabled && /^\s*\/(?:t(?:e(?:a(?:m)?)?)?)?$/i.test(this.app.draft);
+    return this.commandSuggested('/team') && !this.thread.teamEnabled;
+  }
+  private commandSuggested(command: string): boolean {
+    const draft = this.app.draft.trim().toLowerCase();
+    return !this.app.busy && !this.thread.archived && this.app.saveError.length === 0 && draft.startsWith('/') && command.startsWith(draft);
+  }
+  private referenceSuggested(): boolean {
+    return this.canAttach() && this.thread.references.length < 4 && referenceQuery(this.app.draft) !== undefined;
+  }
+  private referenceMatches(): ThreadViewModel[] {
+    const query = (referenceQuery(this.app.draft) || '').trim().toLowerCase();
+    return this.app.threads.filter((item) => item.id !== this.thread.id && item.messages.some((message) => message.role === 'assistant' && message.status === 'complete') &&
+      !this.thread.references.some((ref) => ref.threadId === item.id) && item.title.toLowerCase().includes(query))
+      .sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 6);
+  }
+
+  @Builder
+  referenceSuggestions() {
+    Column({ space: 2 }) {
+      Text(t('引用会话 · 输入 @ 后搜索标题')).fontSize(12).fontColor($r('app.color.text_secondary')).padding(8)
+      if (this.referenceMatches().length === 0) {
+        Text(t('没有可引用的匹配会话')).fontSize(13).fontColor($r('app.color.text_tertiary')).padding(12)
+      }
+      Scroll() {
+        Column() {
+          ForEach(this.referenceMatches(), (item: ThreadViewModel) => {
+            Row({ space: 8 }) {
+              SymbolGlyph($r('sys.symbol.ellipsis_message')).fontSize(16).fontColor([$r('app.color.accent')])
+              Text(item.displayTitle).fontSize(14).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                .fontColor($r('app.color.text_primary')).layoutWeight(1)
+              if (item.archived) { Text(t('已归档')).fontSize(11).fontColor($r('app.color.text_tertiary')) }
+            }.id('mention-thread-' + item.id).height(44).width('100%').padding({ left: 12, right: 12 })
+            .onClick(() => { this.app.referenceThread(item.id); })
+          }, (item: ThreadViewModel) => item.id)
+        }.width('100%')
+      }.width('100%').constraintSize({ maxHeight: 176 }).scrollBar(BarState.Auto)
+    }.id('reference-suggestions').width('100%').alignItems(HorizontalAlign.Start)
+    .borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
+    .border({ width: 0.5, color: $r('app.color.divider') })
+  }
+
+  @Builder
+  compactSuggestion() {
+    Row({ space: Space.md }) {
+      IconBadge({ icon: $r('sys.symbol.doc_text'), diameter: 36 })
+      Column({ space: 2 }) {
+        Text('/compact').fontSize(14).fontWeight(FontWeight.Medium).fontFamily('monospace').fontColor($r('app.color.text_primary'))
+        Text(t('压缩较早对话，保留完整记录')).fontSize(12).fontColor($r('app.color.text_secondary'))
+      }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+    }.id('slash-compact').width('100%').padding(12).borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
+    .border({ width: 0.5, color: $r('app.color.divider') })
+    .onClick(() => { this.app.setDraft('/compact'); this.send(); })
   }
 
   @Builder
@@ -509,8 +573,40 @@ export struct ChatPanel {
   }
 
   @Builder
+  reasoningPicker() {
+    ReasoningEffortPicker({ value: this.thread.reasoningEffort, modelName: this.thread.modelRef?.modelId || '',
+      efforts: reasoningEfforts(this.app.providerProfiles.find((item) => item.id === this.thread.modelRef?.providerId)?.protocol || '', this.thread.modelRef?.modelId || ''),
+      disabled: this.app.busy || this.thread.archived || this.app.saveError.length > 0,
+      onSelect: async (value: string): Promise<boolean> => {
+        const saved = await this.app.setReasoningEffort(value);
+        if (!saved && this.app.error) this.getUIContext().getPromptAction().showToast({ message: this.app.error });
+        return saved;
+      } })
+  }
+
+  private highestEffort(): boolean {
+    return this.app.configured && !this.thread.archived && isHighestReasoningEffort(
+      this.app.providerProfiles.find((item) => item.id === this.thread.modelRef?.providerId)?.protocol || '',
+      this.thread.modelRef?.modelId || '', this.thread.reasoningEffort);
+  }
+
+  @Builder
   composer() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      if (this.highestEffort()) {
+        ComposerGlow({ active: true })
+      }
     Column({ space: 4 }) {
+      if (this.thread.references.length > 0) {
+        Scroll() {
+          Column({ space: 4 }) {
+            ForEach(this.thread.references, (item: ThreadReference) => {
+              ThreadReferenceCard({ reference: item, removable: true, disabled: !this.canAttach(),
+                onRemove: () => { this.app.removeThreadReference(item.threadId); } })
+            }, (item: ThreadReference) => item.threadId)
+          }.width('100%')
+        }.width('100%').constraintSize({ maxHeight: 104 }).scrollBar(BarState.Auto)
+      }
       if (this.thread.teamEnabled) {
         this.teamChip()
       }
@@ -519,7 +615,7 @@ export struct ChatPanel {
       }
       TextArea({ text: this.app.draft,
         placeholder: this.thread.archived ? t("已归档的对话无法继续") : this.app.generating ? t("补充要求，或排队下一项任务…")
-          : this.thread.teamEnabled ? t("描述目标，主 Agent 会按需组建团队…") : t("问点什么…") })
+          : this.thread.teamEnabled ? t("描述目标，主 Agent 会按需组建团队…") : t('输入消息，/ 命令，@ 引用会话') })
         .id('composer').fontSize(Font.body).fontColor($r('app.color.text_primary'))
         .placeholderColor($r('app.color.text_tertiary')).backgroundColor(Color.Transparent)
         .constraintSize({ minHeight: 44, maxHeight: 160 }).maxLength(24000)
@@ -549,6 +645,21 @@ export struct ChatPanel {
           title: { title: t("上下文") }, detents: [SheetSize.MEDIUM, SheetSize.LARGE], dragBar: true,
           backgroundColor: $r('app.color.page_background'), onDisappear: () => { this.showSummary = false; }
         })
+        if (!this.app.generating && this.app.configured && supportsReasoningEffort(
+          this.app.providerProfiles.find((item) => item.id === this.thread.modelRef?.providerId)?.protocol || '', this.thread.modelRef?.modelId || '')) {
+          Button({ type: ButtonType.Capsule }) {
+            Text(reasoningEffortName(this.thread.reasoningEffort)).fontSize(12)
+              .fontWeight(this.highestEffort() ? FontWeight.Medium : FontWeight.Regular)
+              .fontColor(this.highestEffort() ? $r('app.color.on_accent_container') : $r('app.color.text_secondary'))
+          }.id('open-reasoning-effort').height(32).padding({ left: 8, right: 8 })
+          .backgroundColor(this.highestEffort() ? $r('app.color.user_bubble') : Color.Transparent)
+          .enabled(!this.app.busy && !this.thread.archived && this.app.saveError.length === 0)
+          .accessibilityText(t('推理强度') + '：' + reasoningEffortName(this.thread.reasoningEffort))
+          .onClick(() => { this.getUIContext().getFocusController().clearFocus(); this.showReasoning = !this.showReasoning; })
+          .bindPopup(this.showReasoning, { builder: this.reasoningPicker, placement: Placement.Top,
+            popupColor: $r('app.color.surface'), radius: 20, enableArrow: false, autoCancel: true,
+            onStateChange: (event) => { this.showReasoning = event.isVisible; } })
+        }
         if (this.thread.pendingInputs.length > 0) {
           Row({ space: 4 }) {
             SymbolGlyph($r('sys.symbol.clock')).fontSize(14).fontColor([$r('app.color.on_accent_container')])
@@ -589,7 +700,8 @@ export struct ChatPanel {
         }
       }.width('100%')
     }
-    .padding({ left: 8, right: 8, top: 4, bottom: 8 }).borderRadius(Radius.xl)
+    .padding({ left: 8, right: 8, top: 4, bottom: 8 })
+    }.width('100%').borderRadius(Radius.xl).clip(true)
     .backgroundColor($r('app.color.surface'))
     .border({ width: this.composerFocused ? 1 : 0.5,
       color: this.composerFocused ? $r('app.color.accent_outline') : $r('app.color.divider') })
@@ -634,11 +746,19 @@ export struct ChatPanel {
 
   build() {
     Column() {
-      if (this.thread.messages.length === 0 && this.app.teams.length === 0) {
-        this.welcome()
-      } else {
-        this.messageList()
-      }
+      Column() {
+        if (this.thread.messages.length === 0 && this.app.teams.length === 0) {
+          this.welcome()
+        } else {
+          this.messageList()
+        }
+      }.id('chat-swipe-area').layoutWeight(1).width('100%')
+      // Normal priority lets nested horizontal scrollers keep their gestures. The composer
+      // stays outside this region so selecting or moving through draft text does not open history.
+      .gesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Right, distance: 24 })
+        .onActionEnd((event: GestureEvent) => {
+          if (event.offsetX >= 64 && event.offsetX > Math.abs(event.offsetY) * 1.5) { this.onOpenHistory(); }
+        }))
       Column({ space: Space.sm }) {
         if (this.app.searchMessageId) { Banner({ text: this.app.searchQuery ? t("匹配：") + this.app.searchQuery : t("历史节点"), danger: false, actionLabel: t("定位"), onAction: () => this.locate() }).onAppear(() => { setTimeout(() => this.locate(), 100); }) }
         if (this.approval.form) { InputFormCard({ approval: this.approval }) }
@@ -671,6 +791,8 @@ export struct ChatPanel {
         if (this.teamSuggested()) {
           this.commandSuggestion()
         }
+        if (this.commandSuggested('/compact')) { this.compactSuggestion() }
+        if (this.referenceSuggested()) { this.referenceSuggestions() }
         this.composer()
       }.width('100%').padding({ left: 10, right: 10, bottom: Space.sm })
     }.height('100%').width('100%')

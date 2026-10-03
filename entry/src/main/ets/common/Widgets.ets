@@ -1,5 +1,8 @@
 import { t } from '../model/I18n';
 import { Btn, Font, Motion, Radius, Space } from './Theme';
+import { LiquidToggle } from './LiquidToggle';
+import { AnimatorResult } from '@kit.ArkUI';
+import { SegmentFrame, SegmentedMotion } from './SegmentedMotion';
 
 @Component
 export struct IconButton {
@@ -57,7 +60,11 @@ export struct RowDivider {
   }
 }
 
-// Tappable list row with trailing value and chevron.
+// The trailing mark tells what a tap does: 'chevron' opens another page,
+// 'select' marks the chosen option in a list, 'expand' folds content in place.
+export type RowTrailing = 'chevron' | 'select' | 'expand';
+
+// Tappable list row with a trailing value and mark.
 @Component
 export struct NavRow {
   @Prop title: string = '';
@@ -65,6 +72,11 @@ export struct NavRow {
   @Prop value: string = '';
   @Prop disabled: boolean = false;
   @Prop accent: boolean = false;
+  // Still tappable but de-emphasized, e.g. a disabled provider.
+  @Prop muted: boolean = false;
+  @Prop trailing: RowTrailing = 'chevron';
+  // Selected for 'select', expanded for 'expand'.
+  @Prop active: boolean = false;
   icon?: Resource;
   compId: string = '';
   onTap: () => void = () => {};
@@ -73,26 +85,32 @@ export struct NavRow {
     Row({ space: Space.md }) {
       if (this.icon) {
         SymbolGlyph(this.icon).fontSize(20)
-          .fontColor([this.accent ? $r('app.color.accent') : $r('app.color.text_secondary')])
+          .fontColor([this.accent ? $r('app.color.accent') : this.muted ? $r('app.color.text_tertiary') : $r('app.color.text_secondary')])
       }
       Column({ space: 3 }) {
         Text(this.title).fontSize(Font.body).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-          .fontColor(this.accent ? $r('app.color.accent') : $r('app.color.text_primary'))
+          .fontColor(this.accent ? $r('app.color.accent') : this.muted ? $r('app.color.text_secondary') : $r('app.color.text_primary'))
           .fontWeight(this.accent ? FontWeight.Medium : FontWeight.Normal)
         if (this.subtitle.length > 0) {
           Text(this.subtitle).fontSize(Font.caption).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-            .fontColor($r('app.color.text_secondary'))
+            .fontColor(this.muted ? $r('app.color.text_tertiary') : $r('app.color.text_secondary'))
         }
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
       if (this.value.length > 0) {
         Text(this.value).fontSize(13).maxLines(1).fontColor($r('app.color.text_tertiary'))
       }
-      if (!this.accent) {
+      if (this.trailing === 'select') {
+        SymbolGlyph($r('sys.symbol.checkmark')).fontSize(18).fontColor([$r('app.color.accent')]).opacity(this.active ? 1 : 0)
+      } else if (this.trailing === 'expand') {
+        SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
+          .rotate({ angle: this.active ? 180 : 0 }).animation({ duration: Motion.fast, curve: Motion.standard })
+      } else if (!this.accent) {
         SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
       }
     }
     .id(this.compId).width('100%').constraintSize({ minHeight: 56 }).padding({ left: Space.lg, right: Space.lg, top: 10, bottom: 10 })
     .opacity(this.disabled ? 0.4 : 1).enabled(!this.disabled)
+    .accessibilityText(this.trailing === 'select' && this.active ? this.title + t("，已选中") : '')
     .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
     .onClick(() => this.onTap())
   }
@@ -115,9 +133,10 @@ export struct SwitchRow {
           Text(this.subtitle).fontSize(Font.caption).lineHeight(17).fontColor($r('app.color.text_secondary'))
         }
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-      Toggle({ type: ToggleType.Switch, isOn: this.isOn }).id(this.compId).selectedColor($r('app.color.accent'))
-        .enabled(!this.disabled).onChange((value: boolean) => this.onChange(value))
+      LiquidToggle({ isOn: this.isOn, disabled: this.disabled, label: this.title, compId: this.compId,
+        onChange: (value: boolean) => this.onChange(value) })
     }.width('100%').constraintSize({ minHeight: 56 }).padding({ left: Space.lg, right: Space.md, top: 10, bottom: 10 })
+    .opacity(this.disabled ? 0.4 : 1)
   }
 }
 
@@ -130,11 +149,13 @@ export struct Banner {
   @Prop actionEnabled: boolean = true;
   compId: string = '';
   actionId: string = '';
+  // Glyph for neutral banners; danger banners always use the alert mark.
+  icon: Resource = $r('sys.symbol.archivebox');
   onAction: () => void = () => {};
 
   build() {
     Row({ space: Space.sm }) {
-      SymbolGlyph(this.danger ? $r('sys.symbol.exclamationmark_circle') : $r('sys.symbol.archivebox')).fontSize(18)
+      SymbolGlyph(this.danger ? $r('sys.symbol.exclamationmark_circle') : this.icon).fontSize(18)
         .fontColor([this.danger ? $r('app.color.danger') : $r('app.color.text_secondary')])
       Text(this.text).id(this.compId).fontSize(13).lineHeight(19).layoutWeight(1)
         .fontColor(this.danger ? $r('app.color.danger') : $r('app.color.text_primary'))
@@ -185,26 +206,93 @@ export struct EmptyState {
 }
 
 // iOS/HarmonyOS-style segmented control. Options are short labels; onSelect receives the index.
-// The selection thumb slides between segments on a spring, like the desktop liquid toggle.
+// Shared rubber motion; each surface keeps its existing dimensions and styling.
 @Component
 export struct Segmented {
-  @Prop options: string[] = [];
-  @Prop selected: number = 0;
+  @Prop @Watch('resetGeometry') options: string[] = [];
+  @Prop @Watch('syncSelection') selected: number = 0;
   @State private segmentWidth: number = 0;
+  @State private thumbLeft: number = 0;
+  @State private thumbRight: number = 0;
+  controlHeight: number = 36;
+  labelSize: number = 14;
+  trackRadius: number = Radius.sm;
+  thumbRadius: number = Radius.sm - 2;
+  gap: number = 0;
+  thumbShadow: boolean = true;
+  optionIds: string[] = [];
   compIdPrefix: string = 'segment';
   onSelect: (index: number) => void = () => {};
+  private trackWidth: number = 0;
+  private animator?: AnimatorResult;
+  private generation: number = 0;
+
+  aboutToDisappear(): void { this.stopAnimation(); }
+
+  private stopAnimation(): void {
+    this.generation++;
+    this.animator?.cancel();
+    this.animator = undefined;
+  }
+
+  private target(): SegmentFrame {
+    const index = Math.max(0, Math.min(this.options.length - 1, this.selected));
+    const left = index * (this.segmentWidth + this.gap);
+    return { left: left, right: left + this.segmentWidth };
+  }
+
+  private resetGeometry(): void {
+    const width = this.options.length > 0 ?
+      Math.max(0, (this.trackWidth - this.gap * (this.options.length - 1)) / this.options.length) : 0;
+    // Callers often rebuild their label array when selection changes. That must
+    // not cancel an in-flight animation when the measured slots are unchanged.
+    if (Math.abs(width - this.segmentWidth) < 0.01) return;
+    this.stopAnimation();
+    this.segmentWidth = width;
+    const target = this.target();
+    this.thumbLeft = target.left;
+    this.thumbRight = target.right;
+  }
+
+  private syncSelection(): void {
+    this.stopAnimation();
+    if (this.segmentWidth <= 0) return;
+    const from: SegmentFrame = { left: this.thumbLeft, right: this.thumbRight };
+    const target = this.target();
+    if (Math.abs(from.left - target.left) + Math.abs(from.right - target.right) < 0.01) return;
+    const generation = this.generation;
+    const animator = this.getUIContext().createAnimator({
+      duration: SegmentedMotion.duration, easing: 'linear', delay: 0, fill: 'forwards',
+      direction: 'normal', iterations: 1, begin: 0, end: 1
+    });
+    animator.onFrame = (progress: number): void => {
+      if (generation !== this.generation) return;
+      const frame = SegmentedMotion.sample(from, target, progress);
+      this.thumbLeft = frame.left;
+      this.thumbRight = frame.right;
+    };
+    animator.onFinish = (): void => {
+      if (generation !== this.generation) return;
+      this.thumbLeft = target.left;
+      this.thumbRight = target.right;
+      this.animator = undefined;
+    };
+    this.animator = animator;
+    animator.play();
+  }
 
   build() {
     Stack({ alignContent: Alignment.Start }) {
       if (this.segmentWidth > 0) {
-        Column().width(this.segmentWidth).height('100%').borderRadius(Radius.sm - 2)
-          .backgroundColor($r('app.color.surface')).shadow({ radius: 4, color: '#14000000', offsetY: 1 })
-          .translate({ x: this.selected * this.segmentWidth })
-          .animation({ curve: Motion.thumb })
+        Column().width(this.thumbRight - this.thumbLeft).height('100%').borderRadius(this.thumbRadius)
+          .backgroundColor($r('app.color.surface'))
+          .shadow({ radius: this.thumbShadow ? 4 : 0, color: this.thumbShadow ? '#14000000' : '#00000000', offsetY: 1 })
+          .translate({ x: this.thumbLeft }).hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
       }
-      Row() {
+      Row({ space: this.gap }) {
         ForEach(this.options, (label: string, index: number) => {
-          Text(label).id(this.compIdPrefix + '-' + index).fontSize(14).layoutWeight(1).height('100%').textAlign(TextAlign.Center)
+          Text(label).id(this.optionIds[index] || this.compIdPrefix + '-' + index)
+            .fontSize(this.labelSize).layoutWeight(1).height('100%').textAlign(TextAlign.Center)
             .fontWeight(index === this.selected ? FontWeight.Medium : FontWeight.Normal)
             .fontColor(index === this.selected ? $r('app.color.text_primary') : $r('app.color.text_secondary'))
             .animation({ duration: Motion.fast, curve: Motion.standard })
@@ -213,9 +301,14 @@ export struct Segmented {
         }, (label: string) => label)
       }.width('100%').height('100%')
       .onAreaChange((_old: Area, next: Area) => {
-        this.segmentWidth = (next.width as number) / Math.max(1, this.options.length);
+        const width = next.width as number;
+        if (Math.abs(width - this.trackWidth) > 0.01) {
+          this.trackWidth = width;
+          this.resetGeometry();
+        }
       })
-    }.width('100%').height(36).padding(3).borderRadius(Radius.sm).backgroundColor($r('app.color.surface_variant'))
+    }.width('100%').height(this.controlHeight).padding(3).borderRadius(this.trackRadius)
+    .backgroundColor($r('app.color.surface_variant'))
   }
 }
 
@@ -228,6 +321,15 @@ export struct ThinkingLine {
   @State private breath: number = 0.55;
   @State private sweep: number = -100;
 
+  @Builder
+  shimmer() {
+    Column().width('50%').height('100%')
+      .linearGradient({ angle: 90, colors: [[Color.Transparent, 0], [$r('app.color.text_primary'), 0.5], [Color.Transparent, 1]] })
+      .translate({ x: this.sweep + '%' })
+      .blendMode(BlendMode.SRC_ATOP)
+      .hitTestBehavior(HitTestMode.Transparent)
+  }
+
   build() {
     Row({ space: Space.sm }) {
       if (!this.compact) {
@@ -236,11 +338,10 @@ export struct ThinkingLine {
       // The band only paints over the label's own pixels (SRC_ATOP inside an offscreen layer).
       Stack({ alignContent: Alignment.Start }) {
         Text(this.label).fontSize(this.compact ? 13 : 15).maxLines(1).fontColor($r('app.color.text_tertiary'))
-        Column().width('50%').height('100%')
-          .linearGradient({ angle: 90, colors: [[Color.Transparent, 0], [$r('app.color.text_primary'), 0.5], [Color.Transparent, 1]] })
-          .translate({ x: this.sweep + '%' })
-          .blendMode(BlendMode.SRC_ATOP)
-      }.blendMode(BlendMode.SRC_OVER, BlendApplyType.OFFSCREEN)
+      }
+      // An overlay follows the measured label size without stretching the message row.
+      .overlay(this.shimmer(), { align: Alignment.Start })
+      .blendMode(BlendMode.SRC_OVER, BlendApplyType.OFFSCREEN)
     }
     .accessibilityText(this.label)
     .transition(TransitionEffect.OPACITY.animation({ duration: Motion.fast, curve: Motion.standard }))

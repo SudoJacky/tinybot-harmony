@@ -1,4 +1,5 @@
 import { t } from '../../model/I18n';
+import { AnthropicContentBlock, validateAnthropicContent } from '../../model/AnthropicContent';
 import { MAX_TOOL_ARGUMENTS, MAX_TOOL_CALLS, ModelTurn, ToolCall, validateToolCalls } from '../../model/Agent';
 import { AnthropicBlock } from './WireProtocols';
 
@@ -104,10 +105,14 @@ export class ResponsesStream implements ModelStream {
   }
 }
 
-interface AnthropicDelta { type?: string; text?: string; partial_json?: string; stop_reason?: string; }
+interface AnthropicDelta { type?: string; text?: string; thinking?: string; signature?: string; partial_json?: string; stop_reason?: string; }
 interface AnthropicEvent { type: string; index?: number; content_block?: AnthropicBlock; delta?: AnthropicDelta; }
 
 export class AnthropicStream implements ModelStream {
+  private preserved: Map<number, AnthropicContentBlock> = new Map<number, AnthropicContentBlock>();
+  private reasoning: string = '';
+  private thinkingSize: number = 0;
+  private onReasoning?: (text: string) => void;
   private frames: EventFrames;
   private onText: (text: string) => void;
   private content: string = '';
@@ -118,8 +123,9 @@ export class AnthropicStream implements ModelStream {
   private closed: Set<number> = new Set<number>();
   private fragments: Set<number> = new Set<number>();
   private calls: Map<number, ToolCall> = new Map<number, ToolCall>();
-  constructor(onText: (text: string) => void) {
+  constructor(onText: (text: string) => void, onReasoning?: (text: string) => void) {
     this.onText = onText;
+    this.onReasoning = onReasoning;
     this.frames = new EventFrames((payload: string) => this.event(payload));
   }
   push(text: string): void { this.frames.push(text); }
@@ -131,9 +137,23 @@ export class AnthropicStream implements ModelStream {
     validateToolCalls(calls);
     if ((this.reason === 'tool_use') !== (calls.length > 0)) { throw new Error(t("Anthropic 工具调用与结束原因不匹配。")); }
     if (calls.length === 0 && this.content.trim().length === 0) { throw new Error(t("模型没有返回可显示的文本。")); }
-    return { content: this.content, toolCalls: calls };
+    const preserved: AnthropicContentBlock[] = [];
+    for (const index of Array.from(this.preserved.keys()).sort((a: number, b: number) => a - b)) {
+      const block = this.preserved.get(index)!;
+      const call = this.calls.get(index);
+      if (call) block.input = JSON.parse(call.function.arguments) as Object;
+      preserved.push(block);
+    }
+    validateAnthropicContent(preserved);
+    return { content: this.content, toolCalls: calls, reasoningContent: this.reasoning || undefined, anthropicContent: preserved };
   }
   private append(text: string): void { this.content += text; this.onText(text); }
+  private appendThinking(text: string): void {
+    this.thinkingSize += text.length;
+    if (this.thinkingSize > 1024 * 1024) throw new Error(t('Anthropic 思考记录无效或过大。'));
+    this.reasoning += text;
+    if (text) this.onReasoning?.(text);
+  }
   private event(payload: string): void {
     if (this.done) { throw new Error(t("Anthropic 在结束后继续返回数据。")); }
     const event = parseEvent(payload) as AnthropicEvent;
@@ -163,11 +183,21 @@ export class AnthropicStream implements ModelStream {
     }
     if (event.type === 'content_block_start') {
       const block = event.content_block;
-      if (!block || this.blocks.has(index) || !['text', 'tool_use'].includes(block.type)) { throw new Error(t("Anthropic 内容块无效或不支持。")); }
+      if (!block || this.blocks.has(index) || !['text', 'tool_use', 'thinking', 'redacted_thinking'].includes(block.type)) { throw new Error(t("Anthropic 内容块无效或不支持。")); }
       this.blocks.set(index, block.type);
+      this.preserved.set(index, JSON.parse(JSON.stringify(block)) as AnthropicContentBlock);
       if (block.type === 'text') {
         if (typeof block.text !== 'string') { throw new Error(t("Anthropic 文本无效。")); }
         if (block.text) { this.append(block.text); }
+      } else if (block.type === 'thinking') {
+        if (typeof block.thinking !== 'string' || (block.signature !== undefined && typeof block.signature !== 'string')) {
+          throw new Error(t('Anthropic 思考记录无效或过大。'));
+        }
+        this.appendThinking(block.thinking);
+      } else if (block.type === 'redacted_thinking') {
+        if (typeof block.data !== 'string' || !block.data) throw new Error(t('Anthropic 思考记录无效或过大。'));
+        this.thinkingSize += block.data.length;
+        if (this.thinkingSize > 1024 * 1024) throw new Error(t('Anthropic 思考记录无效或过大。'));
       } else {
         if (this.calls.size >= MAX_TOOL_CALLS || !block.input || typeof block.input !== 'object' || Array.isArray(block.input)) {
           throw new Error(t("Anthropic 工具输入无效。"));
@@ -179,8 +209,17 @@ export class AnthropicStream implements ModelStream {
       if (event.type === 'content_block_stop') { this.closed.add(index); return; }
       if (event.type !== 'content_block_delta') { throw new Error(t("Anthropic 内容块事件不支持。")); }
       const delta = event.delta;
+      const preserved = this.preserved.get(index)!;
       if (this.blocks.get(index) === 'text' && delta?.type === 'text_delta' && typeof delta.text === 'string') {
         this.append(delta.text);
+        preserved.text = (preserved.text || '') + delta.text;
+      } else if (preserved.type === 'thinking' && delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+        this.appendThinking(delta.thinking);
+        preserved.thinking = (preserved.thinking || '') + delta.thinking;
+      } else if (preserved.type === 'thinking' && delta?.type === 'signature_delta' && typeof delta.signature === 'string') {
+        this.thinkingSize += delta.signature.length;
+        if (this.thinkingSize > 1024 * 1024) throw new Error(t('Anthropic 思考记录无效或过大。'));
+        preserved.signature = (preserved.signature || '') + delta.signature;
       } else if (this.blocks.get(index) === 'tool_use' && delta?.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
         const call = this.calls.get(index);
         if (!call) { throw new Error(t("Anthropic 工具调用不存在。")); }

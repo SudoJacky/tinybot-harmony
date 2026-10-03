@@ -97,6 +97,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
       // The provider's final message is authoritative even when it emitted no deltas.
       step.content = response.content;
       step.reasoningContent = response.reasoningContent;
+      step.anthropicContent = response.anthropicContent;
       step.usage = response.usage;
       turn.content = turn.steps.map((item: AgentStep) => item.content).filter((content: string) => content.length > 0).join('\n\n');
       validateToolCalls(response.toolCalls);

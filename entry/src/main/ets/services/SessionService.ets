@@ -1,4 +1,6 @@
 import { t } from '../model/I18n';
+import { reasoningEfforts, supportsReasoningEffort } from '../model/ReasoningEffort';
+import { ThreadReference, captureThreadReference, isCompactCommand, removeReferenceQuery, validateThreadReferences } from '../model/ThreadReferences';
 import { TeamMember, TeamPlan, TeamRun, TeamTaskRecord, parseTeamPlan, teamCommand, validateTeamMembers, validateTeamPlan } from '../model/Team';
 import { ChatTeamTools, CHAT_TEAM_INSTRUCTIONS } from './ChatTeamTools';
 import { TeamCoordinator } from './TeamCoordinator';
@@ -140,6 +142,14 @@ export class SessionService {
     const config = modelConfig(this.providerProfiles, reference, this.data.config);
     const capability = this.data.productivity?.options?.capabilities.find((item) => item.providerId === reference.providerId && item.modelId === reference.modelId);
     if (capability) { config.images = capability.images; config.reasoning = capability.reasoning; config.requestUsage = capability.requestUsage; config.contextWindow = capability.contextWindow; }
+    const thread = this.data.threads.find((item) => item.id === this.data.activeThreadId);
+    const protocol = this.providerProfiles.find((item) => item.id === reference.providerId)?.protocol || '';
+    // An automatically routed model (or a worker using another model) retains its own defaults.
+    if (supportsReasoningEffort(protocol, reference.modelId) && thread?.modelRef?.providerId === reference.providerId &&
+      thread.modelRef.modelId === reference.modelId && thread.reasoningEffort && thread.reasoningEffort !== 'default') {
+      config.reasoning = thread.reasoningEffort;
+    }
+    if (!reasoningEfforts(protocol, reference.modelId).includes(config.reasoning || 'default')) config.reasoning = 'default';
     return config;
   }
   async setThreadMcp(id: string, enabled: boolean): Promise<boolean> {
@@ -214,6 +224,37 @@ export class SessionService {
       validateAttachments(items); this.active.attachments = items; await this.persist();
     });
   }
+  async referenceThread(id: string): Promise<boolean> {
+    return this.mutate(t('添加会话引用失败：'), async () => {
+      if (this.active.archived) { throw new Error(t('请先恢复对话。')); }
+      if (id === this.active.id) { throw new Error(t('请选择其他会话。')); }
+      const items = this.active.references || [];
+      if (items.some((item) => item.threadId === id)) { throw new Error(t('已引用该会话。')); }
+      const references = items.concat([captureThreadReference(this.requireThread(id))]);
+      validateThreadReferences(references);
+      this.active.references = references;
+      this.setDraft(removeReferenceQuery(this.active.draft || ''), this.active.id);
+      await this.persist();
+    });
+  }
+  async removeThreadReference(id: string): Promise<boolean> {
+    return this.mutate(t('更新会话引用失败：'), async () => {
+      if (this.active.archived) { throw new Error(t('请先恢复对话。')); }
+      this.active.references = (this.active.references || []).filter((item) => item.threadId !== id);
+      await this.persist();
+    });
+  }
+  async restoreMessageDraft(id: string): Promise<boolean> {
+    return this.mutate(t('恢复草稿失败：'), async () => {
+      if (this.active.archived) { throw new Error(t('请先恢复对话。')); }
+      const message = this.active.messages.find((item) => item.id === id && item.role === 'user');
+      if (!message) { throw new Error(t('消息已不存在。')); }
+      this.active.attachments = JSON.parse(JSON.stringify(message.attachments || [])) as Attachment[];
+      this.active.references = (message.references || []).map((item): ThreadReference => ({ threadId: item.threadId, title: item.title,
+        content: item.content, capturedAt: item.capturedAt, truncated: item.truncated }));
+      this.setDraft(message.content, this.active.id); await this.persist();
+    });
+  }
   async forkThread(messageId: string = ''): Promise<boolean> {
     return this.mutate(t("创建分支失败："), async () => {
       const source = this.active;
@@ -222,6 +263,7 @@ export class SessionService {
       const end = index < 0 ? 0 : index % 2 === 0 ? index : index + 1;
       const branch = this.freshThread(); branch.title = source.title.slice(0, 26) + t(' · 分支'); branch.titleEdited = true;
       branch.parentThreadId = source.id; branch.parentMessageId = index >= 0 ? source.messages[index].id : undefined; branch.modelRef = source.modelRef;
+      branch.reasoningEffort = source.reasoningEffort;
       branch.messages = JSON.parse(JSON.stringify(source.messages.slice(0, end))) as MessageData[];
       branch.draft = index >= 0 && index % 2 === 0 ? source.messages[index].content : '';
       branch.attachments = index >= 0 && index % 2 === 0 ? source.messages[index].attachments : [];
@@ -307,11 +349,28 @@ export class SessionService {
       const candidate = this.snapshot();
       const thread = candidate.threads.find((item) => item.id === candidate.activeThreadId);
       if (!thread) { throw new Error(t("当前对话不存在。")); }
+      if (thread.modelRef?.providerId !== providerId || thread.modelRef?.modelId !== modelId) { thread.reasoningEffort = undefined; }
       thread.modelRef = reference;
       if (asDefault) { candidate.config = config; }
       await this.commitSettings(candidate); this.status.contextStatus = '';
     });
   }
+  async setReasoningEffort(value: string): Promise<boolean> {
+    if (!this.status.ready || this.active.archived) return false;
+    return this.mutate(t('保存推理强度失败：'), async () => {
+      const protocol = this.providerProfiles.find((item) => item.id === this.active.modelRef?.providerId)?.protocol || '';
+      if (!reasoningEfforts(protocol, this.active.modelRef?.modelId || '').includes(value) || !this.currentConfig.configured) {
+        throw new Error(t('当前模型或协议不支持此推理强度设置。'));
+      }
+      // Commit a copy so a failed disk write leaves the previous selection intact.
+      const candidate = this.snapshot();
+      const thread = candidate.threads.find((item) => item.id === candidate.activeThreadId);
+      if (!thread) throw new Error(t('当前对话不存在。'));
+      thread.reasoningEffort = value === 'default' ? undefined : value;
+      await this.commitSettings(candidate);
+    });
+  }
+
   async saveProvider(draft: ProviderDraft): Promise<boolean> {
     return this.mutate('', async () => {
       this.status.error = await this.profiles.save(this.snapshot(), draft, (candidate) => this.commitSettings(candidate));
@@ -364,6 +423,8 @@ export class SessionService {
     this.status.error = '';
     try {
       if ((this.active.attachments || []).length > 0) { throw new Error(t("附件请在当前任务完成后发送，或先移除附件再排队。")); }
+      if ((this.active.references || []).length > 0) { throw new Error(t('会话引用请在当前任务完成后发送，或先移除引用再排队。')); }
+      if (/^\/compact(?:\s|$)/i.test((this.active.draft || '').trim())) { throw new Error(t('/compact 请在当前任务完成后单独发送。')); }
       if (mode === 'steer' && (!this.status.acceptingSteering || !this.runtime.acceptsSteering)) {
         throw new Error(t("本轮正在结束或已停止，请将指令加入队列。"));
       }
@@ -394,11 +455,15 @@ export class SessionService {
   async send(): Promise<void> {
     if (!this.canMutate || this.active.archived) { return; }
     const text = (this.active.draft || '').trim();
+    if (/^\/compact(?:\s|$)/i.test(text)) {
+      if (!isCompactCommand(text)) { this.status.error = t('/compact 不接受参数，请单独发送。'); this.publish('state'); return; }
+      await this.compactHistory(true); return;
+    }
     if (teamCommand(text) === '' && !(this.active.attachments || []).length) {
       await this.mutate(t("开启团队模式失败："), async () => { this.active.teamEnabled = true; this.active.draft = ''; await this.persist(); }); return;
     }
-    if (text.length === 0 && (this.active.attachments || []).length === 0) { return; }
-    await this.runTasks(text || t('请分析附件。'));
+    if (text.length === 0 && (this.active.attachments || []).length === 0 && !(this.active.references || []).length) { return; }
+    await this.runTasks(text || ((this.active.references || []).length ? t('请参考引用的会话。') : t('请分析附件。')));
   }
   async resumeQueue(): Promise<void> {
     if (!this.canMutate || this.active.archived || (this.active.pendingInputs || []).length === 0) { return; }
@@ -421,8 +486,12 @@ export class SessionService {
     });
   }
 
-  async compactHistory(): Promise<void> {
-    if (!this.canMutate || this.active.archived || !this.currentConfig.configured) { return; }
+  async compactHistory(fromCommand: boolean = false): Promise<void> {
+    if (!this.canMutate || this.active.archived) { return; }
+    if (!this.currentConfig.configured) {
+      this.status.error = t('当前对话没有可用模型，请选择模型，或添加、启用模型服务。'); this.publish('state'); return;
+    }
+    const draftRevision = this.draftRevision;
     const thread = this.active; const config = this.currentConfig;
     const instructions = sessionInstructions(config, this.extensions) + memoryContext(this.data.productivity || defaultProductivity(), thread.id); const tools = this.tools(thread);
     this.status.phase = 'compacting'; this.status.error = ''; this.publish('state');
@@ -433,6 +502,9 @@ export class SessionService {
           config, instructions, tools.definitions(), () => this.persist(), (status) => this.contextProgress(status))
       });
       if (result.status !== 'complete') { this.status.error = result.status === 'stopped' ? t("上下文压缩已停止。") : result.error; }
+      else if (fromCommand && this.draftRevision === draftRevision && isCompactCommand(thread.draft || '')) {
+        this.setDraft('', thread.id); await this.persist();
+      }
     } catch (error) { this.status.error = t("上下文压缩失败：") + (error as Error).message; }
     finally {
       this.status.phase = 'idle';
@@ -473,8 +545,9 @@ export class SessionService {
     }
     let tools = this.tools(thread, selected); let instructions = sessionInstructions(config, this.extensions, selected) + memoryContext(this.data.productivity || defaultProductivity(), thread.id) +
       (thread.parentThreadId ? '\n这是从历史创建的会话分支，使用独立的新工作区。历史文件操作发生在原会话，不能假设原文件仍存在；先列出或读取当前文件。' : '');
-    const user: MessageData = { id: this.resources.createId(), role: 'user', content: text, status: 'complete', error: '', attachments: queuedId ? [] : this.active.attachments };
-    if (!queuedId) { thread.attachments = []; }
+    const user: MessageData = { id: this.resources.createId(), role: 'user', content: text, status: 'complete', error: '',
+      attachments: queuedId ? [] : thread.attachments, references: queuedId ? [] : thread.references };
+    if (!queuedId) { thread.attachments = []; thread.references = []; }
     const answer: MessageData = { id: this.resources.createId(), role: 'assistant', content: '', status: 'generating', error: '', modelRef: reference };
     let chatTeams: ChatTeamTools | undefined = undefined;
     if (thread.teamEnabled) {
