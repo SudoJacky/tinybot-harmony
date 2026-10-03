@@ -17,6 +17,14 @@ function Read-ZipText($Archive, [string]$Name) {
     try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
 }
 
+function Read-NativeBuildId([string]$ReadElf, [string]$Path) {
+    $notes = & $ReadElf -n $Path
+    if ($LASTEXITCODE -ne 0) { throw "Cannot read native build ID: $Path" }
+    $match = [regex]::Match(($notes -join "`n"), 'Build ID:\s*([0-9a-fA-F]+)')
+    if (-not $match.Success) { throw "Native build ID missing: $Path" }
+    return $match.Groups[1].Value.ToLowerInvariant()
+}
+
 Push-Location $projectRoot
 try {
     $nodePath = Join-Path $StudioRoot 'tools/node/node.exe'
@@ -52,6 +60,8 @@ try {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Missing build output: $required" }
     }
     $hapBytes = $null
+    $nativeLibraries = @()
+    $readElf = Join-Path $StudioRoot 'sdk/default/openharmony/native/llvm/bin/llvm-readelf.exe'
     $appArchive = [IO.Compression.ZipFile]::OpenRead($appPath)
     try {
         $pack = (Read-ZipText $appArchive 'pack.info') | ConvertFrom-Json
@@ -76,6 +86,27 @@ try {
                 if ($entry.FullName -match '(?i)(\.(p12|p7b|pem|key|keystore)$|(^|/)(\.env|build-profile\.json5)$)') { throw "Unexpected sensitive file in HAP: $($entry.FullName)" }
             }
             if (-not ($hapArchive.Entries | Where-Object { $_.FullName.EndsWith('/THIRD_PARTY_NOTICES.txt') })) { throw 'Third-party notices missing from HAP.' }
+            # 0.1.2 adds native execution. Check both cloud-phone and emulator
+            # libraries and preserve matching unstripped binaries for crash diagnosis.
+            foreach ($abi in @('arm64-v8a', 'x86_64')) {
+                $library = "libs/$abi/libtinybot_sandbox.so"
+                $nativeEntry = $hapArchive.GetEntry($library)
+                if ($null -eq $nativeEntry) { throw "Native sandbox missing from HAP: $library" }
+                $nativeStream = $nativeEntry.Open()
+                $hasher = [Security.Cryptography.SHA256]::Create()
+                try { $nativeHash = [BitConverter]::ToString($hasher.ComputeHash($nativeStream)).Replace('-', '').ToLowerInvariant() }
+                finally { $hasher.Dispose(); $nativeStream.Dispose() }
+                $strippedPath = Join-Path $projectRoot "entry/build/default/intermediates/stripped_native_libs/default/$abi/libtinybot_sandbox.so"
+                $symbolPath = Join-Path $projectRoot "entry/build/default/intermediates/cmake/default/obj/$abi/libtinybot_sandbox.so"
+                if ((Get-FileHash -LiteralPath $strippedPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $nativeHash) {
+                    throw "Packaged native library is stale: $abi"
+                }
+                $buildId = Read-NativeBuildId $readElf $strippedPath
+                if ((Read-NativeBuildId $readElf $symbolPath) -ne $buildId) { throw "Native symbols do not match HAP: $abi" }
+                $sections = & $readElf -S $symbolPath
+                if ($LASTEXITCODE -ne 0 -or ($sections -join "`n") -notmatch '\.debug_info\s') { throw "Native debug symbols missing: $abi" }
+                $nativeLibraries += [ordered]@{ abi = $abi; path = $library; sha256 = $nativeHash; buildId = $buildId }
+            }
         } finally { $hapArchive.Dispose() }
 
         foreach ($folder in @('packages', 'symbols', 'assets', 'screenshots', 'licenses')) {
@@ -89,10 +120,16 @@ try {
     }
 
     Copy-Item -LiteralPath $symbolsPath -Destination (Join-Path $OutputDirectory 'symbols/app-symbol.zip')
+    foreach ($abi in @('arm64-v8a', 'x86_64')) {
+        $nativeDestination = Join-Path $OutputDirectory "symbols/native/$abi"
+        New-Item -ItemType Directory -Path $nativeDestination -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $projectRoot "entry/build/default/intermediates/cmake/default/obj/$abi/libtinybot_sandbox.so") -Destination $nativeDestination
+    }
     Copy-Item -LiteralPath 'artifacts/app-store/tinybot-icon-1024.png' -Destination (Join-Path $OutputDirectory 'assets')
     Copy-Item -Path 'docs/distribution/*.txt' -Destination $OutputDirectory
     Copy-Item -LiteralPath 'LICENSE' -Destination (Join-Path $OutputDirectory 'licenses/APACHE-2.0.txt')
     Copy-Item -LiteralPath 'entry/src/main/resources/rawfile/THIRD_PARTY_NOTICES.txt' -Destination (Join-Path $OutputDirectory 'licenses')
+    Copy-Item -LiteralPath 'entry/src/main/cpp/third_party/quickjs/LICENSE' -Destination (Join-Path $OutputDirectory 'licenses/QuickJS-MIT.txt')
     if (Test-Path -LiteralPath 'artifacts/store-screenshots') {
         Get-ChildItem -LiteralPath 'artifacts/store-screenshots' -File | Where-Object { $_.Extension -in @('.png', '.txt') } | ForEach-Object {
             Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $OutputDirectory 'screenshots')
@@ -118,6 +155,7 @@ try {
         targetApi = $pack.summary.modules[0].apiVersion.target
         sdkVersion = $sdk.data.version
         deviceTypes = $manifest.module.deviceTypes
+        nativeLibraries = $nativeLibraries
         signing = 'unsigned; cloud-managed release signing required before upload/install'
         uploadedToAGC = $false
         rebuiltThisRun = (-not $SkipBuild.IsPresent)
