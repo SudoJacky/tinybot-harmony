@@ -1,4 +1,5 @@
 import { Attachment } from '../model/Productivity';
+import { ThreadReference } from '../model/ThreadReferences';
 import { AgentStep, ToolCall, ToolExecution } from '../model/Agent';
 import { CompactionData, MessageData, ThreadData } from '../model/Conversation';
 import { ModelReference } from '../model/ProviderProfiles';
@@ -33,6 +34,7 @@ export class AgentStepViewModel implements AgentStep {
 
 @Observed
 export class MessageViewModel {
+  references: ThreadReference[] = [];
   // Deliberately excluded from MessageData: keep reading choices across live updates,
   // while newly loaded history starts with compact defaults.
   processOpen: boolean = false;
@@ -49,6 +51,7 @@ export class MessageViewModel {
   modelRef?: ModelReference;
   constructor(data: MessageData) { this.update(data); }
   update(data: MessageData): void {
+    this.references = data.references || [];
     this.id = data.id; this.role = data.role; this.content = data.content; this.status = data.status; this.error = data.error;
     this.attachments = data.attachments || [];
     this.modelRef = data.modelRef; this.steps = data.steps || [];
@@ -63,6 +66,8 @@ export class MessageViewModel {
 
 @Observed
 export class ThreadViewModel {
+  reasoningEffort: string = 'default';
+  references: ThreadReference[] = [];
   get displayTitle(): string {
     return !this.titleEdited && this.messages.length === 0 && (this.title === '新对话' || this.title === 'New chat') ? t('新对话') : this.title;
   }
@@ -85,6 +90,8 @@ export class ThreadViewModel {
   queuePaused: boolean = false;
   constructor(data: ThreadData) { this.update(data); }
   update(data: ThreadData): void {
+    this.reasoningEffort = data.reasoningEffort || 'default';
+    this.references = data.references || [];
     this.teamEnabled = data.teamEnabled === true;
     this.parentThreadId = data.parentThreadId; this.parentMessageId = data.parentMessageId; this.disabledMcpIds = data.disabledMcpIds || [];
     this.id = data.id; this.title = data.title; this.updatedAt = data.updatedAt;

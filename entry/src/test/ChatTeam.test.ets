@@ -22,7 +22,7 @@ class BaseTools implements AgentTools {
   files: Map<string, string> = new Map<string, string>();
   calls: string[] = [];
   definitions(): ToolDefinition[] {
-    return ['read_file', 'write_file', 'mcp_call', 'publish_data_view', 'read_web'].map((name): ToolDefinition => {
+    return ['read_file', 'write_file', 'mcp_call', 'publish_data_view', 'read_web', 'execute_code'].map((name): ToolDefinition => {
       return { type: 'function', function: { name: name, description: name, parameters: { type: 'object', properties: {}, required: [], additionalProperties: false } } };
     });
   }
@@ -166,6 +166,7 @@ export default function chatTeamTests(): void {
       args.members[0].toolProfile = 'review'; const id = await f.recruit(JSON.stringify(args)); await f.wait(id);
       const names = f.provider.requests[0].tools.map((tool) => tool.function.name);
       expect(names.includes('team_recruit')).assertFalse(); expect(names.includes('publish_data_view')).assertFalse();
+      expect(names.includes('execute_code')).assertTrue();
       expect(names.includes('write_file')).assertFalse(); expect(names.includes('mcp_call')).assertFalse(); expect(names.includes('read_file')).assertTrue(); await f.host.close();
     });
     it('missing_handoff_is_failed_even_if_employee_finishes_text', 0, async () => {

@@ -90,6 +90,9 @@ export async function readBackup(context: common.UIAbilityContext): Promise<AppD
   for (const thread of data.threads) {
     thread.id = threadIds.get(thread.id) as string; thread.parentThreadId = threadIds.get(thread.parentThreadId || ''); thread.parentMessageId = messageIds.get(thread.parentMessageId || '');
     thread.pendingInputs = []; thread.queuePaused = true;
+    for (const reference of (thread.references || []).concat(...thread.messages.map((message) => message.references || []))) {
+      reference.threadId = threadIds.get(reference.threadId) || reference.threadId;
+    }
     thread.disabledMcpIds = [];
     for (const run of thread.teams || []) {
       if (run.ownerMessageId) { run.ownerMessageId = messageIds.get(run.ownerMessageId) || run.ownerMessageId; }

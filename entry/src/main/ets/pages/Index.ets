@@ -179,8 +179,7 @@ struct Index {
           onSkills: () => { this.paths.pushPath({ name: 'skills' }); },
           onPrompt: () => { this.paths.pushPath({ name: 'prompt' }); },
           onEditProvider: (id: string, preset: string) => {
-            this.app.beginProvider(preset, id);
-            this.paths.pushPath({ name: 'provider' });
+            if (this.app.beginProvider(preset, id)) { this.paths.pushPath({ name: 'provider' }); }
           } })
       }.title(t("设置")).backgroundColor($r('app.color.page_background'))
     } else if (name === 'prompt') {
@@ -203,6 +202,14 @@ struct Index {
       NavDestination() {
         ProviderEditorPanel({ app: this.app, editor: this.app.providerEditor, onSaved: () => { this.paths.pop(); } })
       }.title(this.app.providerEditor.id.length > 0 ? t("编辑服务") : t("添加服务")).backgroundColor($r('app.color.page_background'))
+        .onBackPressed(() => {
+          if (this.app.busy) { return true; }
+          if (!this.app.providerEditor.hasChanges) { return false; }
+          this.getUIContext().showAlertDialog({ title: t('放弃未保存的修改？'), message: t('离开后，本次对服务配置的修改不会保存。'),
+            primaryButton: { value: t('继续编辑'), action: () => {} },
+            secondaryButton: { value: t('放弃修改'), fontColor: $r('app.color.danger'), action: () => { this.paths.pop(); } } });
+          return true;
+        })
         .onHidden(() => { this.app.providerEditor.apiKey = ''; })
     } else if (name === 'models') {
       NavDestination() {
@@ -291,6 +298,7 @@ struct Index {
           this.header()
           if (this.app.ready) {
             ChatPanel({ app: this.app, thread: this.app.active, approval: this.approval, onSettings: () => this.openSettings(),
+                onOpenHistory: () => this.setDrawer(true),
                 onFiles: () => this.openFiles(), onTools: (tab: string) => this.openTools(tab) })
               .layoutWeight(1)
           } else {

@@ -1,4 +1,8 @@
 import teamTests from './Team.test';
+import swipeRowTests from './SwipeRow.test';
+import segmentedMotionTests from './SegmentedMotion.test';
+import reasoningEffortTests from './ReasoningEffort.test';
+import threadReferenceTests from './ThreadReferences.test';
 import systemPromptTests from './SystemPrompt.test';
 import i18nTests from './I18n.test';
 import chatTeamTests from './ChatTeam.test';
@@ -16,6 +20,10 @@ import sessionServiceTests from './SessionService.test';
 import processPresentationTests from './ProcessPresentation.test';
 
 export default function tests(): void {
+  swipeRowTests();
+  segmentedMotionTests();
+  reasoningEffortTests();
+  threadReferenceTests();
   processPresentationTests();
   systemPromptTests();
   i18nTests();

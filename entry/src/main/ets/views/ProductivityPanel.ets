@@ -1,4 +1,5 @@
 import { t } from '../model/I18n';
+import { SwipeRow } from '../common/SwipeRow';
 import { util } from '@kit.ArkTS';
 import { common } from '@kit.AbilityKit';
 import { McpOAuth } from '../services/McpOAuth';
@@ -18,6 +19,7 @@ export struct ProductivityPanel {
   @State tab: string = 'memory';
   onUse: () => void = () => {};
   @State private editing: boolean = false;
+  @State private swipeRow: string = '';
   @State private editingId: string = '';
   @State private name: string = '';
   @State private content: string = '';
@@ -54,7 +56,7 @@ export struct ProductivityPanel {
   private currentIndex(): number { return Math.max(0, TABS.indexOf(this.tab)); }
   private selectTab(index: number): void {
     if (this.tab === TABS[index]) { return; }
-    this.tab = TABS[index]; this.tabs.changeIndex(index);
+    this.swipeRow = ''; this.tab = TABS[index]; this.tabs.changeIndex(index);
   }
   private reset(): void {
     this.editingId = ''; this.name = ''; this.content = ''; this.url = ''; this.token = ''; this.scoped = false; this.noAuth = true; this.error = '';
@@ -154,17 +156,6 @@ export struct ProductivityPanel {
   }
 
   @Builder
-  deleteAction(id: string, label: string) {
-    Button({ type: ButtonType.Normal }) {
-      Column({ space: 4 }) {
-        SymbolGlyph($r('sys.symbol.trash')).fontSize(20).fontColor([Color.White])
-        Text(t("删除")).fontSize(12).fontColor(Color.White)
-      }
-    }.width(76).height('100%').borderRadius(Radius.lg).margin({ left: Space.sm })
-    .backgroundColor($r('app.color.danger')).enabled(!this.locked()).onClick(() => this.remove(id, label))
-  }
-
-  @Builder
   caption(text: string) {
     Text(text).fontSize(13).lineHeight(20).fontColor($r('app.color.text_secondary')).width('100%')
       .padding({ left: 4, right: 4, top: Space.sm })
@@ -180,6 +171,9 @@ export struct ProductivityPanel {
       }
       ForEach(this.memories(), (item: MemoryEntry) => {
         ListItem() {
+          SwipeRow({ rowKey: 'memory-' + item.id, label: t('这条记忆'), activeRow: this.swipeRow,
+            disabled: this.locked(), onOpen: (key: string) => { this.swipeRow = key; },
+            onDelete: () => this.remove(item.id, t('这条记忆')) }) {
           Column({ space: Space.sm }) {
             Text(item.content).fontSize(15).lineHeight(22).maxLines(4).textOverflow({ overflow: TextOverflow.Ellipsis })
               .width('100%').fontColor($r('app.color.text_primary'))
@@ -197,7 +191,8 @@ export struct ProductivityPanel {
           }.padding(Space.lg).width('100%').backgroundColor($r('app.color.surface')).borderRadius(Radius.lg)
           .stateStyles({ pressed: { .opacity(0.7) }, normal: { .opacity(1) } })
           .onClick(() => { if (!this.locked()) { this.editMemory(item); } })
-        }.swipeAction({ end: { builder: () => { this.deleteAction(item.id, t("这条记忆")); } } })
+          }
+        }
       }, (item: MemoryEntry) => item.id + item.updatedAt)
     }.width('100%').height('100%').padding({ left: Space.page, right: Space.page }).scrollBar(BarState.Off)
     .contentEndOffset(Space.lg).edgeEffect(EdgeEffect.Spring)
@@ -212,6 +207,9 @@ export struct ProductivityPanel {
       }
       ForEach(this.app.productivity.templates, (item: PromptTemplate) => {
         ListItem() {
+          SwipeRow({ rowKey: 'template-' + item.id, label: item.name, activeRow: this.swipeRow,
+            disabled: this.locked(), onOpen: (key: string) => { this.swipeRow = key; },
+            onDelete: () => this.remove(item.id, t('这个模板')) }) {
           Row({ space: Space.md }) {
             IconBadge({ icon: $r('sys.symbol.doc_plaintext') })
             Column({ space: 4 }) {
@@ -226,7 +224,8 @@ export struct ProductivityPanel {
           }.padding(Space.lg).width('100%').backgroundColor($r('app.color.surface')).borderRadius(Radius.lg)
           .stateStyles({ pressed: { .opacity(0.7) }, normal: { .opacity(1) } })
           .onClick(() => { if (!this.locked()) { this.editTemplate(item); } })
-        }.swipeAction({ end: { builder: () => { this.deleteAction(item.id, t("这个模板")); } } })
+          }
+        }
       }, (item: PromptTemplate) => JSON.stringify(item))
     }.width('100%').height('100%').padding({ left: Space.page, right: Space.page }).scrollBar(BarState.Off)
     .contentEndOffset(Space.lg).edgeEffect(EdgeEffect.Spring)
@@ -259,6 +258,9 @@ export struct ProductivityPanel {
       }
       ForEach(this.app.productivity.servers, (item: McpServer) => {
         ListItem() {
+          SwipeRow({ rowKey: 'mcp-' + item.id, label: item.name, activeRow: this.swipeRow,
+            disabled: this.locked(), onOpen: (key: string) => { this.swipeRow = key; },
+            onDelete: () => this.remove(item.id, t('这个 MCP 服务')) }) {
           Column({ space: 10 }) {
             Row({ space: Space.md }) {
               IconBadge({ icon: $r('sys.symbol.connection'),
@@ -308,7 +310,8 @@ export struct ProductivityPanel {
           }.padding({ left: Space.lg, right: Space.md, top: Space.md, bottom: 4 }).width('100%')
           .backgroundColor($r('app.color.surface')).borderRadius(Radius.lg)
           .onClick(() => { if (!this.locked()) { this.editServer(item); } })
-        }.swipeAction({ end: { builder: () => { this.deleteAction(item.id, t("这个 MCP 服务")); } } })
+          }
+        }
       }, (item: McpServer) => JSON.stringify(item))
       if (this.app.productivity.servers.length > 0) {
         ListItem() {
@@ -421,8 +424,8 @@ export struct ProductivityPanel {
         TabContent() { this.memoryTab() }
         TabContent() { this.templateTab() }
         TabContent() { this.serverTab() }
-      }.barHeight(0).layoutWeight(1).animationDuration(250)
-      .onChange((index: number) => { this.tab = TABS[index]; })
+      }.barHeight(0).layoutWeight(1).animationDuration(250).scrollable(false)
+      .onChange((index: number) => { this.swipeRow = ''; this.tab = TABS[index]; })
       if (this.error.length > 0 && !this.editing) {
         Banner({ text: this.error }).padding({ left: Space.page, right: Space.page })
       }

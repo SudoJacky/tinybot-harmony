@@ -5,5 +5,7 @@
   "main": "",
   "author": "",
   "license": "",
-  "dependencies": {}
+  "dependencies": {
+    "libtinybot_sandbox.so": "file:./src/main/cpp/types/libtinybot_sandbox"
+  }
 }

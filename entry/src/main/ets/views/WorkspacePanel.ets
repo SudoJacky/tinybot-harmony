@@ -1,7 +1,7 @@
 import { t } from '../model/I18n';
+import { SwipeRow } from '../common/SwipeRow';
 import { common } from '@kit.AbilityKit';
 import { fileIo as fs, picker } from '@kit.CoreFileKit';
-import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { NativeWorkspaceFiles } from '../services/NativeWorkspaceFiles';
@@ -29,6 +29,7 @@ function pad(value: number): string { return value < 10 ? '0' + value : value.to
 export struct WorkspacePanel {
   @ObjectLink app: ChatViewModel;
   @State private directory: string = '';
+  @State private swipeRow: string = '';
   @State private entries: WorkspaceEntry[] = [];
   @State private selected: string = '';
   @State private content: string = '';
@@ -205,26 +206,6 @@ export struct WorkspacePanel {
     if (entry.kind === 'symlink') { return t("链接 · 不支持打开"); }
     const dot = entry.name.lastIndexOf('.');
     return dot > 0 ? entry.name.slice(dot + 1).toUpperCase() + t(" 文件") : t("文件");
-  }
-
-  @Builder
-  rowMenu(path: string) {
-    Menu() {
-      MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.share')), content: t("分享") })
-        .onClick(() => this.fileAction('share', path))
-      MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.square_and_arrow_down')), content: t("导出到文件") })
-        .onClick(() => this.fileAction('export', path))
-      MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.trash')).fontColor([$r('app.color.danger')]), content: t("删除") })
-        .contentFontColor($r('app.color.danger')).onClick(() => this.confirmDelete(path))
-    }
-  }
-
-  @Builder
-  deleteAction(path: string) {
-    Button({ type: ButtonType.Normal }) {
-      SymbolGlyph($r('sys.symbol.trash')).fontSize(20).fontColor([Color.White])
-    }.width(64).height('100%').backgroundColor($r('app.color.danger')).accessibilityText(t("删除"))
-    .enabled(!this.locked()).onClick(() => this.confirmDelete(path))
   }
 
   @Builder
@@ -413,11 +394,17 @@ export struct WorkspacePanel {
             ForEach(this.entries, (entry: WorkspaceEntry) => {
               ListItem() {
                 if (entry.kind === 'file') {
-                  Column() { this.entryRow(entry) }.bindContextMenu(this.rowMenu(this.join(entry.name)), ResponseType.LongPress)
+                  SwipeRow({ rowKey: this.join(entry.name), label: entry.name, radius: 0,
+                    activeRow: this.swipeRow, disabled: this.locked(), onOpen: (key: string) => { this.swipeRow = key; },
+                    onShare: () => this.fileAction('share', this.join(entry.name)),
+                    onExport: () => this.fileAction('export', this.join(entry.name)),
+                    onDelete: () => this.confirmDelete(this.join(entry.name)) }) {
+                    this.entryRow(entry)
+                  }
                 } else {
                   this.entryRow(entry)
                 }
-              }.swipeAction(entry.kind === 'file' ? { end: { builder: () => { this.deleteAction(this.join(entry.name)); } } } : {})
+              }
             }, (entry: WorkspaceEntry) => this.directory + '/' + entry.name)
             if (this.truncated) {
               ListItem() {

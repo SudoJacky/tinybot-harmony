@@ -126,6 +126,129 @@ function historySeed(): AppData {
 
 export default function sessionServiceTests(): void {
   describe('SessionService', () => {
+    it('reasoningSelectionPersistsAndReachesTheRequestAndResetsToModelDefaults', 0, async () => {
+      const data = seed(); data.productivity = defaultProductivity();
+      const options = defaultAssistantOptions();
+      options.capabilities = [{ providerId: 'test', modelId: 'model', images: true, reasoning: 'medium', contextWindow: 32768, requestUsage: false }];
+      data.productivity.options = options;
+      const f = new Fixture(data); await f.session.initialize();
+      expect(await f.session.setReasoningEffort('high')).assertTrue();
+      const restored = new Fixture(await f.repository.load()); await restored.session.initialize();
+      expect(active(restored.session.snapshot()).reasoningEffort).assertEqual('high');
+      restored.session.setDraft('hello'); await restored.session.send();
+      expect(restored.provider.requests[0].reasoning).assertEqual('high');
+      expect(await restored.session.setReasoningEffort('default')).assertTrue();
+      expect(active(restored.session.snapshot()).reasoningEffort === undefined).assertTrue();
+      restored.session.setDraft('hello again'); await restored.session.send();
+      expect(restored.provider.requests[1].reasoning).assertEqual('medium');
+    });
+    it('anthropicEffortAndSignedHistorySurviveRuntimeAndRestart', 0, async () => {
+      const data = seed(); const profile = (data.providerProfiles || [])[0];
+      profile.protocol = 'anthropic-messages'; profile.models = ['claude-opus-4-6'];
+      data.threads[0].modelRef = { providerId: 'test', modelId: 'claude-opus-4-6' };
+      const f = new Fixture(data); await f.session.initialize();
+      expect(await f.session.setReasoningEffort('max')).assertTrue();
+      expect(await f.session.setReasoningEffort('none')).assertFalse();
+      f.provider.respond = async (): Promise<ModelTurn> => {
+        return { content: 'answer', toolCalls: [], reasoningContent: 'thought', anthropicContent: [
+          { type: 'thinking', thinking: 'thought', signature: 'opaque-signature' },
+          { type: 'text', text: 'answer' }
+        ] };
+      };
+      f.session.setDraft('hello'); await f.session.send();
+      expect(f.provider.requests[0].reasoning).assertEqual('max');
+      const restored = new Fixture(await f.repository.load()); await restored.session.initialize();
+      expect(restored.session.currentConfig.reasoning).assertEqual('max');
+      restored.session.setDraft('continue'); await restored.session.send();
+      const answer = restored.provider.requests[0].messages.find((message) => message.role === 'assistant');
+      expect(answer?.anthropicContent?.[0].signature).assertEqual('opaque-signature');
+    });
+    it('reasoningSelectionIsScopedToTheThreadAndSelectedModel', 0, async () => {
+      const data = seed(); (data.providerProfiles || [])[0].models.push('another');
+      const f = new Fixture(data); await f.session.initialize();
+      await f.session.setReasoningEffort('low');
+      await f.session.selectModel('test', 'model');
+      expect(f.session.currentConfig.reasoning).assertEqual('low');
+      await f.session.newThread();
+      expect(active(f.session.snapshot()).reasoningEffort === undefined).assertTrue();
+      await f.session.selectThread('thread-1');
+      expect(f.session.currentConfig.reasoning).assertEqual('low');
+      await f.session.selectModel('test', 'another');
+      expect(active(f.session.snapshot()).reasoningEffort === undefined).assertTrue();
+    });
+    it('reasoningSelectionRejectsUnsupportedValuesAndRollsBackFailedWrites', 0, async () => {
+      const f = new Fixture(); await f.session.initialize();
+      expect(await f.session.setReasoningEffort('invalid')).assertFalse();
+      await f.session.setReasoningEffort('low');
+      f.repository.beforeSave = async () => { throw new Error('disk failed'); };
+      expect(await f.session.setReasoningEffort('high')).assertFalse();
+      expect(f.session.currentConfig.reasoning).assertEqual('low');
+      expect(active(await f.repository.load()).reasoningEffort).assertEqual('low');
+      const unsupported = seed(); (unsupported.providerProfiles || [])[0].protocol = 'anthropic-messages';
+      (unsupported.providerProfiles || [])[0].models = ['claude-haiku-4-5'];
+      unsupported.threads[0].modelRef = { providerId: 'test', modelId: 'claude-haiku-4-5' };
+      const other = new Fixture(unsupported); await other.session.initialize();
+      expect(await other.session.setReasoningEffort('high')).assertFalse();
+      const broken = seed(); broken.threads[0].reasoningEffort = 'invalid';
+      let rejected = false;
+      try { parseAppData(JSON.stringify(broken)); } catch (_) { rejected = true; }
+      expect(rejected).assertTrue();
+    });
+    it('reasoningOverrideDoesNotLeakToAutomaticallyRoutedModels', 0, async () => {
+      const data = seed(); (data.providerProfiles || [])[0].models.push('another');
+      data.productivity = defaultProductivity();
+      const options = defaultAssistantOptions(); options.autoRoute = true;
+      options.fast = { providerId: 'test', modelId: 'another' };
+      options.capabilities = [{ providerId: 'test', modelId: 'another', reasoning: 'low', images: true, requestUsage: false, contextWindow: 32768 }];
+      data.productivity.options = options;
+      const f = new Fixture(data); await f.session.initialize();
+      await f.session.setReasoningEffort('high'); f.session.setDraft('hello'); await f.session.send();
+      expect(f.provider.requests[0].model).assertEqual('another');
+      expect(f.provider.requests[0].reasoning).assertEqual('low');
+    });
+    it('compactSlashCommandSummarizesWithoutCreatingAMessage', 0, async () => {
+      const f = new Fixture(historySeed()); await f.session.initialize();
+      f.provider.respond = async () => reply('short summary');
+      f.session.setDraft(' /compact '); await f.session.send();
+      expect(active(f.session.snapshot()).messages.length).assertEqual(8);
+      expect(active(f.session.snapshot()).compaction?.summary).assertEqual('short summary');
+      expect(active(await f.repository.load()).draft).assertEqual('');
+      expect(f.provider.requests[0].messages.some((message) => message.content === '/compact')).assertFalse();
+    });
+    it('compactKeepsFailedCommandAndRejectsQueueAndArguments', 0, async () => {
+      const f = new Fixture(); await f.session.initialize();
+      f.session.setDraft('/compact'); await f.session.enqueueInput('followUp');
+      expect((active(f.session.snapshot()).pendingInputs || []).length).assertEqual(0);
+      await f.session.send(); expect(active(f.session.snapshot()).draft).assertEqual('/compact');
+      expect(f.session.state.error.length > 0).assertTrue(); expect(f.provider.requests.length).assertEqual(0);
+      f.session.setDraft('/compact later'); await f.session.send();
+      expect(active(f.session.snapshot()).messages.length).assertEqual(0); expect(f.provider.requests.length).assertEqual(0);
+    });
+    it('compactPreservesDraftTypedWhileSummaryIsRunning', 0, async () => {
+      const f = new Fixture(historySeed()); await f.session.initialize();
+      f.provider.respond = async () => { f.session.setDraft('next task'); return reply('short summary'); };
+      f.session.setDraft('/compact'); await f.session.send();
+      expect(active(f.session.snapshot()).draft).assertEqual('next task');
+    });
+    it('referencesPersistAcrossSwitchAndDeletionAndReachModelAsUserContext', 0, async () => {
+      const data = seed(); const source = historySeed().threads[0]; source.id = 'source'; source.title = 'Reference source';
+      source.messages[7].content = 'unique source answer'; data.threads.push(source);
+      const f = new Fixture(data); await f.session.initialize();
+      f.session.setDraft('compare @Reference'); expect(await f.session.referenceThread('source')).assertTrue();
+      expect(active(f.session.snapshot()).draft).assertEqual('compare ');
+      expect(await f.session.referenceThread('source')).assertFalse();
+      await f.session.selectThread('source'); await f.session.selectThread('thread-1');
+      expect((active(await f.repository.load()).references || []).length).assertEqual(1);
+      await f.session.deleteThread('source'); await f.session.send();
+      expect(f.provider.requests[0].messages.some((message) => message.role === 'user' && message.content.includes('unique source answer'))).assertTrue();
+      expect(f.provider.requests[0].messages.filter((message) => message.role === 'system').some((message) => message.content.includes('unique source answer'))).assertFalse();
+      expect((active(f.session.snapshot()).references || []).length).assertEqual(0);
+      const user = active(f.session.snapshot()).messages[0]; expect((user.references || []).length).assertEqual(1);
+      await f.session.restoreMessageDraft(user.id); expect((active(f.session.snapshot()).references || []).length).assertEqual(1);
+      await f.session.enqueueInput('followUp'); expect((active(f.session.snapshot()).pendingInputs || []).length).assertEqual(0);
+      expect(await f.session.removeThreadReference('source')).assertTrue();
+      expect((active(await f.repository.load()).references || []).length).assertEqual(0);
+    });
     it('slashTeamEnablesModeWithoutCallingModelUntilThereIsATask', 0, async () => {
       const f = new Fixture(); await f.session.initialize(); f.session.setDraft('/team'); await f.session.send();
       expect(f.provider.requests.length).assertEqual(0); expect(active(await f.repository.load()).teamEnabled).assertTrue();
@@ -539,6 +662,26 @@ export default function sessionServiceTests(): void {
       expect(await f.session.saveProvider(draft)).assertFalse();
       expect(f.session.snapshot().providerProfiles?.[0].baseUrl).assertEqual('https://example.com/v1');
       expect(await f.keys.read(alias)).assertEqual('new-secret');
+    });
+
+    it('preservesSavedKeyWhenChangingProtocolAndOrdinaryProviderSettings', 0, async () => {
+      const f = new Fixture(); await f.session.initialize();
+      const draft = providerDraft(); draft.noApiKey = false; draft.apiKey = 'existing-secret';
+      expect(await f.session.saveProvider(draft)).assertTrue();
+      const alias = f.session.snapshot().providerProfiles?.[0].credentialAlias || '';
+      const removals = f.keys.removed.length;
+      draft.apiKey = ''; draft.protocol = 'responses'; draft.baseUrl += '/responses/';
+      draft.name = 'Renamed'; draft.models = 'model,second-model'; draft.contextWindow = '65536';
+      expect(await f.session.saveProvider(draft)).assertTrue();
+      expect(f.session.snapshot().providerProfiles?.[0].credentialAlias).assertEqual(alias);
+      expect((await f.repository.load()).providerProfiles?.[0].protocol).assertEqual('responses');
+      draft.protocol = 'chat-completions'; draft.baseUrl = 'https://example.com/v1'; draft.enabled = false;
+      expect(await f.session.saveProvider(draft)).assertTrue();
+      expect(f.session.snapshot().providerProfiles?.[0].credentialAlias).assertEqual(alias);
+      expect(await f.keys.read(alias)).assertEqual('existing-secret'); expect(f.keys.removed.length).assertEqual(removals);
+      draft.baseUrl = 'https://example.com/other-tenant/v1';
+      expect(await f.session.saveProvider(draft)).assertFalse();
+      expect((await f.repository.load()).providerProfiles?.[0].baseUrl).assertEqual('https://example.com/v1');
     });
 
     it('requiresReplacingAMissingSavedKeyBeforeKeepingItsAlias', 0, async () => {

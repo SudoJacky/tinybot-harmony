@@ -1,4 +1,5 @@
 import { describe, expect, it } from '@ohos/hypium';
+import { ProviderEditorViewModel } from '../main/ets/viewmodel/ProviderEditorViewModel';
 import { defaultConfig, emptyData, parseAppData } from '../main/ets/model/Conversation';
 import { ModelMessage, ToolDefinition, ToolProperty, ToolParameters, ToolDefinitionFunction } from '../main/ets/model/Agent';
 import { ProviderProfile, availableModels, migrateProfiles, modelConfig, modelIds, validateProfile } from '../main/ets/model/ProviderProfiles';
@@ -39,6 +40,53 @@ const ANTHROPIC_TEXT = 'data: {"type":"message_start"}\n\n' +
 
 export default function profileTests(): void {
   describe('ProviderProfiles', () => {
+    it('mobileEditorAddsModelsWithoutDuplicatesAndRejectsInvalidBatchAtomically', 0, () => {
+      const editor = new ProviderEditorViewModel(); editor.reset(profile('test'));
+      expect(editor.hasChanges).assertFalse();
+      editor.addModels('same-model,new-model');
+      expect(editor.modelList.join(',')).assertEqual('same-model,other-model,new-model'); expect(editor.hasChanges).assertTrue();
+      const before = editor.models; rejects(() => editor.addModels('valid,' + 'x'.repeat(201)));
+      expect(editor.models).assertEqual(before);
+      editor.removeModel('new-model'); expect(editor.hasChanges).assertFalse();
+      editor.removeModel('same-model'); editor.removeModel('other-model');
+      expect(editor.fieldError('models').length > 0).assertTrue();
+    });
+    it('mobileEditorRetainsKeysAcrossProtocolsAtTheSameServiceRoot', 0, () => {
+      const editor = new ProviderEditorViewModel(); editor.reset(profile('test'));
+      expect(editor.canKeepKey).assertTrue(); expect(editor.fieldError('key')).assertEqual('');
+      editor.baseUrl += '/chat/completions'; expect(editor.canKeepKey).assertTrue();
+      editor.baseUrl = 'https://other.example/v1'; expect(editor.canKeepKey).assertFalse();
+      expect(editor.fieldError('key').length > 0).assertTrue();
+      editor.apiKey = 'replacement'; expect(editor.fieldError('key')).assertEqual('');
+      editor.reset(profile('test')); editor.changeProtocol('responses'); expect(editor.canKeepKey).assertTrue();
+      expect(editor.fieldError('key')).assertEqual('');
+      editor.changeProtocol('anthropic-messages'); expect(editor.canKeepKey).assertTrue();
+      editor.baseUrl = 'https://example.com/other'; expect(editor.canKeepKey).assertFalse();
+      editor.baseUrl = 'https://example.com:8443/v1'; expect(editor.canKeepKey).assertFalse();
+      editor.baseUrl = 'http://example.com/v1'; expect(editor.canKeepKey).assertFalse();
+      editor.baseUrl = 'invalid'; expect(editor.canKeepKey).assertFalse();
+      editor.noApiKey = true; expect(editor.fieldError('key')).assertEqual('');
+    });
+    it('mobileEditorConvertsFullEndpointPathsWhenSwitchingProtocol', 0, () => {
+      const existing = profile('test'); existing.baseUrl += '/chat/completions/';
+      const editor = new ProviderEditorViewModel(); editor.reset(existing);
+      editor.changeProtocol('responses');
+      expect(editor.baseUrl).assertEqual('https://example.com/v1/responses');
+      expect(editor.canKeepKey).assertTrue(); expect(editor.fieldError('url')).assertEqual('');
+      editor.changeProtocol('chat-completions');
+      expect(editor.baseUrl).assertEqual('https://example.com/v1/chat/completions');
+      expect(editor.canKeepKey).assertTrue();
+    });
+    it('mobileEditorReportsFieldErrorsAndResetsDirtyStateBetweenServices', 0, () => {
+      const editor = new ProviderEditorViewModel(); editor.reset();
+      expect(editor.hasChanges).assertFalse(); expect(editor.fieldError('name').length > 0).assertTrue();
+      editor.baseUrl = 'not a url'; expect(editor.fieldError('url').length > 0).assertTrue();
+      editor.contextWindow = '8191'; expect(editor.fieldError('context').length > 0).assertTrue();
+      editor.contextWindow = '8192'; expect(editor.fieldError('context')).assertEqual('');
+      editor.reset(profile('another')); expect(editor.hasChanges).assertFalse(); expect(editor.apiKey).assertEqual('');
+      editor.modelInput = 'unfinished model'; expect(editor.hasChanges).assertTrue();
+      editor.reset(profile('test')); expect(editor.modelInput).assertEqual(''); expect(editor.hasChanges).assertFalse();
+    });
     it('migratesConfiguredLegacyDeepSeekWithoutChangingAliasOrEndpoint', 0, () => {
       const config = defaultConfig();
       config.configured = true; config.credentialAlias = 'existing-secure-key';

@@ -1,4 +1,5 @@
 import { t } from '../model/I18n';
+import { reasoningEfforts, reasoningEffortName } from '../model/ReasoningEffort';
 import { common } from '@kit.AbilityKit';
 import { AssistantOptions, ModelCapability, defaultAssistantOptions } from '../model/AssistantOptions';
 import { ModelReference } from '../model/ProviderProfiles';
@@ -11,8 +12,6 @@ import { Btn, Font, Radius, Space, compactNumber, shortTime } from '../common/Th
 import { Banner, BottomBar, EmptyState, GroupCard, NavRow, RowDivider, SectionHeader, Segmented, StatTile, SwitchRow, Tag } from '../common/Widgets';
 
 const TABS: string[] = ['settings', 'usage', 'backup'];
-const REASONING: string[] = ['default', 'low', 'medium', 'high'];
-function REASONING_NAMES(): string[] { return [t("服务默认"), t("低强度"), t("中强度"), t("高强度")]; }
 function STATUS_NAMES(): Record<string, string> { return { 'complete': t("完成"), 'failed': t("失败"), 'cancelled': t("已取消"), 'running_or_unknown': t("未结束") }; }
 
 @Component
@@ -34,12 +33,18 @@ export struct AssistantPanel {
   aboutToAppear(): void { this.options = JSON.parse(JSON.stringify(this.app.productivity.options || defaultAssistantOptions())) as AssistantOptions; this.records = UsageLedger.list(); this.loadCapability(); }
   private choices(kind: string = ''): string[] { return [kind === 'image' ? t("未启用") : t("跟随当前模型")].concat(this.app.modelChoices.map((item) => item.providerName + ' · ' + item.modelId)); }
   private reference(index: number): ModelReference | undefined { const item = this.app.modelChoices[index - 1]; return item ? { providerId: item.providerId, modelId: item.modelId } : undefined; }
-  private supportsReasoning(): boolean { return this.app.providerProfiles.find((item) => item.id === this.reference(this.capabilityIndex + 1)?.providerId)?.protocol !== 'anthropic-messages'; }
+  private efforts(): string[] {
+    const reference = this.reference(this.capabilityIndex + 1);
+    const protocol = this.app.providerProfiles.find((item) => item.id === reference?.providerId)?.protocol || '';
+    return reasoningEfforts(protocol, reference?.modelId || '');
+  }
+  private supportsReasoning(): boolean { return this.efforts().length > 1; }
   private chosen(reference?: ModelReference): number { return reference ? this.app.modelChoices.findIndex((item) => item.providerId === reference.providerId && item.modelId === reference.modelId) + 1 : 0; }
   private loadCapability(): void {
     const reference = this.reference(this.capabilityIndex + 1);
     const item = this.options.capabilities.find((item) => item.providerId === reference?.providerId && item.modelId === reference?.modelId);
-    this.images = item?.images !== false; this.usage = item?.requestUsage === true; this.reasoning = this.supportsReasoning() ? item?.reasoning || 'default' : 'default';
+    this.images = item?.images !== false; this.usage = item?.requestUsage === true;
+    this.reasoning = this.efforts().includes(item?.reasoning || 'default') ? item?.reasoning || 'default' : 'default';
     this.contextWindow = String(item?.contextWindow || this.app.providerProfiles.find((item) => item.id === reference?.providerId)?.contextWindow || 32768);
   }
   private async save(): Promise<void> {
@@ -179,9 +184,9 @@ export struct AssistantPanel {
                 SwitchRow({ title: t("请求流式用量"), subtitle: t("适用于支持 stream_options 的 Chat Completions 服务。"), compId: 'capability-usage',
                   isOn: this.usage, onChange: (value) => { this.usage = value; } })
                 RowDivider()
-                this.choiceRow(t("推理强度"), this.supportsReasoning() ? '' : t("Anthropic 使用服务默认设置"), REASONING_NAMES(),
-                  Math.max(0, REASONING.indexOf(this.reasoning)), this.supportsReasoning(),
-                  (index: number) => { this.reasoning = REASONING[index]; })
+                this.choiceRow(t("推理强度"), this.supportsReasoning() ? '' : t('当前模型使用服务默认设置'), this.efforts().map((value) => reasoningEffortName(value)),
+                  Math.max(0, this.efforts().indexOf(this.reasoning)), this.supportsReasoning(),
+                  (index: number) => { this.reasoning = this.efforts()[index]; })
                 RowDivider()
                 Row({ space: Space.md }) {
                   Text(t("上下文窗口")).fontSize(Font.body).fontColor($r('app.color.text_primary'))

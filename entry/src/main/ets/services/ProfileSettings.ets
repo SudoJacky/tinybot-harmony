@@ -2,7 +2,7 @@ import { t } from '../model/I18n';
 import { AppData, copyModelConfig } from '../model/Conversation';
 import { ProviderProfile, modelConfig, modelIds, validateProfile } from '../model/ProviderProfiles';
 import { CredentialReader } from './providers/Provider';
-import { protocolUrl } from './providers/WireProtocols';
+import { sameCredentialScope } from './providers/WireProtocols';
 
 export interface CredentialVault extends CredentialReader {
   write(alias: string, secret: string): Promise<void>;
@@ -36,10 +36,9 @@ export class ProfileSettings {
     const previous = profiles.find((item: ProviderProfile) => item.id === draft.id);
     if (draft.id.length > 0 && !previous) { throw new Error(t("模型服务不存在。")); }
     const key = draft.apiKey.trim();
-    const sameScope = previous?.protocol === draft.protocol &&
-      protocolUrl(previous.protocol, previous.baseUrl, true) === protocolUrl(draft.protocol, draft.baseUrl, true);
+    const sameScope = previous !== undefined && sameCredentialScope(previous.protocol, previous.baseUrl, draft.protocol, draft.baseUrl);
     if (!draft.noApiKey && key.length === 0 && (!previous?.credentialAlias || !sameScope)) {
-      throw new Error(t("请填写 API Key；修改协议或服务地址时需要重新填写，其他服务的密钥不会被复用。"));
+      throw new Error(t("请填写 API Key；更换服务基础地址时需要重新填写，其他服务的密钥不会被复用。"));
     }
     const profile: ProviderProfile = { id: previous?.id || 'provider-' + this.createId(), name: draft.name.trim(),
       presetId: draft.presetId, protocol: draft.protocol, baseUrl: draft.baseUrl.trim().replace(/\/+$/, ''),

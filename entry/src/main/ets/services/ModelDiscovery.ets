@@ -3,7 +3,7 @@ import { http } from '@kit.NetworkKit';
 import { ProviderDraft } from './ProfileSettings';
 import { ProviderProfile } from '../model/ProviderProfiles';
 import { CredentialStore } from './CredentialStore';
-import { protocolUrl, protocolHeaders } from './providers/WireProtocols';
+import { protocolUrl, protocolHeaders, sameCredentialScope } from './providers/WireProtocols';
 interface ListedModel { id: string; }
 interface ModelList { data: ListedModel[]; }
 export async function discoverModels(draft: ProviderDraft, profiles: ProviderProfile[]): Promise<string[]> {
@@ -11,7 +11,7 @@ export async function discoverModels(draft: ProviderDraft, profiles: ProviderPro
   let key = draft.apiKey.trim();
   if (!draft.noApiKey && !key) {
     const existing = profiles.find((item) => item.id === draft.id);
-    if (!existing || existing.protocol !== draft.protocol || protocolUrl(existing.protocol, existing.baseUrl, true).replace(/\/(chat\/completions|responses|messages)$/, '/models') !== endpoint) {
+    if (!existing || !existing.credentialAlias || !sameCredentialScope(existing.protocol, existing.baseUrl, draft.protocol, draft.baseUrl)) {
       throw new Error(t("请先填写此服务的 API Key。"));
     }
     key = await new CredentialStore().read(existing.credentialAlias);

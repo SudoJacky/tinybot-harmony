@@ -1,4 +1,5 @@
 import { t } from './I18n';
+import { AnthropicContentBlock, validateAnthropicContent } from './AnthropicContent';
 import { Attachment } from './Productivity';
 import { RequestUsage } from './Usage';
 import { PendingInput, validatePendingInput } from './PendingInput';
@@ -50,6 +51,7 @@ export interface ToolDefinition {
 }
 
 export interface ModelMessage {
+  anthropicContent?: AnthropicContentBlock[];
   attachments?: Attachment[];
   images?: string[];
   role: string;
@@ -60,6 +62,7 @@ export interface ModelMessage {
 }
 
 export interface ModelTurn {
+  anthropicContent?: AnthropicContentBlock[];
   usage?: RequestUsage;
   content: string;
   toolCalls: ToolCall[];
@@ -73,6 +76,7 @@ export interface ToolExecution {
 }
 
 export interface AgentStep {
+  anthropicContent?: AnthropicContentBlock[];
   usage?: RequestUsage;
   content: string;
   tools: ToolExecution[];
@@ -108,10 +112,10 @@ export function toolError(message: string): string {
 export function stepMessages(step: AgentStep, includeSteering: boolean = true): ModelMessage[] {
   const prefix: ModelMessage[] = includeSteering && step.steering ? [{ role: 'user', content: step.steering.text }] : [];
   if (step.tools.length === 0) {
-    return prefix.concat([{ role: 'assistant', content: step.content, reasoningContent: step.reasoningContent }]);
+    return prefix.concat([{ role: 'assistant', content: step.content, reasoningContent: step.reasoningContent, anthropicContent: step.anthropicContent }]);
   }
   const result: ModelMessage[] = [{
-    role: 'assistant', content: step.content, reasoningContent: step.reasoningContent,
+    role: 'assistant', content: step.content, reasoningContent: step.reasoningContent, anthropicContent: step.anthropicContent,
     toolCalls: step.tools.map((tool: ToolExecution) => tool.call)
   }];
   for (const tool of step.tools) {
@@ -142,6 +146,7 @@ export function validateSteps(steps: AgentStep[]): void {
   const ids = new Set<string>();
   const inputIds = new Set<string>();
   for (const step of steps) {
+    if (step?.anthropicContent !== undefined) validateAnthropicContent(step.anthropicContent);
     if (!step || typeof step.content !== 'string' || !Array.isArray(step.tools) ||
       (step.reasoningContent !== undefined && (typeof step.reasoningContent !== 'string' ||
         step.reasoningContent.length > MAX_REASONING_CONTENT))) {

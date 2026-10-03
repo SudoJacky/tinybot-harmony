@@ -1,4 +1,5 @@
 import { t } from '../model/I18n';
+import { referenceContext } from '../model/ThreadReferences';
 import { TeamMember, TeamPlan, TeamRun } from '../model/Team';
 import { Attachment, ProductivityData, defaultProductivity, expandTemplate } from '../model/Productivity';
 import { AppData, ModelConfig, defaultConfig, copyModelConfig } from '../model/Conversation';
@@ -63,6 +64,7 @@ export class ChatViewModel {
   teams: TeamRun[] = [];
   setTeamEnabled(enabled: boolean): Promise<boolean> { return this.requireSession().setTeamEnabled(enabled); }
   get teamBusy(): boolean { return this.phase === 'team'; }
+  get saving(): boolean { return this.phase === 'saving'; }
   prepareTeam(goal: string, members: TeamMember[], concurrency: number): Promise<boolean> { return this.requireSession().prepareTeam(goal, members, concurrency); }
   reviseTeam(id: string, revision: number, plan: TeamPlan): Promise<boolean> { return this.requireSession().reviseTeam(id, revision, plan); }
   executeTeam(id: string, revision: number): Promise<void> { return this.requireSession().executeTeam(id, revision); }
@@ -142,7 +144,7 @@ export class ChatViewModel {
     return name + ' · ' + ref.modelId + (this.configured ? '' : t(' · 不可用'));
   }
   get visibleMessages(): MessageViewModel[] { return this.active.messages.slice(-this.visibleMessageCount); }
-  get contextUsed(): number { return this.contextTokens + estimateTextTokens(this.draft); }
+  get contextUsed(): number { return this.contextTokens + estimateTextTokens(this.draft + referenceContext(this.active.references)); }
   get contextWindow(): number { return contextSettings(this.currentConfig).window; }
   get contextLabel(): string { return t('上下文约 {0} / {1} tokens', [this.contextUsed, this.contextWindow]); }
   get canQueueInput(): boolean {
@@ -158,6 +160,8 @@ export class ChatViewModel {
   importSnapshot(data: AppData): Promise<boolean> { return this.requireSession().importSnapshot(data); }
   setThreadMcp(id: string, enabled: boolean): Promise<boolean> { return this.requireSession().setThreadMcp(id, enabled); }
   setAttachments(items: Attachment[]): Promise<boolean> { return this.requireSession().setAttachments(items); }
+  referenceThread(id: string): Promise<boolean> { return this.requireSession().referenceThread(id); }
+  removeThreadReference(id: string): Promise<boolean> { return this.requireSession().removeThreadReference(id); }
   forkThread(messageId: string = ''): Promise<boolean> { return this.requireSession().forkThread(messageId); }
   useTemplate(id: string): void {
     try {
@@ -172,6 +176,7 @@ export class ChatViewModel {
   pinThread(id: string): Promise<boolean> { return this.requireSession().pinThread(id); }
   archiveThread(id: string): Promise<boolean> { return this.requireSession().archiveThread(id); }
   selectModel(providerId: string, modelId: string, asDefault: boolean = false): Promise<boolean> { return this.requireSession().selectModel(providerId, modelId, asDefault); }
+  setReasoningEffort(value: string): Promise<boolean> { return this.requireSession().setReasoningEffort(value); }
   deleteProvider(id: string): Promise<boolean> { return this.requireSession().deleteProvider(id); }
   changeSkill(name: string, remove: boolean = false): Promise<boolean> { return this.requireSession().changeSkill(name, remove); }
   enqueueInput(mode: InputMode): Promise<void> { return this.requireSession().enqueueInput(mode); }
@@ -201,19 +206,22 @@ export class ChatViewModel {
   async stop(): Promise<void> { if (this.session) { await this.session.stop(); } }
   retryPrompt(): void {
     if (!this.requireSession().canMutate) { return; }
-    if (this.active.messages.length >= 2) { this.setDraft(this.active.messages[this.active.messages.length - 2].content); this.setAttachments(this.active.messages[this.active.messages.length - 2].attachments); }
+    if (this.active.messages.length >= 2) { this.requireSession().restoreMessageDraft(this.active.messages[this.active.messages.length - 2].id); }
   }
 
   openSettings(): void { this.settings.reset(this.config, this.extensions.webEnabled); }
   async saveSettings(): Promise<boolean> {
     const saved = await this.requireSession().saveSettings(this.settings.systemPrompt, this.settings.autoCompact, this.settings.webEnabled);
-    this.settings.error = saved ? '' : this.error; return saved;
+    // A refused save (session busy) reports no session error; still tell the user it did not stick.
+    this.settings.error = saved ? '' : this.error || t("设置未保存，请稍后重试。"); return saved;
   }
-  beginProvider(presetId: string = '', profileId: string = ''): void {
-    if (!this.requireSession().canMutate) { return; }
+  // Returns false when the editor was not reset, so callers must not open it with a stale draft.
+  beginProvider(presetId: string = '', profileId: string = ''): boolean {
+    if (!this.requireSession().canMutate) { return false; }
     const profile = this.providerProfiles.find((item) => item.id === profileId);
     if (profileId.length > 0 && !profile) { throw new Error(t("模型服务不存在。")); }
     this.providerEditor.reset(profile, this.providerPresets.find((preset) => preset.id === presetId));
+    return true;
   }
   async saveProvider(): Promise<boolean> {
     const saved = await this.requireSession().saveProvider(this.providerEditor.snapshot());

@@ -1,4 +1,5 @@
 import { t } from './I18n';
+import { REASONING_EFFORTS } from './ReasoningEffort';
 import { ModelReference, validateReference } from './ProviderProfiles';
 export interface ModelCapability extends ModelReference { images: boolean; reasoning: string; contextWindow: number; requestUsage: boolean; }
 export interface AssistantOptions {
@@ -15,7 +16,7 @@ export function validateAssistantOptions(value: AssistantOptions): void {
   for (const reference of [value.fast, value.deep, value.vision, value.memory, value.image]) { if (reference) { validateReference(reference); } }
   for (const item of value.capabilities) {
     validateReference(item);
-    if (typeof item.images !== 'boolean' || typeof item.requestUsage !== 'boolean' || !['default', 'low', 'medium', 'high'].includes(item.reasoning) ||
+    if (typeof item.images !== 'boolean' || typeof item.requestUsage !== 'boolean' || !REASONING_EFFORTS.includes(item.reasoning) ||
       !Number.isInteger(item.contextWindow) || item.contextWindow < 8192 || item.contextWindow > 2000000) { throw new Error(t("模型能力配置无效。")); }
   }
 }

@@ -10,6 +10,8 @@ import { Attachments } from '../services/Attachments';
 import { MessageViewModel, ToolExecutionViewModel } from '../viewmodel/ChatViewModel';
 import { Btn, Font, Motion, Radius, Space, compactNumber, fileSize, systemInsets } from '../common/Theme';
 import { ThinkingDisclosure } from './ThinkingDisclosure';
+import { ThreadReferenceCard } from './ThreadReferenceCard';
+import { ThreadReference } from '../model/ThreadReferences';
 import { DisclosureState } from '../viewmodel/DisclosureState';
 import { ToolDetails } from './ToolDetails';
 import { ProcessItem, TimelineEntry, buildTimeline, describeTools, durationLabel, elapsedMs, foldsToAnswer, persistentTool,
@@ -411,7 +413,15 @@ export struct MessageBubble {
   private foldable(): boolean { return this.message.status === 'complete' && foldsToAnswer(this.timeline()); }
   private folded(): boolean { return this.foldable() && !this.message.processOpen; }
   private entryVisible(entry: TimelineEntry, index: number, count: number): boolean {
-    return !this.folded() || entry.kind !== 'text' || index === count - 1;
+    if (!this.folded()) { return true; }
+    if (entry.kind === 'text') { return index === count - 1; }
+    if (entry.kind !== 'process') { return true; }
+    // Empty folded groups must not mount: the parent Column adds spacing even to empty children.
+    const latestPlanId = summarizeProcess(this.message.stepViews).latestPlanId;
+    return entry.items.some((item: ProcessItem) => {
+      const tool = this.message.stepViews[item.step]?.tools[item.tool];
+      return tool !== undefined && persistentTool(tool, latestPlanId);
+    });
   }
   private processSummary(): string {
     const elapsed = elapsedMs(this.message.steps);
@@ -482,6 +492,9 @@ export struct MessageBubble {
   @Builder
   userMessage() {
     Column({ space: 6 }) {
+      ForEach(this.message.references, (item: ThreadReference) => {
+        ThreadReferenceCard({ reference: item })
+      }, (item: ThreadReference) => item.threadId)
       if (this.images().length === 1) {
         Image('file://' + Attachments.path(this.images()[0])).width(200).constraintSize({ maxHeight: 260 })
           .objectFit(ImageFit.Cover).borderRadius(Radius.lg).backgroundColor($r('app.color.surface_variant'))
