@@ -11,7 +11,7 @@ const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/et
 const source = path.resolve(__dirname, '../entry/src/main/ets');
 const fixture = path.resolve(__dirname, '../.hvigor/native-productivity-' + crypto.randomUUID());
 fs.mkdirSync(fixture, { recursive: true });
-const handles = new Map(); let failManifest = false;
+const handles = new Map(); let failManifest = false; const usageWrites = [];
 const nativePath = p => p.startsWith('/sandbox/') ? path.join(fixture, p.slice(1)) : p;
 const fileIo = {
   OpenMode: { READ_ONLY: 1, CREATE: 2, WRITE_ONLY: 4, TRUNC: 8, NOFOLLOW: 16 },
@@ -24,12 +24,15 @@ const fileIo = {
   stat: async fd => typeof fd === 'number' ? handles.get(fd).stat() : fs.promises.stat(nativePath(fd)),
   lstat: async p => { try { return await fs.promises.lstat(nativePath(p)); } catch(e) { if(e.code==='ENOENT')e.code=13900002;throw e; } },
   fsync: fd => handles.get(fd).sync(), unlink: p => fs.promises.unlink(nativePath(p)),
-  rename: async (a,b) => { if (failManifest && b.endsWith('/index.json')) { throw new Error('injected manifest failure'); } await fs.promises.rename(nativePath(a),nativePath(b)); }
+  rename: async (a,b) => { if (failManifest && b.endsWith('/index.json')) { throw new Error('injected manifest failure'); } if(b.includes("/usage-records/"))usageWrites.push(b); await fs.promises.rename(nativePath(a),nativePath(b)); }
 };
 // Reproduce the empty-input behavior observed on the physical HarmonyOS device.
 class Encoder { encodeInto(s) { return s === '' ? undefined : new TextEncoder().encode(s); } }
 class Decoder { constructor(encoding, opts) { this.decoder = new TextDecoder(encoding, opts); } decodeToString(bytes, opts) { return this.decoder.decode(bytes, opts); } }
 const cache = new Map(); const calls = []; let httpScript = () => {}; let destroyed = 0; let jsonScript = () => { throw Error('Unexpected JSON request'); };
+let fakeTimers;
+const scheduleTimer = (fn, ms) => fakeTimers ? fakeTimers.set(fn, ms) : setTimeout(fn, ms);
+const cancelTimer = id => fakeTimers ? fakeTimers.clear(id) : clearTimeout(id);
 let selectedFile = '/sandbox/backup-export.json';
 const http = { RequestMethod: { POST: 'POST', GET: 'GET' }, HttpDataType: { STRING: 'string', ARRAY_BUFFER: 'buffer' }, createHttp: () => {
   const handlers = {}; let closed = false;
@@ -41,6 +44,7 @@ const http = { RequestMethod: { POST: 'POST', GET: 'GET' }, HttpDataType: { STRI
     } };
 } };
 const kits = {
+  '@kit.PerformanceAnalysisKit': { hilog: { info() {}, error() {} } },
   '@kit.CoreFileKit': { fileIo, picker: { DocumentViewPicker: class { async save() {return [selectedFile];} async select() {return [selectedFile];} } } }, '@kit.ImageKit': { image: {} }, '@kit.NetworkKit': { http },
   '@kit.MediaLibraryKit': {}, '@kit.ShareKit': {},
   '@kit.ArkTS': { util: { generateRandomUUID: () => crypto.randomUUID(), TextEncoder: Encoder, TextDecoder: Decoder,
@@ -61,7 +65,7 @@ function load(file) {
   const exports = {}; cache.set(file, exports);
   const compiled = ts.transpileModule(fs.readFileSync(file,'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021, experimentalDecorators: true } }).outputText;
   vm.runInNewContext(compiled, { exports, require: id => id.startsWith('.') ? load(path.resolve(path.dirname(file), id)) : kits[id],
-    Observed: cls => cls, setTimeout, clearTimeout, Uint8Array, ArrayBuffer, DataView, Map, Set, Object, JSON, Error, console }, { filename: file });
+    Observed: cls => cls, setTimeout: scheduleTimer, clearTimeout: cancelTimer, Uint8Array, ArrayBuffer, DataView, Map, Set, Object, JSON, Error, console }, { filename: file });
   return exports;
 }
 const model = load(path.join(source, 'model/Conversation'));
@@ -86,6 +90,10 @@ function respond(request, result, sse = false) {
   const bytes = Buffer.from(text);
   for (let i=0; i<bytes.length; i+=7) request.emit('dataReceive', Uint8Array.from(bytes.subarray(i,i+7)).buffer);
   request.emit('dataEnd');
+}
+function readSavedUsage(root) {
+  const dir=nativePath(root+'/usage-records');const manifest=JSON.parse(fs.readFileSync(path.join(dir,'index.json'),'utf8'));
+  return Array.from({length:manifest.pages},(_,i)=>JSON.parse(fs.readFileSync(path.join(dir,i+'.json'),'utf8'))).flat();
 }
 async function test(name, run) { await run(); console.log('PASS '+name); }
 (async () => {
@@ -203,12 +211,15 @@ async function test(name, run) { await run(); console.log('PASS '+name); }
     const root='/sandbox/backup-app';fs.mkdirSync(nativePath(root+'/workspace/thread'),{recursive:true});fs.mkdirSync(nativePath(root+'/cache'));fs.mkdirSync(nativePath(root+'/attachments'));
     Attachments.configure(root);const id=crypto.randomUUID();fs.writeFileSync(nativePath(root+'/attachments/'+id+'.txt'),'sample');fs.writeFileSync(nativePath(root+'/workspace/thread/note.txt'),'workspace');
     const data=model.emptyData();data.activeThreadId='thread';const attachment={id,name:'input.txt',mime:'text/plain',path:id+'.txt',size:6,text:'sample'};
+    data.config.userDocument = '# About me\nCall me Lin.\n';
     data.threads=[{id:'thread',title:'source',updatedAt:1,messages:[{id:'u',role:'user',content:'hello',status:'complete',error:'',attachments:[attachment]},{id:'a',role:'assistant',content:'answer',status:'complete',error:''}],modelRef:{providerId:'provider',modelId:'model'}}];
     data.providerProfiles=[{id:'provider',name:'Provider',protocol:'chat-completions',baseUrl:'https://api.invalid/v1',credentialAlias:'SECRET-ALIAS',noApiKey:false,enabled:true,models:['model'],contextWindow:32768}];
     data.productivity={memories:[{id:'m',content:'fact',threadId:'thread',updatedAt:1,sourceThreadId:'thread',sourceMessageId:'u'}],templates:[],servers:[]};
     const context={cacheDir:root+'/cache',getApplicationContext:()=>({filesDir:root})};await exportBackup(context,JSON.parse(JSON.stringify(data)));
     const exported=fs.readFileSync(nativePath(selectedFile),'utf8');assert.ok(!exported.includes('SECRET-ALIAS'));
     const restored=await readBackup(context);assert.notEqual(restored.threads[0].id,'thread');assert.equal(restored.providerProfiles[0].enabled,false);
+    assert.equal(JSON.parse(exported).data.config.userDocument, data.config.userDocument);
+    assert.equal(restored.config.userDocument, data.config.userDocument);
     assert.equal(restored.productivity.memories[0].threadId,restored.threads[0].id);assert.equal(restored.productivity.memories[0].sourceMessageId,restored.threads[0].messages[0].id);
     assert.equal(fs.readFileSync(nativePath(root+'/workspace/'+restored.threads[0].id+'/note.txt'),'utf8'),'workspace');
     const restoredAttachment=restored.threads[0].messages[0].attachments[0];assert.notEqual(restoredAttachment.id,id);assert.equal(fs.readFileSync(nativePath(root+'/attachments/'+restoredAttachment.path),'utf8'),'sample');
@@ -240,12 +251,100 @@ async function test(name, run) { await run(); console.log('PASS '+name); }
     }
     assert.equal(requests,2);
   });
+  await test('provider keeps active streams beyond three minutes and stops idle or cancelled streams', async () => {
+    const {ProtocolProvider}=load(path.join(source,'services/providers/ProtocolProvider'));
+    const provider=new ProtocolProvider({id:'test',name:'Test',protocol:'chat-completions',defaultBaseUrl:'https://fixture.invalid/v1',defaultModel:'test'});
+    const input={model:'test',baseUrl:'https://fixture.invalid/v1',apiKey:'',messages:[{role:'user',content:'hello'}],tools:[],usageOrigin:{threadId:'trace-thread',turnId:'trace-turn',purpose:'conversation',step:2}};
+    const {UsageLedger}=load(path.join(source,'services/UsageLedger'));
+    const recordsBefore=new Set(UsageLedger.list().map(item=>item.id));
+    let now=0, sequence=0, transport; const timers=new Map();
+    fakeTimers={set(fn,ms){const id=++sequence;timers.set(id,{fn,at:now+ms});return id;},clear(id){timers.delete(id);}};
+    const advance=ms=>{now+=ms;for(const [id,item] of [...timers])if(item.at<=now){timers.delete(id);item.fn();}};
+    const emit=text=>transport.emit('dataReceive',Uint8Array.from(Buffer.from(text)).buffer);
+    httpScript=request=>{transport=request;request.callback(null,200);};
+    try {
+      const pending=provider.stream(input,new Cancellation(),()=>{});
+      await new Promise(setImmediate);
+      assert.equal(transport.options.readTimeout,0);
+      assert.equal(transport.options.connectTimeout,15000);
+      assert.equal(JSON.parse(transport.options.extraData).stream_options.include_usage, true);
+      assert.equal(JSON.stringify(JSON.parse(transport.options.extraData)).includes('trace-thread'),false,'local attribution stays out of API payloads');
+      advance(119000);emit(': heartbeat\n\n');
+      advance(119000);emit(': heartbeat\n\n');
+      assert.equal(timers.size,1);
+      emit('data: {"choices":[{"index":0,"delta":{"content":"done"}}]}\n\ndata: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
+      transport.emit('dataEnd');
+      assert.equal((await pending).content,'done');assert.equal(timers.size,0);
+      const idle=provider.stream({...input, requestUsage: false},new Cancellation(),()=>{});
+      const timedOut=assert.rejects(idle,/120/);
+      await new Promise(setImmediate);
+      assert.equal(JSON.parse(transport.options.extraData).stream_options, undefined);
+      advance(119999);emit('');advance(1);
+      await timedOut;assert.equal(timers.size,0);
+      const cancellation=new Cancellation();let text='';
+      const cancelled=provider.stream(input,cancellation,delta=>{text+=delta;});
+      const rejected=assert.rejects(cancelled);
+      await new Promise(setImmediate);cancellation.cancel();await rejected;
+      emit('data: {"choices":[{"delta":{"content":"late"}}]}\n\n');
+      advance(120000);assert.equal(text,'');assert.equal(timers.size,0);
+      httpScript=request=>{transport=request;};
+      const startup=provider.stream(input,new Cancellation(),()=>{});
+      const startupTimedOut=assert.rejects(startup,/120/);
+      await new Promise(setImmediate);advance(120000);
+      await startupTimedOut;assert.equal(timers.size,0);
+      const tracked=UsageLedger.list().filter(item=>!recordsBefore.has(item.id));
+      assert.equal(tracked.length,4);assert.equal(tracked.map(item=>item.status).sort().join(','),'cancelled,complete,failed,failed');
+      assert.ok(tracked.every(item=>item.origin.threadId==='trace-thread'&&item.origin.turnId==='trace-turn'&&item.origin.step===2),'all outcomes keep their origin');
+    } finally {fakeTimers=undefined;}
+  });
   await test('usage ledger preserves new requests while restoring persisted records',async()=>{
     const {UsageLedger}=load(path.join(source,'services/UsageLedger'));const root='/sandbox/ledger';fs.mkdirSync(nativePath(root),{recursive:true});
+    const previousRecordCount=UsageLedger.list().length;
+    let usageNotifications=0;
+    const stopWatching=UsageLedger.subscribe(()=>{usageNotifications++;});
+    const stopBrokenWatcher=UsageLedger.subscribe(()=>{throw new Error('view failure');});
     fs.writeFileSync(nativePath(root+'/usage-ledger.json'),JSON.stringify([{id:'old',model:'old'}]));
     const ready=UsageLedger.configure(root);UsageLedger.record({id:'new',model:'new',status:'running_or_unknown'});await ready;
     UsageLedger.record({id:'new',model:'new',status:'complete'});await UsageLedger.queue;
-    const records=JSON.parse(fs.readFileSync(nativePath(root+'/usage-ledger.json'),'utf8'));assert.equal(records.length,2);assert.equal(records.find(x=>x.id==='new').status,'complete');
+    const records=readSavedUsage(root);assert.equal(records.length,previousRecordCount+2);assert.equal(records.find(x=>x.id==='new').status,'complete');
+    assert.ok(usageNotifications>=3,'load and request updates notify the usage page');
+    stopWatching();stopBrokenWatcher();const notificationsBefore=usageNotifications;
+    UsageLedger.record({id:'new',model:'new',status:'complete',tokens:{input:100,output:20}});await UsageLedger.queue;
+    assert.equal(usageNotifications,notificationsBefore,'closed pages unsubscribe');
+    assert.equal(UsageLedger.list().filter(x=>x.id==='new').length,1,'settlement updates one request');
+    const origin={threadId:'thread',turnId:'turn',purpose:'team_task',attempt:2};
+    UsageLedger.record({...UsageLedger.list().find(x=>x.id==='new'),origin});
+    UsageLedger.recordTool('new',{id:'tool',name:'read_skill',skill:'review',status:'running',startedAt:10,durationMs:0});
+    UsageLedger.recordTool('new',{id:'tool',name:'read_skill',skill:'review',status:'complete',startedAt:10,durationMs:50});
+    UsageLedger.recordTool('absent',{id:'ignored',name:'test',status:'complete',startedAt:10,durationMs:0});
+    await UsageLedger.queue;
+    const saved=readSavedUsage(root);
+    assert.equal(saved.length,previousRecordCount+2);
+    const enriched=saved.find(x=>x.id==='new');assert.deepEqual(enriched.origin,origin);
+    assert.deepEqual(enriched.tokens,{input:100,output:20});assert.equal(enriched.tools.length,1);assert.equal(enriched.tools[0].durationMs,50);
   });
-  console.log('16 native adapter integration checks passed. Fixtures: '+fixture);
+  await test('usage shards coalesce writes, recover migration and restore updates', async()=>{
+    const ledgerFile=path.join(source,'services/UsageLedger.ets');cache.delete(ledgerFile);
+    const {UsageLedger:Ledger}=load(ledgerFile);const root='/sandbox/large-ledger';fs.mkdirSync(nativePath(root),{recursive:true});
+    const legacy=Array.from({length:700},(_,i)=>({id:'bulk-'+i,model:'model',provider:'test',startedAt:i,status:'complete',durationMs:1,tokens:{input:100,output:20}}));
+    fs.writeFileSync(nativePath(root+'/usage-ledger.json'),JSON.stringify(legacy));
+    failManifest=true;await assert.rejects(Ledger.configure(root),/manifest failure/);failManifest=false;
+    assert.equal(JSON.parse(fs.readFileSync(nativePath(root+'/usage-ledger.json'),'utf8')).length,700,'legacy stays intact after interrupted migration');
+    cache.delete(ledgerFile);const {UsageLedger:Recovered}=load(ledgerFile);await Recovered.configure(root);
+    assert.equal(readSavedUsage(root).length,700);
+    usageWrites.length=0;
+    for(let i=0;i<200;i++)Recovered.record({...legacy[350],durationMs:i});
+    await Recovered.queue;
+    assert.equal(usageWrites.filter(p=>p.endsWith('/1.json')).length,1,'a burst writes the affected shard once');
+    assert.equal(usageWrites.length,1,'no other shards or manifest are rewritten');
+    assert.equal(readSavedUsage(root).find(r=>r.id==='bulk-350').durationMs,199);
+    cache.delete(ledgerFile);const {UsageLedger:Reloaded}=load(ledgerFile);await Reloaded.configure(root);
+    assert.equal(Reloaded.list().length,700);assert.equal(Reloaded.list().find(r=>r.id==='bulk-350').durationMs,199);
+    // Loading a broken shard must not permit a later request to overwrite history.
+    fs.writeFileSync(nativePath(root+'/usage-records/1.json'),'broken');
+    cache.delete(ledgerFile);const {UsageLedger:Broken}=load(ledgerFile);await assert.rejects(Broken.configure(root));
+    Broken.record({...legacy[0],id:'after-failure'});await Broken.queue;
+    assert.equal(fs.readFileSync(nativePath(root+'/usage-records/1.json'),'utf8'),'broken');
+  });
+  console.log('18 native adapter integration checks passed. Fixtures: '+fixture);
 })().catch(error=>{console.error(error);process.exitCode=1;});

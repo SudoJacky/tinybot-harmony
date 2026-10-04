@@ -4,6 +4,7 @@ import { CodeExecutionTools } from './CodeExecutionTools';
 import { NativeCodeExecutor } from './NativeCodeExecutor';
 import { InteractionTools } from './InteractionTools';
 import { UsageLedger } from './UsageLedger';
+import { UsageRecorder, UsageToolActivity } from '../model/Usage';
 import { Cancellation } from './Cancellation';
 import { RuleTools } from './RuleTools';
 import { McpTools } from './McpTools';
@@ -28,6 +29,10 @@ import { SkillTools } from './SkillTools';
 import { ToolSet } from './ToolSet';
 import { profileProvider } from './providers/DefaultProviders';
 import { ProviderRegistry } from './providers/ProviderRegistry';
+
+class NativeUsageRecorder implements UsageRecorder {
+  recordTool(id: string, activity: UsageToolActivity): void { UsageLedger.recordTool(id, activity); }
+}
 
 class NativeSessionResources implements SessionResources {
   private workspaces: WorkspaceStore;
@@ -64,6 +69,6 @@ export function createNativeSessionService(filesDir: string, workspaceFilesDir: 
   Attachments.configure(workspaceFilesDir);
   UsageLedger.configure(filesDir).catch((error: Error) => { UsageLedger.error = error.message; });
   const providers = new ProviderRegistry(); const credentials = new CredentialStore();
-  return new SessionService(new ConversationStore(filesDir), new AgentRuntime(providers, credentials), credentials,
+  return new SessionService(new ConversationStore(filesDir), new AgentRuntime(providers, credentials, new NativeUsageRecorder()), credentials,
     new NativeSessionResources(workspaceFilesDir, providers, approval));
 }

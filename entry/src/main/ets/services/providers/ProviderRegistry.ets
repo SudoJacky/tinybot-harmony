@@ -3,6 +3,7 @@ import { ModelMessage, ModelTurn, ToolDefinition } from '../../model/Agent';
 import { ModelConfig } from '../../model/Conversation';
 import { copyProviderInfo, ProviderInfo } from '../../model/Provider';
 import { Cancellation } from '../Cancellation';
+import { UsageOrigin } from '../../model/Usage';
 import { CredentialReader, ModelProvider, ModelRequestOptions, ModelSession } from './Provider';
 
 class BoundModel implements ModelSession {
@@ -14,10 +15,12 @@ class BoundModel implements ModelSession {
   private reasoning?: string;
   private requestUsage?: boolean;
   private images?: boolean;
+  private origin?: UsageOrigin;
 
-  constructor(provider: ModelProvider, config: ModelConfig, credentials: CredentialReader) {
+  constructor(provider: ModelProvider, config: ModelConfig, credentials: CredentialReader, origin?: UsageOrigin) {
     this.provider = provider;
     this.credentials = credentials;
+    this.origin = origin ? JSON.parse(JSON.stringify(origin)) as UsageOrigin : undefined;
     this.baseUrl = config.baseUrl;
     this.model = config.model;
     this.alias = config.credentialAlias;
@@ -33,7 +36,11 @@ class BoundModel implements ModelSession {
     // Resolve on every request, allowing later credential rotation without caching secrets.
     const key = await this.credentials.read(this.alias);
     cancellation.check();
+    const origin: UsageOrigin = this.origin ? JSON.parse(JSON.stringify(this.origin)) as UsageOrigin : {};
+    if (options?.usagePurpose) { origin.purpose = options.usagePurpose; }
+    if (options?.usageStep !== undefined) { origin.step = options.usageStep; }
     return this.provider.stream({ baseUrl: this.baseUrl, model: this.model, apiKey: key,
+      usageOrigin: origin,
       messages: messages, tools: tools, maxOutputTokens: options?.maxOutputTokens,
       reasoning: this.reasoning, requestUsage: this.requestUsage }, cancellation, onText, options?.onReasoning);
   }
@@ -79,13 +86,13 @@ export class ProviderRegistry {
     return provider.endpoint(previous.baseUrl) === provider.endpoint(baseUrl);
   }
 
-  bind(config: ModelConfig, credentials: CredentialReader): ModelSession {
+  bind(config: ModelConfig, credentials: CredentialReader, origin?: UsageOrigin): ModelSession {
     const provider = this.require(config.providerId);
     provider.endpoint(config.baseUrl);
     if (config.model.trim().length === 0) {
       throw new Error(t("请填写模型名称。"));
     }
     // Registry edits affect future runs only; the active run keeps this provider instance.
-    return new BoundModel(provider, config, credentials);
+    return new BoundModel(provider, config, credentials, origin);
   }
 }

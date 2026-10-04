@@ -4,6 +4,8 @@ import { LanguagePreferences } from '../services/LanguagePreferences';
 import { ChatViewModel, SettingsViewModel } from '../viewmodel/ChatViewModel';
 import { ProviderInfo } from '../model/Provider';
 import { ProviderProfile } from '../model/ProviderProfiles';
+import { AssistantOptions, defaultAssistantOptions } from '../model/AssistantOptions';
+import { ProductivityData } from '../model/Productivity';
 import { Btn, Font, Space, Styles, protocolName } from '../common/Theme';
 import { Banner, BottomBar, GroupCard, NavRow, RowDivider, SectionHeader, SwitchRow } from '../common/Widgets';
 
@@ -13,17 +15,50 @@ export struct SettingsPanel {
   @State private languageError: string = '';
   @State private showLanguage: boolean = false;
   @State private showPresets: boolean = false;
+  @State private assistantDraft: AssistantOptions = defaultAssistantOptions();
+  @State private assistantSaving: boolean = false;
   @ObjectLink app: ChatViewModel;
   @ObjectLink settings: SettingsViewModel;
   onEditProvider: (id: string, preset: string) => void = () => {};
   onSkills: () => void = () => {};
-  onPrompt: () => void = () => {};
+  onUserDocument: () => void = () => {};
+  onUsage: () => void = () => {};
+  onModels: () => void = () => {};
+  onBackup: () => void = () => {};
+  onTools: (tab: string) => void = () => {};
   private pendingSave: Promise<void> = Promise.resolve();
 
   // A brief save leaves the page untouched; a reply, compaction or team run locks it with a notice.
   private blocked(): boolean { return this.app.busy && !this.app.saving; }
   // Editors need a mutable session; unsaved chat data must be resolved first.
-  private canEdit(): boolean { return !this.blocked() && this.app.saveError.length === 0; }
+  private canEdit(): boolean { return !this.blocked() && !this.assistantSaving && this.app.saveError.length === 0; }
+
+  aboutToAppear(): void { this.resetAssistantDraft(); }
+
+  private resetAssistantDraft(): void {
+    this.assistantDraft = JSON.parse(JSON.stringify(this.app.productivity.options || defaultAssistantOptions())) as AssistantOptions;
+  }
+
+  private saveAssistantToggle(kind: string, value: boolean): void {
+    if (!this.canEdit()) { return; }
+    if (kind === 'memory') { this.assistantDraft.autoMemory = value; }
+    else if (kind === 'readOnly') { this.assistantDraft.readOnly = value; }
+    else if (kind === 'summary') { this.assistantDraft.saveSummary = value; }
+    this.assistantSaving = true;
+    this.pendingSave = this.pendingSave.then(async () => {
+      try {
+        const extras = JSON.parse(JSON.stringify(this.app.productivity)) as ProductivityData;
+        const options = extras.options || defaultAssistantOptions();
+        if (kind === 'memory') { options.autoMemory = value; }
+        else if (kind === 'readOnly') { options.readOnly = value; }
+        else if (kind === 'summary') { options.saveSummary = value; }
+        extras.options = options;
+        if (!await this.app.saveProductivity(extras)) {
+          this.getUIContext().getPromptAction().showToast({ message: this.app.error });
+        }
+      } finally { this.resetAssistantDraft(); this.assistantSaving = false; }
+    });
+  }
 
   // Toggles persist immediately, one save at a time; a failed save reverts the switch and says why.
   private saveToggle(apply: (value: boolean) => void, value: boolean): void {
@@ -35,9 +70,9 @@ export struct SettingsPanel {
     });
   }
 
-  private promptPreview(): string {
-    const prompt = this.app.config.systemPrompt.trim();
-    return prompt.length > 0 ? prompt.replace(/\s+/g, ' ') : t("未设置，使用默认行为");
+  private userDocumentPreview(): string {
+    const document = (this.app.config.userDocument || '').trim();
+    return document.length > 0 ? document.replace(/\s+/g, ' ') : t('填写称呼、背景和回答偏好');
   }
 
   private languageName(choice: string): string {
@@ -121,21 +156,63 @@ export struct SettingsPanel {
             }, (profile: ProviderProfile) => JSON.stringify(profile))
             NavRow({ title: t('添加模型服务'), compId: 'add-provider', icon: $r('sys.symbol.plus'), accent: true,
               disabled: !this.canEdit(), onTap: () => { this.showPresets = true; } })
+            RowDivider()
+            NavRow({ title: t('模型分工与能力'), subtitle: t('自动选择模型、专用模型与能力配置'), compId: 'open-model-settings',
+              icon: $r('sys.symbol.gearshape'), disabled: !this.canEdit(), onTap: () => this.onModels() })
+          }
+        }
+        SectionHeader({ title: t('长期记忆') })
+        GroupCard() {
+          Column() {
+            SwitchRow({ title: t('自动提取长期记忆'), compId: 'auto-memory',
+              isOn: this.assistantDraft.autoMemory, disabled: !this.canEdit(),
+              onChange: (value: boolean) => this.saveAssistantToggle('memory', value) })
+            RowDivider()
+            NavRow({ title: t('管理长期记忆'), subtitle: t('查看、编辑所有对话或当前对话的记忆'), compId: 'open-memory',
+              icon: $r('sys.symbol.lightbulb'), disabled: !this.canEdit(), onTap: () => this.onTools('memory') })
           }
         }
         SectionHeader({ title: t("助手") })
         GroupCard() {
           Column() {
-            NavRow({ title: t("系统提示"), subtitle: this.promptPreview(), compId: 'open-system-prompt',
-              icon: $r('sys.symbol.square_and_pencil'), disabled: !this.canEdit(), onTap: () => this.onPrompt() })
-            RowDivider()
-            NavRow({ title: 'Skills', compId: 'open-skills', icon: $r('sys.symbol.wand_and_stars'),
-              value: t("{0} 个已启用", [this.app.extensions.skills.filter((skill) => skill.enabled).length]),
-              disabled: !this.canEdit(), onTap: () => this.onSkills() })
+            NavRow({ title: t('用户文档（USER.md）'), subtitle: this.userDocumentPreview(), compId: 'open-user-document',
+              icon: $r('sys.symbol.square_and_pencil'), disabled: !this.canEdit(), onTap: () => this.onUserDocument() })
             RowDivider()
             SwitchRow({ title: t("自动压缩历史"), compId: 'auto-compact', isOn: this.settings.autoCompact,
               subtitle: t("接近上下文预算时，用当前模型生成摘要，完整记录保留。"), disabled: !this.canEdit(),
               onChange: (value: boolean) => { this.saveToggle((v: boolean) => { this.settings.autoCompact = v; }, value); } })
+            RowDivider()
+            SwitchRow({ title: t('只读任务'), subtitle: t('阻止修改文件、调用远程工具和生成图片。'), compId: 'read-only',
+              isOn: this.assistantDraft.readOnly, disabled: !this.canEdit(),
+              onChange: (value: boolean) => this.saveAssistantToggle('readOnly', value) })
+            RowDivider()
+            SwitchRow({ title: t('任务结束后保存结果'), subtitle: t('把成功的回答归档到工作区的“任务结果”目录。'), compId: 'save-summary',
+              isOn: this.assistantDraft.saveSummary, disabled: !this.canEdit(),
+              onChange: (value: boolean) => this.saveAssistantToggle('summary', value) })
+          }
+        }
+        SectionHeader({ title: t('工具与扩展') })
+        GroupCard() {
+          Column() {
+            NavRow({ title: 'Skills', compId: 'open-skills', icon: $r('sys.symbol.wand_and_stars'),
+              value: t('{0} 个已启用', [this.app.extensions.skills.filter((skill) => skill.enabled).length]),
+              disabled: !this.canEdit(), onTap: () => this.onSkills() })
+            RowDivider()
+            NavRow({ title: t('提示词模板'), compId: 'open-templates', icon: $r('sys.symbol.doc_plaintext'),
+              disabled: !this.canEdit(), onTap: () => this.onTools('templates') })
+            RowDivider()
+            NavRow({ title: t('MCP 服务'), compId: 'open-mcp', icon: $r('sys.symbol.connection'),
+              disabled: !this.canEdit(), onTap: () => this.onTools('mcp') })
+          }
+        }
+        SectionHeader({ title: t('数据与用量') })
+        GroupCard() {
+          Column() {
+            NavRow({ title: t('Token 用量'), subtitle: t('查看用量概览、每日趋势和请求明细'), compId: 'open-usage',
+              icon: $r('sys.symbol.clock'), onTap: () => this.onUsage() })
+            RowDivider()
+            NavRow({ title: t('备份与恢复'), compId: 'open-backup', icon: $r('sys.symbol.folder_badge_plus'),
+              disabled: !this.canEdit(), onTap: () => this.onBackup() })
           }
         }
         SectionHeader({ title: t('隐私') })
@@ -151,9 +228,6 @@ export struct SettingsPanel {
             .bindSheet($$this.showLanguage, this.languageSheet(), { title: { title: t('语言') }, height: SheetSize.FIT_CONTENT,
               dragBar: true, backgroundColor: $r('app.color.page_background') })
         }
-        Text(t("会话与文件保存在本机 · 消息和工具结果会发送给所选模型服务"))
-          .fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).textAlign(TextAlign.Center)
-          .width('100%').margin({ top: Space.xl })
       }.padding({ left: Space.page, right: Space.page, bottom: Space.xl }).width('100%')
     }.height('100%').width('100%').scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring).align(Alignment.Top)
     .bindSheet($$this.showPresets, this.presetsSheet(), { title: { title: t('添加模型服务') }, detents: [SheetSize.LARGE], dragBar: true,
@@ -162,7 +236,7 @@ export struct SettingsPanel {
 }
 
 @Component
-export struct SystemPromptPanel {
+export struct UserDocumentPanel {
   @ObjectLink app: ChatViewModel;
   @ObjectLink settings: SettingsViewModel;
   onSaved: () => void = () => {};
@@ -170,17 +244,20 @@ export struct SystemPromptPanel {
   build() {
     Column() {
       Column({ space: Space.md }) {
-        TextArea({ text: this.settings.systemPrompt, placeholder: t("希望 Tinybot 如何回答？") }).id('system-prompt')
-          .attributeModifier(Styles.area).layoutWeight(1).maxLength(4000).showCounter(true)
+        Text(t('USER.md 会附加到所有对话的上下文，保存后从下一轮生效。系统提示词由应用维护，不可修改。清空文档即可停用个人偏好。'))
+          .fontSize(Font.caption).fontColor($r('app.color.text_secondary')).width('100%')
+        TextArea({ text: this.settings.userDocument, placeholder: t('例如：\n# 关于我\n请称呼我为…\n\n# 回答偏好\n先给结论，再给必要的例子。') }).id('user-document')
+          .attributeModifier(Styles.area).layoutWeight(1)
           .backgroundColor($r('app.color.surface'))
-          .onChange((value: string) => { this.settings.systemPrompt = value; })
+          .enabled(!this.app.busy && this.app.saveError.length === 0)
+          .onChange((value: string) => { this.settings.userDocument = value; })
         if (this.settings.error.length > 0) {
           Banner({ text: this.settings.error })
         }
       }.layoutWeight(1).padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.md })
       BottomBar() {
         Button(this.app.busy ? t("正在保存…") : t("保存")).id('save-settings').attributeModifier(Btn.primary).width('100%')
-          .enabled(!this.app.busy)
+          .enabled(!this.app.busy && this.app.saveError.length === 0)
           .onClick(async () => { if (await this.app.saveSettings()) { this.onSaved(); } })
       }
     }.width('100%').height('100%')

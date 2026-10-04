@@ -38,6 +38,7 @@ export class MessageViewModel {
   // Deliberately excluded from MessageData: keep reading choices across live updates,
   // while newly loaded history starts with compact defaults.
   processOpen: boolean = false;
+  usageOpen: boolean = false;
   disclosures: DisclosureStore = new DisclosureStore();
   reasoningContent: string = '';
   attachments: Attachment[] = [];

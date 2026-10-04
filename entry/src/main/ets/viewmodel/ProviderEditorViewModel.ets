@@ -17,7 +17,7 @@ export class ProviderEditorViewModel {
   enabled: boolean = true;
   models: string = '';
   modelInput: string = '';
-  contextWindow: string = '32768';
+  contextWindow: string = '';
   error: string = '';
   private originalProtocol: string = '';
   private originalUrl: string = '';
@@ -59,7 +59,7 @@ export class ProviderEditorViewModel {
       return this.hasSavedKey ? t('服务基础地址已改变，请重新填写密钥。') : t('请填写 API Key，或在高级设置中选择无需密钥。');
     }
     if (field === 'models') { try { modelIds(this.models); } catch (error) { return (error as Error).message; } }
-    if (field === 'context' && (!Number.isInteger(Number(this.contextWindow)) || Number(this.contextWindow) < 8192 || Number(this.contextWindow) > 2000000)) {
+    if (field === 'context' && this.contextWindow.trim() && (!Number.isInteger(Number(this.contextWindow)) || Number(this.contextWindow) < 8192 || Number(this.contextWindow) > 2000000)) {
       return t('上下文窗口需为 8192–2000000 的整数。');
     }
     return '';
@@ -82,7 +82,7 @@ export class ProviderEditorViewModel {
     this.noApiKey = profile?.noApiKey === undefined ? preset?.noApiKey === true : profile.noApiKey;
     this.enabled = profile?.enabled === undefined ? true : profile.enabled;
     this.models = profile ? profile.models.join('\n') : (preset?.models || []).join('\n');
-    this.contextWindow = (profile?.contextWindow || 32768).toString();
+    this.contextWindow = profile?.contextWindow === undefined ? '' : String(profile.contextWindow);
     this.error = '';
     this.originalProtocol = this.protocol; this.originalUrl = this.baseUrl;
     this.initial = JSON.stringify(this.snapshot());

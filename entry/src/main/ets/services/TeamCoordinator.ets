@@ -6,6 +6,7 @@ import { TeamAttempt, TeamRun, TeamTaskRecord, lastAttempt, teamPlan, validateTe
 import { AgentTools } from './AgentLoop';
 import { AgentRuntime } from './AgentRuntime';
 import { Cancellation } from './Cancellation';
+import { UsageOrigin } from '../model/Usage';
 interface TeamEvidence { taskId: string; title: string; output: string; }
 
 // Parallel model requests share a serialized tool lane: file mutations and approval dialogs never overlap.
@@ -23,6 +24,7 @@ export class TeamTools implements AgentTools {
   execute(call: ToolCall, cancellation: Cancellation): Promise<string> { return this.lane.execute(this.inner, call, cancellation); }
 }
 export interface TeamExecution {
+  usageOrigin?: UsageOrigin;
   runtime: () => AgentRuntime; tools: (record: TeamTaskRecord, attempt: TeamAttempt) => AgentTools; config: ModelConfig;
   complete?: (record: TeamTaskRecord, attempt: TeamAttempt) => void;
   lane?: TeamToolLane;
@@ -103,6 +105,10 @@ export class TeamCoordinator {
       await execution.checkpoint();
       if (this.stopped) { record.status = 'cancelled'; attempt.status = 'cancelled'; return; }
       const result = await runtime.run({ sessionId: attempt.id, config: execution.config, messages: messages,
+        usageOrigin: { threadId: execution.usageOrigin?.threadId, threadTitle: execution.usageOrigin?.threadTitle,
+          turnId: execution.usageOrigin?.turnId, turnLabel: execution.usageOrigin?.turnLabel, skill: execution.usageOrigin?.skill,
+          purpose: 'team_task', teamId: run.id, taskId: record.task.id, taskTitle: record.task.title,
+          memberName: member?.name, attemptId: attempt.id, attempt: record.attempts.length },
         tools: new TeamTools(execution.tools(record, attempt), lane) }, { prepare: async () => {}, checkpoint: execution.checkpoint });
       attempt.turn = result.turn; attempt.status = result.status === 'complete' ? 'succeeded' : result.status === 'stopped' ? 'cancelled' : 'failed';
       attempt.error = result.error; record.status = attempt.status;

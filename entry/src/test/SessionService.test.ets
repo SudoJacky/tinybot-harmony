@@ -1,4 +1,7 @@
 import { describe, expect, it } from '@ohos/hypium';
+import { contextSettings } from '../main/ets/model/ConversationContext';
+import { DEFAULT_SYSTEM_PROMPT } from '../main/ets/model/SystemPrompt';
+import { CONVERSATION_TITLE_PROMPT, sanitizeConversationTitle, titleCharacters } from '../main/ets/model/ConversationTitle';
 import { ModelTurn, ToolCall, ToolDefinition } from '../main/ets/model/Agent';
 import { AppData, ThreadData, emptyData, parseAppData } from '../main/ets/model/Conversation';
 import { ProviderInfo } from '../main/ets/model/Provider';
@@ -99,6 +102,9 @@ class Fixture {
 function reply(content: string = 'done'): ModelTurn { return { content: content, toolCalls: [] }; }
 function seed(): AppData {
   const data = emptyData();
+  // Most session tests isolate the main turn; memory-specific tests enable extraction separately.
+  data.productivity = defaultProductivity(); data.productivity.options = defaultAssistantOptions();
+  data.productivity.options.autoMemory = false;
   const profile: ProviderProfile = { id: 'test', name: 'Test', protocol: 'chat-completions', baseUrl: 'https://example.com/v1',
     credentialAlias: '', noApiKey: true, enabled: true, models: ['model'], contextWindow: 32768 };
   data.providerProfiles = [profile]; data.extensions = defaultExtensions();
@@ -124,11 +130,209 @@ function historySeed(): AppData {
   return data;
 }
 
+function titleSeed(): AppData {
+  const data = seed(); data.threads[0].title = '新对话'; return data;
+}
+function isTitleRequest(request: ProviderRequest): boolean {
+  return request.messages[0]?.content === CONVERSATION_TITLE_PROMPT;
+}
+// All fixture IO is promise-based; drain detached auxiliary work without wall-clock sleeps.
+async function settleTitles(): Promise<void> {
+  for (let i = 0; i < 100; i++) { await Promise.resolve(); }
+}
+
 export default function sessionServiceTests(): void {
   describe('SessionService', () => {
+    it('addsGlobalUserDocumentToRequestsAndClearsItWithoutChangingSystemRules', 0, async () => {
+      const f = new Fixture(); await f.session.initialize();
+      const document = '# About me\nCall me Lin.\n\n# Preferences\nKeep it concise.';
+      expect(await f.session.saveSettings(document, true, false)).assertTrue();
+      expect((await f.repository.load()).config.userDocument).assertEqual(document);
+      expect(f.session.currentConfig.userDocument).assertEqual(document);
+      f.session.setDraft('hello'); await f.session.send();
+      const first = f.provider.requests[0].messages[0].content;
+      expect(first.startsWith(DEFAULT_SYSTEM_PROMPT)).assertTrue();
+      expect(first.includes(JSON.stringify(document))).assertTrue();
+      await f.session.newThread();
+      expect(f.session.currentConfig.userDocument).assertEqual(document);
+      f.session.setDraft('hello again'); await f.session.send(); await settleTitles();
+      const chats = f.provider.requests.filter((request) => !isTitleRequest(request));
+      expect(chats[1].messages[0].content.includes(JSON.stringify(document))).assertTrue();
+      expect(await f.session.saveSettings('', true, false)).assertTrue();
+      f.session.setDraft('without preferences'); await f.session.send();
+      const cleared = f.provider.requests.filter((request) => !isTitleRequest(request));
+      expect(cleared[2].messages[0].content.startsWith(DEFAULT_SYSTEM_PROMPT)).assertTrue();
+      expect(cleared[2].messages[0].content.includes('# USER.md')).assertFalse();
+      expect((await f.repository.load()).config.userDocument).assertEqual('');
+    });
+    it('keepsSavedUserDocumentWhenSavingItsReplacementFails', 0, async () => {
+      const f = new Fixture(); await f.session.initialize();
+      expect(await f.session.saveSettings('original preferences', true, false)).assertTrue();
+      f.repository.beforeSave = async () => { throw new Error('disk full'); };
+      expect(await f.session.saveSettings('unsaved replacement', true, false)).assertFalse();
+      expect(f.session.snapshot().config.userDocument).assertEqual('original preferences');
+      expect((await f.repository.load()).config.userDocument).assertEqual('original preferences');
+      expect(f.session.snapshot().config.systemPrompt).assertEqual(DEFAULT_SYSTEM_PROMPT);
+    });
+    it('restoresBackupPreferencesWithoutOverwritingAnExistingDocument', 0, async () => {
+      const f = new Fixture(); await f.session.initialize();
+      const imported = emptyData(); imported.config.userDocument = '# Restored preferences';
+      imported.productivity = { memories: [], templates: [], servers: [] };
+      expect(await f.session.importSnapshot(imported)).assertTrue();
+      expect((await f.repository.load()).config.userDocument).assertEqual('# Restored preferences');
+      imported.config.userDocument = 'different backup';
+      expect(await f.session.importSnapshot(imported)).assertTrue();
+      expect((await f.repository.load()).config.userDocument).assertEqual('# Restored preferences');
+    });
+    it('normalizesShortTitlesWithoutSplittingUnicodeCharacters', 0, () => {
+      expect(sanitizeConversationTitle('  \n **"简短会话标题。"**\nexplanation')).assertEqual('简短会话标题');
+      expect(sanitizeConversationTitle('  Fix   login\t failures! ')).assertEqual('Fix login failures');
+      expect(sanitizeConversationTitle('***。***')).assertEqual('');
+      expect(sanitizeConversationTitle('😀'.repeat(40))).assertEqual('😀'.repeat(28));
+      expect(titleCharacters('😀abc', 2)).assertEqual('😀a');
+    });
+    it('generatesOneDurableTitleUsingTheFirstTurnsModelWithoutBlockingChat', 0, async () => {
+      const data = titleSeed(); data.threads[0].reasoningEffort = 'high';
+      const f = new Fixture(data); await f.session.initialize();
+      const release = new Gate(); const entered = new Gate();
+      f.provider.respond = async (index) => {
+        if (!isTitleRequest(f.provider.requests[index])) { return reply('normal answer'); }
+        expect(active(await f.repository.load()).messages[0].content).assertEqual('帮我排查登录失败的原因');
+        entered.open(); await release.promise; return reply('**登录故障排查。**');
+      };
+      f.session.setDraft('帮我排查登录失败的原因'); await f.session.send(); await entered.promise;
+      expect(f.session.state.phase).assertEqual('idle');
+      expect(active(f.session.snapshot()).messages[1].content).assertEqual('normal answer');
+      expect(active(f.session.snapshot()).title).assertEqual('帮我排查登录失败的原因');
+      release.open(); await settleTitles();
+      const saved = active(await f.repository.load());
+      expect(saved.title).assertEqual('登录故障排查'); expect(saved.messages.length).assertEqual(2);
+      expect(saved.titleEdited === true).assertFalse();
+      const request = f.provider.requests.find((item) => isTitleRequest(item));
+      const conversation = f.provider.requests.find((item) => !isTitleRequest(item));
+      expect(request?.usageOrigin?.purpose).assertEqual('title');
+      expect(conversation?.usageOrigin?.purpose).assertEqual('conversation');
+      expect(request?.usageOrigin?.threadId).assertEqual(saved.id);
+      expect(request?.usageOrigin?.turnId).assertEqual(saved.messages[0].id);
+      expect(conversation?.usageOrigin?.turnId).assertEqual(saved.messages[0].id);
+      expect(request?.model).assertEqual('model'); expect(request?.reasoning).assertEqual('high');
+      expect(request?.tools.length).assertEqual(0); expect(request?.messages.length).assertEqual(2);
+      expect(request?.maxOutputTokens === undefined).assertTrue();
+      f.session.setDraft('继续'); await f.session.send();
+      expect(f.provider.requests.filter((item) => isTitleRequest(item)).length).assertEqual(1);
+      const restored = new Fixture(await f.repository.load()); await restored.session.initialize();
+      expect(active(restored.session.snapshot()).title).assertEqual('登录故障排查');
+    });
+    it('keepsForegroundModelRunningWhenTitleGenerationFails', 0, async () => {
+      const f = new Fixture(titleSeed()); await f.session.initialize();
+      const release = new Gate(); const entered = new Gate();
+      f.provider.respond = async (index) => {
+        if (isTitleRequest(f.provider.requests[index])) { throw new Error('title offline'); }
+        entered.open(); await release.promise; return reply('answer survived');
+      };
+      f.session.setDraft('hello'); const sending = f.session.send(); await entered.promise; await settleTitles();
+      expect(f.session.state.phase).assertEqual('running'); expect(f.session.state.error).assertEqual('');
+      release.open(); await sending; await settleTitles();
+      expect(active(f.session.snapshot()).title).assertEqual('hello');
+      expect(active(f.session.snapshot()).messages[1].status).assertEqual('complete');
+      expect(f.resources.errors.some((item) => item.includes('title offline'))).assertTrue();
+    });
+    it('discardsLateTitlesAfterManualRenameArchiveOrDeletion', 0, async () => {
+      for (const action of ['rename', 'archive', 'delete']) {
+        const f = new Fixture(titleSeed()); await f.session.initialize(); const release = new Gate();
+        f.provider.respond = async (index) => {
+          if (!isTitleRequest(f.provider.requests[index])) { return reply(); }
+          await release.promise; return reply('late title');
+        };
+        f.session.setDraft('hello'); await f.session.send();
+        if (action === 'rename') { await f.session.renameThread('thread-1', 'Manual'); }
+        if (action === 'archive') { await f.session.archiveThread('thread-1'); }
+        if (action === 'delete') { await f.session.deleteThread('thread-1'); }
+        release.open(); await settleTitles();
+        const thread = (await f.repository.load()).threads.find((item) => item.id === 'thread-1');
+        expect(thread?.title === 'late title').assertFalse();
+        if (action === 'rename') { expect(thread?.title).assertEqual('Manual'); }
+        if (action === 'delete') { expect(thread === undefined).assertTrue(); }
+      }
+    });
+    it('mergesLateTitlesAfterSettingsCommitsAndPreservesTypingDuringTitleSave', 0, async () => {
+      const f = new Fixture(titleSeed()); await f.session.initialize(); const release = new Gate();
+      f.provider.respond = async (index) => {
+        if (!isTitleRequest(f.provider.requests[index])) { return reply(); }
+        await release.promise; return reply('generated title');
+      };
+      f.session.setDraft('hello'); await f.session.send();
+      const enteredSettings = new Gate(); const releaseSettings = new Gate();
+      const enteredTitle = new Gate(); const releaseTitle = new Gate(); let blockedSettings = false;
+      f.repository.beforeSave = async (snapshot) => {
+        if (!blockedSettings) { blockedSettings = true; enteredSettings.open(); await releaseSettings.promise; }
+        else if (active(snapshot).title === 'generated title') { enteredTitle.open(); await releaseTitle.promise; }
+      };
+      const saving = f.session.saveSettings('new instructions', false, false); await enteredSettings.promise;
+      release.open(); await settleTitles();
+      expect(active(f.session.snapshot()).title).assertEqual('hello');
+      releaseSettings.open(); expect(await saving).assertTrue(); await enteredTitle.promise;
+      f.session.setDraft('typed during title save'); releaseTitle.open(); await settleTitles();
+      const saved = await f.repository.load();
+      expect(saved.config.userDocument).assertEqual('new instructions');
+      expect(active(saved).title).assertEqual('generated title');
+      expect(active(saved).draft).assertEqual('typed during title save');
+    });
+    it('keepsFallbackAndChatUsableWhenGeneratedTitleCannotBeSaved', 0, async () => {
+      const f = new Fixture(titleSeed()); await f.session.initialize(); const release = new Gate();
+      f.provider.respond = async (index) => {
+        if (!isTitleRequest(f.provider.requests[index])) { return reply(); }
+        await release.promise; return reply('generated title');
+      };
+      f.session.setDraft('hello'); await f.session.send();
+      f.repository.beforeSave = async (snapshot) => {
+        if (active(snapshot).title === 'generated title') { throw new Error('title disk failure'); }
+      };
+      release.open(); await settleTitles();
+      expect(active(f.session.snapshot()).title).assertEqual('hello');
+      expect(active(await f.repository.load()).title).assertEqual('hello');
+      expect(f.session.canMutate).assertTrue(); expect(f.session.state.saveError).assertEqual('');
+      expect(f.resources.errors.some((item) => item.includes('title disk failure'))).assertTrue();
+    });
+    it('doesNotGenerateTitlesForManualOrExistingThreadsOrUnpersistedFirstTurns', 0, async () => {
+      const manual = titleSeed(); manual.threads[0].titleEdited = true;
+      for (const data of [manual, historySeed(), seed()]) {
+        const f = new Fixture(data); await f.session.initialize();
+        f.session.setDraft('hello'); await f.session.send(); await settleTitles();
+        expect(f.provider.requests.some((item) => isTitleRequest(item))).assertFalse();
+      }
+      const failed = new Fixture(titleSeed()); await failed.session.initialize();
+      failed.repository.beforeSave = async () => { throw new Error('disk failed'); };
+      failed.session.setDraft('hello'); await failed.session.send(); await settleTitles();
+      expect(failed.provider.requests.length).assertEqual(0);
+    });
+    it('persistsAutomaticContextAndResolvesModelThenServiceOverrides', 0, async () => {
+      const f = new Fixture(); await f.session.initialize();
+      const draft = providerDraft(); draft.models = 'model,deepseek-flash'; draft.contextWindow = '';
+      expect(await f.session.saveProvider(draft)).assertTrue();
+      expect(await f.session.selectModel('test', 'deepseek-flash')).assertTrue();
+      expect(contextSettings(f.session.currentConfig).window).assertEqual(1000000);
+      const extras = defaultProductivity(); const options = defaultAssistantOptions();
+      options.capabilities = [{ providerId: 'test', modelId: 'deepseek-flash', images: true, reasoning: 'default', requestUsage: false }];
+      extras.options = options;
+      expect(await f.session.saveProductivity(extras)).assertTrue();
+      draft.contextWindow = '65536';
+      expect(await f.session.saveProvider(draft)).assertTrue();
+      expect(contextSettings(f.session.currentConfig).window).assertEqual(65536);
+      options.capabilities[0].contextWindow = 128000;
+      expect(await f.session.saveProductivity(extras)).assertTrue();
+      expect(contextSettings(f.session.currentConfig).window).assertEqual(128000);
+      options.capabilities[0].contextWindow = undefined; draft.contextWindow = '';
+      expect(await f.session.saveProductivity(extras)).assertTrue();
+      expect(await f.session.saveProvider(draft)).assertTrue();
+      const restored = new Fixture(await f.repository.load()); await restored.session.initialize();
+      expect(contextSettings(restored.session.currentConfig).window).assertEqual(1000000);
+      expect(await restored.session.selectModel('test', 'model')).assertTrue();
+      expect(contextSettings(restored.session.currentConfig).window).assertEqual(200000);
+    });
     it('reasoningSelectionPersistsAndReachesTheRequestAndResetsToModelDefaults', 0, async () => {
       const data = seed(); data.productivity = defaultProductivity();
-      const options = defaultAssistantOptions();
+      const options = defaultAssistantOptions(); options.autoMemory = false;
       options.capabilities = [{ providerId: 'test', modelId: 'model', images: true, reasoning: 'medium', contextWindow: 32768, requestUsage: false }];
       data.productivity.options = options;
       const f = new Fixture(data); await f.session.initialize();
@@ -376,7 +580,7 @@ export default function sessionServiceTests(): void {
       expect(active(saved).messages[1].steps?.[0].tools[1].status).assertEqual('complete'); expect(active(saved).messages[3].content).assertEqual('continued');
     });
     it('automaticMemoryUsesUserEvidenceAfterDurableSuccessAndPreservesManualFacts', 0, async () => {
-      const data = seed(); data.productivity = defaultProductivity(); data.productivity.options = defaultAssistantOptions(); data.productivity.options.autoMemory = true;
+      const data = seed(); data.productivity = defaultProductivity();
       data.productivity.memories = [{ id: 'manual', content: '用户偏好中文', threadId: '', updatedAt: 1 }];
       const f = new Fixture(data); await f.session.initialize(); f.provider.respond = async (index) => reply(index === 0 ? 'assistant assertion' : '["用户偏好中文","用户喜欢简短回答"]');
       f.session.setDraft('请记住我喜欢简短回答'); await f.session.send();
@@ -580,7 +784,7 @@ export default function sessionServiceTests(): void {
       expect(await f.session.newThread()).assertFalse();
       release.open(); expect(await saving).assertTrue();
       const saved = await f.repository.load();
-      expect(saved.config.systemPrompt).assertEqual('new prompt'); expect(saved.extensions?.webEnabled).assertFalse();
+      expect(saved.config.userDocument).assertEqual('new prompt'); expect(saved.extensions?.webEnabled).assertFalse();
       expect(active(saved).draft).assertEqual('typed during save');
       expect(active(f.session.snapshot()).draft).assertEqual('typed during save');
     });

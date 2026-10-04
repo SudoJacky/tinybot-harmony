@@ -6,7 +6,7 @@ import { PendingInput, validatePendingInput } from './PendingInput';
 
 export const MAX_TOOL_CALLS: number = 8;
 export const MAX_TOOL_ARGUMENTS: number = 96 * 1024;
-export const MAX_AGENT_STEPS: number = 8;
+export const MAX_AGENT_STEPS: number = 200;
 export const MAX_REASONING_CONTENT: number = 1024 * 1024;
 
 export interface ToolFunction {

@@ -45,7 +45,10 @@ export struct ChatPanel {
   @ObjectLink app: ChatViewModel;
   @ObjectLink thread: ThreadViewModel;
   onSettings: () => void = () => {};
-  onOpenHistory: () => void = () => {};
+  onHistoryDragStart: (event: GestureEvent) => void = () => {};
+  onHistoryDragUpdate: (event: GestureEvent) => void = () => {};
+  onHistoryDragEnd: (event: GestureEvent) => void = () => {};
+  onHistoryDragCancel: () => void = () => {};
   onFiles: () => void = () => {};
   onTools: (tab: string) => void = () => {};
   @ObjectLink approval: ToolApproval;
@@ -65,6 +68,9 @@ export struct ChatPanel {
   @State private memoryThreadId: string = '';
   @State private composerFocused: boolean = false;
   @State private showReasoning: boolean = false;
+  @State private reasoningPreview: string = '';
+  @State private reasoningPreviewKey: string = '';
+  private reasoningSaving: boolean = false;
   private scroller: Scroller = new Scroller();
   private scrollTimer: number = -1;
   // Messages already on screen when a thread opens render in place; only later ones animate in.
@@ -575,19 +581,43 @@ export struct ChatPanel {
   @Builder
   reasoningPicker() {
     ReasoningEffortPicker({ value: this.thread.reasoningEffort, modelName: this.thread.modelRef?.modelId || '',
+      selectionKey: this.reasoningKey(),
       efforts: reasoningEfforts(this.app.providerProfiles.find((item) => item.id === this.thread.modelRef?.providerId)?.protocol || '', this.thread.modelRef?.modelId || ''),
       disabled: this.app.busy || this.thread.archived || this.app.saveError.length > 0,
+      onPreview: (value: string | undefined): void => {
+        if (value !== undefined) {
+          this.reasoningPreviewKey = this.reasoningKey();
+          this.reasoningPreview = value;
+        } else if (!this.reasoningSaving) this.reasoningPreview = '';
+      },
       onSelect: async (value: string): Promise<boolean> => {
-        const saved = await this.app.setReasoningEffort(value);
-        if (!saved && this.app.error) this.getUIContext().getPromptAction().showToast({ message: this.app.error });
-        return saved;
+        this.reasoningSaving = true;
+        try {
+          const saved = await this.app.setReasoningEffort(value);
+          if (!saved && this.app.error) this.getUIContext().getPromptAction().showToast({ message: this.app.error });
+          return saved;
+        } finally {
+          // SessionService publishes the committed snapshot before resolving.
+          this.reasoningSaving = false;
+          this.reasoningPreview = '';
+        }
       } })
+  }
+
+  private reasoningKey(): string {
+    return JSON.stringify([this.thread.id, this.thread.modelRef?.providerId || '', this.thread.modelRef?.modelId || '',
+      this.app.providerProfiles.find((item) => item.id === this.thread.modelRef?.providerId)?.protocol || '']);
+  }
+
+  private displayedEffort(): string {
+    return this.reasoningPreview && this.reasoningPreviewKey === this.reasoningKey() ?
+      this.reasoningPreview : this.thread.reasoningEffort;
   }
 
   private highestEffort(): boolean {
     return this.app.configured && !this.thread.archived && isHighestReasoningEffort(
       this.app.providerProfiles.find((item) => item.id === this.thread.modelRef?.providerId)?.protocol || '',
-      this.thread.modelRef?.modelId || '', this.thread.reasoningEffort);
+      this.thread.modelRef?.modelId || '', this.displayedEffort());
   }
 
   @Builder
@@ -648,17 +678,20 @@ export struct ChatPanel {
         if (!this.app.generating && this.app.configured && supportsReasoningEffort(
           this.app.providerProfiles.find((item) => item.id === this.thread.modelRef?.providerId)?.protocol || '', this.thread.modelRef?.modelId || '')) {
           Button({ type: ButtonType.Capsule }) {
-            Text(reasoningEffortName(this.thread.reasoningEffort)).fontSize(12)
+            Text(reasoningEffortName(this.displayedEffort())).fontSize(12)
               .fontWeight(this.highestEffort() ? FontWeight.Medium : FontWeight.Regular)
               .fontColor(this.highestEffort() ? $r('app.color.on_accent_container') : $r('app.color.text_secondary'))
           }.id('open-reasoning-effort').height(32).padding({ left: 8, right: 8 })
           .backgroundColor(this.highestEffort() ? $r('app.color.user_bubble') : Color.Transparent)
           .enabled(!this.app.busy && !this.thread.archived && this.app.saveError.length === 0)
-          .accessibilityText(t('推理强度') + '：' + reasoningEffortName(this.thread.reasoningEffort))
+          .accessibilityText(t('推理强度') + '：' + reasoningEffortName(this.displayedEffort()))
           .onClick(() => { this.getUIContext().getFocusController().clearFocus(); this.showReasoning = !this.showReasoning; })
           .bindPopup(this.showReasoning, { builder: this.reasoningPicker, placement: Placement.Top,
             popupColor: $r('app.color.surface'), radius: 20, enableArrow: false, autoCancel: true,
-            onStateChange: (event) => { this.showReasoning = event.isVisible; } })
+            onStateChange: (event) => {
+              this.showReasoning = event.isVisible;
+              if (!event.isVisible && !this.reasoningSaving) this.reasoningPreview = '';
+            } })
         }
         if (this.thread.pendingInputs.length > 0) {
           Row({ space: 4 }) {
@@ -755,10 +788,11 @@ export struct ChatPanel {
       }.id('chat-swipe-area').layoutWeight(1).width('100%')
       // Normal priority lets nested horizontal scrollers keep their gestures. The composer
       // stays outside this region so selecting or moving through draft text does not open history.
-      .gesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Right, distance: 24 })
-        .onActionEnd((event: GestureEvent) => {
-          if (event.offsetX >= 64 && event.offsetX > Math.abs(event.offsetY) * 1.5) { this.onOpenHistory(); }
-        }))
+      .gesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Right, distance: 8 })
+        .onActionStart((event: GestureEvent) => this.onHistoryDragStart(event))
+        .onActionUpdate((event: GestureEvent) => this.onHistoryDragUpdate(event))
+        .onActionEnd((event: GestureEvent) => this.onHistoryDragEnd(event))
+        .onActionCancel(() => this.onHistoryDragCancel()))
       Column({ space: Space.sm }) {
         if (this.app.searchMessageId) { Banner({ text: this.app.searchQuery ? t("匹配：") + this.app.searchQuery : t("历史节点"), danger: false, actionLabel: t("定位"), onAction: () => this.locate() }).onAppear(() => { setTimeout(() => this.locate(), 100); }) }
         if (this.approval.form) { InputFormCard({ approval: this.approval }) }

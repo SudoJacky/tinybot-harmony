@@ -1,6 +1,8 @@
 import { t } from '../model/I18n';
 import { ProductivityPanel } from '../views/ProductivityPanel';
-import { AssistantPanel } from '../views/AssistantPanel';
+import { ModelSettingsPanel } from '../views/AssistantPanel';
+import { BackupPanel } from '../views/BackupPanel';
+import { UsagePanel } from '../views/UsagePanel';
 import { BranchesPanel } from '../views/BranchesPanel';
 import { WorkspacePanel } from '../views/WorkspacePanel';
 import { ToolApproval } from '../services/ToolApproval';
@@ -12,7 +14,7 @@ import { writeBytes } from '../services/Attachments';
 import { ShareInbox, exportFile, shareFile } from '../services/NativeActions';
 import { ChatViewModel, MessageViewModel } from '../viewmodel/ChatViewModel';
 import { ChatPanel } from '../views/ChatPanel';
-import { SettingsPanel, SystemPromptPanel } from '../views/SettingsPanel';
+import { SettingsPanel, UserDocumentPanel } from '../views/SettingsPanel';
 import { ThreadList } from '../views/ThreadList';
 import { ProviderEditorPanel } from '../views/ProviderEditorPanel';
 import { ModelPickerPanel } from '../views/ModelPickerPanel';
@@ -31,8 +33,10 @@ struct Index {
   @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
   @State private app: ChatViewModel = new ChatViewModel();
   @State private drawerOpen: boolean = false;
-  @State private drawerDrag: number = 0;
+  @State private drawerReveal: number = 0;
+  @State private drawerDragging: boolean = false;
   @State private drawerWidth: number = DRAWER_MAX_WIDTH;
+  private drawerDragStart: number = 0;
   private paths: NavPathStack = new NavPathStack();
   private session?: SessionService;
   @State private approval: ToolApproval = new ToolApproval();
@@ -71,7 +75,7 @@ struct Index {
   }
 
   onBackPress(): boolean {
-    if (this.drawerOpen) {
+    if (this.drawerOpen || this.drawerDragging) {
       this.setDrawer(false);
       return true;
     }
@@ -85,16 +89,39 @@ struct Index {
   }
 
   private setDrawer(open: boolean): void {
-    if (open) { this.getUIContext().getFocusController().clearFocus(); }
+    this.getUIContext().getFocusController().clearFocus();
+    this.drawerDragging = false;
+    this.drawerOpen = open;
     this.getUIContext().animateTo({ duration: Motion.drawer, curve: Motion.drawerCurve }, () => {
-      this.drawerOpen = open;
-      this.drawerDrag = 0;
+      this.drawerReveal = open ? 1 : 0;
     });
   }
 
-  // 0 when closed, 1 when fully open; follows the finger while the drawer is dragged.
-  private drawerProgress(): number {
-    return this.drawerOpen ? Math.max(0, 1 + this.drawerDrag / this.drawerWidth) : 0;
+  private startDrawerDrag(event: GestureEvent, fromChat: boolean = false): void {
+    if (!this.app.ready || (fromChat && (this.drawerOpen || event.offsetX <= 0 ||
+      event.offsetX <= Math.abs(event.offsetY) * 1.5))) { return; }
+    this.getUIContext().getFocusController().clearFocus();
+    this.drawerDragStart = this.drawerReveal;
+    this.drawerDragging = true;
+    this.updateDrawerDrag(event);
+  }
+
+  private updateDrawerDrag(event: GestureEvent): void {
+    if (!this.drawerDragging) { return; }
+    // No animation during the gesture: pausing or reversing the finger immediately moves the drawer.
+    this.drawerReveal = Math.max(0, Math.min(1, this.drawerDragStart + event.offsetX / this.drawerWidth));
+  }
+
+  private endDrawerDrag(event: GestureEvent): void {
+    if (!this.drawerDragging) { return; }
+    this.updateDrawerDrag(event);
+    // A deliberate flick follows its direction; a slow release settles at the nearest edge.
+    const open = Math.abs(event.velocityX) >= 600 ? event.velocityX > 0 : this.drawerReveal >= 0.5;
+    this.setDrawer(open);
+  }
+
+  private cancelDrawerDrag(): void {
+    if (this.drawerDragging) { this.setDrawer(this.drawerOpen); }
   }
 
   private openSettings(): void {
@@ -149,16 +176,8 @@ struct Index {
         MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.square_and_arrow_down')), content: t("导出为 Markdown") })
           .enabled(this.app.active.messages.length > 0).onClick(() => this.exportChat(false))
       }
-      MenuItemGroup({ header: t("助手") }) {
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.lightbulb')), content: t("长期记忆") })
-          .enabled(!this.app.busy).onClick(() => this.openTools('memory'))
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.doc_plaintext')), content: t("提示词模板") })
-          .enabled(!this.app.busy).onClick(() => this.openTools('templates'))
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.connection')), content: t("MCP 服务") })
-          .enabled(!this.app.busy).onClick(() => this.openTools('mcp'))
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.gearshape')), content: t("助手设置与用量") })
-          .enabled(!this.app.busy).onClick(() => this.paths.pushPath({ name: 'assistant' }))
-      }
+      MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.gearshape')), content: t('设置') })
+        .onClick(() => this.openSettings())
     }
   }
 
@@ -166,8 +185,12 @@ struct Index {
   destination(name: string, param: Object) {
     if (name === 'branches') {
       NavDestination() { BranchesPanel({ app: this.app, onSelected: () => this.paths.clear() }) }.title(t("会话分支")).backgroundColor($r('app.color.page_background'))
-    } else if (name === 'assistant') {
-      NavDestination() { AssistantPanel({ app: this.app }) }.title(t("助手")).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'model-settings') {
+      NavDestination() { ModelSettingsPanel({ app: this.app }) }.title(t('模型分工与能力')).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'backup') {
+      NavDestination() { BackupPanel({ app: this.app }) }.title(t('备份与恢复')).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'usage') {
+      NavDestination() { UsagePanel({ app: this.app }) }.title(t('Token 用量')).backgroundColor($r('app.color.page_background'))
     } else if (name === 'productivity') {
       NavDestination() { ProductivityPanel({ app: this.app, tab: (param as string) || 'memory', onUse: () => { this.paths.clear(); } }) }
         .title(t("记忆与工具")).backgroundColor($r('app.color.page_background'))
@@ -176,17 +199,21 @@ struct Index {
     } else if (name === 'settings') {
       NavDestination() {
         SettingsPanel({ app: this.app, settings: this.app.settings,
+          onUsage: () => { this.paths.pushPath({ name: 'usage' }); },
+          onModels: () => { this.paths.pushPath({ name: 'model-settings' }); },
+          onBackup: () => { this.paths.pushPath({ name: 'backup' }); },
+          onTools: (tab: string) => this.openTools(tab),
           onSkills: () => { this.paths.pushPath({ name: 'skills' }); },
-          onPrompt: () => { this.paths.pushPath({ name: 'prompt' }); },
+          onUserDocument: () => { this.paths.pushPath({ name: 'user-document' }); },
           onEditProvider: (id: string, preset: string) => {
             if (this.app.beginProvider(preset, id)) { this.paths.pushPath({ name: 'provider' }); }
           } })
       }.title(t("设置")).backgroundColor($r('app.color.page_background'))
-    } else if (name === 'prompt') {
+    } else if (name === 'user-document') {
       NavDestination() {
-        SystemPromptPanel({ app: this.app, settings: this.app.settings, onSaved: () => { this.paths.pop(); } })
-      }.title(t("系统提示")).backgroundColor($r('app.color.page_background'))
-        .onHidden(() => { this.app.settings.systemPrompt = this.app.config.systemPrompt; })
+        UserDocumentPanel({ app: this.app, settings: this.app.settings, onSaved: () => { this.paths.pop(); } })
+      }.title(t('用户文档（USER.md）')).backgroundColor($r('app.color.page_background'))
+        .onHidden(() => { this.app.settings.userDocument = this.app.config.userDocument || ''; })
     } else if (name === 'skills') {
       NavDestination() {
         SkillsPanel({ app: this.app, onEdit: (skill: string) => {
@@ -259,8 +286,7 @@ struct Index {
       Column()
         .width('100%').height('100%').backgroundColor($r('app.color.scrim'))
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-        .opacity(Math.max(0, 1 + this.drawerDrag / this.drawerWidth))
-        .transition(TransitionEffect.OPACITY)
+        .opacity(this.drawerReveal)
         .onClick(() => this.setDrawer(false))
       Stack() {
         Column().width('100%').height('100%').backgroundColor($r('app.color.page_background'))
@@ -272,19 +298,18 @@ struct Index {
         } })
       }
       .width('84%').constraintSize({ maxWidth: DRAWER_MAX_WIDTH }).height('100%')
-      .translate({ x: this.drawerDrag })
-      .transition(TransitionEffect.translate({ x: -DRAWER_MAX_WIDTH }))
+      .id('history-drawer')
+      .translate({ x: (this.drawerReveal - 1) * this.drawerWidth })
       .onAreaChange((_old: Area, next: Area) => { this.drawerWidth = Math.max(1, next.width as number); })
-      .gesture(PanGesture({ direction: PanDirection.Horizontal })
-        .onActionUpdate((event: GestureEvent) => { this.drawerDrag = Math.min(0, event.offsetX); })
-        .onActionEnd(() => {
-          if (this.drawerDrag < -this.drawerWidth / 4) {
-            this.setDrawer(false);
-          } else {
-            this.getUIContext().animateTo({ duration: Motion.medium, curve: Motion.drawerCurve }, () => { this.drawerDrag = 0; });
-          }
-        }))
     }.width('100%').height('100%')
+    .hitTestBehavior(this.drawerOpen || this.drawerDragging ? HitTestMode.Default : HitTestMode.None)
+    .enabled(this.drawerOpen || this.drawerDragging)
+    .accessibilityLevel(this.drawerOpen || this.drawerDragging ? 'auto' : 'no-hide-descendants')
+    .gesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Horizontal, distance: 8 })
+      .onActionStart((event: GestureEvent) => this.startDrawerDrag(event))
+      .onActionUpdate((event: GestureEvent) => this.updateDrawerDrag(event))
+      .onActionEnd((event: GestureEvent) => this.endDrawerDrag(event))
+      .onActionCancel(() => this.cancelDrawerDrag()))
   }
 
   build() {
@@ -298,7 +323,10 @@ struct Index {
           this.header()
           if (this.app.ready) {
             ChatPanel({ app: this.app, thread: this.app.active, approval: this.approval, onSettings: () => this.openSettings(),
-                onOpenHistory: () => this.setDrawer(true),
+                onHistoryDragStart: (event: GestureEvent) => this.startDrawerDrag(event, true),
+                onHistoryDragUpdate: (event: GestureEvent) => this.updateDrawerDrag(event),
+                onHistoryDragEnd: (event: GestureEvent) => this.endDrawerDrag(event),
+                onHistoryDragCancel: () => this.cancelDrawerDrag(),
                 onFiles: () => this.openFiles(), onTools: (tab: string) => this.openTools(tab) })
               .layoutWeight(1)
           } else {
@@ -314,8 +342,9 @@ struct Index {
           }
         }.width('100%').height('100%')
         // The page drifts aside a little under the drawer, giving the layers depth.
-        .translate({ x: this.drawerProgress() * 28 })
-        if (this.drawerOpen) {
+        .translate({ x: this.drawerReveal * 28 })
+        // Keep the measured drawer mounted so the first drag frame needs no enter transition.
+        if (this.app.ready) {
           this.drawer()
         }
       }.width('100%').height('100%')

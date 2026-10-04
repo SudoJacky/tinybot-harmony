@@ -67,7 +67,7 @@ export interface ResponsesRequest {
 interface ReasoningOptions { effort: string; }
 
 export function responsesRequest(model: string, messages: ModelMessage[], tools: ToolDefinition[],
-  maxOutput: number = 4096): ResponsesRequest {
+  maxOutput?: number): ResponsesRequest {
   const input: ResponsesInput[] = [];
   const instructions: string[] = [];
   for (const message of messages) {
@@ -132,6 +132,7 @@ export interface AnthropicRequest {
 interface AnthropicThinkingOptions { type: string; }
 
 export function anthropicRequest(model: string, messages: ModelMessage[], tools: ToolDefinition[],
+  // Messages requires max_tokens; retain the compatible fallback for unknown models.
   maxOutput: number = 4096): AnthropicRequest {
   const result: AnthropicMessage[] = [];
   const system: string[] = [];
