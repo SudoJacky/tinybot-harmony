@@ -1,6 +1,8 @@
 import { describe, expect, it } from '@ohos/hypium';
 import { ProviderEditorViewModel } from '../main/ets/viewmodel/ProviderEditorViewModel';
 import { defaultConfig, emptyData, parseAppData } from '../main/ets/model/Conversation';
+import { contextSettings } from '../main/ets/model/ConversationContext';
+import { chatRequest } from '../main/ets/services/providers/ChatCompletionsProtocol';
 import { ModelMessage, ToolDefinition, ToolProperty, ToolParameters, ToolDefinitionFunction } from '../main/ets/model/Agent';
 import { ProviderProfile, availableModels, migrateProfiles, modelConfig, modelIds, validateProfile } from '../main/ets/model/ProviderProfiles';
 import { protocolUrl, protocolHeaders, responsesRequest, anthropicRequest } from '../main/ets/services/providers/WireProtocols';
@@ -40,6 +42,25 @@ const ANTHROPIC_TEXT = 'data: {"type":"message_start"}\n\n' +
 
 export default function profileTests(): void {
   describe('ProviderProfiles', () => {
+    it('resolvesAutomaticWindowsPerModelAndKeepsExplicitServiceOverrides', 0, () => {
+      const service = profile('custom-proxy');
+      service.contextWindow = undefined;
+      service.models = ['deepseek-flash', 'deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp',
+        'glm-5.3', 'glm-5.3-flash', 'other-model'];
+      validateProfile(service);
+      for (const model of service.models) {
+        const config = modelConfig([service], { providerId: service.id, modelId: model }, defaultConfig());
+        expect(contextSettings(config).window).assertEqual(model === 'other-model' ? 200000 : 1000000);
+      }
+      service.contextWindow = 65536;
+      expect(contextSettings(modelConfig([service], { providerId: service.id, modelId: 'deepseek-flash' }, defaultConfig())).window).assertEqual(65536);
+      const editor = new ProviderEditorViewModel();
+      editor.reset();
+      expect(editor.contextWindow).assertEqual('');
+      expect(editor.fieldError('context')).assertEqual('');
+      editor.reset(service);
+      expect(editor.contextWindow).assertEqual('65536');
+    });
     it('mobileEditorAddsModelsWithoutDuplicatesAndRejectsInvalidBatchAtomically', 0, () => {
       const editor = new ProviderEditorViewModel(); editor.reset(profile('test'));
       expect(editor.hasChanges).assertFalse();
@@ -144,6 +165,13 @@ export default function profileTests(): void {
     });
   });
   describe('WireProtocols', () => {
+    it('omitsOptionalOutputLimitsButPreservesExplicitInternalBudgets', 0, () => {
+      expect(JSON.stringify(chatRequest('model', HISTORY, TOOLS)).includes('max_tokens')).assertFalse();
+      expect(JSON.stringify(responsesRequest('model', HISTORY, TOOLS)).includes('max_output_tokens')).assertFalse();
+      expect(chatRequest('model', HISTORY, TOOLS, {}, 1600).max_tokens).assertEqual(1600);
+      expect(responsesRequest('model', HISTORY, TOOLS, 2000).max_output_tokens).assertEqual(2000);
+      expect(anthropicRequest('model', HISTORY, TOOLS).max_tokens).assertEqual(4096);
+    });
     it('separatesAnthropicApiKeyHeadersFromOpenAiBearerAuth', 0, () => {
       expect(protocolHeaders('responses', 'fixture-key')['Authorization']).assertEqual('Bearer fixture-key');
       expect(protocolHeaders('chat-completions', 'fixture-key')['Authorization']).assertEqual('Bearer fixture-key');
@@ -181,6 +209,25 @@ export default function profileTests(): void {
           parser.push(wire.slice(0, boundary)); parser.push(wire.slice(boundary));
           expect(parser.finish().content).assertEqual('你好'); expect(visible).assertEqual('你好');
         }
+      }
+    });
+    it('explainsResponsesOutputExhaustionAndPreservesSafeFailureIdentifiers', 0, () => {
+      const events: string[] = [
+        '{"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}}}',
+        '{"type":"response.incomplete","response":{"incomplete_details":{"reason":"content_filter"}}}',
+        '{"type":"response.failed","response":{"error":{"code":"server_error","message":"private request data"}}}',
+        '{"type":"error","code":"invalid_image","message":"private request data"}',
+        '{"type":"response.failed","response":{"error":{"code":"private request data"}}}'
+      ];
+      const expected: string[] = ['思考 token', 'response.incomplete: content_filter', 'response.failed: server_error',
+        'error: invalid_image', '[response.failed]'];
+      for (let index = 0; index < events.length; index++) {
+        const parser = new ResponsesStream(() => {});
+        let message = '';
+        try { parser.push('data: ' + events[index] + '\n\n'); } catch (error) { message = (error as Error).message; }
+        expect(message.includes(expected[index])).assertTrue();
+        expect(message.includes('private request data')).assertFalse();
+        rejects(() => { parser.finish(); });
       }
     });
     it('collectsResponsesCallsFromTheAuthoritativeCompletedOutput', 0, () => {

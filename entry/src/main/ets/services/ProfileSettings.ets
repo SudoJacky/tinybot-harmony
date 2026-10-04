@@ -43,7 +43,8 @@ export class ProfileSettings {
     const profile: ProviderProfile = { id: previous?.id || 'provider-' + this.createId(), name: draft.name.trim(),
       presetId: draft.presetId, protocol: draft.protocol, baseUrl: draft.baseUrl.trim().replace(/\/+$/, ''),
       credentialAlias: draft.noApiKey ? '' : key.length > 0 ? 'pending-key' : previous?.credentialAlias || '',
-      noApiKey: draft.noApiKey, enabled: draft.enabled, models: modelIds(draft.models), contextWindow: Number(draft.contextWindow) };
+      noApiKey: draft.noApiKey, enabled: draft.enabled, models: modelIds(draft.models),
+      contextWindow: draft.contextWindow.trim() ? Number(draft.contextWindow) : undefined };
     validateProfile(profile);
     // An alias can survive a restore/signing change while its secure asset is unavailable.
     // Do not report a successful save when a blank editor would retain a missing key.

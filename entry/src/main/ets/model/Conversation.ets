@@ -10,7 +10,7 @@ import { ModelReference, ProviderProfile, validateProfile, validateReference } f
 import { ExtensionSettings, validateExtensions } from './Skills';
 import { PendingInput, validatePendingInputs } from './PendingInput';
 
-import { DEFAULT_SYSTEM_PROMPT, migrateSystemPrompt } from './SystemPrompt';
+import { DEFAULT_SYSTEM_PROMPT, migrateUserDocument } from './SystemPrompt';
 
 export interface ModelConfig {
   reasoning?: string;
@@ -21,6 +21,8 @@ export interface ModelConfig {
   baseUrl: string;
   model: string;
   systemPrompt: string;
+  // App-managed USER.md, shared by all conversations and included in backups.
+  userDocument?: string;
   credentialAlias: string;
   contextWindow?: number;
   autoCompact?: boolean;
@@ -47,7 +49,7 @@ export interface CompactionData {
 
 export function copyModelConfig(config: ModelConfig, configured: boolean = config.configured): ModelConfig {
   return { configured: configured, providerId: config.providerId, baseUrl: config.baseUrl, model: config.model,
-    systemPrompt: config.systemPrompt, credentialAlias: config.credentialAlias,
+    systemPrompt: config.systemPrompt, userDocument: config.userDocument, credentialAlias: config.credentialAlias,
     contextWindow: config.contextWindow, autoCompact: config.autoCompact, reasoning: config.reasoning, requestUsage: config.requestUsage, images: config.images };
 }
 
@@ -93,7 +95,8 @@ export function defaultConfig(): ModelConfig {
     baseUrl: provider.defaultBaseUrl,
     model: provider.defaultModel,
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
-    credentialAlias: '', contextWindow: 32768, autoCompact: true
+    userDocument: '',
+    credentialAlias: '', autoCompact: true
   };
 }
 
@@ -173,7 +176,13 @@ export function parseAppData(text: string): AppData {
   } else if (typeof data.config.providerId !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(data.config.providerId)) {
     throw new Error(t("本地模型服务配置损坏，原文件已保留。"));
   }
-  data.config.systemPrompt = migrateSystemPrompt(data.config.systemPrompt);
+  if (data.config.userDocument !== undefined && typeof data.config.userDocument !== 'string') {
+    throw new Error(t('用户文档格式无效，原文件已保留。'));
+  }
+  if (data.config.userDocument === undefined) {
+    data.config.userDocument = migrateUserDocument(data.config.systemPrompt);
+  }
+  data.config.systemPrompt = DEFAULT_SYSTEM_PROMPT;
   for (const thread of data.threads) {
     if (!thread || typeof thread.id !== 'string' || thread.id.length === 0 || threadIds.has(thread.id) ||
       typeof thread.title !== 'string' || typeof thread.updatedAt !== 'number' ||

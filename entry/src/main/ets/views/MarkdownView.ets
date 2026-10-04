@@ -1,8 +1,10 @@
 import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
+import { ColorMetrics } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { MarkdownBlock, MarkdownSpan, markdownBlocks, markdownSpans } from '../model/Markdown';
 import { Radius, Space } from '../common/Theme';
+import { RevealSpan, StreamReveal } from '../model/StreamReveal';
 
 // Long code blocks start collapsed so one answer does not push the conversation off screen.
 const CODE_PREVIEW_LINES: number = 18;
@@ -12,14 +14,63 @@ const NBSP: string = String.fromCharCode(0xA0);
 @Component
 export struct MarkdownView {
   @Prop @Watch('refresh') content: string = '';
+  @Prop @Watch('refresh') streaming: boolean = false;
   @Prop fontSize: number = 16;
   @State private blocks: MarkdownBlock[] = [];
   @State private copied: number = -1;
   @State private expanded: number[] = [];
   private copyTimer: number = -1;
-  aboutToAppear(): void { this.refresh(); }
-  aboutToDisappear(): void { clearTimeout(this.copyTimer); }
-  private refresh(): void { this.blocks = markdownBlocks(this.content); }
+  @State private revealTime: number = 0;
+  private reveal: StreamReveal = new StreamReveal();
+  private revealTimer: number = -1;
+  private mounted: boolean = false;
+  aboutToAppear(): void { this.refresh(); this.mounted = true; }
+  aboutToDisappear(): void {
+    this.mounted = false; clearTimeout(this.copyTimer); clearTimeout(this.revealTimer); this.revealTimer = -1;
+  }
+  private refresh(): void {
+    const now = Date.now();
+    const blocks = markdownBlocks(this.content);
+    const keys: string[] = [];
+    blocks.forEach((block: MarkdownBlock, index: number) => {
+      if (block.kind === 'table') {
+        block.rows.forEach((row: string[], r: number) => {
+          row.forEach((cell: string, c: number) => {
+            const key = `${index}:${r}:${c}`; keys.push(key);
+            this.reveal.update(key, this.inlineSpans(cell).map((span: MarkdownSpan) => span.text).join(''), now, this.mounted && this.streaming);
+          });
+        });
+      } else {
+        const key = `${index}`; keys.push(key);
+        const text = block.kind === 'code' ? block.text : this.inlineSpans(block.text).map((span: MarkdownSpan) => span.text).join('');
+        this.reveal.update(key, text, now, this.mounted && this.streaming);
+      }
+    });
+    this.reveal.retain(keys);
+    this.blocks = blocks; this.revealTime = now;
+    clearTimeout(this.revealTimer); this.revealTimer = -1;
+    this.scheduleReveal();
+  }
+  private scheduleReveal(): void {
+    if (!this.reveal.active(this.revealTime)) { return; }
+    this.revealTimer = setTimeout(() => {
+      this.revealTimer = -1;
+      if (!this.mounted) { return; }
+      this.revealTime = Date.now(); this.scheduleReveal();
+    }, 32);
+  }
+  private revealColor(color: ResourceColor, opacity: number): ResourceColor {
+    if (opacity >= 1) { return color; }
+    try {
+      const value = ColorMetrics.resourceColor(color);
+      return ColorMetrics.rgba(value.red, value.green, value.blue, value.alpha / 255 * opacity).color;
+    } catch (_) { return color; }
+  }
+  private inlineSpans(text: string): MarkdownSpan[] {
+    return markdownSpans(text).map((span: MarkdownSpan): MarkdownSpan => {
+      return { text: span.kind === 'code' ? NBSP + span.text + NBSP : span.text, kind: span.kind, url: span.url };
+    });
+  }
   private async open(url: string): Promise<void> {
     if (!/^https?:\/\//.test(url)) { return; }
     try { await (this.getUIContext().getHostContext() as common.UIAbilityContext).startAbility({ action: 'ohos.want.action.viewData', uri: url }); }
@@ -52,16 +103,17 @@ export struct MarkdownView {
   private headingSize(level: number): number { return level <= 1 ? this.fontSize + 5 : level === 2 ? this.fontSize + 3 : this.fontSize + 1; }
 
   @Builder
-  prose(text: string, size: number, bold: boolean, color: ResourceColor) {
+  prose(text: string, size: number, bold: boolean, color: ResourceColor, key: string) {
     Text() {
-      ForEach(markdownSpans(text), (span: MarkdownSpan) => {
+      ForEach(this.reveal.spans(key, this.inlineSpans(text), this.revealTime), (span: RevealSpan) => {
         if (span.kind === 'code') {
-          Span(NBSP + span.text + NBSP).fontFamily('monospace').fontSize(size - 2).fontColor($r('app.color.on_accent_container'))
+          Span(span.text).fontFamily('monospace').fontSize(size - 2)
+            .fontColor(this.revealColor($r('app.color.on_accent_container'), span.opacity))
             .textBackgroundStyle({ color: $r('app.color.surface_variant'), radius: 4 })
         } else {
           Span(span.text).fontWeight(bold || span.kind === 'bold' ? FontWeight.Bold : FontWeight.Normal)
             .fontStyle(span.kind === 'italic' ? FontStyle.Italic : FontStyle.Normal)
-            .fontColor(span.kind === 'link' ? $r('app.color.accent') : color)
+            .fontColor(this.revealColor(span.kind === 'link' ? $r('app.color.accent') : color, span.opacity))
             .decoration({ type: span.kind === 'link' ? TextDecorationType.Underline :
               span.kind === 'strike' ? TextDecorationType.LineThrough : TextDecorationType.None, color: span.kind === 'link' ? $r('app.color.accent') : color })
             .onClick(() => { if (span.url) { this.open(span.url); } })
@@ -87,7 +139,11 @@ export struct MarkdownView {
       }.width('100%').padding({ left: Space.md, right: 4 }).height(38)
       Divider().strokeWidth(0.5).color($r('app.color.divider'))
       Scroll() {
-        Text(this.codeShown(block, index)).fontSize(13).lineHeight(20).fontFamily('monospace')
+        Text() {
+          ForEach(this.reveal.spans(`${index}`, [{ text: this.codeShown(block, index), kind: 'code', url: '' }], this.revealTime), (span: RevealSpan) => {
+            Span(span.text).fontColor(this.revealColor($r('app.color.text_primary'), span.opacity))
+          })
+        }.fontSize(13).lineHeight(20).fontFamily('monospace')
           .copyOption(CopyOptions.LocalDevice).fontColor($r('app.color.text_primary'))
           .padding({ left: Space.md, right: Space.md, top: 10, bottom: 12 })
       }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).width('100%').align(Alignment.Start)
@@ -108,13 +164,13 @@ export struct MarkdownView {
   }
 
   @Builder
-  table(block: MarkdownBlock) {
+  table(block: MarkdownBlock, blockIndex: number) {
     Scroll() {
       Column() {
         ForEach(block.rows, (row: string[], index: number) => {
           Row() {
             ForEach(row, (cell: string, column: number) => {
-              Column() { this.prose(cell, 14, index === 0, $r('app.color.text_primary')) }
+              Column() { this.prose(cell, 14, index === 0, $r('app.color.text_primary'), `${blockIndex}:${index}:${column}`) }
                 .width(this.columnWidths(block)[column] || 88).padding({ left: 10, right: 10, top: 8, bottom: 8 })
                 .border({ width: { left: column > 0 ? 0.5 : 0 }, color: $r('app.color.divider') })
             })
@@ -133,11 +189,11 @@ export struct MarkdownView {
         if (block.kind === 'code') {
           this.codeBlock(block, index)
         } else if (block.kind === 'table') {
-          this.table(block)
+          this.table(block, index)
         } else if (block.kind === 'rule') {
           Divider().strokeWidth(0.5).color($r('app.color.divider')).margin({ top: 4, bottom: 4 })
         } else if (block.kind === 'quote') {
-          Column() { this.prose(block.text, this.fontSize - 1, false, $r('app.color.text_secondary')) }
+          Column() { this.prose(block.text, this.fontSize - 1, false, $r('app.color.text_secondary'), `${index}`) }
             .width('100%').padding({ left: Space.md, top: 2, bottom: 2 })
             .border({ width: { left: 3 }, color: $r('app.color.accent') })
         } else if (block.kind === 'list') {
@@ -145,13 +201,13 @@ export struct MarkdownView {
             Text(block.rows[0][0]).fontSize(block.rows[0][0] === '•' ? this.fontSize + 2 : this.fontSize)
               .lineHeight(Math.round(this.fontSize * 1.62)).constraintSize({ minWidth: 22 })
               .fontColor(block.rows[0][0] === '☑' ? $r('app.color.accent') : $r('app.color.text_secondary'))
-            Column() { this.prose(block.text, this.fontSize, false, $r('app.color.text_primary')) }.layoutWeight(1)
+            Column() { this.prose(block.text, this.fontSize, false, $r('app.color.text_primary'), `${index}`) }.layoutWeight(1)
           }.width('100%').alignItems(VerticalAlign.Top).padding({ left: block.level * 18 }).margin({ top: -4 })
         } else if (block.kind === 'heading') {
-          Column() { this.prose(block.text, this.headingSize(block.level), true, $r('app.color.text_primary')) }
+          Column() { this.prose(block.text, this.headingSize(block.level), true, $r('app.color.text_primary'), `${index}`) }
             .margin({ top: index > 0 ? 6 : 0 })
         } else {
-          this.prose(block.text, this.fontSize, false, $r('app.color.text_primary'))
+          this.prose(block.text, this.fontSize, false, $r('app.color.text_primary'), `${index}`)
         }
       })
     }.width('100%').alignItems(HorizontalAlign.Start)

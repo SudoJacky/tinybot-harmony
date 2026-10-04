@@ -1,12 +1,14 @@
 import { ModelMessage, ModelTurn, ToolDefinition } from '../../model/Agent';
 import { ProviderInfo } from '../../model/Provider';
 import { Cancellation } from '../Cancellation';
+import { UsageOrigin } from '../../model/Usage';
 
 export interface CredentialReader {
   read(alias: string): Promise<string>;
 }
 
 export interface ProviderRequest {
+  usageOrigin?: UsageOrigin;
   reasoning?: string;
   requestUsage?: boolean;
   baseUrl: string;
@@ -18,6 +20,8 @@ export interface ProviderRequest {
 }
 
 export interface ModelRequestOptions {
+  usagePurpose?: string;
+  usageStep?: number;
   maxOutputTokens?: number;
   onReasoning?: (text: string) => void;
 }

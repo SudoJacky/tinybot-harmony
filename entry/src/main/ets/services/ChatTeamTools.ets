@@ -2,6 +2,7 @@ import { getLocale, t } from '../model/I18n';
 import { employeeName } from '../model/TeamNames';
 import { ModelConfig, ThreadData } from '../model/Conversation';
 import { ModelReference } from '../model/ProviderProfiles';
+import { UsageOrigin } from '../model/Usage';
 import { ToolCall, ToolDefinition, ToolProperty } from '../model/Agent';
 import { TeamArtifact, TeamAttempt, TeamHandoff, TeamMember, TeamPlan, TeamRun, TeamTask, TeamTaskRecord, lastAttempt, validateTeamPlan } from '../model/Team';
 import { AgentTools } from './AgentLoop';
@@ -27,6 +28,7 @@ interface MemberIdentity { id: string; displayName: string; }
 interface TeamPage { runId: string; status: string; error: string; revision: number; members: MemberIdentity[]; tasks: TaskStatus[]; results: ResultReference[]; afterSequence: number; hasMore: boolean; }
 interface ActiveTeam { coordinator: TeamCoordinator; done: Promise<void>; }
 export interface ChatTeamContext {
+  usageOrigin?: UsageOrigin;
   configFor?: (reference: ModelReference) => ModelConfig;
   thread: ThreadData; messageId: string; config: ModelConfig; base: () => AgentTools;
   runtime: () => AgentRuntime; createId: () => string; checkpoint: () => Promise<void>; changed: () => void;
@@ -158,6 +160,7 @@ export class ChatTeamTools implements AgentTools {
     if (this.active.has(run.id)) { return; }
     const coordinator = new TeamCoordinator(); const employeeTools = new Map<string, EmployeeTools>();
     const done = coordinator.execute(run, {
+      usageOrigin: this.context.usageOrigin,
       runtime: this.context.runtime, config: this.context.configFor ? this.context.configFor(run.model) : this.context.config, createId: this.context.createId, lane: this.lane,
       tools: (record, attempt) => {
         const profile = run.members.find((member) => member.id === record.task.memberId)?.toolProfile || 'execution';

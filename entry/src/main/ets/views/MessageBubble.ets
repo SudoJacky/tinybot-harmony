@@ -8,7 +8,8 @@ import { PlanItem, parsePlan } from '../model/RichArtifacts';
 import { Attachment } from '../model/Productivity';
 import { Attachments } from '../services/Attachments';
 import { MessageViewModel, ToolExecutionViewModel } from '../viewmodel/ChatViewModel';
-import { Btn, Font, Motion, Radius, Space, compactNumber, fileSize, systemInsets } from '../common/Theme';
+import { Btn, Font, Motion, Radius, Space, fileSize, systemInsets } from '../common/Theme';
+import { MessageUsage } from './MessageUsage';
 import { ThinkingDisclosure } from './ThinkingDisclosure';
 import { ThreadReferenceCard } from './ThreadReferenceCard';
 import { ThreadReference } from '../model/ThreadReferences';
@@ -447,14 +448,6 @@ export struct MessageBubble {
   private images(): Attachment[] { return this.message.attachments.filter((item) => item.mime === 'image/jpeg'); }
   private files(): Attachment[] { return this.message.attachments.filter((item) => item.mime !== 'image/jpeg'); }
   private preview(item: Attachment): void { this.previewPath = Attachments.path(item); this.previewing = true; }
-  private usageLabel(): string {
-    const records = this.message.steps.map((item) => item.usage).filter((item) => item !== undefined);
-    if (!records.length) { return ''; }
-    let input = 0; let output = 0; let duration = 0; let unknown = 0;
-    for (const record of records) { duration += record?.durationMs || 0; if (record?.tokens) { input += record.tokens.input; output += record.tokens.output; } else { unknown++; } }
-    return (duration / 1000).toFixed(1) + 's' + (records.length > unknown ? t(" · 输入 ") + compactNumber(input) + t(" · 输出 ") + compactNumber(output) : '') +
-      (unknown ? ' · ' + unknown + t(" 次未报告") : '');
-  }
   @Builder
   documentViewer() {
     DocumentPreview({ name: this.documentName, content: this.documentText, onReference: this.onReference, onClose: () => { this.documentOpen = false; } })
@@ -596,7 +589,8 @@ export struct MessageBubble {
               if (entry.kind === 'steering') {
                 this.steering(entry.step)
               } else if (entry.kind === 'text') {
-                MarkdownView({ content: this.message.stepViews[entry.step]?.content || '' })
+                MarkdownView({ content: this.message.stepViews[entry.step]?.content || '',
+                  streaming: this.message.status === 'generating' && entry.step === this.message.stepViews.length - 1 })
               } else {
                 ProcessGroup({ message: this.message, disclosure: this.message.disclosures.get(entry.key), groupKey: entry.key, richOnly: this.folded(),
                   onResume: this.onResume, onInspect: this.onInspect })
@@ -609,7 +603,7 @@ export struct MessageBubble {
           ThinkingLine()
         }
       } else if (this.message.content.length > 0) {
-        MarkdownView({ content: this.message.content })
+        MarkdownView({ content: this.message.content, streaming: this.message.status === 'generating' })
       } else if (this.message.status === 'generating') {
         ThinkingLine()
       }
@@ -630,17 +624,11 @@ export struct MessageBubble {
             () => { this.onFork(this.message.id); })
           this.actionButton($r('sys.symbol.lightbulb'), t("提炼为记忆"), 'remember-' + this.message.id,
             () => { this.onRemember(this.message.id); })
-          Blank()
-          if (this.usageLabel()) {
-            Text(this.usageLabel()).id('usage-' + this.message.id).fontSize(11).maxLines(1)
-              .accessibilityText(t("模型用时与 Token 用量：") + this.usageLabel()).fontColor($r('app.color.text_tertiary'))
-          }
         }.width('100%').margin({ left: -8, top: -6 })
         .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 4 }))
           .animation({ duration: Motion.medium, curve: Motion.standard }))
-      } else if (this.usageLabel()) {
-        Text(this.usageLabel()).fontSize(11).fontColor($r('app.color.text_tertiary'))
       }
+      MessageUsage({ message: this.message })
     }.width('100%').alignItems(HorizontalAlign.Start)
   }
 

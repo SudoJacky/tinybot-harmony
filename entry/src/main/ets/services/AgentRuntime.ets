@@ -1,6 +1,7 @@
 import { t } from '../model/I18n';
 import { AgentTurn, MAX_AGENT_STEPS, ModelMessage } from '../model/Agent';
 import { ModelConfig } from '../model/Conversation';
+import { UsageOrigin, UsageRecorder } from '../model/Usage';
 import { AgentTools, LoopEvent, LoopEventType, SteeringInput, runAgentLoop } from './AgentLoop';
 import { Cancellation, RunCancelledError } from './Cancellation';
 import { CredentialReader, ModelSession } from './providers/Provider';
@@ -29,6 +30,7 @@ export interface AgentEvent {
 }
 
 export interface AgentRunRequest {
+  usageOrigin?: UsageOrigin;
   sessionId: string;
   config: ModelConfig;
   messages: ModelMessage[];
@@ -55,16 +57,18 @@ interface ActiveRun {
 export class AgentRuntime {
   private providers: ProviderRegistry;
   private credentials: CredentialReader;
+  private usage?: UsageRecorder;
   private active?: ActiveRun;
   private sequence: number = 0;
   private listeners: Set<(event: AgentEvent) => void> = new Set<(event: AgentEvent) => void>();
 
-  constructor(providers: ProviderRegistry, credentials: CredentialReader) {
+  constructor(providers: ProviderRegistry, credentials: CredentialReader, usage?: UsageRecorder) {
     this.providers = providers;
     this.credentials = credentials;
+    this.usage = usage;
   }
 
-  fork(): AgentRuntime { return new AgentRuntime(this.providers, this.credentials); }
+  fork(): AgentRuntime { return new AgentRuntime(this.providers, this.credentials, this.usage); }
 
   get isRunning(): boolean {
     return this.active !== undefined;
@@ -111,7 +115,7 @@ export class AgentRuntime {
         let model: ModelSession | undefined = undefined;
         let bindingError: Error | undefined = undefined;
         try {
-          model = this.providers.bind(request.config, this.credentials);
+          model = this.providers.bind(request.config, this.credentials, request.usageOrigin);
         } catch (error) {
           bindingError = error as Error;
         }
@@ -145,7 +149,8 @@ export class AgentRuntime {
                   toolCallId: event.toolCallId, delta: event.delta });
               }
             },
-            checkpoint: hooks.checkpoint, steering: hooks.steering
+            checkpoint: hooks.checkpoint, steering: hooks.steering,
+            toolActivity: (id, activity) => { this.usage?.recordTool(id, activity); }
           });
         }
         active.state.status = 'complete';

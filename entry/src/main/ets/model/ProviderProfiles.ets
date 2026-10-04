@@ -20,7 +20,7 @@ export interface ProviderProfile {
   noApiKey: boolean;
   enabled: boolean;
   models: string[];
-  contextWindow: number;
+  contextWindow?: number;
 }
 
 export interface ModelChoice extends ModelReference {
@@ -67,7 +67,7 @@ export function migrateProfiles(config: ModelConfig): ProviderProfile[] {
   const profile: ProviderProfile = { id: config.providerId, name: preset?.name || config.providerId,
     presetId: preset?.id, protocol: preset?.protocol || 'chat-completions', baseUrl: config.baseUrl,
     credentialAlias: config.credentialAlias, noApiKey: config.credentialAlias.length === 0,
-    enabled: true, models: models, contextWindow: contextSettings(config).window };
+    enabled: true, models: models, contextWindow: config.contextWindow };
   validateProfile(profile);
   return [profile];
 }
@@ -90,5 +90,5 @@ export function modelConfig(profiles: ProviderProfile[], reference: ModelReferen
   }
   return { configured: true, providerId: profile.id, baseUrl: profile.baseUrl, model: reference.modelId,
     credentialAlias: profile.credentialAlias, contextWindow: profile.contextWindow,
-    systemPrompt: preferences.systemPrompt, autoCompact: preferences.autoCompact };
+    systemPrompt: preferences.systemPrompt, userDocument: preferences.userDocument, autoCompact: preferences.autoCompact };
 }

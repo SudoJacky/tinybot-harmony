@@ -1,4 +1,5 @@
 import { t } from '../model/I18n';
+import { RequestUsage } from '../model/Usage';
 import { referenceContext } from '../model/ThreadReferences';
 import { TeamMember, TeamPlan, TeamRun } from '../model/Team';
 import { Attachment, ProductivityData, defaultProductivity, expandTemplate } from '../model/Productivity';
@@ -19,12 +20,12 @@ export { AgentStepViewModel, MessageViewModel, ThreadViewModel, ToolExecutionVie
 
 @Observed
 export class SettingsViewModel {
-  systemPrompt: string = '';
+  userDocument: string = '';
   autoCompact: boolean = true;
   webEnabled: boolean = true;
   error: string = '';
   reset(config: ModelConfig, webEnabled: boolean): void {
-    this.systemPrompt = config.systemPrompt; this.autoCompact = contextSettings(config).autoCompact;
+    this.userDocument = config.userDocument || ''; this.autoCompact = contextSettings(config).autoCompact;
     this.webEnabled = webEnabled; this.error = '';
   }
 }
@@ -157,6 +158,7 @@ export class ChatViewModel {
   cancelMemoryDraft(): void { this.requireSession().cancelMemoryDraft(); }
   saveMemoryDraft(threadId: string, messageId: string, items: string[], global: boolean): Promise<number> { return this.requireSession().saveMemoryDraft(threadId, messageId, items, global); }
   exportSnapshot(): AppData { return this.requireSession().snapshot(); }
+  attributeUsage(records: RequestUsage[]): RequestUsage[] { return this.requireSession().attributeUsage(records); }
   importSnapshot(data: AppData): Promise<boolean> { return this.requireSession().importSnapshot(data); }
   setThreadMcp(id: string, enabled: boolean): Promise<boolean> { return this.requireSession().setThreadMcp(id, enabled); }
   setAttachments(items: Attachment[]): Promise<boolean> { return this.requireSession().setAttachments(items); }
@@ -211,7 +213,7 @@ export class ChatViewModel {
 
   openSettings(): void { this.settings.reset(this.config, this.extensions.webEnabled); }
   async saveSettings(): Promise<boolean> {
-    const saved = await this.requireSession().saveSettings(this.settings.systemPrompt, this.settings.autoCompact, this.settings.webEnabled);
+    const saved = await this.requireSession().saveSettings(this.settings.userDocument, this.settings.autoCompact, this.settings.webEnabled);
     // A refused save (session busy) reports no session error; still tell the user it did not stick.
     this.settings.error = saved ? '' : this.error || t("设置未保存，请稍后重试。"); return saved;
   }

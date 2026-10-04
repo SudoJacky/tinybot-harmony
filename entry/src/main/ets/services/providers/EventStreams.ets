@@ -51,8 +51,26 @@ interface ResponseItem {
   arguments?: string;
   content?: ResponseContent[];
 }
-interface ResponseData { status: string; output: ResponseItem[]; }
-interface ResponseEvent { type: string; delta?: string; response?: ResponseData; }
+interface ResponseError { code?: string; }
+interface ResponseIncomplete { reason?: string; }
+interface ResponseData {
+  status: string;
+  output: ResponseItem[];
+  error?: ResponseError;
+  incomplete_details?: ResponseIncomplete;
+}
+interface ResponseEvent { type: string; delta?: string; response?: ResponseData; code?: string; error?: ResponseError; }
+
+function responsesFailure(event: ResponseEvent): Error {
+  const reason = event.response?.incomplete_details?.reason;
+  if (event.type === 'response.incomplete' && reason === 'max_output_tokens') {
+    return new Error(t('Responses 回答达到输出上限（包含思考 token），尚未完成。请提高输出上限或降低思考强度。'));
+  }
+  // Keep diagnostic identifiers, without copying upstream messages that may echo request data.
+  const detail = event.type === 'response.incomplete' ? reason : event.response?.error?.code || event.error?.code || event.code;
+  const identifier = typeof detail === 'string' && /^[a-zA-Z0-9_.-]{1,80}$/.test(detail) ? ': ' + detail : '';
+  return new Error(t('Responses 模型服务返回错误或不完整回答。') + ' [' + event.type + identifier + ']');
+}
 
 export class ResponsesStream implements ModelStream {
   private frames: EventFrames;
@@ -74,7 +92,7 @@ export class ResponsesStream implements ModelStream {
     const event = parseEvent(payload) as ResponseEvent;
     if (!event || typeof event.type !== 'string') { throw new Error(t("Responses 流式事件无效。")); }
     if (event.type === 'error' || event.type === 'response.failed' || event.type === 'response.incomplete' ||
-      event.type === 'response.refusal.delta') { throw new Error(t("Responses 模型服务返回错误或不完整回答。")); }
+      event.type === 'response.refusal.delta') { throw responsesFailure(event); }
     if (event.type === 'response.output_text.delta') {
       if (typeof event.delta !== 'string') { throw new Error(t("Responses 文本片段无效。")); }
       this.content += event.delta;

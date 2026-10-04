@@ -24,7 +24,8 @@ function allAttachments(data: AppData): Attachment[] {
 }
 export async function exportBackup(context: common.UIAbilityContext, data: AppData): Promise<void> {
   const envelope: BackupEnvelope = { format: 'tinybot-harmony.backup.v1', data: data, attachments: [], files: [] };
-  data.config = defaultConfig();
+  const userDocument = data.config.userDocument || '';
+  data.config = defaultConfig(); data.config.userDocument = userDocument;
   for (const profile of data.providerProfiles || []) { profile.credentialAlias = ''; profile.noApiKey = true; profile.enabled = false; }
   for (const server of data.productivity?.servers || []) { server.credentialAlias = ''; server.authType = undefined; server.enabled = false; }
   let size = JSON.stringify(data).length * 3;
@@ -109,6 +110,8 @@ export async function readBackup(context: common.UIAbilityContext): Promise<AppD
   for (const memory of data.productivity?.memories || []) { memory.id = util.generateRandomUUID(); memory.threadId = threadIds.get(memory.threadId) || ''; memory.sourceThreadId = threadIds.get(memory.sourceThreadId || ''); memory.sourceMessageId = messageIds.get(memory.sourceMessageId || ''); }
   for (const template of data.productivity?.templates || []) { template.id = util.generateRandomUUID(); }
   for (const server of data.productivity?.servers || []) { server.id = util.generateRandomUUID(); server.enabled = false; server.credentialAlias = ''; server.authType = undefined; }
+  const userDocument = data.config.userDocument || '';
   data.activeThreadId = threadIds.get(data.activeThreadId) || ''; data.config = defaultConfig();
+  data.config.userDocument = userDocument;
   return data;
 }

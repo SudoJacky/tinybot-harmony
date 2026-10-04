@@ -1,10 +1,11 @@
 import { describe, expect, it } from '@ohos/hypium';
 import { AgentTurn, ModelMessage, ModelTurn, ToolDefinition } from '../main/ets/model/Agent';
 import { MessageData, ThreadData, emptyData, parseAppData } from '../main/ets/model/Conversation';
-import { CompactionPlan, contextSettings, estimateContextTokens, estimateTextTokens,
+import { CompactionPlan, contextSettings, contextInputBudget, estimateContextTokens, estimateTextTokens,
   prepareCompaction, threadHistory } from '../main/ets/model/ConversationContext';
 import { matchingThreads, threadTitle } from '../main/ets/model/SessionManagement';
 import { compactContext } from '../main/ets/services/ContextCompactor';
+import { prepareSessionContext } from '../main/ets/services/SessionContext';
 import { Cancellation } from '../main/ets/services/Cancellation';
 import { ModelRequestOptions, ModelSession } from '../main/ets/services/providers/Provider';
 import { runAgentLoop, AgentTools } from '../main/ets/services/AgentLoop';
@@ -66,6 +67,30 @@ class LargeResultTools extends NoTools {
 
 export default function contextTests(): void {
   describe('ContextManagement', () => {
+    it('compactsBeforePiReserveIsConsumedAndUsesSeparateSummaryBudget', 0, async () => {
+      const thread = fixture();
+      for (const item of thread.messages) { item.content = 'x'.repeat(18000); }
+      const config = emptyData().config; config.contextWindow = 32768;
+      const before = estimateContextTokens(threadHistory(thread, ''));
+      expect(before > contextInputBudget(32768) && before < 32768 - 4096).assertTrue();
+      const model = new SummaryModel(); let saved = 0;
+      const history = await prepareSessionContext(thread, model, new Cancellation(), false, config, '', [],
+        async () => { saved++; }, () => {});
+      expect(saved).assertEqual(1);
+      expect(model.limits[0]).assertEqual(4096);
+      expect(thread.messages.length).assertEqual(4);
+      expect(estimateContextTokens(history) < contextInputBudget(32768)).assertTrue();
+    });
+    it('reservesPiHeadroomAndKeepsRecentHistoryWithoutStarvingSmallWindows', 0, () => {
+      const config = emptyData().config;
+      expect(contextInputBudget(1000000)).assertEqual(983616);
+      expect(contextSettings(config).keepRecent).assertEqual(20000);
+      config.model = 'unknown';
+      expect(contextInputBudget(contextSettings(config).window)).assertEqual(183616);
+      config.contextWindow = 8192;
+      expect(contextInputBudget(contextSettings(config).window)).assertEqual(4096);
+      expect(contextSettings(config).keepRecent).assertEqual(2048);
+    });
     it('keepsCurrentPromptWhileReplyIsGenerating', 0, () => {
       const thread = fixture();
       thread.messages.push(message('u3', 'user', 'current prompt'));
@@ -123,6 +148,10 @@ export default function contextTests(): void {
       const data = emptyData();
       data.config.contextWindow = undefined;
       data.config.autoCompact = undefined;
+      expect(contextSettings(parseAppData(JSON.stringify(data)).config).window).assertEqual(1000000);
+      data.config.model = 'unknown-model';
+      expect(contextSettings(parseAppData(JSON.stringify(data)).config).window).assertEqual(200000);
+      data.config.contextWindow = 32768;
       expect(contextSettings(parseAppData(JSON.stringify(data)).config).window).assertEqual(32768);
       data.threads = [fixture()];
       data.threads[0].compaction = { summary: 'bad', firstKeptMessageId: 'a1', tokensBefore: 1, createdAt: 1 };

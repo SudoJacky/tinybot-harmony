@@ -1,5 +1,18 @@
 export interface TokenUsage { input: number; output: number; cached?: number; reasoning?: number; cacheWrite?: number; }
-export interface RequestUsage { id: string; provider: string; model: string; startedAt: number; durationMs: number; firstTokenMs?: number; status: string; tokens?: TokenUsage; }
+export interface UsageOrigin {
+  threadId?: string; threadTitle?: string; turnId?: string; turnLabel?: string;
+  purpose?: string; step?: number; skill?: string;
+  teamId?: string; taskId?: string; taskTitle?: string; memberName?: string; attemptId?: string; attempt?: number;
+}
+export interface UsageToolActivity {
+  id: string; name: string; status: string; startedAt: number; durationMs: number;
+  skill?: string; server?: string; remoteTool?: string;
+}
+export interface UsageRecorder { recordTool(requestId: string, activity: UsageToolActivity): void; }
+export interface RequestUsage {
+  id: string; provider: string; model: string; startedAt: number; durationMs: number; firstTokenMs?: number;
+  status: string; tokens?: TokenUsage; origin?: UsageOrigin; tools?: UsageToolActivity[];
+}
 interface Details { cached_tokens?: number; reasoning_tokens?: number; }
 interface WireUsage {
   prompt_tokens?: number; completion_tokens?: number; input_tokens?: number; output_tokens?: number;

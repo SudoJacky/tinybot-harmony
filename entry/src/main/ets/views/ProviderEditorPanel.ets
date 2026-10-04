@@ -307,7 +307,7 @@ export struct ProviderEditorPanel {
           Column() {
             GroupCard() {
               Column() {
-                NavRow({ title: t('高级设置'), subtitle: protocolName(this.editor.protocol) + ' · ' + this.editor.contextWindow + ' tokens',
+                NavRow({ title: t('高级设置'), subtitle: protocolName(this.editor.protocol) + ' · ' + (this.editor.contextWindow ? this.editor.contextWindow + ' tokens' : t('按模型自动设置')),
                   trailing: 'expand', active: this.advanced, compId: 'provider-advanced', disabled: this.locked(),
                   onTap: () => { this.advanced = !this.advanced; } })
                 if (this.advanced) {
@@ -319,10 +319,10 @@ export struct ProviderEditorPanel {
                     }
                     Column() {
                       this.label(t('上下文窗口（Token）'))
-                      TextInput({ text: this.editor.contextWindow }).id('context-window').attributeModifier(Styles.input)
+                      TextInput({ text: this.editor.contextWindow, placeholder: t('留空使用模型默认值') }).id('context-window').attributeModifier(Styles.input)
                         .type(InputType.Number).maxLength(7).onChange((value: string) => { this.editor.contextWindow = value; })
                       this.fieldError('context')
-                      Text(t('使用此服务的模型共享该窗口预算，预留 4096 用于输出。')).fontSize(12).lineHeight(18)
+                      Text(t('留空按模型设置：通用 200k，DeepSeek V4 / Flash、GLM 5.3 系列 1M。填写数值覆盖服务默认值；单模型设置优先。')).fontSize(12).lineHeight(18)
                         .fontColor($r('app.color.text_secondary')).width('100%').margin({ top: 6 })
                     }
                   }.padding(12)

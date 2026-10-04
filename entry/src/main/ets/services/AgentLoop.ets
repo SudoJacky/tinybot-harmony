@@ -3,8 +3,9 @@ import { AgentStep, AgentTurn, MAX_AGENT_STEPS, ModelMessage, ToolCall, ToolDefi
   interruptTools, stepMessages, toolError, validateToolCalls } from '../model/Agent';
 import { Cancellation, RunCancelledError } from './Cancellation';
 import { ModelSession } from './providers/Provider';
-import { OUTPUT_RESERVE, estimateContextTokens } from '../model/ConversationContext';
+import { contextInputBudget, estimateContextTokens } from '../model/ConversationContext';
 import { PendingInput, validatePendingInput } from '../model/PendingInput';
+import { UsageToolActivity } from '../model/Usage';
 
 export interface SteeringInput {
   peek: () => PendingInput | undefined;
@@ -27,6 +28,7 @@ export interface LoopEvent {
 }
 
 export interface LoopObserver {
+  toolActivity?: (requestId: string, activity: UsageToolActivity) => void;
   event: (event: LoopEvent) => void;
   checkpoint: () => Promise<void>;
   steering?: SteeringInput;
@@ -62,7 +64,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
       }
       const input: PendingInput | undefined = pending ? { id: pending.id, mode: pending.mode, text: pending.text } : undefined;
       const requestMessages: ModelMessage[] = input ? messages.concat([{ role: 'user', content: input.text }]) : messages;
-      if (context.contextWindow !== undefined && estimateContextTokens(requestMessages, definitions) > context.contextWindow - OUTPUT_RESERVE) {
+      if (context.contextWindow !== undefined && estimateContextTokens(requestMessages, definitions) > contextInputBudget(context.contextWindow)) {
         throw new Error(t("本轮内容超过上下文预算，执行已停止。已完成的工具结果已保留；请压缩历史、缩小任务或提高窗口设置。"));
       }
       const step: AgentStep = { content: '', tools: [], steering: input };
@@ -86,7 +88,8 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
         step.content += text;
         turn.content += text;
         observer.event({ type: 'text_delta', step: round, delta: text });
-      }, { maxOutputTokens: context.contextWindow === undefined ? undefined : OUTPUT_RESERVE,
+      }, {
+        usageStep: round + 1,
         onReasoning: (text: string) => {
           if (!acceptingText || cancellation.cancelled) { return; }
           step.reasoningContent = (step.reasoningContent || '') + text;
@@ -140,6 +143,21 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
         // Never execute a tool unless its intent has been durably recorded first.
         await observer.checkpoint();
         cancellation.check();
+        const activity: UsageToolActivity = { id: tool.call.id, name: tool.call.function.name, status: 'running', startedAt: Date.now(), durationMs: 0 };
+        // Record names only, never tool arguments, prompts, outputs or credentials.
+        try {
+          const args = JSON.parse(tool.call.function.arguments) as Record<string, string>;
+          if (activity.name === 'read_skill' && typeof args.name === 'string') { activity.skill = args.name.slice(0, 120); }
+          if (activity.name === 'mcp_call') {
+            if (typeof args.server === 'string') { activity.server = args.server.slice(0, 120); }
+            if (typeof args.tool === 'string') { activity.remoteTool = args.tool.slice(0, 120); }
+          }
+        } catch (_) { /* Invalid arguments are handled by the tool. */ }
+        const recordActivity = (): void => {
+          if (!step.usage) { return; }
+          try { observer.toolActivity?.(step.usage.id, activity); } catch (_) { /* Telemetry cannot stop a task. */ }
+        };
+        recordActivity();
         try {
           tool.output = await context.tools.execute(tool.call, cancellation);
           tool.status = 'complete';
@@ -147,6 +165,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
           tool.output = toolError((error as Error).message);
           tool.status = error instanceof RunCancelledError ? 'cancelled' : 'failed';
         }
+        activity.status = tool.status; activity.durationMs = Date.now() - activity.startedAt; recordActivity();
         observer.event({ type: 'tool_end', step: round, toolCallId: tool.call.id });
         // Preserve a committed write receipt even if stop was pressed during that write.
         await observer.checkpoint();

@@ -16,6 +16,9 @@ import { protocolUrl, protocolHeaders, responsesRequest, anthropicRequest, Respo
 import { ModelProvider, ProviderRequest } from './Provider';
 import { ChatCompletionsOptions, chatRequest, ChatRequest } from './ChatCompletionsProtocol';
 
+// Tinybot desktop separates request startup and stream idleness (both 120 s).
+const STREAM_IDLE_TIMEOUT_MS: number = 120000;
+
 export class ProtocolProvider implements ModelProvider {
   readonly info: ProviderInfo;
   private options: ChatCompletionsOptions;
@@ -43,12 +46,13 @@ export class ProtocolProvider implements ModelProvider {
     const body: Object = this.info.protocol === 'responses' ? responsesRequest(input.model, messages, input.tools, input.maxOutputTokens) :
       this.info.protocol === 'anthropic-messages' ? anthropicRequest(input.model, messages, input.tools, input.maxOutputTokens) :
       chatRequest(input.model, messages, input.tools, this.options, input.maxOutputTokens);
-    if (input.requestUsage && this.info.protocol === 'chat-completions') { (body as ChatRequest).stream_options = { include_usage: true }; }
+    if (input.requestUsage !== false && this.info.protocol === 'chat-completions') { (body as ChatRequest).stream_options = { include_usage: true }; }
     applyReasoningEffort(this.info.protocol, input.model, input.reasoning, body);
     const request = http.createHttp();
     const startedAt = Date.now();
     const usageId = util.generateRandomUUID();
-    UsageLedger.record({ id: usageId, provider: this.info.id, model: input.model, startedAt: startedAt, durationMs: 0, status: 'running_or_unknown' });
+    UsageLedger.record({ id: usageId, provider: this.info.id, model: input.model, startedAt: startedAt, durationMs: 0,
+      status: 'running_or_unknown', origin: input.usageOrigin });
     hilog.info(0x0000, 'TinybotNetwork', 'Request start provider=%{public}s protocol=%{public}s model=%{public}s messages=%{public}d tools=%{public}d',
       this.info.id, this.info.protocol, input.model, input.messages.length, input.tools.length);
     return new Promise<ModelTurn>((resolve, reject) => {
@@ -68,7 +72,7 @@ export class ProtocolProvider implements ModelProvider {
         clearTimeout(timer);
         removeCancel();
         request.destroy();
-        const record: RequestUsage = { id: usageId, provider: this.info.id, model: input.model,
+        const record: RequestUsage = { id: usageId, provider: this.info.id, model: input.model, origin: input.usageOrigin,
           startedAt: startedAt, durationMs: Date.now() - startedAt, firstTokenMs: firstToken === undefined ? undefined : firstToken - startedAt,
           status: error ? cancellation.cancelled ? 'cancelled' : 'failed' : 'complete', tokens: usage.result() };
         UsageLedger.record(record); if (result) { result.usage = record; }
@@ -105,7 +109,11 @@ export class ProtocolProvider implements ModelProvider {
           settle(error as Error);
         }
       };
-      timer = setTimeout(() => settle(new Error(t("本次请求超过 3 分钟，请检查网络或稍后重试。"))), 180000);
+      const resetIdleTimer = (): void => {
+        clearTimeout(timer);
+        timer = setTimeout(() => settle(new Error(t('模型服务连续 120 秒未返回数据，请检查网络或稍后重试。'))), STREAM_IDLE_TIMEOUT_MS);
+      };
+      resetIdleTimer();
       removeCancel = cancellation.onCancel(() => settle(new RunCancelledError() as Error));
       if (settled) {
         return;
@@ -115,6 +123,7 @@ export class ProtocolProvider implements ModelProvider {
           if (settled || parseError) {
             return;
           }
+          if (data.byteLength > 0) { resetIdleTimer(); }
           if (receivedBytes === 0) {
             hilog.info(0x0000, 'TinybotNetwork', 'First data elapsedMs=%{public}d', Date.now() - startedAt);
           }
@@ -141,7 +150,8 @@ export class ProtocolProvider implements ModelProvider {
           extraData: JSON.stringify(body),
           usingCache: false,
           connectTimeout: 15000,
-          readTimeout: 60000
+          // SDK 0 disables its deadline; the resettable idle timer above owns reads.
+          readTimeout: 0
         }, (error: BusinessError, code: number) => {
           if (error) {
             hilog.error(0x0000, 'TinybotNetwork', 'Request error code=%{public}d elapsedMs=%{public}d bytes=%{public}d',

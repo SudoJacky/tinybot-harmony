@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@ohos/hypium';
-import { ModelMessage, ModelTurn, ToolCall, ToolDefinition } from '../main/ets/model/Agent';
+import { ModelMessage, ModelTurn, ToolCall, ToolDefinition, validateSteps } from '../main/ets/model/Agent';
 import { defaultConfig, emptyData, ModelConfig, parseAppData } from '../main/ets/model/Conversation';
 import { ProviderInfo } from '../main/ets/model/Provider';
 import { AgentTools } from '../main/ets/services/AgentLoop';
@@ -8,6 +8,12 @@ import { Cancellation, RunCancelledError } from '../main/ets/services/Cancellati
 import { chatRequest, completionUrl } from '../main/ets/services/providers/ChatCompletionsProtocol';
 import { CredentialReader, ModelProvider, ModelSession, ProviderRequest } from '../main/ets/services/providers/Provider';
 import { ProviderRegistry } from '../main/ets/services/providers/ProviderRegistry';
+import { UsageOrigin, UsageToolActivity, UsageRecorder } from '../main/ets/model/Usage';
+
+class TestUsageRecorder implements UsageRecorder {
+  records: UsageToolActivity[] = [];
+  recordTool(_id: string, activity: UsageToolActivity): void { this.records.push(JSON.parse(JSON.stringify(activity)) as UsageToolActivity); }
+}
 
 class Gate {
   private release: () => void = () => {};
@@ -176,6 +182,44 @@ export default function runtimeTests(): void {
   });
 
   describe('AgentRuntime', () => {
+    it('keepsTurnOriginAcrossCallsAndSeparatesPreparationPurpose', 0, async () => {
+      const provider = new TestProvider('test', [answer('summary'), toolAnswer(), answer()]);
+      const runtime = new AgentRuntime(registry(provider), new TestCredentials());
+      const run = request(); run.usageOrigin = { threadId: 'thread', turnId: 'turn', purpose: 'conversation' };
+      const callbacks = hooks(); callbacks.prepareContext = async (model, messages, cancellation) => {
+        await model.stream([], [], cancellation, () => {}, { usagePurpose: 'compaction', usageStep: 1 }); return messages;
+      };
+      expect((await runtime.run(run, callbacks)).status).assertEqual('complete');
+      expect(provider.inputs.length).assertEqual(3);
+      expect(provider.inputs[0].usageOrigin?.purpose).assertEqual('compaction');
+      expect(provider.inputs[1].usageOrigin?.purpose).assertEqual('conversation');
+      expect(provider.inputs[2].usageOrigin?.turnId).assertEqual('turn');
+      expect(provider.inputs[2].usageOrigin?.step).assertEqual(2);
+    });
+    it('forkedConcurrentRuntimesFreezeSeparateOrigins', 0, async () => {
+      const provider = new TestProvider('test', [answer(), answer()]);
+      const credentials = new TestCredentials(); credentials.blocked = new Gate();
+      const first = new AgentRuntime(registry(provider), credentials); const second = first.fork();
+      const origin: UsageOrigin = { threadId: 'one', turnId: 'a', taskId: 'task-a', purpose: 'team_task' };
+      const a = request(); a.usageOrigin = origin;
+      const b = request(); b.usageOrigin = { threadId: 'two', turnId: 'b', taskId: 'task-b', purpose: 'title' };
+      const pending = first.run(a, hooks()); const other = second.run(b, hooks());
+      origin.threadId = 'mutated'; await credentials.entered.promise; credentials.blocked.open(); await Promise.all([pending, other]);
+      expect(provider.inputs.map((item) => item.usageOrigin?.threadId).sort().join(',')).assertEqual('one,two');
+      expect(provider.inputs.find((item) => item.usageOrigin?.threadId === 'one')?.usageOrigin?.taskId).assertEqual('task-a');
+    });
+    it('recordsExecutedToolsWithoutArgumentsAndSkipsUnexecutedIntents', 0, async () => {
+      const response = toolAnswer(); response.usage = { id: 'request', provider: 'test', model: 'model', startedAt: 1, durationMs: 20, status: 'complete' };
+      const recorder = new TestUsageRecorder();
+      const runtime = new AgentRuntime(registry(new TestProvider('test', [response, answer()])), new TestCredentials(), recorder);
+      await runtime.run(request(), hooks());
+      expect(recorder.records.length).assertEqual(2); expect(recorder.records[0].status).assertEqual('running');
+      expect(recorder.records[1].status).assertEqual('complete'); expect(JSON.stringify(recorder.records).includes('arguments')).assertFalse();
+      const blocked = new TestUsageRecorder();
+      const second = new AgentRuntime(registry(new TestProvider('test', [response])), new TestCredentials(), blocked);
+      let checkpoints = 0; const callbacks = hooks(); callbacks.checkpoint = async () => { if (++checkpoints === 2) { throw new Error('save failed'); } };
+      await second.run(request(), callbacks); expect(blocked.records.length).assertEqual(0);
+    });
     it('preparesCompactedContextWithTheSameBoundModelBeforeTheAgentRequest', 0, async () => {
       const provider = new TestProvider('test', [answer('summary'), answer('final')]);
       const agent = new AgentRuntime(registry(provider), new TestCredentials());
@@ -401,9 +445,27 @@ export default function runtimeTests(): void {
       expect(result.status).assertEqual('failed');
       expect(result.error.includes('1 次')).assertTrue();
       expect(tools.calls.length).assertEqual(0);
-      input.maxSteps = 9;
-      expect((await agent.run(input, hooks())).error.includes('1 至 8')).assertTrue();
+      input.maxSteps = 201;
+      expect((await agent.run(input, hooks())).error.includes('1 至 200')).assertTrue();
       expect(provider.inputs.length).assertEqual(1);
+    });
+    it('allowsTwoHundredRequestsByDefaultWithoutCappingNormalOutput', 0, async () => {
+      const responses: ModelTurn[] = [];
+      for (let index = 0; index < 199; index++) {
+        const response = toolAnswer();
+        response.toolCalls[0].id = 'call_' + index;
+        response.toolCalls[0].function.arguments = JSON.stringify({ path: 'dir' + index });
+        responses.push(response);
+      }
+      responses.push(answer());
+      const provider = new TestProvider('test', responses);
+      const tools = new TestTools();
+      const result = await new AgentRuntime(registry(provider), new TestCredentials()).run(request(tools), hooks());
+      expect(result.status).assertEqual('complete');
+      expect(provider.inputs.length).assertEqual(200);
+      expect(tools.calls.length).assertEqual(199);
+      expect(provider.inputs.every((input) => input.maxOutputTokens === undefined)).assertTrue();
+      validateSteps(result.turn.steps);
     });
     it('releasesTheRunEvenWhenAUiListenerThrows', 0, async () => {
       const agent = new AgentRuntime(registry(new TestProvider('test', [answer()])), new TestCredentials());

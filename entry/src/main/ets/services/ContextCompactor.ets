@@ -1,7 +1,7 @@
 import { t } from '../model/I18n';
 import { ModelMessage } from '../model/Agent';
 import { CompactionData } from '../model/Conversation';
-import { CompactionPlan, ContextSettings, OUTPUT_RESERVE, estimateContextTokens, estimateTextTokens } from '../model/ConversationContext';
+import { CompactionPlan, ContextSettings, SUMMARY_MAX_TOKENS, estimateContextTokens, estimateTextTokens } from '../model/ConversationContext';
 import { Cancellation } from './Cancellation';
 import { ModelSession } from './providers/Provider';
 
@@ -29,7 +29,7 @@ export async function compactContext(plan: CompactionPlan, settings: ContextSett
   if (remaining.length === 0) { throw new Error(t("没有可压缩的有效历史。")); }
   let summary = plan.previousSummary;
   let batch = 0;
-  const budget = settings.window - OUTPUT_RESERVE;
+  const budget = settings.window - SUMMARY_MAX_TOKENS;
   while (remaining.length > 0) {
     cancellation.check();
     const overhead = estimateContextTokens(summaryRequest(summary, ''));
@@ -49,10 +49,10 @@ export async function compactContext(plan: CompactionPlan, settings: ContextSett
     if (low === 0) { throw new Error(t("摘要请求没有足够的上下文空间。")); }
     onProgress(++batch);
     const response = await model.stream(summaryRequest(summary, remaining.slice(0, low)), [], cancellation,
-      () => {}, { maxOutputTokens: OUTPUT_RESERVE });
+      () => {}, { maxOutputTokens: SUMMARY_MAX_TOKENS, usagePurpose: 'compaction', usageStep: batch });
     cancellation.check();
     if (response.toolCalls.length > 0 || response.content.trim().length === 0 ||
-      response.content.length > 32768 || estimateTextTokens(response.content) >= OUTPUT_RESERVE) {
+      response.content.length > 32768 || estimateTextTokens(response.content) >= SUMMARY_MAX_TOKENS) {
       throw new Error(t("模型没有返回有效且足够简短的摘要，原上下文已保留。"));
     }
     summary = response.content.trim();
