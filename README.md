@@ -4,6 +4,8 @@
 
 当前是 **原生 Agent 功能增强版**，最低与目标版本均为 **HarmonyOS API 26**。支持独立运行的 Agent、图片与文本附件、工作区文件界面、长期记忆、提示词模板、会话分支和远程 MCP。
 
+当前测试版本为 **0.1.3 / 10003**。参阅[更新说明](docs/distribution/RELEASE-NOTES.txt)、[云测试步骤与验证记录](docs/distribution/CLOUD-TEST.txt)和[交付包准备说明](docs/distribution/START-HERE.txt)。
+
 ## 已实现
 
 - **代码沙箱**：`execute_code` 在独立 QuickJS Runtime 中运行同步 JavaScript，支持 JSON 输入、结构化结果和日志；固定 2 秒预算、32 MiB Runtime 分配限额及输出限制，可取消。聊天、团队与只读模式均可使用，无文件、网络或宿主工具访问。当前为同进程解释器隔离，详见[使用方式与边界](docs/code-sandbox.md)。
