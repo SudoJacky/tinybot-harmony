@@ -12,6 +12,7 @@ const source = path.resolve(__dirname, '../entry/src/main/ets');
 const fixture = path.resolve(__dirname, '../.hvigor/native-productivity-' + crypto.randomUUID());
 fs.mkdirSync(fixture, { recursive: true });
 const handles = new Map(); let failManifest = false; const usageWrites = [];
+const cloudLocations = new Map(); let failCloudCopy = false; let cloudCopyError;
 const nativePath = p => p.startsWith('/sandbox/') ? path.join(fixture, p.slice(1)) : p;
 const fileIo = {
   OpenMode: { READ_ONLY: 1, CREATE: 2, WRITE_ONLY: 4, TRUNC: 8, NOFOLLOW: 16 },
@@ -22,7 +23,8 @@ const fileIo = {
   write: async (fd, bytes, options) => (await handles.get(fd).write(new Uint8Array(bytes), 0, bytes.byteLength, options.offset)).bytesWritten,
   close: async file => { const fd = typeof file === 'number' ? file : file.fd; await handles.get(fd).close(); handles.delete(fd); },
   stat: async fd => typeof fd === 'number' ? handles.get(fd).stat() : fs.promises.stat(nativePath(fd)),
-  lstat: async p => { try { return await fs.promises.lstat(nativePath(p)); } catch(e) { if(e.code==='ENOENT')e.code=13900002;throw e; } },
+  lstat: async p => { try { const stat = await fs.promises.lstat(nativePath(p)); stat.location = cloudLocations.get(p) ?? (p.startsWith('/sandbox/cloud/') ? 1 : 0); return stat; } catch(e) { if(e.code==='ENOENT')e.code=13900002;throw e; } },
+  copyFile: async (a,b) => { if (cloudCopyError) throw cloudCopyError; if (failCloudCopy) { fs.writeFileSync(nativePath(b),'partial'); throw Error('injected cloud write failure'); } await fs.promises.copyFile(nativePath(a),nativePath(b)); },
   fsync: fd => handles.get(fd).sync(), unlink: p => fs.promises.unlink(nativePath(p)),
   rename: async (a,b) => { if (failManifest && b.endsWith('/index.json')) { throw new Error('injected manifest failure'); } if(b.includes("/usage-records/"))usageWrites.push(b); await fs.promises.rename(nativePath(a),nativePath(b)); }
 };
@@ -34,6 +36,26 @@ let fakeTimers;
 const scheduleTimer = (fn, ms) => fakeTimers ? fakeTimers.set(fn, ms) : setTimeout(fn, ms);
 const cancelTimer = id => fakeTimers ? fakeTimers.clear(id) : clearTimeout(id);
 let selectedFile = '/sandbox/backup-export.json';
+let cloudStart = () => {}, cacheStart = () => {};
+const syncInstances = [], cacheInstances = [];
+const cloudSync = {
+  SyncState: { UPLOADING:0, UPLOAD_FAILED:1, DOWNLOADING:2, DOWNLOAD_FAILED:3, COMPLETED:4, STOPPED:5 },
+  ErrorType: { NO_ERROR:0, NETWORK_UNAVAILABLE:1, WIFI_UNAVAILABLE:2, BATTERY_LEVEL_LOW:3, BATTERY_LEVEL_WARNING:4, CLOUD_STORAGE_FULL:5, LOCAL_STORAGE_FULL:6, DEVICE_TEMPERATURE_TOO_HIGH:7, REMOTE_SERVER_ABNORMAL:8 },
+  State: { RUNNING:0, COMPLETED:1, FAILED:2, STOPPED:3 }, DownloadErrorType: { NO_ERROR:0 },
+  FileSync: class {
+    constructor() { syncInstances.push(this); }
+    on(event,callback) { this.callback=callback; }
+    off(event,callback) { assert.equal(callback,this.callback);this.callback=undefined; }
+    async start() { await cloudStart(this); }
+  },
+  CloudFileCache: class {
+    constructor() { cacheInstances.push(this); }
+    on(event,callback) { this.callback=callback; }
+    off(event,callback) { assert.equal(callback,this.callback);this.callback=undefined; }
+    async start(uri) { this.uri=uri;await cacheStart(this); }
+    async stop(uri) { assert.equal(uri,this.uri);this.stopped=true; }
+  }
+};
 const http = { RequestMethod: { POST: 'POST', GET: 'GET' }, HttpDataType: { STRING: 'string', ARRAY_BUFFER: 'buffer' }, createHttp: () => {
   const handlers = {}; let closed = false;
   return { on: (name, fn) => { handlers[name] = fn; }, destroy: () => { closed = true; destroyed++; },
@@ -44,8 +66,8 @@ const http = { RequestMethod: { POST: 'POST', GET: 'GET' }, HttpDataType: { STRI
     } };
 } };
 const kits = {
-  '@kit.PerformanceAnalysisKit': { hilog: { info() {}, error() {} } },
-  '@kit.CoreFileKit': { fileIo, picker: { DocumentViewPicker: class { async save() {return [selectedFile];} async select() {return [selectedFile];} } } }, '@kit.ImageKit': { image: {} }, '@kit.NetworkKit': { http },
+  '@kit.PerformanceAnalysisKit': { hilog: { info() {}, error() {}, warn() {} } },
+  '@kit.CoreFileKit': { fileIo, cloudSync, fileUri: {getUriFromPath:p=>'file://'+p}, picker: { DocumentViewPicker: class { async save() {return [selectedFile];} async select() {return [selectedFile];} } } }, '@kit.ImageKit': { image: {} }, '@kit.NetworkKit': { http },
   '@kit.MediaLibraryKit': {}, '@kit.ShareKit': {},
   '@kit.ArkTS': { util: { generateRandomUUID: () => crypto.randomUUID(), TextEncoder: Encoder, TextDecoder: Decoder,
     Base64Helper: class { async encodeToString(bytes) { return Buffer.from(bytes).toString('base64'); } encodeToStringSync(bytes) { return Buffer.from(bytes).toString('base64'); } decodeSync(text) { return Uint8Array.from(Buffer.from(text,'base64')); } } } },
@@ -225,6 +247,100 @@ async function test(name, run) { await run(); console.log('PASS '+name); }
     const restoredAttachment=restored.threads[0].messages[0].attachments[0];assert.notEqual(restoredAttachment.id,id);assert.equal(fs.readFileSync(nativePath(root+'/attachments/'+restoredAttachment.path),'utf8'),'sample');
     model.parseAppData(JSON.stringify(restored));const bad=JSON.parse(exported);bad.files[0].path='../escape';fs.writeFileSync(nativePath(selectedFile),JSON.stringify(bad));await assert.rejects(readBackup(context),/路径/);
   });
+  await test('cloud snapshots are opt-in, immutable, credential-free and stay pending until native upload',async()=>{
+    const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
+    const context={cloudFileDir:'/sandbox/cloud',cacheDir:'/sandbox/backup-app/cache',getApplicationContext:()=>({filesDir:'/sandbox/backup-app'})};
+    await assert.rejects(CloudBackup.list(context),/云空间/);
+    assert.equal(fs.existsSync(nativePath(context.cloudFileDir)),false,'never manufacture a local cloud root');
+    fs.mkdirSync(nativePath(context.cloudFileDir));
+    assert.equal((await CloudBackup.list(context)).length,0);assert.equal(syncInstances.length,0,'listing never starts upload');
+    const data=JSON.parse(fs.readFileSync(nativePath(selectedFile),'utf8')).data;
+    data.providerProfiles[0].credentialAlias='SECRET-CLOUD';data.providerProfiles[0].enabled=true;
+    const before=JSON.stringify(data);
+    cloudStart=async sync=>{sync.callback({state:cloudSync.SyncState.COMPLETED,error:0});};
+    assert.equal(await CloudBackup.create(context,data),true);
+    let items=await CloudBackup.list(context);assert.equal(items.length,1);assert.equal(items[0].location,1,'sync completion alone is not proof of upload');
+    assert.equal(JSON.stringify(data),before,'export never mutates live configuration');
+    const firstPath=context.cloudFileDir+'/tinybot-backups/'+items[0].name;
+    const original=fs.readFileSync(nativePath(firstPath),'utf8');assert.ok(!original.includes('SECRET-CLOUD'));
+    assert.equal(JSON.parse(original).data.providerProfiles[0].enabled,false);
+    assert.equal(fs.readdirSync(nativePath(context.cacheDir)).length,0,'temporary plaintext snapshot is removed');
+    cloudLocations.set(firstPath,3);
+    await CloudBackup.create(context,data);items=await CloudBackup.list(context);
+    assert.equal(items.length,2);assert.equal(fs.readFileSync(nativePath(firstPath),'utf8'),original);
+    assert.equal(items.find(i=>i.name===path.basename(firstPath)).location,3);
+    assert.ok(syncInstances.every(s=>!s.callback),'native listeners are removed');
+  });
+  await test('cloud quota failure preserves the pending snapshot; failed writes never become restore points',async()=>{
+    const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
+    const context={cloudFileDir:'/sandbox/cloud',cacheDir:'/sandbox/backup-app/cache',getApplicationContext:()=>({filesDir:'/sandbox/backup-app'})};
+    const before=(await CloudBackup.list(context)).length;
+    cloudStart=async sync=>{sync.callback({state:cloudSync.SyncState.UPLOAD_FAILED,error:cloudSync.ErrorType.CLOUD_STORAGE_FULL});};
+    await assert.rejects(CloudBackup.create(context,model.emptyData()),/云空间已满/);
+    assert.equal((await CloudBackup.list(context)).length,before+1,'failed upload retains a retryable snapshot');
+    failCloudCopy=true;
+    try { await assert.rejects(CloudBackup.create(context,model.emptyData()),/injected cloud write/); } finally { failCloudCopy=false; }
+    assert.equal((await CloudBackup.list(context)).length,before+1);
+    assert.ok(fs.readdirSync(nativePath(context.cloudFileDir+'/tinybot-backups')).every(n=>!n.endsWith('.partial')));
+    assert.equal(fs.readdirSync(nativePath(context.cacheDir)).length,0);
+    cloudCopyError=Object.assign(Error('Permission denied'),{code:13900012});
+    try { await assert.rejects(CloudBackup.create(context,model.emptyData()),/13900012.*Tinybot/); } finally {cloudCopyError=undefined;}
+    assert.equal((await CloudBackup.list(context)).length,before+1);
+    assert.equal(fs.readdirSync(nativePath(context.cacheDir)).length,0);
+  });
+  await test('cloud restore awaits its own download completion and restores independent data',async()=>{
+    const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
+    const context={cloudFileDir:'/sandbox/cloud',cacheDir:'/sandbox/backup-app/cache',getApplicationContext:()=>({filesDir:'/sandbox/backup-app'})};
+    const items=await CloudBackup.list(context);const item=items.find(i=>i.location===3);
+    const file=context.cloudFileDir+'/tinybot-backups/'+item.name;cloudLocations.set(file,2);
+    const workspaces=()=>fs.readdirSync(nativePath('/sandbox/backup-app/workspace')).length;
+    const before=workspaces();cacheStart=async()=>{};
+    let settled=false;const restore=CloudBackup.restore(context,item.name).then(data=>{settled=true;return data;});
+    while (!cacheInstances.at(-1)?.uri) await new Promise(setImmediate);
+    const cache=cacheInstances.at(-1);
+    await new Promise(setImmediate);assert.equal(settled,false,'start acknowledgement is not completion');
+    cache.callback({uri:'file:///another-backup',state:1,error:0});await new Promise(setImmediate);assert.equal(settled,false);
+    assert.equal(workspaces(),before,'no restore files before download completion');
+    await assert.rejects(CloudBackup.sync(),/正在进行/);
+    cloudLocations.set(file,3);cache.callback({uri:cache.uri,state:1,error:0});
+    const data=await restore;assert.notEqual(data.threads[0].id,'thread');
+    assert.equal(data.providerProfiles[0].enabled,false);assert.equal(data.providerProfiles[0].credentialAlias,'');
+    assert.equal(fs.readFileSync(nativePath('/sandbox/backup-app/workspace/'+data.threads[0].id+'/note.txt'),'utf8'),'workspace');
+    assert.equal(cache.callback,undefined);assert.equal(cache.stopped,undefined);
+    await assert.rejects(CloudBackup.restore(context,'../escape.json'),/备份文件无效/);
+  });
+  await test('cloud download failure and malformed backups leave existing conversations untouched',async()=>{
+    const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
+    const context={cloudFileDir:'/sandbox/cloud',cacheDir:'/sandbox/backup-app/cache',getApplicationContext:()=>({filesDir:'/sandbox/backup-app'})};
+    const item=(await CloudBackup.list(context)).find(i=>i.location===3),file=context.cloudFileDir+'/tinybot-backups/'+item.name;
+    const before=fs.readdirSync(nativePath('/sandbox/backup-app/workspace')).join(',');cloudLocations.set(file,2);
+    cacheStart=async cache=>{cache.callback({uri:cache.uri,state:2,error:2});};
+    await assert.rejects(CloudBackup.restore(context,item.name),/下载失败/);
+    assert.equal(cacheInstances.at(-1).stopped,true);assert.equal(cacheInstances.at(-1).callback,undefined);
+    cloudLocations.set(file,3);const original=fs.readFileSync(nativePath(file),'utf8');const bad=JSON.parse(original);bad.files[0].path='../escape';
+    fs.writeFileSync(nativePath(file),JSON.stringify(bad));
+    try { await assert.rejects(CloudBackup.restore(context,item.name),/路径/); } finally { fs.writeFileSync(nativePath(file),original); }
+    assert.equal(fs.readdirSync(nativePath('/sandbox/backup-app/workspace')).join(','),before);
+    assert.equal(fs.readFileSync(nativePath('/sandbox/backup-app/workspace/thread/note.txt'),'utf8'),'workspace');
+  });
+  await test('cloud timeouts release locks and listeners without reporting upload success',async()=>{
+    const {CloudBackup,cloudBackupError}=load(path.join(source,'services/CloudBackup'));
+    const timers=new Map();let id=0;fakeTimers={set(fn,ms){const key=++id;timers.set(key,{fn,ms});return key;},clear(key){timers.delete(key);}};
+    try {
+      cloudStart=async()=>{};const pending=CloudBackup.sync();await new Promise(setImmediate);
+      assert.equal(timers.size,1);assert.equal([...timers.values()][0].ms,30000);[...timers.values()][0].fn();
+      assert.equal(await pending,false);assert.equal(timers.size,0);assert.equal(syncInstances.at(-1).callback,undefined);
+      cloudStart=async()=>{throw Object.assign(Error('not ready'),{code:22400001});};
+      await assert.rejects(CloudBackup.sync(),error=>/华为云空间/.test(cloudBackupError(error)));
+      assert.equal(timers.size,0);assert.equal(syncInstances.at(-1).callback,undefined);
+      const context={cloudFileDir:'/sandbox/cloud',getApplicationContext:()=>({filesDir:'/sandbox/backup-app'})};
+      const item=(await CloudBackup.list(context))[0];cloudLocations.set('/sandbox/cloud/tinybot-backups/'+item.name,2);cacheStart=async()=>{};
+      const download=CloudBackup.restore(context,item.name);const rejected=assert.rejects(download,/下载超时/);
+      while (!timers.size) await new Promise(setImmediate);
+      assert.equal([...timers.values()][0].ms,60000);[...timers.values()][0].fn();await rejected;
+      assert.equal(timers.size,0);assert.equal(cacheInstances.at(-1).callback,undefined);assert.equal(cacheInstances.at(-1).stopped,true);
+    } finally {fakeTimers=undefined;}
+  });
   await test('image generation and edits require approval, persist outputs and send binary multipart',async()=>{
     const {ImageTools}=load(path.join(source,'services/ImageTools'));const root='/sandbox/workspace/images';fs.mkdirSync(nativePath(root),{recursive:true});Attachments.configure('/sandbox/backup-app');
     const jpeg=Uint8Array.from([255,216,255,217]).buffer;
@@ -250,6 +366,111 @@ async function test(name, run) { await run(); console.log('PASS '+name); }
       await assert.rejects(discoverModels({...draft,baseUrl},[profile]),/API Key/);
     }
     assert.equal(requests,2);
+  });
+  await test('long thinking survives SSE overhead and more than 2 MiB of UTF-8 text, persistence and replay', async () => {
+    const {ProtocolProvider}=load(path.join(source,'services/providers/ProtocolProvider'));
+    const {chatRequest}=load(path.join(source,'services/providers/ChatCompletionsProtocol'));
+    const {anthropicRequest}=load(path.join(source,'services/providers/WireProtocols'));
+    const {stepMessages,validateSteps}=load(path.join(source,'model/Agent'));
+    const event=data=>'data: '+JSON.stringify(data)+'\n\n';
+    const input={model:'fixture-model',baseUrl:'https://fixture.invalid/v1',apiKey:'',messages:[{role:'user',content:'fixture'}],tools:[]};
+    for(const scenario of ['chat-overhead','chat-thinking','anthropic-thinking']) {
+      const anthropic=scenario==='anthropic-thinking';
+      const protocol=anthropic?'anthropic-messages':'chat-completions';
+      const piece=scenario==='chat-overhead'?'分析':'逐步核对推导。'.repeat(64);
+      const count=scenario==='chat-overhead'?12000:1800;
+      const thought=piece.repeat(count),answer='推导完成。';
+      let wire=anthropic?event({type:'message_start',message:{usage:{input_tokens:10,output_tokens:0}}})+event({type:'content_block_start',index:0,content_block:{type:'thinking',thinking:'',signature:''}}):'';
+      const chunk=anthropic?event({type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:piece}}):event({
+        id:'chatcmpl-long-reasoning-fixture',object:'chat.completion.chunk',created:1700000000,model:'fixture-thinking-model',system_fingerprint:'fixture',
+        choices:[{index:0,delta:{reasoning_content:piece},finish_reason:null}]
+      });
+      wire+=chunk.repeat(count);
+      if(anthropic) {
+        wire+=event({type:'content_block_delta',index:0,delta:{type:'signature_delta',signature:'fixture-signature'}})+event({type:'content_block_stop',index:0});
+        wire+=event({type:'content_block_start',index:1,content_block:{type:'text',text:''}})+event({type:'content_block_delta',index:1,delta:{type:'text_delta',text:answer}})+event({type:'content_block_stop',index:1});
+        wire+=event({type:'message_delta',delta:{stop_reason:'end_turn'},usage:{output_tokens:42}})+event({type:'message_stop'});
+      } else {
+        wire+=event({choices:[{index:0,delta:{content:answer},finish_reason:'stop'}]})+event({choices:[],usage:{prompt_tokens:10,completion_tokens:42,total_tokens:52}})+'data: [DONE]\n\n';
+      }
+      const bytes=Buffer.from(wire);
+      assert.ok(bytes.byteLength>2*1024*1024,scenario+' must cross the old transport cap');
+      if(scenario==='chat-overhead')assert.ok(Buffer.byteLength(thought)<100000,'SSE metadata can dwarf actual reasoning');
+      else assert.ok(Buffer.byteLength(thought)>2*1024*1024,'actual CJK reasoning also exceeds 2 MiB');
+      httpScript=request=>{
+        request.callback(null,200);
+        // Arbitrary byte boundaries split multibyte characters and SSE lines.
+        for(let offset=0;offset<bytes.length;offset+=3071)request.emit('dataReceive',Uint8Array.from(bytes.subarray(offset,offset+3071)).buffer);
+        request.emit('dataEnd');
+      };
+      let text='',reasoning='';
+      const provider=new ProtocolProvider({id:scenario,name:scenario,protocol,defaultBaseUrl:input.baseUrl,defaultModel:input.model});
+      const turn=await provider.stream(input,new Cancellation(),delta=>{text+=delta;},delta=>{reasoning+=delta;});
+      assert.equal(text,answer);assert.equal(reasoning,thought);assert.equal(turn.reasoningContent,thought);assert.equal(turn.usage.status,'complete');
+      assert.equal(turn.usage.tokens.output,42);
+      const step={content:turn.content,reasoningContent:turn.reasoningContent,anthropicContent:turn.anthropicContent,tools:[]};validateSteps([step]);
+      const root=path.join(fixture,scenario);fs.mkdirSync(root);
+      const data=model.emptyData();data.activeThreadId=scenario;
+      data.threads=[{id:scenario,title:'Long thinking',updatedAt:1,messages:[{id:'question',role:'user',content:'fixture',status:'complete',error:''},
+        {id:'reply',role:'assistant',content:turn.content,status:'complete',error:'',steps:[step]}]}];
+      await new ConversationStore(root).save(data);
+      const restored=(await new ConversationStore(root).load()).threads[0].messages[1].steps[0];
+      assert.equal(restored.reasoningContent,thought);assert.equal(restored.content,answer);
+      const history=stepMessages(restored);
+      if(anthropic) {
+        const replay=anthropicRequest(input.model,history,[]);assert.equal(replay.messages[0].content[0].thinking,thought);
+        assert.equal(replay.messages[0].content[0].signature,'fixture-signature');
+      } else assert.equal(chatRequest(input.model,history,[],{replayReasoning:true}).messages[0].reasoning_content,thought);
+      console.log('  '+scenario+': '+bytes.byteLength+' wire bytes, '+Buffer.byteLength(thought)+' reasoning bytes, saved and reloaded');
+    }
+  });
+  await test('Responses reasoning reaches the live process, survives completion and reload, and stays out of answer text', async () => {
+    const {ProtocolProvider}=load(path.join(source,'services/providers/ProtocolProvider'));
+    const {ProviderRegistry}=load(path.join(source,'services/providers/ProviderRegistry'));
+    const {runAgentLoop}=load(path.join(source,'services/AgentLoop'));
+    const {ThreadViewModel}=load(path.join(source,'viewmodel/SessionViewModels'));
+    const {buildTimeline}=load(path.join(source,'model/ProcessPresentation'));
+    const registry=new ProviderRegistry();
+    registry.register(new ProtocolProvider({id:'responses-thinking',name:'Responses',protocol:'responses',defaultBaseUrl:'https://fixture.invalid/v1',defaultModel:'gpt-5.2'}));
+    for(const style of ['summary','content']) {
+      const turn={content:'',steps:[]},deltas=[];
+      const data=model.emptyData();data.activeThreadId='responses-'+style;
+      data.threads=[{id:data.activeThreadId,title:'Responses thinking',updatedAt:1,messages:[{id:'u',role:'user',content:'fixture',status:'complete',error:''},
+        {id:'a',role:'assistant',content:'',status:'generating',error:'',steps:turn.steps}]}];
+      const thread=new ThreadViewModel(data.threads[0]);
+      const config={...model.defaultConfig(),providerId:'responses-thinking',baseUrl:'https://fixture.invalid/v1',model:'gpt-5.2',reasoning:'high'};
+      const bound=registry.bind(config,{read:async()=>''});
+      const root=path.join(fixture,'responses-live-'+style);fs.mkdirSync(root);const repository=new ConversationStore(root);
+      const update=()=>{data.threads[0].messages[1].steps=turn.steps;data.threads[0].messages[1].content=turn.content;thread.update(data.threads[0]);};
+      httpScript=request=>{
+        assert.equal(JSON.parse(request.options.extraData).reasoning.summary,'auto');assert.equal(JSON.parse(request.options.extraData).reasoning.effort,'high');
+        request.callback(null,200);
+        const emit=value=>{const bytes=Buffer.from('data: '+JSON.stringify(value)+'\n\n');for(let i=0;i<bytes.length;i+=7)request.emit('dataReceive',Uint8Array.from(bytes.subarray(i,i+7)).buffer);};
+        const type=style==='summary'?'response.reasoning_summary_text':'response.reasoning_text';
+        const coordinates=style==='summary'?{output_index:0,summary_index:0}:{output_index:0,content_index:0};
+        emit({type:type+'.delta',...coordinates,delta:'先检查输入，'});
+        emit({type:type+'.delta',...coordinates,delta:'再核对结果。'});
+        assert.equal(thread.messages[1].content,'','answer is still empty while thinking streams');
+        assert.equal(thread.messages[1].stepViews[0].reasoningContent,'先检查输入，再核对结果。');
+        const thinking=buildTimeline(thread.messages[1].stepViews)[0];assert.equal(thinking.kind,'process');assert.equal(thinking.items[0].tool,-1);
+        emit({type:type+'.done',...coordinates,text:'先检查输入，再核对结果。'});
+        emit({type:'response.output_text.delta',delta:'最终回答。'});
+        const item={type:'reasoning',summary:[],encrypted_content:'must-not-display'};
+        item[style]=[{type:style==='summary'?'summary_text':'reasoning_text',text:'先检查输入，再核对结果。'}];
+        emit({type:'response.completed',response:{status:'completed',output:[item,{type:'message',content:[{type:'output_text',text:'最终回答。'}]}]}});
+        request.emit('dataEnd');
+      };
+      await runAgentLoop({model:bound,messages:[{role:'user',content:'fixture'}],tools:{definitions:()=>[],execute:async()=>{throw Error('Unexpected tool');}},turn,maxSteps:1},new Cancellation(),{
+        event:event=>{update();if(event.type==='reasoning_delta')deltas.push(event.delta);},checkpoint:async()=>{update();await repository.save(data);}
+      });
+      assert.equal(deltas.join(''),'先检查输入，再核对结果。','done/completed must not duplicate thought text');
+      data.threads[0].messages[1].status='complete';update();await repository.save(data);
+      const restored=new ThreadViewModel((await new ConversationStore(root).load()).threads[0]);
+      assert.equal(restored.messages[1].content,'最终回答。');assert.equal(restored.messages[1].reasoningContent,'先检查输入，再核对结果。');
+      assert.equal(restored.messages[1].stepViews[0].reasoningContent,'先检查输入，再核对结果。');
+      assert.ok(buildTimeline(restored.messages[1].stepViews).some(entry=>entry.kind==='process'));
+      assert.equal(JSON.stringify(restored).includes('must-not-display'),false);
+    }
   });
   await test('provider keeps active streams beyond three minutes and stops idle or cancelled streams', async () => {
     const {ProtocolProvider}=load(path.join(source,'services/providers/ProtocolProvider'));
@@ -346,5 +567,5 @@ async function test(name, run) { await run(); console.log('PASS '+name); }
     Broken.record({...legacy[0],id:'after-failure'});await Broken.queue;
     assert.equal(fs.readFileSync(nativePath(root+'/usage-records/1.json'),'utf8'),'broken');
   });
-  console.log('18 native adapter integration checks passed. Fixtures: '+fixture);
+  console.log('25 native adapter integration checks passed. Fixtures: '+fixture);
 })().catch(error=>{console.error(error);process.exitCode=1;});

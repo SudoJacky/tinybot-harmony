@@ -1,6 +1,6 @@
 import { t } from '../../model/I18n';
 import { AnthropicContentBlock, validateAnthropicContent } from '../../model/AnthropicContent';
-import { MAX_TOOL_ARGUMENTS, MAX_TOOL_CALLS, ModelTurn, ToolCall, validateToolCalls } from '../../model/Agent';
+import { MAX_REASONING_CONTENT, MAX_TOOL_ARGUMENTS, MAX_TOOL_CALLS, ModelTurn, ToolCall, validateToolCalls } from '../../model/Agent';
 import { AnthropicBlock } from './WireProtocols';
 
 export interface ModelStream {
@@ -50,6 +50,7 @@ interface ResponseItem {
   name?: string;
   arguments?: string;
   content?: ResponseContent[];
+  summary?: ResponseContent[];
 }
 interface ResponseError { code?: string; }
 interface ResponseIncomplete { reason?: string; }
@@ -59,7 +60,17 @@ interface ResponseData {
   error?: ResponseError;
   incomplete_details?: ResponseIncomplete;
 }
-interface ResponseEvent { type: string; delta?: string; response?: ResponseData; code?: string; error?: ResponseError; }
+interface ResponseEvent {
+  type: string; delta?: string; text?: string; response?: ResponseData; code?: string; error?: ResponseError;
+  output_index?: number; summary_index?: number; content_index?: number;
+}
+
+function reasoningPartKey(output: number = 0, part: number = 0, summary: boolean): string {
+  if (!Number.isSafeInteger(output) || output < 0 || !Number.isSafeInteger(part) || part < 0) {
+    throw new Error(t('Responses 推理文本片段无效。'));
+  }
+  return output + (summary ? ':summary:' : ':content:') + part;
+}
 
 function responsesFailure(event: ResponseEvent): Error {
   const reason = event.response?.incomplete_details?.reason;
@@ -76,9 +87,15 @@ export class ResponsesStream implements ModelStream {
   private frames: EventFrames;
   private content: string = '';
   private result?: ModelTurn;
+  private reasoning: string = '';
+  private reasoningParts: Map<string, string> = new Map<string, string>();
+  private closedReasoningParts: Set<string> = new Set<string>();
+  private lastReasoningPart: string = '';
   private onText: (text: string) => void;
-  constructor(onText: (text: string) => void) {
+  private onReasoning?: (text: string) => void;
+  constructor(onText: (text: string) => void, onReasoning?: (text: string) => void) {
     this.onText = onText;
+    this.onReasoning = onReasoning;
     this.frames = new EventFrames((payload: string) => this.event(payload));
   }
   push(text: string): void { this.frames.push(text); }
@@ -87,13 +104,58 @@ export class ResponsesStream implements ModelStream {
     if (!this.result) { throw new Error(t("Responses 连接结束，但未收到完整回答的结束标记。")); }
     return this.result;
   }
+
+  // done/completed contain full text, not another delta. Reconcile per output/part
+  // so repeated snapshots do not duplicate thinking or merge distinct paragraphs.
+  private reasoningPart(key: string, text: string | undefined, complete: boolean): void {
+    if (typeof text !== 'string' || (!complete && this.closedReasoningParts.has(key))) {
+      throw new Error(t('Responses 推理文本片段无效。'));
+    }
+    const previous = this.reasoningParts.get(key) || '';
+    if (complete && !text.startsWith(previous)) {
+      throw new Error(t('Responses 最终推理文本与流式片段不一致。'));
+    }
+    const delta = complete ? text.slice(previous.length) : text;
+    const addition = delta && this.reasoning && this.lastReasoningPart !== key ? '\n\n' + delta : delta;
+    if (this.reasoning.length + addition.length > MAX_REASONING_CONTENT) {
+      throw new Error(t('模型返回的推理内容已结束或超出长度限制。'));
+    }
+    this.reasoningParts.set(key, complete ? text : previous + text);
+    if (complete) { this.closedReasoningParts.add(key); }
+    if (addition) {
+      this.reasoning += addition; this.lastReasoningPart = key;
+      this.onReasoning?.(addition);
+    }
+  }
+
+  private completeReasoning(item: ResponseItem, index: number): void {
+    // Only text is displayable. Opaque encrypted_content is never interpreted as text.
+    for (const summary of [true, false]) {
+      const parts = summary ? item.summary : item.content;
+      if (parts === undefined) { continue; }
+      if (!Array.isArray(parts)) { throw new Error(t('Responses 推理文本片段无效。')); }
+      for (let part = 0; part < parts.length; part++) {
+        if (!parts[part] || parts[part].type !== (summary ? 'summary_text' : 'reasoning_text')) {
+          throw new Error(t('Responses 推理文本片段无效。'));
+        }
+        this.reasoningPart(reasoningPartKey(index, part, summary), parts[part].text, true);
+      }
+    }
+  }
+
   private event(payload: string): void {
     if (this.result) { throw new Error(t("Responses 在结束后继续返回数据。")); }
     const event = parseEvent(payload) as ResponseEvent;
     if (!event || typeof event.type !== 'string') { throw new Error(t("Responses 流式事件无效。")); }
     if (event.type === 'error' || event.type === 'response.failed' || event.type === 'response.incomplete' ||
       event.type === 'response.refusal.delta') { throw responsesFailure(event); }
-    if (event.type === 'response.output_text.delta') {
+    if (['response.reasoning_summary_text.delta', 'response.reasoning_summary_text.done',
+      'response.reasoning_text.delta', 'response.reasoning_text.done'].includes(event.type)) {
+      const summary = event.type.startsWith('response.reasoning_summary_text.');
+      const complete = event.type.endsWith('.done');
+      this.reasoningPart(reasoningPartKey(event.output_index, summary ? event.summary_index : event.content_index, summary),
+        complete ? event.text : event.delta, complete);
+    } else if (event.type === 'response.output_text.delta') {
       if (typeof event.delta !== 'string') { throw new Error(t("Responses 文本片段无效。")); }
       this.content += event.delta;
       this.onText(event.delta);
@@ -104,7 +166,8 @@ export class ResponsesStream implements ModelStream {
       }
       const calls: ToolCall[] = [];
       let text = '';
-      for (const item of response.output) {
+      for (let index = 0; index < response.output.length; index++) {
+        const item = response.output[index];
         if (item.type === 'function_call') {
           calls.push({ id: item.call_id || '', type: 'function', function: { name: item.name || '', arguments: item.arguments || '' } });
         } else if (item.type === 'message') {
@@ -113,12 +176,13 @@ export class ResponsesStream implements ModelStream {
             if (part.type !== 'output_text' || typeof part.text !== 'string') { throw new Error(t("Responses 返回了不支持的输出类型。")); }
             text += part.text;
           }
-        } else if (item.type !== 'reasoning') { throw new Error(t("Responses 返回了不支持的输出类型。")); }
+        } else if (item.type === 'reasoning') { this.completeReasoning(item, index); }
+        else { throw new Error(t("Responses 返回了不支持的输出类型。")); }
       }
       validateToolCalls(calls);
       if (text !== this.content) { throw new Error(t("Responses 最终文本与流式片段不一致。")); }
       if (calls.length === 0 && text.trim().length === 0) { throw new Error(t("模型没有返回可显示的文本。")); }
-      this.result = { content: text, toolCalls: calls };
+      this.result = { content: text, toolCalls: calls, reasoningContent: this.reasoning || undefined };
     }
   }
 }

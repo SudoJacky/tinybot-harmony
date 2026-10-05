@@ -8,6 +8,9 @@ export default function swipeRowTests(): void {
       expect(Swipe.reveal(80, 320)).assertEqual(80);
       expect(Swipe.reveal(120, 320) < 120).assertTrue();
       expect(Swipe.armed(Swipe.reveal(120, 320), 320)).assertFalse();
+      // A shorter deliberate drag arms deletion; pulling back disarms it again.
+      expect(Swipe.armed(Swipe.reveal(245, 320), 320)).assertTrue();
+      expect(Swipe.armed(Swipe.reveal(235, 320), 320)).assertFalse();
       expect(Swipe.armed(Swipe.reveal(300, 320), 320)).assertTrue();
       expect(Swipe.reveal(10000, 320)).assertEqual(320);
       expect(Swipe.armed(130, 130)).assertFalse();

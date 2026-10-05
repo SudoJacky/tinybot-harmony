@@ -1,5 +1,6 @@
 {
   "string": [
+    { "name": "microphone_reason", "value": "用于将你说的话转换为消息草稿中的文字" },
     { "name": "module_desc", "value": "Tinybot 原生个人 AI 助手" },
     { "name": "EntryAbility_desc", "value": "Tinybot 原生个人 AI 助手" },
     { "name": "EntryAbility_label", "value": "Tinybot" }

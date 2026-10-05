@@ -41,7 +41,7 @@ export class ProtocolProvider implements ModelProvider {
     const usage = new UsageStream(); let firstToken: number | undefined = undefined;
     const receiveText = (text: string): void => { if (text && firstToken === undefined) { firstToken = Date.now(); } onText(text); };
     const decoder = new util.TextDecoder('utf-8');
-    const parser: ModelStream = this.info.protocol === 'responses' ? new ResponsesStream(receiveText) :
+    const parser: ModelStream = this.info.protocol === 'responses' ? new ResponsesStream(receiveText, onReasoning) :
       this.info.protocol === 'anthropic-messages' ? new AnthropicStream(receiveText, onReasoning) : new ChatStream(receiveText, onReasoning);
     const body: Object = this.info.protocol === 'responses' ? responsesRequest(input.model, messages, input.tools, input.maxOutputTokens) :
       this.info.protocol === 'anthropic-messages' ? anthropicRequest(input.model, messages, input.tools, input.maxOutputTokens) :
@@ -127,11 +127,10 @@ export class ProtocolProvider implements ModelProvider {
           if (receivedBytes === 0) {
             hilog.info(0x0000, 'TinybotNetwork', 'First data elapsedMs=%{public}d', Date.now() - startedAt);
           }
+          // Count bytes for diagnostics only. SSE metadata and heartbeats are not
+          // retained model output; a cumulative wire-size cap cuts off valid thinking.
+          // Parsers still bound individual frames, reasoning and tool arguments.
           receivedBytes += data.byteLength;
-          if (receivedBytes > 2 * 1024 * 1024) {
-            settle(new Error(t("单次回答超过 2 MB，请缩小问题范围。")));
-            return;
-          }
           try {
             const text = decoder.decodeToString(new Uint8Array(data), { stream: true }); usage.push(text); parser.push(text);
           } catch (error) {
