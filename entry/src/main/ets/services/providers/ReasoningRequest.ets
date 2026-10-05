@@ -9,7 +9,10 @@ export function applyReasoningEffort(protocol: string, model: string, effort: st
     throw new Error(t('当前模型或协议不支持此推理强度设置。'));
   }
   if (protocol === 'chat-completions') (body as ChatRequest).reasoning_effort = effort;
-  else if (protocol === 'responses') (body as ResponsesRequest).reasoning = { effort: effort };
+  else if (protocol === 'responses') {
+    const request = body as ResponsesRequest;
+    request.reasoning = { summary: request.reasoning?.summary, effort: effort };
+  }
   else if (protocol === 'anthropic-messages') {
     const request = body as AnthropicRequest;
     request.output_config = { effort: effort };

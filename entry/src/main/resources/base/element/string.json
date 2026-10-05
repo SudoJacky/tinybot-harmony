@@ -1,5 +1,6 @@
 {
   "string": [
+    { "name": "microphone_reason", "value": "Convert your speech to text in the message draft" },
     {
       "name": "module_desc",
       "value": "Tinybot personal AI assistant"

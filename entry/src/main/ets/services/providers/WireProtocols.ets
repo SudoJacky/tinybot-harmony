@@ -1,6 +1,7 @@
 import { t } from '../../model/I18n';
 import { AnthropicContentBlock, validateAnthropicContent } from '../../model/AnthropicContent';
 import { ModelMessage, ToolDefinition, ToolParameters } from '../../model/Agent';
+import { supportsReasoningEffort } from '../../model/ReasoningEffort';
 import { completionUrl } from './ChatCompletionsProtocol';
 
 export function protocolHeaders(protocol: string, apiKey: string): Record<string, string> {
@@ -55,7 +56,7 @@ interface ResponsesTool {
   strict: boolean;
 }
 export interface ResponsesRequest {
-  reasoning?: ReasoningOptions;
+  reasoning?: ResponsesReasoningOptions;
   model: string;
   stream: boolean;
   store: boolean;
@@ -65,6 +66,7 @@ export interface ResponsesRequest {
   max_output_tokens?: number;
 }
 interface ReasoningOptions { effort: string; }
+interface ResponsesReasoningOptions { effort?: string; summary?: string; }
 
 export function responsesRequest(model: string, messages: ModelMessage[], tools: ToolDefinition[],
   maxOutput?: number): ResponsesRequest {
@@ -88,6 +90,7 @@ export function responsesRequest(model: string, messages: ModelMessage[], tools:
     }
   }
   return { model: model, stream: true, store: false, instructions: instructions.length > 0 ? instructions.join('\n\n') : undefined,
+    reasoning: supportsReasoningEffort('responses', model) ? { summary: 'auto' } : undefined,
     input: input, max_output_tokens: maxOutput,
     tools: tools.length > 0 ? tools.map((tool: ToolDefinition): ResponsesTool => {
       return { type: 'function', name: tool.function.name, description: tool.function.description,

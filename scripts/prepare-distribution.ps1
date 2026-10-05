@@ -1,12 +1,15 @@
 [CmdletBinding()]
 param(
-    [string]$StudioRoot = 'D:/DevEco Studio',
+    [string]$StudioRoot = $env:DEVECO_STUDIO_HOME,
     [string]$OutputDirectory,
     [switch]$SkipBuild
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if (-not $StudioRoot) {
+    $StudioRoot = Join-Path $env:ProgramFiles 'Huawei\DevEco Studio'
+}
 $projectRoot = Split-Path $PSScriptRoot -Parent
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
@@ -125,7 +128,7 @@ try {
         New-Item -ItemType Directory -Path $nativeDestination -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $projectRoot "entry/build/default/intermediates/cmake/default/obj/$abi/libtinybot_sandbox.so") -Destination $nativeDestination
     }
-    Copy-Item -LiteralPath 'artifacts/app-store/tinybot-icon-1024.png' -Destination (Join-Path $OutputDirectory 'assets')
+    Copy-Item -LiteralPath 'AppScope/resources/base/media/tinybot_icon.png' -Destination (Join-Path $OutputDirectory 'assets/tinybot-icon.png')
     Copy-Item -Path 'docs/distribution/*.txt' -Destination $OutputDirectory
     Copy-Item -LiteralPath 'LICENSE' -Destination (Join-Path $OutputDirectory 'licenses/APACHE-2.0.txt')
     Copy-Item -LiteralPath 'entry/src/main/resources/rawfile/THIRD_PARTY_NOTICES.txt' -Destination (Join-Path $OutputDirectory 'licenses')

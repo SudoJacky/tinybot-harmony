@@ -11,7 +11,12 @@
     "installationFree": false,
     "pages": "$profile:main_pages",
     "requestPermissions": [
-      { "name": "ohos.permission.INTERNET" }
+      { "name": "ohos.permission.INTERNET" },
+      {
+        "name": "ohos.permission.MICROPHONE",
+        "reason": "$string:microphone_reason",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" }
+      }
     ],
     "abilities": [
       {

@@ -33,6 +33,7 @@ struct Index {
   @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
   @State private app: ChatViewModel = new ChatViewModel();
   @State private drawerOpen: boolean = false;
+  @State private chatVisible: boolean = true;
   @State private drawerReveal: number = 0;
   @State private drawerDragging: boolean = false;
   @State private drawerWidth: number = DRAWER_MAX_WIDTH;
@@ -323,6 +324,7 @@ struct Index {
           this.header()
           if (this.app.ready) {
             ChatPanel({ app: this.app, thread: this.app.active, approval: this.approval, onSettings: () => this.openSettings(),
+                activeThreadId: this.app.active.id, speechEnabled: this.chatVisible && !this.drawerOpen && !this.drawerDragging,
                 onHistoryDragStart: (event: GestureEvent) => this.startDrawerDrag(event, true),
                 onHistoryDragUpdate: (event: GestureEvent) => this.updateDrawerDrag(event),
                 onHistoryDragEnd: (event: GestureEvent) => this.endDrawerDrag(event),
@@ -351,6 +353,7 @@ struct Index {
     }
     .backgroundColor($r('app.color.page_background'))
     .hideTitleBar(true).hideToolBar(true).mode(NavigationMode.Stack)
+    .onNavBarStateChange((visible: boolean) => { this.chatVisible = visible; })
     .navDestination(this.destination).width('100%').height('100%')
       }, (locale: string) => locale)
     }.width('100%').height('100%')

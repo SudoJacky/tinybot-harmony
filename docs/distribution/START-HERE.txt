@@ -1,17 +1,17 @@
-Tinybot 0.1.3 · 发布 / 云测试准备说明
-更新日期：2026-10-04
-本文描述 0.1.3 的目标交付内容；版本更新后需重新运行准备脚本生成软件包、符号表和校验信息，旧版本产物不能直接作为本版本提交。
+Tinybot 0.1.4 · 发布 / 云测试准备说明
+更新日期：2026-10-05
+本文描述 0.1.4 的目标交付内容；版本更新后需重新运行准备脚本生成软件包、符号表和校验信息，旧版本产物不能直接作为本版本提交。
 
 一、这次准备了什么
 
-packages/Tinybot-0.1.3-10003-release-UNSIGNED.app：Release 模式完整应用包，等待云签名。
-packages/Tinybot-0.1.3-10003-release-UNSIGNED.hap：同一 APP 内的 entry 模块，供检查或后续签名使用。
+packages/Tinybot-0.1.4-10004-release-UNSIGNED.app：Release 模式完整应用包，等待云签名。
+packages/Tinybot-0.1.4-10004-release-UNSIGNED.hap：同一 APP 内的 entry 模块，供检查或后续签名使用。
 symbols/app-symbol.zip：本版本符号表，供 DevEco Studio 上传及问题定位。
 symbols/native/arm64-v8a/、symbols/native/x86_64/：与包内 Build ID 一致的未裁剪沙箱原生库，供 Native 崩溃定位。
-assets/tinybot-icon-1024.png：1024×1024 PNG 商店图标，来自软件包实际使用的图标。
+assets/tinybot-icon.png：工程实际使用的 512×512 PNG 图标；商店上传所需尺寸以 AGC 当前字段为准。
 screenshots/：本机真实界面截图；上传前按 AGC 当前字段要求选择、预览。
-当前截图候选仍来自 0.1.0；拍摄版本见 screenshots/SCREENSHOTS.txt，不能作为 0.1.3 新交互的验证证据。
-RELEASE-NOTES.txt：0.1.3 测试版更新说明、升级与回归重点。
+仅在本机已有 artifacts/store-screenshots 时附带截图，拍摄版本以截图记录为准；历史截图不能作为 0.1.4 新交互的验证证据。
+RELEASE-NOTES.txt：0.1.4 测试版更新说明、升级与回归重点。
 STORE-LISTING.txt：应用介绍、版本说明和待填字段。
 CLOUD-TEST.txt：云测试环境选择、功能验证步骤、审核体验说明。
 PRIVACY-DRAFT.txt：按当前实现整理的隐私政策草稿，含待补充项，不能原样发布。
@@ -23,21 +23,21 @@ licenses/：工程 Apache-2.0、QuickJS MIT，以及品牌资源和 Liquid Toggl
 
 包名：com.sudojacky.tinybot
 应用名称：Tinybot
-版本：0.1.3，versionCode=10003
+版本：0.1.4，versionCode=10004
 设备类型：phone
 最低 / 目标 API：26；当前使用 SDK 26.0.0.105 Release。
 构建模式：release，包内 app.debug=false。
 原生 ABI：arm64-v8a（手机）、x86_64（模拟器），均包含 libtinybot_sandbox.so。
 本次交付：未签名，不是可直接安装或直接在 AGC 网页提交的最终发布签名包。
 
-原工程的自动签名为 debug Profile，仅授权一台本机测试设备。
+原工程的自动签名为 debug Profile，仅适用于该 Profile 授权的调试设备。
 即使采用 Release 编译模式，调试证书也不会自动变成发布证书。
 因此请使用下面的云签名流程，不要拿 entry-default-signed.hap 当作云测试或上架发布包。
 交付目录不包含私钥、密钥库、签名密码、模型 API Key 或手机中的对话数据。
 
 三、推荐：在 DevEco Studio 26 中上传并使用云管理证书
 
-1. 打开 D:\Study\coding\tinybot-harmony。
+1. 打开 D:\Code\tinybot-harmony。
 2. 使用已登录的个人开发者账号，确认 AGC 应用绑定的包名为 com.sudojacky.tinybot。
 3. 菜单 Build > Upload Product，选择 default 产品的 Release APP。
    原始构建产物位于 build\outputs\default\tinybot-harmony-default-unsigned.app。
@@ -53,13 +53,13 @@ licenses/：工程 Apache-2.0、QuickJS MIT，以及品牌资源和 Liquid Toggl
 
 本次仅完成本地准备，没有替你在 AGC 创建应用、申请云证书或上传软件包。
 如果设备池没有 API 26 手机，此版本无法安装；需等待适配设备或另行评估降低最低 API，不能只修改清单数字。
-如果 AGC 已存在 versionCode=10003 的版本，先增加版本号重新构建，或明确使用上传向导的 Manage Build Version。
+如果 AGC 已存在 versionCode=10004 的版本，先增加版本号重新构建，或明确使用上传向导的 Manage Build Version。
 上传向导更改构建号或重新签名后，最终文件的哈希值会变化，需以最终包重新记录校验信息。
 
 四、以后如何重新准备
 
 在工程根目录运行：
-  powershell -ExecutionPolicy Bypass -File scripts\prepare-distribution.ps1
+  powershell -ExecutionPolicy Bypass -File scripts\prepare-distribution.ps1 -StudioRoot "C:\Program Files\Huawei\DevEco Studio"
 
 脚本会使用 devecocli 先检查 ArkTS，再构建 release APP；校验包名、版本、debug 标志和包内容，检查两种 ABI 的沙箱库、包内哈希与原生符号 Build ID，生成独立目录和 ZIP。
 已有相同输出目录时脚本会停止，避免覆盖。可通过 -OutputDirectory 指定新的输出目录。

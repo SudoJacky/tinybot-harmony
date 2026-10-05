@@ -38,6 +38,17 @@ Anthropic 已知支持 adaptive thinking 的模型在明确选择 effort 时附�
 旧模型的思考预算是另一个参数，本滑块不将它伪装成 effort。未知别名不自动启用 adaptive。
 输出 token 上限沿用原有配置。
 
+Responses 对支持推理的模型请求 `reasoning.summary: "auto"`，独立于 effort；默认档不强制
+指定 effort，切换档位也不覆盖 summary。已知非推理模型（如 GPT-4.1）不附加该参数；未知
+网关别名沿用现有推理能力判断，是否支持摘要取决于服务端。
+
+Responses 解析 `response.reasoning_summary_text.delta` 和 `response.reasoning_text.delta`，
+将收到的可显示文字传给过程区。按输出项及段落分别累积，`*.done` 与 `response.completed`
+中的完整文本只补齐尚未收到的后缀，避免重复显示；仅在最终结果返回的摘要也会显示并保存。
+思考文字写入每步的 `reasoningContent`，重新打开会话后仍可展开查看，不混入最终回答。
+`encrypted_content` 不作为正文，也不会将可见摘要伪造成 Responses 原生推理输入。
+OpenAI 返回的是思考摘要，不是内部原始思考 token；服务端未返回可显示文字时，只保留执行状态。
+
 Anthropic 流式响应解析 `thinking_delta` 和 `signature_delta`，思考文本进入现有过程展示。
 完整、有序的原生内容块（包括签名和 `redacted_thinking`）独立保存，工具调用续轮原样回传，
 避免把签名思考块丢失或重建。签名及加密内容不显示在正文，也不会发送到 OpenAI 协议。
@@ -60,9 +71,14 @@ Anthropic 流式响应解析 `thinking_delta` 和 `signature_delta`，思考文�
 保存失败回滚、无效值及不支持协议的拒绝、自动路由隔离。
 `ReasoningEffort.test.ets` 验证模型档位、三种请求格式、分片流、签名/加密内容的
 持久化和工具续轮回传、异常记录拒绝。合成协议测试不代表已完成真实 Anthropic 服务验证。
+Responses 的分段、完成快照去重、最终摘要、纯文本推理、加密内容隔离和异常片段也有覆盖。
+`scripts/test-productivity-native.cjs` 使用实际 Provider、模型绑定、Agent 循环、过程视图模型和
+文件存储验证 Responses 思考文本在回答前可见、完成后不重复、重新加载后仍可展开；不代表
+已验证所有模型服务或兼容网关的实际返回行为。
 
 参考官方文档：
 
 - [OpenAI reasoning](https://developers.openai.com/api/docs/guides/reasoning)
+- [Responses 思考摘要流式事件](https://developers.openai.com/api/reference/resources/responses/streaming-events#response.reasoning_summary_text.delta)
 - [Anthropic effort](https://platform.claude.com/docs/en/build-with-claude/effort)
 - [Anthropic thinking tool workflows](https://platform.claude.com/docs/en/build-with-claude/thinking-tool-workflows)

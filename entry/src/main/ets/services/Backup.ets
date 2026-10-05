@@ -22,7 +22,9 @@ function allAttachments(data: AppData): Attachment[] {
   for (const thread of data.threads) { for (const item of (thread.attachments || []).concat(...thread.messages.map((message) => message.attachments || []))) { result.set(item.id, item); } }
   return Array.from(result.values());
 }
-export async function exportBackup(context: common.UIAbilityContext, data: AppData): Promise<void> {
+// Both local export and Huawei Cloud use the same validated, credential-free snapshot.
+export async function createBackupFile(context: common.UIAbilityContext, snapshot: AppData): Promise<string> {
+  const data = JSON.parse(JSON.stringify(snapshot)) as AppData;
   const envelope: BackupEnvelope = { format: 'tinybot-harmony.backup.v1', data: data, attachments: [], files: [] };
   const userDocument = data.config.userDocument || '';
   data.config = defaultConfig(); data.config.userDocument = userDocument;
@@ -53,12 +55,21 @@ export async function exportBackup(context: common.UIAbilityContext, data: AppDa
   const bytes = new util.TextEncoder().encodeInto(JSON.stringify(envelope));
   if (bytes.byteLength > MAX_BACKUP) { throw new Error(t("备份超过 20 MB。")); }
   const path = context.cacheDir + '/backup-' + util.generateRandomUUID() + '.json';
-  await writeBytes(path, bytes.buffer as ArrayBuffer); await exportFile(context, path, 'Tinybot备份.json');
+  await writeBytes(path, bytes.buffer as ArrayBuffer);
+  return path;
+}
+export async function exportBackup(context: common.UIAbilityContext, data: AppData): Promise<void> {
+  const path = await createBackupFile(context, data);
+  try { await exportFile(context, path, 'Tinybot备份.json'); }
+  finally { await fs.unlink(path); }
 }
 export async function readBackup(context: common.UIAbilityContext): Promise<AppData | undefined> {
   const uris = await new picker.DocumentViewPicker(context).select({ maxSelectNumber: 1, fileSuffixFilters: ['Tinybot 备份|.json'] });
   if (!uris.length) { return undefined; }
-  const file = await fs.open(uris[0], fs.OpenMode.READ_ONLY); let text = '';
+  return readBackupFile(context, uris[0]);
+}
+export async function readBackupFile(context: common.UIAbilityContext, path: string): Promise<AppData> {
+  const file = await fs.open(path, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW); let text = '';
   try { text = new util.TextDecoder('utf-8', { fatal: true }).decodeToString(new Uint8Array(await readBounded(file.fd, MAX_BACKUP))); }
   finally { await fs.close(file); }
   const envelope = JSON.parse(text) as BackupEnvelope;
@@ -72,19 +83,23 @@ export async function readBackup(context: common.UIAbilityContext): Promise<AppD
     binaries.set(item.id, new util.Base64Helper().decodeSync(item.bytes)); attachmentIds.set(item.id, util.generateRandomUUID());
   }
   for (const item of allAttachments(data)) { if (!binaries.has(item.id) || binaries.get(item.id)?.byteLength !== item.size) { throw new Error(t("备份缺少附件或大小不一致。")); } }
+  const workspaceBytes: Uint8Array[] = [];
   for (const item of envelope.files) {
+    if (!item) { throw new Error(t("备份文件无效。")); }
     if (!threadIds.has(item.threadId) || typeof item.bytes !== 'string' || item.bytes.length > 6 * 1024 * 1024) { throw new Error(t("备份文件无效。")); }
     workspaceRelativePath(item.path, false); const key = item.threadId + '/' + item.path;
     if (paths.has(key)) { throw new Error(t("备份包含重复文件。")); } paths.add(key);
+    workspaceBytes.push(new util.Base64Helper().decodeSync(item.bytes));
   }
   const workspace = new WorkspaceStore(context.getApplicationContext().filesDir);
   const attachmentRoot = context.getApplicationContext().filesDir + '/attachments'; if (!await fs.access(attachmentRoot)) { await fs.mkdir(attachmentRoot); }
   for (const item of allAttachments(data)) { const id = attachmentIds.get(item.id) as string; const path = id + (item.mime === 'image/jpeg' ? '.jpg' : '.txt'); await writeBytes(attachmentRoot + '/' + path, (binaries.get(item.id) as Uint8Array).buffer as ArrayBuffer); }
   for (const thread of data.threads) { await workspace.ensureThread(threadIds.get(thread.id) as string); }
-  for (const item of envelope.files) {
+  for (let index = 0; index < envelope.files.length; index++) {
+    const item = envelope.files[index];
     const root = workspace.pathFor(threadIds.get(item.threadId) as string); const parts = item.path.split('/'); let directory = root;
     for (const part of parts.slice(0, -1)) { directory += '/' + part; if (!await fs.access(directory)) { await fs.mkdir(directory); } }
-    await writeBytes(root + '/' + item.path, new util.Base64Helper().decodeSync(item.bytes).buffer as ArrayBuffer);
+    await writeBytes(root + '/' + item.path, workspaceBytes[index].buffer as ArrayBuffer);
   }
   const providers = new Map<string, string>();
   for (const profile of data.providerProfiles || []) { const id = 'provider-' + util.generateRandomUUID(); providers.set(profile.id, id); profile.id = id; profile.enabled = false; profile.noApiKey = true; profile.credentialAlias = ''; profile.name += '（恢复后请配置密钥）'; }

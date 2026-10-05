@@ -1,6 +1,6 @@
-import { AnimatorResult, curves } from '@kit.ArkUI';
+import { AnimatorResult } from '@kit.ArkUI';
 import { t } from '../model/I18n';
-import { Radius } from './Theme';
+import { Motion, Radius } from './Theme';
 import { SwipeRowMotion as Swipe } from './SwipeRowMotion';
 
 // Native implementation of a shared reveal drawer; no web component/runtime is used.
@@ -25,7 +25,13 @@ export struct SwipeRow {
   private animator?: AnimatorResult;
 
   aboutToDisappear(): void { this.stop(); }
-  private stop(): void { this.animator?.cancel(); this.animator = undefined; }
+  private stop(): void {
+    const animator = this.animator;
+    // cancel() emits a final onFrame at the endpoint. Invalidate it first so
+    // a new gesture continues from the displayed position, not that endpoint.
+    this.animator = undefined;
+    animator?.cancel();
+  }
   private syncOpen(): void {
     if (this.activeRow !== this.rowKey) this.settle(false);
   }
@@ -38,19 +44,24 @@ export struct SwipeRow {
     this.stop();
     const from = this.reveal; const to = open ? Math.min(Swipe.drawer, this.rowWidth) : 0;
     if (Math.abs(from - to) < 0.1) { this.reveal = to; return; }
-    const spring = curves.interpolatingSpring(0, 1, 230, 25);
+    // Physical springs cannot be sampled with ICurve.interpolate(). Let the
+    // native animator resolve their timing and emit positions directly.
     const animator = this.getUIContext().createAnimator({ duration: 280,
-      easing: 'linear', delay: 0, fill: 'forwards',
-      direction: 'normal', iterations: 1, begin: 0, end: 1 });
-    animator.onFrame = (progress: number) => {
-      this.reveal = Math.max(0, Math.min(this.rowWidth, from + (to - from) * spring.interpolate(progress)));
+      easing: 'interpolating-spring(0, 1, 230, 25)', delay: 0, fill: 'forwards',
+      direction: 'normal', iterations: 1, begin: from, end: to });
+    animator.onFrame = (position: number) => {
+      if (this.animator !== animator) return;
+      this.reveal = Math.max(0, Math.min(this.rowWidth, position));
     };
-    animator.onFinish = () => { this.reveal = to; this.animator = undefined; };
+    animator.onFinish = () => {
+      if (this.animator !== animator) return;
+      this.reveal = to; this.animator = undefined;
+    };
     this.animator = animator; animator.play();
   }
   private start(event: GestureEvent): void {
     if (this.disabled) return;
-    this.stop(); this.origin = this.reveal; this.dragging = true;
+    this.stop(); this.origin = Swipe.dragOrigin(this.reveal); this.dragging = true;
     this.move(event);
   }
   private move(event: GestureEvent): void {
@@ -70,6 +81,25 @@ export struct SwipeRow {
     this.onOpen(''); this.close(); this.onDelete();
   }
   @Builder
+  deleteIcon() {
+    Stack() {
+      Shape() {
+        Path().commands('M6 9 L7 20 Q7 22 9 22 H15 Q17 22 17 20 L18 9 M10 11 V18 M14 11 V18')
+      }.viewPort({ x: 0, y: 0, width: '24px', height: '24px' })
+      .width(24).height(24).fill(Color.Transparent).stroke($r('app.color.on_danger'))
+      .strokeWidth('1.7px').strokeLineCap(LineCapStyle.Round).strokeLineJoin(LineJoinStyle.Round)
+      Shape() {
+        Path().commands('M4 7 H20 M9 7 V4 Q9 3 10 3 H14 Q15 3 15 4 V7')
+      }.viewPort({ x: 0, y: 0, width: '24px', height: '24px' })
+      .width(24).height(24).fill(Color.Transparent).stroke($r('app.color.on_danger'))
+      .strokeWidth('1.7px').strokeLineCap(LineCapStyle.Round).strokeLineJoin(LineJoinStyle.Round)
+      .id('swipe-delete-lid-' + this.rowKey)
+      .rotate({ angle: Swipe.armed(this.reveal, this.rowWidth) ? -28 : 0, centerX: 4, centerY: 7 })
+      .translate({ y: Swipe.armed(this.reveal, this.rowWidth) ? -1 : 0 })
+      .animation({ duration: Motion.fast, curve: Motion.standard })
+    }.width(24).height(24).hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+  }
+  @Builder
   actionsMenu() {
     Menu() {
       if (this.onShare) {
@@ -86,10 +116,7 @@ export struct SwipeRow {
     Stack({ alignContent: Alignment.TopEnd }) {
       Button({ type: ButtonType.Normal }) {
         Column({ space: 4 }) {
-          SymbolGlyph($r('sys.symbol.trash')).fontSize(21).fontColor([$r('app.color.on_danger')])
-            .scale({ x: Swipe.armed(this.reveal, this.rowWidth) ? 1.16 : 1,
-              y: Swipe.armed(this.reveal, this.rowWidth) ? 1.16 : 1 })
-            .animation({ duration: 140, curve: Curve.EaseOut })
+          this.deleteIcon()
           Text(t('删除')).fontSize(12).fontColor($r('app.color.on_danger'))
         }.opacity(Math.min(1, this.reveal / 48)).width('100%')
       }.id('swipe-delete-' + this.rowKey).width(Math.max(1, this.reveal)).height(this.rowHeight)

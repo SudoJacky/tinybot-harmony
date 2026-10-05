@@ -2,6 +2,10 @@ import { t } from '../model/I18n';
 import { supportsReasoningEffort, reasoningEfforts, reasoningEffortName, isHighestReasoningEffort } from '../model/ReasoningEffort';
 import { ComposerGlow } from '../common/ComposerGlow';
 import { ReasoningEffortPicker } from './ReasoningEffortPicker';
+import { SpeechInput } from '../services/SpeechInput';
+import { DictationDraft } from '../model/DictationDraft';
+import { VoicePill } from '../common/VoicePill';
+import { pasteboard } from '@kit.BasicServicesKit';
 import { ThreadReference, referenceQuery } from '../model/ThreadReferences';
 import { ThreadReferenceCard } from './ThreadReferenceCard';
 import { curves } from '@kit.ArkUI';
@@ -44,6 +48,8 @@ function SUGGESTIONS(): Suggestion[] { return [
 export struct ChatPanel {
   @ObjectLink app: ChatViewModel;
   @ObjectLink thread: ThreadViewModel;
+  @Prop @Watch('speechAvailabilityChanged') speechEnabled: boolean = true;
+  @Prop @Watch('speechThreadChanged') activeThreadId: string = '';
   onSettings: () => void = () => {};
   onHistoryDragStart: (event: GestureEvent) => void = () => {};
   onHistoryDragUpdate: (event: GestureEvent) => void = () => {};
@@ -54,6 +60,10 @@ export struct ChatPanel {
   @ObjectLink approval: ToolApproval;
   @State private importing: boolean = false;
   @State private showPlus: boolean = false;
+  @State private speech: SpeechInput = new SpeechInput();
+  @State private unwrittenSpeech: string = '';
+  private dictationDraft?: DictationDraft;
+  private speechThreadId: string = '';
   @State private showApprovalDetails: boolean = false;
   @State private previewing: boolean = false;
   @State private previewPath: string = '';
@@ -93,8 +103,61 @@ export struct ChatPanel {
     if (index >= 0) { this.followOutput = false; this.scroller.scrollToIndex(index + (this.thread.messages.length > this.app.visibleMessageCount ? 1 : 0), false, ScrollAlign.CENTER); }
   }
 
+  aboutToAppear(): void {
+    this.speech.onResult = (text: string): void => {
+      if (!this.dictationDraft || this.speechThreadId !== this.app.active.id || !this.speechEnabled) {
+        this.endSpeech(false); return;
+      }
+      try { this.app.setDraft(this.dictationDraft.update(this.app.draft, text)); }
+      catch (error) {
+        this.endSpeech(false); this.unwrittenSpeech = text; this.speech.error = (error as Error).message;
+      }
+    };
+    this.speech.onComplete = (): void => { this.dictationDraft = undefined; this.app.flushDraft(); };
+    this.speech.onError = (): void => { this.dictationDraft = undefined; this.app.flushDraft(); };
+    this.speech.onBackground = (): void => { this.dictationDraft = undefined; this.app.flushDraft(); };
+  }
+
   aboutToDisappear(): void {
+    this.endSpeech(false);
     clearTimeout(this.scrollTimer);
+  }
+
+  private speechActive(): boolean {
+    return this.speech.phase === 'preparing' || this.speech.phase === 'listening' || this.speech.phase === 'finishing';
+  }
+  private speechAvailabilityChanged(): void { if (!this.speechEnabled) { this.endSpeech(false); } }
+  private speechThreadChanged(): void { if (this.speechThreadId !== this.activeThreadId) { this.endSpeech(false); } }
+  private startSpeech(settings: boolean = false): void {
+    if (this.speechActive() || !this.speechEnabled || !this.app.ready || this.thread.archived || this.app.saveError) { return; }
+    this.getUIContext().getFocusController().clearFocus();
+    this.speechThreadId = this.app.active.id;
+    this.dictationDraft = new DictationDraft(this.app.draft);
+    this.unwrittenSpeech = '';
+    this.speech.start(this.getUIContext().getHostContext() as common.UIAbilityContext, settings);
+  }
+  private finishSpeech(): void {
+    if (this.speech.phase === 'preparing') { this.endSpeech(false); }
+    else { this.speech.finish(); }
+  }
+  private endSpeech(rollback: boolean): void {
+    const hadDraft = this.dictationDraft !== undefined;
+    if (rollback && this.dictationDraft && this.speechThreadId === this.app.active.id) {
+      this.app.setDraft(this.dictationDraft.cancel(this.app.draft));
+    }
+    this.dictationDraft = undefined;
+    this.speech.cancel();
+    if (hadDraft) { this.app.flushDraft(); }
+  }
+  private async speechErrorAction(): Promise<void> {
+    if (this.unwrittenSpeech) {
+      try {
+        await pasteboard.getSystemPasteboard().setData(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, this.unwrittenSpeech));
+        this.getUIContext().getPromptAction().showToast({ message: t('已复制') });
+        this.unwrittenSpeech = ''; this.speech.error = '';
+      } catch (error) { this.speech.error = t('复制失败：') + (error as Error).message; }
+    } else if (this.speech.permissionDenied) { this.startSpeech(true); }
+    else { this.speech.error = ''; }
   }
 
   private follow(): void {
@@ -110,6 +173,7 @@ export struct ChatPanel {
   }
 
   private send(): void {
+    if (this.speechActive()) { return; }
     this.inspectingOutput = false; this.followOutput = true;
     this.app.send(() => this.follow());
   }
@@ -120,7 +184,7 @@ export struct ChatPanel {
   }
 
   private canSend(): boolean {
-    return this.app.ready && !this.app.busy && !this.importing && !this.thread.archived && this.hasDraft() && this.app.saveError.length === 0;
+    return !this.speechActive() && this.app.ready && !this.app.busy && !this.importing && !this.thread.archived && this.hasDraft() && this.app.saveError.length === 0;
   }
 
   private async attach(photo: boolean): Promise<void> {
@@ -148,7 +212,7 @@ export struct ChatPanel {
     }
   }
   private canAttach(): boolean {
-    return !this.app.busy && !this.importing && !this.thread.archived && this.app.saveError.length === 0;
+    return !this.speechActive() && !this.app.busy && !this.importing && !this.thread.archived && this.app.saveError.length === 0;
   }
   // Close the sheet first so the system picker does not open on top of a dismissing sheet.
   private fromSheet(action: () => void): void {
@@ -489,7 +553,7 @@ export struct ChatPanel {
   }
   private commandSuggested(command: string): boolean {
     const draft = this.app.draft.trim().toLowerCase();
-    return !this.app.busy && !this.thread.archived && this.app.saveError.length === 0 && draft.startsWith('/') && command.startsWith(draft);
+    return !this.speechActive() && !this.app.busy && !this.thread.archived && this.app.saveError.length === 0 && draft.startsWith('/') && command.startsWith(draft);
   }
   private referenceSuggested(): boolean {
     return this.canAttach() && this.thread.references.length < 4 && referenceQuery(this.app.draft) !== undefined;
@@ -644,15 +708,26 @@ export struct ChatPanel {
         this.attachmentStrip()
       }
       TextArea({ text: this.app.draft,
-        placeholder: this.thread.archived ? t("已归档的对话无法继续") : this.app.generating ? t("补充要求，或排队下一项任务…")
+        placeholder: this.speechActive() ? t('请说出要输入的内容') : this.thread.archived ? t("已归档的对话无法继续") : this.app.generating ? t("补充要求，或排队下一项任务…")
           : this.thread.teamEnabled ? t("描述目标，主 Agent 会按需组建团队…") : t('输入消息，/ 命令，@ 引用会话') })
         .id('composer').fontSize(Font.body).fontColor($r('app.color.text_primary'))
         .placeholderColor($r('app.color.text_tertiary')).backgroundColor(Color.Transparent)
         .constraintSize({ minHeight: 44, maxHeight: 160 }).maxLength(24000)
         .padding({ left: 6, right: 6, top: 10, bottom: 4 }).borderRadius(0)
-        .enabled(!this.thread.archived).onChange((value: string) => { this.app.setDraft(value); })
+        .enabled(!this.thread.archived).focusable(!this.speechActive()).enableKeyboardOnFocus(!this.speechActive())
+        .onWillChange((value: EditableTextChangeValue) => !this.speechActive() || value.content === this.app.draft)
+        .onChange((value: string) => {
+          if (!this.speechActive()) { this.app.setDraft(value); }
+        })
         .onFocus(() => { this.composerFocused = true; }).onBlur(() => { this.composerFocused = false; })
       Row({ space: 4 }) {
+        if (this.speechActive()) {
+          Button(t('取消')).id('cancel-speech').attributeModifier(Btn.textSmall)
+            .onClick(() => this.endSpeech(true))
+          Blank()
+        } else {
+        Scroll() {
+        Row({ space: 4 }) {
         IconButton({ icon: $r('sys.symbol.plus'), label: t("添加图片、文件或模板"), compId: 'add-attachment', diameter: 36,
           iconSize: 20, fill: $r('app.color.surface_variant'), disabled: this.thread.archived || this.app.saveError.length > 0,
           onTap: () => { this.getUIContext().getFocusController().clearFocus(); this.showPlus = true; } })
@@ -707,9 +782,14 @@ export struct ChatPanel {
             backgroundColor: $r('app.color.page_background')
           })
         }
-        Blank()
+        }
+        }.layoutWeight(1).align(Alignment.Start).scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
+        }
+        VoicePill({ phase: this.speech.phase, speaking: this.speech.speaking, startedAt: this.speech.startedAt,
+          disabled: !this.app.ready || !this.speechEnabled || this.thread.archived || this.app.saveError.length > 0,
+          onStart: () => this.startSpeech(), onFinish: () => this.finishSpeech(), onCancel: () => this.endSpeech(true) })
         if (this.app.generating) {
-          if (this.hasDraft() && this.app.canQueueInput) {
+          if (!this.speechActive() && this.hasDraft() && this.app.canQueueInput) {
             Button(t("追加")).id('steer-message').attributeModifier(Btn.tonalSmall)
               .enabled(this.app.acceptingSteering).onClick(() => this.app.enqueueInput('steer'))
             Button(t("排队")).id('queue-message').attributeModifier(Btn.plainSmall)
@@ -720,7 +800,7 @@ export struct ChatPanel {
             onTap: () => { this.app.stop(); } })
             .transition(Motion.pop())
         } else {
-          if (this.thread.pendingInputs.length > 0 && this.hasDraft()) {
+          if (!this.speechActive() && this.thread.pendingInputs.length > 0 && this.hasDraft()) {
             Button(t("排队")).id('queue-message').attributeModifier(Btn.plainSmall)
               .enabled(this.app.canQueueInput).onClick(() => this.app.enqueueInput('followUp'))
           }
@@ -807,6 +887,11 @@ export struct ChatPanel {
         if (this.app.error.length > 0) {
           Banner({ text: this.app.error, compId: 'chat-error', actionLabel: t("关闭"), actionId: 'dismiss-error',
             onAction: () => { this.app.error = ''; } })
+        }
+        if (this.speech.error.length > 0) {
+          Banner({ text: this.speech.error, compId: 'speech-error', actionId: 'speech-error-action',
+            actionLabel: this.unwrittenSpeech ? t('复制识别文字') : this.speech.permissionDenied ? t('允许麦克风') : t('关闭'),
+            onAction: () => this.speechErrorAction() })
         }
         if (this.app.saveError.length > 0) {
           Banner({ text: this.app.saveError, actionLabel: t("重试保存"), actionId: 'retry-save',

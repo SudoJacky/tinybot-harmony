@@ -1,11 +1,11 @@
 import { describe, expect, it } from '@ohos/hypium';
 import { reasoningEfforts, supportsReasoningEffort, isHighestReasoningEffort } from '../main/ets/model/ReasoningEffort';
-import { AgentStep, ModelMessage, ToolExecution, stepMessages, validateSteps } from '../main/ets/model/Agent';
+import { AgentStep, MAX_REASONING_CONTENT, ModelMessage, ToolExecution, stepMessages, validateSteps } from '../main/ets/model/Agent';
 import { validateAnthropicContent } from '../main/ets/model/AnthropicContent';
 import { applyReasoningEffort } from '../main/ets/services/providers/ReasoningRequest';
 import { chatRequest } from '../main/ets/services/providers/ChatCompletionsProtocol';
 import { responsesRequest, anthropicRequest } from '../main/ets/services/providers/WireProtocols';
-import { AnthropicStream } from '../main/ets/services/providers/EventStreams';
+import { AnthropicStream, ResponsesStream } from '../main/ets/services/providers/EventStreams';
 
 function rejects(action: () => void): void {
   let rejected = false;
@@ -30,6 +30,16 @@ const THINKING_WIRE: string = [
   '{"type":"content_block_stop","index":3}',
   '{"type":"message_delta","delta":{"stop_reason":"tool_use"}}',
   '{"type":"message_stop"}'
+].map((event: string) => 'data: ' + event + '\n\n').join('');
+
+const RESPONSES_THINKING: string = [
+  '{"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":0,"delta":"先检查"}',
+  '{"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":0,"delta":"输入。"}',
+  '{"type":"response.reasoning_summary_text.done","output_index":0,"summary_index":0,"text":"先检查输入。"}',
+  '{"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":1,"delta":"再核对结果。"}',
+  '{"type":"response.reasoning_summary_text.done","output_index":0,"summary_index":1,"text":"再核对结果。"}',
+  '{"type":"response.output_text.delta","delta":"完成"}',
+  '{"type":"response.completed","response":{"status":"completed","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"先检查输入。"},{"type":"summary_text","text":"再核对结果。"}]},{"type":"message","content":[{"type":"output_text","text":"完成"}]}]}}'
 ].map((event: string) => 'data: ' + event + '\n\n').join('');
 
 export default function reasoningEffortTests(): void {
@@ -63,6 +73,7 @@ export default function reasoningEffortTests(): void {
       const responses = responsesRequest('gpt-5.2', [], []);
       applyReasoningEffort('responses', 'gpt-5.2', 'xhigh', responses);
       expect(responses.reasoning?.effort).assertEqual('xhigh');
+      expect(responses.reasoning?.summary).assertEqual('auto');
       const claude = anthropicRequest('claude-opus-4-6', [], []);
       applyReasoningEffort('anthropic-messages', claude.model, 'max', claude);
       expect(claude.output_config?.effort).assertEqual('max');
@@ -73,6 +84,56 @@ export default function reasoningEffortTests(): void {
       applyReasoningEffort('anthropic-messages', legacy.model, 'high', legacy);
       expect(legacy.output_config?.effort).assertEqual('high');
       expect(legacy.thinking === undefined).assertTrue();
+    });
+    it('requestsResponsesSummariesWithoutForcingDefaultEffortOrChangingNonReasoningModels', 0, () => {
+      const request = responsesRequest('gpt-5.2', [], []);
+      applyReasoningEffort('responses', request.model, 'default', request);
+      expect(request.reasoning?.summary).assertEqual('auto');
+      expect(request.reasoning?.effort === undefined).assertTrue();
+      expect(responsesRequest('gpt-4.1', [], []).reasoning === undefined).assertTrue();
+      expect(responsesRequest('custom-reasoning-alias', [], []).reasoning?.summary).assertEqual('auto');
+    });
+    it('streamsResponsesThinkingSeparatelyAndDeduplicatesDoneAndCompletedSnapshots', 0, () => {
+      let answer = ''; let thinking = '';
+      const parser = new ResponsesStream((delta: string) => { answer += delta; }, (delta: string) => { thinking += delta; });
+      for (let offset = 0; offset < RESPONSES_THINKING.length; offset += 7) { parser.push(RESPONSES_THINKING.slice(offset, offset + 7)); }
+      const turn = parser.finish();
+      expect(answer).assertEqual('完成'); expect(turn.content).assertEqual('完成');
+      expect(thinking).assertEqual('先检查输入。\n\n再核对结果。'); expect(turn.reasoningContent).assertEqual(thinking);
+      const step: AgentStep = { content: turn.content, reasoningContent: turn.reasoningContent, tools: [] };
+      const restored = JSON.parse(JSON.stringify(step)) as AgentStep; validateSteps([restored]);
+      expect(restored.reasoningContent).assertEqual(thinking);
+      // Visible summaries are local display data, not invented assistant input or encrypted reasoning.
+      expect(JSON.stringify(responsesRequest('gpt-5.2', stepMessages(restored), [])).includes('先检查输入')).assertFalse();
+    });
+    it('acceptsResponsesTextualThinkingAndFinalOnlySummariesWithoutShowingEncryptedData', 0, () => {
+      let thinking = '';
+      const raw = new ResponsesStream(() => {}, (delta: string) => { thinking += delta; });
+      raw.push('data: {"type":"response.reasoning_text.delta","output_index":0,"content_index":0,"delta":"检查"}\n\n');
+      raw.push('data: {"type":"response.reasoning_text.done","output_index":0,"content_index":0,"text":"检查文件"}\n\n');
+      raw.push('data: {"type":"response.completed","response":{"status":"completed","output":[{"type":"reasoning","summary":[],"content":[{"type":"reasoning_text","text":"检查文件"}],"encrypted_content":"opaque"},{"type":"reasoning","summary":[{"type":"summary_text","text":"准备调用工具"}]},{"type":"function_call","call_id":"call_1","name":"read_file","arguments":"{}"}]}}\n\n');
+      expect(thinking).assertEqual('检查文件\n\n准备调用工具'); expect(raw.finish().reasoningContent).assertEqual(thinking);
+      expect(raw.finish().toolCalls.length).assertEqual(1);
+      const opaque = new ResponsesStream(() => {});
+      opaque.push('data: {"type":"response.completed","response":{"status":"completed","output":[{"type":"reasoning","summary":[],"encrypted_content":"opaque"},{"type":"function_call","call_id":"call_1","name":"read_file","arguments":"{}"}]}}\n\n');
+      expect(opaque.finish().reasoningContent === undefined).assertTrue();
+    });
+    it('rejectsMalformedContradictoryAndOverLimitResponsesThinking', 0, () => {
+      for (const event of ['{"type":"response.reasoning_summary_text.delta","delta":42}',
+        '{"type":"response.reasoning_text.delta","output_index":-1,"delta":"text"}',
+        '{"type":"response.reasoning_text.done"}']) {
+        rejects(() => new ResponsesStream(() => {}).push('data: ' + event + '\n\n'));
+      }
+      const parser = new ResponsesStream(() => {});
+      parser.push('data: {"type":"response.reasoning_text.delta","delta":"partial"}\n\n');
+      rejects(() => parser.push('data: {"type":"response.reasoning_text.done","text":"different"}\n\n'));
+      const closed = new ResponsesStream(() => {});
+      closed.push('data: {"type":"response.reasoning_text.done","text":"done"}\n\n');
+      rejects(() => closed.push('data: {"type":"response.reasoning_text.delta","delta":"late"}\n\n'));
+      const oversized = new ResponsesStream(() => {});
+      const chunk = 'data: {"type":"response.reasoning_summary_text.delta","delta":"' + 'a'.repeat(1024) + '"}\n\n';
+      for (let index = 0; index < MAX_REASONING_CONTENT / 1024; index++) { oversized.push(chunk); }
+      rejects(() => oversized.push(chunk));
     });
     it('omitsDefaultsAndRejectsInvalidCrossProviderLevels', 0, () => {
       const claude = anthropicRequest('claude-opus-4-6', [], []);
