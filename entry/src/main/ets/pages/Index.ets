@@ -7,6 +7,8 @@ import { BranchesPanel } from '../views/BranchesPanel';
 import { WorkspacePanel } from '../views/WorkspacePanel';
 import { ToolApproval } from '../services/ToolApproval';
 import { common } from '@kit.AbilityKit';
+import { BusinessError } from '@kit.BasicServicesKit';
+import { requestAppReview } from '../services/AppInformation';
 import { util } from '@kit.ArkTS';
 import { KeyboardAvoidMode, SymbolGlyphModifier } from '@kit.ArkUI';
 import { Attachment } from '../model/Productivity';
@@ -15,6 +17,7 @@ import { ShareInbox, exportFile, shareFile } from '../services/NativeActions';
 import { ChatViewModel, MessageViewModel } from '../viewmodel/ChatViewModel';
 import { ChatPanel } from '../views/ChatPanel';
 import { SettingsPanel, UserDocumentPanel } from '../views/SettingsPanel';
+import { SupportPanel, supportTitle } from '../views/SupportPanel';
 import { ThreadList } from '../views/ThreadList';
 import { ProviderEditorPanel } from '../views/ProviderEditorPanel';
 import { ModelPickerPanel } from '../views/ModelPickerPanel';
@@ -42,6 +45,7 @@ struct Index {
   private session?: SessionService;
   @State private approval: ToolApproval = new ToolApproval();
   private receiving: boolean = false;
+  private ratingOpen: boolean = false;
 
   onPageShow(): void {
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
@@ -130,6 +134,25 @@ struct Index {
     this.paths.pushPath({ name: 'settings' });
   }
 
+  private async openSupport(page: string): Promise<void> {
+    if (page !== 'rating') {
+      this.paths.pushPath({ name: 'support', param: page });
+      return;
+    }
+    if (this.ratingOpen) { return; }
+    this.ratingOpen = true;
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      await requestAppReview(context);
+    } catch (error) {
+      const failure = error as BusinessError;
+      const detail = failure.code ? failure.code + ' · ' + failure.message : failure.message;
+      this.getUIContext().showAlertDialog({ title: t('评分和评论'),
+        message: t('暂时无法打开评分和评论，请稍后重试。错误：{0}', [detail]),
+        confirm: { value: t('关闭'), action: () => {} } });
+    } finally { this.ratingOpen = false; }
+  }
+
   private openFiles(): void {
     this.getUIContext().getFocusController().clearFocus();
     this.paths.pushPath({ name: 'files' });
@@ -203,6 +226,7 @@ struct Index {
           onUsage: () => { this.paths.pushPath({ name: 'usage' }); },
           onModels: () => { this.paths.pushPath({ name: 'model-settings' }); },
           onBackup: () => { this.paths.pushPath({ name: 'backup' }); },
+          onSupport: (page: string) => this.openSupport(page),
           onTools: (tab: string) => this.openTools(tab),
           onSkills: () => { this.paths.pushPath({ name: 'skills' }); },
           onUserDocument: () => { this.paths.pushPath({ name: 'user-document' }); },
@@ -210,6 +234,11 @@ struct Index {
             if (this.app.beginProvider(preset, id)) { this.paths.pushPath({ name: 'provider' }); }
           } })
       }.title(t("设置")).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'support') {
+      NavDestination() {
+        SupportPanel({ page: param as string,
+          onOpen: (page: string) => this.openSupport(page) })
+      }.title(supportTitle(param as string)).backgroundColor($r('app.color.page_background'))
     } else if (name === 'user-document') {
       NavDestination() {
         UserDocumentPanel({ app: this.app, settings: this.app.settings, onSaved: () => { this.paths.pop(); } })

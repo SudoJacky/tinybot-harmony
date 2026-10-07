@@ -121,13 +121,29 @@ export class CloudBackup {
       if (!match) { continue; }
       const stat = await fs.lstat(directory + '/' + name);
       if (stat.isFile() && !stat.isSymbolicLink()) {
-        result.push({ name: name, createdAt: Number(match[1]), size: stat.size, location: stat.location });
+        // lstat lacks native FileInfo; reading its location can crash libfs.
+        const location = (await fs.stat(directory + '/' + name)).location;
+        result.push({ name: name, createdAt: Number(match[1]), size: stat.size, location: location });
       }
     }
     return result.sort((a: CloudBackupItem, b: CloudBackupItem) => b.createdAt - a.createdAt);
   }
 
   static sync(): Promise<boolean> { return exclusive(() => requestSync()); }
+
+  static remove(context: common.UIAbilityContext, name: string): Promise<boolean> {
+    return exclusive(async () => {
+      if (!SNAPSHOT_NAME.test(name)) { throw new Error(t('备份文件无效。')); }
+      const path = await backupDirectory(context) + '/' + name;
+      const stat = await fs.lstat(path);
+      if (!stat.isFile() || stat.isSymbolicLink()) { throw new Error(t('备份文件无效。')); }
+      await fs.unlink(path);
+      try { return await requestSync(); }
+      catch (error) {
+        throw new Error(t('备份已从本机列表移除，云端删除尚待同步：{0}', [cloudBackupError(error as Error)]));
+      }
+    });
+  }
 
   static create(context: common.UIAbilityContext, data: AppData): Promise<boolean> {
     return exclusive(async () => {
@@ -159,7 +175,7 @@ export class CloudBackup {
       const path = await backupDirectory(context) + '/' + name;
       const stat = await fs.lstat(path);
       if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_BACKUP) { throw new Error(t('备份文件无效。')); }
-      if (stat.location === 2) { await download(path); }
+      if ((await fs.stat(path)).location === 2) { await download(path); }
       return readBackupFile(context, path);
     });
   }

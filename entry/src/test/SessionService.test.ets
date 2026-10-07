@@ -184,6 +184,78 @@ export default function sessionServiceTests(): void {
       expect(await f.session.importSnapshot(imported)).assertTrue();
       expect((await f.repository.load()).config.userDocument).assertEqual('# Restored preferences');
     });
+    it('restoresUsingLocalServicesAndCredentialsWithoutOverwritingSettings', 0, async () => {
+      const data = seed(); const profile = (data.providerProfiles as ProviderProfile[])[0];
+      profile.noApiKey = false; profile.credentialAlias = 'local-key'; data.config.credentialAlias = 'local-key';
+      data.config.userDocument = 'local preferences';
+      data.productivity = defaultProductivity(); data.productivity.options = defaultAssistantOptions();
+      data.productivity.options.autoMemory = false;
+      data.productivity.servers = [{ id: 'local-mcp', name: 'Local MCP', url: 'https://mcp.example.com/api',
+        enabled: true, credentialAlias: 'local-token', authType: 'oauth' }];
+      const f = new Fixture(data); f.keys.values.set('local-key', 'local-secret'); f.keys.values.set('local-token', 'token-secret');
+      await f.session.initialize(); const before = f.session.snapshot();
+      const imported = seed(); imported.config.userDocument = 'backup preferences';
+      imported.providerProfiles = [{ id: 'remote', name: 'Backup provider', protocol: profile.protocol, baseUrl: profile.baseUrl + '/',
+        credentialAlias: '', noApiKey: true, enabled: false, models: ['model'] }];
+      imported.threads[0].id = 'restored'; imported.threads[0].modelRef = { providerId: 'remote', modelId: 'model' };
+      imported.threads[0].disabledMcpIds = ['remote-mcp'];
+      imported.threads[0].messages = [{ id: 'old-question', role: 'user', content: 'saved question', status: 'complete', error: '' },
+        { id: 'old-message', role: 'assistant', content: 'saved answer', status: 'complete', error: '',
+        modelRef: { providerId: 'remote', modelId: 'model' } }];
+      imported.productivity = { memories: [], templates: [], servers: [{ id: 'remote-mcp', name: 'Backup MCP',
+        url: 'https://mcp.example.com/api', enabled: false, credentialAlias: '' }] };
+      const originalImport = JSON.stringify(imported);
+      expect(await f.session.importSnapshot(imported)).assertTrue();
+      const saved = await f.repository.load();
+      expect(JSON.stringify(saved.providerProfiles)).assertEqual(JSON.stringify(before.providerProfiles));
+      expect(JSON.stringify(saved.config)).assertEqual(JSON.stringify(before.config));
+      expect(JSON.stringify(saved.productivity)).assertEqual(JSON.stringify(before.productivity));
+      expect(saved.activeThreadId).assertEqual(before.activeThreadId);
+      const restored = saved.threads.find((thread) => thread.id === 'restored') as ThreadData;
+      expect(restored.modelRef?.providerId).assertEqual('test');
+      expect(restored.messages[1].modelRef?.providerId).assertEqual('test');
+      expect(restored.disabledMcpIds?.[0]).assertEqual('local-mcp');
+      expect(JSON.stringify(imported)).assertEqual(originalImport);
+      expect(await f.session.selectThread('restored')).assertTrue();
+      f.session.setDraft('continue restored conversation'); await f.session.send();
+      expect(f.provider.requests[0].apiKey).assertEqual('local-secret');
+      expect(f.keys.values.get('local-token')).assertEqual('token-secret'); expect(f.keys.removed.length).assertEqual(0);
+    });
+    it('doesNotGuessBetweenAccountsAndDoesNotReuseCredentialsForChangedEndpoints', 0, async () => {
+      for (const changedEndpoint of [false, true]) {
+        const data = seed(); const profiles = data.providerProfiles as ProviderProfile[];
+        profiles[0].credentialAlias = 'existing-key'; profiles[0].noApiKey = false;
+        profiles.push({ id: 'second', name: 'Second account', protocol: profiles[0].protocol, baseUrl: profiles[0].baseUrl,
+          enabled: true, noApiKey: false, credentialAlias: 'second-key', models: ['model'] });
+        const f = new Fixture(data); await f.session.initialize(); const before = JSON.stringify(f.session.snapshot().providerProfiles);
+        const imported = seed(); const profile = (imported.providerProfiles as ProviderProfile[])[0];
+        profile.id = changedEndpoint ? 'test' : 'unknown-account';
+        if (changedEndpoint) { profile.baseUrl = 'https://different.example.com/v1'; }
+        imported.threads[0].id = 'restored'; imported.threads[0].modelRef = { providerId: profile.id, modelId: 'model' };
+        imported.productivity = { memories: [], templates: [], servers: [] };
+        expect(await f.session.importSnapshot(imported)).assertTrue();
+        const saved = f.session.snapshot(); const all = saved.providerProfiles as ProviderProfile[];
+        expect(all.length).assertEqual(3); expect(JSON.stringify(all.slice(0, 2))).assertEqual(before);
+        expect(all[2].enabled).assertFalse(); expect(all[2].credentialAlias).assertEqual('');
+        expect(all[2].id === profile.id).assertFalse();
+        expect(saved.threads[1].modelRef?.providerId).assertEqual(all[2].id);
+      }
+    });
+    it('prefersTheOriginalServiceIdAndLeavesLocalDataIntactWhenRestoreSaveFails', 0, async () => {
+      const data = seed(); const profiles = data.providerProfiles as ProviderProfile[];
+      profiles.push({ id: 'second', name: 'Second account', protocol: profiles[0].protocol, baseUrl: profiles[0].baseUrl,
+        enabled: true, noApiKey: false, credentialAlias: 'second-key', models: ['model'] });
+      const f = new Fixture(data); f.keys.values.set('second-key', 'preserved'); await f.session.initialize();
+      const imported = seed(); imported.threads[0].id = 'restored'; imported.productivity = { memories: [], templates: [], servers: [] };
+      const before = JSON.stringify(f.session.snapshot());
+      f.repository.beforeSave = async () => { throw new Error('disk full'); };
+      expect(await f.session.importSnapshot(imported)).assertFalse();
+      expect(JSON.stringify(f.session.snapshot())).assertEqual(before); expect(f.keys.values.get('second-key')).assertEqual('preserved');
+      f.repository.beforeSave = async () => {};
+      expect(await f.session.importSnapshot(imported)).assertTrue();
+      expect(f.session.snapshot().providerProfiles?.length).assertEqual(2);
+      expect(f.session.snapshot().threads[1].modelRef?.providerId).assertEqual('test');
+    });
     it('normalizesShortTitlesWithoutSplittingUnicodeCharacters', 0, () => {
       expect(sanitizeConversationTitle('  \n **"简短会话标题。"**\nexplanation')).assertEqual('简短会话标题');
       expect(sanitizeConversationTitle('  Fix   login\t failures! ')).assertEqual('Fix login failures');

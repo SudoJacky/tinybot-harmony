@@ -7,6 +7,7 @@ import { ProviderProfile } from '../model/ProviderProfiles';
 import { AssistantOptions, defaultAssistantOptions } from '../model/AssistantOptions';
 import { ProductivityData } from '../model/Productivity';
 import { Btn, Font, Space, Styles, protocolName } from '../common/Theme';
+import { monochromeProviderLogo, providerLogo } from '../common/ProviderBrand';
 import { Banner, BottomBar, GroupCard, NavRow, RowDivider, SectionHeader, SwitchRow } from '../common/Widgets';
 
 @Component
@@ -25,6 +26,7 @@ export struct SettingsPanel {
   onUsage: () => void = () => {};
   onModels: () => void = () => {};
   onBackup: () => void = () => {};
+  onSupport: (page: string) => void = () => {};
   onTools: (tab: string) => void = () => {};
   private pendingSave: Promise<void> = Promise.resolve();
 
@@ -114,10 +116,11 @@ export struct SettingsPanel {
             ForEach(this.app.providerPresets, (preset: ProviderInfo, index: number) => {
               if (index > 0) { RowDivider() }
               NavRow({ title: preset.name, subtitle: protocolName(preset.protocol), compId: 'preset-' + preset.id,
+                image: providerLogo(preset.id), tintImage: monochromeProviderLogo(preset.id), icon: $r('sys.symbol.cloud'), iconWidth: 28,
                 disabled: !this.canEdit(), onTap: () => this.choosePreset(preset.id) })
             }, (preset: ProviderInfo) => preset.id)
             RowDivider()
-            NavRow({ title: t('添加自定义服务'), compId: 'add-custom-provider', icon: $r('sys.symbol.plus'), accent: true,
+            NavRow({ title: t('添加自定义服务'), compId: 'add-custom-provider', icon: $r('sys.symbol.plus'), iconWidth: 28, accent: true,
               disabled: !this.canEdit(), onTap: () => this.choosePreset('') })
           }
         }
@@ -148,17 +151,18 @@ export struct SettingsPanel {
         GroupCard() {
           Column() {
             ForEach(this.app.providerProfiles, (profile: ProviderProfile) => {
-              NavRow({ title: profile.name, compId: 'edit-provider-' + profile.id, icon: $r('sys.symbol.cloud'),
+              NavRow({ title: profile.name, compId: 'edit-provider-' + profile.id, icon: $r('sys.symbol.cloud'), iconWidth: 28,
+                image: providerLogo(profile.presetId || ''), tintImage: monochromeProviderLogo(profile.presetId || ''),
                 subtitle: t("{0} · {1} 个模型", [protocolName(profile.protocol), profile.models.length]),
                 value: profile.enabled ? '' : t("已停用"), muted: !profile.enabled, disabled: !this.canEdit(),
                 onTap: () => this.onEditProvider(profile.id, '') })
               RowDivider()
             }, (profile: ProviderProfile) => JSON.stringify(profile))
-            NavRow({ title: t('添加模型服务'), compId: 'add-provider', icon: $r('sys.symbol.plus'), accent: true,
+            NavRow({ title: t('添加模型服务'), compId: 'add-provider', icon: $r('sys.symbol.plus'), iconWidth: 28, accent: true,
               disabled: !this.canEdit(), onTap: () => { this.showPresets = true; } })
             RowDivider()
             NavRow({ title: t('模型分工与能力'), subtitle: t('自动选择模型、专用模型与能力配置'), compId: 'open-model-settings',
-              icon: $r('sys.symbol.gearshape'), disabled: !this.canEdit(), onTap: () => this.onModels() })
+              icon: $r('sys.symbol.gearshape'), iconWidth: 28, disabled: !this.canEdit(), onTap: () => this.onModels() })
           }
         }
         SectionHeader({ title: t('长期记忆') })
@@ -227,6 +231,16 @@ export struct SettingsPanel {
             compId: 'open-language', disabled: !this.canEdit(), onTap: () => { this.showLanguage = true; } })
             .bindSheet($$this.showLanguage, this.languageSheet(), { title: { title: t('语言') }, height: SheetSize.FIT_CONTENT,
               dragBar: true, backgroundColor: $r('app.color.page_background') })
+        }
+        SectionHeader({ title: t('关于') })
+        GroupCard() {
+          Column() {
+            NavRow({ title: t('使用帮助'), compId: 'open-help', onTap: () => this.onSupport('help') })
+            RowDivider()
+            NavRow({ title: t('评分和评论'), compId: 'open-rating', onTap: () => this.onSupport('rating') })
+            RowDivider()
+            NavRow({ title: t('关于 Tinybot'), compId: 'open-about', onTap: () => this.onSupport('about') })
+          }
         }
       }.padding({ left: Space.page, right: Space.page, bottom: Space.xl }).width('100%')
     }.height('100%').width('100%').scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring).align(Alignment.Top)

@@ -1,4 +1,5 @@
 import { t } from '../model/I18n';
+import { prepareBackupServices } from '../model/BackupRestore';
 import { RequestUsage } from '../model/Usage';
 import { attributeLegacyUsage } from '../model/UsageAttribution';
 import { reasoningEfforts, supportsReasoningEffort } from '../model/ReasoningEffort';
@@ -169,6 +170,8 @@ export class SessionService {
   }
   async importSnapshot(imported: AppData): Promise<boolean> {
     return this.mutate(t("导入失败："), async () => {
+      imported = JSON.parse(JSON.stringify(imported)) as AppData;
+      prepareBackupServices(this.data, imported, () => this.resources.createId());
       const candidate = this.snapshot(); const known = new Set(candidate.threads.map((item) => item.id));
       if (imported.threads.some((item) => known.has(item.id))) { throw new Error(t("备份会话 ID 冲突。")); }
       for (const thread of imported.threads) { await this.resources.ensureWorkspace(thread.id); }
