@@ -22,8 +22,19 @@ const fileIo = {
   read: async (fd, bytes) => (await handles.get(fd).read(new Uint8Array(bytes))).bytesRead,
   write: async (fd, bytes, options) => (await handles.get(fd).write(new Uint8Array(bytes), 0, bytes.byteLength, options.offset)).bytesWritten,
   close: async file => { const fd = typeof file === 'number' ? file : file.fd; await handles.get(fd).close(); handles.delete(fd); },
-  stat: async fd => typeof fd === 'number' ? handles.get(fd).stat() : fs.promises.stat(nativePath(fd)),
-  lstat: async p => { try { const stat = await fs.promises.lstat(nativePath(p)); stat.location = cloudLocations.get(p) ?? (p.startsWith('/sandbox/cloud/') ? 1 : 0); return stat; } catch(e) { if(e.code==='ENOENT')e.code=13900002;throw e; } },
+  stat: async file => {
+    const stat = await (typeof file === 'number' ? handles.get(file).stat() : fs.promises.stat(nativePath(file)));
+    stat.location = cloudLocations.get(file) ?? 1;
+    return stat;
+  },
+  lstat: async p => {
+    try {
+      const stat = await fs.promises.lstat(nativePath(p));
+      // The device's lstat result lacks the native FileInfo required by this getter.
+      Object.defineProperty(stat, 'location', { get() { throw Error('lstat.location causes a native crash; use stat(path).location'); } });
+      return stat;
+    } catch(e) { if(e.code==='ENOENT')e.code=13900002;throw e; }
+  },
   copyFile: async (a,b) => { if (cloudCopyError) throw cloudCopyError; if (failCloudCopy) { fs.writeFileSync(nativePath(b),'partial'); throw Error('injected cloud write failure'); } await fs.promises.copyFile(nativePath(a),nativePath(b)); },
   fsync: fd => handles.get(fd).sync(), unlink: p => fs.promises.unlink(nativePath(p)),
   rename: async (a,b) => { if (failManifest && b.endsWith('/index.json')) { throw new Error('injected manifest failure'); } if(b.includes("/usage-records/"))usageWrites.push(b); await fs.promises.rename(nativePath(a),nativePath(b)); }
@@ -245,6 +256,15 @@ async function test(name, run) { await run(); console.log('PASS '+name); }
     assert.equal(restored.productivity.memories[0].threadId,restored.threads[0].id);assert.equal(restored.productivity.memories[0].sourceMessageId,restored.threads[0].messages[0].id);
     assert.equal(fs.readFileSync(nativePath(root+'/workspace/'+restored.threads[0].id+'/note.txt'),'utf8'),'workspace');
     const restoredAttachment=restored.threads[0].messages[0].attachments[0];assert.notEqual(restoredAttachment.id,id);assert.equal(fs.readFileSync(nativePath(root+'/attachments/'+restoredAttachment.path),'utf8'),'sample');
+    const {SessionService}=load(path.join(source,'services/SessionService'));
+    const repository=new ConversationStore(nativePath(root));await repository.save(data);
+    const vault={read:async()=>{throw Error('restore must not read credentials');},write:async()=>{throw Error('restore must not write credentials');},remove:async()=>{throw Error('restore must not remove credentials');}};
+    const resources={createId:()=>crypto.randomUUID(),ensureWorkspace:async()=>{},configureProviders:()=>{},reportError:()=>{},
+      tools:()=>({definitions:()=>[],execute:async()=>{throw Error('restore must not execute tools');}})};
+    const session=new SessionService(repository,{},vault,resources);await session.initialize();
+    const local=session.snapshot();assert.equal(await session.importSnapshot(restored),true,session.state.error);
+    const merged=await repository.load();assert.deepEqual(merged.providerProfiles,local.providerProfiles);assert.deepEqual(merged.config,local.config);
+    assert.equal(merged.threads.length,2);assert.equal(merged.threads[1].modelRef.providerId,'provider');
     model.parseAppData(JSON.stringify(restored));const bad=JSON.parse(exported);bad.files[0].path='../escape';fs.writeFileSync(nativePath(selectedFile),JSON.stringify(bad));await assert.rejects(readBackup(context),/路径/);
   });
   await test('cloud snapshots are opt-in, immutable, credential-free and stay pending until native upload',async()=>{
@@ -265,11 +285,32 @@ async function test(name, run) { await run(); console.log('PASS '+name); }
     const original=fs.readFileSync(nativePath(firstPath),'utf8');assert.ok(!original.includes('SECRET-CLOUD'));
     assert.equal(JSON.parse(original).data.providerProfiles[0].enabled,false);
     assert.equal(fs.readdirSync(nativePath(context.cacheDir)).length,0,'temporary plaintext snapshot is removed');
+    cloudLocations.set(firstPath,2);
+    assert.equal((await CloudBackup.list(context))[0].location,2,'reopening lists cloud-only metadata without downloading');
+    assert.equal(cacheInstances.length,0);
     cloudLocations.set(firstPath,3);
     await CloudBackup.create(context,data);items=await CloudBackup.list(context);
     assert.equal(items.length,2);assert.equal(fs.readFileSync(nativePath(firstPath),'utf8'),original);
     assert.equal(items.find(i=>i.name===path.basename(firstPath)).location,3);
     assert.ok(syncInstances.every(s=>!s.callback),'native listeners are removed');
+  });
+  await test('cloud metadata lookup excludes directories and symbolic links before querying location',async()=>{
+    const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
+    const context={cloudFileDir:'/sandbox/cloud'};
+    const name='tinybot-1700000000000-'+crypto.randomUUID()+'.json';
+    const file=context.cloudFileDir+'/tinybot-backups/'+name;
+    const originalLstat=fileIo.lstat,originalStat=fileIo.stat;
+    fs.mkdirSync(nativePath(file));
+    fileIo.stat=async value=>{assert.notEqual(value,file,'rejected entries must not be followed by stat');return originalStat(value);};
+    try {
+      assert.ok((await CloudBackup.list(context)).every(item=>item.name!==name));
+      await assert.rejects(CloudBackup.restore(context,name),/备份文件无效/);
+      await assert.rejects(CloudBackup.remove(context,name),/备份文件无效/);
+      fileIo.lstat=async value=>value===file?{isFile:()=>false,isSymbolicLink:()=>true}:originalLstat(value);
+      assert.ok((await CloudBackup.list(context)).every(item=>item.name!==name));
+      await assert.rejects(CloudBackup.restore(context,name),/备份文件无效/);
+      await assert.rejects(CloudBackup.remove(context,name),/备份文件无效/);
+    } finally {fileIo.lstat=originalLstat;fileIo.stat=originalStat;fs.rmdirSync(nativePath(file));}
   });
   await test('cloud quota failure preserves the pending snapshot; failed writes never become restore points',async()=>{
     const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
@@ -339,6 +380,50 @@ async function test(name, run) { await run(); console.log('PASS '+name); }
       while (!timers.size) await new Promise(setImmediate);
       assert.equal([...timers.values()][0].ms,60000);[...timers.values()][0].fn();await rejected;
       assert.equal(timers.size,0);assert.equal(cacheInstances.at(-1).callback,undefined);assert.equal(cacheInstances.at(-1).stopped,true);
+    } finally {fakeTimers=undefined;}
+  });
+  await test('cloud deletion removes only the selected snapshot without downloading or touching app data',async()=>{
+    const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
+    const context={cloudFileDir:'/sandbox/delete-cloud'},directory=context.cloudFileDir+'/tinybot-backups';
+    fs.mkdirSync(nativePath(directory),{recursive:true});fs.writeFileSync(nativePath(directory+'/keep.txt'),'keep');
+    const appBefore=fs.readFileSync(nativePath('/sandbox/backup-app/sessions-v2/index.json'),'utf8');
+    const downloads=cacheInstances.length;
+    cloudStart=async sync=>{sync.callback({state:4,error:0});};
+    for(const location of [1,2,3]) {
+      const name='tinybot-1700000000000-'+crypto.randomUUID()+'.json',file=directory+'/'+name;
+      fs.writeFileSync(nativePath(file),'snapshot');cloudLocations.set(file,location);
+      assert.equal(await CloudBackup.remove(context,name),true);assert.equal(fs.existsSync(nativePath(file)),false);
+    }
+    assert.equal(cacheInstances.length,downloads);assert.equal(fs.readFileSync(nativePath(directory+'/keep.txt'),'utf8'),'keep');
+    assert.equal(fs.readFileSync(nativePath('/sandbox/backup-app/sessions-v2/index.json'),'utf8'),appBefore);
+    await assert.rejects(CloudBackup.remove(context,'../keep.txt'),/备份文件无效/);
+  });
+  await test('cloud deletion distinguishes unlink failure from pending cloud sync and supports retrying sync',async()=>{
+    const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
+    const context={cloudFileDir:'/sandbox/delete-cloud'},name='tinybot-1700000000000-'+crypto.randomUUID()+'.json';
+    const file=context.cloudFileDir+'/tinybot-backups/'+name;fs.writeFileSync(nativePath(file),'keep on failure');
+    const original=fileIo.unlink;const syncCount=syncInstances.length;
+    fileIo.unlink=async value=>{if(value===file)throw Error('unlink denied');return original(value);};
+    try {await assert.rejects(CloudBackup.remove(context,name),/unlink denied/);} finally {fileIo.unlink=original;}
+    assert.equal(fs.existsSync(nativePath(file)),true);assert.equal(syncInstances.length,syncCount);
+    cloudStart=async()=>{throw Object.assign(Error('offline'),{code:22400002});};
+    await assert.rejects(CloudBackup.remove(context,name),/已从本机列表移除.*尚待同步.*网络不可用/);
+    assert.equal(fs.existsSync(nativePath(file)),false);assert.equal(syncInstances.at(-1).callback,undefined);
+    cloudStart=async sync=>{sync.callback({state:4,error:0});};assert.equal(await CloudBackup.sync(),true);
+  });
+  await test('cloud deletion holds the operation lock until sync settles and reports timeouts as pending',async()=>{
+    const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
+    const context={cloudFileDir:'/sandbox/delete-cloud'},name='tinybot-1700000000000-'+crypto.randomUUID()+'.json';
+    const file=context.cloudFileDir+'/tinybot-backups/'+name;fs.writeFileSync(nativePath(file),'snapshot');
+    const timers=new Map();let id=0;fakeTimers={set(fn,ms){const key=++id;timers.set(key,{fn,ms});return key;},clear(key){timers.delete(key);}};
+    try {
+      cloudStart=async()=>{};const pending=CloudBackup.remove(context,name);
+      while(!timers.size)await new Promise(setImmediate);
+      await assert.rejects(CloudBackup.sync(),/正在进行/);
+      assert.equal([...timers.values()][0].ms,30000);[...timers.values()][0].fn();
+      assert.equal(await pending,false);assert.equal(fs.existsSync(nativePath(file)),false);
+      assert.equal(timers.size,0);assert.equal(syncInstances.at(-1).callback,undefined);
+      cloudStart=async sync=>{sync.callback({state:4,error:0});};assert.equal(await CloudBackup.sync(),true);
     } finally {fakeTimers=undefined;}
   });
   await test('image generation and edits require approval, persist outputs and send binary multipart',async()=>{
@@ -567,5 +652,5 @@ async function test(name, run) { await run(); console.log('PASS '+name); }
     Broken.record({...legacy[0],id:'after-failure'});await Broken.queue;
     assert.equal(fs.readFileSync(nativePath(root+'/usage-records/1.json'),'utf8'),'broken');
   });
-  console.log('25 native adapter integration checks passed. Fixtures: '+fixture);
+  console.log('29 native adapter integration checks passed. Fixtures: '+fixture);
 })().catch(error=>{console.error(error);process.exitCode=1;});

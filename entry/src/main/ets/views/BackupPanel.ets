@@ -4,7 +4,7 @@ import { exportBackup, readBackup } from '../services/Backup';
 import { CloudBackup, CloudBackupItem, cloudBackupError } from '../services/CloudBackup';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { Space, Radius } from '../common/Theme';
-import { Banner, GroupCard, NavRow, RowDivider, SectionHeader } from '../common/Widgets';
+import { Banner, GroupCard, IconButton, NavRow, RowDivider, SectionHeader } from '../common/Widgets';
 
 @Component
 export struct BackupPanel {
@@ -48,9 +48,17 @@ export struct BackupPanel {
   private confirmRestore(item: CloudBackupItem): void {
     if (this.locked()) { return; }
     this.getUIContext().showAlertDialog({ title: t('恢复这份备份？'),
-      message: t('将 {0} 的备份恢复为独立副本，现有对话会保留。恢复后需要重新配置密钥。', [this.date(item)]),
+      message: t('将 {0} 的备份恢复为独立副本，保留本机已有对话、密钥和服务设置。', [this.date(item)]),
       primaryButton: { value: t('取消'), action: () => {} },
       secondaryButton: { value: t('恢复'), action: () => this.cloud('restore', item.name) } });
+  }
+
+  private confirmDelete(item: CloudBackupItem): void {
+    if (this.locked()) { return; }
+    this.getUIContext().showAlertDialog({ title: t('删除这份备份？'),
+      message: t('删除 {0} 的备份，删除会同步到云端及其他设备，不影响当前对话和设置。此操作无法在 Tinybot 内撤销。', [this.date(item)]),
+      primaryButton: { value: t('取消'), action: () => {} },
+      secondaryButton: { value: t('删除'), fontColor: $r('app.color.danger'), action: () => this.cloud('delete', item.name) } });
   }
 
   private async cloud(action: string, name: string = ''): Promise<void> {
@@ -62,6 +70,11 @@ export struct BackupPanel {
         const data = await CloudBackup.restore(context, name);
         if (!await this.app.importSnapshot(data)) { throw new Error(this.app.error); }
         if (this.visible) { this.cloudStatus = t('备份已恢复为独立副本'); }
+      } else if (action === 'delete') {
+        const completed = await CloudBackup.remove(context, name);
+        if (this.visible) {
+          this.cloudStatus = completed ? t('备份已删除，同步已完成。') : t('备份已从本机列表移除，云端删除尚待同步。请稍后刷新。');
+        }
       } else {
         const completed = action === 'create' ? await CloudBackup.create(context, this.app.exportSnapshot()) : await CloudBackup.sync();
         if (this.visible) { this.cloudStatus = completed ? t('已刷新备份列表，请以每份备份的云端状态为准。') : t('同步尚未完成，请稍后刷新。未上传的备份只保存在本机。'); }
@@ -111,8 +124,12 @@ export struct BackupPanel {
             Column() {
               ForEach(this.cloudItems, (item: CloudBackupItem, index: number) => {
                 if (index > 0) { RowDivider() }
-                NavRow({ title: this.date(item), subtitle: this.detail(item), compId: 'cloud-backup-' + item.name,
-                  disabled: this.locked(), onTap: () => this.confirmRestore(item) })
+                Row() {
+                  NavRow({ title: this.date(item), subtitle: this.detail(item), compId: 'cloud-backup-' + item.name,
+                    disabled: this.locked(), onTap: () => this.confirmRestore(item) }).layoutWeight(1)
+                  IconButton({ icon: $r('sys.symbol.trash'), tint: $r('app.color.danger'), label: t('删除备份'),
+                    compId: 'delete-cloud-backup-' + item.name, disabled: this.locked(), onTap: () => this.confirmDelete(item) })
+                }.width('100%').padding({ right: Space.sm })
               }, (item: CloudBackupItem) => item.name + ':' + item.location + ':' + item.size)
             }
           }
@@ -132,7 +149,7 @@ export struct BackupPanel {
         }
         Row({ space: Space.sm }) {
           SymbolGlyph($r('sys.symbol.lock')).fontSize(16).fontColor([$r('app.color.text_secondary')])
-          Text(t("API 密钥和 Token 不会导出。恢复后，请重新填写密钥并启用对应服务。")).fontSize(13).lineHeight(19).layoutWeight(1)
+          Text(t('API 密钥和 Token 不会导出。恢复会保留本机已有密钥和服务设置；新增服务仍需配置凭据。')).fontSize(13).lineHeight(19).layoutWeight(1)
             .fontColor($r('app.color.text_secondary'))
         }.width('100%').alignItems(VerticalAlign.Top).padding(Space.md).margin({ top: Space.md })
         .borderRadius(Radius.md).backgroundColor($r('app.color.surface_variant'))

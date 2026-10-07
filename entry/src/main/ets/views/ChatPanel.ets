@@ -913,6 +913,9 @@ export struct ChatPanel {
         if (this.commandSuggested('/compact')) { this.compactSuggestion() }
         if (this.referenceSuggested()) { this.referenceSuggestions() }
         this.composer()
+        Text(t('AI可能会犯错，请仔细鉴别。')).id('ai-disclaimer')
+          .fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+          .textAlign(TextAlign.Center).width('100%').padding({ left: Space.sm, right: Space.sm })
       }.width('100%').padding({ left: 10, right: 10, bottom: Space.sm })
     }.height('100%').width('100%')
       .bindSheet($$this.showMemoryDraft, this.memoryDraftSheet(), { title: { title: t("提炼并确认记忆") }, detents: [SheetSize.LARGE], dragBar: true, keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY,

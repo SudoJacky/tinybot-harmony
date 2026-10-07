@@ -101,30 +101,28 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
     for (const part of parts.slice(0, -1)) { directory += '/' + part; if (!await fs.access(directory)) { await fs.mkdir(directory); } }
     await writeBytes(root + '/' + item.path, workspaceBytes[index].buffer as ArrayBuffer);
   }
-  const providers = new Map<string, string>();
-  for (const profile of data.providerProfiles || []) { const id = 'provider-' + util.generateRandomUUID(); providers.set(profile.id, id); profile.id = id; profile.enabled = false; profile.noApiKey = true; profile.credentialAlias = ''; profile.name += '（恢复后请配置密钥）'; }
+  // Keep service IDs until SessionService can match them against this device's settings.
+  for (const profile of data.providerProfiles || []) { profile.enabled = false; profile.noApiKey = true; profile.credentialAlias = ''; }
   for (const thread of data.threads) {
     thread.id = threadIds.get(thread.id) as string; thread.parentThreadId = threadIds.get(thread.parentThreadId || ''); thread.parentMessageId = messageIds.get(thread.parentMessageId || '');
     thread.pendingInputs = []; thread.queuePaused = true;
     for (const reference of (thread.references || []).concat(...thread.messages.map((message) => message.references || []))) {
       reference.threadId = threadIds.get(reference.threadId) || reference.threadId;
     }
-    thread.disabledMcpIds = [];
     for (const run of thread.teams || []) {
       if (run.ownerMessageId) { run.ownerMessageId = messageIds.get(run.ownerMessageId) || run.ownerMessageId; }
-      run.id = util.generateRandomUUID(); run.model.providerId = providers.get(run.model.providerId) || run.model.providerId;
+      run.id = util.generateRandomUUID();
       for (const record of run.tasks) { for (const attempt of record.attempts) { attempt.id = util.generateRandomUUID(); } }
     }
     if (thread.compaction) { thread.compaction.firstKeptMessageId = messageIds.get(thread.compaction.firstKeptMessageId) || thread.compaction.firstKeptMessageId; }
-    if (thread.modelRef) { thread.modelRef.providerId = providers.get(thread.modelRef.providerId) || thread.modelRef.providerId; }
-    for (const message of thread.messages) { message.id = messageIds.get(message.id) as string; if (message.modelRef) { message.modelRef.providerId = providers.get(message.modelRef.providerId) || message.modelRef.providerId; } }
+    for (const message of thread.messages) { message.id = messageIds.get(message.id) as string; }
     for (const item of (thread.attachments || []).concat(...thread.messages.map((message) => message.attachments || []))) {
       const id = attachmentIds.get(item.id); if (id) { item.id = id; item.path = id + (item.mime === 'image/jpeg' ? '.jpg' : '.txt'); }
     }
   }
   for (const memory of data.productivity?.memories || []) { memory.id = util.generateRandomUUID(); memory.threadId = threadIds.get(memory.threadId) || ''; memory.sourceThreadId = threadIds.get(memory.sourceThreadId || ''); memory.sourceMessageId = messageIds.get(memory.sourceMessageId || ''); }
   for (const template of data.productivity?.templates || []) { template.id = util.generateRandomUUID(); }
-  for (const server of data.productivity?.servers || []) { server.id = util.generateRandomUUID(); server.enabled = false; server.credentialAlias = ''; server.authType = undefined; }
+  for (const server of data.productivity?.servers || []) { server.enabled = false; server.credentialAlias = ''; server.authType = undefined; }
   const userDocument = data.config.userDocument || '';
   data.activeThreadId = threadIds.get(data.activeThreadId) || ''; data.config = defaultConfig();
   data.config.userDocument = userDocument;

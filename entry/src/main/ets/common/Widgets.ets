@@ -78,13 +78,25 @@ export struct NavRow {
   // Selected for 'select', expanded for 'expand'.
   @Prop active: boolean = false;
   icon?: Resource;
+  image?: Resource;
+  tintImage: boolean = false;
+  iconWidth: number = 20;
   compId: string = '';
   onTap: () => void = () => {};
 
   build() {
     Row({ space: Space.md }) {
-      if (this.icon) {
-        SymbolGlyph(this.icon).fontSize(20)
+      if (this.image) {
+        if (this.tintImage) {
+          Image(this.image).width(28).height(28).objectFit(ImageFit.Contain)
+            .fillColor(this.muted ? $r('app.color.text_tertiary') : $r('app.color.text_primary'))
+            .accessibilityLevel('no')
+        } else {
+          Image(this.image).width(28).height(28).objectFit(ImageFit.Contain)
+            .opacity(this.muted ? 0.5 : 1).accessibilityLevel('no')
+        }
+      } else if (this.icon) {
+        SymbolGlyph(this.icon).fontSize(20).width(this.iconWidth)
           .fontColor([this.accent ? $r('app.color.accent') : this.muted ? $r('app.color.text_tertiary') : $r('app.color.text_secondary')])
       }
       Column({ space: 3 }) {

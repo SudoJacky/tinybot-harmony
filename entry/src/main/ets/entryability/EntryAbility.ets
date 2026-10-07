@@ -26,18 +26,19 @@ export default class EntryAbility extends UIAbility {
   private mainWindow?: window.Window;
 
   // Pages extend their backgrounds under the system bars, so match the status bar text to the theme.
-  private applySystemBars(): void {
+  private applySystemBars(config: Configuration = this.context.config): void {
     if (!this.mainWindow) {
       return;
     }
-    const dark = this.context.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
+    const dark = config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
     this.mainWindow.setWindowSystemBarProperties({ statusBarContentColor: dark ? '#FFFFFF' : '#000000' })
       .catch((err: Error) => hilog.error(DOMAIN, 'testTag', 'Failed to set bar color. Cause: %{public}s', err.message));
   }
 
-  onConfigurationUpdate(_config: Configuration): void {
+  onConfigurationUpdate(config: Configuration): void {
     LanguagePreferences.refresh();
-    this.applySystemBars();
+    // The callback receives the new theme before context.config is refreshed.
+    this.applySystemBars(config);
   }
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
