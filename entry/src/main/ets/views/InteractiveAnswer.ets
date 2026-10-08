@@ -1,10 +1,12 @@
 import { WebUiView } from './WebUiView';
 import { LengthMetrics } from '@kit.ArkUI';
+import { pasteboard } from '@kit.BasicServicesKit';
 import { t } from '../model/I18n';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { UiCompiler, UiNode, UiPart, UiSavedState, UiValue, UiValues,
-  copyUiValues, uiNodeText, uiParts, validateUiState } from '../model/InteractiveUi';
+  copyUiValues, uiNodeText, uiNodeVisible, uiStepValue, uiText, uiParts, validateUiState } from '../model/InteractiveUi';
 import { Btn, Radius, Space } from '../common/Theme';
+import { Segmented } from '../common/Widgets';
 import { MarkdownView } from './MarkdownView';
 import { DataViewCard } from './DataViewCard';
 import { UiSceneView } from './UiSceneView';
@@ -16,16 +18,25 @@ struct UiNodeView {
   @Prop values: UiValues;
   @Prop interactive: boolean = false;
   @Prop ready: boolean = false;
+  @Prop layoutWidth: number | string = '100%';
   onWebSave: (values: UiValues) => Promise<UiValues> = async () => { throw new Error('Web UI save handler missing'); };
   onEdit: (node: UiNode, value: UiValue, commit: boolean) => void = () => {};
   onAction: (id: string) => void = () => {};
   onCommit: (id: string) => void = () => {};
   onInvalid: (id: string, invalid: boolean) => void = () => {};
   @State private imageError: boolean = false;
-  private children(): UiNode[] { return this.nodes.filter((item) => item.parent === this.node.id); }
+  @State private rowWidth: number = 0;
+  private children(): UiNode[] { return this.nodes.filter((item) => item.parent === this.node.id && uiNodeVisible(item, this.values)); }
+  private childWidth(): number | string {
+    return this.node.kind === 'row' && this.rowWidth >= 400 ? (this.rowWidth - 12) / 2 : '100%';
+  }
   private label(): string { return uiNodeText(this.node, this.values); }
   private value(): UiValue { return this.values[this.node.bind || '']; }
   private options(): SelectOption[] { return (this.node.options || []).map((value): SelectOption => ({ value: value })); }
+  private segmentedWidth(): number {
+    const options = this.node.options || [];
+    return options.reduce((width: number, label: string) => Math.max(width, label.length * 14 + 32), 100) * options.length;
+  }
   private editText(value: string): void {
     const valid = this.node.kind !== 'number' || (value.trim().length > 0 && Number.isFinite(Number(value)));
     this.onInvalid(this.node.id, !valid);
@@ -36,7 +47,7 @@ struct UiNodeView {
   childrenView() {
     ForEach(this.children(), (child: UiNode) => {
       UiNodeView({ node: this.nodes.find((item: UiNode) => item.id === child.id) as UiNode, nodes: this.nodes, values: this.values, interactive: this.interactive,
-        ready: this.ready, onWebSave: this.onWebSave, onEdit: this.onEdit, onAction: this.onAction, onCommit: this.onCommit, onInvalid: this.onInvalid })
+        ready: this.ready, layoutWidth: this.childWidth(), onWebSave: this.onWebSave, onEdit: this.onEdit, onAction: this.onAction, onCommit: this.onCommit, onInvalid: this.onInvalid })
     }, (child: UiNode) => child.id)
   }
   build() {
@@ -44,7 +55,7 @@ struct UiNodeView {
       if (!this.node.visibleKey || this.values[this.node.visibleKey] === this.node.visibleValue) {
         if (this.node.kind === 'row') {
           Flex({ wrap: FlexWrap.Wrap, space: { main: LengthMetrics.vp(12), cross: LengthMetrics.vp(8) } }) { this.childrenView() }
-            .width('100%')
+            .width('100%').onAreaChange((_old: Area, area: Area) => { this.rowWidth = Number(area.width); })
         } else if (this.node.kind === 'column' || this.node.kind === 'card') {
           Column({ space: 12 }) { this.childrenView() }.width('100%').alignItems(HorizontalAlign.Start)
             .padding(this.node.kind === 'card' ? 14 : 0).borderRadius(Radius.md)
@@ -71,6 +82,36 @@ struct UiNodeView {
           Select(this.options()).value(String(this.value())).selected((this.node.options || []).indexOf(String(this.value())))
             .enabled(this.interactive).accessibilityText(this.label())
             .onSelect((_index: number, value: string) => this.onEdit(this.node, value, true))
+        } else if (this.node.kind === 'segmented') {
+          Text(this.label()).fontSize(13).fontColor($r('app.color.text_secondary'))
+          Scroll() {
+            Segmented({ options: this.node.options || [], selected: (this.node.options || []).indexOf(String(this.value())),
+              compIdPrefix: 'ui-' + this.node.id, controlHeight: 44,
+              onSelect: (index: number) => { if (this.interactive) { this.onEdit(this.node, (this.node.options || [])[index], true); } } })
+              .width(this.segmentedWidth()).enabled(this.interactive)
+          }.width('100%').scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
+        } else if (this.node.kind === 'stepper') {
+          Text(this.label()).fontSize(13).fontColor($r('app.color.text_secondary'))
+          Row({ space: 12 }) {
+            Button('−').attributeModifier(Btn.tonalSmall).width(44).height(44)
+              .id('ui-' + this.node.id + '-decrease').accessibilityText(this.label() + ' −')
+              .enabled(this.interactive && Number(this.value()) > (this.node.min as number))
+              .onClick(() => this.onEdit(this.node, uiStepValue(this.node, this.values, -1), true))
+            Text(String(this.value())).id('ui-' + this.node.id + '-value').fontSize(18).fontWeight(FontWeight.Medium)
+              .layoutWeight(1).textAlign(TextAlign.Center).fontColor($r('app.color.text_primary'))
+            Button('+').attributeModifier(Btn.tonalSmall).width(44).height(44)
+              .id('ui-' + this.node.id + '-increase').accessibilityText(this.label() + ' +')
+              .enabled(this.interactive && Number(this.value()) < (this.node.max as number))
+              .onClick(() => this.onEdit(this.node, uiStepValue(this.node, this.values, 1), true))
+          }.width('100%')
+        } else if (this.node.kind === 'checkbox') {
+          Row({ space: 8 }) {
+            Checkbox({ name: this.node.id }).select(this.value() === true).enabled(this.interactive)
+              .id('ui-' + this.node.id).accessibilityText(this.label()).selectedColor($r('app.color.accent'))
+              .onChange((value: boolean) => this.onEdit(this.node, value, true))
+            Text(this.label()).fontSize(15).layoutWeight(1).fontColor($r('app.color.text_primary'))
+              .decoration({ type: this.value() === true ? TextDecorationType.LineThrough : TextDecorationType.None })
+          }.width('100%').constraintSize({ minHeight: 44 })
         } else if (this.node.kind === 'toggle') {
           Row({ space: 12 }) {
             Text(this.label()).fontSize(15).layoutWeight(1).fontColor($r('app.color.text_primary'))
@@ -101,7 +142,7 @@ struct UiNodeView {
           Text(this.label()).fontSize(12).fontColor($r('app.color.text_secondary'))
         }
       }
-    }.width(this.node.parent && this.nodes.find((item) => item.id === this.node.parent)?.kind === 'row' ? '48%' : '100%')
+    }.width(this.layoutWidth)
     .alignItems(HorizontalAlign.Start)
   }
 }
@@ -174,6 +215,14 @@ struct UiSurface {
     this.busy = true; this.error = '';
     try {
       validateUiState(this.compiler.document, this.values);
+      const definition = this.compiler.document.actions.find((item) => item.id === action);
+      if (definition?.kind === 'copy') {
+        try {
+          await pasteboard.getSystemPasteboard().setData(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, uiText(definition.text || '', this.values)));
+        } catch (_) { throw new Error(t('复制失败，请长按文本复制。')); }
+        this.getUIContext().getPromptAction().showToast({ message: t('已复制') });
+        return;
+      }
       const saved = await this.onInteract(this.surfaceKey, copyUiValues(this.values), action);
       if (this.mounted) { this.values = saved; this.dirty = false; }
     } catch (error) { if (this.mounted) { this.report(error as Error); } }
@@ -185,7 +234,7 @@ struct UiSurface {
         Text(this.title || t('交互界面')).fontSize(17).fontWeight(FontWeight.Medium).layoutWeight(1).fontColor($r('app.color.text_primary'))
         if (this.busy || (!this.complete && !this.failed)) { LoadingProgress().width(18).height(18) }
       }.width('100%')
-      ForEach(this.nodes.filter((node: UiNode) => !node.parent), (node: UiNode) => {
+      ForEach(this.nodes.filter((node: UiNode) => !node.parent && uiNodeVisible(node, this.values)), (node: UiNode) => {
         UiNodeView({ node: this.nodes.find((item: UiNode) => item.id === node.id) as UiNode, nodes: this.nodes, values: this.values, interactive: this.complete && this.available && !this.busy,
           ready: this.complete, onWebSave: (values: UiValues) => this.saveWeb(values),
           onEdit: (item: UiNode, value: UiValue, commit: boolean) => this.edit(item, value, commit),

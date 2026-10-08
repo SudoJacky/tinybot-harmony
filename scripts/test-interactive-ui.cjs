@@ -107,6 +107,55 @@ function fixture(source = answer) {
     const rs=[records[0],...Array.from({length:129},(_,i)=>({op:'node',node:{id:'n'+i,kind:'text',text:'x'}})),records.at(-1)];
     assert.throws(()=>new ui.UiCompiler().update(jsonl(rs),true));
   });
+  const nativeRecords = [
+    {op:'begin',version:1,title:'Controls',state:{tab:'清单',people:4,each:30,buy:false,prepare:false,completed:0}},
+    {op:'node',node:{id:'mode',kind:'segmented',text:'Mode',bind:'tab',options:['清单','对比']}},
+    {op:'node',node:{id:'people',kind:'stepper',text:'People',bind:'people',min:1,max:12,action:'calculate'}},
+    {op:'node',node:{id:'buy',kind:'checkbox',text:'Buy',bind:'buy',action:'calculate'}},
+    {op:'node',node:{id:'prepare',kind:'checkbox',text:'Prepare',bind:'prepare',action:'calculate'}},
+    {op:'node',node:{id:'progress',kind:'progress',text:'已完成 {{completed}} / 3 项',bind:'completed',min:0,max:3}},
+    {op:'node',node:{id:'copy',kind:'button',text:'Copy',action:'copyResult'}},
+    {op:'action',action:{id:'calculate',kind:'compute',code:'input.each = 120 / input.people; input.completed = Number(input.buy) + Number(input.prepare); return input;'}},
+    {op:'action',action:{id:'copyResult',kind:'copy',text:'聚餐：{{people}} 人，每人 {{each}} 元。\n准备进度：{{completed}} / 3 项。'}},
+    {op:'action',action:{id:'reset',kind:'reset'}},
+    {op:'end'}
+  ];
+  const native = {records:nativeRecords,content:'```tinybot-ui\n'+jsonl(nativeRecords)+'\n```'};
+  const nativeDoc = ui.parseUiSurface(native.content, '0');
+  test('native selectors, steppers and checklists validate bound values and complete streams', () => {
+    const compiler = new ui.UiCompiler(), source = jsonl(native.records);
+    for (let i = 1; i < source.length; i += 17) compiler.update(source.slice(0,i),false);
+    assert.equal(compiler.update(source,true).complete,true);
+    for (const values of [{tab:'missing'},{people:0},{people:13},{buy:'true'}]) assert.throws(()=>ui.validateUiState(nativeDoc,{...nativeDoc.initial,...values}));
+    for (const change of [rs=>rs[1].node.options=['same','same'],rs=>rs[1].node.options=Array.from({length:7},(_,i)=>String(i)),rs=>delete rs[2].node.max,rs=>rs[2].node.step=0,rs=>rs[2].node.action='copyResult']) {
+      const rs=clone(native.records);change(rs);assert.throws(()=>new ui.UiCompiler().update(jsonl(rs),true));
+    }
+  });
+  test('stepper clamps bounds and progress retains its human-readable label', () => {
+    const node={id:'rate',kind:'stepper',bind:'rate',min:0,max:1,step:0.1};
+    assert.equal(ui.uiStepValue(node,{rate:0.2},1),0.3);
+    assert.equal(ui.uiStepValue(node,{rate:0.95},1),1);
+    assert.equal(ui.uiStepValue(node,{rate:0},-1),0);
+    const progress=nativeDoc.nodes.find(n=>n.id==='progress');
+    assert.equal(ui.uiNodeText(progress,{...nativeDoc.initial,completed:2}),'已完成 2 / 3 项');
+  });
+  test('copy validates template keys and requires an explicit button', () => {
+    const copy=nativeDoc.actions.find(a=>a.kind==='copy');
+    assert.equal(ui.uiText(copy.text,{...nativeDoc.initial,people:6,each:20,completed:2}),'聚餐：6 人，每人 20 元。\n准备进度：2 / 3 项。');
+    for (const change of [rs=>rs.find(r=>r.action?.kind==='copy').action.text='{{missing}}',rs=>rs.find(r=>r.action?.kind==='copy').action.code='return input',rs=>rs[5].node.action='copyResult']) {
+      const rs=clone(native.records);change(rs);assert.throws(()=>new ui.UiCompiler().update(jsonl(rs),true));
+    }
+  });
+  await asyncTest('native checklist and stepper events compute, persist and restore without a model request',async()=>{
+    const f=fixture(native.content);await f.session.initialize();
+    const values=await f.session.interactUi('thread-1','a','0:0',{...nativeDoc.initial,people:6,buy:true,prepare:true},'calculate');
+    assert.equal(values.each,20);assert.equal(values.completed,2);assert.equal(f.provider.requests.length,0);
+    const selected=await f.session.interactUi('thread-1','a','0:0',{...values,tab:'对比'});
+    const reloaded=new Fixture(await f.repository.load());await reloaded.session.initialize();
+    assert.deepEqual(JSON.parse(JSON.stringify(reloaded.session.snapshot().threads[0].messages[1].uiStates[0].values)),JSON.parse(JSON.stringify(selected)));
+    await assert.rejects(f.session.interactUi('thread-1','a','0:0',selected,'copyResult'),/explicit client button/);
+    const reset=await f.session.interactUi('thread-1','a','0:0',selected,'reset');assert.equal(reset.people,4);assert.equal(reset.completed,0);assert.equal(reset.tab,'清单');
+  });
   await asyncTest('local compute saves derived state without a model request', async () => {
     const f=fixture(); await f.session.initialize(); const v=await f.session.interactUi('thread-1','a','0:0',{amount:100,people:4,result:50,show:true},'calc');
     assert.equal(v.result,25); assert.equal(f.provider.requests.length,0); assert.equal(f.executions(),1);

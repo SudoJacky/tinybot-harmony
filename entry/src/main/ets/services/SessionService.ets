@@ -709,6 +709,7 @@ export class SessionService {
       const document = parseUiSurface(content, indexes[1]); validateUiState(document, values);
       const action = actionId ? document.actions.find((item) => item.id === actionId) : undefined;
       if (actionId && !action) { throw new Error('Interactive UI: unknown action ' + actionId); }
+      if (action?.kind === 'copy') { throw new Error('Interactive UI: copy must run from an explicit client button'); }
       if (action?.kind === 'reset') { result = copyUiValues(document.initial); }
       if (action?.kind === 'set') {
         for (const name of Object.keys(action.values as UiValues)) { result[name] = (action.values as UiValues)[name]; }
