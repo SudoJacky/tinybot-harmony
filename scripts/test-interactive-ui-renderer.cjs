@@ -12,7 +12,9 @@ if (!fs.existsSync(emitted)) throw Error('Run devecocli build before this render
 const source = path.join(root, 'views/InteractiveAnswer.ets');
 if (fs.statSync(source).mtimeMs > fs.statSync(emitted).mtimeMs) throw Error('Stale emitted component: rebuild first.');
 let serial = 0;
+let activeView;
 const errors = [];
+const clipboard = { values: [], failure: false };
 class Property {
   constructor(value, owner, name) { this.value = value; this.owner = owner; this.name = name; }
   get() { return this.value; }
@@ -20,10 +22,10 @@ class Property {
   reset(value) { this.set(value); }
 }
 class ViewPU {
-  constructor(parent, storage, id) { this.parent = parent; this.id = id; this.watches = new Map(); this.effects = new Map(); this.childViews = new Map(); this.lists = new Map(); this.branches = new Map(); }
+  constructor(parent, storage, id) { this.parent = parent; this.id = id; this.watches = new Map(); this.effects = new Map(); this.childViews = new Map(); this.lists = new Map(); this.branches = new Map(); this.uiNodes = new Map(); }
   finalizeConstruction() {}
   declareWatch(name, callback) { this.watches.set(name, callback); }
-  observeComponentCreation2(callback) { const id = ++serial; this.effects.set(id, callback); this.current = id; callback(id, true); }
+  observeComponentCreation2(callback) { const id = ++serial; this.effects.set(id, callback); this.current = id; const previous=activeView; activeView=this; callback(id, true); activeView=previous; }
   forEachUpdateFunction(id, items, create, key) {
     const previous = this.lists.get(id) || new Set(); const next = new Set();
     items.forEach((item, index) => { const identity = key ? key(item, index) : JSON.stringify(item); next.add(identity); if (!previous.has(identity)) create(item, index); });
@@ -32,13 +34,17 @@ class ViewPU {
   ifElseBranchUpdateFunction(branch, create) { const id = this.current; if (this.branches.get(id) !== branch) { this.branches.set(id, branch); create(); } }
   updateStateVarsOfChildByElmtId(id, params) { this.childViews.get(id).updateStateVars(params); }
   static create(child) { child.parent.childViews.set(child.id, child); child.aboutToAppear?.(); }
-  flush() { for (const [id, effect] of [...this.effects]) { this.current = id; effect(id, false); } }
+  flush() { for (const [id, effect] of [...this.effects]) { this.current = id; const previous=activeView; activeView=this; effect(id, false); activeView=previous; } }
 }
 class MarkdownView extends ViewPU {
   constructor(parent, params, storage, id) { super(parent, storage, id); Object.assign(this, params); }
   updateStateVars(params) { Object.assign(this, params); }
 }
 const noUi = new Proxy({}, { get: () => () => {} });
+function nativeControl(type) { return new Proxy({}, { get: (_, method) => (...args) => {
+  if(method==='pop')return;
+  const nodes=activeView.uiNodes,id=activeView.current,node=nodes.get(id)||{type};nodes.set(id,node);node[method]=args[0];
+} }); }
 const cache = new Map();
 function model(file) {
   file = path.resolve(file + '.ets'); if (cache.has(file)) return cache.get(file);
@@ -48,8 +54,10 @@ function model(file) {
 }
 const globals = { exports: {}, ViewPU, SynchedPropertySimpleOneWayPU: Property, SynchedPropertyObjectOneWayPU: Property,
   ObservedPropertySimplePU: Property, ObservedPropertyObjectPU: Property, ObservedObject: { GetRawObject: value => value },
-  Column: noUi, Row: noUi, Text: noUi, Button: noUi, If: noUi, ForEach: noUi, LoadingProgress: noUi,
-  HorizontalAlign: {}, FontWeight: {}, Color: {}, $r: () => '', setTimeout, clearTimeout,
+  Column: noUi, Row: noUi, Text: nativeControl('Text'), Button: nativeControl('Button'), Checkbox: nativeControl('Checkbox'),
+  Flex: nativeControl('Flex'), Scroll: noUi, Progress: noUi, __Common__: noUi, If: noUi, ForEach: noUi, LoadingProgress: noUi,
+  HorizontalAlign: {}, FontWeight: {}, Color: {}, FlexWrap: {}, TextAlign: {}, TextDecorationType: {}, ScrollDirection: {}, BarState: {},
+  $r: () => '', setTimeout, clearTimeout,
   require: id => {
     if (id.includes('InteractiveUi&')) return model(path.join(root, 'model/InteractiveUi'));
     if (id.includes('I18n&')) return { t: text => text };
@@ -58,7 +66,9 @@ const globals = { exports: {}, ViewPU, SynchedPropertySimpleOneWayPU: Property, 
     if (id.includes('DataViewCard&')) return {};
     if (id.includes('UiSceneView&')) return {};
     if (id.includes('WebUiView&')) return {};
-    if (id === '@ohos:arkui.node') return {};
+    if (id.includes('Widgets&')) return { Segmented: MarkdownView };
+    if (id === '@ohos:arkui.node') return { LengthMetrics: {vp:value=>value} };
+    if (id === '@ohos:pasteboard') return {default:{MIMETYPE_TEXT_PLAIN:'text/plain',createData:(_type,value)=>value,getSystemPasteboard:()=>({setData:async value=>{if(clipboard.failure)throw Error('Clipboard denied');clipboard.values.push(value);}})}};
     if (id === '@ohos:hilog') return { default: { error: (...args) => errors.push(args) } };
     throw Error('Unhandled dependency ' + id);
   }
@@ -132,10 +142,53 @@ test('malformed finished JSON still reports failure rather than being ignored', 
   const child = [...view.childViews.values()].find(v => v instanceof UiSurface);
   assert.ok(child.error); assert.equal(child.complete, false);
 });
+test('native stepper buttons commit bounded values and disable at endpoints',()=>{
+  const edits=[],node={id:'guests',kind:'stepper',text:'Guests',bind:'guests',min:1,max:3};
+  const view=new UiNodeView(null,{node,nodes:[node],values:{guests:2},interactive:true,onEdit:(n,value,commit)=>edits.push({value,commit})});view.initialRender();
+  const button=suffix=>[...view.uiNodes.values()].find(n=>n.id==='ui-guests-'+suffix);
+  button('increase').onClick();button('decrease').onClick();assert.deepEqual(edits,[{value:3,commit:true},{value:1,commit:true}]);
+  view.updateStateVars({node,nodes:[node],values:{guests:3},interactive:true});view.flush();assert.equal(button('increase').enabled,false);assert.equal(button('decrease').enabled,true);
+  view.updateStateVars({node,nodes:[node],values:{guests:1},interactive:false});view.flush();assert.equal(button('increase').enabled,false);assert.equal(button('decrease').enabled,false);
+});
+test('native checkbox commits booleans and receives restored selection',()=>{
+  const edits=[],node={id:'task',kind:'checkbox',text:'Prepare',bind:'done'};
+  const view=new UiNodeView(null,{node,nodes:[node],values:{done:false},interactive:true,onEdit:(n,value,commit)=>edits.push({value,commit})});view.initialRender();
+  const box=()=>[...view.uiNodes.values()].find(n=>n.type==='Checkbox');box().onChange(true);assert.deepEqual(edits,[{value:true,commit:true}]);
+  view.updateStateVars({node,nodes:[node],values:{done:true},interactive:false});view.flush();assert.equal(box().select,true);assert.equal(box().enabled,false);
+});
+test('segmented selection is local, reflects restored state and ignores disabled events',()=>{
+  const edits=[],node={id:'mode',kind:'segmented',text:'Mode',bind:'tab',options:['One','Two']};
+  const view=new UiNodeView(null,{node,nodes:[node],values:{tab:'Two'},interactive:true,onEdit:(n,value,commit)=>edits.push({value,commit})});view.initialRender();
+  const control=[...view.childViews.values()][0];assert.equal(control.selected,1);control.onSelect(0);assert.deepEqual(edits,[{value:'One',commit:true}]);
+  view.updateStateVars({node,nodes:[node],values:{tab:'One'},interactive:false});view.flush();assert.equal(control.selected,0);control.onSelect(1);assert.equal(edits.length,1);
+});
+test('rows respond to actual width and omit hidden children without changing visible child identity',()=>{
+  const row={id:'row',kind:'row'},left={id:'left',parent:'row',kind:'text',text:'Left'},hidden={id:'hidden',parent:'row',kind:'text',text:'Hidden',visibleKey:'show',visibleValue:true};
+  const nodes=[row,left,hidden],view=new UiNodeView(null,{node:row,nodes,values:{show:false},interactive:true});view.initialRender();
+  const child=[...view.childViews.values()][0];assert.equal(view.children().length,1);assert.equal(child.layoutWidth,'100%');
+  const flex=[...view.uiNodes.values()].find(n=>n.type==='Flex');flex.onAreaChange({}, {width:620});view.flush();assert.equal(child.layoutWidth,304);
+  flex.onAreaChange({}, {width:320});view.flush();assert.equal(child.layoutWidth,'100%');assert.equal([...view.childViews.values()][0],child);
+  view.updateStateVars({node:row,nodes,values:{show:true},interactive:true});view.flush();assert.equal(view.children().length,2);
+});
 if (failed) process.exitCode = 1;
 
 // ArkWeb lifecycle regression: loadData must wait for the initial blank document.
 (async () => {
+  const copySource = [
+    {op:'begin',version:1,title:'Copy',state:{people:4,each:30,completed:0}},
+    {op:'node',node:{id:'copy',kind:'button',text:'Copy',action:'copyResult'}},
+    {op:'action',action:{id:'copyResult',kind:'copy',text:'聚餐：{{people}} 人，每人 {{each}} 元。\n准备进度：{{completed}} / 3 项。'}},
+    {op:'end'}
+  ].map(record=>JSON.stringify(record)).join('\n');
+  let interactions=0,toasts=0;
+  const surface=new UiSurface(null,{source:copySource,closed:true,streaming:false,available:true,onInteract:async()=>{interactions++;throw Error('Copy must not call session');}});
+  surface.getUIContext=()=>({getPromptAction:()=>({showToast:()=>toasts++})});surface.aboutToAppear();
+  assert.equal(clipboard.values.length,0,'copy must never run on mount');
+  surface.values={...surface.values,people:6,each:20,completed:2};await surface.interact('copyResult');
+  assert.equal(clipboard.values.at(-1),'聚餐：6 人，每人 20 元。\n准备进度：2 / 3 项。');assert.equal(interactions,0);assert.equal(toasts,1);
+  clipboard.failure=true;await surface.interact('copyResult');assert.match(surface.error,/复制失败/);assert.equal(toasts,1);assert.equal(surface.busy,false);clipboard.failure=false;
+  surface.available=false;await surface.interact('copyResult');assert.equal(clipboard.values.length,1);
+  console.log('PASS explicit copy uses current state, stays local and reports clipboard failures');
   const webEmitted = emitted.replace('InteractiveAnswer.ts', 'WebUiView.ts');
   if (fs.statSync(path.join(root, 'views/WebUiView.ets')).mtimeMs > fs.statSync(webEmitted).mtimeMs) throw Error('Rebuild WebUiView before testing.');
   const callbacks = {}, loads = [], sent = [];

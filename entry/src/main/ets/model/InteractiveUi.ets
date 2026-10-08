@@ -5,7 +5,7 @@ import { parseUiScene } from './UiScene';
 export type UiValue = string | number | boolean;
 export type UiValues = Record<string, UiValue>;
 export interface UiSavedState { key: string; values: UiValues; }
-export interface UiAction { id: string; kind: string; code?: string; prompt?: string; values?: UiValues; }
+export interface UiAction { id: string; kind: string; code?: string; prompt?: string; text?: string; values?: UiValues; }
 export interface UiNode {
   id: string; kind: string; parent?: string; text?: string; bind?: string; action?: string;
   options?: string[]; min?: number; max?: number; step?: number;
@@ -15,7 +15,7 @@ export interface UiRecord { op: string; version?: number; title?: string; state?
 export interface UiDocument { version: number; title: string; initial: UiValues; nodes: UiNode[]; actions: UiAction[]; complete: boolean; }
 export interface UiPart { kind: string; key: string; content: string; closed: boolean; }
 const CONTAINERS: string[] = ['column', 'row', 'card'];
-const INPUTS: string[] = ['input', 'number', 'select', 'toggle', 'slider'];
+const INPUTS: string[] = ['input', 'number', 'select', 'segmented', 'toggle', 'checkbox', 'slider', 'stepper'];
 const KINDS: string[] = CONTAINERS.concat(INPUTS, ['text', 'heading', 'markdown', 'button', 'progress', 'divider', 'image', 'data', 'scene', 'web']);
 function fail(detail: string): never { throw new Error('Interactive UI: ' + detail); }
 export function uiIdentifier(value: string): boolean {
@@ -60,8 +60,8 @@ export function validateUiState(document: UiDocument, values: UiValues): void {
     }
     if (!node.bind) { continue; }
     const value = values[node.bind];
-    if (node.kind === 'select' && !node.options?.includes(String(value))) { fail(node.id + ': invalid selection'); }
-    if (['slider', 'number', 'progress'].includes(node.kind) && ((node.min !== undefined && Number(value) < node.min) || (node.max !== undefined && Number(value) > node.max))) { fail(node.id + ': value outside range'); }
+    if (['select', 'segmented'].includes(node.kind) && !node.options?.includes(String(value))) { fail(node.id + ': invalid selection'); }
+    if (['slider', 'stepper', 'number', 'progress'].includes(node.kind) && ((node.min !== undefined && Number(value) < node.min) || (node.max !== undefined && Number(value) > node.max))) { fail(node.id + ': value outside range'); }
   }
 }
 export function uiText(template: string, values: UiValues): string {
@@ -71,7 +71,14 @@ export function uiText(template: string, values: UiValues): string {
   });
 }
 export function uiNodeText(node: UiNode, values: UiValues): string {
-  return node.bind && !INPUTS.includes(node.kind) ? String(values[node.bind]) : uiText(node.text || '', values);
+  return node.bind && !INPUTS.includes(node.kind) && node.kind !== 'progress' ? String(values[node.bind]) : uiText(node.text || '', values);
+}
+export function uiNodeVisible(node: UiNode, values: UiValues): boolean {
+  return node.visibleKey === undefined || values[node.visibleKey] === node.visibleValue;
+}
+export function uiStepValue(node: UiNode, values: UiValues, direction: number): number {
+  const next = Number((Number(values[node.bind || '']) + direction * (node.step || 1)).toPrecision(15));
+  return Math.max(node.min as number, Math.min(node.max as number, next));
 }
 export class UiCompiler {
   document: UiDocument = { version: 1, title: '', initial: {}, nodes: [], actions: [], complete: false };
@@ -113,7 +120,7 @@ export class UiCompiler {
       for (const node of this.document.nodes) {
         if (node.action) {
           const action = this.document.actions.find((item) => item.id === node.action);
-          if (!action || (node.kind !== 'button' && action.kind === 'submit')) { fail(node.id + ': invalid action reference'); }
+          if (!action || (node.kind !== 'button' && ['submit', 'copy'].includes(action.kind))) { fail(node.id + ': invalid action reference'); }
         }
       }
       validateUiState(this.document, this.document.initial); this.document.complete = true;
@@ -134,16 +141,16 @@ export class UiCompiler {
     if (node.kind === 'button') { text(node.text, 200, true); if (!node.action) { fail(node.id + ': button needs action'); } }
     if (INPUTS.includes(node.kind) || node.kind === 'progress') {
       if (!node.bind) { fail(node.id + ': missing binding'); }
-      const type = ['number', 'slider', 'progress'].includes(node.kind) ? 'number' : node.kind === 'toggle' ? 'boolean' : 'string';
+      const type = ['number', 'slider', 'stepper', 'progress'].includes(node.kind) ? 'number' : ['toggle', 'checkbox'].includes(node.kind) ? 'boolean' : 'string';
       if (typeof initial[node.bind as string] !== type) { fail(node.id + ': incorrect binding type'); }
       text(node.text, 200, true);
     }
-    if (node.kind === 'select' && (!Array.isArray(node.options) || node.options.length < 2 || node.options.length > 30 || node.options.some((option) => typeof option !== 'string' || option.length > 120) || new Set(node.options).size !== node.options.length)) { fail(node.id + ': invalid options'); }
+    if (['select', 'segmented'].includes(node.kind) && (!Array.isArray(node.options) || node.options.length < 2 || node.options.length > (node.kind === 'segmented' ? 6 : 30) || node.options.some((option) => typeof option !== 'string' || !option.trim() || option.length > (node.kind === 'segmented' ? 24 : 120)) || new Set(node.options).size !== node.options.length)) { fail(node.id + ': invalid options'); }
     for (const value of [node.min, node.max, node.step]) {
       if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) { fail(node.id + ': invalid numeric range'); }
     }
     if ((node.min !== undefined && node.max !== undefined && node.min >= node.max) || (node.step !== undefined && node.step <= 0)) { fail(node.id + ': invalid range'); }
-    if (['slider', 'progress'].includes(node.kind) && (node.min === undefined || node.max === undefined)) { fail(node.id + ': missing range'); }
+    if (['slider', 'stepper', 'progress'].includes(node.kind) && (node.min === undefined || node.max === undefined)) { fail(node.id + ': missing range'); }
     if (node.kind === 'image') {
       text(node.text, 500, true); text(node.source, 2000, true);
       if (!/^https:\/\/[^\s]+$/.test(node.source as string)) { fail(node.id + ': images require HTTPS'); }
@@ -168,10 +175,12 @@ export class UiCompiler {
     }
   }
   private action(action: UiAction): void {
-    fields(action, ['id', 'kind', 'code', 'prompt', 'values']);
-    if (!uiIdentifier(action.id) || !['compute', 'set', 'reset', 'submit'].includes(action.kind) || this.document.actions.length >= 32 || this.document.actions.some((item) => item.id === action.id)) { fail('invalid or duplicate action'); }
+    fields(action, ['id', 'kind', 'code', 'prompt', 'text', 'values']);
+    if (!uiIdentifier(action.id) || !['compute', 'set', 'reset', 'submit', 'copy'].includes(action.kind) || this.document.actions.length >= 32 || this.document.actions.some((item) => item.id === action.id)) { fail('invalid or duplicate action'); }
     if (action.kind === 'compute') { text(action.code, 16000, true); } else if (action.code !== undefined) { fail('code only allowed for compute'); }
     if (action.kind === 'submit') { text(action.prompt, 2000, true); } else if (action.prompt !== undefined) { fail('prompt only allowed for submit'); }
+    if (action.kind === 'copy') { text(action.text, 8000, true); uiText(action.text as string, this.document.initial); }
+    else if (action.text !== undefined) { fail('text only allowed for copy'); }
     if (action.kind === 'set') {
       validateUiValues(action.values as UiValues);
       for (const key of Object.keys(action.values as UiValues)) { if (typeof (action.values as UiValues)[key] !== typeof this.document.initial[key]) { fail('set changed state schema'); } }
