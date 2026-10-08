@@ -1309,5 +1309,14 @@
   "暂时无法打开评分和评论，请稍后重试。错误：{0}": "Unable to open ratings and reviews right now. Please try again later. Error: {0}",
   "0.1.5 测试版 · 2026-10-07": "0.1.5 beta · 2026-10-07",
   "新增聊天底部的 AI 提示、使用帮助与关于 Tinybot，可查看更新说明、公告和首次使用指引。评分和评论直接打开系统评价弹窗；服务列表新增品牌 Logo，并修复切换明暗主题时状态栏文字颜色滞后的问题。": "Added an AI notice below the chat composer, help, and About Tinybot with release notes, announcements, and a getting started guide. Ratings and reviews open the system review dialog directly. Added provider logos to service lists and fixed delayed status bar text colors when switching themes.",
-  "云备份支持确认后删除指定快照。恢复备份时保留本机密钥与配置，复用能明确匹配的模型服务和 MCP；无法匹配或存在多个候选时导入为停用副本。": "Cloud backups can now be deleted after confirmation. Restoring a backup preserves local credentials and settings and reuses unambiguously matching model and MCP services. Unmatched or ambiguous services are imported as disabled copies."
+  "云备份支持确认后删除指定快照。恢复备份时保留本机密钥与配置，复用能明确匹配的模型服务和 MCP；无法匹配或存在多个候选时导入为停用副本。": "Cloud backups can now be deleted after confirmation. Restoring a backup preserves local credentials and settings and reuses unambiguously matching model and MCP services. Unmatched or ambiguous services are imported as disabled copies.",
+  "界面操作失败：": "Interface action failed: ",
+  "请先打开并恢复此对话。": "Open and restore this conversation first.",
+  "交互界面已不可用。": "This interactive interface is no longer available.",
+  "交互状态已保存，请稍后重新提交。": "Your inputs were saved. Please submit again later.",
+  "图片加载失败": "Image failed to load",
+  "界面生成未完成，无法交互。": "The interface is incomplete and cannot be used.",
+  "交互界面": "Interactive interface",
+  "请输入有效数字。": "Enter a valid number.",
+  "保存输入": "Save inputs"
 }

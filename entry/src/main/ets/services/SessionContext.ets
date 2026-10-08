@@ -1,3 +1,4 @@
+import { INTERACTIVE_UI_INSTRUCTIONS } from '../model/InteractiveUiInstructions';
 import { t } from '../model/I18n';
 import { MAX_AGENT_STEPS, ModelMessage, ToolDefinition } from '../model/Agent';
 import { ModelConfig, ThreadData } from '../model/Conversation';
@@ -10,6 +11,7 @@ import { DEFAULT_SYSTEM_PROMPT, runtimeInstructions, userDocumentContext } from 
 
 export function sessionInstructions(config: ModelConfig, extensions: ExtensionSettings, selected: string = ''): string {
   return DEFAULT_SYSTEM_PROMPT + runtimeInstructions(extensions.webEnabled, MAX_AGENT_STEPS) +
+    INTERACTIVE_UI_INSTRUCTIONS +
     userDocumentContext(config.userDocument || '') + skillCatalog(extensions.skills, selected);
 }
 

@@ -5,6 +5,7 @@ import { CompactionData, MessageData, ThreadData } from '../model/Conversation';
 import { ModelReference } from '../model/ProviderProfiles';
 import { PendingInput } from '../model/PendingInput';
 import { t } from '../model/I18n';
+import { UiSavedState } from '../model/InteractiveUi';
 import { DisclosureStore } from './DisclosureState';
 
 @Observed
@@ -34,6 +35,7 @@ export class AgentStepViewModel implements AgentStep {
 
 @Observed
 export class MessageViewModel {
+  uiStates: UiSavedState[] = [];
   references: ThreadReference[] = [];
   // Deliberately excluded from MessageData: keep reading choices across live updates,
   // while newly loaded history starts with compact defaults.
@@ -52,6 +54,7 @@ export class MessageViewModel {
   modelRef?: ModelReference;
   constructor(data: MessageData) { this.update(data); }
   update(data: MessageData): void {
+    this.uiStates = data.uiStates || [];
     this.references = data.references || [];
     this.id = data.id; this.role = data.role; this.content = data.content; this.status = data.status; this.error = data.error;
     this.attachments = data.attachments || [];

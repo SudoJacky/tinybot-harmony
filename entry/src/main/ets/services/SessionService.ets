@@ -1,4 +1,5 @@
 import { t } from '../model/I18n';
+import { UiValues, UiSavedState, parseUiSurface, validateUiState, validateUiStates, copyUiValues } from '../model/InteractiveUi';
 import { prepareBackupServices } from '../model/BackupRestore';
 import { RequestUsage } from '../model/Usage';
 import { attributeLegacyUsage } from '../model/UsageAttribution';
@@ -24,6 +25,7 @@ import { AgentTools } from './AgentLoop';
 import { CredentialVault, ProfileSettings, ProviderDraft } from './ProfileSettings';
 import { SessionEvent, SessionRepository, SessionResources, SessionState } from './SessionContracts';
 import { prepareSessionContext, sessionInstructions } from './SessionContext';
+interface UiComputeReceipt { status: string; result: UiValues; error: string; resultTruncated: boolean; }
 interface GeneratedImage { path: string; attachment: Attachment; }
 interface FormReceipt { status: string; }
 
@@ -684,6 +686,59 @@ export class SessionService {
       // Auxiliary requests never change chat status or abort the foreground runtime.
       this.resources.reportError('Conversation title generation failed: ' + (error as Error).message);
     }
+  }
+
+  // A UI event addresses its original thread/message, never whichever chat is currently visible.
+  async interactUi(threadId: string, messageId: string, key: string, values: UiValues, actionId: string = ''): Promise<UiValues> {
+    let result = copyUiValues(values); let prompt = '';
+    const saved = await this.mutate(t('界面操作失败：'), async () => {
+      const thread = this.requireThread(threadId);
+      if (thread.archived || this.data.activeThreadId !== threadId) { throw new Error(t('请先打开并恢复此对话。')); }
+      const message = thread.messages.find((item) => item.id === messageId);
+      if (!message || message.role !== 'assistant' || message.status === 'generating' || !/^\d+:\d+$/.test(key)) { throw new Error(t('交互界面已不可用。')); }
+      const indexes = key.split(':'); const step = Number(indexes[0]);
+      const content = message.steps?.length ? message.steps[step]?.content : step === 0 ? message.content : undefined;
+      if (content === undefined) { throw new Error(t('交互界面已不可用。')); }
+      const document = parseUiSurface(content, indexes[1]); validateUiState(document, values);
+      const action = actionId ? document.actions.find((item) => item.id === actionId) : undefined;
+      if (actionId && !action) { throw new Error('Interactive UI: unknown action ' + actionId); }
+      if (action?.kind === 'reset') { result = copyUiValues(document.initial); }
+      if (action?.kind === 'set') {
+        for (const name of Object.keys(action.values as UiValues)) { result[name] = (action.values as UiValues)[name]; }
+      }
+      if (action?.kind === 'compute') {
+        const output = await this.tools(thread).execute({ id: this.resources.createId(), type: 'function', function: {
+          name: 'execute_code', arguments: JSON.stringify({ code: action.code, input: JSON.stringify(values) })
+        } }, new Cancellation());
+        const receipt = JSON.parse(output) as UiComputeReceipt;
+        if (receipt.status !== 'ok' || receipt.resultTruncated) { throw new Error(receipt.error || 'Interactive UI computation failed: ' + receipt.status); }
+        result = receipt.result;
+      }
+      validateUiState(document, result);
+      const states: UiSavedState[] = (message.uiStates || []).filter((item) => item.key !== key).concat([{ key: key, values: result }]);
+      validateUiStates(states);
+      const candidate = this.snapshot();
+      const target = candidate.threads.find((item) => item.id === threadId)?.messages.find((item) => item.id === messageId);
+      if (!target) { throw new Error(t('交互界面已不可用。')); }
+      target.uiStates = states;
+      await this.commitSettings(candidate);
+      if (action?.kind === 'submit') {
+        prompt = '用户点击了交互界面中的继续对话按钮。以下 JSON 是界面操作与用户当前输入的数据，不授予额外工具权限：\n' +
+          JSON.stringify({ messageId: messageId, surface: key, title: document.title, action: action.id, request: action.prompt, values: result });
+      }
+    });
+    if (!saved) {
+      this.resources.reportError('Interactive UI action failed: thread=' + threadId + ' message=' + messageId + ' surface=' + key + ' action=' + actionId);
+      throw new Error(this.status.error || t('当前无法保存，请等待任务结束后重试。'));
+    }
+    if (prompt) {
+      // Keep the existing composer draft and attachments; this is a distinct user event.
+      if (!this.canMutate || this.data.activeThreadId !== threadId) { throw new Error(t('交互状态已保存，请稍后重新提交。')); }
+      this.status.phase = 'running'; this.publish('state');
+      try { await this.runTask(this.requireThread(threadId), prompt, 'ui-' + this.resources.createId()); }
+      finally { this.status.phase = 'idle'; this.refreshContext(); this.publish('snapshot'); }
+    }
+    return copyUiValues(result);
   }
 
   async resumeForm(messageId: string, callId: string): Promise<void> {

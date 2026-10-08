@@ -18,6 +18,7 @@ import { InputFormCard } from './InputFormCard';
 import { ChatTeamCard } from './ChatTeamCard';
 import { MemoryDraftPanel } from './MemoryDraftPanel';
 import { ChatViewModel, MessageViewModel, ThreadViewModel } from '../viewmodel/ChatViewModel';
+import { UiValues } from '../model/InteractiveUi';
 import { ImageViewer, MessageBubble } from './MessageBubble';
 import { InputQueuePanel } from './InputQueuePanel';
 import { Btn, Font, Motion, Radius, Space, fileSize } from '../common/Theme';
@@ -172,6 +173,9 @@ export struct ChatPanel {
     }, 80);
   }
 
+  private uiHandler(threadId: string, messageId: string): (key: string, values: UiValues, action: string) => Promise<UiValues> {
+    return (key: string, values: UiValues, action: string) => this.app.interactUi(threadId, messageId, key, values, action);
+  }
   private send(): void {
     if (this.speechActive()) { return; }
     this.inspectingOutput = false; this.followOutput = true;
@@ -316,7 +320,8 @@ export struct ChatPanel {
         }
         ForEach(this.app.visibleMessages, (message: MessageViewModel) => {
           ListItem() {
-            MessageBubble({ message: message, onFork: (id: string) => { this.fork(id); }, onRemember: (id: string) => { this.remember(id); },
+            MessageBubble({ message: message, uiAvailable: !this.app.busy && !this.thread.archived,
+              onUi: this.uiHandler(this.thread.id, message.id), onFork: (id: string) => { this.fork(id); }, onRemember: (id: string) => { this.remember(id); },
               onInspect: () => { this.inspectingOutput = true; this.followOutput = false; clearTimeout(this.scrollTimer); this.scrollTimer = -1; },
               onReference: (text: string) => this.app.setDraft(this.app.draft + text), onResume: (id: string) => this.app.resumeForm(message.id, id),
               hasExtra: message.role === 'assistant' && this.app.teams.some((run) => run.ownerMessageId === message.id) }) {
@@ -326,7 +331,7 @@ export struct ChatPanel {
             .backgroundColor(this.app.searchMessageId === message.id ? $r('app.color.accent_container') : Color.Transparent)
             .animation({ duration: Motion.medium, curve: Motion.standard })
             .transition(this.messageEnter(message))
-        }, (message: MessageViewModel) => message.id)
+        }, (message: MessageViewModel) => this.thread.id + ":" + message.id)
         if (this.app.teams.some((run) => !run.ownerMessageId)) {
           ListItem() { ChatTeamCard({ app: this.app, onFiles: this.onFiles }) }.width('100%')
         }

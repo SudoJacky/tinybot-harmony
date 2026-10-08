@@ -2,6 +2,8 @@ import { t } from '../model/I18n';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { MarkdownView } from './MarkdownView';
+import { InteractiveAnswer } from './InteractiveAnswer';
+import { UiValues } from '../model/InteractiveUi';
 import { DocumentPreview } from './DocumentPreview';
 import { DataViewCard } from './DataViewCard';
 import { PlanItem, parsePlan } from '../model/RichArtifacts';
@@ -394,6 +396,8 @@ export struct ImageViewer {
 
 @Component
 export struct MessageBubble {
+  @Prop uiAvailable: boolean = false;
+  onUi: (key: string, values: UiValues, action: string) => Promise<UiValues> = async () => { throw new Error('Interactive UI handler is not connected'); };
   @ObjectLink message: MessageViewModel;
   onFork: (id: string) => void = () => {};
   onRemember: (messageId: string) => void = () => {};
@@ -415,7 +419,7 @@ export struct MessageBubble {
   private folded(): boolean { return this.foldable() && !this.message.processOpen; }
   private entryVisible(entry: TimelineEntry, index: number, count: number): boolean {
     if (!this.folded()) { return true; }
-    if (entry.kind === 'text') { return index === count - 1; }
+    if (entry.kind === 'text') { return index === count - 1 || (this.message.stepViews[entry.step]?.content || '').includes('```tinybot-ui'); }
     if (entry.kind !== 'process') { return true; }
     // Empty folded groups must not mount: the parent Column adds spacing even to empty children.
     const latestPlanId = summarizeProcess(this.message.stepViews).latestPlanId;
@@ -589,7 +593,8 @@ export struct MessageBubble {
               if (entry.kind === 'steering') {
                 this.steering(entry.step)
               } else if (entry.kind === 'text') {
-                MarkdownView({ content: this.message.stepViews[entry.step]?.content || '',
+                InteractiveAnswer({ content: this.message.stepViews[entry.step]?.content || '', step: entry.step,
+                  saved: this.message.uiStates, available: this.uiAvailable, onInteract: this.onUi,
                   streaming: this.message.status === 'generating' && entry.step === this.message.stepViews.length - 1 })
               } else {
                 ProcessGroup({ message: this.message, disclosure: this.message.disclosures.get(entry.key), groupKey: entry.key, richOnly: this.folded(),
@@ -603,7 +608,7 @@ export struct MessageBubble {
           ThinkingLine()
         }
       } else if (this.message.content.length > 0) {
-        MarkdownView({ content: this.message.content, streaming: this.message.status === 'generating' })
+        InteractiveAnswer({ content: this.message.content, saved: this.message.uiStates, available: this.uiAvailable, onInteract: this.onUi, streaming: this.message.status === 'generating' })
       } else if (this.message.status === 'generating') {
         ThinkingLine()
       }
