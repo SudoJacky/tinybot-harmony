@@ -44,10 +44,10 @@ let checks = 0;
 function test(name, fn) { fn(); checks++; console.log('PASS ' + name); }
 async function asyncTest(name, fn) { await fn(); checks++; console.log('PASS ' + name); }
 function broken(change) { const rs = clone(records); change(rs); return jsonl(rs); }
-function fixture() {
+function fixture(source = answer) {
   const data = seed(); data.threads[0].messages = [
     { id: 'u', role: 'user', content: 'Create a calculator', status: 'complete', error: '' },
-    { id: 'a', role: 'assistant', content: answer, steps: [{ content: answer, tools: [] }], status: 'complete', error: '' }
+    { id: 'a', role: 'assistant', content: source, steps: [{ content: source, tools: [] }], status: 'complete', error: '' }
   ];
   const f = new Fixture(data); let executions = 0;
   f.resources.agentTools = { definitions: () => [], execute: async call => {
@@ -192,6 +192,22 @@ function fixture() {
     assert.ok(instructions.includes(INTERACTIVE_UI_INSTRUCTIONS));
     assert.ok(instructions.includes('Node record:'));
     assert.equal(instructions.includes('describe_ui'),false);
+  });
+  test('Web content validates before rendering and cannot bind code to mutable state',()=>{
+    const spec={version:1,html:'<canvas></canvas>',css:'',js:'document.body.dataset.ready="yes"',library:'three',height:400};
+    const rs=clone(records);rs.splice(-1,0,{op:'node',node:{id:'web',kind:'web',data:JSON.stringify(spec)}});
+    assert.equal(new ui.UiCompiler().update(jsonl(rs),true).nodes.at(-1).kind,'web');
+    rs.at(-2).node.bind='amount';assert.throws(()=>new ui.UiCompiler().update(jsonl(rs),true));delete rs.at(-2).node.bind;
+    rs.at(-2).node.data=JSON.stringify({...spec,library:'remote'});assert.throws(()=>new ui.UiCompiler().update(jsonl(rs),true));
+  });
+  await asyncTest('Web state saves use the existing durable isolated lane without model calls',async()=>{
+    const example=JSON.parse(fs.readFileSync(path.join(root,'main/resources/rawfile/interactive-web/example.json'),'utf8')).content;
+    const f=fixture(example);
+    await f.session.initialize(); const initial=ui.parseUiSurface(example,'0').initial;
+    const saved=await f.session.interactUi('thread-1','a','0:0',{...initial,speed:1.2});
+    assert.equal(saved.speed,1.2);assert.equal(f.provider.requests.length,0);assert.equal(f.executions(),0);
+    assert.equal(f.session.snapshot().threads[0].messages[1].uiStates[0].values.speed,1.2);
+    await assert.rejects(f.session.interactUi('thread-1','a','0:0',{...initial,speed:'wrong type'}));
   });
   test('corrupt persisted UI state is rejected on load',()=>{
     const data=seed(); data.threads[0].messages=[{id:'u',role:'user',content:'x',status:'complete',error:'',uiStates:[{key:'bad',values:{}}]}];

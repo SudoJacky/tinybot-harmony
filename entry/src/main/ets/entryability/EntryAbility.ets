@@ -1,3 +1,4 @@
+import { webview } from '@kit.ArkWeb';
 import { ShareInbox } from '../services/NativeActions';
 import { LanguagePreferences } from '../services/LanguagePreferences';
 import { McpOAuth } from '../services/McpOAuth';
@@ -42,6 +43,11 @@ export default class EntryAbility extends UIAbility {
   }
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    // Prepare ArkWeb before mounting the first generated surface on the UI rendering path.
+    const webStarted = Date.now();
+    hilog.info(DOMAIN, 'TinybotWebUI', 'engine initialization start');
+    webview.WebviewController.initializeWebEngine();
+    hilog.info(DOMAIN, 'TinybotWebUI', 'engine initialized ms=%{public}d', Date.now() - webStarted);
     LanguagePreferences.initialize(this.context);
     ShareInbox.receive(want, this.context.getApplicationContext().filesDir);
     try {

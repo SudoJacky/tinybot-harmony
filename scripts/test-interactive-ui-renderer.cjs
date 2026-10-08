@@ -57,6 +57,7 @@ const globals = { exports: {}, ViewPU, SynchedPropertySimpleOneWayPU: Property, 
     if (id.includes('MarkdownView&')) return { MarkdownView };
     if (id.includes('DataViewCard&')) return {};
     if (id.includes('UiSceneView&')) return {};
+    if (id.includes('WebUiView&')) return {};
     if (id === '@ohos:arkui.node') return {};
     if (id === '@ohos:hilog') return { default: { error: (...args) => errors.push(args) } };
     throw Error('Unhandled dependency ' + id);
@@ -132,3 +133,58 @@ test('malformed finished JSON still reports failure rather than being ignored', 
   assert.ok(child.error); assert.equal(child.complete, false);
 });
 if (failed) process.exitCode = 1;
+
+// ArkWeb lifecycle regression: loadData must wait for the initial blank document.
+(async () => {
+  const webEmitted = emitted.replace('InteractiveAnswer.ts', 'WebUiView.ts');
+  if (fs.statSync(path.join(root, 'views/WebUiView.ets')).mtimeMs > fs.statSync(webEmitted).mtimeMs) throw Error('Rebuild WebUiView before testing.');
+  const callbacks = {}, loads = [], sent = [];
+  const port = { close() {}, onMessageEvent(fn) { this.receive = fn; }, postMessageEvent(value) { sent.push(JSON.parse(value)); } };
+  class Controller {
+    loadData(html) { loads.push(html); }
+    async runJavaScript() { return 'true'; }
+    createWebMessagePorts() { return [port, { close() {} }]; }
+    postMessage() {}
+  }
+  const webGlobals = { ...globals, exports: {}, MessageLevel: { Error: 3 },
+    Web: new Proxy({}, { get: (_, name) => (...args) => { if (name.startsWith('on')) callbacks[name] = args[0]; } }),
+    require: id => {
+      if (id === '@ohos:web.webview') return { default: { WebviewController: Controller } };
+      if (id === '@ohos:hilog') return { default: { info() {}, warn() {}, error() {} } };
+      if (id.includes('WebUi&')) return model(path.join(root, 'model/WebUi'));
+      if (id.includes('WebUiAssets&')) return { webUiAssets: async () => ['', ''] };
+      return globals.require(id);
+    }
+  };
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(webEmitted, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }
+  }).outputText, webGlobals, { filename: webEmitted });
+  const view = new webGlobals.exports.WebUiView(null, { content: JSON.stringify({version:1,html:'',css:'',js:'',library:'none',height:200}), values:{count:0}, interactive:true,
+    onSave: async values => values });
+  view.getUIContext = () => ({ getHostContext: () => ({}) });
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  const intercept = (url, main = true) => callbacks.onLoadIntercept({data:{getRequestUrl:()=>url,isMainFrame:()=>main}});
+  try {
+    view.aboutToAppear(); view.initialRender(); callbacks.onControllerAttached(); await settle();
+    assert.equal(loads.length,0,'initial navigation must finish before loadData');
+    callbacks.onPageEnd({url:'about:blank'}); await settle(); assert.equal(loads.length,1);
+    assert.equal(intercept('data:text/html;charset=UTF-8;base64,host',false),true);
+    assert.equal(intercept('data:text/html;charset=UTF-8;base64,host'),false);
+    assert.equal(intercept('data:text/html;charset=UTF-8;base64,another'),true);
+    assert.equal(intercept('https://example.com'),true); assert.equal(intercept('file:///private'),true);
+    callbacks.onPageEnd({url:'data:text/html,host'}); await settle();
+    assert.equal(sent[0].type,'init'); await port.receive('{"type":"ready"}');
+    assert.equal(view.ready,true); assert.equal(view.error,'');
+    console.log('PASS ArkWeb waits for its initial document and permits exactly one native data load');
+    await view.receive('{"type":"save","id":1,"values":{"count":1}}',view.generation);
+    assert.equal(sent.at(-1).type,'ack'); assert.equal(sent.at(-1).values.count,1);
+    view.onSave = async () => { throw new Error('Disk write failed'); };
+    await view.receive('{"type":"save","id":2,"values":{"count":2}}',view.generation);
+    assert.equal(sent.at(-1).error,'Disk write failed'); assert.equal(view.error,'Disk write failed');
+    console.log('PASS ArkWeb state acknowledgements follow persistence and expose save failures');
+    await view.restart(); assert.equal(loads.length,2); assert.equal(intercept('data:text/html,host'),false);
+    callbacks.onPageEnd({url:'data:text/html,host'}); await settle();
+    assert.equal(sent.at(-1).type,'init'); assert.equal(view.error,'');
+    console.log('PASS explicit reload reconnects a new document and clears the prior error');
+  } finally { view.aboutToDisappear(); }
+})().catch(error => { console.error(error); process.exitCode = 1; });

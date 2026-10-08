@@ -1,3 +1,4 @@
+import { WebUiView } from './WebUiView';
 import { LengthMetrics } from '@kit.ArkUI';
 import { t } from '../model/I18n';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -14,6 +15,8 @@ struct UiNodeView {
   @Prop nodes: UiNode[];
   @Prop values: UiValues;
   @Prop interactive: boolean = false;
+  @Prop ready: boolean = false;
+  onWebSave: (values: UiValues) => Promise<UiValues> = async () => { throw new Error('Web UI save handler missing'); };
   onEdit: (node: UiNode, value: UiValue, commit: boolean) => void = () => {};
   onAction: (id: string) => void = () => {};
   onCommit: (id: string) => void = () => {};
@@ -33,7 +36,7 @@ struct UiNodeView {
   childrenView() {
     ForEach(this.children(), (child: UiNode) => {
       UiNodeView({ node: this.nodes.find((item: UiNode) => item.id === child.id) as UiNode, nodes: this.nodes, values: this.values, interactive: this.interactive,
-        onEdit: this.onEdit, onAction: this.onAction, onCommit: this.onCommit, onInvalid: this.onInvalid })
+        ready: this.ready, onWebSave: this.onWebSave, onEdit: this.onEdit, onAction: this.onAction, onCommit: this.onCommit, onInvalid: this.onInvalid })
     }, (child: UiNode) => child.id)
   }
   build() {
@@ -87,6 +90,10 @@ struct UiNodeView {
           DataViewCard({ content: this.node.bind ? String(this.value()) : this.node.data || '' })
         } else if (this.node.kind === 'scene') {
           UiSceneView({ content: this.node.bind ? String(this.value()) : this.node.data || '', interactive: this.interactive, onAction: this.onAction })
+        } else if (this.node.kind === 'web') {
+          if (this.ready) {
+            WebUiView({ content: this.node.data || '', values: this.values, interactive: this.interactive, onSave: this.onWebSave })
+          }
         } else if (this.node.kind === 'image') {
           Image(this.node.source).width('100%').height(220).objectFit(ImageFit.Contain).accessibilityText(this.label())
             .onError(() => { this.imageError = true; })
@@ -141,6 +148,16 @@ struct UiSurface {
       if (this.complete) { validateUiState(document, this.values); }
     } catch (error) { this.failed = true; this.complete = false; this.report(error as Error); }
   }
+  private async saveWeb(values: UiValues): Promise<UiValues> {
+    if (!this.complete || !this.available || this.busy) { throw new Error(t('交互界面已不可用。')); }
+    validateUiState(this.compiler.document, values); this.busy = true; this.error = '';
+    try {
+      const saved = await this.onInteract(this.surfaceKey, copyUiValues(values), '');
+      if (this.mounted) { this.values = saved; this.dirty = false; }
+      return saved;
+    } catch (error) { if (this.mounted) { this.report(error as Error); } throw error as Error; }
+    finally { if (this.mounted) { this.busy = false; } }
+  }
   private edit(node: UiNode, value: UiValue, commit: boolean): void {
     if (!this.complete || this.busy || !this.available || !node.bind) { return; }
     const next = copyUiValues(this.values); next[node.bind] = value;
@@ -170,6 +187,7 @@ struct UiSurface {
       }.width('100%')
       ForEach(this.nodes.filter((node: UiNode) => !node.parent), (node: UiNode) => {
         UiNodeView({ node: this.nodes.find((item: UiNode) => item.id === node.id) as UiNode, nodes: this.nodes, values: this.values, interactive: this.complete && this.available && !this.busy,
+          ready: this.complete, onWebSave: (values: UiValues) => this.saveWeb(values),
           onEdit: (item: UiNode, value: UiValue, commit: boolean) => this.edit(item, value, commit),
           onAction: (id: string) => { this.interact(id); },
           onCommit: (id: string) => this.schedule(id),

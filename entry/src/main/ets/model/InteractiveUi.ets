@@ -1,3 +1,4 @@
+import { parseWebUi } from './WebUi';
 import { parseDataView } from './RichArtifacts';
 import { parseUiScene } from './UiScene';
 // Platform-independent versioned JSONL UI protocol. Only complete records are applied.
@@ -15,7 +16,7 @@ export interface UiDocument { version: number; title: string; initial: UiValues;
 export interface UiPart { kind: string; key: string; content: string; closed: boolean; }
 const CONTAINERS: string[] = ['column', 'row', 'card'];
 const INPUTS: string[] = ['input', 'number', 'select', 'toggle', 'slider'];
-const KINDS: string[] = CONTAINERS.concat(INPUTS, ['text', 'heading', 'markdown', 'button', 'progress', 'divider', 'image', 'data', 'scene']);
+const KINDS: string[] = CONTAINERS.concat(INPUTS, ['text', 'heading', 'markdown', 'button', 'progress', 'divider', 'image', 'data', 'scene', 'web']);
 function fail(detail: string): never { throw new Error('Interactive UI: ' + detail); }
 export function uiIdentifier(value: string): boolean {
   return typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(value) && !['constructor', 'prototype', '__proto__'].includes(value);
@@ -45,9 +46,11 @@ export function validateUiStates(states: UiSavedState[]): void {
 }
 export function validateUiState(document: UiDocument, values: UiValues): void {
   validateUiValues(values);
+  if (document.nodes.filter((node) => node.kind === 'web').length > 2) { fail('at most two Web surfaces per interface'); }
   const keys = Object.keys(document.initial);
   if (keys.length !== Object.keys(values).length || keys.some((key) => typeof values[key] !== typeof document.initial[key])) { fail('state must retain declared keys and types'); }
   for (const node of document.nodes) {
+    if (node.kind === 'web') { parseWebUi(node.data || ''); }
     if (node.kind === 'data') { parseDataView(node.bind ? String(values[node.bind]) : node.data || ''); }
     if (node.kind === 'scene') {
       const scene = parseUiScene(node.bind ? String(values[node.bind]) : node.data || '');
@@ -119,7 +122,8 @@ export class UiCompiler {
   private node(node: UiNode): void {
     fields(node, ['id', 'kind', 'parent', 'text', 'bind', 'action', 'options', 'min', 'max', 'step', 'visibleKey', 'visibleValue', 'source', 'data']);
     if (!uiIdentifier(node.id) || !KINDS.includes(node.kind)) { fail('invalid node id or kind'); }
-    text(node.text, 8000); text(node.data, 16000);
+    text(node.text, 8000); text(node.data, node.kind === 'web' ? 64000 : 16000);
+    if (node.kind === 'web' && (!node.data || node.bind !== undefined || node.action !== undefined)) { fail(node.id + ': web requires static data and uses state-only messages'); }
     const initial = this.document.initial;
     for (const key of [node.bind, node.visibleKey]) {
       if (key !== undefined && (!uiIdentifier(key) || !Object.keys(initial).includes(key))) { fail(node.id + ': unknown state binding'); }

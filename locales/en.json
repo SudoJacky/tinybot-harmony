@@ -1318,5 +1318,13 @@
   "界面生成未完成，无法交互。": "The interface is incomplete and cannot be used.",
   "交互界面": "Interactive interface",
   "请输入有效数字。": "Enter a valid number.",
-  "保存输入": "Save inputs"
+  "保存输入": "Save inputs",
+  "交互内容启动超时，请重试。": "Interactive content timed out. Try again.",
+  "正在加载交互内容…": "Loading interactive content…",
+  "交互内容渲染进程已退出，请重试。": "The interactive renderer exited. Try again.",
+  "交互示例": "Interactive examples",
+  "旋转、缩放并调整三维场景": "Rotate, zoom and adjust a 3D scene",
+  "重新加载": "Reload",
+  "三维场景": "3D scene",
+  "二维动画": "2D animation"
 }
