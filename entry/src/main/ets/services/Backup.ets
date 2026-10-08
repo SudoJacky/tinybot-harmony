@@ -2,6 +2,7 @@ import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
 import { fileIo as fs, picker } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { AppData, parseAppData, defaultConfig } from '../model/Conversation';
 import { Attachment } from '../model/Productivity';
 import { WorkspaceStore } from '../model/WorkspaceStore';
@@ -63,20 +64,23 @@ export async function exportBackup(context: common.UIAbilityContext, data: AppDa
   try { await exportFile(context, path, 'Tinybot备份.json'); }
   finally { await fs.unlink(path); }
 }
-export async function readBackup(context: common.UIAbilityContext): Promise<AppData | undefined> {
+export async function readBackup(context: common.UIAbilityContext, local: AppData): Promise<AppData | undefined> {
   const uris = await new picker.DocumentViewPicker(context).select({ maxSelectNumber: 1, fileSuffixFilters: ['Tinybot 备份|.json'] });
   if (!uris.length) { return undefined; }
-  return readBackupFile(context, uris[0]);
+  return readBackupFile(context, uris[0], local);
 }
-export async function readBackupFile(context: common.UIAbilityContext, path: string): Promise<AppData> {
+export async function readBackupFile(context: common.UIAbilityContext, path: string, local: AppData): Promise<AppData> {
   const file = await fs.open(path, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW); let text = '';
   try { text = new util.TextDecoder('utf-8', { fatal: true }).decodeToString(new Uint8Array(await readBounded(file.fd, MAX_BACKUP))); }
   finally { await fs.close(file); }
   const envelope = JSON.parse(text) as BackupEnvelope;
   if (!envelope || envelope.format !== 'tinybot-harmony.backup.v1' || !Array.isArray(envelope.attachments) || !Array.isArray(envelope.files) || envelope.files.length > 1000) { throw new Error(t("备份格式无效。")); }
   const data = parseAppData(JSON.stringify(envelope.data));
-  const threadIds = new Map<string, string>(); const messageIds = new Map<string, string>();
-  for (const thread of data.threads) { threadIds.set(thread.id, util.generateRandomUUID()); for (const message of thread.messages) { if (!messageIds.has(message.id)) { messageIds.set(message.id, util.generateRandomUUID()); } } }
+  // Keep record identities across devices and repeated restores. Local records win.
+  const threadIds = new Set(data.threads.map((thread) => thread.id));
+  const known = new Set(local.threads.map((thread) => thread.id));
+  const workspace = new WorkspaceStore(context.getApplicationContext().filesDir);
+  for (const thread of data.threads) { workspace.pathFor(thread.id); }
   const attachmentIds = new Map<string, string>(); const binaries = new Map<string, Uint8Array>(); const paths = new Set<string>();
   for (const item of envelope.attachments) {
     if (!item || typeof item.id !== 'string' || typeof item.bytes !== 'string' || item.bytes.length > 6 * 1024 * 1024 || binaries.has(item.id)) { throw new Error(t("备份附件无效。")); }
@@ -91,40 +95,33 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
     if (paths.has(key)) { throw new Error(t("备份包含重复文件。")); } paths.add(key);
     workspaceBytes.push(new util.Base64Helper().decodeSync(item.bytes));
   }
-  const workspace = new WorkspaceStore(context.getApplicationContext().filesDir);
+  const totalThreads = data.threads.length;
+  data.threads = data.threads.filter((thread) => !known.has(thread.id));
+  const additions = new Set(data.threads.map((thread) => thread.id));
+  if (!additions.has(data.activeThreadId)) { data.activeThreadId = ''; }
+  hilog.info(0x0000, 'Backup', 'Restore prepared: new chats=%{public}d, skipped chats=%{public}d',
+    data.threads.length, totalThreads - data.threads.length);
   const attachmentRoot = context.getApplicationContext().filesDir + '/attachments'; if (!await fs.access(attachmentRoot)) { await fs.mkdir(attachmentRoot); }
   for (const item of allAttachments(data)) { const id = attachmentIds.get(item.id) as string; const path = id + (item.mime === 'image/jpeg' ? '.jpg' : '.txt'); await writeBytes(attachmentRoot + '/' + path, (binaries.get(item.id) as Uint8Array).buffer as ArrayBuffer); }
-  for (const thread of data.threads) { await workspace.ensureThread(threadIds.get(thread.id) as string); }
+  for (const thread of data.threads) { await workspace.ensureThread(thread.id); }
   for (let index = 0; index < envelope.files.length; index++) {
     const item = envelope.files[index];
-    const root = workspace.pathFor(threadIds.get(item.threadId) as string); const parts = item.path.split('/'); let directory = root;
+    if (!additions.has(item.threadId)) { continue; }
+    const root = workspace.pathFor(item.threadId); const parts = item.path.split('/'); let directory = root;
     for (const part of parts.slice(0, -1)) { directory += '/' + part; if (!await fs.access(directory)) { await fs.mkdir(directory); } }
     await writeBytes(root + '/' + item.path, workspaceBytes[index].buffer as ArrayBuffer);
   }
   // Keep service IDs until SessionService can match them against this device's settings.
   for (const profile of data.providerProfiles || []) { profile.enabled = false; profile.noApiKey = true; profile.credentialAlias = ''; }
   for (const thread of data.threads) {
-    thread.id = threadIds.get(thread.id) as string; thread.parentThreadId = threadIds.get(thread.parentThreadId || ''); thread.parentMessageId = messageIds.get(thread.parentMessageId || '');
     thread.pendingInputs = []; thread.queuePaused = true;
-    for (const reference of (thread.references || []).concat(...thread.messages.map((message) => message.references || []))) {
-      reference.threadId = threadIds.get(reference.threadId) || reference.threadId;
-    }
-    for (const run of thread.teams || []) {
-      if (run.ownerMessageId) { run.ownerMessageId = messageIds.get(run.ownerMessageId) || run.ownerMessageId; }
-      run.id = util.generateRandomUUID();
-      for (const record of run.tasks) { for (const attempt of record.attempts) { attempt.id = util.generateRandomUUID(); } }
-    }
-    if (thread.compaction) { thread.compaction.firstKeptMessageId = messageIds.get(thread.compaction.firstKeptMessageId) || thread.compaction.firstKeptMessageId; }
-    for (const message of thread.messages) { message.id = messageIds.get(message.id) as string; }
     for (const item of (thread.attachments || []).concat(...thread.messages.map((message) => message.attachments || []))) {
       const id = attachmentIds.get(item.id); if (id) { item.id = id; item.path = id + (item.mime === 'image/jpeg' ? '.jpg' : '.txt'); }
     }
   }
-  for (const memory of data.productivity?.memories || []) { memory.id = util.generateRandomUUID(); memory.threadId = threadIds.get(memory.threadId) || ''; memory.sourceThreadId = threadIds.get(memory.sourceThreadId || ''); memory.sourceMessageId = messageIds.get(memory.sourceMessageId || ''); }
-  for (const template of data.productivity?.templates || []) { template.id = util.generateRandomUUID(); }
   for (const server of data.productivity?.servers || []) { server.enabled = false; server.credentialAlias = ''; server.authType = undefined; }
   const userDocument = data.config.userDocument || '';
-  data.activeThreadId = threadIds.get(data.activeThreadId) || ''; data.config = defaultConfig();
+  data.config = defaultConfig();
   data.config.userDocument = userDocument;
   return data;
 }

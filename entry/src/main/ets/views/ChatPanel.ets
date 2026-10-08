@@ -16,6 +16,7 @@ import { selectAttachments } from '../services/NativeActions';
 import { ToolApproval } from '../services/ToolApproval';
 import { InputFormCard } from './InputFormCard';
 import { ChatTeamCard } from './ChatTeamCard';
+import { ChatPlanPanel } from './ChatPlanPanel';
 import { MemoryDraftPanel } from './MemoryDraftPanel';
 import { ChatViewModel, MessageViewModel, ThreadViewModel } from '../viewmodel/ChatViewModel';
 import { UiValues } from '../model/InteractiveUi';
@@ -917,6 +918,10 @@ export struct ChatPanel {
         }
         if (this.commandSuggested('/compact')) { this.compactSuggestion() }
         if (this.referenceSuggested()) { this.referenceSuggestions() }
+        // The latest turn's plan stays beside the composer, outside the scrolling transcript.
+        ForEach(this.thread.messages.slice(-1).filter((message) => message.role === 'assistant'), (message: MessageViewModel) => {
+          ChatPlanPanel({ plan: message.plan })
+        }, (message: MessageViewModel) => this.thread.id + ':' + message.id)
         this.composer()
         Text(t('AI可能会犯错，请仔细鉴别。')).id('ai-disclaimer')
           .fontSize(Font.caption).fontColor($r('app.color.text_secondary'))

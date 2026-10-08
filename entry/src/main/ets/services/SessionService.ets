@@ -173,9 +173,9 @@ export class SessionService {
   async importSnapshot(imported: AppData): Promise<boolean> {
     return this.mutate(t("导入失败："), async () => {
       imported = JSON.parse(JSON.stringify(imported)) as AppData;
-      prepareBackupServices(this.data, imported, () => this.resources.createId());
       const candidate = this.snapshot(); const known = new Set(candidate.threads.map((item) => item.id));
-      if (imported.threads.some((item) => known.has(item.id))) { throw new Error(t("备份会话 ID 冲突。")); }
+      imported.threads = imported.threads.filter((item) => !known.has(item.id));
+      prepareBackupServices(this.data, imported, () => this.resources.createId());
       for (const thread of imported.threads) { await this.resources.ensureWorkspace(thread.id); }
       candidate.threads = candidate.threads.concat(imported.threads);
       // Restore preferences on a fresh install without overwriting an existing personal document.
@@ -185,7 +185,14 @@ export class SessionService {
       for (const skill of imported.extensions?.skills || []) { if (!extensions.skills.some((item) => item.name === skill.name)) { extensions.skills.push(skill); } }
       candidate.extensions = extensions; validateExtensions(extensions);
       const extras = candidate.productivity || defaultProductivity(); const source = imported.productivity || defaultProductivity();
-      extras.memories = extras.memories.concat(source.memories); extras.templates = extras.templates.concat(source.templates);
+      for (const memory of source.memories) {
+        if (!extras.memories.some((item) => item.id === memory.id)) { extras.memories.push(memory); }
+      }
+      for (const template of source.templates) {
+        // Older restores regenerated template IDs, including the built-in templates.
+        if (!extras.templates.some((item) => item.id === template.id ||
+          (item.name === template.name && item.content === template.content))) { extras.templates.push(template); }
+      }
       extras.servers = extras.servers.concat(source.servers);
       candidate.productivity = extras; validateProductivity(extras); await this.commitSettings(candidate);
     });

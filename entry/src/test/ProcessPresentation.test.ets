@@ -44,22 +44,21 @@ export default function processPresentationTests(): void {
       expect(foldsToAnswer(buildTimeline([{ content: 'reading', tools: [tool('a')] }]))).assertFalse();
       expect(foldsToAnswer(buildTimeline([{ content: '', tools: [tool('a')] }, { content: 'done', tools: [] }]))).assertTrue();
     });
-    it('countsFailuresAndKeepsOnlyLatestValidPlanAlongsideChartsAndResumeActions', 0, () => {
+    it('countsFailuresAndKeepsChartsAndResumeActionsInTheTranscript', 0, () => {
       const plan = '{"steps":[{"step":"work","status":"completed"}]}';
       const first = tool('first', 'complete', 'update_plan', plan);
       const latest = tool('latest', 'complete', 'update_plan', plan);
       const broken = tool('broken', 'complete', 'update_plan', '{}');
       const steps: AgentStep[] = [{ content: '', tools: [first, latest, broken, tool('x', 'failed')] }, { content: 'done', tools: [] }];
       const summary = summarizeProcess(steps);
-      expect(summary.latestPlanId).assertEqual('latest');
       expect(summary.failures).assertEqual(1);
       expect(summary.operations).assertEqual(4);
-      expect(persistentTool(first, summary.latestPlanId)).assertFalse();
-      expect(persistentTool(latest, summary.latestPlanId)).assertTrue();
-      expect(persistentTool(tool('chart', 'complete', 'publish_data_view'), '')).assertTrue();
-      expect(persistentTool(tool('form', 'interrupted', 'request_user_input'), '')).assertTrue();
-      expect(persistentTool(tool('form', 'cancelled', 'request_user_input'), '')).assertTrue();
-      expect(persistentTool(tool('ordinary'), '')).assertFalse();
+      expect(persistentTool(first)).assertFalse();
+      expect(persistentTool(latest)).assertFalse();
+      expect(persistentTool(tool('chart', 'complete', 'publish_data_view'))).assertTrue();
+      expect(persistentTool(tool('form', 'interrupted', 'request_user_input'))).assertTrue();
+      expect(persistentTool(tool('form', 'cancelled', 'request_user_input'))).assertTrue();
+      expect(persistentTool(tool('ordinary'))).assertFalse();
     });
     it('describesAGroupAsASentenceCountingEachFileOnce', 0, () => {
       setLocale('zh-CN');

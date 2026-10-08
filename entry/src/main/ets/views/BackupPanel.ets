@@ -48,7 +48,7 @@ export struct BackupPanel {
   private confirmRestore(item: CloudBackupItem): void {
     if (this.locked()) { return; }
     this.getUIContext().showAlertDialog({ title: t('恢复这份备份？'),
-      message: t('将 {0} 的备份恢复为独立副本，保留本机已有对话、密钥和服务设置。', [this.date(item)]),
+      message: t('恢复 {0} 的备份，跳过已有会话和模板，保留本机版本、密钥和服务设置。', [this.date(item)]),
       primaryButton: { value: t('取消'), action: () => {} },
       secondaryButton: { value: t('恢复'), action: () => this.cloud('restore', item.name) } });
   }
@@ -67,9 +67,9 @@ export struct BackupPanel {
     try {
       const context = this.context();
       if (action === 'restore') {
-        const data = await CloudBackup.restore(context, name);
+        const data = await CloudBackup.restore(context, name, this.app.exportSnapshot());
         if (!await this.app.importSnapshot(data)) { throw new Error(this.app.error); }
-        if (this.visible) { this.cloudStatus = t('备份已恢复为独立副本'); }
+        if (this.visible) { this.cloudStatus = t('备份已恢复，已跳过已有内容'); }
       } else if (action === 'delete') {
         const completed = await CloudBackup.remove(context, name);
         if (this.visible) {
@@ -88,7 +88,7 @@ export struct BackupPanel {
     this.busy = true; this.error = '';
     try {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      if (restore) { const data = await readBackup(context); if (data) { if (!await this.app.importSnapshot(data)) { throw new Error(this.app.error); } this.getUIContext().getPromptAction().showToast({ message: t("备份已恢复为独立副本") }); } }
+      if (restore) { const data = await readBackup(context, this.app.exportSnapshot()); if (data) { if (!await this.app.importSnapshot(data)) { throw new Error(this.app.error); } this.getUIContext().getPromptAction().showToast({ message: t("备份已恢复，已跳过已有内容") }); } }
       else { await exportBackup(context, this.app.exportSnapshot()); }
     } catch (error) { this.error = (error as Error).message; }
     finally { this.busy = false; }
@@ -143,7 +143,7 @@ export struct BackupPanel {
             NavRow({ title: t("导出备份"), subtitle: t("存到本机，或分享到其他设备"), compId: 'export-backup',
               icon: $r('sys.symbol.square_and_arrow_down'), disabled: this.app.busy || this.busy, onTap: () => this.backup(false) })
             RowDivider()
-            NavRow({ title: t("从备份导入"), subtitle: t("作为独立副本恢复，不会覆盖现有对话"), compId: 'import-backup',
+            NavRow({ title: t("从备份导入"), subtitle: t("只恢复缺少的内容，保留本机已有对话"), compId: 'import-backup',
               icon: $r('sys.symbol.folder_badge_plus'), disabled: this.app.busy || this.busy, onTap: () => this.backup(true) })
           }
         }
