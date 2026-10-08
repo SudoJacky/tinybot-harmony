@@ -26,6 +26,7 @@ export struct SettingsPanel {
   onUsage: () => void = () => {};
   onModels: () => void = () => {};
   onBackup: () => void = () => {};
+  onUiDemo: () => void = () => {};
   onSupport: (page: string) => void = () => {};
   onTools: (tab: string) => void = () => {};
   private pendingSave: Promise<void> = Promise.resolve();
@@ -235,6 +236,8 @@ export struct SettingsPanel {
         SectionHeader({ title: t('关于') })
         GroupCard() {
           Column() {
+            NavRow({ title: t('交互示例'), subtitle: t('旋转、缩放并调整三维场景'), compId: 'open-ui-demo', onTap: () => this.onUiDemo() })
+            RowDivider()
             NavRow({ title: t('使用帮助'), compId: 'open-help', onTap: () => this.onSupport('help') })
             RowDivider()
             NavRow({ title: t('评分和评论'), compId: 'open-rating', onTap: () => this.onSupport('rating') })

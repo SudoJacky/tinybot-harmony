@@ -1,3 +1,4 @@
+import { validateUiAnswer } from '../model/InteractiveUi';
 import { t } from '../model/I18n';
 import { AgentStep, AgentTurn, MAX_AGENT_STEPS, ModelMessage, ToolCall, ToolDefinition, ToolExecution,
   interruptTools, stepMessages, toolError, validateToolCalls } from '../model/Agent';
@@ -97,6 +98,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
         } })
         .finally(() => { acceptingText = false; });
       cancellation.check();
+      validateUiAnswer(response.content);
       // The provider's final message is authoritative even when it emitted no deltas.
       step.content = response.content;
       step.reasoningContent = response.reasoningContent;

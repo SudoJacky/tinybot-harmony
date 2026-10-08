@@ -1,4 +1,5 @@
 import { t } from '../model/I18n';
+import { UiValues } from '../model/InteractiveUi';
 import { RequestUsage } from '../model/Usage';
 import { referenceContext } from '../model/ThreadReferences';
 import { TeamMember, TeamPlan, TeamRun } from '../model/Team';
@@ -204,6 +205,9 @@ export class ChatViewModel {
   async resumeQueue(onUpdate: () => void): Promise<void> {
     this.onOutput = onUpdate;
     try { await this.requireSession().resumeQueue(); } finally { this.onOutput = () => {}; }
+  }
+  interactUi(threadId: string, messageId: string, key: string, values: UiValues, actionId: string): Promise<UiValues> {
+    return this.requireSession().interactUi(threadId, messageId, key, values, actionId);
   }
   async stop(): Promise<void> { if (this.session) { await this.session.stop(); } }
   retryPrompt(): void {

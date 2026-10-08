@@ -1,3 +1,4 @@
+import { WebUiDemoPanel } from '../views/WebUiDemoPanel';
 import { t } from '../model/I18n';
 import { ProductivityPanel } from '../views/ProductivityPanel';
 import { ModelSettingsPanel } from '../views/AssistantPanel';
@@ -211,6 +212,8 @@ struct Index {
       NavDestination() { BranchesPanel({ app: this.app, onSelected: () => this.paths.clear() }) }.title(t("会话分支")).backgroundColor($r('app.color.page_background'))
     } else if (name === 'model-settings') {
       NavDestination() { ModelSettingsPanel({ app: this.app }) }.title(t('模型分工与能力')).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'ui-demo') {
+      NavDestination() { WebUiDemoPanel() }.title(t('交互示例')).backgroundColor($r('app.color.page_background'))
     } else if (name === 'backup') {
       NavDestination() { BackupPanel({ app: this.app }) }.title(t('备份与恢复')).backgroundColor($r('app.color.page_background'))
     } else if (name === 'usage') {
@@ -225,6 +228,7 @@ struct Index {
         SettingsPanel({ app: this.app, settings: this.app.settings,
           onUsage: () => { this.paths.pushPath({ name: 'usage' }); },
           onModels: () => { this.paths.pushPath({ name: 'model-settings' }); },
+          onUiDemo: () => { this.paths.pushPath({ name: 'ui-demo' }); },
           onBackup: () => { this.paths.pushPath({ name: 'backup' }); },
           onSupport: (page: string) => this.openSupport(page),
           onTools: (tab: string) => this.openTools(tab),

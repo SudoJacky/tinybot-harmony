@@ -36,7 +36,7 @@ function tick(value: number): string {
 
 @Component
 export struct DataViewCard {
-  @Prop content: string;
+  @Prop @Watch('refreshData') content: string;
   @State private view: DataView | undefined = undefined;
   @State private error: string = '';
   @State private table: boolean = false;
@@ -46,13 +46,19 @@ export struct DataViewCard {
   @State private series: string[] = SERIES_LIGHT;
   private canvas: CanvasRenderingContext2D = new CanvasRenderingContext2D(new RenderingContextSettings(true));
   private chartWidth: number = 300;
+  private canvasReady: boolean = false;
   private ink: string = '#8F9B97';
   private grid: string = '#E1E5E0';
   private surface: string = '#FFFFFF';
 
+  private refreshData(): void {
+    this.error = '';
+    try { this.view = parseDataView(this.content); this.rows = this.view.rows; this.table = this.view.kind === 'table'; this.sortColumn = -1; this.draw(); }
+    catch (error) { this.view = undefined; this.rows = []; this.error = (error as Error).message; }
+  }
+
   aboutToAppear(): void {
-    try { this.view = parseDataView(this.content); this.rows = this.view.rows; this.table = this.view.kind === 'table'; }
-    catch (error) { this.error = (error as Error).message; }
+    this.refreshData();
     try {
       const resources = this.getUIContext().getHostContext()!.resourceManager;
       this.series = resources.getConfigurationSync().colorMode === resourceManager.ColorMode.DARK ? SERIES_DARK : SERIES_LIGHT;
@@ -130,7 +136,7 @@ export struct DataViewCard {
 
   private draw(): void {
     const view = this.view;
-    if (!view || !this.isChart()) { return; }
+    if (!view || !this.isChart() || !this.canvasReady) { return; }
     const ctx = this.canvas; const width = this.chartWidth; const plotWidth = Math.max(1, width - PLOT_LEFT - 4);
     const plotHeight = CHART_HEIGHT - PLOT_TOP - PLOT_BOTTOM;
     ctx.clearRect(0, 0, width, CHART_HEIGHT);
@@ -228,7 +234,7 @@ export struct DataViewCard {
           Text(this.view.insight).fontSize(13).lineHeight(20).width('100%').fontColor($r('app.color.text_secondary'))
         }
         if (this.isChart() && !this.table) {
-          Canvas(this.canvas).width('100%').height(CHART_HEIGHT).onReady(() => this.draw())
+          Canvas(this.canvas).width('100%').height(CHART_HEIGHT).onReady(() => { this.canvasReady = true; this.draw(); })
             .accessibilityText(this.view.title + '，' + (KIND_NAMES()[this.view.kind] || '') + t("，可切换为数据表查看"))
             .onAreaChange((_old, area) => { this.chartWidth = Number(area.width); this.draw(); })
           Flex({ wrap: FlexWrap.Wrap }) {
