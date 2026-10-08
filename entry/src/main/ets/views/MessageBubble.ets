@@ -6,7 +6,6 @@ import { InteractiveAnswer } from './InteractiveAnswer';
 import { UiValues } from '../model/InteractiveUi';
 import { DocumentPreview } from './DocumentPreview';
 import { DataViewCard } from './DataViewCard';
-import { PlanItem, parsePlan } from '../model/RichArtifacts';
 import { Attachment } from '../model/Productivity';
 import { Attachments } from '../services/Attachments';
 import { MessageViewModel, ToolExecutionViewModel } from '../viewmodel/ChatViewModel';
@@ -85,48 +84,13 @@ function toolStatusLabel(status: string): string {
 
 function activeTool(tool: ToolExecutionViewModel): boolean { return tool.status === 'running' || tool.status === 'pending'; }
 
-// Results that stay in view even when their process group or the whole answer is folded: charts, forms to resume, the latest plan.
+// Results that stay in view even when their process group or the whole answer is folded: charts and forms to resume.
 @Component
 struct RichToolResult {
   @ObjectLink execution: ToolExecutionViewModel;
-  @Prop showPlan: boolean = false;
   onResume: (id: string) => void = () => {};
 
   private name(): string { return this.execution.call.function.name; }
-  private plan(): PlanItem[] {
-    try { return parsePlan(this.execution.output).steps; } catch (_) { return []; }
-  }
-  private planDone(): number { return this.plan().filter((item: PlanItem) => item.status === 'completed').length; }
-
-  @Builder
-  planCard() {
-    Column({ space: 10 }) {
-      Row({ space: Space.sm }) {
-        Text(t("任务计划")).fontSize(13).fontWeight(FontWeight.Medium).layoutWeight(1).fontColor($r('app.color.text_primary'))
-        Text(this.planDone() + ' / ' + this.plan().length).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
-      }.width('100%')
-      Progress({ value: this.planDone(), total: Math.max(1, this.plan().length), type: ProgressType.Linear })
-        .width('100%').color($r('app.color.accent')).backgroundColor($r('app.color.surface_variant'))
-        .style({ strokeWidth: 4, strokeRadius: 2 })
-      ForEach(this.plan(), (item: PlanItem) => {
-        Row({ space: 10 }) {
-          if (item.status === 'completed') {
-            SymbolGlyph($r('sys.symbol.checkmark_circle_fill')).fontSize(18).fontColor([$r('app.color.accent')])
-          } else if (item.status === 'in_progress') {
-            LoadingProgress().width(18).height(18).color($r('app.color.accent'))
-          } else {
-            SymbolGlyph($r('sys.symbol.circle')).fontSize(18).fontColor([$r('app.color.text_tertiary')])
-          }
-          Text(item.step).fontSize(14).lineHeight(20).layoutWeight(1)
-            .fontWeight(item.status === 'in_progress' ? FontWeight.Medium : FontWeight.Normal)
-            .decoration({ type: item.status === 'completed' ? TextDecorationType.LineThrough : TextDecorationType.None,
-              color: $r('app.color.text_tertiary') })
-            .fontColor(item.status === 'completed' ? $r('app.color.text_tertiary') : $r('app.color.text_primary'))
-        }.width('100%').alignItems(VerticalAlign.Top)
-      })
-    }.width('100%').padding({ top: 8, bottom: 8 })
-  }
-
   build() {
     Column({ space: Space.sm }) {
       if (this.name() === 'request_user_input' && ['interrupted', 'cancelled'].includes(this.execution.status)) {
@@ -139,9 +103,6 @@ struct RichToolResult {
       }
       if (this.execution.status === 'complete' && this.name() === 'publish_data_view') {
         DataViewCard({ content: this.execution.output })
-      }
-      if (this.showPlan && this.execution.status === 'complete' && this.plan().length > 0) {
-        this.planCard()
       }
     }.width('100%').alignItems(HorizontalAlign.Start)
   }
@@ -236,10 +197,8 @@ struct ProcessGroup {
     }
     return tools;
   }
-  private latestPlanId(): string { return summarizeProcess(this.message.stepViews).latestPlanId; }
   private richTools(): ToolExecutionViewModel[] {
-    const latestPlanId = this.latestPlanId();
-    return this.tools().filter((tool: ToolExecutionViewModel) => persistentTool(tool, latestPlanId));
+    return this.tools().filter((tool: ToolExecutionViewModel) => persistentTool(tool));
   }
   private thought(): boolean { return this.items().some((item: ProcessItem) => item.tool < 0); }
   private failures(): number { return this.tools().filter((tool: ToolExecutionViewModel) => tool.status === 'failed').length; }
@@ -338,7 +297,7 @@ struct ProcessGroup {
         }.width('100%').alignItems(HorizontalAlign.Start)
       }
       ForEach(this.richTools(), (tool: ToolExecutionViewModel) => {
-        RichToolResult({ execution: tool, onResume: this.onResume, showPlan: tool.call.id === this.latestPlanId() })
+        RichToolResult({ execution: tool, onResume: this.onResume })
       }, (tool: ToolExecutionViewModel) => tool.call.id)
     }.width('100%').alignItems(HorizontalAlign.Start)
   }
@@ -422,10 +381,9 @@ export struct MessageBubble {
     if (entry.kind === 'text') { return index === count - 1 || (this.message.stepViews[entry.step]?.content || '').includes('```tinybot-ui'); }
     if (entry.kind !== 'process') { return true; }
     // Empty folded groups must not mount: the parent Column adds spacing even to empty children.
-    const latestPlanId = summarizeProcess(this.message.stepViews).latestPlanId;
     return entry.items.some((item: ProcessItem) => {
       const tool = this.message.stepViews[item.step]?.tools[item.tool];
-      return tool !== undefined && persistentTool(tool, latestPlanId);
+      return tool !== undefined && persistentTool(tool);
     });
   }
   private processSummary(): string {

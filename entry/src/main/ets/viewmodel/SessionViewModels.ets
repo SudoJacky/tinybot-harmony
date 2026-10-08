@@ -7,6 +7,7 @@ import { PendingInput } from '../model/PendingInput';
 import { t } from '../model/I18n';
 import { UiSavedState } from '../model/InteractiveUi';
 import { DisclosureStore } from './DisclosureState';
+import { PlanProgressViewModel } from './PlanProgressViewModel';
 
 @Observed
 export class ToolExecutionViewModel implements ToolExecution {
@@ -35,6 +36,7 @@ export class AgentStepViewModel implements AgentStep {
 
 @Observed
 export class MessageViewModel {
+  plan: PlanProgressViewModel = new PlanProgressViewModel();
   uiStates: UiSavedState[] = [];
   references: ThreadReference[] = [];
   // Deliberately excluded from MessageData: keep reading choices across live updates,
@@ -59,6 +61,7 @@ export class MessageViewModel {
     this.id = data.id; this.role = data.role; this.content = data.content; this.status = data.status; this.error = data.error;
     this.attachments = data.attachments || [];
     this.modelRef = data.modelRef; this.steps = data.steps || [];
+    this.plan.update(this.steps, data.status);
     this.reasoningContent = this.steps.map((step) => step.reasoningContent || '').filter((text) => text.length > 0).join('\n\n');
     this.stepViews = this.steps.map((step: AgentStep, index: number) => {
       const existing = this.stepViews[index];

@@ -9,6 +9,10 @@ import { TeamMemberAvatar } from './TeamMemberAvatar';
 
 interface TeamCardInput { run: TeamRun; }
 interface TeamStatusInput { status: string; }
+interface TeamAvatarInput { run: TeamRun; member: TeamMember; size: number; ring: boolean; }
+interface TeamToolInput { tool: ToolExecution; }
+interface TeamAttemptInput { record: TeamTaskRecord; attempt: TeamAttempt; index: number; }
+interface TeamTaskInput { run: TeamRun; record: TeamTaskRecord; }
 
 function LOG_TITLES(): Record<string, string> { return {
   'team_complete_task': t("提交交接"), 'team_list_messages': t("查看团队交接"), 'team_read_message': t("读取交接"),
@@ -87,9 +91,9 @@ struct ChatTeamRun {
   }
 
   @Builder
-  avatar(run: TeamRun, member: TeamMember, size: number, ring: boolean) {
-    TeamMemberAvatar({ memberId: member.id, diameter: size, ring: ring, busy: this.memberBusy(run, member.id),
-      label: member.name + (this.memberBusy(run, member.id) ? t("，工作中") : '') })
+  avatar(input: TeamAvatarInput) {
+    TeamMemberAvatar({ memberId: input.member.id, diameter: input.size, ring: input.ring, busy: this.memberBusy(input.run, input.member.id),
+      label: input.member.name + (this.memberBusy(input.run, input.member.id) ? t("，工作中") : '') })
   }
 
   @Builder
@@ -106,15 +110,15 @@ struct ChatTeamRun {
   }
 
   @Builder
-  taskGlyph(status: string) {
+  taskGlyph(input: TeamStatusInput) {
     Stack() {
-      if (status === 'running') {
+      if (input.status === 'running') {
         LoadingProgress().width(18).height(18).color($r('app.color.accent'))
-      } else if (status === 'succeeded') {
+      } else if (input.status === 'succeeded') {
         SymbolGlyph($r('sys.symbol.checkmark_circle_fill')).fontSize(18).fontColor([$r('app.color.accent')])
-      } else if (status === 'failed') {
+      } else if (input.status === 'failed') {
         SymbolGlyph($r('sys.symbol.exclamationmark_circle')).fontSize(18).fontColor([$r('app.color.danger')])
-      } else if (status === 'interrupted' || status === 'cancelled') {
+      } else if (input.status === 'interrupted' || input.status === 'cancelled') {
         SymbolGlyph($r('sys.symbol.exclamationmark_circle')).fontSize(18).fontColor([$r('app.color.warning')])
       } else {
         SymbolGlyph($r('sys.symbol.circle')).fontSize(18).fontColor([$r('app.color.text_tertiary')])
@@ -128,24 +132,24 @@ struct ChatTeamRun {
   }
 
   @Builder
-  toolLog(tool: ToolExecution) {
+  toolLog(input: TeamToolInput) {
     Column({ space: 4 }) {
       Row({ space: 6 }) {
-        Text(LOG_TITLES()[tool.call.function.name] || tool.call.function.name).fontSize(12).fontWeight(FontWeight.Medium)
+        Text(LOG_TITLES()[input.tool.call.function.name] || input.tool.call.function.name).fontSize(12).fontWeight(FontWeight.Medium)
           .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
-        if (tool.status === 'running') {
+        if (input.tool.status === 'running') {
           LoadingProgress().width(12).height(12).color($r('app.color.accent'))
-        } else if (tool.status === 'complete') {
+        } else if (input.tool.status === 'complete') {
           SymbolGlyph($r('sys.symbol.checkmark')).fontSize(12).fontColor([$r('app.color.accent')])
         } else {
-          Text(tool.status === 'failed' ? t("失败") : t("已中断")).fontSize(11)
-            .fontColor(tool.status === 'failed' ? $r('app.color.danger') : $r('app.color.text_tertiary'))
+          Text(input.tool.status === 'failed' ? t("失败") : t("已中断")).fontSize(11)
+            .fontColor(input.tool.status === 'failed' ? $r('app.color.danger') : $r('app.color.text_tertiary'))
         }
       }.width('100%')
-      Text(tool.call.function.arguments).fontSize(11).lineHeight(16).fontFamily('monospace').maxLines(4)
+      Text(input.tool.call.function.arguments).fontSize(11).lineHeight(16).fontFamily('monospace').maxLines(4)
         .textOverflow({ overflow: TextOverflow.Ellipsis }).copyOption(CopyOptions.LocalDevice).fontColor($r('app.color.text_secondary'))
-      if (tool.output) {
-        Text(tool.output).fontSize(11).lineHeight(16).maxLines(6).textOverflow({ overflow: TextOverflow.Ellipsis })
+      if (input.tool.output) {
+        Text(input.tool.output).fontSize(11).lineHeight(16).maxLines(6).textOverflow({ overflow: TextOverflow.Ellipsis })
           .copyOption(CopyOptions.LocalDevice).fontColor($r('app.color.text_secondary'))
       }
     }.width('100%').alignItems(HorizontalAlign.Start).padding({ left: 10, right: 10, top: 8, bottom: 8 })
@@ -153,25 +157,25 @@ struct ChatTeamRun {
   }
 
   @Builder
-  attemptView(record: TeamTaskRecord, attempt: TeamAttempt, index: number) {
+  attemptView(input: TeamAttemptInput) {
     Column({ space: Space.sm }) {
-      Text((record.attempts.length > 1 ? t("第 ") + (index + 1) + t(" 次 · ") : '') + teamStatus(attempt.status) + ' · ' + clock(attempt.startedAt) +
-        (attempt.finishedAt ? t(" · 用时 ") + duration(attempt.finishedAt - attempt.startedAt) : ''))
+      Text((input.record.attempts.length > 1 ? t("第 ") + (input.index + 1) + t(" 次 · ") : '') + teamStatus(input.attempt.status) + ' · ' + clock(input.attempt.startedAt) +
+        (input.attempt.finishedAt ? t(" · 用时 ") + duration(input.attempt.finishedAt - input.attempt.startedAt) : ''))
         .fontSize(11).fontColor($r('app.color.text_tertiary'))
-      if (attempt.error) {
-        Text(attempt.error).fontSize(13).lineHeight(19).width('100%').padding({ left: 10, right: 10, top: 6, bottom: 6 })
+      if (input.attempt.error) {
+        Text(input.attempt.error).fontSize(13).lineHeight(19).width('100%').padding({ left: 10, right: 10, top: 6, bottom: 6 })
           .borderRadius(Radius.sm).fontColor($r('app.color.danger')).backgroundColor($r('app.color.danger_container'))
           .copyOption(CopyOptions.LocalDevice)
       }
-      if (attempt.handoff) {
+      if (input.attempt.handoff) {
         this.label(t("交接"))
         Column() {
-          MarkdownView({ content: attempt.handoff.summary, fontSize: 14 })
+          MarkdownView({ content: input.attempt.handoff.summary, fontSize: 14 })
         }.width('100%').padding({ left: Space.md, right: 4 })
         .border({ width: { left: 2 }, color: $r('app.color.accent_outline') })
-        if (attempt.handoff.unresolved.length) {
+        if (input.attempt.handoff.unresolved.length) {
           this.label(t("未解决"))
-          ForEach(attempt.handoff.unresolved, (item: string) => {
+          ForEach(input.attempt.handoff.unresolved, (item: string) => {
             Row({ space: 6 }) {
               SymbolGlyph($r('sys.symbol.exclamationmark_circle')).fontSize(14).fontColor([$r('app.color.warning')])
                 .margin({ top: 2 })
@@ -180,10 +184,10 @@ struct ChatTeamRun {
             }.width('100%').alignItems(VerticalAlign.Top)
           }, (item: string, i: number) => i + item)
         }
-        if (attempt.handoff.artifacts.length) {
+        if (input.attempt.handoff.artifacts.length) {
           this.label(t("产物"))
           Flex({ wrap: FlexWrap.Wrap, space: { main: LengthMetrics.vp(6), cross: LengthMetrics.vp(6) } }) {
-            ForEach(attempt.handoff.artifacts, (artifact: TeamArtifact) => {
+            ForEach(input.attempt.handoff.artifacts, (artifact: TeamArtifact) => {
               Row({ space: 4 }) {
                 SymbolGlyph($r('sys.symbol.doc_text')).fontSize(14).fontColor([$r('app.color.accent')])
                 Text(baseName(artifact.path)).fontSize(12).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -195,23 +199,25 @@ struct ChatTeamRun {
             }, (artifact: TeamArtifact) => artifact.path)
           }.width('100%')
         }
-      } else if (attempt.turn.content) {
-        MarkdownView({ content: attempt.turn.content, fontSize: 14 })
-      } else if (attempt.status === 'running') {
+      } else if (input.attempt.turn.content) {
+        MarkdownView({ content: input.attempt.turn.content, fontSize: 14 })
+      } else if (input.attempt.status === 'running') {
         Text(t("正在工作，完成后会提交交接…")).fontSize(13).fontColor($r('app.color.text_tertiary'))
       }
-      if (this.toolCount(attempt) > 0) {
+      if (this.toolCount(input.attempt) > 0) {
         Row({ space: 4 }) {
-          Text(t("执行记录 · ") + this.toolCount(attempt) + t(" 次工具调用")).fontSize(12).fontColor($r('app.color.text_secondary'))
+          Text(t("执行记录 · ") + this.toolCount(input.attempt) + t(" 次工具调用")).fontSize(12).fontColor($r('app.color.text_secondary'))
           SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(12).fontColor([$r('app.color.text_tertiary')])
-            .rotate({ angle: this.expandedLogs.includes(attempt.id) ? 180 : 0 })
-        }.id('team-log-' + attempt.id).height(32)
-        .onClick(() => this.animate(() => { this.expandedLogs = this.toggleList(this.expandedLogs, attempt.id); }))
-        if (this.expandedLogs.includes(attempt.id)) {
+            .rotate({ angle: this.expandedLogs.includes(input.attempt.id) ? 180 : 0 })
+        }.id('team-log-' + input.attempt.id).height(32)
+        .onClick(() => this.animate(() => { this.expandedLogs = this.toggleList(this.expandedLogs, input.attempt.id); }))
+        if (this.expandedLogs.includes(input.attempt.id)) {
           Column({ space: 6 }) {
-            ForEach(attempt.turn.steps, (step: AgentStep) => {
-              ForEach(step.tools, (tool: ToolExecution) => { this.toolLog(tool) }, (tool: ToolExecution) => tool.call.id + tool.status)
-            })
+            ForEach(input.attempt.turn.steps.map((_step, index: number) => index), (stepIndex: number) => {
+              ForEach(input.attempt.turn.steps[stepIndex].tools.map((tool) => tool.call.id), (callId: string) => {
+                this.toolLog({ tool: input.attempt.turn.steps[stepIndex].tools.find((tool) => tool.call.id === callId) as ToolExecution })
+              }, (callId: string) => callId)
+            }, (stepIndex: number) => stepIndex.toString())
           }.width('100%').transition(TransitionEffect.OPACITY)
         }
       }
@@ -219,37 +225,39 @@ struct ChatTeamRun {
   }
 
   @Builder
-  taskRow(run: TeamRun, record: TeamTaskRecord) {
+  taskRow(input: TeamTaskInput) {
     Column({ space: Space.sm }) {
       Row({ space: Space.md }) {
-        if (run.members.find((member) => member.id === record.task.memberId)) {
-          this.avatar(run, run.members.find((member) => member.id === record.task.memberId) as TeamMember, 32, record.status === 'running')
+        if (input.run.members.find((member) => member.id === input.record.task.memberId)) {
+          this.avatar({ run: input.run, member: input.run.members.find((member) => member.id === input.record.task.memberId) as TeamMember, size: 32, ring: input.record.status === 'running' })
         }
         Column({ space: 2 }) {
-          Text(record.task.title).fontSize(14).fontWeight(FontWeight.Medium).maxLines(this.expandedTasks.includes(record.task.id) ? 4 : 1)
+          Text(input.record.task.title).fontSize(14).fontWeight(FontWeight.Medium).maxLines(this.expandedTasks.includes(input.record.task.id) ? 4 : 1)
             .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
-          Text(this.memberName(run, record.task.memberId) + ' · ' + teamStatus(record.status)).fontSize(Font.caption)
-            .fontColor(record.status === 'failed' ? $r('app.color.danger') : $r('app.color.text_secondary'))
+          Text(this.memberName(input.run, input.record.task.memberId) + ' · ' + teamStatus(input.record.status)).fontSize(Font.caption)
+            .fontColor(input.record.status === 'failed' ? $r('app.color.danger') : $r('app.color.text_secondary'))
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-        this.taskGlyph(record.status)
+        this.taskGlyph({ status: input.record.status })
         SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(12).fontColor([$r('app.color.text_tertiary')])
-          .rotate({ angle: this.expandedTasks.includes(record.task.id) ? 180 : 0 })
-      }.id('team-task-' + run.id + '-' + record.task.id).width('100%').constraintSize({ minHeight: 52 })
-      .accessibilityText(record.task.title + '，' + this.memberName(run, record.task.memberId) + '，' + teamStatus(record.status))
-      .onClick(() => this.animate(() => { this.expandedTasks = this.toggleList(this.expandedTasks, record.task.id); }))
-      if (this.expandedTasks.includes(record.task.id)) {
+          .rotate({ angle: this.expandedTasks.includes(input.record.task.id) ? 180 : 0 })
+      }.id('team-task-' + input.run.id + '-' + input.record.task.id).width('100%').constraintSize({ minHeight: 52 })
+      .accessibilityText(input.record.task.title + '，' + this.memberName(input.run, input.record.task.memberId) + '，' + teamStatus(input.record.status))
+      .onClick(() => this.animate(() => { this.expandedTasks = this.toggleList(this.expandedTasks, input.record.task.id); }))
+      if (this.expandedTasks.includes(input.record.task.id)) {
         Column({ space: Space.sm }) {
           // The result leads; the brief the coordinator wrote is usually long, so it starts clamped.
-          ForEach(record.attempts, (attempt: TeamAttempt, index: number) => { this.attemptView(record, attempt, index) },
-            (attempt: TeamAttempt) => JSON.stringify(attempt))
-          if (!record.attempts.length) { Text(t("等待前置任务或空闲员工")).fontSize(13).fontColor($r('app.color.text_tertiary')) }
+          ForEach(input.record.attempts.map((attempt) => attempt.id), (attemptId: string, index: number) => {
+            this.attemptView({ record: input.record,
+              attempt: input.record.attempts.find((attempt) => attempt.id === attemptId) as TeamAttempt, index: index })
+          }, (attemptId: string) => attemptId)
+          if (!input.record.attempts.length) { Text(t("等待前置任务或空闲员工")).fontSize(13).fontColor($r('app.color.text_tertiary')) }
           this.label(t("任务说明"))
-          Text(record.task.instructions).fontSize(13).lineHeight(20).fontColor($r('app.color.text_secondary'))
-            .maxLines(this.expandedBriefs.includes(record.task.id) ? 200 : 3).textOverflow({ overflow: TextOverflow.Ellipsis })
-            .accessibilityText(record.task.instructions)
-            .onClick(() => this.animate(() => { this.expandedBriefs = this.toggleList(this.expandedBriefs, record.task.id); }))
-          if (record.task.dependencies.length) {
-            Text(t("依赖：") + record.task.dependencies.map((id) => run.tasks.find((item) => item.task.id === id)?.task.title || id).join('、'))
+          Text(input.record.task.instructions).fontSize(13).lineHeight(20).fontColor($r('app.color.text_secondary'))
+            .maxLines(this.expandedBriefs.includes(input.record.task.id) ? 200 : 3).textOverflow({ overflow: TextOverflow.Ellipsis })
+            .accessibilityText(input.record.task.instructions)
+            .onClick(() => this.animate(() => { this.expandedBriefs = this.toggleList(this.expandedBriefs, input.record.task.id); }))
+          if (input.record.task.dependencies.length) {
+            Text(t("依赖：") + input.record.task.dependencies.map((id) => input.run.tasks.find((item) => item.task.id === id)?.task.title || id).join('、'))
               .fontSize(12).lineHeight(18).fontColor($r('app.color.text_tertiary'))
           }
         }.width('100%').alignItems(HorizontalAlign.Start).padding({ left: 44, bottom: Space.sm })
@@ -287,9 +295,11 @@ struct ChatTeamRun {
           if (!this.expanded) {
             Row() {
               Row() {
-                ForEach(input.run.members.slice(0, 5), (member: TeamMember, index: number) => {
-                  Column() { this.avatar(input.run, member, 26, true) }.margin({ left: index === 0 ? 0 : -6 })
-                }, (member: TeamMember) => member.id + ':' + this.memberBusy(input.run, member.id))
+                ForEach(input.run.members.slice(0, 5).map((member) => member.id), (memberId: string, index: number) => {
+                  Column() {
+                    this.avatar({ run: input.run, member: input.run.members.find((member) => member.id === memberId) as TeamMember, size: 26, ring: true })
+                  }.margin({ left: index === 0 ? 0 : -6 })
+                }, (memberId: string) => memberId)
               }
               Text(input.run.members.map((member) => member.name).join('、')).fontSize(Font.caption).maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1).margin({ left: Space.sm })
@@ -308,10 +318,12 @@ struct ChatTeamRun {
                 .fontColor($r('app.color.danger')).backgroundColor($r('app.color.danger_container'))
                 .copyOption(CopyOptions.LocalDevice)
             }
-            ForEach(input.run.tasks, (record: TeamTaskRecord, index: number) => {
+            // Stable IDs retain native rows. Resolve each ID through the live builder input so
+            // new snapshots update existing rows instead of capturing their initial objects.
+            ForEach(input.run.tasks.map((record) => record.task.id), (taskId: string, index: number) => {
               if (index > 0) { Divider().strokeWidth(0.5).color($r('app.color.divider')).margin({ left: 44 }) }
-              this.taskRow(input.run, record)
-            }, (record: TeamTaskRecord) => JSON.stringify(record))
+              this.taskRow({ run: input.run, record: input.run.tasks.find((record) => record.task.id === taskId) as TeamTaskRecord })
+            }, (taskId: string) => taskId)
             Row({ space: Space.sm }) {
               Text(this.usage(input.run)).fontSize(11).layoutWeight(1).maxLines(2).fontColor($r('app.color.text_tertiary'))
               Row({ space: 4 }) {

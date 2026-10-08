@@ -128,7 +128,8 @@ function readSavedUsage(root) {
   const dir=nativePath(root+'/usage-records');const manifest=JSON.parse(fs.readFileSync(path.join(dir,'index.json'),'utf8'));
   return Array.from({length:manifest.pages},(_,i)=>JSON.parse(fs.readFileSync(path.join(dir,i+'.json'),'utf8'))).flat();
 }
-async function test(name, run) { await run(); console.log('PASS '+name); }
+let completedTests = 0;
+async function test(name, run) { await run(); completedTests++; console.log('PASS '+name); }
 (async () => {
   let store;
   await test('atomic legacy migration, unchanged thread reuse and interrupted commit recovery', async () => {
@@ -239,7 +240,7 @@ async function test(name, run) { await run(); console.log('PASS '+name); }
     const authenticated={...server,credentialAlias:alias,authType:'oauth'};const tokens=await Promise.all([McpOAuth.bearer(authenticated),McpOAuth.bearer(authenticated)]);
     assert.deepEqual(tokens,['second','second']);assert.equal(tokenRequests,2);await assert.rejects(McpOAuth.bearer({...authenticated,url:'https://other.invalid/mcp'}),/不匹配/);
   });
-  await test('backup restores independent conversations, attachments, files and scoped memory without secrets',async()=>{
+  await test('backup preserves conversation identities, attachments, files and scoped memory without secrets',async()=>{
     const {exportBackup,readBackup}=load(path.join(source,'services/Backup'));
     const root='/sandbox/backup-app';fs.mkdirSync(nativePath(root+'/workspace/thread'),{recursive:true});fs.mkdirSync(nativePath(root+'/cache'));fs.mkdirSync(nativePath(root+'/attachments'));
     Attachments.configure(root);const id=crypto.randomUUID();fs.writeFileSync(nativePath(root+'/attachments/'+id+'.txt'),'sample');fs.writeFileSync(nativePath(root+'/workspace/thread/note.txt'),'workspace');
@@ -250,7 +251,7 @@ async function test(name, run) { await run(); console.log('PASS '+name); }
     data.productivity={memories:[{id:'m',content:'fact',threadId:'thread',updatedAt:1,sourceThreadId:'thread',sourceMessageId:'u'}],templates:[],servers:[]};
     const context={cacheDir:root+'/cache',getApplicationContext:()=>({filesDir:root})};await exportBackup(context,JSON.parse(JSON.stringify(data)));
     const exported=fs.readFileSync(nativePath(selectedFile),'utf8');assert.ok(!exported.includes('SECRET-ALIAS'));
-    const restored=await readBackup(context);assert.notEqual(restored.threads[0].id,'thread');assert.equal(restored.providerProfiles[0].enabled,false);
+    const restored=await readBackup(context,model.emptyData());assert.equal(restored.threads[0].id,'thread');assert.equal(restored.providerProfiles[0].enabled,false);
     assert.equal(JSON.parse(exported).data.config.userDocument, data.config.userDocument);
     assert.equal(restored.config.userDocument, data.config.userDocument);
     assert.equal(restored.productivity.memories[0].threadId,restored.threads[0].id);assert.equal(restored.productivity.memories[0].sourceMessageId,restored.threads[0].messages[0].id);
@@ -264,8 +265,70 @@ async function test(name, run) { await run(); console.log('PASS '+name); }
     const session=new SessionService(repository,{},vault,resources);await session.initialize();
     const local=session.snapshot();assert.equal(await session.importSnapshot(restored),true,session.state.error);
     const merged=await repository.load();assert.deepEqual(merged.providerProfiles,local.providerProfiles);assert.deepEqual(merged.config,local.config);
-    assert.equal(merged.threads.length,2);assert.equal(merged.threads[1].modelRef.providerId,'provider');
-    model.parseAppData(JSON.stringify(restored));const bad=JSON.parse(exported);bad.files[0].path='../escape';fs.writeFileSync(nativePath(selectedFile),JSON.stringify(bad));await assert.rejects(readBackup(context),/路径/);
+    assert.equal(merged.threads.length,1,'restoring an existing conversation must not duplicate it');assert.equal(merged.threads[0].modelRef.providerId,'provider');
+    model.parseAppData(JSON.stringify(restored));const bad=JSON.parse(exported);bad.files[0].path='../escape';fs.writeFileSync(nativePath(selectedFile),JSON.stringify(bad));await assert.rejects(readBackup(context,model.emptyData()),/路径/);
+  });
+  await test('repeated restore merges three chats and templates without overwriting local files or edits',async()=>{
+    const {createBackupFile,readBackupFile}=load(path.join(source,'services/Backup'));
+    const {SessionService}=load(path.join(source,'services/SessionService'));
+    const {defaultProductivity}=load(path.join(source,'model/Productivity'));
+    const root='/sandbox/dedup-app';fs.mkdirSync(nativePath(root+'/cache'),{recursive:true});
+    fs.mkdirSync(nativePath(root+'/attachments'));Attachments.configure(root);
+    const attachment={id:'dedup-attachment',name:'note.txt',mime:'text/plain',path:'dedup-attachment.txt',size:6};
+    fs.writeFileSync(nativePath(root+'/attachments/'+attachment.path),'sample');
+    const data=model.emptyData();data.productivity=defaultProductivity();data.activeThreadId='chat-0';
+    data.threads=Array.from({length:3},(_,i)=>({id:'chat-'+i,title:'same title',updatedAt:1,messages:[
+      {id:'question-'+i,role:'user',content:'same question',status:'complete',error:'',attachments:[{...attachment}]},
+      {id:'answer-'+i,role:'assistant',content:'same answer',status:'complete',error:''}]}));
+    data.threads[1].parentThreadId='chat-0';data.threads[1].parentMessageId='answer-0';
+    data.threads[1].references=[{threadId:'chat-0',title:'same title',content:'snapshot',capturedAt:1,truncated:false}];
+    data.productivity.templates.push({id:'custom',name:'Custom',content:'original {{input}}'});
+    data.productivity.memories=[{id:'memory',content:'fact',threadId:'chat-1',sourceThreadId:'chat-0',sourceMessageId:'question-0',updatedAt:1}];
+    for(const thread of data.threads){fs.mkdirSync(nativePath(root+'/workspace/'+thread.id),{recursive:true});fs.writeFileSync(nativePath(root+'/workspace/'+thread.id+'/note.txt'),'backup');}
+    const context={cacheDir:root+'/cache',getApplicationContext:()=>({filesDir:root})};
+    const backup=await createBackupFile(context,data);const original=JSON.parse(fs.readFileSync(nativePath(backup),'utf8'));
+    const vault={read:async()=>'',write:async()=>{},remove:async()=>{}};
+    const resources={createId:()=>crypto.randomUUID(),ensureWorkspace:async()=>{},configureProviders:()=>{},reportError:()=>{},tools:()=>({definitions:()=>[]})};
+    const repository=new ConversationStore(nativePath(root));
+    const local=JSON.parse(JSON.stringify(data));local.threads=local.threads.slice(0,1);local.threads[0].title='edited locally';
+    local.productivity.templates.find(t=>t.id==='custom').content='edited locally';local.productivity.memories=[];
+    await repository.save(local);const session=new SessionService(repository,{},vault,resources);await session.initialize();
+    fs.writeFileSync(nativePath(root+'/workspace/chat-0/note.txt'),'local file');
+    fs.writeFileSync(nativePath(root+'/attachments/'+attachment.path),'edited');
+    const prepared=await readBackupFile(context,backup,session.snapshot());
+    assert.equal(prepared.threads.length,2);assert.equal(prepared.threads[0].parentThreadId,'chat-0');
+    assert.equal(prepared.threads[0].parentMessageId,'answer-0');assert.equal(prepared.threads[0].references[0].threadId,'chat-0');
+    assert.equal(prepared.threads[0].messages[0].id,'question-1');
+    assert.equal(await session.importSnapshot(prepared),true,session.state.error);
+    const merged=session.snapshot();assert.equal(merged.threads.length,3);assert.equal(merged.threads[0].title,'edited locally');
+    assert.equal(merged.productivity.templates.length,3);assert.equal(merged.productivity.templates.find(t=>t.id==='custom').content,'edited locally');
+    assert.equal(merged.productivity.memories.length,1);assert.equal(merged.productivity.memories[0].sourceMessageId,'question-0');
+    assert.equal(fs.readFileSync(nativePath(root+'/workspace/chat-0/note.txt'),'utf8'),'local file');
+    assert.equal(fs.readFileSync(nativePath(root+'/attachments/'+attachment.path),'utf8'),'edited');
+    const files=fs.readdirSync(nativePath(root+'/attachments')).sort();
+    for(let i=0;i<2;i++){
+      const restored=await readBackupFile(context,backup,session.snapshot());assert.equal(restored.threads.length,0);
+      assert.equal(await session.importSnapshot(restored),true,session.state.error);
+      assert.equal(JSON.stringify(session.snapshot()),JSON.stringify(merged));
+      assert.deepEqual(fs.readdirSync(nativePath(root+'/attachments')).sort(),files);
+    }
+    // Re-export/reload keeps identities and therefore remains idempotent after restart.
+    const exportedAgain=await createBackupFile(context,session.snapshot());
+    const restarted=new SessionService(repository,{},vault,resources);await restarted.initialize();
+    assert.equal(await restarted.importSnapshot(await readBackupFile(context,exportedAgain,restarted.snapshot())),true);
+    assert.equal(restarted.snapshot().threads.length,3);
+    // An old regenerated ID must not duplicate an identical template. Same name alone is insufficient.
+    const legacy=model.emptyData();legacy.productivity=defaultProductivity();
+    legacy.productivity.templates=legacy.productivity.templates.map(t=>({...t,id:crypto.randomUUID()}));
+    legacy.productivity.templates.push({id:'another',name:'Custom',content:'different content'});
+    assert.equal(await restarted.importSnapshot(legacy),true,restarted.state.error);
+    assert.equal(restarted.snapshot().productivity.templates.length,4);
+    // Even skipped chats must still undergo backup validation before filesystem writes.
+    original.files[0].path='../escape';fs.writeFileSync(nativePath(backup),JSON.stringify(original));
+    await assert.rejects(readBackupFile(context,backup,restarted.snapshot()),/路径/);
+    original.files[0].path='note.txt';original.data.threads[0].id='../escape';
+    fs.writeFileSync(nativePath(backup),JSON.stringify(original));await assert.rejects(readBackupFile(context,backup,restarted.snapshot()));
+    Attachments.configure('/sandbox/backup-app');
   });
   await test('cloud snapshots are opt-in, immutable, credential-free and stay pending until native upload',async()=>{
     const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
@@ -304,11 +367,11 @@ async function test(name, run) { await run(); console.log('PASS '+name); }
     fileIo.stat=async value=>{assert.notEqual(value,file,'rejected entries must not be followed by stat');return originalStat(value);};
     try {
       assert.ok((await CloudBackup.list(context)).every(item=>item.name!==name));
-      await assert.rejects(CloudBackup.restore(context,name),/备份文件无效/);
+      await assert.rejects(CloudBackup.restore(context,name,model.emptyData()),/备份文件无效/);
       await assert.rejects(CloudBackup.remove(context,name),/备份文件无效/);
       fileIo.lstat=async value=>value===file?{isFile:()=>false,isSymbolicLink:()=>true}:originalLstat(value);
       assert.ok((await CloudBackup.list(context)).every(item=>item.name!==name));
-      await assert.rejects(CloudBackup.restore(context,name),/备份文件无效/);
+      await assert.rejects(CloudBackup.restore(context,name,model.emptyData()),/备份文件无效/);
       await assert.rejects(CloudBackup.remove(context,name),/备份文件无效/);
     } finally {fileIo.lstat=originalLstat;fileIo.stat=originalStat;fs.rmdirSync(nativePath(file));}
   });
@@ -329,14 +392,14 @@ async function test(name, run) { await run(); console.log('PASS '+name); }
     assert.equal((await CloudBackup.list(context)).length,before+1);
     assert.equal(fs.readdirSync(nativePath(context.cacheDir)).length,0);
   });
-  await test('cloud restore awaits its own download completion and restores independent data',async()=>{
+  await test('cloud restore awaits its own download completion and skips existing chats',async()=>{
     const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
     const context={cloudFileDir:'/sandbox/cloud',cacheDir:'/sandbox/backup-app/cache',getApplicationContext:()=>({filesDir:'/sandbox/backup-app'})};
     const items=await CloudBackup.list(context);const item=items.find(i=>i.location===3);
     const file=context.cloudFileDir+'/tinybot-backups/'+item.name;cloudLocations.set(file,2);
     const workspaces=()=>fs.readdirSync(nativePath('/sandbox/backup-app/workspace')).length;
     const before=workspaces();cacheStart=async()=>{};
-    let settled=false;const restore=CloudBackup.restore(context,item.name).then(data=>{settled=true;return data;});
+    let settled=false;const restore=CloudBackup.restore(context,item.name,model.emptyData()).then(data=>{settled=true;return data;});
     while (!cacheInstances.at(-1)?.uri) await new Promise(setImmediate);
     const cache=cacheInstances.at(-1);
     await new Promise(setImmediate);assert.equal(settled,false,'start acknowledgement is not completion');
@@ -344,11 +407,14 @@ async function test(name, run) { await run(); console.log('PASS '+name); }
     assert.equal(workspaces(),before,'no restore files before download completion');
     await assert.rejects(CloudBackup.sync(),/正在进行/);
     cloudLocations.set(file,3);cache.callback({uri:cache.uri,state:1,error:0});
-    const data=await restore;assert.notEqual(data.threads[0].id,'thread');
+    const data=await restore;assert.equal(data.threads[0].id,'thread');
     assert.equal(data.providerProfiles[0].enabled,false);assert.equal(data.providerProfiles[0].credentialAlias,'');
     assert.equal(fs.readFileSync(nativePath('/sandbox/backup-app/workspace/'+data.threads[0].id+'/note.txt'),'utf8'),'workspace');
     assert.equal(cache.callback,undefined);assert.equal(cache.stopped,undefined);
-    await assert.rejects(CloudBackup.restore(context,'../escape.json'),/备份文件无效/);
+    const attachmentFiles=fs.readdirSync(nativePath('/sandbox/backup-app/attachments')).sort();
+    const again=await CloudBackup.restore(context,item.name,data);assert.equal(again.threads.length,0);
+    assert.deepEqual(fs.readdirSync(nativePath('/sandbox/backup-app/attachments')).sort(),attachmentFiles);
+    await assert.rejects(CloudBackup.restore(context,'../escape.json',model.emptyData()),/备份文件无效/);
   });
   await test('cloud download failure and malformed backups leave existing conversations untouched',async()=>{
     const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
@@ -356,11 +422,11 @@ async function test(name, run) { await run(); console.log('PASS '+name); }
     const item=(await CloudBackup.list(context)).find(i=>i.location===3),file=context.cloudFileDir+'/tinybot-backups/'+item.name;
     const before=fs.readdirSync(nativePath('/sandbox/backup-app/workspace')).join(',');cloudLocations.set(file,2);
     cacheStart=async cache=>{cache.callback({uri:cache.uri,state:2,error:2});};
-    await assert.rejects(CloudBackup.restore(context,item.name),/下载失败/);
+    await assert.rejects(CloudBackup.restore(context,item.name,model.emptyData()),/下载失败/);
     assert.equal(cacheInstances.at(-1).stopped,true);assert.equal(cacheInstances.at(-1).callback,undefined);
     cloudLocations.set(file,3);const original=fs.readFileSync(nativePath(file),'utf8');const bad=JSON.parse(original);bad.files[0].path='../escape';
     fs.writeFileSync(nativePath(file),JSON.stringify(bad));
-    try { await assert.rejects(CloudBackup.restore(context,item.name),/路径/); } finally { fs.writeFileSync(nativePath(file),original); }
+    try { await assert.rejects(CloudBackup.restore(context,item.name,model.emptyData()),/路径/); } finally { fs.writeFileSync(nativePath(file),original); }
     assert.equal(fs.readdirSync(nativePath('/sandbox/backup-app/workspace')).join(','),before);
     assert.equal(fs.readFileSync(nativePath('/sandbox/backup-app/workspace/thread/note.txt'),'utf8'),'workspace');
   });
@@ -376,7 +442,7 @@ async function test(name, run) { await run(); console.log('PASS '+name); }
       assert.equal(timers.size,0);assert.equal(syncInstances.at(-1).callback,undefined);
       const context={cloudFileDir:'/sandbox/cloud',getApplicationContext:()=>({filesDir:'/sandbox/backup-app'})};
       const item=(await CloudBackup.list(context))[0];cloudLocations.set('/sandbox/cloud/tinybot-backups/'+item.name,2);cacheStart=async()=>{};
-      const download=CloudBackup.restore(context,item.name);const rejected=assert.rejects(download,/下载超时/);
+      const download=CloudBackup.restore(context,item.name,model.emptyData());const rejected=assert.rejects(download,/下载超时/);
       while (!timers.size) await new Promise(setImmediate);
       assert.equal([...timers.values()][0].ms,60000);[...timers.values()][0].fn();await rejected;
       assert.equal(timers.size,0);assert.equal(cacheInstances.at(-1).callback,undefined);assert.equal(cacheInstances.at(-1).stopped,true);
@@ -652,5 +718,5 @@ async function test(name, run) { await run(); console.log('PASS '+name); }
     Broken.record({...legacy[0],id:'after-failure'});await Broken.queue;
     assert.equal(fs.readFileSync(nativePath(root+'/usage-records/1.json'),'utf8'),'broken');
   });
-  console.log('29 native adapter integration checks passed. Fixtures: '+fixture);
+  console.log(completedTests+' native adapter integration checks passed. Fixtures: '+fixture);
 })().catch(error=>{console.error(error);process.exitCode=1;});

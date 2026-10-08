@@ -169,14 +169,14 @@ export class CloudBackup {
     });
   }
 
-  static restore(context: common.UIAbilityContext, name: string): Promise<AppData> {
+  static restore(context: common.UIAbilityContext, name: string, local: AppData): Promise<AppData> {
     return exclusive(async () => {
       if (!SNAPSHOT_NAME.test(name)) { throw new Error(t('备份文件无效。')); }
       const path = await backupDirectory(context) + '/' + name;
       const stat = await fs.lstat(path);
       if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_BACKUP) { throw new Error(t('备份文件无效。')); }
       if ((await fs.stat(path)).location === 2) { await download(path); }
-      return readBackupFile(context, path);
+      return readBackupFile(context, path, local);
     });
   }
 }
