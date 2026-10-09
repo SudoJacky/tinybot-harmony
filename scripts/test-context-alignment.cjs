@@ -45,6 +45,7 @@ const { runAgentLoop } = from('services/AgentLoop');
 const { ContextOverflowError, httpProviderError } = from('services/providers/ProviderErrors');
 const { ProtocolProvider } = from('services/providers/ProtocolProvider');
 const { WorkspaceTools } = from('services/WorkspaceTools');
+const { WebTools } = from('services/WebTools');
 const { RuleTools } = from('services/RuleTools');
 const { chatRequest } = from('services/providers/ChatCompletionsProtocol');
 const { responsesRequest, anthropicRequest } = from('services/providers/WireProtocols');
@@ -91,6 +92,15 @@ async function main() {
   const writePrompt = manager.inspect(workspace.definitions());
   assert.ok(writePrompt.messages[0].content.includes('write_file 会覆盖同名文件'));
   assert.ok(writePrompt.context.tokens > readPrompt.context.tokens);
+  const web = new WebTools({}).definitions();
+  const webPrompt = manager.inspect(web).messages[0].content;
+  for (const tool of web) {
+    assert.ok(webPrompt.includes(tool.function.name));
+    for (const guideline of tool.promptGuidelines) {
+      assert.ok(webPrompt.includes(guideline));
+      assert.ok(!readPrompt.messages[0].content.includes(guideline));
+    }
+  }
   const defs = workspace.definitions();
   defs[0].promptGuidelines = ['shared rule', 'shared rule']; defs[1].promptGuidelines = ['shared rule'];
   assert.equal(manager.inspect(defs).messages[0].content.split('shared rule').length - 1, 1);

@@ -56,7 +56,7 @@ class Fixture {
   cancellation: Cancellation = new Cancellation();
   saves: string[] = [];
   ends: string[] = [];
-  saved: (index: number) => Promise<void> = async () => {};
+  saved: (snapshot: AgentTurn) => Promise<void> = async () => {};
   ended: (id: string) => void = () => {};
   constructor(calls: ToolCall[] = [call('a'), call('b')]) {
     this.model = new BatchModel(calls); this.tools = new GatedTools(calls.map((item) => item.id));
@@ -64,7 +64,10 @@ class Fixture {
   observer(): LoopObserver {
     return { event: (event) => {
       if (event.type === 'tool_end') { this.ends.push(event.toolCallId!); this.ended(event.toolCallId!); }
-    }, checkpoint: async () => { this.saves.push(JSON.stringify(this.turn)); await this.saved(this.saves.length); } };
+    }, checkpoint: async () => {
+      const snapshot = JSON.parse(JSON.stringify(this.turn)) as AgentTurn;
+      await this.saved(snapshot); this.saves.push(JSON.stringify(snapshot));
+    } };
   }
   run(mode?: ToolExecutionMode): Promise<void> {
     return runAgentLoop({ model: this.model, tools: this.tools, messages: [{ role: 'user', content: 'task' }],
@@ -84,8 +87,11 @@ export default function toolParallelismTests(): void {
   describe('ToolParallelism', () => {
     it('startsIndependentCallsTogetherAndReplaysOutOfOrderOutcomesInSourceOrder', 0, async () => {
       const f = new Fixture(); const bEnded = new Gate(); const firstSave = new Gate(); const saving = new Gate();
-      f.saved = async (index) => { if (index === 1) { saving.open(); await firstSave.promise; } };
-      f.tools.beforeStart = () => { expect(f.saves[0].includes('"status":"running"')).assertTrue(); };
+      f.saved = async () => { if (!f.tools.starts.length) { saving.open(); await firstSave.promise; } };
+      f.tools.beforeStart = (id) => {
+        expect(f.saves.some((snapshot) => (JSON.parse(snapshot) as AgentTurn).steps.some((step) =>
+          step.tools.some((tool) => tool.call.id === id && tool.status === 'running')))).assertTrue();
+      };
       f.ended = (id) => { if (id === 'b') { bEnded.open(); } };
       const work = f.run(); await saving.promise; expect(f.tools.starts.length).assertEqual(0); firstSave.open();
       await f.tools.entered.get('b')!.promise;
@@ -141,9 +147,14 @@ export default function toolParallelismTests(): void {
     });
     it('serializesReceiptSavesAndDrainsOtherToolsAfterAPersistenceFailure', 0, async () => {
       const f = new Fixture(); const blocked = new Gate(); const saving = new Gate(); let active = 0; let peak = 0; let settled = false;
-      f.saved = async (index) => {
+      let failed = false;
+      f.saved = async (snapshot) => {
         active++; peak = Math.max(peak, active);
-        try { if (index === 2) { saving.open(); await blocked.promise; throw new Error('receipt disk failure'); } }
+        try {
+          if (!failed && snapshot.steps.some((step) => step.tools.some((tool) => tool.call.id === 'b' && tool.status === 'complete'))) {
+            failed = true; saving.open(); await blocked.promise; throw new Error('receipt disk failure');
+          }
+        }
         finally { active--; }
       };
       const work = errorOf(f.run()).then((error) => { settled = true; return error; });
@@ -151,7 +162,9 @@ export default function toolParallelismTests(): void {
       f.tools.gates.get('a')!.open(); await Promise.resolve();
       expect(settled).assertFalse(); expect(peak).assertEqual(1); blocked.open();
       expect(await work).assertEqual('receipt disk failure'); expect(f.model.requests.length).assertEqual(1);
-      expect(f.saves.length).assertEqual(3); expect(f.turn.steps[0].tools.every((tool) => tool.status === 'complete')).assertTrue();
+      const durable = JSON.parse(f.saves[f.saves.length - 1]) as AgentTurn;
+      expect(durable.steps[0].tools.every((tool) => tool.status === 'complete')).assertTrue();
+      expect(JSON.stringify(durable.steps[0].tools)).assertEqual(JSON.stringify(f.turn.steps[0].tools));
     });
     it('returnsToolErrorsWithoutDiscardingSuccessfulSiblings', 0, async () => {
       const f = new Fixture(); f.tools.failures = ['a']; f.tools.gates.forEach((gate) => gate.open()); await f.run();

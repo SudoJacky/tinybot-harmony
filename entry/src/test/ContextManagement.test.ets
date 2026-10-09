@@ -269,10 +269,10 @@ export default function contextTests(): void {
       }, '上下文预算');
       expect(model.requests.length).assertEqual(1);
       expect(tools.writes).assertEqual(1);
-      expect(saved.length).assertEqual(2);
       expect(turn.steps[0].tools[0].status).assertEqual('complete');
       expect(turn.steps[0].tools[0].output.length).assertEqual(16000);
-      expect(saved[1].includes('"status":"complete"')).assertTrue();
+      const durable = JSON.parse(saved[saved.length - 1]) as AgentTurn;
+      expect(JSON.stringify(durable.steps[0].tools)).assertEqual(JSON.stringify(turn.steps[0].tools));
     });
   });
   describe('SessionManagement', () => {
