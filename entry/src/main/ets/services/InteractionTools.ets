@@ -30,7 +30,7 @@ export class InteractionTools implements AgentTools {
       'update_plan': '复杂任务用 update_plan 展示并随实际进展更新步骤；简单任务不必建计划。',
       'publish_data_view': '用 publish_data_view 展示适合比较的真实数据，保留来源和单位；示例或估算必须标明，不能伪装成实测值。'
     };
-    return { type: 'function', promptSnippet: snippets[name], promptGuidelines: [guidelines[name]], function: { name: name, description: description, parameters: { type: 'object',
+    return { type: 'function', executionMode: 'sequential', promptSnippet: snippets[name], promptGuidelines: [guidelines[name]], function: { name: name, description: description, parameters: { type: 'object',
       properties: { 'data': { type: 'string', description: '符合上述格式的 JSON 字符串' } }, required: ['data'], additionalProperties: false } } };
   }
 }

@@ -58,9 +58,13 @@ export interface ToolDefinitionFunction {
   parameters: ToolParameters;
 }
 
+export type ToolExecutionMode = 'parallel' | 'sequential';
+
 export interface ToolDefinition {
   type: string;
   function: ToolDefinitionFunction;
+  // A sequential tool makes its entire model-response batch execute in order.
+  executionMode?: ToolExecutionMode;
   // Local prompt contributions, never serialized into provider tool schemas.
   promptSnippet?: string;
   promptGuidelines?: string[];

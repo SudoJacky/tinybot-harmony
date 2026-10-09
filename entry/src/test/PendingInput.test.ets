@@ -126,7 +126,7 @@ export default function pendingInputTests(): void {
       expect(model.requests[2][model.requests[2].length - 1].content).assertEqual('s2');
       expect(fixture.pending.length).assertEqual(1);
       expect(fixture.pending[0].id).assertEqual('later');
-      expect(fixture.checkpoints[4].includes('"steering":{"id":"s1"')).assertTrue();
+      expect(fixture.checkpoints.some((snapshot) => snapshot.includes('"steering":{"id":"s1"'))).assertTrue();
     });
     it('acceptsSteeringDuringAResponseThatWouldOtherwiseFinish', 0, async () => {
       const fixture = new QueueFixture();

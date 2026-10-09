@@ -77,6 +77,7 @@ export class WorkspaceTools implements AgentTools {
       'write_file': ['write_file 会覆盖同名文件，写入前先检查现有内容。']
     };
     return definitions.map((definition): ToolDefinition => ({ type: definition.type, function: definition.function,
+      executionMode: ['write_file', 'edit_file'].includes(definition.function.name) ? 'sequential' : 'parallel',
       promptSnippet: snippets[definition.function.name], promptGuidelines: guidelines[definition.function.name] }));
   }
 

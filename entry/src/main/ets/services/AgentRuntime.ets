@@ -1,5 +1,5 @@
 import { t } from '../model/I18n';
-import { AgentTurn, MAX_AGENT_STEPS, ModelMessage } from '../model/Agent';
+import { AgentTurn, MAX_AGENT_STEPS, ModelMessage, ToolExecutionMode } from '../model/Agent';
 import { ModelConfig, copyModelConfig } from '../model/Conversation';
 import { UsageOrigin, UsageRecorder } from '../model/Usage';
 import { AgentTools, LoopEvent, LoopEventType, SteeringInput, runAgentLoop } from './AgentLoop';
@@ -33,6 +33,7 @@ export interface AgentEvent {
 }
 
 export interface AgentRunRequest {
+  toolExecution?: ToolExecutionMode;
   usageOrigin?: UsageOrigin;
   sessionId: string;
   config: ModelConfig;
@@ -131,6 +132,7 @@ export class AgentRuntime {
         const window = contextSettings(config).window;
         const limit = request.maxSteps === undefined ? MAX_AGENT_STEPS : request.maxSteps;
         const tools = request.tools;
+        const toolExecution = request.toolExecution;
         const contextOnly = request.contextOnly === true;
         this.emit({ type: 'run_start', run: active.state });
         if (bindingError) {
@@ -157,7 +159,7 @@ export class AgentRuntime {
           const preparedContext = new RequestContext(source, config);
           const contextTools = new ContextTools(tools, source.entries, window);
           const boundModel = model;
-          await runAgentLoop({ model: model, messages: messages, tools: contextTools,
+          await runAgentLoop({ model: model, messages: messages, tools: contextTools, toolExecution: toolExecution,
             prepareRequest: async (definitions, pending, cancellation, recoverOverflow) => {
               const prepared = await preparedContext.prepare(boundModel, definitions, cancellation, pending, false, recoverOverflow);
               this.usage?.recordContext?.(request.sessionId, prepared.context);

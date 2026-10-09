@@ -19,7 +19,8 @@ class Gate {
 class TeamKeys implements CredentialReader { async read(_alias: string): Promise<string> { return ''; } }
 class BlockingTools implements AgentTools {
   entered: Gate = new Gate(); release: Gate = new Gate(); count: number = 0;
-  definitions(): ToolDefinition[] { return []; }
+  definitions(): ToolDefinition[] { return [{ type: 'function', executionMode: 'sequential', function: {
+    name: 'test', description: 'Exclusive operation', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false } } }]; }
   async execute(_call: ToolCall, _signal: Cancellation): Promise<string> { this.count++; this.entered.open(); await this.release.promise; return 'ok'; }
 }
 class TeamProvider implements ModelProvider {

@@ -1,4 +1,5 @@
 import teamTests from './Team.test';
+import toolParallelismTests from './ToolParallelism.test';
 import usageStatisticsTests from './UsageStatistics.test';
 import swipeRowTests from './SwipeRow.test';
 import segmentedMotionTests from './SegmentedMotion.test';
@@ -30,6 +31,7 @@ export default function tests(): void {
   systemPromptTests();
   i18nTests();
   teamTests();
+  toolParallelismTests();
   chatTeamTests();
   advancedTests();
   productivityTests();

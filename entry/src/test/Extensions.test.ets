@@ -180,8 +180,11 @@ export default function extensionTests(): void {
       const result: AgentTurn = { content: '', steps: [] };
       const saved: string[] = [];
       await run(model, new ToolSet([new SkillTools([skill]), new WebTools(new FixtureWeb())]), result, saved);
-      expect(saved.length).assertEqual(6);
+      // Two batch-intent saves plus three individually completed receipts.
+      expect(saved.length).assertEqual(5);
       expect(saved[0].includes('"status":"running"')).assertTrue();
+      expect((JSON.parse(saved[2]) as AgentTurn).steps[1].tools.every((tool) => tool.status === 'running')).assertTrue();
+      expect((JSON.parse(saved[4]) as AgentTurn).steps.every((step) => step.tools.every((tool) => tool.status === 'complete'))).assertTrue();
       expect(model.requests[2][5].toolCallId).assertEqual('w');
       expect(model.requests[2][5].content.includes('"trust":"untrusted"')).assertTrue();
       const data = emptyData();
