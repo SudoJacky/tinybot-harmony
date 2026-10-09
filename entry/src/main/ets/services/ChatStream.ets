@@ -192,7 +192,7 @@ export class ChatStream implements ModelStream {
     call.type = delta.type || call.type;
     call.function.name += delta.function?.name || '';
     call.function.arguments += delta.function?.arguments || '';
-    if (call.id.length > 128 || call.function.name.length > 64 || call.function.arguments.length > MAX_TOOL_ARGUMENTS) {
+    if (call.id.length > 128 || call.function.name.length > 64 || (call.function.name !== 'execute_code' && call.function.arguments.length > MAX_TOOL_ARGUMENTS)) {
       throw new Error(t("模型返回的工具调用过大。"));
     }
   }

@@ -45,6 +45,8 @@ export interface MessageData {
 export interface CompactionData {
   summary: string;
   firstKeptMessageId: string;
+  // A step boundary inside the user/assistant pair; absent retains the whole pair.
+  firstKeptStep?: number;
   tokensBefore: number;
   createdAt: number;
 }
@@ -55,7 +57,9 @@ export function copyModelConfig(config: ModelConfig, configured: boolean = confi
     contextWindow: config.contextWindow, autoCompact: config.autoCompact, reasoning: config.reasoning, requestUsage: config.requestUsage, images: config.images };
 }
 
-export interface ThreadData {
+export interface ContextState { compaction?: CompactionData; }
+
+export interface ThreadData extends ContextState {
   // Absent means follow the selected model's assistant settings.
   reasoningEffort?: string;
   references?: ThreadReference[];
@@ -73,7 +77,6 @@ export interface ThreadData {
   parentThreadId?: string;
   parentMessageId?: string;
   disabledMcpIds?: string[];
-  compaction?: CompactionData;
   modelRef?: ModelReference;
   pendingInputs?: PendingInput[];
   queuePaused?: boolean;
@@ -81,6 +84,7 @@ export interface ThreadData {
 
 export interface AppData {
   version: number;
+  // Includes the provider/model and reasoning selection shared by empty chats.
   config: ModelConfig;
   threads: ThreadData[];
   activeThreadId: string;
@@ -162,6 +166,9 @@ export function parseAppData(text: string): AppData {
   const threadIds = new Set<string>();
   if (data.extensions !== undefined) { validateExtensions(data.extensions); }
   contextSettings(data.config);
+  if (data.config.reasoning !== undefined && !REASONING_EFFORTS.includes(data.config.reasoning)) {
+    throw new Error(t('推理强度设置无效。'));
+  }
   if (data.providerProfiles !== undefined) {
     if (!Array.isArray(data.providerProfiles)) { throw new Error(t("模型服务列表损坏。")); }
     const ids = new Set<string>();

@@ -19,12 +19,14 @@ export class ToolExecutionViewModel implements ToolExecution {
 
 @Observed
 export class AgentStepViewModel implements AgentStep {
+  uiValidation?: string;
   content: string = '';
   reasoningContent: string = '';
   steering?: PendingInput;
   tools: ToolExecutionViewModel[] = [];
   constructor(data: AgentStep) { this.update(data); }
   update(data: AgentStep): void {
+    this.uiValidation = data.uiValidation;
     this.content = data.content; this.reasoningContent = data.reasoningContent || ''; this.steering = data.steering;
     this.tools = data.tools.map((tool: ToolExecution, index: number) => {
       const existing = this.tools[index];

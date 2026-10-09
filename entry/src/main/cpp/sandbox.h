@@ -5,10 +5,7 @@
 #include <string>
 
 namespace tinybot {
-constexpr size_t MAX_SOURCE_BYTES = 32 * 1024;
-constexpr size_t MAX_INPUT_BYTES = 32 * 1024;
 constexpr size_t MAX_LOG_BYTES = 32 * 1024;
-constexpr size_t MAX_RESULT_BYTES = 16 * 1024;
 constexpr size_t MEMORY_BYTES = 32 * 1024 * 1024;
 constexpr int TIMEOUT_MS = 2000;
 

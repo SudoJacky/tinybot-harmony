@@ -552,6 +552,7 @@ export struct MessageBubble {
                 this.steering(entry.step)
               } else if (entry.kind === 'text') {
                 InteractiveAnswer({ content: this.message.stepViews[entry.step]?.content || '', step: entry.step,
+                  validation: this.message.stepViews[entry.step]?.uiValidation || '',
                   saved: this.message.uiStates, available: this.uiAvailable, onInteract: this.onUi,
                   streaming: this.message.status === 'generating' && entry.step === this.message.stepViews.length - 1 })
               } else {

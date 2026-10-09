@@ -758,11 +758,9 @@
   "提炼为记忆": "Extract memories",
   "模型用时与 Token 用量：": "Model duration and token usage: ",
   "新对话默认": "Default for new chats",
-  "设为新对话默认": "Set as default for new chats",
   "搜索服务或模型": "Search providers or models",
   "尚无已启用的模型服务": "No enabled model providers",
   "添加模型服务": "Add model provider",
-  "点击选择仅用于当前对话；点星标设为之后新对话的默认模型。": "Tap a model to use it in this chat. Tap the star to make it the default for new chats.",
   "服务配置已变化，请重新登录。": "Provider settings changed. Sign in again.",
   "OAuth 登录成功": "OAuth sign-in successful",
   "请输入 Bearer Token，或选择无需鉴权。修改服务地址后需要重新填写 Token。": "Enter a Bearer Token or choose No authentication. Enter the token again after changing the endpoint.",
@@ -1332,5 +1330,8 @@
   "展开计划": "Expand plan",
   "收起计划": "Collapse plan",
   "计划读取失败：": "Could not read plan: ",
-  "计划读取失败": "Could not read plan"
+  "计划读取失败": "Could not read plan",
+  "空对话中的模型和推理强度会用于之后的新对话；已有消息的对话仅修改自身配置。": "Model and reasoning choices in empty chats become the defaults for new chats. Changes in chats with messages apply only to that chat.",
+  "正在检查交互内容…": "Checking interactive content…",
+  "交互内容检查未通过。": "Interactive content did not pass validation."
 }

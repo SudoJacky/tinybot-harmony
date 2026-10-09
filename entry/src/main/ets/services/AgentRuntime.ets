@@ -1,12 +1,15 @@
 import { t } from '../model/I18n';
 import { AgentTurn, MAX_AGENT_STEPS, ModelMessage } from '../model/Agent';
-import { ModelConfig } from '../model/Conversation';
+import { ModelConfig, copyModelConfig } from '../model/Conversation';
 import { UsageOrigin, UsageRecorder } from '../model/Usage';
 import { AgentTools, LoopEvent, LoopEventType, SteeringInput, runAgentLoop } from './AgentLoop';
 import { Cancellation, RunCancelledError } from './Cancellation';
 import { CredentialReader, ModelSession } from './providers/Provider';
 import { ProviderRegistry } from './providers/ProviderRegistry';
 import { contextSettings } from '../model/ConversationContext';
+import { PromptSection, runEntries } from '../model/ContextProjection';
+import { ContextSource, RequestContext } from './RequestContext';
+import { ContextTools } from './ContextTools';
 
 export type RunStatus = 'running' | 'complete' | 'stopped' | 'failed';
 export type RunPhase = 'preparing' | 'executing' | 'finalizing';
@@ -40,6 +43,7 @@ export interface AgentRunRequest {
 }
 
 export interface AgentRunHooks {
+  context?: ContextSource;
   prepare: (cancellation: Cancellation) => Promise<void>;
   checkpoint: () => Promise<void>;
   steering?: SteeringInput;
@@ -58,17 +62,20 @@ export class AgentRuntime {
   private providers: ProviderRegistry;
   private credentials: CredentialReader;
   private usage?: UsageRecorder;
+  private validateAnswer?: (content: string, cancellation: Cancellation) => Promise<void>;
   private active?: ActiveRun;
   private sequence: number = 0;
   private listeners: Set<(event: AgentEvent) => void> = new Set<(event: AgentEvent) => void>();
 
-  constructor(providers: ProviderRegistry, credentials: CredentialReader, usage?: UsageRecorder) {
+  constructor(providers: ProviderRegistry, credentials: CredentialReader, usage?: UsageRecorder,
+    validateAnswer?: (content: string, cancellation: Cancellation) => Promise<void>) {
     this.providers = providers;
     this.credentials = credentials;
     this.usage = usage;
+    this.validateAnswer = validateAnswer;
   }
 
-  fork(): AgentRuntime { return new AgentRuntime(this.providers, this.credentials, this.usage); }
+  fork(): AgentRuntime { return new AgentRuntime(this.providers, this.credentials, this.usage, this.validateAnswer); }
 
   get isRunning(): boolean {
     return this.active !== undefined;
@@ -114,13 +121,14 @@ export class AgentRuntime {
         // Freeze routing/config/history before the first await or caller notification.
         let model: ModelSession | undefined = undefined;
         let bindingError: Error | undefined = undefined;
+        const config = copyModelConfig(request.config);
         try {
-          model = this.providers.bind(request.config, this.credentials, request.usageOrigin);
+          model = this.providers.bind(config, this.credentials, request.usageOrigin);
         } catch (error) {
           bindingError = error as Error;
         }
         let messages = JSON.parse(JSON.stringify(request.messages)) as ModelMessage[];
-        const window = contextSettings(request.config).window;
+        const window = contextSettings(config).window;
         const limit = request.maxSteps === undefined ? MAX_AGENT_STEPS : request.maxSteps;
         const tools = request.tools;
         const contextOnly = request.contextOnly === true;
@@ -141,8 +149,22 @@ export class AgentRuntime {
         }
         active.state.phase = 'executing';
         if (!contextOnly) {
-          await runAgentLoop({ model: model, messages: messages, tools: tools,
-            turn: active.state.turn, maxSteps: limit, contextWindow: window }, active.cancellation, {
+          const defaultSource: ContextSource = { state: active.state.turn,
+            entries: () => runEntries(messages, active.state.turn, request.sessionId),
+            sections: () => messages.filter((message) => message.role === 'system').map((message, index): PromptSection => ({ name: 'instructions_' + index, content: message.content })),
+            persist: hooks.checkpoint, progress: () => {} };
+          const source = hooks.context || defaultSource;
+          const preparedContext = new RequestContext(source, config);
+          const contextTools = new ContextTools(tools, source.entries, window);
+          const boundModel = model;
+          await runAgentLoop({ model: model, messages: messages, tools: contextTools,
+            prepareRequest: async (definitions, pending, cancellation) => {
+              const prepared = await preparedContext.prepare(boundModel, definitions, cancellation, pending);
+              this.usage?.recordContext?.(request.sessionId, prepared.context);
+              return prepared;
+            },
+            recordResponse: (response) => preparedContext.recordResponse(response),
+            turn: active.state.turn, maxSteps: limit, contextWindow: window, validateAnswer: this.validateAnswer }, active.cancellation, {
             event: (event: LoopEvent) => {
               if (this.active === active) {
                 this.emit({ type: event.type, run: active.state, step: event.step,

@@ -1,4 +1,5 @@
 import { WebUiDemoPanel } from '../views/WebUiDemoPanel';
+import { WebUiPreflightHost } from '../views/WebUiPreflightHost';
 import { t } from '../model/I18n';
 import { ProductivityPanel } from '../views/ProductivityPanel';
 import { ModelSettingsPanel } from '../views/AssistantPanel';
@@ -382,6 +383,7 @@ struct Index {
         if (this.app.ready) {
           this.drawer()
         }
+        WebUiPreflightHost()
       }.width('100%').height('100%')
     }
     .backgroundColor($r('app.color.page_background'))

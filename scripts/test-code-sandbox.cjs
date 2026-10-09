@@ -36,7 +36,7 @@ function load(name) {
   return exports;
 }
 const { Cancellation } = load('Cancellation');
-const { CodeExecutionTools, codeUtf8Bytes } = load('CodeExecutionTools');
+const { CodeExecutionTools } = load('CodeExecutionTools');
 const { NativeCodeExecutor } = load('NativeCodeExecutor');
 const { RuleTools } = load('RuleTools');
 const { ToolSet } = load('ToolSet');
@@ -52,15 +52,14 @@ async function main() {
   await code.execute(call({ code: 'return input;', input: '{"x":2}' }), signal);
   assert.equal(received[1][1], '{"x":2}');
   const invalid = [null, [], 3, 'str', {}, { code: '' }, { code: ' ' }, { code: 1 }, { code: 'return 1;', input: {} },
-    { code: 'return 1;', memoryLimit: 999999999 }, { code: 'return 1;', network: true },
-    { code: '中'.repeat(11000) }, { code: 'return input;', input: '🙂'.repeat(9000) }];
+    { code: 'return 1;', memoryLimit: 999999999 }, { code: 'return 1;', network: true }];
   for (const args of invalid) await assert.rejects(code.execute(call(args), signal));
   await assert.rejects(code.execute({ function: { name: 'execute_code', arguments: '{' } }, signal));
   assert.equal(received.length, 2);
-  for (const value of ['', 'ascii', '中文🙂', '\ud800', '\udc00', 'a\ud800b']) {
-    assert.equal(codeUtf8Bytes(value), Buffer.byteLength(value));
-  }
-  console.log('PASS tool validation, UTF-8 limits, fixed capabilities, read-only ToolSet routing');
+  await code.execute(call({code: ' '.repeat(128 * 1024) + 'return input;', input: JSON.stringify('🙂'.repeat(40000))}), signal);
+  assert.equal(received[2][0].length > 96 * 1024, true);
+  assert.equal(received[2][1], JSON.stringify('🙂'.repeat(40000)));
+  console.log('PASS tool validation, large source/input, read-only ToolSet routing');
 
   const executor = new NativeCodeExecutor();
   const stopped = new Cancellation(); stopped.cancel();

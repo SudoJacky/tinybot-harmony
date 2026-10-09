@@ -151,7 +151,7 @@ export default function sessionServiceTests(): void {
       expect(f.session.currentConfig.userDocument).assertEqual(document);
       f.session.setDraft('hello'); await f.session.send();
       const first = f.provider.requests[0].messages[0].content;
-      expect(first.startsWith(DEFAULT_SYSTEM_PROMPT)).assertTrue();
+      expect(first.startsWith('<identity>\n' + DEFAULT_SYSTEM_PROMPT + '\n</identity>')).assertTrue();
       expect(first.includes(JSON.stringify(document))).assertTrue();
       await f.session.newThread();
       expect(f.session.currentConfig.userDocument).assertEqual(document);
@@ -161,7 +161,7 @@ export default function sessionServiceTests(): void {
       expect(await f.session.saveSettings('', true, false)).assertTrue();
       f.session.setDraft('without preferences'); await f.session.send();
       const cleared = f.provider.requests.filter((request) => !isTitleRequest(request));
-      expect(cleared[2].messages[0].content.startsWith(DEFAULT_SYSTEM_PROMPT)).assertTrue();
+      expect(cleared[2].messages[0].content.startsWith('<identity>\n' + DEFAULT_SYSTEM_PROMPT + '\n</identity>')).assertTrue();
       expect(cleared[2].messages[0].content.includes('# USER.md')).assertFalse();
       expect((await f.repository.load()).config.userDocument).assertEqual('');
     });
@@ -228,7 +228,7 @@ export default function sessionServiceTests(): void {
         profiles.push({ id: 'second', name: 'Second account', protocol: profiles[0].protocol, baseUrl: profiles[0].baseUrl,
           enabled: true, noApiKey: false, credentialAlias: 'second-key', models: ['model'] });
         const f = new Fixture(data); await f.session.initialize(); const before = JSON.stringify(f.session.snapshot().providerProfiles);
-        const imported = seed(); const profile = (imported.providerProfiles as ProviderProfile[])[0];
+        const imported = historySeed(); const profile = (imported.providerProfiles as ProviderProfile[])[0];
         profile.id = changedEndpoint ? 'test' : 'unknown-account';
         if (changedEndpoint) { profile.baseUrl = 'https://different.example.com/v1'; }
         imported.threads[0].id = 'restored'; imported.threads[0].modelRef = { providerId: profile.id, modelId: 'model' };
@@ -264,7 +264,7 @@ export default function sessionServiceTests(): void {
       expect(titleCharacters('😀abc', 2)).assertEqual('😀a');
     });
     it('generatesOneDurableTitleUsingTheFirstTurnsModelWithoutBlockingChat', 0, async () => {
-      const data = titleSeed(); data.threads[0].reasoningEffort = 'high';
+      const data = titleSeed(); data.config.reasoning = 'high';
       const f = new Fixture(data); await f.session.initialize();
       const release = new Gate(); const entered = new Gate();
       f.provider.respond = async (index) => {
@@ -422,6 +422,7 @@ export default function sessionServiceTests(): void {
       const data = seed(); const profile = (data.providerProfiles || [])[0];
       profile.protocol = 'anthropic-messages'; profile.models = ['claude-opus-4-6'];
       data.threads[0].modelRef = { providerId: 'test', modelId: 'claude-opus-4-6' };
+      data.config.model = 'claude-opus-4-6';
       const f = new Fixture(data); await f.session.initialize();
       expect(await f.session.setReasoningEffort('max')).assertTrue();
       expect(await f.session.setReasoningEffort('none')).assertFalse();
@@ -446,7 +447,7 @@ export default function sessionServiceTests(): void {
       await f.session.selectModel('test', 'model');
       expect(f.session.currentConfig.reasoning).assertEqual('low');
       await f.session.newThread();
-      expect(active(f.session.snapshot()).reasoningEffort === undefined).assertTrue();
+      expect(active(f.session.snapshot()).reasoningEffort).assertEqual('low');
       await f.session.selectThread('thread-1');
       expect(f.session.currentConfig.reasoning).assertEqual('low');
       await f.session.selectModel('test', 'another');
@@ -463,11 +464,103 @@ export default function sessionServiceTests(): void {
       const unsupported = seed(); (unsupported.providerProfiles || [])[0].protocol = 'anthropic-messages';
       (unsupported.providerProfiles || [])[0].models = ['claude-haiku-4-5'];
       unsupported.threads[0].modelRef = { providerId: 'test', modelId: 'claude-haiku-4-5' };
+      unsupported.config.model = 'claude-haiku-4-5';
       const other = new Fixture(unsupported); await other.session.initialize();
       expect(await other.session.setReasoningEffort('high')).assertFalse();
       const broken = seed(); broken.threads[0].reasoningEffort = 'invalid';
       let rejected = false;
       try { parseAppData(JSON.stringify(broken)); } catch (_) { rejected = true; }
+      expect(rejected).assertTrue();
+    });
+    it('emptyChatsShareUnsentSelectionsAcrossRestartWithoutLosingDrafts', 0, async () => {
+      const data = seed(); (data.providerProfiles || [])[0].models.push('another');
+      const f = new Fixture(data); await f.session.initialize();
+      f.session.setDraft('keep this draft'); await f.session.flushDraft();
+      await f.session.newThread();
+      expect(await f.session.selectModel('test', 'another')).assertTrue();
+      expect(await f.session.setReasoningEffort('max')).assertTrue();
+      expect(f.provider.requests.length).assertEqual(0);
+      const saved = await f.repository.load();
+      expect(saved.config.model).assertEqual('another'); expect(saved.config.reasoning).assertEqual('max');
+      const restored = new Fixture(saved); restored.resources.ids = 1000; await restored.session.initialize();
+      await restored.session.selectThread('thread-1');
+      expect(restored.session.currentConfig.model).assertEqual('another');
+      expect(restored.session.currentConfig.reasoning).assertEqual('max');
+      expect(active(restored.session.snapshot()).draft).assertEqual('keep this draft');
+      await restored.session.newThread();
+      expect(restored.session.currentConfig.model).assertEqual('another');
+      expect(restored.session.currentConfig.reasoning).assertEqual('max');
+      // Re-selecting the same model preserves effort; changing providers resets it.
+      await restored.session.selectModel('test', 'another');
+      expect(restored.session.currentConfig.reasoning).assertEqual('max');
+      const draft = providerDraft(); draft.id = ''; draft.name = 'Second'; draft.models = 'another';
+      await restored.session.saveProvider(draft);
+      const second = (restored.session.snapshot().providerProfiles || []).find((item) => item.id !== 'test');
+      expect(second !== undefined).assertTrue();
+      await restored.session.selectModel(second!.id, 'another');
+      expect(restored.session.snapshot().config.providerId).assertEqual(second!.id);
+      expect(restored.session.snapshot().config.reasoning === undefined).assertTrue();
+      await restored.session.setReasoningEffort('high'); await restored.session.newThread();
+      expect(restored.session.currentConfig.providerId).assertEqual(second!.id);
+      expect(restored.session.currentConfig.reasoning).assertEqual('high');
+    });
+    it('usedChatsKeepTheirSelectionAndNeverChangeNewChatPreferences', 0, async () => {
+      const data = seed(); (data.providerProfiles || [])[0].models.push('another');
+      const f = new Fixture(data); await f.session.initialize();
+      await f.session.setReasoningEffort('high'); f.session.setDraft('first'); await f.session.send();
+      expect(f.provider.requests[0].reasoning).assertEqual('high');
+      await f.session.newThread();
+      await f.session.selectModel('test', 'another'); await f.session.setReasoningEffort('max');
+      await f.session.selectThread('thread-1');
+      expect(f.session.currentConfig.model).assertEqual('model'); expect(f.session.currentConfig.reasoning).assertEqual('high');
+      await f.session.setReasoningEffort('low'); f.session.setDraft('second'); await f.session.send();
+      expect(f.provider.requests[1].model).assertEqual('model'); expect(f.provider.requests[1].reasoning).assertEqual('low');
+      // A failed request in the old chat still must not change the new-chat defaults.
+      await f.session.selectModel('test', 'another'); await f.session.setReasoningEffort('medium');
+      f.provider.respond = async () => { throw new Error('request failed'); };
+      f.session.setDraft('third'); await f.session.send();
+      expect(active(f.session.snapshot()).messages[5].status).assertEqual('failed');
+      expect(active(f.session.snapshot()).messages[5].error).assertEqual('request failed');
+      const saved = await f.repository.load();
+      expect(saved.config.model).assertEqual('another'); expect(saved.config.reasoning).assertEqual('max');
+      const restored = new Fixture(saved); restored.resources.ids = 1000; await restored.session.initialize();
+      expect(restored.session.currentConfig.reasoning).assertEqual('medium');
+      await restored.session.newThread(); expect(restored.session.currentConfig.reasoning).assertEqual('max');
+      await restored.session.selectModel('test', 'model');
+      expect(restored.session.currentConfig.reasoning === undefined).assertTrue();
+      await restored.session.selectThread('thread-1');
+      expect(restored.session.currentConfig.model).assertEqual('another'); expect(restored.session.currentConfig.reasoning).assertEqual('medium');
+    });
+    it('emptyPreferenceWritesRollbackTogetherAndProviderEditsPreserveEffort', 0, async () => {
+      const data = seed(); (data.providerProfiles || [])[0].models.push('another');
+      const f = new Fixture(data); await f.session.initialize(); await f.session.setReasoningEffort('high');
+      await f.session.newThread();
+      f.repository.beforeSave = async () => { throw new Error('disk failed'); };
+      expect(await f.session.setReasoningEffort('low')).assertFalse();
+      expect(await f.session.selectModel('test', 'another')).assertFalse();
+      expect(f.session.snapshot().config.model).assertEqual('model'); expect(f.session.snapshot().config.reasoning).assertEqual('high');
+      expect(f.session.snapshot().threads.every((thread) => thread.modelRef?.modelId === 'model' && thread.reasoningEffort === 'high')).assertTrue();
+      expect((await f.repository.load()).config.reasoning).assertEqual('high');
+      f.repository.beforeSave = async () => {};
+      expect(await f.session.saveProvider(providerDraft())).assertTrue();
+      await f.session.newThread(); expect(f.session.currentConfig.reasoning).assertEqual('high');
+      await f.session.setReasoningEffort('default');
+      expect((await f.repository.load()).config.reasoning === undefined).assertTrue();
+      expect(f.session.snapshot().threads.every((thread) => thread.reasoningEffort === undefined)).assertTrue();
+    });
+    it('initializationSyncsLegacyEmptyChatsButPreservesUsedChats', 0, async () => {
+      const data = historySeed(); (data.providerProfiles || [])[0].models.push('another');
+      data.threads[0].reasoningEffort = 'high';
+      data.threads.push({ id: 'empty', title: 'Draft', updatedAt: 2, messages: [], draft: 'unsent',
+        modelRef: { providerId: 'test', modelId: 'another' }, reasoningEffort: 'max' });
+      const f = new Fixture(data); await f.session.initialize();
+      expect(f.session.currentConfig.reasoning).assertEqual('high');
+      await f.session.selectThread('empty');
+      expect(f.session.currentConfig.model).assertEqual('model');
+      expect(active(f.session.snapshot()).reasoningEffort === undefined).assertTrue();
+      expect(active(f.session.snapshot()).draft).assertEqual('unsent');
+      const corrupt = seed(); corrupt.config.reasoning = 'invalid';
+      let rejected = false; try { parseAppData(JSON.stringify(corrupt)); } catch (_) { rejected = true; }
       expect(rejected).assertTrue();
     });
     it('reasoningOverrideDoesNotLeakToAutomaticallyRoutedModels', 0, async () => {

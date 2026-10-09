@@ -26,18 +26,18 @@
 }
 ```
 
-状态包括 `ok`、`error`、`timeout`、`cancelled`、`memory_limit`、`output_limit`、`unsupported_async`。失败时 `result` 为 `null`。日志截断仍允许计算成功；超大结果整体丢弃并标记 `resultTruncated`，不会把截断 JSON 作为有效结果返回。用户停止会沿用 harness 的取消状态，不向下一轮模型提交结果。
+状态包括 `ok`、`error`、`timeout`、`cancelled`、`memory_limit`、`unsupported_async`。失败时 `result` 为 `null`。日志截断仍允许计算成功；结果完整返回，`resultTruncated` 保留兼容且始终为 false。用户停止会沿用 harness 的取消状态，不向下一轮模型提交结果。
 
 ## 能力与预算
 
 | 项目 | 固定限制 |
 | --- | --- |
-| 源码 / JSON 输入 | 各 32 KiB UTF-8，Native 桥再次校验 |
+| 源码 / JSON 输入 | 不再设置独立大小上限；仍受运行时内存与耗时预算约束 |
 | 执行时间 | 从 Native 接收开始计 2000 ms，包含排队、解析、执行、结果序列化和错误转换 |
 | Runtime 分配 | 32 MiB，分配失败锁存为终止状态，即使 JS 捕获异常也不算成功 |
 | JavaScript 栈 | 512 KiB |
 | stdout + stderr | 合计 32 KiB UTF-8，按完整码点截断 |
-| 返回 JSON | 16 KiB UTF-8 |
+| 返回 JSON | 不再设置独立大小上限 |
 | 错误文本 | 4 KiB UTF-8 |
 | 并发 | 应用内最多一次；其他调用收到 busy 工具错误，不建立无界队列 |
 
@@ -71,6 +71,6 @@ cmake --build .cache/sandbox-host -j 4
 ctest --test-dir .cache/sandbox-host --output-on-failure
 ```
 
-HarmonyOS 使用 SDK 的 `ohos.toolchain.cmake` 交叉编译，加 `-DSANDBOX_DEVICE_TESTS=ON` 生成 `sandbox_tests`，可以通过 `devecocli device file send` 推送到测试设备运行。测试覆盖计算、输入隔离、宿主能力缺失、异常、Promise、日志洪水、输出溢出、内存膨胀、栈溢出、Atomics 阻塞、死循环、恶意 `toJSON` / `toString`、取消和故障后的重复执行。主机契约测试使用 Native mock，不能替代真实设备上的 Node-API 调用验证。
+HarmonyOS 使用 SDK 的 `ohos.toolchain.cmake` 交叉编译，加 `-DSANDBOX_DEVICE_TESTS=ON` 生成 `sandbox_tests`，可以通过 `devecocli device file send` 推送到测试设备运行。测试覆盖计算、输入隔离、宿主能力缺失、异常、Promise、日志洪水、大输入/源码/结果、内存膨胀、栈溢出、Atomics 阻塞、死循环、恶意 `toJSON` / `toString`、取消和故障后的重复执行。主机契约测试使用 Native mock，不能替代真实设备上的 Node-API 调用验证。
 
 2026-10-04 验证：主机引擎测试及 Mate 90 Pro（x86_64 模拟器）27 项 Native 检查通过，含故障后连续 100 次执行；现有 219 项本地测试通过。模拟器真实聊天经模型工具调用、ArkTS、Node-API 到 QuickJS 完成求和（10）、死循环超时（约 2003 ms）及后续执行恢复（42）。构建同时包含 arm64-v8a 与 x86_64，最终安装与启动检查为 `Smoke: PASS`；尚未进行物理手机验证。

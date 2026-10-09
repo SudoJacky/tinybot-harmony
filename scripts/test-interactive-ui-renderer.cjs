@@ -118,6 +118,20 @@ test('completed history mounts correctly as the differential control', () => {
   const view = mounted(answer, false); const child = [...view.childViews.values()].find(v => v instanceof UiSurface);
   assert.equal(child.complete, true); assert.equal(child.error, '');
 });
+test('pending and failed validation withhold a surface; passing releases it', () => {
+  for(const validation of ['pending','TypeError: startup failed']){
+    const view=new InteractiveAnswer(null,{content:answer,streaming:false,validation,available:true});view.aboutToAppear();view.initialRender();
+    assert.equal([...view.childViews.values()].some(v=>v instanceof UiSurface),false);
+    view.updateStateVars({content:answer,streaming:false,validation:'',available:true});view.flush();
+    assert.ok([...view.childViews.values()].some(v=>v instanceof UiSurface));
+  }
+});
+test('a closed surface still withholds Web execution during streaming', () => {
+  const source=[{op:'begin',version:1,title:'Web',state:{}},{op:'node',node:{id:'web',kind:'web',data:JSON.stringify({version:1,html:'',css:'',js:'',library:'none',height:200})}},{op:'end'}].map(r=>JSON.stringify(r)).join('\n');
+  const view=new UiSurface(null,{source,closed:true,streaming:true,available:true});view.aboutToAppear();view.initialRender();
+  const node=[...view.childViews.values()].find(v=>v instanceof UiNodeView);assert.equal(node.ready,false);
+  view.updateStateVars({source,closed:true,streaming:false,available:true});view.flush();assert.equal(node.ready,true);
+});
 test('same-id node upserts reach existing native child without resetting it', () => {
   const head = records.slice(0, 2).map(r => JSON.stringify(r)).join('\n') + '\n';
   const view = new UiSurface(null, { source: head, closed: false, streaming: true, available: true }); view.aboutToAppear(); view.initialRender();
@@ -239,5 +253,10 @@ if (failed) process.exitCode = 1;
     callbacks.onPageEnd({url:'data:text/html,host'}); await settle();
     assert.equal(sent.at(-1).type,'init'); assert.equal(view.error,'');
     console.log('PASS explicit reload reconnects a new document and clears the prior error');
+    const diagnostics=[];view.preflight=true;view.onValidation=error=>diagnostics.push(error);
+    await view.receive('{"type":"error","message":"TypeError: constructor failed"}',view.generation);
+    await view.receive('{"type":"ready"}',view.generation);
+    assert.equal(view.ready,false);assert.deepEqual(diagnostics,['TypeError: constructor failed']);
+    console.log('PASS ArkWeb forwards preflight errors and rejects a late ready');
   } finally { view.aboutToDisappear(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

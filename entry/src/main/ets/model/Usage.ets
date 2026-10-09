@@ -1,3 +1,4 @@
+import { ContextDiagnostics } from './Agent';
 export interface TokenUsage { input: number; output: number; cached?: number; reasoning?: number; cacheWrite?: number; }
 export interface UsageOrigin {
   threadId?: string; threadTitle?: string; turnId?: string; turnLabel?: string;
@@ -8,7 +9,10 @@ export interface UsageToolActivity {
   id: string; name: string; status: string; startedAt: number; durationMs: number;
   skill?: string; server?: string; remoteTool?: string;
 }
-export interface UsageRecorder { recordTool(requestId: string, activity: UsageToolActivity): void; }
+export interface UsageRecorder {
+  recordTool(requestId: string, activity: UsageToolActivity): void;
+  recordContext?(sessionId: string, diagnostics: ContextDiagnostics): void;
+}
 export interface RequestUsage {
   id: string; provider: string; model: string; startedAt: number; durationMs: number; firstTokenMs?: number;
   status: string; tokens?: TokenUsage; origin?: UsageOrigin; tools?: UsageToolActivity[];

@@ -14,7 +14,7 @@ import { memoryKey, parseMemorySuggestions, validateMemorySuggestions } from '..
 import { Cancellation } from './Cancellation';
 import { ToolSet } from './ToolSet';
 import { AppData, MessageData, ModelConfig, ThreadData, copyModelConfig, emptyData } from '../model/Conversation';
-import { estimateContextTokens, threadHistory } from '../model/ConversationContext';
+import { contextSettings } from '../model/ConversationContext';
 import { ModelReference, ProviderProfile, migrateProfiles, modelConfig } from '../model/ProviderProfiles';
 import { InputMode, MAX_INPUT_TEXT, PendingInput, nextPendingInput, validatePendingInputs } from '../model/PendingInput';
 import { ExtensionSettings, SkillData, SkillFile, defaultExtensions, explicitSkill, parseSkill, validateExtensions } from '../model/Skills';
@@ -24,7 +24,10 @@ import { AgentEvent, AgentRuntime } from './AgentRuntime';
 import { AgentTools } from './AgentLoop';
 import { CredentialVault, ProfileSettings, ProviderDraft } from './ProfileSettings';
 import { SessionEvent, SessionRepository, SessionResources, SessionState } from './SessionContracts';
-import { prepareSessionContext, sessionInstructions } from './SessionContext';
+import { prepareSessionContext, sessionInstructions, sessionPromptSections, sessionContextSource } from './SessionContext';
+import { renderPrompt } from '../model/ContextProjection';
+import { RequestContext } from './RequestContext';
+import { ContextTools } from './ContextTools';
 interface UiComputeReceipt { status: string; result: UiValues; error: string; resultTruncated: boolean; }
 interface GeneratedImage { path: string; attachment: Attachment; }
 interface FormReceipt { status: string; }
@@ -227,7 +230,8 @@ export class SessionService {
       const created = !active;
       if (!active) { active = this.freshThread(); await this.resources.ensureWorkspace(active.id); data.threads.unshift(active); }
       data.activeThreadId = active.id;
-      if (created || migrate) { await this.persist(); }
+      const preferencesChanged = this.syncEmptyThreadPreferences(data);
+      if (created || migrate || preferencesChanged) { await this.persist(); }
       this.status.ready = true;
       this.refreshContext();
     } catch (error) { this.status.error = t("打开本地会话或工作区失败：") + (error as Error).message; }
@@ -363,7 +367,7 @@ export class SessionService {
     finally { this.status.phase = 'idle'; this.publish('snapshot'); }
   }
 
-  async selectModel(providerId: string, modelId: string, asDefault: boolean = false): Promise<boolean> {
+  async selectModel(providerId: string, modelId: string): Promise<boolean> {
     if (!this.status.ready || this.active.archived) { return false; }
     return this.mutate(t("选择模型失败："), async () => {
       const reference: ModelReference = { providerId: providerId, modelId: modelId };
@@ -374,7 +378,10 @@ export class SessionService {
       if (!thread) { throw new Error(t("当前对话不存在。")); }
       if (thread.modelRef?.providerId !== providerId || thread.modelRef?.modelId !== modelId) { thread.reasoningEffort = undefined; }
       thread.modelRef = reference;
-      if (asDefault) { candidate.config = config; }
+      if (thread.messages.length === 0) {
+        config.reasoning = thread.reasoningEffort;
+        candidate.config = config;
+      }
       await this.commitSettings(candidate); this.status.contextStatus = '';
     });
   }
@@ -390,6 +397,7 @@ export class SessionService {
       const thread = candidate.threads.find((item) => item.id === candidate.activeThreadId);
       if (!thread) throw new Error(t('当前对话不存在。'));
       thread.reasoningEffort = value === 'default' ? undefined : value;
+      if (thread.messages.length === 0) { candidate.config.reasoning = thread.reasoningEffort; }
       await this.commitSettings(candidate);
     });
   }
@@ -567,8 +575,11 @@ export class SessionService {
     if (selected.length > 0 && !this.extensions.skills.some((skill: SkillData) => skill.enabled && skill.name === selected)) {
       this.status.error = t("指定的 Skill 不存在或已停用，请到设置中的 Skills 管理检查。"); thread.queuePaused = true; return false;
     }
-    let tools = this.tools(thread, selected); let instructions = sessionInstructions(config, this.extensions, selected) + memoryContext(this.data.productivity || defaultProductivity(), thread.id) +
-      (thread.parentThreadId ? '\n这是从历史创建的会话分支，使用独立的新工作区。历史文件操作发生在原会话，不能假设原文件仍存在；先列出或读取当前文件。' : '');
+    let tools = this.tools(thread, selected);
+    const sections = sessionPromptSections(config, this.extensions, selected);
+    sections.push({ name: 'memory', content: memoryContext(this.data.productivity || defaultProductivity(), thread.id) });
+    if (thread.parentThreadId) { sections.push({ name: 'branch', content: '这是从历史创建的会话分支，使用独立的新工作区。历史文件操作发生在原会话，不能假设原文件仍存在；先列出或读取当前文件。' }); }
+    const instructions = renderPrompt(sections);
     const user: MessageData = { id: this.resources.createId(), role: 'user', content: text, status: 'complete', error: '',
       attachments: queuedId ? [] : thread.attachments, references: queuedId ? [] : thread.references };
     if (!queuedId) { thread.attachments = []; thread.references = []; }
@@ -582,8 +593,8 @@ export class SessionService {
         base: () => this.tools(thread, selected), runtime: () => this.runtime.fork(), createId: () => this.resources.createId(),
         checkpoint: () => this.persist(), changed: () => this.publish('snapshot') });
       this.chatTeams = chatTeams; tools = chatTeams;
-      instructions += CHAT_TEAM_INSTRUCTIONS + '\n本聊天已有团队（以此处ID为准，禁止跨会话访问）：' +
-        JSON.stringify((thread.teams || []).filter((run) => run.ownerMessageId).map((run) => run.id + ' ' + run.status));
+      sections.push({ name: 'team', content: CHAT_TEAM_INSTRUCTIONS + '\n本聊天已有团队（以此处ID为准，禁止跨会话访问）：' +
+        JSON.stringify((thread.teams || []).filter((run) => run.ownerMessageId).map((run) => run.id + ' ' + run.status)) });
     }
     const generateTitle = shouldGenerateTitle(thread);
     if (thread.messages.length === 0 && !thread.titleEdited) { thread.title = titleCharacters(text.replace(/\s+/g, ' '), 32); }
@@ -597,6 +608,10 @@ export class SessionService {
     const unsubscribe = this.runtime.subscribe((event: AgentEvent) => {
       if (event.run.sessionId !== thread.id) { return; }
       answer.content = event.run.turn.content; answer.steps = event.run.turn.steps;
+      if (event.type === 'step_start') {
+        const context = answer.steps[event.step || 0]?.context;
+        if (context) { this.status.contextTokens = context.tokens; }
+      }
       if (event.type === 'tool_end') {
         const execution = answer.steps?.flatMap((step) => step.tools).find((tool) => tool.call.id === event.toolCallId && tool.call.function.name === 'generate_image' && tool.status === 'complete');
         if (execution) { const image = JSON.parse(execution.output) as GeneratedImage; validateAttachments([image.attachment]); answer.attachments = (answer.attachments || []).concat([image.attachment]).slice(-4); }
@@ -616,7 +631,7 @@ export class SessionService {
       }
     });
     try {
-      await this.runtime.run({ sessionId: thread.id, config: config, messages: threadHistory(thread, instructions), tools: tools,
+      await this.runtime.run({ sessionId: thread.id, config: config, messages: [], tools: tools,
         usageOrigin: { threadId: thread.id, threadTitle: thread.title, turnId: user.id, turnLabel: text.slice(0, 80), purpose: 'conversation', skill: selected || undefined } }, {
         prepare: async (cancellation) => {
           cancellation.check(); cancellation.onCancel(() => chatTeams?.stop()); await this.resources.ensureWorkspace(thread.id);
@@ -624,8 +639,7 @@ export class SessionService {
           // The runtime's initial checkpoint has durably saved the first user message.
           if (generateTitle) { this.generateTitle(thread.id, user.id, text, fallbackTitle, copyModelConfig(config)); }
         },
-        prepareContext: (model, _messages, cancellation) => prepareSessionContext(thread, model, cancellation, false,
-          config, instructions, tools.definitions(), () => this.persist(), (status) => this.contextProgress(status)),
+        context: sessionContextSource(thread, () => sections, () => this.persist(), (status) => this.contextProgress(status)),
         checkpoint: () => { this.publish('snapshot'); return this.persist(); },
         steering: {
           peek: () => nextPendingInput(thread.pendingInputs || [], thread.queuePaused === true, true),
@@ -854,7 +868,12 @@ export class SessionService {
   }
   private refreshContext(): void {
     if (this.data.threads.length === 0) { this.status.contextTokens = 0; return; }
-    this.status.contextTokens = estimateContextTokens(threadHistory(this.active, sessionInstructions(this.data.config, this.extensions) + memoryContext(this.data.productivity || defaultProductivity(), this.active.id)), this.tools(this.active).definitions());
+    const config = this.currentConfig;
+    const sections = sessionPromptSections(config, this.extensions);
+    sections.push({ name: 'memory', content: memoryContext(this.data.productivity || defaultProductivity(), this.active.id) });
+    const source = sessionContextSource(this.active, () => sections, async () => {}, () => {});
+    const tools = new ContextTools(this.tools(this.active), source.entries, contextSettings(config).window);
+    this.status.contextTokens = new RequestContext(source, config).inspect(tools.definitions()).context.tokens;
   }
   private contextProgress(status: string): void { this.status.contextStatus = status; this.publish('state'); }
   private requireThread(id: string): ThreadData {
@@ -863,7 +882,24 @@ export class SessionService {
   }
   private freshThread(): ThreadData {
     return { id: this.resources.createId(), title: '新对话', updatedAt: Date.now(), messages: [], draft: '', pendingInputs: [], queuePaused: false,
+      reasoningEffort: this.data.config.reasoning,
       modelRef: this.data.config.configured ? { providerId: this.data.config.providerId, modelId: this.data.config.model } : undefined };
+  }
+  // Until the first message, every empty chat shares the new-chat preferences.
+  // Sync only selection fields: drafts, attachments and workspace identity stay local.
+  private syncEmptyThreadPreferences(data: AppData): boolean {
+    let changed = false;
+    const reference: ModelReference | undefined = data.config.configured ?
+      { providerId: data.config.providerId, modelId: data.config.model } : undefined;
+    for (const thread of data.threads) {
+      if (thread.messages.length > 0) { continue; }
+      if (thread.modelRef?.providerId === reference?.providerId && thread.modelRef?.modelId === reference?.modelId &&
+        thread.reasoningEffort === data.config.reasoning) { continue; }
+      thread.modelRef = reference ? { providerId: reference.providerId, modelId: reference.modelId } : undefined;
+      thread.reasoningEffort = data.config.reasoning;
+      changed = true;
+    }
+    return changed;
   }
   private async replaceActive(id: string): Promise<void> {
     if (this.data.activeThreadId !== id) { return; }
@@ -886,6 +922,7 @@ export class SessionService {
     finally { this.status.phase = 'idle'; this.publish('snapshot'); }
   }
   private async commitSettings(candidate: AppData): Promise<void> {
+    this.syncEmptyThreadPreferences(candidate);
     await this.repository.save(candidate);
     for (const thread of candidate.threads) {
       const current = this.data.threads.find((item) => item.id === thread.id);
@@ -897,6 +934,7 @@ export class SessionService {
     while (revision !== this.draftRevision) { revision = this.draftRevision; await this.persist(); }
   }
   private async persist(): Promise<void> {
+    this.syncEmptyThreadPreferences(this.data);
     try { await this.repository.save(this.snapshot()); this.status.saveError = ''; }
     catch (error) {
       this.status.saveError = t('会话尚未保存，请重试保存。当前内容仍保留在页面中。原因：') + (error as Error).message;

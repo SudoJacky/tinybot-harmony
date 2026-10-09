@@ -2,9 +2,11 @@ import { ProductivityData, Attachment } from '../model/Productivity';
 import { ImageTools } from './ImageTools';
 import { CodeExecutionTools } from './CodeExecutionTools';
 import { NativeCodeExecutor } from './NativeCodeExecutor';
+import { WebUiPreflight } from './WebUiPreflight';
 import { InteractionTools } from './InteractionTools';
 import { UsageLedger } from './UsageLedger';
 import { UsageRecorder, UsageToolActivity } from '../model/Usage';
+import { ContextDiagnostics } from '../model/Agent';
 import { Cancellation } from './Cancellation';
 import { RuleTools } from './RuleTools';
 import { McpTools } from './McpTools';
@@ -32,6 +34,9 @@ import { ProviderRegistry } from './providers/ProviderRegistry';
 
 class NativeUsageRecorder implements UsageRecorder {
   recordTool(id: string, activity: UsageToolActivity): void { UsageLedger.recordTool(id, activity); }
+  recordContext(id: string, diagnostics: ContextDiagnostics): void {
+    hilog.info(0x0000, 'TinybotContext', 'session=%{public}s %{public}s', id, JSON.stringify(diagnostics));
+  }
 }
 
 class NativeSessionResources implements SessionResources {
@@ -69,6 +74,7 @@ export function createNativeSessionService(filesDir: string, workspaceFilesDir: 
   Attachments.configure(workspaceFilesDir);
   UsageLedger.configure(filesDir).catch((error: Error) => { UsageLedger.error = error.message; });
   const providers = new ProviderRegistry(); const credentials = new CredentialStore();
-  return new SessionService(new ConversationStore(filesDir), new AgentRuntime(providers, credentials, new NativeUsageRecorder()), credentials,
+  return new SessionService(new ConversationStore(filesDir), new AgentRuntime(providers, credentials, new NativeUsageRecorder(),
+    (content, cancellation) => WebUiPreflight.validate(content, cancellation)), credentials,
     new NativeSessionResources(workspaceFilesDir, providers, approval));
 }

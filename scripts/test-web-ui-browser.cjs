@@ -14,10 +14,11 @@ assert.throws(()=>parseWebUi(JSON.stringify({...spec,library:'cdn'})));assert.th
  const browser=await chromium.launch({channel:'msedge',headless:true,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
  try{
   const page=await browser.newPage({viewport:{width:400,height:600}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  const consoleErrors=[];page.on('console',message=>{if(message.type()==='error')consoleErrors.push(message.text());});
   const requests=[];await page.route('**/*',route=>{requests.push(route.request().url());route.abort();});
-  async function mount(values,specOverride=spec){
+  async function mount(values,specOverride=spec,expectedError='',preflight=false){
    await page.setContent(html);
-   await page.evaluate(({spec,values})=>{
+   await page.evaluate(({spec,values,preflight})=>{
     window.messages=[];window.saved=values;window.failSave=false;
     const channel=new MessageChannel();window.nativePort=channel.port1;
     channel.port1.onmessage=event=>{const data=JSON.parse(event.data);window.messages.push(data);if(data.type==='save'){
@@ -25,10 +26,16 @@ assert.throws(()=>parseWebUi(JSON.stringify({...spec,library:'cdn'})));assert.th
       else {window.saved=data.values;channel.port1.postMessage(JSON.stringify({type:'ack',id:data.id,values:data.values}));}
     }};
     window.postMessage('tinybot-web-port','*',[channel.port2]);
-    channel.port1.postMessage(JSON.stringify({type:'init',spec,values,active:true}));
-   },{spec:specOverride,values});
-   await page.waitForFunction(()=>window.messages.some(m=>m.type==='ready'||m.type==='error'));
-   const messages=await page.evaluate(()=>window.messages);assert.equal(messages.find(m=>m.type==='error'),undefined,JSON.stringify(messages));
+    channel.port1.postMessage(JSON.stringify({type:'init',spec,values,active:true,preflight}));
+   },{spec:specOverride,values,preflight});
+   try { await page.waitForFunction(()=>window.messages.some(m=>m.type==='ready'||m.type==='error')); }
+   catch(error){console.error({errors,consoleErrors,frames:page.frames().map(f=>f.url()),host:await page.evaluate(()=>({ready:window.__tinybotHostReady,messages:window.messages}))});throw error;}
+   const messages=await page.evaluate(()=>window.messages);
+   if(expectedError){
+    assert.ok(messages.some(m=>m.type==='error'&&m.message.includes(expectedError)),JSON.stringify(messages));
+    await page.waitForTimeout(350);
+    assert.equal(await page.evaluate(()=>messages.some(m=>m.type==='ready')),false,'failed startup cannot publish a late ready');
+   }else assert.equal(messages.find(m=>m.type==='error'),undefined,JSON.stringify(messages));
    return page.frames().find(f=>f.parentFrame());
   }
   let frame=await mount(begin.state);
@@ -68,5 +75,17 @@ assert.throws(()=>parseWebUi(JSON.stringify({...spec,library:'cdn'})));assert.th
   await page.evaluate(values=>nativePort.postMessage(JSON.stringify({type:'state',values,active:true})),initial2d);
   await frame.waitForFunction(()=>document.getElementById('count').textContent==='当前计数：0');
   console.log('PASS Canvas demo commits DOM edits and applies native reset through the same bridge');
+  await mount(begin.state,spec,'',true);
+  console.log('PASS actual Three.js scene passes startup preflight');
+  const bad={version:1,html:'',css:'',js:'new THREE.OrbitControls();',library:'three',height:360};
+  await mount({},bad,'new OrbitControls(camera, renderer.domElement)',true);
+  assert.ok(await page.evaluate(()=>messages.some(m=>m.message?.includes('tinybot-generated.js'))),'diagnostic includes source stack');
+  await mount({},{...bad,library:'none',js:'const = broken'},'SyntaxError',true);
+  await mount({},{...bad,library:'none',js:'Promise.reject(new Error("async startup failed"));'},'async startup failed',true);
+  await mount({},{...bad,library:'none',js:'tinybot.animate(()=>{throw new Error("first frame failed")})'},'first frame failed',true);
+  await mount({},{...bad,library:'none',js:'console.error("renderer failed")'},'renderer failed',true);
+  await mount({},{...bad,library:'none',js:'await tinybot.save({});'},'Save state only on user interaction',true);
+  await mount({},{...bad,library:'none',js:'document.body.textContent="fixed";'},'',true);
+  console.log('PASS constructor, syntax, rejection, animation and console failures reach the bridge; failed probes cannot save or become ready; next probe recovers');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

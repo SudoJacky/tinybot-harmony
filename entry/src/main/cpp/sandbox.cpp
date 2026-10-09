@@ -148,11 +148,7 @@ void Run(JSContext *ctx, const std::string &source, const std::string &inputJson
             const char *text = JS_ToCStringLen(ctx, &length, json);
             if (!text) { CaptureError(ctx, result); }
             else {
-                if (length > MAX_RESULT_BYTES) {
-                    result.status = "output_limit";
-                    result.resultTruncated = true;
-                    result.error = "Result exceeds 16 KiB; return a smaller summary";
-                } else { result.resultJson.assign(text, length); }
+                result.resultJson.assign(text, length);
                 JS_FreeCString(ctx, text);
             }
         }
@@ -180,8 +176,8 @@ std::string Quote(const std::string &text)
 ExecutionResult ExecuteCode(const std::string &source, const std::string &inputJson, Budget &budget)
 {
     ExecutionResult result;
-    if (source.empty() || source.size() > MAX_SOURCE_BYTES || inputJson.size() > MAX_INPUT_BYTES) {
-        result.status = "error"; result.error = "Source and JSON input must each fit in 32 KiB; source is required";
+    if (source.empty()) {
+        result.status = "error"; result.error = "Source is required";
     } else if (!Interrupt(nullptr, &budget)) {
         const JSMallocFunctions allocator = {Allocate, Free, Reallocate, UsableSize};
         JSRuntime *runtime = JS_NewRuntime2(&allocator, &budget);
