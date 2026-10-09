@@ -74,7 +74,7 @@ export default function contextTests(): void {
         { id: 'a1', role: 'assistant', content: '', status: 'generating', error: '', steps: [] }] };
       for (let index = 0; index < 4; index++) {
         thread.messages[1].steps!.push({ content: 'x'.repeat(20000), uiValidation: '', tools: [{
-          call: { id: 'call' + index, type: 'function', function: { name: 'write_file', arguments: '{}' } }, status: 'complete', output: 'receipt' + index
+          call: { id: 'call' + index, type: 'function', function: { name: 'write_file', arguments: JSON.stringify({ path: 'file' + index + '.txt', content: 'saved' }) } }, status: 'complete', output: 'receipt' + index
         }] });
       }
       const config = emptyData().config; config.contextWindow = 32768;
@@ -87,6 +87,8 @@ export default function contextTests(): void {
       const restored = parseAppData(JSON.stringify(data)).threads[0];
       expect(restored.messages[1].steps?.length).assertEqual(4);
       expect(restored.messages[1].steps?.[0].tools[0].output).assertEqual('receipt0');
+      expect(restored.compaction?.fileOperations?.modifiedFiles.includes('file0.txt')).assertTrue();
+      expect(restored.compaction?.fileOperations?.modifiedFiles.length).assertEqual(restored.compaction?.firstKeptStep);
       expect(threadHistory(restored, 'rules').some((item) => item.toolCallId === 'call3')).assertTrue();
     });
     it('projectsLargeResultsWithoutDiscardingTheirReadableOriginals', 0, async () => {
@@ -267,10 +269,10 @@ export default function contextTests(): void {
       }, '上下文预算');
       expect(model.requests.length).assertEqual(1);
       expect(tools.writes).assertEqual(1);
-      expect(saved.length).assertEqual(2);
       expect(turn.steps[0].tools[0].status).assertEqual('complete');
       expect(turn.steps[0].tools[0].output.length).assertEqual(16000);
-      expect(saved[1].includes('"status":"complete"')).assertTrue();
+      const durable = JSON.parse(saved[saved.length - 1]) as AgentTurn;
+      expect(JSON.stringify(durable.steps[0].tools)).assertEqual(JSON.stringify(turn.steps[0].tools));
     });
   });
   describe('SessionManagement', () => {

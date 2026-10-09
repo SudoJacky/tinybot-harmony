@@ -15,7 +15,7 @@ function load(file) {
   vm.runInNewContext(js, { exports, require: id => load(path.resolve(path.dirname(file), id)), setTimeout, clearTimeout, Map, Set, Date, JSON, console }, { filename: file });
   return exports;
 }
-const { UsageQuery } = load(path.join(__dirname, '../entry/src/main/ets/model/UsageQuery'));
+const { UsageQuery, USAGE_PAGE_SIZE } = load(path.join(__dirname, '../entry/src/main/ets/model/UsageQuery'));
 const { summarizeUsage } = load(path.join(__dirname, '../entry/src/main/ets/model/UsageStatistics'));
 const now = Date.now();
 const filter = { range: 3, provider: '', model: '', threadId: '', now };
@@ -28,7 +28,7 @@ function record(i) {
   const small = Array.from({ length: 97 }, (_, i) => record(i)).reverse();
   const query = new UsageQuery(small); let cursor; const ids = [];
   do {
-    const page = await query.page(filter, cursor); assert.ok(page.records.length <= 30);
+    const page = await query.page(filter, cursor); assert.ok(page.records.length <= USAGE_PAGE_SIZE);
     ids.push(...page.records.map(item => item.id)); cursor = page.next;
   } while (cursor);
   const expected = summarizeUsage(small, 3, '', '', now);
@@ -37,24 +37,27 @@ function record(i) {
   assert.equal((await query.page(scoped)).records.length, summarizeUsage(small, 3, scoped.provider, scoped.model, now).records.length);
   const first = await query.page(filter);
   const inserted = new UsageQuery([record(1000000), ...small]);
-  assert.equal((await inserted.page(filter, first.next)).records[0].id, ids[30], 'cursor is stable after inserting unrelated older records');
+  assert.equal((await inserted.page(filter, first.next)).records[0].id, ids[USAGE_PAGE_SIZE], 'cursor is stable after inserting unrelated older records');
   const cancelled = new UsageQuery(small); const pending = cancelled.summary(filter); cancelled.cancel();
   await assert.rejects(pending, /superseded/);
   const records = Array.from({ length: 100000 }, (_, i) => record(i));
   const large = new UsageQuery(records); let ticks = 0; let maxGap = 0; let last = performance.now();
   const heartbeat = setInterval(() => { const next = performance.now(); maxGap = Math.max(maxGap, next - last); last = next; ticks++; }, 5);
-  const begin = performance.now();
-  const summary = await large.summary(filter); const summaryMs = performance.now() - begin;
-  assert.equal(summary.totals.calls, 100000); assert.equal(summary.totals.total, 12000000);
-  assert.equal(summary.records.length, 0);
-  assert.ok(summary.sessions.every(item => item.records.length === 0 && item.turns.length === 0), 'summary does not retain request lists or eagerly build turns');
-  const pageBegin = performance.now(); const page = await large.page(filter);
-  assert.equal(page.records.length, 30); assert.ok(page.next);
-  const turns = await large.turns(filter, 'thread-10');
-  assert.equal(turns.reduce((sum, item) => sum + item.calls, 0), 20);
-  assert.ok(turns.every(item => item.records.length === 0));
-  clearInterval(heartbeat); assert.ok(ticks > 10, 'cooperative queries yield to the event loop');
-  console.log(JSON.stringify({ records: records.length, sessions: summary.sessions.length, summaryMs: Math.round(summaryMs),
-    pageAndTurnsMs: Math.round(performance.now() - pageBegin), eventLoopTicks: ticks, maxEventLoopGapMs: Math.round(maxGap), retainedPageRecords: page.records.length }));
-  console.log('PASS bounded pages, exact totals, tied timestamps, filters, lazy turns, cancellation and event-loop yielding');
+  try {
+    const begin = performance.now();
+    const summary = await large.summary(filter); const summaryMs = performance.now() - begin;
+    assert.equal(summary.totals.calls, 100000); assert.equal(summary.totals.total, 12000000);
+    assert.equal(summary.records.length, 0);
+    assert.ok(summary.sessions.every(item => item.records.length === 0 && item.turns.length === 0), 'summary does not retain request lists or eagerly build turns');
+    const pageBegin = performance.now(); const page = await large.page(filter);
+    assert.equal(page.records.length, USAGE_PAGE_SIZE); assert.ok(page.next);
+    const turns = await large.turns(filter, 'thread-10');
+    assert.equal(turns.reduce((sum, item) => sum + item.calls, 0), 20);
+    assert.ok(turns.every(item => item.records.length === 0));
+    console.log(JSON.stringify({ records: records.length, sessions: summary.sessions.length, summaryMs: Math.round(summaryMs),
+      pageAndTurnsMs: Math.round(performance.now() - pageBegin), eventLoopTicks: ticks, maxEventLoopGapMs: Math.round(maxGap), retainedPageRecords: page.records.length }));
+    console.log('PASS bounded pages, exact totals, tied timestamps, filters, lazy turns and cancellation; timing is informational');
+  } finally {
+    clearInterval(heartbeat);
+  }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1,6 +1,6 @@
 import { t } from '../model/I18n';
 import { teamWorkerInstructions } from '../model/SystemPrompt';
-import { ModelMessage, ToolCall, ToolDefinition } from '../model/Agent';
+import { ModelMessage, ToolCall, ToolDefinition, ToolExecutionMode } from '../model/Agent';
 import { ModelConfig } from '../model/Conversation';
 import { TeamAttempt, TeamRun, TeamTaskRecord, lastAttempt, teamPlan, validateTeamPlan } from '../model/Team';
 import { AgentTools } from './AgentLoop';
@@ -9,12 +9,22 @@ import { Cancellation } from './Cancellation';
 import { UsageOrigin } from '../model/Usage';
 interface TeamEvidence { taskId: string; title: string; output: string; }
 
-// Parallel model requests share a serialized tool lane: file mutations and approval dialogs never overlap.
+// Concurrent reads share the lane; exclusive tools wait for earlier reads and block later arrivals.
 export class TeamToolLane {
   private tail: Promise<void> = Promise.resolve();
+  private readers: Set<Promise<void>> = new Set<Promise<void>>();
   execute(tools: AgentTools, call: ToolCall, cancellation: Cancellation): Promise<string> {
-    const work = this.tail.then(() => { cancellation.check(); return tools.execute(call, cancellation); });
-    this.tail = work.then(() => {}, () => {}); return work;
+    const mode = tools.definitions().find((tool) => tool.function.name === call.function.name)?.executionMode || 'parallel';
+    return this.run(mode, () => tools.execute(call, cancellation), cancellation);
+  }
+  run(mode: ToolExecutionMode, action: () => Promise<string>, cancellation: Cancellation): Promise<string> {
+    const ready = mode === 'sequential' ? Promise.all([this.tail, ...Array.from(this.readers)]).then(() => {}) : this.tail;
+    const work = ready.then(() => { cancellation.check(); return action(); });
+    // Release scheduling barriers on failure; the original work still rejects to its caller.
+    const settled = work.then(() => {}, () => {});
+    if (mode === 'sequential') { this.tail = settled; this.readers.clear(); }
+    else { this.readers.add(settled); settled.then(() => { this.readers.delete(settled); }); }
+    return work;
   }
 }
 export class TeamTools implements AgentTools {

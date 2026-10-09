@@ -13,7 +13,8 @@ export class CodeExecutionTools implements AgentTools {
   constructor(executor: CodeExecutor) { this.executor = executor; }
 
   definitions(): ToolDefinition[] {
-    return [{ type: 'function', function: {
+    // The native adapter admits one job until its runtime has finished cleanup.
+    return [{ type: 'function', executionMode: 'sequential', function: {
       name: 'execute_code',
       description: 'Run synchronous JavaScript for calculation, parsing and data transformation in a fresh isolated QuickJS runtime. ' +
         'code is a function body: read the input variable and use return for a JSON-serializable result. ' +

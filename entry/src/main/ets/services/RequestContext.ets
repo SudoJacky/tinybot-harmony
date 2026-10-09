@@ -1,4 +1,5 @@
-import { ContextDiagnostics, ModelMessage, ModelTurn, ToolDefinition } from '../model/Agent';
+import { ContextDiagnostics, ModelMessage, ModelTurn, ToolDefinition, toolSchemas } from '../model/Agent';
+import { toolPromptSections } from '../model/ToolPrompt';
 import { CompactionData, ContextState, ModelConfig } from '../model/Conversation';
 import { planContextCompaction, contextInputBudget, contextSettings, estimateContextTokens, estimateTextTokens } from '../model/ConversationContext';
 import { ContextEntry, PromptSection, projectedHistory, renderPrompt } from '../model/ContextProjection';
@@ -7,6 +8,7 @@ import { compactContext } from './ContextCompactor';
 import { projectResults } from './ContextTools';
 import { ModelSession } from './providers/Provider';
 import { t } from '../model/I18n';
+import { ContextOverflowError } from './providers/ProviderErrors';
 
 export interface ContextSource {
   state: ContextState;
@@ -30,7 +32,7 @@ export class RequestContext {
   constructor(source: ContextSource, config: ModelConfig) { this.source = source; this.config = config; }
 
   inspect(tools: ToolDefinition[]): PreparedRequest {
-    const sections = this.source.sections();
+    const sections = this.source.sections().concat(toolPromptSections(tools));
     const entries = projectResults(this.source.entries(), contextSettings(this.config).window);
     const messages = this.assemble(entries, sections, this.source.state.compaction, []);
     return { messages: messages, context: this.describe(messages, tools, sections) };
@@ -44,22 +46,24 @@ export class RequestContext {
   }
 
   async prepare(model: ModelSession, tools: ToolDefinition[], cancellation: Cancellation,
-    pending: ModelMessage[] = [], manual: boolean = false): Promise<PreparedRequest> {
+    pending: ModelMessage[] = [], manual: boolean = false, recoverOverflow: boolean = false): Promise<PreparedRequest> {
     cancellation.check();
     const settings = contextSettings(this.config);
-    const sections = this.source.sections();
+    if (recoverOverflow && !settings.autoCompact) { throw new ContextOverflowError(); }
+    const sections = this.source.sections().concat(toolPromptSections(tools));
     const instructions = renderPrompt(sections);
     const entries = projectResults(this.source.entries(), settings.window);
     const assemble = (checkpoint?: CompactionData): ModelMessage[] => this.assemble(entries, sections, checkpoint, pending);
     let messages = assemble(this.source.state.compaction);
     let diagnostics = this.describe(messages, tools, sections);
-    if (manual || (settings.autoCompact && diagnostics.tokens > diagnostics.inputBudget)) {
+    if (manual || recoverOverflow || (settings.autoCompact && diagnostics.tokens > diagnostics.inputBudget)) {
       const overhead = estimateContextTokens(instructions ? [{ role: 'system', content: instructions }] : [], tools) + estimateContextTokens(pending);
       // The summary prompt targets about 1000 CJK characters; leave room for its wrapper too.
-      const keep = Math.min(settings.keepRecent, Math.max(0, contextInputBudget(settings.window) - overhead - 2200));
+      let keep = Math.min(settings.keepRecent, Math.max(0, contextInputBudget(settings.window) - overhead - 2200));
+      if (recoverOverflow) { keep = Math.min(keep, Math.floor(diagnostics.historyTokens / 2)); }
       const plan = planContextCompaction(entries, this.source.state.compaction, keep, diagnostics.tokens);
       if (!plan) { throw new Error(t('没有可压缩的较早完整轮次。最近一轮和当前输入会保留，请缩小任务或提高上下文窗口。')); }
-      this.source.progress(t('正在压缩较早对话…'));
+      this.source.progress(recoverOverflow ? t('模型输入超出窗口，正在压缩后重试一次…') : t('正在压缩较早对话…'));
       const checkpoint = await compactContext(plan, settings, model, cancellation,
         (batch) => this.source.progress(t('正在压缩较早对话 · 第 {0} 批', [batch])));
       cancellation.check();
@@ -73,6 +77,7 @@ export class RequestContext {
       cancellation.check();
       this.baselineInput = 0;
       messages = candidate; diagnostics = this.describe(messages, tools, sections);
+      diagnostics.compactionReason = recoverOverflow ? 'overflow' : manual ? 'manual' : 'threshold';
       this.source.progress(t('较早对话已压缩，完整记录保留'));
     }
     if (!manual && diagnostics.tokens > diagnostics.inputBudget) {
@@ -100,7 +105,7 @@ export class RequestContext {
     const sizes: Record<string, number> = {};
     for (const section of sections) { sizes[section.name] = estimateTextTokens(section.content); }
     return { tokens: tokens, heuristicTokens: heuristic, source: source, inputBudget: contextInputBudget(contextSettings(this.config).window),
-      sections: sizes, toolTokens: estimateTextTokens(JSON.stringify(tools)),
+      sections: sizes, toolTokens: estimateTextTokens(JSON.stringify(toolSchemas(tools))),
       historyTokens: estimateContextTokens(messages.filter((message) => message.role !== 'system')),
       projectedResults: messages.filter((message) => message.role === 'tool' && message.content.startsWith('{"contextPreview":true,')).length };
   }

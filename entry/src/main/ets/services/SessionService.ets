@@ -17,7 +17,7 @@ import { AppData, MessageData, ModelConfig, ThreadData, copyModelConfig, emptyDa
 import { contextSettings } from '../model/ConversationContext';
 import { ModelReference, ProviderProfile, migrateProfiles, modelConfig } from '../model/ProviderProfiles';
 import { InputMode, MAX_INPUT_TEXT, PendingInput, nextPendingInput, validatePendingInputs } from '../model/PendingInput';
-import { ExtensionSettings, SkillData, SkillFile, defaultExtensions, explicitSkill, parseSkill, validateExtensions } from '../model/Skills';
+import { ExtensionSettings, SkillData, SkillFile, defaultExtensions, explicitSkill, expandSkillCommand, parseSkill, validateExtensions } from '../model/Skills';
 import { threadTitle } from '../model/SessionManagement';
 import { CONVERSATION_TITLE_PROMPT, sanitizeConversationTitle, shouldGenerateTitle, titleCharacters } from '../model/ConversationTitle';
 import { AgentEvent, AgentRuntime } from './AgentRuntime';
@@ -580,7 +580,7 @@ export class SessionService {
     sections.push({ name: 'memory', content: memoryContext(this.data.productivity || defaultProductivity(), thread.id) });
     if (thread.parentThreadId) { sections.push({ name: 'branch', content: '这是从历史创建的会话分支，使用独立的新工作区。历史文件操作发生在原会话，不能假设原文件仍存在；先列出或读取当前文件。' }); }
     const instructions = renderPrompt(sections);
-    const user: MessageData = { id: this.resources.createId(), role: 'user', content: text, status: 'complete', error: '',
+    const user: MessageData = { id: this.resources.createId(), role: 'user', content: text, skillPrompt: expandSkillCommand(text, this.extensions.skills), status: 'complete', error: '',
       attachments: queuedId ? [] : thread.attachments, references: queuedId ? [] : thread.references };
     if (!queuedId) { thread.attachments = []; thread.references = []; }
     const answer: MessageData = { id: this.resources.createId(), role: 'assistant', content: '', status: 'generating', error: '', modelRef: reference };

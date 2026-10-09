@@ -60,5 +60,5 @@ export async function compactContext(plan: CompactionPlan, settings: ContextSett
     remaining = remaining.slice(low);
   }
   return { summary: summary, firstKeptMessageId: plan.firstKeptMessageId, firstKeptStep: plan.firstKeptStep,
-    tokensBefore: plan.tokensBefore, createdAt: Date.now() };
+    tokensBefore: plan.tokensBefore, createdAt: Date.now(), fileOperations: plan.fileOperations };
 }

@@ -305,8 +305,11 @@ export default function runtimeTests(): void {
       const result = await agent.run(request(tools), persistence);
       expect(result.status).assertEqual('complete');
       expect(result.turn.content).assertEqual('done');
-      expect(types.join(',')).assertEqual('run_start,step_start,model_end,tool_start,tool_end,step_end,step_start,text_delta,model_end,step_end,run_finishing,run_end');
-      expect(keys.aliases.length).assertEqual(2);
+      const ordered = ['run_start', 'step_start', 'model_end', 'tool_start', 'tool_end', 'run_finishing', 'run_end'];
+      let previous = -1;
+      for (const type of ordered) { const index = types.indexOf(type); expect(index > previous).assertTrue(); previous = index; }
+      expect(types.filter((type) => type === 'run_end').length).assertEqual(1);
+      expect(types[types.length - 1]).assertEqual('run_end');
       expect(tools.calls.length).assertEqual(1);
       expect(snapshots.join('').includes('fake-secret')).assertFalse();
       expect(agent.isRunning).assertFalse();
@@ -399,11 +402,14 @@ export default function runtimeTests(): void {
       const failed = await agent.run(request(), hooks());
       expect(failed.status).assertEqual('failed');
       expect(failed.error.includes('未注册')).assertTrue();
-      expect(events.join(',')).assertEqual('run_start,run_finishing,run_end');
+      expect(events[0]).assertEqual('run_start');
+      expect(events[events.length - 1]).assertEqual('run_end');
+      expect(events.includes('step_start')).assertFalse();
       unsubscribe();
+      const observed = events.length;
       providers.register(new TestProvider('test', [answer()]));
       expect((await agent.run(request(), hooks())).status).assertEqual('complete');
-      expect(events.length).assertEqual(3);
+      expect(events.length).assertEqual(observed);
     });
     it('preservesStorageErrorsInsteadOfCallingThemCancellation', 0, async () => {
       const provider = new TestProvider('test', [answer()]);

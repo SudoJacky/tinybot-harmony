@@ -246,9 +246,8 @@ export default function agentTests(): void {
       expect(result.content).assertEqual('已创建并核对。');
       expect(files.values.get('notes/a.txt')).assertEqual('你好🌱');
       expect(files.calls.join(',')).assertEqual('write:notes/a.txt,read:notes/a.txt');
-      expect(saved.length).assertEqual(4);
-      expect(saved[0].includes('"status":"running"')).assertTrue();
-      expect(saved[1].includes('"status":"complete"')).assertTrue();
+      const durable = (JSON.parse(saved[saved.length - 1]) as AgentTurn).steps.flatMap((step) => step.tools);
+      expect(JSON.stringify(durable)).assertEqual(JSON.stringify(result.steps.flatMap((step) => step.tools)));
       expect(model.requests[1][1].toolCalls?.[0].id).assertEqual('write');
       expect(model.requests[1][2].toolCallId).assertEqual('write');
       expect(model.requests[2][4].content).assertEqual('{"content":"你好🌱"}');

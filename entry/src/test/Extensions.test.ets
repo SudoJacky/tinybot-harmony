@@ -180,8 +180,8 @@ export default function extensionTests(): void {
       const result: AgentTurn = { content: '', steps: [] };
       const saved: string[] = [];
       await run(model, new ToolSet([new SkillTools([skill]), new WebTools(new FixtureWeb())]), result, saved);
-      expect(saved.length).assertEqual(6);
-      expect(saved[0].includes('"status":"running"')).assertTrue();
+      const durable = (JSON.parse(saved[saved.length - 1]) as AgentTurn).steps.flatMap((step) => step.tools);
+      expect(JSON.stringify(durable)).assertEqual(JSON.stringify(result.steps.flatMap((step) => step.tools)));
       expect(model.requests[2][5].toolCallId).assertEqual('w');
       expect(model.requests[2][5].content.includes('"trust":"untrusted"')).assertTrue();
       const data = emptyData();

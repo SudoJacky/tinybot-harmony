@@ -1088,11 +1088,20 @@ export default function sessionServiceTests(): void {
       const entered = new Gate(); const release = new Gate();
       f.provider.respond = async () => { entered.open(); await release.promise; return reply(); };
       f.session.setDraft('/skill:demo task'); const running = f.session.send(); await entered.promise;
+      const sent = f.provider.requests[0].messages.find((message) => message.role === 'user')?.content || '';
+      expect(sent.includes('<skill name="demo">')).assertTrue();
+      expect(sent.includes('Read the reference.')).assertTrue();
+      expect(sent.includes('references/a.md')).assertTrue();
+      expect(sent.endsWith('task')).assertTrue();
       expect(await f.session.changeSkill('demo', true)).assertFalse(); release.open(); await running;
       expect(await f.session.changeSkill('demo')).assertTrue();
       expect((await f.repository.load()).extensions?.skills[0].enabled).assertFalse();
       expect(await f.session.changeSkill('demo', true)).assertTrue();
       expect((await f.repository.load()).extensions?.skills.length).assertEqual(0);
+      expect(active(await f.repository.load()).messages[0].skillPrompt).assertEqual(sent);
+      f.provider.respond = async () => reply();
+      f.session.setDraft('continue'); await f.session.send();
+      expect(f.provider.requests[1].messages.some((message) => message.content === sent)).assertTrue();
     });
   });
 }

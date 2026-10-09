@@ -19,7 +19,8 @@ class Gate {
 class TeamKeys implements CredentialReader { async read(_alias: string): Promise<string> { return ''; } }
 class BlockingTools implements AgentTools {
   entered: Gate = new Gate(); release: Gate = new Gate(); count: number = 0;
-  definitions(): ToolDefinition[] { return []; }
+  definitions(): ToolDefinition[] { return [{ type: 'function', executionMode: 'sequential', function: {
+    name: 'test', description: 'Exclusive operation', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false } } }]; }
   async execute(_call: ToolCall, _signal: Cancellation): Promise<string> { this.count++; this.entered.open(); await this.release.promise; return 'ok'; }
 }
 class TeamProvider implements ModelProvider {
@@ -88,7 +89,9 @@ export default function teamTests(): void {
       expect(f.run.tasks[0].status).assertEqual('running'); expect(f.run.tasks[1].status).assertEqual('running'); expect(f.run.tasks[2].status).assertEqual('pending');
       release.open(); await work;
       expect(f.run.status).assertEqual('completed'); expect(f.run.tasks[2].attempts[0].turn.content).assertEqual('最终报告');
-      expect(f.saves.length > 5).assertTrue();
+      const durable = JSON.parse(f.saves[f.saves.length - 1]) as TeamRun;
+      expect(durable.status).assertEqual('completed');
+      expect(durable.tasks.every((task) => task.status === 'succeeded')).assertTrue();
     });
     it('one_member_never_runs_two_tasks_at_once', 0, async () => {
       const f = new Fixture(); f.run.tasks[1].task.memberId = 'researcher';

@@ -6,6 +6,7 @@ import { PendingInput, validatePendingInput } from './PendingInput';
 import { ContextState } from './Conversation';
 
 export interface ContextDiagnostics {
+  compactionReason?: string;
   tokens: number;
   heuristicTokens: number;
   inputBudget: number;
@@ -57,9 +58,20 @@ export interface ToolDefinitionFunction {
   parameters: ToolParameters;
 }
 
+export type ToolExecutionMode = 'parallel' | 'sequential';
+
 export interface ToolDefinition {
   type: string;
   function: ToolDefinitionFunction;
+  // A sequential tool makes its entire model-response batch execute in order.
+  executionMode?: ToolExecutionMode;
+  // Local prompt contributions, never serialized into provider tool schemas.
+  promptSnippet?: string;
+  promptGuidelines?: string[];
+}
+
+export function toolSchemas(tools: ToolDefinition[]): ToolDefinition[] {
+  return tools.map((tool): ToolDefinition => ({ type: tool.type, function: tool.function }));
 }
 
 export interface ModelMessage {
@@ -88,6 +100,7 @@ export interface ToolExecution {
 }
 
 export interface AgentStep {
+  requestError?: string; // A failed request is kept for diagnostics, never replayed as model output.
   context?: ContextDiagnostics;
   continuation?: string;
   uiValidation?: string; // 'pending', '' (passed), or a runtime diagnostic. Persisted for replay.
@@ -126,6 +139,7 @@ export function toolError(message: string): string {
 
 export function stepMessages(step: AgentStep, includeSteering: boolean = true): ModelMessage[] {
   const prefix: ModelMessage[] = includeSteering && step.steering ? [{ role: 'user', content: step.steering.text }] : [];
+  if (step.requestError) { return prefix; }
   const result: ModelMessage[] = [{
     role: 'assistant', content: step.content, reasoningContent: step.reasoningContent, anthropicContent: step.anthropicContent,
     toolCalls: step.tools.length ? step.tools.map((tool: ToolExecution) => tool.call) : undefined
@@ -165,6 +179,7 @@ export function validateSteps(steps: AgentStep[]): void {
   for (const step of steps) {
     if (step?.anthropicContent !== undefined) validateAnthropicContent(step.anthropicContent);
     if (!step || typeof step.content !== 'string' || !Array.isArray(step.tools) ||
+      (step.requestError !== undefined && (step.requestError !== 'context_overflow' || step.tools.length > 0)) ||
       (step.continuation !== undefined && typeof step.continuation !== 'string') ||
       (step.uiValidation !== undefined && (typeof step.uiValidation !== 'string' || step.uiValidation.length > 8000)) ||
       (step.reasoningContent !== undefined && (typeof step.reasoningContent !== 'string' ||

@@ -43,10 +43,10 @@ export default function systemPromptTests(): void {
       const defaults = emptyData(); defaults.config.userDocument = undefined;
       expect(parseAppData(JSON.stringify(defaults)).config.userDocument).assertEqual('');
     });
-    it('composesRuntimeAndOnlyEnabledWebAndSkillContextWithoutMutatingSettings', 0, () => {
+    it('composesRuntimeAndSelectedSkillsWithoutMutatingSettings', 0, () => {
       const config = defaultConfig(); config.systemPrompt = 'My custom assistant';
       config.userDocument = '# Preferences\nUse short answers.';
-      const extensions = defaultExtensions(); extensions.webEnabled = false;
+      const extensions = defaultExtensions();
       extensions.skills = [parseSkill('---\nname: report\ndescription: Summarize reports\ndisable-model-invocation: true\n---\nRead the source.')];
       const base = sessionInstructions(config, extensions);
       expect(base.startsWith('<identity>\n' + DEFAULT_SYSTEM_PROMPT + '\n</identity>')).assertTrue();
@@ -54,12 +54,9 @@ export default function systemPromptTests(): void {
       expect(base.includes('My custom assistant')).assertFalse();
       expect(base.includes('# USER.md')).assertTrue();
       expect(base.includes(JSON.stringify(config.userDocument))).assertTrue();
-      expect(base.includes('<web>')).assertFalse();
       expect(base.includes('Summarize reports')).assertFalse();
       expect(base.includes('<team_coordinator>')).assertFalse();
-      extensions.webEnabled = true;
       const selected = sessionInstructions(config, extensions, 'report');
-      expect(selected.includes('<web>')).assertTrue();
       expect(selected.includes('Summarize reports')).assertTrue();
       expect(config.systemPrompt).assertEqual('My custom assistant');
       config.userDocument = ' \n ';

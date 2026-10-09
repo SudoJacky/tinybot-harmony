@@ -10,6 +10,7 @@ import { contextSettings, validateCompaction } from './ConversationContext';
 import { ModelReference, ProviderProfile, validateProfile, validateReference } from './ProviderProfiles';
 import { ExtensionSettings, validateExtensions } from './Skills';
 import { PendingInput, validatePendingInputs } from './PendingInput';
+import { FileOperations } from './FileOperations';
 
 import { DEFAULT_SYSTEM_PROMPT, migrateUserDocument } from './SystemPrompt';
 
@@ -30,6 +31,8 @@ export interface ModelConfig {
 }
 
 export interface MessageData {
+  // Model-visible explicit Skill expansion, captured once; content stays user-visible.
+  skillPrompt?: string;
   uiStates?: UiSavedState[];
   references?: ThreadReference[];
   id: string;
@@ -43,6 +46,7 @@ export interface MessageData {
 }
 
 export interface CompactionData {
+  fileOperations?: FileOperations;
   summary: string;
   firstKeptMessageId: string;
   // A step boundary inside the user/assistant pair; absent retains the whole pair.
@@ -123,7 +127,7 @@ export function requestHistory(messages: MessageData[], systemPrompt: string): M
     }
     const answer = messages[index + 1];
     if (!answer) {
-      result.push({ role: 'user', content: message.content + referenceContext(message.references), attachments: message.attachments });
+      result.push({ role: 'user', content: (message.skillPrompt ?? message.content) + referenceContext(message.references), attachments: message.attachments });
     } else if (answer.role === 'assistant') {
       const steps = answer.steps || [];
       const hasTools = steps.some((step: AgentStep) => step.tools.length > 0);
@@ -131,7 +135,7 @@ export function requestHistory(messages: MessageData[], systemPrompt: string): M
       if (answer.status !== 'complete' && !hasTools && !hasSteering) {
         continue;
       }
-      result.push({ role: 'user', content: message.content + referenceContext(message.references), attachments: message.attachments });
+      result.push({ role: 'user', content: (message.skillPrompt ?? message.content) + referenceContext(message.references), attachments: message.attachments });
       if (steps.length === 0) {
         result.push({ role: 'assistant', content: answer.content });
       } else {
@@ -231,6 +235,10 @@ export function parseAppData(text: string): AppData {
         throw new Error(t("本地消息数据损坏，原文件已保留。"));
       }
       messageIds.add(message.id);
+      if (message.skillPrompt !== undefined && (message.role !== 'user' || typeof message.skillPrompt !== 'string' ||
+        !message.skillPrompt.trim() || message.skillPrompt.length > 64000)) {
+        throw new Error('Invalid saved Skill expansion; original transcript preserved.');
+      }
       if (message.uiStates !== undefined) { validateUiStates(message.uiStates); }
       if (message.attachments) { validateAttachments(message.attachments); }
       if (message.references !== undefined) { validateThreadReferences(message.references); }

@@ -27,6 +27,7 @@ export function buildTimeline(steps: AgentStep[]): TimelineEntry[] {
     if (step.steering) {
       group = undefined; entries.push({ kind: 'steering', key: 'steering-' + index, step: index, items: [] });
     }
+    if (step.requestError) { continue; }
     const items: ProcessItem[] = [];
     if ((step.reasoningContent || '').trim().length > 0) { items.push({ step: index, tool: -1 }); }
     if (step.content.trim().length > 0) {

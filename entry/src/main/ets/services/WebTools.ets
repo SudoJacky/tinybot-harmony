@@ -95,7 +95,8 @@ export class WebTools implements AgentTools {
   constructor(transport: WebTransport) { this.transport = transport; }
 
   definitions(): ToolDefinition[] {
-    return [{ type: 'function', function: {
+    return [{ type: 'function', promptSnippet: '读取已知 URL 的静态网页',
+      promptGuidelines: ['read_web 不提供联网搜索。引用使用工具返回的来源 URL，区分网页陈述与推断；读取失败、内容过期或截断时说明证据局限。'], function: {
       name: 'read_web', description: '读取指定 HTTP/HTTPS 网页的静态正文、标题和链接，供引用来源。不是搜索引擎或浏览器；不登录、不执行 JavaScript。最多下载 1 MiB，正文最多 20000 字符，截断会明确标记。',
       parameters: { type: 'object', properties: {
         'url': { type: 'string', description: '用户提供或已知来源的完整网页 URL，不要编造地址。' }

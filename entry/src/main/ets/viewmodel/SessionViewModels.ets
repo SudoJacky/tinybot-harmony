@@ -19,6 +19,7 @@ export class ToolExecutionViewModel implements ToolExecution {
 
 @Observed
 export class AgentStepViewModel implements AgentStep {
+  requestError?: string;
   uiValidation?: string;
   content: string = '';
   reasoningContent: string = '';
@@ -26,6 +27,7 @@ export class AgentStepViewModel implements AgentStep {
   tools: ToolExecutionViewModel[] = [];
   constructor(data: AgentStep) { this.update(data); }
   update(data: AgentStep): void {
+    this.requestError = data.requestError;
     this.uiValidation = data.uiValidation;
     this.content = data.content; this.reasoningContent = data.reasoningContent || ''; this.steering = data.steering;
     this.tools = data.tools.map((tool: ToolExecution, index: number) => {
@@ -64,7 +66,7 @@ export class MessageViewModel {
     this.attachments = data.attachments || [];
     this.modelRef = data.modelRef; this.steps = data.steps || [];
     this.plan.update(this.steps, data.status);
-    this.reasoningContent = this.steps.map((step) => step.reasoningContent || '').filter((text) => text.length > 0).join('\n\n');
+    this.reasoningContent = this.steps.filter((step) => !step.requestError).map((step) => step.reasoningContent || '').filter((text) => text.length > 0).join('\n\n');
     this.stepViews = this.steps.map((step: AgentStep, index: number) => {
       const existing = this.stepViews[index];
       if (existing) { existing.update(step); return existing; }

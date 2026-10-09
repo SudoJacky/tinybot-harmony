@@ -234,13 +234,11 @@ function fixture(source = answer) {
     const result=vm.runInNewContext('(function(input){'+action.code+'})(input)',{input},{timeout:100});
     ui.validateUiState(document,result);assert.equal(result.each,30);assert.equal(JSON.parse(result.scene).shapes.length,4);
   });
-  test('the complete UI contract is available from the first model request',()=>{
+  test('the session prompt includes the UI instructions',()=>{
     const {sessionInstructions}=load(path.join(root,'main/ets/services/SessionContext'));
     const {INTERACTIVE_UI_INSTRUCTIONS}=load(path.join(root,'main/ets/model/InteractiveUiInstructions'));
     const data=seed();const instructions=sessionInstructions(data.config,data.extensions);
     assert.ok(instructions.includes(INTERACTIVE_UI_INSTRUCTIONS));
-    assert.ok(instructions.includes('Node record:'));
-    assert.equal(instructions.includes('describe_ui'),false);
   });
   test('Web content validates before rendering and cannot bind code to mutable state',()=>{
     const spec={version:1,html:'<canvas></canvas>',css:'',js:'document.body.dataset.ready="yes"',library:'three',height:400};

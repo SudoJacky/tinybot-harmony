@@ -36,7 +36,8 @@ export interface ChatTeamContext {
 function stringProperty(description: string): ToolProperty { return { type: 'string', description: description }; }
 function strings(description: string): ToolProperty { return { type: 'array', description: description, items: stringProperty('字符串') }; }
 function definition(name: string, description: string, properties: Record<string, ToolProperty>, required: string[]): ToolDefinition {
-  return { type: 'function', function: { name: name, description: description, parameters: { type: 'object', properties: properties, required: required, additionalProperties: false } } };
+  return { type: 'function', executionMode: ['team_inspect', 'team_read_result', 'team_list_messages', 'team_read_message'].includes(name) ? 'parallel' : 'sequential',
+    function: { name: name, description: description, parameters: { type: 'object', properties: properties, required: required, additionalProperties: false } } };
 }
 function coordinatorDefinitions(): ToolDefinition[] {
   const member: ToolProperty = { type: 'object', description: '员工角色', properties: {
@@ -182,7 +183,8 @@ export class ChatTeamTools implements AgentTools {
     if (!args || typeof args !== 'object') { throw new Error(t("团队参数无效。")); }
     if (call.function.name === 'team_recruit') { return this.recruit(args, cancellation); }
     const run = this.require(args.runId);
-    if (call.function.name === 'team_read_result') { return this.readResult(args, cancellation); }
+    // Coordinator waits/control must stay outside the lane needed by its workers.
+    if (call.function.name === 'team_read_result') { return this.lane.run('parallel', () => this.readResult(args, cancellation), cancellation); }
     if (call.function.name === 'team_control') { return this.control(run, args); }
     if (call.function.name === 'team_resume') {
       if (run.tasks.some((record) => !['pending', 'succeeded'].includes(record.status))) { throw new Error(t("请先明确重试失败、中断或取消的任务。")); }

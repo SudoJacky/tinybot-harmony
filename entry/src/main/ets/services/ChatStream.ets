@@ -1,6 +1,7 @@
 import { t } from '../model/I18n';
 import { MAX_REASONING_CONTENT, MAX_TOOL_ARGUMENTS, MAX_TOOL_CALLS, ModelTurn, ToolCall, validateToolCalls } from '../model/Agent';
 import { ModelStream } from './providers/EventStreams';
+import { ProviderErrorData, ContextOverflowError, isContextOverflow } from './providers/ProviderErrors';
 
 interface StreamToolFunction {
   name?: string;
@@ -28,7 +29,7 @@ interface StreamChoice {
 
 interface StreamChunk {
   choices?: StreamChoice[];
-  error?: Object;
+  error?: ProviderErrorData;
 }
 
 // SSE framing survives arbitrary transport chunk boundaries, including CRLF splits.
@@ -122,6 +123,7 @@ export class ChatStream implements ModelStream {
       throw new Error(t("模型返回了无效的流式 JSON。"));
     }
     if (!chunk || chunk.error) {
+      if (isContextOverflow(chunk?.error)) { throw new ContextOverflowError(); }
       throw new Error(t("模型服务在生成过程中返回错误。"));
     }
     if (!Array.isArray(chunk.choices)) {

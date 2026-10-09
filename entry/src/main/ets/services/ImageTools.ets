@@ -23,7 +23,7 @@ export class ImageTools implements AgentTools {
   }
   definitions(): ToolDefinition[] {
     const sources = this.attachments.map((item) => item.id + ': ' + item.name).join('\n');
-    return [{ type: 'function', function: { name: 'generate_image', description: '按描述生成图片，或编辑已有图片。使用配置的图片模型，可能产生费用。输出保存到工作区，可继续编辑。可用附件 ID：\n' + sources,
+    return [{ type: 'function', executionMode: 'sequential', function: { name: 'generate_image', description: '按描述生成图片，或编辑已有图片。使用配置的图片模型，可能产生费用。输出保存到工作区，可继续编辑。可用附件 ID：\n' + sources,
       parameters: { type: 'object', properties: { 'prompt': { type: 'string', description: '图片生成或编辑要求' },
         'source': { type: 'string', description: '编辑时使用图片附件 ID 或工作区相对路径；生成新图时省略' } }, required: ['prompt'], additionalProperties: false } } }];
   }

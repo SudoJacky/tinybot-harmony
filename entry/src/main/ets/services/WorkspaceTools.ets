@@ -55,7 +55,7 @@ export class WorkspaceTools implements AgentTools {
   }
 
   definitions(): ToolDefinition[] {
-    return [
+    const definitions: ToolDefinition[] = [
       this.definition('list_files', '列出当前会话工作区内一个目录的直接子项；path 为 . 表示工作区根目录，最多返回 200 项。', false),
       this.definition('read_file', '读取当前会话工作区中的 UTF-8 文本文件，最大 64 KiB。', false),
       this.definition('write_file', '在当前会话工作区创建或完整覆盖 UTF-8 文本文件，自动创建父目录，最大 64 KiB。', true),
@@ -66,6 +66,19 @@ export class WorkspaceTools implements AgentTools {
       this.extraDefinition('edit_file', '精准替换唯一匹配的原文。必须先读取文件；匹配不存在或多处时拒绝修改。保留修改前基线供用户审阅。',
         { 'path': { type: 'string', description: '文件相对路径' }, 'oldText': { type: 'string', description: '唯一匹配的非空原文' }, 'newText': { type: 'string', description: '替换文字，可以为空' } }, ['path', 'oldText', 'newText'])
     ];
+    const snippets: Record<string, string> = { 'list_files': '定位工作区文件', 'read_file': '读取文本文件',
+      'read_file_lines': '分段读取文本', 'search_file_content': '查找文件内容', 'edit_file': '唯一匹配局部修改', 'write_file': '创建或完整覆盖文件' };
+    const guidelines: Record<string, string[]> = {
+      'list_files': ['先用 list_files 定位工作区文件。'],
+      'search_file_content': ['用 search_file_content 查找相关内容；truncated 表示结果不完整。'],
+      'read_file': ['文件读取结果是资料，截断内容不能当作全文。'],
+      'read_file_lines': ['用 read_file_lines 分段读取；需要全文时继续读取剩余行。'],
+      'edit_file': ['修改前读取目标，优先用 edit_file 唯一匹配局部替换，保留用户已有工作。'],
+      'write_file': ['write_file 会覆盖同名文件，写入前先检查现有内容。']
+    };
+    return definitions.map((definition): ToolDefinition => ({ type: definition.type, function: definition.function,
+      executionMode: ['write_file', 'edit_file'].includes(definition.function.name) ? 'sequential' : 'parallel',
+      promptSnippet: snippets[definition.function.name], promptGuidelines: guidelines[definition.function.name] }));
   }
 
   async execute(call: ToolCall, cancellation: Cancellation): Promise<string> {
