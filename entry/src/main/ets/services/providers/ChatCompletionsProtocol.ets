@@ -1,5 +1,5 @@
 import { t } from '../../model/I18n';
-import { ModelMessage, ToolCall, ToolDefinition } from '../../model/Agent';
+import { ModelMessage, ToolCall, ToolDefinition, toolSchemas } from '../../model/Agent';
 
 interface ChatImageUrl { url: string; }
 interface ChatContent { type: string; text?: string; image_url?: ChatImageUrl; }
@@ -39,7 +39,7 @@ export function completionUrl(baseUrl: string, allowHttp: boolean = false): stri
 
 export function chatRequest(model: string, messages: ModelMessage[], tools: ToolDefinition[],
   options: ChatCompletionsOptions = {}, maxOutputTokens?: number): ChatRequest {
-  return { model: model, stream: true, tools: tools.length > 0 ? tools : undefined,
+  return { model: model, stream: true, tools: tools.length > 0 ? toolSchemas(tools) : undefined,
     max_tokens: maxOutputTokens,
     tool_choice: tools.length > 0 ? 'auto' : undefined,
     messages: messages.map((message: ModelMessage): ChatWireMessage => {

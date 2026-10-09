@@ -1,4 +1,6 @@
 {
+  "模型服务报告输入超过上下文窗口。": "The model service reported that the input exceeds its context window.",
+  "模型输入超出窗口，正在压缩后重试一次…": "The input exceeded the model context window. Compacting before one retry…",
   "复制失败：": "Copy failed: ",
   "草稿已修改，语音输入已停止。": "The draft changed. Voice input has stopped.",
   "草稿超过 24000 字符，语音输入已停止。可复制本次识别的完整文字。": "The draft exceeds 24,000 characters. Voice input has stopped; you can copy the full transcript.",

@@ -9,6 +9,7 @@ import { PendingInput, validatePendingInput } from '../model/PendingInput';
 import { UsageToolActivity } from '../model/Usage';
 import { PreparedRequest } from './RequestContext';
 import { ModelTurn } from '../model/Agent';
+import { ContextOverflowError } from './providers/ProviderErrors';
 
 export interface SteeringInput {
   peek: () => PendingInput | undefined;
@@ -38,7 +39,7 @@ export interface LoopObserver {
 }
 
 export interface LoopContext {
-  prepareRequest?: (tools: ToolDefinition[], pending: ModelMessage[], cancellation: Cancellation) => Promise<PreparedRequest>;
+  prepareRequest?: (tools: ToolDefinition[], pending: ModelMessage[], cancellation: Cancellation, recoverOverflow?: boolean) => Promise<PreparedRequest>;
   recordResponse?: (response: ModelTurn) => void;
   validateAnswer?: (content: string, cancellation: Cancellation) => Promise<void>;
   model: ModelSession;
@@ -60,6 +61,8 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
   const turn = context.turn;
   const seen = new Set<string>();
   let validationFailures = 0;
+  let recoveryPending = false;
+  let recoveryAttempted = false;
   try {
     for (let round = 0; round < limit; round++) {
       cancellation.check();
@@ -70,7 +73,8 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
       }
       const input: PendingInput | undefined = pending ? { id: pending.id, mode: pending.mode, text: pending.text } : undefined;
       const definitions = context.tools.definitions();
-      const prepared = context.prepareRequest ? await context.prepareRequest(definitions, input ? [{ role: 'user', content: input.text }] : [], cancellation) : undefined;
+      const prepared = context.prepareRequest ? await context.prepareRequest(definitions, input ? [{ role: 'user', content: input.text }] : [], cancellation, recoveryPending) : undefined;
+      recoveryPending = false;
       cancellation.check();
       if (prepared) { messages = prepared.messages; }
       const requestMessages: ModelMessage[] = input ? messages.concat([{ role: 'user', content: input.text }]) : messages;
@@ -88,24 +92,34 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
         if (!prepared) { messages.push({ role: 'user', content: input.text }); }
       }
       let acceptingText = true;
-      const response = await context.model.stream(messages, definitions, cancellation, (text: string) => {
-        if (!acceptingText || cancellation.cancelled) {
-          return;
-        }
-        if (step.content.length === 0 && turn.content.length > 0) {
-          turn.content += '\n\n';
-        }
-        step.content += text;
-        turn.content += text;
-        observer.event({ type: 'text_delta', step: round, delta: text });
-      }, {
-        usageStep: round + 1,
-        onReasoning: (text: string) => {
+      let response: ModelTurn;
+      try {
+        response = await context.model.stream(messages, definitions, cancellation, (text: string) => {
           if (!acceptingText || cancellation.cancelled) { return; }
-          step.reasoningContent = (step.reasoningContent || '') + text;
-          observer.event({ type: 'reasoning_delta', step: round, delta: text });
-        } })
-        .finally(() => { acceptingText = false; });
+          if (step.content.length === 0 && turn.content.length > 0) { turn.content += '\n\n'; }
+          step.content += text;
+          turn.content += text;
+          observer.event({ type: 'text_delta', step: round, delta: text });
+        }, {
+          usageStep: round + 1,
+          onReasoning: (text: string) => {
+            if (!acceptingText || cancellation.cancelled) { return; }
+            step.reasoningContent = (step.reasoningContent || '') + text;
+            observer.event({ type: 'reasoning_delta', step: round, delta: text });
+          } })
+          .finally(() => { acceptingText = false; });
+      } catch (error) {
+        cancellation.check();
+        if (!(error instanceof ContextOverflowError)) { throw error as Error; }
+        step.requestError = 'context_overflow';
+        turn.content = turn.steps.filter((item) => !item.requestError && !item.uiValidation).map((item) => item.content).filter((content) => content.length > 0).join('\n\n');
+        observer.event({ type: 'step_end', step: round });
+        await observer.checkpoint();
+        cancellation.check();
+        if (recoveryAttempted || round === limit - 1 || !context.prepareRequest) { throw error; }
+        recoveryAttempted = true; recoveryPending = true;
+        continue;
+      }
       cancellation.check();
       // The provider's final message is authoritative even when it emitted no deltas.
       context.recordResponse?.(response);
@@ -113,7 +127,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
       step.reasoningContent = response.reasoningContent;
       step.anthropicContent = response.anthropicContent;
       step.usage = response.usage;
-      turn.content = turn.steps.map((item: AgentStep) => item.content).filter((content: string) => content.length > 0).join('\n\n');
+      turn.content = turn.steps.filter((item) => !item.requestError).map((item: AgentStep) => item.content).filter((content: string) => content.length > 0).join('\n\n');
       validateToolCalls(response.toolCalls);
       for (const call of response.toolCalls) {
         if (seen.has(call.id)) {
@@ -139,7 +153,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
           validationFailures++;
         }
       } else { step.uiValidation = ''; }
-      turn.content = turn.steps.filter((item) => !item.uiValidation).map((item) => item.content).filter((content) => content.length > 0).join('\n\n');
+      turn.content = turn.steps.filter((item) => !item.requestError && !item.uiValidation).map((item) => item.content).filter((content) => content.length > 0).join('\n\n');
       observer.event({ type: 'model_end', step: round });
       if (step.uiValidation) {
         for (const tool of step.tools) { tool.status = 'cancelled'; tool.output = toolError('UI validation failed; this tool was not executed.'); }

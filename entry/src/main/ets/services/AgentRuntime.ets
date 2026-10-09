@@ -158,8 +158,8 @@ export class AgentRuntime {
           const contextTools = new ContextTools(tools, source.entries, window);
           const boundModel = model;
           await runAgentLoop({ model: model, messages: messages, tools: contextTools,
-            prepareRequest: async (definitions, pending, cancellation) => {
-              const prepared = await preparedContext.prepare(boundModel, definitions, cancellation, pending);
+            prepareRequest: async (definitions, pending, cancellation, recoverOverflow) => {
+              const prepared = await preparedContext.prepare(boundModel, definitions, cancellation, pending, false, recoverOverflow);
               this.usage?.recordContext?.(request.sessionId, prepared.context);
               return prepared;
             },

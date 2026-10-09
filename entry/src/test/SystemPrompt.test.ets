@@ -59,7 +59,8 @@ export default function systemPromptTests(): void {
       expect(base.includes('<team_coordinator>')).assertFalse();
       extensions.webEnabled = true;
       const selected = sessionInstructions(config, extensions, 'report');
-      expect(selected.includes('<web>')).assertTrue();
+      // Tool-specific guidance is contributed by the actual request catalog.
+      expect(selected.includes('<web>')).assertFalse();
       expect(selected.includes('Summarize reports')).assertTrue();
       expect(config.systemPrompt).assertEqual('My custom assistant');
       config.userDocument = ' \n ';

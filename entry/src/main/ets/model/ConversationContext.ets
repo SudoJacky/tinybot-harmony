@@ -1,5 +1,6 @@
 import { t } from './I18n';
-import { ModelMessage, ToolDefinition } from './Agent';
+import { ModelMessage, ToolDefinition, toolSchemas } from './Agent';
+import { FileOperations, collectFileOperations, validateFileOperations } from './FileOperations';
 import { CompactionData, ModelConfig, ThreadData } from './Conversation';
 import { ContextEntry, contextBoundary, projectedHistory, threadEntries } from './ContextProjection';
 
@@ -26,6 +27,7 @@ export interface ContextSettings {
 }
 
 export interface CompactionPlan {
+  fileOperations?: FileOperations;
   firstKeptMessageId: string;
   firstKeptStep?: number;
   messages: ModelMessage[];
@@ -53,7 +55,7 @@ export function estimateTextTokens(text: string): number {
 }
 
 export function estimateContextTokens(messages: ModelMessage[], tools: ToolDefinition[] = []): number {
-  let tokens = 3 + (tools.length > 0 ? estimateTextTokens(JSON.stringify(tools)) : 0);
+  let tokens = 3 + (tools.length > 0 ? estimateTextTokens(JSON.stringify(toolSchemas(tools))) : 0);
   for (const message of messages) {
     tokens += 8 + estimateTextTokens(message.content) + estimateTextTokens(message.reasoningContent || '');
     for (const attachment of message.attachments || []) { tokens += attachment.mime === 'image/jpeg' ? 1800 : estimateTextTokens(attachment.text || ''); }
@@ -86,7 +88,8 @@ export function planContextCompaction(entries: ContextEntry[], checkpoint: Compa
   const boundary = entries[cut];
   return { firstKeptMessageId: boundary.messageId, firstKeptStep: boundary.step,
     messages: entries.slice(start, cut).flatMap((entry) => entry.messages),
-    previousSummary: checkpoint?.summary || '', tokensBefore: tokensBefore };
+    previousSummary: checkpoint?.summary || '', tokensBefore: tokensBefore,
+    fileOperations: collectFileOperations(entries.slice(start, cut).flatMap((entry) => entry.results || []), checkpoint?.fileOperations) };
 }
 
 export function prepareCompaction(thread: ThreadData, settings: ContextSettings): CompactionPlan | undefined {
@@ -95,6 +98,7 @@ export function prepareCompaction(thread: ThreadData, settings: ContextSettings)
 }
 
 export function validateCompaction(compaction: CompactionData, thread: ThreadData): void {
+  if (compaction?.fileOperations !== undefined) { validateFileOperations(compaction.fileOperations); }
   if (!compaction || typeof compaction.summary !== 'string' || compaction.summary.trim().length === 0 ||
     compaction.summary.length > 32768 || typeof compaction.firstKeptMessageId !== 'string' ||
     !Number.isInteger(compaction.tokensBefore) || compaction.tokensBefore < 0 ||

@@ -15,6 +15,7 @@ import { ModelStream, ResponsesStream, AnthropicStream } from './EventStreams';
 import { protocolUrl, protocolHeaders, responsesRequest, anthropicRequest, ResponsesRequest } from './WireProtocols';
 import { ModelProvider, ProviderRequest } from './Provider';
 import { ChatCompletionsOptions, chatRequest, ChatRequest } from './ChatCompletionsProtocol';
+import { ContextOverflowError, httpProviderError } from './ProviderErrors';
 
 // Tinybot desktop separates request startup and stream idleness (both 120 s).
 const STREAM_IDLE_TIMEOUT_MS: number = 120000;
@@ -59,6 +60,7 @@ export class ProtocolProvider implements ModelProvider {
       let settled = false;
       let ended = false;
       let responseCode = 0;
+      let responsePrefix = '';
       let parseError: Error | undefined = undefined;
       let receivedBytes = 0;
       let timer = -1;
@@ -78,6 +80,9 @@ export class ProtocolProvider implements ModelProvider {
         UsageLedger.record(record); if (result) { result.usage = record; }
         hilog.info(0x0000, 'TinybotNetwork', 'Request ended elapsedMs=%{public}d bytes=%{public}d http=%{public}d failed=%{public}s',
           Date.now() - startedAt, receivedBytes, responseCode, (error !== undefined).toString());
+        if (error instanceof ContextOverflowError) {
+          hilog.warn(0x0000, 'TinybotNetwork', 'Context overflow provider=%{public}s model=%{public}s http=%{public}d', this.info.id, input.model, responseCode);
+        }
         if (error) {
           reject(error);
         } else if (result) {
@@ -91,7 +96,8 @@ export class ProtocolProvider implements ModelProvider {
           return;
         }
         if (responseCode !== 200) {
-          settle(new Error(t("模型服务返回 HTTP {0}，请检查地址、API Key、模型名称和额度。", [responseCode])));
+          if (!ended) { return; }
+          settle(httpProviderError(responseCode, responsePrefix));
           return;
         }
         if (parseError) {
@@ -120,7 +126,7 @@ export class ProtocolProvider implements ModelProvider {
       }
       try {
         request.on('dataReceive', (data: ArrayBuffer) => {
-          if (settled || parseError) {
+          if (settled) {
             return;
           }
           if (data.byteLength > 0) { resetIdleTimer(); }
@@ -132,7 +138,9 @@ export class ProtocolProvider implements ModelProvider {
           // Parsers still bound individual frames, reasoning and tool arguments.
           receivedBytes += data.byteLength;
           try {
-            const text = decoder.decodeToString(new Uint8Array(data), { stream: true }); usage.push(text); parser.push(text);
+            const text = decoder.decodeToString(new Uint8Array(data), { stream: true });
+            responsePrefix += text.slice(0, Math.max(0, 16384 - responsePrefix.length));
+            if (!parseError && (responseCode === 0 || responseCode === 200)) { usage.push(text); parser.push(text); }
           } catch (error) {
             parseError = error as Error;
             finish();

@@ -17,7 +17,8 @@ export class SkillTools implements AgentTools {
 
   definitions(): ToolDefinition[] {
     if (this.skills.length === 0) { return []; }
-    return [{ type: 'function', function: {
+    return [{ type: 'function', promptSnippet: '读取 Skill 正文与参考文件',
+      promptGuidelines: ['任务匹配 Skill 时，先用 read_skill 读取正文；用户消息已包含该 Skill 正文时直接使用，参考文件按需读取。Skill 不授予新工具或权限。'], function: {
       name: 'read_skill', description: '读取已启用 Skill 的指令或随附参考文件。先读取 SKILL.md；结果包含可读取的参考文件路径。只读取资料，不执行脚本。',
       parameters: { type: 'object', properties: {
         'name': { type: 'string', description: 'Skills 目录中的准确名称。' },

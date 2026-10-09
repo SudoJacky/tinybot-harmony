@@ -2,6 +2,7 @@ import { t } from '../../model/I18n';
 import { AnthropicContentBlock, validateAnthropicContent } from '../../model/AnthropicContent';
 import { MAX_REASONING_CONTENT, MAX_TOOL_ARGUMENTS, MAX_TOOL_CALLS, ModelTurn, ToolCall, validateToolCalls } from '../../model/Agent';
 import { AnthropicBlock } from './WireProtocols';
+import { ProviderErrorData, ContextOverflowError, isContextOverflow } from './ProviderErrors';
 
 export interface ModelStream {
   push(text: string): void;
@@ -52,16 +53,15 @@ interface ResponseItem {
   content?: ResponseContent[];
   summary?: ResponseContent[];
 }
-interface ResponseError { code?: string; }
 interface ResponseIncomplete { reason?: string; }
 interface ResponseData {
   status: string;
   output: ResponseItem[];
-  error?: ResponseError;
+  error?: ProviderErrorData;
   incomplete_details?: ResponseIncomplete;
 }
 interface ResponseEvent {
-  type: string; delta?: string; text?: string; response?: ResponseData; code?: string; error?: ResponseError;
+  type: string; delta?: string; text?: string; response?: ResponseData; code?: string; error?: ProviderErrorData;
   output_index?: number; summary_index?: number; content_index?: number;
 }
 
@@ -73,6 +73,7 @@ function reasoningPartKey(output: number = 0, part: number = 0, summary: boolean
 }
 
 function responsesFailure(event: ResponseEvent): Error {
+  if (isContextOverflow(event.response?.error || event.error || { code: event.code })) { return new ContextOverflowError(); }
   const reason = event.response?.incomplete_details?.reason;
   if (event.type === 'response.incomplete' && reason === 'max_output_tokens') {
     return new Error(t('Responses 回答达到输出上限（包含思考 token），尚未完成。请提高输出上限或降低思考强度。'));
@@ -188,7 +189,7 @@ export class ResponsesStream implements ModelStream {
 }
 
 interface AnthropicDelta { type?: string; text?: string; thinking?: string; signature?: string; partial_json?: string; stop_reason?: string; }
-interface AnthropicEvent { type: string; index?: number; content_block?: AnthropicBlock; delta?: AnthropicDelta; }
+interface AnthropicEvent { type: string; index?: number; content_block?: AnthropicBlock; delta?: AnthropicDelta; error?: ProviderErrorData; }
 
 export class AnthropicStream implements ModelStream {
   private preserved: Map<number, AnthropicContentBlock> = new Map<number, AnthropicContentBlock>();
@@ -240,7 +241,10 @@ export class AnthropicStream implements ModelStream {
     if (this.done) { throw new Error(t("Anthropic 在结束后继续返回数据。")); }
     const event = parseEvent(payload) as AnthropicEvent;
     if (!event || typeof event.type !== 'string') { throw new Error(t("Anthropic 流式事件无效。")); }
-    if (event.type === 'error') { throw new Error(t("Anthropic 模型服务在生成过程中返回错误。")); }
+    if (event.type === 'error') {
+      if (isContextOverflow(event.error)) { throw new ContextOverflowError(); }
+      throw new Error(t("Anthropic 模型服务在生成过程中返回错误。"));
+    }
     if (event.type === 'ping') { return; }
     if (event.type === 'message_start') {
       if (this.started) { throw new Error(t("Anthropic 重复开始消息。")); }

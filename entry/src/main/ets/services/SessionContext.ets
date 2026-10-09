@@ -14,7 +14,7 @@ export function sessionInstructions(config: ModelConfig, extensions: ExtensionSe
 
 export function sessionPromptSections(config: ModelConfig, extensions: ExtensionSettings, selected: string = ''): PromptSection[] {
   return [{ name: 'identity', content: DEFAULT_SYSTEM_PROMPT },
-    { name: 'runtime', content: runtimeInstructions(extensions.webEnabled, MAX_AGENT_STEPS) },
+    { name: 'runtime', content: runtimeInstructions(MAX_AGENT_STEPS) },
     { name: 'interactive_ui', content: INTERACTIVE_UI_INSTRUCTIONS },
     { name: 'user_preferences', content: userDocumentContext(config.userDocument || '') },
     { name: 'skills', content: skillCatalog(extensions.skills, selected) }];
