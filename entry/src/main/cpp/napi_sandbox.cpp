@@ -3,6 +3,7 @@
 #include <memory>
 #include <mutex>
 #include <limits>
+void InstallOrchestrator(napi_env env, napi_value exports);
 
 namespace {
 struct Job {
@@ -108,6 +109,7 @@ napi_value Init(napi_env env, napi_value exports)
         {"cancel", nullptr, Cancel, nullptr, nullptr, nullptr, napi_default, nullptr}
     };
     napi_define_properties(env, exports, 2, properties);
+    InstallOrchestrator(env, exports);
     return exports;
 }
 napi_module module = {1, 0, nullptr, Init, "tinybot_sandbox", nullptr, {0}};

@@ -16,6 +16,7 @@ import { ThreadReferenceCard } from './ThreadReferenceCard';
 import { ThreadReference } from '../model/ThreadReferences';
 import { DisclosureState } from '../viewmodel/DisclosureState';
 import { ToolDetails } from './ToolDetails';
+import { OrchestrationReceipts } from './OrchestrationReceipts';
 import { ProcessItem, TimelineEntry, buildTimeline, describeTools, durationLabel, elapsedMs, foldsToAnswer, persistentTool,
   summarizeProcess, thoughtTail } from '../model/ProcessPresentation';
 import { toolStat } from '../model/ToolPresentation';
@@ -165,6 +166,9 @@ struct ToolRow {
         Column() {
           ToolDetails({ disclosure: this.disclosure, identity: this.execution.call.id, name: this.name(), argumentsText: this.execution.call.function.arguments,
             output: this.execution.output, status: this.execution.status, onInspect: this.onInspect })
+          if (this.execution.children.length > 0) {
+            OrchestrationReceipts({ children: this.execution.children, onInspect: this.onInspect })
+          }
         }.width('100%').padding({ left: 19 })
       }
     }.width('100%').alignItems(HorizontalAlign.Start)

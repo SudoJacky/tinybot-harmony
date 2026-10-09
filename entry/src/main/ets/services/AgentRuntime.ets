@@ -1,5 +1,5 @@
 import { t } from '../model/I18n';
-import { AgentTurn, MAX_AGENT_STEPS, ModelMessage, ToolExecutionMode } from '../model/Agent';
+import { AgentTurn, MAX_AGENT_STEPS, ModelMessage, ToolDefinition, ToolExecutionMode } from '../model/Agent';
 import { ModelConfig, copyModelConfig } from '../model/Conversation';
 import { UsageOrigin, UsageRecorder } from '../model/Usage';
 import { AgentTools, LoopEvent, LoopEventType, SteeringInput, runAgentLoop } from './AgentLoop';
@@ -8,8 +8,9 @@ import { CredentialReader, ModelSession } from './providers/Provider';
 import { ProviderRegistry } from './providers/ProviderRegistry';
 import { contextSettings } from '../model/ConversationContext';
 import { PromptSection, runEntries } from '../model/ContextProjection';
-import { ContextSource, RequestContext } from './RequestContext';
+import { ContextSource, PreparedRequest, RequestContext } from './RequestContext';
 import { ContextTools } from './ContextTools';
+import { OrchestrationExecutor, OrchestrationTools } from './OrchestrationTools';
 
 export type RunStatus = 'running' | 'complete' | 'stopped' | 'failed';
 export type RunPhase = 'preparing' | 'executing' | 'finalizing';
@@ -44,6 +45,7 @@ export interface AgentRunRequest {
 }
 
 export interface AgentRunHooks {
+  contextChanged?: (request: PreparedRequest) => void;
   context?: ContextSource;
   prepare: (cancellation: Cancellation) => Promise<void>;
   checkpoint: () => Promise<void>;
@@ -65,18 +67,29 @@ export class AgentRuntime {
   private usage?: UsageRecorder;
   private validateAnswer?: (content: string, cancellation: Cancellation) => Promise<void>;
   private active?: ActiveRun;
+  private orchestrator?: OrchestrationExecutor;
   private sequence: number = 0;
   private listeners: Set<(event: AgentEvent) => void> = new Set<(event: AgentEvent) => void>();
 
   constructor(providers: ProviderRegistry, credentials: CredentialReader, usage?: UsageRecorder,
-    validateAnswer?: (content: string, cancellation: Cancellation) => Promise<void>) {
+    validateAnswer?: (content: string, cancellation: Cancellation) => Promise<void>, orchestrator?: OrchestrationExecutor) {
     this.providers = providers;
     this.credentials = credentials;
     this.usage = usage;
     this.validateAnswer = validateAnswer;
+    this.orchestrator = orchestrator;
   }
 
-  fork(): AgentRuntime { return new AgentRuntime(this.providers, this.credentials, this.usage, this.validateAnswer); }
+  fork(): AgentRuntime { return new AgentRuntime(this.providers, this.credentials, this.usage, this.validateAnswer, this.orchestrator); }
+
+  private contextTools(tools: AgentTools, source: ContextSource, config: ModelConfig): AgentTools {
+    const contextTools = new ContextTools(tools, source.entries, contextSettings(config).window);
+    return this.orchestrator ? new OrchestrationTools(contextTools, this.orchestrator) : contextTools;
+  }
+
+  inspectContext(source: ContextSource, config: ModelConfig, tools: AgentTools, extra: ToolDefinition[] = []): PreparedRequest {
+    return new RequestContext(source, config).inspect(this.contextTools(tools, source, config).definitions().concat(extra));
+  }
 
   get isRunning(): boolean {
     return this.active !== undefined;
@@ -157,12 +170,13 @@ export class AgentRuntime {
             persist: hooks.checkpoint, progress: () => {} };
           const source = hooks.context || defaultSource;
           const preparedContext = new RequestContext(source, config);
-          const contextTools = new ContextTools(tools, source.entries, window);
+          const executionTools = this.contextTools(tools, source, config);
           const boundModel = model;
-          await runAgentLoop({ model: model, messages: messages, tools: contextTools, toolExecution: toolExecution,
+          await runAgentLoop({ model: model, messages: messages, tools: executionTools, toolExecution: toolExecution,
             prepareRequest: async (definitions, pending, cancellation, recoverOverflow) => {
               const prepared = await preparedContext.prepare(boundModel, definitions, cancellation, pending, false, recoverOverflow);
               this.usage?.recordContext?.(request.sessionId, prepared.context);
+              hooks.contextChanged?.(prepared);
               return prepared;
             },
             recordResponse: (response) => preparedContext.recordResponse(response),

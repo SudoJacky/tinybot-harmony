@@ -1,9 +1,11 @@
 import { AgentStep, AgentTurn, ModelMessage, ToolExecution, stepMessages } from './Agent';
 import { CompactionData, ThreadData, requestHistory } from './Conversation';
 import { fileOperationsContext } from './FileOperations';
+import { referenceContext } from './ThreadReferences';
 
 export interface PromptSection { name: string; content: string; }
 export interface ContextEntry {
+  referenceText?: string;
   messageId: string;
   step?: number;
   answerId?: string;
@@ -17,7 +19,9 @@ export function renderPrompt(sections: PromptSection[]): string {
 }
 
 export function stepEntry(messageId: string, answerId: string, step: AgentStep, index: number): ContextEntry {
-  return { messageId: messageId, answerId: answerId, step: index, messages: stepMessages(step), results: step.tools };
+  const receipts: ToolExecution[] = [];
+  for (const tool of step.tools) { receipts.push(tool, ...(tool.children || [])); }
+  return { messageId: messageId, answerId: answerId, step: index, messages: stepMessages(step), results: receipts };
 }
 
 // The transcript stays complete. These entries are only the model-visible projection, grouped so
@@ -30,7 +34,7 @@ export function threadEntries(thread: ThreadData): ContextEntry[] {
     let replay = requestHistory(answer && !active ? [user, answer] : [user], '');
     if (!replay.length && thread.compaction?.firstKeptMessageId === user.id) { replay = requestHistory([user], ''); }
     if (!replay.length) { continue; }
-    entries.push({ messageId: user.id, messages: [replay[0]] });
+    entries.push({ messageId: user.id, messages: [replay[0]], referenceText: referenceContext(user.references) });
     if (!answer) { continue; }
     const steps = answer.steps || [];
     if (!steps.length && !active) {

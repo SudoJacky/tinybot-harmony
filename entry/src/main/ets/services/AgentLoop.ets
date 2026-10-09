@@ -19,8 +19,13 @@ export interface SteeringInput {
 
 export interface AgentTools {
   definitions(): ToolDefinition[];
-  execute(call: ToolCall, cancellation: Cancellation): Promise<string>;
+  execute(call: ToolCall, cancellation: Cancellation, context?: ToolInvocationContext): Promise<string>;
   beforeFinish?(cancellation: Cancellation): Promise<string | undefined>;
+}
+
+export interface ToolInvocationContext {
+  execution: ToolExecution;
+  executeChild: (child: ToolExecution, tools: AgentTools, cancellation: Cancellation) => Promise<void>;
 }
 
 export type LoopEventType = 'step_start' | 'text_delta' | 'reasoning_delta' | 'model_end' | 'tool_start' | 'tool_end' | 'step_end';

@@ -6,7 +6,7 @@ import { attributeLegacyUsage } from '../model/UsageAttribution';
 import { reasoningEfforts, supportsReasoningEffort } from '../model/ReasoningEffort';
 import { ThreadReference, captureThreadReference, isCompactCommand, removeReferenceQuery, validateThreadReferences } from '../model/ThreadReferences';
 import { TeamMember, TeamPlan, TeamRun, TeamTaskRecord, parseTeamPlan, teamCommand, validateTeamMembers, validateTeamPlan } from '../model/Team';
-import { ChatTeamTools, CHAT_TEAM_INSTRUCTIONS } from './ChatTeamTools';
+import { ChatTeamTools, CHAT_TEAM_INSTRUCTIONS, coordinatorDefinitions } from './ChatTeamTools';
 import { TeamCoordinator } from './TeamCoordinator';
 import { Attachment, MemoryEntry, ProductivityData, defaultProductivity, validateAttachments, validateProductivity, memoryContext } from '../model/Productivity';
 import { defaultAssistantOptions, routeModel } from '../model/AssistantOptions';
@@ -26,8 +26,6 @@ import { CredentialVault, ProfileSettings, ProviderDraft } from './ProfileSettin
 import { SessionEvent, SessionRepository, SessionResources, SessionState } from './SessionContracts';
 import { prepareSessionContext, sessionInstructions, sessionPromptSections, sessionContextSource } from './SessionContext';
 import { renderPrompt } from '../model/ContextProjection';
-import { RequestContext } from './RequestContext';
-import { ContextTools } from './ContextTools';
 interface UiComputeReceipt { status: string; result: UiValues; error: string; resultTruncated: boolean; }
 interface GeneratedImage { path: string; attachment: Attachment; }
 interface FormReceipt { status: string; }
@@ -640,6 +638,11 @@ export class SessionService {
           if (generateTitle) { this.generateTitle(thread.id, user.id, text, fallbackTitle, copyModelConfig(config)); }
         },
         context: sessionContextSource(thread, () => sections, () => this.persist(), (status) => this.contextProgress(status)),
+        contextChanged: (prepared) => {
+          this.status.contextTokens = prepared.context.tokens;
+          this.status.contextBreakdown = prepared.breakdown;
+          this.status.contextSource = prepared.context.source;
+        },
         checkpoint: () => { this.publish('snapshot'); return this.persist(); },
         steering: {
           peek: () => nextPendingInput(thread.pendingInputs || [], thread.queuePaused === true, true),
@@ -867,13 +870,20 @@ export class SessionService {
     return this.resources.tools(thread.id, this.extensions, selected, extras, (thread.attachments || []).concat(...thread.messages.map((item) => item.attachments || [])));
   }
   private refreshContext(): void {
-    if (this.data.threads.length === 0) { this.status.contextTokens = 0; return; }
+    if (this.data.threads.length === 0) { this.status.contextTokens = 0; this.status.contextBreakdown = []; this.status.contextSource = 'estimate'; return; }
     const config = this.currentConfig;
     const sections = sessionPromptSections(config, this.extensions);
     sections.push({ name: 'memory', content: memoryContext(this.data.productivity || defaultProductivity(), this.active.id) });
+    if (this.active.parentThreadId) { sections.push({ name: 'branch', content: '这是从历史创建的会话分支，使用独立的新工作区。历史文件操作发生在原会话，不能假设原文件仍存在；先列出或读取当前文件。' }); }
+    if (this.active.teamEnabled) {
+      sections.push({ name: 'team', content: CHAT_TEAM_INSTRUCTIONS + '\n本聊天已有团队（以此处ID为准，禁止跨会话访问）：' +
+        JSON.stringify((this.active.teams || []).filter((run) => run.ownerMessageId).map((run) => run.id + ' ' + run.status)) });
+    }
     const source = sessionContextSource(this.active, () => sections, async () => {}, () => {});
-    const tools = new ContextTools(this.tools(this.active), source.entries, contextSettings(config).window);
-    this.status.contextTokens = new RequestContext(source, config).inspect(tools.definitions()).context.tokens;
+    const prepared = this.runtime.inspectContext(source, config, this.tools(this.active), this.active.teamEnabled ? coordinatorDefinitions() : []);
+    this.status.contextTokens = prepared.context.tokens;
+    this.status.contextBreakdown = prepared.breakdown;
+    this.status.contextSource = prepared.context.source;
   }
   private contextProgress(status: string): void { this.status.contextStatus = status; this.publish('state'); }
   private requireThread(id: string): ThreadData {

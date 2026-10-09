@@ -3,6 +3,7 @@ import { AppData, MessageData } from '../model/Conversation';
 import { ProviderProfile } from '../model/ProviderProfiles';
 import { ExtensionSettings } from '../model/Skills';
 import { AgentTools } from './AgentLoop';
+import { ContextTokenItem } from '../model/ContextBreakdown';
 
 export interface SessionRepository {
   load(): Promise<AppData>;
@@ -27,6 +28,8 @@ export interface SessionState {
   saveError: string;
   contextStatus: string;
   contextTokens: number;
+  contextBreakdown?: ContextTokenItem[];
+  contextSource?: string;
   acceptingSteering: boolean;
 }
 

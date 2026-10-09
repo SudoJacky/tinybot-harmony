@@ -23,7 +23,7 @@ export function projectResults(entries: ContextEntry[], window: number): Context
         previewStart: receipt.output.slice(0, previewLength), previewEnd: receipt.output.slice(-previewLength)
       }) };
     });
-    return { messageId: entry.messageId, step: entry.step, answerId: entry.answerId, messages: messages, results: entry.results };
+    return { messageId: entry.messageId, step: entry.step, answerId: entry.answerId, messages: messages, results: entry.results, referenceText: entry.referenceText };
   });
 }
 

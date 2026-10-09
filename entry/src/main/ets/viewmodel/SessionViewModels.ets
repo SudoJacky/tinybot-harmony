@@ -14,7 +14,8 @@ export class ToolExecutionViewModel implements ToolExecution {
   call: ToolCall;
   status: string;
   output: string;
-  constructor(data: ToolExecution) { this.call = data.call; this.status = data.status; this.output = data.output; }
+  children: ToolExecution[] = [];
+  constructor(data: ToolExecution) { this.call = data.call; this.status = data.status; this.output = data.output; this.children = data.children?.slice() || []; }
 }
 
 @Observed
@@ -32,7 +33,7 @@ export class AgentStepViewModel implements AgentStep {
     this.content = data.content; this.reasoningContent = data.reasoningContent || ''; this.steering = data.steering;
     this.tools = data.tools.map((tool: ToolExecution, index: number) => {
       const existing = this.tools[index];
-      if (existing && existing.call.id === tool.call.id) { existing.status = tool.status; existing.output = tool.output; return existing; }
+      if (existing && existing.call.id === tool.call.id) { existing.status = tool.status; existing.output = tool.output; existing.children = tool.children?.slice() || []; return existing; }
       return new ToolExecutionViewModel(tool);
     });
   }

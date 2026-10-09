@@ -1,11 +1,12 @@
 import { t } from '../model/I18n';
 import { UiValues } from '../model/InteractiveUi';
 import { RequestUsage } from '../model/Usage';
+import { ContextTokenItem, draftBreakdown } from '../model/ContextBreakdown';
 import { referenceContext } from '../model/ThreadReferences';
 import { TeamMember, TeamPlan, TeamRun } from '../model/Team';
 import { Attachment, ProductivityData, defaultProductivity, expandTemplate } from '../model/Productivity';
 import { AppData, ModelConfig, defaultConfig, copyModelConfig } from '../model/Conversation';
-import { contextSettings, estimateTextTokens } from '../model/ConversationContext';
+import { contextSettings } from '../model/ConversationContext';
 import { ModelChoice, ProviderProfile, availableModels } from '../model/ProviderProfiles';
 import { ProviderInfo, builtinProviderInfos } from '../model/Provider';
 import { ExtensionSettings, SkillData, defaultExtensions } from '../model/Skills';
@@ -50,6 +51,8 @@ export class ChatViewModel {
   saveError: string = '';
   draft: string = '';
   contextTokens: number = 0;
+  contextItems: ContextTokenItem[] = [];
+  contextSource: string = 'estimate';
   contextStatus: string = '';
   visibleMessageCount: number = 60;
   config: ModelConfig = defaultConfig();
@@ -116,6 +119,7 @@ export class ChatViewModel {
     this.generating = state.phase === 'running' || state.phase === 'compacting';
     this.acceptingSteering = state.acceptingSteering; this.error = state.error; this.saveError = state.saveError;
     this.contextStatus = state.contextStatus; this.contextTokens = state.contextTokens;
+    this.contextItems = state.contextBreakdown || []; this.contextSource = state.contextSource || 'estimate';
   }
   private projectData(data: AppData): void {
     this.teams = data.threads.find((thread) => thread.id === data.activeThreadId)?.teams || [];
@@ -146,7 +150,9 @@ export class ChatViewModel {
     return name + ' · ' + ref.modelId + (this.configured ? '' : t(' · 不可用'));
   }
   get visibleMessages(): MessageViewModel[] { return this.active.messages.slice(-this.visibleMessageCount); }
-  get contextUsed(): number { return this.contextTokens + estimateTextTokens(this.draft + referenceContext(this.active.references)); }
+  get contextDraft(): ContextTokenItem[] { return draftBreakdown(this.draft, referenceContext(this.active.references), this.active.attachments); }
+  get contextDetails(): ContextTokenItem[] { return this.contextItems.concat(this.contextDraft); }
+  get contextUsed(): number { return this.contextTokens + this.contextDraft.reduce((sum, item) => sum + item.tokens, 0); }
   get contextWindow(): number { return contextSettings(this.currentConfig).window; }
   get contextLabel(): string { return t('上下文约 {0} / {1} tokens', [this.contextUsed, this.contextWindow]); }
   get canQueueInput(): boolean {

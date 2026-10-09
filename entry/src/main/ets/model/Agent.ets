@@ -97,6 +97,7 @@ export interface ToolExecution {
   call: ToolCall;
   status: string;
   output: string;
+  children?: ToolExecution[];
 }
 
 export interface AgentStep {
@@ -159,6 +160,7 @@ export function stepMessages(step: AgentStep, includeSteering: boolean = true): 
 export function interruptTools(steps: AgentStep[]): void {
   for (const step of steps) {
     for (const tool of step.tools) {
+      if (tool.children) { interruptTools([{ content: '', tools: tool.children }]); }
       if (tool.status === 'pending') {
         tool.status = 'cancelled';
         tool.output = toolError('本轮已中断，此工具未执行。');
@@ -198,6 +200,19 @@ export function validateSteps(steps: AgentStep[]): void {
         throw new Error(t("本地工具记录损坏，原文件已保留。"));
       }
       ids.add(tool.call.id);
+      if (tool.children !== undefined) {
+        if (tool.call.function.name !== 'orchestrate' || !Array.isArray(tool.children) || tool.children.length > 32) {
+          throw new Error('Invalid orchestration receipts');
+        }
+        for (const child of tool.children) {
+          validateToolCalls([child?.call]);
+          if (child.children !== undefined || ids.has(child.call.id) || typeof child.output !== 'string' ||
+            !['pending', 'running', 'complete', 'failed', 'cancelled', 'interrupted'].includes(child.status)) {
+            throw new Error('Invalid orchestration child receipt');
+          }
+          ids.add(child.call.id);
+        }
+      }
     }
   }
 }

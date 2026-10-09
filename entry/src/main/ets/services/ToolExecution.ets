@@ -3,6 +3,12 @@ import { UsageToolActivity } from '../model/Usage';
 import { AgentTools, LoopObserver } from './AgentLoop';
 import { Cancellation, RunCancelledError } from './Cancellation';
 
+export class ToolPersistenceError extends Error {}
+export class ToolResultError extends Error {
+  output: string;
+  constructor(output: string) { super('Tool execution failed'); this.output = output; }
+}
+
 // Execution order may differ from source order; the step's receipt array never moves.
 export async function executeToolBatch(step: AgentStep, round: number, tools: AgentTools,
   definitions: ToolDefinition[], cancellation: Cancellation, observer: LoopObserver,
@@ -48,10 +54,25 @@ export async function executeToolBatch(step: AgentStep, round: number, tools: Ag
     };
     recordActivity();
     try {
-      tool.output = await tools.execute(tool.call, cancellation);
+      tool.output = await tools.execute(tool.call, cancellation, {
+        execution: tool,
+        executeChild: async (child, nestedTools, signal) => {
+          const nestedStep: AgentStep = { content: '', tools: [child], usage: step.usage };
+          try {
+            await executeToolBatch(nestedStep, round, nestedTools, nestedTools.definitions(), signal, {
+              checkpoint: checkpoint, toolActivity: observer.toolActivity,
+              event: (event) => observer.event({ type: event.type, step: round, toolCallId: tool.call.id })
+            });
+          } catch (error) {
+            if (error instanceof RunCancelledError) { throw error; }
+            throw new ToolPersistenceError((error as Error).message);
+          }
+        }
+      });
       tool.status = 'complete';
     } catch (error) {
-      tool.output = toolError((error as Error).message);
+      if (error instanceof ToolPersistenceError) { throw error; }
+      tool.output = error instanceof ToolResultError ? error.output : toolError((error as Error).message);
       tool.status = error instanceof RunCancelledError ? 'cancelled' : 'failed';
     }
     activity.status = tool.status; activity.durationMs = Date.now() - activity.startedAt; recordActivity();

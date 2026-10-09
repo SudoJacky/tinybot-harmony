@@ -39,7 +39,7 @@ function definition(name: string, description: string, properties: Record<string
   return { type: 'function', executionMode: ['team_inspect', 'team_read_result', 'team_list_messages', 'team_read_message'].includes(name) ? 'parallel' : 'sequential',
     function: { name: name, description: description, parameters: { type: 'object', properties: properties, required: required, additionalProperties: false } } };
 }
-function coordinatorDefinitions(): ToolDefinition[] {
+export function coordinatorDefinitions(): ToolDefinition[] {
   const member: ToolProperty = { type: 'object', description: '员工角色', properties: {
     'id': stringProperty('唯一技术 ID，不是显示姓名'), 'displayName': stringProperty('为员工取的自然姓名，例如林知夏或Alex Chen；遵循用户指定的称呼和语言，同一团队尽量不重名。不要仅用职责或技术ID代替姓名。省略或留空时应用自动补名，以返回的displayName为准。'), 'instructions': stringProperty('职责和边界'),
     'toolProfile': { type: 'string', description: '权限：execution 继承工作工具；research 文件和网页；review 只读', enum: ['execution', 'research', 'review'] }
