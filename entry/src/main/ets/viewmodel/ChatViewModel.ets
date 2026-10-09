@@ -178,7 +178,7 @@ export class ChatViewModel {
   renameThread(id: string, value: string): Promise<boolean> { return this.requireSession().renameThread(id, value); }
   pinThread(id: string): Promise<boolean> { return this.requireSession().pinThread(id); }
   archiveThread(id: string): Promise<boolean> { return this.requireSession().archiveThread(id); }
-  selectModel(providerId: string, modelId: string, asDefault: boolean = false): Promise<boolean> { return this.requireSession().selectModel(providerId, modelId, asDefault); }
+  selectModel(providerId: string, modelId: string): Promise<boolean> { return this.requireSession().selectModel(providerId, modelId); }
   setReasoningEffort(value: string): Promise<boolean> { return this.requireSession().setReasoningEffort(value); }
   deleteProvider(id: string): Promise<boolean> { return this.requireSession().deleteProvider(id); }
   changeSkill(name: string, remove: boolean = false): Promise<boolean> { return this.requireSession().changeSkill(name, remove); }

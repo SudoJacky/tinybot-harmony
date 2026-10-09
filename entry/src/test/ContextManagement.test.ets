@@ -9,6 +9,8 @@ import { prepareSessionContext } from '../main/ets/services/SessionContext';
 import { Cancellation } from '../main/ets/services/Cancellation';
 import { ModelRequestOptions, ModelSession } from '../main/ets/services/providers/Provider';
 import { runAgentLoop, AgentTools } from '../main/ets/services/AgentLoop';
+import { ContextTools } from '../main/ets/services/ContextTools';
+import { threadEntries } from '../main/ets/model/ContextProjection';
 
 function message(id: string, role: string, content: string): MessageData {
   return { id: id, role: role, content: content, status: 'complete', error: '' };
@@ -67,6 +69,38 @@ class LargeResultTools extends NoTools {
 
 export default function contextTests(): void {
   describe('ContextManagement', () => {
+    it('compactsInsideAnActiveTurnAndRetainsEveryFullReceiptAcrossReload', 0, async () => {
+      const thread: ThreadData = { id: 'long', title: 'long', updatedAt: 1, messages: [message('u1', 'user', 'finish the task'),
+        { id: 'a1', role: 'assistant', content: '', status: 'generating', error: '', steps: [] }] };
+      for (let index = 0; index < 4; index++) {
+        thread.messages[1].steps!.push({ content: 'x'.repeat(20000), uiValidation: '', tools: [{
+          call: { id: 'call' + index, type: 'function', function: { name: 'write_file', arguments: '{}' } }, status: 'complete', output: 'receipt' + index
+        }] });
+      }
+      const config = emptyData().config; config.contextWindow = 32768;
+      const model = new SummaryModel(); let saves = 0;
+      const history = await prepareSessionContext(thread, model, new Cancellation(), false, config, 'rules', [], async () => { saves++; }, () => {});
+      expect(saves).assertEqual(1); expect((thread.compaction?.firstKeptStep || 0) > 0).assertTrue();
+      expect(history.some((item) => item.content === 'finish the task')).assertTrue();
+      expect(estimateContextTokens(history) <= contextInputBudget(32768)).assertTrue();
+      const data = emptyData(); data.threads = [thread]; data.activeThreadId = thread.id;
+      const restored = parseAppData(JSON.stringify(data)).threads[0];
+      expect(restored.messages[1].steps?.length).assertEqual(4);
+      expect(restored.messages[1].steps?.[0].tools[0].output).assertEqual('receipt0');
+      expect(threadHistory(restored, 'rules').some((item) => item.toolCallId === 'call3')).assertTrue();
+    });
+    it('projectsLargeResultsWithoutDiscardingTheirReadableOriginals', 0, async () => {
+      const thread = fixture(); const full = '中'.repeat(20000) + 'END';
+      thread.messages[3].steps = [{ content: '', tools: [{ call: { id: 'large', type: 'function', function: { name: 'execute_code', arguments: '{}' } }, status: 'complete', output: full }] }];
+      const config = emptyData().config; config.contextWindow = 8192;
+      const tools = new ContextTools(new NoTools(), () => threadEntries(thread), 8192);
+      const history = await prepareSessionContext(thread, new SummaryModel(), new Cancellation(), false, config, '', tools.definitions(), async () => {}, () => {});
+      const preview = history.find((item) => item.toolCallId === 'large');
+      expect(preview?.content.includes('"contextPreview":true')).assertTrue();
+      const page = await tools.execute({ id: 'read', type: 'function', function: { name: 'read_tool_result', arguments: '{"messageId":"a2","callId":"large","offset":20000}' } }, new Cancellation());
+      expect(page.includes('"content":"END"')).assertTrue();
+      expect(thread.messages[3].steps?.[0].tools[0].output).assertEqual(full);
+    });
     it('compactsBeforePiReserveIsConsumedAndUsesSeparateSummaryBudget', 0, async () => {
       const thread = fixture();
       for (const item of thread.messages) { item.content = 'x'.repeat(18000); }

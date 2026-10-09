@@ -36,7 +36,7 @@ int main()
         result.stdoutText.size() + result.stderrText.size() <= MAX_LOG_BYTES, "combined UTF-8 log flood bounded");
     Check(Run("return '\"' + '\\n' + '\\\\';").ToJson().find("\"status\":\"ok\"") != std::string::npos, "escaped output envelope");
     result = Run("return 'x'.repeat(20000);");
-    Check(result.status == "output_limit" && result.resultJson == "null" && result.resultTruncated, "oversized result discarded");
+    Check(result.status == "ok" && result.resultJson.size() == 20002 && !result.resultTruncated, "large result retained");
     result = Run("const data=[]; while(true){data.push(new Uint8Array(1024*1024));}");
     Check(result.status == "memory_limit", "allocation limit");
     Check(Run("try { new ArrayBuffer(128*1024*1024); } catch(e) {} return 1;").status == "memory_limit", "caught OOM remains terminal");
@@ -65,8 +65,8 @@ int main()
     Check(ExecuteCode("while(true){}", "null", early).status == "cancelled", "cancellation before worker starts");
     Budget expired; expired.started -= std::chrono::seconds(3);
     Check(ExecuteCode("return 1;", "null", expired).status == "timeout", "queue delay consumes budget");
-    Check(Run(std::string(MAX_SOURCE_BYTES + 1, ' ')).status == "error", "native source limit");
-    Check(Run("return input;", std::string(MAX_INPUT_BYTES + 1, ' ')).status == "error", "native input limit");
+    Check(Run(std::string(128 * 1024, ' ') + "return 42;").resultJson == "42", "large source accepted");
+    Check(Run("return input.length;", "\"" + std::string(128 * 1024, 'x') + "\"").resultJson == "131072", "large JSON input accepted");
     for (int i = 0; i < 100; i++) {
         result = Run("return 42;");
         if (result.status != "ok" || result.resultJson != "42") { Check(false, "recovery after failures"); }

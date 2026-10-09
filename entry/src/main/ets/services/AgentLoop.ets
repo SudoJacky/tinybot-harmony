@@ -1,4 +1,4 @@
-import { validateUiAnswer } from '../model/InteractiveUi';
+import { validateUiAnswer, uiParts } from '../model/InteractiveUi';
 import { t } from '../model/I18n';
 import { AgentStep, AgentTurn, MAX_AGENT_STEPS, ModelMessage, ToolCall, ToolDefinition, ToolExecution,
   interruptTools, stepMessages, toolError, validateToolCalls } from '../model/Agent';
@@ -7,6 +7,8 @@ import { ModelSession } from './providers/Provider';
 import { contextInputBudget, estimateContextTokens } from '../model/ConversationContext';
 import { PendingInput, validatePendingInput } from '../model/PendingInput';
 import { UsageToolActivity } from '../model/Usage';
+import { PreparedRequest } from './RequestContext';
+import { ModelTurn } from '../model/Agent';
 
 export interface SteeringInput {
   peek: () => PendingInput | undefined;
@@ -36,6 +38,9 @@ export interface LoopObserver {
 }
 
 export interface LoopContext {
+  prepareRequest?: (tools: ToolDefinition[], pending: ModelMessage[], cancellation: Cancellation) => Promise<PreparedRequest>;
+  recordResponse?: (response: ModelTurn) => void;
+  validateAnswer?: (content: string, cancellation: Cancellation) => Promise<void>;
   model: ModelSession;
   tools: AgentTools;
   messages: ModelMessage[];
@@ -51,10 +56,10 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_AGENT_STEPS) {
     throw new Error(t("执行步数必须在 1 至 {0} 之间。", [MAX_AGENT_STEPS]));
   }
-  const messages = context.messages.slice();
-  const definitions = context.tools.definitions();
+  let messages = context.messages.slice();
   const turn = context.turn;
   const seen = new Set<string>();
+  let validationFailures = 0;
   try {
     for (let round = 0; round < limit; round++) {
       cancellation.check();
@@ -64,11 +69,15 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
         if (pending.mode !== 'steer') { throw new Error(t("本轮只能接收追加指令。")); }
       }
       const input: PendingInput | undefined = pending ? { id: pending.id, mode: pending.mode, text: pending.text } : undefined;
+      const definitions = context.tools.definitions();
+      const prepared = context.prepareRequest ? await context.prepareRequest(definitions, input ? [{ role: 'user', content: input.text }] : [], cancellation) : undefined;
+      cancellation.check();
+      if (prepared) { messages = prepared.messages; }
       const requestMessages: ModelMessage[] = input ? messages.concat([{ role: 'user', content: input.text }]) : messages;
-      if (context.contextWindow !== undefined && estimateContextTokens(requestMessages, definitions) > contextInputBudget(context.contextWindow)) {
+      if (!prepared && context.contextWindow !== undefined && estimateContextTokens(requestMessages, definitions) > contextInputBudget(context.contextWindow)) {
         throw new Error(t("本轮内容超过上下文预算，执行已停止。已完成的工具结果已保留；请压缩历史、缩小任务或提高窗口设置。"));
       }
-      const step: AgentStep = { content: '', tools: [], steering: input };
+      const step: AgentStep = { content: '', tools: [], steering: input, uiValidation: 'pending', context: prepared?.context };
       turn.steps = turn.steps.concat([step]);
       observer.event({ type: 'step_start', step: round });
       if (input) {
@@ -76,7 +85,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
         observer.steering?.consume(input.id);
         await observer.checkpoint();
         cancellation.check();
-        messages.push({ role: 'user', content: input.text });
+        if (!prepared) { messages.push({ role: 'user', content: input.text }); }
       }
       let acceptingText = true;
       const response = await context.model.stream(messages, definitions, cancellation, (text: string) => {
@@ -98,8 +107,8 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
         } })
         .finally(() => { acceptingText = false; });
       cancellation.check();
-      validateUiAnswer(response.content);
       // The provider's final message is authoritative even when it emitted no deltas.
+      context.recordResponse?.(response);
       step.content = response.content;
       step.reasoningContent = response.reasoningContent;
       step.anthropicContent = response.anthropicContent;
@@ -115,14 +124,43 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
       step.tools = response.toolCalls.map((call: ToolCall): ToolExecution => {
         return { call: call, status: 'pending', output: '' };
       });
+      const hasUi = uiParts(response.content, false).some((part) => part.kind === 'ui');
+      if (hasUi) {
+        observer.event({ type: 'model_end', step: round });
+        try {
+          validateUiAnswer(response.content);
+          await context.validateAnswer?.(response.content, cancellation);
+          cancellation.check();
+          step.uiValidation = '';
+        } catch (error) {
+          cancellation.check();
+          if (error instanceof RunCancelledError) { throw error; }
+          step.uiValidation = (error as Error).message.slice(0, 8000) || 'UI validation failed without an error message';
+          validationFailures++;
+        }
+      } else { step.uiValidation = ''; }
+      turn.content = turn.steps.filter((item) => !item.uiValidation).map((item) => item.content).filter((content) => content.length > 0).join('\n\n');
       observer.event({ type: 'model_end', step: round });
+      if (step.uiValidation) {
+        for (const tool of step.tools) { tool.status = 'cancelled'; tool.output = toolError('UI validation failed; this tool was not executed.'); }
+      }
+      if (hasUi) { await observer.checkpoint(); cancellation.check(); }
+      if (step.uiValidation && (validationFailures >= 3 || round === limit - 1)) {
+        throw new Error('UI validation failed after repair attempts: ' + step.uiValidation);
+      }
+      if (step.uiValidation) {
+        observer.event({ type: 'step_end', step: round });
+        messages.push(...stepMessages(step, false)); continue;
+      }
       if (step.tools.length === 0) {
         observer.event({ type: 'step_end', step: round });
         const continuation = await context.tools.beforeFinish?.(cancellation);
         cancellation.check();
         if (continuation) {
           if (round === limit - 1) { throw new Error(t("团队结果已保存，但本轮达到模型调用上限，请继续汇总。")); }
-          messages.push(...stepMessages(step, false), { role: 'user', content: continuation });
+          step.continuation = continuation;
+          await observer.checkpoint(); cancellation.check();
+          messages.push(...stepMessages(step, false));
           continue;
         }
         if (!observer.steering?.peek()) { return; }

@@ -236,7 +236,7 @@ struct UiSurface {
       }.width('100%')
       ForEach(this.nodes.filter((node: UiNode) => !node.parent && uiNodeVisible(node, this.values)), (node: UiNode) => {
         UiNodeView({ node: this.nodes.find((item: UiNode) => item.id === node.id) as UiNode, nodes: this.nodes, values: this.values, interactive: this.complete && this.available && !this.busy,
-          ready: this.complete, onWebSave: (values: UiValues) => this.saveWeb(values),
+          ready: this.complete && !this.streaming, onWebSave: (values: UiValues) => this.saveWeb(values),
           onEdit: (item: UiNode, value: UiValue, commit: boolean) => this.edit(item, value, commit),
           onAction: (id: string) => { this.interact(id); },
           onCommit: (id: string) => this.schedule(id),
@@ -255,6 +255,7 @@ struct UiSurface {
 
 @Component
 export struct InteractiveAnswer {
+  @Prop validation: string = '';
   @Prop @Watch('refresh') content: string = '';
   @Prop @Watch('refresh') streaming: boolean = false;
   @Prop available: boolean = false;
@@ -269,7 +270,10 @@ export struct InteractiveAnswer {
       // ForEach retains keyed item closures. Read the current state by index so reused children receive new chunks.
       ForEach(this.parts, (part: UiPart, index: number) => {
         if (part.kind === 'text') { MarkdownView({ content: this.parts[index].content, streaming: this.streaming }) }
-        else {
+        else if (this.validation && !this.streaming) {
+          Text(this.validation === 'pending' ? t('正在检查交互内容…') : t('交互内容检查未通过。'))
+            .fontSize(13).fontColor($r('app.color.text_secondary'))
+        } else {
           UiSurface({ source: this.parts[index].content, closed: this.parts[index].closed, streaming: this.streaming, available: this.available,
             surfaceKey: this.step + ':' + part.key, saved: this.saved, onInteract: this.onInteract })
         }

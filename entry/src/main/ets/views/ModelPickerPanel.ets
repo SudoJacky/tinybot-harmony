@@ -62,12 +62,6 @@ export struct ModelPickerPanel {
           Text(t("新对话默认")).fontSize(11).fontColor($r('app.color.text_tertiary'))
         }
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-      Button({ type: ButtonType.Circle }) {
-        SymbolGlyph(this.isDefault(choice) ? $r('sys.symbol.star_fill') : $r('sys.symbol.star')).fontSize(18)
-          .fontColor([this.isDefault(choice) ? $r('app.color.accent') : $r('app.color.text_tertiary')])
-      }.id('default-model-' + choice.providerId + '-' + choice.modelId).width(40).height(40)
-      .backgroundColor(Color.Transparent).accessibilityText(t("设为新对话默认")).enabled(!this.app.busy)
-      .onClick(async () => { if (await this.app.selectModel(choice.providerId, choice.modelId, true)) { this.onSelected(); } })
       SymbolGlyph($r('sys.symbol.checkmark')).fontSize(18).width(20)
         .fontColor([this.isCurrent(choice) ? $r('app.color.accent') : Color.Transparent])
     }
@@ -100,7 +94,7 @@ export struct ModelPickerPanel {
             .divider({ strokeWidth: 0.5, color: $r('app.color.divider'), startMargin: Space.lg })
           }, (group: ProviderGroup) => group.providerId + ':' + group.choices.length)
           ListItem() {
-            Text(t("点击选择仅用于当前对话；点星标设为之后新对话的默认模型。")).fontSize(Font.caption).lineHeight(18)
+            Text(t("空对话中的模型和推理强度会用于之后的新对话；已有消息的对话仅修改自身配置。")).fontSize(Font.caption).lineHeight(18)
               .fontColor($r('app.color.text_tertiary')).width('100%').padding({ left: 4, top: Space.md, bottom: Space.xl })
           }
         }.layoutWeight(1).width('100%').scrollBar(BarState.Off).sticky(StickyStyle.None).edgeEffect(EdgeEffect.Spring)

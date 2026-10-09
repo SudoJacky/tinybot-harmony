@@ -49,7 +49,8 @@ export default function systemPromptTests(): void {
       const extensions = defaultExtensions(); extensions.webEnabled = false;
       extensions.skills = [parseSkill('---\nname: report\ndescription: Summarize reports\ndisable-model-invocation: true\n---\nRead the source.')];
       const base = sessionInstructions(config, extensions);
-      expect(base.startsWith(DEFAULT_SYSTEM_PROMPT + '\n\n<runtime>')).assertTrue();
+      expect(base.startsWith('<identity>\n' + DEFAULT_SYSTEM_PROMPT + '\n</identity>')).assertTrue();
+      expect(base.includes('<runtime>')).assertTrue();
       expect(base.includes('My custom assistant')).assertFalse();
       expect(base.includes('# USER.md')).assertTrue();
       expect(base.includes(JSON.stringify(config.userDocument))).assertTrue();

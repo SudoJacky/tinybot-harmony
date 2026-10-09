@@ -310,7 +310,7 @@ export class AnthropicStream implements ModelStream {
           call.function.arguments = ''; this.fragments.add(index);
         }
         call.function.arguments += delta.partial_json;
-        if (call.function.arguments.length > MAX_TOOL_ARGUMENTS) { throw new Error(t("Anthropic 工具输入过大。")); }
+        if ((call.function.name !== 'execute_code' && call.function.arguments.length > MAX_TOOL_ARGUMENTS)) { throw new Error(t("Anthropic 工具输入过大。")); }
       } else { throw new Error(t("Anthropic 内容片段无效或不支持。")); }
     }
   }

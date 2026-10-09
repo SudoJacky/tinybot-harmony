@@ -2,6 +2,7 @@
 #include "sandbox.h"
 #include <memory>
 #include <mutex>
+#include <limits>
 
 namespace {
 struct Job {
@@ -62,8 +63,8 @@ napi_value Start(napi_env env, napi_callback_info info)
     }
     auto job = std::make_unique<Job>();
     if (!ReadString(env, args[0], 128, job->id) || job->id.empty() ||
-        !ReadString(env, args[1], tinybot::MAX_SOURCE_BYTES, job->source) || job->source.empty() ||
-        !ReadString(env, args[2], tinybot::MAX_INPUT_BYTES, job->input)) {
+        !ReadString(env, args[1], std::numeric_limits<size_t>::max() - 1, job->source) || job->source.empty() ||
+        !ReadString(env, args[2], std::numeric_limits<size_t>::max() - 1, job->input)) {
         napi_throw_type_error(env, nullptr, "Invalid sandbox input or byte limit exceeded"); return nullptr;
     }
     {

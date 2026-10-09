@@ -62,8 +62,10 @@ export class ProfileSettings {
       const first = profiles.length === 0;
       if ((first || data.config.providerId === profile.id) && profile.enabled) {
         const id = first ? profile.models[0] : data.config.model;
+        const reasoning = first ? undefined : data.config.reasoning;
         data.config = profile.models.includes(id) ? modelConfig(data.providerProfiles, { providerId: profile.id, modelId: id }, data.config) :
           copyModelConfig(data.config, false);
+        data.config.reasoning = reasoning;
       } else if (data.config.providerId === profile.id) { data.config = copyModelConfig(data.config, false); }
       const active = data.threads.find((item) => item.id === data.activeThreadId);
       if (first && profile.enabled && active && !active.modelRef) { active.modelRef = { providerId: profile.id, modelId: profile.models[0] }; }

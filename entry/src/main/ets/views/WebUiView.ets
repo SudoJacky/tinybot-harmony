@@ -12,6 +12,8 @@ export struct WebUiView {
   @Prop @Watch('restart') content: string = '';
   @Prop @Watch('sync') values: UiValues = {};
   @Prop @Watch('sync') interactive: boolean = false;
+  @Prop preflight: boolean = false;
+  onValidation: (error: string) => void = () => {};
   onSave: (values: UiValues) => Promise<UiValues> = async () => { throw new Error('Web UI save handler missing'); };
   @State private error: string = '';
   @State private ready: boolean = false;
@@ -37,6 +39,7 @@ export struct WebUiView {
   private report(error: Error): void {
     this.error = error.message; this.ready = false; clearTimeout(this.timer);
     hilog.error(0x0000, 'TinybotWebUI', 'generation=%{public}d error=%{public}s', this.generation, error.message);
+    if (this.preflight) { this.onValidation(error.message); }
   }
   private async restart(): Promise<void> {
     if (!this.mounted || !this.attached || !this.initialPageLoaded) { return; }
@@ -71,12 +74,12 @@ export struct WebUiView {
       hilog.info(0x0000, 'TinybotWebUI', 'connect message port');
       // loadData may use an opaque data: origin; transfer only to the verified top-level host.
       this.controller.postMessage('tinybot-web-port', [this.ports[1]], '*');
-      this.ports[0].postMessageEvent(JSON.stringify({ type: 'init', spec: this.spec, values: this.values, active: this.interactive && this.visible }));
+      this.ports[0].postMessageEvent(JSON.stringify({ type: 'init', spec: this.spec, values: this.values, active: this.preflight || (this.interactive && this.visible), preflight: this.preflight }));
     } catch (error) { this.report(error as Error); }
   }
   private sync(): void {
     if (!this.mounted || !this.ports.length) { return; }
-    try { this.ports[0].postMessageEvent(JSON.stringify({ type: 'state', values: this.values, active: this.interactive && this.visible })); }
+    try { this.ports[0].postMessageEvent(JSON.stringify({ type: 'state', values: this.values, active: this.preflight || (this.interactive && this.visible) })); }
     catch (error) { this.report(error as Error); }
   }
   private async receive(data: webview.WebMessage, generation: number): Promise<void> {
@@ -87,8 +90,10 @@ export struct WebUiView {
       const message = parseWebUiMessage(data); id = message.id || 0;
       if (message.type === 'error') { throw new Error(message.message); }
       if (message.type === 'ready') {
+        if (this.error) { return; } // A late ready must not erase a startup failure.
         clearTimeout(this.timer); this.ready = true;
-        hilog.info(0x0000, 'TinybotWebUI', 'ready library=%{public}s', this.spec?.library || 'none'); return;
+        hilog.info(0x0000, 'TinybotWebUI', 'ready library=%{public}s preflight=%{public}s', this.spec?.library || 'none', String(this.preflight));
+        if (this.preflight) { this.onValidation(''); } return;
       }
       if (!this.interactive || !this.visible || this.saving) { throw new Error(t('当前无法保存，请等待任务结束后重试。')); }
       this.saving = true;
@@ -129,7 +134,7 @@ export struct WebUiView {
           if (blocked) { hilog.warn(0x0000, 'TinybotWebUI', 'blocked navigation scheme=%{public}s', url.split(':')[0]); }
           return blocked;
         })
-        .onConsole((event) => { if (event.message.getMessageLevel() === MessageLevel.Error) { hilog.error(0x0000, 'TinybotWebUI', 'console error=%{public}s', event.message.getMessage().slice(0, 500)); } return false; })
+        .onConsole((event) => { if (event.message.getMessageLevel() === MessageLevel.Error) { this.report(new Error(event.message.getMessage().slice(0, 2000))); } return false; })
         .onErrorReceive((event) => { if (event.request.isMainFrame()) { this.report(new Error(event.error.getErrorInfo())); } else { hilog.error(0x0000, 'TinybotWebUI', 'resource error=%{public}s', event.error.getErrorInfo()); } })
         .onPermissionRequest((event) => { event.request.deny(); })
         .onRenderExited(() => { this.report(new Error(t('交互内容渲染进程已退出，请重试。'))); })
