@@ -2,6 +2,7 @@ import { ProductivityData, Attachment } from '../model/Productivity';
 import { ImageTools } from './ImageTools';
 import { CodeExecutionTools } from './CodeExecutionTools';
 import { NativeCodeExecutor } from './NativeCodeExecutor';
+import { NativeOrchestrationExecutor } from './NativeOrchestrationExecutor';
 import { WebUiPreflight } from './WebUiPreflight';
 import { InteractionTools } from './InteractionTools';
 import { UsageLedger } from './UsageLedger';
@@ -75,6 +76,6 @@ export function createNativeSessionService(filesDir: string, workspaceFilesDir: 
   UsageLedger.configure(filesDir).catch((error: Error) => { UsageLedger.error = error.message; });
   const providers = new ProviderRegistry(); const credentials = new CredentialStore();
   return new SessionService(new ConversationStore(filesDir), new AgentRuntime(providers, credentials, new NativeUsageRecorder(),
-    (content, cancellation) => WebUiPreflight.validate(content, cancellation)), credentials,
+    (content, cancellation) => WebUiPreflight.validate(content, cancellation), new NativeOrchestrationExecutor()), credentials,
     new NativeSessionResources(workspaceFilesDir, providers, approval));
 }

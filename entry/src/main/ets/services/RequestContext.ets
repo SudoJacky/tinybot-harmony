@@ -9,6 +9,7 @@ import { projectResults } from './ContextTools';
 import { ModelSession } from './providers/Provider';
 import { t } from '../model/I18n';
 import { ContextOverflowError } from './providers/ProviderErrors';
+import { ContextTokenItem, contextBreakdown } from '../model/ContextBreakdown';
 
 export interface ContextSource {
   state: ContextState;
@@ -17,7 +18,7 @@ export interface ContextSource {
   persist: () => Promise<void>;
   progress: (status: string) => void;
 }
-export interface PreparedRequest { messages: ModelMessage[]; context: ContextDiagnostics; }
+export interface PreparedRequest { messages: ModelMessage[]; context: ContextDiagnostics; breakdown?: ContextTokenItem[]; }
 
 // One boundary for every assistant request. Storage, UI and tool execution remain outside this module.
 export class RequestContext {
@@ -35,7 +36,8 @@ export class RequestContext {
     const sections = this.source.sections().concat(toolPromptSections(tools));
     const entries = projectResults(this.source.entries(), contextSettings(this.config).window);
     const messages = this.assemble(entries, sections, this.source.state.compaction, []);
-    return { messages: messages, context: this.describe(messages, tools, sections) };
+    return { messages: messages, context: this.describe(messages, tools, sections),
+      breakdown: contextBreakdown(messages, tools, sections, entries, this.source.state.compaction !== undefined) };
   }
 
   recordResponse(response: ModelTurn): void {
@@ -85,7 +87,8 @@ export class RequestContext {
     }
     this.lastMessages = messages.map((message) => JSON.stringify(message));
     this.lastTools = JSON.stringify(tools);
-    return { messages: messages, context: diagnostics };
+    return { messages: messages, context: diagnostics,
+      breakdown: contextBreakdown(messages, tools, sections, entries, this.source.state.compaction !== undefined) };
   }
 
   private assemble(entries: ContextEntry[], sections: PromptSection[], checkpoint: CompactionData | undefined, pending: ModelMessage[]): ModelMessage[] {

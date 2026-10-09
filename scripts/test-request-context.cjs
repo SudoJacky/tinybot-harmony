@@ -12,6 +12,7 @@ function load(file) {
   return exports;
 }
 const { RequestContext } = load(root + '/services/RequestContext');
+const { draftBreakdown } = load(root + '/model/ContextBreakdown');
 const { ContextTools, projectResults, resultTokenBudget } = load(root + '/services/ContextTools');
 const { threadEntries, projectedHistory } = load(root + '/model/ContextProjection');
 const { sessionContextSource } = load(root + '/services/SessionContext');
@@ -32,6 +33,34 @@ function fixture() {
 }
 function source(thread, persist = async () => {}) { return sessionContextSource(thread, () => [{ name: 'rules', content: 'Follow the user.' }], persist, () => {}); }
 async function main() {
+  const detailThread = fixture(); detailThread.messages[1].status = 'complete';
+  detailThread.messages[0].references = [{threadId:'other',title:'Other',content:'quoted context',capturedAt:1,truncated:false}];
+  detailThread.messages[1].steps = [{ content:'answer',reasoningContent:'thinking',tools:[
+    {call:call('outer','orchestrate'),status:'complete',output:'summary only',children:[
+      {call:call('child','read_file'),status:'complete',output:'private full child output'.repeat(100)}]}] }];
+  const detailTools = [{type:'function',function:{name:'orchestrate',description:'compose tools',parameters:{type:'object',properties:{}}}}];
+  const detailManager = new RequestContext(source(detailThread), config());
+  const inspection = detailManager.inspect(detailTools);
+  assert.equal(inspection.breakdown.reduce((sum,row)=>sum+row.tokens,0),inspection.context.heuristicTokens);
+  const outputRows = inspection.breakdown.filter(row=>row.kind==='results');
+  assert.equal(outputRows.length,1); assert.equal(outputRows[0].name,'orchestrate');
+  assert.equal(outputRows[0].messageId,'u1'); assert.equal(outputRows[0].step,0);
+  assert.equal(outputRows[0].tokens,estimateTextTokens('summary only'));
+  assert.ok(inspection.breakdown.some(row=>row.name==='reasoning'&&row.kind==='assistant'));
+  assert.ok(inspection.breakdown.some(row=>row.name==='history_references'&&row.kind==='attachments'));
+  assert.equal(inspection.breakdown.find(row=>row.kind==='user').tokens,estimateTextTokens(detailThread.messages[0].content));
+  assert.ok(!JSON.stringify(inspection.breakdown).includes('private full child output'));
+  assert.ok(!JSON.stringify(inspection.breakdown).includes('Follow the user.'));
+  const draft = draftBreakdown('hello','reference',[{id:'a',name:'photo',mime:'image/jpeg'}]);
+  assert.equal(draft.find(row=>row.id==='draft-attachment-0').tokens,1800);
+  assert.equal(draft.find(row=>row.id==='draft-frame').tokens,8);
+  assert.equal(draftBreakdown('', '', []).length,0);
+  detailThread.compaction = {firstKeptMessageId:'u1',firstKeptStep:0,summary:'Older work',tokensBefore:1000,createdAt:1};
+  const compactDetails = detailManager.inspect(detailTools);
+  assert.equal(compactDetails.breakdown.filter(row=>row.kind==='summary').length,1);
+  assert.ok(compactDetails.breakdown.some(row=>row.kind==='user'&&row.messageId==='u1'));
+  assert.equal(compactDetails.breakdown.reduce((sum,row)=>sum+row.tokens,0),compactDetails.context.heuristicTokens);
+  console.log('PASS request composition totals, retained tool receipts, source attribution, draft attachments and summary separation');
   // A long single user turn compacts inside the turn, then continues without replaying any tool.
   const thread = fixture(), turn = { content: '', steps: [] }, requests = [], writes = [], saved = [];
   const manager = new RequestContext(source(thread, async () => saved.push(JSON.stringify(thread))), config());
@@ -65,6 +94,8 @@ async function main() {
   const original = JSON.stringify(resultThread);
   const projected = projectResults(threadEntries(resultThread), 8192);
   const preview = JSON.parse(projected.flatMap(e => e.messages).find(m => m.role === 'tool').content);
+  const previewDetails = new RequestContext(source(resultThread),config()).inspect([]);
+  assert.equal(previewDetails.breakdown.find(row=>row.kind==='results').tokens,estimateTextTokens(JSON.stringify(preview)));
   assert.equal(preview.contextPreview, true); assert.equal(preview.totalCharacters, big.length); assert.equal(JSON.stringify(resultThread), original);
   let toolExecutions = 0;
   const reader = new ContextTools({ definitions: () => [], execute: async () => { toolExecutions++; return ''; } }, () => threadEntries(resultThread), 8192);

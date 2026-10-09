@@ -1,5 +1,73 @@
 # Harness 代码沙箱
 
+## 异步工具编排
+
+`orchestrate` 接受 `{ "code": "异步 JavaScript 函数体" }`，在新的 QuickJS Runtime 中执行。
+使用 `await tools.read_file({path: 'data.json'})` 调用当前 Agent 有权使用的工具，使用 `return`
+交付 JSON 可序列化的汇总。工具返回值是解析后的 JSON；非 JSON 文本保持字符串。
+`ALL_TOOLS` 提供本次可用工具的 `name`、`description` 和 `parameters`；`console` 日志沿用下文限制。
+
+异步编排还提供以下全局函数，函数签名和限制随 `orchestrate` 工具说明一起交给 Agent：
+
+| 函数 | 行为 |
+| --- | --- |
+| `text(value)` | 字符串原样写入 stdout，其他值先经 `JSON.stringify` 转换；undefined 记为 `undefined`，循环引用和 BigInt 抛错。与 console 共用 32 KiB 日志预算，截断时标记 `logsTruncated`。日志随最终回执返回，不实时推送，也不替代 `return`。 |
+| `as_settled(iterableOrMap)` | 返回异步迭代器，按观察到的完成顺序产生 `{index, status: 'fulfilled', value}` 或 `{index, status: 'rejected', reason}`。普通迭代对象使用从 0 开始的位置，Map 使用原始键。支持普通值和 Promise，空集合立即结束。 |
+| `stream_settled(iterableOrMap, emit)` | 按相同顺序执行并等待每次 `emit(outcome)`，返回 `Promise<void>`。回调异常向外传播；回调可以继续调用工具。 |
+
+这些辅助函数只在 `orchestrate` 中提供。它们不会取消任务；提前退出迭代或捕获回调异常后，
+仍需等待所有已启动的工具调用。失败的 `reason` 可能是 Error，汇总时使用 `String(reason)` 保留错误信息。
+例如并发读取、处理部分失败并统一交付：
+
+```javascript
+const jobs = new Map(['a.json', 'b.json'].map(path => [path, tools.read_file({path})]));
+const results = [];
+await stream_settled(jobs, item => {
+  results.push(item.status === 'fulfilled'
+    ? {path: item.index, content: item.value.content}
+    : {path: item.index, error: String(item.reason)});
+});
+text({completed: results.length});
+return results;
+```
+
+```javascript
+const results = await Promise.all([
+  tools.read_file({path: 'a.json'}),
+  tools.read_file({path: 'b.json'})
+]);
+const total = results.flatMap(item => JSON.parse(item.content)).reduce((a, b) => a + b, 0);
+await tools.write_file({path: 'total.json', content: JSON.stringify({total})});
+return {total, path: 'total.json'};
+```
+
+第一版开放工作区文件、网页、Skills、MCP 目录/调用和历史工具结果读取。工具目录取自当前 Agent
+经过只读与员工权限过滤后的目录，子调用沿用原工具的参数校验、路径校验和 MCP 审批。
+Team 控制、用户表单、图片/界面发布以及 `execute_code`/`orchestrate` 本身不作为嵌套工具开放。
+普通直接调用仍可使用。编排并不自动启动员工或作语义判断；最终回答仍由 Agent 生成。
+
+每次最多 32 个子调用，最多 4 个宿主工具同时执行；标为 sequential 的工具等待已有读取并阻止
+后续调用越过。编排外层不占用团队工具通道，具体子调用才进入该通道。必须等待所有工具再返回；
+遗漏 await 报错并取消、收拢已接纳调用，已经完成的写入不会撤销。工具失败使对应 Promise 拒绝，
+可以用 `Promise.allSettled` 收集部分结果；持久化失败终止本次执行，不能被脚本 catch 隐藏。
+
+运行预算为 32 MiB JS Runtime 分配、2 秒累计非等待时间、120 秒墙钟时间；解释器中断仍是协作式，
+不是 OS 硬抢占。源码及每个子调用参数最多 96 KiB UTF-8，工具结果与最终返回值各最多 1 MiB。
+超限明确报错；宿主已保存的完整工具回执不因此删除。最多同时接纳 4 个 Native 编排执行。
+不提供文件、网络、模块、定时器或宿主对象的直接访问。
+
+完整子调用保存在外层工具的 `children`，每个调用先保存意图再执行副作用，完成后保存回执。
+模型常规上下文只接收外层汇总；子回执可以通过 `read_tool_result` 的 messageId/callId 读取，
+也参与压缩时的文件操作证据汇总。工具详情页可查看每个子调用的参数、状态和结果。
+停止会取消 Native 执行及宿主请求并等待清理；重启后未结束子调用标为中断，不自动重放脚本。
+第一版没有跨调用 store/load、后台执行单元和 exec/wait 接口。
+
+验证入口：`node scripts/test-orchestration.cjs`、`node scripts/test-request-context.cjs`，
+以及 CMake 的 `orchestration_tests` / `ctest`。`scripts/orchestration-smoke-server.cjs`
+提供仅监听 localhost:18769 的确定性模型夹具，供签名应用经过真实工具与 Node-API 链路进行设备验证。
+
+## 同步纯计算
+
 `NativeSessionResources` 为聊天和团队提供 `execute_code`，支持纯计算 JavaScript。research、review 和全局只读模式均可使用；文件操作仍由原有工作区工具校验权限、路径和修改基线。
 
 ## 调用约定

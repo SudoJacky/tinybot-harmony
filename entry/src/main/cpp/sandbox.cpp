@@ -1,8 +1,10 @@
 #include "sandbox.h"
+#include "orchestration_helpers.h"
 #include "quickjs.h"
 #include <algorithm>
 #include <cstdlib>
 #include <limits>
+#include <stdexcept>
 
 namespace tinybot {
 namespace {
@@ -160,6 +162,160 @@ void Run(JSContext *ctx, const std::string &source, const std::string &inputJson
         result.error = "Result serialization queued asynchronous work";
     }
 }
+struct PendingTool { int id; JSValue resolve; JSValue reject; };
+struct AsyncState {
+    ToolHost &host;
+    std::vector<std::string> names;
+    std::vector<PendingTool> pending;
+    std::vector<JSValue> rejected;
+    int calls = 0;
+    bool accepting = true;
+};
+void TrackRejection(JSContext *ctx, JSValueConst promise, JSValueConst, JS_BOOL handled, void *opaque)
+{
+    auto &state = *static_cast<AsyncState *>(opaque);
+    auto found = std::find_if(state.rejected.begin(), state.rejected.end(), [&](JSValue value) {
+        return JS_VALUE_GET_PTR(value) == JS_VALUE_GET_PTR(promise);
+    });
+    if (handled && found != state.rejected.end()) { JS_FreeValue(ctx, *found); state.rejected.erase(found); }
+    else if (!handled && found == state.rejected.end()) { state.rejected.push_back(JS_DupValue(ctx, promise)); }
+}
+JSValue InvokeTool(JSContext *ctx, JSValueConst, int argc, JSValueConst *argv, int index)
+{
+    auto &state = *static_cast<AsyncState *>(JS_GetRuntimeOpaque(JS_GetRuntime(ctx)));
+    if (!state.accepting || state.calls >= 32) { return JS_ThrowInternalError(ctx, "Tool dispatch closed or 32-call budget exceeded"); }
+    if (argc != 1 || !JS_IsObject(argv[0]) || JS_IsArray(ctx, argv[0])) {
+        return JS_ThrowTypeError(ctx, "Pass one tool arguments object");
+    }
+    JSValue json = JS_JSONStringify(ctx, argv[0], JS_UNDEFINED, JS_UNDEFINED);
+    if (JS_IsException(json)) { return json; }
+    size_t size = 0;
+    const char *raw = JS_ToCStringLen(ctx, &size, json);
+    if (!raw) { JS_FreeValue(ctx, json); return JS_EXCEPTION; }
+    std::string arguments(raw, size);
+    JS_FreeCString(ctx, raw); JS_FreeValue(ctx, json);
+    if (size > 96 * 1024) { return JS_ThrowRangeError(ctx, "Tool arguments exceed 96 KiB"); }
+    JSValue resolving[2];
+    JSValue promise = JS_NewPromiseCapability(ctx, resolving);
+    if (JS_IsException(promise)) { return promise; }
+    const int id = ++state.calls;
+    state.pending.push_back({id, resolving[0], resolving[1]});
+    try { state.host.Submit(id, state.names.at(index), arguments); }
+    catch (const std::exception &error) {
+        state.pending.pop_back(); JS_FreeValue(ctx, resolving[0]); JS_FreeValue(ctx, resolving[1]); JS_FreeValue(ctx, promise);
+        return JS_ThrowInternalError(ctx, "%s", error.what());
+    }
+    return promise;
+}
+void RunAsync(JSContext *ctx, const std::string &source, const std::string &catalogJson,
+    Budget &budget, ToolHost &host, ExecutionResult &result)
+{
+    AsyncState state{host, {}, {}, {}, 0, true};
+    JSRuntime *runtime = JS_GetRuntime(ctx);
+    JS_SetRuntimeOpaque(runtime, &state);
+    JS_SetHostPromiseRejectionTracker(runtime, TrackRejection, &state);
+    JSValue root = JS_UNDEFINED;
+    const auto wallStart = std::chrono::steady_clock::now();
+    do {
+        if (!InstallConsole(ctx, result)) { CaptureError(ctx, result); break; }
+        JSValue catalog = JS_ParseJSON(ctx, catalogJson.c_str(), catalogJson.size(), "tools.json");
+        if (JS_IsException(catalog)) { CaptureError(ctx, result); break; }
+        JSValue lengthValue = JS_GetPropertyStr(ctx, catalog, "length");
+        uint32_t length = 0; JS_ToUint32(ctx, &length, lengthValue); JS_FreeValue(ctx, lengthValue);
+        JSValue tools = JS_NewObjectProto(ctx, JS_NULL);
+        bool valid = JS_IsArray(ctx, catalog) && length <= 64;
+        for (uint32_t i = 0; valid && i < length; i++) {
+            JSValue item = JS_GetPropertyUint32(ctx, catalog, i);
+            JSValue nameValue = JS_GetPropertyStr(ctx, item, "name");
+            const char *name = JS_ToCString(ctx, nameValue);
+            valid = name && name[0];
+            if (valid) {
+                state.names.emplace_back(name);
+                valid = JS_SetPropertyStr(ctx, tools, name, JS_NewCFunctionMagic(ctx, InvokeTool, name, 1, JS_CFUNC_generic_magic, i)) >= 0;
+            }
+            if (name) { JS_FreeCString(ctx, name); }
+            JS_FreeValue(ctx, nameValue); JS_FreeValue(ctx, item);
+        }
+        JSValue global = JS_GetGlobalObject(ctx);
+        int toolsSet = JS_SetPropertyStr(ctx, global, "tools", tools);
+        int catalogSet = JS_SetPropertyStr(ctx, global, "ALL_TOOLS", catalog);
+        JS_FreeValue(ctx, global);
+        if (!valid || toolsSet < 0 || catalogSet < 0) { result.status = "error"; result.error = "Invalid tool catalog"; break; }
+        JSValue helpers = JS_Eval(ctx, ORCHESTRATION_HELPERS, sizeof(ORCHESTRATION_HELPERS) - 1,
+            "orchestration_helpers.js", JS_EVAL_TYPE_GLOBAL);
+        if (JS_IsException(helpers)) { CaptureError(ctx, result); break; }
+        JS_FreeValue(ctx, helpers);
+        const std::string wrapped = "(async function() {\n'use strict';\n" + source + "\n})()";
+        root = JS_Eval(ctx, wrapped.c_str(), wrapped.size(), "orchestrate.js", JS_EVAL_TYPE_GLOBAL);
+        if (JS_IsException(root)) { CaptureError(ctx, result); break; }
+        while (!Interrupt(runtime, &budget)) {
+            if (std::chrono::steady_clock::now() - wallStart >= std::chrono::seconds(120)) {
+                result.status = "timeout"; result.error = "Orchestration exceeded 120 seconds"; break;
+            }
+            if (JS_IsJobPending(runtime)) {
+                JSContext *jobContext = nullptr;
+                if (JS_ExecutePendingJob(runtime, &jobContext) < 0) { CaptureError(jobContext ? jobContext : ctx, result); break; }
+                continue;
+            }
+            const int status = JS_PromiseState(ctx, root);
+            if (status == JS_PROMISE_REJECTED) {
+                JS_Throw(ctx, JS_PromiseResult(ctx, root)); CaptureError(ctx, result); break;
+            }
+            if (status == JS_PROMISE_FULFILLED) {
+                if (!state.pending.empty()) { result.status = "error"; result.error = "Await every tool call before returning"; break; }
+                if (!state.rejected.empty()) {
+                    JS_Throw(ctx, JS_PromiseResult(ctx, state.rejected.front())); CaptureError(ctx, result); break;
+                }
+                state.accepting = false;
+                JSValue value = JS_PromiseResult(ctx, root);
+                JSValue json = JS_IsUndefined(value) ? JS_NULL : JS_JSONStringify(ctx, value, JS_UNDEFINED, JS_UNDEFINED);
+                JS_FreeValue(ctx, value);
+                if (JS_IsException(json)) { CaptureError(ctx, result); }
+                else if (JS_IsUndefined(json)) { result.status = "error"; result.error = "Return a JSON-serializable value"; }
+                else if (!JS_IsNull(json)) {
+                    size_t size = 0; const char *raw = JS_ToCStringLen(ctx, &size, json);
+                    if (!raw) { CaptureError(ctx, result); }
+                    else if (size > 1024 * 1024) { result.status = "error"; result.error = "Result exceeds 1 MiB"; }
+                    else { result.resultJson.assign(raw, size); }
+                    if (raw) { JS_FreeCString(ctx, raw); }
+                }
+                JS_FreeValue(ctx, json);
+                if (JS_IsJobPending(runtime)) { result.status = "error"; result.error = "Result serialization must not schedule async work"; }
+                break;
+            }
+            if (state.pending.empty()) { result.status = "error"; result.error = "Unresolved promise has no pending host tool"; break; }
+            ToolReply reply;
+            const auto waitStart = std::chrono::steady_clock::now();
+            const bool received = host.Wait(reply);
+            budget.started += std::chrono::steady_clock::now() - waitStart; // I/O wait is not script execution time.
+            if (!received) { continue; }
+            auto pending = std::find_if(state.pending.begin(), state.pending.end(), [&](const PendingTool &item) { return item.id == reply.id; });
+            if (pending == state.pending.end()) { result.status = "error"; result.error = "Unknown tool response"; break; }
+            JSValue value;
+            if (reply.value.size() > 1024 * 1024) { reply.error = true; reply.value = "Tool result exceeds 1 MiB; read a smaller range"; }
+            if (reply.error) {
+                value = JS_NewError(ctx);
+                JS_SetPropertyStr(ctx, value, "message", JS_NewStringLen(ctx, reply.value.data(), reply.value.size()));
+            } else {
+                value = JS_ParseJSON(ctx, reply.value.c_str(), reply.value.size(), "tool-result.json");
+                if (JS_IsException(value)) {
+                    JS_FreeValue(ctx, JS_GetException(ctx));
+                    value = JS_NewStringLen(ctx, reply.value.data(), reply.value.size());
+                }
+            }
+            JSValue settled = JS_Call(ctx, reply.error ? pending->reject : pending->resolve, JS_UNDEFINED, 1, &value);
+            JS_FreeValue(ctx, value); JS_FreeValue(ctx, pending->resolve); JS_FreeValue(ctx, pending->reject);
+            state.pending.erase(pending);
+            if (JS_IsException(settled)) { CaptureError(ctx, result); break; }
+            JS_FreeValue(ctx, settled);
+        }
+    } while (false);
+    JS_SetHostPromiseRejectionTracker(runtime, nullptr, nullptr);
+    for (auto &pending : state.pending) { JS_FreeValue(ctx, pending.resolve); JS_FreeValue(ctx, pending.reject); }
+    for (auto value : state.rejected) { JS_FreeValue(ctx, value); }
+    JS_FreeValue(ctx, root);
+    JS_SetRuntimeOpaque(runtime, nullptr);
+}
 std::string Quote(const std::string &text)
 {
     const char hex[] = "0123456789abcdef";
@@ -173,8 +329,9 @@ std::string Quote(const std::string &text)
 }
 }
 
-ExecutionResult ExecuteCode(const std::string &source, const std::string &inputJson, Budget &budget)
+ExecutionResult Execute(const std::string &source, const std::string &inputJson, Budget &budget, ToolHost *host)
 {
+    const auto wallStart = budget.started;
     ExecutionResult result;
     if (source.empty()) {
         result.status = "error"; result.error = "Source is required";
@@ -187,7 +344,11 @@ ExecutionResult ExecuteCode(const std::string &source, const std::string &inputJ
             JS_SetCanBlock(runtime, false); // Atomics.wait must never block the worker.
             JS_SetInterruptHandler(runtime, Interrupt, &budget);
             JSContext *ctx = JS_NewContext(runtime);
-            if (ctx) { Run(ctx, source, inputJson, result); JS_FreeContext(ctx); }
+            if (ctx) {
+                if (host) { RunAsync(ctx, source, inputJson, budget, *host, result); }
+                else { Run(ctx, source, inputJson, result); }
+                JS_FreeContext(ctx);
+            }
             else { result.status = "error"; result.error = "Cannot create JavaScript context"; }
             // No standard library, module loader, native handles or pending-job pump is installed.
             JS_FreeRuntime(runtime);
@@ -198,9 +359,14 @@ ExecutionResult ExecuteCode(const std::string &source, const std::string &inputJ
     else if (budget.timedOut) { result.status = "timeout"; result.error = "Execution exceeded 2000 ms"; }
     else if (budget.memoryExceeded) { result.status = "memory_limit"; result.error = "Runtime allocation limit exceeded"; }
     if (result.status != "ok") { result.resultJson = "null"; }
-    result.durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - budget.started).count();
+    result.durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - wallStart).count();
     return result;
 }
+
+ExecutionResult ExecuteCode(const std::string &source, const std::string &inputJson, Budget &budget)
+{ return Execute(source, inputJson, budget, nullptr); }
+ExecutionResult Orchestrate(const std::string &source, const std::string &catalogJson, Budget &budget, ToolHost &host)
+{ return Execute(source, catalogJson, budget, &host); }
 
 std::string ExecutionResult::ToJson() const
 {

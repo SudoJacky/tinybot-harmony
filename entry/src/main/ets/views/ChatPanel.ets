@@ -22,6 +22,7 @@ import { ChatViewModel, MessageViewModel, ThreadViewModel } from '../viewmodel/C
 import { UiValues } from '../model/InteractiveUi';
 import { ImageViewer, MessageBubble } from './MessageBubble';
 import { InputQueuePanel } from './InputQueuePanel';
+import { ContextDetails } from './ContextDetails';
 import { Btn, Font, Motion, Radius, Space, fileSize } from '../common/Theme';
 import { Banner, IconBadge, IconButton } from '../common/Widgets';
 
@@ -371,11 +372,14 @@ export struct ChatPanel {
           Progress({ value: this.app.contextUsed, total: Math.max(1, this.app.contextWindow), type: ProgressType.Linear })
             .width('100%').color(this.contextColor()).backgroundColor($r('app.color.surface_variant'))
             .style({ strokeWidth: 8, strokeRadius: 4 })
+          Text(t('剩余约 {0} tokens', [Math.max(0, this.app.contextWindow - this.app.contextUsed)])).fontSize(12)
+            .fontColor($r('app.color.text_tertiary'))
           if (this.app.contextStatus.length > 0) {
             Text(this.app.contextStatus).id('context-status').fontSize(13).lineHeight(19).width('100%')
               .fontColor($r('app.color.text_secondary'))
           }
         }.padding(Space.lg).borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
+        ContextDetails({ app: this.app })
         if (this.thread.compaction) {
           Column({ space: 10 }) {
             Row({ space: Space.sm }) {
@@ -403,7 +407,7 @@ export struct ChatPanel {
             .fontColor($r('app.color.text_tertiary'))
         }.width('100%')
       }.width('100%').padding({ left: Space.page, right: Space.page, bottom: Space.xl })
-    }.width('100%').scrollBar(BarState.Off)
+    }.width('100%').height('100%').scrollBar(BarState.Off)
   }
 
   @Builder

@@ -15,6 +15,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Locale validation failed. Run node scripts/bui
 $env:DEVECO_STUDIO_HOME = $StudioPath
 & $nodePath (Join-Path $projectPath 'scripts/test-code-sandbox.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Code sandbox adapter tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-orchestration.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Orchestration integration tests failed.' }
 $env:DEVECO_SDK_HOME = Join-Path $StudioPath 'sdk'
 $env:JAVA_HOME = Join-Path $StudioPath 'jbr'
 $startedAt = Get-Date
