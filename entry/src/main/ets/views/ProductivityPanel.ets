@@ -1,15 +1,11 @@
 import { t } from '../model/I18n';
 import { SwipeRow } from '../common/SwipeRow';
 import { util } from '@kit.ArkTS';
-import { common } from '@kit.AbilityKit';
 import { McpOAuth } from '../services/McpOAuth';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { ProductivityData, MemoryEntry, PromptTemplate, McpServer, validateProductivity } from '../model/Productivity';
 import { MEMORY_CHAR_LIMIT, memoryCharacters } from '../model/MemoryMaintenance';
-import { saveMcpCandidate } from '../model/ResourceManagement';
-import { McpClient } from '../services/McpClient';
 import { Cancellation } from '../services/Cancellation';
-import { CredentialStore } from '../services/CredentialStore';
 import { Btn, Font, Radius, Space, Styles, shortTime } from '../common/Theme';
 import { Banner, BottomBar, EmptyState, IconBadge, Segmented, Tag } from '../common/Widgets';
 
@@ -39,15 +35,13 @@ export struct ProductivityPanel {
   @State private oauthCallback: string = '';
   private async login(server: McpServer): Promise<void> {
     if (this.locked()) { return; }
-    this.busy = true; this.error = ''; let alias = '';
+    this.busy = true; this.error = '';
     try {
-      alias = await McpOAuth.login(server, this.getUIContext().getHostContext() as common.UIAbilityContext, this.oauthClientId.trim());
-      const data = this.snapshot(); const target = data.servers.find((item) => item.id === server.id && item.url === server.url);
-      if (!target) { throw new Error(t("服务配置已变化，请重新登录。")); }
-      const previous = target.credentialAlias; target.credentialAlias = alias; target.authType = 'oauth';
-      if (!await this.app.saveProductivity(data)) { throw new Error(this.app.error); }
-      alias = ''; if (previous) { await new CredentialStore().remove(previous); } this.toast(t("OAuth 登录成功"));
-    } catch (error) { this.error = (error as Error).message; if (alias) { await new CredentialStore().remove(alias).catch(() => {}); } }
+      const result = await this.app.changeMcp({ action: 'save', id: server.id, name: server.name, url: server.url,
+        auth: 'oauth', clientId: this.oauthClientId.trim(), enabled: server.enabled, verify: false }, this.cancellation);
+      this.error = result.warning;
+      if (!result.warning) { this.toast(t("OAuth 登录成功")); }
+    } catch (error) { this.error = (error as Error).message; }
     finally { this.busy = false; this.oauthCallback = ''; }
   }
   private tabs: TabsController = new TabsController();
@@ -89,39 +83,30 @@ export struct ProductivityPanel {
   private async save(): Promise<void> {
     if (this.locked()) { return; }
     this.busy = true; this.error = ''; const data = this.snapshot(); const id = this.editingId || util.generateRandomUUID();
-    let newAlias = ''; let oldAlias = ''; const vault = new CredentialStore();
     try {
+      if (this.tab === 'mcp') {
+        const existing = data.servers.find((item) => item.id === this.editingId);
+        const result = await this.app.changeMcp({ action: 'save', id: this.editingId || undefined,
+          name: this.name.trim(), url: this.url.trim(), enabled: existing?.enabled !== false, verify: false,
+          auth: this.noAuth ? 'none' : this.token.trim() || !existing?.credentialAlias ? 'bearer' : 'keep',
+          token: this.noAuth ? undefined : this.token.trim() || (existing?.credentialAlias ? undefined : '') }, this.cancellation);
+        this.editing = false; this.reset(); this.error = result.warning;
+        if (!result.warning) { this.toast(t("已保存")); }
+        return;
+      }
       if (this.tab === 'memory') {
         const memory: MemoryEntry = { id: id, content: this.content.trim(), threadId: this.scoped ? this.app.active.id : '', updatedAt: Date.now() };
         data.memories = data.memories.filter((item) => item.id !== id).concat([memory]);
-      } else if (this.tab === 'templates') {
+      } else {
         const template: PromptTemplate = { id: id, name: this.name.trim(), content: this.content };
         const index = data.templates.findIndex((item) => item.id === id);
         if (index >= 0) { data.templates[index] = template; } else { data.templates.push(template); }
-      } else {
-        const existing = data.servers.find((item) => item.id === id); oldAlias = existing?.credentialAlias || '';
-        const address = this.url.trim();
-        let alias = '';
-        if (!this.noAuth) {
-          if (this.token.trim()) { newAlias = 'tinybot-mcp-' + util.generateRandomUUID(); alias = newAlias; }
-          else if (existing && existing.url === address && oldAlias) { await vault.read(oldAlias); alias = oldAlias; }
-          else { throw new Error(t("请输入 Bearer Token，或选择无需鉴权。修改服务地址后需要重新填写 Token。")); }
-        }
-        const server: McpServer = { id: id, name: this.name.trim(), url: address, enabled: existing?.enabled !== false, credentialAlias: alias,
-          authType: existing?.authType === 'oauth' && address === existing.url && alias === oldAlias ? 'oauth' : undefined };
-        data.servers = saveMcpCandidate(data, server).servers;
       }
       validateProductivity(data);
-      if (newAlias) { await vault.write(newAlias, this.token.trim()); }
       if (!await this.app.saveProductivity(data)) { throw new Error(this.app.error); }
-      if (oldAlias && !data.servers.some((item) => item.credentialAlias === oldAlias)) { try { await vault.remove(oldAlias); } catch (_) { /* Config is already committed. */ } }
-      newAlias = ''; this.editing = false; this.reset(); this.toast(t("已保存"));
-    } catch (error) {
-      this.error = (error as Error).message;
-      if (newAlias && !this.app.productivity.servers.some((item) => item.credentialAlias === newAlias)) {
-        try { await vault.remove(newAlias); } catch (_) { /* Unreferenced secret can be removed later. */ }
-      }
-    } finally { this.busy = false; }
+      this.editing = false; this.reset(); this.toast(t("已保存"));
+    } catch (error) { this.error = (error as Error).message; }
+    finally { this.busy = false; }
   }
   private remove(id: string, label: string): void {
     this.getUIContext().showAlertDialog({ title: t('删除{0}？', [label]), message: t("删除后将不再使用，且无法恢复。"),
@@ -130,28 +115,34 @@ export struct ProductivityPanel {
   }
   private async removeNow(id: string): Promise<void> {
     if (this.locked()) { return; }
-    const data = this.snapshot(); const alias = data.servers.find((item) => item.id === id)?.credentialAlias || '';
-    if (this.tab === 'memory') { data.memories = data.memories.filter((item) => item.id !== id); }
-    else if (this.tab === 'templates') { data.templates = data.templates.filter((item) => item.id !== id); }
-    else { data.servers = data.servers.filter((item) => item.id !== id); }
-    if (await this.app.saveProductivity(data)) {
-      if (this.tab === 'mcp' && alias) { try { await new CredentialStore().remove(alias); } catch (_) { /* No longer referenced. */ } }
+    this.busy = true; this.error = '';
+    try {
+      let warning = '';
+      if (this.tab === 'mcp') {
+        warning = (await this.app.changeMcp({ action: 'remove', id: id }, this.cancellation)).warning;
+      } else {
+        const data = this.snapshot();
+        if (this.tab === 'memory') { data.memories = data.memories.filter((item) => item.id !== id); }
+        else { data.templates = data.templates.filter((item) => item.id !== id); }
+        if (!await this.app.saveProductivity(data)) { throw new Error(this.app.error); }
+      }
       if (this.editingId === id) { this.editing = false; this.reset(); }
-      this.toast(t("已删除"));
-    } else { this.error = this.app.error; }
+      this.error = warning;
+      if (!warning) { this.toast(t("已删除")); }
+    } catch (error) { this.error = (error as Error).message; }
+    finally { this.busy = false; }
   }
   private async toggle(server: McpServer, value: boolean): Promise<void> {
-    if (server.enabled === value) { return; }
-    const data = this.snapshot(); const item = data.servers.find((item) => item.id === server.id);
-    if (item) { item.enabled = value; if (!await this.app.saveProductivity(data)) { this.error = this.app.error; } }
+    if (server.enabled === value || this.locked()) { return; }
+    try { this.error = (await this.app.changeMcp({ action: value ? 'enable' : 'disable', id: server.id }, this.cancellation)).warning; }
+    catch (error) { this.error = (error as Error).message; }
   }
   private async test(server: McpServer): Promise<void> {
-    if (this.testingId) { return; }
+    if (this.testingId || this.locked()) { return; }
     this.testingId = server.id; this.testId = server.id; this.testMessage = ''; this.error = '';
     try {
-      const tools = await new McpClient(server).list(this.cancellation);
-      this.testOk = true;
-      this.testMessage = t("连接成功 · ") + tools.length + t(" 个工具") + (tools.length ? '：' + tools.map((tool) => tool.name).join('、') : '');
+      const result = await this.app.changeMcp({ action: 'test', id: server.id }, this.cancellation);
+      this.testOk = true; this.testMessage = t("连接成功 · ") + result.tools + t(" 个工具");
     } catch (error) { this.testOk = false; this.testMessage = (error as Error).message; }
     finally { this.testingId = ''; }
   }

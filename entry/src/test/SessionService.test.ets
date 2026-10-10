@@ -20,7 +20,6 @@ import { defaultAssistantOptions } from '../main/ets/model/AssistantOptions';
 import { InteractionTools } from '../main/ets/services/InteractionTools';
 import { ToolApproval } from '../main/ets/services/ToolApproval';
 import { InputForm } from '../main/ets/model/RichArtifacts';
-import { TeamPlan, defaultTeamMembers, teamPlan } from '../main/ets/model/Team';
 
 class Gate {
   private release: () => void = () => {};
@@ -629,6 +628,11 @@ export default function sessionServiceTests(): void {
     });
     it('chatCoordinatorRecruitsAndIntegratesWithoutManualPlanOrSecondTurn', 0, async () => {
       const f = new Fixture(); await f.session.initialize(); let parentRequests = 0;
+      const teams: SessionEvent[] = []; const metadata: SessionEvent[] = [];
+      f.session.subscribe((event: SessionEvent) => {
+        if (event.kind === 'teams') { teams.push(event); }
+        if (event.kind === 'thread') { metadata.push(event); }
+      });
       f.provider.respond = async (index) => {
         const request = f.provider.requests[index];
         if (request.tools.some((tool) => tool.function.name === 'team_complete_task')) {
@@ -648,38 +652,11 @@ export default function sessionServiceTests(): void {
       expect(thread.messages[1].status).assertEqual('complete'); expect(thread.messages[1].content.includes('最终结论')).assertTrue();
       expect(thread.teams![0].status).assertEqual('completed'); expect(thread.teams![0].ownerMessageId).assertEqual(thread.messages[1].id);
       expect(active(await f.repository.load()).teams![0].tasks[0].attempts[0].handoff?.summary).assertEqual('研究证据已整理');
-    });
-    it('teamPlansRequireConfirmationAndRejectStaleEdits', 0, async () => {
-      const f = new Fixture(); await f.session.initialize();
-      const plan: TeamPlan = { tasks: [{ id: 'final', title: '报告', memberId: 'editor', instructions: '输出报告', dependencies: [] }], finalTaskId: 'final' };
-      f.provider.respond = async () => reply(JSON.stringify(plan));
-      expect(await f.session.prepareTeam('测试团队', defaultTeamMembers(), 2)).assertTrue();
-      const run = f.session.snapshot().threads[0].teams![0];
-      expect(f.provider.requests.length).assertEqual(1); expect(run.status).assertEqual('planned');
-      expect(f.provider.requests[0].tools.length).assertEqual(0);
-      expect(await f.session.reviseTeam(run.id, run.revision + 1, plan)).assertFalse();
-      expect(f.session.state.error.includes('更新')).assertTrue();
-      f.provider.respond = async () => reply('报告完成'); await f.session.executeTeam(run.id, run.revision);
-      const completed = f.session.snapshot().threads[0].teams![0]; expect(completed.status).assertEqual('completed');
-      const changed = teamPlan(completed); changed.tasks[0].instructions = '改动已执行任务';
-      expect(await f.session.reviseTeam(run.id, completed.revision, changed)).assertFalse();
-      expect((await f.repository.load()).threads[0].teams![0].tasks[0].attempts[0].turn.content).assertEqual('报告完成');
-    });
-    it('teamPlanningFailureDoesNotCreateRunnablePlan', 0, async () => {
-      const f = new Fixture(); await f.session.initialize(); f.provider.respond = async () => reply('not JSON');
-      expect(await f.session.prepareTeam('测试团队', defaultTeamMembers(), 2)).assertFalse();
-      expect((f.session.snapshot().threads[0].teams || []).length).assertEqual(0); expect(f.session.canMutate).assertTrue();
-    });
-    it('teamExecutionLocksChatAndCanBeStoppedFromSession', 0, async () => {
-      const f = new Fixture(); await f.session.initialize();
-      const plan: TeamPlan = { tasks: [{ id: 'final', title: '报告', memberId: 'editor', instructions: '输出报告', dependencies: [] }], finalTaskId: 'final' };
-      f.provider.respond = async () => reply(JSON.stringify(plan)); await f.session.prepareTeam('测试团队', defaultTeamMembers(), 1);
-      const run = f.session.snapshot().threads[0].teams![0]; const entered = new Gate();
-      f.provider.respond = async (_index, signal) => { entered.open(); await new Promise<void>((resolve) => { signal.onCancel(resolve); }); signal.check(); return reply(); };
-      const work = f.session.executeTeam(run.id, run.revision); await entered.promise;
-      expect(f.session.canMutate).assertFalse(); expect(await f.session.newThread()).assertFalse();
-      await f.session.stop(); await work;
-      expect(f.session.snapshot().threads[0].teams![0].status).assertEqual('cancelled'); expect(f.session.canMutate).assertTrue();
+      expect(teams.length > 0).assertTrue(); expect(metadata.length > 0).assertTrue();
+      expect(teams.every((event) => event.data === undefined && event.thread === undefined)).assertTrue();
+      expect(metadata.every((event) => event.data === undefined && event.thread?.messages.length === 0 && event.thread.teams === undefined)).assertTrue();
+      teams[teams.length - 1].teams![0].goal = 'observer edit';
+      expect(active(f.session.snapshot()).teams![0].goal === 'observer edit').assertFalse();
     });
     it('memoryProposalDoesNotSaveOrCopyLongAnswersAndIncludesRoleEvidence', 0, async () => {
       const data = seed(); const thread = data.threads[0]; thread.draft = 'keep draft';

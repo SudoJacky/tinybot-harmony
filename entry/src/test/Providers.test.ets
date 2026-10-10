@@ -1,8 +1,10 @@
+import { ProviderEffects } from '../main/ets/services/providers/Provider';
+import { ProviderProfile } from '../main/ets/model/ProviderProfiles';
+import { ProviderEditorViewModel } from '../main/ets/viewmodel/ProviderEditorViewModel';
 import { describe, expect, it } from '@ohos/hypium';
 import { ModelMessage, ToolDefinition } from '../main/ets/model/Agent';
-import { defaultConfig } from '../main/ets/model/Conversation';
-import { builtinProviderInfos, providerDraft } from '../main/ets/model/Provider';
-import { createProviderRegistry } from '../main/ets/services/providers/DefaultProviders';
+import { builtinProviderInfos } from '../main/ets/model/Provider';
+import { profileProvider } from '../main/ets/services/providers/DefaultProviders';
 import { chatRequest } from '../main/ets/services/providers/ChatCompletionsProtocol';
 
 function rejects(action: () => void): void {
@@ -12,47 +14,43 @@ function rejects(action: () => void): void {
 }
 
 export default function providerTests(): void {
+  const effects: ProviderEffects = { hydrate: async (messages) => messages, recordUsage: () => {} };
   describe('BuiltInProviders', () => {
-    it('registersDesktopPresetsAndKeepsUserFacingCatalogIndependent', 0, () => {
-      const registry = createProviderRegistry();
-      expect(registry.list().map((info) => info.id).join(',')).assertEqual('deepseek,dashscope,openai,zai,ollama,openai-compatible,openai-responses,anthropic');
-      const info = registry.require(defaultConfig().providerId).info;
-      expect(defaultConfig().baseUrl).assertEqual(info.defaultBaseUrl);
-      expect(defaultConfig().model).assertEqual(info.defaultModel);
-      const copy = registry.list();
-      copy[0].models?.push('changed');
-      expect(registry.require('deepseek').info.models?.indexOf('changed')).assertEqual(-1);
-      expect(registry.require('dashscope').endpoint(registry.require('dashscope').info.defaultBaseUrl))
-        .assertEqual('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions');
-      expect(registry.require('zai').endpoint(registry.require('zai').info.defaultBaseUrl))
-        .assertEqual('https://open.bigmodel.cn/api/paas/v4/chat/completions');
-    });
-    it('allowsHttpOnlyForTheExplicitOllamaRegistration', 0, () => {
-      const registry = createProviderRegistry();
-      const localUrl = 'http://192.168.1.10:11434/v1';
-      expect(registry.require('ollama').endpoint(localUrl)).assertEqual(localUrl + '/chat/completions');
-      expect(registry.require('ollama').endpoint('https://ollama.example/v1/')).assertEqual('https://ollama.example/v1/chat/completions');
-      for (const info of registry.list()) {
-        if (info.id !== 'ollama') { rejects(() => { registry.require(info.id).endpoint(localUrl); }); }
-      }
-      for (const invalid of ['', 'ftp://host/v1', 'http://user:pass@host/v1', 'http://host/v1?key=x',
-        'http://host/v1#key', 'http://host\\@other/v1']) {
-        rejects(() => { registry.require('ollama').endpoint(invalid); });
+    it('buildsConfiguredProvidersThroughTheProductionFactory', 0, () => {
+      for (const info of builtinProviderInfos()) {
+        const profile: ProviderProfile = { id: 'saved-' + info.id, name: info.name, presetId: info.id,
+          protocol: info.protocol, baseUrl: info.defaultBaseUrl || 'https://custom.example/v1',
+          models: info.models?.length ? info.models : ['custom-model'], enabled: true, noApiKey: true, credentialAlias: '' };
+        const provider = profileProvider(profile, effects);
+        expect(provider.info.id).assertEqual(profile.id);
+        expect(provider.info.models![0]).assertEqual(profile.models[0]);
+        profile.models.push('changed');
+        expect(provider.info.models!.includes('changed')).assertFalse();
+        expect(provider.endpoint(profile.baseUrl).startsWith(profile.baseUrl)).assertTrue();
       }
     });
-    it('clearsCloudDefaultsForOllamaAndRetainsExplicitCustomDrafts', 0, () => {
-      const infos = builtinProviderInfos();
-      const local = providerDraft(infos[4], 'https://old.example/v1', 'old-model');
-      expect(local.baseUrl).assertEqual('');
-      expect(local.model).assertEqual('');
-      expect(local.noApiKey).assertTrue();
-      const cloud = providerDraft(infos[1], 'http://local:11434/v1', 'local-model');
-      expect(cloud.baseUrl).assertEqual(infos[1].defaultBaseUrl);
-      expect(cloud.model).assertEqual('qwen-plus');
-      expect(cloud.noApiKey).assertFalse();
-      const custom = providerDraft(infos[5], 'https://proxy.example/v1', 'custom-model');
-      expect(custom.baseUrl).assertEqual('https://proxy.example/v1');
-      expect(custom.model).assertEqual('custom-model');
+    it('allowsExplicitHttpProfilesAndRejectsMalformedEndpoints', 0, () => {
+      for (const info of builtinProviderInfos()) {
+        const profile: ProviderProfile = { id: 'saved-' + info.id, name: info.name, presetId: info.id,
+          protocol: info.protocol, baseUrl: 'http://192.168.1.10:11434/v1', models: ['local-model'],
+          enabled: true, noApiKey: true, credentialAlias: '' };
+        const provider = profileProvider(profile, effects);
+        expect(provider.endpoint(profile.baseUrl).startsWith(profile.baseUrl)).assertTrue();
+        for (const invalid of ['', 'ftp://host/v1', 'http://user:pass@host/v1', 'http://host/v1?key=x', 'http://host/v1#key']) {
+          rejects(() => { provider.endpoint(invalid); });
+        }
+      }
+    });
+    it('initializesTheProductionEditorFromPresets', 0, () => {
+      const infos = builtinProviderInfos(); const editor = new ProviderEditorViewModel();
+      editor.baseUrl = 'https://old.example/v1'; editor.models = 'old-model';
+      editor.reset(undefined, infos.find((info) => info.id === 'ollama'));
+      expect(editor.baseUrl).assertEqual(''); expect(editor.models).assertEqual(''); expect(editor.noApiKey).assertTrue();
+      editor.reset(undefined, infos.find((info) => info.id === 'dashscope'));
+      expect(editor.baseUrl).assertEqual('https://dashscope.aliyuncs.com/compatible-mode/v1');
+      expect(editor.modelList[0]).assertEqual('qwen-plus'); expect(editor.noApiKey).assertFalse();
+      editor.reset(undefined, infos.find((info) => info.id === 'openai-compatible'));
+      expect(editor.baseUrl).assertEqual(''); expect(editor.models).assertEqual('');
     });
     it('replaysVendorReasoningOnlyWhenTheAdapterOptsIn', 0, () => {
       const messages: ModelMessage[] = [

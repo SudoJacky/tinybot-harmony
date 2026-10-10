@@ -12,7 +12,7 @@ import { ToolApproval } from './ToolApproval';
 interface SecretReceipt { status: string; values?: Record<string, string>; }
 
 export async function prepareNativeMcp(server: McpServer, request: McpRequest, approval: ToolApproval,
-  context: common.UIAbilityContext | undefined, cancellation: Cancellation): Promise<McpServer> {
+  context: common.UIAbilityContext | undefined, cancellation: Cancellation, confirm: boolean = true): Promise<McpServer> {
   const result = JSON.parse(JSON.stringify(server)) as McpServer;
   let alias = '';
   try {
@@ -29,7 +29,7 @@ export async function prepareNativeMcp(server: McpServer, request: McpRequest, a
       result.credentialAlias = alias; result.authType = undefined;
     } else if (request.auth === 'oauth') {
       if (!context) { throw new Error(t('无法打开系统浏览器。')); }
-      await approval.request(t('连接 MCP：{0}', [server.name]), server.url + '\n' + t('将在浏览器中完成 OAuth 授权。'), cancellation);
+      if (confirm) { await approval.request(t('连接 MCP：{0}', [server.name]), server.url + '\n' + t('将在浏览器中完成 OAuth 授权。'), cancellation); }
       alias = await McpOAuth.login(server, context, request.clientId || '', cancellation);
       result.credentialAlias = alias; result.authType = 'oauth';
     }

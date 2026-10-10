@@ -1,3 +1,4 @@
+import { WorkspaceEntry, WorkspaceFiles, WorkspaceListing, WorkspaceText, WorkspaceWrite } from '../main/ets/services/WorkspaceFiles';
 import { describe, expect, it } from '@ohos/hypium';
 import { AgentStep, AgentTurn, ModelTurn, ToolCall, ToolDefinition, ModelMessage, validateSteps } from '../main/ets/model/Agent';
 import { emptyData, parseAppData, requestHistory } from '../main/ets/model/Conversation';
@@ -7,7 +8,7 @@ import { ModelSession, ModelRequestOptions } from '../main/ets/services/provider
 import { toolPreview } from '../main/ets/model/ToolPresentation';
 import { ChatStream } from '../main/ets/services/ChatStream';
 import { chatRequest } from '../main/ets/services/providers/ChatCompletionsProtocol';
-import { WorkspaceFiles, WorkspaceTools, workspaceRelativePath } from '../main/ets/services/WorkspaceTools';
+import { WorkspaceTools, workspaceRelativePath } from '../main/ets/services/WorkspaceTools';
 
 const DONE = 'data: [DONE]\n\n';
 const FINISH_TOOLS = 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n';
@@ -80,26 +81,26 @@ class MemoryFiles implements WorkspaceFiles {
   calls: string[] = [];
   afterWrite?: () => void;
 
-  async list(path: string, cancellation: Cancellation): Promise<string> {
+  async list(path: string, cancellation: Cancellation): Promise<WorkspaceListing> {
     cancellation.check();
     this.calls.push('list:' + path);
-    return JSON.stringify(Array.from(this.values.keys()));
+    return { path: path, entries: Array.from(this.values.keys()).map((name): WorkspaceEntry => ({ name: name, kind: 'file' })), truncated: false };
   }
 
-  async read(path: string, cancellation: Cancellation): Promise<string> {
+  async read(path: string, cancellation: Cancellation): Promise<WorkspaceText> {
     cancellation.check();
     this.calls.push('read:' + path);
     const value = this.values.get(path);
     if (value === undefined) { throw new Error('file missing'); }
-    return JSON.stringify({ content: value });
+    return { path: path, content: value };
   }
 
-  async write(path: string, content: string, cancellation: Cancellation): Promise<string> {
+  async write(path: string, content: string, cancellation: Cancellation): Promise<WorkspaceWrite> {
     cancellation.check();
     this.calls.push('write:' + path);
     this.values.set(path, content);
     this.afterWrite?.();
-    return JSON.stringify({ written: true });
+    return { path: path, bytes: content.length, written: true };
   }
 }
 
@@ -250,7 +251,7 @@ export default function agentTests(): void {
       expect(JSON.stringify(durable)).assertEqual(JSON.stringify(result.steps.flatMap((step) => step.tools)));
       expect(model.requests[1][1].toolCalls?.[0].id).assertEqual('write');
       expect(model.requests[1][2].toolCallId).assertEqual('write');
-      expect(model.requests[2][4].content).assertEqual('{"content":"你好🌱"}');
+      expect(model.requests[2][4].content).assertEqual('{"path":"notes/a.txt","content":"你好🌱"}');
       expect(model.schemas[0].some((tool) => tool.function.name === 'write_file')).assertTrue();
       expect(model.schemas[0].some((tool) => tool.function.name === 'search_file_content')).assertTrue();
     });

@@ -1,8 +1,6 @@
 import { t } from '../../model/I18n';
 import { applyReasoningEffort } from './ReasoningRequest';
-import { Attachments } from '../Attachments';
 import { UsageStream, RequestUsage } from '../../model/Usage';
-import { UsageLedger } from '../UsageLedger';
 import { http } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -13,7 +11,7 @@ import { Cancellation, RunCancelledError } from '../Cancellation';
 import { ChatStream } from '../ChatStream';
 import { ModelStream, ResponsesStream, AnthropicStream } from './EventStreams';
 import { protocolUrl, protocolHeaders, responsesRequest, anthropicRequest, ResponsesRequest } from './WireProtocols';
-import { ModelProvider, ProviderRequest } from './Provider';
+import { ModelProvider, ProviderRequest, ProviderEffects } from './Provider';
 import { ChatCompletionsOptions, chatRequest, ChatRequest } from './ChatCompletionsProtocol';
 import { ContextOverflowError, httpProviderError } from './ProviderErrors';
 
@@ -23,9 +21,11 @@ const STREAM_IDLE_TIMEOUT_MS: number = 120000;
 export class ProtocolProvider implements ModelProvider {
   readonly info: ProviderInfo;
   private options: ChatCompletionsOptions;
+  private effects: ProviderEffects;
 
-  constructor(info: ProviderInfo, options: ChatCompletionsOptions = {}) {
+  constructor(info: ProviderInfo, effects: ProviderEffects, options: ChatCompletionsOptions = {}) {
     this.info = copyProviderInfo(info);
+    this.effects = effects;
     this.options = { allowHttp: options.allowHttp, replayReasoning: options.replayReasoning };
   }
 
@@ -37,7 +37,7 @@ export class ProtocolProvider implements ModelProvider {
     onText: (text: string) => void, onReasoning?: (text: string) => void): Promise<ModelTurn> {
     cancellation.check();
     const endpoint = this.endpoint(input.baseUrl);
-    const messages = await Attachments.hydrate(input.messages);
+    const messages = await this.effects.hydrate(input.messages);
     cancellation.check();
     const usage = new UsageStream(); let firstToken: number | undefined = undefined;
     const receiveText = (text: string): void => { if (text && firstToken === undefined) { firstToken = Date.now(); } onText(text); };
@@ -52,7 +52,7 @@ export class ProtocolProvider implements ModelProvider {
     const request = http.createHttp();
     const startedAt = Date.now();
     const usageId = util.generateRandomUUID();
-    UsageLedger.record({ id: usageId, provider: this.info.id, model: input.model, startedAt: startedAt, durationMs: 0,
+    this.effects.recordUsage({ id: usageId, provider: this.info.id, model: input.model, startedAt: startedAt, durationMs: 0,
       status: 'running_or_unknown', origin: input.usageOrigin });
     hilog.info(0x0000, 'TinybotNetwork', 'Request start provider=%{public}s protocol=%{public}s model=%{public}s messages=%{public}d tools=%{public}d',
       this.info.id, this.info.protocol, input.model, input.messages.length, input.tools.length);
@@ -77,7 +77,7 @@ export class ProtocolProvider implements ModelProvider {
         const record: RequestUsage = { id: usageId, provider: this.info.id, model: input.model, origin: input.usageOrigin,
           startedAt: startedAt, durationMs: Date.now() - startedAt, firstTokenMs: firstToken === undefined ? undefined : firstToken - startedAt,
           status: error ? cancellation.cancelled ? 'cancelled' : 'failed' : 'complete', tokens: usage.result() };
-        UsageLedger.record(record); if (result) { result.usage = record; }
+        this.effects.recordUsage(record); if (result) { result.usage = record; }
         hilog.info(0x0000, 'TinybotNetwork', 'Request ended elapsedMs=%{public}d bytes=%{public}d http=%{public}d failed=%{public}s',
           Date.now() - startedAt, receivedBytes, responseCode, (error !== undefined).toString());
         if (error instanceof ContextOverflowError) {

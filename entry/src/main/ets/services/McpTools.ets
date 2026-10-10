@@ -3,7 +3,7 @@ import { ToolCall, ToolDefinition } from '../model/Agent';
 import { McpServer } from '../model/Productivity';
 import { AgentTools } from './AgentLoop';
 import { Cancellation } from './Cancellation';
-import { McpClient, McpToolInfo } from './McpClient';
+import { McpConnection, McpConnectionFactory, McpToolInfo } from './McpConnection';
 import { ToolApproval } from './ToolApproval';
 
 interface ServerSummary { id: string; name: string; }
@@ -11,12 +11,13 @@ interface McpArguments { server: string; tool?: string; arguments?: string; quer
 export class McpTools implements AgentTools {
   private servers: McpServer[];
   private approval: ToolApproval;
-  private clients: Map<string, McpClient> = new Map<string, McpClient>();
+  private clients: Map<string, McpConnection> = new Map<string, McpConnection>();
   private catalog: Map<string, McpToolInfo[]> = new Map<string, McpToolInfo[]>();
   private versions: Map<string, string> = new Map<string, string>();
+  private connect: McpConnectionFactory;
   private live?: () => McpServer[];
-  constructor(servers: McpServer[], approval: ToolApproval, live?: () => McpServer[]) {
-    this.servers = servers.filter((item) => item.enabled); this.approval = approval; this.live = live;
+  constructor(servers: McpServer[], approval: ToolApproval, connect: McpConnectionFactory, live?: () => McpServer[]) {
+    this.connect = connect; this.servers = servers.filter((item) => item.enabled); this.approval = approval; this.live = live;
   }
   definitions(): ToolDefinition[] {
     if (!this.live && !this.servers.length) { return []; }
@@ -47,7 +48,7 @@ export class McpTools implements AgentTools {
       this.clients.delete(server.id); this.catalog.delete(server.id); this.versions.set(server.id, version);
     }
     let client = this.clients.get(server.id);
-    if (!client) { client = new McpClient(server); this.clients.set(server.id, client); }
+    if (!client) { client = this.connect(server); this.clients.set(server.id, client); }
     if (call.function.name === 'mcp_list_tools' || call.function.name === 'mcp_search_tools') {
       const tools = await client.list(cancellation);
       const words = (args.query || '').toLowerCase().split(/\s+/).filter((item) => !!item);

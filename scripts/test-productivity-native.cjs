@@ -128,6 +128,13 @@ function readSavedUsage(root) {
   const dir=nativePath(root+'/usage-records');const manifest=JSON.parse(fs.readFileSync(path.join(dir,'index.json'),'utf8'));
   return Array.from({length:manifest.pages},(_,i)=>JSON.parse(fs.readFileSync(path.join(dir,i+'.json'),'utf8'))).flat();
 }
+const providerEffects = { hydrate: messages => Attachments.hydrate(messages),
+  recordUsage: record => load(path.join(source, 'services/UsageLedger')).UsageLedger.record(record) };
+function idleRuntime(vault) {
+  const { AgentRuntime } = load(path.join(source, 'services/AgentRuntime'));
+  const { ProviderRegistry } = load(path.join(source, 'services/providers/ProviderRegistry'));
+  return new AgentRuntime(new ProviderRegistry(), vault);
+}
 let completedTests = 0;
 async function test(name, run) { await run(); completedTests++; console.log('PASS '+name); }
 (async () => {
@@ -148,6 +155,52 @@ async function test(name, run) { await run(); completedTests++; console.log('PAS
     data.threads[0].title='second'; const b=store.save(data); data.threads[0].title='not saved'; await Promise.all([a,b]);
     assert.equal((await new ConversationStore(fixture).load()).threads[0].title,'second');
   });
+  await test('partial saves skip unrelated history and preserve queued or failed changes', async () => {
+    const data = await store.load();
+    data.threads.push({ id: 'inactive', title: 'Inactive', updatedAt: 1, messages: [] });
+    await store.save(data);
+    const active = data.threads[0], inactive = data.threads[1];
+    Object.defineProperty(inactive, 'messages', { configurable: true, enumerable: true,
+      get() { throw Error('Unchanged history was traversed'); } });
+    active.title = 'partial';
+    const saving = store.save(data, [active.id]);
+    active.title = 'later mutation';
+    await saving;
+    assert.equal((await new ConversationStore(fixture).load()).threads[0].title, 'partial');
+    Object.defineProperty(inactive, 'messages', { configurable: true, enumerable: true, writable: true, value: [] });
+    active.title = 'queued active'; const first = store.save(data, [active.id]);
+    inactive.title = 'queued inactive'; const second = store.save(data, [inactive.id]);
+    await Promise.all([first, second]);
+    let restored = await new ConversationStore(fixture).load();
+    assert.equal(restored.threads[0].title, 'queued active'); assert.equal(restored.threads[1].title, 'queued inactive');
+    active.title = 'retry active'; failManifest = true;
+    await assert.rejects(store.save(data, [active.id]), /injected/); failManifest = false;
+    inactive.title = 'retry inactive'; await store.save(data, [inactive.id]);
+    restored = await new ConversationStore(fixture).load();
+    assert.equal(restored.threads[0].title, 'retry active'); assert.equal(restored.threads[1].title, 'retry inactive');
+    const rejectedCandidate = structuredClone(data); rejectedCandidate.threads[1].title = 'rolled back';
+    failManifest = true; await assert.rejects(store.save(rejectedCandidate), /injected/); failManifest = false;
+    active.title = 'after rollback'; await store.save(data, [active.id]);
+    restored = await new ConversationStore(fixture).load();
+    assert.equal(restored.threads[0].title, 'after rollback'); assert.equal(restored.threads[1].title, 'retry inactive');
+  });
+  await test('partial saves retain recovery of inactive conversations', async () => {
+    const data = await store.load();
+    data.threads[1].messages = [
+      { id: 'recovered-user', role: 'user', content: 'hello', status: 'complete', error: '' },
+      { id: 'recovered-assistant', role: 'assistant', content: 'partial', status: 'generating', error: '' }
+    ];
+    await store.save(data);
+    const recoveredStore = new ConversationStore(fixture), recovered = await recoveredStore.load();
+    assert.notEqual(recovered.threads[1].messages[1].status, 'generating');
+    recovered.threads[0].title = 'save after recovery';
+    await recoveredStore.save(recovered, [recovered.threads[0].id]);
+    const manifest = JSON.parse(fs.readFileSync(path.join(fixture, 'sessions-v2/index.json'), 'utf8'));
+    const inactiveFile = manifest.threads.find(item => item.id === recovered.threads[1].id).file;
+    const persisted = JSON.parse(fs.readFileSync(path.join(fixture, 'sessions-v2', inactiveFile), 'utf8'));
+    assert.equal(persisted.messages[1].status, recovered.threads[1].messages[1].status);
+    assert.equal(persisted.messages[1].error, recovered.threads[1].messages[1].error);
+  });
   await test('managed text attachments hydrate without mutating persisted history',async()=>{
     Attachments.configure(fixture);const incoming=path.join(fixture,'input.txt');fs.writeFileSync(incoming,'材料内容');
     const item=await Attachments.import(incoming,false);const messages=[{role:'user',content:'总结',attachments:[item]}];
@@ -157,8 +210,8 @@ async function test(name, run) { await run(); completedTests++; console.log('PAS
   await test('empty workspace files round-trip with device encoder behavior',async()=>{
     fs.mkdirSync(nativePath('/sandbox/workspace/thread'),{recursive:true});
     const files=new NativeWorkspaceFiles('/sandbox/workspace/thread'), signal=new Cancellation();
-    await files.write('empty.md','',signal);assert.equal(JSON.parse(await files.read('empty.md',signal)).content,'');
-    await files.write('empty.md','# note',signal);assert.equal(JSON.parse(await files.read('empty.md',signal)).content,'# note');
+    await files.write('empty.md','',signal);assert.equal((await files.read('empty.md',signal)).content,'');
+    await files.write('empty.md','# note',signal);assert.equal((await files.read('empty.md',signal)).content,'# note');
     await assert.rejects(files.checkedPath('../escape'));
   });
   await test('MCP initializes, negotiates session headers, reads JSON/SSE and paginates',async()=>{
@@ -177,7 +230,7 @@ async function test(name, run) { await run(); completedTests++; console.log('PAS
       else if(b.method==='notifications/initialized')req.callback(null,202);
       else if(b.method==='tools/list')respond(req,{tools:[{name:'read',inputSchema:{type:'object'}}]});
       else respond(req,{content:[{type:'text',text:'done'}]},true);};
-    const approval=new ToolApproval(),tools=new McpTools([server],approval),signal=new Cancellation();
+    const approval=new ToolApproval(),tools=new McpTools([server],approval, server => new McpClient(server)),signal=new Cancellation();
     const call=(name,args)=>({id:'c',type:'function',function:{name,arguments:JSON.stringify(args)}});
     const action=call('mcp_call',{server:'s',tool:'read',arguments:'{}'});
     await assert.rejects(tools.execute(action,signal),/mcp_list_tools/);
@@ -200,7 +253,7 @@ async function test(name, run) { await run(); completedTests++; console.log('PAS
     const files=new NativeWorkspaceFiles(root),signal=new Cancellation();await files.write('note.txt','after',signal);
     assert.equal((await new NativeWorkspaceFiles(root).baseline('note.txt')).content,'before');
     await files.write('note.txt','later',signal);assert.equal((await files.baseline('note.txt')).content,'before');
-    assert.ok(!JSON.parse(await files.list('.',signal)).entries.some(e=>e.name.startsWith('.tinybot-')));
+    assert.ok(!(await files.list('.',signal)).entries.some(e=>e.name.startsWith('.tinybot-')));
     await assert.rejects(files.restore('note.txt','after'),/变化/);await files.restore('note.txt','later');
     assert.equal(fs.readFileSync(nativePath(root+'/note.txt'),'utf8'),'before');assert.equal(await files.baseline('note.txt'),undefined);
     await files.write('new.txt','new',signal);await files.restore('new.txt','new');assert.ok(!fs.existsSync(nativePath(root+'/new.txt')));
@@ -262,7 +315,7 @@ async function test(name, run) { await run(); completedTests++; console.log('PAS
     const vault={read:async()=>{throw Error('restore must not read credentials');},write:async()=>{throw Error('restore must not write credentials');},remove:async()=>{throw Error('restore must not remove credentials');}};
     const resources={createId:()=>crypto.randomUUID(),ensureWorkspace:async()=>{},configureProviders:()=>{},reportError:()=>{},
       tools:()=>({definitions:()=>[],execute:async()=>{throw Error('restore must not execute tools');}})};
-    const session=new SessionService(repository,{},vault,resources);await session.initialize();
+    const session=new SessionService(repository,idleRuntime(vault),vault,resources);await session.initialize();
     const local=session.snapshot();assert.equal(await session.importSnapshot(restored),true,session.state.error);
     const merged=await repository.load();assert.deepEqual(merged.providerProfiles,local.providerProfiles);assert.deepEqual(merged.config,local.config);
     assert.equal(merged.threads.length,1,'restoring an existing conversation must not duplicate it');assert.equal(merged.threads[0].modelRef.providerId,'provider');
@@ -292,7 +345,7 @@ async function test(name, run) { await run(); completedTests++; console.log('PAS
     const repository=new ConversationStore(nativePath(root));
     const local=JSON.parse(JSON.stringify(data));local.threads=local.threads.slice(0,1);local.threads[0].title='edited locally';
     local.productivity.templates.find(t=>t.id==='custom').content='edited locally';local.productivity.memories=[];
-    await repository.save(local);const session=new SessionService(repository,{},vault,resources);await session.initialize();
+    await repository.save(local);const session=new SessionService(repository,idleRuntime(vault),vault,resources);await session.initialize();
     fs.writeFileSync(nativePath(root+'/workspace/chat-0/note.txt'),'local file');
     fs.writeFileSync(nativePath(root+'/attachments/'+attachment.path),'edited');
     const prepared=await readBackupFile(context,backup,session.snapshot());
@@ -314,7 +367,7 @@ async function test(name, run) { await run(); completedTests++; console.log('PAS
     }
     // Re-export/reload keeps identities and therefore remains idempotent after restart.
     const exportedAgain=await createBackupFile(context,session.snapshot());
-    const restarted=new SessionService(repository,{},vault,resources);await restarted.initialize();
+    const restarted=new SessionService(repository,idleRuntime(vault),vault,resources);await restarted.initialize();
     assert.equal(await restarted.importSnapshot(await readBackupFile(context,exportedAgain,restarted.snapshot())),true);
     assert.equal(restarted.snapshot().threads.length,3);
     // An old regenerated ID must not duplicate an identical template. Same name alone is insufficient.
@@ -555,7 +608,7 @@ async function test(name, run) { await run(); completedTests++; console.log('PAS
         request.emit('dataEnd');
       };
       let text='',reasoning='';
-      const provider=new ProtocolProvider({id:scenario,name:scenario,protocol,defaultBaseUrl:input.baseUrl,defaultModel:input.model});
+      const provider=new ProtocolProvider({id:scenario,name:scenario,protocol,defaultBaseUrl:input.baseUrl,defaultModel:input.model}, providerEffects);
       const turn=await provider.stream(input,new Cancellation(),delta=>{text+=delta;},delta=>{reasoning+=delta;});
       assert.equal(text,answer);assert.equal(reasoning,thought);assert.equal(turn.reasoningContent,thought);assert.equal(turn.usage.status,'complete');
       assert.equal(turn.usage.tokens.output,42);
@@ -582,7 +635,7 @@ async function test(name, run) { await run(); completedTests++; console.log('PAS
     const {ThreadViewModel}=load(path.join(source,'viewmodel/SessionViewModels'));
     const {buildTimeline}=load(path.join(source,'model/ProcessPresentation'));
     const registry=new ProviderRegistry();
-    registry.register(new ProtocolProvider({id:'responses-thinking',name:'Responses',protocol:'responses',defaultBaseUrl:'https://fixture.invalid/v1',defaultModel:'gpt-5.2'}));
+    registry.register(new ProtocolProvider({id:'responses-thinking',name:'Responses',protocol:'responses',defaultBaseUrl:'https://fixture.invalid/v1',defaultModel:'gpt-5.2'}, providerEffects));
     for(const style of ['summary','content']) {
       const turn={content:'',steps:[]},deltas=[];
       const data=model.emptyData();data.activeThreadId='responses-'+style;
@@ -625,7 +678,7 @@ async function test(name, run) { await run(); completedTests++; console.log('PAS
   });
   await test('provider keeps active streams beyond three minutes and stops idle or cancelled streams', async () => {
     const {ProtocolProvider}=load(path.join(source,'services/providers/ProtocolProvider'));
-    const provider=new ProtocolProvider({id:'test',name:'Test',protocol:'chat-completions',defaultBaseUrl:'https://fixture.invalid/v1',defaultModel:'test'});
+    const provider=new ProtocolProvider({id:'test',name:'Test',protocol:'chat-completions',defaultBaseUrl:'https://fixture.invalid/v1',defaultModel:'test'}, providerEffects);
     const input={model:'test',baseUrl:'https://fixture.invalid/v1',apiKey:'',messages:[{role:'user',content:'hello'}],tools:[],usageOrigin:{threadId:'trace-thread',turnId:'trace-turn',purpose:'conversation',step:2}};
     const {UsageLedger}=load(path.join(source,'services/UsageLedger'));
     const recordsBefore=new Set(UsageLedger.list().map(item=>item.id));

@@ -4,6 +4,7 @@ import { util } from '@kit.ArkTS';
 import { McpServer } from '../model/Productivity';
 import { Cancellation } from './Cancellation';
 import { McpOAuth } from './McpOAuth';
+import { McpConnection, McpToolInfo } from './McpConnection';
 
 interface RpcRequest { jsonrpc: string; id?: number; method: string; params?: Object; }
 interface RpcError { code: number; message: string; }
@@ -13,7 +14,6 @@ interface InitializeParams { protocolVersion: string; capabilities: Record<strin
 interface CursorParams { cursor?: string; }
 interface CallParams { name: string; arguments: Object; }
 interface InitializeResult { protocolVersion: string; }
-export interface McpToolInfo { name: string; description?: string; inputSchema: Object; }
 interface ToolsResult { tools: McpToolInfo[]; nextCursor?: string; }
 
 export function mcpResponse(text: string, id: number): RpcResponse | undefined {
@@ -28,7 +28,7 @@ export function mcpResponse(text: string, id: number): RpcResponse | undefined {
 }
 
 // One client per server per run. No retry of tool calls with uncertain side effects.
-export class McpClient {
+export class McpClient implements McpConnection {
   private server: McpServer;
   private session: string = '';
   private version: string = '2025-06-18';

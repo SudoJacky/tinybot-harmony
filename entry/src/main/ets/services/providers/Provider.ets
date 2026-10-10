@@ -1,7 +1,12 @@
 import { ModelMessage, ModelTurn, ToolDefinition } from '../../model/Agent';
 import { ProviderInfo } from '../../model/Provider';
 import { Cancellation } from '../Cancellation';
-import { UsageOrigin } from '../../model/Usage';
+import { UsageOrigin, RequestUsage } from '../../model/Usage';
+
+export interface ProviderEffects {
+  hydrate: (messages: ModelMessage[]) => Promise<ModelMessage[]>;
+  recordUsage: (record: RequestUsage) => void;
+}
 
 export interface CredentialReader {
   read(alias: string): Promise<string>;
