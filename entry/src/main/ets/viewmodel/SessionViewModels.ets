@@ -103,7 +103,7 @@ export class ThreadViewModel {
   pendingInputs: PendingInput[] = [];
   queuePaused: boolean = false;
   constructor(data: ThreadData) { this.update(data); }
-  update(data: ThreadData): void {
+  updateMetadata(data: ThreadData): void {
     this.memoryReview = data.memoryReview;
     this.reasoningEffort = data.reasoningEffort || 'default';
     this.references = data.references || [];
@@ -114,6 +114,9 @@ export class ThreadViewModel {
     this.attachments = data.attachments || [];
     this.draft = data.draft || ''; this.compaction = data.compaction; this.modelRef = data.modelRef;
     this.pendingInputs = data.pendingInputs || []; this.queuePaused = data.queuePaused === true;
+  }
+  update(data: ThreadData): void {
+    this.updateMetadata(data);
     const existing = new Map<string, MessageViewModel>();
     for (const message of this.messages) { existing.set(message.id, message); }
     this.messages = data.messages.map((message: MessageData) => {

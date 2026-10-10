@@ -54,16 +54,3 @@ export function builtinProviderInfos(): ProviderInfo[] {
       apiKeyUrl: 'https://platform.claude.com/settings/keys' }
   ];
 }
-
-export interface ProviderDraft {
-  baseUrl: string;
-  model: string;
-  noApiKey: boolean;
-}
-
-export function providerDraft(info: ProviderInfo, currentUrl: string, currentModel: string): ProviderDraft {
-  // Custom endpoints retain the draft. Presets replace it, including Ollama's intentionally empty fields.
-  return { baseUrl: info.id === LEGACY_PROVIDER_ID ? currentUrl : info.defaultBaseUrl,
-    model: info.id === LEGACY_PROVIDER_ID ? currentModel : info.defaultModel,
-    noApiKey: info.noApiKey === true };
-}

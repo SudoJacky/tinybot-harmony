@@ -26,7 +26,6 @@ class FakeMcp {
   async list(cancel) { cancel.check(); return [{ name: 'echo', description: 'Echo text', inputSchema: { type: 'object' } }]; }
   async call(name, args, cancel) { cancel.check(); calls.push({ server: this.server, name, args }); return { text: args.text }; }
 }
-stub('services/McpClient', { McpClient: FakeMcp });
 stub('services/CredentialStore', { CredentialStore: class {
   async write(k, v) { nativeSecrets.set(k, v); } async read(k) { return nativeSecrets.get(k) || ''; } async remove(k) { nativeSecrets.delete(k); }
 } });
@@ -70,13 +69,13 @@ async function fixture(data = seed()) {
   const approval = { request: async (_title, _detail, cancel) => cancel.check() };
   const resources = { createId: () => 'id-' + ++ids, ensureWorkspace: async () => {}, configureProviders: () => {},
     tools: (_id, extensions, selected, extras, _attachments, live) => {
-      liveTools = new ToolSet([new SkillTools(extensions.skills, selected, () => live.skills()), new McpTools(extras.servers, approval, () => live.servers())]); return liveTools;
+      liveTools = new ToolSet([new SkillTools(extensions.skills, selected, () => live.skills()), new McpTools(extras.servers, approval, server => new FakeMcp(server), () => live.servers())]); return liveTools;
     }, reportError: s => errors.push(s), reportResources: s => logs.push(s),
     installSkill: async source => ({ ...parseSkill(document('downloaded')), source: { url: source, installedAt: 1, modified: false } }),
     prepareMcp: async (server, request, cancel) => { cancel.check(); if (request.auth === 'bearer') { server.credentialAlias = 'secret-' + ++ids; await keys.write(server.credentialAlias, 'PRIVATE-TOKEN'); } return server; },
     testMcp: async (_server, cancel) => { cancel.check(); return 1; } };
   const session = new SessionService(repo, new AgentRuntime(registry, keys), keys, resources); await session.initialize();
-  return { session, repo, provider, requests, resources, errors, logs, secrets, tools: () => liveTools,
+  return { session, repo, provider, requests, resources, errors, logs, secrets, keys, tools: () => liveTools,
     send: async script => { let i = 0; provider.respond = async () => i < script.length ? reply('', [script[i++]]) : reply(); session.setDraft('Manage my resources'); await session.send(); } };
 }
 const receipts = f => f.requests.flatMap(r => r.messages.filter(m => m.role === 'tool').map(m => m.content));
@@ -156,6 +155,35 @@ async function main() {
   await m.send([call('mcp_manage',{action:'disable',id:serverId}),call('mcp_list_tools',{server:serverId}),call('mcp_manage',{action:'enable',id:serverId}),call('mcp_list_tools',{server:serverId}),call('mcp_manage',{action:'remove',id:serverId})]);
   assert.equal(m.session.snapshot().productivity.servers.length,0);
   console.log('PASS MCP save/probe/discover/call in one turn, failure rollback, stale schema invalidation and credential cleanup');
+
+  const editor = await fixture();
+  const edit = request => editor.session.changeMcp(request, new Cancellation());
+  const created = await edit({ action: 'save', name: 'Editor', url: 'https://editor.example/mcp', auth: 'bearer', token: 'EDITOR-SECRET', verify: false });
+  const oldAlias = editor.session.snapshot().productivity.servers[0].credentialAlias;
+  assert.equal(editor.secrets.get(oldAlias), 'EDITOR-SECRET');
+  assert.ok(!editor.repo.saved.includes('EDITOR-SECRET'));
+  editor.keys.remove = async alias => { if (alias === oldAlias) throw Error('injected cleanup failure'); editor.secrets.delete(alias); };
+  const replaced = await edit({ action: 'save', id: created.id, name: 'Editor', url: 'https://editor.example/mcp', auth: 'bearer', token: 'NEW-SECRET', verify: false });
+  assert.match(replaced.warning, /Configuration saved.*cleanup failure/);
+  assert.ok(editor.errors.some(message => message.includes('cleanup failure')));
+  const committedAlias = editor.session.snapshot().productivity.servers[0].credentialAlias;
+  assert.equal(editor.secrets.get(committedAlias), 'NEW-SECRET');
+  assert.equal((await editor.repo.load()).productivity.servers[0].credentialAlias, committedAlias);
+  const aliases = [...editor.secrets.keys()].sort();
+  editor.repo.beforeSave = async () => { throw Error('injected editor disk failure'); };
+  await assert.rejects(edit({ action: 'save', id: created.id, name: 'Editor', url: 'https://editor.example/mcp', auth: 'bearer', token: 'ROLLBACK-SECRET', verify: false }), /disk failure/);
+  assert.deepEqual([...editor.secrets.keys()].sort(), aliases);
+  assert.equal(editor.session.snapshot().productivity.servers[0].credentialAlias, committedAlias);
+  editor.repo.beforeSave = async () => {};
+  await assert.rejects(edit({ action: 'save', id: created.id, name: 'Editor', url: 'https://different.example/mcp', auth: 'keep', verify: false }), /same URL/);
+  const cancelledEditor = new Cancellation(); cancelledEditor.cancel();
+  await assert.rejects(editor.session.changeMcp({ action: 'remove', id: created.id }, cancelledEditor));
+  assert.equal(editor.session.snapshot().productivity.servers.length, 1);
+  editor.keys.remove = async alias => editor.secrets.delete(alias);
+  await edit({ action: 'remove', id: created.id });
+  assert.equal(editor.session.snapshot().productivity.servers.length, 0);
+  assert.ok(!editor.secrets.has(committedAlias));
+  console.log('PASS editor and chat share credential commit/rollback, cleanup warnings, scope checks and cancellation');
 
   const fetched = [], docs = new Map();
   const transport = { resolve: (ref,base) => new URL(ref,base).href, get: async (url,cancel) => { cancel.check(); fetched.push(url); const body = docs.get(url); if (body === undefined) throw Error('404 '+url); return {url,contentType:'text/plain',body}; } };

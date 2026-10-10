@@ -1,3 +1,4 @@
+import { ProviderEffects } from '../main/ets/services/providers/Provider';
 import { describe, expect, it } from '@ohos/hypium';
 import { ProviderEditorViewModel } from '../main/ets/viewmodel/ProviderEditorViewModel';
 import { defaultConfig, emptyData, parseAppData } from '../main/ets/model/Conversation';
@@ -158,7 +159,8 @@ export default function profileTests(): void {
     });
     it('usesTheSelectedProtocolRatherThanProviderNameOrBaseUrl', 0, () => {
       const value = profile('deepseek-proxy', 'anthropic-messages');
-      expect(profileProvider(value).endpoint(value.baseUrl)).assertEqual(value.baseUrl + '/messages');
+      const effects: ProviderEffects = { hydrate: async (messages) => messages, recordUsage: () => {} };
+      expect(profileProvider(value, effects).endpoint(value.baseUrl)).assertEqual(value.baseUrl + '/messages');
       expect(protocolUrl('responses', 'https://example.com/v1/responses/', false)).assertEqual('https://example.com/v1/responses');
       expect(protocolUrl('anthropic-messages', 'https://api.anthropic.com', false)).assertEqual('https://api.anthropic.com/v1/messages');
       rejects(() => protocolUrl('responses', 'https://example.com/v1/chat/completions', false));

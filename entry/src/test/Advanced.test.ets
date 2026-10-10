@@ -1,8 +1,9 @@
+import { WorkspaceFiles, WorkspaceListing, WorkspaceText, WorkspaceWrite } from '../main/ets/services/WorkspaceFiles';
 import { describe, expect, it } from '@ohos/hypium';
 import { parsePlan, parseForm, formResult, parseDataView, dataCsv, parseDelimited, lineDiff } from '../main/ets/model/RichArtifacts';
 import { UsageStream } from '../main/ets/model/Usage';
 import { defaultAssistantOptions, routeModel } from '../main/ets/model/AssistantOptions';
-import { replaceUnique, WorkspaceTools, WorkspaceFiles } from '../main/ets/services/WorkspaceTools';
+import { replaceUnique, WorkspaceTools } from '../main/ets/services/WorkspaceTools';
 import { Cancellation } from '../main/ets/services/Cancellation';
 import { ToolApproval } from '../main/ets/services/ToolApproval';
 import { InteractionTools } from '../main/ets/services/InteractionTools';
@@ -11,9 +12,9 @@ import { ModelReference } from '../main/ets/model/ProviderProfiles';
 function rejects(action: () => void): void { let rejected = false; try { action(); } catch (_) { rejected = true; } expect(rejected).assertTrue(); }
 function call(name: string, data: string): ToolCall { return { id: 'test', type: 'function', function: { name: name, arguments: JSON.stringify({ data: data }) } }; }
 class SearchFiles implements WorkspaceFiles {
-  async list(path: string, _signal: Cancellation): Promise<string> { return path ? '{"entries":[{"name":"b.txt","kind":"file"}],"truncated":false}' : '{"entries":[{"name":"sub","kind":"directory"},{"name":"a.txt","kind":"file"},{"name":"link","kind":"symlink"}],"truncated":false}'; }
-  async read(path: string, _signal: Cancellation): Promise<string> { return JSON.stringify({ content: path === 'a.txt' ? 'first\nTODO a' : 'TODO b' }); }
-  async write(_path: string, _content: string, _signal: Cancellation): Promise<string> { throw new Error('Unexpected write'); }
+  async list(path: string, _signal: Cancellation): Promise<WorkspaceListing> { return { path: path, entries: path ? [{ name: 'b.txt', kind: 'file' }] : [{ name: 'sub', kind: 'directory' }, { name: 'a.txt', kind: 'file' }, { name: 'link', kind: 'symlink' }], truncated: false }; }
+  async read(path: string, _signal: Cancellation): Promise<WorkspaceText> { return { path: path, content: path === 'a.txt' ? 'first\nTODO a' : 'TODO b' }; }
+  async write(_path: string, _content: string, _signal: Cancellation): Promise<WorkspaceWrite> { throw new Error('Unexpected write'); }
 }
 export default function advancedTests(): void {
   describe('Advanced', () => {

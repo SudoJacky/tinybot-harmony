@@ -1,3 +1,4 @@
+import { ProviderEffects } from './providers/Provider';
 import { ProductivityData, Attachment, McpServer } from '../model/Productivity';
 import { LiveResources, McpRequest } from '../model/ResourceManagement';
 import { SkillData } from '../model/Skills';
@@ -12,8 +13,8 @@ import { NativeOrchestrationExecutor } from './NativeOrchestrationExecutor';
 import { WebUiPreflight } from './WebUiPreflight';
 import { InteractionTools } from './InteractionTools';
 import { UsageLedger } from './UsageLedger';
-import { UsageRecorder, UsageToolActivity } from '../model/Usage';
-import { ContextDiagnostics } from '../model/Agent';
+import { UsageRecorder, UsageToolActivity, RequestUsage } from '../model/Usage';
+import { ModelMessage, ContextDiagnostics } from '../model/Agent';
 import { Cancellation } from './Cancellation';
 import { RuleTools } from './RuleTools';
 import { McpTools } from './McpTools';
@@ -39,6 +40,11 @@ import { ToolSet } from './ToolSet';
 import { profileProvider } from './providers/DefaultProviders';
 import { ProviderRegistry } from './providers/ProviderRegistry';
 
+class NativeProviderEffects implements ProviderEffects {
+  hydrate(messages: ModelMessage[]): Promise<ModelMessage[]> { return Attachments.hydrate(messages); }
+  recordUsage(record: RequestUsage): void { UsageLedger.record(record); }
+}
+
 class NativeUsageRecorder implements UsageRecorder {
   recordTool(id: string, activity: UsageToolActivity): void { UsageLedger.recordTool(id, activity); }
   recordContext(id: string, diagnostics: ContextDiagnostics): void {
@@ -63,7 +69,7 @@ class NativeSessionResources implements SessionResources {
       new SkillTools(extensions.skills, selected, live ? () => live.skills() : undefined), new InteractionTools(this.approval)];
     groups.push(new CodeExecutionTools(new NativeCodeExecutor()));
     if (extensions.webEnabled) { groups.push(new WebTools(new NativeWebTransport())); }
-    if (productivity) { groups.push(new McpTools(productivity.servers, this.approval, live ? () => live.servers() : undefined)); }
+    if (productivity) { groups.push(new McpTools(productivity.servers, this.approval, (server) => new McpClient(server), live ? () => live.servers() : undefined)); }
     const reference = productivity?.options?.image; const profile = this.profiles.find((item) => item.id === reference?.providerId && item.enabled);
     if (reference && profile && profile.models.includes(reference.modelId)) { groups.push(new ImageTools(profile, reference, this.workspaces.pathFor(id), this.approval, attachments)); }
     return new RuleTools(new ToolSet(groups), productivity?.options?.readOnly === true);
@@ -74,7 +80,7 @@ class NativeSessionResources implements SessionResources {
   configureProviders(profiles: ProviderProfile[]): void {
     this.profiles = JSON.parse(JSON.stringify(profiles)) as ProviderProfile[];
     for (const info of this.providers.list()) { this.providers.unregister(info.id); }
-    for (const profile of profiles) { this.providers.register(profileProvider(profile)); }
+    for (const profile of profiles) { this.providers.register(profileProvider(profile, new NativeProviderEffects())); }
   }
   reportError(message: string): void { hilog.error(0x0000, 'TinybotSession', '%{public}s', message); }
   reportMemory(message: string): void { hilog.info(0x0000, 'TinybotMemory', '%{public}s', message); }
@@ -82,8 +88,8 @@ class NativeSessionResources implements SessionResources {
   installSkill(source: string, paths: string[], cancellation: Cancellation): Promise<SkillData> {
     return new SkillInstaller(new NativeWebTransport()).install(source, paths, cancellation);
   }
-  prepareMcp(server: McpServer, request: McpRequest, cancellation: Cancellation): Promise<McpServer> {
-    return prepareNativeMcp(server, request, this.approval, this.context, cancellation);
+  prepareMcp(server: McpServer, request: McpRequest, cancellation: Cancellation, confirm: boolean = true): Promise<McpServer> {
+    return prepareNativeMcp(server, request, this.approval, this.context, cancellation, confirm);
   }
   async testMcp(server: McpServer, cancellation: Cancellation): Promise<number> { return (await new McpClient(server).list(cancellation)).length; }
 }

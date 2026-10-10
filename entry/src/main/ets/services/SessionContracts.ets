@@ -1,5 +1,6 @@
+import { TeamRun } from '../model/Team';
 import { ProductivityData, Attachment, McpServer } from '../model/Productivity';
-import { AppData, MessageData } from '../model/Conversation';
+import { AppData, MessageData, ThreadData } from '../model/Conversation';
 import { ProviderProfile } from '../model/ProviderProfiles';
 import { ExtensionSettings, SkillData } from '../model/Skills';
 import { LiveResources, McpRequest } from '../model/ResourceManagement';
@@ -9,7 +10,8 @@ import { ContextTokenItem } from '../model/ContextBreakdown';
 
 export interface SessionRepository {
   load(): Promise<AppData>;
-  save(data: AppData): Promise<void>;
+  // Capture call-time values synchronously. Omitted IDs mean a full save; otherwise unchanged threads are reused.
+  save(data: AppData, changedThreadIds?: string[]): Promise<void>;
 }
 
 export interface SessionResources {
@@ -18,7 +20,7 @@ export interface SessionResources {
   ensureWorkspace(threadId: string): Promise<void>;
   tools(threadId: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments?: Attachment[], live?: LiveResources): AgentTools;
   installSkill?(source: string, paths: string[], cancellation: Cancellation): Promise<SkillData>;
-  prepareMcp?(server: McpServer, request: McpRequest, cancellation: Cancellation): Promise<McpServer>;
+  prepareMcp?(server: McpServer, request: McpRequest, cancellation: Cancellation, confirm?: boolean): Promise<McpServer>;
   testMcp?(server: McpServer, cancellation: Cancellation): Promise<number>;
   reportResources?(message: string): void;
   configureProviders(profiles: ProviderProfile[]): void;
@@ -26,7 +28,7 @@ export interface SessionResources {
   reportMemory?(message: string): void;
 }
 
-export type SessionPhase = 'idle' | 'loading' | 'saving' | 'running' | 'compacting' | 'memory' | 'team';
+export type SessionPhase = 'idle' | 'loading' | 'saving' | 'running' | 'compacting' | 'memory';
 
 export interface SessionState {
   ready: boolean;
@@ -42,9 +44,11 @@ export interface SessionState {
 
 // Structural changes carry detached snapshots; text events carry only the changed prose.
 export interface SessionEvent {
-  kind: 'snapshot' | 'message' | 'text' | 'reasoning' | 'draft' | 'state';
+  kind: 'snapshot' | 'message' | 'text' | 'reasoning' | 'draft' | 'state' | 'thread' | 'teams';
   state: SessionState;
   data?: AppData;
+  thread?: ThreadData;
+  teams?: TeamRun[];
   threadId?: string;
   message?: MessageData;
   messageId?: string;

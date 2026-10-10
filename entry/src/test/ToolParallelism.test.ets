@@ -1,3 +1,4 @@
+import { WorkspaceFiles, WorkspaceListing, WorkspaceText, WorkspaceWrite } from '../main/ets/services/WorkspaceFiles';
 import { describe, expect, it } from '@ohos/hypium';
 import { AgentTurn, ModelMessage, ModelTurn, ToolCall, ToolDefinition, ToolExecutionMode } from '../main/ets/model/Agent';
 import { emptyData, parseAppData, requestHistory } from '../main/ets/model/Conversation';
@@ -5,7 +6,7 @@ import { AgentTools, LoopObserver, runAgentLoop } from '../main/ets/services/Age
 import { Cancellation } from '../main/ets/services/Cancellation';
 import { ModelSession } from '../main/ets/services/providers/Provider';
 import { TeamToolLane, TeamTools } from '../main/ets/services/TeamCoordinator';
-import { WorkspaceTools, WorkspaceFiles } from '../main/ets/services/WorkspaceTools';
+import { WorkspaceTools } from '../main/ets/services/WorkspaceTools';
 import { ToolSet } from '../main/ets/services/ToolSet';
 import { RuleTools } from '../main/ets/services/RuleTools';
 import { chatRequest } from '../main/ets/services/providers/ChatCompletionsProtocol';
@@ -75,9 +76,9 @@ class Fixture {
   }
 }
 class Files implements WorkspaceFiles {
-  async list(): Promise<string> { return '[]'; }
-  async read(): Promise<string> { return '{"content":"ok"}'; }
-  async write(): Promise<string> { return '{"written":true}'; }
+  async list(): Promise<WorkspaceListing> { return { path: '.', entries: [], truncated: false }; }
+  async read(): Promise<WorkspaceText> { return { path: 'file', content: 'ok' }; }
+  async write(): Promise<WorkspaceWrite> { return { path: 'file', bytes: 0, written: true }; }
 }
 async function errorOf(work: Promise<void>): Promise<string> {
   try { await work; return ''; } catch (error) { return (error as Error).message; }

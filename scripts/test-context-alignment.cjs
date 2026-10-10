@@ -20,8 +20,6 @@ const kits = {
 };
 function load(file) {
   file = path.resolve(file.endsWith('.ets') ? file : file + '.ets');
-  if (file === path.join(root, 'services/Attachments.ets')) return { Attachments: { hydrate: async messages => messages } };
-  if (file === path.join(root, 'services/UsageLedger.ets')) return { UsageLedger: { record: record => usage.push(record) } };
   if (cache.has(file)) return cache.get(file);
   const exports = {}; cache.set(file, exports);
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021, experimentalDecorators: true } }).outputText,
@@ -213,7 +211,7 @@ async function main() {
   assert.equal(attempts, 3); assert.equal(runtimeSummaries, 1); assert.equal(runtimeWrites, 1);
   console.log('PASS AgentRuntime forwards overflow recovery to the shared context boundary for worker runs');
 
-  const provider = new ProtocolProvider({ id: 'test', name: 'Test', protocol: 'chat-completions', defaultBaseUrl: 'https://test.invalid', defaultModel: 'test' });
+  const provider = new ProtocolProvider({ id: 'test', name: 'Test', protocol: 'chat-completions', defaultBaseUrl: 'https://test.invalid', defaultModel: 'test' }, { hydrate: async messages => messages, recordUsage: record => usage.push(record) });
   const request = { baseUrl: 'https://test.invalid', model: 'test', apiKey: 'secret', messages: [], tools: [] };
   const payload = JSON.stringify({ error: { code: 'context_length_exceeded', message: 'secret echoed by upstream' } });
   for (const order of ['status-first', 'status-last']) {

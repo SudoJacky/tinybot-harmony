@@ -3,13 +3,9 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { Cancellation } from './Cancellation';
-import { MAX_FILE_BYTES, WorkspaceFiles, workspaceRelativePath } from './WorkspaceTools';
+import { MAX_FILE_BYTES, workspaceRelativePath } from './WorkspaceTools';
 
-interface FileEntry {
-  name: string;
-  kind: string;
-}
-export interface FileBaseline { path: string; existed: boolean; content: string; }
+import { WorkspaceFiles, WorkspaceEntry, WorkspaceListing, WorkspaceText, WorkspaceWrite, FileBaseline } from './WorkspaceFiles';
 
 export class NativeWorkspaceFiles implements WorkspaceFiles {
   private root: string;
@@ -26,21 +22,21 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     return absolute;
   }
 
-  async list(path: string, cancellation: Cancellation): Promise<string> {
+  async list(path: string, cancellation: Cancellation): Promise<WorkspaceListing> {
     const absolute = await this.resolve(path, false, cancellation);
     await this.requireDirectory(absolute);
     cancellation.check();
     const names = await fs.listFile(absolute, { recursion: false, listNum: 201 });
-    const entries: FileEntry[] = [];
+    const entries: WorkspaceEntry[] = [];
     for (const name of names.slice(0, 200).sort().filter((name) => !name.startsWith('.tinybot-'))) {
       cancellation.check();
       const stat = await fs.lstat(absolute + '/' + name);
       entries.push({ name: name, kind: stat.isSymbolicLink() ? 'symlink' : stat.isDirectory() ? 'directory' : 'file' });
     }
-    return JSON.stringify({ path: path || '.', entries: entries, truncated: names.length > 200 });
+    return { path: path || '.', entries: entries, truncated: names.length > 200 };
   }
 
-  async read(path: string, cancellation: Cancellation): Promise<string> {
+  async read(path: string, cancellation: Cancellation): Promise<WorkspaceText> {
     const absolute = await this.resolve(path, false, cancellation);
     cancellation.check();
     const file = await fs.open(absolute, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
@@ -69,13 +65,13 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
         throw new Error(t("此文件不是可读取的文本文件。"));
       }
       cancellation.check();
-      return JSON.stringify({ path: path, content: content });
+      return { path: path, content: content };
     } finally {
       await fs.close(file);
     }
   }
 
-  async write(path: string, content: string, cancellation: Cancellation): Promise<string> {
+  async write(path: string, content: string, cancellation: Cancellation): Promise<WorkspaceWrite> {
     // Some device SDKs return undefined for encodeInto(''), despite its declared return type.
     const bytes = content.length === 0 ? new Uint8Array(0) : new util.TextEncoder().encodeInto(content);
     if (bytes.byteLength > MAX_FILE_BYTES || content.includes('\u0000')) {
@@ -110,7 +106,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
       cancellation.check();
       await fs.rename(temporary, absolute);
       committed = true;
-      return JSON.stringify({ path: path, bytes: bytes.byteLength, written: true });
+      return { path: path, bytes: bytes.byteLength, written: true };
     } catch (error) {
       if (!committed) {
         try {
@@ -139,7 +135,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     if (!await fs.access(directory)) { await fs.mkdir(directory); }
     await this.requireDirectory(directory);
     if (await this.baseline(path)) { return; }
-    const content = existed ? (JSON.parse(await this.read(path, cancellation)) as FileBaseline).content : '';
+    const content = existed ? (await this.read(path, cancellation)).content : '';
     const text = JSON.stringify({ path: path, existed: existed, content: content } as FileBaseline);
     const temporary = directory + '/pending-' + util.generateRandomUUID();
     const file = await fs.open(temporary, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.NOFOLLOW);
@@ -161,7 +157,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
   async restore(path: string, expected: string): Promise<void> {
     const baseline = await this.baseline(path);
     if (!baseline) { throw new Error(t("没有保存的修改基线。")); }
-    const current = JSON.parse(await this.read(path, new Cancellation())) as FileBaseline;
+    const current = await this.read(path, new Cancellation());
     if (current.content !== expected) { throw new Error(t("文件已变化，请重新打开并检查。")); }
     this.restoring = true;
     try {

@@ -1,9 +1,11 @@
+import { McpSettingsCommand, McpSettingsResult } from '../services/McpSettings';
+import { Cancellation } from '../services/Cancellation';
 import { t } from '../model/I18n';
 import { UiValues } from '../model/InteractiveUi';
 import { RequestUsage } from '../model/Usage';
 import { ContextTokenItem, draftBreakdown } from '../model/ContextBreakdown';
 import { referenceContext } from '../model/ThreadReferences';
-import { TeamMember, TeamPlan, TeamRun } from '../model/Team';
+import { TeamRun } from '../model/Team';
 import { Attachment, ProductivityData, defaultProductivity, expandTemplate } from '../model/Productivity';
 import { AppData, ModelConfig, defaultConfig, copyModelConfig } from '../model/Conversation';
 import { contextSettings } from '../model/ConversationContext';
@@ -68,14 +70,7 @@ export class ChatViewModel {
   private phase: SessionPhase = 'idle';
   teams: TeamRun[] = [];
   setTeamEnabled(enabled: boolean): Promise<boolean> { return this.requireSession().setTeamEnabled(enabled); }
-  get teamBusy(): boolean { return this.phase === 'team'; }
   get saving(): boolean { return this.phase === 'saving'; }
-  prepareTeam(goal: string, members: TeamMember[], concurrency: number): Promise<boolean> { return this.requireSession().prepareTeam(goal, members, concurrency); }
-  reviseTeam(id: string, revision: number, plan: TeamPlan): Promise<boolean> { return this.requireSession().reviseTeam(id, revision, plan); }
-  executeTeam(id: string, revision: number): Promise<void> { return this.requireSession().executeTeam(id, revision); }
-  retryTeamTask(id: string, revision: number, taskId: string): Promise<boolean> { return this.requireSession().retryTeamTask(id, revision, taskId); }
-  pauseTeam(): void { this.requireSession().pauseTeam(); }
-  stopTeam(): void { this.requireSession().stopTeam(); }
   private selectedConfig: ModelConfig = defaultConfig();
   private draftTimer: number = -1;
   private onOutput: () => void = () => {};
@@ -89,6 +84,11 @@ export class ChatViewModel {
   private project(event: SessionEvent): void {
     this.projectState(event.state);
     if (event.data) { this.projectData(event.data); }
+    if (event.kind === 'teams' && event.threadId === this.active.id) { this.teams = event.teams || []; }
+    if (event.kind === 'thread' && event.thread) {
+      this.threads.find((thread) => thread.id === event.threadId)?.updateMetadata(event.thread);
+      if (event.threadId === this.active.id) { this.draft = event.thread.draft || ''; }
+    }
     if (event.kind === 'draft' && event.threadId === this.active.id) {
       this.draft = event.content || ''; this.active.draft = this.draft;
     }
@@ -111,7 +111,7 @@ export class ChatViewModel {
         if (step) { step.content = event.stepContent || ''; }
       }
     }
-    if (['text', 'reasoning', 'message', 'snapshot'].includes(event.kind)) { this.onOutput(); }
+    if (['text', 'reasoning', 'message', 'snapshot', 'thread', 'teams'].includes(event.kind)) { this.onOutput(); }
   }
   private projectState(state: SessionState): void {
     this.phase = state.phase;
@@ -160,6 +160,7 @@ export class ChatViewModel {
   }
   filteredThreads(query: string, archived: boolean): ThreadViewModel[] { return matchingThreads(this.threads, query, archived) as ThreadViewModel[]; }
 
+  changeMcp(request: McpSettingsCommand, cancellation: Cancellation): Promise<McpSettingsResult> { return this.requireSession().changeMcp(request, cancellation); }
   saveProductivity(value: ProductivityData): Promise<boolean> { return this.requireSession().saveProductivity(value); }
   refreshMemoryContext(): Promise<boolean> { return this.requireSession().refreshMemoryContext(); }
   proposeMemory(messageId: string): Promise<string[]> { return this.requireSession().proposeMemory(messageId); }

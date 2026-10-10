@@ -12,13 +12,9 @@ import { exportFile, shareFile } from '../services/NativeActions';
 import { MarkdownView } from './MarkdownView';
 import { DataTable } from './DataTable';
 import { parseDelimited, lineDiff } from '../model/RichArtifacts';
-import { FileBaseline } from '../services/NativeWorkspaceFiles';
+import { FileBaseline, WorkspaceEntry } from '../services/WorkspaceFiles';
 import { Btn, Font, Radius, Space, systemInsets } from '../common/Theme';
 import { Banner, BottomBar, EmptyState } from '../common/Widgets';
-
-interface WorkspaceEntry { name: string; kind: string; }
-interface WorkspaceListing { entries: WorkspaceEntry[]; truncated: boolean; }
-interface WorkspaceText { content: string; }
 
 const IMAGE_FILE: RegExp = /\.(png|jpe?g|webp|gif|bmp)$/i;
 const MARKDOWN_FILE: RegExp = /\.(md|markdown)$/i;
@@ -67,7 +63,7 @@ export struct WorkspacePanel {
   private async refresh(): Promise<void> {
     if (!this.files) { return; }
     try {
-      const list = JSON.parse(await this.files.list(this.directory || '.', new Cancellation())) as WorkspaceListing;
+      const list = await this.files.list(this.directory || '.', new Cancellation());
       // Folders first, then files, each alphabetical.
       this.entries = list.entries.sort((a, b) => (a.kind === 'directory' ? 0 : 1) - (b.kind === 'directory' ? 0 : 1) || a.name.localeCompare(b.name));
       this.truncated = list.truncated; this.error = '';
@@ -84,7 +80,7 @@ export struct WorkspacePanel {
     this.reviewing = false; this.baseline = undefined; this.csv = []; this.selection = '';
     try {
       if (IMAGE_FILE.test(entry.name)) { this.imagePath = await this.files.checkedPath(path); }
-      else { this.content = (JSON.parse(await this.files.read(path, new Cancellation())) as WorkspaceText).content; this.original = this.content; }
+      else { this.content = (await this.files.read(path, new Cancellation())).content; this.original = this.content; }
       this.baseline = await this.files.baseline(path);
       if (/\.(csv|tsv)$/i.test(path)) { this.csv = parseDelimited(this.content, /\.tsv$/i.test(path) ? '\t' : ','); }
     } catch (error) { this.previewError = t("无法预览：") + (error as Error).message; }

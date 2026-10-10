@@ -2,14 +2,9 @@ import { t } from '../model/I18n';
 import { ToolCall, ToolDefinition, ToolProperty } from '../model/Agent';
 import { AgentTools } from './AgentLoop';
 import { Cancellation } from './Cancellation';
+import { WorkspaceFiles } from './WorkspaceFiles';
 
 export const MAX_FILE_BYTES: number = 64 * 1024;
-
-export interface WorkspaceFiles {
-  list(path: string, cancellation: Cancellation): Promise<string>;
-  read(path: string, cancellation: Cancellation): Promise<string>;
-  write(path: string, content: string, cancellation: Cancellation): Promise<string>;
-}
 
 interface FileArguments {
   path: string;
@@ -21,9 +16,6 @@ interface FileArguments {
   endLine?: number;
 }
 
-interface ListingEntry { name: string; kind: string; }
-interface Listing { entries: ListingEntry[]; truncated: boolean; }
-interface TextFile { content: string; }
 interface SearchMatch { path: string; line: number; text: string; }
 
 export function replaceUnique(content: string, oldText: string, newText: string): string {
@@ -104,10 +96,10 @@ export class WorkspaceTools implements AgentTools {
       return this.search(path, args.query, cancellation);
     }
     if (name === 'edit_file' || name === 'read_file_lines') {
-      const content = (JSON.parse(await this.files.read(path, cancellation)) as TextFile).content;
+      const content = (await this.files.read(path, cancellation)).content;
       if (name === 'edit_file') {
         if (typeof args.oldText !== 'string' || typeof args.newText !== 'string') { throw new Error(t("编辑需要 oldText 和 newText。")); }
-        return this.files.write(path, replaceUnique(content, args.oldText, args.newText), cancellation);
+        return JSON.stringify(await this.files.write(path, replaceUnique(content, args.oldText, args.newText), cancellation));
       }
       const start = args.startLine || 0; const end = args.endLine || 0;
       if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start || end - start >= 200) { throw new Error(t("行范围无效，最多 200 行。")); }
@@ -115,12 +107,12 @@ export class WorkspaceTools implements AgentTools {
       return JSON.stringify({ path: path, startLine: start, totalLines: lines.length, content: lines.slice(start - 1, end).join('\n') });
     }
     if (name === 'list_files') {
-      return this.files.list(path, cancellation);
+      return JSON.stringify(await this.files.list(path, cancellation));
     }
     if (name === 'read_file') {
-      return this.files.read(path, cancellation);
+      return JSON.stringify(await this.files.read(path, cancellation));
     }
-    return this.files.write(path, args.content as string, cancellation);
+    return JSON.stringify(await this.files.write(path, args.content as string, cancellation));
   }
 
   private extraDefinition(name: string, description: string, properties: Record<string, ToolProperty>, required: string[]): ToolDefinition {
@@ -133,7 +125,7 @@ export class WorkspaceTools implements AgentTools {
     let checked = 0; let directories = 0; let truncated = false;
     while (pending.length && checked < 200 && matches.length < 100 && directories < 100) {
       cancellation.check(); const directory = pending.shift() || ''; directories++;
-      const listing = JSON.parse(await this.files.list(directory, cancellation)) as Listing;
+      const listing = await this.files.list(directory, cancellation);
       truncated = truncated || listing.truncated;
       for (const entry of listing.entries) {
         if (checked >= 200 || matches.length >= 100) { truncated = true; break; }
@@ -143,7 +135,7 @@ export class WorkspaceTools implements AgentTools {
         if (entry.kind !== 'file') { continue; }
         checked++;
         let content = '';
-        try { content = (JSON.parse(await this.files.read(file, cancellation)) as TextFile).content; }
+        try { content = (await this.files.read(file, cancellation)).content; }
         catch (_) { cancellation.check(); skipped.push(file); continue; }
         const lines = content.split('\n');
         for (let i = 0; i < lines.length; i++) {
