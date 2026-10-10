@@ -5,6 +5,7 @@ import { common } from '@kit.AbilityKit';
 import { McpOAuth } from '../services/McpOAuth';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { ProductivityData, MemoryEntry, PromptTemplate, McpServer, validateProductivity } from '../model/Productivity';
+import { MEMORY_CHAR_LIMIT, memoryCharacters } from '../model/MemoryMaintenance';
 import { McpClient } from '../services/McpClient';
 import { Cancellation } from '../services/Cancellation';
 import { CredentialStore } from '../services/CredentialStore';
@@ -164,7 +165,27 @@ export struct ProductivityPanel {
   @Builder
   memoryTab() {
     List({ space: Space.md }) {
-      ListItem() { this.caption(t("记忆会作为背景资料随每次请求发送给模型。可以对所有对话生效，或只用于当前对话。")) }
+      ListItem() { this.caption(t('自动保存的记忆在新对话中加载，当前对话保留原快照；手动编辑或删除立即生效。')) }
+      ListItem() {
+        Button(t('将最新记忆用于本对话')).attributeModifier(Btn.textSmall).enabled(!this.locked()).id('refresh-memory-context')
+          .onClick(async () => {
+            if (!await this.app.refreshMemoryContext()) { this.error = this.app.error; }
+            else { this.error = ''; this.getUIContext().getPromptAction().showToast({ message: t('本对话已加载最新记忆。') }); }
+          })
+      }
+      ListItem() { this.caption(t('记忆容量：{0}/100 条 · {1}/{2} 字符',
+        [this.app.productivity.memories.length, memoryCharacters(this.app.productivity.memories), MEMORY_CHAR_LIMIT])) }
+      if (this.app.active.memoryReview) {
+        ListItem() {
+          if (this.app.active.memoryReview?.error) {
+            Banner({ text: this.app.active.memoryReview?.error || '', compId: 'memory-review-error' })
+          } else {
+            this.caption(t('最近整理：新增 {0}，更新 {1}，删除 {2}，重复 {3}。',
+              [this.app.active.memoryReview?.added || 0, this.app.active.memoryReview?.updated || 0,
+                this.app.active.memoryReview?.removed || 0, this.app.active.memoryReview?.duplicates || 0]))
+          }
+        }
+      }
       if (this.memories().length === 0) {
         ListItem() { EmptyState({ icon: $r('sys.symbol.lightbulb'), title: t("还没有记忆"),
           caption: t("添加你的偏好、身份背景或常用约定；也可以长按聊天消息保存。") }) }

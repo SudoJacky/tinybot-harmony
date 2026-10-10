@@ -11,6 +11,7 @@ import { ModelReference, ProviderProfile, validateProfile, validateReference } f
 import { ExtensionSettings, validateExtensions } from './Skills';
 import { PendingInput, validatePendingInputs } from './PendingInput';
 import { FileOperations } from './FileOperations';
+import { MemoryReviewRecord } from './MemoryMaintenance';
 
 import { DEFAULT_SYSTEM_PROMPT, migrateUserDocument } from './SystemPrompt';
 
@@ -64,6 +65,9 @@ export function copyModelConfig(config: ModelConfig, configured: boolean = confi
 export interface ContextState { compaction?: CompactionData; }
 
 export interface ThreadData extends ContextState {
+  memorySnapshot?: string;
+  memoryReviewedMessageId?: string;
+  memoryReview?: MemoryReviewRecord;
   // Absent means follow the selected model's assistant settings.
   reasoningEffort?: string;
   references?: ThreadReference[];
@@ -206,6 +210,17 @@ export function parseAppData(text: string): AppData {
       throw new Error(t("本地会话数据损坏，原文件已保留。"));
     }
     threadIds.add(thread.id);
+    if ((thread.memorySnapshot !== undefined && (typeof thread.memorySnapshot !== 'string' || thread.memorySnapshot.length > 64000)) ||
+      (thread.memoryReviewedMessageId !== undefined && typeof thread.memoryReviewedMessageId !== 'string')) {
+      throw new Error(t('本地记忆状态损坏，原文件已保留。'));
+    }
+    if (thread.memoryReview !== undefined) {
+      const review = thread.memoryReview;
+      if (!review || typeof review.error !== 'string' || !Number.isFinite(review.updatedAt) ||
+        [review.added, review.updated, review.removed, review.duplicates, review.characters].some((value) => !Number.isInteger(value) || value < 0)) {
+        throw new Error(t('本地记忆状态损坏，原文件已保留。'));
+      }
+    }
     if (thread.reasoningEffort !== undefined && !REASONING_EFFORTS.includes(thread.reasoningEffort)) {
       throw new Error(t('推理强度设置无效。'));
     }
@@ -261,6 +276,9 @@ export function parseAppData(text: string): AppData {
       }
     }
     if (thread.compaction !== undefined) { validateCompaction(thread.compaction, thread); }
+    if (thread.memoryReviewedMessageId !== undefined && !thread.messages.some((message) => message.role === 'user' && message.id === thread.memoryReviewedMessageId)) {
+      throw new Error(t('本地记忆状态损坏，原文件已保留。'));
+    }
   }
   if (data.activeThreadId.length > 0 && !threadIds.has(data.activeThreadId)) {
     throw new Error(t("找不到上次打开的会话，原文件已保留。"));
