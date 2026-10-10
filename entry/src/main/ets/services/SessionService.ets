@@ -8,12 +8,14 @@ import { ThreadReference, captureThreadReference, isCompactCommand, removeRefere
 import { TeamMember, TeamPlan, TeamRun, TeamTaskRecord, parseTeamPlan, teamCommand, validateTeamMembers, validateTeamPlan } from '../model/Team';
 import { ChatTeamTools, CHAT_TEAM_INSTRUCTIONS, coordinatorDefinitions } from './ChatTeamTools';
 import { TeamCoordinator } from './TeamCoordinator';
-import { Attachment, MemoryEntry, ProductivityData, defaultProductivity, validateAttachments, validateProductivity, memoryContext } from '../model/Productivity';
+import { Attachment, MemoryEntry, McpServer, ProductivityData, defaultProductivity, validateAttachments, validateProductivity, memoryContext } from '../model/Productivity';
 import { defaultAssistantOptions, routeModel } from '../model/AssistantOptions';
 import { memoryKey, parseMemorySuggestions, validateMemorySuggestions } from '../model/MemorySuggestions';
 import { MEMORY_CHAR_LIMIT, MEMORY_REVIEW_INTERVAL, MEMORY_REVIEW_PROMPT, MemoryOperation, MemoryChange,
   applyMemoryOperations, memoryCharacters, memoryEvidence, memoryReviewTurns, parseMemoryOperations } from '../model/MemoryMaintenance';
 import { MemoryTools } from './MemoryTools';
+import { ResourceTools } from './ResourceTools';
+import { LiveResources, SkillRequest, McpRequest, McpSummary, saveSkillCandidate, changeSkillCandidate, saveMcpCandidate } from '../model/ResourceManagement';
 import { Cancellation } from './Cancellation';
 import { ToolSet } from './ToolSet';
 import { AppData, MessageData, ModelConfig, ThreadData, copyModelConfig, emptyData } from '../model/Conversation';
@@ -36,6 +38,7 @@ interface FormReceipt { status: string; }
 
 // Sole owner of application/session data and admission. No ArkUI or platform Kit imports.
 export class SessionService {
+  private resourceCommit?: Promise<void>;
   private memoryReviewRunning: boolean = false;
   private chatTeams?: ChatTeamTools;
   private teamCoordinator?: TeamCoordinator;
@@ -442,29 +445,17 @@ export class SessionService {
   }
   async saveSkill(originalName: string, document: string, files: SkillFile[]): Promise<boolean> {
     return this.mutate(t("保存 Skill 失败："), async () => {
-      const skill = parseSkill(document);
-      if (this.extensions.skills.some((item: SkillData) => item.name === skill.name && item.name !== originalName)) {
-        throw new Error(t("同名 Skill 已存在，请编辑已有条目或更改 name。"));
-      }
-      const existing = this.extensions.skills.find((item: SkillData) => item.name === originalName);
-      if (originalName.length > 0 && !existing) { throw new Error(t("Skill 不存在。")); }
-      skill.enabled = existing ? existing.enabled : true;
-      skill.files = JSON.parse(JSON.stringify(files)) as SkillFile[];
       const candidate = this.snapshot();
-      candidate.extensions = { webEnabled: this.extensions.webEnabled, skills: existing ?
-        this.extensions.skills.map((item: SkillData) => item.name === originalName ? skill : item) : this.extensions.skills.concat([skill]) };
-      validateExtensions(candidate.extensions); await this.commitSettings(candidate);
+      candidate.extensions = saveSkillCandidate(this.extensions, originalName, document, files);
+      await this.commitSettings(candidate);
     });
   }
   async changeSkill(name: string, remove: boolean = false): Promise<boolean> {
     return this.mutate(t("更新 Skill 失败："), async () => {
       const candidate = this.snapshot();
-      const extensions = candidate.extensions || defaultExtensions();
-      const skill = extensions.skills.find((item: SkillData) => item.name === name);
-      if (!skill) { throw new Error(t("Skill 不存在。")); }
-      if (remove) { extensions.skills = extensions.skills.filter((item: SkillData) => item.name !== name); }
-      else { skill.enabled = !skill.enabled; }
-      candidate.extensions = extensions; await this.commitSettings(candidate);
+      const enabled = this.extensions.skills.find((item) => item.name === name)?.enabled;
+      candidate.extensions = changeSkillCandidate(this.extensions, name, remove ? 'remove' : enabled ? 'disable' : 'enable');
+      await this.commitSettings(candidate);
     });
   }
 
@@ -870,8 +861,12 @@ export class SessionService {
   }
 
   private chatTools(thread: ThreadData, selected: string = '', base?: AgentTools): AgentTools {
-    const tools = base || this.tools(thread, selected);
+    let tools = base || this.tools(thread, selected);
     const options = this.data.productivity?.options || defaultAssistantOptions();
+    if (!options.readOnly) {
+      tools = new ToolSet([tools, new ResourceTools((request, cancellation) => this.manageSkill(thread, request, cancellation),
+        (request, cancellation) => this.manageMcp(thread, request, cancellation))]);
+    }
     if (!options.autoMemory || options.readOnly) { return tools; }
     return new ToolSet([tools, new MemoryTools(async (operations, cancellation) => {
       const user = thread.messages.slice().reverse().find((message) => message.role === 'user');
@@ -886,6 +881,111 @@ export class SessionService {
       return JSON.stringify({ success: true, receipt: change.receipt, limit: MEMORY_CHAR_LIMIT,
         memories: change.memories.filter((item) => !item.threadId || item.threadId === thread.id) });
     })]);
+  }
+
+  private checkResourceMutation(thread: ThreadData, cancellation: Cancellation): void {
+    cancellation.check();
+    if (this.data.productivity?.options?.readOnly || thread.archived || this.status.saveError) { throw new Error('Resource changes are unavailable in this session.'); }
+  }
+
+  private async commitResources(thread: ThreadData, candidate: AppData, detail: string): Promise<void> {
+    // Runtime owns thread identity. Replacing AppData here would detach in-flight messages and drafts.
+    const committed = this.repository.save(candidate).then(() => {
+      this.data.extensions = candidate.extensions; this.data.productivity = candidate.productivity;
+      thread.disabledMcpIds = candidate.threads.find((item) => item.id === thread.id)?.disabledMcpIds;
+    });
+    this.resourceCommit = committed;
+    try { await committed; }
+    catch (error) { this.resources.reportError('Resource commit failed: thread=' + thread.id + ' ' + detail + ' ' + (error as Error).message); throw error as Error; }
+    finally { this.resourceCommit = undefined; }
+    this.resources.reportResources?.('thread=' + thread.id + ' ' + detail); this.publish('snapshot');
+  }
+
+  private async manageSkill(thread: ThreadData, request: SkillRequest, cancellation: Cancellation): Promise<string> {
+    this.checkResourceMutation(thread, cancellation);
+    let imported: SkillData | undefined;
+    if (request.action === 'install') {
+      if (!this.extensions.webEnabled) { throw new Error('Enable web access before installing a skill from a URL.'); }
+      if (!this.resources.installSkill) { throw new Error('Skill downloads are unavailable.'); }
+      imported = await this.resources.installSkill(request.source || '', JSON.parse(request.paths || '[]') as string[], cancellation);
+    }
+    const candidate = this.snapshot();
+    if (['create', 'update', 'install'].includes(request.action)) {
+      if (request.action === 'update' && request.files === undefined) { throw new Error('Update requires the complete files JSON array; use [] to remove all references.'); }
+      const files = imported ? imported.files : JSON.parse(request.files || '[]') as SkillFile[];
+      candidate.extensions = saveSkillCandidate(this.extensions, request.name || '', imported ? imported.document : request.document || '', files, imported);
+    } else { candidate.extensions = changeSkillCandidate(this.extensions, request.name || '', request.action); }
+    this.checkResourceMutation(thread, cancellation);
+    const name = imported?.name || (request.document ? parseSkill(request.document).name : request.name || '');
+    await this.commitResources(thread, candidate, 'skill ' + request.action + ' ' + name);
+    const skill = this.extensions.skills.find((item) => item.name === name);
+    return JSON.stringify({ success: true, action: request.action, name: name, enabled: skill?.enabled,
+      available: !!skill?.enabled && !skill.manualOnly, source: skill?.source, files: skill?.files.map((file) => file.path),
+      next: 'Use read_skill for current instructions. Scripts are reference text only; no Shell/Python/Node runtime.' });
+  }
+
+  private async manageMcp(thread: ThreadData, request: McpRequest, cancellation: Cancellation): Promise<string> {
+    this.checkResourceMutation(thread, cancellation);
+    const extras = this.data.productivity || defaultProductivity();
+    const old = extras.servers.find((item) => item.id === request.id);
+    if (request.action === 'list') {
+      return JSON.stringify(extras.servers.map((item): McpSummary => { return { id: item.id, name: item.name, url: item.url,
+        enabled: item.enabled, available: item.enabled && !(thread.disabledMcpIds || []).includes(item.id),
+        auth: item.authType || (item.credentialAlias ? 'bearer' : 'none') }; }));
+    }
+    if (request.id && !old) { throw new Error('MCP server does not exist: ' + request.id); }
+    if (request.action === 'test') {
+      if (!old || !this.resources.testMcp) { throw new Error('MCP connection testing is unavailable.'); }
+      return JSON.stringify({ success: true, id: old.id, tools: await this.resources.testMcp(old, cancellation) });
+    }
+    let candidate = this.snapshot();
+    let newAlias = '';
+    let count = 0;
+    const id = old?.id || this.resources.createId();
+    try {
+      if (request.action === 'save') {
+        if (!this.resources.prepareMcp || !this.resources.testMcp) { throw new Error('Native MCP setup is unavailable.'); }
+        if (request.auth === 'keep' && (!old || old.url !== request.url)) { throw new Error('Keeping credentials requires an existing server with the same URL.'); }
+        const server: McpServer = { id: id, name: request.name || '', url: request.url || '', enabled: true,
+          credentialAlias: request.auth === 'keep' ? old?.credentialAlias || '' : '', authType: request.auth === 'keep' ? old?.authType : undefined };
+        saveMcpCandidate(extras, server);
+        const prepared = await this.resources.prepareMcp(server, request, cancellation);
+        newAlias = prepared.credentialAlias !== old?.credentialAlias ? prepared.credentialAlias : '';
+        count = await this.resources.testMcp(prepared, cancellation);
+        candidate = this.snapshot(); candidate.productivity = saveMcpCandidate(candidate.productivity || defaultProductivity(), prepared);
+      } else {
+        if (!old) { throw new Error('MCP server does not exist.'); }
+        const next = candidate.productivity || defaultProductivity();
+        if (request.action === 'remove') { next.servers = next.servers.filter((item) => item.id !== id); }
+        else {
+          const target = next.servers.find((item) => item.id === id);
+          if (!target) { throw new Error('MCP server does not exist.'); }
+          target.enabled = request.action === 'enable';
+        }
+        validateProductivity(next); candidate.productivity = next;
+      }
+      if (['save', 'enable', 'remove'].includes(request.action)) {
+        const target = candidate.threads.find((item) => item.id === thread.id);
+        if (target) { target.disabledMcpIds = (target.disabledMcpIds || []).filter((value) => value !== id); }
+      }
+      this.checkResourceMutation(thread, cancellation);
+      await this.commitResources(thread, candidate, 'mcp ' + request.action + ' ' + id);
+      newAlias = '';
+    } catch (error) {
+      this.resources.reportError('MCP setup failed: thread=' + thread.id + ' id=' + id + ' ' + (error as Error).message);
+      if (newAlias) {
+        try { await this.credentials.remove(newAlias); }
+        catch (cleanup) { this.resources.reportError('MCP credential rollback failed: ' + (cleanup as Error).message); }
+      }
+      throw error as Error;
+    }
+    let warning = '';
+    if (old?.credentialAlias && !this.data.productivity?.servers.some((item) => item.credentialAlias === old.credentialAlias)) {
+      try { await this.credentials.remove(old.credentialAlias); }
+      catch (error) { warning = 'Configuration saved, but old credential cleanup failed.'; this.resources.reportError(warning + ' ' + (error as Error).message); }
+    }
+    return JSON.stringify({ success: true, action: request.action, id: id, tools: count, warning: warning,
+      next: 'Use mcp_search_tools or mcp_list_tools before mcp_call.' });
   }
 
   private async commitMemory(thread: ThreadData, change: MemoryChange, reviewedId?: string): Promise<void> {
@@ -971,7 +1071,10 @@ export class SessionService {
   private tools(thread: ThreadData, selected: string = ''): AgentTools {
     const extras = JSON.parse(JSON.stringify(this.data.productivity || defaultProductivity())) as ProductivityData;
     extras.servers = extras.servers.filter((item) => !(thread.disabledMcpIds || []).includes(item.id));
-    return this.resources.tools(thread.id, this.extensions, selected, extras, (thread.attachments || []).concat(...thread.messages.map((item) => item.attachments || [])));
+    const live: LiveResources = { skills: () => this.extensions.skills,
+      servers: () => (this.data.productivity?.servers || []).filter((item) => !(thread.disabledMcpIds || []).includes(item.id)) };
+    return this.resources.tools(thread.id, this.extensions, selected, extras,
+      (thread.attachments || []).concat(...thread.messages.map((item) => item.attachments || [])), live);
   }
   private refreshContext(): void {
     if (this.data.threads.length === 0) { this.status.contextTokens = 0; this.status.contextBreakdown = []; this.status.contextSource = 'estimate'; return; }
@@ -1048,6 +1151,8 @@ export class SessionService {
     while (revision !== this.draftRevision) { revision = this.draftRevision; await this.persist(); }
   }
   private async persist(): Promise<void> {
+    // Draft autosaves and team checkpoints must capture resources after the transaction publishes them.
+    if (this.resourceCommit) { await this.resourceCommit; }
     this.syncEmptyThreadPreferences(this.data);
     try { await this.repository.save(this.snapshot()); this.status.saveError = ''; }
     catch (error) {

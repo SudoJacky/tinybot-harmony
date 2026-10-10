@@ -6,6 +6,7 @@ import { McpOAuth } from '../services/McpOAuth';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { ProductivityData, MemoryEntry, PromptTemplate, McpServer, validateProductivity } from '../model/Productivity';
 import { MEMORY_CHAR_LIMIT, memoryCharacters } from '../model/MemoryMaintenance';
+import { saveMcpCandidate } from '../model/ResourceManagement';
 import { McpClient } from '../services/McpClient';
 import { Cancellation } from '../services/Cancellation';
 import { CredentialStore } from '../services/CredentialStore';
@@ -108,8 +109,7 @@ export struct ProductivityPanel {
         }
         const server: McpServer = { id: id, name: this.name.trim(), url: address, enabled: existing?.enabled !== false, credentialAlias: alias,
           authType: existing?.authType === 'oauth' && address === existing.url && alias === oldAlias ? 'oauth' : undefined };
-        const index = data.servers.findIndex((item) => item.id === id);
-        if (index >= 0) { data.servers[index] = server; } else { data.servers.push(server); }
+        data.servers = saveMcpCandidate(data, server).servers;
       }
       validateProductivity(data);
       if (newAlias) { await vault.write(newAlias, this.token.trim()); }

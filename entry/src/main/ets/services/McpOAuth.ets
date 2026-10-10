@@ -5,6 +5,7 @@ import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { util } from '@kit.ArkTS';
 import { CredentialStore } from './CredentialStore';
 import { McpServer } from '../model/Productivity';
+import { Cancellation, RunCancelledError } from './Cancellation';
 interface ResourceMetadata { resource: string; authorization_servers: string[]; scopes_supported?: string[]; }
 interface AuthMetadata { issuer: string; authorization_endpoint: string; token_endpoint: string; registration_endpoint?: string; code_challenge_methods_supported?: string[]; }
 interface Registration { client_id: string; }
@@ -56,7 +57,8 @@ export class McpOAuth {
   static receive(uri: string): void {
     if (uri.startsWith(REDIRECT + '?') && McpOAuth.callback) { try { McpOAuth.callback(uri); } catch (_) { /* Ignore malformed callbacks without consuming the pending login. */ } }
   }
-  static async login(server: McpServer, context: common.UIAbilityContext, clientId: string = ''): Promise<string> {
+  static async login(server: McpServer, context: common.UIAbilityContext, clientId: string = '', cancellation: Cancellation = new Cancellation()): Promise<string> {
+    cancellation.check();
     if (McpOAuth.callback) { throw new Error(t("已有 OAuth 登录正在进行。")); }
     const resource = await resourceMetadata(server.url); const issuer = secure(resource.authorization_servers[0]).replace(/\/$/, '');
     const host = origin(issuer); const path = issuer.slice(host.length);
@@ -80,21 +82,26 @@ export class McpOAuth {
       'code_challenge': challenge, 'code_challenge_method': 'S256', 'state': state, 'resource': server.url };
     if (resource.scopes_supported?.length) { params['scope'] = resource.scopes_supported.join(' '); }
     const authorization = metadata.authorization_endpoint + (metadata.authorization_endpoint.includes('?') ? '&' : '?') + encode(params);
+    cancellation.check();
     const callback = await new Promise<string>((resolve, reject) => {
-      const timeout = setTimeout(() => { McpOAuth.callback = undefined; reject(new Error(t("OAuth 登录等待超过 5 分钟，请重新登录。"))); }, 300000);
+      let remove = (): void => {};
+      const timeout = setTimeout(() => { remove(); McpOAuth.callback = undefined; reject(new Error(t("OAuth 登录等待超过 5 分钟，请重新登录。"))); }, 300000);
       McpOAuth.callback = (value: string) => {
         const values = new Map<string, string>();
         for (const part of value.slice(value.indexOf('?') + 1).split('&')) { const index = part.indexOf('='); if (index > 0) { values.set(decodeURIComponent(part.slice(0, index)), decodeURIComponent(part.slice(index + 1))); } }
         if (values.get('state') !== state) { return; }
-        clearTimeout(timeout); McpOAuth.callback = undefined; resolve(value);
+        clearTimeout(timeout); remove(); McpOAuth.callback = undefined; resolve(value);
       };
-      context.startAbility({ action: 'ohos.want.action.viewData', uri: authorization }).catch(() => { clearTimeout(timeout); McpOAuth.callback = undefined; reject(new Error(t("无法打开系统浏览器。"))); });
+      remove = cancellation.onCancel(() => { clearTimeout(timeout); McpOAuth.callback = undefined; reject(new RunCancelledError()); });
+      context.startAbility({ action: 'ohos.want.action.viewData', uri: authorization }).catch(() => { clearTimeout(timeout); remove(); McpOAuth.callback = undefined; reject(new Error(t("无法打开系统浏览器。"))); });
     });
+    cancellation.check();
     const code = /[?&]code=([^&]+)/.exec(callback)?.[1];
     if (!code) { throw new Error(t("OAuth 授权被取消或未返回授权码。")); }
     const tokens = await oauthJson(metadata.token_endpoint, encode({ 'grant_type': 'authorization_code', 'client_id': clientId,
       'code': decodeURIComponent(code), 'redirect_uri': REDIRECT, 'code_verifier': verifier, 'resource': server.url })) as OAuthTokens;
     if (!tokens.access_token || tokens.token_type?.toLowerCase() !== 'bearer') { throw new Error(t("OAuth 未返回有效 Bearer 凭据。")); }
+    cancellation.check();
     const stored: StoredOAuth = { resource: server.url, clientId: clientId, tokenEndpoint: metadata.token_endpoint,
       accessToken: tokens.access_token, refreshToken: tokens.refresh_token, expiresAt: tokens.expires_in ? Date.now() + tokens.expires_in * 1000 : 0 };
     const alias = 'tinybot-oauth-' + util.generateRandomUUID(); await new CredentialStore().write(alias, JSON.stringify(stored)); return alias;

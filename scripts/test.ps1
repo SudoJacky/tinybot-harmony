@@ -13,6 +13,8 @@ if (-not (Test-Path -LiteralPath $nodePath) -or -not (Test-Path -LiteralPath $hv
 & $nodePath (Join-Path $projectPath 'scripts/build-locales.cjs') --check
 if ($LASTEXITCODE -ne 0) { throw 'Locale validation failed. Run node scripts/build-locales.cjs after editing translations.' }
 $env:DEVECO_STUDIO_HOME = $StudioPath
+& $nodePath (Join-Path $projectPath 'scripts/test-resources.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Resource management integration tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-memory.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Memory maintenance integration tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-code-sandbox.cjs')

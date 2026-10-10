@@ -53,7 +53,7 @@ struct Index {
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     if (!this.session) {
-      this.session = createNativeSessionService(context.filesDir, context.getApplicationContext().filesDir, this.approval);
+      this.session = createNativeSessionService(context.filesDir, context.getApplicationContext().filesDir, this.approval, context);
       this.session.subscribe((event) => {
         if (event.state.ready && event.state.phase === 'idle' && !event.state.saveError && ShareInbox.peek()) { this.receiveShare(); }
       });
