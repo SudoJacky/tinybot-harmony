@@ -13,9 +13,13 @@ export class McpTools implements AgentTools {
   private approval: ToolApproval;
   private clients: Map<string, McpClient> = new Map<string, McpClient>();
   private catalog: Map<string, McpToolInfo[]> = new Map<string, McpToolInfo[]>();
-  constructor(servers: McpServer[], approval: ToolApproval) { this.servers = servers.filter((item) => item.enabled); this.approval = approval; }
+  private versions: Map<string, string> = new Map<string, string>();
+  private live?: () => McpServer[];
+  constructor(servers: McpServer[], approval: ToolApproval, live?: () => McpServer[]) {
+    this.servers = servers.filter((item) => item.enabled); this.approval = approval; this.live = live;
+  }
   definitions(): ToolDefinition[] {
-    if (!this.servers.length) { return []; }
+    if (!this.live && !this.servers.length) { return []; }
     const catalog = JSON.stringify(this.servers.map((item): ServerSummary => { return { id: item.id, name: item.name }; }));
     return [
       // Discovery initializes a mutable MCP session; calls also own the approval dialog.
@@ -33,9 +37,15 @@ export class McpTools implements AgentTools {
     ];
   }
   async execute(call: ToolCall, cancellation: Cancellation): Promise<string> {
+    cancellation.check();
     const args = JSON.parse(call.function.arguments) as McpArguments;
-    const server = this.servers.find((item) => item.id === args.server);
+    if (!args || typeof args.server !== 'string') { throw new Error(t("MCP 参数无效。")); }
+    const server = (this.live ? this.live() : this.servers).find((item) => item.id === args.server && item.enabled);
     if (!server) { throw new Error(t("MCP 服务未启用。")); }
+    const version = JSON.stringify(server);
+    if (this.versions.get(server.id) !== version) {
+      this.clients.delete(server.id); this.catalog.delete(server.id); this.versions.set(server.id, version);
+    }
     let client = this.clients.get(server.id);
     if (!client) { client = new McpClient(server); this.clients.set(server.id, client); }
     if (call.function.name === 'mcp_list_tools' || call.function.name === 'mcp_search_tools') {

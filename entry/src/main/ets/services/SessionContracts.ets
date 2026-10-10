@@ -1,7 +1,9 @@
-import { ProductivityData, Attachment } from '../model/Productivity';
+import { ProductivityData, Attachment, McpServer } from '../model/Productivity';
 import { AppData, MessageData } from '../model/Conversation';
 import { ProviderProfile } from '../model/ProviderProfiles';
-import { ExtensionSettings } from '../model/Skills';
+import { ExtensionSettings, SkillData } from '../model/Skills';
+import { LiveResources, McpRequest } from '../model/ResourceManagement';
+import { Cancellation } from './Cancellation';
 import { AgentTools } from './AgentLoop';
 import { ContextTokenItem } from '../model/ContextBreakdown';
 
@@ -14,7 +16,11 @@ export interface SessionResources {
   afterTask?(threadId: string, messageId: string, content: string): Promise<void>;
   createId(): string;
   ensureWorkspace(threadId: string): Promise<void>;
-  tools(threadId: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments?: Attachment[]): AgentTools;
+  tools(threadId: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments?: Attachment[], live?: LiveResources): AgentTools;
+  installSkill?(source: string, paths: string[], cancellation: Cancellation): Promise<SkillData>;
+  prepareMcp?(server: McpServer, request: McpRequest, cancellation: Cancellation): Promise<McpServer>;
+  testMcp?(server: McpServer, cancellation: Cancellation): Promise<number>;
+  reportResources?(message: string): void;
   configureProviders(profiles: ProviderProfile[]): void;
   reportError(message: string): void;
   reportMemory?(message: string): void;

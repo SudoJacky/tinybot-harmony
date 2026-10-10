@@ -29,7 +29,7 @@ export class ToolApproval {
   cancelForm(): void { if (this.formAnswer) { this.formAnswer('{"status":"cancelled"}'); } }
   async request(title: string, details: string, cancellation: Cancellation): Promise<void> {
     cancellation.check();
-    if (this.answer) { throw new Error(t("已有一个工具等待确认。")); }
+    if (this.answer || this.formAnswer) { throw new Error(t("已有一个工具等待确认。")); }
     const allowed = await new Promise<boolean>((resolve) => {
       let remove = (): void => {};
       this.title = title; this.details = details;

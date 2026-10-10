@@ -1395,5 +1395,10 @@
   "0.1.6 测试版 · 2026-10-09": "0.1.6 Beta · 2026-10-09",
   "新增工具编排，可组合文件、网页与 MCP 工具，统一汇总结果；展开工具回执可查看各子调用的参数、状态和结果，支持停止与错误恢复。": "Tool orchestration combines file, web and MCP tools into one result. Expand receipts to inspect each child call, its arguments, status and output, with cancellation and error recovery.",
   "上下文用量明细": "Context usage details",
-  "点击输入框旁的上下文圆圈，可展开查看系统提示、工具定义、用户输入、助手消息、工具结果、摘要、附件与协议开销。分类为本地估算，模型实际返回的请求及本轮用量单独显示。": "Tap the context indicator beside the composer to inspect system prompts, tool definitions, user input, assistant messages, tool results, summaries, attachments and message overhead. Categories are local estimates; reported request and turn usage is shown separately."
+  "点击输入框旁的上下文圆圈，可展开查看系统提示、工具定义、用户输入、助手消息、工具结果、摘要、附件与协议开销。分类为本地估算，模型实际返回的请求及本轮用量单独显示。": "Tap the context indicator beside the composer to inspect system prompts, tool definitions, user input, assistant messages, tool results, summaries, attachments and message overhead. Categories are local estimates; reported request and turn usage is shown separately.",
+  "MCP 鉴权：{0}": "MCP authentication: {0}",
+  "仅发送给 {0}；不会写入聊天或交给模型。": "Sent only to {0}; never included in chat or sent to the model.",
+  "MCP 配置已取消。": "MCP setup cancelled.",
+  "连接 MCP：{0}": "Connect MCP: {0}",
+  "将在浏览器中完成 OAuth 授权。": "Complete OAuth authorization in your browser."
 }

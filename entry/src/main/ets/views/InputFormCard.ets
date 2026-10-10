@@ -57,7 +57,7 @@ export struct InputFormCard {
               } else {
                 TextInput({ text: this.values[index] || '', placeholder: field.type === 'number' ? t("请输入数字") : t("请输入") })
                   .id('form-field-' + index).attributeModifier(Styles.input).height(44)
-                  .type(field.type === 'number' ? InputType.NUMBER_DECIMAL : InputType.Normal)
+                  .type(field.type === 'password' ? InputType.Password : field.type === 'number' ? InputType.NUMBER_DECIMAL : InputType.Normal)
                   .maxLength(2000).onChange((value) => this.set(index, value))
               }
             }.width('100%').alignItems(HorizontalAlign.Start)
@@ -72,9 +72,9 @@ export struct InputFormCard {
       }
       Row({ space: Space.sm }) {
         Button(t("不回答")).id('cancel-form').attributeModifier(Btn.plainSmall).height(40).layoutWeight(1)
-          .onClick(() => this.approval.cancelForm())
+          .onClick(() => { this.values = []; this.approval.cancelForm(); })
         Button(t("提交并继续")).id('submit-form').attributeModifier(Btn.primarySmall).height(40).layoutWeight(1)
-          .onClick(() => this.approval.submit(this.values))
+          .onClick(() => { this.approval.submit(this.values); if (!this.approval.form) { this.values = []; } })
       }.width('100%')
     }.width('100%').padding(Space.md).backgroundColor($r('app.color.surface')).borderRadius(Radius.lg)
     .border({ width: 1, color: $r('app.color.accent_container') })

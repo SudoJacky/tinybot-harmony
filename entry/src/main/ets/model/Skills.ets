@@ -8,8 +8,10 @@ export interface SkillFile {
 }
 
 interface SkillSummary { name: string; description: string; }
+export interface SkillSource { url: string; installedAt: number; modified: boolean; }
 
 export interface SkillData {
+  source?: SkillSource;
   name: string;
   description: string;
   document: string;
@@ -97,6 +99,10 @@ export function validateExtensions(value: ExtensionSettings): void {
   const names = new Set<string>();
   let total = 0;
   for (const skill of value.skills) {
+    if (skill?.source && (typeof skill.source.url !== 'string' || !skill.source.url.startsWith('https://') ||
+      skill.source.url.length > 2048 || !Number.isFinite(skill.source.installedAt) || typeof skill.source.modified !== 'boolean')) {
+      throw new Error('Invalid skill installation provenance.');
+    }
     if (!skill || typeof skill.enabled !== 'boolean' || !Array.isArray(skill.files) || skill.files.length > 16) {
       throw new Error(t("Skill 配置或参考文件数量无效。"));
     }
