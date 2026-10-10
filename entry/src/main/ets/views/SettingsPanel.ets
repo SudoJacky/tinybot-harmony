@@ -170,6 +170,7 @@ export struct SettingsPanel {
         GroupCard() {
           Column() {
             SwitchRow({ title: t('自动提取长期记忆'), compId: 'auto-memory',
+              subtitle: t('按需保存长期事实，每 10 轮后台复盘；会额外调用模型。'),
               isOn: this.assistantDraft.autoMemory, disabled: !this.canEdit(),
               onChange: (value: boolean) => this.saveAssistantToggle('memory', value) })
             RowDivider()

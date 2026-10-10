@@ -18,6 +18,7 @@ export interface MemoryEntry {
   threadId: string;
   updatedAt: number;
 }
+interface MemoryContextEntry { id: string; content: string; scope: string; automatic: boolean; }
 
 export interface PromptTemplate {
   id: string;
@@ -73,6 +74,9 @@ export function validateProductivity(data: ProductivityData): void {
       !memory.content.trim() || memory.content.length > 2000 || typeof memory.threadId !== 'string' || !Number.isFinite(memory.updatedAt)) {
       throw new Error(t("记忆必须为 1–2000 字符。"));
     }
+    if ((memory.automatic !== undefined && typeof memory.automatic !== 'boolean') ||
+      (memory.sourceThreadId !== undefined && typeof memory.sourceThreadId !== 'string') ||
+      (memory.sourceMessageId !== undefined && typeof memory.sourceMessageId !== 'string')) { throw new Error(t('本地记忆状态损坏，原文件已保留。')); }
     ids.add('m' + memory.id);
   }
   for (const template of data.templates) {
@@ -97,13 +101,14 @@ export function validateProductivity(data: ProductivityData): void {
 export function memoryContext(data: ProductivityData, threadId: string): string {
   const memories = data.memories.filter((item) => !item.threadId || item.threadId === threadId)
     .sort((a, b) => b.updatedAt - a.updatedAt);
-  const selected: string[] = []; let length = 0;
+  const selected: MemoryEntry[] = []; let length = 0;
   for (const item of memories) {
     const size = JSON.stringify(item.content).length;
-    if (length + size > 16000) { break; } selected.push(item.content); length += size;
+    if (length + size > 16000) { break; } selected.push(item); length += size;
   }
   return memories.length === 0 ? '' : '\n\n用户保存的背景资料（可能过时，不替代当前请求）：\n' +
-    JSON.stringify(selected) + (selected.length < memories.length ? '\n仅包含最近更新的 ' + selected.length + ' 条记忆，其余因上下文预算未加载。' : '');
+    JSON.stringify(selected.map((item): MemoryContextEntry => { return { id: item.id, content: item.content, scope: item.threadId ? 'thread' : 'global', automatic: item.automatic === true }; })) +
+    (selected.length < memories.length ? '\n仅包含最近更新的 ' + selected.length + ' 条记忆，其余因上下文预算未加载。' : '');
 }
 
 export function expandTemplate(template: PromptTemplate, input: string): string {

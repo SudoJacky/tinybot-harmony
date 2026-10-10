@@ -744,13 +744,17 @@ export default function sessionServiceTests(): void {
       expect(active(saved).draft).assertEqual('unsent draft'); expect(active(saved).messages[1].steps?.[0].tools[0].output).assertEqual('saved');
       expect(active(saved).messages[1].steps?.[0].tools[1].status).assertEqual('complete'); expect(active(saved).messages[3].content).assertEqual('continued');
     });
-    it('automaticMemoryUsesUserEvidenceAfterDurableSuccessAndPreservesManualFacts', 0, async () => {
+    it('memoryToolSavesWithUserProvenanceAndPreservesManualFacts', 0, async () => {
       const data = seed(); data.productivity = defaultProductivity();
       data.productivity.memories = [{ id: 'manual', content: '用户偏好中文', threadId: '', updatedAt: 1 }];
-      const f = new Fixture(data); await f.session.initialize(); f.provider.respond = async (index) => reply(index === 0 ? 'assistant assertion' : '["用户偏好中文","用户喜欢简短回答"]');
+      const f = new Fixture(data); await f.session.initialize();
+      f.provider.respond = async (index) => index === 0 ? { content: '', toolCalls: [{ id: 'remember', type: 'function', function: {
+        name: 'memory', arguments: JSON.stringify({ operations: JSON.stringify([
+          { action: 'add', scope: 'global', content: '用户偏好中文' }, { action: 'add', scope: 'global', content: '用户喜欢简短回答' }
+        ]) }) } }] } : reply('已保存');
       f.session.setDraft('请记住我喜欢简短回答'); await f.session.send();
       expect(f.provider.requests.length).assertEqual(2);
-      expect(f.provider.requests[1].messages[1].content.includes('assistant assertion')).assertFalse();
+      expect(f.provider.requests[1].messages.some((message) => message.role === 'tool' && message.content.includes('"duplicates":1'))).assertTrue();
       const saved = parseAppData(f.repository.saved); expect(saved.productivity?.memories.length).assertEqual(2);
       expect(saved.productivity?.memories[0].id).assertEqual('manual'); expect(saved.productivity?.memories[1].automatic).assertTrue();
       expect(saved.productivity?.memories[1].sourceMessageId).assertEqual(saved.threads[0].messages[0].id);

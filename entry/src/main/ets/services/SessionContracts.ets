@@ -17,6 +17,7 @@ export interface SessionResources {
   tools(threadId: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments?: Attachment[]): AgentTools;
   configureProviders(profiles: ProviderProfile[]): void;
   reportError(message: string): void;
+  reportMemory?(message: string): void;
 }
 
 export type SessionPhase = 'idle' | 'loading' | 'saving' | 'running' | 'compacting' | 'memory' | 'team';

@@ -1,4 +1,5 @@
 import { Attachment } from '../model/Productivity';
+import { MemoryReviewRecord } from '../model/MemoryMaintenance';
 import { ThreadReference } from '../model/ThreadReferences';
 import { AgentStep, ToolCall, ToolExecution } from '../model/Agent';
 import { CompactionData, MessageData, ThreadData } from '../model/Conversation';
@@ -78,6 +79,7 @@ export class MessageViewModel {
 
 @Observed
 export class ThreadViewModel {
+  memoryReview?: MemoryReviewRecord;
   reasoningEffort: string = 'default';
   references: ThreadReference[] = [];
   get displayTitle(): string {
@@ -102,6 +104,7 @@ export class ThreadViewModel {
   queuePaused: boolean = false;
   constructor(data: ThreadData) { this.update(data); }
   update(data: ThreadData): void {
+    this.memoryReview = data.memoryReview;
     this.reasoningEffort = data.reasoningEffort || 'default';
     this.references = data.references || [];
     this.teamEnabled = data.teamEnabled === true;

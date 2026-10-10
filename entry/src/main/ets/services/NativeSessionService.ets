@@ -68,6 +68,7 @@ class NativeSessionResources implements SessionResources {
     for (const profile of profiles) { this.providers.register(profileProvider(profile)); }
   }
   reportError(message: string): void { hilog.error(0x0000, 'TinybotSession', '%{public}s', message); }
+  reportMemory(message: string): void { hilog.info(0x0000, 'TinybotMemory', '%{public}s', message); }
 }
 
 // Native composition root. The session service can also run with an in-memory repository/model.

@@ -161,6 +161,7 @@ export class ChatViewModel {
   filteredThreads(query: string, archived: boolean): ThreadViewModel[] { return matchingThreads(this.threads, query, archived) as ThreadViewModel[]; }
 
   saveProductivity(value: ProductivityData): Promise<boolean> { return this.requireSession().saveProductivity(value); }
+  refreshMemoryContext(): Promise<boolean> { return this.requireSession().refreshMemoryContext(); }
   proposeMemory(messageId: string): Promise<string[]> { return this.requireSession().proposeMemory(messageId); }
   cancelMemoryDraft(): void { this.requireSession().cancelMemoryDraft(); }
   saveMemoryDraft(threadId: string, messageId: string, items: string[], global: boolean): Promise<number> { return this.requireSession().saveMemoryDraft(threadId, messageId, items, global); }
