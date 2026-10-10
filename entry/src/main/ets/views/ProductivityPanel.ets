@@ -408,7 +408,7 @@ export struct ProductivityPanel {
           }
         }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.lg })
       }.layoutWeight(1).scrollBar(BarState.Off).align(Alignment.Top)
-      BottomBar() {
+      BottomBar({ sheet: true }) {
         Row({ space: Space.md }) {
           if (this.editingId.length > 0) {
             Button(t("删除")).attributeModifier(Btn.danger).enabled(!this.locked())
@@ -450,6 +450,7 @@ export struct ProductivityPanel {
     }.width('100%').height('100%')
     .bindSheet($$this.editing, this.editorSheet(), {
       title: { title: this.sheetTitle() }, detents: [SheetSize.LARGE], dragBar: true,
+      keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY,
       backgroundColor: $r('app.color.page_background'),
       onDisappear: () => { this.token = ''; this.error = ''; }
     })

@@ -21,7 +21,7 @@ interface TeamArgs {
   action?: string; taskIds?: string[];
 }
 interface HandoffArgs { summary: string; unresolved: string[]; artifacts: string[]; }
-interface FileRead { content: string; }
+interface FileRead { content: string; truncated?: boolean; nextOffset?: number; nextColumn?: number; }
 interface ResultReference { entryId: string; taskId: string; memberId: string; sequence: number; summary: string; unresolved: string[]; artifacts: string[]; }
 interface TaskStatus { taskId: string; memberId: string; title: string; status: string; error: string; }
 interface MemberIdentity { id: string; displayName: string; }
@@ -80,7 +80,7 @@ class EmployeeTools implements AgentTools {
   candidate?: TeamHandoff;
   constructor(base: AgentTools, profile: string, host: ChatTeamTools, run: TeamRun, attempt: TeamAttempt) {
     this.base = base; this.host = host; this.run = run; this.attempt = attempt;
-    const reads = ['list_files', 'read_file', 'read_file_lines', 'search_file_content', 'read_skill', 'update_plan', 'execute_code'];
+    const reads = ['list_files', 'read_file', 'read_file_lines', 'read_attachment', 'search_file_content', 'read_skill', 'update_plan', 'execute_code'];
     const research = reads.concat(['read_web', 'write_file', 'edit_file']);
     this.catalog = base.definitions().filter((item) => item.function.name !== 'publish_data_view' &&
       !item.function.name.startsWith('team_') && (profile === 'execution' || (profile === 'research' ? research : reads).includes(item.function.name)));
@@ -120,9 +120,20 @@ class EmployeeTools implements AgentTools {
 async function readArtifact(base: AgentTools, path: string, cancellation: Cancellation): Promise<string> {
   if (typeof path !== 'string') { throw new Error(t("产物路径必须是字符串。")); }
   workspaceRelativePath(path, false);
-  const result = JSON.parse(await base.execute({ id: 'team_artifact_read', type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ path: path }) } }, cancellation)) as FileRead;
-  if (typeof result.content !== 'string') { throw new Error(t("无法读取交接产物：") + path); }
-  return result.content;
+  let content = ''; let offset = 1; let column = 1;
+  while (true) {
+    cancellation.check();
+    const result = JSON.parse(await base.execute({ id: 'team_artifact_read', type: 'function', function: {
+      name: 'read_file', arguments: JSON.stringify({ path: path, offset: offset, column: column }) } }, cancellation)) as FileRead;
+    if (typeof result.content !== 'string') { throw new Error(t('无法读取交接产物：') + path); }
+    content += result.content;
+    if (content.length > 65536) { throw new Error(t('单份交接产物最多 65536 字符，请缩小交接文件。')); }
+    if (!result.truncated) { return content; }
+    const nextOffset = result.nextOffset || 0; const nextColumn = result.nextColumn || 0;
+    if (!Number.isSafeInteger(nextOffset) || !Number.isSafeInteger(nextColumn) || nextColumn < 1 ||
+      nextOffset < offset || (nextOffset === offset && nextColumn <= column)) { throw new Error(t('无法读取交接产物：') + path); }
+    offset = nextOffset; column = nextColumn;
+  }
 }
 
 // One coordinator per parent turn. Ownership comes from the current thread, never from model-supplied paths.

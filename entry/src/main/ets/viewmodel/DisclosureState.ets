@@ -1,10 +1,13 @@
 // Transient reading state belongs to a message, not to conditionally mounted UI.
 @Observed
 export class DisclosureState {
+  children: DisclosureStore = new DisclosureStore();
   open: boolean = false;
   limit: number = 0;
   rawOpen: boolean = false;
   rawLimit: number = 2000;
+  detailTab: string = 'result';
+  detailPage: number = 0;
 }
 
 export class DisclosureStore {

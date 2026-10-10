@@ -56,8 +56,9 @@ export function validateAttachments(items: Attachment[]): void {
     if (!item || !/^[a-zA-Z0-9-]{1,80}$/.test(item.id) || ids.has(item.id) ||
       typeof item.name !== 'string' || item.name.length > 200 || typeof item.path !== 'string' ||
       item.path !== item.id + (item.mime === 'image/jpeg' ? '.jpg' : '.txt') ||
-      !['image/jpeg', 'text/plain'].includes(item.mime) || !Number.isFinite(item.size) || item.size < 0 || item.size > 4 * 1024 * 1024 ||
-      (item.text !== undefined && (typeof item.text !== 'string' || item.text.length > 32000))) {
+      !['image/jpeg', 'text/plain'].includes(item.mime) || !Number.isSafeInteger(item.size) || item.size < 0 ||
+      (item.mime === 'image/jpeg' && item.size > 4 * 1024 * 1024) ||
+      (item.text !== undefined && (typeof item.text !== 'string' || item.text.includes('\u0000')))) {
       throw new Error(t("附件记录无效。"));
     }
     ids.add(item.id);

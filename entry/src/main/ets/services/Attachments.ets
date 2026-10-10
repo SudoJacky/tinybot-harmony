@@ -5,6 +5,8 @@ import { util } from '@kit.ArkTS';
 import { Attachment, validateAttachments } from '../model/Productivity';
 import { ModelMessage } from '../model/Agent';
 import { officeText, pdfText } from './DocumentText';
+import { readUtf8File } from './TextFiles';
+import { attachmentContext } from '../model/AttachmentContext';
 
 export class Attachments {
   private static root: string = '';
@@ -18,7 +20,8 @@ export class Attachments {
     try {
       const document = !photo && /\.(pdf|docx|xlsx|pptx)(?:\?|$)/i.test(uri);
       const stat = await fs.stat(file.fd);
-      if (!stat.isFile() || stat.size > (photo ? 20 * 1024 * 1024 : document ? 8 * 1024 * 1024 : 64 * 1024)) { throw new Error(t("图片最多 20 MB，文档最多 8 MB，文本最多 64 KiB。")); }
+      if (!stat.isFile()) { throw new Error(t('请选择普通文件。')); }
+      if ((photo && stat.size > 20 * 1024 * 1024) || (document && stat.size > 8 * 1024 * 1024)) { throw new Error(t('图片最多 20 MB，文档最多 8 MB。')); }
       let bytes: ArrayBuffer;
       let text: string | undefined;
       if (photo) {
@@ -41,11 +44,10 @@ export class Attachments {
         } else { text = await officeText(source); }
         bytes = new util.TextEncoder().encodeInto(text).buffer as ArrayBuffer;
       } else {
-        bytes = await readBounded(file.fd, 64 * 1024);
-        text = bytes.byteLength === 0 ? '' : new util.TextDecoder('utf-8', { fatal: true }).decodeToString(new Uint8Array(bytes));
-        if (text.includes('\u0000') || text.length > 32000) { throw new Error(t("请选择最多 32000 字符的 UTF-8 文本。")); }
+        text = await readUtf8File(file.fd);
+        bytes = text.length ? new util.TextEncoder().encodeInto(text).buffer as ArrayBuffer : new ArrayBuffer(0);
       }
-      if (bytes.byteLength > 4 * 1024 * 1024) { throw new Error(t("压缩后图片仍超过 4 MB。")); }
+      if (photo && bytes.byteLength > 4 * 1024 * 1024) { throw new Error(t("压缩后图片仍超过 4 MB。")); }
       let name = uri.slice(uri.lastIndexOf('/') + 1).split('?')[0];
       try { name = decodeURIComponent(name); } catch (_) { /* Keep literal URI name. */ }
       const item: Attachment = { id: id, name: (name || (photo ? '图片' : '文本')).slice(0, 200),
@@ -59,7 +61,7 @@ export class Attachments {
       const message = JSON.parse(JSON.stringify(original)) as ModelMessage;
       message.images = [];
       for (const item of message.attachments || []) {
-        if (item.mime === 'text/plain') { message.content += '\n\n附件资料 ' + item.name + '：\n' + (item.text || ''); }
+        if (item.mime === 'text/plain') { message.content += attachmentContext(item); }
         else {
           const file = await fs.open(Attachments.path(item), fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
           try { message.images.push('data:image/jpeg;base64,' + new util.Base64Helper().encodeToStringSync(new Uint8Array(await readBounded(file.fd, 4 * 1024 * 1024)))); }

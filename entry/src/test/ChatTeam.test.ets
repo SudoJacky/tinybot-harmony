@@ -11,6 +11,7 @@ import { Cancellation } from '../main/ets/services/Cancellation';
 import { ChatTeamTools } from '../main/ets/services/ChatTeamTools';
 import { CredentialReader, ModelProvider, ProviderRequest } from '../main/ets/services/providers/Provider';
 import { ProviderRegistry } from '../main/ets/services/providers/ProviderRegistry';
+import { textPage } from '../main/ets/model/TextPage';
 
 class Gate {
   private release: () => void = () => {};
@@ -29,12 +30,12 @@ class BaseTools implements AgentTools {
   async execute(call: ToolCall, signal: Cancellation): Promise<string> {
     signal.check(); this.calls.push(call.function.name);
     const args = JSON.parse(call.function.arguments) as FileArgs;
-    if (call.function.name === 'read_file') { if (!this.files.has(args.path)) { throw new Error('missing file'); } return JSON.stringify({ content: this.files.get(args.path) }); }
+    if (call.function.name === 'read_file') { if (!this.files.has(args.path)) { throw new Error('missing file'); } return JSON.stringify(textPage(this.files.get(args.path) as string, args.offset, undefined, args.column)); }
     if (call.function.name === 'write_file') { this.files.set(args.path, args.content || ''); }
     return '{}';
   }
 }
-interface FileArgs { path: string; content?: string; }
+interface FileArgs { path: string; content?: string; offset?: number; column?: number; }
 interface Assignment { task: TaskInput; }
 interface TaskInput { id: string; }
 interface RecruitReply { runId: string; }
@@ -199,6 +200,24 @@ export default function chatTeamTests(): void {
       const id = await f.recruit(); const page = await f.wait(id); const args = JSON.stringify({ runId: id, entryId: page.results[0].entryId, artifactIndex: 0 });
       expect((await f.host.execute(call('team_read_result', args), new Cancellation())).includes('original')).assertTrue();
       f.base.files.set('report.md', 'changed'); await rejection(() => f.host.execute(call('team_read_result', args), new Cancellation()), '已变化'); await f.host.close();
+    });
+    it('handoff_reads_all_pages_and_detects_changes_beyond_the_first_page', 0, async () => {
+      const f = new Fixture(); const content = '中文'.repeat(20000) + '\nORIGINAL';
+      f.base.files.set('report.md', content); f.provider.artifacts = ['report.md'];
+      const id = await f.recruit(); const page = await f.wait(id);
+      expect(page.results.length).assertEqual(1);
+      expect(f.thread.teams![0].tasks[0].attempts[0].handoff?.artifacts[0].content).assertEqual(content);
+      recoverTeams(JSON.parse(JSON.stringify(f.thread.teams)) as TeamRun[]);
+      f.base.files.set('report.md', content.replace('ORIGINAL', 'CHANGED'));
+      await rejection(() => f.host.execute(call('team_read_result', JSON.stringify({ runId: id, entryId: page.results[0].entryId, artifactIndex: 0 })), new Cancellation()), '已变化');
+      await f.host.close();
+    });
+    it('rejects_oversized_handoff_without_saving_a_partial_artifact', 0, async () => {
+      const f = new Fixture(); f.base.files.set('report.md', 'x'.repeat(65537)); f.provider.artifacts = ['report.md'];
+      const id = await f.recruit(); const page = await f.wait(id);
+      expect(page.results.length).assertEqual(0);
+      expect(f.thread.teams![0].tasks[0].attempts[0].handoff).assertUndefined();
+      recoverTeams(JSON.parse(JSON.stringify(f.thread.teams)) as TeamRun[]); await f.host.close();
     });
     it('chat_run_survives_load_and_running_work_becomes_interrupted', 0, async () => {
       const f = new Fixture(); const id = await f.recruit(); await f.wait(id); await f.host.close();

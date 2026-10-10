@@ -20,6 +20,7 @@ import { RuleTools } from './RuleTools';
 import { McpTools } from './McpTools';
 import { ToolApproval } from './ToolApproval';
 import { Attachments } from './Attachments';
+import { AttachmentTools } from './AttachmentTools';
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { ConversationStore } from '../model/ConversationStore';
@@ -65,7 +66,7 @@ class NativeSessionResources implements SessionResources {
   createId(): string { return util.generateRandomUUID(); }
   ensureWorkspace(id: string): Promise<void> { return this.workspaces.ensureThread(id); }
   tools(id: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments: Attachment[] = [], live?: LiveResources): AgentTools {
-    const groups: AgentTools[] = [new WorkspaceTools(new NativeWorkspaceFiles(this.workspaces.pathFor(id))),
+    const groups: AgentTools[] = [new WorkspaceTools(new NativeWorkspaceFiles(this.workspaces.pathFor(id))), new AttachmentTools(attachments),
       new SkillTools(extensions.skills, selected, live ? () => live.skills() : undefined), new InteractionTools(this.approval)];
     groups.push(new CodeExecutionTools(new NativeCodeExecutor()));
     if (extensions.webEnabled) { groups.push(new WebTools(new NativeWebTransport())); }

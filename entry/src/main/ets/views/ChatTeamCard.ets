@@ -6,19 +6,15 @@ import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { Font, Motion, Radius, Space, compactNumber } from '../common/Theme';
 import { MarkdownView } from './MarkdownView';
 import { TeamMemberAvatar } from './TeamMemberAvatar';
+import { ToolReceipt } from './ToolReceipt';
+import { DisclosureStore } from '../viewmodel/DisclosureState';
 
 interface TeamCardInput { run: TeamRun; }
 interface TeamStatusInput { status: string; }
 interface TeamAvatarInput { run: TeamRun; member: TeamMember; size: number; ring: boolean; }
-interface TeamToolInput { tool: ToolExecution; }
+interface TeamToolInput { tool: ToolExecution; scope: string; }
 interface TeamAttemptInput { record: TeamTaskRecord; attempt: TeamAttempt; index: number; }
 interface TeamTaskInput { run: TeamRun; record: TeamTaskRecord; }
-
-function LOG_TITLES(): Record<string, string> { return {
-  'team_complete_task': t("提交交接"), 'team_list_messages': t("查看团队交接"), 'team_read_message': t("读取交接"),
-  'read_web': t("读取网页"), 'list_files': t("列出文件"), 'read_file': t("读取文件"), 'read_file_lines': t("读取文件片段"),
-  'search_file_content': t("搜索文件内容"), 'write_file': t("写入文件"), 'edit_file': t("编辑文件"), 'read_skill': t("读取 Skill")
-}; }
 
 function toneForeground(status: string): ResourceColor {
   if (status === 'failed') { return $r('app.color.danger'); }
@@ -58,6 +54,7 @@ struct ChatTeamRun {
   @State private expandedTasks: string[] = [];
   @State private expandedLogs: string[] = [];
   @State private expandedBriefs: string[] = [];
+  private disclosures: DisclosureStore = new DisclosureStore();
 
   aboutToAppear(): void {
     // A team working right now opens by default so its progress is visible without a tap.
@@ -133,27 +130,9 @@ struct ChatTeamRun {
 
   @Builder
   toolLog(input: TeamToolInput) {
-    Column({ space: 4 }) {
-      Row({ space: 6 }) {
-        Text(LOG_TITLES()[input.tool.call.function.name] || input.tool.call.function.name).fontSize(12).fontWeight(FontWeight.Medium)
-          .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
-        if (input.tool.status === 'running') {
-          LoadingProgress().width(12).height(12).color($r('app.color.accent'))
-        } else if (input.tool.status === 'complete') {
-          SymbolGlyph($r('sys.symbol.checkmark')).fontSize(12).fontColor([$r('app.color.accent')])
-        } else {
-          Text(input.tool.status === 'failed' ? t("失败") : t("已中断")).fontSize(11)
-            .fontColor(input.tool.status === 'failed' ? $r('app.color.danger') : $r('app.color.text_tertiary'))
-        }
-      }.width('100%')
-      Text(input.tool.call.function.arguments).fontSize(11).lineHeight(16).fontFamily('monospace').maxLines(4)
-        .textOverflow({ overflow: TextOverflow.Ellipsis }).copyOption(CopyOptions.LocalDevice).fontColor($r('app.color.text_secondary'))
-      if (input.tool.output) {
-        Text(input.tool.output).fontSize(11).lineHeight(16).maxLines(6).textOverflow({ overflow: TextOverflow.Ellipsis })
-          .copyOption(CopyOptions.LocalDevice).fontColor($r('app.color.text_secondary'))
-      }
-    }.width('100%').alignItems(HorizontalAlign.Start).padding({ left: 10, right: 10, top: 8, bottom: 8 })
-    .backgroundColor($r('app.color.surface_variant')).borderRadius(Radius.sm)
+    Column() {
+      ToolReceipt({ execution: input.tool, disclosure: this.disclosures.get(input.scope + ':' + input.tool.call.id) })
+    }.width('100%').padding({ left: 10, right: 10 }).backgroundColor($r('app.color.surface_variant')).borderRadius(Radius.sm)
   }
 
   @Builder
@@ -215,7 +194,7 @@ struct ChatTeamRun {
           Column({ space: 6 }) {
             ForEach(input.attempt.turn.steps.map((_step, index: number) => index), (stepIndex: number) => {
               ForEach(input.attempt.turn.steps[stepIndex].tools.map((tool) => tool.call.id), (callId: string) => {
-                this.toolLog({ tool: input.attempt.turn.steps[stepIndex].tools.find((tool) => tool.call.id === callId) as ToolExecution })
+                this.toolLog({ scope: input.attempt.id + ':' + stepIndex, tool: input.attempt.turn.steps[stepIndex].tools.find((tool) => tool.call.id === callId) as ToolExecution })
               }, (callId: string) => callId)
             }, (stepIndex: number) => stepIndex.toString())
           }.width('100%').transition(TransitionEffect.OPACITY)

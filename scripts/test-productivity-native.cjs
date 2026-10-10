@@ -207,6 +207,88 @@ async function test(name, run) { await run(); completedTests++; console.log('PAS
     const hydrated=await Attachments.hydrate(messages);assert.match(hydrated[0].content,/材料内容/);assert.equal(messages[0].content,'总结');
     fs.writeFileSync(incoming,Buffer.from([0xff,0xff]));await assert.rejects(Attachments.import(incoming,false));
   });
+  await test('large text attachments persist intact and are read in bounded pages after reload',async()=>{
+    const {AttachmentTools}=load(path.join(source,'services/AttachmentTools'));
+    const {estimateContextTokens}=load(path.join(source,'model/ConversationContext'));
+    const {attachmentTokens}=load(path.join(source,'model/ContextBreakdown'));
+    const incoming=path.join(fixture,'large.txt');
+    // Cross both old byte/character limits, a chunk boundary and a UTF-8 character boundary.
+    const content='a'.repeat(65535)+'中文🙂\n'+'附件正文🙂'.repeat(18000)+'\nEND';
+    fs.writeFileSync(incoming,content);
+    const item=await Attachments.import(incoming,false);
+    assert.equal(item.text,content);assert.equal(item.size,Buffer.byteLength(content));
+    assert.equal(fs.readFileSync(Attachments.path(item),'utf8'),content);
+    const data=model.emptyData();data.activeThreadId='large-attachment';
+    data.threads=[{id:data.activeThreadId,title:'Large',updatedAt:1,messages:[{id:'large-user',role:'user',content:'read',status:'complete',error:'',attachments:[item]},
+      {id:'large-answer',role:'assistant',content:'saved',status:'complete',error:''}]}];
+    const localStore=new ConversationStore(path.join(fixture,'large-store'));fs.mkdirSync(path.join(fixture,'large-store'));
+    await localStore.save(data);const restored=(await localStore.load()).threads[0].messages[0];
+    const hydrated=(await Attachments.hydrate([{role:'user',content:'read',attachments:restored.attachments}]))[0];
+    assert.match(hydrated.content,/read_attachment/);assert.ok(!hydrated.content.includes('END'));
+    assert.ok(estimateContextTokens([{role:'user',content:'',attachments:restored.attachments}])<1000);
+    assert.ok(attachmentTokens(item)<1000);
+    const tools=new AttachmentTools(restored.attachments);let offset=1,column=1,joined='',pages=0;
+    while(true){
+      const result=JSON.parse(await tools.execute({id:'read',function:{name:'read_attachment',arguments:JSON.stringify({id:item.id,offset,column})}},new Cancellation()));
+      assert.ok(Buffer.byteLength(result.content)<=50*1024);joined+=result.content;pages++;
+      if(!result.truncated)break;
+      assert.ok(result.nextOffset>offset||result.nextOffset===offset&&result.nextColumn>column);
+      offset=result.nextOffset;column=result.nextColumn;assert.ok(pages<100);
+    }
+    assert.equal(joined,content);assert.ok(pages>1);
+    await assert.rejects(tools.execute({function:{name:'read_attachment',arguments:'{"id":"other-chat"}'}},new Cancellation()),/unavailable/);
+    await assert.rejects(tools.execute({function:{name:'read_attachment',arguments:JSON.stringify({id:item.id,offset:0})}},new Cancellation()),/positive integers/);
+    const cancelled=new Cancellation();cancelled.cancel();
+    await assert.rejects(tools.execute({function:{name:'read_attachment',arguments:JSON.stringify({id:item.id})}},cancelled));
+    fs.writeFileSync(incoming,'x'.repeat(4*1024*1024+1));
+    const overImageLimit=await Attachments.import(incoming,false);assert.equal(overImageLimit.size,4*1024*1024+1);
+    assert.equal(model.parseAppData(JSON.stringify({...data,threads:[{...data.threads[0],attachments:[overImageLimit]}]})).threads[0].attachments[0].text.length,4*1024*1024+1);
+    fs.writeFileSync(incoming,'');assert.equal((await Attachments.import(incoming,false)).text,'');
+    fs.writeFileSync(incoming,'valid\0binary');await assert.rejects(Attachments.import(incoming,false),/文本/);
+    fs.writeFileSync(incoming,Buffer.concat([Buffer.alloc(65535,97),Buffer.from([0xe4,0xb8])]));await assert.rejects(Attachments.import(incoming,false));
+  });
+  await test('text attachments above the image cap survive backup and restore within the total backup budget',async()=>{
+    const {createBackupFile,readBackupFile}=load(path.join(source,'services/Backup'));
+    const root='/sandbox/large-backup';fs.mkdirSync(nativePath(root),{recursive:true});fs.mkdirSync(nativePath(root+'/cache'));
+    Attachments.configure(root);const content='b'.repeat(4*1024*1024+1);fs.writeFileSync(nativePath(root+'/input.txt'),content);
+    const item=await Attachments.import(root+'/input.txt',false);const data=model.emptyData();
+    data.activeThreadId='large-backup';data.threads=[{id:'large-backup',title:'Large backup',updatedAt:1,messages:[],attachments:[item]}];
+    const context={cacheDir:root+'/cache',getApplicationContext:()=>({filesDir:root})};
+    const backup=await createBackupFile(context,data);const restored=await readBackupFile(context,backup,model.emptyData());
+    const restoredItem=restored.threads[0].attachments[0];assert.equal(restoredItem.text,content);
+    assert.equal(fs.readFileSync(nativePath(Attachments.path(restoredItem)),'utf8'),content);
+    Attachments.configure(fixture);
+  });
+  await test('large workspace tools page Unicode without loss, search the tail and restore full baselines',async()=>{
+    const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
+    const {importTextFile}=load(path.join(source,'services/TextFiles'));
+    const root='/sandbox/workspace/large';fs.mkdirSync(nativePath(root),{recursive:true});
+    const files=new NativeWorkspaceFiles(root),tools=new WorkspaceTools(files),signal=new Cancellation();
+    const invoke=async(name,args)=>JSON.parse(await tools.execute({id:name,function:{name,arguments:JSON.stringify(args)}},signal));
+    const content=Array.from({length:2300},(_,i)=>`${i}: 中文资料🙂`).join('\n')+'\n'+'长行🙂'.repeat(18000)+'\nTAIL-MARKER';
+    fs.writeFileSync(nativePath(root+'/input.txt'),content);assert.equal(await importTextFile(root+'/input.txt'),content);
+    await invoke('write_file',{path:'large.txt',content});assert.equal((await files.read('large.txt',signal)).content,content);
+    let joined='',offset=1,column=1,pages=0;
+    while(true){const result=await invoke('read_file',{path:'large.txt',offset,column});joined+=result.content;pages++;
+      assert.ok(Buffer.byteLength(result.content)<=50*1024);
+      if(!result.truncated)break;
+      assert.ok(result.nextOffset>offset||result.nextOffset===offset&&result.nextColumn>column);
+      offset=result.nextOffset;column=result.nextColumn;assert.ok(pages<100);}
+    assert.equal(joined,content);assert.ok(pages>2);
+    const range=await invoke('read_file_lines',{path:'large.txt',startLine:2200,endLine:2201});assert.equal(range.content,content.split('\n').slice(2199,2201).join('\n')+'\n');
+    const search=await invoke('search_file_content',{path:'.',query:'TAIL-MARKER'});assert.equal(search.matches.length,2);assert.equal(search.skipped.length,0);
+    await files.accept('large.txt');
+    await invoke('edit_file',{path:'large.txt',oldText:'TAIL-MARKER',newText:'EDITED'});
+    assert.equal((await files.baseline('large.txt')).content,content);
+    await files.restore('large.txt',content.replace('TAIL-MARKER','EDITED'));assert.equal((await files.read('large.txt',signal)).content,content);
+    for(const args of [{offset:0},{offset:999999},{limit:0},{offset:1,column:999999}])await assert.rejects(invoke('read_file',{path:'large.txt',...args}));
+    // Exactly full byte pages must preserve the following newline, including an empty last line.
+    for(const sample of ['x'.repeat(50*1024)+'\n','x'.repeat(50*1024-1)+'🙂\n','\n'.repeat(2001)]){
+      fs.writeFileSync(nativePath(root+'/boundary.txt'),sample);let actual='',args={path:'boundary.txt'};
+      for(let n=0;n<10;n++){const r=await invoke('read_file',args);actual+=r.content;if(!r.truncated)break;args={path:'boundary.txt',offset:r.nextOffset,column:r.nextColumn};}
+      assert.equal(actual,sample);
+    }
+  });
   await test('empty workspace files round-trip with device encoder behavior',async()=>{
     fs.mkdirSync(nativePath('/sandbox/workspace/thread'),{recursive:true});
     const files=new NativeWorkspaceFiles('/sandbox/workspace/thread'), signal=new Cancellation();

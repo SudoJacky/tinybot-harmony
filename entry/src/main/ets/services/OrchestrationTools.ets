@@ -11,7 +11,7 @@ interface CodeArguments { code: string; }
 interface ChildReference { callId: string; tool: string; status: string; }
 interface ExecutionStatus { status: string; calls?: ChildReference[]; }
 interface CatalogEntry { name: string; description: string; parameters: Object; }
-const NESTED_TOOLS: string[] = ['list_files', 'read_file', 'read_file_lines', 'search_file_content',
+const NESTED_TOOLS: string[] = ['list_files', 'read_file', 'read_file_lines', 'read_attachment', 'search_file_content',
   'write_file', 'edit_file', 'read_web', 'read_skill', 'mcp_list_tools', 'mcp_search_tools', 'mcp_call', 'read_tool_result'];
 
 // Wrap the final policy-filtered catalog, outside any TeamToolLane. Only children enter that lane.

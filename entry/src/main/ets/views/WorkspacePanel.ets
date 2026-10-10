@@ -6,7 +6,7 @@ import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { NativeWorkspaceFiles } from '../services/NativeWorkspaceFiles';
 import { Cancellation } from '../services/Cancellation';
-import { readSkillImport } from '../services/SkillImport';
+import { importTextFile } from '../services/TextFiles';
 import { Attachments } from '../services/Attachments';
 import { exportFile, shareFile } from '../services/NativeActions';
 import { MarkdownView } from './MarkdownView';
@@ -105,7 +105,7 @@ export struct WorkspacePanel {
       this.busy = true; let count = 0;
       for (const uri of uris) {
         const document = /\.(pdf|docx|xlsx|pptx)(?:\?|$)/i.test(uri);
-        const text = document ? (await Attachments.import(uri, false)).text || '' : await readSkillImport(uri);
+        const text = document ? (await Attachments.import(uri, false)).text || '' : await importTextFile(uri);
         let name = uri.slice(uri.lastIndexOf('/') + 1).split('?')[0];
         try { name = decodeURIComponent(name); } catch (_) { /* Keep literal URI name. */ }
         name = name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(-80) || t("导入-") + Date.now() + '.txt';

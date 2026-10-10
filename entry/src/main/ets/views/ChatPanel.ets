@@ -25,6 +25,7 @@ import { InputQueuePanel } from './InputQueuePanel';
 import { ContextDetails } from './ContextDetails';
 import { Btn, Font, Motion, Radius, Space, fileSize } from '../common/Theme';
 import { Banner, IconBadge, IconButton } from '../common/Widgets';
+import { WindowViewport } from '../viewmodel/WindowViewport';
 
 class Suggestion {
   icon: Resource;
@@ -80,6 +81,7 @@ export struct ChatPanel {
   @State private memoryMessageId: string = '';
   @State private memoryThreadId: string = '';
   @State private composerFocused: boolean = false;
+  @State private viewport: WindowViewport = new WindowViewport();
   @State private showReasoning: boolean = false;
   @State private reasoningPreview: string = '';
   @State private reasoningPreviewKey: string = '';
@@ -107,6 +109,10 @@ export struct ChatPanel {
   }
 
   aboutToAppear(): void {
+    this.viewport.onKeyboard = (shown: boolean): void => {
+      if (shown && this.composerFocused) { this.inspectingOutput = false; this.followOutput = true; this.follow(); }
+    };
+    this.viewport.observe(this.getUIContext());
     this.speech.onResult = (text: string): void => {
       if (!this.dictationDraft || this.speechThreadId !== this.app.active.id || !this.speechEnabled) {
         this.endSpeech(false); return;
@@ -122,6 +128,7 @@ export struct ChatPanel {
   }
 
   aboutToDisappear(): void {
+    this.viewport.dispose();
     this.endSpeech(false);
     clearTimeout(this.scrollTimer);
   }
@@ -213,9 +220,16 @@ export struct ChatPanel {
     MemoryDraftPanel({ app: this.app, threadId: this.memoryThreadId, messageId: this.memoryMessageId, onClose: () => { this.showMemoryDraft = false; } })
   }
   private async fork(id: string): Promise<void> {
+    const editing = this.thread.messages.some((message) => message.id === id && message.role === 'user');
     if (await this.app.forkThread(id)) {
       this.getUIContext().getPromptAction().showToast({ message: t("已切换到新分支，原对话保留在列表中") });
+      if (editing) { this.getUIContext().getFocusController().requestFocus('composer'); }
     }
+  }
+  private async regenerate(id: string): Promise<void> {
+    this.getUIContext().getFocusController().clearFocus();
+    this.inspectingOutput = false; this.followOutput = true;
+    await this.app.regenerateReply(id, () => this.follow());
   }
   private canAttach(): boolean {
     return !this.speechActive() && !this.app.busy && !this.importing && !this.thread.archived && this.app.saveError.length === 0;
@@ -323,6 +337,7 @@ export struct ChatPanel {
         ForEach(this.app.visibleMessages, (message: MessageViewModel) => {
           ListItem() {
             MessageBubble({ message: message, uiAvailable: !this.app.busy && !this.thread.archived,
+              actionsEnabled: !this.app.busy && !this.app.saveError, onRegenerate: (id: string) => this.regenerate(id),
               onUi: this.uiHandler(this.thread.id, message.id), onFork: (id: string) => { this.fork(id); }, onRemember: (id: string) => { this.remember(id); },
               onInspect: () => { this.inspectingOutput = true; this.followOutput = false; clearTimeout(this.scrollTimer); this.scrollTimer = -1; },
               onReference: (text: string) => this.app.setDraft(this.app.draft + text), onResume: (id: string) => this.app.resumeForm(message.id, id),
@@ -344,6 +359,10 @@ export struct ChatPanel {
       .onTouch((event: TouchEvent) => { if (event.type === TouchType.Down) { this.followOutput = false; } })
       .onReachEnd(() => { if (!this.inspectingOutput) { this.followOutput = true; } })
       .onDidScroll(() => { this.atBottom = this.scroller.isAtEnd(); })
+      .onAreaChange((previous: Area, current: Area) => {
+        // RESIZE moves the composer but does not scroll the List. Follow its final viewport size.
+        if (previous.height !== current.height && this.composerFocused && this.viewport.keyboardHeight > 0) { this.follow(); }
+      })
       if (!this.atBottom) {
         Column() {
           IconButton({ icon: $r('sys.symbol.arrow_down'), label: t("查看最新消息"), compId: 'scroll-to-latest',
@@ -729,7 +748,8 @@ export struct ChatPanel {
         .onChange((value: string) => {
           if (!this.speechActive()) { this.app.setDraft(value); }
         })
-        .onFocus(() => { this.composerFocused = true; }).onBlur(() => { this.composerFocused = false; })
+        .onFocus(() => { this.composerFocused = true; this.inspectingOutput = false; this.followOutput = true; this.follow(); })
+        .onBlur(() => { this.composerFocused = false; })
       Row({ space: 4 }) {
         if (this.speechActive()) {
           Button(t('取消')).id('cancel-speech').attributeModifier(Btn.textSmall)
@@ -927,9 +947,11 @@ export struct ChatPanel {
           ChatPlanPanel({ plan: message.plan })
         }, (message: MessageViewModel) => this.thread.id + ':' + message.id)
         this.composer()
-        Text(t('AI可能会犯错，请仔细鉴别。')).id('ai-disclaimer')
-          .fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
-          .textAlign(TextAlign.Center).width('100%').padding({ left: Space.sm, right: Space.sm })
+        if (this.viewport.keyboardHeight === 0) {
+          Text(t('AI可能会犯错，请仔细鉴别。')).id('ai-disclaimer')
+            .fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+            .textAlign(TextAlign.Center).width('100%').padding({ left: Space.sm, right: Space.sm })
+        }
       }.width('100%').padding({ left: 10, right: 10, bottom: Space.sm })
     }.height('100%').width('100%')
       .bindSheet($$this.showMemoryDraft, this.memoryDraftSheet(), { title: { title: t("提炼并确认记忆") }, detents: [SheetSize.LARGE], dragBar: true, keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY,

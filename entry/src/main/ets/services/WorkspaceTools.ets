@@ -3,8 +3,7 @@ import { ToolCall, ToolDefinition, ToolProperty } from '../model/Agent';
 import { AgentTools } from './AgentLoop';
 import { Cancellation } from './Cancellation';
 import { WorkspaceFiles } from './WorkspaceFiles';
-
-export const MAX_FILE_BYTES: number = 64 * 1024;
+import { textPage, MAX_READ_LINES } from '../model/TextPage';
 
 interface FileArguments {
   path: string;
@@ -14,6 +13,9 @@ interface FileArguments {
   query?: string;
   startLine?: number;
   endLine?: number;
+  offset?: number;
+  limit?: number;
+  column?: number;
 }
 
 interface SearchMatch { path: string; line: number; text: string; }
@@ -49,11 +51,13 @@ export class WorkspaceTools implements AgentTools {
   definitions(): ToolDefinition[] {
     const definitions: ToolDefinition[] = [
       this.definition('list_files', '列出当前会话工作区内一个目录的直接子项；path 为 . 表示工作区根目录，最多返回 200 项。', false),
-      this.definition('read_file', '读取当前会话工作区中的 UTF-8 文本文件，最大 64 KiB。', false),
-      this.definition('write_file', '在当前会话工作区创建或完整覆盖 UTF-8 文本文件，自动创建父目录，最大 64 KiB。', true),
+      this.extraDefinition('read_file', '读取工作区 UTF-8 文本。每次最多 2000 行或 50 KiB；truncated 表示未读完，用 nextOffset/nextColumn 作为 offset/column 继续，直到完整。',
+        { 'path': { type: 'string', description: '文件相对路径' }, 'offset': { type: 'integer', description: '起始行，默认 1' },
+          'limit': { type: 'integer', description: '最多读取的行数，默认 2000' }, 'column': { type: 'integer', description: '首行起始 UTF-16 列，默认 1；续读时使用 nextColumn' } }, ['path']),
+      this.definition('write_file', '在当前会话工作区创建或完整覆盖 UTF-8 文本文件，自动创建父目录。', true),
       this.extraDefinition('search_file_content', '递归搜索工作区 UTF-8 文本中的字面关键词，返回路径、行号和片段。最多检查 200 个文件、返回 100 个匹配；truncated 表示结果不完整。',
         { 'path': { type: 'string', description: '目录相对路径，根目录使用 .' }, 'query': { type: 'string', description: '非空字面关键词，区分大小写' } }, ['path', 'query']),
-      this.extraDefinition('read_file_lines', '按行读取不超过 64 KiB 的文本，行号从 1 开始，最多 200 行。',
+      this.extraDefinition('read_file_lines', '按行读取文本，行号从 1 开始，每次最多 2000 行或 50 KiB；用 read_file 的 offset/column 接续 nextOffset/nextColumn。',
         { 'path': { type: 'string', description: '文件相对路径' }, 'startLine': { type: 'integer', description: '开始行' }, 'endLine': { type: 'integer', description: '结束行（含）' } }, ['path', 'startLine', 'endLine']),
       this.extraDefinition('edit_file', '精准替换唯一匹配的原文。必须先读取文件；匹配不存在或多处时拒绝修改。保留修改前基线供用户审阅。',
         { 'path': { type: 'string', description: '文件相对路径' }, 'oldText': { type: 'string', description: '唯一匹配的非空原文' }, 'newText': { type: 'string', description: '替换文字，可以为空' } }, ['path', 'oldText', 'newText'])
@@ -86,7 +90,7 @@ export class WorkspaceTools implements AgentTools {
       throw new Error(t("工具参数必须是有效的 JSON 对象。"));
     }
     if (!args || Array.isArray(args) || typeof args.path !== 'string' ||
-      Object.keys(args).some((key: string) => !['path', 'content', 'oldText', 'newText', 'query', 'startLine', 'endLine'].includes(key)) ||
+      Object.keys(args).some((key: string) => !['path', 'content', 'oldText', 'newText', 'query', 'startLine', 'endLine', 'offset', 'limit', 'column'].includes(key)) ||
       (name === 'write_file' && typeof args.content !== 'string')) {
       throw new Error(t("工具参数不符合要求：必须包含 path，写入还需要 content。"));
     }
@@ -102,17 +106,22 @@ export class WorkspaceTools implements AgentTools {
         return JSON.stringify(await this.files.write(path, replaceUnique(content, args.oldText, args.newText), cancellation));
       }
       const start = args.startLine || 0; const end = args.endLine || 0;
-      if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start || end - start >= 200) { throw new Error(t("行范围无效，最多 200 行。")); }
-      const lines = content.split('\n');
-      return JSON.stringify({ path: path, startLine: start, totalLines: lines.length, content: lines.slice(start - 1, end).join('\n') });
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 1 || end < start || end - start >= MAX_READ_LINES) { throw new Error(t('行范围无效，最多 2000 行。')); }
+      return this.readPage(path, content, start, end - start + 1);
     }
     if (name === 'list_files') {
       return JSON.stringify(await this.files.list(path, cancellation));
     }
     if (name === 'read_file') {
-      return JSON.stringify(await this.files.read(path, cancellation));
+      return this.readPage(path, (await this.files.read(path, cancellation)).content, args.offset, args.limit, args.column);
     }
     return JSON.stringify(await this.files.write(path, args.content as string, cancellation));
+  }
+
+  private readPage(path: string, content: string, offset?: number, limit?: number, column?: number): string {
+    const page = textPage(content, offset, limit, column);
+    return JSON.stringify({ path: path, content: page.content, startLine: page.startLine, totalLines: page.totalLines,
+      truncated: page.truncated, nextOffset: page.nextOffset, nextColumn: page.nextColumn });
   }
 
   private extraDefinition(name: string, description: string, properties: Record<string, ToolProperty>, required: string[]): ToolDefinition {

@@ -251,7 +251,7 @@ export default function agentTests(): void {
       expect(JSON.stringify(durable)).assertEqual(JSON.stringify(result.steps.flatMap((step) => step.tools)));
       expect(model.requests[1][1].toolCalls?.[0].id).assertEqual('write');
       expect(model.requests[1][2].toolCallId).assertEqual('write');
-      expect(model.requests[2][4].content).assertEqual('{"path":"notes/a.txt","content":"你好🌱"}');
+      expect(model.requests[2][4].content).assertEqual('{"path":"notes/a.txt","content":"你好🌱","startLine":1,"totalLines":1,"truncated":false}');
       expect(model.schemas[0].some((tool) => tool.function.name === 'write_file')).assertTrue();
       expect(model.schemas[0].some((tool) => tool.function.name === 'search_file_content')).assertTrue();
     });

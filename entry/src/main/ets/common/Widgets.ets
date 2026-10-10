@@ -3,6 +3,7 @@ import { Btn, Font, Motion, Radius, Space } from './Theme';
 import { LiquidToggle } from './LiquidToggle';
 import { AnimatorResult } from '@kit.ArkUI';
 import { SegmentFrame, SegmentedMotion } from './SegmentedMotion';
+import { WindowViewport } from '../viewmodel/WindowViewport';
 
 @Component
 export struct IconButton {
@@ -188,12 +189,17 @@ export struct Banner {
 @Component
 export struct BottomBar {
   @BuilderParam content: () => void;
+  @Prop sheet: boolean = false;
+  @State private viewport: WindowViewport = new WindowViewport();
+  aboutToAppear(): void { if (this.sheet) { this.viewport.observe(this.getUIContext()); } }
+  aboutToDisappear(): void { this.viewport.dispose(); }
 
   build() {
     Column() {
       this.content()
     }
-    .width('100%').padding({ left: Space.page, right: Space.page, top: 10, bottom: 12 })
+    .width('100%').padding({ left: Space.page, right: Space.page, top: 10,
+      bottom: 12 + (this.sheet && this.viewport.keyboardHeight === 0 ? this.viewport.bottom : 0) })
     .backgroundColor($r('app.color.page_background'))
     .border({ width: { top: 0.5 }, color: $r('app.color.divider') })
   }

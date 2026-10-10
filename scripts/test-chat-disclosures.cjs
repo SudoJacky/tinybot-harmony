@@ -41,6 +41,8 @@ first.usageOpen = true;
 group.open = true;
 thought.open = true; thought.limit = 8000;
 tool.open = true; tool.limit = 12000; tool.rawOpen = true; tool.rawLimit = 6000;
+tool.detailTab = 'logs'; tool.detailPage = 2;
+const child = tool.children.get('child'); child.open = true; child.detailPage = 1;
 
 // New streaming snapshots and later steps must not erase existing reading state.
 data.messages[0].steps[0].tools[0].output = 'file output';
@@ -53,6 +55,8 @@ assert.equal(first.disclosures.get('tool-read-1'), tool);
 assert.equal(tool.limit, 12000);
 assert.equal(tool.rawOpen, true);
 assert.equal(tool.rawLimit, 6000);
+assert.equal(tool.detailTab, 'logs'); assert.equal(tool.detailPage, 2);
+assert.equal(tool.children.get('child'), child); assert.equal(child.open, true); assert.equal(child.detailPage, 1);
 assert.equal(first.disclosures.get('thinking-0').limit, 8000);
 assert.equal(first.disclosures.get('tool-read-2').open, false);
 console.log('PASS streaming updates and new tools preserve prior reading state');

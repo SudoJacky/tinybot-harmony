@@ -137,6 +137,14 @@ export struct ProviderEditorPanel {
   }
 
   @Builder
+  serviceActions() {
+    Menu() {
+      MenuItem({ content: t('删除此服务') }).id('delete-provider-' + this.editor.id)
+        .contentFontColor($r('app.color.danger')).enabled(!this.locked()).onClick(() => this.confirmDelete())
+    }
+  }
+
+  @Builder
   modelRow(id: string) {
     Row({ space: 8 }) {
       SymbolGlyph($r('sys.symbol.checkmark')).fontSize(14).fontColor([$r('app.color.accent')])
@@ -210,6 +218,13 @@ export struct ProviderEditorPanel {
 
   build() {
     Column() {
+      if (this.editor.id.length > 0) {
+        Row() {
+          Blank()
+          Button(t('更多操作')).id('provider-more-actions').attributeModifier(Btn.text).height(44)
+            .enabled(!this.locked()).bindMenu(this.serviceActions)
+        }.width('100%').padding({ left: Space.page, right: Space.page })
+      }
       Scroll(this.scroller) {
         Column() {
           Column() {
@@ -330,10 +345,6 @@ export struct ProviderEditorPanel {
               }
             }
           }.margin({ top: 16 })
-          if (this.editor.id.length > 0) {
-            Button(t('删除此服务')).id('delete-provider-' + this.editor.id).attributeModifier(Btn.danger).width('100%')
-              .margin({ top: Space.xl }).enabled(!this.locked()).onClick(() => this.confirmDelete())
-          }
         }.padding({ left: Space.page, right: Space.page, bottom: Space.xl }).width('100%').enabled(!this.locked())
       }.layoutWeight(1).width('100%').scrollBar(BarState.Auto).align(Alignment.Top)
       BottomBar() {

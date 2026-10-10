@@ -210,6 +210,10 @@ export class ChatViewModel {
     this.onOutput = onUpdate;
     try { await this.requireSession().send(); } finally { this.onOutput = () => {}; }
   }
+  async regenerateReply(id: string, onUpdate: () => void): Promise<boolean> {
+    this.onOutput = onUpdate;
+    try { return await this.requireSession().regenerateReply(id); } finally { this.onOutput = () => {}; }
+  }
   async resumeQueue(onUpdate: () => void): Promise<void> {
     this.onOutput = onUpdate;
     try { await this.requireSession().resumeQueue(); } finally { this.onOutput = () => {}; }

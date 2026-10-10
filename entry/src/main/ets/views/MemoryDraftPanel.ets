@@ -93,7 +93,7 @@ export struct MemoryDraftPanel {
         }.layoutWeight(1).width('100%').scrollBar(BarState.Off).align(Alignment.Top).edgeEffect(EdgeEffect.Spring)
       }
       if (this.loading && this.error) { Banner({ text: this.error }).padding({ left: Space.page, right: Space.page }) }
-      BottomBar() {
+      BottomBar({ sheet: true }) {
         Row({ space: Space.md }) {
           Button(this.loading ? t("取消提炼") : t("取消")).id('cancel-memory-draft').attributeModifier(Btn.tonal).layoutWeight(1)
             .enabled(!this.saving).onClick(() => this.close())
