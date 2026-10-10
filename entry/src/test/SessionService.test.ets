@@ -13,7 +13,9 @@ import { Cancellation, RunCancelledError } from '../main/ets/services/Cancellati
 import { CredentialVault, ProviderDraft } from '../main/ets/services/ProfileSettings';
 import { SessionEvent, SessionRepository, SessionResources } from '../main/ets/services/SessionContracts';
 import { SessionService } from '../main/ets/services/SessionService';
-import { Attachment, defaultProductivity } from '../main/ets/model/Productivity';
+import { Attachment, ProductivityData, defaultProductivity } from '../main/ets/model/Productivity';
+import { AttachmentTools } from '../main/ets/services/AttachmentTools';
+import { ToolSet } from '../main/ets/services/ToolSet';
 import { ModelProvider, ProviderRequest } from '../main/ets/services/providers/Provider';
 import { ProviderRegistry } from '../main/ets/services/providers/ProviderRegistry';
 import { defaultAssistantOptions } from '../main/ets/model/AssistantOptions';
@@ -82,7 +84,9 @@ class Resources implements SessionResources {
   errors: string[] = [];
   createId(): string { return 'id-' + ++this.ids; }
   async ensureWorkspace(id: string): Promise<void> { this.workspaces.push(id); }
-  tools(_id: string, _extensions: ExtensionSettings, _selected: string): AgentTools { return this.agentTools; }
+  tools(_id: string, _extensions: ExtensionSettings, _selected: string, _productivity?: ProductivityData, attachments: Attachment[] = []): AgentTools {
+    return new ToolSet([this.agentTools, new AttachmentTools(attachments)]);
+  }
   configureProviders(_profiles: ProviderProfile[]): void {}
   reportError(message: string): void { this.errors.push(message); }
 }
@@ -760,6 +764,22 @@ export default function sessionServiceTests(): void {
       const restored = parseAppData(f.repository.saved);
       expect(active(restored).messages[0].attachments?.[0].path).assertEqual('photo.jpg');
     });
+    it('readsLargeComposerAttachmentsInNormalAndTeamChats', 0, async () => {
+      for (const team of [false, true]) {
+        const data = seed(); data.threads[0].teamEnabled = team;
+        const f = new Fixture(data); await f.session.initialize();
+        const text = 'x'.repeat(70000) + '\nATTACHMENT-END';
+        const attachment: Attachment = { id: 'large', name: 'large.txt', path: 'large.txt', mime: 'text/plain', size: text.length, text: text };
+        expect(await f.session.setAttachments([attachment])).assertTrue();
+        f.provider.respond = async (index) => index === 0 ? { content: '', toolCalls: [{ id: 'read-large', type: 'function',
+          function: { name: 'read_attachment', arguments: JSON.stringify({ id: 'large', offset: 2 }) } }] } : reply('Read the end.');
+        f.session.setDraft('Read the last line of the attachment.'); await f.session.send();
+        expect(f.provider.requests.length).assertEqual(2);
+        expect(f.provider.requests[0].tools.some((tool) => tool.function.name === 'read_attachment')).assertTrue();
+        expect(f.provider.requests[1].messages.some((message) => message.role === 'tool' && message.content.includes('ATTACHMENT-END'))).assertTrue();
+        expect(active(await f.repository.load()).messages[0].attachments?.[0].text).assertEqual(text);
+      }
+    });
     it('forksBeforeSelectedUserAndPreservesOriginalAndDraftAttachment', 0, async () => {
       const data = historySeed();
       data.threads[0].messages[2].attachments = [{ id: 'photo', name: 'photo', path: 'photo.jpg', mime: 'image/jpeg', size: 12 }];
@@ -771,6 +791,45 @@ export default function sessionServiceTests(): void {
       expect(branch.attachments?.[0].id).assertEqual('photo');
       expect(snapshot.threads.find((item) => item.id === 'thread-1')?.messages.length).assertEqual(8);
       parseAppData(f.repository.saved);
+    });
+    it('regeneratesSelectedAnswerOnANewBranchWithAttachmentsAndReferences', 0, async () => {
+      const data = historySeed(); const original = data.threads[0];
+      data.productivity = defaultProductivity(); data.productivity.options = defaultAssistantOptions();
+      data.productivity.options.autoMemory = false; data.productivity.options.readOnly = true;
+      original.draft = 'unfinished next question'; original.reasoningEffort = 'high'; original.disabledMcpIds = ['offline'];
+      original.messages[2].attachments = [{ id: 'note', name: 'note.txt', path: 'note.txt', mime: 'text/plain', size: 4, text: 'note' }];
+      original.messages[2].references = [{ threadId: 'reference', title: 'Reference', content: 'saved reference context', capturedAt: 1, truncated: false }];
+      const f = new Fixture(data); await f.session.initialize();
+      expect(await f.session.regenerateReply('answer-1')).assertTrue();
+      const snapshot = f.session.snapshot(); const branch = active(snapshot);
+      expect(JSON.stringify(snapshot.productivity?.options)).assertEqual(JSON.stringify(data.productivity.options));
+      expect(branch.id === original.id).assertFalse(); expect(branch.parentMessageId).assertEqual('user-1');
+      expect(branch.messages.length).assertEqual(4); expect(branch.reasoningEffort).assertEqual('high');
+      expect(branch.disabledMcpIds?.[0]).assertEqual('offline');
+      expect(branch.messages[2].attachments?.[0].text).assertEqual('note');
+      expect(branch.messages[2].references?.[0].content).assertEqual('saved reference context');
+      expect(f.provider.requests.length).assertEqual(1);
+      expect(JSON.stringify(f.provider.requests[0].messages).includes('saved reference context')).assertTrue();
+      const preserved = snapshot.threads.find((item) => item.id === original.id) as ThreadData;
+      expect(JSON.stringify(preserved.messages)).assertEqual(JSON.stringify(original.messages));
+      expect(preserved.draft).assertEqual('unfinished next question'); parseAppData(f.repository.saved);
+    });
+    it('doesNotRegenerateWhenBranchCannotBeSavedOrTheTargetIsInvalid', 0, async () => {
+      const f = new Fixture(historySeed()); await f.session.initialize();
+      expect(await f.session.regenerateReply('user-1')).assertFalse();
+      expect(await f.session.regenerateReply('missing')).assertFalse();
+      expect(f.session.snapshot().threads.length).assertEqual(1);
+      f.repository.beforeSave = async () => { throw new Error('disk full'); };
+      expect(await f.session.regenerateReply('answer-1')).assertFalse();
+      expect(f.provider.requests.length).assertEqual(0);
+      expect(f.session.snapshot().threads.find((item) => item.id === 'thread-1')?.messages.length).assertEqual(8);
+    });
+    it('rejectsRepeatedRegenerationWhileOneBranchIsSaving', 0, async () => {
+      const f = new Fixture(historySeed()); await f.session.initialize();
+      const gate = new Gate(); f.repository.beforeSave = async () => { await gate.promise; };
+      const first = f.session.regenerateReply('answer-1');
+      expect(await f.session.regenerateReply('answer-1')).assertFalse(); gate.open(); await first;
+      expect(f.provider.requests.length).assertEqual(1); expect(f.session.snapshot().threads.length).assertEqual(2);
     });
     it('injectsOnlyApplicableMemoryIntoTheNextModelRequest', 0, async () => {
       const f = new Fixture(); await f.session.initialize(); const data = defaultProductivity();

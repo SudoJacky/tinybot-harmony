@@ -16,6 +16,7 @@ export struct MarkdownView {
   @Prop @Watch('refresh') content: string = '';
   @Prop @Watch('refresh') streaming: boolean = false;
   @Prop fontSize: number = 16;
+  @Prop selectable: boolean = true;
   @State private blocks: MarkdownBlock[] = [];
   @State private copied: number = -1;
   @State private expanded: number[] = [];
@@ -119,7 +120,7 @@ export struct MarkdownView {
             .onClick(() => { if (span.url) { this.open(span.url); } })
         }
       })
-    }.fontSize(size).lineHeight(Math.round(size * 1.62)).fontColor(color).copyOption(CopyOptions.LocalDevice).width('100%')
+    }.fontSize(size).lineHeight(Math.round(size * 1.62)).fontColor(color).copyOption(this.selectable ? CopyOptions.LocalDevice : CopyOptions.None).width('100%')
   }
 
   @Builder
@@ -144,7 +145,7 @@ export struct MarkdownView {
             Span(span.text).fontColor(this.revealColor($r('app.color.text_primary'), span.opacity))
           })
         }.fontSize(13).lineHeight(20).fontFamily('monospace')
-          .copyOption(CopyOptions.LocalDevice).fontColor($r('app.color.text_primary'))
+          .copyOption(this.selectable ? CopyOptions.LocalDevice : CopyOptions.None).fontColor($r('app.color.text_primary'))
           .padding({ left: Space.md, right: Space.md, top: 10, bottom: 12 })
       }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).width('100%').align(Alignment.Start)
       if (this.codeLines(block) > CODE_PREVIEW_LINES) {

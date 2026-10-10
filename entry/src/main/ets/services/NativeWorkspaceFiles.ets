@@ -3,7 +3,8 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { Cancellation } from './Cancellation';
-import { MAX_FILE_BYTES, workspaceRelativePath } from './WorkspaceTools';
+import { workspaceRelativePath } from './WorkspaceTools';
+import { readUtf8File } from './TextFiles';
 
 import { WorkspaceFiles, WorkspaceEntry, WorkspaceListing, WorkspaceText, WorkspaceWrite, FileBaseline } from './WorkspaceFiles';
 
@@ -41,30 +42,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     cancellation.check();
     const file = await fs.open(absolute, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
     try {
-      const stat = await fs.stat(file.fd);
-      if (!stat.isFile() || stat.size > MAX_FILE_BYTES) {
-        throw new Error(t("只能读取不超过 64 KiB 的普通文本文件。"));
-      }
-      const buffer = new Uint8Array(MAX_FILE_BYTES + 1);
-      let total = 0;
-      while (total < buffer.byteLength) {
-        cancellation.check();
-        const chunk = new ArrayBuffer(buffer.byteLength - total);
-        const count = await fs.read(file.fd, chunk);
-        if (count === 0) {
-          break;
-        }
-        buffer.set(new Uint8Array(chunk, 0, count), total);
-        total += count;
-      }
-      if (total > MAX_FILE_BYTES) {
-        throw new Error(t("文件超过 64 KiB 读取上限。"));
-      }
-      const content = total === 0 ? '' : new util.TextDecoder('utf-8', { fatal: true }).decodeToString(buffer.slice(0, total));
-      if (content.includes('\u0000')) {
-        throw new Error(t("此文件不是可读取的文本文件。"));
-      }
-      cancellation.check();
+      const content = await readUtf8File(file.fd, cancellation);
       return { path: path, content: content };
     } finally {
       await fs.close(file);
@@ -74,8 +52,8 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
   async write(path: string, content: string, cancellation: Cancellation): Promise<WorkspaceWrite> {
     // Some device SDKs return undefined for encodeInto(''), despite its declared return type.
     const bytes = content.length === 0 ? new Uint8Array(0) : new util.TextEncoder().encodeInto(content);
-    if (bytes.byteLength > MAX_FILE_BYTES || content.includes('\u0000')) {
-      throw new Error(t("写入内容必须是不超过 64 KiB 的文本，不能包含空字符。"));
+    if (content.includes('\u0000')) {
+      throw new Error(t('文本不能包含空字符。'));
     }
     const absolute = await this.resolve(path, true, cancellation);
     const existing = await this.optionalStat(absolute);

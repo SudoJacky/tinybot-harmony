@@ -20,6 +20,7 @@ class Property {
 class ViewPU {
   constructor(parent, storage, id) { this.parent = parent; this.id = id; this.effects = new Map(); this.childViews = new Map(); this.lists = new Map(); this.branches = new Map(); this.texts = new Map(); this.loadingMounts = 0; }
   finalizeConstruction() {}
+  declareWatch() {}
   observeComponentCreation2(callback, component) { const id = ++serial; this.effects.set(id, callback); this.currentElmt = id; currentView = this; if (component === globals.LoadingProgress) this.loadingMounts++; callback(id, true); }
   forEachUpdateFunction(id, items, create, key) {
     const previous = this.lists.get(id) || new Set(), next = new Set();
@@ -37,8 +38,14 @@ class Child extends ViewPU {
 }
 class MarkdownView extends Child {}
 class TeamMemberAvatar extends Child {}
+class ToolReceipt extends Child {}
+const disclosureExports = {};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(root, 'entry/src/main/ets/viewmodel/DisclosureState.ets'), 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021, experimentalDecorators: true }
+}).outputText, {exports: disclosureExports, Observed: cls => cls});
 const noUi = () => new Proxy({}, { get: () => () => {} });
 const globals = { exports: {}, ViewPU, SynchedPropertyNesedObjectPU: Property, SynchedPropertySimpleOneWayPU: Property,
+  SynchedPropertyObjectOneWayPU: Property,
   ObservedPropertySimplePU: Property, ObservedPropertyObjectPU: Property,
   ObservedObject: { GetRawObject: value => value },
   makeBuilderParameterProxy: (name, getters) => new Proxy({}, { get: (_, key) => getters[key]() }),
@@ -49,13 +56,20 @@ const globals = { exports: {}, ViewPU, SynchedPropertyNesedObjectPU: Property, S
     if (id.includes('Theme&')) return { Font: {}, Motion: {}, Radius: {}, Space: {}, compactNumber: String };
     if (id.includes('MarkdownView&')) return { MarkdownView };
     if (id.includes('TeamMemberAvatar&')) return { TeamMemberAvatar };
+    if (id.includes('ToolReceipt&')) return { ToolReceipt };
+    if (id.includes('DisclosureState&')) return disclosureExports;
+    if (id.includes('/model/ToolPresentation&')) return loadModel('model/ToolPresentation');
+    if (id.includes('/model/ToolDetailContent&')) return loadModel('model/ToolDetailContent');
+    if (id.includes('/services/Attachments&')) return { Attachments: { path: () => { throw Error('Unexpected file access'); } } };
+    if (id.includes('/views/DataViewCard&')) return { DataViewCard: Child };
     if (id === '@ohos:arkui.node') return { LengthMetrics: { vp: n => n } };
     throw Error('Unexpected dependency ' + id);
   }
 };
-for (const name of ['Column','Row','Stack','Text','SymbolGlyph','LoadingProgress','Progress','Divider','If','ForEach','Flex']) globals[name] = noUi();
+for (const name of ['Column','Row','Stack','Text','SymbolGlyph','LoadingProgress','Progress','Divider','If','ForEach','Flex','Button','Scroll','Image']) globals[name] = noUi();
 globals.Text = new Proxy({}, { get: (_, name) => name === 'create' ? text => currentView.texts.set(currentView.currentElmt, text) : () => {} });
-for (const name of ['FlexAlign','HorizontalAlign','VerticalAlign','FontWeight','TextOverflow','CopyOptions','FlexWrap','ProgressType']) globals[name] = {};
+for (const name of ['FlexAlign','HorizontalAlign','VerticalAlign','FontWeight','TextOverflow','CopyOptions','FlexWrap','ProgressType','WordBreak','Color','ButtonType','Alignment','BarState','ImageFit']) globals[name] = {};
+globals.Scroller = class { scrollTo() {} };
 vm.runInNewContext(ts.transpileModule(fs.readFileSync(emitted, 'utf8') + '\nexport { ChatTeamRun };', {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }
 }).outputText, globals, { filename: emitted });
@@ -84,7 +98,7 @@ test('worker chunks preserve avatar, Markdown and loading component instances', 
   children.forEach(child=>assert.equal(f.view.childViews.get(child.id),child));
   assert.equal(f.view.loadingMounts,mounts,'streaming must not restart loading animations');
   assert.equal(children.find(v=>v instanceof MarkdownView).content,f.app.teams[0].tasks[0].attempts[0].turn.content);
-  assert.ok([...f.view.texts.values()].includes(f.app.teams[0].tasks[0].attempts[0].turn.steps[0].tools[0].output),'tool output must update through retained rows');
+  assert.equal(children.find(v=>v instanceof ToolReceipt).execution.output,f.app.teams[0].tasks[0].attempts[0].turn.steps[0].tools[0].output,'tool output must update through retained rows');
   assert.deepEqual(f.view.expandedTasks,['task']);assert.deepEqual(f.view.expandedLogs,['attempt']);
 });
 test('completion reaches retained avatars and task status', () => {
@@ -110,14 +124,58 @@ test('one worker streams without rebuilding another worker row', () => {
 test('new tool steps and retry attempts append without resetting existing output', () => {
   const f=mount(), children=[...f.view.childViews.values()], mounts=f.view.loadingMounts;
   update(f, run=>{run.tasks[0].attempts[0].turn.steps.push({content:'next step',tools:[{call:{id:'next-call',function:{name:'read_file',arguments:'{}'}},status:'running',output:'next result'}]});});
-  assert.equal(f.view.childViews.size,children.length);assert.equal(f.view.loadingMounts,mounts+1);
-  assert.ok([...f.view.texts.values()].includes('next result'));
+  assert.equal(f.view.childViews.size,children.length+1);assert.equal(f.view.loadingMounts,mounts);
+  const nextTool=[...f.view.childViews.values()].find(v=>v instanceof ToolReceipt && v.execution.call.id==='next-call');
+  assert.equal(nextTool.execution.output,'next result');
   update(f, run=>{run.tasks[0].attempts[0].turn.steps[1].tools[0].output='updated next result';});
-  assert.equal(f.view.loadingMounts,mounts+1);assert.ok([...f.view.texts.values()].includes('updated next result'));
+  assert.equal(f.view.loadingMounts,mounts);assert.equal(nextTool.execution.output,'updated next result');
   update(f, run=>{const previous=run.tasks[0].attempts[0];previous.status='failed';const retry=JSON.parse(JSON.stringify(previous));retry.id='retry';retry.status='running';retry.turn.content='retry output';retry.turn.steps=[];run.tasks[0].attempts.push(retry);});
-  assert.equal(f.view.childViews.size,children.length+1);children.forEach(child=>assert.equal(f.view.childViews.get(child.id),child));
+  assert.equal(f.view.childViews.size,children.length+2);children.forEach(child=>assert.equal(f.view.childViews.get(child.id),child));
   const retry=[...f.view.childViews.values()].at(-1);assert.equal(retry.content,'retry output');
   update(f, run=>{run.tasks[0].attempts[1].turn.content='retry finished';});
-  assert.equal(retry.content,'retry finished');assert.equal(f.view.childViews.size,children.length+1);
+  assert.equal(retry.content,'retry finished');assert.equal(f.view.childViews.size,children.length+2);
+});
+test('Team receipts retain reading state while same call IDs in retries are isolated', () => {
+  const f=mount(), receipt=[...f.view.childViews.values()].find(v=>v instanceof ToolReceipt);
+  receipt.disclosure.open=true;receipt.disclosure.detailTab='raw';receipt.disclosure.detailPage=2;
+  update(f, run=>{run.tasks[0].attempts[0].turn.steps[0].tools[0].status='complete';});
+  assert.equal(receipt.execution.status,'complete');assert.equal(receipt.disclosure.open,true);assert.equal(receipt.disclosure.detailPage,2);
+  update(f, run=>{const retry=JSON.parse(JSON.stringify(run.tasks[0].attempts[0]));retry.id='retry';run.tasks[0].attempts.push(retry);});
+  const a=f.view.disclosures.get('attempt:0:call'),b=f.view.disclosures.get('retry:0:call');
+  assert.equal(a,receipt.disclosure);assert.notEqual(a,b);assert.equal(b.open,false);
+});
+const modelCache = new Map();
+function loadModel(name) {
+  const file=path.resolve(root,'entry/src/main/ets',name+'.ets');
+  if(modelCache.has(file))return modelCache.get(file);
+  const exports={};modelCache.set(file,exports);
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2021}}).outputText,
+    {exports,require:id=>id.endsWith('/I18n')?{t:text=>text}:loadModel(path.relative(path.join(root,'entry/src/main/ets'),path.resolve(path.dirname(file),id))) });
+  return exports;
+}
+function loadView(name) {
+  const file=path.join(path.dirname(emitted),name+'.ts'), source=path.join(root,'entry/src/main/ets/views',name+'.ets');
+  if(fs.statSync(source).mtimeMs>fs.statSync(file).mtimeMs)throw Error('Rebuild '+name+' before this test.');
+  const context={...globals,exports:{}};
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2021}}).outputText,context);
+  return context.exports[name];
+}
+test('expanded result sections and rows update without stale ForEach captures', () => {
+  const ToolDetails=loadView('ToolDetails'),disclosure=new disclosureExports.DisclosureState();
+  const args={disclosure,name:'execute_code',argumentsText:'{"code":"return 1"}',output:'{"result":{"value":1}}',status:'complete',identity:'call'};
+  const view=new ToolDetails(null,args);view.aboutToAppear();view.initialRender();
+  const section=[...view.childViews.values()][0];section.initialRender();
+  assert.ok([...section.texts.values()].includes('1'));
+  view.updateStateVars({...args,output:'{"result":{"value":2}}'});view.refresh();view.flush();section.flush();
+  assert.equal([...view.childViews.values()][0],section);assert.ok([...section.texts.values()].includes('2'));
+  assert.ok(![...section.texts.values()].includes('1'),'retained result fields must display the latest receipt');
+  view.select('input');assert.equal(view.pages[0].body,'return 1');view.select('raw');assert.ok(view.pages.some(page=>page.body.includes('2')));
+});
+test('orchestration child snapshots refresh retained receipt rows', () => {
+  const Receipts=loadView('OrchestrationReceipts'),initial=seed().tasks[0].attempts[0].turn.steps[0].tools[0];
+  const view=new Receipts(null,{children:[initial],disclosures:new disclosureExports.DisclosureStore()});view.initialRender();
+  const child=[...view.childViews.values()][0];child.disclosure.open=true;
+  view.updateStateVars({children:[{...initial,status:'complete',output:'final child result'}]});view.flush();
+  assert.equal([...view.childViews.values()][0],child);assert.equal(child.execution.output,'final child result');assert.equal(child.execution.status,'complete');assert.equal(child.disclosure.open,true);
 });
 if(failures)process.exitCode=1;

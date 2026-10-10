@@ -244,16 +244,21 @@ export class SessionService {
       const branch = this.freshThread(); branch.title = source.title.slice(0, 26) + t(' · 分支'); branch.titleEdited = true;
       branch.parentThreadId = source.id; branch.parentMessageId = index >= 0 ? source.messages[index].id : undefined; branch.modelRef = source.modelRef;
       branch.reasoningEffort = source.reasoningEffort;
+      branch.teamEnabled = source.teamEnabled;
+      branch.disabledMcpIds = source.disabledMcpIds?.slice();
       branch.messages = JSON.parse(JSON.stringify(source.messages.slice(0, end))) as MessageData[];
       branch.draft = index >= 0 && index % 2 === 0 ? source.messages[index].content : '';
-      branch.attachments = index >= 0 && index % 2 === 0 ? source.messages[index].attachments : [];
+      branch.attachments = index >= 0 && index % 2 === 0 ? JSON.parse(JSON.stringify(source.messages[index].attachments || [])) as Attachment[] : [];
+      branch.references = index >= 0 && index % 2 === 0 ? (source.messages[index].references || []).map((item): ThreadReference => ({
+        threadId: item.threadId, title: item.title, content: item.content, capturedAt: item.capturedAt, truncated: item.truncated })) : [];
       await this.resources.ensureWorkspace(branch.id);
       // Preserve historical messages verbatim. The request explicitly identifies the new workspace.
       const extras = this.data.productivity || defaultProductivity();
       const copied = extras.memories.filter((item) => item.threadId === source.id).map((item): MemoryEntry => {
         return { id: this.resources.createId(), content: item.content, threadId: branch.id, updatedAt: Date.now() };
       });
-      const next: ProductivityData = { memories: extras.memories.concat(copied), templates: extras.templates, servers: extras.servers };
+      const next: ProductivityData = { memories: extras.memories.concat(copied), templates: extras.templates,
+        servers: extras.servers, options: extras.options };
       validateProductivity(next); this.data.productivity = next;
       this.data.threads.unshift(branch); this.data.activeThreadId = branch.id; await this.persist();
     });
@@ -265,6 +270,15 @@ export class SessionService {
       this.data.threads.unshift(thread); this.data.activeThreadId = thread.id;
       this.status.contextStatus = ''; await this.persist();
     });
+  }
+
+  // A regenerated answer is a new branch; existing answers and later turns stay intact.
+  async regenerateReply(messageId: string): Promise<boolean> {
+    if (!this.canMutate) { return false; }
+    const index = this.active.messages.findIndex((item) => item.id === messageId && item.role === 'assistant');
+    if (index < 1 || this.active.messages[index - 1].role !== 'user') { return false; }
+    if (!await this.forkThread(this.active.messages[index - 1].id)) { return false; }
+    await this.send(); return true;
   }
   async selectThread(id: string): Promise<boolean> {
     return this.mutate(t("打开对话失败："), async () => {
@@ -524,6 +538,11 @@ export class SessionService {
       attachments: queuedId ? [] : thread.attachments, references: queuedId ? [] : thread.references };
     if (!queuedId) { thread.attachments = []; thread.references = []; }
     const answer: MessageData = { id: this.resources.createId(), role: 'assistant', content: '', status: 'generating', error: '', modelRef: reference };
+    const generateTitle = shouldGenerateTitle(thread);
+    if (thread.messages.length === 0 && !thread.titleEdited) { thread.title = titleCharacters(text.replace(/\s+/g, ' '), 32); }
+    const fallbackTitle = thread.title;
+    // Team catalogs must see attachments after they move from the composer to history.
+    thread.messages = thread.messages.concat([user, answer]);
     let chatTeams: ChatTeamTools | undefined = undefined;
     if (thread.teamEnabled) {
       const workerConfig = copyModelConfig(config); workerConfig.systemPrompt = instructions;
@@ -536,10 +555,6 @@ export class SessionService {
       sections.push({ name: 'team', content: CHAT_TEAM_INSTRUCTIONS + '\n本聊天已有团队（以此处ID为准，禁止跨会话访问）：' +
         JSON.stringify((thread.teams || []).filter((run) => run.ownerMessageId).map((run) => run.id + ' ' + run.status)) });
     }
-    const generateTitle = shouldGenerateTitle(thread);
-    if (thread.messages.length === 0 && !thread.titleEdited) { thread.title = titleCharacters(text.replace(/\s+/g, ' '), 32); }
-    const fallbackTitle = thread.title;
-    thread.messages = thread.messages.concat([user, answer]);
     if (queuedId) { thread.pendingInputs = (thread.pendingInputs || []).filter((item: PendingInput) => item.id !== queuedId); }
     else { thread.draft = ''; }
     thread.updatedAt = Date.now();

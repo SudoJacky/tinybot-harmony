@@ -19,17 +19,8 @@ import { ToolDetails } from './ToolDetails';
 import { OrchestrationReceipts } from './OrchestrationReceipts';
 import { ProcessItem, TimelineEntry, buildTimeline, describeTools, durationLabel, elapsedMs, foldsToAnswer, persistentTool,
   summarizeProcess, thoughtTail } from '../model/ProcessPresentation';
-import { toolStat } from '../model/ToolPresentation';
+import { toolStat, toolTitle, toolStatusLabel } from '../model/ToolPresentation';
 import { ThinkingLine } from '../common/Widgets';
-
-function TOOL_TITLES(): Record<string, string> { return {
-  'team_recruit': t("招募员工"), 'team_wait': t("等待员工交接"), 'team_inspect': t("查看团队"), 'team_read_result': t("读取交接结果"),
-  'team_control': t("调整团队执行"), 'team_resume': t("继续团队"),
-  'read_web': t("读取网页"), 'read_skill': t("读取 Skill"), 'list_files': t("列出文件"), 'read_file': t("读取文件"),
-  'read_file_lines': t("读取文件片段"), 'search_file_content': t("搜索文件内容"), 'write_file': t("写入文件"), 'edit_file': t("编辑文件"),
-  'generate_image': t("生成图片"), 'mcp_call': t("调用远程工具"), 'mcp_list_tools': t("查看远程工具"), 'mcp_search_tools': t("搜索远程工具"),
-  'publish_data_view': t("生成图表"), 'update_plan': t("更新计划"), 'request_user_input': t("请你补充信息")
-}; }
 
 interface ToolArguments { path?: string; url?: string; query?: string; pattern?: string; name?: string; tool?: string; prompt?: string; title?: string;
   goal?: string; members?: Object[]; tasks?: Object[]; waitFor?: string; action?: string; }
@@ -39,7 +30,6 @@ function TEAM_ACTIONS(): Record<string, string> { return { 'pause': t("暂停派
 @Builder
 function noContent() {}
 
-function toolTitle(name: string): string { return TOOL_TITLES()[name] || name; }
 
 // The most telling argument (file, link, query…) shown next to the tool name.
 function toolDetail(execution: ToolExecutionViewModel): string {
@@ -63,24 +53,13 @@ function toolIcon(name: string): Resource {
   if (name === 'read_skill') { return $r('sys.symbol.wand_and_stars'); }
   if (name === 'list_files') { return $r('sys.symbol.rectangle_stack'); }
   if (name === 'write_file' || name === 'edit_file') { return $r('sys.symbol.square_and_pencil'); }
-  if (name === 'read_file' || name === 'read_file_lines') { return $r('sys.symbol.doc_text'); }
+  if (name === 'read_file' || name === 'read_file_lines' || name === 'read_attachment') { return $r('sys.symbol.doc_text'); }
   if (name === 'search_file_content' || name === 'mcp_search_tools') { return $r('sys.symbol.magnifyingglass'); }
   if (name === 'generate_image') { return $r('sys.symbol.picture'); }
   if (name === 'update_plan') { return $r('sys.symbol.list_bullet'); }
   if (name === 'request_user_input') { return $r('sys.symbol.questionmark_circle'); }
   if (name === 'publish_data_view') { return $r('sys.symbol.text_alignleft'); }
   return $r('sys.symbol.connection');
-}
-
-function toolStatusLabel(status: string): string {
-  switch (status) {
-    case 'pending': return t("等待中");
-    case 'running': return t("执行中");
-    case 'complete': return t("完成");
-    case 'failed': return t("失败");
-    case 'cancelled': return t("已取消");
-    default: return t("已中断");
-  }
 }
 
 function activeTool(tool: ToolExecutionViewModel): boolean { return tool.status === 'running' || tool.status === 'pending'; }
@@ -167,7 +146,7 @@ struct ToolRow {
           ToolDetails({ disclosure: this.disclosure, identity: this.execution.call.id, name: this.name(), argumentsText: this.execution.call.function.arguments,
             output: this.execution.output, status: this.execution.status, onInspect: this.onInspect })
           if (this.execution.children.length > 0) {
-            OrchestrationReceipts({ children: this.execution.children, onInspect: this.onInspect })
+            OrchestrationReceipts({ children: this.execution.children, disclosures: this.disclosure.children, onInspect: this.onInspect })
           }
         }.width('100%').padding({ left: 19 })
       }
@@ -276,8 +255,8 @@ struct ProcessGroup {
     Column({ space: Space.sm }) {
       if (!this.richOnly && this.items().length > 0) {
         Column() {
-          this.header()
-          if (this.disclosure.open) {
+          if (this.items().length > 1 || this.thought()) { this.header() }
+          if (this.disclosure.open || (this.items().length === 1 && !this.thought())) {
             Column() {
               ForEach(this.items(), (item: ProcessItem) => {
                 if (item.tool < 0) {
@@ -290,12 +269,12 @@ struct ProcessGroup {
                 } else if (this.toolAt(item)) {
                   ToolRow({ execution: this.toolAt(item) as ToolExecutionViewModel,
                     disclosure: this.message.disclosures.get('tool-' + (this.toolAt(item) as ToolExecutionViewModel).call.id),
-                    onInspect: this.onInspect })
+                    onInspect: () => { this.disclosure.open = true; this.message.processOpen = true; this.onInspect(); } })
                 }
               }, (item: ProcessItem) => item.step + '-' + item.tool)
             }.width('100%').alignItems(HorizontalAlign.Start)
-            .padding({ left: 12 }).margin({ bottom: 4 })
-            .border({ width: { left: 1 }, color: $r('app.color.divider') })
+            .padding({ left: this.items().length === 1 && !this.thought() ? 0 : 12 }).margin({ bottom: 4 })
+            .border({ width: { left: this.items().length === 1 && !this.thought() ? 0 : 1 }, color: $r('app.color.divider') })
             .transition(TransitionEffect.OPACITY.animation({ duration: Motion.medium, curve: Motion.standard }))
           }
         }.width('100%').alignItems(HorizontalAlign.Start)
@@ -359,6 +338,8 @@ export struct ImageViewer {
 
 @Component
 export struct MessageBubble {
+  @Prop actionsEnabled: boolean = true;
+  onRegenerate: (id: string) => void = () => {};
   @Prop uiAvailable: boolean = false;
   onUi: (key: string, values: UiValues, action: string) => Promise<UiValues> = async () => { throw new Error('Interactive UI handler is not connected'); };
   @ObjectLink message: MessageViewModel;
@@ -373,6 +354,7 @@ export struct MessageBubble {
   @State private documentOpen: boolean = false;
   @State private documentName: string = '';
   @State private documentText: string = '';
+  @State private selectingText: boolean = false;
   @State private previewPath: string = '';
   @State private previewing: boolean = false;
 
@@ -416,7 +398,8 @@ export struct MessageBubble {
   private preview(item: Attachment): void { this.previewPath = Attachments.path(item); this.previewing = true; }
   @Builder
   documentViewer() {
-    DocumentPreview({ name: this.documentName, content: this.documentText, onReference: this.onReference, onClose: () => { this.documentOpen = false; } })
+    DocumentPreview({ name: this.documentName, content: this.documentText, messageText: this.selectingText,
+      onReference: this.onReference, onClose: () => { this.documentOpen = false; } })
   }
 
   @Builder
@@ -425,13 +408,20 @@ export struct MessageBubble {
       if (this.message.content.length > 0) {
         MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.rectangle_on_rectangle')), content: t("复制") })
           .onClick(() => this.copy())
+        MenuItem({ content: t('选择文本') }).onClick(() => {
+          this.selectingText = true; this.documentName = t('消息文本'); this.documentText = this.message.content; this.documentOpen = true;
+        })
       }
       MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.split')),
         content: this.message.role === 'user' ? t("从这里改写（新分支）") : t("从这里创建分支") })
-        .onClick(() => this.onFork(this.message.id))
+        .enabled(this.actionsEnabled).onClick(() => this.onFork(this.message.id))
+      if (this.message.role === 'assistant' && this.message.status !== 'generating') {
+        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.arrow_clockwise')), content: t('重新生成（保留原回答）') })
+          .enabled(this.actionsEnabled).onClick(() => this.onRegenerate(this.message.id))
+      }
       if (this.message.content.length > 0) {
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.lightbulb')), content: t("提炼为记忆…") })
-          .onClick(() => this.onRemember(this.message.id))
+        MenuItem({ content: t("提炼为记忆…") })
+          .enabled(this.actionsEnabled).onClick(() => this.onRemember(this.message.id))
       }
     }
   }
@@ -442,10 +432,21 @@ export struct MessageBubble {
   }
 
   @Builder
-  actionButton(icon: Resource, label: string, compId: string, action: () => void) {
-    Button({ type: ButtonType.Circle, stateEffect: true }) {
-      SymbolGlyph(icon).fontSize(17).fontColor([$r('app.color.text_tertiary')])
-    }.id(compId).width(36).height(36).backgroundColor(Color.Transparent).clickEffect(Motion.pressSmall).accessibilityText(label).onClick(action)
+  actionButton(icon: Resource, label: string, compId: string, action: () => void, enabled: boolean = true) {
+    Button({ type: ButtonType.Normal, stateEffect: true }) {
+      Row({ space: 4 }) {
+        SymbolGlyph(icon).fontSize(14).fontColor([$r('app.color.text_secondary')])
+        Text(label).fontSize(12).fontColor($r('app.color.text_secondary'))
+      }
+    }.id(compId).height(44).padding({ left: 6, right: 6 }).borderRadius(8).enabled(enabled)
+      .backgroundColor(Color.Transparent).clickEffect(Motion.pressSmall).accessibilityText(label).onClick(action)
+  }
+
+  @Builder
+  moreActions() {
+    Button(t('更多')).id('message-more-' + this.message.id).height(44).padding({ left: 8, right: 8 })
+      .fontSize(12).fontColor($r('app.color.text_secondary')).backgroundColor(Color.Transparent)
+      .accessibilityText(t('消息操作')).bindMenu(this.actions)
   }
 
   @Builder
@@ -478,11 +479,11 @@ export struct MessageBubble {
         }.padding({ left: 10, right: 12, top: 8, bottom: 8 }).borderRadius(Radius.md)
         .backgroundColor($r('app.color.surface')).border({ width: 0.5, color: $r('app.color.divider') })
         .constraintSize({ maxWidth: 240 })
-        .onClick(() => { this.documentName = item.name; this.documentText = item.text || ''; this.documentOpen = true; })
+        .onClick(() => { this.selectingText = false; this.documentName = item.name; this.documentText = item.text || ''; this.documentOpen = true; })
       }, (item: Attachment) => item.id)
       if (this.message.content.length > 0) {
         Text(this.message.content).fontSize(Font.body).lineHeight(24)
-          .fontColor($r('app.color.text_primary')).copyOption(CopyOptions.LocalDevice)
+          .fontColor($r('app.color.text_primary')).copyOption(CopyOptions.None)
           .padding({ left: 14, right: 14, top: 10, bottom: 10 })
           .borderRadius({ topLeft: 20, topRight: 20, bottomLeft: 20, bottomRight: 6 })
           .backgroundColor($r('app.color.user_bubble'))
@@ -490,6 +491,11 @@ export struct MessageBubble {
       if (this.message.error.length > 0) {
         Text(this.message.error).fontSize(Font.caption).fontColor($r('app.color.danger'))
       }
+      Row({ space: 4 }) {
+        this.actionButton($r('sys.symbol.square_and_pencil'), t('改写'), 'edit-' + this.message.id,
+          () => this.onFork(this.message.id), this.actionsEnabled)
+        this.moreActions()
+      }.justifyContent(FlexAlign.End)
     }.width('100%').alignItems(HorizontalAlign.End).padding({ left: 48 })
   }
 
@@ -555,7 +561,7 @@ export struct MessageBubble {
               if (entry.kind === 'steering') {
                 this.steering(entry.step)
               } else if (entry.kind === 'text') {
-                InteractiveAnswer({ content: this.message.stepViews[entry.step]?.content || '', step: entry.step,
+                InteractiveAnswer({ content: this.message.stepViews[entry.step]?.content || '', step: entry.step, selectable: false,
                   validation: this.message.stepViews[entry.step]?.uiValidation || '',
                   saved: this.message.uiStates, available: this.uiAvailable, onInteract: this.onUi,
                   streaming: this.message.status === 'generating' && entry.step === this.message.stepViews.length - 1 })
@@ -571,7 +577,7 @@ export struct MessageBubble {
           ThinkingLine()
         }
       } else if (this.message.content.length > 0) {
-        InteractiveAnswer({ content: this.message.content, saved: this.message.uiStates, available: this.uiAvailable, onInteract: this.onUi, streaming: this.message.status === 'generating' })
+        InteractiveAnswer({ content: this.message.content, saved: this.message.uiStates, available: this.uiAvailable, onInteract: this.onUi, streaming: this.message.status === 'generating', selectable: false })
       } else if (this.message.status === 'generating') {
         ThinkingLine()
       }
@@ -585,14 +591,17 @@ export struct MessageBubble {
           .backgroundColor(this.message.status === 'failed' ? $r('app.color.danger_container') : $r('app.color.surface_variant'))
       }
       // Visible shortcuts for finished answers; the long-press menu offers the same actions.
-      if (this.message.status !== 'generating' && this.message.content.length > 0) {
-        Row() {
-          this.actionButton($r('sys.symbol.rectangle_on_rectangle'), t("复制回答"), 'copy-' + this.message.id, () => { this.copy(); })
-          this.actionButton($r('sys.symbol.split'), t("从这里创建分支"), 'fork-' + this.message.id,
-            () => { this.onFork(this.message.id); })
-          this.actionButton($r('sys.symbol.lightbulb'), t("提炼为记忆"), 'remember-' + this.message.id,
-            () => { this.onRemember(this.message.id); })
-        }.width('100%').margin({ left: -8, top: -6 })
+      if (this.message.status !== 'generating') {
+        Flex({ wrap: FlexWrap.Wrap }) {
+          if (this.message.content.length > 0) {
+            this.actionButton($r('sys.symbol.rectangle_on_rectangle'), t('复制'), 'copy-' + this.message.id, () => { this.copy(); })
+          }
+          this.actionButton($r('sys.symbol.arrow_clockwise'), t('重新生成'), 'regenerate-' + this.message.id,
+            () => this.onRegenerate(this.message.id), this.actionsEnabled)
+          this.actionButton($r('sys.symbol.split'), t('分支'), 'fork-' + this.message.id,
+            () => { this.onFork(this.message.id); }, this.actionsEnabled)
+          this.moreActions()
+        }.width('100%').margin({ left: -6, top: -6 })
         .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 4 }))
           .animation({ duration: Motion.medium, curve: Motion.standard }))
       }

@@ -15,7 +15,7 @@ interface BackupEnvelope { format: string; data: AppData; attachments: BackupAtt
 const MAX_BACKUP = 20 * 1024 * 1024;
 async function encodeFile(path: string): Promise<string> {
   const file = await fs.open(path, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
-  try { return new util.Base64Helper().encodeToString(new Uint8Array(await readBounded(file.fd, 4 * 1024 * 1024))); }
+  try { return new util.Base64Helper().encodeToString(new Uint8Array(await readBounded(file.fd, MAX_BACKUP))); }
   finally { await fs.close(file); }
 }
 function allAttachments(data: AppData): Attachment[] {
@@ -83,14 +83,14 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
   for (const thread of data.threads) { workspace.pathFor(thread.id); }
   const attachmentIds = new Map<string, string>(); const binaries = new Map<string, Uint8Array>(); const paths = new Set<string>();
   for (const item of envelope.attachments) {
-    if (!item || typeof item.id !== 'string' || typeof item.bytes !== 'string' || item.bytes.length > 6 * 1024 * 1024 || binaries.has(item.id)) { throw new Error(t("备份附件无效。")); }
+    if (!item || typeof item.id !== 'string' || typeof item.bytes !== 'string' || item.bytes.length > MAX_BACKUP || binaries.has(item.id)) { throw new Error(t("备份附件无效。")); }
     binaries.set(item.id, new util.Base64Helper().decodeSync(item.bytes)); attachmentIds.set(item.id, util.generateRandomUUID());
   }
   for (const item of allAttachments(data)) { if (!binaries.has(item.id) || binaries.get(item.id)?.byteLength !== item.size) { throw new Error(t("备份缺少附件或大小不一致。")); } }
   const workspaceBytes: Uint8Array[] = [];
   for (const item of envelope.files) {
     if (!item) { throw new Error(t("备份文件无效。")); }
-    if (!threadIds.has(item.threadId) || typeof item.bytes !== 'string' || item.bytes.length > 6 * 1024 * 1024) { throw new Error(t("备份文件无效。")); }
+    if (!threadIds.has(item.threadId) || typeof item.bytes !== 'string' || item.bytes.length > MAX_BACKUP) { throw new Error(t("备份文件无效。")); }
     workspaceRelativePath(item.path, false); const key = item.threadId + '/' + item.path;
     if (paths.has(key)) { throw new Error(t("备份包含重复文件。")); } paths.add(key);
     workspaceBytes.push(new util.Base64Helper().decodeSync(item.bytes));

@@ -255,6 +255,7 @@ struct UiSurface {
 
 @Component
 export struct InteractiveAnswer {
+  @Prop selectable: boolean = true;
   @Prop validation: string = '';
   @Prop @Watch('refresh') content: string = '';
   @Prop @Watch('refresh') streaming: boolean = false;
@@ -269,7 +270,7 @@ export struct InteractiveAnswer {
     Column({ space: Space.md }) {
       // ForEach retains keyed item closures. Read the current state by index so reused children receive new chunks.
       ForEach(this.parts, (part: UiPart, index: number) => {
-        if (part.kind === 'text') { MarkdownView({ content: this.parts[index].content, streaming: this.streaming }) }
+        if (part.kind === 'text') { MarkdownView({ content: this.parts[index].content, streaming: this.streaming, selectable: this.selectable }) }
         else if (this.validation && !this.streaming) {
           Text(this.validation === 'pending' ? t('正在检查交互内容…') : t('交互内容检查未通过。'))
             .fontSize(13).fontColor($r('app.color.text_secondary'))

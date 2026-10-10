@@ -66,7 +66,7 @@ export function persistentTool(tool: ToolExecution): boolean {
 interface ToolTarget { path?: string; url?: string; }
 
 function toolCategory(name: string): string {
-  if (['read_file', 'read_file_lines'].includes(name)) { return 'read'; }
+  if (['read_file', 'read_file_lines', 'read_attachment'].includes(name)) { return 'read'; }
   if (['write_file', 'edit_file'].includes(name)) { return 'edit'; }
   if (name.startsWith('team_')) { return 'team'; }
   if (name.startsWith('mcp_')) { return 'mcp'; }

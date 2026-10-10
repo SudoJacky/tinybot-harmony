@@ -1,4 +1,5 @@
 import { ModelMessage, ToolDefinition, toolSchemas } from './Agent';
+import { attachmentContext } from './AttachmentContext';
 import { ContextEntry, PromptSection, renderPrompt } from './ContextProjection';
 import { estimateTextTokens } from './ConversationContext';
 import { Attachment } from './Productivity';
@@ -14,7 +15,7 @@ export interface ContextTokenItem {
 }
 
 export function attachmentTokens(attachment: Attachment): number {
-  return attachment.mime === 'image/jpeg' ? 1800 : estimateTextTokens(attachment.text || '');
+  return attachment.mime === 'image/jpeg' ? 1800 : estimateTextTokens(attachmentContext(attachment));
 }
 
 export function contextBreakdown(messages: ModelMessage[], tools: ToolDefinition[], sections: PromptSection[],

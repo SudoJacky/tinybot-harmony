@@ -8,6 +8,7 @@ import { DataTable } from './DataTable';
 export struct DocumentPreview {
   name: string = '';
   content: string = '';
+  messageText: boolean = false;
   onClose: () => void = () => {};
   onReference: (value: string) => void = () => {};
   @State private rows: string[][] = [];
@@ -34,10 +35,10 @@ export struct DocumentPreview {
             .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
           Text(this.kind()).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-        IconButton({ icon: $r('sys.symbol.xmark'), label: t("关闭"), diameter: 36, iconSize: 18,
+        IconButton({ icon: $r('sys.symbol.xmark'), label: t("关闭"), compId: 'close-text-preview', diameter: 44, iconSize: 18,
           fill: $r('app.color.surface_variant'), tint: $r('app.color.text_secondary'), onTap: () => this.onClose() })
       }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.lg, bottom: Space.sm })
-      Text(this.rows.length ? t("点选单元格后可引用到对话。") : t("长按选择文字后可引用到对话。PDF 页码、幻灯片序号与单元格地址保留在正文中。"))
+      Text(this.messageText ? t('长按选择并复制文字，关闭后返回对话。') : this.rows.length ? t("点选单元格后可引用到对话。") : t("长按选择文字后可引用到对话。PDF 页码、幻灯片序号与单元格地址保留在正文中。"))
         .fontSize(Font.caption).lineHeight(18).width('100%').fontColor($r('app.color.text_secondary'))
         .padding({ left: Space.page, right: Space.page, bottom: Space.md })
       Scroll() {
@@ -59,7 +60,7 @@ export struct DocumentPreview {
         .backgroundColor(this.rows.length ? Color.Transparent : $r('app.color.surface'))
       }.layoutWeight(1).width('100%').padding({ left: Space.page, right: Space.page }).align(Alignment.Top)
       .scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring)
-      BottomBar() {
+      BottomBar({ sheet: true }) {
         Column({ space: 10 }) {
           if (this.error) {
             Text(this.error).fontColor($r('app.color.danger')).fontSize(Font.caption).width('100%')
@@ -71,7 +72,8 @@ export struct DocumentPreview {
               .fontColor(this.selected ? $r('app.color.text_primary') : $r('app.color.text_tertiary'))
           }.width('100%')
           Button(t("引用到对话")).id('reference-document').attributeModifier(Btn.primary).width('100%').enabled(!!this.selected).onClick(() => {
-            this.onReference(t("\n\n引用附件 ") + this.name + '（' + this.location + '）：\n' + this.selected.slice(0, 4000) + t("\n修改要求：")); this.onClose();
+            this.onReference((this.messageText ? t('\n\n引用消息：\n') : t("\n\n引用附件 ") + this.name + '（' + this.location + '）：\n') +
+              this.selected.slice(0, 4000) + t("\n修改要求：")); this.onClose();
           })
         }.width('100%')
       }
