@@ -56,7 +56,7 @@ class NativeUsageRecorder implements UsageRecorder {
   }
 }
 
-class NativeSessionResources implements SessionResources {
+export class NativeSessionResources implements SessionResources {
   private workspaces: WorkspaceStore;
   private providers: ProviderRegistry;
   private approval: ToolApproval;
@@ -67,12 +67,15 @@ class NativeSessionResources implements SessionResources {
     this.workspaces = new WorkspaceStore(workspaceFilesDir); this.providers = providers; this.approval = approval;
   }
   createId(): string { return util.generateRandomUUID(); }
-  ensureWorkspace(id: string): Promise<void> { return this.workspaces.ensureThread(id); }
-  tools(id: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments: Attachment[] = [], live?: LiveResources): AgentTools {
-    const groups: AgentTools[] = [new WorkspaceTools(new NativeWorkspaceFiles(this.workspaces.pathFor(id))), new AttachmentTools(attachments),
+  ensureWorkspace(id: string, workspaceId?: string): Promise<void> {
+    return workspaceId ? this.workspaces.requireWorkspace(workspaceId) : this.workspaces.ensureThread(id);
+  }
+  tools(id: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments: Attachment[] = [], live?: LiveResources, workspaceId?: string): AgentTools {
+    const root = this.workspaces.pathFor(workspaceId || id);
+    const groups: AgentTools[] = [new WorkspaceTools(new NativeWorkspaceFiles(root)), new AttachmentTools(attachments),
       new SkillTools(extensions.skills, selected, live ? () => live.skills() : undefined), new InteractionTools(this.approval)];
     groups.push(new CodeExecutionTools(new NativeCodeExecutor()));
-    groups.push(new PresentTools((path: string) => new NativeWorkspaceFiles(this.workspaces.pathFor(id)).checkedPath(path)));
+    groups.push(new PresentTools((path: string) => new NativeWorkspaceFiles(root).checkedPath(path)));
     if (extensions.webEnabled) { groups.push(new WebTools(new NativeWebTransport())); }
     const search = productivity?.options?.search;
     if (extensions.webEnabled && search?.enabled) {
@@ -80,11 +83,11 @@ class NativeSessionResources implements SessionResources {
     }
     if (productivity) { groups.push(new McpTools(productivity.servers, this.approval, (server) => new McpClient(server), live ? () => live.servers() : undefined)); }
     const reference = productivity?.options?.image; const profile = this.profiles.find((item) => item.id === reference?.providerId && item.enabled);
-    if (reference && profile && profile.models.includes(reference.modelId)) { groups.push(new ImageTools(profile, reference, this.workspaces.pathFor(id), this.approval, attachments)); }
+    if (reference && profile && profile.models.includes(reference.modelId)) { groups.push(new ImageTools(profile, reference, root, this.approval, attachments)); }
     return new RuleTools(new ToolSet(groups), productivity?.options?.readOnly === true);
   }
-  async afterTask(threadId: string, messageId: string, content: string): Promise<void> {
-    await new NativeWorkspaceFiles(this.workspaces.pathFor(threadId)).write('任务结果/' + messageId + '.md', content, new Cancellation());
+  async afterTask(threadId: string, messageId: string, content: string, workspaceId?: string): Promise<void> {
+    await new NativeWorkspaceFiles(this.workspaces.pathFor(workspaceId || threadId)).write('任务结果/' + messageId + '.md', content, new Cancellation());
   }
   configureProviders(profiles: ProviderProfile[]): void {
     this.profiles = JSON.parse(JSON.stringify(profiles)) as ProviderProfile[];

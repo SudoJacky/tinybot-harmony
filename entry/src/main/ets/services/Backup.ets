@@ -1,3 +1,4 @@
+import { ProjectData, validateProjects } from '../model/Project';
 import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
 import { fileIo as fs, picker } from '@kit.CoreFileKit';
@@ -9,7 +10,7 @@ import { WorkspaceStore } from '../model/WorkspaceStore';
 import { workspaceRelativePath } from './WorkspaceTools';
 import { Attachments, readBounded, writeBytes } from './Attachments';
 import { exportFile } from './NativeActions';
-interface BackupFile { threadId: string; path: string; bytes: string; }
+interface BackupFile { threadId?: string; workspaceId?: string; path: string; bytes: string; }
 interface BackupAttachment { id: string; bytes: string; }
 interface BackupEnvelope { format: string; data: AppData; attachments: BackupAttachment[]; files: BackupFile[]; }
 const MAX_BACKUP = 20 * 1024 * 1024;
@@ -26,7 +27,8 @@ function allAttachments(data: AppData): Attachment[] {
 // Both local export and Huawei Cloud use the same validated, credential-free snapshot.
 export async function createBackupFile(context: common.UIAbilityContext, snapshot: AppData): Promise<string> {
   const data = JSON.parse(JSON.stringify(snapshot)) as AppData;
-  const envelope: BackupEnvelope = { format: 'tinybot-harmony.backup.v1', data: data, attachments: [], files: [] };
+  const envelope: BackupEnvelope = { format: 'tinybot-harmony.backup.v2', data: data, attachments: [], files: [] };
+  validateProjects(data);
   const userDocument = data.config.userDocument || '';
   data.config = defaultConfig(); data.config.userDocument = userDocument;
   for (const profile of data.providerProfiles || []) { profile.credentialAlias = ''; profile.noApiKey = true; profile.enabled = false; }
@@ -35,9 +37,12 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
   let size = JSON.stringify(data).length * 3;
   for (const item of allAttachments(data)) { const bytes = await encodeFile(Attachments.path(item)); size += bytes.length; if (size > MAX_BACKUP) { throw new Error(t("备份超过 20 MB，请先清理不需要的附件。")); } envelope.attachments.push({ id: item.id, bytes: bytes }); }
   const workspaces = new WorkspaceStore(context.getApplicationContext().filesDir);
-  for (const thread of data.threads) {
-    const root = workspaces.pathFor(thread.id); const pending = [''];
-    if (!await fs.access(root)) { continue; }
+  const projectRoots = new Set((data.projects || []).map((project) => project.workspaceId));
+  const roots = Array.from(projectRoots).concat(data.threads.filter((thread) => !thread.projectId).map((thread) => thread.id));
+  for (const workspaceId of roots) {
+    const root = workspaces.pathFor(workspaceId); const pending = [''];
+    if (!projectRoots.has(workspaceId) && !await fs.access(root)) { continue; }
+    await workspaces.requireWorkspace(workspaceId);
     while (pending.length) {
       const directory = pending.shift() || '';
       for (const name of await fs.listFile(root + (directory ? '/' + directory : ''))) {
@@ -49,7 +54,7 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
         else if (stat.isFile()) {
           const bytes = await encodeFile(absolute); size += bytes.length;
           if (size > MAX_BACKUP || envelope.files.length >= 1000) { throw new Error(t("备份最多 20 MB、1000 个文件。")); }
-          envelope.files.push({ threadId: thread.id, path: path, bytes: bytes });
+          envelope.files.push({ workspaceId: workspaceId, path: path, bytes: bytes });
         }
       }
     }
@@ -75,13 +80,16 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
   try { text = new util.TextDecoder('utf-8', { fatal: true }).decodeToString(new Uint8Array(await readBounded(file.fd, MAX_BACKUP))); }
   finally { await fs.close(file); }
   const envelope = JSON.parse(text) as BackupEnvelope;
-  if (!envelope || envelope.format !== 'tinybot-harmony.backup.v1' || !Array.isArray(envelope.attachments) || !Array.isArray(envelope.files) || envelope.files.length > 1000) { throw new Error(t("备份格式无效。")); }
+  if (!envelope || !['tinybot-harmony.backup.v1', 'tinybot-harmony.backup.v2'].includes(envelope.format) || !Array.isArray(envelope.attachments) || !Array.isArray(envelope.files) || envelope.files.length > 1000) { throw new Error(t("备份格式无效。")); }
   const data = parseAppData(JSON.stringify(envelope.data));
   // Keep record identities across devices and repeated restores. Local records win.
-  const threadIds = new Set(data.threads.map((thread) => thread.id));
+  const legacy = envelope.format === 'tinybot-harmony.backup.v1';
+  if (legacy && ((data.projects || []).length > 0 || data.threads.some((thread) => thread.projectId !== undefined))) { throw new Error(t('备份格式无效。')); }
+  const workspaceIds = new Set(data.threads.filter((thread) => !thread.projectId).map((thread) => thread.id)
+    .concat((data.projects || []).map((project) => project.workspaceId)));
   const known = new Set(local.threads.map((thread) => thread.id));
   const workspace = new WorkspaceStore(context.getApplicationContext().filesDir);
-  for (const thread of data.threads) { workspace.pathFor(thread.id); }
+  for (const id of Array.from(workspaceIds)) { workspace.pathFor(id); }
   const attachmentIds = new Map<string, string>(); const binaries = new Map<string, Uint8Array>(); const paths = new Set<string>();
   for (const item of envelope.attachments) {
     if (!item || typeof item.id !== 'string' || typeof item.bytes !== 'string' || item.bytes.length > MAX_BACKUP || binaries.has(item.id)) { throw new Error(t("备份附件无效。")); }
@@ -91,8 +99,9 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
   const workspaceBytes: Uint8Array[] = [];
   for (const item of envelope.files) {
     if (!item) { throw new Error(t("备份文件无效。")); }
-    if (!threadIds.has(item.threadId) || typeof item.bytes !== 'string' || item.bytes.length > MAX_BACKUP) { throw new Error(t("备份文件无效。")); }
-    workspaceRelativePath(item.path, false); const key = item.threadId + '/' + item.path;
+    const id = legacy ? item.threadId : item.workspaceId;
+    if (typeof id !== 'string' || !workspaceIds.has(id) || (legacy ? item.workspaceId !== undefined : item.threadId !== undefined) || typeof item.bytes !== 'string' || item.bytes.length > MAX_BACKUP) { throw new Error(t("备份文件无效。")); }
+    workspaceRelativePath(item.path, false); const key = id + '/' + item.path;
     if (paths.has(key)) { throw new Error(t("备份包含重复文件。")); } paths.add(key);
     workspaceBytes.push(new util.Base64Helper().decodeSync(item.bytes));
   }
@@ -102,14 +111,43 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
   if (!additions.has(data.activeThreadId)) { data.activeThreadId = ''; }
   hilog.info(0x0000, 'Backup', 'Restore prepared: new chats=%{public}d, skipped chats=%{public}d',
     data.threads.length, totalThreads - data.threads.length);
+  // New projects are restored into fresh roots; existing projects keep their local root and bytes.
+  // Until the session manifest commits, prepared files are unreferenced and cannot replace local projects.
+  const destinations = new Map<string, string>();
+  for (const thread of data.threads) { if (!thread.projectId) { destinations.set(thread.id, thread.id); } }
+  data.projects = (data.projects || []).map((project): ProjectData => {
+    const existing = (local.projects || []).find((item) => item.id === project.id);
+    if (existing) { return JSON.parse(JSON.stringify(existing)) as ProjectData; }
+    const previous = project.workspaceId;
+    project.workspaceId = 'project-' + util.generateRandomUUID();
+    destinations.set(previous, project.workspaceId);
+    return project;
+  });
+  const merged: AppData = { version: 2, config: local.config, activeThreadId: local.activeThreadId,
+    threads: local.threads.concat(data.threads), projects: (local.projects || []).concat((data.projects || [])
+      .filter((project) => !(local.projects || []).some((item) => item.id === project.id))) };
+  validateProjects(merged);
+  for (const project of data.projects || []) {
+    if ((local.projects || []).some((item) => item.id === project.id)) { await workspace.requireWorkspace(project.workspaceId); }
+  }
   const attachmentRoot = context.getApplicationContext().filesDir + '/attachments'; if (!await fs.access(attachmentRoot)) { await fs.mkdir(attachmentRoot); }
   for (const item of allAttachments(data)) { const id = attachmentIds.get(item.id) as string; const path = id + (item.mime === 'image/jpeg' ? '.jpg' : '.txt'); await writeBytes(attachmentRoot + '/' + path, (binaries.get(item.id) as Uint8Array).buffer as ArrayBuffer); }
-  for (const thread of data.threads) { await workspace.ensureThread(thread.id); }
+  for (const id of Array.from(destinations.values())) { await workspace.ensureThread(id); }
   for (let index = 0; index < envelope.files.length; index++) {
     const item = envelope.files[index];
-    if (!additions.has(item.threadId)) { continue; }
-    const root = workspace.pathFor(item.threadId); const parts = item.path.split('/'); let directory = root;
-    for (const part of parts.slice(0, -1)) { directory += '/' + part; if (!await fs.access(directory)) { await fs.mkdir(directory); } }
+    const target = destinations.get((legacy ? item.threadId : item.workspaceId) as string);
+    if (!target) { continue; }
+    const root = workspace.pathFor(target); const parts = item.path.split('/'); let directory = root;
+    for (const part of parts.slice(0, -1)) {
+      directory += '/' + part;
+      if (!await fs.access(directory)) { await fs.mkdir(directory); }
+      const stat = await fs.lstat(directory);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) { throw new Error(t('工作区路径必须是目录，不能是符号链接。')); }
+    }
+    if (await fs.access(root + '/' + item.path)) {
+      const stat = await fs.lstat(root + '/' + item.path);
+      if (!stat.isFile() || stat.isSymbolicLink()) { throw new Error(t('备份文件无效。')); }
+    }
     await writeBytes(root + '/' + item.path, workspaceBytes[index].buffer as ArrayBuffer);
   }
   // Keep service IDs until SessionService can match them against this device's settings.

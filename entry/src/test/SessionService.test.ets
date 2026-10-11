@@ -146,6 +146,45 @@ async function settleTitles(): Promise<void> {
 
 export default function sessionServiceTests(): void {
   describe('SessionService', () => {
+    it('sharesProjectInstructionsAcrossFreshSessionsWithoutLeakingOtherHistory', 0, async () => {
+      const f = new Fixture(); await f.session.initialize();
+      expect(await f.session.saveProject('Calculator', 'Use integer cents.')).assertTrue();
+      const project = f.session.snapshot().projects![0];
+      const firstId = f.session.snapshot().activeThreadId;
+      f.session.setDraft('Unique task from session A'); await f.session.send(); await settleTitles();
+      expect(f.provider.requests.filter((request) => !isTitleRequest(request))[0].messages[0].content.includes('Use integer cents.')).assertTrue();
+      expect(await f.session.newThread(project.id)).assertTrue();
+      f.session.setDraft('Task B'); await f.session.send(); await settleTitles();
+      const requests = f.provider.requests.filter((request) => !isTitleRequest(request));
+      expect(requests[requests.length - 1].messages[0].content.includes('Use integer cents.')).assertTrue();
+      expect(JSON.stringify(requests[requests.length - 1].messages).includes('Unique task from session A')).assertFalse();
+      expect(await f.session.saveProject('Calculator', 'Use decimal strings.', project.id)).assertTrue();
+      expect(await f.session.selectThread(firstId)).assertTrue();
+      f.session.setDraft('Continue A'); await f.session.send(); await settleTitles();
+      const updated = f.provider.requests.filter((request) => !isTitleRequest(request));
+      expect(updated[updated.length - 1].messages[0].content.includes('Use decimal strings.')).assertTrue();
+      expect(updated[updated.length - 1].messages[0].content.includes('Use integer cents.')).assertFalse();
+      expect(await f.session.selectThread('thread-1')).assertTrue();
+      f.session.setDraft('Standalone'); await f.session.send(); await settleTitles();
+      const ordinary = f.provider.requests.filter((request) => !isTitleRequest(request));
+      expect(ordinary[ordinary.length - 1].messages[0].content.includes('Use decimal strings.')).assertFalse();
+    });
+    it('regeneratesWithinTheProjectAndPreservesTheOriginalConversation', 0, async () => {
+      const f = new Fixture(); await f.session.initialize();
+      expect(await f.session.saveProject('Project', 'Project rule')).assertTrue();
+      f.session.setDraft('Original question'); await f.session.send(); await settleTitles();
+      const original = active(f.session.snapshot());
+      const saved = JSON.stringify(original.messages);
+      expect(await f.session.regenerateReply(original.messages[1].id)).assertTrue(); await settleTitles();
+      const data = f.session.snapshot(); const branch = active(data);
+      expect(branch.projectId).assertEqual(original.projectId);
+      expect(branch.parentThreadId).assertEqual(original.id);
+      expect(JSON.stringify(data.threads.find((thread) => thread.id === original.id)!.messages)).assertEqual(saved);
+      const requests = f.provider.requests.filter((request) => !isTitleRequest(request));
+      const prompt = requests[requests.length - 1].messages[0].content;
+      expect(prompt.includes('共享工作区')).assertTrue();
+      expect(prompt.includes('独立的新工作区')).assertFalse();
+    });
     it('addsGlobalUserDocumentToRequestsAndClearsItWithoutChangingSystemRules', 0, async () => {
       const f = new Fixture(); await f.session.initialize();
       const document = '# About me\nCall me Lin.\n\n# Preferences\nKeep it concise.';

@@ -592,7 +592,8 @@ export struct ChatPanel {
     const query = (referenceQuery(this.app.draft) || '').trim().toLowerCase();
     return this.app.threads.filter((item) => item.id !== this.thread.id && item.messages.some((message) => message.role === 'assistant' && message.status === 'complete') &&
       !this.thread.references.some((ref) => ref.threadId === item.id) && item.title.toLowerCase().includes(query))
-      .sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 6);
+      .sort((a, b) => Number(!!this.thread.projectId && b.projectId === this.thread.projectId) -
+        Number(!!this.thread.projectId && a.projectId === this.thread.projectId) || b.updatedAt - a.updatedAt).slice(0, 6);
   }
 
   @Builder

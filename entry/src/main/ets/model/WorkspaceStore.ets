@@ -20,6 +20,15 @@ export class WorkspaceStore {
     await this.ensureDirectory(path);
   }
 
+  async requireWorkspace(id: string): Promise<void> {
+    const path = this.pathFor(id);
+    for (const directory of [this.rootDir, path]) {
+      if (!await fs.access(directory)) { throw new Error(t('项目工作区不存在，请从备份恢复。')); }
+      const stat = await fs.lstat(directory);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) { throw new Error(t('工作区路径必须是目录，不能是符号链接。')); }
+    }
+  }
+
   private async ensureDirectory(path: string): Promise<void> {
     if (!await fs.access(path)) {
       await fs.mkdir(path);

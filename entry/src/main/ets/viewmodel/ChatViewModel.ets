@@ -1,3 +1,4 @@
+import { ProjectData } from '../model/Project';
 import { McpSettingsCommand, McpSettingsResult } from '../services/McpSettings';
 import { Cancellation } from '../services/Cancellation';
 import { t } from '../model/I18n';
@@ -38,6 +39,15 @@ export class SettingsViewModel {
 // ArkUI projection and editor drafts only. Durable data and execution belong to SessionService.
 @Observed
 export class ChatViewModel {
+  projects: ProjectData[] = [];
+  get activeProject(): ProjectData | undefined { return this.projects.find((item) => item.id === this.active.projectId); }
+  get activeWorkspaceId(): string { return this.requireSession().workspaceId; }
+  saveProject(name: string, instructions: string, id?: string): Promise<boolean> { return this.requireSession().saveProject(name, instructions, id); }
+  openProject(projectId: string): Promise<boolean> {
+    const thread = this.threads.filter((item) => item.projectId === projectId && !item.archived)
+      .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    return thread ? this.selectThread(thread.id) : this.newThread(projectId);
+  }
   productivity: ProductivityData = defaultProductivity();
   ready: boolean = false;
   searchQuery: string = '';
@@ -123,6 +133,7 @@ export class ChatViewModel {
     this.contextItems = state.contextBreakdown || []; this.contextSource = state.contextSource || 'estimate';
   }
   private projectData(data: AppData): void {
+    this.projects = data.projects || [];
     this.teams = data.threads.find((thread) => thread.id === data.activeThreadId)?.teams || [];
     this.productivity = data.productivity || defaultProductivity();
     this.config = data.config; this.extensions = data.extensions || defaultExtensions(); this.providerProfiles = data.providerProfiles || [];
@@ -182,7 +193,7 @@ export class ChatViewModel {
       if (item) { this.setDraft(expandTemplate(item, this.draft)); }
     } catch (error) { this.error = (error as Error).message; }
   }
-  newThread(): Promise<boolean> { return this.requireSession().newThread(); }
+  newThread(projectId: string | undefined = this.active.projectId): Promise<boolean> { return this.requireSession().newThread(projectId || undefined); }
   selectThread(id: string): Promise<boolean> { return this.requireSession().selectThread(id); }
   deleteThread(id: string): Promise<boolean> { return this.requireSession().deleteThread(id); }
   renameThread(id: string, value: string): Promise<boolean> { return this.requireSession().renameThread(id, value); }

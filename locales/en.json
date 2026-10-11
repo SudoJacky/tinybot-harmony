@@ -1484,5 +1484,21 @@
   "编辑前，请先用 read_file 或 read_file_lines 读取文件。": "Before editing, read the file using read_file or read_file_lines.",
   "本轮修改 · {0} 个文件": "Changes this turn · {0} files",
   "比较本轮首次修改前与最后成功写入的内容。": "Compares content before the first edit with the last successful write in this turn.",
-  "查找文件": "Find files"
+  "查找文件": "Find files",
+  "项目名称需要 1 至 80 个字符。": "Project names must contain 1 to 80 characters.",
+  "会话关联的项目不存在。": "The project linked to this chat does not exist.",
+  "项目数据无效。": "Invalid project data.",
+  "工作区归属冲突。": "Conflicting workspace ownership.",
+  "项目工作区不存在，请从备份恢复。": "The project workspace is missing. Restore it from a backup.",
+  "保存项目失败：": "Failed to save project: ",
+  "这会恢复项目中的累计修改，可能包含其他会话的改动。": "This restores accumulated project changes, which may include changes from other chats.",
+  "项目文件": "Project files",
+  "普通聊天": "Standalone chats",
+  "项目名称": "Project name",
+  "项目说明与约定（可选）": "Project description and instructions (optional)",
+  "项目内的会话共享文件和项目说明，各自保留对话历史。": "Chats in a project share files and instructions, while keeping separate conversation histories.",
+  "编辑项目": "Edit project",
+  "新建项目": "New project",
+  "项目中的待审修改": "Pending project changes",
+  "这里包含项目内各会话和文件编辑的累计修改。": "Includes accumulated changes from project chats and file edits."
 }
