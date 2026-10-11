@@ -497,6 +497,105 @@ async function test(name, run) { await run(); completedTests++; console.log('PAS
       assert.equal(fs.readdirSync(nativePath(root)).filter(p=>p.endsWith('.tmp')).length,0);
     }finally{release();await first;await second;fileIo.rename=rename;}
   });
+  await test('oversized MCP results survive storage and can be paged past the former truncation point without replay',async()=>{
+    const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
+    const {ContextTools,projectResults}=load(path.join(source,'services/ContextTools'));
+    const {stepMessages}=load(path.join(source,'model/Agent'));
+    const {executeToolBatch}=load(path.join(source,'services/ToolExecution'));
+    const approval=new ToolApproval(),signal=new Cancellation();let invocations=0;
+    const payload='资料🙂'.repeat(24000)+'TAIL-AFTER-48000';
+    const mcp=new McpTools([server],approval,()=>({list:async()=>[{name:'large',inputSchema:{type:'object'}}],call:async()=>{invocations++;return{content:[{type:'text',text:payload}]};}}));
+    const call=(name,args)=>({id:name,type:'function',function:{name,arguments:JSON.stringify(args)}});
+    await mcp.execute(call('mcp_list_tools',{server:'s'}),signal);
+    const step={content:'',tools:[{call:call('mcp_call',{server:'s',tool:'large',arguments:'{}'}),status:'pending',output:''}]};
+    const run=executeToolBatch(step,0,mcp,mcp.definitions(),signal,{checkpoint:async()=>{},event:()=>{}});
+    await new Promise(r=>setTimeout(r,0));approval.respond(true);await run;
+    assert.equal(step.tools[0].status,'complete');assert.equal(JSON.parse(step.tools[0].output).content[0].text,payload);
+    const root=path.join(fixture,'full-mcp');fs.mkdirSync(root);const disk=new ConversationStore(root),data=model.emptyData();
+    data.activeThreadId='full';data.threads=[{id:'full',title:'Full MCP',updatedAt:1,messages:[{id:'u',role:'user',content:'Read',status:'complete',error:''},
+      {id:'a',role:'assistant',content:'',status:'complete',error:'',steps:[step]}]}];await disk.save(data);
+    const saved=(await disk.load()).threads[0].messages[1].steps[0];
+    const entries=[{messageId:'u',answerId:'a',step:0,messages:stepMessages(saved),results:saved.tools}];
+    const projected=projectResults(entries,128000);const preview=JSON.parse(projected[0].messages.find(m=>m.role==='tool').content);
+    assert.equal(preview.contextPreview,true);assert.ok(preview.previewEnd.includes('TAIL-AFTER-48000'));
+    const tools=new ContextTools(new WorkspaceTools({}),()=>entries,128000);
+    let rebuilt='',offset=0;while(true){const page=JSON.parse(await tools.execute(call('read_tool_result',{messageId:'a',callId:'mcp_call',offset,length:8000}),signal));rebuilt+=page.content;if(page.complete)break;assert.ok(page.nextOffset>offset);offset=page.nextOffset;}
+    assert.equal(rebuilt,saved.tools[0].output);assert.equal(invocations,1);
+    await assert.rejects(tools.execute(call('read_tool_result',{messageId:'other',callId:'mcp_call'}),signal));
+  });
+  await test('search discovers beyond directory caps, filters globs, pages matches and preserves context',async()=>{
+    const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
+    const root='/sandbox/workspace/search-pages';fs.mkdirSync(nativePath(root),{recursive:true});fs.mkdirSync(nativePath(root+'/src'));
+    for(let i=0;i<205;i++)fs.writeFileSync(nativePath(root+`/src/f${String(i).padStart(3,'0')}.ts`),'before\nTODO '+i+'\nafter');
+    fs.writeFileSync(nativePath(root+'/skip.md'),'TODO markdown');fs.writeFileSync(nativePath(root+'/.hidden.ts'),'TODO hidden');
+    const native=new NativeWorkspaceFiles(root),tools=new WorkspaceTools(native),signal=new Cancellation();
+    const invoke=async(name,args)=>JSON.parse(await tools.execute({id:name,function:{name,arguments:JSON.stringify(args)}},signal));
+    const first=await invoke('list_files',{path:'src'}),last=await invoke('list_files',{path:'src',offset:first.nextOffset});
+    assert.equal(first.entries.length,200);assert.equal(last.entries.length,5);
+    let reads=0;const original=native.read.bind(native);native.read=async(...args)=>{reads++;return original(...args);};
+    let names=[],cursor;do{const page=await invoke('find_files',{path:'.',glob:'src/**/*.ts',limit:17,cursor});names.push(...page.paths);cursor=page.nextCursor;}while(cursor);
+    assert.equal(names.length,205);assert.equal(new Set(names).size,205);assert.equal(reads,0,'finding names must not read text');
+    let matches=[];cursor=undefined;do{const page=await invoke('search_file_content',{path:'.',glob:'*.ts',query:'todo',ignoreCase:true,context:1,limit:19,cursor});matches.push(...page.matches);cursor=page.nextCursor;}while(cursor);
+    assert.equal(matches.length,205);assert.ok(matches.every(m=>m.line===2&&m.before[0]==='before'&&m.after[0]==='after'));
+    assert.equal(new Set(matches.map(m=>m.path)).size,205);
+    await assert.rejects(tools.execute({id:'edit',function:{name:'edit_file',arguments:'{"path":"src/f000.ts","oldText":"TODO","newText":"DONE"}'}},signal),e=>e.code==='FS_NOT_OBSERVED');
+  });
+  await test('search continues within a file and through empty pages, rejects stale or mismatched cursors',async()=>{
+    const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
+    const root='/sandbox/workspace/search-cursor';fs.mkdirSync(nativePath(root),{recursive:true});
+    const native=new NativeWorkspaceFiles(root),tools=new WorkspaceTools(native),signal=new Cancellation();
+    const invoke=async(name,args)=>JSON.parse(await tools.execute({id:name,function:{name,arguments:JSON.stringify(args)}},signal));
+    fs.writeFileSync(nativePath(root+'/many.txt'),'TODO\n'.repeat(230));
+    const args={path:'.',query:'TODO',limit:100};const a=await invoke('search_file_content',args),b=await invoke('search_file_content',{...args,cursor:a.nextCursor}),c=await invoke('search_file_content',{...args,cursor:b.nextCursor});
+    assert.equal(a.matches.length+b.matches.length+c.matches.length,230);assert.equal(c.truncated,false);assert.equal(b.matches[0].line,101);
+    const replay=await invoke('search_file_content',{...args,cursor:a.nextCursor});assert.deepEqual(replay.matches,b.matches);
+    const otherRun=new WorkspaceTools(native);
+    await otherRun.execute({id:'other',function:{name:'search_file_content',arguments:JSON.stringify(args)}},signal);
+    await assert.rejects(otherRun.execute({id:'other',function:{name:'search_file_content',arguments:JSON.stringify({...args,cursor:a.nextCursor})}},signal),e=>e.code==='FS_INVALID_CURSOR');
+    await assert.rejects(invoke('search_file_content',{...args,query:'changed',cursor:a.nextCursor}),e=>e.code==='FS_INVALID_CURSOR');
+    fs.appendFileSync(nativePath(root+'/many.txt'),'changed');await assert.rejects(invoke('search_file_content',{...args,cursor:a.nextCursor}),e=>e.code==='FS_STALE_SEARCH');
+    for(let i=0;i<201;i++)fs.writeFileSync(nativePath(root+`/f${String(i).padStart(3,'0')}.md`),i===200?'TARGET':'other');
+    const empty=await invoke('search_file_content',{path:'.',query:'TARGET',glob:'*.md'});assert.equal(empty.matches.length,0);assert.equal(empty.truncated,true);
+    const tail=await invoke('search_file_content',{path:'.',query:'TARGET',glob:'*.md',cursor:empty.nextCursor});assert.equal(tail.matches.length,1);
+    const cancelled=new Cancellation();cancelled.cancel();await assert.rejects(tools.execute({id:'x',function:{name:'find_files',arguments:'{"path":"."}'}},cancelled));
+  });
+  await test('turn summaries record net changes, include nested calls, survive reload and never enter model messages',async()=>{
+    const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
+    const {turnFileChanges}=load(path.join(source,'model/TurnFileChanges'));
+    const {stepMessages}=load(path.join(source,'model/Agent'));
+    const root='/sandbox/workspace/turn-changes';fs.mkdirSync(nativePath(root),{recursive:true});fs.writeFileSync(nativePath(root+'/a.txt'),'base\n');
+    const native=new NativeWorkspaceFiles(root),signal=new Cancellation();let tools=new WorkspaceTools(native);
+    const invoke=async(name,args)=>{const tool={call:{id:crypto.randomUUID(),type:'function',function:{name,arguments:JSON.stringify(args)}},status:'running',output:''};tool.output=await tools.execute(tool.call,signal,{execution:tool});tool.status='complete';return tool;};
+    await invoke('read_file',{path:'a.txt'});
+    const first=await invoke('edit_file',{path:'a.txt',oldText:'base',newText:'temporary'});
+    const reverted=await invoke('edit_file',{path:'a.txt',oldText:'temporary',newText:'base'});
+    assert.equal(turnFileChanges([{content:'',tools:[first,reverted]}]).length,0,'reverted edits must not add up');
+    const final=await invoke('edit_file',{path:'a.txt',oldText:'base',newText:'final\nextra'});
+    const empty=await invoke('write_file',{path:'empty.txt',content:''});
+    const parent={call:{id:'parent',function:{name:'orchestrate',arguments:'{}'}},status:'complete',output:'{}',children:[final,first,reverted,empty]};
+    const steps=[{content:'',tools:[parent]}];const changes=turnFileChanges(JSON.parse(JSON.stringify(steps)));
+    assert.equal(changes.length,2);assert.equal(changes[0].added,2);assert.equal(changes[0].removed,1);assert.equal(changes[1].created,true);
+    assert.ok(!JSON.stringify(stepMessages(steps[0])).includes('turnFileChange'));
+    tools=new WorkspaceTools(native);await invoke('read_file',{path:'a.txt'});
+    const secondTurn=await invoke('edit_file',{path:'a.txt',oldText:'extra',newText:'next'});
+    assert.equal(secondTurn.turnFileChange.diff.added,1);assert.equal(secondTurn.turnFileChange.diff.removed,1);
+    assert.equal((await native.baseline('a.txt')).content,'base\n','user restore baseline stays separate');
+  });
+  await test('real tool execution serializes actionable file errors without modifying the file',async()=>{
+    const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
+    const {executeToolBatch}=load(path.join(source,'services/ToolExecution'));
+    const root='/sandbox/workspace/error-codes';fs.mkdirSync(nativePath(root),{recursive:true});fs.writeFileSync(nativePath(root+'/a.txt'),'repeat repeat\nunique');
+    const tools=new WorkspaceTools(new NativeWorkspaceFiles(root)),signal=new Cancellation();
+    const invoke=async(name,args)=>{const step={content:'',tools:[{call:{id:crypto.randomUUID(),type:'function',function:{name,arguments:JSON.stringify(args)}},status:'pending',output:''}]};await executeToolBatch(step,0,tools,tools.definitions(),signal,{checkpoint:async()=>{},event:()=>{}});return step.tools[0];};
+    let tool=await invoke('edit_file',{path:'a.txt',oldText:'unique',newText:'x'});let result=JSON.parse(tool.output);
+    assert.equal(tool.status,'failed');assert.equal(result.code,'FS_NOT_OBSERVED');assert.equal(result.path,'a.txt');assert.equal(result.recovery,'read_file');
+    await invoke('read_file',{path:'a.txt'});
+    tool=await invoke('edit_file',{path:'a.txt',edits:[{oldText:'unique',newText:'x'},{oldText:'repeat',newText:'y'}]});result=JSON.parse(tool.output);
+    assert.equal(result.code,'FS_AMBIGUOUS_MATCH');assert.equal(result.editIndex,2);assert.equal(result.path,'a.txt');assert.equal(result.recovery,'add_match_context');
+    assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),'repeat repeat\nunique');
+    fs.writeFileSync(nativePath(root+'/a.txt'),'external');tool=await invoke('write_file',{path:'a.txt',content:'lost'});assert.equal(JSON.parse(tool.output).code,'FS_STALE_VERSION');
+    assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),'external');
+  });
   await test('image hydration awaits actual base64 encoding',async()=>{
     const id=crypto.randomUUID(),bytes=Buffer.from([255,216,255,217]);fs.writeFileSync(path.join(fixture,'attachments',id+'.jpg'),bytes);
     const item={id,name:'image.jpg',mime:'image/jpeg',path:id+'.jpg',size:bytes.length};

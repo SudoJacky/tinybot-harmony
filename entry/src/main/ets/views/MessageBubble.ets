@@ -1,5 +1,7 @@
 import { t } from '../model/I18n';
 import { PresentedFile, deliveredFiles } from '../model/Deliverables';
+import { turnFileChanges } from '../model/TurnFileChanges';
+import { TurnChangesCard } from './TurnChangesCard';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { MarkdownView } from './MarkdownView';
@@ -56,7 +58,7 @@ function toolIcon(name: string): Resource {
   if (name === 'list_files') { return $r('sys.symbol.rectangle_stack'); }
   if (name === 'write_file' || name === 'edit_file') { return $r('sys.symbol.square_and_pencil'); }
   if (name === 'read_file' || name === 'read_file_lines' || name === 'read_attachment') { return $r('sys.symbol.doc_text'); }
-  if (name === 'search_file_content' || name === 'mcp_search_tools') { return $r('sys.symbol.magnifyingglass'); }
+  if (name === 'find_files' || name === 'search_file_content' || name === 'mcp_search_tools') { return $r('sys.symbol.magnifyingglass'); }
   if (name === 'generate_image') { return $r('sys.symbol.picture'); }
   if (name === 'update_plan') { return $r('sys.symbol.list_bullet'); }
   if (name === 'request_user_input') { return $r('sys.symbol.questionmark_circle'); }
@@ -630,6 +632,9 @@ export struct MessageBubble {
           .backgroundColor(this.message.status === 'failed' ? $r('app.color.danger_container') : $r('app.color.surface_variant'))
       }
       // Visible shortcuts for finished answers; the long-press menu offers the same actions.
+      if (this.message.status !== 'generating' && turnFileChanges(this.message.steps).length > 0) {
+        TurnChangesCard({ changes: turnFileChanges(this.message.steps) })
+      }
       if (this.message.status !== 'generating') {
         Flex({ wrap: FlexWrap.Wrap }) {
           if (this.message.content.length > 0) {

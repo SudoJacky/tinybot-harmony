@@ -2,7 +2,7 @@ import { Cancellation } from './Cancellation';
 import { TextEdit } from '../model/WorkspaceEdit';
 
 export interface WorkspaceEntry { name: string; kind: string; }
-export interface WorkspaceListing { path: string; entries: WorkspaceEntry[]; truncated: boolean; }
+export interface WorkspaceListing { path: string; entries: WorkspaceEntry[]; truncated: boolean; nextOffset?: number; }
 export interface WorkspaceText { path: string; content: string; version: string; }
 // null means create only; omitted guard is reserved for explicit user operations.
 export interface WorkspaceWriteGuard { version: string | null; }
@@ -15,7 +15,7 @@ export interface FileBaseline { path: string; existed: boolean; content: string;
 
 // Native storage and in-memory adapters share typed results. Tool dispatch owns JSON encoding.
 export interface WorkspaceFiles {
-  list(path: string, cancellation: Cancellation): Promise<WorkspaceListing>;
+  list(path: string, cancellation: Cancellation, offset?: number): Promise<WorkspaceListing>;
   read(path: string, cancellation: Cancellation): Promise<WorkspaceText>;
   write(path: string, content: string, cancellation: Cancellation, guard?: WorkspaceWriteGuard): Promise<WorkspaceWrite>;
   edit(path: string, edits: TextEdit[], version: string, cancellation: Cancellation): Promise<WorkspaceWrite>;

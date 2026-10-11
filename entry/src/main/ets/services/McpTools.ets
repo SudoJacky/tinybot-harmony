@@ -65,6 +65,8 @@ export class McpTools implements AgentTools {
     if (!params || typeof params !== 'object' || Array.isArray(params)) { throw new Error(t("工具参数必须为 JSON 对象。")); }
     await this.approval.request(server.name + ' · ' + args.tool, server.url + '\n\n' + args.arguments, cancellation);
     const result = JSON.stringify(await client.call(args.tool, params, cancellation));
-    return result.length > 48000 ? JSON.stringify({ truncated: true, text: result.slice(0, 48000) }) : result;
+    // Persist the complete accepted response. ContextTools bounds the model projection
+    // and read_tool_result retrieves the saved receipt without repeating this operation.
+    return result;
   }
 }

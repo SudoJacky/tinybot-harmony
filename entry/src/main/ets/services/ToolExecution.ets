@@ -72,7 +72,7 @@ export async function executeToolBatch(step: AgentStep, round: number, tools: Ag
       tool.status = 'complete';
     } catch (error) {
       if (error instanceof ToolPersistenceError) { throw error; }
-      tool.output = error instanceof ToolResultError ? error.output : toolError((error as Error).message);
+      tool.output = error instanceof ToolResultError ? error.output : toolError(error as Error);
       tool.status = error instanceof RunCancelledError ? 'cancelled' : 'failed';
     }
     activity.status = tool.status; activity.durationMs = Date.now() - activity.startedAt; recordActivity();

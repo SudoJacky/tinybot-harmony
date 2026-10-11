@@ -8,6 +8,7 @@ import { workspaceRelativePath } from './WorkspaceTools';
 import { readUtf8File } from './TextFiles';
 import { TextEdit, applyTextEdits, validateEdits } from '../model/WorkspaceEdit';
 import { withFileMutation } from './FileMutationQueue';
+import { ToolFailure } from '../model/ToolFailure';
 
 import { WorkspaceFiles, WorkspaceEntry, WorkspaceListing, WorkspaceText, WorkspaceWrite, WorkspaceWriteGuard, FileBaseline } from './WorkspaceFiles';
 
@@ -32,18 +33,20 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     return absolute;
   }
 
-  async list(path: string, cancellation: Cancellation): Promise<WorkspaceListing> {
+  async list(path: string, cancellation: Cancellation, offset: number = 0): Promise<WorkspaceListing> {
+    if (!Number.isSafeInteger(offset) || offset < 0) { throw new ToolFailure('FS_INVALID_ARGUMENTS', 'Invalid directory offset.', 'fix_arguments', path); }
     const absolute = await this.resolve(path, false, cancellation);
     await this.requireDirectory(absolute);
     cancellation.check();
-    const names = await fs.listFile(absolute, { recursion: false, listNum: 201 });
+    const names = (await fs.listFile(absolute, { recursion: false })).filter((name: string) => !name.startsWith('.tinybot-')).sort();
     const entries: WorkspaceEntry[] = [];
-    for (const name of names.slice(0, 200).sort().filter((name) => !name.startsWith('.tinybot-'))) {
+    for (const name of names.slice(offset, offset + 200)) {
       cancellation.check();
       const stat = await fs.lstat(absolute + '/' + name);
       entries.push({ name: name, kind: stat.isSymbolicLink() ? 'symlink' : stat.isDirectory() ? 'directory' : 'file' });
     }
-    return { path: path || '.', entries: entries, truncated: names.length > 200 };
+    return { path: path || '.', entries: entries, truncated: names.length > offset + 200,
+      nextOffset: names.length > offset + 200 ? offset + 200 : undefined };
   }
 
   async read(path: string, cancellation: Cancellation): Promise<WorkspaceText> {
@@ -77,10 +80,10 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     if (existing && (!existing.isFile() || existing.isSymbolicLink())) {
       throw new Error(t("只能写入普通文件，不能覆盖目录或符号链接。"));
     }
-    if (guard && guard.version === null && existing) { throw new Error(t('覆盖已有文件前，请先用 read_file 或 read_file_lines 读取。')); }
+    if (guard && guard.version === null && existing) { throw new ToolFailure('FS_NOT_OBSERVED', t('覆盖已有文件前，请先用 read_file 或 read_file_lines 读取。'), 'read_file', path); }
     const original = existing ? await this.read(path, cancellation) : undefined;
     if (guard && guard.version !== null && (!original || original.version !== guard.version)) {
-      throw new Error(t('文件自上次读取后已变化，请重新读取再修改。'));
+      throw new ToolFailure('FS_STALE_VERSION', t('文件自上次读取后已变化，请重新读取再修改。'), 'read_file', path);
     }
     const before = original ? original.content : '';
     if (edits.length > 0) { content = applyTextEdits(before, edits); }

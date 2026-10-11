@@ -1,5 +1,7 @@
 import { t } from './I18n';
 import { FileDiff } from './FileDiff';
+import { ToolFailure } from './ToolFailure';
+import { TurnFileChange } from './TurnFileChanges';
 import { AnthropicContentBlock, validateAnthropicContent } from './AnthropicContent';
 import { Attachment } from './Productivity';
 import { RequestUsage } from './Usage';
@@ -95,6 +97,7 @@ export interface ModelTurn {
 }
 
 export interface ToolExecution {
+  turnFileChange?: TurnFileChange;
   fileDiff?: FileDiff;
   // Persisted presentation metadata, never included in the model-visible output.
   websiteIcon?: string;
@@ -157,8 +160,11 @@ export function validateToolCalls(calls: ToolCall[]): void {
   }
 }
 
-export function toolError(message: string): string {
-  return JSON.stringify({ error: message });
+export function toolError(error: string | Error): string {
+  if (error instanceof ToolFailure) {
+    return JSON.stringify({ error: error.message, code: error.code, recovery: error.recovery, path: error.path, editIndex: error.editIndex });
+  }
+  return JSON.stringify({ error: typeof error === 'string' ? error : error.message });
 }
 
 export function stepMessages(step: AgentStep, includeSteering: boolean = true): ModelMessage[] {

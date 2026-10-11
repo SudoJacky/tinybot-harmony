@@ -46,6 +46,12 @@ test('search groups duplicate paths while preserving matches and skipped files',
   assert.equal(result.sections[0].rows[1].value,'three'); assert.ok(flat(result.notices).includes('binary'));
   assert.ok(flat(render('search_file_content',{}, {matches:[]})).includes('没有匹配项'));
 });
+test('search contexts and name discovery are visible without reading live files', () => {
+  const result=render('search_file_content',{path:'.',query:'TODO',context:1},{matches:[{path:'a.ts',line:5,column:12,text:'TODO',before:['before'],after:['after']}],truncated:true,nextCursor:'search-1'});
+  assert.equal(result.sections[0].rows[0].value,'before\nTODO\nafter');assert.match(result.sections[0].rows[0].label,/:12/);
+  const names=render('find_files',{path:'.',glob:'*.md'},{paths:['a.md','sub/b.md'],truncated:false});
+  assert.deepEqual(Array.from(names.sections[0].rows,r=>r.label),['a.md','sub/b.md']);
+});
 test('directories and plans retain empty and status distinctions', () => {
   const listing=render('list_files',{}, {entries:[{name:'src',kind:'directory'},{name:'a.txt',kind:'file'},{name:'link',kind:'symlink'}]});
   assert.deepEqual(Array.from(listing.sections[0].rows,row=>row.value),['文件夹','文件','符号链接']);

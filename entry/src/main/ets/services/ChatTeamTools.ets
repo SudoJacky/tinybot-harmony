@@ -80,7 +80,7 @@ class EmployeeTools implements AgentTools {
   candidate?: TeamHandoff;
   constructor(base: AgentTools, profile: string, host: ChatTeamTools, run: TeamRun, attempt: TeamAttempt) {
     this.base = base; this.host = host; this.run = run; this.attempt = attempt;
-    const reads = ['list_files', 'read_file', 'read_file_lines', 'read_attachment', 'search_file_content', 'read_skill', 'update_plan', 'execute_code'];
+    const reads = ['find_files', 'list_files', 'read_file', 'read_file_lines', 'read_attachment', 'search_file_content', 'read_skill', 'update_plan', 'execute_code'];
     const research = reads.concat(['read_web', 'search_web', 'read_reference', 'write_file', 'edit_file']);
     this.catalog = base.definitions().filter((item) => item.function.name !== 'publish_data_view' &&
       !item.function.name.startsWith('team_') && (profile === 'execution' || (profile === 'research' ? research : reads).includes(item.function.name)));

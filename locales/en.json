@@ -1481,5 +1481,8 @@
   "覆盖已有文件前，请先用 read_file 或 read_file_lines 读取。": "Before overwriting an existing file, read it using read_file or read_file_lines.",
   "文件自上次读取后已变化，请重新读取再修改。": "The file has changed since your last read. Read it again before modifying it.",
   "edits 不能与 oldText/newText 混用。": "Do not mix edits with oldText/newText.",
-  "编辑前，请先用 read_file 或 read_file_lines 读取文件。": "Before editing, read the file using read_file or read_file_lines."
+  "编辑前，请先用 read_file 或 read_file_lines 读取文件。": "Before editing, read the file using read_file or read_file_lines.",
+  "本轮修改 · {0} 个文件": "Changes this turn · {0} files",
+  "比较本轮首次修改前与最后成功写入的内容。": "Compares content before the first edit with the last successful write in this turn.",
+  "查找文件": "Find files"
 }
