@@ -1,3 +1,4 @@
+import { ToolFailure, parseToolArguments } from '../model/ToolFailure';
 import { ToolCall, ToolDefinition } from '../model/Agent';
 import { MemoryOperation, parseMemoryOperations } from '../model/MemoryMaintenance';
 import { AgentTools } from './AgentLoop';
@@ -23,8 +24,8 @@ export class MemoryTools implements AgentTools {
   }
   async execute(call: ToolCall, cancellation: Cancellation): Promise<string> {
     cancellation.check();
-    const args = JSON.parse(call.function.arguments) as MemoryArguments;
-    if (!args || typeof args.operations !== 'string') { throw new Error('Memory requires an operations JSON string.'); }
+    const args = parseToolArguments(call.function.arguments) as MemoryArguments;
+    if (!args || typeof args.operations !== 'string') { throw new ToolFailure('INVALID_ARGUMENTS', 'Memory requires an operations JSON string.', 'fix_arguments'); }
     return this.apply(parseMemoryOperations(args.operations), cancellation);
   }
 }

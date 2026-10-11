@@ -70,6 +70,8 @@ Team 控制、用户表单、图片/界面发布以及 `execute_code`/`orchestra
 
 `NativeSessionResources` 为聊天和团队提供 `execute_code`，支持纯计算 JavaScript。research、review 和全局只读模式均可使用；文件操作仍由原有工作区工具校验权限、路径和修改基线。
 
+失败回执保留 `status`、`error`、stdout/stderr 和其他运行字段，并增加统一的 `code`、`recovery`；外层工具状态同步标为失败或取消，不把沙箱返回失败当作调用成功。编排失败同样保留子调用列表，恢复时先检查已完成的操作，避免重新执行整个脚本造成重复写入。
+
 ## 调用约定
 
 ```json

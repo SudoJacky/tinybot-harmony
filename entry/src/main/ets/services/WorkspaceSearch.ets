@@ -40,14 +40,14 @@ export class WorkspaceSearch {
       (args.ignoreCase !== undefined && typeof args.ignoreCase !== 'boolean') ||
       (args.cursor !== undefined && typeof args.cursor !== 'string') || (args.glob !== undefined && typeof args.glob !== 'string') ||
       (!find && (typeof args.query !== 'string' || !args.query || args.query.length > 1000))) {
-      throw new ToolFailure('FS_INVALID_ARGUMENTS', 'Use limit 1–100, context 0–5 and a nonempty query for content searches.', 'fix_arguments', args.path);
+      throw new ToolFailure('FS_INVALID_ARGUMENTS', 'Use limit 1–100, context 0–5 and a nonempty query for content searches.', 'fix_arguments', { path: args.path });
     }
     const pattern = filePattern(args.glob || '*');
     const key = JSON.stringify({ find: find, path: args.path, query: args.query || '', glob: args.glob || '*', ignoreCase: args.ignoreCase === true, context: context, limit: limit });
     let tasks: SearchTask[] = [{ path: args.path, directory: true, offset: 0 }];
     if (args.cursor !== undefined) {
       const saved = this.cursors.get(args.cursor);
-      if (!saved || saved.key !== key) { throw new ToolFailure('FS_INVALID_CURSOR', 'Search cursor expired or parameters changed. Restart without cursor.', 'restart_search', args.path); }
+      if (!saved || saved.key !== key) { throw new ToolFailure('FS_INVALID_CURSOR', 'Search cursor expired or parameters changed. Restart without cursor.', 'restart_search', { path: args.path }); }
       tasks = saved.tasks.map((item: SearchTask): SearchTask => ({ path: item.path, directory: item.directory, offset: item.offset, version: item.version }));
     }
     const matches: SearchMatch[] = []; const paths: string[] = []; const skipped: string[] = [];
@@ -59,7 +59,7 @@ export class WorkspaceSearch {
         directories++;
         const page = await this.files.list(task.path, cancellation, task.offset);
         if (page.truncated && (page.nextOffset === undefined || page.nextOffset <= task.offset)) {
-          throw new ToolFailure('FS_INCOMPLETE_LIST', 'Directory listing cannot continue.', 'inspect_directory', task.path);
+          throw new ToolFailure('FS_INCOMPLETE_LIST', 'Directory listing cannot continue.', 'inspect_directory', { path: task.path });
         }
         // Keep directory continuation after its entries, without dropping any remainder at a page boundary.
         if (page.nextOffset !== undefined) { tasks.push({ path: task.path, directory: true, offset: page.nextOffset }); }
@@ -76,7 +76,7 @@ export class WorkspaceSearch {
       let content: string; let version: string;
       try { const file = await this.files.read(task.path, cancellation); content = file.content; version = file.version; }
       catch (error) { cancellation.check(); if (task.version !== undefined) { throw error as Error; } skipped.push(task.path); continue; }
-      if (task.version !== undefined && task.version !== version) { throw new ToolFailure('FS_STALE_SEARCH', 'File changed while paging search results. Restart the search.', 'restart_search', task.path); }
+      if (task.version !== undefined && task.version !== version) { throw new ToolFailure('FS_STALE_SEARCH', 'File changed while paging search results. Restart the search.', 'restart_search', { path: task.path }); }
       const lines = content.split('\n');
       let line = task.offset;
       for (; line < lines.length && matches.length < limit; line++) {

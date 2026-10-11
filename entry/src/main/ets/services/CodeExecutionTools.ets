@@ -1,3 +1,4 @@
+import { ToolFailure, ToolResultError, parseToolArguments } from '../model/ToolFailure';
 import { ToolCall, ToolDefinition } from '../model/Agent';
 import { AgentTools } from './AgentLoop';
 import { Cancellation } from './Cancellation';
@@ -6,6 +7,7 @@ export interface CodeExecutor {
   execute(source: string, inputJson: string, cancellation: Cancellation): Promise<string>;
 }
 
+interface CodeStatus { status: string; }
 interface CodeArguments { code: string; input?: string; }
 
 export class CodeExecutionTools implements AgentTools {
@@ -31,17 +33,21 @@ export class CodeExecutionTools implements AgentTools {
 
   async execute(call: ToolCall, cancellation: Cancellation): Promise<string> {
     cancellation.check();
-    if (call.function.name !== 'execute_code') { throw new Error('Unsupported code execution tool'); }
+    if (call.function.name !== 'execute_code') { throw new ToolFailure('TOOL_UNAVAILABLE', 'Unsupported code execution tool', 'check_available_tools'); }
     let args: CodeArguments;
-    try { args = JSON.parse(call.function.arguments) as CodeArguments; }
-    catch (_) { throw new Error('Code tool arguments must be a JSON object'); }
+    try { args = parseToolArguments(call.function.arguments) as CodeArguments; }
+    catch (_) { throw new ToolFailure('INVALID_ARGUMENTS', 'Code tool arguments must be a JSON object', 'fix_arguments'); }
     if (!args || typeof args !== 'object' || Array.isArray(args) || typeof args.code !== 'string' || !args.code.trim() ||
       Object.keys(args).some((key: string) => key !== 'code' && key !== 'input') ||
-      (args.input !== undefined && typeof args.input !== 'string')) { throw new Error('Expected code and optional JSON input strings'); }
+      (args.input !== undefined && typeof args.input !== 'string')) { throw new ToolFailure('INVALID_ARGUMENTS', 'Expected code and optional JSON input strings', 'fix_arguments'); }
     const input = args.input === undefined ? 'null' : args.input;
     // Native parsing keeps JSON depth, allocation and parse work inside the runtime budget.
     const output = await this.executor.execute(args.code, input, cancellation);
     cancellation.check();
+    const result = JSON.parse(output) as CodeStatus;
+    if (result.status !== 'ok') {
+      throw new ToolResultError(output, result.status === 'cancelled' ? 'CANCELLED' : result.status === 'timeout' ? 'TIMEOUT' : result.status === 'memory_limit' ? 'LIMIT_EXCEEDED' : 'EXECUTION_FAILED', 'fix_code');
+    }
     return output;
   }
 }

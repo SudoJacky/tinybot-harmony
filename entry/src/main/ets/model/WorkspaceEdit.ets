@@ -11,7 +11,7 @@ export function validateEdits(edits: TextEdit[]): void {
   edits.forEach((edit: TextEdit, index: number) => {
     if (!edit || Array.isArray(edit) || typeof edit.oldText !== 'string' || !edit.oldText ||
       typeof edit.newText !== 'string' || Object.keys(edit).some((key: string) => !['oldText', 'newText'].includes(key))) {
-      throw new ToolFailure('FS_INVALID_EDITS', t('第 {0} 项编辑需要非空 oldText 和字符串 newText。', [index + 1]), 'fix_arguments', undefined, index + 1);
+      throw new ToolFailure('FS_INVALID_EDITS', t('第 {0} 项编辑需要非空 oldText 和字符串 newText。', [index + 1]), 'fix_arguments', { editIndex: index + 1 });
     }
   });
 }
@@ -29,14 +29,14 @@ export function applyTextEdits(content: string, edits: TextEdit[]): string {
     const oldText = edit.oldText.replace(/\r\n/g, '\n');
     const newText = edit.newText.replace(/\r\n/g, '\n');
     const start = normalized.indexOf(oldText);
-    if (start < 0) { throw new ToolFailure('FS_MATCH_NOT_FOUND', t('第 {0} 项编辑：', [index + 1]) + t('原文不存在，请重新读取文件。'), 'read_file', undefined, index + 1); }
+    if (start < 0) { throw new ToolFailure('FS_MATCH_NOT_FOUND', t('第 {0} 项编辑：', [index + 1]) + t('原文不存在，请重新读取文件。'), 'read_file', { editIndex: index + 1 }); }
     if (normalized.indexOf(oldText, start + 1) >= 0) {
-      throw new ToolFailure('FS_AMBIGUOUS_MATCH', t('第 {0} 项编辑：', [index + 1]) + t('原文匹配多处，请提供更多上下文。'), 'add_match_context', undefined, index + 1);
+      throw new ToolFailure('FS_AMBIGUOUS_MATCH', t('第 {0} 项编辑：', [index + 1]) + t('原文匹配多处，请提供更多上下文。'), 'add_match_context', { editIndex: index + 1 });
     }
     return { start: start, end: start + oldText.length, replacement: newText.replace(/\n/g, ending), unchanged: oldText === newText, index: index + 1 };
   }).sort((a: LocatedEdit, b: LocatedEdit) => a.start - b.start);
   for (let i = 1; i < located.length; i++) {
-    if (located[i].start < located[i - 1].end) { throw new ToolFailure('FS_OVERLAPPING_EDITS', t('编辑范围重叠，请合并为一项编辑。'), 'merge_edits', undefined, located[i].index); }
+    if (located[i].start < located[i - 1].end) { throw new ToolFailure('FS_OVERLAPPING_EDITS', t('编辑范围重叠，请合并为一项编辑。'), 'merge_edits', { editIndex: located[i].index }); }
   }
   // Map sorted normalized offsets back to original UTF-16 offsets without rewriting untouched lines.
   let raw = 0; let normalizedOffset = 0; let previous = 0;

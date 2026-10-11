@@ -1,7 +1,7 @@
-import { ToolCall, ToolDefinition, ToolExecution, validateToolCalls } from '../model/Agent';
+import { ToolFailure, ToolResultError, parseToolArguments } from '../model/ToolFailure';
+import { ToolCall, ToolDefinition, ToolExecution, validateToolCalls, toolError } from '../model/Agent';
 import { AgentTools, ToolInvocationContext } from './AgentLoop';
 import { Cancellation } from './Cancellation';
-import { ToolResultError } from './ToolExecution';
 
 export interface OrchestrationExecutor {
   execute(source: string, catalog: string, invoke: (name: string, argumentsJson: string) => Promise<string>,
@@ -50,9 +50,9 @@ export class OrchestrationTools implements AgentTools {
   async execute(call: ToolCall, cancellation: Cancellation, context?: ToolInvocationContext): Promise<string> {
     if (call.function.name !== 'orchestrate') { return this.inner.execute(call, cancellation, context); }
     cancellation.check();
-    const args = JSON.parse(call.function.arguments) as CodeArguments;
+    const args = parseToolArguments(call.function.arguments) as CodeArguments;
     if (!args || Array.isArray(args) || typeof args.code !== 'string' || !args.code.trim() || Object.keys(args).some((key) => key !== 'code')) {
-      throw new Error('Expected an object containing only a non-empty code string');
+      throw new ToolFailure('INVALID_ARGUMENTS', 'Expected an object containing only a non-empty code string', 'fix_arguments');
     }
     if (!context) { throw new Error('Orchestration requires a durable tool invocation context'); }
     const invocation = context;
@@ -70,8 +70,8 @@ export class OrchestrationTools implements AgentTools {
     const invoke = (name: string, argumentsJson: string): Promise<string> => {
       signal.check();
       const definition = catalog.find((tool) => tool.function.name === name);
-      if (!definition || !this.nested().some((tool) => tool.function.name === name)) { throw new Error('Tool unavailable: ' + name); }
-      if (children.length >= 32) { throw new Error('Orchestration exceeded 32 tool calls'); }
+      if (!definition || !this.nested().some((tool) => tool.function.name === name)) { throw new ToolFailure('TOOL_UNAVAILABLE', 'Tool unavailable: ' + name, 'check_available_tools'); }
+      if (children.length >= 32) { throw new ToolFailure('LIMIT_EXCEEDED', 'Orchestration exceeded 32 tool calls', 'reduce_input'); }
       const child: ToolExecution = { call: { id: call.id.slice(0, 115) + '_child_' + (children.length + 1),
         type: 'function', function: { name: name, arguments: argumentsJson } }, status: 'pending', output: '' };
       validateToolCalls([child.call]); children.push(child);
@@ -100,7 +100,7 @@ export class OrchestrationTools implements AgentTools {
       await Promise.all(admitted);
       unsubscribe();
       for (const child of children) {
-        if (child.status === 'pending') { child.status = 'cancelled'; child.output = JSON.stringify({ error: 'Orchestration ended before this call started' }); }
+        if (child.status === 'pending') { child.status = 'cancelled'; child.output = toolError(new ToolFailure('NOT_EXECUTED', 'Orchestration ended before this call started', 'none')); }
       }
       if (fatal) { throw fatal as Error; }
     }
@@ -108,7 +108,7 @@ export class OrchestrationTools implements AgentTools {
     const status = JSON.parse(result) as ExecutionStatus;
     status.calls = children.map((child): ChildReference => ({ callId: child.call.id, tool: child.call.function.name, status: child.status }));
     const output = JSON.stringify(status);
-    if (status.status !== 'ok') { throw new ToolResultError(output); }
+    if (status.status !== 'ok') { throw new ToolResultError(output, status.status === 'timeout' ? 'TIMEOUT' : 'EXECUTION_FAILED', 'inspect_children_before_retry'); }
     return output;
   }
 }

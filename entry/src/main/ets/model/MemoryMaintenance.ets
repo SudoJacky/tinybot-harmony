@@ -1,3 +1,4 @@
+import { ToolFailure, parseToolArguments } from './ToolFailure';
 import { t } from './I18n';
 import { MemoryEntry } from './Productivity';
 import { memoryKey } from './MemorySuggestions';
@@ -40,14 +41,14 @@ export function memoryCharacters(memories: MemoryEntry[]): number {
 }
 
 export function parseMemoryOperations(text: string): MemoryOperation[] {
-  const operations = JSON.parse(text.trim().replace(/^```(?:json)?\s*|\s*```$/g, '')) as MemoryOperation[];
+  const operations = parseToolArguments(text.trim().replace(/^```(?:json)?\s*|\s*```$/g, '')) as MemoryOperation[];
   if (!Array.isArray(operations) || operations.length > 5 || operations.some((op) => !op ||
     !['add', 'update', 'remove'].includes(op.action) ||
     (op.action !== 'remove' && (typeof op.content !== 'string' || !op.content.trim() || op.content.trim().length > 500)) ||
     (op.action === 'add' ? !['global', 'thread'].includes(op.scope || '') || op.id !== undefined :
       typeof op.id !== 'string' || !op.id || op.scope !== undefined) ||
     (op.sourceMessageId !== undefined && (typeof op.sourceMessageId !== 'string' || !op.sourceMessageId)))) {
-    throw new Error(t('记忆变更格式无效。'));
+    throw new ToolFailure('INVALID_ARGUMENTS', t('记忆变更格式无效。'), 'fix_arguments');
   }
   return operations;
 }
@@ -60,7 +61,7 @@ export function applyMemoryOperations(existing: MemoryEntry[], operations: Memor
   const receipt: MemoryReceipt = { added: 0, updated: 0, removed: 0, duplicates: 0, characters: 0 };
   const touched = new Set<string>();
   for (const operation of operations) {
-    if (!operation.sourceMessageId || !evidenceIds.includes(operation.sourceMessageId)) { throw new Error(t('记忆变更缺少有效的用户消息来源。')); }
+    if (!operation.sourceMessageId || !evidenceIds.includes(operation.sourceMessageId)) { throw new ToolFailure('EVIDENCE_REQUIRED', t('记忆变更缺少有效的用户消息来源。'), 'provide_user_evidence'); }
     const content = (operation.content || '').trim();
     if (operation.action === 'add') {
       const scope = operation.scope === 'global' ? '' : threadId;
@@ -72,17 +73,17 @@ export function applyMemoryOperations(existing: MemoryEntry[], operations: Memor
       receipt.added++;
     } else {
       const item = memories.find((entry) => entry.id === operation.id);
-      if (!item || (item.threadId && item.threadId !== threadId)) { throw new Error(t('找不到当前可修改的记忆。')); }
-      if (item.automatic !== true) { throw new Error(t('手动记忆只能由用户编辑或删除。')); }
-      if (touched.has(item.id)) { throw new Error(t('同一批次不能重复修改一条记忆。')); }
+      if (!item || (item.threadId && item.threadId !== threadId)) { throw new ToolFailure('NOT_FOUND', t('找不到当前可修改的记忆。'), 'check_resource'); }
+      if (item.automatic !== true) { throw new ToolFailure('PERMISSION_DENIED', t('手动记忆只能由用户编辑或删除。'), 'check_permissions'); }
+      if (touched.has(item.id)) { throw new ToolFailure('INVALID_ARGUMENTS', t('同一批次不能重复修改一条记忆。'), 'fix_arguments'); }
       touched.add(item.id);
       if (operation.action === 'remove') {
-        if (background) { throw new Error(t('自动复盘不能删除记忆。')); }
+        if (background) { throw new ToolFailure('PERMISSION_DENIED', t('自动复盘不能删除记忆。'), 'check_permissions'); }
         memories = memories.filter((entry) => entry.id !== item.id); receipt.removed++;
       } else if (memoryKey(item.content) === memoryKey(content)) { receipt.duplicates++; }
       else {
         if (memories.some((entry) => entry.id !== item.id && (!entry.threadId || entry.threadId === item.threadId) &&
-          memoryKey(entry.content) === memoryKey(content))) { throw new Error(t('更新后的内容与已有记忆重复。')); }
+          memoryKey(entry.content) === memoryKey(content))) { throw new ToolFailure('INVALID_ARGUMENTS', t('更新后的内容与已有记忆重复。'), 'fix_arguments'); }
         item.content = content; item.updatedAt = Date.now(); item.sourceThreadId = threadId;
         item.sourceMessageId = operation.sourceMessageId; receipt.updated++;
       }
@@ -91,8 +92,8 @@ export function applyMemoryOperations(existing: MemoryEntry[], operations: Memor
   receipt.characters = memoryCharacters(memories);
   // Existing over-budget libraries can still be reduced, without destroying imported/manual entries.
   if (memories.length > 100 || (receipt.characters > MEMORY_CHAR_LIMIT && receipt.characters > memoryCharacters(existing))) {
-    throw new Error(t('记忆容量不足：{0}/100 条，{1}/{2} 字符。请先整理已有记忆；本次未保存任何变更。',
-      [memories.length, receipt.characters, MEMORY_CHAR_LIMIT]));
+    throw new ToolFailure('LIMIT_EXCEEDED', t('记忆容量不足：{0}/100 条，{1}/{2} 字符。请先整理已有记忆；本次未保存任何变更。',
+      [memories.length, receipt.characters, MEMORY_CHAR_LIMIT]), 'reduce_input');
   }
   return { memories: memories, receipt: receipt };
 }

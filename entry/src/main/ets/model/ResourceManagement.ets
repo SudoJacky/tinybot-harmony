@@ -1,3 +1,4 @@
+import { ToolFailure, parseToolArguments } from './ToolFailure';
 import { ExtensionSettings, SkillData, SkillFile, parseSkill, validateExtensions } from './Skills';
 import { McpServer, ProductivityData, validateProductivity } from './Productivity';
 
@@ -29,8 +30,8 @@ export function saveSkillCandidate(settings: ExtensionSettings, original: string
   const next = JSON.parse(JSON.stringify(settings)) as ExtensionSettings;
   const skill = parseSkill(document);
   const existing = next.skills.find((item) => item.name === original);
-  if (original && !existing) { throw new Error('Skill does not exist: ' + original); }
-  if (next.skills.some((item) => item.name === skill.name && item.name !== original)) { throw new Error('Skill already exists: ' + skill.name); }
+  if (original && !existing) { throw new ToolFailure('NOT_FOUND', 'Skill does not exist: ' + original, 'check_resource'); }
+  if (next.skills.some((item) => item.name === skill.name && item.name !== original)) { throw new ToolFailure('ALREADY_EXISTS', 'Skill already exists: ' + skill.name, 'check_resource'); }
   skill.enabled = existing ? existing.enabled : true;
   skill.files = JSON.parse(JSON.stringify(files)) as SkillFile[];
   skill.source = imported?.source || existing?.source;
@@ -42,10 +43,10 @@ export function saveSkillCandidate(settings: ExtensionSettings, original: string
 export function changeSkillCandidate(settings: ExtensionSettings, name: string, action: string): ExtensionSettings {
   const next = JSON.parse(JSON.stringify(settings)) as ExtensionSettings;
   const skill = next.skills.find((item) => item.name === name);
-  if (!skill) { throw new Error('Skill does not exist: ' + name); }
+  if (!skill) { throw new ToolFailure('NOT_FOUND', 'Skill does not exist: ' + name, 'check_resource'); }
   if (action === 'remove') { next.skills = next.skills.filter((item) => item.name !== name); }
   else if (action === 'enable' || action === 'disable') { skill.enabled = action === 'enable'; }
-  else { throw new Error('Unknown skill action: ' + action); }
+  else { throw new ToolFailure('INVALID_ARGUMENTS', 'Unknown skill action: ' + action, 'fix_arguments'); }
   validateExtensions(next); return next;
 }
 
@@ -57,34 +58,34 @@ export function saveMcpCandidate(data: ProductivityData, server: McpServer): Pro
 }
 
 export function parseSkillRequest(text: string): SkillRequest {
-  const fieldsValue = JSON.parse(text) as Record<string, Object>;
-  const value = JSON.parse(text) as SkillRequest;
+  const fieldsValue = parseToolArguments(text) as Record<string, Object>;
+  const value = parseToolArguments(text) as SkillRequest;
   if (!value || Array.isArray(value) || typeof value.action !== 'string' ||
     Object.keys(value).some((key) => !['action', 'name', 'document', 'files', 'source', 'paths'].includes(key) || typeof fieldsValue[key] !== 'string')) {
-    throw new Error('Invalid skill_manage arguments.');
+    throw new ToolFailure('INVALID_ARGUMENTS', 'Invalid skill_manage arguments.', 'fix_arguments');
   }
   const fields: Record<string, string[]> = { 'create': ['document', 'files'], 'update': ['name', 'document', 'files'],
     'install': ['name', 'source', 'paths'], 'remove': ['name'], 'enable': ['name'], 'disable': ['name'] };
-  if (!fields[value.action] || Object.keys(value).some((key) => key !== 'action' && !fields[value.action].includes(key))) { throw new Error('Invalid skill action or fields.'); }
-  if (['update', 'remove', 'enable', 'disable'].includes(value.action) && !value.name) { throw new Error('Skill name is required.'); }
-  if (['create', 'update'].includes(value.action) && !value.document) { throw new Error('Complete SKILL.md is required.'); }
-  if (value.action === 'install' && !value.source) { throw new Error('Skill source URL is required.'); }
+  if (!fields[value.action] || Object.keys(value).some((key) => key !== 'action' && !fields[value.action].includes(key))) { throw new ToolFailure('INVALID_ARGUMENTS', 'Invalid skill action or fields.', 'fix_arguments'); }
+  if (['update', 'remove', 'enable', 'disable'].includes(value.action) && !value.name) { throw new ToolFailure('INVALID_ARGUMENTS', 'Skill name is required.', 'fix_arguments'); }
+  if (['create', 'update'].includes(value.action) && !value.document) { throw new ToolFailure('INVALID_ARGUMENTS', 'Complete SKILL.md is required.', 'fix_arguments'); }
+  if (value.action === 'install' && !value.source) { throw new ToolFailure('INVALID_ARGUMENTS', 'Skill source URL is required.', 'fix_arguments'); }
   return value;
 }
 
 export function parseMcpRequest(text: string): McpRequest {
-  const fieldsValue = JSON.parse(text) as Record<string, Object>;
-  const value = JSON.parse(text) as McpRequest;
+  const fieldsValue = parseToolArguments(text) as Record<string, Object>;
+  const value = parseToolArguments(text) as McpRequest;
   if (!value || Array.isArray(value) || typeof value.action !== 'string' ||
     Object.keys(value).some((key) => !['action', 'id', 'name', 'url', 'auth', 'clientId'].includes(key) || typeof fieldsValue[key] !== 'string')) {
-    throw new Error('Invalid mcp_manage arguments. Do not pass secrets; use the native authentication form.');
+    throw new ToolFailure('INVALID_ARGUMENTS', 'Invalid mcp_manage arguments. Do not pass secrets; use the native authentication form.', 'fix_arguments');
   }
-  if (!['list', 'save', 'remove', 'enable', 'disable', 'test'].includes(value.action)) { throw new Error('Invalid MCP action.'); }
-  if (value.action !== 'save' && Object.keys(value).some((key) => key !== 'action' && key !== 'id')) { throw new Error('Unexpected MCP fields.'); }
-  if (!['list', 'save'].includes(value.action) && !value.id) { throw new Error('MCP id is required.'); }
+  if (!['list', 'save', 'remove', 'enable', 'disable', 'test'].includes(value.action)) { throw new ToolFailure('INVALID_ARGUMENTS', 'Invalid MCP action.', 'fix_arguments'); }
+  if (value.action !== 'save' && Object.keys(value).some((key) => key !== 'action' && key !== 'id')) { throw new ToolFailure('INVALID_ARGUMENTS', 'Unexpected MCP fields.', 'fix_arguments'); }
+  if (!['list', 'save'].includes(value.action) && !value.id) { throw new ToolFailure('INVALID_ARGUMENTS', 'MCP id is required.', 'fix_arguments'); }
   if (value.action === 'save' && (!value.name || !value.url || !['none', 'bearer', 'oauth', 'keep'].includes(value.auth || ''))) {
-    throw new Error('MCP save requires name, HTTPS url and auth: none|bearer|oauth|keep.');
+    throw new ToolFailure('INVALID_ARGUMENTS', 'MCP save requires name, HTTPS url and auth: none|bearer|oauth|keep.', 'fix_arguments');
   }
-  if (value.clientId && value.auth !== 'oauth') { throw new Error('clientId requires OAuth.'); }
+  if (value.clientId && value.auth !== 'oauth') { throw new ToolFailure('INVALID_ARGUMENTS', 'clientId requires OAuth.', 'fix_arguments'); }
   return value;
 }

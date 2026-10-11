@@ -1,3 +1,4 @@
+import { ToolFailure } from '../model/ToolFailure';
 import { t } from '../model/I18n';
 import { Cancellation } from './Cancellation';
 import { InputForm, formResult } from '../model/RichArtifacts';
@@ -12,7 +13,7 @@ export class ToolApproval {
   private formAnswer?: (value: string) => void;
   async ask(form: InputForm, cancellation: Cancellation): Promise<string> {
     cancellation.check();
-    if (this.formAnswer || this.answer) { throw new Error(t("已有待处理提问。")); }
+    if (this.formAnswer || this.answer) { throw new ToolFailure('INTERACTION_PENDING', t("已有待处理提问。"), 'wait_for_user'); }
     const result = await new Promise<string>((resolve) => {
       let remove = (): void => {};
       this.form = form; this.formError = '';
@@ -29,14 +30,14 @@ export class ToolApproval {
   cancelForm(): void { if (this.formAnswer) { this.formAnswer('{"status":"cancelled"}'); } }
   async request(title: string, details: string, cancellation: Cancellation): Promise<void> {
     cancellation.check();
-    if (this.answer || this.formAnswer) { throw new Error(t("已有一个工具等待确认。")); }
+    if (this.answer || this.formAnswer) { throw new ToolFailure('INTERACTION_PENDING', t("已有一个工具等待确认。"), 'wait_for_user'); }
     const allowed = await new Promise<boolean>((resolve) => {
       let remove = (): void => {};
       this.title = title; this.details = details;
       this.answer = (value: boolean) => { remove(); this.answer = undefined; this.title = ''; this.details = ''; resolve(value); };
       remove = cancellation.onCancel(() => this.respond(false));
     });
-    cancellation.check(); if (!allowed) { throw new Error(t("用户拒绝此次远程工具调用。")); }
+    cancellation.check(); if (!allowed) { throw new ToolFailure('USER_DENIED', t("用户拒绝此次远程工具调用。"), 'respect_user_decision'); }
   }
   respond(allowed: boolean): void { if (this.answer) { this.answer(allowed); } }
 }

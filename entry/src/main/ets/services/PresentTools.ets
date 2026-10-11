@@ -1,3 +1,4 @@
+import { ToolFailure, parseToolArguments } from '../model/ToolFailure';
 import { ToolCall, ToolDefinition } from '../model/Agent';
 import { PresentedFile } from '../model/Deliverables';
 import { AgentTools } from './AgentLoop';
@@ -21,15 +22,15 @@ export class PresentTools implements AgentTools {
   }
   async execute(call: ToolCall, cancellation: Cancellation): Promise<string> {
     cancellation.check();
-    const args = JSON.parse(call.function.arguments) as PresentArguments;
+    const args = parseToolArguments(call.function.arguments) as PresentArguments;
     if (call.function.name !== 'present_files' || !args || Array.isArray(args) || Object.keys(args).some((key) => key !== 'files') ||
-      !Array.isArray(args.files) || args.files.length < 1 || args.files.length > 8) { throw new Error('Expected 1–8 workspace files.'); }
+      !Array.isArray(args.files) || args.files.length < 1 || args.files.length > 8) { throw new ToolFailure('INVALID_ARGUMENTS', 'Expected 1–8 workspace files.', 'fix_arguments'); }
     const files: PresentedFile[] = []; const seen = new Set<string>();
     for (const file of args.files) {
       if (!file || typeof file.path !== 'string' || Object.keys(file).some((key) => !['path', 'description'].includes(key)) ||
-        (file.description !== undefined && (typeof file.description !== 'string' || file.description.length > 300))) { throw new Error('Invalid file delivery.'); }
+        (file.description !== undefined && (typeof file.description !== 'string' || file.description.length > 300))) { throw new ToolFailure('INVALID_ARGUMENTS', 'Invalid file delivery.', 'fix_arguments'); }
       const path = workspaceRelativePath(file.path, false);
-      if (seen.has(path)) { throw new Error('Duplicate delivered file.'); }
+      if (seen.has(path)) { throw new ToolFailure('INVALID_ARGUMENTS', 'Duplicate delivered file.', 'fix_arguments'); }
       await this.checkFile(path); cancellation.check(); seen.add(path);
       files.push({ path: path, description: file.description });
     }

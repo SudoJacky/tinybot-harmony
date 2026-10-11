@@ -588,13 +588,69 @@ async function test(name, run) { await run(); completedTests++; console.log('PAS
     const tools=new WorkspaceTools(new NativeWorkspaceFiles(root)),signal=new Cancellation();
     const invoke=async(name,args)=>{const step={content:'',tools:[{call:{id:crypto.randomUUID(),type:'function',function:{name,arguments:JSON.stringify(args)}},status:'pending',output:''}]};await executeToolBatch(step,0,tools,tools.definitions(),signal,{checkpoint:async()=>{},event:()=>{}});return step.tools[0];};
     let tool=await invoke('edit_file',{path:'a.txt',oldText:'unique',newText:'x'});let result=JSON.parse(tool.output);
-    assert.equal(tool.status,'failed');assert.equal(result.code,'FS_NOT_OBSERVED');assert.equal(result.path,'a.txt');assert.equal(result.recovery,'read_file');
+    assert.equal(tool.status,'failed');assert.equal(result.code,'FS_NOT_OBSERVED');assert.equal(result.details.path,'a.txt');assert.equal(result.recovery,'read_file');
     await invoke('read_file',{path:'a.txt'});
     tool=await invoke('edit_file',{path:'a.txt',edits:[{oldText:'unique',newText:'x'},{oldText:'repeat',newText:'y'}]});result=JSON.parse(tool.output);
-    assert.equal(result.code,'FS_AMBIGUOUS_MATCH');assert.equal(result.editIndex,2);assert.equal(result.path,'a.txt');assert.equal(result.recovery,'add_match_context');
+    assert.equal(result.code,'FS_AMBIGUOUS_MATCH');assert.equal(result.details.editIndex,2);assert.equal(result.details.path,'a.txt');assert.equal(result.recovery,'add_match_context');
     assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),'repeat repeat\nunique');
     fs.writeFileSync(nativePath(root+'/a.txt'),'external');tool=await invoke('write_file',{path:'a.txt',content:'lost'});assert.equal(JSON.parse(tool.output).code,'FS_STALE_VERSION');
     assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),'external');
+  });
+  await test('common error receipts classify tool arguments, policy, resources and unknown failures without retry',async()=>{
+    const {executeToolBatch}=load(path.join(source,'services/ToolExecution'));
+    const {ToolSet}=load(path.join(source,'services/ToolSet'));
+    const {RuleTools}=load(path.join(source,'services/RuleTools'));
+    const {AttachmentTools}=load(path.join(source,'services/AttachmentTools'));
+    const {MemoryTools}=load(path.join(source,'services/MemoryTools'));
+    const {CodeExecutionTools}=load(path.join(source,'services/CodeExecutionTools'));
+    const invoke=async(tools,name,args,raw=false)=>{
+      const step={content:'',tools:[{call:{id:crypto.randomUUID(),type:'function',function:{name,arguments:raw?args:JSON.stringify(args)}},status:'pending',output:''}]};
+      await executeToolBatch(step,0,tools,tools.definitions(),new Cancellation(),{checkpoint:async()=>{},event:()=>{}});
+      return {...step.tools[0],result:JSON.parse(step.tools[0].output)};
+    };
+    let runs=0;const unknown={definitions:()=>[],execute:async()=>{runs++;throw Error('raw native failure');}};
+    let receipt=await invoke(unknown,'x','{',true);assert.equal(receipt.result.code,'INVALID_ARGUMENTS');assert.equal(runs,0);
+    receipt=await invoke(unknown,'x',{});assert.equal(receipt.result.code,'UNKNOWN_ERROR');assert.equal(receipt.result.error,'raw native failure');assert.equal(runs,1);
+    receipt=await invoke({definitions:()=>[],execute:async()=>{throw null;}},'x',{});assert.equal(receipt.result.code,'UNKNOWN_ERROR');assert.equal(receipt.result.error,'null');
+    receipt=await invoke(new ToolSet([]),'missing',{});assert.equal(receipt.result.code,'TOOL_UNAVAILABLE');
+    receipt=await invoke(new RuleTools(unknown,true),'write_file',{});assert.equal(receipt.result.code,'PERMISSION_DENIED');assert.equal(runs,1);
+    receipt=await invoke(new AttachmentTools([]),'read_attachment',{id:'missing'});assert.equal(receipt.result.code,'NOT_FOUND');
+    receipt=await invoke(new MemoryTools(async()=>{runs++;return '{}';}),'memory',{operations:'[bad'});assert.equal(receipt.result.code,'INVALID_ARGUMENTS');assert.equal(runs,1);
+    receipt=await invoke(new CodeExecutionTools({execute:async()=>JSON.stringify({status:'timeout',error:'budget expired',stdout:'before timeout',result:null})}),'execute_code',{code:'while(true){}'});
+    assert.equal(receipt.status,'failed');assert.equal(receipt.result.code,'TIMEOUT');assert.equal(receipt.result.status,'timeout');assert.equal(receipt.result.stdout,'before timeout');
+    receipt=await invoke(new CodeExecutionTools({execute:async()=>JSON.stringify({status:'cancelled',error:'stopped',stdout:'partial'})}),'execute_code',{code:'return 1;'});
+    assert.equal(receipt.status,'cancelled');assert.equal(receipt.result.code,'CANCELLED');assert.equal(receipt.result.stdout,'partial');
+  });
+  await test('MCP failures preserve remote data, classify HTTP and denial, and record cancellation separately',async()=>{
+    const {executeToolBatch}=load(path.join(source,'services/ToolExecution'));
+    const approval=new ToolApproval();let remoteCalls=0;
+    const remote={isError:true,content:[{type:'text',text:'remote failure '+ 'x'.repeat(60000)}],error:{remote:'untouched'}};
+    const tools=new McpTools([server],approval,()=>({list:async()=>[{name:'write',inputSchema:{type:'object'}}],call:async()=>{remoteCalls++;return remote;}}));
+    const call=(name,args)=>({id:crypto.randomUUID(),type:'function',function:{name,arguments:JSON.stringify(args)}});
+    await tools.execute(call('mcp_list_tools',{server:'s'}),new Cancellation());
+    const run=async(allow)=>{
+      const step={content:'',tools:[{call:call('mcp_call',{server:'s',tool:'write',arguments:'{}'}),status:'pending',output:''}]};
+      const pending=executeToolBatch(step,0,tools,tools.definitions(),new Cancellation(),{checkpoint:async()=>{},event:()=>{}});
+      await new Promise(setImmediate);approval.respond(allow);await pending;return step.tools[0];
+    };
+    let receipt=await run(false);assert.equal(JSON.parse(receipt.output).code,'USER_DENIED');assert.equal(remoteCalls,0);
+    receipt=await run(true);let result=JSON.parse(receipt.output);assert.equal(receipt.status,'failed');assert.equal(result.code,'REMOTE_TOOL_ERROR');assert.deepEqual(result.details.result,remote);assert.equal(remoteCalls,1);
+    for(const [status,code] of [[401,'AUTH_REQUIRED'],[403,'PERMISSION_DENIED'],[429,'RATE_LIMITED'],[503,'HTTP_ERROR']]){
+      let count=0;httpScript=req=>{count++;req.callback(null,status);};
+      await assert.rejects(new McpClient(server).list(new Cancellation()),error=>error.code===code&&error.details.httpStatus===status);assert.equal(count,1);
+    }
+    const signal=new Cancellation();let started;const admitted=new Promise(resolve=>{started=resolve;});
+    httpScript=()=>{started();};
+    const client=new McpClient(server);const adapter={definitions:()=>[],execute:()=>client.list(signal)};
+    const step={content:'',tools:[{call:call('mcp_list_tools',{server:'s'}),status:'pending',output:''}]};
+    const pending=executeToolBatch(step,0,adapter,[],signal,{checkpoint:async()=>{},event:()=>{}});await admitted;signal.cancel();await assert.rejects(pending);
+    assert.equal(step.tools[0].status,'cancelled');assert.equal(JSON.parse(step.tools[0].output).code,'CANCELLED');
+  });
+  await test('interrupted receipts distinguish never-started from unknown outcomes without changing completed results',async()=>{
+    const {interruptTools}=load(path.join(source,'model/Agent'));
+    const steps=[{content:'',tools:['pending','running','complete'].map(status=>({status,output:'original'}))}];
+    interruptTools(steps);assert.equal(JSON.parse(steps[0].tools[0].output).code,'NOT_EXECUTED');
+    assert.equal(JSON.parse(steps[0].tools[1].output).code,'OUTCOME_UNKNOWN');assert.equal(steps[0].tools[2].output,'original');
   });
   await test('image hydration awaits actual base64 encoding',async()=>{
     const id=crypto.randomUUID(),bytes=Buffer.from([255,216,255,217]);fs.writeFileSync(path.join(fixture,'attachments',id+'.jpg'),bytes);

@@ -1,8 +1,9 @@
+import { ToolFailure, toolHttpFailure } from '../model/ToolFailure';
 import { t } from '../model/I18n';
 import { http } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
 import { McpServer } from '../model/Productivity';
-import { Cancellation } from './Cancellation';
+import { Cancellation, RunCancelledError } from './Cancellation';
 import { McpOAuth } from './McpOAuth';
 import { McpConnection, McpToolInfo } from './McpConnection';
 
@@ -40,7 +41,7 @@ export class McpClient implements McpConnection {
     if (this.initialized) { return; }
     const params: InitializeParams = { protocolVersion: this.version, capabilities: {}, clientInfo: { name: 'tinybot-harmony', version: '0.2.0' } };
     const result = await this.post('initialize', params, cancellation) as InitializeResult;
-    if (!result || !['2025-03-26', '2025-06-18', '2025-11-25'].includes(result.protocolVersion)) { throw new Error(t("MCP 协议版本不受支持。")); }
+    if (!result || !['2025-03-26', '2025-06-18', '2025-11-25'].includes(result.protocolVersion)) { throw new ToolFailure('UNSUPPORTED_PROTOCOL', t("MCP 协议版本不受支持。"), 'check_settings'); }
     this.version = result.protocolVersion;
     await this.post('notifications/initialized', undefined, cancellation, true); this.initialized = true;
   }
@@ -49,16 +50,16 @@ export class McpClient implements McpConnection {
     for (let page = 0; page < 10; page++) {
       const params: CursorParams = { cursor: cursor || undefined };
       const result = await this.post('tools/list', params, cancellation) as ToolsResult;
-      if (!result || !Array.isArray(result.tools)) { throw new Error(t("MCP 工具目录格式无效。")); }
+      if (!result || !Array.isArray(result.tools)) { throw new ToolFailure('INVALID_RESPONSE', t("MCP 工具目录格式无效。"), 'inspect_service'); }
       for (const tool of result.tools) {
-        if (typeof tool.name !== 'string' || !tool.name || !tool.inputSchema || typeof tool.inputSchema !== 'object') { throw new Error(t("MCP 工具定义无效。")); }
+        if (typeof tool.name !== 'string' || !tool.name || !tool.inputSchema || typeof tool.inputSchema !== 'object') { throw new ToolFailure('INVALID_RESPONSE', t("MCP 工具定义无效。"), 'inspect_service'); }
         tools.push(tool);
       }
-      if (tools.length > 200) { throw new Error(t("MCP 服务工具超过 200 个，请缩小服务范围。")); }
+      if (tools.length > 200) { throw new ToolFailure('LIMIT_EXCEEDED', t("MCP 服务工具超过 200 个，请缩小服务范围。"), 'reduce_input'); }
       if (!result.nextCursor) { return tools; }
-      if (result.nextCursor === cursor) { throw new Error(t("MCP 分页游标重复。")); } cursor = result.nextCursor;
+      if (result.nextCursor === cursor) { throw new ToolFailure('INVALID_RESPONSE', t("MCP 分页游标重复。"), 'inspect_service'); } cursor = result.nextCursor;
     }
-    throw new Error(t("MCP 工具目录分页过多。"));
+    throw new ToolFailure('LIMIT_EXCEEDED', t("MCP 工具目录分页过多。"), 'reduce_input');
   }
   async call(name: string, args: Object, cancellation: Cancellation): Promise<Object> {
     await this.initialize(cancellation); const params: CallParams = { name: name, arguments: args };
@@ -77,7 +78,7 @@ export class McpClient implements McpConnection {
       let done = false; let code = 0; let text = ''; let bytes = 0; let ended = false;
       let remove = (): void => {}; let timer = -1;
       const decoder = new util.TextDecoder('utf-8');
-      const finish = (error?: Error, result?: Object): void => {
+      const finish = (error?: Error | ToolFailure | RunCancelledError, result?: Object): void => {
         if (done) { return; } done = true; clearTimeout(timer); remove(); request.destroy();
         if (error) { reject(error); } else { const empty: Record<string, string> = {}; resolve(result || empty); }
       };
@@ -85,20 +86,20 @@ export class McpClient implements McpConnection {
         if (!code || done) { return; }
         if (code < 200 || code >= 300) {
           if (code === 404) { this.session = ''; this.initialized = false; }
-          finish(new Error('MCP HTTP ' + code + (code === 401 ? t("：请检查 Bearer Token 或重新进行 OAuth 登录。") : t("。调用未自动重试；如已提交写操作，请先检查结果。")))); return;
+          finish(toolHttpFailure(code, 'MCP HTTP ' + code + (code === 401 ? t("：请检查 Bearer Token 或重新进行 OAuth 登录。") : t("。调用未自动重试；如已提交写操作，请先检查结果。")), 'mcp')); return;
         }
         if (notification) { finish(); return; }
         const response = mcpResponse(text, id);
         if (response?.error) {
           const message = typeof response.error.message === 'string' ? response.error.message.slice(0, 500) : '服务返回无效错误信息';
-          finish(new Error(t("MCP 错误 ") + response.error.code + '：' + message));
+          finish(new ToolFailure('REMOTE_ERROR', t("MCP 错误 ") + response.error.code + '：' + message, 'inspect_result_before_retry', { remoteCode: response.error.code, service: 'mcp' }));
         }
         else if (response?.result !== undefined) { finish(undefined, response.result); }
-        else if (ended) { finish(new Error(t("MCP 响应缺少对应请求结果。"))); }
+        else if (ended) { finish(new ToolFailure('INVALID_RESPONSE', t("MCP 响应缺少对应请求结果。"), 'inspect_service')); }
       };
-      timer = setTimeout(() => finish(new Error(t("MCP 请求超时，结果未知；请检查服务端状态。"))), 60000);
+      timer = setTimeout(() => finish(new ToolFailure('TIMEOUT', t("MCP 请求超时，结果未知；请检查服务端状态。"), 'inspect_result_before_retry', { service: 'mcp' })), 60000);
       remove = cancellation.onCancel(() => {
-        finish(new Error(t("MCP 已停止等待，已提交的远程操作可能仍在执行。")));
+        finish(new RunCancelledError(t("MCP 已停止等待，已提交的远程操作可能仍在执行。")));
         if (method === 'tools/call') {
           const params: Record<string, string | number> = { 'requestId': id, 'reason': 'User cancelled' };
           this.post('notifications/cancelled', params, new Cancellation(), true).catch(() => {});
@@ -116,19 +117,19 @@ export class McpClient implements McpConnection {
       });
       request.on('dataReceive', (buffer: ArrayBuffer) => {
         if (done) { return; } bytes += buffer.byteLength;
-        if (bytes > 1024 * 1024) { finish(new Error(t("MCP 响应超过 1 MB。"))); return; }
+        if (bytes > 1024 * 1024) { finish(new ToolFailure('LIMIT_EXCEEDED', t("MCP 响应超过 1 MB。"), 'reduce_input')); return; }
         try { text += decoder.decodeToString(new Uint8Array(buffer), { stream: true }); inspect(); }
-        catch (_) { finish(new Error(t("MCP 返回了无法解析的数据。"))); }
+        catch (_) { finish(new ToolFailure('INVALID_RESPONSE', t("MCP 返回了无法解析的数据。"), 'inspect_service')); }
       });
       request.on('dataEnd', () => {
         if (done) { return; }
         try { ended = true; text += decoder.decodeToString(new Uint8Array(0)); inspect(); }
-        catch (_) { finish(new Error(t("MCP 返回了无法解析的数据。"))); }
+        catch (_) { finish(new ToolFailure('INVALID_RESPONSE', t("MCP 返回了无法解析的数据。"), 'inspect_service')); }
       });
       try { request.requestInStream(this.server.url, { method: http.RequestMethod.POST, header: headers, extraData: JSON.stringify(body),
         usingCache: false, connectTimeout: 15000, readTimeout: 60000, maxRedirects: 0 }, (error, status) => {
-        if (error) { finish(new Error(t("MCP 网络请求失败（") + error.code + '）。')); } else { code = status; inspect(); }
-      }); } catch (_) { finish(new Error(t("无法创建 MCP 请求。"))); }
+        if (error) { finish(new ToolFailure('NETWORK_ERROR', t("MCP 网络请求失败（") + error.code + '）。', 'inspect_result_before_retry', { service: 'mcp', nativeCode: error.code })); } else { code = status; inspect(); }
+      }); } catch (error) { finish(error as Error); }
     });
   }
 }

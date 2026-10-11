@@ -1,3 +1,4 @@
+import { ToolFailure, parseToolArguments } from '../model/ToolFailure';
 import { ToolCall, ToolDefinition } from '../model/Agent';
 import { SearchResult } from '../model/WebSearch';
 import { AgentTools } from './AgentLoop';
@@ -18,11 +19,11 @@ export class WebSearchTools implements AgentTools {
   }
   async execute(call: ToolCall, cancellation: Cancellation): Promise<string> {
     cancellation.check();
-    const args = JSON.parse(call.function.arguments) as SearchArguments;
+    const args = parseToolArguments(call.function.arguments) as SearchArguments;
     if (call.function.name !== 'search_web' || !args || Array.isArray(args) || typeof args.query !== 'string' ||
-      !args.query.trim() || args.query.length > 1000 || Object.keys(args).some((key) => !['query', 'maxResults'].includes(key))) { throw new Error('Invalid search query.'); }
+      !args.query.trim() || args.query.length > 1000 || Object.keys(args).some((key) => !['query', 'maxResults'].includes(key))) { throw new ToolFailure('INVALID_ARGUMENTS', 'Invalid search query.', 'fix_arguments'); }
     const maximum = args.maxResults === undefined ? 5 : args.maxResults;
-    if (!Number.isInteger(maximum) || maximum < 1 || maximum > 10) { throw new Error('maxResults must be 1–10.'); }
+    if (!Number.isInteger(maximum) || maximum < 1 || maximum > 10) { throw new ToolFailure('INVALID_ARGUMENTS', 'maxResults must be 1–10.', 'fix_arguments'); }
     const result = await this.transport.search(args.query.trim(), maximum, cancellation);
     cancellation.check(); return JSON.stringify(result);
   }

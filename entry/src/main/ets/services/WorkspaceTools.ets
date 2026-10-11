@@ -3,7 +3,7 @@ import { ToolCall, ToolDefinition, ToolProperty } from '../model/Agent';
 import { AgentTools, ToolInvocationContext } from './AgentLoop';
 import { fileDiff } from '../model/FileDiff';
 import { TextEdit, applyTextEdits, validateEdits } from '../model/WorkspaceEdit';
-import { ToolFailure } from '../model/ToolFailure';
+import { ToolFailure, parseToolArguments } from '../model/ToolFailure';
 import { WorkspaceSearch } from './WorkspaceSearch';
 import { Cancellation } from './Cancellation';
 import { WorkspaceFiles, WorkspaceWrite } from './WorkspaceFiles';
@@ -98,8 +98,8 @@ export class WorkspaceTools implements AgentTools {
   async execute(call: ToolCall, cancellation: Cancellation, context?: ToolInvocationContext): Promise<string> {
     try { return await this.executeFile(call, cancellation, context); }
     catch (error) {
-      if (error instanceof ToolFailure && error.path === undefined) {
-        try { const args = JSON.parse(call.function.arguments) as FileArguments; if (typeof args.path === 'string') { error.path = args.path; } } catch (_) {}
+      if (error instanceof ToolFailure && error.details?.path === undefined) {
+        try { const args = parseToolArguments(call.function.arguments) as FileArguments; if (typeof args.path === 'string') { if (!error.details) { error.details = {}; } error.details.path = args.path; } } catch (_) {}
       }
       throw error as Error;
     }
@@ -109,11 +109,11 @@ export class WorkspaceTools implements AgentTools {
     cancellation.check();
     const name = call.function.name;
     if (['find_files', 'list_files', 'read_file', 'write_file', 'search_file_content', 'read_file_lines', 'edit_file'].indexOf(name) < 0) {
-      throw new Error(t("不支持的工具：") + name);
+      throw new ToolFailure('TOOL_UNAVAILABLE', t("不支持的工具：") + name, 'check_available_tools');
     }
     let args: FileArguments;
     try {
-      args = JSON.parse(call.function.arguments) as FileArguments;
+      args = parseToolArguments(call.function.arguments) as FileArguments;
     } catch (_) {
       throw new ToolFailure('FS_INVALID_ARGUMENTS', t("工具参数必须是有效的 JSON 对象。"), 'fix_arguments');
     }
@@ -138,7 +138,7 @@ export class WorkspaceTools implements AgentTools {
       }
       validateEdits(edits);
       const version = this.observed.get(path);
-      if (version === undefined) { throw new ToolFailure('FS_NOT_OBSERVED', t('编辑前，请先用 read_file 或 read_file_lines 读取文件。'), 'read_file', path); }
+      if (version === undefined) { throw new ToolFailure('FS_NOT_OBSERVED', t('编辑前，请先用 read_file 或 read_file_lines 读取文件。'), 'read_file', { path: path }); }
       return this.receipt(await this.files.edit(path, edits, version, cancellation), context);
     }
     if (name === 'read_file_lines') {

@@ -1,3 +1,4 @@
+import { ToolFailure } from '../model/ToolFailure';
 import { t } from '../model/I18n';
 import { ToolCall, ToolDefinition } from '../model/Agent';
 import { AgentTools, ToolInvocationContext } from './AgentLoop';
@@ -8,7 +9,7 @@ export class RuleTools implements AgentTools {
   private allowed(name: string): boolean { return !this.readOnly || !['write_file', 'edit_file', 'mcp_call', 'generate_image'].includes(name); }
   definitions(): ToolDefinition[] { return this.inner.definitions().filter((item) => this.allowed(item.function.name)); }
   async execute(call: ToolCall, cancellation: Cancellation, context?: ToolInvocationContext): Promise<string> {
-    if (!this.allowed(call.function.name)) { throw new Error(t("只读规则已阻止此次操作。")); }
+    if (!this.allowed(call.function.name)) { throw new ToolFailure('PERMISSION_DENIED', t("只读规则已阻止此次操作。"), 'check_permissions'); }
     return this.inner.execute(call, cancellation, context);
   }
 }

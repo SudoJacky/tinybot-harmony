@@ -1,3 +1,4 @@
+import { ToolFailure } from '../model/ToolFailure';
 import { ToolCall, ToolDefinition } from '../model/Agent';
 import { SkillRequest, McpRequest, parseSkillRequest, parseMcpRequest } from '../model/ResourceManagement';
 import { AgentTools } from './AgentLoop';
@@ -33,6 +34,6 @@ export class ResourceTools implements AgentTools {
     cancellation.check();
     if (call.function.name === 'skill_manage') { return this.skill(parseSkillRequest(call.function.arguments), cancellation); }
     if (call.function.name === 'mcp_manage') { return this.mcp(parseMcpRequest(call.function.arguments), cancellation); }
-    throw new Error('Unknown resource management tool.');
+    throw new ToolFailure('TOOL_UNAVAILABLE', 'Unknown resource management tool.', 'check_available_tools');
   }
 }

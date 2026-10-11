@@ -1,3 +1,4 @@
+import { ToolFailure, parseToolArguments } from '../model/ToolFailure';
 import { t } from '../model/I18n';
 import { ToolCall, ToolDefinition } from '../model/Agent';
 import { SkillData, SkillSource, skillPath } from '../model/Skills';
@@ -43,19 +44,19 @@ export class SkillTools implements AgentTools {
         name: item.name, description: item.description, enabled: item.enabled, manualOnly: item.manualOnly, source: item.source
       }; }));
     }
-    if (call.function.name !== 'read_skill') { throw new Error(t("不支持的 Skill 工具。")); }
-    const args = JSON.parse(call.function.arguments) as SkillArguments;
+    if (call.function.name !== 'read_skill') { throw new ToolFailure('TOOL_UNAVAILABLE', t("不支持的 Skill 工具。"), 'check_available_tools'); }
+    const args = parseToolArguments(call.function.arguments) as SkillArguments;
     if (!args || Array.isArray(args) || typeof args.name !== 'string' ||
       (args.path !== undefined && typeof args.path !== 'string') ||
       Object.keys(args).some((key: string) => key !== 'name' && key !== 'path')) {
-      throw new Error(t("read_skill 参数需要 name 和可选的 path。"));
+      throw new ToolFailure('INVALID_ARGUMENTS', t("read_skill 参数需要 name 和可选的 path。"), 'fix_arguments');
     }
     const skill = (this.live ? this.live() : this.skills).find((item: SkillData) => item.name === args.name &&
       item.enabled && (!item.manualOnly || item.name === this.selected));
-    if (!skill) { throw new Error(t("Skill 未启用或本轮不可用：") + args.name); }
+    if (!skill) { throw new ToolFailure('TOOL_UNAVAILABLE', t("Skill 未启用或本轮不可用：") + args.name, 'check_available_tools'); }
     const path = skillPath(args.path === undefined ? 'SKILL.md' : args.path);
     const content = path === 'SKILL.md' ? skill.document : skill.files.find((file) => file.path === path)?.content;
-    if (content === undefined) { throw new Error(t("Skill 参考文件尚未导入：") + path); }
+    if (content === undefined) { throw new ToolFailure('NOT_FOUND', t("Skill 参考文件尚未导入：") + path, 'check_resource'); }
     return JSON.stringify({ name: skill.name, path: path, content: content,
       files: skill.files.map((file) => file.path), kind: path === 'SKILL.md' ? 'skill_instructions' : 'reference_data' });
   }

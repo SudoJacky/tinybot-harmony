@@ -1,3 +1,4 @@
+import { ToolFailure } from '../model/ToolFailure';
 import { validateUiAnswer, uiParts } from '../model/InteractiveUi';
 import { t } from '../model/I18n';
 import { AgentStep, AgentTurn, MAX_AGENT_STEPS, ModelMessage, ToolCall, ToolDefinition, ToolExecution, ToolExecutionMode,
@@ -167,7 +168,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
       turn.content = turn.steps.filter((item) => !item.requestError && !item.uiValidation).map((item) => item.content).filter((content) => content.length > 0).join('\n\n');
       observer.event({ type: 'model_end', step: round });
       if (step.uiValidation) {
-        for (const tool of step.tools) { tool.status = 'cancelled'; tool.output = toolError('UI validation failed; this tool was not executed.'); }
+        for (const tool of step.tools) { tool.status = 'cancelled'; tool.output = toolError(new ToolFailure('NOT_EXECUTED', 'UI validation failed; this tool was not executed.', 'fix_interface')); }
       }
       if (hasUi) { await observer.checkpoint(); cancellation.check(); }
       if (step.uiValidation && (validationFailures >= 3 || round === limit - 1)) {
@@ -196,7 +197,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
       if (round === limit - 1) {
         for (const tool of step.tools) {
           tool.status = 'cancelled';
-          tool.output = toolError(`已达到本轮 ${limit} 次模型调用上限，此工具未执行。`);
+          tool.output = toolError(new ToolFailure('NOT_EXECUTED', `已达到本轮 ${limit} 次模型调用上限，此工具未执行。`, 'none'));
         }
         throw new Error(t("已达到本轮 {0} 次模型调用上限，执行已停止。你可以继续发送指令。", [limit]));
       }

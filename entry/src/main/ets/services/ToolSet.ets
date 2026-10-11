@@ -1,3 +1,4 @@
+import { ToolFailure } from '../model/ToolFailure';
 import { t } from '../model/I18n';
 import { ToolCall, ToolDefinition } from '../model/Agent';
 import { AgentTools, ToolInvocationContext } from './AgentLoop';
@@ -14,7 +15,7 @@ export class ToolSet implements AgentTools {
     for (const group of groups) {
       for (const definition of group.definitions()) {
         const name = definition.function.name;
-        if (this.entries.has(name)) { throw new Error(t("工具名称重复：") + name); }
+        if (this.entries.has(name)) { throw new ToolFailure('INTERNAL_ERROR', t("工具名称重复：") + name, 'inspect_error'); }
         this.entries.set(name, group);
         this.catalog.push(definition);
       }
@@ -26,7 +27,7 @@ export class ToolSet implements AgentTools {
   async execute(call: ToolCall, cancellation: Cancellation, context?: ToolInvocationContext): Promise<string> {
     cancellation.check();
     const group = this.entries.get(call.function.name);
-    if (!group) { throw new Error(t("工具未启用或不存在：") + call.function.name); }
+    if (!group) { throw new ToolFailure('TOOL_UNAVAILABLE', t("工具未启用或不存在：") + call.function.name, 'check_available_tools'); }
     return group.execute(call, cancellation, context);
   }
 

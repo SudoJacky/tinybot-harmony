@@ -1,3 +1,4 @@
+import { ToolFailure, parseToolArguments } from '../model/ToolFailure';
 import { ModelMessage, ToolCall, ToolDefinition, ToolExecution } from '../model/Agent';
 import { ContextEntry } from '../model/ContextProjection';
 import { contextInputBudget, estimateTextTokens } from '../model/ConversationContext';
@@ -14,7 +15,7 @@ export function projectResults(entries: ContextEntry[], window: number): Context
     const messages = entry.messages.map((message): ModelMessage => {
       if (message.role !== 'tool' || estimateTextTokens(message.content) <= budget) { return message; }
       const receipt = entry.results?.find((result) => result.call.id === message.toolCallId);
-      if (!receipt || !entry.answerId) { throw new Error('Oversized tool result has no retrievable transcript source.'); }
+      if (!receipt || !entry.answerId) { throw new ToolFailure('INTERNAL_ERROR', 'Oversized tool result has no retrievable transcript source.', 'inspect_error'); }
       const previewLength = Math.min(2000, Math.floor(budget / 8));
       return { role: 'tool', toolCallId: message.toolCallId, content: JSON.stringify({
         contextPreview: true, messageId: entry.answerId, callId: receipt.call.id,
@@ -34,7 +35,7 @@ export class ContextTools implements AgentTools {
   private window: number;
   constructor(inner: AgentTools, entries: () => ContextEntry[], window: number) {
     this.inner = inner; this.entries = entries; this.window = window;
-    if (inner.definitions().some((tool) => tool.function.name === 'read_tool_result')) { throw new Error('Duplicate tool: read_tool_result'); }
+    if (inner.definitions().some((tool) => tool.function.name === 'read_tool_result')) { throw new ToolFailure('INTERNAL_ERROR', 'Duplicate tool: read_tool_result', 'inspect_error'); }
   }
   definitions(): ToolDefinition[] {
     if (!this.entries().some((entry) => (entry.results || []).length > 0)) { return this.inner.definitions(); }
@@ -55,15 +56,15 @@ export class ContextTools implements AgentTools {
   async execute(call: ToolCall, cancellation: Cancellation, context?: ToolInvocationContext): Promise<string> {
     if (call.function.name !== 'read_tool_result') { return this.inner.execute(call, cancellation, context); }
     cancellation.check();
-    const args = JSON.parse(call.function.arguments) as ReadResultArguments;
+    const args = parseToolArguments(call.function.arguments) as ReadResultArguments;
     if (!args || Array.isArray(args) || typeof args.messageId !== 'string' || typeof args.callId !== 'string' ||
-      Object.keys(args).some((key) => !['messageId', 'callId', 'offset', 'length'].includes(key))) { throw new Error('Invalid saved result arguments.'); }
+      Object.keys(args).some((key) => !['messageId', 'callId', 'offset', 'length'].includes(key))) { throw new ToolFailure('INVALID_ARGUMENTS', 'Invalid saved result arguments.', 'fix_arguments'); }
     const offset = args.offset === undefined ? 0 : args.offset; const length = args.length === undefined ? 4000 : args.length;
-    if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(length) || length < 1 || length > 8000) { throw new Error('Invalid saved result range.'); }
+    if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(length) || length < 1 || length > 8000) { throw new ToolFailure('INVALID_ARGUMENTS', 'Invalid saved result range.', 'fix_arguments'); }
     const source = this.entries().find((entry) => entry.answerId === args.messageId && entry.results?.some((result) => result.call.id === args.callId));
     const receipt = source?.results?.find((result) => result.call.id === args.callId);
-    if (!receipt || ['pending', 'running'].includes(receipt.status)) { throw new Error('Saved tool result not found or not yet completed.'); }
-    if (offset > receipt.output.length) { throw new Error('Offset exceeds saved result length.'); }
+    if (!receipt || ['pending', 'running'].includes(receipt.status)) { throw new ToolFailure('NOT_FOUND', 'Saved tool result not found or not yet completed.', 'check_resource'); }
+    if (offset > receipt.output.length) { throw new ToolFailure('INVALID_ARGUMENTS', 'Offset exceeds saved result length.', 'fix_arguments'); }
     const encode = (end: number): string => JSON.stringify({ messageId: args.messageId, callId: args.callId,
       executionStatus: receipt.status, offset: offset, nextOffset: end, totalCharacters: receipt.output.length,
       complete: end === receipt.output.length, content: receipt.output.slice(offset, end) });
@@ -73,7 +74,7 @@ export class ContextTools implements AgentTools {
       if (estimateTextTokens(encode(middle)) <= resultTokenBudget(this.window)) { low = middle; } else { high = middle - 1; }
     }
     if (low < receipt.output.length && /[\uD800-\uDBFF]/.test(receipt.output.charAt(low - 1))) { low--; }
-    if (low <= offset && offset < receipt.output.length) { throw new Error('No context space available for the saved result page.'); }
+    if (low <= offset && offset < receipt.output.length) { throw new ToolFailure('CONTEXT_LIMIT', 'No context space available for the saved result page.', 'reduce_input'); }
     return encode(low);
   }
 }

@@ -1,3 +1,4 @@
+import { ToolFailure, parseToolArguments } from '../model/ToolFailure';
 import { Attachment } from '../model/Productivity';
 import { ToolCall, ToolDefinition } from '../model/Agent';
 import { textPage } from '../model/TextPage';
@@ -23,12 +24,12 @@ export class AttachmentTools implements AgentTools {
   }
   async execute(call: ToolCall, cancellation: Cancellation): Promise<string> {
     cancellation.check();
-    if (call.function.name !== 'read_attachment') { throw new Error('Unsupported attachment tool.'); }
-    const args = JSON.parse(call.function.arguments) as AttachmentArguments;
+    if (call.function.name !== 'read_attachment') { throw new ToolFailure('TOOL_UNAVAILABLE', 'Unsupported attachment tool.', 'check_available_tools'); }
+    const args = parseToolArguments(call.function.arguments) as AttachmentArguments;
     if (!args || Array.isArray(args) || typeof args.id !== 'string' ||
-      Object.keys(args).some((key) => !['id', 'offset', 'limit', 'column'].includes(key))) { throw new Error('Invalid attachment arguments.'); }
+      Object.keys(args).some((key) => !['id', 'offset', 'limit', 'column'].includes(key))) { throw new ToolFailure('INVALID_ARGUMENTS', 'Invalid attachment arguments.', 'fix_arguments'); }
     const item = this.attachments.find((attachment) => attachment.id === args.id && attachment.mime === 'text/plain');
-    if (!item || typeof item.text !== 'string') { throw new Error('Text attachment is unavailable in this conversation.'); }
+    if (!item || typeof item.text !== 'string') { throw new ToolFailure('NOT_FOUND', 'Text attachment is unavailable in this conversation.', 'check_resource'); }
     const page = textPage(item.text, args.offset, args.limit, args.column);
     return JSON.stringify({ id: item.id, name: item.name, content: page.content, startLine: page.startLine,
       totalLines: page.totalLines, truncated: page.truncated, nextOffset: page.nextOffset, nextColumn: page.nextColumn });

@@ -1,3 +1,4 @@
+import { ToolFailure, parseToolArguments } from '../model/ToolFailure';
 import { t } from '../model/I18n';
 import { ToolCall, ToolDefinition } from '../model/Agent';
 import { McpServer } from '../model/Productivity';
@@ -6,6 +7,7 @@ import { Cancellation } from './Cancellation';
 import { McpConnection, McpConnectionFactory, McpToolInfo } from './McpConnection';
 import { ToolApproval } from './ToolApproval';
 
+interface McpCallResult { isError?: boolean; }
 interface ServerSummary { id: string; name: string; }
 interface McpArguments { server: string; tool?: string; arguments?: string; query?: string; }
 export class McpTools implements AgentTools {
@@ -39,10 +41,10 @@ export class McpTools implements AgentTools {
   }
   async execute(call: ToolCall, cancellation: Cancellation): Promise<string> {
     cancellation.check();
-    const args = JSON.parse(call.function.arguments) as McpArguments;
-    if (!args || typeof args.server !== 'string') { throw new Error(t("MCP 参数无效。")); }
+    const args = parseToolArguments(call.function.arguments) as McpArguments;
+    if (!args || typeof args.server !== 'string') { throw new ToolFailure('INVALID_ARGUMENTS', t("MCP 参数无效。"), 'fix_arguments'); }
     const server = (this.live ? this.live() : this.servers).find((item) => item.id === args.server && item.enabled);
-    if (!server) { throw new Error(t("MCP 服务未启用。")); }
+    if (!server) { throw new ToolFailure('NOT_CONFIGURED', t("MCP 服务未启用。"), 'check_settings'); }
     const version = JSON.stringify(server);
     if (this.versions.get(server.id) !== version) {
       this.clients.delete(server.id); this.catalog.delete(server.id); this.versions.set(server.id, version);
@@ -52,19 +54,21 @@ export class McpTools implements AgentTools {
     if (call.function.name === 'mcp_list_tools' || call.function.name === 'mcp_search_tools') {
       const tools = await client.list(cancellation);
       const words = (args.query || '').toLowerCase().split(/\s+/).filter((item) => !!item);
-      if (call.function.name === 'mcp_search_tools' && !words.length) { throw new Error(t("请提供工具检索关键词。")); }
+      if (call.function.name === 'mcp_search_tools' && !words.length) { throw new ToolFailure('INVALID_ARGUMENTS', t("请提供工具检索关键词。"), 'fix_arguments'); }
       const selected = call.function.name === 'mcp_search_tools' ? tools.filter((tool) => words.some((word) => (tool.name + ' ' + (tool.description || '')).toLowerCase().includes(word))).slice(0, 12) : tools;
       const output = JSON.stringify(selected);
       if (output.length > 48000) { return JSON.stringify({ message: '目录过大，请使用 mcp_search_tools 检索所需工具。', tools: tools.map((item) => item.name).slice(0, 200) }); }
       const previous = this.catalog.get(server.id) || []; this.catalog.set(server.id, previous.filter((item) => !selected.some((match) => match.name === item.name)).concat(selected));
       return output;
     }
-    if (call.function.name !== 'mcp_call' || typeof args.tool !== 'string' || typeof args.arguments !== 'string') { throw new Error(t("MCP 参数无效。")); }
-    if (!this.catalog.get(server.id)?.some((item) => item.name === args.tool)) { throw new Error(t("请先使用 mcp_list_tools 读取目录。")); }
-    const params = JSON.parse(args.arguments) as Object;
-    if (!params || typeof params !== 'object' || Array.isArray(params)) { throw new Error(t("工具参数必须为 JSON 对象。")); }
+    if (call.function.name !== 'mcp_call' || typeof args.tool !== 'string' || typeof args.arguments !== 'string') { throw new ToolFailure('INVALID_ARGUMENTS', t("MCP 参数无效。"), 'fix_arguments'); }
+    if (!this.catalog.get(server.id)?.some((item) => item.name === args.tool)) { throw new ToolFailure('SCHEMA_REQUIRED', t("请先使用 mcp_list_tools 读取目录。"), 'discover_tools'); }
+    const params = parseToolArguments(args.arguments) as Object;
+    if (!params || typeof params !== 'object' || Array.isArray(params)) { throw new ToolFailure('INVALID_ARGUMENTS', t("工具参数必须为 JSON 对象。"), 'fix_arguments'); }
     await this.approval.request(server.name + ' · ' + args.tool, server.url + '\n\n' + args.arguments, cancellation);
-    const result = JSON.stringify(await client.call(args.tool, params, cancellation));
+    const receipt = await client.call(args.tool, params, cancellation);
+    const result = JSON.stringify(receipt);
+    if ((receipt as McpCallResult).isError === true) { throw new ToolFailure('REMOTE_TOOL_ERROR', 'Remote tool reported failure. See details.result.', 'inspect_result_before_retry', { service: server.name, result: receipt }); }
     // Persist the complete accepted response. ContextTools bounds the model projection
     // and read_tool_result retrieves the saved receipt without repeating this operation.
     return result;

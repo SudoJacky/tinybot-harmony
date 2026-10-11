@@ -1,3 +1,4 @@
+import { ToolFailure, parseToolArguments } from '../model/ToolFailure';
 import { ToolCall, ToolDefinition } from '../model/Agent';
 import { MessageData } from '../model/Conversation';
 import { AgentTools } from './AgentLoop';
@@ -22,11 +23,11 @@ export class ReferenceTools implements AgentTools {
   }
   async execute(call: ToolCall, cancellation: Cancellation): Promise<string> {
     cancellation.check();
-    const args = JSON.parse(call.function.arguments) as ReferenceArguments;
+    const args = parseToolArguments(call.function.arguments) as ReferenceArguments;
     if (call.function.name !== 'read_reference' || !args || Array.isArray(args) || typeof args.messageId !== 'string' || typeof args.threadId !== 'string' ||
-      Object.keys(args).some((key) => !['messageId', 'threadId', 'offset', 'column', 'limit'].includes(key))) { throw new Error('Invalid reference arguments.'); }
+      Object.keys(args).some((key) => !['messageId', 'threadId', 'offset', 'column', 'limit'].includes(key))) { throw new ToolFailure('INVALID_ARGUMENTS', 'Invalid reference arguments.', 'fix_arguments'); }
     const reference = this.messages().find((message) => message.role === 'user' && message.id === args.messageId)?.references?.find((item) => item.threadId === args.threadId);
-    if (!reference) { throw new Error('Referenced snapshot not found in this conversation.'); }
+    if (!reference) { throw new ToolFailure('NOT_FOUND', 'Referenced snapshot not found in this conversation.', 'check_resource'); }
     const page = textPage(reference.fullContent === undefined ? reference.content : reference.fullContent, args.offset, args.limit, args.column);
     return JSON.stringify({ messageId: args.messageId, threadId: reference.threadId, capturedAt: reference.capturedAt,
       previewOnly: reference.truncated && reference.fullContent === undefined,

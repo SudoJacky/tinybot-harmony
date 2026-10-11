@@ -1,6 +1,7 @@
-export class RunCancelledError extends Error {
-  constructor() {
-    super('已停止执行。已完成的文件操作会保留。');
+import { ToolFailure } from '../model/ToolFailure';
+export class RunCancelledError extends ToolFailure {
+  constructor(message: string = '已停止执行。已完成的文件操作会保留。') {
+    super('CANCELLED', message, 'inspect_result_before_retry');
   }
 }
 

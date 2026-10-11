@@ -1,6 +1,6 @@
 import { t } from './I18n';
 import { FileDiff } from './FileDiff';
-import { ToolFailure } from './ToolFailure';
+import { ToolFailure, ToolResultError } from './ToolFailure';
 import { TurnFileChange } from './TurnFileChanges';
 import { AnthropicContentBlock, validateAnthropicContent } from './AnthropicContent';
 import { Attachment } from './Productivity';
@@ -160,11 +160,12 @@ export function validateToolCalls(calls: ToolCall[]): void {
   }
 }
 
-export function toolError(error: string | Error): string {
+export function toolError(error: string | Error | null | undefined): string {
+  if (error instanceof ToolResultError) { return error.output; }
   if (error instanceof ToolFailure) {
-    return JSON.stringify({ error: error.message, code: error.code, recovery: error.recovery, path: error.path, editIndex: error.editIndex });
+    return JSON.stringify({ error: error.message, code: error.code, recovery: error.recovery, details: error.details });
   }
-  return JSON.stringify({ error: typeof error === 'string' ? error : error.message });
+  return JSON.stringify({ error: typeof error === 'string' ? error : error?.message || String(error), code: 'UNKNOWN_ERROR', recovery: 'inspect_error' });
 }
 
 export function stepMessages(step: AgentStep, includeSteering: boolean = true): ModelMessage[] {
@@ -193,10 +194,10 @@ export function interruptTools(steps: AgentStep[]): void {
       if (tool.children) { interruptTools([{ content: '', tools: tool.children }]); }
       if (tool.status === 'pending') {
         tool.status = 'cancelled';
-        tool.output = toolError('本轮已中断，此工具未执行。');
+        tool.output = toolError(new ToolFailure('NOT_EXECUTED', '本轮已中断，此工具未执行。', 'none'));
       } else if (tool.status === 'running') {
         tool.status = 'interrupted';
-        tool.output = toolError('执行中断，结果未知；再次写入前请先检查工作区中的文件。');
+        tool.output = toolError(new ToolFailure('OUTCOME_UNKNOWN', '执行中断，结果未知；再次写入前请先检查工作区中的文件。', 'inspect_result_before_retry'));
       }
     }
   }
