@@ -4,6 +4,8 @@ import { DetailRow, DetailSection, ToolDetailContent, compactDetailValue, detail
 import { DisclosureState } from '../viewmodel/DisclosureState';
 import { Attachments } from '../services/Attachments';
 import { DataViewCard } from './DataViewCard';
+import { FileDiff } from '../model/FileDiff';
+import { FileDiffCard } from './FileDiffCard';
 
 @Component
 struct ReceiptSection {
@@ -47,6 +49,7 @@ struct ReceiptSection {
 // One receipt renderer for chat, Team and nested calls. Full details live in a bounded, paged sheet.
 @Component
 export struct ToolDetails {
+  @Prop @Watch('refresh') diff: FileDiff | undefined = undefined;
   @ObjectLink disclosure: DisclosureState;
   @Prop identity: string = '';
   @Prop @Watch('refresh') name: string = '';
@@ -77,8 +80,11 @@ export struct ToolDetails {
       ];
     }
     this.pages = detailPages(sections);
-    this.disclosure.detailPage = Math.max(0, Math.min(this.disclosure.detailPage, this.pages.length - 1));
+    this.disclosure.detailPage = Math.max(0, Math.min(this.disclosure.detailPage, this.pageCount() - 1));
   }
+  private hasDiff(): boolean { return this.status === 'complete' && this.diff !== undefined && ['write_file', 'edit_file'].includes(this.name); }
+  private showingDiff(): boolean { return this.hasDiff() && this.disclosure.detailTab === 'result'; }
+  private pageCount(): number { return this.showingDiff() ? Math.max(1, Math.ceil((this.diff?.rows.length || 0) / 40)) : this.pages.length; }
   private select(tab: string): void {
     this.onInspect();
     if (this.disclosure.detailTab !== tab) { this.disclosure.detailPage = 0; }
@@ -131,7 +137,7 @@ export struct ToolDetails {
       }.width('100%')
       Scroll(this.scroller) {
         Column({ space: 12 }) {
-          if (this.content.path) {
+          if (this.content.path && !this.showingDiff()) {
             Text(this.content.path).fontSize(12).lineHeight(18).width('100%').fontColor($r('app.color.text_secondary'))
               .wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
           }
@@ -139,20 +145,22 @@ export struct ToolDetails {
             this.picture()
             if (this.name === 'publish_data_view' && this.status === 'complete') { DataViewCard({ content: this.output }) }
           }
-          if (this.pages.length > 0) { ReceiptSection({ section: this.pages[this.disclosure.detailPage] }) }
+          if (this.showingDiff()) {
+            FileDiffCard({ diff: this.diff as FileDiff, page: this.disclosure.detailPage })
+          } else if (this.pages.length > 0) { ReceiptSection({ section: this.pages[this.disclosure.detailPage] }) }
           ForEach(this.content.notices, (notice: string) => {
             Text(notice).fontSize(12).lineHeight(18).fontColor($r('app.color.warning')).width('100%')
           })
         }.width('100%').alignItems(HorizontalAlign.Start).padding({ bottom: 16 })
       }.layoutWeight(1).width('100%').align(Alignment.TopStart).scrollBar(BarState.Auto)
-      if (this.pages.length > 1) {
+      if (this.pageCount() > 1) {
         Row({ space: 8 }) {
           Button(t('上一页')).height(44).fontSize(13).enabled(this.disclosure.detailPage > 0)
             .backgroundColor(Color.Transparent).fontColor($r('app.color.accent'))
             .id('tool-detail-prev-' + this.identity).onClick(() => this.page(-1))
-          Text((this.disclosure.detailPage + 1) + ' / ' + this.pages.length).layoutWeight(1).textAlign(TextAlign.Center)
+          Text((this.disclosure.detailPage + 1) + ' / ' + this.pageCount()).layoutWeight(1).textAlign(TextAlign.Center)
             .fontSize(12).fontColor($r('app.color.text_tertiary'))
-          Button(t('下一页')).height(44).fontSize(13).enabled(this.disclosure.detailPage < this.pages.length - 1)
+          Button(t('下一页')).height(44).fontSize(13).enabled(this.disclosure.detailPage < this.pageCount() - 1)
             .backgroundColor(Color.Transparent).fontColor($r('app.color.accent'))
             .id('tool-detail-next-' + this.identity).onClick(() => this.page(1))
         }.width('100%')
@@ -162,21 +170,25 @@ export struct ToolDetails {
 
   build() {
     Column({ space: 8 }) {
-      if (this.content.path) {
-        Text(this.content.path).fontSize(12).lineHeight(18).maxLines(2).width('100%')
-          .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_secondary')).copyOption(CopyOptions.LocalDevice)
+      if (this.hasDiff()) {
+        FileDiffCard({ diff: this.diff as FileDiff, compact: true, onExpand: () => this.inspect('result') })
+      } else {
+        if (this.content.path) {
+          Text(this.content.path).fontSize(12).lineHeight(18).maxLines(2).width('100%')
+            .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_secondary')).copyOption(CopyOptions.LocalDevice)
+        }
+        if (this.content.summary) {
+          Text(this.content.summary).fontSize(12).fontColor($r('app.color.text_tertiary'))
+        }
+        this.picture()
+        ForEach(this.content.sections.slice(0, 2).map((_section: DetailSection, index: number) => index), (index: number) => {
+          ReceiptSection({ section: this.content.sections[index], compact: true })
+        }, (index: number) => index.toString())
+        if (this.content.notices.length) {
+          Text(this.content.notices[0]).fontSize(12).fontColor($r('app.color.warning'))
+        }
+        Text(t('仅预览本次返回内容，详情可分页查看')).fontSize(11).fontColor($r('app.color.text_tertiary'))
       }
-      if (this.content.summary) {
-        Text(this.content.summary).fontSize(12).fontColor($r('app.color.text_tertiary'))
-      }
-      this.picture()
-      ForEach(this.content.sections.slice(0, 2).map((_section: DetailSection, index: number) => index), (index: number) => {
-        ReceiptSection({ section: this.content.sections[index], compact: true })
-      }, (index: number) => index.toString())
-      if (this.content.notices.length) {
-        Text(this.content.notices[0]).fontSize(12).fontColor($r('app.color.warning'))
-      }
-      Text(t('仅预览本次返回内容，详情可分页查看')).fontSize(11).fontColor($r('app.color.text_tertiary'))
       Row({ space: 16 }) {
         Text(t('查看详情')).id('tool-more-' + this.identity).fontSize(12).fontColor($r('app.color.accent')).height(44)
           .onClick(() => this.inspect('result'))

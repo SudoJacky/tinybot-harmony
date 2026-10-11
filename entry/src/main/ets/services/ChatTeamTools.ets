@@ -1,3 +1,4 @@
+import { ToolFailure, parseToolArguments } from '../model/ToolFailure';
 import { getLocale, t } from '../model/I18n';
 import { employeeName } from '../model/TeamNames';
 import { ModelConfig, ThreadData } from '../model/Conversation';
@@ -5,7 +6,7 @@ import { ModelReference } from '../model/ProviderProfiles';
 import { UsageOrigin } from '../model/Usage';
 import { ToolCall, ToolDefinition, ToolProperty } from '../model/Agent';
 import { TeamArtifact, TeamAttempt, TeamHandoff, TeamMember, TeamPlan, TeamRun, TeamTask, TeamTaskRecord, lastAttempt, validateTeamPlan } from '../model/Team';
-import { AgentTools } from './AgentLoop';
+import { AgentTools, ToolInvocationContext } from './AgentLoop';
 import { AgentRuntime } from './AgentRuntime';
 import { Cancellation } from './Cancellation';
 import { TeamCoordinator, TeamToolLane, TeamTools } from './TeamCoordinator';
@@ -80,8 +81,8 @@ class EmployeeTools implements AgentTools {
   candidate?: TeamHandoff;
   constructor(base: AgentTools, profile: string, host: ChatTeamTools, run: TeamRun, attempt: TeamAttempt) {
     this.base = base; this.host = host; this.run = run; this.attempt = attempt;
-    const reads = ['list_files', 'read_file', 'read_file_lines', 'read_attachment', 'search_file_content', 'read_skill', 'update_plan', 'execute_code'];
-    const research = reads.concat(['read_web', 'write_file', 'edit_file']);
+    const reads = ['find_files', 'list_files', 'read_file', 'read_file_lines', 'read_attachment', 'search_file_content', 'read_skill', 'update_plan', 'execute_code'];
+    const research = reads.concat(['read_web', 'search_web', 'read_reference', 'write_file', 'edit_file']);
     this.catalog = base.definitions().filter((item) => item.function.name !== 'publish_data_view' &&
       !item.function.name.startsWith('team_') && (profile === 'execution' || (profile === 'research' ? research : reads).includes(item.function.name)));
     this.allowed = new Set(this.catalog.map((item) => item.function.name));
@@ -94,23 +95,23 @@ class EmployeeTools implements AgentTools {
     }, ['entryId']));
   }
   definitions(): ToolDefinition[] { return this.catalog; }
-  async execute(call: ToolCall, cancellation: Cancellation): Promise<string> {
+  async execute(call: ToolCall, cancellation: Cancellation, context?: ToolInvocationContext): Promise<string> {
     cancellation.check(); const name = call.function.name;
-    if (this.candidate) { throw new Error(t("已经提交交接，请结束当前任务，不再调用工具。")); }
+    if (this.candidate) { throw new ToolFailure('INVALID_STATE', t("已经提交交接，请结束当前任务，不再调用工具。"), 'inspect_state'); }
     if (name === 'team_list_messages') { return JSON.stringify(this.host.page(this.run.id, 0)); }
-    if (name === 'team_read_message') { const args = JSON.parse(call.function.arguments) as TeamArgs; args.runId = this.run.id; return this.host.readResult(args, cancellation); }
+    if (name === 'team_read_message') { const args = parseToolArguments(call.function.arguments) as TeamArgs; args.runId = this.run.id; return this.host.readResult(args, cancellation); }
     if (name !== 'team_complete_task') {
-      if (!this.allowed.has(name)) { throw new Error(t("员工没有此工具权限：") + name); }
-      return this.base.execute(call, cancellation);
+      if (!this.allowed.has(name)) { throw new ToolFailure('PERMISSION_DENIED', t("员工没有此工具权限：") + name, 'check_permissions'); }
+      return this.base.execute(call, cancellation, context);
     }
-    const args = JSON.parse(call.function.arguments) as HandoffArgs;
+    const args = parseToolArguments(call.function.arguments) as HandoffArgs;
     if (!args || typeof args.summary !== 'string' || !args.summary.trim() || args.summary.length > 12000 || !Array.isArray(args.unresolved) ||
       args.unresolved.length > 20 || args.unresolved.some((item) => typeof item !== 'string' || !item.trim() || item.length > 2000) ||
-      !Array.isArray(args.artifacts) || args.artifacts.length > 8 || new Set(args.artifacts).size !== args.artifacts.length) { throw new Error(t("交接摘要、未解决事项或产物格式无效。")); }
+      !Array.isArray(args.artifacts) || args.artifacts.length > 8 || new Set(args.artifacts).size !== args.artifacts.length) { throw new ToolFailure('INVALID_ARGUMENTS', t("交接摘要、未解决事项或产物格式无效。"), 'fix_arguments'); }
     const artifacts: TeamArtifact[] = []; let total = 0;
     for (const path of args.artifacts) {
       const content = await readArtifact(this.base, path, cancellation); total += content.length;
-      if (total > 128000) { throw new Error(t("交接产物总计超过128000字符，请缩小交接文件。")); }
+      if (total > 128000) { throw new ToolFailure('LIMIT_EXCEEDED', t("交接产物总计超过128000字符，请缩小交接文件。"), 'reduce_input'); }
       artifacts.push({ path: path, content: content });
     }
     this.candidate = { summary: args.summary.trim(), unresolved: args.unresolved, artifacts: artifacts, sequence: 0 };
@@ -118,20 +119,20 @@ class EmployeeTools implements AgentTools {
   }
 }
 async function readArtifact(base: AgentTools, path: string, cancellation: Cancellation): Promise<string> {
-  if (typeof path !== 'string') { throw new Error(t("产物路径必须是字符串。")); }
+  if (typeof path !== 'string') { throw new ToolFailure('INVALID_ARGUMENTS', t("产物路径必须是字符串。"), 'fix_arguments'); }
   workspaceRelativePath(path, false);
   let content = ''; let offset = 1; let column = 1;
   while (true) {
     cancellation.check();
     const result = JSON.parse(await base.execute({ id: 'team_artifact_read', type: 'function', function: {
       name: 'read_file', arguments: JSON.stringify({ path: path, offset: offset, column: column }) } }, cancellation)) as FileRead;
-    if (typeof result.content !== 'string') { throw new Error(t('无法读取交接产物：') + path); }
+    if (typeof result.content !== 'string') { throw new ToolFailure('INVALID_RESULT', t('无法读取交接产物：') + path, 'inspect_result'); }
     content += result.content;
-    if (content.length > 65536) { throw new Error(t('单份交接产物最多 65536 字符，请缩小交接文件。')); }
+    if (content.length > 65536) { throw new ToolFailure('LIMIT_EXCEEDED', t('单份交接产物最多 65536 字符，请缩小交接文件。'), 'reduce_input'); }
     if (!result.truncated) { return content; }
     const nextOffset = result.nextOffset || 0; const nextColumn = result.nextColumn || 0;
     if (!Number.isSafeInteger(nextOffset) || !Number.isSafeInteger(nextColumn) || nextColumn < 1 ||
-      nextOffset < offset || (nextOffset === offset && nextColumn <= column)) { throw new Error(t('无法读取交接产物：') + path); }
+      nextOffset < offset || (nextOffset === offset && nextColumn <= column)) { throw new ToolFailure('INVALID_RESULT', t('无法读取交接产物：') + path, 'inspect_result'); }
     offset = nextOffset; column = nextColumn;
   }
 }
@@ -153,22 +154,22 @@ export class ChatTeamTools implements AgentTools {
     this.all = new ToolSet([new TeamTools(context.base(), this.lane), new CoordinatorCatalog(this)]);
   }
   definitions(): ToolDefinition[] { return this.all.definitions(); }
-  execute(call: ToolCall, cancellation: Cancellation): Promise<string> { return this.all.execute(call, cancellation); }
+  execute(call: ToolCall, cancellation: Cancellation, context?: ToolInvocationContext): Promise<string> { return this.all.execute(call, cancellation, context); }
   stop(): void { this.halted = true; this.active.forEach((item) => item.coordinator.stop()); this.notify(); }
   async close(): Promise<void> { this.stop(); await Promise.all(Array.from(this.active.values()).map((item) => item.done)); }
   private notify(): void { this.listeners.forEach((listener) => listener()); this.listeners.clear(); }
   private require(id?: string): TeamRun {
     const run = (this.context.thread.teams || []).find((item) => item.id === id && item.ownerMessageId !== undefined);
-    if (!run) { throw new Error(t("团队不属于当前聊天或不存在。")); } return run;
+    if (!run) { throw new ToolFailure('NOT_FOUND', t("团队不属于当前聊天或不存在。"), 'check_resource'); } return run;
   }
   private async save(run: TeamRun): Promise<void> {
     const snapshot = JSON.parse(JSON.stringify(run)) as TeamRun;
     try { await this.context.checkpoint(); }
-    catch (error) { this.stop(); throw new Error((error as Error).message); }
+    catch (error) { this.stop(); throw error as Error; }
     this.committed.set(run.id, snapshot); this.notify(); this.context.changed();
   }
   private start(run: TeamRun): void {
-    if (this.halted) { throw new Error(t("本轮团队调度已停止。")); }
+    if (this.halted) { throw new ToolFailure('INVALID_STATE', t("本轮团队调度已停止。"), 'inspect_state'); }
     if (this.active.has(run.id)) { return; }
     const coordinator = new TeamCoordinator(); const employeeTools = new Map<string, EmployeeTools>();
     const done = coordinator.execute(run, {
@@ -180,7 +181,7 @@ export class ChatTeamTools implements AgentTools {
       },
       complete: (_record, attempt) => {
         const handoff = employeeTools.get(attempt.id)?.candidate;
-        if (!handoff) { throw new Error(t("员工未调用 team_complete_task 交接，不能标为成功。")); }
+        if (!handoff) { throw new ToolFailure('HANDOFF_REQUIRED', t("员工未调用 team_complete_task 交接，不能标为成功。"), 'complete_handoff'); }
         run.sequence = (run.sequence || 0) + 1; handoff.sequence = run.sequence; attempt.handoff = handoff;
       },
       checkpoint: () => this.save(run), changed: this.context.changed
@@ -189,36 +190,36 @@ export class ChatTeamTools implements AgentTools {
     this.active.set(run.id, { coordinator: coordinator, done: done }); this.touched.add(run.id);
   }
   async dispatch(call: ToolCall, cancellation: Cancellation): Promise<string> {
-    cancellation.check(); if (this.halted) { throw new Error(t("团队已停止。")); }
-    const args = JSON.parse(call.function.arguments) as TeamArgs;
-    if (!args || typeof args !== 'object') { throw new Error(t("团队参数无效。")); }
+    cancellation.check(); if (this.halted) { throw new ToolFailure('INVALID_STATE', t("团队已停止。"), 'inspect_state'); }
+    const args = parseToolArguments(call.function.arguments) as TeamArgs;
+    if (!args || typeof args !== 'object') { throw new ToolFailure('INVALID_ARGUMENTS', t("团队参数无效。"), 'fix_arguments'); }
     if (call.function.name === 'team_recruit') { return this.recruit(args, cancellation); }
     const run = this.require(args.runId);
     // Coordinator waits/control must stay outside the lane needed by its workers.
     if (call.function.name === 'team_read_result') { return this.lane.run('parallel', () => this.readResult(args, cancellation), cancellation); }
     if (call.function.name === 'team_control') { return this.control(run, args); }
     if (call.function.name === 'team_resume') {
-      if (run.tasks.some((record) => !['pending', 'succeeded'].includes(record.status))) { throw new Error(t("请先明确重试失败、中断或取消的任务。")); }
+      if (run.tasks.some((record) => !['pending', 'succeeded'].includes(record.status))) { throw new ToolFailure('INVALID_STATE', t("请先明确重试失败、中断或取消的任务。"), 'inspect_state'); }
       if (run.tasks.every((record) => record.status === 'succeeded')) { return JSON.stringify(this.page(run.id, args.afterSequence || 0)); }
       this.start(run); return JSON.stringify({ runId: run.id, status: run.status });
     }
     const cursor = args.afterSequence === undefined ? 0 : args.afterSequence;
-    if (!Number.isInteger(cursor) || cursor < 0 || cursor > (run.sequence || 0)) { throw new Error(t("结果游标无效。")); }
+    if (!Number.isInteger(cursor) || cursor < 0 || cursor > (run.sequence || 0)) { throw new ToolFailure('INVALID_ARGUMENTS', t("结果游标无效。"), 'fix_arguments'); }
     if (call.function.name === 'team_wait') {
-      if (args.waitFor !== undefined && !['next_result', 'all_tasks'].includes(args.waitFor)) { throw new Error(t("等待条件无效。")); }
+      if (args.waitFor !== undefined && !['next_result', 'all_tasks'].includes(args.waitFor)) { throw new ToolFailure('INVALID_ARGUMENTS', t("等待条件无效。"), 'fix_arguments'); }
       await this.wait(run.id, cursor, args.waitFor === 'all_tasks', cancellation);
-    } else if (call.function.name !== 'team_inspect') { throw new Error(t("未知团队工具。")); }
+    } else if (call.function.name !== 'team_inspect') { throw new ToolFailure('TOOL_UNAVAILABLE', t("未知团队工具。"), 'check_available_tools'); }
     const result = this.page(run.id, cursor); this.consumed.set(run.id, result.afterSequence); this.acknowledged.set(run.id, result.revision);
     return JSON.stringify(result);
   }
   private async recruit(args: TeamArgs, cancellation: Cancellation): Promise<string> {
-    if (!Array.isArray(args.members) || !Array.isArray(args.tasks) || !args.tasks.length) { throw new Error(t("需要 members 和非空 tasks 数组。")); }
+    if (!Array.isArray(args.members) || !Array.isArray(args.tasks) || !args.tasks.length) { throw new ToolFailure('INVALID_ARGUMENTS', t("需要 members 和非空 tasks 数组。"), 'fix_arguments'); }
     const existing = args.runId === undefined ? [] : this.require(args.runId).members;
     const reserved = existing.map((member) => member.name);
     // Reserve every explicit name first so generated names cannot collide with a later entry.
     for (const member of args.members) {
       if (!member || typeof member.id !== 'string' ||
-        (member.displayName !== undefined && typeof member.displayName !== 'string')) { throw new Error(t("员工定义无效。")); }
+        (member.displayName !== undefined && typeof member.displayName !== 'string')) { throw new ToolFailure('INVALID_ARGUMENTS', t("员工定义无效。"), 'fix_arguments'); }
       if (member.displayName?.trim()) { reserved.push(member.displayName.trim()); }
     }
     const members: TeamMember[] = args.members.map((member): TeamMember => {
@@ -229,10 +230,10 @@ export class ChatTeamTools implements AgentTools {
     let run: TeamRun; let release = (): void => {};
     if (args.runId !== undefined) {
       run = this.require(args.runId);
-      if (args.goal !== undefined || args.maxConcurrency !== undefined) { throw new Error(t("追加招募不能改变目标或并行上限。")); }
+      if (args.goal !== undefined || args.maxConcurrency !== undefined) { throw new ToolFailure('INVALID_ARGUMENTS', t("追加招募不能改变目标或并行上限。"), 'fix_arguments'); }
       const active = this.active.get(run.id);
       if (active && !active.coordinator.accepting) { await active.done; cancellation.check(); }
-      if (!['running', 'completed', 'paused'].includes(run.status)) { throw new Error(t("请先处理团队失败或中断，再追加任务。")); }
+      if (!['running', 'completed', 'paused'].includes(run.status)) { throw new ToolFailure('INVALID_STATE', t("请先处理团队失败或中断，再追加任务。"), 'inspect_state'); }
       const plan: TeamPlan = { tasks: run.tasks.map((record) => record.task).concat(args.tasks), finalTaskId: '' };
       validateTeamPlan(plan, run.members.concat(members), true);
       if (this.active.get(run.id)?.coordinator.accepting) { release = (this.active.get(run.id) as ActiveTeam).coordinator.holdDispatch(); }
@@ -240,10 +241,10 @@ export class ChatTeamTools implements AgentTools {
       run.tasks = run.tasks.concat(args.tasks.map((task): TeamTaskRecord => { return { task: task, status: 'pending', attempts: [] }; }));
       if (run.status === 'completed') { run.status = 'planned'; }
     } else {
-      if (typeof args.goal !== 'string' || !args.goal.trim() || args.goal.length > 12000) { throw new Error(t("新团队需要有效目标。")); }
-      if (this.active.size >= 4) { throw new Error(t("本轮最多同时运行4个团队。")); }
+      if (typeof args.goal !== 'string' || !args.goal.trim() || args.goal.length > 12000) { throw new ToolFailure('INVALID_ARGUMENTS', t("新团队需要有效目标。"), 'fix_arguments'); }
+      if (this.active.size >= 4) { throw new ToolFailure('LIMIT_EXCEEDED', t("本轮最多同时运行4个团队。"), 'reduce_input'); }
       const concurrency = args.maxConcurrency === undefined ? 2 : args.maxConcurrency;
-      if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) { throw new Error(t("并行上限为1至4。")); }
+      if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) { throw new ToolFailure('INVALID_ARGUMENTS', t("并行上限为1至4。"), 'fix_arguments'); }
       validateTeamPlan({ tasks: args.tasks, finalTaskId: '' }, members, true);
       run = { id: this.context.createId(), ownerMessageId: this.context.messageId, goal: args.goal.trim(), members: members,
         concurrency: concurrency, model: { providerId: this.context.config.providerId, modelId: this.context.config.model },
@@ -259,7 +260,7 @@ export class ChatTeamTools implements AgentTools {
   }
   page(id: string, cursor: number): TeamPage {
     this.require(id); const run = this.committed.get(id);
-    if (!run) { throw new Error(t("团队尚未保存。")); }
+    if (!run) { throw new ToolFailure('INVALID_STATE', t("团队尚未保存。"), 'inspect_state'); }
     const results: ResultReference[] = [];
     for (const record of run.tasks) { for (const attempt of record.attempts) {
       if (attempt.status === 'succeeded' && attempt.handoff && attempt.handoff.sequence > cursor) { results.push(reference(record, attempt)); }
@@ -287,12 +288,12 @@ export class ChatTeamTools implements AgentTools {
     for (const record of snapshot?.tasks || []) { for (const attempt of record.attempts) {
       if (attempt.id !== args.entryId || attempt.status !== 'succeeded' || !attempt.handoff) { continue; }
       if (args.artifactIndex === undefined) { return JSON.stringify(reference(record, attempt)); }
-      if (!Number.isInteger(args.artifactIndex) || args.artifactIndex < 0 || args.artifactIndex >= attempt.handoff.artifacts.length) { throw new Error(t("产物索引无效。")); }
+      if (!Number.isInteger(args.artifactIndex) || args.artifactIndex < 0 || args.artifactIndex >= attempt.handoff.artifacts.length) { throw new ToolFailure('INVALID_ARGUMENTS', t("产物索引无效。"), 'fix_arguments'); }
       const artifact = attempt.handoff.artifacts[args.artifactIndex]; const content = await readArtifact(this.context.base(), artifact.path, cancellation);
-      if (content !== artifact.content) { throw new Error(t("产物已变化，当前文件不能冒充交接时版本：") + artifact.path); }
+      if (content !== artifact.content) { throw new ToolFailure('STALE_RESOURCE', t("产物已变化，当前文件不能冒充交接时版本：") + artifact.path, 'read_resource'); }
       return JSON.stringify({ path: artifact.path, content: content, verified: true });
     } }
-    throw new Error(t("已提交交接不存在。"));
+    throw new ToolFailure('NOT_FOUND', t("已提交交接不存在。"), 'check_resource');
   }
   private async control(run: TeamRun, args: TeamArgs): Promise<string> {
     const active = this.active.get(run.id);
@@ -300,11 +301,11 @@ export class ChatTeamTools implements AgentTools {
       if (active) { if (args.action === 'pause') { active.coordinator.pause(); } else { active.coordinator.stop(); } }
       else { run.status = args.action === 'pause' ? 'paused' : 'cancelled'; run.revision++; await this.save(run); }
     } else if (args.action === 'retry') {
-      if (active || !Array.isArray(args.taskIds) || !args.taskIds.length || new Set(args.taskIds).size !== args.taskIds.length) { throw new Error(t("等待团队停止后，明确指定要重试的任务。")); }
+      if (active || !Array.isArray(args.taskIds) || !args.taskIds.length || new Set(args.taskIds).size !== args.taskIds.length) { throw new ToolFailure('INVALID_STATE', t("等待团队停止后，明确指定要重试的任务。"), 'inspect_state'); }
       const selected = args.taskIds.map((id) => run.tasks.find((record) => record.task.id === id));
-      if (selected.some((record) => !record || !['failed', 'cancelled', 'interrupted'].includes(record.status))) { throw new Error(t("只能重试失败、停止或中断的任务。")); }
+      if (selected.some((record) => !record || !['failed', 'cancelled', 'interrupted'].includes(record.status))) { throw new ToolFailure('INVALID_STATE', t("只能重试失败、停止或中断的任务。"), 'inspect_state'); }
       selected.forEach((record) => { if (record) { record.status = 'pending'; } }); run.status = 'paused'; run.error = ''; run.revision++; await this.save(run);
-    } else { throw new Error(t("未知团队操作。")); }
+    } else { throw new ToolFailure('TOOL_UNAVAILABLE', t("未知团队操作。"), 'check_available_tools'); }
     return JSON.stringify({ runId: run.id, status: run.status, accepted: args.action });
   }
   async beforeFinish(cancellation: Cancellation): Promise<string | undefined> {

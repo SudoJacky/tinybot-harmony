@@ -18,7 +18,7 @@ export struct ToolReceipt {
         if (this.execution.status === 'running') {
           LoadingProgress().width(14).height(14).color($r('app.color.accent'))
         }
-        Text(toolStat(this.execution.call.function.name, this.execution.call.function.arguments, this.execution.output, this.execution.status) ||
+        Text(toolStat(this.execution.call.function.name, this.execution.call.function.arguments, this.execution.output, this.execution.status, this.execution.fileDiff) ||
           toolStatusLabel(this.execution.status)).fontSize(12)
           .fontColor(this.execution.status === 'failed' ? $r('app.color.danger') : $r('app.color.text_tertiary'))
         SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(10).fontColor([$r('app.color.text_tertiary')])
@@ -28,7 +28,7 @@ export struct ToolReceipt {
       .onClick(() => { this.onInspect(); this.disclosure.open = !this.disclosure.open; })
       if (this.disclosure.open) {
         ToolDetails({ disclosure: this.disclosure, identity: this.execution.call.id, name: this.execution.call.function.name,
-          argumentsText: this.execution.call.function.arguments, output: this.execution.output, status: this.execution.status, onInspect: this.onInspect })
+          argumentsText: this.execution.call.function.arguments, output: this.execution.output, status: this.execution.status, diff: this.execution.fileDiff, onInspect: this.onInspect })
         ForEach((this.execution.children || []).map((child: ToolExecution) => child.call.id), (id: string) => {
           ToolReceipt({ execution: this.execution.children?.find((child: ToolExecution) => child.call.id === id) as ToolExecution,
             disclosure: this.disclosure.children.get(id), onInspect: this.onInspect })

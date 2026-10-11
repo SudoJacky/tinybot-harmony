@@ -16,7 +16,7 @@ const cloudLocations = new Map(); let failCloudCopy = false; let cloudCopyError;
 const nativePath = p => p.startsWith('/sandbox/') ? path.join(fixture, p.slice(1)) : p;
 const fileIo = {
   OpenMode: { READ_ONLY: 1, CREATE: 2, WRITE_ONLY: 4, TRUNC: 8, NOFOLLOW: 16 },
-  access: async p => fs.existsSync(nativePath(p)), mkdir: p => fs.promises.mkdir(nativePath(p)), readText: p => fs.promises.readFile(nativePath(p), 'utf8'),
+  access: async p => fs.existsSync(nativePath(p)), mkdir: (p, recursive = false) => fs.promises.mkdir(nativePath(p), { recursive }), readText: p => fs.promises.readFile(nativePath(p), 'utf8'),
   listFile: async p => fs.promises.readdir(nativePath(p)),
   open: async (p, flags) => { const h = await fs.promises.open(nativePath(p), flags & 4 ? 'w' : 'r'); handles.set(h.fd, h); return { fd: h.fd }; },
   read: async (fd, bytes) => (await handles.get(fd).read(new Uint8Array(bytes))).bytesRead,
@@ -41,7 +41,8 @@ const fileIo = {
 };
 // Reproduce the empty-input behavior observed on the physical HarmonyOS device.
 class Encoder { encodeInto(s) { return s === '' ? undefined : new TextEncoder().encode(s); } }
-class Decoder { constructor(encoding, opts) { this.decoder = new TextDecoder(encoding, opts); } decodeToString(bytes, opts) { return this.decoder.decode(bytes, opts); } }
+// Harmony uses ignoreBOM=true to remove the marker, unlike Node's WHATWG decoder.
+class Decoder { constructor(encoding, opts) { this.decoder = new TextDecoder(encoding, {...opts, ignoreBOM: !opts?.ignoreBOM}); } decodeToString(bytes, opts) { return this.decoder.decode(bytes, opts); } }
 const cache = new Map(); const calls = []; let httpScript = () => {}; let destroyed = 0; let jsonScript = () => { throw Error('Unexpected JSON request'); };
 let fakeTimers;
 const scheduleTimer = (fn, ms) => fakeTimers ? fakeTimers.set(fn, ms) : setTimeout(fn, ms);
@@ -339,6 +340,317 @@ async function test(name, run) { await run(); completedTests++; console.log('PAS
     await assert.rejects(files.restore('note.txt','after'),/变化/);await files.restore('note.txt','later');
     assert.equal(fs.readFileSync(nativePath(root+'/note.txt'),'utf8'),'before');assert.equal(await files.baseline('note.txt'),undefined);
     await files.write('new.txt','new',signal);await files.restore('new.txt','new');assert.ok(!fs.existsSync(nativePath(root+'/new.txt')));
+  });
+  await test('per-operation diff uses the actual native write, survives reload and stays out of model output',async()=>{
+    const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
+    const {ToolSet}=load(path.join(source,'services/ToolSet'));
+    const {RuleTools}=load(path.join(source,'services/RuleTools'));
+    const {ContextTools}=load(path.join(source,'services/ContextTools'));
+    const {stepMessages}=load(path.join(source,'model/Agent'));
+    const root='/sandbox/workspace/diff';fs.mkdirSync(nativePath(root),{recursive:true});
+    const native=new NativeWorkspaceFiles(root), tools=new ContextTools(new RuleTools(new ToolSet([new WorkspaceTools(native)]),false),()=>[],128000);
+    const signal=new Cancellation();
+    const invoke=async(name,args)=>{
+      const execution={call:{id:crypto.randomUUID(),type:'function',function:{name,arguments:JSON.stringify(args)}},status:'running',output:''};
+      execution.output=await tools.execute(execution.call,signal,{execution,executeChild:async()=>{throw Error('unexpected child');}});
+      execution.status='complete';return execution;
+    };
+    const create=await invoke('write_file',{path:'note.txt',content:'head\nold\ntail\n'});
+    assert.equal(create.fileDiff.created,true);assert.equal(create.fileDiff.added,3);
+    assert.deepEqual(Object.keys(JSON.parse(create.output)).sort(),['bytes','path','written']);
+    const edit=await invoke('edit_file',{path:'note.txt',oldText:'old',newText:'new\nextra'});
+    assert.equal(edit.fileDiff.added,2);assert.equal(edit.fileDiff.removed,1);
+    assert.equal(edit.fileDiff.rows.find(r=>r.kind==='removed').oldLine,2);
+    const overwrite=await invoke('write_file',{path:'note.txt',content:'head\nnew\nfinal\n'});
+    assert.equal(overwrite.fileDiff.added,1);assert.equal(overwrite.fileDiff.removed,2,'compare to immediately preceding content, not the original baseline');
+    const unchanged=await invoke('write_file',{path:'note.txt',content:'head\nnew\nfinal\n'});
+    assert.equal(unchanged.fileDiff.added,0);assert.equal(unchanged.fileDiff.removed,0);
+    const step={content:'',tools:[create,edit,overwrite,unchanged]};
+    assert.ok(!JSON.stringify(stepMessages(step)).includes('fileDiff'));
+    const data=model.emptyData();data.activeThreadId='diff';data.threads=[{id:'diff',title:'Diff',updatedAt:1,messages:[
+      {id:'user',role:'user',content:'Edit',status:'complete',error:''},
+      {id:'answer',role:'assistant',content:'Done',status:'complete',error:'',steps:[step]}]}];
+    const restored=model.parseAppData(JSON.stringify(data));
+    assert.equal(restored.threads[0].messages[1].steps[0].tools[2].fileDiff.removed,2);
+    assert.equal((await native.baseline('note.txt')).existed,false,'workspace restore keeps its separate original baseline');
+    await assert.rejects(invoke('edit_file',{path:'note.txt',oldText:'missing',newText:'wrong'}));
+    assert.equal((await native.read('note.txt',signal)).content,'head\nnew\nfinal\n');
+  });
+  await test('batch edits match one original, read and commit once, and keep model receipts small',async()=>{
+    const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
+    const root='/sandbox/workspace/batch';fs.mkdirSync(nativePath(root),{recursive:true});
+    const native=new NativeWorkspaceFiles(root),tools=new WorkspaceTools(native),signal=new Cancellation();
+    const invoke=(name,args,context)=>tools.execute({id:name,type:'function',function:{name,arguments:JSON.stringify(args)}},signal,context);
+    await invoke('write_file',{path:'a.txt',content:'alpha\nbeta\ntail\n'});
+    let reads=0,commits=0;const read=native.read.bind(native),rename=fileIo.rename;
+    native.read=async(...args)=>{reads++;return read(...args);};
+    fileIo.rename=async(a,b)=>{if(b===root+'/a.txt')commits++;return rename(a,b);};
+    const execution={status:'running'};
+    try {
+      const result=JSON.parse(await invoke('edit_file',{path:'a.txt',edits:[{oldText:'beta',newText:'alpha'},{oldText:'alpha',newText:'beta'}]},{execution}));
+      assert.deepEqual(Object.keys(result).sort(),['bytes','path','written']);
+      assert.equal(reads,1);assert.equal(commits,1);
+      assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),'beta\nalpha\ntail\n');
+      assert.ok(execution.fileDiff.added>0);assert.ok(execution.fileDiff.removed>0);
+    } finally {fileIo.rename=rename;}
+    await invoke('edit_file',{path:'a.txt',oldText:'tail',newText:'$& $1 $` literal'});
+    assert.ok(fs.readFileSync(nativePath(root+'/a.txt'),'utf8').endsWith('$& $1 $` literal\n'));
+  });
+  await test('failed batch validation changes neither the file nor its review baseline',async()=>{
+    const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
+    const root='/sandbox/workspace/batch-failure';fs.mkdirSync(nativePath(root),{recursive:true});
+    const original='alpha beta\nrepeat repeat\n';fs.writeFileSync(nativePath(root+'/a.txt'),original);
+    const native=new NativeWorkspaceFiles(root),tools=new WorkspaceTools(native),signal=new Cancellation();
+    const invoke=(name,args)=>tools.execute({id:name,function:{name,arguments:JSON.stringify(args)}},signal);
+    await invoke('read_file',{path:'a.txt'});
+    const invalid=[
+      {edits:[{oldText:'alpha',newText:'changed'},{oldText:'missing',newText:'x'}]},
+      {edits:[{oldText:'alpha beta',newText:'x'},{oldText:'beta',newText:'y'}]},
+      {edits:[{oldText:'repeat',newText:'x'}]},
+      {edits:[{oldText:'alpha',newText:'x'},{oldText:'alpha',newText:'y'}]},
+      {edits:[{oldText:'',newText:'x'}]}, {edits:[]}, {edits:null},
+      {edits:[{oldText:'alpha',newText:5}]}, {edits:[{oldText:'alpha',newText:'x',extra:true}]},
+      {edits:Array(33).fill({oldText:'alpha',newText:'x'})},
+      {edits:[{oldText:'alpha',newText:'x'}],oldText:'beta',newText:'y'},
+      {oldText:'alpha',newText:'\0'}
+    ];
+    for(const args of invalid){await assert.rejects(invoke('edit_file',{path:'a.txt',...args}));
+      assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),original);assert.equal(await native.baseline('a.txt'),undefined);}
+    await assert.rejects(invoke('edit_file',{path:'a.txt',edits:[{oldText:'alpha',newText:'x'},{oldText:'missing',newText:'y'}]}),/第 2 项/);
+    await invoke('edit_file',{path:'a.txt',edits:[{oldText:'alpha',newText:''},{oldText:' beta',newText:'ok'}]});
+    assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),'ok\nrepeat repeat\n');
+  });
+  await test('native edits preserve UTF-8 BOM, CRLF, untouched mixed endings and no final newline',async()=>{
+    const root='/sandbox/workspace/line-endings';fs.mkdirSync(nativePath(root),{recursive:true});
+    const native=new NativeWorkspaceFiles(root),signal=new Cancellation();
+    const original='\uFEFFhead\r\nold\r\nblock\r\ntail\nlast';
+    fs.writeFileSync(nativePath(root+'/a.txt'),original);
+    const snapshot=await native.read('a.txt',signal);assert.equal(snapshot.content,original);
+    const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
+    const view=JSON.parse(await new WorkspaceTools(native).execute({id:'read',function:{name:'read_file',arguments:'{"path":"a.txt"}'}},signal));
+    assert.equal(view.content,original.slice(1),'hide the encoding marker from text copied by the model');
+    const receipt=await native.edit('a.txt',[{oldText:'old\nblock',newText:'new\nmore'}],snapshot.version,signal);
+    const expected='\uFEFFhead\r\nnew\r\nmore\r\ntail\nlast';
+    assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),expected);
+    assert.equal(receipt.before,original);assert.equal(receipt.after,expected);
+    const noop=await native.edit('a.txt',[{oldText:'more\ntail\nlast',newText:'more\ntail\nlast'}],receipt.version,signal);
+    assert.equal(noop.after,expected,'no-op must not normalize untouched mixed endings');
+    await native.restore('a.txt',expected);assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),original);
+    const empty=await native.write('empty.txt','',signal);assert.equal(empty.version.length,44);
+  });
+  await test('only explicit successful reads and writes authorize mutations; stale content is rejected',async()=>{
+    const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
+    const root='/sandbox/workspace/observations';fs.mkdirSync(nativePath(root),{recursive:true});
+    fs.writeFileSync(nativePath(root+'/a.txt'),'alpha\ntail');
+    const native=new NativeWorkspaceFiles(root),signal=new Cancellation();let tools=new WorkspaceTools(native);
+    const invoke=(name,args)=>tools.execute({id:name,function:{name,arguments:JSON.stringify(args)}},signal);
+    const edit=()=>invoke('edit_file',{path:'a.txt',oldText:'alpha',newText:'beta'});
+    await assert.rejects(edit(),/先.*读取/);
+    await assert.rejects(invoke('write_file',{path:'a.txt',content:'lost'}),/先.*读取/);
+    await invoke('search_file_content',{path:'.',query:'alpha'});await assert.rejects(edit(),/先.*读取/);
+    await assert.rejects(invoke('read_file',{path:'a.txt',offset:0}));await assert.rejects(edit(),/先.*读取/);
+    await invoke('read_file_lines',{path:'a.txt',startLine:1,endLine:1});
+    // Same byte count, with timestamps restored: content version still detects a change outside the read page.
+    const stat=fs.statSync(nativePath(root+'/a.txt'));
+    fs.writeFileSync(nativePath(root+'/a.txt'),'alpha\nTAIL');fs.utimesSync(nativePath(root+'/a.txt'),stat.atime,stat.mtime);
+    await assert.rejects(edit(),/已变化/);await assert.rejects(invoke('write_file',{path:'a.txt',content:'lost'}),/已变化/);
+    assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),'alpha\nTAIL');
+    await invoke('read_file',{path:'a.txt'});await edit();
+    await invoke('write_file',{path:'a.txt',content:'new'});
+    tools=new WorkspaceTools(native);await assert.rejects(edit(),/先.*读取/);
+    await invoke('write_file',{path:'created.txt',content:'new'});
+    await invoke('edit_file',{path:'created.txt',oldText:'new',newText:'edited'});
+    await invoke('read_file',{path:'a.txt'});fs.unlinkSync(nativePath(root+'/a.txt'));
+    await assert.rejects(invoke('write_file',{path:'a.txt',content:'resurrect'}),/已变化/);
+    assert.equal(fs.existsSync(nativePath(root+'/a.txt')),false);
+  });
+  await test('shared mutation queue prevents lost updates across workspace adapter instances',async()=>{
+    const root='/sandbox/workspace/racing';fs.mkdirSync(nativePath(root),{recursive:true});
+    const a=new NativeWorkspaceFiles(root),b=new NativeWorkspaceFiles(root),signal=new Cancellation();
+    const original=await a.write('a.txt','initial',signal);
+    const results=await Promise.allSettled([
+      a.edit('a.txt',[{oldText:'initial',newText:'first'}],original.version,signal),
+      b.edit('a.txt',[{oldText:'initial',newText:'second'}],original.version,signal)
+    ]);
+    assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+    assert.match(results.find(r=>r.status==='rejected').reason.message,/已变化/);
+    assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),'first');
+    const creates=await Promise.allSettled([a.write('new.txt','first',signal,{version:null}),b.write('new.txt','second',signal,{version:null})]);
+    assert.equal(creates.filter(r=>r.status==='fulfilled').length,1);
+  });
+  await test('queue holds through native commit, allows different files and releases after cancellation',async()=>{
+    const root='/sandbox/workspace/queue';fs.mkdirSync(nativePath(root),{recursive:true});
+    const a=new NativeWorkspaceFiles(root),b=new NativeWorkspaceFiles(root),signal=new Cancellation();
+    let release,entered;const blocked=new Promise(r=>release=r),started=new Promise(r=>entered=r);
+    const rename=fileIo.rename;let holding=true;
+    fileIo.rename=async(from,to)=>{if(to===root+'/a.txt'&&holding){holding=false;entered();await blocked;}return rename(from,to);};
+    let first,second;
+    try{
+      first=a.write('a.txt','first',signal);await started;
+      const cancelled=new Cancellation();let secondFinished=false;
+      second=b.write('a.txt','second',cancelled).then(()=>{secondFinished=true;return undefined;},e=>{secondFinished=true;return e;});
+      cancelled.cancel();
+      await b.write('b.txt','independent',signal);
+      assert.equal(secondFinished,false,'queued cancellation must not release another writer while native I/O is active');
+      release();await first;assert.match((await second).message,/停止/);
+      await b.write('a.txt','third',signal);assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),'third');
+      assert.equal(fs.readdirSync(nativePath(root)).filter(p=>p.endsWith('.tmp')).length,0);
+    }finally{release();await first;await second;fileIo.rename=rename;}
+  });
+  await test('oversized MCP results survive storage and can be paged past the former truncation point without replay',async()=>{
+    const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
+    const {ContextTools,projectResults}=load(path.join(source,'services/ContextTools'));
+    const {stepMessages}=load(path.join(source,'model/Agent'));
+    const {executeToolBatch}=load(path.join(source,'services/ToolExecution'));
+    const approval=new ToolApproval(),signal=new Cancellation();let invocations=0;
+    const payload='资料🙂'.repeat(24000)+'TAIL-AFTER-48000';
+    const mcp=new McpTools([server],approval,()=>({list:async()=>[{name:'large',inputSchema:{type:'object'}}],call:async()=>{invocations++;return{content:[{type:'text',text:payload}]};}}));
+    const call=(name,args)=>({id:name,type:'function',function:{name,arguments:JSON.stringify(args)}});
+    await mcp.execute(call('mcp_list_tools',{server:'s'}),signal);
+    const step={content:'',tools:[{call:call('mcp_call',{server:'s',tool:'large',arguments:'{}'}),status:'pending',output:''}]};
+    const run=executeToolBatch(step,0,mcp,mcp.definitions(),signal,{checkpoint:async()=>{},event:()=>{}});
+    await new Promise(r=>setTimeout(r,0));approval.respond(true);await run;
+    assert.equal(step.tools[0].status,'complete');assert.equal(JSON.parse(step.tools[0].output).content[0].text,payload);
+    const root=path.join(fixture,'full-mcp');fs.mkdirSync(root);const disk=new ConversationStore(root),data=model.emptyData();
+    data.activeThreadId='full';data.threads=[{id:'full',title:'Full MCP',updatedAt:1,messages:[{id:'u',role:'user',content:'Read',status:'complete',error:''},
+      {id:'a',role:'assistant',content:'',status:'complete',error:'',steps:[step]}]}];await disk.save(data);
+    const saved=(await disk.load()).threads[0].messages[1].steps[0];
+    const entries=[{messageId:'u',answerId:'a',step:0,messages:stepMessages(saved),results:saved.tools}];
+    const projected=projectResults(entries,128000);const preview=JSON.parse(projected[0].messages.find(m=>m.role==='tool').content);
+    assert.equal(preview.contextPreview,true);assert.ok(preview.previewEnd.includes('TAIL-AFTER-48000'));
+    const tools=new ContextTools(new WorkspaceTools({}),()=>entries,128000);
+    let rebuilt='',offset=0;while(true){const page=JSON.parse(await tools.execute(call('read_tool_result',{messageId:'a',callId:'mcp_call',offset,length:8000}),signal));rebuilt+=page.content;if(page.complete)break;assert.ok(page.nextOffset>offset);offset=page.nextOffset;}
+    assert.equal(rebuilt,saved.tools[0].output);assert.equal(invocations,1);
+    await assert.rejects(tools.execute(call('read_tool_result',{messageId:'other',callId:'mcp_call'}),signal));
+  });
+  await test('search discovers beyond directory caps, filters globs, pages matches and preserves context',async()=>{
+    const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
+    const root='/sandbox/workspace/search-pages';fs.mkdirSync(nativePath(root),{recursive:true});fs.mkdirSync(nativePath(root+'/src'));
+    for(let i=0;i<205;i++)fs.writeFileSync(nativePath(root+`/src/f${String(i).padStart(3,'0')}.ts`),'before\nTODO '+i+'\nafter');
+    fs.writeFileSync(nativePath(root+'/skip.md'),'TODO markdown');fs.writeFileSync(nativePath(root+'/.hidden.ts'),'TODO hidden');
+    const native=new NativeWorkspaceFiles(root),tools=new WorkspaceTools(native),signal=new Cancellation();
+    const invoke=async(name,args)=>JSON.parse(await tools.execute({id:name,function:{name,arguments:JSON.stringify(args)}},signal));
+    const first=await invoke('list_files',{path:'src'}),last=await invoke('list_files',{path:'src',offset:first.nextOffset});
+    assert.equal(first.entries.length,200);assert.equal(last.entries.length,5);
+    let reads=0;const original=native.read.bind(native);native.read=async(...args)=>{reads++;return original(...args);};
+    let names=[],cursor;do{const page=await invoke('find_files',{path:'.',glob:'src/**/*.ts',limit:17,cursor});names.push(...page.paths);cursor=page.nextCursor;}while(cursor);
+    assert.equal(names.length,205);assert.equal(new Set(names).size,205);assert.equal(reads,0,'finding names must not read text');
+    let matches=[];cursor=undefined;do{const page=await invoke('search_file_content',{path:'.',glob:'*.ts',query:'todo',ignoreCase:true,context:1,limit:19,cursor});matches.push(...page.matches);cursor=page.nextCursor;}while(cursor);
+    assert.equal(matches.length,205);assert.ok(matches.every(m=>m.line===2&&m.before[0]==='before'&&m.after[0]==='after'));
+    assert.equal(new Set(matches.map(m=>m.path)).size,205);
+    await assert.rejects(tools.execute({id:'edit',function:{name:'edit_file',arguments:'{"path":"src/f000.ts","oldText":"TODO","newText":"DONE"}'}},signal),e=>e.code==='FS_NOT_OBSERVED');
+  });
+  await test('search continues within a file and through empty pages, rejects stale or mismatched cursors',async()=>{
+    const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
+    const root='/sandbox/workspace/search-cursor';fs.mkdirSync(nativePath(root),{recursive:true});
+    const native=new NativeWorkspaceFiles(root),tools=new WorkspaceTools(native),signal=new Cancellation();
+    const invoke=async(name,args)=>JSON.parse(await tools.execute({id:name,function:{name,arguments:JSON.stringify(args)}},signal));
+    fs.writeFileSync(nativePath(root+'/many.txt'),'TODO\n'.repeat(230));
+    const args={path:'.',query:'TODO',limit:100};const a=await invoke('search_file_content',args),b=await invoke('search_file_content',{...args,cursor:a.nextCursor}),c=await invoke('search_file_content',{...args,cursor:b.nextCursor});
+    assert.equal(a.matches.length+b.matches.length+c.matches.length,230);assert.equal(c.truncated,false);assert.equal(b.matches[0].line,101);
+    const replay=await invoke('search_file_content',{...args,cursor:a.nextCursor});assert.deepEqual(replay.matches,b.matches);
+    const otherRun=new WorkspaceTools(native);
+    await otherRun.execute({id:'other',function:{name:'search_file_content',arguments:JSON.stringify(args)}},signal);
+    await assert.rejects(otherRun.execute({id:'other',function:{name:'search_file_content',arguments:JSON.stringify({...args,cursor:a.nextCursor})}},signal),e=>e.code==='FS_INVALID_CURSOR');
+    await assert.rejects(invoke('search_file_content',{...args,query:'changed',cursor:a.nextCursor}),e=>e.code==='FS_INVALID_CURSOR');
+    fs.appendFileSync(nativePath(root+'/many.txt'),'changed');await assert.rejects(invoke('search_file_content',{...args,cursor:a.nextCursor}),e=>e.code==='FS_STALE_SEARCH');
+    for(let i=0;i<201;i++)fs.writeFileSync(nativePath(root+`/f${String(i).padStart(3,'0')}.md`),i===200?'TARGET':'other');
+    const empty=await invoke('search_file_content',{path:'.',query:'TARGET',glob:'*.md'});assert.equal(empty.matches.length,0);assert.equal(empty.truncated,true);
+    const tail=await invoke('search_file_content',{path:'.',query:'TARGET',glob:'*.md',cursor:empty.nextCursor});assert.equal(tail.matches.length,1);
+    const cancelled=new Cancellation();cancelled.cancel();await assert.rejects(tools.execute({id:'x',function:{name:'find_files',arguments:'{"path":"."}'}},cancelled));
+  });
+  await test('turn summaries record net changes, include nested calls, survive reload and never enter model messages',async()=>{
+    const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
+    const {turnFileChanges}=load(path.join(source,'model/TurnFileChanges'));
+    const {stepMessages}=load(path.join(source,'model/Agent'));
+    const root='/sandbox/workspace/turn-changes';fs.mkdirSync(nativePath(root),{recursive:true});fs.writeFileSync(nativePath(root+'/a.txt'),'base\n');
+    const native=new NativeWorkspaceFiles(root),signal=new Cancellation();let tools=new WorkspaceTools(native);
+    const invoke=async(name,args)=>{const tool={call:{id:crypto.randomUUID(),type:'function',function:{name,arguments:JSON.stringify(args)}},status:'running',output:''};tool.output=await tools.execute(tool.call,signal,{execution:tool});tool.status='complete';return tool;};
+    await invoke('read_file',{path:'a.txt'});
+    const first=await invoke('edit_file',{path:'a.txt',oldText:'base',newText:'temporary'});
+    const reverted=await invoke('edit_file',{path:'a.txt',oldText:'temporary',newText:'base'});
+    assert.equal(turnFileChanges([{content:'',tools:[first,reverted]}]).length,0,'reverted edits must not add up');
+    const final=await invoke('edit_file',{path:'a.txt',oldText:'base',newText:'final\nextra'});
+    const empty=await invoke('write_file',{path:'empty.txt',content:''});
+    const parent={call:{id:'parent',function:{name:'orchestrate',arguments:'{}'}},status:'complete',output:'{}',children:[final,first,reverted,empty]};
+    const steps=[{content:'',tools:[parent]}];const changes=turnFileChanges(JSON.parse(JSON.stringify(steps)));
+    assert.equal(changes.length,2);assert.equal(changes[0].added,2);assert.equal(changes[0].removed,1);assert.equal(changes[1].created,true);
+    assert.ok(!JSON.stringify(stepMessages(steps[0])).includes('turnFileChange'));
+    tools=new WorkspaceTools(native);await invoke('read_file',{path:'a.txt'});
+    const secondTurn=await invoke('edit_file',{path:'a.txt',oldText:'extra',newText:'next'});
+    assert.equal(secondTurn.turnFileChange.diff.added,1);assert.equal(secondTurn.turnFileChange.diff.removed,1);
+    assert.equal((await native.baseline('a.txt')).content,'base\n','user restore baseline stays separate');
+  });
+  await test('real tool execution serializes actionable file errors without modifying the file',async()=>{
+    const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
+    const {executeToolBatch}=load(path.join(source,'services/ToolExecution'));
+    const root='/sandbox/workspace/error-codes';fs.mkdirSync(nativePath(root),{recursive:true});fs.writeFileSync(nativePath(root+'/a.txt'),'repeat repeat\nunique');
+    const tools=new WorkspaceTools(new NativeWorkspaceFiles(root)),signal=new Cancellation();
+    const invoke=async(name,args)=>{const step={content:'',tools:[{call:{id:crypto.randomUUID(),type:'function',function:{name,arguments:JSON.stringify(args)}},status:'pending',output:''}]};await executeToolBatch(step,0,tools,tools.definitions(),signal,{checkpoint:async()=>{},event:()=>{}});return step.tools[0];};
+    let tool=await invoke('edit_file',{path:'a.txt',oldText:'unique',newText:'x'});let result=JSON.parse(tool.output);
+    assert.equal(tool.status,'failed');assert.equal(result.code,'FS_NOT_OBSERVED');assert.equal(result.details.path,'a.txt');assert.equal(result.recovery,'read_file');
+    await invoke('read_file',{path:'a.txt'});
+    tool=await invoke('edit_file',{path:'a.txt',edits:[{oldText:'unique',newText:'x'},{oldText:'repeat',newText:'y'}]});result=JSON.parse(tool.output);
+    assert.equal(result.code,'FS_AMBIGUOUS_MATCH');assert.equal(result.details.editIndex,2);assert.equal(result.details.path,'a.txt');assert.equal(result.recovery,'add_match_context');
+    assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),'repeat repeat\nunique');
+    fs.writeFileSync(nativePath(root+'/a.txt'),'external');tool=await invoke('write_file',{path:'a.txt',content:'lost'});assert.equal(JSON.parse(tool.output).code,'FS_STALE_VERSION');
+    assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),'external');
+  });
+  await test('common error receipts classify tool arguments, policy, resources and unknown failures without retry',async()=>{
+    const {executeToolBatch}=load(path.join(source,'services/ToolExecution'));
+    const {ToolSet}=load(path.join(source,'services/ToolSet'));
+    const {RuleTools}=load(path.join(source,'services/RuleTools'));
+    const {AttachmentTools}=load(path.join(source,'services/AttachmentTools'));
+    const {MemoryTools}=load(path.join(source,'services/MemoryTools'));
+    const {CodeExecutionTools}=load(path.join(source,'services/CodeExecutionTools'));
+    const invoke=async(tools,name,args,raw=false)=>{
+      const step={content:'',tools:[{call:{id:crypto.randomUUID(),type:'function',function:{name,arguments:raw?args:JSON.stringify(args)}},status:'pending',output:''}]};
+      await executeToolBatch(step,0,tools,tools.definitions(),new Cancellation(),{checkpoint:async()=>{},event:()=>{}});
+      return {...step.tools[0],result:JSON.parse(step.tools[0].output)};
+    };
+    let runs=0;const unknown={definitions:()=>[],execute:async()=>{runs++;throw Error('raw native failure');}};
+    let receipt=await invoke(unknown,'x','{',true);assert.equal(receipt.result.code,'INVALID_ARGUMENTS');assert.equal(runs,0);
+    receipt=await invoke(unknown,'x',{});assert.equal(receipt.result.code,'UNKNOWN_ERROR');assert.equal(receipt.result.error,'raw native failure');assert.equal(runs,1);
+    receipt=await invoke({definitions:()=>[],execute:async()=>{throw null;}},'x',{});assert.equal(receipt.result.code,'UNKNOWN_ERROR');assert.equal(receipt.result.error,'null');
+    receipt=await invoke(new ToolSet([]),'missing',{});assert.equal(receipt.result.code,'TOOL_UNAVAILABLE');
+    receipt=await invoke(new RuleTools(unknown,true),'write_file',{});assert.equal(receipt.result.code,'PERMISSION_DENIED');assert.equal(runs,1);
+    receipt=await invoke(new AttachmentTools([]),'read_attachment',{id:'missing'});assert.equal(receipt.result.code,'NOT_FOUND');
+    receipt=await invoke(new MemoryTools(async()=>{runs++;return '{}';}),'memory',{operations:'[bad'});assert.equal(receipt.result.code,'INVALID_ARGUMENTS');assert.equal(runs,1);
+    receipt=await invoke(new CodeExecutionTools({execute:async()=>JSON.stringify({status:'timeout',error:'budget expired',stdout:'before timeout',result:null})}),'execute_code',{code:'while(true){}'});
+    assert.equal(receipt.status,'failed');assert.equal(receipt.result.code,'TIMEOUT');assert.equal(receipt.result.status,'timeout');assert.equal(receipt.result.stdout,'before timeout');
+    receipt=await invoke(new CodeExecutionTools({execute:async()=>JSON.stringify({status:'cancelled',error:'stopped',stdout:'partial'})}),'execute_code',{code:'return 1;'});
+    assert.equal(receipt.status,'cancelled');assert.equal(receipt.result.code,'CANCELLED');assert.equal(receipt.result.stdout,'partial');
+  });
+  await test('MCP failures preserve remote data, classify HTTP and denial, and record cancellation separately',async()=>{
+    const {executeToolBatch}=load(path.join(source,'services/ToolExecution'));
+    const approval=new ToolApproval();let remoteCalls=0;
+    const remote={isError:true,content:[{type:'text',text:'remote failure '+ 'x'.repeat(60000)}],error:{remote:'untouched'}};
+    const tools=new McpTools([server],approval,()=>({list:async()=>[{name:'write',inputSchema:{type:'object'}}],call:async()=>{remoteCalls++;return remote;}}));
+    const call=(name,args)=>({id:crypto.randomUUID(),type:'function',function:{name,arguments:JSON.stringify(args)}});
+    await tools.execute(call('mcp_list_tools',{server:'s'}),new Cancellation());
+    const run=async(allow)=>{
+      const step={content:'',tools:[{call:call('mcp_call',{server:'s',tool:'write',arguments:'{}'}),status:'pending',output:''}]};
+      const pending=executeToolBatch(step,0,tools,tools.definitions(),new Cancellation(),{checkpoint:async()=>{},event:()=>{}});
+      await new Promise(setImmediate);approval.respond(allow);await pending;return step.tools[0];
+    };
+    let receipt=await run(false);assert.equal(JSON.parse(receipt.output).code,'USER_DENIED');assert.equal(remoteCalls,0);
+    receipt=await run(true);let result=JSON.parse(receipt.output);assert.equal(receipt.status,'failed');assert.equal(result.code,'REMOTE_TOOL_ERROR');assert.deepEqual(result.details.result,remote);assert.equal(remoteCalls,1);
+    for(const [status,code] of [[401,'AUTH_REQUIRED'],[403,'PERMISSION_DENIED'],[429,'RATE_LIMITED'],[503,'HTTP_ERROR']]){
+      let count=0;httpScript=req=>{count++;req.callback(null,status);};
+      await assert.rejects(new McpClient(server).list(new Cancellation()),error=>error.code===code&&error.details.httpStatus===status);assert.equal(count,1);
+    }
+    const signal=new Cancellation();let started;const admitted=new Promise(resolve=>{started=resolve;});
+    httpScript=()=>{started();};
+    const client=new McpClient(server);const adapter={definitions:()=>[],execute:()=>client.list(signal)};
+    const step={content:'',tools:[{call:call('mcp_list_tools',{server:'s'}),status:'pending',output:''}]};
+    const pending=executeToolBatch(step,0,adapter,[],signal,{checkpoint:async()=>{},event:()=>{}});await admitted;signal.cancel();await assert.rejects(pending);
+    assert.equal(step.tools[0].status,'cancelled');assert.equal(JSON.parse(step.tools[0].output).code,'CANCELLED');
+  });
+  await test('interrupted receipts distinguish never-started from unknown outcomes without changing completed results',async()=>{
+    const {interruptTools}=load(path.join(source,'model/Agent'));
+    const steps=[{content:'',tools:['pending','running','complete'].map(status=>({status,output:'original'}))}];
+    interruptTools(steps);assert.equal(JSON.parse(steps[0].tools[0].output).code,'NOT_EXECUTED');
+    assert.equal(JSON.parse(steps[0].tools[1].output).code,'OUTCOME_UNKNOWN');assert.equal(steps[0].tools[2].output,'original');
   });
   await test('image hydration awaits actual base64 encoding',async()=>{
     const id=crypto.randomUUID(),bytes=Buffer.from([255,216,255,217]);fs.writeFileSync(path.join(fixture,'attachments',id+'.jpg'),bytes);

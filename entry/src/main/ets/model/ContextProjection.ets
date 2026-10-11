@@ -34,7 +34,7 @@ export function threadEntries(thread: ThreadData): ContextEntry[] {
     let replay = requestHistory(answer && !active ? [user, answer] : [user], '');
     if (!replay.length && thread.compaction?.firstKeptMessageId === user.id) { replay = requestHistory([user], ''); }
     if (!replay.length) { continue; }
-    entries.push({ messageId: user.id, messages: [replay[0]], referenceText: referenceContext(user.references) });
+    entries.push({ messageId: user.id, messages: [replay[0]], referenceText: referenceContext(user.references, user.id) });
     if (!answer) { continue; }
     const steps = answer.steps || [];
     if (!steps.length && !active) {

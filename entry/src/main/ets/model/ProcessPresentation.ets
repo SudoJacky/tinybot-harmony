@@ -70,7 +70,7 @@ function toolCategory(name: string): string {
   if (['write_file', 'edit_file'].includes(name)) { return 'edit'; }
   if (name.startsWith('team_')) { return 'team'; }
   if (name.startsWith('mcp_')) { return 'mcp'; }
-  return ['list_files', 'search_file_content', 'read_web', 'read_skill', 'generate_image', 'update_plan', 'publish_data_view',
+  return ['find_files', 'list_files', 'search_file_content', 'read_web', 'read_skill', 'generate_image', 'update_plan', 'publish_data_view',
     'request_user_input'].includes(name) ? name : 'other';
 }
 
@@ -79,6 +79,7 @@ function categoryLabel(category: string, count: number): string {
     case 'read': return t('读取了 {0} 个文件', [count]);
     case 'edit': return t('编辑了 {0} 个文件', [count]);
     case 'list_files': return t('浏览了 {0} 个目录', [count]);
+    case 'find_files':
     case 'search_file_content': return t('搜索了 {0} 次', [count]);
     case 'read_web': return t('读取了 {0} 个网页', [count]);
     case 'read_skill': return t('读取了 {0} 个 Skill', [count]);

@@ -60,6 +60,7 @@ export struct ChatPanel {
   onHistoryDragEnd: (event: GestureEvent) => void = () => {};
   onHistoryDragCancel: () => void = () => {};
   onFiles: () => void = () => {};
+  onOpenFile: (path: string) => void = () => {};
   onTools: (tab: string) => void = () => {};
   @ObjectLink approval: ToolApproval;
   @State private importing: boolean = false;
@@ -336,7 +337,7 @@ export struct ChatPanel {
         }
         ForEach(this.app.visibleMessages, (message: MessageViewModel) => {
           ListItem() {
-            MessageBubble({ message: message, uiAvailable: !this.app.busy && !this.thread.archived,
+            MessageBubble({ message: message, webEnabled: this.app.extensions.webEnabled, onOpenFile: this.onOpenFile, uiAvailable: !this.app.busy && !this.thread.archived,
               actionsEnabled: !this.app.busy && !this.app.saveError, onRegenerate: (id: string) => this.regenerate(id),
               onUi: this.uiHandler(this.thread.id, message.id), onFork: (id: string) => { this.fork(id); }, onRemember: (id: string) => { this.remember(id); },
               onInspect: () => { this.inspectingOutput = true; this.followOutput = false; clearTimeout(this.scrollTimer); this.scrollTimer = -1; },
@@ -793,6 +794,7 @@ export struct ChatPanel {
           .onClick(() => { this.getUIContext().getFocusController().clearFocus(); this.showReasoning = !this.showReasoning; })
           .bindPopup(this.showReasoning, { builder: this.reasoningPicker, placement: Placement.Top,
             popupColor: $r('app.color.surface'), radius: 20, enableArrow: false, autoCancel: true,
+            mask: { color: $r('app.color.scrim') },
             onStateChange: (event) => {
               this.showReasoning = event.isVisible;
               if (!event.isVisible && !this.reasoningSaving) this.reasoningPreview = '';
@@ -838,7 +840,8 @@ export struct ChatPanel {
             fill: this.canSend() ? $r('app.color.accent') : $r('app.color.surface_variant'),
             tint: this.canSend() ? $r('app.color.on_accent') : $r('app.color.text_tertiary'),
             disabled: !this.canSend(), onTap: () => this.send() })
-            .bindContextMenu(this.sendMenu, ResponseType.LongPress)
+            .bindContextMenu(this.sendMenu, ResponseType.LongPress, {
+              mask: { color: $r('app.color.scrim'), backgroundBlurStyle: BlurStyle.NONE } })
             .transition(Motion.pop())
         }
       }.width('100%')

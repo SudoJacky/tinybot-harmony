@@ -1,6 +1,7 @@
 import { McpSettingsCommand, McpSettingsResult } from '../services/McpSettings';
 import { Cancellation } from '../services/Cancellation';
 import { t } from '../model/I18n';
+import { SearchDraft } from '../model/WebSearch';
 import { UiValues } from '../model/InteractiveUi';
 import { RequestUsage } from '../model/Usage';
 import { ContextTokenItem, draftBreakdown } from '../model/ContextBreakdown';
@@ -162,6 +163,7 @@ export class ChatViewModel {
 
   changeMcp(request: McpSettingsCommand, cancellation: Cancellation): Promise<McpSettingsResult> { return this.requireSession().changeMcp(request, cancellation); }
   saveProductivity(value: ProductivityData): Promise<boolean> { return this.requireSession().saveProductivity(value); }
+  saveSearch(draft: SearchDraft): Promise<boolean> { return this.requireSession().saveSearch(draft); }
   refreshMemoryContext(): Promise<boolean> { return this.requireSession().refreshMemoryContext(); }
   proposeMemory(messageId: string): Promise<string[]> { return this.requireSession().proposeMemory(messageId); }
   cancelMemoryDraft(): void { this.requireSession().cancelMemoryDraft(); }

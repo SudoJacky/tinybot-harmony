@@ -1,3 +1,4 @@
+import { ToolFailure } from '../model/ToolFailure';
 import { validateUiAnswer, uiParts } from '../model/InteractiveUi';
 import { t } from '../model/I18n';
 import { AgentStep, AgentTurn, MAX_AGENT_STEPS, ModelMessage, ToolCall, ToolDefinition, ToolExecution, ToolExecutionMode,
@@ -11,6 +12,8 @@ import { PreparedRequest } from './RequestContext';
 import { ModelTurn } from '../model/Agent';
 import { ContextOverflowError } from './providers/ProviderErrors';
 import { executeToolBatch } from './ToolExecution';
+import { RepeatToolReminder } from './RepeatToolReminder';
+import { requestWithRetry } from './RequestRetry';
 
 export interface SteeringInput {
   peek: () => PendingInput | undefined;
@@ -28,7 +31,7 @@ export interface ToolInvocationContext {
   executeChild: (child: ToolExecution, tools: AgentTools, cancellation: Cancellation) => Promise<void>;
 }
 
-export type LoopEventType = 'step_start' | 'text_delta' | 'reasoning_delta' | 'model_end' | 'tool_start' | 'tool_end' | 'step_end';
+export type LoopEventType = 'step_start' | 'text_delta' | 'reasoning_delta' | 'model_end' | 'tool_start' | 'tool_end' | 'step_end' | 'request_retry';
 
 export interface LoopEvent {
   type: LoopEventType;
@@ -67,6 +70,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
   let messages = context.messages.slice();
   const turn = context.turn;
   const seen = new Set<string>();
+  const repeatReminder = new RepeatToolReminder();
   let validationFailures = 0;
   let recoveryPending = false;
   let recoveryAttempted = false;
@@ -92,6 +96,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
       turn.steps = turn.steps.concat([step]);
       observer.event({ type: 'step_start', step: round });
       if (input) {
+        repeatReminder.reset();
         // Record input in the transcript and remove it from the outbox in one checkpoint.
         observer.steering?.consume(input.id);
         await observer.checkpoint();
@@ -101,7 +106,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
       let acceptingText = true;
       let response: ModelTurn;
       try {
-        response = await context.model.stream(messages, definitions, cancellation, (text: string) => {
+        response = await requestWithRetry(step, () => context.model.stream(messages, definitions, cancellation, (text: string) => {
           if (!acceptingText || cancellation.cancelled) { return; }
           if (step.content.length === 0 && turn.content.length > 0) { turn.content += '\n\n'; }
           step.content += text;
@@ -113,7 +118,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
             if (!acceptingText || cancellation.cancelled) { return; }
             step.reasoningContent = (step.reasoningContent || '') + text;
             observer.event({ type: 'reasoning_delta', step: round, delta: text });
-          } })
+          } }), cancellation, observer.checkpoint, () => observer.event({ type: 'request_retry', step: round }))
           .finally(() => { acceptingText = false; });
       } catch (error) {
         cancellation.check();
@@ -163,7 +168,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
       turn.content = turn.steps.filter((item) => !item.requestError && !item.uiValidation).map((item) => item.content).filter((content) => content.length > 0).join('\n\n');
       observer.event({ type: 'model_end', step: round });
       if (step.uiValidation) {
-        for (const tool of step.tools) { tool.status = 'cancelled'; tool.output = toolError('UI validation failed; this tool was not executed.'); }
+        for (const tool of step.tools) { tool.status = 'cancelled'; tool.output = toolError(new ToolFailure('NOT_EXECUTED', 'UI validation failed; this tool was not executed.', 'fix_interface')); }
       }
       if (hasUi) { await observer.checkpoint(); cancellation.check(); }
       if (step.uiValidation && (validationFailures >= 3 || round === limit - 1)) {
@@ -192,11 +197,13 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
       if (round === limit - 1) {
         for (const tool of step.tools) {
           tool.status = 'cancelled';
-          tool.output = toolError(`已达到本轮 ${limit} 次模型调用上限，此工具未执行。`);
+          tool.output = toolError(new ToolFailure('NOT_EXECUTED', `已达到本轮 ${limit} 次模型调用上限，此工具未执行。`, 'none'));
         }
         throw new Error(t("已达到本轮 {0} 次模型调用上限，执行已停止。你可以继续发送指令。", [limit]));
       }
       await executeToolBatch(step, round, context.tools, definitions, cancellation, observer, context.toolExecution);
+      step.toolReminder = repeatReminder.observe(step);
+      if (step.toolReminder) { await observer.checkpoint(); cancellation.check(); }
       messages.push(...stepMessages(step, false));
       observer.event({ type: 'step_end', step: round });
     }

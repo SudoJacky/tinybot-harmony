@@ -8,7 +8,7 @@ packages/Tinybot-0.1.6-10006-release-UNSIGNED.app：Release 模式完整应用�
 packages/Tinybot-0.1.6-10006-release-UNSIGNED.hap：同一 APP 内的 entry 模块，供检查或后续签名使用。
 symbols/app-symbol.zip：本版本符号表，供 DevEco Studio 上传及问题定位。
 symbols/native/arm64-v8a/、symbols/native/x86_64/：与包内 Build ID 一致的未裁剪沙箱原生库，供 Native 崩溃定位。
-assets/tinybot-icon.png：工程实际使用的 512×512 PNG 图标；商店上传所需尺寸以 AGC 当前字段为准。
+assets/tinybot-icon.png：工程实际使用的 1024×1024 PNG 图标；商店上传所需尺寸以 AGC 当前字段为准。
 screenshots/：本机真实界面截图；上传前按 AGC 当前字段要求选择、预览。
 仅在本机已有 artifacts/store-screenshots 时附带截图，拍摄版本以截图记录为准；历史截图不能作为 0.1.6 新交互的验证证据。
 RELEASE-NOTES.txt：0.1.6 测试版更新说明、升级与回归重点。

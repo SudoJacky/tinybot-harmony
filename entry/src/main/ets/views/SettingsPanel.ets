@@ -25,6 +25,7 @@ export struct SettingsPanel {
   onUserDocument: () => void = () => {};
   onUsage: () => void = () => {};
   onModels: () => void = () => {};
+  onSearch: () => void = () => {};
   onBackup: () => void = () => {};
   onUiDemo: () => void = () => {};
   onSupport: (page: string) => void = () => {};
@@ -209,6 +210,9 @@ export struct SettingsPanel {
             RowDivider()
             NavRow({ title: t('MCP 服务'), compId: 'open-mcp', icon: $r('sys.symbol.connection'),
               disabled: !this.canEdit(), onTap: () => this.onTools('mcp') })
+            RowDivider()
+            NavRow({ title: t('联网搜索'), subtitle: 'DeepSeek / Tavily', compId: 'open-search-settings',
+              disabled: !this.canEdit(), onTap: this.onSearch })
           }
         }
         SectionHeader({ title: t('数据与用量') })
@@ -223,8 +227,8 @@ export struct SettingsPanel {
         }
         SectionHeader({ title: t('隐私') })
         GroupCard() {
-          SwitchRow({ title: t("允许读取网页"), compId: 'web-enabled', isOn: this.settings.webEnabled,
-            subtitle: t("读取指定链接的静态正文，内容会发送给当前模型。"), disabled: !this.canEdit(),
+          SwitchRow({ title: t('允许联网'), compId: 'web-enabled', isOn: this.settings.webEnabled,
+            subtitle: t('允许网页读取和已配置的搜索；获取的内容会发送给当前模型。'), disabled: !this.canEdit(),
             onChange: (value: boolean) => { this.saveToggle((v: boolean) => { this.settings.webEnabled = v; }, value); } })
         }
         SectionHeader({ title: t('偏好设置') })

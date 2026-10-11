@@ -64,7 +64,7 @@ export function toolDetailContent(name: string, argumentsText: string, output: s
     content.inputs = fields(parse(str(args.data)), t('参数'));
   }
   if (result.truncated === true) { content.notices.push(t('工具仅返回了部分内容')); }
-  if (numeric(result.nextOffset) > 0) {
+  if (numeric(result.nextOffset) > 0 && name !== 'list_files') {
     content.notices.push(t('工具返回的续读位置：第 {0} 行，第 {1} 列', [numeric(result.nextOffset), numeric(result.nextColumn) || 1]));
   }
   if (status === 'pending' || status === 'running') {
@@ -121,12 +121,19 @@ export function toolDetailContent(name: string, argumentsText: string, output: s
       for (const item of matches) {
         const match = record(item); const path = str(match.path);
         if (!groups.has(path)) { paths.push(path); groups.set(path, []); }
-        groups.get(path)?.push({ label: t('第 {0} 行', [numeric(match.line)]), value: str(match.text) });
+        const before = Array.isArray(match.before) ? (match.before as Object[]).map((value: Object) => str(value)) : [];
+        const after = Array.isArray(match.after) ? (match.after as Object[]).map((value: Object) => str(value)) : [];
+        groups.get(path)?.push({ label: t('第 {0} 行', [numeric(match.line)]) + (numeric(match.column) > 1 ? ':' + numeric(match.column) : ''),
+          value: before.concat([str(match.text)], after).join('\n') });
       }
       content.sections = paths.map((path: string) => section(path, '', 'list', groups.get(path) || []));
       if (!matches.length) { content.sections = [section(t('结果'), t('没有匹配项'))]; }
       if (Array.isArray(result.skipped) && result.skipped.length) { content.notices.push(t('跳过的文件') + ': ' + show(result.skipped)); }
     }
+  } else if (status === 'complete' && name === 'find_files' && Array.isArray(result.paths)) {
+    content.summary = t('{0} 项', [result.paths.length]);
+    content.sections = [section(t('查找文件'), result.paths.length ? '' : t('没有匹配项'), 'list',
+      (result.paths as Object[]).map((path: Object): DetailRow => ({ label: str(path), value: '' })))];
   } else if (status === 'complete' && name === 'list_files' && Array.isArray(result.entries)) {
     const entries = result.entries as Object[];
     if (entries.every((item: Object) => typeof record(item).name === 'string' && typeof record(item).kind === 'string')) {

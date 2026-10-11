@@ -1,6 +1,7 @@
+import { ToolFailure, parseToolArguments } from '../model/ToolFailure';
 import { t } from '../model/I18n';
 import { ToolCall, ToolDefinition } from '../model/Agent';
-import { AgentTools } from './AgentLoop';
+import { AgentTools, ToolInvocationContext } from './AgentLoop';
 import { Cancellation } from './Cancellation';
 
 export const MAX_WEB_BYTES: number = 1024 * 1024;
@@ -14,6 +15,7 @@ export interface WebTransport {
 export interface WebLink { title: string; url: string; }
 export interface WebPage {
   url: string;
+  favicon?: string;
   title: string;
   content: string;
   links: WebLink[];
@@ -25,11 +27,11 @@ interface WebArguments { url: string; }
 
 export function validateWebAddress(value: string): string {
   if (typeof value !== 'string' || value.length > 4096 || /[\s\u0000-\u001f\\]/.test(value)) {
-    throw new Error(t("网页地址必须是不含空白的 HTTP 或 HTTPS URL。"));
+    throw new ToolFailure('INVALID_ARGUMENTS', t("网页地址必须是不含空白的 HTTP 或 HTTPS URL。"), 'fix_arguments');
   }
   const match = /^https?:\/\/([^/?#]+)(?:[/?#]|$)/i.exec(value);
   if (!match || match[1].includes('@')) {
-    throw new Error(t("只能读取 HTTP 或 HTTPS 网页，地址不能包含用户名或密码。"));
+    throw new ToolFailure('INVALID_ARGUMENTS', t("只能读取 HTTP 或 HTTPS 网页，地址不能包含用户名或密码。"), 'fix_arguments');
   }
   return value;
 }
@@ -48,19 +50,47 @@ function plainText(value: string): string {
     .replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+function htmlAttribute(tag: string, name: string): string {
+  const match = new RegExp('\\s' + name + '\\s*=\\s*(?:"([^"]*)"|\'([^\']*)\'|([^\\s>]+))', 'i').exec(tag);
+  return decodeEntities(match?.[1] || match?.[2] || match?.[3] || '').trim();
+}
+
+// Metadata only: reading a page does not fetch its subresources.
+function pageFavicon(clean: string, address: string, transport: WebTransport): string {
+  const head = /<head\b[^>]*>([\s\S]*?)<\/head\s*>/i.exec(clean)?.[1] || clean;
+  let base = address;
+  const baseTag = /<base\b[^>]*>/i.exec(head)?.[0] || '';
+  try { base = validateWebAddress(transport.resolve(htmlAttribute(baseTag, 'href') || address, address)); }
+  catch (_) { /* An invalid optional base does not invalidate the page. */ }
+  let touchIcon = '';
+  for (const tag of head.match(/<link\b[^>]*>/gi) || []) {
+    const rel = htmlAttribute(tag, 'rel').toLowerCase().split(/\s+/);
+    const href = htmlAttribute(tag, 'href');
+    if (!href || (!rel.includes('icon') && !rel.includes('apple-touch-icon'))) { continue; }
+    try {
+      const icon = validateWebAddress(transport.resolve(href, base));
+      if (rel.includes('icon')) { return icon; }
+      if (!touchIcon) { touchIcon = icon; }
+    } catch (_) { /* Ignore non-web or malformed optional icons. */ }
+  }
+  return touchIcon || validateWebAddress(transport.resolve('/favicon.ico', address));
+}
+
 export function extractWebPage(document: WebDocument, transport: WebTransport): WebPage {
   const mime = document.contentType.split(';')[0].trim().toLowerCase();
   const html = mime === 'text/html' || mime === 'application/xhtml+xml';
   if (!html && !mime.startsWith('text/') && mime !== 'application/json' && mime !== 'application/xml') {
-    throw new Error(t("暂不支持此网页内容类型：") + (mime || t("未声明")) + t("。请使用 HTML 或文本链接。"));
+    throw new ToolFailure('UNSUPPORTED_CONTENT', t("暂不支持此网页内容类型：") + (mime || t("未声明")) + t("。请使用 HTML 或文本链接。"), 'use_supported_source');
   }
   let title = '';
+  let favicon: string | undefined = undefined;
   let content = document.body;
   const links: WebLink[] = [];
   let linksTruncated = false;
   if (html) {
     const clean = document.body.replace(/<!--[\s\S]*?-->/g, '')
       .replace(/<(script|style|template|svg|noscript)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
+    favicon = pageFavicon(clean, document.url, transport);
     title = plainText(/<title\b[^>]*>([\s\S]*?)<\/title\s*>/i.exec(clean)?.[1] || '').slice(0, 300);
     // Prefer the article/main region, but do not execute JavaScript or load subresources.
     content = /<(?:main|article)\b[^>]*>([\s\S]*?)<\/(?:main|article)\s*>/i.exec(clean)?.[1] ||
@@ -84,9 +114,9 @@ export function extractWebPage(document: WebDocument, transport: WebTransport): 
     }
     content = plainText(content.replace(/<(?:br\b[^>]*|\/(?:p|div|li|h[1-6]|tr|section|article|main))\s*>/gi, '\n'));
   }
-  if (content.includes('\u0000')) { throw new Error(t("网页返回了二进制内容或不支持的文本编码。")); }
-  if (content.trim().length === 0) { throw new Error(t("网页没有可读取的正文，可能需要登录或 JavaScript。")); }
-  return { url: document.url, title: title, content: content.slice(0, MAX_WEB_TEXT), links: links,
+  if (content.includes('\u0000')) { throw new ToolFailure('UNSUPPORTED_CONTENT', t("网页返回了二进制内容或不支持的文本编码。"), 'use_supported_source'); }
+  if (content.trim().length === 0) { throw new ToolFailure('CONTENT_UNAVAILABLE', t("网页没有可读取的正文，可能需要登录或 JavaScript。"), 'use_supported_source'); }
+  return { url: document.url, favicon: favicon, title: title, content: content.slice(0, MAX_WEB_TEXT), links: links,
     truncated: content.length > MAX_WEB_TEXT, linksTruncated: linksTruncated, trust: 'untrusted' };
 }
 
@@ -104,15 +134,18 @@ export class WebTools implements AgentTools {
     } }];
   }
 
-  async execute(call: ToolCall, cancellation: Cancellation): Promise<string> {
+  async execute(call: ToolCall, cancellation: Cancellation, context?: ToolInvocationContext): Promise<string> {
     cancellation.check();
-    if (call.function.name !== 'read_web') { throw new Error(t("不支持的网页工具。")); }
-    const args = JSON.parse(call.function.arguments) as WebArguments;
+    if (call.function.name !== 'read_web') { throw new ToolFailure('TOOL_UNAVAILABLE', t("不支持的网页工具。"), 'check_available_tools'); }
+    const args = parseToolArguments(call.function.arguments) as WebArguments;
     if (!args || Array.isArray(args) || typeof args.url !== 'string' || Object.keys(args).some((key: string) => key !== 'url')) {
-      throw new Error(t("read_web 参数必须仅包含 url。"));
+      throw new ToolFailure('INVALID_ARGUMENTS', t("read_web 参数必须仅包含 url。"), 'fix_arguments');
     }
     const document = await this.transport.get(validateWebAddress(args.url), cancellation);
     cancellation.check();
-    return JSON.stringify(extractWebPage(document, this.transport));
+    const page = extractWebPage(document, this.transport);
+    if (context) { context.execution.websiteIcon = page.favicon; }
+    page.favicon = undefined;
+    return JSON.stringify(page);
   }
 }

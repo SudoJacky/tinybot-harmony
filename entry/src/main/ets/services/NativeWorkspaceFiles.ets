@@ -1,16 +1,26 @@
 import { t } from '../model/I18n';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
+import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { Cancellation } from './Cancellation';
 import { workspaceRelativePath } from './WorkspaceTools';
 import { readUtf8File } from './TextFiles';
+import { TextEdit, applyTextEdits, validateEdits } from '../model/WorkspaceEdit';
+import { withFileMutation } from './FileMutationQueue';
+import { ToolFailure } from '../model/ToolFailure';
 
-import { WorkspaceFiles, WorkspaceEntry, WorkspaceListing, WorkspaceText, WorkspaceWrite, FileBaseline } from './WorkspaceFiles';
+import { WorkspaceFiles, WorkspaceEntry, WorkspaceListing, WorkspaceText, WorkspaceWrite, WorkspaceWriteGuard, FileBaseline } from './WorkspaceFiles';
+
+async function contentVersion(content: string): Promise<string> {
+  const hash = cryptoFramework.createMd('SHA256');
+  // The device encoder returns undefined for an empty string.
+  if (content.length > 0) { await hash.update({ data: new util.TextEncoder().encodeInto(content) }); }
+  return new util.Base64Helper().encodeToStringSync((await hash.digest()).data);
+}
 
 export class NativeWorkspaceFiles implements WorkspaceFiles {
   private root: string;
-  private restoring: boolean = false;
 
   constructor(workspaceDir: string) {
     this.root = workspaceDir;
@@ -23,18 +33,20 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     return absolute;
   }
 
-  async list(path: string, cancellation: Cancellation): Promise<WorkspaceListing> {
+  async list(path: string, cancellation: Cancellation, offset: number = 0): Promise<WorkspaceListing> {
+    if (!Number.isSafeInteger(offset) || offset < 0) { throw new ToolFailure('FS_INVALID_ARGUMENTS', 'Invalid directory offset.', 'fix_arguments', { path: path }); }
     const absolute = await this.resolve(path, false, cancellation);
     await this.requireDirectory(absolute);
     cancellation.check();
-    const names = await fs.listFile(absolute, { recursion: false, listNum: 201 });
+    const names = (await fs.listFile(absolute, { recursion: false })).filter((name: string) => !name.startsWith('.tinybot-')).sort();
     const entries: WorkspaceEntry[] = [];
-    for (const name of names.slice(0, 200).sort().filter((name) => !name.startsWith('.tinybot-'))) {
+    for (const name of names.slice(offset, offset + 200)) {
       cancellation.check();
       const stat = await fs.lstat(absolute + '/' + name);
       entries.push({ name: name, kind: stat.isSymbolicLink() ? 'symlink' : stat.isDirectory() ? 'directory' : 'file' });
     }
-    return { path: path || '.', entries: entries, truncated: names.length > 200 };
+    return { path: path || '.', entries: entries, truncated: names.length > offset + 200,
+      nextOffset: names.length > offset + 200 ? offset + 200 : undefined };
   }
 
   async read(path: string, cancellation: Cancellation): Promise<WorkspaceText> {
@@ -43,24 +55,45 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     const file = await fs.open(absolute, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
     try {
       const content = await readUtf8File(file.fd, cancellation);
-      return { path: path, content: content };
+      return { path: path, content: content, version: await contentVersion(content) };
     } finally {
       await fs.close(file);
     }
   }
 
-  async write(path: string, content: string, cancellation: Cancellation): Promise<WorkspaceWrite> {
-    // Some device SDKs return undefined for encodeInto(''), despite its declared return type.
-    const bytes = content.length === 0 ? new Uint8Array(0) : new util.TextEncoder().encodeInto(content);
-    if (content.includes('\u0000')) {
-      throw new Error(t('文本不能包含空字符。'));
-    }
+  async write(path: string, content: string, cancellation: Cancellation, guard?: WorkspaceWriteGuard): Promise<WorkspaceWrite> {
+    workspaceRelativePath(path, false);
+    return withFileMutation(this.root + '/' + path, () => this.mutate(path, content, [], cancellation, guard));
+  }
+
+  async edit(path: string, edits: TextEdit[], version: string, cancellation: Cancellation): Promise<WorkspaceWrite> {
+    workspaceRelativePath(path, false);
+    validateEdits(edits);
+    return withFileMutation(this.root + '/' + path, () => this.mutate(path, '', edits, cancellation, { version: version }));
+  }
+
+  private async mutate(path: string, content: string, edits: TextEdit[], cancellation: Cancellation,
+    guard?: WorkspaceWriteGuard, capture: boolean = true): Promise<WorkspaceWrite> {
+    cancellation.check();
     const absolute = await this.resolve(path, true, cancellation);
     const existing = await this.optionalStat(absolute);
     if (existing && (!existing.isFile() || existing.isSymbolicLink())) {
       throw new Error(t("只能写入普通文件，不能覆盖目录或符号链接。"));
     }
-    if (!this.restoring) { await this.capture(path, existing !== undefined, cancellation); }
+    if (guard && guard.version === null && existing) { throw new ToolFailure('FS_NOT_OBSERVED', t('覆盖已有文件前，请先用 read_file 或 read_file_lines 读取。'), 'read_file', { path: path }); }
+    const original = existing ? await this.read(path, cancellation) : undefined;
+    if (guard && guard.version !== null && (!original || original.version !== guard.version)) {
+      throw new ToolFailure('FS_STALE_VERSION', t('文件自上次读取后已变化，请重新读取再修改。'), 'read_file', { path: path });
+    }
+    const before = original ? original.content : '';
+    if (edits.length > 0) { content = applyTextEdits(before, edits); }
+    // Some device SDKs return undefined for encodeInto(''), despite its declared return type.
+    const bytes = content.length === 0 ? new Uint8Array(0) : new util.TextEncoder().encodeInto(content);
+    if (content.includes('\u0000')) {
+      throw new Error(t('文本不能包含空字符。'));
+    }
+    const version = await contentVersion(content);
+    if (capture) { await this.capture(path, existing !== undefined, cancellation, before); }
     cancellation.check();
     const parent = absolute.slice(0, absolute.lastIndexOf('/'));
     const temporary = parent + '/.tinybot-' + util.generateRandomUUID() + '.tmp';
@@ -84,7 +117,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
       cancellation.check();
       await fs.rename(temporary, absolute);
       committed = true;
-      return { path: path, bytes: bytes.byteLength, written: true };
+      return { path: path, bytes: bytes.byteLength, written: true, before: before, after: content, created: !existing, version: version };
     } catch (error) {
       if (!committed) {
         try {
@@ -108,12 +141,12 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     return item;
   }
 
-  private async capture(path: string, existed: boolean, cancellation: Cancellation): Promise<void> {
+  private async capture(path: string, existed: boolean, cancellation: Cancellation, content: string): Promise<void> {
     const directory = this.root + '/.tinybot-review';
-    if (!await fs.access(directory)) { await fs.mkdir(directory); }
+    if (!await fs.access(directory)) { await fs.mkdir(directory, true); }
     await this.requireDirectory(directory);
     if (await this.baseline(path)) { return; }
-    const content = existed ? (await this.read(path, cancellation)).content : '';
+    cancellation.check();
     const text = JSON.stringify({ path: path, existed: existed, content: content } as FileBaseline);
     const temporary = directory + '/pending-' + util.generateRandomUUID();
     const file = await fs.open(temporary, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.NOFOLLOW);
@@ -129,20 +162,27 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
   }
 
   async accept(path: string): Promise<void> {
+    workspaceRelativePath(path, false);
+    return withFileMutation(this.root + '/' + path, () => this.acceptUnlocked(path));
+  }
+
+  private async acceptUnlocked(path: string): Promise<void> {
     if (await this.baseline(path)) { await fs.unlink(this.baselinePath(path)); }
   }
 
   async restore(path: string, expected: string): Promise<void> {
+    workspaceRelativePath(path, false);
+    return withFileMutation(this.root + '/' + path, () => this.restoreUnlocked(path, expected));
+  }
+
+  private async restoreUnlocked(path: string, expected: string): Promise<void> {
     const baseline = await this.baseline(path);
     if (!baseline) { throw new Error(t("没有保存的修改基线。")); }
     const current = await this.read(path, new Cancellation());
     if (current.content !== expected) { throw new Error(t("文件已变化，请重新打开并检查。")); }
-    this.restoring = true;
-    try {
-      if (baseline.existed) { await this.write(path, baseline.content, new Cancellation()); }
-      else { await fs.unlink(await this.checkedPath(path)); }
-      await this.accept(path);
-    } finally { this.restoring = false; }
+    if (baseline.existed) { await this.mutate(path, baseline.content, [], new Cancellation(), { version: current.version }, false); }
+    else { await fs.unlink(await this.checkedPath(path)); }
+    await this.acceptUnlocked(path);
   }
 
   // Every component is checked: a nested symlink must never widen the workspace.
@@ -161,7 +201,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
       current += '/' + parts[index];
       let stat = await this.optionalStat(current);
       if (!stat && createParents && index < parts.length - 1) {
-        await fs.mkdir(current);
+        await fs.mkdir(current, true);
         stat = await fs.lstat(current);
       }
       if (stat?.isSymbolicLink()) {

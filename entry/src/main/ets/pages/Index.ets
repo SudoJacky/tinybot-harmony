@@ -7,6 +7,7 @@ import { BackupPanel } from '../views/BackupPanel';
 import { UsagePanel } from '../views/UsagePanel';
 import { BranchesPanel } from '../views/BranchesPanel';
 import { WorkspacePanel } from '../views/WorkspacePanel';
+import { SearchSettingsPanel } from '../views/SearchSettingsPanel';
 import { ToolApproval } from '../services/ToolApproval';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -222,13 +223,16 @@ struct Index {
     } else if (name === 'productivity') {
       NavDestination() { ProductivityPanel({ app: this.app, tab: (param as string) || 'memory', onUse: () => { this.paths.clear(); } }) }
         .title(t("记忆与工具")).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'search-settings') {
+      NavDestination() { SearchSettingsPanel({ app: this.app }) }.title(t('联网搜索')).backgroundColor($r('app.color.page_background'))
     } else if (name === 'files') {
-      WorkspacePanel({ app: this.app })
+      WorkspacePanel({ app: this.app, initialPath: (param as string) || '' })
     } else if (name === 'settings') {
       NavDestination() {
         SettingsPanel({ app: this.app, settings: this.app.settings,
           onUsage: () => { this.paths.pushPath({ name: 'usage' }); },
           onModels: () => { this.paths.pushPath({ name: 'model-settings' }); },
+          onSearch: () => { this.paths.pushPath({ name: 'search-settings' }); },
           onUiDemo: () => { this.paths.pushPath({ name: 'ui-demo' }); },
           onBackup: () => { this.paths.pushPath({ name: 'backup' }); },
           onSupport: (page: string) => this.openSupport(page),
@@ -308,7 +312,8 @@ struct Index {
       Button({ type: ButtonType.Circle, stateEffect: true }) {
         SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(20).fontColor([$r('app.color.text_primary')])
       }.id('chat-more').width(40).height(44).backgroundColor(Color.Transparent).accessibilityText(t("更多操作"))
-      .enabled(this.app.ready).bindMenu(this.moreMenu)
+      .enabled(this.app.ready).bindMenu(this.moreMenu, {
+        mask: { color: $r('app.color.scrim'), backgroundBlurStyle: BlurStyle.NONE } })
       IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t("新建对话"), compId: 'new-chat',
         disabled: !this.app.ready || this.app.busy || this.app.saveError.length > 0,
         onTap: () => { this.app.newThread(); } })
@@ -363,7 +368,8 @@ struct Index {
                 onHistoryDragUpdate: (event: GestureEvent) => this.updateDrawerDrag(event),
                 onHistoryDragEnd: (event: GestureEvent) => this.endDrawerDrag(event),
                 onHistoryDragCancel: () => this.cancelDrawerDrag(),
-                onFiles: () => this.openFiles(), onTools: (tab: string) => this.openTools(tab) })
+                onFiles: () => this.openFiles(), onOpenFile: (path: string) => this.paths.pushPath({ name: 'files', param: path }),
+                onTools: (tab: string) => this.openTools(tab) })
               .layoutWeight(1)
           } else {
             Column({ space: Space.lg }) {

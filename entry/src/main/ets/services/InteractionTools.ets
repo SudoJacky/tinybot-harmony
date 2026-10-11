@@ -1,3 +1,4 @@
+import { ToolFailure, parseToolArguments } from '../model/ToolFailure';
 import { t } from '../model/I18n';
 import { ToolCall, ToolDefinition } from '../model/Agent';
 import { parseDataView, parseForm, parsePlan } from '../model/RichArtifacts';
@@ -16,12 +17,12 @@ export class InteractionTools implements AgentTools {
     ];
   }
   async execute(call: ToolCall, cancellation: Cancellation): Promise<string> {
-    cancellation.check(); const args = JSON.parse(call.function.arguments) as Payload;
-    if (!args || typeof args.data !== 'string') { throw new Error(t("需要 data JSON 字符串。")); }
+    cancellation.check(); const args = parseToolArguments(call.function.arguments) as Payload;
+    if (!args || typeof args.data !== 'string') { throw new ToolFailure('INVALID_ARGUMENTS', t("需要 data JSON 字符串。"), 'fix_arguments'); }
     if (call.function.name === 'request_user_input') { return this.approval.ask(parseForm(args.data), cancellation); }
     if (call.function.name === 'update_plan') { return JSON.stringify(parsePlan(args.data)); }
     if (call.function.name === 'publish_data_view') { return JSON.stringify(parseDataView(args.data)); }
-    throw new Error(t("未知交互工具。"));
+    throw new ToolFailure('TOOL_UNAVAILABLE', t("未知交互工具。"), 'check_available_tools');
   }
   private definition(name: string, description: string): ToolDefinition {
     const snippets: Record<string, string> = { 'request_user_input': '收集必要信息', 'update_plan': '展示任务进展', 'publish_data_view': '展示真实数据' };

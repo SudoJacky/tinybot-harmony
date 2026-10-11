@@ -142,7 +142,8 @@ export struct SwipeRow {
       this.rowWidth = width;
     })
     .onVisibleAreaChange([0], (visible: boolean) => { if (!visible) { this.stop(); this.reveal = 0; this.dragging = false; } })
-    .bindContextMenu(this.actionsMenu, ResponseType.LongPress)
+    .bindContextMenu(this.actionsMenu, ResponseType.LongPress, {
+      mask: { color: $r('app.color.scrim'), backgroundBlurStyle: BlurStyle.NONE } })
     .priorityGesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Horizontal, distance: 12 })
       .onActionStart((event: GestureEvent) => this.start(event))
       .onActionUpdate((event: GestureEvent) => this.move(event))

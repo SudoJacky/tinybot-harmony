@@ -46,6 +46,12 @@ test('search groups duplicate paths while preserving matches and skipped files',
   assert.equal(result.sections[0].rows[1].value,'three'); assert.ok(flat(result.notices).includes('binary'));
   assert.ok(flat(render('search_file_content',{}, {matches:[]})).includes('没有匹配项'));
 });
+test('search contexts and name discovery are visible without reading live files', () => {
+  const result=render('search_file_content',{path:'.',query:'TODO',context:1},{matches:[{path:'a.ts',line:5,column:12,text:'TODO',before:['before'],after:['after']}],truncated:true,nextCursor:'search-1'});
+  assert.equal(result.sections[0].rows[0].value,'before\nTODO\nafter');assert.match(result.sections[0].rows[0].label,/:12/);
+  const names=render('find_files',{path:'.',glob:'*.md'},{paths:['a.md','sub/b.md'],truncated:false});
+  assert.deepEqual(Array.from(names.sections[0].rows,r=>r.label),['a.md','sub/b.md']);
+});
 test('directories and plans retain empty and status distinctions', () => {
   const listing=render('list_files',{}, {entries:[{name:'src',kind:'directory'},{name:'a.txt',kind:'file'},{name:'link',kind:'symlink'}]});
   assert.deepEqual(Array.from(listing.sections[0].rows,row=>row.value),['文件夹','文件','符号链接']);
@@ -103,5 +109,55 @@ test('paged unicode and large row values are lossless with bounded pages', () =>
   assert.ok(rowPages.every(page=>page.rows.length<=30));
   const restored=new Map();for(const page of rowPages)for(const row of page.rows)restored.set(row.label,(restored.get(row.label)||'')+row.value);
   for(const row of rows)assert.equal(restored.get(row.label),row.value);
+});
+test('web favicons respect final URL, HTML base, rel tokens and optional invalid metadata', () => {
+  const { extractWebPage } = load(path.join(root, 'services/WebTools'));
+  const { toolFavicon } = load(path.join(root, 'model/ToolPresentation'));
+  const transport = { resolve: (reference, base) => new URL(reference, base).href,
+    get: () => { throw Error('Icon discovery must not fetch subresources'); } };
+  const page = (head, mime = 'text/html') => extractWebPage({url:'https://site.test/docs/page',contentType:mime,
+    body:`<html><head>${head}</head><body><main>Body</main></body></html>`}, transport);
+  const declared = page('<base href="https://cdn.test/assets/"><link href="touch.png" rel="apple-touch-icon">' +
+    '<!-- <link rel="icon" href="wrong.png"> --><script>"<link rel=icon href=wrong.png>"</script>' +
+    '<link data-href="wrong.png" href="logo.svg?a=1&amp;b=2" rel="SHORTCUT ICON">');
+  assert.equal(declared.favicon, 'https://cdn.test/assets/logo.svg?a=1&b=2');
+  assert.equal(declared.content, 'Body');
+  assert.equal(page('<link rel="not-icon" href="bad.png">').favicon,'https://site.test/favicon.ico');
+  assert.equal(page('<link rel=apple-touch-icon href=/touch.png>').favicon,'https://site.test/touch.png');
+  assert.equal(page('<base href="file:///bad"><link rel=icon href="javascript:bad()">' +
+    '<link rel=icon href="https://user:pass@site.test/private"><link rel=icon href="/good.svg">').favicon,'https://site.test/good.svg');
+  assert.equal(page('', 'text/plain').favicon, undefined);
+  const output = declared.favicon;
+  assert.equal(toolFavicon('read_web',output,'complete',true),declared.favicon);
+  assert.equal(toolFavicon('read_web',output,'complete',false),'');
+  assert.equal(toolFavicon('read_web',output,'failed',true),'');
+  assert.equal(toolFavicon('read_file',output,'complete',true),'');
+  for (const receipt of [undefined, 42, 'file:///x', 'https://user:pass@site.test/x']) {
+    assert.equal(toolFavicon('read_web',receipt,'complete',true),'');
+  }
+});
+test('file diff preserves unchanged lines, real line numbers, terminal newline changes and separate hunks', () => {
+  const { fileDiff, fileDiffText } = load(path.join(root,'model/FileDiff'));
+  const { toolStat } = load(path.join(root,'model/ToolPresentation'));
+  const before='title\nkeep\nold\nend\n',after='title\nkeep\nnew\nextra\nend\n';
+  const diff=fileDiff('note.md',before,after);
+  assert.equal(diff.added,2);assert.equal(diff.removed,1);
+  assert.deepEqual(Array.from(diff.rows,r=>[r.kind,r.oldLine,r.newLine]),[
+    ['context',1,1],['context',2,2],['removed',3,0],['added',0,3],['added',0,4],['context',4,5]]);
+  assert.equal(toolStat('edit_file','{}','{}','complete',diff),'+2 −1');
+  assert.equal(toolStat('edit_file','{}','{}','failed',diff),'');
+  const created=fileDiff('new.txt','','a\nb\n',true);
+  assert.equal(created.added,2,'terminal newline is not an extra empty line');assert.equal(created.removed,0);
+  assert.equal(fileDiff('empty','','',true).created,true);
+  assert.equal(fileDiff('same',before,before).rows.length,0);
+  const newline=fileDiff('line','text','text\n');
+  assert.equal(newline.added,1);assert.equal(newline.removed,1);assert.ok(fileDiffText(newline).includes('No newline at end of file'));
+  const many=Array.from({length:80},(_,i)=>`line ${i}\n`);
+  const edited=many.slice();edited[10]='A\n';edited[65]='B\n';
+  const hunks=fileDiff('many',many.join(''),edited.join(''));
+  assert.equal(hunks.added,2);assert.equal(hunks.removed,2);assert.ok(hunks.rows.some(r=>r.kind==='gap'));
+  assert.deepEqual(Array.from(hunks.rows.filter(r=>r.kind==='added'),r=>r.newLine),[11,66]);
+  const replaced=fileDiff('big','old\n'.repeat(2000),'new\n'.repeat(2000));
+  assert.equal(replaced.added,2000);assert.equal(replaced.removed,2000);
 });
 if(failures)process.exitCode=1;

@@ -103,14 +103,16 @@ struct ThreadRow {
           Button({ type: ButtonType.Circle }) {
             SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
           }.width(32).height(32).backgroundColor(Color.Transparent).accessibilityText(t("对话管理"))
-          .enabled(!this.locked()).bindMenu(this.actions)
+          .enabled(!this.locked()).bindMenu(this.actions, {
+            mask: { color: $r('app.color.scrim'), backgroundBlurStyle: BlurStyle.NONE } })
         }
         .width('100%').padding({ left: Space.md, right: 4, top: 10, bottom: 10 })
         .onClick(async () => {
           if (this.locked()) { return; }
           if (this.query.trim() ? await this.app.openMessage(this.thread.id, this.matchId(), this.query.trim()) : await this.app.selectThread(this.thread.id)) { this.onSelected(); }
         })
-        .bindContextMenu(this.actions, ResponseType.LongPress)
+        .bindContextMenu(this.actions, ResponseType.LongPress, {
+          mask: { color: $r('app.color.scrim'), backgroundBlurStyle: BlurStyle.NONE } })
       }
     }
     .width('100%').borderRadius(Radius.md)

@@ -4,7 +4,7 @@ import { REASONING_EFFORTS } from './ReasoningEffort';
 import { ThreadReference, referenceContext, validateThreadReferences } from './ThreadReferences';
 import { TeamRun, recoverTeams } from './Team';
 import { Attachment, ProductivityData, validateAttachments, validateProductivity } from './Productivity';
-import { AgentStep, ModelMessage, interruptTools, stepMessages, validateSteps } from './Agent';
+import { AgentStep, ModelMessage, interruptTools, migrateWebIcons, stepMessages, validateSteps } from './Agent';
 import { builtinProviderInfos, DEFAULT_PROVIDER_ID, LEGACY_PROVIDER_ID } from './Provider';
 import { contextSettings, validateCompaction } from './ConversationContext';
 import { ModelReference, ProviderProfile, validateProfile, validateReference } from './ProviderProfiles';
@@ -131,7 +131,7 @@ export function requestHistory(messages: MessageData[], systemPrompt: string): M
     }
     const answer = messages[index + 1];
     if (!answer) {
-      result.push({ role: 'user', content: (message.skillPrompt ?? message.content) + referenceContext(message.references), attachments: message.attachments });
+      result.push({ role: 'user', content: (message.skillPrompt ?? message.content) + referenceContext(message.references, message.id), attachments: message.attachments });
     } else if (answer.role === 'assistant') {
       const steps = answer.steps || [];
       const hasTools = steps.some((step: AgentStep) => step.tools.length > 0);
@@ -139,7 +139,7 @@ export function requestHistory(messages: MessageData[], systemPrompt: string): M
       if (answer.status !== 'complete' && !hasTools && !hasSteering) {
         continue;
       }
-      result.push({ role: 'user', content: (message.skillPrompt ?? message.content) + referenceContext(message.references), attachments: message.attachments });
+      result.push({ role: 'user', content: (message.skillPrompt ?? message.content) + referenceContext(message.references, message.id), attachments: message.attachments });
       if (steps.length === 0) {
         result.push({ role: 'assistant', content: answer.content });
       } else {
@@ -260,6 +260,7 @@ export function parseAppData(text: string): AppData {
       if (message.modelRef !== undefined) { validateReference(message.modelRef); }
       if (message.steps !== undefined) {
         validateSteps(message.steps);
+        migrateWebIcons(message.steps);
         if (message.role !== 'assistant' && message.steps.length > 0) {
           throw new Error(t("本地工具记录损坏，原文件已保留。"));
         }

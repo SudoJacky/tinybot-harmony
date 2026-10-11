@@ -222,7 +222,8 @@ export struct ProviderEditorPanel {
         Row() {
           Blank()
           Button(t('更多操作')).id('provider-more-actions').attributeModifier(Btn.text).height(44)
-            .enabled(!this.locked()).bindMenu(this.serviceActions)
+            .enabled(!this.locked()).bindMenu(this.serviceActions, {
+              mask: { color: $r('app.color.scrim'), backgroundBlurStyle: BlurStyle.NONE } })
         }.width('100%').padding({ left: Space.page, right: Space.page })
       }
       Scroll(this.scroller) {

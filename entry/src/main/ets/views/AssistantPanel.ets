@@ -86,7 +86,8 @@ export struct ModelSettingsPanel {
     .width('100%').constraintSize({ minHeight: 56 }).padding({ left: Space.lg, right: Space.lg, top: 10, bottom: 10 })
     .opacity(enabled ? 1 : 0.4).enabled(enabled)
     .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
-    .bindMenu(this.choiceMenu(options, selected, onSelect))
+    .bindMenu(this.choiceMenu(options, selected, onSelect), {
+      mask: { color: $r('app.color.scrim'), backgroundBlurStyle: BlurStyle.NONE } })
   }
 
   @Builder

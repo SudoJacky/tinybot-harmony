@@ -1,5 +1,7 @@
 {
   "color": [
+    { "name": "diff_added_background", "value": "#E5F2E7" },
+    { "name": "diff_removed_background", "value": "#FBE8E5" },
     { "name": "start_window_background", "value": "#F5F6F2" },
     { "name": "page_background", "value": "#F5F6F2" },
     { "name": "surface", "value": "#FFFFFF" },

@@ -3,6 +3,11 @@ import { t } from '../../model/I18n';
 export interface ProviderErrorData { code?: string; type?: string; message?: string; }
 interface ErrorEnvelope { error?: ProviderErrorData; }
 
+export class TransientProviderError extends Error {
+  code: string;
+  constructor(message: string, code: string) { super(message); this.name = 'TransientProviderError'; this.code = code; }
+}
+
 export class ContextOverflowError extends Error {
   constructor() {
     super(t('模型服务报告输入超过上下文窗口。'));
@@ -25,5 +30,7 @@ export function httpProviderError(status: number, body: string): Error {
   catch (_) { /* Non-JSON HTTP errors still report the status, never an invented cause. */ }
   if ([400, 413, 422].includes(status) && isContextOverflow(envelope?.error)) { return new ContextOverflowError(); }
   // Never expose upstream message bodies: some services echo prompts or credentials.
-  return new Error(t('模型服务返回 HTTP {0}，请检查地址、API Key、模型名称和额度。', [status]));
+  const message = t('模型服务返回 HTTP {0}，请检查地址、API Key、模型名称和额度。', [status]);
+  const quota = ['insufficient_quota', 'quota_exceeded', 'billing_hard_limit_reached'].includes(envelope?.error?.code || '');
+  return !quota && [408, 429, 500, 502, 503, 504].includes(status) ? new TransientProviderError(message, 'http_' + status) : new Error(message);
 }

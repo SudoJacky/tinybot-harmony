@@ -1,12 +1,14 @@
 import { t } from './I18n';
+import { FileDiff } from './FileDiff';
 
 export function toolTitle(name: string): string {
   const titles: Record<string, string> = {
+    'search_web': t('联网搜索'), 'present_files': t('交付文件'), 'read_reference': t('补读会话引用'),
     'team_recruit': t('招募员工'), 'team_wait': t('等待员工交接'), 'team_inspect': t('查看团队'), 'team_read_result': t('读取交接结果'),
     'team_control': t('调整团队执行'), 'team_resume': t('继续团队'), 'team_complete_task': t('提交交接'),
     'team_list_messages': t('查看团队交接'), 'team_read_message': t('读取交接'),
     'read_web': t('读取网页'), 'read_skill': t('读取 Skill'), 'list_files': t('列出文件'), 'read_file': t('读取文件'),
-    'read_file_lines': t('读取文件片段'), 'read_attachment': t('读取附件'), 'search_file_content': t('搜索文件内容'),
+    'find_files': t('查找文件'), 'read_file_lines': t('读取文件片段'), 'read_attachment': t('读取附件'), 'search_file_content': t('搜索文件内容'),
     'write_file': t('写入文件'), 'edit_file': t('编辑文件'), 'generate_image': t('生成图片'),
     'mcp_call': t('调用远程工具'), 'mcp_list_tools': t('查看远程工具'), 'mcp_search_tools': t('搜索远程工具'),
     'execute_code': t('执行代码'), 'orchestrate': t('编排工具'), 'publish_data_view': t('生成图表'),
@@ -38,6 +40,14 @@ function data(value: string): PreviewData {
   try { const parsed = JSON.parse(value) as PreviewData; return parsed && typeof parsed === 'object' ? parsed : {}; }
   catch (_) { return {}; }
 }
+
+export function toolFavicon(name: string, icon: string | undefined, status: string, webEnabled: boolean): string {
+  if (name !== 'read_web' || status !== 'complete' || !webEnabled) { return ''; }
+  // Historical receipts without icon metadata keep their generic icon; never re-read a page for decoration.
+  if (typeof icon !== 'string' || icon.length > 4096 || /[\s\u0000-\u001f\\]/.test(icon)) { return ''; }
+  const match = /^https?:\/\/([^/?#]+)(?:[/?#]|$)/i.exec(icon);
+  return match && !match[1].includes('@') ? icon : '';
+}
 export function toolPreview(name: string, argumentsText: string, output: string, status: string): ToolPreview {
   const args = data(argumentsText); const result = data(output);
   const preview: ToolPreview = { path: typeof args.path === 'string' ? args.path : typeof args.url === 'string' ? args.url : '',
@@ -62,8 +72,9 @@ export function toolPreview(name: string, argumentsText: string, output: string,
 function lineCount(value: string): number { return value.length ? value.split('\n').length : 0; }
 
 // A glanceable result next to the tool name, so most rows never need opening.
-export function toolStat(name: string, argumentsText: string, output: string, status: string): string {
+export function toolStat(name: string, argumentsText: string, output: string, status: string, diff?: FileDiff): string {
   if (status !== 'complete') { return ''; }
+  if (diff && ['edit_file', 'write_file'].includes(name)) { return '+' + diff.added + ' −' + diff.removed; }
   const args = data(argumentsText); const result = data(output);
   if (name === 'edit_file' && typeof args.oldText === 'string' && typeof args.newText === 'string') {
     return '+' + lineCount(args.newText) + ' −' + lineCount(args.oldText);
