@@ -1,0 +1,6 @@
+{
+  "layered-image": {
+    "background": "$media:tinybot_icon_background",
+    "foreground": "$media:tinybot_icon_foreground"
+  }
+}

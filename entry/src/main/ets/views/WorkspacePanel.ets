@@ -23,6 +23,7 @@ function pad(value: number): string { return value < 10 ? '0' + value : value.to
 
 @Component
 export struct WorkspacePanel {
+  @Prop initialPath: string = '';
   @ObjectLink app: ChatViewModel;
   @State private directory: string = '';
   @State private swipeRow: string = '';
@@ -49,6 +50,11 @@ export struct WorkspacePanel {
   aboutToAppear(): void {
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     this.files = new NativeWorkspaceFiles(new WorkspaceStore(context.getApplicationContext().filesDir).pathFor(this.app.active.id));
+    if (this.initialPath) {
+      const slash = this.initialPath.lastIndexOf('/');
+      this.directory = slash < 0 ? '' : this.initialPath.slice(0, slash);
+      this.open({ name: this.initialPath.slice(slash + 1), kind: 'file' });
+    }
     this.refresh();
     systemInsets(this.getUIContext()).then((insets: number[]) => { this.insetTop = insets[0]; this.insetBottom = insets[1]; });
   }

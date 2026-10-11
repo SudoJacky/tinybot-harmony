@@ -1,7 +1,8 @@
 import { Attachment } from '../model/Productivity';
+import { FileDiff } from '../model/FileDiff';
 import { MemoryReviewRecord } from '../model/MemoryMaintenance';
 import { ThreadReference } from '../model/ThreadReferences';
-import { AgentStep, ToolCall, ToolExecution } from '../model/Agent';
+import { AgentStep, ToolCall, ToolExecution, RequestRetry } from '../model/Agent';
 import { CompactionData, MessageData, ThreadData } from '../model/Conversation';
 import { ModelReference } from '../model/ProviderProfiles';
 import { PendingInput } from '../model/PendingInput';
@@ -12,15 +13,18 @@ import { PlanProgressViewModel } from './PlanProgressViewModel';
 
 @Observed
 export class ToolExecutionViewModel implements ToolExecution {
+  fileDiff?: FileDiff;
+  websiteIcon?: string;
   call: ToolCall;
   status: string;
   output: string;
   children: ToolExecution[] = [];
-  constructor(data: ToolExecution) { this.call = data.call; this.status = data.status; this.output = data.output; this.children = data.children?.slice() || []; }
+  constructor(data: ToolExecution) { this.fileDiff = data.fileDiff; this.websiteIcon = data.websiteIcon; this.call = data.call; this.status = data.status; this.output = data.output; this.children = data.children?.slice() || []; }
 }
 
 @Observed
 export class AgentStepViewModel implements AgentStep {
+  retries?: RequestRetry[];
   requestError?: string;
   uiValidation?: string;
   content: string = '';
@@ -29,12 +33,13 @@ export class AgentStepViewModel implements AgentStep {
   tools: ToolExecutionViewModel[] = [];
   constructor(data: AgentStep) { this.update(data); }
   update(data: AgentStep): void {
+    this.retries = data.retries?.map((retry): RequestRetry => ({ attempt: retry.attempt, delayMs: retry.delayMs, code: retry.code, waiting: retry.waiting }));
     this.requestError = data.requestError;
     this.uiValidation = data.uiValidation;
     this.content = data.content; this.reasoningContent = data.reasoningContent || ''; this.steering = data.steering;
     this.tools = data.tools.map((tool: ToolExecution, index: number) => {
       const existing = this.tools[index];
-      if (existing && existing.call.id === tool.call.id) { existing.status = tool.status; existing.output = tool.output; existing.children = tool.children?.slice() || []; return existing; }
+      if (existing && existing.call.id === tool.call.id) { existing.status = tool.status; existing.output = tool.output; existing.fileDiff = tool.fileDiff; existing.websiteIcon = tool.websiteIcon; existing.children = tool.children?.slice() || []; return existing; }
       return new ToolExecutionViewModel(tool);
     });
   }

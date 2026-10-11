@@ -1,4 +1,4 @@
-import { WorkspaceEntry, WorkspaceFiles, WorkspaceListing, WorkspaceText, WorkspaceWrite } from '../main/ets/services/WorkspaceFiles';
+import { WorkspaceEntry, WorkspaceFiles, WorkspaceListing, WorkspaceText, WorkspaceWrite, WorkspaceWriteGuard } from '../main/ets/services/WorkspaceFiles';
 import { describe, expect, it } from '@ohos/hypium';
 import { AgentStep, AgentTurn, ModelTurn, ToolCall, ToolDefinition, ModelMessage, validateSteps } from '../main/ets/model/Agent';
 import { emptyData, parseAppData, requestHistory } from '../main/ets/model/Conversation';
@@ -77,6 +77,7 @@ class ScriptModel implements ModelSession {
 }
 
 class MemoryFiles implements WorkspaceFiles {
+  async edit(): Promise<WorkspaceWrite> { throw new Error('Unexpected edit'); }
   values: Map<string, string> = new Map<string, string>();
   calls: string[] = [];
   afterWrite?: () => void;
@@ -92,15 +93,16 @@ class MemoryFiles implements WorkspaceFiles {
     this.calls.push('read:' + path);
     const value = this.values.get(path);
     if (value === undefined) { throw new Error('file missing'); }
-    return { path: path, content: value };
+    return { path: path, content: value, version: value };
   }
 
-  async write(path: string, content: string, cancellation: Cancellation): Promise<WorkspaceWrite> {
+  async write(path: string, content: string, cancellation: Cancellation, guard?: WorkspaceWriteGuard): Promise<WorkspaceWrite> {
     cancellation.check();
+    if (guard && (this.values.get(path) ?? null) !== guard.version) { throw new Error('Stale file'); }
     this.calls.push('write:' + path);
     this.values.set(path, content);
     this.afterWrite?.();
-    return { path: path, bytes: content.length, written: true };
+    return { path: path, bytes: content.length, written: true, version: content };
   }
 }
 

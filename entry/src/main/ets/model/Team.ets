@@ -1,5 +1,5 @@
 import { t } from './I18n';
-import { AgentTurn, interruptTools, validateSteps } from './Agent';
+import { AgentTurn, interruptTools, migrateWebIcons, validateSteps } from './Agent';
 import { ModelReference, validateReference } from './ProviderProfiles';
 
 export interface TeamMember { id: string; name: string; instructions: string; toolProfile?: string; }
@@ -81,12 +81,13 @@ export function recoverTeams(runs: TeamRun[]): void {
     if (run.ownerMessageId !== undefined && (!identifier(run.ownerMessageId) || !Number.isInteger(run.sequence) || (run.sequence || 0) < 0)) { throw new Error(t("聊天团队归属无效。")); }
     if (!run.planning || typeof run.planning.content !== 'string') { throw new Error(t("规划记录损坏。")); }
     validateSteps(run.planning.steps);
+    migrateWebIcons(run.planning.steps);
     for (const record of run.tasks) {
       if (!Array.isArray(record.attempts) || !['pending', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted'].includes(record.status)) { throw new Error(t("任务记录损坏。")); }
       for (const attempt of record.attempts) {
         if (!attempt || !identifier(attempt.id) || !attempt.turn || typeof attempt.turn.content !== 'string' ||
           !['running', 'succeeded', 'failed', 'cancelled', 'interrupted'].includes(attempt.status)) { throw new Error(t("任务执行记录损坏。")); }
-        validateSteps(attempt.turn.steps); interruptTools(attempt.turn.steps);
+        validateSteps(attempt.turn.steps); migrateWebIcons(attempt.turn.steps); interruptTools(attempt.turn.steps);
         if (attempt.handoff) {
           const handoff = attempt.handoff;
           if (!bounded(handoff.summary, 12000) || !Array.isArray(handoff.unresolved) || handoff.unresolved.some((item) => !bounded(item, 2000)) ||

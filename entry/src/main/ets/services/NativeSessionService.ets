@@ -1,4 +1,7 @@
 import { ProviderEffects } from './providers/Provider';
+import { PresentTools } from './PresentTools';
+import { WebSearchTools } from './WebSearchTools';
+import { NativeSearchTransport } from './NativeSearchTransport';
 import { ProductivityData, Attachment, McpServer } from '../model/Productivity';
 import { LiveResources, McpRequest } from '../model/ResourceManagement';
 import { SkillData } from '../model/Skills';
@@ -69,7 +72,12 @@ class NativeSessionResources implements SessionResources {
     const groups: AgentTools[] = [new WorkspaceTools(new NativeWorkspaceFiles(this.workspaces.pathFor(id))), new AttachmentTools(attachments),
       new SkillTools(extensions.skills, selected, live ? () => live.skills() : undefined), new InteractionTools(this.approval)];
     groups.push(new CodeExecutionTools(new NativeCodeExecutor()));
+    groups.push(new PresentTools((path: string) => new NativeWorkspaceFiles(this.workspaces.pathFor(id)).checkedPath(path)));
     if (extensions.webEnabled) { groups.push(new WebTools(new NativeWebTransport())); }
+    const search = productivity?.options?.search;
+    if (extensions.webEnabled && search?.enabled) {
+      groups.push(new WebSearchTools(new NativeSearchTransport(search, new CredentialStore(), id, (record) => UsageLedger.record(record), () => this.profiles)));
+    }
     if (productivity) { groups.push(new McpTools(productivity.servers, this.approval, (server) => new McpClient(server), live ? () => live.servers() : undefined)); }
     const reference = productivity?.options?.image; const profile = this.profiles.find((item) => item.id === reference?.providerId && item.enabled);
     if (reference && profile && profile.models.includes(reference.modelId)) { groups.push(new ImageTools(profile, reference, this.workspaces.pathFor(id), this.approval, attachments)); }

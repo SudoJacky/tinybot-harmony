@@ -18,7 +18,7 @@ export struct ThreadReferenceCard {
         Text(this.reference.title).fontSize(20).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
         Text(t('引用的是选择时的文字快照，不含附件和工具记录。')).fontSize(13).fontColor($r('app.color.text_secondary'))
         if (this.reference.truncated) {
-          Text(t('内容较长，仅引用最近部分。')).fontSize(13).fontColor($r('app.color.text_secondary'))
+          Text(this.reference.fullContent !== undefined ? t('已保存完整快照，模型可按需补读；此处展示最近内容。') : t('内容较长，仅引用最近部分。')).fontSize(13).fontColor($r('app.color.text_secondary'))
         }
         Text(this.reference.content).fontSize(14).lineHeight(22).copyOption(CopyOptions.LocalDevice)
           .fontColor($r('app.color.text_primary')).width('100%')
@@ -32,7 +32,7 @@ export struct ThreadReferenceCard {
       Column({ space: 2 }) {
         Text(this.reference.title).fontSize(13).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           .fontColor($r('app.color.text_primary'))
-        Text(this.reference.truncated ? t('会话引用 · 最近部分') : t('会话引用 · 文字快照'))
+        Text(this.reference.truncated && this.reference.fullContent === undefined ? t('会话引用 · 最近部分') : t('会话引用 · 文字快照'))
           .fontSize(11).fontColor($r('app.color.text_secondary'))
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
       if (this.removable) {

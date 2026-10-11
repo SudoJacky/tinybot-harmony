@@ -31,6 +31,7 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
   data.config = defaultConfig(); data.config.userDocument = userDocument;
   for (const profile of data.providerProfiles || []) { profile.credentialAlias = ''; profile.noApiKey = true; profile.enabled = false; }
   for (const server of data.productivity?.servers || []) { server.credentialAlias = ''; server.authType = undefined; server.enabled = false; }
+  if (data.productivity?.options?.search) { data.productivity.options.search.enabled = false; data.productivity.options.search.credentialAlias = ''; data.productivity.options.search.modelProviderId = undefined; }
   let size = JSON.stringify(data).length * 3;
   for (const item of allAttachments(data)) { const bytes = await encodeFile(Attachments.path(item)); size += bytes.length; if (size > MAX_BACKUP) { throw new Error(t("备份超过 20 MB，请先清理不需要的附件。")); } envelope.attachments.push({ id: item.id, bytes: bytes }); }
   const workspaces = new WorkspaceStore(context.getApplicationContext().filesDir);
@@ -120,6 +121,7 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
     }
   }
   for (const server of data.productivity?.servers || []) { server.enabled = false; server.credentialAlias = ''; server.authType = undefined; }
+  if (data.productivity?.options?.search) { data.productivity.options.search.enabled = false; data.productivity.options.search.credentialAlias = ''; data.productivity.options.search.modelProviderId = undefined; }
   const userDocument = data.config.userDocument || '';
   data.config = defaultConfig();
   data.config.userDocument = userDocument;

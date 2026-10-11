@@ -7,6 +7,9 @@ import { RequestUsage } from '../model/Usage';
 import { attributeLegacyUsage } from '../model/UsageAttribution';
 import { reasoningEfforts, supportsReasoningEffort } from '../model/ReasoningEffort';
 import { ThreadReference, captureThreadReference, isCompactCommand, removeReferenceQuery, validateThreadReferences } from '../model/ThreadReferences';
+import { ReferenceTools } from './ReferenceTools';
+import { saveSearchSettings } from './SearchSettings';
+import { SearchDraft } from '../model/WebSearch';
 import { TeamRun, teamCommand } from '../model/Team';
 import { ChatTeamTools, CHAT_TEAM_INSTRUCTIONS, coordinatorDefinitions } from './ChatTeamTools';
 import { Attachment, MemoryEntry, McpServer, ProductivityData, defaultProductivity, validateAttachments, validateProductivity, memoryContext } from '../model/Productivity';
@@ -175,6 +178,11 @@ export class SessionService {
     finally { this.status.phase = 'idle'; this.publish('snapshot'); }
   }
 
+  async saveSearch(draft: SearchDraft): Promise<boolean> {
+    return this.mutate('', async () => {
+      this.status.error = await saveSearchSettings(this.snapshot(), draft, this.credentials, () => this.resources.createId(), (candidate) => this.commitSettings(candidate));
+    });
+  }
   async saveProductivity(value: ProductivityData): Promise<boolean> {
     return this.mutate(t("保存资料失败："), async () => {
       validateProductivity(value);
@@ -231,7 +239,7 @@ export class SessionService {
       if (!message) { throw new Error(t('消息已不存在。')); }
       this.active.attachments = JSON.parse(JSON.stringify(message.attachments || [])) as Attachment[];
       this.active.references = (message.references || []).map((item): ThreadReference => ({ threadId: item.threadId, title: item.title,
-        content: item.content, capturedAt: item.capturedAt, truncated: item.truncated }));
+        content: item.content, capturedAt: item.capturedAt, truncated: item.truncated, fullContent: item.fullContent }));
       this.setDraft(message.content, this.active.id); await this.persist();
     });
   }
@@ -250,7 +258,7 @@ export class SessionService {
       branch.draft = index >= 0 && index % 2 === 0 ? source.messages[index].content : '';
       branch.attachments = index >= 0 && index % 2 === 0 ? JSON.parse(JSON.stringify(source.messages[index].attachments || [])) as Attachment[] : [];
       branch.references = index >= 0 && index % 2 === 0 ? (source.messages[index].references || []).map((item): ThreadReference => ({
-        threadId: item.threadId, title: item.title, content: item.content, capturedAt: item.capturedAt, truncated: item.truncated })) : [];
+        threadId: item.threadId, title: item.title, content: item.content, capturedAt: item.capturedAt, truncated: item.truncated, fullContent: item.fullContent })) : [];
       await this.resources.ensureWorkspace(branch.id);
       // Preserve historical messages verbatim. The request explicitly identifies the new workspace.
       const extras = this.data.productivity || defaultProductivity();
@@ -961,8 +969,8 @@ export class SessionService {
     extras.servers = extras.servers.filter((item) => !(thread.disabledMcpIds || []).includes(item.id));
     const live: LiveResources = { skills: () => this.extensions.skills,
       servers: () => (this.data.productivity?.servers || []).filter((item) => !(thread.disabledMcpIds || []).includes(item.id)) };
-    return this.resources.tools(thread.id, this.extensions, selected, extras,
-      (thread.attachments || []).concat(...thread.messages.map((item) => item.attachments || [])), live);
+    return new ToolSet([this.resources.tools(thread.id, this.extensions, selected, extras,
+      (thread.attachments || []).concat(...thread.messages.map((item) => item.attachments || [])), live), new ReferenceTools(() => thread.messages)]);
   }
   private refreshContext(): void {
     if (this.data.threads.length === 0) { this.status.contextTokens = 0; this.status.contextBreakdown = []; this.status.contextSource = 'estimate'; return; }

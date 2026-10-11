@@ -5,7 +5,7 @@ import { ModelReference } from '../model/ProviderProfiles';
 import { UsageOrigin } from '../model/Usage';
 import { ToolCall, ToolDefinition, ToolProperty } from '../model/Agent';
 import { TeamArtifact, TeamAttempt, TeamHandoff, TeamMember, TeamPlan, TeamRun, TeamTask, TeamTaskRecord, lastAttempt, validateTeamPlan } from '../model/Team';
-import { AgentTools } from './AgentLoop';
+import { AgentTools, ToolInvocationContext } from './AgentLoop';
 import { AgentRuntime } from './AgentRuntime';
 import { Cancellation } from './Cancellation';
 import { TeamCoordinator, TeamToolLane, TeamTools } from './TeamCoordinator';
@@ -81,7 +81,7 @@ class EmployeeTools implements AgentTools {
   constructor(base: AgentTools, profile: string, host: ChatTeamTools, run: TeamRun, attempt: TeamAttempt) {
     this.base = base; this.host = host; this.run = run; this.attempt = attempt;
     const reads = ['list_files', 'read_file', 'read_file_lines', 'read_attachment', 'search_file_content', 'read_skill', 'update_plan', 'execute_code'];
-    const research = reads.concat(['read_web', 'write_file', 'edit_file']);
+    const research = reads.concat(['read_web', 'search_web', 'read_reference', 'write_file', 'edit_file']);
     this.catalog = base.definitions().filter((item) => item.function.name !== 'publish_data_view' &&
       !item.function.name.startsWith('team_') && (profile === 'execution' || (profile === 'research' ? research : reads).includes(item.function.name)));
     this.allowed = new Set(this.catalog.map((item) => item.function.name));
@@ -94,14 +94,14 @@ class EmployeeTools implements AgentTools {
     }, ['entryId']));
   }
   definitions(): ToolDefinition[] { return this.catalog; }
-  async execute(call: ToolCall, cancellation: Cancellation): Promise<string> {
+  async execute(call: ToolCall, cancellation: Cancellation, context?: ToolInvocationContext): Promise<string> {
     cancellation.check(); const name = call.function.name;
     if (this.candidate) { throw new Error(t("已经提交交接，请结束当前任务，不再调用工具。")); }
     if (name === 'team_list_messages') { return JSON.stringify(this.host.page(this.run.id, 0)); }
     if (name === 'team_read_message') { const args = JSON.parse(call.function.arguments) as TeamArgs; args.runId = this.run.id; return this.host.readResult(args, cancellation); }
     if (name !== 'team_complete_task') {
       if (!this.allowed.has(name)) { throw new Error(t("员工没有此工具权限：") + name); }
-      return this.base.execute(call, cancellation);
+      return this.base.execute(call, cancellation, context);
     }
     const args = JSON.parse(call.function.arguments) as HandoffArgs;
     if (!args || typeof args.summary !== 'string' || !args.summary.trim() || args.summary.length > 12000 || !Array.isArray(args.unresolved) ||
@@ -153,7 +153,7 @@ export class ChatTeamTools implements AgentTools {
     this.all = new ToolSet([new TeamTools(context.base(), this.lane), new CoordinatorCatalog(this)]);
   }
   definitions(): ToolDefinition[] { return this.all.definitions(); }
-  execute(call: ToolCall, cancellation: Cancellation): Promise<string> { return this.all.execute(call, cancellation); }
+  execute(call: ToolCall, cancellation: Cancellation, context?: ToolInvocationContext): Promise<string> { return this.all.execute(call, cancellation, context); }
   stop(): void { this.halted = true; this.active.forEach((item) => item.coordinator.stop()); this.notify(); }
   async close(): Promise<void> { this.stop(); await Promise.all(Array.from(this.active.values()).map((item) => item.done)); }
   private notify(): void { this.listeners.forEach((listener) => listener()); this.listeners.clear(); }

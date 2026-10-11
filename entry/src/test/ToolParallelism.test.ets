@@ -76,9 +76,10 @@ class Fixture {
   }
 }
 class Files implements WorkspaceFiles {
+  async edit(): Promise<WorkspaceWrite> { throw new Error('Unexpected edit'); }
   async list(): Promise<WorkspaceListing> { return { path: '.', entries: [], truncated: false }; }
-  async read(): Promise<WorkspaceText> { return { path: 'file', content: 'ok' }; }
-  async write(): Promise<WorkspaceWrite> { return { path: 'file', bytes: 0, written: true }; }
+  async read(): Promise<WorkspaceText> { return { path: 'file', content: 'ok', version: 'ok' }; }
+  async write(): Promise<WorkspaceWrite> { return { path: 'file', bytes: 0, written: true, version: '' }; }
 }
 async function errorOf(work: Promise<void>): Promise<string> {
   try { await work; return ''; } catch (error) { return (error as Error).message; }

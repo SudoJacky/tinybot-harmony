@@ -1,4 +1,5 @@
 import { t } from './I18n';
+import { FileDiff } from './FileDiff';
 import { AnthropicContentBlock, validateAnthropicContent } from './AnthropicContent';
 import { Attachment } from './Productivity';
 import { RequestUsage } from './Usage';
@@ -94,13 +95,35 @@ export interface ModelTurn {
 }
 
 export interface ToolExecution {
+  fileDiff?: FileDiff;
+  // Persisted presentation metadata, never included in the model-visible output.
+  websiteIcon?: string;
   call: ToolCall;
   status: string;
   output: string;
   children?: ToolExecution[];
 }
 
+interface LegacyWebIcon { favicon?: string; }
+export function migrateWebIcons(steps: AgentStep[]): void {
+  for (const step of steps) {
+    for (const tool of step.tools) {
+      if (tool.children) { migrateWebIcons([{ content: '', tools: tool.children }]); }
+      if (tool.call.function.name !== 'read_web') { continue; }
+      let value: LegacyWebIcon;
+      try { value = JSON.parse(tool.output) as LegacyWebIcon; } catch (_) { continue; }
+      if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.favicon !== 'string') { continue; }
+      tool.websiteIcon = tool.websiteIcon || value.favicon;
+      value.favicon = undefined;
+      tool.output = JSON.stringify(value);
+    }
+  }
+}
+
+export interface RequestRetry { attempt: number; delayMs: number; code: string; waiting: boolean; }
 export interface AgentStep {
+  retries?: RequestRetry[];
+  toolReminder?: string;
   requestError?: string; // A failed request is kept for diagnostics, never replayed as model output.
   context?: ContextDiagnostics;
   continuation?: string;
@@ -153,6 +176,7 @@ export function stepMessages(step: AgentStep, includeSteering: boolean = true): 
       JSON.stringify({ error: step.uiValidation }) + '\nCorrect the interface and emit a complete replacement tinybot-ui surface. Do not repeat successful tool side effects. If this device lacks the required capability, use a supported alternative.' });
   }
   if (step.continuation) { result.push({ role: 'user', content: step.continuation }); }
+  if (step.toolReminder) { result.push({ role: 'user', content: step.toolReminder }); }
   return prefix.concat(result);
 }
 
@@ -180,9 +204,14 @@ export function validateSteps(steps: AgentStep[]): void {
   const inputIds = new Set<string>();
   for (const step of steps) {
     if (step?.anthropicContent !== undefined) validateAnthropicContent(step.anthropicContent);
+    if (step?.retries !== undefined && (!Array.isArray(step.retries) || step.retries.length > 2 || step.retries.some((retry, index) =>
+      !retry || retry.attempt !== index + 1 || ![1000, 2000].includes(retry.delayMs) || typeof retry.code !== 'string' || retry.code.length > 40 || typeof retry.waiting !== 'boolean'))) {
+      throw new Error('Invalid request retry record.');
+    }
     if (!step || typeof step.content !== 'string' || !Array.isArray(step.tools) ||
       (step.requestError !== undefined && (step.requestError !== 'context_overflow' || step.tools.length > 0)) ||
       (step.continuation !== undefined && typeof step.continuation !== 'string') ||
+      (step.toolReminder !== undefined && (typeof step.toolReminder !== 'string' || step.toolReminder.length > 2000)) ||
       (step.uiValidation !== undefined && (typeof step.uiValidation !== 'string' || step.uiValidation.length > 8000)) ||
       (step.reasoningContent !== undefined && (typeof step.reasoningContent !== 'string' ||
         step.reasoningContent.length > MAX_REASONING_CONTENT))) {

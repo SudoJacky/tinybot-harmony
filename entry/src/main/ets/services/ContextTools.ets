@@ -1,7 +1,7 @@
 import { ModelMessage, ToolCall, ToolDefinition, ToolExecution } from '../model/Agent';
 import { ContextEntry } from '../model/ContextProjection';
 import { contextInputBudget, estimateTextTokens } from '../model/ConversationContext';
-import { AgentTools } from './AgentLoop';
+import { AgentTools, ToolInvocationContext } from './AgentLoop';
 import { Cancellation } from './Cancellation';
 
 interface ReadResultArguments { messageId: string; callId: string; offset?: number; length?: number; }
@@ -52,8 +52,8 @@ export class ContextTools implements AgentTools {
   beforeFinish(cancellation: Cancellation): Promise<string | undefined> {
     return this.inner.beforeFinish ? this.inner.beforeFinish(cancellation) : Promise.resolve(undefined);
   }
-  async execute(call: ToolCall, cancellation: Cancellation): Promise<string> {
-    if (call.function.name !== 'read_tool_result') { return this.inner.execute(call, cancellation); }
+  async execute(call: ToolCall, cancellation: Cancellation, context?: ToolInvocationContext): Promise<string> {
+    if (call.function.name !== 'read_tool_result') { return this.inner.execute(call, cancellation, context); }
     cancellation.check();
     const args = JSON.parse(call.function.arguments) as ReadResultArguments;
     if (!args || Array.isArray(args) || typeof args.messageId !== 'string' || typeof args.callId !== 'string' ||

@@ -36,7 +36,7 @@ export struct ToolDetailSheet {
       Scroll() {
         ToolDetails({ disclosure: this.disclosure, identity: this.execution.call.id,
           name: this.execution.call.function.name, argumentsText: this.execution.call.function.arguments,
-          output: this.execution.output, status: this.execution.status })
+          output: this.execution.output, status: this.execution.status, diff: this.execution.fileDiff })
       }.id('tool-detail-scroll').width('100%').layoutWeight(1).align(Alignment.TopStart).scrollBar(BarState.Auto)
     }.id('tool-detail-sheet').width('100%').height('100%').padding({ left: 16, right: 16, top: 8, bottom: 24 })
   }

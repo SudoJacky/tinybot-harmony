@@ -1,8 +1,10 @@
 import { t } from '../model/I18n';
 import { ToolCall, ToolDefinition, ToolProperty } from '../model/Agent';
-import { AgentTools } from './AgentLoop';
+import { AgentTools, ToolInvocationContext } from './AgentLoop';
+import { fileDiff } from '../model/FileDiff';
+import { TextEdit, applyTextEdits, validateEdits } from '../model/WorkspaceEdit';
 import { Cancellation } from './Cancellation';
-import { WorkspaceFiles } from './WorkspaceFiles';
+import { WorkspaceFiles, WorkspaceWrite } from './WorkspaceFiles';
 import { textPage, MAX_READ_LINES } from '../model/TextPage';
 
 interface FileArguments {
@@ -10,6 +12,7 @@ interface FileArguments {
   content?: string;
   oldText?: string;
   newText?: string;
+  edits?: TextEdit[];
   query?: string;
   startLine?: number;
   endLine?: number;
@@ -21,9 +24,7 @@ interface FileArguments {
 interface SearchMatch { path: string; line: number; text: string; }
 
 export function replaceUnique(content: string, oldText: string, newText: string): string {
-  if (!oldText || content.indexOf(oldText) < 0) { throw new Error(t("原文不存在，请重新读取文件。")); }
-  if (content.indexOf(oldText, content.indexOf(oldText) + 1) >= 0) { throw new Error(t("原文匹配多处，请提供更多上下文。")); }
-  return content.replace(oldText, () => newText);
+  return applyTextEdits(content, [{ oldText: oldText, newText: newText }]);
 }
 
 export function workspaceRelativePath(path: string, allowRoot: boolean): string {
@@ -43,6 +44,8 @@ export function workspaceRelativePath(path: string, allowRoot: boolean): string 
 
 export class WorkspaceTools implements AgentTools {
   private files: WorkspaceFiles;
+  // Fresh for each agent run. Search/internal reads do not authorize overwrites.
+  private observed: Map<string, string> = new Map<string, string>();
 
   constructor(files: WorkspaceFiles) {
     this.files = files;
@@ -54,13 +57,18 @@ export class WorkspaceTools implements AgentTools {
       this.extraDefinition('read_file', '读取工作区 UTF-8 文本。每次最多 2000 行或 50 KiB；truncated 表示未读完，用 nextOffset/nextColumn 作为 offset/column 继续，直到完整。',
         { 'path': { type: 'string', description: '文件相对路径' }, 'offset': { type: 'integer', description: '起始行，默认 1' },
           'limit': { type: 'integer', description: '最多读取的行数，默认 2000' }, 'column': { type: 'integer', description: '首行起始 UTF-16 列，默认 1；续读时使用 nextColumn' } }, ['path']),
-      this.definition('write_file', '在当前会话工作区创建或完整覆盖 UTF-8 文本文件，自动创建父目录。', true),
+      this.definition('write_file', '创建或完整覆盖工作区 UTF-8 文本文件，自动创建父目录。覆盖前必须在本轮用 read_file/read_file_lines 读取；文件变化后需重新读取。本轮成功写入也算已读取。', true),
       this.extraDefinition('search_file_content', '递归搜索工作区 UTF-8 文本中的字面关键词，返回路径、行号和片段。最多检查 200 个文件、返回 100 个匹配；truncated 表示结果不完整。',
         { 'path': { type: 'string', description: '目录相对路径，根目录使用 .' }, 'query': { type: 'string', description: '非空字面关键词，区分大小写' } }, ['path', 'query']),
       this.extraDefinition('read_file_lines', '按行读取文本，行号从 1 开始，每次最多 2000 行或 50 KiB；用 read_file 的 offset/column 接续 nextOffset/nextColumn。',
         { 'path': { type: 'string', description: '文件相对路径' }, 'startLine': { type: 'integer', description: '开始行' }, 'endLine': { type: 'integer', description: '结束行（含）' } }, ['path', 'startLine', 'endLine']),
-      this.extraDefinition('edit_file', '精准替换唯一匹配的原文。必须先读取文件；匹配不存在或多处时拒绝修改。保留修改前基线供用户审阅。',
-        { 'path': { type: 'string', description: '文件相对路径' }, 'oldText': { type: 'string', description: '唯一匹配的非空原文' }, 'newText': { type: 'string', description: '替换文字，可以为空' } }, ['path', 'oldText', 'newText'])
+      this.extraDefinition('edit_file', '精准替换文件。先在本轮读取（或成功写入）目标，变化后需重读。优先传 edits 批量编辑：所有 oldText 匹配同一份修改前原文，必须唯一且不重叠，全部校验后一次写入。仅兼容 CRLF/LF 差异，不做模糊匹配。也支持单处 oldText/newText，不能与 edits 混用。',
+        { 'path': { type: 'string', description: '文件相对路径' },
+          'edits': { type: 'array', description: '1–32 处编辑，针对同一份修改前原文', items: { type: 'object', description: '一处精准替换',
+            properties: { 'oldText': { type: 'string', description: '唯一匹配的非空原文' }, 'newText': { type: 'string', description: '替换文字，可以为空' } },
+            required: ['oldText', 'newText'], additionalProperties: false } },
+          'oldText': { type: 'string', description: '旧版单处编辑的原文，与 edits 互斥' },
+          'newText': { type: 'string', description: '旧版单处编辑的替换文字，可以为空' } }, ['path'])
     ];
     const snippets: Record<string, string> = { 'list_files': '定位工作区文件', 'read_file': '读取文本文件',
       'read_file_lines': '分段读取文本', 'search_file_content': '查找文件内容', 'edit_file': '唯一匹配局部修改', 'write_file': '创建或完整覆盖文件' };
@@ -77,7 +85,7 @@ export class WorkspaceTools implements AgentTools {
       promptSnippet: snippets[definition.function.name], promptGuidelines: guidelines[definition.function.name] }));
   }
 
-  async execute(call: ToolCall, cancellation: Cancellation): Promise<string> {
+  async execute(call: ToolCall, cancellation: Cancellation, context?: ToolInvocationContext): Promise<string> {
     cancellation.check();
     const name = call.function.name;
     if (['list_files', 'read_file', 'write_file', 'search_file_content', 'read_file_lines', 'edit_file'].indexOf(name) < 0) {
@@ -90,7 +98,7 @@ export class WorkspaceTools implements AgentTools {
       throw new Error(t("工具参数必须是有效的 JSON 对象。"));
     }
     if (!args || Array.isArray(args) || typeof args.path !== 'string' ||
-      Object.keys(args).some((key: string) => !['path', 'content', 'oldText', 'newText', 'query', 'startLine', 'endLine', 'offset', 'limit', 'column'].includes(key)) ||
+      Object.keys(args).some((key: string) => !['path', 'content', 'oldText', 'newText', 'edits', 'query', 'startLine', 'endLine', 'offset', 'limit', 'column'].includes(key)) ||
       (name === 'write_file' && typeof args.content !== 'string')) {
       throw new Error(t("工具参数不符合要求：必须包含 path，写入还需要 content。"));
     }
@@ -99,27 +107,54 @@ export class WorkspaceTools implements AgentTools {
       if (typeof args.query !== 'string' || !args.query || args.query.length > 1000) { throw new Error(t("搜索关键词需为 1–1000 字符。")); }
       return this.search(path, args.query, cancellation);
     }
-    if (name === 'edit_file' || name === 'read_file_lines') {
-      const content = (await this.files.read(path, cancellation)).content;
-      if (name === 'edit_file') {
-        if (typeof args.oldText !== 'string' || typeof args.newText !== 'string') { throw new Error(t("编辑需要 oldText 和 newText。")); }
-        return JSON.stringify(await this.files.write(path, replaceUnique(content, args.oldText, args.newText), cancellation));
+    if (name === 'edit_file') {
+      let edits: TextEdit[];
+      if (args.edits !== undefined) {
+        if (args.oldText !== undefined || args.newText !== undefined) { throw new Error(t('edits 不能与 oldText/newText 混用。')); }
+        edits = args.edits;
+      } else {
+        if (typeof args.oldText !== 'string' || typeof args.newText !== 'string') { throw new Error(t('编辑需要 oldText 和 newText。')); }
+        edits = [{ oldText: args.oldText, newText: args.newText }];
       }
+      validateEdits(edits);
+      const version = this.observed.get(path);
+      if (version === undefined) { throw new Error(t('编辑前，请先用 read_file 或 read_file_lines 读取文件。')); }
+      return this.receipt(await this.files.edit(path, edits, version, cancellation), context);
+    }
+    if (name === 'read_file_lines') {
       const start = args.startLine || 0; const end = args.endLine || 0;
       if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 1 || end < start || end - start >= MAX_READ_LINES) { throw new Error(t('行范围无效，最多 2000 行。')); }
-      return this.readPage(path, content, start, end - start + 1);
+      return this.read(path, cancellation, start, end - start + 1);
     }
     if (name === 'list_files') {
       return JSON.stringify(await this.files.list(path, cancellation));
     }
     if (name === 'read_file') {
-      return this.readPage(path, (await this.files.read(path, cancellation)).content, args.offset, args.limit, args.column);
+      return this.read(path, cancellation, args.offset, args.limit, args.column);
     }
-    return JSON.stringify(await this.files.write(path, args.content as string, cancellation));
+    const version = this.observed.get(path);
+    return this.receipt(await this.files.write(path, args.content as string, cancellation,
+      { version: version === undefined ? null : version }), context);
+  }
+
+  private receipt(receipt: WorkspaceWrite, context?: ToolInvocationContext): string {
+    if (receipt.written) { this.observed.set(receipt.path, receipt.version); }
+    if (context && receipt.written && receipt.before !== undefined && receipt.after !== undefined) {
+      context.execution.fileDiff = fileDiff(receipt.path, receipt.before, receipt.after, receipt.created === true);
+    }
+    return JSON.stringify({ path: receipt.path, bytes: receipt.bytes, written: receipt.written });
+  }
+
+  private async read(path: string, cancellation: Cancellation, offset?: number, limit?: number, column?: number): Promise<string> {
+    const result = await this.files.read(path, cancellation);
+    const output = this.readPage(path, result.content, offset, limit, column);
+    this.observed.set(path, result.version);
+    return output;
   }
 
   private readPage(path: string, content: string, offset?: number, limit?: number, column?: number): string {
-    const page = textPage(content, offset, limit, column);
+    // BOM belongs to the encoding, not the text the model should copy into oldText.
+    const page = textPage(content.startsWith('\uFEFF') ? content.slice(1) : content, offset, limit, column);
     return JSON.stringify({ path: path, content: page.content, startLine: page.startLine, totalLines: page.totalLines,
       truncated: page.truncated, nextOffset: page.nextOffset, nextColumn: page.nextColumn });
   }

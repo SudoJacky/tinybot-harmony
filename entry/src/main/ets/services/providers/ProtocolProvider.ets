@@ -13,7 +13,7 @@ import { ModelStream, ResponsesStream, AnthropicStream } from './EventStreams';
 import { protocolUrl, protocolHeaders, responsesRequest, anthropicRequest, ResponsesRequest } from './WireProtocols';
 import { ModelProvider, ProviderRequest, ProviderEffects } from './Provider';
 import { ChatCompletionsOptions, chatRequest, ChatRequest } from './ChatCompletionsProtocol';
-import { ContextOverflowError, httpProviderError } from './ProviderErrors';
+import { ContextOverflowError, TransientProviderError, httpProviderError } from './ProviderErrors';
 
 // Tinybot desktop separates request startup and stream idleness (both 120 s).
 const STREAM_IDLE_TIMEOUT_MS: number = 120000;
@@ -117,7 +117,10 @@ export class ProtocolProvider implements ModelProvider {
       };
       const resetIdleTimer = (): void => {
         clearTimeout(timer);
-        timer = setTimeout(() => settle(new Error(t('模型服务连续 120 秒未返回数据，请检查网络或稍后重试。'))), STREAM_IDLE_TIMEOUT_MS);
+        timer = setTimeout(() => {
+          const message = t('模型服务连续 120 秒未返回数据，请检查网络或稍后重试。');
+          settle(receivedBytes === 0 ? new TransientProviderError(message, 'timeout') : new Error(message));
+        }, STREAM_IDLE_TIMEOUT_MS);
       };
       resetIdleTimer();
       removeCancel = cancellation.onCancel(() => settle(new RunCancelledError() as Error));
@@ -163,7 +166,10 @@ export class ProtocolProvider implements ModelProvider {
           if (error) {
             hilog.error(0x0000, 'TinybotNetwork', 'Request error code=%{public}d elapsedMs=%{public}d bytes=%{public}d',
               error.code, Date.now() - startedAt, receivedBytes);
-            settle(new Error(t("网络请求失败（{0}），请检查连接和服务地址。", [error.code])));
+            const message = t("网络请求失败（{0}），请检查连接和服务地址。", [error.code]);
+            // Retry only known connection/timeout failures before any response bytes.
+            settle(receivedBytes === 0 && [2300005, 2300006, 2300007, 2300028, 2300052, 2300056].includes(error.code) ?
+              new TransientProviderError(message, 'transport') : new Error(message));
             return;
           }
           responseCode = code;

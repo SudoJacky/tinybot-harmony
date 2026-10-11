@@ -11,7 +11,8 @@ export async function importTextFile(uri: string): Promise<string> {
 // The chunk size bounds each I/O allocation, not the size of an accepted text file.
 export async function readUtf8File(fd: number, cancellation: Cancellation = new Cancellation()): Promise<string> {
   if (!(await fs.stat(fd)).isFile()) { throw new Error(t('请选择普通文件。')); }
-  const decoder = new util.TextDecoder('utf-8', { fatal: true });
+  // Harmony's ignoreBOM=true removes the marker (opposite to WHATWG TextDecoder).
+  const decoder = new util.TextDecoder('utf-8', { fatal: true, ignoreBOM: false });
   const buffer = new ArrayBuffer(64 * 1024);
   const parts: string[] = [];
   while (true) {

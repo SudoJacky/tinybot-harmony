@@ -387,7 +387,7 @@ export struct UsagePanel {
 
   private purposeName(purpose: string): string {
     const names: Record<string, string> = { 'conversation': t('对话'), 'team_planning': t('团队规划'), 'team_task': t('团队执行'),
-      'compaction': t('上下文压缩'), 'title': t('标题生成'), 'memory': t('记忆提取'), 'unclassified': t('未分类') };
+      'compaction': t('上下文压缩'), 'title': t('标题生成'), 'memory': t('记忆提取'), 'web_search': t('联网搜索'), 'unclassified': t('未分类') };
     return names[purpose] || t('未分类');
   }
   private groupValue(item: UsageGroup): string { return item.reported ? this.number(item.total) + ' Token' : t('未报告'); }

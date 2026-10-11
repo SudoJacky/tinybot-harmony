@@ -16,7 +16,7 @@ const cloudLocations = new Map(); let failCloudCopy = false; let cloudCopyError;
 const nativePath = p => p.startsWith('/sandbox/') ? path.join(fixture, p.slice(1)) : p;
 const fileIo = {
   OpenMode: { READ_ONLY: 1, CREATE: 2, WRITE_ONLY: 4, TRUNC: 8, NOFOLLOW: 16 },
-  access: async p => fs.existsSync(nativePath(p)), mkdir: p => fs.promises.mkdir(nativePath(p)), readText: p => fs.promises.readFile(nativePath(p), 'utf8'),
+  access: async p => fs.existsSync(nativePath(p)), mkdir: (p, recursive = false) => fs.promises.mkdir(nativePath(p), { recursive }), readText: p => fs.promises.readFile(nativePath(p), 'utf8'),
   listFile: async p => fs.promises.readdir(nativePath(p)),
   open: async (p, flags) => { const h = await fs.promises.open(nativePath(p), flags & 4 ? 'w' : 'r'); handles.set(h.fd, h); return { fd: h.fd }; },
   read: async (fd, bytes) => (await handles.get(fd).read(new Uint8Array(bytes))).bytesRead,
@@ -41,7 +41,8 @@ const fileIo = {
 };
 // Reproduce the empty-input behavior observed on the physical HarmonyOS device.
 class Encoder { encodeInto(s) { return s === '' ? undefined : new TextEncoder().encode(s); } }
-class Decoder { constructor(encoding, opts) { this.decoder = new TextDecoder(encoding, opts); } decodeToString(bytes, opts) { return this.decoder.decode(bytes, opts); } }
+// Harmony uses ignoreBOM=true to remove the marker, unlike Node's WHATWG decoder.
+class Decoder { constructor(encoding, opts) { this.decoder = new TextDecoder(encoding, {...opts, ignoreBOM: !opts?.ignoreBOM}); } decodeToString(bytes, opts) { return this.decoder.decode(bytes, opts); } }
 const cache = new Map(); const calls = []; let httpScript = () => {}; let destroyed = 0; let jsonScript = () => { throw Error('Unexpected JSON request'); };
 let fakeTimers;
 const scheduleTimer = (fn, ms) => fakeTimers ? fakeTimers.set(fn, ms) : setTimeout(fn, ms);
@@ -339,6 +340,162 @@ async function test(name, run) { await run(); completedTests++; console.log('PAS
     await assert.rejects(files.restore('note.txt','after'),/变化/);await files.restore('note.txt','later');
     assert.equal(fs.readFileSync(nativePath(root+'/note.txt'),'utf8'),'before');assert.equal(await files.baseline('note.txt'),undefined);
     await files.write('new.txt','new',signal);await files.restore('new.txt','new');assert.ok(!fs.existsSync(nativePath(root+'/new.txt')));
+  });
+  await test('per-operation diff uses the actual native write, survives reload and stays out of model output',async()=>{
+    const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
+    const {ToolSet}=load(path.join(source,'services/ToolSet'));
+    const {RuleTools}=load(path.join(source,'services/RuleTools'));
+    const {ContextTools}=load(path.join(source,'services/ContextTools'));
+    const {stepMessages}=load(path.join(source,'model/Agent'));
+    const root='/sandbox/workspace/diff';fs.mkdirSync(nativePath(root),{recursive:true});
+    const native=new NativeWorkspaceFiles(root), tools=new ContextTools(new RuleTools(new ToolSet([new WorkspaceTools(native)]),false),()=>[],128000);
+    const signal=new Cancellation();
+    const invoke=async(name,args)=>{
+      const execution={call:{id:crypto.randomUUID(),type:'function',function:{name,arguments:JSON.stringify(args)}},status:'running',output:''};
+      execution.output=await tools.execute(execution.call,signal,{execution,executeChild:async()=>{throw Error('unexpected child');}});
+      execution.status='complete';return execution;
+    };
+    const create=await invoke('write_file',{path:'note.txt',content:'head\nold\ntail\n'});
+    assert.equal(create.fileDiff.created,true);assert.equal(create.fileDiff.added,3);
+    assert.deepEqual(Object.keys(JSON.parse(create.output)).sort(),['bytes','path','written']);
+    const edit=await invoke('edit_file',{path:'note.txt',oldText:'old',newText:'new\nextra'});
+    assert.equal(edit.fileDiff.added,2);assert.equal(edit.fileDiff.removed,1);
+    assert.equal(edit.fileDiff.rows.find(r=>r.kind==='removed').oldLine,2);
+    const overwrite=await invoke('write_file',{path:'note.txt',content:'head\nnew\nfinal\n'});
+    assert.equal(overwrite.fileDiff.added,1);assert.equal(overwrite.fileDiff.removed,2,'compare to immediately preceding content, not the original baseline');
+    const unchanged=await invoke('write_file',{path:'note.txt',content:'head\nnew\nfinal\n'});
+    assert.equal(unchanged.fileDiff.added,0);assert.equal(unchanged.fileDiff.removed,0);
+    const step={content:'',tools:[create,edit,overwrite,unchanged]};
+    assert.ok(!JSON.stringify(stepMessages(step)).includes('fileDiff'));
+    const data=model.emptyData();data.activeThreadId='diff';data.threads=[{id:'diff',title:'Diff',updatedAt:1,messages:[
+      {id:'user',role:'user',content:'Edit',status:'complete',error:''},
+      {id:'answer',role:'assistant',content:'Done',status:'complete',error:'',steps:[step]}]}];
+    const restored=model.parseAppData(JSON.stringify(data));
+    assert.equal(restored.threads[0].messages[1].steps[0].tools[2].fileDiff.removed,2);
+    assert.equal((await native.baseline('note.txt')).existed,false,'workspace restore keeps its separate original baseline');
+    await assert.rejects(invoke('edit_file',{path:'note.txt',oldText:'missing',newText:'wrong'}));
+    assert.equal((await native.read('note.txt',signal)).content,'head\nnew\nfinal\n');
+  });
+  await test('batch edits match one original, read and commit once, and keep model receipts small',async()=>{
+    const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
+    const root='/sandbox/workspace/batch';fs.mkdirSync(nativePath(root),{recursive:true});
+    const native=new NativeWorkspaceFiles(root),tools=new WorkspaceTools(native),signal=new Cancellation();
+    const invoke=(name,args,context)=>tools.execute({id:name,type:'function',function:{name,arguments:JSON.stringify(args)}},signal,context);
+    await invoke('write_file',{path:'a.txt',content:'alpha\nbeta\ntail\n'});
+    let reads=0,commits=0;const read=native.read.bind(native),rename=fileIo.rename;
+    native.read=async(...args)=>{reads++;return read(...args);};
+    fileIo.rename=async(a,b)=>{if(b===root+'/a.txt')commits++;return rename(a,b);};
+    const execution={status:'running'};
+    try {
+      const result=JSON.parse(await invoke('edit_file',{path:'a.txt',edits:[{oldText:'beta',newText:'alpha'},{oldText:'alpha',newText:'beta'}]},{execution}));
+      assert.deepEqual(Object.keys(result).sort(),['bytes','path','written']);
+      assert.equal(reads,1);assert.equal(commits,1);
+      assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),'beta\nalpha\ntail\n');
+      assert.ok(execution.fileDiff.added>0);assert.ok(execution.fileDiff.removed>0);
+    } finally {fileIo.rename=rename;}
+    await invoke('edit_file',{path:'a.txt',oldText:'tail',newText:'$& $1 $` literal'});
+    assert.ok(fs.readFileSync(nativePath(root+'/a.txt'),'utf8').endsWith('$& $1 $` literal\n'));
+  });
+  await test('failed batch validation changes neither the file nor its review baseline',async()=>{
+    const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
+    const root='/sandbox/workspace/batch-failure';fs.mkdirSync(nativePath(root),{recursive:true});
+    const original='alpha beta\nrepeat repeat\n';fs.writeFileSync(nativePath(root+'/a.txt'),original);
+    const native=new NativeWorkspaceFiles(root),tools=new WorkspaceTools(native),signal=new Cancellation();
+    const invoke=(name,args)=>tools.execute({id:name,function:{name,arguments:JSON.stringify(args)}},signal);
+    await invoke('read_file',{path:'a.txt'});
+    const invalid=[
+      {edits:[{oldText:'alpha',newText:'changed'},{oldText:'missing',newText:'x'}]},
+      {edits:[{oldText:'alpha beta',newText:'x'},{oldText:'beta',newText:'y'}]},
+      {edits:[{oldText:'repeat',newText:'x'}]},
+      {edits:[{oldText:'alpha',newText:'x'},{oldText:'alpha',newText:'y'}]},
+      {edits:[{oldText:'',newText:'x'}]}, {edits:[]}, {edits:null},
+      {edits:[{oldText:'alpha',newText:5}]}, {edits:[{oldText:'alpha',newText:'x',extra:true}]},
+      {edits:Array(33).fill({oldText:'alpha',newText:'x'})},
+      {edits:[{oldText:'alpha',newText:'x'}],oldText:'beta',newText:'y'},
+      {oldText:'alpha',newText:'\0'}
+    ];
+    for(const args of invalid){await assert.rejects(invoke('edit_file',{path:'a.txt',...args}));
+      assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),original);assert.equal(await native.baseline('a.txt'),undefined);}
+    await assert.rejects(invoke('edit_file',{path:'a.txt',edits:[{oldText:'alpha',newText:'x'},{oldText:'missing',newText:'y'}]}),/第 2 项/);
+    await invoke('edit_file',{path:'a.txt',edits:[{oldText:'alpha',newText:''},{oldText:' beta',newText:'ok'}]});
+    assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),'ok\nrepeat repeat\n');
+  });
+  await test('native edits preserve UTF-8 BOM, CRLF, untouched mixed endings and no final newline',async()=>{
+    const root='/sandbox/workspace/line-endings';fs.mkdirSync(nativePath(root),{recursive:true});
+    const native=new NativeWorkspaceFiles(root),signal=new Cancellation();
+    const original='\uFEFFhead\r\nold\r\nblock\r\ntail\nlast';
+    fs.writeFileSync(nativePath(root+'/a.txt'),original);
+    const snapshot=await native.read('a.txt',signal);assert.equal(snapshot.content,original);
+    const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
+    const view=JSON.parse(await new WorkspaceTools(native).execute({id:'read',function:{name:'read_file',arguments:'{"path":"a.txt"}'}},signal));
+    assert.equal(view.content,original.slice(1),'hide the encoding marker from text copied by the model');
+    const receipt=await native.edit('a.txt',[{oldText:'old\nblock',newText:'new\nmore'}],snapshot.version,signal);
+    const expected='\uFEFFhead\r\nnew\r\nmore\r\ntail\nlast';
+    assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),expected);
+    assert.equal(receipt.before,original);assert.equal(receipt.after,expected);
+    const noop=await native.edit('a.txt',[{oldText:'more\ntail\nlast',newText:'more\ntail\nlast'}],receipt.version,signal);
+    assert.equal(noop.after,expected,'no-op must not normalize untouched mixed endings');
+    await native.restore('a.txt',expected);assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),original);
+    const empty=await native.write('empty.txt','',signal);assert.equal(empty.version.length,44);
+  });
+  await test('only explicit successful reads and writes authorize mutations; stale content is rejected',async()=>{
+    const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
+    const root='/sandbox/workspace/observations';fs.mkdirSync(nativePath(root),{recursive:true});
+    fs.writeFileSync(nativePath(root+'/a.txt'),'alpha\ntail');
+    const native=new NativeWorkspaceFiles(root),signal=new Cancellation();let tools=new WorkspaceTools(native);
+    const invoke=(name,args)=>tools.execute({id:name,function:{name,arguments:JSON.stringify(args)}},signal);
+    const edit=()=>invoke('edit_file',{path:'a.txt',oldText:'alpha',newText:'beta'});
+    await assert.rejects(edit(),/先.*读取/);
+    await assert.rejects(invoke('write_file',{path:'a.txt',content:'lost'}),/先.*读取/);
+    await invoke('search_file_content',{path:'.',query:'alpha'});await assert.rejects(edit(),/先.*读取/);
+    await assert.rejects(invoke('read_file',{path:'a.txt',offset:0}));await assert.rejects(edit(),/先.*读取/);
+    await invoke('read_file_lines',{path:'a.txt',startLine:1,endLine:1});
+    // Same byte count, with timestamps restored: content version still detects a change outside the read page.
+    const stat=fs.statSync(nativePath(root+'/a.txt'));
+    fs.writeFileSync(nativePath(root+'/a.txt'),'alpha\nTAIL');fs.utimesSync(nativePath(root+'/a.txt'),stat.atime,stat.mtime);
+    await assert.rejects(edit(),/已变化/);await assert.rejects(invoke('write_file',{path:'a.txt',content:'lost'}),/已变化/);
+    assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),'alpha\nTAIL');
+    await invoke('read_file',{path:'a.txt'});await edit();
+    await invoke('write_file',{path:'a.txt',content:'new'});
+    tools=new WorkspaceTools(native);await assert.rejects(edit(),/先.*读取/);
+    await invoke('write_file',{path:'created.txt',content:'new'});
+    await invoke('edit_file',{path:'created.txt',oldText:'new',newText:'edited'});
+    await invoke('read_file',{path:'a.txt'});fs.unlinkSync(nativePath(root+'/a.txt'));
+    await assert.rejects(invoke('write_file',{path:'a.txt',content:'resurrect'}),/已变化/);
+    assert.equal(fs.existsSync(nativePath(root+'/a.txt')),false);
+  });
+  await test('shared mutation queue prevents lost updates across workspace adapter instances',async()=>{
+    const root='/sandbox/workspace/racing';fs.mkdirSync(nativePath(root),{recursive:true});
+    const a=new NativeWorkspaceFiles(root),b=new NativeWorkspaceFiles(root),signal=new Cancellation();
+    const original=await a.write('a.txt','initial',signal);
+    const results=await Promise.allSettled([
+      a.edit('a.txt',[{oldText:'initial',newText:'first'}],original.version,signal),
+      b.edit('a.txt',[{oldText:'initial',newText:'second'}],original.version,signal)
+    ]);
+    assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+    assert.match(results.find(r=>r.status==='rejected').reason.message,/已变化/);
+    assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),'first');
+    const creates=await Promise.allSettled([a.write('new.txt','first',signal,{version:null}),b.write('new.txt','second',signal,{version:null})]);
+    assert.equal(creates.filter(r=>r.status==='fulfilled').length,1);
+  });
+  await test('queue holds through native commit, allows different files and releases after cancellation',async()=>{
+    const root='/sandbox/workspace/queue';fs.mkdirSync(nativePath(root),{recursive:true});
+    const a=new NativeWorkspaceFiles(root),b=new NativeWorkspaceFiles(root),signal=new Cancellation();
+    let release,entered;const blocked=new Promise(r=>release=r),started=new Promise(r=>entered=r);
+    const rename=fileIo.rename;let holding=true;
+    fileIo.rename=async(from,to)=>{if(to===root+'/a.txt'&&holding){holding=false;entered();await blocked;}return rename(from,to);};
+    let first,second;
+    try{
+      first=a.write('a.txt','first',signal);await started;
+      const cancelled=new Cancellation();let secondFinished=false;
+      second=b.write('a.txt','second',cancelled).then(()=>{secondFinished=true;return undefined;},e=>{secondFinished=true;return e;});
+      cancelled.cancel();
+      await b.write('b.txt','independent',signal);
+      assert.equal(secondFinished,false,'queued cancellation must not release another writer while native I/O is active');
+      release();await first;assert.match((await second).message,/停止/);
+      await b.write('a.txt','third',signal);assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),'third');
+      assert.equal(fs.readdirSync(nativePath(root)).filter(p=>p.endsWith('.tmp')).length,0);
+    }finally{release();await first;await second;fileIo.rename=rename;}
   });
   await test('image hydration awaits actual base64 encoding',async()=>{
     const id=crypto.randomUUID(),bytes=Buffer.from([255,216,255,217]);fs.writeFileSync(path.join(fixture,'attachments',id+'.jpg'),bytes);
