@@ -290,7 +290,7 @@ struct Index {
       IconButton({ icon: $r('sys.symbol.line_3_horizontal'), label: t("对话列表"), compId: 'open-history',
         disabled: !this.app.ready, onTap: () => this.setDrawer(true) })
       Column({ space: 1 }) {
-        Text(this.app.ready ? this.app.active.displayTitle : 'Tinybot').fontSize(16).fontWeight(FontWeight.Medium)
+        Text(this.app.ready ? (this.app.activeProject ? this.app.activeProject.name + ' · ' : '') + this.app.active.displayTitle : 'Tinybot').fontSize(16).fontWeight(FontWeight.Medium)
           .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
         Row({ space: 2 }) {
           if (this.app.ready && this.app.active.teamEnabled) {
@@ -332,7 +332,7 @@ struct Index {
         Column().width('100%').height('100%').backgroundColor($r('app.color.page_background'))
           .borderRadius({ topRight: 20, bottomRight: 20 })
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-        ThreadList({ app: this.app, onSelected: () => this.setDrawer(false), onSettings: () => {
+        ThreadList({ app: this.app, onSelected: () => this.setDrawer(false), onFiles: () => { this.setDrawer(false); this.openFiles(); }, onSettings: () => {
           this.setDrawer(false);
           this.openSettings();
         } })

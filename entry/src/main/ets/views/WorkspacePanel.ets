@@ -49,7 +49,7 @@ export struct WorkspacePanel {
   private files?: NativeWorkspaceFiles;
   aboutToAppear(): void {
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-    this.files = new NativeWorkspaceFiles(new WorkspaceStore(context.getApplicationContext().filesDir).pathFor(this.app.active.id));
+    this.files = new NativeWorkspaceFiles(new WorkspaceStore(context.getApplicationContext().filesDir).pathFor(this.app.activeWorkspaceId));
     if (this.initialPath) {
       const slash = this.initialPath.lastIndexOf('/');
       this.directory = slash < 0 ? '' : this.initialPath.slice(0, slash);
@@ -284,8 +284,8 @@ export struct WorkspacePanel {
       Row({ space: Space.sm }) {
         SymbolGlyph($r('sys.symbol.square_and_pencil')).fontSize(18).fontColor([$r('app.color.accent')])
         Column({ space: 2 }) {
-          Text(t("助手修改了这个文件")).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
-          Text(this.baseline?.existed ? t("确认保留修改，或恢复到修改前的版本。") : t("这是助手新建的文件。")).fontSize(Font.caption)
+          Text(this.app.active.projectId ? t("项目中的待审修改") : t("助手修改了这个文件")).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
+          Text(this.app.active.projectId ? t("这里包含项目内各会话和文件编辑的累计修改。") : this.baseline?.existed ? t("确认保留修改，或恢复到修改前的版本。") : t("这是助手新建的文件。")).fontSize(Font.caption)
             .fontColor($r('app.color.text_secondary'))
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
         Button(this.reviewing ? t("看内容") : t("看差异")).id('workspace-diff').attributeModifier(Btn.textSmall)
@@ -294,7 +294,7 @@ export struct WorkspacePanel {
       Row({ space: Space.sm }) {
         Button(this.baseline?.existed ? t("恢复原版") : t("删除文件")).id('workspace-restore').attributeModifier(Btn.plainSmall)
           .height(36).layoutWeight(1).enabled(!this.locked()).onClick(() => {
-            this.getUIContext().showAlertDialog({ title: t("恢复修改前版本？"), message: this.baseline?.existed ? t("当前内容将被保存基线替换。") : t("此文件是新建文件，恢复会删除它。"),
+            this.getUIContext().showAlertDialog({ title: t("恢复修改前版本？"), message: (this.app.active.projectId ? t("这会恢复项目中的累计修改，可能包含其他会话的改动。") + "\n" : "") + (this.baseline?.existed ? t("当前内容将被保存基线替换。") : t("此文件是新建文件，恢复会删除它。")),
               primaryButton: { value: t("取消"), action: () => {} }, secondaryButton: { value: t("恢复"), fontColor: $r('app.color.danger'), action: () => this.reviewAction(true) } });
           })
         Button(t("保留修改")).id('workspace-accept').attributeModifier(Btn.primarySmall).height(36).layoutWeight(1)
@@ -432,7 +432,7 @@ export struct WorkspacePanel {
         onWillDismiss: (action: DismissContentCoverAction) => { if (this.dirty()) { this.closePreview(); } else { action.dismiss(); } }
       })
     }
-    .title(this.crumbs().length > 0 ? this.crumbs()[this.crumbs().length - 1] : t("工作区文件"))
+    .title(this.crumbs().length > 0 ? this.crumbs()[this.crumbs().length - 1] : this.app.activeProject ? t("项目文件") + " · " + this.app.activeProject.name : t("工作区文件"))
     .backgroundColor($r('app.color.page_background'))
     // Back goes up one folder before leaving the page, matching system file managers.
     .onBackPressed(() => {

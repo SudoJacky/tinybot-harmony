@@ -50,7 +50,7 @@ export class ConversationStore implements SessionRepository {
       next.set(thread.id, previous === undefined || changed === undefined || changed.has(thread.id) ? JSON.stringify(thread) : previous);
     }
     const metadata: AppData = { version: data.version, config: data.config, threads: [], activeThreadId: data.activeThreadId,
-      providerProfiles: data.providerProfiles, extensions: data.extensions, productivity: data.productivity };
+      providerProfiles: data.providerProfiles, extensions: data.extensions, productivity: data.productivity, projects: data.projects };
     const header = JSON.stringify(metadata);
     this.captured = next;
     this.captureFailed = false;

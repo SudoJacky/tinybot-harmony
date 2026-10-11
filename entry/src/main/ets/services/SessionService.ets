@@ -1,3 +1,4 @@
+import { projectName, projectFor, workspaceIdFor, validateProjects, projectContext } from '../model/Project';
 import { proposeSessionMemory, reviewSessionMemory, addMemoryDraft } from './SessionMemory';
 import { McpSettings, McpSettingsCommand, McpSettingsResult, McpSettingsHost } from './McpSettings';
 import { t } from '../model/I18n';
@@ -33,7 +34,7 @@ import { AgentEvent, AgentRuntime } from './AgentRuntime';
 import { AgentTools } from './AgentLoop';
 import { CredentialVault, ProfileSettings, ProviderDraft } from './ProfileSettings';
 import { SessionEvent, SessionRepository, SessionResources, SessionState } from './SessionContracts';
-import { prepareSessionContext, sessionInstructions, sessionPromptSections, sessionContextSource } from './SessionContext';
+import { prepareSessionContext, sessionPromptSections, sessionContextSource } from './SessionContext';
 import { renderPrompt } from '../model/ContextProjection';
 interface UiComputeReceipt { status: string; result: UiValues; error: string; resultTruncated: boolean; }
 interface GeneratedImage { path: string; attachment: Attachment; }
@@ -68,6 +69,7 @@ export class SessionService {
   }
 
   snapshot(): AppData { return JSON.parse(JSON.stringify(this.data)) as AppData; }
+  get workspaceId(): string { return workspaceIdFor(this.data, this.active); }
   attributeUsage(records: RequestUsage[]): RequestUsage[] { return attributeLegacyUsage(records, this.data.threads); }
   async setTeamEnabled(enabled: boolean): Promise<boolean> {
     return this.mutate(t("保存团队模式失败："), async () => { this.active.teamEnabled = enabled; await this.persist(); });
@@ -119,8 +121,11 @@ export class SessionService {
       const candidate = this.snapshot(); const known = new Set(candidate.threads.map((item) => item.id));
       imported.threads = imported.threads.filter((item) => !known.has(item.id));
       prepareBackupServices(this.data, imported, () => this.resources.createId());
-      for (const thread of imported.threads) { await this.resources.ensureWorkspace(thread.id); }
+      candidate.projects = (candidate.projects || []).concat((imported.projects || []).filter((project) =>
+        !(candidate.projects || []).some((item) => item.id === project.id)));
       candidate.threads = candidate.threads.concat(imported.threads);
+      validateProjects(candidate);
+      for (const thread of imported.threads) { await this.ensureThreadWorkspace(thread, candidate); }
       // Restore preferences on a fresh install without overwriting an existing personal document.
       if (!(candidate.config.userDocument || '').trim()) { candidate.config.userDocument = imported.config.userDocument || ''; }
       candidate.providerProfiles = (candidate.providerProfiles || []).concat(imported.providerProfiles || []);
@@ -154,12 +159,14 @@ export class SessionService {
     this.status.phase = 'loading'; this.status.error = ''; this.publish('state');
     try {
       const data = await this.repository.load();
+      validateProjects(data);
       const migrate = data.providerProfiles === undefined;
       data.providerProfiles = data.providerProfiles || migrateProfiles(data.config);
       data.extensions = data.extensions || defaultExtensions();
       data.productivity = data.productivity || defaultProductivity();
+      for (const project of data.projects || []) { await this.resources.ensureWorkspace(project.id, project.workspaceId); }
       for (const thread of data.threads) {
-        await this.resources.ensureWorkspace(thread.id);
+        await this.ensureThreadWorkspace(thread, data);
         if ((thread.pendingInputs || []).length > 0) { thread.queuePaused = true; }
         if (migrate && data.config.configured) { thread.modelRef = { providerId: data.config.providerId, modelId: data.config.model }; }
       }
@@ -251,6 +258,7 @@ export class SessionService {
       const end = index < 0 ? 0 : index % 2 === 0 ? index : index + 1;
       const branch = this.freshThread(); branch.title = source.title.slice(0, 26) + t(' · 分支'); branch.titleEdited = true;
       branch.parentThreadId = source.id; branch.parentMessageId = index >= 0 ? source.messages[index].id : undefined; branch.modelRef = source.modelRef;
+      branch.projectId = source.projectId;
       branch.reasoningEffort = source.reasoningEffort;
       branch.teamEnabled = source.teamEnabled;
       branch.disabledMcpIds = source.disabledMcpIds?.slice();
@@ -259,8 +267,8 @@ export class SessionService {
       branch.attachments = index >= 0 && index % 2 === 0 ? JSON.parse(JSON.stringify(source.messages[index].attachments || [])) as Attachment[] : [];
       branch.references = index >= 0 && index % 2 === 0 ? (source.messages[index].references || []).map((item): ThreadReference => ({
         threadId: item.threadId, title: item.title, content: item.content, capturedAt: item.capturedAt, truncated: item.truncated, fullContent: item.fullContent })) : [];
-      await this.resources.ensureWorkspace(branch.id);
-      // Preserve historical messages verbatim. The request explicitly identifies the new workspace.
+      await this.ensureThreadWorkspace(branch);
+      // Preserve historical messages verbatim. Context describes shared project files or a fresh standalone workspace.
       const extras = this.data.productivity || defaultProductivity();
       const copied = extras.memories.filter((item) => item.threadId === source.id).map((item): MemoryEntry => {
         return { id: this.resources.createId(), content: item.content, threadId: branch.id, updatedAt: Date.now() };
@@ -272,9 +280,37 @@ export class SessionService {
     });
   }
 
-  async newThread(): Promise<boolean> {
+  private ensureThreadWorkspace(thread: ThreadData, data: AppData = this.data): Promise<void> {
+    return this.resources.ensureWorkspace(thread.id, projectFor(data, thread)?.workspaceId);
+  }
+
+  async saveProject(name: string, instructions: string, id?: string): Promise<boolean> {
+    return this.mutate(t('保存项目失败：'), async () => {
+      const candidate = this.snapshot();
+      const projects = candidate.projects || [];
+      let project = id ? projects.find((item) => item.id === id) : undefined;
+      if (id && !project) { throw new Error(t('会话关联的项目不存在。')); }
+      const now = Date.now();
+      if (project) {
+        project.name = projectName(name); project.instructions = instructions; project.updatedAt = now;
+      } else {
+        const projectId = this.resources.createId();
+        project = { id: projectId, name: projectName(name), workspaceId: 'project-' + projectId,
+          instructions: instructions, createdAt: now, updatedAt: now };
+        projects.push(project);
+        const thread = this.freshThread(); thread.projectId = project.id;
+        candidate.threads.unshift(thread); candidate.activeThreadId = thread.id;
+      }
+      candidate.projects = projects;
+      validateProjects(candidate);
+      if (!id) { await this.resources.ensureWorkspace(project.workspaceId); }
+      await this.commitSettings(candidate);
+    });
+  }
+
+  async newThread(projectId?: string): Promise<boolean> {
     return this.mutate(t("新建对话失败："), async () => {
-      const thread = this.freshThread(); await this.resources.ensureWorkspace(thread.id);
+      const thread = this.freshThread(); thread.projectId = projectId; await this.ensureThreadWorkspace(thread);
       this.data.threads.unshift(thread); this.data.activeThreadId = thread.id;
       this.status.contextStatus = ''; await this.persist();
     });
@@ -290,7 +326,7 @@ export class SessionService {
   }
   async selectThread(id: string): Promise<boolean> {
     return this.mutate(t("打开对话失败："), async () => {
-      const thread = this.requireThread(id); await this.resources.ensureWorkspace(thread.id);
+      const thread = this.requireThread(id); await this.ensureThreadWorkspace(thread);
       this.data.activeThreadId = id; this.status.contextStatus = ''; await this.persist();
     });
   }
@@ -486,7 +522,9 @@ export class SessionService {
     }
     const draftRevision = this.draftRevision;
     const thread = this.active; const config = this.currentConfig;
-    const instructions = sessionInstructions(config, this.extensions) + this.memoryPrompt(thread, true); const tools = this.chatTools(thread);
+    const sections = sessionPromptSections(config, this.extensions);
+    sections.push({ name: 'workspace', content: projectContext(this.data, thread) }, { name: 'memory', content: this.memoryPrompt(thread, true) });
+    const instructions = renderPrompt(sections); const tools = this.chatTools(thread);
     this.status.phase = 'compacting'; this.status.error = ''; this.publish('state');
     try {
       const result = await this.runtime.run({ sessionId: thread.id, config: config, messages: [], contextOnly: true, tools: tools,
@@ -540,7 +578,7 @@ export class SessionService {
     let tools = this.chatTools(thread, selected);
     const sections = sessionPromptSections(config, this.extensions, selected);
     sections.push({ name: 'memory', content: this.memoryPrompt(thread, true) });
-    if (thread.parentThreadId) { sections.push({ name: 'branch', content: '这是从历史创建的会话分支，使用独立的新工作区。历史文件操作发生在原会话，不能假设原文件仍存在；先列出或读取当前文件。' }); }
+    sections.push({ name: 'workspace', content: projectContext(this.data, thread) });
     const instructions = renderPrompt(sections);
     const user: MessageData = { id: this.resources.createId(), role: 'user', content: text, skillPrompt: expandSkillCommand(text, this.extensions.skills), status: 'complete', error: '',
       attachments: queuedId ? [] : thread.attachments, references: queuedId ? [] : thread.references };
@@ -597,7 +635,7 @@ export class SessionService {
       await this.runtime.run({ sessionId: thread.id, config: config, messages: [], tools: tools,
         usageOrigin: { threadId: thread.id, threadTitle: thread.title, turnId: user.id, turnLabel: text.slice(0, 80), purpose: 'conversation', skill: selected || undefined } }, {
         prepare: async (cancellation) => {
-          cancellation.check(); cancellation.onCancel(() => chatTeams?.stop()); await this.resources.ensureWorkspace(thread.id);
+          cancellation.check(); cancellation.onCancel(() => chatTeams?.stop()); await this.ensureThreadWorkspace(thread);
           cancellation.check();
           // The runtime's initial checkpoint has durably saved the first user message.
           if (generateTitle) { this.generateTitle(thread.id, user.id, text, fallbackTitle, copyModelConfig(config)); }
@@ -626,7 +664,7 @@ export class SessionService {
     }
     if (answer.status === 'complete' && !this.status.saveError) {
       if (options.saveSummary && !options.readOnly) {
-        try { await this.resources.afterTask?.(thread.id, answer.id, answer.content); }
+        try { await this.resources.afterTask?.(thread.id, answer.id, answer.content, projectFor(this.data, thread)?.workspaceId); }
         catch (error) { this.status.error = t("任务已完成，但结果归档失败：") + (error as Error).message; }
       }
       if (options.autoMemory && !options.readOnly) { this.reviewMemory(thread, user, copyModelConfig(config)); }
@@ -970,14 +1008,14 @@ export class SessionService {
     const live: LiveResources = { skills: () => this.extensions.skills,
       servers: () => (this.data.productivity?.servers || []).filter((item) => !(thread.disabledMcpIds || []).includes(item.id)) };
     return new ToolSet([this.resources.tools(thread.id, this.extensions, selected, extras,
-      (thread.attachments || []).concat(...thread.messages.map((item) => item.attachments || [])), live), new ReferenceTools(() => thread.messages)]);
+      (thread.attachments || []).concat(...thread.messages.map((item) => item.attachments || [])), live, projectFor(this.data, thread)?.workspaceId), new ReferenceTools(() => thread.messages)]);
   }
   private refreshContext(): void {
     if (this.data.threads.length === 0) { this.status.contextTokens = 0; this.status.contextBreakdown = []; this.status.contextSource = 'estimate'; return; }
     const config = this.currentConfig;
     const sections = sessionPromptSections(config, this.extensions);
     sections.push({ name: 'memory', content: this.memoryPrompt(this.active) });
-    if (this.active.parentThreadId) { sections.push({ name: 'branch', content: '这是从历史创建的会话分支，使用独立的新工作区。历史文件操作发生在原会话，不能假设原文件仍存在；先列出或读取当前文件。' }); }
+    sections.push({ name: 'workspace', content: projectContext(this.data, this.active) });
     if (this.active.teamEnabled) {
       sections.push({ name: 'team', content: CHAT_TEAM_INSTRUCTIONS + '\n本聊天已有团队（以此处ID为准，禁止跨会话访问）：' +
         JSON.stringify((this.active.teams || []).filter((run) => run.ownerMessageId).map((run) => run.id + ' ' + run.status)) });
@@ -1016,8 +1054,10 @@ export class SessionService {
   }
   private async replaceActive(id: string): Promise<void> {
     if (this.data.activeThreadId !== id) { return; }
-    const next = this.data.threads.find((item) => item.id !== id && !item.archived) || this.freshThread();
-    await this.resources.ensureWorkspace(next.id);
+    const projectId = this.requireThread(id).projectId;
+    const next = this.data.threads.find((item) => item.id !== id && !item.archived && item.projectId === projectId) ||
+      this.data.threads.find((item) => item.id !== id && !item.archived) || this.freshThread();
+    await this.ensureThreadWorkspace(next);
     if (!this.data.threads.some((item) => item.id === next.id)) { this.data.threads.unshift(next); }
     this.data.activeThreadId = next.id; this.status.contextStatus = '';
   }

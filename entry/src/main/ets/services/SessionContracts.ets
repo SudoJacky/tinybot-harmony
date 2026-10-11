@@ -15,10 +15,10 @@ export interface SessionRepository {
 }
 
 export interface SessionResources {
-  afterTask?(threadId: string, messageId: string, content: string): Promise<void>;
+  afterTask?(threadId: string, messageId: string, content: string, workspaceId?: string): Promise<void>;
   createId(): string;
-  ensureWorkspace(threadId: string): Promise<void>;
-  tools(threadId: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments?: Attachment[], live?: LiveResources): AgentTools;
+  ensureWorkspace(threadId: string, workspaceId?: string): Promise<void>;
+  tools(threadId: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments?: Attachment[], live?: LiveResources, workspaceId?: string): AgentTools;
   installSkill?(source: string, paths: string[], cancellation: Cancellation): Promise<SkillData>;
   prepareMcp?(server: McpServer, request: McpRequest, cancellation: Cancellation, confirm?: boolean): Promise<McpServer>;
   testMcp?(server: McpServer, cancellation: Cancellation): Promise<number>;

@@ -1,4 +1,5 @@
 import { t } from './I18n';
+import { ProjectData, validateProjects } from './Project';
 import { UiSavedState, validateUiStates } from './InteractiveUi';
 import { REASONING_EFFORTS } from './ReasoningEffort';
 import { ThreadReference, referenceContext, validateThreadReferences } from './ThreadReferences';
@@ -65,6 +66,7 @@ export function copyModelConfig(config: ModelConfig, configured: boolean = confi
 export interface ContextState { compaction?: CompactionData; }
 
 export interface ThreadData extends ContextState {
+  projectId?: string;
   memorySnapshot?: string;
   memoryReviewedMessageId?: string;
   memoryReview?: MemoryReviewRecord;
@@ -91,6 +93,7 @@ export interface ThreadData extends ContextState {
 }
 
 export interface AppData {
+  projects?: ProjectData[];
   version: number;
   // Includes the provider/model and reasoning selection shared by empty chats.
   config: ModelConfig;
@@ -115,7 +118,7 @@ export function defaultConfig(): ModelConfig {
 }
 
 export function emptyData(): AppData {
-  return { version: 1, config: defaultConfig(), threads: [], activeThreadId: '' };
+  return { version: 2, projects: [], config: defaultConfig(), threads: [], activeThreadId: '' };
 }
 
 // Replay completed text and tool receipts. Interrupted prose is excluded, but file effects remain known.
@@ -164,7 +167,7 @@ export function requestHistory(messages: MessageData[], systemPrompt: string): M
 
 export function parseAppData(text: string): AppData {
   const data = JSON.parse(text) as AppData;
-  if (!data || data.version !== 1 || !data.config || !Array.isArray(data.threads) ||
+  if (!data || ![1, 2].includes(data.version) || !data.config || !Array.isArray(data.threads) ||
     typeof data.activeThreadId !== 'string' || typeof data.config.configured !== 'boolean' || typeof data.config.baseUrl !== 'string' ||
     typeof data.config.model !== 'string' || typeof data.config.systemPrompt !== 'string' ||
     typeof data.config.credentialAlias !== 'string') {
@@ -284,5 +287,8 @@ export function parseAppData(text: string): AppData {
   if (data.activeThreadId.length > 0 && !threadIds.has(data.activeThreadId)) {
     throw new Error(t("找不到上次打开的会话，原文件已保留。"));
   }
+  validateProjects(data);
+  data.projects = data.projects || [];
+  data.version = 2;
   return data;
 }

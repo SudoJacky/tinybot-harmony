@@ -94,7 +94,7 @@ struct ThreadRow {
             if (this.query.trim()) { Text(this.snippet()).fontSize(12).maxLines(2).fontColor($r('app.color.accent')) }
             if (this.thread.parentThreadId) { Text('↳ ' + (this.app.threads.find((item) => item.id === this.thread.parentThreadId)?.title || t("原对话已删除"))).fontSize(11).maxLines(1).fontColor($r('app.color.text_secondary')) }
             Row({ space: 6 }) {
-              Text(shortTime(this.thread.updatedAt)).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
+              Text((this.app.projects.find((item) => item.id === this.thread.projectId)?.name || '') + (this.thread.projectId ? ' · ' : '') + shortTime(this.thread.updatedAt)).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
               if (this.thread.draft.length > 0) {
                 Text(t("草稿")).fontSize(11).fontColor($r('app.color.danger'))
               }
@@ -127,9 +127,53 @@ export struct ThreadList {
   @ObjectLink app: ChatViewModel;
   onSelected: () => void = () => {};
   onSettings: () => void = () => {};
+  onFiles: () => void = () => {};
   @State private query: string = '';
   @State private archived: boolean = false;
   @State private visibleCount: number = 40;
+  @State private projectScope: string = '*';
+  @State private projectEditing: boolean = false;
+  @State private projectId: string = '';
+  @State private projectName: string = '';
+  @State private projectInstructions: string = '';
+
+  aboutToAppear(): void { this.projectScope = this.app.active.projectId || '*'; }
+  private scopeIds(): string[] { return ['*', '', ...this.app.projects.map((item) => item.id)]; }
+  private scopeOptions(): SelectOption[] {
+    return [{ value: t('所有对话') }, { value: t('普通聊天') }, ...this.app.projects.map((item): SelectOption => ({ value: item.name }))];
+  }
+  private filtered(): ThreadViewModel[] {
+    return this.app.filteredThreads(this.query, this.archived).filter((thread) =>
+      this.projectScope === '*' || (thread.projectId || '') === this.projectScope);
+  }
+  private editProject(id: string = ''): void {
+    const project = this.app.projects.find((item) => item.id === id);
+    this.projectId = id; this.projectName = project?.name || ''; this.projectInstructions = project?.instructions || '';
+    this.projectEditing = true;
+  }
+
+  @Builder
+  projectEditor() {
+    Scroll() {
+      Column({ space: Space.md }) {
+        TextInput({ text: this.projectName, placeholder: t('项目名称') }).id('project-name').maxLength(80)
+          .onChange((value: string) => { this.projectName = value; })
+        TextArea({ text: this.projectInstructions, placeholder: t('项目说明与约定（可选）') }).id('project-instructions')
+          .height(220).maxLength(16000).onChange((value: string) => { this.projectInstructions = value; })
+        Text(t('项目内的会话共享文件和项目说明，各自保留对话历史。')).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+        if (this.app.error) { Banner({ text: this.app.error }) }
+        Button(t('保存')).id('project-save').attributeModifier(Btn.primary).width('100%')
+          .enabled(!this.app.busy && !this.app.saveError && this.projectName.trim().length > 0)
+          .onClick(async () => {
+            if (await this.app.saveProject(this.projectName, this.projectInstructions, this.projectId || undefined)) {
+              this.projectScope = this.projectId || this.app.active.projectId || '*';
+              this.projectEditing = false; this.visibleCount = 40;
+            }
+          })
+      }.width('100%').padding(Space.lg)
+    }.width('100%').height('100%').align(Alignment.TopStart)
+  }
+
 
   private sections(threads: ThreadViewModel[]): ThreadSection[] {
     const result: ThreadSection[] = [];
@@ -165,7 +209,23 @@ export struct ThreadList {
         }
       }.id('history-new-chat').attributeModifier(Btn.tonal).width('100%')
       .enabled(!this.app.busy && this.app.saveError.length === 0)
-      .onClick(async () => { if (await this.app.newThread()) { this.onSelected(); } })
+      .onClick(async () => { if (await this.app.newThread(this.projectScope === '*' ? '' : this.projectScope)) { this.onSelected(); } })
+      Row({ space: 4 }) {
+        Select(this.scopeOptions()).id('project-filter').layoutWeight(1)
+          .selected(this.scopeIds().indexOf(this.projectScope))
+          .value(this.scopeOptions()[Math.max(0, this.scopeIds().indexOf(this.projectScope))].value)
+          .onSelect((index: number) => { this.projectScope = this.scopeIds()[index]; this.visibleCount = 40; })
+        if (this.projectScope !== '*' && this.projectScope !== '') {
+          IconButton({ icon: $r('sys.symbol.folder'), label: t('项目文件'), compId: 'project-files',
+            disabled: this.app.busy || !!this.app.saveError, onTap: async () => {
+              if (await this.app.openProject(this.projectScope)) { this.onFiles(); }
+            } })
+          IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('编辑项目'), compId: 'project-edit',
+            disabled: this.app.busy || !!this.app.saveError, onTap: () => this.editProject(this.projectScope) })
+        }
+        IconButton({ icon: $r('sys.symbol.plus'), label: t('新建项目'), compId: 'project-create',
+          disabled: this.app.busy || !!this.app.saveError, onTap: () => this.editProject() })
+      }.width('100%')
       Search({ value: this.query, placeholder: t("搜索对话") }).id('search-threads').height(40)
         .backgroundColor($r('app.color.surface_variant')).placeholderColor($r('app.color.text_tertiary'))
         .onChange((value: string) => { this.query = value; this.visibleCount = 40; })
@@ -173,7 +233,7 @@ export struct ThreadList {
         optionIds: ['active-threads', 'archived-threads'], controlHeight: 38, labelSize: 13,
         trackRadius: 19, thumbRadius: 16, gap: 2, thumbShadow: false,
         onSelect: (index: number) => { this.archived = index === 1; this.visibleCount = 40; } })
-      if (this.app.filteredThreads(this.query, this.archived).length === 0) {
+      if (this.filtered().length === 0) {
         Column({ space: Space.sm }) {
           SymbolGlyph(this.query.trim().length > 0 ? $r('sys.symbol.magnifyingglass') : $r('sys.symbol.ellipsis_message'))
             .fontSize(32).fontColor([$r('app.color.text_tertiary')])
@@ -182,7 +242,7 @@ export struct ThreadList {
         }.layoutWeight(1).width('100%').justifyContent(FlexAlign.Center)
       } else {
         List({ space: 2 }) {
-          ForEach(this.sections(this.app.filteredThreads(this.query, this.archived).slice(0, this.visibleCount)),
+          ForEach(this.sections(this.filtered().slice(0, this.visibleCount)),
             (section: ThreadSection) => {
               ListItemGroup({ header: this.sectionHeader(section.title), space: 2 }) {
                 ForEach(section.threads, (thread: ThreadViewModel) => {
@@ -190,7 +250,7 @@ export struct ThreadList {
                 }, (thread: ThreadViewModel) => thread.id)
               }
             }, (section: ThreadSection) => section.title + ':' + section.threads.map((t) => t.id).join(','))
-          if (this.app.filteredThreads(this.query, this.archived).length > this.visibleCount) {
+          if (this.filtered().length > this.visibleCount) {
             ListItem() {
               Button(t("加载更多对话")).id('load-more-threads').attributeModifier(Btn.textSmall)
                 .onClick(() => { this.visibleCount += 40; })
@@ -218,5 +278,7 @@ export struct ThreadList {
     }
     .padding({ left: Space.md, right: Space.md, top: Space.sm, bottom: Space.sm })
     .height('100%').width('100%').backgroundColor($r('app.color.page_background'))
+    .bindSheet($$this.projectEditing, this.projectEditor(), { title: { title: this.projectId ? t('编辑项目') : t('新建项目') },
+      detents: [SheetSize.LARGE], dragBar: true, keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY })
   }
 }

@@ -86,6 +86,7 @@ export class MessageViewModel {
 
 @Observed
 export class ThreadViewModel {
+  projectId?: string;
   memoryReview?: MemoryReviewRecord;
   reasoningEffort: string = 'default';
   references: ThreadReference[] = [];
@@ -111,6 +112,7 @@ export class ThreadViewModel {
   queuePaused: boolean = false;
   constructor(data: ThreadData) { this.update(data); }
   updateMetadata(data: ThreadData): void {
+    this.projectId = data.projectId;
     this.memoryReview = data.memoryReview;
     this.reasoningEffort = data.reasoningEffort || 'default';
     this.references = data.references || [];
