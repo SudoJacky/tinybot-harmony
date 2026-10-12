@@ -1,5 +1,5 @@
 import { ToolFailure, parseToolResponse } from '../../model/ToolFailure';
-import { SearchConfig, SearchResult, SearchSource } from '../../model/WebSearch';
+import { DEEPSEEK_SEARCH_BASE_URL, DEEPSEEK_SEARCH_MODEL, SearchConfig, SearchResult, SearchSource } from '../../model/WebSearch';
 import { SearchProvider, SearchHttpRequest } from './SearchProvider';
 interface SearchItem { type: string; url: string; title?: string; page_age?: string; }
 interface Citation { url?: string; cited_text?: string; }
@@ -15,7 +15,7 @@ export function parseSearchResponse(body: string, maximum: number): SearchResult
   const response = parseToolResponse(body) as SearchResponse;
   if (!Array.isArray(response?.content)) { throw new ToolFailure('INVALID_RESPONSE', 'DeepSeek search returned no structured content.', 'inspect_service'); }
   const blocks = response.content.filter((block) => block?.type === 'web_search_tool_result');
-  if (!blocks.length) { throw new ToolFailure('CAPABILITY_UNAVAILABLE', 'DeepSeek did not return native web search results. Check the search endpoint, model and account capability in search settings.', 'check_settings'); }
+  if (!blocks.length) { throw new ToolFailure('CAPABILITY_UNAVAILABLE', 'DeepSeek did not return native web search results. Check the selected DeepSeek provider and account search capability.', 'check_settings'); }
   const snippets = new Map<string, string>();
   for (const block of response.content) {
     if (block?.type !== 'text' || !Array.isArray(block.citations)) { continue; }
@@ -44,18 +44,18 @@ export function parseSearchResponse(body: string, maximum: number): SearchResult
 }
 
 // Same native server tool contract as DeepSeek Harness; no free-form answer is used as evidence.
-export function searchRequest(model: string, query: string): string {
-  const body: DeepSeekSearchRequest = { model: model, max_tokens: 4096,
+export function searchRequest(query: string): string {
+  const body: DeepSeekSearchRequest = { model: DEEPSEEK_SEARCH_MODEL, max_tokens: 4096,
     messages: [{ role: 'user', content: [{ type: 'text', text: 'Perform a web search for the query: ' + query }] }],
     tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }] };
   return JSON.stringify(body);
 }
 
 export class DeepSeekSearchProvider implements SearchProvider {
-  request(config: SearchConfig, query: string, _maximum: number, key: string): SearchHttpRequest {
-    return { endpoint: config.baseUrl.replace(/\/+$/, '') + '/messages',
+  request(_config: SearchConfig, query: string, _maximum: number, key: string): SearchHttpRequest {
+    return { endpoint: DEEPSEEK_SEARCH_BASE_URL + '/messages',
       headers: { 'x-api-key': key, 'Authorization': 'Bearer ' + key, 'anthropic-version': '2023-06-01',
-        'Content-Type': 'application/json', 'Accept': 'application/json' }, body: searchRequest(config.model, query) };
+        'Content-Type': 'application/json', 'Accept': 'application/json' }, body: searchRequest(query) };
   }
   parse(body: string, maximum: number): SearchResult { return parseSearchResponse(body, maximum); }
 }

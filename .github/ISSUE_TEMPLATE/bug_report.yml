@@ -1,0 +1,110 @@
+name: Bug report
+description: Report a reproducible problem with Tinybot for HarmonyOS.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Tinybot for HarmonyOS. Please search existing issues before submitting a new report.
+        Remove API keys, credentials, and private data from any logs, screenshots, or examples you share.
+
+  - type: input
+    id: tinybot-version
+    attributes:
+      label: Tinybot version
+      description: Find this in Settings → About Tinybot. Include the version code if available.
+      placeholder: "0.1.6 (10006)"
+    validations:
+      required: true
+
+  - type: input
+    id: harmonyos-version
+    attributes:
+      label: HarmonyOS version
+      description: Include the full OS version or build number from the device's system settings.
+      placeholder: "HarmonyOS version and build number"
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: Device or emulator
+      description: Specify the device model and whether this is a physical device or a DevEco emulator.
+      placeholder: "HUAWEI Mate 70 Pro+ (physical device)"
+    validations:
+      required: true
+
+  - type: input
+    id: installation-source
+    attributes:
+      label: Installation source
+      description: Tell us where you obtained the app. For a local build, include the commit and DevEco Studio version.
+      placeholder: "Release package, testing package, or local build"
+    validations:
+      required: false
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the problem and its impact. Include the exact error message if available.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest reliable sequence that triggers the problem. Mention whether it happens every time or intermittently.
+      placeholder: |
+        1. Open ...
+        2. Select ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: Describe what you expected Tinybot to do.
+    validations:
+      required: true
+
+  - type: textarea
+    id: model-configuration
+    attributes:
+      label: Model or service configuration
+      description: If relevant, include the provider, model ID, API protocol, and any involved MCP or search service. Do not include credentials or private endpoints.
+      placeholder: |
+        Provider:
+        Model ID:
+        API protocol (Chat Completions, OpenAI Responses, or Anthropic Messages):
+        Related MCP or search service:
+    validations:
+      required: false
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Logs and screenshots
+      description: Add relevant logs, screenshots, or a short screen recording. Remove API keys, credentials, and private data first.
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Include anything else that may help us investigate, such as when the problem started or whether an earlier version worked.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: existing-issues
+    attributes:
+      label: Existing issues
+      options:
+        - label: I searched the existing issues and did not find a duplicate.
+          required: true
