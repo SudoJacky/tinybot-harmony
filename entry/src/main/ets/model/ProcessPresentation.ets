@@ -1,11 +1,42 @@
 import { t } from './I18n';
 import { AgentStep, ToolExecution } from './Agent';
+import { stepDisplayContent } from './PublishedPreview';
 
 export interface ProcessSummary { operations: number; failures: number; }
 // tool < 0 marks the step's thinking; otherwise an index into the step's tools.
 export interface ProcessItem { step: number; tool: number; }
 // The answer reads as narration interleaved with process groups: everything between two narrations folds into one line.
 export interface TimelineEntry { kind: string; key: string; step: number; items: ProcessItem[]; }
+
+// Derive the turn's current phase from runtime events, never from a simulated step list.
+export function turnPhase(status: string, steps: AgentStep[]): string {
+  if (status !== 'generating') { return status; }
+  const last = steps[steps.length - 1];
+  if (!last) { return 'waiting'; }
+  if (steps.some((step) => step.tools.some((tool) => tool.status === 'running' || tool.status === 'pending'))) { return 'tools'; }
+  if (last.tools.length) { return 'waiting'; }
+  if (last.content.trim()) { return 'answer'; }
+  if ((last.reasoningContent || '').trim()) { return 'thinking'; }
+  if (last.retries?.length) { return 'retry'; }
+  return 'waiting';
+}
+
+export function workflowEntryState(entry: TimelineEntry, steps: AgentStep[], status: string): string {
+  const tools = entry.items.filter((item) => item.tool >= 0).map((item) => steps[item.step]?.tools[item.tool]);
+  if (tools.some((tool) => tool?.status === 'failed')) { return 'failed'; }
+  if (tools.some((tool) => tool?.status === 'interrupted' || tool?.status === 'cancelled')) { return 'stopped'; }
+  if (status === 'generating') {
+    if (tools.some((tool) => tool?.status === 'running' || tool?.status === 'pending')) { return 'active'; }
+    const last = steps[steps.length - 1];
+    if (entry.kind === 'text' && entry.step === steps.length - 1 && !last.tools.length) { return 'active'; }
+    if (entry.items.some((item) => item.tool < 0 && item.step === steps.length - 1) &&
+      last.tools.length === 0 && !last.content.trim()) { return 'active'; }
+  }
+  // A stopped thought/answer must not acquire a success tick just because the turn ended.
+  if ((status === 'stopped' || status === 'failed') &&
+    (entry.step === steps.length - 1 || entry.items.some((item) => item.step === steps.length - 1))) { return status; }
+  return 'complete';
+}
 
 export function summarizeProcess(steps: AgentStep[]): ProcessSummary {
   const result: ProcessSummary = { operations: 0, failures: 0 };
@@ -30,7 +61,7 @@ export function buildTimeline(steps: AgentStep[]): TimelineEntry[] {
     if (step.requestError) { continue; }
     const items: ProcessItem[] = [];
     if ((step.reasoningContent || '').trim().length > 0) { items.push({ step: index, tool: -1 }); }
-    if (step.content.trim().length > 0) {
+    if (stepDisplayContent(step).trim().length > 0) {
       group = appendItems(entries, group, items);
       group = undefined; entries.push({ kind: 'text', key: 'text-' + index, step: index, items: [] });
       items.splice(0);

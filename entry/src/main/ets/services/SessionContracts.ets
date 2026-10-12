@@ -15,6 +15,7 @@ export interface SessionRepository {
 }
 
 export interface SessionResources {
+  recoverUi?(threadId: string, content: string, error: Error, cancellation: Cancellation, workspaceId?: string): Promise<string>;
   afterTask?(threadId: string, messageId: string, content: string, workspaceId?: string): Promise<void>;
   createId(): string;
   ensureWorkspace(threadId: string, workspaceId?: string): Promise<void>;

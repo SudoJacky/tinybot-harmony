@@ -1,5 +1,7 @@
 import { ProviderEffects } from './providers/Provider';
 import { PresentTools } from './PresentTools';
+import { PreviewTools } from './PreviewTools';
+import { savePreviewRepair } from './PreviewRecovery';
 import { WebSearchTools } from './WebSearchTools';
 import { NativeSearchTransport } from './NativeSearchTransport';
 import { ProductivityData, Attachment, McpServer } from '../model/Productivity';
@@ -67,6 +69,10 @@ export class NativeSessionResources implements SessionResources {
     this.workspaces = new WorkspaceStore(workspaceFilesDir); this.providers = providers; this.approval = approval;
   }
   createId(): string { return util.generateRandomUUID(); }
+  recoverUi(threadId: string, content: string, error: Error, cancellation: Cancellation, workspaceId?: string): Promise<string> {
+    return savePreviewRepair(new NativeWorkspaceFiles(this.workspaces.pathFor(workspaceId || threadId)),
+      this.createId(), content, error, cancellation);
+  }
   ensureWorkspace(id: string, workspaceId?: string): Promise<void> {
     return workspaceId ? this.workspaces.requireWorkspace(workspaceId) : this.workspaces.ensureThread(id);
   }
@@ -76,6 +82,7 @@ export class NativeSessionResources implements SessionResources {
       new SkillTools(extensions.skills, selected, live ? () => live.skills() : undefined), new InteractionTools(this.approval)];
     groups.push(new CodeExecutionTools(new NativeCodeExecutor()));
     groups.push(new PresentTools((path: string) => new NativeWorkspaceFiles(root).checkedPath(path)));
+    groups.push(new PreviewTools(new NativeWorkspaceFiles(root), (content, cancellation) => WebUiPreflight.validate(content, cancellation)));
     if (extensions.webEnabled) { groups.push(new WebTools(new NativeWebTransport())); }
     const search = productivity?.options?.search;
     if (extensions.webEnabled && search?.enabled) {

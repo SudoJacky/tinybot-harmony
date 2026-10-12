@@ -146,6 +146,61 @@ async function settleTitles(): Promise<void> {
 
 export default function sessionServiceTests(): void {
   describe('SessionService', () => {
+    it('reusesUntouchedActiveChatWithoutWritingOrCreatingWorkspaces', 0, async () => {
+      const f = new Fixture(titleSeed()); await f.session.initialize();
+      await f.session.setTeamEnabled(true); await f.session.setReasoningEffort('high');
+      const before = f.session.snapshot(); const writes = f.repository.writes.length;
+      const workspaces = f.resources.workspaces.length; const ids = f.resources.ids;
+      for (let i = 0; i < 10; i++) { expect(await f.session.newThread()).assertTrue(); }
+      expect(JSON.stringify(f.session.snapshot())).assertEqual(JSON.stringify(before));
+      expect(f.repository.writes.length).assertEqual(writes);
+      expect(f.resources.workspaces.length).assertEqual(workspaces); expect(f.resources.ids).assertEqual(ids);
+      expect(f.session.currentConfig.reasoning).assertEqual('high');
+      f.session.setDraft('Keep team choice'); await f.session.send();
+      expect(active(f.session.snapshot()).teamEnabled).assertTrue();
+    });
+    it('newChatPreservesPreparedInputAndNamedOrArchivedChats', 0, async () => {
+      const candidates: ThreadData[] = [];
+      for (let index = 0; index < 10; index++) { candidates.push(titleSeed().threads[0]); }
+      candidates[0].draft = 'unsent draft';
+      candidates[1].draft = ' ';
+      candidates[2].attachments = [{ id: 'file', name: 'note.txt', mime: 'text/plain', path: 'file.txt', size: 3, text: 'abc' }];
+      candidates[3].references = [{ threadId: 'source', title: 'Reference', content: 'Context', capturedAt: 1, truncated: false }];
+      candidates[4].pendingInputs = [{ id: 'queued', mode: 'followUp', text: 'Later' }];
+      candidates[5].title = 'Named'; candidates[5].titleEdited = true;
+      candidates[6].pinned = true;
+      candidates[7].archived = true;
+      candidates[8].parentThreadId = 'source';
+      candidates[9].messages = [
+        { id: 'm', role: 'user', content: 'sent', status: 'complete', error: '' },
+        { id: 'a', role: 'assistant', content: 'reply', status: 'complete', error: '' }];
+      for (const thread of candidates) {
+        const data = seed(); data.threads = [thread]; const f = new Fixture(data); await f.session.initialize();
+        if (!f.session.state.ready) { throw new Error(f.session.state.error); }
+        const original = JSON.stringify(f.session.snapshot().threads.find((item) => item.id === thread.id));
+        expect(await f.session.newThread()).assertTrue();
+        expect(f.session.snapshot().activeThreadId === thread.id).assertFalse();
+        expect(JSON.stringify(f.session.snapshot().threads.find((item) => item.id === thread.id))).assertEqual(original);
+        const count = f.session.snapshot().threads.length;
+        expect(await f.session.newThread()).assertTrue(); expect(f.session.snapshot().threads.length).assertEqual(count);
+      }
+    });
+    it('newChatReusesOnlyTheRequestedProjectAndSerializesRapidClicks', 0, async () => {
+      const f = new Fixture(); await f.session.initialize(); await f.session.saveProject('Project', '');
+      const project = f.session.snapshot().projects![0]; const first = f.session.snapshot().activeThreadId;
+      expect(await f.session.newThread(project.id)).assertTrue(); expect(f.session.snapshot().activeThreadId).assertEqual(first);
+      const entered = new Gate(); const release = new Gate();
+      f.repository.beforeSave = async () => { entered.open(); await release.promise; };
+      const creating = f.session.newThread(); await entered.promise;
+      expect(await f.session.newThread()).assertFalse();
+      release.open(); expect(await creating).assertTrue();
+      expect(active(f.session.snapshot()).projectId === undefined).assertTrue();
+      const count = f.session.snapshot().threads.length;
+      expect(await f.session.newThread()).assertTrue(); expect(f.session.snapshot().threads.length).assertEqual(count);
+      expect(await f.session.newThread(project.id)).assertTrue();
+      expect(active(f.session.snapshot()).projectId).assertEqual(project.id);
+      expect(f.provider.requests.length).assertEqual(0);
+    });
     it('sharesProjectInstructionsAcrossFreshSessionsWithoutLeakingOtherHistory', 0, async () => {
       const f = new Fixture(); await f.session.initialize();
       expect(await f.session.saveProject('Calculator', 'Use integer cents.')).assertTrue();
@@ -1034,7 +1089,8 @@ export default function sessionServiceTests(): void {
     });
 
     it('routesLateComposerChangesToTheDisplayedThreadDuringASwitch', 0, async () => {
-      const f = new Fixture(); await f.session.initialize(); await f.session.newThread();
+      const data = seed(); data.threads[0].titleEdited = true;
+      const f = new Fixture(data); await f.session.initialize(); await f.session.newThread();
       const second = f.session.snapshot().activeThreadId;
       const entered = new Gate(); const release = new Gate(); let blocked = false;
       f.repository.beforeSave = async () => { if (!blocked) { blocked = true; entered.open(); await release.promise; } };

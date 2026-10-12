@@ -1,4 +1,6 @@
 import { parseWebUi } from './WebUi';
+import { parseUiJson } from './UiJson';
+import { UiDiagnosticError, locateUiError } from './UiRepair';
 import { parseDataView } from './RichArtifacts';
 import { parseUiScene } from './UiScene';
 // Platform-independent versioned JSONL UI protocol. Only complete records are applied.
@@ -17,7 +19,7 @@ export interface UiPart { kind: string; key: string; content: string; closed: bo
 const CONTAINERS: string[] = ['column', 'row', 'card'];
 const INPUTS: string[] = ['input', 'number', 'select', 'segmented', 'toggle', 'checkbox', 'slider', 'stepper'];
 const KINDS: string[] = CONTAINERS.concat(INPUTS, ['text', 'heading', 'markdown', 'button', 'progress', 'divider', 'image', 'data', 'scene', 'web']);
-function fail(detail: string): never { throw new Error('Interactive UI: ' + detail); }
+function fail(detail: string): never { throw new UiDiagnosticError('INVALID_FIELD', 'Interactive UI: ' + detail); }
 export function uiIdentifier(value: string): boolean {
   return typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(value) && !['constructor', 'prototype', '__proto__'].includes(value);
 }
@@ -87,10 +89,12 @@ export class UiCompiler {
   private offset: number = 0;
   private records: number = 0;
   private begun: boolean = false;
+  private lineNumber: number = 0;
+  private diagnostic?: UiDiagnosticError;
   update(source: string, final: boolean): UiDocument {
     if (!source.startsWith(this.source)) { fail('stream rewrote published prefix'); }
     this.source = source;
-    if (this.error) { throw new Error(this.error); }
+    if (this.diagnostic) { throw this.diagnostic; }
     try {
       if (source.length > 96000) { fail('surface exceeds 96,000 characters'); }
       let end = source.indexOf('\n', this.offset);
@@ -98,13 +102,22 @@ export class UiCompiler {
       if (final && this.offset < source.length) { this.line(source.slice(this.offset)); this.offset = source.length; }
       if (final && !this.document.complete) { fail('incomplete surface: expected end record'); }
       return this.document;
-    } catch (error) { this.error = (error as Error).message; throw error as Error; }
+    } catch (error) { this.diagnostic = locateUiError(error as Error, {}); this.error = this.diagnostic.message; throw this.diagnostic; }
   }
   private line(line: string): void {
+    this.lineNumber++;
+    try { this.record(line); }
+    catch (error) {
+      const diagnostic = locateUiError(error as Error, { line: this.lineNumber });
+      diagnostic.message = 'Interactive UI JSONL line ' + this.lineNumber + ': ' + diagnostic.message;
+      throw diagnostic;
+    }
+  }
+  private record(line: string): void {
     if (!line.trim()) { return; }
     if (++this.records > 512) { fail('too many records'); }
     if (this.document.complete) { fail('record after end'); }
-    const record = JSON.parse(line) as UiRecord;
+    const record = parseUiJson(line, 'record') as UiRecord;
     if (!record || typeof record !== 'object') { fail('invalid record'); }
     if (!this.begun) {
       fields(record, ['op', 'version', 'title', 'state']);
@@ -131,6 +144,14 @@ export class UiCompiler {
     if (!uiIdentifier(node.id) || !KINDS.includes(node.kind)) { fail('invalid node id or kind'); }
     text(node.text, 8000); text(node.data, node.kind === 'web' ? 64000 : 16000);
     if (node.kind === 'web' && (!node.data || node.bind !== undefined || node.action !== undefined)) { fail(node.id + ': web requires static data and uses state-only messages'); }
+    if (node.kind === 'web') {
+      try { parseWebUi(node.data || ''); }
+      catch (error) {
+        const diagnostic = locateUiError(error as Error, { node: node.id });
+        if (!diagnostic.location.field) { diagnostic.location.field = 'node.data'; }
+        diagnostic.message = 'node=' + node.id + ' field=' + diagnostic.location.field + ': ' + diagnostic.message; throw diagnostic;
+      }
+    }
     const initial = this.document.initial;
     for (const key of [node.bind, node.visibleKey]) {
       if (key !== undefined && (!uiIdentifier(key) || !Object.keys(initial).includes(key))) { fail(node.id + ': unknown state binding'); }
@@ -226,7 +247,12 @@ export function validateUiAnswer(content: string): void {
   const surfaces = uiParts(content, false).filter((part) => part.kind === 'ui');
   if (surfaces.length > 8) { fail('more than 8 surfaces in one response'); }
   for (const part of surfaces) {
-    if (!part.closed) { fail('missing closing UI fence'); }
-    new UiCompiler().update(part.content, true);
+    try {
+      if (!part.closed) { fail('missing closing UI fence'); }
+      new UiCompiler().update(part.content, true);
+    } catch (error) {
+      const diagnostic = locateUiError(error as Error, { surface: part.key });
+      diagnostic.message = 'surface=' + part.key + ': ' + diagnostic.message; throw diagnostic;
+    }
   }
 }

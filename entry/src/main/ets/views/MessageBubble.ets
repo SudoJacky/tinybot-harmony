@@ -1,5 +1,6 @@
 import { AppMaterials } from '../common/AppMaterials';
 import { t } from '../model/I18n';
+import { stepDisplayContent } from '../model/PublishedPreview';
 import { PresentedFile, deliveredFiles } from '../model/Deliverables';
 import { turnFileChanges } from '../model/TurnFileChanges';
 import { TurnChangesCard } from './TurnChangesCard';
@@ -22,10 +23,11 @@ import { DisclosureState } from '../viewmodel/DisclosureState';
 import { ToolDetails } from './ToolDetails';
 import { OrchestrationReceipts } from './OrchestrationReceipts';
 import { ProcessItem, TimelineEntry, buildTimeline, describeTools, durationLabel, elapsedMs, foldsToAnswer, persistentTool,
-  summarizeProcess, thoughtTail } from '../model/ProcessPresentation';
+  summarizeProcess, thoughtTail, turnPhase, workflowEntryState } from '../model/ProcessPresentation';
 import { toolFavicon, toolStat, toolTitle, toolStatusLabel } from '../model/ToolPresentation';
 import { WebsiteIcon } from '../common/WebsiteIcon';
 import { ThinkingLine } from '../common/Widgets';
+import { SendBubbleMotion, SendOrigin } from '../common/SendBubbleMotion';
 
 interface ToolArguments { path?: string; url?: string; query?: string; pattern?: string; name?: string; tool?: string; prompt?: string; title?: string;
   goal?: string; members?: Object[]; tasks?: Object[]; waitFor?: string; action?: string; }
@@ -234,22 +236,21 @@ struct ProcessGroup {
   @Builder
   header() {
     Row({ space: 6 }) {
-      SymbolGlyph(this.failures() > 0 ? $r('sys.symbol.exclamationmark_circle') : this.icon()).fontSize(14)
-        .fontColor([this.failures() > 0 ? $r('app.color.danger') : $r('app.color.text_tertiary')])
+      ThinkingLine({ label: this.label(), working: this.active(), compact: true,
+        icon: this.failures() > 0 ? $r('sys.symbol.exclamationmark_circle') : this.icon(), danger: this.failures() > 0 })
       if (this.active()) {
-        ThinkingLine({ label: this.label(), compact: true })
         Text(this.detail()).fontSize(12).maxLines(1).layoutWeight(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_tertiary'))
       } else {
-        Text(this.label()).fontSize(13).maxLines(1).flexShrink(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_tertiary'))
         if (this.failures() > 0) {
           Text(t('{0} 次失败', [this.failures()])).fontSize(12).flexShrink(0).fontColor($r('app.color.danger'))
         }
         Blank()
       }
-      SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(11).fontColor([$r('app.color.text_tertiary')])
-        .rotate({ angle: this.disclosure.open ? 180 : 0 })
+      Stack({ alignContent: Alignment.Center }) {
+        SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(11).fontColor([$r('app.color.text_tertiary')])
+      }.width(16).height(16).rotate({ angle: this.disclosure.open ? 180 : 0 })
+        .animation({ duration: Motion.medium, curve: Motion.standard })
     }.id(this.groupKey + '-' + this.message.id).width('100%').height(44)
     .accessibilityText((this.disclosure.open ? t('收起') : t('展开')) + ' ' + this.label())
     .onClick(() => {
@@ -286,7 +287,8 @@ struct ProcessGroup {
             }.width('100%').alignItems(HorizontalAlign.Start)
             .padding({ left: this.items().length === 1 && !this.thought() ? 0 : 12 }).margin({ bottom: 4 })
             .border({ width: { left: this.items().length === 1 && !this.thought() ? 0 : 1 }, color: $r('app.color.divider') })
-            .transition(TransitionEffect.OPACITY.animation({ duration: Motion.medium, curve: Motion.standard }))
+            .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -3 }))
+              .animation({ duration: Motion.medium, curve: Motion.standard }))
           }
         }.width('100%').alignItems(HorizontalAlign.Start)
       }
@@ -349,6 +351,12 @@ export struct ImageViewer {
 
 @Component
 export struct MessageBubble {
+  @Prop @Watch('syncWorkflow') turnStatus: string = '';
+  @State private settled: boolean = false;
+  @State private workflowCollapsed: boolean = false;
+  @Prop sendOrigin: SendOrigin | undefined = undefined;
+  onSendReady: () => void = () => {};
+  onSendFinish: () => void = () => {};
   @Prop readingMessageId: string = '';
   onRead: (id: string) => void = () => {};
   @Prop webEnabled: boolean = false;
@@ -374,15 +382,51 @@ export struct MessageBubble {
   @State private previewing: boolean = false;
 
   private timeline(): TimelineEntry[] { return buildTimeline(this.message.stepViews); }
+  aboutToAppear(): void { this.settled = this.turnStatus === 'complete'; }
+  private syncWorkflow(): void {
+    this.getUIContext().animateTo({ duration: 280, curve: Motion.standard }, () => {
+      this.settled = this.turnStatus === 'complete';
+      // Interrupted work remains visible, including errors and pending questions.
+      if (this.turnStatus !== 'generating') { this.workflowCollapsed = false; }
+    });
+  }
   // A finished answer folds its narration and process behind the elapsed time so the reply leads on a phone screen.
-  private foldable(): boolean { return this.message.status === 'complete' && foldsToAnswer(this.timeline()); }
-  private folded(): boolean { return this.foldable() && !this.message.processOpen; }
+  private foldable(): boolean { return this.settled && foldsToAnswer(this.timeline()); }
+  private folded(): boolean { return this.workflowCollapsed || (this.foldable() && !this.message.processOpen); }
+  private workflowLabel(): string {
+    const phase = turnPhase(this.message.status, this.message.stepViews);
+    if (phase === 'tools') {
+      for (const step of this.message.stepViews) {
+        const tool = step.tools.find(activeTool);
+        if (tool) { return t('正在{0}', [toolTitle(tool.call.function.name)]); }
+      }
+    }
+    if (phase === 'answer') { return t('正在生成回答'); }
+    if (phase === 'thinking') { return t('正在思考'); }
+    if (phase === 'retry') { return t('正在重试'); }
+    if (phase === 'generating' || phase === 'waiting') { return t('等待模型响应'); }
+    if (phase === 'stopped') { return t('已停止'); }
+    if (phase === 'failed') { return t('未完成'); }
+    return this.processSummary();
+  }
+  private workflowVisible(): boolean {
+    return this.message.status === 'generating' || this.message.stepViews.length > 0;
+  }
+  private traceEntry(entry: TimelineEntry): boolean {
+    const entries = this.timeline();
+    return entry.kind !== 'steering' && !(entry.kind === 'text' && entries[entries.length - 1]?.key === entry.key);
+  }
+  private traceState(entry: TimelineEntry): string {
+    const live = this.timeline().find((item: TimelineEntry) => item.key === entry.key) || entry;
+    return workflowEntryState(live, this.message.stepViews, this.message.status);
+  }
   private entryVisible(entry: TimelineEntry, index: number, count: number): boolean {
     if (!this.folded()) { return true; }
-    if (entry.kind === 'text') { return index === count - 1 || (this.message.stepViews[entry.step]?.content || '').includes('```tinybot-ui'); }
+    if (entry.kind === 'text') { return index === count - 1 || stepDisplayContent(this.message.stepViews[entry.step]).includes('```tinybot-ui'); }
     if (entry.kind !== 'process') { return true; }
     // Empty folded groups must not mount: the parent Column adds spacing even to empty children.
-    return entry.items.some((item: ProcessItem) => {
+    const live = this.timeline().find((item: TimelineEntry) => item.key === entry.key) || entry;
+    return live.items.some((item: ProcessItem) => {
       const tool = this.message.stepViews[item.step]?.tools[item.tool];
       return tool !== undefined && persistentTool(tool);
     });
@@ -486,6 +530,8 @@ export struct MessageBubble {
   @Builder
   userMessage() {
     Column({ space: 6 }) {
+      SendBubbleMotion({ origin: this.sendOrigin, bubbleId: 'sent-bubble-' + this.message.id,
+        onReady: this.onSendReady, onFinish: this.onSendFinish }) {
       ForEach(this.message.references, (item: ThreadReference) => {
         ThreadReferenceCard({ reference: item })
       }, (item: ThreadReference) => item.threadId)
@@ -525,11 +571,13 @@ export struct MessageBubble {
       if (this.message.error.length > 0) {
         Text(this.message.error).fontSize(Font.caption).fontColor($r('app.color.danger'))
       }
+      }
       Row({ space: 4 }) {
         this.actionButton($r('sys.symbol.square_and_pencil'), t('改写'), 'edit-' + this.message.id,
           () => this.onFork(this.message.id), () => this.actionsEnabled)
         this.moreActions()
-      }.justifyContent(FlexAlign.End)
+      }.justifyContent(FlexAlign.End).opacity(this.sendOrigin ? 0 : 1)
+        .animation({ duration: Motion.fast, curve: Motion.standard })
     }.width('100%').alignItems(HorizontalAlign.End).padding({ left: 48 })
   }
 
@@ -543,6 +591,15 @@ export struct MessageBubble {
     .alignItems(HorizontalAlign.Start).padding({ left: 14, right: 14, top: 8, bottom: 10 })
     .constraintSize({ maxWidth: '85%' }).borderRadius(Radius.md).backgroundColor($r('app.color.user_bubble'))
     .alignSelf(ItemAlign.End)
+  }
+
+  @Builder
+  workflowRail(entry: TimelineEntry) {
+    if (this.traceEntry(entry) && !this.folded()) {
+      Column() {
+        Column().width(1).height('100%').backgroundColor($r('app.color.divider'))
+      }.width(16).height('100%').padding({ top: entry.kind === 'process' ? 34 : 24, bottom: 2 })
+    }
   }
 
   @Builder
@@ -561,41 +618,62 @@ export struct MessageBubble {
         } else {
           Blank()
         }
-        if (this.message.status === 'generating') {
-          LoadingProgress().width(16).height(16).color($r('app.color.accent'))
-          Text(t("第 {0} 步", [Math.max(1, this.message.stepViews.length)])).fontSize(Font.caption)
-            .fontColor($r('app.color.text_secondary'))
-        } else if (this.message.status === 'stopped') {
-          Text(t("已停止")).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
-        } else if (this.message.status === 'failed') {
-          Text(t("未完成")).fontSize(Font.caption).fontColor($r('app.color.danger'))
-        }
       }.width('100%')
+      if (this.workflowVisible()) {
+        Row({ space: 6 }) {
+          ThinkingLine({ label: this.workflowLabel(), working: this.message.status === 'generating', compact: true,
+            icon: this.message.status === 'failed' ? $r('sys.symbol.exclamationmark_circle') :
+              this.message.status === 'stopped' ? $r('sys.symbol.stop_circle') :
+              this.message.status === 'generating' ? $r('sys.symbol.lightbulb') : $r('sys.symbol.checkmark'),
+            danger: this.message.status === 'failed' })
+          Blank()
+          if (this.failures() > 0) {
+            Text(t('{0} 次失败', [this.failures()])).id('process-failures-' + this.message.id)
+              .fontSize(12).fontColor($r('app.color.danger'))
+          }
+          if (this.message.status === 'generating') {
+            Text(t("第 {0} 步", [Math.max(1, this.message.stepViews.length)])).fontSize(11)
+              .fontColor($r('app.color.text_tertiary'))
+          }
+          if (this.timeline().length > 0 && (this.message.status === 'generating' || this.foldable())) {
+            Stack({ alignContent: Alignment.Center }) {
+              SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(11).fontColor([$r('app.color.text_tertiary')])
+            }.width(16).height(16).rotate({ angle: this.folded() ? 0 : 180 })
+              .animation({ duration: 280, curve: Motion.standard })
+          }
+        }.id('process-' + this.message.id).height(44).width('100%')
+        .accessibilityText((this.folded() ? t("查看执行过程，") : t("收起执行过程")) + this.workflowLabel())
+        .onClick(() => {
+          if (!this.timeline().length || (this.message.status !== 'generating' && !this.foldable())) { return; }
+          this.onInspect();
+          this.getUIContext().animateTo({ duration: 280, curve: Motion.standard }, () => {
+            if (this.message.status === 'generating') {
+              this.workflowCollapsed = !this.workflowCollapsed;
+              this.message.processOpen = !this.workflowCollapsed;
+            } else { this.message.processOpen = !this.message.processOpen; }
+          });
+        })
+      }
       if (this.message.stepViews.length > 0) {
-        if (this.foldable()) {
-          Row({ space: 6 }) {
-            Text(this.processSummary()).fontSize(13).fontColor($r('app.color.text_tertiary'))
-            if (this.failures() > 0) {
-              Text(t('{0} 次失败', [this.failures()])).id('process-failures-' + this.message.id).fontSize(12).fontColor($r('app.color.danger'))
-            }
-            SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(11).fontColor([$r('app.color.text_tertiary')])
-              .rotate({ angle: this.message.processOpen ? 180 : 0 })
-            Blank()
-          }.id('process-' + this.message.id).height(44).width('100%')
-          .border({ width: { bottom: 0.5 }, color: $r('app.color.divider') })
-          .accessibilityText((this.message.processOpen ? t("收起执行过程") : t("查看执行过程，")) + this.processSummary() +
-            (this.failures() ? t("{0} 次失败", [this.failures()]) : ''))
-          .onClick(() => {
-            this.getUIContext().animateTo({ duration: Motion.medium, curve: Motion.standard }, () => { this.onInspect(); this.message.processOpen = !this.message.processOpen; });
-          })
-        }
         ForEach(this.timeline(), (entry: TimelineEntry, index: number) => {
           if (this.entryVisible(entry, index, this.timeline().length)) {
-            Column() {
+            Row({ space: 10 }) {
+              if (this.traceEntry(entry) && !this.folded()) {
+                Column({ space: 5 }) {
+                  if (this.traceState(entry) === 'active') {
+                    LoadingProgress().width(14).height(14).color($r('app.color.accent'))
+                  } else {
+                    SymbolGlyph(this.traceState(entry) === 'failed' ? $r('sys.symbol.exclamationmark_circle') :
+                      this.traceState(entry) === 'stopped' ? $r('sys.symbol.stop_circle') : $r('sys.symbol.checkmark'))
+                      .fontSize(12).fontColor([this.traceState(entry) === 'failed' ? $r('app.color.danger') : $r('app.color.text_tertiary')])
+                  }
+                }.width(16).padding({ top: entry.kind === 'process' ? 15 : 5 })
+              }
+              Column() {
               if (entry.kind === 'steering') {
                 this.steering(entry.step)
               } else if (entry.kind === 'text') {
-                InteractiveAnswer({ content: this.message.stepViews[entry.step]?.content || '', step: entry.step, selectable: false,
+                InteractiveAnswer({ content: stepDisplayContent(this.message.stepViews[entry.step]), step: entry.step, selectable: false,
                   validation: this.message.stepViews[entry.step]?.uiValidation || '',
                   saved: this.message.uiStates, available: this.uiAvailable, onInteract: this.onUi,
                   streaming: this.message.status === 'generating' && entry.step === this.message.stepViews.length - 1 })
@@ -603,19 +681,18 @@ export struct MessageBubble {
                 ProcessGroup({ message: this.message, webEnabled: this.webEnabled, disclosure: this.message.disclosures.get(entry.key), groupKey: entry.key, richOnly: this.folded(),
                   onResume: this.onResume, onInspect: this.onInspect })
               }
-            }.width('100%').alignItems(HorizontalAlign.Start)
-            .transition(TransitionEffect.OPACITY.animation({ duration: Motion.medium, curve: Motion.standard }))
+              }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+            }.width('100%').alignItems(VerticalAlign.Top)
+            .background(this.workflowRail(entry), { align: Alignment.TopStart })
+            .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -4 }))
+              .animation({ duration: 280, curve: Motion.standard }))
           }
         }, (entry: TimelineEntry) => entry.key)
         if (this.retryStatus()) {
           Text(this.retryStatus()).fontSize(13).fontColor($r('app.color.text_secondary')).id('request-retry-' + this.message.id)
-        } else if (this.awaitingModel()) {
-          ThinkingLine()
         }
       } else if (this.message.content.length > 0) {
         InteractiveAnswer({ content: this.message.content, saved: this.message.uiStates, available: this.uiAvailable, onInteract: this.onUi, streaming: this.message.status === 'generating', selectable: false })
-      } else if (this.message.status === 'generating') {
-        ThinkingLine()
       }
       if (this.hasExtra) {
         this.extra()

@@ -50,7 +50,8 @@ function fixture(source = answer) {
     { id: 'a', role: 'assistant', content: source, steps: [{ content: source, tools: [] }], status: 'complete', error: '' }
   ];
   const f = new Fixture(data); let executions = 0;
-  f.resources.agentTools = { definitions: () => [], execute: async call => {
+  f.resources.agentTools = { definitions: () => [{ type: 'function', function: { name: 'execute_code', description: 'Fixture calculator',
+    parameters: { type: 'object', properties: {}, additionalProperties: true } } }], execute: async call => {
     executions++;
     const args = JSON.parse(call.function.arguments);
     const result = vm.runInNewContext('(function(input){' + args.code + '})(input)', { input: JSON.parse(args.input) }, { timeout: 100 });

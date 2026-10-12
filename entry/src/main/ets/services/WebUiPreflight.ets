@@ -1,5 +1,6 @@
 import { UiCompiler, UiValues, uiParts } from '../model/InteractiveUi';
 import { Cancellation, RunCancelledError } from './Cancellation';
+import { UiDiagnosticError } from '../model/UiRepair';
 
 export interface WebUiProbe { id: number; content: string; values: UiValues; }
 interface PendingProbe { probe: WebUiProbe; start: () => void; finish: (error?: Error) => void; }
@@ -54,7 +55,8 @@ export class WebUiPreflight {
         try { await WebUiPreflight.check(node.data || '', document.initial, cancellation); }
         catch (error) {
           cancellation.check();
-          throw new Error('surface=' + part.key + ' node=' + node.id + '\n' + (error as Error).message);
+          throw new UiDiagnosticError('WEB_STARTUP_FAILED', 'surface=' + part.key + ' node=' + node.id + '\n' + (error as Error).message,
+            { surface: part.key, node: node.id, field: 'node.data' });
         }
       }
     }
