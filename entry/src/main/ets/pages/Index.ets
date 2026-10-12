@@ -44,6 +44,7 @@ struct Index {
   @State private app: ChatViewModel = new ChatViewModel();
   @State private drawerOpen: boolean = false;
   @State private chatVisible: boolean = true;
+  @State private headerProgress: number = 0;
   @State private drawerReveal: number = 0;
   @State private drawerDragging: boolean = false;
   @State private drawerWidth: number = DRAWER_MAX_WIDTH;
@@ -330,6 +331,11 @@ struct Index {
 
   @Builder
   header() {
+    Stack() {
+      Column().id('chat-header-backdrop').width('100%').height(CHAT_HEADER_HEIGHT)
+        .backgroundEffect({ radius: 12, color: $r('app.color.chat_header_background') })
+        .translate({ y: -CHAT_HEADER_HEIGHT * this.headerProgress }).opacity(1 - this.headerProgress)
+        .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
     Row({ space: 4 }) {
       IconButton({ icon: $r('sys.symbol.line_3_horizontal'), label: t("对话列表"), compId: 'open-history',
         material: AppMaterials.control, tint: $r('sys.color.font_primary'),
@@ -366,6 +372,9 @@ struct Index {
         }.justifyContent(FlexAlign.Center).constraintSize({ maxWidth: '100%' })
       }
       .id('open-model-picker').layoutWeight(1).padding({ top: 4, bottom: 4 }).borderRadius(12)
+      .translate({ y: -CHAT_HEADER_HEIGHT * this.headerProgress }).opacity(1 - this.headerProgress)
+      .hitTestBehavior(this.headerProgress < 1 ? HitTestMode.Default : HitTestMode.None)
+      .accessibilityLevel(this.headerProgress < 1 ? 'auto' : 'no-hide-descendants')
       .accessibilityText(t("切换模型：") + this.app.currentModelLabel)
       .enabled(this.app.ready && !this.app.busy && !this.app.active.archived)
       .onClick(() => { this.paths.pushPath({ name: 'models' }); })
@@ -380,6 +389,8 @@ struct Index {
         disabled: !this.app.ready || this.app.busy || this.app.saveError.length > 0,
         onTap: () => { this.app.newThread(); } })
     }.width('100%').height(CHAT_HEADER_HEIGHT).padding({ left: 6, right: 6 })
+      .hitTestBehavior(HitTestMode.Transparent)
+    }.width('100%').height(CHAT_HEADER_HEIGHT).clip(true).hitTestBehavior(HitTestMode.Transparent)
     .translate({ x: this.drawerReveal * 28 })
   }
 
@@ -427,6 +438,7 @@ struct Index {
           if (this.app.ready) {
             ChatPanel({ app: this.app, thread: this.app.active, approval: this.approval, onSettings: () => this.openSettings(),
                 topInset: CHAT_HEADER_HEIGHT,
+                onHeaderProgress: (progress: number): void => { this.headerProgress = progress; },
                 voiceRequest: this.voiceRequest, onVoiceShortcutConsumed: () => { this.voiceRequest = ''; },
                 activeThreadId: this.app.active.id, speechEnabled: this.chatVisible && !this.drawerOpen && !this.drawerDragging,
                 onHistoryDragStart: (event: GestureEvent) => this.startDrawerDrag(event, true),
@@ -457,7 +469,7 @@ struct Index {
     // Native button materials only work inside the actual navigation title bar.
     .title({ builder: this.header, height: CHAT_HEADER_HEIGHT }, {
       barStyle: BarStyle.STACK, backgroundColor: Color.Transparent,
-      backgroundEffect: { radius: 12, color: $r('app.color.chat_header_background') }
+      backgroundEffect: { radius: 0, color: Color.Transparent }
     })
     .hideBackButton(true).titleMode(NavigationTitleMode.Mini).hideToolBar(true).mode(NavigationMode.Stack)
     .onNavBarStateChange((visible: boolean) => { this.chatVisible = visible; })

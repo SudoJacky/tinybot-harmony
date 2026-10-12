@@ -3,7 +3,8 @@ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),asse
 const {chromium}=require('playwright');
 const studio=process.env.DEVECO_STUDIO_HOME||path.join(process.env.ProgramFiles,'Huawei/DevEco Studio');
 const ts=require(studio+'/sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript');
-const exportsObject={};vm.runInNewContext(ts.transpileModule(fs.readFileSync('entry/src/main/ets/model/WebUi.ets','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2021}}).outputText,{exports:exportsObject});
+function model(name,directory='entry/src/main/ets/model'){const file=path.resolve(directory,name+'.ets'),exports={};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2021}}).outputText,{exports,require:id=>model(id,path.dirname(file))});return exports;}
+const exportsObject=model('WebUi');
 const {webUiHost,parseWebUi,parseWebUiMessage}=exportsObject;
 const assets='entry/src/main/resources/rawfile/interactive-web/';
 const example=JSON.parse(fs.readFileSync(assets+'example.json','utf8')).content.split('\n');
@@ -38,7 +39,23 @@ assert.throws(()=>parseWebUi(JSON.stringify({...spec,library:'cdn'})));assert.th
    }else assert.equal(messages.find(m=>m.type==='error'),undefined,JSON.stringify(messages));
    return page.frames().find(f=>f.parentFrame());
   }
-  let frame=await mount(begin.state);
+  const {PreviewTools}=model('../services/PreviewTools'),{Cancellation}=model('../services/Cancellation');
+  const {parseUiSurface}=model('InteractiveUi');
+  const previewSource='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text x="5" y="30">Pelican</text></svg>';
+  const previewCall={id:'browser-preview',type:'function',function:{name:'publish_preview',arguments:JSON.stringify({path:'pelican.svg'})}};
+  const receipt={call:previewCall,status:'running',output:''};
+  const publisher=new PreviewTools({read:async()=>({content:previewSource})},async content=>{
+    const data=JSON.parse(parseUiSurface(content,'0').nodes[0].data);
+    await mount({},data,'',true);
+  });
+  await publisher.execute(previewCall,new Cancellation(),{execution:receipt});
+  const preview=JSON.parse(parseUiSurface(receipt.previewContent,'0').nodes[0].data);
+  let frame=await mount({},preview);
+  assert.equal(await frame.locator('svg text').textContent(),'Pelican');
+  assert.equal(await frame.locator('svg').getAttribute('viewBox'),'0 0 100 100');
+  assert.equal(preview.html,previewSource);
+  console.log('PASS file publication runs real browser preflight and renders the exact SVG snapshot with empty state');
+  frame=await mount(begin.state);
   assert.equal(await frame.evaluate(()=>THREE.REVISION),'186');
   assert.equal(await frame.locator('canvas').count(),1);
   assert.equal(await frame.evaluate(()=>{try{parent.document.body;return false}catch{return true}}),true);

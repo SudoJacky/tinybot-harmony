@@ -45,6 +45,7 @@ export interface AgentRunRequest {
 }
 
 export interface AgentRunHooks {
+  recoverUi?: (content: string, error: Error, cancellation: Cancellation) => Promise<string>;
   contextChanged?: (request: PreparedRequest) => void;
   context?: ContextSource;
   prepare: (cancellation: Cancellation) => Promise<void>;
@@ -180,7 +181,8 @@ export class AgentRuntime {
               return prepared;
             },
             recordResponse: (response) => preparedContext.recordResponse(response),
-            turn: active.state.turn, maxSteps: limit, contextWindow: window, validateAnswer: this.validateAnswer }, active.cancellation, {
+            turn: active.state.turn, maxSteps: limit, contextWindow: window, validateAnswer: this.validateAnswer,
+            recoverUi: hooks.recoverUi }, active.cancellation, {
             event: (event: LoopEvent) => {
               if (this.active === active) {
                 this.emit({ type: event.type, run: active.state, step: event.step,

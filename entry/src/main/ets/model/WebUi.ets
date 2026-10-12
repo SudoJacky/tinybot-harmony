@@ -1,14 +1,24 @@
+import { parseUiJson } from './UiJson';
+import { UiDiagnosticError } from './UiRepair';
 // Versioned Web content embedded in a completed native UI surface.
 export interface WebUiSpec { version: number; html: string; css: string; js: string; library: string; height: number; }
 export interface WebUiMessage { type: string; id?: number; values?: Record<string, string | number | boolean>; message?: string; }
+function invalidWebField(field: string, expected: string): never {
+  throw new UiDiagnosticError('INVALID_FIELD', 'Web UI: ' + field + ' expected ' + expected, { field: 'node.data.' + field });
+}
 export function parseWebUi(source: string): WebUiSpec {
   if (source.length > 64000) { throw new Error('Web UI: content exceeds 64,000 characters'); }
-  const spec = JSON.parse(source) as WebUiSpec;
-  if (!spec || typeof spec !== 'object' || Array.isArray(spec) || Object.keys(spec).some((key) => !['version', 'html', 'css', 'js', 'library', 'height'].includes(key)) ||
-    spec.version !== 1 || typeof spec.html !== 'string' || typeof spec.css !== 'string' || typeof spec.js !== 'string' ||
-    !['none', 'three'].includes(spec.library) || !Number.isFinite(spec.height) || spec.height < 200 || spec.height > 800) {
-    throw new Error('Web UI: expected version 1, html/css/js strings, library none/three and height 200..800');
+  const spec = parseUiJson(source, 'node.data') as WebUiSpec;
+  if (!spec || typeof spec !== 'object' || Array.isArray(spec)) { throw new UiDiagnosticError('INVALID_FIELD', 'Web UI: node.data expected an object', { field: 'node.data' }); }
+  if (Object.keys(spec).some((key) => !['version', 'html', 'css', 'js', 'library', 'height'].includes(key))) {
+    throw new UiDiagnosticError('INVALID_FIELD', 'Web UI: only version, html, css, js, library and height are allowed', { field: 'node.data' });
   }
+  if (spec.version !== 1) { invalidWebField('version', '1'); }
+  if (typeof spec.html !== 'string') { invalidWebField('html', 'a string'); }
+  if (typeof spec.css !== 'string') { invalidWebField('css', 'a string'); }
+  if (typeof spec.js !== 'string') { invalidWebField('js', 'a string'); }
+  if (!['none', 'three'].includes(spec.library)) { invalidWebField('library', 'none or three'); }
+  if (!Number.isFinite(spec.height) || spec.height < 200 || spec.height > 800) { invalidWebField('height', 'a number in 200..800'); }
   return spec;
 }
 export function parseWebUiMessage(source: string): WebUiMessage {

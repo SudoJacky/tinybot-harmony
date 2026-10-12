@@ -13,6 +13,7 @@ import { ModelTurn } from '../model/Agent';
 import { ContextOverflowError } from './providers/ProviderErrors';
 import { executeToolBatch } from './ToolExecution';
 import { RepeatToolReminder } from './RepeatToolReminder';
+import { UiDiagnosticError, uiFailureReport } from '../model/UiRepair';
 import { requestWithRetry } from './RequestRetry';
 
 export interface SteeringInput {
@@ -52,6 +53,7 @@ export interface LoopContext {
   prepareRequest?: (tools: ToolDefinition[], pending: ModelMessage[], cancellation: Cancellation, recoverOverflow?: boolean) => Promise<PreparedRequest>;
   recordResponse?: (response: ModelTurn) => void;
   validateAnswer?: (content: string, cancellation: Cancellation) => Promise<void>;
+  recoverUi?: (content: string, error: Error, cancellation: Cancellation) => Promise<string>;
   model: ModelSession;
   tools: AgentTools;
   messages: ModelMessage[];
@@ -153,15 +155,18 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
       const hasUi = uiParts(response.content, false).some((part) => part.kind === 'ui');
       if (hasUi) {
         observer.event({ type: 'model_end', step: round });
+        let phase = 'INVALID_FIELD';
         try {
           validateUiAnswer(response.content);
+          phase = 'WEB_STARTUP_FAILED';
           await context.validateAnswer?.(response.content, cancellation);
           cancellation.check();
           step.uiValidation = '';
         } catch (error) {
           cancellation.check();
           if (error instanceof RunCancelledError) { throw error; }
-          step.uiValidation = (error as Error).message.slice(0, 8000) || 'UI validation failed without an error message';
+          const diagnostic = error instanceof UiDiagnosticError ? error : new UiDiagnosticError(phase, (error as Error).message);
+          step.uiValidation = context.recoverUi ? await context.recoverUi(response.content, diagnostic as Error, cancellation) : uiFailureReport(diagnostic as Error);
           validationFailures++;
         }
       } else { step.uiValidation = ''; }

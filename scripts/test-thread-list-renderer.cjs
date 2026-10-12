@@ -1,0 +1,160 @@
+// Run after devecocli build. Retain keyed groups and execute the actual emitted update callbacks.
+const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict');
+const root = path.resolve(__dirname, '..');
+const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio');
+const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
+const source = path.join(root, 'entry/src/main/ets/views/ThreadList.ets');
+const emitted = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/views/ThreadList.ts');
+assert.ok(fs.statSync(emitted).mtimeMs >= fs.statSync(source).mtimeMs, 'Build before testing');
+const tree = ts.createSourceFile(emitted, fs.readFileSync(emitted, 'utf8'), ts.ScriptTarget.Latest, true);
+const cls = name => tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === name);
+let mount, saveProject;
+const rowUpdates = [];
+function visit(node) {
+  if (ts.isCallExpression(node) && node.expression.getText(tree) === 'this.observeComponentCreation2' &&
+      node.arguments[1]?.getText(tree) === 'ForEach' && node.arguments[0].getText(tree).includes('ListItemGroup.create')) mount = node.getText(tree);
+  ts.forEachChild(node, visit);
+}
+visit(cls('ThreadList')); assert.ok(mount, 'Locate the actual project list renderer');
+function editorVisit(node) {
+  if (ts.isCallExpression(node) && node.expression.getText(tree) === 'Button.onClick') saveProject = node.arguments[0].getText(tree);
+  ts.forEachChild(node, editorVisit);
+}
+editorVisit(cls('ThreadList').members.find(n => n.name?.getText(tree) === 'projectEditor'));
+function rowVisit(node) {
+  if (ts.isCallExpression(node) && node.expression.getText(tree) === 'this.observeComponentCreation2' &&
+    node.arguments[1]?.getText(tree) === 'Text' && node.arguments[0].getText(tree).includes('Text.create(this.thread.displayTitle)')) rowUpdates.push(node.getText(tree));
+  ts.forEachChild(node, rowVisit);
+}
+rowVisit(cls('ThreadRow')); assert.equal(rowUpdates.length, 1);
+let serial = 0, current, initial;
+const effects = new Map(), lists = new Map(), branches = new Map(), texts = new Map(), groups = new Set(), readers = new Set(), menuItems = new Map();
+class ViewPU {
+  finalizeConstruction() {}
+  observeComponentCreation2(callback) { const id = ++serial; effects.set(id, callback); this.run(id, true); }
+  run(id, first) { const before = [current, initial]; current = id; initial = first; effects.get(id)(id, first); [current, initial] = before; }
+  forEachUpdateFunction(id, items, create, key) {
+    const previous = lists.get(id) || []; const next = items.map((item, i) => key(item, i));
+    lists.set(id, next); items.forEach((item, i) => { if (!previous.includes(next[i])) create(item, i); });
+  }
+  ifElseBranchUpdateFunction(branch, create) { if (branches.get(current) !== branch) { branches.set(current, branch); create(); } }
+  updateStateVarsOfChildByElmtId() {}
+  static create() {}
+  flush() { for (const id of [...effects.keys()]) if (readers.has(id)) this.run(id, false); }
+}
+const noop = new Proxy({}, { get: () => () => {} });
+const globals = { exports: {}, ViewPU, t: key => key, Motion: {}, Space: {}, Btn: {}, AppMaterials: {},
+  IconButton: class {}, SymbolGlyphModifier: class { fontColor() { return this; } }, Context: noop,
+  TransitionEffect: { OPACITY: { animation() { return this; } } },
+  ListItemGroup: { create(options) { if (initial) { groups.add(current); options.header(); } }, pop() {} },
+  Text: new Proxy({}, { get: (_, key) => key === 'create' ? value => texts.set(current, value) : () => {} }) };
+for (const name of ['ForEach','If','ListItem','Row','Stack','SymbolGlyph','Button','Menu','MenuItem']) globals[name] = noop;
+globals.MenuItem = new Proxy({}, { get: (_, key) => key === 'create' ? value => menuItems.set(current, value) : () => {} });
+for (const name of ['ButtonType','Color','Alignment','FontWeight','TextOverflow']) globals[name] = {};
+const names = ['filtered','sections','sectionThreads','sectionTitle','groupOpen','visibleCount','onActivePath','lastBranch','loadMore','toggleGroup','sectionHeader','projectActions'];
+vm.runInNewContext(ts.transpileModule(`${cls('ThreadSection').getText(tree)}
+class Sidebar extends ViewPU { ${cls('ThreadList').members.filter(n => names.includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')}
+mount() { ${mount}; } saveFromEditor() { return (${saveProject})(); } }
+class RowProbe extends ViewPU {
+${cls('ThreadRow').members.filter(n => ['active', 'actions'].includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')}
+mount() { ${rowUpdates.join(';')}; this.actions(); }
+}
+exports.Sidebar = Sidebar; exports.RowProbe = RowProbe;`, { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, globals);
+const cache = new Map();
+function load(file) {
+  file = path.resolve(file.endsWith('.ets') ? file : file + '.ets');
+  if (cache.has(file)) return cache.get(file);
+  const exports = {}; cache.set(file, exports);
+  let content = fs.readFileSync(file, 'utf8');
+  if (file.endsWith('SessionService.test.ets')) content += '\nexport { Fixture, seed };';
+  vm.runInNewContext(ts.transpileModule(content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021, experimentalDecorators: true } }).outputText,
+    { exports, Observed: cls => cls, setTimeout, clearTimeout, console, require: id => {
+      if (id === '@ohos/hypium') return {};
+      if (!id.startsWith('.')) throw Error('Unexpected dependency ' + id);
+      return load(path.resolve(path.dirname(file), id));
+    } }, { filename: file }); return exports;
+}
+const { Fixture, seed } = load(path.join(root, 'entry/src/test/SessionService.test'));
+const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/ChatViewModel'));
+(async () => {
+  const data = seed();
+  data.projects = [{ id: 'project', name: 'Original project', instructions: '', workspaceId: 'project-workspace', createdAt: 1, updatedAt: 1 }];
+  data.threads = ['one','two','three'].map((id, i) => ({ ...data.threads[0], id, titleEdited: true, updatedAt: 3-i }));
+  data.activeThreadId = 'three';
+  const f = new Fixture(data), app = new ChatViewModel(); await app.initialize(f.session);
+  const observedApp = new Proxy(app, { get(target, key, receiver) {
+    if (current !== undefined && ['threads','projects','active'].includes(key)) readers.add(current);
+    return Reflect.get(target, key, receiver);
+  } });
+  const sidebar = Object.assign(new globals.exports.Sidebar(), { app: observedApp, query: '', archived: false, visibleCounts: {}, collapsedProjects: [] });
+  sidebar.mount(); const groupIds = [...groups];
+  const countId = [...texts].find(([, value]) => value === '3')[0];
+  const rowListId = [...lists].find(([, ids]) => ids.includes('one'))[0];
+  const rows = () => Array.from(lists.get(rowListId));
+  assert.deepEqual(rows(), ['one','two','three']);
+  const row = Object.assign(new globals.exports.RowProbe(), { app: observedApp, thread: new Proxy(app.threads.find(t => t.id === 'three'), {
+    get(target, key, receiver) { if (current !== undefined) readers.add(current); return Reflect.get(target, key, receiver); }
+  }) });
+  row.mount(); const titleId = [...texts].find(([, value]) => value === 'Test')[0];
+  const pinMenuId = [...menuItems].find(([, value]) => value.content === '置顶')[0];
+  assert.equal(await app.renameThread('three', 'Renamed chat'), true); sidebar.flush();
+  assert.equal(texts.get(titleId), 'Renamed chat', 'Retained row must display renamed title immediately');
+  assert.equal(await app.deleteThread('one'), true); sidebar.flush();
+  assert.deepEqual(rows(), ['two','three'], 'Deleting must remove the retained row without switching tabs');
+  assert.equal(texts.get(countId), '2', 'Counts must immediately follow membership changes');
+  assert.equal(await app.archiveThread('two'), true); sidebar.flush();
+  assert.deepEqual(rows(), ['three'], 'Archiving must immediately remove the row');
+  assert.equal(await app.archiveThread('two'), true); sidebar.flush();
+  assert.deepEqual(rows(), ['two','three'], 'Restoring must immediately reinsert the row');
+  assert.equal(await app.pinThread('three'), true); sidebar.flush();
+  assert.deepEqual(rows(), ['three','two'], 'Pinning must reorder the retained group');
+  assert.equal(menuItems.get(pinMenuId).content, '取消置顶', 'Menu must reflect the new pinned state');
+  assert.equal(await app.pinThread('three'), true); sidebar.flush();
+  assert.deepEqual(rows(), ['two','three'], 'Unpinning must restore chronological order');
+  assert.equal(menuItems.get(pinMenuId).content, '置顶');
+  assert.equal(await app.newThread(''), true); sidebar.flush();
+  assert.ok(rows().includes(app.active.id), 'New chats must appear in the retained group');
+  assert.equal(await app.saveProject('Renamed project', '', 'project'), true); sidebar.flush();
+  assert.ok([...texts.values()].includes('Renamed project'), 'Project headers must read current names');
+  assert.deepEqual([...groups], groupIds, 'Updates must preserve group identity and collapse state');
+  sidebar.query = 'no matches'; sidebar.archived = true;
+  sidebar.projectId = ''; sidebar.projectName = 'Created from filtered view'; sidebar.projectInstructions = '';
+  sidebar.projectEditing = true;
+  await sidebar.saveFromEditor(); sidebar.flush();
+  const projectId = app.active.projectId;
+  assert.ok(projectId && projectId !== 'project');
+  assert.equal(sidebar.archived, false, 'New projects must be revealed outside the archived filter');
+  assert.equal(sidebar.query, '', 'New projects must not remain hidden by a previous search');
+  assert.equal(sidebar.projectEditing, false);
+  assert.ok([...texts.values()].includes('Created from filtered view'));
+  assert.ok([...lists.values()].some(ids => ids.includes(app.active.id)), 'New project must immediately contain its starter chat');
+  assert.equal(groups.size, groupIds.length + 1, 'Only the new project mounts; existing groups remain');
+  sidebar.query = 'Renamed chat'; sidebar.archived = true;
+  sidebar.projectId = projectId; sidebar.projectName = 'Edited project'; sidebar.projectEditing = true;
+  await sidebar.saveFromEditor();
+  assert.equal(sidebar.query, 'Renamed chat', 'Editing a project must preserve filters');
+  assert.equal(sidebar.archived, true);
+  assert.equal(app.error, '');
+  const widgetSource = path.join(root, 'entry/src/main/ets/common/Widgets.ets');
+  const widgetEmitted = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/common/Widgets.ts');
+  assert.ok(fs.statSync(widgetEmitted).mtimeMs >= fs.statSync(widgetSource).mtimeMs, 'Build Widgets before testing');
+  const widgetTree = ts.createSourceFile(widgetEmitted, fs.readFileSync(widgetEmitted, 'utf8'), ts.ScriptTarget.Latest, true);
+  const icon = widgetTree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'IconButton');
+  let accessibilityLabel;
+  class Property {
+    constructor(value) { this.value = value; }
+    get() { if (current !== undefined) readers.add(current); return this.value; }
+    set(value) { this.value = value; }
+    reset(value) { this.value = value; }
+  }
+  const widgets = { ...globals, exports: {}, SynchedPropertySimpleOneWayPU: Property, SynchedPropertyObjectOneWayPU: Property, ObservedObject: { GetRawObject: v => v },
+    Button: new Proxy({}, { get: (_, key) => key === 'accessibilityText' ? value => { accessibilityLabel = value; } : () => {} }) };
+  vm.runInNewContext(ts.transpileModule(icon.getText(widgetTree), { compilerOptions: {
+    module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021
+  } }).outputText, widgets);
+  const button = new widgets.exports.IconButton(undefined, { label: '新对话 · Original' }); button.initialRender();
+  assert.equal(accessibilityLabel, '新对话 · Original');
+  button.updateStateVars({ icon: button.icon, tint: button.tint, fill: button.fill, disabled: false, label: '新对话 · Renamed' }); button.flush();
+  assert.equal(accessibilityLabel, '新对话 · Renamed', 'Retained project buttons must update their accessibility names');
+  console.log('PASS retained sidebar: rename, pin/unpin labels and ordering, delete/archive/restore, new chat, project create/edit and filtered-view creation');
+})().catch(error => { console.error(error); process.exitCode = 1; });

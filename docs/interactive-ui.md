@@ -4,6 +4,31 @@
 
 协议和模型指引分别位于 `model/InteractiveUi.ets` 与 `model/InteractiveUiInstructions.ets`。这是 Tinybot 自己的客户端协议，不依赖特定模型或 ChatGPT 私有接口。
 
+## 按文件发布预览
+
+生成的 SVG、HTML 或较大的界面应先写入工作区，再调用 `publish_preview({"path":"pelican.svg","title":"Pelican"})`。支持 `.svg`、`.html` 和不带代码围栏的 `.jsonl`；前两者由客户端序列化为一个 Web 节点，JSONL 则使用完整的 `begin` / `node` / `action` / `end` 记录。JSONL 中的 `node.data` 仍用 `JSON.stringify` 序列化；无须保存交互状态时，空 `state: {}` 合法。
+
+工具只读取一次文件，校验协议并运行现有设备 Web 启动检查，通过后把该快照随工具记录保存。之后修改或删除文件不会改变已发布预览；重启、分支和状态操作均使用快照。模型只收到路径、标题和发布结果，不收到完整预览内容，也不应在最终回答中再次抄写 JSON。下载、分享和导出文件仍用 `present_files`。
+
+HTML 必须自包含，沿用 Web 沙箱的网络、文件和设备权限限制；需要原生控件、声明状态、独立 `js` 或 Three.js 时，使用 JSONL。启动检查失败或取消不会发布预览。解析错误指出文件（工具调用时）、surface、JSONL 行和嵌套 `node.data` 字段；引擎提供偏移时同时给出字符位置，否则保留错误及有界片段，不猜测位置或把语法错误归因于空状态。修复源文件后再次发布即可。
+
+## 失败后的局部修复
+
+恢复指引使用英文，按结构化错误类型选择，不匹配本地化错误文案。`publish_preview` 保留 `PREVIEW_INVALID` / `fix_preview_file`，并在 `details` 中提供 `category`、文件 `path` / `version`、`location`、有界 `excerpt` 和 `repair.instruction` / `repair.retry`。重试参数保留原始路径及可选标题，不包含完整源码。
+
+| 类型 | 恢复动作 |
+| --- | --- |
+| `JSON_SYNTAX` | 区分外层 JSONL 与嵌套 `node.data`，读取出错位置，用 `edit_file` 局部修正转义后重新发布。 |
+| `INVALID_FIELD` | 按字段和约束修改，例如 `node.data.height` 必须是 200–800 的数值。 |
+| `WEB_STARTUP_FAILED` | 检查启动错误和堆栈；宿主或设备能力不可用时先解决该条件，不反复改写有效源码。 |
+| 文件版本过期、未读取、匹配缺失或不唯一 | 保留原文件，重新读取，选取有足够上下文且唯一的 `oldText`。 |
+
+行号从 1 开始。嵌套 JSON 的 `character` 是解码后 `node.data` 内的位置，由 `characterScope` 标明，不能直接当作源文件列号。`locationScope` 区分 `jsonl_source` 与 SVG/HTML 自动生成的 `generated_wrapper`；不把包装记录的行号冒充 HTML/SVG 文件行号。
+
+普通聊天直接输出的 `tinybot-ui` 校验失败后，会按 surface 把原始 JSONL 保存到工作区 `preview-repairs/<唯一ID>-<surface>.jsonl`，在持久化的错误报告中提供每个已保存文件的路径、版本及 `publish_preview` 重试调用。Agent 读取这些文件并局部修改即可，无须重新抄写整段回答。去掉外层 Markdown 围栏不改变 JSONL 内容；如果只是缺少闭合围栏，暂存文件可直接发布。该回答的所有 surface 均未发布，修复后要分别发布仍需展示的 surface。
+
+只读模式不暂存文件；超过 8 个 surface 或保存失败会明确报告原因，部分保存只返回实际成功的路径。取消不触发模型重试。团队成员的直接输出目前沿用诊断恢复；已有文件的 `publish_preview` 错误指引与普通聊天一致。恢复报告随会话保存、重启后可重放；原始失败回答也保留，不在此处做上下文裁剪。Web 启动检查只覆盖启动，不保证后续所有交互正确。
+
 ## 原生能力
 
 - `column`、`card`、`row` 组合内容；行的实际可用宽度小于 400vp 时单列，达到 400vp 后两列。隐藏的节点不占位置。
@@ -49,6 +74,7 @@
 ```text
 node scripts/test-interactive-ui.cjs
 node scripts/test-interactive-ui-renderer.cjs
+node scripts/test-preview-publication.cjs
 ```
 
-需将 `DEVECO_STUDIO_HOME` 指向本机 DevEco Studio。上述测试覆盖协议、持久化及真实编译后的控件回调。真机验收应覆盖分段切换、步进、勾选、复制、窄屏布局和重启恢复；固定输入验证客户端行为，不等于模型生成质量评测。
+需将 `DEVECO_STUDIO_HOME` 指向本机 DevEco Studio。上述测试覆盖协议、持久化及真实编译后的控件回调，预览测试还通过实际 SessionService / AgentRuntime / 文件工具验证“大输入失败 → 暂存 → 读取 → 小范围替换 → 再发布”，并覆盖只读、保存失败、取消及编辑冲突。真机验收应覆盖分段切换、步进、勾选、复制、窄屏布局和重启恢复；固定输入验证客户端行为，不等于模型生成质量评测。

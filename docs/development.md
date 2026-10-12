@@ -50,6 +50,16 @@ node scripts/build-app-icons.cjs .cache/icon-tools/node_modules/@resvg/resvg-js
 
 `node scripts/test-productivity-native.cjs`（可用 `DEVECO_STUDIO_HOME` 指定 SDK 位置）。
 
+构建后运行 `node scripts/test-send-motion.cjs`，验证发送动效的实际编译后生命周期、输入区坐标换算、首条消息、历史恢复、切换会话、发送未被接受及后续队列消息隔离；动画观感和列表裁剪仍需在真机验证。
+
+构建后运行 `node scripts/test-thinking-motion.cjs`，验证思考状态的循环、结束交叉渐变、历史静态挂载、快速切换文案、离屏暂停与卸载清理；配合 `test-chat-disclosures.cjs` 确认手动展开状态不受影响。呼吸、扫光与展开效果在真机使用实际推理响应验证。
+
+构建后运行 `node scripts/test-turn-workflow.cjs`，验证整轮真实阶段、并行工具、重试/停止/失败、保留节点的最新步骤、完成收束及手动展开和预览保留。
+
+构建后运行 `node scripts/test-project-tree.cjs`，用真实会话服务与视图模型验证侧栏项目分组、普通聊天、空项目、同名项目、置顶顺序、搜索展开、归档、独立分页及新建会话归属；分支线和折叠动效在真机验证。
+
+`node scripts/test-thread-list-renderer.cjs` 使用编译后的回调与稳定分组节点，验证会话改名、删除、归档、恢复、置顶/取消置顶的排序与菜单、新建及项目改名后的即时刷新和计数，也验证从搜索、归档页面创建项目后显示新分组；只执行读取了变化状态的更新回调，防止分组闭包保留旧数组。
+
 `node scripts/test-i18n-native.cjs` 验证语言偏好与持久化；`node scripts/test-chat-disclosures.cjs` 验证流式更新、过程重开、消息隔离和历史加载时的展开状态。`node scripts/test-tool-details.cjs` 验证分类回执、失败状态与无损分页；构建后运行 `node scripts/test-team-renderer.cjs`，检查 DevEco 实际生成的 Team、工具详情及编排子调用更新回调。`node scripts/test-message-actions-renderer.cjs` 验证改写、重新生成、分支按钮在会话结束后恢复可用，再次忙碌或保存出错时禁用；复制保持可用。
 
 本地测试覆盖指令顺序、整批工具边界、无工具回答后的追加、取消、落盘失败、上下文和步数限制、历史回放与压缩、会话隔离和重启恢复。真机使用本地模拟模型验证追加后连续执行多个任务，以及停止、错误、重启、撤回编辑和恢复执行。

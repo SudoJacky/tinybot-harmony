@@ -4,6 +4,7 @@ import { AgentTools, ToolInvocationContext } from './AgentLoop';
 import { fileDiff } from '../model/FileDiff';
 import { TextEdit, applyTextEdits, validateEdits } from '../model/WorkspaceEdit';
 import { ToolFailure, parseToolArguments } from '../model/ToolFailure';
+import { repairGuidance } from '../model/UiRepair';
 import { WorkspaceSearch } from './WorkspaceSearch';
 import { Cancellation } from './Cancellation';
 import { WorkspaceFiles, WorkspaceWrite } from './WorkspaceFiles';
@@ -100,6 +101,10 @@ export class WorkspaceTools implements AgentTools {
     catch (error) {
       if (error instanceof ToolFailure && error.details?.path === undefined) {
         try { const args = parseToolArguments(call.function.arguments) as FileArguments; if (typeof args.path === 'string') { if (!error.details) { error.details = {}; } error.details.path = args.path; } } catch (_) {}
+      }
+      if (error instanceof ToolFailure && ['FS_STALE_VERSION', 'FS_MATCH_NOT_FOUND', 'FS_AMBIGUOUS_MATCH', 'FS_NOT_OBSERVED'].includes(error.code)) {
+        if (!error.details) { error.details = {}; }
+        error.details.repair = repairGuidance('EDIT_CONFLICT');
       }
       throw error as Error;
     }

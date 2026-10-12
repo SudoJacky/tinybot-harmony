@@ -29,12 +29,15 @@ import { ContextDetails } from './ContextDetails';
 import { Btn, Font, Motion, Radius, Space, fileSize } from '../common/Theme';
 import { Banner, IconBadge, IconButton } from '../common/Widgets';
 import { WindowViewport } from '../viewmodel/WindowViewport';
+import { SendFrame, SendOrigin } from '../common/SendBubbleMotion';
 
 @Component
 export struct ChatPanel {
   @ObjectLink app: ChatViewModel;
   @ObjectLink thread: ThreadViewModel;
   @Prop topInset: number = 0;
+  onHeaderProgress: (progress: number) => void = () => {};
+  private lastHeaderProgress: number = -1;
   @Prop @Watch('speechAvailabilityChanged') speechEnabled: boolean = true;
   @Prop @Watch('speechThreadChanged') activeThreadId: string = '';
   @Prop @Watch('receiveVoiceShortcut') voiceRequest: string = '';
@@ -69,6 +72,8 @@ export struct ChatPanel {
   @State private memoryMessageId: string = '';
   @State private memoryThreadId: string = '';
   @State private composerFocused: boolean = false;
+  @State private sendingMessageId: string = '';
+  @State private sendOrigin: SendOrigin | undefined = undefined;
   @State private viewport: WindowViewport = new WindowViewport();
   @State private showReasoning: boolean = false;
   @State private reasoningPreview: string = '';
@@ -88,6 +93,7 @@ export struct ChatPanel {
   }
   // The user's turn lifts in first; the answer follows a beat later.
   private messageEnter(message: MessageViewModel): TransitionEffect {
+    if (message.id === this.sendingMessageId) { return TransitionEffect.IDENTITY; }
     if (!this.isLive(message.id)) { return TransitionEffect.IDENTITY; }
     return message.role === 'user' ? Motion.rise(0, 16) : Motion.rise(2, 10);
   }
@@ -131,6 +137,9 @@ export struct ChatPanel {
     else { this.receiveVoiceShortcut(); }
   }
   private speechThreadChanged(): void {
+    this.lastHeaderProgress = -1;
+    this.onHeaderProgress(0);
+    this.sendingMessageId = ''; this.sendOrigin = undefined;
     if (this.speechThreadId !== this.activeThreadId) { this.endSpeech(false); }
     this.reading.stop();
     this.receiveVoiceShortcut();
@@ -183,7 +192,7 @@ export struct ChatPanel {
   }
 
   private follow(): void {
-    if (!this.followOutput || this.scrollTimer !== -1) {
+    if (!this.followOutput || this.sendingMessageId || this.scrollTimer !== -1) {
       return;
     }
     this.scrollTimer = setTimeout(() => {
@@ -194,18 +203,62 @@ export struct ChatPanel {
     }, 80);
   }
 
+  private updateHeaderProgress(): void {
+    // Item coordinates already include contentStartOffset; no accumulated gesture deltas or offset baselines.
+    const first = this.scroller.getItemRect(0);
+    const distance = this.topInset + Space.sm - first.y;
+    const fraction = first.height > 0 ? Math.max(0, Math.min(1, distance / 96)) : 1;
+    const progress = fraction * fraction * (3 - 2 * fraction);
+    if (progress !== this.lastHeaderProgress) {
+      this.lastHeaderProgress = progress;
+      this.onHeaderProgress(progress);
+    }
+  }
+
   private uiHandler(threadId: string, messageId: string): (key: string, values: UiValues, action: string) => Promise<UiValues> {
     return (key: string, values: UiValues, action: string) => this.app.interactUi(threadId, messageId, key, values, action);
   }
   private send(): void {
     if (this.speechActive()) { return; }
     this.inspectingOutput = false; this.followOutput = true;
-    this.app.send(() => this.follow());
+    const context = this.getUIContext();
+    const composer = context.getComponentUtils().getRectangleById('composer');
+    const viewport = context.getComponentUtils().getRectangleById('chat-swipe-area');
+    const origin: SendOrigin = { x: context.px2vp(composer.windowOffset.x + composer.size.width / 2),
+      y: context.px2vp(composer.windowOffset.y + composer.size.height / 2),
+      height: context.px2vp(composer.size.height), viewportHeight: context.px2vp(viewport.size.height) };
+    const threadId = this.thread.id;
+    const previous = new Set(this.thread.messages.map((message: MessageViewModel) => message.id));
+    let accepted = false;
+    this.app.send(() => {
+      if (this.thread.id !== threadId) { return; }
+      if (!accepted) {
+        const message = this.thread.messages.find((item: MessageViewModel) => item.role === 'user' && !previous.has(item.id));
+        if (message) {
+          accepted = true; this.sendOrigin = origin; this.sendingMessageId = message.id;
+          clearTimeout(this.scrollTimer); this.scrollTimer = -1;
+          context.postFrameCallback(new SendFrame(() => {
+            if (this.thread.id === threadId && this.sendingMessageId === message.id) { this.scroller.scrollEdge(Edge.Bottom); }
+          }));
+        }
+      }
+      this.follow();
+    });
+  }
+
+  private finishSendFlight(id: string): void {
+    if (this.sendingMessageId !== id) { return; }
+    this.sendingMessageId = ''; this.sendOrigin = undefined; this.follow();
   }
 
   // Use methods: ordinary accessors in a V1 @Component are omitted by the ArkUI compiler.
   private hasDraft(): boolean {
     return this.app.draft.trim().length > 0 || this.thread.attachments.length > 0 || this.thread.references.length > 0;
+  }
+
+  private composerExpanded(): boolean {
+    return this.composerFocused || this.app.draft.length > 0 || this.hasDraft() || this.importing || this.speechActive() ||
+      this.app.generating || this.thread.pendingInputs.length > 0 || this.showPlus || this.showContext || this.showReasoning || this.showQueue;
   }
 
   private canSend(): boolean {
@@ -298,6 +351,7 @@ export struct ChatPanel {
       }.width('100%').constraintSize({ minHeight: '100%' })
       .padding({ left: 20, right: 20, top: this.topInset + Space.lg, bottom: Space.md })
     }.layoutWeight(1).width('100%').scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring)
+      .onAppear(() => { this.lastHeaderProgress = 0; this.onHeaderProgress(0); })
   }
 
   @Builder
@@ -312,7 +366,9 @@ export struct ChatPanel {
         }
         ForEach(this.app.visibleMessages, (message: MessageViewModel) => {
           ListItem() {
-            MessageBubble({ message: message, webEnabled: this.app.extensions.webEnabled, onOpenFile: this.onOpenFile, uiAvailable: !this.app.busy && !this.thread.archived,
+            MessageBubble({ message: message, turnStatus: message.status, webEnabled: this.app.extensions.webEnabled, onOpenFile: this.onOpenFile, uiAvailable: !this.app.busy && !this.thread.archived,
+              sendOrigin: this.sendingMessageId === message.id ? this.sendOrigin : undefined,
+              onSendReady: (): void => { this.scroller.scrollEdge(Edge.Bottom); }, onSendFinish: (): void => { this.finishSendFlight(message.id); },
               readingMessageId: this.reading.messageId, onRead: (id: string) => this.readAnswer(id),
               actionsEnabled: !this.app.busy && !this.app.saveError, onRegenerate: (id: string) => this.regenerate(id),
               onUi: this.uiHandler(this.thread.id, message.id), onFork: (id: string) => { this.fork(id); }, onRemember: (id: string) => { this.remember(id); },
@@ -330,26 +386,29 @@ export struct ChatPanel {
           ListItem() { ChatTeamCard({ app: this.app, onFiles: this.onFiles }) }.width('100%')
         }
       }
-      .id('message-list').width('100%').height('100%')
-      .padding({ left: Space.page, right: Space.page, bottom: Space.lg })
+      .id('message-list').width('100%').height('100%').clip(!this.sendingMessageId)
+      .padding({ left: Space.page, right: Space.page })
       // Scroll the leading space away so messages can pass beneath the floating title bar.
       .contentStartOffset(this.topInset + Space.sm)
+      // Only the end of the transcript clears the floating controls; messages scroll behind them.
+      .contentEndOffset(48)
       .scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring)
       .onTouch((event: TouchEvent) => { if (event.type === TouchType.Down) { this.followOutput = false; } })
       .onReachEnd(() => { if (!this.inspectingOutput) { this.followOutput = true; } })
-      .onDidScroll(() => { this.atBottom = this.scroller.isAtEnd(); })
+      .onDidScroll(() => { this.atBottom = this.scroller.isAtEnd(); this.updateHeaderProgress(); })
       .onAreaChange((previous: Area, current: Area) => {
         // RESIZE moves the composer but does not scroll the List. Follow its final viewport size.
         if (previous.height !== current.height && this.composerFocused && this.viewport.keyboardHeight > 0) { this.follow(); }
       })
       if (!this.atBottom) {
-        Column() {
-          IconButton({ icon: $r('sys.symbol.arrow_down'), label: t("查看最新消息"), compId: 'scroll-to-latest',
-            diameter: 38, iconSize: 18, fill: $r('app.color.surface'), tint: $r('app.color.text_primary'),
-            onTap: () => { this.inspectingOutput = false; this.followOutput = true; this.scroller.scrollEdge(Edge.Bottom); } })
-        }.width(38).height(38).borderRadius(19).backgroundColor($r('app.color.surface'))
-        .border({ width: 0.5, color: $r('app.color.divider') })
-        .shadow({ radius: 12, color: '#22000000', offsetY: 2 }).margin({ bottom: Space.md })
+        // Toggle supports native immersive material outside navigation bars; expose this momentary action as a button.
+        Toggle({ type: ToggleType.Button, isOn: false }) {
+          SymbolGlyph($r('sys.symbol.arrow_down')).fontSize(18).fontColor([$r('sys.color.font_primary')])
+        }.id('scroll-to-latest').width(38).height(38).padding(0).borderRadius(19)
+        .backgroundColor(Color.Transparent).selectedColor(Color.Transparent).systemMaterial(AppMaterials.control)
+        .accessibilityText(t("查看最新消息")).accessibilityRole(AccessibilityRoleType.BUTTON)
+        .onClick(() => { this.inspectingOutput = false; this.followOutput = true; this.scroller.scrollEdge(Edge.Bottom); })
+        .margin({ bottom: Space.md })
         .transition(Motion.pop())
       }
     }.layoutWeight(1).width('100%')
@@ -613,26 +672,24 @@ export struct ChatPanel {
 
   @Builder
   teamToggle() {
-    Row() {
-      // Toggle supports native material in the content area; ordinary Button and Chip do not.
-      Toggle({ type: ToggleType.Button, isOn: this.thread.teamEnabled }) {
-        Row({ space: 6 }) {
-          SymbolGlyph($r('sys.symbol.person_2')).fontSize(16)
-            .fontColor([this.thread.teamEnabled ? $r('app.color.on_accent') : $r('sys.color.font_primary')])
-          Text(t('团队模式')).fontSize(13).fontWeight(FontWeight.Medium)
-            .fontColor(this.thread.teamEnabled ? $r('app.color.on_accent') : $r('sys.color.font_primary'))
-        }
-      }.id('composer-team-toggle').height(32).padding({ left: 12, right: 12 }).borderRadius(16)
-        .backgroundColor(Color.Transparent).selectedColor($r('app.color.accent'))
-        .systemMaterial(this.thread.teamEnabled ? AppMaterials.accentControl : AppMaterials.control)
-        .enabled(this.app.ready && !this.app.busy && !this.thread.archived && this.app.saveError.length === 0)
-        .accessibilityText(t('团队模式'))
-        .accessibilityDescription(this.thread.teamEnabled ? t('关闭团队模式') : t('开启团队模式'))
-        .onChange((enabled: boolean) => {
-          if (enabled !== this.thread.teamEnabled) { this.toggleTeam(enabled); }
-        })
-    }.width('100%').height(40).justifyContent(FlexAlign.Start)
-      .padding({ left: 4 })
+    // Toggle supports native material in the content area; ordinary Button and Chip do not.
+    Toggle({ type: ToggleType.Button, isOn: this.thread.teamEnabled }) {
+      Row({ space: 6 }) {
+        SymbolGlyph($r('sys.symbol.person_2')).fontSize(16)
+          .fontColor([this.thread.teamEnabled ? $r('app.color.on_accent') : $r('sys.color.font_primary')])
+        Text(t('团队模式')).fontSize(13).fontWeight(FontWeight.Medium)
+          .fontColor(this.thread.teamEnabled ? $r('app.color.on_accent') : $r('sys.color.font_primary'))
+      }
+    }.id('composer-team-toggle').height(32).padding({ left: 12, right: 12 }).borderRadius(16)
+      .margin({ left: 14, bottom: Space.sm })
+      .backgroundColor(Color.Transparent).selectedColor($r('app.color.accent'))
+      .systemMaterial(this.thread.teamEnabled ? AppMaterials.accentControl : AppMaterials.control)
+      .enabled(this.app.ready && !this.app.busy && !this.thread.archived && this.app.saveError.length === 0)
+      .accessibilityText(t('团队模式'))
+      .accessibilityDescription(this.thread.teamEnabled ? t('关闭团队模式') : t('开启团队模式'))
+      .onChange((enabled: boolean) => {
+        if (enabled !== this.thread.teamEnabled) { this.toggleTeam(enabled); }
+      })
   }
 
   // Slash-command suggestion shown while the draft is a prefix of /team.
@@ -701,12 +758,21 @@ export struct ChatPanel {
   }
 
   @Builder
+  composerAddButton() {
+    IconButton({ icon: $r('sys.symbol.plus'), label: t("添加图片、文件或模板"), compId: 'add-attachment', diameter: 36,
+      iconSize: 20, fill: $r('app.color.surface_variant'), disabled: this.thread.archived || this.app.saveError.length > 0,
+      onTap: () => { this.getUIContext().getFocusController().clearFocus(); this.showPlus = true; } })
+  }
+
+  @Builder
   composer() {
     Stack({ alignContent: Alignment.Bottom }) {
-      if (this.highestEffort()) {
+      if (this.highestEffort() && this.composerExpanded()) {
         ComposerGlow({ active: true })
+          .transition(TransitionEffect.OPACITY.animation({ duration: Motion.medium, curve: Motion.standard }))
       }
-    Column({ space: 4 }) {
+    // Keep the editor and toolbar mounted. Animate reserved space, never switch layout modes.
+    Column() {
       if (this.thread.references.length > 0) {
         Scroll() {
           Column({ space: 4 }) {
@@ -722,11 +788,15 @@ export struct ChatPanel {
       }
       TextArea({ text: this.app.draft,
         placeholder: this.speechActive() ? t('请说出要输入的内容') : this.thread.archived ? t("已归档的对话无法继续") : this.app.generating ? t("补充要求，或排队下一项任务…")
-          : this.thread.teamEnabled ? t("描述目标，主 Agent 会按需组建团队…") : t('输入消息，/ 命令，@ 引用会话') })
+          : !this.composerExpanded() ? t('输入消息…') : this.thread.teamEnabled ? t("描述目标，主 Agent 会按需组建团队…") : t('输入消息，/ 命令，@ 引用会话') })
         .id('composer').fontSize(Font.body).fontColor($r('app.color.text_primary'))
         .placeholderColor($r('app.color.text_tertiary')).backgroundColor(Color.Transparent)
-        .constraintSize({ minHeight: 44, maxHeight: 160 }).maxLength(24000)
-        .padding({ left: 6, right: 6, top: 10, bottom: 4 }).borderRadius(0)
+        .width('100%')
+        .constraintSize({ minHeight: 44, maxHeight: this.composerExpanded() ? 160 : 44 }).maxLength(24000)
+        .padding({ left: this.composerExpanded() ? 6 : 46, right: this.composerExpanded() ? 6 : 42,
+          top: 10, bottom: this.composerExpanded() ? 4 : 10 }).borderRadius(0)
+        .align(this.composerExpanded() ? Alignment.TopStart : Alignment.Start)
+        .animation({ duration: Motion.medium, curve: Motion.standard })
         .enabled(!this.thread.archived).focusable(!this.speechActive()).enableKeyboardOnFocus(!this.speechActive())
         .onWillChange((value: EditableTextChangeValue) => !this.speechActive() || value.content === this.app.draft)
         .onChange((value: string) => {
@@ -734,21 +804,20 @@ export struct ChatPanel {
         })
         .onFocus(() => { this.composerFocused = true; this.inspectingOutput = false; this.followOutput = true; this.follow(); })
         .onBlur(() => { this.composerFocused = false; })
-      Row({ space: 4 }) {
+        .onEditChange((editing: boolean) => { this.composerFocused = editing; })
+    }
+    .width('100%').padding({ left: 8, right: 8, top: this.composerExpanded() ? 4 : 6,
+      bottom: this.composerExpanded() ? (this.speechActive() ? 52 : 48) : 6 })
+    .animation({ duration: Motion.medium, curve: Motion.standard })
+      Row() {
         if (this.speechActive()) {
           Button(t('取消')).id('cancel-speech').attributeModifier(Btn.textSmall)
             .onClick(() => this.endSpeech(true))
           Blank()
         } else {
+        this.composerAddButton()
         Scroll() {
         Row({ space: 4 }) {
-        IconButton({ icon: $r('sys.symbol.plus'), label: t("添加图片、文件或模板"), compId: 'add-attachment', diameter: 36,
-          iconSize: 20, fill: $r('app.color.surface_variant'), disabled: this.thread.archived || this.app.saveError.length > 0,
-          onTap: () => { this.getUIContext().getFocusController().clearFocus(); this.showPlus = true; } })
-          .bindSheet($$this.showPlus, this.plusSheet(), {
-            detents: [SheetSize.MEDIUM, SheetSize.LARGE], dragBar: true, showClose: false,
-            backgroundColor: $r('app.color.page_background')
-          })
         // A bare ring reads as a spinner at low usage; the percentage makes it a gauge.
         Row({ space: 4 }) {
           Progress({ value: this.app.contextUsed, total: Math.max(1, this.app.contextWindow), type: ProgressType.Ring })
@@ -798,45 +867,68 @@ export struct ChatPanel {
           })
         }
         }
-        }.layoutWeight(1).align(Alignment.Start).scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
+        }.layoutWeight(1).margin({ left: 4 }).align(Alignment.Start).scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
+          .opacity(this.composerExpanded() ? 1 : 0)
+          .translate({ y: this.composerExpanded() ? 0 : 4 })
+          .animation({ duration: Motion.fast, curve: Motion.standard })
+          .enabled(this.composerExpanded())
+          .accessibilityLevel(this.composerExpanded() ? 'auto' : 'no-hide-descendants')
+          .hitTestBehavior(this.composerExpanded() ? HitTestMode.Default : HitTestMode.None)
         }
         VoicePill({ phase: this.speech.phase, speaking: this.speech.speaking, startedAt: this.speech.startedAt,
           disabled: !this.app.ready || !this.speechEnabled || this.thread.archived || this.app.saveError.length > 0,
           onStart: () => this.startSpeech(), onFinish: () => this.finishSpeech(), onCancel: () => this.endSpeech(true) })
+          .margin({ left: 4 })
         if (this.app.generating) {
           if (!this.speechActive() && this.hasDraft() && this.app.canQueueInput) {
             Button(t("追加")).id('steer-message').attributeModifier(Btn.tonalSmall)
+              .margin({ left: 4 })
               .enabled(this.app.acceptingSteering).onClick(() => this.app.enqueueInput('steer'))
             Button(t("排队")).id('queue-message').attributeModifier(Btn.plainSmall)
+              .margin({ left: 4 })
               .onClick(() => this.app.enqueueInput('followUp'))
           }
           IconButton({ icon: $r('sys.symbol.square_fill'), label: t("停止"), compId: 'stop-generation', diameter: 36,
             iconSize: 14, fill: $r('app.color.text_primary'), tint: $r('app.color.page_background'),
             onTap: () => { this.app.stop(); } })
+            .margin({ left: 4 })
             .transition(Motion.pop())
         } else {
           if (!this.speechActive() && this.thread.pendingInputs.length > 0 && this.hasDraft()) {
             Button(t("排队")).id('queue-message').attributeModifier(Btn.plainSmall)
+              .margin({ left: 4 })
               .enabled(this.app.canQueueInput).onClick(() => this.app.enqueueInput('followUp'))
           }
+          Row() {
           IconButton({ icon: $r('sys.symbol.arrow_up'), label: t("发送"), compId: 'send-message', diameter: 36, iconSize: 18,
             fill: this.canSend() ? $r('app.color.accent') : $r('app.color.surface_variant'),
             tint: this.canSend() ? $r('app.color.on_accent') : $r('app.color.text_tertiary'),
             disabled: !this.canSend(), onTap: () => this.send() })
             .bindContextMenu(this.sendMenu, ResponseType.LongPress, {
               systemMaterial: AppMaterials.surface, mask: false })
-            .transition(Motion.pop())
+          }.width(this.hasDraft() && !this.speechActive() ? 40 : 0).height(36)
+            .padding({ left: this.hasDraft() && !this.speechActive() ? 4 : 0 }).clip(true)
+            .opacity(this.hasDraft() && !this.speechActive() ? 1 : 0)
+            .animation({ duration: Motion.fast, curve: Motion.standard })
+            .hitTestBehavior(this.hasDraft() && !this.speechActive() ? HitTestMode.Default : HitTestMode.None)
+            .accessibilityLevel(this.hasDraft() && !this.speechActive() ? 'auto' : 'no-hide-descendants')
         }
-      }.width('100%')
-    }
-    .padding({ left: 8, right: 8, top: 4, bottom: 8 })
-    }.width('100%').borderRadius(Radius.xl).clip(true)
+      }.width('100%').height(this.speechActive() ? 48 : this.composerExpanded() ? 44 : 46)
+        .padding({ left: 8, right: 8, bottom: this.composerExpanded() ? 8 : 10 })
+        .animation({ duration: Motion.medium, curve: Motion.standard })
+        .hitTestBehavior(this.composerExpanded() ? HitTestMode.Default : HitTestMode.Transparent)
+    }.id('composer-shell').width('100%').borderRadius(this.composerExpanded() ? Radius.xl : 28).clip(true)
     .backgroundColor($r('app.color.surface'))
     .border({ width: this.composerFocused ? 1 : 0.5,
       color: this.composerFocused ? $r('app.color.accent_outline') : $r('app.color.divider') })
     .shadow(this.composerFocused ? { radius: 28, color: $r('app.color.accent_glow'), offsetY: 4 }
       : { radius: 12, color: '#0A000000', offsetY: 2 })
     .animation({ duration: Motion.medium, curve: Motion.standard })
+    // Anchor the sheet to the stable shell, not an add button that moves when the composer expands.
+    .bindSheet($$this.showPlus, this.plusSheet(), {
+      detents: [SheetSize.MEDIUM, SheetSize.LARGE], dragBar: true, showClose: false,
+      backgroundColor: $r('app.color.page_background')
+    })
     .bindContentCover($$this.previewing, this.imageViewer(), { modalTransition: ModalTransition.ALPHA })
   }
 
@@ -875,13 +967,16 @@ export struct ChatPanel {
 
   build() {
     Column() {
-      Column() {
-        if (this.thread.messages.length === 0 && this.app.teams.length === 0) {
-          this.welcome()
-        } else {
-          this.messageList()
-        }
-      }.id('chat-swipe-area').layoutWeight(1).width('100%')
+      Stack({ alignContent: Alignment.BottomStart }) {
+        Column() {
+          if (this.thread.messages.length === 0 && this.app.teams.length === 0) {
+            this.welcome()
+          } else {
+            this.messageList()
+          }
+        }.width('100%').height('100%').zIndex(this.sendingMessageId ? 1 : 0)
+        this.teamToggle()
+      }.id('chat-swipe-area').layoutWeight(1).width('100%').zIndex(this.sendingMessageId ? 1 : 0)
       // Normal priority lets nested horizontal scrollers keep their gestures. The composer
       // stays outside this region so selecting or moving through draft text does not open history.
       .gesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Right, distance: 8 })
@@ -940,7 +1035,6 @@ export struct ChatPanel {
         ForEach(this.thread.messages.slice(-1).filter((message) => message.role === 'assistant'), (message: MessageViewModel) => {
           ChatPlanPanel({ plan: message.plan })
         }, (message: MessageViewModel) => this.thread.id + ':' + message.id)
-        this.teamToggle()
         this.composer()
         if (this.viewport.keyboardHeight === 0) {
           Text(t('AI可能会犯错，请仔细鉴别。')).id('ai-disclaimer')

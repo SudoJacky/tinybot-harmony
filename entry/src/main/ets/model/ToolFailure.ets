@@ -1,4 +1,11 @@
+import { UiErrorLocation, RepairGuidance } from './UiRepair';
 export interface ToolFailureDetails {
+  version?: string;
+  category?: string;
+  location?: UiErrorLocation;
+  locationScope?: string;
+  excerpt?: string;
+  repair?: RepairGuidance;
   path?: string;
   editIndex?: number;
   service?: string;

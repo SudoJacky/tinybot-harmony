@@ -11,7 +11,7 @@ export struct IconButton {
   @Prop tint: ResourceColor = $r('app.color.text_primary');
   @Prop fill: ResourceColor = Color.Transparent;
   @Prop disabled: boolean = false;
-  label: string = '';
+  @Prop label: string = '';
   compId: string = '';
   diameter: number = 44;
   iconSize: number = 22;
@@ -334,44 +334,107 @@ export struct Segmented {
   }
 }
 
-// Waiting-for-model line: the mascot breathes while a light band sweeps across the label.
+// One retained status line: breathe/sheen while working, then softly settle into its final label.
 @Component
 export struct ThinkingLine {
-  @Prop label: string = t("正在思考…");
-  // Inline in a process group: just the shimmering label at caption size.
+  @Prop @Watch('syncState') label: string = t("正在思考…");
+  @Prop @Watch('syncState') working: boolean = true;
   @Prop compact: boolean = false;
-  @State private breath: number = 0.55;
+  @Prop icon: Resource = $r('sys.symbol.lightbulb');
+  @Prop danger: boolean = false;
+  @State private breath: number = 0.58;
   @State private sweep: number = -100;
+  @State private currentLabel: string = '';
+  @State private previousLabel: string = '';
+  @State private labelMix: number = 1;
+  private mounted: boolean = false;
+  private visible: boolean = false;
+  private loop?: AnimatorResult;
+  private settling?: AnimatorResult;
+
+  aboutToAppear(): void { this.mounted = true; this.currentLabel = this.label; }
+  aboutToDisappear(): void {
+    this.mounted = false; this.visible = false; this.stopLoop(); this.stopSettle();
+  }
+  private stopLoop(): void { const loop = this.loop; this.loop = undefined; loop?.cancel(); }
+  private stopSettle(): void { const settling = this.settling; this.settling = undefined; settling?.cancel(); }
+  private syncMotion(): void {
+    if (!this.mounted || !this.visible || !this.working) { this.stopLoop(); return; }
+    if (this.loop) { return; }
+    const loop = this.getUIContext().createAnimator({ duration: 1800, easing: 'linear', delay: 0,
+      fill: 'none', direction: 'normal', iterations: -1, begin: 0, end: 1 });
+    loop.onFrame = (phase: number) => {
+      if (this.loop !== loop) { return; }
+      this.breath = 0.58 + 0.42 * (1 - Math.cos(phase * Math.PI * 2)) / 2;
+      this.sweep = -100 + phase * 400;
+    };
+    this.loop = loop; loop.play();
+  }
+  private syncState(): void {
+    if (!this.mounted) { return; }
+    this.syncMotion();
+    if (this.currentLabel === this.label) { return; }
+    this.stopSettle();
+    this.previousLabel = this.visible ? this.currentLabel : '';
+    this.currentLabel = this.label;
+    if (!this.visible) { this.labelMix = 1; return; }
+    this.labelMix = 0;
+    const settling = this.getUIContext().createAnimator({ duration: 280, easing: 'ease-out', delay: 0,
+      fill: 'forwards', direction: 'normal', iterations: 1, begin: 0, end: 1 });
+    settling.onFrame = (phase: number) => { if (this.settling === settling) { this.labelMix = phase; } };
+    settling.onFinish = () => {
+      if (this.settling !== settling) { return; }
+      this.labelMix = 1; this.previousLabel = ''; this.settling = undefined;
+    };
+    this.settling = settling; settling.play();
+  }
+  private visibilityChanged(visible: boolean): void {
+    this.visible = visible;
+    if (!visible) { this.stopSettle(); this.labelMix = 1; this.previousLabel = ''; }
+    this.syncMotion();
+  }
 
   @Builder
   shimmer() {
     Column().width('50%').height('100%')
       .linearGradient({ angle: 90, colors: [[Color.Transparent, 0], [$r('app.color.text_primary'), 0.5], [Color.Transparent, 1]] })
       .translate({ x: this.sweep + '%' })
+      .opacity(this.working ? 1 : 1 - this.labelMix)
       .blendMode(BlendMode.SRC_ATOP)
-      .hitTestBehavior(HitTestMode.Transparent)
+      .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
   }
 
   build() {
-    Row({ space: Space.sm }) {
-      if (!this.compact) {
-        Image($r('app.media.tinybot')).width(18).height(18).opacity(this.breath)
+    Row({ space: this.compact ? 6 : Space.sm }) {
+      if (this.compact) {
+        SymbolGlyph(this.icon).fontSize(14)
+          .fontColor([this.danger ? $r('app.color.danger') : $r('app.color.text_secondary')])
+          .opacity(this.danger ? 1 : this.working ? this.breath : 0.62 + (this.breath - 0.62) * (1 - this.labelMix))
+      } else {
+        Image($r('app.media.tinybot')).width(18).height(18)
+          .opacity(this.working ? this.breath : 0.62)
       }
       // The band only paints over the label's own pixels (SRC_ATOP inside an offscreen layer).
       Stack({ alignContent: Alignment.Start }) {
-        Text(this.label).fontSize(this.compact ? 13 : 15).maxLines(1).fontColor($r('app.color.text_tertiary'))
+        Text(this.currentLabel).fontSize(this.compact ? 13 : 15).maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_tertiary'))
+          .opacity(this.labelMix).blur(2 * (1 - this.labelMix)).translate({ y: 2 * (1 - this.labelMix) })
+        if (this.previousLabel) {
+          Text(this.previousLabel).fontSize(this.compact ? 13 : 15).maxLines(1).width('100%')
+            .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_tertiary'))
+            .opacity(1 - this.labelMix).blur(2 * this.labelMix).translate({ y: -2 * this.labelMix })
+            .position({ x: 0, y: 0 }).accessibilityLevel('no')
+        }
       }
       // An overlay follows the measured label size without stretching the message row.
       .overlay(this.shimmer(), { align: Alignment.Start })
       .blendMode(BlendMode.SRC_OVER, BlendApplyType.OFFSCREEN)
+      .flexShrink(1)
     }
+    .constraintSize({ maxWidth: '100%' }).flexShrink(1)
     .accessibilityText(this.label)
     .transition(TransitionEffect.OPACITY.animation({ duration: Motion.fast, curve: Motion.standard }))
-    .onAppear(() => {
-      const ui = this.getUIContext();
-      ui.animateTo({ duration: 800, curve: Curve.EaseInOut, iterations: -1, playMode: PlayMode.Alternate }, () => { this.breath = 1; });
-      ui.animateTo({ duration: 1800, curve: Curve.Linear, iterations: -1 }, () => { this.sweep = 200; });
-    })
+    .onVisibleAreaChange([0], (visible: boolean) => this.visibilityChanged(visible))
   }
 }
 

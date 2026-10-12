@@ -2,6 +2,7 @@ import { projectName, projectFor, workspaceIdFor, validateProjects, projectConte
 import { proposeSessionMemory, reviewSessionMemory, addMemoryDraft } from './SessionMemory';
 import { McpSettings, McpSettingsCommand, McpSettingsResult, McpSettingsHost } from './McpSettings';
 import { t } from '../model/I18n';
+import { stepDisplayContent } from '../model/PublishedPreview';
 import { UiValues, UiSavedState, parseUiSurface, validateUiState, validateUiStates, copyUiValues } from '../model/InteractiveUi';
 import { prepareBackupServices } from '../model/BackupRestore';
 import { RequestUsage } from '../model/Usage';
@@ -320,6 +321,14 @@ export class SessionService {
   }
 
   async newThread(projectId?: string): Promise<boolean> {
+    if (!this.canMutate) { return false; }
+    const current = this.active;
+    // Repeated new-chat actions are idempotent while the current composer is untouched.
+    // Keep its workspace and local model/team choices; never discard prepared input.
+    if (current.projectId === projectId && !current.archived && !current.titleEdited && !current.pinned &&
+      !current.parentThreadId && current.messages.length === 0 && (current.draft || '').length === 0 &&
+      (current.attachments || []).length === 0 && (current.references || []).length === 0 &&
+      (current.pendingInputs || []).length === 0) { return true; }
     return this.mutate(t("新建对话失败："), async () => {
       const thread = this.freshThread(); thread.projectId = projectId; await this.ensureThreadWorkspace(thread);
       this.data.threads.unshift(thread); this.data.activeThreadId = thread.id;
@@ -649,6 +658,8 @@ export class SessionService {
     try {
       await this.runtime.run({ sessionId: thread.id, config: config, messages: [], tools: tools,
         usageOrigin: { threadId: thread.id, threadTitle: thread.title, turnId: user.id, turnLabel: text.slice(0, 80), purpose: 'conversation', skill: selected || undefined } }, {
+        recoverUi: !options.readOnly && this.resources.recoverUi ? (content, error, cancellation) =>
+          this.resources.recoverUi!(thread.id, content, error, cancellation, projectFor(this.data, thread)?.workspaceId) : undefined,
         prepare: async (cancellation) => {
           cancellation.check(); cancellation.onCancel(() => chatTeams?.stop()); await this.ensureThreadWorkspace(thread);
           cancellation.check();
@@ -739,7 +750,7 @@ export class SessionService {
       const message = thread.messages.find((item) => item.id === messageId);
       if (!message || message.role !== 'assistant' || message.status === 'generating' || !/^\d+:\d+$/.test(key)) { throw new Error(t('交互界面已不可用。')); }
       const indexes = key.split(':'); const step = Number(indexes[0]);
-      const content = message.steps?.length ? message.steps[step]?.content : step === 0 ? message.content : undefined;
+      const content = message.steps?.length ? (message.steps[step] ? stepDisplayContent(message.steps[step]) : undefined) : step === 0 ? message.content : undefined;
       if (content === undefined) { throw new Error(t('交互界面已不可用。')); }
       const document = parseUiSurface(content, indexes[1]); validateUiState(document, values);
       const action = actionId ? document.actions.find((item) => item.id === actionId) : undefined;

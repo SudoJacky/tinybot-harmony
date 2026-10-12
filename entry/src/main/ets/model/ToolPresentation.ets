@@ -3,7 +3,7 @@ import { FileDiff } from './FileDiff';
 
 export function toolTitle(name: string): string {
   const titles: Record<string, string> = {
-    'search_web': t('联网搜索'), 'present_files': t('交付文件'), 'read_reference': t('补读会话引用'),
+    'search_web': t('联网搜索'), 'present_files': t('交付文件'), 'publish_preview': t('发布预览'), 'read_reference': t('补读会话引用'),
     'team_recruit': t('招募员工'), 'team_wait': t('等待员工交接'), 'team_inspect': t('查看团队'), 'team_read_result': t('读取交接结果'),
     'team_control': t('调整团队执行'), 'team_resume': t('继续团队'), 'team_complete_task': t('提交交接'),
     'team_list_messages': t('查看团队交接'), 'team_read_message': t('读取交接'),

@@ -14,6 +14,7 @@ import { PlanProgressViewModel } from './PlanProgressViewModel';
 
 @Observed
 export class ToolExecutionViewModel implements ToolExecution {
+  previewContent?: string;
   turnFileChange?: TurnFileChange;
   fileDiff?: FileDiff;
   websiteIcon?: string;
@@ -21,7 +22,7 @@ export class ToolExecutionViewModel implements ToolExecution {
   status: string;
   output: string;
   children: ToolExecution[] = [];
-  constructor(data: ToolExecution) { this.turnFileChange = data.turnFileChange; this.fileDiff = data.fileDiff; this.websiteIcon = data.websiteIcon; this.call = data.call; this.status = data.status; this.output = data.output; this.children = data.children?.slice() || []; }
+  constructor(data: ToolExecution) { this.previewContent = data.previewContent; this.turnFileChange = data.turnFileChange; this.fileDiff = data.fileDiff; this.websiteIcon = data.websiteIcon; this.call = data.call; this.status = data.status; this.output = data.output; this.children = data.children?.slice() || []; }
 }
 
 @Observed
@@ -41,7 +42,7 @@ export class AgentStepViewModel implements AgentStep {
     this.content = data.content; this.reasoningContent = data.reasoningContent || ''; this.steering = data.steering;
     this.tools = data.tools.map((tool: ToolExecution, index: number) => {
       const existing = this.tools[index];
-      if (existing && existing.call.id === tool.call.id) { existing.status = tool.status; existing.output = tool.output; existing.turnFileChange = tool.turnFileChange; existing.fileDiff = tool.fileDiff; existing.websiteIcon = tool.websiteIcon; existing.children = tool.children?.slice() || []; return existing; }
+      if (existing && existing.call.id === tool.call.id) { existing.previewContent = tool.previewContent; existing.status = tool.status; existing.output = tool.output; existing.turnFileChange = tool.turnFileChange; existing.fileDiff = tool.fileDiff; existing.websiteIcon = tool.websiteIcon; existing.children = tool.children?.slice() || []; return existing; }
       return new ToolExecutionViewModel(tool);
     });
   }
