@@ -1,6 +1,6 @@
 import { t } from '../model/I18n';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
-import { SearchConfig, SearchProviderId, defaultSearchConfig, reusableSearchProfiles } from '../model/WebSearch';
+import { SearchProviderId, defaultSearchConfig, deepSeekSearchProfiles } from '../model/WebSearch';
 import { ProviderProfile } from '../model/ProviderProfiles';
 import { Btn, Space } from '../common/Theme';
 import { Banner, SwitchRow } from '../common/Widgets';
@@ -10,37 +10,33 @@ export struct SearchSettingsPanel {
   @ObjectLink app: ChatViewModel;
   @State private searchEnabled: boolean = false;
   @State private provider: SearchProviderId = 'deepseek';
-  @State private sourceId: string = 'auto';
+  @State private sourceId: string = '';
   @State private baseUrl: string = '';
-  @State private model: string = '';
   @State private apiKey: string = '';
   @State private savedKey: boolean = false;
   @State private saving: boolean = false;
   @State private error: string = '';
   aboutToAppear(): void {
     const config = this.app.productivity.options?.search || defaultSearchConfig();
-    this.searchEnabled = config.enabled; this.baseUrl = config.baseUrl; this.model = config.model; this.savedKey = !!config.credentialAlias;
-    this.provider = config.provider; this.sourceId = config.modelProviderId || (config.credentialAlias || config.provider === 'tavily' ? 'custom' : 'auto');
+    this.searchEnabled = config.enabled; this.baseUrl = config.provider === 'tavily' ? config.baseUrl! : ''; this.savedKey = !!config.credentialAlias;
+    this.provider = config.provider; this.sourceId = this.candidates().some((item) => item.id === config.modelProviderId) ? config.modelProviderId! : '';
   }
   private candidates(): ProviderProfile[] {
-    const config: SearchConfig = { provider: this.provider, baseUrl: this.baseUrl, enabled: false, model: this.model, credentialAlias: '' };
-    return reusableSearchProfiles(config, this.app.providerProfiles);
+    return deepSeekSearchProfiles(this.app.providerProfiles);
   }
-  private sourceIds(): string[] { return ['auto'].concat(this.candidates().map((item) => item.id), ['custom']); }
-  private sourceLabels(): string[] { return [t('自动复用已配置的模型密钥')].concat(this.candidates().map((item) => item.name), [t('独立搜索密钥')]); }
   private changeProvider(index: number): void {
     this.provider = index === 0 ? 'deepseek' : 'tavily';
     const saved = this.app.productivity.options?.search;
     const config = saved?.provider === this.provider ? saved : defaultSearchConfig(this.provider);
-    this.baseUrl = config.baseUrl; this.model = config.model; this.apiKey = ''; this.savedKey = !!config.credentialAlias;
-    this.sourceId = config.modelProviderId || (config.credentialAlias || this.provider === 'tavily' ? 'custom' : 'auto');
+    this.baseUrl = config.provider === 'tavily' ? config.baseUrl! : ''; this.apiKey = ''; this.savedKey = !!config.credentialAlias; this.error = '';
+    this.sourceId = this.candidates().some((item) => item.id === config.modelProviderId) ? config.modelProviderId! : '';
   }
   private async save(): Promise<void> {
     if (this.app.busy || this.saving) { return; }
     this.saving = true; this.error = '';
     try {
       const ok = await this.app.saveSearch({ provider: this.provider, enabled: this.searchEnabled, baseUrl: this.baseUrl,
-        model: this.model, apiKey: this.apiKey, credentialSource: this.sourceId });
+        apiKey: this.apiKey, modelProviderId: this.provider === 'deepseek' && this.sourceId ? this.sourceId : undefined });
       this.error = this.app.error;
       if (ok) { this.apiKey = ''; this.aboutToAppear(); this.getUIContext().getPromptAction().showToast({ message: t('搜索设置已保存') }); }
     } finally { this.saving = false; }
@@ -52,29 +48,31 @@ export struct SearchSettingsPanel {
         Select([{ value: 'DeepSeek' }, { value: 'Tavily' }]).selected(this.provider === 'deepseek' ? 0 : 1)
           .value(this.provider === 'deepseek' ? 'DeepSeek' : 'Tavily').enabled(!this.saving).id('search-provider')
           .onSelect((index: number) => this.changeProvider(index))
-        Text(t('搜索词会发送给所选服务；结果统一返回来源链接和摘录。DeepSeek 需要支持原生搜索的接口与模型。'))
+        Text(t('搜索词会发送给所选服务，结果返回来源链接和摘录。'))
           .fontSize(14).fontColor($r('app.color.text_secondary'))
         SwitchRow({ title: t('启用联网搜索'), isOn: this.searchEnabled, disabled: this.saving || this.app.busy,
           onChange: (value: boolean) => { this.searchEnabled = value; } })
-        Text(t('搜索接口基础地址')).fontColor($r('app.color.text_secondary'))
-        TextInput({ text: this.baseUrl, placeholder: 'https://api.deepseek.com/anthropic/v1' }).id('search-base-url')
-          .enabled(!this.saving).onChange((value: string) => { this.baseUrl = value; })
         if (this.provider === 'deepseek') {
-          Text(t('模型')).fontColor($r('app.color.text_secondary'))
-          TextInput({ text: this.model, placeholder: 'deepseek-v4-flash' }).id('search-model')
-            .enabled(!this.saving).onChange((value: string) => { this.model = value; })
-          Text(t('密钥来源')).fontColor($r('app.color.text_secondary'))
-          Select(this.sourceLabels().map((label: string): SelectOption => ({ value: label })))
-            .selected(Math.max(0, this.sourceIds().indexOf(this.sourceId)))
-            .value(this.sourceLabels()[Math.max(0, this.sourceIds().indexOf(this.sourceId))]).enabled(!this.saving)
-            .id('search-credential-source').onSelect((index: number) => { this.sourceId = this.sourceIds()[index]; this.apiKey = ''; })
-          if (this.sourceId === 'auto') {
-            Text(this.candidates().length === 1 ? t('将复用 {0} 的密钥，无需重复填写。', [this.candidates()[0].name]) :
-              this.candidates().length > 1 ? t('有多个匹配服务，请选择要复用的密钥。') : t('没有地址匹配的模型服务，可选择独立搜索密钥。'))
-              .fontSize(13).fontColor($r('app.color.text_secondary'))
+          Text(t('使用 DeepSeek 官方搜索，自动复用已配置的 DeepSeek 服务密钥。搜索会产生额外的模型用量。'))
+            .fontSize(14).fontColor($r('app.color.text_secondary'))
+          if (this.candidates().length > 1) {
+            Text(t('DeepSeek 服务')).fontColor($r('app.color.text_secondary'))
+            Select(this.candidates().map((item: ProviderProfile): SelectOption => ({ value: item.name })))
+              .selected(this.candidates().findIndex((item) => item.id === this.sourceId))
+              .value(this.candidates().find((item) => item.id === this.sourceId)?.name || t('请选择用于联网搜索的 DeepSeek 服务。'))
+              .enabled(!this.saving).id('search-credential-source')
+              .onSelect((index: number) => { this.sourceId = this.candidates()[index].id; })
+          } else if (this.candidates().length === 1) {
+            Text(t('将复用 {0} 的密钥，无需重复填写。', [this.candidates()[0].name]))
+              .id('search-provider-key-ready').fontSize(13).fontColor($r('app.color.text_secondary'))
+          } else {
+            Text(t('请先在设置中添加并启用 DeepSeek 官方模型服务，配置 API Key。'))
+              .id('search-provider-key-missing').fontSize(13).fontColor($r('app.color.text_secondary'))
           }
-        }
-        if (this.sourceId === 'custom') {
+        } else {
+          Text(t('搜索接口基础地址')).fontColor($r('app.color.text_secondary'))
+          TextInput({ text: this.baseUrl, placeholder: 'https://api.tavily.com' }).id('search-base-url')
+            .enabled(!this.saving).onChange((value: string) => { this.baseUrl = value; })
           Text('API Key').fontColor($r('app.color.text_secondary'))
           TextInput({ text: this.apiKey, placeholder: this.savedKey ? t('留空保留已保存的搜索密钥') : 'API Key' }).type(InputType.Password)
             .id('search-api-key').enabled(!this.saving).onChange((value: string) => { this.apiKey = value; })
@@ -85,6 +83,6 @@ export struct SearchSettingsPanel {
         Button(t('保存')).attributeModifier(Btn.primary).enabled(!this.saving && !this.app.busy && !this.app.saveError)
           .id('save-search-settings').onClick(() => this.save())
       }.width('100%').padding(Space.page).alignItems(HorizontalAlign.Start)
-    }.width('100%').height('100%').backgroundColor($r('app.color.page_background'))
+    }.width('100%').height('100%').align(Alignment.Top).backgroundColor($r('app.color.page_background'))
   }
 }

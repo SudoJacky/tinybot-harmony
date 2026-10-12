@@ -2,7 +2,7 @@ import { ToolFailure, toolHttpFailure } from '../model/ToolFailure';
 import { http } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { SearchConfig, SearchResult, validateSearchConfig, searchCredentialAlias } from '../model/WebSearch';
+import { SearchConfig, SearchResult, DEEPSEEK_SEARCH_MODEL, validateSearchConfig, searchCredentialAlias } from '../model/WebSearch';
 import { ProviderProfile } from '../model/ProviderProfiles';
 import { SearchProvider, SearchHttpRequest } from './search/SearchProvider';
 import { DeepSeekSearchProvider } from './search/DeepSeekSearchProvider';
@@ -26,6 +26,7 @@ export class NativeSearchTransport implements SearchTransport {
   private provider: SearchProvider;
   constructor(config: SearchConfig, credentials: CredentialReader, threadId: string, recordUsage: (record: RequestUsage) => void,
     profiles: () => ProviderProfile[]) {
+    validateSearchConfig(config);
     this.config = JSON.parse(JSON.stringify(config)) as SearchConfig; this.credentials = credentials; this.threadId = threadId; this.recordUsage = recordUsage;
     this.profiles = profiles; this.provider = config.provider === 'tavily' ? new TavilySearchProvider() : new DeepSeekSearchProvider();
   }
@@ -36,9 +37,9 @@ export class NativeSearchTransport implements SearchTransport {
     let alias: string;
     try { alias = searchCredentialAlias(this.config, this.profiles()); } catch (error) { throw new ToolFailure('NOT_CONFIGURED', (error as Error).message, 'check_settings'); }
     const key = await this.credentials.read(alias); cancellation.check();
-    if (!key) { throw new ToolFailure('AUTH_REQUIRED', 'Configure the search API Key in search settings.', 'check_credentials'); }
+    if (!key.trim()) { throw new ToolFailure('AUTH_REQUIRED', 'Configure the API Key in the selected provider settings.', 'check_credentials'); }
     const request = this.provider.request(this.config, query, maximum, key);
-    const record: RequestUsage = { id: util.generateRandomUUID(), provider: this.config.provider + '-search', model: this.config.model || 'search',
+    const record: RequestUsage = { id: util.generateRandomUUID(), provider: this.config.provider + '-search', model: this.config.provider === 'deepseek' ? DEEPSEEK_SEARCH_MODEL : 'search',
       startedAt: Date.now(), durationMs: 0, status: 'running_or_unknown', origin: { threadId: this.threadId, purpose: 'web_search' } };
     this.recordUsage(record);
     try {
@@ -68,7 +69,7 @@ export class NativeSearchTransport implements SearchTransport {
           header: input.headers, extraData: input.body
         }, (error: BusinessError, response: http.HttpResponse) => {
           if (error) { finish('', new ToolFailure('NETWORK_ERROR', 'Search network error (' + error.code + ').', 'check_connection', { nativeCode: error.code })); return; }
-          if (response.responseCode !== 200) { finish('', toolHttpFailure(response.responseCode, 'Search HTTP ' + response.responseCode + '. Check search endpoint, model and API Key.', 'search')); return; }
+          if (response.responseCode !== 200) { finish('', toolHttpFailure(response.responseCode, 'Search HTTP ' + response.responseCode + '. Check the search service configuration and API Key.', 'search')); return; }
           if (typeof response.result !== 'string') { finish('', new ToolFailure('INVALID_RESPONSE', 'Search returned invalid data.', 'inspect_service')); return; }
           finish(response.result);
         });

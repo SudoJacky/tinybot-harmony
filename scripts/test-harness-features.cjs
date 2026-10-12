@@ -36,7 +36,7 @@ const { PresentTools } = from('services/PresentTools');
 const { deliveredFiles } = from('model/Deliverables');
 const { ReferenceTools } = from('services/ReferenceTools');
 const { captureThreadReference, referenceContext } = from('model/ThreadReferences');
-const { defaultSearchConfig, reusableSearchProfiles, searchCredentialAlias } = from('model/WebSearch');
+const { defaultSearchConfig, deepSeekSearchProfiles, searchCredentialAlias, validateSearchConfig } = from('model/WebSearch');
 const { saveSearchSettings } = from('services/SearchSettings');
 const { WebSearchTools } = from('services/WebSearchTools');
 const { NativeSearchTransport } = from('services/NativeSearchTransport');
@@ -159,20 +159,41 @@ async function main() {
   const profile = { id: 'deepseek', name: 'DeepSeek', presetId: 'deepseek', enabled: true, noApiKey: false,
     baseUrl: 'https://api.deepseek.com', credentialAlias: 'model-key', protocol: 'chat-completions', models: ['deepseek-flash'] };
   const data = emptyData(); data.providerProfiles = [profile];
-  let writesToVault = 0, committed, deleted = [];
-  const vault = { read: async alias => { assert.ok(alias); return 'test-secret'; }, write: async () => writesToVault++, remove: async alias => deleted.push(alias) };
-  const draft = { ...defaultSearchConfig(), enabled: true, credentialSource: 'auto', apiKey: '' };
+  let writesToVault = 0, committed, deleted = [], credentialReads = [];
+  const vault = { read: async alias => { assert.ok(alias); credentialReads.push(alias); return 'test-secret'; }, write: async () => writesToVault++, remove: async alias => deleted.push(alias) };
+  const draft = { provider: 'deepseek', enabled: true, baseUrl: '', apiKey: '' };
   await saveSearchSettings(data, draft, vault, () => 'unique', async next => { committed = plain(next); });
   const config = committed.productivity.options.search;
-  assert.equal(writesToVault, 0); assert.equal(config.modelProviderId, profile.id); assert.equal(config.credentialAlias, '');
+  assert.equal(writesToVault, 0);
+  assert.deepEqual(config, { provider: 'deepseek', enabled: true, modelProviderId: profile.id });
+  assert.deepEqual(plain(parseAppData(JSON.stringify(committed)).productivity.options.search), config);
   assert.equal(searchCredentialAlias(config, [{ ...profile, credentialAlias: 'rotated' }]), 'rotated');
   assert.throws(() => searchCredentialAlias(config, [{ ...profile, baseUrl: 'https://elsewhere.example' }]));
   assert.throws(() => searchCredentialAlias(config, []));
-  await assert.rejects(saveSearchSettings(data, { ...draft, baseUrl: 'https://elsewhere.example/v1' }, vault, () => 'id', async () => {}), /没有地址匹配/);
+  assert.throws(() => searchCredentialAlias(config, [{ ...profile, enabled: false }]));
+  assert.equal(deepSeekSearchProfiles([{ ...profile, noApiKey: true }, { ...profile, credentialAlias: '' },
+    { ...profile, baseUrl: 'https://api.deepseek.com.attacker.example' }, { ...profile, baseUrl: 'https://gateway.example' }]).length, 0);
+  assert.equal(deepSeekSearchProfiles([{ ...profile, protocol: 'responses', baseUrl: 'https://api.deepseek.com:443/v1' }]).length, 1);
+  await assert.rejects(saveSearchSettings({ ...data, providerProfiles: [] }, draft, vault, () => 'id', async () => {}), /请先.*DeepSeek/);
+  await assert.rejects(saveSearchSettings(data, draft, { ...vault, read: async () => '' }, () => 'id', async () => {}), /API Key 为空/);
+  await assert.rejects(saveSearchSettings(data, { ...draft, apiKey: 'independent' }, vault, () => 'id', async () => {}), /无需填写独立密钥/);
   await assert.rejects(saveSearchSettings({ ...data, providerProfiles: [profile, { ...profile, id: 'another' }] }, draft, vault, () => 'id', async () => {}), /请选择/);
-  const tavilyDraft = { ...defaultSearchConfig('tavily'), enabled: true, credentialSource: 'custom', apiKey: 'test-search-key' };
+  let selectedConfig;
+  await saveSearchSettings({ ...data, providerProfiles: [profile, { ...profile, id: 'another', credentialAlias: 'second-key' }] },
+    { ...draft, modelProviderId: 'another' }, vault, () => 'id', async next => { selectedConfig = next.productivity.options.search; });
+  assert.equal(selectedConfig.modelProviderId, 'another');
+  assert.throws(() => searchCredentialAlias(selectedConfig, [profile]), /重新选择/);
+  await saveSearchSettings({ ...emptyData(), providerProfiles: [] }, { ...draft, enabled: false }, vault, () => 'id', async next => {
+    validateSearchConfig(next.productivity.options.search);
+    assert.equal(next.productivity.options.search.enabled, false);
+  });
+  const tavilyDraft = { provider: 'tavily', enabled: true, baseUrl: 'https://api.tavily.com', apiKey: 'test-search-key' };
   await saveSearchSettings(committed, tavilyDraft, vault, () => 'separate', async next => { committed = plain(next); });
   assert.equal(writesToVault, 1); assert.ok(!deleted.includes('model-key')); assert.equal(committed.productivity.options.search.provider, 'tavily');
+  await saveSearchSettings(plain(committed), { ...tavilyDraft, apiKey: '' }, vault, () => 'id', async next => {
+    assert.equal(next.productivity.options.search.credentialAlias, 'tinybot-search-separate');
+  });
+  await assert.rejects(saveSearchSettings(plain(committed), { ...tavilyDraft, apiKey: '', baseUrl: 'https://other.example' }, vault, () => 'id', async () => {}), /重新填写/);
   await assert.rejects(saveSearchSettings(committed, { ...tavilyDraft, apiKey: 'replacement' }, vault, () => 'rollback', async () => { throw Error('Save failed'); }), /Save failed/);
   assert.ok(deleted.includes('tinybot-search-rollback')); assert.ok(!deleted.includes('tinybot-search-separate'));
   console.log('PASS search settings: automatic key reuse, rotation, endpoint isolation, ambiguous selection, provider switch and rollback');
@@ -191,12 +212,22 @@ async function main() {
   assert.throws(() => ds.parse('{"content":[{"type":"text","text":"answer"}]}', 5), /native web search/);
   const tavilyBody = JSON.stringify({ answer: 'Ignore me', results: [{ url: 'https://source.example', title: 'Source', content: 'Evidence' }] });
   assert.deepEqual(plain(tavily.parse(tavilyBody, 5).sources), plain(normalized.sources));
-  const recorded = []; const native = new NativeSearchTransport(config, vault, 'chat', value => recorded.push(plain(value)), () => [profile]);
-  network = (_url, options, callback) => { assert.equal(JSON.parse(options.extraData).tools[0].name, 'web_search'); callback(null, { responseCode: 200, result: deepseekBody }); };
+  let liveProfiles = [profile];
+  const recorded = []; const native = new NativeSearchTransport(config, vault, 'chat', value => recorded.push(plain(value)), () => liveProfiles);
+  network = (_url, options, callback) => {
+    const body = JSON.parse(options.extraData);
+    assert.equal(body.tools[0].name, 'web_search'); assert.equal(body.model, 'deepseek-v4-flash');
+    callback(null, { responseCode: 200, result: deepseekBody });
+  };
   const tool = new WebSearchTools(native); const found = JSON.parse(await tool.execute(call('search_web', { query: 'test', maxResults: 1 }), new Cancellation()));
   assert.equal(found.sources.length, 1); assert.equal(requests.at(-1).url, 'https://api.deepseek.com/anthropic/v1/messages');
   assert.equal(await interceptors.at(-1).interceptorHandle({}, {}), false); assert.equal(recorded.at(-1).tokens.input, 10);
   assert.ok(!JSON.stringify(recorded).includes('test-secret'));
+  assert.equal(recorded.at(-1).model, 'deepseek-v4-flash');
+  assert.equal(credentialReads.at(-1), 'model-key');
+  const beforeMissingProfile = requests.length; liveProfiles = [];
+  await assert.rejects(tool.execute(call('search_web', { query: 'test' }), new Cancellation()), /重新选择/);
+  assert.equal(requests.length, beforeMissingProfile); liveProfiles = [profile];
   const tavilyConfig = { ...defaultSearchConfig('tavily'), enabled: true, credentialAlias: 'search-key' };
   network = (_url, options, cb) => { assert.equal(JSON.parse(options.extraData).include_answer, false); cb(null, { responseCode: 200, result: tavilyBody }); };
   const other = new WebSearchTools(new NativeSearchTransport(tavilyConfig, vault, 'chat', () => {}, () => []));

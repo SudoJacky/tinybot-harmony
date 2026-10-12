@@ -6,7 +6,7 @@ interface TavilyItem { url: string; title?: string; content?: string; published_
 interface TavilyResponse { results?: TavilyItem[]; }
 export class TavilySearchProvider implements SearchProvider {
   request(config: SearchConfig, query: string, maximum: number, key: string): SearchHttpRequest {
-    return { endpoint: config.baseUrl.replace(/\/+$/, '') + '/search',
+    return { endpoint: config.baseUrl!.replace(/\/+$/, '') + '/search',
       headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify({ query: query, max_results: maximum, search_depth: 'basic',
         include_answer: false, include_raw_content: false, include_images: false }) };

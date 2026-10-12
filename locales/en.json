@@ -1468,12 +1468,7 @@
   "补读会话引用": "Read referenced snapshot",
   "搜索服务": "Search provider",
   "密钥来源": "Credential source",
-  "自动复用已配置的模型密钥": "Automatically reuse a configured model key",
-  "独立搜索密钥": "Separate search key",
   "将复用 {0} 的密钥，无需重复填写。": "The key from {0} will be reused. No need to enter it again.",
-  "有多个匹配服务，请选择要复用的密钥。": "Multiple services match. Choose the key to reuse.",
-  "没有地址匹配的模型服务，可选择独立搜索密钥。": "No model service matches this endpoint. You can use a separate search key.",
-  "搜索词会发送给所选服务；结果统一返回来源链接和摘录。DeepSeek 需要支持原生搜索的接口与模型。": "Queries are sent to the selected provider. Results include source links and excerpts. DeepSeek requires an endpoint and model that support native search.",
   "edits 必须包含 1–32 项编辑。": "edits must contain 1–32 edits.",
   "第 {0} 项编辑需要非空 oldText 和字符串 newText。": "Edit {0} requires non-empty oldText and a string newText.",
   "第 {0} 项编辑：": "Edit {0}: ",
@@ -1512,5 +1507,13 @@
   "许可证：{0}": "License: {0}",
   "收起许可全文": "Hide full license",
   "展开许可全文": "Show full license",
-  "感谢开源社区。本应用使用或参考了以下开源组件与设计，版权归各自权利人所有。展开可离线查看随应用附带的原文；各组件适用其自身许可证。": "Thank you to the open-source community. This app uses or draws on the components and designs below. Copyright belongs to their respective owners. Expand each entry to read the bundled original text offline; each component is governed by its own license."
+  "感谢开源社区。本应用使用或参考了以下开源组件与设计，版权归各自权利人所有。展开可离线查看随应用附带的原文；各组件适用其自身许可证。": "Thank you to the open-source community. This app uses or draws on the components and designs below. Copyright belongs to their respective owners. Expand each entry to read the bundled original text offline; each component is governed by its own license.",
+  "所选 DeepSeek 服务已停用、删除或不再使用官方地址，请在联网搜索中重新选择。": "The selected DeepSeek provider was disabled, removed, or no longer uses the official endpoint. Select a provider again in web search settings.",
+  "请先在设置中添加并启用 DeepSeek 官方模型服务，配置 API Key。": "First add and enable an official DeepSeek model provider in Settings and configure its API Key.",
+  "请选择用于联网搜索的 DeepSeek 服务。": "Select a DeepSeek provider for web search.",
+  "DeepSeek 搜索复用模型服务密钥，无需填写独立密钥。": "DeepSeek search reuses the model provider API Key. A separate key is not needed.",
+  "API Key 为空，请在对应服务中重新配置。": "The API Key is empty. Configure it again in the corresponding provider settings.",
+  "搜索词会发送给所选服务，结果返回来源链接和摘录。": "Search queries are sent to the selected service, which returns source links and excerpts.",
+  "使用 DeepSeek 官方搜索，自动复用已配置的 DeepSeek 服务密钥。搜索会产生额外的模型用量。": "Uses official DeepSeek search with your configured DeepSeek provider API Key. Searching incurs additional model usage.",
+  "DeepSeek 服务": "DeepSeek provider"
 }
