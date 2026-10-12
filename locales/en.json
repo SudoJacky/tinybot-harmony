@@ -1500,5 +1500,17 @@
   "编辑项目": "Edit project",
   "新建项目": "New project",
   "项目中的待审修改": "Pending project changes",
-  "这里包含项目内各会话和文件编辑的累计修改。": "Includes accumulated changes from project chats and file edits."
+  "这里包含项目内各会话和文件编辑的累计修改。": "Includes accumulated changes from project chats and file edits.",
+  "第三方开源许可协议": "Third-party open-source licenses",
+  "开源共建": "Built with the community",
+  "Tinybot 是一款开源软件，遵循 Apache 2.0 许可证。欢迎社区参与维护、改进翻译、报告问题，以及通过 Pull Request 提交代码，一起让 Tinybot 变得更好。": "Tinybot is open-source software licensed under Apache 2.0. Help make Tinybot better by maintaining the project, improving translations, reporting issues, or contributing code through pull requests.",
+  "GitHub 仓库": "GitHub repository",
+  "报告软件问题（Issues）": "Report an issue",
+  "免责声明": "Disclaimer",
+  "本软件按“现状”提供；除适用法律要求或书面约定外，不提供任何明示或默示担保。相关责任限制以 Apache 2.0 许可证为准。AI 生成内容可能不准确，请自行核实重要信息，审慎执行工具操作，并备份重要数据。你所连接的模型及其他第三方服务，其可用性、费用与数据处理规则由相应服务商决定。": "This software is provided “as is”, without express or implied warranties, except as required by applicable law or agreed in writing. Limitations of liability are governed by the Apache 2.0 license. AI-generated content may be inaccurate. Verify important information, use tools with care, and back up important data. Availability, fees, and data handling for connected models and other third-party services are determined by their providers.",
+  "无法读取许可文本：{0}": "Unable to read license text: {0}",
+  "许可证：{0}": "License: {0}",
+  "收起许可全文": "Hide full license",
+  "展开许可全文": "Show full license",
+  "感谢开源社区。本应用使用或参考了以下开源组件与设计，版权归各自权利人所有。展开可离线查看随应用附带的原文；各组件适用其自身许可证。": "Thank you to the open-source community. This app uses or draws on the components and designs below. Copyright belongs to their respective owners. Expand each entry to read the bundled original text offline; each component is governed by its own license."
 }

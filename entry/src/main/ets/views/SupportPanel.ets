@@ -1,4 +1,6 @@
 import { t } from '../model/I18n';
+import { common } from '@kit.AbilityKit';
+import { ThirdPartyLicensesPanel } from './ThirdPartyLicensesPanel';
 import { readAppInformation } from '../services/AppInformation';
 import { Font, Space } from '../common/Theme';
 import { Banner, GroupCard, NavRow, RowDivider, SectionHeader } from '../common/Widgets';
@@ -8,6 +10,7 @@ export function supportTitle(page: string): string {
   if (page === 'updates') { return t('更新说明'); }
   if (page === 'announcements') { return t('公告'); }
   if (page === 'guide') { return t('首次使用指引'); }
+  if (page === 'licenses') { return t('第三方开源许可协议'); }
   return t('关于 Tinybot');
 }
 
@@ -17,6 +20,17 @@ export struct SupportPanel {
   @State private version: string = '';
   @State private error: string = '';
   onOpen: (page: string) => void = () => {};
+
+  private async openWebsite(url: string): Promise<void> {
+    try {
+      await (this.getUIContext().getHostContext() as common.UIAbilityContext)
+        .startAbility({ action: 'ohos.want.action.viewData', uri: url });
+    } catch (error) {
+      this.getUIContext().showAlertDialog({ title: t('无法打开系统浏览器。'),
+        message: url + '\n' + (error as Error).message,
+        confirm: { value: t('关闭'), action: () => {} } });
+    }
+  }
 
   aboutToAppear(): void {
     if (this.page !== 'about') { return; }
@@ -49,6 +63,16 @@ export struct SupportPanel {
         Text(t('版本 {0}', [this.version])).id('about-version').fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
       }
     }.width('100%').padding({ top: Space.lg, bottom: Space.xl })
+    this.article(t('开源共建'), t('Tinybot 是一款开源软件，遵循 Apache 2.0 许可证。欢迎社区参与维护、改进翻译、报告问题，以及通过 Pull Request 提交代码，一起让 Tinybot 变得更好。'))
+    GroupCard() {
+      Column() {
+        NavRow({ title: t('GitHub 仓库'), subtitle: 'SudoJacky/tinybot-harmony', compId: 'about-github',
+          onTap: () => this.openWebsite('https://github.com/SudoJacky/tinybot-harmony') })
+        RowDivider()
+        NavRow({ title: t('报告软件问题（Issues）'), compId: 'about-issues',
+          onTap: () => this.openWebsite('https://github.com/SudoJacky/tinybot-harmony/issues') })
+      }
+    }
     GroupCard() {
       Column() {
         NavRow({ title: t('更新说明'), compId: 'open-release-notes', onTap: () => this.onOpen('updates') })
@@ -66,8 +90,18 @@ export struct SupportPanel {
         NavRow({ title: t('用户协议'), value: t('待补充'), compId: 'user-agreement', disabled: true })
         RowDivider()
         NavRow({ title: t('隐私政策'), value: t('待补充'), compId: 'privacy-policy', disabled: true })
+        RowDivider()
+        NavRow({ title: 'Apache License 2.0', compId: 'about-project-license',
+          onTap: () => this.openWebsite('https://github.com/SudoJacky/tinybot-harmony/blob/main/LICENSE') })
+        RowDivider()
+        NavRow({ title: t('第三方开源许可协议'), compId: 'open-third-party-licenses',
+          onTap: () => this.onOpen('licenses') })
       }
     }
+    this.article(t('免责声明'), t('本软件按“现状”提供；除适用法律要求或书面约定外，不提供任何明示或默示担保。相关责任限制以 Apache 2.0 许可证为准。AI 生成内容可能不准确，请自行核实重要信息，审慎执行工具操作，并备份重要数据。你所连接的模型及其他第三方服务，其可用性、费用与数据处理规则由相应服务商决定。'))
+    Text('Copyright © 2026 Tinybot. All rights reserved.').id('about-copyright')
+      .fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).textAlign(TextAlign.Center)
+      .width('100%').padding({ top: Space.lg, bottom: Space.sm })
   }
 
   @Builder
@@ -102,21 +136,25 @@ export struct SupportPanel {
   }
 
   build() {
-    Scroll() {
-      Column({ space: Space.md }) {
-        if (this.error) { Banner({ text: this.error, compId: 'support-error' }) }
-        if (this.page === 'help') {
-          this.help()
-        } else if (this.page === 'guide') {
-          this.guide()
-        } else if (this.page === 'updates') {
-          this.updates()
-        } else if (this.page === 'announcements') {
-          this.article(t('暂无公告'), t('有新的公告时，会显示在这里。'))
-        } else {
-          this.about()
-        }
-      }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.md, bottom: Space.xl })
-    }.height('100%').width('100%').align(Alignment.Top).scrollBar(BarState.Auto).edgeEffect(EdgeEffect.Spring)
+    if (this.page === 'licenses') {
+      ThirdPartyLicensesPanel()
+    } else {
+      Scroll() {
+        Column({ space: Space.md }) {
+          if (this.error) { Banner({ text: this.error, compId: 'support-error' }) }
+          if (this.page === 'help') {
+            this.help()
+          } else if (this.page === 'guide') {
+            this.guide()
+          } else if (this.page === 'updates') {
+            this.updates()
+          } else if (this.page === 'announcements') {
+            this.article(t('暂无公告'), t('有新的公告时，会显示在这里。'))
+          } else {
+            this.about()
+          }
+        }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.md, bottom: Space.xl })
+      }.height('100%').width('100%').align(Alignment.Top).scrollBar(BarState.Auto).edgeEffect(EdgeEffect.Spring)
+    }
   }
 }
