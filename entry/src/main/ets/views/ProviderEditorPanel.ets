@@ -1,5 +1,7 @@
+import { AppMaterials } from '../common/AppMaterials';
 import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
+import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { discoverModels } from '../services/ModelDiscovery';
 import { ProviderEditorViewModel } from '../viewmodel/ProviderEditorViewModel';
@@ -38,7 +40,7 @@ export struct ProviderEditorPanel {
       await (this.getUIContext().getHostContext() as common.UIAbilityContext)
         .startAbility({ action: 'ohos.want.action.viewData', uri: url });
     } catch (_) {
-      if (this.alive) { this.getUIContext().getPromptAction().showToast({ message: t('无法打开系统浏览器。') }); }
+      if (this.alive) { this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t('无法打开系统浏览器。') }); }
     }
   }
   private async discover(): Promise<void> {
@@ -62,7 +64,7 @@ export struct ProviderEditorPanel {
     const invalid = ['name', 'url', 'key', 'models', 'context'].find((field: string) => this.editor.fieldError(field).length > 0);
     if (invalid) {
       if (invalid === 'context') { this.advanced = true; }
-      this.getUIContext().getPromptAction().showToast({ message: t('请检查标出的设置项。') });
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t('请检查标出的设置项。') });
       if (invalid === 'models') { this.showModels = true; return; }
       setTimeout(() => {
         if (!this.alive) { return; }
@@ -128,7 +130,7 @@ export struct ProviderEditorPanel {
     }.width('100%')
   }
   private confirmDelete(): void {
-    this.getUIContext().showAlertDialog({ title: t('删除模型服务？'),
+    this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface, title: t('删除模型服务？'),
       message: t('删除这份服务配置及其密钥，保留完整对话。使用它的会话需要重新选择模型。'),
       primaryButton: { value: t('取消'), action: () => {} },
       secondaryButton: { value: t('删除'), fontColor: $r('app.color.danger'), action: async () => {
@@ -139,7 +141,8 @@ export struct ProviderEditorPanel {
   @Builder
   serviceActions() {
     Menu() {
-      MenuItem({ content: t('删除此服务') }).id('delete-provider-' + this.editor.id)
+      MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.trash')).fontColor([$r('app.color.danger')]),
+        content: t('删除此服务') }).id('delete-provider-' + this.editor.id)
         .contentFontColor($r('app.color.danger')).enabled(!this.locked()).onClick(() => this.confirmDelete())
     }
   }
@@ -223,7 +226,7 @@ export struct ProviderEditorPanel {
           Blank()
           Button(t('更多操作')).id('provider-more-actions').attributeModifier(Btn.text).height(44)
             .enabled(!this.locked()).bindMenu(this.serviceActions, {
-              mask: { color: $r('app.color.scrim'), backgroundBlurStyle: BlurStyle.NONE } })
+              systemMaterial: AppMaterials.surface, mask: false })
         }.width('100%').padding({ left: Space.page, right: Space.page })
       }
       Scroll(this.scroller) {

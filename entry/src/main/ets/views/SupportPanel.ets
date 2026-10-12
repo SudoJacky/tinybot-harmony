@@ -1,3 +1,4 @@
+import { AppMaterials } from '../common/AppMaterials';
 import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
 import { ThirdPartyLicensesPanel } from './ThirdPartyLicensesPanel';
@@ -26,7 +27,7 @@ export struct SupportPanel {
       await (this.getUIContext().getHostContext() as common.UIAbilityContext)
         .startAbility({ action: 'ohos.want.action.viewData', uri: url });
     } catch (error) {
-      this.getUIContext().showAlertDialog({ title: t('无法打开系统浏览器。'),
+      this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface, title: t('无法打开系统浏览器。'),
         message: url + '\n' + (error as Error).message,
         confirm: { value: t('关闭'), action: () => {} } });
     }

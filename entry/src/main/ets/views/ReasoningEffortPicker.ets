@@ -1,4 +1,5 @@
 import { t } from '../model/I18n';
+import { AppMaterials } from '../common/AppMaterials';
 import { reasoningEffortName } from '../model/ReasoningEffort';
 import { IconButton } from '../common/Widgets';
 
@@ -64,18 +65,20 @@ export struct ReasoningEffortPicker {
           Text(this.modelName).fontSize(12).fontColor($r('app.color.text_secondary'))
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }.layoutWeight(1)
-        IconButton({ icon: $r('sys.symbol.arrow_counterclockwise'), label: t('恢复默认推理强度'),
+        IconButton({ icon: $r('sys.symbol.arrow_counterclockwise'), label: t('恢复 Auto 推理强度'),
           compId: 'reset-reasoning-effort', diameter: 32, iconSize: 17,
           disabled: this.disabled || this.saving || this.value === 'default',
           onTap: () => { this.select(0); } })
       }.width('100%')
+      // Keep the native track/thumb proportions: material adds its own pressed-state enlargement.
       Slider({ value: this.previewIndex, min: 0, max: this.efforts.length - 1, step: 1, style: SliderStyle.InSet })
         .id('reasoning-effort-slider').width('100%').height(44)
-        .trackThickness(28).blockSize({ width: 26, height: 26 }).blockColor($r('app.color.surface'))
+        .blockColor($r('app.color.surface'))
         .selectedColor($r('app.color.accent')).trackColor($r('app.color.surface_variant'))
         .showSteps(true).stepSize(4).stepColor($r('app.color.text_tertiary'))
         .enabled(!this.disabled && !this.saving)
         .accessibilityText(t('推理强度') + '：' + reasoningEffortName(this.efforts[this.previewIndex]))
+        .systemMaterial(AppMaterials.control)
         .onChange((value: number, mode: SliderChangeMode) => {
           if (this.disabled || this.saving) return;
           this.dragging = mode === SliderChangeMode.Begin || mode === SliderChangeMode.Moving;

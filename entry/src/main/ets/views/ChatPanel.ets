@@ -1,4 +1,7 @@
+import { AppMaterials } from '../common/AppMaterials';
 import { t } from '../model/I18n';
+import { AnswerSpeech } from '../services/AnswerSpeech';
+import { LaunchActions } from '../services/LaunchActions';
 import { supportsReasoningEffort, reasoningEfforts, reasoningEffortName, isHighestReasoningEffort } from '../model/ReasoningEffort';
 import { ComposerGlow } from '../common/ComposerGlow';
 import { ReasoningEffortPicker } from './ReasoningEffortPicker';
@@ -8,7 +11,7 @@ import { VoicePill } from '../common/VoicePill';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { ThreadReference, referenceQuery } from '../model/ThreadReferences';
 import { ThreadReferenceCard } from './ThreadReferenceCard';
-import { curves } from '@kit.ArkUI';
+import { curves, SymbolGlyphModifier } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { Attachment, PromptTemplate } from '../model/Productivity';
 import { Attachments } from '../services/Attachments';
@@ -27,33 +30,16 @@ import { Btn, Font, Motion, Radius, Space, fileSize } from '../common/Theme';
 import { Banner, IconBadge, IconButton } from '../common/Widgets';
 import { WindowViewport } from '../viewmodel/WindowViewport';
 
-class Suggestion {
-  icon: Resource;
-  title: string;
-  detail: string;
-  prompt: string;
-
-  constructor(icon: Resource, title: string, detail: string, prompt: string) {
-    this.icon = icon;
-    this.title = title;
-    this.detail = detail;
-    this.prompt = prompt;
-  }
-}
-
-function SUGGESTIONS(): Suggestion[] { return [
-  new Suggestion($r('sys.symbol.checkmark'), t("整理成行动"), t("把零散想法变成步骤"), t("帮我把下面的想法整理成可执行的步骤：")),
-  new Suggestion($r('sys.symbol.ellipsis_message'), t("通俗解释"), t("用生活例子讲清概念"), t("请用一个贴近日常生活的例子，解释一个复杂概念：")),
-  new Suggestion($r('sys.symbol.square_and_pencil'), t("润色文字"), t("更清晰、更得体"), t("请帮我润色下面这段文字，保持原意，让表达更清晰：")),
-  new Suggestion($r('sys.symbol.magnifyingglass'), t("读网页"), t("总结链接中的要点"), t("请阅读这个网页并总结要点："))
-]; }
-
 @Component
 export struct ChatPanel {
   @ObjectLink app: ChatViewModel;
   @ObjectLink thread: ThreadViewModel;
+  @Prop topInset: number = 0;
   @Prop @Watch('speechAvailabilityChanged') speechEnabled: boolean = true;
   @Prop @Watch('speechThreadChanged') activeThreadId: string = '';
+  @Prop @Watch('receiveVoiceShortcut') voiceRequest: string = '';
+  private consumedVoiceRequest: string = '';
+  onVoiceShortcutConsumed: () => void = () => {};
   onSettings: () => void = () => {};
   onHistoryDragStart: (event: GestureEvent) => void = () => {};
   onHistoryDragUpdate: (event: GestureEvent) => void = () => {};
@@ -66,6 +52,7 @@ export struct ChatPanel {
   @State private importing: boolean = false;
   @State private showPlus: boolean = false;
   @State private speech: SpeechInput = new SpeechInput();
+  @State private reading: AnswerSpeech = new AnswerSpeech();
   @State private unwrittenSpeech: string = '';
   private dictationDraft?: DictationDraft;
   private speechThreadId: string = '';
@@ -126,21 +113,45 @@ export struct ChatPanel {
     this.speech.onComplete = (): void => { this.dictationDraft = undefined; this.app.flushDraft(); };
     this.speech.onError = (): void => { this.dictationDraft = undefined; this.app.flushDraft(); };
     this.speech.onBackground = (): void => { this.dictationDraft = undefined; this.app.flushDraft(); };
+    this.receiveVoiceShortcut();
   }
 
   aboutToDisappear(): void {
     this.viewport.dispose();
     this.endSpeech(false);
+    this.reading.stop();
     clearTimeout(this.scrollTimer);
   }
 
   private speechActive(): boolean {
     return this.speech.phase === 'preparing' || this.speech.phase === 'listening' || this.speech.phase === 'finishing';
   }
-  private speechAvailabilityChanged(): void { if (!this.speechEnabled) { this.endSpeech(false); } }
-  private speechThreadChanged(): void { if (this.speechThreadId !== this.activeThreadId) { this.endSpeech(false); } }
+  private speechAvailabilityChanged(): void {
+    if (!this.speechEnabled) { this.endSpeech(false); this.reading.stop(); }
+    else { this.receiveVoiceShortcut(); }
+  }
+  private speechThreadChanged(): void {
+    if (this.speechThreadId !== this.activeThreadId) { this.endSpeech(false); }
+    this.reading.stop();
+    this.receiveVoiceShortcut();
+  }
+  private receiveVoiceShortcut(): void {
+    if (!this.voiceRequest || this.voiceRequest === this.consumedVoiceRequest ||
+      this.voiceRequest !== this.activeThreadId || this.voiceRequest !== this.thread.id || !this.speechEnabled) { return; }
+    this.consumedVoiceRequest = this.voiceRequest;
+    this.onVoiceShortcutConsumed();
+    if (LaunchActions.isForeground()) { this.startSpeech(); }
+  }
+  private readAnswer(id: string): void {
+    if (this.reading.messageId === id) { this.reading.stop(); return; }
+    const message = this.thread.messages.find((item: MessageViewModel) => item.id === id);
+    if (!message || message.role !== 'assistant' || message.status === 'generating' || !this.speechEnabled) { return; }
+    this.endSpeech(false);
+    this.reading.start(this.getUIContext().getHostContext() as common.UIAbilityContext, id, message.content);
+  }
   private startSpeech(settings: boolean = false): void {
     if (this.speechActive() || !this.speechEnabled || !this.app.ready || this.thread.archived || this.app.saveError) { return; }
+    this.reading.stop();
     this.getUIContext().getFocusController().clearFocus();
     this.speechThreadId = this.app.active.id;
     this.dictationDraft = new DictationDraft(this.app.draft);
@@ -164,7 +175,7 @@ export struct ChatPanel {
     if (this.unwrittenSpeech) {
       try {
         await pasteboard.getSystemPasteboard().setData(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, this.unwrittenSpeech));
-        this.getUIContext().getPromptAction().showToast({ message: t('已复制') });
+        this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t('已复制') });
         this.unwrittenSpeech = ''; this.speech.error = '';
       } catch (error) { this.speech.error = t('复制失败：') + (error as Error).message; }
     } else if (this.speech.permissionDenied) { this.startSpeech(true); }
@@ -223,7 +234,7 @@ export struct ChatPanel {
   private async fork(id: string): Promise<void> {
     const editing = this.thread.messages.some((message) => message.id === id && message.role === 'user');
     if (await this.app.forkThread(id)) {
-      this.getUIContext().getPromptAction().showToast({ message: t("已切换到新分支，原对话保留在列表中") });
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t("已切换到新分支，原对话保留在列表中") });
       if (editing) { this.getUIContext().getFocusController().requestFocus('composer'); }
     }
   }
@@ -253,27 +264,12 @@ export struct ChatPanel {
   }
 
   private confirmCompact(): void {
-    this.getUIContext().showAlertDialog({
+    this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface,
       title: t("压缩较早对话？"),
       message: t("将调用当前模型生成摘要，消耗 Token。完整记录保留，之后请求使用摘要和最近消息。"),
       primaryButton: { value: t("取消"), action: () => {} },
       secondaryButton: { value: t("压缩"), action: () => { this.showContext = false; this.app.compactHistory(); } }
     });
-  }
-
-  @Builder
-  suggestionCard(item: Suggestion, index: number) {
-    Column({ space: 6 }) {
-      SymbolGlyph(item.icon).fontSize(20).fontColor([$r('app.color.accent')])
-      Text(item.title).fontSize(15).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
-      Text(item.detail).fontSize(Font.caption).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-        .fontColor($r('app.color.text_secondary'))
-    }
-    .layoutWeight(1).alignItems(HorizontalAlign.Start).padding(14).borderRadius(Radius.lg)
-    .backgroundColor($r('app.color.surface'))
-    .clickEffect(Motion.press)
-    .transition(Motion.rise(4 + index))
-    .onClick(() => { this.app.setDraft(item.prompt); })
   }
 
   @Builder
@@ -298,30 +294,9 @@ export struct ChatPanel {
           }.width('100%').padding(Space.lg).borderRadius(Radius.lg).backgroundColor($r('app.color.accent_container'))
           .transition(Motion.rise(3))
         }
-        Row({ space: 10 }) {
-          this.suggestionCard(SUGGESTIONS()[0], 0)
-          this.suggestionCard(SUGGESTIONS()[1], 1)
-        }.width('100%')
-        Row({ space: 10 }) {
-          this.suggestionCard(SUGGESTIONS()[2], 2)
-          this.suggestionCard(SUGGESTIONS()[3], 3)
-        }.width('100%')
-        if (!this.thread.teamEnabled) {
-          Row({ space: Space.md }) {
-            IconBadge({ icon: $r('sys.symbol.person_2'), diameter: 40 })
-            Column({ space: 2 }) {
-              Text(t("交给 Agent 团队")).fontSize(15).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
-              Text(t("复杂任务由主 Agent 招募员工并行完成")).fontSize(Font.caption).maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_secondary'))
-            }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-            SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
-          }
-          .id('welcome-team').width('100%').padding(14).borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
-          .clickEffect(Motion.press).transition(Motion.rise(8))
-          .enabled(!this.thread.archived && this.app.saveError.length === 0)
-          .onClick(() => this.toggleTeam(true))
-        }
-      }.width('100%').constraintSize({ minHeight: '100%' }).padding({ left: 20, right: 20, top: Space.lg, bottom: Space.md })
+        Blank().layoutWeight(1)
+      }.width('100%').constraintSize({ minHeight: '100%' })
+      .padding({ left: 20, right: 20, top: this.topInset + Space.lg, bottom: Space.md })
     }.layoutWeight(1).width('100%').scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring)
   }
 
@@ -338,6 +313,7 @@ export struct ChatPanel {
         ForEach(this.app.visibleMessages, (message: MessageViewModel) => {
           ListItem() {
             MessageBubble({ message: message, webEnabled: this.app.extensions.webEnabled, onOpenFile: this.onOpenFile, uiAvailable: !this.app.busy && !this.thread.archived,
+              readingMessageId: this.reading.messageId, onRead: (id: string) => this.readAnswer(id),
               actionsEnabled: !this.app.busy && !this.app.saveError, onRegenerate: (id: string) => this.regenerate(id),
               onUi: this.uiHandler(this.thread.id, message.id), onFork: (id: string) => { this.fork(id); }, onRemember: (id: string) => { this.remember(id); },
               onInspect: () => { this.inspectingOutput = true; this.followOutput = false; clearTimeout(this.scrollTimer); this.scrollTimer = -1; },
@@ -355,7 +331,9 @@ export struct ChatPanel {
         }
       }
       .id('message-list').width('100%').height('100%')
-      .padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.lg })
+      .padding({ left: Space.page, right: Space.page, bottom: Space.lg })
+      // Scroll the leading space away so messages can pass beneath the floating title bar.
+      .contentStartOffset(this.topInset + Space.sm)
       .scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring)
       .onTouch((event: TouchEvent) => { if (event.type === TouchType.Down) { this.followOutput = false; } })
       .onReachEnd(() => { if (!this.inspectingOutput) { this.followOutput = true; } })
@@ -444,7 +422,8 @@ export struct ChatPanel {
   @Builder
   sendMenu() {
     Menu() {
-      MenuItem({ content: t("加入队列") }).enabled(this.app.canQueueInput && this.hasDraft())
+      MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.text_and_plus')), content: t("加入队列") })
+        .enabled(this.app.canQueueInput && this.hasDraft())
         .onClick(() => this.app.enqueueInput('followUp'))
     }
   }
@@ -517,7 +496,7 @@ export struct ChatPanel {
               .enabled(!this.thread.archived)
               .onClick(() => {
                 this.showPlus = false; this.app.useTemplate(item.id);
-                this.getUIContext().getPromptAction().showToast({ message: t("已套用模板，可继续编辑后发送") });
+                this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t("已套用模板，可继续编辑后发送") });
               })
             }, (item: PromptTemplate) => item.id)
           }.width('100%').borderRadius(Radius.lg).clip(true).backgroundColor($r('app.color.surface'))
@@ -573,9 +552,7 @@ export struct ChatPanel {
   }
 
   private async toggleTeam(enabled: boolean): Promise<void> {
-    if (await this.app.setTeamEnabled(enabled)) {
-      this.getUIContext().getPromptAction().showToast({ message: enabled ? t("已开启团队模式，描述目标即可开始") : t("已关闭团队模式") });
-    }
+    await this.app.setTeamEnabled(enabled);
   }
 
   private teamSuggested(): boolean {
@@ -635,19 +612,27 @@ export struct ChatPanel {
   }
 
   @Builder
-  teamChip() {
-    Row({ space: 6 }) {
-      SymbolGlyph($r('sys.symbol.person_2')).fontSize(14).fontColor([$r('app.color.on_accent_container')])
-      Text(t("团队模式")).fontSize(12).fontWeight(FontWeight.Medium).fontColor($r('app.color.on_accent_container'))
-      Button({ type: ButtonType.Circle }) {
-        SymbolGlyph($r('sys.symbol.xmark')).fontSize(11).fontColor([$r('app.color.on_accent_container')])
-      }.id('disable-team').width(22).height(22).backgroundColor(Color.Transparent).accessibilityText(t("关闭团队模式"))
-      .responseRegion({ x: -10, y: -8, width: 42, height: 38 })
-      .enabled(!this.app.busy).opacity(this.app.busy ? 0.4 : 1).onClick(() => this.toggleTeam(false))
-    }.height(28).padding({ left: 10, right: 3 }).borderRadius(14).backgroundColor($r('app.color.accent_container'))
-    .alignSelf(ItemAlign.Start).margin({ left: 2, top: 4 })
-    .transition(TransitionEffect.OPACITY.combine(TransitionEffect.scale({ x: 0.9, y: 0.9 }))
-      .animation({ duration: Motion.medium, curve: Motion.standard }))
+  teamToggle() {
+    Row() {
+      // Toggle supports native material in the content area; ordinary Button and Chip do not.
+      Toggle({ type: ToggleType.Button, isOn: this.thread.teamEnabled }) {
+        Row({ space: 6 }) {
+          SymbolGlyph($r('sys.symbol.person_2')).fontSize(16)
+            .fontColor([this.thread.teamEnabled ? $r('app.color.on_accent') : $r('sys.color.font_primary')])
+          Text(t('团队模式')).fontSize(13).fontWeight(FontWeight.Medium)
+            .fontColor(this.thread.teamEnabled ? $r('app.color.on_accent') : $r('sys.color.font_primary'))
+        }
+      }.id('composer-team-toggle').height(32).padding({ left: 12, right: 12 }).borderRadius(16)
+        .backgroundColor(Color.Transparent).selectedColor($r('app.color.accent'))
+        .systemMaterial(this.thread.teamEnabled ? AppMaterials.accentControl : AppMaterials.control)
+        .enabled(this.app.ready && !this.app.busy && !this.thread.archived && this.app.saveError.length === 0)
+        .accessibilityText(t('团队模式'))
+        .accessibilityDescription(this.thread.teamEnabled ? t('关闭团队模式') : t('开启团队模式'))
+        .onChange((enabled: boolean) => {
+          if (enabled !== this.thread.teamEnabled) { this.toggleTeam(enabled); }
+        })
+    }.width('100%').height(40).justifyContent(FlexAlign.Start)
+      .padding({ left: 4 })
   }
 
   // Slash-command suggestion shown while the draft is a prefix of /team.
@@ -689,7 +674,7 @@ export struct ChatPanel {
         this.reasoningSaving = true;
         try {
           const saved = await this.app.setReasoningEffort(value);
-          if (!saved && this.app.error) this.getUIContext().getPromptAction().showToast({ message: this.app.error });
+          if (!saved && this.app.error) this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: this.app.error });
           return saved;
         } finally {
           // SessionService publishes the committed snapshot before resolving.
@@ -731,9 +716,6 @@ export struct ChatPanel {
             }, (item: ThreadReference) => item.threadId)
           }.width('100%')
         }.width('100%').constraintSize({ maxHeight: 104 }).scrollBar(BarState.Auto)
-      }
-      if (this.thread.teamEnabled) {
-        this.teamChip()
       }
       if (this.thread.attachments.length > 0 || this.importing) {
         this.attachmentStrip()
@@ -794,8 +776,8 @@ export struct ChatPanel {
           .accessibilityText(t('推理强度') + '：' + reasoningEffortName(this.displayedEffort()))
           .onClick(() => { this.getUIContext().getFocusController().clearFocus(); this.showReasoning = !this.showReasoning; })
           .bindPopup(this.showReasoning, { builder: this.reasoningPicker, placement: Placement.Top,
-            popupColor: $r('app.color.surface'), radius: 20, enableArrow: false, autoCancel: true,
-            mask: { color: $r('app.color.scrim') },
+            systemMaterial: AppMaterials.surface, radius: 20, enableArrow: false, autoCancel: true,
+            mask: false,
             onStateChange: (event) => {
               this.showReasoning = event.isVisible;
               if (!event.isVisible && !this.reasoningSaving) this.reasoningPreview = '';
@@ -842,7 +824,7 @@ export struct ChatPanel {
             tint: this.canSend() ? $r('app.color.on_accent') : $r('app.color.text_tertiary'),
             disabled: !this.canSend(), onTap: () => this.send() })
             .bindContextMenu(this.sendMenu, ResponseType.LongPress, {
-              mask: { color: $r('app.color.scrim'), backgroundBlurStyle: BlurStyle.NONE } })
+              systemMaterial: AppMaterials.surface, mask: false })
             .transition(Motion.pop())
         }
       }.width('100%')
@@ -922,6 +904,14 @@ export struct ChatPanel {
           Banner({ text: this.app.error, compId: 'chat-error', actionLabel: t("关闭"), actionId: 'dismiss-error',
             onAction: () => { this.app.error = ''; } })
         }
+        if (this.reading.messageId) {
+          Banner({ text: this.reading.preparing ? t('正在准备朗读…') : t('正在朗读回答'), danger: false,
+            compId: 'answer-speech', actionId: 'stop-answer-speech', actionLabel: t('停止朗读'), onAction: () => this.reading.stop() })
+        }
+        if (this.reading.error) {
+          Banner({ text: this.reading.error, compId: 'answer-speech-error', actionLabel: t('关闭'),
+            onAction: () => { this.reading.error = ''; } })
+        }
         if (this.speech.error.length > 0) {
           Banner({ text: this.speech.error, compId: 'speech-error', actionId: 'speech-error-action',
             actionLabel: this.unwrittenSpeech ? t('复制识别文字') : this.speech.permissionDenied ? t('允许麦克风') : t('关闭'),
@@ -950,6 +940,7 @@ export struct ChatPanel {
         ForEach(this.thread.messages.slice(-1).filter((message) => message.role === 'assistant'), (message: MessageViewModel) => {
           ChatPlanPanel({ plan: message.plan })
         }, (message: MessageViewModel) => this.thread.id + ':' + message.id)
+        this.teamToggle()
         this.composer()
         if (this.viewport.keyboardHeight === 0) {
           Text(t('AI可能会犯错，请仔细鉴别。')).id('ai-disclaimer')

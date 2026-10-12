@@ -1,3 +1,5 @@
+import { AppMaterials } from '../common/AppMaterials';
+import { monochromeProviderLogo, providerLogo } from '../common/ProviderBrand';
 import { WebUiDemoPanel } from '../views/WebUiDemoPanel';
 import { WebUiPreflightHost } from '../views/WebUiPreflightHost';
 import { t } from '../model/I18n';
@@ -30,8 +32,10 @@ import { SessionService } from '../services/SessionService';
 import { createNativeSessionService } from '../services/NativeSessionService';
 import { Btn, Motion, Space } from '../common/Theme';
 import { IconButton } from '../common/Widgets';
+import { LaunchActions } from '../services/LaunchActions';
 
 const DRAWER_MAX_WIDTH: number = 340;
+const CHAT_HEADER_HEIGHT: number = 56;
 
 @Entry
 @Component
@@ -49,6 +53,9 @@ struct Index {
   @State private approval: ToolApproval = new ToolApproval();
   private receiving: boolean = false;
   private ratingOpen: boolean = false;
+  private unsubscribeLaunch?: () => void;
+  private launching: boolean = false;
+  @State private voiceRequest: string = '';
 
   onPageShow(): void {
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
@@ -59,7 +66,33 @@ struct Index {
         if (event.state.ready && event.state.phase === 'idle' && !event.state.saveError && ShareInbox.peek()) { this.receiveShare(); }
       });
     }
-    this.app.initialize(this.session).then(() => { ShareInbox.subscribe(() => this.receiveShare()); });
+    this.app.initialize(this.session).then(() => {
+      ShareInbox.subscribe(() => this.receiveShare());
+      if (this.app.ready && !this.unsubscribeLaunch) {
+        this.unsubscribeLaunch = LaunchActions.subscribe(() => this.receiveLaunch());
+      }
+    });
+  }
+
+  private async receiveLaunch(): Promise<void> {
+    const action = LaunchActions.take();
+    if (!action) { return; }
+    if (this.launching || this.receiving || this.app.busy || this.app.saveError) {
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t('请先完成当前操作或保存，再使用快捷入口。') });
+      return;
+    }
+    this.launching = true;
+    try {
+      await this.app.flushDraft();
+      if (this.app.saveError) { throw new Error(this.app.saveError); }
+      if (!LaunchActions.isForeground()) { return; }
+      // Desktop shortcuts always create a standalone chat, regardless of the previously selected project.
+      if (!await this.app.newThread('')) { throw new Error(this.app.error || this.app.saveError || t('无法创建新对话。')); }
+      this.paths.clear(); this.setDrawer(false);
+      this.voiceRequest = action === 'voice-input' && LaunchActions.isForeground() ? this.app.active.id : '';
+    } catch (error) {
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: (error as Error).message });
+    } finally { this.launching = false; }
   }
 
   private async receiveShare(): Promise<void> {
@@ -91,6 +124,7 @@ struct Index {
   }
 
   aboutToDisappear(): void {
+    this.unsubscribeLaunch?.(); this.unsubscribeLaunch = undefined;
     this.app.stop();
     this.app.flushDraft();
     this.app.providerEditor.apiKey = '';
@@ -150,7 +184,7 @@ struct Index {
     } catch (error) {
       const failure = error as BusinessError;
       const detail = failure.code ? failure.code + ' · ' + failure.message : failure.message;
-      this.getUIContext().showAlertDialog({ title: t('评分和评论'),
+      this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface, title: t('评分和评论'),
         message: t('暂时无法打开评分和评论，请稍后重试。错误：{0}', [detail]),
         confirm: { value: t('关闭'), action: () => {} } });
     } finally { this.ratingOpen = false; }
@@ -168,7 +202,7 @@ struct Index {
 
   private async fork(): Promise<void> {
     if (await this.app.forkThread()) {
-      this.getUIContext().getPromptAction().showToast({ message: t("已切换到新分支，原对话保留在列表中") });
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t("已切换到新分支，原对话保留在列表中") });
     }
   }
 
@@ -211,20 +245,20 @@ struct Index {
   @Builder
   destination(name: string, param: Object) {
     if (name === 'branches') {
-      NavDestination() { BranchesPanel({ app: this.app, onSelected: () => this.paths.clear() }) }.title(t("会话分支")).backgroundColor($r('app.color.page_background'))
+      NavDestination() { BranchesPanel({ app: this.app, onSelected: () => this.paths.clear() }) }.title(t("会话分支"), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'model-settings') {
-      NavDestination() { ModelSettingsPanel({ app: this.app }) }.title(t('模型分工与能力')).backgroundColor($r('app.color.page_background'))
+      NavDestination() { ModelSettingsPanel({ app: this.app }) }.title(t('模型分工与能力'), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'ui-demo') {
-      NavDestination() { WebUiDemoPanel() }.title(t('交互示例')).backgroundColor($r('app.color.page_background'))
+      NavDestination() { WebUiDemoPanel() }.title(t('交互示例'), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'backup') {
-      NavDestination() { BackupPanel({ app: this.app }) }.title(t('备份与恢复')).backgroundColor($r('app.color.page_background'))
+      NavDestination() { BackupPanel({ app: this.app }) }.title(t('备份与恢复'), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'usage') {
-      NavDestination() { UsagePanel({ app: this.app }) }.title(t('Token 用量')).backgroundColor($r('app.color.page_background'))
+      NavDestination() { UsagePanel({ app: this.app }) }.title(t('Token 用量'), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'productivity') {
       NavDestination() { ProductivityPanel({ app: this.app, tab: (param as string) || 'memory', onUse: () => { this.paths.clear(); } }) }
-        .title(t("记忆与工具")).backgroundColor($r('app.color.page_background'))
+        .title(t("记忆与工具"), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'search-settings') {
-      NavDestination() { SearchSettingsPanel({ app: this.app }) }.title(t('联网搜索')).backgroundColor($r('app.color.page_background'))
+      NavDestination() { SearchSettingsPanel({ app: this.app }) }.title(t('联网搜索'), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'files') {
       WorkspacePanel({ app: this.app, initialPath: (param as string) || '' })
     } else if (name === 'settings') {
@@ -242,16 +276,16 @@ struct Index {
           onEditProvider: (id: string, preset: string) => {
             if (this.app.beginProvider(preset, id)) { this.paths.pushPath({ name: 'provider' }); }
           } })
-      }.title(t("设置")).backgroundColor($r('app.color.page_background'))
+      }.title(t("设置"), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'support') {
       NavDestination() {
         SupportPanel({ page: param as string,
           onOpen: (page: string) => this.openSupport(page) })
-      }.title(supportTitle(param as string)).backgroundColor($r('app.color.page_background'))
+      }.title(supportTitle(param as string), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'user-document') {
       NavDestination() {
         UserDocumentPanel({ app: this.app, settings: this.app.settings, onSaved: () => { this.paths.pop(); } })
-      }.title(t('用户文档（USER.md）')).backgroundColor($r('app.color.page_background'))
+      }.title(t('用户文档（USER.md）'), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
         .onHidden(() => { this.app.settings.userDocument = this.app.config.userDocument || ''; })
     } else if (name === 'skills') {
       NavDestination() {
@@ -259,19 +293,19 @@ struct Index {
           this.app.beginSkill(skill);
           this.paths.pushPath({ name: 'skill-editor' });
         }, onUse: () => { this.paths.clear(); } })
-      }.title('Skills').backgroundColor($r('app.color.page_background'))
+      }.title('Skills', { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'skill-editor') {
       NavDestination() {
         SkillEditorPanel({ app: this.app, editor: this.app.skillEditor, onSaved: () => { this.paths.pop(); } })
-      }.title(this.app.skillEditor.originalName.length > 0 ? t("编辑 Skill") : t("添加 Skill")).backgroundColor($r('app.color.page_background'))
+      }.title(this.app.skillEditor.originalName.length > 0 ? t("编辑 Skill") : t("添加 Skill"), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'provider') {
       NavDestination() {
         ProviderEditorPanel({ app: this.app, editor: this.app.providerEditor, onSaved: () => { this.paths.pop(); } })
-      }.title(this.app.providerEditor.id.length > 0 ? t("编辑服务") : t("添加服务")).backgroundColor($r('app.color.page_background'))
+      }.title(this.app.providerEditor.id.length > 0 ? t("编辑服务") : t("添加服务"), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
         .onBackPressed(() => {
           if (this.app.busy) { return true; }
           if (!this.app.providerEditor.hasChanges) { return false; }
-          this.getUIContext().showAlertDialog({ title: t('放弃未保存的修改？'), message: t('离开后，本次对服务配置的修改不会保存。'),
+          this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface, title: t('放弃未保存的修改？'), message: t('离开后，本次对服务配置的修改不会保存。'),
             primaryButton: { value: t('继续编辑'), action: () => {} },
             secondaryButton: { value: t('放弃修改'), fontColor: $r('app.color.danger'), action: () => { this.paths.pop(); } } });
           return true;
@@ -280,24 +314,50 @@ struct Index {
     } else if (name === 'models') {
       NavDestination() {
         ModelPickerPanel({ app: this.app, onSelected: () => { this.paths.pop(); }, onSettings: () => this.openSettings() })
-      }.title(t("选择模型")).backgroundColor($r('app.color.page_background'))
+      }.title(t("选择模型"), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
     }
+  }
+
+  private currentProviderPreset(): string {
+    return this.app.providerProfiles.find((profile) => profile.id === this.app.active.modelRef?.providerId)?.presetId || '';
+  }
+
+  private modelSubtitle(): string {
+    if (!this.app.ready) { return t('你的随身 AI 助手'); }
+    const reference = this.app.active.modelRef;
+    return reference ? reference.modelId + (this.app.configured ? '' : t(' · 不可用')) : t('选择模型');
   }
 
   @Builder
   header() {
     Row({ space: 4 }) {
       IconButton({ icon: $r('sys.symbol.line_3_horizontal'), label: t("对话列表"), compId: 'open-history',
+        material: AppMaterials.control, tint: $r('sys.color.font_primary'),
         disabled: !this.app.ready, onTap: () => this.setDrawer(true) })
       Column({ space: 1 }) {
         Text(this.app.ready ? (this.app.activeProject ? this.app.activeProject.name + ' · ' : '') + this.app.active.displayTitle : 'Tinybot').fontSize(16).fontWeight(FontWeight.Medium)
           .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
-        Row({ space: 2 }) {
+        Row({ space: 4 }) {
           if (this.app.ready && this.app.active.teamEnabled) {
             SymbolGlyph($r('sys.symbol.person_2')).fontSize(12).fontColor([$r('app.color.accent')]).margin({ right: 2 })
               .accessibilityText(t("团队模式已开启"))
           }
-          Text(this.app.ready ? this.app.currentModelLabel : t("你的随身 AI 助手")).fontSize(12).maxLines(1)
+          if (this.app.ready && this.app.active.modelRef) {
+            if (providerLogo(this.currentProviderPreset())) {
+              if (monochromeProviderLogo(this.currentProviderPreset())) {
+                Image(providerLogo(this.currentProviderPreset())).width(14).height(14).objectFit(ImageFit.Contain)
+                  .fillColor($r('app.color.text_secondary')).flexShrink(0).accessibilityLevel('no')
+              } else {
+                Image(providerLogo(this.currentProviderPreset())).width(14).height(14).objectFit(ImageFit.Contain)
+                  .flexShrink(0).accessibilityLevel('no')
+              }
+            } else {
+              SymbolGlyph($r('sys.symbol.cloud')).fontSize(14).fontColor([$r('app.color.text_secondary')])
+                .flexShrink(0).accessibilityLevel('no')
+            }
+            Text('·').fontSize(12).fontColor($r('app.color.text_secondary')).flexShrink(0).accessibilityLevel('no')
+          }
+          Text(this.modelSubtitle()).fontSize(12).maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis }).flexShrink(1)
             .fontColor(this.app.ready && !this.app.configured ? $r('app.color.danger') : $r('app.color.text_secondary'))
           if (this.app.ready) {
@@ -310,14 +370,17 @@ struct Index {
       .enabled(this.app.ready && !this.app.busy && !this.app.active.archived)
       .onClick(() => { this.paths.pushPath({ name: 'models' }); })
       Button({ type: ButtonType.Circle, stateEffect: true }) {
-        SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(20).fontColor([$r('app.color.text_primary')])
-      }.id('chat-more').width(40).height(44).backgroundColor(Color.Transparent).accessibilityText(t("更多操作"))
+        SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(20).fontColor([$r('sys.color.font_primary')])
+      }.id('chat-more').width(44).height(44).borderRadius(22).backgroundColor(Color.Transparent)
+      .systemMaterial(AppMaterials.control).accessibilityText(t("更多操作"))
       .enabled(this.app.ready).bindMenu(this.moreMenu, {
-        mask: { color: $r('app.color.scrim'), backgroundBlurStyle: BlurStyle.NONE } })
+        systemMaterial: AppMaterials.surface, mask: false })
       IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t("新建对话"), compId: 'new-chat',
+        material: AppMaterials.control, tint: $r('sys.color.font_primary'),
         disabled: !this.app.ready || this.app.busy || this.app.saveError.length > 0,
         onTap: () => { this.app.newThread(); } })
-    }.width('100%').height(56).padding({ left: 6, right: 6 })
+    }.width('100%').height(CHAT_HEADER_HEIGHT).padding({ left: 6, right: 6 })
+    .translate({ x: this.drawerReveal * 28 })
   }
 
   @Builder
@@ -355,14 +418,16 @@ struct Index {
   build() {
     Column() {
       ForEach([this.locale], (_locale: string) => {
+    Stack() {
     Navigation(this.paths) {
       Stack() {
         Column().width('100%').height('100%').backgroundColor($r('app.color.page_background'))
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         Column() {
-          this.header()
           if (this.app.ready) {
             ChatPanel({ app: this.app, thread: this.app.active, approval: this.approval, onSettings: () => this.openSettings(),
+                topInset: CHAT_HEADER_HEIGHT,
+                voiceRequest: this.voiceRequest, onVoiceShortcutConsumed: () => { this.voiceRequest = ''; },
                 activeThreadId: this.app.active.id, speechEnabled: this.chatVisible && !this.drawerOpen && !this.drawerDragging,
                 onHistoryDragStart: (event: GestureEvent) => this.startDrawerDrag(event, true),
                 onHistoryDragUpdate: (event: GestureEvent) => this.updateDrawerDrag(event),
@@ -385,17 +450,23 @@ struct Index {
         }.width('100%').height('100%')
         // The page drifts aside a little under the drawer, giving the layers depth.
         .translate({ x: this.drawerReveal * 28 })
-        // Keep the measured drawer mounted so the first drag frame needs no enter transition.
-        if (this.app.ready) {
-          this.drawer()
-        }
         WebUiPreflightHost()
       }.width('100%').height('100%')
     }
     .backgroundColor($r('app.color.page_background'))
-    .hideTitleBar(true).hideToolBar(true).mode(NavigationMode.Stack)
+    // Native button materials only work inside the actual navigation title bar.
+    .title({ builder: this.header, height: CHAT_HEADER_HEIGHT }, {
+      barStyle: BarStyle.STACK, backgroundColor: Color.Transparent,
+      backgroundEffect: { radius: 12, color: $r('app.color.chat_header_background') }
+    })
+    .hideBackButton(true).titleMode(NavigationTitleMode.Mini).hideToolBar(true).mode(NavigationMode.Stack)
     .onNavBarStateChange((visible: boolean) => { this.chatVisible = visible; })
     .navDestination(this.destination).width('100%').height('100%')
+    // Cover both the navigation title bar and content, keeping the measured drawer mounted.
+    if (this.app.ready) {
+      this.drawer()
+    }
+    }.width('100%').height('100%')
       }, (locale: string) => locale)
     }.width('100%').height('100%')
   }

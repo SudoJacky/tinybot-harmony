@@ -1,3 +1,4 @@
+import { AppMaterials } from '../common/AppMaterials';
 import { t } from '../model/I18n';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { Btn, Font, Radius, Space } from '../common/Theme';
@@ -33,7 +34,7 @@ export struct MemoryDraftPanel {
     this.saving = true; this.error = '';
     try {
       const count = await this.app.saveMemoryDraft(this.threadId, this.messageId, this.chosen(), this.global);
-      this.getUIContext().getPromptAction().showToast({ message: count ? t('已保存 {0} 条记忆', [count]) : t("这些记忆已存在，未重复添加") });
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: count ? t('已保存 {0} 条记忆', [count]) : t("这些记忆已存在，未重复添加") });
       this.onClose();
     } catch (error) { this.error = (error as Error).message; }
     finally { this.saving = false; }

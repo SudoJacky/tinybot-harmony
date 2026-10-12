@@ -56,6 +56,8 @@ export class SessionService {
   private profiles: ProfileSettings;
   private draftRevision: number = 0;
   private dirtyDrafts: Set<string> = new Set<string>();
+  // Composer choices stay outside persisted data until a user message is submitted.
+  private pendingTeamModes: Map<string, boolean> = new Map<string, boolean>();
   private recovering?: Cancellation;
   private listeners: Set<(event: SessionEvent) => void> = new Set<(event: SessionEvent) => void>();
 
@@ -72,7 +74,16 @@ export class SessionService {
   get workspaceId(): string { return workspaceIdFor(this.data, this.active); }
   attributeUsage(records: RequestUsage[]): RequestUsage[] { return attributeLegacyUsage(records, this.data.threads); }
   async setTeamEnabled(enabled: boolean): Promise<boolean> {
-    return this.mutate(t("保存团队模式失败："), async () => { this.active.teamEnabled = enabled; await this.persist(); });
+    if (!this.canMutate || this.active.archived) { return false; }
+    const thread = this.active; const startedAt = Date.now();
+    this.pendingTeamModes.set(thread.id, enabled);
+    this.refreshContext(); this.publishThread(thread);
+    this.resources.reportResources?.('Team mode selected in memory: enabled=' + enabled +
+      ' durationMs=' + (Date.now() - startedAt));
+    return true;
+  }
+  private selectedTeamMode(thread: ThreadData): boolean {
+    return this.pendingTeamModes.get(thread.id) ?? thread.teamEnabled === true;
   }
 
   get state(): SessionState { return JSON.parse(JSON.stringify(this.status)) as SessionState; }
@@ -336,6 +347,7 @@ export class SessionService {
       await this.replaceActive(id);
       // Deleting a conversation deliberately retains its workspace.
       this.data.threads = this.data.threads.filter((thread) => thread.id !== id);
+      this.pendingTeamModes.delete(id);
       await this.persist();
     });
   }
@@ -490,7 +502,7 @@ export class SessionService {
       await this.compactHistory(true); return;
     }
     if (teamCommand(text) === '' && !(this.active.attachments || []).length) {
-      await this.mutate(t("开启团队模式失败："), async () => { this.active.teamEnabled = true; this.active.draft = ''; await this.persist(); }); return;
+      this.setDraft(''); await this.setTeamEnabled(true); return;
     }
     if (text.length === 0 && (this.active.attachments || []).length === 0 && !(this.active.references || []).length) { return; }
     await this.runTasks(text || ((this.active.references || []).length ? t('请参考引用的会话。') : t('请分析附件。')));
@@ -567,7 +579,7 @@ export class SessionService {
 
   private async runTask(thread: ThreadData, text: string, queuedId?: string): Promise<boolean> {
     const command = teamCommand(text);
-    if (command !== undefined) { thread.teamEnabled = true; text = command || t('请分析附件。'); }
+    if (command !== undefined) { text = command || t('请分析附件。'); }
     const options = this.data.productivity?.options || defaultAssistantOptions();
     const reference = thread.modelRef ? routeModel(options, text, (thread.attachments || []).concat(...thread.messages.filter((item) => item.role === 'user').map((item) => item.attachments || [])).some((item) => item.mime.startsWith('image/')), thread.modelRef) : undefined;
     const config = reference ? this.configFor(reference) : this.currentConfig; const selected = explicitSkill(text);
@@ -575,6 +587,9 @@ export class SessionService {
     if (selected.length > 0 && !this.extensions.skills.some((skill: SkillData) => skill.enabled && skill.name === selected)) {
       this.status.error = t("指定的 Skill 不存在或已停用，请到设置中的 Skills 管理检查。"); thread.queuePaused = true; return false;
     }
+    // Commit the choice with the message through the runtime's initial checkpoint, before requesting the model.
+    thread.teamEnabled = command !== undefined || this.selectedTeamMode(thread);
+    this.pendingTeamModes.delete(thread.id);
     let tools = this.chatTools(thread, selected);
     const sections = sessionPromptSections(config, this.extensions, selected);
     sections.push({ name: 'memory', content: this.memoryPrompt(thread, true) });
@@ -1016,12 +1031,13 @@ export class SessionService {
     const sections = sessionPromptSections(config, this.extensions);
     sections.push({ name: 'memory', content: this.memoryPrompt(this.active) });
     sections.push({ name: 'workspace', content: projectContext(this.data, this.active) });
-    if (this.active.teamEnabled) {
+    const teamEnabled = this.selectedTeamMode(this.active);
+    if (teamEnabled) {
       sections.push({ name: 'team', content: CHAT_TEAM_INSTRUCTIONS + '\n本聊天已有团队（以此处ID为准，禁止跨会话访问）：' +
         JSON.stringify((this.active.teams || []).filter((run) => run.ownerMessageId).map((run) => run.id + ' ' + run.status)) });
     }
     const source = sessionContextSource(this.active, () => sections, async () => {}, () => {});
-    const prepared = this.runtime.inspectContext(source, config, this.chatTools(this.active), this.active.teamEnabled ? coordinatorDefinitions() : []);
+    const prepared = this.runtime.inspectContext(source, config, this.chatTools(this.active), teamEnabled ? coordinatorDefinitions() : []);
     this.status.contextTokens = prepared.context.tokens;
     this.status.contextBreakdown = prepared.breakdown;
     this.status.contextSource = prepared.context.source;
@@ -1111,11 +1127,11 @@ export class SessionService {
   }
   private publishThread(thread: ThreadData): void {
     const metadata: ThreadData = { id: thread.id, title: thread.title, updatedAt: thread.updatedAt, messages: [],
-      pinned: thread.pinned, archived: thread.archived, titleEdited: thread.titleEdited, draft: thread.draft,
+      projectId: thread.projectId, pinned: thread.pinned, archived: thread.archived, titleEdited: thread.titleEdited, draft: thread.draft,
       attachments: thread.attachments, references: thread.references, parentThreadId: thread.parentThreadId,
       parentMessageId: thread.parentMessageId, disabledMcpIds: thread.disabledMcpIds, modelRef: thread.modelRef,
       pendingInputs: thread.pendingInputs, queuePaused: thread.queuePaused, compaction: thread.compaction,
-      memoryReview: thread.memoryReview, reasoningEffort: thread.reasoningEffort, teamEnabled: thread.teamEnabled };
+      memoryReview: thread.memoryReview, reasoningEffort: thread.reasoningEffort, teamEnabled: this.selectedTeamMode(thread) };
     this.emit({ kind: 'thread', state: this.state, threadId: thread.id,
       thread: JSON.parse(JSON.stringify(metadata)) as ThreadData });
   }
@@ -1124,7 +1140,11 @@ export class SessionService {
       teams: JSON.parse(JSON.stringify(thread.teams || [])) as TeamRun[] });
   }
   private publish(kind: 'snapshot' | 'state'): void {
-    this.emit({ kind: kind, state: this.state, data: kind === 'snapshot' ? this.snapshot() : undefined });
+    const data = kind === 'snapshot' ? this.snapshot() : undefined;
+    if (data) {
+      for (const thread of data.threads) { thread.teamEnabled = this.selectedTeamMode(thread); }
+    }
+    this.emit({ kind: kind, state: this.state, data: data });
   }
   private emit(event: SessionEvent): void {
     for (const listener of Array.from(this.listeners)) {

@@ -1,3 +1,4 @@
+import { AppMaterials } from '../common/AppMaterials';
 import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
 import { ColorMetrics } from '@kit.ArkUI';
@@ -75,14 +76,14 @@ export struct MarkdownView {
   private async open(url: string): Promise<void> {
     if (!/^https?:\/\//.test(url)) { return; }
     try { await (this.getUIContext().getHostContext() as common.UIAbilityContext).startAbility({ action: 'ohos.want.action.viewData', uri: url }); }
-    catch (_) { this.getUIContext().getPromptAction().showToast({ message: t("无法打开链接，可复制后在浏览器中打开。") }); }
+    catch (_) { this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t("无法打开链接，可复制后在浏览器中打开。") }); }
   }
   private async copy(text: string, index: number): Promise<void> {
     try {
       await pasteboard.getSystemPasteboard().setData(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text));
       this.copied = index; clearTimeout(this.copyTimer);
       this.copyTimer = setTimeout(() => { this.copied = -1; this.copyTimer = -1; }, 1600);
-    } catch (_) { this.getUIContext().getPromptAction().showToast({ message: t("复制失败，请长按文本复制。") }); }
+    } catch (_) { this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t("复制失败，请长按文本复制。") }); }
   }
   private codeLines(block: MarkdownBlock): number { return block.text.split('\n').length; }
   private codeShown(block: MarkdownBlock, index: number): string {

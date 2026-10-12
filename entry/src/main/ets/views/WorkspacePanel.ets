@@ -1,3 +1,4 @@
+import { AppMaterials } from '../common/AppMaterials';
 import { t } from '../model/I18n';
 import { SwipeRow } from '../common/SwipeRow';
 import { common } from '@kit.AbilityKit';
@@ -62,7 +63,7 @@ export struct WorkspacePanel {
   private locked(): boolean { return this.busy || this.app.busy; }
   private join(name: string): string { return (this.directory ? this.directory + '/' : '') + name; }
   private fileName(path: string): string { return path.split('/').pop() || t("文件.txt"); }
-  private toast(message: string): void { this.getUIContext().getPromptAction().showToast({ message: message }); }
+  private toast(message: string): void { this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: message }); }
   private crumbs(): string[] { return this.directory ? this.directory.split('/') : []; }
   private dirty(): boolean { return this.editing && this.content !== this.original; }
 
@@ -183,14 +184,14 @@ export struct WorkspacePanel {
   }
 
   private confirmDelete(path: string): void {
-    this.getUIContext().showAlertDialog({ title: t("删除文件？"), message: this.fileName(path) + t("\n删除后无法恢复。"),
+    this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface, title: t("删除文件？"), message: this.fileName(path) + t("\n删除后无法恢复。"),
       primaryButton: { value: t("取消"), action: () => {} },
       secondaryButton: { value: t("删除"), fontColor: $r('app.color.danger'), action: () => this.fileAction('delete', path) } });
   }
 
   private closePreview(): void {
     if (!this.dirty()) { this.previewing = false; this.editing = false; return; }
-    this.getUIContext().showAlertDialog({ title: t("放弃未保存的修改？"), message: this.fileName(this.selected),
+    this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface, title: t("放弃未保存的修改？"), message: this.fileName(this.selected),
       primaryButton: { value: t("继续编辑"), action: () => {} },
       secondaryButton: { value: t("放弃"), fontColor: $r('app.color.danger'),
         action: () => { this.content = this.original; this.editing = false; this.previewing = false; } } });
@@ -294,7 +295,7 @@ export struct WorkspacePanel {
       Row({ space: Space.sm }) {
         Button(this.baseline?.existed ? t("恢复原版") : t("删除文件")).id('workspace-restore').attributeModifier(Btn.plainSmall)
           .height(36).layoutWeight(1).enabled(!this.locked()).onClick(() => {
-            this.getUIContext().showAlertDialog({ title: t("恢复修改前版本？"), message: (this.app.active.projectId ? t("这会恢复项目中的累计修改，可能包含其他会话的改动。") + "\n" : "") + (this.baseline?.existed ? t("当前内容将被保存基线替换。") : t("此文件是新建文件，恢复会删除它。")),
+            this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface, title: t("恢复修改前版本？"), message: (this.app.active.projectId ? t("这会恢复项目中的累计修改，可能包含其他会话的改动。") + "\n" : "") + (this.baseline?.existed ? t("当前内容将被保存基线替换。") : t("此文件是新建文件，恢复会删除它。")),
               primaryButton: { value: t("取消"), action: () => {} }, secondaryButton: { value: t("恢复"), fontColor: $r('app.color.danger'), action: () => this.reviewAction(true) } });
           })
         Button(t("保留修改")).id('workspace-accept').attributeModifier(Btn.primarySmall).height(36).layoutWeight(1)
@@ -432,7 +433,7 @@ export struct WorkspacePanel {
         onWillDismiss: (action: DismissContentCoverAction) => { if (this.dirty()) { this.closePreview(); } else { action.dismiss(); } }
       })
     }
-    .title(this.crumbs().length > 0 ? this.crumbs()[this.crumbs().length - 1] : this.app.activeProject ? t("项目文件") + " · " + this.app.activeProject.name : t("工作区文件"))
+    .title(this.crumbs().length > 0 ? this.crumbs()[this.crumbs().length - 1] : this.app.activeProject ? t("项目文件") + " · " + this.app.activeProject.name : t("工作区文件"), { systemMaterial: AppMaterials.control })
     .backgroundColor($r('app.color.page_background'))
     // Back goes up one folder before leaving the page, matching system file managers.
     .onBackPressed(() => {
