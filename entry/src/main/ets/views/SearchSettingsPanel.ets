@@ -1,3 +1,4 @@
+import { AppMaterials } from '../common/AppMaterials';
 import { t } from '../model/I18n';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { SearchProviderId, defaultSearchConfig, deepSeekSearchProfiles } from '../model/WebSearch';
@@ -38,7 +39,7 @@ export struct SearchSettingsPanel {
       const ok = await this.app.saveSearch({ provider: this.provider, enabled: this.searchEnabled, baseUrl: this.baseUrl,
         apiKey: this.apiKey, modelProviderId: this.provider === 'deepseek' && this.sourceId ? this.sourceId : undefined });
       this.error = this.app.error;
-      if (ok) { this.apiKey = ''; this.aboutToAppear(); this.getUIContext().getPromptAction().showToast({ message: t('搜索设置已保存') }); }
+      if (ok) { this.apiKey = ''; this.aboutToAppear(); this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t('搜索设置已保存') }); }
     } finally { this.saving = false; }
   }
   build() {
@@ -47,6 +48,8 @@ export struct SearchSettingsPanel {
         Text(t('搜索服务')).fontSize(22).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
         Select([{ value: 'DeepSeek' }, { value: 'Tavily' }]).selected(this.provider === 'deepseek' ? 0 : 1)
           .value(this.provider === 'deepseek' ? 'DeepSeek' : 'Tavily').enabled(!this.saving).id('search-provider')
+          .backgroundColor(Color.Transparent).fontColor($r('sys.color.font_primary'))
+          .systemMaterial(AppMaterials.control).menuSystemMaterial(AppMaterials.surface)
           .onSelect((index: number) => this.changeProvider(index))
         Text(t('搜索词会发送给所选服务，结果返回来源链接和摘录。'))
           .fontSize(14).fontColor($r('app.color.text_secondary'))
@@ -61,6 +64,8 @@ export struct SearchSettingsPanel {
               .selected(this.candidates().findIndex((item) => item.id === this.sourceId))
               .value(this.candidates().find((item) => item.id === this.sourceId)?.name || t('请选择用于联网搜索的 DeepSeek 服务。'))
               .enabled(!this.saving).id('search-credential-source')
+              .backgroundColor(Color.Transparent).fontColor($r('sys.color.font_primary'))
+              .systemMaterial(AppMaterials.control).menuSystemMaterial(AppMaterials.surface)
               .onSelect((index: number) => { this.sourceId = this.candidates()[index].id; })
           } else if (this.candidates().length === 1) {
             Text(t('将复用 {0} 的密钥，无需重复填写。', [this.candidates()[0].name]))

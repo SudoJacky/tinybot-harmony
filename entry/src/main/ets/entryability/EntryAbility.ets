@@ -2,6 +2,7 @@ import { webview } from '@kit.ArkWeb';
 import { ShareInbox } from '../services/NativeActions';
 import { LanguagePreferences } from '../services/LanguagePreferences';
 import { McpOAuth } from '../services/McpOAuth';
+import { LaunchActions } from '../services/LaunchActions';
 /*
  * Copyright (c) 2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -50,6 +51,7 @@ export default class EntryAbility extends UIAbility {
     hilog.info(DOMAIN, 'TinybotWebUI', 'engine initialized ms=%{public}d', Date.now() - webStarted);
     LanguagePreferences.initialize(this.context);
     ShareInbox.receive(want, this.context.getApplicationContext().filesDir);
+    LaunchActions.receive(want);
     try {
       this.context.getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
     } catch (err) {
@@ -61,6 +63,7 @@ export default class EntryAbility extends UIAbility {
   onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     McpOAuth.receive(want.uri || '');
     ShareInbox.receive(want, this.context.getApplicationContext().filesDir);
+    LaunchActions.receive(want);
   }
 
   onDestroy(): void {
@@ -88,12 +91,14 @@ export default class EntryAbility extends UIAbility {
   }
 
   onForeground(): void {
+    LaunchActions.setForeground(true);
     LanguagePreferences.refresh();
     // Ability has brought to foreground
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onForeground');
   }
 
   onBackground(): void {
+    LaunchActions.setForeground(false);
     // Ability has back to background
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onBackground');
   }

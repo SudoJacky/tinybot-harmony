@@ -1,3 +1,4 @@
+import { AppMaterials } from '../common/AppMaterials';
 import { t } from '../model/I18n';
 import { AppLanguage } from '../model/I18n';
 import { LanguagePreferences } from '../services/LanguagePreferences';
@@ -58,7 +59,7 @@ export struct SettingsPanel {
         else if (kind === 'summary') { options.saveSummary = value; }
         extras.options = options;
         if (!await this.app.saveProductivity(extras)) {
-          this.getUIContext().getPromptAction().showToast({ message: this.app.error });
+          this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: this.app.error });
         }
       } finally { this.resetAssistantDraft(); this.assistantSaving = false; }
     });
@@ -70,7 +71,7 @@ export struct SettingsPanel {
     this.pendingSave = this.pendingSave.then(async () => {
       if (await this.app.saveSettings()) { return; }
       apply(!value);
-      this.getUIContext().getPromptAction().showToast({ message: this.settings.error });
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: this.settings.error });
     });
   }
 
@@ -86,7 +87,7 @@ export struct SettingsPanel {
   @Builder
   languageSheet() {
     Column() {
-      GroupCard() {
+      Column() {
         Column() {
           ForEach(['system', 'zh-CN', 'en'], (choice: string, index: number) => {
             if (index > 0) { RowDivider() }
@@ -236,7 +237,7 @@ export struct SettingsPanel {
           NavRow({ title: t('语言'), value: this.languageName(this.language),
             compId: 'open-language', disabled: !this.canEdit(), onTap: () => { this.showLanguage = true; } })
             .bindSheet($$this.showLanguage, this.languageSheet(), { title: { title: t('语言') }, height: SheetSize.FIT_CONTENT,
-              dragBar: true, backgroundColor: $r('app.color.page_background') })
+              dragBar: true, systemMaterial: AppMaterials.surface })
         }
         SectionHeader({ title: t('关于') })
         GroupCard() {

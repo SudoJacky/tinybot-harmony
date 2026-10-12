@@ -1,3 +1,4 @@
+import { AppMaterials } from '../common/AppMaterials';
 import { WebUiView } from './WebUiView';
 import { LengthMetrics } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
@@ -81,6 +82,8 @@ struct UiNodeView {
           Text(this.label()).fontSize(13).fontColor($r('app.color.text_secondary'))
           Select(this.options()).value(String(this.value())).selected((this.node.options || []).indexOf(String(this.value())))
             .enabled(this.interactive).accessibilityText(this.label())
+            .backgroundColor(Color.Transparent).fontColor($r('sys.color.font_primary'))
+            .systemMaterial(AppMaterials.control).menuSystemMaterial(AppMaterials.surface)
             .onSelect((_index: number, value: string) => this.onEdit(this.node, value, true))
         } else if (this.node.kind === 'segmented') {
           Text(this.label()).fontSize(13).fontColor($r('app.color.text_secondary'))
@@ -116,12 +119,14 @@ struct UiNodeView {
           Row({ space: 12 }) {
             Text(this.label()).fontSize(15).layoutWeight(1).fontColor($r('app.color.text_primary'))
             Toggle({ type: ToggleType.Switch, isOn: this.value() === true }).enabled(this.interactive)
+              .systemMaterial(AppMaterials.control)
               .accessibilityText(this.label()).onChange((value: boolean) => this.onEdit(this.node, value, true))
           }.width('100%')
         } else if (this.node.kind === 'slider') {
           Text(this.label() + ': ' + String(this.value())).fontSize(13).fontColor($r('app.color.text_secondary'))
           Slider({ value: Number(this.value()), min: this.node.min, max: this.node.max, step: this.node.step || 1 })
             .enabled(this.interactive).accessibilityText(this.label())
+            .systemMaterial(AppMaterials.control)
             .onChange((value: number, mode: SliderChangeMode) => this.onEdit(this.node, value, mode === SliderChangeMode.End || mode === SliderChangeMode.Click))
         } else if (this.node.kind === 'progress') {
           Text(this.label()).fontSize(13).fontColor($r('app.color.text_secondary'))
@@ -220,7 +225,7 @@ struct UiSurface {
         try {
           await pasteboard.getSystemPasteboard().setData(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, uiText(definition.text || '', this.values)));
         } catch (_) { throw new Error(t('复制失败，请长按文本复制。')); }
-        this.getUIContext().getPromptAction().showToast({ message: t('已复制') });
+        this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t('已复制') });
         return;
       }
       const saved = await this.onInteract(this.surfaceKey, copyUiValues(this.values), action);

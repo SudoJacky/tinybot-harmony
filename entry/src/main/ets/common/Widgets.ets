@@ -1,7 +1,7 @@
 import { t } from '../model/I18n';
 import { Btn, Font, Motion, Radius, Space } from './Theme';
 import { LiquidToggle } from './LiquidToggle';
-import { AnimatorResult } from '@kit.ArkUI';
+import { AnimatorResult, uiMaterial } from '@kit.ArkUI';
 import { SegmentFrame, SegmentedMotion } from './SegmentedMotion';
 import { WindowViewport } from '../viewmodel/WindowViewport';
 
@@ -15,6 +15,8 @@ export struct IconButton {
   compId: string = '';
   diameter: number = 44;
   iconSize: number = 22;
+  // Native material is supported when the button lives in a navigation title bar.
+  material?: uiMaterial.Material;
   onTap: () => void = () => {};
 
   build() {
@@ -23,8 +25,10 @@ export struct IconButton {
     }
     .id(this.compId).width(this.diameter).height(this.diameter).backgroundColor(this.fill)
     .animation({ duration: Motion.fast, curve: Motion.standard })
-    .clickEffect(this.disabled ? null : Motion.pressSmall)
+    .clickEffect(this.disabled || this.material ? null : Motion.pressSmall)
     .enabled(!this.disabled).accessibilityText(this.label).onClick(() => this.onTap())
+    .borderRadius(this.diameter / 2)
+    .systemMaterial(this.material)
   }
 }
 

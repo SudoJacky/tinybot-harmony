@@ -1,3 +1,4 @@
+import { AppMaterials } from '../common/AppMaterials';
 import { t } from '../model/I18n';
 import { SwipeRow } from '../common/SwipeRow';
 import { util } from '@kit.ArkTS';
@@ -68,7 +69,7 @@ export struct ProductivityPanel {
   private editServer(item: McpServer): void {
     this.reset(); this.editingId = item.id; this.name = item.name; this.url = item.url; this.noAuth = !item.credentialAlias; this.openEditor();
   }
-  private toast(message: string): void { this.getUIContext().getPromptAction().showToast({ message: message }); }
+  private toast(message: string): void { this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: message }); }
   private memories(): MemoryEntry[] {
     return this.app.productivity.memories.filter((item) => !item.threadId || item.threadId === this.app.active.id)
       .sort((a, b) => b.updatedAt - a.updatedAt);
@@ -109,7 +110,7 @@ export struct ProductivityPanel {
     finally { this.busy = false; }
   }
   private remove(id: string, label: string): void {
-    this.getUIContext().showAlertDialog({ title: t('删除{0}？', [label]), message: t("删除后将不再使用，且无法恢复。"),
+    this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface, title: t('删除{0}？', [label]), message: t("删除后将不再使用，且无法恢复。"),
       primaryButton: { value: t("取消"), action: () => {} },
       secondaryButton: { value: t("删除"), fontColor: $r('app.color.danger'), action: () => this.removeNow(id) } });
   }
@@ -161,7 +162,7 @@ export struct ProductivityPanel {
         Button(t('将最新记忆用于本对话')).attributeModifier(Btn.textSmall).enabled(!this.locked()).id('refresh-memory-context')
           .onClick(async () => {
             if (!await this.app.refreshMemoryContext()) { this.error = this.app.error; }
-            else { this.error = ''; this.getUIContext().getPromptAction().showToast({ message: t('本对话已加载最新记忆。') }); }
+            else { this.error = ''; this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t('本对话已加载最新记忆。') }); }
           })
       }
       ListItem() { this.caption(t('记忆容量：{0}/100 条 · {1}/{2} 字符',
@@ -286,6 +287,7 @@ export struct ProductivityPanel {
               }.layoutWeight(1).alignItems(HorizontalAlign.Start)
               Toggle({ type: ToggleType.Switch, isOn: item.enabled }).id('toggle-mcp-' + item.id)
                 .selectedColor($r('app.color.accent')).enabled(!this.locked())
+                .systemMaterial(AppMaterials.control)
                 .onChange((value: boolean) => { this.toggle(item, value); })
             }.width('100%')
             Row({ space: 6 }) {
@@ -376,6 +378,7 @@ export struct ProductivityPanel {
                   .fontColor($r('app.color.text_secondary'))
               }.layoutWeight(1).alignItems(HorizontalAlign.Start)
               Toggle({ type: ToggleType.Switch, isOn: this.noAuth }).id('mcp-no-auth').selectedColor($r('app.color.accent'))
+                .systemMaterial(AppMaterials.control)
                 .onChange((value) => { this.noAuth = value; })
             }.width('100%').padding({ left: Space.lg, right: Space.md, top: 10, bottom: 10 }).margin({ top: Space.sm })
             .borderRadius(Radius.sm).backgroundColor($r('app.color.surface'))

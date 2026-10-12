@@ -1,3 +1,4 @@
+import { AppMaterials } from '../common/AppMaterials';
 import { t } from '../model/I18n';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { SkillData } from '../model/Skills';
@@ -15,7 +16,7 @@ export struct SkillsPanel {
   }
 
   private confirmDelete(skill: SkillData): void {
-    this.getUIContext().showAlertDialog({ title: t("删除 Skill？"), message: skill.name + t("\n已保存的对话记录会保留。"),
+    this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface, title: t("删除 Skill？"), message: skill.name + t("\n已保存的对话记录会保留。"),
       primaryButton: { value: t("取消"), action: () => {} },
       secondaryButton: { value: t("删除"), fontColor: $r('app.color.danger'),
         action: () => { this.app.changeSkill(skill.name, true); } } });
@@ -33,6 +34,7 @@ export struct SkillsPanel {
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
         Toggle({ type: ToggleType.Switch, isOn: skill.enabled }).id('toggle-skill-' + skill.name)
           .selectedColor($r('app.color.accent')).enabled(!this.locked())
+          .systemMaterial(AppMaterials.control)
           .onChange((value: boolean) => { if (value !== skill.enabled) { this.app.changeSkill(skill.name); } })
       }.width('100%')
       if (skill.description.length > 0) {

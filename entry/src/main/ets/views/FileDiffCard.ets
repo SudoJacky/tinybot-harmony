@@ -1,3 +1,4 @@
+import { AppMaterials } from '../common/AppMaterials';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { FileDiff, FileDiffRow, fileDiffText } from '../model/FileDiff';
 import { t } from '../model/I18n';
@@ -23,8 +24,8 @@ export struct FileDiffCard {
   private async copy(): Promise<void> {
     try {
       await pasteboard.getSystemPasteboard().setData(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, fileDiffText(this.diff)));
-      this.getUIContext().getPromptAction().showToast({ message: t('已复制') });
-    } catch (_) { this.getUIContext().getPromptAction().showToast({ message: t('复制失败，请长按文本选择复制。') }); }
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t('已复制') });
+    } catch (_) { this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t('复制失败，请长按文本选择复制。') }); }
   }
   build() {
     Column() {

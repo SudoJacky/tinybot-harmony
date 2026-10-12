@@ -27,6 +27,10 @@ if ($LASTEXITCODE -ne 0) { throw 'Orchestration integration tests failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Tool detail presentation tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-window-viewport.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Window viewport integration tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-answer-speech-native.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Answer speech and launch shortcut tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-team-toggle.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Team mode persistence and projection tests failed.' }
 $env:DEVECO_SDK_HOME = Join-Path $StudioPath 'sdk'
 $env:JAVA_HOME = Join-Path $StudioPath 'jbr'
 $startedAt = Get-Date

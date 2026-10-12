@@ -1,4 +1,5 @@
-import { AnimatorResult } from '@kit.ArkUI';
+import { AppMaterials } from './AppMaterials';
+import { AnimatorResult, SymbolGlyphModifier } from '@kit.ArkUI';
 import { t } from '../model/I18n';
 import { Motion, Radius } from './Theme';
 import { SwipeRowMotion as Swipe } from './SwipeRowMotion';
@@ -103,12 +104,15 @@ export struct SwipeRow {
   actionsMenu() {
     Menu() {
       if (this.onShare) {
-        MenuItem({ content: t('分享') }).enabled(!this.disabled).onClick(() => this.onShare?.())
+        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.share')), content: t('分享') })
+          .enabled(!this.disabled).onClick(() => this.onShare?.())
       }
       if (this.onExport) {
-        MenuItem({ content: t('导出到文件') }).enabled(!this.disabled).onClick(() => this.onExport?.())
+        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.square_and_arrow_down')), content: t('导出到文件') })
+          .enabled(!this.disabled).onClick(() => this.onExport?.())
       }
-      MenuItem({ content: t('删除') }).contentFontColor($r('app.color.danger'))
+      MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.trash')).fontColor([$r('app.color.danger')]),
+        content: t('删除') }).contentFontColor($r('app.color.danger'))
         .enabled(!this.disabled).onClick(() => this.requestDelete())
     }
   }
@@ -143,7 +147,7 @@ export struct SwipeRow {
     })
     .onVisibleAreaChange([0], (visible: boolean) => { if (!visible) { this.stop(); this.reveal = 0; this.dragging = false; } })
     .bindContextMenu(this.actionsMenu, ResponseType.LongPress, {
-      mask: { color: $r('app.color.scrim'), backgroundBlurStyle: BlurStyle.NONE } })
+      systemMaterial: AppMaterials.surface, mask: false })
     .priorityGesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Horizontal, distance: 12 })
       .onActionStart((event: GestureEvent) => this.start(event))
       .onActionUpdate((event: GestureEvent) => this.move(event))

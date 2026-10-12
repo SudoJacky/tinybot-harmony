@@ -1,5 +1,7 @@
 {
   "string": [
+    { "name": "shortcut_new_chat", "value": "New chat" },
+    { "name": "shortcut_voice_input", "value": "Voice input" },
     { "name": "microphone_reason", "value": "Convert your speech to text in the message draft" },
     {
       "name": "module_desc",

@@ -62,6 +62,7 @@ const globals = { exports: {}, ViewPU, SynchedPropertySimpleOneWayPU: Property, 
     if (id.includes('InteractiveUi&')) return model(path.join(root, 'model/InteractiveUi'));
     if (id.includes('I18n&')) return { t: text => text };
     if (id.includes('Theme&')) return { Space: {}, Radius: {}, Btn: {} };
+    if (id.includes('AppMaterials&')) return { AppMaterials: { control: {}, surface: {} } };
     if (id.includes('MarkdownView&')) return { MarkdownView };
     if (id.includes('DataViewCard&')) return {};
     if (id.includes('UiSceneView&')) return {};

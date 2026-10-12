@@ -1,3 +1,4 @@
+import { AppMaterials } from '../common/AppMaterials';
 import { getLocale, t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
 import { exportBackup, readBackup } from '../services/Backup';
@@ -47,7 +48,7 @@ export struct BackupPanel {
 
   private confirmRestore(item: CloudBackupItem): void {
     if (this.locked()) { return; }
-    this.getUIContext().showAlertDialog({ title: t('恢复这份备份？'),
+    this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface, title: t('恢复这份备份？'),
       message: t('恢复 {0} 的备份，跳过已有会话和模板，保留本机版本、密钥和服务设置。', [this.date(item)]),
       primaryButton: { value: t('取消'), action: () => {} },
       secondaryButton: { value: t('恢复'), action: () => this.cloud('restore', item.name) } });
@@ -55,7 +56,7 @@ export struct BackupPanel {
 
   private confirmDelete(item: CloudBackupItem): void {
     if (this.locked()) { return; }
-    this.getUIContext().showAlertDialog({ title: t('删除这份备份？'),
+    this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface, title: t('删除这份备份？'),
       message: t('删除 {0} 的备份，删除会同步到云端及其他设备，不影响当前对话和设置。此操作无法在 Tinybot 内撤销。', [this.date(item)]),
       primaryButton: { value: t('取消'), action: () => {} },
       secondaryButton: { value: t('删除'), fontColor: $r('app.color.danger'), action: () => this.cloud('delete', item.name) } });
@@ -88,7 +89,7 @@ export struct BackupPanel {
     this.busy = true; this.error = '';
     try {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      if (restore) { const data = await readBackup(context, this.app.exportSnapshot()); if (data) { if (!await this.app.importSnapshot(data)) { throw new Error(this.app.error); } this.getUIContext().getPromptAction().showToast({ message: t("备份已恢复，已跳过已有内容") }); } }
+      if (restore) { const data = await readBackup(context, this.app.exportSnapshot()); if (data) { if (!await this.app.importSnapshot(data)) { throw new Error(this.app.error); } this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t("备份已恢复，已跳过已有内容") }); } }
       else { await exportBackup(context, this.app.exportSnapshot()); }
     } catch (error) { this.error = (error as Error).message; }
     finally { this.busy = false; }

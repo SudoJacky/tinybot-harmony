@@ -1,3 +1,4 @@
+import { AppMaterials } from '../common/AppMaterials';
 import { t } from '../model/I18n';
 import { defaultContextWindow } from '../model/ConversationContext';
 import { reasoningEfforts, reasoningEffortName } from '../model/ReasoningEffort';
@@ -50,7 +51,7 @@ export struct ModelSettingsPanel {
     }
     extras.options = this.options;
     if (!await this.app.saveProductivity(extras)) { this.error = this.app.error; }
-    else { this.getUIContext().getPromptAction().showToast({ message: t("模型设置已保存") }); }
+    else { this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t("模型设置已保存") }); }
   }
   private setRoute(kind: string, index: number): void {
     const chosen = this.reference(index);
@@ -87,7 +88,7 @@ export struct ModelSettingsPanel {
     .opacity(enabled ? 1 : 0.4).enabled(enabled)
     .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
     .bindMenu(this.choiceMenu(options, selected, onSelect), {
-      mask: { color: $r('app.color.scrim'), backgroundBlurStyle: BlurStyle.NONE } })
+      systemMaterial: AppMaterials.surface, mask: false })
   }
 
   @Builder

@@ -1150,7 +1150,7 @@
   "中": "Medium",
   "高": "High",
   "默认": "Default",
-  "恢复默认推理强度": "Reset reasoning effort",
+  "恢复 Auto 推理强度": "Reset reasoning effort to Auto",
   "保存推理强度失败：": "Failed to save reasoning effort: ",
   "推理强度设置无效。": "Invalid reasoning effort setting.",
   "当前模型或协议不支持此推理强度设置。": "This model or protocol does not support this reasoning effort setting.",
@@ -1515,5 +1515,16 @@
   "API Key 为空，请在对应服务中重新配置。": "The API Key is empty. Configure it again in the corresponding provider settings.",
   "搜索词会发送给所选服务，结果返回来源链接和摘录。": "Search queries are sent to the selected service, which returns source links and excerpts.",
   "使用 DeepSeek 官方搜索，自动复用已配置的 DeepSeek 服务密钥。搜索会产生额外的模型用量。": "Uses official DeepSeek search with your configured DeepSeek provider API Key. Searching incurs additional model usage.",
-  "DeepSeek 服务": "DeepSeek provider"
+  "DeepSeek 服务": "DeepSeek provider",
+  "这条回答没有可朗读的正文。": "This answer has no text to read aloud.",
+  "此设备不支持系统朗读。": "System read aloud is not supported on this device.",
+  "系统朗读响应超时，请重试。": "System read aloud timed out. Please try again.",
+  "朗读失败（{0}）：{1}": "Read aloud failed ({0}): {1}",
+  "停止朗读失败：{0}": "Could not stop read aloud: {0}",
+  "请先完成当前操作或保存，再使用快捷入口。": "Finish the current operation or save your changes before using a shortcut.",
+  "无法创建新对话。": "Could not create a new chat.",
+  "正在准备朗读…": "Preparing read aloud…",
+  "正在朗读回答": "Reading answer aloud",
+  "停止朗读": "Stop reading",
+  "朗读回答": "Read aloud"
 }

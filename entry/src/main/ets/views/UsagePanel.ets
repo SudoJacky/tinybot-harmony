@@ -1,4 +1,5 @@
 import { t, getLocale } from '../model/I18n';
+import { AppMaterials } from '../common/AppMaterials';
 import { RequestUsage, UsageOrigin, UsageToolActivity } from '../model/Usage';
 import { UsageActivity, UsageDay, UsageGroup, UsageModel, UsagePeriod, UsageSession, UsageStatistics, UsageFilter, reportedTokens } from '../model/UsageStatistics';
 import { UsageCursor, UsageQuery } from '../model/UsageQuery';
@@ -232,7 +233,7 @@ export struct UsagePanel {
   filterSheet() {
     Scroll() {
       Column() {
-        GroupCard() {
+        Column() {
           Column() {
             ForEach(this.filterItems, (id: string, index: number) => {
               if (index > 0) { RowDivider() }
@@ -563,6 +564,6 @@ export struct UsagePanel {
     }.width('100%').height('100%').padding({ left: Space.page, right: Space.page }).scrollBar(BarState.Off)
       .edgeEffect(EdgeEffect.Spring).contentEndOffset(Space.xl)
       .bindSheet($$this.showFilter, this.filterSheet(), { title: { title: this.filterTitle() },
-        height: SheetSize.FIT_CONTENT, dragBar: true, backgroundColor: $r('app.color.page_background') })
+        height: SheetSize.FIT_CONTENT, dragBar: true, systemMaterial: AppMaterials.surface })
   }
 }

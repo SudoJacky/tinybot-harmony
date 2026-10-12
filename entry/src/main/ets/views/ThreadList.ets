@@ -1,3 +1,4 @@
+import { AppMaterials } from '../common/AppMaterials';
 import { t } from '../model/I18n';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { ChatViewModel, ThreadViewModel } from '../viewmodel/ChatViewModel';
@@ -50,7 +51,7 @@ struct ThreadRow {
       MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.trash')).fontColor([$r('app.color.danger')]),
         content: t("删除") }).contentFontColor($r('app.color.danger'))
         .onClick(() => {
-          this.getUIContext().showAlertDialog({
+          this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface,
             title: t("删除这段对话？"), message: this.thread.title + t("\n会话工作区中的文件会保留。"),
             primaryButton: { value: t("取消"), action: () => {} },
             secondaryButton: { value: t("删除"), fontColor: $r('app.color.danger'),
@@ -104,7 +105,7 @@ struct ThreadRow {
             SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
           }.width(32).height(32).backgroundColor(Color.Transparent).accessibilityText(t("对话管理"))
           .enabled(!this.locked()).bindMenu(this.actions, {
-            mask: { color: $r('app.color.scrim'), backgroundBlurStyle: BlurStyle.NONE } })
+            systemMaterial: AppMaterials.surface, mask: false })
         }
         .width('100%').padding({ left: Space.md, right: 4, top: 10, bottom: 10 })
         .onClick(async () => {
@@ -112,7 +113,7 @@ struct ThreadRow {
           if (this.query.trim() ? await this.app.openMessage(this.thread.id, this.matchId(), this.query.trim()) : await this.app.selectThread(this.thread.id)) { this.onSelected(); }
         })
         .bindContextMenu(this.actions, ResponseType.LongPress, {
-          mask: { color: $r('app.color.scrim'), backgroundBlurStyle: BlurStyle.NONE } })
+          systemMaterial: AppMaterials.surface, mask: false })
       }
     }
     .width('100%').borderRadius(Radius.md)
@@ -214,6 +215,8 @@ export struct ThreadList {
         Select(this.scopeOptions()).id('project-filter').layoutWeight(1)
           .selected(this.scopeIds().indexOf(this.projectScope))
           .value(this.scopeOptions()[Math.max(0, this.scopeIds().indexOf(this.projectScope))].value)
+          .backgroundColor(Color.Transparent).fontColor($r('sys.color.font_primary'))
+          .systemMaterial(AppMaterials.control).menuSystemMaterial(AppMaterials.surface)
           .onSelect((index: number) => { this.projectScope = this.scopeIds()[index]; this.visibleCount = 40; })
         if (this.projectScope !== '*' && this.projectScope !== '') {
           IconButton({ icon: $r('sys.symbol.folder'), label: t('项目文件'), compId: 'project-files',

@@ -1,3 +1,4 @@
+import { AppMaterials } from '../common/AppMaterials';
 import { t } from '../model/I18n';
 import { PresentedFile, deliveredFiles } from '../model/Deliverables';
 import { turnFileChanges } from '../model/TurnFileChanges';
@@ -348,6 +349,8 @@ export struct ImageViewer {
 
 @Component
 export struct MessageBubble {
+  @Prop readingMessageId: string = '';
+  onRead: (id: string) => void = () => {};
   @Prop webEnabled: boolean = false;
   onOpenFile: (path: string) => void = () => {};
   @Prop actionsEnabled: boolean = true;
@@ -409,8 +412,8 @@ export struct MessageBubble {
   private async copy(): Promise<void> {
     try {
       await pasteboard.getSystemPasteboard().setData(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, this.message.content));
-      this.getUIContext().getPromptAction().showToast({ message: t("已复制") });
-    } catch (_) { this.getUIContext().getPromptAction().showToast({ message: t("复制失败，请长按文本选择复制。") }); }
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t("已复制") });
+    } catch (_) { this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t("复制失败，请长按文本选择复制。") }); }
   }
 
   private images(): Attachment[] { return this.message.attachments.filter((item) => item.mime === 'image/jpeg'); }
@@ -428,7 +431,7 @@ export struct MessageBubble {
       if (this.message.content.length > 0) {
         MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.rectangle_on_rectangle')), content: t("复制") })
           .onClick(() => this.copy())
-        MenuItem({ content: t('选择文本') }).onClick(() => {
+        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.textformat')), content: t('选择文本') }).onClick(() => {
           this.selectingText = true; this.documentName = t('消息文本'); this.documentText = this.message.content; this.documentOpen = true;
         })
       }
@@ -436,11 +439,17 @@ export struct MessageBubble {
         content: this.message.role === 'user' ? t("从这里改写（新分支）") : t("从这里创建分支") })
         .enabled(this.actionsEnabled).onClick(() => this.onFork(this.message.id))
       if (this.message.role === 'assistant' && this.message.status !== 'generating') {
+        if (this.message.content.trim().length > 0) {
+          MenuItem({ symbolStartIcon: new SymbolGlyphModifier(this.readingMessageId === this.message.id ?
+            $r('sys.symbol.stop_circle_fill') : $r('sys.symbol.speaker_wave_2')),
+            content: this.readingMessageId === this.message.id ? t('停止朗读') : t('朗读回答') })
+            .id('read-answer-' + this.message.id).onClick(() => this.onRead(this.message.id))
+        }
         MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.arrow_clockwise')), content: t('重新生成（保留原回答）') })
           .enabled(this.actionsEnabled).onClick(() => this.onRegenerate(this.message.id))
       }
       if (this.message.content.length > 0) {
-        MenuItem({ content: t("提炼为记忆…") })
+        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.lightbulb')), content: t("提炼为记忆…") })
           .enabled(this.actionsEnabled).onClick(() => this.onRemember(this.message.id))
       }
     }
@@ -471,7 +480,7 @@ export struct MessageBubble {
     }.id('message-more-' + this.message.id).width(44).height(44).padding(0).borderRadius(8)
       .backgroundColor(Color.Transparent).clickEffect(Motion.pressSmall)
       .accessibilityText(t('消息操作')).bindMenu(this.actions, {
-        mask: { color: $r('app.color.scrim'), backgroundBlurStyle: BlurStyle.NONE } })
+        systemMaterial: AppMaterials.surface, mask: false })
   }
 
   @Builder
@@ -662,7 +671,7 @@ export struct MessageBubble {
           this.assistantMessage()
         }
       }.width('100%').bindContextMenu(this.actions, ResponseType.LongPress, {
-        mask: { color: $r('app.color.scrim'), backgroundBlurStyle: BlurStyle.NONE } })
+        systemMaterial: AppMaterials.surface, mask: false })
     }.width('100%')
     .bindContentCover($$this.previewing, this.viewer(), { modalTransition: ModalTransition.ALPHA })
     .bindSheet($$this.documentOpen, this.documentViewer(), { height: '90%', showClose: false, dragBar: true,

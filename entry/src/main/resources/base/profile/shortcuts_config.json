@@ -1,0 +1,26 @@
+{
+  "shortcuts": [
+    {
+      "shortcutId": "new_chat",
+      "label": "$string:shortcut_new_chat",
+      "icon": "$media:shortcut_new_chat",
+      "wants": [{
+        "bundleName": "com.sudojacky.tinybot",
+        "moduleName": "entry",
+        "abilityName": "EntryAbility",
+        "parameters": { "tinybotAction": "new-chat" }
+      }]
+    },
+    {
+      "shortcutId": "voice_input",
+      "label": "$string:shortcut_voice_input",
+      "icon": "$media:shortcut_voice_input",
+      "wants": [{
+        "bundleName": "com.sudojacky.tinybot",
+        "moduleName": "entry",
+        "abilityName": "EntryAbility",
+        "parameters": { "tinybotAction": "voice-input" }
+      }]
+    }
+  ]
+}

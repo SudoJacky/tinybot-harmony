@@ -1,5 +1,3 @@
-import { t } from './I18n';
-
 // Standard wire values. "default" is a local sentinel and is never sent to a provider.
 // Model-specific subsets verified against official docs; see docs/reasoning-effort.md.
 export const REASONING_EFFORTS: string[] = ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
@@ -53,5 +51,5 @@ export function adaptiveThinkingModel(model: string): boolean {
 }
 
 export function reasoningEffortName(value: string): string {
-  return value === 'default' ? t('默认') : value;
+  return value === 'default' ? 'Auto' : value;
 }

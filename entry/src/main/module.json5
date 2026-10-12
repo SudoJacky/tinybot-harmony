@@ -28,6 +28,9 @@
         "startWindowIcon": "$media:tinybot_icon",
         "startWindowBackground": "$color:start_window_background",
         "exported": true,
+        "metadata": [
+          { "name": "ohos.ability.shortcuts", "resource": "$profile:shortcuts_config" }
+        ],
         "skills": [
           { "actions": ["ohos.want.action.viewData"], "entities": ["entity.system.browsable"], "uris": [{ "scheme": "tinybot-harmony", "host": "oauth", "path": "/callback" }] },
           { "actions": ["ohos.want.action.sendData"], "uris": [
