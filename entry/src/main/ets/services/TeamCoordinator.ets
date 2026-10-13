@@ -1,4 +1,5 @@
 import { t } from '../model/I18n';
+import { ToolSelection } from '../model/AgentMode';
 import { teamWorkerInstructions } from '../model/SystemPrompt';
 import { ModelMessage, ToolCall, ToolDefinition, ToolExecutionMode } from '../model/Agent';
 import { ModelConfig } from '../model/Conversation';
@@ -34,6 +35,7 @@ export class TeamTools implements AgentTools {
   execute(call: ToolCall, cancellation: Cancellation, context?: ToolInvocationContext): Promise<string> { return this.lane.execute(this.inner, call, cancellation, context); }
 }
 export interface TeamExecution {
+  toolSelection?: ToolSelection;
   usageOrigin?: UsageOrigin;
   runtime: () => AgentRuntime; tools: (record: TeamTaskRecord, attempt: TeamAttempt) => AgentTools; config: ModelConfig;
   complete?: (record: TeamTaskRecord, attempt: TeamAttempt) => void;
@@ -114,7 +116,7 @@ export class TeamCoordinator {
     try {
       await execution.checkpoint();
       if (this.stopped) { record.status = 'cancelled'; attempt.status = 'cancelled'; return; }
-      const result = await runtime.run({ sessionId: attempt.id, config: execution.config, messages: messages,
+      const result = await runtime.run({ sessionId: attempt.id, config: execution.config, messages: messages, toolSelection: execution.toolSelection,
         usageOrigin: { threadId: execution.usageOrigin?.threadId, threadTitle: execution.usageOrigin?.threadTitle,
           turnId: execution.usageOrigin?.turnId, turnLabel: execution.usageOrigin?.turnLabel, skill: execution.usageOrigin?.skill,
           purpose: 'team_task', teamId: run.id, taskId: record.task.id, taskTitle: record.task.title,

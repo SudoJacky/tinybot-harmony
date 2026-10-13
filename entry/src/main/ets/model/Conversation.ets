@@ -1,4 +1,5 @@
 import { t } from './I18n';
+import { ToolSelection, validateToolSelection } from './AgentMode';
 import { ProjectData, validateProjects } from './Project';
 import { UiSavedState, validateUiStates } from './InteractiveUi';
 import { REASONING_EFFORTS } from './ReasoningEffort';
@@ -65,7 +66,7 @@ export function copyModelConfig(config: ModelConfig, configured: boolean = confi
 
 export interface ContextState { compaction?: CompactionData; }
 
-export interface ThreadData extends ContextState {
+export interface ThreadData extends ContextState, ToolSelection {
   projectId?: string;
   memorySnapshot?: string;
   memoryReviewedMessageId?: string;
@@ -227,6 +228,7 @@ export function parseAppData(text: string): AppData {
     if (thread.reasoningEffort !== undefined && !REASONING_EFFORTS.includes(thread.reasoningEffort)) {
       throw new Error(t('推理强度设置无效。'));
     }
+    validateToolSelection(thread);
     if (thread.teamEnabled !== undefined && typeof thread.teamEnabled !== 'boolean') { throw new Error(t("团队模式设置损坏。")); }
     if (thread.teams !== undefined) { recoverTeams(thread.teams); }
     if (thread.attachments) { validateAttachments(thread.attachments); }

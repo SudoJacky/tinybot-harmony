@@ -1,4 +1,5 @@
 import { ProjectData } from '../model/Project';
+import { AgentMode } from '../model/AgentMode';
 import { McpSettingsCommand, McpSettingsResult } from '../services/McpSettings';
 import { Cancellation } from '../services/Cancellation';
 import { t } from '../model/I18n';
@@ -81,6 +82,9 @@ export class ChatViewModel {
   private phase: SessionPhase = 'idle';
   teams: TeamRun[] = [];
   setTeamEnabled(enabled: boolean): Promise<boolean> { return this.requireSession().setTeamEnabled(enabled); }
+  setAgentMode(mode: AgentMode): Promise<boolean> { return this.requireSession().setAgentMode(mode); }
+  setToolEnabled(name: string, enabled: boolean): Promise<boolean> { return this.requireSession().setToolEnabled(name, enabled); }
+  setDisabledTools(names: string[]): Promise<boolean> { return this.requireSession().setDisabledTools(names); }
   get saving(): boolean { return this.phase === 'saving'; }
   private selectedConfig: ModelConfig = defaultConfig();
   private draftTimer: number = -1;

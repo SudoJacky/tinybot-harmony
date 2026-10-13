@@ -1,5 +1,7 @@
 import { AppMaterials } from '../common/AppMaterials';
 import { t } from '../model/I18n';
+import { AgentMode, AGENT_MODES, agentModeName } from '../model/AgentMode';
+import { CustomToolsPanel } from './CustomToolsPanel';
 import { AnswerSpeech } from '../services/AnswerSpeech';
 import { LaunchActions } from '../services/LaunchActions';
 import { supportsReasoningEffort, reasoningEfforts, reasoningEffortName, isHighestReasoningEffort } from '../model/ReasoningEffort';
@@ -80,9 +82,15 @@ export struct ChatPanel {
   @State private sendOrigin: SendOrigin | undefined = undefined;
   @State private viewport: WindowViewport = new WindowViewport();
   @State private showReasoning: boolean = false;
+  @State private showTools: boolean = false;
   @State private reasoningPreview: string = '';
   @State private reasoningPreviewKey: string = '';
   private reasoningSaving: boolean = false;
+
+  private async openCustomTools(): Promise<void> {
+    this.showPlus = false;
+    if (await this.app.setAgentMode('custom')) { this.showTools = true; }
+  }
   private scroller: Scroller = new Scroller();
   private scrollTimer: number = -1;
   // Messages already on screen when a thread opens render in place; only later ones animate in.
@@ -262,7 +270,7 @@ export struct ChatPanel {
 
   private composerExpanded(): boolean {
     return this.composerFocused || this.app.draft.length > 0 || this.hasDraft() || this.importing || this.speechActive() ||
-      this.app.generating || this.thread.pendingInputs.length > 0 || this.showPlus || this.showContext || this.showReasoning || this.showQueue;
+      this.app.generating || this.thread.pendingInputs.length > 0 || this.showPlus || this.showContext || this.showReasoning || this.showTools || this.showQueue;
   }
 
   private canSend(): boolean {
@@ -524,6 +532,9 @@ export struct ChatPanel {
         }.width('100%').alignItems(VerticalAlign.Top)
         Text(this.thread.attachments.length >= 4 ? t("已达到每条消息 4 个附件的上限") : t("图片需模型支持视觉输入 · 文本文件最多 64 KB"))
           .fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).width('100%').textAlign(TextAlign.Center)
+        Button(t('自定义工具')).id('open-custom-tools').attributeModifier(Btn.tonal).width('100%')
+          .enabled(!this.app.busy && !this.thread.archived && this.app.saveError.length === 0)
+          .onClick(() => this.openCustomTools())
         Button(t('引用其他会话')).id('add-thread-reference').attributeModifier(Btn.tonal).width('100%')
           .enabled(this.canAttach() && this.thread.references.length < 4)
           .onClick(() => this.fromSheet(() => {
@@ -769,6 +780,38 @@ export struct ChatPanel {
   }
 
   @Builder
+  agentModeMenu() {
+    Menu() {
+      ForEach(AGENT_MODES, (mode: AgentMode) => {
+        MenuItem({ content: agentModeName(mode) })
+          .selected(mode === this.thread.agentMode)
+          .selectIcon(true)
+          .onClick(() => { if (mode === 'custom') { this.openCustomTools(); } else { this.app.setAgentMode(mode); } })
+      }, (mode: AgentMode) => mode)
+    }
+  }
+
+  @Builder
+  customToolsSheet() {
+    CustomToolsPanel({ app: this.app, thread: this.thread })
+  }
+
+  @Builder
+  agentModePicker() {
+    Button(agentModeName(this.thread.agentMode))
+      .id('composer-agent-mode').attributeModifier(Btn.textSmall).height(40)
+      .padding({ left: 10, right: 10 })
+      .fontColor(this.thread.agentMode === 'custom' ? $r('app.color.accent') : $r('app.color.text_secondary'))
+      .enabled(!this.app.busy && !this.thread.archived && this.app.saveError.length === 0)
+      .accessibilityText(t('Agent 模式') + '：' + agentModeName(this.thread.agentMode))
+      .bindMenu(this.agentModeMenu)
+      .bindSheet($$this.showTools, this.customToolsSheet(), {
+        title: { title: t('自定义工具') }, detents: [SheetSize.LARGE], dragBar: true,
+        backgroundColor: $r('app.color.page_background')
+      })
+  }
+
+  @Builder
   composer() {
     Stack({ alignContent: Alignment.Bottom }) {
       if (this.highestEffort() && this.composerExpanded()) {
@@ -822,6 +865,7 @@ export struct ChatPanel {
         this.composerAddButton()
         Scroll() {
         Row({ space: 4 }) {
+        this.agentModePicker()
         // A bare ring reads as a spinner at low usage; the percentage makes it a gauge.
         Row({ space: 4 }) {
           Progress({ value: this.app.contextUsed, total: Math.max(1, this.app.contextWindow), type: ProgressType.Ring })

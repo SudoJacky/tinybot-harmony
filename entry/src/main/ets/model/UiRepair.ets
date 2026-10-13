@@ -30,6 +30,9 @@ export function repairGuidance(code: string, path?: string, title?: string): Rep
     instruction = 'Inspect the reported Web startup error and its stack before changing source code. ' +
       'If the host or device capability is unavailable, address that condition rather than rewriting valid content. ' +
       'A successful startup check does not verify every later interaction.';
+  } else if (code === 'SCREENSHOT_FAILED') {
+    instruction = 'Inspect the device rendering/capture error before editing source. A capture failure does not prove the preview source is invalid. ' +
+      'Restore the rendering host or device capability and retry publication; do not claim to have visually inspected an unavailable image.';
   } else if (code === 'EDIT_CONFLICT') {
     instruction = 'Read the current file again before editing. The previous version or replacement match is no longer usable. ' +
       'Choose a uniquely matching oldText with sufficient unchanged context; do not retry the same stale patch.';
