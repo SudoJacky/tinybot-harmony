@@ -4,7 +4,18 @@ const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFi
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 const root = path.resolve(__dirname, '../entry/src'), cache = new Map();
 const nativeResult = { type: 3, value: '' };
+const TouchType = { Down: 0, Up: 1, Move: 2, Cancel: 3 };
 const nativeWebview = { JsMessageType: { STRING: 3, NONE: 0 }, WebviewController: class {
+  backAvailable = false; forwardAvailable = false; effects = [];
+  url = 'about:blank';
+  accessBackward() { return this.backAvailable; }
+  accessForward() { return this.forwardAvailable; }
+  backward() { this.effects.push('back'); }
+  forward() { this.effects.push('forward'); }
+  refresh() { this.effects.push('reload'); }
+  getUrl() { return this.url; }
+  clearHistory() { this.effects.push('clearHistory'); this.backAvailable = false; this.forwardAvailable = false; }
+  loadUrl(url) { this.url = url; this.effects.push('navigate'); }
   getTitle() { return 'Native browser'; }
   async runJavaScript() { return JSON.stringify(nativeResult.value); }
   async runJavaScriptExt() { return { getType: () => nativeResult.type, getString: () => JSON.stringify(nativeResult.value) }; }
@@ -17,7 +28,7 @@ function load(file) {
   if (file.endsWith('SessionService.test.ets')) source += '\nexport { Fixture, seed };';
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021, experimentalDecorators: true
-  } }).outputText, { exports, Observed: cls => cls, setTimeout, clearTimeout, console, require: id => {
+  } }).outputText, { exports, Observed: cls => cls, TouchType, setTimeout, clearTimeout, console, require: id => {
     if (id === '@ohos/hypium') return {};
     if (id === '@kit.ArkWeb') return { webview: nativeWebview };
     if (!id.startsWith('.')) throw Error('Unexpected platform dependency ' + id);
@@ -43,7 +54,8 @@ function fixture(policy = 'enabled') {
     async act(action) { this.effects.push(action.action); if (this.hold) await this.hold.promise; },
     async snapshot(id) { return { snapshotId: id, url: this.url, title: this.page, text: this.page,
       elements: [{ id: 1, role: 'button', label: 'Submit', type: '' }], truncated: false, embeddedFrames: 0, trust: 'untrusted' }; },
-    close() { this.effects.push('close'); }
+    close() { this.effects.push('close'); },
+    userBack() { return false; }
   };
   const saved = [], logs = [];
   browser.attach(driver); browser.configure(async value => { saved.push(value); }, message => logs.push(message));
@@ -197,6 +209,58 @@ async function acquired() {
     await assert.rejects(tools.execute(call('browser_open', { url: 'https://example.com', reason: 'Disabled' }), f.cancellation), error => error.code === 'TOOL_UNAVAILABLE');
     assert.equal(f.browser.permissionPending, false);
     console.log('PASS live permission changes update both the model catalog and dispatch, including enable during a running task');
+  }
+  {
+    const f = await acquired();
+    const { ToolFailure } = load(path.join(root, 'main/ets/model/ToolFailure'));
+    f.driver.act = async () => { throw new ToolFailure('STALE_BROWSER_SNAPSHOT', 'Viewing changed the page.', 'read_browser_snapshot'); };
+    await assert.rejects(f.browser.act({ action: 'click', snapshotId: f.receipt.page.snapshotId, elementId: 1 }, f.cancellation),
+      error => error.code === 'STALE_BROWSER_SNAPSHOT');
+    assert.equal(f.browser.error, '', 'A stale observation must not turn normal viewing into a page-loading error');
+    assert.equal(f.browser.paused, false); assert.equal(f.browser.owner, 'agent');
+    assert.notEqual((await f.browser.snapshot(f.cancellation)).snapshotId, f.receipt.page.snapshotId);
+    assert.ok(f.logs.includes('observation changed code=STALE_BROWSER_SNAPSHOT'));
+    console.log('PASS stale viewing observations remain explicit tool failures, refresh without taking control and do not show a loading error');
+  }
+  {
+    const f = await acquired();
+    const { NativeBrowserDriver } = load(path.join(root, 'main/ets/services/NativeBrowserDriver'));
+    const driver = new NativeBrowserDriver(f.browser);
+    const touch = (type, x, y, count = 1, id = 1) => driver.userTouch({ type,
+      changedTouches: [{ id, screenX: x, screenY: y }], touches: Array.from({ length: count }, (_, i) => ({ id: i + 1 })) });
+    touch(TouchType.Down, 100, 100);
+    assert.equal(f.browser.paused, false, 'Pressing down to begin viewing must not take control');
+    touch(TouchType.Move, 100, 150); touch(TouchType.Move, 100, 100); touch(TouchType.Up, 100, 100);
+    assert.equal(f.browser.paused, false, 'A drag remains viewing even when it returns to its origin');
+    touch(TouchType.Down, 100, 100); touch(TouchType.Down, 200, 100, 2, 2);
+    touch(TouchType.Up, 200, 100, 2, 2); touch(TouchType.Up, 100, 100);
+    assert.equal(f.browser.paused, false, 'Pinch gestures must not take control');
+    touch(TouchType.Down, 100, 100); touch(TouchType.Cancel, 100, 100); touch(TouchType.Up, 100, 100);
+    assert.equal(f.browser.paused, false, 'A cancelled gesture cannot become a click');
+    touch(TouchType.Down, 100, 100); touch(TouchType.Up, 102, 102);
+    assert.equal(f.browser.paused, true, 'A tap transfers control before continuing page interaction');
+    f.browser.handoff();
+    assert.equal(driver.userBack(), false); assert.equal(driver.userForward(), false);
+    assert.equal(f.browser.paused, false, 'Empty history must not pause a task');
+    assert.deepEqual(driver.controller.effects, []);
+    driver.controller.backAvailable = true; driver.historyChanged();
+    assert.equal(f.browser.canGoBack, true); assert.equal(f.browser.canGoForward, false);
+    assert.equal(driver.userBack(), true); assert.equal(f.browser.paused, true);
+    assert.deepEqual(driver.controller.effects, ['back']);
+    f.browser.handoff(); driver.controller.forwardAvailable = true; driver.historyChanged();
+    assert.equal(driver.userForward(), true); assert.equal(f.browser.paused, true);
+    driver.close(); assert.equal(f.browser.canGoBack, false); assert.equal(f.browser.canGoForward, false);
+    driver.pageEnd('about:blank');
+    const first = driver.open('https://example.com'); await settle();
+    driver.controller.backAvailable = true; driver.pageEnd('https://example.com'); await first;
+    assert.equal(f.browser.canGoBack, false, 'The internal blank page must not become user history');
+    assert.ok(driver.controller.effects.includes('clearHistory'));
+    driver.controller.effects = [];
+    const second = driver.open('https://example.com/next'); await settle();
+    driver.controller.backAvailable = true; driver.pageEnd('https://example.com/next'); await second;
+    assert.equal(f.browser.canGoBack, true, 'Subsequent browser_open calls preserve real history');
+    assert.deepEqual(driver.controller.effects, ['navigate']);
+    console.log('PASS native viewing gestures keep the task running; taps and available navigation take control; empty history does not');
   }
   {
     const { NativeBrowserDriver } = load(path.join(root, 'main/ets/services/NativeBrowserDriver'));

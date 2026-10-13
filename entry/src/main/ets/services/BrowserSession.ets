@@ -14,6 +14,7 @@ export interface BrowserDriver {
   open(url: string): Promise<void>;
   snapshot(id: string): Promise<BrowserPage>;
   act(action: BrowserAction): Promise<void>;
+  userBack(): boolean;
   close(): void;
 }
 export interface BrowserReceipt { operation: string; completed: boolean; userIntervened: boolean; page?: BrowserPage; browserClosed?: boolean; }
@@ -26,6 +27,9 @@ export class BrowserSession implements ExecutionGate {
   owner: string = 'none';
   url: string = '';
   title: string = '';
+  canGoBack: boolean = false;
+  canGoForward: boolean = false;
+  editingAddress: boolean = false;
   error: string = '';
   handoffReason: string = '';
   permissionReason: string = '';
@@ -114,11 +118,12 @@ export class BrowserSession implements ExecutionGate {
     this.log('task released epoch=' + this.epoch);
   }
   close(): void {
-    this.epoch++; this.open = false; this.owner = 'none'; this.handoffReason = '';
+    this.epoch++; this.open = false; this.owner = 'none'; this.handoffReason = ''; this.editingAddress = false;
     this.driver?.close(); this.wake(); this.log('closed epoch=' + this.epoch);
   }
   report(message: string): void { this.error = message; this.log('error=' + message); }
   pageChanged(url: string, title: string): void { this.url = url; this.title = title; }
+  userBack(): boolean { return this.requireDriver().userBack(); }
   private requireDriver(): BrowserDriver {
     if (!this.driver) { throw new ToolFailure('BROWSER_UNAVAILABLE', 'Browser view is not attached.', 'inspect_error'); }
     return this.driver;
@@ -187,7 +192,13 @@ export class BrowserSession implements ExecutionGate {
         try { await this.wait(cancellation); }
         catch (error) { if (!(error instanceof RunCancelledError && cancellation.cancelled)) { throw error as Error; } }
       }
-      if (failure) { this.report(failure.message); throw failure; }
+      if (failure) {
+        // A changed observation is returned to the model for a fresh read, not a page-loading error.
+        if (failure instanceof ToolFailure && ['STALE_BROWSER_SNAPSHOT', 'STALE_BROWSER_ELEMENT'].includes(failure.code)) {
+          this.log('observation changed code=' + failure.code);
+        } else { this.report(failure.message); }
+        throw failure;
+      }
       if (cancellation.cancelled) { return { operation: operation, completed: true, userIntervened: epoch !== this.epoch }; }
       try {
         this.requireOpen();

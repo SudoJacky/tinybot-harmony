@@ -121,7 +121,11 @@ struct Index {
   }
 
   onBackPress(): boolean {
-    if (this.browserExpanded) { this.setBrowserExpanded(false); return true; }
+    if (this.browserExpanded) {
+      if (this.browser.editingAddress) { this.getUIContext().getFocusController().clearFocus(); return true; }
+      if (this.browser.owner === 'user' && this.browser.userBack()) { return true; }
+      this.setBrowserExpanded(false); return true;
+    }
     if (this.drawerOpen || this.drawerDragging) {
       this.setDrawer(false);
       return true;

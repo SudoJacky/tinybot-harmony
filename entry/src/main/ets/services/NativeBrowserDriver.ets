@@ -12,11 +12,34 @@ export class NativeBrowserDriver implements BrowserDriver {
   private loading: boolean = false;
   private error: string = '';
   private waiters: Set<() => void> = new Set<() => void>();
+  private touchStart?: TouchObject;
+  private touchMoved: boolean = false;
   constructor(browser: BrowserSession) { this.browser = browser; }
   pageBegin(): void { this.loading = true; this.error = ''; this.browser.error = ''; }
   pageEnd(url: string): void {
     this.initialized = true; this.loading = false;
-    this.browser.pageChanged(url, this.controller.getTitle()); this.wake();
+    this.browser.pageChanged(url, this.controller.getTitle()); this.historyChanged(); this.wake();
+  }
+  historyChanged(): void {
+    this.browser.canGoBack = this.controller.accessBackward();
+    this.browser.canGoForward = this.controller.accessForward();
+  }
+  userTouch(event: TouchEvent): void {
+    const point = event.changedTouches[0];
+    if (event.type === TouchType.Down && !this.touchStart && point) {
+      this.touchStart = point; this.touchMoved = false;
+    }
+    if (this.touchStart && point) {
+      // Remember the whole gesture: a drag back to its origin is still a drag.
+      if (event.touches.length > 1 || point.id !== this.touchStart.id ||
+        Math.hypot(point.screenX - this.touchStart.screenX, point.screenY - this.touchStart.screenY) > 8) {
+        this.touchMoved = true;
+      }
+    }
+    if (event.type === TouchType.Up) {
+      if (this.touchStart && !this.touchMoved) { this.browser.takeOver(); }
+      if (event.touches.length <= 1) { this.touchStart = undefined; }
+    } else if (event.type === TouchType.Cancel) { this.touchStart = undefined; }
   }
   failed(message: string): void {
     this.error = message; this.loading = false; this.browser.report(message); this.wake();
@@ -43,8 +66,10 @@ export class NativeBrowserDriver implements BrowserDriver {
   }
   async open(url: string): Promise<void> {
     await this.ready();
+    const firstPage = this.controller.getUrl() === 'about:blank';
     this.loading = true; this.error = ''; this.controller.loadUrl(url);
     await this.ready();
+    if (firstPage) { this.controller.clearHistory(); this.historyChanged(); }
   }
   async snapshot(id: string): Promise<BrowserPage> {
     await this.ready();
@@ -85,10 +110,18 @@ export class NativeBrowserDriver implements BrowserDriver {
   }
   close(): void {
     this.initialized = false; this.loading = false; this.error = ''; this.wake();
+    this.touchStart = undefined;
+    this.browser.canGoBack = false; this.browser.canGoForward = false;
     // Removing the mounted Web closes the renderer. Never run another page action here.
   }
   userNavigate(url: string): void { this.browser.takeOver(); this.loading = true; this.error = ''; this.controller.loadUrl(url); }
-  userBack(): void { this.browser.takeOver(); if (this.controller.accessBackward()) { this.loading = true; this.error = ''; this.controller.backward(); } }
-  userForward(): void { this.browser.takeOver(); if (this.controller.accessForward()) { this.loading = true; this.error = ''; this.controller.forward(); } }
+  userBack(): boolean {
+    if (!this.controller.accessBackward()) { return false; }
+    this.browser.takeOver(); this.loading = true; this.error = ''; this.controller.backward(); return true;
+  }
+  userForward(): boolean {
+    if (!this.controller.accessForward()) { return false; }
+    this.browser.takeOver(); this.loading = true; this.error = ''; this.controller.forward(); return true;
+  }
   userReload(): void { this.browser.takeOver(); this.loading = true; this.error = ''; this.controller.refresh(); }
 }
