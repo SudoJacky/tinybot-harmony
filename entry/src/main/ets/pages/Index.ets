@@ -121,12 +121,17 @@ struct Index {
   }
 
   onBackPress(): boolean {
-    if (this.browserExpanded) { this.browserExpanded = false; return true; }
+    if (this.browserExpanded) { this.setBrowserExpanded(false); return true; }
     if (this.drawerOpen || this.drawerDragging) {
       this.setDrawer(false);
       return true;
     }
     return false;
+  }
+
+  private setBrowserExpanded(expanded: boolean): void {
+    this.getUIContext().getFocusController().clearFocus();
+    this.browserExpanded = expanded;
   }
 
   aboutToDisappear(): void {
@@ -443,7 +448,7 @@ struct Index {
         Column() {
           if (this.app.ready) {
             ChatPanel({ app: this.app, thread: this.app.active, approval: this.approval, browser: this.browser,
-                onBrowser: () => { this.browserExpanded = true; }, onSettings: () => this.openSettings(),
+                onBrowser: () => this.setBrowserExpanded(true), onSettings: () => this.openSettings(),
                 topInset: CHAT_HEADER_HEIGHT,
                 onHeaderProgress: (progress: number): void => { this.headerProgress = progress; },
                 voiceRequest: this.voiceRequest, onVoiceShortcutConsumed: () => { this.voiceRequest = ''; },
@@ -488,8 +493,8 @@ struct Index {
     }.width('100%').height('100%')
       }, (locale: string) => locale)
       BrowserPanel({ browser: this.browser, expanded: this.browserExpanded,
-        onSettings: () => { this.browserExpanded = false; this.openSettings(); },
-        onDismiss: () => { this.getUIContext().getFocusController().clearFocus(); this.browserExpanded = false; } })
+        onSettings: () => { this.setBrowserExpanded(false); this.openSettings(); },
+        onDismiss: () => this.setBrowserExpanded(false) })
     }.width('100%').height('100%')
   }
 }
