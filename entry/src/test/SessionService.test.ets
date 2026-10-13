@@ -136,6 +136,16 @@ function historySeed(): AppData {
 function titleSeed(): AppData {
   const data = seed(); data.threads[0].title = '新对话'; return data;
 }
+function batchSeed(): AppData {
+  const data = seed();
+  data.projects = [{ id: 'project', name: 'Project', instructions: '', workspaceId: 'project-workspace', createdAt: 1, updatedAt: 1 }];
+  data.threads = ['thread-1', 'selected', 'ordinary', 'remaining', 'archived'].map((id, index): ThreadData => ({
+    id: id, title: id, updatedAt: index + 1, messages: [], draft: 'draft-' + id,
+    projectId: id === 'ordinary' ? undefined : 'project', archived: id === 'archived',
+    modelRef: { providerId: 'test', modelId: 'model' }
+  }));
+  return data;
+}
 function isTitleRequest(request: ProviderRequest): boolean {
   return request.messages[0]?.content === CONVERSATION_TITLE_PROMPT;
 }
@@ -146,6 +156,95 @@ async function settleTitles(): Promise<void> {
 
 export default function sessionServiceTests(): void {
   describe('SessionService', () => {
+    it('batchArchivesAndRestoresInOneCommitWithASameProjectReplacement', 0, async () => {
+      const f = new Fixture(batchSeed()); await f.session.initialize();
+      const writes = f.repository.writes.length;
+      expect(await f.session.archiveThreads(['thread-1', 'selected', 'selected'], true)).assertTrue();
+      const archived = await f.repository.load();
+      expect(archived.activeThreadId).assertEqual('remaining');
+      expect(archived.threads.filter((thread) => thread.archived).length).assertEqual(3);
+      expect(archived.threads.find((thread) => thread.id === 'thread-1')?.draft).assertEqual('draft-thread-1');
+      expect(f.repository.writes.length).assertEqual(writes + 1);
+      expect(await f.session.archiveThreads(['thread-1', 'selected'], true)).assertTrue();
+      expect(f.session.snapshot().threads.find((thread) => thread.id === 'selected')?.archived).assertTrue();
+      expect(await f.session.archiveThreads(['thread-1', 'selected'], false)).assertTrue();
+      expect(f.session.snapshot().activeThreadId).assertEqual('remaining');
+      expect(f.session.snapshot().threads.filter((thread) => thread.archived).length).assertEqual(1);
+      expect((await f.repository.load()).threads.filter((thread) => thread.archived).length).assertEqual(1);
+    });
+
+    it('batchDeletesSelectedChatsWithoutChoosingAnotherSelectedOrArchivedChat', 0, async () => {
+      const f = new Fixture(batchSeed()); await f.session.initialize();
+      const writes = f.repository.writes.length;
+      expect(await f.session.deleteThreads(['thread-1', 'selected', 'selected'])).assertTrue();
+      const saved = await f.repository.load();
+      expect(saved.activeThreadId).assertEqual('remaining');
+      expect(saved.threads.length).assertEqual(3);
+      expect(saved.threads.some((thread) => ['thread-1', 'selected'].includes(thread.id))).assertFalse();
+      expect(active(saved).projectId).assertEqual('project');
+      expect(active(saved).draft).assertEqual('draft-remaining');
+      expect(f.repository.writes.length).assertEqual(writes + 1);
+    });
+
+    it('batchCreatesOnlyOneReplacementWhenAllChatsAreSelected', 0, async () => {
+      for (const remove of [false, true]) {
+        const f = new Fixture(batchSeed()); await f.session.initialize();
+        const ids = f.session.snapshot().threads.map((thread) => thread.id);
+        const nextId = f.resources.ids;
+        expect(remove ? await f.session.deleteThreads(ids) : await f.session.archiveThreads(ids, true)).assertTrue();
+        const saved = await f.repository.load();
+        expect(ids.includes(saved.activeThreadId)).assertFalse();
+        expect(f.resources.ids).assertEqual(nextId + 1);
+        expect(active(saved).archived === true).assertFalse();
+        expect(saved.threads.length).assertEqual(remove ? 1 : ids.length + 1);
+        expect(saved.threads.filter((thread) => !thread.archived).length).assertEqual(1);
+      }
+    });
+
+    it('batchKeepsStateAndPendingTeamSelectionsWhenSavingFails', 0, async () => {
+      for (const remove of [false, true]) {
+        const f = new Fixture(batchSeed()); await f.session.initialize(); await f.session.setTeamEnabled(true);
+        let published = f.session.snapshot();
+        f.session.subscribe((event: SessionEvent) => { if (event.data) { published = event.data; } });
+        const before = JSON.stringify(f.session.snapshot()); const saved = f.repository.saved;
+        f.repository.beforeSave = async () => { throw new Error('batch disk failure'); };
+        expect(remove ? await f.session.deleteThreads(['thread-1', 'selected']) :
+          await f.session.archiveThreads(['thread-1', 'selected'], true)).assertFalse();
+        expect(JSON.stringify(f.session.snapshot())).assertEqual(before);
+        expect(f.repository.saved).assertEqual(saved);
+        expect(f.session.state.error.includes('batch disk failure')).assertTrue();
+        expect(f.resources.errors.some((error) => error.includes('batch disk failure'))).assertTrue();
+        expect(active(published).teamEnabled).assertTrue();
+      }
+    });
+
+    it('batchValidatesAllIdsBeforeChangingAnythingAndRejectsEmptySelections', 0, async () => {
+      const f = new Fixture(batchSeed()); await f.session.initialize();
+      const before = JSON.stringify(f.session.snapshot()); const writes = f.repository.writes.length;
+      const workspaces = f.resources.workspaces.length;
+      expect(await f.session.deleteThreads(['thread-1', 'missing'])).assertFalse();
+      expect(await f.session.archiveThreads(['thread-1', 'missing'], true)).assertFalse();
+      expect(await f.session.deleteThreads([])).assertFalse();
+      expect(await f.session.archiveThreads([], true)).assertFalse();
+      expect(JSON.stringify(f.session.snapshot())).assertEqual(before);
+      expect(f.repository.writes.length).assertEqual(writes);
+      expect(f.resources.workspaces.length).assertEqual(workspaces);
+    });
+
+    it('batchRejectsConcurrentMutationsAndPreservesTypingDuringCommit', 0, async () => {
+      const f = new Fixture(batchSeed()); await f.session.initialize();
+      const entered = new Gate(); const release = new Gate(); let blocked = false;
+      f.repository.beforeSave = async () => { if (!blocked) { blocked = true; entered.open(); await release.promise; } };
+      const saving = f.session.archiveThreads(['selected'], true); await entered.promise;
+      expect(await f.session.deleteThreads(['ordinary'])).assertFalse();
+      expect(await f.session.archiveThreads(['remaining'], true)).assertFalse();
+      f.session.setDraft('typed during batch'); release.open(); expect(await saving).assertTrue();
+      const saved = await f.repository.load();
+      expect(active(saved).draft).assertEqual('typed during batch');
+      expect(saved.threads.some((thread) => thread.id === 'ordinary')).assertTrue();
+      expect(saved.threads.find((thread) => thread.id === 'remaining')?.archived === true).assertFalse();
+    });
+
     it('reusesUntouchedActiveChatWithoutWritingOrCreatingWorkspaces', 0, async () => {
       const f = new Fixture(titleSeed()); await f.session.initialize();
       await f.session.setTeamEnabled(true); await f.session.setReasoningEffort('high');

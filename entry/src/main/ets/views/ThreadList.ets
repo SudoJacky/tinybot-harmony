@@ -20,10 +20,13 @@ struct ThreadRow {
   @Prop query: string = '';
   @Prop lastBranch: boolean = false;
   @Prop activePath: boolean = false;
+  @Prop selecting: boolean = false;
+  @Prop selected: boolean = false;
   @State private rowHeight: number = 64;
   @ObjectLink thread: ThreadViewModel;
   @ObjectLink app: ChatViewModel;
   onSelected: () => void = () => {};
+  onSelectionChanged: (selected: boolean) => void = () => {};
   @State private editing: boolean = false;
   @State private name: string = '';
 
@@ -44,24 +47,26 @@ struct ThreadRow {
   @Builder
   actions() {
     Menu() {
-      MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.square_and_pencil')), content: t("重命名") })
-        .onClick(() => { this.name = this.thread.title; this.editing = true; })
-      MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.pin')),
-        content: this.thread.pinned ? t("取消置顶") : t("置顶") })
-        .onClick(() => this.app.pinThread(this.thread.id))
-      MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.archivebox')),
-        content: this.thread.archived ? t("恢复对话") : t("归档") })
-        .onClick(() => this.app.archiveThread(this.thread.id))
-      MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.trash')).fontColor([$r('app.color.danger')]),
-        content: t("删除") }).contentFontColor($r('app.color.danger'))
-        .onClick(() => {
-          this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface,
-            title: t("删除这段对话？"), message: this.thread.title + t("\n会话工作区中的文件会保留。"),
-            primaryButton: { value: t("取消"), action: () => {} },
-            secondaryButton: { value: t("删除"), fontColor: $r('app.color.danger'),
-              action: () => { this.app.deleteThread(this.thread.id); } }
-          });
-        })
+      if (!this.selecting) {
+        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.square_and_pencil')), content: t("重命名") })
+          .onClick(() => { this.name = this.thread.title; this.editing = true; })
+        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.pin')),
+          content: this.thread.pinned ? t("取消置顶") : t("置顶") })
+          .onClick(() => this.app.pinThread(this.thread.id))
+        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.archivebox')),
+          content: this.thread.archived ? t("恢复对话") : t("归档") })
+          .onClick(() => this.app.archiveThread(this.thread.id))
+        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.trash')).fontColor([$r('app.color.danger')]),
+          content: t("删除") }).contentFontColor($r('app.color.danger'))
+          .onClick(() => {
+            this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface,
+              title: t("删除这段对话？"), message: this.thread.title + t("\n会话工作区中的文件会保留。"),
+              primaryButton: { value: t("取消"), action: () => {} },
+              secondaryButton: { value: t("删除"), fontColor: $r('app.color.danger'),
+                action: () => { this.app.deleteThread(this.thread.id); } }
+            });
+          })
+      }
     }
   }
 
@@ -83,10 +88,16 @@ struct ThreadRow {
   build() {
     Stack({ alignContent: Alignment.End }) {
     Column() {
-      if (this.editing) {
+      if (this.editing && !this.selecting) {
         this.renameEditor()
       } else {
         Row({ space: Space.sm }) {
+          if (this.selecting) {
+            Checkbox({ name: this.thread.id }).id('thread-select-' + this.thread.id).select(this.selected)
+              .shape(CheckBoxShape.CIRCLE).selectedColor($r('app.color.accent')).width(22).height(22)
+              .enabled(!this.locked()).accessibilityText(this.thread.displayTitle)
+              .onChange((value: boolean) => { if (!this.locked()) { this.onSelectionChanged(value); } })
+          }
           Column({ space: 4 }) {
             Row({ space: 4 }) {
               if (this.thread.pinned) {
@@ -106,15 +117,18 @@ struct ThreadRow {
               }
             }
           }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-          Button({ type: ButtonType.Circle }) {
-            SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
-          }.width(32).height(32).backgroundColor(Color.Transparent).accessibilityText(t("对话管理"))
-          .enabled(!this.locked()).bindMenu(this.actions, {
-            systemMaterial: AppMaterials.surface, mask: false })
+          if (!this.selecting) {
+            Button({ type: ButtonType.Circle }) {
+              SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
+            }.width(32).height(32).backgroundColor(Color.Transparent).accessibilityText(t("对话管理"))
+            .enabled(!this.locked()).bindMenu(this.actions, {
+              systemMaterial: AppMaterials.surface, mask: false })
+          }
         }
         .width('100%').padding({ left: Space.md, right: 4, top: 10, bottom: 10 })
         .onClick(async () => {
           if (this.locked()) { return; }
+          if (this.selecting) { this.onSelectionChanged(!this.selected); return; }
           if (this.query.trim() ? await this.app.openMessage(this.thread.id, this.matchId(), this.query.trim()) : await this.app.selectThread(this.thread.id)) { this.onSelected(); }
         })
         .bindContextMenu(this.actions, ResponseType.LongPress, {
@@ -122,7 +136,7 @@ struct ThreadRow {
       }
     }
     .width('calc(100% - 28vp)').borderRadius(Radius.md)
-    .backgroundColor(this.active() ? $r('app.color.accent_container') : Color.Transparent)
+    .backgroundColor((this.selecting ? this.selected : this.active()) ? $r('app.color.accent_container') : Color.Transparent)
     .opacity(this.locked() && !this.active() ? 0.6 : 1)
     .onAreaChange((_old: Area, area: Area) => { this.rowHeight = Number(area.height); })
     Shape() {
@@ -149,6 +163,8 @@ export struct ThreadList {
   onFiles: () => void = () => {};
   @State private query: string = '';
   @State private archived: boolean = false;
+  @State private selecting: boolean = false;
+  @State private selectedIds: string[] = [];
   @State private visibleCounts: Record<string, number> = {};
   @State private collapsedProjects: string[] = [];
   @State private projectEditing: boolean = false;
@@ -158,6 +174,36 @@ export struct ThreadList {
 
   private filtered(): ThreadViewModel[] {
     return this.app.filteredThreads(this.query, this.archived);
+  }
+  private locked(): boolean { return this.app.busy || this.app.saveError.length > 0; }
+  private endSelection(): void { this.selecting = false; this.selectedIds = []; }
+  private selectThread(id: string, selected: boolean): void {
+    if (this.locked()) { return; }
+    this.selectedIds = this.selectedIds.filter((item) => item !== id);
+    if (selected) { this.selectedIds = this.selectedIds.concat(id); }
+  }
+  private allSelected(): boolean {
+    const threads = this.filtered();
+    return threads.length > 0 && threads.every((thread) => this.selectedIds.includes(thread.id));
+  }
+  private selectAll(): void {
+    if (this.locked()) { return; }
+    this.selectedIds = this.allSelected() ? [] : this.filtered().map((thread) => thread.id);
+  }
+  private async archiveSelected(): Promise<void> {
+    if (this.locked() || this.selectedIds.length === 0) { return; }
+    if (await this.app.archiveThreads(this.selectedIds.slice(), !this.archived)) { this.endSelection(); }
+  }
+  private confirmDeleteSelected(): void {
+    if (this.locked() || this.selectedIds.length === 0) { return; }
+    const ids = this.selectedIds.slice();
+    this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface,
+      title: t('删除选中的 {0} 段对话？', [ids.length]),
+      message: t('删除后无法恢复。会话工作区中的文件会保留。'),
+      primaryButton: { value: t('取消'), action: () => {} },
+      secondaryButton: { value: t('删除'), fontColor: $r('app.color.danger'),
+        action: async () => { if (await this.app.deleteThreads(ids)) { this.endSelection(); } } }
+    });
   }
   private groupOpen(id: string): boolean { return !!this.query.trim() || !this.collapsedProjects.includes(id); }
   private visibleCount(id: string): number { return this.visibleCounts[id] || 20; }
@@ -262,16 +308,18 @@ export struct ThreadList {
       }.id('project-group-' + (id || 'ordinary')).layoutWeight(1).height(44).padding({ right: 4 })
         .backgroundColor(Color.Transparent).borderRadius(10).onClick(() => this.toggleGroup(id))
         .accessibilityText(this.sectionTitle(id) + '，' + (this.groupOpen(id) ? t('收起') : t('展开')))
-      IconButton({ icon: $r('sys.symbol.plus'), label: t('新对话') + ' · ' + this.sectionTitle(id),
-        compId: 'project-new-chat-' + (id || 'ordinary'), diameter: 32, iconSize: 16,
-        disabled: this.app.busy || !!this.app.saveError,
-        onTap: async () => { if (await this.app.newThread(id)) { this.onSelected(); } } })
-      if (id) {
-        Button({ type: ButtonType.Circle }) {
-          SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
-        }.id('project-actions-' + id).width(32).height(32).backgroundColor(Color.Transparent)
-          .accessibilityText(t('编辑项目') + ' · ' + this.sectionTitle(id)).enabled(!this.app.busy && !this.app.saveError)
-          .bindMenu(this.projectActions(id), { systemMaterial: AppMaterials.surface, mask: false })
+      if (!this.selecting) {
+        IconButton({ icon: $r('sys.symbol.plus'), label: t('新对话') + ' · ' + this.sectionTitle(id),
+          compId: 'project-new-chat-' + (id || 'ordinary'), diameter: 32, iconSize: 16,
+          disabled: this.app.busy || !!this.app.saveError,
+          onTap: async () => { if (await this.app.newThread(id)) { this.onSelected(); } } })
+        if (id) {
+          Button({ type: ButtonType.Circle }) {
+            SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
+          }.id('project-actions-' + id).width(32).height(32).backgroundColor(Color.Transparent)
+            .accessibilityText(t('编辑项目') + ' · ' + this.sectionTitle(id)).enabled(!this.app.busy && !this.app.saveError)
+            .bindMenu(this.projectActions(id), { systemMaterial: AppMaterials.surface, mask: false })
+        }
       }
     }.width('100%').padding({ top: 4 }).backgroundColor($r('app.color.page_background'))
   }
@@ -281,24 +329,43 @@ export struct ThreadList {
       Row({ space: Space.sm }) {
         Image($r('app.media.tinybot')).width(28).height(28)
         Text('Tinybot').fontSize(20).fontWeight(FontWeight.Bold).layoutWeight(1).fontColor($r('app.color.text_primary'))
-        IconButton({ icon: $r('sys.symbol.folder_badge_plus'), label: t('新建项目'), compId: 'project-create',
-          disabled: this.app.busy || !!this.app.saveError, onTap: () => this.editProject() })
-      }.width('100%').height(48).padding({ left: 4 })
-      Button() {
-        Row({ space: Space.sm }) {
-          SymbolGlyph($r('sys.symbol.square_and_pencil')).fontSize(18).fontColor([$r('app.color.on_accent_container')])
-          Text(t("新对话")).fontSize(15).fontWeight(FontWeight.Medium).fontColor($r('app.color.on_accent_container'))
+        Button(this.selecting ? t('取消') : t('多选')).id('thread-selection-mode').attributeModifier(Btn.textSmall)
+          .enabled(!this.locked() && (this.selecting || this.filtered().length > 0))
+          .onClick(() => { if (this.selecting) { this.endSelection(); } else { this.selecting = true; } })
+        if (!this.selecting) {
+          IconButton({ icon: $r('sys.symbol.folder_badge_plus'), label: t('新建项目'), compId: 'project-create',
+            disabled: this.app.busy || !!this.app.saveError, onTap: () => this.editProject() })
         }
-      }.id('history-new-chat').attributeModifier(Btn.tonal).width('100%')
-      .enabled(!this.app.busy && this.app.saveError.length === 0)
-      .onClick(async () => { if (await this.app.newThread('')) { this.onSelected(); } })
+      }.width('100%').height(48).padding({ left: 4 })
+      if (!this.selecting) {
+        Button() {
+          Row({ space: Space.sm }) {
+            SymbolGlyph($r('sys.symbol.square_and_pencil')).fontSize(18).fontColor([$r('app.color.on_accent_container')])
+            Text(t("新对话")).fontSize(15).fontWeight(FontWeight.Medium).fontColor($r('app.color.on_accent_container'))
+          }
+        }.id('history-new-chat').attributeModifier(Btn.tonal).width('100%')
+        .enabled(!this.app.busy && this.app.saveError.length === 0)
+        .onClick(async () => { if (await this.app.newThread('')) { this.onSelected(); } })
+      }
       Search({ value: this.query, placeholder: t("搜索对话") }).id('search-threads').height(40)
         .backgroundColor($r('app.color.surface_variant')).placeholderColor($r('app.color.text_tertiary'))
-        .onChange((value: string) => { this.query = value; this.visibleCounts = {}; })
+        .enabled(!this.locked())
+        .onChange((value: string) => { this.query = value; this.visibleCounts = {}; this.selectedIds = []; })
       Segmented({ options: [t("对话"), t("已归档")], selected: this.archived ? 1 : 0,
         optionIds: ['active-threads', 'archived-threads'], controlHeight: 38, labelSize: 13,
         trackRadius: 19, thumbRadius: 16, gap: 2, thumbShadow: false,
-        onSelect: (index: number) => { this.archived = index === 1; this.visibleCounts = {}; } })
+        onSelect: (index: number) => {
+          if (this.locked()) { return; }
+          this.archived = index === 1; this.visibleCounts = {}; this.selectedIds = [];
+        } })
+      if (this.selecting) {
+        Row({ space: Space.sm }) {
+          Text(t('已选 {0} 项', [this.selectedIds.length])).id('thread-selection-count')
+            .fontSize(Font.small).fontColor($r('app.color.text_secondary')).layoutWeight(1)
+          Button(this.allSelected() ? t('取消全选') : t('全选')).id('thread-select-all').attributeModifier(Btn.textSmall)
+            .enabled(!this.locked() && this.filtered().length > 0).onClick(() => this.selectAll())
+        }.width('100%')
+      }
       if (this.sections(this.filtered()).length === 0) {
         Column({ space: Space.sm }) {
           SymbolGlyph(this.query.trim().length > 0 ? $r('sys.symbol.magnifyingglass') : $r('sys.symbol.ellipsis_message'))
@@ -315,6 +382,8 @@ export struct ThreadList {
                 if (this.groupOpen(id)) {
                   ForEach(this.sectionThreads(id).slice(0, this.visibleCount(id)), (thread: ThreadViewModel) => {
                     ListItem() { ThreadRow({ thread: thread, app: this.app, query: this.query, onSelected: this.onSelected,
+                      selecting: this.selecting, selected: this.selectedIds.includes(thread.id),
+                      onSelectionChanged: (selected: boolean) => this.selectThread(thread.id, selected),
                       lastBranch: this.lastBranch(id, thread.id),
                       activePath: this.onActivePath(id, thread.id) }) }
                       .transition(TransitionEffect.OPACITY.animation({ duration: Motion.fast, curve: Motion.standard }))
@@ -342,15 +411,25 @@ export struct ThreadList {
         Banner({ text: this.app.error })
       }
       Divider().strokeWidth(0.5).color($r('app.color.divider'))
-      Row({ space: Space.md }) {
-        SymbolGlyph($r('sys.symbol.gearshape')).fontSize(20).fontColor([$r('app.color.text_secondary')])
-        Text(t("设置")).fontSize(15).layoutWeight(1).fontColor($r('app.color.text_primary'))
-        Text(t("{0} 个服务", [this.app.providerProfiles.length])).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
-        SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(14).fontColor([$r('app.color.text_tertiary')])
+      if (this.selecting) {
+        Row({ space: Space.sm }) {
+          Button(this.archived ? t('恢复对话') : t('归档')).id('thread-batch-archive')
+            .attributeModifier(Btn.tonal).layoutWeight(1).enabled(!this.locked() && this.selectedIds.length > 0)
+            .onClick(() => this.archiveSelected())
+          Button(t('删除')).id('thread-batch-delete').attributeModifier(Btn.danger).layoutWeight(1)
+            .enabled(!this.locked() && this.selectedIds.length > 0).onClick(() => this.confirmDeleteSelected())
+        }.width('100%')
+      } else {
+        Row({ space: Space.md }) {
+          SymbolGlyph($r('sys.symbol.gearshape')).fontSize(20).fontColor([$r('app.color.text_secondary')])
+          Text(t("设置")).fontSize(15).layoutWeight(1).fontColor($r('app.color.text_primary'))
+          Text(t("{0} 个服务", [this.app.providerProfiles.length])).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
+          SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(14).fontColor([$r('app.color.text_tertiary')])
+        }
+        .id('open-settings').width('100%').height(48).padding({ left: Space.md, right: Space.md }).borderRadius(Radius.md)
+        .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
+        .onClick(() => this.onSettings())
       }
-      .id('open-settings').width('100%').height(48).padding({ left: Space.md, right: Space.md }).borderRadius(Radius.md)
-      .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
-      .onClick(() => this.onSettings())
     }
     .padding({ left: Space.md, right: Space.md, top: Space.sm, bottom: Space.sm })
     .height('100%').width('100%').backgroundColor($r('app.color.page_background'))

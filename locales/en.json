@@ -1531,5 +1531,11 @@
   "发布预览": "Publish preview",
   "正在生成回答": "Writing an answer",
   "正在重试": "Retrying",
-  "等待模型响应": "Waiting for the model"
+  "等待模型响应": "Waiting for the model",
+  "多选": "Select",
+  "全选": "Select all",
+  "取消全选": "Deselect all",
+  "已选 {0} 项": "{0} selected",
+  "删除选中的 {0} 段对话？": "Delete {0} selected chats?",
+  "删除后无法恢复。会话工作区中的文件会保留。": "This cannot be undone. Files in the chat workspaces will be kept."
 }
