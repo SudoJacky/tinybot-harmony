@@ -24,6 +24,8 @@ import { Cancellation } from './Cancellation';
 import { RuleTools } from './RuleTools';
 import { McpTools } from './McpTools';
 import { ToolApproval } from './ToolApproval';
+import { BrowserSession } from './BrowserSession';
+import { BrowserTools } from './BrowserTools';
 import { Attachments } from './Attachments';
 import { AttachmentTools } from './AttachmentTools';
 import { util } from '@kit.ArkTS';
@@ -62,9 +64,11 @@ export class NativeSessionResources implements SessionResources {
   private workspaces: WorkspaceStore;
   private providers: ProviderRegistry;
   private approval: ToolApproval;
+  private browser?: BrowserSession;
   private profiles: ProviderProfile[] = [];
   private context?: common.UIAbilityContext;
-  constructor(workspaceFilesDir: string, providers: ProviderRegistry, approval: ToolApproval, context?: common.UIAbilityContext) {
+  constructor(workspaceFilesDir: string, providers: ProviderRegistry, approval: ToolApproval, context?: common.UIAbilityContext, browser?: BrowserSession) {
+    this.browser = browser;
     this.context = context;
     this.workspaces = new WorkspaceStore(workspaceFilesDir); this.providers = providers; this.approval = approval;
   }
@@ -84,6 +88,7 @@ export class NativeSessionResources implements SessionResources {
     groups.push(new PresentTools((path: string) => new NativeWorkspaceFiles(root).checkedPath(path)));
     groups.push(new PreviewTools(new NativeWorkspaceFiles(root), (content, cancellation) => WebUiPreflight.validate(content, cancellation)));
     if (extensions.webEnabled) { groups.push(new WebTools(new NativeWebTransport())); }
+    if (this.browser) { groups.push(new BrowserTools(this.browser, id, productivity?.options?.readOnly === true)); }
     const search = productivity?.options?.search;
     if (extensions.webEnabled && search?.enabled) {
       groups.push(new WebSearchTools(new NativeSearchTransport(search, new CredentialStore(), id, (record) => UsageLedger.record(record), () => this.profiles)));
@@ -114,11 +119,16 @@ export class NativeSessionResources implements SessionResources {
 }
 
 // Native composition root. The session service can also run with an in-memory repository/model.
-export function createNativeSessionService(filesDir: string, workspaceFilesDir: string, approval: ToolApproval = new ToolApproval(), context?: common.UIAbilityContext): SessionService {
+export function createNativeSessionService(filesDir: string, workspaceFilesDir: string, approval: ToolApproval = new ToolApproval(), context?: common.UIAbilityContext, browser?: BrowserSession): SessionService {
   Attachments.configure(workspaceFilesDir);
   UsageLedger.configure(filesDir).catch((error: Error) => { UsageLedger.error = error.message; });
   const providers = new ProviderRegistry(); const credentials = new CredentialStore();
-  return new SessionService(new ConversationStore(filesDir), new AgentRuntime(providers, credentials, new NativeUsageRecorder(),
-    (content, cancellation) => WebUiPreflight.validate(content, cancellation), new NativeOrchestrationExecutor()), credentials,
-    new NativeSessionResources(workspaceFilesDir, providers, approval, context));
+  const session = new SessionService(new ConversationStore(filesDir), new AgentRuntime(providers, credentials, new NativeUsageRecorder(),
+    (content, cancellation) => WebUiPreflight.validate(content, cancellation), new NativeOrchestrationExecutor(), browser), credentials,
+    new NativeSessionResources(workspaceFilesDir, providers, approval, context, browser));
+  if (browser) {
+    browser.configure((policy) => session.setBrowserPolicy(policy), (message) => hilog.info(0x0000, 'TinybotBrowser', '%{public}s', message));
+    session.subscribe((event) => { if (event.data) { browser.updatePolicy(event.data.extensions?.browserPolicy || 'unset'); } });
+  }
+  return session;
 }

@@ -1,0 +1,53 @@
+import { BrowserAction } from '../services/BrowserSession';
+
+// Fixed scripts only: the model never supplies JavaScript, selectors, native bridges or cookies.
+const SENSITIVE_INPUT: string = `const sensitive = node => node.matches('input[type="password"],input[type="hidden"],input[type="file"]') || /password|one-time-code|cc-number|cc-csc/.test(node.autocomplete || '') || /password|passwd|secret|token|otp|verification|验证码|密码/i.test((node.name || '') + ' ' + (node.id || ''));`;
+
+export function browserSnapshotScript(id: string): string {
+  return `(() => {
+    ${SENSITIVE_INPUT}
+    const snapshotId = ${JSON.stringify(id)};
+    const visible = node => { const r = node.getBoundingClientRect(); const s = getComputedStyle(node); return r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth && s.visibility !== 'hidden' && s.display !== 'none'; };
+    const nodes = [...document.querySelectorAll('a[href],button,input,textarea,select,[role="button"],[role="link"],[contenteditable="true"]')].filter(visible);
+    const retained = nodes.slice(0, 80);
+    globalThis.__tinybotBrowserSnapshot = { id: snapshotId, nodes: retained };
+    const elements = retained.map((node, index) => ({ id: index + 1,
+      role: node.getAttribute('role') || node.tagName.toLowerCase(),
+      label: (node.getAttribute('aria-label') || node.labels?.[0]?.innerText || node.innerText || node.getAttribute('placeholder') || node.title || node.name || '').trim().slice(0, 240),
+      type: sensitive(node) ? 'user-only' : (node.type || ''), disabled: !!node.disabled || node.getAttribute('aria-disabled') === 'true',
+      options: node.tagName === 'SELECT' ? [...node.options].slice(0, 50).map(o => ({ value: o.value.slice(0, 200), label: o.text.slice(0, 200) })) : undefined
+    }));
+    const text = document.body?.innerText || '';
+    return JSON.stringify({ snapshotId, url: location.href, title: document.title.slice(0, 300), text: text.slice(0, 16000), elements,
+      truncated: text.length > 16000 || nodes.length > 80, embeddedFrames: document.querySelectorAll('iframe,frame').length, trust: 'untrusted' });
+  })()`;
+}
+
+export function browserActionScript(action: BrowserAction): string {
+  return `(() => {
+    ${SENSITIVE_INPUT}
+    const args = ${JSON.stringify(action)};
+    const fail = (code, message) => JSON.stringify({ code, message });
+    if (args.action === 'scroll') { window.scrollBy({ top: args.deltaY, behavior: 'instant' }); return JSON.stringify({ ok: true }); }
+    const snapshot = globalThis.__tinybotBrowserSnapshot;
+    if (!snapshot || snapshot.id !== args.snapshotId) return fail('STALE_BROWSER_SNAPSHOT', 'Read a new browser snapshot before acting.');
+    const node = snapshot.nodes[args.elementId - 1];
+    if (!node || !node.isConnected) return fail('STALE_BROWSER_ELEMENT', 'The element changed. Read a new snapshot.');
+    if (sensitive(node)) return fail('USER_INPUT_REQUIRED', 'This control requires user handoff.');
+    if (node.disabled || node.getAttribute('aria-disabled') === 'true') return fail('ELEMENT_DISABLED', 'The element is disabled.');
+    if (args.action === 'click') { node.click(); }
+    else if (args.action === 'type') {
+      if (!['INPUT', 'TEXTAREA'].includes(node.tagName) || node.readOnly) return fail('UNSUPPORTED_CONTROL', 'This is not an editable text field. Hand off unsupported controls.');
+      if (node.tagName === 'INPUT' && !['text','search','email','tel','url','number'].includes(node.type)) return fail('UNSUPPORTED_CONTROL', 'This input type requires user interaction.');
+      const prototype = node.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(prototype, 'value').set;
+      const previous = node.value; setter.call(node, args.text);
+      if (node.value !== args.text) { setter.call(node, previous); return fail('INVALID_INPUT_VALUE', 'The input cannot accept this value without changing it.'); }
+      node.dispatchEvent(new Event('input', { bubbles: true })); node.dispatchEvent(new Event('change', { bubbles: true }));
+    } else if (args.action === 'select') {
+      if (node.tagName !== 'SELECT' || ![...node.options].some(o => o.value === args.text)) return fail('INVALID_OPTION', 'Choose a value from the select options.');
+      node.value = args.text; node.dispatchEvent(new Event('input', { bubbles: true })); node.dispatchEvent(new Event('change', { bubbles: true }));
+    } else return fail('INVALID_ARGUMENTS', 'Unknown DOM action.');
+    return JSON.stringify({ ok: true });
+  })()`;
+}

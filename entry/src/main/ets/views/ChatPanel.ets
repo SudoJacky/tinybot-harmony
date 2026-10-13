@@ -17,6 +17,8 @@ import { Attachment, PromptTemplate } from '../model/Productivity';
 import { Attachments } from '../services/Attachments';
 import { selectAttachments } from '../services/NativeActions';
 import { ToolApproval } from '../services/ToolApproval';
+import { BrowserSession } from '../services/BrowserSession';
+import { BrowserStatusCard } from './BrowserPanel';
 import { InputFormCard } from './InputFormCard';
 import { ChatTeamCard } from './ChatTeamCard';
 import { ChatPlanPanel } from './ChatPlanPanel';
@@ -52,6 +54,8 @@ export struct ChatPanel {
   onOpenFile: (path: string) => void = () => {};
   onTools: (tab: string) => void = () => {};
   @ObjectLink approval: ToolApproval;
+  @ObjectLink browser: BrowserSession;
+  onBrowser: () => void = () => {};
   @State private importing: boolean = false;
   @State private showPlus: boolean = false;
   @State private speech: SpeechInput = new SpeechInput();
@@ -986,6 +990,9 @@ export struct ChatPanel {
         .onActionCancel(() => this.onHistoryDragCancel()))
       Column({ space: Space.sm }) {
         if (this.app.searchMessageId) { Banner({ text: this.app.searchQuery ? t("匹配：") + this.app.searchQuery : t("历史节点"), danger: false, actionLabel: t("定位"), onAction: () => this.locate() }).onAppear(() => { setTimeout(() => this.locate(), 100); }) }
+        if (this.browser.permissionPending || this.browser.open || this.browser.error) {
+          BrowserStatusCard({ browser: this.browser, onOpen: this.onBrowser })
+        }
         if (this.approval.form) { InputFormCard({ approval: this.approval }) }
         if (this.approval.title) {
           this.approvalCard()

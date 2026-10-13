@@ -1,10 +1,10 @@
 import { t } from '../model/I18n';
-import { AgentTurn, MAX_AGENT_STEPS, ModelMessage, ToolDefinition, ToolExecutionMode } from '../model/Agent';
+import { AgentTurn, MAX_AGENT_STEPS, ModelMessage, ModelTurn, ToolDefinition, ToolExecutionMode } from '../model/Agent';
 import { ModelConfig, copyModelConfig } from '../model/Conversation';
 import { UsageOrigin, UsageRecorder } from '../model/Usage';
-import { AgentTools, LoopEvent, LoopEventType, SteeringInput, runAgentLoop } from './AgentLoop';
+import { AgentTools, ExecutionGate, LoopEvent, LoopEventType, SteeringInput, runAgentLoop } from './AgentLoop';
 import { Cancellation, RunCancelledError } from './Cancellation';
-import { CredentialReader, ModelSession } from './providers/Provider';
+import { CredentialReader, ModelRequestOptions, ModelSession } from './providers/Provider';
 import { ProviderRegistry } from './providers/ProviderRegistry';
 import { contextSettings } from '../model/ConversationContext';
 import { PromptSection, runEntries } from '../model/ContextProjection';
@@ -61,6 +61,21 @@ interface ActiveRun {
   resolveIdle: () => void;
 }
 
+// Also covers context-summary requests, which run outside the main agent loop.
+class ControlledModel implements ModelSession {
+  private model: ModelSession;
+  private gate: ExecutionGate;
+  constructor(model: ModelSession, gate: ExecutionGate) { this.model = model; this.gate = gate; }
+  async stream(messages: ModelMessage[], tools: ToolDefinition[], cancellation: Cancellation,
+    onText: (text: string) => void, options?: ModelRequestOptions): Promise<ModelTurn> {
+    await this.gate.wait(cancellation); cancellation.check();
+    let response: ModelTurn;
+    try { response = await this.model.stream(messages, tools, cancellation, onText, options); }
+    catch (error) { await this.gate.wait(cancellation); cancellation.check(); throw error as Error; }
+    await this.gate.wait(cancellation); cancellation.check(); return response;
+  }
+}
+
 // Owns one active run, from preflight through the final persistence barrier.
 export class AgentRuntime {
   private providers: ProviderRegistry;
@@ -70,10 +85,13 @@ export class AgentRuntime {
   private active?: ActiveRun;
   private orchestrator?: OrchestrationExecutor;
   private sequence: number = 0;
+  private gate?: ExecutionGate;
   private listeners: Set<(event: AgentEvent) => void> = new Set<(event: AgentEvent) => void>();
 
   constructor(providers: ProviderRegistry, credentials: CredentialReader, usage?: UsageRecorder,
-    validateAnswer?: (content: string, cancellation: Cancellation) => Promise<void>, orchestrator?: OrchestrationExecutor) {
+    validateAnswer?: (content: string, cancellation: Cancellation) => Promise<void>, orchestrator?: OrchestrationExecutor,
+    gate?: ExecutionGate) {
+    this.gate = gate;
     this.providers = providers;
     this.credentials = credentials;
     this.usage = usage;
@@ -81,7 +99,7 @@ export class AgentRuntime {
     this.orchestrator = orchestrator;
   }
 
-  fork(): AgentRuntime { return new AgentRuntime(this.providers, this.credentials, this.usage, this.validateAnswer, this.orchestrator); }
+  fork(): AgentRuntime { return new AgentRuntime(this.providers, this.credentials, this.usage, this.validateAnswer, this.orchestrator, this.gate); }
 
   private contextTools(tools: AgentTools, source: ContextSource, config: ModelConfig): AgentTools {
     const contextTools = new ContextTools(tools, source.entries, contextSettings(config).window);
@@ -139,6 +157,7 @@ export class AgentRuntime {
         const config = copyModelConfig(request.config);
         try {
           model = this.providers.bind(config, this.credentials, request.usageOrigin);
+          if (this.gate) { model = new ControlledModel(model, this.gate); }
         } catch (error) {
           bindingError = error as Error;
         }
@@ -190,6 +209,8 @@ export class AgentRuntime {
               }
             },
             checkpoint: hooks.checkpoint, steering: hooks.steering,
+            waitForExecution: this.gate ? (cancellation) => this.gate!.wait(cancellation) : undefined,
+            refreshToolResult: this.gate?.refreshResult ? (call, output, cancellation) => this.gate!.refreshResult!(call, output, cancellation) : undefined,
             toolActivity: (id, activity) => { this.usage?.recordTool(id, activity); }
           });
         }
@@ -211,6 +232,7 @@ export class AgentRuntime {
     } finally {
       // Includes synchronous run_end listeners; no next run can overlap final persistence.
       this.active = undefined;
+      this.gate?.release(active.cancellation);
       active.resolveIdle();
     }
   }

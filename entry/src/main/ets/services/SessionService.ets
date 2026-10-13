@@ -28,7 +28,7 @@ import { AppData, MessageData, ModelConfig, ThreadData, copyModelConfig, emptyDa
 import { contextSettings } from '../model/ConversationContext';
 import { ModelReference, ProviderProfile, migrateProfiles, modelConfig } from '../model/ProviderProfiles';
 import { InputMode, MAX_INPUT_TEXT, PendingInput, nextPendingInput, validatePendingInputs } from '../model/PendingInput';
-import { ExtensionSettings, SkillData, SkillFile, defaultExtensions, explicitSkill, expandSkillCommand, parseSkill, validateExtensions } from '../model/Skills';
+import { BrowserPolicy, ExtensionSettings, SkillData, SkillFile, defaultExtensions, explicitSkill, expandSkillCommand, parseSkill, validateExtensions } from '../model/Skills';
 import { threadTitle } from '../model/SessionManagement';
 import { CONVERSATION_TITLE_PROMPT, sanitizeConversationTitle, shouldGenerateTitle, titleCharacters } from '../model/ConversationTitle';
 import { AgentEvent, AgentRuntime } from './AgentRuntime';
@@ -469,9 +469,23 @@ export class SessionService {
   async saveSettings(userDocument: string, autoCompact: boolean, webEnabled: boolean): Promise<boolean> {
     return this.mutate(t("保存助手设置失败："), async () => {
       const candidate = this.snapshot(); candidate.config.userDocument = userDocument; candidate.config.autoCompact = autoCompact;
-      candidate.extensions = { webEnabled: webEnabled, skills: this.extensions.skills };
+      candidate.extensions = { webEnabled: webEnabled, browserPolicy: this.extensions.browserPolicy, skills: this.extensions.skills };
       await this.commitSettings(candidate);
     });
+  }
+  async setBrowserPolicy(policy: BrowserPolicy): Promise<void> {
+    if (!this.status.ready || this.status.saveError) { throw new Error(this.status.saveError || 'Session is not ready.'); }
+    if (!['unset', 'enabled', 'disabled'].includes(policy)) { throw new Error('Invalid browser permission setting.'); }
+    // This field can change while the runtime is paused. Publish only this field, never an old transcript snapshot.
+    const candidate = this.snapshot();
+    candidate.extensions = candidate.extensions || defaultExtensions();
+    candidate.extensions.browserPolicy = policy;
+    await this.commitCandidate(candidate, () => {
+      if (!this.data.extensions) { this.data.extensions = defaultExtensions(); }
+      this.data.extensions.browserPolicy = policy;
+    });
+    await this.persist();
+    this.publish('snapshot');
   }
   async saveSkill(originalName: string, document: string, files: SkillFile[]): Promise<boolean> {
     return this.mutate(t("保存 Skill 失败："), async () => {
