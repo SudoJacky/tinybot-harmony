@@ -1,7 +1,7 @@
 import { BrowserSession } from '../services/BrowserSession';
 import { NativeBrowserDriver } from '../services/NativeBrowserDriver';
 import { validateWebAddress } from '../services/WebTools';
-import { Btn, Space } from '../common/Theme';
+import { Btn, Motion, Space } from '../common/Theme';
 import { IconButton } from '../common/Widgets';
 import { t } from '../model/I18n';
 
@@ -80,8 +80,11 @@ export struct BrowserPanel {
           .onAxisEvent(() => { this.browser.takeOver(); })
           .onKeyEvent((event) => { if (event.type === KeyType.Down) { this.browser.takeOver(); } return false; })
       }
-    }.width('100%').height('100%').backgroundColor($r('app.color.page_background'))
-      .opacity(this.expanded && this.browser.open ? 1 : 0)
+    }.id('agent-browser-panel').width('100%').height('100%').backgroundColor($r('app.color.page_background'))
+      // Slide the mounted page as one surface; leave input gating outside the animation.
+      .translate({ y: this.expanded ? '0%' : '100%' })
+      .animation({ duration: this.expanded ? Motion.drawer : Motion.medium, curve: Motion.drawerCurve })
+      .opacity(this.browser.open ? 1 : 0)
       .hitTestBehavior(this.expanded && this.browser.open ? HitTestMode.Default : HitTestMode.None)
       .enabled(this.expanded && this.browser.open)
       .accessibilityLevel(this.expanded && this.browser.open ? 'auto' : 'no-hide-descendants')
