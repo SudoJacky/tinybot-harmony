@@ -213,11 +213,15 @@ if (failed) process.exitCode = 1;
     async runJavaScript() { return 'true'; }
     createWebMessagePorts() { return [port, { close() {} }]; }
     postMessage() {}
+    onActive() {}
+    getSurfaceId() { return 'web-surface'; }
   }
-  const webGlobals = { ...globals, exports: {}, MessageLevel: { Error: 3 },
+  let captureSurface = async () => ({ release: async () => {} });
+  const webGlobals = { ...globals, exports: {}, MessageLevel: { Error: 3 }, Stack: noUi, Image: noUi, ImageFit: {},
     Web: new Proxy({}, { get: (_, name) => (...args) => { if (name.startsWith('on')) callbacks[name] = args[0]; } }),
     require: id => {
       if (id === '@ohos:web.webview') return { default: { WebviewController: Controller } };
+      if (id === '@ohos:multimedia.image') return { default: { createPixelMapFromSurface: id => { assert.equal(id, 'web-surface'); return captureSurface(); } } };
       if (id === '@ohos:hilog') return { default: { info() {}, warn() {}, error() {} } };
       if (id.includes('WebUi&')) return model(path.join(root, 'model/WebUi'));
       if (id.includes('WebUiAssets&')) return { webUiAssets: async () => ['', ''] };
@@ -243,6 +247,19 @@ if (failed) process.exitCode = 1;
     callbacks.onPageEnd({url:'data:text/html,host'}); await settle();
     assert.equal(sent[0].type,'init'); await port.receive('{"type":"ready"}');
     assert.equal(view.ready,true); assert.equal(view.error,'');
+    await view.receive('{"type":"resize","height":100}',view.generation);
+    assert.equal(view.heightValue,200,'explicit scene height ignores resize messages');
+    view.spec.autoHeight=true; view.interactive=false;
+    await view.receive('{"type":"resize","height":123.2}',view.generation);
+    assert.equal(view.heightValue,124); assert.equal(view.error,'','layout does not require permission to save');
+    await view.receive('{"type":"resize","height":12}',view.generation);
+    assert.equal(view.heightValue,48);
+    await view.receive('{"type":"resize","height":1200}',view.generation);
+    assert.equal(view.heightValue,800);
+    await view.receive('{"type":"resize","height":200}',view.generation-1);
+    assert.equal(view.heightValue,800,'old document cannot resize the new view');
+    view.interactive=true;
+    console.log('PASS ArkWeb sizes auto-height previews independently of state saving, bounds height and ignores stale documents');
     console.log('PASS ArkWeb waits for its initial document and permits exactly one native data load');
     await view.receive('{"type":"save","id":1,"values":{"count":1}}',view.generation);
     assert.equal(sent.at(-1).type,'ack'); assert.equal(sent.at(-1).values.count,1);
@@ -259,5 +276,27 @@ if (failed) process.exitCode = 1;
     await view.receive('{"type":"ready"}',view.generation);
     assert.equal(view.ready,false);assert.deepEqual(diagnostics,['TypeError: constructor failed']);
     console.log('PASS ArkWeb forwards preflight errors and rejects a late ready');
+    view.error='';view.snapshotMode=true;diagnostics.length=0;
+    await view.receive('{"type":"ready"}',view.generation);
+    assert.equal(sent.at(-1).type,'snapshot');assert.equal(diagnostics.length,0);
+    let finishCapture, enteredCapture;
+    let entered=new Promise(resolve=>enteredCapture=resolve);
+    captureSurface=()=>{enteredCapture();return new Promise(resolve=>finishCapture=resolve);};
+    const capturing=view.receive('{"type":"snapshotReady"}',view.generation);
+    assert.equal(diagnostics.length,0,'capture readiness must wait for Web surface pixels');
+    await entered;
+    const pixel={release:async()=>{}};finishCapture(pixel);await capturing;
+    assert.equal(view.snapshot,pixel);assert.deepEqual(diagnostics,['']);
+    diagnostics.length=0;view.snapshot=undefined;
+    await view.receive('{"type":"ready"}',view.generation);
+    entered=new Promise(resolve=>enteredCapture=resolve);
+    const stale=view.receive('{"type":"snapshotReady"}',view.generation);await entered;view.generation++;
+    let released=false;finishCapture({release:async()=>{released=true;}});await stale;
+    assert.equal(released,true);assert.equal(view.snapshot,undefined);assert.equal(diagnostics.length,0);
+    captureSurface=async()=>{throw Error('Surface read failed');};view.error='';
+    await view.receive('{"type":"ready"}',view.generation);
+    await view.receive('{"type":"snapshotReady"}',view.generation);
+    assert.deepEqual(diagnostics,['Surface read failed']);
+    console.log('PASS preview screenshot readiness waits for pixels, releases stale captures and reports surface failures');
   } finally { view.aboutToDisappear(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

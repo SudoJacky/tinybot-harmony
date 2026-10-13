@@ -72,6 +72,7 @@ async function main() {
   assert.ok(published.receipt.output.length < 200); assert.ok(!JSON.stringify(published.inputs).includes('<svg'));
   const content = stepDisplayContent(published.turn.steps[0]);
   assert.equal(JSON.parse(parseUiSurface(content, '0').nodes[0].data).html, svg);
+  assert.equal(JSON.parse(parseUiSurface(content, '0').nodes[0].data).autoHeight, true);
   assert.ok(buildTimeline(published.turn.steps).some(x => x.kind === 'text' && x.step === 0));
   assert.ok(published.checkpoints.some(x => x.steps[0].tools[0]?.previewContent === content));
   files.set('pelican.svg', '<svg>changed</svg>');

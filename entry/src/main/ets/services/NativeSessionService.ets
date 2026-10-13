@@ -1,6 +1,7 @@
 import { ProviderEffects } from './providers/Provider';
 import { PresentTools } from './PresentTools';
 import { PreviewTools } from './PreviewTools';
+import { PreviewCapture } from './PreviewCapture';
 import { savePreviewRepair } from './PreviewRecovery';
 import { WebSearchTools } from './WebSearchTools';
 import { NativeSearchTransport } from './NativeSearchTransport';
@@ -86,7 +87,8 @@ export class NativeSessionResources implements SessionResources {
       new SkillTools(extensions.skills, selected, live ? () => live.skills() : undefined), new InteractionTools(this.approval)];
     groups.push(new CodeExecutionTools(new NativeCodeExecutor()));
     groups.push(new PresentTools((path: string) => new NativeWorkspaceFiles(root).checkedPath(path)));
-    groups.push(new PreviewTools(new NativeWorkspaceFiles(root), (content, cancellation) => WebUiPreflight.validate(content, cancellation)));
+    groups.push(new PreviewTools(new NativeWorkspaceFiles(root), (content, cancellation) => WebUiPreflight.validate(content, cancellation),
+      (content, cancellation) => PreviewCapture.capture(content, cancellation)));
     if (extensions.webEnabled) { groups.push(new WebTools(new NativeWebTransport())); }
     if (this.browser) { groups.push(new BrowserTools(this.browser, id, productivity?.options?.readOnly === true)); }
     const search = productivity?.options?.search;

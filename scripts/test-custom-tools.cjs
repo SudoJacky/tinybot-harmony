@@ -1,0 +1,156 @@
+// Exercise real SessionService, AgentRuntime, tool dispatch and team workers.
+const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict');
+const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio');
+const ts = require(studio + '/sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript');
+const root = path.resolve('entry/src'), cache = new Map();
+function load(file) {
+  file = path.resolve(file.endsWith('.ets') ? file : file + '.ets');
+  if (cache.has(file)) return cache.get(file);
+  const exports = {}; cache.set(file, exports);
+  let source = fs.readFileSync(file, 'utf8');
+  if (file.endsWith('SessionService.test.ets')) source += '\nexport { Fixture, seed };';
+  vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021, experimentalDecorators: true } }).outputText,
+    { exports, Observed: cls => cls, setTimeout, clearTimeout, console, require: id => {
+      if (id === '@ohos/hypium') return {};
+      if (!id.startsWith('.')) throw Error('Unexpected platform dependency ' + id);
+      return load(path.resolve(path.dirname(file), id));
+    } }, { filename: file });
+  return exports;
+}
+const { Fixture, seed } = load(root + '/test/SessionService.test');
+const { ChatViewModel } = load(root + '/main/ets/viewmodel/ChatViewModel');
+const { TOOL_GROUPS, BASIC_FILE_TOOLS } = load(root + '/main/ets/model/ToolGroups');
+const { validateToolSelection, toolEnabled } = load(root + '/main/ets/model/AgentMode');
+const { SelectedTools } = load(root + '/main/ets/services/SelectedTools');
+const { RuleTools } = load(root + '/main/ets/services/RuleTools');
+const { Cancellation } = load(root + '/main/ets/services/Cancellation');
+const { AgentRuntime } = load(root + '/main/ets/services/AgentRuntime');
+const { ProviderRegistry } = load(root + '/main/ets/services/providers/ProviderRegistry');
+const { parseAppData } = load(root + '/main/ets/model/Conversation');
+const clean = value => JSON.parse(JSON.stringify(value));
+const all = Array.from(TOOL_GROUPS.flatMap(group => group.tools));
+const optional = all.filter(name => !BASIC_FILE_TOOLS.includes(name));
+const def = name => ({ type: 'function', function: { name, description: name, parameters: { type: 'object', properties: {} } } });
+const call = (name, args = {}) => ({ id: 'call-' + name, type: 'function', function: { name, arguments: JSON.stringify(args) } });
+const reply = (...toolCalls) => ({ content: toolCalls.length ? '' : 'done', toolCalls });
+const executor = { async execute(code, catalog, invoke) {
+  const tools = Object.fromEntries(JSON.parse(catalog).map(tool => [tool.name, async args => JSON.parse(await invoke(tool.name, JSON.stringify(args)))]));
+  try { return JSON.stringify({ status: 'ok', result: await vm.runInNewContext('(async()=>{' + code + '})()', { tools, ALL_TOOLS: JSON.parse(catalog) }) }); }
+  catch (error) { return JSON.stringify({ status: 'error', error: error.message }); }
+} };
+function fixture(data = seed()) {
+  data.threads[0].titleEdited = true;
+  const f = new Fixture(data), calls = [];
+  // These tools are added by SessionService/AgentRuntime or belong to workers.
+  const owned = ['memory', 'skill_manage', 'mcp_manage', 'read_tool_result', 'orchestrate'];
+  f.resources.agentTools = { definitions: () => all.filter(name => !name.startsWith('team_') && !owned.includes(name)).map(def),
+    execute: async incoming => { calls.push(incoming.function.name); return JSON.stringify({ ok: true, content: '[1,2]' }); } };
+  const registry = new ProviderRegistry(); registry.register(f.provider);
+  f.session.runtime = new AgentRuntime(registry, f.keys, undefined, undefined, executor);
+  f.calls = calls; return f;
+}
+async function main() {
+  assert.equal(all.length, 42); assert.equal(new Set(all).size, 42); assert.equal(BASIC_FILE_TOOLS.length, 7);
+  assert.equal(optional.length, 35);
+  for (const selection of [{ agentMode: 'research' }, { disabledTools: ['write_file'] }, { disabledTools: ['unknown'] },
+    { disabledTools: ['read_web', 'read_web'] }, { disabledTools: 'read_web' }, { disabledTools: [null] }]) {
+    assert.throws(() => validateToolSelection(selection));
+  }
+  const original = { agentMode: 'custom', disabledTools: ['read_web'] }, effects = [];
+  const selected = new SelectedTools({ definitions: () => all.map(def), execute: async incoming => { effects.push(incoming.function.name); return '{}'; } }, original);
+  original.disabledTools.length = 0;
+  assert.ok(!selected.definitions().some(item => item.function.name === 'read_web'));
+  await assert.rejects(selected.execute(call('read_web'), new Cancellation()), error => error.code === 'PERMISSION_DENIED');
+  for (const name of BASIC_FILE_TOOLS) await selected.execute(call(name), new Cancellation());
+  assert.deepEqual(effects, Array.from(BASIC_FILE_TOOLS));
+  const readOnly = new RuleTools(selected, true);
+  await assert.rejects(readOnly.execute(call('write_file'), new Cancellation()), error => error.code === 'PERMISSION_DENIED');
+  assert.equal(toolEnabled('team_recruit', { agentMode: 'custom', disabledTools: ['team_complete_task'] }), false);
+  assert.equal(toolEnabled('team_resume', { agentMode: 'custom', disabledTools: ['team_complete_task'] }), false);
+  console.log('PASS validated inventory, mandatory file tools, immutable selection, direct dispatch and permission intersection');
+
+  const f = fixture(), app = new ChatViewModel(); await app.initialize(f.session);
+  assert.equal(app.active.agentMode, 'full');
+  const events = []; f.session.subscribe(event => events.push(event));
+  const initialWrites = f.repository.writes.length;
+  await app.setToolEnabled('read_web', false); await app.setToolEnabled('mcp_call', false);
+  await app.setToolEnabled('read_tool_result', false); await app.setToolEnabled('memory', false);
+  assert.equal(app.active.agentMode, 'custom'); assert.equal(app.active.disabledTools.length, 4);
+  assert.equal(f.repository.writes.length, initialWrites); assert.equal(f.provider.requests.length, 0);
+  assert.ok(events.every(event => event.state.phase === 'idle' && event.kind !== 'snapshot'));
+  await app.setAgentMode('full'); assert.equal(app.active.disabledTools.length, 4);
+  await app.setAgentMode('custom'); await assert.rejects(app.setToolEnabled('edit_file', false));
+  f.session.setDraft('try blocked operation');
+  f.provider.respond = async index => index === 0 ? reply(call('read_web', { url: 'https://example.com' })) : reply();
+  await f.session.send();
+  const advertised = f.provider.requests[0].tools.map(item => item.function.name);
+  for (const name of ['read_web', 'mcp_call', 'memory']) assert.ok(!advertised.includes(name));
+  for (const name of BASIC_FILE_TOOLS) assert.ok(advertised.includes(name));
+  assert.ok(!f.provider.requests[1].tools.some(item => item.function.name === 'read_tool_result'), 'runtime-added retrieval remains disabled');
+  assert.deepEqual(f.calls, [], 'a forged direct call cannot execute a hidden tool');
+  const saved = await f.repository.load(); assert.equal(saved.threads[0].agentMode, 'custom');
+  assert.equal(saved.threads[0].disabledTools.length, 4);
+  const restored = fixture(saved); await restored.session.initialize();
+  assert.equal(restored.session.snapshot().threads[0].disabledTools.length, 4);
+  await app.setAgentMode('full'); f.session.setDraft('full mode');
+  f.provider.respond = async () => reply(); await f.session.send();
+  assert.ok(f.provider.requests.at(-1).tools.some(item => item.function.name === 'read_web'));
+  assert.equal((await f.repository.load()).threads[0].disabledTools.length, 4, 'full mode preserves custom configuration');
+  await app.setAgentMode('custom'); assert.equal(app.active.disabledTools.length, 4);
+  assert.equal(await f.session.forkThread(), true); assert.equal(f.session.active.agentMode, 'custom');
+  assert.equal(f.session.active.disabledTools.length, 4);
+  const badData = clean(f.session.snapshot()); badData.threads[0].disabledTools = ['write_file']; assert.throws(() => parseAppData(JSON.stringify(badData)));
+  console.log('PASS view-model selection, zero-IO toggles, real model catalog/dispatch, restart, full/custom switching and branch inheritance');
+
+  const sdk = fixture(); await sdk.session.initialize(); await sdk.session.setToolEnabled('read_web', false);
+  sdk.provider.respond = async index => index === 0 ? reply(call('orchestrate', { code: 'return await tools.read_web({url:"https://example.com"});' })) : reply();
+  sdk.session.setDraft('blocked SDK tool'); await sdk.session.send(); assert.deepEqual(sdk.calls, []);
+  const outer = sdk.session.active.messages.at(-1).steps[0].tools[0];
+  assert.equal(outer.status, 'failed'); assert.match(outer.output, /read_web/);
+  await sdk.session.setToolEnabled('orchestrate', false);
+  sdk.provider.respond = async () => reply(); sdk.session.setDraft('without orchestration'); await sdk.session.send();
+  assert.ok(!sdk.provider.requests.at(-1).tools.some(item => item.function.name === 'orchestrate'));
+  assert.ok(sdk.provider.requests.at(-1).tools.some(item => item.function.name === 'read_file'));
+  await sdk.session.setDisabledTools(optional); sdk.session.setDraft('basic files only'); await sdk.session.send();
+  assert.deepEqual(Array.from(sdk.provider.requests.at(-1).tools, item => item.function.name).sort(), Array.from(BASIC_FILE_TOOLS).sort());
+  console.log('PASS SDK children respect custom selection and disabling orchestration retains direct file tools');
+
+  const frozen = fixture(); await frozen.session.initialize(); await frozen.session.setToolEnabled('read_web', false);
+  let enter, release; const entered = new Promise(resolve => { enter = resolve; }); const held = new Promise(resolve => { release = resolve; });
+  frozen.provider.respond = async () => { enter(); await held; return reply(); };
+  frozen.session.setDraft('hold current task'); const running = frozen.session.send(); await entered;
+  assert.equal(await frozen.session.setAgentMode('full'), false); assert.equal(await frozen.session.setToolEnabled('read_web', true), false);
+  release(); await running; assert.ok(frozen.session.active.disabledTools.includes('read_web'));
+  console.log('PASS a running task cannot change mode or tool selection');
+
+  const team = fixture(); await team.session.initialize(); await team.session.setTeamEnabled(true);
+  await team.session.setToolEnabled('execute_code', false); await team.session.setToolEnabled('orchestrate', false);
+  let parentCalls = 0, workerCalls = 0;
+  team.provider.respond = async index => {
+    const request = team.provider.requests[index], names = request.tools.map(item => item.function.name);
+    if (names.includes('team_complete_task')) {
+      workerCalls++; assert.ok(!names.includes('execute_code')); assert.ok(!names.includes('orchestrate'));
+      return workerCalls === 1 ? reply(call('team_complete_task', { summary: 'reviewed', unresolved: [], artifacts: [] })) : reply();
+    }
+    if (parentCalls++ === 0) return reply(call('team_recruit', { goal: 'review', members: [{ id: 'worker', instructions: 'Read and report', toolProfile: 'research' }],
+      tasks: [{ id: 'task', memberId: 'worker', title: 'Review', instructions: 'Read and report', dependencies: [] }] }));
+    if (parentCalls === 2) return reply(call('team_wait', { runId: team.session.active.teams[0].id, waitFor: 'all_tasks' }));
+    return reply();
+  };
+  team.session.setDraft('review with team'); await team.session.send();
+  assert.equal(workerCalls, 2); assert.equal(team.session.active.teams[0].status, 'completed');
+  await team.session.setToolEnabled('team_complete_task', false);
+  team.provider.respond = async () => reply(); team.session.setDraft('handoff disabled'); await team.session.send();
+  const catalog = team.provider.requests.at(-1).tools.map(item => item.function.name);
+  assert.ok(!catalog.includes('team_recruit')); assert.ok(!catalog.includes('team_resume'));
+  console.log('PASS real team workers inherit tool selection and required handoff gates team dispatch');
+
+  const memoryData = seed(); memoryData.productivity.options.autoMemory = true;
+  const memory = fixture(memoryData); await memory.session.initialize(); await memory.session.setToolEnabled('memory', false);
+  memory.session.reviewMemory = async () => { throw Error('Disabled memory must not trigger background review'); };
+  memory.provider.respond = async () => reply(); memory.session.setDraft('remember this'); await memory.session.send();
+  assert.ok(!memory.provider.requests[0].tools.some(item => item.function.name === 'memory'));
+  assert.equal(memory.session.active.messages.at(-1).status, 'complete');
+  console.log('PASS disabling memory suppresses its tool and automatic background review');
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });

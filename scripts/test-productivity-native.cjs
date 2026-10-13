@@ -137,7 +137,10 @@ function idleRuntime(vault) {
   return new AgentRuntime(new ProviderRegistry(), vault);
 }
 let completedTests = 0;
-async function test(name, run) { await run(); completedTests++; console.log('PASS '+name); }
+async function test(name, run) {
+  if (process.env.TEST_FILTER && !name.includes(process.env.TEST_FILTER)) return;
+  await run(); completedTests++; console.log('PASS '+name);
+}
 (async () => {
   let store;
   await test('atomic legacy migration, unchanged thread reuse and interrupted commit recovery', async () => {
@@ -258,6 +261,27 @@ async function test(name, run) { await run(); completedTests++; console.log('PAS
     const backup=await createBackupFile(context,data);const restored=await readBackupFile(context,backup,model.emptyData());
     const restoredItem=restored.threads[0].attachments[0];assert.equal(restoredItem.text,content);
     assert.equal(fs.readFileSync(nativePath(Attachments.path(restoredItem)),'utf8'),content);
+    Attachments.configure(fixture);
+  });
+  await test('preview screenshot bytes survive backup, restored references and missing-image validation',async()=>{
+    const {createBackupFile,readBackupFile}=load(path.join(source,'services/Backup'));
+    const root='/sandbox/preview-backup';fs.mkdirSync(nativePath(root+'/attachments'),{recursive:true});fs.mkdirSync(nativePath(root+'/cache'));
+    Attachments.configure(root);const bytes=Buffer.from('preview-jpeg');fs.writeFileSync(nativePath(root+'/attachments/shot.jpg'),bytes);
+    const shot={image:{id:'shot',name:'Preview.jpg',mime:'image/jpeg',path:'shot.jpg',size:bytes.length},width:100,height:80,viewportWidth:344};
+    const data=model.emptyData();data.activeThreadId='preview-backup';data.threads=[{id:'preview-backup',title:'Preview',updatedAt:1,messages:[
+      {id:'user',role:'user',content:'Create preview',status:'complete',error:''},
+      {id:'assistant',role:'assistant',content:'',status:'complete',error:'',steps:[{content:'',tools:[{
+        call:{id:'publish',type:'function',function:{name:'publish_preview',arguments:'{"path":"art.svg"}'}},status:'complete',output:'{}',
+        previewContent:'```tinybot-ui\n{"op":"begin","version":1,"title":"Preview","state":{}}\n{"op":"end"}\n```',previewScreenshot:shot
+      }]}]}
+    ]}];
+    const context={cacheDir:root+'/cache',getApplicationContext:()=>({filesDir:root})};
+    const backup=await createBackupFile(context,data);const envelope=JSON.parse(fs.readFileSync(nativePath(backup),'utf8'));
+    assert.equal(envelope.attachments.length,1);
+    const restored=await readBackupFile(context,backup,model.emptyData());const image=restored.threads[0].messages[1].steps[0].tools[0].previewScreenshot.image;
+    assert.notEqual(image.id,'shot');assert.deepEqual(fs.readFileSync(nativePath(Attachments.path(image))),bytes);
+    envelope.attachments=[];fs.writeFileSync(nativePath(backup),JSON.stringify(envelope));
+    await assert.rejects(readBackupFile(context,backup,model.emptyData()),/备份缺少附件/);
     Attachments.configure(fixture);
   });
   await test('large workspace tools page Unicode without loss, search the tail and restore full baselines',async()=>{

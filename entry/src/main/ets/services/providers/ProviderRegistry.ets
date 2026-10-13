@@ -30,6 +30,11 @@ class BoundModel implements ModelSession {
   async stream(messages: ModelMessage[], tools: ToolDefinition[], cancellation: Cancellation,
     onText: (text: string) => void, options?: ModelRequestOptions): Promise<ModelTurn> {
     cancellation.check();
+    if (this.images === false) {
+      messages = messages.map((message): ModelMessage => message.previewScreenshot ? {
+        role: message.role, content: message.content + '\nThe current model is configured without image support; the screenshot was not sent. Do not claim to have visually inspected it.'
+      } : message);
+    }
     if (this.images === false && messages.some((message) => (message.attachments || []).some((item) => item.mime.startsWith('image/')))) {
       throw new Error(t("当前模型设置为不支持图片，请选择视觉模型或调整能力设置。"));
     }

@@ -35,6 +35,10 @@ if ($LASTEXITCODE -ne 0) { throw 'Window viewport integration tests failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Answer speech and launch shortcut tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-team-toggle.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Team mode persistence and projection tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-custom-tools.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Custom tool selection and inherited execution tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-custom-tools-renderer.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Custom tool selection UI callback tests failed. Build the app first.' }
 $env:DEVECO_SDK_HOME = Join-Path $StudioPath 'sdk'
 $env:JAVA_HOME = Join-Path $StudioPath 'jbr'
 $startedAt = Get-Date

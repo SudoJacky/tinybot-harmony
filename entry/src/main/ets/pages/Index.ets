@@ -2,6 +2,7 @@ import { AppMaterials } from '../common/AppMaterials';
 import { monochromeProviderLogo, providerLogo } from '../common/ProviderBrand';
 import { WebUiDemoPanel } from '../views/WebUiDemoPanel';
 import { WebUiPreflightHost } from '../views/WebUiPreflightHost';
+import { PreviewCaptureHost } from '../views/PreviewCaptureHost';
 import { BrowserPanel } from '../views/BrowserPanel';
 import { BrowserSession } from '../services/BrowserSession';
 import { t } from '../model/I18n';
@@ -121,7 +122,11 @@ struct Index {
   }
 
   onBackPress(): boolean {
-    if (this.browserExpanded) { this.setBrowserExpanded(false); return true; }
+    if (this.browserExpanded) {
+      if (this.browser.editingAddress) { this.getUIContext().getFocusController().clearFocus(); return true; }
+      if (this.browser.owner === 'user' && this.browser.userBack()) { return true; }
+      this.setBrowserExpanded(false); return true;
+    }
     if (this.drawerOpen || this.drawerDragging) {
       this.setDrawer(false);
       return true;
@@ -443,6 +448,8 @@ struct Index {
     Stack() {
     Navigation(this.paths) {
       Stack() {
+        // Render the capture card at chat width behind the opaque page.
+        PreviewCaptureHost()
         Column().width('100%').height('100%').backgroundColor($r('app.color.page_background'))
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         Column() {

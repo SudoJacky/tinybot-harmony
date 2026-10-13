@@ -5,30 +5,35 @@ const studio=process.env.DEVECO_STUDIO_HOME||path.join(process.env.ProgramFiles,
 const ts=require(studio+'/sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript');
 function model(name,directory='entry/src/main/ets/model'){const file=path.resolve(directory,name+'.ets'),exports={};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2021}}).outputText,{exports,require:id=>model(id,path.dirname(file))});return exports;}
 const exportsObject=model('WebUi');
-const {webUiHost,parseWebUi,parseWebUiMessage}=exportsObject;
+const {webUiHost,parseWebUi,parseWebUiMessage,webUiAutoHeight}=exportsObject;
 const assets='entry/src/main/resources/rawfile/interactive-web/';
 const example=JSON.parse(fs.readFileSync(assets+'example.json','utf8')).content.split('\n');
 const begin=JSON.parse(example[1]);const spec=parseWebUi(JSON.parse(example[2]).node.data);
 const html=webUiHost(fs.readFileSync(assets+'host.js','utf8'),fs.readFileSync(assets+'three.bundle.js','utf8'));
 assert.throws(()=>parseWebUi(JSON.stringify({...spec,library:'cdn'})));assert.throws(()=>parseWebUiMessage('{"type":"submit"}'));assert.throws(()=>parseWebUiMessage('{"type":"save","id":0,"values":{}}'));
+assert.throws(()=>parseWebUi(JSON.stringify({...spec,autoHeight:'yes'})));
+assert.throws(()=>parseWebUiMessage('{"type":"resize","height":-1}'));
+assert.throws(()=>parseWebUiMessage('{"type":"resize","height":"200"}'));
 (async()=>{
  const browser=await chromium.launch({channel:'msedge',headless:true,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
  try{
   const page=await browser.newPage({viewport:{width:400,height:600}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
   const consoleErrors=[];page.on('console',message=>{if(message.type()==='error')consoleErrors.push(message.text());});
   const requests=[];await page.route('**/*',route=>{requests.push(route.request().url());route.abort();});
-  async function mount(values,specOverride=spec,expectedError='',preflight=false){
+  async function mount(values,specOverride=spec,expectedError='',preflight=false,snapshotMode=false){
    await page.setContent(html);
-   await page.evaluate(({spec,values,preflight})=>{
+   await page.evaluate(({spec,values,preflight,autoHeight,snapshotMode})=>{
     window.messages=[];window.saved=values;window.failSave=false;
     const channel=new MessageChannel();window.nativePort=channel.port1;
-    channel.port1.onmessage=event=>{const data=JSON.parse(event.data);window.messages.push(data);if(data.type==='save'){
+    channel.port1.onmessage=event=>{const data=JSON.parse(event.data);window.messages.push(data);if(data.type==='resize'&&autoHeight){
+      document.documentElement.style.height=Math.max(48,Math.min(800,data.height))+'px';
+    }if(data.type==='save'){
       if(window.failSave)channel.port1.postMessage(JSON.stringify({type:'ack',id:data.id,error:'Disk write failed'}));
       else {window.saved=data.values;channel.port1.postMessage(JSON.stringify({type:'ack',id:data.id,values:data.values}));}
     }};
     window.postMessage('tinybot-web-port','*',[channel.port2]);
-    channel.port1.postMessage(JSON.stringify({type:'init',spec,values,active:true,preflight}));
-   },{spec:specOverride,values,preflight});
+    channel.port1.postMessage(JSON.stringify({type:'init',spec,values,active:true,preflight,autoHeight,snapshotMode}));
+   },{spec:specOverride,values,preflight,autoHeight:webUiAutoHeight(specOverride),snapshotMode});
    try { await page.waitForFunction(()=>window.messages.some(m=>m.type==='ready'||m.type==='error')); }
    catch(error){console.error({errors,consoleErrors,frames:page.frames().map(f=>f.url()),host:await page.evaluate(()=>({ready:window.__tinybotHostReady,messages:window.messages}))});throw error;}
    const messages=await page.evaluate(()=>window.messages);
@@ -55,7 +60,41 @@ assert.throws(()=>parseWebUi(JSON.stringify({...spec,library:'cdn'})));assert.th
   assert.equal(await frame.locator('svg').getAttribute('viewBox'),'0 0 100 100');
   assert.equal(preview.html,previewSource);
   console.log('PASS file publication runs real browser preflight and renders the exact SVG snapshot with empty state');
+  const landscape={...preview,html:previewSource.replace('0 0 100 100','0 0 100 50')};
+  frame=await mount({},landscape);
+  await page.waitForFunction(()=>document.querySelector('iframe').clientHeight===200);
+  assert.equal((await frame.locator('svg').boundingBox()).height,200);
+  await page.setViewportSize({width:280,height:600});
+  await page.waitForFunction(()=>document.querySelector('iframe').clientHeight===140);
+  await frame.locator('svg').evaluate(svg=>svg.setAttribute('viewBox','0 0 100 20'));
+  await page.waitForFunction(()=>document.querySelector('iframe').clientHeight===56);
+  await page.waitForTimeout(100);
+  assert.ok((await page.evaluate(()=>messages.filter(m=>m.type==='resize').length))<10,'height feedback must settle');
+  assert.equal(await page.evaluate(()=>messages.some(m=>m.type==='save')),false);
+  await page.setViewportSize({width:400,height:600});
+  const legacy={...landscape};delete legacy.autoHeight;
+  frame=await mount({},legacy);
+  await page.waitForFunction(()=>document.querySelector('iframe').clientHeight===200);
+  console.log('PASS new and saved file previews shrink to content and update on width/content changes without saves or resize loops');
+  frame=await mount({},{...preview,html:'<div style="height:24px">Small preview</div>'});
+  await page.waitForFunction(()=>document.querySelector('iframe').clientHeight===48);
+  frame=await mount({},{...preview,html:'<div style="height:1200px">Tall preview</div>'});
+  await page.waitForFunction(()=>document.querySelector('iframe').clientHeight===800);
+  assert.equal(await frame.evaluate(()=>document.body.scrollHeight),1200);
+  frame=await mount({},{...preview,html:'<h1>Title</h1><p>Text with margins</p>'});
+  await page.waitForFunction(()=>document.querySelector('iframe').clientHeight<200);
+  const textBounds=await frame.locator('p').boundingBox();
+  assert.ok(textBounds.y+textBounds.height<=await page.locator('iframe').evaluate(el=>el.clientHeight),
+    JSON.stringify({textBounds,measure:await frame.evaluate(()=>({body:document.body.getBoundingClientRect().toJSON(),scroll:document.body.scrollHeight,margin:getComputedStyle(document.body).margin})),messages:await page.evaluate(()=>messages)}));
+  console.log('PASS compact and tall HTML previews respect height bounds and preserve text margins');
+  frame=await mount({},preview,'',true,true);
+  assert.equal(await page.evaluate(()=>messages.some(m=>m.type==='snapshotReady')),false);
+  await page.evaluate(()=>nativePort.postMessage(JSON.stringify({type:'snapshot'})));
+  await page.waitForFunction(()=>messages.some(m=>m.type==='snapshotReady'));
+  assert.equal(await page.evaluate(()=>messages.some(m=>m.type==='save')),false);
+  console.log('PASS snapshot requests cross the sandbox and report painted-frame readiness without saving state');
   frame=await mount(begin.state);
+  assert.equal(await page.evaluate(()=>messages.some(m=>m.type==='resize')),false,'explicit scene height is retained');
   assert.equal(await frame.evaluate(()=>THREE.REVISION),'186');
   assert.equal(await frame.locator('canvas').count(),1);
   assert.equal(await frame.evaluate(()=>{try{parent.document.body;return false}catch{return true}}),true);

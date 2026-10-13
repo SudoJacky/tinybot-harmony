@@ -1,9 +1,10 @@
 import { webview } from '@kit.ArkWeb';
+import { image } from '@kit.ImageKit';
 import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { t } from '../model/I18n';
 import { UiValues } from '../model/InteractiveUi';
-import { WebUiSpec, parseWebUi, parseWebUiMessage, webUiHost, WEB_UI_ORIGIN } from '../model/WebUi';
+import { WebUiSpec, parseWebUi, parseWebUiMessage, webUiHost, webUiAutoHeight, WEB_UI_ORIGIN } from '../model/WebUi';
 import { webUiAssets } from '../services/WebUiAssets';
 import { Btn } from '../common/Theme';
 
@@ -13,11 +14,13 @@ export struct WebUiView {
   @Prop @Watch('sync') values: UiValues = {};
   @Prop @Watch('sync') interactive: boolean = false;
   @Prop preflight: boolean = false;
+  @Prop snapshotMode: boolean = false;
   onValidation: (error: string) => void = () => {};
   onSave: (values: UiValues) => Promise<UiValues> = async () => { throw new Error('Web UI save handler missing'); };
   @State private error: string = '';
   @State private ready: boolean = false;
   @State private heightValue: number = 360;
+  @State private snapshot: image.PixelMap | undefined = undefined;
   private controller: webview.WebviewController = new webview.WebviewController();
   private ports: webview.WebMessagePort[] = [];
   private spec?: WebUiSpec;
@@ -29,8 +32,9 @@ export struct WebUiView {
   private timer: number = -1;
   private saving: boolean = false;
   private hostNavigationPending: boolean = false;
+  private snapshotRequested: boolean = false;
   aboutToAppear(): void { this.mounted = true; hilog.info(0x0000, 'TinybotWebUI', 'mount contentChars=%{public}d', this.content.length); }
-  aboutToDisappear(): void { this.mounted = false; this.attached = false; this.initialPageLoaded = false; this.generation++; this.closePorts(); }
+  aboutToDisappear(): void { this.mounted = false; this.attached = false; this.initialPageLoaded = false; this.generation++; this.closePorts(); this.snapshot?.release(); }
   private closePorts(): void {
     clearTimeout(this.timer);
     for (const port of this.ports) { port.close(); }
@@ -44,7 +48,8 @@ export struct WebUiView {
   private async restart(): Promise<void> {
     if (!this.mounted || !this.attached || !this.initialPageLoaded) { return; }
     const generation = ++this.generation;
-    this.closePorts(); this.ready = false; this.error = '';
+    this.closePorts(); this.ready = false; this.error = ''; this.snapshotRequested = false;
+    const oldSnapshot = this.snapshot; this.snapshot = undefined; await oldSnapshot?.release();
     try {
       this.spec = parseWebUi(this.content); this.heightValue = this.spec.height;
       const assets = await webUiAssets(this.getUIContext().getHostContext() as common.UIAbilityContext, this.spec.library === 'three');
@@ -74,7 +79,7 @@ export struct WebUiView {
       hilog.info(0x0000, 'TinybotWebUI', 'connect message port');
       // loadData may use an opaque data: origin; transfer only to the verified top-level host.
       this.controller.postMessage('tinybot-web-port', [this.ports[1]], '*');
-      this.ports[0].postMessageEvent(JSON.stringify({ type: 'init', spec: this.spec, values: this.values, active: this.preflight || (this.interactive && this.visible), preflight: this.preflight }));
+      this.ports[0].postMessageEvent(JSON.stringify({ type: 'init', spec: this.spec, autoHeight: webUiAutoHeight(this.spec), values: this.values, active: this.preflight || (this.interactive && this.visible), preflight: this.preflight, snapshotMode: this.snapshotMode }));
     } catch (error) { this.report(error as Error); }
   }
   private sync(): void {
@@ -89,11 +94,34 @@ export struct WebUiView {
       if (typeof data !== 'string') { throw new Error('Web UI: expected a text message'); }
       const message = parseWebUiMessage(data); id = message.id || 0;
       if (message.type === 'error') { throw new Error(message.message); }
+      if (message.type === 'resize') {
+        if (this.spec && webUiAutoHeight(this.spec)) { this.heightValue = Math.max(48, Math.min(800, Math.ceil(message.height as number))); }
+        return;
+      }
       if (message.type === 'ready') {
         if (this.error) { return; } // A late ready must not erase a startup failure.
         clearTimeout(this.timer); this.ready = true;
         hilog.info(0x0000, 'TinybotWebUI', 'ready library=%{public}s preflight=%{public}s', this.spec?.library || 'none', String(this.preflight));
+        if (this.snapshotMode) {
+          if (this.snapshotRequested) { return; }
+          this.snapshotRequested = true;
+          // Hidden Web views may be inactive after startup. Activate before requesting a painted frame.
+          this.controller.onActive();
+          this.ports[0].postMessageEvent(JSON.stringify({ type: 'snapshot' }));
+          return;
+        }
         if (this.preflight) { this.onValidation(''); } return;
+      }
+      if (message.type === 'snapshotReady' && this.snapshotMode) {
+        if (!this.snapshotRequested || this.error) { return; }
+        this.snapshotRequested = false;
+        // RAF completes before ArkWeb commits its independent native surface. Allow that commit to settle.
+        await new Promise<void>((resolve) => { setTimeout(resolve, 1000); });
+        if (!this.mounted || generation !== this.generation || this.error) { return; }
+        const pixel = await image.createPixelMapFromSurface(this.controller.getSurfaceId());
+        if (!this.mounted || generation !== this.generation || this.error) { await pixel.release(); return; }
+        this.snapshot = pixel;
+        this.onValidation(''); return;
       }
       if (!this.interactive || !this.visible || this.saving) { throw new Error(t('当前无法保存，请等待任务结束后重试。')); }
       this.saving = true;
@@ -114,6 +142,7 @@ export struct WebUiView {
         Text(this.error).fontSize(13).fontColor($r('app.color.danger')).copyOption(CopyOptions.LocalDevice)
         Button(t('重新加载')).attributeModifier(Btn.textSmall).onClick(() => { this.restart(); })
       } else if (!this.ready) { Text(t('正在加载交互内容…')).fontSize(13).fontColor($r('app.color.text_secondary')) }
+      Stack() {
       Web({ src: 'about:blank', controller: this.controller })
         .width('100%').height(this.heightValue).javaScriptAccess(true).domStorageAccess(false).databaseAccess(false)
         .fileAccess(false).onlineImageAccess(false).blockNetwork(true)
@@ -139,6 +168,8 @@ export struct WebUiView {
         .onPermissionRequest((event) => { event.request.deny(); })
         .onRenderExited(() => { this.report(new Error(t('交互内容渲染进程已退出，请重试。'))); })
         .onVisibleAreaChange([0], (visible: boolean) => { this.visible = visible; this.sync(); })
+      if (this.snapshot) { Image(this.snapshot).width('100%').height(this.heightValue).objectFit(ImageFit.Fill) }
+      }.width('100%').height(this.heightValue)
     }.width('100%').alignItems(HorizontalAlign.Start)
   }
 }

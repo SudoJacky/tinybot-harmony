@@ -14,9 +14,22 @@ export function toolTitle(name: string): string {
     'write_file': t('写入文件'), 'edit_file': t('编辑文件'), 'generate_image': t('生成图片'),
     'mcp_call': t('调用远程工具'), 'mcp_list_tools': t('查看远程工具'), 'mcp_search_tools': t('搜索远程工具'),
     'execute_code': t('执行代码'), 'orchestrate': t('编排工具'), 'publish_data_view': t('生成图表'),
-    'update_plan': t('更新计划'), 'request_user_input': t('请你补充信息')
+    'update_plan': t('更新计划'), 'request_user_input': t('请你补充信息'),
+    'list_skills': t('查看 Skills'), 'skill_manage': t('管理 Skills'), 'mcp_manage': t('管理 MCP 服务'),
+    'memory': t('维护长期记忆'), 'read_tool_result': t('补读工具结果')
   };
   return titles[name] || name;
+}
+
+export function toolGroupTitle(id: string): string {
+  const titles: Record<string, string> = {
+    'workspace-read': t('文件读取与检索'), 'workspace-write': t('文件编辑'), 'context-read': t('附件与历史结果'),
+    'web': t('网页读取与搜索'), 'browser': t('浏览器'), 'calculation': t('代码计算'), 'orchestration': t('工具编排'),
+    'interaction': t('用户交互与计划'), 'delivery': t('预览与交付'), 'image': t('图片生成'), 'skill-read': t('Skills 读取'),
+    'mcp-discovery': t('MCP 工具发现'), 'mcp-execution': t('MCP 工具调用'), 'extension-management': t('扩展管理'),
+    'memory': t('长期记忆'), 'team-coordination': t('团队管理'), 'team-handoff': t('员工交接')
+  };
+  return titles[id] || id;
 }
 
 export function toolStatusLabel(status: string): string {

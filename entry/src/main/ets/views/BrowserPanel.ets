@@ -4,6 +4,7 @@ import { validateWebAddress } from '../services/WebTools';
 import { Btn, Motion, Space } from '../common/Theme';
 import { IconButton } from '../common/Widgets';
 import { t } from '../model/I18n';
+import { KeyCode } from '@kit.InputKit';
 
 // Always keep this host mounted. Expanding changes presentation, never the Web instance.
 @Component
@@ -13,11 +14,15 @@ export struct BrowserPanel {
   onDismiss: () => void = () => {};
   onSettings: () => void = () => {};
   @State private address: string = '';
+  @State private addressDirty: boolean = false;
   private driver?: NativeBrowserDriver;
   aboutToAppear(): void { this.driver = new NativeBrowserDriver(this.browser); this.browser.attach(this.driver); }
   aboutToDisappear(): void { if (this.driver) { this.browser.detach(this.driver); } }
   private navigate(): void {
-    try { this.driver?.userNavigate(validateWebAddress(this.address.trim())); }
+    try {
+      this.driver?.userNavigate(validateWebAddress((this.browser.editingAddress || this.addressDirty ? this.address : this.browser.url).trim()));
+      this.getUIContext().getFocusController().clearFocus();
+    }
     catch (error) { this.browser.report((error as Error).message); }
   }
   build() {
@@ -36,17 +41,27 @@ export struct BrowserPanel {
             onTap: () => { this.browser.close(); this.onDismiss(); } })
         }.width('100%').padding({ left: Space.sm, right: Space.sm, top: Space.sm })
         Row({ space: Space.sm }) {
-          TextInput({ text: this.address || this.browser.url, placeholder: t('网页地址') }).id('browser-address').layoutWeight(1)
-            .onTouchIntercept((event) => { if (event.type === TouchType.Down) { this.browser.takeOver(); } return HitTestMode.Default; })
-            .onChange((value: string) => { this.address = value; })
+          TextInput({ text: this.browser.editingAddress || this.addressDirty ? this.address : this.browser.url, placeholder: t('网页地址') })
+            .id('browser-address').layoutWeight(1).type(InputType.URL).enterKeyType(EnterKeyType.Go)
+            .onFocus(() => { if (!this.addressDirty) { this.address = this.browser.url; } this.browser.editingAddress = true; })
+            .onBlur(() => { this.browser.editingAddress = false; })
+            .onChange((value: string) => {
+              if (this.browser.editingAddress && value !== this.address) { this.browser.takeOver(); this.addressDirty = true; }
+              this.address = value;
+            })
             .onSubmit(() => this.navigate())
           Button(t('打开')).id('browser-go').attributeModifier(Btn.textSmall).onClick(() => this.navigate())
         }.padding({ left: Space.md, right: Space.md }).width('100%')
         Row({ space: Space.sm }) {
-          IconButton({ icon: $r('sys.symbol.chevron_left'), label: t('上一页'), compId: 'browser-back', onTap: () => this.driver?.userBack() })
-          IconButton({ icon: $r('sys.symbol.chevron_right'), label: t('下一页'), compId: 'browser-forward', onTap: () => this.driver?.userForward() })
+          IconButton({ icon: $r('sys.symbol.chevron_left'), label: t('上一页'), compId: 'browser-back',
+            disabled: !this.browser.canGoBack, onTap: () => this.driver?.userBack() })
+          IconButton({ icon: $r('sys.symbol.chevron_right'), label: t('下一页'), compId: 'browser-forward',
+            disabled: !this.browser.canGoForward, onTap: () => this.driver?.userForward() })
           IconButton({ icon: $r('sys.symbol.arrow_clockwise'), label: t('重新加载'), compId: 'browser-reload', onTap: () => this.driver?.userReload() })
           Blank()
+          if (this.browser.owner === 'agent') {
+            Button(t('接管浏览器')).id('browser-takeover').attributeModifier(Btn.tonal).onClick(() => this.browser.takeOver())
+          }
           if (this.browser.owner === 'user' && this.browser.hasTask) {
             Button(t('交还给 Tinybot')).id('browser-handoff').attributeModifier(Btn.primarySmall)
               .onClick(() => { this.getUIContext().getFocusController().clearFocus(); this.browser.handoff(); })
@@ -64,7 +79,8 @@ export struct BrowserPanel {
           .id('agent-browser-web').width('100%').layoutWeight(1).javaScriptAccess(true).domStorageAccess(true)
           .fileAccess(false).multiWindowAccess(false).blockNetwork(false)
           .onPageBegin(() => this.driver?.pageBegin())
-          .onPageEnd((event) => { this.address = ''; this.driver?.pageEnd(event.url); })
+          .onPageEnd((event) => { this.driver?.pageEnd(event.url); if (!this.browser.editingAddress) { this.addressDirty = false; } })
+          .onNavigationEntryCommitted(() => this.driver?.historyChanged())
           .onLoadIntercept((event) => {
             const url = event.data.getRequestUrl();
             if (url === 'about:blank') { return false; }
@@ -75,10 +91,16 @@ export struct BrowserPanel {
           .onHttpErrorReceive((event) => { if (event.request.isMainFrame()) { this.browser.report(t('浏览器返回 HTTP {0}。', [event.response.getResponseCode()])); } })
           .onRenderExited(() => { this.driver?.failed(t('浏览器渲染进程已退出，请关闭后重新打开。')); this.browser.close(); })
           .onPermissionRequest((event) => { event.request.deny(); this.browser.report(t('浏览器未授权摄像头、麦克风或位置访问。')); })
-          .onTouchIntercept((event) => { if (event.type === TouchType.Down) { this.browser.takeOver(); } return HitTestMode.Default; })
+          .onTouch((event) => this.driver?.userTouch(event))
           .onMouse((event) => { if (event.action === MouseAction.Press) { this.browser.takeOver(); } })
-          .onAxisEvent(() => { this.browser.takeOver(); })
-          .onKeyEvent((event) => { if (event.type === KeyType.Down) { this.browser.takeOver(); } return false; })
+          .onInterceptKeyEvent((event) => {
+            // Arrow/Page/Home/End keys only move the viewport; editing and activation take control.
+            if (event.type === KeyType.Down && ![KeyCode.KEYCODE_DPAD_UP, KeyCode.KEYCODE_DPAD_DOWN,
+              KeyCode.KEYCODE_DPAD_LEFT, KeyCode.KEYCODE_DPAD_RIGHT, KeyCode.KEYCODE_PAGE_UP, KeyCode.KEYCODE_PAGE_DOWN,
+              KeyCode.KEYCODE_MOVE_HOME, KeyCode.KEYCODE_MOVE_END, KeyCode.KEYCODE_CTRL_LEFT, KeyCode.KEYCODE_CTRL_RIGHT,
+              KeyCode.KEYCODE_SHIFT_LEFT, KeyCode.KEYCODE_SHIFT_RIGHT].includes(event.keyCode)) { this.browser.takeOver(); }
+            return false;
+          })
       }
     }.id('agent-browser-panel').width('100%').height('100%').backgroundColor($r('app.color.page_background'))
       // Slide the mounted page as one surface; leave input gating outside the animation.

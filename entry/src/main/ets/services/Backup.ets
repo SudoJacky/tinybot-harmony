@@ -4,7 +4,7 @@ import { common } from '@kit.AbilityKit';
 import { fileIo as fs, picker } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { AppData, parseAppData, defaultConfig } from '../model/Conversation';
+import { AppData, ThreadData, parseAppData, defaultConfig } from '../model/Conversation';
 import { Attachment } from '../model/Productivity';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { workspaceRelativePath } from './WorkspaceTools';
@@ -19,9 +19,18 @@ async function encodeFile(path: string): Promise<string> {
   try { return new util.Base64Helper().encodeToString(new Uint8Array(await readBounded(file.fd, MAX_BACKUP))); }
   finally { await fs.close(file); }
 }
+function threadAttachments(thread: ThreadData): Attachment[] {
+  const result = (thread.attachments || []).concat(...thread.messages.map((message) => message.attachments || []));
+  for (const message of thread.messages) {
+    for (const step of message.steps || []) {
+      for (const tool of step.tools) { if (tool.previewScreenshot) { result.push(tool.previewScreenshot.image); } }
+    }
+  }
+  return result;
+}
 function allAttachments(data: AppData): Attachment[] {
   const result = new Map<string, Attachment>();
-  for (const thread of data.threads) { for (const item of (thread.attachments || []).concat(...thread.messages.map((message) => message.attachments || []))) { result.set(item.id, item); } }
+  for (const thread of data.threads) { for (const item of threadAttachments(thread)) { result.set(item.id, item); } }
   return Array.from(result.values());
 }
 // Both local export and Huawei Cloud use the same validated, credential-free snapshot.
@@ -157,7 +166,7 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
   for (const profile of data.providerProfiles || []) { profile.enabled = false; profile.noApiKey = true; profile.credentialAlias = ''; }
   for (const thread of data.threads) {
     thread.pendingInputs = []; thread.queuePaused = true;
-    for (const item of (thread.attachments || []).concat(...thread.messages.map((message) => message.attachments || []))) {
+    for (const item of threadAttachments(thread)) {
       const id = attachmentIds.get(item.id); if (id) { item.id = id; item.path = id + (item.mime === 'image/jpeg' ? '.jpg' : '.txt'); }
     }
   }

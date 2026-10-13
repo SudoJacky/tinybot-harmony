@@ -39,6 +39,8 @@
         state = data.values; active = data.active;
         for (const listener of listeners) listener(copy(state));
         resume();
+      } else if (data.type === 'snapshot' && initial.snapshotMode) {
+        requestAnimationFrame(() => requestAnimationFrame(() => { if (!failed) send({ type: 'snapshotReady' }); }));
       } else if (data.type === 'ack' && pending?.id === data.id) {
         const saved = pending; pending = undefined;
         if (data.error) saved.reject(new Error(data.error));
@@ -59,6 +61,17 @@
       }
     }), writable: false });
     window.__tinybotReady = () => {
+      if (initial.autoHeight) {
+        let lastHeight = -1;
+        const measure = () => {
+          const body = document.body, style = getComputedStyle(body);
+          const height = Math.ceil(Math.max(body.getBoundingClientRect().height, body.scrollHeight) +
+            (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0));
+          if (height !== lastHeight) { lastHeight = height; send({ type: 'resize', height }); }
+        };
+        new ResizeObserver(measure).observe(document.body);
+        measure();
+      }
       // Exercise the initial animation callback even if an invisible Web component throttles RAF.
       if (initial.preflight && animate && !failed) {
         try { animate(0, 0); } catch (error) { failure(error); }
@@ -76,12 +89,13 @@
     frame.setAttribute('sandbox', 'allow-scripts');
     frame.setAttribute('allow', "camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'");
     frame.title = 'Interactive content';
-    const bootstrap = '(' + childRuntime.toString() + ')(' + JSON.stringify({ values: data.values, active: data.active, preflight: data.preflight === true }).replace(/</g, '\\u003c') + ');';
+    const bootstrap = '(' + childRuntime.toString() + ')(' + JSON.stringify({ values: data.values, active: data.active, preflight: data.preflight === true, autoHeight: data.autoHeight === true, snapshotMode: data.snapshotMode === true }).replace(/</g, '\\u003c') + ');';
     const csp = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
     frame.srcdoc = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
       '<meta http-equiv="Content-Security-Policy" content="' + csp + '">' +
       '<style>html{color-scheme:light}body{margin:0;font:15px system-ui;color:#17251f;background:white}*{box-sizing:border-box}canvas{display:block;max-width:100%;touch-action:none}button,input,select{font:inherit}button{min-height:40px}</style>' +
-      '<style>' + spec.css.replace(/<\/style/gi, '<\\/style') + '</style>' + script(bootstrap) +
+      '<style>' + spec.css.replace(/<\/style/gi, '<\\/style') + '</style>' +
+      (data.autoHeight ? '<style>html,body{min-height:0!important;overflow:auto}</style>' : '') + script(bootstrap) +
       (spec.library === 'three' ? script(library) : '') + '</head><body>' + spec.html +
       script('Promise.resolve((async()=>{\n' + spec.js + '\n})()).then(__tinybotReady).catch(__tinybotError);\n//# sourceURL=tinybot-generated.js') + '</body></html>';
     document.body.append(frame);
@@ -100,7 +114,9 @@
     } else if (frame && event.source === frame.contentWindow && event.data?.channel === 'tinybot-frame') {
       const data = event.data;
       if (data.type === 'save') send({ type: 'save', id: data.id, values: data.values });
+      else if (data.type === 'resize') send({ type: 'resize', height: data.height });
       else if (data.type === 'ready') send({ type: 'ready' });
+      else if (data.type === 'snapshotReady') send({ type: 'snapshotReady' });
       else if (data.type === 'error') send({ type: 'error', message: String(data.message).slice(0, 2000) });
     }
   });

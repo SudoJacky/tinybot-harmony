@@ -19,6 +19,8 @@ struct UiNodeView {
   @Prop values: UiValues;
   @Prop interactive: boolean = false;
   @Prop ready: boolean = false;
+  @Prop snapshotMode: boolean = false;
+  onWebReady: (id: string, error: string) => void = () => {};
   @Prop layoutWidth: number | string = '100%';
   onWebSave: (values: UiValues) => Promise<UiValues> = async () => { throw new Error('Web UI save handler missing'); };
   onEdit: (node: UiNode, value: UiValue, commit: boolean) => void = () => {};
@@ -48,7 +50,7 @@ struct UiNodeView {
   childrenView() {
     ForEach(this.children(), (child: UiNode) => {
       UiNodeView({ node: this.nodes.find((item: UiNode) => item.id === child.id) as UiNode, nodes: this.nodes, values: this.values, interactive: this.interactive,
-        ready: this.ready, layoutWidth: this.childWidth(), onWebSave: this.onWebSave, onEdit: this.onEdit, onAction: this.onAction, onCommit: this.onCommit, onInvalid: this.onInvalid })
+        ready: this.ready, snapshotMode: this.snapshotMode, onWebReady: this.onWebReady, layoutWidth: this.childWidth(), onWebSave: this.onWebSave, onEdit: this.onEdit, onAction: this.onAction, onCommit: this.onCommit, onInvalid: this.onInvalid })
     }, (child: UiNode) => child.id)
   }
   build() {
@@ -138,7 +140,8 @@ struct UiNodeView {
           UiSceneView({ content: this.node.bind ? String(this.value()) : this.node.data || '', interactive: this.interactive, onAction: this.onAction })
         } else if (this.node.kind === 'web') {
           if (this.ready) {
-            WebUiView({ content: this.node.data || '', values: this.values, interactive: this.interactive, onSave: this.onWebSave })
+          WebUiView({ content: this.node.data || '', values: this.values, interactive: this.interactive, onSave: this.onWebSave,
+            snapshotMode: this.snapshotMode, preflight: this.snapshotMode, onValidation: (error: string) => this.onWebReady(this.node.id, error) })
           }
         } else if (this.node.kind === 'image') {
           Image(this.node.source).width('100%').height(220).objectFit(ImageFit.Contain).accessibilityText(this.label())
@@ -158,6 +161,8 @@ struct UiSurface {
   @Prop @Watch('refresh') closed: boolean;
   @Prop @Watch('refresh') streaming: boolean;
   @Prop available: boolean = false;
+  @Prop snapshotMode: boolean = false;
+  onWebReady: (id: string, error: string) => void = () => {};
   surfaceKey: string = '';
   saved: UiSavedState[] = [];
   onInteract: (key: string, values: UiValues, action: string) => Promise<UiValues> = async () => { throw new Error('Interactive UI handler is not connected'); };
@@ -241,7 +246,8 @@ struct UiSurface {
       }.width('100%')
       ForEach(this.nodes.filter((node: UiNode) => !node.parent && uiNodeVisible(node, this.values)), (node: UiNode) => {
         UiNodeView({ node: this.nodes.find((item: UiNode) => item.id === node.id) as UiNode, nodes: this.nodes, values: this.values, interactive: this.complete && this.available && !this.busy,
-          ready: this.complete && !this.streaming, onWebSave: (values: UiValues) => this.saveWeb(values),
+          ready: this.complete && !this.streaming, snapshotMode: this.snapshotMode,
+          onWebReady: (id: string, error: string) => this.onWebReady(this.surfaceKey + '/' + id, error), onWebSave: (values: UiValues) => this.saveWeb(values),
           onEdit: (item: UiNode, value: UiValue, commit: boolean) => this.edit(item, value, commit),
           onAction: (id: string) => { this.interact(id); },
           onCommit: (id: string) => this.schedule(id),
@@ -260,6 +266,8 @@ struct UiSurface {
 
 @Component
 export struct InteractiveAnswer {
+  @Prop snapshotMode: boolean = false;
+  onWebReady: (id: string, error: string) => void = () => {};
   @Prop selectable: boolean = true;
   @Prop validation: string = '';
   @Prop @Watch('refresh') content: string = '';
@@ -281,7 +289,7 @@ export struct InteractiveAnswer {
             .fontSize(13).fontColor($r('app.color.text_secondary'))
         } else {
           UiSurface({ source: this.parts[index].content, closed: this.parts[index].closed, streaming: this.streaming, available: this.available,
-            surfaceKey: this.step + ':' + part.key, saved: this.saved, onInteract: this.onInteract })
+            surfaceKey: this.step + ':' + part.key, snapshotMode: this.snapshotMode, onWebReady: this.onWebReady, saved: this.saved, onInteract: this.onInteract })
         }
       }, (part: UiPart) => part.kind + '-' + part.key)
     }.width('100%').alignItems(HorizontalAlign.Start)

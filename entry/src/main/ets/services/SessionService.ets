@@ -2,6 +2,10 @@ import { projectName, projectFor, workspaceIdFor, validateProjects, projectConte
 import { proposeSessionMemory, reviewSessionMemory, addMemoryDraft } from './SessionMemory';
 import { McpSettings, McpSettingsCommand, McpSettingsResult, McpSettingsHost } from './McpSettings';
 import { t } from '../model/I18n';
+import { AgentMode, toolEnabled, ToolSelection, validateToolSelection } from '../model/AgentMode';
+import { RuleTools } from './RuleTools';
+import { SelectedTools } from './SelectedTools';
+import { BASIC_FILE_TOOLS, OPTIONAL_TOOL_NAMES } from '../model/ToolGroups';
 import { stepDisplayContent } from '../model/PublishedPreview';
 import { UiValues, UiSavedState, parseUiSurface, validateUiState, validateUiStates, copyUiValues } from '../model/InteractiveUi';
 import { prepareBackupServices } from '../model/BackupRestore';
@@ -36,7 +40,7 @@ import { AgentTools } from './AgentLoop';
 import { CredentialVault, ProfileSettings, ProviderDraft } from './ProfileSettings';
 import { SessionEvent, SessionRepository, SessionResources, SessionState } from './SessionContracts';
 import { prepareSessionContext, sessionPromptSections, sessionContextSource } from './SessionContext';
-import { renderPrompt } from '../model/ContextProjection';
+import { PromptSection, renderPrompt } from '../model/ContextProjection';
 interface UiComputeReceipt { status: string; result: UiValues; error: string; resultTruncated: boolean; }
 interface GeneratedImage { path: string; attachment: Attachment; }
 interface FormReceipt { status: string; }
@@ -59,6 +63,7 @@ export class SessionService {
   private dirtyDrafts: Set<string> = new Set<string>();
   // Composer choices stay outside persisted data until a user message is submitted.
   private pendingTeamModes: Map<string, boolean> = new Map<string, boolean>();
+  private pendingToolSelections: Map<string, ToolSelection> = new Map<string, ToolSelection>();
   private recovering?: Cancellation;
   private listeners: Set<(event: SessionEvent) => void> = new Set<(event: SessionEvent) => void>();
 
@@ -85,6 +90,39 @@ export class SessionService {
   }
   private selectedTeamMode(thread: ThreadData): boolean {
     return this.pendingTeamModes.get(thread.id) ?? thread.teamEnabled === true;
+  }
+  async setAgentMode(mode: AgentMode): Promise<boolean> {
+    if (!this.canMutate || this.active.archived) { return false; }
+    const selection = this.selectedToolSelection(this.active); selection.agentMode = mode;
+    this.selectTools(selection);
+    return true;
+  }
+  async setDisabledTools(names: string[]): Promise<boolean> {
+    if (!this.canMutate || this.active.archived) { return false; }
+    this.selectTools({ agentMode: 'custom', disabledTools: names.slice() }); return true;
+  }
+  async setToolEnabled(name: string, enabled: boolean): Promise<boolean> {
+    if (!BASIC_FILE_TOOLS.includes(name) && !OPTIONAL_TOOL_NAMES.includes(name)) { throw new Error(t('自定义工具设置无效。')); }
+    const disabled = (this.selectedToolSelection(this.active).disabledTools || []).filter((item) => item !== name);
+    if (!enabled) { disabled.push(name); }
+    return this.setDisabledTools(disabled);
+  }
+  private selectTools(selection: ToolSelection): void {
+    validateToolSelection(selection); this.pendingToolSelections.set(this.active.id, selection);
+    this.refreshContext(); this.publishThread(this.active);
+  }
+  private selectedToolSelection(thread: ThreadData): ToolSelection {
+    const selection = this.pendingToolSelections.get(thread.id) || thread;
+    return { agentMode: selection.agentMode || 'full', disabledTools: selection.disabledTools?.slice() };
+  }
+  private readOnly(_thread: ThreadData): boolean { return this.data.productivity?.options?.readOnly === true; }
+  private addModeInstructions(sections: PromptSection[], thread: ThreadData): void {
+    const selection = this.selectedToolSelection(thread);
+    if (selection.agentMode === 'custom') {
+      sections.push({ name: 'agent-mode', content: 'The user selected a custom toolset. Disabled tools: ' +
+        JSON.stringify(selection.disabledTools || []) + '. These restrictions apply to direct calls, tool orchestration and team workers. ' +
+        'Do not bypass disabled tools. Basic file reading, search and editing remain available subject to the existing permissions.' });
+    }
   }
 
   get state(): SessionState { return JSON.parse(JSON.stringify(this.status)) as SessionState; }
@@ -273,6 +311,8 @@ export class SessionService {
       branch.projectId = source.projectId;
       branch.reasoningEffort = source.reasoningEffort;
       branch.teamEnabled = source.teamEnabled;
+      const selection = this.selectedToolSelection(source);
+      branch.agentMode = selection.agentMode; branch.disabledTools = selection.disabledTools;
       branch.disabledMcpIds = source.disabledMcpIds?.slice();
       branch.messages = JSON.parse(JSON.stringify(source.messages.slice(0, end))) as MessageData[];
       branch.draft = index >= 0 && index % 2 === 0 ? source.messages[index].content : '';
@@ -364,7 +404,7 @@ export class SessionService {
       // Deleting a conversation deliberately retains its workspace.
       candidate.threads = candidate.threads.filter((thread) => !selected.has(thread.id));
       await this.commitSettings(candidate);
-      for (const id of ids) { this.pendingTeamModes.delete(id); }
+      for (const id of ids) { this.pendingTeamModes.delete(id); this.pendingToolSelections.delete(id); }
       if (activeChanged) { this.status.contextStatus = ''; }
     });
   }
@@ -579,6 +619,7 @@ export class SessionService {
     const thread = this.active; const config = this.currentConfig;
     const sections = sessionPromptSections(config, this.extensions);
     sections.push({ name: 'workspace', content: projectContext(this.data, thread) }, { name: 'memory', content: this.memoryPrompt(thread, true) });
+    this.addModeInstructions(sections, thread);
     const instructions = renderPrompt(sections); const tools = this.chatTools(thread);
     this.status.phase = 'compacting'; this.status.error = ''; this.publish('state');
     try {
@@ -633,10 +674,14 @@ export class SessionService {
     // Commit the choice with the message through the runtime's initial checkpoint, before requesting the model.
     thread.teamEnabled = command !== undefined || this.selectedTeamMode(thread);
     this.pendingTeamModes.delete(thread.id);
+    const selection = this.selectedToolSelection(thread); const readOnly = this.readOnly(thread);
+    thread.agentMode = selection.agentMode; thread.disabledTools = selection.disabledTools;
+    this.pendingToolSelections.delete(thread.id);
     let tools = this.chatTools(thread, selected);
     const sections = sessionPromptSections(config, this.extensions, selected);
     sections.push({ name: 'memory', content: this.memoryPrompt(thread, true) });
     sections.push({ name: 'workspace', content: projectContext(this.data, thread) });
+    this.addModeInstructions(sections, thread);
     const instructions = renderPrompt(sections);
     const user: MessageData = { id: this.resources.createId(), role: 'user', content: text, skillPrompt: expandSkillCommand(text, this.extensions.skills), status: 'complete', error: '',
       attachments: queuedId ? [] : thread.attachments, references: queuedId ? [] : thread.references };
@@ -651,6 +696,7 @@ export class SessionService {
     if (thread.teamEnabled) {
       const workerConfig = copyModelConfig(config); workerConfig.systemPrompt = instructions;
       chatTeams = new ChatTeamTools({ thread: thread, messageId: answer.id, config: workerConfig,
+        toolSelection: selection,
         usageOrigin: { threadId: thread.id, threadTitle: thread.title, turnId: user.id, turnLabel: text.slice(0, 80), skill: selected || undefined },
         configFor: (model) => { const saved = this.configFor(model); saved.systemPrompt = workerConfig.systemPrompt; return saved; },
         base: () => this.tools(thread, selected), runtime: () => this.runtime.fork(), createId: () => this.resources.createId(),
@@ -690,9 +736,9 @@ export class SessionService {
       }
     });
     try {
-      await this.runtime.run({ sessionId: thread.id, config: config, messages: [], tools: tools,
+      await this.runtime.run({ sessionId: thread.id, config: config, messages: [], tools: tools, toolSelection: selection,
         usageOrigin: { threadId: thread.id, threadTitle: thread.title, turnId: user.id, turnLabel: text.slice(0, 80), purpose: 'conversation', skill: selected || undefined } }, {
-        recoverUi: !options.readOnly && this.resources.recoverUi ? (content, error, cancellation) =>
+        recoverUi: !readOnly && this.resources.recoverUi ? (content, error, cancellation) =>
           this.resources.recoverUi!(thread.id, content, error, cancellation, projectFor(this.data, thread)?.workspaceId) : undefined,
         prepare: async (cancellation) => {
           cancellation.check(); cancellation.onCancel(() => chatTeams?.stop()); await this.ensureThreadWorkspace(thread);
@@ -723,11 +769,11 @@ export class SessionService {
       if (this.status.contextStatus.startsWith(t("正在压缩"))) { this.status.contextStatus = ''; }
     }
     if (answer.status === 'complete' && !this.status.saveError) {
-      if (options.saveSummary && !options.readOnly) {
+      if (options.saveSummary && !readOnly) {
         try { await this.resources.afterTask?.(thread.id, answer.id, answer.content, projectFor(this.data, thread)?.workspaceId); }
         catch (error) { this.status.error = t("任务已完成，但结果归档失败：") + (error as Error).message; }
       }
-      if (options.autoMemory && !options.readOnly) { this.reviewMemory(thread, user, copyModelConfig(config)); }
+      if (options.autoMemory && !readOnly && toolEnabled('memory', selection)) { this.reviewMemory(thread, user, copyModelConfig(config)); }
     }
     return answer.status === 'complete' && this.status.saveError.length === 0;
   }
@@ -887,12 +933,12 @@ export class SessionService {
   private chatTools(thread: ThreadData, selected: string = '', base?: AgentTools): AgentTools {
     let tools = base || this.tools(thread, selected);
     const options = this.data.productivity?.options || defaultAssistantOptions();
-    if (!options.readOnly) {
-      tools = new ToolSet([tools, new ResourceTools((request, cancellation) => this.manageSkill(thread, request, cancellation),
-        (request, cancellation) => this.manageMcp(thread, request, cancellation))]);
+    if (!this.readOnly(thread)) {
+      tools = new SelectedTools(new ToolSet([tools, new ResourceTools((request, cancellation) => this.manageSkill(thread, request, cancellation),
+        (request, cancellation) => this.manageMcp(thread, request, cancellation))]), this.selectedToolSelection(thread));
     }
-    if (!options.autoMemory || options.readOnly) { return tools; }
-    return new ToolSet([tools, new MemoryTools(async (operations, cancellation) => {
+    if (!options.autoMemory || this.readOnly(thread) || !toolEnabled('memory', this.selectedToolSelection(thread))) { return tools; }
+    return new SelectedTools(new ToolSet([tools, new MemoryTools(async (operations, cancellation) => {
       const user = thread.messages.slice().reverse().find((message) => message.role === 'user');
       if (!user) { throw new Error(t('记忆变更缺少有效的用户消息来源。')); }
       // The host supplies provenance; the model cannot impersonate another conversation's source.
@@ -904,12 +950,12 @@ export class SessionService {
       if (operations.length > 0) { await this.commitMemory(thread, change); }
       return JSON.stringify({ success: true, receipt: change.receipt, limit: MEMORY_CHAR_LIMIT,
         memories: change.memories.filter((item) => !item.threadId || item.threadId === thread.id) });
-    })]);
+    })]), this.selectedToolSelection(thread));
   }
 
   private checkResourceMutation(thread: ThreadData, cancellation: Cancellation): void {
     cancellation.check();
-    if (this.data.productivity?.options?.readOnly || thread.archived || this.status.saveError) { throw new Error('Resource changes are unavailable in this session.'); }
+    if (this.readOnly(thread) || thread.archived || this.status.saveError) { throw new Error('Resource changes are unavailable in this session.'); }
   }
 
   private async commitResources(thread: ThreadData, candidate: AppData, detail: string): Promise<void> {
@@ -1034,7 +1080,8 @@ export class SessionService {
       while (this.status.phase !== 'idle') { await this.waitForIdle(); }
       const current = this.data.threads.find((item) => item.id === threadId);
       const options = this.data.productivity?.options || defaultAssistantOptions();
-      if (!current || current.archived || !options.autoMemory || options.readOnly || !this.canMutate) {
+      if (!current || current.archived || !options.autoMemory || this.readOnly(current) ||
+        !toolEnabled('memory', this.selectedToolSelection(current)) || !this.canMutate) {
         this.resources.reportMemory?.('review discarded: thread=' + threadId + ' session unavailable or memory disabled'); return;
       }
       const live = this.data.productivity?.memories || [];
@@ -1064,11 +1111,13 @@ export class SessionService {
 
   private tools(thread: ThreadData, selected: string = ''): AgentTools {
     const extras = JSON.parse(JSON.stringify(this.data.productivity || defaultProductivity())) as ProductivityData;
+    extras.options = extras.options || defaultAssistantOptions();
+    extras.options.readOnly = this.readOnly(thread);
     extras.servers = extras.servers.filter((item) => !(thread.disabledMcpIds || []).includes(item.id));
     const live: LiveResources = { skills: () => this.extensions.skills,
       servers: () => (this.data.productivity?.servers || []).filter((item) => !(thread.disabledMcpIds || []).includes(item.id)) };
-    return new ToolSet([this.resources.tools(thread.id, this.extensions, selected, extras,
-      (thread.attachments || []).concat(...thread.messages.map((item) => item.attachments || [])), live, projectFor(this.data, thread)?.workspaceId), new ReferenceTools(() => thread.messages)]);
+    return new SelectedTools(new RuleTools(new ToolSet([this.resources.tools(thread.id, this.extensions, selected, extras,
+      (thread.attachments || []).concat(...thread.messages.map((item) => item.attachments || [])), live, projectFor(this.data, thread)?.workspaceId), new ReferenceTools(() => thread.messages)]), extras.options.readOnly), this.selectedToolSelection(thread));
   }
   private refreshContext(): void {
     if (this.data.threads.length === 0) { this.status.contextTokens = 0; this.status.contextBreakdown = []; this.status.contextSource = 'estimate'; return; }
@@ -1076,13 +1125,14 @@ export class SessionService {
     const sections = sessionPromptSections(config, this.extensions);
     sections.push({ name: 'memory', content: this.memoryPrompt(this.active) });
     sections.push({ name: 'workspace', content: projectContext(this.data, this.active) });
+    this.addModeInstructions(sections, this.active);
     const teamEnabled = this.selectedTeamMode(this.active);
     if (teamEnabled) {
       sections.push({ name: 'team', content: CHAT_TEAM_INSTRUCTIONS + '\n本聊天已有团队（以此处ID为准，禁止跨会话访问）：' +
         JSON.stringify((this.active.teams || []).filter((run) => run.ownerMessageId).map((run) => run.id + ' ' + run.status)) });
     }
     const source = sessionContextSource(this.active, () => sections, async () => {}, () => {});
-    const prepared = this.runtime.inspectContext(source, config, this.chatTools(this.active), teamEnabled ? coordinatorDefinitions() : []);
+    const prepared = this.runtime.inspectContext(source, config, this.chatTools(this.active), teamEnabled ? coordinatorDefinitions() : [], this.selectedToolSelection(this.active));
     this.status.contextTokens = prepared.context.tokens;
     this.status.contextBreakdown = prepared.breakdown;
     this.status.contextSource = prepared.context.source;
@@ -1176,7 +1226,8 @@ export class SessionService {
       attachments: thread.attachments, references: thread.references, parentThreadId: thread.parentThreadId,
       parentMessageId: thread.parentMessageId, disabledMcpIds: thread.disabledMcpIds, modelRef: thread.modelRef,
       pendingInputs: thread.pendingInputs, queuePaused: thread.queuePaused, compaction: thread.compaction,
-      memoryReview: thread.memoryReview, reasoningEffort: thread.reasoningEffort, teamEnabled: this.selectedTeamMode(thread) };
+      memoryReview: thread.memoryReview, reasoningEffort: thread.reasoningEffort, teamEnabled: this.selectedTeamMode(thread),
+      agentMode: this.selectedToolSelection(thread).agentMode, disabledTools: this.selectedToolSelection(thread).disabledTools };
     this.emit({ kind: 'thread', state: this.state, threadId: thread.id,
       thread: JSON.parse(JSON.stringify(metadata)) as ThreadData });
   }
@@ -1187,7 +1238,11 @@ export class SessionService {
   private publish(kind: 'snapshot' | 'state'): void {
     const data = kind === 'snapshot' ? this.snapshot() : undefined;
     if (data) {
-      for (const thread of data.threads) { thread.teamEnabled = this.selectedTeamMode(thread); }
+      for (const thread of data.threads) {
+        thread.teamEnabled = this.selectedTeamMode(thread);
+        const selection = this.selectedToolSelection(thread);
+        thread.agentMode = selection.agentMode; thread.disabledTools = selection.disabledTools;
+      }
     }
     this.emit({ kind: kind, state: this.state, data: data });
   }
