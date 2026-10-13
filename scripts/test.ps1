@@ -12,6 +12,8 @@ if (-not (Test-Path -LiteralPath $nodePath) -or -not (Test-Path -LiteralPath $hv
 }
 & $nodePath (Join-Path $projectPath 'scripts/build-locales.cjs') --check
 if ($LASTEXITCODE -ne 0) { throw 'Locale validation failed. Run node scripts/build-locales.cjs after editing translations.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-browser.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Browser permission, takeover and runtime pause tests failed.' }
 $env:DEVECO_STUDIO_HOME = $StudioPath
 & $nodePath (Join-Path $projectPath 'scripts/test-harness-features.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Search, delivery, references and runtime reliability tests failed.' }

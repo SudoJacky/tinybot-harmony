@@ -20,7 +20,10 @@ export interface SkillData {
   files: SkillFile[];
 }
 
+export type BrowserPolicy = 'unset' | 'enabled' | 'disabled';
+
 export interface ExtensionSettings {
+  browserPolicy?: BrowserPolicy;
   webEnabled: boolean;
   skills: SkillData[];
 }
@@ -93,6 +96,9 @@ export function parseSkill(document: string): SkillData {
 }
 
 export function validateExtensions(value: ExtensionSettings): void {
+  if (value?.browserPolicy !== undefined && !['unset', 'enabled', 'disabled'].includes(value.browserPolicy)) {
+    throw new Error('Invalid browser permission setting.');
+  }
   if (!value || typeof value.webEnabled !== 'boolean' || !Array.isArray(value.skills) || value.skills.length > MAX_SKILLS) {
     throw new Error(t("联网或 Skills 设置损坏。"));
   }

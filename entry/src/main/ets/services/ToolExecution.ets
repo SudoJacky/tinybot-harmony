@@ -19,6 +19,7 @@ export async function executeToolBatch(step: AgentStep, round: number, tools: Ag
     return work;
   };
   const prepare = async (batch: ToolExecution[]): Promise<void> => {
+    await observer.waitForExecution?.(cancellation);
     cancellation.check();
     for (const tool of batch) { tool.status = 'running'; }
     try {
@@ -31,6 +32,7 @@ export async function executeToolBatch(step: AgentStep, round: number, tools: Ag
     }
   };
   const execute = async (tool: ToolExecution): Promise<void> => {
+    await observer.waitForExecution?.(cancellation);
     if (cancellation.cancelled) { tool.status = 'pending'; cancellation.check(); }
     observer.event({ type: 'tool_start', step: round, toolCallId: tool.call.id });
     if (cancellation.cancelled) { tool.status = 'pending'; cancellation.check(); }
@@ -54,13 +56,14 @@ export async function executeToolBatch(step: AgentStep, round: number, tools: Ag
       if (!args || typeof args !== 'object' || Array.isArray(args)) {
         throw new ToolFailure('INVALID_ARGUMENTS', 'Tool arguments must be a JSON object.', 'fix_arguments');
       }
-      tool.output = await tools.execute(tool.call, cancellation, {
+      let output = await tools.execute(tool.call, cancellation, {
         execution: tool,
         executeChild: async (child, nestedTools, signal) => {
           const nestedStep: AgentStep = { content: '', tools: [child], usage: step.usage };
           try {
             await executeToolBatch(nestedStep, round, nestedTools, nestedTools.definitions(), signal, {
-              checkpoint: checkpoint, toolActivity: observer.toolActivity,
+              checkpoint: checkpoint, toolActivity: observer.toolActivity, waitForExecution: observer.waitForExecution,
+              refreshToolResult: observer.refreshToolResult,
               event: (event) => observer.event({ type: event.type, step: round, toolCallId: tool.call.id })
             });
           } catch (error) {
@@ -69,9 +72,20 @@ export async function executeToolBatch(step: AgentStep, round: number, tools: Ag
           }
         }
       });
+      // A stop while waiting must not discard an operation that already completed.
+      if (!cancellation.cancelled) {
+        try {
+          await observer.waitForExecution?.(cancellation);
+          if (!cancellation.cancelled && observer.refreshToolResult) { output = await observer.refreshToolResult(tool.call, output, cancellation); }
+        } catch (error) {
+          if (!(error instanceof RunCancelledError && cancellation.cancelled)) { throw error as Error; }
+        }
+      }
+      tool.output = output;
       tool.status = 'complete';
     } catch (error) {
       if (error instanceof ToolPersistenceError) { throw error; }
+      if (!cancellation.cancelled) { await observer.waitForExecution?.(cancellation); }
       tool.output = toolError(error as Error);
       tool.status = error instanceof RunCancelledError || (error instanceof ToolResultError && error.code === 'CANCELLED') ? 'cancelled' : 'failed';
     }

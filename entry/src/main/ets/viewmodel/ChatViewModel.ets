@@ -196,9 +196,11 @@ export class ChatViewModel {
   newThread(projectId: string | undefined = this.active.projectId): Promise<boolean> { return this.requireSession().newThread(projectId || undefined); }
   selectThread(id: string): Promise<boolean> { return this.requireSession().selectThread(id); }
   deleteThread(id: string): Promise<boolean> { return this.requireSession().deleteThread(id); }
+  deleteThreads(ids: string[]): Promise<boolean> { return this.requireSession().deleteThreads(ids); }
   renameThread(id: string, value: string): Promise<boolean> { return this.requireSession().renameThread(id, value); }
   pinThread(id: string): Promise<boolean> { return this.requireSession().pinThread(id); }
   archiveThread(id: string): Promise<boolean> { return this.requireSession().archiveThread(id); }
+  archiveThreads(ids: string[], archived: boolean): Promise<boolean> { return this.requireSession().archiveThreads(ids, archived); }
   selectModel(providerId: string, modelId: string): Promise<boolean> { return this.requireSession().selectModel(providerId, modelId); }
   setReasoningEffort(value: string): Promise<boolean> { return this.requireSession().setReasoningEffort(value); }
   deleteProvider(id: string): Promise<boolean> { return this.requireSession().deleteProvider(id); }

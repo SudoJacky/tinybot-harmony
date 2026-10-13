@@ -28,7 +28,7 @@ import { AppData, MessageData, ModelConfig, ThreadData, copyModelConfig, emptyDa
 import { contextSettings } from '../model/ConversationContext';
 import { ModelReference, ProviderProfile, migrateProfiles, modelConfig } from '../model/ProviderProfiles';
 import { InputMode, MAX_INPUT_TEXT, PendingInput, nextPendingInput, validatePendingInputs } from '../model/PendingInput';
-import { ExtensionSettings, SkillData, SkillFile, defaultExtensions, explicitSkill, expandSkillCommand, parseSkill, validateExtensions } from '../model/Skills';
+import { BrowserPolicy, ExtensionSettings, SkillData, SkillFile, defaultExtensions, explicitSkill, expandSkillCommand, parseSkill, validateExtensions } from '../model/Skills';
 import { threadTitle } from '../model/SessionManagement';
 import { CONVERSATION_TITLE_PROMPT, sanitizeConversationTitle, shouldGenerateTitle, titleCharacters } from '../model/ConversationTitle';
 import { AgentEvent, AgentRuntime } from './AgentRuntime';
@@ -351,13 +351,21 @@ export class SessionService {
     });
   }
   async deleteThread(id: string): Promise<boolean> {
+    return this.deleteThreads([id]);
+  }
+  async deleteThreads(ids: string[]): Promise<boolean> {
+    if (ids.length === 0) { return false; }
     return this.mutate(t("删除对话失败："), async () => {
-      this.requireThread(id);
-      await this.replaceActive(id);
+      for (const id of ids) { this.requireThread(id); }
+      const selected = new Set(ids);
+      const candidate = this.snapshot();
+      const activeChanged = selected.has(candidate.activeThreadId);
+      await this.replaceActive(selected, candidate);
       // Deleting a conversation deliberately retains its workspace.
-      this.data.threads = this.data.threads.filter((thread) => thread.id !== id);
-      this.pendingTeamModes.delete(id);
-      await this.persist();
+      candidate.threads = candidate.threads.filter((thread) => !selected.has(thread.id));
+      await this.commitSettings(candidate);
+      for (const id of ids) { this.pendingTeamModes.delete(id); }
+      if (activeChanged) { this.status.contextStatus = ''; }
     });
   }
   async renameThread(id: string, title: string): Promise<boolean> {
@@ -371,10 +379,22 @@ export class SessionService {
     });
   }
   async archiveThread(id: string): Promise<boolean> {
+    const thread = this.data.threads.find((item) => item.id === id);
+    return this.archiveThreads([id], !thread?.archived);
+  }
+  async archiveThreads(ids: string[], archived: boolean): Promise<boolean> {
+    if (ids.length === 0) { return false; }
     return this.mutate(t("归档状态保存失败："), async () => {
-      const thread = this.requireThread(id);
-      if (!thread.archived) { await this.replaceActive(id); }
-      thread.archived = !thread.archived; await this.persist();
+      for (const id of ids) { this.requireThread(id); }
+      const selected = new Set(ids);
+      const candidate = this.snapshot();
+      const activeChanged = archived && selected.has(candidate.activeThreadId);
+      if (archived) { await this.replaceActive(selected, candidate); }
+      for (const thread of candidate.threads) {
+        if (selected.has(thread.id)) { thread.archived = archived; }
+      }
+      await this.commitSettings(candidate);
+      if (activeChanged) { this.status.contextStatus = ''; }
     });
   }
 
@@ -449,9 +469,23 @@ export class SessionService {
   async saveSettings(userDocument: string, autoCompact: boolean, webEnabled: boolean): Promise<boolean> {
     return this.mutate(t("保存助手设置失败："), async () => {
       const candidate = this.snapshot(); candidate.config.userDocument = userDocument; candidate.config.autoCompact = autoCompact;
-      candidate.extensions = { webEnabled: webEnabled, skills: this.extensions.skills };
+      candidate.extensions = { webEnabled: webEnabled, browserPolicy: this.extensions.browserPolicy, skills: this.extensions.skills };
       await this.commitSettings(candidate);
     });
+  }
+  async setBrowserPolicy(policy: BrowserPolicy): Promise<void> {
+    if (!this.status.ready || this.status.saveError) { throw new Error(this.status.saveError || 'Session is not ready.'); }
+    if (!['unset', 'enabled', 'disabled'].includes(policy)) { throw new Error('Invalid browser permission setting.'); }
+    // This field can change while the runtime is paused. Publish only this field, never an old transcript snapshot.
+    const candidate = this.snapshot();
+    candidate.extensions = candidate.extensions || defaultExtensions();
+    candidate.extensions.browserPolicy = policy;
+    await this.commitCandidate(candidate, () => {
+      if (!this.data.extensions) { this.data.extensions = defaultExtensions(); }
+      this.data.extensions.browserPolicy = policy;
+    });
+    await this.persist();
+    this.publish('snapshot');
   }
   async saveSkill(originalName: string, document: string, files: SkillFile[]): Promise<boolean> {
     return this.mutate(t("保存 Skill 失败："), async () => {
@@ -1079,14 +1113,14 @@ export class SessionService {
     }
     return changed;
   }
-  private async replaceActive(id: string): Promise<void> {
-    if (this.data.activeThreadId !== id) { return; }
-    const projectId = this.requireThread(id).projectId;
-    const next = this.data.threads.find((item) => item.id !== id && !item.archived && item.projectId === projectId) ||
-      this.data.threads.find((item) => item.id !== id && !item.archived) || this.freshThread();
-    await this.ensureThreadWorkspace(next);
-    if (!this.data.threads.some((item) => item.id === next.id)) { this.data.threads.unshift(next); }
-    this.data.activeThreadId = next.id; this.status.contextStatus = '';
+  private async replaceActive(ids: Set<string>, candidate: AppData): Promise<void> {
+    if (!ids.has(candidate.activeThreadId)) { return; }
+    const projectId = this.active.projectId;
+    const remaining = candidate.threads.filter((item) => !ids.has(item.id) && !item.archived);
+    const next = remaining.find((item) => item.projectId === projectId) || remaining[0] || this.freshThread();
+    await this.ensureThreadWorkspace(next, candidate);
+    if (!candidate.threads.some((item) => item.id === next.id)) { candidate.threads.unshift(next); }
+    candidate.activeThreadId = next.id;
   }
   private async mutate(prefix: string, action: () => Promise<void>): Promise<boolean> {
     if (!this.canMutate) { return false; }

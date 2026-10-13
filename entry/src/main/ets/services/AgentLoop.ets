@@ -27,6 +27,12 @@ export interface AgentTools {
   beforeFinish?(cancellation: Cancellation): Promise<string | undefined>;
 }
 
+export interface ExecutionGate {
+  wait(cancellation: Cancellation): Promise<void>;
+  release(cancellation: Cancellation): void;
+  refreshResult?(call: ToolCall, output: string, cancellation: Cancellation): Promise<string>;
+}
+
 export interface ToolInvocationContext {
   execution: ToolExecution;
   executeChild: (child: ToolExecution, tools: AgentTools, cancellation: Cancellation) => Promise<void>;
@@ -42,6 +48,8 @@ export interface LoopEvent {
 }
 
 export interface LoopObserver {
+  waitForExecution?: (cancellation: Cancellation) => Promise<void>;
+  refreshToolResult?: (call: ToolCall, output: string, cancellation: Cancellation) => Promise<string>;
   toolActivity?: (requestId: string, activity: UsageToolActivity) => void;
   event: (event: LoopEvent) => void;
   checkpoint: () => Promise<void>;
@@ -78,6 +86,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
   let recoveryAttempted = false;
   try {
     for (let round = 0; round < limit; round++) {
+      await observer.waitForExecution?.(cancellation);
       cancellation.check();
       const pending = observer.steering?.peek();
       if (pending) {
@@ -108,21 +117,26 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
       let acceptingText = true;
       let response: ModelTurn;
       try {
-        response = await requestWithRetry(step, () => context.model.stream(messages, definitions, cancellation, (text: string) => {
-          if (!acceptingText || cancellation.cancelled) { return; }
-          if (step.content.length === 0 && turn.content.length > 0) { turn.content += '\n\n'; }
-          step.content += text;
-          turn.content += text;
-          observer.event({ type: 'text_delta', step: round, delta: text });
-        }, {
-          usageStep: round + 1,
-          onReasoning: (text: string) => {
+        response = await requestWithRetry(step, async () => {
+          await observer.waitForExecution?.(cancellation);
+          cancellation.check();
+          return context.model.stream(messages, definitions, cancellation, (text: string) => {
             if (!acceptingText || cancellation.cancelled) { return; }
-            step.reasoningContent = (step.reasoningContent || '') + text;
-            observer.event({ type: 'reasoning_delta', step: round, delta: text });
-          } }), cancellation, observer.checkpoint, () => observer.event({ type: 'request_retry', step: round }))
+            if (step.content.length === 0 && turn.content.length > 0) { turn.content += '\n\n'; }
+            step.content += text;
+            turn.content += text;
+            observer.event({ type: 'text_delta', step: round, delta: text });
+          }, {
+            usageStep: round + 1,
+            onReasoning: (text: string) => {
+              if (!acceptingText || cancellation.cancelled) { return; }
+              step.reasoningContent = (step.reasoningContent || '') + text;
+              observer.event({ type: 'reasoning_delta', step: round, delta: text });
+            } });
+        }, cancellation, observer.checkpoint, () => observer.event({ type: 'request_retry', step: round }))
           .finally(() => { acceptingText = false; });
       } catch (error) {
+        await observer.waitForExecution?.(cancellation);
         cancellation.check();
         if (!(error instanceof ContextOverflowError)) { throw error as Error; }
         step.requestError = 'context_overflow';
@@ -134,6 +148,8 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
         recoveryAttempted = true; recoveryPending = true;
         continue;
       }
+      cancellation.check();
+      await observer.waitForExecution?.(cancellation);
       cancellation.check();
       // The provider's final message is authoritative even when it emitted no deltas.
       context.recordResponse?.(response);
@@ -207,8 +223,15 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
         throw new Error(t("已达到本轮 {0} 次模型调用上限，执行已停止。你可以继续发送指令。", [limit]));
       }
       await executeToolBatch(step, round, context.tools, definitions, cancellation, observer, context.toolExecution);
+      await observer.waitForExecution?.(cancellation);
       step.toolReminder = repeatReminder.observe(step);
       if (step.toolReminder) { await observer.checkpoint(); cancellation.check(); }
+      for (const tool of step.tools) {
+        if (tool.status === 'complete' && observer.refreshToolResult) {
+          tool.output = await observer.refreshToolResult(tool.call, tool.output, cancellation);
+        }
+      }
+      await observer.waitForExecution?.(cancellation);
       messages.push(...stepMessages(step, false));
       observer.event({ type: 'step_end', step: round });
     }

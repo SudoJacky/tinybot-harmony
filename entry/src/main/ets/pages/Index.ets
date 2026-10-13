@@ -2,6 +2,8 @@ import { AppMaterials } from '../common/AppMaterials';
 import { monochromeProviderLogo, providerLogo } from '../common/ProviderBrand';
 import { WebUiDemoPanel } from '../views/WebUiDemoPanel';
 import { WebUiPreflightHost } from '../views/WebUiPreflightHost';
+import { BrowserPanel } from '../views/BrowserPanel';
+import { BrowserSession } from '../services/BrowserSession';
 import { t } from '../model/I18n';
 import { ProductivityPanel } from '../views/ProductivityPanel';
 import { ModelSettingsPanel } from '../views/AssistantPanel';
@@ -52,6 +54,8 @@ struct Index {
   private paths: NavPathStack = new NavPathStack();
   private session?: SessionService;
   @State private approval: ToolApproval = new ToolApproval();
+  @State private browser: BrowserSession = new BrowserSession();
+  @State private browserExpanded: boolean = false;
   private receiving: boolean = false;
   private ratingOpen: boolean = false;
   private unsubscribeLaunch?: () => void;
@@ -62,7 +66,7 @@ struct Index {
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     if (!this.session) {
-      this.session = createNativeSessionService(context.filesDir, context.getApplicationContext().filesDir, this.approval, context);
+      this.session = createNativeSessionService(context.filesDir, context.getApplicationContext().filesDir, this.approval, context, this.browser);
       this.session.subscribe((event) => {
         if (event.state.ready && event.state.phase === 'idle' && !event.state.saveError && ShareInbox.peek()) { this.receiveShare(); }
       });
@@ -117,6 +121,7 @@ struct Index {
   }
 
   onBackPress(): boolean {
+    if (this.browserExpanded) { this.browserExpanded = false; return true; }
     if (this.drawerOpen || this.drawerDragging) {
       this.setDrawer(false);
       return true;
@@ -265,6 +270,7 @@ struct Index {
     } else if (name === 'settings') {
       NavDestination() {
         SettingsPanel({ app: this.app, settings: this.app.settings,
+          browser: this.browser,
           onUsage: () => { this.paths.pushPath({ name: 'usage' }); },
           onModels: () => { this.paths.pushPath({ name: 'model-settings' }); },
           onSearch: () => { this.paths.pushPath({ name: 'search-settings' }); },
@@ -427,7 +433,7 @@ struct Index {
   }
 
   build() {
-    Column() {
+    Stack() {
       ForEach([this.locale], (_locale: string) => {
     Stack() {
     Navigation(this.paths) {
@@ -436,11 +442,12 @@ struct Index {
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         Column() {
           if (this.app.ready) {
-            ChatPanel({ app: this.app, thread: this.app.active, approval: this.approval, onSettings: () => this.openSettings(),
+            ChatPanel({ app: this.app, thread: this.app.active, approval: this.approval, browser: this.browser,
+                onBrowser: () => { this.browserExpanded = true; }, onSettings: () => this.openSettings(),
                 topInset: CHAT_HEADER_HEIGHT,
                 onHeaderProgress: (progress: number): void => { this.headerProgress = progress; },
                 voiceRequest: this.voiceRequest, onVoiceShortcutConsumed: () => { this.voiceRequest = ''; },
-                activeThreadId: this.app.active.id, speechEnabled: this.chatVisible && !this.drawerOpen && !this.drawerDragging,
+                activeThreadId: this.app.active.id, speechEnabled: this.chatVisible && !this.drawerOpen && !this.drawerDragging && !this.browserExpanded,
                 onHistoryDragStart: (event: GestureEvent) => this.startDrawerDrag(event, true),
                 onHistoryDragUpdate: (event: GestureEvent) => this.updateDrawerDrag(event),
                 onHistoryDragEnd: (event: GestureEvent) => this.endDrawerDrag(event),
@@ -480,6 +487,9 @@ struct Index {
     }
     }.width('100%').height('100%')
       }, (locale: string) => locale)
+      BrowserPanel({ browser: this.browser, expanded: this.browserExpanded,
+        onSettings: () => { this.browserExpanded = false; this.openSettings(); },
+        onDismiss: () => { this.getUIContext().getFocusController().clearFocus(); this.browserExpanded = false; } })
     }.width('100%').height('100%')
   }
 }

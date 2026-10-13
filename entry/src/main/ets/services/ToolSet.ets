@@ -12,7 +12,12 @@ export class ToolSet implements AgentTools {
 
   constructor(groups: AgentTools[]) {
     this.groups = groups.slice();
-    for (const group of groups) {
+    this.refresh();
+  }
+
+  private refresh(): void {
+    this.entries.clear(); this.catalog = [];
+    for (const group of this.groups) {
       for (const definition of group.definitions()) {
         const name = definition.function.name;
         if (this.entries.has(name)) { throw new ToolFailure('INTERNAL_ERROR', t("工具名称重复：") + name, 'inspect_error'); }
@@ -22,10 +27,11 @@ export class ToolSet implements AgentTools {
     }
   }
 
-  definitions(): ToolDefinition[] { return this.catalog.slice(); }
+  definitions(): ToolDefinition[] { this.refresh(); return this.catalog.slice(); }
 
   async execute(call: ToolCall, cancellation: Cancellation, context?: ToolInvocationContext): Promise<string> {
     cancellation.check();
+    this.refresh();
     const group = this.entries.get(call.function.name);
     if (!group) { throw new ToolFailure('TOOL_UNAVAILABLE', t("工具未启用或不存在：") + call.function.name, 'check_available_tools'); }
     return group.execute(call, cancellation, context);

@@ -10,6 +10,7 @@ const tree = ts.createSourceFile(emitted, fs.readFileSync(emitted, 'utf8'), ts.S
 const cls = name => tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === name);
 let mount, saveProject;
 const rowUpdates = [];
+let checkboxUpdate, rowClick;
 function visit(node) {
   if (ts.isCallExpression(node) && node.expression.getText(tree) === 'this.observeComponentCreation2' &&
       node.arguments[1]?.getText(tree) === 'ForEach' && node.arguments[0].getText(tree).includes('ListItemGroup.create')) mount = node.getText(tree);
@@ -24,11 +25,17 @@ editorVisit(cls('ThreadList').members.find(n => n.name?.getText(tree) === 'proje
 function rowVisit(node) {
   if (ts.isCallExpression(node) && node.expression.getText(tree) === 'this.observeComponentCreation2' &&
     node.arguments[1]?.getText(tree) === 'Text' && node.arguments[0].getText(tree).includes('Text.create(this.thread.displayTitle)')) rowUpdates.push(node.getText(tree));
+  if (ts.isCallExpression(node) && node.expression.getText(tree) === 'this.observeComponentCreation2' &&
+    node.arguments[1]?.getText(tree) === 'Checkbox') checkboxUpdate = node.getText(tree);
+  if (ts.isCallExpression(node) && node.expression.getText(tree) === 'Row.onClick' &&
+    node.arguments[0].getText(tree).includes('this.onSelectionChanged')) rowClick = node.arguments[0].getText(tree);
   ts.forEachChild(node, rowVisit);
 }
 rowVisit(cls('ThreadRow')); assert.equal(rowUpdates.length, 1);
+assert.ok(checkboxUpdate && rowClick, 'Locate real checkbox and selection click callbacks');
 let serial = 0, current, initial;
 const effects = new Map(), lists = new Map(), branches = new Map(), texts = new Map(), groups = new Set(), readers = new Set(), menuItems = new Map();
+let checkboxSelected, checkboxChange;
 class ViewPU {
   finalizeConstruction() {}
   observeComponentCreation2(callback) { const id = ++serial; effects.set(id, callback); this.run(id, true); }
@@ -51,13 +58,18 @@ const globals = { exports: {}, ViewPU, t: key => key, Motion: {}, Space: {}, Btn
 for (const name of ['ForEach','If','ListItem','Row','Stack','SymbolGlyph','Button','Menu','MenuItem']) globals[name] = noop;
 globals.MenuItem = new Proxy({}, { get: (_, key) => key === 'create' ? value => menuItems.set(current, value) : () => {} });
 for (const name of ['ButtonType','Color','Alignment','FontWeight','TextOverflow']) globals[name] = {};
-const names = ['filtered','sections','sectionThreads','sectionTitle','groupOpen','visibleCount','onActivePath','lastBranch','loadMore','toggleGroup','sectionHeader','projectActions'];
+globals.CheckBoxShape = {};
+globals.Checkbox = new Proxy({}, { get: (_, key) => key === 'select' ? value => { checkboxSelected = value; } :
+  key === 'onChange' ? callback => { checkboxChange = callback; } : () => {} });
+const names = ['filtered','sections','sectionThreads','sectionTitle','groupOpen','visibleCount','onActivePath','lastBranch','loadMore','toggleGroup','sectionHeader','projectActions',
+  'locked','endSelection','selectThread','allSelected','selectAll','archiveSelected','confirmDeleteSelected'];
 vm.runInNewContext(ts.transpileModule(`${cls('ThreadSection').getText(tree)}
 class Sidebar extends ViewPU { ${cls('ThreadList').members.filter(n => names.includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')}
 mount() { ${mount}; } saveFromEditor() { return (${saveProject})(); } }
 class RowProbe extends ViewPU {
-${cls('ThreadRow').members.filter(n => ['active', 'actions'].includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')}
+${cls('ThreadRow').members.filter(n => ['active', 'actions', 'locked'].includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')}
 mount() { ${rowUpdates.join(';')}; this.actions(); }
+mountSelection() { ${checkboxUpdate}; } selectFromRow() { return (${rowClick})(); }
 }
 exports.Sidebar = Sidebar; exports.RowProbe = RowProbe;`, { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, globals);
 const cache = new Map();
@@ -87,6 +99,7 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
     return Reflect.get(target, key, receiver);
   } });
   const sidebar = Object.assign(new globals.exports.Sidebar(), { app: observedApp, query: '', archived: false, visibleCounts: {}, collapsedProjects: [] });
+  sidebar.selecting = false; sidebar.selectedIds = [];
   sidebar.mount(); const groupIds = [...groups];
   const countId = [...texts].find(([, value]) => value === '3')[0];
   const rowListId = [...lists].find(([, ids]) => ids.includes('one'))[0];
@@ -157,4 +170,47 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
   button.updateStateVars({ icon: button.icon, tint: button.tint, fill: button.fill, disabled: false, label: '新对话 · Renamed' }); button.flush();
   assert.equal(accessibilityLabel, '新对话 · Renamed', 'Retained project buttons must update their accessibility names');
   console.log('PASS retained sidebar: rename, pin/unpin labels and ordering, delete/archive/restore, new chat, project create/edit and filtered-view creation');
+
+  const batchData = seed();
+  batchData.threads = Array.from({ length: 25 }, (_, i) => ({ ...batchData.threads[0], id: 'batch-' + i, title: i < 2 ? 'Match' : 'Other', draft: '' }));
+  batchData.activeThreadId = 'batch-0';
+  const batch = new Fixture(batchData), batchApp = new ChatViewModel(); await batchApp.initialize(batch.session);
+  const selection = Object.assign(new globals.exports.Sidebar(), { app: batchApp, query: '', archived: false,
+    selecting: true, selectedIds: [], visibleCounts: {}, collapsedProjects: [''] });
+  selection.selectAll();
+  assert.equal(selection.selectedIds.length, 25, 'Select all includes collapsed groups and unloaded rows');
+  selection.selectAll(); assert.equal(selection.selectedIds.length, 0);
+  selection.query = 'Match'; selection.selectAll();
+  assert.deepEqual(Array.from(selection.selectedIds), ['batch-0', 'batch-1'], 'Select all respects search');
+  const selectionRow = Object.assign(new globals.exports.RowProbe(), { app: batchApp, thread: batchApp.threads[0], selecting: true,
+    onSelectionChanged: value => selection.selectThread('batch-0', value) });
+  Object.defineProperty(selectionRow, 'selected', { get() { if (current !== undefined) readers.add(current); return selection.selectedIds.includes('batch-0'); } });
+  selectionRow.mountSelection(); assert.equal(checkboxSelected, true);
+  await selectionRow.selectFromRow(); selectionRow.flush();
+  assert.equal(checkboxSelected, false, 'Tapping a selected row updates its retained checkbox');
+  assert.equal(batchApp.active.id, 'batch-0', 'Selection never navigates away');
+  checkboxChange(true); selectionRow.flush(); assert.equal(checkboxSelected, true);
+  await selection.archiveSelected();
+  assert.equal(selection.selecting, false); assert.equal(selection.selectedIds.length, 0);
+  assert.equal(batchApp.filteredThreads('Match', false).length, 0);
+  assert.equal(batchApp.filteredThreads('Match', true).length, 2);
+  assert.ok(!['batch-0', 'batch-1'].includes(batchApp.active.id));
+  selection.archived = true; selection.selecting = true; selection.selectAll(); await selection.archiveSelected();
+  assert.equal(batchApp.filteredThreads('Match', false).length, 2, 'Archive tab batch action restores selected chats');
+  selection.archived = false; selection.selecting = true; selection.selectAll();
+  const selectedBeforeFailure = Array.from(selection.selectedIds), savedBeforeFailure = batch.repository.saved;
+  batch.repository.beforeSave = async () => { throw Error('batch save failure'); };
+  await selection.archiveSelected();
+  assert.equal(selection.selecting, true); assert.deepEqual(Array.from(selection.selectedIds), selectedBeforeFailure);
+  assert.equal(batch.repository.saved, savedBeforeFailure);
+  batch.repository.beforeSave = async () => {};
+  let dialog;
+  selection.getUIContext = () => ({ showAlertDialog: value => { dialog = value; } });
+  selection.confirmDeleteSelected();
+  assert.ok(dialog); assert.equal(batchApp.filteredThreads('Match', false).length, 2, 'Delete requires confirmation');
+  dialog.primaryButton.action(); assert.equal(batchApp.filteredThreads('Match', false).length, 2, 'Cancelling keeps chats');
+  await dialog.secondaryButton.action();
+  assert.equal(batchApp.filteredThreads('Match', false).length, 0); assert.equal(selection.selecting, false);
+  assert.equal(batchApp.threads.length, 23);
+  console.log('PASS batch selection: retained checkbox, row taps, filtered/all/unloaded selection, archive, restore, delete confirmation and retry after save failure');
 })().catch(error => { console.error(error); process.exitCode = 1; });

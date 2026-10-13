@@ -2,6 +2,7 @@ import { AppMaterials } from '../common/AppMaterials';
 import { t } from '../model/I18n';
 import { AppLanguage } from '../model/I18n';
 import { LanguagePreferences } from '../services/LanguagePreferences';
+import { BrowserSession } from '../services/BrowserSession';
 import { ChatViewModel, SettingsViewModel } from '../viewmodel/ChatViewModel';
 import { ProviderInfo } from '../model/Provider';
 import { ProviderProfile } from '../model/ProviderProfiles';
@@ -21,6 +22,7 @@ export struct SettingsPanel {
   @State private assistantSaving: boolean = false;
   @ObjectLink app: ChatViewModel;
   @ObjectLink settings: SettingsViewModel;
+  @ObjectLink browser: BrowserSession;
   onEditProvider: (id: string, preset: string) => void = () => {};
   onSkills: () => void = () => {};
   onUserDocument: () => void = () => {};
@@ -202,6 +204,17 @@ export struct SettingsPanel {
         SectionHeader({ title: t('工具与扩展') })
         GroupCard() {
           Column() {
+            SwitchRow({ title: t('应用内浏览器'), compId: 'browser-enabled', isOn: this.browser.policy === 'enabled',
+              subtitle: this.browser.policy === 'unset' ? t('默认关闭，首次需要时询问。') : this.browser.policy === 'disabled' ? t('已关闭，助手不会再次请求启用。') : t('允许助手操作网页；你可以随时接管。'),
+              disabled: this.browser.permissionSaving || !this.app.ready || this.app.saveError.length > 0,
+              onChange: async (value: boolean) => { try { await this.browser.setEnabled(value); }
+                catch (error) { this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: (error as Error).message }); } } })
+            if (this.browser.policy === 'unset') {
+              Button(t('不再询问启用')).id('browser-disable-requests').attributeModifier(Btn.textSmall).enabled(!this.browser.permissionSaving)
+                .onClick(async () => { try { await this.browser.setEnabled(false); }
+                  catch (error) { this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: (error as Error).message }); } })
+            }
+            RowDivider()
             NavRow({ title: 'Skills', compId: 'open-skills', icon: $r('sys.symbol.wand_and_stars'),
               value: t('{0} 个已启用', [this.app.extensions.skills.filter((skill) => skill.enabled).length]),
               disabled: !this.canEdit(), onTap: () => this.onSkills() })
