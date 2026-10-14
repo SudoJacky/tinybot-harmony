@@ -8,6 +8,9 @@ import { WebUiSpec, parseWebUi, parseWebUiMessage, webUiHost, webUiAutoHeight, W
 import { webUiAssets } from '../services/WebUiAssets';
 import { Btn } from '../common/Theme';
 
+let activeWebViews: number = 0;
+let webViewSequence: number = 0;
+
 @Component
 export struct WebUiView {
   @Prop @Watch('restart') content: string = '';
@@ -15,26 +18,63 @@ export struct WebUiView {
   @Prop @Watch('sync') interactive: boolean = false;
   @Prop preflight: boolean = false;
   @Prop snapshotMode: boolean = false;
+  @Prop retainedHeight: number = 0;
+  onHeight: (height: number) => void = () => {};
+  @StorageLink('tinybot.foreground') @Watch('visibilityChanged') private foreground: boolean = true;
   onValidation: (error: string) => void = () => {};
   onSave: (values: UiValues) => Promise<UiValues> = async () => { throw new Error('Web UI save handler missing'); };
   @State private error: string = '';
   @State private ready: boolean = false;
   @State private heightValue: number = 360;
   @State private snapshot: image.PixelMap | undefined = undefined;
+  @State private renderWeb: boolean = false;
   private controller: webview.WebviewController = new webview.WebviewController();
   private ports: webview.WebMessagePort[] = [];
   private spec?: WebUiSpec;
   private mounted: boolean = false;
   private attached: boolean = false;
   private initialPageLoaded: boolean = false;
-  private visible: boolean = true;
+  private visible: boolean = false;
   private generation: number = 0;
   private timer: number = -1;
+  private releaseTimer: number = -1;
   private saving: boolean = false;
   private hostNavigationPending: boolean = false;
   private snapshotRequested: boolean = false;
-  aboutToAppear(): void { this.mounted = true; hilog.info(0x0000, 'TinybotWebUI', 'mount contentChars=%{public}d', this.content.length); }
-  aboutToDisappear(): void { this.mounted = false; this.attached = false; this.initialPageLoaded = false; this.generation++; this.closePorts(); this.snapshot?.release(); }
+  private instanceId: number = ++webViewSequence;
+  aboutToAppear(): void {
+    this.mounted = true;
+    try {
+      this.spec = parseWebUi(this.content);
+      this.heightValue = webUiAutoHeight(this.spec) && this.retainedHeight > 0 ? this.retainedHeight : this.spec.height;
+    } catch (error) { this.report(error as Error); return; }
+    this.visibilityChanged();
+  }
+  aboutToDisappear(): void { this.mounted = false; clearTimeout(this.releaseTimer); this.releaseWeb(); this.snapshot?.release(); }
+  private releaseWeb(): void {
+    this.attached = false; this.initialPageLoaded = false; this.hostNavigationPending = false;
+    this.generation++; this.closePorts(); this.ready = false;
+    if (this.renderWeb) {
+      activeWebViews--;
+      hilog.info(0x0000, 'TinybotWebUI', 'release instance=%{public}d generation=%{public}d webViews=%{public}d', this.instanceId, this.generation, activeWebViews);
+    }
+    this.renderWeb = false;
+  }
+  private visibilityChanged(): void {
+    clearTimeout(this.releaseTimer); this.releaseTimer = -1;
+    if (!this.mounted) { return; }
+    if (this.preflight || (this.visible && this.foreground)) {
+      if (!this.renderWeb && !this.error) {
+        this.controller = new webview.WebviewController(); this.renderWeb = true;
+        activeWebViews++;
+        hilog.info(0x0000, 'TinybotWebUI', 'activate instance=%{public}d generation=%{public}d webViews=%{public}d preflight=%{public}s', this.instanceId, this.generation, activeWebViews, String(this.preflight));
+      }
+    } else if (this.renderWeb && !this.saving) {
+      // Keep brief scroll reversals warm, then remove Web itself rather than only stopping our RAF wrapper.
+      this.releaseTimer = setTimeout(() => { this.releaseTimer = -1; if (this.mounted && (!this.visible || !this.foreground)) { this.releaseWeb(); } }, 600);
+    }
+    this.sync();
+  }
   private closePorts(): void {
     clearTimeout(this.timer);
     for (const port of this.ports) { port.close(); }
@@ -51,7 +91,8 @@ export struct WebUiView {
     this.closePorts(); this.ready = false; this.error = ''; this.snapshotRequested = false;
     const oldSnapshot = this.snapshot; this.snapshot = undefined; await oldSnapshot?.release();
     try {
-      this.spec = parseWebUi(this.content); this.heightValue = this.spec.height;
+      this.spec = parseWebUi(this.content);
+      if (!webUiAutoHeight(this.spec)) { this.heightValue = this.spec.height; }
       const assets = await webUiAssets(this.getUIContext().getHostContext() as common.UIAbilityContext, this.spec.library === 'three');
       if (!this.mounted || generation !== this.generation) { return; }
       const host = webUiHost(assets[0], assets[1]);
@@ -79,12 +120,12 @@ export struct WebUiView {
       hilog.info(0x0000, 'TinybotWebUI', 'connect message port');
       // loadData may use an opaque data: origin; transfer only to the verified top-level host.
       this.controller.postMessage('tinybot-web-port', [this.ports[1]], '*');
-      this.ports[0].postMessageEvent(JSON.stringify({ type: 'init', spec: this.spec, autoHeight: webUiAutoHeight(this.spec), values: this.values, active: this.preflight || (this.interactive && this.visible), preflight: this.preflight, snapshotMode: this.snapshotMode }));
+      this.ports[0].postMessageEvent(JSON.stringify({ type: 'init', spec: this.spec, autoHeight: webUiAutoHeight(this.spec), values: this.values, active: this.preflight || (this.interactive && this.visible && this.foreground), preflight: this.preflight, snapshotMode: this.snapshotMode }));
     } catch (error) { this.report(error as Error); }
   }
   private sync(): void {
     if (!this.mounted || !this.ports.length) { return; }
-    try { this.ports[0].postMessageEvent(JSON.stringify({ type: 'state', values: this.values, active: this.preflight || (this.interactive && this.visible) })); }
+    try { this.ports[0].postMessageEvent(JSON.stringify({ type: 'state', values: this.values, active: this.preflight || (this.interactive && this.visible && this.foreground) })); }
     catch (error) { this.report(error as Error); }
   }
   private async receive(data: webview.WebMessage, generation: number): Promise<void> {
@@ -96,6 +137,7 @@ export struct WebUiView {
       if (message.type === 'error') { throw new Error(message.message); }
       if (message.type === 'resize') {
         if (this.spec && webUiAutoHeight(this.spec)) { this.heightValue = Math.max(48, Math.min(800, Math.ceil(message.height as number))); }
+        this.onHeight(this.heightValue);
         return;
       }
       if (message.type === 'ready') {
@@ -123,13 +165,13 @@ export struct WebUiView {
         this.snapshot = pixel;
         this.onValidation(''); return;
       }
-      if (!this.interactive || !this.visible || this.saving) { throw new Error(t('当前无法保存，请等待任务结束后重试。')); }
+      if (!this.interactive || !this.visible || !this.foreground || this.saving) { throw new Error(t('当前无法保存，请等待任务结束后重试。')); }
       this.saving = true;
       try {
         const saved = await this.onSave(message.values as UiValues);
         hilog.info(0x0000, 'TinybotWebUI', 'state saved id=%{public}d keys=%{public}d', id, Object.keys(saved).length);
         if (this.mounted && generation === this.generation) { this.ports[0].postMessageEvent(JSON.stringify({ type: 'ack', id: id, values: saved })); }
-      } finally { this.saving = false; }
+      } finally { this.saving = false; this.visibilityChanged(); }
     } catch (error) {
       if (!this.mounted || generation !== this.generation) { return; }
       this.report(error as Error);
@@ -140,9 +182,10 @@ export struct WebUiView {
     Column({ space: 8 }) {
       if (this.error) {
         Text(this.error).fontSize(13).fontColor($r('app.color.danger')).copyOption(CopyOptions.LocalDevice)
-        Button(t('重新加载')).attributeModifier(Btn.textSmall).onClick(() => { this.restart(); })
-      } else if (!this.ready) { Text(t('正在加载交互内容…')).fontSize(13).fontColor($r('app.color.text_secondary')) }
-      Stack() {
+        Button(t('重新加载')).attributeModifier(Btn.textSmall).onClick(() => { this.error = ''; this.visibilityChanged(); this.restart(); })
+      }
+      Stack({ alignContent: Alignment.TopStart }) {
+      if (this.renderWeb) {
       Web({ src: 'about:blank', controller: this.controller })
         .width('100%').height(this.heightValue).javaScriptAccess(true).domStorageAccess(false).databaseAccess(false)
         .fileAccess(false).onlineImageAccess(false).blockNetwork(true)
@@ -167,9 +210,13 @@ export struct WebUiView {
         .onErrorReceive((event) => { if (event.request.isMainFrame()) { this.report(new Error(event.error.getErrorInfo())); } else { hilog.error(0x0000, 'TinybotWebUI', 'resource error=%{public}s', event.error.getErrorInfo()); } })
         .onPermissionRequest((event) => { event.request.deny(); })
         .onRenderExited(() => { this.report(new Error(t('交互内容渲染进程已退出，请重试。'))); })
-        .onVisibleAreaChange([0], (visible: boolean) => { this.visible = visible; this.sync(); })
+      }
       if (this.snapshot) { Image(this.snapshot).width('100%').height(this.heightValue).objectFit(ImageFit.Fill) }
+      if (!this.ready && !this.error) {
+        Text(t('正在加载交互内容…')).fontSize(13).fontColor($r('app.color.text_secondary')).hitTestBehavior(HitTestMode.None)
+      }
       }.width('100%').height(this.heightValue)
     }.width('100%').alignItems(HorizontalAlign.Start)
+      .onVisibleAreaChange([0], (visible: boolean) => { this.visible = visible; this.visibilityChanged(); })
   }
 }

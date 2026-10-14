@@ -19,6 +19,8 @@ $env:DEVECO_STUDIO_HOME = $StudioPath
 if ($LASTEXITCODE -ne 0) { throw 'Search, delivery, references and runtime reliability tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-preview-publication.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Preview publication integration tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-preview-lifecycle.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Preview resource and lazy lifecycle tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-resources.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Resource management integration tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-memory.cjs')

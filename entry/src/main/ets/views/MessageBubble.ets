@@ -1,6 +1,7 @@
 import { AppMaterials } from '../common/AppMaterials';
 import { t } from '../model/I18n';
-import { stepDisplayContent } from '../model/PublishedPreview';
+import { stepDisplayContent, stepPreviews, PublishedPreview } from '../model/PublishedPreview';
+import { PublishedPreviewCard } from './PublishedPreviewCard';
 import { PresentedFile, deliveredFiles } from '../model/Deliverables';
 import { turnFileChanges } from '../model/TurnFileChanges';
 import { TurnChangesCard } from './TurnChangesCard';
@@ -351,6 +352,7 @@ export struct ImageViewer {
 
 @Component
 export struct MessageBubble {
+  @Prop latestPreviewIds: string[] = [];
   @Prop @Watch('syncWorkflow') turnStatus: string = '';
   @State private settled: boolean = false;
   @State private workflowCollapsed: boolean = false;
@@ -673,10 +675,15 @@ export struct MessageBubble {
               if (entry.kind === 'steering') {
                 this.steering(entry.step)
               } else if (entry.kind === 'text') {
-                InteractiveAnswer({ content: stepDisplayContent(this.message.stepViews[entry.step]), step: entry.step, selectable: false,
+                InteractiveAnswer({ content: this.message.stepViews[entry.step].content, step: entry.step, selectable: false,
                   validation: this.message.stepViews[entry.step]?.uiValidation || '',
-                  saved: this.message.uiStates, available: this.uiAvailable, onInteract: this.onUi,
+                  saved: this.message.uiStates, presentation: this.message.uiPresentation, available: this.uiAvailable, onInteract: this.onUi,
                   streaming: this.message.status === 'generating' && entry.step === this.message.stepViews.length - 1 })
+                ForEach(stepPreviews(this.message.id, this.message.stepViews[entry.step], entry.step, this.latestPreviewIds),
+                  (preview: PublishedPreview) => {
+                    PublishedPreviewCard({ preview: stepPreviews(this.message.id, this.message.stepViews[entry.step], entry.step, this.latestPreviewIds).find((item) => item.id === preview.id) as PublishedPreview,
+                      saved: this.message.uiStates, presentation: this.message.uiPresentation, available: this.uiAvailable, onInteract: this.onUi })
+                  }, (preview: PublishedPreview) => preview.id)
               } else {
                 ProcessGroup({ message: this.message, webEnabled: this.webEnabled, disclosure: this.message.disclosures.get(entry.key), groupKey: entry.key, richOnly: this.folded(),
                   onResume: this.onResume, onInspect: this.onInspect })
@@ -692,7 +699,7 @@ export struct MessageBubble {
           Text(this.retryStatus()).fontSize(13).fontColor($r('app.color.text_secondary')).id('request-retry-' + this.message.id)
         }
       } else if (this.message.content.length > 0) {
-        InteractiveAnswer({ content: this.message.content, saved: this.message.uiStates, available: this.uiAvailable, onInteract: this.onUi, streaming: this.message.status === 'generating', selectable: false })
+        InteractiveAnswer({ content: this.message.content, saved: this.message.uiStates, presentation: this.message.uiPresentation, available: this.uiAvailable, onInteract: this.onUi, streaming: this.message.status === 'generating', selectable: false })
       }
       if (this.hasExtra) {
         this.extra()

@@ -10,6 +10,8 @@ import { ModelReference } from '../model/ProviderProfiles';
 import { PendingInput } from '../model/PendingInput';
 import { t } from '../model/I18n';
 import { UiSavedState } from '../model/InteractiveUi';
+import { UiPresentation } from '../model/UiPresentation';
+import { latestPreviewIds } from '../model/PublishedPreview';
 import { DisclosureStore } from './DisclosureState';
 import { PlanProgressViewModel } from './PlanProgressViewModel';
 
@@ -52,6 +54,7 @@ export class AgentStepViewModel implements AgentStep {
 
 @Observed
 export class MessageViewModel {
+  uiPresentation: UiPresentation = new UiPresentation();
   plan: PlanProgressViewModel = new PlanProgressViewModel();
   uiStates: UiSavedState[] = [];
   references: ThreadReference[] = [];
@@ -89,6 +92,13 @@ export class MessageViewModel {
 
 @Observed
 export class ThreadViewModel {
+  latestPreviewIds: string[] = [];
+  refreshPreviews(): void {
+    const ids = latestPreviewIds(this.messages);
+    if (ids.length !== this.latestPreviewIds.length || ids.some((id, index) => id !== this.latestPreviewIds[index])) {
+      this.latestPreviewIds = ids;
+    }
+  }
   agentMode: AgentMode = 'full';
   disabledTools: string[] = [];
   projectId?: string;
@@ -139,5 +149,6 @@ export class ThreadViewModel {
       if (view) { view.update(message); return view; }
       return new MessageViewModel(message);
     });
+    this.refreshPreviews();
   }
 }

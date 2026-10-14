@@ -33,12 +33,17 @@ import { ContextDetails } from './ContextDetails';
 import { Btn, Font, Motion, Radius, Space, fileSize } from '../common/Theme';
 import { Banner, IconBadge, IconButton } from '../common/Widgets';
 import { WindowViewport } from '../viewmodel/WindowViewport';
+import { MessageListSource } from '../viewmodel/MessageListSource';
 import { SendFrame, SendOrigin } from '../common/SendBubbleMotion';
 
 @Component
 export struct ChatPanel {
-  @ObjectLink app: ChatViewModel;
-  @ObjectLink thread: ThreadViewModel;
+  @ObjectLink @Watch('syncMessages') app: ChatViewModel;
+  @ObjectLink @Watch('syncMessages') thread: ThreadViewModel;
+  private messageSource: MessageListSource = new MessageListSource();
+  private syncMessages(): void {
+    this.messageSource.update(this.thread.id, this.app.visibleMessages);
+  }
   @Prop topInset: number = 0;
   onHeaderProgress: (progress: number) => void = () => {};
   private lastHeaderProgress: number = -1;
@@ -115,6 +120,7 @@ export struct ChatPanel {
   }
 
   aboutToAppear(): void {
+    this.syncMessages();
     this.viewport.onKeyboard = (shown: boolean): void => {
       if (shown && this.composerFocused) { this.inspectingOutput = false; this.followOutput = true; this.follow(); }
     };
@@ -376,9 +382,9 @@ export struct ChatPanel {
               .onClick(() => { this.app.visibleMessageCount += 60; })
           }.width('100%')
         }
-        ForEach(this.app.visibleMessages, (message: MessageViewModel) => {
+        LazyForEach(this.messageSource, (message: MessageViewModel) => {
           ListItem() {
-            MessageBubble({ message: message, turnStatus: message.status, webEnabled: this.app.extensions.webEnabled, onOpenFile: this.onOpenFile, uiAvailable: !this.app.busy && !this.thread.archived,
+            MessageBubble({ message: message, latestPreviewIds: this.thread.latestPreviewIds, turnStatus: message.status, webEnabled: this.app.extensions.webEnabled, onOpenFile: this.onOpenFile, uiAvailable: !this.app.busy && !this.thread.archived,
               sendOrigin: this.sendingMessageId === message.id ? this.sendOrigin : undefined,
               onSendReady: (): void => { this.scroller.scrollEdge(Edge.Bottom); }, onSendFinish: (): void => { this.finishSendFlight(message.id); },
               readingMessageId: this.reading.messageId, onRead: (id: string) => this.readAnswer(id),
@@ -393,6 +399,7 @@ export struct ChatPanel {
             .backgroundColor(this.app.searchMessageId === message.id ? $r('app.color.accent_container') : Color.Transparent)
             .animation({ duration: Motion.medium, curve: Motion.standard })
             .transition(this.messageEnter(message))
+            .onAppear(() => { this.baseline.add(message.id); })
         }, (message: MessageViewModel) => this.thread.id + ":" + message.id)
         if (this.app.teams.some((run) => !run.ownerMessageId)) {
           ListItem() { ChatTeamCard({ app: this.app, onFiles: this.onFiles }) }.width('100%')
@@ -405,6 +412,7 @@ export struct ChatPanel {
       // Only the end of the transcript clears the floating controls; messages scroll behind them.
       .contentEndOffset(48)
       .scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring)
+      .cachedCount(1).maintainVisibleContentPosition(true)
       .onTouch((event: TouchEvent) => { if (event.type === TouchType.Down) { this.followOutput = false; } })
       .onReachEnd(() => { if (!this.inspectingOutput) { this.followOutput = true; } })
       .onDidScroll(() => { this.atBottom = this.scroller.isAtEnd(); this.updateHeaderProgress(); })

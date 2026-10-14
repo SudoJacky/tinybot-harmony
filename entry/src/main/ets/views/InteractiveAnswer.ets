@@ -11,9 +11,12 @@ import { Segmented } from '../common/Widgets';
 import { MarkdownView } from './MarkdownView';
 import { DataViewCard } from './DataViewCard';
 import { UiSceneView } from './UiSceneView';
+import { UiPresentation } from '../model/UiPresentation';
 
 @Component
 struct UiNodeView {
+  presentation?: UiPresentation;
+  surfaceKey: string = '';
   @Prop node: UiNode;
   @Prop nodes: UiNode[];
   @Prop values: UiValues;
@@ -50,7 +53,8 @@ struct UiNodeView {
   childrenView() {
     ForEach(this.children(), (child: UiNode) => {
       UiNodeView({ node: this.nodes.find((item: UiNode) => item.id === child.id) as UiNode, nodes: this.nodes, values: this.values, interactive: this.interactive,
-        ready: this.ready, snapshotMode: this.snapshotMode, onWebReady: this.onWebReady, layoutWidth: this.childWidth(), onWebSave: this.onWebSave, onEdit: this.onEdit, onAction: this.onAction, onCommit: this.onCommit, onInvalid: this.onInvalid })
+        ready: this.ready, snapshotMode: this.snapshotMode, onWebReady: this.onWebReady, presentation: this.presentation, surfaceKey: this.surfaceKey,
+        layoutWidth: this.childWidth(), onWebSave: this.onWebSave, onEdit: this.onEdit, onAction: this.onAction, onCommit: this.onCommit, onInvalid: this.onInvalid })
     }, (child: UiNode) => child.id)
   }
   build() {
@@ -141,6 +145,8 @@ struct UiNodeView {
         } else if (this.node.kind === 'web') {
           if (this.ready) {
           WebUiView({ content: this.node.data || '', values: this.values, interactive: this.interactive, onSave: this.onWebSave,
+            retainedHeight: this.presentation?.webHeights.get(this.surfaceKey + '/' + this.node.id) || 0,
+            onHeight: (height: number) => { this.presentation?.webHeights.set(this.surfaceKey + '/' + this.node.id, height); },
             snapshotMode: this.snapshotMode, preflight: this.snapshotMode, onValidation: (error: string) => this.onWebReady(this.node.id, error) })
           }
         } else if (this.node.kind === 'image') {
@@ -157,6 +163,7 @@ struct UiNodeView {
 
 @Component
 struct UiSurface {
+  presentation?: UiPresentation;
   @Prop @Watch('refresh') source: string;
   @Prop @Watch('refresh') closed: boolean;
   @Prop @Watch('refresh') streaming: boolean;
@@ -180,7 +187,12 @@ struct UiSurface {
   private mounted: boolean = false;
   private commitTimer: number = -1;
   aboutToAppear(): void { this.mounted = true; this.refresh(); }
-  aboutToDisappear(): void { this.mounted = false; clearTimeout(this.commitTimer); }
+  aboutToDisappear(): void {
+    this.mounted = false; clearTimeout(this.commitTimer);
+    if (this.dirty || this.invalid.length) {
+      this.presentation?.drafts.set(this.surfaceKey, { values: copyUiValues(this.values), dirty: this.dirty, invalid: this.invalid.slice() });
+    }
+  }
   private report(error: Error): void {
     this.error = error.message;
     hilog.error(0x0000, 'TinybotUI', 'surface=%{public}s chars=%{public}d closed=%{public}s streaming=%{public}s nodes=%{public}d error=%{public}s',
@@ -194,7 +206,9 @@ struct UiSurface {
       this.title = document.title; this.nodes = document.nodes.slice(); this.complete = document.complete && this.closed;
       if (!this.initialized && document.title) {
         const saved = this.saved.find((item) => item.key === this.surfaceKey);
-        this.values = copyUiValues(saved ? saved.values : document.initial); this.initialized = true;
+        const draft = this.presentation?.drafts.get(this.surfaceKey);
+        this.values = copyUiValues(draft ? draft.values : saved ? saved.values : document.initial);
+        this.dirty = draft?.dirty || false; this.invalid = draft?.invalid.slice() || []; this.initialized = true;
       }
       if (this.complete) { validateUiState(document, this.values); }
     } catch (error) { this.failed = true; this.complete = false; this.report(error as Error); }
@@ -204,6 +218,7 @@ struct UiSurface {
     validateUiState(this.compiler.document, values); this.busy = true; this.error = '';
     try {
       const saved = await this.onInteract(this.surfaceKey, copyUiValues(values), '');
+      this.presentation?.drafts.delete(this.surfaceKey);
       if (this.mounted) { this.values = saved; this.dirty = false; }
       return saved;
     } catch (error) { if (this.mounted) { this.report(error as Error); } throw error as Error; }
@@ -234,6 +249,7 @@ struct UiSurface {
         return;
       }
       const saved = await this.onInteract(this.surfaceKey, copyUiValues(this.values), action);
+      this.presentation?.drafts.delete(this.surfaceKey);
       if (this.mounted) { this.values = saved; this.dirty = false; }
     } catch (error) { if (this.mounted) { this.report(error as Error); } }
     finally { if (this.mounted) { this.busy = false; } }
@@ -247,6 +263,7 @@ struct UiSurface {
       ForEach(this.nodes.filter((node: UiNode) => !node.parent && uiNodeVisible(node, this.values)), (node: UiNode) => {
         UiNodeView({ node: this.nodes.find((item: UiNode) => item.id === node.id) as UiNode, nodes: this.nodes, values: this.values, interactive: this.complete && this.available && !this.busy,
           ready: this.complete && !this.streaming, snapshotMode: this.snapshotMode,
+          presentation: this.presentation, surfaceKey: this.surfaceKey,
           onWebReady: (id: string, error: string) => this.onWebReady(this.surfaceKey + '/' + id, error), onWebSave: (values: UiValues) => this.saveWeb(values),
           onEdit: (item: UiNode, value: UiValue, commit: boolean) => this.edit(item, value, commit),
           onAction: (id: string) => { this.interact(id); },
@@ -266,6 +283,8 @@ struct UiSurface {
 
 @Component
 export struct InteractiveAnswer {
+  presentation?: UiPresentation;
+  @Prop surfaceOffset: number = 0;
   @Prop snapshotMode: boolean = false;
   onWebReady: (id: string, error: string) => void = () => {};
   @Prop selectable: boolean = true;
@@ -289,7 +308,8 @@ export struct InteractiveAnswer {
             .fontSize(13).fontColor($r('app.color.text_secondary'))
         } else {
           UiSurface({ source: this.parts[index].content, closed: this.parts[index].closed, streaming: this.streaming, available: this.available,
-            surfaceKey: this.step + ':' + part.key, snapshotMode: this.snapshotMode, onWebReady: this.onWebReady, saved: this.saved, onInteract: this.onInteract })
+            surfaceKey: this.step + ':' + (Number(part.key) + this.surfaceOffset), presentation: this.presentation,
+            snapshotMode: this.snapshotMode, onWebReady: this.onWebReady, saved: this.saved, onInteract: this.onInteract })
         }
       }, (part: UiPart) => part.kind + '-' + part.key)
     }.width('100%').alignItems(HorizontalAlign.Start)
