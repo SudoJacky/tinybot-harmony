@@ -1,3 +1,4 @@
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { ModelChoice } from '../model/ProviderProfiles';
@@ -17,6 +18,7 @@ class ProviderGroup {
 
 @Component
 export struct ModelPickerPanel {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   onSelected: () => void = () => {};
   onSettings: () => void = () => {};
@@ -47,7 +49,7 @@ export struct ModelPickerPanel {
 
   @Builder
   groupHeader(name: string) {
-    Text(name).fontSize(13).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_secondary')).width('100%')
+    Text(name).fontFamily(this.appearance.fontFamily).fontSize(13).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_secondary')).width('100%')
       .padding({ left: 4, top: Space.lg, bottom: Space.sm }).backgroundColor($r('app.color.page_background'))
   }
 
@@ -55,15 +57,15 @@ export struct ModelPickerPanel {
   choiceRow(choice: ModelChoice) {
     Row({ space: Space.md }) {
       Column({ space: 3 }) {
-        Text(choice.modelId).fontSize(Font.body).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(choice.modelId).fontFamily(this.appearance.fontFamily).fontSize(Font.body).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           .fontWeight(this.isCurrent(choice) ? FontWeight.Medium : FontWeight.Normal)
-          .fontColor(this.isCurrent(choice) ? $r('app.color.accent') : $r('app.color.text_primary'))
+          .fontColor(this.isCurrent(choice) ? this.appearance.accent : $r('app.color.text_primary'))
         if (this.isDefault(choice)) {
-          Text(t("新对话默认")).fontSize(11).fontColor($r('app.color.text_tertiary'))
+          Text(t("新对话默认")).fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.text_tertiary'))
         }
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
       SymbolGlyph($r('sys.symbol.checkmark')).fontSize(18).width(20)
-        .fontColor([this.isCurrent(choice) ? $r('app.color.accent') : Color.Transparent])
+        .fontColor([this.isCurrent(choice) ? this.appearance.accent : Color.Transparent])
     }
     .id('choose-model-' + choice.providerId + '-' + choice.modelId)
     .width('100%').height(60).padding({ left: Space.lg, right: Space.md })
@@ -74,14 +76,15 @@ export struct ModelPickerPanel {
 
   build() {
     Column({ space: Space.sm }) {
-      Search({ value: this.query, placeholder: t("搜索服务或模型") }).id('model-search').height(40)
+      Search({ value: this.query, placeholder: t("搜索服务或模型") }).textFont({ family: this.appearance.fontFamily })
+        .placeholderFont({ family: this.appearance.fontFamily }).id('model-search').height(40)
         .backgroundColor($r('app.color.surface_variant')).placeholderColor($r('app.color.text_tertiary'))
         .onChange((value: string) => { this.query = value; })
       if (this.app.modelChoices.length === 0) {
         Column({ space: Space.md }) {
           SymbolGlyph($r('sys.symbol.cloud')).fontSize(36).fontColor([$r('app.color.text_tertiary')])
-          Text(t("尚无已启用的模型服务")).fontSize(15).fontColor($r('app.color.text_secondary'))
-          Button(t("添加模型服务")).id('picker-add-provider').attributeModifier(Btn.primary).onClick(() => this.onSettings())
+          Text(t("尚无已启用的模型服务")).fontFamily(this.appearance.fontFamily).fontSize(15).fontColor($r('app.color.text_secondary'))
+          Button(t("添加模型服务")).fontFamily(this.appearance.fontFamily).id('picker-add-provider').attributeModifier(Btn.primary).onClick(() => this.onSettings())
         }.layoutWeight(1).width('100%').justifyContent(FlexAlign.Center)
       } else {
         List() {
@@ -94,7 +97,7 @@ export struct ModelPickerPanel {
             .divider({ strokeWidth: 0.5, color: $r('app.color.divider'), startMargin: Space.lg })
           }, (group: ProviderGroup) => group.providerId + ':' + group.choices.length)
           ListItem() {
-            Text(t("空对话中的模型和推理强度会用于之后的新对话；已有消息的对话仅修改自身配置。")).fontSize(Font.caption).lineHeight(18)
+            Text(t("空对话中的模型和推理强度会用于之后的新对话；已有消息的对话仅修改自身配置。")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).lineHeight(18)
               .fontColor($r('app.color.text_tertiary')).width('100%').padding({ left: 4, top: Space.md, bottom: Space.xl })
           }
         }.layoutWeight(1).width('100%').scrollBar(BarState.Off).sticky(StickyStyle.None).edgeEffect(EdgeEffect.Spring)

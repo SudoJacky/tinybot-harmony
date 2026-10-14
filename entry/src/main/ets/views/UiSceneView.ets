@@ -1,8 +1,10 @@
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { UiScene, UiShape, parseUiScene } from '../model/UiScene';
 import { Btn } from '../common/Theme';
 // Declarative vectors, never arbitrary drawing scripts. Controls remain accessible native buttons.
 @Component
 export struct UiSceneView {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop @Watch('refresh') content: string = '';
   @Prop interactive: boolean = false;
   onAction: (id: string) => void = () => {};
@@ -33,7 +35,7 @@ export struct UiSceneView {
   }
   build() {
     Column({ space: 8 }) {
-      if (this.error) { Text(this.error).fontColor($r('app.color.danger')) }
+      if (this.error) { Text(this.error).fontFamily(this.appearance.fontFamily).fontColor($r('app.color.danger')) }
       else {
         Canvas(this.canvas).width('100%').aspectRatio(this.scene.width / this.scene.height).backgroundColor('#ffffff')
           .accessibilityText(this.scene.shapes.map((shape: UiShape) => shape.text || '').filter((label: string) => !!label).join(', '))
@@ -41,7 +43,7 @@ export struct UiSceneView {
           .onAreaChange((_old, area) => { this.canvasWidth = Number(area.width); if (this.ready) { this.draw(); } })
         Flex({ wrap: FlexWrap.Wrap }) {
           ForEach(this.controls(), (shape: UiShape) => {
-            Button(shape.text || shape.id).attributeModifier(Btn.tonalSmall).margin(4).enabled(this.interactive)
+            Button(shape.text || shape.id).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.tonalSmall).margin(4).enabled(this.interactive)
               .onClick(() => this.onAction(shape.action || ''))
           }, (shape: UiShape) => shape.id)
         }.width('100%')

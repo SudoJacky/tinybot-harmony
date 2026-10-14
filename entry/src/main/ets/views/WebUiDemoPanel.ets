@@ -1,3 +1,4 @@
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
 import { InteractiveAnswer } from './InteractiveAnswer';
@@ -7,6 +8,7 @@ import { Btn } from '../common/Theme';
 interface WebUiExample { content: string; }
 @Component
 export struct WebUiDemoPanel {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @State private examples: string[] = [];
   @State private selected: number = 0;
   @State private error: string = '';
@@ -32,10 +34,10 @@ export struct WebUiDemoPanel {
     Scroll() {
       Column({ space: 12 }) {
         Row({ space: 12 }) {
-          Button(t('三维场景')).attributeModifier(Btn.textSmall).onClick(() => { this.selected = 0; })
-          Button(t('二维动画')).attributeModifier(Btn.textSmall).onClick(() => { this.selected = 1; })
+          Button(t('三维场景')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.textSmall).onClick(() => { this.selected = 0; })
+          Button(t('二维动画')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.textSmall).onClick(() => { this.selected = 1; })
         }
-        if (this.error) { Text(this.error).fontColor($r('app.color.danger')) }
+        if (this.error) { Text(this.error).fontFamily(this.appearance.fontFamily).fontColor($r('app.color.danger')) }
         if (this.examples.length === 2) {
           ForEach([this.selected], (index: number) => {
             InteractiveAnswer({ content: this.examples[index], available: true,

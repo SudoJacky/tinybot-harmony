@@ -1,3 +1,4 @@
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { BrowserSession } from '../services/BrowserSession';
 import { NativeBrowserDriver } from '../services/NativeBrowserDriver';
 import { validateWebAddress } from '../services/WebTools';
@@ -9,6 +10,7 @@ import { KeyCode } from '@kit.InputKit';
 // Always keep this host mounted. Expanding changes presentation, never the Web instance.
 @Component
 export struct BrowserPanel {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink browser: BrowserSession;
   @Prop expanded: boolean = false;
   onDismiss: () => void = () => {};
@@ -31,9 +33,9 @@ export struct BrowserPanel {
         Row({ space: Space.sm }) {
           IconButton({ icon: $r('sys.symbol.chevron_down'), label: t('收起浏览器'), compId: 'browser-collapse', onTap: this.onDismiss })
           Column({ space: 2 }) {
-            Text(this.browser.title || t('应用内浏览器')).fontSize(16).fontWeight(FontWeight.Medium).maxLines(1)
+            Text(this.browser.title || t('应用内浏览器')).fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium).maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
-            Text(this.browser.owner === 'agent' ? t('Tinybot 正在使用浏览器') : this.browser.hasTask ? t('浏览器由你控制 · 任务已暂停') : t('浏览器由你控制'))
+            Text(this.browser.owner === 'agent' ? t('Tinybot 正在使用浏览器') : this.browser.hasTask ? t('浏览器由你控制 · 任务已暂停') : t('浏览器由你控制')).fontFamily(this.appearance.fontFamily)
               .fontSize(12).fontColor($r('app.color.text_secondary'))
           }.layoutWeight(1).alignItems(HorizontalAlign.Start)
           IconButton({ icon: $r('sys.symbol.gearshape'), label: t('设置'), compId: 'browser-settings', onTap: this.onSettings })
@@ -41,7 +43,7 @@ export struct BrowserPanel {
             onTap: () => { this.browser.close(); this.onDismiss(); } })
         }.width('100%').padding({ left: Space.sm, right: Space.sm, top: Space.sm })
         Row({ space: Space.sm }) {
-          TextInput({ text: this.browser.editingAddress || this.addressDirty ? this.address : this.browser.url, placeholder: t('网页地址') })
+          TextInput({ text: this.browser.editingAddress || this.addressDirty ? this.address : this.browser.url, placeholder: t('网页地址') }).fontFamily(this.appearance.fontFamily)
             .id('browser-address').layoutWeight(1).type(InputType.URL).enterKeyType(EnterKeyType.Go)
             .onFocus(() => { if (!this.addressDirty) { this.address = this.browser.url; } this.browser.editingAddress = true; })
             .onBlur(() => { this.browser.editingAddress = false; })
@@ -50,7 +52,7 @@ export struct BrowserPanel {
               this.address = value;
             })
             .onSubmit(() => this.navigate())
-          Button(t('打开')).id('browser-go').attributeModifier(Btn.textSmall).onClick(() => this.navigate())
+          Button(t('打开')).fontFamily(this.appearance.fontFamily).id('browser-go').attributeModifier(Btn.textSmall).onClick(() => this.navigate())
         }.padding({ left: Space.md, right: Space.md }).width('100%')
         Row({ space: Space.sm }) {
           IconButton({ icon: $r('sys.symbol.chevron_left'), label: t('上一页'), compId: 'browser-back',
@@ -60,19 +62,19 @@ export struct BrowserPanel {
           IconButton({ icon: $r('sys.symbol.arrow_clockwise'), label: t('重新加载'), compId: 'browser-reload', onTap: () => this.driver?.userReload() })
           Blank()
           if (this.browser.owner === 'agent') {
-            Button(t('接管浏览器')).id('browser-takeover').attributeModifier(Btn.tonal).onClick(() => this.browser.takeOver())
+            Button(t('接管浏览器')).fontFamily(this.appearance.fontFamily).id('browser-takeover').attributeModifier(Btn.tonal).onClick(() => this.browser.takeOver())
           }
           if (this.browser.owner === 'user' && this.browser.hasTask) {
-            Button(t('交还给 Tinybot')).id('browser-handoff').attributeModifier(Btn.primarySmall)
+            Button(t('交还给 Tinybot')).fontFamily(this.appearance.fontFamily).id('browser-handoff').attributeModifier(Btn.primarySmall)
               .onClick(() => { this.getUIContext().getFocusController().clearFocus(); this.browser.handoff(); })
           }
         }.width('100%').padding({ left: Space.sm, right: Space.md })
         if (this.browser.handoffReason) {
-          Text(this.browser.handoffReason).id('browser-handoff-reason').fontSize(13).fontColor($r('app.color.text_secondary'))
+          Text(this.browser.handoffReason).fontFamily(this.appearance.fontFamily).id('browser-handoff-reason').fontSize(13).fontColor($r('app.color.text_secondary'))
             .width('100%').padding({ left: Space.md, right: Space.md })
         }
         if (this.browser.error) {
-          Text(this.browser.error).id('browser-error').fontSize(13).fontColor($r('app.color.danger')).copyOption(CopyOptions.LocalDevice)
+          Text(this.browser.error).fontFamily(this.appearance.fontFamily).id('browser-error').fontSize(13).fontColor($r('app.color.danger')).copyOption(CopyOptions.LocalDevice)
             .width('100%').padding({ left: Space.md, right: Space.md })
         }
         Web({ src: 'about:blank', controller: this.driver.controller })
@@ -116,37 +118,38 @@ export struct BrowserPanel {
 
 @Component
 export struct BrowserStatusCard {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink browser: BrowserSession;
   onOpen: () => void = () => {};
   build() {
     Column({ space: Space.sm }) {
       if (this.browser.permissionPending) {
-        Text(t('允许启用应用内浏览器？')).id('browser-permission-title').fontSize(15).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
-        Text(this.browser.permissionReason).fontSize(13).fontColor($r('app.color.text_secondary'))
-        Text(this.browser.permissionUrl).fontSize(12).maxLines(2).fontColor($r('app.color.text_secondary'))
-        Text(t('你可以随时接管浏览器，也可以在设置中关闭。网页内容会发送给当前模型。')).fontSize(12).fontColor($r('app.color.text_secondary'))
+        Text(t('允许启用应用内浏览器？')).fontFamily(this.appearance.fontFamily).id('browser-permission-title').fontSize(15).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
+        Text(this.browser.permissionReason).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
+        Text(this.browser.permissionUrl).fontFamily(this.appearance.fontFamily).fontSize(12).maxLines(2).fontColor($r('app.color.text_secondary'))
+        Text(t('你可以随时接管浏览器，也可以在设置中关闭。网页内容会发送给当前模型。')).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
         Row({ space: Space.sm }) {
-          Button(t('保持关闭')).id('browser-permission-deny').attributeModifier(Btn.plainSmall).layoutWeight(1).enabled(!this.browser.permissionSaving)
+          Button(t('保持关闭')).fontFamily(this.appearance.fontFamily).id('browser-permission-deny').attributeModifier(Btn.plainSmall).layoutWeight(1).enabled(!this.browser.permissionSaving)
             .onClick(async () => { try { await this.browser.setEnabled(false); } catch (_) { /* The browser exposes the save error. */ } })
-          Button(t('允许并启用')).id('browser-permission-allow').attributeModifier(Btn.primarySmall).layoutWeight(1).enabled(!this.browser.permissionSaving)
+          Button(t('允许并启用')).fontFamily(this.appearance.fontFamily).id('browser-permission-allow').attributeModifier(Btn.primarySmall).layoutWeight(1).enabled(!this.browser.permissionSaving)
             .onClick(async () => { try { await this.browser.setEnabled(true); } catch (_) { /* The browser exposes the save error. */ } })
         }.width('100%')
       } else if (this.browser.open) {
         Button() {
           Row({ space: Space.sm }) {
-            SymbolGlyph($r('sys.symbol.connection')).fontSize(18).fontColor([$r('app.color.accent')])
+            SymbolGlyph($r('sys.symbol.connection')).fontSize(18).fontColor([this.appearance.accent])
             Column({ space: 2 }) {
-              Text(this.browser.owner === 'agent' ? t('Tinybot 正在使用浏览器') : this.browser.hasTask ? t('浏览器由你控制 · 任务已暂停') : t('浏览器由你控制'))
+              Text(this.browser.owner === 'agent' ? t('Tinybot 正在使用浏览器') : this.browser.hasTask ? t('浏览器由你控制 · 任务已暂停') : t('浏览器由你控制')).fontFamily(this.appearance.fontFamily)
                 .fontSize(13).fontColor($r('app.color.text_primary'))
-              Text(this.browser.handoffReason || this.browser.title || this.browser.url).fontSize(12).maxLines(1)
+              Text(this.browser.handoffReason || this.browser.title || this.browser.url).fontFamily(this.appearance.fontFamily).fontSize(12).maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_secondary'))
             }.layoutWeight(1).alignItems(HorizontalAlign.Start)
             SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(12).fontColor([$r('app.color.text_secondary')])
           }.width('100%')
-        }.id('open-agent-browser').attributeModifier(Btn.plainSmall).width('100%').onClick(this.onOpen)
+        }.fontFamily(this.appearance.fontFamily).id('open-agent-browser').attributeModifier(Btn.plainSmall).width('100%').onClick(this.onOpen)
       }
       if (this.browser.error) {
-        Text(this.browser.error).fontSize(12).fontColor($r('app.color.danger')).width('100%')
+        Text(this.browser.error).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.danger')).width('100%')
       }
     }.width('100%').padding(Space.sm).backgroundColor($r('app.color.surface_variant')).borderRadius(12)
   }

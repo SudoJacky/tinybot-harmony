@@ -15,10 +15,14 @@ if ($LASTEXITCODE -ne 0) { throw 'Locale validation failed. Run node scripts/bui
 & $nodePath (Join-Path $projectPath 'scripts/test-browser.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Browser permission, takeover and runtime pause tests failed.' }
 $env:DEVECO_STUDIO_HOME = $StudioPath
+& $nodePath (Join-Path $projectPath 'scripts/test-appearance.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Appearance preference and palette tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-harness-features.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Search, delivery, references and runtime reliability tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-preview-publication.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Preview publication integration tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-preview-lifecycle.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Preview resource and lazy lifecycle tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-resources.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Resource management integration tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-memory.cjs')
@@ -39,6 +43,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Team mode persistence and projection tests fai
 if ($LASTEXITCODE -ne 0) { throw 'Custom tool selection and inherited execution tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-custom-tools-renderer.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Custom tool selection UI callback tests failed. Build the app first.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-help-demo.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Help demo animation lifecycle tests failed. Build the app first.' }
 $env:DEVECO_SDK_HOME = Join-Path $StudioPath 'sdk'
 $env:JAVA_HOME = Join-Path $StudioPath 'jbr'
 $startedAt = Get-Date

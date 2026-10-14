@@ -1,4 +1,5 @@
-import { AnimatorResult } from '@kit.ArkUI';
+import { AppearanceStyle } from './AppearanceStyle';
+import { AnimatorResult, ColorMetrics } from '@kit.ArkUI';
 import { SpeechPhase } from '../services/SpeechInput';
 import { t } from '../model/I18n';
 import { Motion } from './Theme';
@@ -7,6 +8,7 @@ import { VoicePillAction, VoicePillGesture } from './VoicePillGesture';
 // ArkUI interpretation of the supplied VoicePill: anchored capsule, clock and activity history.
 @Component
 export struct VoicePill {
+  @StorageProp('tinybot.appearance.style') @Watch('syncColor') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop @Watch('syncPhase') phase: SpeechPhase = 'idle';
   @Prop speaking: boolean = false;
   @Prop startedAt: number = 0;
@@ -28,6 +30,13 @@ export struct VoicePill {
   private lastFrame: number = 0;
   private lastSample: number = 0;
   private color: string = '247,250,248';
+
+  private syncColor(): void {
+    if (!this.ready) { return; }
+    const color = ColorMetrics.resourceColor(this.appearance.onAccent);
+    this.color = `${color.red},${color.green},${color.blue}`;
+    this.draw(Date.now(), 0);
+  }
 
   aboutToDisappear(): void {
     clearTimeout(this.holdTimer); this.stopAnimation(); this.gestureState.reset(); this.ready = false;
@@ -133,31 +142,30 @@ export struct VoicePill {
           Canvas(this.canvas).width(64).height(22).accessibilityLevel('no')
             .onReady(() => {
               this.ready = true;
-              const value = this.getUIContext().getHostContext()!.resourceManager.getColorSync($r('app.color.on_accent').id);
-              this.color = `${(value >>> 16) & 255},${(value >>> 8) & 255},${value & 255}`;
+              this.syncColor();
               this.syncPhase();
             })
           Text(this.elapsed).id('speech-time').width(34).fontSize(12).fontWeight(FontWeight.Medium)
-            .fontFamily('monospace').fontColor($r('app.color.on_accent'))
+            .fontFamily('monospace').fontColor(this.appearance.onAccent)
           Blank().width(36)
         }.width(156).height(36).opacity(this.opened ? Math.max(0, 1 - this.pull / 64) : 0)
           .translate({ x: -this.pull * 0.45 }).hitTestBehavior(HitTestMode.None)
-        Text('‹ ' + t('取消')).width(116).margin({ right: 36 }).fontSize(12)
-          .fontColor($r('app.color.on_accent')).textAlign(TextAlign.Center).opacity(Math.min(1, this.pull / 64))
+        Text('‹ ' + t('取消')).fontFamily(this.appearance.fontFamily).width(116).margin({ right: 36 }).fontSize(12)
+          .fontColor(this.appearance.onAccent).textAlign(TextAlign.Center).opacity(Math.min(1, this.pull / 64))
           .hitTestBehavior(HitTestMode.None)
         Stack() {
           SymbolGlyph($r('sys.symbol.mic')).fontSize(19).fontColor([$r('app.color.text_secondary')])
             .opacity(this.opened ? 0 : 1).scale({ x: this.opened ? 0.7 : 1, y: this.opened ? 0.7 : 1 })
           if (this.phase === 'preparing' || this.phase === 'finishing') {
-            LoadingProgress().width(19).height(19).color($r('app.color.on_accent'))
+            LoadingProgress().width(19).height(19).color(this.appearance.onAccent)
           } else {
-            Rect().width(10).height(10).radius(2).fill($r('app.color.on_accent'))
+            Rect().width(10).height(10).radius(2).fill(this.appearance.onAccent)
               .opacity(this.opened ? 1 : 0).scale({ x: this.opened ? 1 : 0.6, y: this.opened ? 1 : 0.6 })
           }
         }.width(36).height(36).translate({ x: -this.pull * 0.2 }).hitTestBehavior(HitTestMode.None)
       }.width('100%').height(36)
-    }.id('start-speech').width(this.opened ? 156 : 36).height(36).padding(0).borderRadius(18).clip(true)
-      .backgroundColor(this.opened ? $r('app.color.accent') : $r('app.color.surface_variant'))
+    }.fontFamily(this.appearance.fontFamily).id('start-speech').width(this.opened ? 156 : 36).height(36).padding(0).borderRadius(18).clip(true)
+      .backgroundColor(this.opened ? this.appearance.accent : $r('app.color.surface_variant'))
       .scale({ x: this.pressed ? 0.95 : 1, y: this.pressed ? 0.95 : 1, centerX: '100%', centerY: '50%' })
       .enabled(!this.disabled).opacity(this.disabled ? 0.4 : 1)
       .responseRegion({ x: 0, y: -4, width: '100%', height: 44 })

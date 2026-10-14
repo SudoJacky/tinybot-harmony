@@ -1,3 +1,4 @@
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
 import { t } from '../model/I18n';
@@ -7,6 +8,7 @@ import { Banner, GroupCard, NavRow, RowDivider } from '../common/Widgets';
 
 @Component
 struct LicenseCard {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop item: ThirdPartyLicense;
   @State private expanded: boolean = false;
   @State private loading: boolean = false;
@@ -35,11 +37,11 @@ struct LicenseCard {
     GroupCard() {
       Column() {
         Column({ space: Space.sm }) {
-          Text(this.item.name).fontSize(Font.body).fontWeight(FontWeight.Medium)
+          Text(this.item.name).fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontWeight(FontWeight.Medium)
             .fontColor($r('app.color.text_primary')).width('100%')
-          Text(t('许可证：{0}', [this.item.license])).fontSize(Font.small)
+          Text(t('许可证：{0}', [this.item.license])).fontFamily(this.appearance.fontFamily).fontSize(Font.small)
             .fontColor($r('app.color.text_secondary')).width('100%')
-          Text(this.item.copyright).fontSize(Font.caption).lineHeight(20)
+          Text(this.item.copyright).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).lineHeight(20)
             .fontColor($r('app.color.text_secondary')).width('100%').copyOption(CopyOptions.LocalDevice)
         }.alignItems(HorizontalAlign.Start).width('100%').padding(Space.lg)
         RowDivider()
@@ -48,7 +50,7 @@ struct LicenseCard {
           disabled: this.loading, onTap: () => this.toggle() })
         if (this.error) { Banner({ text: this.error, compId: 'license-error-' + this.item.id }) }
         if (this.expanded) {
-          Text(this.text).id('license-text-' + this.item.id).fontSize(Font.small).lineHeight(22)
+          Text(this.text).fontFamily(this.appearance.fontFamily).id('license-text-' + this.item.id).fontSize(Font.small).lineHeight(22)
             .fontColor($r('app.color.text_secondary')).width('100%').padding(Space.lg)
             .copyOption(CopyOptions.LocalDevice)
         }
@@ -59,10 +61,11 @@ struct LicenseCard {
 
 @Component
 export struct ThirdPartyLicensesPanel {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   build() {
     Scroll() {
       Column({ space: Space.md }) {
-        Text(t('感谢开源社区。本应用使用或参考了以下开源组件与设计，版权归各自权利人所有。展开可离线查看随应用附带的原文；各组件适用其自身许可证。'))
+        Text(t('感谢开源社区。本应用使用或参考了以下开源组件与设计，版权归各自权利人所有。展开可离线查看随应用附带的原文；各组件适用其自身许可证。')).fontFamily(this.appearance.fontFamily)
           .fontSize(Font.small).lineHeight(22).fontColor($r('app.color.text_secondary')).width('100%')
         ForEach(THIRD_PARTY_LICENSES, (item: ThirdPartyLicense) => {
           LicenseCard({ item: item })

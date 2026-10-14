@@ -1,6 +1,8 @@
 import { t, getLocale } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
 import { curves, window } from '@kit.ArkUI';
+import { SwitchSize } from './SwitchSize';
+import { currentAppearanceStyle } from './AppearanceStyle';
 // Shared design tokens and control styles for the phone UI. Colors live in resources (light/dark).
 
 // Motion tokens mirrored from the desktop workbench so both clients move alike. The system
@@ -70,19 +72,20 @@ export class AppButton implements AttributeModifier<ButtonAttribute> {
   }
 
   applyNormalAttribute(instance: ButtonAttribute): void {
+    const appearance = currentAppearanceStyle();
     const large = this.size >= 44;
     instance.type(ButtonType.Capsule).height(this.size).fontSize(large ? 15 : 13).fontWeight(FontWeight.Medium)
       .padding({ left: large ? 20 : 14, right: large ? 20 : 14 });
     if (this.kind === 'primary') {
-      instance.backgroundColor($r('app.color.accent')).fontColor($r('app.color.on_accent'));
+      instance.backgroundColor(appearance.accent).fontColor(appearance.onAccent);
     } else if (this.kind === 'tonal') {
-      instance.backgroundColor($r('app.color.accent_container')).fontColor($r('app.color.on_accent_container'));
+      instance.backgroundColor(appearance.accentContainer).fontColor(appearance.onAccentContainer);
     } else if (this.kind === 'danger') {
       instance.backgroundColor($r('app.color.danger_container')).fontColor($r('app.color.danger'));
     } else if (this.kind === 'plain') {
       instance.backgroundColor($r('app.color.surface_variant')).fontColor($r('app.color.text_primary'));
     } else {
-      instance.backgroundColor(Color.Transparent).fontColor($r('app.color.accent'));
+      instance.backgroundColor(Color.Transparent).fontColor(appearance.accent);
     }
   }
 }
@@ -112,9 +115,20 @@ export class AreaStyle implements AttributeModifier<TextAreaAttribute> {
   }
 }
 
+export class SwitchStyle implements AttributeModifier<ToggleAttribute> {
+  applyNormalAttribute(instance: ToggleAttribute): void {
+    const verticalInset = (SwitchSize.touchHeight - SwitchSize.nativeHeight) / 2;
+    instance.width(SwitchSize.nativeWidth).height(SwitchSize.nativeHeight)
+      .margin({ top: verticalInset, bottom: verticalInset })
+      .responseRegion({ x: (SwitchSize.nativeWidth - SwitchSize.touchWidth) / 2, y: -verticalInset,
+        width: SwitchSize.touchWidth, height: SwitchSize.touchHeight });
+  }
+}
+
 export class Styles {
   static readonly input: InputStyle = new InputStyle();
   static readonly area: AreaStyle = new AreaStyle();
+  static readonly toggle: SwitchStyle = new SwitchStyle();
 }
 
 const PROTOCOL_NAMES: Record<string, string> = {

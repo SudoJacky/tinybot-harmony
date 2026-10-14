@@ -1,4 +1,4 @@
-import { AppMaterials } from '../common/AppMaterials';
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { ChatViewModel, ThreadViewModel } from '../viewmodel/ChatViewModel';
@@ -17,6 +17,7 @@ class ThreadSection {
 
 @Component
 struct ThreadRow {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop query: string = '';
   @Prop lastBranch: boolean = false;
   @Prop activePath: boolean = false;
@@ -59,7 +60,7 @@ struct ThreadRow {
         MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.trash')).fontColor([$r('app.color.danger')]),
           content: t("删除") }).contentFontColor($r('app.color.danger'))
           .onClick(() => {
-            this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface,
+            this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface,
               title: t("删除这段对话？"), message: this.thread.title + t("\n会话工作区中的文件会保留。"),
               primaryButton: { value: t("取消"), action: () => {} },
               secondaryButton: { value: t("删除"), fontColor: $r('app.color.danger'),
@@ -73,14 +74,14 @@ struct ThreadRow {
   @Builder
   renameEditor() {
     Row({ space: 4 }) {
-      TextInput({ text: this.name, placeholder: t("对话名称") }).maxLength(80).layoutWeight(1).height(40)
+      TextInput({ text: this.name, placeholder: t("对话名称") }).fontFamily(this.appearance.fontFamily).maxLength(80).layoutWeight(1).height(40)
         .fontSize(15).backgroundColor($r('app.color.surface')).defaultFocus(true)
         .onChange((value: string) => { this.name = value; })
         .onSubmit(async () => { if (await this.app.renameThread(this.thread.id, this.name)) { this.editing = false; } })
       IconButton({ icon: $r('sys.symbol.xmark'), label: t("取消"), diameter: 36, iconSize: 18,
         tint: $r('app.color.text_secondary'), onTap: () => { this.editing = false; } })
       IconButton({ icon: $r('sys.symbol.checkmark'), label: t("保存名称"), diameter: 36, iconSize: 18,
-        tint: $r('app.color.accent'), disabled: this.locked(),
+        tint: this.appearance.accent, disabled: this.locked(),
         onTap: async () => { if (await this.app.renameThread(this.thread.id, this.name)) { this.editing = false; } } })
     }.width('100%').padding({ left: Space.sm, right: 4, top: 6, bottom: 6 })
   }
@@ -94,35 +95,35 @@ struct ThreadRow {
         Row({ space: Space.sm }) {
           if (this.selecting) {
             Checkbox({ name: this.thread.id }).id('thread-select-' + this.thread.id).select(this.selected)
-              .shape(CheckBoxShape.CIRCLE).selectedColor($r('app.color.accent')).width(22).height(22)
+              .shape(CheckBoxShape.CIRCLE).selectedColor(this.appearance.accent).width(22).height(22)
               .enabled(!this.locked()).accessibilityText(this.thread.displayTitle)
               .onChange((value: boolean) => { if (!this.locked()) { this.onSelectionChanged(value); } })
           }
           Column({ space: 4 }) {
             Row({ space: 4 }) {
               if (this.thread.pinned) {
-                SymbolGlyph($r('sys.symbol.pin_fill')).fontSize(13).fontColor([$r('app.color.accent')])
+                SymbolGlyph($r('sys.symbol.pin_fill')).fontSize(13).fontColor([this.appearance.accent])
               }
-              Text(this.thread.displayTitle).fontSize(15).maxLines(1).layoutWeight(1)
+              Text(this.thread.displayTitle).fontFamily(this.appearance.fontFamily).fontSize(15).maxLines(1).layoutWeight(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
                 .fontWeight(this.active() ? FontWeight.Medium : FontWeight.Normal)
-                .fontColor(this.active() ? $r('app.color.on_accent_container') : $r('app.color.text_primary'))
+                .fontColor(this.active() ? this.appearance.onAccentContainer : $r('app.color.text_primary'))
             }.width('100%')
-            if (this.query.trim()) { Text(this.snippet()).fontSize(12).maxLines(2).fontColor($r('app.color.accent')) }
-            if (this.thread.parentThreadId) { Text('↳ ' + (this.app.threads.find((item) => item.id === this.thread.parentThreadId)?.title || t("原对话已删除"))).fontSize(11).maxLines(1).fontColor($r('app.color.text_secondary')) }
+            if (this.query.trim()) { Text(this.snippet()).fontFamily(this.appearance.fontFamily).fontSize(12).maxLines(2).fontColor(this.appearance.accent) }
+            if (this.thread.parentThreadId) { Text('↳ ' + (this.app.threads.find((item) => item.id === this.thread.parentThreadId)?.title || t("原对话已删除"))).fontFamily(this.appearance.fontFamily).fontSize(11).maxLines(1).fontColor($r('app.color.text_secondary')) }
             Row({ space: 6 }) {
-              Text(shortTime(this.thread.updatedAt)).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
+              Text(shortTime(this.thread.updatedAt)).fontFamily(this.appearance.fontFamily).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
               if (this.thread.draft.length > 0) {
-                Text(t("草稿")).fontSize(11).fontColor($r('app.color.danger'))
+                Text(t("草稿")).fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.danger'))
               }
             }
           }.layoutWeight(1).alignItems(HorizontalAlign.Start)
           if (!this.selecting) {
             Button({ type: ButtonType.Circle }) {
               SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
-            }.width(32).height(32).backgroundColor(Color.Transparent).accessibilityText(t("对话管理"))
+            }.fontFamily(this.appearance.fontFamily).width(32).height(32).backgroundColor(Color.Transparent).accessibilityText(t("对话管理"))
             .enabled(!this.locked()).bindMenu(this.actions, {
-              systemMaterial: AppMaterials.surface, mask: false })
+              systemMaterial: this.appearance.surface, mask: false })
           }
         }
         .width('100%').padding({ left: Space.md, right: 4, top: 10, bottom: 10 })
@@ -132,18 +133,18 @@ struct ThreadRow {
           if (this.query.trim() ? await this.app.openMessage(this.thread.id, this.matchId(), this.query.trim()) : await this.app.selectThread(this.thread.id)) { this.onSelected(); }
         })
         .bindContextMenu(this.actions, ResponseType.LongPress, {
-          systemMaterial: AppMaterials.surface, mask: false })
+          systemMaterial: this.appearance.surface, mask: false })
       }
     }
     .width('calc(100% - 28vp)').borderRadius(Radius.md)
-    .backgroundColor((this.selecting ? this.selected : this.active()) ? $r('app.color.accent_container') : Color.Transparent)
+    .backgroundColor((this.selecting ? this.selected : this.active()) ? this.appearance.accentContainer : Color.Transparent)
     .opacity(this.locked() && !this.active() ? 0.6 : 1)
     .onAreaChange((_old: Area, area: Area) => { this.rowHeight = Number(area.height); })
     Shape() {
       Path().commands(`M12 0 V${this.lastBranch ? this.rowHeight / 2 - 8 : this.rowHeight} M12 ${this.rowHeight / 2 - 8} Q12 ${this.rowHeight / 2} 20 ${this.rowHeight / 2} H28`)
         .stroke($r('app.color.divider'))
       Path().commands(this.active() ? `M12 0 V${this.rowHeight / 2 - 8} Q12 ${this.rowHeight / 2} 20 ${this.rowHeight / 2} H28` : `M12 0 V${this.rowHeight}`)
-        .stroke($r('app.color.accent')).strokeDashArray([this.rowHeight + 28, this.rowHeight + 28])
+        .stroke(this.appearance.accent).strokeDashArray([this.rowHeight + 28, this.rowHeight + 28])
         .strokeDashOffset(this.activePath ? 0 : this.rowHeight + 28)
         .animation({ duration: Motion.drawer, curve: Motion.standard })
     }.viewPort({ x: 0, y: 0, width: '28px', height: this.rowHeight + 'px' })
@@ -157,6 +158,7 @@ struct ThreadRow {
 // Project tree; presentation grouping never changes a thread's stored project membership.
 @Component
 export struct ThreadList {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   onSelected: () => void = () => {};
   onSettings: () => void = () => {};
@@ -197,7 +199,7 @@ export struct ThreadList {
   private confirmDeleteSelected(): void {
     if (this.locked() || this.selectedIds.length === 0) { return; }
     const ids = this.selectedIds.slice();
-    this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface,
+    this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface,
       title: t('删除选中的 {0} 段对话？', [ids.length]),
       message: t('删除后无法恢复。会话工作区中的文件会保留。'),
       primaryButton: { value: t('取消'), action: () => {} },
@@ -245,13 +247,13 @@ export struct ThreadList {
   projectEditor() {
     Scroll() {
       Column({ space: Space.md }) {
-        TextInput({ text: this.projectName, placeholder: t('项目名称') }).id('project-name').maxLength(80)
+        TextInput({ text: this.projectName, placeholder: t('项目名称') }).fontFamily(this.appearance.fontFamily).id('project-name').maxLength(80)
           .onChange((value: string) => { this.projectName = value; })
-        TextArea({ text: this.projectInstructions, placeholder: t('项目说明与约定（可选）') }).id('project-instructions')
+        TextArea({ text: this.projectInstructions, placeholder: t('项目说明与约定（可选）') }).fontFamily(this.appearance.fontFamily).id('project-instructions')
           .height(220).maxLength(16000).onChange((value: string) => { this.projectInstructions = value; })
-        Text(t('项目内的会话共享文件和项目说明，各自保留对话历史。')).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+        Text(t('项目内的会话共享文件和项目说明，各自保留对话历史。')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
         if (this.app.error) { Banner({ text: this.app.error }) }
-        Button(t('保存')).id('project-save').attributeModifier(Btn.primary).width('100%')
+        Button(t('保存')).fontFamily(this.appearance.fontFamily).id('project-save').attributeModifier(Btn.primary).width('100%')
           .enabled(!this.app.busy && !this.app.saveError && this.projectName.trim().length > 0)
           .onClick(async () => {
             const creating = !this.projectId;
@@ -300,12 +302,12 @@ export struct ThreadList {
           }.width(24).height(24)
             .rotate({ angle: this.groupOpen(id) ? 0 : -90, centerX: '50%', centerY: '50%' })
             .animation({ duration: Motion.medium, curve: Motion.standard })
-          Text(this.sectionTitle(id)).fontSize(14).fontWeight(FontWeight.Medium).maxLines(1).layoutWeight(1)
+          Text(this.sectionTitle(id)).fontFamily(this.appearance.fontFamily).fontSize(14).fontWeight(FontWeight.Medium).maxLines(1).layoutWeight(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .fontColor((this.app.active.projectId || '') === id ? $r('app.color.accent') : $r('app.color.text_secondary'))
-          Text(String(this.sectionThreads(id).length)).fontSize(11).fontColor($r('app.color.text_tertiary'))
+            .fontColor((this.app.active.projectId || '') === id ? this.appearance.accent : $r('app.color.text_secondary'))
+          Text(String(this.sectionThreads(id).length)).fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.text_tertiary'))
         }.width('100%')
-      }.id('project-group-' + (id || 'ordinary')).layoutWeight(1).height(44).padding({ right: 4 })
+      }.fontFamily(this.appearance.fontFamily).id('project-group-' + (id || 'ordinary')).layoutWeight(1).height(44).padding({ right: 4 })
         .backgroundColor(Color.Transparent).borderRadius(10).onClick(() => this.toggleGroup(id))
         .accessibilityText(this.sectionTitle(id) + '，' + (this.groupOpen(id) ? t('收起') : t('展开')))
       if (!this.selecting) {
@@ -316,9 +318,9 @@ export struct ThreadList {
         if (id) {
           Button({ type: ButtonType.Circle }) {
             SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
-          }.id('project-actions-' + id).width(32).height(32).backgroundColor(Color.Transparent)
+          }.fontFamily(this.appearance.fontFamily).id('project-actions-' + id).width(32).height(32).backgroundColor(Color.Transparent)
             .accessibilityText(t('编辑项目') + ' · ' + this.sectionTitle(id)).enabled(!this.app.busy && !this.app.saveError)
-            .bindMenu(this.projectActions(id), { systemMaterial: AppMaterials.surface, mask: false })
+            .bindMenu(this.projectActions(id), { systemMaterial: this.appearance.surface, mask: false })
         }
       }
     }.width('100%').padding({ top: 4 }).backgroundColor($r('app.color.page_background'))
@@ -328,8 +330,8 @@ export struct ThreadList {
     Column({ space: Space.md }) {
       Row({ space: Space.sm }) {
         Image($r('app.media.tinybot')).width(28).height(28)
-        Text('Tinybot').fontSize(20).fontWeight(FontWeight.Bold).layoutWeight(1).fontColor($r('app.color.text_primary'))
-        Button(this.selecting ? t('取消') : t('多选')).id('thread-selection-mode').attributeModifier(Btn.textSmall)
+        Text('Tinybot').fontFamily(this.appearance.fontFamily).fontSize(20).fontWeight(FontWeight.Bold).layoutWeight(1).fontColor($r('app.color.text_primary'))
+        Button(this.selecting ? t('取消') : t('多选')).fontFamily(this.appearance.fontFamily).id('thread-selection-mode').attributeModifier(Btn.textSmall)
           .enabled(!this.locked() && (this.selecting || this.filtered().length > 0))
           .onClick(() => { if (this.selecting) { this.endSelection(); } else { this.selecting = true; } })
         if (!this.selecting) {
@@ -340,14 +342,15 @@ export struct ThreadList {
       if (!this.selecting) {
         Button() {
           Row({ space: Space.sm }) {
-            SymbolGlyph($r('sys.symbol.square_and_pencil')).fontSize(18).fontColor([$r('app.color.on_accent_container')])
-            Text(t("新对话")).fontSize(15).fontWeight(FontWeight.Medium).fontColor($r('app.color.on_accent_container'))
+            SymbolGlyph($r('sys.symbol.square_and_pencil')).fontSize(18).fontColor([this.appearance.onAccentContainer])
+            Text(t("新对话")).fontFamily(this.appearance.fontFamily).fontSize(15).fontWeight(FontWeight.Medium).fontColor(this.appearance.onAccentContainer)
           }
-        }.id('history-new-chat').attributeModifier(Btn.tonal).width('100%')
+        }.fontFamily(this.appearance.fontFamily).id('history-new-chat').attributeModifier(Btn.tonal).width('100%')
         .enabled(!this.app.busy && this.app.saveError.length === 0)
         .onClick(async () => { if (await this.app.newThread('')) { this.onSelected(); } })
       }
-      Search({ value: this.query, placeholder: t("搜索对话") }).id('search-threads').height(40)
+      Search({ value: this.query, placeholder: t("搜索对话") }).textFont({ family: this.appearance.fontFamily })
+        .placeholderFont({ family: this.appearance.fontFamily }).id('search-threads').height(40)
         .backgroundColor($r('app.color.surface_variant')).placeholderColor($r('app.color.text_tertiary'))
         .enabled(!this.locked())
         .onChange((value: string) => { this.query = value; this.visibleCounts = {}; this.selectedIds = []; })
@@ -360,9 +363,9 @@ export struct ThreadList {
         } })
       if (this.selecting) {
         Row({ space: Space.sm }) {
-          Text(t('已选 {0} 项', [this.selectedIds.length])).id('thread-selection-count')
+          Text(t('已选 {0} 项', [this.selectedIds.length])).fontFamily(this.appearance.fontFamily).id('thread-selection-count')
             .fontSize(Font.small).fontColor($r('app.color.text_secondary')).layoutWeight(1)
-          Button(this.allSelected() ? t('取消全选') : t('全选')).id('thread-select-all').attributeModifier(Btn.textSmall)
+          Button(this.allSelected() ? t('取消全选') : t('全选')).fontFamily(this.appearance.fontFamily).id('thread-select-all').attributeModifier(Btn.textSmall)
             .enabled(!this.locked() && this.filtered().length > 0).onClick(() => this.selectAll())
         }.width('100%')
       }
@@ -370,7 +373,7 @@ export struct ThreadList {
         Column({ space: Space.sm }) {
           SymbolGlyph(this.query.trim().length > 0 ? $r('sys.symbol.magnifyingglass') : $r('sys.symbol.ellipsis_message'))
             .fontSize(32).fontColor([$r('app.color.text_tertiary')])
-          Text(this.query.trim().length > 0 ? t("没有匹配的对话") : this.archived ? t("没有归档的对话") : t("还没有对话"))
+          Text(this.query.trim().length > 0 ? t("没有匹配的对话") : this.archived ? t("没有归档的对话") : t("还没有对话")).fontFamily(this.appearance.fontFamily)
             .fontSize(Font.small).fontColor($r('app.color.text_secondary'))
         }.layoutWeight(1).width('100%').justifyContent(FlexAlign.Center)
       } else {
@@ -389,12 +392,12 @@ export struct ThreadList {
                       .transition(TransitionEffect.OPACITY.animation({ duration: Motion.fast, curve: Motion.standard }))
                   }, (thread: ThreadViewModel) => thread.id)
                   if (this.sectionThreads(id).length === 0) {
-                    ListItem() { Text(t('还没有对话')).fontSize(12).fontColor($r('app.color.text_tertiary'))
+                    ListItem() { Text(t('还没有对话')).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_tertiary'))
                       .padding({ left: 32, top: 8, bottom: 16 }) }
                   }
                   if (this.sectionThreads(id).length > this.visibleCount(id)) {
                     ListItem() {
-                      Button(t('加载更多对话')).id('load-more-threads-' + (id || 'ordinary')).attributeModifier(Btn.textSmall)
+                      Button(t('加载更多对话')).fontFamily(this.appearance.fontFamily).id('load-more-threads-' + (id || 'ordinary')).attributeModifier(Btn.textSmall)
                         .margin({ left: 28 }).onClick(() => this.loadMore(id))
                     }
                   }
@@ -413,17 +416,17 @@ export struct ThreadList {
       Divider().strokeWidth(0.5).color($r('app.color.divider'))
       if (this.selecting) {
         Row({ space: Space.sm }) {
-          Button(this.archived ? t('恢复对话') : t('归档')).id('thread-batch-archive')
+          Button(this.archived ? t('恢复对话') : t('归档')).fontFamily(this.appearance.fontFamily).id('thread-batch-archive')
             .attributeModifier(Btn.tonal).layoutWeight(1).enabled(!this.locked() && this.selectedIds.length > 0)
             .onClick(() => this.archiveSelected())
-          Button(t('删除')).id('thread-batch-delete').attributeModifier(Btn.danger).layoutWeight(1)
+          Button(t('删除')).fontFamily(this.appearance.fontFamily).id('thread-batch-delete').attributeModifier(Btn.danger).layoutWeight(1)
             .enabled(!this.locked() && this.selectedIds.length > 0).onClick(() => this.confirmDeleteSelected())
         }.width('100%')
       } else {
         Row({ space: Space.md }) {
           SymbolGlyph($r('sys.symbol.gearshape')).fontSize(20).fontColor([$r('app.color.text_secondary')])
-          Text(t("设置")).fontSize(15).layoutWeight(1).fontColor($r('app.color.text_primary'))
-          Text(t("{0} 个服务", [this.app.providerProfiles.length])).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
+          Text(t("设置")).fontFamily(this.appearance.fontFamily).fontSize(15).layoutWeight(1).fontColor($r('app.color.text_primary'))
+          Text(t("{0} 个服务", [this.app.providerProfiles.length])).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
           SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(14).fontColor([$r('app.color.text_tertiary')])
         }
         .id('open-settings').width('100%').height(48).padding({ left: Space.md, right: Space.md }).borderRadius(Radius.md)

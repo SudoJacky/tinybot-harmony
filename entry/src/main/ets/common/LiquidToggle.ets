@@ -1,11 +1,14 @@
+import { AppearanceStyle } from './AppearanceStyle';
 import { AnimatorResult } from '@kit.ArkUI';
 import { LiquidToggleMotion as Liquid } from './LiquidToggleMotion';
 import { Motion } from './Theme';
+import { SwitchSize } from './SwitchSize';
 
 // Bencho Liquid Toggle, adapted to ArkUI. See THIRD_PARTY_NOTICES.txt.
 // Theme resources replace the web demo's CSS tokens; no web runtime is needed.
 @Component
 export struct LiquidToggle {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop @Watch('syncSelection') isOn: boolean = false;
   @Prop @Watch('syncDisabled') disabled: boolean = false;
   @Prop speed: number = 50;
@@ -139,18 +142,18 @@ export struct LiquidToggle {
         // not alter the endpoints or introduce a second coordinate system.
         Stack() {
           Circle().width(Liquid.thumbSize).height(Liquid.thumbSize)
-            .fill(this.preview ? $r('app.color.on_accent') : $r('app.color.text_tertiary'))
+            .fill(this.preview ? this.appearance.onAccent : $r('app.color.text_tertiary'))
             .scale({ x: this.thumbScale, y: 1 / this.thumbScale })
         }.width(Liquid.thumbSize).height(Liquid.thumbSize)
         .translate({ x: Liquid.pad + this.thumbPosition })
       }
       .width(Liquid.railWidth).height(Liquid.railHeight).borderRadius(Liquid.railHeight / 2)
-      .backgroundColor(this.preview ? $r('app.color.accent') : $r('app.color.surface_variant'))
+      .backgroundColor(this.preview ? this.appearance.accent : $r('app.color.surface_variant'))
       .animation({ duration: Motion.fast, curve: Motion.standard })
       .accessibilityLevel('no-hide-descendants').hitTestBehavior(HitTestMode.None)
-    }
-    .id(this.compId).width(Liquid.railWidth).height(48).padding(0)
-    .borderRadius(24).backgroundColor(Color.Transparent).enabled(!this.disabled)
+    }.fontFamily(this.appearance.fontFamily)
+    .id(this.compId).width(SwitchSize.touchWidth).height(SwitchSize.touchHeight).padding(0)
+    .borderRadius(SwitchSize.touchHeight / 2).backgroundColor(Color.Transparent).enabled(!this.disabled)
     .accessibilityText(this.label).accessibilityRole(AccessibilityRoleType.SWITCH)
     .accessibilityChecked(this.selected)
     .onClick(() => { if (!this.disabled && !this.dragging) this.commit(!this.selected); })

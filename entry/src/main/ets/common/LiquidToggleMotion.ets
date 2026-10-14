@@ -1,5 +1,6 @@
 // Native adaptation of Bencho's MIT-licensed Liquid Toggle (bencho.dev/licence).
 // A single opaque body stretches with velocity; no trailing blobs or SVG goo filter.
+import { SwitchSize } from './SwitchSize';
 export class LiquidToggleFrame {
   position: number;
   velocity: number;
@@ -12,10 +13,10 @@ export class LiquidToggleFrame {
 
 export class LiquidToggleMotion {
   // Compact settings-row proportions; the component keeps a separate 48 vp hit area.
-  static readonly railWidth: number = 52;
-  static readonly railHeight: number = 28;
-  static readonly thumbSize: number = 22;
-  static readonly pad: number = 3;
+  static readonly railWidth: number = SwitchSize.width;
+  static readonly railHeight: number = SwitchSize.height;
+  static readonly thumbSize: number = SwitchSize.thumb;
+  static readonly pad: number = SwitchSize.inset;
   static readonly travel: number = LiquidToggleMotion.railWidth - LiquidToggleMotion.thumbSize - LiquidToggleMotion.pad * 2;
   static readonly duration: number = 800;
 

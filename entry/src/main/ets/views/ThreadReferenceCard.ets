@@ -1,3 +1,4 @@
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { ThreadReference } from '../model/ThreadReferences';
 import { IconButton } from '../common/Widgets';
@@ -5,6 +6,7 @@ import { Radius, Space } from '../common/Theme';
 
 @Component
 export struct ThreadReferenceCard {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop reference: ThreadReference;
   removable: boolean = false;
   disabled: boolean = false;
@@ -15,12 +17,12 @@ export struct ThreadReferenceCard {
   preview() {
     Scroll() {
       Column({ space: Space.md }) {
-        Text(this.reference.title).fontSize(20).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
-        Text(t('引用的是选择时的文字快照，不含附件和工具记录。')).fontSize(13).fontColor($r('app.color.text_secondary'))
+        Text(this.reference.title).fontFamily(this.appearance.fontFamily).fontSize(20).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
+        Text(t('引用的是选择时的文字快照，不含附件和工具记录。')).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
         if (this.reference.truncated) {
-          Text(this.reference.fullContent !== undefined ? t('已保存完整快照，模型可按需补读；此处展示最近内容。') : t('内容较长，仅引用最近部分。')).fontSize(13).fontColor($r('app.color.text_secondary'))
+          Text(this.reference.fullContent !== undefined ? t('已保存完整快照，模型可按需补读；此处展示最近内容。') : t('内容较长，仅引用最近部分。')).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
         }
-        Text(this.reference.content).fontSize(14).lineHeight(22).copyOption(CopyOptions.LocalDevice)
+        Text(this.reference.content).fontFamily(this.appearance.fontFamily).fontSize(14).lineHeight(22).copyOption(CopyOptions.LocalDevice)
           .fontColor($r('app.color.text_primary')).width('100%')
       }.width('100%').alignItems(HorizontalAlign.Start).padding(Space.page)
     }.width('100%').height('100%').align(Alignment.Top)
@@ -28,11 +30,11 @@ export struct ThreadReferenceCard {
 
   build() {
     Row({ space: 8 }) {
-      SymbolGlyph($r('sys.symbol.ellipsis_message')).fontSize(18).fontColor([$r('app.color.accent')])
+      SymbolGlyph($r('sys.symbol.ellipsis_message')).fontSize(18).fontColor([this.appearance.accent])
       Column({ space: 2 }) {
-        Text(this.reference.title).fontSize(13).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(this.reference.title).fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           .fontColor($r('app.color.text_primary'))
-        Text(this.reference.truncated && this.reference.fullContent === undefined ? t('会话引用 · 最近部分') : t('会话引用 · 文字快照'))
+        Text(this.reference.truncated && this.reference.fullContent === undefined ? t('会话引用 · 最近部分') : t('会话引用 · 文字快照')).fontFamily(this.appearance.fontFamily)
           .fontSize(11).fontColor($r('app.color.text_secondary'))
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
       if (this.removable) {

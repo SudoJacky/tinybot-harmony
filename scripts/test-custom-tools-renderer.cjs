@@ -15,6 +15,7 @@ class Property { constructor(value) { this.value = value; } get() { return this.
 class ViewPU {
   constructor(parent, storage, id) { this.parent = parent; this.id = id; this.effects = new Map(); this.children = new Map(); this.lists = new Map(); this.branches = new Map(); }
   finalizeConstruction() {}
+  createStorageProp() { return new Property({ fontFamily: '' }); }
   observeComponentCreation2(callback) { const id = ++serial; this.effects.set(id, callback); this.currentElmt = id; current = this; callback(id, true); }
   forEachUpdateFunction(id, items, create, key) {
     const old = this.lists.get(id) || new Set(), next = new Set();
@@ -43,6 +44,7 @@ const globals = { exports: {}, ViewPU, SynchedPropertyNesedObjectPU: Property, B
     if (id.includes('ToolPresentation&')) return { toolTitle: name => name, toolGroupTitle: name => name };
     if (id.includes('Widgets&')) return { GroupCard, SwitchRow, SectionHeader: Child, RowDivider: Child };
     if (id.includes('Theme&')) return { Btn: {}, Font: {}, Space: {} };
+    if (id.includes('AppearanceStyle&')) return { AppearanceStyle: class {} };
     throw Error('Unexpected import ' + id);
   }
 };

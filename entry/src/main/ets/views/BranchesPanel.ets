@@ -1,3 +1,4 @@
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { ChatViewModel, ThreadViewModel } from '../viewmodel/ChatViewModel';
 import { Btn, Font, Radius, Space, shortTime } from '../common/Theme';
@@ -8,6 +9,7 @@ const INDENT: number = 20;
 // Conversation family tree: only threads that have a parent or children are listed, roots first, depth-first.
 @Component
 export struct BranchesPanel {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   onSelected: () => void = () => {};
   private parent(thread: ThreadViewModel): ThreadViewModel | undefined {
@@ -44,21 +46,21 @@ export struct BranchesPanel {
       }
       Row({ space: Space.md }) {
         IconBadge({ icon: thread.parentThreadId ? $r('sys.symbol.split') : $r('sys.symbol.ellipsis_message'),
-          tint: thread.id === this.app.active.id ? $r('app.color.accent') : $r('app.color.text_secondary'),
-          fill: thread.id === this.app.active.id ? $r('app.color.accent_container') : $r('app.color.surface_variant') })
+          tint: thread.id === this.app.active.id ? this.appearance.accent : $r('app.color.text_secondary'),
+          fill: thread.id === this.app.active.id ? this.appearance.accentContainer : $r('app.color.surface_variant') })
         Column({ space: 4 }) {
-          Text(thread.displayTitle).fontSize(15).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(thread.displayTitle).fontFamily(this.appearance.fontFamily).fontSize(15).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
             .fontWeight(thread.id === this.app.active.id ? FontWeight.Medium : FontWeight.Normal)
             .fontColor($r('app.color.text_primary'))
           Row({ space: 6 }) {
             if (thread.id === this.app.active.id) { Tag({ text: t("当前"), strong: true }) }
             if (thread.archived) { Tag({ text: t("已归档") }) }
-            Text(thread.messages.length + t(" 条消息 · ") + shortTime(thread.updatedAt)).fontSize(Font.caption).maxLines(1)
+            Text(thread.messages.length + t(" 条消息 · ") + shortTime(thread.updatedAt)).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).maxLines(1)
               .fontColor($r('app.color.text_tertiary'))
           }
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
         if (thread.parentThreadId && thread.parentMessageId && this.parent(thread)) {
-          Button(t("起点")).attributeModifier(Btn.textSmall).padding({ left: 10, right: 10 })
+          Button(t("起点")).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.textSmall).padding({ left: 10, right: 10 })
             .accessibilityText(t("回到分支起点消息"))
             .onClick(async () => {
               if (await this.app.openMessage(thread.parentThreadId || '', thread.parentMessageId || '')) { this.onSelected(); }
@@ -67,7 +69,7 @@ export struct BranchesPanel {
       }
       .layoutWeight(1).padding({ left: Space.md, right: 4, top: 10, bottom: 10 }).borderRadius(Radius.md)
       .backgroundColor($r('app.color.surface'))
-      .border({ width: thread.id === this.app.active.id ? 1 : 0, color: $r('app.color.accent_container') })
+      .border({ width: thread.id === this.app.active.id ? 1 : 0, color: this.appearance.accentContainer })
       .stateStyles({ pressed: { .opacity(0.7) }, normal: { .opacity(1) } })
       .onClick(() => this.open(thread))
     }.width('100%').alignItems(VerticalAlign.Center)

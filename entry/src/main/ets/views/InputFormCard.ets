@@ -1,3 +1,4 @@
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { FormField } from '../model/RichArtifacts';
 import { ToolApproval } from '../services/ToolApproval';
@@ -7,6 +8,7 @@ import { IconBadge } from '../common/Widgets';
 // The assistant paused to ask for structured input; sits above the composer like the tool approval card.
 @Component
 export struct InputFormCard {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink approval: ToolApproval;
   @State private values: string[] = [];
   private set(index: number, value: string): void { const next = this.values.slice(); next[index] = value; this.values = next; }
@@ -20,13 +22,13 @@ export struct InputFormCard {
   optionChip(field: FormField, index: number, option: string) {
     Row({ space: 4 }) {
       if (this.chosen(index).includes(option)) {
-        SymbolGlyph($r('sys.symbol.checkmark')).fontSize(13).fontColor([$r('app.color.on_accent_container')])
+        SymbolGlyph($r('sys.symbol.checkmark')).fontSize(13).fontColor([this.appearance.onAccentContainer])
       }
-      Text(option).fontSize(13).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-        .fontColor(this.chosen(index).includes(option) ? $r('app.color.on_accent_container') : $r('app.color.text_primary'))
+      Text(option).fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        .fontColor(this.chosen(index).includes(option) ? this.appearance.onAccentContainer : $r('app.color.text_primary'))
     }
     .height(34).padding({ left: 14, right: 14 }).borderRadius(17).margin({ right: Space.sm, bottom: Space.sm })
-    .backgroundColor(this.chosen(index).includes(option) ? $r('app.color.accent_container') : $r('app.color.surface_variant'))
+    .backgroundColor(this.chosen(index).includes(option) ? this.appearance.accentContainer : $r('app.color.surface_variant'))
     .accessibilityText(option + (this.chosen(index).includes(option) ? t("，已选中") : ''))
     .onClick(() => { if (field.type === 'select') { this.set(index, option); } else { this.toggle(index, option); } })
   }
@@ -36,8 +38,8 @@ export struct InputFormCard {
       Row({ space: Space.sm }) {
         IconBadge({ icon: $r('sys.symbol.questionmark_circle'), diameter: 32 })
         Column({ space: 2 }) {
-          Text(t("助手需要你补充信息")).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
-          Text(this.approval.form?.title || '').fontSize(15).fontWeight(FontWeight.Medium).maxLines(2)
+          Text(t("助手需要你补充信息")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+          Text(this.approval.form?.title || '').fontFamily(this.appearance.fontFamily).fontSize(15).fontWeight(FontWeight.Medium).maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
       }.width('100%')
@@ -48,14 +50,14 @@ export struct InputFormCard {
               Text() {
                 Span(field.label)
                 if (field.required) { Span(' *').fontColor($r('app.color.danger')) }
-              }.fontSize(13).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_secondary'))
+              }.fontFamily(this.appearance.fontFamily).fontSize(13).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_secondary'))
               if (field.type === 'select' || field.type === 'multiselect') {
                 Flex({ wrap: FlexWrap.Wrap }) {
                   ForEach(field.options || [], (option: string) => { this.optionChip(field, index, option) },
                     (option: string) => option)
                 }.width('100%').margin({ bottom: -Space.sm })
               } else {
-                TextInput({ text: this.values[index] || '', placeholder: field.type === 'number' ? t("请输入数字") : t("请输入") })
+                TextInput({ text: this.values[index] || '', placeholder: field.type === 'number' ? t("请输入数字") : t("请输入") }).fontFamily(this.appearance.fontFamily)
                   .id('form-field-' + index).attributeModifier(Styles.input).height(44)
                   .type(field.type === 'password' ? InputType.Password : field.type === 'number' ? InputType.NUMBER_DECIMAL : InputType.Normal)
                   .maxLength(2000).onChange((value) => this.set(index, value))
@@ -67,17 +69,17 @@ export struct InputFormCard {
       if (this.approval.formError) {
         Row({ space: 6 }) {
           SymbolGlyph($r('sys.symbol.exclamationmark_circle')).fontSize(14).fontColor([$r('app.color.danger')])
-          Text(this.approval.formError).fontSize(Font.caption).layoutWeight(1).fontColor($r('app.color.danger'))
+          Text(this.approval.formError).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).layoutWeight(1).fontColor($r('app.color.danger'))
         }.width('100%')
       }
       Row({ space: Space.sm }) {
-        Button(t("不回答")).id('cancel-form').attributeModifier(Btn.plainSmall).height(40).layoutWeight(1)
+        Button(t("不回答")).fontFamily(this.appearance.fontFamily).id('cancel-form').attributeModifier(Btn.plainSmall).height(40).layoutWeight(1)
           .onClick(() => { this.values = []; this.approval.cancelForm(); })
-        Button(t("提交并继续")).id('submit-form').attributeModifier(Btn.primarySmall).height(40).layoutWeight(1)
+        Button(t("提交并继续")).fontFamily(this.appearance.fontFamily).id('submit-form').attributeModifier(Btn.primarySmall).height(40).layoutWeight(1)
           .onClick(() => { this.approval.submit(this.values); if (!this.approval.form) { this.values = []; } })
       }.width('100%')
     }.width('100%').padding(Space.md).backgroundColor($r('app.color.surface')).borderRadius(Radius.lg)
-    .border({ width: 1, color: $r('app.color.accent_container') })
+    .border({ width: 1, color: this.appearance.accentContainer })
     .shadow({ radius: 16, color: '#1A000000', offsetY: 2 })
     .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 24 })).animation({ duration: 200 }))
   }

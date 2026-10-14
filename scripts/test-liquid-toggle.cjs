@@ -10,7 +10,15 @@ const source = fs.readFileSync(path.join(__dirname, '../entry/src/main/ets/commo
 const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 },
 }).outputText;
-const loaded = { exports: {} };
+const sizeSource = fs.readFileSync(path.join(__dirname, '../entry/src/main/ets/common/SwitchSize.ets'), 'utf8');
+const sizeModule = { exports: {} };
+vm.runInNewContext(ts.transpileModule(sizeSource, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 },
+}).outputText, sizeModule);
+const loaded = { exports: {}, require: name => {
+  assert.equal(name, './SwitchSize');
+  return sizeModule.exports;
+} };
 vm.runInNewContext(compiled, loaded);
 const { LiquidToggleMotion: motion } = loaded.exports;
 const near = (actual, expected, tolerance = 1e-8) => assert.ok(Math.abs(actual - expected) < tolerance,

@@ -1,4 +1,4 @@
-import { AppMaterials } from './AppMaterials';
+import { AppearanceStyle } from './AppearanceStyle';
 import { AnimatorResult, SymbolGlyphModifier } from '@kit.ArkUI';
 import { t } from '../model/I18n';
 import { Motion, Radius } from './Theme';
@@ -8,6 +8,7 @@ import { SwipeRowMotion as Swipe } from './SwipeRowMotion';
 // A full swipe requests the same confirmation as the delete button, never deletes early.
 @Component
 export struct SwipeRow {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @BuilderParam content: () => void;
   rowKey: string = '';
   label: string = '';
@@ -121,9 +122,9 @@ export struct SwipeRow {
       Button({ type: ButtonType.Normal }) {
         Column({ space: 4 }) {
           this.deleteIcon()
-          Text(t('删除')).fontSize(12).fontColor($r('app.color.on_danger'))
+          Text(t('删除')).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.on_danger'))
         }.opacity(Math.min(1, this.reveal / 48)).width('100%')
-      }.id('swipe-delete-' + this.rowKey).width(Math.max(1, this.reveal)).height(this.rowHeight)
+      }.fontFamily(this.appearance.fontFamily).id('swipe-delete-' + this.rowKey).width(Math.max(1, this.reveal)).height(this.rowHeight)
       .position({ x: Math.max(0, this.rowWidth - this.reveal), y: 0 })
       .backgroundColor($r('app.color.danger')).borderRadius(this.radius)
       .enabled(!this.disabled && this.reveal >= 32).opacity(this.reveal > 0 ? 1 : 0)
@@ -147,7 +148,7 @@ export struct SwipeRow {
     })
     .onVisibleAreaChange([0], (visible: boolean) => { if (!visible) { this.stop(); this.reveal = 0; this.dragging = false; } })
     .bindContextMenu(this.actionsMenu, ResponseType.LongPress, {
-      systemMaterial: AppMaterials.surface, mask: false })
+      systemMaterial: this.appearance.surface, mask: false })
     .priorityGesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Horizontal, distance: 12 })
       .onActionStart((event: GestureEvent) => this.start(event))
       .onActionUpdate((event: GestureEvent) => this.move(event))

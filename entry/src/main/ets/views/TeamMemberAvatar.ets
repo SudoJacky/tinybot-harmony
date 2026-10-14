@@ -1,3 +1,4 @@
+import { AppearanceStyle } from '../common/AppearanceStyle';
 // Sprite and ID mapping from Tinybot desktop's TeamMemberAvatar.
 // The unchanged 4 x 3 portrait sheet is bundled locally; see THIRD_PARTY_NOTICES.txt.
 function portraitIndex(memberId: string): number {
@@ -14,6 +15,7 @@ function portraitIndex(memberId: string): number {
 
 @Component
 export struct TeamMemberAvatar {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop memberId: string = '';
   @Prop diameter: number = 32;
   @Prop ring: boolean = false;
@@ -32,7 +34,7 @@ export struct TeamMemberAvatar {
       }.width(this.diameter).height(this.diameter).borderRadius(this.diameter / 2).clip(true)
       // Draw the status ring over the cropped image so it never shifts the sprite coordinates.
       Circle().width(this.diameter).height(this.diameter).fill(Color.Transparent)
-        .stroke(this.busy ? $r('app.color.accent') : $r('app.color.surface'))
+        .stroke(this.busy ? this.appearance.accent : $r('app.color.surface'))
         .strokeWidth(this.ring ? 2 : 0).accessibilityLevel('no')
     }.width(this.diameter).height(this.diameter).accessibilityText(this.label).accessibilityGroup(true)
   }

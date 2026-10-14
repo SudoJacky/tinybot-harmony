@@ -108,7 +108,9 @@ export class ChatViewModel {
       this.draft = event.content || ''; this.active.draft = this.draft;
     }
     if (event.kind === 'message' && event.message) {
-      this.threads.find((thread) => thread.id === event.threadId)?.messages.find((message) => message.id === event.message?.id)?.update(event.message);
+      const thread = this.threads.find((thread) => thread.id === event.threadId);
+      thread?.messages.find((message) => message.id === event.message?.id)?.update(event.message);
+      thread?.refreshPreviews();
     }
     if (event.kind === 'reasoning') {
       const message = this.threads.find((thread) => thread.id === event.threadId)?.messages.find((item) => item.id === event.messageId);

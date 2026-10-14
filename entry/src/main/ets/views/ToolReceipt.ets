@@ -1,3 +1,4 @@
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { ToolExecution } from '../model/Agent';
 import { t } from '../model/I18n';
 import { toolTitle, toolStat, toolStatusLabel } from '../model/ToolPresentation';
@@ -7,19 +8,20 @@ import { ToolDetails } from './ToolDetails';
 // Shared by Team and nested orchestration calls; the owner retains reading state across collapse.
 @Component
 export struct ToolReceipt {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop execution: ToolExecution;
   @ObjectLink disclosure: DisclosureState;
   onInspect: () => void = () => {};
   build() {
     Column({ space: 4 }) {
       Row({ space: 8 }) {
-        Text(toolTitle(this.execution.call.function.name)).fontSize(13).fontColor($r('app.color.text_secondary')).layoutWeight(1)
+        Text(toolTitle(this.execution.call.function.name)).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary')).layoutWeight(1)
           .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
         if (this.execution.status === 'running') {
-          LoadingProgress().width(14).height(14).color($r('app.color.accent'))
+          LoadingProgress().width(14).height(14).color(this.appearance.accent)
         }
         Text(toolStat(this.execution.call.function.name, this.execution.call.function.arguments, this.execution.output, this.execution.status, this.execution.fileDiff) ||
-          toolStatusLabel(this.execution.status)).fontSize(12)
+          toolStatusLabel(this.execution.status)).fontFamily(this.appearance.fontFamily).fontSize(12)
           .fontColor(this.execution.status === 'failed' ? $r('app.color.danger') : $r('app.color.text_tertiary'))
         SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(10).fontColor([$r('app.color.text_tertiary')])
           .rotate({ angle: this.disclosure.open ? 180 : 0 })

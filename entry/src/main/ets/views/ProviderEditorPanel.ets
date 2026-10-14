@@ -1,4 +1,4 @@
-import { AppMaterials } from '../common/AppMaterials';
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
@@ -10,6 +10,7 @@ import { Banner, BottomBar, GroupCard, IconButton, NavRow, RowDivider, SectionHe
 
 @Component
 export struct ProviderEditorPanel {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   @ObjectLink editor: ProviderEditorViewModel;
   onSaved: () => void = () => {};
@@ -40,7 +41,7 @@ export struct ProviderEditorPanel {
       await (this.getUIContext().getHostContext() as common.UIAbilityContext)
         .startAbility({ action: 'ohos.want.action.viewData', uri: url });
     } catch (_) {
-      if (this.alive) { this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t('无法打开系统浏览器。') }); }
+      if (this.alive) { this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t('无法打开系统浏览器。') }); }
     }
   }
   private async discover(): Promise<void> {
@@ -64,7 +65,7 @@ export struct ProviderEditorPanel {
     const invalid = ['name', 'url', 'key', 'models', 'context'].find((field: string) => this.editor.fieldError(field).length > 0);
     if (invalid) {
       if (invalid === 'context') { this.advanced = true; }
-      this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t('请检查标出的设置项。') });
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t('请检查标出的设置项。') });
       if (invalid === 'models') { this.showModels = true; return; }
       setTimeout(() => {
         if (!this.alive) { return; }
@@ -87,12 +88,12 @@ export struct ProviderEditorPanel {
 
   @Builder
   label(text: string) {
-    Text(text).fontSize(13).fontColor($r('app.color.text_secondary')).width('100%').margin({ bottom: 6 })
+    Text(text).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary')).width('100%').margin({ bottom: 6 })
   }
   @Builder
   fieldError(field: string) {
     if (this.attempted && this.editor.fieldError(field)) {
-      Text(this.editor.fieldError(field)).id('provider-field-error-' + field).fontSize(12).lineHeight(18)
+      Text(this.editor.fieldError(field)).fontFamily(this.appearance.fontFamily).id('provider-field-error-' + field).fontSize(12).lineHeight(18)
         .fontColor($r('app.color.danger')).width('100%').margin({ top: 6 })
     }
   }
@@ -108,16 +109,16 @@ export struct ProviderEditorPanel {
         ForEach(this.protocols, (protocol: string, index: number) => {
           Column({ space: 6 }) {
             Image(this.protocolLogos[index]).width(24).height(24).objectFit(ImageFit.Contain)
-              .fillColor(this.editor.protocol === protocol ? $r('app.color.accent') : $r('app.color.text_secondary'))
-            Text(this.protocolLabels[index]).fontSize(13).lineHeight(17).maxLines(2).textAlign(TextAlign.Center)
+              .fillColor(this.editor.protocol === protocol ? this.appearance.accent : $r('app.color.text_secondary'))
+            Text(this.protocolLabels[index]).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(17).maxLines(2).textAlign(TextAlign.Center)
               .fontWeight(this.editor.protocol === protocol ? FontWeight.Medium : FontWeight.Normal)
               .fontColor(this.editor.protocol === protocol ? $r('app.color.text_primary') : $r('app.color.text_secondary'))
           }
           .id('provider-protocol-' + protocol).layoutWeight(1).constraintSize({ minHeight: 76 })
           .justifyContent(FlexAlign.Center).padding({ left: 6, right: 6, top: 10, bottom: 10 })
           .borderRadius(Radius.md)
-          .backgroundColor(this.editor.protocol === protocol ? $r('app.color.accent_tint') : $r('app.color.surface_variant'))
-          .border({ width: 1.5, color: this.editor.protocol === protocol ? $r('app.color.accent') : Color.Transparent })
+          .backgroundColor(this.editor.protocol === protocol ? this.appearance.accentTint : $r('app.color.surface_variant'))
+          .border({ width: 1.5, color: this.editor.protocol === protocol ? this.appearance.accent : Color.Transparent })
           .animation({ duration: Motion.fast, curve: Motion.standard })
           .clickEffect(Motion.press)
           .accessibilityGroup(true)
@@ -125,12 +126,12 @@ export struct ProviderEditorPanel {
           .onClick(() => { this.editor.changeProtocol(protocol); })
         }, (protocol: string) => protocol)
       }.width('100%').alignItems(VerticalAlign.Top)
-      Text(protocolName(this.editor.protocol) + ' · ' + this.protocolHint(this.editor.protocol))
+      Text(protocolName(this.editor.protocol) + ' · ' + this.protocolHint(this.editor.protocol)).fontFamily(this.appearance.fontFamily)
         .fontSize(12).lineHeight(18).fontColor($r('app.color.text_secondary')).width('100%')
     }.width('100%')
   }
   private confirmDelete(): void {
-    this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface, title: t('删除模型服务？'),
+    this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t('删除模型服务？'),
       message: t('删除这份服务配置及其密钥，保留完整对话。使用它的会话需要重新选择模型。'),
       primaryButton: { value: t('取消'), action: () => {} },
       secondaryButton: { value: t('删除'), fontColor: $r('app.color.danger'), action: async () => {
@@ -150,8 +151,8 @@ export struct ProviderEditorPanel {
   @Builder
   modelRow(id: string) {
     Row({ space: 8 }) {
-      SymbolGlyph($r('sys.symbol.checkmark')).fontSize(14).fontColor([$r('app.color.accent')])
-      Text(id).fontSize(14).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+      SymbolGlyph($r('sys.symbol.checkmark')).fontSize(14).fontColor([this.appearance.accent])
+      Text(id).fontFamily(this.appearance.fontFamily).fontSize(14).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
         .layoutWeight(1).fontColor($r('app.color.text_primary')).copyOption(CopyOptions.LocalDevice)
       IconButton({ icon: $r('sys.symbol.xmark'), label: t('移除模型 {0}', [id]), compId: 'remove-model-' + id,
         iconSize: 12, disabled: this.locked(), onTap: () => this.editor.removeModel(id) })
@@ -161,11 +162,11 @@ export struct ProviderEditorPanel {
   modelsSheet() {
     Column({ space: Space.md }) {
       Column({ space: 8 }) {
-        Text(t('添加模型 ID')).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary')).width('100%')
-        TextArea({ text: this.editor.modelInput, placeholder: t('粘贴模型 ID，支持换行或逗号分隔') }).id('provider-models')
+        Text(t('添加模型 ID')).fontFamily(this.appearance.fontFamily).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary')).width('100%')
+        TextArea({ text: this.editor.modelInput, placeholder: t('粘贴模型 ID，支持换行或逗号分隔') }).fontFamily(this.appearance.fontFamily).id('provider-models')
           .attributeModifier(Styles.area).constraintSize({ minHeight: 60, maxHeight: 104 }).maxLength(10000)
           .onChange((value: string) => { this.editor.modelInput = value; this.modelError = ''; })
-        Button(t('添加到列表')).id('add-manual-models').attributeModifier(Btn.tonal).width('100%')
+        Button(t('添加到列表')).fontFamily(this.appearance.fontFamily).id('add-manual-models').attributeModifier(Btn.tonal).width('100%')
           .enabled(this.editor.modelInput.trim().length > 0).onClick(() => this.addManual())
         if (this.modelError) { Banner({ text: this.modelError }) }
         this.fieldError('models')
@@ -174,7 +175,7 @@ export struct ProviderEditorPanel {
         ForEach(this.editor.modelList, (id: string) => { ListItem() { this.modelRow(id) } }, (id: string) => id)
       }.layoutWeight(1).width('100%').scrollBar(BarState.Auto)
       BottomBar() {
-        Button(t('完成 · {0} 个模型', [this.editor.modelList.length])).id('finish-models').attributeModifier(Btn.primary).width('100%')
+        Button(t('完成 · {0} 个模型', [this.editor.modelList.length])).fontFamily(this.appearance.fontFamily).id('finish-models').attributeModifier(Btn.primary).width('100%')
           .onClick(() => {
             if (this.editor.modelInput.trim()) { this.addManual(); if (this.modelError) { return; } }
             this.getUIContext().getFocusController().clearFocus(); this.showModels = false;
@@ -185,21 +186,22 @@ export struct ProviderEditorPanel {
   @Builder
   discoverySheet() {
     Column({ space: Space.md }) {
-      Search({ value: this.modelQuery, placeholder: t('搜索模型 ID') }).id('discovered-model-search').height(44)
+      Search({ value: this.modelQuery, placeholder: t('搜索模型 ID') }).textFont({ family: this.appearance.fontFamily })
+        .placeholderFont({ family: this.appearance.fontFamily }).id('discovered-model-search').height(44)
         .margin({ left: Space.page, right: Space.page }).onChange((value: string) => { this.modelQuery = value; })
-      Text(t('只添加你需要的模型，已有模型会保留。')).fontSize(13).fontColor($r('app.color.text_secondary'))
+      Text(t('只添加你需要的模型，已有模型会保留。')).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
         .padding({ left: Space.page, right: Space.page }).width('100%')
-      if (this.matches().length === 0) { Text(t('没有匹配的模型')).fontColor($r('app.color.text_secondary')).padding(16) }
+      if (this.matches().length === 0) { Text(t('没有匹配的模型')).fontFamily(this.appearance.fontFamily).fontColor($r('app.color.text_secondary')).padding(16) }
       List() {
         ForEach(this.matches(), (id: string) => {
           ListItem() {
             Row({ space: 8 }) {
               Checkbox({ name: id }).select(this.editor.modelList.includes(id) || this.selectedModels.includes(id))
-                .enabled(!this.editor.modelList.includes(id)).selectedColor($r('app.color.accent'))
+                .enabled(!this.editor.modelList.includes(id)).selectedColor(this.appearance.accent)
                 .onChange((value: boolean) => this.toggleFound(id, value)).accessibilityText(id)
-              Text(id).fontSize(14).fontColor($r('app.color.text_primary')).layoutWeight(1).maxLines(2)
+              Text(id).fontFamily(this.appearance.fontFamily).fontSize(14).fontColor($r('app.color.text_primary')).layoutWeight(1).maxLines(2)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
-              if (this.editor.modelList.includes(id)) { Text(t('已添加')).fontSize(12).fontColor($r('app.color.text_secondary')) }
+              if (this.editor.modelList.includes(id)) { Text(t('已添加')).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary')) }
             }.width('100%').constraintSize({ minHeight: 52 }).padding({ left: 12, right: 16 })
             .onClick(() => { if (!this.editor.modelList.includes(id)) { this.toggleFound(id, !this.selectedModels.includes(id)); } })
           }
@@ -208,7 +210,7 @@ export struct ProviderEditorPanel {
       BottomBar() {
         Column({ space: 8 }) {
           if (this.modelError) { Banner({ text: this.modelError }) }
-          Button(t('添加所选模型（{0}）', [this.selectedModels.length])).id('add-discovered-models')
+          Button(t('添加所选模型（{0}）', [this.selectedModels.length])).fontFamily(this.appearance.fontFamily).id('add-discovered-models')
             .attributeModifier(Btn.primary).width('100%').enabled(this.selectedModels.length > 0)
             .onClick(() => {
               try { this.editor.addModels(this.selectedModels.join('\n')); this.showDiscovery = false; }
@@ -224,9 +226,9 @@ export struct ProviderEditorPanel {
       if (this.editor.id.length > 0) {
         Row() {
           Blank()
-          Button(t('更多操作')).id('provider-more-actions').attributeModifier(Btn.text).height(44)
+          Button(t('更多操作')).fontFamily(this.appearance.fontFamily).id('provider-more-actions').attributeModifier(Btn.text).height(44)
             .enabled(!this.locked()).bindMenu(this.serviceActions, {
-              systemMaterial: AppMaterials.surface, mask: false })
+              systemMaterial: this.appearance.surface, mask: false })
         }.width('100%').padding({ left: Space.page, right: Space.page })
       }
       Scroll(this.scroller) {
@@ -242,7 +244,7 @@ export struct ProviderEditorPanel {
             Column({ space: 12 }) {
               Column() {
                 this.label(t('服务名称'))
-                TextInput({ text: this.editor.name, placeholder: t('例如：我的 DeepSeek、公司代理') }).id('provider-name')
+                TextInput({ text: this.editor.name, placeholder: t('例如：我的 DeepSeek、公司代理') }).fontFamily(this.appearance.fontFamily).id('provider-name')
                   .attributeModifier(Styles.input).maxLength(80).enterKeyType(EnterKeyType.Next)
                   .onSubmit(() => { this.getUIContext().getFocusController().requestFocus('provider-url'); })
                   .onChange((value: string) => { this.editor.name = value; })
@@ -250,12 +252,12 @@ export struct ProviderEditorPanel {
               }
               Column() {
                 this.label(t('服务地址'))
-                TextInput({ text: this.editor.baseUrl, placeholder: 'https://api.example.com/v1' }).id('provider-url')
+                TextInput({ text: this.editor.baseUrl, placeholder: 'https://api.example.com/v1' }).fontFamily(this.appearance.fontFamily).id('provider-url')
                   .attributeModifier(Styles.input).type(InputType.URL).maxLength(1024)
                   .onChange((value: string) => { this.editor.baseUrl = value; })
                 this.fieldError('url')
                 if (this.editor.baseUrl.startsWith('http://')) {
-                  Text(t('HTTP 连接未加密，仅适用于可信网络中的本地模型。')).fontSize(12).width('100%')
+                  Text(t('HTTP 连接未加密，仅适用于可信网络中的本地模型。')).fontFamily(this.appearance.fontFamily).fontSize(12).width('100%')
                     .fontColor($r('app.color.warning')).margin({ top: 6 })
                 }
               }
@@ -270,19 +272,19 @@ export struct ProviderEditorPanel {
                 RowDivider()
                 if (this.editor.canKeepKey && !this.replacingKey) {
                   Row({ space: 8 }) {
-                    SymbolGlyph($r('sys.symbol.checkmark')).fontSize(16).fontColor([$r('app.color.accent')])
-                    Text(t('密钥已保存')).fontSize(14).fontColor($r('app.color.text_primary')).layoutWeight(1)
-                    Button(t('更换')).id('replace-provider-key').attributeModifier(Btn.text).height(44).enabled(!this.locked())
+                    SymbolGlyph($r('sys.symbol.checkmark')).fontSize(16).fontColor([this.appearance.accent])
+                    Text(t('密钥已保存')).fontFamily(this.appearance.fontFamily).fontSize(14).fontColor($r('app.color.text_primary')).layoutWeight(1)
+                    Button(t('更换')).fontFamily(this.appearance.fontFamily).id('replace-provider-key').attributeModifier(Btn.text).height(44).enabled(!this.locked())
                       .onClick(() => { this.replacingKey = true; })
                   }.padding({ left: 16, right: 4 }).width('100%').constraintSize({ minHeight: 56 })
                 } else {
                   Column() {
-                    TextInput({ text: this.editor.apiKey, placeholder: this.editor.canKeepKey ? t('留空保留原密钥') : t('填写 API Key') })
+                    TextInput({ text: this.editor.apiKey, placeholder: this.editor.canKeepKey ? t('留空保留原密钥') : t('填写 API Key') }).fontFamily(this.appearance.fontFamily)
                       .id('provider-key').attributeModifier(Styles.input).type(InputType.Password).showPasswordIcon(true)
                       .copyOption(CopyOptions.None).maxLength(512).onChange((value: string) => { this.editor.apiKey = value; })
                     this.fieldError('key')
                     if (this.editor.hasSavedKey && !this.editor.canKeepKey && !this.attempted) {
-                      Text(t('服务基础地址已改变，请重新填写密钥。')).fontSize(12).fontColor($r('app.color.text_secondary')).width('100%').margin({ top: 6 })
+                      Text(t('服务基础地址已改变，请重新填写密钥。')).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary')).width('100%').margin({ top: 6 })
                     }
                   }.padding(12)
                 }
@@ -292,10 +294,10 @@ export struct ProviderEditorPanel {
           if (this.editor.apiKeyUrl) {
             Button() {
               Row({ space: 6 }) {
-                Text(t('获取 API Key')).fontSize(14).fontColor($r('app.color.accent'))
-                SymbolGlyph($r('sys.symbol.arrow_up_right')).fontSize(12).fontColor([$r('app.color.accent')])
+                Text(t('获取 API Key')).fontFamily(this.appearance.fontFamily).fontSize(14).fontColor(this.appearance.accent)
+                SymbolGlyph($r('sys.symbol.arrow_up_right')).fontSize(12).fontColor([this.appearance.accent])
               }
-            }.id('get-provider-api-key').attributeModifier(Btn.text).height(44)
+            }.fontFamily(this.appearance.fontFamily).id('get-provider-api-key').attributeModifier(Btn.text).height(44)
               .accessibilityText(t('获取 API Key，在浏览器中打开'))
               .enabled(!this.locked()).onClick(() => this.openApiKeyPage())
           }
@@ -309,14 +311,14 @@ export struct ProviderEditorPanel {
                 RowDivider()
               }
               if (this.editor.modelList.length === 0) {
-                Text(t('添加至少一个模型，即可开始对话。')).fontSize(13).fontColor($r('app.color.text_secondary')).padding(16).width('100%')
+                Text(t('添加至少一个模型，即可开始对话。')).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary')).padding(16).width('100%')
               }
               Row({ space: 8 }) {
-                Button(this.discovering ? t('正在发现模型…') : t('获取模型')).id('discover-models').attributeModifier(Btn.tonal).layoutWeight(1)
+                Button(this.discovering ? t('正在发现模型…') : t('获取模型')).fontFamily(this.appearance.fontFamily).id('discover-models').attributeModifier(Btn.tonal).layoutWeight(1)
                   .enabled(!this.locked()).onClick(() => this.discover())
                   .bindSheet($$this.showDiscovery, this.discoverySheet(), { title: { title: t('选择要添加的模型') }, detents: [SheetSize.LARGE], dragBar: true,
                     keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY, backgroundColor: $r('app.color.page_background') })
-                Button(t('手动添加')).id('manage-provider-models')
+                Button(t('手动添加')).fontFamily(this.appearance.fontFamily).id('manage-provider-models')
                   .attributeModifier(Btn.text).height(44).layoutWeight(1).enabled(!this.locked())
                   .onClick(() => { this.modelError = ''; this.showModels = true; })
               }.padding(12).width('100%')
@@ -338,10 +340,10 @@ export struct ProviderEditorPanel {
                     }
                     Column() {
                       this.label(t('上下文窗口（Token）'))
-                      TextInput({ text: this.editor.contextWindow, placeholder: t('留空使用模型默认值') }).id('context-window').attributeModifier(Styles.input)
+                      TextInput({ text: this.editor.contextWindow, placeholder: t('留空使用模型默认值') }).fontFamily(this.appearance.fontFamily).id('context-window').attributeModifier(Styles.input)
                         .type(InputType.Number).maxLength(7).onChange((value: string) => { this.editor.contextWindow = value; })
                       this.fieldError('context')
-                      Text(t('留空按模型设置：通用 200k，DeepSeek V4 / Flash、GLM 5.3 系列 1M。填写数值覆盖服务默认值；单模型设置优先。')).fontSize(12).lineHeight(18)
+                      Text(t('留空按模型设置：通用 200k，DeepSeek V4 / Flash、GLM 5.3 系列 1M。填写数值覆盖服务默认值；单模型设置优先。')).fontFamily(this.appearance.fontFamily).fontSize(12).lineHeight(18)
                         .fontColor($r('app.color.text_secondary')).width('100%').margin({ top: 6 })
                     }
                   }.padding(12)
@@ -354,7 +356,7 @@ export struct ProviderEditorPanel {
       BottomBar() {
         Column({ space: 8 }) {
           if (this.editor.error) { Banner({ text: this.editor.error, compId: 'provider-error' }) }
-          Button(this.app.busy ? t('正在保存…') : this.editor.id ? t('保存更改') : t('保存服务')).id('save-provider')
+          Button(this.app.busy ? t('正在保存…') : this.editor.id ? t('保存更改') : t('保存服务')).fontFamily(this.appearance.fontFamily).id('save-provider')
             .attributeModifier(Btn.primary).width('100%').enabled(!this.locked()).onClick(() => this.save())
         }
       }

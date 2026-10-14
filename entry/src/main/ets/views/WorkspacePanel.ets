@@ -1,4 +1,4 @@
-import { AppMaterials } from '../common/AppMaterials';
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { SwipeRow } from '../common/SwipeRow';
 import { common } from '@kit.AbilityKit';
@@ -24,6 +24,7 @@ function pad(value: number): string { return value < 10 ? '0' + value : value.to
 
 @Component
 export struct WorkspacePanel {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop initialPath: string = '';
   @ObjectLink app: ChatViewModel;
   @State private directory: string = '';
@@ -63,7 +64,7 @@ export struct WorkspacePanel {
   private locked(): boolean { return this.busy || this.app.busy; }
   private join(name: string): string { return (this.directory ? this.directory + '/' : '') + name; }
   private fileName(path: string): string { return path.split('/').pop() || t("文件.txt"); }
-  private toast(message: string): void { this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: message }); }
+  private toast(message: string): void { this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: message }); }
   private crumbs(): string[] { return this.directory ? this.directory.split('/') : []; }
   private dirty(): boolean { return this.editing && this.content !== this.original; }
 
@@ -184,14 +185,14 @@ export struct WorkspacePanel {
   }
 
   private confirmDelete(path: string): void {
-    this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface, title: t("删除文件？"), message: this.fileName(path) + t("\n删除后无法恢复。"),
+    this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t("删除文件？"), message: this.fileName(path) + t("\n删除后无法恢复。"),
       primaryButton: { value: t("取消"), action: () => {} },
       secondaryButton: { value: t("删除"), fontColor: $r('app.color.danger'), action: () => this.fileAction('delete', path) } });
   }
 
   private closePreview(): void {
     if (!this.dirty()) { this.previewing = false; this.editing = false; return; }
-    this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface, title: t("放弃未保存的修改？"), message: this.fileName(this.selected),
+    this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t("放弃未保存的修改？"), message: this.fileName(this.selected),
       primaryButton: { value: t("继续编辑"), action: () => {} },
       secondaryButton: { value: t("放弃"), fontColor: $r('app.color.danger'),
         action: () => { this.content = this.original; this.editing = false; this.previewing = false; } } });
@@ -216,13 +217,13 @@ export struct WorkspacePanel {
     Row({ space: Space.md }) {
       Column() {
         SymbolGlyph(this.icon(entry)).fontSize(22)
-          .fontColor([entry.kind === 'directory' ? $r('app.color.accent') : $r('app.color.text_secondary')])
+          .fontColor([entry.kind === 'directory' ? this.appearance.accent : $r('app.color.text_secondary')])
       }.width(40).height(40).borderRadius(Radius.sm).justifyContent(FlexAlign.Center)
-      .backgroundColor(entry.kind === 'directory' ? $r('app.color.accent_container') : $r('app.color.surface_variant'))
+      .backgroundColor(entry.kind === 'directory' ? this.appearance.accentContainer : $r('app.color.surface_variant'))
       Column({ space: 2 }) {
-        Text(entry.name).fontSize(15).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(entry.name).fontFamily(this.appearance.fontFamily).fontSize(15).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           .fontColor($r('app.color.text_primary'))
-        Text(this.kindLabel(entry)).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
+        Text(this.kindLabel(entry)).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
       if (entry.kind === 'directory') {
         SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
@@ -238,14 +239,14 @@ export struct WorkspacePanel {
   breadcrumbs() {
     Scroll() {
       Row({ space: 2 }) {
-        Text(t("工作区")).fontSize(14).padding({ left: 8, right: 8 }).height(32).borderRadius(16)
-          .fontColor(this.directory ? $r('app.color.accent') : $r('app.color.text_primary'))
+        Text(t("工作区")).fontFamily(this.appearance.fontFamily).fontSize(14).padding({ left: 8, right: 8 }).height(32).borderRadius(16)
+          .fontColor(this.directory ? this.appearance.accent : $r('app.color.text_primary'))
           .fontWeight(this.directory ? FontWeight.Normal : FontWeight.Medium)
           .onClick(() => { if (this.directory) { this.go(''); } })
         ForEach(this.crumbs(), (part: string, index: number) => {
           SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(12).fontColor([$r('app.color.text_tertiary')])
-          Text(part).fontSize(14).padding({ left: 8, right: 8 }).height(32).borderRadius(16).maxLines(1)
-            .fontColor(index === this.crumbs().length - 1 ? $r('app.color.text_primary') : $r('app.color.accent'))
+          Text(part).fontFamily(this.appearance.fontFamily).fontSize(14).padding({ left: 8, right: 8 }).height(32).borderRadius(16).maxLines(1)
+            .fontColor(index === this.crumbs().length - 1 ? $r('app.color.text_primary') : this.appearance.accent)
             .fontWeight(index === this.crumbs().length - 1 ? FontWeight.Medium : FontWeight.Normal)
             .onClick(() => { this.go(this.crumbs().slice(0, index + 1).join('/')); })
         }, (part: string, index: number) => index + part)
@@ -258,7 +259,7 @@ export struct WorkspacePanel {
   toolbarButton(icon: Resource, label: string, compId: string, danger: boolean, action: () => void) {
     Column({ space: 3 }) {
       SymbolGlyph(icon).fontSize(22).fontColor([danger ? $r('app.color.danger') : $r('app.color.text_primary')])
-      Text(label).fontSize(11).fontColor(danger ? $r('app.color.danger') : $r('app.color.text_secondary'))
+      Text(label).fontFamily(this.appearance.fontFamily).fontSize(11).fontColor(danger ? $r('app.color.danger') : $r('app.color.text_secondary'))
     }.id(compId).layoutWeight(1).height(56).justifyContent(FlexAlign.Center).enabled(!this.locked())
     .opacity(this.locked() ? 0.4 : 1)
     .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
@@ -273,7 +274,7 @@ export struct WorkspacePanel {
         Text(line.length > 0 ? line : ' ').fontSize(12).lineHeight(19).fontFamily('monospace').width('100%')
           .padding({ left: 10, right: 10, top: 1, bottom: 1 }).copyOption(CopyOptions.LocalDevice)
           .fontColor(line.startsWith('@@') ? $r('app.color.text_tertiary') : line.startsWith('- ') ? $r('app.color.danger') : $r('app.color.text_primary'))
-          .backgroundColor(line.startsWith('+ ') ? $r('app.color.accent_container') : line.startsWith('- ') ? $r('app.color.danger_container') : Color.Transparent)
+          .backgroundColor(line.startsWith('+ ') ? this.appearance.accentContainer : line.startsWith('- ') ? $r('app.color.danger_container') : Color.Transparent)
       }, (line: string, index: number) => index + line)
     }.width('100%').borderRadius(Radius.sm).clip(true).border({ width: 0.5, color: $r('app.color.divider') })
   }
@@ -283,26 +284,26 @@ export struct WorkspacePanel {
   reviewCard() {
     Column({ space: 10 }) {
       Row({ space: Space.sm }) {
-        SymbolGlyph($r('sys.symbol.square_and_pencil')).fontSize(18).fontColor([$r('app.color.accent')])
+        SymbolGlyph($r('sys.symbol.square_and_pencil')).fontSize(18).fontColor([this.appearance.accent])
         Column({ space: 2 }) {
-          Text(this.app.active.projectId ? t("项目中的待审修改") : t("助手修改了这个文件")).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
-          Text(this.app.active.projectId ? t("这里包含项目内各会话和文件编辑的累计修改。") : this.baseline?.existed ? t("确认保留修改，或恢复到修改前的版本。") : t("这是助手新建的文件。")).fontSize(Font.caption)
+          Text(this.app.active.projectId ? t("项目中的待审修改") : t("助手修改了这个文件")).fontFamily(this.appearance.fontFamily).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
+          Text(this.app.active.projectId ? t("这里包含项目内各会话和文件编辑的累计修改。") : this.baseline?.existed ? t("确认保留修改，或恢复到修改前的版本。") : t("这是助手新建的文件。")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
             .fontColor($r('app.color.text_secondary'))
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-        Button(this.reviewing ? t("看内容") : t("看差异")).id('workspace-diff').attributeModifier(Btn.textSmall)
+        Button(this.reviewing ? t("看内容") : t("看差异")).fontFamily(this.appearance.fontFamily).id('workspace-diff').attributeModifier(Btn.textSmall)
           .padding({ left: 10, right: 10 }).onClick(() => { this.reviewing = !this.reviewing; })
       }.width('100%')
       Row({ space: Space.sm }) {
-        Button(this.baseline?.existed ? t("恢复原版") : t("删除文件")).id('workspace-restore').attributeModifier(Btn.plainSmall)
+        Button(this.baseline?.existed ? t("恢复原版") : t("删除文件")).fontFamily(this.appearance.fontFamily).id('workspace-restore').attributeModifier(Btn.plainSmall)
           .height(36).layoutWeight(1).enabled(!this.locked()).onClick(() => {
-            this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface, title: t("恢复修改前版本？"), message: (this.app.active.projectId ? t("这会恢复项目中的累计修改，可能包含其他会话的改动。") + "\n" : "") + (this.baseline?.existed ? t("当前内容将被保存基线替换。") : t("此文件是新建文件，恢复会删除它。")),
+            this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t("恢复修改前版本？"), message: (this.app.active.projectId ? t("这会恢复项目中的累计修改，可能包含其他会话的改动。") + "\n" : "") + (this.baseline?.existed ? t("当前内容将被保存基线替换。") : t("此文件是新建文件，恢复会删除它。")),
               primaryButton: { value: t("取消"), action: () => {} }, secondaryButton: { value: t("恢复"), fontColor: $r('app.color.danger'), action: () => this.reviewAction(true) } });
           })
-        Button(t("保留修改")).id('workspace-accept').attributeModifier(Btn.primarySmall).height(36).layoutWeight(1)
+        Button(t("保留修改")).fontFamily(this.appearance.fontFamily).id('workspace-accept').attributeModifier(Btn.primarySmall).height(36).layoutWeight(1)
           .enabled(!this.locked()).onClick(() => this.reviewAction(false))
       }.width('100%')
     }.padding(Space.md).borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
-    .border({ width: 1, color: $r('app.color.accent_container') })
+    .border({ width: 1, color: this.appearance.accentContainer })
     .margin({ left: Space.page, right: Space.page, bottom: Space.sm })
   }
 
@@ -312,18 +313,18 @@ export struct WorkspacePanel {
       Row({ space: 4 }) {
         Button({ type: ButtonType.Circle }) {
           SymbolGlyph($r('sys.symbol.chevron_left')).fontSize(22).fontColor([$r('app.color.text_primary')])
-        }.width(44).height(44).backgroundColor(Color.Transparent).accessibilityText(t("返回")).onClick(() => this.closePreview())
+        }.fontFamily(this.appearance.fontFamily).width(44).height(44).backgroundColor(Color.Transparent).accessibilityText(t("返回")).onClick(() => this.closePreview())
         Column({ space: 1 }) {
-          Text(this.fileName(this.selected)).fontSize(16).fontWeight(FontWeight.Medium).maxLines(1)
+          Text(this.fileName(this.selected)).fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium).maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
-          Text(this.editing ? (this.dirty() ? t("编辑中 · 未保存") : t("编辑中")) : this.directory || t("工作区")).fontSize(Font.caption).maxLines(1)
-            .fontColor(this.dirty() ? $r('app.color.accent') : $r('app.color.text_tertiary'))
+          Text(this.editing ? (this.dirty() ? t("编辑中 · 未保存") : t("编辑中")) : this.directory || t("工作区")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).maxLines(1)
+            .fontColor(this.dirty() ? this.appearance.accent : $r('app.color.text_tertiary'))
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
         if (this.editing) {
-          Button(this.busy ? t("保存中…") : t("保存")).id('workspace-edit-save').attributeModifier(Btn.primarySmall)
+          Button(this.busy ? t("保存中…") : t("保存")).fontFamily(this.appearance.fontFamily).id('workspace-edit-save').attributeModifier(Btn.primarySmall)
             .enabled(!this.locked()).onClick(() => this.save())
         } else if (this.imagePath.length === 0 && this.previewError.length === 0) {
-          Button(t("编辑")).id('workspace-edit-save').attributeModifier(Btn.tonalSmall).enabled(!this.locked())
+          Button(t("编辑")).fontFamily(this.appearance.fontFamily).id('workspace-edit-save').attributeModifier(Btn.tonalSmall).enabled(!this.locked())
             .onClick(() => { this.editing = true; })
         }
       }.width('100%').height(56).padding({ left: 4, right: Space.page })
@@ -331,7 +332,7 @@ export struct WorkspacePanel {
         Banner({ text: this.previewError }).padding({ left: Space.page, right: Space.page })
       }
       if (this.editing) {
-        TextArea({ text: this.content, placeholder: t("开始输入…") }).id('workspace-content')
+        TextArea({ text: this.content, placeholder: t("开始输入…") }).fontFamily(this.appearance.fontFamily).id('workspace-content')
           .fontSize(15).lineHeight(24).layoutWeight(1).width('100%').maxLength(32000).defaultFocus(true)
           .backgroundColor(Color.Transparent).borderRadius(0).padding({ left: Space.page, right: Space.page, top: Space.sm })
           .fontColor($r('app.color.text_primary')).placeholderColor($r('app.color.text_tertiary'))
@@ -411,7 +412,7 @@ export struct WorkspacePanel {
             }, (entry: WorkspaceEntry) => this.directory + '/' + entry.name)
             if (this.truncated) {
               ListItem() {
-                Text(t("仅显示前 200 项")).fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).width('100%')
+                Text(t("仅显示前 200 项")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).width('100%')
                   .textAlign(TextAlign.Center).padding(Space.md)
               }
             }
@@ -421,9 +422,9 @@ export struct WorkspacePanel {
         }.layoutWeight(1).onRefreshing(() => { this.refresh(); })
         BottomBar() {
           Row({ space: Space.md }) {
-            Button(this.busy ? t("处理中…") : t("导入文件")).id('workspace-import').attributeModifier(Btn.tonal).height(48).layoutWeight(1)
+            Button(this.busy ? t("处理中…") : t("导入文件")).fontFamily(this.appearance.fontFamily).id('workspace-import').attributeModifier(Btn.tonal).height(48).layoutWeight(1)
               .enabled(!this.locked()).onClick(() => this.importFiles())
-            Button(t("新建笔记")).id('workspace-new').attributeModifier(Btn.primary).layoutWeight(1)
+            Button(t("新建笔记")).fontFamily(this.appearance.fontFamily).id('workspace-new').attributeModifier(Btn.primary).layoutWeight(1)
               .enabled(!this.locked()).onClick(() => this.newNote())
           }.width('100%')
         }
@@ -433,7 +434,7 @@ export struct WorkspacePanel {
         onWillDismiss: (action: DismissContentCoverAction) => { if (this.dirty()) { this.closePreview(); } else { action.dismiss(); } }
       })
     }
-    .title(this.crumbs().length > 0 ? this.crumbs()[this.crumbs().length - 1] : this.app.activeProject ? t("项目文件") + " · " + this.app.activeProject.name : t("工作区文件"), { systemMaterial: AppMaterials.control })
+    .title(this.crumbs().length > 0 ? this.crumbs()[this.crumbs().length - 1] : this.app.activeProject ? t("项目文件") + " · " + this.app.activeProject.name : t("工作区文件"), { systemMaterial: this.appearance.control })
     .backgroundColor($r('app.color.page_background'))
     // Back goes up one folder before leaving the page, matching system file managers.
     .onBackPressed(() => {
