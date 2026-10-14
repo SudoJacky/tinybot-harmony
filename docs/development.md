@@ -64,6 +64,8 @@ node scripts/build-app-icons.cjs .cache/icon-tools/node_modules/@resvg/resvg-js
 
 `node scripts/test-i18n-native.cjs` 验证语言偏好与持久化；`node scripts/test-chat-disclosures.cjs` 验证流式更新、过程重开、消息隔离和历史加载时的展开状态。`node scripts/test-tool-details.cjs` 验证分类回执、失败状态与无损分页；构建后运行 `node scripts/test-team-renderer.cjs`，检查 DevEco 实际生成的 Team、工具详情及编排子调用更新回调。`node scripts/test-message-actions-renderer.cjs` 验证改写、重新生成、分支按钮在会话结束后恢复可用，再次忙碌或保存出错时禁用；复制保持可用。
 
+`node scripts/test-answer-speech-native.cjs` 验证回答朗读的分段、取消、后台释放、系统失败和快捷入口分发；构建后运行 `node scripts/test-launch-actions-renderer.cjs`，用实际生成的页面方法验证快捷入口保存草稿、创建独立会话、忙碌拒绝及听写单次触发。
+
 本地测试覆盖指令顺序、整批工具边界、无工具回答后的追加、取消、落盘失败、上下文和步数限制、历史回放与压缩、会话隔离和重启恢复。真机使用本地模拟模型验证追加后连续执行多个任务，以及停止、错误、重启、撤回编辑和恢复执行。
 
 ## 历史验证记录
