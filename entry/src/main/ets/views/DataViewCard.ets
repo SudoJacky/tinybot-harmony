@@ -1,3 +1,4 @@
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
@@ -36,6 +37,7 @@ function tick(value: number): string {
 
 @Component
 export struct DataViewCard {
+  @StorageProp('tinybot.appearance.style') @Watch('refreshPalette') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop @Watch('refreshData') content: string;
   @State private view: DataView | undefined = undefined;
   @State private error: string = '';
@@ -59,13 +61,16 @@ export struct DataViewCard {
 
   aboutToAppear(): void {
     this.refreshData();
-    try {
+    this.refreshPalette();
+  }
+
+  private refreshPalette(): void {
       const resources = this.getUIContext().getHostContext()!.resourceManager;
       this.series = resources.getConfigurationSync().colorMode === resourceManager.ColorMode.DARK ? SERIES_DARK : SERIES_LIGHT;
       this.ink = this.rgba(resources.getColorSync($r('app.color.text_tertiary').id));
       this.grid = this.rgba(resources.getColorSync($r('app.color.divider').id));
       this.surface = this.rgba(resources.getColorSync($r('app.color.surface').id));
-    } catch (_) { /* Keep light defaults. */ }
+    this.draw();
   }
 
   private rgba(argb: number): string {
@@ -265,7 +270,7 @@ export struct DataViewCard {
       if (this.error) {
         Row({ space: Space.sm }) {
           SymbolGlyph($r('sys.symbol.exclamationmark_circle')).fontSize(16).fontColor([$r('app.color.danger')])
-          Text(this.error).fontSize(13).layoutWeight(1).fontColor($r('app.color.danger'))
+          Text(this.error).fontFamily(this.appearance.fontFamily).fontSize(13).layoutWeight(1).fontColor($r('app.color.danger'))
         }.width('100%')
       }
     }.width('100%').padding({ left: 14, right: 14, top: 14, bottom: 10 }).borderRadius(Radius.lg)

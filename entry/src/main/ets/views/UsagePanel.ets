@@ -1,5 +1,5 @@
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t, getLocale } from '../model/I18n';
-import { AppMaterials } from '../common/AppMaterials';
 import { RequestUsage, UsageOrigin, UsageToolActivity } from '../model/Usage';
 import { UsageActivity, UsageDay, UsageGroup, UsageModel, UsagePeriod, UsageSession, UsageStatistics, UsageFilter, reportedTokens } from '../model/UsageStatistics';
 import { UsageCursor, UsageQuery } from '../model/UsageQuery';
@@ -10,6 +10,7 @@ import { Banner, EmptyState, GroupCard, NavRow, RowDivider, SectionHeader, Segme
 
 @Component
 export struct UsagePanel {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   @State private range: number = 2;
   @State private provider: string = '';
@@ -271,8 +272,8 @@ export struct UsagePanel {
   @Builder
   metric(label: string, value: string) {
     Row({ space: Space.sm }) {
-      Text(label).fontSize(13).fontColor($r('app.color.text_secondary')).layoutWeight(1)
-      Text(value).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
+      Text(label).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary')).layoutWeight(1)
+      Text(value).fontFamily(this.appearance.fontFamily).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
     }.width('100%')
   }
 
@@ -281,9 +282,9 @@ export struct UsagePanel {
     SectionHeader({ title: t('用量概览') })
     GroupCard() {
       Column({ space: Space.md }) {
-        Text(t('总 Token')).fontSize(13).fontColor($r('app.color.text_secondary'))
-        Text(this.total(this.stats.totals.total)).id('usage-total').fontSize(34).fontWeight(FontWeight.Bold)
-          .fontColor($r('app.color.accent')).maxLines(1).minFontSize(20).maxFontSize(34)
+        Text(t('总 Token')).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
+        Text(this.total(this.stats.totals.total)).fontFamily(this.appearance.fontFamily).id('usage-total').fontSize(34).fontWeight(FontWeight.Bold)
+          .fontColor(this.appearance.accent).maxLines(1).minFontSize(20).maxFontSize(34)
         Row({ space: Space.sm }) {
           StatTile({ value: this.total(this.stats.totals.input), label: t('输入 Token') })
           StatTile({ value: this.total(this.stats.totals.output), label: t('输出 Token') })
@@ -298,7 +299,7 @@ export struct UsagePanel {
       StatTile({ value: this.number(this.stats.totals.reported), label: t('已报告用量') })
       StatTile({ value: this.number(this.stats.totals.missing), label: t('未报告') })
     }.width('100%').margin({ top: Space.sm })
-    Text(t('失败 {0} · 已取消 {1} · 进行中 / 结果不确定 {2}', [this.stats.totals.failed, this.stats.totals.cancelled, this.stats.totals.pending]))
+    Text(t('失败 {0} · 已取消 {1} · 进行中 / 结果不确定 {2}', [this.stats.totals.failed, this.stats.totals.cancelled, this.stats.totals.pending])).fontFamily(this.appearance.fontFamily)
       .fontSize(Font.caption).fontColor($r('app.color.text_secondary')).width('100%').margin({ top: Space.sm })
   }
 
@@ -307,28 +308,28 @@ export struct UsagePanel {
     SectionHeader({ title: t('每日趋势') })
     GroupCard() {
       Column({ space: Space.sm }) {
-        Text(compactNumber(Math.max(0, ...this.stats.days.map((item: UsageDay) => item.total))) + ' Token')
+        Text(compactNumber(Math.max(0, ...this.stats.days.map((item: UsageDay) => item.total))) + ' Token').fontFamily(this.appearance.fontFamily)
           .fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).width('100%')
         Row({ space: this.stats.days.length > 7 ? 3 : 8 }) {
           ForEach(this.stats.days, (item: UsageDay) => {
             Column() {
               Column().width('100%').height(item.total > 0 ? Math.max(3, item.total / this.stats.peak * 100) : 2)
-                .backgroundColor(item.date === this.selectedDay().date ? $r('app.color.accent') : $r('app.color.text_tertiary')).borderRadius(3)
+                .backgroundColor(item.date === this.selectedDay().date ? this.appearance.accent : $r('app.color.text_tertiary')).borderRadius(3)
             }.layoutWeight(1).height(110).justifyContent(FlexAlign.End)
               .id('usage-day-' + item.date).accessibilityText(item.date + ' · ' + (item.calls > 0 && item.reported === 0 ? t('未报告') : this.number(item.total) + ' Token'))
               .onClick(() => { this.day = item.date; })
           }, (item: UsageDay) => JSON.stringify(item))
         }.width('100%')
         Row() {
-          Text(this.stats.days[0]?.date.slice(5) || '')
+          Text(this.stats.days[0]?.date.slice(5) || '').fontFamily(this.appearance.fontFamily)
             .fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
           Blank()
-          Text(this.stats.days[this.stats.days.length - 1]?.date.slice(5) || '')
+          Text(this.stats.days[this.stats.days.length - 1]?.date.slice(5) || '').fontFamily(this.appearance.fontFamily)
             .fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
         }.width('100%')
-        Text(this.selectedDay().date + ' · ' + (this.selectedDay().calls > 0 && this.selectedDay().reported === 0 ? t('未报告') : this.number(this.selectedDay().total) + ' Token'))
+        Text(this.selectedDay().date + ' · ' + (this.selectedDay().calls > 0 && this.selectedDay().reported === 0 ? t('未报告') : this.number(this.selectedDay().total) + ' Token')).fontFamily(this.appearance.fontFamily)
           .fontSize(14).fontColor($r('app.color.text_primary')).width('100%')
-        Text(t('{0} 次请求 · {1} 次未报告', [this.selectedDay().calls, this.selectedDay().missing]))
+        Text(t('{0} 次请求 · {1} 次未报告', [this.selectedDay().calls, this.selectedDay().missing])).fontFamily(this.appearance.fontFamily)
           .fontSize(Font.caption).fontColor($r('app.color.text_secondary')).width('100%')
       }.width('100%').padding(Space.lg)
     }
@@ -338,13 +339,13 @@ export struct UsagePanel {
   modelRow(item: UsageModel) {
     Column({ space: Space.sm }) {
       Row({ space: Space.sm }) {
-        Text(item.model).fontSize(14).fontWeight(FontWeight.Medium).layoutWeight(1).maxLines(2)
+        Text(item.model).fontFamily(this.appearance.fontFamily).fontSize(14).fontWeight(FontWeight.Medium).layoutWeight(1).maxLines(2)
           .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
-        Text(item.reported ? this.number(item.total) : t('未报告')).fontSize(14).fontColor($r('app.color.accent'))
+        Text(item.reported ? this.number(item.total) : t('未报告')).fontFamily(this.appearance.fontFamily).fontSize(14).fontColor(this.appearance.accent)
       }.width('100%')
       Progress({ value: item.total, total: Math.max(1, this.stats.totals.total), type: ProgressType.Linear })
-        .width('100%').color($r('app.color.accent')).backgroundColor($r('app.color.surface_variant'))
-      Text(this.providerName(item.provider) + ' · ' + t('{0} 次请求 · {1} 次未报告', [item.calls, item.missing]))
+        .width('100%').color(this.appearance.accent).backgroundColor($r('app.color.surface_variant'))
+      Text(this.providerName(item.provider) + ' · ' + t('{0} 次请求 · {1} 次未报告', [item.calls, item.missing])).fontFamily(this.appearance.fontFamily)
         .fontSize(Font.caption).fontColor($r('app.color.text_secondary')).width('100%')
     }.padding(Space.lg).width('100%')
   }
@@ -353,15 +354,15 @@ export struct UsagePanel {
   requestRow(item: RequestUsage) {
     Column({ space: Space.sm }) {
       Row({ space: Space.sm }) {
-        Text(item.model).fontSize(14).fontWeight(FontWeight.Medium).layoutWeight(1).maxLines(2)
+        Text(item.model).fontFamily(this.appearance.fontFamily).fontSize(14).fontWeight(FontWeight.Medium).layoutWeight(1).maxLines(2)
           .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
         Tag({ text: this.status(item), danger: item.status === 'failed' })
       }.width('100%')
-      Text(this.providerName(item.provider) + ' · ' + new Date(item.startedAt).toLocaleString(getLocale()))
+      Text(this.providerName(item.provider) + ' · ' + new Date(item.startedAt).toLocaleString(getLocale())).fontFamily(this.appearance.fontFamily)
         .fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).width('100%')
-      Text(reportedTokens(item.tokens) ? t('输入 {0} · 输出 {1}', [this.number(item.tokens!.input), this.number(item.tokens!.output)]) : t('Token 未报告'))
+      Text(reportedTokens(item.tokens) ? t('输入 {0} · 输出 {1}', [this.number(item.tokens!.input), this.number(item.tokens!.output)]) : t('Token 未报告')).fontFamily(this.appearance.fontFamily)
         .fontSize(13).fontColor($r('app.color.text_secondary')).width('100%')
-      Button(this.expanded === item.id ? t('收起详情') : t('查看详情')).attributeModifier(Btn.textSmall)
+      Button(this.expanded === item.id ? t('收起详情') : t('查看详情')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.textSmall)
         .onClick(() => { this.expanded = this.expanded === item.id ? '' : item.id; this.detailToolPage = 0; })
       if (this.expanded === item.id) {
         this.metric(t('用途'), this.purposeName(item.origin?.purpose || 'unclassified'))
@@ -475,7 +476,7 @@ export struct UsagePanel {
           Column({ space: Space.sm }) {
             this.metric(item.label, skills ? t('{0} 轮', [item.calls]) : t('{0} 次', [item.calls]))
             if (!skills && item.failed > 0) {
-              Text(t('{0} 次失败', [item.failed])).fontSize(Font.caption).fontColor($r('app.color.danger')).width('100%')
+              Text(t('{0} 次失败', [item.failed])).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.danger')).width('100%')
             }
           }.width('100%').padding(Space.lg)
         }, (item: UsageActivity) => JSON.stringify(item))
@@ -500,11 +501,11 @@ export struct UsagePanel {
   pager(page: number, hasNext: boolean, previous: () => void, next: () => void) {
     if (page > 0 || hasNext) {
       Row() {
-        Button(t('上一页')).attributeModifier(Btn.textSmall).enabled(page > 0 && !this.loading && !this.pageLoading).onClick(previous)
+        Button(t('上一页')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.textSmall).enabled(page > 0 && !this.loading && !this.pageLoading).onClick(previous)
         Blank()
-        Text(String(page + 1)).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+        Text(String(page + 1)).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
         Blank()
-        Button(t('下一页')).attributeModifier(Btn.textSmall).enabled(hasNext && !this.loading && !this.pageLoading).onClick(next)
+        Button(t('下一页')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.textSmall).enabled(hasNext && !this.loading && !this.pageLoading).onClick(next)
       }.width('100%').padding(Space.sm)
     }
   }
@@ -550,7 +551,7 @@ export struct UsagePanel {
           if (this.tab === 3) {
             Row() {
             SectionHeader({ title: t('请求明细') }).layoutWeight(1)
-            Button(t('刷新')).id('usage-refresh').attributeModifier(Btn.textSmall).onClick(() => this.refresh())
+            Button(t('刷新')).fontFamily(this.appearance.fontFamily).id('usage-refresh').attributeModifier(Btn.textSmall).onClick(() => this.refresh())
             }.width('100%')
           }
         }.width('100%')
@@ -564,6 +565,6 @@ export struct UsagePanel {
     }.width('100%').height('100%').padding({ left: Space.page, right: Space.page }).scrollBar(BarState.Off)
       .edgeEffect(EdgeEffect.Spring).contentEndOffset(Space.xl)
       .bindSheet($$this.showFilter, this.filterSheet(), { title: { title: this.filterTitle() },
-        height: SheetSize.FIT_CONTENT, dragBar: true, systemMaterial: AppMaterials.surface })
+        height: SheetSize.FIT_CONTENT, dragBar: true, systemMaterial: this.appearance.surface })
   }
 }

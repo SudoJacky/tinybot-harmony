@@ -1,6 +1,7 @@
 import { webview } from '@kit.ArkWeb';
 import { ShareInbox } from '../services/NativeActions';
 import { LanguagePreferences } from '../services/LanguagePreferences';
+import { AppearancePreferences } from '../services/AppearancePreferences';
 import { McpOAuth } from '../services/McpOAuth';
 import { LaunchActions } from '../services/LaunchActions';
 /*
@@ -18,7 +19,7 @@ import { LaunchActions } from '../services/LaunchActions';
  * limitations under the License.
  */
 
-import { AbilityConstant, Configuration, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
+import { AbilityConstant, Configuration, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 
@@ -28,19 +29,20 @@ export default class EntryAbility extends UIAbility {
   private mainWindow?: window.Window;
 
   // Pages extend their backgrounds under the system bars, so match the status bar text to the theme.
-  private applySystemBars(config: Configuration = this.context.config): void {
+  private applySystemBars(): void {
     if (!this.mainWindow) {
       return;
     }
-    const dark = config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
+    const dark = AppStorage.get<boolean>('tinybot.appearance.dark') === true;
     this.mainWindow.setWindowSystemBarProperties({ statusBarContentColor: dark ? '#FFFFFF' : '#000000' })
       .catch((err: Error) => hilog.error(DOMAIN, 'testTag', 'Failed to set bar color. Cause: %{public}s', err.message));
   }
 
   onConfigurationUpdate(config: Configuration): void {
     LanguagePreferences.refresh();
+    AppearancePreferences.refresh(config);
     // The callback receives the new theme before context.config is refreshed.
-    this.applySystemBars(config);
+    this.applySystemBars();
   }
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
@@ -50,13 +52,9 @@ export default class EntryAbility extends UIAbility {
     webview.WebviewController.initializeWebEngine();
     hilog.info(DOMAIN, 'TinybotWebUI', 'engine initialized ms=%{public}d', Date.now() - webStarted);
     LanguagePreferences.initialize(this.context);
+    AppearancePreferences.initialize(this.context);
     ShareInbox.receive(want, this.context.getApplicationContext().filesDir);
     LaunchActions.receive(want);
-    try {
-      this.context.getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
-    } catch (err) {
-      hilog.error(DOMAIN, 'testTag', 'Failed to set colorMode. Cause: %{public}s', JSON.stringify(err));
-    }
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
   }
 
@@ -81,6 +79,7 @@ export default class EntryAbility extends UIAbility {
       }
       hilog.info(DOMAIN, 'testTag', 'Succeeded in loading the content.');
       this.mainWindow = windowStage.getMainWindowSync();
+      AppearancePreferences.activate();
       this.applySystemBars();
     });
   }

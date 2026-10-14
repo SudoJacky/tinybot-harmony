@@ -1,4 +1,4 @@
-import { AppMaterials } from '../common/AppMaterials';
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { AppLanguage } from '../model/I18n';
 import { LanguagePreferences } from '../services/LanguagePreferences';
@@ -17,6 +17,7 @@ import { Banner, BottomBar, GroupCard, NavRow, RowDivider, SectionHeader, Switch
 
 @Component
 export struct SettingsPanel {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.language') private language: string = 'system';
   @State private languageError: string = '';
   @State private showLanguage: boolean = false;
@@ -36,6 +37,7 @@ export struct SettingsPanel {
   onSearch: () => void = () => {};
   onBackup: () => void = () => {};
   onUiDemo: () => void = () => {};
+  onAppearance: () => void = () => {};
   onSupport: (page: string) => void = () => {};
   onTools: (tab: string) => void = () => {};
   private pendingSave: Promise<void> = Promise.resolve();
@@ -61,7 +63,7 @@ export struct SettingsPanel {
           }, (mode: AgentMode) => mode)
         }
       }
-      Text(t('仅用于当前对话，选择会随下一条消息保存。')).fontSize(Font.caption)
+      Text(t('仅用于当前对话，选择会随下一条消息保存。')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
         .fontColor($r('app.color.text_secondary')).width('100%')
     }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.xl })
   }
@@ -92,7 +94,7 @@ export struct SettingsPanel {
         else if (kind === 'summary') { options.saveSummary = value; }
         extras.options = options;
         if (!await this.app.saveProductivity(extras)) {
-          this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: this.app.error });
+          this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: this.app.error });
         }
       } finally { this.resetAssistantDraft(); this.assistantSaving = false; }
     });
@@ -104,7 +106,7 @@ export struct SettingsPanel {
     this.pendingSave = this.pendingSave.then(async () => {
       if (await this.app.saveSettings()) { return; }
       apply(!value);
-      this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: this.settings.error });
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: this.settings.error });
     });
   }
 
@@ -145,7 +147,7 @@ export struct SettingsPanel {
   presetsSheet() {
     Scroll() {
       Column() {
-        Text(t('选择服务后，地址和常用模型会自动填好。')).fontSize(13).fontColor($r('app.color.text_secondary'))
+        Text(t('选择服务后，地址和常用模型会自动填好。')).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
           .width('100%').padding({ bottom: 12 })
         GroupCard() {
           Column() {
@@ -253,11 +255,11 @@ export struct SettingsPanel {
               subtitle: this.browser.policy === 'unset' ? t('默认关闭，首次需要时询问。') : this.browser.policy === 'disabled' ? t('已关闭，助手不会再次请求启用。') : t('允许助手操作网页；你可以随时接管。'),
               disabled: this.browser.permissionSaving || !this.app.ready || this.app.saveError.length > 0,
               onChange: async (value: boolean) => { try { await this.browser.setEnabled(value); }
-                catch (error) { this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: (error as Error).message }); } } })
+                catch (error) { this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: (error as Error).message }); } } })
             if (this.browser.policy === 'unset') {
-              Button(t('不再询问启用')).id('browser-disable-requests').attributeModifier(Btn.textSmall).enabled(!this.browser.permissionSaving)
+              Button(t('不再询问启用')).fontFamily(this.appearance.fontFamily).id('browser-disable-requests').attributeModifier(Btn.textSmall).enabled(!this.browser.permissionSaving)
                 .onClick(async () => { try { await this.browser.setEnabled(false); }
-                  catch (error) { this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: (error as Error).message }); } })
+                  catch (error) { this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: (error as Error).message }); } })
             }
             RowDivider()
             NavRow({ title: 'Skills', compId: 'open-skills', icon: $r('sys.symbol.wand_and_stars'),
@@ -292,10 +294,15 @@ export struct SettingsPanel {
         }
         SectionHeader({ title: t('偏好设置') })
         GroupCard() {
-          NavRow({ title: t('语言'), value: this.languageName(this.language),
-            compId: 'open-language', disabled: !this.canEdit(), onTap: () => { this.showLanguage = true; } })
-            .bindSheet($$this.showLanguage, this.languageSheet(), { title: { title: t('语言') }, height: SheetSize.FIT_CONTENT,
-              dragBar: true, systemMaterial: AppMaterials.surface })
+          Column() {
+            NavRow({ title: t('界面与外观'), subtitle: t('主题色、字体、明暗模式与光感效果'),
+              compId: 'open-appearance', onTap: () => this.onAppearance() })
+            RowDivider()
+            NavRow({ title: t('语言'), value: this.languageName(this.language),
+              compId: 'open-language', disabled: !this.canEdit(), onTap: () => { this.showLanguage = true; } })
+              .bindSheet($$this.showLanguage, this.languageSheet(), { title: { title: t('语言') }, height: SheetSize.FIT_CONTENT,
+                dragBar: true, systemMaterial: this.appearance.surface })
+          }
         }
         SectionHeader({ title: t('关于') })
         GroupCard() {
@@ -318,6 +325,7 @@ export struct SettingsPanel {
 
 @Component
 export struct UserDocumentPanel {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   @ObjectLink settings: SettingsViewModel;
   onSaved: () => void = () => {};
@@ -325,9 +333,9 @@ export struct UserDocumentPanel {
   build() {
     Column() {
       Column({ space: Space.md }) {
-        Text(t('USER.md 会附加到所有对话的上下文，保存后从下一轮生效。系统提示词由应用维护，不可修改。清空文档即可停用个人偏好。'))
+        Text(t('USER.md 会附加到所有对话的上下文，保存后从下一轮生效。系统提示词由应用维护，不可修改。清空文档即可停用个人偏好。')).fontFamily(this.appearance.fontFamily)
           .fontSize(Font.caption).fontColor($r('app.color.text_secondary')).width('100%')
-        TextArea({ text: this.settings.userDocument, placeholder: t('例如：\n# 关于我\n请称呼我为…\n\n# 回答偏好\n先给结论，再给必要的例子。') }).id('user-document')
+        TextArea({ text: this.settings.userDocument, placeholder: t('例如：\n# 关于我\n请称呼我为…\n\n# 回答偏好\n先给结论，再给必要的例子。') }).fontFamily(this.appearance.fontFamily).id('user-document')
           .attributeModifier(Styles.area).layoutWeight(1)
           .backgroundColor($r('app.color.surface'))
           .enabled(!this.app.busy && this.app.saveError.length === 0)
@@ -337,7 +345,7 @@ export struct UserDocumentPanel {
         }
       }.layoutWeight(1).padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.md })
       BottomBar() {
-        Button(this.app.busy ? t("正在保存…") : t("保存")).id('save-settings').attributeModifier(Btn.primary).width('100%')
+        Button(this.app.busy ? t("正在保存…") : t("保存")).fontFamily(this.appearance.fontFamily).id('save-settings').attributeModifier(Btn.primary).width('100%')
           .enabled(!this.app.busy && this.app.saveError.length === 0)
           .onClick(async () => { if (await this.app.saveSettings()) { this.onSaved(); } })
       }

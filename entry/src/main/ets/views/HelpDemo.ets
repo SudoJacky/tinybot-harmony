@@ -1,3 +1,4 @@
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { AnimatorResult } from '@kit.ArkUI';
 import { Radius } from '../common/Theme';
 import { HelpDemoKind, TutorialStep, TutorialRect, TUTORIAL_STEP_MS, tutorialSteps, tutorialRect,
@@ -6,6 +7,7 @@ import { HelpTutorialScreen, tutorialText } from './HelpTutorialScreen';
 
 @Component
 export struct HelpDemo {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   kind: HelpDemoKind = 'chat';
   @StorageProp('tinybot.foreground') @Watch('syncPlayback') private foreground: boolean = false;
   @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
@@ -114,14 +116,14 @@ export struct HelpDemo {
   touch() {
     Rect().width(tutorialRect(this.steps[this.index].control).width + 8)
       .height(tutorialRect(this.steps[this.index].control).height + 8).radius(14)
-      .fill(Color.Transparent).stroke($r('app.color.accent')).strokeWidth(2)
+      .fill(Color.Transparent).stroke(this.appearance.accent).strokeWidth(2)
       .position({ x: tutorialRect(this.steps[this.index].control).x - 4, y: tutorialRect(this.steps[this.index].control).y - 4 })
       .opacity(this.focus() * (1 - this.navigation()) * 0.8)
-    Circle().width(32).height(32).fill(Color.Transparent).stroke($r('app.color.accent')).strokeWidth(2)
+    Circle().width(32).height(32).fill(Color.Transparent).stroke(this.appearance.accent).strokeWidth(2)
       .position({ x: this.pointerX() - 16, y: this.pointerY() - 16 })
       .scale({ x: 1 + this.ripple() * 1.8, y: 1 + this.ripple() * 1.8 })
       .opacity(this.phase >= 0.43 ? (1 - this.ripple()) * 0.8 : 0)
-    Circle().width(20).height(20).fill($r('app.color.surface')).stroke($r('app.color.accent')).strokeWidth(3)
+    Circle().width(20).height(20).fill($r('app.color.surface')).stroke(this.appearance.accent).strokeWidth(3)
       .position({ x: this.pointerX() - 10, y: this.pointerY() - 10 })
       .scale({ x: 1 - this.tap() * 0.2, y: 1 - this.tap() * 0.2 }).opacity(this.pointerAlpha())
   }
@@ -149,10 +151,10 @@ export struct HelpDemo {
         .backgroundColor($r('app.color.surface_variant')).hitTestBehavior(HitTestMode.None)
         .accessibilityLevel('no-hide-descendants')
         .onAreaChange((oldArea: Area, area: Area) => { this.stageWidth = Number(area.width); })
-      Text(tutorialText(this.steps[this.index].caption, this.locale)).fontSize(12).maxLines(2)
+      Text(tutorialText(this.steps[this.index].caption, this.locale)).fontFamily(this.appearance.fontFamily).fontSize(12).maxLines(2)
         .fontColor($r('app.color.text_secondary')).width('100%').constraintSize({ minHeight: 32 })
       Progress({ value: this.index + this.phase, total: this.steps.length, type: ProgressType.Linear })
-        .width('100%').height(2).color($r('app.color.accent')).backgroundColor($r('app.color.divider'))
+        .width('100%').height(2).color(this.appearance.accent).backgroundColor($r('app.color.divider'))
         .accessibilityLevel('no')
     }.width('100%').id('help-demo-' + this.kind)
       .onVisibleAreaChange([0], (visible: boolean) => {

@@ -24,6 +24,8 @@ class Property {
 class ViewPU {
   constructor(parent, storage, id) { this.parent = parent; this.id = id; this.watches = new Map(); this.effects = new Map(); this.childViews = new Map(); this.lists = new Map(); this.branches = new Map(); this.uiNodes = new Map(); }
   finalizeConstruction() {}
+  createStorageProp(key, value, name) { return new Property(value, this, name); }
+  createStorageLink(key, value, name) { return new Property(value, this, name); }
   declareWatch(name, callback) { this.watches.set(name, callback); }
   observeComponentCreation2(callback) { const id = ++serial; this.effects.set(id, callback); this.current = id; const previous=activeView; activeView=this; callback(id, true); activeView=previous; }
   forEachUpdateFunction(id, items, create, key) {
@@ -62,6 +64,7 @@ const globals = { exports: {}, ViewPU, SynchedPropertySimpleOneWayPU: Property, 
     if (id.includes('InteractiveUi&')) return model(path.join(root, 'model/InteractiveUi'));
     if (id.includes('I18n&')) return { t: text => text };
     if (id.includes('Theme&')) return { Space: {}, Radius: {}, Btn: {} };
+    if (id.includes('AppearanceStyle&')) return { AppearanceStyle: class { constructor() { this.fontFamily = ''; } } };
     if (id.includes('AppMaterials&')) return { AppMaterials: { control: {}, surface: {} } };
     if (id.includes('MarkdownView&')) return { MarkdownView };
     if (id.includes('DataViewCard&')) return {};
@@ -217,7 +220,7 @@ if (failed) process.exitCode = 1;
     getSurfaceId() { return 'web-surface'; }
   }
   let captureSurface = async () => ({ release: async () => {} });
-  const webGlobals = { ...globals, exports: {}, MessageLevel: { Error: 3 }, Stack: noUi, Image: noUi, ImageFit: {},
+  const webGlobals = { ...globals, exports: {}, MessageLevel: { Error: 3 }, Stack: noUi, Image: noUi, ImageFit: {}, Alignment: {}, HitTestMode: {},
     Web: new Proxy({}, { get: (_, name) => (...args) => { if (name.startsWith('on')) callbacks[name] = args[0]; } }),
     require: id => {
       if (id === '@ohos:web.webview') return { default: { WebviewController: Controller } };
@@ -237,6 +240,7 @@ if (failed) process.exitCode = 1;
   const settle = () => new Promise(resolve => setImmediate(resolve));
   const intercept = (url, main = true) => callbacks.onLoadIntercept({data:{getRequestUrl:()=>url,isMainFrame:()=>main}});
   try {
+    view.visible = true;
     view.aboutToAppear(); view.initialRender(); callbacks.onControllerAttached(); await settle();
     assert.equal(loads.length,0,'initial navigation must finish before loadData');
     callbacks.onPageEnd({url:'about:blank'}); await settle(); assert.equal(loads.length,1);
@@ -262,10 +266,11 @@ if (failed) process.exitCode = 1;
     console.log('PASS ArkWeb sizes auto-height previews independently of state saving, bounds height and ignores stale documents');
     console.log('PASS ArkWeb waits for its initial document and permits exactly one native data load');
     await view.receive('{"type":"save","id":1,"values":{"count":1}}',view.generation);
-    assert.equal(sent.at(-1).type,'ack'); assert.equal(sent.at(-1).values.count,1);
+    const savedAck = sent.find(message => message.type === 'ack' && message.id === 1);
+    assert.ok(savedAck); assert.equal(savedAck.values.count,1);
     view.onSave = async () => { throw new Error('Disk write failed'); };
     await view.receive('{"type":"save","id":2,"values":{"count":2}}',view.generation);
-    assert.equal(sent.at(-1).error,'Disk write failed'); assert.equal(view.error,'Disk write failed');
+    assert.equal(sent.find(message => message.type === 'ack' && message.id === 2).error,'Disk write failed'); assert.equal(view.error,'Disk write failed');
     console.log('PASS ArkWeb state acknowledgements follow persistence and expose save failures');
     await view.restart(); assert.equal(loads.length,2); assert.equal(intercept('data:text/html,host'),false);
     callbacks.onPageEnd({url:'data:text/html,host'}); await settle();

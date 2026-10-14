@@ -1,4 +1,4 @@
-import { AppMaterials } from '../common/AppMaterials';
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { WebUiView } from './WebUiView';
 import { LengthMetrics } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
@@ -15,6 +15,7 @@ import { UiPresentation } from '../model/UiPresentation';
 
 @Component
 struct UiNodeView {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   presentation?: UiPresentation;
   surfaceKey: string = '';
   @Prop node: UiNode;
@@ -68,7 +69,7 @@ struct UiNodeView {
             .padding(this.node.kind === 'card' ? 14 : 0).borderRadius(Radius.md)
             .backgroundColor(this.node.kind === 'card' ? $r('app.color.surface_variant') : Color.Transparent)
         } else if (this.node.kind === 'text' || this.node.kind === 'heading') {
-          Text(this.label()).fontSize(this.node.kind === 'heading' ? 20 : 15)
+          Text(this.label()).fontFamily(this.appearance.fontFamily).fontSize(this.node.kind === 'heading' ? 20 : 15)
             .fontWeight(this.node.kind === 'heading' ? FontWeight.Bold : FontWeight.Normal)
             .fontColor($r('app.color.text_primary')).copyOption(CopyOptions.LocalDevice)
         } else if (this.node.kind === 'markdown') {
@@ -76,23 +77,23 @@ struct UiNodeView {
         } else if (this.node.kind === 'divider') {
           Divider().color($r('app.color.divider'))
         } else if (this.node.kind === 'button') {
-          Button(this.label()).attributeModifier(Btn.tonalSmall).enabled(this.interactive)
+          Button(this.label()).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.tonalSmall).enabled(this.interactive)
             .onClick(() => this.onAction(this.node.action || ''))
         } else if (this.node.kind === 'input' || this.node.kind === 'number') {
-          Text(this.label()).fontSize(13).fontColor($r('app.color.text_secondary'))
-          TextInput({ text: String(this.value()) }).maxLength(2000)
+          Text(this.label()).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
+          TextInput({ text: String(this.value()) }).fontFamily(this.appearance.fontFamily).maxLength(2000)
             .type(this.node.kind === 'number' ? InputType.Number : InputType.Normal)
             .enabled(this.interactive).accessibilityText(this.label()).onChange((value: string) => this.editText(value))
             .onEditChange((editing: boolean) => { if (!editing) { this.onCommit(this.node.action || ''); } })
         } else if (this.node.kind === 'select') {
-          Text(this.label()).fontSize(13).fontColor($r('app.color.text_secondary'))
+          Text(this.label()).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
           Select(this.options()).value(String(this.value())).selected((this.node.options || []).indexOf(String(this.value())))
             .enabled(this.interactive).accessibilityText(this.label())
             .backgroundColor(Color.Transparent).fontColor($r('sys.color.font_primary'))
-            .systemMaterial(AppMaterials.control).menuSystemMaterial(AppMaterials.surface)
+            .systemMaterial(this.appearance.control).menuSystemMaterial(this.appearance.surface)
             .onSelect((_index: number, value: string) => this.onEdit(this.node, value, true))
         } else if (this.node.kind === 'segmented') {
-          Text(this.label()).fontSize(13).fontColor($r('app.color.text_secondary'))
+          Text(this.label()).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
           Scroll() {
             Segmented({ options: this.node.options || [], selected: (this.node.options || []).indexOf(String(this.value())),
               compIdPrefix: 'ui-' + this.node.id, controlHeight: 44,
@@ -100,15 +101,15 @@ struct UiNodeView {
               .width(this.segmentedWidth()).enabled(this.interactive)
           }.width('100%').scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
         } else if (this.node.kind === 'stepper') {
-          Text(this.label()).fontSize(13).fontColor($r('app.color.text_secondary'))
+          Text(this.label()).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
           Row({ space: 12 }) {
-            Button('−').attributeModifier(Btn.tonalSmall).width(44).height(44)
+            Button('−').fontFamily(this.appearance.fontFamily).attributeModifier(Btn.tonalSmall).width(44).height(44)
               .id('ui-' + this.node.id + '-decrease').accessibilityText(this.label() + ' −')
               .enabled(this.interactive && Number(this.value()) > (this.node.min as number))
               .onClick(() => this.onEdit(this.node, uiStepValue(this.node, this.values, -1), true))
-            Text(String(this.value())).id('ui-' + this.node.id + '-value').fontSize(18).fontWeight(FontWeight.Medium)
+            Text(String(this.value())).fontFamily(this.appearance.fontFamily).id('ui-' + this.node.id + '-value').fontSize(18).fontWeight(FontWeight.Medium)
               .layoutWeight(1).textAlign(TextAlign.Center).fontColor($r('app.color.text_primary'))
-            Button('+').attributeModifier(Btn.tonalSmall).width(44).height(44)
+            Button('+').fontFamily(this.appearance.fontFamily).attributeModifier(Btn.tonalSmall).width(44).height(44)
               .id('ui-' + this.node.id + '-increase').accessibilityText(this.label() + ' +')
               .enabled(this.interactive && Number(this.value()) < (this.node.max as number))
               .onClick(() => this.onEdit(this.node, uiStepValue(this.node, this.values, 1), true))
@@ -116,29 +117,29 @@ struct UiNodeView {
         } else if (this.node.kind === 'checkbox') {
           Row({ space: 8 }) {
             Checkbox({ name: this.node.id }).select(this.value() === true).enabled(this.interactive)
-              .id('ui-' + this.node.id).accessibilityText(this.label()).selectedColor($r('app.color.accent'))
+              .id('ui-' + this.node.id).accessibilityText(this.label()).selectedColor(this.appearance.accent)
               .onChange((value: boolean) => this.onEdit(this.node, value, true))
-            Text(this.label()).fontSize(15).layoutWeight(1).fontColor($r('app.color.text_primary'))
+            Text(this.label()).fontFamily(this.appearance.fontFamily).fontSize(15).layoutWeight(1).fontColor($r('app.color.text_primary'))
               .decoration({ type: this.value() === true ? TextDecorationType.LineThrough : TextDecorationType.None })
           }.width('100%').constraintSize({ minHeight: 44 })
         } else if (this.node.kind === 'toggle') {
           Row({ space: 12 }) {
-            Text(this.label()).fontSize(15).layoutWeight(1).fontColor($r('app.color.text_primary'))
+            Text(this.label()).fontFamily(this.appearance.fontFamily).fontSize(15).layoutWeight(1).fontColor($r('app.color.text_primary'))
             Toggle({ type: ToggleType.Switch, isOn: this.value() === true }).enabled(this.interactive)
               .attributeModifier(Styles.toggle)
-              .systemMaterial(AppMaterials.control)
+              .systemMaterial(this.appearance.control)
               .accessibilityText(this.label()).onChange((value: boolean) => this.onEdit(this.node, value, true))
           }.width('100%')
         } else if (this.node.kind === 'slider') {
-          Text(this.label() + ': ' + String(this.value())).fontSize(13).fontColor($r('app.color.text_secondary'))
+          Text(this.label() + ': ' + String(this.value())).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
           Slider({ value: Number(this.value()), min: this.node.min, max: this.node.max, step: this.node.step || 1 })
             .enabled(this.interactive).accessibilityText(this.label())
-            .systemMaterial(AppMaterials.control)
+            .systemMaterial(this.appearance.control)
             .onChange((value: number, mode: SliderChangeMode) => this.onEdit(this.node, value, mode === SliderChangeMode.End || mode === SliderChangeMode.Click))
         } else if (this.node.kind === 'progress') {
-          Text(this.label()).fontSize(13).fontColor($r('app.color.text_secondary'))
+          Text(this.label()).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
           Progress({ value: Number(this.value()) - (this.node.min || 0), total: (this.node.max || 100) - (this.node.min || 0) })
-            .width('100%').color($r('app.color.accent')).accessibilityText(this.label() + ': ' + this.value())
+            .width('100%').color(this.appearance.accent).accessibilityText(this.label() + ': ' + this.value())
         } else if (this.node.kind === 'data') {
           DataViewCard({ content: this.node.bind ? String(this.value()) : this.node.data || '' })
         } else if (this.node.kind === 'scene') {
@@ -153,8 +154,8 @@ struct UiNodeView {
         } else if (this.node.kind === 'image') {
           Image(this.node.source).width('100%').height(220).objectFit(ImageFit.Contain).accessibilityText(this.label())
             .onError(() => { this.imageError = true; })
-          if (this.imageError) { Text(t('图片加载失败')).fontColor($r('app.color.danger')) }
-          Text(this.label()).fontSize(12).fontColor($r('app.color.text_secondary'))
+          if (this.imageError) { Text(t('图片加载失败')).fontFamily(this.appearance.fontFamily).fontColor($r('app.color.danger')) }
+          Text(this.label()).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
         }
       }
     }.width(this.layoutWidth)
@@ -164,6 +165,7 @@ struct UiNodeView {
 
 @Component
 struct UiSurface {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   presentation?: UiPresentation;
   @Prop @Watch('refresh') source: string;
   @Prop @Watch('refresh') closed: boolean;
@@ -246,7 +248,7 @@ struct UiSurface {
         try {
           await pasteboard.getSystemPasteboard().setData(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, uiText(definition.text || '', this.values)));
         } catch (_) { throw new Error(t('复制失败，请长按文本复制。')); }
-        this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t('已复制') });
+        this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t('已复制') });
         return;
       }
       const saved = await this.onInteract(this.surfaceKey, copyUiValues(this.values), action);
@@ -258,7 +260,7 @@ struct UiSurface {
   build() {
     Column({ space: 12 }) {
       Row({ space: 8 }) {
-        Text(this.title || t('交互界面')).fontSize(17).fontWeight(FontWeight.Medium).layoutWeight(1).fontColor($r('app.color.text_primary'))
+        Text(this.title || t('交互界面')).fontFamily(this.appearance.fontFamily).fontSize(17).fontWeight(FontWeight.Medium).layoutWeight(1).fontColor($r('app.color.text_primary'))
         if (this.busy || (!this.complete && !this.failed)) { LoadingProgress().width(18).height(18) }
       }.width('100%')
       ForEach(this.nodes.filter((node: UiNode) => !node.parent && uiNodeVisible(node, this.values)), (node: UiNode) => {
@@ -271,10 +273,10 @@ struct UiSurface {
           onCommit: (id: string) => this.schedule(id),
           onInvalid: (id: string, invalid: boolean) => { this.invalid = this.invalid.filter((key) => key !== id).concat(invalid ? [id] : []); } })
       }, (node: UiNode) => node.id)
-      if (this.invalid.length > 0) { Text(t('请输入有效数字。')).fontSize(13).fontColor($r('app.color.danger')) }
-      if (this.error) { Text(this.error).fontSize(13).fontColor($r('app.color.danger')).copyOption(CopyOptions.LocalDevice) }
+      if (this.invalid.length > 0) { Text(t('请输入有效数字。')).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.danger')) }
+      if (this.error) { Text(this.error).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.danger')).copyOption(CopyOptions.LocalDevice) }
       if (this.dirty && this.complete) {
-        Button(t('保存输入')).attributeModifier(Btn.textSmall).enabled(this.available && !this.busy && this.invalid.length === 0)
+        Button(t('保存输入')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.textSmall).enabled(this.available && !this.busy && this.invalid.length === 0)
           .onClick(() => { this.interact(''); })
       }
     }.width('100%').alignItems(HorizontalAlign.Start).padding(14).borderRadius(Radius.md)
@@ -284,6 +286,7 @@ struct UiSurface {
 
 @Component
 export struct InteractiveAnswer {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   presentation?: UiPresentation;
   @Prop surfaceOffset: number = 0;
   @Prop snapshotMode: boolean = false;
@@ -305,7 +308,7 @@ export struct InteractiveAnswer {
       ForEach(this.parts, (part: UiPart, index: number) => {
         if (part.kind === 'text') { MarkdownView({ content: this.parts[index].content, streaming: this.streaming, selectable: this.selectable }) }
         else if (this.validation && !this.streaming) {
-          Text(this.validation === 'pending' ? t('正在检查交互内容…') : t('交互内容检查未通过。'))
+          Text(this.validation === 'pending' ? t('正在检查交互内容…') : t('交互内容检查未通过。')).fontFamily(this.appearance.fontFamily)
             .fontSize(13).fontColor($r('app.color.text_secondary'))
         } else {
           UiSurface({ source: this.parts[index].content, closed: this.parts[index].closed, streaming: this.streaming, available: this.available,

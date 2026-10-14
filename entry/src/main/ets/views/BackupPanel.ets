@@ -1,4 +1,4 @@
-import { AppMaterials } from '../common/AppMaterials';
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { getLocale, t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
 import { exportBackup, readBackup } from '../services/Backup';
@@ -9,6 +9,7 @@ import { Banner, GroupCard, IconButton, NavRow, RowDivider, SectionHeader } from
 
 @Component
 export struct BackupPanel {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   @State private busy: boolean = false;
   @State private error: string = '';
@@ -48,7 +49,7 @@ export struct BackupPanel {
 
   private confirmRestore(item: CloudBackupItem): void {
     if (this.locked()) { return; }
-    this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface, title: t('恢复这份备份？'),
+    this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t('恢复这份备份？'),
       message: t('恢复 {0} 的备份，跳过已有会话和模板，保留本机版本、密钥和服务设置。', [this.date(item)]),
       primaryButton: { value: t('取消'), action: () => {} },
       secondaryButton: { value: t('恢复'), action: () => this.cloud('restore', item.name) } });
@@ -56,7 +57,7 @@ export struct BackupPanel {
 
   private confirmDelete(item: CloudBackupItem): void {
     if (this.locked()) { return; }
-    this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface, title: t('删除这份备份？'),
+    this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t('删除这份备份？'),
       message: t('删除 {0} 的备份，删除会同步到云端及其他设备，不影响当前对话和设置。此操作无法在 Tinybot 内撤销。', [this.date(item)]),
       primaryButton: { value: t('取消'), action: () => {} },
       secondaryButton: { value: t('删除'), fontColor: $r('app.color.danger'), action: () => this.cloud('delete', item.name) } });
@@ -89,7 +90,7 @@ export struct BackupPanel {
     this.busy = true; this.error = '';
     try {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      if (restore) { const data = await readBackup(context, this.app.exportSnapshot()); if (data) { if (!await this.app.importSnapshot(data)) { throw new Error(this.app.error); } this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t("备份已恢复，已跳过已有内容") }); } }
+      if (restore) { const data = await readBackup(context, this.app.exportSnapshot()); if (data) { if (!await this.app.importSnapshot(data)) { throw new Error(this.app.error); } this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t("备份已恢复，已跳过已有内容") }); } }
       else { await exportBackup(context, this.app.exportSnapshot()); }
     } catch (error) { this.error = (error as Error).message; }
     finally { this.busy = false; }
@@ -113,8 +114,8 @@ export struct BackupPanel {
         }
         if (this.busy) {
           Row({ space: Space.sm }) {
-            LoadingProgress().width(20).height(20).color($r('app.color.accent'))
-            Text(t('正在处理备份…')).fontSize(13).fontColor($r('app.color.text_secondary'))
+            LoadingProgress().width(20).height(20).color(this.appearance.accent)
+            Text(t('正在处理备份…')).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
           }.margin({ top: Space.md })
         }
         if (this.cloudError) { Banner({ text: this.cloudError, compId: 'cloud-backup-error' }).margin({ top: Space.md }) }
@@ -135,7 +136,7 @@ export struct BackupPanel {
             }
           }
         } else if (this.cloudLoaded) {
-          Text(t('暂无备份。已在其他设备备份？请开启云空间后刷新列表。')).fontSize(13).lineHeight(19)
+          Text(t('暂无备份。已在其他设备备份？请开启云空间后刷新列表。')).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(19)
             .fontColor($r('app.color.text_secondary')).width('100%').margin({ top: Space.md })
         }
         SectionHeader({ title: t('本地备份') })
@@ -150,7 +151,7 @@ export struct BackupPanel {
         }
         Row({ space: Space.sm }) {
           SymbolGlyph($r('sys.symbol.lock')).fontSize(16).fontColor([$r('app.color.text_secondary')])
-          Text(t('API 密钥和 Token 不会导出。恢复会保留本机已有密钥和服务设置；新增服务仍需配置凭据。')).fontSize(13).lineHeight(19).layoutWeight(1)
+          Text(t('API 密钥和 Token 不会导出。恢复会保留本机已有密钥和服务设置；新增服务仍需配置凭据。')).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(19).layoutWeight(1)
             .fontColor($r('app.color.text_secondary'))
         }.width('100%').alignItems(VerticalAlign.Top).padding(Space.md).margin({ top: Space.md })
         .borderRadius(Radius.md).backgroundColor($r('app.color.surface_variant'))

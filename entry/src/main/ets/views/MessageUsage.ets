@@ -1,3 +1,4 @@
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { MessageUsageSummary, summarizeUsage } from '../model/MessageUsage';
 import { MessageViewModel } from '../viewmodel/SessionViewModels';
@@ -5,6 +6,7 @@ import { compactNumber, Motion, Radius } from '../common/Theme';
 
 @Component
 export struct MessageUsage {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink message: MessageViewModel;
 
   private usage(): MessageUsageSummary { return summarizeUsage(this.message.steps.map(step => step.usage)); }
@@ -30,8 +32,8 @@ export struct MessageUsage {
   @Builder
   detail(label: string, value: string) {
     Row({ space: 12 }) {
-      Text(label).fontSize(12).fontColor($r('app.color.text_secondary')).layoutWeight(1)
-      Text(value).fontSize(12).fontColor($r('app.color.text_primary')).textAlign(TextAlign.End)
+      Text(label).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary')).layoutWeight(1)
+      Text(value).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_primary')).textAlign(TextAlign.End)
     }.width('100%').alignItems(VerticalAlign.Top)
   }
 
@@ -40,18 +42,18 @@ export struct MessageUsage {
       Column({ space: 8 }) {
         Button({ type: ButtonType.Normal, stateEffect: true }) {
           Row({ space: 6 }) {
-            Text(this.summary()).fontSize(11).fontColor($r('app.color.text_tertiary')).layoutWeight(1)
+            Text(this.summary()).fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.text_tertiary')).layoutWeight(1)
               .textAlign(TextAlign.Start)
             SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(11).fontColor([$r('app.color.text_tertiary')])
               .rotate({ angle: this.message.usageOpen ? 180 : 0 })
           }.width('100%').padding({ top: 8, bottom: 8 })
-        }.id('usage-' + this.message.id).width('100%').backgroundColor(Color.Transparent)
+        }.fontFamily(this.appearance.fontFamily).id('usage-' + this.message.id).width('100%').backgroundColor(Color.Transparent)
           .borderRadius(Radius.sm).clickEffect(Motion.pressSmall)
           .accessibilityText(this.summary() + ' · ' + (this.message.usageOpen ? t('收起用量详情') : t('展开用量详情')))
           .onClick(() => { this.message.usageOpen = !this.message.usageOpen; })
         if (this.message.usageOpen) {
           Column({ space: 10 }) {
-            Text(t('本条回复用量')).fontSize(13).fontColor($r('app.color.text_primary'))
+            Text(t('本条回复用量')).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_primary'))
             this.detail(t('模型请求'), t('{0} 次', [this.usage().requests]))
             this.detail(t('累计模型用时'), (this.usage().durationMs / 1000).toFixed(1) + 's')
             this.detail(t('总 Token'), this.tokens(this.usage().input + this.usage().output, this.usage().reported))

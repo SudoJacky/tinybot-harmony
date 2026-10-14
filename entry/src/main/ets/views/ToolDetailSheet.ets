@@ -1,3 +1,4 @@
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { ToolExecutionViewModel } from '../viewmodel/SessionViewModels';
 import { ToolDetails } from './ToolDetails';
@@ -6,6 +7,7 @@ import { DisclosureState } from '../viewmodel/DisclosureState';
 // Owned by the message, so advancing to a new step cannot unmount an open tool sheet.
 @Component
 export struct ToolDetailSheet {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink execution: ToolExecutionViewModel;
   @Prop title: string = '';
   onClose: () => void = () => {};
@@ -25,12 +27,12 @@ export struct ToolDetailSheet {
   build() {
     Column({ space: 8 }) {
       Row({ space: 8 }) {
-        Text(this.title).fontSize(17).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary')).layoutWeight(1)
-        Text(this.statusLabel()).fontSize(12)
+        Text(this.title).fontFamily(this.appearance.fontFamily).fontSize(17).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary')).layoutWeight(1)
+        Text(this.statusLabel()).fontFamily(this.appearance.fontFamily).fontSize(12)
           .fontColor(this.execution.status === 'failed' ? $r('app.color.danger') : $r('app.color.text_secondary'))
         Button({ type: ButtonType.Circle }) {
           SymbolGlyph($r('sys.symbol.xmark')).fontSize(16).fontColor([$r('app.color.text_secondary')])
-        }.id('close-tool-details').width(44).height(44).backgroundColor(Color.Transparent)
+        }.fontFamily(this.appearance.fontFamily).id('close-tool-details').width(44).height(44).backgroundColor(Color.Transparent)
         .accessibilityText(t('关闭')).onClick(() => this.onClose())
       }.width('100%')
       Scroll() {

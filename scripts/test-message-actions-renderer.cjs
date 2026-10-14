@@ -54,6 +54,7 @@ vm.runInNewContext(ts.transpileModule(probe, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }
 }).outputText, globals, { filename: emitted });
 const view = new globals.exports.Probe();
+view.appearance = { fontFamily: '' };
 let allowed = false;
 Object.defineProperty(view, 'actionsEnabled', { get() {
   if (current !== undefined) subscribers.add(current);

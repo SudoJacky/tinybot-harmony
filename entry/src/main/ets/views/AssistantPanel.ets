@@ -1,4 +1,4 @@
-import { AppMaterials } from '../common/AppMaterials';
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { defaultContextWindow } from '../model/ConversationContext';
 import { reasoningEfforts, reasoningEffortName } from '../model/ReasoningEffort';
@@ -11,6 +11,7 @@ import { Banner, BottomBar, EmptyState, GroupCard, RowDivider, SectionHeader, Sw
 
 @Component
 export struct ModelSettingsPanel {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   @State private options: AssistantOptions = defaultAssistantOptions();
   @State private capabilityIndex: number = 0;
@@ -51,7 +52,7 @@ export struct ModelSettingsPanel {
     }
     extras.options = this.options;
     if (!await this.app.saveProductivity(extras)) { this.error = this.app.error; }
-    else { this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t("模型设置已保存") }); }
+    else { this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t("模型设置已保存") }); }
   }
   private setRoute(kind: string, index: number): void {
     const chosen = this.reference(index);
@@ -74,21 +75,21 @@ export struct ModelSettingsPanel {
   choiceRow(title: string, subtitle: string, options: string[], selected: number, enabled: boolean, onSelect: (index: number) => void) {
     Row({ space: Space.md }) {
       Column({ space: 3 }) {
-        Text(title).fontSize(Font.body).fontColor($r('app.color.text_primary'))
+        Text(title).fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontColor($r('app.color.text_primary'))
         if (subtitle.length > 0) {
-          Text(subtitle).fontSize(Font.caption).lineHeight(17).fontColor($r('app.color.text_secondary'))
+          Text(subtitle).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).lineHeight(17).fontColor($r('app.color.text_secondary'))
         }
       }.alignItems(HorizontalAlign.Start).flexShrink(0).constraintSize({ maxWidth: '55%' })
-      Text(options[selected] || options[0] || '').fontSize(13).maxLines(2).textAlign(TextAlign.End).layoutWeight(1)
+      Text(options[selected] || options[0] || '').fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(2).textAlign(TextAlign.End).layoutWeight(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .fontColor(selected > 0 ? $r('app.color.accent') : $r('app.color.text_tertiary'))
+        .fontColor(selected > 0 ? this.appearance.accent : $r('app.color.text_tertiary'))
       SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(14).fontColor([$r('app.color.text_tertiary')])
     }
     .width('100%').constraintSize({ minHeight: 56 }).padding({ left: Space.lg, right: Space.lg, top: 10, bottom: 10 })
     .opacity(enabled ? 1 : 0.4).enabled(enabled)
     .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
     .bindMenu(this.choiceMenu(options, selected, onSelect), {
-      systemMaterial: AppMaterials.surface, mask: false })
+      systemMaterial: this.appearance.surface, mask: false })
   }
 
   @Builder
@@ -139,12 +140,12 @@ export struct ModelSettingsPanel {
                   (index: number) => { this.reasoning = this.efforts()[index]; })
                 RowDivider()
                 Row({ space: Space.md }) {
-                  Text(t("上下文窗口")).fontSize(Font.body).fontColor($r('app.color.text_primary'))
-                  TextInput({ text: this.contextWindow, placeholder: this.contextPlaceholder() }).id('capability-context').type(InputType.Number)
+                  Text(t("上下文窗口")).fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontColor($r('app.color.text_primary'))
+                  TextInput({ text: this.contextWindow, placeholder: this.contextPlaceholder() }).fontFamily(this.appearance.fontFamily).id('capability-context').type(InputType.Number)
                     .layoutWeight(1).height(40).fontSize(15).textAlign(TextAlign.End).backgroundColor(Color.Transparent)
                     .fontColor($r('app.color.text_primary')).placeholderColor($r('app.color.text_tertiary'))
                     .onChange((value) => { this.contextWindow = value; })
-                  Text('Token').fontSize(13).fontColor($r('app.color.text_tertiary'))
+                  Text('Token').fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_tertiary'))
                 }.width('100%').height(56).padding({ left: Space.lg, right: Space.lg })
               }
             }
@@ -157,7 +158,7 @@ export struct ModelSettingsPanel {
         }.width('100%').padding({ left: Space.page, right: Space.page, bottom: Space.lg })
       }.layoutWeight(1).scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring).align(Alignment.Top)
       BottomBar() {
-        Button(this.app.busy ? t("请等待当前任务完成") : t("保存")).id('save-assistant-options').attributeModifier(Btn.primary).width('100%')
+        Button(this.app.busy ? t("请等待当前任务完成") : t("保存")).fontFamily(this.appearance.fontFamily).id('save-assistant-options').attributeModifier(Btn.primary).width('100%')
           .enabled(!this.app.busy && !this.app.saveError).onClick(() => this.save())
       }
     }.width('100%').height('100%')

@@ -1,3 +1,4 @@
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Font, Radius } from '../common/Theme';
 
 const CELL_WIDTH: number = 104;
@@ -6,6 +7,7 @@ const CELL_WIDTH: number = 104;
 // Header taps sort (when onHeaderTap is set); cell taps select (when onCellTap is set).
 @Component
 export struct DataTable {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop header: string[] = [];
   @Prop rows: string[][] = [];
   @Prop numeric: boolean[] = [];
@@ -24,12 +26,12 @@ export struct DataTable {
   @Builder
   headerCell(label: string, column: number) {
     Row({ space: 2 }) {
-      Text(label).fontSize(Font.caption).fontWeight(FontWeight.Medium).maxLines(2).layoutWeight(1)
+      Text(label).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontWeight(FontWeight.Medium).maxLines(2).layoutWeight(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis }).textAlign(this.cellAlign(column))
         .fontColor($r('app.color.text_secondary'))
       if (this.sortColumn === column) {
         SymbolGlyph(this.ascending ? $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
-          .fontSize(11).fontColor([$r('app.color.accent')])
+          .fontSize(11).fontColor([this.appearance.accent])
       }
     }.width(CELL_WIDTH).padding({ left: 10, right: 10, top: 9, bottom: 9 })
     .onClick(() => { if (this.onHeaderTap) { this.onHeaderTap(column); } })
@@ -37,10 +39,10 @@ export struct DataTable {
 
   @Builder
   cell(value: string, row: number, column: number) {
-    Text(value).width(CELL_WIDTH).fontSize(13).lineHeight(18).maxLines(3)
+    Text(value).fontFamily(this.appearance.fontFamily).width(CELL_WIDTH).fontSize(13).lineHeight(18).maxLines(3)
       .textOverflow({ overflow: TextOverflow.Ellipsis }).textAlign(this.cellAlign(column))
       .padding({ left: 10, right: 10, top: 8, bottom: 8 }).fontColor($r('app.color.text_primary'))
-      .backgroundColor(row === this.selectedRow && column === this.selectedColumn ? $r('app.color.accent_container') : Color.Transparent)
+      .backgroundColor(row === this.selectedRow && column === this.selectedColumn ? this.appearance.accentContainer : Color.Transparent)
       .copyOption(this.onCellTap ? CopyOptions.None : CopyOptions.LocalDevice)
       .onClick(() => { if (this.onCellTap) { this.onCellTap(row, column); } })
   }

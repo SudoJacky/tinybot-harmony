@@ -1,3 +1,4 @@
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { LengthMetrics } from '@kit.ArkUI';
 import { AgentStep, ToolExecution } from '../model/Agent';
@@ -47,6 +48,7 @@ function baseName(path: string): string {
 
 @Component
 struct ChatTeamRun {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   @Prop runId: string = '';
   onFiles: () => void = () => {};
@@ -101,7 +103,7 @@ struct ChatTeamRun {
       if (input.status === 'running') {
         LoadingProgress().width(12).height(12).color(toneForeground(input.status))
       }
-      Text(teamStatus(input.status)).fontSize(11).fontWeight(FontWeight.Medium).fontColor(toneForeground(input.status))
+      Text(teamStatus(input.status)).fontFamily(this.appearance.fontFamily).fontSize(11).fontWeight(FontWeight.Medium).fontColor(toneForeground(input.status))
     }.id('team-status-' + this.runId).height(22).padding({ left: 8, right: 8 }).borderRadius(11)
     .backgroundColor(toneBackground(input.status))
   }
@@ -110,9 +112,9 @@ struct ChatTeamRun {
   taskGlyph(input: TeamStatusInput) {
     Stack() {
       if (input.status === 'running') {
-        LoadingProgress().width(18).height(18).color($r('app.color.accent'))
+        LoadingProgress().width(18).height(18).color(this.appearance.accent)
       } else if (input.status === 'succeeded') {
-        SymbolGlyph($r('sys.symbol.checkmark_circle_fill')).fontSize(18).fontColor([$r('app.color.accent')])
+        SymbolGlyph($r('sys.symbol.checkmark_circle_fill')).fontSize(18).fontColor([this.appearance.accent])
       } else if (input.status === 'failed') {
         SymbolGlyph($r('sys.symbol.exclamationmark_circle')).fontSize(18).fontColor([$r('app.color.danger')])
       } else if (input.status === 'interrupted' || input.status === 'cancelled') {
@@ -125,7 +127,7 @@ struct ChatTeamRun {
 
   @Builder
   label(text: string) {
-    Text(text).fontSize(11).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_tertiary'))
+    Text(text).fontFamily(this.appearance.fontFamily).fontSize(11).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_tertiary'))
   }
 
   @Builder
@@ -139,10 +141,10 @@ struct ChatTeamRun {
   attemptView(input: TeamAttemptInput) {
     Column({ space: Space.sm }) {
       Text((input.record.attempts.length > 1 ? t("第 ") + (input.index + 1) + t(" 次 · ") : '') + teamStatus(input.attempt.status) + ' · ' + clock(input.attempt.startedAt) +
-        (input.attempt.finishedAt ? t(" · 用时 ") + duration(input.attempt.finishedAt - input.attempt.startedAt) : ''))
+        (input.attempt.finishedAt ? t(" · 用时 ") + duration(input.attempt.finishedAt - input.attempt.startedAt) : '')).fontFamily(this.appearance.fontFamily)
         .fontSize(11).fontColor($r('app.color.text_tertiary'))
       if (input.attempt.error) {
-        Text(input.attempt.error).fontSize(13).lineHeight(19).width('100%').padding({ left: 10, right: 10, top: 6, bottom: 6 })
+        Text(input.attempt.error).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(19).width('100%').padding({ left: 10, right: 10, top: 6, bottom: 6 })
           .borderRadius(Radius.sm).fontColor($r('app.color.danger')).backgroundColor($r('app.color.danger_container'))
           .copyOption(CopyOptions.LocalDevice)
       }
@@ -151,14 +153,14 @@ struct ChatTeamRun {
         Column() {
           MarkdownView({ content: input.attempt.handoff.summary, fontSize: 14 })
         }.width('100%').padding({ left: Space.md, right: 4 })
-        .border({ width: { left: 2 }, color: $r('app.color.accent_outline') })
+        .border({ width: { left: 2 }, color: this.appearance.accentOutline })
         if (input.attempt.handoff.unresolved.length) {
           this.label(t("未解决"))
           ForEach(input.attempt.handoff.unresolved, (item: string) => {
             Row({ space: 6 }) {
               SymbolGlyph($r('sys.symbol.exclamationmark_circle')).fontSize(14).fontColor([$r('app.color.warning')])
                 .margin({ top: 2 })
-              Text(item).fontSize(13).lineHeight(19).layoutWeight(1).fontColor($r('app.color.text_primary'))
+              Text(item).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(19).layoutWeight(1).fontColor($r('app.color.text_primary'))
                 .copyOption(CopyOptions.LocalDevice)
             }.width('100%').alignItems(VerticalAlign.Top)
           }, (item: string, i: number) => i + item)
@@ -168,8 +170,8 @@ struct ChatTeamRun {
           Flex({ wrap: FlexWrap.Wrap, space: { main: LengthMetrics.vp(6), cross: LengthMetrics.vp(6) } }) {
             ForEach(input.attempt.handoff.artifacts, (artifact: TeamArtifact) => {
               Row({ space: 4 }) {
-                SymbolGlyph($r('sys.symbol.doc_text')).fontSize(14).fontColor([$r('app.color.accent')])
-                Text(baseName(artifact.path)).fontSize(12).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                SymbolGlyph($r('sys.symbol.doc_text')).fontSize(14).fontColor([this.appearance.accent])
+                Text(baseName(artifact.path)).fontFamily(this.appearance.fontFamily).fontSize(12).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                   .constraintSize({ maxWidth: 200 }).fontColor($r('app.color.text_primary'))
               }.height(30).padding({ left: 8, right: 10 }).borderRadius(15)
               .backgroundColor($r('app.color.surface_variant')).clickEffect(Motion.press)
@@ -181,11 +183,11 @@ struct ChatTeamRun {
       } else if (input.attempt.turn.content) {
         MarkdownView({ content: input.attempt.turn.content, fontSize: 14 })
       } else if (input.attempt.status === 'running') {
-        Text(t("正在工作，完成后会提交交接…")).fontSize(13).fontColor($r('app.color.text_tertiary'))
+        Text(t("正在工作，完成后会提交交接…")).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_tertiary'))
       }
       if (this.toolCount(input.attempt) > 0) {
         Row({ space: 4 }) {
-          Text(t("执行记录 · ") + this.toolCount(input.attempt) + t(" 次工具调用")).fontSize(12).fontColor($r('app.color.text_secondary'))
+          Text(t("执行记录 · ") + this.toolCount(input.attempt) + t(" 次工具调用")).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
           SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(12).fontColor([$r('app.color.text_tertiary')])
             .rotate({ angle: this.expandedLogs.includes(input.attempt.id) ? 180 : 0 })
         }.id('team-log-' + input.attempt.id).height(32)
@@ -211,9 +213,9 @@ struct ChatTeamRun {
           this.avatar({ run: input.run, member: input.run.members.find((member) => member.id === input.record.task.memberId) as TeamMember, size: 32, ring: input.record.status === 'running' })
         }
         Column({ space: 2 }) {
-          Text(input.record.task.title).fontSize(14).fontWeight(FontWeight.Medium).maxLines(this.expandedTasks.includes(input.record.task.id) ? 4 : 1)
+          Text(input.record.task.title).fontFamily(this.appearance.fontFamily).fontSize(14).fontWeight(FontWeight.Medium).maxLines(this.expandedTasks.includes(input.record.task.id) ? 4 : 1)
             .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
-          Text(this.memberName(input.run, input.record.task.memberId) + ' · ' + teamStatus(input.record.status)).fontSize(Font.caption)
+          Text(this.memberName(input.run, input.record.task.memberId) + ' · ' + teamStatus(input.record.status)).fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
             .fontColor(input.record.status === 'failed' ? $r('app.color.danger') : $r('app.color.text_secondary'))
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
         this.taskGlyph({ status: input.record.status })
@@ -229,14 +231,14 @@ struct ChatTeamRun {
             this.attemptView({ record: input.record,
               attempt: input.record.attempts.find((attempt) => attempt.id === attemptId) as TeamAttempt, index: index })
           }, (attemptId: string) => attemptId)
-          if (!input.record.attempts.length) { Text(t("等待前置任务或空闲员工")).fontSize(13).fontColor($r('app.color.text_tertiary')) }
+          if (!input.record.attempts.length) { Text(t("等待前置任务或空闲员工")).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_tertiary')) }
           this.label(t("任务说明"))
-          Text(input.record.task.instructions).fontSize(13).lineHeight(20).fontColor($r('app.color.text_secondary'))
+          Text(input.record.task.instructions).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(20).fontColor($r('app.color.text_secondary'))
             .maxLines(this.expandedBriefs.includes(input.record.task.id) ? 200 : 3).textOverflow({ overflow: TextOverflow.Ellipsis })
             .accessibilityText(input.record.task.instructions)
             .onClick(() => this.animate(() => { this.expandedBriefs = this.toggleList(this.expandedBriefs, input.record.task.id); }))
           if (input.record.task.dependencies.length) {
-            Text(t("依赖：") + input.record.task.dependencies.map((id) => input.run.tasks.find((item) => item.task.id === id)?.task.title || id).join('、'))
+            Text(t("依赖：") + input.record.task.dependencies.map((id) => input.run.tasks.find((item) => item.task.id === id)?.task.title || id).join('、')).fontFamily(this.appearance.fontFamily)
               .fontSize(12).lineHeight(18).fontColor($r('app.color.text_tertiary'))
           }
         }.width('100%').alignItems(HorizontalAlign.Start).padding({ left: 44, bottom: Space.sm })
@@ -252,23 +254,23 @@ struct ChatTeamRun {
         Column({ space: 10 }) {
           Row({ space: Space.sm }) {
             Column() {
-              SymbolGlyph($r('sys.symbol.person_2')).fontSize(16).fontColor([$r('app.color.on_accent_container')])
-            }.width(28).height(28).borderRadius(9).justifyContent(FlexAlign.Center).backgroundColor($r('app.color.accent_container'))
-            Text(input.run.ownerMessageId ? t("Agent 团队") : t("历史团队")).fontSize(15).fontWeight(FontWeight.Medium)
+              SymbolGlyph($r('sys.symbol.person_2')).fontSize(16).fontColor([this.appearance.onAccentContainer])
+            }.width(28).height(28).borderRadius(9).justifyContent(FlexAlign.Center).backgroundColor(this.appearance.accentContainer)
+            Text(input.run.ownerMessageId ? t("Agent 团队") : t("历史团队")).fontFamily(this.appearance.fontFamily).fontSize(15).fontWeight(FontWeight.Medium)
               .fontColor($r('app.color.text_primary')).layoutWeight(1)
             this.statusPill({ status: input.run.status })
             SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(14).fontColor([$r('app.color.text_tertiary')])
               .rotate({ angle: this.expanded ? 180 : 0 })
           }.width('100%')
           if (input.run.goal) {
-            Text(input.run.goal).fontSize(13).lineHeight(19).maxLines(this.expanded ? 6 : 2)
+            Text(input.run.goal).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(19).maxLines(this.expanded ? 6 : 2)
               .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_secondary'))
           }
           Row({ space: Space.sm }) {
             Progress({ value: this.doneCount(input.run), total: Math.max(1, input.run.tasks.length), type: ProgressType.Linear })
-              .layoutWeight(1).color(input.run.status === 'failed' ? $r('app.color.danger') : $r('app.color.accent'))
+              .layoutWeight(1).color(input.run.status === 'failed' ? $r('app.color.danger') : this.appearance.accent)
               .backgroundColor($r('app.color.surface_variant')).style({ strokeWidth: 4, strokeRadius: 2 })
-            Text(this.doneCount(input.run) + '/' + input.run.tasks.length + t(" 任务")).fontSize(Font.caption)
+            Text(this.doneCount(input.run) + '/' + input.run.tasks.length + t(" 任务")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
               .fontColor($r('app.color.text_tertiary'))
           }.width('100%')
           if (!this.expanded) {
@@ -280,7 +282,7 @@ struct ChatTeamRun {
                   }.margin({ left: index === 0 ? 0 : -6 })
                 }, (memberId: string) => memberId)
               }
-              Text(input.run.members.map((member) => member.name).join('、')).fontSize(Font.caption).maxLines(1)
+              Text(input.run.members.map((member) => member.name).join('、')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1).margin({ left: Space.sm })
                 .fontColor($r('app.color.text_secondary'))
             }.width('100%')
@@ -292,7 +294,7 @@ struct ChatTeamRun {
         if (this.expanded) {
           Column() {
             if (input.run.error) {
-              Text(input.run.error).fontSize(13).lineHeight(19).width('100%').margin({ bottom: Space.sm })
+              Text(input.run.error).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(19).width('100%').margin({ bottom: Space.sm })
                 .padding({ left: 10, right: 10, top: 6, bottom: 6 }).borderRadius(Radius.sm)
                 .fontColor($r('app.color.danger')).backgroundColor($r('app.color.danger_container'))
                 .copyOption(CopyOptions.LocalDevice)
@@ -304,12 +306,12 @@ struct ChatTeamRun {
               this.taskRow({ run: input.run, record: input.run.tasks.find((record) => record.task.id === taskId) as TeamTaskRecord })
             }, (taskId: string) => taskId)
             Row({ space: Space.sm }) {
-              Text(this.usage(input.run)).fontSize(11).layoutWeight(1).maxLines(2).fontColor($r('app.color.text_tertiary'))
+              Text(this.usage(input.run)).fontFamily(this.appearance.fontFamily).fontSize(11).layoutWeight(1).maxLines(2).fontColor($r('app.color.text_tertiary'))
               Row({ space: 4 }) {
-                SymbolGlyph($r('sys.symbol.folder')).fontSize(14).fontColor([$r('app.color.on_accent_container')])
-                Text(t("查看文件")).fontSize(12).fontWeight(FontWeight.Medium).fontColor($r('app.color.on_accent_container'))
+                SymbolGlyph($r('sys.symbol.folder')).fontSize(14).fontColor([this.appearance.onAccentContainer])
+                Text(t("查看文件")).fontFamily(this.appearance.fontFamily).fontSize(12).fontWeight(FontWeight.Medium).fontColor(this.appearance.onAccentContainer)
               }.id('team-files-' + input.run.id).height(30).padding({ left: 10, right: 12 }).borderRadius(15)
-              .backgroundColor($r('app.color.accent_container')).clickEffect(Motion.press)
+              .backgroundColor(this.appearance.accentContainer).clickEffect(Motion.press)
               .opacity(this.app.busy ? 0.5 : 1).enabled(!this.app.busy).onClick(() => this.onFiles())
             }.width('100%').margin({ top: Space.sm })
           }.width('100%').padding({ top: 4 }).border({ width: { top: 0.5 }, color: $r('app.color.divider') })
@@ -317,7 +319,7 @@ struct ChatTeamRun {
         }
       }.width('100%').padding(14)
     }.width('100%').borderRadius(Radius.lg).clip(true).backgroundColor($r('app.color.surface'))
-    .border({ width: 0.5, color: input.run.status === 'running' ? $r('app.color.accent_outline') : $r('app.color.divider') })
+    .border({ width: 0.5, color: input.run.status === 'running' ? this.appearance.accentOutline : $r('app.color.divider') })
   }
 
   build() {

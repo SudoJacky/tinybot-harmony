@@ -1,3 +1,4 @@
+import { AppearanceStyle } from './AppearanceStyle';
 import { t } from '../model/I18n';
 import { Btn, Font, Motion, Radius, Space } from './Theme';
 import { LiquidToggle } from './LiquidToggle';
@@ -7,6 +8,7 @@ import { WindowViewport } from '../viewmodel/WindowViewport';
 
 @Component
 export struct IconButton {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop icon: Resource = $r('sys.symbol.plus');
   @Prop tint: ResourceColor = $r('app.color.text_primary');
   @Prop fill: ResourceColor = Color.Transparent;
@@ -22,7 +24,7 @@ export struct IconButton {
   build() {
     Button({ type: ButtonType.Circle, stateEffect: true }) {
       SymbolGlyph(this.icon).fontSize(this.iconSize).fontColor([this.tint])
-    }
+    }.fontFamily(this.appearance.fontFamily)
     .id(this.compId).width(this.diameter).height(this.diameter).backgroundColor(this.fill)
     .animation({ duration: Motion.fast, curve: Motion.standard })
     .clickEffect(this.disabled || this.material ? null : Motion.pressSmall)
@@ -34,14 +36,15 @@ export struct IconButton {
 
 @Component
 export struct SectionHeader {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop title: string = '';
   @Prop caption: string = '';
 
   build() {
     Column({ space: 2 }) {
-      Text(this.title).fontSize(13).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_secondary'))
+      Text(this.title).fontFamily(this.appearance.fontFamily).fontSize(13).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_secondary'))
       if (this.caption.length > 0) {
-        Text(this.caption).fontSize(Font.caption).lineHeight(18).fontColor($r('app.color.text_tertiary'))
+        Text(this.caption).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).lineHeight(18).fontColor($r('app.color.text_tertiary'))
       }
     }.width('100%').alignItems(HorizontalAlign.Start).padding({ left: 4, right: 4, top: Space.lg, bottom: Space.sm })
   }
@@ -72,6 +75,7 @@ export type RowTrailing = 'chevron' | 'select' | 'expand';
 // Tappable list row with a trailing value and mark.
 @Component
 export struct NavRow {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop title: string = '';
   @Prop subtitle: string = '';
   @Prop value: string = '';
@@ -102,22 +106,22 @@ export struct NavRow {
         }
       } else if (this.icon) {
         SymbolGlyph(this.icon).fontSize(20).width(this.iconWidth)
-          .fontColor([this.accent ? $r('app.color.accent') : this.muted ? $r('app.color.text_tertiary') : $r('app.color.text_secondary')])
+          .fontColor([this.accent ? this.appearance.accent : this.muted ? $r('app.color.text_tertiary') : $r('app.color.text_secondary')])
       }
       Column({ space: 3 }) {
-        Text(this.title).fontSize(Font.body).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-          .fontColor(this.accent ? $r('app.color.accent') : this.muted ? $r('app.color.text_secondary') : $r('app.color.text_primary'))
+        Text(this.title).fontFamily(this.appearance.fontFamily).fontSize(Font.body).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          .fontColor(this.accent ? this.appearance.accent : this.muted ? $r('app.color.text_secondary') : $r('app.color.text_primary'))
           .fontWeight(this.accent ? FontWeight.Medium : FontWeight.Normal)
         if (this.subtitle.length > 0) {
-          Text(this.subtitle).fontSize(Font.caption).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(this.subtitle).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
             .fontColor(this.muted ? $r('app.color.text_tertiary') : $r('app.color.text_secondary'))
         }
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
       if (this.value.length > 0) {
-        Text(this.value).fontSize(13).maxLines(1).fontColor($r('app.color.text_tertiary'))
+        Text(this.value).fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(1).fontColor($r('app.color.text_tertiary'))
       }
       if (this.trailing === 'select') {
-        SymbolGlyph($r('sys.symbol.checkmark')).fontSize(18).fontColor([$r('app.color.accent')]).opacity(this.active ? 1 : 0)
+        SymbolGlyph($r('sys.symbol.checkmark')).fontSize(18).fontColor([this.appearance.accent]).opacity(this.active ? 1 : 0)
       } else if (this.trailing === 'expand') {
         SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
           .rotate({ angle: this.active ? 180 : 0 }).animation({ duration: Motion.fast, curve: Motion.standard })
@@ -135,6 +139,7 @@ export struct NavRow {
 
 @Component
 export struct SwitchRow {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop title: string = '';
   @Prop subtitle: string = '';
   @Prop isOn: boolean = false;
@@ -145,9 +150,9 @@ export struct SwitchRow {
   build() {
     Row({ space: Space.md }) {
       Column({ space: 3 }) {
-        Text(this.title).fontSize(Font.body).fontColor($r('app.color.text_primary'))
+        Text(this.title).fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontColor($r('app.color.text_primary'))
         if (this.subtitle.length > 0) {
-          Text(this.subtitle).fontSize(Font.caption).lineHeight(17).fontColor($r('app.color.text_secondary'))
+          Text(this.subtitle).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).lineHeight(17).fontColor($r('app.color.text_secondary'))
         }
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
       LiquidToggle({ isOn: this.isOn, disabled: this.disabled, label: this.title, compId: this.compId,
@@ -160,6 +165,7 @@ export struct SwitchRow {
 // Inline status message with an optional action, e.g. save failures.
 @Component
 export struct Banner {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop text: string = '';
   @Prop danger: boolean = true;
   @Prop actionLabel: string = '';
@@ -174,10 +180,10 @@ export struct Banner {
     Row({ space: Space.sm }) {
       SymbolGlyph(this.danger ? $r('sys.symbol.exclamationmark_circle') : this.icon).fontSize(18)
         .fontColor([this.danger ? $r('app.color.danger') : $r('app.color.text_secondary')])
-      Text(this.text).id(this.compId).fontSize(13).lineHeight(19).layoutWeight(1)
+      Text(this.text).fontFamily(this.appearance.fontFamily).id(this.compId).fontSize(13).lineHeight(19).layoutWeight(1)
         .fontColor(this.danger ? $r('app.color.danger') : $r('app.color.text_primary'))
       if (this.actionLabel.length > 0) {
-        Button(this.actionLabel).id(this.actionId).attributeModifier(Btn.textSmall)
+        Button(this.actionLabel).fontFamily(this.appearance.fontFamily).id(this.actionId).attributeModifier(Btn.textSmall)
           .enabled(this.actionEnabled).onClick(() => this.onAction())
       }
     }
@@ -212,6 +218,7 @@ export struct BottomBar {
 // Centered placeholder for empty lists.
 @Component
 export struct EmptyState {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop icon: Resource = $r('sys.symbol.doc_text');
   @Prop title: string = '';
   @Prop caption: string = '';
@@ -219,9 +226,9 @@ export struct EmptyState {
   build() {
     Column({ space: Space.md }) {
       SymbolGlyph(this.icon).fontSize(40).fontColor([$r('app.color.text_tertiary')])
-      Text(this.title).fontSize(15).fontColor($r('app.color.text_secondary'))
+      Text(this.title).fontFamily(this.appearance.fontFamily).fontSize(15).fontColor($r('app.color.text_secondary'))
       if (this.caption.length > 0) {
-        Text(this.caption).fontSize(13).lineHeight(19).textAlign(TextAlign.Center).fontColor($r('app.color.text_tertiary'))
+        Text(this.caption).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(19).textAlign(TextAlign.Center).fontColor($r('app.color.text_tertiary'))
       }
     }.width('100%').padding({ left: Space.xl, right: Space.xl, top: 56, bottom: 56 })
   }
@@ -231,6 +238,7 @@ export struct EmptyState {
 // Shared rubber motion; each surface keeps its existing dimensions and styling.
 @Component
 export struct Segmented {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop @Watch('resetGeometry') options: string[] = [];
   @Prop @Watch('syncSelection') selected: number = 0;
   @State private segmentWidth: number = 0;
@@ -313,7 +321,7 @@ export struct Segmented {
       }
       Row({ space: this.gap }) {
         ForEach(this.options, (label: string, index: number) => {
-          Text(label).id(this.optionIds[index] || this.compIdPrefix + '-' + index)
+          Text(label).fontFamily(this.appearance.fontFamily).id(this.optionIds[index] || this.compIdPrefix + '-' + index)
             .fontSize(this.labelSize).layoutWeight(1).height('100%').textAlign(TextAlign.Center)
             .fontWeight(index === this.selected ? FontWeight.Medium : FontWeight.Normal)
             .fontColor(index === this.selected ? $r('app.color.text_primary') : $r('app.color.text_secondary'))
@@ -337,6 +345,7 @@ export struct Segmented {
 // One retained status line: breathe/sheen while working, then softly settle into its final label.
 @Component
 export struct ThinkingLine {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop @Watch('syncState') label: string = t("正在思考…");
   @Prop @Watch('syncState') working: boolean = true;
   @Prop compact: boolean = false;
@@ -416,11 +425,11 @@ export struct ThinkingLine {
       }
       // The band only paints over the label's own pixels (SRC_ATOP inside an offscreen layer).
       Stack({ alignContent: Alignment.Start }) {
-        Text(this.currentLabel).fontSize(this.compact ? 13 : 15).maxLines(1)
+        Text(this.currentLabel).fontFamily(this.appearance.fontFamily).fontSize(this.compact ? 13 : 15).maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_tertiary'))
           .opacity(this.labelMix).blur(2 * (1 - this.labelMix)).translate({ y: 2 * (1 - this.labelMix) })
         if (this.previousLabel) {
-          Text(this.previousLabel).fontSize(this.compact ? 13 : 15).maxLines(1).width('100%')
+          Text(this.previousLabel).fontFamily(this.appearance.fontFamily).fontSize(this.compact ? 13 : 15).maxLines(1).width('100%')
             .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_tertiary'))
             .opacity(1 - this.labelMix).blur(2 * this.labelMix).translate({ y: -2 * this.labelMix })
             .position({ x: 0, y: 0 }).accessibilityLevel('no')
@@ -441,12 +450,13 @@ export struct ThinkingLine {
 // Soft highlight that keeps sweeping across its parent while some work is running.
 @Component
 export struct SweepBand {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @State private travel: number = -100;
 
   build() {
     Stack({ alignContent: Alignment.Start }) {
       Column().width('45%').height('100%')
-        .linearGradient({ angle: 90, colors: [[Color.Transparent, 0], [$r('app.color.accent_tint'), 0.5], [Color.Transparent, 1]] })
+        .linearGradient({ angle: 90, colors: [[Color.Transparent, 0], [this.appearance.accentTint, 0.5], [Color.Transparent, 1]] })
         .translate({ x: this.travel + '%' })
     }
     .width('100%').height('100%').clip(true).hitTestBehavior(HitTestMode.Transparent)
@@ -460,43 +470,46 @@ export struct SweepBand {
 // Rounded-square symbol used as the leading visual of cards and rows.
 @Component
 export struct IconBadge {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop icon: Resource = $r('sys.symbol.doc_text');
-  @Prop tint: ResourceColor = $r('app.color.accent');
-  @Prop fill: ResourceColor = $r('app.color.accent_container');
+  @Prop tint?: ResourceColor;
+  @Prop fill?: ResourceColor;
   diameter: number = 36;
 
   build() {
     Column() {
-      SymbolGlyph(this.icon).fontSize(Math.round(this.diameter * 0.55)).fontColor([this.tint])
+      SymbolGlyph(this.icon).fontSize(Math.round(this.diameter * 0.55)).fontColor([this.tint || this.appearance.accent])
     }.width(this.diameter).height(this.diameter).borderRadius(Math.round(this.diameter * 0.3))
-    .justifyContent(FlexAlign.Center).backgroundColor(this.fill)
+    .justifyContent(FlexAlign.Center).backgroundColor(this.fill || this.appearance.accentContainer)
   }
 }
 
 // Small status pill, e.g. "仅本对话" / "OAuth" / "失败".
 @Component
 export struct Tag {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop text: string = '';
   @Prop strong: boolean = false;
   @Prop danger: boolean = false;
 
   build() {
-    Text(this.text).fontSize(11).height(20).padding({ left: 8, right: 8 }).borderRadius(10).maxLines(1)
-      .fontColor(this.danger ? $r('app.color.danger') : this.strong ? $r('app.color.on_accent_container') : $r('app.color.text_secondary'))
-      .backgroundColor(this.danger ? $r('app.color.danger_container') : this.strong ? $r('app.color.accent_container') : $r('app.color.surface_variant'))
+    Text(this.text).fontFamily(this.appearance.fontFamily).fontSize(11).height(20).padding({ left: 8, right: 8 }).borderRadius(10).maxLines(1)
+      .fontColor(this.danger ? $r('app.color.danger') : this.strong ? this.appearance.onAccentContainer : $r('app.color.text_secondary'))
+      .backgroundColor(this.danger ? $r('app.color.danger_container') : this.strong ? this.appearance.accentContainer : $r('app.color.surface_variant'))
   }
 }
 
 // Headline number with a caption, laid out in rows of equal-width tiles.
 @Component
 export struct StatTile {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop value: string = '';
   @Prop label: string = '';
 
   build() {
     Column({ space: 2 }) {
-      Text(this.value).fontSize(20).fontWeight(FontWeight.Bold).maxLines(1).fontColor($r('app.color.text_primary'))
-      Text(this.label).fontSize(Font.caption).maxLines(1).fontColor($r('app.color.text_secondary'))
+      Text(this.value).fontFamily(this.appearance.fontFamily).fontSize(20).fontWeight(FontWeight.Bold).maxLines(1).fontColor($r('app.color.text_primary'))
+      Text(this.label).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).maxLines(1).fontColor($r('app.color.text_secondary'))
     }.layoutWeight(1).alignItems(HorizontalAlign.Start).padding({ left: 14, right: 10, top: 12, bottom: 12 })
     .borderRadius(Radius.md).backgroundColor($r('app.color.surface'))
   }

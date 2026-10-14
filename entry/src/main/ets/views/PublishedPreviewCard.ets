@@ -1,3 +1,4 @@
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { PublishedPreview } from '../model/PublishedPreview';
 import { UiSavedState, UiValues } from '../model/InteractiveUi';
@@ -9,6 +10,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 
 @Component
 export struct PublishedPreviewCard {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   presentation?: UiPresentation;
   @Prop @Watch('revisionChanged') preview: PublishedPreview;
   @Prop available: boolean = false;
@@ -41,11 +43,11 @@ export struct PublishedPreviewCard {
               })
           }
           Column({ space: 4 }) {
-            Text(this.preview.title).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
-            Text(this.preview.superseded ? t('历史版本') : this.preview.path).fontSize(12).fontColor($r('app.color.text_secondary'))
-            if (this.imageError) { Text(t('预览截图加载失败')).fontSize(12).fontColor($r('app.color.danger')) }
+            Text(this.preview.title).fontFamily(this.appearance.fontFamily).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
+            Text(this.preview.superseded ? t('历史版本') : this.preview.path).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
+            if (this.imageError) { Text(t('预览截图加载失败')).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.danger')) }
           }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-          Button(this.expanded ? t('收起预览') : t('展开预览')).attributeModifier(Btn.textSmall)
+          Button(this.expanded ? t('收起预览') : t('展开预览')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.textSmall)
             .id('preview-toggle-' + this.preview.id).onClick(() => { this.expanded = !this.expanded; })
         }.width('100%').padding(12).borderRadius(Radius.md).backgroundColor($r('app.color.surface'))
       }

@@ -1,4 +1,4 @@
-import { AppMaterials } from '../common/AppMaterials';
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { SwipeRow } from '../common/SwipeRow';
 import { util } from '@kit.ArkTS';
@@ -14,6 +14,7 @@ const TABS: string[] = ['memory', 'templates', 'mcp'];
 
 @Component
 export struct ProductivityPanel {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   @State tab: string = 'memory';
   onUse: () => void = () => {};
@@ -69,7 +70,7 @@ export struct ProductivityPanel {
   private editServer(item: McpServer): void {
     this.reset(); this.editingId = item.id; this.name = item.name; this.url = item.url; this.noAuth = !item.credentialAlias; this.openEditor();
   }
-  private toast(message: string): void { this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: message }); }
+  private toast(message: string): void { this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: message }); }
   private memories(): MemoryEntry[] {
     return this.app.productivity.memories.filter((item) => !item.threadId || item.threadId === this.app.active.id)
       .sort((a, b) => b.updatedAt - a.updatedAt);
@@ -110,7 +111,7 @@ export struct ProductivityPanel {
     finally { this.busy = false; }
   }
   private remove(id: string, label: string): void {
-    this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface, title: t('删除{0}？', [label]), message: t("删除后将不再使用，且无法恢复。"),
+    this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t('删除{0}？', [label]), message: t("删除后将不再使用，且无法恢复。"),
       primaryButton: { value: t("取消"), action: () => {} },
       secondaryButton: { value: t("删除"), fontColor: $r('app.color.danger'), action: () => this.removeNow(id) } });
   }
@@ -150,7 +151,7 @@ export struct ProductivityPanel {
 
   @Builder
   caption(text: string) {
-    Text(text).fontSize(13).lineHeight(20).fontColor($r('app.color.text_secondary')).width('100%')
+    Text(text).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(20).fontColor($r('app.color.text_secondary')).width('100%')
       .padding({ left: 4, right: 4, top: Space.sm })
   }
 
@@ -159,10 +160,10 @@ export struct ProductivityPanel {
     List({ space: Space.md }) {
       ListItem() { this.caption(t('自动保存的记忆在新对话中加载，当前对话保留原快照；手动编辑或删除立即生效。')) }
       ListItem() {
-        Button(t('将最新记忆用于本对话')).attributeModifier(Btn.textSmall).enabled(!this.locked()).id('refresh-memory-context')
+        Button(t('将最新记忆用于本对话')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.textSmall).enabled(!this.locked()).id('refresh-memory-context')
           .onClick(async () => {
             if (!await this.app.refreshMemoryContext()) { this.error = this.app.error; }
-            else { this.error = ''; this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t('本对话已加载最新记忆。') }); }
+            else { this.error = ''; this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t('本对话已加载最新记忆。') }); }
           })
       }
       ListItem() { this.caption(t('记忆容量：{0}/100 条 · {1}/{2} 字符',
@@ -188,16 +189,16 @@ export struct ProductivityPanel {
             disabled: this.locked(), onOpen: (key: string) => { this.swipeRow = key; },
             onDelete: () => this.remove(item.id, t('这条记忆')) }) {
           Column({ space: Space.sm }) {
-            Text(item.content).fontSize(15).lineHeight(22).maxLines(4).textOverflow({ overflow: TextOverflow.Ellipsis })
+            Text(item.content).fontFamily(this.appearance.fontFamily).fontSize(15).lineHeight(22).maxLines(4).textOverflow({ overflow: TextOverflow.Ellipsis })
               .width('100%').fontColor($r('app.color.text_primary'))
             Row({ space: Space.sm }) {
               Tag({ text: item.threadId ? t("仅本对话") : t("所有对话"), strong: !item.threadId })
               Tag({ text: item.automatic ? t("自动提取") : t("手动添加") })
               Blank()
-              Text(shortTime(item.updatedAt)).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
+              Text(shortTime(item.updatedAt)).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
             }.width('100%')
             if (item.sourceThreadId && item.sourceMessageId) {
-              Button(t("查看记忆来源")).attributeModifier(Btn.textSmall).onClick(async () => {
+              Button(t("查看记忆来源")).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.textSmall).onClick(async () => {
                 if (await this.app.openMessage(item.sourceThreadId || '', item.sourceMessageId || '')) { this.onUse(); }
               })
             }
@@ -226,12 +227,12 @@ export struct ProductivityPanel {
           Row({ space: Space.md }) {
             IconBadge({ icon: $r('sys.symbol.doc_plaintext') })
             Column({ space: 4 }) {
-              Text(item.name).fontSize(Font.body).fontWeight(FontWeight.Medium).maxLines(1)
+              Text(item.name).fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontWeight(FontWeight.Medium).maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
-              Text(item.content.replace(/\s+/g, ' ')).fontSize(13).lineHeight(19).maxLines(2)
+              Text(item.content.replace(/\s+/g, ' ')).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(19).maxLines(2)
                 .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_secondary'))
             }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-            Button(t("套用")).id('use-template-' + item.id).attributeModifier(Btn.tonalSmall)
+            Button(t("套用")).fontFamily(this.appearance.fontFamily).id('use-template-' + item.id).attributeModifier(Btn.tonalSmall)
               .enabled(!this.app.busy && !this.app.active.archived)
               .onClick(() => { this.app.useTemplate(item.id); this.onUse(); })
           }.padding(Space.lg).width('100%').backgroundColor($r('app.color.surface')).borderRadius(Radius.lg)
@@ -252,18 +253,18 @@ export struct ProductivityPanel {
         ListItem() {
           Column({ space: Space.sm }) {
             Row({ space: Space.sm }) {
-              LoadingProgress().width(18).height(18).color($r('app.color.accent'))
-              Text(t("正在等待浏览器完成登录…")).fontSize(14).fontWeight(FontWeight.Medium).layoutWeight(1)
-                .fontColor($r('app.color.on_accent_container'))
+              LoadingProgress().width(18).height(18).color(this.appearance.accent)
+              Text(t("正在等待浏览器完成登录…")).fontFamily(this.appearance.fontFamily).fontSize(14).fontWeight(FontWeight.Medium).layoutWeight(1)
+                .fontColor(this.appearance.onAccentContainer)
             }.width('100%')
-            Text(t("如果浏览器没有自动返回，请复制地址栏中的完整回调地址并粘贴到这里。")).fontSize(Font.caption).lineHeight(18)
-              .width('100%').fontColor($r('app.color.on_accent_container'))
-            TextInput({ text: this.oauthCallback, placeholder: t("粘贴完整回调地址") }).id('mcp-oauth-callback')
+            Text(t("如果浏览器没有自动返回，请复制地址栏中的完整回调地址并粘贴到这里。")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).lineHeight(18)
+              .width('100%').fontColor(this.appearance.onAccentContainer)
+            TextInput({ text: this.oauthCallback, placeholder: t("粘贴完整回调地址") }).fontFamily(this.appearance.fontFamily).id('mcp-oauth-callback')
               .attributeModifier(Styles.input).height(44).backgroundColor($r('app.color.surface'))
               .onChange((value) => { this.oauthCallback = value; })
-            Button(t("完成登录")).id('mcp-oauth-finish').attributeModifier(Btn.primarySmall).height(40).width('100%')
+            Button(t("完成登录")).fontFamily(this.appearance.fontFamily).id('mcp-oauth-finish').attributeModifier(Btn.primarySmall).height(40).width('100%')
               .enabled(this.oauthCallback.trim().length > 0).onClick(() => McpOAuth.receive(this.oauthCallback))
-          }.width('100%').padding(Space.lg).borderRadius(Radius.lg).backgroundColor($r('app.color.accent_container'))
+          }.width('100%').padding(Space.lg).borderRadius(Radius.lg).backgroundColor(this.appearance.accentContainer)
         }
       }
       if (this.app.productivity.servers.length === 0) {
@@ -277,18 +278,18 @@ export struct ProductivityPanel {
           Column({ space: 10 }) {
             Row({ space: Space.md }) {
               IconBadge({ icon: $r('sys.symbol.connection'),
-                tint: item.enabled ? $r('app.color.accent') : $r('app.color.text_tertiary'),
-                fill: item.enabled ? $r('app.color.accent_container') : $r('app.color.surface_variant') })
+                tint: item.enabled ? this.appearance.accent : $r('app.color.text_tertiary'),
+                fill: item.enabled ? this.appearance.accentContainer : $r('app.color.surface_variant') })
               Column({ space: 3 }) {
-                Text(item.name).fontSize(Font.body).fontWeight(FontWeight.Medium).maxLines(1)
+                Text(item.name).fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontWeight(FontWeight.Medium).maxLines(1)
                   .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
-                Text(item.url).fontSize(Font.caption).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                Text(item.url).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                   .fontColor($r('app.color.text_tertiary'))
               }.layoutWeight(1).alignItems(HorizontalAlign.Start)
               Toggle({ type: ToggleType.Switch, isOn: item.enabled }).id('toggle-mcp-' + item.id)
                 .attributeModifier(Styles.toggle)
-                .selectedColor($r('app.color.accent')).enabled(!this.locked())
-                .systemMaterial(AppMaterials.control)
+                .selectedColor(this.appearance.accent).enabled(!this.locked())
+                .systemMaterial(this.appearance.control)
                 .onChange((value: boolean) => { this.toggle(item, value); })
             }.width('100%')
             Row({ space: 6 }) {
@@ -300,23 +301,23 @@ export struct ProductivityPanel {
             Divider().strokeWidth(0.5).color($r('app.color.divider'))
             Row({ space: Space.xs }) {
               if (this.testingId === item.id) {
-                LoadingProgress().width(16).height(16).color($r('app.color.accent')).margin({ left: 10 })
+                LoadingProgress().width(16).height(16).color(this.appearance.accent).margin({ left: 10 })
               }
-              Button(this.testingId === item.id ? t("连接中…") : t("测试连接")).id('test-mcp-' + item.id).attributeModifier(Btn.textSmall)
+              Button(this.testingId === item.id ? t("连接中…") : t("测试连接")).fontFamily(this.appearance.fontFamily).id('test-mcp-' + item.id).attributeModifier(Btn.textSmall)
                 .padding({ left: 10, right: 10 }).enabled(!this.testingId).onClick(() => this.test(item))
-              Button(t("OAuth 登录")).id('login-mcp-' + item.id).attributeModifier(Btn.textSmall).padding({ left: 10, right: 10 })
+              Button(t("OAuth 登录")).fontFamily(this.appearance.fontFamily).id('login-mcp-' + item.id).attributeModifier(Btn.textSmall).padding({ left: 10, right: 10 })
                 .enabled(!this.locked()).onClick(() => this.login(item))
               Blank()
-              Button(this.app.active.disabledMcpIds.includes(item.id) ? t("本对话启用") : t("本对话停用")).id('thread-mcp-' + item.id)
+              Button(this.app.active.disabledMcpIds.includes(item.id) ? t("本对话启用") : t("本对话停用")).fontFamily(this.appearance.fontFamily).id('thread-mcp-' + item.id)
                 .attributeModifier(Btn.textSmall).padding({ left: 10, right: 10 })
-                .fontColor(this.app.active.disabledMcpIds.includes(item.id) ? $r('app.color.accent') : $r('app.color.text_secondary'))
+                .fontColor(this.app.active.disabledMcpIds.includes(item.id) ? this.appearance.accent : $r('app.color.text_secondary'))
                 .enabled(!this.locked()).onClick(() => this.app.setThreadMcp(item.id, this.app.active.disabledMcpIds.includes(item.id)))
             }.width('100%').margin({ left: -10 })
             if (this.testId === item.id && this.testMessage.length > 0) {
               Row({ space: Space.sm }) {
                 SymbolGlyph(this.testOk ? $r('sys.symbol.checkmark_circle_fill') : $r('sys.symbol.exclamationmark_circle'))
-                  .fontSize(16).fontColor([this.testOk ? $r('app.color.accent') : $r('app.color.danger')])
-                Text(this.testMessage).fontSize(13).lineHeight(19).layoutWeight(1).maxLines(6)
+                  .fontSize(16).fontColor([this.testOk ? this.appearance.accent : $r('app.color.danger')])
+                Text(this.testMessage).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(19).layoutWeight(1).maxLines(6)
                   .textOverflow({ overflow: TextOverflow.Ellipsis }).copyOption(CopyOptions.LocalDevice)
                   .fontColor(this.testOk ? $r('app.color.text_primary') : $r('app.color.danger'))
               }.width('100%').alignItems(VerticalAlign.Top).padding(10).borderRadius(Radius.sm)
@@ -331,10 +332,10 @@ export struct ProductivityPanel {
       if (this.app.productivity.servers.length > 0) {
         ListItem() {
           Column({ space: Space.sm }) {
-            Text(t("OAuth 客户端 ID（可选）")).fontSize(13).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_secondary')).width('100%')
-            TextInput({ text: this.oauthClientId, placeholder: t("已在服务端注册的公开客户端 ID") }).id('mcp-oauth-client')
+            Text(t("OAuth 客户端 ID（可选）")).fontFamily(this.appearance.fontFamily).fontSize(13).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_secondary')).width('100%')
+            TextInput({ text: this.oauthClientId, placeholder: t("已在服务端注册的公开客户端 ID") }).fontFamily(this.appearance.fontFamily).id('mcp-oauth-client')
               .attributeModifier(Styles.input).height(44).onChange((value) => { this.oauthClientId = value; })
-            Text(t("用于 OAuth 登录。留空时向服务动态注册客户端。")).fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).width('100%')
+            Text(t("用于 OAuth 登录。留空时向服务动态注册客户端。")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).width('100%')
           }.width('100%').padding(Space.lg).borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
         }
       }
@@ -344,14 +345,14 @@ export struct ProductivityPanel {
 
   @Builder
   fieldLabel(text: string, top: number) {
-    Text(text).fontSize(13).fontColor($r('app.color.text_secondary')).width('100%').padding({ left: 4, top: top })
+    Text(text).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary')).width('100%').padding({ left: 4, top: top })
   }
 
   @Builder
   scopeChip(label: string, value: boolean) {
-    Text(label).fontSize(14).height(36).layoutWeight(1).textAlign(TextAlign.Center).borderRadius(18)
-      .fontColor(this.scoped === value ? $r('app.color.on_accent_container') : $r('app.color.text_secondary'))
-      .backgroundColor(this.scoped === value ? $r('app.color.accent_container') : $r('app.color.surface'))
+    Text(label).fontFamily(this.appearance.fontFamily).fontSize(14).height(36).layoutWeight(1).textAlign(TextAlign.Center).borderRadius(18)
+      .fontColor(this.scoped === value ? this.appearance.onAccentContainer : $r('app.color.text_secondary'))
+      .backgroundColor(this.scoped === value ? this.appearance.accentContainer : $r('app.color.surface'))
       .border({ width: this.scoped === value ? 0 : 0.5, color: $r('app.color.divider') })
       .onClick(() => { this.scoped = value; })
   }
@@ -363,41 +364,41 @@ export struct ProductivityPanel {
         Column({ space: Space.sm }) {
           if (this.tab !== 'memory') {
             this.fieldLabel(this.tab === 'mcp' ? t("服务名称") : t("模板名称"), 0)
-            TextInput({ text: this.name, placeholder: this.tab === 'mcp' ? t("例如：公司知识库") : t("例如：会议纪要") })
+            TextInput({ text: this.name, placeholder: this.tab === 'mcp' ? t("例如：公司知识库") : t("例如：会议纪要") }).fontFamily(this.appearance.fontFamily)
               .id('productivity-name').attributeModifier(Styles.input).backgroundColor($r('app.color.surface'))
               .maxLength(40).onChange((value) => { this.name = value; })
           }
           if (this.tab === 'mcp') {
             this.fieldLabel(t("服务地址"), Space.sm)
-            TextInput({ text: this.url, placeholder: 'https://example.com/mcp' }).id('mcp-url').type(InputType.URL)
+            TextInput({ text: this.url, placeholder: 'https://example.com/mcp' }).fontFamily(this.appearance.fontFamily).id('mcp-url').type(InputType.URL)
               .attributeModifier(Styles.input).backgroundColor($r('app.color.surface'))
               .onChange((value) => { this.url = value; })
             Row({ space: Space.md }) {
               Column({ space: 2 }) {
-                Text(t("无需鉴权")).fontSize(Font.body).fontColor($r('app.color.text_primary'))
-                Text(t("关闭后填写 Bearer Token，Token 保存在系统安全存储中。")).fontSize(Font.caption)
+                Text(t("无需鉴权")).fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontColor($r('app.color.text_primary'))
+                Text(t("关闭后填写 Bearer Token，Token 保存在系统安全存储中。")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
                   .fontColor($r('app.color.text_secondary'))
               }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-              Toggle({ type: ToggleType.Switch, isOn: this.noAuth }).id('mcp-no-auth').selectedColor($r('app.color.accent'))
+              Toggle({ type: ToggleType.Switch, isOn: this.noAuth }).id('mcp-no-auth').selectedColor(this.appearance.accent)
                 .attributeModifier(Styles.toggle)
-                .systemMaterial(AppMaterials.control)
+                .systemMaterial(this.appearance.control)
                 .onChange((value) => { this.noAuth = value; })
             }.width('100%').padding({ left: Space.lg, right: Space.md, top: 10, bottom: 10 }).margin({ top: Space.sm })
             .borderRadius(Radius.sm).backgroundColor($r('app.color.surface'))
             if (!this.noAuth) {
-              TextInput({ text: this.token, placeholder: this.editingId ? t("留空则保留已有 Token") : 'Bearer Token' })
+              TextInput({ text: this.token, placeholder: this.editingId ? t("留空则保留已有 Token") : 'Bearer Token' }).fontFamily(this.appearance.fontFamily)
                 .id('mcp-token').type(InputType.Password).attributeModifier(Styles.input).backgroundColor($r('app.color.surface'))
                 .onChange((value) => { this.token = value; })
             }
           } else {
             if (this.tab === 'templates') { this.fieldLabel(t("模板正文"), Space.sm) }
             TextArea({ text: this.content,
-              placeholder: this.tab === 'memory' ? t("例如：回答优先使用中文，代码示例使用 ArkTS。") : t("例如：请把以下内容整理成会议纪要：\n\n{{input}}") })
+              placeholder: this.tab === 'memory' ? t("例如：回答优先使用中文，代码示例使用 ArkTS。") : t("例如：请把以下内容整理成会议纪要：\n\n{{input}}") }).fontFamily(this.appearance.fontFamily)
               .id('productivity-content').attributeModifier(Styles.area).backgroundColor($r('app.color.surface'))
               .height(this.tab === 'memory' ? 160 : 220).fontSize(15).showCounter(true)
               .maxLength(this.tab === 'memory' ? 2000 : 12000).onChange((value) => { this.content = value; })
             if (this.tab === 'templates') {
-              Button(t("插入 {{input}} 占位")).attributeModifier(Btn.textSmall).enabled(!this.content.includes('{{input}}'))
+              Button(t("插入 {{input}} 占位")).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.textSmall).enabled(!this.content.includes('{{input}}'))
                 .onClick(() => { this.content = this.content + (this.content.length > 0 ? '\n\n' : '') + '{{input}}'; })
             }
             if (this.tab === 'memory') {
@@ -416,10 +417,10 @@ export struct ProductivityPanel {
       BottomBar({ sheet: true }) {
         Row({ space: Space.md }) {
           if (this.editingId.length > 0) {
-            Button(t("删除")).attributeModifier(Btn.danger).enabled(!this.locked())
+            Button(t("删除")).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.danger).enabled(!this.locked())
               .onClick(() => this.remove(this.editingId, this.tab === 'memory' ? t("这条记忆") : this.tab === 'templates' ? t("这个模板") : t("这个 MCP 服务")))
           }
-          Button(this.busy ? t("正在保存…") : t("保存")).id('save-productivity').attributeModifier(Btn.primary).layoutWeight(1)
+          Button(this.busy ? t("正在保存…") : t("保存")).fontFamily(this.appearance.fontFamily).id('save-productivity').attributeModifier(Btn.primary).layoutWeight(1)
             .enabled(this.canSave()).onClick(() => this.save())
         }.width('100%')
       }
@@ -447,7 +448,7 @@ export struct ProductivityPanel {
         Banner({ text: this.error }).padding({ left: Space.page, right: Space.page })
       }
       BottomBar() {
-        Button(this.tab === 'memory' ? t("添加记忆") : this.tab === 'templates' ? t("新建模板") : t("添加 MCP 服务"))
+        Button(this.tab === 'memory' ? t("添加记忆") : this.tab === 'templates' ? t("新建模板") : t("添加 MCP 服务")).fontFamily(this.appearance.fontFamily)
           .id('add-productivity').attributeModifier(Btn.primary).width('100%')
           .enabled(!this.locked() && (this.tab !== 'mcp' || this.app.productivity.servers.length < 10))
           .onClick(() => this.createEntry())

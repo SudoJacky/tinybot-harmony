@@ -1,3 +1,4 @@
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { BASIC_FILE_TOOLS, OPTIONAL_TOOL_NAMES, TOOL_GROUPS, ToolGroup } from '../model/ToolGroups';
 import { toolTitle, toolGroupTitle } from '../model/ToolPresentation';
@@ -7,6 +8,7 @@ import { Btn, Font, Space } from '../common/Theme';
 
 @Component
 export struct CustomToolsPanel {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   @ObjectLink thread: ThreadViewModel;
 
@@ -15,22 +17,22 @@ export struct CustomToolsPanel {
   build() {
     Scroll() {
       Column({ space: Space.sm }) {
-        Text(t('基础文件工具始终保留，其余工具可以逐个开关。工具仍受服务配置和授权限制。'))
+        Text(t('基础文件工具始终保留，其余工具可以逐个开关。工具仍受服务配置和授权限制。')).fontFamily(this.appearance.fontFamily)
           .fontSize(Font.caption).lineHeight(20).fontColor($r('app.color.text_secondary'))
           .width('100%').padding({ left: Space.md, right: Space.md, top: Space.md })
-        Text(t('选择会随下一条消息保存。')).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+        Text(t('选择会随下一条消息保存。')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
           .width('100%').padding({ left: Space.md, right: Space.md })
-        Text(t('已开启 {0} / {1} 个可选工具', [OPTIONAL_TOOL_NAMES.length - this.thread.disabledTools.length, OPTIONAL_TOOL_NAMES.length]))
+        Text(t('已开启 {0} / {1} 个可选工具', [OPTIONAL_TOOL_NAMES.length - this.thread.disabledTools.length, OPTIONAL_TOOL_NAMES.length])).fontFamily(this.appearance.fontFamily)
           .fontSize(Font.caption).fontColor($r('app.color.text_secondary')).width('100%').padding({ left: Space.md, right: Space.md })
         Row({ space: Space.sm }) {
-          Button(t('全部开启')).id('enable-optional-tools').attributeModifier(Btn.plainSmall).height(40)
+          Button(t('全部开启')).fontFamily(this.appearance.fontFamily).id('enable-optional-tools').attributeModifier(Btn.plainSmall).height(40)
             .enabled(this.editable()).onClick(() => { this.app.setDisabledTools([]); })
-          Button(t('关闭可选工具')).id('disable-optional-tools').attributeModifier(Btn.plainSmall).height(40)
+          Button(t('关闭可选工具')).fontFamily(this.appearance.fontFamily).id('disable-optional-tools').attributeModifier(Btn.plainSmall).height(40)
             .enabled(this.editable()).onClick(() => { this.app.setDisabledTools(OPTIONAL_TOOL_NAMES); })
         }.width('100%').padding({ left: Space.md, right: Space.md })
         SectionHeader({ title: t('基础文件工具'), caption: t('基础工具，始终开启') })
         GroupCard() {
-          Text(BASIC_FILE_TOOLS.map((name) => toolTitle(name)).join('、'))
+          Text(BASIC_FILE_TOOLS.map((name) => toolTitle(name)).join('、')).fontFamily(this.appearance.fontFamily)
             .fontSize(Font.caption).lineHeight(20).fontColor($r('app.color.text_secondary'))
             .width('100%').padding(Space.md)
         }

@@ -15,6 +15,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Locale validation failed. Run node scripts/bui
 & $nodePath (Join-Path $projectPath 'scripts/test-browser.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Browser permission, takeover and runtime pause tests failed.' }
 $env:DEVECO_STUDIO_HOME = $StudioPath
+& $nodePath (Join-Path $projectPath 'scripts/test-appearance.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Appearance preference and palette tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-harness-features.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Search, delivery, references and runtime reliability tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-preview-publication.cjs')

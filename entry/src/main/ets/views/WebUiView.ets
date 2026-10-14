@@ -1,3 +1,4 @@
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { webview } from '@kit.ArkWeb';
 import { image } from '@kit.ImageKit';
 import { common } from '@kit.AbilityKit';
@@ -13,6 +14,7 @@ let webViewSequence: number = 0;
 
 @Component
 export struct WebUiView {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop @Watch('restart') content: string = '';
   @Prop @Watch('sync') values: UiValues = {};
   @Prop @Watch('sync') interactive: boolean = false;
@@ -181,8 +183,8 @@ export struct WebUiView {
   build() {
     Column({ space: 8 }) {
       if (this.error) {
-        Text(this.error).fontSize(13).fontColor($r('app.color.danger')).copyOption(CopyOptions.LocalDevice)
-        Button(t('重新加载')).attributeModifier(Btn.textSmall).onClick(() => { this.error = ''; this.visibilityChanged(); this.restart(); })
+        Text(this.error).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.danger')).copyOption(CopyOptions.LocalDevice)
+        Button(t('重新加载')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.textSmall).onClick(() => { this.error = ''; this.visibilityChanged(); this.restart(); })
       }
       Stack({ alignContent: Alignment.TopStart }) {
       if (this.renderWeb) {
@@ -213,7 +215,7 @@ export struct WebUiView {
       }
       if (this.snapshot) { Image(this.snapshot).width('100%').height(this.heightValue).objectFit(ImageFit.Fill) }
       if (!this.ready && !this.error) {
-        Text(t('正在加载交互内容…')).fontSize(13).fontColor($r('app.color.text_secondary')).hitTestBehavior(HitTestMode.None)
+        Text(t('正在加载交互内容…')).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary')).hitTestBehavior(HitTestMode.None)
       }
       }.width('100%').height(this.heightValue)
     }.width('100%').alignItems(HorizontalAlign.Start)

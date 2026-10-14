@@ -1,3 +1,4 @@
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { ContextTokenItem } from '../model/ContextBreakdown';
 import { MessageUsageSummary, summarizeUsage } from '../model/MessageUsage';
@@ -7,6 +8,7 @@ import { Btn, Radius, Space } from '../common/Theme';
 
 @Component
 export struct ContextDetails {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   @State private expanded: string[] = [];
   @State private shown: number = 12;
@@ -61,49 +63,49 @@ export struct ContextDetails {
   @Builder
   metric(label: string, value: string) {
     Row({ space: 12 }) {
-      Text(label).fontSize(13).fontColor($r('app.color.text_secondary')).layoutWeight(1)
-      Text(value).fontSize(13).fontColor($r('app.color.text_primary')).textAlign(TextAlign.End)
+      Text(label).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary')).layoutWeight(1)
+      Text(value).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_primary')).textAlign(TextAlign.End)
     }.width('100%')
   }
   build() {
     Column({ space: Space.lg }) {
       Column({ space: 14 }) {
-        Text(t('上下文构成（估算）')).fontSize(16).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
-        Text(t('分类按实际保留的内容估算，不是账单。分类合计可能与服务端校准的占用不同。'))
+        Text(t('上下文构成（估算）')).fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
+        Text(t('分类按实际保留的内容估算，不是账单。分类合计可能与服务端校准的占用不同。')).fontFamily(this.appearance.fontFamily)
           .fontSize(12).lineHeight(18).fontColor($r('app.color.text_tertiary'))
         ForEach(this.kinds, (kind: string) => {
           Column({ space: 6 }) {
             Button({ type: ButtonType.Normal }) {
               Row({ space: 8 }) {
-                Text(this.title(kind)).fontSize(14).layoutWeight(1).textAlign(TextAlign.Start).fontColor($r('app.color.text_primary'))
-                Text('~' + this.tokens(kind)).fontSize(13).fontColor($r('app.color.text_secondary'))
+                Text(this.title(kind)).fontFamily(this.appearance.fontFamily).fontSize(14).layoutWeight(1).textAlign(TextAlign.Start).fontColor($r('app.color.text_primary'))
+                Text('~' + this.tokens(kind)).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
                 SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(11).fontColor([$r('app.color.text_tertiary')])
                   .rotate({ angle: this.expanded.includes(kind) ? 180 : 0 })
               }.width('100%').padding({ top: 7, bottom: 7 })
-            }.id('context-category-' + kind).width('100%').backgroundColor(Color.Transparent)
+            }.fontFamily(this.appearance.fontFamily).id('context-category-' + kind).width('100%').backgroundColor(Color.Transparent)
               .onClick(() => { this.expanded = this.expanded.includes(kind) ? this.expanded.filter((item) => item !== kind) : this.expanded.concat([kind]); })
             Progress({ value: this.tokens(kind), total: Math.max(1, this.total()), type: ProgressType.Linear })
-              .width('100%').color($r('app.color.accent')).backgroundColor($r('app.color.surface_variant')).style({ strokeWidth: 3 })
+              .width('100%').color(this.appearance.accent).backgroundColor($r('app.color.surface_variant')).style({ strokeWidth: 3 })
             if (this.expanded.includes(kind)) {
               ForEach(this.rows(kind).slice(0, this.shown), (item: ContextTokenItem) => {
                 this.metric(this.label(item), '~' + item.tokens)
               }, (item: ContextTokenItem) => item.id)
               if (this.rows(kind).length > this.shown) {
-                Button(t('显示更多明细')).attributeModifier(Btn.textSmall).onClick(() => { this.shown += 20; })
+                Button(t('显示更多明细')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.textSmall).onClick(() => { this.shown += 20; })
               }
             }
           }.width('100%')
         }, (kind: string) => kind)
         this.metric(t('分类估算合计'), '~' + this.total())
-        Text(this.app.contextSource === 'usage+estimate' ? t('占用总量：服务端输入用量 + 后续内容估算') : t('占用总量：本地内容估算'))
+        Text(this.app.contextSource === 'usage+estimate' ? t('占用总量：服务端输入用量 + 后续内容估算') : t('占用总量：本地内容估算')).fontFamily(this.appearance.fontFamily)
           .fontSize(12).fontColor($r('app.color.text_tertiary'))
         if (this.app.generating) {
-          Text(t('生成中展示最近一次请求的内容；输入框草稿另计，尚未发送。')).fontSize(12).fontColor($r('app.color.text_tertiary'))
+          Text(t('生成中展示最近一次请求的内容；输入框草稿另计，尚未发送。')).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_tertiary'))
         }
       }.id('context-breakdown').width('100%').alignItems(HorizontalAlign.Start)
         .padding(Space.lg).borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
       Column({ space: 12 }) {
-        Text(t('实际用量（服务端报告）')).fontSize(16).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
+        Text(t('实际用量（服务端报告）')).fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
         this.metric(t('最近一次输入'), this.reported(this.latest()?.tokens?.input))
         this.metric(t('最近一次输出'), this.reported(this.latest()?.tokens?.output))
         this.metric(t('本轮模型请求'), this.usage().requests.toString())
@@ -112,10 +114,10 @@ export struct ContextDetails {
         this.metric(t('缓存读取 Token'), this.counted(this.usage().cached, this.usage().cacheReports))
         this.metric(t('缓存写入 Token'), this.counted(this.usage().cacheWrite, this.usage().writeReports))
         this.metric(t('推理 Token'), this.counted(this.usage().reasoning, this.usage().reasoningReports))
-        Text(t('仅统计本轮聊天记录中的模型请求，不含标题、记忆整理或团队员工。缓存属于输入，推理属于输出，不重复相加。'))
+        Text(t('仅统计本轮聊天记录中的模型请求，不含标题、记忆整理或团队员工。缓存属于输入，推理属于输出，不重复相加。')).fontFamily(this.appearance.fontFamily)
           .fontSize(12).lineHeight(18).fontColor($r('app.color.text_tertiary'))
         if (this.usage().reported < this.usage().requests) {
-          Text(t('{0} 次请求尚未报告用量', [this.usage().requests - this.usage().reported])).fontSize(12).fontColor($r('app.color.text_tertiary'))
+          Text(t('{0} 次请求尚未报告用量', [this.usage().requests - this.usage().reported])).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_tertiary'))
         }
       }.id('context-reported-usage').width('100%').alignItems(HorizontalAlign.Start)
         .padding(Space.lg).borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))

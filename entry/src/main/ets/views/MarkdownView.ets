@@ -1,4 +1,4 @@
-import { AppMaterials } from '../common/AppMaterials';
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
 import { ColorMetrics } from '@kit.ArkUI';
@@ -14,6 +14,7 @@ const NBSP: string = String.fromCharCode(0xA0);
 
 @Component
 export struct MarkdownView {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop @Watch('refresh') content: string = '';
   @Prop @Watch('refresh') streaming: boolean = false;
   @Prop fontSize: number = 16;
@@ -76,14 +77,14 @@ export struct MarkdownView {
   private async open(url: string): Promise<void> {
     if (!/^https?:\/\//.test(url)) { return; }
     try { await (this.getUIContext().getHostContext() as common.UIAbilityContext).startAbility({ action: 'ohos.want.action.viewData', uri: url }); }
-    catch (_) { this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t("无法打开链接，可复制后在浏览器中打开。") }); }
+    catch (_) { this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t("无法打开链接，可复制后在浏览器中打开。") }); }
   }
   private async copy(text: string, index: number): Promise<void> {
     try {
       await pasteboard.getSystemPasteboard().setData(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text));
       this.copied = index; clearTimeout(this.copyTimer);
       this.copyTimer = setTimeout(() => { this.copied = -1; this.copyTimer = -1; }, 1600);
-    } catch (_) { this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t("复制失败，请长按文本复制。") }); }
+    } catch (_) { this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t("复制失败，请长按文本复制。") }); }
   }
   private codeLines(block: MarkdownBlock): number { return block.text.split('\n').length; }
   private codeShown(block: MarkdownBlock, index: number): string {
@@ -110,18 +111,18 @@ export struct MarkdownView {
       ForEach(this.reveal.spans(key, this.inlineSpans(text), this.revealTime), (span: RevealSpan) => {
         if (span.kind === 'code') {
           Span(span.text).fontFamily('monospace').fontSize(size - 2)
-            .fontColor(this.revealColor($r('app.color.on_accent_container'), span.opacity))
+            .fontColor(this.revealColor(this.appearance.onAccentContainer, span.opacity))
             .textBackgroundStyle({ color: $r('app.color.surface_variant'), radius: 4 })
         } else {
           Span(span.text).fontWeight(bold || span.kind === 'bold' ? FontWeight.Bold : FontWeight.Normal)
             .fontStyle(span.kind === 'italic' ? FontStyle.Italic : FontStyle.Normal)
-            .fontColor(this.revealColor(span.kind === 'link' ? $r('app.color.accent') : color, span.opacity))
+            .fontColor(this.revealColor(span.kind === 'link' ? this.appearance.accent : color, span.opacity))
             .decoration({ type: span.kind === 'link' ? TextDecorationType.Underline :
-              span.kind === 'strike' ? TextDecorationType.LineThrough : TextDecorationType.None, color: span.kind === 'link' ? $r('app.color.accent') : color })
+              span.kind === 'strike' ? TextDecorationType.LineThrough : TextDecorationType.None, color: span.kind === 'link' ? this.appearance.accent : color })
             .onClick(() => { if (span.url) { this.open(span.url); } })
         }
       })
-    }.fontSize(size).lineHeight(Math.round(size * 1.62)).fontColor(color).copyOption(this.selectable ? CopyOptions.LocalDevice : CopyOptions.None).width('100%')
+    }.fontFamily(this.appearance.fontFamily).fontSize(size).lineHeight(Math.round(size * 1.62)).fontColor(color).copyOption(this.selectable ? CopyOptions.LocalDevice : CopyOptions.None).width('100%')
   }
 
   @Builder
@@ -132,9 +133,9 @@ export struct MarkdownView {
           .fontColor($r('app.color.text_secondary'))
         Row({ space: 4 }) {
           SymbolGlyph(this.copied === index ? $r('sys.symbol.checkmark') : $r('sys.symbol.rectangle_on_rectangle')).fontSize(14)
-            .fontColor([this.copied === index ? $r('app.color.accent') : $r('app.color.text_secondary')])
-          Text(this.copied === index ? t("已复制") : t("复制")).fontSize(12)
-            .fontColor(this.copied === index ? $r('app.color.accent') : $r('app.color.text_secondary'))
+            .fontColor([this.copied === index ? this.appearance.accent : $r('app.color.text_secondary')])
+          Text(this.copied === index ? t("已复制") : t("复制")).fontFamily(this.appearance.fontFamily).fontSize(12)
+            .fontColor(this.copied === index ? this.appearance.accent : $r('app.color.text_secondary'))
         }.height(32).padding({ left: 10, right: 10 }).borderRadius(16)
         .stateStyles({ pressed: { .backgroundColor($r('app.color.divider')) }, normal: { .backgroundColor(Color.Transparent) } })
         .accessibilityText(t("复制代码")).onClick(() => this.copy(block.text, index))
@@ -151,10 +152,10 @@ export struct MarkdownView {
       }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).width('100%').align(Alignment.Start)
       if (this.codeLines(block) > CODE_PREVIEW_LINES) {
         Row({ space: 4 }) {
-          Text(this.expanded.includes(index) ? t("收起") : t("展开全部 {0} 行", [this.codeLines(block)])).fontSize(13)
-            .fontColor($r('app.color.accent'))
+          Text(this.expanded.includes(index) ? t("收起") : t("展开全部 {0} 行", [this.codeLines(block)])).fontFamily(this.appearance.fontFamily).fontSize(13)
+            .fontColor(this.appearance.accent)
           SymbolGlyph(this.expanded.includes(index) ? $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
-            .fontSize(13).fontColor([$r('app.color.accent')])
+            .fontSize(13).fontColor([this.appearance.accent])
         }.width('100%').height(40).justifyContent(FlexAlign.Center)
         .border({ width: { top: 0.5 }, color: $r('app.color.divider') })
         .onClick(() => {
@@ -197,12 +198,12 @@ export struct MarkdownView {
         } else if (block.kind === 'quote') {
           Column() { this.prose(block.text, this.fontSize - 1, false, $r('app.color.text_secondary'), `${index}`) }
             .width('100%').padding({ left: Space.md, top: 2, bottom: 2 })
-            .border({ width: { left: 3 }, color: $r('app.color.accent') })
+            .border({ width: { left: 3 }, color: this.appearance.accent })
         } else if (block.kind === 'list') {
           Row() {
-            Text(block.rows[0][0]).fontSize(block.rows[0][0] === '•' ? this.fontSize + 2 : this.fontSize)
+            Text(block.rows[0][0]).fontFamily(this.appearance.fontFamily).fontSize(block.rows[0][0] === '•' ? this.fontSize + 2 : this.fontSize)
               .lineHeight(Math.round(this.fontSize * 1.62)).constraintSize({ minWidth: 22 })
-              .fontColor(block.rows[0][0] === '☑' ? $r('app.color.accent') : $r('app.color.text_secondary'))
+              .fontColor(block.rows[0][0] === '☑' ? this.appearance.accent : $r('app.color.text_secondary'))
             Column() { this.prose(block.text, this.fontSize, false, $r('app.color.text_primary'), `${index}`) }.layoutWeight(1)
           }.width('100%').alignItems(VerticalAlign.Top).padding({ left: block.level * 18 }).margin({ top: -4 })
         } else if (block.kind === 'heading') {

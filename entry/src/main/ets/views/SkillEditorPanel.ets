@@ -1,3 +1,4 @@
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
 import { picker } from '@kit.CoreFileKit';
@@ -10,6 +11,7 @@ import { Banner, BottomBar, SectionHeader } from '../common/Widgets';
 
 @Component
 export struct SkillEditorPanel {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   @ObjectLink editor: SkillEditorViewModel;
   onSaved: () => void = () => {};
@@ -43,7 +45,7 @@ export struct SkillEditorPanel {
         Column() {
           Row() {
             SectionHeader({ title: 'SKILL.md', caption: t("包含 name、description 和指令正文。") }).layoutWeight(1)
-            Button(this.importing ? t("导入中…") : t("从文件导入")).id('import-skill').attributeModifier(Btn.textSmall)
+            Button(this.importing ? t("导入中…") : t("从文件导入")).fontFamily(this.appearance.fontFamily).id('import-skill').attributeModifier(Btn.textSmall)
               .enabled(this.idle()).onClick(() => this.importText(false))
           }.width('100%').alignItems(VerticalAlign.Bottom)
           TextArea({ text: this.editor.document, placeholder: t("---\nname: my-skill\ndescription: …\n---\n\n指令正文") })
@@ -57,20 +59,20 @@ export struct SkillEditorPanel {
               Column({ space: Space.sm }) {
                 Row({ space: Space.sm }) {
                   SymbolGlyph($r('sys.symbol.doc_text')).fontSize(18).fontColor([$r('app.color.text_secondary')])
-                  Text(file.path).fontSize(Font.small).maxLines(1).layoutWeight(1)
+                  Text(file.path).fontFamily(this.appearance.fontFamily).fontSize(Font.small).maxLines(1).layoutWeight(1)
                     .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
                   SymbolGlyph(this.expandedPath === file.path ? $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
                     .fontSize(14).fontColor([$r('app.color.text_tertiary')])
                   Button({ type: ButtonType.Circle }) {
                     SymbolGlyph($r('sys.symbol.xmark')).fontSize(16).fontColor([$r('app.color.text_secondary')])
-                  }.width(32).height(32).backgroundColor(Color.Transparent).accessibilityText(t("移除"))
+                  }.fontFamily(this.appearance.fontFamily).width(32).height(32).backgroundColor(Color.Transparent).accessibilityText(t("移除"))
                   .enabled(this.idle())
                   .onClick(() => { this.editor.files = this.editor.files.filter((item: SkillFile) => item.path !== file.path); })
                 }.width('100%').height(44)
                 .onClick(() => { this.expandedPath = this.expandedPath === file.path ? '' : file.path; })
                 if (this.expandedPath === file.path) {
                   Scroll() {
-                    Text(file.content).fontSize(Font.caption).lineHeight(18).copyOption(CopyOptions.LocalDevice)
+                    Text(file.content).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).lineHeight(18).copyOption(CopyOptions.LocalDevice)
                       .fontColor($r('app.color.text_primary')).width('100%')
                   }.constraintSize({ maxHeight: 200 }).width('100%').align(Alignment.TopStart).padding(Space.md)
                   .borderRadius(Radius.sm).backgroundColor($r('app.color.surface_variant')).margin({ bottom: Space.sm })
@@ -84,21 +86,21 @@ export struct SkillEditorPanel {
               Divider().strokeWidth(0.5).color($r('app.color.divider'))
             }
             Column({ space: Space.sm }) {
-              TextInput({ text: this.editor.referencePath, placeholder: t("相对路径，例如 references/guide.md") })
+              TextInput({ text: this.editor.referencePath, placeholder: t("相对路径，例如 references/guide.md") }).fontFamily(this.appearance.fontFamily)
                 .id('skill-reference-path').attributeModifier(Styles.input).maxLength(256).enabled(this.idle())
                 .onChange((value: string) => { this.editor.referencePath = value; })
-              TextArea({ text: this.editor.referenceText, placeholder: t("粘贴参考内容，或从文件导入") })
+              TextArea({ text: this.editor.referenceText, placeholder: t("粘贴参考内容，或从文件导入") }).fontFamily(this.appearance.fontFamily)
                 .id('skill-reference-text').attributeModifier(Styles.area).height(110).maxLength(32000).enabled(this.idle())
                 .onChange((value: string) => { this.editor.referenceText = value; })
               Row({ space: Space.sm }) {
-                Button(t("从文件导入")).attributeModifier(Btn.textSmall).enabled(this.idle()).onClick(() => this.importText(true))
+                Button(t("从文件导入")).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.textSmall).enabled(this.idle()).onClick(() => this.importText(true))
                 Blank()
-                Button(t("添加文件")).attributeModifier(Btn.tonalSmall).enabled(this.idle())
+                Button(t("添加文件")).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.tonalSmall).enabled(this.idle())
                   .onClick(() => this.editor.addReference())
               }.width('100%')
             }.padding({ top: this.editor.files.length > 0 ? Space.md : 0 })
           }.padding(Space.lg).borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
-          Text(t("启用的 Skill 名称和简介会提供给模型；正文与参考内容只在读取时发送。最多保存 20 个 Skills。"))
+          Text(t("启用的 Skill 名称和简介会提供给模型；正文与参考内容只在读取时发送。最多保存 20 个 Skills。")).fontFamily(this.appearance.fontFamily)
             .fontSize(Font.caption).lineHeight(18).fontColor($r('app.color.text_tertiary')).width('100%')
             .padding({ left: 4, right: 4, top: Space.md })
         }.padding({ left: Space.page, right: Space.page, bottom: Space.xl }).width('100%')
@@ -106,7 +108,7 @@ export struct SkillEditorPanel {
       BottomBar() {
         Column({ space: Space.sm }) {
           if (this.editor.error.length > 0) { Banner({ text: this.editor.error, compId: 'skill-error' }) }
-          Button(t("保存 Skill")).id('save-skill').attributeModifier(Btn.primary).width('100%')
+          Button(t("保存 Skill")).fontFamily(this.appearance.fontFamily).id('save-skill').attributeModifier(Btn.primary).width('100%')
             .enabled(this.idle() && this.app.saveError.length === 0)
             .onClick(async () => { if (await this.app.saveSkill()) { this.onSaved(); } })
         }

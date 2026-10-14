@@ -1,4 +1,4 @@
-import { AppMaterials } from '../common/AppMaterials';
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { monochromeProviderLogo, providerLogo } from '../common/ProviderBrand';
 import { WebUiDemoPanel } from '../views/WebUiDemoPanel';
 import { WebUiPreflightHost } from '../views/WebUiPreflightHost';
@@ -25,6 +25,7 @@ import { ShareInbox, exportFile, shareFile } from '../services/NativeActions';
 import { ChatViewModel, MessageViewModel } from '../viewmodel/ChatViewModel';
 import { ChatPanel } from '../views/ChatPanel';
 import { SettingsPanel, UserDocumentPanel } from '../views/SettingsPanel';
+import { AppearancePanel } from '../views/AppearancePanel';
 import { SupportPanel, supportTitle } from '../views/SupportPanel';
 import { ThreadList } from '../views/ThreadList';
 import { ProviderEditorPanel } from '../views/ProviderEditorPanel';
@@ -43,6 +44,7 @@ const CHAT_HEADER_HEIGHT: number = 56;
 @Entry
 @Component
 struct Index {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
   @State private app: ChatViewModel = new ChatViewModel();
   @State private drawerOpen: boolean = false;
@@ -84,7 +86,7 @@ struct Index {
     const action = LaunchActions.take();
     if (!action) { return; }
     if (this.launching || this.receiving || this.app.busy || this.app.saveError) {
-      this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t('请先完成当前操作或保存，再使用快捷入口。') });
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t('请先完成当前操作或保存，再使用快捷入口。') });
       return;
     }
     this.launching = true;
@@ -97,7 +99,7 @@ struct Index {
       this.paths.clear(); this.setDrawer(false);
       this.voiceRequest = action === 'voice-input' && LaunchActions.isForeground() ? this.app.active.id : '';
     } catch (error) {
-      this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: (error as Error).message });
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: (error as Error).message });
     } finally { this.launching = false; }
   }
 
@@ -200,7 +202,7 @@ struct Index {
     } catch (error) {
       const failure = error as BusinessError;
       const detail = failure.code ? failure.code + ' · ' + failure.message : failure.message;
-      this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface, title: t('评分和评论'),
+      this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t('评分和评论'),
         message: t('暂时无法打开评分和评论，请稍后重试。错误：{0}', [detail]),
         confirm: { value: t('关闭'), action: () => {} } });
     } finally { this.ratingOpen = false; }
@@ -218,7 +220,7 @@ struct Index {
 
   private async fork(): Promise<void> {
     if (await this.app.forkThread()) {
-      this.getUIContext().getPromptAction().showToast({ systemMaterial: AppMaterials.surface, message: t("已切换到新分支，原对话保留在列表中") });
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t("已切换到新分支，原对话保留在列表中") });
     }
   }
 
@@ -261,20 +263,23 @@ struct Index {
   @Builder
   destination(name: string, param: Object) {
     if (name === 'branches') {
-      NavDestination() { BranchesPanel({ app: this.app, onSelected: () => this.paths.clear() }) }.title(t("会话分支"), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
+      NavDestination() { BranchesPanel({ app: this.app, onSelected: () => this.paths.clear() }) }.title(t("会话分支"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'appearance') {
+      NavDestination() { AppearancePanel() }.title(t('界面与外观'), { systemMaterial: this.appearance.control })
+        .backgroundColor($r('app.color.page_background'))
     } else if (name === 'model-settings') {
-      NavDestination() { ModelSettingsPanel({ app: this.app }) }.title(t('模型分工与能力'), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
+      NavDestination() { ModelSettingsPanel({ app: this.app }) }.title(t('模型分工与能力'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'ui-demo') {
-      NavDestination() { WebUiDemoPanel() }.title(t('交互示例'), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
+      NavDestination() { WebUiDemoPanel() }.title(t('交互示例'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'backup') {
-      NavDestination() { BackupPanel({ app: this.app }) }.title(t('备份与恢复'), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
+      NavDestination() { BackupPanel({ app: this.app }) }.title(t('备份与恢复'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'usage') {
-      NavDestination() { UsagePanel({ app: this.app }) }.title(t('Token 用量'), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
+      NavDestination() { UsagePanel({ app: this.app }) }.title(t('Token 用量'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'productivity') {
       NavDestination() { ProductivityPanel({ app: this.app, tab: (param as string) || 'memory', onUse: () => { this.paths.clear(); } }) }
-        .title(t("记忆与工具"), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
+        .title(t("记忆与工具"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'search-settings') {
-      NavDestination() { SearchSettingsPanel({ app: this.app }) }.title(t('联网搜索'), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
+      NavDestination() { SearchSettingsPanel({ app: this.app }) }.title(t('联网搜索'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'files') {
       WorkspacePanel({ app: this.app, initialPath: (param as string) || '' })
     } else if (name === 'settings') {
@@ -285,6 +290,7 @@ struct Index {
           onModels: () => { this.paths.pushPath({ name: 'model-settings' }); },
           onSearch: () => { this.paths.pushPath({ name: 'search-settings' }); },
           onUiDemo: () => { this.paths.pushPath({ name: 'ui-demo' }); },
+          onAppearance: () => { this.paths.pushPath({ name: 'appearance' }); },
           onBackup: () => { this.paths.pushPath({ name: 'backup' }); },
           onSupport: (page: string) => this.openSupport(page),
           onTools: (tab: string) => this.openTools(tab),
@@ -293,16 +299,16 @@ struct Index {
           onEditProvider: (id: string, preset: string) => {
             if (this.app.beginProvider(preset, id)) { this.paths.pushPath({ name: 'provider' }); }
           } })
-      }.title(t("设置"), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
+      }.title(t("设置"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'support') {
       NavDestination() {
         SupportPanel({ page: param as string,
           onOpen: (page: string) => this.openSupport(page) })
-      }.title(supportTitle(param as string), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
+      }.title(supportTitle(param as string), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'user-document') {
       NavDestination() {
         UserDocumentPanel({ app: this.app, settings: this.app.settings, onSaved: () => { this.paths.pop(); } })
-      }.title(t('用户文档（USER.md）'), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
+      }.title(t('用户文档（USER.md）'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
         .onHidden(() => { this.app.settings.userDocument = this.app.config.userDocument || ''; })
     } else if (name === 'skills') {
       NavDestination() {
@@ -310,19 +316,19 @@ struct Index {
           this.app.beginSkill(skill);
           this.paths.pushPath({ name: 'skill-editor' });
         }, onUse: () => { this.paths.clear(); } })
-      }.title('Skills', { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
+      }.title('Skills', { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'skill-editor') {
       NavDestination() {
         SkillEditorPanel({ app: this.app, editor: this.app.skillEditor, onSaved: () => { this.paths.pop(); } })
-      }.title(this.app.skillEditor.originalName.length > 0 ? t("编辑 Skill") : t("添加 Skill"), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
+      }.title(this.app.skillEditor.originalName.length > 0 ? t("编辑 Skill") : t("添加 Skill"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'provider') {
       NavDestination() {
         ProviderEditorPanel({ app: this.app, editor: this.app.providerEditor, onSaved: () => { this.paths.pop(); } })
-      }.title(this.app.providerEditor.id.length > 0 ? t("编辑服务") : t("添加服务"), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
+      }.title(this.app.providerEditor.id.length > 0 ? t("编辑服务") : t("添加服务"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
         .onBackPressed(() => {
           if (this.app.busy) { return true; }
           if (!this.app.providerEditor.hasChanges) { return false; }
-          this.getUIContext().showAlertDialog({ systemMaterial: AppMaterials.surface, title: t('放弃未保存的修改？'), message: t('离开后，本次对服务配置的修改不会保存。'),
+          this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t('放弃未保存的修改？'), message: t('离开后，本次对服务配置的修改不会保存。'),
             primaryButton: { value: t('继续编辑'), action: () => {} },
             secondaryButton: { value: t('放弃修改'), fontColor: $r('app.color.danger'), action: () => { this.paths.pop(); } } });
           return true;
@@ -331,7 +337,7 @@ struct Index {
     } else if (name === 'models') {
       NavDestination() {
         ModelPickerPanel({ app: this.app, onSelected: () => { this.paths.pop(); }, onSettings: () => this.openSettings() })
-      }.title(t("选择模型"), { systemMaterial: AppMaterials.control }).backgroundColor($r('app.color.page_background'))
+      }.title(t("选择模型"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     }
   }
 
@@ -354,14 +360,14 @@ struct Index {
         .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
     Row({ space: 4 }) {
       IconButton({ icon: $r('sys.symbol.line_3_horizontal'), label: t("对话列表"), compId: 'open-history',
-        material: AppMaterials.control, tint: $r('sys.color.font_primary'),
+        material: this.appearance.control, tint: $r('sys.color.font_primary'),
         disabled: !this.app.ready, onTap: () => this.setDrawer(true) })
       Column({ space: 1 }) {
         Text(this.app.ready ? (this.app.activeProject ? this.app.activeProject.name + ' · ' : '') + this.app.active.displayTitle : 'Tinybot').fontSize(16).fontWeight(FontWeight.Medium)
           .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
         Row({ space: 4 }) {
           if (this.app.ready && this.app.active.teamEnabled) {
-            SymbolGlyph($r('sys.symbol.person_2')).fontSize(12).fontColor([$r('app.color.accent')]).margin({ right: 2 })
+            SymbolGlyph($r('sys.symbol.person_2')).fontSize(12).fontColor([this.appearance.accent]).margin({ right: 2 })
               .accessibilityText(t("团队模式已开启"))
           }
           if (this.app.ready && this.app.active.modelRef) {
@@ -397,11 +403,11 @@ struct Index {
       Button({ type: ButtonType.Circle, stateEffect: true }) {
         SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(20).fontColor([$r('sys.color.font_primary')])
       }.id('chat-more').width(44).height(44).borderRadius(22).backgroundColor(Color.Transparent)
-      .systemMaterial(AppMaterials.control).accessibilityText(t("更多操作"))
+      .systemMaterial(this.appearance.control).accessibilityText(t("更多操作"))
       .enabled(this.app.ready).bindMenu(this.moreMenu, {
-        systemMaterial: AppMaterials.surface, mask: false })
+        systemMaterial: this.appearance.surface, mask: false })
       IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t("新建对话"), compId: 'new-chat',
-        material: AppMaterials.control, tint: $r('sys.color.font_primary'),
+        material: this.appearance.control, tint: $r('sys.color.font_primary'),
         disabled: !this.app.ready || this.app.busy || this.app.saveError.length > 0,
         onTap: () => { this.app.newThread(); } })
     }.width('100%').height(CHAT_HEADER_HEIGHT).padding({ left: 6, right: 6 })
@@ -470,7 +476,7 @@ struct Index {
           } else {
             Column({ space: Space.lg }) {
               if (this.app.loading) {
-                LoadingProgress().width(32).height(32).color($r('app.color.accent'))
+                LoadingProgress().width(32).height(32).color(this.appearance.accent)
                 Text(t("正在打开本地会话…")).fontColor($r('app.color.text_secondary'))
               } else {
                 Text(this.app.error).fontColor($r('app.color.danger')).textAlign(TextAlign.Center)
