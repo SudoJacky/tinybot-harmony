@@ -2,7 +2,7 @@ import { AppMaterials } from '../common/AppMaterials';
 import { t } from '../model/I18n';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { SkillData } from '../model/Skills';
-import { Btn, Font, Radius, Space } from '../common/Theme';
+import { Btn, Font, Radius, Space, Styles } from '../common/Theme';
 import { Banner, BottomBar } from '../common/Widgets';
 
 @Component
@@ -33,6 +33,7 @@ export struct SkillsPanel {
             .fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
         Toggle({ type: ToggleType.Switch, isOn: skill.enabled }).id('toggle-skill-' + skill.name)
+          .attributeModifier(Styles.toggle)
           .selectedColor($r('app.color.accent')).enabled(!this.locked())
           .systemMaterial(AppMaterials.control)
           .onChange((value: boolean) => { if (value !== skill.enabled) { this.app.changeSkill(skill.name); } })

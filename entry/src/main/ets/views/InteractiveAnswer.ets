@@ -6,7 +6,7 @@ import { t } from '../model/I18n';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { UiCompiler, UiNode, UiPart, UiSavedState, UiValue, UiValues,
   copyUiValues, uiNodeText, uiNodeVisible, uiStepValue, uiText, uiParts, validateUiState } from '../model/InteractiveUi';
-import { Btn, Radius, Space } from '../common/Theme';
+import { Btn, Radius, Space, Styles } from '../common/Theme';
 import { Segmented } from '../common/Widgets';
 import { MarkdownView } from './MarkdownView';
 import { DataViewCard } from './DataViewCard';
@@ -125,6 +125,7 @@ struct UiNodeView {
           Row({ space: 12 }) {
             Text(this.label()).fontSize(15).layoutWeight(1).fontColor($r('app.color.text_primary'))
             Toggle({ type: ToggleType.Switch, isOn: this.value() === true }).enabled(this.interactive)
+              .attributeModifier(Styles.toggle)
               .systemMaterial(AppMaterials.control)
               .accessibilityText(this.label()).onChange((value: boolean) => this.onEdit(this.node, value, true))
           }.width('100%')

@@ -1,6 +1,7 @@
 import { TutorialControl, TutorialScreen, tutorialRect } from '../model/HelpTutorial';
 import { EN_MESSAGES, ZH_MESSAGES } from '../model/LocaleCatalog';
 import { Font, Radius } from '../common/Theme';
+import { SwitchSize } from '../common/SwitchSize';
 import { NavRow } from '../common/Widgets';
 import { providerLogo } from '../common/ProviderBrand';
 
@@ -189,7 +190,9 @@ export struct HelpTutorialScreen {
   switchAt(title: string, y: number, isOn: boolean) {
     Row() {
       Text(title).fontSize(16).fontColor($r('app.color.text_primary')).layoutWeight(1)
-      Toggle({ type: ToggleType.Switch, isOn }).width(52).height(28).selectedColor($r('app.color.accent'))
+      Toggle({ type: ToggleType.Switch, isOn }).width(SwitchSize.width).height(SwitchSize.height)
+        .margin({ left: (SwitchSize.touchWidth - SwitchSize.width) / 2,
+          right: (SwitchSize.touchWidth - SwitchSize.width) / 2 }).selectedColor($r('app.color.accent'))
     }.width(328).height(64).padding({ left: 16, right: 16 }).position({ x: 16, y })
   }
 

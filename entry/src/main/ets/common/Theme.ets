@@ -1,6 +1,7 @@
 import { t, getLocale } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
 import { curves, window } from '@kit.ArkUI';
+import { SwitchSize } from './SwitchSize';
 // Shared design tokens and control styles for the phone UI. Colors live in resources (light/dark).
 
 // Motion tokens mirrored from the desktop workbench so both clients move alike. The system
@@ -112,9 +113,20 @@ export class AreaStyle implements AttributeModifier<TextAreaAttribute> {
   }
 }
 
+export class SwitchStyle implements AttributeModifier<ToggleAttribute> {
+  applyNormalAttribute(instance: ToggleAttribute): void {
+    const verticalInset = (SwitchSize.touchHeight - SwitchSize.nativeHeight) / 2;
+    instance.width(SwitchSize.nativeWidth).height(SwitchSize.nativeHeight)
+      .margin({ top: verticalInset, bottom: verticalInset })
+      .responseRegion({ x: (SwitchSize.nativeWidth - SwitchSize.touchWidth) / 2, y: -verticalInset,
+        width: SwitchSize.touchWidth, height: SwitchSize.touchHeight });
+  }
+}
+
 export class Styles {
   static readonly input: InputStyle = new InputStyle();
   static readonly area: AreaStyle = new AreaStyle();
+  static readonly toggle: SwitchStyle = new SwitchStyle();
 }
 
 const PROTOCOL_NAMES: Record<string, string> = {
