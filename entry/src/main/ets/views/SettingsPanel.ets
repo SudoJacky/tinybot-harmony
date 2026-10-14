@@ -2,6 +2,9 @@ import { AppMaterials } from '../common/AppMaterials';
 import { t } from '../model/I18n';
 import { AppLanguage } from '../model/I18n';
 import { LanguagePreferences } from '../services/LanguagePreferences';
+import { AgentMode, AGENT_MODES, agentModeName } from '../model/AgentMode';
+import { OPTIONAL_TOOL_NAMES } from '../model/ToolGroups';
+import { CustomToolsPanel } from './CustomToolsPanel';
 import { BrowserSession } from '../services/BrowserSession';
 import { ChatViewModel, SettingsViewModel } from '../viewmodel/ChatViewModel';
 import { ProviderInfo } from '../model/Provider';
@@ -18,6 +21,8 @@ export struct SettingsPanel {
   @State private languageError: string = '';
   @State private showLanguage: boolean = false;
   @State private showPresets: boolean = false;
+  @State private showAgentMode: boolean = false;
+  @State private showCustomTools: boolean = false;
   @State private assistantDraft: AssistantOptions = defaultAssistantOptions();
   @State private assistantSaving: boolean = false;
   @ObjectLink app: ChatViewModel;
@@ -39,6 +44,32 @@ export struct SettingsPanel {
   private blocked(): boolean { return this.app.busy && !this.app.saving; }
   // Editors need a mutable session; unsaved chat data must be resolved first.
   private canEdit(): boolean { return !this.blocked() && !this.assistantSaving && this.app.saveError.length === 0; }
+  private canSelectMode(): boolean { return this.canEdit() && !this.app.busy && !this.app.active.archived; }
+  private async selectMode(mode: AgentMode): Promise<void> {
+    if (this.canSelectMode() && await this.app.setAgentMode(mode)) { this.showAgentMode = false; }
+  }
+
+  @Builder
+  agentModeSheet() {
+    Column({ space: Space.md }) {
+      GroupCard() {
+        Column() {
+          ForEach(AGENT_MODES, (mode: AgentMode, index: number) => {
+            if (index > 0) { RowDivider() }
+            NavRow({ title: agentModeName(mode), trailing: 'select', active: this.app.active.agentMode === mode,
+              compId: 'settings-agent-mode-' + mode, disabled: !this.canSelectMode(), onTap: () => this.selectMode(mode) })
+          }, (mode: AgentMode) => mode)
+        }
+      }
+      Text(t('仅用于当前对话，选择会随下一条消息保存。')).fontSize(Font.caption)
+        .fontColor($r('app.color.text_secondary')).width('100%')
+    }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.xl })
+  }
+
+  @Builder
+  customToolsSheet() {
+    CustomToolsPanel({ app: this.app, thread: this.app.active })
+  }
 
   aboutToAppear(): void { this.resetAssistantDraft(); }
 
@@ -185,6 +216,20 @@ export struct SettingsPanel {
         SectionHeader({ title: t("助手") })
         GroupCard() {
           Column() {
+            NavRow({ title: t('Agent 模式'), value: agentModeName(this.app.active.agentMode), compId: 'settings-agent-mode',
+              subtitle: t('仅用于当前对话，选择会随下一条消息保存。'), icon: $r('sys.symbol.gearshape'),
+              disabled: !this.canSelectMode(), onTap: () => { this.showAgentMode = true; } })
+              .bindSheet($$this.showAgentMode, this.agentModeSheet(), { title: { title: t('Agent 模式') }, detents: [SheetSize.FIT_CONTENT], dragBar: true,
+                backgroundColor: $r('app.color.page_background') })
+            RowDivider()
+            if (this.app.active.agentMode === 'custom') {
+              NavRow({ title: t('自定义工具'), compId: 'open-custom-tools', icon: $r('sys.symbol.wrench_and_screwdriver'),
+                value: t('已开启 {0} / {1} 个可选工具', [OPTIONAL_TOOL_NAMES.length - this.app.active.disabledTools.length, OPTIONAL_TOOL_NAMES.length]),
+                disabled: !this.canSelectMode(), onTap: () => { this.showCustomTools = true; } })
+                .bindSheet($$this.showCustomTools, this.customToolsSheet(), { title: { title: t('自定义工具') }, detents: [SheetSize.LARGE], dragBar: true,
+                  backgroundColor: $r('app.color.page_background') })
+              RowDivider()
+            }
             NavRow({ title: t('用户文档（USER.md）'), subtitle: this.userDocumentPreview(), compId: 'open-user-document',
               icon: $r('sys.symbol.square_and_pencil'), disabled: !this.canEdit(), onTap: () => this.onUserDocument() })
             RowDivider()

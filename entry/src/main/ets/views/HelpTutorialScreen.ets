@@ -137,11 +137,9 @@ export struct HelpTutorialScreen {
       .textOverflow({ overflow: TextOverflow.Ellipsis })
       .position({ x: this.screen === 'draft' ? 32 : 66, y: this.screen === 'draft' ? 590 : 644 })
     if (this.screen === 'draft') {
-      Text(this.text('完整版')).fontSize(12).fontColor($r('app.color.text_secondary'))
-        .width(76).height(36).position({ x: 74, y: 648 })
       Progress({ value: 8, total: 100, type: ProgressType.Ring }).width(16).height(16)
-        .color($r('app.color.accent')).position({ x: 160, y: 658 })
-      Text('8%').fontSize(11).fontColor($r('app.color.text_tertiary')).position({ x: 184, y: 658 })
+        .color($r('app.color.accent')).position({ x: 74, y: 658 })
+      Text('8%').fontSize(11).fontColor($r('app.color.text_tertiary')).position({ x: 98, y: 658 })
     }
     Stack() { this.glyph($r('sys.symbol.plus')) }.width(36).height(36).borderRadius(18)
       .backgroundColor($r('app.color.surface_variant')).position({ x: 26, y: 648 })
@@ -342,10 +340,8 @@ export struct HelpTutorialScreen {
     }.position({ x: 24, y: 438 })
     Text(this.text('图片需模型支持视觉输入 · 文本文件最多 64 KB')).fontSize(11).fontColor($r('app.color.text_tertiary'))
       .width(328).textAlign(TextAlign.Center).position({ x: 16, y: 538 })
-    Text(this.text('自定义工具')).fontSize(15).fontColor($r('app.color.accent')).textAlign(TextAlign.Center)
-      .width(328).height(44).borderRadius(22).backgroundColor($r('app.color.accent_container')).position({ x: 16, y: 572 })
     Text(this.text('引用其他会话')).fontSize(15).fontColor($r('app.color.accent')).textAlign(TextAlign.Center)
-      .width(328).height(44).borderRadius(22).backgroundColor($r('app.color.accent_container')).position({ x: 16, y: 628 })
+      .width(328).height(44).borderRadius(22).backgroundColor($r('app.color.accent_container')).position({ x: 16, y: 572 })
   }
 
   @Builder
