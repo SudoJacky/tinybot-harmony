@@ -91,6 +91,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onForeground(): void {
+    AppStorage.setOrCreate('tinybot.foreground', true);
     LaunchActions.setForeground(true);
     LanguagePreferences.refresh();
     // Ability has brought to foreground
@@ -98,6 +99,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onBackground(): void {
+    AppStorage.setOrCreate('tinybot.foreground', false);
     LaunchActions.setForeground(false);
     // Ability has back to background
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onBackground');

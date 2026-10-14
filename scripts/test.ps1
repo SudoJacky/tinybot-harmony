@@ -39,6 +39,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Team mode persistence and projection tests fai
 if ($LASTEXITCODE -ne 0) { throw 'Custom tool selection and inherited execution tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-custom-tools-renderer.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Custom tool selection UI callback tests failed. Build the app first.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-help-demo.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Help demo animation lifecycle tests failed. Build the app first.' }
 $env:DEVECO_SDK_HOME = Join-Path $StudioPath 'sdk'
 $env:JAVA_HOME = Join-Path $StudioPath 'jbr'
 $startedAt = Get-Date
