@@ -101,7 +101,7 @@ export function tutorialSteps(kind: HelpDemoKind): TutorialStep[] {
     case 'attachments': return [
       step('chat', 'plus', 'plus', '点击输入框左侧的 +'),
       step('plus', 'photo', 'attachment', '点击图片，选择要添加的材料'),
-      step('chat', 'mic', 'speech', '点击或按住麦克风'),
+      step('chat', 'mic', 'speech', '点击麦克风开始录音'),
       step('speech', 'mic', 'draft', '再次点击结束语音输入'),
       step('draft', 'send', 'answer', '检查文字后手动发送')
     ];

@@ -17,6 +17,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Browser permission, takeover and runtime pause
 $env:DEVECO_STUDIO_HOME = $StudioPath
 & $nodePath (Join-Path $projectPath 'scripts/test-code-highlight.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Markdown code highlighting tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-speech-orb.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Voice input UI lifecycle tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-appearance.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Appearance preference and palette tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-harness-features.cjs')

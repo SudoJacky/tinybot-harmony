@@ -6,6 +6,10 @@ import { t } from '../model/I18n';
 
 export type SpeechPhase = 'idle' | 'preparing' | 'listening' | 'finishing' | 'complete' | 'error';
 
+// RecognitionListener.onEvent reports VAD begin/end; these are not amplitude samples.
+const SPEECH_BEGIN: number = 1;
+const SPEECH_END: number = 3;
+
 // The system owns audio capture. The consumer receives full transcript updates.
 @Observed
 export class SpeechInput {
@@ -69,8 +73,14 @@ export class SpeechInput {
           this.timer = setTimeout(() => this.finish(), 10 * 60 * 1000);
         },
         onEvent: (sessionId: string, eventCode: number): void => {
-          if (this.sessionId === sessionId && (eventCode === 1 || eventCode === 3)) {
-            this.speaking = eventCode === 1;
+          if (this.sessionId !== sessionId || this.phase !== 'listening') { return; }
+          if (eventCode === SPEECH_BEGIN || eventCode === SPEECH_END) {
+            const speaking = eventCode === SPEECH_BEGIN;
+            if (this.speaking !== speaking) {
+              this.speaking = speaking;
+              hilog.info(0, 'SpeechInput', 'VAD session=%{public}s event=%{public}d speaking=%{public}s',
+                sessionId, eventCode, String(speaking));
+            }
           }
         },
         onResult: (sessionId: string, result: speechRecognizer.SpeechRecognitionResult): void => {
@@ -103,6 +113,7 @@ export class SpeechInput {
 
   finish(): void {
     if (this.phase !== 'listening' || !this.engine) { return; }
+    this.speaking = false;
     this.phase = 'finishing';
     this.deadline(this.sessionId, 10000);
     try { this.engine.finish(this.sessionId); }

@@ -7,7 +7,8 @@ import { ComposerGlow } from '../common/ComposerGlow';
 import { ReasoningEffortPicker } from './ReasoningEffortPicker';
 import { SpeechInput } from '../services/SpeechInput';
 import { DictationDraft } from '../model/DictationDraft';
-import { VoicePill } from '../common/VoicePill';
+import { VoiceInputButton } from '../common/VoiceInputButton';
+import { SpeechOrb } from '../common/SpeechOrb';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { ThreadReference, referenceQuery } from '../model/ThreadReferences';
 import { ThreadReferenceCard } from './ThreadReferenceCard';
@@ -121,11 +122,11 @@ export struct ChatPanel {
     this.viewport.observe(this.getUIContext());
     this.speech.onResult = (text: string): void => {
       if (!this.dictationDraft || this.speechThreadId !== this.app.active.id || !this.speechEnabled) {
-        this.endSpeech(false); return;
+        this.endSpeech(); return;
       }
       try { this.app.setDraft(this.dictationDraft.update(this.app.draft, text)); }
       catch (error) {
-        this.endSpeech(false); this.unwrittenSpeech = text; this.speech.error = (error as Error).message;
+        this.endSpeech(); this.unwrittenSpeech = text; this.speech.error = (error as Error).message;
       }
     };
     this.speech.onComplete = (): void => { this.dictationDraft = undefined; this.app.flushDraft(); };
@@ -136,7 +137,7 @@ export struct ChatPanel {
 
   aboutToDisappear(): void {
     this.viewport.dispose();
-    this.endSpeech(false);
+    this.endSpeech();
     this.reading.stop();
     clearTimeout(this.scrollTimer);
   }
@@ -145,14 +146,14 @@ export struct ChatPanel {
     return this.speech.phase === 'preparing' || this.speech.phase === 'listening' || this.speech.phase === 'finishing';
   }
   private speechAvailabilityChanged(): void {
-    if (!this.speechEnabled) { this.endSpeech(false); this.reading.stop(); }
+    if (!this.speechEnabled) { this.endSpeech(); this.reading.stop(); }
     else { this.receiveVoiceShortcut(); }
   }
   private speechThreadChanged(): void {
     this.lastHeaderProgress = -1;
     this.onHeaderProgress(0);
     this.sendingMessageId = ''; this.sendOrigin = undefined;
-    if (this.speechThreadId !== this.activeThreadId) { this.endSpeech(false); }
+    if (this.speechThreadId !== this.activeThreadId) { this.endSpeech(); }
     this.reading.stop();
     this.receiveVoiceShortcut();
   }
@@ -167,7 +168,7 @@ export struct ChatPanel {
     if (this.reading.messageId === id) { this.reading.stop(); return; }
     const message = this.thread.messages.find((item: MessageViewModel) => item.id === id);
     if (!message || message.role !== 'assistant' || message.status === 'generating' || !this.speechEnabled) { return; }
-    this.endSpeech(false);
+    this.endSpeech();
     this.reading.start(this.getUIContext().getHostContext() as common.UIAbilityContext, id, message.content);
   }
   private startSpeech(settings: boolean = false): void {
@@ -180,14 +181,11 @@ export struct ChatPanel {
     this.speech.start(this.getUIContext().getHostContext() as common.UIAbilityContext, settings);
   }
   private finishSpeech(): void {
-    if (this.speech.phase === 'preparing') { this.endSpeech(false); }
+    if (this.speech.phase === 'preparing') { this.endSpeech(); }
     else { this.speech.finish(); }
   }
-  private endSpeech(rollback: boolean): void {
+  private endSpeech(): void {
     const hadDraft = this.dictationDraft !== undefined;
-    if (rollback && this.dictationDraft && this.speechThreadId === this.app.active.id) {
-      this.app.setDraft(this.dictationDraft.cancel(this.app.draft));
-    }
     this.dictationDraft = undefined;
     this.speech.cancel();
     if (hadDraft) { this.app.flushDraft(); }
@@ -825,8 +823,6 @@ export struct ChatPanel {
     .animation({ duration: Motion.medium, curve: Motion.standard })
       Row() {
         if (this.speechActive()) {
-          Button(t('取消')).fontFamily(this.appearance.fontFamily).id('cancel-speech').attributeModifier(Btn.textSmall)
-            .onClick(() => this.endSpeech(true))
           Blank()
         } else {
         this.composerAddButton()
@@ -889,9 +885,9 @@ export struct ChatPanel {
           .accessibilityLevel(this.composerExpanded() ? 'auto' : 'no-hide-descendants')
           .hitTestBehavior(this.composerExpanded() ? HitTestMode.Default : HitTestMode.None)
         }
-        VoicePill({ phase: this.speech.phase, speaking: this.speech.speaking, startedAt: this.speech.startedAt,
+        VoiceInputButton({ phase: this.speech.phase, startedAt: this.speech.startedAt,
           disabled: !this.app.ready || !this.speechEnabled || this.thread.archived || this.app.saveError.length > 0,
-          onStart: () => this.startSpeech(), onFinish: () => this.finishSpeech(), onCancel: () => this.endSpeech(true) })
+          onStart: () => this.startSpeech(), onFinish: () => this.finishSpeech() })
           .margin({ left: 4 })
         if (this.app.generating) {
           if (!this.speechActive() && this.hasDraft() && this.app.canQueueInput) {
@@ -1052,6 +1048,9 @@ export struct ChatPanel {
         ForEach(this.thread.messages.slice(-1).filter((message) => message.role === 'assistant'), (message: MessageViewModel) => {
           ChatPlanPanel({ plan: message.plan })
         }, (message: MessageViewModel) => this.thread.id + ':' + message.id)
+        if (this.speechActive()) {
+          SpeechOrb({ phase: this.speech.phase, speaking: this.speech.speaking }).transition(Motion.rise(0, 8))
+        }
         this.composer()
         if (this.viewport.keyboardHeight === 0) {
           Text(t('AI可能会犯错，请仔细鉴别。')).fontFamily(this.appearance.fontFamily).id('ai-disclaimer')
