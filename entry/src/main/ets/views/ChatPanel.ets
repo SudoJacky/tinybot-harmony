@@ -18,6 +18,12 @@ import { curves, FrameCallback, SymbolGlyphModifier } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { Attachment, PromptTemplate } from '../model/Productivity';
 import { Attachments } from '../services/Attachments';
+import { image } from '@kit.ImageKit';
+import { DrawingDraft } from '../model/DrawingDraft';
+import { DrawingBoard } from './DrawingBoard';
+import { SkillData } from '../model/Skills';
+import { SkillQuery, matchingSkills, skillDisplayName, skillDraft, skillQuery } from '../model/SkillCompletion';
+import { builtinSkillInfo } from '../model/BuiltinSkills';
 import { selectAttachments } from '../services/NativeActions';
 import { ToolApproval } from '../services/ToolApproval';
 import { BrowserSession } from '../services/BrowserSession';
@@ -74,6 +80,9 @@ export struct ChatPanel {
   onBrowser: () => void = () => {};
   @State private importing: boolean = false;
   @State private showPlus: boolean = false;
+  @State private showDrawing: boolean = false;
+  @State private drawingDraft: DrawingDraft = new DrawingDraft();
+  private drawingThreadId: string = '';
   @State private speech: SpeechInput = new SpeechInput();
   @State private voiceMode: boolean = false;
   @State private speechHolding: boolean = false;
@@ -100,6 +109,8 @@ export struct ChatPanel {
   @State private memoryMessageId: string = '';
   @State private memoryThreadId: string = '';
   @State private composerFocused: boolean = false;
+  @State private composerSelectionStart: number = -1;
+  @State private composerSelectionEnd: number = -1;
   @State private sendingMessageId: string = '';
   @State private sendOrigin: SendOrigin | undefined = undefined;
   @State private viewport: WindowViewport = new WindowViewport();
@@ -170,6 +181,7 @@ export struct ChatPanel {
     else { this.receiveVoiceShortcut(); }
   }
   private speechThreadChanged(): void {
+    this.composerSelectionStart = -1; this.composerSelectionEnd = -1;
     this.lastHeaderProgress = -1;
     this.onHeaderProgress(0);
     this.sendingMessageId = ''; this.sendOrigin = undefined;
@@ -401,6 +413,41 @@ export struct ChatPanel {
     if (this.app.busy || this.app.saveError) { this.app.error = t("请等待当前任务完成并保存后再提炼记忆。"); return; }
     this.getUIContext().getFocusController().clearFocus();
     this.memoryMessageId = messageId; this.memoryThreadId = this.thread.id; this.showMemoryDraft = true;
+  }
+  private openDrawing(): void {
+    if (!this.canAttach() || this.thread.attachments.length >= 4) { return; }
+    this.getUIContext().getFocusController().clearFocus();
+    this.drawingThreadId = this.thread.id; this.drawingDraft = new DrawingDraft(); this.showDrawing = true;
+  }
+  private closeDrawing(): void {
+    if (this.drawingDraft.saving) { return; }
+    if (!this.drawingDraft.dirty()) { this.showDrawing = false; return; }
+    this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t('放弃这次绘画？'),
+      message: t('尚未添加到消息的绘画将丢失。'), primaryButton: { value: t('继续绘画'), action: () => {} },
+      secondaryButton: { value: t('放弃'), action: () => { this.showDrawing = false; } } });
+  }
+  private async addDrawing(pixel: image.PixelMap): Promise<void> {
+    if (this.drawingThreadId !== this.app.active.id) { throw new Error(t('对话已切换，请在当前对话重新添加附件。')); }
+    if (!this.canAttach() || this.thread.attachments.length >= 4) { throw new Error(t('当前无法添加附件，请稍后重试。')); }
+    this.importing = true;
+    try {
+      const item = await Attachments.saveDrawing(pixel);
+      if (this.drawingThreadId !== this.app.active.id) { throw new Error(t('对话已切换，请在当前对话重新添加附件。')); }
+      if (!await this.app.setAttachments(this.thread.attachments.concat([item]))) {
+        throw new Error(this.app.saveError || this.app.error || t('添加附件失败，请重试。'));
+      }
+      this.showDrawing = false;
+    } finally { this.importing = false; }
+  }
+  @Builder
+  drawingSheet() {
+    DrawingBoard({ draft: this.drawingDraft, onClose: () => this.closeDrawing(),
+      onAdd: (pixel: image.PixelMap) => this.addDrawing(pixel) })
+  }
+  @Builder
+  chatCover() {
+    if (this.showDrawing) { this.drawingSheet() }
+    else { this.imageViewer() }
   }
   @Builder
   memoryDraftSheet() {
@@ -635,6 +682,10 @@ export struct ChatPanel {
             this.canAttach() && this.thread.attachments.length < 4, () => this.fromSheet(() => this.attach(true)))
           this.plusTile($r('sys.symbol.doc_text'), t("文本文件"), 'attach-text',
             this.canAttach() && this.thread.attachments.length < 4, () => this.fromSheet(() => this.attach(false)))
+          this.plusTile($r('sys.symbol.square_and_pencil'), t('画板'), 'attach-drawing',
+            this.canAttach() && this.thread.attachments.length < 4, () => this.fromSheet(() => this.openDrawing()))
+        }.width('100%').alignItems(VerticalAlign.Top)
+        Row() {
           this.plusTile($r('sys.symbol.folder'), t("工作区"), 'open-workspace', !this.app.busy,
             () => { this.showPlus = false; this.onFiles(); })
           this.plusTile($r('sys.symbol.lightbulb'), t("记忆"), 'open-memory', !this.app.busy,
@@ -747,7 +798,33 @@ export struct ChatPanel {
     return !this.speechActive() && !this.app.busy && !this.thread.archived && this.app.saveError.length === 0 && draft.startsWith('/') && command.startsWith(draft);
   }
   private referenceSuggested(): boolean {
-    return this.canAttach() && this.thread.references.length < 4 && referenceQuery(this.app.draft) !== undefined;
+    return this.canAttach() && this.thread.references.length < 4 && !this.skillSuggested() && referenceQuery(this.app.draft) !== undefined;
+  }
+  private currentSkillQuery(): SkillQuery | undefined {
+    if (this.composerSelectionStart !== this.composerSelectionEnd) { return undefined; }
+    return skillQuery(this.app.draft, this.composerSelectionEnd < 0 ? this.app.draft.length : this.composerSelectionEnd);
+  }
+  private skillSuggested(): boolean {
+    return !this.voiceMode && !this.speechActive() && !this.app.busy && !this.thread.archived &&
+      this.app.saveError.length === 0 && this.currentSkillQuery() !== undefined;
+  }
+  private skillMatches(): SkillData[] {
+    return matchingSkills(this.app.extensions.skills, this.currentSkillQuery()?.text || '');
+  }
+  private selectSkill(name: string): void {
+    const query = this.currentSkillQuery();
+    if (!this.skillSuggested() || !query) { return; }
+    const next = skillDraft(this.app.draft, name, query);
+    if (!this.app.useSkill(name, query)) { return; }
+    this.composerSelectionStart = next.caret; this.composerSelectionEnd = next.caret;
+    const threadId = this.thread.id;
+    const request = ++this.keyboardFocusRequest;
+    this.getUIContext().postFrameCallback(new ComposerKeyboardFrame(() => {
+      if (request !== this.keyboardFocusRequest || this.thread.id !== threadId || this.app.draft !== next.text ||
+        this.thread.archived || this.voiceMode || this.speechActive()) { return; }
+      this.getUIContext().getFocusController().requestFocus('composer');
+      this.composerController.caretPosition(next.caret);
+    }));
   }
   private referenceMatches(): ThreadViewModel[] {
     const query = (referenceQuery(this.app.draft) || '').trim().toLowerCase();
@@ -755,6 +832,36 @@ export struct ChatPanel {
       !this.thread.references.some((ref) => ref.threadId === item.id) && item.title.toLowerCase().includes(query))
       .sort((a, b) => Number(!!this.thread.projectId && b.projectId === this.thread.projectId) -
         Number(!!this.thread.projectId && a.projectId === this.thread.projectId) || b.updatedAt - a.updatedAt).slice(0, 6);
+  }
+
+  @Builder
+  skillSuggestions() {
+    Column({ space: 2 }) {
+      Text(t('选择 Skill · 输入 $ 后搜索')).fontFamily(this.appearance.fontFamily).fontSize(12)
+        .fontColor($r('app.color.text_secondary')).padding(8)
+      if (this.skillMatches().length === 0) {
+        Text(t('没有匹配的已启用 Skill')).fontFamily(this.appearance.fontFamily).fontSize(13)
+          .fontColor($r('app.color.text_tertiary')).padding(12)
+      }
+      Scroll() {
+        Column() {
+          ForEach(this.skillMatches(), (skill: SkillData) => {
+            Row({ space: 8 }) {
+              SymbolGlyph($r('sys.symbol.wand_and_stars')).fontSize(16).fontColor([this.appearance.accent])
+              Column({ space: 2 }) {
+                Text(skillDisplayName(skill)).fontFamily(this.appearance.fontFamily).fontSize(14).maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
+                Text(builtinSkillInfo(skill) ? t(skill.description) : skill.description).fontFamily(this.appearance.fontFamily)
+                  .fontSize(12).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_secondary'))
+              }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+            }.id('mention-skill-' + skill.name).height(56).width('100%').padding({ left: 12, right: 12 })
+              .onClick(() => this.selectSkill(skill.name))
+          }, (skill: SkillData) => skill.name)
+        }.width('100%')
+      }.width('100%').constraintSize({ maxHeight: 176 }).scrollBar(BarState.Auto)
+    }.id('skill-suggestions').width('100%').alignItems(HorizontalAlign.Start)
+      .borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
+      .border({ width: 0.5, color: $r('app.color.divider') })
   }
 
   @Builder
@@ -884,7 +991,7 @@ export struct ChatPanel {
 
   @Builder
   composerAddButton() {
-    IconButton({ icon: $r('sys.symbol.plus'), label: t("添加图片、文件或模板"), compId: 'add-attachment', diameter: 36,
+    IconButton({ icon: $r('sys.symbol.plus'), label: t('添加图片、画板、文件或模板'), compId: 'add-attachment', diameter: 36,
       iconSize: 20, fill: $r('app.color.surface_variant'), disabled: this.thread.archived || this.app.saveError.length > 0 || this.speechActive() || this.speechHolding,
       onTap: () => { this.getUIContext().getFocusController().clearFocus(); this.showPlus = true; } })
   }
@@ -913,7 +1020,7 @@ export struct ChatPanel {
       }
       TextArea({ text: this.app.draft, controller: this.composerController,
         placeholder: this.speechActive() ? t('请说出要输入的内容') : this.thread.archived ? t("已归档的对话无法继续") : this.app.generating ? t("补充要求，或排队下一项任务…")
-          : !this.composerExpanded() ? t('输入消息…') : this.thread.teamEnabled ? t("描述目标，主 Agent 会按需组建团队…") : t('输入消息，/ 命令，@ 引用会话') }).fontFamily(this.appearance.fontFamily)
+          : !this.composerExpanded() ? t('输入消息…') : this.thread.teamEnabled ? t("描述目标，主 Agent 会按需组建团队…") : t('输入消息，/ 命令，$ 技能，@ 引用会话') }).fontFamily(this.appearance.fontFamily)
         .id('composer').fontSize(Font.body).fontColor($r('app.color.text_primary'))
         .placeholderColor($r('app.color.text_tertiary')).backgroundColor(Color.Transparent)
         .width('100%')
@@ -927,6 +1034,9 @@ export struct ChatPanel {
         .onWillChange((value: EditableTextChangeValue) => !this.speechActive() || value.content === this.app.draft)
         .onChange((value: string) => {
           if (!this.speechActive()) { this.app.setDraft(value); }
+        })
+        .onTextSelectionChange((start: number, end: number) => {
+          this.composerSelectionStart = start; this.composerSelectionEnd = end;
         })
         .onFocus(() => { this.composerFocused = true; this.inspectingOutput = false; this.followOutput = true; this.follow(); })
         .onBlur(() => { this.composerFocused = false; })
@@ -1065,7 +1175,6 @@ export struct ChatPanel {
       detents: [SheetSize.MEDIUM, SheetSize.LARGE], dragBar: true, showClose: false,
       backgroundColor: $r('app.color.page_background')
     })
-    .bindContentCover($$this.previewing, this.imageViewer(), { modalTransition: ModalTransition.ALPHA })
   }
 
   // Remote MCP calls pause the agent until the user decides; keep the card compact but impossible to miss.
@@ -1102,6 +1211,8 @@ export struct ChatPanel {
   }
 
   build() {
+    // Keep the cover on its own node: a false bindSheet on the same node removes an active cover on device.
+    Stack() {
     Column() {
       Stack({ alignContent: Alignment.BottomStart }) {
         Column() {
@@ -1177,6 +1288,7 @@ export struct ChatPanel {
           this.commandSuggestion()
         }
         if (this.commandSuggested('/compact')) { this.compactSuggestion() }
+        if (this.skillSuggested()) { this.skillSuggestions() }
         if (this.referenceSuggested()) { this.referenceSuggestions() }
         // The latest turn's plan stays beside the composer, outside the scrolling transcript.
         ForEach(this.thread.messages.slice(-1).filter((message) => message.role === 'assistant'), (message: MessageViewModel) => {
@@ -1192,5 +1304,10 @@ export struct ChatPanel {
     }.height('100%').width('100%')
       .bindSheet($$this.showMemoryDraft, this.memoryDraftSheet(), { title: { title: t("提炼并确认记忆") }, detents: [SheetSize.LARGE], dragBar: true, keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY,
         backgroundColor: $r('app.color.page_background') })
+    }.width('100%').height('100%')
+      .bindContentCover(this.showDrawing || this.previewing, this.chatCover(), { modalTransition: ModalTransition.ALPHA,
+        backgroundColor: $r('app.color.page_background'), onWillDismiss: () => {
+          if (this.showDrawing) { this.closeDrawing(); } else { this.previewing = false; }
+        } })
   }
 }

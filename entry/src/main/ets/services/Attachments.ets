@@ -1,6 +1,7 @@
 import { t } from '../model/I18n';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { image } from '@kit.ImageKit';
+import { drawing } from '@kit.ArkGraphics2D';
 import { util } from '@kit.ArkTS';
 import { Attachment, validateAttachments } from '../model/Productivity';
 import { ModelMessage } from '../model/Agent';
@@ -13,6 +14,23 @@ export class Attachments {
   static configure(filesDir: string): void { Attachments.root = filesDir + '/attachments'; }
   static path(item: Attachment): string { validateAttachments([item]); return Attachments.root + '/' + item.path; }
   static async savePreview(pixel: image.PixelMap): Promise<Attachment> {
+    return Attachments.saveImage(pixel, 'Preview screenshot.jpg');
+  }
+  static async saveDrawing(pixel: image.PixelMap): Promise<Attachment> {
+    const info = await pixel.getImageInfo();
+    const scale = Math.min(1, 1600 / Math.max(info.size.width, info.size.height));
+    if (scale < 1) { await pixel.scale(scale, scale); }
+    const opaque = image.createEmptyPixelMap({ editable: true, pixelFormat: image.PixelMapFormat.RGBA_8888,
+      alphaType: image.AlphaType.OPAQUE, size: {
+        width: Math.max(1, Math.round(info.size.width * scale)), height: Math.max(1, Math.round(info.size.height * scale)) } });
+    try {
+      // Pen Kit exports transparent ink; JPEG needs a solid background to keep black strokes visible.
+      const canvas = new drawing.Canvas(opaque);
+      canvas.drawColor(255, 255, 255, 255); canvas.drawImage(pixel, 0, 0);
+      return await Attachments.saveImage(opaque, t('手绘示意.jpg'));
+    } finally { await opaque.release(); }
+  }
+  private static async saveImage(pixel: image.PixelMap, name: string): Promise<Attachment> {
     if (!Attachments.root) { throw new Error(t('附件存储尚未就绪。')); }
     if (!await fs.access(Attachments.root)) { await fs.mkdir(Attachments.root); }
     const info = await pixel.getImageInfo();
@@ -22,9 +40,9 @@ export class Attachments {
     let bytes: ArrayBuffer;
     try { bytes = await packer.packing(pixel, { format: 'image/jpeg', quality: 85 }); }
     finally { await packer.release(); }
-    if (bytes.byteLength > 4 * 1024 * 1024) { throw new Error('Preview screenshot exceeds 4 MB'); }
+    if (bytes.byteLength > 4 * 1024 * 1024) { throw new Error(t('压缩后图片仍超过 4 MB。')); }
     const id = util.generateRandomUUID();
-    const item: Attachment = { id: id, name: 'Preview screenshot.jpg', mime: 'image/jpeg', path: id + '.jpg', size: bytes.byteLength };
+    const item: Attachment = { id: id, name: name, mime: 'image/jpeg', path: id + '.jpg', size: bytes.byteLength };
     await writeBytes(Attachments.path(item), bytes);
     return item;
   }

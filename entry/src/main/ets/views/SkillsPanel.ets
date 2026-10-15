@@ -2,6 +2,7 @@ import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { SkillData } from '../model/Skills';
+import { builtinSkillInfo } from '../model/BuiltinSkills';
 import { Btn, Font, Radius, Space, Styles } from '../common/Theme';
 import { Banner, BottomBar } from '../common/Widgets';
 
@@ -28,8 +29,12 @@ export struct SkillsPanel {
     Column({ space: 10 }) {
       Row({ space: Space.md }) {
         Column({ space: 3 }) {
-          Text(skill.name).fontFamily(this.appearance.fontFamily).fontSize(Font.title).fontWeight(FontWeight.Medium).maxLines(1)
+          Text(builtinSkillInfo(skill) ? t(builtinSkillInfo(skill)!.title) : skill.name).fontFamily(this.appearance.fontFamily).fontSize(Font.title).fontWeight(FontWeight.Medium).maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
+          if (builtinSkillInfo(skill)) {
+            Text(t('内置') + ' · ' + skill.name).fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
+              .fontColor($r('app.color.text_tertiary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
           Text(t("{0} 个参考文件{1}", [skill.files.length, skill.manualOnly ? t(' · 仅手动调用') : ''])).fontFamily(this.appearance.fontFamily)
             .fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
@@ -40,14 +45,14 @@ export struct SkillsPanel {
           .onChange((value: boolean) => { if (value !== skill.enabled) { this.app.changeSkill(skill.name); } })
       }.width('100%')
       if (skill.description.length > 0) {
-        Text(skill.description).fontFamily(this.appearance.fontFamily).fontSize(Font.small).lineHeight(21).maxLines(3)
+        Text(builtinSkillInfo(skill) ? t(skill.description) : skill.description).fontFamily(this.appearance.fontFamily).fontSize(Font.small).lineHeight(21).maxLines(3)
           .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_secondary')).width('100%')
       }
       Row({ space: Space.sm }) {
-        Button(t("在对话中使用")).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.tonalSmall)
+        Button(t("在对话中使用")).id('use-skill-' + skill.name).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.tonalSmall)
           .enabled(skill.enabled && !this.app.busy && !this.app.active.archived)
           .onClick(() => { if (this.app.useSkill(skill.name)) { this.onUse(); } })
-        Button(t("编辑")).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.plainSmall).enabled(!this.locked()).onClick(() => this.onEdit(skill.name))
+        Button(t("编辑")).id('edit-skill-' + skill.name).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.plainSmall).enabled(!this.locked()).onClick(() => this.onEdit(skill.name))
         Blank()
         Button({ type: ButtonType.Circle }) {
           SymbolGlyph($r('sys.symbol.trash')).fontSize(18).fontColor([$r('app.color.danger')])

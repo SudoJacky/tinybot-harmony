@@ -80,7 +80,7 @@ const http = { RequestMethod: { POST: 'POST', GET: 'GET' }, HttpDataType: { STRI
 const kits = {
   '@kit.PerformanceAnalysisKit': { hilog: { info() {}, error() {}, warn() {} } },
   '@kit.CoreFileKit': { fileIo, cloudSync, fileUri: {getUriFromPath:p=>'file://'+p}, picker: { DocumentViewPicker: class { async save() {return [selectedFile];} async select() {return [selectedFile];} } } }, '@kit.ImageKit': { image: {} }, '@kit.NetworkKit': { http },
-  '@kit.MediaLibraryKit': {}, '@kit.ShareKit': {},
+  '@kit.MediaLibraryKit': {}, '@kit.ShareKit': {}, '@kit.ArkGraphics2D': { drawing: {} },
   '@kit.ArkTS': { util: { generateRandomUUID: () => crypto.randomUUID(), TextEncoder: Encoder, TextDecoder: Decoder,
     Base64Helper: class { async encodeToString(bytes) { return Buffer.from(bytes).toString('base64'); } encodeToStringSync(bytes) { return Buffer.from(bytes).toString('base64'); } decodeSync(text) { return Uint8Array.from(Buffer.from(text,'base64')); } } } },
   '@kit.AssetStoreKit': { asset: {} }, '@kit.BasicServicesKit': { zlib: {
@@ -210,6 +210,45 @@ async function test(name, run) {
     const item=await Attachments.import(incoming,false);const messages=[{role:'user',content:'总结',attachments:[item]}];
     const hydrated=await Attachments.hydrate(messages);assert.match(hydrated[0].content,/材料内容/);assert.equal(messages[0].content,'总结');
     fs.writeFileSync(incoming,Buffer.from([0xff,0xff]));await assert.rejects(Attachments.import(incoming,false));
+  });
+  await test('drawing attachments encode, persist and hydrate images for all model protocols',async()=>{
+    Attachments.configure(fixture);
+    const previousImage=kits['@kit.ImageKit'].image;
+    const previousGraphics=kits['@kit.ArkGraphics2D'].drawing;
+    let releases=0,opaqueReleases=0,packed=Uint8Array.from([255,216,255,217]).buffer;
+    const composites=[];
+    const scales=[];
+    const pixel={getImageInfo:async()=>({size:{width:2400,height:1800}}),scale:async(x,y)=>scales.push([x,y])};
+    kits['@kit.ArkGraphics2D'].drawing={Canvas:class {
+      constructor(target){this.target=target;}
+      drawColor(...channels){assert.deepEqual(channels,[255,255,255,255]);this.target.white=true;}
+      drawImage(value,x,y){assert.equal(value,pixel);assert.equal(x,0);assert.equal(y,0);assert.equal(this.target.white,true);this.target.composited=true;}
+    }};
+    kits['@kit.ImageKit'].image={PixelMapFormat:{RGBA_8888:3},AlphaType:{OPAQUE:1},
+      createEmptyPixelMap:options=>{assert.equal(options.size.width,1600);assert.equal(options.size.height,1200);
+        const target={getImageInfo:async()=>({size:options.size}),release:async()=>{opaqueReleases++;}};composites.push(target);return target;},
+      createImagePacker:()=>({packing:async(value,options)=>{
+        if(value!==pixel){assert.equal(value.composited,true,'native ink must be composited on white before JPEG packing');}
+        assert.equal(options.format,'image/jpeg');return packed;
+      },release:async()=>{releases++;}})};
+    try {
+      const item=await Attachments.saveDrawing(pixel);
+      assert.equal(item.mime,'image/jpeg');assert.equal(item.size,4);assert.equal(item.name,'手绘示意.jpg');
+      assert.deepEqual(scales,[[1600/2400,1600/2400]]);
+      assert.deepEqual(fs.readFileSync(Attachments.path(item)),Buffer.from(packed));
+      const restored=JSON.parse(JSON.stringify(item));
+      const messages=await Attachments.hydrate([{role:'user',content:'Explain this sketch',attachments:[restored]}]);
+      const url='data:image/jpeg;base64,'+Buffer.from(packed).toString('base64');
+      const {chatRequest}=load(path.join(source,'services/providers/ChatCompletionsProtocol'));
+      const {responsesRequest,anthropicRequest}=load(path.join(source,'services/providers/WireProtocols'));
+      assert.equal(chatRequest('vision',messages,[]).messages[0].content.at(-1).image_url.url,url);
+      assert.equal(responsesRequest('vision',messages,[]).input[0].content.at(-1).image_url,url);
+      assert.equal(anthropicRequest('vision',messages,[]).messages[0].content.at(-1).source.data,Buffer.from(packed).toString('base64'));
+      assert.equal((await Attachments.savePreview(pixel)).name,'Preview screenshot.jpg');
+      packed=new ArrayBuffer(4*1024*1024+1);
+      await assert.rejects(Attachments.saveDrawing(pixel),/4 MB/);assert.equal(releases,3);
+      assert.equal(opaqueReleases,2,'temporary opaque images are released on success and failure');
+    } finally {kits['@kit.ImageKit'].image=previousImage;kits['@kit.ArkGraphics2D'].drawing=previousGraphics;}
   });
   await test('large text attachments persist intact and are read in bounded pages after reload',async()=>{
     const {AttachmentTools}=load(path.join(source,'services/AttachmentTools'));

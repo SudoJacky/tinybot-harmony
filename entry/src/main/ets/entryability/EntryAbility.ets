@@ -21,10 +21,15 @@ import { DeveloperDiagnostics } from '../services/DeveloperDiagnostics';
  * limitations under the License.
  */
 
-import { AbilityConstant, Configuration, UIAbility, Want } from '@kit.AbilityKit';
+import { AbilityConstant, common, Configuration, UIAbility, Want } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 
 const DOMAIN = 0x0000;
+
+// Required by Pen Kit's system-provided handwriting component.
+declare namespace globalThis {
+  let _brushEngineContext: common.UIAbilityContext;
+}
 
 export default class EntryAbility extends UIAbility {
   private mainWindow?: window.Window;
@@ -47,6 +52,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    globalThis._brushEngineContext = this.context;
     DeveloperDiagnostics.initialize(this.context);
     // Prepare ArkWeb before mounting the first generated surface on the UI rendering path.
     const webStarted = Date.now();

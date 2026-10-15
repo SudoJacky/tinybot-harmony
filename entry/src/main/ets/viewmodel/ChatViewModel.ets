@@ -16,6 +16,7 @@ import { contextSettings } from '../model/ConversationContext';
 import { ModelChoice, ProviderProfile, availableModels } from '../model/ProviderProfiles';
 import { ProviderInfo, builtinProviderInfos } from '../model/Provider';
 import { ExtensionSettings, SkillData, defaultExtensions } from '../model/Skills';
+import { SkillQuery, skillDraft } from '../model/SkillCompletion';
 import { InputMode } from '../model/PendingInput';
 import { matchingThreads } from '../model/SessionManagement';
 import { SessionEvent, SessionPhase, SessionState, SettingsToggle } from '../services/SessionContracts';
@@ -293,9 +294,9 @@ export class ChatViewModel {
     const saved = await this.requireSession().saveSkill(this.skillEditor.originalName, this.skillEditor.document, this.skillEditor.files);
     this.skillEditor.error = saved ? '' : this.error; return saved;
   }
-  useSkill(name: string): boolean {
+  useSkill(name: string, query?: SkillQuery): boolean {
     if (!this.requireSession().canMutate || this.active.archived || !this.extensions.skills.some((skill) => skill.name === name && skill.enabled)) { return false; }
-    this.setDraft('/skill:' + name + ' ' + this.draft.replace(/^\/skill:[^\s]+\s*/, '')); return true;
+    this.setDraft(skillDraft(this.draft, name, query).text); return true;
   }
   private requireSession(): SessionService {
     if (!this.session) { throw new Error(t("会话服务尚未就绪。")); }

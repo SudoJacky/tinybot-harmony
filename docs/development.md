@@ -33,6 +33,8 @@ devecocli run --device <设备名称或序列号>
 
 维护方式见 [locales/README.md](../locales/README.md)。修改双语 JSON 后运行 `node scripts/build-locales.cjs` 生成同步词条，`--check` 验证词条、占位符和代码引用完整性。
 
+内置 Skill 的文本源与打包、升级和验证方式见 [网页、搜索与 Skills](web-and-skills.md#内置-skills)。修改 `skills/` 后运行 `node scripts/build-builtin-skills.cjs`，并维护内置显示名称和简介的双语词条；打包检查已纳入 `scripts/test.ps1`。
+
 ## 应用图标
 
 HarmonyOS 图标源文件为 `assets/app-icon.svg`，背景铺满正方形，不预裁圆角、不加外边距或外框；内部 Logo 沿用原有比例。应用与桌面入口引用 `tinybot_layered_icon`，由系统合成前景、背景并裁切外形。启动窗口、关于页和交付素材使用同源合成 PNG。资源均为 1024×1024；只修改本项目源文件，不覆盖桌面版图标。
@@ -53,6 +55,8 @@ node scripts/build-app-icons.cjs .cache/icon-tools/node_modules/@resvg/resvg-js
 `node scripts/test-productivity-native.cjs`（可用 `DEVECO_STUDIO_HOME` 指定 SDK 位置）。
 
 构建后运行 `node scripts/test-send-motion.cjs`，验证发送动效的实际编译后生命周期、输入区坐标换算、首条消息、历史恢复、切换会话、发送未被接受及后续队列消息隔离；动画观感和列表裁剪仍需在真机验证。
+
+画板使用 Pen Kit 的 `HandwriteComponent` 和 `HandwriteController`；`EntryAbility` 按官方接入要求设置 `_brushEngineContext`。系统组件管理笔迹和工具栏，`getContentRange` 与 `getThumbnail` 导出笔迹区域，`Attachments.saveDrawing` 使用 ArkGraphics2D 合成白底后编码 JPEG，避免透明笔迹变黑底。构建后运行 `node scripts/test-drawing-board.cjs`，验证实际编译的初始化和加载回调、空白校验、原生导出失败、像素释放、重复保存防护、弹层隔离，以及草稿附件保存和会话切换隔离；已纳入 `test.ps1`。系统笔刷、橡皮擦和撤销重做需在真机验证。
 
 构建后运行 `node scripts/test-thinking-motion.cjs`，验证思考状态的循环、结束交叉渐变、历史静态挂载、快速切换文案、离屏暂停与卸载清理；配合 `test-chat-disclosures.cjs` 确认手动展开状态不受影响。呼吸、扫光与展开效果在真机使用实际推理响应验证。
 
