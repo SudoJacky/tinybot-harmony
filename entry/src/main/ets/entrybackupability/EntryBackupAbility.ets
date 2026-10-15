@@ -1,3 +1,5 @@
+import { configureNativeDiagnosticLog } from '../services/NativeDiagnosticLog';
+import { Diagnostics } from '../model/Diagnostics';
 /*
  * Copyright (c) 2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,19 +15,20 @@
  * limitations under the License.
  */
 
-import { hilog } from '@kit.PerformanceAnalysisKit';
 import { BackupExtensionAbility, BundleVersion } from '@kit.CoreFileKit';
 
 const DOMAIN = 0x0000;
 
 export default class EntryBackupAbility extends BackupExtensionAbility {
   async onBackup() {
-    hilog.info(DOMAIN, 'testTag', 'onBackup ok');
+    configureNativeDiagnosticLog();
+    Diagnostics.log('info', 'backup', 'started');
     await Promise.resolve();
   }
 
   async onRestore(bundleVersion: BundleVersion) {
-    hilog.info(DOMAIN, 'testTag', 'onRestore ok %{public}s', JSON.stringify(bundleVersion));
+    configureNativeDiagnosticLog();
+    Diagnostics.log('info', 'backup', 'restored');
     await Promise.resolve();
   }
 }

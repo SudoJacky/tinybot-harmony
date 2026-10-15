@@ -88,7 +88,7 @@ class Resources implements SessionResources {
     return new ToolSet([this.agentTools, new AttachmentTools(attachments)]);
   }
   configureProviders(_profiles: ProviderProfile[]): void {}
-  reportError(message: string): void { this.errors.push(message); }
+  reportError(_event: string, error: Error | string): void { this.errors.push(typeof error === 'string' ? error : error.message); }
 }
 class Fixture {
   repository: MemoryRepository;

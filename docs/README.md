@@ -34,6 +34,7 @@
 ## 开发与交付
 
 - [开发与验证](development.md)：环境、构建、签名、测试入口及历史验证记录。
+- [App 内性能诊断](developer-diagnostics.md)：隐藏开发者模式、资源/渲染统计、时间线和 CPU Profile 导出。
 - [词条维护](../locales/README.md)：双语 JSON 与生成检查。
 - [交付包准备](distribution/START-HERE.txt)、[更新说明](distribution/RELEASE-NOTES.txt)、[云测试步骤](distribution/CLOUD-TEST.txt)。
 - 发布准备材料：[发布缺口](distribution/RELEASE-GAPS.txt)、[商店介绍](distribution/STORE-LISTING.txt)、[隐私草案](distribution/PRIVACY-DRAFT.txt)。

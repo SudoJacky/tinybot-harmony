@@ -1,9 +1,9 @@
+import { Diagnostics } from '../model/Diagnostics';
 import { ProjectData, validateProjects } from '../model/Project';
 import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
 import { fileIo as fs, picker } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 import { AppData, ThreadData, parseAppData, defaultConfig } from '../model/Conversation';
 import { Attachment } from '../model/Productivity';
 import { WorkspaceStore } from '../model/WorkspaceStore';
@@ -121,8 +121,7 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
   data.threads = data.threads.filter((thread) => !known.has(thread.id));
   const additions = new Set(data.threads.map((thread) => thread.id));
   if (!additions.has(data.activeThreadId)) { data.activeThreadId = ''; }
-  hilog.info(0x0000, 'Backup', 'Restore prepared: new chats=%{public}d, skipped chats=%{public}d',
-    data.threads.length, totalThreads - data.threads.length);
+  if (Diagnostics.acceptsLog('info')) { Diagnostics.log('info', 'backup', 'restore_prepared', { newChats: data.threads.length, skippedChats: totalThreads - data.threads.length }); };
   // New projects are restored into fresh roots; existing projects keep their local root and bytes.
   // Until the session manifest commits, prepared files are unreferenced and cannot replace local projects.
   const destinations = new Map<string, string>();

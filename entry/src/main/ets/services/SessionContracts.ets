@@ -1,3 +1,4 @@
+import { LogFields } from '../model/DiagnosticLog';
 import { TeamRun } from '../model/Team';
 import { ProductivityData, Attachment, McpServer } from '../model/Productivity';
 import { AppData, MessageData, ModelConfig, ThreadData } from '../model/Conversation';
@@ -23,10 +24,10 @@ export interface SessionResources {
   installSkill?(source: string, paths: string[], cancellation: Cancellation): Promise<SkillData>;
   prepareMcp?(server: McpServer, request: McpRequest, cancellation: Cancellation, confirm?: boolean): Promise<McpServer>;
   testMcp?(server: McpServer, cancellation: Cancellation): Promise<number>;
-  reportResources?(message: string): void;
+  reportResources?(event: string, fields?: LogFields): void;
   configureProviders(profiles: ProviderProfile[]): void;
-  reportError(message: string): void;
-  reportMemory?(message: string): void;
+  reportError(event: string, error: Error | string, fields?: LogFields): void;
+  reportMemory?(event: string, fields?: LogFields): void;
 }
 
 export type SessionPhase = 'idle' | 'loading' | 'saving' | 'running' | 'compacting' | 'memory';

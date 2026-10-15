@@ -1,5 +1,5 @@
+import { Diagnostics } from '../model/Diagnostics';
 import { uiMaterial } from '@kit.ArkUI';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 import { LightEffect } from '../model/Appearance';
 
 // Read the device once, when the first native component requests its material.
@@ -39,8 +39,7 @@ export class AppMaterials {
         default:
           throw new Error('Unsupported material level: ' + level);
       }
-      hilog.info(0x0000, 'TinybotMaterial', 'Device material level=%{public}d style=%{public}d',
-        level, AppMaterials.selectedStyle);
+      if (Diagnostics.acceptsLog('info')) { Diagnostics.log('info', 'appearance', 'material', { level: level, style: AppMaterials.selectedStyle }); };
     }
     return AppMaterials.selectedStyle;
   }

@@ -1,3 +1,4 @@
+import { Diagnostics } from '../model/Diagnostics';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { AnswerSpeech } from '../services/AnswerSpeech';
@@ -10,7 +11,6 @@ import { DictationDraft } from '../model/DictationDraft';
 import { VoiceHoldButton } from '../common/VoiceHoldButton';
 import { VoiceRecordingOverlay } from '../common/VoiceRecordingOverlay';
 import { VoiceAction, VoiceTargetRect, voiceActionAtPoint } from '../model/VoiceGesture';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { ThreadReference, referenceQuery } from '../model/ThreadReferences';
 import { ThreadReferenceCard } from './ThreadReferenceCard';
@@ -203,7 +203,7 @@ export struct ChatPanel {
     this.getUIContext().postFrameCallback(new ComposerKeyboardFrame(() => {
       if (request !== this.keyboardFocusRequest || this.thread.id !== threadId || !this.speechEnabled ||
         this.thread.archived || this.voiceMode || this.speechActive()) { return; }
-      hilog.info(0, 'VoiceComposer', 'Request keyboard focus request=%{public}d', request);
+      if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'voice', 'focus_requested', { request: request }); };
       this.getUIContext().getFocusController().requestFocus('composer');
       this.composerController.caretPosition(this.app.draft.length);
     }));
@@ -231,7 +231,7 @@ export struct ChatPanel {
   private releaseSpeech(action: VoiceAction = this.speechTarget): void {
     if (!this.dictationDraft) { return; }
     this.speechHolding = false;
-    hilog.info(0, 'VoiceComposer', 'Release action=%{public}s phase=%{public}s characters=%{public}d', action, this.speech.phase, this.speech.text.length);
+    if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'voice', 'released', { action: action, phase: this.speech.phase, chars: this.speech.text.length }); };
     if (action === 'cancel' || this.speech.phase === 'preparing') {
       this.endSpeech();
       if (action === 'edit') { this.showSpeechKeyboard(); }
@@ -247,7 +247,7 @@ export struct ChatPanel {
     try { this.app.setDraft(transaction.update(this.app.draft, this.speech.text)); return true; }
     catch (error) {
       this.unwrittenSpeech = this.speech.text; this.speech.error = (error as Error).message; this.speech.phase = 'error';
-      hilog.error(0, 'VoiceComposer', 'Draft commit failed: %{public}s', this.speech.error); return false;
+      Diagnostics.log('error', 'voice', 'draft_failed', undefined, this.speech.error); return false;
     }
   }
   private completeSpeech(): void {
@@ -296,9 +296,21 @@ export struct ChatPanel {
     this.scrollTimer = setTimeout(() => {
       this.scrollTimer = -1;
       if (this.followOutput && this.thread.messages.length > 0) {
+        if (Diagnostics.recording) { Diagnostics.event('scroll.follow'); }
         this.scroller.scrollEdge(Edge.Bottom);
       }
     }, 80);
+  }
+  private messageAreaChanged(id: string, previous: Area, current: Area): void {
+    if (Diagnostics.recording) {
+      Diagnostics.measure('layout.messageCallback', 1, 'count');
+      if (previous.height !== current.height || previous.width !== current.width) {
+        Diagnostics.event('layout.message', { previousHeightVp: Number(previous.height), heightVp: Number(current.height), following: this.followOutput ? 1 : 0 });
+      }
+    }
+    if (previous.height !== current.height && id === this.thread.messages[this.thread.messages.length - 1]?.id) {
+      this.follow();
+    }
   }
 
   private scrollToLatest(): void {
@@ -488,6 +500,7 @@ export struct ChatPanel {
               ChatTeamCard({ app: this.app, messageId: message.id, onFiles: this.onFiles })
             }
           }
+            .onAreaChange((previous: Area, current: Area) => this.messageAreaChanged(message.id, previous, current))
             .backgroundColor(this.app.searchMessageId === message.id ? this.appearance.accentContainer : Color.Transparent)
             .animation({ duration: Motion.medium, curve: Motion.standard })
             .transition(this.messageEnter(message))

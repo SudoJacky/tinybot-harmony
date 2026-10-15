@@ -12,11 +12,19 @@ if (-not (Test-Path -LiteralPath $nodePath) -or -not (Test-Path -LiteralPath $hv
 }
 & $nodePath (Join-Path $projectPath 'scripts/build-locales.cjs') --check
 if ($LASTEXITCODE -ne 0) { throw 'Locale validation failed. Run node scripts/build-locales.cjs after editing translations.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-developer-diagnostics.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Developer diagnostics collection, export and lifecycle tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-unified-logging.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Unified runtime log levels, redaction, export and disabled-path tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-browser.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Browser permission, takeover and runtime pause tests failed.' }
 $env:DEVECO_STUDIO_HOME = $StudioPath
 & $nodePath (Join-Path $projectPath 'scripts/test-code-highlight.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Markdown code highlighting tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-stream-reveal.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Streaming text reveal tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-markdown-performance.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Markdown incremental parsing and renderer tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-speech-orb.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Voice input UI lifecycle tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-voice-composer.cjs')

@@ -1,5 +1,7 @@
 # 开发与验证
 
+App 内隐藏开发者模式的开启方式、指标口径、诊断导出及采样限制见[性能诊断](developer-diagnostics.md)。
+
 [文档索引](README.md) · [项目首页](../README.md)
 
 ## 环境与构建
@@ -55,6 +57,8 @@ node scripts/build-app-icons.cjs .cache/icon-tools/node_modules/@resvg/resvg-js
 构建后运行 `node scripts/test-thinking-motion.cjs`，验证思考状态的循环、结束交叉渐变、历史静态挂载、快速切换文案、离屏暂停与卸载清理；配合 `test-chat-disclosures.cjs` 确认手动展开状态不受影响。呼吸、扫光与展开效果在真机使用实际推理响应验证。
 
 构建后运行 `node scripts/test-turn-workflow.cjs`，验证整轮真实阶段、并行工具、重试/停止/失败、保留节点的最新步骤、完成收束及手动展开和预览保留。
+
+构建后运行 `node scripts/test-markdown-performance.cjs`，验证增量 Markdown 与全文解析在逐字符边界的一致性、稳定块复用、代码预览与展开、实际编译渲染回调的最新文本，以及离屏高度占位、重新测量和渐显计时器清理；该项与 `test-stream-reveal.cjs` 均纳入 `test.ps1`。真机性能比较使用同一固定负载、采样窗口和构建类型，先回到空对话并重启进程，分别记录 UI 任务分布和内存工具口径。
 
 构建后运行 `node scripts/test-project-tree.cjs`，用真实会话服务与视图模型验证侧栏项目分组、普通聊天、空项目、同名项目、置顶顺序、搜索展开、归档、独立分页及新建会话归属；分支线和折叠动效在真机验证。
 

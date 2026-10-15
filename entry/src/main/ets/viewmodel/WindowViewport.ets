@@ -1,6 +1,6 @@
+import { Diagnostics } from '../model/Diagnostics';
 import { common } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 
 // Window-owned keyboard/gesture insets, observed by chat and sheet footers.
 @Observed
@@ -37,7 +37,7 @@ export class WindowViewport {
       host.on('keyboardHeightChange', this.keyboardListener);
       host.on('avoidAreaChange', this.areaListener);
     } catch (error) {
-      hilog.error(0x0000, 'TinybotViewport', 'Unable to observe window insets: %{public}s', (error as Error).message);
+      Diagnostics.log('error', 'appearance', 'insets_failed', undefined, error as Error);
     }
   }
   dispose(): void {

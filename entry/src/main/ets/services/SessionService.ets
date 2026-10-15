@@ -1,3 +1,4 @@
+import { Diagnostics } from '../model/Diagnostics';
 import { projectName, projectFor, workspaceIdFor, validateProjects, projectContext } from '../model/Project';
 import { proposeSessionMemory, reviewSessionMemory, addMemoryDraft } from './SessionMemory';
 import { McpSettings, McpSettingsCommand, McpSettingsResult, McpSettingsHost } from './McpSettings';
@@ -71,7 +72,7 @@ export class SessionService {
     this.repository = repository;
     this.runtime = runtime;
     this.credentials = credentials;
-    this.mcpSettings = new McpSettings(credentials, () => resources.createId(), (message) => resources.reportError(message));
+    this.mcpSettings = new McpSettings(credentials, () => resources.createId(), (message) => resources.reportError('mcp_failed', message));
     this.resources = resources;
     this.profiles = new ProfileSettings(credentials, () => resources.createId());
   }
@@ -84,8 +85,7 @@ export class SessionService {
     const thread = this.active; const startedAt = Date.now();
     this.pendingTeamModes.set(thread.id, enabled);
     this.refreshContext(); this.publishThread(thread);
-    this.resources.reportResources?.('Team mode selected in memory: enabled=' + enabled +
-      ' durationMs=' + (Date.now() - startedAt));
+    this.resources.reportResources?.('team_selected', { enabled: enabled, durationMs: Date.now() - startedAt });
     return true;
   }
   private selectedTeamMode(thread: ThreadData): boolean {
@@ -670,7 +670,7 @@ export class SessionService {
       }
     } catch (error) {
       thread.queuePaused = true; this.status.error = t("执行失败：") + (error as Error).message;
-      this.resources.reportError(this.status.error);
+      this.resources.reportError('tasks_failed', this.status.error);
     } finally {
       this.status.acceptingSteering = false; this.status.phase = 'idle';
       this.refreshContext(); this.publish('snapshot');
@@ -781,7 +781,7 @@ export class SessionService {
       await chatTeams?.close(); this.chatTeams = undefined;
       unsubscribe(); this.status.acceptingSteering = false;
       if (answer.status !== 'complete') { thread.queuePaused = true; }
-      if (answer.status === 'failed') { this.resources.reportError('Run failed: ' + answer.error); }
+      if (answer.status === 'failed') { this.resources.reportError('run_failed', answer.error); }
       if (this.status.contextStatus.startsWith(t("正在压缩"))) { this.status.contextStatus = ''; }
     }
     if (answer.status === 'complete' && !this.status.saveError) {
@@ -833,7 +833,7 @@ export class SessionService {
       } finally { this.status.phase = 'idle'; this.publish('snapshot'); }
     } catch (error) {
       // Auxiliary requests never change chat status or abort the foreground runtime.
-      this.resources.reportError('Conversation title generation failed: ' + (error as Error).message);
+      this.resources.reportError('title_failed', error as Error);
     }
   }
 
@@ -878,7 +878,7 @@ export class SessionService {
       }
     });
     if (!saved) {
-      this.resources.reportError('Interactive UI action failed: thread=' + threadId + ' message=' + messageId + ' surface=' + key + ' action=' + actionId);
+      this.resources.reportError('interactive_failed', this.status.error, { threadId: threadId, messageId: messageId, surfaceId: key });
       throw new Error(this.status.error || t('当前无法保存，请等待任务结束后重试。'));
     }
     if (prompt) {
@@ -981,8 +981,8 @@ export class SessionService {
         this.data.extensions = candidate.extensions; this.data.productivity = candidate.productivity;
         thread.disabledMcpIds = candidate.threads.find((item) => item.id === thread.id)?.disabledMcpIds;
       });
-    } catch (error) { this.resources.reportError('Resource commit failed: thread=' + thread.id + ' ' + detail + ' ' + (error as Error).message); throw error as Error; }
-    this.resources.reportResources?.('thread=' + thread.id + ' ' + detail); this.publish('snapshot');
+    } catch (error) { this.resources.reportError('resource_failed', error as Error, { threadId: thread.id }); throw error as Error; }
+    this.resources.reportResources?.('committed', { threadId: thread.id }); this.publish('snapshot');
   }
 
   private async manageSkill(thread: ThreadData, request: SkillRequest, cancellation: Cancellation): Promise<string> {
@@ -1074,8 +1074,8 @@ export class SessionService {
         this.data.productivity = extras; thread.memoryReview = target.memoryReview;
         thread.memoryReviewedMessageId = target.memoryReviewedMessageId;
       });
-    } catch (error) { this.resources.reportError('Memory commit failed: thread=' + thread.id + ' ' + (error as Error).message); throw error as Error; }
-    this.resources.reportMemory?.('thread=' + thread.id + ' source=' + (reviewedId || 'tool') + ' ' + JSON.stringify(change.receipt));
+    } catch (error) { this.resources.reportError('memory_failed', error as Error, { threadId: thread.id }); throw error as Error; }
+    this.resources.reportMemory?.('committed', { threadId: thread.id, messageId: reviewedId || '', added: change.receipt.added, updated: change.receipt.updated, removed: change.receipt.removed, duplicates: change.receipt.duplicates, characters: change.receipt.characters });
     this.publish('snapshot');
   }
 
@@ -1090,7 +1090,7 @@ export class SessionService {
       const reference = this.data.productivity?.options?.memory;
       const selected = reference ? this.configFor(reference) : config;
       const runtime = this.runtime.fork();
-      this.resources.reportMemory?.('review started: thread=' + threadId + ' through=' + reviewedId);
+      this.resources.reportMemory?.('review_started', { threadId: threadId, messageId: reviewedId });
       const operations = await reviewSessionMemory(runtime, thread, user, selected, existing, turns);
       // Background model work never owns the write lane. Re-enter only between foreground operations.
       while (this.status.phase !== 'idle') { await this.waitForIdle(); }
@@ -1098,7 +1098,7 @@ export class SessionService {
       const options = this.data.productivity?.options || defaultAssistantOptions();
       if (!current || current.archived || !options.autoMemory || this.readOnly(current) ||
         !toolEnabled('memory', this.selectedToolSelection(current)) || !this.canMutate) {
-        this.resources.reportMemory?.('review discarded: thread=' + threadId + ' session unavailable or memory disabled'); return;
+        this.resources.reportMemory?.('review_discarded', { threadId: threadId }); return;
       }
       const live = this.data.productivity?.memories || [];
       // A late review must never replace a newer foreground/manual edit or revive a deleted fact.
@@ -1112,7 +1112,7 @@ export class SessionService {
       } finally { this.status.phase = 'idle'; this.refreshContext(); this.publish('snapshot'); }
     } catch (error) {
       const message = (error as Error).message;
-      this.resources.reportError('Memory review failed: thread=' + threadId + ' through=' + reviewedId + ' ' + message);
+      this.resources.reportError('memory_review_failed', message, { threadId: threadId, messageId: reviewedId });
       // Keep the review cursor unchanged so failed work remains eligible for a later retry.
       while (this.status.phase !== 'idle') { await this.waitForIdle(); }
       const current = this.data.threads.find((item) => item.id === threadId);
@@ -1136,22 +1136,25 @@ export class SessionService {
       (thread.attachments || []).concat(...thread.messages.map((item) => item.attachments || [])), live, projectFor(this.data, thread)?.workspaceId), new ReferenceTools(() => thread.messages)]), extras.options.readOnly), this.selectedToolSelection(thread));
   }
   private refreshContext(): void {
-    if (this.data.threads.length === 0) { this.status.contextTokens = 0; this.status.contextBreakdown = []; this.status.contextSource = 'estimate'; return; }
-    const config = this.currentConfig;
-    const sections = sessionPromptSections(config, this.extensions);
-    sections.push({ name: 'memory', content: this.memoryPrompt(this.active) });
-    sections.push({ name: 'workspace', content: projectContext(this.data, this.active) });
-    this.addModeInstructions(sections, this.active);
-    const teamEnabled = this.selectedTeamMode(this.active);
-    if (teamEnabled) {
-      sections.push({ name: 'team', content: CHAT_TEAM_INSTRUCTIONS + '\n本聊天已有团队（以此处ID为准，禁止跨会话访问）：' +
-        JSON.stringify((this.active.teams || []).filter((run) => run.ownerMessageId).map((run) => run.id + ' ' + run.status)) });
-    }
-    const source = sessionContextSource(this.active, () => sections, async () => {}, () => {});
-    const prepared = this.runtime.inspectContext(source, config, this.chatTools(this.active), teamEnabled ? coordinatorDefinitions() : [], this.selectedToolSelection(this.active));
-    this.status.contextTokens = prepared.context.tokens;
-    this.status.contextBreakdown = prepared.breakdown;
-    this.status.contextSource = prepared.context.source;
+    const diagnosticMark = Diagnostics.begin();
+    try {
+      if (this.data.threads.length === 0) { this.status.contextTokens = 0; this.status.contextBreakdown = []; this.status.contextSource = 'estimate'; return; }
+      const config = this.currentConfig;
+      const sections = sessionPromptSections(config, this.extensions);
+      sections.push({ name: 'memory', content: this.memoryPrompt(this.active) });
+      sections.push({ name: 'workspace', content: projectContext(this.data, this.active) });
+      this.addModeInstructions(sections, this.active);
+      const teamEnabled = this.selectedTeamMode(this.active);
+      if (teamEnabled) {
+        sections.push({ name: 'team', content: CHAT_TEAM_INSTRUCTIONS + '\n本聊天已有团队（以此处ID为准，禁止跨会话访问）：' +
+          JSON.stringify((this.active.teams || []).filter((run) => run.ownerMessageId).map((run) => run.id + ' ' + run.status)) });
+      }
+      const source = sessionContextSource(this.active, () => sections, async () => {}, () => {});
+      const prepared = this.runtime.inspectContext(source, config, this.chatTools(this.active), teamEnabled ? coordinatorDefinitions() : [], this.selectedToolSelection(this.active));
+      this.status.contextTokens = prepared.context.tokens;
+      this.status.contextBreakdown = prepared.breakdown;
+      this.status.contextSource = prepared.context.source;
+    } finally { if (Diagnostics.recording) { Diagnostics.end('context.inspect', diagnosticMark); } }
   }
   private contextProgress(status: string): void { this.status.contextStatus = status; this.publish('state'); }
   private requireThread(id: string): ThreadData {
@@ -1199,12 +1202,11 @@ export class SessionService {
       await this.persistDraftChanges(draftRevision);
       this.refreshContext(); return true;
     }
-    catch (error) { this.status.error = prefix + (error as Error).message; this.resources.reportError(this.status.error); return false; }
+    catch (error) { this.status.error = prefix + (error as Error).message; this.resources.reportError('mutation_failed', error as Error); return false; }
     finally {
       this.status.phase = 'idle'; this.publish(publication);
       if (publication === 'preferences') {
-        this.resources.reportResources?.('Preferences save: durationMs=' + (Date.now() - startedAt) +
-          ' success=' + (this.status.error.length === 0));
+        this.resources.reportResources?.('preferences_saved', { durationMs: Date.now() - startedAt, failed: this.status.error.length > 0 });
       }
     }
   }
@@ -1255,7 +1257,7 @@ export class SessionService {
       this.status.saveError = t('会话尚未保存，请重试保存。当前内容仍保留在页面中。原因：') + (error as Error).message;
       this.chatTeams?.stop();
       if (this.status.phase === 'running') { this.active.queuePaused = true; this.runtime.abort(); }
-      this.resources.reportError(this.status.saveError); this.publish('state'); throw new Error(this.status.saveError);
+      this.resources.reportError('save_failed', this.status.saveError); this.publish('state'); throw new Error(this.status.saveError);
     }
   }
   private publishThread(thread: ThreadData): void {
@@ -1274,21 +1276,24 @@ export class SessionService {
       teams: JSON.parse(JSON.stringify(thread.teams || [])) as TeamRun[] });
   }
   private publish(kind: 'snapshot' | 'state' | 'preferences'): void {
-    const data = kind === 'snapshot' ? this.snapshot() : undefined;
-    if (data) {
-      for (const thread of data.threads) {
-        thread.teamEnabled = this.selectedTeamMode(thread);
-        const selection = this.selectedToolSelection(thread);
-        thread.agentMode = selection.agentMode; thread.disabledTools = selection.disabledTools;
+    const diagnosticMark = Diagnostics.begin();
+    try {
+      const data = kind === 'snapshot' ? this.snapshot() : undefined;
+      if (data) {
+        for (const thread of data.threads) {
+          thread.teamEnabled = this.selectedTeamMode(thread);
+          const selection = this.selectedToolSelection(thread);
+          thread.agentMode = selection.agentMode; thread.disabledTools = selection.disabledTools;
+        }
       }
-    }
-    this.emit({ kind: kind, state: this.state, data: data,
-      preferences: kind === 'preferences' ? this.preferencesSnapshot() : undefined });
+      this.emit({ kind: kind, state: this.state, data: data,
+        preferences: kind === 'preferences' ? this.preferencesSnapshot() : undefined });
+    } finally { if (Diagnostics.recording) { Diagnostics.end('session.publish', diagnosticMark); } }
   }
   private emit(event: SessionEvent): void {
     for (const listener of Array.from(this.listeners)) {
       try { listener(event); }
-      catch (error) { this.resources.reportError('Session observer failed: ' + (error as Error).message); }
+      catch (error) { this.resources.reportError('observer_failed', error as Error); }
     }
   }
 }

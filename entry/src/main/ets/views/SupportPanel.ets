@@ -7,8 +7,13 @@ import { Font, Space } from '../common/Theme';
 import { Banner, GroupCard, NavRow, RowDivider, SectionHeader } from '../common/Widgets';
 import { HelpDemo } from './HelpDemo';
 import { HelpDemoKind } from '../model/HelpTutorial';
+import { DeveloperGate, Diagnostics } from '../model/Diagnostics';
+import { DeveloperDiagnostics } from '../services/DeveloperDiagnostics';
+import { DeveloperPanel } from './DeveloperPanel';
+import { Btn } from '../common/Theme';
 
 export function supportTitle(page: string): string {
+  if (page === 'developer') { return t('开发者模式'); }
   if (page === 'help') { return t('使用帮助'); }
   if (page === 'updates') { return t('更新说明'); }
   if (page === 'announcements') { return t('公告'); }
@@ -23,7 +28,40 @@ export struct SupportPanel {
   @Prop page: string = 'about';
   @State private version: string = '';
   @State private error: string = '';
+  @State private showDeveloperPassword: boolean = false;
+  @State private developerPassword: string = '';
+  @State private developerError: string = '';
+  private developerGate: DeveloperGate = new DeveloperGate();
   onOpen: (page: string) => void = () => {};
+
+  aboutToDisappear(): void { this.cancelDeveloperUnlock(); }
+  private cancelDeveloperUnlock(): void {
+    this.developerPassword = ''; this.developerError = ''; this.developerGate.cancel();
+  }
+  private versionTapped(): void {
+    if (AppStorage.get<boolean>('tinybot.developer.enabled')) { this.onOpen('developer'); return; }
+    if (this.developerGate.tap(Diagnostics.now())) { this.developerPassword = ''; this.developerError = ''; this.showDeveloperPassword = true; }
+  }
+  private unlockDeveloper(): void {
+    const password = this.developerPassword; this.developerPassword = '';
+    if (!this.developerGate.verify(password, Diagnostics.now())) {
+      const remaining = this.developerGate.remaining(Diagnostics.now());
+      this.developerError = remaining > 0 ? t('尝试次数过多，请 {0} 秒后重试。', [remaining]) : t('密码不正确。'); return;
+    }
+    try { DeveloperDiagnostics.enable(); this.showDeveloperPassword = false; this.onOpen('developer'); }
+    catch (error) { this.developerError = t('诊断操作失败：{0}', [(error as Error).message]); }
+  }
+  @Builder
+  developerPasswordSheet() {
+    Column({ space: Space.md }) {
+      TextInput({ text: this.developerPassword, placeholder: t('开发者密码') }).type(InputType.Password).id('developer-password')
+        .fontFamily(this.appearance.fontFamily).enterKeyType(EnterKeyType.Done).onSubmit(() => this.unlockDeveloper())
+        .onChange((value: string) => { this.developerPassword = value; })
+      if (this.developerError) { Banner({ text: this.developerError, compId: 'developer-password-error' }) }
+      Button(t('开启开发者模式')).fontFamily(this.appearance.fontFamily).id('developer-unlock').attributeModifier(Btn.primary)
+        .width('100%').onClick(() => this.unlockDeveloper())
+    }.width('100%').padding(Space.page)
+  }
 
   private async openWebsite(url: string): Promise<void> {
     try {
@@ -66,6 +104,10 @@ export struct SupportPanel {
       Text(t('你的随身 AI 助手')).fontFamily(this.appearance.fontFamily).fontSize(Font.small).fontColor($r('app.color.text_secondary'))
       if (this.version) {
         Text(t('版本 {0}', [this.version])).fontFamily(this.appearance.fontFamily).id('about-version').fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+          .onClick(() => this.versionTapped())
+          .bindSheet($$this.showDeveloperPassword, this.developerPasswordSheet(), { title: { title: t('开启开发者模式') }, height: SheetSize.FIT_CONTENT,
+            dragBar: true, keyboardAvoidMode: SheetKeyboardAvoidMode.TRANSLATE_AND_RESIZE, systemMaterial: this.appearance.surface,
+            onDisappear: () => this.cancelDeveloperUnlock() })
       }
     }.width('100%').padding({ top: Space.lg, bottom: Space.xl })
     this.article(t('开源共建'), t('Tinybot 是一款开源软件，遵循 Apache 2.0 许可证。欢迎社区参与维护、改进翻译、报告问题，以及通过 Pull Request 提交代码，一起让 Tinybot 变得更好。'))
@@ -141,7 +183,9 @@ export struct SupportPanel {
   }
 
   build() {
-    if (this.page === 'licenses') {
+    if (this.page === 'developer') {
+      DeveloperPanel({ onDisabled: () => this.onOpen('about') })
+    } else if (this.page === 'licenses') {
       ThirdPartyLicensesPanel()
     } else {
       Scroll() {

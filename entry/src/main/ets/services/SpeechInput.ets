@@ -1,7 +1,7 @@
+import { Diagnostics } from '../model/Diagnostics';
 import { abilityAccessCtrl, ApplicationStateChangeCallback, common } from '@kit.AbilityKit';
 import { speechRecognizer } from '@kit.CoreSpeechKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 import { t } from '../model/I18n';
 
 export type SpeechPhase = 'idle' | 'preparing' | 'listening' | 'finishing' | 'complete' | 'error';
@@ -40,7 +40,7 @@ export class SpeechInput {
     const id = 'tinybot_' + Date.now() + '_' + (++this.sequence);
     this.sessionId = id;
     this.phase = 'preparing';
-    hilog.info(0, 'SpeechInput', 'Preparing session=%{public}s', id);
+    if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'speech', 'preparing', { sessionId: id }); };
     try {
       if (!canIUse('SystemCapability.AI.SpeechRecognizer')) {
         throw new Error(t('此设备不支持系统语音识别。'));
@@ -71,7 +71,7 @@ export class SpeechInput {
           clearTimeout(this.timer);
           this.startedAt = Date.now();
           this.phase = 'listening';
-          hilog.info(0, 'SpeechInput', 'Listening session=%{public}s', sessionId);
+          if (Diagnostics.acceptsLog('info')) { Diagnostics.log('info', 'speech', 'listening', { sessionId: sessionId }); };
           // The engine also enforces this duration; the timer stops capture if completion is delayed.
           this.timer = setTimeout(() => this.finish(), 10 * 60 * 1000);
         },
@@ -81,8 +81,7 @@ export class SpeechInput {
             const speaking = eventCode === SPEECH_BEGIN;
             if (this.speaking !== speaking) {
               this.speaking = speaking;
-              hilog.info(0, 'SpeechInput', 'VAD session=%{public}s event=%{public}d speaking=%{public}s',
-                sessionId, eventCode, String(speaking));
+              if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'speech', 'vad', { sessionId: sessionId, eventCode: eventCode, speaking: speaking }); };
             }
           }
         },
@@ -97,7 +96,7 @@ export class SpeechInput {
           if (this.sessionId !== sessionId) { return; }
           this.release(false);
           this.phase = 'complete';
-          hilog.info(0, 'SpeechInput', 'Complete session=%{public}s characters=%{public}d', sessionId, this.text.length);
+          if (Diagnostics.acceptsLog('info')) { Diagnostics.log('info', 'speech', 'complete', { sessionId: sessionId, chars: this.text.length }); };
           this.onComplete();
         },
         onError: (sessionId: string, code: number): void => {
@@ -133,7 +132,7 @@ export class SpeechInput {
     if (this.phase !== 'listening' || !this.engine) { return; }
     this.speaking = false;
     this.phase = 'finishing';
-    hilog.info(0, 'SpeechInput', 'Finishing session=%{public}s characters=%{public}d', this.sessionId, this.text.length);
+    if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'speech', 'finishing', { sessionId: this.sessionId, chars: this.text.length }); };
     this.deadline(this.sessionId, 10000);
     try { this.engine.finish(this.sessionId); }
     catch (error) { this.fail(this.errorMessage((error as BusinessError).code)); }
@@ -157,7 +156,7 @@ export class SpeechInput {
   }
 
   private fail(message: string): void {
-    hilog.error(0, 'SpeechInput', 'Recognition failed session=%{public}s reason=%{public}s', this.sessionId, message);
+    Diagnostics.log('error', 'speech', 'recognition_failed', { sessionId: this.sessionId }, message);
     this.release(true);
     this.error = message;
     this.phase = 'error';
@@ -180,7 +179,7 @@ export class SpeechInput {
     this.engine = undefined;
     if (engine) {
       try { if (cancel) { engine.cancel(id); } }
-      catch (error) { hilog.warn(0, 'SpeechInput', 'Cancel failed: %{public}d', (error as BusinessError).code); }
+      catch (error) { Diagnostics.log('warn', 'speech', 'cancel_failed', undefined, error as Error); }
       finally { engine.shutdown(); }
     }
     if (this.application) {

@@ -1,5 +1,5 @@
+import { Diagnostics } from '../model/Diagnostics';
 import { image } from '@kit.ImageKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 import { PreviewCapture, PreviewCaptureRequest } from '../services/PreviewCapture';
 import { Attachments } from '../services/Attachments';
 import { UiCompiler, UiNode, uiNodeVisible, uiParts } from '../model/InteractiveUi';
@@ -47,8 +47,7 @@ struct PreviewCaptureView {
       const attachment = await Attachments.savePreview(pixel);
       const info = await pixel.getImageInfo();
       if (!this.mounted) { return; }
-      hilog.info(0x0000, 'TinybotPreview', 'screenshot id=%{public}d pixels=%{public}dx%{public}d widthVp=%{public}s',
-        this.request.id, info.size.width, info.size.height, String(this.cardWidth));
+      if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'preview', 'captured', { operationId: this.request.id, width: info.size.width, height: info.size.height, widthVp: this.cardWidth }); };
       PreviewCapture.complete(this.request.id, { image: attachment, width: info.size.width, height: info.size.height, viewportWidth: this.cardWidth });
     } catch (error) {
       if (this.mounted) { PreviewCapture.complete(this.request.id, undefined, error as Error); }

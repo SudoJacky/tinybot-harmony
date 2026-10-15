@@ -58,7 +58,7 @@ function fixture(policy = 'enabled') {
     userBack() { return false; }
   };
   const saved = [], logs = [];
-  browser.attach(driver); browser.configure(async value => { saved.push(value); }, message => logs.push(message));
+  browser.attach(driver); browser.configure(async value => { saved.push(value); }, (event, fields, error) => logs.push({ event, fields, error }));
   browser.updatePolicy(policy);
   return { browser, cancellation, driver, saved, logs, tools: new BrowserTools(browser, 'thread', false) };
 }
@@ -219,7 +219,7 @@ async function acquired() {
     assert.equal(f.browser.error, '', 'A stale observation must not turn normal viewing into a page-loading error');
     assert.equal(f.browser.paused, false); assert.equal(f.browser.owner, 'agent');
     assert.notEqual((await f.browser.snapshot(f.cancellation)).snapshotId, f.receipt.page.snapshotId);
-    assert.ok(f.logs.includes('observation changed code=STALE_BROWSER_SNAPSHOT'));
+    assert.ok(f.logs.some(log => log.event === 'observation_changed' && log.error.code === 'STALE_BROWSER_SNAPSHOT'));
     console.log('PASS stale viewing observations remain explicit tool failures, refresh without taking control and do not show a loading error');
   }
   {

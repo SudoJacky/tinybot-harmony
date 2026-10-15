@@ -1,3 +1,4 @@
+import { Diagnostics } from '../model/Diagnostics';
 import { ProjectData } from '../model/Project';
 import { AgentMode } from '../model/AgentMode';
 import { McpSettingsCommand, McpSettingsResult } from '../services/McpSettings';
@@ -97,42 +98,45 @@ export class ChatViewModel {
   }
 
   private project(event: SessionEvent): void {
-    this.projectState(event.state);
-    if (event.data) { this.projectData(event.data); }
-    if (event.preferences) {
-      this.config = event.preferences.config; this.extensions = event.preferences.extensions;
-      this.productivity = event.preferences.productivity; this.selectedConfig = this.requireSession().currentConfig;
-    }
-    if (event.kind === 'teams' && event.threadId === this.active.id) { this.teams = event.teams || []; }
-    if (event.kind === 'thread' && event.thread) {
-      this.threads.find((thread) => thread.id === event.threadId)?.updateMetadata(event.thread);
-      if (event.threadId === this.active.id) { this.draft = event.thread.draft || ''; }
-    }
-    if (event.kind === 'draft' && event.threadId === this.active.id) {
-      this.draft = event.content || ''; this.active.draft = this.draft;
-    }
-    if (event.kind === 'message' && event.message) {
-      const thread = this.threads.find((thread) => thread.id === event.threadId);
-      thread?.messages.find((message) => message.id === event.message?.id)?.update(event.message);
-      thread?.refreshPreviews();
-    }
-    if (event.kind === 'reasoning') {
-      const message = this.threads.find((thread) => thread.id === event.threadId)?.messages.find((item) => item.id === event.messageId);
-      if (message) {
-        const step = message.stepViews[event.step || 0];
-        if (step) { step.reasoningContent = event.stepContent || ''; }
-        message.reasoningContent = message.stepViews.map((item) => item.reasoningContent).filter((text) => text.length > 0).join('\n\n');
+    const diagnosticMark = Diagnostics.begin();
+    try {
+      this.projectState(event.state);
+      if (event.data) { this.projectData(event.data); }
+      if (event.preferences) {
+        this.config = event.preferences.config; this.extensions = event.preferences.extensions;
+        this.productivity = event.preferences.productivity; this.selectedConfig = this.requireSession().currentConfig;
       }
-    }
-    if (event.kind === 'text') {
-      const message = this.threads.find((thread) => thread.id === event.threadId)?.messages.find((item) => item.id === event.messageId);
-      if (message) {
-        message.content = event.content || '';
-        const step = message.stepViews[event.step || 0];
-        if (step) { step.content = event.stepContent || ''; }
+      if (event.kind === 'teams' && event.threadId === this.active.id) { this.teams = event.teams || []; }
+      if (event.kind === 'thread' && event.thread) {
+        this.threads.find((thread) => thread.id === event.threadId)?.updateMetadata(event.thread);
+        if (event.threadId === this.active.id) { this.draft = event.thread.draft || ''; }
       }
-    }
-    if (['text', 'reasoning', 'message', 'snapshot', 'thread', 'teams'].includes(event.kind)) { this.onOutput(); }
+      if (event.kind === 'draft' && event.threadId === this.active.id) {
+        this.draft = event.content || ''; this.active.draft = this.draft;
+      }
+      if (event.kind === 'message' && event.message) {
+        const thread = this.threads.find((thread) => thread.id === event.threadId);
+        thread?.messages.find((message) => message.id === event.message?.id)?.update(event.message);
+        thread?.refreshPreviews();
+      }
+      if (event.kind === 'reasoning') {
+        const message = this.threads.find((thread) => thread.id === event.threadId)?.messages.find((item) => item.id === event.messageId);
+        if (message) {
+          const step = message.stepViews[event.step || 0];
+          if (step) { step.reasoningContent = event.stepContent || ''; }
+          message.reasoningContent = message.stepViews.map((item) => item.reasoningContent).filter((text) => text.length > 0).join('\n\n');
+        }
+      }
+      if (event.kind === 'text') {
+        const message = this.threads.find((thread) => thread.id === event.threadId)?.messages.find((item) => item.id === event.messageId);
+        if (message) {
+          message.content = event.content || '';
+          const step = message.stepViews[event.step || 0];
+          if (step) { step.content = event.stepContent || ''; }
+        }
+      }
+      if (['text', 'reasoning', 'message', 'snapshot', 'thread', 'teams'].includes(event.kind)) { this.onOutput(); }
+    } finally { if (Diagnostics.recording) { Diagnostics.end('viewmodel.project', diagnosticMark); } }
   }
   private projectState(state: SessionState): void {
     this.phase = state.phase;

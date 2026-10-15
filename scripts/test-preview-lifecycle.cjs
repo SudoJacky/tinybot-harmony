@@ -76,7 +76,7 @@ source.unregisterDataChangeListener(listener); source.update('third-thread', [])
 console.log('PASS lazy row identity, retained disclosure/height state, thread switch and listener cleanup');
 
 let now = 0, sequence = 0, controllers = 0; const timers = new Map();
-const logs = [], context = {
+const logs = [], context = { Diagnostics: from('model/Diagnostics').Diagnostics,
   activeWebViews: 0,
   ...from('model/WebUi'), hilog: { info: (...args) => logs.push(args), error: (...args) => logs.push(args) }, t: x => x,
   webview: { WebviewController: class { constructor() { controllers++; } } },

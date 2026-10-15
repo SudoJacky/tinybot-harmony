@@ -1,3 +1,4 @@
+import { Diagnostics } from '../model/Diagnostics';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { PublishedPreview } from '../model/PublishedPreview';
@@ -6,7 +7,6 @@ import { Attachments } from '../services/Attachments';
 import { Btn, Radius, Space } from '../common/Theme';
 import { InteractiveAnswer } from './InteractiveAnswer';
 import { UiPresentation } from '../model/UiPresentation';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 
 @Component
 export struct PublishedPreviewCard {
@@ -39,7 +39,7 @@ export struct PublishedPreviewCard {
               .sourceSize(this.thumbnailSize()).borderRadius(Radius.sm)
               .accessibilityText(this.preview.title).onError((error) => {
                 this.imageError = true;
-                hilog.error(0x0000, 'TinybotPreview', 'thumbnail id=%{public}s error=%{public}s', this.preview.id, error.message);
+                Diagnostics.log('error', 'preview', 'thumbnail_failed', { previewId: this.preview.id }, error.message);
               })
           }
           Column({ space: 4 }) {

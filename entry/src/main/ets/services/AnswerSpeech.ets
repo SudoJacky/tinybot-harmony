@@ -1,7 +1,7 @@
+import { Diagnostics } from '../model/Diagnostics';
 import { ApplicationStateChangeCallback, common } from '@kit.AbilityKit';
 import { textToSpeech } from '@kit.CoreSpeechKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 import { answerSpeechChunks, answerSpeechText } from '../model/AnswerSpeechText';
 import { t } from '../model/I18n';
 
@@ -77,7 +77,7 @@ export class AnswerSpeech {
       } catch (error) {
         const detail = error as BusinessError;
         if (generation === this.generation) { this.fail(detail.code || 0, detail.message); }
-        else { hilog.error(0, 'AnswerSpeech', 'Late engine cleanup failed: %{public}s', detail.message); }
+        else { Diagnostics.log('error', 'speech', 'late_cleanup_failed', undefined, detail); }
       }
     });
     return AnswerSpeech.pending;
@@ -109,7 +109,7 @@ export class AnswerSpeech {
     try {
       this.engine.speak(this.chunks[this.chunkIndex], { requestId: this.requestId,
         extraParams: { languageContext: this.language, playType: 1, soundChannel: 1, speed: 1 } });
-      hilog.info(0, 'AnswerSpeech', 'Playback requested chunk=%{public}d/%{public}d', this.chunkIndex + 1, this.chunks.length);
+      if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'speech', 'playback_requested', { chunk: this.chunkIndex + 1, total: this.chunks.length }); };
     } catch (error) { const detail = error as BusinessError; this.fail(detail.code || 0, detail.message); }
   }
 
@@ -121,13 +121,13 @@ export class AnswerSpeech {
   }
 
   private fail(code: number, message: string): void {
-    hilog.error(0, 'AnswerSpeech', 'Playback failed code=%{public}d message=%{public}s', code, message);
+    Diagnostics.log('error', 'speech', 'playback_failed', { code: code }, message);
     this.stop();
     this.error = t('朗读失败（{0}）：{1}', [code, message]);
   }
 
   private reportCleanup(error: BusinessError): void {
-    hilog.error(0, 'AnswerSpeech', 'Cleanup failed code=%{public}d message=%{public}s', error.code || 0, error.message);
+    Diagnostics.log('error', 'speech', 'cleanup_failed', undefined, error);
     this.error = t('停止朗读失败：{0}', [error.message]);
   }
 }

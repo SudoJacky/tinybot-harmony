@@ -44,7 +44,7 @@ async function fixture(data = seed()) {
   const registry = new ProviderRegistry(); registry.register(provider);
   const keys = { read: async () => '', write: async () => {}, remove: async () => {} };
   const resources = { createId: () => 'id-' + ++ids, ensureWorkspace: async () => {}, configureProviders: () => {},
-    tools: () => ({ definitions: () => [], execute: async () => { throw Error('Unexpected tool'); } }), reportError: s => errors.push(s), reportMemory: s => logs.push(s) };
+    tools: () => ({ definitions: () => [], execute: async () => { throw Error('Unexpected tool'); } }), reportError: (_event, error) => errors.push(typeof error === 'string' ? error : error.message), reportMemory: s => logs.push(s) };
   const session = new SessionService(repository, new AgentRuntime(registry, keys), keys, resources); await session.initialize();
   return { session, provider, repository, requests, errors, logs, writes, send: async text => { session.setDraft(text); await session.send(); } };
 }

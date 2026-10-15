@@ -1,9 +1,11 @@
+import { Diagnostics } from '../model/Diagnostics';
 import { webview } from '@kit.ArkWeb';
 import { ShareInbox } from '../services/NativeActions';
 import { LanguagePreferences } from '../services/LanguagePreferences';
 import { AppearancePreferences } from '../services/AppearancePreferences';
 import { McpOAuth } from '../services/McpOAuth';
 import { LaunchActions } from '../services/LaunchActions';
+import { DeveloperDiagnostics } from '../services/DeveloperDiagnostics';
 /*
  * Copyright (c) 2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,7 +22,6 @@ import { LaunchActions } from '../services/LaunchActions';
  */
 
 import { AbilityConstant, Configuration, UIAbility, Want } from '@kit.AbilityKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 
 const DOMAIN = 0x0000;
@@ -35,7 +36,7 @@ export default class EntryAbility extends UIAbility {
     }
     const dark = AppStorage.get<boolean>('tinybot.appearance.dark') === true;
     this.mainWindow.setWindowSystemBarProperties({ statusBarContentColor: dark ? '#FFFFFF' : '#000000' })
-      .catch((err: Error) => hilog.error(DOMAIN, 'testTag', 'Failed to set bar color. Cause: %{public}s', err.message));
+      .catch((err: Error) => Diagnostics.log('error', 'app', 'bar_failed', undefined, err));
   }
 
   onConfigurationUpdate(config: Configuration): void {
@@ -46,16 +47,17 @@ export default class EntryAbility extends UIAbility {
   }
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    DeveloperDiagnostics.initialize(this.context);
     // Prepare ArkWeb before mounting the first generated surface on the UI rendering path.
     const webStarted = Date.now();
-    hilog.info(DOMAIN, 'TinybotWebUI', 'engine initialization start');
+    Diagnostics.log('info', 'web', 'engine_start');
     webview.WebviewController.initializeWebEngine();
-    hilog.info(DOMAIN, 'TinybotWebUI', 'engine initialized ms=%{public}d', Date.now() - webStarted);
+    if (Diagnostics.acceptsLog('info')) { Diagnostics.log('info', 'web', 'engine_ready', { elapsedMs: Date.now() - webStarted }); };
     LanguagePreferences.initialize(this.context);
     AppearancePreferences.initialize(this.context);
     ShareInbox.receive(want, this.context.getApplicationContext().filesDir);
     LaunchActions.receive(want);
-    hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
+    Diagnostics.log('info', 'app', 'created');
   }
 
   onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
@@ -65,19 +67,20 @@ export default class EntryAbility extends UIAbility {
   }
 
   onDestroy(): void {
-    hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onDestroy');
+    DeveloperDiagnostics.stop();
+    Diagnostics.log('info', 'app', 'destroyed');
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
     // Main window is created, set main page for this ability
-    hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onWindowStageCreate');
+    Diagnostics.log('info', 'app', 'window_created');
 
     windowStage.loadContent('pages/Index', (err) => {
       if (err.code) {
-        hilog.error(DOMAIN, 'testTag', 'Failed to load the content. Cause: %{public}s', JSON.stringify(err));
+        Diagnostics.log('error', 'app', 'window_failed', undefined, err);
         return;
       }
-      hilog.info(DOMAIN, 'testTag', 'Succeeded in loading the content.');
+      Diagnostics.log('info', 'app', 'window_loaded');
       this.mainWindow = windowStage.getMainWindowSync();
       AppearancePreferences.activate();
       this.applySystemBars();
@@ -86,21 +89,23 @@ export default class EntryAbility extends UIAbility {
 
   onWindowStageDestroy(): void {
     // Main window is destroyed, release UI related resources
-    hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onWindowStageDestroy');
+    Diagnostics.log('info', 'app', 'window_destroyed');
   }
 
   onForeground(): void {
+    DeveloperDiagnostics.setForeground(true);
     AppStorage.setOrCreate('tinybot.foreground', true);
     LaunchActions.setForeground(true);
     LanguagePreferences.refresh();
     // Ability has brought to foreground
-    hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onForeground');
+    Diagnostics.log('info', 'app', 'foreground');
   }
 
   onBackground(): void {
+    DeveloperDiagnostics.setForeground(false);
     AppStorage.setOrCreate('tinybot.foreground', false);
     LaunchActions.setForeground(false);
     // Ability has back to background
-    hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onBackground');
+    Diagnostics.log('info', 'app', 'background');
   }
 }

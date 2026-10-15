@@ -29,6 +29,7 @@ function load(file) {
   }).outputText, loaded, { filename: file });
   return loaded.exports;
 }
+load(root + '/model/Diagnostics.ets').Diagnostics.configureLogSink(data => logs.push(data));
 const model = load(root + '/model/Appearance.ets');
 for (const [hue, color] of [[0, '#FF0000'], [60, '#FFFF00'], [120, '#00FF00'], [180, '#00FFFF'],
   [240, '#0000FF'], [300, '#FF00FF'], [360, '#FF0000']]) {
@@ -82,7 +83,7 @@ for (const failure of ['flush', 'apply']) {
   assert.throws(() => preferences.select({ ...selected, accent: 'blue' }), /failed/);
   assert.deepEqual(JSON.parse(disk.get('appearance')), selected, 'Failed changes must restore the saved preferences');
   assert.equal(storage.get('tinybot.appearance.options').accent, 'custom');
-  assert.ok(logs.some(args => args.includes('Appearance save/apply failed: %{public}s')));
+  assert.ok(logs.some(data => data.level === 'error' && data.module === 'appearance' && data.event === 'save_failed'));
 }
 working = new Map(disk); preferences.initialize(context); preferences.activate();
 assert.equal(currentAppearanceStyle().fontFamily, 'Noto Serif', 'Restore preferences on the next launch');
