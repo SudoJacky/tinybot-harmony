@@ -29,6 +29,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Markdown incremental parsing and renderer test
 if ($LASTEXITCODE -ne 0) { throw 'Voice input UI lifecycle tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-voice-composer.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Voice composer tests failed. Build the app first.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-drawing-board.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Drawing board and composer attachment tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-appearance.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Appearance preference and palette tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-settings-performance.cjs')

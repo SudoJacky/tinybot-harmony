@@ -18,6 +18,9 @@ import { curves, FrameCallback, SymbolGlyphModifier } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { Attachment, PromptTemplate } from '../model/Productivity';
 import { Attachments } from '../services/Attachments';
+import { image } from '@kit.ImageKit';
+import { DrawingDraft } from '../model/DrawingDraft';
+import { DrawingBoard } from './DrawingBoard';
 import { selectAttachments } from '../services/NativeActions';
 import { ToolApproval } from '../services/ToolApproval';
 import { BrowserSession } from '../services/BrowserSession';
@@ -74,6 +77,9 @@ export struct ChatPanel {
   onBrowser: () => void = () => {};
   @State private importing: boolean = false;
   @State private showPlus: boolean = false;
+  @State private showDrawing: boolean = false;
+  @State private drawingDraft: DrawingDraft = new DrawingDraft();
+  private drawingThreadId: string = '';
   @State private speech: SpeechInput = new SpeechInput();
   @State private voiceMode: boolean = false;
   @State private speechHolding: boolean = false;
@@ -402,6 +408,41 @@ export struct ChatPanel {
     this.getUIContext().getFocusController().clearFocus();
     this.memoryMessageId = messageId; this.memoryThreadId = this.thread.id; this.showMemoryDraft = true;
   }
+  private openDrawing(): void {
+    if (!this.canAttach() || this.thread.attachments.length >= 4) { return; }
+    this.getUIContext().getFocusController().clearFocus();
+    this.drawingThreadId = this.thread.id; this.drawingDraft = new DrawingDraft(); this.showDrawing = true;
+  }
+  private closeDrawing(): void {
+    if (this.drawingDraft.saving) { return; }
+    if (!this.drawingDraft.dirty()) { this.showDrawing = false; return; }
+    this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t('放弃这次绘画？'),
+      message: t('尚未添加到消息的绘画将丢失。'), primaryButton: { value: t('继续绘画'), action: () => {} },
+      secondaryButton: { value: t('放弃'), action: () => { this.showDrawing = false; } } });
+  }
+  private async addDrawing(pixel: image.PixelMap): Promise<void> {
+    if (this.drawingThreadId !== this.app.active.id) { throw new Error(t('对话已切换，请在当前对话重新添加附件。')); }
+    if (!this.canAttach() || this.thread.attachments.length >= 4) { throw new Error(t('当前无法添加附件，请稍后重试。')); }
+    this.importing = true;
+    try {
+      const item = await Attachments.saveDrawing(pixel);
+      if (this.drawingThreadId !== this.app.active.id) { throw new Error(t('对话已切换，请在当前对话重新添加附件。')); }
+      if (!await this.app.setAttachments(this.thread.attachments.concat([item]))) {
+        throw new Error(this.app.saveError || this.app.error || t('添加附件失败，请重试。'));
+      }
+      this.showDrawing = false;
+    } finally { this.importing = false; }
+  }
+  @Builder
+  drawingSheet() {
+    DrawingBoard({ draft: this.drawingDraft, onClose: () => this.closeDrawing(),
+      onAdd: (pixel: image.PixelMap) => this.addDrawing(pixel) })
+  }
+  @Builder
+  chatCover() {
+    if (this.showDrawing) { this.drawingSheet() }
+    else { this.imageViewer() }
+  }
   @Builder
   memoryDraftSheet() {
     MemoryDraftPanel({ app: this.app, threadId: this.memoryThreadId, messageId: this.memoryMessageId, onClose: () => { this.showMemoryDraft = false; } })
@@ -635,6 +676,10 @@ export struct ChatPanel {
             this.canAttach() && this.thread.attachments.length < 4, () => this.fromSheet(() => this.attach(true)))
           this.plusTile($r('sys.symbol.doc_text'), t("文本文件"), 'attach-text',
             this.canAttach() && this.thread.attachments.length < 4, () => this.fromSheet(() => this.attach(false)))
+          this.plusTile($r('sys.symbol.square_and_pencil'), t('画板'), 'attach-drawing',
+            this.canAttach() && this.thread.attachments.length < 4, () => this.fromSheet(() => this.openDrawing()))
+        }.width('100%').alignItems(VerticalAlign.Top)
+        Row() {
           this.plusTile($r('sys.symbol.folder'), t("工作区"), 'open-workspace', !this.app.busy,
             () => { this.showPlus = false; this.onFiles(); })
           this.plusTile($r('sys.symbol.lightbulb'), t("记忆"), 'open-memory', !this.app.busy,
@@ -884,7 +929,7 @@ export struct ChatPanel {
 
   @Builder
   composerAddButton() {
-    IconButton({ icon: $r('sys.symbol.plus'), label: t("添加图片、文件或模板"), compId: 'add-attachment', diameter: 36,
+    IconButton({ icon: $r('sys.symbol.plus'), label: t('添加图片、画板、文件或模板'), compId: 'add-attachment', diameter: 36,
       iconSize: 20, fill: $r('app.color.surface_variant'), disabled: this.thread.archived || this.app.saveError.length > 0 || this.speechActive() || this.speechHolding,
       onTap: () => { this.getUIContext().getFocusController().clearFocus(); this.showPlus = true; } })
   }
@@ -1065,7 +1110,6 @@ export struct ChatPanel {
       detents: [SheetSize.MEDIUM, SheetSize.LARGE], dragBar: true, showClose: false,
       backgroundColor: $r('app.color.page_background')
     })
-    .bindContentCover($$this.previewing, this.imageViewer(), { modalTransition: ModalTransition.ALPHA })
   }
 
   // Remote MCP calls pause the agent until the user decides; keep the card compact but impossible to miss.
@@ -1102,6 +1146,8 @@ export struct ChatPanel {
   }
 
   build() {
+    // Keep the cover on its own node: a false bindSheet on the same node removes an active cover on device.
+    Stack() {
     Column() {
       Stack({ alignContent: Alignment.BottomStart }) {
         Column() {
@@ -1192,5 +1238,10 @@ export struct ChatPanel {
     }.height('100%').width('100%')
       .bindSheet($$this.showMemoryDraft, this.memoryDraftSheet(), { title: { title: t("提炼并确认记忆") }, detents: [SheetSize.LARGE], dragBar: true, keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY,
         backgroundColor: $r('app.color.page_background') })
+    }.width('100%').height('100%')
+      .bindContentCover(this.showDrawing || this.previewing, this.chatCover(), { modalTransition: ModalTransition.ALPHA,
+        backgroundColor: $r('app.color.page_background'), onWillDismiss: () => {
+          if (this.showDrawing) { this.closeDrawing(); } else { this.previewing = false; }
+        } })
   }
 }
