@@ -70,7 +70,7 @@ async function fixture(data = seed()) {
   const resources = { createId: () => 'id-' + ++ids, ensureWorkspace: async () => {}, configureProviders: () => {},
     tools: (_id, extensions, selected, extras, _attachments, live) => {
       liveTools = new ToolSet([new SkillTools(extensions.skills, selected, () => live.skills()), new McpTools(extras.servers, approval, server => new FakeMcp(server), () => live.servers())]); return liveTools;
-    }, reportError: s => errors.push(s), reportResources: s => logs.push(s),
+    }, reportError: (_event, error) => errors.push(typeof error === 'string' ? error : error.message), reportResources: s => logs.push(s),
     installSkill: async source => ({ ...parseSkill(document('downloaded')), source: { url: source, installedAt: 1, modified: false } }),
     prepareMcp: async (server, request, cancel) => { cancel.check(); if (request.auth === 'bearer') { server.credentialAlias = 'secret-' + ++ids; await keys.write(server.credentialAlias, 'PRIVATE-TOKEN'); } return server; },
     testMcp: async (_server, cancel) => { cancel.check(); return 1; } };

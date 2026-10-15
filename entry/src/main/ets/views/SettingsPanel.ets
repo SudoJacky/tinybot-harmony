@@ -14,6 +14,7 @@ import { Banner, BottomBar, GroupCard, NavRow, RowDivider, SectionHeader, Switch
 
 @Component
 export struct SettingsPanel {
+  @StorageProp('tinybot.developer.enabled') private developerEnabled: boolean = false;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.language') private language: string = 'system';
   @State private languageError: string = '';
@@ -263,6 +264,10 @@ export struct SettingsPanel {
             NavRow({ title: t('评分和评论'), compId: 'open-rating', onTap: () => this.onSupport('rating') })
             RowDivider()
             NavRow({ title: t('关于 Tinybot'), compId: 'open-about', onTap: () => this.onSupport('about') })
+            if (this.developerEnabled) {
+              RowDivider()
+              NavRow({ title: t('开发者模式'), subtitle: t('性能统计、慢操作与诊断日志'), compId: 'open-developer', onTap: () => this.onSupport('developer') })
+            }
           }
         }
       }.padding({ left: Space.page, right: Space.page, bottom: Space.xl }).width('100%')

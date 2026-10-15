@@ -20,6 +20,7 @@ class Property {
 class ViewPU {
   constructor(parent, storage, id) { this.parent = parent; this.id = id; this.effects = new Map(); this.childViews = new Map(); this.lists = new Map(); this.branches = new Map(); this.texts = new Map(); this.loadingMounts = 0; }
   finalizeConstruction() {}
+  createStorageProp(_key, value) { return new Property(value); }
   declareWatch() {}
   observeComponentCreation2(callback, component) { const id = ++serial; this.effects.set(id, callback); this.currentElmt = id; currentView = this; if (component === globals.LoadingProgress) this.loadingMounts++; callback(id, true); }
   forEachUpdateFunction(id, items, create, key) {
@@ -51,6 +52,7 @@ const globals = { exports: {}, ViewPU, SynchedPropertyNesedObjectPU: Property, S
   makeBuilderParameterProxy: (name, getters) => new Proxy({}, { get: (_, key) => getters[key]() }),
   TransitionEffect: { OPACITY: { combine() { return this; } }, translate() {} },
   require: id => {
+    if (id.includes('/common/AppearanceStyle&')) return { AppearanceStyle: class {} };
     if (id.includes('I18n&')) return { t: text => text };
     if (id.includes('Team&')) return { teamStatus: status => status };
     if (id.includes('Theme&')) return { Font: {}, Motion: {}, Radius: {}, Space: {}, compactNumber: String };
@@ -62,6 +64,7 @@ const globals = { exports: {}, ViewPU, SynchedPropertyNesedObjectPU: Property, S
     if (id.includes('/model/ToolDetailContent&')) return loadModel('model/ToolDetailContent');
     if (id.includes('/services/Attachments&')) return { Attachments: { path: () => { throw Error('Unexpected file access'); } } };
     if (id.includes('/views/DataViewCard&')) return { DataViewCard: Child };
+    if (id.includes('/views/FileDiffCard&')) return { FileDiffCard: Child };
     if (id === '@ohos:arkui.node') return { LengthMetrics: { vp: n => n } };
     throw Error('Unexpected dependency ' + id);
   }

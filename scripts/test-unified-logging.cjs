@@ -1,0 +1,106 @@
+// Exercise the public production interface and its actual native output adapter.
+const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict');
+const { performance } = require('node:perf_hooks');
+const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio');
+const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
+const root = path.resolve(__dirname, '../entry/src/main/ets'), cache = new Map(), native = [];
+let serialization = 0;
+const sink = Object.fromEntries(['debug', 'info', 'warn', 'error'].map(level => [level, (...args) => native.push({ level, args })]));
+function load(name) {
+  const file = path.resolve(name.endsWith('.ets') ? name : name + '.ets');
+  if (cache.has(file)) return cache.get(file);
+  const exports = {}; cache.set(file, exports);
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2021,
+    module: ts.ModuleKind.CommonJS } }).outputText, { exports, JSON: { stringify: value => { serialization++; return JSON.stringify(value); } },
+    require: id => id === '@kit.PerformanceAnalysisKit' ? { hilog: sink } : load(path.resolve(path.dirname(file), id)) });
+  return exports;
+}
+const { DiagnosticsCollector, Diagnostics } = load(path.join(root, 'model/Diagnostics'));
+const { configureNativeDiagnosticLog } = load(path.join(root, 'services/NativeDiagnosticLog'));
+configureNativeDiagnosticLog();
+let now = 100, clocks = 0, reads = 0;
+Diagnostics.configureClock(() => { clocks++; return now; });
+const fields = { get chars() { reads++; return 9000; }, get apiKey() { throw Error('Secret field must not be inspected'); } };
+const error = { get message() { throw Error('Disabled logs must not inspect errors'); } };
+for (let index = 0; index < 100000; index++) {
+  Diagnostics.log('debug', 'speech', 'vad', fields, error);
+  Diagnostics.log('info', 'network', 'request_start', fields, error);
+}
+assert.equal(reads, 0); assert.equal(clocks, 0); assert.equal(serialization, 0); assert.equal(native.length, 0);
+assert.equal(Diagnostics.eventsSince(0).length, 0);
+console.log('PASS closed Debug/Info perform no field/error reads, clocks, serialization, buffering or native writes');
+
+const secret = 'PRIVATE_API_KEY_0123456789';
+Diagnostics.log('warn', 'web', 'navigation_blocked', { scheme: 'https', threadId: secret, authorization: secret });
+Diagnostics.log('error', 'session', 'run_failed', { code: 401 }, Error('timeout Authorization: Bearer ' + secret + ' https://secret.example/path prompt=PRIVATE_PROMPT'));
+assert.equal(clocks, 0); assert.equal(native.length, 2); assert.equal(serialization, 2);
+assert.equal(Diagnostics.snapshot().logging.records.length, 0); assert.equal(Diagnostics.eventsSince(0).length, 0);
+assert.ok(!JSON.stringify(native).includes(secret)); assert.ok(!JSON.stringify(native).includes('secret.example'));
+assert.equal(JSON.parse(native[1].args.at(-1)).fields.errorKind, 'timeout');
+console.log('PASS closed Warn/Error use only sanitized HiLog and do not read the collector clock or retain diagnostic events');
+
+Diagnostics.start(); Diagnostics.detailed = false;
+Diagnostics.log('debug', 'speech', 'vad', fields); assert.equal(reads, 0);
+Diagnostics.log('info', 'network', 'request_start', { operationId: 7, threadId: secret, protocol: 'chat-completions', chars: 22,
+  apiKey: secret, Authorization: secret, request: secret, prompt: 'PRIVATE_PROMPT', body: { text: secret }, url: 'https://secret.example', path: 'C:/private/user' });
+let snapshot = Diagnostics.snapshot(); let log = snapshot.logging.records.at(-1);
+assert.equal(log.log.fields.threadId, 'ref-1'); assert.equal(log.log.fields.protocol, 'chat-completions');
+assert.equal(log.log.fields.chars, 22); assert.equal(log.log.fields.operationId, 7);
+assert.equal(log.log.fields.apiKey, undefined); assert.equal(log.log.fields.request, undefined);
+assert.ok(!JSON.stringify(snapshot).includes('PRIVATE_')); assert.ok(!JSON.stringify(snapshot).includes('secret.example'));
+Diagnostics.log('info', 'network', 'request_end', { threadId: secret, protocol: secret });
+log = Diagnostics.snapshot().logging.records.at(-1); assert.equal(log.log.fields.threadId, 'ref-1'); assert.equal(log.log.fields.protocol, '[redacted]');
+const before = Diagnostics.snapshot().logging.records.length;
+Diagnostics.log('info', 'constructor', 'request_start', fields); Diagnostics.log('info', 'network', secret, fields);
+assert.equal(Diagnostics.snapshot().logging.records.length, before); assert.equal(reads, 0);
+assert.equal(Diagnostics.snapshot().logging.rejected, 2);
+Diagnostics.logLevel = 'error';
+const warnings = native.length; Diagnostics.log('warn', 'web', 'navigation_blocked', { scheme: 'data' });
+assert.equal(native.length, warnings + 1); assert.equal(Diagnostics.snapshot().logging.records.length, before);
+Diagnostics.log('error', 'session', 'save_failed', {}, Object.assign(Error('PRIVATE_SECRET ' + secret), { code: 28 }));
+log = Diagnostics.snapshot().logging.records.at(-1); assert.equal(log.log.fields.errorCode, 28); assert.equal(log.log.fields.errorKind, 'unknown');
+assert.equal(Diagnostics.snapshot().logging.counts.error, 1); assert.ok(Diagnostics.snapshot().logging.filtered >= 2);
+Diagnostics.log('error', 'browser', 'observation_changed', undefined, Object.assign(Error(secret), { code: 'STALE_BROWSER_SNAPSHOT' }));
+assert.equal(Diagnostics.snapshot().logging.records.at(-1).log.fields.errorCode, 'STALE_BROWSER_SNAPSHOT');
+Diagnostics.logLevel = 'debug'; Diagnostics.log('debug', 'speech', 'vad', { speaking: false });
+assert.equal(Diagnostics.snapshot().logging.counts.debug, 1);
+console.log('PASS all levels, allowlisted names/fields/enums, private payload exclusion, error classification/codes and per-capture references');
+
+const collector = new DiagnosticsCollector(); collector.configureClock(() => ++now); collector.start();
+for (let index = 0; index < 1100; index++) collector.log('info', 'diagnostics', 'marker', { count: index });
+for (let index = 0; index < 14000; index++) collector.event('render.test', { number: index }, 0, true);
+snapshot = collector.snapshot();
+assert.equal(snapshot.logging.records.length, 1000); assert.equal(snapshot.logging.overwritten, 100); assert.equal(snapshot.logging.counts.info, 1100);
+assert.equal(snapshot.events.length, 12000); assert.ok(snapshot.events.every(event => !event.log));
+assert.equal(snapshot.logging.records[0].log.fields.count, 100); assert.equal(snapshot.logging.records.at(-1).log.fields.count, 1099);
+const all = collector.eventsSince(0); assert.equal(all.length, 13000); assert.ok(all.every((event, index) => !index || event.seq > all[index - 1].seq));
+assert.ok(all.every((event, index) => !index || event.time >= all[index - 1].time));
+assert.equal(collector.snapshot(false).logging.records.length, 0);
+collector.stop(); const stopped = JSON.stringify(collector.snapshot()); collector.log('error', 'session', 'save_failed', {}, Error(secret));
+assert.equal(JSON.stringify(collector.snapshot()), stopped, 'Stopped collector without native sink remains unchanged');
+collector.start(); assert.equal(collector.snapshot().logging.records.length, 0); assert.equal(collector.snapshot().logging.overwritten, 0);
+collector.log('info', 'network', 'request_start', { threadId: 'different id' });
+assert.equal(collector.snapshot().logging.records[0].log.fields.threadId, 'ref-1');
+collector.configureLogSink(() => { throw Error('native output unavailable'); }); collector.log('error', 'session', 'save_failed');
+assert.equal(collector.snapshot().logging.sinkFailures, 1); collector.clear(); assert.equal(collector.snapshot().logging.records.length, 0);
+console.log('PASS independent bounded log ring, monotonic shared sequence, overwrite accounting, stop/reset and visible sink failures');
+
+// Architectural guard: new application paths cannot bypass redaction or the mode/level gate.
+let migratedCalls = 0;
+for (const file of fs.readdirSync(root, { recursive: true }).filter(file => file.endsWith('.ets'))) {
+  const source = fs.readFileSync(path.join(root, file), 'utf8');
+  if (file.replaceAll('\\', '/') === 'services/NativeDiagnosticLog.ets') continue;
+  assert.ok(!/\bhilog\s*\./.test(source), 'Direct HiLog bypass: ' + file);
+  assert.ok(!/import\s*\{[^}]*\bhilog\b/.test(source), 'Direct HiLog import: ' + file);
+  for (const match of source.matchAll(/Diagnostics\.log\('(debug|info|warn|error)', '([^']+)', '([^']+)'/g)) {
+    const fresh = new DiagnosticsCollector(); fresh.start(); fresh.logLevel = 'debug'; fresh.log(match[1], match[2], match[3]);
+    assert.equal(fresh.snapshot().logging.rejected, 0, 'Unregistered production log: ' + match[0]); migratedCalls++;
+  }
+}
+assert.ok(migratedCalls >= 55, 'Expected the existing logging paths to migrate');
+console.log('PASS application-wide logging architecture guard and fixed event catalog: ' + migratedCalls + ' literal call sites');
+Diagnostics.stop();
+const begin = performance.now();
+for (let index = 0; index < 1000000; index++) Diagnostics.log('info', 'network', 'request_start');
+// Benchmark is separate from deterministic zero-work assertions; never use host timing as device proof.
+console.log(JSON.stringify({ iterations: 1000000, hostDurationMs: +(performance.now() - begin).toFixed(2), note: 'Host microbenchmark only' }));

@@ -1,9 +1,9 @@
+import { Diagnostics } from '../model/Diagnostics';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { WebUiView } from './WebUiView';
 import { LengthMetrics } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { t } from '../model/I18n';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 import { UiCompiler, UiNode, UiPart, UiSavedState, UiValue, UiValues,
   copyUiValues, uiNodeText, uiNodeVisible, uiStepValue, uiText, uiParts, validateUiState } from '../model/InteractiveUi';
 import { Btn, Radius, Space, Styles } from '../common/Theme';
@@ -198,8 +198,7 @@ struct UiSurface {
   }
   private report(error: Error): void {
     this.error = error.message;
-    hilog.error(0x0000, 'TinybotUI', 'surface=%{public}s chars=%{public}d closed=%{public}s streaming=%{public}s nodes=%{public}d error=%{public}s',
-      this.surfaceKey, this.source.length, String(this.closed), String(this.streaming), this.nodes.length, error.message);
+    Diagnostics.log('error', 'preview', 'failed', { surfaceId: this.surfaceKey, chars: this.source.length, closed: this.closed, streaming: this.streaming, nodes: this.nodes.length }, error);
   }
   private refresh(): void {
     if (this.failed) { return; }

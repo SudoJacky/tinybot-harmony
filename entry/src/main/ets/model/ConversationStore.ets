@@ -1,3 +1,4 @@
+import { Diagnostics } from './Diagnostics';
 import { t } from './I18n';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
@@ -43,6 +44,7 @@ export class ConversationStore implements SessionRepository {
   save(data: AppData, changedThreadIds?: string[]): Promise<void> {
     // Capture synchronously, before any queued IO. Immutable strings can be shared across saves.
     // Failed candidates may have been rolled back by the caller. Re-capture its authoritative state.
+    const mark = Diagnostics.begin();
     const changed = changedThreadIds === undefined || this.captureFailed ? undefined : new Set(changedThreadIds);
     const next = new Map<string, string>();
     for (const thread of data.threads) {
@@ -54,6 +56,7 @@ export class ConversationStore implements SessionRepository {
     const header = JSON.stringify(metadata);
     this.captured = next;
     this.captureFailed = false;
+    if (Diagnostics.recording) { Diagnostics.end('storage.capture', mark, { threads: data.threads.length, changed: changedThreadIds ? changedThreadIds.length : data.threads.length, metadataChars: header.length }); }
     const saved = this.pendingSave.then(() => this.commit(header, next));
     // Keep the queue usable; the failed operation still rejects to its caller.
     this.pendingSave = saved.catch(() => { this.captureFailed = true; }); return saved;
@@ -82,6 +85,7 @@ export class ConversationStore implements SessionRepository {
     }
   }
   private async write(path: string, text: string): Promise<void> {
+    const mark = Diagnostics.begin();
     const bytes = new util.TextEncoder().encodeInto(text);
     const file = await fs.open(path, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
     try {
@@ -92,6 +96,6 @@ export class ConversationStore implements SessionRepository {
         written += count;
       }
       await fs.fsync(file.fd);
-    } finally { await fs.close(file); }
+    } finally { await fs.close(file); if (Diagnostics.recording) { Diagnostics.end('storage.write', mark, { bytes: bytes.byteLength }); } }
   }
 }

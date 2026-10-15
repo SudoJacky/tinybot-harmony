@@ -1,6 +1,6 @@
+import { Diagnostics } from '../model/Diagnostics';
 import { common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 import { t } from '../model/I18n';
 import { McpServer } from '../model/Productivity';
 import { McpRequest } from '../model/ResourceManagement';
@@ -37,7 +37,7 @@ export async function prepareNativeMcp(server: McpServer, request: McpRequest, a
   } catch (error) {
     if (alias) {
       try { await new CredentialStore().remove(alias); }
-      catch (cleanup) { hilog.error(0, 'TinybotResources', 'Credential rollback failed: %{public}s', (cleanup as Error).message); }
+      catch (cleanup) { Diagnostics.log('error', 'resources', 'credential_rollback_failed', undefined, cleanup as Error); }
     }
     throw error as Error;
   }

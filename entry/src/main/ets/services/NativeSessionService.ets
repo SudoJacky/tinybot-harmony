@@ -30,7 +30,8 @@ import { BrowserTools } from './BrowserTools';
 import { Attachments } from './Attachments';
 import { AttachmentTools } from './AttachmentTools';
 import { util } from '@kit.ArkTS';
-import { hilog } from '@kit.PerformanceAnalysisKit';
+import { Diagnostics } from '../model/Diagnostics';
+import { LogFields } from '../model/DiagnosticLog';
 import { ConversationStore } from '../model/ConversationStore';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { ProviderProfile } from '../model/ProviderProfiles';
@@ -57,7 +58,7 @@ class NativeProviderEffects implements ProviderEffects {
 class NativeUsageRecorder implements UsageRecorder {
   recordTool(id: string, activity: UsageToolActivity): void { UsageLedger.recordTool(id, activity); }
   recordContext(id: string, diagnostics: ContextDiagnostics): void {
-    hilog.info(0x0000, 'TinybotContext', 'session=%{public}s %{public}s', id, JSON.stringify(diagnostics));
+    if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'context', 'inspected', { sessionId: id, tokens: diagnostics.tokens, budget: diagnostics.inputBudget, tools: diagnostics.toolTokens, messages: diagnostics.historyTokens, count: diagnostics.projectedResults }); }
   }
 }
 
@@ -108,9 +109,9 @@ export class NativeSessionResources implements SessionResources {
     for (const info of this.providers.list()) { this.providers.unregister(info.id); }
     for (const profile of profiles) { this.providers.register(profileProvider(profile, new NativeProviderEffects())); }
   }
-  reportError(message: string): void { hilog.error(0x0000, 'TinybotSession', '%{public}s', message); }
-  reportMemory(message: string): void { hilog.info(0x0000, 'TinybotMemory', '%{public}s', message); }
-  reportResources(message: string): void { hilog.info(0x0000, 'TinybotResources', '%{public}s', message); }
+  reportError(event: string, error: Error | string, fields?: LogFields): void { Diagnostics.log('error', 'session', event, fields, error); }
+  reportMemory(event: string, fields?: LogFields): void { Diagnostics.log('info', 'memory', event, fields); }
+  reportResources(event: string, fields?: LogFields): void { Diagnostics.log('info', 'resources', event, fields); }
   installSkill(source: string, paths: string[], cancellation: Cancellation): Promise<SkillData> {
     return new SkillInstaller(new NativeWebTransport()).install(source, paths, cancellation);
   }
@@ -129,7 +130,7 @@ export function createNativeSessionService(filesDir: string, workspaceFilesDir: 
     (content, cancellation) => WebUiPreflight.validate(content, cancellation), new NativeOrchestrationExecutor(), browser), credentials,
     new NativeSessionResources(workspaceFilesDir, providers, approval, context, browser));
   if (browser) {
-    browser.configure((policy) => session.setBrowserPolicy(policy), (message) => hilog.info(0x0000, 'TinybotBrowser', '%{public}s', message));
+    browser.configure((policy) => session.setBrowserPolicy(policy), (event, fields, error) => Diagnostics.log(error === undefined ? 'info' : 'error', 'browser', event, fields, error));
     session.subscribe((event) => { if (event.data) { browser.updatePolicy(event.data.extensions?.browserPolicy || 'unset'); } });
   }
   return session;

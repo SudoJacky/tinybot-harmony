@@ -41,6 +41,9 @@ function load(relative) {
     setTimeout: (fn, delay) => { timers.set(++timerId, { fn, delay }); return timerId; }, clearTimeout: id => timers.delete(id), Error }, { filename: file });
   return exports;
 }
+const diagnostics = load(path.join(root, 'model/Diagnostics')).Diagnostics;
+diagnostics.start(); diagnostics.logLevel = 'debug';
+diagnostics.configureLogSink(data => { if (data.module === 'speech' && data.event === 'vad') vadEvents.push(data); });
 const { SpeechInput } = load(path.join(root, 'services/SpeechInput'));
 const { DictationDraft } = load(path.join(root, 'model/DictationDraft'));
 function engine() {

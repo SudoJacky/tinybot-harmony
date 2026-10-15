@@ -18,9 +18,8 @@ export class StreamReveal {
       this.entries.set(key, { text: text, ranges: [] });
       return;
     }
-    let prefix = 0;
+    let prefix = previous ? previous.text.length : 0;
     if (previous) {
-      while (prefix < previous.text.length && prefix < text.length && previous.text[prefix] === text[prefix]) { prefix++; }
       // Do not cut a UTF-16 surrogate pair when replacing a suffix.
       if (prefix > 0 && /[\uD800-\uDBFF]/.test(text[prefix - 1])) { prefix--; }
     }
@@ -37,7 +36,8 @@ export class StreamReveal {
   }
 
   retain(keys: string[]): void {
-    this.entries.forEach((_value: RevealText, key: string) => { if (!keys.includes(key)) { this.entries.delete(key); } });
+    const retained = new Set<string>(keys);
+    this.entries.forEach((_value: RevealText, key: string) => { if (!retained.has(key)) { this.entries.delete(key); } });
   }
 
   active(now: number): boolean {

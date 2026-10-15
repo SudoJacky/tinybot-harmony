@@ -1,6 +1,6 @@
+import { Diagnostics } from '../model/Diagnostics';
 import { common, Configuration, ConfigurationConstant } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 import { ThemeControl } from '@kit.ArkUI';
 import { AppearanceOptions, accentPalette, defaultAppearance, validateAppearance } from '../model/Appearance';
 import { makeAppearanceStyle } from '../common/AppearanceStyle';
@@ -22,7 +22,7 @@ export class AppearancePreferences {
     validateAppearance(options);
     AppearancePreferences.options = options;
     AppearancePreferences.refresh();
-    hilog.info(0x0000, 'TinybotAppearance', 'Loaded appearance=%{public}s', JSON.stringify(options));
+    Diagnostics.log('info', 'appearance', 'loaded');
   }
 
   static activate(): void {
@@ -67,13 +67,13 @@ export class AppearancePreferences {
       AppearancePreferences.options = JSON.parse(serialized) as AppearanceOptions;
       AppearancePreferences.apply(AppearancePreferences.options);
     } catch (error) {
-      hilog.error(0x0000, 'TinybotAppearance', 'Appearance save/apply failed: %{public}s', (error as Error).message);
+      Diagnostics.log('error', 'appearance', 'save_failed', undefined, error as Error);
       AppearancePreferences.options = previous;
       store.putSync('appearance', JSON.stringify(previous));
       store.flushSync();
       AppearancePreferences.apply(previous);
       throw new Error((error as Error).message);
     }
-    hilog.info(0x0000, 'TinybotAppearance', 'Applied appearance=%{public}s', serialized);
+    Diagnostics.log('info', 'appearance', 'applied');
   }
 }

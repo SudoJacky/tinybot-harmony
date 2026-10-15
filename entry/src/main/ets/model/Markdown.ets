@@ -1,11 +1,19 @@
 export interface MarkdownBlock { kind: string; text: string; level: number; rows: string[][]; }
 export interface MarkdownSpan { text: string; kind: string; url: string; }
+interface MarkdownParse { blocks: MarkdownBlock[]; starts: number[]; }
 export function markdownBlocks(source: string): MarkdownBlock[] {
-  const lines = source.replace(/\r\n/g, '\n').split('\n'); const blocks: MarkdownBlock[] = [];
+  return parseMarkdown(source.replace(/\r\n/g, '\n')).blocks;
+}
+function parseMarkdown(source: string): MarkdownParse {
+  const lines = source.split('\n'); const blocks: MarkdownBlock[] = [];
+  const offsets: number[] = []; let offset = 0;
+  for (const line of lines) { offsets.push(offset); offset += line.length + 1; }
+  const starts: number[] = [];
   let index = 0;
   while (index < lines.length) {
     const line = lines[index];
     if (!line.trim()) { index++; continue; }
+    starts.push(offsets[index]);
     const fence = line.match(/^\s*(```+|~~~+)(.*)$/);
     if (fence) {
       const content: string[] = []; index++;
@@ -38,7 +46,27 @@ export function markdownBlocks(source: string): MarkdownBlock[] {
       text: heading ? heading[2] : line, level: heading ? heading[1].length : 0, rows: [] });
     index++;
   }
-  return blocks;
+  return { blocks: blocks, starts: starts };
+}
+
+export interface MarkdownUpdate { start: number; blocks: MarkdownBlock[]; }
+// Keep the final two blocks mutable: a partial table separator may initially
+// parse as its own block, then turn the preceding line into a table header.
+export class MarkdownDocument {
+  private source: string = '';
+  private starts: number[] = [];
+  update(content: string): MarkdownUpdate {
+    const source = content.replace(/\r\n/g, '\n');
+    if (source === this.source) { return { start: this.starts.length, blocks: [] }; }
+    const append = source.startsWith(this.source);
+    const start = append ? Math.max(0, this.starts.length - 2) : 0;
+    const offset = append && this.starts.length ? this.starts[start] : 0;
+    const parsed = parseMarkdown(source.slice(offset));
+    this.starts.length = start;
+    for (const position of parsed.starts) { this.starts.push(offset + position); }
+    this.source = source;
+    return { start: start, blocks: parsed.blocks };
+  }
 }
 function tableCells(line: string): string[] { return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim()); }
 // Bare URLs stop before CJK/fullwidth punctuation and trailing sentence punctuation.

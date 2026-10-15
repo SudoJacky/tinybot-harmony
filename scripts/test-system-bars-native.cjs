@@ -6,8 +6,10 @@ const assert = require('node:assert/strict');
 const studio = process.env.DEVECO_STUDIO_HOME || 'C:/Program Files/Huawei/DevEco Studio';
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 const file = path.resolve(__dirname, '../entry/src/main/ets/entryability/EntryAbility.ets');
-const colors = [], failures = [];
+const colors = [], failures = []; let dark = false;
 const kits = {
+  '../model/Diagnostics': require('./load-diagnostics.cjs'),
+  '../services/AppearancePreferences': { AppearancePreferences: { refresh: config => { dark = config.colorMode === 0; }, activate: () => { dark = ability.context.config.colorMode === 0; } } },
   '@kit.AbilityKit': {
     UIAbility: class {},
     ConfigurationConstant: { ColorMode: { COLOR_MODE_DARK: 0, COLOR_MODE_LIGHT: 1 } }
@@ -19,7 +21,7 @@ const exportsObject = {};
 const compiled = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: {
   module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021
 } }).outputText;
-vm.runInNewContext(compiled, { exports: exportsObject, require: id => kits[id] }, { filename: file });
+vm.runInNewContext(compiled, { AppStorage: { get: () => dark }, exports: exportsObject, require: id => kits[id] }, { filename: file });
 const ability = new exportsObject.default();
 const nativeWindow = { setWindowSystemBarProperties: properties => {
   colors.push(properties.statusBarContentColor);

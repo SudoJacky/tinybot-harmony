@@ -1,3 +1,4 @@
+import { LogFields } from '../model/DiagnosticLog';
 import { BrowserPolicy } from '../model/Skills';
 import { ToolCall } from '../model/Agent';
 import { ToolFailure, ToolResultError } from '../model/ToolFailure';
@@ -38,7 +39,7 @@ export class BrowserSession implements ExecutionGate {
   permissionSaving: boolean = false;
   private driver?: BrowserDriver;
   private savePolicy?: (policy: BrowserPolicy) => Promise<void>;
-  private log: (message: string) => void = () => {};
+  private log: (event: string, fields?: LogFields, error?: Error | string) => void = () => {};
   private lease?: Cancellation;
   private threadId: string = '';
   private removeCancellation: () => void = () => {};
@@ -50,7 +51,7 @@ export class BrowserSession implements ExecutionGate {
 
   get paused(): boolean { return this.permissionPending || (!!this.lease && this.owner === 'user'); }
   get hasTask(): boolean { return this.lease !== undefined; }
-  configure(savePolicy: (policy: BrowserPolicy) => Promise<void>, log: (message: string) => void): void {
+  configure(savePolicy: (policy: BrowserPolicy) => Promise<void>, log: (event: string, fields?: LogFields, error?: Error | string) => void): void {
     this.savePolicy = savePolicy; this.log = log;
   }
   attach(driver: BrowserDriver): void {
@@ -74,7 +75,7 @@ export class BrowserSession implements ExecutionGate {
       const policy: BrowserPolicy = enabled ? 'enabled' : 'disabled';
       await this.savePolicy(policy);
       this.updatePolicy(policy);
-      this.log('permission=' + policy);
+      this.log('permission', { policy: policy });
     } catch (error) { this.report((error as Error).message); throw error as Error; }
     finally { this.permissionSaving = false; }
   }
@@ -102,12 +103,12 @@ export class BrowserSession implements ExecutionGate {
   takeOver(reason: string = ''): void {
     if (!this.open || this.owner === 'user') { return; }
     this.owner = 'user'; this.epoch++; this.handoffReason = reason;
-    this.log('control=user epoch=' + this.epoch + ' activeTask=' + String(this.hasTask));
+    this.log('control_user', { generation: this.epoch, enabled: this.hasTask });
   }
   handoff(): void {
     if (!this.open || !this.lease || this.policy !== 'enabled') { return; }
     this.owner = 'agent'; this.handoffReason = ''; this.epoch++;
-    this.log('control=agent epoch=' + this.epoch); this.wake();
+    this.log('control_agent', { generation: this.epoch }); this.wake();
   }
   release(cancellation: Cancellation): void {
     if (this.lease !== cancellation) { return; }
@@ -115,13 +116,13 @@ export class BrowserSession implements ExecutionGate {
     this.lease = undefined; this.threadId = ''; this.epoch++;
     if (this.open) { this.owner = 'user'; }
     this.answerPermission(false); this.handoffReason = ''; this.wake();
-    this.log('task released epoch=' + this.epoch);
+    this.log('task_released', { generation: this.epoch });
   }
   close(): void {
     this.epoch++; this.open = false; this.owner = 'none'; this.handoffReason = ''; this.editingAddress = false;
-    this.driver?.close(); this.wake(); this.log('closed epoch=' + this.epoch);
+    this.driver?.close(); this.wake(); this.log('closed', { generation: this.epoch });
   }
-  report(message: string): void { this.error = message; this.log('error=' + message); }
+  report(message: string): void { this.error = message; this.log('failed', undefined, message); }
   pageChanged(url: string, title: string): void { this.url = url; this.title = title; }
   userBack(): boolean { return this.requireDriver().userBack(); }
   private requireDriver(): BrowserDriver {
@@ -147,13 +148,13 @@ export class BrowserSession implements ExecutionGate {
     }
     if (!this.lease) {
       this.lease = cancellation; this.threadId = threadId;
-      this.log('acquire thread=' + this.threadId);
+      this.log('acquired', { threadId: this.threadId });
       this.removeCancellation = cancellation.onCancel(() => this.release(cancellation));
     }
     if (this.open && this.owner === 'user') { await this.wait(cancellation); }
     if (this.policy === 'unset') {
       this.permissionPending = true; this.permissionReason = reason; this.permissionUrl = url;
-      this.log('waiting for initial permission');
+      this.log('permission_wait');
       const allowed = await new Promise<boolean>((resolve) => { this.permissionAnswer = resolve; });
       cancellation.check();
       if (!allowed) { throw new ToolFailure('USER_DENIED', 'Browser enable request was declined or dismissed.', 'respect_user_decision'); }
@@ -183,7 +184,7 @@ export class BrowserSession implements ExecutionGate {
   private async perform(operation: string, execute: () => Promise<void>, cancellation: Cancellation): Promise<BrowserReceipt> {
     if (this.operating) { throw new ToolFailure('BROWSER_BUSY', 'A browser operation is still in progress.', 'wait_for_owner'); }
     const epoch = this.epoch; this.operating = true;
-    this.log('operation=' + operation + ' epoch=' + epoch);
+    this.log('operation', { action: operation, generation: epoch });
     try {
       let failure: Error | undefined;
       try { await execute(); } catch (error) { failure = error as Error; }
@@ -195,7 +196,7 @@ export class BrowserSession implements ExecutionGate {
       if (failure) {
         // A changed observation is returned to the model for a fresh read, not a page-loading error.
         if (failure instanceof ToolFailure && ['STALE_BROWSER_SNAPSHOT', 'STALE_BROWSER_ELEMENT'].includes(failure.code)) {
-          this.log('observation changed code=' + failure.code);
+          this.log('observation_changed', undefined, failure);
         } else { this.report(failure.message); }
         throw failure;
       }

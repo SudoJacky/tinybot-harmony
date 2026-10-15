@@ -1,3 +1,4 @@
+import { Diagnostics } from '../model/Diagnostics';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { AppearanceOptions, AppearanceMode, AccentName, LightEffect, APPEARANCE_MODES, ACCENT_NAMES,
   FONT_SCALES, LIGHT_EFFECTS, accentPalette, defaultAppearance, copyAppearance, colorHsv, hsvColor } from '../model/Appearance';
@@ -6,7 +7,6 @@ import { t } from '../model/I18n';
 import { Btn, Font, Radius, Space, Styles } from '../common/Theme';
 import { Banner, GroupCard, NavRow, RowDivider, SectionHeader, Segmented } from '../common/Widgets';
 import { text } from '@kit.ArkGraphics2D';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 
 let readingFonts: string[] | undefined;
 
@@ -51,10 +51,10 @@ export struct AppearancePanel {
       if (this.options.fontFamily && !families.includes(this.options.fontFamily)) { families.push(this.options.fontFamily); }
       readingFonts = families;
       if (this.mounted) { this.fonts = families; this.fontLoading = false; }
-      hilog.info(0x0000, 'TinybotAppearance', 'Reading font families=%{public}s', JSON.stringify(families));
+      if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'appearance', 'fonts_loaded', { count: families.length }); };
     }).catch((error: Error) => {
       if (this.mounted) { this.error = t('无法读取设备字体：{0}', [error.message]); this.fontLoading = false; }
-      hilog.error(0x0000, 'TinybotAppearance', 'Font enumeration failed: %{public}s', error.message);
+      Diagnostics.log('error', 'appearance', 'fonts_failed', undefined, error);
     });
   }
 

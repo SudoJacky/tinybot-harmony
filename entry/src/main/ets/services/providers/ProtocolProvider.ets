@@ -1,10 +1,10 @@
+import { Diagnostics } from '../../model/Diagnostics';
 import { t } from '../../model/I18n';
 import { applyReasoningEffort } from './ReasoningRequest';
 import { UsageStream, RequestUsage } from '../../model/Usage';
 import { http } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 import { ModelTurn } from '../../model/Agent';
 import { copyProviderInfo, ProviderInfo } from '../../model/Provider';
 import { Cancellation, RunCancelledError } from '../Cancellation';
@@ -40,10 +40,19 @@ export class ProtocolProvider implements ModelProvider {
     const messages = await this.effects.hydrate(input.messages);
     cancellation.check();
     const usage = new UsageStream(); let firstToken: number | undefined = undefined;
-    const receiveText = (text: string): void => { if (text && firstToken === undefined) { firstToken = Date.now(); } onText(text); };
+    const diagnosticId = Diagnostics.nextId(); const networkMark = Diagnostics.begin(diagnosticId); let textChunks = 0; let textChars = 0;
+    const receiveText = (text: string): void => {
+      if (text && firstToken === undefined) { firstToken = Date.now(); if (Diagnostics.recording && networkMark) { Diagnostics.measure('network.firstText', Diagnostics.now() - networkMark.time); Diagnostics.event('network.firstText', {}, diagnosticId); } }
+      textChunks++; textChars += text.length; const mark = Diagnostics.begin(diagnosticId); onText(text);
+      if (Diagnostics.recording) { Diagnostics.end('network.publishText', mark, { chars: text.length, cumulativeChars: textChars, chunk: textChunks }); }
+    };
+    const receiveReasoning = (text: string): void => {
+      const mark = Diagnostics.begin(diagnosticId); onReasoning?.(text);
+      if (Diagnostics.recording) { Diagnostics.end('network.publishReasoning', mark, { chars: text.length }); }
+    };
     const decoder = new util.TextDecoder('utf-8');
-    const parser: ModelStream = this.info.protocol === 'responses' ? new ResponsesStream(receiveText, onReasoning) :
-      this.info.protocol === 'anthropic-messages' ? new AnthropicStream(receiveText, onReasoning) : new ChatStream(receiveText, onReasoning);
+    const parser: ModelStream = this.info.protocol === 'responses' ? new ResponsesStream(receiveText, receiveReasoning) :
+      this.info.protocol === 'anthropic-messages' ? new AnthropicStream(receiveText, receiveReasoning) : new ChatStream(receiveText, receiveReasoning);
     const body: Object = this.info.protocol === 'responses' ? responsesRequest(input.model, messages, input.tools, input.maxOutputTokens) :
       this.info.protocol === 'anthropic-messages' ? anthropicRequest(input.model, messages, input.tools, input.maxOutputTokens) :
       chatRequest(input.model, messages, input.tools, this.options, input.maxOutputTokens);
@@ -54,8 +63,7 @@ export class ProtocolProvider implements ModelProvider {
     const usageId = util.generateRandomUUID();
     this.effects.recordUsage({ id: usageId, provider: this.info.id, model: input.model, startedAt: startedAt, durationMs: 0,
       status: 'running_or_unknown', origin: input.usageOrigin });
-    hilog.info(0x0000, 'TinybotNetwork', 'Request start provider=%{public}s protocol=%{public}s model=%{public}s messages=%{public}d tools=%{public}d',
-      this.info.id, this.info.protocol, input.model, input.messages.length, input.tools.length);
+    if (Diagnostics.acceptsLog('info')) { Diagnostics.log('info', 'network', 'request_start', { operationId: diagnosticId, providerId: this.info.id, protocol: this.info.protocol, hasModel: input.model.length > 0, messages: input.messages.length, tools: input.tools.length }); };
     return new Promise<ModelTurn>((resolve, reject) => {
       let settled = false;
       let ended = false;
@@ -71,6 +79,7 @@ export class ProtocolProvider implements ModelProvider {
           return;
         }
         settled = true;
+        if (Diagnostics.recording) { Diagnostics.end('network.request', networkMark, { bytes: receivedBytes, http: responseCode, failed: error ? 1 : 0, cancelled: cancellation.cancelled ? 1 : 0, textChunks: textChunks, textChars: textChars }); }
         clearTimeout(timer);
         removeCancel();
         request.destroy();
@@ -78,10 +87,9 @@ export class ProtocolProvider implements ModelProvider {
           startedAt: startedAt, durationMs: Date.now() - startedAt, firstTokenMs: firstToken === undefined ? undefined : firstToken - startedAt,
           status: error ? cancellation.cancelled ? 'cancelled' : 'failed' : 'complete', tokens: usage.result() };
         this.effects.recordUsage(record); if (result) { result.usage = record; }
-        hilog.info(0x0000, 'TinybotNetwork', 'Request ended elapsedMs=%{public}d bytes=%{public}d http=%{public}d failed=%{public}s',
-          Date.now() - startedAt, receivedBytes, responseCode, (error !== undefined).toString());
+        if (Diagnostics.acceptsLog('info')) { Diagnostics.log('info', 'network', 'request_end', { operationId: diagnosticId, elapsedMs: Date.now() - startedAt, bytes: receivedBytes, http: responseCode, failed: error !== undefined, cancelled: cancellation.cancelled }); };
         if (error instanceof ContextOverflowError) {
-          hilog.warn(0x0000, 'TinybotNetwork', 'Context overflow provider=%{public}s model=%{public}s http=%{public}d', this.info.id, input.model, responseCode);
+          Diagnostics.log('warn', 'network', 'context_overflow', { operationId: diagnosticId, providerId: this.info.id, http: responseCode });
         }
         if (error) {
           reject(error);
@@ -134,12 +142,14 @@ export class ProtocolProvider implements ModelProvider {
           }
           if (data.byteLength > 0) { resetIdleTimer(); }
           if (receivedBytes === 0) {
-            hilog.info(0x0000, 'TinybotNetwork', 'First data elapsedMs=%{public}d', Date.now() - startedAt);
+            if (Diagnostics.recording && networkMark) { Diagnostics.measure('network.firstData', Diagnostics.now() - networkMark.time); Diagnostics.event('network.firstData', {}, diagnosticId); }
+            if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'network', 'first_data', { operationId: diagnosticId, elapsedMs: Date.now() - startedAt }); };
           }
           // Count bytes for diagnostics only. SSE metadata and heartbeats are not
           // retained model output; a cumulative wire-size cap cuts off valid thinking.
           // Parsers still bound individual frames, reasoning and tool arguments.
           receivedBytes += data.byteLength;
+          const parseMark = Diagnostics.begin(diagnosticId);
           try {
             const text = decoder.decodeToString(new Uint8Array(data), { stream: true });
             responsePrefix += text.slice(0, Math.max(0, 16384 - responsePrefix.length));
@@ -147,7 +157,7 @@ export class ProtocolProvider implements ModelProvider {
           } catch (error) {
             parseError = error as Error;
             finish();
-          }
+          } finally { if (Diagnostics.recording) { Diagnostics.end('network.decodeParse', parseMark, { bytes: data.byteLength }); } }
         });
         request.on('dataEnd', () => {
           ended = true;
@@ -164,8 +174,7 @@ export class ProtocolProvider implements ModelProvider {
           readTimeout: 0
         }, (error: BusinessError, code: number) => {
           if (error) {
-            hilog.error(0x0000, 'TinybotNetwork', 'Request error code=%{public}d elapsedMs=%{public}d bytes=%{public}d',
-              error.code, Date.now() - startedAt, receivedBytes);
+            Diagnostics.log('error', 'network', 'request_failed', { operationId: diagnosticId, code: error.code, elapsedMs: Date.now() - startedAt, bytes: receivedBytes }, error);
             const message = t("网络请求失败（{0}），请检查连接和服务地址。", [error.code]);
             // Retry only known connection/timeout failures before any response bytes.
             settle(receivedBytes === 0 && [2300005, 2300006, 2300007, 2300028, 2300052, 2300056].includes(error.code) ?

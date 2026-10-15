@@ -19,6 +19,7 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.resolve(__dirname,'..
     observedWrites.push(key); return Reflect.set(target,key,value,receiver);
   }}); }
 },require:id=>{
+  if(id==='../model/Diagnostics')return require('./load-diagnostics.cjs');
   if(id==='@kit.ArkUI')return {window:platform};
   if(id==='@kit.PerformanceAnalysisKit')return {hilog:{error:(...values)=>errors.push(values)}};
   throw Error('Unexpected dependency '+id);

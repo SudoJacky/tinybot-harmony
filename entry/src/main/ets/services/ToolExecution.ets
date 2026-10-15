@@ -1,3 +1,4 @@
+import { Diagnostics } from '../model/Diagnostics';
 import { AgentStep, ToolDefinition, ToolExecution, ToolExecutionMode, toolError } from '../model/Agent';
 import { UsageToolActivity } from '../model/Usage';
 import { AgentTools, LoopObserver } from './AgentLoop';
@@ -36,6 +37,8 @@ export async function executeToolBatch(step: AgentStep, round: number, tools: Ag
     if (cancellation.cancelled) { tool.status = 'pending'; cancellation.check(); }
     observer.event({ type: 'tool_start', step: round, toolCallId: tool.call.id });
     if (cancellation.cancelled) { tool.status = 'pending'; cancellation.check(); }
+    const diagnosticId = Diagnostics.nextId(); const diagnosticMark = Diagnostics.begin(diagnosticId);
+    if (Diagnostics.recording) { Diagnostics.event('tool.start', { round: round, argumentChars: tool.call.function.arguments.length }, diagnosticId); }
     const activity: UsageToolActivity = { id: tool.call.id, name: tool.call.function.name,
       status: 'running', startedAt: Date.now(), durationMs: 0 };
     try {
@@ -89,6 +92,7 @@ export async function executeToolBatch(step: AgentStep, round: number, tools: Ag
       tool.output = toolError(error as Error);
       tool.status = error instanceof RunCancelledError || (error instanceof ToolResultError && error.code === 'CANCELLED') ? 'cancelled' : 'failed';
     }
+    if (Diagnostics.recording) { Diagnostics.end('tool.execute', diagnosticMark, { failed: tool.status === 'failed' ? 1 : 0, cancelled: tool.status === 'cancelled' ? 1 : 0, outputChars: tool.output.length, round: round }); }
     activity.status = tool.status; activity.durationMs = Date.now() - activity.startedAt; recordActivity();
     observer.event({ type: 'tool_end', step: round, toolCallId: tool.call.id });
     // Cancellation never discards an operation that already committed successfully.

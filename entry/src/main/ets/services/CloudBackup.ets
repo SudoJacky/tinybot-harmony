@@ -1,8 +1,8 @@
+import { Diagnostics } from '../model/Diagnostics';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { cloudSync, fileIo as fs, fileUri } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 import { AppData } from '../model/Conversation';
 import { t } from '../model/I18n';
 import { createBackupFile, readBackupFile } from './Backup';
@@ -54,7 +54,7 @@ function syncError(code: cloudSync.ErrorType): string {
 }
 
 function logCleanup(error: Error): void {
-  hilog.warn(0x0000, 'CloudBackup', 'Native cleanup failed: %{public}s', String((error as BusinessError).code));
+  Diagnostics.log('warn', 'backup', 'cleanup_failed', undefined, error);
 }
 
 // start() only acknowledges the request; completion is delivered through progress.
