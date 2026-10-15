@@ -151,7 +151,7 @@ export struct ModelSettingsPanel {
             }
           } else {
             GroupCard() {
-              EmptyState({ icon: $r('sys.symbol.cloud'), title: t("还没有可用的模型"), caption: t("先在“设置 › 模型服务”中添加并启用服务。") })
+              EmptyState({ icon: $r('sys.symbol.cloud'), title: t("还没有可用的模型"), caption: t("先在“设置 › 模型与服务”中添加并启用服务。") })
             }
           }
           if (this.error) { Banner({ text: this.error }).margin({ top: Space.md }) }

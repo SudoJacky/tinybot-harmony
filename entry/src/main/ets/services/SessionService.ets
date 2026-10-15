@@ -38,7 +38,7 @@ import { CONVERSATION_TITLE_PROMPT, sanitizeConversationTitle, shouldGenerateTit
 import { AgentEvent, AgentRuntime } from './AgentRuntime';
 import { AgentTools } from './AgentLoop';
 import { CredentialVault, ProfileSettings, ProviderDraft } from './ProfileSettings';
-import { SessionEvent, SessionRepository, SessionResources, SessionState } from './SessionContracts';
+import { SessionEvent, SessionPreferences, SessionRepository, SessionResources, SessionState, SettingsToggle } from './SessionContracts';
 import { prepareSessionContext, sessionPromptSections, sessionContextSource } from './SessionContext';
 import { PromptSection, renderPrompt } from '../model/ContextProjection';
 interface UiComputeReceipt { status: string; result: UiValues; error: string; resultTruncated: boolean; }
@@ -508,10 +508,26 @@ export class SessionService {
   }
   async saveSettings(userDocument: string, autoCompact: boolean, webEnabled: boolean): Promise<boolean> {
     return this.mutate(t("保存助手设置失败："), async () => {
-      const candidate = this.snapshot(); candidate.config.userDocument = userDocument; candidate.config.autoCompact = autoCompact;
-      candidate.extensions = { webEnabled: webEnabled, browserPolicy: this.extensions.browserPolicy, skills: this.extensions.skills };
-      await this.commitSettings(candidate);
-    });
+      const preferences = this.preferencesSnapshot();
+      preferences.config.userDocument = userDocument; preferences.config.autoCompact = autoCompact;
+      preferences.extensions.webEnabled = webEnabled;
+      await this.commitPreferences(preferences);
+    }, 'preferences');
+  }
+  async setSettingsToggle(kind: SettingsToggle, value: boolean): Promise<boolean> {
+    return this.mutate(t("保存助手设置失败："), async () => {
+      if (typeof value !== 'boolean') { throw new Error('Invalid settings toggle value.'); }
+      const preferences = this.preferencesSnapshot();
+      const options = preferences.productivity.options || defaultAssistantOptions();
+      if (kind === 'autoMemory') { options.autoMemory = value; }
+      else if (kind === 'readOnly') { options.readOnly = value; }
+      else if (kind === 'saveSummary') { options.saveSummary = value; }
+      else if (kind === 'autoCompact') { preferences.config.autoCompact = value; }
+      else if (kind === 'webEnabled') { preferences.extensions.webEnabled = value; }
+      else { throw new Error('Invalid settings toggle.'); }
+      preferences.productivity.options = options;
+      await this.commitPreferences(preferences);
+    }, 'preferences');
   }
   async setBrowserPolicy(policy: BrowserPolicy): Promise<void> {
     if (!this.status.ready || this.status.saveError) { throw new Error(this.status.saveError || 'Session is not ready.'); }
@@ -1172,8 +1188,9 @@ export class SessionService {
     if (!candidate.threads.some((item) => item.id === next.id)) { candidate.threads.unshift(next); }
     candidate.activeThreadId = next.id;
   }
-  private async mutate(prefix: string, action: () => Promise<void>): Promise<boolean> {
+  private async mutate(prefix: string, action: () => Promise<void>, publication: 'snapshot' | 'preferences' = 'snapshot'): Promise<boolean> {
     if (!this.canMutate) { return false; }
+    const startedAt = Date.now();
     const draftRevision = this.draftRevision;
     this.status.phase = 'saving'; this.status.error = ''; this.publish('state');
     try {
@@ -1183,13 +1200,34 @@ export class SessionService {
       this.refreshContext(); return true;
     }
     catch (error) { this.status.error = prefix + (error as Error).message; this.resources.reportError(this.status.error); return false; }
-    finally { this.status.phase = 'idle'; this.publish('snapshot'); }
+    finally {
+      this.status.phase = 'idle'; this.publish(publication);
+      if (publication === 'preferences') {
+        this.resources.reportResources?.('Preferences save: durationMs=' + (Date.now() - startedAt) +
+          ' success=' + (this.status.error.length === 0));
+      }
+    }
   }
-  private async commitCandidate(candidate: AppData, publish: () => void): Promise<void> {
+  private async commitCandidate(candidate: AppData, publish: () => void, changedThreadIds?: string[]): Promise<void> {
     if (this.pendingCommit) { throw new Error('A session commit is already in progress.'); }
-    const committed = this.repository.save(candidate).then(publish);
+    const committed = this.repository.save(candidate, changedThreadIds).then(publish);
     this.pendingCommit = committed;
     try { await committed; } finally { this.pendingCommit = undefined; }
+  }
+  private preferencesSnapshot(): SessionPreferences {
+    const preferences: SessionPreferences = { config: this.data.config, extensions: this.extensions,
+      productivity: this.data.productivity || defaultProductivity() };
+    return JSON.parse(JSON.stringify(preferences)) as SessionPreferences;
+  }
+  private async commitPreferences(preferences: SessionPreferences): Promise<void> {
+    // The repository captures values before IO. Reuse unchanged transcript files and retain live drafts.
+    const candidate: AppData = { version: this.data.version, config: preferences.config, extensions: preferences.extensions,
+      productivity: preferences.productivity, threads: this.data.threads, activeThreadId: this.data.activeThreadId,
+      providerProfiles: this.data.providerProfiles, projects: this.data.projects };
+    await this.commitCandidate(candidate, () => {
+      this.data.config = preferences.config; this.data.extensions = preferences.extensions;
+      this.data.productivity = preferences.productivity;
+    }, Array.from(this.dirtyDrafts));
   }
   private async commitSettings(candidate: AppData): Promise<void> {
     this.syncEmptyThreadPreferences(candidate);
@@ -1235,7 +1273,7 @@ export class SessionService {
     this.emit({ kind: 'teams', state: this.state, threadId: thread.id,
       teams: JSON.parse(JSON.stringify(thread.teams || [])) as TeamRun[] });
   }
-  private publish(kind: 'snapshot' | 'state'): void {
+  private publish(kind: 'snapshot' | 'state' | 'preferences'): void {
     const data = kind === 'snapshot' ? this.snapshot() : undefined;
     if (data) {
       for (const thread of data.threads) {
@@ -1244,7 +1282,8 @@ export class SessionService {
         thread.agentMode = selection.agentMode; thread.disabledTools = selection.disabledTools;
       }
     }
-    this.emit({ kind: kind, state: this.state, data: data });
+    this.emit({ kind: kind, state: this.state, data: data,
+      preferences: kind === 'preferences' ? this.preferencesSnapshot() : undefined });
   }
   private emit(event: SessionEvent): void {
     for (const listener of Array.from(this.listeners)) {

@@ -1,6 +1,7 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { TutorialControl, TutorialScreen, tutorialRect } from '../model/HelpTutorial';
 import { EN_MESSAGES, ZH_MESSAGES } from '../model/LocaleCatalog';
+import { SpeechOrb } from '../common/SpeechOrb';
 import { Font, Radius } from '../common/Theme';
 import { SwitchSize } from '../common/SwitchSize';
 import { NavRow } from '../common/Widgets';
@@ -134,7 +135,7 @@ export struct HelpTutorialScreen {
     this.card(16, this.screen === 'draft' ? 584 : 638, 328, this.screen === 'draft' ? 110 : 56)
     Text(this.screen === 'draft' ? this.text('帮我把下面的想法整理成可执行的步骤：')
       .slice(0, Math.ceil(this.typing * this.text('帮我把下面的想法整理成可执行的步骤：').length)) :
-      this.screen === 'speech' ? this.text('请说出要输入的内容') : this.text('输入消息…')).fontFamily(this.appearance.fontFamily)
+      this.screen === 'speech' ? this.text('松开发送') : this.screen === 'voice-ready' ? this.text('按住说话') : this.text('输入消息…')).fontFamily(this.appearance.fontFamily)
       .fontSize(16).fontColor(this.screen === 'draft' ? $r('app.color.text_primary') : $r('app.color.text_tertiary'))
       .width(this.screen === 'draft' ? 296 : 226).height(48).maxLines(this.screen === 'draft' ? 2 : 1)
       .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -150,20 +151,19 @@ export struct HelpTutorialScreen {
       if (this.screen === 'draft' || this.screen === 'running') {
         SymbolGlyph(this.screen === 'running' ? $r('sys.symbol.square_fill') : $r('sys.symbol.arrow_up'))
           .fontSize(18).fontColor([this.appearance.onAccent])
-      } else { this.glyph($r('sys.symbol.mic'), 19) }
+      } else { this.glyph(this.screen === 'speech' || this.screen === 'voice-ready' ? $r('sys.symbol.keyboard') : $r('sys.symbol.mic'), 19) }
     }.width(36).height(36).borderRadius(18)
       .backgroundColor(this.screen === 'draft' || this.screen === 'running' ? this.appearance.accent : $r('app.color.surface_variant'))
       .position({ x: 298, y: 648 })
     if (this.screen === 'speech') {
-      Row({ space: 5 }) {
-        ForEach([0, 1, 2, 3, 4, 5, 6], (bar: number) => {
-          Rect().width(3).height(6 + 14 * Math.abs(Math.sin(this.motion * Math.PI * 6 + bar)))
-            .radius(2).fill(this.appearance.onAccent)
-        }, (bar: number) => bar.toString())
-        Text('0:02').fontFamily(this.appearance.fontFamily).fontSize(12).fontColor(this.appearance.onAccent).width(34)
-        Rect().width(10).height(10).radius(2).fill(this.appearance.onAccent)
-      }.width(156).height(36).justifyContent(FlexAlign.Center).borderRadius(18)
-        .backgroundColor(this.appearance.accent).position({ x: 178, y: 648 })
+      Text(this.text('帮我把下面的想法整理成可执行的步骤：')).fontFamily(this.appearance.fontFamily).fontSize(16)
+        .fontColor($r('app.color.text_primary')).width(328).padding(14).borderRadius(20)
+        .backgroundColor($r('app.color.surface')).position({ x: 16, y: 346 })
+      SpeechOrb({ phase: 'listening', speaking: true }).width(160).position({ x: 100, y: 424 })
+      Stack() { this.glyph($r('sys.symbol.xmark'), 22) }.width(64).height(48).borderRadius(24)
+        .backgroundColor($r('app.color.surface')).position({ x: 32, y: 578 })
+      Stack() { this.glyph($r('sys.symbol.square_and_pencil'), 22) }.width(64).height(48).borderRadius(24)
+        .backgroundColor($r('app.color.surface')).position({ x: 264, y: 578 })
     }
     Text(this.text('AI可能会犯错，请仔细鉴别。')).fontFamily(this.appearance.fontFamily).fontSize(10).fontColor($r('app.color.text_tertiary'))
       .textAlign(TextAlign.Center).width(340).height(20).position({ x: 10, y: 698 })
@@ -171,15 +171,16 @@ export struct HelpTutorialScreen {
 
   @Builder
   menu() {
-    this.card(108, 86, 200, 310)
+    this.card(108, 86, 200, 354)
     Text(this.text('本对话')).fontFamily(this.appearance.fontFamily).fontSize(17).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
       .position({ x: 124, y: 99 })
-    this.menuRow(this.text('工作区文件'), $r('sys.symbol.folder'), 132)
-    this.menuRow(this.text('分支关系'), $r('sys.symbol.rectangle_stack'), 176)
-    this.menuRow(this.text('创建分支'), $r('sys.symbol.split'), 220)
-    this.menuRow(this.text('分享对话'), $r('sys.symbol.share'), 264)
-    this.menuRow(this.text('导出为 Markdown'), $r('sys.symbol.square_and_arrow_down'), 308)
-    this.menuRow(this.text('设置'), $r('sys.symbol.gearshape'), 352)
+    this.menuRow(this.text('工具范围'), $r('sys.symbol.wrench_and_screwdriver'), 132)
+    this.menuRow(this.text('工作区文件'), $r('sys.symbol.folder'), 176)
+    this.menuRow(this.text('分支关系'), $r('sys.symbol.rectangle_stack'), 220)
+    this.menuRow(this.text('创建分支'), $r('sys.symbol.split'), 264)
+    this.menuRow(this.text('分享对话'), $r('sys.symbol.share'), 308)
+    this.menuRow(this.text('导出为 Markdown'), $r('sys.symbol.square_and_arrow_down'), 352)
+    this.menuRow(this.text('设置'), $r('sys.symbol.gearshape'), 396)
   }
 
   @Builder
@@ -202,39 +203,41 @@ export struct HelpTutorialScreen {
   settings() {
     this.pageTitle(this.text('设置'))
     if (this.screen === 'settings-memory') {
-      this.heading(this.text('长期记忆'), 92)
-      this.card(16, 132, 328, 160)
-      this.switchAt(this.text('自动提取长期记忆'), 140, true)
+      this.heading(this.text('助手偏好'), 92)
+      this.card(16, 132, 328, 192)
+      this.controlRow('user-document', this.text('称呼与回答偏好'), $r('sys.symbol.square_and_pencil'), this.text('填写称呼、背景和回答偏好'))
+      this.line(196)
+      this.rowAt(this.text('提示词模板'), $r('sys.symbol.doc_plaintext'), 196)
+      this.line(260)
+      this.switchAt(this.text('自动保存任务结果'), 260, false)
+      this.heading(this.text('记忆与上下文'), 348)
+      this.card(16, 388, 328, 192)
+      this.switchAt(this.text('自动提取长期记忆'), 388, true)
+      this.line(452)
       this.controlRow('memory', this.text('管理长期记忆'), $r('sys.symbol.lightbulb'), this.text('查看、编辑所有对话或当前对话的记忆'))
-      this.heading(this.text('助手'), 308)
-      this.card(16, 348, 328, 184)
-      this.controlRow('user-document', this.text('用户文档（USER.md）'), $r('sys.symbol.square_and_pencil'), this.text('填写称呼、背景和回答偏好'))
-      this.line(412)
-      this.switchAt(this.text('自动压缩历史'), 412, true)
-      this.line(468)
-      this.switchAt(this.text('只读任务'), 468, false)
-      this.heading(this.text('工具与扩展'), 548)
-      this.card(16, 588, 328, 112)
-      this.rowAt('Skills', $r('sys.symbol.wand_and_stars'), 588)
-      this.rowAt(this.text('提示词模板'), $r('sys.symbol.doc_plaintext'), 644)
+      this.line(516)
+      this.switchAt(this.text('自动压缩历史'), 516, true)
+      this.heading(this.text('工具与权限'), 604)
+      this.card(16, 644, 328, 64)
+      this.switchAt(this.text('只读模式'), 644, false)
     } else if (this.screen === 'settings-data') {
-      this.heading(this.text('数据与用量'), 92)
-      this.card(16, 132, 328, 116)
-      this.rowAt(this.text('Token 用量'), $r('sys.symbol.clock'), 132, this.text('查看用量概览、每日趋势和请求明细'))
-      this.line(192)
+      this.heading(this.text('界面与语言'), 92)
+      this.card(16, 132, 328, 112)
+      this.rowAt(this.text('界面与外观'), $r('sys.symbol.gearshape'), 132)
+      this.line(188)
+      this.rowAt(this.text('语言'), $r('sys.symbol.gearshape'), 188)
+      this.heading(this.text('数据与用量'), 272)
+      this.card(16, 312, 328, 116)
+      this.rowAt(this.text('Token 用量'), $r('sys.symbol.clock'), 312, this.text('查看用量概览、每日趋势和请求明细'))
+      this.line(372)
       this.controlRow('backup', this.text('备份与恢复'), $r('sys.symbol.folder_badge_plus'))
-      this.heading(this.text('隐私'), 272)
-      this.card(16, 312, 328, 88)
-      this.switchAt(this.text('允许联网'), 324, true)
-      this.heading(this.text('偏好设置'), 424)
-      this.card(16, 464, 328, 56)
-      this.rowAt(this.text('语言'), $r('sys.symbol.gearshape'), 464)
-      this.heading(this.text('关于'), 544)
-      this.card(16, 584, 328, 112)
-      this.rowAt(this.text('使用帮助'), $r('sys.symbol.questionmark_circle'), 584)
-      this.rowAt(this.text('关于 Tinybot'), $r('sys.symbol.info_circle'), 640)
+      this.heading(this.text('帮助与关于'), 456)
+      this.card(16, 496, 328, 168)
+      this.rowAt(this.text('使用帮助'), $r('sys.symbol.questionmark_circle'), 496)
+      this.rowAt(this.text('评分和评论'), $r('sys.symbol.star'), 552)
+      this.rowAt(this.text('关于 Tinybot'), $r('sys.symbol.info_circle'), 608)
     } else {
-      this.heading(this.text('模型服务'), 92)
+      this.heading(this.text('模型与服务'), 92)
       this.card(16, 132, 328, 184)
       NavRow({ title: 'DeepSeek', subtitle: 'Chat Completions · 2', image: providerLogo('deepseek') })
         .width(328).height(64).position({ x: 16, y: 132 })
@@ -242,15 +245,16 @@ export struct HelpTutorialScreen {
       this.controlRow('add-provider', this.text('添加模型服务'), $r('sys.symbol.plus'), '', true)
       this.line(252)
       this.rowAt(this.text('模型分工与能力'), $r('sys.symbol.gearshape'), 252, this.text('自动选择模型、专用模型与能力配置'))
-      this.heading(this.text('长期记忆'), 332)
-      this.card(16, 372, 328, 128)
-      this.switchAt(this.text('自动提取长期记忆'), 372, true)
-      this.line(428)
-      this.rowAt(this.text('管理长期记忆'), $r('sys.symbol.lightbulb'), 428, this.text('查看、编辑所有对话或当前对话的记忆'))
-      this.heading(this.text('助手'), 520)
-      this.card(16, 560, 328, 128)
-      this.rowAt(this.text('用户文档（USER.md）'), $r('sys.symbol.square_and_pencil'), 560, this.text('填写称呼、背景和回答偏好'))
-      this.switchAt(this.text('自动压缩历史'), 624, true)
+      this.heading(this.text('助手偏好'), 332)
+      this.card(16, 372, 328, 184)
+      this.rowAt(this.text('称呼与回答偏好'), $r('sys.symbol.square_and_pencil'), 372, this.text('填写称呼、背景和回答偏好'))
+      this.line(436)
+      this.rowAt(this.text('提示词模板'), $r('sys.symbol.doc_plaintext'), 436)
+      this.line(492)
+      this.switchAt(this.text('自动保存任务结果'), 492, false)
+      this.heading(this.text('记忆与上下文'), 580)
+      this.card(16, 620, 328, 80)
+      this.switchAt(this.text('自动提取长期记忆'), 620, true)
     }
   }
 
@@ -359,7 +363,7 @@ export struct HelpTutorialScreen {
 
   @Builder
   document() {
-    this.pageTitle(this.text('用户文档（USER.md）'))
+    this.pageTitle(this.text('称呼与回答偏好'))
     Text(this.text('保存后从下一轮生效')).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
       .position({ x: 16, y: 98 }).width(328)
     Text(this.screen === 'document-ready' ? ('# ' + this.text('回答偏好') + '\n' + this.text('请简洁回答'))

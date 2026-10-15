@@ -1,4 +1,4 @@
-// Run after devecocli build. Exercise the emitted Orb and start/stop button lifecycles.
+// Run after devecocli build. Exercise the emitted Orb and hold-to-talk gesture lifecycles.
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict');
 const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio');
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
@@ -65,41 +65,44 @@ const mounting = orb(); mounting.value.ready = false; mounting.value.syncAnimati
 const empty = orb(); empty.value.canvas.width = 0; empty.value.draw(now, 33); assert.equal(empty.paint.clears, 0);
 console.log('PASS native speech Orb: phases, VAD smoothing, frame throttling, theme effects off, visibility, foreground, teardown');
 
-// Exercise the actual click action and clock; ArkUI handles taps and accessibility activation.
-const buttonSource = path.join(root, 'entry/src/main/ets/common/VoiceInputButton.ets');
-const buttonEmitted = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/common/VoiceInputButton.ts');
-assert.ok(fs.existsSync(buttonEmitted) && fs.statSync(buttonEmitted).mtimeMs >= fs.statSync(buttonSource).mtimeMs, 'Build VoiceInputButton before testing');
+// Execute the emitted touch controller with deterministic timers and window coordinates.
+const buttonSource = path.join(root, 'entry/src/main/ets/common/VoiceHoldButton.ets');
+const buttonEmitted = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/common/VoiceHoldButton.ts');
+assert.ok(fs.statSync(buttonEmitted).mtimeMs >= fs.statSync(buttonSource).mtimeMs, 'Build VoiceHoldButton before testing');
 const buttonTree = ts.createSourceFile(buttonEmitted, fs.readFileSync(buttonEmitted, 'utf8'), ts.ScriptTarget.Latest, true);
-const buttonClass = buttonTree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'VoiceInputButton');
-const buttonNames = ['aboutToAppear', 'aboutToDisappear', 'active', 'availabilityChanged', 'syncClock', 'activate'];
+const buttonClass = buttonTree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'VoiceHoldButton');
+const buttonNames = ['aboutToDisappear', 'availabilityChanged', 'phaseChanged', 'reset', 'touch', 'label'];
 const buttonMethods = buttonClass.members.filter(n => buttonNames.includes(n.name?.getText(buttonTree))).map(n => n.getText(buttonTree)).join('\n');
 const timers = new Map(); let timerId = 0;
-scope.setTimeout = (callback, delay) => { assert.equal(delay, 1000); timers.set(++timerId, callback); return timerId; };
+scope.setTimeout = (callback, delay) => { assert.equal(delay, 220); timers.set(++timerId, callback); return timerId; };
 scope.clearTimeout = id => timers.delete(id);
+scope.TouchType = { Down: 0, Up: 1, Move: 2, Cancel: 3 };
 vm.runInNewContext(ts.transpileModule(`class Button { ${buttonMethods} } exports.Button = Button;`, {
   compilerOptions: { target: ts.ScriptTarget.ES2021 }
 }).outputText, scope);
-const button = Object.assign(new scope.exports.Button(), { phase: 'idle', disabled: false, startedAt: 0,
-  elapsed: '0:00', clockTimer: -1, mounted: false });
-let starts = 0, finishes = 0;
-button.onStart = () => { starts++; button.phase = 'preparing'; };
-button.onFinish = () => { finishes++; };
-button.aboutToAppear(); assert.equal(timers.size, 0);
-button.activate(); assert.equal(starts, 1); assert.equal(timers.size, 0);
-button.activate(); assert.equal(finishes, 1, 'A second tap can stop preparation');
-button.phase = 'listening'; button.startedAt = 1000; now = 62000; button.syncClock();
-assert.equal(button.elapsed, '1:01'); assert.equal(timers.size, 1);
-const tick = timers.get(button.clockTimer); timers.delete(button.clockTimer); now += 1000; tick();
-assert.equal(button.elapsed, '1:02'); assert.equal(timers.size, 1);
-button.activate(); assert.equal(finishes, 2, 'Tap the same button to finish recording');
-button.phase = 'finishing'; button.syncClock(); button.activate();
-assert.equal(finishes, 2, 'Ignore repeated taps while waiting for final recognition');
-assert.equal(timers.size, 0); assert.equal(button.elapsed, '1:02', 'Freeze capture duration during finalization');
-button.phase = 'listening'; button.disabled = true; button.availabilityChanged(); assert.equal(finishes, 3);
-button.activate(); assert.equal(finishes, 3, 'Disabled control cannot toggle recording');
-button.disabled = false; button.syncClock(); const lateTick = timers.get(button.clockTimer);
-button.aboutToDisappear(); assert.equal(timers.size, 0); lateTick(); assert.equal(timers.size, 0, 'No clock can restart after unmount');
-button.phase = 'complete'; button.aboutToAppear(); assert.equal(button.elapsed, '0:00'); assert.equal(timers.size, 0);
-button.activate(); assert.equal(starts, 2, 'Completed input can begin another recording');
-button.aboutToDisappear(); assert.equal(timers.size, 0);
-console.log('PASS voice input button: tap start/stop, preparation, finalization, disabled state, one-second clock, teardown');
+const button = Object.assign(new scope.exports.Button(), { phase: 'idle', action: 'send', disabled: false, pressed: false,
+  pointerId: -1, timer: -1, held: false });
+let starts = 0, releases = 0, cancels = 0, lastPoint;
+button.onHold = () => { starts++; button.phase = 'listening'; return true; };
+button.onRelease = () => releases++;
+button.onCancel = () => cancels++;
+button.onMove = (x, y) => { lastPoint = [x, y]; };
+const touch = (type, x = 100, y = 700, count = 1) => button.touch({ type, stopPropagation() {},
+  changedTouches: [{ id: 1, windowX: x, windowY: y }], touches: Array(count).fill({ id: 1 }) });
+const hold = () => { touch(0); const tick = timers.get(button.timer); timers.delete(button.timer); tick(); };
+touch(0); assert.equal(button.pressed, true); touch(1);
+assert.equal(starts, 0); assert.equal(timers.size, 0, 'Short taps never record');
+hold(); assert.equal(starts, 1); assert.equal(button.label(), '松开发送');
+touch(2, 30, 580); assert.deepEqual(lastPoint, [30, 580], 'Track outside the composer in window coordinates');
+button.action = 'cancel'; assert.equal(button.label(), '松开取消');
+touch(2, 160, 700); button.action = 'send'; touch(1, 160, 700);
+assert.equal(releases, 1); assert.deepEqual(lastPoint, [160, 700], 'Release uses final finger position');
+hold(); touch(3); assert.equal(cancels, 1); touch(1); assert.equal(releases, 1);
+hold(); touch(2, 0, 0, 2); assert.equal(cancels, 2, 'Multiple fingers cancel recording');
+hold(); button.disabled = true; button.availabilityChanged(); assert.equal(cancels, 3);
+button.disabled = false; button.phase = 'idle'; touch(0); button.aboutToDisappear();
+assert.equal(timers.size, 0, 'Unmount cancels pending recognition');
+hold(); button.aboutToDisappear(); assert.equal(cancels, 4, 'Unmount cancels capture');
+button.phase = 'finishing'; touch(0); assert.equal(timers.size, 0, 'Cannot record while finalizing');
+button.phase = 'idle'; touch(0); button.phase = 'error'; button.phaseChanged(); assert.equal(timers.size, 0);
+console.log('PASS hold to talk: threshold, drag outside, final coordinates, touch cancellation, multiple fingers, disabled state and teardown');
