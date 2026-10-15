@@ -5,6 +5,8 @@ import { PreviewCaptureHost } from '../views/PreviewCaptureHost';
 import { BrowserPanel } from '../views/BrowserPanel';
 import { BrowserSession } from '../services/BrowserSession';
 import { t } from '../model/I18n';
+import { agentModeName } from '../model/AgentMode';
+import { ToolScopePanel } from '../views/ToolScopePanel';
 import { ProductivityPanel } from '../views/ProductivityPanel';
 import { ModelSettingsPanel } from '../views/AssistantPanel';
 import { BackupPanel } from '../views/BackupPanel';
@@ -58,6 +60,7 @@ struct Index {
   @State private approval: ToolApproval = new ToolApproval();
   @State private browser: BrowserSession = new BrowserSession();
   @State private browserExpanded: boolean = false;
+  @State private showToolScope: boolean = false;
   private receiving: boolean = false;
   private ratingOpen: boolean = false;
   private unsubscribeLaunch?: () => void;
@@ -239,9 +242,18 @@ struct Index {
 
   // Conversation-level actions live in the header; the composer "+" sheet holds per-message inputs.
   @Builder
+  toolScopeSheet() {
+    ToolScopePanel({ app: this.app, thread: this.app.active })
+  }
+
+  @Builder
   moreMenu() {
     Menu() {
       MenuItemGroup({ header: t("本对话") }) {
+        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.wrench_and_screwdriver')),
+          content: t('工具范围：{0}', [agentModeName(this.app.active.agentMode)]) }).id('open-tool-scope')
+          .enabled(this.app.ready && !this.app.busy && !this.app.active.archived && this.app.saveError.length === 0)
+          .onClick(() => { this.showToolScope = true; })
         MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.folder')), content: t("工作区文件") })
           .enabled(!this.app.busy).onClick(() => this.openFiles())
         MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.rectangle_stack')), content: t("分支关系") })
@@ -276,7 +288,7 @@ struct Index {
       NavDestination() { ProductivityPanel({ app: this.app, tab: (param as string) || 'memory', onUse: () => { this.paths.clear(); } }) }
         .title(t("记忆与工具"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'search-settings') {
-      NavDestination() { SearchSettingsPanel({ app: this.app }) }.title(t('联网搜索'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+      NavDestination() { SearchSettingsPanel({ app: this.app }) }.title(t('搜索服务'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'files') {
       WorkspacePanel({ app: this.app, initialPath: (param as string) || '' })
     } else if (name === 'settings') {
@@ -304,7 +316,7 @@ struct Index {
     } else if (name === 'user-document') {
       NavDestination() {
         UserDocumentPanel({ app: this.app, settings: this.app.settings, onSaved: () => { this.paths.pop(); } })
-      }.title(t('用户文档（USER.md）'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+      }.title(t('称呼与回答偏好'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
         .onHidden(() => { this.app.settings.userDocument = this.app.config.userDocument || ''; })
     } else if (name === 'skills') {
       NavDestination() {
@@ -505,5 +517,8 @@ struct Index {
         onSettings: () => { this.setBrowserExpanded(false); this.openSettings(); },
         onDismiss: () => this.setBrowserExpanded(false) })
     }.width('100%').height('100%')
+    .bindSheet($$this.showToolScope, this.toolScopeSheet(), { title: { title: t('工具范围') },
+      height: this.app.active.agentMode === 'custom' ? SheetSize.LARGE : SheetSize.FIT_CONTENT,
+      dragBar: true, systemMaterial: this.appearance.surface })
   }
 }

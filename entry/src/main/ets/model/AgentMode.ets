@@ -27,5 +27,5 @@ export function toolEnabled(name: string, selection: ToolSelection): boolean {
 }
 
 export function agentModeName(mode: AgentMode): string {
-  return mode === 'custom' ? t('自定义') : t('完整版');
+  return mode === 'custom' ? t('自定义') : t('全部');
 }

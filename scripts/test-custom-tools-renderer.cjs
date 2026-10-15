@@ -29,6 +29,7 @@ class ViewPU {
 class Child extends ViewPU { constructor(parent, params, storage, id) { super(parent, storage, id); Object.assign(this, params); } }
 class GroupCard extends Child {}
 class SwitchRow extends Child {}
+class NavRow extends Child {}
 const buttons = new Map(), texts = new Map();
 const ui = kind => new Proxy({}, { get: (_, name) => value => {
   if (kind === 'Text' && name === 'create') texts.set(current.currentElmt, value);
@@ -42,13 +43,13 @@ const globals = { exports: {}, ViewPU, SynchedPropertyNesedObjectPU: Property, B
     if (id.includes('I18n&')) return { t: (text, values) => values ? text + ':' + values.join('/') : text };
     if (id.includes('ToolGroups&')) return groups;
     if (id.includes('ToolPresentation&')) return { toolTitle: name => name, toolGroupTitle: name => name };
-    if (id.includes('Widgets&')) return { GroupCard, SwitchRow, SectionHeader: Child, RowDivider: Child };
+    if (id.includes('Widgets&')) return { GroupCard, SwitchRow, NavRow, SectionHeader: Child, RowDivider: Child };
     if (id.includes('Theme&')) return { Btn: {}, Font: {}, Space: {} };
     if (id.includes('AppearanceStyle&')) return { AppearanceStyle: class {} };
     throw Error('Unexpected import ' + id);
   }
 };
-for (const kind of ['Scroll', 'Column', 'Row', 'Text', 'Button', 'ForEach', 'If']) globals[kind] = ui(kind);
+for (const kind of ['Scroll', 'Column', 'Row', 'Text', 'Button', 'ForEach', 'If', 'Blank', '__Common__']) globals[kind] = ui(kind);
 vm.runInNewContext(ts.transpileModule(fs.readFileSync(emitted, 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }
 }).outputText, globals, { filename: emitted });
@@ -75,4 +76,40 @@ const button = id => [...buttons.values()].find(value => value.id === id);
   app.busy = false; thread.archived = true; panel.flush(); assert.ok(rows().every(child => child.disabled));
   thread.archived = false; app.saveError = 'save failed'; panel.flush(); assert.ok(rows().every(child => child.disabled));
   console.log('PASS emitted 35 keyed optional rows, compact mandatory files, on/off updates, enabled count, bulk controls and busy/archive/save-error restrictions');
+
+  const scopeSource = root + '/views/ToolScopePanel.ets';
+  const scopeEmitted = path.resolve('entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/views/ToolScopePanel.ts');
+  assert.ok(fs.statSync(scopeEmitted).mtimeMs >= fs.statSync(scopeSource).mtimeMs, 'Build ToolScopePanel before testing');
+  const originalRequire = globals.require;
+  const scopeGlobals = { ...globals, exports: {}, require: id => {
+    if (id.includes('AgentMode&')) return { AGENT_MODES: ['full', 'custom'], agentModeName: value => value };
+    if (id.includes('CustomToolsPanel&')) return { CustomToolsPanel: Child };
+    return originalRequire(id);
+  } };
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(scopeEmitted, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }
+  }).outputText, scopeGlobals, { filename: scopeEmitted });
+  const currentThread = { id: 'current', agentMode: 'full', archived: false, disabledTools: ['read_web'] };
+  const calls = [];
+  const scopeApp = { ready: true, busy: false, saveError: '', active: currentThread,
+    setAgentMode: async mode => { calls.push(mode); currentThread.agentMode = mode; return true; } };
+  const scope = new scopeGlobals.exports.ToolScopePanel(undefined, { app: scopeApp, thread: currentThread }); scope.initialRender();
+  const modeRows = () => [...scope.children.values()].filter(child => child instanceof NavRow);
+  assert.equal(modeRows().length, 2);
+  const custom = modeRows().find(row => row.compId === 'conversation-tool-scope-custom');
+  await custom.onTap(); scope.flush();
+  assert.equal(currentThread.agentMode, 'custom'); assert.equal(custom.active, true);
+  assert.equal(currentThread.disabledTools[0], 'read_web', 'Opening custom mode retains the prior selection');
+  assert.ok([...scope.children.values()].some(child => child.constructor === Child && child.thread === currentThread), 'Custom tools open for the displayed conversation');
+  const retainedCustom = custom;
+  await modeRows().find(row => row.compId === 'conversation-tool-scope-full').onTap(); scope.flush();
+  assert.equal(modeRows().find(row => row.compId === 'conversation-tool-scope-custom'), retainedCustom);
+  for (const lock of ['busy', 'archived', 'saveError', 'other-thread']) {
+    scopeApp.busy = lock === 'busy'; currentThread.archived = lock === 'archived';
+    scopeApp.saveError = lock === 'saveError' ? 'save failed' : '';
+    scopeApp.active = lock === 'other-thread' ? { id: 'other' } : currentThread;
+    scope.flush(); assert.ok(modeRows().every(row => row.disabled));
+    const count = calls.length; await custom.onTap(); assert.equal(calls.length, count, 'A stale or locked control cannot change another conversation');
+  }
+  console.log('PASS conversation tool scope, keyed selection updates, custom controls and stale/busy/archive/save-error restrictions');
 })().catch(error => { console.error(error); process.exitCode = 1; });

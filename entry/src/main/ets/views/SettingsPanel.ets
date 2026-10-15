@@ -2,9 +2,6 @@ import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { AppLanguage } from '../model/I18n';
 import { LanguagePreferences } from '../services/LanguagePreferences';
-import { AgentMode, AGENT_MODES, agentModeName } from '../model/AgentMode';
-import { OPTIONAL_TOOL_NAMES } from '../model/ToolGroups';
-import { CustomToolsPanel } from './CustomToolsPanel';
 import { BrowserSession } from '../services/BrowserSession';
 import { ChatViewModel, SettingsViewModel } from '../viewmodel/ChatViewModel';
 import { SettingsToggle } from '../services/SessionContracts';
@@ -22,8 +19,6 @@ export struct SettingsPanel {
   @State private languageError: string = '';
   @State private showLanguage: boolean = false;
   @State private showPresets: boolean = false;
-  @State private showAgentMode: boolean = false;
-  @State private showCustomTools: boolean = false;
   @State private assistantDraft: AssistantOptions = defaultAssistantOptions();
   @ObjectLink app: ChatViewModel;
   @ObjectLink settings: SettingsViewModel;
@@ -45,34 +40,6 @@ export struct SettingsPanel {
   private blocked(): boolean { return this.app.busy && !this.app.saving; }
   // Editors need a mutable session; unsaved chat data must be resolved first.
   private canEdit(): boolean { return !this.blocked() && this.app.saveError.length === 0; }
-  private canSelectMode(): boolean { return this.canEdit() && !this.app.active.archived; }
-  private async selectMode(mode: AgentMode): Promise<void> {
-    await this.pendingSave;
-    if (this.canSelectMode() && await this.app.setAgentMode(mode)) { this.showAgentMode = false; }
-  }
-
-  @Builder
-  agentModeSheet() {
-    Column({ space: Space.md }) {
-      GroupCard() {
-        Column() {
-          ForEach(AGENT_MODES, (mode: AgentMode, index: number) => {
-            if (index > 0) { RowDivider() }
-            NavRow({ title: agentModeName(mode), trailing: 'select', active: this.app.active.agentMode === mode,
-              compId: 'settings-agent-mode-' + mode, disabled: !this.canSelectMode(), onTap: () => this.selectMode(mode) })
-          }, (mode: AgentMode) => mode)
-        }
-      }
-      Text(t('仅用于当前对话，选择会随下一条消息保存。')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
-        .fontColor($r('app.color.text_secondary')).width('100%')
-    }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.xl })
-  }
-
-  @Builder
-  customToolsSheet() {
-    CustomToolsPanel({ app: this.app, thread: this.app.active })
-  }
-
   aboutToAppear(): void { this.resetAssistantDraft(); }
 
   private resetAssistantDraft(): void {
@@ -185,7 +152,7 @@ export struct SettingsPanel {
     Scroll() {
       Column() {
         this.statusBanners()
-        SectionHeader({ title: t("模型服务") })
+        SectionHeader({ title: t('模型与服务') })
         GroupCard() {
           Column() {
             ForEach(this.app.providerProfiles, (profile: ProviderProfile) => {
@@ -203,7 +170,21 @@ export struct SettingsPanel {
               icon: $r('sys.symbol.gearshape'), iconWidth: 28, disabled: !this.canEdit(), onTap: () => this.onModels() })
           }
         }
-        SectionHeader({ title: t('长期记忆') })
+        SectionHeader({ title: t('助手偏好') })
+        GroupCard() {
+          Column() {
+            NavRow({ title: t('称呼与回答偏好'), subtitle: this.userDocumentPreview(), compId: 'open-user-document',
+              icon: $r('sys.symbol.square_and_pencil'), disabled: !this.canEdit(), onTap: () => this.onUserDocument() })
+            RowDivider()
+            NavRow({ title: t('提示词模板'), compId: 'open-templates', icon: $r('sys.symbol.doc_plaintext'),
+              disabled: !this.canEdit(), onTap: () => this.onTools('templates') })
+            RowDivider()
+            SwitchRow({ title: t('自动保存任务结果'), subtitle: t('把成功的回答归档到工作区的“任务结果”目录。'), compId: 'save-summary',
+              isOn: this.assistantDraft.saveSummary, disabled: !this.canEdit(),
+              onChange: (value: boolean) => this.saveToggle('saveSummary', value) })
+          }
+        }
+        SectionHeader({ title: t('记忆与上下文') })
         GroupCard() {
           Column() {
             SwitchRow({ title: t('自动提取长期记忆'), compId: 'auto-memory',
@@ -213,44 +194,26 @@ export struct SettingsPanel {
             RowDivider()
             NavRow({ title: t('管理长期记忆'), subtitle: t('查看、编辑所有对话或当前对话的记忆'), compId: 'open-memory',
               icon: $r('sys.symbol.lightbulb'), disabled: !this.canEdit(), onTap: () => this.onTools('memory') })
-          }
-        }
-        SectionHeader({ title: t("助手") })
-        GroupCard() {
-          Column() {
-            NavRow({ title: t('Agent 模式'), value: agentModeName(this.app.active.agentMode), compId: 'settings-agent-mode',
-              subtitle: t('仅用于当前对话，选择会随下一条消息保存。'), icon: $r('sys.symbol.gearshape'),
-              disabled: !this.canSelectMode(), onTap: () => { this.showAgentMode = true; } })
-              .bindSheet($$this.showAgentMode, this.agentModeSheet(), { title: { title: t('Agent 模式') }, detents: [SheetSize.FIT_CONTENT], dragBar: true,
-                backgroundColor: $r('app.color.page_background') })
-            RowDivider()
-            if (this.app.active.agentMode === 'custom') {
-              NavRow({ title: t('自定义工具'), compId: 'open-custom-tools', icon: $r('sys.symbol.wrench_and_screwdriver'),
-                value: t('已开启 {0} / {1} 个可选工具', [OPTIONAL_TOOL_NAMES.length - this.app.active.disabledTools.length, OPTIONAL_TOOL_NAMES.length]),
-                disabled: !this.canSelectMode(), onTap: () => { this.showCustomTools = true; } })
-                .bindSheet($$this.showCustomTools, this.customToolsSheet(), { title: { title: t('自定义工具') }, detents: [SheetSize.LARGE], dragBar: true,
-                  backgroundColor: $r('app.color.page_background') })
-              RowDivider()
-            }
-            NavRow({ title: t('用户文档（USER.md）'), subtitle: this.userDocumentPreview(), compId: 'open-user-document',
-              icon: $r('sys.symbol.square_and_pencil'), disabled: !this.canEdit(), onTap: () => this.onUserDocument() })
             RowDivider()
             SwitchRow({ title: t("自动压缩历史"), compId: 'auto-compact', isOn: this.settings.autoCompact,
               subtitle: t("接近上下文预算时，用当前模型生成摘要，完整记录保留。"), disabled: !this.canEdit(),
               onChange: (value: boolean) => this.saveToggle('autoCompact', value) })
-            RowDivider()
-            SwitchRow({ title: t('只读任务'), subtitle: t('阻止修改文件、调用远程工具和生成图片。'), compId: 'read-only',
+          }
+        }
+        SectionHeader({ title: t('工具与权限') })
+        GroupCard() {
+          Column() {
+            SwitchRow({ title: t('只读模式'), subtitle: t('对所有对话生效，阻止修改文件、调用远程工具和生成图片。'), compId: 'read-only',
               isOn: this.assistantDraft.readOnly, disabled: !this.canEdit(),
               onChange: (value: boolean) => this.saveToggle('readOnly', value) })
             RowDivider()
-            SwitchRow({ title: t('任务结束后保存结果'), subtitle: t('把成功的回答归档到工作区的“任务结果”目录。'), compId: 'save-summary',
-              isOn: this.assistantDraft.saveSummary, disabled: !this.canEdit(),
-              onChange: (value: boolean) => this.saveToggle('saveSummary', value) })
-          }
-        }
-        SectionHeader({ title: t('工具与扩展') })
-        GroupCard() {
-          Column() {
+            SwitchRow({ title: t('允许网页读取与搜索'), compId: 'web-enabled', isOn: this.settings.webEnabled,
+              subtitle: t('允许助手读取网页和使用搜索；不影响模型服务与浏览器权限。'), disabled: !this.canEdit(),
+              onChange: (value: boolean) => this.saveToggle('webEnabled', value) })
+            RowDivider()
+            NavRow({ title: t('搜索服务'), subtitle: 'DeepSeek / Tavily', compId: 'open-search-settings',
+              disabled: !this.canEdit(), onTap: this.onSearch })
+            RowDivider()
             SwitchRow({ title: t('应用内浏览器'), compId: 'browser-enabled', isOn: this.browser.policy === 'enabled',
               subtitle: this.browser.policy === 'unset' ? t('默认关闭，首次需要时询问。') : this.browser.policy === 'disabled' ? t('已关闭，助手不会再次请求启用。') : t('允许助手操作网页；你可以随时接管。'),
               disabled: this.browser.permissionSaving || !this.app.ready || this.app.saveError.length > 0,
@@ -266,14 +229,20 @@ export struct SettingsPanel {
               value: t('{0} 个已启用', [this.app.extensions.skills.filter((skill) => skill.enabled).length]),
               disabled: !this.canEdit(), onTap: () => this.onSkills() })
             RowDivider()
-            NavRow({ title: t('提示词模板'), compId: 'open-templates', icon: $r('sys.symbol.doc_plaintext'),
-              disabled: !this.canEdit(), onTap: () => this.onTools('templates') })
-            RowDivider()
             NavRow({ title: t('MCP 服务'), compId: 'open-mcp', icon: $r('sys.symbol.connection'),
               disabled: !this.canEdit(), onTap: () => this.onTools('mcp') })
+          }
+        }
+        SectionHeader({ title: t('界面与语言') })
+        GroupCard() {
+          Column() {
+            NavRow({ title: t('界面与外观'), subtitle: t('主题色、字体、明暗模式与光感效果'),
+              compId: 'open-appearance', onTap: () => this.onAppearance() })
             RowDivider()
-            NavRow({ title: t('联网搜索'), subtitle: 'DeepSeek / Tavily', compId: 'open-search-settings',
-              disabled: !this.canEdit(), onTap: this.onSearch })
+            NavRow({ title: t('语言'), value: this.languageName(this.language),
+              compId: 'open-language', disabled: !this.canEdit(), onTap: () => { this.showLanguage = true; } })
+              .bindSheet($$this.showLanguage, this.languageSheet(), { title: { title: t('语言') }, height: SheetSize.FIT_CONTENT,
+                dragBar: true, systemMaterial: this.appearance.surface })
           }
         }
         SectionHeader({ title: t('数据与用量') })
@@ -286,25 +255,7 @@ export struct SettingsPanel {
               disabled: !this.canEdit(), onTap: () => this.onBackup() })
           }
         }
-        SectionHeader({ title: t('隐私') })
-        GroupCard() {
-          SwitchRow({ title: t('允许联网'), compId: 'web-enabled', isOn: this.settings.webEnabled,
-            subtitle: t('允许网页读取和已配置的搜索；获取的内容会发送给当前模型。'), disabled: !this.canEdit(),
-            onChange: (value: boolean) => this.saveToggle('webEnabled', value) })
-        }
-        SectionHeader({ title: t('偏好设置') })
-        GroupCard() {
-          Column() {
-            NavRow({ title: t('界面与外观'), subtitle: t('主题色、字体、明暗模式与光感效果'),
-              compId: 'open-appearance', onTap: () => this.onAppearance() })
-            RowDivider()
-            NavRow({ title: t('语言'), value: this.languageName(this.language),
-              compId: 'open-language', disabled: !this.canEdit(), onTap: () => { this.showLanguage = true; } })
-              .bindSheet($$this.showLanguage, this.languageSheet(), { title: { title: t('语言') }, height: SheetSize.FIT_CONTENT,
-                dragBar: true, systemMaterial: this.appearance.surface })
-          }
-        }
-        SectionHeader({ title: t('关于') })
+        SectionHeader({ title: t('帮助与关于') })
         GroupCard() {
           Column() {
             NavRow({ title: t('使用帮助'), compId: 'open-help', onTap: () => this.onSupport('help') })

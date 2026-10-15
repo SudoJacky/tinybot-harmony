@@ -34,7 +34,7 @@ const emitted = path.join(root, 'entry/build/default/cache/default/default@Compi
 assert.ok(fs.statSync(emitted).mtimeMs >= fs.statSync(panelSource).mtimeMs, 'Build before testing the UI callbacks');
 const tree = ts.createSourceFile(emitted, fs.readFileSync(emitted, 'utf8'), ts.ScriptTarget.Latest, true);
 const declaration = tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'SettingsPanel');
-const names = ['blocked', 'canEdit', 'canSelectMode', 'selectMode', 'resetAssistantDraft', 'saveToggle', 'setToggleDraft', 'savedToggleValue'];
+const names = ['blocked', 'canEdit', 'resetAssistantDraft', 'saveToggle', 'setToggleDraft', 'savedToggleValue'];
 const globals = { exports: {}, defaultAssistantOptions };
 vm.runInNewContext(ts.transpileModule(`class Panel {
 ${declaration.members.filter(n => names.includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')}
@@ -71,7 +71,6 @@ async function setup() {
   f.repository.save = (data, ids) => { captureIds.push(ids); return save(data); };
   const start = performance.now(); ui.value.saveToggle('readOnly', true); await settle();
   const editableDuringSave = ui.value.canEdit();
-  assert.equal(ui.value.canSelectMode(), true, 'Mode selection must not flash disabled during a preference save');
   held.open(); await ui.value.pendingSave;
   console.log(JSON.stringify({ editableDuringSave, snapshots, messageUpdates, contextMs: Math.round(contextMs), saveMs: Math.round(performance.now() - start) }));
   assert.equal(editableDuringSave, true, 'Saving one toggle must leave unrelated settings editable');

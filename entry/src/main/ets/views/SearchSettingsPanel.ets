@@ -83,7 +83,7 @@ export struct SearchSettingsPanel {
           TextInput({ text: this.apiKey, placeholder: this.savedKey ? t('留空保留已保存的搜索密钥') : 'API Key' }).fontFamily(this.appearance.fontFamily).type(InputType.Password)
             .id('search-api-key').enabled(!this.saving).onChange((value: string) => { this.apiKey = value; })
         }
-        Text(t('密钥保存在系统安全存储，不随备份导出。关闭“允许联网”也会停用搜索。')).fontFamily(this.appearance.fontFamily)
+        Text(t('密钥保存在系统安全存储，不随备份导出。关闭“允许网页读取与搜索”也会停用搜索。')).fontFamily(this.appearance.fontFamily)
           .fontSize(12).fontColor($r('app.color.text_secondary'))
         if (this.error) { Banner({ text: this.error, danger: true }) }
         Button(t('保存')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.primary).enabled(!this.saving && !this.app.busy && !this.app.saveError)
