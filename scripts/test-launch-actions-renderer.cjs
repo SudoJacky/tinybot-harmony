@@ -23,7 +23,7 @@ function controller(file, name, methods) {
 }
 function page() {
   const page = controller('pages/Index', 'Index', ['receiveLaunch']);
-  page.events = []; page.voiceRequest = '';
+  page.events = []; page.voiceRequest = ''; page.appearance = { surface: {} };
   page.app = { busy: false, saveError: '', error: '', active: { id: 'old', projectId: 'project' },
     flushDraft: async () => page.events.push('saved'),
     newThread: async project => { page.events.push(['new', project]); page.app.active.id = 'new'; return true; }
@@ -53,7 +53,7 @@ function page() {
 
   const panel = controller('views/ChatPanel', 'ChatPanel', ['receiveVoiceShortcut', 'speechAvailabilityChanged', 'speechThreadChanged']);
   let starts = 0, stops = 0, consumed = 0;
-  panel.reading = { stop: () => stops++ }; panel.endSpeech = () => {};
+  panel.reading = { stop: () => stops++ }; panel.endSpeech = () => {}; panel.onHeaderProgress = () => {};
   panel.startSpeech = () => starts++; panel.onVoiceShortcutConsumed = () => consumed++;
   panel.voiceRequest = 'new'; panel.activeThreadId = 'old'; panel.thread = { id: 'old' }; panel.speechEnabled = false;
   panel.receiveVoiceShortcut(); assert.equal(starts, 0);

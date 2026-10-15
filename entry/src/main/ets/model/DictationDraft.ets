@@ -16,6 +16,4 @@ export class DictationDraft {
     this.latest = next;
     return next;
   }
-
-  cancel(current: string): string { return current === this.latest ? this.original : current; }
 }

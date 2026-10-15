@@ -1,5 +1,12 @@
 {
   "color": [
+    { "name": "code_keyword", "value": "#D6A8EE" },
+    { "name": "code_string", "value": "#A2D6AA" },
+    { "name": "code_number", "value": "#F0BD8D" },
+    { "name": "code_comment", "value": "#A1B2A7" },
+    { "name": "code_function", "value": "#9CCBF4" },
+    { "name": "code_property", "value": "#F1ADBF" },
+    { "name": "code_punctuation", "value": "#BDCCC3" },
     { "name": "diff_added_background", "value": "#203D2C" },
     { "name": "diff_removed_background", "value": "#452B2B" },
     { "name": "start_window_background", "value": "#121A18" },

@@ -4,6 +4,7 @@ import { common } from '@kit.AbilityKit';
 import { ColorMetrics } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { MarkdownBlock, MarkdownSpan, markdownBlocks, markdownSpans } from '../model/Markdown';
+import { codePrefix, highlightCode } from '../model/CodeHighlight';
 import { Radius, Space } from '../common/Theme';
 import { RevealSpan, StreamReveal } from '../model/StreamReveal';
 
@@ -20,6 +21,7 @@ export struct MarkdownView {
   @Prop fontSize: number = 16;
   @Prop selectable: boolean = true;
   @State private blocks: MarkdownBlock[] = [];
+  @State private codeTokens: MarkdownSpan[][] = [];
   @State private copied: number = -1;
   @State private expanded: number[] = [];
   private copyTimer: number = -1;
@@ -50,6 +52,14 @@ export struct MarkdownView {
       }
     });
     this.reveal.retain(keys);
+    this.codeTokens = blocks.map((block: MarkdownBlock, index: number): MarkdownSpan[] => {
+      if (block.kind !== 'code') { return []; }
+      const previous = this.blocks[index];
+      if (previous?.kind === 'code' && previous.text === block.text && previous.rows[0][0] === block.rows[0][0]) {
+        return this.codeTokens[index];
+      }
+      return highlightCode(block.text, block.rows[0][0]);
+    });
     this.blocks = blocks; this.revealTime = now;
     clearTimeout(this.revealTimer); this.revealTimer = -1;
     this.scheduleReveal();
@@ -90,6 +100,18 @@ export struct MarkdownView {
   private codeShown(block: MarkdownBlock, index: number): string {
     if (this.expanded.includes(index) || this.codeLines(block) <= CODE_PREVIEW_LINES) { return block.text; }
     return block.text.split('\n').slice(0, CODE_PREVIEW_LINES).join('\n');
+  }
+  private codeColor(kind: string): ResourceColor {
+    switch (kind) {
+      case 'syntax-keyword': return $r('app.color.code_keyword');
+      case 'syntax-string': return $r('app.color.code_string');
+      case 'syntax-number': return $r('app.color.code_number');
+      case 'syntax-comment': return $r('app.color.code_comment');
+      case 'syntax-function': return $r('app.color.code_function');
+      case 'syntax-property': return $r('app.color.code_property');
+      case 'syntax-punctuation': return $r('app.color.code_punctuation');
+      default: return $r('app.color.text_primary');
+    }
   }
   // Cells share one width per column so rows line up; sized from the longest cell (CJK glyphs count double).
   private columnWidths(block: MarkdownBlock): number[] {
@@ -143,8 +165,8 @@ export struct MarkdownView {
       Divider().strokeWidth(0.5).color($r('app.color.divider'))
       Scroll() {
         Text() {
-          ForEach(this.reveal.spans(`${index}`, [{ text: this.codeShown(block, index), kind: 'code', url: '' }], this.revealTime), (span: RevealSpan) => {
-            Span(span.text).fontColor(this.revealColor($r('app.color.text_primary'), span.opacity))
+          ForEach(this.reveal.spans(`${index}`, codePrefix(this.codeTokens[index], this.codeShown(block, index).length), this.revealTime), (span: RevealSpan) => {
+            Span(span.text).fontColor(this.revealColor(this.codeColor(span.kind), span.opacity))
           })
         }.fontSize(13).lineHeight(20).fontFamily('monospace')
           .copyOption(this.selectable ? CopyOptions.LocalDevice : CopyOptions.None).fontColor($r('app.color.text_primary'))

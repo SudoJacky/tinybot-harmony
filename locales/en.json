@@ -33,8 +33,6 @@
   "草稿已修改，语音输入已停止。": "The draft changed. Voice input has stopped.",
   "草稿超过 24000 字符，语音输入已停止。可复制本次识别的完整文字。": "The draft exceeds 24,000 characters. Voice input has stopped; you can copy the full transcript.",
   "停止语音输入": "Stop voice input",
-  "再次点击停止，左滑取消本次输入": "Tap again to stop, or slide left to cancel this dictation",
-  "点击开始，或按住说话": "Tap to start, or hold to speak",
   "复制识别文字": "Copy transcript",
   "允许麦克风": "Allow microphone",
   "识别未完成": "Recognition incomplete",
@@ -1313,7 +1311,6 @@
   "开始对话": "Start a conversation",
   "先在“设置 → 添加模型服务”选择服务商，填写自己的 API Key 和模型。保存后，点击聊天顶部的模型名称选择模型，再输入问题并发送。": "In Settings → Add model service, choose a provider and enter your API key and model. Save, tap the model name at the top of the chat to select a model, then type and send your question.",
   "附件与语音": "Attachments and voice",
-  "点击输入框的“+”添加图片或文档；图片需要支持视觉的模型。点击或按住麦克风可转写语音，识别文字仍需手动发送。": "Tap “+” in the composer to add images or documents. Images require a model with vision support. Tap or hold the microphone to transcribe speech, then send the text when ready.",
   "让助手记住偏好": "Personalize your assistant",
   "在“设置 → 用户文档（USER.md）”填写称呼和回答偏好；在“管理长期记忆”中查看、编辑或删除记忆。": "Add your preferred name and response preferences in Settings → User document (USER.md). View, edit or delete memories in Manage long-term memory.",
   "文件与备份": "Files and backups",
@@ -1619,7 +1616,6 @@
   "点击 + 添加材料": "Tap + to add materials",
   "语音输入": "Voice input",
   "识别文字": "Transcribed text",
-  "点击或按住麦克风": "Tap or hold the microphone",
   "检查文字后手动发送": "Check the text, then tap Send",
   "打开用户文档": "Open your user document",
   "称呼与背景": "Name and background",
@@ -1705,5 +1701,7 @@
   "无法保存外观设置：{0}": "Could not save appearance settings: {0}",
   "标准": "Standard",
   "无法读取设备字体：{0}": "Could not read device fonts: {0}",
-  "正在读取字体…": "Loading fonts…"
+  "正在读取字体…": "Loading fonts…",
+  "点击麦克风开始录音": "Tap the microphone to start recording",
+  "点击输入框的“+”添加图片或文档；图片需要支持视觉的模型。点击麦克风开始录音，再次点击停止；识别文字仍需手动发送。": "Tap “+” in the composer to add images or documents. Images require a model with vision support. Tap the microphone to start recording and tap again to stop; send the transcribed text when ready."
 }

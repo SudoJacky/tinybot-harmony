@@ -7,7 +7,7 @@ const studio = process.env.DEVECO_STUDIO_HOME || 'D:/DevEco Studio';
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 const root = path.resolve(__dirname, '../entry/src/main/ets');
 const cache = new Map(), timers = new Map(), callbacks = new Set();
-let capability, permission, setting, create, engines, timerId = 0, permissionCalls, settingCalls;
+let capability, permission, setting, create, engines, timerId = 0, permissionCalls, settingCalls, vadEvents = [];
 const appContext = { on: (event, cb) => { assert.equal(event, 'applicationStateChange'); callbacks.add(cb); },
   off: (event, cb) => { assert.equal(event, 'applicationStateChange'); callbacks.delete(cb); } };
 const context = { getApplicationContext: () => appContext };
@@ -26,7 +26,7 @@ const kits = {
     assert.equal(params.language, 'zh-CN'); assert.equal(params.online, 1);
     assert.equal(params.extraParams.recognizerMode, 'long'); return create();
   } } },
-  '@kit.PerformanceAnalysisKit': { hilog: { warn: () => {} } }
+  '@kit.PerformanceAnalysisKit': { hilog: { warn: () => {}, info: (...args) => vadEvents.push(args) } }
 };
 function load(relative) {
   const file = path.resolve(relative.endsWith('.ets') ? relative : relative + '.ets');
@@ -42,7 +42,6 @@ function load(relative) {
 }
 const { SpeechInput } = load(path.join(root, 'services/SpeechInput'));
 const { DictationDraft } = load(path.join(root, 'model/DictationDraft'));
-const { VoicePillGesture } = load(path.join(root, 'common/VoicePillGesture'));
 function engine() {
   const item = { started: 0, cancelled: 0, closed: 0, finished: 0,
     setListener(listener) { this.listener = listener; },
@@ -65,7 +64,7 @@ function engine() {
 function reset() {
   assert.equal(callbacks.size, 0, 'no leaked lifecycle registration');
   assert.equal(timers.size, 0, 'no leaked timer');
-  engines = []; capability = true; permissionCalls = 0; settingCalls = 0; setting = async () => [0];
+  vadEvents = []; engines = []; capability = true; permissionCalls = 0; settingCalls = 0; setting = async () => [0];
   permission = async () => ({ authResults: [0] }); create = async () => engine();
 }
 function deferred() { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; }
@@ -190,17 +189,9 @@ test('draft bounds reject without truncation and keep transcript available', asy
   assert.throws(() => draft.update('x'.repeat(24000), speech.text), /24000/);
   assert.equal(speech.text, '完整识别文字'); assert.equal(new DictationDraft('原文\n').update('原文\n', '文字'), '原文\n文字');
 });
-test('cancel restores the original draft and late recognition cannot reinsert it', async () => {
-  const speech = new SpeechInput(); let current = '原有文字'; const draft = new DictationDraft(current);
-  speech.onResult = text => { current = draft.update(current, text); };
-  await speech.start(context); engines[0].result('本次听写');
-  assert.equal(current, '原有文字\n本次听写'); current = draft.cancel(current); speech.cancel();
-  engines[0].result('迟到结果', true, true); assert.equal(current, '原有文字');
-});
-test('external edits win over both dictation updates and rollback', async () => {
+test('external edits prevent dictation from overwriting the current draft', async () => {
   const draft = new DictationDraft('原文'); draft.update('原文', '听写');
   assert.throws(() => draft.update('外部修改', '继续听写'), /草稿已修改/);
-  assert.equal(draft.cancel('外部修改'), '外部修改');
 });
 test('background keeps words already written into composer and ignores subsequent text', async () => {
   const speech = new SpeechInput(); let current = ''; const draft = new DictationDraft(current);
@@ -216,28 +207,18 @@ test('native voice activity drives the visual state and stops when capture ends'
   native.listener.onEvent(native.id, 1, 'speech started'); speech.cancel();
   native.listener.onEvent(native.id, 1, 'late event'); assert.equal(speech.speaking, false);
 });
-test('a tap starts on release and a second tap finishes', () => {
-  const gesture = new VoicePillGesture(); assert.equal(gesture.down(1, 300, false), true);
-  assert.equal(gesture.up(1), 'start'); gesture.down(2, 300, true); assert.equal(gesture.up(2), 'finish');
-});
-test('a hold starts once and release finishes without a second toggle', () => {
-  const gesture = new VoicePillGesture(); gesture.down(1, 300, false);
-  assert.equal(gesture.hold(), 'start'); assert.equal(gesture.hold(), 'none');
-  assert.equal(gesture.up(1), 'finish'); assert.equal(gesture.up(1), 'none');
-});
-test('left swipe cancels once, reversals below threshold preserve the active recording', () => {
-  const gesture = new VoicePillGesture(); gesture.down(1, 300, true);
-  assert.equal(gesture.move(1, 250, true), 'none'); assert.equal(gesture.pull, 50);
-  gesture.move(1, 295, true); assert.equal(gesture.pull, 5);
-  assert.equal(gesture.move(1, 236, true), 'cancel'); assert.equal(gesture.move(1, 220, true), 'none');
-  assert.equal(gesture.up(1), 'none');
-});
-test('extra fingers and interrupted presses cannot start or stop another gesture', () => {
-  const gesture = new VoicePillGesture(); gesture.down(1, 300, false);
-  assert.equal(gesture.down(2, 100, false), false); assert.equal(gesture.up(2), 'none');
-  assert.equal(gesture.move(2, 0, true), 'none'); assert.equal(gesture.interrupt(), 'none');
-  assert.equal(gesture.hold(), 'none'); assert.equal(gesture.up(1), 'none');
-  gesture.down(3, 300, false); gesture.hold(); assert.equal(gesture.interrupt(), 'cancel');
+test('finishing clears speech activity and ignores subsequent VAD events', async () => {
+  const speech = new SpeechInput(); await speech.start(context); const native = engines[0];
+  native.listener.onEvent(native.id, 1, 'speech started'); assert.equal(speech.speaking, true);
+  assert.equal(vadEvents.length, 1);
+  native.listener.onEvent(native.id, 1, 'duplicate');
+  native.listener.onEvent(native.id, 2, 'unrelated');
+  native.listener.onEvent('old-session', 3, 'stale');
+  assert.equal(vadEvents.length, 1); assert.equal(speech.speaking, true);
+  speech.finish(); assert.equal(speech.speaking, false);
+  native.listener.onEvent(native.id, 1, 'late start'); assert.equal(speech.speaking, false);
+  native.result('保留识别文字', true, true); native.complete();
+  assert.equal(speech.text, '保留识别文字'); assert.equal(speech.phase, 'complete');
 });
 (async () => {
   for (const { name, run } of cases) { reset(); await run(); console.log('PASS ' + name); }
