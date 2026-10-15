@@ -1,6 +1,5 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { monochromeProviderLogo, providerLogo } from '../common/ProviderBrand';
-import { WebUiDemoPanel } from '../views/WebUiDemoPanel';
 import { WebUiPreflightHost } from '../views/WebUiPreflightHost';
 import { PreviewCaptureHost } from '../views/PreviewCaptureHost';
 import { BrowserPanel } from '../views/BrowserPanel';
@@ -269,8 +268,6 @@ struct Index {
         .backgroundColor($r('app.color.page_background'))
     } else if (name === 'model-settings') {
       NavDestination() { ModelSettingsPanel({ app: this.app }) }.title(t('模型分工与能力'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
-    } else if (name === 'ui-demo') {
-      NavDestination() { WebUiDemoPanel() }.title(t('交互示例'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'backup') {
       NavDestination() { BackupPanel({ app: this.app }) }.title(t('备份与恢复'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'usage') {
@@ -289,7 +286,6 @@ struct Index {
           onUsage: () => { this.paths.pushPath({ name: 'usage' }); },
           onModels: () => { this.paths.pushPath({ name: 'model-settings' }); },
           onSearch: () => { this.paths.pushPath({ name: 'search-settings' }); },
-          onUiDemo: () => { this.paths.pushPath({ name: 'ui-demo' }); },
           onAppearance: () => { this.paths.pushPath({ name: 'appearance' }); },
           onBackup: () => { this.paths.pushPath({ name: 'backup' }); },
           onSupport: (page: string) => this.openSupport(page),

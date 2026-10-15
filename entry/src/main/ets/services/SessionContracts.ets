@@ -1,6 +1,6 @@
 import { TeamRun } from '../model/Team';
 import { ProductivityData, Attachment, McpServer } from '../model/Productivity';
-import { AppData, MessageData, ThreadData } from '../model/Conversation';
+import { AppData, MessageData, ModelConfig, ThreadData } from '../model/Conversation';
 import { ProviderProfile } from '../model/ProviderProfiles';
 import { ExtensionSettings, SkillData } from '../model/Skills';
 import { LiveResources, McpRequest } from '../model/ResourceManagement';
@@ -43,10 +43,19 @@ export interface SessionState {
   acceptingSteering: boolean;
 }
 
-// Structural changes carry detached snapshots; text events carry only the changed prose.
+export type SettingsToggle = 'autoMemory' | 'readOnly' | 'saveSummary' | 'autoCompact' | 'webEnabled';
+
+export interface SessionPreferences {
+  config: ModelConfig;
+  extensions: ExtensionSettings;
+  productivity: ProductivityData;
+}
+
+// Structural changes carry detached snapshots; preference changes omit transcripts.
 export interface SessionEvent {
-  kind: 'snapshot' | 'message' | 'text' | 'reasoning' | 'draft' | 'state' | 'thread' | 'teams';
+  kind: 'snapshot' | 'preferences' | 'message' | 'text' | 'reasoning' | 'draft' | 'state' | 'thread' | 'teams';
   state: SessionState;
+  preferences?: SessionPreferences;
   data?: AppData;
   thread?: ThreadData;
   teams?: TeamRun[];

@@ -17,7 +17,7 @@ import { ProviderInfo, builtinProviderInfos } from '../model/Provider';
 import { ExtensionSettings, SkillData, defaultExtensions } from '../model/Skills';
 import { InputMode } from '../model/PendingInput';
 import { matchingThreads } from '../model/SessionManagement';
-import { SessionEvent, SessionPhase, SessionState } from '../services/SessionContracts';
+import { SessionEvent, SessionPhase, SessionState, SettingsToggle } from '../services/SessionContracts';
 import { SessionService } from '../services/SessionService';
 import { ProviderEditorViewModel } from './ProviderEditorViewModel';
 import { SkillEditorViewModel } from './SkillEditorViewModel';
@@ -99,6 +99,10 @@ export class ChatViewModel {
   private project(event: SessionEvent): void {
     this.projectState(event.state);
     if (event.data) { this.projectData(event.data); }
+    if (event.preferences) {
+      this.config = event.preferences.config; this.extensions = event.preferences.extensions;
+      this.productivity = event.preferences.productivity; this.selectedConfig = this.requireSession().currentConfig;
+    }
     if (event.kind === 'teams' && event.threadId === this.active.id) { this.teams = event.teams || []; }
     if (event.kind === 'thread' && event.thread) {
       this.threads.find((thread) => thread.id === event.threadId)?.updateMetadata(event.thread);
@@ -249,6 +253,10 @@ export class ChatViewModel {
   }
 
   openSettings(): void { this.settings.reset(this.config, this.extensions.webEnabled); }
+  async setSettingsToggle(kind: SettingsToggle, value: boolean): Promise<boolean> {
+    const saved = await this.requireSession().setSettingsToggle(kind, value);
+    this.settings.error = saved ? '' : this.error || t("设置未保存，请稍后重试。"); return saved;
+  }
   async saveSettings(): Promise<boolean> {
     const saved = await this.requireSession().saveSettings(this.settings.userDocument, this.settings.autoCompact, this.settings.webEnabled);
     // A refused save (session busy) reports no session error; still tell the user it did not stick.

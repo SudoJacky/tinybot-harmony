@@ -7,10 +7,10 @@ import { OPTIONAL_TOOL_NAMES } from '../model/ToolGroups';
 import { CustomToolsPanel } from './CustomToolsPanel';
 import { BrowserSession } from '../services/BrowserSession';
 import { ChatViewModel, SettingsViewModel } from '../viewmodel/ChatViewModel';
+import { SettingsToggle } from '../services/SessionContracts';
 import { ProviderInfo } from '../model/Provider';
 import { ProviderProfile } from '../model/ProviderProfiles';
 import { AssistantOptions, defaultAssistantOptions } from '../model/AssistantOptions';
-import { ProductivityData } from '../model/Productivity';
 import { Btn, Font, Space, Styles, protocolName } from '../common/Theme';
 import { monochromeProviderLogo, providerLogo } from '../common/ProviderBrand';
 import { Banner, BottomBar, GroupCard, NavRow, RowDivider, SectionHeader, SwitchRow } from '../common/Widgets';
@@ -25,7 +25,6 @@ export struct SettingsPanel {
   @State private showAgentMode: boolean = false;
   @State private showCustomTools: boolean = false;
   @State private assistantDraft: AssistantOptions = defaultAssistantOptions();
-  @State private assistantSaving: boolean = false;
   @ObjectLink app: ChatViewModel;
   @ObjectLink settings: SettingsViewModel;
   @ObjectLink browser: BrowserSession;
@@ -36,18 +35,19 @@ export struct SettingsPanel {
   onModels: () => void = () => {};
   onSearch: () => void = () => {};
   onBackup: () => void = () => {};
-  onUiDemo: () => void = () => {};
   onAppearance: () => void = () => {};
   onSupport: (page: string) => void = () => {};
   onTools: (tab: string) => void = () => {};
   private pendingSave: Promise<void> = Promise.resolve();
+  private toggleRevisions: Map<SettingsToggle, number> = new Map<SettingsToggle, number>();
 
   // A brief save leaves the page untouched; a reply, compaction or team run locks it with a notice.
   private blocked(): boolean { return this.app.busy && !this.app.saving; }
   // Editors need a mutable session; unsaved chat data must be resolved first.
-  private canEdit(): boolean { return !this.blocked() && !this.assistantSaving && this.app.saveError.length === 0; }
-  private canSelectMode(): boolean { return this.canEdit() && !this.app.busy && !this.app.active.archived; }
+  private canEdit(): boolean { return !this.blocked() && this.app.saveError.length === 0; }
+  private canSelectMode(): boolean { return this.canEdit() && !this.app.active.archived; }
   private async selectMode(mode: AgentMode): Promise<void> {
+    await this.pendingSave;
     if (this.canSelectMode() && await this.app.setAgentMode(mode)) { this.showAgentMode = false; }
   }
 
@@ -79,33 +79,33 @@ export struct SettingsPanel {
     this.assistantDraft = JSON.parse(JSON.stringify(this.app.productivity.options || defaultAssistantOptions())) as AssistantOptions;
   }
 
-  private saveAssistantToggle(kind: string, value: boolean): void {
-    if (!this.canEdit()) { return; }
-    if (kind === 'memory') { this.assistantDraft.autoMemory = value; }
+  private setToggleDraft(kind: SettingsToggle, value: boolean): void {
+    if (kind === 'autoMemory') { this.assistantDraft.autoMemory = value; }
     else if (kind === 'readOnly') { this.assistantDraft.readOnly = value; }
-    else if (kind === 'summary') { this.assistantDraft.saveSummary = value; }
-    this.assistantSaving = true;
-    this.pendingSave = this.pendingSave.then(async () => {
-      try {
-        const extras = JSON.parse(JSON.stringify(this.app.productivity)) as ProductivityData;
-        const options = extras.options || defaultAssistantOptions();
-        if (kind === 'memory') { options.autoMemory = value; }
-        else if (kind === 'readOnly') { options.readOnly = value; }
-        else if (kind === 'summary') { options.saveSummary = value; }
-        extras.options = options;
-        if (!await this.app.saveProductivity(extras)) {
-          this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: this.app.error });
-        }
-      } finally { this.resetAssistantDraft(); this.assistantSaving = false; }
-    });
+    else if (kind === 'saveSummary') { this.assistantDraft.saveSummary = value; }
+    else if (kind === 'autoCompact') { this.settings.autoCompact = value; }
+    else if (kind === 'webEnabled') { this.settings.webEnabled = value; }
   }
 
-  // Toggles persist immediately, one save at a time; a failed save reverts the switch and says why.
-  private saveToggle(apply: (value: boolean) => void, value: boolean): void {
-    apply(value);
+  private savedToggleValue(kind: SettingsToggle): boolean {
+    const options = this.app.productivity.options || defaultAssistantOptions();
+    if (kind === 'autoMemory') { return options.autoMemory; }
+    if (kind === 'readOnly') { return options.readOnly; }
+    if (kind === 'saveSummary') { return options.saveSummary; }
+    if (kind === 'autoCompact') { return this.app.config.autoCompact !== false; }
+    return this.app.extensions.webEnabled;
+  }
+
+  // Respond immediately; serialize field changes without locking or resetting unrelated drafts.
+  private saveToggle(kind: SettingsToggle, value: boolean): void {
+    if (!this.canEdit()) { return; }
+    this.setToggleDraft(kind, value);
+    const revision = (this.toggleRevisions.get(kind) || 0) + 1;
+    this.toggleRevisions.set(kind, revision);
     this.pendingSave = this.pendingSave.then(async () => {
-      if (await this.app.saveSettings()) { return; }
-      apply(!value);
+      if (await this.app.setSettingsToggle(kind, value)) { return; }
+      // An earlier failure cannot undo a newer click on the same switch.
+      if (this.toggleRevisions.get(kind) === revision) { this.setToggleDraft(kind, this.savedToggleValue(kind)); }
       this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: this.settings.error });
     });
   }
@@ -209,7 +209,7 @@ export struct SettingsPanel {
             SwitchRow({ title: t('自动提取长期记忆'), compId: 'auto-memory',
               subtitle: t('按需保存长期事实，每 10 轮后台复盘；会额外调用模型。'),
               isOn: this.assistantDraft.autoMemory, disabled: !this.canEdit(),
-              onChange: (value: boolean) => this.saveAssistantToggle('memory', value) })
+              onChange: (value: boolean) => this.saveToggle('autoMemory', value) })
             RowDivider()
             NavRow({ title: t('管理长期记忆'), subtitle: t('查看、编辑所有对话或当前对话的记忆'), compId: 'open-memory',
               icon: $r('sys.symbol.lightbulb'), disabled: !this.canEdit(), onTap: () => this.onTools('memory') })
@@ -237,15 +237,15 @@ export struct SettingsPanel {
             RowDivider()
             SwitchRow({ title: t("自动压缩历史"), compId: 'auto-compact', isOn: this.settings.autoCompact,
               subtitle: t("接近上下文预算时，用当前模型生成摘要，完整记录保留。"), disabled: !this.canEdit(),
-              onChange: (value: boolean) => { this.saveToggle((v: boolean) => { this.settings.autoCompact = v; }, value); } })
+              onChange: (value: boolean) => this.saveToggle('autoCompact', value) })
             RowDivider()
             SwitchRow({ title: t('只读任务'), subtitle: t('阻止修改文件、调用远程工具和生成图片。'), compId: 'read-only',
               isOn: this.assistantDraft.readOnly, disabled: !this.canEdit(),
-              onChange: (value: boolean) => this.saveAssistantToggle('readOnly', value) })
+              onChange: (value: boolean) => this.saveToggle('readOnly', value) })
             RowDivider()
             SwitchRow({ title: t('任务结束后保存结果'), subtitle: t('把成功的回答归档到工作区的“任务结果”目录。'), compId: 'save-summary',
               isOn: this.assistantDraft.saveSummary, disabled: !this.canEdit(),
-              onChange: (value: boolean) => this.saveAssistantToggle('summary', value) })
+              onChange: (value: boolean) => this.saveToggle('saveSummary', value) })
           }
         }
         SectionHeader({ title: t('工具与扩展') })
@@ -290,7 +290,7 @@ export struct SettingsPanel {
         GroupCard() {
           SwitchRow({ title: t('允许联网'), compId: 'web-enabled', isOn: this.settings.webEnabled,
             subtitle: t('允许网页读取和已配置的搜索；获取的内容会发送给当前模型。'), disabled: !this.canEdit(),
-            onChange: (value: boolean) => { this.saveToggle((v: boolean) => { this.settings.webEnabled = v; }, value); } })
+            onChange: (value: boolean) => this.saveToggle('webEnabled', value) })
         }
         SectionHeader({ title: t('偏好设置') })
         GroupCard() {
@@ -307,8 +307,6 @@ export struct SettingsPanel {
         SectionHeader({ title: t('关于') })
         GroupCard() {
           Column() {
-            NavRow({ title: t('交互示例'), subtitle: t('旋转、缩放并调整三维场景'), compId: 'open-ui-demo', onTap: () => this.onUiDemo() })
-            RowDivider()
             NavRow({ title: t('使用帮助'), compId: 'open-help', onTap: () => this.onSupport('help') })
             RowDivider()
             NavRow({ title: t('评分和评论'), compId: 'open-rating', onTap: () => this.onSupport('rating') })
