@@ -213,6 +213,17 @@ export struct ChatPanel {
     }, 80);
   }
 
+  private scrollToLatest(): void {
+    this.inspectingOutput = false;
+    // Resume following at onReachEnd so streaming updates cannot interrupt the native spring's soft landing.
+    this.followOutput = false;
+    clearTimeout(this.scrollTimer); this.scrollTimer = -1;
+    const earlier = this.app.visibleMessageCount < this.thread.messages.length ? 1 : 0;
+    const team = this.app.teams.some((run) => !run.ownerMessageId) ? 1 : 0;
+    const lastIndex = earlier + this.app.visibleMessages.length + team - 1;
+    this.scroller.scrollToIndex(lastIndex, true, ScrollAlign.END);
+  }
+
   private updateHeaderProgress(): void {
     // Item coordinates already include contentStartOffset; no accumulated gesture deltas or offset baselines.
     const first = this.scroller.getItemRect(0);
@@ -419,7 +430,7 @@ export struct ChatPanel {
         }.id('scroll-to-latest').width(38).height(38).padding(0).borderRadius(19)
         .backgroundColor(Color.Transparent).selectedColor(Color.Transparent).systemMaterial(this.appearance.control)
         .accessibilityText(t("查看最新消息")).accessibilityRole(AccessibilityRoleType.BUTTON)
-        .onClick(() => { this.inspectingOutput = false; this.followOutput = true; this.scroller.scrollEdge(Edge.Bottom); })
+        .onClick(() => { this.scrollToLatest(); })
         .margin({ bottom: Space.md })
         .transition(Motion.pop())
       }
