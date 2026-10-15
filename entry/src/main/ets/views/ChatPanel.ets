@@ -7,12 +7,14 @@ import { ComposerGlow } from '../common/ComposerGlow';
 import { ReasoningEffortPicker } from './ReasoningEffortPicker';
 import { SpeechInput } from '../services/SpeechInput';
 import { DictationDraft } from '../model/DictationDraft';
-import { VoiceInputButton } from '../common/VoiceInputButton';
-import { SpeechOrb } from '../common/SpeechOrb';
+import { VoiceHoldButton } from '../common/VoiceHoldButton';
+import { VoiceRecordingOverlay } from '../common/VoiceRecordingOverlay';
+import { VoiceAction, VoiceTargetRect, voiceActionAtPoint } from '../model/VoiceGesture';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { ThreadReference, referenceQuery } from '../model/ThreadReferences';
 import { ThreadReferenceCard } from './ThreadReferenceCard';
-import { curves, SymbolGlyphModifier } from '@kit.ArkUI';
+import { curves, FrameCallback, SymbolGlyphModifier } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { Attachment, PromptTemplate } from '../model/Productivity';
 import { Attachments } from '../services/Attachments';
@@ -34,6 +36,13 @@ import { Banner, IconBadge, IconButton } from '../common/Widgets';
 import { WindowViewport } from '../viewmodel/WindowViewport';
 import { MessageListSource } from '../viewmodel/MessageListSource';
 import { SendFrame, SendOrigin } from '../common/SendBubbleMotion';
+
+// onFrame runs before dirty properties are applied. Focus needs the editor's rendered visibility and focusability.
+class ComposerKeyboardFrame extends FrameCallback {
+  private action: () => void;
+  constructor(action: () => void) { super(); this.action = action; }
+  onIdle(): void { this.action(); }
+}
 
 @Component
 export struct ChatPanel {
@@ -66,6 +75,14 @@ export struct ChatPanel {
   @State private importing: boolean = false;
   @State private showPlus: boolean = false;
   @State private speech: SpeechInput = new SpeechInput();
+  @State private voiceMode: boolean = false;
+  @State private speechHolding: boolean = false;
+  @State private speechTarget: VoiceAction = 'send';
+  private speechOutcome?: VoiceAction;
+  private cancelVoiceRect?: VoiceTargetRect;
+  private editVoiceRect?: VoiceTargetRect;
+  private composerController: TextAreaController = new TextAreaController();
+  private keyboardFocusRequest: number = 0;
   @State private reading: AnswerSpeech = new AnswerSpeech();
   @State private unwrittenSpeech: string = '';
   private dictationDraft?: DictationDraft;
@@ -124,14 +141,15 @@ export struct ChatPanel {
       if (!this.dictationDraft || this.speechThreadId !== this.app.active.id || !this.speechEnabled) {
         this.endSpeech(); return;
       }
-      try { this.app.setDraft(this.dictationDraft.update(this.app.draft, text)); }
-      catch (error) {
-        this.endSpeech(); this.unwrittenSpeech = text; this.speech.error = (error as Error).message;
-      }
+      // Partial recognition stays in the floating preview; cancellation never edits the existing draft.
     };
-    this.speech.onComplete = (): void => { this.dictationDraft = undefined; this.app.flushDraft(); };
-    this.speech.onError = (): void => { this.dictationDraft = undefined; this.app.flushDraft(); };
-    this.speech.onBackground = (): void => { this.dictationDraft = undefined; this.app.flushDraft(); };
+    this.speech.onComplete = (): void => { if (!this.speechHolding) { this.completeSpeech(); } };
+    this.speech.onError = (): void => {
+      this.speechHolding = false; this.speechOutcome = undefined; this.speechTarget = 'send';
+      // An interrupted recognition is recoverable text, never an automatically sent message.
+      if (this.applySpeechDraft()) { this.voiceMode = false; this.app.flushDraft(); }
+    };
+    this.speech.onBackground = (): void => this.endSpeech();
     this.receiveVoiceShortcut();
   }
 
@@ -141,6 +159,8 @@ export struct ChatPanel {
     this.reading.stop();
     clearTimeout(this.scrollTimer);
   }
+
+  private voiceOverlayVisible(): boolean { return this.speechHolding || this.speechActive(); }
 
   private speechActive(): boolean {
     return this.speech.phase === 'preparing' || this.speech.phase === 'listening' || this.speech.phase === 'finishing';
@@ -162,7 +182,7 @@ export struct ChatPanel {
       this.voiceRequest !== this.activeThreadId || this.voiceRequest !== this.thread.id || !this.speechEnabled) { return; }
     this.consumedVoiceRequest = this.voiceRequest;
     this.onVoiceShortcutConsumed();
-    if (LaunchActions.isForeground()) { this.startSpeech(); }
+    if (LaunchActions.isForeground()) { this.enterVoiceMode(); }
   }
   private readAnswer(id: string): void {
     if (this.reading.messageId === id) { this.reading.stop(); return; }
@@ -171,24 +191,89 @@ export struct ChatPanel {
     this.endSpeech();
     this.reading.start(this.getUIContext().getHostContext() as common.UIAbilityContext, id, message.content);
   }
-  private startSpeech(settings: boolean = false): void {
-    if (this.speechActive() || !this.speechEnabled || !this.app.ready || this.thread.archived || this.app.saveError) { return; }
+  private enterVoiceMode(): void {
+    this.keyboardFocusRequest++;
+    this.getUIContext().getFocusController().clearFocus();
+    this.composerFocused = false; this.voiceMode = true;
+  }
+  private showSpeechKeyboard(): void {
+    this.voiceMode = false;
+    const threadId = this.thread.id;
+    const request = ++this.keyboardFocusRequest;
+    this.getUIContext().postFrameCallback(new ComposerKeyboardFrame(() => {
+      if (request !== this.keyboardFocusRequest || this.thread.id !== threadId || !this.speechEnabled ||
+        this.thread.archived || this.voiceMode || this.speechActive()) { return; }
+      hilog.info(0, 'VoiceComposer', 'Request keyboard focus request=%{public}d', request);
+      this.getUIContext().getFocusController().requestFocus('composer');
+      this.composerController.caretPosition(this.app.draft.length);
+    }));
+  }
+  private canRecordSpeech(): boolean {
+    return this.app.ready && this.speechEnabled && !this.thread.archived && !this.app.saveError && !this.importing &&
+      !this.speech.permissionSettingsPending && (!this.app.busy || this.app.canQueueInput);
+  }
+  private startSpeech(): boolean {
+    if (this.speechActive() || !this.canRecordSpeech()) { return false; }
     this.reading.stop();
     this.getUIContext().getFocusController().clearFocus();
+    this.voiceMode = true; this.speechHolding = true; this.speechTarget = 'send'; this.speechOutcome = undefined;
+    this.cancelVoiceRect = undefined; this.editVoiceRect = undefined;
     this.speechThreadId = this.app.active.id;
     this.dictationDraft = new DictationDraft(this.app.draft);
     this.unwrittenSpeech = '';
-    this.speech.start(this.getUIContext().getHostContext() as common.UIAbilityContext, settings);
+    this.speech.start(this.getUIContext().getHostContext() as common.UIAbilityContext);
+    return true;
   }
-  private finishSpeech(): void {
-    if (this.speech.phase === 'preparing') { this.endSpeech(); }
+  private moveSpeech(x: number, y: number): void {
+    if (this.speechHolding) { this.speechTarget = voiceActionAtPoint(x, y, this.cancelVoiceRect, this.editVoiceRect); }
+  }
+  private cancelSpeechHold(): void { if (this.speechHolding) { this.endSpeech(); } }
+  private releaseSpeech(action: VoiceAction = this.speechTarget): void {
+    if (!this.dictationDraft) { return; }
+    this.speechHolding = false;
+    hilog.info(0, 'VoiceComposer', 'Release action=%{public}s phase=%{public}s characters=%{public}d', action, this.speech.phase, this.speech.text.length);
+    if (action === 'cancel' || this.speech.phase === 'preparing') {
+      this.endSpeech();
+      if (action === 'edit') { this.showSpeechKeyboard(); }
+      return;
+    }
+    this.speechOutcome = action;
+    if (this.speech.phase === 'complete') { this.completeSpeech(); }
     else { this.speech.finish(); }
   }
+  private applySpeechDraft(): boolean {
+    const transaction = this.dictationDraft; this.dictationDraft = undefined;
+    if (!transaction || this.speechThreadId !== this.app.active.id || !this.speechEnabled || !this.speech.text.trim()) { return false; }
+    try { this.app.setDraft(transaction.update(this.app.draft, this.speech.text)); return true; }
+    catch (error) {
+      this.unwrittenSpeech = this.speech.text; this.speech.error = (error as Error).message; this.speech.phase = 'error';
+      hilog.error(0, 'VoiceComposer', 'Draft commit failed: %{public}s', this.speech.error); return false;
+    }
+  }
+  private completeSpeech(): void {
+    const action = this.speechOutcome; this.speechOutcome = undefined;
+    if (!action || !this.dictationDraft) { return; }
+    if (!this.speech.text.trim()) {
+      this.endSpeech();
+      if (action === 'edit') { this.showSpeechKeyboard(); }
+      else { this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t('未识别到文字，请重试。') }); }
+      return;
+    }
+    if (!this.applySpeechDraft()) { return; }
+    this.speech.cancel(); this.speechTarget = 'send';
+    if (action === 'edit') { this.showSpeechKeyboard(); this.app.flushDraft(); }
+    else if (this.canSend()) { this.send(); }
+    else if (this.app.generating && this.app.canQueueInput) { this.app.enqueueInput('followUp'); }
+    else {
+      this.voiceMode = false; this.app.flushDraft();
+      this.speech.error = t('识别文字已保留为草稿，当前无法发送。');
+    }
+  }
   private endSpeech(): void {
-    const hadDraft = this.dictationDraft !== undefined;
-    this.dictationDraft = undefined;
+    this.keyboardFocusRequest++;
+    this.dictationDraft = undefined; this.speechOutcome = undefined; this.speechHolding = false; this.speechTarget = 'send';
+    this.cancelVoiceRect = undefined; this.editVoiceRect = undefined;
     this.speech.cancel();
-    if (hadDraft) { this.app.flushDraft(); }
   }
   private async speechErrorAction(): Promise<void> {
     if (this.unwrittenSpeech) {
@@ -197,7 +282,10 @@ export struct ChatPanel {
         this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t('已复制') });
         this.unwrittenSpeech = ''; this.speech.error = '';
       } catch (error) { this.speech.error = t('复制失败：') + (error as Error).message; }
-    } else if (this.speech.permissionDenied) { this.startSpeech(true); }
+    } else if (this.speech.permissionDenied) {
+      this.enterVoiceMode();
+      await this.speech.requestPermissionSetting(this.getUIContext().getHostContext() as common.UIAbilityContext);
+    }
     else { this.speech.error = ''; }
   }
 
@@ -278,6 +366,7 @@ export struct ChatPanel {
   }
 
   private composerExpanded(): boolean {
+    if (this.voiceMode) { return false; }
     return this.composerFocused || this.app.draft.length > 0 || this.hasDraft() || this.importing || this.speechActive() ||
       this.app.generating || this.thread.pendingInputs.length > 0 || this.showPlus || this.showContext || this.showReasoning || this.showQueue;
   }
@@ -783,7 +872,7 @@ export struct ChatPanel {
   @Builder
   composerAddButton() {
     IconButton({ icon: $r('sys.symbol.plus'), label: t("添加图片、文件或模板"), compId: 'add-attachment', diameter: 36,
-      iconSize: 20, fill: $r('app.color.surface_variant'), disabled: this.thread.archived || this.app.saveError.length > 0,
+      iconSize: 20, fill: $r('app.color.surface_variant'), disabled: this.thread.archived || this.app.saveError.length > 0 || this.speechActive() || this.speechHolding,
       onTap: () => { this.getUIContext().getFocusController().clearFocus(); this.showPlus = true; } })
   }
 
@@ -809,7 +898,7 @@ export struct ChatPanel {
       if (this.thread.attachments.length > 0 || this.importing) {
         this.attachmentStrip()
       }
-      TextArea({ text: this.app.draft,
+      TextArea({ text: this.app.draft, controller: this.composerController,
         placeholder: this.speechActive() ? t('请说出要输入的内容') : this.thread.archived ? t("已归档的对话无法继续") : this.app.generating ? t("补充要求，或排队下一项任务…")
           : !this.composerExpanded() ? t('输入消息…') : this.thread.teamEnabled ? t("描述目标，主 Agent 会按需组建团队…") : t('输入消息，/ 命令，@ 引用会话') }).fontFamily(this.appearance.fontFamily)
         .id('composer').fontSize(Font.body).fontColor($r('app.color.text_primary'))
@@ -820,7 +909,8 @@ export struct ChatPanel {
           top: 10, bottom: this.composerExpanded() ? 4 : 10 }).borderRadius(0)
         .align(this.composerExpanded() ? Alignment.TopStart : Alignment.Start)
         .animation({ duration: Motion.medium, curve: Motion.standard })
-        .enabled(!this.thread.archived).focusable(!this.speechActive()).enableKeyboardOnFocus(!this.speechActive())
+        .visibility(this.voiceMode ? Visibility.Hidden : Visibility.Visible)
+        .enabled(!this.thread.archived).focusable(!this.voiceMode && !this.speechActive()).enableKeyboardOnFocus(!this.voiceMode && !this.speechActive())
         .onWillChange((value: EditableTextChangeValue) => !this.speechActive() || value.content === this.app.draft)
         .onChange((value: string) => {
           if (!this.speechActive()) { this.app.setDraft(value); }
@@ -832,6 +922,17 @@ export struct ChatPanel {
     .width('100%').padding({ left: 8, right: 8, top: this.composerExpanded() ? 4 : 6,
       bottom: this.composerExpanded() ? (this.speechActive() ? 52 : 48) : 6 })
     .animation({ duration: Motion.medium, curve: Motion.standard })
+      if (this.voiceMode) {
+        Row({ space: 4 }) {
+          this.composerAddButton()
+          VoiceHoldButton({ phase: this.speech.phase, action: this.speechTarget, disabled: !this.canRecordSpeech(),
+            onHold: (): boolean => this.startSpeech(), onMove: (x: number, y: number): void => this.moveSpeech(x, y),
+            onRelease: (): void => this.releaseSpeech(), onCancel: (): void => this.cancelSpeechHold() }).layoutWeight(1)
+          IconButton({ icon: $r('sys.symbol.keyboard'), label: t('切换到键盘输入'), compId: 'voice-keyboard', diameter: 36,
+            iconSize: 20, fill: $r('app.color.surface_variant'), disabled: this.speechActive() || this.speechHolding,
+            onTap: () => this.showSpeechKeyboard() })
+        }.width('100%').height(56).padding({ left: 8, right: 8 })
+      } else {
       Row() {
         if (this.speechActive()) {
           Blank()
@@ -896,9 +997,9 @@ export struct ChatPanel {
           .accessibilityLevel(this.composerExpanded() ? 'auto' : 'no-hide-descendants')
           .hitTestBehavior(this.composerExpanded() ? HitTestMode.Default : HitTestMode.None)
         }
-        VoiceInputButton({ phase: this.speech.phase, startedAt: this.speech.startedAt,
-          disabled: !this.app.ready || !this.speechEnabled || this.thread.archived || this.app.saveError.length > 0,
-          onStart: () => this.startSpeech(), onFinish: () => this.finishSpeech() })
+        IconButton({ icon: $r('sys.symbol.mic'), label: t('切换到语音输入'), compId: 'start-speech', diameter: 36,
+          iconSize: 19, fill: $r('app.color.surface_variant'), disabled: !this.canRecordSpeech(),
+          onTap: () => this.enterVoiceMode() })
           .margin({ left: 4 })
         if (this.app.generating) {
           if (!this.speechActive() && this.hasDraft() && this.app.canQueueInput) {
@@ -938,6 +1039,7 @@ export struct ChatPanel {
         .padding({ left: 8, right: 8, bottom: this.composerExpanded() ? 8 : 10 })
         .animation({ duration: Motion.medium, curve: Motion.standard })
         .hitTestBehavior(this.composerExpanded() ? HitTestMode.Default : HitTestMode.Transparent)
+      }
     }.id('composer-shell').width('100%').borderRadius(this.composerExpanded() ? Radius.xl : 28).clip(true)
     .backgroundColor($r('app.color.surface'))
     .border({ width: this.composerFocused ? 1 : 0.5,
@@ -996,7 +1098,15 @@ export struct ChatPanel {
             this.messageList()
           }
         }.width('100%').height('100%').zIndex(this.sendingMessageId ? 1 : 0)
-        this.teamToggle()
+        if (!this.voiceOverlayVisible()) { this.teamToggle() }
+        if (this.voiceOverlayVisible()) {
+          VoiceRecordingOverlay({ phase: this.speech.phase === 'complete' ? 'finishing' : this.speech.phase,
+            text: this.speech.text, speaking: this.speech.speaking, action: this.speechTarget,
+            onTargetArea: (action: VoiceAction, rect: VoiceTargetRect): void => {
+              if (action === 'cancel') { this.cancelVoiceRect = rect; } else { this.editVoiceRect = rect; }
+            }, onCancel: (): void => this.releaseSpeech('cancel'), onEdit: (): void => this.releaseSpeech('edit') })
+            .align(Alignment.Bottom).zIndex(5).transition(Motion.rise(0, 52))
+        }
       }.id('chat-swipe-area').layoutWeight(1).width('100%').zIndex(this.sendingMessageId ? 1 : 0)
       // Normal priority lets nested horizontal scrollers keep their gestures. The composer
       // stays outside this region so selecting or moving through draft text does not open history.
@@ -1059,9 +1169,6 @@ export struct ChatPanel {
         ForEach(this.thread.messages.slice(-1).filter((message) => message.role === 'assistant'), (message: MessageViewModel) => {
           ChatPlanPanel({ plan: message.plan })
         }, (message: MessageViewModel) => this.thread.id + ':' + message.id)
-        if (this.speechActive()) {
-          SpeechOrb({ phase: this.speech.phase, speaking: this.speech.speaking }).transition(Motion.rise(0, 8))
-        }
         this.composer()
         if (this.viewport.keyboardHeight === 0) {
           Text(t('AI可能会犯错，请仔细鉴别。')).fontFamily(this.appearance.fontFamily).id('ai-disclaimer')

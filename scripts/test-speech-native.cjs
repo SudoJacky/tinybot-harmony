@@ -26,7 +26,8 @@ const kits = {
     assert.equal(params.language, 'zh-CN'); assert.equal(params.online, 1);
     assert.equal(params.extraParams.recognizerMode, 'long'); return create();
   } } },
-  '@kit.PerformanceAnalysisKit': { hilog: { warn: () => {}, info: (...args) => vadEvents.push(args) } }
+  '@kit.PerformanceAnalysisKit': { hilog: { warn: () => {}, error: () => {},
+    info: (...args) => { if (args[2].startsWith('VAD ')) vadEvents.push(args); } } }
 };
 function load(relative) {
   const file = path.resolve(relative.endsWith('.ets') ? relative : relative + '.ets');
@@ -219,6 +220,22 @@ test('finishing clears speech activity and ignores subsequent VAD events', async
   native.listener.onEvent(native.id, 1, 'late start'); assert.equal(speech.speaking, false);
   native.result('保留识别文字', true, true); native.complete();
   assert.equal(speech.text, '保留识别文字'); assert.equal(speech.phase, 'complete');
+});
+test('permission settings grant access without starting capture and suppress duplicate requests', async () => {
+  const pending = deferred(); setting = () => pending.promise;
+  const speech = new SpeechInput(); speech.permissionDenied = true;
+  const request = speech.requestPermissionSetting(context);
+  assert.equal(speech.permissionSettingsPending, true);
+  await speech.requestPermissionSetting(context); assert.equal(settingCalls, 1);
+  pending.resolve([0]); await request;
+  assert.equal(speech.permissionSettingsPending, false); assert.equal(speech.permissionDenied, false);
+  assert.equal(engines.length, 0); assert.equal(speech.phase, 'idle');
+});
+test('permission settings denial remains visible and always unlocks the control', async () => {
+  setting = async () => [-1]; const speech = new SpeechInput(); speech.permissionDenied = true;
+  await speech.requestPermissionSetting(context);
+  assert.equal(speech.permissionSettingsPending, false); assert.equal(speech.permissionDenied, true);
+  assert.equal(speech.phase, 'error'); assert.match(speech.error, /麦克风权限/); assert.equal(engines.length, 0);
 });
 (async () => {
   for (const { name, run } of cases) { reset(); await run(); console.log('PASS ' + name); }

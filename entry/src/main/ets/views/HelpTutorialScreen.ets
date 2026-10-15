@@ -1,6 +1,7 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { TutorialControl, TutorialScreen, tutorialRect } from '../model/HelpTutorial';
 import { EN_MESSAGES, ZH_MESSAGES } from '../model/LocaleCatalog';
+import { SpeechOrb } from '../common/SpeechOrb';
 import { Font, Radius } from '../common/Theme';
 import { SwitchSize } from '../common/SwitchSize';
 import { NavRow } from '../common/Widgets';
@@ -134,7 +135,7 @@ export struct HelpTutorialScreen {
     this.card(16, this.screen === 'draft' ? 584 : 638, 328, this.screen === 'draft' ? 110 : 56)
     Text(this.screen === 'draft' ? this.text('帮我把下面的想法整理成可执行的步骤：')
       .slice(0, Math.ceil(this.typing * this.text('帮我把下面的想法整理成可执行的步骤：').length)) :
-      this.screen === 'speech' ? this.text('请说出要输入的内容') : this.text('输入消息…')).fontFamily(this.appearance.fontFamily)
+      this.screen === 'speech' ? this.text('松开发送') : this.screen === 'voice-ready' ? this.text('按住说话') : this.text('输入消息…')).fontFamily(this.appearance.fontFamily)
       .fontSize(16).fontColor(this.screen === 'draft' ? $r('app.color.text_primary') : $r('app.color.text_tertiary'))
       .width(this.screen === 'draft' ? 296 : 226).height(48).maxLines(this.screen === 'draft' ? 2 : 1)
       .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -150,20 +151,19 @@ export struct HelpTutorialScreen {
       if (this.screen === 'draft' || this.screen === 'running') {
         SymbolGlyph(this.screen === 'running' ? $r('sys.symbol.square_fill') : $r('sys.symbol.arrow_up'))
           .fontSize(18).fontColor([this.appearance.onAccent])
-      } else { this.glyph($r('sys.symbol.mic'), 19) }
+      } else { this.glyph(this.screen === 'speech' || this.screen === 'voice-ready' ? $r('sys.symbol.keyboard') : $r('sys.symbol.mic'), 19) }
     }.width(36).height(36).borderRadius(18)
       .backgroundColor(this.screen === 'draft' || this.screen === 'running' ? this.appearance.accent : $r('app.color.surface_variant'))
       .position({ x: 298, y: 648 })
     if (this.screen === 'speech') {
-      Row({ space: 5 }) {
-        ForEach([0, 1, 2, 3, 4, 5, 6], (bar: number) => {
-          Rect().width(3).height(6 + 14 * Math.abs(Math.sin(this.motion * Math.PI * 6 + bar)))
-            .radius(2).fill(this.appearance.onAccent)
-        }, (bar: number) => bar.toString())
-        Text('0:02').fontFamily(this.appearance.fontFamily).fontSize(12).fontColor(this.appearance.onAccent).width(34)
-        Rect().width(10).height(10).radius(2).fill(this.appearance.onAccent)
-      }.width(156).height(36).justifyContent(FlexAlign.Center).borderRadius(18)
-        .backgroundColor(this.appearance.accent).position({ x: 178, y: 648 })
+      Text(this.text('帮我把下面的想法整理成可执行的步骤：')).fontFamily(this.appearance.fontFamily).fontSize(16)
+        .fontColor($r('app.color.text_primary')).width(328).padding(14).borderRadius(20)
+        .backgroundColor($r('app.color.surface')).position({ x: 16, y: 346 })
+      SpeechOrb({ phase: 'listening', speaking: true }).width(160).position({ x: 100, y: 424 })
+      Stack() { this.glyph($r('sys.symbol.xmark'), 22) }.width(64).height(48).borderRadius(24)
+        .backgroundColor($r('app.color.surface')).position({ x: 32, y: 578 })
+      Stack() { this.glyph($r('sys.symbol.square_and_pencil'), 22) }.width(64).height(48).borderRadius(24)
+        .backgroundColor($r('app.color.surface')).position({ x: 264, y: 578 })
     }
     Text(this.text('AI可能会犯错，请仔细鉴别。')).fontFamily(this.appearance.fontFamily).fontSize(10).fontColor($r('app.color.text_tertiary'))
       .textAlign(TextAlign.Center).width(340).height(20).position({ x: 10, y: 698 })

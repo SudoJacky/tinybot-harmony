@@ -19,6 +19,8 @@ $env:DEVECO_STUDIO_HOME = $StudioPath
 if ($LASTEXITCODE -ne 0) { throw 'Markdown code highlighting tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-speech-orb.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Voice input UI lifecycle tests failed. Build the app first.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-voice-composer.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Voice composer tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-appearance.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Appearance preference and palette tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-settings-performance.cjs')

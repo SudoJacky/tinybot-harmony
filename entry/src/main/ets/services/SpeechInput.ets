@@ -17,6 +17,7 @@ export class SpeechInput {
   text: string = '';
   error: string = '';
   permissionDenied: boolean = false;
+  permissionSettingsPending: boolean = false;
   startedAt: number = 0;
   speaking: boolean = false;
   onResult: (text: string) => void = () => {};
@@ -39,6 +40,7 @@ export class SpeechInput {
     const id = 'tinybot_' + Date.now() + '_' + (++this.sequence);
     this.sessionId = id;
     this.phase = 'preparing';
+    hilog.info(0, 'SpeechInput', 'Preparing session=%{public}s', id);
     try {
       if (!canIUse('SystemCapability.AI.SpeechRecognizer')) {
         throw new Error(t('此设备不支持系统语音识别。'));
@@ -69,6 +71,7 @@ export class SpeechInput {
           clearTimeout(this.timer);
           this.startedAt = Date.now();
           this.phase = 'listening';
+          hilog.info(0, 'SpeechInput', 'Listening session=%{public}s', sessionId);
           // The engine also enforces this duration; the timer stops capture if completion is delayed.
           this.timer = setTimeout(() => this.finish(), 10 * 60 * 1000);
         },
@@ -94,6 +97,7 @@ export class SpeechInput {
           if (this.sessionId !== sessionId) { return; }
           this.release(false);
           this.phase = 'complete';
+          hilog.info(0, 'SpeechInput', 'Complete session=%{public}s characters=%{public}d', sessionId, this.text.length);
           this.onComplete();
         },
         onError: (sessionId: string, code: number): void => {
@@ -111,10 +115,25 @@ export class SpeechInput {
     }
   }
 
+  // Grant access without opening the microphone; capture still requires a new hold gesture.
+  async requestPermissionSetting(context: common.UIAbilityContext): Promise<void> {
+    if (this.permissionSettingsPending) { return; }
+    this.permissionSettingsPending = true;
+    try {
+      const grants = await abilityAccessCtrl.createAtManager().requestPermissionOnSetting(context, ['ohos.permission.MICROPHONE']);
+      if (grants[0] !== abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED) {
+        throw new Error(t('未获得麦克风权限，请在系统设置中允许 Tinybot 使用麦克风。'));
+      }
+      this.permissionDenied = false; this.error = ''; this.phase = 'idle';
+    } catch (error) { this.fail((error as Error).message); }
+    finally { this.permissionSettingsPending = false; }
+  }
+
   finish(): void {
     if (this.phase !== 'listening' || !this.engine) { return; }
     this.speaking = false;
     this.phase = 'finishing';
+    hilog.info(0, 'SpeechInput', 'Finishing session=%{public}s characters=%{public}d', this.sessionId, this.text.length);
     this.deadline(this.sessionId, 10000);
     try { this.engine.finish(this.sessionId); }
     catch (error) { this.fail(this.errorMessage((error as BusinessError).code)); }
@@ -138,6 +157,7 @@ export class SpeechInput {
   }
 
   private fail(message: string): void {
+    hilog.error(0, 'SpeechInput', 'Recognition failed session=%{public}s reason=%{public}s', this.sessionId, message);
     this.release(true);
     this.error = message;
     this.phase = 'error';
