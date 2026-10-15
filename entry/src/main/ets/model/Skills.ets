@@ -1,6 +1,7 @@
 import { t } from './I18n';
 export const MAX_SKILL_TEXT: number = 32000;
 export const MAX_SKILLS: number = 20;
+export const MAX_SKILL_TOTAL: number = 512000;
 
 export interface SkillFile {
   path: string;
@@ -26,6 +27,8 @@ export interface ExtensionSettings {
   browserPolicy?: BrowserPolicy;
   webEnabled: boolean;
   skills: SkillData[];
+  // Names already considered during bundled-Skill installation, including user-owned collisions.
+  seededBuiltinSkills?: string[];
 }
 
 export function defaultExtensions(): ExtensionSettings { return { webEnabled: true, skills: [] }; }
@@ -102,6 +105,11 @@ export function validateExtensions(value: ExtensionSettings): void {
   if (!value || typeof value.webEnabled !== 'boolean' || !Array.isArray(value.skills) || value.skills.length > MAX_SKILLS) {
     throw new Error(t("联网或 Skills 设置损坏。"));
   }
+  if (value.seededBuiltinSkills !== undefined && (!Array.isArray(value.seededBuiltinSkills) ||
+    value.seededBuiltinSkills.some((name) => typeof name !== 'string' || name.length > 64 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) ||
+    new Set<string>(value.seededBuiltinSkills).size !== value.seededBuiltinSkills.length)) {
+    throw new Error('Invalid built-in Skill installation state.');
+  }
   const names = new Set<string>();
   let total = 0;
   for (const skill of value.skills) {
@@ -128,7 +136,7 @@ export function validateExtensions(value: ExtensionSettings): void {
       total += file.content.length;
     }
   }
-  if (total > 512000) { throw new Error(t("Skills 正文和参考资料合计不能超过 512000 字符。")); }
+  if (total > MAX_SKILL_TOTAL) { throw new Error(t("Skills 正文和参考资料合计不能超过 512000 字符。")); }
 }
 
 export function explicitSkill(text: string): string {

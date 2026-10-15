@@ -33,6 +33,8 @@ devecocli run --device <设备名称或序列号>
 
 维护方式见 [locales/README.md](../locales/README.md)。修改双语 JSON 后运行 `node scripts/build-locales.cjs` 生成同步词条，`--check` 验证词条、占位符和代码引用完整性。
 
+内置 Skill 的文本源与打包、升级和验证方式见 [网页、搜索与 Skills](web-and-skills.md#内置-skills)。修改 `skills/` 后运行 `node scripts/build-builtin-skills.cjs`，并维护内置显示名称和简介的双语词条；打包检查已纳入 `scripts/test.ps1`。
+
 ## 应用图标
 
 HarmonyOS 图标源文件为 `assets/app-icon.svg`，背景铺满正方形，不预裁圆角、不加外边距或外框；内部 Logo 沿用原有比例。应用与桌面入口引用 `tinybot_layered_icon`，由系统合成前景、背景并裁切外形。启动窗口、关于页和交付素材使用同源合成 PNG。资源均为 1024×1024；只修改本项目源文件，不覆盖桌面版图标。

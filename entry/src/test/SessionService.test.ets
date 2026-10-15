@@ -1316,6 +1316,7 @@ export default function sessionServiceTests(): void {
 
     it('persistsSkillsAndRejectsTheirMutationDuringExecution', 0, async () => {
       const f = new Fixture(); await f.session.initialize();
+      const initialSkillCount = f.session.snapshot().extensions?.skills.length || 0;
       const document = '---\nname: demo\ndescription: demo skill\n---\nRead the reference.';
       expect(await f.session.saveSkill('', document, [{ path: 'references/a.md', content: 'reference' }])).assertTrue();
       expect(await f.session.saveSkill('', document, [])).assertFalse();
@@ -1329,9 +1330,9 @@ export default function sessionServiceTests(): void {
       expect(sent.endsWith('task')).assertTrue();
       expect(await f.session.changeSkill('demo', true)).assertFalse(); release.open(); await running;
       expect(await f.session.changeSkill('demo')).assertTrue();
-      expect((await f.repository.load()).extensions?.skills[0].enabled).assertFalse();
+      expect((await f.repository.load()).extensions?.skills.find((skill) => skill.name === 'demo')?.enabled).assertFalse();
       expect(await f.session.changeSkill('demo', true)).assertTrue();
-      expect((await f.repository.load()).extensions?.skills.length).assertEqual(0);
+      expect((await f.repository.load()).extensions?.skills.length).assertEqual(initialSkillCount);
       expect(active(await f.repository.load()).messages[0].skillPrompt).assertEqual(sent);
       f.provider.respond = async () => reply();
       f.session.setDraft('continue'); await f.session.send();

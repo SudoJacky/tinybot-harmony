@@ -1,0 +1,7 @@
+[
+  { "name": "document-brief", "title": "资料速读" },
+  { "name": "web-research", "title": "联网调研" },
+  { "name": "notes-to-actions", "title": "随手记整理" },
+  { "name": "data-analysis", "title": "数据分析" },
+  { "name": "sketch-to-prototype", "title": "草图变原型" }
+]

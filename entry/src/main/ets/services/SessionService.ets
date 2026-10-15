@@ -34,6 +34,7 @@ import { contextSettings } from '../model/ConversationContext';
 import { ModelReference, ProviderProfile, migrateProfiles, modelConfig } from '../model/ProviderProfiles';
 import { InputMode, MAX_INPUT_TEXT, PendingInput, nextPendingInput, validatePendingInputs } from '../model/PendingInput';
 import { BrowserPolicy, ExtensionSettings, SkillData, SkillFile, defaultExtensions, explicitSkill, expandSkillCommand, parseSkill, validateExtensions } from '../model/Skills';
+import { seedBuiltinSkills } from '../model/BuiltinSkills';
 import { threadTitle } from '../model/SessionManagement';
 import { CONVERSATION_TITLE_PROMPT, sanitizeConversationTitle, shouldGenerateTitle, titleCharacters } from '../model/ConversationTitle';
 import { AgentEvent, AgentRuntime } from './AgentRuntime';
@@ -213,6 +214,7 @@ export class SessionService {
       const migrate = data.providerProfiles === undefined;
       data.providerProfiles = data.providerProfiles || migrateProfiles(data.config);
       data.extensions = data.extensions || defaultExtensions();
+      const builtinsChanged = seedBuiltinSkills(data.extensions);
       data.productivity = data.productivity || defaultProductivity();
       for (const project of data.projects || []) { await this.resources.ensureWorkspace(project.id, project.workspaceId); }
       for (const thread of data.threads) {
@@ -228,7 +230,7 @@ export class SessionService {
       if (!active) { active = this.freshThread(); await this.resources.ensureWorkspace(active.id); data.threads.unshift(active); }
       data.activeThreadId = active.id;
       const preferencesChanged = this.syncEmptyThreadPreferences(data);
-      if (created || migrate || preferencesChanged.length > 0) { await this.persist(); }
+      if (created || migrate || builtinsChanged || preferencesChanged.length > 0) { await this.persist(); }
       this.status.ready = true;
       this.refreshContext();
     } catch (error) { this.status.error = t("打开本地会话或工作区失败：") + (error as Error).message; }

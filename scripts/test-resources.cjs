@@ -34,7 +34,9 @@ const { emptyData, parseAppData } = from('model/Conversation');
 const { defaultAssistantOptions } = from('model/AssistantOptions');
 const { defaultProductivity } = from('model/Productivity');
 const { modelConfig } = from('model/ProviderProfiles');
-const { parseSkill } = from('model/Skills');
+const { parseSkill, skillCatalog, validateExtensions } = from('model/Skills');
+const { seedBuiltinSkills, builtinSkillInfo } = from('model/BuiltinSkills');
+const { BUILTIN_SKILL_DOCUMENTS } = from('model/BuiltinSkillCatalog');
 const { parseMcpRequest, parseSkillRequest, saveSkillCandidate } = from('model/ResourceManagement');
 const { Cancellation } = from('services/Cancellation');
 const { ToolApproval } = from('services/ToolApproval');
@@ -58,9 +60,9 @@ function seed() {
   data.threads = [{ id: 'chat', title: 'Test', titleEdited: true, updatedAt: 1, messages: [], draft: '', modelRef: { providerId: 'test', modelId: 'model' } }];
   data.activeThreadId = 'chat'; return data;
 }
-async function fixture(data = seed()) {
+async function fixture(data = seed(), beforeSave = async () => {}) {
   const requests = [], errors = [], logs = [], secrets = new Map(); let liveTools;
-  const repo = { saved: JSON.stringify(data), beforeSave: async () => {}, load: async () => parseAppData(repo.saved),
+  const repo = { saved: JSON.stringify(data), beforeSave, load: async () => parseAppData(repo.saved),
     save: async d => { const text = JSON.stringify(d); await repo.beforeSave(d); repo.saved = text; } };
   const provider = { info: { id: 'test', name: 'Test', protocol: 'test', defaultBaseUrl: '', defaultModel: 'model' }, endpoint: b => b,
     respond: async () => reply(), stream: async (r, c, emit) => { requests.push(r); const result = await provider.respond(r); c.check(); emit(result.content); return result; } };
@@ -80,6 +82,55 @@ async function fixture(data = seed()) {
 }
 const receipts = f => f.requests.flatMap(r => r.messages.filter(m => m.role === 'tool').map(m => m.content));
 async function main() {
+  const bundledNames = BUILTIN_SKILL_DOCUMENTS.map(item => item.name);
+  const builtins = await fixture();
+  assert.deepEqual(Array.from(builtins.session.snapshot().extensions.skills, item => item.name), Array.from(bundledNames));
+  assert.deepEqual(Array.from((await builtins.repo.load()).extensions.seededBuiltinSkills), Array.from(bundledNames));
+  const builtinTools = new SkillTools(builtins.session.snapshot().extensions.skills);
+  for (const entry of BUILTIN_SKILL_DOCUMENTS) {
+    const skill = builtins.session.snapshot().extensions.skills.find(item => item.name === entry.name);
+    assert.equal(skill.enabled, true); assert.equal(skill.manualOnly, false);
+    assert.equal(builtinSkillInfo(skill).title, entry.title);
+    const read = JSON.parse(await invoke(builtinTools, 'read_skill', { name: entry.name }));
+    assert.equal(read.content, entry.document); assert.equal(read.kind, 'skill_instructions');
+  }
+  assert.ok(skillCatalog(builtins.session.snapshot().extensions.skills).includes(bundledNames[0]));
+  builtins.session.setDraft('/skill:notes-to-actions 整理这些想法'); await builtins.session.send();
+  assert.ok(builtins.requests.some(request => request.messages.some(message => message.role === 'user' &&
+    message.content.includes('<skill name="notes-to-actions">') && message.content.includes('整理这些想法'))));
+  assert.equal(await builtins.session.changeSkill('web-research'), true);
+  assert.equal(await builtins.session.changeSkill('data-analysis', true), true);
+  assert.equal(await builtins.session.saveSkill('document-brief', document('my-brief', 'My edited instructions'), []), true);
+  const restoredBuiltins = await fixture(await builtins.repo.load());
+  const restored = restoredBuiltins.session.snapshot().extensions.skills;
+  assert.equal(restored.find(item => item.name === 'web-research').enabled, false);
+  assert.ok(!restored.some(item => ['data-analysis', 'document-brief'].includes(item.name)));
+  assert.equal(restored.find(item => item.name === 'my-brief').document, document('my-brief', 'My edited instructions'));
+  await assert.rejects(() => invoke(new SkillTools(restored), 'read_skill', { name: 'web-research' }));
+  console.log('PASS bundled Skills install durably, enter the catalog/read path and explicit turns, and respect edit/rename/disable/delete after restart');
+
+  const collision = parseSkill(document('web-research', 'User instructions')); collision.enabled = false;
+  const legacy = { webEnabled: false, browserPolicy: 'disabled', skills: [collision] };
+  assert.equal(seedBuiltinSkills(legacy), true); validateExtensions(legacy);
+  assert.equal(legacy.skills.find(item => item.name === 'web-research'), collision);
+  assert.equal(collision.enabled, false); assert.equal(builtinSkillInfo(collision), undefined);
+  assert.equal(legacy.webEnabled, false); assert.equal(legacy.browserPolicy, 'disabled');
+  assert.equal(seedBuiltinSkills(legacy), false);
+  const full = { webEnabled: true, skills: Array.from({ length: 20 }, (_, i) => parseSkill(document('user-' + i))) };
+  assert.equal(seedBuiltinSkills(full), false); assert.equal(full.skills.length, 20);
+  full.skills.pop(); assert.equal(seedBuiltinSkills(full), true); assert.equal(full.skills.length, 20);
+  const crowded = { webEnabled: true, skills: Array.from({ length: 16 }, (_, i) => {
+    const item = parseSkill(document('large-' + i)); item.files = [{ path: 'reference.txt', content: 'x'.repeat(32000 - item.document.length) }]; return item;
+  }) };
+  validateExtensions(crowded); assert.equal(seedBuiltinSkills(crowded), false);
+  const unavailable = await fixture(seed(), async () => { throw Error('builtin disk full'); });
+  assert.equal(unavailable.session.state.ready, false); assert.match(unavailable.session.state.error, /builtin disk full/);
+  assert.equal((await unavailable.repo.load()).extensions, undefined);
+  const retried = await fixture(await unavailable.repo.load());
+  assert.equal(retried.session.snapshot().extensions.skills.length, bundledNames.length);
+  assert.throws(() => validateExtensions({ webEnabled: true, skills: [], seededBuiltinSkills: ['../escape'] }));
+  console.log('PASS upgrades preserve same-name user Skills and network settings, defer at capacity, and retry failed startup persistence');
+
   for (const bad of [null, [], {}, { action:'save', name:'x', url:'https://x', auth:'bearer', token:'SECRET' }, { action:'remove' }, {action:'test',id:'x',url:'https://x'}]) assert.throws(() => parseMcpRequest(JSON.stringify(bad)));
   for (const bad of [{action:'create',name:'overwrite',document:document()}, {action:'update',name:'x'}, {action:'install',document:document()}]) assert.throws(() => parseSkillRequest(JSON.stringify(bad)));
   const f = await fixture();
@@ -87,17 +138,17 @@ async function main() {
   await f.send([create, call('read_skill',{name:'test-skill'}), call('read_skill',{name:'test-skill',path:'references/guide.md'}),
     call('skill_manage',{action:'update',name:'test-skill',document:document('test-skill','Updated body'),files:'[]'}), call('read_skill',{name:'test-skill'})]);
   assert.ok(receipts(f).some(r => r.includes('REFERENCE'))); assert.ok(receipts(f).some(r => r.includes('Updated body')));
-  assert.equal(f.session.snapshot().extensions.skills[0].files.length,0);
+  assert.equal(f.session.snapshot().extensions.skills.find(item => item.name === 'test-skill').files.length,0);
   assert.equal((await f.repo.load()).threads[0].messages.at(-1).content,'done');
   const schemas = f.requests.map(r => JSON.stringify(r.tools.filter(t => ['skill_manage','mcp_manage','read_skill','list_skills','mcp_call','mcp_search_tools','mcp_list_tools'].includes(t.function.name))));
   assert.ok(schemas.every(s => s === schemas[0]));
   const reboot = await fixture(await f.repo.load()); await reboot.send([call('read_skill',{name:'test-skill'})]); assert.ok(receipts(reboot).some(r => r.includes('Updated body')));
   await f.send([call('skill_manage',{action:'disable',name:'test-skill'}), call('read_skill',{name:'test-skill'}), call('skill_manage',{action:'remove',name:'test-skill'})]);
-  assert.equal(f.session.snapshot().extensions.skills.length,0);
+  assert.equal(f.session.snapshot().extensions.skills.length,bundledNames.length);
   console.log('PASS create/update/reference reads in the same turn, fixed schemas, disable/remove and restart persistence');
 
-  const failed = await fixture(); failed.repo.beforeSave = async d => { if (d.extensions?.skills.length) { failed.session.setDraft('concurrent typing'); throw Error('disk full'); } };
-  await failed.send([create]); assert.equal(failed.session.snapshot().extensions.skills.length,0); assert.equal(failed.session.snapshot().threads[0].draft,'concurrent typing');
+  const failed = await fixture(); failed.repo.beforeSave = async d => { if (d.extensions?.skills.some(item => item.name === 'test-skill')) { failed.session.setDraft('concurrent typing'); throw Error('disk full'); } };
+  await failed.send([create]); assert.equal(failed.session.snapshot().extensions.skills.length,bundledNames.length); assert.equal(failed.session.snapshot().threads[0].draft,'concurrent typing');
   assert.ok(failed.errors.some(e => e.includes('disk full')));
   const ro = seed(); ro.productivity.options.readOnly = true; const readonly = await fixture(ro); await readonly.send([]);
   assert.ok(!readonly.requests[0].tools.some(t => ['skill_manage','mcp_manage'].includes(t.function.name)));
@@ -110,11 +161,11 @@ async function main() {
   const racing = await fixture(); let open, entered;
   const gate = new Promise(resolve => { open = resolve; }), started = new Promise(resolve => { entered = resolve; });
   let held = false;
-  racing.repo.beforeSave = async d => { if (!held && d.extensions?.skills.length) { held = true; entered(); await gate; } };
+  racing.repo.beforeSave = async d => { if (!held && d.extensions?.skills.some(item => item.name === 'test-skill')) { held = true; entered(); await gate; } };
   const running = racing.send([create]); await started;
   racing.session.setDraft('typing during resource save'); const flush = racing.session.flushDraft();
   await Promise.resolve(); open(); await Promise.all([running,flush]);
-  assert.equal((await racing.repo.load()).extensions.skills.length,1);
+  assert.equal((await racing.repo.load()).extensions.skills.length,bundledNames.length + 1);
   assert.equal((await racing.repo.load()).threads[0].draft,'typing during resource save');
   console.log('PASS concurrent draft persistence cannot overwrite a committed resource snapshot');
 
