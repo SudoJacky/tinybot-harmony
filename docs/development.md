@@ -58,6 +58,10 @@ node scripts/build-app-icons.cjs .cache/icon-tools/node_modules/@resvg/resvg-js
 
 画板使用 Pen Kit 的 `HandwriteComponent` 和 `HandwriteController`；`EntryAbility` 按官方接入要求设置 `_brushEngineContext`。系统组件管理笔迹和工具栏，`getContentRange` 与 `getThumbnail` 导出笔迹区域，`Attachments.saveDrawing` 使用 ArkGraphics2D 合成白底后编码 JPEG，避免透明笔迹变黑底。构建后运行 `node scripts/test-drawing-board.cjs`，验证实际编译的初始化和加载回调、空白校验、原生导出失败、像素释放、重复保存防护、弹层隔离，以及草稿附件保存和会话切换隔离；已纳入 `test.ps1`。系统笔刷、橡皮擦和撤销重做需在真机验证。
 
+Release 混淆规则必须保留 `globalThis` 全局名，避免 Pen Kit 的 ambient namespace 声明被顶层混淆改写，导致 `EntryAbility.onCreate` 引用不存在的变量。运行 `devecocli build --build-mode release` 后，以 `node scripts/test-release-models.cjs` 检查实际混淆产物的 Ability 初始化、全局画板上下文与模型数据兼容性；安装后还需确认应用实际进入页面，启动命令返回成功本身不代表页面已加载。
+
+浏览器批注的原生 `PixelMap` 以普通组件参数传递并在批注页退出时释放，不使用 `@Prop` 复制或代理原生句柄；标题和截图尺寸单独作为响应式参数。批注页显示截图、圈画后添加到消息及发送附件，需在真机验证。
+
 构建后运行 `node scripts/test-thinking-motion.cjs`，验证思考状态的循环、结束交叉渐变、历史静态挂载、快速切换文案、离屏暂停与卸载清理；配合 `test-chat-disclosures.cjs` 确认手动展开状态不受影响。呼吸、扫光与展开效果在真机使用实际推理响应验证。
 
 构建后运行 `node scripts/test-turn-workflow.cjs`，验证整轮真实阶段、并行工具、重试/停止/失败、保留节点的最新步骤、完成收束及手动展开和预览保留。

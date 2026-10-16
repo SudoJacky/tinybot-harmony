@@ -3,7 +3,6 @@ import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Btn, Font, Space, systemInsets } from '../common/Theme';
 import { IconButton } from '../common/Widgets';
 import { BrowserAnnotation } from '../model/BrowserAnnotation';
-import { NativeBrowserCapture } from '../services/NativeBrowserDriver';
 import { renderBrowserAnnotation } from '../services/BrowserAnnotationImage';
 import { t } from '../model/I18n';
 import { Diagnostics } from '../model/Diagnostics';
@@ -12,7 +11,11 @@ import { Diagnostics } from '../model/Diagnostics';
 export struct BrowserAnnotationBoard {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink draft: BrowserAnnotation;
-  @Require @Prop capture: NativeBrowserCapture;
+  // Keep this immutable native handle out of @Prop's object copying/proxying.
+  pixel?: image.PixelMap;
+  @Prop pageTitle: string = '';
+  @Prop captureWidth: number = 0;
+  @Prop captureHeight: number = 0;
   onClose: () => void = () => {};
   onAdd: (pixel: image.PixelMap, note: string) => Promise<void> = async () => {};
   @State private error: string = '';
@@ -29,7 +32,7 @@ export struct BrowserAnnotationBoard {
     systemInsets(this.getUIContext()).then((insets: number[]) => { this.insetTop = insets[0]; this.insetBottom = insets[1]; });
   }
   aboutToDisappear(): void {
-    this.capture.pixel.release().catch((error: Error) => Diagnostics.log('error', 'browser', 'annotation_failed', undefined, error));
+    this.pixel?.release().catch((error: Error) => Diagnostics.log('error', 'browser', 'annotation_failed', undefined, error));
   }
   private draw(): void {
     if (!this.ready) { return; }
@@ -62,7 +65,10 @@ export struct BrowserAnnotationBoard {
     if (this.draft.saving) { return; }
     this.draft.end(); this.pointer = -1; this.draft.saving = true; this.error = '';
     let pixel: image.PixelMap | undefined;
-    try { pixel = await renderBrowserAnnotation(this.capture.pixel, this.draft.strokes); await this.onAdd(pixel, this.draft.note); }
+    try {
+      if (!this.pixel) { throw new Error(t('批注截图已失效，请重新截取。')); }
+      pixel = await renderBrowserAnnotation(this.pixel, this.draft.strokes); await this.onAdd(pixel, this.draft.note);
+    }
     catch (error) { this.error = (error as Error).message; Diagnostics.log('error', 'browser', 'annotation_failed', undefined, error as Error); }
     finally { try { await pixel?.release(); } finally { this.draft.saving = false; } }
   }
@@ -78,11 +84,11 @@ export struct BrowserAnnotationBoard {
   build() {
     Navigation() {
       Column({ space: Space.sm }) {
-        Text(this.capture.title || this.capture.url).fontFamily(this.appearance.fontFamily).fontSize(12).maxLines(1)
+        Text(this.pageTitle).fontFamily(this.appearance.fontFamily).fontSize(12).maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_secondary')).width('100%')
         Stack() {
           Stack() {
-            Image(this.capture.pixel).width('100%').height('100%').objectFit(ImageFit.Fill)
+            Image(this.pixel).width('100%').height('100%').objectFit(ImageFit.Fill)
             Canvas(this.canvas).width('100%').height('100%').id('annotation-canvas')
               .accessibilityText(t('在截图上圈画批注'))
               .onReady(() => { this.ready = true; this.draw(); })
@@ -91,8 +97,8 @@ export struct BrowserAnnotationBoard {
           }.width(this.frameWidth).height(this.frameHeight).clip(true).enabled(!this.draft.saving)
         }.width('100%').layoutWeight(1).backgroundColor($r('app.color.surface_variant'))
           .onAreaChange((_old, area) => {
-            const scale = Math.min(Number(area.width) / this.capture.width, Number(area.height) / this.capture.height);
-            this.frameWidth = this.capture.width * scale; this.frameHeight = this.capture.height * scale;
+            const scale = Math.min(Number(area.width) / this.captureWidth, Number(area.height) / this.captureHeight);
+            this.frameWidth = this.captureWidth * scale; this.frameHeight = this.captureHeight * scale;
           })
         Row({ space: Space.sm }) {
           Text(t('用手指圈画，或在下方填写说明。')).fontFamily(this.appearance.fontFamily).fontSize(12).layoutWeight(1).fontColor($r('app.color.text_secondary'))
