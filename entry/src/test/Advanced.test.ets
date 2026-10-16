@@ -3,7 +3,8 @@ import { describe, expect, it } from '@ohos/hypium';
 import { parsePlan, parseForm, formResult, parseDataView, dataCsv, parseDelimited, lineDiff } from '../main/ets/model/RichArtifacts';
 import { UsageStream } from '../main/ets/model/Usage';
 import { defaultAssistantOptions, routeModel } from '../main/ets/model/AssistantOptions';
-import { replaceUnique, WorkspaceTools } from '../main/ets/services/WorkspaceTools';
+import { WorkspaceTools } from '../main/ets/services/WorkspaceTools';
+import { applyTextEdits } from '../main/ets/model/WorkspaceEdit';
 import { Cancellation } from '../main/ets/services/Cancellation';
 import { ToolApproval } from '../main/ets/services/ToolApproval';
 import { InteractionTools } from '../main/ets/services/InteractionTools';
@@ -51,8 +52,9 @@ export default function advancedTests(): void {
       rejects(() => parseDelimited('"incomplete', ','));
     });
     it('uniqueEditsDoNotExpandReplacementSyntaxOrAcceptAmbiguity', 0, () => {
-      expect(replaceUnique('A old B', 'old', '$&')).assertEqual('A $& B');
-      rejects(() => replaceUnique('same same', 'same', 'x')); rejects(() => replaceUnique('text', 'missing', 'x'));
+      expect(applyTextEdits('A old B', [{ oldText: 'old', newText: '$&' }])).assertEqual('A $& B');
+      rejects(() => applyTextEdits('same same', [{ oldText: 'same', newText: 'x' }]));
+      rejects(() => applyTextEdits('text', [{ oldText: 'missing', newText: 'x' }]));
       expect(lineDiff('a\nb\nc', 'a\nx\nc')).assertEqual('@@ 第 2 行起 @@\n- b\n+ x');
     });
     it('searchTraversesTextFilesAndReturnsLineNumbers', 0, async () => {

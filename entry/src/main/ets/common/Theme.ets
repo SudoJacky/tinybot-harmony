@@ -166,15 +166,6 @@ export function shortTime(time: number, now: number = Date.now()): string {
   return date.getFullYear() + '/' + (date.getMonth() + 1) + '/' + date.getDate();
 }
 
-export function dayGroup(time: number, now: number = Date.now()): string {
-  const today = startOfDay(now);
-  if (time >= today) { return t("今天"); }
-  if (time >= today - DAY) { return t("昨天"); }
-  if (time >= today - 7 * DAY) { return t("7 天内"); }
-  if (time >= today - 30 * DAY) { return t("30 天内"); }
-  return t("更早");
-}
-
 export function fileSize(bytes: number): string {
   if (bytes < 1024) { return bytes + ' B'; }
   if (bytes < 1024 * 1024) { return (bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0) + ' KB'; }

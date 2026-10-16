@@ -24,8 +24,6 @@ import { DeveloperDiagnostics } from '../services/DeveloperDiagnostics';
 import { AbilityConstant, common, Configuration, UIAbility, Want } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 
-const DOMAIN = 0x0000;
-
 // Required by Pen Kit's system-provided handwriting component.
 declare namespace globalThis {
   let _brushEngineContext: common.UIAbilityContext;

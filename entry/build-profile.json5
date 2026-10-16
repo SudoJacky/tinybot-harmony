@@ -16,10 +16,16 @@
   "buildOptionSet": [
     {
       "name": "release",
+      "externalNativeOptions": {
+        "abiFilters": ["arm64-v8a"],
+        // Keep native symbols for crash diagnosis; packaged libraries are stripped.
+        "cFlags": "-g",
+        "cppFlags": "-g"
+      },
       "arkOptions": {
         "obfuscation": {
           "ruleOptions": {
-            "enable": false,
+            "enable": true,
             "files": [
               "./obfuscation-rules.txt"
             ]

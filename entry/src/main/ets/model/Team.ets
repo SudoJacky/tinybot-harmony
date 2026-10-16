@@ -16,11 +16,6 @@ export interface TeamRun {
   revision: number; status: string; error: string; createdAt: number;
   finalTaskId: string; tasks: TeamTaskRecord[]; planning: AgentTurn;
 }
-export function defaultTeamMembers(): TeamMember[] {
-  return [{ id: 'researcher', name: '研究员', instructions: '查找资料，整理事实和出处，标出缺失信息。' },
-    { id: 'analyst', name: '分析员', instructions: '分析证据、比较方案，指出风险与未解决问题。' },
-    { id: 'editor', name: '编辑', instructions: '核对前置结果，汇总为清晰的最终交付物。' }];
-}
 function bounded(value: string, max: number): boolean { return typeof value === 'string' && value.trim().length > 0 && value.length <= max; }
 function identifier(value: string): boolean { return typeof value === 'string' && /^[a-zA-Z0-9_-]{1,120}$/.test(value); }
 export function validateTeamMembers(members: TeamMember[]): void {
@@ -58,10 +53,6 @@ export function validateTeamPlan(plan: TeamPlan, members: TeamMember[], chat: bo
     for (const task of plan.tasks) { if (connected.has(task.id)) { task.dependencies.forEach((id) => connected.add(id)); } }
   }
   if (connected.size !== plan.tasks.length) { throw new Error(t("所有任务必须通过依赖关系汇入最终任务。")); }
-}
-export function parseTeamPlan(text: string, members: TeamMember[]): TeamPlan {
-  const clean = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  const plan = JSON.parse(clean) as TeamPlan; validateTeamPlan(plan, members); return plan;
 }
 export function teamPlan(run: TeamRun): TeamPlan { return { tasks: run.tasks.map((record) => record.task), finalTaskId: run.finalTaskId }; }
 export function lastAttempt(record: TeamTaskRecord): TeamAttempt | undefined { return record.attempts[record.attempts.length - 1]; }

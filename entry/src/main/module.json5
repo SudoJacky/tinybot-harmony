@@ -9,6 +9,7 @@
     ],
     "deliveryWithInstall": true,
     "installationFree": false,
+    "compressNativeLibs": true,
     "pages": "$profile:main_pages",
     "requestPermissions": [
       { "name": "ohos.permission.INTERNET" },

@@ -7,7 +7,8 @@ function model(name,directory='entry/src/main/ets/model'){const file=path.resolv
 const exportsObject=model('WebUi');
 const {webUiHost,parseWebUi,parseWebUiMessage,webUiAutoHeight}=exportsObject;
 const assets='entry/src/main/resources/rawfile/interactive-web/';
-const example=JSON.parse(fs.readFileSync(assets+'example.json','utf8')).content.split('\n');
+const fixtures=path.join(__dirname,'fixtures/interactive-web/');
+const example=JSON.parse(fs.readFileSync(path.join(fixtures,'example.json'),'utf8')).content.split('\n');
 const begin=JSON.parse(example[1]);const spec=parseWebUi(JSON.parse(example[2]).node.data);
 const html=webUiHost(fs.readFileSync(assets+'host.js','utf8'),fs.readFileSync(assets+'three.bundle.js','utf8'));
 assert.throws(()=>parseWebUi(JSON.stringify({...spec,library:'cdn'})));assert.throws(()=>parseWebUiMessage('{"type":"submit"}'));assert.throws(()=>parseWebUiMessage('{"type":"save","id":0,"values":{}}'));
@@ -21,6 +22,8 @@ assert.throws(()=>parseWebUiMessage('{"type":"resize","height":"200"}'));
   const consoleErrors=[];page.on('console',message=>{if(message.type()==='error')consoleErrors.push(message.text());});
   const requests=[];await page.route('**/*',route=>{requests.push(route.request().url());route.abort();});
   async function mount(values,specOverride=spec,expectedError='',preflight=false,snapshotMode=false){
+   // setContent retains the previous window and message listeners; a remount needs a fresh host.
+   await page.goto('about:blank');
    await page.setContent(html);
    await page.evaluate(({spec,values,preflight,autoHeight,snapshotMode})=>{
     window.messages=[];window.saved=values;window.failSave=false;
@@ -123,7 +126,7 @@ assert.throws(()=>parseWebUiMessage('{"type":"resize","height":"200"}'));
   assert.equal(await frame.evaluate(()=>{try{localStorage.setItem('x','1');return false}catch{return true}}),true);
   assert.equal(errors.length,0,errors.join('\n'));
   console.log('PASS CSP blocks outgoing fetch before any request and sandbox denies storage');
-  const example2d=JSON.parse(fs.readFileSync(assets+'example-2d.json','utf8')).content.split('\n');
+  const example2d=JSON.parse(fs.readFileSync(path.join(fixtures,'example-2d.json'),'utf8')).content.split('\n');
   const initial2d=JSON.parse(example2d[1]).state, spec2d=parseWebUi(JSON.parse(example2d[2]).node.data);
   frame=await mount(initial2d,spec2d);await frame.locator('#add').click();
   await page.waitForFunction(()=>window.saved.count===1);

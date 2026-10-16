@@ -2,7 +2,7 @@ import { describe, expect, it } from '@ohos/hypium';
 import { ModelTurn, ToolCall, ToolDefinition } from '../main/ets/model/Agent';
 import { defaultConfig } from '../main/ets/model/Conversation';
 import { ProviderInfo } from '../main/ets/model/Provider';
-import { TeamPlan, TeamRun, TeamTaskRecord, defaultTeamMembers, parseTeamPlan, recoverTeams, teamPlan, validateTeamPlan } from '../main/ets/model/Team';
+import { TeamMember, TeamPlan, TeamRun, TeamTaskRecord, recoverTeams, teamPlan, validateTeamPlan } from '../main/ets/model/Team';
 import { AgentRuntime } from '../main/ets/services/AgentRuntime';
 import { TeamCoordinator, TeamExecution, TeamToolLane } from '../main/ets/services/TeamCoordinator';
 import { ToolSet } from '../main/ets/services/ToolSet';
@@ -33,6 +33,11 @@ class TeamProvider implements ModelProvider {
     return { content: text, toolCalls: [] };
   }
 }
+function fixtureMembers(): TeamMember[] {
+  return [{ id: 'researcher', name: 'Researcher', instructions: 'Collect evidence.' },
+    { id: 'analyst', name: 'Analyst', instructions: 'Analyze evidence.' },
+    { id: 'editor', name: 'Editor', instructions: 'Integrate results.' }];
+}
 function fixturePlan(): TeamPlan {
   return { tasks: [
     { id: 'a', title: '研究A', memberId: 'researcher', instructions: '收集A', dependencies: [] },
@@ -41,7 +46,7 @@ function fixturePlan(): TeamPlan {
   ], finalTaskId: 'final' };
 }
 function fixtureRun(): TeamRun {
-  return { id: 'run1', goal: '测试目标', members: defaultTeamMembers(), concurrency: 2, model: { providerId: 'test', modelId: 'model' },
+  return { id: 'run1', goal: '测试目标', members: fixtureMembers(), concurrency: 2, model: { providerId: 'test', modelId: 'model' },
     revision: 0, status: 'planned', error: '', createdAt: 1, finalTaskId: 'final', planning: { content: '', steps: [] },
     tasks: fixturePlan().tasks.map((task): TeamTaskRecord => { return { task: task, status: 'pending', attempts: [] }; }) };
 }
@@ -62,7 +67,7 @@ class Fixture {
   execute(): Promise<void> { return this.coordinator.execute(this.run, this.options); }
 }
 function rejectsPlan(plan: TeamPlan, fragment: string): void {
-  let error = ''; try { validateTeamPlan(plan, defaultTeamMembers()); } catch (caught) { error = (caught as Error).message; }
+  let error = ''; try { validateTeamPlan(plan, fixtureMembers()); } catch (caught) { error = (caught as Error).message; }
   expect(error.includes(fragment)).assertTrue();
 }
 
@@ -74,10 +79,11 @@ export default function teamTests(): void {
       const owner = fixturePlan(); owner.tasks[0].memberId = 'nobody'; rejectsPlan(owner, '负责人');
       const disconnected = fixturePlan(); disconnected.tasks[2].dependencies = ['a']; rejectsPlan(disconnected, '汇入');
     });
-    it('parses_fenced_json_without_accepting_extra_prose', 0, () => {
-      expect(parseTeamPlan('```json\n' + JSON.stringify(fixturePlan()) + '\n```', defaultTeamMembers()).tasks.length).assertEqual(3);
-      let error = ''; try { parseTeamPlan('Here is your plan: ' + JSON.stringify(fixturePlan()), defaultTeamMembers()); } catch (caught) { error = (caught as Error).message; }
-      expect(error.length > 0).assertTrue();
+    it('validatesStructuredChatPlansWithoutAFinalWorker', 0, () => {
+      const plan = fixturePlan(); plan.finalTaskId = '';
+      validateTeamPlan(plan, fixtureMembers(), true);
+      let error = ''; try { validateTeamPlan(fixturePlan(), fixtureMembers(), true); } catch (caught) { error = (caught as Error).message; }
+      expect(error.includes('聊天团队')).assertTrue();
     });
     it('parallel_workers_wait_for_dependencies_and_receive_handoffs', 0, async () => {
       const f = new Fixture(); const entered = new Gate(); const release = new Gate(); let started = 0;

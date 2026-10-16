@@ -3,7 +3,7 @@ import { attachmentContext } from './AttachmentContext';
 import { ModelMessage, ToolDefinition, toolSchemas } from './Agent';
 import { FileOperations, collectFileOperations, validateFileOperations } from './FileOperations';
 import { CompactionData, ModelConfig, ThreadData } from './Conversation';
-import { ContextEntry, contextBoundary, projectedHistory, threadEntries } from './ContextProjection';
+import { ContextEntry, contextBoundary } from './ContextProjection';
 
 export const DEFAULT_CONTEXT_WINDOW: number = 200000;
 // Tinybot desktop: src-tauri/src/agent/provider/model-defaults.json.
@@ -66,11 +66,6 @@ export function estimateContextTokens(messages: ModelMessage[], tools: ToolDefin
   return tokens;
 }
 
-export function threadHistory(thread: ThreadData, instructions: string): ModelMessage[] {
-  const prefix: ModelMessage[] = instructions.trim() ? [{ role: 'system', content: instructions }] : [];
-  return prefix.concat(projectedHistory(threadEntries(thread), thread.compaction));
-}
-
 export function planContextCompaction(entries: ContextEntry[], checkpoint: CompactionData | undefined,
   keepRecent: number, tokensBefore: number): CompactionPlan | undefined {
   const start = contextBoundary(entries, checkpoint);
@@ -91,11 +86,6 @@ export function planContextCompaction(entries: ContextEntry[], checkpoint: Compa
     messages: entries.slice(start, cut).flatMap((entry) => entry.messages),
     previousSummary: checkpoint?.summary || '', tokensBefore: tokensBefore,
     fileOperations: collectFileOperations(entries.slice(start, cut).flatMap((entry) => entry.results || []), checkpoint?.fileOperations) };
-}
-
-export function prepareCompaction(thread: ThreadData, settings: ContextSettings): CompactionPlan | undefined {
-  return planContextCompaction(threadEntries(thread), thread.compaction, settings.keepRecent,
-    estimateContextTokens(threadHistory(thread, '')));
 }
 
 export function validateCompaction(compaction: CompactionData, thread: ThreadData): void {

@@ -89,15 +89,3 @@ export function highlightCode(text: string, info: string): MarkdownSpan[] {
   append(spans, text.slice(offset), 'text');
   return spans;
 }
-
-// Clip the already-tokenized prefix without losing multiline lexical context.
-export function codePrefix(spans: MarkdownSpan[], length: number): MarkdownSpan[] {
-  const result: MarkdownSpan[] = [];
-  let remaining = length;
-  for (const span of spans) {
-    if (remaining <= 0) { break; }
-    result.push({ text: span.text.slice(0, remaining), kind: span.kind, url: '' });
-    remaining -= span.text.length;
-  }
-  return result;
-}

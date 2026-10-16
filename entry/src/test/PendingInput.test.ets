@@ -1,7 +1,8 @@
 import { describe, expect, it } from '@ohos/hypium';
 import { AgentTurn, ModelMessage, ModelTurn, ToolCall, ToolDefinition } from '../main/ets/model/Agent';
 import { MessageData, ThreadData, emptyData, parseAppData, requestHistory } from '../main/ets/model/Conversation';
-import { prepareCompaction } from '../main/ets/model/ConversationContext';
+import { planContextCompaction, estimateContextTokens } from '../main/ets/model/ConversationContext';
+import { threadEntries, projectedHistory } from '../main/ets/model/ContextProjection';
 import { PendingInput, nextPendingInput, validatePendingInputs } from '../main/ets/model/PendingInput';
 import { matchingThreads } from '../main/ets/model/SessionManagement';
 import { AgentTools, LoopObserver, runAgentLoop } from '../main/ets/services/AgentLoop';
@@ -150,7 +151,8 @@ export default function pendingInputTests(): void {
       expect(matchingThreads([restored], 'keep source', false).length).assertEqual(1);
       restored.messages.push({ id: 'u2', role: 'user', content: 'new', status: 'complete', error: '' },
         { id: 'a2', role: 'assistant', content: 'done', status: 'complete', error: '' });
-      const plan = prepareCompaction(restored, { window: 8192, autoCompact: true, keepRecent: 1 });
+      const plan = planContextCompaction(threadEntries(restored), restored.compaction, 1,
+        estimateContextTokens(projectedHistory(threadEntries(restored), restored.compaction)));
       expect(plan?.messages[3].content).assertEqual('keep source');
     });
     it('neverDispatchesAnUnrecordedInputAndKeepsItInInterruptedHistory', 0, async () => {
