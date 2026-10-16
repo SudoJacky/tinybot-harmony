@@ -1,6 +1,6 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 // Sprite and ID mapping from Tinybot desktop's TeamMemberAvatar.
-// The unchanged 4 x 3 portrait sheet is bundled locally; see THIRD_PARTY_NOTICES.txt.
+// The 4 x 3 portrait sheet uses lossless WebP; see THIRD_PARTY_NOTICES.txt.
 function portraitIndex(memberId: string): number {
   if (memberId === 'research') { return 0; }
   if (memberId === 'analysis') { return 4; }

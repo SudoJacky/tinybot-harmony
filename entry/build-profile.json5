@@ -16,10 +16,13 @@
   "buildOptionSet": [
     {
       "name": "release",
+      "externalNativeOptions": {
+        "abiFilters": ["arm64-v8a"]
+      },
       "arkOptions": {
         "obfuscation": {
           "ruleOptions": {
-            "enable": false,
+            "enable": true,
             "files": [
               "./obfuscation-rules.txt"
             ]
