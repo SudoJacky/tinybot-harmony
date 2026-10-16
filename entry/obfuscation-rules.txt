@@ -19,3 +19,7 @@
 -enable-toplevel-obfuscation
 -enable-filename-obfuscation
 -enable-export-obfuscation
+
+# Pen Kit's ambient namespace augments the platform global object.
+-keep-global-name
+globalThis

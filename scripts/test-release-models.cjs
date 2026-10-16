@@ -82,3 +82,33 @@ const draft = new Annotation(); draft.begin(0.25, 0.5, 0.01); draft.move(0.75, 0
 assert.deepEqual(plain(draft.strokes), [{ points: [{ x: 0.25, y: 0.5 }, { x: 0.75, y: 0.5 }], width: 0.01 }]);
 draft.undo(); assert.equal(draft.dirty(), false);
 console.log('PASS obfuscated release keeps annotation model properties and callbacks usable');
+
+// Run the emitted ability startup: ambient global declarations must still resolve
+// to the platform global object after top-level name obfuscation.
+const initialized = [];
+const startupScope = { exports: {}, Date, AppStorage: { setOrCreate() {} }, require: id => {
+  if (id === '@ohos:app.ability.UIAbility') return { default: class {} };
+  if (id === '@ohos:web.webview') return { default: { WebviewController: {
+    initializeWebEngine() { initialized.push('web'); }
+  } } };
+  const normalized = /^@normalized:N&&&(.+)&$/.exec(id);
+  assert.ok(normalized, 'Unexpected ability dependency: ' + id);
+  const dependency = Object.entries(names).find(([, mapping]) => mapping?.obfName?.replace(/\.ets$/, '') === normalized[1]);
+  assert.ok(dependency, 'Missing ability dependency mapping: ' + id);
+  const symbol = path.basename(dependency[0], '.ets') === 'NativeActions' ? 'ShareInbox' : path.basename(dependency[0], '.ets');
+  const implementation = symbol === 'Diagnostics' ? { log() {}, acceptsLog: () => false } : {
+    initialize() { initialized.push(symbol); }, receive() {}, setForeground() {}, refresh() {}, activate() {}
+  };
+  return { [names.PropertyCache[symbol] || symbol]: implementation };
+} };
+const abilityMapping = names['entry/src/main/ets/entryability/EntryAbility.ets'];
+const abilityFile = path.join(emitted, abilityMapping.obfName.replace(/\.ets$/, '.ts'));
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(abilityFile, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }
+}).outputText, startupScope, { filename: abilityFile });
+const ability = new startupScope.exports.default();
+ability.context = { getApplicationContext: () => ({ filesDir: '/test/files' }) };
+ability.onCreate({}, {});
+assert.equal(startupScope._brushEngineContext, ability.context, 'Pen Kit receives the real global context');
+assert.deepEqual(initialized, ['DeveloperDiagnostics', 'web', 'LanguagePreferences', 'AppearancePreferences']);
+console.log('PASS obfuscated release starts the ability and initializes the global Pen Kit context, Web engine and preferences');

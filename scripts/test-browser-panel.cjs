@@ -158,21 +158,24 @@ const TouchType = { Down: 0, Move: 1, Up: 2, Cancel: 3 };
   vm.runInNewContext(ts.transpileModule(`export function areaCallbacks() { return {
     frame: ${areaHandlers['Stack.onAreaChange']}, canvas: ${areaHandlers['Canvas.onAreaChange']}
   }; }`, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 } }).outputText, { exports: areaExports });
-  const layout = { capture: { width: 900, height: 1200 }, frameWidth: 0, frameHeight: 0, draw() {} };
+  const layout = { captureWidth: 900, captureHeight: 1200, frameWidth: 0, frameHeight: 0, draw() {} };
   const area = areaExports.areaCallbacks.call(layout);
   area.frame({}, { width: 300, height: 600 }); area.canvas({}, { width: 0, height: 0 });
   assert.equal(layout.frameWidth, 300); assert.equal(layout.frameHeight, 400, 'Initial zero-size canvas measurement cannot collapse the image frame');
   area.canvas({}, { width: 300, height: 400 }); assert.equal(layout.canvasWidth, 300);
   let outputReleases = 0, captureReleases = 0, adds = 0, finish;
   const output = { release: async () => { outputReleases++; } };
-  const board = probe(annotationTree, annotationClass, ['draw', 'touch', 'add', 'aboutToDisappear'], {
+  const board = probe(annotationTree, annotationClass, ['setInitiallyProvidedValue', 'draw', 'touch', 'add', 'aboutToDisappear'], {
     TouchType, Diagnostics: { log: (...args) => logs.push(args) },
-    renderBrowserAnnotation: async (pixel, strokes) => { assert.equal(pixel, board.capture.pixel); assert.equal(strokes, board.draft.strokes); return output; }
+    renderBrowserAnnotation: async (pixel, strokes) => { assert.equal(pixel, board.pixel); assert.equal(strokes, board.draft.strokes); return output; }
   });
   Object.assign(board, { canvasWidth: 100, canvasHeight: 200, ready: true, pointer: -1, draft: new annotationExports.BrowserAnnotation(),
-    capture: { pixel: { release: async () => { captureReleases++; } } },
+    __draft: { set() {} },
     canvas: { clearRect() {}, beginPath() {}, moveTo: (...point) => geometry.push(point), lineTo() {}, stroke() {} },
     getUIContext: () => ({ getFocusController: () => ({ clearFocus() {} }) }) });
+  const nativePixel = { release: async () => { captureReleases++; } };
+  board.setInitiallyProvidedValue({ pixel: nativePixel, pageTitle: 'Test page', captureWidth: 900, captureHeight: 1200 });
+  assert.equal(board.pixel, nativePixel, 'The compiled component boundary retains the original native image handle');
   const touch = (type, x, y) => board.touch({ type, changedTouches: [{ id: 1, x, y }], touches: type === TouchType.Up ? [] : [{ id: 1 }], stopPropagation() {} });
   touch(TouchType.Down, 25, 50); touch(TouchType.Move, 50, 100); touch(TouchType.Up, 75, 150);
   assert.equal(board.draft.strokes.length, 1); assert.equal(board.draft.strokes[0].points[0].x, 0.25);

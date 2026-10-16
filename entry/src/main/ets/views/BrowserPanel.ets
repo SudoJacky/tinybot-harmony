@@ -59,7 +59,9 @@ export struct BrowserPanel {
   @Builder
   annotationSheet() {
     if (this.annotationCapture) {
-      BrowserAnnotationBoard({ capture: this.annotationCapture, draft: this.annotation, onClose: () => this.closeAnnotation(),
+      BrowserAnnotationBoard({ pixel: this.annotationCapture.pixel, pageTitle: this.annotationCapture.title || this.annotationCapture.url,
+        captureWidth: this.annotationCapture.width, captureHeight: this.annotationCapture.height,
+        draft: this.annotation, onClose: () => this.closeAnnotation(),
         onAdd: async (pixel: image.PixelMap, note: string) => {
           const capture = this.annotationCapture;
           if (!capture) { throw new Error(t('批注截图已失效，请重新截取。')); }
