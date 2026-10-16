@@ -544,12 +544,12 @@ export struct MessageBubble {
       }, (item: ThreadReference) => item.threadId)
       if (this.images().length === 1) {
         Image('file://' + Attachments.path(this.images()[0])).width(200).constraintSize({ maxHeight: 260 })
-          .objectFit(ImageFit.Cover).borderRadius(Radius.lg).backgroundColor($r('app.color.surface_variant'))
+          .objectFit(ImageFit.Contain).borderRadius(Radius.lg).backgroundColor($r('app.color.surface_variant'))
           .accessibilityText(this.images()[0].name).onClick(() => this.preview(this.images()[0]))
       } else if (this.images().length > 1) {
         Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.End }) {
           ForEach(this.images(), (item: Attachment) => {
-            Image('file://' + Attachments.path(item)).width(108).height(108).objectFit(ImageFit.Cover)
+            Image('file://' + Attachments.path(item)).width(108).height(108).objectFit(ImageFit.Contain)
               .borderRadius(Radius.md).margin(2).backgroundColor($r('app.color.surface_variant'))
               .accessibilityText(item.name).onClick(() => this.preview(item))
           }, (item: Attachment) => item.id)
@@ -761,9 +761,10 @@ export struct MessageBubble {
         }
       }.width('100%').bindContextMenu(this.actions, ResponseType.LongPress, {
         systemMaterial: this.appearance.surface, mask: false })
+      .bindSheet($$this.documentOpen, this.documentViewer(), { height: '90%', showClose: false, dragBar: true,
+        backgroundColor: $r('app.color.page_background') })
     }.width('100%')
+    // A closed sheet on the cover's node can dismiss the image preview on API 26.
     .bindContentCover($$this.previewing, this.viewer(), { modalTransition: ModalTransition.ALPHA })
-    .bindSheet($$this.documentOpen, this.documentViewer(), { height: '90%', showClose: false, dragBar: true,
-      backgroundColor: $r('app.color.page_background') })
   }
 }

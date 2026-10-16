@@ -258,7 +258,7 @@ struct Index {
           .enabled(!this.app.busy).onClick(() => this.openFiles())
         MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.rectangle_stack')), content: t("分支关系") })
           .enabled(!this.app.busy).onClick(() => this.paths.pushPath({ name: 'branches' }))
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.split')), content: t("创建分支") })
+        MenuItem({ startIcon: $r('app.media.message_branch'), content: t("创建分支") })
           .enabled(!this.app.busy && this.app.saveError.length === 0 && this.app.active.messages.length > 0)
           .onClick(() => this.fork())
         MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.share')), content: t("分享对话") })
