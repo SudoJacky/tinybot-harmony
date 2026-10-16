@@ -5,7 +5,8 @@ import { ToolFailure } from '../model/ToolFailure';
 import { browserActionScript, browserSnapshotScript } from '../model/BrowserScripts';
 import { BrowserAction, BrowserDriver, BrowserPage, BrowserSession } from './BrowserSession';
 
-interface BrowserScriptResult { ok?: boolean; code?: string; message?: string; }
+interface BrowserTarget { x: number; y: number; }
+interface BrowserScriptResult { ok?: boolean; code?: string; message?: string; target?: BrowserTarget; }
 export interface NativeBrowserCapture extends AnnotationPage { pixel: image.PixelMap; width: number; height: number; }
 
 export class NativeBrowserDriver implements BrowserDriver {
@@ -18,8 +19,13 @@ export class NativeBrowserDriver implements BrowserDriver {
   private waiters: Set<() => void> = new Set<() => void>();
   private touchStart?: TouchObject;
   private touchMoved: boolean = false;
+  private feedbackVisible: boolean = false;
   constructor(browser: BrowserSession) { this.browser = browser; }
-  pageBegin(): void { this.loading = true; this.error = ''; this.browser.error = ''; }
+  pageBegin(): void { this.browser.clearActionFeedback(); this.loading = true; this.error = ''; this.browser.error = ''; }
+  setFeedbackVisible(visible: boolean): void {
+    this.feedbackVisible = visible;
+    if (!visible) { this.browser.clearActionFeedback(); }
+  }
   pageEnd(url: string): void {
     this.initialized = true; this.loading = false;
     if (this.clearInitialHistory && url !== 'about:blank') { this.controller.clearHistory(); this.clearInitialHistory = false; }
@@ -30,6 +36,7 @@ export class NativeBrowserDriver implements BrowserDriver {
     this.browser.canGoForward = this.controller.accessForward();
   }
   userTouch(event: TouchEvent): void {
+    if (event.type === TouchType.Down) { this.browser.clearActionFeedback(); }
     const point = event.changedTouches[0];
     if (event.type === TouchType.Down && !this.touchStart && point) {
       this.touchStart = point; this.touchMoved = false;
@@ -47,6 +54,7 @@ export class NativeBrowserDriver implements BrowserDriver {
     } else if (event.type === TouchType.Cancel) { this.touchStart = undefined; }
   }
   failed(message: string): void {
+    this.browser.clearActionFeedback();
     this.error = message; this.loading = false; this.browser.report(message); this.wake();
   }
   private wake(): void { for (const finish of Array.from(this.waiters)) { finish(); } }
@@ -117,6 +125,7 @@ export class NativeBrowserDriver implements BrowserDriver {
     return value;
   }
   async act(action: BrowserAction): Promise<void> {
+    this.browser.clearActionFeedback();
     await this.ready();
     if (action.action === 'back' || action.action === 'forward' || action.action === 'reload') {
       if (action.action === 'back' && !this.controller.accessBackward() || action.action === 'forward' && !this.controller.accessForward()) {
@@ -128,10 +137,35 @@ export class NativeBrowserDriver implements BrowserDriver {
       else { this.controller.refresh(); }
       await this.ready(); return;
     }
-    const result = JSON.parse(await this.script(browserActionScript(action))) as BrowserScriptResult;
+    if (this.feedbackVisible && ['click', 'type', 'select'].includes(action.action)) {
+      this.requireCurrentAction(action);
+      const preview = await this.runAction(action, true);
+      this.requireCurrentAction(action);
+      if (!preview.target || !Number.isFinite(preview.target.x) || !Number.isFinite(preview.target.y) ||
+        preview.target.x < 0 || preview.target.x > 1 || preview.target.y < 0 || preview.target.y > 1) {
+        throw new ToolFailure('INVALID_RESPONSE', 'Browser action preview returned an invalid target.', 'inspect_browser');
+      }
+      this.browser.showActionFeedback(preview.target.x, preview.target.y);
+      // Allow the native cue to paint before a click can navigate away. Revalidate before issuing the effect.
+      await new Promise<void>((resolve) => { setTimeout(resolve, 120); });
+      this.requireCurrentAction(action);
+    }
+    try { await this.runAction(action); }
+    catch (error) { this.browser.clearActionFeedback(); throw error as Error; }
+  }
+  private requireCurrentAction(action: BrowserAction): void {
+    if (!this.browser.isCurrentSnapshot(action.snapshotId)) {
+      this.browser.clearActionFeedback();
+      throw new ToolFailure('STALE_BROWSER_SNAPSHOT', 'Browser control changed before the action was issued. Read a new snapshot.', 'read_browser_snapshot');
+    }
+  }
+  private async runAction(action: BrowserAction, preview: boolean = false): Promise<BrowserScriptResult> {
+    const result = JSON.parse(await this.script(browserActionScript(action, preview))) as BrowserScriptResult;
     if (result.ok !== true) { throw new ToolFailure(result.code || 'BROWSER_ACTION_FAILED', result.message || 'Browser action failed.', 'inspect_browser_before_retry'); }
+    return result;
   }
   close(): void {
+    this.browser.clearActionFeedback();
     this.initialized = false; this.loading = false; this.clearInitialHistory = false; this.error = ''; this.wake();
     this.touchStart = undefined;
     this.browser.canGoBack = false; this.browser.canGoForward = false;

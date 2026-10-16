@@ -21,7 +21,10 @@ const nativeWebview = { JsMessageType: { STRING: 3, NONE: 0 }, WebviewController
   getTitle() { return 'Native browser'; }
   getSurfaceId() { return 'browser-surface'; }
   async runJavaScript() { return JSON.stringify(nativeResult.value); }
-  async runJavaScriptExt() { return { getType: () => nativeResult.type, getString: () => JSON.stringify(nativeResult.value) }; }
+  async runJavaScriptExt(source) {
+    const value = nativeResult.execute ? await nativeResult.execute(source) : nativeResult.value;
+    return { getType: () => nativeResult.type, getString: () => JSON.stringify(value) };
+  }
 } };
 function load(file) {
   file = path.resolve(file.endsWith('.ets') ? file : file + '.ets');
@@ -73,6 +76,55 @@ async function acquired() {
   return { ...f, receipt };
 }
 (async () => {
+  {
+    const { NativeBrowserDriver } = load(path.join(root, 'main/ets/services/NativeBrowserDriver'));
+    const f = await acquired(), driver = new NativeBrowserDriver(f.browser), calls = [];
+    driver.controller.url = 'https://example.com'; driver.pageEnd(driver.controller.url); driver.setFeedbackVisible(true);
+    nativeResult.execute = async source => {
+      const preview = source.includes('const preview = true;'); calls.push(preview ? 'preview' : 'effect');
+      return JSON.stringify(preview ? { ok: true, target: { x: 0.25, y: 0.5 } } : { ok: true });
+    };
+    const action = { action: 'click', snapshotId: f.receipt.page.snapshotId, elementId: 1 };
+    const acting = driver.act(action); await settle();
+    assert.deepEqual(calls, ['preview']); assert.equal(f.browser.actionFeedback.x, 0.25); assert.equal(f.browser.actionFeedback.y, 0.5);
+    await acting; assert.deepEqual(calls, ['preview', 'effect']);
+    driver.setFeedbackVisible(false); assert.equal(f.browser.actionFeedback, undefined);
+    calls.length = 0; await driver.act(action); assert.deepEqual(calls, ['effect'], 'Collapsed browsing skips visual preview and its delay');
+    driver.setFeedbackVisible(true); calls.length = 0;
+    const interrupted = driver.act(action); await settle();
+    f.browser.takeOver(); f.browser.handoff();
+    await assert.rejects(interrupted, error => error.code === 'STALE_BROWSER_SNAPSHOT');
+    assert.deepEqual(calls, ['preview'], 'Taking over and handing back during preview must not issue the old action');
+    assert.equal(f.browser.actionFeedback, undefined);
+    const fresh = await f.browser.snapshot(f.cancellation); calls.length = 0;
+    nativeResult.execute = async () => { calls.push('invalid-preview'); return JSON.stringify({ ok: true, target: { x: 2, y: 0.5 } }); };
+    await assert.rejects(driver.act({ ...action, snapshotId: fresh.snapshotId }), error => error.code === 'INVALID_RESPONSE');
+    assert.deepEqual(calls, ['invalid-preview']); assert.equal(f.browser.actionFeedback, undefined);
+    f.browser.showActionFeedback(0.25, 0.5); const previousId = f.browser.actionFeedback.id;
+    f.browser.showActionFeedback(0.75, 0.5); assert.ok(f.browser.actionFeedback.id > previousId);
+    await new Promise(resolve => setTimeout(resolve, 510)); assert.equal(f.browser.actionFeedback, undefined, 'Operation cues expire automatically');
+    nativeResult.execute = undefined; f.browser.release(f.cancellation);
+    console.log('PASS visible actions preview their target before a single effect, hidden browsing skips preview, and takeover invalidates pending clicks');
+  }
+  {
+    const { NativeBrowserDriver } = load(path.join(root, 'main/ets/services/NativeBrowserDriver'));
+    const f = await acquired(), driver = new NativeBrowserDriver(f.browser); let effects = 0;
+    driver.controller.url = 'https://example.com'; driver.pageEnd(driver.controller.url); driver.setFeedbackVisible(true);
+    nativeResult.execute = async source => {
+      if (source.includes('const preview = true;')) return JSON.stringify({ ok: true, target: { x: 0.5, y: 0.5 } });
+      effects++; return JSON.stringify({ ok: true });
+    };
+    f.driver.act = action => driver.act(action);
+    const action = f.browser.act({ action: 'type', snapshotId: f.receipt.page.snapshotId, elementId: 1, text: 'edited' }, f.cancellation);
+    const rejected = assert.rejects(action, error => error.code === 'STALE_BROWSER_SNAPSHOT');
+    await settle(); await f.browser.pauseForAnnotation();
+    assert.equal(f.browser.owner, 'user'); assert.equal(effects, 0);
+    f.browser.handoff(); await rejected;
+    f.browser.showActionFeedback(0.5, 0.5); driver.pageBegin(); assert.equal(f.browser.actionFeedback, undefined);
+    f.browser.showActionFeedback(0.5, 0.5); f.browser.close(); assert.equal(f.browser.actionFeedback, undefined);
+    f.browser.release(f.cancellation); nativeResult.execute = undefined;
+    console.log('PASS annotation takeover cancels the unissued preview action without blocking capture; page loads and close clear indicators');
+  }
   {
     const f = await acquired(); f.driver.hold = gate();
     let operationDone = false, annotationReady = false;

@@ -1,5 +1,5 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
-import { BrowserSession } from '../services/BrowserSession';
+import { BrowserActionFeedback, BrowserSession } from '../services/BrowserSession';
 import { NativeBrowserDriver, NativeBrowserCapture } from '../services/NativeBrowserDriver';
 import { BrowserAnnotation, AnnotationPage } from '../model/BrowserAnnotation';
 import { BrowserAnnotationBoard } from './BrowserAnnotationBoard';
@@ -16,7 +16,7 @@ import { Diagnostics } from '../model/Diagnostics';
 export struct BrowserPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink browser: BrowserSession;
-  @Prop expanded: boolean = false;
+  @Prop @Watch('syncBrowserVisibility') expanded: boolean = false;
   @Prop threadId: string = '';
   @Prop canAnnotate: boolean = false;
   onAnnotation: (threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string) => Promise<void> = async () => {};
@@ -27,12 +27,15 @@ export struct BrowserPanel {
   @State private capturing: boolean = false;
   @State private showAnnotation: boolean = false;
   @State private annotation: BrowserAnnotation = new BrowserAnnotation();
+  @State private webWidth: number = 0;
+  @State private webHeight: number = 0;
   private annotationCapture?: NativeBrowserCapture;
   private annotationThreadId: string = '';
   private mounted: boolean = false;
   private driver?: NativeBrowserDriver;
-  aboutToAppear(): void { this.mounted = true; this.driver = new NativeBrowserDriver(this.browser); this.browser.attach(this.driver); }
+  aboutToAppear(): void { this.mounted = true; this.driver = new NativeBrowserDriver(this.browser); this.browser.attach(this.driver); this.syncBrowserVisibility(); }
   aboutToDisappear(): void { this.mounted = false; if (this.driver) { this.browser.detach(this.driver); } }
+  private syncBrowserVisibility(): void { this.driver?.setFeedbackVisible(this.expanded); }
   private async annotate(): Promise<void> {
     if (!this.driver || this.capturing || this.showAnnotation || !this.canAnnotate) { return; }
     this.capturing = true; this.annotationThreadId = this.threadId;
@@ -124,9 +127,10 @@ export struct BrowserPanel {
           Text(this.browser.error).fontFamily(this.appearance.fontFamily).id('browser-error').fontSize(13).fontColor($r('app.color.danger')).copyOption(CopyOptions.LocalDevice)
             .width('100%').padding({ left: Space.md, right: Space.md })
         }
+        Stack({ alignContent: Alignment.TopStart }) {
         Web({ src: 'about:blank', controller: this.driver.controller })
           .enabled(!this.capturing)
-          .id('agent-browser-web').width('100%').layoutWeight(1).javaScriptAccess(true).domStorageAccess(true)
+          .id('agent-browser-web').width('100%').height('100%').javaScriptAccess(true).domStorageAccess(true)
           .fileAccess(false).multiWindowAccess(false).blockNetwork(false)
           .onPageBegin(() => this.driver?.pageBegin())
           .onPageEnd((event) => { this.driver?.pageEnd(event.url); if (!this.browser.editingAddress) { this.addressDirty = false; } })
@@ -151,6 +155,20 @@ export struct BrowserPanel {
               KeyCode.KEYCODE_SHIFT_LEFT, KeyCode.KEYCODE_SHIFT_RIGHT].includes(event.keyCode)) { this.browser.takeOver(); }
             return false;
           })
+          ForEach(this.expanded && this.browser.owner === 'agent' && this.browser.actionFeedback ? [this.browser.actionFeedback] : [],
+            (feedback: BrowserActionFeedback) => {
+              Stack() {
+                Circle().width(32).height(32).fill(this.appearance.accentTint).stroke(this.appearance.accent).strokeWidth(2)
+                Circle().width(6).height(6).fill(this.appearance.accent)
+              }.id('browser-agent-action').width(32).height(32)
+                .position({ x: feedback.x * this.webWidth - 16, y: feedback.y * this.webHeight - 16 })
+                .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+                .transition(TransitionEffect.asymmetric(
+                  TransitionEffect.OPACITY.combine(TransitionEffect.scale({ x: 0.6, y: 0.6 })).animation({ duration: Motion.fast, curve: Motion.standard }),
+                  TransitionEffect.OPACITY.combine(TransitionEffect.scale({ x: 1.4, y: 1.4 })).animation({ duration: Motion.medium, curve: Motion.standard })))
+            }, (feedback: BrowserActionFeedback) => String(feedback.id))
+        }.width('100%').layoutWeight(1).clip(true)
+          .onAreaChange((_old: Area, next: Area) => { this.webWidth = Number(next.width); this.webHeight = Number(next.height); })
       }
     }.id('agent-browser-panel').width('100%').height('100%').backgroundColor($r('app.color.page_background'))
       // Slide the mounted page as one surface; leave input gating outside the animation.

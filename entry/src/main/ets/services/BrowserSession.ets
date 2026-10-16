@@ -11,6 +11,7 @@ export interface BrowserPage {
   truncated: boolean; embeddedFrames: number; trust: string;
 }
 export interface BrowserAction { action: string; snapshotId?: string; elementId?: number; text?: string; deltaY?: number; }
+export interface BrowserActionFeedback { id: number; x: number; y: number; }
 export interface BrowserDriver {
   open(url: string): Promise<void>;
   snapshot(id: string): Promise<BrowserPage>;
@@ -32,6 +33,7 @@ export class BrowserSession implements ExecutionGate {
   canGoForward: boolean = false;
   editingAddress: boolean = false;
   error: string = '';
+  actionFeedback?: BrowserActionFeedback;
   handoffReason: string = '';
   permissionReason: string = '';
   permissionUrl: string = '';
@@ -49,6 +51,8 @@ export class BrowserSession implements ExecutionGate {
   private sequence: number = 0;
   private operating: boolean = false;
   private issuedOperation?: Promise<void>;
+  private feedbackSequence: number = 0;
+  private feedbackTimer: number = -1;
 
   get paused(): boolean { return this.permissionPending || (!!this.lease && this.owner === 'user'); }
   get hasTask(): boolean { return this.lease !== undefined; }
@@ -102,6 +106,7 @@ export class BrowserSession implements ExecutionGate {
   }
   private wake(): void { for (const finish of Array.from(this.waiters)) { finish(); } }
   takeOver(reason: string = ''): void {
+    this.clearActionFeedback();
     if (!this.open || this.owner === 'user') { return; }
     this.owner = 'user'; this.epoch++; this.handoffReason = reason;
     this.log('control_user', { generation: this.epoch, enabled: this.hasTask });
@@ -113,6 +118,7 @@ export class BrowserSession implements ExecutionGate {
   }
   release(cancellation: Cancellation): void {
     if (this.lease !== cancellation) { return; }
+    this.clearActionFeedback();
     this.removeCancellation(); this.removeCancellation = () => {};
     this.lease = undefined; this.threadId = ''; this.epoch++;
     if (this.open) { this.owner = 'user'; }
@@ -120,6 +126,7 @@ export class BrowserSession implements ExecutionGate {
     this.log('task_released', { generation: this.epoch });
   }
   close(): void {
+    this.clearActionFeedback();
     this.epoch++; this.open = false; this.owner = 'none'; this.handoffReason = ''; this.editingAddress = false;
     this.driver?.close(); this.wake(); this.log('closed', { generation: this.epoch });
   }
@@ -139,12 +146,28 @@ export class BrowserSession implements ExecutionGate {
     this.requireOpen(); this.takeOver();
     const epoch = this.epoch;
     // An already issued click may still navigate. Capture only after that action drains.
-    await this.issuedOperation;
+    try { await this.issuedOperation; }
+    catch (error) {
+      // Taking over during the visual preview cancels the unissued action. Its task keeps the failure receipt.
+      if (!(error instanceof ToolFailure && error.code === 'STALE_BROWSER_SNAPSHOT' && this.owner === 'user')) { throw error as Error; }
+      this.log('observation_changed', undefined, error as Error);
+    }
     this.requireOpen();
     if (this.owner !== 'user' || epoch !== this.epoch) {
       throw new ToolFailure('STALE_BROWSER_SNAPSHOT', 'Browser control changed before annotation capture.', 'inspect_browser');
     }
     this.log('annotation_started', { generation: epoch });
+  }
+  isCurrentSnapshot(snapshotId?: string): boolean {
+    return this.open && this.policy === 'enabled' && this.owner === 'agent' && !!this.lease && !!snapshotId?.endsWith('-' + this.epoch);
+  }
+  showActionFeedback(x: number, y: number): void {
+    this.clearActionFeedback();
+    this.actionFeedback = { id: ++this.feedbackSequence, x: x, y: y };
+    this.feedbackTimer = setTimeout(() => this.clearActionFeedback(), 480);
+  }
+  clearActionFeedback(): void {
+    clearTimeout(this.feedbackTimer); this.feedbackTimer = -1; this.actionFeedback = undefined;
   }
   report(message: string): void { this.error = message; this.log('failed', undefined, message); }
   pageChanged(url: string, title: string): void { this.url = url === 'about:blank' ? '' : url; this.title = title; }

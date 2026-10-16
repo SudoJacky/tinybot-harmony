@@ -23,6 +23,27 @@ const index = indexTree.statements.find(n => ts.isClassDeclaration(n) && n.name.
 const back = index.members.find(n => n.name?.getText(indexTree) === 'onBackPress').body.getText(indexTree);
 const panelClass = panelTree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'BrowserPanel');
 const navigate = panelClass.members.find(n => n.name?.getText(panelTree) === 'navigate').body.getText(panelTree);
+const feedbackStatements = [];
+function feedback(node) {
+  if (ts.isVariableDeclaration(node) && node.name.getText(panelTree) === 'forEachItemGenFunction' && node.initializer?.getText(panelTree).includes("browser-agent-action")) {
+    feedbackStatements.push(node.initializer.getText(panelTree));
+  }
+  ts.forEachChild(node, feedback);
+}
+feedback(panelTree);
+assert.equal(feedbackStatements.length, 1);
+const feedbackExports = {}, marker = {};
+const markerUi = new Proxy({}, { get: (_, name) => (...args) => { marker[name] = args[0]; } });
+vm.runInNewContext(ts.transpileModule(`export function marker() { return (${feedbackStatements[0]}); }`, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }
+}).outputText, { exports: feedbackExports, Stack: markerUi, Circle: new Proxy({}, { get: () => () => {} }),
+  HitTestMode: { None: 'pass-through' }, Motion: {},
+  TransitionEffect: { OPACITY: { combine() { return this; }, animation() { return this; } }, scale() {}, asymmetric() {} } });
+const markerView = { webWidth: 400, webHeight: 600, appearance: {}, observeComponentCreation2(callback) { callback(1, true); } };
+feedbackExports.marker.call(markerView)({ id: 1, x: 0.25, y: 0.5 });
+assert.equal(marker.position.x, 84); assert.equal(marker.position.y, 284);
+assert.equal(marker.hitTestBehavior, 'pass-through'); assert.equal(marker.accessibilityLevel, 'no');
+console.log('PASS emitted operation cue maps normalized coordinates onto the Web viewport and passes through input');
 const compiled = {};
 vm.runInNewContext(ts.transpileModule(`export function callbacks() {
   return { focus: ${handlers['TextInput.onFocus']}, blur: ${handlers['TextInput.onBlur']},
