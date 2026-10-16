@@ -16,6 +16,9 @@ export class Attachments {
   static async savePreview(pixel: image.PixelMap): Promise<Attachment> {
     return Attachments.saveImage(pixel, 'Preview screenshot.jpg');
   }
+  static saveBrowserAnnotation(pixel: image.PixelMap): Promise<Attachment> {
+    return Attachments.saveImage(pixel, t('网页批注.jpg'));
+  }
   static async saveDrawing(pixel: image.PixelMap): Promise<Attachment> {
     const info = await pixel.getImageInfo();
     const scale = Math.min(1, 1600 / Math.max(info.size.width, info.size.height));

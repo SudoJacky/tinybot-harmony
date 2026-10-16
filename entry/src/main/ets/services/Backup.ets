@@ -21,8 +21,10 @@ async function encodeFile(path: string): Promise<string> {
 }
 function threadAttachments(thread: ThreadData): Attachment[] {
   const result = (thread.attachments || []).concat(...thread.messages.map((message) => message.attachments || []));
+  result.push(...(thread.pendingInputs || []).flatMap((input) => input.attachments || []));
   for (const message of thread.messages) {
     for (const step of message.steps || []) {
+      result.push(...step.steering?.attachments || []);
       for (const tool of step.tools) { if (tool.previewScreenshot) { result.push(tool.previewScreenshot.image); } }
     }
   }

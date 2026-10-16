@@ -1,6 +1,7 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { PendingInput } from '../model/PendingInput';
+import { Attachment } from '../model/Productivity';
 import { ChatViewModel, ThreadViewModel } from '../viewmodel/ChatViewModel';
 import { Btn, Font, Radius, Space } from '../common/Theme';
 
@@ -47,6 +48,9 @@ export struct InputQueuePanel {
               }.width('100%')
               Text(input.text).fontFamily(this.appearance.fontFamily).fontSize(Font.small).lineHeight(21).maxLines(4)
                 .textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%').fontColor($r('app.color.text_primary'))
+              ForEach(input.attachments || [], (item: Attachment) => {
+                Text(item.name).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
+              }, (item: Attachment) => item.id)
             }.padding(Space.md).borderRadius(Radius.md).width('100%').backgroundColor($r('app.color.surface'))
           }
         }, (input: PendingInput) => input.id)

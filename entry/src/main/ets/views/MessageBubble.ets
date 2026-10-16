@@ -592,6 +592,12 @@ export struct MessageBubble {
   steering(index: number) {
     Column({ space: 4 }) {
       Text(t("追加指令")).fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.text_secondary'))
+      ForEach(this.message.stepViews[index]?.steering?.attachments || [], (item: Attachment) => {
+        if (item.mime === 'image/jpeg') {
+          Image('file://' + Attachments.path(item)).width(200).constraintSize({ maxHeight: 260 }).objectFit(ImageFit.Contain)
+            .borderRadius(Radius.md).accessibilityText(item.name).onClick(() => this.preview(item))
+        } else { Text(item.name).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary')) }
+      }, (item: Attachment) => item.id)
       Text(this.message.stepViews[index]?.steering?.text || '').fontFamily(this.appearance.fontFamily).fontSize(15).lineHeight(22)
         .copyOption(CopyOptions.LocalDevice).fontColor($r('app.color.text_primary'))
     }

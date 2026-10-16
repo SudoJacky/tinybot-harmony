@@ -1,9 +1,12 @@
 import { webview } from '@kit.ArkWeb';
+import { image } from '@kit.ImageKit';
+import { AnnotationPage } from '../model/BrowserAnnotation';
 import { ToolFailure } from '../model/ToolFailure';
 import { browserActionScript, browserSnapshotScript } from '../model/BrowserScripts';
 import { BrowserAction, BrowserDriver, BrowserPage, BrowserSession } from './BrowserSession';
 
 interface BrowserScriptResult { ok?: boolean; code?: string; message?: string; }
+export interface NativeBrowserCapture extends AnnotationPage { pixel: image.PixelMap; width: number; height: number; }
 
 export class NativeBrowserDriver implements BrowserDriver {
   controller: webview.WebviewController = new webview.WebviewController();
@@ -74,6 +77,22 @@ export class NativeBrowserDriver implements BrowserDriver {
   private navigate(url: string): void {
     this.clearInitialHistory = this.clearInitialHistory || this.controller.getUrl() === 'about:blank';
     this.loading = true; this.error = ''; this.controller.loadUrl(url);
+  }
+  async capture(): Promise<NativeBrowserCapture> {
+    await this.ready();
+    const url = this.controller.getUrl();
+    if (!/^https?:\/\//i.test(url) || this.browser.owner !== 'user') {
+      throw new ToolFailure('BROWSER_NOT_OWNED', 'Open a web page and take control before annotating it.', 'inspect_browser');
+    }
+    const title = this.controller.getTitle();
+    const pixel = await image.createPixelMapFromSurface(this.controller.getSurfaceId());
+    try {
+      if (!this.browser.open || this.browser.owner !== 'user' || url !== this.controller.getUrl() || this.loading) {
+        throw new ToolFailure('STALE_BROWSER_SNAPSHOT', 'Page changed during annotation capture. Try again after loading finishes.', 'inspect_browser');
+      }
+      const info = await pixel.getImageInfo();
+      return { pixel: pixel, url: url, title: title, width: info.size.width, height: info.size.height };
+    } catch (error) { await pixel.release(); throw error as Error; }
   }
   async snapshot(id: string): Promise<BrowserPage> {
     await this.ready();

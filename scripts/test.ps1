@@ -20,6 +20,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Developer diagnostics collection, export and l
 if ($LASTEXITCODE -ne 0) { throw 'Unified runtime log levels, redaction, export and disabled-path tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-browser.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Browser permission, takeover and runtime pause tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-browser-annotation.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Browser annotation geometry, export and image delivery tests failed.' }
 $env:DEVECO_STUDIO_HOME = $StudioPath
 & $nodePath (Join-Path $projectPath 'scripts/test-code-highlight.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Markdown code highlighting tests failed.' }

@@ -4,6 +4,9 @@ import { WebUiPreflightHost } from '../views/WebUiPreflightHost';
 import { PreviewCaptureHost } from '../views/PreviewCaptureHost';
 import { BrowserPanel } from '../views/BrowserPanel';
 import { BrowserSession } from '../services/BrowserSession';
+import { AnnotationPage, browserAnnotationText } from '../model/BrowserAnnotation';
+import { image } from '@kit.ImageKit';
+import { Attachments } from '../services/Attachments';
 import { t } from '../model/I18n';
 import { agentModeName } from '../model/AgentMode';
 import { ToolScopePanel } from '../views/ToolScopePanel';
@@ -165,6 +168,13 @@ struct Index {
     catch (error) {
       this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: (error as Error).message });
     }
+  }
+  private async addBrowserAnnotation(threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string): Promise<void> {
+    if (threadId !== this.app.active.id) { throw new Error(t('对话已切换，请在当前对话重新添加附件。')); }
+    if (!this.app.canQueueInput || this.app.active.attachments.length >= 4) { throw new Error(t('当前无法添加附件，请稍后重试。')); }
+    const item = await Attachments.saveBrowserAnnotation(pixel);
+    await this.app.appendDraftAttachment(threadId, item, browserAnnotationText(page, note));
+    this.paths.clear(); this.setDrawer(false); this.setBrowserExpanded(false);
   }
 
   aboutToDisappear(): void {
@@ -541,6 +551,8 @@ struct Index {
     }.width('100%').height('100%')
       }, (locale: string) => locale)
       BrowserPanel({ browser: this.browser, expanded: this.browserExpanded,
+        threadId: this.app.active.id, canAnnotate: this.app.canQueueInput && this.app.active.attachments.length < 4,
+        onAnnotation: (threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string) => this.addBrowserAnnotation(threadId, pixel, page, note),
         onSettings: () => { this.setBrowserExpanded(false); this.openSettings(); },
         onDismiss: () => this.setBrowserExpanded(false) })
     }.width('100%').height('100%')

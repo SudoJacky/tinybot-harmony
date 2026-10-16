@@ -1,11 +1,15 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { BrowserSession } from '../services/BrowserSession';
-import { NativeBrowserDriver } from '../services/NativeBrowserDriver';
+import { NativeBrowserDriver, NativeBrowserCapture } from '../services/NativeBrowserDriver';
+import { BrowserAnnotation, AnnotationPage } from '../model/BrowserAnnotation';
+import { BrowserAnnotationBoard } from './BrowserAnnotationBoard';
+import { image } from '@kit.ImageKit';
 import { validateWebAddress } from '../services/WebTools';
 import { Btn, Motion, Space } from '../common/Theme';
 import { IconButton } from '../common/Widgets';
 import { t } from '../model/I18n';
 import { KeyCode } from '@kit.InputKit';
+import { Diagnostics } from '../model/Diagnostics';
 
 // Always keep this host mounted. Expanding changes presentation, never the Web instance.
 @Component
@@ -13,13 +17,54 @@ export struct BrowserPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink browser: BrowserSession;
   @Prop expanded: boolean = false;
+  @Prop threadId: string = '';
+  @Prop canAnnotate: boolean = false;
+  onAnnotation: (threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string) => Promise<void> = async () => {};
   onDismiss: () => void = () => {};
   onSettings: () => void = () => {};
   @State private address: string = '';
   @State private addressDirty: boolean = false;
+  @State private capturing: boolean = false;
+  @State private showAnnotation: boolean = false;
+  @State private annotation: BrowserAnnotation = new BrowserAnnotation();
+  private annotationCapture?: NativeBrowserCapture;
+  private annotationThreadId: string = '';
+  private mounted: boolean = false;
   private driver?: NativeBrowserDriver;
-  aboutToAppear(): void { this.driver = new NativeBrowserDriver(this.browser); this.browser.attach(this.driver); }
-  aboutToDisappear(): void { if (this.driver) { this.browser.detach(this.driver); } }
+  aboutToAppear(): void { this.mounted = true; this.driver = new NativeBrowserDriver(this.browser); this.browser.attach(this.driver); }
+  aboutToDisappear(): void { this.mounted = false; if (this.driver) { this.browser.detach(this.driver); } }
+  private async annotate(): Promise<void> {
+    if (!this.driver || this.capturing || this.showAnnotation || !this.canAnnotate) { return; }
+    this.capturing = true; this.annotationThreadId = this.threadId;
+    this.getUIContext().getFocusController().clearFocus();
+    try {
+      await this.browser.pauseForAnnotation();
+      const capture = await this.driver.capture();
+      if (!this.mounted) { await capture.pixel.release(); return; }
+      this.annotationCapture = capture; this.annotation = new BrowserAnnotation(); this.showAnnotation = true;
+      Diagnostics.log('info', 'browser', 'annotation_captured', { width: capture.width, height: capture.height });
+    } catch (error) { this.browser.report((error as Error).message); }
+    finally { this.capturing = false; }
+  }
+  private closeAnnotation(): void {
+    if (this.annotation.saving) { return; }
+    if (!this.annotation.dirty()) { this.showAnnotation = false; return; }
+    this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t('放弃这次批注？'),
+      message: t('尚未添加到消息的批注将丢失。'), primaryButton: { value: t('继续批注'), action: () => {} },
+      secondaryButton: { value: t('放弃'), action: () => { this.showAnnotation = false; } } });
+  }
+  @Builder
+  annotationSheet() {
+    if (this.annotationCapture) {
+      BrowserAnnotationBoard({ capture: this.annotationCapture, draft: this.annotation, onClose: () => this.closeAnnotation(),
+        onAdd: async (pixel: image.PixelMap, note: string) => {
+          const capture = this.annotationCapture;
+          if (!capture) { throw new Error(t('批注截图已失效，请重新截取。')); }
+          await this.onAnnotation(this.annotationThreadId, pixel, capture, note);
+          this.showAnnotation = false;
+        } })
+    }
+  }
   private navigate(): void {
     try {
       this.driver?.userNavigate(validateWebAddress((this.browser.editingAddress || this.addressDirty ? this.address : this.browser.url).trim()));
@@ -41,7 +86,7 @@ export struct BrowserPanel {
           IconButton({ icon: $r('sys.symbol.gearshape'), label: t('设置'), compId: 'browser-settings', onTap: this.onSettings })
           IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭浏览器'), compId: 'browser-close',
             onTap: () => { this.browser.close(); this.onDismiss(); } })
-        }.width('100%').padding({ left: Space.sm, right: Space.sm, top: Space.sm })
+        }.width('100%').padding({ left: Space.sm, right: Space.sm, top: Space.sm }).enabled(!this.capturing)
         Row({ space: Space.sm }) {
           TextInput({ text: this.browser.editingAddress || this.addressDirty ? this.address : this.browser.url, placeholder: t('网页地址') }).fontFamily(this.appearance.fontFamily)
             .id('browser-address').layoutWeight(1).type(InputType.URL).enterKeyType(EnterKeyType.Go)
@@ -53,7 +98,7 @@ export struct BrowserPanel {
             })
             .onSubmit(() => this.navigate())
           Button(t('打开')).fontFamily(this.appearance.fontFamily).id('browser-go').attributeModifier(Btn.textSmall).onClick(() => this.navigate())
-        }.padding({ left: Space.md, right: Space.md }).width('100%')
+        }.padding({ left: Space.md, right: Space.md }).width('100%').enabled(!this.capturing)
         Row({ space: Space.sm }) {
           IconButton({ icon: $r('sys.symbol.chevron_left'), label: t('上一页'), compId: 'browser-back',
             disabled: !this.browser.canGoBack, onTap: () => this.driver?.userBack() })
@@ -61,6 +106,8 @@ export struct BrowserPanel {
             disabled: !this.browser.canGoForward, onTap: () => this.driver?.userForward() })
           IconButton({ icon: $r('sys.symbol.arrow_clockwise'), label: t('重新加载'), compId: 'browser-reload', onTap: () => this.driver?.userReload() })
           Blank()
+          IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: this.capturing ? t('截图中…') : t('批注当前页面'), compId: 'browser-annotate',
+            disabled: !this.canAnnotate || this.capturing || this.browser.url.length === 0, onTap: () => this.annotate() })
           if (this.browser.owner === 'agent') {
             Button(t('接管浏览器')).fontFamily(this.appearance.fontFamily).id('browser-takeover').attributeModifier(Btn.tonal).onClick(() => this.browser.takeOver())
           }
@@ -68,7 +115,7 @@ export struct BrowserPanel {
             Button(t('交还给 Tinybot')).fontFamily(this.appearance.fontFamily).id('browser-handoff').attributeModifier(Btn.primarySmall)
               .onClick(() => { this.getUIContext().getFocusController().clearFocus(); this.browser.handoff(); })
           }
-        }.width('100%').padding({ left: Space.sm, right: Space.md })
+        }.width('100%').padding({ left: Space.sm, right: Space.md }).enabled(!this.capturing)
         if (this.browser.handoffReason) {
           Text(this.browser.handoffReason).fontFamily(this.appearance.fontFamily).id('browser-handoff-reason').fontSize(13).fontColor($r('app.color.text_secondary'))
             .width('100%').padding({ left: Space.md, right: Space.md })
@@ -78,6 +125,7 @@ export struct BrowserPanel {
             .width('100%').padding({ left: Space.md, right: Space.md })
         }
         Web({ src: 'about:blank', controller: this.driver.controller })
+          .enabled(!this.capturing)
           .id('agent-browser-web').width('100%').layoutWeight(1).javaScriptAccess(true).domStorageAccess(true)
           .fileAccess(false).multiWindowAccess(false).blockNetwork(false)
           .onPageBegin(() => this.driver?.pageBegin())
@@ -113,6 +161,8 @@ export struct BrowserPanel {
       .enabled(this.expanded && this.browser.open)
       .accessibilityLevel(this.expanded && this.browser.open ? 'auto' : 'no-hide-descendants')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+      .bindContentCover(this.showAnnotation, this.annotationSheet(), { modalTransition: ModalTransition.ALPHA,
+        onWillDismiss: () => this.closeAnnotation() })
   }
 }
 

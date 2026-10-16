@@ -48,6 +48,7 @@ export class BrowserSession implements ExecutionGate {
   private epoch: number = 0;
   private sequence: number = 0;
   private operating: boolean = false;
+  private issuedOperation?: Promise<void>;
 
   get paused(): boolean { return this.permissionPending || (!!this.lease && this.owner === 'user'); }
   get hasTask(): boolean { return this.lease !== undefined; }
@@ -134,6 +135,17 @@ export class BrowserSession implements ExecutionGate {
     this.open = true; this.owner = 'user'; this.epoch++;
     this.log('opened_by_user', { generation: this.epoch, enabled: this.hasTask });
   }
+  async pauseForAnnotation(): Promise<void> {
+    this.requireOpen(); this.takeOver();
+    const epoch = this.epoch;
+    // An already issued click may still navigate. Capture only after that action drains.
+    await this.issuedOperation;
+    this.requireOpen();
+    if (this.owner !== 'user' || epoch !== this.epoch) {
+      throw new ToolFailure('STALE_BROWSER_SNAPSHOT', 'Browser control changed before annotation capture.', 'inspect_browser');
+    }
+    this.log('annotation_started', { generation: epoch });
+  }
   report(message: string): void { this.error = message; this.log('failed', undefined, message); }
   pageChanged(url: string, title: string): void { this.url = url === 'about:blank' ? '' : url; this.title = title; }
   userBack(): boolean { return this.requireDriver().userBack(); }
@@ -199,7 +211,9 @@ export class BrowserSession implements ExecutionGate {
     this.log('operation', { action: operation, generation: epoch });
     try {
       let failure: Error | undefined;
-      try { await execute(); } catch (error) { failure = error as Error; }
+      try { this.issuedOperation = execute(); await this.issuedOperation; }
+      catch (error) { failure = error as Error; }
+      finally { this.issuedOperation = undefined; }
       // Never abort an issued action on takeover. Hold both success and failure until handoff.
       if (!cancellation.cancelled) {
         try { await this.wait(cancellation); }

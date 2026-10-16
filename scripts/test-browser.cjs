@@ -4,6 +4,8 @@ const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFi
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 const root = path.resolve(__dirname, '../entry/src'), cache = new Map();
 const nativeResult = { type: 3, value: '' };
+const captureResult = { released: 0, before: async () => {} };
+const capturedPixel = { getImageInfo: async () => ({ size: { width: 900, height: 1200 } }), release: async () => { captureResult.released++; } };
 const TouchType = { Down: 0, Up: 1, Move: 2, Cancel: 3 };
 const nativeWebview = { JsMessageType: { STRING: 3, NONE: 0 }, WebviewController: class {
   backAvailable = false; forwardAvailable = false; effects = [];
@@ -17,6 +19,7 @@ const nativeWebview = { JsMessageType: { STRING: 3, NONE: 0 }, WebviewController
   clearHistory() { this.effects.push('clearHistory'); this.backAvailable = false; this.forwardAvailable = false; }
   loadUrl(url) { this.url = url; this.effects.push('navigate'); }
   getTitle() { return 'Native browser'; }
+  getSurfaceId() { return 'browser-surface'; }
   async runJavaScript() { return JSON.stringify(nativeResult.value); }
   async runJavaScriptExt() { return { getType: () => nativeResult.type, getString: () => JSON.stringify(nativeResult.value) }; }
 } };
@@ -31,6 +34,9 @@ function load(file) {
   } }).outputText, { exports, Observed: cls => cls, TouchType, setTimeout, clearTimeout, console, require: id => {
     if (id === '@ohos/hypium') return {};
     if (id === '@kit.ArkWeb') return { webview: nativeWebview };
+    if (id === '@kit.ImageKit') return { image: { createPixelMapFromSurface: async id => {
+      assert.equal(id, 'browser-surface'); await captureResult.before(); return capturedPixel;
+    } } };
     if (!id.startsWith('.')) throw Error('Unexpected platform dependency ' + id);
     return load(path.resolve(path.dirname(file), id));
   } }, { filename: file });
@@ -67,6 +73,19 @@ async function acquired() {
   return { ...f, receipt };
 }
 (async () => {
+  {
+    const f = await acquired(); f.driver.hold = gate();
+    let operationDone = false, annotationReady = false;
+    const operating = f.browser.act({ action: 'reload' }, f.cancellation).then(() => { operationDone = true; });
+    await settle();
+    const preparing = f.browser.pauseForAnnotation().then(() => { annotationReady = true; });
+    await settle(); assert.equal(annotationReady, false); assert.equal(f.browser.owner, 'user');
+    f.driver.hold.resolve(); await preparing;
+    assert.equal(annotationReady, true); assert.equal(operationDone, false); assert.equal(f.cancellation.cancelled, false);
+    f.browser.handoff(); await operating;
+    assert.equal(f.driver.effects.filter(value => value === 'reload').length, 1);
+    console.log('PASS annotation takeover drains the issued action before capture and keeps the agent paused until explicit handoff');
+  }
   {
     for (const policy of ['unset', 'disabled']) {
       const f = fixture(policy);
@@ -308,6 +327,20 @@ async function acquired() {
     assert.equal(f.browser.canGoBack, true);
     assert.deepEqual(driver.controller.effects, ['navigate', 'clearHistory', 'navigate']);
     console.log('PASS manual navigation removes the internal blank page from history and preserves subsequent pages');
+  }
+  {
+    const { NativeBrowserDriver } = load(path.join(root, 'main/ets/services/NativeBrowserDriver'));
+    const f = fixture(); f.browser.openForUser();
+    const driver = new NativeBrowserDriver(f.browser);
+    driver.controller.url = 'https://example.com/current'; driver.pageEnd(driver.controller.url);
+    const capture = await driver.capture();
+    assert.equal(capture.pixel, capturedPixel); assert.equal(capture.url, 'https://example.com/current');
+    assert.equal(capture.width, 900); assert.equal(capture.height, 1200);
+    captureResult.before = async () => { driver.controller.url = 'https://example.com/redirect'; };
+    await assert.rejects(driver.capture(), error => error.code === 'STALE_BROWSER_SNAPSHOT');
+    assert.equal(captureResult.released, 1, 'Discarded captures release their native surface pixels');
+    captureResult.before = async () => {};
+    console.log('PASS native annotation captures the Web surface and rejects page changes with pixel cleanup');
   }
   {
     const { NativeBrowserDriver } = load(path.join(root, 'main/ets/services/NativeBrowserDriver'));
