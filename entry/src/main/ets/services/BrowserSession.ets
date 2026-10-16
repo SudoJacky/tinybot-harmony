@@ -122,8 +122,20 @@ export class BrowserSession implements ExecutionGate {
     this.epoch++; this.open = false; this.owner = 'none'; this.handoffReason = ''; this.editingAddress = false;
     this.driver?.close(); this.wake(); this.log('closed', { generation: this.epoch });
   }
+  openForUser(): void {
+    if (this.policy !== 'enabled') {
+      throw new ToolFailure('PERMISSION_DENIED', 'Enable the in-app browser before opening it.', 'respect_user_decision');
+    }
+    this.requireDriver();
+    // Reopening the viewer must preserve the page and the agent's control.
+    if (this.open) { return; }
+    this.url = ''; this.title = ''; this.error = ''; this.handoffReason = ''; this.editingAddress = false;
+    this.canGoBack = false; this.canGoForward = false;
+    this.open = true; this.owner = 'user'; this.epoch++;
+    this.log('opened_by_user', { generation: this.epoch, enabled: this.hasTask });
+  }
   report(message: string): void { this.error = message; this.log('failed', undefined, message); }
-  pageChanged(url: string, title: string): void { this.url = url; this.title = title; }
+  pageChanged(url: string, title: string): void { this.url = url === 'about:blank' ? '' : url; this.title = title; }
   userBack(): boolean { return this.requireDriver().userBack(); }
   private requireDriver(): BrowserDriver {
     if (!this.driver) { throw new ToolFailure('BROWSER_UNAVAILABLE', 'Browser view is not attached.', 'inspect_error'); }

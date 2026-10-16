@@ -143,6 +143,30 @@ struct Index {
     this.browserExpanded = expanded;
   }
 
+  private openBrowser(): void {
+    if (this.browser.permissionSaving) { return; }
+    if (this.browser.policy !== 'enabled') {
+      this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t('允许启用应用内浏览器？'),
+        message: t('启用后，你和 Tinybot 可以使用同一个浏览器。你可以随时接管，也可以在设置中关闭。助手读取的网页内容会发送给当前模型。'),
+        primaryButton: { value: t('取消'), action: () => {} },
+        secondaryButton: { value: t('允许并启用'), action: () => this.enableAndOpenBrowser() } });
+      return;
+    }
+    try { this.browser.openForUser(); this.setBrowserExpanded(true); }
+    catch (error) {
+      this.browser.report((error as Error).message);
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: (error as Error).message });
+    }
+  }
+
+  private async enableAndOpenBrowser(): Promise<void> {
+    if (this.browser.permissionSaving) { return; }
+    try { await this.browser.setEnabled(true); this.openBrowser(); }
+    catch (error) {
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: (error as Error).message });
+    }
+  }
+
   aboutToDisappear(): void {
     this.unsubscribeLaunch?.(); this.unsubscribeLaunch = undefined;
     this.app.stop();
@@ -256,6 +280,9 @@ struct Index {
           .onClick(() => { this.showToolScope = true; })
         MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.folder')), content: t("工作区文件") })
           .enabled(!this.app.busy).onClick(() => this.openFiles())
+        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.connection')), content: t('应用内浏览器') })
+          .id('open-browser').enabled(this.app.ready && !this.browser.permissionSaving && this.app.saveError.length === 0)
+          .onClick(() => this.openBrowser())
         MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.rectangle_stack')), content: t("分支关系") })
           .enabled(!this.app.busy).onClick(() => this.paths.pushPath({ name: 'branches' }))
         MenuItem({ startIcon: $r('app.media.message_branch'), content: t("创建分支") })

@@ -1,4 +1,5 @@
 {
+  "启用后，你和 Tinybot 可以使用同一个浏览器。你可以随时接管，也可以在设置中关闭。助手读取的网页内容会发送给当前模型。": "Once enabled, you and Tinybot can use the same browser. You can take control at any time or disable it in Settings. Page content read by the assistant is sent to the current model.",
   "请先在画板上绘制内容。": "Draw something on the canvas first.",
   "此设备不支持系统手写画板。": "This device does not support the system drawing board.",
   "画板": "Drawing board",

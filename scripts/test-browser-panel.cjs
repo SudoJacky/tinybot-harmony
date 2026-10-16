@@ -64,3 +64,45 @@ view.browser.editingAddress = true; compiled.back.call(view);
 assert.equal(cleared, 1); assert.equal(collapsed, 2, 'Back dismisses address editing before navigation');
 console.log('PASS emitted browser address callbacks: programmatic changes/focus/copy keep control, editing and empty drafts work');
 console.log('PASS emitted system back: dismiss editing, navigate user history, collapse agent viewing without takeover');
+
+const browserMethods = ['openBrowser', 'enableAndOpenBrowser'].map(name =>
+  index.members.find(node => node.name?.getText(indexTree) === name).getText(indexTree)).join('\n');
+const pageExports = {};
+vm.runInNewContext(ts.transpileModule(`export class Page { ${browserMethods} }`, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }
+}).outputText, { exports: pageExports, t: value => value });
+function page(policy) {
+  const view = new pageExports.Page(), events = [];
+  view.appearance = { surface: {} };
+  view.browser = { policy, permissionSaving: false, openForUser() { events.push('open'); },
+    report(message) { events.push(['report', message]); },
+    async setEnabled() { events.push('save'); this.policy = 'enabled'; } };
+  view.setBrowserExpanded = value => events.push(['expanded', value]);
+  view.getUIContext = () => ({ showAlertDialog(dialog) { view.dialog = dialog; },
+    getPromptAction: () => ({ showToast: value => events.push(['toast', value.message]) }) });
+  return { view, events };
+}
+(async () => {
+  let { view, events } = page('enabled'); view.openBrowser();
+  assert.deepEqual(events, ['open', ['expanded', true]]); assert.equal(view.dialog, undefined);
+  for (const policy of ['unset', 'disabled']) {
+    ({ view, events } = page(policy)); view.openBrowser();
+    assert.equal(events.length, 0); assert.ok(view.dialog);
+    view.dialog.primaryButton.action(); assert.equal(events.length, 0);
+    await view.dialog.secondaryButton.action();
+    assert.deepEqual(events, ['save', 'open', ['expanded', true]]);
+  }
+  ({ view, events } = page('unset')); let saved;
+  view.browser.setEnabled = async () => { await new Promise(resolve => { saved = resolve; }); view.browser.policy = 'enabled'; };
+  view.openBrowser(); const enabling = view.dialog.secondaryButton.action();
+  assert.equal(events.length, 0, 'Do not mount the browser before permission persists');
+  saved(); await enabling; assert.deepEqual(events, ['open', ['expanded', true]]);
+  ({ view, events } = page('disabled'));
+  view.browser.setEnabled = async () => { throw Error('permission disk error'); };
+  view.openBrowser(); await view.dialog.secondaryButton.action();
+  assert.deepEqual(events, [['toast', 'permission disk error']]);
+  assert.equal(view.browser.policy, 'disabled');
+  ({ view, events } = page('enabled')); view.browser.permissionSaving = true; view.openBrowser();
+  assert.equal(events.length, 0); assert.equal(view.dialog, undefined);
+  console.log('PASS emitted manual browser entry: enabled opens directly, cancel preserves policy, enable waits for persistence and save failures stay visible');
+})().catch(error => { console.error(error); process.exitCode = 1; });

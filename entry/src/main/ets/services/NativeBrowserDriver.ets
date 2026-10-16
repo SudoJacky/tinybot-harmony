@@ -10,6 +10,7 @@ export class NativeBrowserDriver implements BrowserDriver {
   private browser: BrowserSession;
   private initialized: boolean = false;
   private loading: boolean = false;
+  private clearInitialHistory: boolean = false;
   private error: string = '';
   private waiters: Set<() => void> = new Set<() => void>();
   private touchStart?: TouchObject;
@@ -18,6 +19,7 @@ export class NativeBrowserDriver implements BrowserDriver {
   pageBegin(): void { this.loading = true; this.error = ''; this.browser.error = ''; }
   pageEnd(url: string): void {
     this.initialized = true; this.loading = false;
+    if (this.clearInitialHistory && url !== 'about:blank') { this.controller.clearHistory(); this.clearInitialHistory = false; }
     this.browser.pageChanged(url, this.controller.getTitle()); this.historyChanged(); this.wake();
   }
   historyChanged(): void {
@@ -66,10 +68,12 @@ export class NativeBrowserDriver implements BrowserDriver {
   }
   async open(url: string): Promise<void> {
     await this.ready();
-    const firstPage = this.controller.getUrl() === 'about:blank';
-    this.loading = true; this.error = ''; this.controller.loadUrl(url);
+    this.navigate(url);
     await this.ready();
-    if (firstPage) { this.controller.clearHistory(); this.historyChanged(); }
+  }
+  private navigate(url: string): void {
+    this.clearInitialHistory = this.clearInitialHistory || this.controller.getUrl() === 'about:blank';
+    this.loading = true; this.error = ''; this.controller.loadUrl(url);
   }
   async snapshot(id: string): Promise<BrowserPage> {
     await this.ready();
@@ -109,12 +113,12 @@ export class NativeBrowserDriver implements BrowserDriver {
     if (result.ok !== true) { throw new ToolFailure(result.code || 'BROWSER_ACTION_FAILED', result.message || 'Browser action failed.', 'inspect_browser_before_retry'); }
   }
   close(): void {
-    this.initialized = false; this.loading = false; this.error = ''; this.wake();
+    this.initialized = false; this.loading = false; this.clearInitialHistory = false; this.error = ''; this.wake();
     this.touchStart = undefined;
     this.browser.canGoBack = false; this.browser.canGoForward = false;
     // Removing the mounted Web closes the renderer. Never run another page action here.
   }
-  userNavigate(url: string): void { this.browser.takeOver(); this.loading = true; this.error = ''; this.controller.loadUrl(url); }
+  userNavigate(url: string): void { this.browser.takeOver(); this.navigate(url); }
   userBack(): boolean {
     if (!this.controller.accessBackward()) { return false; }
     this.browser.takeOver(); this.loading = true; this.error = ''; this.controller.backward(); return true;

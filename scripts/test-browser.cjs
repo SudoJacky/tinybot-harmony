@@ -68,6 +68,38 @@ async function acquired() {
 }
 (async () => {
   {
+    for (const policy of ['unset', 'disabled']) {
+      const f = fixture(policy);
+      const effects = [...f.driver.effects];
+      assert.throws(() => f.browser.openForUser(), error => error.code === 'PERMISSION_DENIED');
+      assert.equal(f.browser.open, false); assert.equal(f.browser.policy, policy);
+      assert.deepEqual(f.saved, []); assert.deepEqual(f.driver.effects, effects);
+    }
+    const missing = new BrowserSession(); missing.updatePolicy('enabled');
+    assert.throws(() => missing.openForUser(), error => error.code === 'BROWSER_UNAVAILABLE');
+    assert.equal(missing.open, false);
+    const f = fixture();
+    f.browser.url = 'https://example.com/old'; f.browser.title = 'Old page'; f.browser.error = 'Old error';
+    f.browser.openForUser();
+    assert.equal(f.browser.open, true); assert.equal(f.browser.owner, 'user');
+    assert.equal(f.browser.url, ''); assert.equal(f.browser.title, ''); assert.equal(f.browser.error, '');
+    assert.equal(f.browser.hasTask, false); assert.equal(f.browser.paused, false);
+    assert.deepEqual(f.driver.effects, []); assert.ok(f.logs.some(log => log.event === 'opened_by_user'));
+    f.browser.pageChanged('about:blank', ''); assert.equal(f.browser.url, '');
+    const acquiring = f.browser.acquire('thread', 'https://example.com', 'Use the shared browser', f.cancellation);
+    await settle(); assert.equal(f.browser.paused, true);
+    f.browser.handoff(); await acquiring;
+    assert.equal(f.browser.owner, 'agent');
+    f.browser.openForUser();
+    assert.equal(f.browser.owner, 'agent'); assert.equal(f.browser.paused, false);
+    assert.equal(f.browser.url, 'https://example.com'); assert.deepEqual(f.driver.effects, ['open']);
+    f.browser.close(); f.browser.openForUser();
+    assert.equal(f.browser.owner, 'user'); assert.equal(f.browser.paused, true);
+    f.browser.handoff(); assert.equal(f.browser.paused, false);
+    f.browser.release(f.cancellation);
+    console.log('PASS manual browser respects permission, opens a fresh user session, shares the agent host and preserves existing control');
+  }
+  {
     const f = fixture('unset'); const save = gate(); let durable = false;
     f.browser.configure(async value => { await save.promise; f.saved.push(value); durable = true; }, () => {});
     let returned = false;
@@ -261,6 +293,21 @@ async function acquired() {
     assert.equal(f.browser.canGoBack, true, 'Subsequent browser_open calls preserve real history');
     assert.deepEqual(driver.controller.effects, ['navigate']);
     console.log('PASS native viewing gestures keep the task running; taps and available navigation take control; empty history does not');
+  }
+  {
+    const { NativeBrowserDriver } = load(path.join(root, 'main/ets/services/NativeBrowserDriver'));
+    const f = fixture(); f.browser.openForUser();
+    const driver = new NativeBrowserDriver(f.browser);
+    driver.pageEnd('about:blank');
+    driver.userNavigate('https://example.com'); driver.controller.backAvailable = true;
+    driver.pageEnd('https://example.com');
+    assert.equal(f.browser.canGoBack, false); assert.equal(f.browser.url, 'https://example.com');
+    assert.deepEqual(driver.controller.effects, ['navigate', 'clearHistory']);
+    driver.userNavigate('https://example.com/next'); driver.controller.backAvailable = true;
+    driver.pageEnd('https://example.com/next');
+    assert.equal(f.browser.canGoBack, true);
+    assert.deepEqual(driver.controller.effects, ['navigate', 'clearHistory', 'navigate']);
+    console.log('PASS manual navigation removes the internal blank page from history and preserves subsequent pages');
   }
   {
     const { NativeBrowserDriver } = load(path.join(root, 'main/ets/services/NativeBrowserDriver'));
