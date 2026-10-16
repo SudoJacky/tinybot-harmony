@@ -1033,11 +1033,14 @@ export default function sessionServiceTests(): void {
       expect(f.provider.requests[0].messages[0].content.includes('global fact')).assertTrue();
       expect(f.provider.requests[0].messages[0].content.includes('other secret')).assertFalse();
     });
-    it('keepsAttachmentsOutOfTextOnlyQueueAndRetainsDraft', 0, async () => {
+    it('queuesAttachmentsWithTheirInstructionAndRestoresThemForEditing', 0, async () => {
       const f = new Fixture(); await f.session.initialize();
       await f.session.setAttachments([{ id: 'photo', name: 'photo', path: 'photo.jpg', mime: 'image/jpeg', size: 12 }]);
       f.session.setDraft('image task'); await f.session.enqueueInput('followUp');
-      expect(active(f.session.snapshot()).pendingInputs?.length).assertEqual(0);
+      expect(active(f.session.snapshot()).pendingInputs?.[0].attachments?.[0].id).assertEqual('photo');
+      expect(active(f.session.snapshot()).draft).assertEqual('');
+      expect(active(f.session.snapshot()).attachments?.length).assertEqual(0);
+      await f.session.removePendingInput(active(f.session.snapshot()).pendingInputs![0].id, true);
       expect(active(f.session.snapshot()).draft).assertEqual('image task');
       expect(active(f.session.snapshot()).attachments?.length).assertEqual(1);
     });

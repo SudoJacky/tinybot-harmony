@@ -1,4 +1,5 @@
 import { t } from './I18n';
+import { Attachment, validateAttachments } from './Productivity';
 export type InputMode = 'steer' | 'followUp';
 export const MAX_PENDING_INPUTS: number = 20;
 export const MAX_INPUT_TEXT: number = 24000;
@@ -7,6 +8,7 @@ export interface PendingInput {
   id: string;
   mode: InputMode;
   text: string;
+  attachments?: Attachment[];
 }
 
 export function validatePendingInput(input: PendingInput): void {
@@ -15,6 +17,7 @@ export function validatePendingInput(input: PendingInput): void {
     input.text.trim().length === 0 || input.text.length > MAX_INPUT_TEXT) {
     throw new Error(t("待发送指令无效，正文需要 1 至 24000 字符。"));
   }
+  if (input.attachments !== undefined) { validateAttachments(input.attachments); }
 }
 
 export function validatePendingInputs(inputs: PendingInput[]): void {

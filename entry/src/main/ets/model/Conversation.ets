@@ -151,7 +151,7 @@ export function requestHistory(messages: MessageData[], systemPrompt: string): M
           if (step.tools.length > 0 || (answer.status === 'complete' && step.content.length > 0)) {
             result.push(...stepMessages(step));
           } else if (step.steering) {
-            result.push({ role: 'user', content: step.steering.text });
+            result.push({ role: 'user', content: step.steering.text, attachments: step.steering.attachments });
           }
         }
         if (answer.status !== 'complete') {

@@ -174,7 +174,7 @@ export function toolError(error: string | Error | null | undefined): string {
 }
 
 export function stepMessages(step: AgentStep, includeSteering: boolean = true): ModelMessage[] {
-  const prefix: ModelMessage[] = includeSteering && step.steering ? [{ role: 'user', content: step.steering.text }] : [];
+  const prefix: ModelMessage[] = includeSteering && step.steering ? [{ role: 'user', content: step.steering.text, attachments: step.steering.attachments }] : [];
   if (step.requestError) { return prefix; }
   const result: ModelMessage[] = [{
     role: 'assistant', content: step.content, reasoningContent: step.reasoningContent, anthropicContent: step.anthropicContent,

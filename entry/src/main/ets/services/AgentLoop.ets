@@ -93,13 +93,13 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
         validatePendingInput(pending);
         if (pending.mode !== 'steer') { throw new Error(t("本轮只能接收追加指令。")); }
       }
-      const input: PendingInput | undefined = pending ? { id: pending.id, mode: pending.mode, text: pending.text } : undefined;
+      const input: PendingInput | undefined = pending ? { id: pending.id, mode: pending.mode, text: pending.text, attachments: pending.attachments } : undefined;
       const definitions = context.tools.definitions();
-      const prepared = context.prepareRequest ? await context.prepareRequest(definitions, input ? [{ role: 'user', content: input.text }] : [], cancellation, recoveryPending) : undefined;
+      const prepared = context.prepareRequest ? await context.prepareRequest(definitions, input ? [{ role: 'user', content: input.text, attachments: input.attachments }] : [], cancellation, recoveryPending) : undefined;
       recoveryPending = false;
       cancellation.check();
       if (prepared) { messages = prepared.messages; }
-      const requestMessages: ModelMessage[] = input ? messages.concat([{ role: 'user', content: input.text }]) : messages;
+      const requestMessages: ModelMessage[] = input ? messages.concat([{ role: 'user', content: input.text, attachments: input.attachments }]) : messages;
       if (!prepared && context.contextWindow !== undefined && estimateContextTokens(requestMessages, definitions) > contextInputBudget(context.contextWindow)) {
         throw new Error(t("本轮内容超过上下文预算，执行已停止。已完成的工具结果已保留；请压缩历史、缩小任务或提高窗口设置。"));
       }
@@ -112,7 +112,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
         observer.steering?.consume(input.id);
         await observer.checkpoint();
         cancellation.check();
-        if (!prepared) { messages.push({ role: 'user', content: input.text }); }
+        if (!prepared) { messages.push({ role: 'user', content: input.text, attachments: input.attachments }); }
       }
       let acceptingText = true;
       let response: ModelTurn;

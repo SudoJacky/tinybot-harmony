@@ -4,6 +4,8 @@ const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFi
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 const root = path.resolve(__dirname, '../entry/src'), cache = new Map();
 const nativeResult = { type: 3, value: '' };
+const captureResult = { released: 0, before: async () => {} };
+const capturedPixel = { getImageInfo: async () => ({ size: { width: 900, height: 1200 } }), release: async () => { captureResult.released++; } };
 const TouchType = { Down: 0, Up: 1, Move: 2, Cancel: 3 };
 const nativeWebview = { JsMessageType: { STRING: 3, NONE: 0 }, WebviewController: class {
   backAvailable = false; forwardAvailable = false; effects = [];
@@ -17,8 +19,12 @@ const nativeWebview = { JsMessageType: { STRING: 3, NONE: 0 }, WebviewController
   clearHistory() { this.effects.push('clearHistory'); this.backAvailable = false; this.forwardAvailable = false; }
   loadUrl(url) { this.url = url; this.effects.push('navigate'); }
   getTitle() { return 'Native browser'; }
+  getSurfaceId() { return 'browser-surface'; }
   async runJavaScript() { return JSON.stringify(nativeResult.value); }
-  async runJavaScriptExt() { return { getType: () => nativeResult.type, getString: () => JSON.stringify(nativeResult.value) }; }
+  async runJavaScriptExt(source) {
+    const value = nativeResult.execute ? await nativeResult.execute(source) : nativeResult.value;
+    return { getType: () => nativeResult.type, getString: () => JSON.stringify(value) };
+  }
 } };
 function load(file) {
   file = path.resolve(file.endsWith('.ets') ? file : file + '.ets');
@@ -31,6 +37,9 @@ function load(file) {
   } }).outputText, { exports, Observed: cls => cls, TouchType, setTimeout, clearTimeout, console, require: id => {
     if (id === '@ohos/hypium') return {};
     if (id === '@kit.ArkWeb') return { webview: nativeWebview };
+    if (id === '@kit.ImageKit') return { image: { createPixelMapFromSurface: async id => {
+      assert.equal(id, 'browser-surface'); await captureResult.before(); return capturedPixel;
+    } } };
     if (!id.startsWith('.')) throw Error('Unexpected platform dependency ' + id);
     return load(path.resolve(path.dirname(file), id));
   } }, { filename: file });
@@ -67,6 +76,100 @@ async function acquired() {
   return { ...f, receipt };
 }
 (async () => {
+  {
+    const { NativeBrowserDriver } = load(path.join(root, 'main/ets/services/NativeBrowserDriver'));
+    const f = await acquired(), driver = new NativeBrowserDriver(f.browser), calls = [];
+    driver.controller.url = 'https://example.com'; driver.pageEnd(driver.controller.url); driver.setFeedbackVisible(true);
+    nativeResult.execute = async source => {
+      const preview = source.includes('const preview = true;'); calls.push(preview ? 'preview' : 'effect');
+      return JSON.stringify(preview ? { ok: true, target: { x: 0.25, y: 0.5 } } : { ok: true });
+    };
+    const action = { action: 'click', snapshotId: f.receipt.page.snapshotId, elementId: 1 };
+    const acting = driver.act(action); await settle();
+    assert.deepEqual(calls, ['preview']); assert.equal(f.browser.actionFeedback.x, 0.25); assert.equal(f.browser.actionFeedback.y, 0.5);
+    await acting; assert.deepEqual(calls, ['preview', 'effect']);
+    driver.setFeedbackVisible(false); assert.equal(f.browser.actionFeedback, undefined);
+    calls.length = 0; await driver.act(action); assert.deepEqual(calls, ['effect'], 'Collapsed browsing skips visual preview and its delay');
+    driver.setFeedbackVisible(true); calls.length = 0;
+    const interrupted = driver.act(action); await settle();
+    f.browser.takeOver(); f.browser.handoff();
+    await assert.rejects(interrupted, error => error.code === 'STALE_BROWSER_SNAPSHOT');
+    assert.deepEqual(calls, ['preview'], 'Taking over and handing back during preview must not issue the old action');
+    assert.equal(f.browser.actionFeedback, undefined);
+    const fresh = await f.browser.snapshot(f.cancellation); calls.length = 0;
+    nativeResult.execute = async () => { calls.push('invalid-preview'); return JSON.stringify({ ok: true, target: { x: 2, y: 0.5 } }); };
+    await assert.rejects(driver.act({ ...action, snapshotId: fresh.snapshotId }), error => error.code === 'INVALID_RESPONSE');
+    assert.deepEqual(calls, ['invalid-preview']); assert.equal(f.browser.actionFeedback, undefined);
+    f.browser.showActionFeedback(0.25, 0.5); const previousId = f.browser.actionFeedback.id;
+    f.browser.showActionFeedback(0.75, 0.5); assert.ok(f.browser.actionFeedback.id > previousId);
+    await new Promise(resolve => setTimeout(resolve, 510)); assert.equal(f.browser.actionFeedback, undefined, 'Operation cues expire automatically');
+    nativeResult.execute = undefined; f.browser.release(f.cancellation);
+    console.log('PASS visible actions preview their target before a single effect, hidden browsing skips preview, and takeover invalidates pending clicks');
+  }
+  {
+    const { NativeBrowserDriver } = load(path.join(root, 'main/ets/services/NativeBrowserDriver'));
+    const f = await acquired(), driver = new NativeBrowserDriver(f.browser); let effects = 0;
+    driver.controller.url = 'https://example.com'; driver.pageEnd(driver.controller.url); driver.setFeedbackVisible(true);
+    nativeResult.execute = async source => {
+      if (source.includes('const preview = true;')) return JSON.stringify({ ok: true, target: { x: 0.5, y: 0.5 } });
+      effects++; return JSON.stringify({ ok: true });
+    };
+    f.driver.act = action => driver.act(action);
+    const action = f.browser.act({ action: 'type', snapshotId: f.receipt.page.snapshotId, elementId: 1, text: 'edited' }, f.cancellation);
+    const rejected = assert.rejects(action, error => error.code === 'STALE_BROWSER_SNAPSHOT');
+    await settle(); await f.browser.pauseForAnnotation();
+    assert.equal(f.browser.owner, 'user'); assert.equal(effects, 0);
+    f.browser.handoff(); await rejected;
+    f.browser.showActionFeedback(0.5, 0.5); driver.pageBegin(); assert.equal(f.browser.actionFeedback, undefined);
+    f.browser.showActionFeedback(0.5, 0.5); f.browser.close(); assert.equal(f.browser.actionFeedback, undefined);
+    f.browser.release(f.cancellation); nativeResult.execute = undefined;
+    console.log('PASS annotation takeover cancels the unissued preview action without blocking capture; page loads and close clear indicators');
+  }
+  {
+    const f = await acquired(); f.driver.hold = gate();
+    let operationDone = false, annotationReady = false;
+    const operating = f.browser.act({ action: 'reload' }, f.cancellation).then(() => { operationDone = true; });
+    await settle();
+    const preparing = f.browser.pauseForAnnotation().then(() => { annotationReady = true; });
+    await settle(); assert.equal(annotationReady, false); assert.equal(f.browser.owner, 'user');
+    f.driver.hold.resolve(); await preparing;
+    assert.equal(annotationReady, true); assert.equal(operationDone, false); assert.equal(f.cancellation.cancelled, false);
+    f.browser.handoff(); await operating;
+    assert.equal(f.driver.effects.filter(value => value === 'reload').length, 1);
+    console.log('PASS annotation takeover drains the issued action before capture and keeps the agent paused until explicit handoff');
+  }
+  {
+    for (const policy of ['unset', 'disabled']) {
+      const f = fixture(policy);
+      const effects = [...f.driver.effects];
+      assert.throws(() => f.browser.openForUser(), error => error.code === 'PERMISSION_DENIED');
+      assert.equal(f.browser.open, false); assert.equal(f.browser.policy, policy);
+      assert.deepEqual(f.saved, []); assert.deepEqual(f.driver.effects, effects);
+    }
+    const missing = new BrowserSession(); missing.updatePolicy('enabled');
+    assert.throws(() => missing.openForUser(), error => error.code === 'BROWSER_UNAVAILABLE');
+    assert.equal(missing.open, false);
+    const f = fixture();
+    f.browser.url = 'https://example.com/old'; f.browser.title = 'Old page'; f.browser.error = 'Old error';
+    f.browser.openForUser();
+    assert.equal(f.browser.open, true); assert.equal(f.browser.owner, 'user');
+    assert.equal(f.browser.url, ''); assert.equal(f.browser.title, ''); assert.equal(f.browser.error, '');
+    assert.equal(f.browser.hasTask, false); assert.equal(f.browser.paused, false);
+    assert.deepEqual(f.driver.effects, []); assert.ok(f.logs.some(log => log.event === 'opened_by_user'));
+    f.browser.pageChanged('about:blank', ''); assert.equal(f.browser.url, '');
+    const acquiring = f.browser.acquire('thread', 'https://example.com', 'Use the shared browser', f.cancellation);
+    await settle(); assert.equal(f.browser.paused, true);
+    f.browser.handoff(); await acquiring;
+    assert.equal(f.browser.owner, 'agent');
+    f.browser.openForUser();
+    assert.equal(f.browser.owner, 'agent'); assert.equal(f.browser.paused, false);
+    assert.equal(f.browser.url, 'https://example.com'); assert.deepEqual(f.driver.effects, ['open']);
+    f.browser.close(); f.browser.openForUser();
+    assert.equal(f.browser.owner, 'user'); assert.equal(f.browser.paused, true);
+    f.browser.handoff(); assert.equal(f.browser.paused, false);
+    f.browser.release(f.cancellation);
+    console.log('PASS manual browser respects permission, opens a fresh user session, shares the agent host and preserves existing control');
+  }
   {
     const f = fixture('unset'); const save = gate(); let durable = false;
     f.browser.configure(async value => { await save.promise; f.saved.push(value); durable = true; }, () => {});
@@ -261,6 +364,35 @@ async function acquired() {
     assert.equal(f.browser.canGoBack, true, 'Subsequent browser_open calls preserve real history');
     assert.deepEqual(driver.controller.effects, ['navigate']);
     console.log('PASS native viewing gestures keep the task running; taps and available navigation take control; empty history does not');
+  }
+  {
+    const { NativeBrowserDriver } = load(path.join(root, 'main/ets/services/NativeBrowserDriver'));
+    const f = fixture(); f.browser.openForUser();
+    const driver = new NativeBrowserDriver(f.browser);
+    driver.pageEnd('about:blank');
+    driver.userNavigate('https://example.com'); driver.controller.backAvailable = true;
+    driver.pageEnd('https://example.com');
+    assert.equal(f.browser.canGoBack, false); assert.equal(f.browser.url, 'https://example.com');
+    assert.deepEqual(driver.controller.effects, ['navigate', 'clearHistory']);
+    driver.userNavigate('https://example.com/next'); driver.controller.backAvailable = true;
+    driver.pageEnd('https://example.com/next');
+    assert.equal(f.browser.canGoBack, true);
+    assert.deepEqual(driver.controller.effects, ['navigate', 'clearHistory', 'navigate']);
+    console.log('PASS manual navigation removes the internal blank page from history and preserves subsequent pages');
+  }
+  {
+    const { NativeBrowserDriver } = load(path.join(root, 'main/ets/services/NativeBrowserDriver'));
+    const f = fixture(); f.browser.openForUser();
+    const driver = new NativeBrowserDriver(f.browser);
+    driver.controller.url = 'https://example.com/current'; driver.pageEnd(driver.controller.url);
+    const capture = await driver.capture();
+    assert.equal(capture.pixel, capturedPixel); assert.equal(capture.url, 'https://example.com/current');
+    assert.equal(capture.width, 900); assert.equal(capture.height, 1200);
+    captureResult.before = async () => { driver.controller.url = 'https://example.com/redirect'; };
+    await assert.rejects(driver.capture(), error => error.code === 'STALE_BROWSER_SNAPSHOT');
+    assert.equal(captureResult.released, 1, 'Discarded captures release their native surface pixels');
+    captureResult.before = async () => {};
+    console.log('PASS native annotation captures the Web surface and rejects page changes with pixel cleanup');
   }
   {
     const { NativeBrowserDriver } = load(path.join(root, 'main/ets/services/NativeBrowserDriver'));

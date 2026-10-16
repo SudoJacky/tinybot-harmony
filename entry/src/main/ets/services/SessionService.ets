@@ -266,10 +266,31 @@ export class SessionService {
     });
   }
   async setAttachments(items: Attachment[]): Promise<boolean> {
+    if (this.status.phase === 'running') {
+      if (!this.canQueueInput) { return false; }
+      try {
+        validateAttachments(items); this.active.attachments = items; this.publish('snapshot');
+        await this.persist(this.active.id); return true;
+      } catch (error) {
+        this.status.error = t('保存附件失败：') + (error as Error).message;
+        this.resources.reportError('mutation_failed', error as Error); this.publish('snapshot'); return false;
+      }
+    }
     return this.mutate(t("保存附件失败："), async () => {
       if (this.active.archived) { throw new Error(t("请先恢复对话。")); }
       validateAttachments(items); this.active.attachments = items; await this.persist();
     });
+  }
+  async appendDraftAttachment(threadId: string, item: Attachment, text: string): Promise<void> {
+    if (this.active.id !== threadId) { throw new Error(t('对话已切换，请在当前对话重新添加附件。')); }
+    if (!this.canQueueInput) { throw new Error(this.status.saveError || t('当前无法添加附件，请稍后重试。')); }
+    const attachments = (this.active.attachments || []).concat([item]);
+    validateAttachments(attachments);
+    const draft = [this.active.draft || '', text].filter((value) => value.length > 0).join('\n\n');
+    if (draft.length > MAX_INPUT_TEXT) { throw new Error(t('批注与现有草稿合计不能超过 24000 字符。')); }
+    this.active.attachments = attachments; this.setDraft(draft, threadId); this.publish('snapshot');
+    // Like typing, staging is allowed while the runtime is paused and uses its ordered save lane.
+    await this.persist(threadId); this.refreshContext(); this.publish('snapshot');
   }
   async referenceThread(id: string): Promise<boolean> {
     return this.mutate(t('添加会话引用失败：'), async () => {
@@ -565,7 +586,6 @@ export class SessionService {
     if (!this.canQueueInput || (this.active.draft || '').trim().length === 0) { return; }
     this.status.error = '';
     try {
-      if ((this.active.attachments || []).length > 0) { throw new Error(t("附件请在当前任务完成后发送，或先移除附件再排队。")); }
       if ((this.active.references || []).length > 0) { throw new Error(t('会话引用请在当前任务完成后发送，或先移除引用再排队。')); }
       if (/^\/compact(?:\s|$)/i.test((this.active.draft || '').trim())) { throw new Error(t('/compact 请在当前任务完成后单独发送。')); }
       if (mode === 'steer' && (!this.status.acceptingSteering || !this.runtime.acceptsSteering)) {
@@ -573,10 +593,12 @@ export class SessionService {
       }
       const text = (this.active.draft || '').trim();
       if (mode === 'steer' && explicitSkill(text).length > 0) { throw new Error(t("运行中保持当前工具与 Skills；显式调用 /skill: 请使用“加入队列”。")); }
-      const pending = (this.active.pendingInputs || []).concat([{ id: this.resources.createId(), mode: mode, text: text }]);
+      const input: PendingInput = { id: this.resources.createId(), mode: mode, text: text };
+      if ((this.active.attachments || []).length) { input.attachments = this.active.attachments; }
+      const pending = (this.active.pendingInputs || []).concat([input]);
       validatePendingInputs(pending); this.active.pendingInputs = pending;
       if (this.status.phase !== 'running') { this.active.queuePaused = true; }
-      this.active.draft = ''; this.publish('snapshot'); await this.persist();
+      this.active.draft = ''; this.active.attachments = []; this.publish('snapshot'); await this.persist();
     } catch (error) {
       this.status.error = t("指令未能提交：") + (error as Error).message;
       if (this.status.saveError.length > 0) { this.active.queuePaused = true; this.runtime.abort(); }
@@ -587,9 +609,9 @@ export class SessionService {
     if (!this.canQueueInput) { return; }
     const input = (this.active.pendingInputs || []).find((item: PendingInput) => item.id === id);
     if (!input) { this.status.error = t("这条指令已经开始执行，不能再撤回。"); this.publish('state'); return; }
-    if (edit && (this.active.draft || '').trim().length > 0) { this.status.error = t("请先发送或清空当前草稿，再撤回编辑。"); this.publish('state'); return; }
+    if (edit && ((this.active.draft || '').trim().length > 0 || (this.active.attachments || []).length > 0)) { this.status.error = t("请先发送或清空当前草稿，再撤回编辑。"); this.publish('state'); return; }
     this.active.pendingInputs = (this.active.pendingInputs || []).filter((item: PendingInput) => item.id !== id);
-    if (edit) { this.active.draft = input.text; }
+    if (edit) { this.active.draft = input.text; this.active.attachments = input.attachments || []; }
     this.status.error = ''; this.publish('snapshot');
     try { await this.persist(); }
     catch (_) { this.active.queuePaused = true; this.runtime.abort(); this.publish('snapshot'); }
@@ -680,10 +702,12 @@ export class SessionService {
   }
 
   private async runTask(thread: ThreadData, text: string, queuedId?: string): Promise<boolean> {
+    const attachments = queuedId ? thread.pendingInputs?.find((item) => item.id === queuedId)?.attachments || [] : thread.attachments || [];
     const command = teamCommand(text);
     if (command !== undefined) { text = command || t('请分析附件。'); }
     const options = this.data.productivity?.options || defaultAssistantOptions();
-    const reference = thread.modelRef ? routeModel(options, text, (thread.attachments || []).concat(...thread.messages.filter((item) => item.role === 'user').map((item) => item.attachments || [])).some((item) => item.mime.startsWith('image/')), thread.modelRef) : undefined;
+    const reference = thread.modelRef ? routeModel(options, text, attachments.concat(...thread.messages.map((item) =>
+      (item.role === 'user' ? item.attachments || [] : []).concat(...(item.steps || []).map((step) => step.steering?.attachments || [])))).some((item) => item.mime.startsWith('image/')), thread.modelRef) : undefined;
     const config = reference ? this.configFor(reference) : this.currentConfig; const selected = explicitSkill(text);
     if (!config.configured) { this.status.error = t("当前对话没有可用模型，请选择模型，或添加、启用模型服务。"); thread.queuePaused = true; return false; }
     if (selected.length > 0 && !this.extensions.skills.some((skill: SkillData) => skill.enabled && skill.name === selected)) {
@@ -702,7 +726,7 @@ export class SessionService {
     this.addModeInstructions(sections, thread);
     const instructions = renderPrompt(sections);
     const user: MessageData = { id: this.resources.createId(), role: 'user', content: text, skillPrompt: expandSkillCommand(text, this.extensions.skills), status: 'complete', error: '',
-      attachments: queuedId ? [] : thread.attachments, references: queuedId ? [] : thread.references };
+      attachments: attachments, references: queuedId ? [] : thread.references };
     if (!queuedId) { thread.attachments = []; thread.references = []; }
     const answer: MessageData = { id: this.resources.createId(), role: 'assistant', content: '', status: 'generating', error: '', modelRef: reference };
     const generateTitle = shouldGenerateTitle(thread);
@@ -1135,7 +1159,8 @@ export class SessionService {
     const live: LiveResources = { skills: () => this.extensions.skills,
       servers: () => (this.data.productivity?.servers || []).filter((item) => !(thread.disabledMcpIds || []).includes(item.id)) };
     return new SelectedTools(new RuleTools(new ToolSet([this.resources.tools(thread.id, this.extensions, selected, extras,
-      (thread.attachments || []).concat(...thread.messages.map((item) => item.attachments || [])), live, projectFor(this.data, thread)?.workspaceId), new ReferenceTools(() => thread.messages)]), extras.options.readOnly), this.selectedToolSelection(thread));
+      (thread.attachments || []).concat(...thread.messages.map((item) => (item.attachments || [])
+        .concat(...(item.steps || []).map((step) => step.steering?.attachments || [])))), live, projectFor(this.data, thread)?.workspaceId), new ReferenceTools(() => thread.messages)]), extras.options.readOnly), this.selectedToolSelection(thread));
   }
   private refreshContext(): void {
     const diagnosticMark = Diagnostics.begin();
