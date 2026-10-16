@@ -747,7 +747,7 @@ export struct ChatPanel {
         ForEach(this.thread.attachments, (item: Attachment) => {
           Stack({ alignContent: Alignment.TopEnd }) {
             if (item.mime === 'image/jpeg') {
-              Image('file://' + Attachments.path(item)).width(64).height(64).objectFit(ImageFit.Cover)
+              Image('file://' + Attachments.path(item)).width(64).height(64).objectFit(ImageFit.Contain)
                 .borderRadius(Radius.md).backgroundColor($r('app.color.surface_variant'))
                 .accessibilityText(item.name)
                 .onClick(() => { this.previewPath = Attachments.path(item); this.previewing = true; })
