@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
-const studio = process.env.DEVECO_STUDIO_HOME || 'D:/DevEco Studio';
+const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio');
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 const root = path.resolve(__dirname, '../entry/src');
 const cache = new Map();
@@ -236,9 +236,10 @@ function fixture(source = answer) {
     ui.validateUiState(document,result);assert.equal(result.each,30);assert.equal(JSON.parse(result.scene).shapes.length,4);
   });
   test('the session prompt includes the UI instructions',()=>{
-    const {sessionInstructions}=load(path.join(root,'main/ets/services/SessionContext'));
+    const {sessionPromptSections}=load(path.join(root,'main/ets/services/SessionContext'));
+    const {renderPrompt}=load(path.join(root,'main/ets/model/ContextProjection'));
     const {INTERACTIVE_UI_INSTRUCTIONS}=load(path.join(root,'main/ets/model/InteractiveUiInstructions'));
-    const data=seed();const instructions=sessionInstructions(data.config,data.extensions);
+    const data=seed();const instructions=renderPrompt(sessionPromptSections(data.config,data.extensions));
     assert.ok(instructions.includes(INTERACTIVE_UI_INSTRUCTIONS));
   });
   test('Web content validates before rendering and cannot bind code to mutable state',()=>{
@@ -249,7 +250,7 @@ function fixture(source = answer) {
     rs.at(-2).node.data=JSON.stringify({...spec,library:'remote'});assert.throws(()=>new ui.UiCompiler().update(jsonl(rs),true));
   });
   await asyncTest('Web state saves use the existing durable isolated lane without model calls',async()=>{
-    const example=JSON.parse(fs.readFileSync(path.join(root,'main/resources/rawfile/interactive-web/example.json'),'utf8')).content;
+    const example=JSON.parse(fs.readFileSync(path.join(__dirname,'fixtures/interactive-web/example.json'),'utf8')).content;
     const f=fixture(example);
     await f.session.initialize(); const initial=ui.parseUiSurface(example,'0').initial;
     const saved=await f.session.interactUi('thread-1','a','0:0',{...initial,speed:1.2});

@@ -2,7 +2,8 @@ import { describe, expect, it } from '@ohos/hypium';
 import { copyModelConfig, defaultConfig, emptyData, parseAppData } from '../main/ets/model/Conversation';
 import { defaultExtensions, parseSkill } from '../main/ets/model/Skills';
 import { DEFAULT_SYSTEM_PROMPT, teamWorkerInstructions } from '../main/ets/model/SystemPrompt';
-import { sessionInstructions } from '../main/ets/services/SessionContext';
+import { sessionPromptSections } from '../main/ets/services/SessionContext';
+import { renderPrompt } from '../main/ets/model/ContextProjection';
 
 export default function systemPromptTests(): void {
   describe('SystemPrompt', () => {
@@ -48,7 +49,7 @@ export default function systemPromptTests(): void {
       config.userDocument = '# Preferences\nUse short answers.';
       const extensions = defaultExtensions();
       extensions.skills = [parseSkill('---\nname: report\ndescription: Summarize reports\ndisable-model-invocation: true\n---\nRead the source.')];
-      const base = sessionInstructions(config, extensions);
+      const base = renderPrompt(sessionPromptSections(config, extensions));
       expect(base.startsWith('<identity>\n' + DEFAULT_SYSTEM_PROMPT + '\n</identity>')).assertTrue();
       expect(base.includes('<runtime>')).assertTrue();
       expect(base.includes('My custom assistant')).assertFalse();
@@ -56,11 +57,11 @@ export default function systemPromptTests(): void {
       expect(base.includes(JSON.stringify(config.userDocument))).assertTrue();
       expect(base.includes('Summarize reports')).assertFalse();
       expect(base.includes('<team_coordinator>')).assertFalse();
-      const selected = sessionInstructions(config, extensions, 'report');
+      const selected = renderPrompt(sessionPromptSections(config, extensions, 'report'));
       expect(selected.includes('Summarize reports')).assertTrue();
       expect(config.systemPrompt).assertEqual('My custom assistant');
       config.userDocument = ' \n ';
-      expect(sessionInstructions(config, extensions).includes('# USER.md')).assertFalse();
+      expect(renderPrompt(sessionPromptSections(config, extensions)).includes('# USER.md')).assertFalse();
     });
     it('requiresChatHandoffOnlyForWorkersWithTheCompletionTool', 0, () => {
       expect(teamWorkerInstructions(true).includes('team_complete_task')).assertTrue();

@@ -89,9 +89,13 @@ try {
                 if ($entry.FullName -match '(?i)(\.(p12|p7b|pem|key|keystore)$|(^|/)(\.env|build-profile\.json5)$)') { throw "Unexpected sensitive file in HAP: $($entry.FullName)" }
             }
             if (-not ($hapArchive.Entries | Where-Object { $_.FullName.EndsWith('/THIRD_PARTY_NOTICES.txt') })) { throw 'Third-party notices missing from HAP.' }
-            # 0.1.2 adds native execution. Check both cloud-phone and emulator
-            # libraries and preserve matching unstripped binaries for crash diagnosis.
-            foreach ($abi in @('arm64-v8a', 'x86_64')) {
+            $packagedAbis = @($hapArchive.Entries | Where-Object { $_.FullName -match '^libs/[^/]+/[^/]+\.so$' } |
+                ForEach-Object { $_.FullName.Split('/')[1] } | Sort-Object -Unique)
+            if ($packagedAbis.Count -ne 1 -or $packagedAbis[0] -ne 'arm64-v8a') {
+                throw 'Expected an arm64-only release package.'
+            }
+            # Preserve matching unstripped binaries for the architectures actually shipped.
+            foreach ($abi in $packagedAbis) {
                 $library = "libs/$abi/libtinybot_sandbox.so"
                 $nativeEntry = $hapArchive.GetEntry($library)
                 if ($null -eq $nativeEntry) { throw "Native sandbox missing from HAP: $library" }
@@ -123,7 +127,8 @@ try {
     }
 
     Copy-Item -LiteralPath $symbolsPath -Destination (Join-Path $OutputDirectory 'symbols/app-symbol.zip')
-    foreach ($abi in @('arm64-v8a', 'x86_64')) {
+    foreach ($library in $nativeLibraries) {
+        $abi = $library.abi
         $nativeDestination = Join-Path $OutputDirectory "symbols/native/$abi"
         New-Item -ItemType Directory -Path $nativeDestination -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $projectRoot "entry/build/default/intermediates/cmake/default/obj/$abi/libtinybot_sandbox.so") -Destination $nativeDestination

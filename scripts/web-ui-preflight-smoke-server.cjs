@@ -1,14 +1,15 @@
 // Deterministic device integration: large QuickJS invocation, broken Three.js, then repair.
 // Run locally and forward emulator port 18767; select this provider only in a test chat.
-const http=require('node:http'),fs=require('node:fs');
-const good=JSON.parse(fs.readFileSync('entry/src/main/resources/rawfile/interactive-web/example.json','utf8')).content;
+const http=require('node:http'),fs=require('node:fs'),path=require('node:path');
+const fixtures=path.join(__dirname,'fixtures/interactive-web');
+const good=JSON.parse(fs.readFileSync(path.join(fixtures,'example.json'),'utf8')).content;
 const bad=good.split('\n').map(line=>{
  if(!line.startsWith('{'))return line;
  const record=JSON.parse(line);
  if(record.node?.kind==='web'){const spec=JSON.parse(record.node.data);spec.js='new THREE.OrbitControls();\n'+spec.js;record.node.data=JSON.stringify(spec);}
  return JSON.stringify(record);
 }).join('\n');
-const fallback=JSON.parse(fs.readFileSync('entry/src/main/resources/rawfile/interactive-web/example-2d.json','utf8')).content;
+const fallback=JSON.parse(fs.readFileSync(path.join(fixtures,'example-2d.json'),'utf8')).content;
 const report={largeInvocation:false,constructorDiagnostic:false,capabilityDiagnostic:false,repaired:false};
 const code='/*'+'x'.repeat(128*1024)+'*/return {length:input.length, payload:"x".repeat(65536)};';
 const call={index:0,id:'large_code',type:'function',function:{name:'execute_code',arguments:JSON.stringify({code,input:JSON.stringify('中'.repeat(40000))})}};

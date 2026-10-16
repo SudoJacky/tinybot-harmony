@@ -29,7 +29,7 @@ function native(file, name, methods, context) {
   return context.exports.Probe;
 }
 const { uiParts, UiCompiler, copyUiValues, validateUiState } = from('model/InteractiveUi');
-const { stepDisplayContent, latestPreviewIds, publishedPreviews } = from('model/PublishedPreview');
+const { stepDisplayContent, latestPreviewIds, stepPreviews } = from('model/PublishedPreview');
 const { ThreadViewModel } = from('viewmodel/SessionViewModels');
 const { MessageListSource } = from('viewmodel/MessageListSource');
 const { UiPresentation } = from('model/UiPresentation');
@@ -47,7 +47,7 @@ const messages = [
 ];
 const latest = latestPreviewIds(messages);
 assert.deepEqual(Array.from(latest), ['b:v2', 'a:other']);
-const previews = publishedPreviews('a', messages[0].steps, latest);
+const previews = stepPreviews('a', messages[0].steps[0], 0, latest);
 assert.equal(previews[0].superseded, true); assert.equal(previews[1].superseded, false);
 assert.deepEqual(Array.from(previews, p => p.surfaceOffset), [1, 3]);
 const originalParts = uiParts(stepDisplayContent(messages[0].steps[0]), false).filter(p => p.kind === 'ui');
@@ -57,8 +57,8 @@ for (const preview of previews) {
 }
 const revisions = Array.from({ length: 40 }, (_, i) => ({ id: 'r' + i, steps: [{ content: '', tools: [publication('call' + i, 'art.svg', surface('Revision'))] }] }));
 assert.equal(latestPreviewIds(revisions).length, 1);
-assert.equal(revisions.flatMap(m => publishedPreviews(m.id, m.steps, latestPreviewIds(revisions))).filter(p => !p.superseded).length, 1);
-assert.equal(publishedPreviews('c', messages[2].steps, latest).length, 0);
+assert.equal(revisions.flatMap(m => stepPreviews(m.id, m.steps[0], 0, latestPreviewIds(revisions))).filter(p => !p.superseded).length, 1);
+assert.equal(stepPreviews('c', messages[2].steps[0], 0, latest).length, 0);
 console.log('PASS repeated and failed publications, distinct artifacts, immutable history and original multi-surface state keys');
 
 const data = { id: 'thread', title: 'Test', updatedAt: 0, messages: messages.map(m => ({ ...m, role: 'assistant', content: '', status: 'complete', error: '' })) };

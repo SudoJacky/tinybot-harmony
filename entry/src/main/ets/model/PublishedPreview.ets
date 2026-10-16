@@ -37,14 +37,6 @@ export function latestPreviewIds(messages: PreviewMessage[]): string[] {
   return Array.from(latest.values());
 }
 
-export function publishedPreviews(messageId: string, steps: AgentStep[], latest: string[]): PublishedPreview[] {
-  const result: PublishedPreview[] = [];
-  for (let index = 0; index < steps.length; index++) {
-    result.push(...stepPreviews(messageId, steps[index], index, latest));
-  }
-  return result;
-}
-
 export function stepPreviews(messageId: string, step: AgentStep, index: number, latest: string[]): PublishedPreview[] {
   const result: PublishedPreview[] = [];
   let offset = uiParts(step.content, false).filter((part) => part.kind === 'ui').length;

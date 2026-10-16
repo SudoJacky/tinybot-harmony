@@ -2,7 +2,7 @@ import { describe, expect, it } from '@ohos/hypium';
 import { AgentTurn, ModelMessage, ModelTurn, ToolDefinition } from '../main/ets/model/Agent';
 import { MessageData, ThreadData, emptyData, parseAppData } from '../main/ets/model/Conversation';
 import { CompactionPlan, contextSettings, contextInputBudget, estimateContextTokens, estimateTextTokens,
-  prepareCompaction, threadHistory } from '../main/ets/model/ConversationContext';
+  planContextCompaction } from '../main/ets/model/ConversationContext';
 import { matchingThreads, threadTitle } from '../main/ets/model/SessionManagement';
 import { compactContext } from '../main/ets/services/ContextCompactor';
 import { prepareSessionContext } from '../main/ets/services/SessionContext';
@@ -10,7 +10,7 @@ import { Cancellation } from '../main/ets/services/Cancellation';
 import { ModelRequestOptions, ModelSession } from '../main/ets/services/providers/Provider';
 import { runAgentLoop, AgentTools } from '../main/ets/services/AgentLoop';
 import { ContextTools } from '../main/ets/services/ContextTools';
-import { threadEntries } from '../main/ets/model/ContextProjection';
+import { threadEntries, projectedHistory } from '../main/ets/model/ContextProjection';
 
 function message(id: string, role: string, content: string): MessageData {
   return { id: id, role: role, content: content, status: 'complete', error: '' };
@@ -89,7 +89,7 @@ export default function contextTests(): void {
       expect(restored.messages[1].steps?.[0].tools[0].output).assertEqual('receipt0');
       expect(restored.compaction?.fileOperations?.modifiedFiles.includes('file0.txt')).assertTrue();
       expect(restored.compaction?.fileOperations?.modifiedFiles.length).assertEqual(restored.compaction?.firstKeptStep);
-      expect(threadHistory(restored, 'rules').some((item) => item.toolCallId === 'call3')).assertTrue();
+      expect(projectedHistory(threadEntries(restored), restored.compaction).some((item) => item.toolCallId === 'call3')).assertTrue();
     });
     it('projectsLargeResultsWithoutDiscardingTheirReadableOriginals', 0, async () => {
       const thread = fixture(); const full = '中'.repeat(20000) + 'END';
@@ -107,7 +107,7 @@ export default function contextTests(): void {
       const thread = fixture();
       for (const item of thread.messages) { item.content = 'x'.repeat(18000); }
       const config = emptyData().config; config.contextWindow = 32768;
-      const before = estimateContextTokens(threadHistory(thread, ''));
+      const before = estimateContextTokens(projectedHistory(threadEntries(thread), thread.compaction));
       expect(before > contextInputBudget(32768) && before < 32768 - 4096).assertTrue();
       const model = new SummaryModel(); let saved = 0;
       const history = await prepareSessionContext(thread, model, new Cancellation(), false, config, '', [],
@@ -131,7 +131,7 @@ export default function contextTests(): void {
       const thread = fixture();
       thread.messages.push(message('u3', 'user', 'current prompt'));
       thread.messages.push({ id: 'a3', role: 'assistant', content: 'partial', status: 'generating', error: '' });
-      const history = threadHistory(thread, 'system');
+      const history = projectedHistory(threadEntries(thread), thread.compaction);
       expect(history[history.length - 1].content).assertEqual('current prompt');
       expect(history.some((item: ModelMessage) => item.content === 'partial')).assertFalse();
     });
@@ -141,7 +141,8 @@ export default function contextTests(): void {
         call: { id: 'read1', type: 'function', function: { name: 'read_file', arguments: '{"path":"a.txt"}' } },
         status: 'complete', output: '{"content":"saved"}'
       }] }];
-      const plan = prepareCompaction(thread, contextSettings(emptyData().config));
+      const plan = planContextCompaction(threadEntries(thread), thread.compaction, contextSettings(emptyData().config).keepRecent,
+        estimateContextTokens(projectedHistory(threadEntries(thread), thread.compaction)));
       expect(plan?.firstKeptMessageId).assertEqual('u2');
       thread.compaction = { summary: 'old context', firstKeptMessageId: 'u2', tokensBefore: 100, createdAt: 1 };
       const data = emptyData();
@@ -149,12 +150,11 @@ export default function contextTests(): void {
       data.activeThreadId = thread.id;
       const restored = parseAppData(JSON.stringify(data)).threads[0];
       expect(restored.messages.length).assertEqual(4);
-      const history = threadHistory(restored, 'system');
-      expect(history[0].content).assertEqual('system');
-      expect(history[1].role).assertEqual('user');
-      expect(history[2].content).assertEqual('recent question');
-      expect(history[3].toolCalls?.[0].id).assertEqual('read1');
-      expect(history[4].toolCallId).assertEqual('read1');
+      const history = projectedHistory(threadEntries(restored), restored.compaction);
+      expect(history[0].role).assertEqual('user');
+      expect(history[1].content).assertEqual('recent question');
+      expect(history[2].toolCalls?.[0].id).assertEqual('read1');
+      expect(history[3].toolCallId).assertEqual('read1');
       expect(history.some((item: ModelMessage) => item.content === 'old question')).assertFalse();
     });
     it('repeatedCompactionStartsAtPreviousBoundaryAndKeepsNewPrompt', 0, () => {
@@ -163,7 +163,8 @@ export default function contextTests(): void {
       thread.messages.push(message('u3', 'user', 'third'), message('a3', 'assistant', 'answer'));
       thread.messages.push(message('u4', 'user', 'current'));
       thread.messages.push({ id: 'a4', role: 'assistant', content: '', status: 'generating', error: '' });
-      const plan = prepareCompaction(thread, contextSettings(emptyData().config));
+      const plan = planContextCompaction(threadEntries(thread), thread.compaction, contextSettings(emptyData().config).keepRecent,
+        estimateContextTokens(projectedHistory(threadEntries(thread), thread.compaction)));
       expect(plan?.firstKeptMessageId).assertEqual('u3');
       expect(plan?.previousSummary).assertEqual('previous');
       expect(plan?.messages[0].content).assertEqual('recent question');
@@ -176,7 +177,8 @@ export default function contextTests(): void {
         call: { id: 'write1', type: 'function', function: { name: 'write_file', arguments: '{"path":"written.txt","content":"ok"}' } },
         status: 'complete', output: '{"written":true}'
       }] }];
-      const plan = prepareCompaction(thread, contextSettings(emptyData().config));
+      const plan = planContextCompaction(threadEntries(thread), thread.compaction, contextSettings(emptyData().config).keepRecent,
+        estimateContextTokens(projectedHistory(threadEntries(thread), thread.compaction)));
       expect(plan?.messages.some((item: ModelMessage) => item.toolCallId === 'write1')).assertTrue();
       expect(plan?.messages[plan.messages.length - 1].content.includes('不要假设文件操作已经回滚')).assertTrue();
     });
@@ -226,7 +228,9 @@ export default function contextTests(): void {
       expect(result.firstKeptMessageId).assertEqual('u2');
     });
     it('failsAndCancelsWithoutMutatingTheInputCheckpoint', 0, async () => {
-      const plan = prepareCompaction(fixture(), contextSettings(emptyData().config)) as CompactionPlan;
+      const thread = fixture();
+      const plan = planContextCompaction(threadEntries(thread), thread.compaction, contextSettings(emptyData().config).keepRecent,
+        estimateContextTokens(projectedHistory(threadEntries(thread), thread.compaction))) as CompactionPlan;
       const before = JSON.stringify(plan);
       const model = new SummaryModel();
       model.failure = 'upstream failed';
@@ -240,7 +244,9 @@ export default function contextTests(): void {
       expect(JSON.stringify(plan)).assertEqual(before);
     });
     it('rejectsToolCallsInSummaryResponses', 0, async () => {
-      const plan = prepareCompaction(fixture(), contextSettings(emptyData().config)) as CompactionPlan;
+      const thread = fixture();
+      const plan = planContextCompaction(threadEntries(thread), thread.compaction, contextSettings(emptyData().config).keepRecent,
+        estimateContextTokens(projectedHistory(threadEntries(thread), thread.compaction))) as CompactionPlan;
       const model = new SummaryModel();
       model.tools = true;
       await rejectsAsync(async () => { await compactContext(plan, contextSettings(emptyData().config), model,

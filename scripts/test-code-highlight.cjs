@@ -9,8 +9,7 @@ function load(name) {
   }).outputText, { exports }, { filename: file });
   return exports;
 }
-const { highlightCode, codePrefix } = load('CodeHighlight');
-const { markdownBlocks } = load('Markdown');
+const { highlightCode } = load('CodeHighlight');
 const { StreamReveal } = load('StreamReveal');
 const has = (spans, text, kind) => assert.ok(spans.some(s => s.text.includes(text) && s.kind === 'syntax-' + kind), `${text}: ${kind}`);
 const cases = [
@@ -35,7 +34,6 @@ for (const [language, source, expected] of cases) {
   for (let end = 0; end <= source.length; end++) {
     const prefix = source.slice(0, end);
     assert.equal(highlightCode(prefix, language).map(s => s.text).join(''), prefix);
-    assert.equal(codePrefix(spans, end).map(s => s.text).join(''), prefix);
   }
 }
 for (const language of ['', 'text', 'unknown']) {
@@ -48,12 +46,7 @@ const comment = highlightCode('/* const fake = "hi";\nreturn 12; */', 'ts');
 assert.equal(comment.length, 1); has(comment, 'return 12', 'comment');
 const string = highlightCode('"// not a comment, const 12"', 'ts');
 assert.equal(string.length, 1); has(string, '// not a comment', 'string');
-const source = 'const x = `你好🙂\n' + Array.from({ length: 24 }, (_, i) => `line ${i}`).join('\n') + '`;';
-const block = markdownBlocks('```ts\n' + source + '\n```')[0];
-const spans = highlightCode(block.text, block.rows[0][0]);
-const preview = source.split('\n').slice(0, 18).join('\n');
-assert.equal(codePrefix(spans, preview.length).map(s => s.text).join(''), preview);
-assert.equal(codePrefix(spans, source.length).map(s => s.text).join(''), source);
+// Preview and expansion run through emitted MarkdownChunkView in test-markdown-performance.cjs.
 const reveal = new StreamReveal();
 reveal.update('code', 'const x = ', 1000, false);
 reveal.update('code', 'const x = "hi"', 1100, true);
@@ -74,4 +67,4 @@ for (const theme of ['base', 'dark']) {
     assert.ok(ratio >= 4.5, `${theme} ${c.name} contrast ${ratio}`);
   }
 }
-console.log('PASS code highlighting: languages, exact text, all streaming prefixes, multiline tokens, preview, reveal, theme contrast');
+console.log('PASS code highlighting: languages, exact text, all streaming prefixes, multiline tokens, reveal, theme contrast');

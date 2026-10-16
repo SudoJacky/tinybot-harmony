@@ -30,10 +30,6 @@ interface FileArguments {
 
 interface TurnBaseline { content: string; created: boolean; }
 
-export function replaceUnique(content: string, oldText: string, newText: string): string {
-  return applyTextEdits(content, [{ oldText: oldText, newText: newText }]);
-}
-
 export function workspaceRelativePath(path: string, allowRoot: boolean): string {
   if (allowRoot && path === '.') {
     return '';

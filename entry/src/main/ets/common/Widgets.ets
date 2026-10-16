@@ -447,26 +447,6 @@ export struct ThinkingLine {
   }
 }
 
-// Soft highlight that keeps sweeping across its parent while some work is running.
-@Component
-export struct SweepBand {
-  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
-  @State private travel: number = -100;
-
-  build() {
-    Stack({ alignContent: Alignment.Start }) {
-      Column().width('45%').height('100%')
-        .linearGradient({ angle: 90, colors: [[Color.Transparent, 0], [this.appearance.accentTint, 0.5], [Color.Transparent, 1]] })
-        .translate({ x: this.travel + '%' })
-    }
-    .width('100%').height('100%').clip(true).hitTestBehavior(HitTestMode.Transparent)
-    .transition(TransitionEffect.OPACITY.animation({ duration: Motion.medium, curve: Motion.standard }))
-    .onAppear(() => {
-      this.getUIContext().animateTo({ duration: 1800, curve: Curve.EaseInOut, iterations: -1 }, () => { this.travel = 325; });
-    })
-  }
-}
-
 // Rounded-square symbol used as the leading visual of cards and rows.
 @Component
 export struct IconBadge {

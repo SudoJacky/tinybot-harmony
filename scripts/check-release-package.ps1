@@ -28,6 +28,7 @@ try {
     $legacyNames = @('background.png', 'foreground.png', 'layered_image.json', 'startIcon.png', 'team_employee_portraits.png')
     foreach ($entry in $package.Entries) {
         if ($entry.FullName -match '(?i)source.?maps?\.(map|json)$' -or
+            $entry.FullName -match '^resources/rawfile/interactive-web/example(-2d)?\.json$' -or
             ($entry.FullName.StartsWith('resources/') -and $legacyNames -contains $entry.Name)) {
             throw "Unexpected debug or legacy content: $($entry.FullName)"
         }

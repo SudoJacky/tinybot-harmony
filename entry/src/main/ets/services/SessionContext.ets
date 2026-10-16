@@ -5,12 +5,8 @@ import { ExtensionSettings, skillCatalog } from '../model/Skills';
 import { Cancellation } from './Cancellation';
 import { ModelSession } from './providers/Provider';
 import { DEFAULT_SYSTEM_PROMPT, runtimeInstructions, userDocumentContext } from '../model/SystemPrompt';
-import { PromptSection, renderPrompt, threadEntries } from '../model/ContextProjection';
+import { PromptSection, threadEntries } from '../model/ContextProjection';
 import { ContextSource, RequestContext } from './RequestContext';
-
-export function sessionInstructions(config: ModelConfig, extensions: ExtensionSettings, selected: string = ''): string {
-  return renderPrompt(sessionPromptSections(config, extensions, selected));
-}
 
 export function sessionPromptSections(config: ModelConfig, extensions: ExtensionSettings, selected: string = ''): PromptSection[] {
   return [{ name: 'identity', content: DEFAULT_SYSTEM_PROMPT },
