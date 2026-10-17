@@ -46,7 +46,13 @@ export class AgentStepViewModel implements AgentStep {
     this.content = data.content; this.reasoningContent = data.reasoningContent || ''; this.steering = data.steering;
     this.tools = data.tools.map((tool: ToolExecution, index: number) => {
       const existing = this.tools[index];
-      if (existing && existing.call.id === tool.call.id) { existing.previewScreenshot = tool.previewScreenshot; existing.previewContent = tool.previewContent; existing.status = tool.status; existing.output = tool.output; existing.turnFileChange = tool.turnFileChange; existing.fileDiff = tool.fileDiff; existing.websiteIcon = tool.websiteIcon; existing.children = tool.children?.slice() || []; return existing; }
+      if (existing && existing.call.id === tool.call.id) {
+        existing.output = tool.output; existing.previewScreenshot = tool.previewScreenshot; existing.previewContent = tool.previewContent;
+        existing.turnFileChange = tool.turnFileChange; existing.fileDiff = tool.fileDiff; existing.websiteIcon = tool.websiteIcon; existing.children = tool.children?.slice() || [];
+        // Status observers may render synchronously: publish the complete receipt first.
+        existing.status = tool.status;
+        return existing;
+      }
       return new ToolExecutionViewModel(tool);
     });
   }

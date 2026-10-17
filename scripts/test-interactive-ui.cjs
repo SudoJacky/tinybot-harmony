@@ -226,7 +226,7 @@ function fixture(source = answer) {
     f.provider.respond=async()=>({content:'```tinybot-ui\n'+jsonl(records.slice(0,-1))+'```',toolCalls:[]});
     f.session.setDraft('new surface');await f.session.send();
     const message=f.session.snapshot().threads[0].messages.at(-1);
-    assert.equal(message.status,'failed');assert.match(message.error,/incomplete surface/);assert.equal(f.executions(),0);
+    assert.equal(message.status,'failed');assert.match(message.error,/UNSUPPORTED_PREVIEW_FORMAT/);assert.equal(f.executions(),0);
   });
   test('deterministic device fixture computes chart and diagram without a model',()=>{
     const fixture=require('./interactive-ui-fixture.cjs');ui.validateUiAnswer(fixture.content);

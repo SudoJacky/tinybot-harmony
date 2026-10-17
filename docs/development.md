@@ -37,7 +37,7 @@ devecocli run --device <设备名称或序列号>
 
 ## 应用图标
 
-HarmonyOS 图标源文件为 `assets/app-icon.svg`，背景铺满正方形，不预裁圆角、不加外边距或外框；内部 Logo 沿用原有比例。应用与桌面入口引用 `tinybot_layered_icon`，由系统合成前景、背景并裁切外形。启动窗口、关于页和交付素材使用同源合成 PNG。资源均为 1024×1024；只修改本项目源文件，不覆盖桌面版图标。
+HarmonyOS 图标源文件为 `assets/app-icon.svg`，背景铺满正方形，不预裁圆角、不加外边距或外框；内部 Logo 沿用原有比例。应用与桌面入口引用 `tinybot_layered_icon`，由系统合成前景、背景并裁切外形。启动窗口、关于页和交付素材使用同源合成 PNG；模块的 `dark/media/tinybot_icon.png` 按深色启动背景与正文色生成，由系统资源匹配选择。资源均为 1024×1024；只修改本项目源文件，不覆盖桌面版图标。
 
 修改源文件后，在项目根目录重新导出（渲染工具仅安装在忽略的缓存目录）：
 
@@ -70,11 +70,15 @@ Release 混淆规则必须保留 `globalThis` 全局名，避免 Pen Kit 的 amb
 
 构建后运行 `node scripts/test-project-tree.cjs`，用真实会话服务与视图模型验证侧栏项目分组、普通聊天、空项目、同名项目、置顶顺序、搜索展开、归档、独立分页及新建会话归属；分支线和折叠动效在真机验证。
 
+`node scripts/test-history-drawer.cjs` 验证编译后的侧栏关闭动画、拖动和中断恢复。关闭动画完成后停止渲染列表内容，保留搜索和分页状态，避免隐藏侧栏随聊天流式输出持续重建。真机性能复现使用 `Generate an SVG of a pelican riding a bicycle.`，分别检查等待模型、工具执行和预览发布期间的主线程延迟与 CPU Profile。
+
 `node scripts/test-custom-tools.cjs` 验证完整版/自定义选择、基础文件工具、执行权限、编排与团队继承、会话恢复和记忆开关。构建后运行 `node scripts/test-custom-tools-renderer.cjs`，验证可选工具行的实际编译回调、开关计数、批量操作及忙碌/归档/保存错误时的禁用状态；两项已纳入 `test.ps1`。
 
 `node scripts/test-thread-list-renderer.cjs` 使用编译后的回调与稳定分组节点，验证会话改名、删除、归档、恢复、置顶/取消置顶的排序与菜单、新建及项目改名后的即时刷新和计数，也验证从搜索、归档页面创建项目后显示新分组；只执行读取了变化状态的更新回调，防止分组闭包保留旧数组。
 
 `node scripts/test-i18n-native.cjs` 验证语言偏好与持久化；`node scripts/test-chat-disclosures.cjs` 验证流式更新、过程重开、消息隔离和历史加载时的展开状态。`node scripts/test-tool-details.cjs` 验证分类回执、失败状态与无损分页；构建后运行 `node scripts/test-team-renderer.cjs`，检查 DevEco 实际生成的 Team、工具详情及编排子调用更新回调。`node scripts/test-message-actions-renderer.cjs` 验证改写、重新生成、分支按钮在会话结束后恢复可用，再次忙碌或保存出错时禁用；复制保持可用。
+
+构建后运行 `node scripts/test-onboarding.cjs`，验证首次使用判断、完成记录持久化、旧草稿保护、重复点击与保存失败重试，以及五幕引导的唤醒中断、拖动边界和回弹、后台/覆盖页暂停、卸载清理、真实服务编辑路由与可编辑首条草稿。模拟器中从“设置 → 使用帮助 → 首次使用指引”重新体验，检查能力卡片的点按与左右滑动、模型配置页取消后返回、键盘出现时底部操作，以及完成后仅准备独立草稿、跳过不改动原聊天。画板模块只在确认设备支持系统手写、用户点击入口后动态导入；不支持时明确提示，不加载 Pen Kit 或创建原生控制器。`lazy import` 仍会遍历共享模块依赖，无法避免模拟器缺少 Pen Kit 时的启动失败。
 
 `node scripts/test-answer-speech-native.cjs` 验证回答朗读的分段、取消、后台释放、系统失败和快捷入口分发；构建后运行 `node scripts/test-launch-actions-renderer.cjs`，用实际生成的页面方法验证快捷入口保存草稿、创建独立会话、忙碌拒绝及听写单次触发。
 

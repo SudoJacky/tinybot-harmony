@@ -25,7 +25,7 @@
 | [工具执行与权限](tools-and-permissions.md) | 文件协议、修改校验、回执、错误、MCP 和权限边界 |
 | [系统提示词](system-prompt.md) | 固定指令、用户偏好、Skills 与团队上下文 |
 | [代码沙箱与工具编排](code-sandbox.md) | execute_code、orchestrate、预算与隔离 |
-| [交互回答](interactive-ui.md) | 原生交互协议、Web 场景及状态恢复 |
+| [交互预览](interactive-ui.md) | JS/HTML/SVG 发布、Three.js 与独立浏览器的区别 |
 | [推理强度](reasoning-effort.md) | 模型推理设置与输入框交互 |
 | [滑动操作行](swipe-rows.md) | 手势与行操作 |
 | [分段选择动效](segmented-motion.md) | 选择器动效 |

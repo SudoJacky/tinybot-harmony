@@ -19,8 +19,8 @@ import { common } from '@kit.AbilityKit';
 import { Attachment, PromptTemplate } from '../model/Productivity';
 import { Attachments } from '../services/Attachments';
 import { image } from '@kit.ImageKit';
-import { DrawingDraft } from '../model/DrawingDraft';
-import { DrawingBoard } from './DrawingBoard';
+import { DrawingBoardOptions, DrawingDraft } from '../model/DrawingDraft';
+import { deviceInfo } from '@kit.BasicServicesKit';
 import { SkillData } from '../model/Skills';
 import { SkillQuery, matchingSkills, skillDisplayName, skillDraft, skillQuery } from '../model/SkillCompletion';
 import { builtinSkillInfo } from '../model/BuiltinSkills';
@@ -83,6 +83,8 @@ export struct ChatPanel {
   @State private showDrawing: boolean = false;
   @State private drawingDraft: DrawingDraft = new DrawingDraft();
   private drawingThreadId: string = '';
+  private drawingOpening: boolean = false;
+  private drawingBuilder?: WrappedBuilder<[DrawingBoardOptions]>;
   @State private speech: SpeechInput = new SpeechInput();
   @State private voiceMode: boolean = false;
   @State private speechHolding: boolean = false;
@@ -414,10 +416,22 @@ export struct ChatPanel {
     this.getUIContext().getFocusController().clearFocus();
     this.memoryMessageId = messageId; this.memoryThreadId = this.thread.id; this.showMemoryDraft = true;
   }
-  private openDrawing(): void {
-    if (!this.canAttach() || this.thread.attachments.length >= 4) { return; }
-    this.getUIContext().getFocusController().clearFocus();
-    this.drawingThreadId = this.thread.id; this.drawingDraft = new DrawingDraft(); this.showDrawing = true;
+  private async openDrawing(): Promise<void> {
+    if (this.drawingOpening || this.showDrawing || !this.canAttach() || this.thread.attachments.length >= 4) { return; }
+    if (deviceInfo.productModel === 'emulator' || !canIUse('SystemCapability.Stylus.Handwrite')) {
+      this.app.error = t('此设备不支持系统手写画板。'); return;
+    }
+    const threadId = this.thread.id;
+    this.drawingOpening = true;
+    try {
+      // Pen Kit is a system HSP absent from emulators. Keep it outside the startup module graph.
+      const board = await import('./DrawingBoard');
+      if (!this.canAttach() || this.thread.id !== threadId || this.thread.attachments.length >= 4) { return; }
+      this.drawingBuilder = board.drawingBoardBuilder;
+      this.getUIContext().getFocusController().clearFocus();
+      this.drawingThreadId = threadId; this.drawingDraft = new DrawingDraft(); this.showDrawing = true;
+    } catch (error) { this.app.error = (error as Error).message; }
+    finally { this.drawingOpening = false; }
   }
   private closeDrawing(): void {
     if (this.drawingDraft.saving) { return; }
@@ -441,8 +455,10 @@ export struct ChatPanel {
   }
   @Builder
   drawingSheet() {
-    DrawingBoard({ draft: this.drawingDraft, onClose: () => this.closeDrawing(),
-      onAdd: (pixel: image.PixelMap) => this.addDrawing(pixel) })
+    if (this.drawingBuilder) {
+      this.drawingBuilder.builder({ draft: this.drawingDraft, onClose: () => this.closeDrawing(),
+        onAdd: (pixel: image.PixelMap) => this.addDrawing(pixel) })
+    }
   }
   @Builder
   chatCover() {

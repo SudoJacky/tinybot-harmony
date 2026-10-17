@@ -1,9 +1,9 @@
 import { ToolFailure } from '../model/ToolFailure';
-import { validateUiAnswer, uiParts } from '../model/InteractiveUi';
+import { uiParts } from '../model/InteractiveUi';
 import { t } from '../model/I18n';
 import { AgentStep, AgentTurn, MAX_AGENT_STEPS, ModelMessage, ToolCall, ToolDefinition, ToolExecution, ToolExecutionMode,
   interruptTools, stepMessages, toolError, validateToolCalls } from '../model/Agent';
-import { Cancellation, RunCancelledError } from './Cancellation';
+import { Cancellation } from './Cancellation';
 import { ModelSession } from './providers/Provider';
 import { contextInputBudget, estimateContextTokens } from '../model/ConversationContext';
 import { PendingInput, validatePendingInput } from '../model/PendingInput';
@@ -171,20 +171,10 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
       const hasUi = uiParts(response.content, false).some((part) => part.kind === 'ui');
       if (hasUi) {
         observer.event({ type: 'model_end', step: round });
-        let phase = 'INVALID_FIELD';
-        try {
-          validateUiAnswer(response.content);
-          phase = 'WEB_STARTUP_FAILED';
-          await context.validateAnswer?.(response.content, cancellation);
-          cancellation.check();
-          step.uiValidation = '';
-        } catch (error) {
-          cancellation.check();
-          if (error instanceof RunCancelledError) { throw error; }
-          const diagnostic = error instanceof UiDiagnosticError ? error : new UiDiagnosticError(phase, (error as Error).message);
-          step.uiValidation = context.recoverUi ? await context.recoverUi(response.content, diagnostic as Error, cancellation) : uiFailureReport(diagnostic as Error);
-          validationFailures++;
-        }
+        cancellation.check();
+        step.uiValidation = uiFailureReport(new UiDiagnosticError('UNSUPPORTED_PREVIEW_FORMAT',
+          'Inline tinybot-ui / JSONL answers are no longer supported. Write a .js, .html or .svg file and call publish_preview; use library="three" for Three.js.') as Error);
+        validationFailures++;
       } else { step.uiValidation = ''; }
       turn.content = turn.steps.filter((item) => !item.requestError && !item.uiValidation).map((item) => item.content).filter((content) => content.length > 0).join('\n\n');
       observer.event({ type: 'model_end', step: round });

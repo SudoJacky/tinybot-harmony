@@ -63,6 +63,50 @@ assert.throws(()=>parseWebUiMessage('{"type":"resize","height":"200"}'));
   assert.equal(await frame.locator('svg').getAttribute('viewBox'),'0 0 100 100');
   assert.equal(preview.html,previewSource);
   console.log('PASS file publication runs real browser preflight and renders the exact SVG snapshot with empty state');
+  async function publishScript(source,args={}) {
+   const call={id:'js-preview',type:'function',function:{name:'publish_preview',arguments:JSON.stringify({path:'scene.js',...args})}};
+   const receipt={call,status:'running',output:''};
+   const tool=new PreviewTools({read:async()=>({content:source,version:'v1'})},async content=>{
+    await mount({},JSON.parse(parseUiSurface(content,'0').nodes[0].data),'',true);
+    const messages=await page.evaluate(()=>window.messages);
+    const failure=messages.find(message=>message.type==='error');if(failure)throw Error(failure.message);
+   });
+   await tool.execute(call,new Cancellation(),{execution:receipt});
+   return JSON.parse(parseUiSurface(receipt.previewContent,'0').nodes[0].data);
+  }
+  const literal='</script> "quotes"\nUnicode: 中文';
+  const plainJs=await publishScript('await Promise.resolve(); document.body.textContent = '+JSON.stringify(literal)+';');
+  frame=await mount({},plainJs);
+  assert.equal(await frame.locator('body').textContent(),literal);
+  assert.equal(await frame.evaluate(()=>typeof THREE),'undefined');
+  await page.setViewportSize({width:400,height:360});
+  const sceneJs=[
+   'const renderer = new THREE.WebGLRenderer({antialias:true, preserveDrawingBuffer:true});',
+   'document.body.append(renderer.domElement);',
+   'const scene = new THREE.Scene(); scene.background = new THREE.Color(0x123456);',
+   'const camera = new THREE.PerspectiveCamera(50,1,0.1,100); camera.position.set(2,2,3);',
+   'const controls = new OrbitControls(camera,renderer.domElement);',
+   'const mesh = new THREE.Mesh(new THREE.BoxGeometry(),new THREE.MeshNormalMaterial()); scene.add(mesh);',
+   'new ResizeObserver(()=>{const {width,height}=document.body.getBoundingClientRect();renderer.setSize(width,height);camera.aspect=width/height;camera.updateProjectionMatrix();}).observe(document.body);',
+   'window.framesRendered=0; tinybot.animate(time=>{mesh.rotation.y=time*0.4;controls.update();renderer.render(scene,camera);window.framesRendered++;});'
+  ].join('\n');
+  const threeJs=await publishScript(sceneJs,{library:'three',height:360});
+  frame=await mount({},threeJs);
+  await frame.waitForFunction(()=>window.framesRendered>2);
+  assert.equal(await frame.evaluate(()=>typeof OrbitControls),'function');
+  assert.equal(await frame.evaluate(()=>document.querySelector('canvas').width),400);
+  assert.equal(await frame.evaluate(()=>document.querySelector('canvas').height),360);
+  const pixels=await frame.evaluate(()=>{const canvas=document.querySelector('canvas'),gl=canvas.getContext('webgl2'),pixel=new Uint8Array(4);gl.readPixels(200,180,1,1,gl.RGBA,gl.UNSIGNED_BYTE,pixel);return Array.from(pixel);});
+  assert.equal(pixels[3],255);assert.notDeepEqual(pixels.slice(0,3),[18,52,86],'center pixel must contain rendered geometry');
+  await page.setViewportSize({width:280,height:420});
+  await frame.waitForFunction(()=>document.querySelector('canvas').width===280&&document.querySelector('canvas').height===420);
+  await page.evaluate(()=>nativePort.postMessage(JSON.stringify({type:'state',values:{},active:false})));
+  await page.waitForTimeout(80);const pausedFrames=await frame.evaluate(()=>window.framesRendered);
+  await page.waitForTimeout(80);assert.equal(await frame.evaluate(()=>window.framesRendered),pausedFrames);
+  await page.evaluate(()=>nativePort.postMessage(JSON.stringify({type:'state',values:{},active:true})));
+  await frame.waitForFunction(count=>window.framesRendered>count,pausedFrames);
+  await page.setViewportSize({width:400,height:600});
+  console.log('PASS published ordinary JS/await/literal source and Three.js geometry render, resize and pause/resume in real browser');
   const landscape={...preview,html:previewSource.replace('0 0 100 100','0 0 100 50')};
   frame=await mount({},landscape);
   await page.waitForFunction(()=>document.querySelector('iframe').clientHeight===200);

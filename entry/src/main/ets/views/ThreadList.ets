@@ -158,6 +158,7 @@ struct ThreadRow {
 // Project tree; presentation grouping never changes a thread's stored project membership.
 @Component
 export struct ThreadList {
+  @Prop active: boolean = true;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   onSelected: () => void = () => {};
@@ -327,6 +328,13 @@ export struct ThreadList {
   }
 
   build() {
+    Column() {
+      if (this.active) { this.listContent() }
+    }.width('100%').height('100%')
+  }
+
+  @Builder
+  listContent() {
     Column({ space: Space.md }) {
       Row({ space: Space.sm }) {
         Image($r('app.media.tinybot')).width(28).height(28)

@@ -14,7 +14,7 @@ function emitted(name) {
   assert.ok(fs.statSync(file).mtimeMs >= fs.statSync(path.join(source, 'views', name + '.ets')).mtimeMs, 'Rebuild ' + name);
   return fs.readFileSync(file, 'utf8');
 }
-let serial = 0, current, dialog, thumbnail;
+let serial = 0, current, dialog, thumbnail, supported = true, controllers = 0;
 const nodes = new Map();
 class Property { constructor(value) { this.value = value; } get() { return this.value; } set(value) { this.value = value; } }
 class ViewPU {
@@ -30,7 +30,7 @@ class ViewPU {
 }
 class Child extends ViewPU { constructor(parent, params, storage, id) { super(parent, storage, id); Object.assign(this, params); } }
 class Controller {
-  constructor() { this.range = { left: 0, top: 0, right: 0, bottom: 0 }; }
+  constructor() { controllers++; this.range = { left: 0, top: 0, right: 0, bottom: 0 }; }
   onLoad(callback) { this.loaded = callback; }
   load(path) { this.path = path; }
   getContentRange() { return this.range; }
@@ -44,7 +44,8 @@ const ui = kind => new Proxy({}, { get: (_, name) => value => {
   }
 } });
 const globals = { exports: {}, ViewPU, SynchedPropertyNesedObjectPU: Property, ObservedPropertySimplePU: Property,
-  canIUse: () => true, TextAlign: {}, FontWeight: {}, SafeAreaType: {}, SafeAreaEdge: {},
+  wrapBuilder: builder => ({ builder }),
+  canIUse: () => supported, TextAlign: {}, FontWeight: {}, SafeAreaType: {}, SafeAreaEdge: {},
   NavPathStack: class {}, BarStyle: {}, Color: {}, NavigationTitleMode: {}, NavigationMode: {},
   require: id => {
     if (id.includes('HandwritePaint')) return { HandwriteComponent: Child, HandwriteController: Controller, PenType: { BALLPOINT_PEN: 2 }, HiddenToolType: { MOSAIC: 7, LASER: 3145728 } };
@@ -87,6 +88,17 @@ const node = id => [...nodes.values()].find(value => value.id === id);
   assert.equal(board.error, 'native export failed'); assert.equal(draft.saving, false);
   console.log('PASS native Pen Kit initialization, content range, blank validation, ink-only export, errors, pixel release and duplicate-save protection');
 
+  supported = false;
+  const beforeControllers = controllers;
+  const unsupported = new globals.exports.DrawingBoard(undefined, { draft: new DrawingDraft() });
+  unsupported.aboutToAppear(); unsupported.initialRender();
+  assert.equal(controllers, beforeControllers, 'Unsupported devices must not instantiate the unavailable Pen Kit controller');
+  assert.equal(unsupported.controller, undefined); assert.equal(unsupported.draft.dirty(), false);
+  assert.equal([...unsupported.children.values()].some(value => value.handwriteController), false);
+  await unsupported.add(); assert.equal(unsupported.draft.saving, false);
+  supported = true;
+  console.log('PASS unsupported drawing screen avoids native initialization and keeps export disabled');
+
   // Exercise the actual composer integration, including the async disk-write boundary.
   const tree = ts.createSourceFile('ChatPanel.ts', emitted('ChatPanel'), ts.ScriptTarget.Latest, true);
   const component = tree.statements.find(value => ts.isClassDeclaration(value) && value.name.text === 'ChatPanel');
@@ -119,7 +131,9 @@ const node = id => [...nodes.values()].find(value => value.id === id);
   console.log('PASS compiled drawing and preview overlays survive closed-sheet bindings and preserve controlled dismissal');
   const names = ['canAttach', 'openDrawing', 'closeDrawing', 'addDrawing'];
   const methods = names.map(name => component.members.find(value => value.name?.getText(tree) === name).getText(tree)).join('\n');
-  const scope = { exports: {}, DrawingDraft, Attachments: {}, t: value => value };
+  let boardLoads = 0;
+  const scope = { exports: {}, DrawingDraft, Attachments: {}, canIUse: () => supported, deviceInfo: { productModel: 'phone' },
+    require: id => { assert.ok(id.includes('DrawingBoard')); boardLoads++; return { drawingBoardBuilder: { builder() {} } }; }, t: value => value };
   vm.runInNewContext(compile(`class Composer { ${methods} } exports.Composer = Composer;`), scope);
   const composer = new scope.exports.Composer();
   let additions = 0, writes = 0, finishWrite;
@@ -128,13 +142,19 @@ const node = id => [...nodes.values()].find(value => value.id === id);
     speechActive: () => false, getUIContext: () => ({ getFocusController: () => ({ clearFocus() {} }), showAlertDialog: value => { dialog = value; } }),
     app: { active: { id: 'chat' }, busy: false, saveError: '', error: '', setAttachments: async items => { additions++; composer.thread.attachments = items; return true; } } });
   scope.Attachments.saveDrawing = async () => { writes++; return image; };
-  composer.openDrawing(); assert.equal(composer.showDrawing, true); composer.closeDrawing(); assert.equal(composer.showDrawing, false);
-  composer.openDrawing(); composer.drawingDraft.hasContent = () => true;
+  supported = false; await composer.openDrawing(); assert.equal(boardLoads, 0);
+  assert.match(composer.app.error, /此设备不支持系统手写画板/); assert.ok(!composer.showDrawing);
+  supported = true; scope.deviceInfo.productModel = 'emulator'; await composer.openDrawing();
+  assert.equal(boardLoads, 0, 'Emulators may report the syscap while lacking the system Pen Kit HSP');
+  scope.deviceInfo.productModel = 'phone';
+  supported = true; composer.app.error = '';
+  await composer.openDrawing(); assert.equal(composer.showDrawing, true); composer.closeDrawing(); assert.equal(composer.showDrawing, false);
+  await composer.openDrawing(); composer.drawingDraft.hasContent = () => true;
   composer.closeDrawing(); dialog.primaryButton.action(); assert.equal(composer.showDrawing, true);
   composer.drawingDraft.saving = true; composer.closeDrawing(); assert.equal(composer.showDrawing, true); composer.drawingDraft.saving = false;
   await composer.addDrawing(pixel); assert.equal(composer.showDrawing, false); assert.equal(additions, 1);
   assert.equal(composer.thread.attachments[0], image); assert.equal(composer.importing, false);
-  composer.openDrawing(); composer.app.setAttachments = async () => false; composer.app.error = 'persist failed';
+  await composer.openDrawing(); composer.app.setAttachments = async () => false; composer.app.error = 'persist failed';
   await assert.rejects(composer.addDrawing(pixel), /persist failed/); assert.equal(composer.showDrawing, true); assert.equal(composer.importing, false);
   composer.app.active.id = 'other'; const before = writes;
   await assert.rejects(composer.addDrawing(pixel), /对话已切换/); assert.equal(writes, before);
@@ -143,6 +163,16 @@ const node = id => [...nodes.values()].find(value => value.id === id);
   await assert.rejects(switched, /对话已切换/); assert.equal(additions, 1); assert.equal(composer.importing, false);
   composer.app.active.id = 'chat'; composer.thread.attachments = [image, image, image, image];
   await assert.rejects(composer.addDrawing(pixel), /当前无法添加附件/);
-  composer.showDrawing = false; composer.openDrawing(); assert.equal(composer.showDrawing, false);
+  composer.showDrawing = false; await composer.openDrawing(); assert.equal(composer.showDrawing, false);
+  composer.thread.attachments = [];
+  let finishLoad, pendingLoads = 0;
+  scope.require = () => { pendingLoads++; return new Promise(resolve => { finishLoad = resolve; }); };
+  const opening = composer.openDrawing(); await Promise.resolve();
+  await composer.openDrawing(); assert.equal(pendingLoads, 1, 'Repeated taps must not load multiple drawing screens');
+  composer.thread.id = 'switched-during-load'; finishLoad({ drawingBoardBuilder: { builder() {} } }); await opening;
+  assert.equal(composer.showDrawing, false, 'A delayed module must not open over a different chat');
+  assert.equal(composer.drawingOpening, false);
+  composer.thread.id = 'chat'; scope.require = () => { throw Error('drawing module failed'); };
+  await composer.openDrawing(); assert.equal(composer.app.error, 'drawing module failed'); assert.equal(composer.drawingOpening, false);
   console.log('PASS composer attaches without sending, confirms discard, reports persistence failure and isolates switched/full conversations');
 })().catch(error => { console.error(error); process.exitCode = 1; });

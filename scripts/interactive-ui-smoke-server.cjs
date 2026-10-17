@@ -1,7 +1,8 @@
-// Local OpenAI-compatible smoke provider. Run: node scripts/interactive-ui-smoke-server.cjs
+// Local OpenAI-compatible smoke provider. Use --native for controls or --bicycle for a procedural 3D exploded view.
 // Forward emulator localhost:18766 to this host port using hdc rport before connecting.
 const http = require('node:http');
-const { content } = require('./interactive-ui-fixture.cjs');
+const { content } = require(process.argv.includes('--bicycle') ? './interactive-bicycle-fixture.cjs' : process.argv.includes('--native') ? './interactive-native-fixture.cjs' : './interactive-ui-fixture.cjs');
+let requests = 0;
 const server = http.createServer(async (req, res) => {
   if (req.url === '/v1/models') { res.writeHead(200, {'Content-Type':'application/json'}); res.end(JSON.stringify({data:[{id:'interactive-ui-smoke'}]})); return; }
   if (req.url !== '/v1/chat/completions' || req.method !== 'POST') { res.writeHead(404); res.end(); return; }
@@ -12,7 +13,8 @@ const server = http.createServer(async (req, res) => {
     const latest=body.messages.filter(m=>m.role==='user').at(-1)?.content || '';
     const system=body.messages.find(m=>m.role==='system')?.content || '';
     const auxiliary=!(body.tools || []).length;
-    const response=auxiliary && system.includes('记忆') ? '[]' : auxiliary && system.includes('标题') ? 'Interactive UI smoke test' : latest.includes('用户点击了交互界面') ? '已收到你在界面中提交的当前输入。此回执来自本地固定测试服务。' : content;
+    console.log(JSON.stringify({ request: ++requests, auxiliary }));
+    const response=auxiliary ? (/title|标题/i.test(system) ? 'Interactive UI smoke test' : '[]') : latest.includes('用户点击了交互界面') ? '已收到你在界面中提交的当前输入。此回执来自本地固定测试服务。' : content;
     res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-cache'});
     for(let index=0;index<response.length;index+=96) {
       if(res.destroyed) return;

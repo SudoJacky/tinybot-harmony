@@ -41,6 +41,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Skill completion and composer callback tests f
 if ($LASTEXITCODE -ne 0) { throw 'Appearance preference and palette tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-settings-performance.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Settings responsiveness and persistence tests failed. Build the app first.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-history-drawer.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'History drawer activity and animation lifecycle tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-harness-features.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Search, delivery, references and runtime reliability tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-preview-publication.cjs')
@@ -69,6 +71,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Custom tool selection and inherited execution 
 if ($LASTEXITCODE -ne 0) { throw 'Custom tool selection UI callback tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-help-demo.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Help demo animation lifecycle tests failed. Build the app first.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-onboarding.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'First-use onboarding persistence, native mascot and navigation tests failed. Build the app first.' }
 $env:DEVECO_SDK_HOME = Join-Path $StudioPath 'sdk'
 $env:JAVA_HOME = Join-Path $StudioPath 'jbr'
 $startedAt = Get-Date

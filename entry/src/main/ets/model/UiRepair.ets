@@ -16,12 +16,14 @@ export function locateUiError(error: Error, location: UiErrorLocation): UiDiagno
   return diagnostic;
 }
 export interface PreviewRetry { tool: string; arguments: PreviewRetryArguments; }
-export interface PreviewRetryArguments { path: string; title?: string; }
+export interface PreviewRetryArguments { path: string; title?: string; library?: string; height?: number; }
 export interface RepairGuidance { instruction: string; retry?: PreviewRetry; }
 // Select by structured failure category, never by matching localized exception text.
-export function repairGuidance(code: string, path?: string, title?: string): RepairGuidance {
+export function repairGuidance(code: string, path?: string, title?: string, library?: string, height?: number): RepairGuidance {
   let instruction: string;
-  if (code === 'JSON_SYNTAX') {
+  if (code === 'UNSUPPORTED_PREVIEW_FORMAT') {
+    return { instruction: 'Do not emit tinybot-ui or publish JSONL. Write ordinary JavaScript to a .js file or self-contained HTML/SVG, then call publish_preview. For Three.js set library="three". Do not repeat successful tool side effects.' };
+  } else if (code === 'JSON_SYNTAX') {
     instruction = 'Inspect the reported syntax location. Distinguish the outer JSONL record from the JSON string in node.data. ' +
       'Use JSON.stringify when serializing nested objects. An empty state object is valid.';
   } else if (code === 'INVALID_FIELD') {
@@ -45,7 +47,7 @@ export function repairGuidance(code: string, path?: string, title?: string): Rep
     'When a source path is provided, use read_file to inspect that file around the reported location, including paged columns for long lines. ' +
     'Then use edit_file with a uniquely matching oldText for a targeted correction. Preserve unrelated content. ' +
     'Retry publication after editing; do not reproduce the full preview JSON in your response.';
-  return { instruction: instruction, retry: path ? { tool: 'publish_preview', arguments: { path: path, title: title } } : undefined };
+  return { instruction: instruction, retry: path ? { tool: 'publish_preview', arguments: { path: path, title: title, library: library, height: height } } : undefined };
 }
 
 export interface PreviewRepairSource { surface: string; path: string; version: string; retry: PreviewRetry; }
@@ -58,6 +60,10 @@ function boundedDiagnostic(text: string, limit: number): string {
 // Keep the persisted report bounded without truncating JSON or fabricating source locations.
 export function uiFailureReport(error: Error, sources: PreviewRepairSource[] = [], storageError?: string): string {
   const diagnostic = error instanceof UiDiagnosticError ? error : new UiDiagnosticError('INVALID_FIELD', error.message);
+  if (diagnostic.code === 'UNSUPPORTED_PREVIEW_FORMAT') {
+    return JSON.stringify({ error: boundedDiagnostic(diagnostic.message, 1800), category: diagnostic.code,
+      repair: repairGuidance(diagnostic.code), publication: 'No preview was published. The legacy format is not migrated.' });
+  }
   return JSON.stringify({ error: boundedDiagnostic(diagnostic.message, 1800), category: diagnostic.code,
     location: diagnostic.location, locationScope: 'jsonl_source', excerpt: diagnostic.excerpt, sources: sources,
     storageError: storageError === undefined ? undefined : boundedDiagnostic(storageError, 500), repair: repairGuidance(diagnostic.code),

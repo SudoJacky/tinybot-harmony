@@ -62,6 +62,7 @@ const globals = { exports: {}, ViewPU, SynchedPropertySimpleOneWayPU: Property, 
   $r: () => '', setTimeout, clearTimeout,
   require: id => {
     if (id.includes('InteractiveUi&')) return model(path.join(root, 'model/InteractiveUi'));
+    if (id.includes('Diagnostics&')) return { Diagnostics: { log: (...args) => errors.push(args), acceptsLog: () => false, recording: false, begin: () => 0 } };
     if (id.includes('I18n&')) return { t: text => text };
     if (id.includes('Theme&')) return { Space: {}, Radius: {}, Btn: {} };
     if (id.includes('AppearanceStyle&')) return { AppearanceStyle: class { constructor() { this.fontFamily = ''; } } };
@@ -90,13 +91,22 @@ const records = [
 ];
 const wire = records.map(r => JSON.stringify(r)).join('\n') + '\n';
 const answer = 'Before the interface.\n```tinybot-ui\n' + wire + '```\nAfter the interface, the complete explanation.';
-function mounted(content, streaming) { const view = new InteractiveAnswer(null, { content, streaming, available: true }); view.aboutToAppear(); view.initialRender(); return view; }
-function update(view, content, streaming) { view.updateStateVars({ content, streaming, available: true }); view.flush(); }
+function mounted(content, streaming) { const view = new InteractiveAnswer(null, { content, streaming, available: true, allowSurface: true }); view.aboutToAppear(); view.initialRender(); return view; }
+function update(view, content, streaming) { view.updateStateVars({ content, streaming, available: true, allowSurface: true }); view.flush(); }
 let failed = 0;
 function test(name, fn) { try { fn(); console.log('PASS ' + name); } catch (error) { failed++; console.error('FAIL ' + name + '\n' + error.stack); } }
 test('plain streaming response reaches full final text without remount', () => {
   const view = mounted('B', true); update(view, 'Before the complete explanation.', false);
   assert.equal([...view.childViews.values()][0].content, 'Before the complete explanation.');
+});
+test('legacy inline surfaces show an explicit error without creating a renderer, including during streaming', () => {
+  for (const streaming of [false, true]) {
+    const view = new InteractiveAnswer(null, { content: answer, streaming, available: true, allowSurface: false });
+    view.aboutToAppear(); view.initialRender();
+    assert.equal([...view.childViews.values()].filter(child => child instanceof UiSurface).length, 0);
+    assert.ok([...view.uiNodes.values()].some(node => String(node.create).includes('Unsupported preview format')));
+    assert.equal([...view.childViews.values()].filter(child => child instanceof MarkdownView).length, 2);
+  }
 });
 test('mixed Markdown and UI completes at arbitrary chunk boundaries without remount', () => {
   for (const stride of [1, 7, 37, 96]) {
@@ -124,9 +134,9 @@ test('completed history mounts correctly as the differential control', () => {
 });
 test('pending and failed validation withhold a surface; passing releases it', () => {
   for(const validation of ['pending','TypeError: startup failed']){
-    const view=new InteractiveAnswer(null,{content:answer,streaming:false,validation,available:true});view.aboutToAppear();view.initialRender();
+    const view=new InteractiveAnswer(null,{content:answer,streaming:false,validation,available:true,allowSurface:true});view.aboutToAppear();view.initialRender();
     assert.equal([...view.childViews.values()].some(v=>v instanceof UiSurface),false);
-    view.updateStateVars({content:answer,streaming:false,validation:'',available:true});view.flush();
+    view.updateStateVars({content:answer,streaming:false,validation:'',available:true,allowSurface:true});view.flush();
     assert.ok([...view.childViews.values()].some(v=>v instanceof UiSurface));
   }
 });

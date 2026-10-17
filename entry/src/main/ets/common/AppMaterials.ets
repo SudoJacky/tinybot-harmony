@@ -44,7 +44,7 @@ export class AppMaterials {
     return AppMaterials.selectedStyle;
   }
 
-  // Navigation buttons and native Select/Slider/Toggle controls. Other content-area buttons are out of scope.
+  // Navigation, native Select/Slider/Toggle controls, and onboarding action/choice buttons.
   static get control(): uiMaterial.Material {
     if (AppMaterials.effect === 'off') { return uiMaterial.Material.empty; }
     if (!AppMaterials.controlMaterial) {
