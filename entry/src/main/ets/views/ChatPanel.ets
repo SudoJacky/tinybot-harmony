@@ -123,6 +123,7 @@ export struct ChatPanel {
 
   private scroller: Scroller = new Scroller();
   private scrollTimer: number = -1;
+  private scrollStopTimer: number = -1;
   // Messages already on screen when a thread opens render in place; only later ones animate in.
   private baselineThread: string = '';
   private baseline: Set<string> = new Set<string>();
@@ -167,10 +168,24 @@ export struct ChatPanel {
   }
 
   aboutToDisappear(): void {
+    this.setScrollActivity(false);
     this.viewport.dispose();
     this.endSpeech();
     this.reading.stop();
     clearTimeout(this.scrollTimer);
+  }
+
+  private setScrollActivity(scrolling: boolean): void {
+    clearTimeout(this.scrollStopTimer); this.scrollStopTimer = -1;
+    if (AppStorage.get<boolean>('tinybot.chat.scrolling') === scrolling) { return; }
+    AppStorage.setOrCreate('tinybot.chat.scrolling', scrolling);
+    if (Diagnostics.recording) { Diagnostics.event('scroll.activity', { enabled: scrolling ? 1 : 0 }); }
+  }
+
+  private stopScrollActivity(): void {
+    clearTimeout(this.scrollStopTimer);
+    // A brief pause between successive gestures must not cold-start a preview.
+    this.scrollStopTimer = setTimeout(() => { this.setScrollActivity(false); }, 200);
   }
 
   private voiceOverlayVisible(): boolean { return this.speechHolding || this.speechActive(); }
@@ -581,6 +596,8 @@ export struct ChatPanel {
       .contentEndOffset(48)
       .scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring)
       .cachedCount(1).maintainVisibleContentPosition(true)
+      .onScrollStart(() => this.setScrollActivity(true))
+      .onScrollStop(() => this.stopScrollActivity())
       .onTouch((event: TouchEvent) => { if (event.type === TouchType.Down) { this.followOutput = false; } })
       .onReachEnd(() => { if (!this.inspectingOutput) { this.followOutput = true; } })
       .onDidScroll(() => { this.atBottom = this.scroller.isAtEnd(); this.updateHeaderProgress(); })
