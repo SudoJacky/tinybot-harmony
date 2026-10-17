@@ -98,14 +98,14 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
     if (current !== undefined && ['threads','projects','active'].includes(key)) readers.add(current);
     return Reflect.get(target, key, receiver);
   } });
-  const sidebar = Object.assign(new globals.exports.Sidebar(), { app: observedApp, query: '', archived: false, visibleCounts: {}, collapsedProjects: [] });
+  const sidebar = Object.assign(new globals.exports.Sidebar(), { app: observedApp, appearance: { fontFamily: 'system' }, query: '', archived: false, visibleCounts: {}, collapsedProjects: [] });
   sidebar.selecting = false; sidebar.selectedIds = [];
   sidebar.mount(); const groupIds = [...groups];
   const countId = [...texts].find(([, value]) => value === '3')[0];
   const rowListId = [...lists].find(([, ids]) => ids.includes('one'))[0];
   const rows = () => Array.from(lists.get(rowListId));
   assert.deepEqual(rows(), ['one','two','three']);
-  const row = Object.assign(new globals.exports.RowProbe(), { app: observedApp, thread: new Proxy(app.threads.find(t => t.id === 'three'), {
+  const row = Object.assign(new globals.exports.RowProbe(), { app: observedApp, appearance: { fontFamily: 'system' }, thread: new Proxy(app.threads.find(t => t.id === 'three'), {
     get(target, key, receiver) { if (current !== undefined) readers.add(current); return Reflect.get(target, key, receiver); }
   }) });
   row.mount(); const titleId = [...texts].find(([, value]) => value === 'Test')[0];
@@ -160,7 +160,9 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
     set(value) { this.value = value; }
     reset(value) { this.value = value; }
   }
-  const widgets = { ...globals, exports: {}, SynchedPropertySimpleOneWayPU: Property, SynchedPropertyObjectOneWayPU: Property, ObservedObject: { GetRawObject: v => v },
+  const widgets = { ...globals, exports: {}, AppearanceStyle: class {},
+    ViewPU: class extends ViewPU { createStorageProp(_key, value) { return new Property(value); } },
+    SynchedPropertySimpleOneWayPU: Property, SynchedPropertyObjectOneWayPU: Property, ObservedObject: { GetRawObject: v => v },
     Button: new Proxy({}, { get: (_, key) => key === 'accessibilityText' ? value => { accessibilityLabel = value; } : () => {} }) };
   vm.runInNewContext(ts.transpileModule(icon.getText(widgetTree), { compilerOptions: {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021
@@ -175,14 +177,14 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
   batchData.threads = Array.from({ length: 25 }, (_, i) => ({ ...batchData.threads[0], id: 'batch-' + i, title: i < 2 ? 'Match' : 'Other', draft: '' }));
   batchData.activeThreadId = 'batch-0';
   const batch = new Fixture(batchData), batchApp = new ChatViewModel(); await batchApp.initialize(batch.session);
-  const selection = Object.assign(new globals.exports.Sidebar(), { app: batchApp, query: '', archived: false,
+  const selection = Object.assign(new globals.exports.Sidebar(), { app: batchApp, appearance: { fontFamily: 'system' }, query: '', archived: false,
     selecting: true, selectedIds: [], visibleCounts: {}, collapsedProjects: [''] });
   selection.selectAll();
   assert.equal(selection.selectedIds.length, 25, 'Select all includes collapsed groups and unloaded rows');
   selection.selectAll(); assert.equal(selection.selectedIds.length, 0);
   selection.query = 'Match'; selection.selectAll();
   assert.deepEqual(Array.from(selection.selectedIds), ['batch-0', 'batch-1'], 'Select all respects search');
-  const selectionRow = Object.assign(new globals.exports.RowProbe(), { app: batchApp, thread: batchApp.threads[0], selecting: true,
+  const selectionRow = Object.assign(new globals.exports.RowProbe(), { app: batchApp, appearance: { fontFamily: 'system' }, thread: batchApp.threads[0], selecting: true,
     onSelectionChanged: value => selection.selectThread('batch-0', value) });
   Object.defineProperty(selectionRow, 'selected', { get() { if (current !== undefined) readers.add(current); return selection.selectedIds.includes('batch-0'); } });
   selectionRow.mountSelection(); assert.equal(checkboxSelected, true);

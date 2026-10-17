@@ -52,6 +52,8 @@ struct Index {
   @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
   @State private app: ChatViewModel = new ChatViewModel();
   @State private drawerOpen: boolean = false;
+  @State private drawerContentActive: boolean = false;
+  private drawerAnimation: number = 0;
   @State private chatVisible: boolean = true;
   @State private headerProgress: number = 0;
   @State private drawerReveal: number = 0;
@@ -188,7 +190,13 @@ struct Index {
     this.getUIContext().getFocusController().clearFocus();
     this.drawerDragging = false;
     this.drawerOpen = open;
-    this.getUIContext().animateTo({ duration: Motion.drawer, curve: Motion.drawerCurve }, () => {
+    if (open) { this.drawerContentActive = true; }
+    const animation = ++this.drawerAnimation;
+    this.getUIContext().animateTo({ duration: Motion.drawer, curve: Motion.drawerCurve, onFinish: () => {
+      if (animation === this.drawerAnimation && !this.drawerOpen && !this.drawerDragging) {
+        this.drawerContentActive = false;
+      }
+    } }, () => {
       this.drawerReveal = open ? 1 : 0;
     });
   }
@@ -198,6 +206,8 @@ struct Index {
       event.offsetX <= Math.abs(event.offsetY) * 1.5))) { return; }
     this.getUIContext().getFocusController().clearFocus();
     this.drawerDragStart = this.drawerReveal;
+    this.drawerAnimation++;
+    this.drawerContentActive = true;
     this.drawerDragging = true;
     this.updateDrawerDrag(event);
   }
@@ -473,7 +483,7 @@ struct Index {
         Column().width('100%').height('100%').backgroundColor($r('app.color.page_background'))
           .borderRadius({ topRight: 20, bottomRight: 20 })
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-        ThreadList({ app: this.app, onSelected: () => this.setDrawer(false), onFiles: () => { this.setDrawer(false); this.openFiles(); }, onSettings: () => {
+        ThreadList({ app: this.app, active: this.drawerContentActive, onSelected: () => this.setDrawer(false), onFiles: () => { this.setDrawer(false); this.openFiles(); }, onSettings: () => {
           this.setDrawer(false);
           this.openSettings();
         } })

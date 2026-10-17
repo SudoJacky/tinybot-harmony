@@ -22,7 +22,8 @@ export struct WebUiView {
   @Prop snapshotMode: boolean = false;
   @Prop retainedHeight: number = 0;
   onHeight: (height: number) => void = () => {};
-  @StorageLink('tinybot.foreground') @Watch('visibilityChanged') private foreground: boolean = true;
+  @StorageLink('tinybot.foreground') @Watch('foregroundChanged') private foreground: boolean = true;
+  @StorageProp('tinybot.chat.scrolling') @Watch('visibilityChanged') private scrolling: boolean = false;
   onValidation: (error: string) => void = () => {};
   onSave: (values: UiValues) => Promise<UiValues> = async () => { throw new Error('Web UI save handler missing'); };
   @State private error: string = '';
@@ -35,6 +36,7 @@ export struct WebUiView {
   private spec?: WebUiSpec;
   private mounted: boolean = false;
   private attached: boolean = false;
+  private nativeActive: boolean | undefined = undefined;
   private initialPageLoaded: boolean = false;
   private visible: boolean = false;
   private generation: number = 0;
@@ -42,6 +44,7 @@ export struct WebUiView {
   private releaseTimer: number = -1;
   private saving: boolean = false;
   private hostNavigationPending: boolean = false;
+  private reloadPending: boolean = false;
   private snapshotRequested: boolean = false;
   private instanceId: number = ++webViewSequence;
   aboutToAppear(): void {
@@ -55,6 +58,8 @@ export struct WebUiView {
   aboutToDisappear(): void { this.mounted = false; clearTimeout(this.releaseTimer); this.releaseWeb(); this.snapshot?.release(); }
   private releaseWeb(): void {
     this.attached = false; this.initialPageLoaded = false; this.hostNavigationPending = false;
+    this.nativeActive = undefined;
+    this.reloadPending = false;
     this.generation++; this.closePorts(); this.ready = false;
     if (this.renderWeb) {
       activeWebViews--;
@@ -64,20 +69,35 @@ export struct WebUiView {
     this.renderWeb = false;
   }
   private visibilityChanged(): void {
-    clearTimeout(this.releaseTimer); this.releaseTimer = -1;
     if (!this.mounted) { return; }
     if (this.preflight || (this.visible && this.foreground)) {
-      if (!this.renderWeb && !this.error) {
+      clearTimeout(this.releaseTimer); this.releaseTimer = -1;
+      if ((this.preflight || !this.scrolling) && !this.renderWeb && !this.error) {
         this.controller = new webview.WebviewController(); this.renderWeb = true;
         activeWebViews++;
         if (Diagnostics.recording) { Diagnostics.event('web.activate', { active: activeWebViews, generation: this.generation, preflight: this.preflight ? 1 : 0 }, this.instanceId); }
         if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'activate', { instanceId: this.instanceId, generation: this.generation, active: activeWebViews, preflight: this.preflight }); };
       }
-    } else if (this.renderWeb && !this.saving) {
-      // Keep brief scroll reversals warm, then remove Web itself rather than only stopping our RAF wrapper.
-      this.releaseTimer = setTimeout(() => { this.releaseTimer = -1; if (this.mounted && (!this.visible || !this.foreground)) { this.releaseWeb(); } }, 600);
+      if ((this.preflight || !this.scrolling) && this.reloadPending) { this.restart(); }
+    } else if (this.renderWeb && !this.saving && this.releaseTimer === -1) {
+      // Pause immediately, but keep the instance through quick scroll reversals.
+      this.releaseTimer = setTimeout(() => { this.releaseTimer = -1; if (this.mounted && (!this.visible || !this.foreground)) { this.releaseWeb(); } }, this.foreground ? 5000 : 600);
     }
     this.sync();
+    this.syncActivity();
+  }
+  private foregroundChanged(): void {
+    clearTimeout(this.releaseTimer); this.releaseTimer = -1;
+    this.visibilityChanged();
+  }
+  private syncActivity(): void {
+    if (!this.renderWeb || !this.attached) { return; }
+    const active = this.preflight || (this.visible && this.foreground && !this.scrolling);
+    if (this.nativeActive === active) { return; }
+    try {
+      if (active) { this.controller.onActive(); } else { this.controller.onInactive(); }
+      this.nativeActive = active;
+    } catch (error) { this.report(error as Error); }
   }
   private closePorts(): void {
     clearTimeout(this.timer);
@@ -91,6 +111,8 @@ export struct WebUiView {
   }
   private async restart(): Promise<void> {
     if (!this.mounted || !this.attached || !this.initialPageLoaded) { return; }
+    if (!this.preflight && (this.scrolling || !this.visible || !this.foreground)) { this.reloadPending = true; return; }
+    this.reloadPending = false;
     const generation = ++this.generation;
     this.closePorts(); this.ready = false; this.error = ''; this.snapshotRequested = false;
     const oldSnapshot = this.snapshot; this.snapshot = undefined; await oldSnapshot?.release();
@@ -99,6 +121,7 @@ export struct WebUiView {
       if (!webUiAutoHeight(this.spec)) { this.heightValue = this.spec.height; }
       const assets = await webUiAssets(this.getUIContext().getHostContext() as common.UIAbilityContext, this.spec.library === 'three');
       if (!this.mounted || generation !== this.generation) { return; }
+      if (!this.preflight && (this.scrolling || !this.visible || !this.foreground)) { this.reloadPending = true; return; }
       const host = webUiHost(assets[0], assets[1]);
       if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'load_start', { instanceId: this.instanceId, chars: host.length }); };
       this.hostNavigationPending = true;
@@ -126,12 +149,12 @@ export struct WebUiView {
       if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'port_connected', { instanceId: this.instanceId }); };
       // loadData may use an opaque data: origin; transfer only to the verified top-level host.
       this.controller.postMessage('tinybot-web-port', [this.ports[1]], '*');
-      this.ports[0].postMessageEvent(JSON.stringify({ type: 'init', spec: this.spec, autoHeight: webUiAutoHeight(this.spec), values: this.values, active: this.preflight || (this.interactive && this.visible && this.foreground), preflight: this.preflight, snapshotMode: this.snapshotMode }));
+      this.ports[0].postMessageEvent(JSON.stringify({ type: 'init', spec: this.spec, autoHeight: webUiAutoHeight(this.spec), values: this.values, active: this.preflight || (this.interactive && this.visible && this.foreground && !this.scrolling), preflight: this.preflight, snapshotMode: this.snapshotMode }));
     } catch (error) { this.report(error as Error); }
   }
   private sync(): void {
     if (!this.mounted || !this.ports.length) { return; }
-    try { this.ports[0].postMessageEvent(JSON.stringify({ type: 'state', values: this.values, active: this.preflight || (this.interactive && this.visible && this.foreground) })); }
+    try { this.ports[0].postMessageEvent(JSON.stringify({ type: 'state', values: this.values, active: this.preflight || (this.interactive && this.visible && this.foreground && !this.scrolling) })); }
     catch (error) { this.report(error as Error); }
   }
   private async receive(data: webview.WebMessage, generation: number): Promise<void> {
@@ -196,7 +219,7 @@ export struct WebUiView {
       Web({ src: 'about:blank', controller: this.controller })
         .width('100%').height(this.heightValue).javaScriptAccess(true).domStorageAccess(false).databaseAccess(false)
         .fileAccess(false).onlineImageAccess(false).blockNetwork(true)
-        .onControllerAttached(() => { if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'attached', { instanceId: this.instanceId }); }; this.attached = true; })
+        .onControllerAttached(() => { if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'attached', { instanceId: this.instanceId }); }; this.attached = true; this.syncActivity(); })
         .onPageEnd((event) => {
           if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'page_end', { instanceId: this.instanceId, scheme: event.url.split(':')[0] }); };
           // Wait for Web's initial about:blank navigation before replacing it with the host.

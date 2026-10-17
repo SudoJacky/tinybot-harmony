@@ -838,25 +838,30 @@ export class SessionService {
       if (result.status !== 'complete') { throw new Error(result.error || 'Conversation title generation stopped'); }
       const title = sanitizeConversationTitle(content);
       if (!title) { throw new Error('Empty conversation title'); }
-      // Settings replace whole snapshots. Commit only between foreground operations,
-      // then revalidate against live data so late results cannot overwrite user changes.
+      // Commit only between foreground operations, then revalidate against live data.
       while (this.status.phase !== 'idle') { await this.waitForIdle(); }
       if (!this.canMutate) { return; }
       const thread = this.data.threads.find((item) => item.id === threadId);
       if (!thread || thread.archived || thread.titleEdited || thread.title !== fallback || thread.messages[0]?.id !== sourceId) { return; }
       this.status.phase = 'saving'; this.publish('state');
       try {
-        const candidate = this.snapshot();
-        const target = candidate.threads.find((item) => item.id === threadId);
-        if (!target) { return; }
+        const target = JSON.parse(JSON.stringify(thread)) as ThreadData;
         target.title = title;
+        // A title changes one thread. Keep unrelated transcripts out of capture and UI projection.
+        const candidate: AppData = { version: this.data.version, config: this.data.config,
+          extensions: this.data.extensions, productivity: this.data.productivity,
+          providerProfiles: this.data.providerProfiles, projects: this.data.projects,
+          activeThreadId: this.data.activeThreadId,
+          threads: this.data.threads.map((item) => item.id === threadId ? target : item) };
         let revision = this.draftRevision;
-        await this.commitSettings(candidate);
+        await this.commitCandidate(candidate, () => { thread.title = title; },
+          [threadId].concat(Array.from(this.dirtyDrafts)));
         // Preserve typing that occurred during the metadata write, using the same save lane.
         while (revision !== this.draftRevision) {
-          revision = this.draftRevision; await this.repository.save(this.data);
+          revision = this.draftRevision; await this.persist(threadId);
         }
-      } finally { this.status.phase = 'idle'; this.publish('snapshot'); }
+        this.publishThread(thread);
+      } finally { this.status.phase = 'idle'; this.publish('state'); }
     } catch (error) {
       // Auxiliary requests never change chat status or abort the foreground runtime.
       this.resources.reportError('title_failed', error as Error);

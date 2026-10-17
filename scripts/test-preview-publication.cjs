@@ -80,6 +80,21 @@ async function main() {
   const view = new AgentStepViewModel({ content: '', tools: [{ ...published.receipt, status: 'running', previewContent: undefined }] });
   const retained = view.tools[0]; view.update(published.turn.steps[0]);
   assert.equal(view.tools[0], retained); assert.equal(stepDisplayContent(view), content);
+  // ArkUI can synchronously render when an observed tool changes to complete.
+  // Exercise that callback during the real projection, before update() returns.
+  const { stepPreviews } = from('model/PublishedPreview');
+  const live = new AgentStepViewModel({ content: '', tools: [{ ...published.receipt,
+    status: 'running', output: '', previewContent: undefined }] });
+  const liveTool = live.tools[0]; let liveStatus = liveTool.status, rendered = 0;
+  Object.defineProperty(liveTool, 'status', { configurable: true,
+    get: () => liveStatus,
+    set: value => { liveStatus = value; if (value === 'complete') {
+      const cards = stepPreviews('live', live, 0, ['live:' + liveTool.call.id]);
+      assert.equal(cards.length, 1); assert.equal(cards[0].path, 'pelican.svg'); rendered++;
+    } }
+  });
+  live.update(published.turn.steps[0]);
+  assert.equal(rendered, 1); assert.equal(live.tools[0], liveTool);
   validateSteps(published.turn.steps);
   console.log('PASS source read once, exact snapshot published and checkpointed, no preview JSON replay, live view retained');
 

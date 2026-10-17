@@ -70,6 +70,8 @@ Release 混淆规则必须保留 `globalThis` 全局名，避免 Pen Kit 的 amb
 
 构建后运行 `node scripts/test-project-tree.cjs`，用真实会话服务与视图模型验证侧栏项目分组、普通聊天、空项目、同名项目、置顶顺序、搜索展开、归档、独立分页及新建会话归属；分支线和折叠动效在真机验证。
 
+`node scripts/test-history-drawer.cjs` 验证编译后的侧栏关闭动画、拖动和中断恢复。关闭动画完成后停止渲染列表内容，保留搜索和分页状态，避免隐藏侧栏随聊天流式输出持续重建。真机性能复现使用 `Generate an SVG of a pelican riding a bicycle.`，分别检查等待模型、工具执行和预览发布期间的主线程延迟与 CPU Profile。
+
 `node scripts/test-custom-tools.cjs` 验证完整版/自定义选择、基础文件工具、执行权限、编排与团队继承、会话恢复和记忆开关。构建后运行 `node scripts/test-custom-tools-renderer.cjs`，验证可选工具行的实际编译回调、开关计数、批量操作及忙碌/归档/保存错误时的禁用状态；两项已纳入 `test.ps1`。
 
 `node scripts/test-thread-list-renderer.cjs` 使用编译后的回调与稳定分组节点，验证会话改名、删除、归档、恢复、置顶/取消置顶的排序与菜单、新建及项目改名后的即时刷新和计数，也验证从搜索、归档页面创建项目后显示新分组；只执行读取了变化状态的更新回调，防止分组闭包保留旧数组。
