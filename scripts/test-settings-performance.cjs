@@ -133,8 +133,40 @@ async function setup() {
   assert.equal((await drafts.f.repository.load()).productivity.options.readOnly, true, 'USER.md saves retain assistant options');
   console.log('PASS preference saves preserve typing during disk IO and USER.md saves retain toggle choices');
 
+  // A detached title request finishes beside the chat UI; it must not copy/reproject all history.
+  const titleData = seed();
+  titleData.threads = data.threads.map(thread => JSON.parse(JSON.stringify(thread)));
+  titleData.activeThreadId = data.activeThreadId;
+  const titleFixture = new Fixture(titleData), titleApp = new ChatViewModel();
+  await titleApp.initialize(titleFixture.session);
+  const titleThread = titleApp.active, titleMessages = titleThread.messages;
+  const titleViews = titleApp.threads, titleGate = gate(), titleCaptures = [];
+  let titleSnapshots = 0, titleUpdates = 0;
+  const titleSnapshot = titleFixture.session.snapshot.bind(titleFixture.session);
+  titleFixture.session.snapshot = () => { titleSnapshots++; return titleSnapshot(); };
+  MessageViewModel.prototype.update = function(data) { titleUpdates++; return update.call(this, data); };
+  const titleSave = titleFixture.repository.save.bind(titleFixture.repository);
+  titleFixture.repository.save = (data, ids) => { titleCaptures.push(ids); return titleSave(data); };
+  titleFixture.repository.beforeSave = () => titleGate.promise;
+  titleFixture.provider.respond = async () => ({ content: 'Generated title', toolCalls: [] });
+  const titleWork = titleFixture.session.generateTitle(titleThread.id, titleMessages[0].id, 'input',
+    titleThread.title, titleFixture.session.currentConfig);
+  await settle(); titleFixture.session.setDraft('typed during title save');
+  titleGate.open(); await titleWork;
+  MessageViewModel.prototype.update = update;
+  assert.equal(titleSnapshots, 0, 'Generating a title must not copy all transcripts');
+  assert.equal(titleUpdates, 0, 'Generating a title must not reproject historical messages');
+  assert.ok(titleCaptures.length >= 1);
+  assert.ok(titleCaptures.every(ids => ids?.length > 0 && ids.every(id => id === titleThread.id)), 'Only capture the renamed thread');
+  assert.equal(titleApp.active, titleThread); assert.equal(titleApp.threads, titleViews);
+  assert.equal(titleApp.active.messages, titleMessages); assert.equal(titleThread.title, 'Generated title');
+  assert.equal(titleApp.draft, 'typed during title save'); assert.equal(titleApp.busy, false);
+  const titled = (await titleFixture.repository.load()).threads.find(thread => thread.id === titleThread.id);
+  assert.equal(titled.title, 'Generated title'); assert.equal(titled.draft, 'typed during title save');
+  console.log('PASS title saves capture only the changed thread, retain UI identity and preserve concurrent typing');
+
   load(path.join(root, 'entry/src/test/SessionService.test')).default();
-  const selected = sessionCases.filter(test => /UserDocument|SettingsCommit/.test(test.name));
+  const selected = sessionCases.filter(test => /UserDocument|SettingsCommit|[Tt]itle/.test(test.name));
   assert.ok(selected.length >= 4);
   for (const test of selected) { await test.run(); console.log('PASS ' + test.name); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

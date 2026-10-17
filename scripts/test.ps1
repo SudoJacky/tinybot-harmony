@@ -41,6 +41,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Skill completion and composer callback tests f
 if ($LASTEXITCODE -ne 0) { throw 'Appearance preference and palette tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-settings-performance.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Settings responsiveness and persistence tests failed. Build the app first.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-history-drawer.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'History drawer activity and animation lifecycle tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-harness-features.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Search, delivery, references and runtime reliability tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-preview-publication.cjs')
