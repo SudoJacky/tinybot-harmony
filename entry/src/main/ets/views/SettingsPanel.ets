@@ -177,7 +177,7 @@ export struct SettingsPanel {
         SectionHeader({ title: t('工具与权限') })
         GroupCard() {
           Column() {
-            SwitchRow({ title: t('只读模式'), icon: $r('sys.symbol.lock'), subtitle: t('对所有对话生效，阻止修改文件、调用远程工具和生成图片。'), compId: 'read-only',
+            SwitchRow({ title: t('只读模式'), icon: $r('sys.symbol.lock'), subtitle: t('对所有对话生效，阻止修改文件和调用远程工具。'), compId: 'read-only',
               isOn: this.assistantDraft.readOnly, disabled: !this.canEdit(),
               onChange: (value: boolean) => this.saveToggle('readOnly', value) })
             RowDivider()

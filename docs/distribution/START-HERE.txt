@@ -1,17 +1,19 @@
-Tinybot v1.0.0 · 发布准备说明
+Tinybot v1.0.1 · 发布准备说明
 更新日期：2026-10-18
 
 一、版本与产物
 
+需为本版重新运行准备脚本；既有 1.0.0 产物不作为 1.0.1 提交。
+
 包名：com.sudojacky.tinybot
-版本：1.0.0，versionCode=1000000
+版本：1.0.1，versionCode=1000001
 设备：phone，最低与目标 HarmonyOS API 26
 发布包：release，app.debug=false，仅 arm64-v8a
 模拟器：使用单独构建的调试包，包含 x86_64；不随正式发布包分发。
 
 运行 scripts/prepare-distribution.ps1 后生成独立目录及 ZIP：
-packages/Tinybot-1.0.0-1000000-release-UNSIGNED.app：待云签名的完整发布包。
-packages/Tinybot-1.0.0-1000000-release-UNSIGNED.hap：同一 APP 内的 entry 模块。
+packages/Tinybot-1.0.1-1000001-release-UNSIGNED.app：待云签名的完整发布包。
+packages/Tinybot-1.0.1-1000001-release-UNSIGNED.hap：同一 APP 内的 entry 模块。
 symbols/app-symbol.zip：ArkTS 符号表。
 symbols/native/arm64-v8a/：与发布包 Build ID 一致的未裁剪原生沙箱库。
 assets/tinybot-icon.png：工程使用的图标。
@@ -36,7 +38,7 @@ powershell -ExecutionPolicy Bypass -File scripts\prepare-distribution.ps1 -Studi
 
 在 DevEco Studio 的 Build > Upload Product 中选择工程原始产物：
 build\outputs\default\tinybot-harmony-default-unsigned.app
-关联现有包名 com.sudojacky.tinybot，核对 1.0.0 / 1000000，使用对应发布证书或云管理签名，附带本版符号表。最终签名包的哈希会变化，以最终文件重新记录。
+关联现有包名 com.sudojacky.tinybot，核对 1.0.1 / 1000001，使用对应发布证书或云管理签名，附带本版符号表。最终签名包的哈希会变化，以最终文件重新记录。
 
 此步骤需在实际平台完成；本地准备不包含创建应用、申请证书、上传、云测试或审核结果。控制台字段以当前平台为准。如版本号已使用，增加 versionCode 后重新构建。
 

@@ -12,7 +12,6 @@ import { common } from '@kit.AbilityKit';
 import { prepareNativeMcp } from './NativeResourceSetup';
 import { McpClient } from './McpClient';
 import { SkillInstaller } from './SkillInstaller';
-import { ImageTools } from './ImageTools';
 import { CodeExecutionTools } from './CodeExecutionTools';
 import { NativeCodeExecutor } from './NativeCodeExecutor';
 import { NativeOrchestrationExecutor } from './NativeOrchestrationExecutor';
@@ -97,8 +96,6 @@ export class NativeSessionResources implements SessionResources {
       groups.push(new WebSearchTools(new NativeSearchTransport(search, new CredentialStore(), id, (record) => UsageLedger.record(record), () => this.profiles)));
     }
     if (productivity) { groups.push(new McpTools(productivity.servers, this.approval, (server) => new McpClient(server), live ? () => live.servers() : undefined)); }
-    const reference = productivity?.options?.image; const profile = this.profiles.find((item) => item.id === reference?.providerId && item.enabled);
-    if (reference && profile && profile.models.includes(reference.modelId)) { groups.push(new ImageTools(profile, reference, root, this.approval, attachments)); }
     return new RuleTools(new ToolSet(groups), productivity?.options?.readOnly === true);
   }
   async afterTask(threadId: string, messageId: string, content: string, workspaceId?: string): Promise<void> {

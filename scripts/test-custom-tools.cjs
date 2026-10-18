@@ -51,12 +51,18 @@ function fixture(data = seed()) {
   f.calls = calls; return f;
 }
 async function main() {
-  assert.equal(all.length, 41); assert.equal(new Set(all).size, 41); assert.equal(BASIC_FILE_TOOLS.length, 6);
-  assert.equal(optional.length, 31);
+  assert.equal(all.length, 40); assert.equal(new Set(all).size, 40); assert.equal(BASIC_FILE_TOOLS.length, 6);
+  assert.equal(optional.length, 30);
+  assert.ok(!all.includes('generate_image'));
+  const removed = seed(); removed.productivity.options.image = {providerId:'old', modelId:'image'};
+  removed.threads[0].agentMode = 'custom'; removed.threads[0].disabledTools = ['generate_image'];
+  const loaded = parseAppData(JSON.stringify(removed));
+  assert.equal(loaded.threads[0].disabledTools.length, 0);
+  assert.equal(loaded.threads[0].messages.length, removed.threads[0].messages.length);
   const covered = Array.from(TOOL_CAPABILITIES.flatMap(capability => capability.tools));
-  assert.equal(TOOL_CAPABILITIES.length, 13);
-  assert.equal(new Set(covered).size, 31); assert.deepEqual(covered.slice().sort(), optional.slice().sort());
-  const obsolete = {agentMode:'custom', disabledTools:Array.from(MANAGED_TOOL_NAMES)};
+  assert.equal(TOOL_CAPABILITIES.length, 12);
+  assert.equal(new Set(covered).size, 30); assert.deepEqual(covered.slice().sort(), optional.slice().sort());
+  const obsolete = {agentMode:'custom', disabledTools:Array.from(MANAGED_TOOL_NAMES).concat(['generate_image'])};
   validateToolSelection(obsolete);
   assert.deepEqual(Array.from(normalizeDisabledTools(obsolete.disabledTools)), []);
   for (const name of MANAGED_TOOL_NAMES) assert.equal(toolEnabled(name, obsolete), true);
@@ -95,7 +101,7 @@ async function main() {
   }
   assert.equal(legacy.repository.writes.length, legacyWrites, 'Capability toggles keep the existing save-on-send behavior');
   for (const name of MANAGED_TOOL_NAMES) await assert.rejects(legacy.session.setToolEnabled(name,false));
-  console.log('PASS 13 selectable capabilities, legacy memory/Skills overrides removed, individual Skill state retained and atomic group catalog/dispatch');
+  console.log('PASS 12 selectable capabilities, legacy memory/Skills overrides removed, individual Skill state retained and atomic group catalog/dispatch');
   for (const selection of [{ agentMode: 'research' }, { disabledTools: ['write_file'] }, { disabledTools: ['unknown'] },
     { disabledTools: ['read_web', 'read_web'] }, { disabledTools: 'read_web' }, { disabledTools: [null] }]) {
     assert.throws(() => validateToolSelection(selection));

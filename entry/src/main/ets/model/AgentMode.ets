@@ -13,7 +13,8 @@ export function validateToolSelection(selection: ToolSelection): void {
   if (selection.agentMode !== undefined) { validateAgentMode(selection.agentMode); }
   const disabled = selection.disabledTools;
   if (disabled === undefined) { return; }
-  const known = OPTIONAL_TOOL_NAMES.concat(MANAGED_TOOL_NAMES);
+  // Accept the removed tool in old saves; normalization discards it before use.
+  const known = OPTIONAL_TOOL_NAMES.concat(MANAGED_TOOL_NAMES, ['generate_image']);
   if (!Array.isArray(disabled) || disabled.length > known.length || new Set(disabled).size !== disabled.length ||
     disabled.some((name) => !known.includes(name))) {
     throw new Error(t('自定义工具设置无效。'));

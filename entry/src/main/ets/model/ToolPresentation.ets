@@ -25,7 +25,7 @@ export function toolGroupTitle(id: string): string {
   const titles: Record<string, string> = {
     'workspace-read': t('文件读取与检索'), 'workspace-write': t('文件编辑'), 'context-read': t('附件与历史结果'),
     'web': t('网页读取与搜索'), 'browser': t('浏览器'), 'calculation': t('代码计算'), 'orchestration': t('工具编排'),
-    'interaction': t('用户交互与计划'), 'delivery': t('预览与交付'), 'image': t('图片生成'), 'skill-read': t('Skills 读取'),
+    'interaction': t('用户交互与计划'), 'delivery': t('预览与交付'), 'skill-read': t('Skills 读取'),
     'mcp-discovery': t('MCP 工具发现'), 'mcp-execution': t('MCP 工具调用'), 'extension-management': t('扩展管理'),
     'memory': t('长期记忆'), 'team-coordination': t('团队管理'), 'team-handoff': t('员工交接'),
     'research': t('资料与检索'), 'execution': t('执行与协作'), 'extensions': t('MCP 服务'),
@@ -42,7 +42,7 @@ export function toolCapabilityDescription(id: string): string {
     'orchestration': t('通过代码组合调用已授权工具'), 'user-input': t('通过表单向你确认信息'),
     'plan': t('创建和更新任务步骤'), 'team': t('招募、管理团队并完成员工交接'),
     'preview': t('发布交互预览、图表和数据表格'), 'file-delivery': t('展示可预览、分享和导出的文件'),
-    'image': t('生成或编辑图片，需配置图片模型'), 'skill-read': t('查看 Skills 目录并读取使用说明'),
+    'skill-read': t('查看 Skills 目录并读取使用说明'),
     'skill-manage': t('安装、更新和管理 Skills'), 'mcp': t('发现并调用已配置的远程工具'),
     'mcp-manage': t('配置和管理 MCP 服务'), 'memory': t('维护长期记忆和自动记忆整理')
   };
