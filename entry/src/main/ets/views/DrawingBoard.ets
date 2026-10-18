@@ -6,8 +6,15 @@ import { HandwriteComponent, HandwriteController, HiddenToolType, PenType } from
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Btn, Font, Radius, Space, systemInsets } from '../common/Theme';
 import { IconButton } from '../common/Widgets';
-import { DrawingDraft } from '../model/DrawingDraft';
+import { DrawingBoardOptions, DrawingDraft } from '../model/DrawingDraft';
 import { t } from '../model/I18n';
+
+@Builder
+function drawingBoardContent(options: DrawingBoardOptions) {
+  DrawingBoard({ draft: options.draft, onClose: options.onClose, onAdd: options.onAdd })
+}
+
+export const drawingBoardBuilder: WrappedBuilder<[DrawingBoardOptions]> = wrapBuilder(drawingBoardContent);
 
 @Component
 export struct DrawingBoard {
@@ -20,30 +27,33 @@ export struct DrawingBoard {
   @State private insetTop: number = 0;
   @State private insetBottom: number = 0;
   private supported: boolean = canIUse('SystemCapability.Stylus.Handwrite');
-  private controller: HandwriteController = new HandwriteController();
+  private controller?: HandwriteController;
   private notePath: string = '';
 
   aboutToAppear(): void {
     systemInsets(this.getUIContext()).then((insets: number[]) => { this.insetTop = insets[0]; this.insetBottom = insets[1]; });
+    if (!this.supported) { return; }
+    const controller = new HandwriteController(); this.controller = controller;
     this.draft.hasContent = (): boolean => {
       if (!this.ready) { return false; }
-      const range = this.controller.getContentRange();
+      const range = controller.getContentRange();
       return range.right > range.left && range.bottom > range.top;
     };
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     this.notePath = context.cacheDir + '/drawing-' + util.generateRandomUUID();
-    this.controller.onLoad((error: BusinessError) => {
+    controller.onLoad((error: BusinessError) => {
       // Pen Kit reports successful loads with a nonempty message as well.
       if (error && error.code) { this.error = error.message; return; }
       this.ready = true;
     });
   }
   private initialize(): void {
+    if (!this.controller) { return; }
     try { this.controller.load(this.notePath); }
     catch (error) { this.error = (error as Error).message; }
   }
   private async add(): Promise<void> {
-    if (!this.ready || this.draft.saving) { return; }
+    if (!this.ready || this.draft.saving || !this.controller) { return; }
     this.error = '';
     this.draft.saving = true;
     let pixel: image.PixelMap | undefined;
@@ -83,7 +93,7 @@ export struct DrawingBoard {
       Column({ space: Space.sm }) {
         if (this.supported) {
           Column() {
-            HandwriteComponent({ handwriteController: this.controller, defaultPenType: PenType.BALLPOINT_PEN,
+            HandwriteComponent({ handwriteController: this.controller as HandwriteController, defaultPenType: PenType.BALLPOINT_PEN,
               hiddenTools: { hiddenOptionalTools: [HiddenToolType.MOSAIC, HiddenToolType.LASER] },
               onInit: () => this.initialize() })
           }.id('drawing-canvas').width('100%').layoutWeight(1).backgroundColor('#ffffff').enabled(!this.draft.saving)

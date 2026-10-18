@@ -33,23 +33,20 @@ async function main(){
  await assert.rejects(WebUiPreflight.validate(good,new Cancellation()),/unavailable/);
  console.log('PASS preflight queue, cancellation, stale events, detach, unavailable host');
 
- const diagnostic='TypeError: THREE.OrbitControls is not a constructor\n at tinybot-generated.js:2:1';
- detach=WebUiPreflight.subscribe(items=>{if(items.length){const probe=items[0];setTimeout(()=>WebUiPreflight.complete(probe.id,probe.content.includes('THREE.OrbitControls')?diagnostic:''),0);}});
  const inputs=[],turn={content:'',steps:[]};
- const model={stream:async messages=>{inputs.push(JSON.parse(JSON.stringify(messages)));return {content:inputs.length===1?bad:good,toolCalls:[]};}};
- await runAgentLoop({model,tools,messages:[{role:'user',content:'build a model'}],turn,maxSteps:5,validateAnswer:(c,s)=>WebUiPreflight.validate(c,s)},new Cancellation(),observer);
- assert.equal(inputs.length,2);assert.ok(inputs[1].at(-1).content.includes(diagnostic.split('\n')[0]));
- assert.ok(turn.steps[0].uiValidation.includes('node=web'));assert.equal(turn.steps[1].uiValidation,'');assert.equal(turn.content,good);
- validateSteps(turn.steps);const reloaded=JSON.parse(JSON.stringify(turn.steps));assert.ok(stepMessages(reloaded[0]).at(-1).content.includes('THREE.OrbitControls'));
- detach();console.log('PASS actual probe diagnostic returns to agent, full replacement succeeds, failed answer excluded, replay retains feedback');
+ const model={stream:async messages=>{inputs.push(JSON.parse(JSON.stringify(messages)));return {content:inputs.length===1?bad:'Use a source file.',toolCalls:[]};}};
+ await runAgentLoop({model,tools,messages:[{role:'user',content:'build a model'}],turn,maxSteps:5,
+  validateAnswer:async()=>{throw Error('Legacy code must not run');},recoverUi:async()=>{throw Error('Legacy code must not be migrated');}},new Cancellation(),observer);
+ assert.equal(inputs.length,2);assert.ok(inputs[1].at(-1).content.includes('UNSUPPORTED_PREVIEW_FORMAT'));
+ assert.equal(JSON.parse(turn.steps[0].uiValidation).category,'UNSUPPORTED_PREVIEW_FORMAT');assert.equal(turn.steps[1].uiValidation,'');assert.equal(turn.content,'Use a source file.');
+ validateSteps(turn.steps);const reloaded=JSON.parse(JSON.stringify(turn.steps));assert.ok(stepMessages(reloaded[0]).at(-1).content.includes('publish_preview'));
+ console.log('PASS legacy inline UI is rejected without executing/migrating; repair guidance survives replay');
 
  const endless={content:'',steps:[]};let count=0;
- await assert.rejects(runAgentLoop({model:{stream:async()=>{count++;return {content:bad,toolCalls:[]};}},tools,messages:[],turn:endless,maxSteps:20,
-  validateAnswer:async()=>{throw Error(diagnostic);}},new Cancellation(),observer),/repair attempts/);
+ await assert.rejects(runAgentLoop({model:{stream:async()=>{count++;return {content:bad,toolCalls:[]};}},tools,messages:[],turn:endless,maxSteps:20},new Cancellation(),observer),/repair attempts/);
  assert.equal(count,3);assert.equal(endless.content,'');
  const signal=new Cancellation(),cancelled={content:'',steps:[]};let requests=0;
- await assert.rejects(runAgentLoop({model:{stream:async()=>{requests++;return {content:bad,toolCalls:[]};}},tools,messages:[],turn:cancelled,maxSteps:5,
-  validateAnswer:async()=>{signal.cancel();signal.check();}},signal,observer),/已停止/);
+ await assert.rejects(runAgentLoop({model:{stream:async()=>{requests++;signal.cancel();return {content:bad,toolCalls:[]};}},tools,messages:[],turn:cancelled,maxSteps:5},signal,observer),/已停止/);
  assert.equal(requests,1);assert.equal(cancelled.steps[0].uiValidation,'pending');
  console.log('PASS repairs bounded, cancellation is not retried, pending surface remains withheld');
  const call={id:'large',type:'function',function:{name:'execute_code',arguments:JSON.stringify({code:' '.repeat(128*1024)+'return 42;'})}};

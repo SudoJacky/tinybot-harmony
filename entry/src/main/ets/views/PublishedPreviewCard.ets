@@ -53,6 +53,7 @@ export struct PublishedPreviewCard {
       }
       if (this.expanded) {
         InteractiveAnswer({ content: this.preview.content, step: this.preview.step, surfaceOffset: this.preview.surfaceOffset,
+          allowSurface: !/\.jsonl$/i.test(this.preview.path),
           saved: this.saved, presentation: this.presentation, available: this.available, onInteract: this.onInteract, selectable: false })
       }
     }.width('100%').alignItems(HorizontalAlign.Start)

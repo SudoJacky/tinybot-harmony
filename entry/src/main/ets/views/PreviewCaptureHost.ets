@@ -55,7 +55,7 @@ struct PreviewCaptureView {
   }
   build() {
     Column() {
-      InteractiveAnswer({ content: this.request.content, available: true, snapshotMode: true,
+      InteractiveAnswer({ content: this.request.content, available: true, snapshotMode: true, allowSurface: true,
         onWebReady: (id: string, error: string) => {
           if (error) { PreviewCapture.complete(this.request.id, undefined, new Error(error)); return; }
           this.waiting.delete(id); this.schedule();

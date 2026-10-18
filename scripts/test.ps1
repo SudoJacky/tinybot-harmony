@@ -71,6 +71,10 @@ if ($LASTEXITCODE -ne 0) { throw 'Custom tool selection and inherited execution 
 if ($LASTEXITCODE -ne 0) { throw 'Custom tool selection UI callback tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-help-demo.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Help demo animation lifecycle tests failed. Build the app first.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-legal-documents.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Bundled legal document reading and text preservation tests failed. Build the app first.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-onboarding.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'First-use onboarding persistence, native mascot and navigation tests failed. Build the app first.' }
 $env:DEVECO_SDK_HOME = Join-Path $StudioPath 'sdk'
 $env:JAVA_HOME = Join-Path $StudioPath 'jbr'
 $startedAt = Get-Date

@@ -41,6 +41,8 @@ import { createNativeSessionService } from '../services/NativeSessionService';
 import { Btn, Motion, Space } from '../common/Theme';
 import { IconButton } from '../common/Widgets';
 import { LaunchActions } from '../services/LaunchActions';
+import { OnboardingPanel } from '../views/OnboardingPanel';
+import { OnboardingPreferences } from '../services/OnboardingPreferences';
 
 const DRAWER_MAX_WIDTH: number = 340;
 const CHAT_HEADER_HEIGHT: number = 56;
@@ -71,6 +73,10 @@ struct Index {
   private unsubscribeLaunch?: () => void;
   private launching: boolean = false;
   @State private voiceRequest: string = '';
+  private onboardingChecked: boolean = false;
+  private onboardingDraftThread: string = '';
+  private onboardingFinishing: boolean = false;
+  @State private onboardingActive: boolean = false;
 
   onPageShow(): void {
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
@@ -86,7 +92,54 @@ struct Index {
       if (this.app.ready && !this.unsubscribeLaunch) {
         this.unsubscribeLaunch = LaunchActions.subscribe(() => this.receiveLaunch());
       }
+      this.offerOnboarding();
     });
+  }
+
+  private onboardingPreferences(): OnboardingPreferences {
+    return new OnboardingPreferences(this.getUIContext().getHostContext() as common.UIAbilityContext);
+  }
+
+  private offerOnboarding(): void {
+    if (!this.app.ready || this.onboardingChecked) { return; }
+    this.onboardingChecked = true;
+    if (this.receiving || this.launching || ShareInbox.peek() || this.paths.size() > 0) { return; }
+    try {
+      if (this.onboardingPreferences().shouldShow(this.app.exportSnapshot())) {
+        this.onboardingDraftThread = ''; this.onboardingActive = true; this.paths.pushPath({ name: 'onboarding' });
+      }
+    } catch (error) { this.app.error = t('无法读取首次使用记录：{0}', [(error as Error).message]); }
+  }
+
+  private async finishOnboarding(action: string, prompt: string): Promise<void> {
+    if (this.onboardingFinishing) { return; }
+    this.onboardingFinishing = true;
+    try {
+      if (action !== 'skip') {
+        if (this.app.busy) { throw new Error(t('请先完成当前任务，再开始新的对话。')); }
+        await this.app.flushDraft();
+        if (this.app.saveError) { throw new Error(this.app.saveError); }
+        if (this.onboardingDraftThread !== this.app.active.id) {
+          // SessionService owns the full untouched-chat check, including references and queued input.
+          if (!await this.app.newThread('')) { throw new Error(this.app.error || this.app.saveError || t('无法创建新对话。')); }
+          this.onboardingDraftThread = this.app.active.id;
+        }
+        this.app.setDraft(prompt); await this.app.flushDraft();
+        if (this.app.saveError) { throw new Error(this.app.saveError); }
+      }
+      this.onboardingPreferences().complete();
+      if (action === 'skip') { this.paths.pop(); }
+      else { this.paths.clear(); this.setDrawer(false); if (action === 'connect') { this.openSettings(); } }
+    } finally { this.onboardingFinishing = false; }
+  }
+
+  // Opening a real provider editor must never complete onboarding. The editor's
+  // existing onSaved pop returns to the still-mounted model-connection scene.
+  private connectOnboardingProvider(preset: string): void {
+    if (!this.onboardingActive || this.onboardingFinishing) { return; }
+    if (!this.app.beginProvider(preset, '')) { throw new Error(this.app.error || t('请先完成当前任务，再开始新的对话。')); }
+    this.onboardingActive = false;
+    this.paths.pushPath({ name: 'provider' });
   }
 
   private async receiveLaunch(): Promise<void> {
@@ -236,6 +289,9 @@ struct Index {
   }
 
   private async openSupport(page: string): Promise<void> {
+    if (page === 'guide') {
+      this.onboardingDraftThread = ''; this.onboardingActive = true; this.paths.pushPath({ name: 'onboarding' }); return;
+    }
     if (page !== 'rating') {
       this.paths.pushPath({ name: 'support', param: page });
       return;
@@ -320,7 +376,22 @@ struct Index {
 
   @Builder
   destination(name: string, param: Object) {
-    if (name === 'branches') {
+    if (name === 'onboarding') {
+      NavDestination() {
+        OnboardingPanel({ active: this.onboardingActive, configured: this.app.configured,
+          connectedPreset: this.currentProviderPreset(), busy: this.app.busy,
+          onFinish: (action: string, prompt: string) => this.finishOnboarding(action, prompt),
+          onConnect: (preset: string) => this.connectOnboardingProvider(preset) })
+      }.hideTitleBar(true).backgroundColor($r('app.color.page_background'))
+        .onBackPressed(() => {
+          this.finishOnboarding('skip', '').catch((error: Error) => {
+            this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: error.message });
+          });
+          return true;
+        })
+        .onShown(() => { this.onboardingActive = true; })
+        .onHidden(() => { this.onboardingActive = false; })
+    } else if (name === 'branches') {
       NavDestination() { BranchesPanel({ app: this.app, onSelected: () => this.paths.clear() }) }.title(t("会话分支"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'appearance') {
       NavDestination() { AppearancePanel() }.title(t('界面与外观'), { systemMaterial: this.appearance.control })

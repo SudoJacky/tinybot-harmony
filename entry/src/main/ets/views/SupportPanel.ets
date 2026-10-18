@@ -2,6 +2,7 @@ import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
 import { ThirdPartyLicensesPanel } from './ThirdPartyLicensesPanel';
+import { LegalDocumentPanel } from './LegalDocumentPanel';
 import { readAppInformation } from '../services/AppInformation';
 import { Font, Space } from '../common/Theme';
 import { Banner, GroupCard, NavRow, RowDivider, SectionHeader } from '../common/Widgets';
@@ -19,6 +20,8 @@ export function supportTitle(page: string): string {
   if (page === 'announcements') { return t('公告'); }
   if (page === 'guide') { return t('首次使用指引'); }
   if (page === 'licenses') { return t('第三方开源许可协议'); }
+  if (page === 'privacy') { return t('隐私政策'); }
+  if (page === 'terms') { return t('用户协议'); }
   return t('关于 Tinybot');
 }
 
@@ -134,9 +137,10 @@ export struct SupportPanel {
     SectionHeader({ title: t('协议与政策') })
     GroupCard() {
       Column() {
-        NavRow({ title: t('用户协议'), value: t('待补充'), compId: 'user-agreement', disabled: true })
+        NavRow({ title: t('用户协议'), compId: 'user-agreement', onTap: () => this.onOpen('terms') })
         RowDivider()
-        NavRow({ title: t('隐私政策'), value: t('待补充'), compId: 'privacy-policy', disabled: true })
+        NavRow({ title: t('隐私政策'), compId: 'privacy-policy',
+          onTap: () => this.onOpen('privacy') })
         RowDivider()
         NavRow({ title: 'Apache License 2.0', compId: 'about-project-license',
           onTap: () => this.openWebsite('https://github.com/SudoJacky/tinybot-harmony/blob/main/LICENSE') })
@@ -146,31 +150,28 @@ export struct SupportPanel {
       }
     }
     this.article(t('免责声明'), t('本软件按“现状”提供；除适用法律要求或书面约定外，不提供任何明示或默示担保。相关责任限制以 Apache 2.0 许可证为准。AI 生成内容可能不准确，请自行核实重要信息，审慎执行工具操作，并备份重要数据。你所连接的模型及其他第三方服务，其可用性、费用与数据处理规则由相应服务商决定。'))
-    Text('Copyright © 2026 Tinybot. All rights reserved.').fontFamily(this.appearance.fontFamily).id('about-copyright')
-      .fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).textAlign(TextAlign.Center)
-      .width('100%').padding({ top: Space.lg, bottom: Space.sm })
+    Column() {
+      Button('苏ICP备2026078369号-1A', { type: ButtonType.Normal, stateEffect: true })
+        .id('about-icp-filing').fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
+        .fontColor(this.appearance.accent).backgroundColor(Color.Transparent).width('100%').height(32)
+        .responseRegion({ x: 0, y: -12, width: '100%', height: 44 })
+        .onClick(() => this.openWebsite('https://beian.miit.gov.cn'))
+      Text('Copyright © 2026 Tinybot. All rights reserved.').fontFamily(this.appearance.fontFamily).id('about-copyright')
+        .fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).textAlign(TextAlign.Center).width('100%')
+    }.width('100%').padding({ bottom: Space.sm })
   }
 
   @Builder
   help() {
+    GroupCard() {
+      NavRow({ title: t('首次使用指引'), subtitle: t('大约一分钟，认识一个新伙伴'), image: $r('app.media.tinybot'),
+        compId: 'help-startup-guide', onTap: () => this.onOpen('guide') })
+    }
     this.article(t('开始对话'), t('先在“设置 → 添加模型服务”选择服务商，填写自己的 API Key 和模型。保存后，点击聊天顶部的模型名称选择模型，再输入问题并发送。'), 'chat')
     this.article(t('附件与语音'), t('点击输入框的“+”添加图片或文档；图片需要支持视觉的模型。点击麦克风切换到按住说话，按住录音、松开发送；滑到左侧取消后松手可取消，滑到右侧编辑后松手可修改文字。点击键盘按钮可返回文字输入。'), 'attachments')
     this.article(t('让助手记住偏好'), t('在“设置 → 助手偏好 → 称呼与回答偏好”填写个人偏好；在“记忆与上下文 → 管理长期记忆”中查看、编辑或删除记忆。'), 'preferences')
     this.article(t('文件与备份'), t('聊天右上角的更多菜单可打开当前会话文件；在“设置 → 备份与恢复”导出备份或使用华为云空间。模型密钥不会随备份导出。'), 'backup')
     this.article(t('连接失败时'), t('检查服务地址、模型名称、API Key 和网络连接。失败提示会保留在聊天中，可修改后重试；模型服务的额度与计费请在服务商处查看。'), 'failure')
-    GroupCard() {
-      NavRow({ title: t('首次使用指引'), compId: 'help-startup-guide', onTap: () => this.onOpen('guide') })
-    }
-  }
-
-  @Builder
-  guide() {
-    this.article(t('1. 准备模型服务'), t('Tinybot 直接连接你选择的模型服务。请先准备服务商提供的 API Key；模型调用费用与可用额度由该服务商决定。'), 'prepare')
-    this.article(t('2. 添加并选择模型'), t('打开“设置 → 添加模型服务”，选择服务商或自定义服务，填写地址、API Key 和模型并保存。回到聊天，点击顶部模型名称选择要使用的模型。'), 'model')
-    this.article(t('3. 开始第一个任务'), t('直接输入你想解决的问题，也可以通过“+”添加材料。发送后可随时停止生成；需要多个助手协作时，可输入 /team 并描述目标。'), 'task')
-    this.article(t('4. 查看结果与保存资料'), t('AI可能会犯错，请仔细鉴别。重要信息请核实来源；需要保留资料时，可从聊天更多菜单导出对话，或在设置中创建备份。'), 'results')
-    Text(t('你可以随时从“关于 Tinybot”重新查看这份指引。')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
-      .fontColor($r('app.color.text_secondary')).width('100%')
   }
 
   @Builder
@@ -187,14 +188,16 @@ export struct SupportPanel {
       DeveloperPanel({ onDisabled: () => this.onOpen('about') })
     } else if (this.page === 'licenses') {
       ThirdPartyLicensesPanel()
+    } else if (this.page === 'privacy') {
+      LegalDocumentPanel({ kind: 'privacy' })
+    } else if (this.page === 'terms') {
+      LegalDocumentPanel({ kind: 'terms' })
     } else {
       Scroll() {
         Column({ space: Space.md }) {
           if (this.error) { Banner({ text: this.error, compId: 'support-error' }) }
           if (this.page === 'help') {
             this.help()
-          } else if (this.page === 'guide') {
-            this.guide()
           } else if (this.page === 'updates') {
             this.updates()
           } else if (this.page === 'announcements') {

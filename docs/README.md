@@ -16,6 +16,7 @@
 | [云备份](cloud-backup.md) | 华为云空间备份、恢复和验证边界 |
 | [语音输入](speech-input.md) | 语音听写操作与系统接入 |
 | [关于与帮助](about-and-help.md) | 首次使用、帮助、版本与市场评价 |
+| [用户协议](user-agreement.md) | AI 应用官方协议调研、Tinybot 条款及应用内阅读边界 |
 
 ## 架构与实现
 
@@ -25,7 +26,7 @@
 | [工具执行与权限](tools-and-permissions.md) | 文件协议、修改校验、回执、错误、MCP 和权限边界 |
 | [系统提示词](system-prompt.md) | 固定指令、用户偏好、Skills 与团队上下文 |
 | [代码沙箱与工具编排](code-sandbox.md) | execute_code、orchestrate、预算与隔离 |
-| [交互回答](interactive-ui.md) | 原生交互协议、Web 场景及状态恢复 |
+| [交互预览](interactive-ui.md) | JS/HTML/SVG 发布、Three.js 与独立浏览器的区别 |
 | [推理强度](reasoning-effort.md) | 模型推理设置与输入框交互 |
 | [滑动操作行](swipe-rows.md) | 手势与行操作 |
 | [分段选择动效](segmented-motion.md) | 选择器动效 |

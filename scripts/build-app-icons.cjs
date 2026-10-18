@@ -13,4 +13,11 @@ for (const [name, svg] of [['tinybot_icon', source], ['tinybot_icon_foreground',
   fs.writeFileSync(path.join(media, name + '.png'), new Resvg(svg).render().asPng());
 }
 fs.copyFileSync(path.join(media, 'tinybot_icon.png'), path.join(root, 'entry/src/main/resources/base/media/tinybot_icon.png'));
-console.log('Rendered 1024 x 1024 HarmonyOS app icons.');
+const darkColors = JSON.parse(fs.readFileSync(path.join(root, 'entry/src/main/resources/dark/element/color.json'), 'utf8')).color;
+const darkBackground = darkColors.find(color => color.name === 'start_window_background').value;
+const darkForeground = darkColors.find(color => color.name === 'text_primary').value;
+const darkSource = source.replaceAll('#f7f6f2', darkBackground).replaceAll('#141413', darkForeground);
+const darkMedia = path.join(root, 'entry/src/main/resources/dark/media');
+fs.mkdirSync(darkMedia, { recursive: true });
+fs.writeFileSync(path.join(darkMedia, 'tinybot_icon.png'), new Resvg(darkSource).render().asPng());
+console.log('Rendered 1024 x 1024 HarmonyOS app icons, including the dark startup/about variant.');

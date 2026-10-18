@@ -36,3 +36,6 @@
 *.key
 *.keystore
 /build-profile.json5
+.ui-audit/
+/.dsh/
+/.playwright-cli/

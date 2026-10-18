@@ -1,89 +1,71 @@
-# 聊天中的交互回答
+# 聊天中的交互预览
 
-模型可将普通文字与 `tinybot-ui` JSONL 界面组合在同一条回答中。完整记录到达后逐步渲染原生组件；界面闭合后开放交互。简单问题仍适合直接用文字回答。
+Agent 将普通 JavaScript、HTML 或 SVG 写入工作区，再调用 `publish_preview`。客户端在聊天消息中嵌入隔离的 ArkWeb 卡片，无需 Agent 编写 JSONL 或转义嵌套代码。
 
-协议和模型指引分别位于 `model/InteractiveUi.ets` 与 `model/InteractiveUiInstructions.ets`。这是 Tinybot 自己的客户端协议，不依赖特定模型或 ChatGPT 私有接口。
+## 发布 JavaScript 和 Three.js
 
-## 按文件发布预览
-
-生成的 SVG、HTML 或较大的界面应先写入工作区，再调用 `publish_preview({"path":"pelican.svg","title":"Pelican"})`。支持 `.svg`、`.html` 和不带代码围栏的 `.jsonl`；前两者由客户端序列化为一个 Web 节点，JSONL 则使用完整的 `begin` / `node` / `action` / `end` 记录。JSONL 中的 `node.data` 仍用 `JSON.stringify` 序列化；无须保存交互状态时，空 `state: {}` 合法。
-
-工具只读取一次文件，校验协议并运行现有设备 Web 启动检查，通过后把该快照随工具记录保存。之后修改或删除文件不会改变已发布预览；重启、分支和状态操作均使用快照。模型只收到路径、标题和发布结果，不收到完整预览内容，也不应在最终回答中再次抄写 JSON。下载、分享和导出文件仍用 `present_files`。
-
-SVG/HTML 文件预览按实际内容高度显示，随可用宽度和内容变化更新，显示高度限定为 48–800vp；较高的内容可在预览内滚动。旧版发布的文件快照也使用该布局。普通 JSONL `web` 节点仍使用指定的 `height`，需要自适应时可在 `node.data` 中设置 `autoHeight: true`。
-
-`publish_preview` 在启动检查通过后，用手机上的同一套卡片组件按聊天宽度渲染，等待 Web 启动和布局稳定，再截取包含标题、控件与留白的预览卡片。截图压缩为最长边不超过 1600 像素的 JPEG，随工具记录保存；下一次模型请求在工具结果之后附带截图和像素尺寸、卡片宽度。模型可检查可读性、裁切和留白，修改源文件后重新发布。截图只包含预览，不包含聊天或手机其他画面；动画只代表取图时的一帧，不证明后续交互正确。
-
-明确配置为不支持图片的模型会收到“未发送截图”的说明，不能宣称看过画面。截图失败返回 `SCREENSHOT_FAILED`，不会发布或伪装成成功的视觉检查。截图附件使用现有附件存储与图片输入链路，重启及会话分支保留发布时的图片。
-
-HTML 必须自包含，沿用 Web 沙箱的网络、文件和设备权限限制；需要原生控件、声明状态、独立 `js` 或 Three.js 时，使用 JSONL。启动检查失败或取消不会发布预览。解析错误指出文件（工具调用时）、surface、JSONL 行和嵌套 `node.data` 字段；引擎提供偏移时同时给出字符位置，否则保留错误及有界片段，不猜测位置或把语法错误归因于空状态。修复源文件后再次发布即可。
-
-## 失败后的局部修复
-
-恢复指引使用英文，按结构化错误类型选择，不匹配本地化错误文案。`publish_preview` 保留 `PREVIEW_INVALID` / `fix_preview_file`，并在 `details` 中提供 `category`、文件 `path` / `version`、`location`、有界 `excerpt` 和 `repair.instruction` / `repair.retry`。重试参数保留原始路径及可选标题，不包含完整源码。
-
-| 类型 | 恢复动作 |
-| --- | --- |
-| `JSON_SYNTAX` | 区分外层 JSONL 与嵌套 `node.data`，读取出错位置，用 `edit_file` 局部修正转义后重新发布。 |
-| `INVALID_FIELD` | 按字段和约束修改，例如 `node.data.height` 必须是 200–800 的数值。 |
-| `WEB_STARTUP_FAILED` | 检查启动错误和堆栈；宿主或设备能力不可用时先解决该条件，不反复改写有效源码。 |
-| 文件版本过期、未读取、匹配缺失或不唯一 | 保留原文件，重新读取，选取有足够上下文且唯一的 `oldText`。 |
-
-行号从 1 开始。嵌套 JSON 的 `character` 是解码后 `node.data` 内的位置，由 `characterScope` 标明，不能直接当作源文件列号。`locationScope` 区分 `jsonl_source` 与 SVG/HTML 自动生成的 `generated_wrapper`；不把包装记录的行号冒充 HTML/SVG 文件行号。
-
-普通聊天直接输出的 `tinybot-ui` 校验失败后，会按 surface 把原始 JSONL 保存到工作区 `preview-repairs/<唯一ID>-<surface>.jsonl`，在持久化的错误报告中提供每个已保存文件的路径、版本及 `publish_preview` 重试调用。Agent 读取这些文件并局部修改即可，无须重新抄写整段回答。去掉外层 Markdown 围栏不改变 JSONL 内容；如果只是缺少闭合围栏，暂存文件可直接发布。该回答的所有 surface 均未发布，修复后要分别发布仍需展示的 surface。
-
-只读模式不暂存文件；超过 8 个 surface 或保存失败会明确报告原因，部分保存只返回实际成功的路径。取消不触发模型重试。团队成员的直接输出目前沿用诊断恢复；已有文件的 `publish_preview` 错误指引与普通聊天一致。恢复报告随会话保存、重启后可重放；原始失败回答也保留，不在此处做上下文裁剪。Web 启动检查只覆盖启动，不保证后续所有交互正确。
-
-## 原生能力
-
-- `column`、`card`、`row` 组合内容；行的实际可用宽度小于 400vp 时单列，达到 400vp 后两列。隐藏的节点不占位置。
-- 文字、Markdown、HTTPS 图片、图表、表格、指标与声明式图形可以和控件混排。
-- `input`、`number`、`select`、`toggle`、`slider` 支持输入和参数调整。
-- `segmented` 用于分区切换，绑定字符串；接受 2–6 个不重复选项，每项最多 24 个字符。窄屏可横向滚动，长选项或大量选项应使用 `select`。
-- `stepper` 使用原生减/加按钮调整数值，必须指定 `min`、`max`，`step` 默认 1。到边界时按钮禁用，结果不会越界。
-- `checkbox` 绑定布尔值，适合任务清单；可以通过计算动作汇总已完成数量，再用 `progress` 展示进度。`toggle` 更适合持续生效的设置。
-- 所有节点可通过 `visibleKey` / `visibleValue` 控制显示，配合分段选择实现分页、分步说明和条件表单。
-
-例如：
-
-```json
-{"op":"begin","version":1,"title":"人数调整","state":{"people":4,"each":30}}
-{"op":"node","node":{"id":"people","kind":"stepper","text":"参加人数","bind":"people","min":1,"max":12,"action":"calculate"}}
-{"op":"node","node":{"id":"result","kind":"heading","text":"每人 {{each}} 元"}}
-{"op":"node","node":{"id":"copy","kind":"button","text":"复制结果","action":"copyResult"}}
-{"op":"action","action":{"id":"calculate","kind":"compute","code":"input.each = Math.round(120 / input.people * 100) / 100; return input;"}}
-{"op":"action","action":{"id":"copyResult","kind":"copy","text":"{{people}} 人，每人 {{each}} 元。"}}
-{"op":"end"}
+```js
+publish_preview({ path: "scene.js", title: "旋转方块", library: "three", height: 400 })
 ```
 
-模型实际输出时使用 `tinybot-ui` 语言标记，而不是上例文档使用的 `json`。
+`path` 是已有工作区文件的相对路径，支持 `.js`、`.html` 和 `.svg`。可选 `title` 最多 160 字符，默认文件名；`library` 为 `none`（默认）或 `three`；可选 `height` 为 200–800vp。
 
-## 动作与状态
+JS 在空白页面的异步函数中执行，支持 `await`，通过 `document.body` 创建 DOM、样式和 Canvas。JS 默认使用 400vp 固定视口，`html/body` 填满视口。HTML/SVG 默认按内容自适应高度（48–800vp），显式设置 `height` 则固定高度。HTML 也可选择内置库，库在页面脚本前加载。
 
-输入提交后，`compute` 在既有 QuickJS 沙箱执行，`set` 更新指定字段，`reset` 恢复初始值；这些动作不会请求模型。状态按消息和界面保存，重启可恢复，创建会话分支时独立复制。计算必须返回相同字段和类型的完整状态，越界、保存失败或计算错误会明确显示。
+`library: "three"` 注入内置 `THREE`（r186）和独立的 `OrbitControls`，无需 CDN 或 import。例如 `scene.js`：
 
-`copy` 只能由明确的按钮触发：其 `text` 模板可使用当前状态字段，复制的是替换后的纯文本；成功提示“已复制”，失败显示错误。它不读取剪贴板、不请求模型、不改变会话状态，也不会在渲染、重启或输入变化时自动执行。
+```js
+const canvas = document.createElement('canvas');
+if (!canvas.getContext('webgl2')) throw new Error('This device does not support WebGL2');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.append(canvas);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+camera.position.set(2, 2, 3);
+const controls = new OrbitControls(camera, canvas);
+const cube = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshNormalMaterial());
+scene.add(cube);
+new ResizeObserver(() => {
+  const { width, height } = document.body.getBoundingClientRect();
+  renderer.setSize(width, height);
+  camera.aspect = width / height;
+  camera.updateProjectionMatrix();
+}).observe(document.body);
+tinybot.animate((time) => {
+  cube.rotation.y = time * 0.4;
+  controls.update();
+  renderer.render(scene, camera);
+});
+```
 
-`submit` 按钮明确表示发送或继续对话，将当前输入作为独立用户事件交给模型，保留输入框内未发送的草稿。
+动画使用 `tinybot.animate`，离屏、聊天滚动或只读时暂停；事件处理可用 `tinybot.active` 判断是否允许输入。聊天滚动期间不创建新的 Web 视图，滚动停止后再稳定 200 ms 才加载当前可见预览；再次滑动会取消本次等待，资源读取完成后也会重新检查滚动状态。短暂离屏时保留并暂停已有实例，连续离屏 5 秒后释放，进入后台仍在 600 ms 后释放。局部变量和 DOM 状态在 Web 视图释放或重启后重新创建；文件接口不提供自定义持久化状态声明。
 
-## Web 场景与边界
+## 与独立浏览器分开
 
-复杂 HTML/CSS 界面、Canvas 动画、模拟和 Three.js 场景可以放在 `web` 节点中。整个界面完整生成后，才在隔离 ArkWeb iframe 执行。Web 无网络、文件、设备权限、外部依赖加载或本地存储权限；只通过状态桥保存声明过的字段。普通 Markdown 与原生节点不会执行 HTML 或脚本。
+预览使用 `WebUiView` 和隔离 iframe，禁止网络、文件、存储、外部依赖、嵌套页面与设备权限；图片可使用 data/blob URL。普通消息里的 HTML/JS 代码块不执行。
 
-没有原生地图/地理服务组件，也没有自动图片检索与素材选择链路。图片须使用已提供或核实的 HTTPS 地址；不能把示意图当作真实地图，不能虚构图表来源。模型生成质量仍依赖所选模型，本地协议和提示词不能替代模型训练。
+`browser_open` 操作外部 HTTP/HTTPS 网页，使用独立 `BrowserSession` 和浏览器面板，遵守浏览器启用、控制权和用户接管规则。发布预览不会申请、获取或改变该会话，也不继承其网页存储或权限。
+
+## 发布与错误
+
+工具只读取一次文件，完成校验、设备 Web 启动检查和卡片截图后，将不可变内容快照与截图随工具记录保存。修改或删除源文件不会改变已发布预览；重新发布产生新版本。重启及会话分支使用保存的快照。下载、分享和导出文件仍用 `present_files`。
+
+截图使用同一套聊天卡片和聊天宽度，最长边不超过 1600 像素，以 JPEG 附在工具结果后供模型检查。截图失败不发布；不支持图片的模型收到明确说明。启动检查包含初始动画回调，但不保证后续所有交互正确，截图也只代表一个画面。
+
+失败返回 `PREVIEW_INVALID` / `fix_preview_file`，包含文件路径、版本、错误类别、诊断及重试参数。重试保留 `path/title/library/height`。`locationScope: generated_wrapper` 表示内部包装协议的位置，不能冒充原始 JS/HTML 文件行号；运行时错误附带浏览器堆栈。Agent 应读取源文件、局部修复后重发。设备能力或截图失败须先检查运行条件。
+
+旧 `.jsonl` 发布返回 `UNSUPPORTED_PREVIEW_FORMAT`，直接输出 `tinybot-ui` 的回答也明确失败；不会暂存旧 JSONL 再建议无效重试。历史消息中的直接 JSONL 界面及 `.jsonl` 预览显示不支持格式的错误，不执行或迁移。内部卡片仍使用客户端生成的界面记录，这不是 Agent 的发布接口。
 
 聊天滚动期间暂停 Web 预览渲染，不创建新的 Web 视图；滚动停止并稳定 200 ms 后才加载当前可见预览，再次滑动会取消本次等待，资源读取完成后也会重新检查滚动状态。短暂离屏时保留并暂停已有实例，连续离屏 5 秒后释放，进入后台仍在 600 ms 后释放。Web 视图释放或重启后，局部 JavaScript 变量与 DOM 重新创建；声明过的输入字段仍通过既有状态桥恢复。
 
 ## 验证
 
-构建 HAP 后运行：
-
 ```text
-node scripts/test-interactive-ui.cjs
-node scripts/test-interactive-ui-renderer.cjs
 node scripts/test-preview-publication.cjs
 node scripts/test-preview-screenshot.cjs
+node scripts/test-web-ui-preflight.cjs
+node scripts/test-web-ui-browser.cjs
 ```
 
-需将 `DEVECO_STUDIO_HOME` 指向本机 DevEco Studio。上述测试覆盖协议、持久化及真实编译后的控件回调，预览测试还通过实际 SessionService / AgentRuntime / 文件工具验证“大输入失败 → 暂存 → 读取 → 小范围替换 → 再发布”，并覆盖只读、保存失败、取消及编辑冲突。真机验收应覆盖分段切换、步进、勾选、复制、窄屏布局和重启恢复；固定输入验证客户端行为，不等于模型生成质量评测。
+浏览器测试需 Playwright 和本机 Edge；`DEVECO_STUDIO_HOME` 指向 DevEco Studio。构建后运行 `test-preview-lifecycle.cjs` 与 `test-interactive-ui-renderer.cjs` 验证实际编译的卡片和生命周期。真实 ArkWeb 设备交互仍需设备验收。
