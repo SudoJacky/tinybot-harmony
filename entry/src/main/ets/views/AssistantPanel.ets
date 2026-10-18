@@ -21,7 +21,7 @@ export struct ModelSettingsPanel {
   @State private contextWindow: string = '';
   @State private error: string = '';
   aboutToAppear(): void { this.options = JSON.parse(JSON.stringify(this.app.productivity.options || defaultAssistantOptions())) as AssistantOptions; this.loadCapability(); }
-  private choices(kind: string = ''): string[] { return [kind === 'image' ? t("未启用") : t("跟随当前模型")].concat(this.app.modelChoices.map((item) => item.providerName + ' · ' + item.modelId)); }
+  private choices(): string[] { return [t("跟随当前模型")].concat(this.app.modelChoices.map((item) => item.providerName + ' · ' + item.modelId)); }
   private reference(index: number): ModelReference | undefined { const item = this.app.modelChoices[index - 1]; return item ? { providerId: item.providerId, modelId: item.modelId } : undefined; }
   private efforts(): string[] {
     const reference = this.reference(this.capabilityIndex + 1);
@@ -58,7 +58,6 @@ export struct ModelSettingsPanel {
     const chosen = this.reference(index);
     if (kind === 'fast') { this.options.fast = chosen; } else if (kind === 'deep') { this.options.deep = chosen; }
     else if (kind === 'vision') { this.options.vision = chosen; } else if (kind === 'memory') { this.options.memory = chosen; }
-    else { this.options.image = chosen; }
   }
 
   @Builder
@@ -118,9 +117,6 @@ export struct ModelSettingsPanel {
             Column() {
               this.choiceRow(t("记忆整理"), '', this.choices(), this.chosen(this.options.memory), true,
                 (index: number) => this.setRoute('memory', index))
-              RowDivider()
-              this.choiceRow(t("图片生成"), t("OpenAI 兼容的图片接口"), this.choices('image'), this.chosen(this.options.image), true,
-                (index: number) => this.setRoute('image', index))
             }
           }
           SectionHeader({ title: t("模型能力") })

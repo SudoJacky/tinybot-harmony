@@ -71,8 +71,8 @@ const rows = () => [...panel.children.values()].filter(child => child instanceof
 const row = name => rows().find(child => child.compId === 'custom-capability-' + name);
 const button = id => [...buttons.values()].find(value => value.id === id);
 (async () => {
-  assert.equal(rows().length, 13);
-  for (const name of ['memory','skill-read','skill-manage']) assert.equal(row(name),undefined);
+  assert.equal(rows().length, 12);
+  for (const name of ['memory','skill-read','skill-manage','image']) assert.equal(row(name),undefined);
   assert.equal(button('enable-optional-tools').enabled,false);
   assert.equal(button('disable-optional-tools').enabled,true);
   for (const name of groups.BASIC_FILE_TOOLS) { assert.equal(row(name), undefined); }
@@ -80,7 +80,7 @@ const button = id => [...buttons.values()].find(value => value.id === id);
   const retained = row('browser'); await retained.onChange(false); panel.flush();
   assert.equal(row('browser'), retained); assert.equal(retained.isOn, false);
   assert.ok(groups.TOOL_CAPABILITIES.find(capability => capability.id === 'browser').tools.every(name => thread.disabledTools.includes(name)));
-  assert.ok([...texts.values()].some(text => text.endsWith(':12/13')));
+  assert.ok([...texts.values()].some(text => text.endsWith(':11/12')));
   await retained.onChange(true); panel.flush(); assert.equal(retained.isOn, true);
   for (const id of ['preview','team','mcp']) {
     await row(id).onChange(false); panel.flush();
@@ -90,14 +90,14 @@ const button = id => [...buttons.values()].find(value => value.id === id);
   }
   assert.ok(rows().every(child => child.subtitle.startsWith('Description: ')), 'Capability descriptions replace raw tool names');
   await button('disable-optional-tools').onClick(); panel.flush();
-  assert.equal(thread.disabledTools.length, 31); assert.ok(rows().every(child => !child.isOn));
+  assert.equal(thread.disabledTools.length, 30); assert.ok(rows().every(child => !child.isOn));
   assert.equal(button('disable-optional-tools').enabled,false);
   assert.equal(button('enable-optional-tools').enabled,true);
   await button('enable-optional-tools').onClick(); panel.flush(); assert.equal(thread.disabledTools.length, 0);
   app.busy = true; panel.flush(); assert.ok(rows().every(child => child.disabled)); assert.equal(button('enable-optional-tools').enabled, false);
   app.busy = false; thread.archived = true; panel.flush(); assert.ok(rows().every(child => child.disabled));
   thread.archived = false; app.saveError = 'save failed'; panel.flush(); assert.ok(rows().every(child => child.disabled));
-  console.log('PASS emitted 13 capability rows without memory/Skills, atomic toggles, count, state-aware bulk actions and busy/archive/save-error restrictions');
+  console.log('PASS emitted 12 capability rows without memory/Skills, atomic toggles, count, state-aware bulk actions and busy/archive/save-error restrictions');
 
   const scopeSource = root + '/views/ToolScopePanel.ets';
   const scopeEmitted = path.resolve('entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/views/ToolScopePanel.ts');

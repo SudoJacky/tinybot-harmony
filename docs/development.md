@@ -80,7 +80,7 @@ Release 混淆规则必须保留 `globalThis` 全局名，避免 Pen Kit 的 amb
 
 `node scripts/test-history-drawer.cjs` 验证编译后的侧栏关闭动画、拖动和中断恢复。关闭动画完成后停止渲染列表内容，保留搜索和分页状态，避免隐藏侧栏随聊天流式输出持续重建。真机性能复现使用 `Generate an SVG of a pelican riding a bicycle.`，分别检查等待模型、工具执行和预览发布期间的主线程延迟与 CPU Profile。
 
-`node scripts/test-custom-tools.cjs` 验证完整版/自定义选择、13 项能力对 31 个可选工具的完整覆盖、旧的部分禁用配置迁移、记忆/Skills 重复禁用记录清除与专门设置生效、组内所有入口的目录与执行限制，以及基础文件权限、编排与团队继承和会话恢复。构建后运行 `node scripts/test-custom-tools-renderer.cjs`，验证能力行的实际编译回调、浏览器/预览/团队/MCP 联动、开关计数、批量操作及忙碌/归档/保存错误时的禁用状态；两项已纳入 `test.ps1`。
+`node scripts/test-custom-tools.cjs` 验证完整版/自定义选择、12 项能力对 30 个可选工具的完整覆盖、旧的部分禁用配置迁移、记忆/Skills 重复禁用记录清除与专门设置生效、组内所有入口的目录与执行限制，以及基础文件权限、编排与团队继承和会话恢复。构建后运行 `node scripts/test-custom-tools-renderer.cjs`，验证能力行的实际编译回调、浏览器/预览/团队/MCP 联动、开关计数、批量操作及忙碌/归档/保存错误时的禁用状态；两项已纳入 `test.ps1`。
 
 `node scripts/test-thread-list-renderer.cjs` 使用编译后的回调与稳定分组节点，验证会话改名、删除、归档、恢复、置顶/取消置顶的排序与菜单、新建及项目改名后的即时刷新和计数，也验证从搜索、归档页面创建项目后显示新分组；只执行读取了变化状态的更新回调，防止分组闭包保留旧数组。
 

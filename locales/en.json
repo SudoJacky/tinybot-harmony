@@ -22,7 +22,6 @@
   "招募、管理团队并完成员工交接": "Recruit and manage a team with worker handoffs",
   "发布交互预览、图表和数据表格": "Publish interactive previews, charts and data tables",
   "展示可预览、分享和导出的文件": "Present files for preview, sharing and export",
-  "生成或编辑图片，需配置图片模型": "Generate or edit images using a configured image model",
   "查看 Skills 目录并读取使用说明": "Browse Skills and read their instructions",
   "安装、更新和管理 Skills": "Install, update and manage Skills",
   "发现并调用已配置的远程工具": "Discover and call configured remote tools",
@@ -601,8 +600,6 @@
   "专用模型": "Specialized models",
   "记忆整理": "Memory organization",
   "提炼与合并长期记忆": "Extract and merge long-term memories",
-  "图片生成": "Image generation",
-  "OpenAI 兼容的图片接口": "OpenAI-compatible image API",
   "模型能力": "Model capabilities",
   "切换到另一个模型前，请先保存当前修改。": "Save changes before switching to another model.",
   "模型": "Model",
@@ -1787,7 +1784,6 @@
   "称呼与回答偏好": "Personal and response preferences",
   "自动保存任务结果": "Automatically save task results",
   "只读模式": "Read-only mode",
-  "对所有对话生效，阻止修改文件、调用远程工具和生成图片。": "Applies to all conversations. Blocks file changes, remote tools, and image generation.",
   "允许网页读取与搜索": "Allow web reading and search",
   "允许助手读取网页和使用搜索；不影响模型服务与浏览器权限。": "Allow the assistant to read web pages and search. Model access and browser permissions are separate.",
   "工具范围": "Tool access",
@@ -2033,5 +2029,8 @@
   "聊天与设置焕新": "Refined chat and settings",
   "流式文字渐显，思考和工具调用独立折叠，消息操作集中为图标。发送消息后收起键盘，输入时显示团队模式；设置使用独立子页，统一图标与间距，改善深色启动页与光感材质的可读性。": "Streaming text fades in, reasoning and tool calls collapse independently, and message actions use compact icons. Sending hides the keyboard; typing reveals team mode. Settings use separate pages with consistent icons and spacing, plus clearer dark startup and material effects.",
   "用量与稳定性": "Usage and stability",
-  "上下文详情展示整个会话的累计用量，每轮仍保留独立统计。改进长回复滚动和预览加载，保留工具执行保护、完整调用记录与错误提示。": "Context details show cumulative usage for the chat, with separate statistics for each turn. Long-answer scrolling and preview loading are improved while preserving execution safeguards, full tool records and visible errors."
+  "上下文详情展示整个会话的累计用量，每轮仍保留独立统计。改进长回复滚动和预览加载，保留工具执行保护、完整调用记录与错误提示。": "Context details show cumulative usage for the chat, with separate statistics for each turn. Long-answer scrolling and preview loading are improved while preserving execution safeguards, full tool records and visible errors.",
+  "对所有对话生效，阻止修改文件和调用远程工具。": "Applies to all chats; prevents file changes and remote tool calls.",
+  "1.0.1 · 2026-10-18": "1.0.1 · 2026-10-18",
+  "移除图片生成设置、工具开关与执行接口，保留图片输入、图片理解和历史图片查看。自定义工具调整为 12 项能力，兼容旧版图片模型与工具禁用配置。": "Removed image generation settings, capability controls and execution endpoints. Image input, image understanding and historical images remain available. Custom tools now have 12 capabilities, with compatibility for legacy image-model and disabled-tool settings."
 }

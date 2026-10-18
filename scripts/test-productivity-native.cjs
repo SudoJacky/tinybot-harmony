@@ -1118,20 +1118,26 @@ async function test(name, run) {
       cloudStart=async sync=>{sync.callback({state:4,error:0});};assert.equal(await CloudBackup.sync(),true);
     } finally {fakeTimers=undefined;}
   });
-  await test('image generation and edits require approval, persist outputs and send binary multipart',async()=>{
-    const {ImageTools}=load(path.join(source,'services/ImageTools'));const root='/sandbox/workspace/images';fs.mkdirSync(nativePath(root),{recursive:true});Attachments.configure('/sandbox/backup-app');
-    const jpeg=Uint8Array.from([255,216,255,217]).buffer;
-    kits['@kit.ImageKit'].image={createImageSource:()=>({getImageInfo:async()=>({size:{width:1,height:1}}),createPixelMap:async()=>({release:async()=>{}}),release:async()=>{}}),createImagePacker:()=>({packing:async()=>jpeg,release:async()=>{}})};
-    const approval=new ToolApproval();const profile={id:'image-provider',protocol:'chat-completions',baseUrl:'https://images.invalid/v1',credentialAlias:'fixture-key'};
-    const tools=new ImageTools(profile,{providerId:profile.id,modelId:'image-test'},root,approval,[]);let requests=0;
-    jsonScript=(url,options)=>{requests++;assert.equal(options.header.Authorization,'Bearer fixture-secret');
-      if(url.endsWith('/generations')){assert.equal(JSON.parse(options.extraData).model,'image-test');}
-      else {assert.equal(url,'https://images.invalid/v1/images/edits');assert.match(options.header['Content-Type'],/multipart/);const body=Buffer.from(options.extraData);assert.ok(body.includes(Buffer.from('name="image"')));assert.ok(body.includes(Buffer.from(jpeg)));}
-      return{responseCode:200,result:JSON.stringify({data:[{b64_json:Buffer.from(jpeg).toString('base64')}]})};};
-    const call=args=>({id:'image',type:'function',function:{name:'generate_image',arguments:JSON.stringify(args)}});
-    const denied=tools.execute(call({prompt:'a circle'}),new Cancellation());approval.respond(false);await assert.rejects(denied);assert.equal(requests,0);
-    const generated=tools.execute(call({prompt:'a circle'}),new Cancellation());approval.respond(true);const first=JSON.parse(await generated);assert.ok(fs.existsSync(nativePath(root+'/'+first.path)));
-    const edited=tools.execute(call({prompt:'make it blue',source:first.path}),new Cancellation());approval.respond(true);const second=JSON.parse(await edited);assert.notEqual(second.path,first.path);assert.equal(requests,2);
+  await test('removed image generation stays unavailable with legacy model configuration', async()=>{
+    const {NativeSessionResources}=load(path.join(source,'services/NativeSessionService'));
+    const {ProviderRegistry}=load(path.join(source,'services/providers/ProviderRegistry'));
+    const {defaultExtensions}=load(path.join(source,'model/Skills'));
+    const {defaultProductivity}=load(path.join(source,'model/Productivity'));
+    const {defaultAssistantOptions}=load(path.join(source,'model/AssistantOptions'));
+    const {ToolDiscovery}=load(path.join(source,'services/ToolDiscovery'));
+    const resources=new NativeSessionResources('/sandbox/removed-images',new ProviderRegistry(),new ToolApproval());
+    resources.configureProviders([{id:'image-provider',name:'Legacy',protocol:'chat-completions',baseUrl:'https://images.invalid/v1',
+      credentialAlias:'fixture-key',noApiKey:false,enabled:true,models:['image-test']}]);
+    const data=defaultProductivity(); data.options={...defaultAssistantOptions(),image:{providerId:'image-provider',modelId:'image-test'}};
+    const ext=defaultExtensions(); ext.webEnabled=false;
+    const tools=resources.tools('chat',ext,'',data,[{id:'text',name:'note.txt',path:'text.txt',mime:'text/plain',size:4,text:'note'}]);
+    assert.ok(!tools.definitions().some(tool=>tool.function.name==='generate_image'));
+    const invoke=(name,args)=>tools.execute({id:name,type:'function',function:{name,arguments:JSON.stringify(args)}},new Cancellation());
+    await assert.rejects(invoke('generate_image',{prompt:'a circle'}),error=>error.code==='TOOL_UNAVAILABLE');
+    const discovery=new ToolDiscovery(tools);
+    const found=JSON.parse(await discovery.execute({id:'search',type:'function',function:{name:'tool_search',arguments:'{"query":""}'}},new Cancellation()));
+    assert.ok(!found.tools.some(tool=>tool.name==='generate_image'));
+    assert.ok(tools.definitions().some(tool=>tool.function.name==='read_attachment'));
   });
   await test('model discovery validates credential origin and uses the protocol endpoint',async()=>{
     const {discoverModels}=load(path.join(source,'services/ModelDiscovery'));let requests=0;

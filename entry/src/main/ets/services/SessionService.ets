@@ -44,7 +44,6 @@ import { SessionEvent, SessionPreferences, SessionRepository, SessionResources, 
 import { prepareSessionContext, sessionPromptSections, sessionContextSource } from './SessionContext';
 import { PromptSection, renderPrompt } from '../model/ContextProjection';
 interface UiComputeReceipt { status: string; result: UiValues; error: string; resultTruncated: boolean; }
-interface GeneratedImage { path: string; attachment: Attachment; }
 interface FormReceipt { status: string; }
 
 // Sole owner of application/session data and admission. No ArkUI or platform Kit imports.
@@ -761,10 +760,6 @@ export class SessionService {
       if (event.type === 'step_start') {
         const context = answer.steps[event.step || 0]?.context;
         if (context) { this.status.contextTokens = context.tokens; }
-      }
-      if (event.type === 'tool_end') {
-        const execution = answer.steps?.flatMap((step) => step.tools).find((tool) => tool.call.id === event.toolCallId && tool.call.function.name === 'generate_image' && tool.status === 'complete');
-        if (execution) { const image = JSON.parse(execution.output) as GeneratedImage; validateAttachments([image.attachment]); answer.attachments = (answer.attachments || []).concat([image.attachment]).slice(-4); }
       }
       answer.status = event.run.status === 'running' ? 'generating' : event.run.status; answer.error = event.run.error;
       this.status.acceptingSteering = this.runtime.acceptsSteering && !thread.queuePaused;
