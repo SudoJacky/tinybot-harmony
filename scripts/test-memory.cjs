@@ -21,7 +21,7 @@ const { ProviderRegistry } = from('services/providers/ProviderRegistry');
 const { AgentRuntime } = from('services/AgentRuntime');
 const { SessionService } = from('services/SessionService');
 const reply = (content = 'done', toolCalls = []) => ({ content, toolCalls });
-const memoryCall = operations => ({ id: 'memory-call', type: 'function', function: { name: 'memory', arguments: JSON.stringify({ operations: JSON.stringify(operations) }) } });
+const memoryCall = operations => ({ id: 'memory-call', type: 'function', function: { name: 'memory', arguments: JSON.stringify({ operations }) } });
 const entry = (id, content, threadId = '', automatic = true) => ({ id, content, threadId, automatic, updatedAt: 1 });
 const op = (action, fields = {}) => ({ action, sourceMessageId: 'user', ...fields });
 let ids = 0;
@@ -82,10 +82,11 @@ async function main() {
   assert.equal(f.session.snapshot().productivity.memories[0].sourceMessageId, sourceId);
   assert.ok(f.requests[1].messages.some(m => m.role === 'tool' && JSON.parse(m.content).success));
   // Once the first tool receipt exists, the runtime also advertises read_tool_result.
-  const frozen = f.requests[1].messages[0].content;
-  await f.send('继续'); assert.equal(f.requests[2].messages[0].content, frozen);
+  const background = content => content.split('\n\n<tools>')[0];
+  const frozen = background(f.requests[1].messages[0].content);
+  await f.send('继续'); assert.equal(background(f.requests[2].messages[0].content), frozen);
   const restored = await fixture(await f.repository.load()); await restored.send('重启后继续');
-  assert.equal(restored.requests[0].messages[0].content, frozen);
+  assert.equal(background(restored.requests[0].messages[0].content), frozen);
   await f.session.newThread(); await f.send('你好'); await settle();
   assert.ok(f.requests.at(-1).messages[0].content.includes('用户喜欢简短回答'));
   const edited = f.session.snapshot().productivity; edited.memories[0].content = '手动更新'; edited.memories[0].automatic = false;

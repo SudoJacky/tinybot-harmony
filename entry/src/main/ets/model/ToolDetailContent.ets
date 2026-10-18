@@ -161,7 +161,7 @@ export function toolDetailContent(name: string, argumentsText: string, output: s
       }))];
     }
   } else if (name === 'request_user_input' && status === 'complete') {
-    const form = record(parse(str(args.data)));
+    const form = typeof args.data === 'string' ? record(parse(str(args.data))) : args;
     const values = record(result.values);
     if (result.status === 'submitted' && Array.isArray(form.fields) && Object.keys(values).length > 0) {
       content.sections = [section(str(form.title) || t('已提交的回答'), '', 'list', Object.keys(values).map((key: string): DetailRow => {

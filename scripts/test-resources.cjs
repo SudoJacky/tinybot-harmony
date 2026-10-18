@@ -134,14 +134,19 @@ async function main() {
   for (const bad of [null, [], {}, { action:'save', name:'x', url:'https://x', auth:'bearer', token:'SECRET' }, { action:'remove' }, {action:'test',id:'x',url:'https://x'}]) assert.throws(() => parseMcpRequest(JSON.stringify(bad)));
   for (const bad of [{action:'create',name:'overwrite',document:document()}, {action:'update',name:'x'}, {action:'install',document:document()}]) assert.throws(() => parseSkillRequest(JSON.stringify(bad)));
   const f = await fixture();
-  const create = call('skill_manage', {action:'create',document:document(),files:JSON.stringify([{path:'references/guide.md',content:'REFERENCE'}])});
+  const create = call('skill_manage', {action:'create',document:document(),files:[{path:'references/guide.md',content:'REFERENCE'}]});
   await f.send([create, call('read_skill',{name:'test-skill'}), call('read_skill',{name:'test-skill',path:'references/guide.md'}),
-    call('skill_manage',{action:'update',name:'test-skill',document:document('test-skill','Updated body'),files:'[]'}), call('read_skill',{name:'test-skill'})]);
+    call('skill_manage',{action:'update',name:'test-skill',document:document('test-skill','Updated body'),files:[]}), call('read_skill',{name:'test-skill'})]);
   assert.ok(receipts(f).some(r => r.includes('REFERENCE'))); assert.ok(receipts(f).some(r => r.includes('Updated body')));
   assert.equal(f.session.snapshot().extensions.skills.find(item => item.name === 'test-skill').files.length,0);
   assert.equal((await f.repo.load()).threads[0].messages.at(-1).content,'done');
-  const schemas = f.requests.map(r => JSON.stringify(r.tools.filter(t => ['skill_manage','mcp_manage','read_skill','list_skills','mcp_call','mcp_search_tools','mcp_list_tools'].includes(t.function.name))));
-  assert.ok(schemas.every(s => s === schemas[0]));
+  const schemas = new Map();
+  for (const request of f.requests) for (const tool of request.tools.filter(t => ['skill_manage','mcp_manage','read_skill','list_skills','mcp_call','mcp_search_tools','mcp_list_tools'].includes(t.function.name))) {
+    const schema = JSON.stringify(tool.function.parameters);
+    if (schemas.has(tool.function.name)) assert.equal(schema, schemas.get(tool.function.name));
+    else schemas.set(tool.function.name, schema);
+  }
+  assert.ok(schemas.has('skill_manage') && schemas.has('read_skill'), 'Invoked tools become visible with stable parameter schemas');
   const reboot = await fixture(await f.repo.load()); await reboot.send([call('read_skill',{name:'test-skill'})]); assert.ok(receipts(reboot).some(r => r.includes('Updated body')));
   await f.send([call('skill_manage',{action:'disable',name:'test-skill'}), call('read_skill',{name:'test-skill'}), call('skill_manage',{action:'remove',name:'test-skill'})]);
   assert.equal(f.session.snapshot().extensions.skills.length,bundledNames.length);
@@ -189,7 +194,7 @@ async function main() {
     if (count === 1) return reply('',[call('mcp_manage',{action:'save',name:'Echo',url:'https://echo.example/mcp',auth:'bearer'})]);
     serverId = m.session.snapshot().productivity.servers[0]?.id;
     if (count === 2) return reply('',[call('mcp_list_tools',{server:serverId})]);
-    if (count === 3) return reply('',[call('mcp_call',{server:serverId,tool:'echo',arguments:'{"text":"hello"}'})]);
+    if (count === 3) return reply('',[call('mcp_call',{server:serverId,tool:'echo',arguments:{text:'hello'}})]);
     return reply();
   };
   m.session.setDraft('Configure echo'); await m.session.send(); assert.equal(calls.at(-1).args.text,'hello');
@@ -200,7 +205,7 @@ async function main() {
   assert.equal(m.session.snapshot().productivity.servers[0].url,old.url); assert.equal(m.secrets.size,1); assert.ok(m.errors.some(e => e.includes('probe failed')));
   m.resources.testMcp = async () => 1;
   await m.send([call('mcp_list_tools',{server:serverId}),call('mcp_manage',{action:'save',id:serverId,name:'Changed',url:'https://other.example/mcp',auth:'none'}),
-    call('mcp_call',{server:serverId,tool:'echo',arguments:'{}'}),call('mcp_search_tools',{server:serverId,query:'echo'}),call('mcp_call',{server:serverId,tool:'echo',arguments:'{"text":"new"}'})]);
+    call('mcp_call',{server:serverId,tool:'echo',arguments:{}}),call('mcp_search_tools',{server:serverId,query:'echo'}),call('mcp_call',{server:serverId,tool:'echo',arguments:{text:'new'}})]);
   assert.equal(calls.at(-1).server.url,'https://other.example/mcp'); assert.equal(m.secrets.size,0);
   assert.ok(receipts(m).some(r => r.includes('mcp_list_tools') && !r.includes('next')));
   await m.send([call('mcp_manage',{action:'disable',id:serverId}),call('mcp_list_tools',{server:serverId}),call('mcp_manage',{action:'enable',id:serverId}),call('mcp_list_tools',{server:serverId}),call('mcp_manage',{action:'remove',id:serverId})]);

@@ -23,6 +23,8 @@ export interface SteeringInput {
 
 export interface AgentTools {
   definitions(): ToolDefinition[];
+  // Visibility may be deferred; scheduling still needs the full authorized execution metadata.
+  executionDefinitions?(): ToolDefinition[];
   execute(call: ToolCall, cancellation: Cancellation, context?: ToolInvocationContext): Promise<string>;
   beforeFinish?(cancellation: Cancellation): Promise<string | undefined>;
 }
@@ -212,7 +214,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
         }
         throw new Error(t("已达到本轮 {0} 次模型调用上限，执行已停止。你可以继续发送指令。", [limit]));
       }
-      await executeToolBatch(step, round, context.tools, definitions, cancellation, observer, context.toolExecution);
+      await executeToolBatch(step, round, context.tools, context.tools.executionDefinitions?.() || definitions, cancellation, observer, context.toolExecution);
       await observer.waitForExecution?.(cancellation);
       step.toolReminder = repeatReminder.observe(step);
       if (step.toolReminder) { await observer.checkpoint(); cancellation.check(); }

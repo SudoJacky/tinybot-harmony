@@ -54,7 +54,7 @@ function fixture(source = answer) {
     parameters: { type: 'object', properties: {}, additionalProperties: true } } }], execute: async call => {
     executions++;
     const args = JSON.parse(call.function.arguments);
-    const result = vm.runInNewContext('(function(input){' + args.code + '})(input)', { input: JSON.parse(args.input) }, { timeout: 100 });
+    const result = vm.runInNewContext('(function(input){' + args.code + '})(input)', { input: args.input }, { timeout: 100 });
     return JSON.stringify({ status: 'ok', result, resultTruncated: false, error: '' });
   } };
   f.executions = () => executions;
@@ -235,12 +235,12 @@ function fixture(source = answer) {
     const result=vm.runInNewContext('(function(input){'+action.code+'})(input)',{input},{timeout:100});
     ui.validateUiState(document,result);assert.equal(result.each,30);assert.equal(JSON.parse(result.scene).shapes.length,4);
   });
-  test('the session prompt includes the UI instructions',()=>{
+  test('the session prompt leaves preview instructions to the preview tool',()=>{
     const {sessionPromptSections}=load(path.join(root,'main/ets/services/SessionContext'));
     const {renderPrompt}=load(path.join(root,'main/ets/model/ContextProjection'));
     const {INTERACTIVE_UI_INSTRUCTIONS}=load(path.join(root,'main/ets/model/InteractiveUiInstructions'));
     const data=seed();const instructions=renderPrompt(sessionPromptSections(data.config,data.extensions));
-    assert.ok(instructions.includes(INTERACTIVE_UI_INSTRUCTIONS));
+    assert.ok(!instructions.includes(INTERACTIVE_UI_INSTRUCTIONS));
   });
   test('Web content validates before rendering and cannot bind code to mutable state',()=>{
     const spec={version:1,html:'<canvas></canvas>',css:'',js:'document.body.dataset.ready="yes"',library:'three',height:400};

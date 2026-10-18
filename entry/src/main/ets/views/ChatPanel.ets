@@ -386,6 +386,8 @@ export struct ChatPanel {
         const message = this.thread.messages.find((item: MessageViewModel) => item.role === 'user' && !previous.has(item.id));
         if (message) {
           accepted = true; this.sendOrigin = origin; this.sendingMessageId = message.id;
+          this.keyboardFocusRequest++;
+          context.getFocusController().clearFocus(); this.composerFocused = false;
           clearTimeout(this.scrollTimer); this.scrollTimer = -1;
           context.postFrameCallback(new SendFrame(() => {
             if (this.thread.id === threadId && this.sendingMessageId === message.id) { this.scroller.scrollEdge(Edge.Bottom); }
@@ -1255,7 +1257,7 @@ export struct ChatPanel {
             this.messageList()
           }
         }.width('100%').height('100%').zIndex(this.sendingMessageId ? 1 : 0)
-        if (!this.voiceOverlayVisible()) { this.teamToggle() }
+        if (this.viewport.keyboardHeight > 0 && !this.voiceMode && !this.voiceOverlayVisible()) { this.teamToggle() }
         if (this.voiceOverlayVisible()) {
           VoiceRecordingOverlay({ phase: this.speech.phase === 'complete' ? 'finishing' : this.speech.phase,
             text: this.speech.text, speaking: this.speech.speaking, action: this.speechTarget,

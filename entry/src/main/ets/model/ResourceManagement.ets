@@ -6,9 +6,9 @@ export interface SkillRequest {
   action: string;
   name?: string;
   document?: string;
-  files?: string;
+  files?: SkillFile[];
   source?: string;
-  paths?: string;
+  paths?: string[];
 }
 export interface McpRequest {
   action: string;
@@ -61,7 +61,12 @@ export function parseSkillRequest(text: string): SkillRequest {
   const fieldsValue = parseToolArguments(text) as Record<string, Object>;
   const value = parseToolArguments(text) as SkillRequest;
   if (!value || Array.isArray(value) || typeof value.action !== 'string' ||
-    Object.keys(value).some((key) => !['action', 'name', 'document', 'files', 'source', 'paths'].includes(key) || typeof fieldsValue[key] !== 'string')) {
+    Object.keys(value).some((key) => !['action', 'name', 'document', 'files', 'source', 'paths'].includes(key) ||
+      (!['files', 'paths'].includes(key) && typeof fieldsValue[key] !== 'string')) ||
+    (value.files !== undefined && (!Array.isArray(value.files) || value.files.length > 16 || value.files.some((file) =>
+      !file || Array.isArray(file) || typeof file.path !== 'string' || typeof file.content !== 'string' ||
+      Object.keys(file).some((key) => key !== 'path' && key !== 'content')))) ||
+    (value.paths !== undefined && (!Array.isArray(value.paths) || value.paths.length > 16 || value.paths.some((item) => typeof item !== 'string')))) {
     throw new ToolFailure('INVALID_ARGUMENTS', 'Invalid skill_manage arguments.', 'fix_arguments');
   }
   const fields: Record<string, string[]> = { 'create': ['document', 'files'], 'update': ['name', 'document', 'files'],

@@ -51,18 +51,20 @@ export struct MarkdownChunkView {
     if (blocks !== this.previousBlocks) { this.measuredHeight = 0; this.previousBlocks = blocks; }
     this.inlineCache.clear();
     const keys: string[] = [];
+    // A completed response still finishes its pending fade; history mounts stay static.
+    const animate = (this.mounted || this.model.animate) && this.visible && (this.streaming || this.reveal.active(now));
     blocks.forEach((block: MarkdownBlock, index: number) => {
       if (block.kind === 'table') {
         block.rows.forEach((row: string[], r: number) => {
           row.forEach((cell: string, c: number) => {
             const key = `${index}:${r}:${c}`; keys.push(key);
-            this.reveal.update(key, this.inlineSpans(cell).map((span: MarkdownSpan) => span.text).join(''), now, (this.mounted || this.model.animate) && this.streaming && this.visible);
+            this.reveal.update(key, this.inlineSpans(cell).map((span: MarkdownSpan) => span.text).join(''), now, animate);
           });
         });
       } else {
         const key = `${index}`; keys.push(key);
         const text = block.kind === 'code' ? block.text : this.inlineSpans(block.text).map((span: MarkdownSpan) => span.text).join('');
-        this.reveal.update(key, text, now, (this.mounted || this.model.animate) && this.streaming && this.visible);
+        this.reveal.update(key, text, now, animate);
       }
     });
     this.reveal.retain(keys);
@@ -99,7 +101,7 @@ export struct MarkdownChunkView {
       if (!this.mounted) { return; }
       if (Diagnostics.recording) { Diagnostics.measure('render.revealTick', 1, 'count'); }
       this.revealTime = Date.now(); this.scheduleReveal();
-    }, 32);
+    }, 16);
   }
   private revealColor(color: ResourceColor, opacity: number): ResourceColor {
     if (opacity >= 1) { return color; }
@@ -183,7 +185,7 @@ export struct MarkdownChunkView {
             .fontStyle(span.kind === 'italic' ? FontStyle.Italic : FontStyle.Normal)
             .fontColor(this.revealColor(span.kind === 'link' ? this.appearance.accent : color, span.opacity))
             .decoration({ type: span.kind === 'link' ? TextDecorationType.Underline :
-              span.kind === 'strike' ? TextDecorationType.LineThrough : TextDecorationType.None, color: span.kind === 'link' ? this.appearance.accent : color })
+              span.kind === 'strike' ? TextDecorationType.LineThrough : TextDecorationType.None, color: this.revealColor(span.kind === 'link' ? this.appearance.accent : color, span.opacity) })
             .onClick(() => { if (span.url) { this.open(span.url); } })
         }
       })

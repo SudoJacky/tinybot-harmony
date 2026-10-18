@@ -84,3 +84,136 @@ probe.workflowCollapsed = true; message.status = probe.turnStatus = 'failed'; pr
 assert.equal(probe.folded(), false, 'Errors reopen a manually collapsed live trace');
 probe.turnStatus = 'complete'; probe.aboutToAppear(); assert.equal(probe.settled, true, 'History initializes settled');
 console.log('PASS turn workflow: actual phases, parallel tools, retry/stop/failure, retained groups, persistent preview, animated completion and manual reading');
+
+// Opening the turn reveals sibling thought/tool rows, without another group toggle.
+const processComponent = tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'ProcessGroup');
+const processMethods = ['items', 'toolAt', 'richTools', 'thinkingNow', 'initialRender'];
+let serial = 0, activeView, activeElement;
+class RenderView {
+  constructor() { this.effects = new Map(); this.branches = new Map(); this.lists = new Map(); this.texts = new Map(); this.rows = new Map(); this.children = new Map(); }
+  observeComponentCreation2(fn) { const id = ++serial; this.effects.set(id, fn); activeView = this; activeElement = id; fn(id, true); }
+  ifElseBranchUpdateFunction(branch, create) {
+    const id = activeElement;
+    if (this.branches.get(id) !== branch) { this.branches.set(id, branch); create(); }
+  }
+  forEachUpdateFunction(id, items, create, key) {
+    const previous = this.lists.get(id) || new Set(), next = new Set();
+    items.forEach(item => { const identity = key(item); next.add(identity); if (!previous.has(identity)) create(item); });
+    this.lists.set(id, next);
+  }
+  updateStateVarsOfChildByElmtId(id, params) { Object.assign(this.children.get(id), params); }
+  flush() { for (const [id, fn] of [...this.effects]) { activeView = this; activeElement = id; fn(id, false); } }
+  static create(child) { child.parent.children.set(child.id, child); }
+}
+class Child {
+  constructor(parent, params, _storage, id) { this.parent = parent; this.id = id; Object.assign(this, params); }
+}
+class ToolRow extends Child {}
+class RichToolResult extends Child {}
+class ThinkingDisclosure extends Child {}
+const noUi = new Proxy({}, { get: () => () => {} });
+const textUi = new Proxy({}, { get: (_target, name) => value => {
+  const node = activeView.texts.get(activeElement) || {}; node[name] = value; activeView.texts.set(activeElement, node);
+} });
+Object.assign(context, { RenderView, ViewPU: RenderView, ToolRow, RichToolResult, ThinkingDisclosure, Column: noUi, ForEach: noUi, If: noUi,
+  Text: textUi, HorizontalAlign: {}, CopyOptions: {}, Space: {}, t: text => text });
+vm.runInNewContext(ts.transpileModule(`class ProcessProbe extends RenderView {
+  ${processComponent.members.filter(n => processMethods.includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')}
+} exports.ProcessProbe = ProcessProbe;`, { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, context);
+const { DisclosureStore } = load(path.join(root, 'viewmodel/DisclosureState'));
+const processMessage = { id: 'turn', status: 'generating', stepViews: [step('', [tool('one')], '思'.repeat(5100))],
+  disclosures: new DisclosureStore(), processOpen: false };
+function mountProcess(richOnly = false) {
+  const view = Object.assign(new context.exports.ProcessProbe(), { message: processMessage, richOnly,
+    groupKey: buildTimeline(processMessage.stepViews)[0].key, appearance: {}, onInspect() {} });
+  view.initialRender(); return view;
+}
+const processView = mountProcess();
+const firstThought = [...processView.children.values()].find(child => child instanceof ThinkingDisclosure);
+assert.equal(firstThought.disclosure.open, false, 'Thought starts folded, like a tool row');
+assert.equal(processView.texts.size, 0, 'No intermediate process group heading');
+const firstTool = [...processView.children.values()].find(child => child instanceof ToolRow);
+assert.equal(firstTool.execution.call.id, 'one', 'Tool row is visible without a group click');
+assert.equal(firstTool.disclosure.open, false);
+firstThought.disclosure.open = true; firstThought.disclosure.limit = 8000;
+processMessage.stepViews[0] = step('', [{ ...tool('one', 'complete'), output: 'latest' }, tool('two', 'failed')], '最新思考');
+processMessage.stepViews.push(step('', [], '下一步思考'));
+processView.flush();
+assert.equal(firstThought.content, '最新思考');
+assert.equal(firstThought.disclosure.open, true, 'Live updates preserve an explicitly opened thought');
+assert.equal([...processView.children.values()].find(child => child instanceof ToolRow && child.execution.call.id === 'one'), firstTool);
+assert.equal(firstTool.execution.output, 'latest');
+assert.equal([...processView.children.values()].filter(child => child instanceof ToolRow).length, 2);
+const nextThought = [...processView.children.values()].find(child => child instanceof ThinkingDisclosure && child.identity === 'turn-1');
+assert.equal(nextThought.content, '下一步思考'); assert.equal(nextThought.disclosure.open, false);
+assert.equal(nextThought.streaming, true); assert.equal(firstThought.streaming, false);
+const preview = tool('preview', 'complete'); preview.call.function.name = 'publish_data_view';
+processMessage.stepViews[1].tools.push(preview);
+const foldedView = mountProcess(true);
+assert.equal(foldedView.texts.size, 0, 'Folding hides all ordinary process text');
+assert.equal([...foldedView.children.values()].filter(child => child instanceof ToolRow).length, 0);
+assert.equal([...foldedView.children.values()].filter(child => child instanceof ThinkingDisclosure).length, 0);
+assert.equal([...foldedView.children.values()].filter(child => child instanceof RichToolResult).length, 1,
+  'Published content remains available while the process is folded');
+
+// The actual thought component handles its own compact toggle and bounded body.
+const thoughtSource = path.join(root, 'views/ThinkingDisclosure.ets');
+const thoughtEmitted = emitted.replace(/MessageBubble\.ts$/, 'ThinkingDisclosure.ts');
+assert.ok(fs.statSync(thoughtEmitted).mtimeMs >= fs.statSync(thoughtSource).mtimeMs, 'Build thought component before testing');
+const thoughtTree = ts.createSourceFile(thoughtEmitted, fs.readFileSync(thoughtEmitted, 'utf8'), ts.ScriptTarget.Latest, true);
+const thoughtComponent = thoughtTree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'ThinkingDisclosure');
+const rowUi = new Proxy({}, { get: (_target, name) => value => {
+  const node = activeView.rows.get(activeElement) || {}; node[name] = value; activeView.rows.set(activeElement, node);
+} });
+const transition = { combine() { return this; }, animation() { return this; } };
+Object.assign(context, { Row: rowUi, Blank: noUi, Stack: noUi, SymbolGlyph: noUi, TextOverflow: {}, Alignment: {},
+  Context: noUi, ThinkingLine: class extends Child {}, TransitionEffect: { OPACITY: transition, translate() {} } });
+vm.runInNewContext(ts.transpileModule(`class ThoughtProbe extends RenderView {
+  ${thoughtComponent.members.find(n => n.name?.getText(thoughtTree) === 'initialRender').getText(thoughtTree)}
+} exports.ThoughtProbe = ThoughtProbe;`, { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, context);
+const thoughtDisclosure = new DisclosureStore().get('thought');
+function mountThought() {
+  const view = Object.assign(new context.exports.ThoughtProbe(), { content: '思'.repeat(5100), identity: 'thought', streaming: false,
+    disclosure: thoughtDisclosure, appearance: {}, onInspect() {}, getUIContext: () => ({ animateTo: (_options, update) => update() }) });
+  view.initialRender(); return view;
+}
+const thoughtView = mountThought();
+const thoughtBody = () => [...thoughtView.texts.values()].find(node => node.id === 'thinking-content-thought');
+const thoughtToggle = [...thoughtView.rows.values()].find(node => node.id === 'thinking-toggle-thought');
+assert.equal(thoughtToggle.height, 32); assert.equal(thoughtBody(), undefined);
+thoughtToggle.onClick(); thoughtView.flush();
+assert.equal(thoughtDisclosure.open, true); assert.equal(thoughtBody().create.length, 4000);
+[...thoughtView.texts.values()].find(node => node.id === 'thinking-more-thought').onClick(); thoughtView.flush();
+assert.equal(thoughtBody().create.length, 5100);
+thoughtView.content = '更新后的思考'; thoughtView.flush(); assert.equal(thoughtBody().create, '更新后的思考');
+thoughtToggle.onClick(); thoughtView.flush(); assert.equal(thoughtDisclosure.open, false);
+assert.ok(![...mountThought().texts.values()].some(node => node.id === 'thinking-content-thought'), 'Remount preserves explicit collapse');
+thoughtToggle.onClick(); assert.equal(thoughtDisclosure.limit, 8000, 'Reopening retains the reading limit');
+assert.ok([...mountThought().texts.values()].some(node => node.id === 'thinking-content-thought'), 'Remount preserves explicit expansion');
+console.log('PASS process rows: sibling collapsed thought/tools, compact thought toggle/continuation, retained live rows, later steps and persistent results');
+
+// Tool rows actually connect their execution state to the shared motion component.
+const toolComponent = tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'ToolRow');
+const toolMethods = ['aboutToAppear', 'statusChanged', 'name', 'stat', 'initialRender'];
+class MotionLine extends Child {}
+Object.assign(context, { ThinkingLine: MotionLine, LoadingProgress: noUi, activeTool: execution => ['pending', 'running'].includes(execution.status),
+  toolTitle: name => name, toolDetail: () => '', toolStat: () => '', toolStatusLabel: status => status, toolIcon: () => ({ id: 'tool-icon' }),
+  t: (text, args = []) => text.replace(/\{(\d+)\}/g, (_match, index) => String(args[index])) });
+vm.runInNewContext(ts.transpileModule(`class ToolProbe extends RenderView {
+  ${toolComponent.members.filter(n => toolMethods.includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')}
+} exports.ToolProbe = ToolProbe;`, { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, context);
+const toolView = Object.assign(new context.exports.ToolProbe(), { execution: tool('animated'), appearance: {},
+  disclosure: new DisclosureStore().get('tool'), glyphShift: 0, glyphOpacity: 1,
+  getUIContext: () => ({ animateTo: (_options, update) => update() }) });
+toolView.aboutToAppear(); toolView.initialRender();
+const toolLine = [...toolView.children.values()].find(child => child instanceof MotionLine);
+assert.equal(toolLine.working, true); assert.equal(toolLine.label, '正在read_file');
+toolView.execution.status = 'complete'; toolView.statusChanged(); toolView.flush();
+assert.equal(toolLine.working, false); assert.equal(toolLine.label, 'read_file');
+assert.notEqual(toolLine.icon.id, 'tool-icon', 'Completed tool uses a completion mark');
+toolView.execution.status = 'failed'; toolView.statusChanged(); toolView.flush();
+assert.equal(toolLine.danger, true); assert.equal(toolLine.working, false);
+toolView.execution.status = 'pending'; toolView.statusChanged(); toolView.flush();
+assert.equal(toolLine.danger, false); assert.equal(toolLine.working, true);
+assert.equal([...toolView.children.values()].find(child => child instanceof MotionLine), toolLine, 'Status updates retain the motion component');
+console.log('PASS actual tool row motion: live title, completion mark, failure warning, pending state and retained component');

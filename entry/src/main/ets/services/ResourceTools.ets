@@ -17,8 +17,15 @@ export class ResourceTools implements AgentTools {
         'install 默认拒绝覆盖，只有用户要求更新时指定 name 为已有名称。remove/enable/disable 需要 name。每文件32000字符；手机不能执行附带脚本。',
       parameters: { type: 'object', properties: {
         'action': { type: 'string', description: 'Operation or authentication mode.', enum: ['create', 'update', 'install', 'remove', 'enable', 'disable'] },
-        'name': { type: 'string', description: 'See tool description.' }, 'document': { type: 'string', description: 'See tool description.' }, 'files': { type: 'string', description: 'See tool description.' },
-        'source': { type: 'string', description: 'See tool description.' }, 'paths': { type: 'string', description: 'See tool description.' }
+        'name': { type: 'string', description: 'See tool description.' }, 'document': { type: 'string', description: 'See tool description.' },
+        'files': { type: 'array', description: '完整参考文件数组，update 必填；[] 删除全部参考文件。', maxItems: 16,
+          items: { type: 'object', description: '一个参考文件', properties: {
+            'path': { type: 'string', description: 'Skill 内相对路径' },
+            'content': { type: 'string', description: '完整 UTF-8 文本', maxLength: 32000 }
+          }, required: ['path', 'content'], additionalProperties: false } },
+        'source': { type: 'string', description: 'See tool description.' },
+        'paths': { type: 'array', description: '安装时需要的相对参考文件路径', maxItems: 16,
+          items: { type: 'string', description: '相对参考文件路径' } }
       }, required: ['action'], additionalProperties: false } } },
       { type: 'function', executionMode: 'sequential', promptSnippet: '配置远程 MCP 服务',
         function: { name: 'mcp_manage', description: '管理远程 HTTPS MCP：list 查看当前服务；save 新增/更新（更新必须 id），需要 name/url/auth；remove/enable/disable/test 需要 id。' +

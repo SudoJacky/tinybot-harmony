@@ -14,24 +14,23 @@ export struct TurnChangesCard {
   @State private diffPage: number = 0;
   private visible(): FileDiff[] { return this.changes.slice(this.filePage * 10, (this.filePage + 1) * 10); }
   build() {
-    Column({ space: 8 }) {
+    Column({ space: 4 }) {
       Button({ type: ButtonType.Normal }) {
         Row({ space: 8 }) {
           Text(t('本轮修改 · {0} 个文件', [this.changes.length])).fontFamily(this.appearance.fontFamily).fontSize(13).layoutWeight(1).fontColor($r('app.color.text_primary'))
           SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(12).rotate({ angle: this.expanded ? 180 : 0 }).fontColor([$r('app.color.text_secondary')])
         }.width('100%')
-      }.fontFamily(this.appearance.fontFamily).height(44).backgroundColor(Color.Transparent).onClick(() => { this.expanded = !this.expanded; })
+      }.id('turn-changes-toggle').fontFamily(this.appearance.fontFamily).height(32).backgroundColor(Color.Transparent).onClick(() => { this.expanded = !this.expanded; })
       if (this.expanded) {
-        Text(t('比较本轮首次修改前与最后成功写入的内容。')).fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.text_tertiary')).width('100%')
         ForEach(this.visible(), (diff: FileDiff) => {
-          Column({ space: 6 }) {
+          Column({ space: 4 }) {
             Button({ type: ButtonType.Normal }) {
               Row({ space: 8 }) {
                 Text(diff.path).fontFamily(this.appearance.fontFamily).fontSize(12).layoutWeight(1).maxLines(2).fontColor($r('app.color.text_primary'))
                 Text('+' + diff.added).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor(this.appearance.accent)
                 Text('−' + diff.removed).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.danger'))
               }.width('100%')
-            }.fontFamily(this.appearance.fontFamily).constraintSize({ minHeight: 44 }).backgroundColor(Color.Transparent)
+            }.fontFamily(this.appearance.fontFamily).constraintSize({ minHeight: 36 }).backgroundColor(Color.Transparent)
               .onClick(() => { this.selected = this.selected === diff.path ? '' : diff.path; this.diffPage = 0; })
             if (this.selected === diff.path) {
               FileDiffCard({ diff: diff, page: this.diffPage })
@@ -53,6 +52,6 @@ export struct TurnChangesCard {
           }
         }
       }
-    }.width('100%').padding(10).borderRadius(12).backgroundColor($r('app.color.surface_variant'))
+    }.id('turn-changes-card').width('100%').padding({ left: 10, right: 10, top: 6, bottom: 6 }).borderRadius(12).backgroundColor($r('app.color.surface_variant'))
   }
 }

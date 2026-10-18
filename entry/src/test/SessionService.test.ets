@@ -22,6 +22,7 @@ import { defaultAssistantOptions } from '../main/ets/model/AssistantOptions';
 import { InteractionTools } from '../main/ets/services/InteractionTools';
 import { ToolApproval } from '../main/ets/services/ToolApproval';
 import { InputForm } from '../main/ets/model/RichArtifacts';
+import { MemoryOperation } from '../main/ets/model/MemoryMaintenance';
 
 class Gate {
   private release: () => void = () => {};
@@ -819,9 +820,10 @@ export default function sessionServiceTests(): void {
       expect(f.provider.requests.length).assertEqual(0); expect(active(await f.repository.load()).teamEnabled === true).assertFalse();
       expect(active(f.session.snapshot()).draft).assertEqual('');
       f.session.setDraft('简单回答即可'); await f.session.send();
-      expect(f.provider.requests[0].tools.some((tool) => tool.function.name === 'team_recruit')).assertTrue();
+      expect(f.provider.requests[0].tools.some((tool) => tool.function.name === 'tool_search' && tool.function.description.includes('team_recruit'))).assertTrue();
       expect(await f.session.setTeamEnabled(false)).assertTrue(); f.session.setDraft('普通模式'); await f.session.send();
       expect(f.provider.requests[1].tools.some((tool) => tool.function.name === 'team_recruit')).assertFalse();
+      expect(f.provider.requests[1].tools.some((tool) => tool.function.name === 'tool_search' && tool.function.description.includes('team_recruit'))).assertFalse();
     });
     it('chatCoordinatorRecruitsAndIntegratesWithoutManualPlanOrSecondTurn', 0, async () => {
       const f = new Fixture(); await f.session.initialize(); let parentRequests = 0;
@@ -904,7 +906,7 @@ export default function sessionServiceTests(): void {
     it('resumesInterruptedFormWithoutReplayingWritesOrConsumingDraftAndWaitsThroughContinuation', 0, async () => {
       const data = seed(); const thread = data.threads[0]; thread.draft = 'unsent draft';
       const definition: InputForm = { title: 'Choose', fields: [{ name: 'choice', label: 'Choice', type: 'text', required: true }] };
-      const form: ToolCall = { id: 'ask', type: 'function', function: { name: 'request_user_input', arguments: JSON.stringify({ data: JSON.stringify(definition) }) } };
+      const form: ToolCall = { id: 'ask', type: 'function', function: { name: 'request_user_input', arguments: JSON.stringify(definition) } };
       const write: ToolCall = { id: 'write', type: 'function', function: { name: 'write_file', arguments: '{"path":"a.txt","content":"saved"}' } };
       thread.messages = [{ id: 'u', role: 'user', content: 'task', status: 'complete', error: '' },
         { id: 'a', role: 'assistant', content: '', status: 'stopped', error: '', steps: [{ content: '', tools: [
@@ -922,10 +924,11 @@ export default function sessionServiceTests(): void {
       const data = seed(); data.productivity = defaultProductivity();
       data.productivity.memories = [{ id: 'manual', content: '用户偏好中文', threadId: '', updatedAt: 1 }];
       const f = new Fixture(data); await f.session.initialize();
+      const operations: MemoryOperation[] = [
+        { action: 'add', scope: 'global', content: '用户偏好中文' }, { action: 'add', scope: 'global', content: '用户喜欢简短回答' }
+      ];
       f.provider.respond = async (index) => index === 0 ? { content: '', toolCalls: [{ id: 'remember', type: 'function', function: {
-        name: 'memory', arguments: JSON.stringify({ operations: JSON.stringify([
-          { action: 'add', scope: 'global', content: '用户偏好中文' }, { action: 'add', scope: 'global', content: '用户喜欢简短回答' }
-        ]) }) } }] } : reply('已保存');
+        name: 'memory', arguments: JSON.stringify({ operations: operations }) } }] } : reply('已保存');
       f.session.setDraft('请记住我喜欢简短回答'); await f.session.send();
       expect(f.provider.requests.length).assertEqual(2);
       expect(f.provider.requests[1].messages.some((message) => message.role === 'tool' && message.content.includes('"duplicates":1'))).assertTrue();

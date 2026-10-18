@@ -37,8 +37,9 @@ export interface ToolCall {
 }
 
 export interface ToolProperty {
-  type: string;
+  type?: string;
   description: string;
+  anyOf?: ToolProperty[];
   properties?: Record<string, ToolProperty>;
   items?: ToolProperty;
   required?: string[];
@@ -46,6 +47,10 @@ export interface ToolProperty {
   enum?: string[];
   minimum?: number;
   maximum?: number;
+  minItems?: number;
+  maxItems?: number;
+  minLength?: number;
+  maxLength?: number;
 }
 
 export interface ToolParameters {

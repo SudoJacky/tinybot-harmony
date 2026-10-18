@@ -7,6 +7,7 @@ import { Cancellation } from './Cancellation';
 import { WorkspaceFiles } from './WorkspaceFiles';
 import { workspaceRelativePath } from './WorkspaceTools';
 import { UiDiagnosticError, repairGuidance } from '../model/UiRepair';
+import { INTERACTIVE_UI_INSTRUCTIONS } from '../model/InteractiveUiInstructions';
 
 interface PreviewArguments { path: string; title?: string; library?: string; height?: number; }
 interface PreviewImageInfo { width: number; height: number; viewportWidth: number; }
@@ -23,7 +24,7 @@ export class PreviewTools implements AgentTools {
   }
   definitions(): ToolDefinition[] {
     return [{ type: 'function', executionMode: 'sequential', promptSnippet: '发布文件预览',
-      promptGuidelines: ['将普通 JS、HTML 或 SVG 写入工作区，再调用 publish_preview 嵌入聊天。Three.js 使用 .js 文件和 library: "three"；不要编写 JSONL。客户端负责包装、启动检查和截图。检查留白、裁切和可读性后再结束；有问题时修改源文件并按原参数重新发布。此工具不打开独立 browser 会话。文件下载另用 present_files。'],
+      promptGuidelines: [INTERACTIVE_UI_INSTRUCTIONS],
       function: { name: 'publish_preview', description: '发布工作区 .js、.html 或 .svg 文件到聊天内的隔离 Web 卡片。JS 在空白页面中执行，可操作 document.body，支持 await；library="three" 预加载 THREE 和独立 OrbitControls。无 imports、网络、本地文件或存储访问。发布前检查启动并截图，成功后保存不可变快照。JSONL 不再支持。',
         parameters: { type: 'object', properties: {
           'path': { type: 'string', description: '现有工作区文件相对路径，.js/.html/.svg' },

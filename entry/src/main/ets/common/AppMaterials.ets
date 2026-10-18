@@ -8,6 +8,7 @@ export class AppMaterials {
   private static controlMaterial?: uiMaterial.Material;
   private static accentControlMaterial?: uiMaterial.Material;
   private static surfaceMaterial?: uiMaterial.Material;
+  private static readingSurfaceMaterial?: uiMaterial.Material;
   private static effect: LightEffect = 'auto';
   private static accent: ResourceColor = $r('app.color.accent_material');
 
@@ -18,6 +19,7 @@ export class AppMaterials {
     AppMaterials.controlMaterial = undefined;
     AppMaterials.accentControlMaterial = undefined;
     AppMaterials.surfaceMaterial = undefined;
+    AppMaterials.readingSurfaceMaterial = undefined;
   }
 
   static get style(): uiMaterial.ImmersiveStyle {
@@ -75,6 +77,17 @@ export class AppMaterials {
       AppMaterials.surfaceMaterial = new uiMaterial.ImmersiveMaterial({ style: AppMaterials.style, colorInvert: true });
     }
     return AppMaterials.surfaceMaterial;
+  }
+
+  // Long sheets need a denser, tinted backing so underlying text cannot compete with their content.
+  static get readingSurface(): uiMaterial.Material {
+    if (AppMaterials.effect === 'off') { return uiMaterial.Material.empty; }
+    if (!AppMaterials.readingSurfaceMaterial) {
+      AppMaterials.readingSurfaceMaterial = new uiMaterial.ImmersiveMaterial({
+        style: uiMaterial.ImmersiveStyle.THICK, materialColor: $r('app.color.reading_surface_tint'), colorInvert: false
+      });
+    }
+    return AppMaterials.readingSurfaceMaterial;
   }
 
   private static lightEffect(): uiMaterial.LightEffectOptions {

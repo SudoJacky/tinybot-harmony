@@ -2,7 +2,7 @@ import { AppearanceStyle } from './AppearanceStyle';
 import { t } from '../model/I18n';
 import { Btn, Font, Motion, Radius, Space } from './Theme';
 import { LiquidToggle } from './LiquidToggle';
-import { AnimatorResult, uiMaterial } from '@kit.ArkUI';
+import { AnimatorResult, ColorMetrics, uiMaterial } from '@kit.ArkUI';
 import { SegmentFrame, SegmentedMotion } from './SegmentedMotion';
 import { WindowViewport } from '../viewmodel/WindowViewport';
 
@@ -89,24 +89,25 @@ export struct NavRow {
   icon?: Resource;
   image?: Resource;
   tintImage: boolean = false;
-  iconWidth: number = 20;
   compId: string = '';
   onTap: () => void = () => {};
 
   build() {
     Row({ space: Space.md }) {
-      if (this.image) {
-        if (this.tintImage) {
-          Image(this.image).width(28).height(28).objectFit(ImageFit.Contain)
-            .fillColor(this.muted ? $r('app.color.text_tertiary') : $r('app.color.text_primary'))
-            .accessibilityLevel('no')
-        } else {
-          Image(this.image).width(28).height(28).objectFit(ImageFit.Contain)
-            .opacity(this.muted ? 0.5 : 1).accessibilityLevel('no')
-        }
-      } else if (this.icon) {
-        SymbolGlyph(this.icon).fontSize(20).width(this.iconWidth)
-          .fontColor([this.accent ? this.appearance.accent : this.muted ? $r('app.color.text_tertiary') : $r('app.color.text_secondary')])
+        if (this.image || this.icon) {
+          Stack() {
+            if (this.image) {
+              if (this.tintImage) {
+                Image(this.image).width(28).height(28).objectFit(ImageFit.Contain)
+                  .fillColor(this.muted ? $r('app.color.text_tertiary') : $r('app.color.text_primary'))
+              } else {
+                Image(this.image).width(28).height(28).objectFit(ImageFit.Contain).opacity(this.muted ? 0.5 : 1)
+              }
+            } else if (this.icon) {
+              SymbolGlyph(this.icon).fontSize(20)
+                .fontColor([this.accent ? this.appearance.accent : this.muted ? $r('app.color.text_tertiary') : $r('app.color.text_secondary')])
+            }
+          }.width(28).height(28).accessibilityLevel('no-hide-descendants')
       }
       Column({ space: 3 }) {
         Text(this.title).fontFamily(this.appearance.fontFamily).fontSize(Font.body).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -144,11 +145,17 @@ export struct SwitchRow {
   @Prop subtitle: string = '';
   @Prop isOn: boolean = false;
   @Prop disabled: boolean = false;
+  icon?: Resource;
   compId: string = '';
   onChange: (value: boolean) => void = () => {};
 
   build() {
     Row({ space: Space.md }) {
+      if (this.icon) {
+        Stack() {
+          SymbolGlyph(this.icon).fontSize(20).fontColor([$r('app.color.text_secondary')])
+        }.width(28).height(28).accessibilityLevel('no-hide-descendants')
+      }
       Column({ space: 3 }) {
         Text(this.title).fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontColor($r('app.color.text_primary'))
         if (this.subtitle.length > 0) {
@@ -345,7 +352,8 @@ export struct Segmented {
 // One retained status line: breathe/sheen while working, then softly settle into its final label.
 @Component
 export struct ThinkingLine {
-  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
+  @StorageProp('tinybot.appearance.style') @Watch('syncMotion') private appearance: AppearanceStyle = new AppearanceStyle();
+  @StorageProp('tinybot.foreground') @Watch('syncMotion') private foreground: boolean = true;
   @Prop @Watch('syncState') label: string = t("正在思考…");
   @Prop @Watch('syncState') working: boolean = true;
   @Prop compact: boolean = false;
@@ -354,21 +362,27 @@ export struct ThinkingLine {
   @State private breath: number = 0.58;
   @State private sweep: number = -100;
   @State private currentLabel: string = '';
+  @State private currentGlyphs: string[] = [];
   @State private previousLabel: string = '';
   @State private labelMix: number = 1;
   private mounted: boolean = false;
   private visible: boolean = false;
   private loop?: AnimatorResult;
   private settling?: AnimatorResult;
+  private ink: ColorMetrics = ColorMetrics.rgba(0, 0, 0, 1);
 
-  aboutToAppear(): void { this.mounted = true; this.currentLabel = this.label; }
+  aboutToAppear(): void { this.mounted = true; this.currentLabel = this.label; this.currentGlyphs = Array.from(this.label); }
   aboutToDisappear(): void {
     this.mounted = false; this.visible = false; this.stopLoop(); this.stopSettle();
   }
   private stopLoop(): void { const loop = this.loop; this.loop = undefined; loop?.cancel(); }
   private stopSettle(): void { const settling = this.settling; this.settling = undefined; settling?.cancel(); }
   private syncMotion(): void {
-    if (!this.mounted || !this.visible || !this.working) { this.stopLoop(); return; }
+    if (this.mounted) { this.ink = ColorMetrics.resourceColor($r('app.color.text_primary')); }
+    if (!this.mounted || !this.visible || !this.foreground || this.appearance.effectStrength === 0) {
+      this.stopLoop(); this.stopSettle(); this.labelMix = 1; this.previousLabel = ''; return;
+    }
+    if (!this.working) { this.stopLoop(); return; }
     if (this.loop) { return; }
     const loop = this.getUIContext().createAnimator({ duration: 1800, easing: 'linear', delay: 0,
       fill: 'none', direction: 'normal', iterations: -1, begin: 0, end: 1 });
@@ -384,9 +398,11 @@ export struct ThinkingLine {
     this.syncMotion();
     if (this.currentLabel === this.label) { return; }
     this.stopSettle();
-    this.previousLabel = this.visible ? this.currentLabel : '';
+    const animate = this.visible && this.foreground && this.appearance.effectStrength > 0;
+    this.previousLabel = animate ? this.currentLabel : '';
     this.currentLabel = this.label;
-    if (!this.visible) { this.labelMix = 1; return; }
+    this.currentGlyphs = Array.from(this.label);
+    if (!animate) { this.labelMix = 1; return; }
     this.labelMix = 0;
     const settling = this.getUIContext().createAnimator({ duration: 280, easing: 'ease-out', delay: 0,
       fill: 'forwards', direction: 'normal', iterations: 1, begin: 0, end: 1 });
@@ -403,14 +419,14 @@ export struct ThinkingLine {
     this.syncMotion();
   }
 
-  @Builder
-  shimmer() {
-    Column().width('50%').height('100%')
-      .linearGradient({ angle: 90, colors: [[Color.Transparent, 0], [$r('app.color.text_primary'), 0.5], [Color.Transparent, 1]] })
-      .translate({ x: this.sweep + '%' })
-      .opacity(this.working ? 1 : 1 - this.labelMix)
-      .blendMode(BlendMode.SRC_ATOP)
-      .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+  // Paint the sheen in glyph ink, so no compositing rectangle can escape a text mask.
+  private sheenColor(index: number): ResourceColor {
+    if (this.danger) { return $r('app.color.danger'); }
+    if (!this.working) { return $r('app.color.text_tertiary'); }
+    if (!this.foreground || this.appearance.effectStrength === 0) { return $r('app.color.text_secondary'); }
+    const position = (index + 0.5) * 100 / Math.max(1, this.currentGlyphs.length);
+    const shine = Math.max(0, 1 - Math.abs(position - this.sweep) / 55);
+    return ColorMetrics.rgba(this.ink.red, this.ink.green, this.ink.blue, this.ink.alpha / 255 * (0.55 + 0.45 * shine)).color;
   }
 
   build() {
@@ -423,10 +439,13 @@ export struct ThinkingLine {
         Image($r('app.media.tinybot')).width(18).height(18)
           .opacity(this.working ? this.breath : 0.62)
       }
-      // The band only paints over the label's own pixels (SRC_ATOP inside an offscreen layer).
       Stack({ alignContent: Alignment.Start }) {
-        Text(this.currentLabel).fontFamily(this.appearance.fontFamily).fontSize(this.compact ? 13 : 15).maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_tertiary'))
+        Text() {
+          ForEach(this.currentGlyphs, (glyph: string, index: number) => {
+            Span(glyph).fontColor(this.sheenColor(index))
+          }, (glyph: string, index: number) => `${index}:${glyph}`)
+        }.fontFamily(this.appearance.fontFamily).fontSize(this.compact ? 13 : 15).maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
           .opacity(this.labelMix).blur(2 * (1 - this.labelMix)).translate({ y: 2 * (1 - this.labelMix) })
         if (this.previousLabel) {
           Text(this.previousLabel).fontFamily(this.appearance.fontFamily).fontSize(this.compact ? 13 : 15).maxLines(1).width('100%')
@@ -435,9 +454,6 @@ export struct ThinkingLine {
             .position({ x: 0, y: 0 }).accessibilityLevel('no')
         }
       }
-      // An overlay follows the measured label size without stretching the message row.
-      .overlay(this.shimmer(), { align: Alignment.Start })
-      .blendMode(BlendMode.SRC_OVER, BlendApplyType.OFFSCREEN)
       .flexShrink(1)
     }
     .constraintSize({ maxWidth: '100%' }).flexShrink(1)

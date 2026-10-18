@@ -22,6 +22,9 @@ function load(file) {
 const { Fixture, seed } = load(path.join(root, 'test/SessionService.test'));
 const { ChatViewModel, MessageViewModel } = load(path.join(root, 'main/ets/viewmodel/ChatViewModel'));
 const gate = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
+// Team tools are deferred; the initial request exposes authorized names through tool_search.
+const teamAvailable = request => request.tools.some(tool => tool.function.name === 'tool_search' &&
+  /\bteam_recruit:/.test(tool.function.description));
 (async () => {
   const data = seed();
   data.projects = [{ id: 'project', name: 'Project', instructions: '', workspaceId: 'project-workspace', createdAt: 1, updatedAt: 1 }];
@@ -92,7 +95,7 @@ const gate = () => { let resolve; const promise = new Promise(done => { resolve 
   assert.equal(f.provider.requests.length, 0, 'mode and message must be saved before model request');
   assert.equal(await app.setTeamEnabled(false), false, 'running turn keeps its selected mode');
   release.resolve(); await sending;
-  assert.equal(f.provider.requests[0].tools.some(tool => tool.function.name === 'team_recruit'), true);
+  assert.equal(teamAvailable(f.provider.requests[0]), true);
   assert.equal(JSON.parse(f.repository.saved).threads[0].teamEnabled, true);
   const sent = new Fixture(await f.repository.load()), sentApp = new ChatViewModel();
   await sentApp.initialize(sent.session); assert.equal(sentApp.active.teamEnabled, true);
@@ -104,7 +107,7 @@ const gate = () => { let resolve; const promise = new Promise(done => { resolve 
   await f.session.flushDraft();
   assert.equal(JSON.parse(f.repository.saved).threads[0].teamEnabled, true, 'pending disable must not leak into autosave');
   f.session.setDraft('Ordinary task'); await f.session.send();
-  assert.equal(f.provider.requests[1].tools.some(tool => tool.function.name === 'team_recruit'), false);
+  assert.equal(teamAvailable(f.provider.requests[1]), false);
   assert.equal(JSON.parse(f.repository.saved).threads[0].teamEnabled, false);
   console.log('PASS both enable and disable commit with the submitted message before the model runs');
 
@@ -128,6 +131,6 @@ const gate = () => { let resolve; const promise = new Promise(done => { resolve 
   assert.equal(slash.repository.writes.length, writes);
   assert.equal(slash.provider.requests.length, 0);
   slash.session.setDraft('Task after command'); await slash.session.send();
-  assert.equal(slash.provider.requests[0].tools.some(tool => tool.function.name === 'team_recruit'), true);
+  assert.equal(teamAvailable(slash.provider.requests[0]), true);
   console.log('PASS bare /team uses the same memory-only selection');
 })().catch(error => { console.error(error); process.exitCode = 1; });

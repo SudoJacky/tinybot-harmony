@@ -10,13 +10,19 @@ import { text } from '@kit.ArkGraphics2D';
 
 let readingFonts: string[] | undefined;
 
+export function appearanceChoiceTitle(choice: string): string {
+  return choice === 'mode' ? t('明暗模式') : choice === 'font' ? t('界面字体') :
+    choice === 'custom' ? t('自定义颜色') : t('光感效果');
+}
+
 @Component
 export struct AppearancePanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.appearance.options') private options: AppearanceOptions = defaultAppearance();
   @StorageProp('tinybot.appearance.dark') private dark: boolean = false;
-  @State private sheet: boolean = false;
-  @State private choice: string = '';
+  @Prop choice: string = '';
+  onChoice: (choice: string) => void = () => {};
+  onDone: () => void = () => {};
   @State private error: string = '';
   @State private fonts: string[] = [''];
   @State private customColor: string = '#216451';
@@ -32,7 +38,11 @@ export struct AppearancePanel {
     { color: '#0000FF', offset: 4 / 6 }, { color: '#FF00FF', offset: 5 / 6 }, { color: '#FF0000', offset: 1 }
   ]);
 
-  aboutToAppear(): void { this.mounted = true; }
+  aboutToAppear(): void {
+    this.mounted = true;
+    if (this.choice === 'custom') { this.updateColor(this.options.customColor); }
+    if (this.choice === 'font') { this.loadFonts(); }
+  }
   aboutToDisappear(): void { this.mounted = false; }
 
   private loadFonts(): void {
@@ -81,7 +91,7 @@ export struct AppearancePanel {
     try {
       AppearancePreferences.select(next);
       this.error = '';
-      this.sheet = false;
+      if (this.choice) { this.onDone(); }
     } catch (error) { this.error = t('无法保存外观设置：{0}', [(error as Error).message]); }
   }
   private selectMode(mode: AppearanceMode): void { const next = copyAppearance(this.options); next.mode = mode; this.save(next); }
@@ -93,10 +103,7 @@ export struct AppearancePanel {
     const next = copyAppearance(this.options); next.accent = 'custom'; next.customColor = this.customColor; this.save(next);
   }
   private open(choice: string): void {
-    this.choice = choice;
-    if (choice === 'custom') { this.updateColor(this.options.customColor); }
-    this.sheet = true;
-    if (choice === 'font') { this.loadFonts(); }
+    this.onChoice(choice);
   }
   private validColor(): boolean { return /^#[0-9A-Fa-f]{6}$/.test(this.customColor); }
   private updateColor(value: string): void {
@@ -116,10 +123,6 @@ export struct AppearancePanel {
     this.saturation = Math.max(0, Math.min(1, finger.localX / this.paletteWidth));
     this.colorValue = 1 - Math.max(0, Math.min(1, finger.localY / 160));
     this.customColor = hsvColor(this.hue, this.saturation, this.colorValue);
-  }
-  private sheetTitle(): string {
-    return this.choice === 'mode' ? t('明暗模式') : this.choice === 'font' ? t('界面字体') :
-      this.choice === 'custom' ? t('自定义颜色') : t('光感效果');
   }
 
   @Builder
@@ -238,14 +241,15 @@ export struct AppearancePanel {
     .hitTestBehavior(HitTestMode.None)
   }
 
-  build() {
+  @Builder
+  appearancePage() {
     Scroll() {
       Column({ space: Space.sm }) {
         this.preview()
         SectionHeader({ title: t('主题') })
         GroupCard() {
           Column() {
-            NavRow({ title: t('明暗模式'), value: this.modeName(this.options.mode), compId: 'appearance-mode', onTap: () => this.open('mode') })
+            NavRow({ title: t('明暗模式'), icon: $r('sys.symbol.circle'), value: this.modeName(this.options.mode), compId: 'appearance-mode', onTap: () => this.open('mode') })
             RowDivider()
             Column({ space: Space.md }) {
               Text(t('主题色')).fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontColor($r('app.color.text_primary')).width('100%')
@@ -269,14 +273,14 @@ export struct AppearancePanel {
               }.width('100%')
             }.padding(Space.lg).width('100%')
             RowDivider()
-            NavRow({ title: t('自定义颜色'), value: this.options.accent === 'custom' ? this.options.customColor : '',
+            NavRow({ title: t('自定义颜色'), icon: $r('sys.symbol.picture'), value: this.options.accent === 'custom' ? this.options.customColor : '',
               compId: 'appearance-custom-color', onTap: () => this.open('custom') })
           }
         }
         SectionHeader({ title: t('字体') })
         GroupCard() {
           Column() {
-            NavRow({ title: t('界面字体'), value: this.fontName(this.options.fontFamily), subtitle: t('代码内容保持等宽显示。'),
+            NavRow({ title: t('界面字体'), icon: $r('sys.symbol.textformat'), value: this.fontName(this.options.fontFamily),
               compId: 'appearance-font', onTap: () => this.open('font') })
             RowDivider()
             Column({ space: Space.md }) {
@@ -289,7 +293,7 @@ export struct AppearancePanel {
         }
         SectionHeader({ title: t('光感与材质') })
         GroupCard() {
-          NavRow({ title: t('光感效果'), value: this.effectName(this.options.lightEffect), subtitle: this.effectDescription(this.options.lightEffect),
+          NavRow({ title: t('光感效果'), icon: $r('sys.symbol.wand_and_stars'), value: this.effectName(this.options.lightEffect),
             compId: 'appearance-effect', onTap: () => this.open('effect') })
         }
         if (this.error) { Banner({ text: this.error, compId: 'appearance-error' }) }
@@ -297,7 +301,11 @@ export struct AppearancePanel {
           .onClick(() => this.save(defaultAppearance())).margin({ top: Space.sm })
       }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.xl })
     }.width('100%').height('100%').scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring).align(Alignment.Top)
-    .bindSheet($$this.sheet, this.choices(), { title: { title: this.sheetTitle() }, height: SheetSize.FIT_CONTENT,
-      dragBar: true, systemMaterial: this.appearance.surface })
+  }
+  build() {
+    if (this.choice) {
+      Scroll() { this.choices() }.width('100%').height('100%').align(Alignment.Top)
+        .scrollBar(BarState.Auto).edgeEffect(EdgeEffect.Spring)
+    } else { this.appearancePage() }
   }
 }

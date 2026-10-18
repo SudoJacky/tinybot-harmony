@@ -109,7 +109,7 @@ export struct BackupPanel {
             NavRow({ title: t('刷新备份列表'), subtitle: t('获取其他设备的备份，并重试待上传的备份'),
               compId: 'refresh-cloud-backups', icon: $r('sys.symbol.arrow_clockwise'), disabled: this.locked(), onTap: () => this.cloud('refresh') })
             RowDivider()
-            NavRow({ title: t('打开华为云空间'), compId: 'open-cloud-settings', disabled: this.busy, onTap: () => this.openCloudSettings() })
+            NavRow({ title: t('打开华为云空间'), icon: $r('sys.symbol.gearshape'), compId: 'open-cloud-settings', disabled: this.busy, onTap: () => this.openCloudSettings() })
           }
         }
         if (this.busy) {
@@ -127,7 +127,7 @@ export struct BackupPanel {
               ForEach(this.cloudItems, (item: CloudBackupItem, index: number) => {
                 if (index > 0) { RowDivider() }
                 Row() {
-                  NavRow({ title: this.date(item), subtitle: this.detail(item), compId: 'cloud-backup-' + item.name,
+                  NavRow({ title: this.date(item), icon: $r('sys.symbol.archivebox'), subtitle: this.detail(item), compId: 'cloud-backup-' + item.name,
                     disabled: this.locked(), onTap: () => this.confirmRestore(item) }).layoutWeight(1)
                   IconButton({ icon: $r('sys.symbol.trash'), tint: $r('app.color.danger'), label: t('删除备份'),
                     compId: 'delete-cloud-backup-' + item.name, disabled: this.locked(), onTap: () => this.confirmDelete(item) })

@@ -72,7 +72,19 @@ assert.equal(row.inlineSpans(paragraph), spans); assert.equal(parseCalls, calls)
 row.model.update(markdownBlocks(paragraph + '新')); clock += 10; row.refresh();
 assert.equal(row.inlineSpans(paragraph + '新').map(x => x.text).join(''), '普通 粗体 \u00a0代码\u00a0🙂新');
 assert.equal(row.reveal.active(clock), true);
-row.streaming = false; row.refresh(); assert.equal(row.reveal.active(clock), false); assert.equal(timers.size, 0);
+clock += 64;
+const fadingOpacity = row.reveal.spans('0', row.inlineSpans(paragraph + '新'), clock).at(-1).opacity;
+row.streaming = false; row.refresh();
+assert.equal(row.reveal.spans('0', row.inlineSpans(paragraph + '新'), clock).at(-1).opacity, fadingOpacity,
+  'completion must preserve the final chunk fade instead of jumping to opaque');
+assert.equal(row.reveal.active(clock), true); assert.equal(timers.size, 1);
+let revealTicks = 0;
+while (timers.size) {
+  assert.ok(revealTicks++ < 20, 'completion must stop scheduling once the fade settles');
+  const [id, tick] = timers.entries().next().value; timers.delete(id); clock += 16; tick();
+}
+assert.equal(row.reveal.spans('0', row.inlineSpans(paragraph + '新'), clock).at(-1).opacity, 1);
+assert.equal(row.reveal.active(clock), false); assert.equal(row.revealTimer, -1);
 row.streaming = true; row.visible = false; clock += 10; row.model.update(markdownBlocks(paragraph + '新尾')); row.refresh();
 assert.equal(timers.size, 0, 'offscreen updates must not schedule reveal clocks');
 const code = Array.from({ length: 2000 }, (_, i) => `const x${i} = ${i};`).join('\n');

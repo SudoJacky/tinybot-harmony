@@ -47,16 +47,14 @@ export struct ContextDetails {
     return (label ? label + (name ? ' · ' + name : '') : name) || this.title(item.kind);
   }
   private records(): (RequestUsage | undefined)[] {
-    const answers = this.app.active.messages.filter((message) => message.role === 'assistant');
-    return answers.length ? answers[answers.length - 1].steps.map((step) => step.usage) : [];
+    return this.app.active.messages.filter((message) => message.role === 'assistant')
+      .flatMap((message) => message.steps.map((step) => step.usage));
   }
   private usage(): MessageUsageSummary {
     const records = this.records(); const summary = summarizeUsage(records);
     summary.requests = records.length;
     return summary;
   }
-  private latest(): RequestUsage | undefined { const records = this.records(); return records[records.length - 1]; }
-  private reported(value: number | undefined): string { return value === undefined ? t('未报告') : value.toString(); }
   private counted(value: number, reports: number): string {
     return reports === 0 ? t('未报告') : value.toString() + (reports < this.usage().requests ? t('（部分）') : '');
   }
@@ -105,16 +103,14 @@ export struct ContextDetails {
       }.id('context-breakdown').width('100%').alignItems(HorizontalAlign.Start)
         .padding(Space.lg).borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
       Column({ space: 12 }) {
-        Text(t('实际用量（服务端报告）')).fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
-        this.metric(t('最近一次输入'), this.reported(this.latest()?.tokens?.input))
-        this.metric(t('最近一次输出'), this.reported(this.latest()?.tokens?.output))
-        this.metric(t('本轮模型请求'), this.usage().requests.toString())
-        this.metric(t('本轮累计输入'), this.counted(this.usage().input, this.usage().reported))
-        this.metric(t('本轮累计输出'), this.counted(this.usage().output, this.usage().reported))
+        Text(t('会话累计用量（服务端报告）')).fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
+        this.metric(t('会话模型请求'), this.usage().requests.toString())
+        this.metric(t('会话累计输入'), this.counted(this.usage().input, this.usage().reported))
+        this.metric(t('会话累计输出'), this.counted(this.usage().output, this.usage().reported))
         this.metric(t('缓存读取 Token'), this.counted(this.usage().cached, this.usage().cacheReports))
         this.metric(t('缓存写入 Token'), this.counted(this.usage().cacheWrite, this.usage().writeReports))
         this.metric(t('推理 Token'), this.counted(this.usage().reasoning, this.usage().reasoningReports))
-        Text(t('仅统计本轮聊天记录中的模型请求，不含标题、记忆整理或团队员工。缓存属于输入，推理属于输出，不重复相加。')).fontFamily(this.appearance.fontFamily)
+        Text(t('累计当前会话聊天记录中的模型请求，不含标题、记忆整理或团队员工。缓存属于输入，推理属于输出，不重复相加。')).fontFamily(this.appearance.fontFamily)
           .fontSize(12).lineHeight(18).fontColor($r('app.color.text_tertiary'))
         if (this.usage().reported < this.usage().requests) {
           Text(t('{0} 次请求尚未报告用量', [this.usage().requests - this.usage().reported])).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_tertiary'))

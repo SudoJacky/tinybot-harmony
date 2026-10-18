@@ -50,19 +50,30 @@ assert.deepEqual(tall.animations[0].start, [0, 20, 1, 0.72], 'Oversized content 
 function panel(messages = []) {
   let update;
   const value = Object.assign(new globals.exports.Panel(), { thread: { id: 'thread', messages }, sendingMessageId: '',
+    keyboardFocusRequest: 0, composerFocused: true, clearedFocus: 0,
     speechActive: () => false, scroller: { scrollEdge() {} }, follow() {},
-    getUIContext: () => ({ px2vp: x => x, postFrameCallback() {}, getComponentUtils: () => ({
+    getUIContext: () => ({ px2vp: x => x, postFrameCallback() {},
+      getFocusController: () => ({ clearFocus() { value.clearedFocus++; } }), getComponentUtils: () => ({
       getRectangleById: () => ({ windowOffset: { x: 0, y: 500 }, size: { width: 320, height: 44 } }) }) }),
     app: { send: cb => { update = cb; } } });
   value.send(); return { value, update: () => update() };
 }
 const first = panel(); first.update(); assert.equal(first.value.sendingMessageId, '', 'Validation failure/commands do not fly');
+assert.equal(first.value.clearedFocus, 0, 'Rejected sends keep the keyboard and input focus');
+assert.equal(first.value.composerFocused, true);
 first.value.thread.messages.push({ id: 'first', role: 'user' }); first.update();
 assert.equal(first.value.sendingMessageId, 'first', 'First message in an empty thread must fly');
+assert.equal(first.value.clearedFocus, 1, 'An accepted message dismisses the keyboard');
+assert.equal(first.value.composerFocused, false);
+assert.equal(first.value.keyboardFocusRequest, 1, 'Invalidate any pending composer focus request');
 first.value.finishSendFlight('first');
+first.value.composerFocused = true;
 first.value.thread.messages.push({ id: 'queued', role: 'user' }); first.update();
 assert.equal(first.value.sendingMessageId, '', 'Queue/output updates do not replay a completed send');
+assert.equal(first.value.clearedFocus, 1, 'Streaming and queued output do not dismiss a reopened keyboard');
+assert.equal(first.value.composerFocused, true);
 const switched = panel([{ id: 'old', role: 'user' }]); switched.value.thread.id = 'other';
 switched.value.thread.messages.push({ id: 'elsewhere', role: 'user' }); switched.update();
 assert.equal(switched.value.sendingMessageId, '', 'A different thread cannot inherit a pending send');
-console.log('PASS send origin, landing, one-shot lifecycle, history, navigation, tall content, first message, rejected send and queued output');
+assert.equal(switched.value.clearedFocus, 0, 'Late updates from another thread do not change keyboard focus');
+console.log('PASS send origin, landing, one-shot lifecycle, history, navigation, tall content, accepted-send keyboard dismissal, rejected send and queued output');

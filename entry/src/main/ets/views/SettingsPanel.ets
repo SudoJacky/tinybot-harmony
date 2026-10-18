@@ -1,7 +1,6 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
-import { AppLanguage } from '../model/I18n';
-import { LanguagePreferences } from '../services/LanguagePreferences';
+import { languageName } from './LanguagePanel';
 import { BrowserSession } from '../services/BrowserSession';
 import { ChatViewModel, SettingsViewModel } from '../viewmodel/ChatViewModel';
 import { SettingsToggle } from '../services/SessionContracts';
@@ -17,14 +16,13 @@ export struct SettingsPanel {
   @StorageProp('tinybot.developer.enabled') private developerEnabled: boolean = false;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.language') private language: string = 'system';
-  @State private languageError: string = '';
-  @State private showLanguage: boolean = false;
-  @State private showPresets: boolean = false;
+  @Prop presetsOnly: boolean = false;
   @State private assistantDraft: AssistantOptions = defaultAssistantOptions();
   @ObjectLink app: ChatViewModel;
   @ObjectLink settings: SettingsViewModel;
   @ObjectLink browser: BrowserSession;
   onEditProvider: (id: string, preset: string) => void = () => {};
+  onAddProvider: () => void = () => {};
   onSkills: () => void = () => {};
   onUserDocument: () => void = () => {};
   onUsage: () => void = () => {};
@@ -32,6 +30,7 @@ export struct SettingsPanel {
   onSearch: () => void = () => {};
   onBackup: () => void = () => {};
   onAppearance: () => void = () => {};
+  onLanguage: () => void = () => {};
   onSupport: (page: string) => void = () => {};
   onTools: (tab: string) => void = () => {};
   private pendingSave: Promise<void> = Promise.resolve();
@@ -80,53 +79,26 @@ export struct SettingsPanel {
 
   private userDocumentPreview(): string {
     const document = (this.app.config.userDocument || '').trim();
-    return document.length > 0 ? document.replace(/\s+/g, ' ') : t('填写称呼、背景和回答偏好');
+    return document.replace(/\s+/g, ' ');
   }
 
-  private languageName(choice: string): string {
-    return choice === 'system' ? t('跟随系统') : choice === 'zh-CN' ? '简体中文' : 'English';
-  }
-
-  @Builder
-  languageSheet() {
-    Column() {
-      Column() {
-        Column() {
-          ForEach(['system', 'zh-CN', 'en'], (choice: string, index: number) => {
-            if (index > 0) { RowDivider() }
-            NavRow({ title: this.languageName(choice), trailing: 'select', active: this.language === choice,
-              compId: 'language-' + choice, disabled: !this.canEdit(), onTap: async () => {
-                await this.app.flushDraft();
-                if (this.app.saveError) { return; }
-                try { LanguagePreferences.select(choice as AppLanguage); this.languageError = ''; this.showLanguage = false; }
-                catch (_) { this.languageError = t('无法保存语言设置，请重试。'); }
-              } })
-          }, (choice: string) => choice)
-        }
-      }
-      if (this.languageError) { Banner({ text: this.languageError }).margin({ top: Space.md }) }
-    }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.xl })
-  }
   private choosePreset(id: string): void {
-    this.showPresets = false;
-    setTimeout(() => this.onEditProvider('', id), 250);
+    this.onEditProvider('', id);
   }
   @Builder
-  presetsSheet() {
+  presetsPage() {
     Scroll() {
       Column() {
-        Text(t('选择服务后，地址和常用模型会自动填好。')).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
-          .width('100%').padding({ bottom: 12 })
         GroupCard() {
           Column() {
             ForEach(this.app.providerPresets, (preset: ProviderInfo, index: number) => {
               if (index > 0) { RowDivider() }
               NavRow({ title: preset.name, subtitle: protocolName(preset.protocol), compId: 'preset-' + preset.id,
-                image: providerLogo(preset.id), tintImage: monochromeProviderLogo(preset.id), icon: $r('sys.symbol.cloud'), iconWidth: 28,
+                image: providerLogo(preset.id), tintImage: monochromeProviderLogo(preset.id), icon: $r('sys.symbol.cloud'),
                 disabled: !this.canEdit(), onTap: () => this.choosePreset(preset.id) })
             }, (preset: ProviderInfo) => preset.id)
             RowDivider()
-            NavRow({ title: t('添加自定义服务'), compId: 'add-custom-provider', icon: $r('sys.symbol.plus'), iconWidth: 28, accent: true,
+            NavRow({ title: t('添加自定义服务'), compId: 'add-custom-provider', icon: $r('sys.symbol.plus'), accent: true,
               disabled: !this.canEdit(), onTap: () => this.choosePreset('') })
           }
         }
@@ -149,7 +121,8 @@ export struct SettingsPanel {
     }
   }
 
-  build() {
+  @Builder
+  settingsPage() {
     Scroll() {
       Column() {
         this.statusBanners()
@@ -157,18 +130,18 @@ export struct SettingsPanel {
         GroupCard() {
           Column() {
             ForEach(this.app.providerProfiles, (profile: ProviderProfile) => {
-              NavRow({ title: profile.name, compId: 'edit-provider-' + profile.id, icon: $r('sys.symbol.cloud'), iconWidth: 28,
+              NavRow({ title: profile.name, compId: 'edit-provider-' + profile.id, icon: $r('sys.symbol.cloud'),
                 image: providerLogo(profile.presetId || ''), tintImage: monochromeProviderLogo(profile.presetId || ''),
                 subtitle: t("{0} · {1} 个模型", [protocolName(profile.protocol), profile.models.length]),
                 value: profile.enabled ? '' : t("已停用"), muted: !profile.enabled, disabled: !this.canEdit(),
                 onTap: () => this.onEditProvider(profile.id, '') })
               RowDivider()
             }, (profile: ProviderProfile) => JSON.stringify(profile))
-            NavRow({ title: t('添加模型服务'), compId: 'add-provider', icon: $r('sys.symbol.plus'), iconWidth: 28, accent: true,
-              disabled: !this.canEdit(), onTap: () => { this.showPresets = true; } })
+            NavRow({ title: t('添加模型服务'), compId: 'add-provider', icon: $r('sys.symbol.plus'), accent: true,
+              disabled: !this.canEdit(), onTap: this.onAddProvider })
             RowDivider()
-            NavRow({ title: t('模型分工与能力'), subtitle: t('自动选择模型、专用模型与能力配置'), compId: 'open-model-settings',
-              icon: $r('sys.symbol.gearshape'), iconWidth: 28, disabled: !this.canEdit(), onTap: () => this.onModels() })
+            NavRow({ title: t('模型分工与能力'), compId: 'open-model-settings',
+              icon: $r('sys.symbol.gearshape'), disabled: !this.canEdit(), onTap: () => this.onModels() })
           }
         }
         SectionHeader({ title: t('助手偏好') })
@@ -180,7 +153,7 @@ export struct SettingsPanel {
             NavRow({ title: t('提示词模板'), compId: 'open-templates', icon: $r('sys.symbol.doc_plaintext'),
               disabled: !this.canEdit(), onTap: () => this.onTools('templates') })
             RowDivider()
-            SwitchRow({ title: t('自动保存任务结果'), subtitle: t('把成功的回答归档到工作区的“任务结果”目录。'), compId: 'save-summary',
+            SwitchRow({ title: t('自动保存任务结果'), icon: $r('sys.symbol.archivebox'), subtitle: t('把成功的回答归档到工作区的“任务结果”目录。'), compId: 'save-summary',
               isOn: this.assistantDraft.saveSummary, disabled: !this.canEdit(),
               onChange: (value: boolean) => this.saveToggle('saveSummary', value) })
           }
@@ -188,34 +161,34 @@ export struct SettingsPanel {
         SectionHeader({ title: t('记忆与上下文') })
         GroupCard() {
           Column() {
-            SwitchRow({ title: t('自动提取长期记忆'), compId: 'auto-memory',
-              subtitle: t('按需保存长期事实，每 10 轮后台复盘；会额外调用模型。'),
+            SwitchRow({ title: t('自动提取长期记忆'), icon: $r('sys.symbol.wand_and_stars'), compId: 'auto-memory',
+              subtitle: t('每 10 轮后台整理，会额外调用模型。'),
               isOn: this.assistantDraft.autoMemory, disabled: !this.canEdit(),
               onChange: (value: boolean) => this.saveToggle('autoMemory', value) })
             RowDivider()
-            NavRow({ title: t('管理长期记忆'), subtitle: t('查看、编辑所有对话或当前对话的记忆'), compId: 'open-memory',
+            NavRow({ title: t('管理长期记忆'), compId: 'open-memory',
               icon: $r('sys.symbol.lightbulb'), disabled: !this.canEdit(), onTap: () => this.onTools('memory') })
             RowDivider()
-            SwitchRow({ title: t("自动压缩历史"), compId: 'auto-compact', isOn: this.settings.autoCompact,
-              subtitle: t("接近上下文预算时，用当前模型生成摘要，完整记录保留。"), disabled: !this.canEdit(),
+            SwitchRow({ title: t("自动压缩历史"), icon: $r('sys.symbol.rectangle_stack'), compId: 'auto-compact', isOn: this.settings.autoCompact,
+              subtitle: t('接近上下文上限时生成摘要，完整记录保留。'), disabled: !this.canEdit(),
               onChange: (value: boolean) => this.saveToggle('autoCompact', value) })
           }
         }
         SectionHeader({ title: t('工具与权限') })
         GroupCard() {
           Column() {
-            SwitchRow({ title: t('只读模式'), subtitle: t('对所有对话生效，阻止修改文件、调用远程工具和生成图片。'), compId: 'read-only',
+            SwitchRow({ title: t('只读模式'), icon: $r('sys.symbol.lock'), subtitle: t('对所有对话生效，阻止修改文件、调用远程工具和生成图片。'), compId: 'read-only',
               isOn: this.assistantDraft.readOnly, disabled: !this.canEdit(),
               onChange: (value: boolean) => this.saveToggle('readOnly', value) })
             RowDivider()
-            SwitchRow({ title: t('允许网页读取与搜索'), compId: 'web-enabled', isOn: this.settings.webEnabled,
-              subtitle: t('允许助手读取网页和使用搜索；不影响模型服务与浏览器权限。'), disabled: !this.canEdit(),
+            SwitchRow({ title: t('允许网页读取与搜索'), icon: $r('sys.symbol.doc_text'), compId: 'web-enabled', isOn: this.settings.webEnabled,
+              subtitle: t('不影响模型服务与浏览器权限。'), disabled: !this.canEdit(),
               onChange: (value: boolean) => this.saveToggle('webEnabled', value) })
             RowDivider()
-            NavRow({ title: t('搜索服务'), subtitle: 'DeepSeek / Tavily', compId: 'open-search-settings',
+            NavRow({ title: t('搜索服务'), icon: $r('sys.symbol.magnifyingglass'), subtitle: 'DeepSeek / Tavily', compId: 'open-search-settings',
               disabled: !this.canEdit(), onTap: this.onSearch })
             RowDivider()
-            SwitchRow({ title: t('应用内浏览器'), compId: 'browser-enabled', isOn: this.browser.policy === 'enabled',
+            SwitchRow({ title: t('应用内浏览器'), icon: $r('sys.symbol.link'), compId: 'browser-enabled', isOn: this.browser.policy === 'enabled',
               subtitle: this.browser.policy === 'unset' ? t('默认关闭，首次需要时询问。') : this.browser.policy === 'disabled' ? t('已关闭，助手不会再次请求启用。') : t('允许助手操作网页；你可以随时接管。'),
               disabled: this.browser.permissionSaving || !this.app.ready || this.app.saveError.length > 0,
               onChange: async (value: boolean) => { try { await this.browser.setEnabled(value); }
@@ -237,19 +210,17 @@ export struct SettingsPanel {
         SectionHeader({ title: t('界面与语言') })
         GroupCard() {
           Column() {
-            NavRow({ title: t('界面与外观'), subtitle: t('主题色、字体、明暗模式与光感效果'),
+            NavRow({ title: t('界面与外观'), icon: $r('sys.symbol.picture'),
               compId: 'open-appearance', onTap: () => this.onAppearance() })
             RowDivider()
-            NavRow({ title: t('语言'), value: this.languageName(this.language),
-              compId: 'open-language', disabled: !this.canEdit(), onTap: () => { this.showLanguage = true; } })
-              .bindSheet($$this.showLanguage, this.languageSheet(), { title: { title: t('语言') }, height: SheetSize.FIT_CONTENT,
-                dragBar: true, systemMaterial: this.appearance.surface })
+            NavRow({ title: t('语言'), icon: $r('sys.symbol.textformat'), value: languageName(this.language),
+              compId: 'open-language', disabled: !this.canEdit(), onTap: this.onLanguage })
           }
         }
         SectionHeader({ title: t('数据与用量') })
         GroupCard() {
           Column() {
-            NavRow({ title: t('Token 用量'), subtitle: t('查看用量概览、每日趋势和请求明细'), compId: 'open-usage',
+            NavRow({ title: t('Token 用量'), compId: 'open-usage',
               icon: $r('sys.symbol.clock'), onTap: () => this.onUsage() })
             RowDivider()
             NavRow({ title: t('备份与恢复'), compId: 'open-backup', icon: $r('sys.symbol.folder_badge_plus'),
@@ -259,21 +230,23 @@ export struct SettingsPanel {
         SectionHeader({ title: t('帮助与关于') })
         GroupCard() {
           Column() {
-            NavRow({ title: t('使用帮助'), compId: 'open-help', onTap: () => this.onSupport('help') })
+            NavRow({ title: t('使用帮助'), icon: $r('sys.symbol.questionmark_circle'), compId: 'open-help', onTap: () => this.onSupport('help') })
             RowDivider()
-            NavRow({ title: t('评分和评论'), compId: 'open-rating', onTap: () => this.onSupport('rating') })
+            NavRow({ title: t('评分和评论'), icon: $r('sys.symbol.star'), compId: 'open-rating', onTap: () => this.onSupport('rating') })
             RowDivider()
-            NavRow({ title: t('关于 Tinybot'), compId: 'open-about', onTap: () => this.onSupport('about') })
+            NavRow({ title: t('关于 Tinybot'), icon: $r('sys.symbol.info_circle'), compId: 'open-about', onTap: () => this.onSupport('about') })
             if (this.developerEnabled) {
               RowDivider()
-              NavRow({ title: t('开发者模式'), subtitle: t('性能统计、慢操作与诊断日志'), compId: 'open-developer', onTap: () => this.onSupport('developer') })
+              NavRow({ title: t('开发者模式'), icon: $r('sys.symbol.wrench_and_screwdriver'), subtitle: t('性能统计、慢操作与诊断日志'), compId: 'open-developer', onTap: () => this.onSupport('developer') })
             }
           }
         }
       }.padding({ left: Space.page, right: Space.page, bottom: Space.xl }).width('100%')
     }.height('100%').width('100%').scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring).align(Alignment.Top)
-    .bindSheet($$this.showPresets, this.presetsSheet(), { title: { title: t('添加模型服务') }, detents: [SheetSize.LARGE], dragBar: true,
-      backgroundColor: $r('app.color.page_background') })
+  }
+  build() {
+    if (this.presetsOnly) { this.presetsPage() }
+    else { this.settingsPage() }
   }
 }
 
@@ -287,8 +260,6 @@ export struct UserDocumentPanel {
   build() {
     Column() {
       Column({ space: Space.md }) {
-        Text(t('USER.md 会附加到所有对话的上下文，保存后从下一轮生效。系统提示词由应用维护，不可修改。清空文档即可停用个人偏好。')).fontFamily(this.appearance.fontFamily)
-          .fontSize(Font.caption).fontColor($r('app.color.text_secondary')).width('100%')
         TextArea({ text: this.settings.userDocument, placeholder: t('例如：\n# 关于我\n请称呼我为…\n\n# 回答偏好\n先给结论，再给必要的例子。') }).fontFamily(this.appearance.fontFamily).id('user-document')
           .attributeModifier(Styles.area).layoutWeight(1)
           .backgroundColor($r('app.color.surface'))

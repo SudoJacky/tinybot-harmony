@@ -21,13 +21,15 @@ export class AppearancePreferences {
     const options = serialized ? JSON.parse(serialized) as AppearanceOptions : defaultAppearance();
     validateAppearance(options);
     AppearancePreferences.options = options;
-    AppearancePreferences.refresh();
+    // Apply window-affecting configuration before loadContent creates the first ArkUI frame.
+    AppearancePreferences.apply(options);
     Diagnostics.log('info', 'appearance', 'loaded');
   }
 
   static activate(): void {
     AppearancePreferences.active = true;
-    AppearancePreferences.apply(AppearancePreferences.options);
+    // ThemeControl needs ArkUI content; do not reconfigure the window during the splash handoff.
+    AppearancePreferences.refresh();
   }
 
   private static apply(options: AppearanceOptions): void {

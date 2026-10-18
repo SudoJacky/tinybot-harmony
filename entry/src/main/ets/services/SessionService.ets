@@ -3,10 +3,10 @@ import { projectName, projectFor, workspaceIdFor, validateProjects, projectConte
 import { proposeSessionMemory, reviewSessionMemory, addMemoryDraft } from './SessionMemory';
 import { McpSettings, McpSettingsCommand, McpSettingsResult, McpSettingsHost } from './McpSettings';
 import { t } from '../model/I18n';
-import { AgentMode, toolEnabled, ToolSelection, validateToolSelection } from '../model/AgentMode';
+import { AgentMode, toolEnabled, ToolSelection, validateToolSelection, normalizeDisabledTools } from '../model/AgentMode';
 import { RuleTools } from './RuleTools';
 import { SelectedTools } from './SelectedTools';
-import { BASIC_FILE_TOOLS, OPTIONAL_TOOL_NAMES } from '../model/ToolGroups';
+import { BASIC_FILE_TOOLS, OPTIONAL_TOOL_NAMES, TOOL_CAPABILITIES } from '../model/ToolGroups';
 import { stepDisplayContent } from '../model/PublishedPreview';
 import { UiValues, UiSavedState, parseUiSurface, validateUiState, validateUiStates, copyUiValues } from '../model/InteractiveUi';
 import { prepareBackupServices } from '../model/BackupRestore';
@@ -104,12 +104,15 @@ export class SessionService {
   }
   async setToolEnabled(name: string, enabled: boolean): Promise<boolean> {
     if (!BASIC_FILE_TOOLS.includes(name) && !OPTIONAL_TOOL_NAMES.includes(name)) { throw new Error(t('自定义工具设置无效。')); }
-    const disabled = (this.selectedToolSelection(this.active).disabledTools || []).filter((item) => item !== name);
-    if (!enabled) { disabled.push(name); }
+    const members = TOOL_CAPABILITIES.find((capability) => capability.tools.includes(name))?.tools || [name];
+    const disabled = (this.selectedToolSelection(this.active).disabledTools || []).filter((item) => !members.includes(item));
+    if (!enabled) { disabled.push(...members); }
     return this.setDisabledTools(disabled);
   }
   private selectTools(selection: ToolSelection): void {
-    validateToolSelection(selection); this.pendingToolSelections.set(this.active.id, selection);
+    validateToolSelection(selection);
+    if (selection.disabledTools !== undefined) { selection.disabledTools = normalizeDisabledTools(selection.disabledTools); }
+    this.pendingToolSelections.set(this.active.id, selection);
     this.refreshContext(); this.publishThread(this.active);
   }
   private selectedToolSelection(thread: ThreadData): ToolSelection {
@@ -815,7 +818,7 @@ export class SessionService {
         try { await this.resources.afterTask?.(thread.id, answer.id, answer.content, projectFor(this.data, thread)?.workspaceId); }
         catch (error) { this.status.error = t("任务已完成，但结果归档失败：") + (error as Error).message; }
       }
-      if (options.autoMemory && !readOnly && toolEnabled('memory', selection)) { this.reviewMemory(thread, user, copyModelConfig(config)); }
+      if (options.autoMemory && !readOnly) { this.reviewMemory(thread, user, copyModelConfig(config)); }
     }
     return answer.status === 'complete' && this.status.saveError.length === 0;
   }
@@ -889,7 +892,7 @@ export class SessionService {
       }
       if (action?.kind === 'compute') {
         const output = await this.tools(thread).execute({ id: this.resources.createId(), type: 'function', function: {
-          name: 'execute_code', arguments: JSON.stringify({ code: action.code, input: JSON.stringify(values) })
+          name: 'execute_code', arguments: JSON.stringify({ code: action.code, input: values })
         } }, new Cancellation());
         const receipt = JSON.parse(output) as UiComputeReceipt;
         if (receipt.status !== 'ok' || receipt.resultTruncated) { throw new Error(receipt.error || 'Interactive UI computation failed: ' + receipt.status); }
@@ -984,7 +987,7 @@ export class SessionService {
       tools = new SelectedTools(new ToolSet([tools, new ResourceTools((request, cancellation) => this.manageSkill(thread, request, cancellation),
         (request, cancellation) => this.manageMcp(thread, request, cancellation))]), this.selectedToolSelection(thread));
     }
-    if (!options.autoMemory || this.readOnly(thread) || !toolEnabled('memory', this.selectedToolSelection(thread))) { return tools; }
+    if (!options.autoMemory || this.readOnly(thread)) { return tools; }
     return new SelectedTools(new ToolSet([tools, new MemoryTools(async (operations, cancellation) => {
       const user = thread.messages.slice().reverse().find((message) => message.role === 'user');
       if (!user) { throw new Error(t('记忆变更缺少有效的用户消息来源。')); }
@@ -1022,12 +1025,12 @@ export class SessionService {
     if (request.action === 'install') {
       if (!this.extensions.webEnabled) { throw new Error('Enable web access before installing a skill from a URL.'); }
       if (!this.resources.installSkill) { throw new Error('Skill downloads are unavailable.'); }
-      imported = await this.resources.installSkill(request.source || '', JSON.parse(request.paths || '[]') as string[], cancellation);
+      imported = await this.resources.installSkill(request.source || '', request.paths || [], cancellation);
     }
     const candidate = this.snapshot();
     if (['create', 'update', 'install'].includes(request.action)) {
       if (request.action === 'update' && request.files === undefined) { throw new Error('Update requires the complete files JSON array; use [] to remove all references.'); }
-      const files = imported ? imported.files : JSON.parse(request.files || '[]') as SkillFile[];
+      const files = imported ? imported.files : request.files || [];
       candidate.extensions = saveSkillCandidate(this.extensions, request.name || '', imported ? imported.document : request.document || '', files, imported);
     } else { candidate.extensions = changeSkillCandidate(this.extensions, request.name || '', request.action); }
     this.checkResourceMutation(thread, cancellation);
@@ -1127,8 +1130,7 @@ export class SessionService {
       while (this.status.phase !== 'idle') { await this.waitForIdle(); }
       const current = this.data.threads.find((item) => item.id === threadId);
       const options = this.data.productivity?.options || defaultAssistantOptions();
-      if (!current || current.archived || !options.autoMemory || this.readOnly(current) ||
-        !toolEnabled('memory', this.selectedToolSelection(current)) || !this.canMutate) {
+      if (!current || current.archived || !options.autoMemory || this.readOnly(current) || !this.canMutate) {
         this.resources.reportMemory?.('review_discarded', { threadId: threadId }); return;
       }
       const live = this.data.productivity?.memories || [];

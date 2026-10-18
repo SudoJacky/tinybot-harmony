@@ -41,6 +41,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Skill completion and composer callback tests f
 if ($LASTEXITCODE -ne 0) { throw 'Appearance preference and palette tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-settings-performance.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Settings responsiveness and persistence tests failed. Build the app first.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-settings-navigation.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Settings subpage drafts, credentials and return callbacks failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-history-drawer.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'History drawer activity and animation lifecycle tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-harness-features.cjs')
@@ -51,6 +53,12 @@ if ($LASTEXITCODE -ne 0) { throw 'Preview publication integration tests failed.'
 if ($LASTEXITCODE -ne 0) { throw 'Preview resource and lazy lifecycle tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-resources.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Resource management integration tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-tool-schemas.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Native tool parameter schema and execution tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-tool-discovery.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Compact tool discovery, permission and runtime tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-context-usage.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Conversation context usage aggregation tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-memory.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Memory maintenance integration tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-code-sandbox.cjs')

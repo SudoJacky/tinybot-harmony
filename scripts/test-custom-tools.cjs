@@ -19,8 +19,9 @@ function load(file) {
 }
 const { Fixture, seed } = load(root + '/test/SessionService.test');
 const { ChatViewModel } = load(root + '/main/ets/viewmodel/ChatViewModel');
-const { TOOL_GROUPS, BASIC_FILE_TOOLS } = load(root + '/main/ets/model/ToolGroups');
-const { validateToolSelection, toolEnabled } = load(root + '/main/ets/model/AgentMode');
+const { TOOL_GROUPS, BASIC_FILE_TOOLS, TOOL_CAPABILITIES, OPTIONAL_TOOL_NAMES, MANAGED_TOOL_NAMES } = load(root + '/main/ets/model/ToolGroups');
+const { SkillTools } = load(root + '/main/ets/services/SkillTools');
+const { validateToolSelection, toolEnabled, normalizeDisabledTools } = load(root + '/main/ets/model/AgentMode');
 const { SelectedTools } = load(root + '/main/ets/services/SelectedTools');
 const { RuleTools } = load(root + '/main/ets/services/RuleTools');
 const { Cancellation } = load(root + '/main/ets/services/Cancellation');
@@ -29,7 +30,7 @@ const { ProviderRegistry } = load(root + '/main/ets/services/providers/ProviderR
 const { parseAppData } = load(root + '/main/ets/model/Conversation');
 const clean = value => JSON.parse(JSON.stringify(value));
 const all = Array.from(TOOL_GROUPS.flatMap(group => group.tools));
-const optional = all.filter(name => !BASIC_FILE_TOOLS.includes(name));
+const optional = Array.from(OPTIONAL_TOOL_NAMES);
 const def = name => ({ type: 'function', function: { name, description: name, parameters: { type: 'object', properties: {} } } });
 const call = (name, args = {}) => ({ id: 'call-' + name, type: 'function', function: { name, arguments: JSON.stringify(args) } });
 const reply = (...toolCalls) => ({ content: toolCalls.length ? '' : 'done', toolCalls });
@@ -50,8 +51,51 @@ function fixture(data = seed()) {
   f.calls = calls; return f;
 }
 async function main() {
-  assert.equal(all.length, 42); assert.equal(new Set(all).size, 42); assert.equal(BASIC_FILE_TOOLS.length, 7);
-  assert.equal(optional.length, 35);
+  assert.equal(all.length, 41); assert.equal(new Set(all).size, 41); assert.equal(BASIC_FILE_TOOLS.length, 6);
+  assert.equal(optional.length, 31);
+  const covered = Array.from(TOOL_CAPABILITIES.flatMap(capability => capability.tools));
+  assert.equal(TOOL_CAPABILITIES.length, 13);
+  assert.equal(new Set(covered).size, 31); assert.deepEqual(covered.slice().sort(), optional.slice().sort());
+  const obsolete = {agentMode:'custom', disabledTools:Array.from(MANAGED_TOOL_NAMES)};
+  validateToolSelection(obsolete);
+  assert.deepEqual(Array.from(normalizeDisabledTools(obsolete.disabledTools)), []);
+  for (const name of MANAGED_TOOL_NAMES) assert.equal(toolEnabled(name, obsolete), true);
+  const skills = [{ name:'enabled', description:'Enabled', enabled:true, document:'Enabled instructions', files:[] },
+    { name:'disabled', description:'Disabled', enabled:false, document:'Disabled instructions', files:[] }];
+  const skillTools = new SelectedTools(new SkillTools(skills, '', () => skills), obsolete);
+  assert.equal(JSON.parse(await skillTools.execute(call('read_skill',{name:'enabled'}),new Cancellation())).content,'Enabled instructions');
+  await assert.rejects(skillTools.execute(call('read_skill',{name:'disabled'}),new Cancellation()), error => error.code==='TOOL_UNAVAILABLE');
+  assert.equal(JSON.parse(await skillTools.execute(call('list_skills'),new Cancellation())).find(skill => skill.name==='disabled').enabled,false);
+  for (const capability of TOOL_CAPABILITIES) {
+    for (const member of capability.tools) {
+      const selection = { agentMode:'custom', disabledTools:[member] };
+      const grouped = new SelectedTools({ definitions: () => all.map(def), execute: async () => 'unexpected' }, selection);
+      assert.deepEqual(Array.from(normalizeDisabledTools([member])).sort(), Array.from(capability.tools).sort());
+      for (const name of capability.tools) {
+        assert.equal(toolEnabled(name, selection), false);
+        assert.ok(!grouped.definitions().some(tool => tool.function.name === name));
+        await assert.rejects(grouped.execute(call(name), new Cancellation()), error => error.code === 'PERMISSION_DENIED');
+      }
+    }
+  }
+  const legacyData = seed(); legacyData.threads[0].agentMode = 'custom';
+  legacyData.threads[0].disabledTools = ['browser_action','publish_data_view','team_complete_task','mcp_call',...MANAGED_TOOL_NAMES];
+  const migrated = parseAppData(JSON.stringify(legacyData));
+  assert.deepEqual(Array.from(migrated.threads[0].disabledTools).sort(),
+    Array.from(normalizeDisabledTools(legacyData.threads[0].disabledTools)).sort());
+  const legacy = fixture(migrated), legacyApp = new ChatViewModel(); await legacyApp.initialize(legacy.session);
+  const legacyWrites = legacy.repository.writes.length;
+  for (const id of ['browser','preview','team','mcp']) {
+    const capability = TOOL_CAPABILITIES.find(item => item.id === id);
+    assert.ok(capability.tools.every(name => legacyApp.active.disabledTools.includes(name)));
+    await legacy.session.setToolEnabled(capability.tools.at(-1), true);
+    assert.ok(capability.tools.every(name => !legacyApp.active.disabledTools.includes(name)));
+    await legacy.session.setToolEnabled(capability.tools[0], false);
+    assert.ok(capability.tools.every(name => legacyApp.active.disabledTools.includes(name)));
+  }
+  assert.equal(legacy.repository.writes.length, legacyWrites, 'Capability toggles keep the existing save-on-send behavior');
+  for (const name of MANAGED_TOOL_NAMES) await assert.rejects(legacy.session.setToolEnabled(name,false));
+  console.log('PASS 13 selectable capabilities, legacy memory/Skills overrides removed, individual Skill state retained and atomic group catalog/dispatch');
   for (const selection of [{ agentMode: 'research' }, { disabledTools: ['write_file'] }, { disabledTools: ['unknown'] },
     { disabledTools: ['read_web', 'read_web'] }, { disabledTools: 'read_web' }, { disabledTools: [null] }]) {
     assert.throws(() => validateToolSelection(selection));
@@ -64,6 +108,7 @@ async function main() {
   for (const name of BASIC_FILE_TOOLS) await selected.execute(call(name), new Cancellation());
   assert.deepEqual(effects, Array.from(BASIC_FILE_TOOLS));
   const readOnly = new RuleTools(selected, true);
+  for (const name of ['memory','skill_manage']) assert.ok(!readOnly.definitions().some(tool => tool.function.name===name));
   await assert.rejects(readOnly.execute(call('write_file'), new Cancellation()), error => error.code === 'PERMISSION_DENIED');
   assert.equal(toolEnabled('team_recruit', { agentMode: 'custom', disabledTools: ['team_complete_task'] }), false);
   assert.equal(toolEnabled('team_resume', { agentMode: 'custom', disabledTools: ['team_complete_task'] }), false);
@@ -74,31 +119,33 @@ async function main() {
   const events = []; f.session.subscribe(event => events.push(event));
   const initialWrites = f.repository.writes.length;
   await app.setToolEnabled('read_web', false); await app.setToolEnabled('mcp_call', false);
-  await app.setToolEnabled('read_tool_result', false); await app.setToolEnabled('memory', false);
-  assert.equal(app.active.agentMode, 'custom'); assert.equal(app.active.disabledTools.length, 4);
+  await app.setToolEnabled('read_tool_result', false);
+  const disabledCount = normalizeDisabledTools(['read_web','mcp_call','read_tool_result']).length;
+  assert.equal(app.active.agentMode, 'custom'); assert.equal(app.active.disabledTools.length, disabledCount);
   assert.equal(f.repository.writes.length, initialWrites); assert.equal(f.provider.requests.length, 0);
   assert.ok(events.every(event => event.state.phase === 'idle' && event.kind !== 'snapshot'));
-  await app.setAgentMode('full'); assert.equal(app.active.disabledTools.length, 4);
+  await app.setAgentMode('full'); assert.equal(app.active.disabledTools.length, disabledCount);
   await app.setAgentMode('custom'); await assert.rejects(app.setToolEnabled('edit_file', false));
   f.session.setDraft('try blocked operation');
   f.provider.respond = async index => index === 0 ? reply(call('read_web', { url: 'https://example.com' })) : reply();
   await f.session.send();
   const advertised = f.provider.requests[0].tools.map(item => item.function.name);
   for (const name of ['read_web', 'mcp_call', 'memory']) assert.ok(!advertised.includes(name));
-  for (const name of BASIC_FILE_TOOLS) assert.ok(advertised.includes(name));
+  for (const name of ['read_file', 'write_file', 'edit_file', 'orchestrate', 'tool_search']) assert.ok(advertised.includes(name));
+  for (const name of ['list_files', 'find_files', 'search_file_content']) assert.ok(!advertised.includes(name));
   assert.ok(!f.provider.requests[1].tools.some(item => item.function.name === 'read_tool_result'), 'runtime-added retrieval remains disabled');
   assert.deepEqual(f.calls, [], 'a forged direct call cannot execute a hidden tool');
   const saved = await f.repository.load(); assert.equal(saved.threads[0].agentMode, 'custom');
-  assert.equal(saved.threads[0].disabledTools.length, 4);
+  assert.equal(saved.threads[0].disabledTools.length, disabledCount);
   const restored = fixture(saved); await restored.session.initialize();
-  assert.equal(restored.session.snapshot().threads[0].disabledTools.length, 4);
+  assert.equal(restored.session.snapshot().threads[0].disabledTools.length, disabledCount);
   await app.setAgentMode('full'); f.session.setDraft('full mode');
   f.provider.respond = async () => reply(); await f.session.send();
-  assert.ok(f.provider.requests.at(-1).tools.some(item => item.function.name === 'read_web'));
-  assert.equal((await f.repository.load()).threads[0].disabledTools.length, 4, 'full mode preserves custom configuration');
-  await app.setAgentMode('custom'); assert.equal(app.active.disabledTools.length, 4);
+  assert.ok(f.provider.requests.at(-1).tools.some(item => item.function.name === 'tool_search' && item.function.description.includes('read_web')));
+  assert.equal((await f.repository.load()).threads[0].disabledTools.length, disabledCount, 'full mode preserves custom configuration');
+  await app.setAgentMode('custom'); assert.equal(app.active.disabledTools.length, disabledCount);
   assert.equal(await f.session.forkThread(), true); assert.equal(f.session.active.agentMode, 'custom');
-  assert.equal(f.session.active.disabledTools.length, 4);
+  assert.equal(f.session.active.disabledTools.length, disabledCount);
   const badData = clean(f.session.snapshot()); badData.threads[0].disabledTools = ['write_file']; assert.throws(() => parseAppData(JSON.stringify(badData)));
   console.log('PASS view-model selection, zero-IO toggles, real model catalog/dispatch, restart, full/custom switching and branch inheritance');
 
@@ -112,7 +159,9 @@ async function main() {
   assert.ok(!sdk.provider.requests.at(-1).tools.some(item => item.function.name === 'orchestrate'));
   assert.ok(sdk.provider.requests.at(-1).tools.some(item => item.function.name === 'read_file'));
   await sdk.session.setDisabledTools(optional); sdk.session.setDraft('basic files only'); await sdk.session.send();
-  assert.deepEqual(Array.from(sdk.provider.requests.at(-1).tools, item => item.function.name).sort(), Array.from(BASIC_FILE_TOOLS).sort());
+  const basic = sdk.provider.requests.at(-1).tools;
+  assert.deepEqual(Array.from(basic, item => item.function.name).sort(), ['read_file', 'write_file', 'edit_file', 'tool_search'].sort());
+  for (const name of ['list_files', 'find_files', 'search_file_content']) assert.ok(basic.find(tool => tool.function.name === 'tool_search').function.description.includes(name));
   console.log('PASS SDK children respect custom selection and disabling orchestration retains direct file tools');
 
   const frozen = fixture(); await frozen.session.initialize(); await frozen.session.setToolEnabled('read_web', false);
@@ -146,11 +195,18 @@ async function main() {
   console.log('PASS real team workers inherit tool selection and required handoff gates team dispatch');
 
   const memoryData = seed(); memoryData.productivity.options.autoMemory = true;
-  const memory = fixture(memoryData); await memory.session.initialize(); await memory.session.setToolEnabled('memory', false);
-  memory.session.reviewMemory = async () => { throw Error('Disabled memory must not trigger background review'); };
-  memory.provider.respond = async () => reply(); memory.session.setDraft('remember this'); await memory.session.send();
-  assert.ok(!memory.provider.requests[0].tools.some(item => item.function.name === 'memory'));
+  memoryData.threads[0].agentMode='custom'; memoryData.threads[0].disabledTools=['memory'];
+  const memory = fixture(memoryData); await memory.session.initialize(); await memory.session.setDisabledTools(optional);
+  let reviews=0; memory.session.reviewMemory = async () => { reviews++; };
+  memory.provider.respond = async index => index===0 ? reply(call('memory',{operations:[]})) : reply();
+  memory.session.setDraft('remember this'); await memory.session.send();
+  assert.ok(memory.provider.requests[0].tools.find(tool => tool.function.name==='tool_search').function.description.includes('memory:'));
+  assert.equal(memory.session.active.messages.at(-1).steps[0].tools[0].status,'complete'); assert.equal(reviews,1);
+  await memory.session.setSettingsToggle('autoMemory',false);
+  memory.provider.respond=async()=>reply(); memory.session.setDraft('memory off'); await memory.session.send();
+  assert.ok(!memory.provider.requests.at(-1).tools.find(tool => tool.function.name==='tool_search').function.description.includes('memory:'));
+  assert.equal(reviews,1);
   assert.equal(memory.session.active.messages.at(-1).status, 'complete');
-  console.log('PASS disabling memory suppresses its tool and automatic background review');
+  console.log('PASS autoMemory is the single switch for memory tools/background review, including legacy overrides and all optional capabilities off');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

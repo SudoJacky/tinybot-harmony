@@ -1,4 +1,3 @@
-import { INTERACTIVE_UI_INSTRUCTIONS } from '../model/InteractiveUiInstructions';
 import { MAX_AGENT_STEPS, ModelMessage, ToolDefinition } from '../model/Agent';
 import { ModelConfig, ThreadData } from '../model/Conversation';
 import { ExtensionSettings, skillCatalog } from '../model/Skills';
@@ -11,7 +10,6 @@ import { ContextSource, RequestContext } from './RequestContext';
 export function sessionPromptSections(config: ModelConfig, extensions: ExtensionSettings, selected: string = ''): PromptSection[] {
   return [{ name: 'identity', content: DEFAULT_SYSTEM_PROMPT },
     { name: 'runtime', content: runtimeInstructions(MAX_AGENT_STEPS) },
-    { name: 'interactive_ui', content: INTERACTIVE_UI_INSTRUCTIONS },
     { name: 'user_preferences', content: userDocumentContext(config.userDocument || '') },
     { name: 'skills', content: skillCatalog(extensions.skills, selected) }];
 }

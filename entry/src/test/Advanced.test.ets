@@ -11,7 +11,7 @@ import { InteractionTools } from '../main/ets/services/InteractionTools';
 import { ToolCall } from '../main/ets/model/Agent';
 import { ModelReference } from '../main/ets/model/ProviderProfiles';
 function rejects(action: () => void): void { let rejected = false; try { action(); } catch (_) { rejected = true; } expect(rejected).assertTrue(); }
-function call(name: string, data: string): ToolCall { return { id: 'test', type: 'function', function: { name: name, arguments: JSON.stringify({ data: data }) } }; }
+function call(name: string, data: string): ToolCall { return { id: 'test', type: 'function', function: { name: name, arguments: data } }; }
 class SearchFiles implements WorkspaceFiles {
   async edit(): Promise<WorkspaceWrite> { throw new Error('Unexpected edit'); }
   async list(path: string, _signal: Cancellation): Promise<WorkspaceListing> { return { path: path, entries: path ? [{ name: 'b.txt', kind: 'file' }] : [{ name: 'sub', kind: 'directory' }, { name: 'a.txt', kind: 'file' }, { name: 'link', kind: 'symlink' }], truncated: false }; }

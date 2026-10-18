@@ -10,6 +10,10 @@ const groups = {};
 vm.runInNewContext(ts.transpileModule(fs.readFileSync(root + '/model/ToolGroups.ets', 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }
 }).outputText, { exports: groups });
+const mode = {};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(root + '/model/AgentMode.ets', 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }
+}).outputText, { exports: mode, require: id => id.includes('ToolGroups') ? groups : { t: text => text } });
 let serial = 0, current;
 class Property { constructor(value) { this.value = value; } get() { return this.value; } set(value) { this.value = value; } }
 class ViewPU {
@@ -42,7 +46,8 @@ const globals = { exports: {}, ViewPU, SynchedPropertyNesedObjectPU: Property, B
   require: id => {
     if (id.includes('I18n&')) return { t: (text, values) => values ? text + ':' + values.join('/') : text };
     if (id.includes('ToolGroups&')) return groups;
-    if (id.includes('ToolPresentation&')) return { toolTitle: name => name, toolGroupTitle: name => name };
+    if (id.includes('AgentMode&')) return mode;
+    if (id.includes('ToolPresentation&')) return { toolTitle: name => name, toolGroupTitle: name => name, toolCapabilityDescription: name => 'Description: ' + name };
     if (id.includes('Widgets&')) return { GroupCard, SwitchRow, NavRow, SectionHeader: Child, RowDivider: Child };
     if (id.includes('Theme&')) return { Btn: {}, Font: {}, Space: {} };
     if (id.includes('AppearanceStyle&')) return { AppearanceStyle: class {} };
@@ -53,29 +58,46 @@ for (const kind of ['Scroll', 'Column', 'Row', 'Text', 'Button', 'ForEach', 'If'
 vm.runInNewContext(ts.transpileModule(fs.readFileSync(emitted, 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }
 }).outputText, globals, { filename: emitted });
-const thread = { disabledTools: [], archived: false }, app = { busy: false, saveError: '',
-  setToolEnabled: async (name, enabled) => { thread.disabledTools = thread.disabledTools.filter(item => item !== name); if (!enabled) thread.disabledTools.push(name); },
-  setDisabledTools: async names => { thread.disabledTools = Array.from(names); }
+const thread = { agentMode: 'custom', disabledTools: [], archived: false }, app = { busy: false, saveError: '',
+  setToolEnabled: async (name, enabled) => {
+    const members = groups.TOOL_CAPABILITIES.find(capability => capability.tools.includes(name)).tools;
+    thread.disabledTools = thread.disabledTools.filter(item => !members.includes(item));
+    if (!enabled) thread.disabledTools.push(...members);
+  },
+  setDisabledTools: async names => { thread.disabledTools = Array.from(mode.normalizeDisabledTools(names)); }
 };
 const panel = new globals.exports.CustomToolsPanel(undefined, { app, thread }); panel.initialRender();
 const rows = () => [...panel.children.values()].filter(child => child instanceof SwitchRow);
-const row = name => rows().find(child => child.compId === 'custom-tool-' + name);
+const row = name => rows().find(child => child.compId === 'custom-capability-' + name);
 const button = id => [...buttons.values()].find(value => value.id === id);
 (async () => {
-  assert.equal(rows().length, 35);
+  assert.equal(rows().length, 13);
+  for (const name of ['memory','skill-read','skill-manage']) assert.equal(row(name),undefined);
+  assert.equal(button('enable-optional-tools').enabled,false);
+  assert.equal(button('disable-optional-tools').enabled,true);
   for (const name of groups.BASIC_FILE_TOOLS) { assert.equal(row(name), undefined); }
   assert.ok([...texts.values()].includes(Array.from(groups.BASIC_FILE_TOOLS).join('、')), 'mandatory tools use a compact read-only summary');
-  const retained = row('read_web'); await retained.onChange(false); panel.flush();
-  assert.equal(row('read_web'), retained); assert.equal(retained.isOn, false); assert.ok(thread.disabledTools.includes('read_web'));
-  assert.ok([...texts.values()].some(text => text.endsWith(':34/35')));
+  const retained = row('browser'); await retained.onChange(false); panel.flush();
+  assert.equal(row('browser'), retained); assert.equal(retained.isOn, false);
+  assert.ok(groups.TOOL_CAPABILITIES.find(capability => capability.id === 'browser').tools.every(name => thread.disabledTools.includes(name)));
+  assert.ok([...texts.values()].some(text => text.endsWith(':12/13')));
   await retained.onChange(true); panel.flush(); assert.equal(retained.isOn, true);
+  for (const id of ['preview','team','mcp']) {
+    await row(id).onChange(false); panel.flush();
+    assert.equal(row(id).isOn, false);
+    assert.ok(groups.TOOL_CAPABILITIES.find(capability => capability.id === id).tools.every(name => thread.disabledTools.includes(name)));
+    await row(id).onChange(true); panel.flush(); assert.equal(row(id).isOn, true);
+  }
+  assert.ok(rows().every(child => child.subtitle.startsWith('Description: ')), 'Capability descriptions replace raw tool names');
   await button('disable-optional-tools').onClick(); panel.flush();
-  assert.equal(thread.disabledTools.length, 35); assert.ok(rows().every(child => !child.isOn));
+  assert.equal(thread.disabledTools.length, 31); assert.ok(rows().every(child => !child.isOn));
+  assert.equal(button('disable-optional-tools').enabled,false);
+  assert.equal(button('enable-optional-tools').enabled,true);
   await button('enable-optional-tools').onClick(); panel.flush(); assert.equal(thread.disabledTools.length, 0);
   app.busy = true; panel.flush(); assert.ok(rows().every(child => child.disabled)); assert.equal(button('enable-optional-tools').enabled, false);
   app.busy = false; thread.archived = true; panel.flush(); assert.ok(rows().every(child => child.disabled));
   thread.archived = false; app.saveError = 'save failed'; panel.flush(); assert.ok(rows().every(child => child.disabled));
-  console.log('PASS emitted 35 keyed optional rows, compact mandatory files, on/off updates, enabled count, bulk controls and busy/archive/save-error restrictions');
+  console.log('PASS emitted 13 capability rows without memory/Skills, atomic toggles, count, state-aware bulk actions and busy/archive/save-error restrictions');
 
   const scopeSource = root + '/views/ToolScopePanel.ets';
   const scopeEmitted = path.resolve('entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/views/ToolScopePanel.ts');

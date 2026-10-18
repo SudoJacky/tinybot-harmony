@@ -1,8 +1,8 @@
 // Shared inventory for custom selection and existing read-only permissions.
 export interface ToolGroup { id: string; readOnly: boolean; tools: string[]; }
-export const BASIC_FILE_TOOLS: string[] = ['list_files', 'find_files', 'read_file', 'read_file_lines', 'search_file_content', 'write_file', 'edit_file'];
+export const BASIC_FILE_TOOLS: string[] = ['list_files', 'find_files', 'read_file', 'search_file_content', 'write_file', 'edit_file'];
 export const TOOL_GROUPS: ToolGroup[] = [
-  { id: 'workspace-read', readOnly: true, tools: ['list_files', 'find_files', 'read_file', 'read_file_lines', 'search_file_content'] },
+  { id: 'workspace-read', readOnly: true, tools: ['list_files', 'find_files', 'read_file', 'search_file_content'] },
   { id: 'workspace-write', readOnly: false, tools: ['write_file', 'edit_file'] },
   { id: 'context-read', readOnly: true, tools: ['read_attachment', 'read_reference', 'read_tool_result'] },
   { id: 'web', readOnly: true, tools: ['read_web', 'search_web'] },
@@ -20,6 +20,29 @@ export const TOOL_GROUPS: ToolGroup[] = [
   { id: 'team-coordination', readOnly: true, tools: ['team_recruit', 'team_wait', 'team_inspect', 'team_read_result', 'team_control', 'team_resume'] },
   { id: 'team-handoff', readOnly: true, tools: ['team_complete_task', 'team_list_messages', 'team_read_message'] }
 ];
-export const OPTIONAL_TOOL_NAMES: string[] = TOOL_GROUPS.flatMap((group) => group.tools).filter((name) => !BASIC_FILE_TOOLS.includes(name));
+// Governed by assistant settings and the dedicated Skills page, never conversation switches.
+export const MANAGED_TOOL_NAMES: string[] = ['memory', 'read_skill', 'list_skills', 'skill_manage'];
+
+// User-facing capabilities are independent of the read-only permission groups above.
+export interface ToolCapability { id: string; section: string; tools: string[]; }
+function groupTools(ids: string[]): string[] {
+  return TOOL_GROUPS.filter((group) => ids.includes(group.id)).flatMap((group) => group.tools);
+}
+export const TOOL_CAPABILITIES: ToolCapability[] = [
+  { id: 'context-read', section: 'research', tools: groupTools(['context-read']) },
+  { id: 'web', section: 'research', tools: groupTools(['web']) },
+  { id: 'browser', section: 'research', tools: groupTools(['browser']) },
+  { id: 'calculation', section: 'execution', tools: groupTools(['calculation']) },
+  { id: 'orchestration', section: 'execution', tools: groupTools(['orchestration']) },
+  { id: 'user-input', section: 'execution', tools: ['request_user_input'] },
+  { id: 'plan', section: 'execution', tools: ['update_plan'] },
+  { id: 'team', section: 'execution', tools: groupTools(['team-coordination', 'team-handoff']) },
+  { id: 'preview', section: 'delivery', tools: ['publish_preview', 'publish_data_view'] },
+  { id: 'file-delivery', section: 'delivery', tools: ['present_files'] },
+  { id: 'image', section: 'delivery', tools: groupTools(['image']) },
+  { id: 'mcp', section: 'extensions', tools: groupTools(['mcp-discovery', 'mcp-execution']) },
+  { id: 'mcp-manage', section: 'extensions', tools: ['mcp_manage'] }
+];
+export const OPTIONAL_TOOL_NAMES: string[] = TOOL_CAPABILITIES.flatMap((capability) => capability.tools);
 
 export const READ_ONLY_BROWSER_ACTIONS: string[] = ['scroll', 'back', 'forward', 'reload'];
