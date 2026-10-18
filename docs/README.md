@@ -16,6 +16,7 @@
 | [云备份](cloud-backup.md) | 华为云空间备份、恢复和验证边界 |
 | [语音输入](speech-input.md) | 语音听写操作与系统接入 |
 | [关于与帮助](about-and-help.md) | 首次使用、帮助、版本与市场评价 |
+| [用户协议](user-agreement.md) | AI 应用官方协议调研、Tinybot 条款及应用内阅读边界 |
 
 ## 架构与实现
 

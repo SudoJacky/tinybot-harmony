@@ -48,6 +48,8 @@ node scripts/build-app-icons.cjs .cache/icon-tools/node_modules/@resvg/resvg-js
 
 ## 自动化验证
 
+构建后运行 `node scripts/test-legal-documents.cjs`，验证用户协议与隐私政策的实际编译读取路径、完整 Markdown 正文及缺失、空白和无效编码资源的错误展示；已纳入 `scripts/test.ps1`。模拟器中从“设置 → 关于 Tinybot”分别打开两个文档，检查全文滚动和返回。阅读页面不写入同意记录。
+
 - ArkTS 本地测试覆盖流式分帧和工具参数组装、多轮执行、取消、步数限制、执行前落盘失败、工具错误恢复、历史协议还原及工作区路径边界，也覆盖 provider 注册、配置快照、事件顺序和运行收尾。
 
 原生文件迁移、云备份、MCP 传输与确认流程还有可复现的适配测试：

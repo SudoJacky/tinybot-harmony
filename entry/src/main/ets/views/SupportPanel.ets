@@ -2,7 +2,7 @@ import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
 import { ThirdPartyLicensesPanel } from './ThirdPartyLicensesPanel';
-import { PrivacyPolicyPanel } from './PrivacyPolicyPanel';
+import { LegalDocumentPanel } from './LegalDocumentPanel';
 import { readAppInformation } from '../services/AppInformation';
 import { Font, Space } from '../common/Theme';
 import { Banner, GroupCard, NavRow, RowDivider, SectionHeader } from '../common/Widgets';
@@ -21,6 +21,7 @@ export function supportTitle(page: string): string {
   if (page === 'guide') { return t('首次使用指引'); }
   if (page === 'licenses') { return t('第三方开源许可协议'); }
   if (page === 'privacy') { return t('隐私政策'); }
+  if (page === 'terms') { return t('用户协议'); }
   return t('关于 Tinybot');
 }
 
@@ -136,7 +137,7 @@ export struct SupportPanel {
     SectionHeader({ title: t('协议与政策') })
     GroupCard() {
       Column() {
-        NavRow({ title: t('用户协议'), value: t('待补充'), compId: 'user-agreement', disabled: true })
+        NavRow({ title: t('用户协议'), compId: 'user-agreement', onTap: () => this.onOpen('terms') })
         RowDivider()
         NavRow({ title: t('隐私政策'), compId: 'privacy-policy',
           onTap: () => this.onOpen('privacy') })
@@ -188,7 +189,9 @@ export struct SupportPanel {
     } else if (this.page === 'licenses') {
       ThirdPartyLicensesPanel()
     } else if (this.page === 'privacy') {
-      PrivacyPolicyPanel()
+      LegalDocumentPanel({ kind: 'privacy' })
+    } else if (this.page === 'terms') {
+      LegalDocumentPanel({ kind: 'terms' })
     } else {
       Scroll() {
         Column({ space: Space.md }) {
