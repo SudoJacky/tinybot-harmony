@@ -56,6 +56,10 @@ node scripts/build-app-icons.cjs .cache/icon-tools/node_modules/@resvg/resvg-js
 
 `node scripts/test-productivity-native.cjs`（可用 `DEVECO_STUDIO_HOME` 指定 SDK 位置）。
 
+`node scripts/test-tool-schemas.cjs` 用 SDK 自带的 JSON Schema 校验器检查原生对象/数组参数、编辑必填字段及三种模型协议的实际请求结构，并执行表单、计划、图表、记忆、Skill、MCP 审批和沙箱输入路径；已纳入 `scripts/test.ps1`。
+
+`node scripts/test-tool-discovery.cjs` 检查 BM25 排序与中英文分词、递归参数检索、5 个默认初始工具、按需 schema/预览规则、权限撤销、串行执行、团队交接和真实 SessionService 的多步加载路径；覆盖未展开的目录/文件搜索工具通过现有编排执行、子回执保存与路径/修改前读取保护，并在同一工具目录下比较全量与按需请求体积；已纳入 `scripts/test.ps1`。报告字符数及本地 Token 估算，不将其等同于服务端计费。
+
 构建后运行 `node scripts/test-send-motion.cjs`，验证发送动效的实际编译后生命周期、输入区坐标换算、首条消息、历史恢复、切换会话、发送未被接受及后续队列消息隔离；动画观感和列表裁剪仍需在真机验证。
 
 画板使用 Pen Kit 的 `HandwriteComponent` 和 `HandwriteController`；`EntryAbility` 按官方接入要求设置 `_brushEngineContext`。系统组件管理笔迹和工具栏，`getContentRange` 与 `getThumbnail` 导出笔迹区域，`Attachments.saveDrawing` 使用 ArkGraphics2D 合成白底后编码 JPEG，避免透明笔迹变黑底。构建后运行 `node scripts/test-drawing-board.cjs`，验证实际编译的初始化和加载回调、空白校验、原生导出失败、像素释放、重复保存防护、弹层隔离，以及草稿附件保存和会话切换隔离；已纳入 `test.ps1`。系统笔刷、橡皮擦和撤销重做需在真机验证。
@@ -68,15 +72,23 @@ Release 混淆规则必须保留 `globalThis` 全局名，避免 Pen Kit 的 amb
 
 构建后运行 `node scripts/test-turn-workflow.cjs`，验证整轮真实阶段、并行工具、重试/停止/失败、保留节点的最新步骤、完成收束及手动展开和预览保留。
 
-构建后运行 `node scripts/test-markdown-performance.cjs`，验证增量 Markdown 与全文解析在逐字符边界的一致性、稳定块复用、代码预览与展开、实际编译渲染回调的最新文本，以及离屏高度占位、重新测量和渐显计时器清理；该项与 `test-stream-reveal.cjs` 均纳入 `test.ps1`。真机性能比较使用同一固定负载、采样窗口和构建类型，先回到空对话并重启进程，分别记录 UI 任务分布和内存工具口径。
+流式富文本的新增片段以 240ms ease-out 从透明淡入，不延迟接收或按空格切分中文，不对已读前文重复播放。回复结束后保留最后一批文字的淡入，历史挂载静态显示；离屏或卸载停止计时。正文、表格和代码均复用原生 Span，保留排版、链接和复制，不使用整段模糊。
+
+构建后运行 `node scripts/test-markdown-performance.cjs`，验证增量 Markdown 与全文解析在逐字符边界的一致性、稳定块复用、代码预览与展开、实际编译渲染回调的最新文本，以及离屏高度占位、重新测量、回复结束的渐显收尾和计时器清理；该项与 `test-stream-reveal.cjs` 均纳入 `test.ps1`。真机性能比较使用同一固定负载、采样窗口和构建类型，先回到空对话并重启进程，分别记录 UI 任务分布和内存工具口径。
 
 构建后运行 `node scripts/test-project-tree.cjs`，用真实会话服务与视图模型验证侧栏项目分组、普通聊天、空项目、同名项目、置顶顺序、搜索展开、归档、独立分页及新建会话归属；分支线和折叠动效在真机验证。
 
 `node scripts/test-history-drawer.cjs` 验证编译后的侧栏关闭动画、拖动和中断恢复。关闭动画完成后停止渲染列表内容，保留搜索和分页状态，避免隐藏侧栏随聊天流式输出持续重建。真机性能复现使用 `Generate an SVG of a pelican riding a bicycle.`，分别检查等待模型、工具执行和预览发布期间的主线程延迟与 CPU Profile。
 
-`node scripts/test-custom-tools.cjs` 验证完整版/自定义选择、基础文件工具、执行权限、编排与团队继承、会话恢复和记忆开关。构建后运行 `node scripts/test-custom-tools-renderer.cjs`，验证可选工具行的实际编译回调、开关计数、批量操作及忙碌/归档/保存错误时的禁用状态；两项已纳入 `test.ps1`。
+`node scripts/test-custom-tools.cjs` 验证完整版/自定义选择、13 项能力对 31 个可选工具的完整覆盖、旧的部分禁用配置迁移、记忆/Skills 重复禁用记录清除与专门设置生效、组内所有入口的目录与执行限制，以及基础文件权限、编排与团队继承和会话恢复。构建后运行 `node scripts/test-custom-tools-renderer.cjs`，验证能力行的实际编译回调、浏览器/预览/团队/MCP 联动、开关计数、批量操作及忙碌/归档/保存错误时的禁用状态；两项已纳入 `test.ps1`。
 
 `node scripts/test-thread-list-renderer.cjs` 使用编译后的回调与稳定分组节点，验证会话改名、删除、归档、恢复、置顶/取消置顶的排序与菜单、新建及项目改名后的即时刷新和计数，也验证从搜索、归档页面创建项目后显示新分组；只执行读取了变化状态的更新回调，防止分组闭包保留旧数组。
+
+`node scripts/test-appearance.cjs` 验证外观偏好、保存回滚与启动初始化顺序：明暗模式和字号在 `EntryAbility.onCreate` 中、首屏创建前应用；`loadContent` 后仅激活 ArkUI 主题，避免启动图退出时重新配置窗口而出现从左上角展开的矩形。设备验证需连续冷启动并检查启动图到会话的过渡帧。
+
+设置的编辑、管理与外观选择使用原生导航子页。构建后运行 `node scripts/test-settings-navigation.cjs`，验证实际编译的表单草稿、保存失败与重试、MCP 凭据保留及警告返回、模型子页返回时的密钥生命周期和外观保存后的返回行为；已纳入 `test.ps1`。模拟器检查右侧进入、系统返回、表单键盘避让与模型草稿，测试时不覆盖已有服务凭据。用量筛选和开发者模式验证继续使用临时弹层。
+
+系统启动页使用 `startup_wordmark.svg` 的居中 Tinybot 文字，浅色与深色资源分别使用柔和灰色和低亮度灰绿色，背景沿用对应的 `start_window_background`。文字已转成矢量轮廓，不依赖设备字体；桌面和应用内图标继续使用原资源。验证需分别切换系统浅色/深色并冷启动；系统启动资源的明暗选择与应用页面内的强制明暗设置应分别检查。
 
 `node scripts/test-i18n-native.cjs` 验证语言偏好与持久化；`node scripts/test-chat-disclosures.cjs` 验证流式更新、过程重开、消息隔离和历史加载时的展开状态。`node scripts/test-tool-details.cjs` 验证分类回执、失败状态与无损分页；构建后运行 `node scripts/test-team-renderer.cjs`，检查 DevEco 实际生成的 Team、工具详情及编排子调用更新回调。`node scripts/test-message-actions-renderer.cjs` 验证改写、重新生成、分支按钮在会话结束后恢复可用，再次忙碌或保存出错时禁用；复制保持可用。
 

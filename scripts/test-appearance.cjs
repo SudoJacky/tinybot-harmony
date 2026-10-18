@@ -64,15 +64,24 @@ const application = { setColorMode: value => events.push(['mode', value]), setFo
   events.push(['fontScale', value]);
 } };
 const context = { config: { colorMode: colorModes.COLOR_MODE_LIGHT }, getApplicationContext: () => application };
-preferences.initialize(context); preferences.activate();
+preferences.initialize(context);
+assert.deepEqual(events.map(([type]) => type), ['mode', 'fontScale'], 'Prepare window configuration before the first page');
+preferences.activate();
+assert.deepEqual(events.map(([type]) => type), ['mode', 'fontScale', 'theme'], 'Mounting only applies the ArkUI theme, without resizing the first frame');
 assert.equal(currentAppearanceStyle().accent, '#216451');
 const defaultMaterial = currentAppearanceStyle().control;
+const readingMaterial = currentAppearanceStyle().readingSurface;
+assert.equal(readingMaterial.options.style, uiMaterial.ImmersiveStyle.THICK);
+assert.equal(readingMaterial.options.materialColor, 'app.color.reading_surface_tint');
+assert.equal(readingMaterial.options.colorInvert, false);
 preferences.refresh(); assert.equal(currentAppearanceStyle().control, defaultMaterial, 'Do not recreate unchanged materials');
+assert.equal(currentAppearanceStyle().readingSurface, readingMaterial, 'Reuse the long-sheet material');
 const selected = { ...model.defaultAppearance(), mode: 'dark', accent: 'custom', customColor: '#FAF8EE',
   fontScale: 1.3, fontFamily: 'Noto Serif', lightEffect: 'off' };
 preferences.select(selected);
 assert.equal(currentAppearanceStyle().control, Material.empty);
 assert.equal(currentAppearanceStyle().surface, Material.empty);
+assert.equal(currentAppearanceStyle().readingSurface, Material.empty);
 assert.equal(currentAppearanceStyle().effectStrength, 0);
 assert.equal(currentAppearanceStyle().fontFamily, 'Noto Serif');
 assert.ok(events.some(([type, value]) => type === 'mode' && value === colorModes.COLOR_MODE_DARK));
@@ -85,7 +94,11 @@ for (const failure of ['flush', 'apply']) {
   assert.equal(storage.get('tinybot.appearance.options').accent, 'custom');
   assert.ok(logs.some(data => data.level === 'error' && data.module === 'appearance' && data.event === 'save_failed'));
 }
-working = new Map(disk); preferences.initialize(context); preferences.activate();
+working = new Map(disk);
+const restoreStart = events.length;
+preferences.initialize(context);
+assert.deepEqual(events.slice(restoreStart), [['mode', colorModes.COLOR_MODE_DARK], ['fontScale', 1.3]], 'Restore saved dark mode and font scale before mounting');
+preferences.activate();
 assert.equal(currentAppearanceStyle().fontFamily, 'Noto Serif', 'Restore preferences on the next launch');
 preferences.select({ ...model.defaultAppearance(), mode: 'system', accent: 'blue', lightEffect: 'gentle' });
 preferences.refresh({ colorMode: colorModes.COLOR_MODE_DARK });
@@ -96,6 +109,7 @@ assert.equal(currentAppearanceStyle().control.options.lightEffect.color, '#40FFF
 preferences.select({ ...model.defaultAppearance(), lightEffect: 'vivid' });
 assert.equal(currentAppearanceStyle().control.options.style, uiMaterial.ImmersiveStyle.ULTRA_THIN);
 assert.equal(currentAppearanceStyle().control.options.interactive, true);
+assert.equal(currentAppearanceStyle().readingSurface.options.style, uiMaterial.ImmersiveStyle.THICK, 'Long-sheet legibility also holds in vivid mode');
 preferences.select(model.defaultAppearance());
 assert.equal(currentAppearanceStyle().accent, '#216451');
 assert.equal(currentAppearanceStyle().effectStrength, 1);

@@ -46,18 +46,17 @@ export struct SearchSettingsPanel {
   build() {
     Scroll() {
       Column({ space: Space.md }) {
-        Text(t('搜索服务')).fontFamily(this.appearance.fontFamily).fontSize(22).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
         Select([{ value: 'DeepSeek' }, { value: 'Tavily' }]).selected(this.provider === 'deepseek' ? 0 : 1)
           .value(this.provider === 'deepseek' ? 'DeepSeek' : 'Tavily').enabled(!this.saving).id('search-provider')
           .backgroundColor(Color.Transparent).fontColor($r('sys.color.font_primary'))
           .systemMaterial(this.appearance.control).menuSystemMaterial(this.appearance.surface)
           .onSelect((index: number) => this.changeProvider(index))
-        Text(t('搜索词会发送给所选服务，结果返回来源链接和摘录。')).fontFamily(this.appearance.fontFamily)
+        Text(t('搜索词会发送给所选服务。')).fontFamily(this.appearance.fontFamily)
           .fontSize(14).fontColor($r('app.color.text_secondary'))
         SwitchRow({ title: t('启用联网搜索'), isOn: this.searchEnabled, disabled: this.saving || this.app.busy,
           onChange: (value: boolean) => { this.searchEnabled = value; } })
         if (this.provider === 'deepseek') {
-          Text(t('使用 DeepSeek 官方搜索，自动复用已配置的 DeepSeek 服务密钥。搜索会产生额外的模型用量。')).fontFamily(this.appearance.fontFamily)
+          Text(t('搜索会产生额外的模型用量。')).fontFamily(this.appearance.fontFamily)
             .fontSize(14).fontColor($r('app.color.text_secondary'))
           if (this.candidates().length > 1) {
             Text(t('DeepSeek 服务')).fontFamily(this.appearance.fontFamily).fontColor($r('app.color.text_secondary'))

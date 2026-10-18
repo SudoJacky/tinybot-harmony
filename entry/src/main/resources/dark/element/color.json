@@ -11,6 +11,7 @@
     { "name": "diff_removed_background", "value": "#452B2B" },
     { "name": "start_window_background", "value": "#121A18" },
     { "name": "page_background", "value": "#121A18" },
+    { "name": "reading_surface_tint", "value": "#CC121A18" },
     { "name": "chat_header_background", "value": "#99121A18" },
     { "name": "surface", "value": "#1D2824" },
     { "name": "surface_variant", "value": "#27342F" },

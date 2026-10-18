@@ -1,5 +1,5 @@
 import { t } from './I18n';
-import { ToolSelection, validateToolSelection } from './AgentMode';
+import { ToolSelection, validateToolSelection, normalizeDisabledTools } from './AgentMode';
 import { ProjectData, validateProjects } from './Project';
 import { UiSavedState, validateUiStates } from './InteractiveUi';
 import { REASONING_EFFORTS } from './ReasoningEffort';
@@ -229,6 +229,7 @@ export function parseAppData(text: string): AppData {
       throw new Error(t('推理强度设置无效。'));
     }
     validateToolSelection(thread);
+    if (thread.disabledTools !== undefined) { thread.disabledTools = normalizeDisabledTools(thread.disabledTools); }
     if (thread.teamEnabled !== undefined && typeof thread.teamEnabled !== 'boolean') { throw new Error(t("团队模式设置损坏。")); }
     if (thread.teams !== undefined) { recoverTeams(thread.teams); }
     if (thread.attachments) { validateAttachments(thread.attachments); }

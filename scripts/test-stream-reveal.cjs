@@ -23,6 +23,8 @@ let parts = shown('旧内容新增', 1100);
 assert.equal(parts[0].text, '旧内容');
 assert.equal(parts[0].opacity, 1);
 assert.ok(parts[1].opacity < 0.21);
+assert.equal(parts[1].opacity, 0, 'new text starts transparent');
+assert.equal(shown('旧内容新增', 1100 + STREAM_REVEAL_MS / 2)[1].opacity, 0.875, 'fade uses an ease-out curve');
 const priorOpacity = shown('旧内容新增', 1180)[1].opacity;
 reveal.update('0', '旧内容新增文字', 1180, true);
 parts = shown('旧内容新增文字', 1180);

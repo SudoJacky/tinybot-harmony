@@ -116,36 +116,36 @@ export struct SupportPanel {
     this.article(t('开源共建'), t('Tinybot 是一款开源软件，遵循 Apache 2.0 许可证。欢迎社区参与维护、改进翻译、报告问题，以及通过 Pull Request 提交代码，一起让 Tinybot 变得更好。'))
     GroupCard() {
       Column() {
-        NavRow({ title: t('GitHub 仓库'), subtitle: 'SudoJacky/tinybot-harmony', compId: 'about-github',
+        NavRow({ title: t('GitHub 仓库'), icon: $r('sys.symbol.link'), subtitle: 'SudoJacky/tinybot-harmony', compId: 'about-github',
           onTap: () => this.openWebsite('https://github.com/SudoJacky/tinybot-harmony') })
         RowDivider()
-        NavRow({ title: t('报告软件问题（Issues）'), compId: 'about-issues',
+        NavRow({ title: t('报告软件问题（Issues）'), icon: $r('sys.symbol.exclamationmark_circle'), compId: 'about-issues',
           onTap: () => this.openWebsite('https://github.com/SudoJacky/tinybot-harmony/issues') })
       }
     }
     GroupCard() {
       Column() {
-        NavRow({ title: t('更新说明'), compId: 'open-release-notes', onTap: () => this.onOpen('updates') })
+        NavRow({ title: t('更新说明'), icon: $r('sys.symbol.doc_text'), compId: 'open-release-notes', onTap: () => this.onOpen('updates') })
         RowDivider()
-        NavRow({ title: t('公告'), compId: 'open-announcements', onTap: () => this.onOpen('announcements') })
+        NavRow({ title: t('公告'), icon: $r('sys.symbol.speaker_wave_2'), compId: 'open-announcements', onTap: () => this.onOpen('announcements') })
         RowDivider()
-        NavRow({ title: t('评分和评论'), compId: 'open-about-rating', onTap: () => this.onOpen('rating') })
+        NavRow({ title: t('评分和评论'), icon: $r('sys.symbol.star'), compId: 'open-about-rating', onTap: () => this.onOpen('rating') })
         RowDivider()
-        NavRow({ title: t('首次使用指引'), compId: 'open-startup-guide', onTap: () => this.onOpen('guide') })
+        NavRow({ title: t('首次使用指引'), icon: $r('sys.symbol.wand_and_stars'), compId: 'open-startup-guide', onTap: () => this.onOpen('guide') })
       }
     }
     SectionHeader({ title: t('协议与政策') })
     GroupCard() {
       Column() {
-        NavRow({ title: t('用户协议'), compId: 'user-agreement', onTap: () => this.onOpen('terms') })
+        NavRow({ title: t('用户协议'), icon: $r('sys.symbol.doc_plaintext'), compId: 'user-agreement', onTap: () => this.onOpen('terms') })
         RowDivider()
-        NavRow({ title: t('隐私政策'), compId: 'privacy-policy',
+        NavRow({ title: t('隐私政策'), icon: $r('sys.symbol.lock'), compId: 'privacy-policy',
           onTap: () => this.onOpen('privacy') })
         RowDivider()
-        NavRow({ title: 'Apache License 2.0', compId: 'about-project-license',
+        NavRow({ title: 'Apache License 2.0', icon: $r('sys.symbol.doc'), compId: 'about-project-license',
           onTap: () => this.openWebsite('https://github.com/SudoJacky/tinybot-harmony/blob/main/LICENSE') })
         RowDivider()
-        NavRow({ title: t('第三方开源许可协议'), compId: 'open-third-party-licenses',
+        NavRow({ title: t('第三方开源许可协议'), icon: $r('sys.symbol.rectangle_stack'), compId: 'open-third-party-licenses',
           onTap: () => this.onOpen('licenses') })
       }
     }
@@ -176,6 +176,10 @@ export struct SupportPanel {
 
   @Builder
   updates() {
+    this.article(t('1.0.0 · 2026-10-18'), t('首个大版本：原生聊天、项目共享工作区、工具编排与团队协作、Skills、MCP、长期记忆和备份集中在手机中。支持连接自己的模型服务，继续保留已有对话与配置。'))
+    this.article(t('工具更精简'), t('初始工具精简为读取、写入、编辑、编排和工具检索；使用 BM25 检索按需加载其他能力。复杂参数使用原生对象和数组，文件编辑支持批量替换，沿用工作区边界、权限与执行确认。'))
+    this.article(t('聊天与设置焕新'), t('流式文字渐显，思考和工具调用独立折叠，消息操作集中为图标。发送消息后收起键盘，输入时显示团队模式；设置使用独立子页，统一图标与间距，改善深色启动页与光感材质的可读性。'))
+    this.article(t('用量与稳定性'), t('上下文详情展示整个会话的累计用量，每轮仍保留独立统计。改进长回复滚动和预览加载，保留工具执行保护、完整调用记录与错误提示。'))
     this.article(t('0.1.6 测试版 · 2026-10-09'), t('新增工具编排，可组合文件、网页与 MCP 工具，统一汇总结果；展开工具回执可查看各子调用的参数、状态和结果，支持停止与错误恢复。'))
     this.article(t('上下文用量明细'), t('点击输入框旁的上下文圆圈，可展开查看系统提示、工具定义、用户输入、助手消息、工具结果、摘要、附件与协议开销。分类为本地估算，模型实际返回的请求及本轮用量单独显示。'))
     this.article(t('0.1.5 测试版 · 2026-10-07'), t('新增聊天底部的 AI 提示、使用帮助与关于 Tinybot，可查看更新说明、公告和首次使用指引。评分和评论直接打开系统评价弹窗；服务列表新增品牌 Logo，并修复切换明暗主题时状态栏文字颜色滞后的问题。'))

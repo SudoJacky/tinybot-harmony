@@ -14,14 +14,16 @@ export struct ProviderEditorPanel {
   @ObjectLink app: ChatViewModel;
   @ObjectLink editor: ProviderEditorViewModel;
   onSaved: () => void = () => {};
+  @Prop page: string = 'service';
+  @Prop foundModels: string[] = [];
+  @Prop initialModelError: string = '';
+  onModels: (error: string) => void = () => {};
+  onDiscovered: (models: string[]) => void = () => {};
   @State private discovering: boolean = false;
   @State private advanced: boolean = false;
   @State private replacingKey: boolean = false;
   @State private attempted: boolean = false;
-  @State private showModels: boolean = false;
-  @State private showDiscovery: boolean = false;
   @State private modelError: string = '';
-  @State private foundModels: string[] = [];
   @State private selectedModels: string[] = [];
   @State private modelQuery: string = '';
   private alive: boolean = true;
@@ -31,8 +33,8 @@ export struct ProviderEditorPanel {
   private protocolLabels: string[] = ['Chat Completions', 'Responses', 'Messages'];
   private protocolLogos: Resource[] = [$r('app.media.logo_openai'), $r('app.media.logo_openai'), $r('app.media.logo_anthropic')];
 
-  aboutToAppear(): void { this.alive = true; }
-  aboutToDisappear(): void { this.alive = false; }
+  aboutToAppear(): void { this.alive = true; this.modelError = this.initialModelError; }
+  aboutToDisappear(): void { this.alive = false; if (this.page === 'service') { this.editor.apiKey = ''; } }
   private locked(): boolean { return this.app.busy || this.discovering; }
   private async openApiKeyPage(): Promise<void> {
     const url = this.editor.apiKeyUrl;
@@ -53,20 +55,19 @@ export struct ProviderEditorPanel {
     try {
       const models = await discoverModels(draft, this.app.providerProfiles);
       if (!this.alive) { return; }
-      this.foundModels = models; this.selectedModels = []; this.modelQuery = ''; this.modelError = '';
-      this.getUIContext().getFocusController().clearFocus(); this.showDiscovery = true;
+      this.getUIContext().getFocusController().clearFocus(); this.onDiscovered(models);
     } catch (error) { if (this.alive) { this.editor.error = (error as Error).message; } }
     finally { if (this.alive) { this.discovering = false; } }
   }
   private async save(): Promise<void> {
     if (this.locked()) { return; }
-    if (this.editor.modelInput.trim()) { this.addManual(); if (this.modelError) { this.showModels = true; return; } }
+    if (this.editor.modelInput.trim()) { this.addManual(); if (this.modelError) { this.onModels(this.modelError); return; } }
     this.attempted = true;
     const invalid = ['name', 'url', 'key', 'models', 'context'].find((field: string) => this.editor.fieldError(field).length > 0);
     if (invalid) {
       if (invalid === 'context') { this.advanced = true; }
       this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t('请检查标出的设置项。') });
-      if (invalid === 'models') { this.showModels = true; return; }
+      if (invalid === 'models') { this.onModels(this.editor.fieldError('models')); return; }
       setTimeout(() => {
         if (!this.alive) { return; }
         this.scroller.scrollEdge(invalid === 'context' ? Edge.Bottom : Edge.Top);
@@ -159,7 +160,7 @@ export struct ProviderEditorPanel {
     }.width('100%').constraintSize({ minHeight: 48 }).padding({ left: 16, right: 4 })
   }
   @Builder
-  modelsSheet() {
+  modelsPage() {
     Column({ space: Space.md }) {
       Column({ space: 8 }) {
         Text(t('添加模型 ID')).fontFamily(this.appearance.fontFamily).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary')).width('100%')
@@ -178,19 +179,17 @@ export struct ProviderEditorPanel {
         Button(t('完成 · {0} 个模型', [this.editor.modelList.length])).fontFamily(this.appearance.fontFamily).id('finish-models').attributeModifier(Btn.primary).width('100%')
           .onClick(() => {
             if (this.editor.modelInput.trim()) { this.addManual(); if (this.modelError) { return; } }
-            this.getUIContext().getFocusController().clearFocus(); this.showModels = false;
+            this.getUIContext().getFocusController().clearFocus(); this.onSaved();
           })
       }
     }.height('100%').width('100%').padding({ top: 8, bottom: 24 })
   }
   @Builder
-  discoverySheet() {
+  discoveryPage() {
     Column({ space: Space.md }) {
       Search({ value: this.modelQuery, placeholder: t('搜索模型 ID') }).textFont({ family: this.appearance.fontFamily })
         .placeholderFont({ family: this.appearance.fontFamily }).id('discovered-model-search').height(44)
         .margin({ left: Space.page, right: Space.page }).onChange((value: string) => { this.modelQuery = value; })
-      Text(t('只添加你需要的模型，已有模型会保留。')).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
-        .padding({ left: Space.page, right: Space.page }).width('100%')
       if (this.matches().length === 0) { Text(t('没有匹配的模型')).fontFamily(this.appearance.fontFamily).fontColor($r('app.color.text_secondary')).padding(16) }
       List() {
         ForEach(this.matches(), (id: string) => {
@@ -213,7 +212,7 @@ export struct ProviderEditorPanel {
           Button(t('添加所选模型（{0}）', [this.selectedModels.length])).fontFamily(this.appearance.fontFamily).id('add-discovered-models')
             .attributeModifier(Btn.primary).width('100%').enabled(this.selectedModels.length > 0)
             .onClick(() => {
-              try { this.editor.addModels(this.selectedModels.join('\n')); this.showDiscovery = false; }
+              try { this.editor.addModels(this.selectedModels.join('\n')); this.onSaved(); }
               catch (error) { this.modelError = (error as Error).message; }
             })
         }
@@ -221,7 +220,8 @@ export struct ProviderEditorPanel {
     }.height('100%').width('100%').padding({ top: 8, bottom: 24 })
   }
 
-  build() {
+  @Builder
+  servicePage() {
     Column() {
       if (this.editor.id.length > 0) {
         Row() {
@@ -307,7 +307,7 @@ export struct ProviderEditorPanel {
               ForEach(this.editor.modelList.slice(0, 3), (id: string) => { this.modelRow(id); RowDivider() }, (id: string) => id)
               if (this.editor.modelList.length > 3) {
                 NavRow({ title: t('查看全部 {0} 个模型', [this.editor.modelList.length]), compId: 'view-all-models',
-                  disabled: this.locked(), onTap: () => { this.modelError = ''; this.showModels = true; } })
+                  disabled: this.locked(), onTap: () => this.onModels('') })
                 RowDivider()
               }
               if (this.editor.modelList.length === 0) {
@@ -316,11 +316,9 @@ export struct ProviderEditorPanel {
               Row({ space: 8 }) {
                 Button(this.discovering ? t('正在发现模型…') : t('获取模型')).fontFamily(this.appearance.fontFamily).id('discover-models').attributeModifier(Btn.tonal).layoutWeight(1)
                   .enabled(!this.locked()).onClick(() => this.discover())
-                  .bindSheet($$this.showDiscovery, this.discoverySheet(), { title: { title: t('选择要添加的模型') }, detents: [SheetSize.LARGE], dragBar: true,
-                    keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY, backgroundColor: $r('app.color.page_background') })
                 Button(t('手动添加')).fontFamily(this.appearance.fontFamily).id('manage-provider-models')
                   .attributeModifier(Btn.text).height(44).layoutWeight(1).enabled(!this.locked())
-                  .onClick(() => { this.modelError = ''; this.showModels = true; })
+                  .onClick(() => this.onModels(''))
               }.padding(12).width('100%')
             }
           }
@@ -343,7 +341,7 @@ export struct ProviderEditorPanel {
                       TextInput({ text: this.editor.contextWindow, placeholder: t('留空使用模型默认值') }).fontFamily(this.appearance.fontFamily).id('context-window').attributeModifier(Styles.input)
                         .type(InputType.Number).maxLength(7).onChange((value: string) => { this.editor.contextWindow = value; })
                       this.fieldError('context')
-                      Text(t('留空按模型设置：通用 200k，DeepSeek V4 / Flash、GLM 5.3 系列 1M。填写数值覆盖服务默认值；单模型设置优先。')).fontFamily(this.appearance.fontFamily).fontSize(12).lineHeight(18)
+                      Text(t('单模型设置优先于此处。')).fontFamily(this.appearance.fontFamily).fontSize(12).lineHeight(18)
                         .fontColor($r('app.color.text_secondary')).width('100%').margin({ top: 6 })
                     }
                   }.padding(12)
@@ -361,7 +359,10 @@ export struct ProviderEditorPanel {
         }
       }
     }.width('100%').height('100%')
-    .bindSheet($$this.showModels, this.modelsSheet(), { title: { title: t('管理模型') }, detents: [SheetSize.LARGE], dragBar: true,
-      keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY, backgroundColor: $r('app.color.page_background') })
+  }
+  build() {
+    if (this.page === 'models') { this.modelsPage() }
+    else if (this.page === 'discovery') { this.discoveryPage() }
+    else { this.servicePage() }
   }
 }

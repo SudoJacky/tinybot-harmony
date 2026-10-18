@@ -14,19 +14,11 @@ if (!fs.existsSync(emitted) || fs.statSync(source).mtimeMs > fs.statSync(emitted
 }
 const tree = ts.createSourceFile(emitted, fs.readFileSync(emitted, 'utf8'), ts.ScriptTarget.Latest, true);
 const component = tree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'MessageBubble');
-const builder = component.members.find(node => node.name?.getText(tree) === 'actionButton');
-const calls = [];
-function visit(node) {
-  if (ts.isCallExpression(node) && node.expression.getText(tree) === 'this.actionButton.bind(this)') {
-    calls.push(node.getText(tree));
-  }
-  ts.forEachChild(node, visit);
-}
-visit(component);
-assert.equal(calls.length, 4, 'Exercise edit, copy, regenerate and fork from the emitted call sites');
+const methods = ['actionButton', 'messageActions', 'selectText'].map(name =>
+  component.members.find(node => node.name?.getText(tree) === name).getText(tree));
 
 let current;
-const effects = new Map(), buttons = new Map(), subscribers = new Set();
+const effects = new Map(), buttons = new Map(), glyphs = new Map(), subscribers = new Set(), readingSubscribers = new Set();
 class ViewPU {
   constructor() { this.branches = new Map(); }
   observeComponentCreation2(callback) {
@@ -45,46 +37,77 @@ const Button = new Proxy({}, { get: (_, method) => value => {
   const button = buttons.get(current) || {};
   button[method] = value; buttons.set(current, button);
 } });
-const globals = { exports: {}, ViewPU, Button, Row: noUi, SymbolGlyph: noUi, Text: noUi, Image: noUi, If: noUi,
+const SymbolGlyph = new Proxy({}, { get: (_, method) => method === 'create' ? value => glyphs.set(current, value) : () => {} });
+const globals = { exports: {}, ViewPU, Button, Flex: noUi, FlexWrap: {}, FlexAlign: {}, SymbolGlyph, Text: noUi, Image: noUi, If: noUi,
   ButtonType: {}, Color: {}, Motion: {}, ImageFit: {}, t: text => text };
-const probe = `class Probe extends ViewPU { ${builder.getText(tree)}
-  mount() { ${calls.join(';\n')}; }
-} exports.Probe = Probe;`;
+const probe = `class Probe extends ViewPU { ${methods.join('\n')} } exports.Probe = Probe;`;
 vm.runInNewContext(ts.transpileModule(probe, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }
 }).outputText, globals, { filename: emitted });
-const view = new globals.exports.Probe();
-view.appearance = { fontFamily: '' };
-let allowed = false;
-Object.defineProperty(view, 'actionsEnabled', { get() {
-  if (current !== undefined) subscribers.add(current);
-  return allowed;
-} });
-const invoked = [];
-view.message = { id: 'message' };
-view.onFork = id => invoked.push('fork:' + id);
-view.onRegenerate = id => invoked.push('regenerate:' + id);
-view.copy = () => invoked.push('copy');
-view.mount();
-const controls = new Map([...buttons.values()].filter(button => button.id).map(button => [button.id, button]));
-const ids = [...effects.keys()];
-function check(expected) {
-  for (const action of ['edit', 'regenerate', 'fork']) {
-    assert.equal(controls.get(action + '-message').enabled, expected, action + ' must follow the current session state');
-  }
-  assert.equal(controls.get('copy-message').enabled, true, 'Copy stays available during a run or save error');
-  assert.deepEqual([...effects.keys()], ids, 'State transitions must not remount controls');
-}
-function update(value) {
-  allowed = value;
-  for (const id of subscribers) {
+function rerun(ids) {
+  for (const id of ids) {
     current = id; effects.get(id)(id, false); current = undefined;
   }
 }
-check(false);
-update(true); check(true); // The answer finishes and final persistence returns to idle.
-update(false); check(false); // A new task or a persistence error blocks mutations again.
-update(true); check(true); // Completion or successful save retry restores the same buttons.
-for (const button of controls.values()) button.onClick();
-assert.deepEqual(invoked, ['fork:message', 'copy', 'regenerate:message', 'fork:message']);
-console.log('PASS retained message actions react to completion, renewed busy/error state and recovery; copy and callbacks remain intact');
+for (const [role, content, expected] of [
+  ['assistant', '回答 **文本**', ['copy', 'select-text', 'read-answer', 'regenerate', 'fork', 'remember']],
+  ['user', '用户文本', ['copy', 'select-text', 'edit']],
+  ['assistant', '', ['regenerate', 'fork']],
+  ['user', '', ['edit']]
+]) {
+  effects.clear(); buttons.clear(); glyphs.clear(); subscribers.clear(); readingSubscribers.clear();
+  const view = new globals.exports.Probe(), invoked = [];
+  view.appearance = { fontFamily: '' };
+  view.message = { id: 'message', role, content };
+  view.onFork = id => invoked.push('fork:' + id);
+  view.onRegenerate = id => invoked.push('regenerate:' + id);
+  view.onRemember = id => invoked.push('remember:' + id);
+  view.onRead = id => invoked.push('read:' + id);
+  view.copy = () => invoked.push('copy');
+  let allowed = false, readingId = '';
+  Object.defineProperty(view, 'actionsEnabled', { get() {
+    if (current !== undefined) subscribers.add(current);
+    return allowed;
+  } });
+  Object.defineProperty(view, 'readingMessageId', { get() {
+    if (current !== undefined) readingSubscribers.add(current);
+    return readingId;
+  } });
+  view.messageActions();
+  const allControls = [...buttons.values()].filter(button => button.id);
+  const controls = new Map(allControls.map(button => [button.id, button]));
+  assert.equal(controls.size, allControls.length, 'No duplicate controls');
+  assert.deepEqual([...controls.keys()], expected.map(action => action + '-message'));
+  const ids = [...effects.keys()];
+  for (const next of [false, true, false, true]) {
+    allowed = next; rerun(subscribers);
+    for (const action of expected) {
+      const button = controls.get(action + '-message');
+      assert.equal(button.enabled, ['edit', 'regenerate', 'fork', 'remember'].includes(action) ? next : true);
+      assert.equal(button.width, 36); assert.equal(button.height, 44);
+      assert.ok(button.accessibilityText);
+    }
+    assert.deepEqual([...effects.keys()], ids, 'State transitions must not remount controls');
+  }
+  if (controls.has('read-answer-message')) {
+    const before = [...glyphs.values()].map(icon => icon.id);
+    readingId = 'another-message'; rerun(readingSubscribers);
+    assert.equal(controls.get('read-answer-message').accessibilityText, '朗读回答');
+    readingId = 'message'; rerun(readingSubscribers);
+    assert.equal(controls.get('read-answer-message').accessibilityText, '停止朗读');
+    assert.notDeepEqual([...glyphs.values()].map(icon => icon.id), before, 'Reading must switch the retained icon');
+    readingId = ''; rerun(readingSubscribers);
+    assert.equal(controls.get('read-answer-message').accessibilityText, '朗读回答');
+    assert.deepEqual([...glyphs.values()].map(icon => icon.id), before);
+    assert.deepEqual([...effects.keys()], ids);
+  }
+  view.message.content = '最新消息文本';
+  for (const button of controls.values()) button.onClick();
+  assert.deepEqual(invoked, expected.filter(action => action !== 'select-text').map(action =>
+    action === 'copy' ? 'copy' : (action === 'edit' ? 'fork' : action === 'read-answer' ? 'read' : action) + ':message'));
+  if (controls.has('select-text-message')) {
+    assert.equal(view.documentOpen, true); assert.equal(view.selectingText, true);
+    assert.equal(view.documentText, '最新消息文本', 'Selection opens the current full text');
+  }
+}
+console.log('PASS compact message actions: unique assistant/user controls, empty content, live permissions, reading/stop icon, selection and callbacks');

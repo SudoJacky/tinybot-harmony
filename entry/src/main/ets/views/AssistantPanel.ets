@@ -97,7 +97,7 @@ export struct ModelSettingsPanel {
     Column() {
       Scroll() {
         Column() {
-          SectionHeader({ title: t("按任务选择模型"), caption: t("图片交给视觉模型；长问题和分析类任务交给深度模型，其余使用快速模型。") })
+          SectionHeader({ title: t("按任务选择模型") })
           GroupCard() {
             Column() {
               SwitchRow({ title: t("自动选择模型"), compId: 'auto-route', isOn: this.options.autoRoute,
@@ -116,14 +116,14 @@ export struct ModelSettingsPanel {
           SectionHeader({ title: t("专用模型") })
           GroupCard() {
             Column() {
-              this.choiceRow(t("记忆整理"), t("用于手动提炼与自动提取记忆"), this.choices(), this.chosen(this.options.memory), true,
+              this.choiceRow(t("记忆整理"), '', this.choices(), this.chosen(this.options.memory), true,
                 (index: number) => this.setRoute('memory', index))
               RowDivider()
               this.choiceRow(t("图片生成"), t("OpenAI 兼容的图片接口"), this.choices('image'), this.chosen(this.options.image), true,
                 (index: number) => this.setRoute('image', index))
             }
           }
-          SectionHeader({ title: t("模型能力"), caption: t("切换到另一个模型前，请先保存当前修改。") })
+          SectionHeader({ title: t("模型能力") })
           if (this.app.modelChoices.length) {
             GroupCard() {
               Column() {

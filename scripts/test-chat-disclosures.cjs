@@ -33,12 +33,10 @@ const data = { id: 'thread', title: 'test', updatedAt: 1, messages: [message('a'
 const thread = new ThreadViewModel(data);
 const first = thread.messages[0];
 const groupKey = buildTimeline(first.stepViews)[0].key;
-const group = first.disclosures.get(groupKey);
 const thought = first.disclosures.get('thinking-0');
 const tool = first.disclosures.get('tool-read-1');
 first.processOpen = true;
 first.usageOpen = true;
-group.open = true;
 thought.open = true; thought.limit = 8000;
 tool.open = true; tool.limit = 12000; tool.rawOpen = true; tool.rawLimit = 6000;
 tool.detailTab = 'logs'; tool.detailPage = 2;
@@ -58,20 +56,20 @@ assert.equal(tool.rawLimit, 6000);
 assert.equal(tool.detailTab, 'logs'); assert.equal(tool.detailPage, 2);
 assert.equal(tool.children.get('child'), child); assert.equal(child.open, true); assert.equal(child.detailPage, 1);
 assert.equal(first.disclosures.get('thinking-0').limit, 8000);
+assert.equal(first.disclosures.get('thinking-0').open, true);
 assert.equal(first.disclosures.get('tool-read-2').open, false);
 console.log('PASS streaming updates and new tools preserve prior reading state');
 
-// Simulate retrieving state after whole-process / group / tool remounts.
-group.open = false; first.processOpen = false;
-group.open = true; first.processOpen = true;
-assert.equal(first.disclosures.get('thinking-0').open, true);
+// Whole-process folding retains the thought reading limit and tool details.
+first.processOpen = false;
+first.processOpen = true;
+assert.equal(first.disclosures.get('thinking-0').limit, 8000);
 assert.equal(first.disclosures.get('tool-read-1').open, true);
 data.messages[0].status = 'complete';
 data.messages[0].steps.push({ content: 'Final answer', tools: [] });
 thread.update(data);
 assert.equal(first.processOpen, true);
 assert.equal(first.usageOpen, true);
-assert.equal(first.disclosures.get(groupKey), group);
 assert.equal(first.disclosures.get('thinking-0'), thought);
 console.log('PASS completion and re-access preserve explicit expansion choices');
 
@@ -81,6 +79,7 @@ assert.equal(thread.messages[1].processOpen, false);
 const reloaded = new ThreadViewModel(data);
 assert.equal(reloaded.messages[0].processOpen, false);
 assert.equal(reloaded.messages[0].usageOpen, false);
+assert.equal(reloaded.messages[0].disclosures.get('thinking-0').limit, 0);
 assert.equal(reloaded.messages[0].disclosures.get('thinking-0').open, false);
 assert.equal(reloaded.messages[0].disclosures.get('tool-read-1').rawLimit, 2000);
 assert.equal(Object.hasOwn(data.messages[0], 'disclosures'), false);

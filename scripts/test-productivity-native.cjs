@@ -339,7 +339,7 @@ async function test(name, run) {
       assert.ok(result.nextOffset>offset||result.nextOffset===offset&&result.nextColumn>column);
       offset=result.nextOffset;column=result.nextColumn;assert.ok(pages<100);}
     assert.equal(joined,content);assert.ok(pages>2);
-    const range=await invoke('read_file_lines',{path:'large.txt',startLine:2200,endLine:2201});assert.equal(range.content,content.split('\n').slice(2199,2201).join('\n')+'\n');
+    const range=await invoke('read_file',{path:'large.txt',offset:2200,limit:2});assert.equal(range.content,content.split('\n').slice(2199,2201).join('\n')+'\n');
     const search=await invoke('search_file_content',{path:'.',query:'TAIL-MARKER'});assert.equal(search.matches.length,2);assert.equal(search.skipped.length,0);
     await files.accept('large.txt');
     await invoke('edit_file',{path:'large.txt',oldText:'TAIL-MARKER',newText:'EDITED'});
@@ -378,7 +378,7 @@ async function test(name, run) {
       else respond(req,{content:[{type:'text',text:'done'}]},true);};
     const approval=new ToolApproval(),tools=new McpTools([server],approval, server => new McpClient(server)),signal=new Cancellation();
     const call=(name,args)=>({id:'c',type:'function',function:{name,arguments:JSON.stringify(args)}});
-    const action=call('mcp_call',{server:'s',tool:'read',arguments:'{}'});
+    const action=call('mcp_call',{server:'s',tool:'read',arguments:{}});
     await assert.rejects(tools.execute(action,signal),/mcp_list_tools/);
     await tools.execute(call('mcp_list_tools',{server:'s'}),signal);
     const before=calls.length;const denied=tools.execute(action,signal);await new Promise(r=>setTimeout(r,0));
@@ -512,7 +512,7 @@ async function test(name, run) {
     await assert.rejects(invoke('write_file',{path:'a.txt',content:'lost'}),/先.*读取/);
     await invoke('search_file_content',{path:'.',query:'alpha'});await assert.rejects(edit(),/先.*读取/);
     await assert.rejects(invoke('read_file',{path:'a.txt',offset:0}));await assert.rejects(edit(),/先.*读取/);
-    await invoke('read_file_lines',{path:'a.txt',startLine:1,endLine:1});
+    await invoke('read_file',{path:'a.txt',offset:1,limit:1});
     // Same byte count, with timestamps restored: content version still detects a change outside the read page.
     const stat=fs.statSync(nativePath(root+'/a.txt'));
     fs.writeFileSync(nativePath(root+'/a.txt'),'alpha\nTAIL');fs.utimesSync(nativePath(root+'/a.txt'),stat.atime,stat.mtime);
@@ -570,7 +570,7 @@ async function test(name, run) {
     const mcp=new McpTools([server],approval,()=>({list:async()=>[{name:'large',inputSchema:{type:'object'}}],call:async()=>{invocations++;return{content:[{type:'text',text:payload}]};}}));
     const call=(name,args)=>({id:name,type:'function',function:{name,arguments:JSON.stringify(args)}});
     await mcp.execute(call('mcp_list_tools',{server:'s'}),signal);
-    const step={content:'',tools:[{call:call('mcp_call',{server:'s',tool:'large',arguments:'{}'}),status:'pending',output:''}]};
+    const step={content:'',tools:[{call:call('mcp_call',{server:'s',tool:'large',arguments:{}}),status:'pending',output:''}]};
     const run=executeToolBatch(step,0,mcp,mcp.definitions(),signal,{checkpoint:async()=>{},event:()=>{}});
     await new Promise(r=>setTimeout(r,0));approval.respond(true);await run;
     assert.equal(step.tools[0].status,'complete');assert.equal(JSON.parse(step.tools[0].output).content[0].text,payload);
@@ -692,7 +692,7 @@ async function test(name, run) {
     const call=(name,args)=>({id:crypto.randomUUID(),type:'function',function:{name,arguments:JSON.stringify(args)}});
     await tools.execute(call('mcp_list_tools',{server:'s'}),new Cancellation());
     const run=async(allow)=>{
-      const step={content:'',tools:[{call:call('mcp_call',{server:'s',tool:'write',arguments:'{}'}),status:'pending',output:''}]};
+      const step={content:'',tools:[{call:call('mcp_call',{server:'s',tool:'write',arguments:{}}),status:'pending',output:''}]};
       const pending=executeToolBatch(step,0,tools,tools.definitions(),new Cancellation(),{checkpoint:async()=>{},event:()=>{}});
       await new Promise(setImmediate);approval.respond(allow);await pending;return step.tools[0];
     };

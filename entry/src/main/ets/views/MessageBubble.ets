@@ -23,8 +23,8 @@ import { ThreadReference } from '../model/ThreadReferences';
 import { DisclosureState } from '../viewmodel/DisclosureState';
 import { ToolDetails } from './ToolDetails';
 import { OrchestrationReceipts } from './OrchestrationReceipts';
-import { ProcessItem, TimelineEntry, buildTimeline, describeTools, durationLabel, elapsedMs, foldsToAnswer, persistentTool,
-  summarizeProcess, thoughtTail, turnPhase, workflowEntryState } from '../model/ProcessPresentation';
+import { ProcessItem, TimelineEntry, buildTimeline, durationLabel, elapsedMs, foldsToAnswer, persistentTool,
+  summarizeProcess, turnPhase, workflowEntryState } from '../model/ProcessPresentation';
 import { toolFavicon, toolStat, toolTitle, toolStatusLabel } from '../model/ToolPresentation';
 import { WebsiteIcon } from '../common/WebsiteIcon';
 import { ThinkingLine } from '../common/Widgets';
@@ -131,11 +131,15 @@ struct ToolRow {
       Row({ space: 6 }) {
         if (this.name() === 'read_web' && this.execution.status === 'complete') {
           WebsiteIcon({ source: toolFavicon(this.name(), this.execution.websiteIcon, this.execution.status, this.webEnabled) })
+          Text(toolTitle(this.name())).fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(1).flexShrink(0)
+            .fontColor($r('app.color.text_secondary'))
         } else {
-          SymbolGlyph(toolIcon(this.name())).fontSize(13)
-            .fontColor([this.execution.status === 'failed' ? $r('app.color.danger') : $r('app.color.text_tertiary')])
+          ThinkingLine({ label: this.execution.status === 'running' ? t('正在{0}', [toolTitle(this.name())]) : toolTitle(this.name()),
+            working: activeTool(this.execution), compact: true,
+            icon: this.execution.status === 'complete' ? $r('sys.symbol.checkmark') :
+              this.execution.status === 'failed' ? $r('sys.symbol.exclamationmark_circle') : toolIcon(this.name()),
+            danger: this.execution.status === 'failed' })
         }
-        Text(toolTitle(this.name())).fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(1).flexShrink(0).fontColor($r('app.color.text_secondary'))
         Text(toolDetail(this.execution)).fontFamily(this.appearance.fontFamily).fontSize(12).maxLines(1).layoutWeight(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_tertiary'))
         Stack() {
@@ -169,13 +173,12 @@ struct ToolRow {
   }
 }
 
-// Everything between two pieces of narration: thinking and tool calls folded into one line that reads like a sentence.
+// The turn header owns process folding; groups only preserve chronological order.
 @Component
 struct ProcessGroup {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop webEnabled: boolean = false;
   @ObjectLink message: MessageViewModel;
-  @ObjectLink disclosure: DisclosureState;
   @Prop groupKey: string = '';
   // When the whole answer is folded only results that need attention remain.
   @Prop richOnly: boolean = false;
@@ -189,112 +192,34 @@ struct ProcessGroup {
   private toolAt(item: ProcessItem): ToolExecutionViewModel | undefined {
     return item.tool < 0 ? undefined : this.message.stepViews[item.step]?.tools[item.tool];
   }
-  private tools(): ToolExecutionViewModel[] {
+  private richTools(): ToolExecutionViewModel[] {
     const tools: ToolExecutionViewModel[] = [];
     for (const item of this.items()) {
       const tool = this.toolAt(item);
-      if (tool) { tools.push(tool); }
+      if (tool && persistentTool(tool)) { tools.push(tool); }
     }
     return tools;
   }
-  private richTools(): ToolExecutionViewModel[] {
-    return this.tools().filter((tool: ToolExecutionViewModel) => persistentTool(tool));
-  }
-  private thought(): boolean { return this.items().some((item: ProcessItem) => item.tool < 0); }
-  private failures(): number { return this.tools().filter((tool: ToolExecutionViewModel) => tool.status === 'failed').length; }
-  private running(): ToolExecutionViewModel | undefined {
-    return this.message.status === 'generating' ? this.tools().find(activeTool) : undefined;
-  }
-  // The model is still thinking when the group ends in the latest step's thought with nothing said or called after it.
-  private thinkingNow(): boolean {
-    const items = this.items();
-    if (this.message.status !== 'generating' || !items.length) { return false; }
-    const last = items[items.length - 1];
-    const step = this.message.stepViews[last.step];
-    return last.tool < 0 && step !== undefined && last.step === this.message.stepViews.length - 1 &&
-      step.tools.length === 0 && step.content.trim().length === 0;
-  }
-  private active(): boolean { return this.running() !== undefined || this.thinkingNow(); }
-  private label(): string {
-    const running = this.running();
-    if (running) { return t('正在{0}', [toolTitle(running.call.function.name)]); }
-    if (this.thinkingNow()) { return t('正在思考'); }
-    const parts: string[] = [];
-    if (this.thought()) { parts.push(t('已思考')); }
-    if (this.tools().length) { parts.push(describeTools(this.tools())); }
-    return parts.join(t('，'));
-  }
-  private detail(): string {
-    const running = this.running();
-    if (running) { return toolDetail(running); }
-    const items = this.items();
-    return this.thinkingNow() ? thoughtTail(this.message.stepViews[items[items.length - 1].step].reasoningContent) : '';
-  }
-  private icon(): Resource {
-    const tools = this.tools();
-    if (!tools.length) { return $r('sys.symbol.lightbulb'); }
-    const edit = tools.find((tool: ToolExecutionViewModel) => ['write_file', 'edit_file'].includes(tool.call.function.name));
-    return toolIcon((edit || tools[tools.length - 1]).call.function.name);
-  }
-
-  @Builder
-  header() {
-    Row({ space: 6 }) {
-      ThinkingLine({ label: this.label(), working: this.active(), compact: true,
-        icon: this.failures() > 0 ? $r('sys.symbol.exclamationmark_circle') : this.icon(), danger: this.failures() > 0 })
-      if (this.active()) {
-        Text(this.detail()).fontFamily(this.appearance.fontFamily).fontSize(12).maxLines(1).layoutWeight(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_tertiary'))
-      } else {
-        if (this.failures() > 0) {
-          Text(t('{0} 次失败', [this.failures()])).fontFamily(this.appearance.fontFamily).fontSize(12).flexShrink(0).fontColor($r('app.color.danger'))
-        }
-        Blank()
-      }
-      Stack({ alignContent: Alignment.Center }) {
-        SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(11).fontColor([$r('app.color.text_tertiary')])
-      }.width(16).height(16).rotate({ angle: this.disclosure.open ? 180 : 0 })
-        .animation({ duration: Motion.medium, curve: Motion.standard })
-    }.id(this.groupKey + '-' + this.message.id).width('100%').height(44)
-    .accessibilityText((this.disclosure.open ? t('收起') : t('展开')) + ' ' + this.label())
-    .onClick(() => {
-      this.onInspect();
-      this.getUIContext().animateTo({ duration: Motion.medium, curve: Motion.standard }, () => {
-        this.disclosure.open = !this.disclosure.open;
-        // Completion must not hide a process the user explicitly chose to read.
-        if (this.disclosure.open) { this.message.processOpen = true; }
-      });
-    })
+  private thinkingNow(step: number): boolean {
+    const value = this.message.stepViews[step];
+    return this.message.status === 'generating' && step === this.message.stepViews.length - 1 &&
+      value.tools.length === 0 && value.content.trim().length === 0;
   }
 
   build() {
     Column({ space: Space.sm }) {
-      if (!this.richOnly && this.items().length > 0) {
-        Column() {
-          if (this.items().length > 1 || this.thought()) { this.header() }
-          if (this.disclosure.open || (this.items().length === 1 && !this.thought())) {
-            Column() {
-              ForEach(this.items(), (item: ProcessItem) => {
-                if (item.tool < 0) {
-                  Column() {
-                    ThinkingDisclosure({ content: this.message.stepViews[item.step]?.reasoningContent || '',
-                      disclosure: this.message.disclosures.get('thinking-' + item.step),
-                      streaming: this.thinkingNow() && item.step === this.message.stepViews.length - 1,
-                      identity: this.message.id + '-' + item.step, onInspect: this.onInspect })
-                  }.width('100%').padding({ top: 6, bottom: 6 })
-                } else if (this.toolAt(item)) {
-                  ToolRow({ execution: this.toolAt(item) as ToolExecutionViewModel, webEnabled: this.webEnabled,
-                    disclosure: this.message.disclosures.get('tool-' + (this.toolAt(item) as ToolExecutionViewModel).call.id),
-                    onInspect: () => { this.disclosure.open = true; this.message.processOpen = true; this.onInspect(); } })
-                }
-              }, (item: ProcessItem) => item.step + '-' + item.tool)
-            }.width('100%').alignItems(HorizontalAlign.Start)
-            .padding({ left: this.items().length === 1 && !this.thought() ? 0 : 12 }).margin({ bottom: 4 })
-            .border({ width: { left: this.items().length === 1 && !this.thought() ? 0 : 1 }, color: $r('app.color.divider') })
-            .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -3 }))
-              .animation({ duration: Motion.medium, curve: Motion.standard }))
+      if (!this.richOnly) {
+        ForEach(this.items(), (item: ProcessItem) => {
+          if (item.tool < 0) {
+            ThinkingDisclosure({ content: this.message.stepViews[item.step]?.reasoningContent || '',
+              disclosure: this.message.disclosures.get('thinking-' + item.step), streaming: this.thinkingNow(item.step),
+              identity: this.message.id + '-' + item.step, onInspect: () => { this.message.processOpen = true; this.onInspect(); } })
+          } else if (this.toolAt(item)) {
+            ToolRow({ execution: this.toolAt(item) as ToolExecutionViewModel, webEnabled: this.webEnabled,
+              disclosure: this.message.disclosures.get('tool-' + (this.toolAt(item) as ToolExecutionViewModel).call.id),
+              onInspect: () => { this.message.processOpen = true; this.onInspect(); } })
           }
-        }.width('100%').alignItems(HorizontalAlign.Start)
+        }, (item: ProcessItem) => item.step + '-' + item.tool)
       }
       ForEach(this.richTools(), (tool: ToolExecutionViewModel) => {
         RichToolResult({ execution: tool, onResume: this.onResume })
@@ -470,6 +395,9 @@ export struct MessageBubble {
   private images(): Attachment[] { return this.message.attachments.filter((item) => item.mime === 'image/jpeg'); }
   private files(): Attachment[] { return this.message.attachments.filter((item) => item.mime !== 'image/jpeg'); }
   private preview(item: Attachment): void { this.previewPath = Attachments.path(item); this.previewing = true; }
+  private selectText(): void {
+    this.selectingText = true; this.documentName = t('消息文本'); this.documentText = this.message.content; this.documentOpen = true;
+  }
   @Builder
   documentViewer() {
     DocumentPreview({ name: this.documentName, content: this.documentText, messageText: this.selectingText,
@@ -482,9 +410,7 @@ export struct MessageBubble {
       if (this.message.content.length > 0) {
         MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.rectangle_on_rectangle')), content: t("复制") })
           .onClick(() => this.copy())
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.textformat')), content: t('选择文本') }).onClick(() => {
-          this.selectingText = true; this.documentName = t('消息文本'); this.documentText = this.message.content; this.documentOpen = true;
-        })
+        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.textformat')), content: t('选择文本') }).onClick(() => this.selectText())
       }
       MenuItem({ startIcon: $r('app.media.message_branch'),
         content: this.message.role === 'user' ? t("从这里改写（新分支）") : t("从这里创建分支") })
@@ -513,25 +439,44 @@ export struct MessageBubble {
 
   @Builder
   actionButton(icon: Resource, label: string, compId: string, action: () => void,
-    enabled: () => boolean = () => true, imageIcon: boolean = false) {
+    enabled: () => boolean = () => true, iconKind: 'symbol' | 'image' | 'reading' = 'symbol') {
     Button({ type: ButtonType.Normal, stateEffect: true }) {
-      if (imageIcon) {
+      if (iconKind === 'image') {
         Image(icon).width(18).height(18).objectFit(ImageFit.Contain).fillColor($r('app.color.text_secondary'))
       } else {
-        SymbolGlyph(icon).fontSize(18).fontColor([$r('app.color.text_secondary')])
+        SymbolGlyph(iconKind === 'reading' && this.readingMessageId === this.message.id ? $r('sys.symbol.stop_circle_fill') : icon)
+          .fontSize(18).fontColor([$r('app.color.text_secondary')])
       }
-    }.fontFamily(this.appearance.fontFamily).id(compId).width(44).height(44).padding(0).borderRadius(8).enabled(enabled())
-      .backgroundColor(Color.Transparent).clickEffect(Motion.pressSmall).accessibilityText(label).onClick(action)
+    }.fontFamily(this.appearance.fontFamily).id(compId).width(36).height(44).padding(0).borderRadius(8).enabled(enabled())
+      .backgroundColor(Color.Transparent).clickEffect(Motion.pressSmall)
+      .accessibilityText(iconKind === 'reading' && this.readingMessageId === this.message.id ? t('停止朗读') : label).onClick(action)
   }
 
   @Builder
-  moreActions() {
-    Button({ type: ButtonType.Normal, stateEffect: true }) {
-      Image($r('app.media.message_more')).width(18).height(18).objectFit(ImageFit.Contain).fillColor($r('app.color.text_secondary'))
-    }.fontFamily(this.appearance.fontFamily).id('message-more-' + this.message.id).width(44).height(44).padding(0).borderRadius(8)
-      .backgroundColor(Color.Transparent).clickEffect(Motion.pressSmall)
-      .accessibilityText(t('消息操作')).bindMenu(this.actions, {
-        systemMaterial: this.appearance.surface, mask: false })
+  messageActions() {
+    Flex({ wrap: FlexWrap.Wrap, justifyContent: this.message.role === 'user' ? FlexAlign.End : FlexAlign.Start }) {
+      if (this.message.content.length > 0) {
+        this.actionButton($r('sys.symbol.rectangle_on_rectangle'), t('复制'), 'copy-' + this.message.id, () => this.copy())
+        this.actionButton($r('sys.symbol.textformat'), t('选择文本'), 'select-text-' + this.message.id, () => this.selectText())
+      }
+      if (this.message.role === 'assistant' && this.message.content.trim().length > 0) {
+        this.actionButton($r('sys.symbol.speaker_wave_2'), t('朗读回答'), 'read-answer-' + this.message.id,
+          () => this.onRead(this.message.id), () => true, 'reading')
+      }
+      if (this.message.role === 'user') {
+        this.actionButton($r('sys.symbol.square_and_pencil'), t('改写'), 'edit-' + this.message.id,
+          () => this.onFork(this.message.id), () => this.actionsEnabled)
+      } else {
+        this.actionButton($r('sys.symbol.arrow_clockwise'), t('重新生成（保留原回答）'), 'regenerate-' + this.message.id,
+          () => this.onRegenerate(this.message.id), () => this.actionsEnabled)
+        this.actionButton($r('app.media.message_branch'), t('分支'), 'fork-' + this.message.id,
+          () => this.onFork(this.message.id), () => this.actionsEnabled, 'image')
+      }
+      if (this.message.role === 'assistant' && this.message.content.length > 0) {
+        this.actionButton($r('sys.symbol.lightbulb'), t('提炼为记忆…'), 'remember-' + this.message.id,
+          () => this.onRemember(this.message.id), () => this.actionsEnabled)
+      }
+    }.width('100%').margin({ left: this.message.role === 'user' ? 0 : -2, top: this.message.role === 'user' ? 0 : -6 })
   }
 
   @Builder
@@ -579,11 +524,7 @@ export struct MessageBubble {
         Text(this.message.error).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.danger'))
       }
       }
-      Row({ space: 4 }) {
-        this.actionButton($r('sys.symbol.square_and_pencil'), t('改写'), 'edit-' + this.message.id,
-          () => this.onFork(this.message.id), () => this.actionsEnabled)
-        this.moreActions()
-      }.justifyContent(FlexAlign.End).opacity(this.sendOrigin ? 0 : 1)
+      Column() { this.messageActions() }.width('100%').opacity(this.sendOrigin ? 0 : 1)
         .animation({ duration: Motion.fast, curve: Motion.standard })
     }.width('100%').alignItems(HorizontalAlign.End).padding({ left: 48 })
   }
@@ -611,13 +552,13 @@ export struct MessageBubble {
     if (this.traceEntry(entry) && !this.folded()) {
       Column() {
         Column().width(1).height('100%').backgroundColor($r('app.color.divider'))
-      }.width(16).height('100%').padding({ top: entry.kind === 'process' ? 34 : 24, bottom: 2 })
+      }.width(16).height('100%').padding({ top: entry.kind === 'process' ? 28 : 24, bottom: 2 })
     }
   }
 
   @Builder
   assistantMessage() {
-    Column({ space: 10 }) {
+    Column({ space: 6 }) {
       ForEach(this.images(), (item: Attachment) => {
         Image('file://' + Attachments.path(item)).width('100%').constraintSize({ maxHeight: 320 }).objectFit(ImageFit.Contain)
           .borderRadius(Radius.md).onClick(() => this.preview(item))
@@ -654,7 +595,7 @@ export struct MessageBubble {
             }.width(16).height(16).rotate({ angle: this.folded() ? 0 : 180 })
               .animation({ duration: 280, curve: Motion.standard })
           }
-        }.id('process-' + this.message.id).height(44).width('100%')
+        }.id('process-' + this.message.id).height(32).width('100%')
         .accessibilityText((this.folded() ? t("查看执行过程，") : t("收起执行过程")) + this.workflowLabel())
         .onClick(() => {
           if (!this.timeline().length || (this.message.status !== 'generating' && !this.foldable())) { return; }
@@ -680,7 +621,7 @@ export struct MessageBubble {
                       this.traceState(entry) === 'stopped' ? $r('sys.symbol.stop_circle') : $r('sys.symbol.checkmark'))
                       .fontSize(12).fontColor([this.traceState(entry) === 'failed' ? $r('app.color.danger') : $r('app.color.text_tertiary')])
                   }
-                }.width(16).padding({ top: entry.kind === 'process' ? 15 : 5 })
+                }.width(16).padding({ top: entry.kind === 'process' ? 9 : 5 })
               }
               Column() {
               if (entry.kind === 'steering') {
@@ -696,7 +637,7 @@ export struct MessageBubble {
                       saved: this.message.uiStates, presentation: this.message.uiPresentation, available: this.uiAvailable, onInteract: this.onUi })
                   }, (preview: PublishedPreview) => preview.id)
               } else {
-                ProcessGroup({ message: this.message, webEnabled: this.webEnabled, disclosure: this.message.disclosures.get(entry.key), groupKey: entry.key, richOnly: this.folded(),
+                ProcessGroup({ message: this.message, webEnabled: this.webEnabled, groupKey: entry.key, richOnly: this.folded(),
                   onResume: this.onResume, onInspect: this.onInspect })
               }
               }.layoutWeight(1).alignItems(HorizontalAlign.Start)
@@ -735,21 +676,12 @@ export struct MessageBubble {
           .fontColor(this.message.status === 'failed' ? $r('app.color.danger') : $r('app.color.text_secondary'))
           .backgroundColor(this.message.status === 'failed' ? $r('app.color.danger_container') : $r('app.color.surface_variant'))
       }
-      // Visible shortcuts for finished answers; the long-press menu offers the same actions.
+      // One compact icon per action; long press remains an alternate access path.
       if (this.message.status !== 'generating' && turnFileChanges(this.message.steps).length > 0) {
         TurnChangesCard({ changes: turnFileChanges(this.message.steps) })
       }
       if (this.message.status !== 'generating') {
-        Flex({ wrap: FlexWrap.Wrap }) {
-          if (this.message.content.length > 0) {
-            this.actionButton($r('sys.symbol.rectangle_on_rectangle'), t('复制'), 'copy-' + this.message.id, () => { this.copy(); })
-          }
-          this.actionButton($r('sys.symbol.arrow_clockwise'), t('重新生成'), 'regenerate-' + this.message.id,
-            () => this.onRegenerate(this.message.id), () => this.actionsEnabled)
-          this.actionButton($r('app.media.message_branch'), t('分支'), 'fork-' + this.message.id,
-            () => { this.onFork(this.message.id); }, () => this.actionsEnabled, true)
-          this.moreActions()
-        }.width('100%').margin({ left: -6, top: -6 })
+        Column() { this.messageActions() }.width('100%')
         .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 4 }))
           .animation({ duration: Motion.medium, curve: Motion.standard }))
       }

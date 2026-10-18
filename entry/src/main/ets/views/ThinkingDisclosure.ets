@@ -5,7 +5,7 @@ import { Motion } from '../common/Theme';
 import { DisclosureState } from '../viewmodel/DisclosureState';
 import { ThinkingLine } from '../common/Widgets';
 
-// A compact preview follows live thought; explicit reading choices survive completion.
+// A thought is a sibling of tool calls, folded by default inside the turn process.
 @Component
 export struct ThinkingDisclosure {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
@@ -30,7 +30,7 @@ export struct ThinkingDisclosure {
           SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(11).fontColor([$r('app.color.text_tertiary')])
         }.width(16).height(16).rotate({ angle: this.disclosure.open ? 180 : 0 })
           .animation({ duration: Motion.medium, curve: Motion.standard })
-      }.id('thinking-toggle-' + this.identity).width('100%').height(44)
+      }.id('thinking-toggle-' + this.identity).width('100%').height(32)
       .accessibilityText((this.disclosure.open ? t('收起') : t('展开')) + ' ' + (this.streaming ? t('正在思考') : t('已思考')))
       .onClick(() => {
         this.onInspect();
@@ -41,17 +41,13 @@ export struct ThinkingDisclosure {
       })
       if (this.disclosure.open) {
         Text(this.content.slice(0, this.disclosure.limit)).fontFamily(this.appearance.fontFamily).id('thinking-content-' + this.identity)
-          .width('100%').fontSize(13).lineHeight(21)
-          .fontColor($r('app.color.text_tertiary')).copyOption(CopyOptions.LocalDevice)
+          .width('100%').fontSize(13).lineHeight(21).fontColor($r('app.color.text_tertiary')).copyOption(CopyOptions.LocalDevice)
           .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -3 }))
             .animation({ duration: Motion.medium, curve: Motion.standard }))
-        Row({ space: 16 }) {
-          if (this.content.length > this.disclosure.limit) {
-            Text(t('展开更多')).fontFamily(this.appearance.fontFamily).id('thinking-more-' + this.identity).fontSize(12).fontColor(this.appearance.accent).height(44)
-              .onClick(() => { this.onInspect(); this.disclosure.limit += 4000; })
-          }
-          Text(t('收起')).fontFamily(this.appearance.fontFamily).id('thinking-less-' + this.identity).fontSize(12).fontColor(this.appearance.accent).height(44)
-            .onClick(() => { this.onInspect(); this.disclosure.open = false; })
+        if (this.content.length > this.disclosure.limit) {
+          Text(t('展开更多')).fontFamily(this.appearance.fontFamily).id('thinking-more-' + this.identity).fontSize(12)
+            .fontColor(this.appearance.accent).height(32)
+            .onClick(() => { this.onInspect(); this.disclosure.limit += 4000; })
         }
       }
     }.width('100%').alignItems(HorizontalAlign.Start)

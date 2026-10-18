@@ -8,13 +8,15 @@ const emitted = path.join(root, 'entry/build/default/cache/default/default@Compi
 assert.ok(fs.statSync(emitted).mtimeMs >= fs.statSync(source).mtimeMs, 'Build before testing');
 const tree = ts.createSourceFile(emitted, fs.readFileSync(emitted, 'utf8'), ts.ScriptTarget.Latest, true);
 const component = tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'ThinkingLine');
-const names = ['aboutToAppear','aboutToDisappear','stopLoop','stopSettle','syncMotion','syncState','visibilityChanged'];
-const globals = { exports: {} };
+const names = ['aboutToAppear','aboutToDisappear','stopLoop','stopSettle','syncMotion','syncState','visibilityChanged','sheenColor'];
+const globals = { exports: {}, ColorMetrics: { resourceColor: () => ({ red: 30, green: 40, blue: 35, alpha: 255 }),
+  rgba: (_r, _g, _b, alpha) => ({ color: alpha }) } };
 vm.runInNewContext(ts.transpileModule(`class Probe { ${component.members.filter(n => names.includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')} }
 exports.Probe = Probe;`, { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, globals);
 function mount(working, label) {
   const animations = [];
   const value = Object.assign(new globals.exports.Probe(), { working, label, mounted: false, visible: false,
+    foreground: true, appearance: { effectStrength: 1 },
     currentLabel: '', previousLabel: '', labelMix: 1, breath: 0.58, sweep: -100,
     getUIContext: () => ({ createAnimator: options => {
       const animator = { options, playing: false, cancelled: false, play() { this.playing = true; },
@@ -27,8 +29,11 @@ const live = mount(true, 'Thinking');
 assert.equal(live.animations.length, 1); assert.equal(live.animations[0].options.iterations, -1);
 live.value.syncState(); assert.equal(live.animations.length, 1, 'Repeated streaming updates must not restart the loop');
 live.animations[0].frame(0.5); assert.equal(live.value.breath, 1); assert.equal(live.value.sweep, 100);
+live.animations[0].frame(0.375);
+assert.ok(live.value.sheenColor(4) > live.value.sheenColor(0), 'Sheen changes glyph ink instead of painting an overlay rectangle');
+const displayedBreath = live.value.breath;
 live.value.working = false; live.value.label = 'Thought'; live.value.syncState();
-assert.equal(live.animations[0].cancelled, true); assert.equal(live.value.breath, 1, 'Cancel callback must not overwrite the displayed frame');
+assert.equal(live.animations[0].cancelled, true); assert.equal(live.value.breath, displayedBreath, 'Cancel callback must not overwrite the displayed frame');
 assert.equal(live.value.previousLabel, 'Thinking'); assert.equal(live.value.currentLabel, 'Thought');
 live.animations[1].frame(0.5); assert.equal(live.value.labelMix, 0.5);
 live.animations[1].finish(); assert.equal(live.value.previousLabel, ''); assert.equal(live.value.labelMix, 1);
@@ -48,4 +53,29 @@ interrupted.value.visibilityChanged(true); assert.equal(interrupted.animations.l
 const loop = interrupted.value.loop; interrupted.value.aboutToDisappear(); const sweep = interrupted.value.sweep;
 loop.frame(0.7); assert.equal(interrupted.value.sweep, sweep, 'Detached callbacks must not mutate an unmounted row');
 assert.equal(loop.cancelled, true);
+const background = mount(true, 'Reading');
+const backgroundLoop = background.value.loop;
+background.value.foreground = false; background.value.syncMotion();
+assert.equal(backgroundLoop.cancelled, true); assert.equal(background.value.loop, undefined);
+const backgroundCount = background.animations.length;
+background.value.label = 'Writing'; background.value.syncState();
+assert.equal(background.animations.length, backgroundCount); assert.equal(background.value.currentLabel, 'Writing');
+assert.equal(background.value.labelMix, 1);
+background.value.foreground = true; background.value.syncMotion();
+assert.equal(background.animations.length, backgroundCount + 1);
+background.value.label = 'Publishing'; background.value.syncState();
+const disabledLoop = background.value.loop, disabledSettle = background.value.settling;
+background.value.appearance.effectStrength = 0; background.value.syncMotion();
+assert.equal(disabledLoop.cancelled, true); assert.equal(disabledSettle.cancelled, true);
+assert.equal(background.value.labelMix, 1); assert.equal(background.value.previousLabel, '');
+const disabledCount = background.animations.length;
+background.value.label = 'Done'; background.value.working = false; background.value.syncState();
+assert.equal(background.animations.length, disabledCount); assert.equal(background.value.currentLabel, 'Done');
+background.value.appearance.effectStrength = 1; background.value.syncMotion();
+assert.equal(background.animations.length, disabledCount, 'Restoring effects must not replay completed steps');
+background.value.aboutToDisappear();
+const unicode = mount(true, '思考🙂');
+assert.equal(unicode.value.currentGlyphs.length, 3, 'Glyph ink preserves Unicode surrogate pairs');
+unicode.value.aboutToDisappear();
 console.log('PASS thinking motion: live loop, settled crossfade, quiet history, rapid labels, hidden rows, resume and unmount cancellation');
+console.log('PASS foreground/effects: pause loops and transitions, update hidden labels, resume live work, keep completed history static');

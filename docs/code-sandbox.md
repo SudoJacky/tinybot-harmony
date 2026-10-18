@@ -6,6 +6,7 @@
 使用 `await tools.read_file({path: 'data.json'})` 调用当前 Agent 有权使用的工具，使用 `return`
 交付 JSON 可序列化的汇总。工具返回值是解析后的 JSON；非 JSON 文本保持字符串。
 `ALL_TOOLS` 提供本次可用工具的 `name`、`description` 和 `parameters`；`console` 日志沿用下文限制。
+`orchestrate` 默认直接提供给模型。`list_files`、`find_files`、`search_file_content` 的完整 schema 按需展开，编排仍可直接调用这些已经获授权的工具，无需先搜索激活；它们的参数说明可在 `ALL_TOOLS` 中读取。
 
 异步编排还提供以下全局函数，函数签名和限制随 `orchestrate` 工具说明一起交给 Agent：
 
@@ -77,11 +78,11 @@ Team 控制、用户表单、图片/界面发布以及 `execute_code`/`orchestra
 ```json
 {
   "code": "console.log('rows', input.values.length); return {total: input.values.reduce((a,b) => a+b, 0)};",
-  "input": "{\"values\":[2,3,5]}"
+  "input": {"values":[2,3,5]}
 }
 ```
 
-`code` 是严格模式同步函数体，通过 `input` 参数读取 JSON 副本，通过 `return` 返回 JSON 可序列化的值；`input` 参数本身是 JSON 编码字符串，省略时为 `null`。不返回值时结果为 `null`。JSON 标准转换适用，例如非有限数变为 `null`，对象内的 undefined 属性被省略；循环引用和 BigInt 报错。
+`code` 是严格模式同步函数体，通过 `input` 参数读取 JSON 副本，通过 `return` 返回 JSON 可序列化的值；`input` 直接接受原生 JSON 对象、数组、字符串、数字、布尔值或 `null`，省略时为 `null`，无需再次编码。字符串保持字符串，不解析其中的 JSON 文本。不返回值时结果为 `null`。JSON 标准转换适用，例如非有限数变为 `null`，对象内的 undefined 属性被省略；循环引用和 BigInt 报错。
 
 ```json
 {

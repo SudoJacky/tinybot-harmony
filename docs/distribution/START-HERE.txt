@@ -1,76 +1,47 @@
-Tinybot 0.1.6 · 发布 / 云测试准备说明
-更新日期：2026-10-09
-本文描述 0.1.6 的目标交付内容；版本更新后需重新运行准备脚本生成软件包、符号表和校验信息，旧版本产物不能直接作为本版本提交。
+Tinybot v1.0.0 · 发布准备说明
+更新日期：2026-10-18
 
-一、这次准备了什么
-
-packages/Tinybot-0.1.6-10006-release-UNSIGNED.app：Release 模式完整应用包，等待云签名。
-packages/Tinybot-0.1.6-10006-release-UNSIGNED.hap：同一 APP 内的 entry 模块，供检查或后续签名使用。
-symbols/app-symbol.zip：本版本符号表，供 DevEco Studio 上传及问题定位。
-symbols/native/arm64-v8a/、symbols/native/x86_64/：与包内 Build ID 一致的未裁剪沙箱原生库，供 Native 崩溃定位。
-assets/tinybot-icon.png：工程实际使用的 1024×1024 PNG 图标；商店上传所需尺寸以 AGC 当前字段为准。
-screenshots/：本机真实界面截图；上传前按 AGC 当前字段要求选择、预览。
-仅在本机已有 artifacts/store-screenshots 时附带截图，拍摄版本以截图记录为准；历史截图不能作为 0.1.6 新交互的验证证据。
-RELEASE-NOTES.txt：0.1.6 测试版更新说明、升级与回归重点。
-STORE-LISTING.txt：应用介绍、版本说明和待填字段。
-CLOUD-TEST.txt：云测试环境选择、功能验证步骤、审核体验说明。
-PRIVACY-DRAFT.txt：按当前实现整理的隐私政策草稿，含待补充项，不能原样发布。
-RELEASE-GAPS.txt：正式提交前仍需完成的项目。
-package-info.json、SHA256SUMS.txt：从最终包读取的配置、文件大小和校验码。
-licenses/：工程 Apache-2.0、QuickJS MIT，以及品牌资源和 Liquid Toggle 等第三方许可说明。
-
-二、软件包当前状态（务必区分）
+一、版本与产物
 
 包名：com.sudojacky.tinybot
-应用名称：Tinybot
-版本：0.1.6，versionCode=10006
-设备类型：phone
-最低 / 目标 API：26；当前使用 SDK 26.0.0.105 Release。
-构建模式：release，包内 app.debug=false。
-原生 ABI：arm64-v8a（手机）、x86_64（模拟器），均包含 libtinybot_sandbox.so。
-本次交付：未签名，不是可直接安装或直接在 AGC 网页提交的最终发布签名包。
+版本：1.0.0，versionCode=1000000
+设备：phone，最低与目标 HarmonyOS API 26
+发布包：release，app.debug=false，仅 arm64-v8a
+模拟器：使用单独构建的调试包，包含 x86_64；不随正式发布包分发。
 
-原工程的自动签名为 debug Profile，仅适用于该 Profile 授权的调试设备。
-即使采用 Release 编译模式，调试证书也不会自动变成发布证书。
-因此请使用下面的云签名流程，不要拿 entry-default-signed.hap 当作云测试或上架发布包。
-交付目录不包含私钥、密钥库、签名密码、模型 API Key 或手机中的对话数据。
+运行 scripts/prepare-distribution.ps1 后生成独立目录及 ZIP：
+packages/Tinybot-1.0.0-1000000-release-UNSIGNED.app：待云签名的完整发布包。
+packages/Tinybot-1.0.0-1000000-release-UNSIGNED.hap：同一 APP 内的 entry 模块。
+symbols/app-symbol.zip：ArkTS 符号表。
+symbols/native/arm64-v8a/：与发布包 Build ID 一致的未裁剪原生沙箱库。
+assets/tinybot-icon.png：工程使用的图标。
+screenshots/：仅附带本机已准备的商店截图；拍摄版本与内容需单独核对，历史图不作为本版验证结果。
+licenses/：工程 Apache-2.0 和随包第三方许可证。
+policies/：应用实际使用的隐私政策与用户协议原文。
+RELEASE-NOTES.txt、STORE-LISTING.txt、CLOUD-TEST.txt、RELEASE-GAPS.txt：版本文案与验证资料。
+PRIVACY-DRAFT.txt：指向应用实际使用的政策文件，替代旧版独立草稿。
+package-info.json、SHA256SUMS.txt：从实际包读取的元数据、文件大小、原生 Build ID 和 SHA-256。
 
-三、推荐：在 DevEco Studio 26 中上传并使用云管理证书
+二、本地生成
 
-1. 打开 D:\Code\tinybot-harmony。
-2. 使用已登录的个人开发者账号，确认 AGC 应用绑定的包名为 com.sudojacky.tinybot。
-3. 菜单 Build > Upload Product，选择 default 产品的 Release APP。
-   原始构建产物位于 build\outputs\default\tinybot-harmony-default-unsigned.app。
-   该上传入口要求从工程 build/outputs 下选择包；不要只保留交付目录中的副本。
-4. 仅测试选择 Testing Only；准备兼用于测试与发布选择 AppGallery Connect。
-5. 检查账号、团队、应用名称、包名、分类、设备类型和语言。
-   未关联应用时，在界面中关联已有的 com.sudojacky.tinybot，避免误建另一个包名。
-6. 使用云管理签名；Custom 模式对应 Automatically manage signing。
-   DevEco Studio 会重新签名，生成后缀 re-signed.app 的包；上传符号表。
-7. 检查最终包信息后再点击 Upload；到 AGC 确认上传、合法性检测与测试结果。
-8. 在 AGC 云测试中使用已重新签名并通过校验的软件包。
-   如果某入口要求本地上传，选择这一步产生的发布签名包，而不是本资料包的 UNSIGNED 文件。
+在项目根目录运行：
+powershell -ExecutionPolicy Bypass -File scripts\prepare-distribution.ps1 -StudioRoot "C:\Program Files\Huawei\DevEco Studio"
 
-本次仅完成本地准备，没有替你在 AGC 创建应用、申请云证书或上传软件包。
-如果设备池没有 API 26 手机，此版本无法安装；需等待适配设备或另行评估降低最低 API，不能只修改清单数字。
-如果 AGC 已存在 versionCode=10006 的版本，先增加版本号重新构建，或明确使用上传向导的 Manage Build Version。
-上传向导更改构建号或重新签名后，最终文件的哈希值会变化，需以最终包重新记录校验信息。
+脚本先检查 ArkTS，再构建 Release APP，验证版本、debug 标志、包内容、arm64 沙箱库和符号 Build ID，最后生成交付目录及 ZIP。已有输出不覆盖；可使用 -OutputDirectory 指定新目录。
+-SkipBuild 仅打包既有产物，仍校验包结构和版本，但不能证明包含最新代码。
 
-四、以后如何重新准备
+三、签名与上传
 
-在工程根目录运行：
-  powershell -ExecutionPolicy Bypass -File scripts\prepare-distribution.ps1 -StudioRoot "C:\Program Files\Huawei\DevEco Studio"
+本地自动签名使用调试 Profile。Release 编译不等于发布签名；交付包中的 UNSIGNED 文件需要正式签名才能安装或发布。
 
-脚本会使用 devecocli 先检查 ArkTS，再构建 release APP；校验包名、版本、debug 标志和包内容，检查两种 ABI 的沙箱库、包内哈希与原生符号 Build ID，生成独立目录和 ZIP。
-已有相同输出目录时脚本会停止，避免覆盖。可通过 -OutputDirectory 指定新的输出目录。
-只打包已经构建的产物时可使用 -SkipBuild；脚本仍会检查包结构，但不会保证产物包含最新源代码。
+在 DevEco Studio 的 Build > Upload Product 中选择工程原始产物：
+build\outputs\default\tinybot-harmony-default-unsigned.app
+关联现有包名 com.sudojacky.tinybot，核对 1.0.0 / 1000000，使用对应发布证书或云管理签名，附带本版符号表。最终签名包的哈希会变化，以最终文件重新记录。
 
-五、官方依据
+此步骤需在实际平台完成；本地准备不包含创建应用、申请证书、上传、云测试或审核结果。控制台字段以当前平台为准。如版本号已使用，增加 versionCode 后重新构建。
 
-发布应用（26.0.0 起支持上传时云签名、Testing Only / AppGallery Connect）：
-https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-publish-app
-提交 HarmonyOS 应用（测试、资料与资质）：
-https://developer.huawei.com/consumer/cn/app/submit
-在应用市场分发（软件包检测、邀请/公开测试、隐私声明）：
-https://developer.huawei.com/consumer/cn/appgallery/devstart/
-以当前 AGC 控制台及上述官方文档要求为准。本资料不表示已经通过华为审核。
+四、资料与回归
+
+应用内已接入用户协议、隐私政策的完整离线阅读和首次使用协议流程。公开政策地址、商店截图、审核体验配置等平台资料见 RELEASE-GAPS.txt。
+使用相同签名从旧版覆盖升级，检查会话、模型配置、草稿和工作区；不卸载或清空用户数据。只在干净的独立测试环境检查全新安装。
+完整回归步骤与本次实测记录见 CLOUD-TEST.txt。

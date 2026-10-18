@@ -1,6 +1,6 @@
 import { MarkdownSpan } from './Markdown';
 
-export const STREAM_REVEAL_MS: number = 220;
+export const STREAM_REVEAL_MS: number = 240;
 interface RevealRange { start: number; end: number; born: number; }
 interface RevealText { text: string; ranges: RevealRange[]; }
 export interface RevealSpan { text: string; kind: string; url: string; opacity: number; }
@@ -62,7 +62,7 @@ export class StreamReveal {
         const stop = Math.min(end, range ? range.end : next ? next.start : end);
         const progress = range ? Math.min(1, Math.max(0, (now - range.born) / STREAM_REVEAL_MS)) : 1;
         result.push({ text: span.text.slice(cursor - offset, stop - offset), kind: span.kind, url: span.url,
-          opacity: 1 - 0.8 * Math.pow(1 - progress, 2) });
+          opacity: 1 - Math.pow(1 - progress, 3) });
         cursor = stop;
       }
       offset = end;

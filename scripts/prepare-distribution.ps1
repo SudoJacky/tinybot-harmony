@@ -116,7 +116,7 @@ try {
             }
         } finally { $hapArchive.Dispose() }
 
-        foreach ($folder in @('packages', 'symbols', 'assets', 'screenshots', 'licenses')) {
+        foreach ($folder in @('packages', 'symbols', 'assets', 'screenshots', 'licenses', 'policies')) {
             New-Item -ItemType Directory -Path (Join-Path $OutputDirectory $folder) -Force | Out-Null
         }
         Copy-Item -LiteralPath $appPath -Destination (Join-Path $OutputDirectory "packages/$baseName.app")
@@ -138,6 +138,11 @@ try {
     Copy-Item -LiteralPath 'LICENSE' -Destination (Join-Path $OutputDirectory 'licenses/APACHE-2.0.txt')
     Copy-Item -LiteralPath 'entry/src/main/resources/rawfile/THIRD_PARTY_NOTICES.txt' -Destination (Join-Path $OutputDirectory 'licenses')
     Copy-Item -LiteralPath 'entry/src/main/cpp/third_party/quickjs/LICENSE' -Destination (Join-Path $OutputDirectory 'licenses/QuickJS-MIT.txt')
+    Copy-Item -Path 'entry/src/main/resources/rawfile/licenses/*.txt' -Destination (Join-Path $OutputDirectory 'licenses')
+    Copy-Item -LiteralPath 'entry/src/main/resources/rawfile/interactive-web/THREE-LICENSE.txt' -Destination (Join-Path $OutputDirectory 'licenses/Threejs-MIT.txt')
+    foreach ($document in @('privacy-policy.md', 'user-agreement.md')) {
+        Copy-Item -LiteralPath (Join-Path 'entry/src/main/resources/rawfile' $document) -Destination (Join-Path $OutputDirectory 'policies')
+    }
     if (Test-Path -LiteralPath 'artifacts/store-screenshots') {
         Get-ChildItem -LiteralPath 'artifacts/store-screenshots' -File | Where-Object { $_.Extension -in @('.png', '.txt') } | ForEach-Object {
             Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $OutputDirectory 'screenshots')
@@ -168,7 +173,7 @@ try {
         uploadedToAGC = $false
         rebuiltThisRun = (-not $SkipBuild.IsPresent)
         originalBuildAppPath = 'build/outputs/default/tinybot-harmony-default-unsigned.app'
-        pending = @('Cloud signing and platform validation', 'Developer name and contact', 'Final privacy policy URL and in-app privacy flow', 'AGC qualification requirements', 'Cloud test results and review model access')
+        pending = @('Release signing and platform upload', 'Verify platform identity, contact and policy URL', 'Current store screenshots and listing fields', 'ARM64 device and cloud tests; review model access')
         files = $files
     }
     $utf8 = New-Object Text.UTF8Encoding($false)

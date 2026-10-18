@@ -12,7 +12,7 @@ export function toolTitle(name: string): string {
     'read_web': t('读取网页'), 'read_skill': t('读取 Skill'), 'list_files': t('列出文件'), 'read_file': t('读取文件'),
     'find_files': t('查找文件'), 'read_file_lines': t('读取文件片段'), 'read_attachment': t('读取附件'), 'search_file_content': t('搜索文件内容'),
     'write_file': t('写入文件'), 'edit_file': t('编辑文件'), 'generate_image': t('生成图片'),
-    'mcp_call': t('调用远程工具'), 'mcp_list_tools': t('查看远程工具'), 'mcp_search_tools': t('搜索远程工具'),
+    'tool_search': t('查找可用工具'), 'mcp_call': t('调用远程工具'), 'mcp_list_tools': t('查看远程工具'), 'mcp_search_tools': t('搜索远程工具'),
     'execute_code': t('执行代码'), 'orchestrate': t('编排工具'), 'publish_data_view': t('生成图表'),
     'update_plan': t('更新计划'), 'request_user_input': t('请你补充信息'),
     'list_skills': t('查看 Skills'), 'skill_manage': t('管理 Skills'), 'mcp_manage': t('管理 MCP 服务'),
@@ -27,9 +27,26 @@ export function toolGroupTitle(id: string): string {
     'web': t('网页读取与搜索'), 'browser': t('浏览器'), 'calculation': t('代码计算'), 'orchestration': t('工具编排'),
     'interaction': t('用户交互与计划'), 'delivery': t('预览与交付'), 'image': t('图片生成'), 'skill-read': t('Skills 读取'),
     'mcp-discovery': t('MCP 工具发现'), 'mcp-execution': t('MCP 工具调用'), 'extension-management': t('扩展管理'),
-    'memory': t('长期记忆'), 'team-coordination': t('团队管理'), 'team-handoff': t('员工交接')
+    'memory': t('长期记忆'), 'team-coordination': t('团队管理'), 'team-handoff': t('员工交接'),
+    'research': t('资料与检索'), 'execution': t('执行与协作'), 'extensions': t('MCP 服务'),
+    'user-input': t('信息确认'), 'plan': t('任务计划'), 'team': t('团队协作'), 'preview': t('预览与图表'),
+    'file-delivery': t('文件交付'), 'skill-manage': t('Skills 管理'), 'mcp': t('MCP 远程工具'), 'mcp-manage': t('MCP 服务管理')
   };
   return titles[id] || id;
+}
+
+export function toolCapabilityDescription(id: string): string {
+  const descriptions: Record<string, string> = {
+    'context-read': t('读取附件、会话引用和历史工具结果'), 'web': t('搜索互联网并读取网页内容'),
+    'browser': t('打开网页、查看页面、操作与接管浏览器'), 'calculation': t('在代码沙箱中计算和处理数据'),
+    'orchestration': t('通过代码组合调用已授权工具'), 'user-input': t('通过表单向你确认信息'),
+    'plan': t('创建和更新任务步骤'), 'team': t('招募、管理团队并完成员工交接'),
+    'preview': t('发布交互预览、图表和数据表格'), 'file-delivery': t('展示可预览、分享和导出的文件'),
+    'image': t('生成或编辑图片，需配置图片模型'), 'skill-read': t('查看 Skills 目录并读取使用说明'),
+    'skill-manage': t('安装、更新和管理 Skills'), 'mcp': t('发现并调用已配置的远程工具'),
+    'mcp-manage': t('配置和管理 MCP 服务'), 'memory': t('维护长期记忆和自动记忆整理')
+  };
+  return descriptions[id] || '';
 }
 
 export function toolStatusLabel(status: string): string {

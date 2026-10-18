@@ -44,7 +44,7 @@ export struct SkillEditorPanel {
       Scroll() {
         Column() {
           Row() {
-            SectionHeader({ title: 'SKILL.md', caption: t("包含 name、description 和指令正文。") }).layoutWeight(1)
+            SectionHeader({ title: 'SKILL.md' }).layoutWeight(1)
             Button(this.importing ? t("导入中…") : t("从文件导入")).fontFamily(this.appearance.fontFamily).id('import-skill').attributeModifier(Btn.textSmall)
               .enabled(this.idle()).onClick(() => this.importText(false))
           }.width('100%').alignItems(VerticalAlign.Bottom)
@@ -100,7 +100,7 @@ export struct SkillEditorPanel {
               }.width('100%')
             }.padding({ top: this.editor.files.length > 0 ? Space.md : 0 })
           }.padding(Space.lg).borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
-          Text(t("启用的 Skill 名称和简介会提供给模型；正文与参考内容只在读取时发送。最多保存 20 个 Skills。")).fontFamily(this.appearance.fontFamily)
+          Text(t('内容会发送给模型；最多保存 20 个 Skills。')).fontFamily(this.appearance.fontFamily)
             .fontSize(Font.caption).lineHeight(18).fontColor($r('app.color.text_tertiary')).width('100%')
             .padding({ left: 4, right: 4, top: Space.md })
         }.padding({ left: Space.page, right: Space.page, bottom: Space.xl }).width('100%')

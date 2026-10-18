@@ -8,7 +8,7 @@ export interface CodeExecutor {
 }
 
 interface CodeStatus { status: string; }
-interface CodeArguments { code: string; input?: string; }
+interface CodeArguments { code: string; input?: Object | null; }
 
 export class CodeExecutionTools implements AgentTools {
   private executor: CodeExecutor;
@@ -26,7 +26,7 @@ export class CodeExecutionTools implements AgentTools {
         'Returns status, stdout, stderr, result, error, logsTruncated, resultTruncated and durationMs. Pure computation is available in read-only mode.',
       parameters: { type: 'object', properties: {
         'code': { type: 'string', description: 'JavaScript function body, e.g. return input.values.reduce((a, b) => a + b, 0);' },
-        'input': { type: 'string', description: 'Optional JSON-encoded input, e.g. {"values":[1,2,3]}; defaults to null.' }
+        'input': { description: 'Optional native JSON value, e.g. {"values":[1,2,3]}; defaults to null.' }
       }, required: ['code'], additionalProperties: false }
     } }];
   }
@@ -38,9 +38,8 @@ export class CodeExecutionTools implements AgentTools {
     try { args = parseToolArguments(call.function.arguments) as CodeArguments; }
     catch (_) { throw new ToolFailure('INVALID_ARGUMENTS', 'Code tool arguments must be a JSON object', 'fix_arguments'); }
     if (!args || typeof args !== 'object' || Array.isArray(args) || typeof args.code !== 'string' || !args.code.trim() ||
-      Object.keys(args).some((key: string) => key !== 'code' && key !== 'input') ||
-      (args.input !== undefined && typeof args.input !== 'string')) { throw new ToolFailure('INVALID_ARGUMENTS', 'Expected code and optional JSON input strings', 'fix_arguments'); }
-    const input = args.input === undefined ? 'null' : args.input;
+      Object.keys(args).some((key: string) => key !== 'code' && key !== 'input')) { throw new ToolFailure('INVALID_ARGUMENTS', 'Expected code and an optional native JSON input value', 'fix_arguments'); }
+    const input = JSON.stringify(args.input === undefined ? null : args.input);
     // Native parsing keeps JSON depth, allocation and parse work inside the runtime budget.
     const output = await this.executor.execute(args.code, input, cancellation);
     cancellation.check();

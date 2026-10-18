@@ -80,7 +80,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     if (existing && (!existing.isFile() || existing.isSymbolicLink())) {
       throw new Error(t("只能写入普通文件，不能覆盖目录或符号链接。"));
     }
-    if (guard && guard.version === null && existing) { throw new ToolFailure('FS_NOT_OBSERVED', t('覆盖已有文件前，请先用 read_file 或 read_file_lines 读取。'), 'read_file', { path: path }); }
+    if (guard && guard.version === null && existing) { throw new ToolFailure('FS_NOT_OBSERVED', t('覆盖已有文件前，请先用 read_file 读取。'), 'read_file', { path: path }); }
     const original = existing ? await this.read(path, cancellation) : undefined;
     if (guard && guard.version !== null && (!original || original.version !== guard.version)) {
       throw new ToolFailure('FS_STALE_VERSION', t('文件自上次读取后已变化，请重新读取再修改。'), 'read_file', { path: path });

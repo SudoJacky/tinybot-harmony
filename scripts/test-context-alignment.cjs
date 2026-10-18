@@ -85,7 +85,8 @@ async function main() {
   const readonly = new RuleTools(workspace, true);
   const manager = new RequestContext(source(fixture()), config());
   const readPrompt = manager.inspect(readonly.definitions());
-  assert.ok(readPrompt.messages[0].content.includes('read_file_lines'));
+  assert.ok(readPrompt.messages[0].content.includes('read_file'));
+  assert.ok(!readPrompt.messages[0].content.includes('read_file_lines'));
   assert.ok(!readPrompt.messages[0].content.includes('write_file') && !readPrompt.messages[0].content.includes('edit_file'));
   const writePrompt = manager.inspect(workspace.definitions());
   assert.ok(writePrompt.messages[0].content.includes('write_file 会覆盖同名文件'));

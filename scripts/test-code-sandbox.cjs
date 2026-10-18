@@ -49,16 +49,20 @@ async function main() {
   assert.equal(readOnly.definitions()[0].function.name, 'execute_code');
   await readOnly.execute(call({ code: 'return input;' }), signal);
   assert.equal(received[0][1], 'null');
-  await code.execute(call({ code: 'return input;', input: '{"x":2}' }), signal);
+  await code.execute(call({ code: 'return input;', input: { x: 2 } }), signal);
   assert.equal(received[1][1], '{"x":2}');
-  const invalid = [null, [], 3, 'str', {}, { code: '' }, { code: ' ' }, { code: 1 }, { code: 'return 1;', input: {} },
+  const invalid = [null, [], 3, 'str', {}, { code: '' }, { code: ' ' }, { code: 1 },
     { code: 'return 1;', memoryLimit: 999999999 }, { code: 'return 1;', network: true }];
   for (const args of invalid) await assert.rejects(code.execute(call(args), signal));
   await assert.rejects(code.execute({ function: { name: 'execute_code', arguments: '{' } }, signal));
   assert.equal(received.length, 2);
-  await code.execute(call({code: ' '.repeat(128 * 1024) + 'return input;', input: JSON.stringify('🙂'.repeat(40000))}), signal);
+  await code.execute(call({code: ' '.repeat(128 * 1024) + 'return input;', input: '🙂'.repeat(40000)}), signal);
   assert.equal(received[2][0].length > 96 * 1024, true);
   assert.equal(received[2][1], JSON.stringify('🙂'.repeat(40000)));
+  for (const input of [[1, { nested: true }], 'plain text', '{"literal":"string"}', 0, false, null]) {
+    await code.execute(call({ code: 'return input;', input }), signal);
+    assert.deepEqual(JSON.parse(received.at(-1)[1]), input);
+  }
   console.log('PASS tool validation, large source/input, read-only ToolSet routing');
 
   const executor = new NativeCodeExecutor();

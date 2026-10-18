@@ -20,5 +20,9 @@ export const THIRD_PARTY_LICENSES: ThirdPartyLicense[] = [
   {
     id: 'three', name: 'Three.js / OrbitControls · 0.186.1', license: 'MIT',
     copyright: 'Copyright © 2010-2026 three.js authors', resource: 'interactive-web/THREE-LICENSE.txt'
+  },
+  {
+    id: 'huawei-samples', name: 'Huawei Ability samples', license: 'Apache-2.0',
+    copyright: 'Copyright (c) 2026 Huawei Device Co., Ltd.', resource: 'licenses/huawei-samples.txt'
   }
 ];

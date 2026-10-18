@@ -12,13 +12,23 @@ import { Banner, BottomBar, EmptyState, IconBadge, Segmented, Tag } from '../com
 
 const TABS: string[] = ['memory', 'templates', 'mcp'];
 
+export interface ProductivityEditorRoute { tab: string; id: string; }
+export function productivityEditorTitle(tab: string, id: string): string {
+  return tab === 'memory' ? (id ? t('编辑记忆') : t('添加记忆')) :
+    tab === 'templates' ? (id ? t('编辑模板') : t('新建模板')) :
+      (id ? t('编辑 MCP 服务') : t('添加 MCP 服务'));
+}
+
 @Component
 export struct ProductivityPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   @State tab: string = 'memory';
+  @Prop editorOnly: boolean = false;
+  @Prop entryId: string = '';
   onUse: () => void = () => {};
-  @State private editing: boolean = false;
+  onEdit: (tab: string, id: string, onReturn: (warning: string) => void) => void = () => {};
+  onClose: (warning: string) => void = () => {};
   @State private swipeRow: string = '';
   @State private editingId: string = '';
   @State private name: string = '';
@@ -48,6 +58,20 @@ export struct ProductivityPanel {
   }
   private tabs: TabsController = new TabsController();
   private cancellation: Cancellation = new Cancellation();
+  aboutToAppear(): void {
+    if (!this.editorOnly) { return; }
+    this.reset(); this.editingId = this.entryId;
+    if (this.tab === 'memory') {
+      const item = this.app.productivity.memories.find((item) => item.id === this.entryId);
+      this.content = item?.content || ''; this.scoped = !!item?.threadId;
+    } else if (this.tab === 'templates') {
+      const item = this.app.productivity.templates.find((item) => item.id === this.entryId);
+      this.name = item?.name || ''; this.content = item?.content || '';
+    } else {
+      const item = this.app.productivity.servers.find((item) => item.id === this.entryId);
+      this.name = item?.name || ''; this.url = item?.url || ''; this.noAuth = !item?.credentialAlias;
+    }
+  }
   aboutToDisappear(): void { this.cancellation.cancel(); this.token = ''; }
 
   private locked(): boolean { return this.busy || this.app.busy; }
@@ -59,16 +83,19 @@ export struct ProductivityPanel {
   private reset(): void {
     this.editingId = ''; this.name = ''; this.content = ''; this.url = ''; this.token = ''; this.scoped = false; this.noAuth = true; this.error = '';
   }
-  private openEditor(): void { this.getUIContext().getFocusController().clearFocus(); this.editing = true; }
-  private createEntry(): void { this.reset(); this.openEditor(); }
+  private openEditor(id: string = ''): void {
+    this.getUIContext().getFocusController().clearFocus(); this.error = '';
+    this.onEdit(this.tab, id, (warning: string) => { this.error = warning; });
+  }
+  private createEntry(): void { this.openEditor(); }
   private editMemory(item: MemoryEntry): void {
-    this.reset(); this.editingId = item.id; this.content = item.content; this.scoped = !!item.threadId; this.openEditor();
+    this.openEditor(item.id);
   }
   private editTemplate(item: PromptTemplate): void {
-    this.reset(); this.editingId = item.id; this.name = item.name; this.content = item.content; this.openEditor();
+    this.openEditor(item.id);
   }
   private editServer(item: McpServer): void {
-    this.reset(); this.editingId = item.id; this.name = item.name; this.url = item.url; this.noAuth = !item.credentialAlias; this.openEditor();
+    this.openEditor(item.id);
   }
   private toast(message: string): void { this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: message }); }
   private memories(): MemoryEntry[] {
@@ -92,8 +119,9 @@ export struct ProductivityPanel {
           name: this.name.trim(), url: this.url.trim(), enabled: existing?.enabled !== false, verify: false,
           auth: this.noAuth ? 'none' : this.token.trim() || !existing?.credentialAlias ? 'bearer' : 'keep',
           token: this.noAuth ? undefined : this.token.trim() || (existing?.credentialAlias ? undefined : '') }, this.cancellation);
-        this.editing = false; this.reset(); this.error = result.warning;
+        this.token = '';
         if (!result.warning) { this.toast(t("已保存")); }
+        this.onClose(result.warning);
         return;
       }
       if (this.tab === 'memory') {
@@ -106,7 +134,7 @@ export struct ProductivityPanel {
       }
       validateProductivity(data);
       if (!await this.app.saveProductivity(data)) { throw new Error(this.app.error); }
-      this.editing = false; this.reset(); this.toast(t("已保存"));
+      this.toast(t("已保存")); this.onClose('');
     } catch (error) { this.error = (error as Error).message; }
     finally { this.busy = false; }
   }
@@ -128,7 +156,7 @@ export struct ProductivityPanel {
         else { data.templates = data.templates.filter((item) => item.id !== id); }
         if (!await this.app.saveProductivity(data)) { throw new Error(this.app.error); }
       }
-      if (this.editingId === id) { this.editing = false; this.reset(); }
+      if (this.editorOnly && this.editingId === id) { this.token = ''; this.onClose(warning); }
       this.error = warning;
       if (!warning) { this.toast(t("已删除")); }
     } catch (error) { this.error = (error as Error).message; }
@@ -248,7 +276,7 @@ export struct ProductivityPanel {
   @Builder
   serverTab() {
     List({ space: Space.md }) {
-      ListItem() { this.caption(t("支持 HTTPS Streamable HTTP、Bearer Token 与 OAuth 登录。每次远程工具调用都会请求确认。")) }
+      ListItem() { this.caption(t('远程工具每次调用前都需确认。')) }
       if (this.busy) {
         ListItem() {
           Column({ space: Space.sm }) {
@@ -335,7 +363,7 @@ export struct ProductivityPanel {
             Text(t("OAuth 客户端 ID（可选）")).fontFamily(this.appearance.fontFamily).fontSize(13).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_secondary')).width('100%')
             TextInput({ text: this.oauthClientId, placeholder: t("已在服务端注册的公开客户端 ID") }).fontFamily(this.appearance.fontFamily).id('mcp-oauth-client')
               .attributeModifier(Styles.input).height(44).onChange((value) => { this.oauthClientId = value; })
-            Text(t("用于 OAuth 登录。留空时向服务动态注册客户端。")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).width('100%')
+            Text(t('留空时向服务动态注册客户端。')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).width('100%')
           }.width('100%').padding(Space.lg).borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
         }
       }
@@ -358,7 +386,7 @@ export struct ProductivityPanel {
   }
 
   @Builder
-  editorSheet() {
+  editorPage() {
     Column() {
       Scroll() {
         Column({ space: Space.sm }) {
@@ -414,7 +442,7 @@ export struct ProductivityPanel {
           }
         }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.lg })
       }.layoutWeight(1).scrollBar(BarState.Off).align(Alignment.Top)
-      BottomBar({ sheet: true }) {
+      BottomBar() {
         Row({ space: Space.md }) {
           if (this.editingId.length > 0) {
             Button(t("删除")).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.danger).enabled(!this.locked())
@@ -427,13 +455,8 @@ export struct ProductivityPanel {
     }.width('100%').height('100%')
   }
 
-  private sheetTitle(): string {
-    return this.tab === 'memory' ? (this.editingId ? t('编辑记忆') : t('添加记忆')) :
-      this.tab === 'templates' ? (this.editingId ? t('编辑模板') : t('新建模板')) :
-      (this.editingId ? t('编辑 MCP 服务') : t('添加 MCP 服务'));
-  }
-
-  build() {
+  @Builder
+  listPage() {
     Column() {
       Segmented({ options: [t("记忆"), t("模板"), 'MCP'], selected: this.currentIndex(), compIdPrefix: 'tab',
         onSelect: (index: number) => this.selectTab(index) })
@@ -444,7 +467,7 @@ export struct ProductivityPanel {
         TabContent() { this.serverTab() }
       }.barHeight(0).layoutWeight(1).animationDuration(250).scrollable(false)
       .onChange((index: number) => { this.swipeRow = ''; this.tab = TABS[index]; })
-      if (this.error.length > 0 && !this.editing) {
+      if (this.error.length > 0) {
         Banner({ text: this.error }).padding({ left: Space.page, right: Space.page })
       }
       BottomBar() {
@@ -454,11 +477,9 @@ export struct ProductivityPanel {
           .onClick(() => this.createEntry())
       }
     }.width('100%').height('100%')
-    .bindSheet($$this.editing, this.editorSheet(), {
-      title: { title: this.sheetTitle() }, detents: [SheetSize.LARGE], dragBar: true,
-      keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY,
-      backgroundColor: $r('app.color.page_background'),
-      onDisappear: () => { this.token = ''; this.error = ''; }
-    })
+  }
+  build() {
+    if (this.editorOnly) { this.editorPage() }
+    else { this.listPage() }
   }
 }

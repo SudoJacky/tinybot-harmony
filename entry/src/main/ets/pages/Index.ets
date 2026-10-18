@@ -10,7 +10,7 @@ import { Attachments } from '../services/Attachments';
 import { t } from '../model/I18n';
 import { agentModeName } from '../model/AgentMode';
 import { ToolScopePanel } from '../views/ToolScopePanel';
-import { ProductivityPanel } from '../views/ProductivityPanel';
+import { ProductivityPanel, ProductivityEditorRoute, productivityEditorTitle } from '../views/ProductivityPanel';
 import { ModelSettingsPanel } from '../views/AssistantPanel';
 import { BackupPanel } from '../views/BackupPanel';
 import { UsagePanel } from '../views/UsagePanel';
@@ -29,7 +29,8 @@ import { ShareInbox, exportFile, shareFile } from '../services/NativeActions';
 import { ChatViewModel, MessageViewModel } from '../viewmodel/ChatViewModel';
 import { ChatPanel } from '../views/ChatPanel';
 import { SettingsPanel, UserDocumentPanel } from '../views/SettingsPanel';
-import { AppearancePanel } from '../views/AppearancePanel';
+import { AppearancePanel, appearanceChoiceTitle } from '../views/AppearancePanel';
+import { LanguagePanel } from '../views/LanguagePanel';
 import { SupportPanel, supportTitle } from '../views/SupportPanel';
 import { ThreadList } from '../views/ThreadList';
 import { ProviderEditorPanel } from '../views/ProviderEditorPanel';
@@ -394,7 +395,15 @@ struct Index {
     } else if (name === 'branches') {
       NavDestination() { BranchesPanel({ app: this.app, onSelected: () => this.paths.clear() }) }.title(t("会话分支"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'appearance') {
-      NavDestination() { AppearancePanel() }.title(t('界面与外观'), { systemMaterial: this.appearance.control })
+      NavDestination() { AppearancePanel({ onChoice: (choice: string) => { this.paths.pushPath({ name: 'appearance-choice', param: choice }); } }) }
+        .title(t('界面与外观'), { systemMaterial: this.appearance.control })
+        .backgroundColor($r('app.color.page_background'))
+    } else if (name === 'appearance-choice') {
+      NavDestination() { AppearancePanel({ choice: param as string, onDone: () => { this.paths.pop(); } }) }
+        .title(appearanceChoiceTitle(param as string), { systemMaterial: this.appearance.control })
+        .backgroundColor($r('app.color.page_background'))
+    } else if (name === 'language') {
+      NavDestination() { LanguagePanel({ app: this.app }) }.title(t('语言'), { systemMaterial: this.appearance.control })
         .backgroundColor($r('app.color.page_background'))
     } else if (name === 'model-settings') {
       NavDestination() { ModelSettingsPanel({ app: this.app }) }.title(t('模型分工与能力'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
@@ -403,8 +412,19 @@ struct Index {
     } else if (name === 'usage') {
       NavDestination() { UsagePanel({ app: this.app }) }.title(t('Token 用量'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'productivity') {
-      NavDestination() { ProductivityPanel({ app: this.app, tab: (param as string) || 'memory', onUse: () => { this.paths.clear(); } }) }
+      NavDestination() { ProductivityPanel({ app: this.app, tab: (param as string) || 'memory', onUse: () => { this.paths.clear(); },
+        onEdit: (tab: string, id: string, onReturn: (warning: string) => void) => {
+          const request: ProductivityEditorRoute = { tab: tab, id: id };
+          this.paths.pushPath({ name: 'productivity-editor', param: request,
+            onPop: (info: PopInfo) => { onReturn(typeof info.result === 'string' ? info.result : ''); } });
+        } }) }
         .title(t("记忆与工具"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'productivity-editor') {
+      NavDestination() {
+        ProductivityPanel({ app: this.app, tab: (param as ProductivityEditorRoute).tab, entryId: (param as ProductivityEditorRoute).id,
+          editorOnly: true, onClose: (warning: string) => { this.paths.pop(warning); } })
+      }.title(productivityEditorTitle((param as ProductivityEditorRoute).tab, (param as ProductivityEditorRoute).id), { systemMaterial: this.appearance.control })
+        .backgroundColor($r('app.color.page_background')).onBackPressed(() => this.app.busy)
     } else if (name === 'search-settings') {
       NavDestination() { SearchSettingsPanel({ app: this.app }) }.title(t('搜索服务'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'files') {
@@ -413,10 +433,12 @@ struct Index {
       NavDestination() {
         SettingsPanel({ app: this.app, settings: this.app.settings,
           browser: this.browser,
+          onAddProvider: () => { this.paths.pushPath({ name: 'provider-presets' }); },
           onUsage: () => { this.paths.pushPath({ name: 'usage' }); },
           onModels: () => { this.paths.pushPath({ name: 'model-settings' }); },
           onSearch: () => { this.paths.pushPath({ name: 'search-settings' }); },
           onAppearance: () => { this.paths.pushPath({ name: 'appearance' }); },
+          onLanguage: () => { this.paths.pushPath({ name: 'language' }); },
           onBackup: () => { this.paths.pushPath({ name: 'backup' }); },
           onSupport: (page: string) => this.openSupport(page),
           onTools: (tab: string) => this.openTools(tab),
@@ -426,6 +448,13 @@ struct Index {
             if (this.app.beginProvider(preset, id)) { this.paths.pushPath({ name: 'provider' }); }
           } })
       }.title(t("设置"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'provider-presets') {
+      NavDestination() {
+        SettingsPanel({ app: this.app, settings: this.app.settings, browser: this.browser, presetsOnly: true,
+          onEditProvider: (_id: string, preset: string) => {
+            if (this.app.beginProvider(preset, '')) { this.paths.replacePath({ name: 'provider' }); }
+          } })
+      }.title(t('添加模型服务'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'support') {
       NavDestination() {
         SupportPanel({ page: param as string,
@@ -449,7 +478,9 @@ struct Index {
       }.title(this.app.skillEditor.originalName.length > 0 ? t("编辑 Skill") : t("添加 Skill"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'provider') {
       NavDestination() {
-        ProviderEditorPanel({ app: this.app, editor: this.app.providerEditor, onSaved: () => { this.paths.pop(); } })
+        ProviderEditorPanel({ app: this.app, editor: this.app.providerEditor, onSaved: () => { this.paths.pop(); },
+          onModels: (error: string) => { this.paths.pushPath({ name: 'provider-models', param: error }); },
+          onDiscovered: (models: string[]) => { this.paths.pushPath({ name: 'provider-discovery', param: models }); } })
       }.title(this.app.providerEditor.id.length > 0 ? t("编辑服务") : t("添加服务"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
         .onBackPressed(() => {
           if (this.app.busy) { return true; }
@@ -459,7 +490,16 @@ struct Index {
             secondaryButton: { value: t('放弃修改'), fontColor: $r('app.color.danger'), action: () => { this.paths.pop(); } } });
           return true;
         })
-        .onHidden(() => { this.app.providerEditor.apiKey = ''; })
+    } else if (name === 'provider-models') {
+      NavDestination() {
+        ProviderEditorPanel({ app: this.app, editor: this.app.providerEditor, page: 'models', initialModelError: (param as string) || '',
+          onSaved: () => { this.paths.pop(); } })
+      }.title(t('管理模型'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'provider-discovery') {
+      NavDestination() {
+        ProviderEditorPanel({ app: this.app, editor: this.app.providerEditor, page: 'discovery', foundModels: param as string[],
+          onSaved: () => { this.paths.pop(); } })
+      }.title(t('选择要添加的模型'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'models') {
       NavDestination() {
         ModelPickerPanel({ app: this.app, onSelected: () => { this.paths.pop(); }, onSettings: () => this.openSettings() })
@@ -639,6 +679,6 @@ struct Index {
     }.width('100%').height('100%')
     .bindSheet($$this.showToolScope, this.toolScopeSheet(), { title: { title: t('工具范围') },
       height: this.app.active.agentMode === 'custom' ? SheetSize.LARGE : SheetSize.FIT_CONTENT,
-      dragBar: true, systemMaterial: this.appearance.surface })
+      dragBar: true, backgroundColor: $r('app.color.page_background'), systemMaterial: this.appearance.readingSurface })
   }
 }

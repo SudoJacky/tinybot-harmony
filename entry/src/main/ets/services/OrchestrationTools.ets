@@ -11,7 +11,7 @@ interface CodeArguments { code: string; }
 interface ChildReference { callId: string; tool: string; status: string; }
 interface ExecutionStatus { status: string; calls?: ChildReference[]; }
 interface CatalogEntry { name: string; description: string; parameters: Object; }
-const NESTED_TOOLS: string[] = ['find_files', 'list_files', 'read_file', 'read_file_lines', 'read_attachment', 'search_file_content',
+const NESTED_TOOLS: string[] = ['find_files', 'list_files', 'read_file', 'read_attachment', 'search_file_content',
   'write_file', 'edit_file', 'read_web', 'search_web', 'read_reference', 'read_skill', 'mcp_list_tools', 'mcp_search_tools', 'mcp_call', 'read_tool_result'];
 
 // Wrap the final policy-filtered catalog, outside any TeamToolLane. Only children enter that lane.
@@ -25,7 +25,8 @@ export class OrchestrationTools implements AgentTools {
       name: 'orchestrate',
       description: 'Run an async JavaScript function body to compose tools and return one JSON result. ' +
         'Use await tools.NAME({...}); tool outputs are parsed JSON when valid, otherwise strings. ' +
-        'ALL_TOOLS contains available names, descriptions and parameter schemas. Existing direct tool schemas also apply. ' +
+        'ALL_TOOLS contains available names, descriptions and parameter schemas, including tools not declared upfront. ' +
+        'For listing and search use tools.list_files({path:"."}), tools.find_files({path:".",glob:"*.md"}) or tools.search_file_content({path:".",query:"text"}). ' +
         'Independent reads may use Promise.all/allSettled; await dependent operations and every tool call before returning. ' +
         'as_settled(iterableOrMap) returns an async iterator in completion order: {index,status,value} or {index,status,reason}; ' +
         'index is the iterable position or Map key. Rejection reasons may be Error objects; use String(reason) in JSON summaries. ' +

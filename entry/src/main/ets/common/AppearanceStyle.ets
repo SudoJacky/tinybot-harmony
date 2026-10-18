@@ -18,6 +18,7 @@ export class AppearanceStyle {
   get control(): uiMaterial.Material { return AppMaterials.control; }
   get accentControl(): uiMaterial.Material { return AppMaterials.accentControl; }
   get surface(): uiMaterial.Material { return AppMaterials.surface; }
+  get readingSurface(): uiMaterial.Material { return AppMaterials.readingSurface; }
 }
 
 export function makeAppearanceStyle(options: AppearanceOptions, dark: boolean): AppearanceStyle {
