@@ -57,6 +57,19 @@ export default function productivityTests(): void {
       expect(markdownSpans('[bad](javascript:alert)')[0].kind).assertEqual('text');
       expect(markdownBlocks('```\npartial')[0].text).assertEqual('partial');
     });
+    it('parsesStandaloneImagesAndDowngradesOtherOnes', 0, () => {
+      const image = markdownBlocks('![架构图](https://example.com/a.png)')[0];
+      expect(image.kind).assertEqual('image');
+      expect(image.rows[0][0]).assertEqual('架构图');
+      expect(image.rows[0][1]).assertEqual('https://example.com/a.png');
+      // A URL that is still streaming, or one that is not HTTPS, must stay readable text.
+      expect(markdownBlocks('![图](https://example.com/a.png')[0].kind).assertEqual('text');
+      expect(markdownBlocks('![图](http://example.com/a.png)')[0].kind).assertEqual('text');
+      const spans = markdownSpans('见 ![图](https://example.com/a.png)');
+      expect(spans[0].text).assertEqual('见 ');
+      expect(spans[1].kind).assertEqual('link');
+      expect(spans[1].text).assertEqual('图');
+    });
     it('matchesMcpResponseIdsInJsonAndSse', 0, () => {
       expect(mcpResponse('{"jsonrpc":"2.0","id":2,"result":{}}', 1)).assertUndefined();
       expect(mcpResponse('event: message\r\ndata: {"jsonrpc":"2.0","id":1,"result":{}}\r\n\r\n', 1)?.id).assertEqual(1);

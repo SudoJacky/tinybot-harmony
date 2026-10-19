@@ -9,11 +9,14 @@ import { highlightCode } from '../model/CodeHighlight';
 import { Radius, Space } from '../common/Theme';
 import { RevealSpan, StreamReveal } from '../model/StreamReveal';
 import { MarkdownChunkModel } from '../viewmodel/MarkdownChunkModel';
+import { ImageViewer } from './ImageViewer';
 
 // Long code blocks start collapsed so one answer does not push the conversation off screen.
 const CODE_PREVIEW_LINES: number = 18;
 // Non-breaking padding keeps the code highlight attached to its text when a line wraps.
 const NBSP: string = String.fromCharCode(0xA0);
+// A fixed height keeps a streaming answer from reflowing while a remote image loads.
+const IMAGE_HEIGHT: number = 220;
 
 @Component
 export struct MarkdownChunkView {
@@ -34,6 +37,10 @@ export struct MarkdownChunkView {
   private highlighted: Map<number, string> = new Map<number, string>();
   @State private copied: number = -1;
   @State private expanded: number[] = [];
+  // Failed image sources are remembered per block so a broken URL shows a tap-through card.
+  @State private imageFailed: number[] = [];
+  @State private previewing: boolean = false;
+  @State private previewSource: string = '';
   private copyTimer: number = -1;
   @State private revealTime: number = 0;
   private reveal: StreamReveal = new StreamReveal();
@@ -48,7 +55,11 @@ export struct MarkdownChunkView {
     const mark = Diagnostics.begin(this.perfId);
     const now = Date.now();
     const blocks = this.model.blocks;
-    if (blocks !== this.previousBlocks) { this.measuredHeight = 0; this.previousBlocks = blocks; }
+    if (blocks !== this.previousBlocks) {
+      this.measuredHeight = 0; this.previousBlocks = blocks;
+      const failed = this.imageFailed.filter((index: number) => index < blocks.length && blocks[index].kind === 'image');
+      if (failed.length !== this.imageFailed.length) { this.imageFailed = failed; }
+    }
     this.inlineCache.clear();
     const keys: string[] = [];
     // A completed response still finishes its pending fade; history mounts stay static.
@@ -61,7 +72,7 @@ export struct MarkdownChunkView {
             this.reveal.update(key, this.inlineSpans(cell).map((span: MarkdownSpan) => span.text).join(''), now, animate);
           });
         });
-      } else {
+      } else if (block.kind !== 'image') {
         const key = `${index}`; keys.push(key);
         const text = block.kind === 'code' ? block.text : this.inlineSpans(block.text).map((span: MarkdownSpan) => span.text).join('');
         this.reveal.update(key, text, now, animate);
@@ -170,6 +181,15 @@ export struct MarkdownChunkView {
     return widths;
   }
   private headingSize(level: number): number { return level <= 1 ? this.fontSize + 5 : level === 2 ? this.fontSize + 3 : this.fontSize + 1; }
+  // Image blocks keep [alt, url] in rows; read it from the model because keyed builders keep their arguments.
+  private imageAlt(index: number): string {
+    const rows = this.model.blocks[index].rows;
+    return rows.length > 0 && rows[0].length > 0 ? rows[0][0] : '';
+  }
+  private imageUrl(index: number): string {
+    const rows = this.model.blocks[index].rows;
+    return rows.length > 0 && rows[0].length > 1 ? rows[0][1] : '';
+  }
 
   // Keyed builders retain their original arguments; read changing text from the model.
   @Builder
@@ -254,6 +274,42 @@ export struct MarkdownChunkView {
     .edgeEffect(EdgeEffect.Spring)
   }
 
+  @Builder
+  imagePreview() {
+    ImageViewer({ source: this.previewSource, onClose: () => { this.previewing = false; } })
+  }
+
+  // A standalone image line becomes its own block. Parsing only accepts HTTPS, so a reply cannot
+  // point the app at cleartext or local sources; a broken URL falls back to a tap-through card.
+  @Builder
+  image(index: number) {
+    if (this.imageFailed.includes(index)) {
+      Row({ space: Space.sm }) {
+        SymbolGlyph($r('sys.symbol.picture')).fontSize(18).fontColor([$r('app.color.text_secondary')])
+        Column({ space: 1 }) {
+          Text(this.imageAlt(index) || t('图片')).fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
+          Text(t('图片加载失败，轻点用浏览器打开')).fontFamily(this.appearance.fontFamily).fontSize(11)
+            .fontColor($r('app.color.text_secondary'))
+        }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+      }.width('100%').padding({ left: Space.md, right: Space.md, top: 10, bottom: 10 })
+      .borderRadius(Radius.md).backgroundColor($r('app.color.surface_variant'))
+      .border({ width: 0.5, color: $r('app.color.divider') })
+      .accessibilityText(this.imageAlt(index) || t('图片'))
+      .onClick(() => this.open(this.imageUrl(index)))
+    } else {
+      Image(this.imageUrl(index))
+        .width('100%').height(IMAGE_HEIGHT).objectFit(ImageFit.Contain)
+        .borderRadius(Radius.md).backgroundColor($r('app.color.surface_variant'))
+        .accessibilityText(this.imageAlt(index) || t('图片'))
+        .onError(() => {
+          if (this.imageFailed.includes(index)) { return; }
+          this.imageFailed = this.imageFailed.concat([index]); this.invalidateMeasure();
+        })
+        .onClick(() => { this.previewSource = this.imageUrl(index); this.previewing = true; })
+    }
+  }
+
   build() {
     Column() {
       if (this.visible || this.measuredHeight === 0) {
@@ -263,6 +319,8 @@ export struct MarkdownChunkView {
               this.codeBlock(this.model.blocks[index], index)
             } else if (this.model.blocks[index].kind === 'table') {
               this.table(this.model.blocks[index], index)
+            } else if (this.model.blocks[index].kind === 'image') {
+              this.image(index)
             } else if (this.model.blocks[index].kind === 'rule') {
               Divider().strokeWidth(0.5).color($r('app.color.divider')).margin({ top: 4, bottom: 4 })
             } else if (this.model.blocks[index].kind === 'quote') {
@@ -296,6 +354,7 @@ export struct MarkdownChunkView {
         Blank().width('100%').height(this.measuredHeight)
       }
     }.width('100%').alignItems(HorizontalAlign.Start)
+    .bindContentCover($$this.previewing, this.imagePreview(), { modalTransition: ModalTransition.ALPHA })
     .onAreaChange((_previous: Area, area: Area) => {
       const width = Number(area.width);
       if (this.measuredWidth > 0 && width !== this.measuredWidth) { this.invalidateMeasure(); }

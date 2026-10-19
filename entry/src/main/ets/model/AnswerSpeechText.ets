@@ -1,8 +1,8 @@
 import { markdownBlocks, markdownSpans } from './Markdown';
 
-// Read prose, link labels and table cells, without speaking code or generated UI payloads.
+// Read prose, link labels and table cells, without speaking code, images or generated UI payloads.
 export function answerSpeechText(source: string): string {
-  return markdownBlocks(source).filter((block) => block.kind !== 'code' && block.kind !== 'rule')
+  return markdownBlocks(source).filter((block) => block.kind !== 'code' && block.kind !== 'rule' && block.kind !== 'image')
     .map((block) => block.kind === 'table' ? block.rows.map((row) => row.join('，')).join('\n') : block.text)
     .map((text) => markdownSpans(text.replace(/!\[[^\]]*\]\([^)]*\)/g, '')).map((span) => span.text).join(''))
     .join('\n').trim();

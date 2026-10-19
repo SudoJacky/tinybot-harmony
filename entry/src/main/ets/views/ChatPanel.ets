@@ -34,7 +34,8 @@ import { ChatPlanPanel } from './ChatPlanPanel';
 import { MemoryDraftPanel } from './MemoryDraftPanel';
 import { ChatViewModel, MessageViewModel, ThreadViewModel } from '../viewmodel/ChatViewModel';
 import { UiValues } from '../model/InteractiveUi';
-import { ImageViewer, MessageBubble } from './MessageBubble';
+import { MessageBubble } from './MessageBubble';
+import { ImageViewer } from './ImageViewer';
 import { InputQueuePanel } from './InputQueuePanel';
 import { ContextDetails } from './ContextDetails';
 import { Btn, Font, Motion, Radius, Space, fileSize } from '../common/Theme';
@@ -818,7 +819,7 @@ export struct ChatPanel {
 
   @Builder
   imageViewer() {
-    ImageViewer({ path: this.previewPath, onClose: () => { this.previewing = false; } })
+    ImageViewer({ source: 'file://' + this.previewPath, onClose: () => { this.previewing = false; } })
   }
 
   private async toggleTeam(enabled: boolean): Promise<void> {
