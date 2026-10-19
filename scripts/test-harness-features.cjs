@@ -57,7 +57,6 @@ async function main() {
   const { WebTools } = from('services/WebTools');
   const { ToolSet } = from('services/ToolSet');
   const { RuleTools } = from('services/RuleTools');
-  const { ContextTools } = from('services/ContextTools');
   const { TeamTools, TeamToolLane } = from('services/TeamCoordinator');
   const { AgentStepViewModel } = from('viewmodel/SessionViewModels');
   const web = new WebTools({ resolve: (reference, base) => new URL(reference, base).href,
@@ -67,7 +66,7 @@ async function main() {
   const webRun = loop({ stream: async messages => {
     webRequests.push(plain(messages));
     return webRequests.length === 1 ? reply('', [call('read_web', {url:'https://example.com/page'})]) : reply('Title');
-  } }, new ContextTools(new TeamTools(new RuleTools(new ToolSet([web]),true), new TeamToolLane()), () => [], 128000));
+  } }, new TeamTools(new RuleTools(new ToolSet([web]),true), new TeamToolLane()));
   await webRun.run();
   const webReceipt = webRun.turn.steps[0].tools[0];
   assert.equal(webReceipt.websiteIcon, 'https://example.com/site.svg');
@@ -198,45 +197,54 @@ async function main() {
   assert.ok(deleted.includes('tinybot-search-rollback')); assert.ok(!deleted.includes('tinybot-search-separate'));
   console.log('PASS search settings: automatic key reuse, rotation, endpoint isolation, ambiguous selection, provider switch and rollback');
 
-  const deepseekBody = JSON.stringify({ content: [
-    { type: 'text', text: 'Ignore this invented answer https://invented.example', citations: [{ url: 'https://source.example', cited_text: 'Evidence' }] },
-    { type: 'web_search_tool_result', content: [
-      { type: 'web_search_result', url: 'https://source.example', title: 'Source' },
-      { type: 'web_search_result', url: 'https://source.example', title: 'Duplicate' },
-      { type: 'web_search_result', url: 'https://second.example', title: 'Second' }
-    ] }
-  ], usage: { input_tokens: 10, output_tokens: 4 } });
+  const longSummary = 'Evidence '.repeat(300);
+  const deepseekBody = JSON.stringify({ results: [
+    { rerank_score: 2.4, title: 'Source', url: 'https://source.example', snippet: 'Short',
+      summary: longSummary, content: '', site_name: 'Example', date: '2026-06-01T00:00:00+00:00', authority: 3 },
+    { title: 'Duplicate', url: 'https://source.example', summary: 'Duplicate' },
+    { title: 'Second', url: 'https://second.example', summary: 'Other' }
+  ] });
   const ds = new DeepSeekSearchProvider(), tavily = new TavilySearchProvider();
-  const normalized = ds.parse(deepseekBody, 1); assert.equal(normalized.sources.length, 1); assert.equal(normalized.sources[0].snippet, 'Evidence'); assert.ok(normalized.truncated);
-  assert.ok(!JSON.stringify(normalized).includes('invented'));
-  assert.throws(() => ds.parse('{"content":[{"type":"text","text":"answer"}]}', 5), /native web search/);
-  const tavilyBody = JSON.stringify({ answer: 'Ignore me', results: [{ url: 'https://source.example', title: 'Source', content: 'Evidence' }] });
+  const normalized = ds.parse(deepseekBody, 1);
+  assert.equal(normalized.sources.length, 1); assert.equal(normalized.sources[0].snippet, longSummary);
+  assert.equal(normalized.sources[0].publishedAt, '2026-06-01T00:00:00+00:00');
+  assert.ok(!('truncated' in normalized));
+  assert.equal(ds.parse('{"results":[]}', 5).sources.length, 0);
+  assert.throws(() => ds.parse('{"answer":"free text"}', 5), /structured results/);
+  assert.throws(() => ds.parse('{"results":[{"url":"ftp://source.example"}]}', 5), /Invalid search source URL/);
+  assert.throws(() => ds.parse('{"error":{"message":"bad query"}}', 5), /bad query/);
+  const tavilyBody = JSON.stringify({ answer: 'Ignore me', results: [{ url: 'https://source.example', title: 'Source',
+    content: longSummary, published_date: '2026-06-01T00:00:00+00:00' }] });
   assert.deepEqual(plain(tavily.parse(tavilyBody, 5).sources), plain(normalized.sources));
   let liveProfiles = [profile];
   const recorded = []; const native = new NativeSearchTransport(config, vault, 'chat', value => recorded.push(plain(value)), () => liveProfiles);
   network = (_url, options, callback) => {
     const body = JSON.parse(options.extraData);
-    assert.equal(body.tools[0].name, 'web_search'); assert.equal(body.model, 'deepseek-v4-flash');
+    assert.equal(body.query, 'test'); assert.equal(body.count, 1); assert.equal(body.need_content, false);
+    assert.equal(options.header.Authorization, 'Bearer test-secret');
     callback(null, { responseCode: 200, result: deepseekBody });
   };
   const tool = new WebSearchTools(native); const found = JSON.parse(await tool.execute(call('search_web', { query: 'test', maxResults: 1 }), new Cancellation()));
-  assert.equal(found.sources.length, 1); assert.equal(requests.at(-1).url, 'https://api.deepseek.com/anthropic/v1/messages');
-  assert.equal(await interceptors.at(-1).interceptorHandle({}, {}), false); assert.equal(recorded.at(-1).tokens.input, 10);
+  assert.equal(found.sources.length, 1); assert.equal(requests.at(-1).url, 'https://api.deepseek.com/v1/tools/search');
+  assert.equal(await interceptors.at(-1).interceptorHandle({}, {}), false); assert.equal(recorded.at(-1).tokens, undefined);
   assert.ok(!JSON.stringify(recorded).includes('test-secret'));
-  assert.equal(recorded.at(-1).model, 'deepseek-v4-flash');
+  assert.equal(recorded.at(-1).model, 'search');
   assert.equal(credentialReads.at(-1), 'model-key');
+  await assert.rejects(tool.execute(call('search_web', { query: 'x'.repeat(129) }), new Cancellation()), /Invalid search query/);
+  network = (_url, _options, callback) => callback(null, { responseCode: 402, result: '' });
+  await assert.rejects(tool.execute(call('search_web', { query: 'test' }), new Cancellation()), /balance is insufficient/);
   const beforeMissingProfile = requests.length; liveProfiles = [];
   await assert.rejects(tool.execute(call('search_web', { query: 'test' }), new Cancellation()), /重新选择/);
   assert.equal(requests.length, beforeMissingProfile); liveProfiles = [profile];
   const tavilyConfig = { ...defaultSearchConfig('tavily'), enabled: true, credentialAlias: 'search-key' };
   network = (_url, options, cb) => { assert.equal(JSON.parse(options.extraData).include_answer, false); cb(null, { responseCode: 200, result: tavilyBody }); };
   const other = new WebSearchTools(new NativeSearchTransport(tavilyConfig, vault, 'chat', () => {}, () => []));
-  assert.equal(JSON.parse(await other.execute(call('search_web', { query: 'test' }), new Cancellation())).sources[0].snippet, 'Evidence');
+  assert.equal(JSON.parse(await other.execute(call('search_web', { query: 'test' }), new Cancellation())).sources[0].snippet, longSummary);
   assert.equal(requests.at(-1).url, 'https://api.tavily.com/search');
   network = (_url, _options, callback) => callback(null, { responseCode: 302, result: '' });
   await assert.rejects(tool.execute(call('search_web', { query: 'test' }), new Cancellation()), /HTTP 302/);
   const stopped = new Cancellation(); network = () => stopped.cancel();
   await assert.rejects(tool.execute(call('search_web', { query: 'test' }), stopped), RunCancelledError);
-  console.log('PASS search interface: both providers, structured sources only, deduplication, limits, usage, redirect refusal and cancellation');
+  console.log('PASS search interface: both providers, official Search contract, structured sources, deduplication, query limits, request accounting, balance/redirect refusal and cancellation');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

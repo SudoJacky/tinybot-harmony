@@ -1,8 +1,7 @@
 // Local OpenAI-compatible fixture for device smoke tests. Never forwards requests to a model.
 const http = require('node:http'), fs = require('node:fs'), path = require('node:path');
 const reportPath = path.resolve('.hvigor/request-context-device-report.json');
-const report = { preview: false, originalRead: false, compacted: false, completed: false };
-let reference;
+const report = { fullResult: false, compacted: false, completed: false };
 function save() { fs.writeFileSync(reportPath, JSON.stringify(report, null, 2)); }
 function respond(res, content, toolCalls = [], input = 1000) {
   res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -20,26 +19,23 @@ http.createServer(async (req, res) => {
     const system = messages.filter(message => message.role === 'system').map(message => message.content).join('\n');
     if (system.includes('上下文摘要助手')) {
       report.compacted = true; save();
-      respond(res, 'The calculation succeeded. Its full output is saved; messageId=' + reference.messageId + ', callId=large. Do not repeat the calculation. Continue from the recent saved-result read.'); return;
+      respond(res, 'The calculation succeeded and its complete output stays in the conversation. Continue from the recent result.'); return;
     }
     if (!system.includes('你是 Tinybot')) { respond(res, system.includes('记忆') ? '[]' : 'Context verification'); return; }
     const last = messages.at(-1);
-    if (last?.role === 'tool' && last.tool_call_id === 'read-original') {
-      const page = JSON.parse(last.content);
-      if (!page.content.includes('CONTEXT_RESULT_END')) throw Error('Original result tail was not returned');
-      if (!report.compacted || !messages.some(message => String(message.content).includes('<context-summary>'))) throw Error('No persisted compaction summary in final request');
-      report.originalRead = true; report.completed = true; save();
-      respond(res, '上下文压缩与完整工具结果分段读取验证通过。计算只执行了一次，完整结果仍保存在会话记录中。'); return;
-    }
     if (last?.role === 'tool' && last.tool_call_id === 'large') {
-      reference = JSON.parse(last.content);
-      if (!reference.contextPreview || reference.totalCharacters < 100000) throw Error('Expected a saved large-result preview');
-      report.preview = true; report.characters = reference.totalCharacters; save();
-      // Usage deliberately exceeds the configured 200k input budget. It exercises usage-driven
-      // mid-turn compaction without making the device render a megabyte of assistant text.
-      respond(res, '正在核验已保存的计算结果。\n' + 'Result verification. '.repeat(500), [tool('read-original', 'read_tool_result', {
-        messageId: reference.messageId, callId: 'large', offset: reference.totalCharacters - 256, length: 256
-      })], 195000); return;
+      // The framework must hand the complete receipt to the model: no preview, no paging indirection.
+      if (typeof last.content !== 'string' || !last.content.includes('CONTEXT_RESULT_END')) throw Error('Full result tail was not returned');
+      if (last.content.includes('contextPreview')) throw Error('Large result was projected instead of passed through');
+      report.fullResult = true; report.characters = last.content.length; save();
+      // Usage deliberately exceeds the configured 200k input budget. The probe call keeps the turn going so
+      // mid-turn compaction runs before the next request, without repeating the large calculation.
+      respond(res, '正在核验已保存的计算结果。\n' + 'Result verification. '.repeat(500), [tool('probe', 'execute_code', { code: "return 'context-probe';" })], 195000); return;
+    }
+    if (last?.role === 'tool' && last.tool_call_id === 'probe') {
+      if (!messages.some(message => String(message.content).includes('<context-summary>'))) throw Error('No persisted compaction summary in final request');
+      report.completed = true; save();
+      respond(res, '上下文压缩与完整工具结果验证通过。计算只执行了一次，完整结果仍保存在会话记录中。'); return;
     }
     respond(res, '', [tool('large', 'execute_code', { code: "return {payload:'x'.repeat(100000),tail:'CONTEXT_RESULT_END'};" })]);
   } catch (error) {

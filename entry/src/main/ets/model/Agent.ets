@@ -17,7 +17,6 @@ export interface ContextDiagnostics {
   sections: Record<string, number>;
   toolTokens: number;
   historyTokens: number;
-  projectedResults: number;
 }
 
 export const MAX_TOOL_CALLS: number = 8;

@@ -12,7 +12,7 @@ interface ChildReference { callId: string; tool: string; status: string; }
 interface ExecutionStatus { status: string; calls?: ChildReference[]; }
 interface CatalogEntry { name: string; description: string; parameters: Object; }
 const NESTED_TOOLS: string[] = ['find_files', 'list_files', 'read_file', 'read_attachment', 'search_file_content',
-  'write_file', 'edit_file', 'read_web', 'search_web', 'read_reference', 'read_skill', 'mcp_list_tools', 'mcp_search_tools', 'mcp_call', 'read_tool_result'];
+  'write_file', 'edit_file', 'read_web', 'search_web', 'read_reference', 'read_skill', 'mcp_list_tools', 'mcp_search_tools', 'mcp_call'];
 
 // Wrap the final policy-filtered catalog, outside any TeamToolLane. Only children enter that lane.
 export class OrchestrationTools implements AgentTools {

@@ -90,7 +90,7 @@ const button = id => [...buttons.values()].find(value => value.id === id);
   }
   assert.ok(rows().every(child => child.subtitle.startsWith('Description: ')), 'Capability descriptions replace raw tool names');
   await button('disable-optional-tools').onClick(); panel.flush();
-  assert.equal(thread.disabledTools.length, 30); assert.ok(rows().every(child => !child.isOn));
+  assert.deepEqual([...thread.disabledTools].sort(), Array.from(groups.OPTIONAL_TOOL_NAMES).sort()); assert.ok(rows().every(child => !child.isOn));
   assert.equal(button('disable-optional-tools').enabled,false);
   assert.equal(button('enable-optional-tools').enabled,true);
   await button('enable-optional-tools').onClick(); panel.flush(); assert.equal(thread.disabledTools.length, 0);

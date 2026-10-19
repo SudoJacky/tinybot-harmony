@@ -6,7 +6,7 @@ import { Cancellation } from './Cancellation';
 
 // Visibility is separate from mandatory file permissions in ToolGroups.
 const DIRECT_TOOLS: string[] = ['read_file', 'write_file', 'edit_file', 'orchestrate',
-  'read_attachment', 'read_reference', 'read_tool_result', 'team_complete_task'];
+  'read_attachment', 'read_reference', 'team_complete_task'];
 interface SearchArguments { query: string; }
 interface ToolSummary { name: string; description: string; }
 interface ToolMatch { tool: ToolDefinition; score: number; }

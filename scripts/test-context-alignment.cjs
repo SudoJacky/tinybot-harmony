@@ -36,7 +36,6 @@ const { emptyData, parseAppData, requestHistory } = from('model/Conversation');
 const { planContextCompaction } = from('model/ConversationContext');
 const { threadEntries, projectedHistory } = from('model/ContextProjection');
 const { RequestContext } = from('services/RequestContext');
-const { ContextTools } = from('services/ContextTools');
 const { sessionContextSource } = from('services/SessionContext');
 const { Cancellation } = from('services/Cancellation');
 const { runAgentLoop } = from('services/AgentLoop');
@@ -146,7 +145,7 @@ async function main() {
     let requests = 0, summaries = 0, writes = 0, consumed = 0, pending;
     const cfg = config(); if (mode === 'disabled') cfg.autoCompact = false;
     const context = new RequestContext(source(thread), cfg);
-    const tools = new ContextTools({ definitions: () => [], execute: async () => { writes++; return 'committed'; } }, () => threadEntries(thread), cfg.contextWindow);
+    const tools = { definitions: () => [], execute: async () => { writes++; return 'committed'; } };
     const model = { stream: async (messages, definitions, cancellation, onText, options) => {
       if (options?.usagePurpose === 'compaction') {
         summaries++;

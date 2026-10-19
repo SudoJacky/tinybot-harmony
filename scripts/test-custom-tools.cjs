@@ -43,7 +43,7 @@ function fixture(data = seed()) {
   data.threads[0].titleEdited = true;
   const f = new Fixture(data), calls = [];
   // These tools are added by SessionService/AgentRuntime or belong to workers.
-  const owned = ['memory', 'skill_manage', 'mcp_manage', 'read_tool_result', 'orchestrate'];
+  const owned = ['memory', 'skill_manage', 'mcp_manage', 'orchestrate'];
   f.resources.agentTools = { definitions: () => all.filter(name => !name.startsWith('team_') && !owned.includes(name)).map(def),
     execute: async incoming => { calls.push(incoming.function.name); return JSON.stringify({ ok: true, content: '[1,2]' }); } };
   const registry = new ProviderRegistry(); registry.register(f.provider);
@@ -51,18 +51,28 @@ function fixture(data = seed()) {
   f.calls = calls; return f;
 }
 async function main() {
-  assert.equal(all.length, 40); assert.equal(new Set(all).size, 40); assert.equal(BASIC_FILE_TOOLS.length, 6);
-  assert.equal(optional.length, 30);
+  assert.equal(all.length, 39); assert.equal(new Set(all).size, 39); assert.equal(BASIC_FILE_TOOLS.length, 6);
+  assert.equal(optional.length, 29);
   assert.ok(!all.includes('generate_image'));
   const removed = seed(); removed.productivity.options.image = {providerId:'old', modelId:'image'};
   removed.threads[0].agentMode = 'custom'; removed.threads[0].disabledTools = ['generate_image'];
   const loaded = parseAppData(JSON.stringify(removed));
   assert.equal(loaded.threads[0].disabledTools.length, 0);
   assert.equal(loaded.threads[0].messages.length, removed.threads[0].messages.length);
+  // Old saves disabled the whole context-read capability, so they still list the removed read_tool_result.
+  const legacyRetrieval = seed(); legacyRetrieval.threads[0].agentMode = 'custom';
+  legacyRetrieval.threads[0].disabledTools = ['read_tool_result'];
+  const migratedRetrieval = parseAppData(JSON.stringify(legacyRetrieval)).threads[0];
+  assert.deepEqual(Array.from(migratedRetrieval.disabledTools), []); assert.equal(migratedRetrieval.agentMode, 'custom');
+  assert.equal(parseAppData(JSON.stringify(legacyRetrieval)).threads[0].messages.length, legacyRetrieval.threads[0].messages.length);
+  const legacyMixed = seed(); legacyMixed.threads[0].agentMode = 'custom';
+  legacyMixed.threads[0].disabledTools = ['read_tool_result', 'read_attachment'];
+  assert.deepEqual(Array.from(parseAppData(JSON.stringify(legacyMixed)).threads[0].disabledTools).sort(),
+    ['read_attachment', 'read_reference']);
   const covered = Array.from(TOOL_CAPABILITIES.flatMap(capability => capability.tools));
   assert.equal(TOOL_CAPABILITIES.length, 12);
-  assert.equal(new Set(covered).size, 30); assert.deepEqual(covered.slice().sort(), optional.slice().sort());
-  const obsolete = {agentMode:'custom', disabledTools:Array.from(MANAGED_TOOL_NAMES).concat(['generate_image'])};
+  assert.equal(new Set(covered).size, 29); assert.deepEqual(covered.slice().sort(), optional.slice().sort());
+  const obsolete = {agentMode:'custom', disabledTools:Array.from(MANAGED_TOOL_NAMES).concat(['generate_image', 'read_tool_result'])};
   validateToolSelection(obsolete);
   assert.deepEqual(Array.from(normalizeDisabledTools(obsolete.disabledTools)), []);
   for (const name of MANAGED_TOOL_NAMES) assert.equal(toolEnabled(name, obsolete), true);
@@ -125,8 +135,7 @@ async function main() {
   const events = []; f.session.subscribe(event => events.push(event));
   const initialWrites = f.repository.writes.length;
   await app.setToolEnabled('read_web', false); await app.setToolEnabled('mcp_call', false);
-  await app.setToolEnabled('read_tool_result', false);
-  const disabledCount = normalizeDisabledTools(['read_web','mcp_call','read_tool_result']).length;
+  const disabledCount = normalizeDisabledTools(['read_web','mcp_call']).length;
   assert.equal(app.active.agentMode, 'custom'); assert.equal(app.active.disabledTools.length, disabledCount);
   assert.equal(f.repository.writes.length, initialWrites); assert.equal(f.provider.requests.length, 0);
   assert.ok(events.every(event => event.state.phase === 'idle' && event.kind !== 'snapshot'));
@@ -139,7 +148,6 @@ async function main() {
   for (const name of ['read_web', 'mcp_call', 'memory']) assert.ok(!advertised.includes(name));
   for (const name of ['read_file', 'write_file', 'edit_file', 'orchestrate', 'tool_search']) assert.ok(advertised.includes(name));
   for (const name of ['list_files', 'find_files', 'search_file_content']) assert.ok(!advertised.includes(name));
-  assert.ok(!f.provider.requests[1].tools.some(item => item.function.name === 'read_tool_result'), 'runtime-added retrieval remains disabled');
   assert.deepEqual(f.calls, [], 'a forged direct call cannot execute a hidden tool');
   const saved = await f.repository.load(); assert.equal(saved.threads[0].agentMode, 'custom');
   assert.equal(saved.threads[0].disabledTools.length, disabledCount);

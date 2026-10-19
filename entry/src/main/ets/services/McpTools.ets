@@ -69,8 +69,7 @@ export class McpTools implements AgentTools {
     const receipt = await client.call(args.tool, params, cancellation);
     const result = JSON.stringify(receipt);
     if ((receipt as McpCallResult).isError === true) { throw new ToolFailure('REMOTE_TOOL_ERROR', 'Remote tool reported failure. See details.result.', 'inspect_result_before_retry', { service: server.name, result: receipt }); }
-    // Persist the complete accepted response. ContextTools bounds the model projection
-    // and read_tool_result retrieves the saved receipt without repeating this operation.
+    // Persist the complete accepted response; the model sees it verbatim, without a context preview.
     return result;
   }
 }
