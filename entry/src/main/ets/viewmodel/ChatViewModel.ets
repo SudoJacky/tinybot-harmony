@@ -123,17 +123,13 @@ export class ChatViewModel {
       if (event.kind === 'reasoning') {
         const message = this.threads.find((thread) => thread.id === event.threadId)?.messages.find((item) => item.id === event.messageId);
         if (message) {
-          const step = message.stepViews[event.step || 0];
-          if (step) { step.reasoningContent = event.stepContent || ''; }
-          message.reasoningContent = message.stepViews.map((item) => item.reasoningContent).filter((text) => text.length > 0).join('\n\n');
+          message.updateReasoning(event.step || 0, event.stepContent || '');
         }
       }
       if (event.kind === 'text') {
         const message = this.threads.find((thread) => thread.id === event.threadId)?.messages.find((item) => item.id === event.messageId);
         if (message) {
-          message.content = event.content || '';
-          const step = message.stepViews[event.step || 0];
-          if (step) { step.content = event.stepContent || ''; }
+          message.updateText(event.content || '', event.step || 0, event.stepContent || '');
         }
       }
       if (['text', 'reasoning', 'message', 'snapshot', 'thread', 'teams'].includes(event.kind)) { this.onOutput(); }
@@ -145,7 +141,15 @@ export class ChatViewModel {
     this.generating = state.phase === 'running' || state.phase === 'compacting';
     this.acceptingSteering = state.acceptingSteering; this.error = state.error; this.saveError = state.saveError;
     this.contextStatus = state.contextStatus; this.contextTokens = state.contextTokens;
-    this.contextItems = state.contextBreakdown || []; this.contextSource = state.contextSource || 'estimate';
+    // Session snapshots clone this array for every token; retain the observed value
+    // until its contents change so deltas do not invalidate the whole chat panel.
+    const items = state.contextBreakdown || [];
+    if (items.length !== this.contextItems.length || items.some((item, index) => {
+      const previous = this.contextItems[index];
+      return item.id !== previous.id || item.kind !== previous.kind || item.tokens !== previous.tokens ||
+        item.messageId !== previous.messageId || item.step !== previous.step || item.name !== previous.name;
+    })) { this.contextItems = items; }
+    this.contextSource = state.contextSource || 'estimate';
   }
   private projectData(data: AppData): void {
     this.projects = data.projects || [];

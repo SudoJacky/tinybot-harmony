@@ -99,9 +99,23 @@ const port = { closed: false, messages: [], close() { this.closed = true; }, pos
 web.ports = [port]; web.interactive = true; web.values = { count: 7 };
 web.attached = true; web.syncActivity(); assert.equal(web.controller.activations, 1);
 web.scrolling = true; web.visibilityChanged();
-assert.equal(web.renderWeb, true); assert.equal(web.controller.pauses, 1); assert.equal(port.messages.at(-1).active, false);
+assert.equal(web.renderWeb, true); assert.equal(web.controller.pauses, 0); assert.equal(port.messages.at(-1).active, true);
 web.scrolling = false; web.visibilityChanged();
-assert.equal(web.controller.activations, 2); assert.equal(port.messages.at(-1).active, true);
+assert.equal(web.controller.activations, 1); assert.equal(port.messages.at(-1).active, true);
+// Background frames may never commit renderWeb=false. Retain the actual bound
+// controller, ports and ready state instead of trusting a boolean false -> true.
+web.ready = true;
+const boundController = web.controller, boundGeneration = web.generation;
+for (const delay of [300, 700, 1700, 30000]) {
+  web.foreground = false; web.foregroundChanged(); advance(delay);
+  assert.equal(web.renderWeb, true); assert.equal(web.controller, boundController);
+  assert.equal(web.ready, true); assert.equal(port.closed, false);
+  assert.equal(port.messages.at(-1).active, false);
+  web.foreground = true; web.foregroundChanged();
+  assert.equal(web.controller, boundController); assert.equal(web.generation, boundGeneration);
+  assert.equal(web.attached, true); assert.equal(web.ready, true);
+  assert.equal(port.messages.at(-1).active, true);
+}
 for (let pass = 0; pass < 6; pass++) {
   web.visible = false; web.visibilityChanged(); advance(800);
   web.visible = true; web.visibilityChanged();
@@ -118,9 +132,9 @@ web.scrolling = false;
 const detachedGeneration = web.generation;
 web.visible = true; web.visibilityChanged(); assert.equal(controllers, 2); assert.equal(web.heightValue, 650);
 web.visible = false; web.visibilityChanged(); advance(1000);
-web.foreground = false; web.foregroundChanged(); advance(600); assert.equal(web.renderWeb, false);
+web.foreground = false; web.foregroundChanged(); advance(600); assert.equal(web.renderWeb, true);
 web.visible = true;
-web.foreground = true; web.visibilityChanged(); assert.equal(controllers, 3);
+web.foreground = true; web.foregroundChanged(); assert.equal(controllers, 2);
 web.saving = true; web.visible = false; web.visibilityChanged(); advance(600); assert.equal(web.renderWeb, true, 'Finish pending saves before releasing Web');
 web.saving = false; web.visibilityChanged(); advance(5000); assert.equal(web.renderWeb, false);
 web.visible = true; web.visibilityChanged(); web.aboutToDisappear(); advance(1000); assert.equal(web.mounted, false); assert.equal(web.renderWeb, false);
@@ -133,7 +147,7 @@ scrolling.scrolling = false; scrolling.visibilityChanged(); assert.equal(control
 scrolling.aboutToDisappear();
 const preflight = make({ preflight: true, scrolling: true }); preflight.aboutToAppear(); assert.equal(preflight.renderWeb, true);
 preflight.aboutToDisappear(); assert.equal(context.activeWebViews, 0);
-console.log('PASS native pause/resume, repeated reversals without cold loads, cold activation after scrolling stops, bounded offscreen/background release and hidden validation');
+console.log('PASS visible Web paints while scrolling, background preserves bound controller/ready/ports, foreground offscreen release and deferred cold loads');
 
 // Follow the actual List event callbacks into the storage observed by WebUiView.
 const scrollState = new Map(), scrollChanges = [];

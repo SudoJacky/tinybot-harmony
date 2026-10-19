@@ -24,7 +24,7 @@ import { ThreadReference } from '../model/ThreadReferences';
 import { DisclosureState } from '../viewmodel/DisclosureState';
 import { ToolDetails } from './ToolDetails';
 import { OrchestrationReceipts } from './OrchestrationReceipts';
-import { ProcessItem, TimelineEntry, buildTimeline, durationLabel, elapsedMs, foldsToAnswer, persistentTool,
+import { ProcessItem, TimelineEntry, durationLabel, elapsedMs, foldsToAnswer, persistentTool,
   summarizeProcess, turnPhase, workflowEntryState } from '../model/ProcessPresentation';
 import { toolFavicon, toolStat, toolTitle, toolStatusLabel } from '../model/ToolPresentation';
 import { WebsiteIcon } from '../common/WebsiteIcon';
@@ -188,7 +188,7 @@ struct ProcessGroup {
 
   // Resolved from the message on every render so a growing group never shows a stale snapshot.
   private items(): ProcessItem[] {
-    return buildTimeline(this.message.stepViews).find((entry: TimelineEntry) => entry.key === this.groupKey)?.items || [];
+    return this.message.timeline.find((entry: TimelineEntry) => entry.key === this.groupKey)?.items || [];
   }
   private toolAt(item: ProcessItem): ToolExecutionViewModel | undefined {
     return item.tool < 0 ? undefined : this.message.stepViews[item.step]?.tools[item.tool];
@@ -263,7 +263,7 @@ export struct MessageBubble {
   @State private previewPath: string = '';
   @State private previewing: boolean = false;
 
-  private timeline(): TimelineEntry[] { return buildTimeline(this.message.stepViews); }
+  private timeline(): TimelineEntry[] { return this.message.timeline; }
   aboutToAppear(): void { this.settled = this.turnStatus === 'complete'; }
   private syncWorkflow(): void {
     this.getUIContext().animateTo({ duration: 280, curve: Motion.standard }, () => {

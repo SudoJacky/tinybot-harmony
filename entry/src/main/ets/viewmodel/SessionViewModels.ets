@@ -14,6 +14,7 @@ import { UiPresentation } from '../model/UiPresentation';
 import { latestPreviewIds } from '../model/PublishedPreview';
 import { DisclosureStore } from './DisclosureState';
 import { PlanProgressViewModel } from './PlanProgressViewModel';
+import { buildTimeline, TimelineEntry } from '../model/ProcessPresentation';
 
 @Observed
 export class ToolExecutionViewModel implements ToolExecution {
@@ -69,7 +70,10 @@ export class MessageViewModel {
   processOpen: boolean = false;
   usageOpen: boolean = false;
   disclosures: DisclosureStore = new DisclosureStore();
-  reasoningContent: string = '';
+  // Aggregate only when requested; token updates must not concatenate all prior thoughts.
+  get reasoningContent(): string {
+    return this.stepViews.filter((step) => !step.requestError).map((step) => step.reasoningContent).filter((text) => text.length > 0).join('\n\n');
+  }
   attachments: Attachment[] = [];
   id: string = '';
   role: string = '';
@@ -78,8 +82,24 @@ export class MessageViewModel {
   error: string = '';
   steps: AgentStep[] = [];
   stepViews: AgentStepViewModel[] = [];
+  timeline: TimelineEntry[] = [];
   modelRef?: ModelReference;
   constructor(data: MessageData) { this.update(data); }
+  updateReasoning(index: number, content: string): void {
+    const step = this.stepViews[index];
+    if (!step) { return; }
+    const hadThought = step.reasoningContent.trim().length > 0;
+    step.reasoningContent = content;
+    if (hadThought !== (content.trim().length > 0)) { this.timeline = buildTimeline(this.stepViews); }
+  }
+  updateText(content: string, index: number, stepContent: string): void {
+    this.content = content;
+    const step = this.stepViews[index];
+    if (!step) { return; }
+    const hadText = step.content.trim().length > 0;
+    step.content = stepContent;
+    if (hadText !== (stepContent.trim().length > 0)) { this.timeline = buildTimeline(this.stepViews); }
+  }
   update(data: MessageData): void {
     this.uiStates = data.uiStates || [];
     this.references = data.references || [];
@@ -87,12 +107,12 @@ export class MessageViewModel {
     this.attachments = data.attachments || [];
     this.modelRef = data.modelRef; this.steps = data.steps || [];
     this.plan.update(this.steps, data.status);
-    this.reasoningContent = this.steps.filter((step) => !step.requestError).map((step) => step.reasoningContent || '').filter((text) => text.length > 0).join('\n\n');
     this.stepViews = this.steps.map((step: AgentStep, index: number) => {
       const existing = this.stepViews[index];
       if (existing) { existing.update(step); return existing; }
       return new AgentStepViewModel(step);
     });
+    this.timeline = buildTimeline(this.stepViews);
   }
 }
 

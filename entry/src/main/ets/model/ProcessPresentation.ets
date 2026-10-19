@@ -1,6 +1,5 @@
 import { t } from './I18n';
 import { AgentStep, ToolExecution } from './Agent';
-import { stepDisplayContent } from './PublishedPreview';
 
 export interface ProcessSummary { operations: number; failures: number; }
 // tool < 0 marks the step's thinking; otherwise an index into the step's tools.
@@ -61,7 +60,9 @@ export function buildTimeline(steps: AgentStep[]): TimelineEntry[] {
     if (step.requestError) { continue; }
     const items: ProcessItem[] = [];
     if ((step.reasoningContent || '').trim().length > 0) { items.push({ step: index, tool: -1 }); }
-    if (stepDisplayContent(step).trim().length > 0) {
+    // A published surface creates a narration entry without joining every HTML snapshot.
+    if (step.content.trim().length > 0 || step.tools.some((tool) => tool.status === 'complete' &&
+      tool.call.function.name === 'publish_preview' && (tool.previewContent || '').trim().length > 0)) {
       group = appendItems(entries, group, items);
       group = undefined; entries.push({ kind: 'text', key: 'text-' + index, step: index, items: [] });
       items.splice(0);

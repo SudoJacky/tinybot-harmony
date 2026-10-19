@@ -26,6 +26,26 @@ function load(file) {
 }
 
 const { buildTimeline, turnPhase, workflowEntryState } = load(path.join(root, 'model/ProcessPresentation'));
+const { MessageViewModel } = load(path.join(root, 'viewmodel/SessionViewModels'));
+const { ChatViewModel } = load(path.join(root, 'viewmodel/ChatViewModel'));
+const chat = new ChatViewModel();
+const state = { phase: 'running', ready: true, acceptingSteering: true, error: '', saveError: '',
+  contextStatus: '', contextTokens: 120, contextSource: 'estimate',
+  contextBreakdown: [{ id: 'prompt', kind: 'message', tokens: 120, messageId: 'm', step: 0, name: 'Prompt' }] };
+chat.project({ kind: 'state', state });
+const contextItems = chat.contextItems;
+for (let i = 0; i < 1000; i++) chat.project({ kind: 'reasoning', state: JSON.parse(JSON.stringify(state)) });
+assert.equal(chat.contextItems, contextItems, 'Token snapshots retain equal observed context rows');
+for (const [field, value] of Object.entries({ id: 'next', kind: 'tool', tokens: 121, messageId: 'n', step: 1, name: 'Tool' })) {
+  const changed = JSON.parse(JSON.stringify(state)); changed.contextBreakdown[0][field] = value;
+  chat.project({ kind: 'state', state: changed });
+  assert.equal(chat.contextItems[0][field], value, 'Changed context field updates: ' + field);
+  chat.project({ kind: 'state', state });
+}
+chat.project({ kind: 'state', state: { ...state, phase: 'idle', acceptingSteering: false, contextTokens: 0, contextBreakdown: [] } });
+assert.equal(chat.contextItems.length, 0); assert.equal(chat.contextTokens, 0);
+assert.equal(chat.generating, false); assert.equal(chat.acceptingSteering, false);
+console.log('PASS stream snapshots retain equal context rows while projecting changed rows, tokens and run state');
 const tool = (id, status = 'running') => ({ call: { id, type: 'function', function: { name: 'read_file', arguments: '{}' } }, status, output: '' });
 const step = (content = '', tools = [], reasoningContent = '') => ({ content, tools, reasoningContent });
 const steps = [];
@@ -53,6 +73,30 @@ steps.push(step()); steps[2].retries = [{ waiting: true, attempt: 1, delayMs: 10
 assert.equal(turnPhase('generating', steps), 'retry');
 for (const status of ['stopped', 'failed', 'complete']) assert.equal(turnPhase(status, steps), status);
 
+// Exercise the real stream projection methods, including first deltas that change
+// grouping, long later thoughts, whitespace removal and a completed publication.
+const streaming = new MessageViewModel({ id: 'stream', role: 'assistant', content: '', error: '', status: 'generating',
+  steps: [step('', [], '')] });
+streaming.updateReasoning(0, 'First thought');
+assert.equal(streaming.timeline[0].items[0].tool, -1);
+const thoughtTimeline = streaming.timeline;
+for (let i = 0; i < 1000; i++) streaming.updateReasoning(0, 'First thought ' + i);
+assert.equal(streaming.timeline, thoughtTimeline, 'Further thought deltas retain the derived timeline');
+assert.equal(streaming.reasoningContent, 'First thought 999');
+streaming.updateText('Narration', 0, 'Narration');
+assert.equal(streaming.timeline.map(e => e.kind).join(','), 'process,text');
+const narrationTimeline = streaming.timeline;
+streaming.updateText('Narration continued', 0, 'Narration continued');
+assert.equal(streaming.timeline, narrationTimeline);
+streaming.updateText(' ', 0, ' ');
+assert.equal(streaming.timeline.map(e => e.kind).join(','), 'process');
+streaming.updateReasoning(0, ' '); assert.equal(streaming.timeline.length, 0);
+const publication = { ...tool('published', 'complete'), previewContent: '```tinybot-ui\n' + 'x'.repeat(30000),
+  call: { id: 'published', function: { name: 'publish_preview', arguments: '{}' } }, output: '{"path":"view.html","title":"View"}' };
+streaming.update({ id: 'stream', role: 'assistant', content: '', error: '', status: 'generating', steps: [step('', [publication])] });
+assert.equal(streaming.timeline.map(e => e.kind).join(','), 'text,process', 'Publication creates a text entry without narration');
+console.log('PASS actual message projection caches streaming structure and refreshes first text/thought, removals and publication');
+
 // Exercise the actual compiled view methods, including stale keyed-group callbacks and live completion.
 const source = path.join(root, 'views/MessageBubble.ets');
 const emitted = path.resolve(__dirname, '../entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/views/MessageBubble.ts');
@@ -64,18 +108,19 @@ const context = { exports: {}, ...load(path.join(root, 'model/ProcessPresentatio
   stepDisplayContent: s => s.content, Motion: { standard: 'ease' } };
 vm.runInNewContext(ts.transpileModule(`class Probe { ${component.members.filter(n => methods.includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')} } exports.Probe = Probe;`,
   { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, context);
-const message = { status: 'generating', stepViews: [step('', [tool('read')])], processOpen: false };
+const messageData = { id: 'workflow', role: 'assistant', content: '', error: '', status: 'generating', steps: [step('', [tool('read')])] };
+const message = new MessageViewModel(messageData);
 const calls = [];
 const probe = Object.assign(new context.exports.Probe(), { message, turnStatus: 'generating', workflowCollapsed: false,
   getUIContext: () => ({ animateTo: (options, update) => { calls.push(options); update(); } }) });
 probe.aboutToAppear();
 const capturedGroup = probe.timeline()[0];
-message.stepViews[0].tools[0].status = 'complete';
-message.stepViews.push(step('', [], 'Continue'));
+messageData.steps[0].tools[0].status = 'complete';
+messageData.steps.push(step('', [], 'Continue')); message.update(messageData);
 assert.equal(probe.traceState(capturedGroup), 'active', 'Retained ForEach resolves live items');
-message.stepViews[1].tools.push({ ...tool('preview', 'complete'), call: { id: 'preview', function: { name: 'publish_data_view', arguments: '{}' } } });
-message.stepViews.push(step('Final answer'));
-message.status = probe.turnStatus = 'complete'; probe.syncWorkflow();
+messageData.steps[1].tools.push({ ...tool('preview', 'complete'), call: { id: 'preview', function: { name: 'publish_data_view', arguments: '{}' } } });
+messageData.steps.push(step('Final answer'));
+messageData.status = 'complete'; message.update(messageData); probe.turnStatus = 'complete'; probe.syncWorkflow();
 assert.equal(probe.folded(), true); assert.equal(calls[0].duration, 280);
 assert.equal(probe.entryVisible(capturedGroup, 0, probe.timeline().length), true, 'Published preview survives folding even in a retained group');
 message.processOpen = true;
@@ -121,8 +166,8 @@ vm.runInNewContext(ts.transpileModule(`class ProcessProbe extends RenderView {
   ${processComponent.members.filter(n => processMethods.includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')}
 } exports.ProcessProbe = ProcessProbe;`, { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, context);
 const { DisclosureStore } = load(path.join(root, 'viewmodel/DisclosureState'));
-const processMessage = { id: 'turn', status: 'generating', stepViews: [step('', [tool('one')], '思'.repeat(5100))],
-  disclosures: new DisclosureStore(), processOpen: false };
+const processData = { id: 'turn', role: 'assistant', content: '', error: '', status: 'generating', steps: [step('', [tool('one')], '思'.repeat(5100))] };
+const processMessage = new MessageViewModel(processData);
 function mountProcess(richOnly = false) {
   const view = Object.assign(new context.exports.ProcessProbe(), { message: processMessage, richOnly,
     groupKey: buildTimeline(processMessage.stepViews)[0].key, appearance: {}, onInspect() {} });
@@ -136,8 +181,8 @@ const firstTool = [...processView.children.values()].find(child => child instanc
 assert.equal(firstTool.execution.call.id, 'one', 'Tool row is visible without a group click');
 assert.equal(firstTool.disclosure.open, false);
 firstThought.disclosure.open = true; firstThought.disclosure.limit = 8000;
-processMessage.stepViews[0] = step('', [{ ...tool('one', 'complete'), output: 'latest' }, tool('two', 'failed')], '最新思考');
-processMessage.stepViews.push(step('', [], '下一步思考'));
+processData.steps[0] = step('', [{ ...tool('one', 'complete'), output: 'latest' }, tool('two', 'failed')], '最新思考');
+processData.steps.push(step('', [], '下一步思考')); processMessage.update(processData);
 processView.flush();
 assert.equal(firstThought.content, '最新思考');
 assert.equal(firstThought.disclosure.open, true, 'Live updates preserve an explicitly opened thought');
@@ -148,7 +193,7 @@ const nextThought = [...processView.children.values()].find(child => child insta
 assert.equal(nextThought.content, '下一步思考'); assert.equal(nextThought.disclosure.open, false);
 assert.equal(nextThought.streaming, true); assert.equal(firstThought.streaming, false);
 const preview = tool('preview', 'complete'); preview.call.function.name = 'publish_data_view';
-processMessage.stepViews[1].tools.push(preview);
+processData.steps[1].tools.push(preview); processMessage.update(processData);
 const foldedView = mountProcess(true);
 assert.equal(foldedView.texts.size, 0, 'Folding hides all ordinary process text');
 assert.equal([...foldedView.children.values()].filter(child => child instanceof ToolRow).length, 0);
