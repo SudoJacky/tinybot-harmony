@@ -404,6 +404,8 @@ export class SessionService {
   // A regenerated answer is a new branch; existing answers and later turns stay intact.
   async regenerateReply(messageId: string): Promise<boolean> {
     if (!this.canMutate) { return false; }
+    const threadId = this.active.id;
+    if ((this.resources.authorizeGeneration && !await this.authorizeGeneration()) || !this.canMutate || this.active.id !== threadId) { return false; }
     const index = this.active.messages.findIndex((item) => item.id === messageId && item.role === 'assistant');
     if (index < 1 || this.active.messages[index - 1].role !== 'user') { return false; }
     if (!await this.forkThread(this.active.messages[index - 1].id)) { return false; }
@@ -630,10 +632,18 @@ export class SessionService {
       this.setDraft(''); await this.setTeamEnabled(true); return;
     }
     if (text.length === 0 && (this.active.attachments || []).length === 0 && !(this.active.references || []).length) { return; }
+    const threadId = this.active.id;
+    if ((this.resources.authorizeGeneration && !await this.authorizeGeneration()) || !this.canMutate || this.active.id !== threadId || (this.active.draft || '').trim() !== text) { return; }
     await this.runTasks(text || ((this.active.references || []).length ? t('请参考引用的会话。') : t('请分析附件。')));
+  }
+  private async authorizeGeneration(): Promise<boolean> {
+    try { await this.resources.authorizeGeneration?.(); return true; }
+    catch (error) { this.status.error = (error as Error).message; this.publish('state'); return false; }
   }
   async resumeQueue(): Promise<void> {
     if (!this.canMutate || this.active.archived || (this.active.pendingInputs || []).length === 0) { return; }
+    const threadId = this.active.id;
+    if ((this.resources.authorizeGeneration && !await this.authorizeGeneration()) || !this.canMutate || this.active.id !== threadId) { return; }
     this.active.queuePaused = false; await this.runTasks();
   }
   async stop(): Promise<void> {
@@ -654,6 +664,8 @@ export class SessionService {
 
   async compactHistory(fromCommand: boolean = false): Promise<void> {
     if (!this.canMutate || this.active.archived) { return; }
+    const threadId = this.active.id;
+    if ((this.resources.authorizeGeneration && !await this.authorizeGeneration()) || !this.canMutate || this.active.id !== threadId) { return; }
     if (!this.currentConfig.configured) {
       this.status.error = t('当前对话没有可用模型，请选择模型，或添加、启用模型服务。'); this.publish('state'); return;
     }
@@ -922,6 +934,8 @@ export class SessionService {
 
   async resumeForm(messageId: string, callId: string): Promise<void> {
     if (!this.canMutate || this.active.archived) { return; }
+    const threadId = this.active.id;
+    if ((this.resources.authorizeGeneration && !await this.authorizeGeneration()) || !this.canMutate || this.active.id !== threadId) { return; }
     const message = this.active.messages.find((item) => item.id === messageId);
     const execution = message?.steps?.flatMap((step) => step.tools).find((item) => item.call.id === callId);
     if (!execution || execution.call.function.name !== 'request_user_input' || !['interrupted', 'cancelled'].includes(execution.status)) { return; }

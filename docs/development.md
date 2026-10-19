@@ -29,6 +29,14 @@ devecocli run --device <设备名称或序列号>
 
 签名命令会修改 `build-profile.json5` 并在本机保存签名材料。该文件已加入 `.gitignore`；版本库使用不含签名的 `build-profile.template.json5`，修改 SDK 或模块配置时需同步模板。工程当前不自动生成发布签名。
 
+## 华为账号配置与验证
+
+入口模块 `module.json5` 的模块级 `metadata` 配置公开的 `client_id`，值为 AppGallery Connect 中该 HarmonyOS 应用的 Client ID，不使用 Client Secret。调试和发布包须分别在华为平台配置实际签名证书的 SHA-256 指纹，并核对包名 `com.sudojacky.tinybot`；配置生效时间以平台提示为准。普通登录不申请手机号、头像或其他用户资料权限。
+
+`node scripts/test-huawei-account.cjs` 验证实际账号服务、安全存储和 SessionService/ProviderRegistry 路径：登录成功/取消、错误码脱敏、重启恢复、账号切换、退出与迟到回调、存储失败及未登录请求拦截。真机仍需验证平台配置、用户主动登录、重启恢复、退出后拦截与重新登录。该接入不代表实名审核已通过。
+
+参考：[Account Kit](https://developer.huawei.com/consumer/cn/sdk/account-kit)、[系统账号状态查询与登录事件](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides-V14/account-login-state-V14)。
+
 ## 中英文词条
 
 维护方式见 [locales/README.md](../locales/README.md)。修改双语 JSON 后运行 `node scripts/build-locales.cjs` 生成同步词条，`--check` 验证词条、占位符和代码引用完整性。

@@ -16,10 +16,13 @@ class BoundModel implements ModelSession {
   private requestUsage?: boolean;
   private images?: boolean;
   private origin?: UsageOrigin;
+  private authorize?: () => Promise<void>;
 
-  constructor(provider: ModelProvider, config: ModelConfig, credentials: CredentialReader, origin?: UsageOrigin) {
+  constructor(provider: ModelProvider, config: ModelConfig, credentials: CredentialReader, origin?: UsageOrigin,
+    authorize?: () => Promise<void>) {
     this.provider = provider;
     this.credentials = credentials;
+    this.authorize = authorize;
     this.origin = origin ? JSON.parse(JSON.stringify(origin)) as UsageOrigin : undefined;
     this.baseUrl = config.baseUrl;
     this.model = config.model;
@@ -40,6 +43,7 @@ class BoundModel implements ModelSession {
     }
     // Resolve on every request, allowing later credential rotation without caching secrets.
     const key = await this.credentials.read(this.alias);
+    await this.authorize?.();
     cancellation.check();
     const origin: UsageOrigin = this.origin ? JSON.parse(JSON.stringify(this.origin)) as UsageOrigin : {};
     if (options?.usagePurpose) { origin.purpose = options.usagePurpose; }
@@ -53,6 +57,9 @@ class BoundModel implements ModelSession {
 
 export class ProviderRegistry {
   private providers: Map<string, ModelProvider> = new Map<string, ModelProvider>();
+  private authorize?: () => Promise<void>;
+
+  constructor(authorize?: () => Promise<void>) { this.authorize = authorize; }
 
   register(provider: ModelProvider): void {
     const info = provider.info;
@@ -98,6 +105,6 @@ export class ProviderRegistry {
       throw new Error(t("请填写模型名称。"));
     }
     // Registry edits affect future runs only; the active run keeps this provider instance.
-    return new BoundModel(provider, config, credentials, origin);
+    return new BoundModel(provider, config, credentials, origin, this.authorize);
   }
 }

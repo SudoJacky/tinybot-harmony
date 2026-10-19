@@ -6,6 +6,12 @@
 
 工程使用 Stage 模型和 ArkUI V1 状态管理。本文描述模块职责、运行生命周期和持久化约定；项目归属见[项目与工作区](projects-and-workspaces.md)，工具协议见[工具执行与权限](tools-and-permissions.md)。
 
+## 华为账号与生成校验
+
+`HuaweiAccount` 调用 Account Kit 原生登录接口，校验请求 state，并通过 `getHuaweiIDState(OPEN_ID)` 检查设备账号一致性；只将 OpenID 存入配置为 `SyncType.NEVER` 的系统 AssetStore，不使用或持久化授权码、ID Token、UnionID。前台恢复时刷新状态，各模型请求在读取 API Key 后再次检查；检查异常拒绝请求，并显示可重试错误。并发模型请求共享正在进行的系统检查，退出使用修订号阻止旧检查恢复登录态。该本机账号登录机制不签发服务端会话，也不宣称真实身份核验。
+
+`NativeSessionService` 在组装 `ProviderRegistry` 时注入统一校验，覆盖聊天、团队、标题、摘要和记忆提炼。`SessionService` 在发送、压缩、恢复队列、表单和重新生成之前预检，避免未登录时清空草稿或创建分支；应用无关测试可注入自己的授权函数。账号记录不进入 `AppData`、会话、诊断日志及备份。
+
 ## Provider 与运行管理
 
 结构参考 pi 的 provider 工厂/注册表、有状态 Agent 和独立 agent-loop：

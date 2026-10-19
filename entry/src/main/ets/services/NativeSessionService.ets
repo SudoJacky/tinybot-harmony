@@ -48,6 +48,7 @@ import { SkillTools } from './SkillTools';
 import { ToolSet } from './ToolSet';
 import { profileProvider } from './providers/DefaultProviders';
 import { ProviderRegistry } from './providers/ProviderRegistry';
+import { huaweiAccount } from './HuaweiAccount';
 
 class NativeProviderEffects implements ProviderEffects {
   hydrate(messages: ModelMessage[]): Promise<ModelMessage[]> { return Attachments.hydrate(messages); }
@@ -62,6 +63,7 @@ class NativeUsageRecorder implements UsageRecorder {
 }
 
 export class NativeSessionResources implements SessionResources {
+  authorizeGeneration(): Promise<void> { return huaweiAccount.requireLogin(); }
   private workspaces: WorkspaceStore;
   private providers: ProviderRegistry;
   private approval: ToolApproval;
@@ -122,7 +124,7 @@ export class NativeSessionResources implements SessionResources {
 export function createNativeSessionService(filesDir: string, workspaceFilesDir: string, approval: ToolApproval = new ToolApproval(), context?: common.UIAbilityContext, browser?: BrowserSession): SessionService {
   Attachments.configure(workspaceFilesDir);
   UsageLedger.configure(filesDir).catch((error: Error) => { UsageLedger.error = error.message; });
-  const providers = new ProviderRegistry(); const credentials = new CredentialStore();
+  const providers = new ProviderRegistry(() => huaweiAccount.requireLogin()); const credentials = new CredentialStore();
   const session = new SessionService(new ConversationStore(filesDir), new AgentRuntime(providers, credentials, new NativeUsageRecorder(),
     (content, cancellation) => WebUiPreflight.validate(content, cancellation), new NativeOrchestrationExecutor(), browser), credentials,
     new NativeSessionResources(workspaceFilesDir, providers, approval, context, browser));

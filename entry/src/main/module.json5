@@ -11,6 +11,9 @@
     "installationFree": false,
     "compressNativeLibs": true,
     "pages": "$profile:main_pages",
+    "metadata": [
+      { "name": "client_id", "value": "6917617825245755680" }
+    ],
     "requestPermissions": [
       { "name": "ohos.permission.INTERNET" },
       {
