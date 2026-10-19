@@ -11,6 +11,12 @@ export class CredentialStore implements CredentialVault {
     if (alias.length === 0) {
       return '';
     }
+    const secret = await this.readOptional(alias);
+    if (secret === undefined) { throw new Error(MISSING_API_KEY); }
+    return secret;
+  }
+
+  async readOptional(alias: string): Promise<string | undefined> {
     const query: asset.AssetMap = new Map();
     query.set(asset.Tag.ALIAS, new util.TextEncoder().encodeInto(alias));
     query.set(asset.Tag.RETURN_TYPE, asset.ReturnType.ALL);
@@ -19,7 +25,7 @@ export class CredentialStore implements CredentialVault {
       result = await asset.query(query);
     } catch (error) {
       if ((error as BusinessError).code === asset.ErrorCode.NOT_FOUND) {
-        throw new Error(MISSING_API_KEY);
+        return undefined;
       }
       throw error as Error;
     }

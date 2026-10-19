@@ -29,6 +29,8 @@ export function browserSnapshotScript(id: string): string {
     }));
     const text = document.body?.innerText || '';
     return JSON.stringify({ snapshotId, url: location.href, title: document.title.slice(0, 300), text: text.slice(0, 16000), elements,
+      textScope: 'document', elementsScope: 'viewport',
+      viewport: { x: scrollX, y: scrollY, width: innerWidth, height: innerHeight, scrollHeight: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0) },
       truncated: text.length > 16000 || nodes.length > 80, embeddedFrames: document.querySelectorAll('iframe,frame').length, trust: 'untrusted' });
   })()`;
 }

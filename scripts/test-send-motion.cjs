@@ -47,9 +47,10 @@ assert.equal(gone.animations.length, 0, 'Navigation cancels pending frame work')
 const tall = bubble(origin); tall.value.rect.size.height = 1600; tall.value.launch(); tall.flush();
 assert.deepEqual(tall.animations[0].start, [0, 20, 1, 0.72], 'Oversized content uses a small entrance');
 
-function panel(messages = []) {
+function panel(messages = [], signedIn = true) {
   let update;
   const value = Object.assign(new globals.exports.Panel(), { thread: { id: 'thread', messages }, sendingMessageId: '',
+    account: { signedIn }, accountRequests: 0, onAccount() { this.accountRequests++; },
     keyboardFocusRequest: 0, composerFocused: true, clearedFocus: 0,
     speechActive: () => false, scroller: { scrollEdge() {} }, follow() {},
     getUIContext: () => ({ px2vp: x => x, postFrameCallback() {},
@@ -59,6 +60,9 @@ function panel(messages = []) {
   value.send(); return { value, update: () => update() };
 }
 const first = panel(); first.update(); assert.equal(first.value.sendingMessageId, '', 'Validation failure/commands do not fly');
+const signedOut = panel([], false);
+assert.equal(signedOut.value.accountRequests, 1, 'Signed-out send opens account page before submitting or starting motion');
+assert.equal(signedOut.value.clearedFocus, 0);
 assert.equal(first.value.clearedFocus, 0, 'Rejected sends keep the keyboard and input focus');
 assert.equal(first.value.composerFocused, true);
 first.value.thread.messages.push({ id: 'first', role: 'user' }); first.update();

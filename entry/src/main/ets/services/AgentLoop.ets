@@ -116,13 +116,13 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
         cancellation.check();
         if (!prepared) { messages.push({ role: 'user', content: input.text, attachments: input.attachments }); }
       }
-      let acceptingText = true;
       let response: ModelTurn;
       try {
         response = await requestWithRetry(step, async () => {
           await observer.waitForExecution?.(cancellation);
           cancellation.check();
-          return context.model.stream(messages, definitions, cancellation, (text: string) => {
+          let acceptingText = true;
+          try { return await context.model.stream(messages, definitions, cancellation, (text: string) => {
             if (!acceptingText || cancellation.cancelled) { return; }
             if (step.content.length === 0 && turn.content.length > 0) { turn.content += '\n\n'; }
             step.content += text;
@@ -134,9 +134,11 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
               if (!acceptingText || cancellation.cancelled) { return; }
               step.reasoningContent = (step.reasoningContent || '') + text;
               observer.event({ type: 'reasoning_delta', step: round, delta: text });
-            } });
-        }, cancellation, observer.checkpoint, () => observer.event({ type: 'request_retry', step: round }))
-          .finally(() => { acceptingText = false; });
+            } }); } finally { acceptingText = false; }
+        }, cancellation, observer.checkpoint, () => {
+          turn.content = turn.steps.filter((item) => !item.requestError).map((item) => item.content).filter((content) => content.length > 0).join('\n\n');
+          observer.event({ type: 'request_retry', step: round });
+        });
       } catch (error) {
         await observer.waitForExecution?.(cancellation);
         cancellation.check();

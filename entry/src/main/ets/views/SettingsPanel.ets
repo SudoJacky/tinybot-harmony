@@ -1,4 +1,5 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { HuaweiAccount } from '../services/HuaweiAccount';
 import { t } from '../model/I18n';
 import { languageName } from './LanguagePanel';
 import { BrowserSession } from '../services/BrowserSession';
@@ -21,6 +22,8 @@ export struct SettingsPanel {
   @ObjectLink app: ChatViewModel;
   @ObjectLink settings: SettingsViewModel;
   @ObjectLink browser: BrowserSession;
+  @ObjectLink account: HuaweiAccount;
+  onAccount: () => void = () => {};
   onEditProvider: (id: string, preset: string) => void = () => {};
   onAddProvider: () => void = () => {};
   onSkills: () => void = () => {};
@@ -126,6 +129,11 @@ export struct SettingsPanel {
     Scroll() {
       Column() {
         this.statusBanners()
+        SectionHeader({ title: t('账号') })
+        GroupCard() {
+          NavRow({ title: t('华为账号'), value: this.account.signedIn ? t('已登录') : t('未登录'),
+            icon: $r('sys.symbol.person'), compId: 'open-huawei-account', onTap: this.onAccount })
+        }
         SectionHeader({ title: t('模型与服务') })
         GroupCard() {
           Column() {

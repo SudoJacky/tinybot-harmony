@@ -12,6 +12,8 @@ if (-not (Test-Path -LiteralPath $nodePath) -or -not (Test-Path -LiteralPath $hv
 }
 & $nodePath (Join-Path $projectPath 'scripts/build-locales.cjs') --check
 if ($LASTEXITCODE -ne 0) { throw 'Locale validation failed. Run node scripts/build-locales.cjs after editing translations.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-huawei-account.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Huawei account login, secure state and generation authorization tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/build-builtin-skills.cjs') --check
 if ($LASTEXITCODE -ne 0) { throw 'Built-in Skills are stale. Run node scripts/build-builtin-skills.cjs.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-developer-diagnostics.cjs')
@@ -51,6 +53,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Search, delivery, references and runtime relia
 if ($LASTEXITCODE -ne 0) { throw 'Preview publication integration tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-preview-lifecycle.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Preview resource and lazy lifecycle tests failed. Build the app first.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-turn-workflow.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Streaming timeline projection and retained process row tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-resources.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Resource management integration tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-tool-schemas.cjs')

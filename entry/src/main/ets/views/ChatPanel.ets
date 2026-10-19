@@ -1,4 +1,5 @@
 import { Diagnostics } from '../model/Diagnostics';
+import { HuaweiAccount } from '../services/HuaweiAccount';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { AnswerSpeech } from '../services/AnswerSpeech';
@@ -53,6 +54,8 @@ class ComposerKeyboardFrame extends FrameCallback {
 
 @Component
 export struct ChatPanel {
+  @ObjectLink account: HuaweiAccount;
+  onAccount: () => void = () => {};
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink @Watch('syncMessages') app: ChatViewModel;
   @ObjectLink @Watch('syncMessages') thread: ThreadViewModel;
@@ -371,6 +374,7 @@ export struct ChatPanel {
   }
   private send(): void {
     if (this.speechActive()) { return; }
+    if (!this.account.signedIn) { this.onAccount(); return; }
     this.inspectingOutput = false; this.followOutput = true;
     const context = this.getUIContext();
     const composer = context.getComponentUtils().getRectangleById('composer');
@@ -1330,6 +1334,10 @@ export struct ChatPanel {
         ForEach(this.thread.messages.slice(-1).filter((message) => message.role === 'assistant'), (message: MessageViewModel) => {
           ChatPlanPanel({ plan: message.plan })
         }, (message: MessageViewModel) => this.thread.id + ':' + message.id)
+        if (this.account.ready && !this.account.signedIn) {
+          Banner({ text: t('登录华为账号后即可使用 AI 生成功能。'), danger: false, compId: 'chat-login-required',
+            actionLabel: t('去登录'), actionId: 'chat-open-account', onAction: this.onAccount })
+        }
         this.composer()
         if (this.viewport.keyboardHeight === 0) {
           Text(t('AI可能会犯错，请仔细鉴别。')).fontFamily(this.appearance.fontFamily).id('ai-disclaimer')

@@ -127,7 +127,9 @@ export class ProtocolProvider implements ModelProvider {
         clearTimeout(timer);
         timer = setTimeout(() => {
           const message = t('模型服务连续 120 秒未返回数据，请检查网络或稍后重试。');
-          settle(receivedBytes === 0 ? new TransientProviderError(message, 'timeout') : new Error(message));
+          Diagnostics.log('warn', 'network', 'request_failed', { operationId: diagnosticId, http: responseCode,
+            elapsedMs: Date.now() - startedAt, bytes: receivedBytes, phase: receivedBytes > 0 ? 'streaming' : 'connecting', retryable: true });
+          settle(new TransientProviderError(message, 'timeout') as Error);
         }, STREAM_IDLE_TIMEOUT_MS);
       };
       resetIdleTimer();
@@ -174,11 +176,12 @@ export class ProtocolProvider implements ModelProvider {
           readTimeout: 0
         }, (error: BusinessError, code: number) => {
           if (error) {
-            Diagnostics.log('error', 'network', 'request_failed', { operationId: diagnosticId, code: error.code, elapsedMs: Date.now() - startedAt, bytes: receivedBytes }, error);
+            const retryable = [2300005, 2300006, 2300007, 2300028, 2300052, 2300056].includes(error.code);
+            Diagnostics.log('error', 'network', 'request_failed', { operationId: diagnosticId, code: error.code, http: responseCode,
+              elapsedMs: Date.now() - startedAt, bytes: receivedBytes, phase: receivedBytes > 0 ? 'streaming' : 'connecting', retryable: retryable }, error);
             const message = t("网络请求失败（{0}），请检查连接和服务地址。", [error.code]);
-            // Retry only known connection/timeout failures before any response bytes.
-            settle(receivedBytes === 0 && [2300005, 2300006, 2300007, 2300028, 2300052, 2300056].includes(error.code) ?
-              new TransientProviderError(message, 'transport') : new Error(message));
+            // The loop retries only an uncommitted model request, with fresh parsers.
+            settle(retryable ? new TransientProviderError(message, 'transport') : new Error(message));
             return;
           }
           responseCode = code;

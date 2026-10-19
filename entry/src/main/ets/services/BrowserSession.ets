@@ -6,9 +6,11 @@ import { ExecutionGate } from './AgentLoop';
 import { Cancellation, RunCancelledError } from './Cancellation';
 
 export interface BrowserElement { id: number; role: string; label: string; type: string; value?: string; }
+export interface BrowserViewport { x: number; y: number; width: number; height: number; scrollHeight: number; }
 export interface BrowserPage {
   snapshotId: string; url: string; title: string; text: string; elements: BrowserElement[];
   truncated: boolean; embeddedFrames: number; trust: string;
+  textScope?: string; elementsScope?: string; viewport?: BrowserViewport;
 }
 export interface BrowserAction { action: string; snapshotId?: string; elementId?: number; text?: string; deltaY?: number; }
 export interface BrowserActionFeedback { id: number; x: number; y: number; }

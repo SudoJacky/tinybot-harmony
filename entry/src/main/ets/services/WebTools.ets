@@ -6,6 +6,7 @@ import { Cancellation } from './Cancellation';
 
 export const MAX_WEB_BYTES: number = 1024 * 1024;
 export const MAX_WEB_TEXT: number = 20000;
+const DEFAULT_WEB_TEXT: number = 8000;
 
 export interface WebDocument { url: string; contentType: string; body: string; }
 export interface WebTransport {
@@ -20,10 +21,13 @@ export interface WebPage {
   content: string;
   links: WebLink[];
   truncated: boolean;
+  offset?: number;
+  totalChars?: number;
+  nextOffset?: number;
   linksTruncated: boolean;
   trust: string;
 }
-interface WebArguments { url: string; }
+interface WebArguments { url: string; offset?: number; maxChars?: number; }
 
 export function validateWebAddress(value: string): string {
   if (typeof value !== 'string' || value.length > 4096 || /[\s\u0000-\u001f\\]/.test(value)) {
@@ -76,10 +80,11 @@ function pageFavicon(clean: string, address: string, transport: WebTransport): s
   return touchIcon || validateWebAddress(transport.resolve('/favicon.ico', address));
 }
 
-export function extractWebPage(document: WebDocument, transport: WebTransport): WebPage {
+export function extractWebPage(document: WebDocument, transport: WebTransport, offset: number = 0, maxChars: number = DEFAULT_WEB_TEXT): WebPage {
   const mime = document.contentType.split(';')[0].trim().toLowerCase();
   const html = mime === 'text/html' || mime === 'application/xhtml+xml';
-  if (!html && !mime.startsWith('text/') && mime !== 'application/json' && mime !== 'application/xml') {
+  const structured = mime === 'application/json' || mime === 'application/xml' || /^application\/[a-z0-9.+-]+\+(?:xml|json)$/.test(mime);
+  if (!html && !mime.startsWith('text/') && !structured) {
     throw new ToolFailure('UNSUPPORTED_CONTENT', t("暂不支持此网页内容类型：") + (mime || t("未声明")) + t("。请使用 HTML 或文本链接。"), 'use_supported_source');
   }
   let title = '';
@@ -116,8 +121,9 @@ export function extractWebPage(document: WebDocument, transport: WebTransport): 
   }
   if (content.includes('\u0000')) { throw new ToolFailure('UNSUPPORTED_CONTENT', t("网页返回了二进制内容或不支持的文本编码。"), 'use_supported_source'); }
   if (content.trim().length === 0) { throw new ToolFailure('CONTENT_UNAVAILABLE', t("网页没有可读取的正文，可能需要登录或 JavaScript。"), 'use_supported_source'); }
-  return { url: document.url, favicon: favicon, title: title, content: content.slice(0, MAX_WEB_TEXT), links: links,
-    truncated: content.length > MAX_WEB_TEXT, linksTruncated: linksTruncated, trust: 'untrusted' };
+  return { url: document.url, favicon: favicon, title: title, content: content.slice(offset, offset + maxChars), links: links,
+    offset: offset, totalChars: content.length, nextOffset: offset + maxChars < content.length ? offset + maxChars : undefined,
+    truncated: offset > 0 || content.length > maxChars, linksTruncated: linksTruncated, trust: 'untrusted' };
 }
 
 export class WebTools implements AgentTools {
@@ -126,10 +132,13 @@ export class WebTools implements AgentTools {
 
   definitions(): ToolDefinition[] {
     return [{ type: 'function', promptSnippet: '读取已知 URL 的静态网页',
-      promptGuidelines: ['read_web 不提供联网搜索。引用使用工具返回的来源 URL，区分网页陈述与推断；读取失败、内容过期或截断时说明证据局限。'], function: {
-      name: 'read_web', description: '读取指定 HTTP/HTTPS 网页的静态正文、标题和链接，供引用来源。不是搜索引擎或浏览器；不登录、不执行 JavaScript。最多下载 1 MiB，正文最多 20000 字符，截断会明确标记。',
+      promptGuidelines: ['read_web 不提供联网搜索。引用使用工具返回的来源 URL，区分网页陈述与推断；读取失败、内容过期或截断时说明证据局限。',
+        '按需读取正文，使用 nextOffset 继续读取所需部分，不必把全部脚注放入上下文。SEC 财报先从 FilingSummary.xml 定位报表，不要猜测 R 编号。'], function: {
+      name: 'read_web', description: '读取指定 HTTP/HTTPS 网页的静态正文、标题和链接，供引用来源。不是搜索引擎或浏览器；不登录、不执行 JavaScript。最多下载 1 MiB，正文默认返回 8000 字符，可指定 offset/maxChars 分页，单页最多 20000 字符。truncated 标记非全文；nextOffset 存在时可继续读取。HTTP 403 时可用浏览器或更换有依据的公开来源。',
       parameters: { type: 'object', properties: {
-        'url': { type: 'string', description: '用户提供或已知来源的完整网页 URL，不要编造地址。' }
+        'url': { type: 'string', description: '用户提供或已知来源的完整网页 URL，不要编造地址。' },
+        'offset': { type: 'integer', description: '正文字符偏移，首次为 0；继续读取时使用返回的 nextOffset。', minimum: 0 },
+        'maxChars': { type: 'integer', description: '本次所需正文字符数，默认 8000。', minimum: 1, maximum: MAX_WEB_TEXT }
       }, required: ['url'], additionalProperties: false }
     } }];
   }
@@ -138,12 +147,14 @@ export class WebTools implements AgentTools {
     cancellation.check();
     if (call.function.name !== 'read_web') { throw new ToolFailure('TOOL_UNAVAILABLE', t("不支持的网页工具。"), 'check_available_tools'); }
     const args = parseToolArguments(call.function.arguments) as WebArguments;
-    if (!args || Array.isArray(args) || typeof args.url !== 'string' || Object.keys(args).some((key: string) => key !== 'url')) {
-      throw new ToolFailure('INVALID_ARGUMENTS', t("read_web 参数必须仅包含 url。"), 'fix_arguments');
+    if (!args || Array.isArray(args) || typeof args.url !== 'string' || Object.keys(args).some((key: string) => !['url', 'offset', 'maxChars'].includes(key)) ||
+      (args.offset !== undefined && (!Number.isSafeInteger(args.offset) || args.offset < 0)) ||
+      (args.maxChars !== undefined && (!Number.isSafeInteger(args.maxChars) || args.maxChars < 1 || args.maxChars > MAX_WEB_TEXT))) {
+      throw new ToolFailure('INVALID_ARGUMENTS', 'read_web requires url, optional nonnegative integer offset and maxChars from 1 to 20000.', 'fix_arguments');
     }
     const document = await this.transport.get(validateWebAddress(args.url), cancellation);
     cancellation.check();
-    const page = extractWebPage(document, this.transport);
+    const page = extractWebPage(document, this.transport, args.offset, args.maxChars);
     if (context) { context.execution.websiteIcon = page.favicon; }
     page.favicon = undefined;
     return JSON.stringify(page);

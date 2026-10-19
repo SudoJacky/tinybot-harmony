@@ -99,6 +99,13 @@ for (const file of fs.readdirSync(root, { recursive: true }).filter(file => file
 }
 assert.ok(migratedCalls >= 55, 'Expected the existing logging paths to migrate');
 console.log('PASS application-wide logging architecture guard and fixed event catalog: ' + migratedCalls + ' literal call sites');
+const { LogSanitizer } = load(path.join(root, 'model/DiagnosticLog'));
+const transportFields = new LogSanitizer().sanitize({ code: 2300056, bytes: 1234, http: 0, phase: 'streaming', retryable: true,
+  body: secret, url: 'https://secret.example' }, undefined, true);
+assert.equal(transportFields.code,2300056);assert.equal(transportFields.bytes,1234);assert.equal(transportFields.http,0);
+assert.equal(transportFields.phase,'streaming');assert.equal(transportFields.retryable,true);
+assert.ok(!JSON.stringify(transportFields).includes(secret));assert.equal(transportFields.url,undefined);
+console.log('PASS transport stage, retry decision and numeric evidence survive redaction without payloads or URLs');
 Diagnostics.stop();
 const begin = performance.now();
 for (let index = 0; index < 1000000; index++) Diagnostics.log('info', 'network', 'request_start');

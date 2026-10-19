@@ -18,7 +18,10 @@ export async function requestWithRetry(step: AgentStep, request: () => Promise<M
     try { return await request(); }
     catch (error) {
       cancellation.check();
-      if (!(error instanceof TransientProviderError) || attempt >= 2 || step.content.length > 0 || (step.reasoningContent || '').length > 0) { throw error as Error; }
+      if (!(error instanceof TransientProviderError) || attempt >= 2 || step.tools.length > 0) { throw error as Error; }
+      // No tools are dispatched before a complete model result. Discard only this
+      // failed attempt's preview; never replay already committed steps or tools.
+      step.content = ''; step.reasoningContent = '';
       const retry: RequestRetry = { attempt: attempt + 1, delayMs: 1000 * (attempt + 1), code: error.code, waiting: true };
       step.retries = (step.retries || []).concat([retry]);
       changed();

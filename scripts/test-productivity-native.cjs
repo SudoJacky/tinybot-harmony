@@ -1253,6 +1253,39 @@ async function test(name, run) {
       assert.equal(JSON.stringify(restored).includes('must-not-display'),false);
     }
   });
+  await test('provider retries interrupted reasoning, text and tool arguments without replaying writes', async () => {
+    const {ProtocolProvider}=load(path.join(source,'services/providers/ProtocolProvider'));
+    const {runAgentLoop}=load(path.join(source,'services/AgentLoop'));
+    const provider=new ProtocolProvider({id:'test',name:'Test',protocol:'chat-completions',defaultBaseUrl:'https://fixture.invalid/v1',defaultModel:'test'},providerEffects);
+    for(const partial of ['reasoning','text','arguments']) {
+      let attempts=0,writes=0,aborted;const bodies=[],saved=[];
+      const turn={content:'',steps:[]};
+      httpScript=request=>{
+        attempts++;bodies.push(JSON.parse(request.options.extraData));
+        const emit=value=>request.emit('dataReceive',Uint8Array.from(Buffer.from('data: '+JSON.stringify({choices:[value]})+'\n\n')).buffer);
+        if(attempts===2) {
+          aborted=request;
+          const delta=partial==='reasoning'?{reasoning_content:'unfinished thought'}:partial==='text'?{content:'unfinished answer'}:
+            {tool_calls:[{index:0,id:'aborted-write',type:'function',function:{name:'write_file',arguments:'{"path":"unfinished'}}]};
+          emit({index:0,delta});
+          request.callback(Object.assign(Error('receive failed'),{code:2300056}));return;
+        }
+        if(attempts===3)aborted.emit('dataReceive',Uint8Array.from(Buffer.from('data: {"choices":[{"delta":{"content":"late"}}]}\n\n')).buffer);
+        request.callback(null,200);
+        emit({index:0,delta:attempts===1?{content:'Prior',tool_calls:[{index:0,id:'committed-write',type:'function',function:{name:'write_file',arguments:'{}'}}]}:{content:'Done'}});
+        emit({index:0,delta:{},finish_reason:attempts===1?'tool_calls':'stop'});
+        request.emit('dataReceive',Uint8Array.from(Buffer.from('data: [DONE]\n\n')).buffer);request.emit('dataEnd');
+      };
+      const bound={stream:(messages,tools,cancellation,onText,options)=>provider.stream({model:'test',baseUrl:'https://fixture.invalid/v1',apiKey:'',messages,tools},cancellation,onText,options?.onReasoning)};
+      await runAgentLoop({model:bound,messages:[{role:'user',content:'fixture'}],turn,maxSteps:3,
+        tools:{definitions:()=>[{type:'function',function:{name:'write_file'}}],execute:async call=>{assert.equal(call.id,'committed-write');writes++;return 'saved';}}},
+        new Cancellation(),{event:()=>{},checkpoint:async()=>saved.push(JSON.parse(JSON.stringify(turn)))});
+      assert.equal(attempts,3);assert.equal(writes,1);assert.equal(turn.content,'Prior\n\nDone');
+      assert.deepEqual(bodies[1],bodies[2]);assert.equal(turn.steps[1].retries.length,1);
+      assert.ok(saved.some(value=>value.steps[1]?.retries?.[0].waiting&&value.content==='Prior'));
+      assert.ok(!JSON.stringify(turn).includes('unfinished'));assert.ok(!JSON.stringify(turn).includes('aborted-write'));
+    }
+  });
   await test('provider keeps active streams beyond three minutes and stops idle or cancelled streams', async () => {
     const {ProtocolProvider}=load(path.join(source,'services/providers/ProtocolProvider'));
     const provider=new ProtocolProvider({id:'test',name:'Test',protocol:'chat-completions',defaultBaseUrl:'https://fixture.invalid/v1',defaultModel:'test'}, providerEffects);
@@ -1283,6 +1316,11 @@ async function test(name, run) {
       assert.equal(JSON.parse(transport.options.extraData).stream_options, undefined);
       advance(119999);emit('');advance(1);
       await timedOut;assert.equal(timers.size,0);
+      const idlePartial=provider.stream(input,new Cancellation(),()=>{});
+      const partialTimedOut=assert.rejects(idlePartial,error=>error.name==='TransientProviderError'&&error.code==='timeout');
+      await new Promise(setImmediate);
+      emit('data: {"choices":[{"index":0,"delta":{"reasoning_content":"unfinished"}}]}\n\n');
+      advance(120000);await partialTimedOut;assert.equal(timers.size,0);
       const cancellation=new Cancellation();let text='';
       const cancelled=provider.stream(input,cancellation,delta=>{text+=delta;});
       const rejected=assert.rejects(cancelled);
@@ -1295,7 +1333,7 @@ async function test(name, run) {
       await new Promise(setImmediate);advance(120000);
       await startupTimedOut;assert.equal(timers.size,0);
       const tracked=UsageLedger.list().filter(item=>!recordsBefore.has(item.id));
-      assert.equal(tracked.length,4);assert.equal(tracked.map(item=>item.status).sort().join(','),'cancelled,complete,failed,failed');
+      assert.equal(tracked.length,5);assert.equal(tracked.map(item=>item.status).sort().join(','),'cancelled,complete,failed,failed,failed');
       assert.ok(tracked.every(item=>item.origin.threadId==='trace-thread'&&item.origin.turnId==='trace-turn'&&item.origin.step===2),'all outcomes keep their origin');
     } finally {fakeTimers=undefined;}
   });

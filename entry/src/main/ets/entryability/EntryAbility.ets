@@ -6,6 +6,7 @@ import { AppearancePreferences } from '../services/AppearancePreferences';
 import { McpOAuth } from '../services/McpOAuth';
 import { LaunchActions } from '../services/LaunchActions';
 import { DeveloperDiagnostics } from '../services/DeveloperDiagnostics';
+import { huaweiAccount } from '../services/HuaweiAccount';
 /*
  * Copyright (c) 2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -97,6 +98,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onForeground(): void {
+    huaweiAccount.refresh();
     DeveloperDiagnostics.setForeground(true);
     AppStorage.setOrCreate('tinybot.foreground', true);
     LaunchActions.setForeground(true);

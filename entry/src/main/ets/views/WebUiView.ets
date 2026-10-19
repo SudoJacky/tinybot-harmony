@@ -79,9 +79,10 @@ export struct WebUiView {
         if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'activate', { instanceId: this.instanceId, generation: this.generation, active: activeWebViews, preflight: this.preflight }); };
       }
       if ((this.preflight || !this.scrolling) && this.reloadPending) { this.restart(); }
-    } else if (this.renderWeb && !this.saving && this.releaseTimer === -1) {
-      // Pause immediately, but keep the instance through quick scroll reversals.
-      this.releaseTimer = setTimeout(() => { this.releaseTimer = -1; if (this.mounted && (!this.visible || !this.foreground)) { this.releaseWeb(); } }, this.foreground ? 5000 : 600);
+    } else if (this.foreground && this.renderWeb && !this.saving && this.releaseTimer === -1) {
+      // Reclaim offscreen views only while ArkUI can commit their removal. A background
+      // false -> true update can retain the old native Web with a replacement controller.
+      this.releaseTimer = setTimeout(() => { this.releaseTimer = -1; if (this.mounted && this.foreground && !this.visible) { this.releaseWeb(); } }, 5000);
     }
     this.sync();
     this.syncActivity();
@@ -92,11 +93,13 @@ export struct WebUiView {
   }
   private syncActivity(): void {
     if (!this.renderWeb || !this.attached) { return; }
-    const active = this.preflight || (this.visible && this.foreground && !this.scrolling);
+    // Scrolling delays creation/loading, never painting an already visible document.
+    const active = this.preflight || (this.visible && this.foreground);
     if (this.nativeActive === active) { return; }
     try {
       if (active) { this.controller.onActive(); } else { this.controller.onInactive(); }
       this.nativeActive = active;
+      if (Diagnostics.recording) { Diagnostics.event('web.activity', { active: active ? 1 : 0 }, this.instanceId); }
     } catch (error) { this.report(error as Error); }
   }
   private closePorts(): void {
@@ -149,12 +152,12 @@ export struct WebUiView {
       if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'port_connected', { instanceId: this.instanceId }); };
       // loadData may use an opaque data: origin; transfer only to the verified top-level host.
       this.controller.postMessage('tinybot-web-port', [this.ports[1]], '*');
-      this.ports[0].postMessageEvent(JSON.stringify({ type: 'init', spec: this.spec, autoHeight: webUiAutoHeight(this.spec), values: this.values, active: this.preflight || (this.interactive && this.visible && this.foreground && !this.scrolling), preflight: this.preflight, snapshotMode: this.snapshotMode }));
+      this.ports[0].postMessageEvent(JSON.stringify({ type: 'init', spec: this.spec, autoHeight: webUiAutoHeight(this.spec), values: this.values, active: this.preflight || (this.interactive && this.visible && this.foreground), preflight: this.preflight, snapshotMode: this.snapshotMode }));
     } catch (error) { this.report(error as Error); }
   }
   private sync(): void {
     if (!this.mounted || !this.ports.length) { return; }
-    try { this.ports[0].postMessageEvent(JSON.stringify({ type: 'state', values: this.values, active: this.preflight || (this.interactive && this.visible && this.foreground && !this.scrolling) })); }
+    try { this.ports[0].postMessageEvent(JSON.stringify({ type: 'state', values: this.values, active: this.preflight || (this.interactive && this.visible && this.foreground) })); }
     catch (error) { this.report(error as Error); }
   }
   private async receive(data: webview.WebMessage, generation: number): Promise<void> {

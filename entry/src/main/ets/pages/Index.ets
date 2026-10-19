@@ -44,6 +44,8 @@ import { IconButton } from '../common/Widgets';
 import { LaunchActions } from '../services/LaunchActions';
 import { OnboardingPanel } from '../views/OnboardingPanel';
 import { OnboardingPreferences } from '../services/OnboardingPreferences';
+import { HuaweiAccount, huaweiAccount } from '../services/HuaweiAccount';
+import { HuaweiAccountPanel } from '../views/HuaweiAccountPanel';
 
 const DRAWER_MAX_WIDTH: number = 340;
 const CHAT_HEADER_HEIGHT: number = 56;
@@ -54,6 +56,7 @@ struct Index {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
   @State private app: ChatViewModel = new ChatViewModel();
+  @State private account: HuaweiAccount = huaweiAccount;
   @State private drawerOpen: boolean = false;
   @State private drawerContentActive: boolean = false;
   private drawerAnimation: number = 0;
@@ -82,6 +85,7 @@ struct Index {
   onPageShow(): void {
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    this.account.initialize(context).then(() => this.account.refresh());
     if (!this.session) {
       this.session = createNativeSessionService(context.filesDir, context.getApplicationContext().filesDir, this.approval, context, this.browser);
       this.session.subscribe((event) => {
@@ -429,9 +433,14 @@ struct Index {
       NavDestination() { SearchSettingsPanel({ app: this.app }) }.title(t('搜索服务'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'files') {
       WorkspacePanel({ app: this.app, initialPath: (param as string) || '' })
+    } else if (name === 'account') {
+      NavDestination() {
+        HuaweiAccountPanel({ account: this.account, taskBusy: this.app.busy, onSupport: (page: string) => this.openSupport(page) })
+      }.title(t('华为账号'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'settings') {
       NavDestination() {
-        SettingsPanel({ app: this.app, settings: this.app.settings,
+        SettingsPanel({ app: this.app, settings: this.app.settings, account: this.account,
+          onAccount: () => { this.paths.pushPath({ name: 'account' }); },
           browser: this.browser,
           onAddProvider: () => { this.paths.pushPath({ name: 'provider-presets' }); },
           onUsage: () => { this.paths.pushPath({ name: 'usage' }); },
@@ -450,7 +459,7 @@ struct Index {
       }.title(t("设置"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'provider-presets') {
       NavDestination() {
-        SettingsPanel({ app: this.app, settings: this.app.settings, browser: this.browser, presetsOnly: true,
+        SettingsPanel({ app: this.app, settings: this.app.settings, account: this.account, browser: this.browser, presetsOnly: true,
           onEditProvider: (_id: string, preset: string) => {
             if (this.app.beginProvider(preset, '')) { this.paths.replacePath({ name: 'provider' }); }
           } })
@@ -626,7 +635,8 @@ struct Index {
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         Column() {
           if (this.app.ready) {
-            ChatPanel({ app: this.app, thread: this.app.active, approval: this.approval, browser: this.browser,
+            ChatPanel({ app: this.app, thread: this.app.active, approval: this.approval, browser: this.browser, account: this.account,
+                onAccount: () => { this.paths.pushPath({ name: 'account' }); },
                 onBrowser: () => this.setBrowserExpanded(true), onSettings: () => this.openSettings(),
                 topInset: CHAT_HEADER_HEIGHT,
                 onHeaderProgress: (progress: number): void => { this.headerProgress = progress; },
