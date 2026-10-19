@@ -20,7 +20,8 @@ const documents = [
   '前文\n\n| Name | Value |\n| :--- | ---: |\n| A | 中文🙂 |\n\n尾部',
   '开头\n```ts\nconst x = 1;\n// 注释\n```\n尾部\n~~~py\nprint("你好")\n~~~',
   'A|B\n---|---\nx|y\n\n>quote\n\ntext\n\n',
-  'A|B\n:---|---\nx|y\n'
+  'A|B\n:---|---\nx|y\n',
+  '前文\n\n![架构图](https://example.com/a.png)\n\n尾部 **粗体**\n'
 ];
 for (const source of documents) {
   for (const chunk of [1, 2, 3, 7, 128]) {
@@ -56,14 +57,22 @@ const areaCallbacks = [], visibilityCallbacks = [], placeholderHeights = [];
 const noop = new Proxy({}, { get: () => () => {} });
 const column = new Proxy({}, { get: (_target, key) => key === 'onAreaChange' ? fn => areaCallbacks.push(fn) : key === 'onVisibleAreaChange' ? (_thresholds, fn) => visibilityCallbacks.push(fn) : () => {} });
 const blank = new Proxy({}, { get: (_target, key) => key === 'height' ? height => placeholderHeights.push(height) : () => {} });
+const images = [];
+const imageNode = new Proxy({}, { get: (_target, key) => (...args) => {
+  if (key === 'create') { images.push({ src: args[0], height: 0 }); }
+  if (key === 'height' && images.length) { images[images.length - 1].height = args[0]; }
+  return imageNode;
+} });
 Object.assign(sandbox, { Text: noop, ForEach: noop, Column: column, Blank: blank, HorizontalAlign: {}, Row: noop, SymbolGlyph: noop, Divider: noop, Scroll: noop, If: noop, Span: noop,
+  Image: imageNode, ImageViewer: noop, ModalTransition: { ALPHA: 0 }, IMAGE_HEIGHT: 220, t: text => text, TextOverflow: {}, ImageFit: {}, FlexAlign: {},
   CopyOptions: { LocalDevice: 1, None: 0 }, Space: {}, Radius: {}, Alignment: {}, BarState: {}, ScrollDirection: {}, Color: {}, FontWeight: {}, FontStyle: {}, TextDecorationType: {} });
 const source = methods('MarkdownView', 'DocumentView', ['refresh', 'syncChunks', 'aboutToAppear', 'aboutToDisappear']) + '\n' +
-  methods('MarkdownChunkView', 'BlockView', ['refresh', 'refreshCode', 'inlineSpans', 'proseText', 'prose', 'initialRender', 'invalidateMeasure', 'codeBlock', 'codeShown', 'codeLines', 'codeColor', 'revealColor', 'columnWidths', 'scheduleReveal', 'aboutToAppear', 'aboutToDisappear']) + '\n' + methods('ChatPanel', 'ChatLayout', ['messageAreaChanged']);
+  methods('MarkdownChunkView', 'BlockView', ['refresh', 'refreshCode', 'inlineSpans', 'proseText', 'prose', 'initialRender', 'invalidateMeasure', 'codeBlock', 'codeShown', 'codeLines', 'codeColor', 'revealColor', 'columnWidths', 'scheduleReveal', 'image', 'imageAlt', 'imageUrl', 'aboutToAppear', 'aboutToDisappear']) + '\n' + methods('ChatPanel', 'ChatLayout', ['messageAreaChanged']);
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, sandbox);
 const makeBlock = (block, animate = false) => Object.assign(new sandbox.exports.BlockView(), {
   model: new MarkdownChunkModel([block], animate), streaming: true, index: 0, mounted: false, visible: true,
-  inlineCache: new Map(), highlighted: new Map(), tableWidths: [], reveal: new StreamReveal(), expanded: [], codeTokens: [], revealTimer: -1, copyTimer: -1
+  inlineCache: new Map(), highlighted: new Map(), tableWidths: [], reveal: new StreamReveal(), expanded: [], codeTokens: [], imageFailed: [],
+  previewing: false, previewSource: '', revealTimer: -1, copyTimer: -1
 });
 const paragraph = '普通 **粗体** `代码`🙂';
 const row = makeBlock(markdownBlocks(paragraph)[0]); row.aboutToAppear();
@@ -172,6 +181,22 @@ areaCallbacks.at(-1)({}, { width: 400, height: 130 });
 outerArea({}, { width: 500, height: 130 }); assert.equal(row.measuredHeight, 0, 'width change must remeasure');
 row.measuredHeight = 130; row.model.update(markdownBlocks('new content')); row.refresh(); assert.equal(row.measuredHeight, 0);
 visibilityCallbacks.at(-1)(true); row.aboutToDisappear(); codeRow.aboutToDisappear(); assert.equal(timers.size, 0);
+// An image block renders the parsed URL at the fixed streaming height; after a load error it
+// swaps to the tap-through card, and the failed index is dropped once the block is no longer an image.
+const imageBranches = [];
+const imageRow = makeBlock(markdownBlocks('![架构图](https://example.com/a.png)')[0]);
+Object.assign(imageRow, { appearance: {}, observeComponentCreation2: fn => fn(1, true),
+  ifElseBranchUpdateFunction: (id, fn) => { imageBranches.push(id); fn(); } });
+images.length = 0; imageRow.image(0);
+assert.equal(imageBranches.at(-1), 1, 'a loading image uses the image branch');
+assert.equal(images.length, 1); assert.equal(images[0].src, 'https://example.com/a.png');
+assert.equal(images[0].height, sandbox.IMAGE_HEIGHT, 'images keep the fixed streaming height');
+assert.equal(imageRow.imageAlt(0), '架构图'); assert.equal(imageRow.imageUrl(0), 'https://example.com/a.png');
+imageRow.imageFailed = [0]; imageRow.image(0);
+assert.equal(imageBranches.at(-1), 0, 'a failed image switches to the tap-through card');
+assert.equal(images.length, 1, 'the failed branch must not request the image again');
+imageRow.model.update(markdownBlocks('普通文字')); imageRow.refresh();
+assert.equal(imageRow.imageFailed.length, 0, 'failed state is dropped when the block is no longer an image');
 sandbox.Diagnostics.start();
 const same = { width: 400, height: 120 };
 for (let index = 0; index < 1000; index++) { innerArea(same, same); layout.messageAreaChanged('old', same, same); }
@@ -187,4 +212,4 @@ assert.ok(diagnostics.metrics.some(m => m.name === 'markdown.sourceChars' && m.m
 assert.ok(diagnostics.events.some(e => e.name === 'markdown.parse'));
 sandbox.Diagnostics.stop();
 console.log('PASS actual emitted layout callbacks aggregate unchanged geometry; changed geometry and document size survive in diagnostics');
-console.log('PASS Markdown: all stream boundaries, tables/fences/CRLF/Unicode, replacement, stable groups, live render callbacks, span cache, code preview/expansion, exact-height offscreen release, remeasure, batched mount/cancel/resume and layout following');
+console.log('PASS Markdown: all stream boundaries, tables/fences/CRLF/Unicode, images, replacement, stable groups, live render callbacks, span cache, code preview/expansion, exact-height offscreen release, remeasure, batched mount/cancel/resume and layout following');

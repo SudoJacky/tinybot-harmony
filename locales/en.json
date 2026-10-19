@@ -1411,6 +1411,7 @@
   "请先打开并恢复此对话。": "Open and restore this conversation first.",
   "交互界面已不可用。": "This interactive interface is no longer available.",
   "交互状态已保存，请稍后重新提交。": "Your inputs were saved. Please submit again later.",
+  "图片加载失败，轻点用浏览器打开": "Image failed to load. Tap to open it in the browser.",
   "图片加载失败": "Image failed to load",
   "界面生成未完成，无法交互。": "The interface is incomplete and cannot be used.",
   "交互界面": "Interactive interface",

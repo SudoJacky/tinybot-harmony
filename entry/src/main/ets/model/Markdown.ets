@@ -1,6 +1,9 @@
 export interface MarkdownBlock { kind: string; text: string; level: number; rows: string[][]; }
 export interface MarkdownSpan { text: string; kind: string; url: string; }
 interface MarkdownParse { blocks: MarkdownBlock[]; starts: number[]; }
+// Only a whole line turns into an image block; an image written inside prose stays a link.
+// HTTPS only: a model reply must not make the app fetch cleartext or local sources.
+const IMAGE_LINE: RegExp = /^\s*!\[([^\]]*)\]\((https:\/\/[^\s)]+)(?:\s+"[^"]*")?\)\s*$/;
 export function markdownBlocks(source: string): MarkdownBlock[] {
   return parseMarkdown(source.replace(/\r\n/g, '\n')).blocks;
 }
@@ -31,6 +34,12 @@ function parseMarkdown(source: string): MarkdownParse {
       const quoted: string[] = [];
       while (index < lines.length && /^>\s?/.test(lines[index])) { quoted.push(lines[index++].replace(/^>\s?/, '')); }
       blocks.push({ kind: 'quote', text: quoted.join('\n'), level: 0, rows: [] }); continue;
+    }
+    const image = line.match(IMAGE_LINE);
+    if (image) {
+      // rows[0] is [alt, url]; an unclosed or still-streaming URL keeps parsing as text.
+      blocks.push({ kind: 'image', text: '', level: 0, rows: [[image[1], image[2]]] });
+      index++; continue;
     }
     const heading = line.match(/^(#{1,6})\s+(.+)$/);
     const bullet = line.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
@@ -70,16 +79,21 @@ export class MarkdownDocument {
 }
 function tableCells(line: string): string[] { return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim()); }
 // Bare URLs stop before CJK/fullwidth punctuation and trailing sentence punctuation.
-const SPAN_PATTERN: RegExp = new RegExp('\\[([^\\]]+)\\]\\((https?://[^\\s)]+)\\)|\\*\\*([^*]+)\\*\\*|__([^_]+)__|`([^`]+)`|\\*([^*]+)\\*|~~([^~]+)~~|' +
+const SPAN_PATTERN: RegExp = new RegExp('!?\\[([^\\]]*)\\]\\((https?://[^\\s)]+)\\)|\\*\\*([^*]+)\\*\\*|__([^_]+)__|`([^`]+)`|\\*([^*]+)\\*|~~([^~]+)~~|' +
   '(https?://[^\\s<>()\\[\\]\\u3000-\\u303f\\uff01-\\uff1f]*[^\\s<>()\\[\\].,;:!?\'"\\u3000-\\u303f\\uff01-\\uff1f])', 'g');
 export function markdownSpans(text: string): MarkdownSpan[] {
   const spans: MarkdownSpan[] = []; const pattern = new RegExp(SPAN_PATTERN.source, 'g');
   let start = 0; let match = pattern.exec(text);
   while (match) {
     if (match.index > start) { spans.push({ text: text.slice(start, match.index), kind: 'text', url: '' }); }
-    spans.push({ text: match[1] || match[3] || match[4] || match[5] || match[6] || match[7] || match[8],
-      kind: match[1] || match[8] ? 'link' : match[3] || match[4] ? 'bold' : match[5] ? 'code' : match[7] ? 'strike' : 'italic',
-      url: match[2] || match[8] || '' });
+    // Capturing groups are undefined when they do not take part in the match.
+    const groups: (string | undefined)[] = match;
+    const link = groups[1] !== undefined; const bare = groups[8] !== undefined;
+    const url = link ? groups[2] || '' : bare ? groups[8] || '' : '';
+    // An inline image without alt text keeps its URL as the visible link label.
+    const label = link ? (groups[1] || url) : groups[3] || groups[4] || groups[5] || groups[6] || groups[7] || groups[8] || '';
+    spans.push({ text: label, kind: link || bare ? 'link' : groups[3] !== undefined || groups[4] !== undefined ? 'bold' :
+      groups[5] !== undefined ? 'code' : groups[7] !== undefined ? 'strike' : 'italic', url: url });
     start = match.index + match[0].length; match = pattern.exec(text);
   }
   if (start < text.length) { spans.push({ text: text.slice(start), kind: 'text', url: '' }); }
