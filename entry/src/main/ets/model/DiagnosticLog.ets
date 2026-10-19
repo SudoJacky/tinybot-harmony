@@ -10,7 +10,7 @@ export interface LogFields {
   added?: number; updated?: number;
   round?: number; revision?: number; threads?: number; changedThreads?: number; selected?: number;
   enabled?: boolean; failed?: boolean; cancelled?: boolean; speaking?: boolean; preflight?: boolean; closed?: boolean;
-  streaming?: boolean; ready?: boolean; hasModel?: boolean;
+  streaming?: boolean; ready?: boolean; hasModel?: boolean; retryable?: boolean;
   protocol?: string; phase?: string; action?: string; policy?: string; scheme?: string; library?: string; status?: string;
   threadId?: string; messageId?: string; sessionId?: string; providerId?: string; previewId?: string; surfaceId?: string;
 }
@@ -38,11 +38,11 @@ EVENTS.diagnostics = ['started', 'stopped', 'marker', 'failed', 'level_changed']
 const NUMBERS: string[] = ['operationId', 'instanceId', 'generation', 'active', 'count', 'total', 'chars', 'bytes', 'elapsedMs', 'durationMs', 'http', 'code',
   'messages', 'tools', 'nodes', 'keys', 'width', 'height', 'widthVp', 'request', 'chunk', 'eventCode', 'newChats', 'skippedChats', 'level', 'style',
   'tokens', 'budget', 'removed', 'retained', 'duplicates', 'characters', 'added', 'updated', 'round', 'revision', 'threads', 'changedThreads', 'selected'];
-const BOOLEANS: string[] = ['enabled', 'failed', 'cancelled', 'speaking', 'preflight', 'closed', 'streaming', 'ready', 'hasModel'];
+const BOOLEANS: string[] = ['enabled', 'failed', 'cancelled', 'speaking', 'preflight', 'closed', 'streaming', 'ready', 'hasModel', 'retryable'];
 const REFERENCES: string[] = ['threadId', 'messageId', 'sessionId', 'providerId', 'previewId', 'surfaceId'];
 const STRINGS: Record<string, string[]> = {};
 STRINGS.protocol = ['chat-completions', 'responses', 'anthropic-messages'];
-STRINGS.phase = ['idle', 'preparing', 'listening', 'complete', 'finishing', 'error', 'creating', 'playing', 'stopping'];
+STRINGS.phase = ['idle', 'preparing', 'listening', 'complete', 'finishing', 'error', 'creating', 'playing', 'stopping', 'connecting', 'streaming'];
 STRINGS.action = ['send', 'cancel', 'edit', 'press', 'none'];
 STRINGS.policy = ['unset', 'enabled', 'disabled'];
 STRINGS.scheme = ['http', 'https', 'about', 'data', 'file', 'other'];

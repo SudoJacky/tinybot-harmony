@@ -81,7 +81,7 @@ GLM 等模型返回的 `reasoning_content` 会独立组装，随工具步骤保�
 | 压缩保留内容 | 优先保留用户消息，预算最多 20000 tokens / 消息预算的 25% | 近期约 20000 tokens | 保留近期约 20000 tokens，继续按完整用户/助手及工具组切分 |
 | 压缩摘要输出 | 默认 1024 tokens | 常规摘要约预留的 80%，受模型输出上限约束 | 维持独立 4096 预算，本次不移植摘要层级合并和提示词策略 |
 | 流式网络超时 | 初始请求及流空闲默认 120 秒，可按服务配置 | HTTP 空闲默认 300 秒，可选 30/60/120/300 秒或关闭 | 采用 120 秒无数据计时，移除旧 180 秒总时限；SDK readTimeout=0，由可重置计时器处理读取超时 |
-| 自动重试 | 最多 3 次，限响应流开始之前 | 默认 3 次，基础延迟 2000ms，可配置 | 输出前的临时错误最多重试 2 次（1 秒、2 秒），可取消并保存状态；不完整输出不重试，不重放工具 |
+| 自动重试 | 最多 3 次，限响应流开始之前 | 默认 3 次，基础延迟 2000ms，可配置 | 明确的临时传输错误或空闲超时最多重试 2 次（1 秒、2 秒），丢弃当前未完成输出，可取消并保存状态；只重发未提交模型请求，不重放已完成工具 |
 | 工具结果 | 由具体工具决定 | 通用截断默认 2000 行 / 50 KiB | 继续使用工具各自预算；桌面进程/文件权限不直接移植到手机 |
 
 参考位置：Tinybot 的 `src-tauri/src/agent/provider/model-defaults.json`、`catalog.rs`、`completion.rs`、`retry.rs`，`src-tauri/src/agent/runtime/usage.rs`，`src/app-core/settings/agentDefaultsSettings.ts`；pi 的 `packages/coding-agent/src/core/compaction/compaction.ts`、`settings-manager.ts`、`http-dispatcher.ts`、`tools/truncate.ts`，`packages/ai/src/api/simple-options.ts`、`anthropic-messages.ts` 和 `packages/agent/src/agent-loop.ts`。

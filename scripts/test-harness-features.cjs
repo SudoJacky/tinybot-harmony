@@ -92,6 +92,31 @@ async function main() {
   assert.deepEqual(JSON.parse(migrated.output),JSON.parse(webReceipt.output));
   assert.ok(!JSON.stringify(requestHistory(migratedWeb.threads[0].messages,'')).includes('site.svg'));
   assert.equal(JSON.parse(await web.execute(call('read_web',{url:'https://example.com/page'}),new Cancellation())).favicon,undefined);
+  const longBody = '<h1>Financial statement</h1><table><tr><td>Revenue 94827</td></tr></table>' +
+    '<p>Definition and references '.repeat(1200) + 'TAIL_MARKER';
+  const pagedWeb = new WebTools({ resolve: (reference, base) => new URL(reference, base).href,
+    get: async () => ({url:'https://example.com/report',contentType:'text/html',body:longBody}) });
+  const readPage = args => pagedWeb.execute(call('read_web',{url:'https://example.com/report',...args}),new Cancellation()).then(JSON.parse);
+  const head = await readPage({});
+  assert.equal(head.content.length,8000); assert.equal(head.nextOffset,8000); assert.equal(head.truncated,true);
+  assert.ok(head.content.includes('Revenue 94827'));
+  let gathered = head.content, offset = head.nextOffset, lastPage;
+  while (offset !== undefined) {
+    lastPage = await readPage({offset,maxChars:3000}); gathered += lastPage.content; offset = lastPage.nextOffset;
+  }
+  assert.equal(gathered.length,head.totalChars); assert.ok(gathered.endsWith('TAIL_MARKER'));
+  assert.equal(lastPage.nextOffset,undefined); assert.equal(lastPage.truncated,true);
+  assert.equal((await readPage({maxChars:20000})).content.length,20000);
+  for (const contentType of ['application/atom+xml','application/rss+xml','application/ld+json']) {
+    const body=contentType.endsWith('+json')?'[{"name":"Annual report"}]':'<feed><entry><title>Annual report</title></entry></feed>';
+    const structuredWeb=new WebTools({get:async()=>({url:'https://example.com/feed',contentType,body}),resolve:(reference,base)=>new URL(reference,base).href});
+    const page=JSON.parse(await structuredWeb.execute(call('read_web',{url:'https://example.com/feed'}),new Cancellation()));
+    assert.equal(page.content,body);assert.equal(page.truncated,false);
+  }
+  for (const args of [{offset:-1},{offset:0.5},{maxChars:0},{maxChars:20001},{selector:'script'}]) {
+    await assert.rejects(readPage(args),/read_web requires/);
+  }
+  console.log('PASS bounded web pages retain every character and source, expose continuation and reject invalid ranges');
   console.log('PASS favicon stays UI-only through real tool dispatch, model continuation, persistence, historical migration and retained view updates');
   const files = new Set(['report.md', 'diagram.png']);
   const present = new PresentTools(async path => { if (!files.has(path)) throw Error('File missing'); return '/workspace/' + path; });
@@ -143,13 +168,42 @@ async function main() {
   await assert.rejects(exhausted.run(), /Busy/); assert.equal(attempts, 3);
   attempts = 0;
   const partial = loop({ stream: async (_m, _t, _c, onText) => { attempts++; onText('partial'); throw new TransientProviderError('Broken', 'transport'); } });
-  await assert.rejects(partial.run(), /Broken/); assert.equal(attempts, 1); assert.equal(partial.turn.content, 'partial');
-  const cancelled = loop({ stream: async () => { throw new TransientProviderError('Busy', 'http_503'); } });
+  await assert.rejects(partial.run(), /Broken/); assert.equal(attempts, 3); assert.equal(partial.turn.content, 'partial');
+  assert.equal(partial.turn.steps[0].retries.length,2);
+  let recoveredRequests = 0, committedWrites = 0, lateText;
+  const recoveryMessages = [];
+  const recovered = loop({stream:async (messages,_tools,_cancel,onText,options) => {
+    recoveredRequests++; recoveryMessages.push(plain(messages));
+    if (recoveredRequests === 1) return reply('Earlier',[call('write_file',{},'committed-write')]);
+    if (recoveredRequests === 2) {
+      lateText = onText; onText('unfinished answer'); options.onReasoning('unfinished thought');
+      throw new TransientProviderError('Receive failed','transport');
+    }
+    lateText('late failed-attempt delta'); onText('Done'); return reply('Done');
+  }},{definitions:()=>[{type:'function',function:{name:'write_file'}}],execute:async()=>{committedWrites++;return 'saved';}});
+  await recovered.run();
+  assert.equal(recoveredRequests,3); assert.equal(committedWrites,1);
+  assert.deepEqual(recoveryMessages[1],recoveryMessages[2],'Retry uses the same committed history');
+  assert.equal(recovered.turn.content,'Earlier\n\nDone');
+  assert.ok(!JSON.stringify(recovered.turn).includes('unfinished'));
+  assert.ok(!JSON.stringify(recovered.turn).includes('late failed-attempt'));
+  assert.ok(recovered.saved.some(turn=>turn.content==='Earlier'&&turn.steps[1]?.retries?.[0].waiting&&turn.steps[1].content===''&&turn.steps[1].reasoningContent===''));
+  attempts=0;
+  const fatal = loop({stream:async(_m,_t,_c,onText)=>{attempts++;onText('kept');throw Error('Invalid response');}});
+  await assert.rejects(fatal.run(),/Invalid response/);assert.equal(attempts,1);assert.equal(fatal.turn.content,'kept');
+  const {requestWithRetry}=from('services/RequestRetry');
+  const committedStep={content:'kept',tools:[{call:call('write_file',{}),status:'complete',output:'saved'}]};
+  let committedAttempts=0;
+  await assert.rejects(requestWithRetry(committedStep,async()=>{committedAttempts++;throw new TransientProviderError('No replay','transport');},new Cancellation(),async()=>{},()=>{}),/No replay/);
+  assert.equal(committedAttempts,1);assert.equal(committedStep.content,'kept');
+  const cancelled = loop({ stream: async (_m,_t,_c,onText) => { onText('discard on cancel'); throw new TransientProviderError('Busy', 'http_503'); } });
   cancelled.events.push = event => { if (event.type === 'request_retry') cancelled.cancellation.cancel(); };
   await assert.rejects(cancelled.run(), RunCancelledError);
-  const badSave = loop({ stream: async () => { throw new TransientProviderError('Busy', 'http_503'); } }, undefined,
+  let saveAttempts=0;
+  const badSave = loop({ stream: async (_m,_t,_c,onText) => { saveAttempts++; onText('discard before checkpoint'); throw new TransientProviderError('Busy', 'http_503'); } }, undefined,
     { checkpoint: async () => { throw Error('Disk failure'); } });
   await assert.rejects(badSave.run(), /Disk failure/);
+  assert.equal(saveAttempts,1,'A failed retry checkpoint prevents the next model request');
   assert.ok(!(httpProviderError(401, '{}') instanceof TransientProviderError));
   assert.ok(!(httpProviderError(429, '{"error":{"code":"insufficient_quota"}}') instanceof TransientProviderError));
   assert.equal(cancelled.turn.steps[0].retries[0].waiting, false);

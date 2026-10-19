@@ -18,9 +18,18 @@ const { browserSnapshotScript, browserActionScript } = exported;
       <input type="file"><input type="text" name="shown" id="password-field" value="secret-password"><select name="filter"><option value="one">One</option><option value="two">Two</option></select>
       <button onclick="document.querySelector('output').textContent='Submitted';window.clicks=(window.clicks||0)+1">Submit</button><output></output>
       <button disabled>Disabled</button><button style="display:none">Hidden</button><iframe srcdoc="<button>Frame button</button>"></iframe>
-      <div style="height:3000px">Tall page</div></main>`);
+      <div style="height:3000px">Tall page</div><a href="https://example.com/report">Annual financial report</a></main>`);
     const snapshot = JSON.parse(await page.evaluate(browserSnapshotScript('first')));
     assert.equal(snapshot.trust, 'untrusted'); assert.equal(snapshot.embeddedFrames, 1);
+    assert.equal(snapshot.textScope,'document'); assert.equal(snapshot.elementsScope,'viewport');
+    assert.equal(snapshot.viewport.y,0); assert.equal(snapshot.viewport.height,900);
+    assert.ok(snapshot.viewport.scrollHeight>3000);
+    assert.ok(snapshot.text.includes('Annual financial report'));
+    assert.ok(!snapshot.elements.some(item=>item.label==='Annual financial report'));
+    await page.evaluate(browserActionScript({action:'scroll',deltaY:10000}));
+    const scrolled=JSON.parse(await page.evaluate(browserSnapshotScript('scrolled')));
+    assert.ok(scrolled.viewport.y>0);assert.ok(scrolled.elements.some(item=>item.label==='Annual financial report'));
+    await page.evaluate(()=>scrollTo(0,0));await page.evaluate(browserSnapshotScript('first'));
     assert.equal(snapshot.elements.some(item => item.label === 'Hidden'), false);
     assert.equal(JSON.stringify(snapshot).includes('secret-password'), false);
     assert.equal(JSON.stringify(snapshot).includes('123456'), false);

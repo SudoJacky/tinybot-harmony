@@ -148,7 +148,11 @@ export default function extensionTests(): void {
       const transport = new FixtureWeb();
       const page = extractWebPage({ url: 'https://example.com', contentType: 'text/plain', body: '中'.repeat(MAX_WEB_TEXT + 1) }, transport);
       expect(page.truncated).assertTrue();
-      expect(page.content.length).assertEqual(MAX_WEB_TEXT);
+      expect(page.content.length).assertEqual(8000);
+      expect(page.nextOffset).assertEqual(8000);
+      const tail = extractWebPage({ url: 'https://example.com', contentType: 'text/plain', body: '中'.repeat(MAX_WEB_TEXT + 1) }, transport, 8000, MAX_WEB_TEXT);
+      expect(page.content.length + tail.content.length).assertEqual(MAX_WEB_TEXT + 1);
+      expect(tail.nextOffset === undefined).assertTrue();
       rejects(() => { extractWebPage({ url: 'https://example.com', contentType: 'application/pdf', body: '%PDF' }, transport); }, '内容类型');
       rejects(() => { extractWebPage({ url: 'https://example.com', contentType: 'text/html', body: '<script>run()</script>' }, transport); }, '没有可读取');
       rejects(() => { extractWebPage({ url: 'https://example.com', contentType: 'text/plain', body: '\u0000' }, transport); }, '二进制');
@@ -161,7 +165,7 @@ export default function extensionTests(): void {
         rejects(() => { validateWebAddress(address); }, '网页');
       }
       for (const args of ['null', '[]', '{"url":1}', '{"url":"https://example.com","headers":{}}']) {
-        await rejectsAsync(async () => { await tools.execute(call('w', 'read_web', args), new Cancellation()); }, '参数');
+        await rejectsAsync(async () => { await tools.execute(call('w', 'read_web', args), new Cancellation()); }, 'read_web');
       }
       expect(transport.requests.length).assertEqual(0);
     });
