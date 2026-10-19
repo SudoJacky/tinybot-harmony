@@ -81,7 +81,7 @@ async function main() {
   const sourceId = f.session.snapshot().threads[0].messages[0].id;
   assert.equal(f.session.snapshot().productivity.memories[0].sourceMessageId, sourceId);
   assert.ok(f.requests[1].messages.some(m => m.role === 'tool' && JSON.parse(m.content).success));
-  // Once the first tool receipt exists, the runtime also advertises read_tool_result.
+  // Tool receipts never change the frozen system prompt.
   const background = content => content.split('\n\n<tools>')[0];
   const frozen = background(f.requests[1].messages[0].content);
   await f.send('继续'); assert.equal(background(f.requests[2].messages[0].content), frozen);

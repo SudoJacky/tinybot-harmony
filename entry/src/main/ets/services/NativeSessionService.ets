@@ -57,7 +57,7 @@ class NativeProviderEffects implements ProviderEffects {
 class NativeUsageRecorder implements UsageRecorder {
   recordTool(id: string, activity: UsageToolActivity): void { UsageLedger.recordTool(id, activity); }
   recordContext(id: string, diagnostics: ContextDiagnostics): void {
-    if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'context', 'inspected', { sessionId: id, tokens: diagnostics.tokens, budget: diagnostics.inputBudget, tools: diagnostics.toolTokens, messages: diagnostics.historyTokens, count: diagnostics.projectedResults }); }
+    if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'context', 'inspected', { sessionId: id, tokens: diagnostics.tokens, budget: diagnostics.inputBudget, tools: diagnostics.toolTokens, messages: diagnostics.historyTokens }); }
   }
 }
 

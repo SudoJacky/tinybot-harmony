@@ -1,12 +1,14 @@
 import { ProviderProfile } from './ProviderProfiles';
 import { t } from './I18n';
-export const DEEPSEEK_SEARCH_BASE_URL: string = 'https://api.deepseek.com/anthropic/v1';
-export const DEEPSEEK_SEARCH_MODEL: string = 'deepseek-v4-flash';
+// Official Search API; the account key is reused from a DeepSeek model provider.
+export const DEEPSEEK_SEARCH_BASE_URL: string = 'https://api.deepseek.com/v1';
+export const DEEPSEEK_SEARCH_ENDPOINT: string = DEEPSEEK_SEARCH_BASE_URL + '/tools/search';
+export const SEARCH_REQUEST_MODEL: string = 'search';
 export type SearchProviderId = 'deepseek' | 'tavily';
 export interface SearchConfig { provider: SearchProviderId; enabled: boolean; baseUrl?: string; credentialAlias?: string; modelProviderId?: string; }
 export interface SearchDraft { provider: SearchProviderId; enabled: boolean; baseUrl: string; apiKey: string; modelProviderId?: string; }
 export interface SearchSource { url: string; title: string; snippet: string; publishedAt?: string; }
-export interface SearchResult { sources: SearchSource[]; truncated: boolean; }
+export interface SearchResult { sources: SearchSource[]; }
 
 export function defaultSearchConfig(provider: SearchProviderId = 'deepseek'): SearchConfig {
   return provider === 'deepseek' ? { provider: provider, enabled: false } :

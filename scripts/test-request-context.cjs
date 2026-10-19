@@ -13,7 +13,6 @@ function load(file) {
 }
 const { RequestContext } = load(root + '/services/RequestContext');
 const { draftBreakdown } = load(root + '/model/ContextBreakdown');
-const { ContextTools, projectResults, resultTokenBudget } = load(root + '/services/ContextTools');
 const { threadEntries, projectedHistory } = load(root + '/model/ContextProjection');
 const { sessionContextSource } = load(root + '/services/SessionContext');
 const { estimateTextTokens, estimateContextTokens, validateCompaction } = load(root + '/model/ConversationContext');
@@ -64,7 +63,7 @@ async function main() {
   // A long single user turn compacts inside the turn, then continues without replaying any tool.
   const thread = fixture(), turn = { content: '', steps: [] }, requests = [], writes = [], saved = [];
   const manager = new RequestContext(source(thread, async () => saved.push(JSON.stringify(thread))), config());
-  const tools = new ContextTools({ definitions: () => [], execute: async c => { writes.push(c.id); return 'receipt ' + c.id; } }, () => threadEntries(thread), 8192);
+  const tools = { definitions: () => [], execute: async c => { writes.push(c.id); return 'receipt ' + c.id; } };
   let modelCalls = 0, summaries = 0;
   const model = { stream: async (messages, definitions, signal, onText, options) => {
     if (options?.usagePurpose === 'compaction') { summaries++; return reply('Completed writes are recorded. Continue remaining work; do not repeat writes.'); }
@@ -87,27 +86,18 @@ async function main() {
   assert.equal(restored.messages[1].steps[0].tools[0].output, 'receipt write1');
   console.log('PASS mid-turn compaction, exact user anchor, no repeated side effects, complete transcript survives reload');
 
-  // Huge results remain byte-for-byte in the transcript and can be paged after compaction/reload.
+  // Huge results stay byte-for-byte in the transcript and reach the model verbatim; nothing is projected.
   const big = 'BEGIN\n' + '中文😀'.repeat(14000) + '\nEND';
   const resultThread = fixture(); resultThread.messages[1].status = 'complete';
   resultThread.messages[1].steps = [{ content: '', tools: [{ call: call('large'), status: 'complete', output: big }] }];
   const original = JSON.stringify(resultThread);
-  const projected = projectResults(threadEntries(resultThread), 8192);
-  const preview = JSON.parse(projected.flatMap(e => e.messages).find(m => m.role === 'tool').content);
-  const previewDetails = new RequestContext(source(resultThread),config()).inspect([]);
-  assert.equal(previewDetails.breakdown.find(row=>row.kind==='results').tokens,estimateTextTokens(JSON.stringify(preview)));
-  assert.equal(preview.contextPreview, true); assert.equal(preview.totalCharacters, big.length); assert.equal(JSON.stringify(resultThread), original);
-  let toolExecutions = 0;
-  const reader = new ContextTools({ definitions: () => [], execute: async () => { toolExecutions++; return ''; } }, () => threadEntries(resultThread), 8192);
-  let offset = 0, collected = '';
-  while (offset < big.length) {
-    const pageText = await reader.execute(call('page', 'read_tool_result', { messageId: 'a1', callId: 'large', offset, length: 8000 }), new Cancellation());
-    assert.ok(estimateTextTokens(pageText) <= resultTokenBudget(8192));
-    const page = JSON.parse(pageText); assert.ok(page.nextOffset > offset); offset = page.nextOffset; collected += page.content;
-  }
-  assert.equal(collected, big); assert.equal(toolExecutions, 0);
-  await assert.rejects(reader.execute(call('bad', 'read_tool_result', { messageId: 'other', callId: 'large' }), new Cancellation()), /not found/);
-  console.log('PASS complete large Unicode result retained, bounded pages reconstruct it exactly, cross-conversation references rejected');
+  const largeManager = new RequestContext(source(resultThread), { ...config(), contextWindow: 400000 });
+  const large = await largeManager.prepare({ stream: async () => { throw Error('Unexpected compaction'); } }, [], new Cancellation());
+  const largeMessage = large.messages.find(message => message.role === 'tool' && message.toolCallId === 'large');
+  assert.equal(largeMessage.content, big);
+  assert.ok(!JSON.stringify(large.messages).includes('contextPreview'));
+  assert.equal(JSON.stringify(resultThread), original);
+  console.log('PASS complete large Unicode result reaches the model verbatim without projection or paging');
 
   // Usage calibrates only an unchanged request prefix. Prompt/tool changes invalidate it.
   const usageThread = fixture(), usageManager = new RequestContext(source(usageThread), config());
@@ -117,7 +107,7 @@ async function main() {
   usageThread.messages[1].steps = [{ content: 'ok', uiValidation: '', tools: [] }];
   let prepared = await usageManager.prepare(usageModel, [], new Cancellation());
   assert.equal(prepared.context.source, 'usage+estimate'); assert.ok(prepared.context.tokens >= 100);
-  prepared = await usageManager.prepare(usageModel, tools.definitions(), new Cancellation());
+  prepared = await usageManager.prepare(usageModel, detailTools, new Cancellation());
   assert.equal(prepared.context.source, 'estimate'); assert.ok(prepared.context.sections.rules > 0);
   assert.ok(!JSON.stringify(prepared.context).includes('Follow the user'));
   console.log('PASS usage calibration, invalidation on tool change, content-free section diagnostics');

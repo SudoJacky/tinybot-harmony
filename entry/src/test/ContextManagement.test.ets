@@ -9,7 +9,6 @@ import { prepareSessionContext } from '../main/ets/services/SessionContext';
 import { Cancellation } from '../main/ets/services/Cancellation';
 import { ModelRequestOptions, ModelSession } from '../main/ets/services/providers/Provider';
 import { runAgentLoop, AgentTools } from '../main/ets/services/AgentLoop';
-import { ContextTools } from '../main/ets/services/ContextTools';
 import { threadEntries, projectedHistory } from '../main/ets/model/ContextProjection';
 
 function message(id: string, role: string, content: string): MessageData {
@@ -91,16 +90,14 @@ export default function contextTests(): void {
       expect(restored.compaction?.fileOperations?.modifiedFiles.length).assertEqual(restored.compaction?.firstKeptStep);
       expect(projectedHistory(threadEntries(restored), restored.compaction).some((item) => item.toolCallId === 'call3')).assertTrue();
     });
-    it('projectsLargeResultsWithoutDiscardingTheirReadableOriginals', 0, async () => {
+    it('passesLargeResultsThroughWithoutProjection', 0, async () => {
       const thread = fixture(); const full = '中'.repeat(20000) + 'END';
       thread.messages[3].steps = [{ content: '', tools: [{ call: { id: 'large', type: 'function', function: { name: 'execute_code', arguments: '{}' } }, status: 'complete', output: full }] }];
-      const config = emptyData().config; config.contextWindow = 8192;
-      const tools = new ContextTools(new NoTools(), () => threadEntries(thread), 8192);
-      const history = await prepareSessionContext(thread, new SummaryModel(), new Cancellation(), false, config, '', tools.definitions(), async () => {}, () => {});
-      const preview = history.find((item) => item.toolCallId === 'large');
-      expect(preview?.content.includes('"contextPreview":true')).assertTrue();
-      const page = await tools.execute({ id: 'read', type: 'function', function: { name: 'read_tool_result', arguments: '{"messageId":"a2","callId":"large","offset":20000}' } }, new Cancellation());
-      expect(page.includes('"content":"END"')).assertTrue();
+      const config = emptyData().config; config.contextWindow = 400000;
+      const history = await prepareSessionContext(thread, new SummaryModel(), new Cancellation(), false, config, '', [], async () => {}, () => {});
+      const result = history.find((item) => item.toolCallId === 'large');
+      expect(result?.content).assertEqual(full);
+      expect(result?.content.includes('contextPreview')).assertFalse();
       expect(thread.messages[3].steps?.[0].tools[0].output).assertEqual(full);
     });
     it('compactsBeforePiReserveIsConsumedAndUsesSeparateSummaryBudget', 0, async () => {

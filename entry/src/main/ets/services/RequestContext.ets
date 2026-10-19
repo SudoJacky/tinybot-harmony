@@ -5,7 +5,6 @@ import { planContextCompaction, contextInputBudget, contextSettings, estimateCon
 import { ContextEntry, PromptSection, projectedHistory, renderPrompt } from '../model/ContextProjection';
 import { Cancellation } from './Cancellation';
 import { compactContext } from './ContextCompactor';
-import { projectResults } from './ContextTools';
 import { ModelSession } from './providers/Provider';
 import { t } from '../model/I18n';
 import { ContextOverflowError } from './providers/ProviderErrors';
@@ -34,7 +33,7 @@ export class RequestContext {
 
   inspect(tools: ToolDefinition[]): PreparedRequest {
     const sections = this.source.sections().concat(toolPromptSections(tools));
-    const entries = projectResults(this.source.entries(), contextSettings(this.config).window);
+    const entries = this.source.entries();
     const messages = this.assemble(entries, sections, this.source.state.compaction, []);
     return { messages: messages, context: this.describe(messages, tools, sections),
       breakdown: contextBreakdown(messages, tools, sections, entries, this.source.state.compaction !== undefined) };
@@ -54,7 +53,7 @@ export class RequestContext {
     if (recoverOverflow && !settings.autoCompact) { throw new ContextOverflowError(); }
     const sections = this.source.sections().concat(toolPromptSections(tools));
     const instructions = renderPrompt(sections);
-    const entries = projectResults(this.source.entries(), settings.window);
+    const entries = this.source.entries();
     const assemble = (checkpoint?: CompactionData): ModelMessage[] => this.assemble(entries, sections, checkpoint, pending);
     let messages = assemble(this.source.state.compaction);
     let diagnostics = this.describe(messages, tools, sections);
@@ -109,7 +108,6 @@ export class RequestContext {
     for (const section of sections) { sizes[section.name] = estimateTextTokens(section.content); }
     return { tokens: tokens, heuristicTokens: heuristic, source: source, inputBudget: contextInputBudget(contextSettings(this.config).window),
       sections: sizes, toolTokens: estimateTextTokens(JSON.stringify(toolSchemas(tools))),
-      historyTokens: estimateContextTokens(messages.filter((message) => message.role !== 'system')),
-      projectedResults: messages.filter((message) => message.role === 'tool' && message.content.startsWith('{"contextPreview":true,')).length };
+      historyTokens: estimateContextTokens(messages.filter((message) => message.role !== 'system')) };
   }
 }

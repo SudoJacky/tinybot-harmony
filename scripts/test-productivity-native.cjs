@@ -408,10 +408,9 @@ async function test(name, run) {
     const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
     const {ToolSet}=load(path.join(source,'services/ToolSet'));
     const {RuleTools}=load(path.join(source,'services/RuleTools'));
-    const {ContextTools}=load(path.join(source,'services/ContextTools'));
     const {stepMessages}=load(path.join(source,'model/Agent'));
     const root='/sandbox/workspace/diff';fs.mkdirSync(nativePath(root),{recursive:true});
-    const native=new NativeWorkspaceFiles(root), tools=new ContextTools(new RuleTools(new ToolSet([new WorkspaceTools(native)]),false),()=>[],128000);
+    const native=new NativeWorkspaceFiles(root), tools=new RuleTools(new ToolSet([new WorkspaceTools(native)]),false);
     const signal=new Cancellation();
     const invoke=async(name,args)=>{
       const execution={call:{id:crypto.randomUUID(),type:'function',function:{name,arguments:JSON.stringify(args)}},status:'running',output:''};
@@ -560,9 +559,7 @@ async function test(name, run) {
       assert.equal(fs.readdirSync(nativePath(root)).filter(p=>p.endsWith('.tmp')).length,0);
     }finally{release();await first;await second;fileIo.rename=rename;}
   });
-  await test('oversized MCP results survive storage and can be paged past the former truncation point without replay',async()=>{
-    const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
-    const {ContextTools,projectResults}=load(path.join(source,'services/ContextTools'));
+  await test('oversized MCP results survive storage and reach the model verbatim without projection',async()=>{
     const {stepMessages}=load(path.join(source,'model/Agent'));
     const {executeToolBatch}=load(path.join(source,'services/ToolExecution'));
     const approval=new ToolApproval(),signal=new Cancellation();let invocations=0;
@@ -578,13 +575,11 @@ async function test(name, run) {
     data.activeThreadId='full';data.threads=[{id:'full',title:'Full MCP',updatedAt:1,messages:[{id:'u',role:'user',content:'Read',status:'complete',error:''},
       {id:'a',role:'assistant',content:'',status:'complete',error:'',steps:[step]}]}];await disk.save(data);
     const saved=(await disk.load()).threads[0].messages[1].steps[0];
-    const entries=[{messageId:'u',answerId:'a',step:0,messages:stepMessages(saved),results:saved.tools}];
-    const projected=projectResults(entries,128000);const preview=JSON.parse(projected[0].messages.find(m=>m.role==='tool').content);
-    assert.equal(preview.contextPreview,true);assert.ok(preview.previewEnd.includes('TAIL-AFTER-48000'));
-    const tools=new ContextTools(new WorkspaceTools({}),()=>entries,128000);
-    let rebuilt='',offset=0;while(true){const page=JSON.parse(await tools.execute(call('read_tool_result',{messageId:'a',callId:'mcp_call',offset,length:8000}),signal));rebuilt+=page.content;if(page.complete)break;assert.ok(page.nextOffset>offset);offset=page.nextOffset;}
-    assert.equal(rebuilt,saved.tools[0].output);assert.equal(invocations,1);
-    await assert.rejects(tools.execute(call('read_tool_result',{messageId:'other',callId:'mcp_call'}),signal));
+    const toolMessage=stepMessages(saved).find(m=>m.role==='tool');
+    assert.equal(toolMessage.content,saved.tools[0].output);
+    assert.ok(toolMessage.content.includes('TAIL-AFTER-48000'));
+    assert.ok(!toolMessage.content.includes('contextPreview'));
+    assert.equal(invocations,1);
   });
   await test('search discovers beyond directory caps, filters globs, pages matches and preserves context',async()=>{
     const {WorkspaceTools}=load(path.join(source,'services/WorkspaceTools'));
@@ -799,6 +794,9 @@ async function test(name, run) {
     assert.equal(session.workspaceId,project.workspaceId);
     const files=new NativeWorkspaceFiles(root+'/workspace/'+project.workspaceId);
     await files.write('main.js','v1',new Cancellation());
+    assert.equal(await session.newThread(project.id),true);
+    assert.equal(session.snapshot().activeThreadId,a,'An untouched project chat is reused');
+    assert.equal(await session.renameThread(a,'First project chat'),true);
     assert.equal(await session.newThread(project.id),true);const b=session.snapshot().activeThreadId;
     assert.notEqual(a,b);assert.equal(session.workspaceId,project.workspaceId);
     assert.equal(await session.forkThread(),true);data=session.snapshot();

@@ -16,7 +16,7 @@ export function toolTitle(name: string): string {
     'execute_code': t('执行代码'), 'orchestrate': t('编排工具'), 'publish_data_view': t('生成图表'),
     'update_plan': t('更新计划'), 'request_user_input': t('请你补充信息'),
     'list_skills': t('查看 Skills'), 'skill_manage': t('管理 Skills'), 'mcp_manage': t('管理 MCP 服务'),
-    'memory': t('维护长期记忆'), 'read_tool_result': t('补读工具结果')
+    'memory': t('维护长期记忆')
   };
   return titles[name] || name;
 }

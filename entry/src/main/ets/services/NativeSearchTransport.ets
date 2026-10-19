@@ -2,12 +2,12 @@ import { ToolFailure, toolHttpFailure } from '../model/ToolFailure';
 import { http } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { SearchConfig, SearchResult, DEEPSEEK_SEARCH_MODEL, validateSearchConfig, searchCredentialAlias } from '../model/WebSearch';
+import { SearchConfig, SearchResult, SEARCH_REQUEST_MODEL, validateSearchConfig, searchCredentialAlias } from '../model/WebSearch';
 import { ProviderProfile } from '../model/ProviderProfiles';
 import { SearchProvider, SearchHttpRequest } from './search/SearchProvider';
 import { DeepSeekSearchProvider } from './search/DeepSeekSearchProvider';
 import { TavilySearchProvider } from './search/TavilySearchProvider';
-import { RequestUsage, UsageStream } from '../model/Usage';
+import { RequestUsage } from '../model/Usage';
 import { Cancellation, RunCancelledError } from './Cancellation';
 import { CredentialReader } from './providers/Provider';
 import { SearchTransport } from './WebSearchTools';
@@ -39,12 +39,12 @@ export class NativeSearchTransport implements SearchTransport {
     const key = await this.credentials.read(alias); cancellation.check();
     if (!key.trim()) { throw new ToolFailure('AUTH_REQUIRED', 'Configure the API Key in the selected provider settings.', 'check_credentials'); }
     const request = this.provider.request(this.config, query, maximum, key);
-    const record: RequestUsage = { id: util.generateRandomUUID(), provider: this.config.provider + '-search', model: this.config.provider === 'deepseek' ? DEEPSEEK_SEARCH_MODEL : 'search',
+    // Billing is per request rather than per token, so no usage stream is parsed.
+    const record: RequestUsage = { id: util.generateRandomUUID(), provider: this.config.provider + '-search', model: SEARCH_REQUEST_MODEL,
       startedAt: Date.now(), durationMs: 0, status: 'running_or_unknown', origin: { threadId: this.threadId, purpose: 'web_search' } };
     this.recordUsage(record);
     try {
       const body = await this.request(request, cancellation);
-      const usage = new UsageStream(); usage.push('data: ' + body.replace(/\r?\n/g, '') + '\n\n'); record.tokens = usage.result();
       const result = this.provider.parse(body, maximum); record.status = 'complete'; return result;
     } catch (error) { record.status = cancellation.cancelled ? 'cancelled' : 'failed'; throw error as Error; }
     finally { record.durationMs = Date.now() - record.startedAt; this.recordUsage(record); }
@@ -69,6 +69,7 @@ export class NativeSearchTransport implements SearchTransport {
           header: input.headers, extraData: input.body
         }, (error: BusinessError, response: http.HttpResponse) => {
           if (error) { finish('', new ToolFailure('NETWORK_ERROR', 'Search network error (' + error.code + ').', 'check_connection', { nativeCode: error.code })); return; }
+          if (response.responseCode === 402) { finish('', new ToolFailure('QUOTA_EXHAUSTED', 'Search was rejected because the account balance is insufficient.', 'check_quota')); return; }
           if (response.responseCode !== 200) { finish('', toolHttpFailure(response.responseCode, 'Search HTTP ' + response.responseCode + '. Check the search service configuration and API Key.', 'search')); return; }
           if (typeof response.result !== 'string') { finish('', new ToolFailure('INVALID_RESPONSE', 'Search returned invalid data.', 'inspect_service')); return; }
           finish(response.result);

@@ -11,7 +11,6 @@ import { ProviderRegistry } from './providers/ProviderRegistry';
 import { contextSettings } from '../model/ConversationContext';
 import { PromptSection, runEntries } from '../model/ContextProjection';
 import { ContextSource, PreparedRequest, RequestContext } from './RequestContext';
-import { ContextTools } from './ContextTools';
 import { OrchestrationExecutor, OrchestrationTools } from './OrchestrationTools';
 import { discoveredToolDefinitions, ToolDiscovery } from './ToolDiscovery';
 
@@ -105,9 +104,9 @@ export class AgentRuntime {
 
   fork(): AgentRuntime { return new AgentRuntime(this.providers, this.credentials, this.usage, this.validateAnswer, this.orchestrator, this.gate); }
 
-  private contextTools(tools: AgentTools, source: ContextSource, config: ModelConfig, selection: ToolSelection = {}): AgentTools {
+  private contextTools(tools: AgentTools, _source: ContextSource, _config: ModelConfig, selection: ToolSelection = {}): AgentTools {
     validateToolSelection(selection);
-    const contextTools = new SelectedTools(new ContextTools(new SelectedTools(tools, selection), source.entries, contextSettings(config).window), selection);
+    const contextTools = new SelectedTools(tools, selection);
     const composed = this.orchestrator && toolEnabled('orchestrate', selection) ? new OrchestrationTools(contextTools, this.orchestrator) : contextTools;
     return composed;
   }

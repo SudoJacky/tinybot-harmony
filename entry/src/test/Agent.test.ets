@@ -383,6 +383,13 @@ export default function agentTests(): void {
       expect(wire[4].content.includes('未执行')).assertTrue();
       expect(JSON.stringify(wire).includes('partial unfinished')).assertFalse();
     });
+    it('dropsRemovedToolNamesFromLegacySelections', 0, () => {
+      const data = emptyData();
+      data.threads = [{ id: 't', title: 't', updatedAt: 1, agentMode: 'custom', disabledTools: ['read_tool_result'], messages: [] }];
+      const restored = parseAppData(JSON.stringify(data)).threads[0];
+      expect(restored.agentMode).assertEqual('custom');
+      expect(restored.disabledTools?.length).assertEqual(0);
+    });
     it('rejectsCorruptToolReceipts', 0, () => {
       const data = emptyData();
       data.threads = [{ id: 't', title: 't', updatedAt: 1, messages: [

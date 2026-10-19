@@ -56,7 +56,7 @@ export struct SearchSettingsPanel {
         SwitchRow({ title: t('启用联网搜索'), isOn: this.searchEnabled, disabled: this.saving || this.app.busy,
           onChange: (value: boolean) => { this.searchEnabled = value; } })
         if (this.provider === 'deepseek') {
-          Text(t('搜索会产生额外的模型用量。')).fontFamily(this.appearance.fontFamily)
+          Text(t('DeepSeek 搜索按请求次数计费，不再产生模型用量。')).fontFamily(this.appearance.fontFamily)
             .fontSize(14).fontColor($r('app.color.text_secondary'))
           if (this.candidates().length > 1) {
             Text(t('DeepSeek 服务')).fontFamily(this.appearance.fontFamily).fontColor($r('app.color.text_secondary'))

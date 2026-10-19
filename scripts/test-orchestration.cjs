@@ -31,7 +31,6 @@ const { Cancellation } = load(root + '/services/Cancellation');
 const { validateSteps, interruptTools, stepMessages } = load(root + '/model/Agent');
 const { stepEntry } = load(root + '/model/ContextProjection');
 const { collectFileOperations } = load(root + '/model/FileOperations');
-const { ContextTools } = load(root + '/services/ContextTools');
 const { emptyData, parseAppData } = load(root + '/model/Conversation');
 const executor = { async execute(code, catalog, invoke) {
   const tools = Object.fromEntries(JSON.parse(catalog).map(tool => [tool.name, async args => {
@@ -81,9 +80,6 @@ async function main() {
   const receiptEntry = stepEntry('u', 'a', step, 0);
   assert.equal(receiptEntry.results.length, 4);
   assert.deepEqual(JSON.parse(JSON.stringify(collectFileOperations(receiptEntry.results))).modifiedFiles, ['sum.json']);
-  const retrieval = new ContextTools(f.tools, () => [receiptEntry], 200000);
-  const retrieved = JSON.parse(await retrieval.execute({ function: { name: 'read_tool_result', arguments: JSON.stringify({ messageId: 'a', callId: step.tools[0].children[0].call.id }) } }, new Cancellation()));
-  assert.equal(JSON.parse(retrieved.content).content, '[1,2]');
   console.log('PASS parallel reads, dependent write, Team lane, checkpoint receipts and compact model output');
 
   const data = emptyData(); data.activeThreadId = 'thread'; data.threads = [{ id:'thread',title:'Orchestration',updatedAt:1,messages:[
