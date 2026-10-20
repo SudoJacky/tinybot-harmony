@@ -200,36 +200,55 @@ function page() {
     ['aboutToAppear', 'aboutToDisappear', 'activeChanged', 'foregroundChanged', 'connectionChanged', 'animate',
       'cancelWake', 'wake', 'continueWake', 'finish', 'move', 'selectTask', 'onMessageChange', 'currentPrompt',
       'primaryEnabled', 'primaryAvailable', 'primaryLabel', 'primaryAction', 'connectSelected', 'connectProvider', 'settleTransition',
-      'selectProvider', 'providerSelectionChanged', 'taskSelectionChanged'],
+      'selectProvider', 'providerSelectionChanged', 'taskSelectionChanged', 'signInAccount'],
     { onboardingTasks: model.onboardingTasks, Motion: { fast: 160, medium: 220, standard: {} }, Edge: { Top: 0 },
       setTimeout: callback => { const id = ++timerId; scheduled.set(id, callback); return id; },
       clearTimeout: id => scheduled.delete(id) }), {
     saving: false, busy: false, step: 0, selectedTask: 1, message: model.onboardingTasks()[1].prompt,
     active: true, foreground: true, configured: false, transitioning: false, transitionRevision: 0,
     connectedPreset: '', selectedPreset: '', waking: false, wakeReady: false, wakeTimer: -1,
+    agreed: false, account: { signedIn: false, ready: true, busy: false, error: '', signIn: async () => {
+      panel.account.signedIn = true;
+    } },
     appearance: { effectStrength: 1 },
     getUIContext: () => ({ animateTo: (options, action) => { action(); options.onFinish?.(); } }),
     onFinish: () => { calls++; return new Promise(done => { resolve = done; }); }
   });
-  panel.aboutToAppear(); panel.move(-1); assert.equal(panel.step, 0); panel.move(9); assert.equal(panel.step, 4);
+  panel.aboutToAppear(); panel.move(-1); assert.equal(panel.step, 0); panel.move(9); assert.equal(panel.step, 5);
+  panel.step = 0;
+  assert.equal(panel.primaryLabel(), '华为账号登录');
+  assert.equal(panel.primaryAvailable(), false, 'Consent is required before native sign-in');
+  panel.agreed = true; assert.equal(panel.primaryAvailable(), true);
+  await panel.signInAccount(); assert.equal(panel.account.signedIn, true);
+  assert.equal(panel.primaryLabel(), '继续', 'A verified account can continue past the first step');
+  panel.account.signedIn = false; panel.account.ready = false; await panel.signInAccount();
+  assert.match(panel.error, /确认登录状态/);
+  panel.account.ready = true; panel.agreed = false; await panel.signInAccount();
+  assert.match(panel.error, /同意/);
+  panel.agreed = true; panel.account.busy = true; assert.equal(panel.primaryAvailable(), false);
+  assert.equal(panel.primaryLabel(), '正在登录…');
+  panel.account.busy = false;
+  panel.account.signedIn = false; panel.agreed = false; panel.step = 0; panel.move(1);
+  assert.equal(panel.step, 1, 'Sign-in can be deferred without leaving onboarding');
+  panel.account.signedIn = true; panel.agreed = true; panel.step = 0; panel.primaryAction(); assert.equal(panel.step, 1);
   const finishing = panel.finish('start'); await panel.finish('skip'); assert.equal(calls, 1);
   resolve(); await finishing; assert.equal(panel.saving, false);
   panel.onFinish = async () => { throw Error('save failed'); }; await panel.finish('connect');
   assert.equal(panel.error, 'save failed'); assert.equal(panel.saving, false);
-  panel.step = 0; panel.waking = false; panel.wake(); panel.wake(); assert.equal(scheduled.size, 1);
-  panel.active = false; panel.activeChanged(); assert.equal(scheduled.size, 0); assert.equal(panel.step, 0);
-  panel.active = true; assert.equal(panel.wakeReady, true); panel.continueWake(); assert.equal(panel.step, 1);
+  panel.step = 1; panel.waking = false; panel.wake(); panel.wake(); assert.equal(scheduled.size, 1);
+  panel.active = false; panel.activeChanged(); assert.equal(scheduled.size, 0); assert.equal(panel.step, 1);
+  panel.active = true; assert.equal(panel.wakeReady, true); panel.continueWake(); assert.equal(panel.step, 2);
   panel.move(-1); panel.wake(); panel.foreground = false; panel.foregroundChanged();
-  assert.equal(scheduled.size, 0); assert.equal(panel.step, 0);
+  assert.equal(scheduled.size, 0); assert.equal(panel.step, 1);
   panel.foreground = true; panel.continueWake(); panel.move(-1); panel.wake();
   const detachedWake = scheduled.values().next().value; panel.aboutToDisappear(); detachedWake();
   assert.equal(scheduled.size, 0, 'Leaving the panel must clear pending wake navigation');
-  assert.equal(panel.step, 0, 'A detached wake callback must not navigate');
-  panel.step = 4; panel.selectTask(2); assert.equal(panel.message, model.onboardingTasks()[2].prompt);
+  assert.equal(panel.step, 1, 'A detached wake callback must not navigate');
+  panel.step = 5; panel.selectTask(2); assert.equal(panel.message, model.onboardingTasks()[2].prompt);
   panel.onMessageChange('  My own first idea  '); assert.equal(panel.selectedTask, -1);
   assert.equal(panel.currentPrompt(), 'My own first idea'); assert.equal(panel.primaryEnabled(), true);
   panel.onMessageChange(' '); assert.equal(panel.primaryEnabled(), false);
-  panel.step = 2;
+  panel.step = 3;
   panel.providerSelectionChanged('deepseek', true);
   panel.providerSelectionChanged('zai', true);
   panel.providerSelectionChanged('deepseek', false);
@@ -256,10 +275,10 @@ function page() {
   console.log('PASS emitted step bounds, explicit completion, duplicate-tap guard and visible save failures');
 
   const pageEnds = [];
-  panel.aboutToAppear(); panel.step = 1;
+  panel.aboutToAppear(); panel.step = 2;
   panel.getUIContext = () => ({ animateTo: (options, action) => { action(); pageEnds.push(options.onFinish); } });
   panel.move(1); panel.move(1);
-  assert.equal(panel.step, 2, 'Repeated clicks during a transition must not skip a scene');
+  assert.equal(panel.step, 3, 'Repeated clicks during a transition must not skip a scene');
   assert.equal(panel.transitioning, true); assert.equal(panel.pageDirection, 1);
   assert.equal(panel.primaryEnabled(), false);
   assert.equal(panel.primaryAvailable(), true, 'A transition must not flash the primary button into its disabled color');
@@ -273,8 +292,8 @@ function page() {
   panel.move(-1); const detachedEnd = pageEnds.shift(); panel.aboutToDisappear(); detachedEnd();
   assert.equal(panel.transitioning, false);
   panel.aboutToAppear(); panel.appearance.effectStrength = 0; panel.move(1);
-  assert.equal(panel.step, 2); assert.equal(panel.transitioning, false); assert.equal(pageEnds.length, 0);
-  panel.active = false; panel.move(1); assert.equal(panel.step, 2, 'Covered pages must not navigate');
+  assert.equal(panel.step, 3); assert.equal(panel.transitioning, false); assert.equal(pageEnds.length, 0);
+  panel.active = false; panel.move(1); assert.equal(panel.step, 3, 'Covered pages must not navigate');
   const capability = Object.assign(probe('views/OnboardingCapability', 'OnboardingCapability',
     ['toggleResult', 'syncActive', 'demoChanged', 'actorChanged'], { Motion: { medium: 220, enter: {} } }), {
     active: true, revealed: false, appearance: { effectStrength: 1 },
@@ -315,7 +334,7 @@ function page() {
     'Scrolling should track the real slot immediately, without trailing behind the finger');
   actor.appearance.effectStrength = 0; actor.placeActor(32, 52, 64, true);
   assert.equal(actor.actorX, 32); assert.equal(actor.actorSize, 64); assert.equal(journeys.length, 1);
-  actor.step = 3; actor.greetActor(); assert.equal(actor.demoTick, 1); assert.equal(actor.demoRevealed, true);
+  actor.step = 4; actor.greetActor(); assert.equal(actor.demoTick, 1); assert.equal(actor.demoRevealed, true);
   actor.transitioning = true; actor.greetActor(); assert.equal(actor.demoTick, 1);
   actor.transitioning = false; actor.capIndex = 0; actor.capabilityChanged(1); assert.equal(actor.demoRevealed, false);
   console.log('PASS persistent actor measured destinations, continuous transform, exiting-page isolation, scroll tracking and shared demo interaction');

@@ -55,7 +55,7 @@ devecocli build
 | `test-custom-tools-renderer.cjs` | 能力行回调、联动开关、忙碌/归档时禁用 | 是 |
 | `test-help-demo.cjs` | 帮助演示动画生命周期 | 是 |
 | `test-legal-documents.cjs` | 用户协议与隐私政策的实际编译读取路径、完整正文与错误展示 | 是 |
-| `test-onboarding.cjs` | 首次使用判断、持久化、旧草稿保护、引导五幕 | 是 |
+| `test-onboarding.cjs` | 首次使用判断、持久化、旧草稿保护、六幕引导的账号同意/登录/稍后登录、唤醒与暂停恢复 | 是 |
 
 ## 需要单独运行的验证
 

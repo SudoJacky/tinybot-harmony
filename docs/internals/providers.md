@@ -97,6 +97,8 @@ API Key 保存在系统 Asset Store，写入属性为 `DEVICE_UNLOCKED` 且 `Syn
 
 ## 华为账号校验注入
 
+首次使用引导的账号步骤复用同一个 `HuaweiAccount` 对象和原生登录流程，不另存账号资料。用户可稍后登录；模型请求仍必须经过下述统一校验。
+
 账号校验不是会话数据的一部分，而是注册表级别的回调：
 
 - `createNativeSessionService()` 用 `new ProviderRegistry(() => huaweiAccount.requireLogin())` 创建注册表；`BoundModel` 在读取密钥后调用该回调，因此聊天、标题、摘要、记忆与团队请求都会经过同一检查。

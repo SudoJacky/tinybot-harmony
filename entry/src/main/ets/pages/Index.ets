@@ -384,9 +384,10 @@ struct Index {
     if (name === 'onboarding') {
       NavDestination() {
         OnboardingPanel({ active: this.onboardingActive, configured: this.app.configured,
-          connectedPreset: this.currentProviderPreset(), busy: this.app.busy,
+          connectedPreset: this.currentProviderPreset(), busy: this.app.busy, account: this.account,
           onFinish: (action: string, prompt: string) => this.finishOnboarding(action, prompt),
-          onConnect: (preset: string) => this.connectOnboardingProvider(preset) })
+          onConnect: (preset: string) => this.connectOnboardingProvider(preset),
+          onLegal: (page: string) => { this.openSupport(page); } })
       }.hideTitleBar(true).backgroundColor($r('app.color.page_background'))
         .onBackPressed(() => {
           this.finishOnboarding('skip', '').catch((error: Error) => {
