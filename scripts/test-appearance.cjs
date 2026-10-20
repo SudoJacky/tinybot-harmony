@@ -3,7 +3,7 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio');
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 const root = path.resolve('entry/src/main/ets'), modules = new Map(), storage = new Map(), events = [], logs = [];
-let disk = new Map(), working = new Map(), failFlush = false, failApply = false;
+let disk = new Map(), working = new Map(), failFlush = false, failApply = false, deviceLevel = 0, levelReads = 0;
 const store = { getSync: (key, fallback) => working.has(key) ? working.get(key) : fallback,
   putSync: (key, value) => working.set(key, value), flushSync() {
     if (failFlush) { failFlush = false; throw Error('disk write failed'); }
@@ -12,18 +12,18 @@ const store = { getSync: (key, fallback) => working.has(key) ? working.get(key) 
 class Material { static empty = { empty: true }; }
 class ImmersiveMaterial extends Material { constructor(options) { super(); this.options = options; } }
 const uiMaterial = { Material, ImmersiveMaterial, ImmersiveStyle: { THICK: 3, THIN: 1, ULTRA_THIN: 0 },
-  MaterialLevel: { EXQUISITE: 0, GENTLE: 1, SMOOTH: 2 }, getGlobalMaterialLevel: () => 0 };
+  MaterialLevel: { EXQUISITE: 0, GENTLE: 1, SMOOTH: 2 }, getGlobalMaterialLevel: () => { levelReads++; return deviceLevel; } };
 const colorModes = { COLOR_MODE_DARK: 0, COLOR_MODE_LIGHT: 1, COLOR_MODE_NOT_SET: -1 };
 const kits = { '@kit.ArkUI': { uiMaterial, ThemeControl: { setDefaultTheme: value => events.push(['theme', value]) } },
   '@kit.ArkData': { preferences: { getPreferencesSync: () => store } },
   '@kit.AbilityKit': { ConfigurationConstant: { ColorMode: colorModes } },
   '@kit.PerformanceAnalysisKit': { hilog: { info: (...args) => logs.push(args), error: (...args) => logs.push(args) } } };
-function load(file) {
-  file = path.resolve(file); if (modules.has(file)) return modules.get(file);
+function load(file, cache = modules) {
+  file = path.resolve(file); if (cache.has(file)) return cache.get(file);
   const loaded = { exports: {}, Observed: value => value, $r: name => name,
     AppStorage: { get: key => storage.get(key), setOrCreate: (key, value) => storage.set(key, value) },
-    require: name => kits[name] || load(path.resolve(path.dirname(file), name + '.ets')) };
-  modules.set(file, loaded.exports);
+    require: name => kits[name] || load(path.resolve(path.dirname(file), name + '.ets'), cache) };
+  cache.set(file, loaded.exports);
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(file, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021, experimentalDecorators: true }
   }).outputText, loaded, { filename: file });
@@ -113,4 +113,33 @@ assert.equal(currentAppearanceStyle().readingSurface.options.style, uiMaterial.I
 preferences.select(model.defaultAppearance());
 assert.equal(currentAppearanceStyle().accent, '#216451');
 assert.equal(currentAppearanceStyle().effectStrength, 1);
+for (const [level, controlStyle, surfaceStyle] of [
+  [uiMaterial.MaterialLevel.EXQUISITE, uiMaterial.ImmersiveStyle.ULTRA_THIN, uiMaterial.ImmersiveStyle.THIN],
+  [uiMaterial.MaterialLevel.GENTLE, uiMaterial.ImmersiveStyle.THIN, uiMaterial.ImmersiveStyle.THICK],
+  [uiMaterial.MaterialLevel.SMOOTH, uiMaterial.ImmersiveStyle.THICK, uiMaterial.ImmersiveStyle.THICK]
+]) {
+  deviceLevel = level;
+  const before = levelReads;
+  const { AppMaterials } = load(root + '/common/AppMaterials.ets', new Map());
+  AppMaterials.configure('auto', '#216451');
+  assert.equal(AppMaterials.control.options.style, controlStyle, 'Controls retain the device tier');
+  assert.equal(AppMaterials.accentControl.options.style, controlStyle, 'Accent buttons retain the device tier');
+  assert.equal(AppMaterials.surface.options.style, surfaceStyle, 'Expanded surfaces use a gentler tier with a floor');
+  assert.equal(AppMaterials.surface, AppMaterials.surface, 'Reuse the expanded-surface material');
+  assert.equal(levelReads, before + 1, 'All roles share one device capability query');
+  for (const [effect, control, surface] of [
+    ['vivid', uiMaterial.ImmersiveStyle.ULTRA_THIN, uiMaterial.ImmersiveStyle.THIN],
+    ['standard', uiMaterial.ImmersiveStyle.THIN, uiMaterial.ImmersiveStyle.THICK],
+    ['gentle', uiMaterial.ImmersiveStyle.THICK, uiMaterial.ImmersiveStyle.THICK]
+  ]) {
+    const previous = AppMaterials.surface;
+    AppMaterials.configure(effect, '#216451');
+    assert.equal(AppMaterials.control.options.style, control);
+    assert.equal(AppMaterials.surface.options.style, surface);
+    assert.notEqual(AppMaterials.surface, previous, 'Changed settings replace cached surfaces');
+    assert.equal(AppMaterials.readingSurface.options.style, uiMaterial.ImmersiveStyle.THICK);
+  }
+  AppMaterials.configure('off', '#216451');
+  for (const role of ['control', 'accentControl', 'surface', 'readingSurface']) assert.equal(AppMaterials[role], Material.empty);
+}
 console.log('PASS appearance: preset/custom contrast, validation, persistence, save/apply rollback, system mode, material levels/cache and reset');

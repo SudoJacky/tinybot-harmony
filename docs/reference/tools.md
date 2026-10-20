@@ -41,7 +41,7 @@
 | --- | --- | --- | --- |
 | `list_files` | 列目录 | `path` string 必填（根目录为 `.`）；`offset` integer 默认 0 | 每页 200 项，`truncated`/`nextOffset` 续页；过滤 `.tinybot-` 内部项；符号链接只报告类型，不跟随。回执 `{path, entries[{name,kind}], truncated, nextOffset}` |
 | `read_file` | 按行读 UTF-8 文本 | `path` 必填；`offset` integer 默认 1；`limit` integer 默认 2000（上限 2000）；`column` integer 默认 1 | 单页最多 2000 行或 50 KiB，长行可按 UTF-16 列续读；返回 `content/startLine/totalLines/truncated/nextOffset/nextColumn`，内容去掉 BOM。成功读取才授权本轮后续覆盖 |
-| `write_file` | 创建或完整覆盖 | `path`、`content` 均必填 | 自动建父目录；临时文件加 `rename` 原子替换；目标已存在时必须本轮读过或成功写过，否则 `FS_NOT_OBSERVED`；含 NUL 直接拒绝。回执 `{path, bytes, written}` |
+| `write_file` | 创建或完整覆盖 | `path`、`content` 均必填 | 自动建父目录；私有工作区原子替换，共享目录保存修改前备份后直接写入；目标已存在时必须本轮读过或成功写过，否则 `FS_NOT_OBSERVED`；含 NUL 直接拒绝。回执 `{path, bytes, written}` |
 | `edit_file` | 按原文批量替换 | `path` 必填；`edits` 数组必填，1–32 项 `{oldText, newText}`；顶层 `oldText`/`newText` 为兼容入口，与 `edits` 互斥 | 所有 `oldText` 匹配同一份原文，须唯一且不重叠，全部校验后一次写入；只兼容 CRLF/LF 差异，不做模糊匹配；保留 BOM 与文件末尾换行。失败不改文件 |
 | `find_files` | 按名称或 glob 查找 | `path` 必填；`glob` string 默认 `*`；`limit` integer 默认 100（1–100）；`cursor` string 可选 | 支持 `*`、`**`、`?`，不含正则；跳过隐藏条目和符号链接；每页最多检查 200 个文件、100 个目录。回执 `{paths, checkedFiles, truncated, nextCursor}` |
 | `search_file_content` | 搜文件内容 | `path`、`query` 必填（1–1000 字符）；`glob` 默认 `*`；`ignoreCase` boolean 默认 false；`context` integer 默认 0（0–5）；`limit` 默认 100；`cursor` 可选 | 匹配带 `path/line/column/text/before/after`，读不了的文件进 `skipped`；`truncated` 为 true 时保持参数用 `nextCursor` 续查。游标仅本轮有效，保留最近 32 页；续查时文件变化报 `FS_STALE_SEARCH` |

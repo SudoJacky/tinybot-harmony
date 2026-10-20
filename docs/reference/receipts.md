@@ -109,6 +109,7 @@
 | `FS_INVALID_EDITS` | 编辑项不合法 | `edits` 为空或超过 32 项、`oldText` 为空、与 `oldText`/`newText` 混用 | `fix_arguments` |
 | `FS_NOT_OBSERVED` | 修改前未读取 | 覆盖或编辑已有文件，但本轮没有成功读取或写入 | `read_file` |
 | `FS_STALE_VERSION` | 文件已变化 | 读取后文件被改写，版本不匹配 | `read_file` |
+| `FS_EXTERNAL_IO` | 共享目录文件操作失败 | `details.category` 指明备份、打开、写入、截断、同步或关闭阶段，`details.nativeCode` 保留系统错误码。直接写入失败可能留下部分内容，原始备份仍保留 | `inspect_error` 或 `inspect_backup` |
 | `FS_MATCH_NOT_FOUND` | 原文不存在 | `oldText` 在文件中找不到 | `read_file` |
 | `FS_AMBIGUOUS_MATCH` | 原文匹配多处 | `oldText` 不唯一 | `add_match_context` |
 | `FS_OVERLAPPING_EDITS` | 编辑范围重叠 | 同一批编辑的区间相交 | `merge_edits` |

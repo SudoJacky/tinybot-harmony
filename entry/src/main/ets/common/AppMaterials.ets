@@ -70,11 +70,13 @@ export class AppMaterials {
     return AppMaterials.accentControlMaterial;
   }
 
-  // Menus, popups, small dialogs/sheets and toasts; large reading/editing surfaces retain solid backgrounds.
+  // Menus and popups use the next gentler app tier; controls keep the selected device/user tier.
   static get surface(): uiMaterial.Material {
     if (AppMaterials.effect === 'off') { return uiMaterial.Material.empty; }
     if (!AppMaterials.surfaceMaterial) {
-      AppMaterials.surfaceMaterial = new uiMaterial.ImmersiveMaterial({ style: AppMaterials.style, colorInvert: true });
+      const style = AppMaterials.style === uiMaterial.ImmersiveStyle.ULTRA_THIN ?
+        uiMaterial.ImmersiveStyle.THIN : uiMaterial.ImmersiveStyle.THICK;
+      AppMaterials.surfaceMaterial = new uiMaterial.ImmersiveMaterial({ style: style, colorInvert: true });
     }
     return AppMaterials.surfaceMaterial;
   }

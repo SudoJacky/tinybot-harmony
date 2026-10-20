@@ -11,7 +11,7 @@ export interface WorkspaceWrite {
   // Local write receipt metadata; WorkspaceTools excludes it from the model result.
   before?: string; after?: string; created?: boolean; version: string;
 }
-export interface FileBaseline { path: string; existed: boolean; content: string; }
+export interface FileBaseline { path: string; existed: boolean; content: string; sourceUri?: string; }
 
 // Native storage and in-memory adapters share typed results. Tool dispatch owns JSON encoding.
 export interface WorkspaceFiles {
