@@ -84,7 +84,7 @@ Release 混淆规则必须保留 `globalThis` 全局名，避免 Pen Kit 的 amb
 
 构建后运行 `node scripts/test-markdown-performance.cjs`，验证增量 Markdown 与全文解析在逐字符边界的一致性、稳定块复用、代码预览与展开、实际编译渲染回调的最新文本，以及离屏高度占位、重新测量、回复结束的渐显收尾和计时器清理；该项与 `test-stream-reveal.cjs` 均纳入 `test.ps1`。真机性能比较使用同一固定负载、采样窗口和构建类型，先回到空对话并重启进程，分别记录 UI 任务分布和内存工具口径。
 
-构建后运行 `node scripts/test-project-tree.cjs`，用真实会话服务与视图模型验证侧栏项目分组、普通聊天、空项目、同名项目、置顶顺序、搜索展开、归档、独立分页及新建会话归属；分支线和折叠动效在真机验证。
+构建后运行 `node scripts/test-project-tree.cjs`，用真实会话服务与视图模型验证侧栏项目分组、普通聊天、空项目、同名项目、置顶顺序、搜索展开、归档、独立分页及新建会话归属；分支线和折叠动效在真机验证。项目共享文件夹的名称、数量、URI 去重、数据校验与模型上下文路径由 Hypium `ProjectFolders` 覆盖；系统文件夹选择器与持久化授权仍需在 API 26 真机验证。
 
 `node scripts/test-history-drawer.cjs` 验证编译后的侧栏关闭动画、拖动和中断恢复。关闭动画完成后停止渲染列表内容，保留搜索和分页状态，避免隐藏侧栏随聊天流式输出持续重建。真机性能复现使用 `Generate an SVG of a pelican riding a bicycle.`，分别检查等待模型、工具执行和预览发布期间的主线程延迟与 CPU Profile。
 

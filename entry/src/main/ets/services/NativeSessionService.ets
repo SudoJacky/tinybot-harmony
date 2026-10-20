@@ -39,6 +39,9 @@ import { AgentRuntime } from './AgentRuntime';
 import { AgentTools } from './AgentLoop';
 import { CredentialStore } from './CredentialStore';
 import { SessionResources } from './SessionContracts';
+import { ProjectData } from '../model/Project';
+import { SharedFolder } from '../model/SharedFolders';
+import { ProjectFolderAccess } from './ProjectFolderAccess';
 import { SessionService } from './SessionService';
 import { NativeWorkspaceFiles } from './NativeWorkspaceFiles';
 import { WorkspaceTools } from './WorkspaceTools';
@@ -83,13 +86,17 @@ export class NativeSessionResources implements SessionResources {
   ensureWorkspace(id: string, workspaceId?: string): Promise<void> {
     return workspaceId ? this.workspaces.requireWorkspace(workspaceId) : this.workspaces.ensureThread(id);
   }
-  tools(id: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments: Attachment[] = [], live?: LiveResources, workspaceId?: string): AgentTools {
+  persistProjectFolders(folders: SharedFolder[]): Promise<void> { return ProjectFolderAccess.persist(folders); }
+  revokeProjectFolders(folders: SharedFolder[]): Promise<void> { return ProjectFolderAccess.revoke(folders); }
+  activateProjectFolders(projects: ProjectData[]): Promise<void> { return ProjectFolderAccess.activateAll(projects); }
+  tools(id: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments: Attachment[] = [], live?: LiveResources, workspaceId?: string, project?: ProjectData): AgentTools {
     const root = this.workspaces.pathFor(workspaceId || id);
-    const groups: AgentTools[] = [new WorkspaceTools(new NativeWorkspaceFiles(root)), new AttachmentTools(attachments),
+    const files = new NativeWorkspaceFiles(root, project?.sharedFolders || []);
+    const groups: AgentTools[] = [new WorkspaceTools(files), new AttachmentTools(attachments),
       new SkillTools(extensions.skills, selected, live ? () => live.skills() : undefined), new InteractionTools(this.approval)];
     groups.push(new CodeExecutionTools(new NativeCodeExecutor()));
-    groups.push(new PresentTools((path: string) => new NativeWorkspaceFiles(root).checkedPath(path)));
-    groups.push(new PreviewTools(new NativeWorkspaceFiles(root), (content, cancellation) => WebUiPreflight.validate(content, cancellation),
+    groups.push(new PresentTools((path: string) => files.checkedPath(path)));
+    groups.push(new PreviewTools(files, (content, cancellation) => WebUiPreflight.validate(content, cancellation),
       (content, cancellation) => PreviewCapture.capture(content, cancellation)));
     if (extensions.webEnabled) { groups.push(new WebTools(new NativeWebTransport())); }
     if (this.browser) { groups.push(new BrowserTools(this.browser, id, productivity?.options?.readOnly === true)); }

@@ -20,6 +20,7 @@ import extensionTests from './Extensions.test';
 import pendingInputTests from './PendingInput.test';
 import sessionServiceTests from './SessionService.test';
 import processPresentationTests from './ProcessPresentation.test';
+import projectFolderTests from './ProjectFolders.test';
 
 export default function tests(): void {
   usageStatisticsTests();
@@ -28,6 +29,7 @@ export default function tests(): void {
   reasoningEffortTests();
   threadReferenceTests();
   processPresentationTests();
+  projectFolderTests();
   systemPromptTests();
   i18nTests();
   teamTests();

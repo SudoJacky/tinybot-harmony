@@ -1,7 +1,12 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
+import { common } from '@kit.AbilityKit';
+import { picker } from '@kit.CoreFileKit';
+import { util } from '@kit.ArkTS';
 import { ChatViewModel, ThreadViewModel } from '../viewmodel/ChatViewModel';
+import { MAX_PROJECT_SHARED_FOLDERS, SharedFolder, sharedFolderNameFromUri, uniqueSharedFolderName } from '../model/SharedFolders';
+import { ProjectFolderAccess } from '../services/ProjectFolderAccess';
 import { Btn, Font, Motion, Radius, Space, shortTime } from '../common/Theme';
 import { Banner, IconButton, Segmented } from '../common/Widgets';
 
@@ -174,6 +179,8 @@ export struct ThreadList {
   @State private projectId: string = '';
   @State private projectName: string = '';
   @State private projectInstructions: string = '';
+  @State private projectFolders: SharedFolder[] = [];
+  @State private projectFolderError: string = '';
 
   private filtered(): ThreadViewModel[] {
     return this.app.filteredThreads(this.query, this.archived);
@@ -241,7 +248,52 @@ export struct ThreadList {
   private editProject(id: string = ''): void {
     const project = this.app.projects.find((item) => item.id === id);
     this.projectId = id; this.projectName = project?.name || ''; this.projectInstructions = project?.instructions || '';
+    this.projectFolders = (project?.sharedFolders || []).slice(); this.projectFolderError = '';
     this.projectEditing = true;
+  }
+  private async addProjectFolders(): Promise<void> {
+    if (this.locked()) { return; }
+    if (this.projectFolders.length >= MAX_PROJECT_SHARED_FOLDERS) {
+      this.projectFolderError = t('每个项目最多添加 {0} 个共享文件夹。', [MAX_PROJECT_SHARED_FOLDERS]); return;
+    }
+    if (!ProjectFolderAccess.canSelectFolders() || !ProjectFolderAccess.supported()) {
+      this.projectFolderError = t('当前设备不支持项目共享文件夹。'); return;
+    }
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    try {
+      const options = new picker.DocumentSelectOptions();
+      options.selectMode = picker.DocumentSelectMode.FOLDER;
+      options.maxSelectNumber = 1;
+      const uris = await new picker.DocumentViewPicker(context).select(options);
+      let next = this.projectFolders.slice();
+      for (const uri of uris) {
+        if (!uri.startsWith('file://') || next.some((item: SharedFolder) => item.uri === uri)) { continue; }
+        const base = sharedFolderNameFromUri(uri);
+        next = next.concat({ id: util.generateRandomUUID(), name: uniqueSharedFolderName(base, next),
+          uri: uri.replace(/\/+$/, ''), addedAt: Date.now() });
+      }
+      this.projectFolders = next; this.projectFolderError = '';
+    } catch (error) {
+      this.projectFolderError = t('无法选择文件夹：') + (error as Error).message;
+    }
+  }
+  private removeProjectFolder(id: string): void {
+    this.projectFolders = this.projectFolders.filter((item: SharedFolder) => item.id !== id);
+  }
+
+  @Builder
+  projectFolderRow(folder: SharedFolder) {
+    Row({ space: Space.sm }) {
+      SymbolGlyph($r('sys.symbol.folder')).fontSize(18).fontColor([this.appearance.accent])
+      Column({ space: 2 }) {
+        Text(folder.name).fontFamily(this.appearance.fontFamily).fontSize(14).maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
+        Text(t('项目内可读写')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
+      }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+      Button(t('移除')).fontFamily(this.appearance.fontFamily).id('project-remove-folder-' + folder.id)
+        .attributeModifier(Btn.textSmall).enabled(!this.locked()).onClick(() => this.removeProjectFolder(folder.id))
+    }.width('100%').padding({ left: Space.sm, right: Space.sm, top: 8, bottom: 8 })
+    .backgroundColor($r('app.color.surface_variant')).borderRadius(Radius.sm)
   }
 
   @Builder
@@ -252,13 +304,24 @@ export struct ThreadList {
           .onChange((value: string) => { this.projectName = value; })
         TextArea({ text: this.projectInstructions, placeholder: t('项目说明与约定（可选）') }).fontFamily(this.appearance.fontFamily).id('project-instructions')
           .height(220).maxLength(16000).onChange((value: string) => { this.projectInstructions = value; })
+        Row({ space: Space.sm }) {
+          Text(t('共享文件夹')).fontFamily(this.appearance.fontFamily).fontSize(Font.small).fontWeight(FontWeight.Medium)
+            .layoutWeight(1).fontColor($r('app.color.text_primary'))
+          Button(t('添加文件夹')).fontFamily(this.appearance.fontFamily).id('project-add-folder')
+            .attributeModifier(Btn.textSmall).enabled(!this.locked() && this.projectFolders.length < MAX_PROJECT_SHARED_FOLDERS)
+            .onClick(() => this.addProjectFolders())
+        }.width('100%')
+        ForEach(this.projectFolders, (folder: SharedFolder) => { this.projectFolderRow(folder) },
+          (folder: SharedFolder) => folder.id)
+        Text(t('项目内的会话可以读写这些文件夹。')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+        if (this.projectFolderError.length > 0) { Banner({ text: this.projectFolderError }) }
         Text(t('项目内的会话共享文件和项目说明，各自保留对话历史。')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
         if (this.app.error) { Banner({ text: this.app.error }) }
         Button(t('保存')).fontFamily(this.appearance.fontFamily).id('project-save').attributeModifier(Btn.primary).width('100%')
           .enabled(!this.app.busy && !this.app.saveError && this.projectName.trim().length > 0)
           .onClick(async () => {
             const creating = !this.projectId;
-            if (await this.app.saveProject(this.projectName, this.projectInstructions, this.projectId || undefined)) {
+            if (await this.app.saveProject(this.projectName, this.projectInstructions, this.projectId || undefined, this.projectFolders)) {
               const id = this.projectId || this.app.active.projectId || '';
               // A newly created project must be visible even when launched from search or archives.
               if (creating) { this.query = ''; this.archived = false; this.visibleCounts = {}; }

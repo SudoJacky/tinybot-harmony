@@ -77,6 +77,8 @@ Markdown 追加内容只重解析最后两个块及新增尾部，保留未变�
 | `entry/src/main/ets/services/ProfileSettings.ets` | 模型服务配置提交与凭据生命周期 |
 | `entry/src/main/ets/model/` | 会话结构、上下文选择、数据校验及原子文件保存 |
 | `entry/src/main/ets/model/WorkspaceStore.ets` | 应用级工作区；普通会话独立目录，项目共享目录由资源适配器统一提供 |
+| `entry/src/main/ets/model/SharedFolders.ets` | 项目共享文件夹名称、挂载路径约束与数据校验 |
+| `entry/src/main/ets/services/ProjectFolderAccess.ets` | 项目文件夹的系统选择授权、持久化、启动激活与撤销 |
 | `entry/src/main/ets/services/providers/ProviderRegistry.ets` | 显式注册、配置绑定和每次请求前的凭据解析 |
 | `entry/src/main/ets/services/providers/DefaultProviders.ets` | 应用内置服务商的注册入口 |
 | `entry/src/main/ets/services/providers/ChatCompletionsProvider.ets` | Chat Completions 的 NetworkKit 请求、取消与 UTF-8 增量解码 |
