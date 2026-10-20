@@ -19,6 +19,7 @@
     { "name": "text_primary", "value": "#EAF1ED" },
     { "name": "text_secondary", "value": "#A8B8AE" },
     { "name": "text_tertiary", "value": "#7C8C84" },
+    { "name": "ai_mark", "value": "#9DB0A5" },
     { "name": "accent", "value": "#A2D8B9" },
     { "name": "accent_material", "value": "#E6A2D8B9" },
     { "name": "on_accent", "value": "#143528" },

@@ -2,7 +2,7 @@ import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { SwipeRow } from '../common/SwipeRow';
 import { common } from '@kit.AbilityKit';
-import { fileIo as fs, picker } from '@kit.CoreFileKit';
+import { picker } from '@kit.CoreFileKit';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { NativeWorkspaceFiles } from '../services/NativeWorkspaceFiles';
@@ -51,7 +51,8 @@ export struct WorkspacePanel {
   private files?: NativeWorkspaceFiles;
   aboutToAppear(): void {
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-    this.files = new NativeWorkspaceFiles(new WorkspaceStore(context.getApplicationContext().filesDir).pathFor(this.app.activeWorkspaceId));
+    this.files = new NativeWorkspaceFiles(new WorkspaceStore(context.getApplicationContext().filesDir).pathFor(this.app.activeWorkspaceId),
+      this.app.activeProject?.sharedFolders || []);
     if (this.initialPath) {
       const slash = this.initialPath.lastIndexOf('/');
       this.directory = slash < 0 ? '' : this.initialPath.slice(0, slash);
@@ -172,14 +173,15 @@ export struct WorkspacePanel {
     this.busy = true;
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     try {
+      if (kind === 'delete') {
+        await this.files.remove(path);
+        if (this.selected === path) { this.previewing = false; this.selected = ''; }
+        this.toast(t("已删除"));
+        return;
+      }
       const absolute = await this.files.checkedPath(path);
       if (kind === 'export') { await exportFile(context, absolute, this.fileName(path)); }
       if (kind === 'share') { await shareFile(context, absolute, this.fileName(path)); }
-      if (kind === 'delete') {
-        await fs.unlink(absolute);
-        if (this.selected === path) { this.previewing = false; this.selected = ''; }
-        this.toast(t("已删除"));
-      }
     } catch (error) { if (this.previewing) { this.previewError = (error as Error).message; } else { this.error = (error as Error).message; } }
     finally { this.busy = false; await this.refresh(); }
   }

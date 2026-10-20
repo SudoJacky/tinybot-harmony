@@ -21,7 +21,7 @@
 
 服务支持 Chat Completions、OpenAI Responses 和 Anthropic Messages。模型实际可用性取决于账号与服务端；Ollama 连接手机可访问的服务器，不在手机上运行模型。
 
-具体入口、功能限制和数据行为见[使用指南](docs/user-guide.md)。
+具体入口、功能限制和数据行为见[使用指南](docs/guide/chat.md)。
 
 ## 本地开发
 
@@ -35,23 +35,25 @@ devecocli build
 .\scripts\test.ps1
 ```
 
-环境变量、签名、真机运行、图标及词条维护见[开发与验证](docs/development.md)。
+环境变量、签名、真机运行、图标及词条维护见[环境、构建与签名](docs/dev/setup.md)。
 
 ## 文档
 
-完整目录见 [docs/README.md](docs/README.md)。
+完整文档站：<https://sudojacky.github.io/tinybot-harmony/>（源码在 `docs/`，用 VitePress 构建）。
 
 | 主题 | 入口 |
 | --- | --- |
-| 手机功能与设置 | [使用指南](docs/user-guide.md) |
-| 项目、会话与文件归属 | [项目与共享工作区](docs/projects-and-workspaces.md) |
-| 模块职责与运行生命周期 | [架构与运行管理](docs/architecture.md) |
-| 工具协议、权限与恢复 | [工具执行与权限](docs/tools-and-permissions.md) |
-| 模型配置、上下文与预算 | [模型服务与限制](docs/models-and-context.md) |
-| 构建、调试与验证 | [开发与验证](docs/development.md) |
+| 安装与第一次对话 | [入门](docs/getting-started/install.md) |
+| 手机功能与设置 | [使用指南](docs/guide/index.md) |
+| 项目、会话与文件归属 | [项目与共享工作区](docs/guide/projects.md) |
+| 模块职责与运行生命周期 | [架构总览](docs/internals/overview.md) |
+| 工具协议、权限与恢复 | [工具注册与执行](docs/internals/tools.md) |
+| 工具参数与回执 | [工具参考](docs/reference/tools.md) |
+| 模型配置、上下文与预算 | [模型服务与上下文](docs/guide/models.md) |
+| 构建、调试与验证 | [开发手册](docs/dev/setup.md) |
 
 ## 当前边界
 
-文件工具只能访问当前会话绑定的工作区；项目内会话共享文件。工具结果会发送给配置的模型服务。当前没有 Shell、跨应用控制或任意外部目录访问能力；代码沙箱仅运行受限 JavaScript。
+文件工具只能访问当前会话绑定的工作区和项目明确授权的共享文件夹；项目内会话共享文件。工具结果会发送给配置的模型服务。当前没有 Shell、跨应用控制或任意外部目录访问能力；代码沙箱仅运行受限 JavaScript。
 
 当前不支持跨项目移动、常驻后台 Agent、桌面协作或对话实时云同步。删除会话保留工作区文件，卸载应用或清除应用数据会清除本地数据。备份不导出模型及 MCP 凭据。

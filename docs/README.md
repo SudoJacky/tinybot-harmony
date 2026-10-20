@@ -1,43 +1,34 @@
-# 文档索引
+# Tinybot 文档
 
-[返回项目首页](../README.md)
+这是 Tinybot 的文档源码目录，用 VitePress 构建为文档站：<https://sudojacky.github.io/tinybot-harmony/>
 
-根 README 保留项目介绍、快速开始和主要边界。功能操作、协议细节、架构约定和开发验证在这里按主题维护；后续行为变更更新对应专题，首页只在功能概览或开始步骤变化时同步。
+## 结构
 
-## 使用与配置
-
-| 文档 | 内容 |
+| 目录 | 内容 |
 | --- | --- |
-| [使用指南](user-guide.md) | 聊天、附件、引用、记忆、队列、设置和用量 |
-| [项目与共享工作区](projects-and-workspaces.md) | 项目归属、目录生命周期、分支、文件审阅与旧数据 |
-| [模型服务与上下文](models-and-context.md) | 服务配置、模型预设、预算、固定限制及历史参数对照 |
-| [团队协作](teams.md) | 招募、任务、交接、停止、恢复和用量 |
-| [网页、搜索与 Skills](web-and-skills.md) | 网页读取、搜索配置、Skill 导入与调用 |
-| [云备份](cloud-backup.md) | 华为云空间备份、恢复和验证边界 |
-| [语音输入](speech-input.md) | 语音听写操作与系统接入 |
-| [关于与帮助](about-and-help.md) | 首次使用、帮助、版本与市场评价 |
-| [用户协议](user-agreement.md) | AI 应用官方协议调研、Tinybot 条款及应用内阅读边界 |
+| `index.md` | 站点首页 |
+| `getting-started/` | 安装与第一次对话 |
+| `guide/` | 使用指南：对话、文件、项目、模型、团队、网页与 Skills、语音、备份、设置、隐私、常见问题 |
+| `internals/` | 架构与子系统：总览、代码地图、会话、轮次、模型服务、提示词、工具、权限、工作区、预览、诊断 |
+| `reference/` | 工具参考、回执与错误、设置项、磁盘布局、词条 |
+| `dev/` | 开发手册：环境与构建、测试、新增工具、新增模型服务、词条、文档站、发布 |
+| `ui/` | 交互与动效细节 |
+| `.vitepress/` | 站点配置与主题 |
+| `local/`、`distribution/` | 本机资料与交付材料，不参与构建 |
 
-## 架构与实现
+## 本地预览
 
-| 文档 | 内容 |
-| --- | --- |
-| [架构与运行管理](architecture.md) | SessionService、AgentRuntime、Provider、持久化及代码入口 |
-| [工具执行与权限](tools-and-permissions.md) | 文件协议、修改校验、回执、错误、MCP 和权限边界 |
-| [系统提示词](system-prompt.md) | 固定指令、用户偏好、Skills 与团队上下文 |
-| [代码沙箱与工具编排](code-sandbox.md) | execute_code、orchestrate、预算与隔离 |
-| [交互预览](interactive-ui.md) | JS/HTML/SVG 发布、Three.js 与独立浏览器的区别 |
-| [推理强度](reasoning-effort.md) | 模型推理设置与输入框交互 |
-| [滑动操作行](swipe-rows.md) | 手势与行操作 |
-| [分段选择动效](segmented-motion.md) | 选择器动效 |
-| [LiquidToggle](liquid-toggle.md) | 原生开关交互 |
+```powershell
+cd docs
+npm install
+npm run dev      # http://localhost:5173/tinybot-harmony/
+npm run build    # 产物在 docs/.vitepress/dist
+```
 
-## 开发与交付
+写作约定、链接规则与发布方式见[文档站维护](dev/docs.md)。
 
-- [开发与验证](development.md)：环境、构建、签名、测试入口及历史验证记录。
-- [App 内性能诊断](developer-diagnostics.md)：隐藏开发者模式、资源/渲染统计、时间线和 CPU Profile 导出。
-- [词条维护](../locales/README.md)：双语 JSON 与生成检查。
-- [交付包准备](distribution/START-HERE.txt)、[更新说明](distribution/RELEASE-NOTES.txt)、[云测试步骤](distribution/CLOUD-TEST.txt)。
-- 发布准备材料：[发布缺口](distribution/RELEASE-GAPS.txt)、[商店介绍](distribution/STORE-LISTING.txt)、[隐私草案](distribution/PRIVACY-DRAFT.txt)。
+## 约定
 
-`docs/local/` 用于本机资料和验证证据，不发布到 GitHub。历史验证记录保留日期与当时范围，不作为当前构建通过的证明。
+- 站内链接使用绝对站点路径（`/internals/tools`），不写 `.md` 后缀。
+- 行为描述以 `entry/src/main/ets` 源码和 `scripts/` 验证脚本为准；参考页给出字段与默认值。
+- 页面末尾保留“代码入口”表，方便从文档跳到实现。

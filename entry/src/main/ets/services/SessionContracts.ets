@@ -8,6 +8,8 @@ import { LiveResources, McpRequest } from '../model/ResourceManagement';
 import { Cancellation } from './Cancellation';
 import { AgentTools } from './AgentLoop';
 import { ContextTokenItem } from '../model/ContextBreakdown';
+import { ProjectData } from '../model/Project';
+import { SharedFolder } from '../model/SharedFolders';
 
 export interface SessionRepository {
   load(): Promise<AppData>;
@@ -21,7 +23,10 @@ export interface SessionResources {
   afterTask?(threadId: string, messageId: string, content: string, workspaceId?: string): Promise<void>;
   createId(): string;
   ensureWorkspace(threadId: string, workspaceId?: string): Promise<void>;
-  tools(threadId: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments?: Attachment[], live?: LiveResources, workspaceId?: string): AgentTools;
+  tools(threadId: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments?: Attachment[], live?: LiveResources, workspaceId?: string, project?: ProjectData): AgentTools;
+  persistProjectFolders?(folders: SharedFolder[]): Promise<void>;
+  revokeProjectFolders?(folders: SharedFolder[]): Promise<void>;
+  activateProjectFolders?(projects: ProjectData[]): Promise<void>;
   installSkill?(source: string, paths: string[], cancellation: Cancellation): Promise<SkillData>;
   prepareMcp?(server: McpServer, request: McpRequest, cancellation: Cancellation, confirm?: boolean): Promise<McpServer>;
   testMcp?(server: McpServer, cancellation: Cancellation): Promise<number>;

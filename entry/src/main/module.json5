@@ -12,10 +12,12 @@
     "compressNativeLibs": true,
     "pages": "$profile:main_pages",
     "metadata": [
-      { "name": "client_id", "value": "6917617825245755680" }
+      { "name": "client_id", "value": "6917617825245755680" },
+      { "name": "ohos.fileshare.supportPreservePersistentPermission" }
     ],
     "requestPermissions": [
       { "name": "ohos.permission.INTERNET" },
+      { "name": "ohos.permission.FILE_ACCESS_PERSIST" },
       {
         "name": "ohos.permission.MICROPHONE",
         "reason": "$string:microphone_reason",
