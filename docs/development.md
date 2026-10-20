@@ -100,7 +100,7 @@ Release 混淆规则必须保留 `globalThis` 全局名，避免 Pen Kit 的 amb
 
 `node scripts/test-i18n-native.cjs` 验证语言偏好与持久化；`node scripts/test-chat-disclosures.cjs` 验证流式更新、过程重开、消息隔离和历史加载时的展开状态。`node scripts/test-tool-details.cjs` 验证分类回执、失败状态与无损分页；构建后运行 `node scripts/test-team-renderer.cjs`，检查 DevEco 实际生成的 Team、工具详情及编排子调用更新回调。`node scripts/test-message-actions-renderer.cjs` 验证改写、重新生成、分支按钮在会话结束后恢复可用，再次忙碌或保存出错时禁用；复制保持可用。
 
-构建后运行 `node scripts/test-onboarding.cjs`，验证首次使用判断、完成记录持久化、旧草稿保护、重复点击与保存失败重试，以及五幕引导的唤醒中断、拖动边界和回弹、后台/覆盖页暂停、卸载清理、真实服务编辑路由与可编辑首条草稿。模拟器中从“设置 → 使用帮助 → 首次使用指引”重新体验，检查能力卡片的点按与左右滑动、模型配置页取消后返回、键盘出现时底部操作，以及完成后仅准备独立草稿、跳过不改动原聊天。画板模块只在确认设备支持系统手写、用户点击入口后动态导入；不支持时明确提示，不加载 Pen Kit 或创建原生控制器。`lazy import` 仍会遍历共享模块依赖，无法避免模拟器缺少 Pen Kit 时的启动失败。
+构建后运行 `node scripts/test-onboarding.cjs`，验证首次使用判断、完成记录持久化、旧草稿保护、重复点击与保存失败重试，以及六幕引导第一步的华为账号同意/登录/稍后登录、唤醒中断、拖动边界和回弹、后台/覆盖页暂停、卸载清理、真实服务编辑路由与可编辑首条草稿。模拟器中从“设置 → 使用帮助 → 首次使用指引”重新体验，检查能力卡片的点按与左右滑动、模型配置页取消后返回、键盘出现时底部操作，以及完成后仅准备独立草稿、跳过不改动原聊天。画板模块只在确认设备支持系统手写、用户点击入口后动态导入；不支持时明确提示，不加载 Pen Kit 或创建原生控制器。`lazy import` 仍会遍历共享模块依赖，无法避免模拟器缺少 Pen Kit 时的启动失败。
 
 `node scripts/test-answer-speech-native.cjs` 验证回答朗读的分段、取消、后台释放、系统失败和快捷入口分发；构建后运行 `node scripts/test-launch-actions-renderer.cjs`，用实际生成的页面方法验证快捷入口保存草稿、创建独立会话、忙碌拒绝及听写单次触发。
 

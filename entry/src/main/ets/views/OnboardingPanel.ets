@@ -4,6 +4,7 @@ import { Motion } from '../common/Theme';
 import { Banner } from '../common/Widgets';
 import { monochromeProviderLogo, providerLogo } from '../common/ProviderBrand';
 import { OnboardingProvider, OnboardingTask, onboardingProviders, onboardingTasks } from '../model/Onboarding';
+import { HuaweiAccount } from '../services/HuaweiAccount';
 import { OnboardingMascot } from './OnboardingMascot';
 import { OnboardingCapability } from './OnboardingCapability';
 import { t } from '../model/I18n';
@@ -18,9 +19,12 @@ export struct OnboardingPanel {
   @Prop @Watch('connectionChanged') configured: boolean = false;
   @Prop @Watch('connectionChanged') connectedPreset: string = '';
   @Prop busy: boolean = false;
+  @ObjectLink account: HuaweiAccount;
   onFinish: (action: string, prompt: string) => Promise<void> = async () => {};
   onConnect: (preset: string) => void = () => {};
+  onLegal: (page: string) => void = () => {};
   @State private step: number = 0;
+  @State private agreed: boolean = false;
   @State private greeted: boolean = false;
   @State private selectedPreset: string = '';
   @State private selectedTask: number = -1;
@@ -89,11 +93,11 @@ export struct OnboardingPanel {
       clearTimeout(this.wakeTimer);
       this.wakeTimer = -1;
     }
-    if (showContinue && this.waking && this.step === 0) { this.wakeReady = true; }
+    if (showContinue && this.waking && this.step === 1) { this.wakeReady = true; }
   }
 
   private wake(): void {
-    if (this.step !== 0 || !this.active || !this.foreground || this.saving || this.waking) { return; }
+    if (this.step !== 1 || !this.active || !this.foreground || this.saving || this.waking) { return; }
     this.error = '';
     this.wakeReady = false;
     this.waking = true;
@@ -101,14 +105,14 @@ export struct OnboardingPanel {
     this.wakeTimer = setTimeout(() => {
       this.wakeTimer = -1;
       if (!this.mounted) { return; }
-      if (this.step !== 0 || !this.active || !this.foreground) { this.wakeReady = true; return; }
+      if (this.step !== 1 || !this.active || !this.foreground) { this.wakeReady = true; return; }
       this.wakeScale = 1;
       this.move(1);
     }, 350);
   }
 
   private continueWake(): void {
-    if (this.step !== 0 || !this.active || !this.foreground || this.saving) { return; }
+    if (this.step !== 1 || !this.active || !this.foreground || this.saving) { return; }
     this.cancelWake(false);
     this.wakeReady = false;
     this.waking = false;
@@ -118,7 +122,7 @@ export struct OnboardingPanel {
 
   private move(delta: number): void {
     if (this.saving || this.transitioning || !this.active || !this.foreground || !this.mounted) { return; }
-    const next = Math.max(0, Math.min(4, this.step + delta));
+    const next = Math.max(0, Math.min(5, this.step + delta));
     if (next === this.step) { return; }
     this.cancelWake(false);
     this.error = '';
@@ -180,22 +184,27 @@ export struct OnboardingPanel {
   }
 
   private sceneLabel(): string {
-    if (this.step === 0) { return t('第一次见面'); }
-    if (this.step === 1) { return t('认识 Tiny'); }
-    if (this.step === 2) { return t('连接模型'); }
-    if (this.step === 3) { return t('Tiny 能做什么'); }
+    if (this.step === 0) { return t('验证华为账号'); }
+    if (this.step === 1) { return t('第一次见面'); }
+    if (this.step === 2) { return t('认识 Tiny'); }
+    if (this.step === 3) { return t('连接模型'); }
+    if (this.step === 4) { return t('Tiny 能做什么'); }
     return t('第一个任务');
   }
 
   private primaryLabel(): string {
-    if (this.step === 0) { return t('继续'); }
+    if (this.step === 0) {
+      if (this.account.signedIn) { return t('继续'); }
+      return this.account.busy ? t('正在登录…') : t('华为账号登录');
+    }
     if (this.step === 1) { return t('继续'); }
-    if (this.step === 2) {
+    if (this.step === 2) { return t('继续'); }
+    if (this.step === 3) {
       if (this.configured) { return t('继续'); }
       if (this.selectedPreset === 'ollama') { return t('连接模型'); }
       return this.selectedPreset.length > 0 ? t('填写 API Key') : t('选择服务商');
     }
-    if (this.step === 3) { return t('试着聊一句'); }
+    if (this.step === 4) { return t('试着聊一句'); }
     return t('带进聊天');
   }
 
@@ -205,23 +214,41 @@ export struct OnboardingPanel {
 
   private primaryAvailable(): boolean {
     if (this.saving || !this.active || !this.foreground) { return false; }
-    if (this.step === 0) { return this.wakeReady && this.active && this.foreground; }
-    if (this.step === 2) {
+    if (this.step === 0) {
+      if (this.account.signedIn) { return true; }
+      return this.account.ready && !this.account.busy && this.agreed;
+    }
+    if (this.step === 1) { return this.wakeReady && this.active && this.foreground; }
+    if (this.step === 3) {
       return this.configured ? true : (!this.busy && this.selectedPreset.length > 0);
     }
-    if (this.step === 4) { return !this.busy && this.message.trim().length > 0; }
+    if (this.step === 5) { return !this.busy && this.message.trim().length > 0; }
     return true;
   }
 
   private primaryAction(): void {
     if (!this.primaryEnabled()) { return; }
-    if (this.step === 0) { this.continueWake(); return; }
-    if (this.step === 2) {
+    if (this.step === 0) {
+      if (this.account.signedIn) { this.move(1); } else { this.signInAccount(); }
+      return;
+    }
+    if (this.step === 1) { this.continueWake(); return; }
+    if (this.step === 3) {
       if (this.configured) { this.move(1); } else { this.connectSelected(); }
       return;
     }
-    if (this.step === 4) { this.finish('start', this.currentPrompt()); return; }
+    if (this.step === 5) { this.finish('start', this.currentPrompt()); return; }
     this.move(1);
+  }
+
+  // Native Account Kit owns consent, the sign-in sheet and account switching.
+  // Onboarding only waits for the verified result and never reads profile data.
+  private async signInAccount(): Promise<void> {
+    if (this.saving || this.transitioning || !this.active || !this.foreground) { return; }
+    if (!this.account.ready) { this.error = t('正在确认登录状态，请稍候。'); return; }
+    if (!this.agreed) { this.error = t('请先阅读并同意用户协议和隐私政策。'); return; }
+    this.error = '';
+    await this.account.signIn();
   }
 
   private brand(): ResourceColor { return this.appearance.accent; }
@@ -315,10 +342,11 @@ export struct OnboardingPanel {
   }
 
   private actorMood(): string {
-    if (this.step === 0) { return this.waking ? 'surprised' : 'sleepy'; }
-    if (this.step === 1) { return this.greeted ? 'proud' : 'happy'; }
-    if (this.step === 2) { return this.configured ? 'proud' : 'curious'; }
-    if (this.step === 3) {
+    if (this.step === 0) { return this.account.signedIn ? 'proud' : 'curious'; }
+    if (this.step === 1) { return this.waking ? 'surprised' : 'sleepy'; }
+    if (this.step === 2) { return this.greeted ? 'proud' : 'happy'; }
+    if (this.step === 3) { return this.configured ? 'proud' : 'curious'; }
+    if (this.step === 4) {
       if (this.demoRevealed || this.capIndex === 2) { return 'proud'; }
       return this.capIndex === 1 ? 'focused' : 'curious';
     }
@@ -327,10 +355,10 @@ export struct OnboardingPanel {
 
   private greetActor(): void {
     if (!this.active || !this.foreground || this.transitioning || this.saving) { return; }
-    if (this.step === 0) { this.wake(); }
+    if (this.step === 1) { this.wake(); }
     else {
       this.animate(() => {
-        if (this.step === 3) { this.demoRevealed = !this.demoRevealed; this.demoTick++; }
+        if (this.step === 4) { this.demoRevealed = !this.demoRevealed; this.demoTick++; }
         else { this.greeted = !this.greeted; }
       });
     }
@@ -351,7 +379,7 @@ export struct OnboardingPanel {
     if (this.stageWidth <= 0) { return; }
     const size = Number(area.width);
     // Swiper cards share a stationary centre; the scenery moves around Tiny.
-    const x = scene === 4 ? Number(area.globalPosition.x) - this.stageLeft + size / 2 : this.stageWidth / 2;
+    const x = scene === 5 ? Number(area.globalPosition.x) - this.stageLeft + size / 2 : this.stageWidth / 2;
     const y = Number(area.globalPosition.y) - this.stageTop + Number(area.height) / 2;
     this.placeActor(x, y, size, true);
   }
@@ -372,7 +400,7 @@ export struct OnboardingPanel {
     const ui = this.getUIContext();
     const rect = ui.getComponentUtils().getRectangleById(id);
     const size = ui.px2vp(rect.size.width);
-    const x = scene === 4 ? ui.px2vp(rect.windowOffset.x) - this.stageLeft + size / 2 : this.stageWidth / 2;
+    const x = scene === 5 ? ui.px2vp(rect.windowOffset.x) - this.stageLeft + size / 2 : this.stageWidth / 2;
     const y = ui.px2vp(rect.windowOffset.y + rect.size.height / 2) - this.stageTop;
     this.placeActor(x, y, size, false);
   }
@@ -387,16 +415,16 @@ export struct OnboardingPanel {
   @Builder
   persistentActor() {
     Column() {
-      OnboardingMascot({ diameter: 220, scene: this.step === 3 ? 0 : this.step,
-        mood: this.actorMood(), greeted: this.step === 0 ? this.waking : this.greeted || this.demoRevealed,
-        sleepy: this.step === 0 && !this.waking, energized: this.step !== 0 || this.waking,
-        allowDrag: this.step === 1 && !this.transitioning,
+      OnboardingMascot({ diameter: 220, scene: this.step === 4 ? 0 : this.step,
+        mood: this.actorMood(), greeted: this.step === 1 ? this.waking : this.greeted || this.demoRevealed,
+        sleepy: this.step === 1 && !this.waking, energized: this.step !== 1,
+        allowDrag: this.step === 2 && !this.transitioning,
         active: this.active && this.foreground && this.actorReady,
         onHello: () => this.greetActor() })
     }.id('onboarding-persistent-actor').width(220).height(220)
       // The theatre's underlying button and Swiper own the entire gesture chain.
-      .hitTestBehavior(this.step === 3 ? HitTestMode.BLOCK_DESCENDANTS : HitTestMode.Default)
-      .accessibilityLevel(this.step === 3 ? 'no-hide-descendants' : 'auto')
+      .hitTestBehavior(this.step === 4 ? HitTestMode.BLOCK_DESCENDANTS : HitTestMode.Default)
+      .accessibilityLevel(this.step === 4 ? 'no-hide-descendants' : 'auto')
       .scale({ x: this.actorSize / 220, y: this.actorSize / 220 })
       .position({ x: this.actorX - 110, y: this.actorY - 110 })
       .opacity(this.actorReady ? 1 : 0)
@@ -431,11 +459,57 @@ export struct OnboardingPanel {
   }
 
   @Builder
+  accountScene() {
+    Column({ space: 16 }) {
+      Stack({ alignContent: Alignment.Center }) {
+        this.actorSlot(0, 132)
+      }.width('100%').height(144)
+      Text(this.account.signedIn ? t('已登录华为账号') : t('登录华为账号'))
+        .id('onboarding-account-status').fontFamily(this.appearance.fontFamily).fontSize(21)
+        .fontWeight(FontWeight.Bold).fontColor(this.ink()).textAlign(TextAlign.Center)
+      Text(!this.account.ready ? t('正在确认登录状态，请稍候。') : this.account.signedIn ?
+        t('登录状态已确认，可以继续。') : t('登录后即可使用 AI 生成功能。'))
+        .fontFamily(this.appearance.fontFamily).fontSize(14).lineHeight(21).fontColor(this.muted())
+        .textAlign(TextAlign.Center).width('100%').padding({ left: 8, right: 8 })
+      if (this.account.error.length > 0) {
+        Banner({ text: this.account.error, compId: 'onboarding-account-error' })
+      }
+      if (this.account.signedIn) {
+        Text(t('仅在本机安全保存华为账号标识，不获取姓名、手机号或身份证号。退出登录不会删除本地会话和文件。'))
+          .fontFamily(this.appearance.fontFamily).fontSize(12).lineHeight(18).fontColor(this.muted())
+          .textAlign(TextAlign.Center).width('100%').padding({ left: 8, right: 8 })
+      } else {
+        Column({ space: 4 }) {
+          Row({ space: 10 }) {
+            Checkbox().id('onboarding-account-consent').select(this.agreed)
+              .selectedColor(this.brand()).enabled(!this.account.busy)
+              .onChange((value: boolean) => { this.agreed = value; if (value) { this.error = ''; } })
+            Text(t('我已阅读并同意用户协议和隐私政策')).fontFamily(this.appearance.fontFamily)
+              .fontSize(13).lineHeight(19).fontColor(this.ink()).layoutWeight(1)
+          }.width('100%').padding({ left: 2, right: 2 })
+          Row({ space: 2 }) {
+            Button(t('用户协议')).id('onboarding-account-terms').height(40).padding({ left: 8, right: 8 })
+              .backgroundColor(Color.Transparent).fontFamily(this.appearance.fontFamily).fontSize(12)
+              .fontColor(this.brandInk()).enabled(!this.account.busy)
+              .accessibilityText(t('用户协议')).onClick(() => this.onLegal('terms'))
+            Text('·').fontSize(12).fontColor(this.faint())
+            Button(t('隐私政策')).id('onboarding-account-privacy').height(40).padding({ left: 8, right: 8 })
+              .backgroundColor(Color.Transparent).fontFamily(this.appearance.fontFamily).fontSize(12)
+              .fontColor(this.brandInk()).enabled(!this.account.busy)
+              .accessibilityText(t('隐私政策')).onClick(() => this.onLegal('privacy'))
+          }.width('100%').justifyContent(FlexAlign.Start)
+        }
+      }
+    }.width('100%').constraintSize({ minHeight: this.bodyHeight }).justifyContent(FlexAlign.Center)
+      .padding({ top: 12, bottom: 12 })
+  }
+
+  @Builder
   wakeScene() {
     Column() {
       Blank()
       Column() {
-        this.actorSlot(0, this.wakeDiameter())
+        this.actorSlot(1, this.wakeDiameter())
       }.id('onboarding-wake-tile').width(this.wakeTileSize()).height(this.wakeTileSize())
         .justifyContent(FlexAlign.Center).backgroundColor(this.bubble()).borderRadius(this.wakeTileSize() * 0.24)
         .shadow({ radius: 30, color: this.appearance.accentGlow, offsetY: 8 })
@@ -456,7 +530,7 @@ export struct OnboardingPanel {
         .backgroundColor(this.bubble()).borderRadius(20)
         .shadow({ radius: 18, color: this.dark ? '#33000000' : '#14000000', offsetY: 8 })
       Stack({ alignContent: Alignment.Center }) {
-        this.actorSlot(1, 220)
+        this.actorSlot(2, 220)
       }
       .width('100%').height(260)
     }
@@ -471,7 +545,7 @@ export struct OnboardingPanel {
         .fontSize(18).fontWeight(FontWeight.Medium).fontColor(this.ink()).textAlign(TextAlign.Center)
         .width('100%').padding(18).backgroundColor(this.bubble()).borderRadius(20)
         .shadow({ radius: 14, color: this.dark ? '#33000000' : '#14000000', offsetY: 6 })
-      this.actorSlot(2, 160)
+      this.actorSlot(3, 160)
       Row({ space: 10 }) {
         ForEach(onboardingProviders(), (provider: OnboardingProvider) => {
           Toggle({ type: ToggleType.Button, isOn: this.selectedPreset === provider.preset }) {
@@ -508,10 +582,10 @@ export struct OnboardingPanel {
         ForEach([0, 1, 2], (index: number) => {
           Column() {
             OnboardingCapability({ index: index, demoTick: this.demoTick,
-              active: this.active && this.foreground && this.step === 3 && this.capIndex === index,
-              onActorArea: (area: Area) => this.locateActor(3, area),
+              active: this.active && this.foreground && this.step === 4 && this.capIndex === index,
+              onActorArea: (area: Area) => this.locateActor(4, area),
               onActorTap: () => this.greetActor(),
-              onActorScroll: (id: string) => this.followActorScroll(3, id) })
+              onActorScroll: (id: string) => this.followActorScroll(4, id) })
           }
           .width('100%').height('100%')
         }, (index: number) => index.toString())
@@ -545,7 +619,7 @@ export struct OnboardingPanel {
   taskScene() {
     Column({ space: 16 }) {
       Row({ space: 8 }) {
-        this.actorSlot(4, 64)
+        this.actorSlot(5, 64)
         Text(t('想先做点什么？')).fontFamily(this.appearance.fontFamily).fontSize(15).lineHeight(23)
           .fontColor(this.ink()).layoutWeight(1).padding(14).backgroundColor(this.bubble())
           .borderRadius({ topLeft: 18, topRight: 18, bottomLeft: 5, bottomRight: 18 })
@@ -581,10 +655,22 @@ export struct OnboardingPanel {
         Banner({ text: this.error, compId: 'onboarding-error' })
       }
       if (this.step === 0) {
+        if (this.account.signedIn) {
+          Blank().height(44)
+        } else {
+          Row({ space: 12 }) {
+            Button(t('稍后登录'), { type: ButtonType.Capsule, stateEffect: true })
+              .id('onboarding-account-later').height(44).padding({ left: 12, right: 12 })
+              .backgroundColor(Color.Transparent).fontFamily(this.appearance.fontFamily).fontSize(12)
+              .fontColor(this.muted()).enabled(!this.saving && !this.account.busy)
+              .accessibilityText(t('稍后登录')).onClick(() => this.move(1))
+          }.width('100%').justifyContent(FlexAlign.Center)
+        }
+      } else if (this.step === 1) {
         Text(this.waking ? t('它醒了。') : t('轻点，叫醒它'))
           .id('onboarding-wake-hint').fontFamily(this.appearance.fontFamily).fontSize(14)
           .fontColor(this.muted()).height(44).textAlign(TextAlign.Center).width('100%')
-      } else if (this.step === 2) {
+      } else if (this.step === 3) {
         Row({ space: 12 }) {
           Button(t('添加其他服务'), { type: ButtonType.Capsule, stateEffect: true })
             .id('onboarding-more-services').height(44).padding({ left: 12, right: 12 })
@@ -600,15 +686,15 @@ export struct OnboardingPanel {
           }
         }
         .width('100%').justifyContent(FlexAlign.Center)
-      } else if (this.step === 3) {
-        this.capabilityDots()
       } else if (this.step === 4) {
+        this.capabilityDots()
+      } else if (this.step === 5) {
         Text(t('只准备草稿，由你发送。')).fontFamily(this.appearance.fontFamily).fontSize(12)
           .fontColor(this.muted()).height(44).textAlign(TextAlign.Center).width('100%')
       } else {
         Blank().height(44)
       }
-      if (!(this.step === 0 && !this.wakeReady)) {
+      if (!(this.step === 1 && !this.wakeReady)) {
         // Like the chat's scroll-to-latest action, use a momentary Toggle with button accessibility semantics.
         Toggle({ type: ToggleType.Button, isOn: false }) {
           Text(this.primaryLabel()).fontFamily(this.appearance.fontFamily).fontSize(15).fontWeight(FontWeight.Medium)
@@ -636,15 +722,17 @@ export struct OnboardingPanel {
       Stack({ alignContent: Alignment.TopStart }) {
         ForEach([this.step], (scene: number) => {
           Column() {
-            if (scene === 0) {
+            if (scene === 1) {
               this.wakeScene()
-            } else if (scene === 3) {
+            } else if (scene === 4) {
               this.capabilityScene()
             } else {
               Scroll() {
-                if (scene === 1) {
-                  this.introductionScene()
+                if (scene === 0) {
+                  this.accountScene()
                 } else if (scene === 2) {
+                  this.introductionScene()
+                } else if (scene === 3) {
                   this.connectionScene()
                 } else {
                   this.taskScene()
