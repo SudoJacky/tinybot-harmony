@@ -12,6 +12,8 @@
 /.appanalyzer
 /.cache
 /docs/local/
+/docs/.vitepress/dist/
+/docs/.vitepress/cache/
 /.codex/
 /.agents/
 /.shots/
