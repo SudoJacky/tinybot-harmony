@@ -65,13 +65,13 @@ Skill 引用 `references/guide.md` 等文件时，在编辑页填写相同的相
 
 ## 联网搜索
 
-- **设置 → 联网搜索**：通用 `search_web` 接口支持 DeepSeek 原生搜索和 Tavily，分别适配请求与结构化来源，统一返回标题、URL、摘录及可用的来源时间。DeepSeek 使用固定的官方 Anthropic Messages 搜索接口和内置搜索模型，不再提供额外的地址、模型或独立密钥输入。只有一个使用官方地址、已启用且配置了 API Key 的模型服务时自动复用，多个时仅需选择已有服务。保存时检查密钥，运行时解析服务引用以跟随密钥轮换；服务删除、停用或改为非官方地址时明确失败。Tavily 保留独立地址和密钥配置。搜索默认关闭，“允许联网”同时控制网页读取和搜索。搜索密钥不进入模型上下文、日志或备份；辅助请求单独记录用量，服务未报告 Token 时保持未知。DeepSeek 只接受结构化原生搜索结果，不将模型自由回答作为来源。
+- **设置 → 联网搜索**：通用 `search_web` 接口支持 DeepSeek 搜索和 Tavily，分别适配请求与结构化来源，统一返回标题、URL、摘要及可用的来源时间。DeepSeek 使用固定的官方 Search 接口 `POST https://api.deepseek.com/v1/tools/search`，按 `count` 请求条数并固定 `need_content: false`，摘要优先取服务返回的长摘要，并按服务返回原样保留（不再按字符上限裁剪），不再调用模型，按请求次数计费；搜索词上限 128 字符。不再提供额外的地址、模型或独立密钥输入。只有一个使用官方地址、已启用且配置了 API Key 的模型服务时自动复用，多个时仅需选择已有服务。保存时检查密钥，运行时解析服务引用以跟随密钥轮换；服务删除、停用或改为非官方地址时明确失败。Tavily 保留独立地址和密钥配置。搜索默认关闭，“允许联网”同时控制网页读取和搜索。搜索密钥不进入模型上下文、日志或备份；辅助请求单独记录请求次数，不记录 Token。DeepSeek 只接受结构化搜索结果，不将服务的自由生成回答作为来源。
 
 ## 搜索适配
 
 `WebSearchTools` 只依赖统一 `SearchTransport.search()`；`NativeSearchTransport` 负责凭据解析、超时、取消、禁止重定向及用量记录，`services/search/DeepSeekSearchProvider.ets` 与 `TavilySearchProvider.ets` 各自编码请求和解析结构化结果。新搜索服务在此层适配，不修改 Agent Loop。
 
-Tavily 请求字段参考 [Search API](https://docs.tavily.com/documentation/api-reference/endpoint/search)；DeepSeek 搜索协议对照本地 DeepSeek Harness `packages/web/web-search-deepseek`。接口和账号是否实际支持原生搜索需联调确认；普通聊天接口可用不表示搜索一定可用。
+Tavily 请求字段参考 [Search API](https://docs.tavily.com/documentation/api-reference/endpoint/search)；DeepSeek 搜索使用官方 [网页搜索与抓取](https://api-docs.deepseek.com/zh-cn/guides/search) 中的 Search 接口，鉴权沿用 Bearer API Key，错误按 4xx/5xx 分类，402 明确提示余额不足，429 提示等待后重试。网页正文仍由本地 `read_web` 读取，未接入同一页面的 Fetch 接口。Search 接口按成功请求计费、每账号 5 QPS；账号是否可用需联调确认，普通聊天接口可用不表示搜索一定可用。
 
 ## 验证
 
@@ -83,4 +83,4 @@ Tavily 请求字段参考 [Search API](https://docs.tavily.com/documentation/api
 
 构建后运行 `node scripts/test-skill-completion.cjs`，验证 `$` 查询、中文/名称/用途筛选、金额边界、停用与手动调用限制、光标处替换、现有命令切换，以及实际编译后的列表点击与延迟聚焦；已纳入 `scripts/test.ps1`。键盘遮挡、输入法与光标交互需在真机验证。
 
-运行 `node scripts/test-harness-features.cjs` 验证搜索提供方、密钥复用与轮换、设置提交失败回滚、取消和重定向、文件回执恢复、引用快照隔离、重复调用提醒及有限重试；已纳入 `scripts/test.ps1`。测试使用真实业务代码与确定性网络/存储适配，不消耗在线额度。
+运行 `node scripts/test-harness-features.cjs` 验证搜索提供方、官方 Search 请求与解析契约、密钥复用与轮换、设置提交失败回滚、取消和重定向、文件回执恢复、引用快照隔离、重复调用提醒及有限重试；已纳入 `scripts/test.ps1`。测试使用真实业务代码与确定性网络/存储适配，不消耗在线额度。
