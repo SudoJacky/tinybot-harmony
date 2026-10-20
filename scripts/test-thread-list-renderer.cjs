@@ -50,7 +50,7 @@ class ViewPU {
   flush() { for (const id of [...effects.keys()]) if (readers.has(id)) this.run(id, false); }
 }
 const noop = new Proxy({}, { get: () => () => {} });
-const globals = { exports: {}, ViewPU, t: key => key, Motion: {}, Space: {}, Btn: {}, AppMaterials: {},
+const globals = { exports: {}, ViewPU, ObservedObject: { GetRawObject: value => value }, t: key => key, Motion: {}, Space: {}, Btn: {}, AppMaterials: {},
   IconButton: class {}, SymbolGlyphModifier: class { fontColor() { return this; } }, Context: noop,
   TransitionEffect: { OPACITY: { animation() { return this; } } },
   ListItemGroup: { create(options) { if (initial) { groups.add(current); options.header(); } }, pop() {} },
@@ -132,7 +132,7 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
   assert.deepEqual([...groups], groupIds, 'Updates must preserve group identity and collapse state');
   sidebar.query = 'no matches'; sidebar.archived = true;
   sidebar.projectId = ''; sidebar.projectName = 'Created from filtered view'; sidebar.projectInstructions = '';
-  sidebar.projectEditing = true;
+  sidebar.projectEditing = true; sidebar.projectFolders = [];
   await sidebar.saveFromEditor(); sidebar.flush();
   const projectId = app.active.projectId;
   assert.ok(projectId && projectId !== 'project');

@@ -68,7 +68,7 @@
 
 ## 沙箱写入根目录
 
-应用级工作区的根目录是 `ApplicationContext.filesDir/workspace`。普通会话使用会话 ID 作为子目录，项目会话使用项目的稳定 `workspaceId`；两者都在同一根下，工具无法访问根外的模型配置、密钥或其他应用数据。
+应用级工作区的根目录是 `ApplicationContext.filesDir/workspace`。普通会话使用会话 ID 作为子目录，项目会话使用项目的稳定 `workspaceId`；两者都在同一根下。项目可额外挂载由系统选择器明确授权的共享文件夹，入口为 `shared/<名称>/`；工具仍无法访问模型配置、密钥或未授权目录。
 
 ```text
 <ApplicationContext.filesDir>/
