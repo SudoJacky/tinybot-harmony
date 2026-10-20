@@ -10,6 +10,7 @@ import { Cancellation } from '../services/Cancellation';
 import { importTextFile } from '../services/TextFiles';
 import { Attachments } from '../services/Attachments';
 import { exportFile, shareFile } from '../services/NativeActions';
+import { aiAssistedFile } from '../model/ConversationExport';
 import { MarkdownView } from './MarkdownView';
 import { DataTable } from './DataTable';
 import { parseDelimited, lineDiff } from '../model/RichArtifacts';
@@ -180,7 +181,10 @@ export struct WorkspacePanel {
         return;
       }
       const absolute = await this.files.checkedPath(path);
-      if (kind === 'export') { await exportFile(context, absolute, this.fileName(path)); }
+      if (kind === 'export') {
+        await exportFile(context, absolute, this.fileName(path),
+          aiAssistedFile(this.app.exportSnapshot(), this.app.activeWorkspaceId, path));
+      }
       if (kind === 'share') { await shareFile(context, absolute, this.fileName(path)); }
     } catch (error) { if (this.previewing) { this.previewError = (error as Error).message; } else { this.error = (error as Error).message; } }
     finally { this.busy = false; await this.refresh(); }

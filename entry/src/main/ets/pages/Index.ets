@@ -6,6 +6,10 @@ import { BrowserPanel } from '../views/BrowserPanel';
 import { BrowserSession } from '../services/BrowserSession';
 import { AnnotationPage, browserAnnotationText } from '../model/BrowserAnnotation';
 import { image } from '@kit.ImageKit';
+import { fileIo as fs } from '@kit.CoreFileKit';
+import { conversationSections, ConversationSection } from '../model/ConversationExport';
+import { conversationImage } from '../services/ConversationImageExport';
+import { ConversationExportSection } from '../views/ConversationExportSection';
 import { Attachments } from '../services/Attachments';
 import { t } from '../model/I18n';
 import { agentModeName } from '../model/AgentMode';
@@ -53,6 +57,7 @@ const CHAT_HEADER_HEIGHT: number = 56;
 @Entry
 @Component
 struct Index {
+  @State private exportingImage: boolean = false;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
   @State private app: ChatViewModel = new ChatViewModel();
@@ -333,16 +338,50 @@ struct Index {
 
   private async exportChat(share: boolean): Promise<void> {
     const thread = this.app.active;
+    let temporary = '';
     try {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       const text = '# ' + thread.title + '\n\n' + thread.messages.map((item: MessageViewModel) =>
         '## ' + (item.role === 'user' ? t("用户") : 'Tinybot') + '\n\n' + item.content +
         (item.attachments.length ? t("\n\n附件：") + item.attachments.map((file: Attachment) => file.name).join('、') : '')).join('\n\n');
       const path = context.cacheDir + '/conversation-' + util.generateRandomUUID() + '.md';
+      temporary = path;
       await writeBytes(path, new util.TextEncoder().encodeInto(text).buffer as ArrayBuffer);
       const name = (thread.title.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40) || t("Tinybot对话")) + '.md';
-      if (share) { await shareFile(context, path, name); } else { await exportFile(context, path, name); }
+      if (share) { await shareFile(context, path, name); }
+      else { await exportFile(context, path, name, thread.messages.some((item) => item.role === 'assistant')); }
     } catch (error) { this.app.error = (error as Error).message; }
+    finally { if (temporary && await fs.access(temporary)) { await fs.unlink(temporary); } }
+  }
+
+  @Builder
+  imageExportSection(section: ConversationSection) { ConversationExportSection({ section: section }) }
+
+  private async exportChatImage(): Promise<void> {
+    if (this.exportingImage || this.app.busy || !this.app.active.messages.length) { return; }
+    this.exportingImage = true;
+    this.getUIContext().getPromptAction().showToast({ message: t('正在导出图片…') });
+    let temporary = '';
+    try {
+      // Capture one immutable conversation, even if the user changes chats while exporting.
+      const snapshot = this.app.exportSnapshot();
+      const thread = snapshot.threads.find((item) => item.id === this.app.active.id)!;
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const ui = this.getUIContext();
+      temporary = await conversationImage(context, conversationSections(thread, snapshot.providerProfiles || []), (section: ConversationSection) =>
+        ui.getComponentSnapshot().createFromBuilder(() => { this.imageExportSection(section); }, 0, true,
+          { scale: 720 / ui.vp2px(360), waitUntilRenderFinished: true }),
+        context.resourceManager.getColorSync($r('app.color.page_background').id));
+      const name = (thread.title.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40) || t('Tinybot对话')) + '.png';
+      await exportFile(context, temporary, name);
+    } catch (error) {
+      const failure = error as BusinessError;
+      this.app.error = t('导出图片失败：{0}', [failure.message || JSON.stringify(error) || String(error)]);
+    }
+    finally {
+      this.exportingImage = false;
+      if (temporary && await fs.access(temporary)) { await fs.unlink(temporary); }
+    }
   }
 
   // Conversation-level actions live in the header; the composer "+" sheet holds per-message inputs.
@@ -373,6 +412,9 @@ struct Index {
           .enabled(this.app.active.messages.length > 0).onClick(() => this.exportChat(true))
         MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.square_and_arrow_down')), content: t("导出为 Markdown") })
           .enabled(this.app.active.messages.length > 0).onClick(() => this.exportChat(false))
+        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.picture')), content: this.exportingImage ? t('正在导出图片…') : t('导出为图片') })
+          .id('export-chat-image').enabled(!this.app.busy && !this.exportingImage && this.app.active.messages.length > 0)
+          .onClick(() => this.exportChatImage())
       }
       MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.gearshape')), content: t('设置') })
         .onClick(() => this.openSettings())
