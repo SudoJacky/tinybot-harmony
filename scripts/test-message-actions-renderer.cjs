@@ -14,7 +14,7 @@ if (!fs.existsSync(emitted) || fs.statSync(source).mtimeMs > fs.statSync(emitted
 }
 const tree = ts.createSourceFile(emitted, fs.readFileSync(emitted, 'utf8'), ts.ScriptTarget.Latest, true);
 const component = tree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'MessageBubble');
-const methods = ['actionButton', 'messageActions', 'selectText'].map(name =>
+const methods = ['actionButton', 'aiMark', 'messageActions', 'selectText'].map(name =>
   component.members.find(node => node.name?.getText(tree) === name).getText(tree));
 
 let current;
@@ -38,8 +38,20 @@ const Button = new Proxy({}, { get: (_, method) => value => {
   button[method] = value; buttons.set(current, button);
 } });
 const SymbolGlyph = new Proxy({}, { get: (_, method) => method === 'create' ? value => glyphs.set(current, value) : () => {} });
-const globals = { exports: {}, ViewPU, Button, Flex: noUi, FlexWrap: {}, FlexAlign: {}, SymbolGlyph, Text: noUi, Image: noUi, If: noUi,
-  ButtonType: {}, Color: {}, Motion: {}, ImageFit: {}, t: text => text };
+const texts = new Map();
+const Text = new Proxy({}, { get: (_, method) => value => {
+  if (current === undefined) return;
+  if (method === 'create') { texts.set(current, { text: value, id: '', color: undefined, weight: undefined, size: 0, spacing: 0 }); return; }
+  const node = texts.get(current);
+  if (!node) return;
+  if (method === 'id') node.id = value;
+  else if (method === 'fontColor') node.color = value;
+  else if (method === 'fontWeight') node.weight = value;
+  else if (method === 'fontSize') node.size = value;
+  else if (method === 'letterSpacing') node.spacing = value;
+} });
+const globals = { exports: {}, ViewPU, Button, Flex: noUi, Row: noUi, FlexWrap: {}, FlexAlign: {}, VerticalAlign: { Center: 'Center' }, FontWeight: { Bold: 'Bold' },
+  SymbolGlyph, Text, Image: noUi, If: noUi, ButtonType: {}, Color: {}, Motion: {}, ImageFit: {}, t: text => text };
 const probe = `class Probe extends ViewPU { ${methods.join('\n')} } exports.Probe = Probe;`;
 vm.runInNewContext(ts.transpileModule(probe, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }
@@ -55,7 +67,7 @@ for (const [role, content, expected] of [
   ['assistant', '', ['regenerate', 'fork']],
   ['user', '', ['edit']]
 ]) {
-  effects.clear(); buttons.clear(); glyphs.clear(); subscribers.clear(); readingSubscribers.clear();
+  effects.clear(); buttons.clear(); glyphs.clear(); texts.clear(); subscribers.clear(); readingSubscribers.clear();
   const view = new globals.exports.Probe(), invoked = [];
   view.appearance = { fontFamily: '' };
   view.message = { id: 'message', role, content };
@@ -78,6 +90,15 @@ for (const [role, content, expected] of [
   const controls = new Map(allControls.map(button => [button.id, button]));
   assert.equal(controls.size, allControls.length, 'No duplicate controls');
   assert.deepEqual([...controls.keys()], expected.map(action => action + '-message'));
+  const marks = [...texts.values()].filter(node => node.text === 'AI');
+  assert.equal(marks.length, role === 'assistant' ? 1 : 0, 'Only model answers carry the AI mark');
+  for (const mark of marks) {
+    assert.equal(mark.id, 'ai-mark-message');
+    assert.equal(mark.weight, 'Bold');
+    assert.equal(mark.size, 11);
+    assert.equal(mark.spacing, 0.8);
+    assert.equal(mark.color.type, 10001, 'The mark keeps its themed color resource');
+  }
   const ids = [...effects.keys()];
   for (const next of [false, true, false, true]) {
     allowed = next; rerun(subscribers);
@@ -110,4 +131,4 @@ for (const [role, content, expected] of [
     assert.equal(view.documentText, '最新消息文本', 'Selection opens the current full text');
   }
 }
-console.log('PASS compact message actions: unique assistant/user controls, empty content, live permissions, reading/stop icon, selection and callbacks');
+console.log('PASS compact message actions: unique assistant/user controls, empty content, live permissions, reading/stop icon, selection, callbacks and the answer-only AI mark');

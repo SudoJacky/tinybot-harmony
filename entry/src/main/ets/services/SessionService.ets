@@ -398,7 +398,8 @@ export class SessionService {
       if (!id) { await this.resources.ensureWorkspace(project.workspaceId); }
       await this.commitSettings(candidate);
       const nextUris = new Set<string>(nextFolders.map((folder: SharedFolder) => folder.uri));
-      const removed = previousFolders.filter((folder: SharedFolder) => !nextUris.has(folder.uri));
+      const removed = previousFolders.filter((folder: SharedFolder) => !nextUris.has(folder.uri) &&
+        !projects.some((item) => (item.sharedFolders || []).some((shared) => shared.uri === folder.uri)));
       if (removed.length > 0 && this.resources.revokeProjectFolders) { await this.resources.revokeProjectFolders(removed); }
     });
   }

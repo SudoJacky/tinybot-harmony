@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 512 512">
+  <title>Tinybot HarmonyOS app icon</title>
+  <rect id="background" width="512" height="512" fill="#f7f6f2"/>
+  <circle cx="234" cy="278" r="154" fill="#141413"/>
+  <circle cx="184" cy="228" r="36" fill="#f7f6f2"/>
+  <circle cx="408" cy="104" r="28" fill="#cc785c"/>
+</svg>

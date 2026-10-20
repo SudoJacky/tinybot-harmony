@@ -69,6 +69,10 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     const entries: WorkspaceEntry[] = [];
     for (const name of names.slice(offset, offset + 200)) {
       cancellation.check();
+      if (this.mounts.length > 0 && (path === '' || path === '.') && name === SHARED_FOLDER_ROOT) {
+        entries.push({ name: name, kind: 'directory' });
+        continue;
+      }
       const stat = await fs.lstat(absolute + '/' + name);
       entries.push({ name: name, kind: stat.isSymbolicLink() ? 'symlink' : stat.isDirectory() ? 'directory' : 'file' });
     }
@@ -103,8 +107,8 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
   async write(path: string, content: string, cancellation: Cancellation, guard?: WorkspaceWriteGuard): Promise<WorkspaceWrite> {
     workspaceRelativePath(path, false);
     if (this.isShared(path)) {
-      const mount = await this.requireMount(path);
-      return withFileMutation('shared:' + mount.folder.id + '/' + mount.relative,
+      const mount = await this.requireMount(path, true);
+      return withFileMutation(this.externalUri(mount.folder, mount.relative),
         () => this.mutateExternal(mount, path, content, [], cancellation, guard));
     }
     return withFileMutation(this.root + '/' + path, () => this.mutate(path, content, [], cancellation, guard));
@@ -114,8 +118,8 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     workspaceRelativePath(path, false);
     validateEdits(edits);
     if (this.isShared(path)) {
-      const mount = await this.requireMount(path);
-      return withFileMutation('shared:' + mount.folder.id + '/' + mount.relative,
+      const mount = await this.requireMount(path, true);
+      return withFileMutation(this.externalUri(mount.folder, mount.relative),
         () => this.mutateExternal(mount, path, '', edits, cancellation, { version: version }));
     }
     return withFileMutation(this.root + '/' + path, () => this.mutate(path, '', edits, cancellation, { version: version }));
@@ -205,25 +209,16 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     const parent = slash < 0 ? '' : mount.relative.slice(0, slash);
     if (parent) { await this.mkdirExternal(mount.folder, parent); }
     const temporary = (parent ? parent + '/' : '') + '.tinybot-' + util.generateRandomUUID() + '.tmp';
-    const file = await this.openExternal(mount.folder, temporary, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+    const file = await this.openExternal(mount.folder, temporary,
+      fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.NOFOLLOW);
     let closed = false;
     let committed = false;
     try {
       await this.writeFd(file.fd, bytes, cancellation);
       await fs.fsync(file.fd);
       await fs.close(file); closed = true;
-      try {
-        await this.renameExternal(mount.folder, temporary, mount.relative);
-      } catch (_) {
-        // Some document providers do not allow renaming a temporary URI. Preserve a usable write.
-        const direct = await this.openExternal(mount.folder, mount.relative, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
-        try {
-          await this.writeFd(direct.fd, bytes, cancellation);
-          await fs.fsync(direct.fd);
-        } finally {
-          await fs.close(direct);
-        }
-      }
+      cancellation.check();
+      await this.renameExternal(mount.folder, temporary, mount.relative);
       committed = true;
       return { path: path, bytes: bytes.byteLength, written: true, before: before, after: content, created: !existing, version: version };
     } finally {
@@ -314,10 +309,25 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     return { folder: folder, relative: slash < 0 ? '' : rest.slice(slash + 1) };
   }
 
-  private async requireMount(path: string): Promise<MountPath> {
+  private async requireMount(path: string, createParents: boolean = false): Promise<MountPath> {
+    workspaceRelativePath(path, false);
     await this.activate();
     const mount = this.mountPath(path);
     if (!mount) { throw new Error(t('共享文件夹不存在，可能已在项目设置中移除。')); }
+    const parts = mount.relative.length > 0 ? mount.relative.split('/') : [];
+    let relative = '';
+    for (let index = -1; index < parts.length; index++) {
+      if (index >= 0) { relative += (relative ? '/' : '') + parts[index]; }
+      let stat = await this.externalStat(mount.folder, relative);
+      if (!stat && createParents && index >= 0 && index < parts.length - 1) {
+        await this.mkdirExternal(mount.folder, relative);
+        stat = await this.externalStat(mount.folder, relative);
+      }
+      if (stat?.isSymbolicLink()) { throw new Error(t('工作区工具不允许访问符号链接。')); }
+      if (index < parts.length - 1 && (!stat || !stat.isDirectory())) {
+        throw new Error(t('工作区路径中的父目录不存在或不是目录。'));
+      }
+    }
     return mount;
   }
 

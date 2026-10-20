@@ -402,31 +402,43 @@ export struct MessageBubble {
       .accessibilityText(iconKind === 'reading' && this.readingMessageId === this.message.id ? t('停止朗读') : label).onClick(action)
   }
 
+  // Stamps model output at the far end of its action row, on the same line as the controls.
+  @Builder
+  aiMark() {
+    Text('AI').fontFamily(this.appearance.fontFamily).fontSize(11).fontWeight(FontWeight.Bold).letterSpacing(0.8)
+      .fontColor($r('app.color.ai_mark')).id('ai-mark-' + this.message.id)
+  }
+
   @Builder
   messageActions() {
-    Flex({ wrap: FlexWrap.Wrap, justifyContent: this.message.role === 'user' ? FlexAlign.End : FlexAlign.Start }) {
-      if (this.message.content.length > 0) {
-        this.actionButton($r('sys.symbol.rectangle_on_rectangle'), t('复制'), 'copy-' + this.message.id, () => this.copy())
-        this.actionButton($r('sys.symbol.textformat'), t('选择文本'), 'select-text-' + this.message.id, () => this.selectText())
+    Row() {
+      Flex({ wrap: FlexWrap.Wrap, justifyContent: this.message.role === 'user' ? FlexAlign.End : FlexAlign.Start }) {
+        if (this.message.content.length > 0) {
+          this.actionButton($r('sys.symbol.rectangle_on_rectangle'), t('复制'), 'copy-' + this.message.id, () => this.copy())
+          this.actionButton($r('sys.symbol.textformat'), t('选择文本'), 'select-text-' + this.message.id, () => this.selectText())
+        }
+        if (this.message.role === 'assistant' && this.message.content.trim().length > 0) {
+          this.actionButton($r('sys.symbol.speaker_wave_2'), t('朗读回答'), 'read-answer-' + this.message.id,
+            () => this.onRead(this.message.id), () => true, 'reading')
+        }
+        if (this.message.role === 'user') {
+          this.actionButton($r('sys.symbol.square_and_pencil'), t('改写'), 'edit-' + this.message.id,
+            () => this.onFork(this.message.id), () => this.actionsEnabled)
+        } else {
+          this.actionButton($r('sys.symbol.arrow_clockwise'), t('重新生成（保留原回答）'), 'regenerate-' + this.message.id,
+            () => this.onRegenerate(this.message.id), () => this.actionsEnabled)
+          this.actionButton($r('app.media.message_branch'), t('分支'), 'fork-' + this.message.id,
+            () => this.onFork(this.message.id), () => this.actionsEnabled, 'image')
+        }
+        if (this.message.role === 'assistant' && this.message.content.length > 0) {
+          this.actionButton($r('sys.symbol.lightbulb'), t('提炼为记忆…'), 'remember-' + this.message.id,
+            () => this.onRemember(this.message.id), () => this.actionsEnabled)
+        }
+      }.layoutWeight(1).margin({ left: this.message.role === 'user' ? 0 : -2 })
+      if (this.message.role === 'assistant') {
+        this.aiMark()
       }
-      if (this.message.role === 'assistant' && this.message.content.trim().length > 0) {
-        this.actionButton($r('sys.symbol.speaker_wave_2'), t('朗读回答'), 'read-answer-' + this.message.id,
-          () => this.onRead(this.message.id), () => true, 'reading')
-      }
-      if (this.message.role === 'user') {
-        this.actionButton($r('sys.symbol.square_and_pencil'), t('改写'), 'edit-' + this.message.id,
-          () => this.onFork(this.message.id), () => this.actionsEnabled)
-      } else {
-        this.actionButton($r('sys.symbol.arrow_clockwise'), t('重新生成（保留原回答）'), 'regenerate-' + this.message.id,
-          () => this.onRegenerate(this.message.id), () => this.actionsEnabled)
-        this.actionButton($r('app.media.message_branch'), t('分支'), 'fork-' + this.message.id,
-          () => this.onFork(this.message.id), () => this.actionsEnabled, 'image')
-      }
-      if (this.message.role === 'assistant' && this.message.content.length > 0) {
-        this.actionButton($r('sys.symbol.lightbulb'), t('提炼为记忆…'), 'remember-' + this.message.id,
-          () => this.onRemember(this.message.id), () => this.actionsEnabled)
-      }
-    }.width('100%').margin({ left: this.message.role === 'user' ? 0 : -2, top: this.message.role === 'user' ? 0 : -6 })
+    }.width('100%').alignItems(VerticalAlign.Center).margin({ top: this.message.role === 'user' ? 0 : -6 })
   }
 
   @Builder

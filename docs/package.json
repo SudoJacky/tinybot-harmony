@@ -1,0 +1,14 @@
+{
+  "name": "tinybot-docs",
+  "private": true,
+  "type": "module",
+  "description": "Tinybot 文档站（VitePress）",
+  "scripts": {
+    "dev": "vitepress dev .",
+    "build": "vitepress build .",
+    "preview": "vitepress preview ."
+  },
+  "devDependencies": {
+    "vitepress": "1.6.4"
+  }
+}

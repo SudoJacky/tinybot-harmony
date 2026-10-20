@@ -11,9 +11,12 @@ const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/et
 const source = path.resolve(__dirname, '../entry/src/main/ets');
 const fixture = path.resolve(__dirname, '../.hvigor/native-productivity-' + crypto.randomUUID());
 fs.mkdirSync(fixture, { recursive: true });
-const handles = new Map(); let failManifest = false; const usageWrites = [];
+const handles = new Map(); let failManifest = false; let failSharedRename = false; const usageWrites = [];
 const cloudLocations = new Map(); let failCloudCopy = false; let cloudCopyError;
-const nativePath = p => p.startsWith('/sandbox/') ? path.join(fixture, p.slice(1)) : p;
+const nativePath = p => {
+  if (p.startsWith('file://')) p = decodeURIComponent(new URL(p).pathname);
+  return p.startsWith('/sandbox/') ? path.join(fixture, p.slice(1)) : p;
+};
 const fileIo = {
   OpenMode: { READ_ONLY: 1, CREATE: 2, WRITE_ONLY: 4, TRUNC: 8, NOFOLLOW: 16 },
   access: async p => fs.existsSync(nativePath(p)), mkdir: (p, recursive = false) => fs.promises.mkdir(nativePath(p), { recursive }), readText: p => fs.promises.readFile(nativePath(p), 'utf8'),
@@ -37,7 +40,7 @@ const fileIo = {
   },
   copyFile: async (a,b) => { if (cloudCopyError) throw cloudCopyError; if (failCloudCopy) { fs.writeFileSync(nativePath(b),'partial'); throw Error('injected cloud write failure'); } await fs.promises.copyFile(nativePath(a),nativePath(b)); },
   fsync: fd => handles.get(fd).sync(), unlink: p => fs.promises.unlink(nativePath(p)),
-  rename: async (a,b) => { if (failManifest && b.endsWith('/index.json')) { throw new Error('injected manifest failure'); } if(b.includes("/usage-records/"))usageWrites.push(b); await fs.promises.rename(nativePath(a),nativePath(b)); }
+  rename: async (a,b) => { if (failSharedRename) throw Error('injected shared rename failure'); if (failManifest && b.endsWith('/index.json')) { throw new Error('injected manifest failure'); } if(b.includes("/usage-records/"))usageWrites.push(b); await fs.promises.rename(nativePath(a),nativePath(b)); }
 };
 // Reproduce the empty-input behavior observed on the physical HarmonyOS device.
 class Encoder { encodeInto(s) { return s === '' ? undefined : new TextEncoder().encode(s); } }
@@ -79,7 +82,10 @@ const http = { RequestMethod: { POST: 'POST', GET: 'GET' }, HttpDataType: { STRI
 } };
 const kits = {
   '@kit.PerformanceAnalysisKit': { hilog: { info() {}, error() {}, warn() {} } },
-  '@kit.CoreFileKit': { fileIo, cloudSync, fileUri: {getUriFromPath:p=>'file://'+p}, picker: { DocumentViewPicker: class { async save() {return [selectedFile];} async select() {return [selectedFile];} } } }, '@kit.ImageKit': { image: {} }, '@kit.NetworkKit': { http },
+  '@kit.CoreFileKit': { fileIo, cloudSync,
+    fileShare: { OperationMode: { READ_MODE: 1, WRITE_MODE: 2 }, activatePermission: async () => {} },
+    fileUri: {getUriFromPath:p=>'file://'+p, FileUri: class { constructor(uri) { this.path = decodeURIComponent(new URL(uri).pathname); } }},
+    picker: { DocumentViewPicker: class { async save() {return [selectedFile];} async select() {return [selectedFile];} } } }, '@kit.ImageKit': { image: {} }, '@kit.NetworkKit': { http },
   '@kit.MediaLibraryKit': {}, '@kit.ShareKit': {}, '@kit.ArkGraphics2D': { drawing: {} },
   '@kit.ArkTS': { util: { generateRandomUUID: () => crypto.randomUUID(), TextEncoder: Encoder, TextDecoder: Decoder,
     Base64Helper: class { async encodeToString(bytes) { return Buffer.from(bytes).toString('base64'); } encodeToStringSync(bytes) { return Buffer.from(bytes).toString('base64'); } decodeSync(text) { return Uint8Array.from(Buffer.from(text,'base64')); } } } },
@@ -99,7 +105,7 @@ function load(file) {
   const exports = {}; cache.set(file, exports);
   const compiled = ts.transpileModule(fs.readFileSync(file,'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021, experimentalDecorators: true } }).outputText;
   vm.runInNewContext(compiled, { exports, require: id => id.startsWith('.') ? load(path.resolve(path.dirname(file), id)) : kits[id],
-    Observed: cls => cls, setTimeout: scheduleTimer, clearTimeout: cancelTimer, Uint8Array, ArrayBuffer, DataView, Map, Set, Object, JSON, Error, console }, { filename: file });
+    Observed: cls => cls, canIUse: () => true, setTimeout: scheduleTimer, clearTimeout: cancelTimer, Uint8Array, ArrayBuffer, DataView, Map, Set, Object, JSON, Error, console }, { filename: file });
   return exports;
 }
 const model = load(path.join(source, 'model/Conversation'));
@@ -393,6 +399,43 @@ async function test(name, run) {
     let n=0;httpScript=req=>{n++;req.callback(null,401);};await assert.rejects(new McpClient(server).list(new Cancellation()),/401/);assert.equal(n,1);
     httpScript=()=>{}; const signal=new Cancellation();const before=destroyed; const pending=new McpClient(server).list(signal);
     await new Promise(r=>setTimeout(r,0));signal.cancel();await assert.rejects(pending);assert.ok(destroyed>before);
+  });
+  await test('shared mounts list, reject traversal and nested links, and preserve files on rename failure', async () => {
+    const root = '/sandbox/workspace/shared-test', external = '/sandbox/external/shared-test';
+    fs.mkdirSync(nativePath(root), { recursive: true });
+    fs.mkdirSync(nativePath(external), { recursive: true });
+    fs.writeFileSync(nativePath(external + '/note.txt'), 'original');
+    const folder = { id: 'mount-one', name: 'Documents', uri: 'file://' + external, addedAt: 1 };
+    const files = new NativeWorkspaceFiles(root, [folder]), signal = new Cancellation();
+    assert.equal((await files.list('.', signal)).entries.find(e => e.name === 'shared').kind, 'directory');
+    assert.equal((await files.list('shared', signal)).entries[0].name, 'Documents');
+    assert.equal((await files.read('shared/Documents/note.txt', signal)).content, 'original');
+    await files.write('shared/Documents/new/note.txt', 'nested', signal, { version: null });
+    assert.equal(fs.readFileSync(nativePath(external + '/new/note.txt'), 'utf8'), 'nested');
+    for (const bad of ['shared/Documents/../note.txt', 'shared/Documents//note.txt']) {
+      await assert.rejects(files.read(bad, signal));
+      await assert.rejects(files.checkedPath(bad));
+      await assert.rejects(files.remove(bad));
+    }
+    const outside = '/sandbox/external/outside'; fs.mkdirSync(nativePath(outside), { recursive: true });
+    fs.writeFileSync(nativePath(outside + '/secret.txt'), 'private');
+    fs.symlinkSync(nativePath(outside), nativePath(external + '/escape'), 'junction');
+    await assert.rejects(files.read('shared/Documents/escape/secret.txt', signal), /符号链接/);
+    await assert.rejects(files.write('shared/Documents/escape/new.txt', 'bad', signal), /符号链接/);
+    await assert.rejects(files.remove('shared/Documents/escape/secret.txt'), /符号链接/);
+    const original = await files.read('shared/Documents/note.txt', signal);
+    failSharedRename = true;
+    try { await assert.rejects(files.write(original.path, 'replacement', signal, { version: original.version }), /rename failure/); }
+    finally { failSharedRename = false; }
+    assert.equal(fs.readFileSync(nativePath(external + '/note.txt'), 'utf8'), 'original');
+    assert.ok(!fs.readdirSync(nativePath(external)).some(name => name.startsWith('.tinybot-')));
+    const alternate = new NativeWorkspaceFiles(root, [{ ...folder, id: 'another-project-mount', name: 'Alias' }]);
+    const writes = await Promise.allSettled([
+      files.write(original.path, 'first', signal, { version: original.version }),
+      alternate.write('shared/Alias/note.txt', 'second', signal, { version: original.version })
+    ]);
+    assert.equal(writes.filter(result => result.status === 'fulfilled').length, 1, 'Aliases share one mutation queue');
+    assert.match(writes.find(result => result.status === 'rejected').reason.message, /变化/);
   });
   await test('baseline persists, hides metadata, detects stale restore and preserves original',async()=>{
     const root='/sandbox/workspace/review';fs.mkdirSync(nativePath(root),{recursive:true});fs.writeFileSync(nativePath(root+'/note.txt'),'before');
