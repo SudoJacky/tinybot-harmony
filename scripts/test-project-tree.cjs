@@ -69,5 +69,15 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
   assert.ok(ids(groups().find(g => g.id === 'beta')).includes(projectThreadId));
   assert.ok(ids(groups().find(g => g.id === '')).includes(app.active.id));
   assert.equal(f.provider.requests.length, 0);
+  const shared = { id: 'mount-one', name: 'Documents', uri: 'file://docs/shared', addedAt: 1 };
+  const revoked = [];
+  f.resources.persistProjectFolders = async () => {};
+  f.resources.revokeProjectFolders = async folders => { revoked.push(...folders); };
+  assert.equal(await app.saveProject('Alpha', '', 'alpha', [shared]), true);
+  assert.equal(await app.saveProject('Beta', '', 'beta', [{ ...shared, id: 'mount-two' }]), true);
+  assert.equal(await app.saveProject('Alpha', '', 'alpha', []), true);
+  assert.equal(revoked.length, 0, 'Removing one project mount preserves another project using the same URI');
+  assert.equal(await app.saveProject('Beta', '', 'beta', []), true);
+  assert.equal(revoked.length, 1, 'The final project removal revokes the unused system grant');
   console.log('PASS project tree: membership, ordinary chats, duplicate names, empty projects, pin order, search, archive, collapse, independent pagination and new-chat destinations');
 })().catch(error => { console.error(error); process.exitCode = 1; });

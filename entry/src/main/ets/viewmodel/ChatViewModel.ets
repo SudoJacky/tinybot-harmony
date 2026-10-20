@@ -1,5 +1,6 @@
 import { Diagnostics } from '../model/Diagnostics';
 import { ProjectData } from '../model/Project';
+import { SharedFolder } from '../model/SharedFolders';
 import { AgentMode } from '../model/AgentMode';
 import { McpSettingsCommand, McpSettingsResult } from '../services/McpSettings';
 import { Cancellation } from '../services/Cancellation';
@@ -45,7 +46,9 @@ export class ChatViewModel {
   projects: ProjectData[] = [];
   get activeProject(): ProjectData | undefined { return this.projects.find((item) => item.id === this.active.projectId); }
   get activeWorkspaceId(): string { return this.requireSession().workspaceId; }
-  saveProject(name: string, instructions: string, id?: string): Promise<boolean> { return this.requireSession().saveProject(name, instructions, id); }
+  saveProject(name: string, instructions: string, id?: string, folders?: SharedFolder[]): Promise<boolean> {
+    return this.requireSession().saveProject(name, instructions, id, folders);
+  }
   openProject(projectId: string): Promise<boolean> {
     const thread = this.threads.filter((item) => item.projectId === projectId && !item.archived)
       .sort((a, b) => b.updatedAt - a.updatedAt)[0];

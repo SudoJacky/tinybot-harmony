@@ -1,5 +1,6 @@
 import { Diagnostics } from '../model/Diagnostics';
 import { projectName, projectFor, workspaceIdFor, validateProjects, projectContext } from '../model/Project';
+import { SharedFolder, validateSharedFolders } from '../model/SharedFolders';
 import { proposeSessionMemory, reviewSessionMemory, addMemoryDraft } from './SessionMemory';
 import { McpSettings, McpSettingsCommand, McpSettingsResult, McpSettingsHost } from './McpSettings';
 import { t } from '../model/I18n';
@@ -219,6 +220,7 @@ export class SessionService {
       const builtinsChanged = seedBuiltinSkills(data.extensions);
       data.productivity = data.productivity || defaultProductivity();
       for (const project of data.projects || []) { await this.resources.ensureWorkspace(project.id, project.workspaceId); }
+      if (this.resources.activateProjectFolders) { await this.resources.activateProjectFolders(data.projects || []); }
       for (const thread of data.threads) {
         await this.ensureThreadWorkspace(thread, data);
         if ((thread.pendingInputs || []).length > 0) { thread.queuePaused = true; }
@@ -361,27 +363,44 @@ export class SessionService {
     return this.resources.ensureWorkspace(thread.id, projectFor(data, thread)?.workspaceId);
   }
 
-  async saveProject(name: string, instructions: string, id?: string): Promise<boolean> {
+  async saveProject(name: string, instructions: string, id?: string, folders?: SharedFolder[]): Promise<boolean> {
     return this.mutate(t('保存项目失败：'), async () => {
       const candidate = this.snapshot();
       const projects = candidate.projects || [];
       let project = id ? projects.find((item) => item.id === id) : undefined;
       if (id && !project) { throw new Error(t('会话关联的项目不存在。')); }
+      validateSharedFolders(folders);
+      const previous = id ? (this.data.projects || []).find((item) => item.id === id) : undefined;
+      const previousFolders = previous?.sharedFolders || [];
+      const nextFolders = folders === undefined ? (project?.sharedFolders || []).slice() :
+        JSON.parse(JSON.stringify(folders)) as SharedFolder[];
       const now = Date.now();
       if (project) {
         project.name = projectName(name); project.instructions = instructions; project.updatedAt = now;
+        project.sharedFolders = nextFolders;
       } else {
         const projectId = this.resources.createId();
         project = { id: projectId, name: projectName(name), workspaceId: 'project-' + projectId,
-          instructions: instructions, createdAt: now, updatedAt: now };
+          instructions: instructions, createdAt: now, updatedAt: now, sharedFolders: nextFolders };
         projects.push(project);
         const thread = this.freshThread(); thread.projectId = project.id;
         candidate.threads.unshift(thread); candidate.activeThreadId = thread.id;
       }
       candidate.projects = projects;
+      // Newly picked URIs still hold the picker's temporary grant; persist them before committing.
+      const previousUris = new Set<string>(previousFolders.map((folder: SharedFolder) => folder.uri));
+      const added = nextFolders.filter((folder: SharedFolder) => !previousUris.has(folder.uri));
+      if (added.length > 0) {
+        if (!this.resources.persistProjectFolders) { throw new Error(t('当前平台无法保存共享文件夹权限。')); }
+        await this.resources.persistProjectFolders(added);
+      }
       validateProjects(candidate);
       if (!id) { await this.resources.ensureWorkspace(project.workspaceId); }
       await this.commitSettings(candidate);
+      const nextUris = new Set<string>(nextFolders.map((folder: SharedFolder) => folder.uri));
+      const removed = previousFolders.filter((folder: SharedFolder) => !nextUris.has(folder.uri) &&
+        !projects.some((item) => (item.sharedFolders || []).some((shared) => shared.uri === folder.uri)));
+      if (removed.length > 0 && this.resources.revokeProjectFolders) { await this.resources.revokeProjectFolders(removed); }
     });
   }
 
@@ -1176,7 +1195,8 @@ export class SessionService {
       servers: () => (this.data.productivity?.servers || []).filter((item) => !(thread.disabledMcpIds || []).includes(item.id)) };
     return new SelectedTools(new RuleTools(new ToolSet([this.resources.tools(thread.id, this.extensions, selected, extras,
       (thread.attachments || []).concat(...thread.messages.map((item) => (item.attachments || [])
-        .concat(...(item.steps || []).map((step) => step.steering?.attachments || [])))), live, projectFor(this.data, thread)?.workspaceId), new ReferenceTools(() => thread.messages)]), extras.options.readOnly), this.selectedToolSelection(thread));
+        .concat(...(item.steps || []).map((step) => step.steering?.attachments || [])))), live, projectFor(this.data, thread)?.workspaceId,
+      projectFor(this.data, thread)), new ReferenceTools(() => thread.messages)]), extras.options.readOnly), this.selectedToolSelection(thread));
   }
   private refreshContext(): void {
     const diagnosticMark = Diagnostics.begin();
