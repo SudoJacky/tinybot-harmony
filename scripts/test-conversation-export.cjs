@@ -5,6 +5,7 @@ const root = path.resolve(__dirname, '..');
 const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio');
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 const files = new Map(), writes = [], removed = [], released = [], draws = [], captureOrder = [];
+const exportLogs = [];
 let destination = 'saved', captureFailure = false, uuid = 0, packFailure = false;
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1ioAAAAASUVORK5CYII=', 'base64');
 const buffer = value => { const b = Buffer.from(value); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); };
@@ -23,7 +24,7 @@ const image = {
     release: async () => released.push('source') })
 };
 const native = {
-  '@kit.BasicServicesKit': {}, '@kit.PerformanceAnalysisKit': { hilog: { error() {} } },
+  '@kit.BasicServicesKit': {},
   '@kit.AbilityKit': {}, '@kit.ImageKit': { image },
   '@kit.ArkGraphics2D': { drawing: { Canvas: class { drawColor() {} drawImageRect(pixel, rect) { draws.push(rect); } } } },
   '@kit.CoreFileKit': { fileIo: io, picker: { DocumentViewPicker: class { async save() { return destination ? [destination] : []; } } } },
@@ -35,6 +36,7 @@ const native = {
 const cache = new Map();
 function load(name) {
   if (cache.has(name)) return cache.get(name);
+  if (name === 'model/Diagnostics') return { Diagnostics: { log: (...args) => exportLogs.push(args) } };
   if (name === 'model/I18n') return { t: (s, values = []) => s.replace(/\{(\d+)\}/g, (_, n) => values[+n]) };
   if (name === 'services/Attachments') return {
     readBounded: async fd => buffer(files.get(fd)),
@@ -154,9 +156,13 @@ function crc32(bytes) {
   assert.equal([...files.keys()].filter(name => name.startsWith('cache/')).length, 1, 'only final PNG remains');
   files.delete(output); captureFailure = true;
   await assert.rejects(conversationImage(context, sections, capture), /snapshot failed/);
+  assert.equal(exportLogs.at(-1)[1], 'export'); assert.equal(exportLogs.at(-1)[2], 'image_failed');
+  assert.equal(exportLogs.at(-1)[3].phase, 'capture');
+  assert.equal(exportLogs.at(-1)[3].chunk, sections.length - 1);
   assert.equal([...files.keys()].filter(name => name.startsWith('cache/')).length, 0);
   captureFailure = false; packFailure = true;
   await assert.rejects(conversationImage(context, sections, capture), /encoder failed/);
+  assert.equal(exportLogs.at(-1)[3].phase, 'encode');
   assert.equal([...files.keys()].filter(name => name.startsWith('cache/')).length, 0);
   packFailure = false;
   await assert.rejects(conversationImage(context, sections, async () => ({

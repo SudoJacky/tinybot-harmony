@@ -188,7 +188,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
   }
 
   private async mutateExternal(mount: MountPath, path: string, content: string, edits: TextEdit[],
-    cancellation: Cancellation, guard?: WorkspaceWriteGuard): Promise<WorkspaceWrite> {
+    cancellation: Cancellation, guard?: WorkspaceWriteGuard, capture: boolean = true): Promise<WorkspaceWrite> {
     if (!mount.relative) { throw new Error(t("请选择共享文件夹中的文件。")); }
     cancellation.check();
     const existing = await this.externalStat(mount.folder, mount.relative);
@@ -205,26 +205,54 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     const bytes = content.length === 0 ? new Uint8Array(0) : new util.TextEncoder().encodeInto(content);
     if (content.includes('\u0000')) { throw new Error(t('文本不能包含空字符。')); }
     const version = await contentVersion(content);
-    const slash = mount.relative.lastIndexOf('/');
-    const parent = slash < 0 ? '' : mount.relative.slice(0, slash);
-    if (parent) { await this.mkdirExternal(mount.folder, parent); }
-    const temporary = (parent ? parent + '/' : '') + '.tinybot-' + util.generateRandomUUID() + '.tmp';
-    const file = await this.openExternal(mount.folder, temporary,
-      fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.NOFOLLOW);
-    let closed = false;
-    let committed = false;
+    // Public providers may allow open/write while rejecting rename/unlink. Never truncate on open.
+    // Keep the first unreviewed backup in our private workspace before touching target bytes.
+    let stage = 'backup';
+    let file: fs.File;
     try {
-      await this.writeFd(file.fd, bytes, cancellation);
-      await fs.fsync(file.fd);
-      await fs.close(file); closed = true;
+      if (capture) { await this.capture(path, existing !== undefined, cancellation, before); }
       cancellation.check();
-      await this.renameExternal(mount.folder, temporary, mount.relative);
-      committed = true;
-      return { path: path, bytes: bytes.byteLength, written: true, before: before, after: content, created: !existing, version: version };
-    } finally {
-      if (!closed) { try { await fs.close(file); } catch (_) { /* Already closed. */ } }
-      if (!committed) { try { await this.unlinkExternal(mount.folder, temporary); } catch (_) { /* Best effort. */ } }
+      stage = 'open';
+      file = await this.openExternal(mount.folder, mount.relative,
+        fs.OpenMode.READ_WRITE | fs.OpenMode.NOFOLLOW | (existing ? 0 : fs.OpenMode.CREATE));
+    } catch (error) {
+      if (error instanceof ToolFailure) { throw error; }
+      throw this.externalFailure(stage, mount.folder, mount.relative, error as BusinessError);
     }
+    let failure: Error | undefined;
+    try {
+      stage = 'verify';
+      const opened = await readUtf8File(file.fd, cancellation);
+      if (opened !== before) {
+        throw new ToolFailure('FS_STALE_VERSION', t('文件自上次读取后已变化，请重新读取再修改。'), 'read_file', { path: path });
+      }
+      stage = 'write';
+      await this.writeFd(file.fd, bytes, cancellation);
+      stage = 'truncate';
+      cancellation.check();
+      await fs.truncate(file.fd, bytes.byteLength);
+      stage = 'fsync';
+      await fs.fsync(file.fd);
+    } catch (error) {
+      failure = error as Error;
+    }
+    try { await fs.close(file); }
+    catch (error) {
+      if (!failure) { stage = 'close'; failure = error as Error; }
+      else { failure = new Error(failure.message + '; close: ' + (error as Error).message); }
+    }
+    if (failure) {
+      if (failure instanceof ToolFailure && failure.code !== 'CANCELLED') { throw failure; }
+      const message = t('共享文件保存失败，文件可能只写入了一部分。请打开文件查看修改前备份，恢复或导出后再重试。') +
+        ' (' + stage + '): ' + failure.message;
+      if (failure instanceof ToolFailure) {
+        failure.message = message; failure.recovery = 'inspect_backup';
+        failure.details = { path: path, category: stage }; throw failure;
+      }
+      throw new ToolFailure('FS_EXTERNAL_IO', message, 'inspect_backup',
+        { path: path, category: stage, nativeCode: (failure as BusinessError).code });
+    }
+    return { path: path, bytes: bytes.byteLength, written: true, before: before, after: content, created: !existing, version: version };
   }
 
   private async writeFd(fd: number, bytes: Uint8Array, cancellation: Cancellation): Promise<void> {
@@ -237,15 +265,23 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     }
   }
 
-  private baselinePath(path: string): string { return this.root + '/.tinybot-review/' + encodeURIComponent(path) + '.json'; }
+  private async baselinePath(path: string): Promise<string> {
+    const mount = this.mountPath(path);
+    // URI identity survives a mount rename and prevents a replacement mount inheriting another file's backup.
+    const key = mount ? 'shared-' + (await contentVersion(this.externalUri(mount.folder, mount.relative)))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') : encodeURIComponent(path);
+    return this.root + '/.tinybot-review/' + key + '.json';
+  }
 
   async baseline(path: string): Promise<FileBaseline | undefined> {
-    if (this.isShared(path)) { return undefined; }
     workspaceRelativePath(path, false);
-    const location = this.baselinePath(path);
+    const location = await this.baselinePath(path);
     if (!await fs.access(location)) { return undefined; }
     const item = JSON.parse(await fs.readText(location)) as FileBaseline;
-    if (item.path !== path || typeof item.content !== 'string' || typeof item.existed !== 'boolean') { throw new Error(t("文件基线损坏。")); }
+    const mount = this.mountPath(path);
+    if ((mount ? item.sourceUri !== this.externalUri(mount.folder, mount.relative) : item.path !== path || item.sourceUri !== undefined) ||
+      typeof item.content !== 'string' || typeof item.existed !== 'boolean') { throw new Error(t("文件基线损坏。")); }
+    item.path = path;
     return item;
   }
 
@@ -255,7 +291,9 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     await this.requireDirectory(directory);
     if (await this.baseline(path)) { return; }
     cancellation.check();
-    const text = JSON.stringify({ path: path, existed: existed, content: content } as FileBaseline);
+    const mount = this.mountPath(path);
+    const text = JSON.stringify({ path: path, existed: existed, content: content,
+      sourceUri: mount ? this.externalUri(mount.folder, mount.relative) : undefined } as FileBaseline);
     const temporary = directory + '/pending-' + util.generateRandomUUID();
     const file = await fs.open(temporary, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.NOFOLLOW);
     try {
@@ -266,22 +304,35 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
       }
       await fs.fsync(file.fd);
     } finally { await fs.close(file); }
-    await fs.rename(temporary, this.baselinePath(path));
+    await fs.rename(temporary, await this.baselinePath(path));
   }
 
   async accept(path: string): Promise<void> {
-    if (this.isShared(path)) { return; }
     workspaceRelativePath(path, false);
-    return withFileMutation(this.root + '/' + path, () => this.acceptUnlocked(path));
+    const mount = this.mountPath(path);
+    return withFileMutation(mount ? this.externalUri(mount.folder, mount.relative) : this.root + '/' + path,
+      () => this.acceptUnlocked(path));
   }
 
   private async acceptUnlocked(path: string): Promise<void> {
-    if (await this.baseline(path)) { await fs.unlink(this.baselinePath(path)); }
+    if (await this.baseline(path)) { await fs.unlink(await this.baselinePath(path)); }
   }
 
   async restore(path: string, expected: string): Promise<void> {
-    if (this.isShared(path)) { throw new Error(t("共享文件夹中的文件不支持恢复基线。")); }
     workspaceRelativePath(path, false);
+    if (this.isShared(path)) {
+      const mount = await this.requireMount(path);
+      return withFileMutation(this.externalUri(mount.folder, mount.relative), async () => {
+        const baseline = await this.baseline(path);
+        if (!baseline) { throw new Error(t("没有保存的修改基线。")); }
+        const current = await this.read(path, new Cancellation());
+        if (current.content !== expected) { throw new Error(t("文件已变化，请重新打开并检查。")); }
+        if (baseline.existed) {
+          await this.mutateExternal(mount, path, baseline.content, [], new Cancellation(), { version: current.version }, false);
+        } else { await this.unlinkExternal(mount.folder, mount.relative); }
+        await this.acceptUnlocked(path);
+      });
+    }
     return withFileMutation(this.root + '/' + path, () => this.restoreUnlocked(path, expected));
   }
 
@@ -351,7 +402,13 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     try {
       return await fs.open(this.externalPath(folder, relative), mode);
     } catch (error) {
-      return await fs.open(this.externalUri(folder, relative), mode);
+      try { return await fs.open(this.externalUri(folder, relative), mode); }
+      catch (uriError) {
+        // URI providers may only open existing files even when CREATE is requested.
+        const failure = this.externalFailure('open', folder, relative, error as BusinessError);
+        failure.message += '; URI (' + (uriError as BusinessError).code + '): ' + (uriError as Error).message;
+        throw failure;
+      }
     }
   }
 
@@ -407,12 +464,10 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     }
   }
 
-  private async renameExternal(folder: SharedFolder, from: string, to: string): Promise<void> {
-    try {
-      await fs.rename(this.externalPath(folder, from), this.externalPath(folder, to));
-    } catch (error) {
-      await fs.rename(this.externalUri(folder, from), this.externalUri(folder, to));
-    }
+  private externalFailure(operation: string, folder: SharedFolder, relative: string, error: BusinessError): ToolFailure {
+    return new ToolFailure('FS_EXTERNAL_IO', 'Shared folder ' + operation + ' failed (' + error.code + '): ' +
+      error.message, 'inspect_error', { path: SHARED_FOLDER_ROOT + '/' + folder.name + '/' + relative,
+        category: operation, nativeCode: error.code });
   }
 
   private async unlinkExternal(folder: SharedFolder, relative: string): Promise<void> {

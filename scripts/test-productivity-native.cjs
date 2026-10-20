@@ -11,20 +11,36 @@ const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/et
 const source = path.resolve(__dirname, '../entry/src/main/ets');
 const fixture = path.resolve(__dirname, '../.hvigor/native-productivity-' + crypto.randomUUID());
 fs.mkdirSync(fixture, { recursive: true });
-const handles = new Map(); let failManifest = false; let failSharedRename = false; const usageWrites = [];
+const handles = new Map(), handlePaths = new Map(), writableHandles = new Set(); let failManifest = false; let failSharedRename = false;
+let sharedWriteFailure = ''; let cancelSharedWrite; let failBackupRename = false; const usageWrites = [];
 const cloudLocations = new Map(); let failCloudCopy = false; let cloudCopyError;
 const nativePath = p => {
   if (p.startsWith('file://')) p = decodeURIComponent(new URL(p).pathname);
   return p.startsWith('/sandbox/') ? path.join(fixture, p.slice(1)) : p;
 };
 const fileIo = {
-  OpenMode: { READ_ONLY: 1, CREATE: 2, WRITE_ONLY: 4, TRUNC: 8, NOFOLLOW: 16 },
+  OpenMode: { READ_ONLY: 1, CREATE: 2, WRITE_ONLY: 4, TRUNC: 8, NOFOLLOW: 16, READ_WRITE: 32 },
   access: async p => fs.existsSync(nativePath(p)), mkdir: (p, recursive = false) => fs.promises.mkdir(nativePath(p), { recursive }), readText: p => fs.promises.readFile(nativePath(p), 'utf8'),
   listFile: async p => fs.promises.readdir(nativePath(p)),
-  open: async (p, flags) => { const h = await fs.promises.open(nativePath(p), flags & 4 ? 'w' : 'r'); handles.set(h.fd, h); return { fd: h.fd }; },
+  open: async (p, flags) => {
+    if(p.startsWith('file://') && flags & 2 && !fs.existsSync(nativePath(p)))throw Object.assign(Error('URI provider cannot create a missing file'),{code:13900002});
+    const mode = flags & 32 ? fs.constants.O_RDWR | (flags & 2 ? fs.constants.O_CREAT : 0) : flags & 4 ? 'w' : 'r';
+    const h = await fs.promises.open(nativePath(p), mode);
+    handles.set(h.fd, h); handlePaths.set(h.fd, nativePath(p)); if(flags & 36)writableHandles.add(h.fd); return { fd: h.fd };
+  },
   read: async (fd, bytes) => (await handles.get(fd).read(new Uint8Array(bytes))).bytesRead,
-  write: async (fd, bytes, options) => (await handles.get(fd).write(new Uint8Array(bytes), 0, bytes.byteLength, options.offset)).bytesWritten,
-  close: async file => { const fd = typeof file === 'number' ? file : file.fd; await handles.get(fd).close(); handles.delete(fd); },
+  write: async (fd, bytes, options) => {
+    if(cancelSharedWrite && handlePaths.get(fd).includes('external')) {
+      await handles.get(fd).write(new Uint8Array(bytes).slice(0,3),0,3,options.offset);
+      cancelSharedWrite.cancel();cancelSharedWrite=undefined;return 3;
+    }
+    if(sharedWriteFailure==='write' && handlePaths.get(fd).includes('external')) {
+      await handles.get(fd).write(new Uint8Array(bytes).slice(0,3),0,3,options.offset);
+      throw Object.assign(Error('injected partial shared write'), {code:13900005});
+    }
+    return (await handles.get(fd).write(new Uint8Array(bytes), 0, bytes.byteLength, options.offset)).bytesWritten;
+  },
+  close: async file => { const fd = typeof file === 'number' ? file : file.fd; const external=handlePaths.get(fd)?.includes('external')&&writableHandles.has(fd); await handles.get(fd).close(); handles.delete(fd);handlePaths.delete(fd);writableHandles.delete(fd); if(external&&sharedWriteFailure==='close')throw Object.assign(Error('injected shared close failure'),{code:13900005}); },
   stat: async file => {
     const stat = await (typeof file === 'number' ? handles.get(file).stat() : fs.promises.stat(nativePath(file)));
     stat.location = cloudLocations.get(file) ?? 1;
@@ -39,8 +55,18 @@ const fileIo = {
     } catch(e) { if(e.code==='ENOENT')e.code=13900002;throw e; }
   },
   copyFile: async (a,b) => { if (cloudCopyError) throw cloudCopyError; if (failCloudCopy) { fs.writeFileSync(nativePath(b),'partial'); throw Error('injected cloud write failure'); } await fs.promises.copyFile(nativePath(a),nativePath(b)); },
-  fsync: fd => handles.get(fd).sync(), unlink: p => fs.promises.unlink(nativePath(p)),
-  rename: async (a,b) => { if (failSharedRename) throw Error('injected shared rename failure'); if (failManifest && b.endsWith('/index.json')) { throw new Error('injected manifest failure'); } if(b.includes("/usage-records/"))usageWrites.push(b); await fs.promises.rename(nativePath(a),nativePath(b)); }
+  fsync: async fd => { if(sharedWriteFailure==='fsync' && handlePaths.get(fd).includes('external'))throw Object.assign(Error('injected shared fsync failure'),{code:13900005});await handles.get(fd).sync(); },
+  truncate: async (fd,len) => { if(sharedWriteFailure==='truncate' && handlePaths.get(fd).includes('external'))throw Object.assign(Error('injected shared truncate failure'),{code:13900005});await handles.get(fd).truncate(len); },
+  unlink: p => fs.promises.unlink(nativePath(p)),
+  rename: async (a,b) => {
+    // Unlike open(), the native rename API takes paths only. Do not normalize picker URIs here.
+    if (a.startsWith('file://') || b.startsWith('file://')) throw Object.assign(Error('No such file or directory'), { code: 13900002 });
+    if (failSharedRename && a.includes('external')) throw Object.assign(Error('injected shared rename failure'), { code: 13900012 });
+    if (failBackupRename && b.includes('/.tinybot-review/')) throw Object.assign(Error('injected backup rename failure'), {code:13900025});
+    if (failManifest && b.endsWith('/index.json')) { throw new Error('injected manifest failure'); }
+    if(b.includes("/usage-records/"))usageWrites.push(b);
+    await fs.promises.rename(nativePath(a),nativePath(b));
+  }
 };
 // Reproduce the empty-input behavior observed on the physical HarmonyOS device.
 class Encoder { encodeInto(s) { return s === '' ? undefined : new TextEncoder().encode(s); } }
@@ -400,7 +426,7 @@ async function test(name, run) {
     httpScript=()=>{}; const signal=new Cancellation();const before=destroyed; const pending=new McpClient(server).list(signal);
     await new Promise(r=>setTimeout(r,0));signal.cancel();await assert.rejects(pending);assert.ok(destroyed>before);
   });
-  await test('shared mounts list, reject traversal and nested links, and preserve files on rename failure', async () => {
+  await test('shared mounts write without rename, keep private backups, reject traversal and nested links', async () => {
     const root = '/sandbox/workspace/shared-test', external = '/sandbox/external/shared-test';
     fs.mkdirSync(nativePath(root), { recursive: true });
     fs.mkdirSync(nativePath(external), { recursive: true });
@@ -410,8 +436,8 @@ async function test(name, run) {
     assert.equal((await files.list('.', signal)).entries.find(e => e.name === 'shared').kind, 'directory');
     assert.equal((await files.list('shared', signal)).entries[0].name, 'Documents');
     assert.equal((await files.read('shared/Documents/note.txt', signal)).content, 'original');
-    await files.write('shared/Documents/new/note.txt', 'nested', signal, { version: null });
-    assert.equal(fs.readFileSync(nativePath(external + '/new/note.txt'), 'utf8'), 'nested');
+    await files.write('shared/Documents/new/中文 笔记.md', 'nested', signal, { version: null });
+    assert.equal(fs.readFileSync(nativePath(external + '/new/中文 笔记.md'), 'utf8'), 'nested');
     for (const bad of ['shared/Documents/../note.txt', 'shared/Documents//note.txt']) {
       await assert.rejects(files.read(bad, signal));
       await assert.rejects(files.checkedPath(bad));
@@ -425,7 +451,14 @@ async function test(name, run) {
     await assert.rejects(files.remove('shared/Documents/escape/secret.txt'), /符号链接/);
     const original = await files.read('shared/Documents/note.txt', signal);
     failSharedRename = true;
-    try { await assert.rejects(files.write(original.path, 'replacement', signal, { version: original.version }), /rename failure/); }
+    try {
+      await files.edit(original.path, [{oldText:'original',newText:'短'}], original.version, signal);
+      assert.equal(fs.readFileSync(nativePath(external+'/note.txt'),'utf8'),'短','Shorter edits truncate trailing bytes');
+      await files.write(original.path, '', signal);
+      assert.equal(fs.statSync(nativePath(external+'/note.txt')).size,0,'Empty writes truncate correctly');
+      assert.equal((await files.baseline(original.path)).content,'original');
+      await files.restore(original.path,'');
+    }
     finally { failSharedRename = false; }
     assert.equal(fs.readFileSync(nativePath(external + '/note.txt'), 'utf8'), 'original');
     assert.ok(!fs.readdirSync(nativePath(external)).some(name => name.startsWith('.tinybot-')));
@@ -436,6 +469,66 @@ async function test(name, run) {
     ]);
     assert.equal(writes.filter(result => result.status === 'fulfilled').length, 1, 'Aliases share one mutation queue');
     assert.match(writes.find(result => result.status === 'rejected').reason.message, /变化/);
+  });
+  await test('shared direct writes retain recoverable backups on partial write, truncate, sync and close failures', async () => {
+    for(const phase of ['write','truncate','fsync','close']) {
+      const root='/sandbox/workspace/failure-'+phase, external='/sandbox/external/failure-'+phase;
+      fs.mkdirSync(nativePath(root),{recursive:true});fs.mkdirSync(nativePath(external),{recursive:true});
+      fs.writeFileSync(nativePath(external+'/note.txt'),'original long text');
+      const folder={id:'mount',name:'Vault',uri:'file://'+external,addedAt:1};
+      const files=new NativeWorkspaceFiles(root,[folder]), signal=new Cancellation();
+      const before=await files.read('shared/Vault/note.txt',signal);
+      sharedWriteFailure=phase;
+      try {
+        await assert.rejects(files.write(before.path,'replacement',signal,{version:before.version}), error=>{
+          assert.equal(error.code,'FS_EXTERNAL_IO');assert.equal(error.recovery,'inspect_backup');
+          assert.equal(error.details.nativeCode,13900005);assert.equal(error.details.category,phase);
+          assert.match(error.message,/修改前备份/);return true;
+        });
+      } finally {sharedWriteFailure='';}
+      const restarted=new NativeWorkspaceFiles(root,[folder]);
+      assert.equal((await restarted.baseline(before.path)).content,'original long text');
+      const partial=await restarted.read(before.path,signal);
+      await restarted.restore(before.path,partial.content);
+      assert.equal(fs.readFileSync(nativePath(external+'/note.txt'),'utf8'),'original long text');
+      assert.equal(await restarted.baseline(before.path),undefined);
+      assert.ok(!fs.readdirSync(nativePath(external)).some(n=>n.startsWith('.tinybot-')));
+    }
+  });
+  await test('shared backup failure blocks mutation and backup identity follows the URI across mount renames', async () => {
+    const root='/sandbox/workspace/shared-backup', external='/sandbox/external/shared-backup';
+    fs.mkdirSync(nativePath(root),{recursive:true});fs.mkdirSync(nativePath(external),{recursive:true});
+    fs.writeFileSync(nativePath(external+'/note.txt'),'original');
+    const folder={id:'mount',name:'Vault',uri:'file://'+external,addedAt:1};
+    const files=new NativeWorkspaceFiles(root,[folder]),signal=new Cancellation(),p='shared/Vault/note.txt';
+    failBackupRename=true;
+    try {await assert.rejects(files.write(p,'changed',signal),e=>e.code==='FS_EXTERNAL_IO'&&e.details.category==='backup');}
+    finally{failBackupRename=false;}
+    assert.equal(fs.readFileSync(nativePath(external+'/note.txt'),'utf8'),'original');
+    await files.write(p,'changed',signal);
+    const renamed=new NativeWorkspaceFiles(root,[{...folder,name:'Renamed'}]);
+    assert.equal((await renamed.baseline('shared/Renamed/note.txt')).content,'original');
+    const other=new NativeWorkspaceFiles(root,[{...folder,uri:'file://'+external+'-other'}]);
+    assert.equal(await other.baseline(p),undefined,'Different mount at same display path cannot inherit a backup');
+    fs.writeFileSync(nativePath(external+'/note.txt'),'outside edit');
+    await assert.rejects(renamed.restore('shared/Renamed/note.txt','changed'),/文件已变化/);
+    assert.equal((await renamed.baseline('shared/Renamed/note.txt')).content,'original');
+    await renamed.accept('shared/Renamed/note.txt');
+    assert.equal(await files.baseline(p),undefined);
+  });
+  await test('cancelled shared writes retain cancellation semantics and a recoverable pre-change backup',async()=>{
+    const root='/sandbox/workspace/shared-cancel',external='/sandbox/external/shared-cancel';
+    fs.mkdirSync(nativePath(root),{recursive:true});fs.mkdirSync(nativePath(external),{recursive:true});
+    fs.writeFileSync(nativePath(external+'/note.txt'),'original');
+    const files=new NativeWorkspaceFiles(root,[{id:'mount',name:'Vault',uri:'file://'+external,addedAt:1}]);
+    const signal=new Cancellation();cancelSharedWrite=signal;
+    await assert.rejects(files.write('shared/Vault/note.txt','replacement',signal),e=>{
+      assert.equal(e.code,'CANCELLED');assert.equal(e.recovery,'inspect_backup');assert.match(e.message,/修改前备份/);return true;
+    });
+    assert.equal((await files.baseline('shared/Vault/note.txt')).content,'original');
+    const current=await files.read('shared/Vault/note.txt',new Cancellation());
+    await files.restore(current.path,current.content);
+    assert.equal(fs.readFileSync(nativePath(external+'/note.txt'),'utf8'),'original');
   });
   await test('baseline persists, hides metadata, detects stale restore and preserves original',async()=>{
     const root='/sandbox/workspace/review';fs.mkdirSync(nativePath(root),{recursive:true});fs.writeFileSync(nativePath(root+'/note.txt'),'before');

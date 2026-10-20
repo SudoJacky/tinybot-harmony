@@ -2,18 +2,19 @@ import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { SwipeRow } from '../common/SwipeRow';
 import { common } from '@kit.AbilityKit';
-import { picker } from '@kit.CoreFileKit';
+import { fileIo as fs, picker } from '@kit.CoreFileKit';
+import { util } from '@kit.ArkTS';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { NativeWorkspaceFiles } from '../services/NativeWorkspaceFiles';
 import { Cancellation } from '../services/Cancellation';
 import { importTextFile } from '../services/TextFiles';
-import { Attachments } from '../services/Attachments';
+import { Attachments, writeBytes } from '../services/Attachments';
 import { exportFile, shareFile } from '../services/NativeActions';
 import { aiAssistedFile } from '../model/ConversationExport';
 import { MarkdownView } from './MarkdownView';
 import { DataTable } from './DataTable';
-import { parseDelimited, lineDiff } from '../model/RichArtifacts';
+import { parseDelimited } from '../model/RichArtifacts';
 import { FileBaseline, WorkspaceEntry } from '../services/WorkspaceFiles';
 import { Btn, Font, Radius, Space, systemInsets } from '../common/Theme';
 import { Banner, BottomBar, EmptyState } from '../common/Widgets';
@@ -42,7 +43,6 @@ export struct WorkspacePanel {
   @State private refreshing: boolean = false;
   @State private error: string = '';
   @State private baseline: FileBaseline | undefined = undefined;
-  @State private reviewing: boolean = false;
   @State private csv: string[][] = [];
   @State private selection: string = '';
   @State private selectedStart: number = 0;
@@ -87,11 +87,11 @@ export struct WorkspacePanel {
     const path = this.join(entry.name);
     if (entry.kind === 'directory') { this.go(path); return; }
     this.selected = path; this.editing = false; this.content = ''; this.original = ''; this.imagePath = ''; this.previewError = '';
-    this.reviewing = false; this.baseline = undefined; this.csv = []; this.selection = '';
+    this.baseline = undefined; this.csv = []; this.selection = '';
     try {
+      this.baseline = await this.files.baseline(path);
       if (IMAGE_FILE.test(entry.name)) { this.imagePath = await this.files.checkedPath(path); }
       else { this.content = (await this.files.read(path, new Cancellation())).content; this.original = this.content; }
-      this.baseline = await this.files.baseline(path);
       if (/\.(csv|tsv)$/i.test(path)) { this.csv = parseDelimited(this.content, /\.tsv$/i.test(path) ? '\t' : ','); }
     } catch (error) { this.previewError = t("无法预览：") + (error as Error).message; }
     this.previewing = true;
@@ -135,6 +135,7 @@ export struct WorkspacePanel {
     this.busy = true;
     try {
       await this.files.write(path, '', new Cancellation()); await this.refresh();
+      this.baseline = await this.files.baseline(path);
       this.selected = path; this.content = ''; this.original = ''; this.imagePath = ''; this.previewError = '';
       this.editing = true; this.previewing = true;
     } catch (error) { this.error = (error as Error).message; }
@@ -147,20 +148,48 @@ export struct WorkspacePanel {
     try {
       await this.files.write(this.selected, this.content, new Cancellation());
       this.baseline = await this.files.baseline(this.selected);
-      this.original = this.content; this.editing = false; this.toast(t("已保存")); await this.refresh();
+      this.original = this.content; this.editing = false; this.previewError = ''; this.toast(t("已保存")); await this.refresh();
+    } catch (error) {
+      this.previewError = (error as Error).message;
+      try { this.baseline = await this.files.baseline(this.selected); }
+      catch (backupError) { this.previewError += '\n' + (backupError as Error).message; }
+    }
+    finally { this.busy = false; }
+  }
+
+  private async exportBaseline(): Promise<void> {
+    if (!this.baseline?.existed || this.locked()) { return; }
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    const temporary = context.cacheDir + '/file-backup-' + util.generateRandomUUID() + '.txt';
+    this.busy = true;
+    try {
+      const bytes: ArrayBuffer = this.baseline.content.length > 0 ?
+        new util.TextEncoder().encodeInto(this.baseline.content).buffer as ArrayBuffer : new ArrayBuffer(0);
+      await writeBytes(temporary, bytes);
+      try { await exportFile(context, temporary, t('备份-') + this.fileName(this.selected)); }
+      finally { await fs.unlink(temporary); }
     } catch (error) { this.previewError = (error as Error).message; }
     finally { this.busy = false; }
   }
 
-  private async reviewAction(restore: boolean): Promise<void> {
-    if (!this.files || this.locked()) { return; }
+  private async restoreBackup(): Promise<void> {
+    if (!this.files || !this.baseline?.existed || this.locked() || this.editing || this.previewError) { return; }
     this.busy = true;
     try {
-      if (restore) { await this.files.restore(this.selected, this.original); }
-      else { await this.files.accept(this.selected); }
+      await this.files.restore(this.selected, this.original);
       this.previewing = false; await this.refresh();
     } catch (error) { this.previewError = (error as Error).message; }
     finally { this.busy = false; }
+  }
+
+  private confirmRestore(): void {
+    if (!this.baseline?.existed || this.locked() || this.editing || this.previewError) { return; }
+    const scope = this.baseline.sourceUri ? t('共享文件将直接写回备份内容；恢复失败时备份会保留。') :
+      this.app.active.projectId ? t('这会恢复项目中的累计修改，可能包含其他会话的改动。') : '';
+    this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t('恢复修改前版本？'),
+      message: (scope ? scope + '\n' : '') + t('当前内容将被保存基线替换。'),
+      primaryButton: { value: t('取消'), action: () => {} },
+      secondaryButton: { value: t('恢复'), fontColor: $r('app.color.danger'), action: () => this.restoreBackup() } });
   }
   private reference(): void {
     const text = this.selection || this.content.slice(0, 4000);
@@ -272,45 +301,14 @@ export struct WorkspacePanel {
     .onClick(action)
   }
 
-  // Changed lines on tinted rows: removals red, additions green, hunk headers muted.
   @Builder
-  diffView() {
-    Column() {
-      ForEach(lineDiff(this.baseline?.content || '', this.content).split('\n'), (line: string) => {
-        Text(line.length > 0 ? line : ' ').fontSize(12).lineHeight(19).fontFamily('monospace').width('100%')
-          .padding({ left: 10, right: 10, top: 1, bottom: 1 }).copyOption(CopyOptions.LocalDevice)
-          .fontColor(line.startsWith('@@') ? $r('app.color.text_tertiary') : line.startsWith('- ') ? $r('app.color.danger') : $r('app.color.text_primary'))
-          .backgroundColor(line.startsWith('+ ') ? this.appearance.accentContainer : line.startsWith('- ') ? $r('app.color.danger_container') : Color.Transparent)
-      }, (line: string, index: number) => index + line)
-    }.width('100%').borderRadius(Radius.sm).clip(true).border({ width: 0.5, color: $r('app.color.divider') })
-  }
-
-  // The assistant changed this file during a task: keep the change or restore the saved baseline.
-  @Builder
-  reviewCard() {
-    Column({ space: 10 }) {
-      Row({ space: Space.sm }) {
-        SymbolGlyph($r('sys.symbol.square_and_pencil')).fontSize(18).fontColor([this.appearance.accent])
-        Column({ space: 2 }) {
-          Text(this.app.active.projectId ? t("项目中的待审修改") : t("助手修改了这个文件")).fontFamily(this.appearance.fontFamily).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
-          Text(this.app.active.projectId ? t("这里包含项目内各会话和文件编辑的累计修改。") : this.baseline?.existed ? t("确认保留修改，或恢复到修改前的版本。") : t("这是助手新建的文件。")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
-            .fontColor($r('app.color.text_secondary'))
-        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-        Button(this.reviewing ? t("看内容") : t("看差异")).fontFamily(this.appearance.fontFamily).id('workspace-diff').attributeModifier(Btn.textSmall)
-          .padding({ left: 10, right: 10 }).onClick(() => { this.reviewing = !this.reviewing; })
-      }.width('100%')
-      Row({ space: Space.sm }) {
-        Button(this.baseline?.existed ? t("恢复原版") : t("删除文件")).fontFamily(this.appearance.fontFamily).id('workspace-restore').attributeModifier(Btn.plainSmall)
-          .height(36).layoutWeight(1).enabled(!this.locked()).onClick(() => {
-            this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t("恢复修改前版本？"), message: (this.app.active.projectId ? t("这会恢复项目中的累计修改，可能包含其他会话的改动。") + "\n" : "") + (this.baseline?.existed ? t("当前内容将被保存基线替换。") : t("此文件是新建文件，恢复会删除它。")),
-              primaryButton: { value: t("取消"), action: () => {} }, secondaryButton: { value: t("恢复"), fontColor: $r('app.color.danger'), action: () => this.reviewAction(true) } });
-          })
-        Button(t("保留修改")).fontFamily(this.appearance.fontFamily).id('workspace-accept').attributeModifier(Btn.primarySmall).height(36).layoutWeight(1)
-          .enabled(!this.locked()).onClick(() => this.reviewAction(false))
-      }.width('100%')
-    }.padding(Space.md).borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
-    .border({ width: 1, color: this.appearance.accentContainer })
-    .margin({ left: Space.page, right: Space.page, bottom: Space.sm })
+  backupMenu() {
+    Menu() {
+      MenuItem({ content: t('导出修改前备份') }).id('workspace-export-backup')
+        .enabled(!this.locked()).onClick(() => this.exportBaseline())
+      MenuItem({ content: t('恢复原版') }).id('workspace-restore')
+        .enabled(!this.locked() && this.previewError.length === 0).onClick(() => this.confirmRestore())
+    }
   }
 
   @Builder
@@ -333,6 +331,13 @@ export struct WorkspacePanel {
           Button(t("编辑")).fontFamily(this.appearance.fontFamily).id('workspace-edit-save').attributeModifier(Btn.tonalSmall).enabled(!this.locked())
             .onClick(() => { this.editing = true; })
         }
+        if (!this.editing && this.baseline?.existed) {
+          Button({ type: ButtonType.Circle }) {
+            SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(22).fontColor([$r('app.color.text_primary')])
+          }.fontFamily(this.appearance.fontFamily).id('workspace-backup-menu').width(40).height(40)
+            .backgroundColor(Color.Transparent).accessibilityText(t('更多操作')).enabled(!this.locked())
+            .bindMenu(this.backupMenu, { systemMaterial: this.appearance.surface, mask: false })
+        }
       }.width('100%').height(56).padding({ left: 4, right: Space.page })
       if (this.previewError.length > 0) {
         Banner({ text: this.previewError }).padding({ left: Space.page, right: Space.page })
@@ -350,8 +355,6 @@ export struct WorkspacePanel {
           Column() {
             if (this.previewError.length === 0 && this.content.length === 0) {
               EmptyState({ icon: $r('sys.symbol.doc_text'), title: t("空文件"), caption: t("点右上角“编辑”开始写内容。") })
-            } else if (this.reviewing && this.baseline) {
-              this.diffView()
             } else if (this.csv.length > 0) {
               DataTable({ header: this.csv[0], rows: this.csv.slice(1), maxHeight: 4000 })
             } else if (MARKDOWN_FILE.test(this.selected)) {
@@ -365,9 +368,6 @@ export struct WorkspacePanel {
         }.layoutWeight(1).width('100%').scrollBar(BarState.Auto).align(Alignment.Top).edgeEffect(EdgeEffect.Spring)
       }
       if (!this.editing) {
-        if (this.baseline && !this.previewError) {
-          this.reviewCard()
-        }
         Row() {
           if (!this.imagePath && !this.previewError) {
             this.toolbarButton($r('sys.symbol.quote'), t("引用"), 'workspace-reference', false, () => this.reference())

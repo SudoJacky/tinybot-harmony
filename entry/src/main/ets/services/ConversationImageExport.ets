@@ -3,8 +3,8 @@ import { image } from '@kit.ImageKit';
 import { drawing } from '@kit.ArkGraphics2D';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 import { BusinessError } from '@kit.BasicServicesKit';
+import { Diagnostics } from '../model/Diagnostics';
 import { ConversationSection } from '../model/ConversationExport';
 import { exportMetadata, stampPng } from '../model/ExportMetadata';
 import { t } from '../model/I18n';
@@ -68,6 +68,7 @@ export async function conversationImage(context: common.UIAbilityContext, sectio
       top += section.height;
     }
     stage = 'encode';
+    // Add AI Metadata
     const bytes = stampPng(new Uint8Array(await pack(result)),
       new util.TextEncoder().encodeInto(JSON.stringify(exportMetadata(id))));
     if (bytes.byteLength > MAX_BYTES) { throw new Error(t('会话图片超过 20 MB，请导出 Markdown。')); }
@@ -75,8 +76,8 @@ export async function conversationImage(context: common.UIAbilityContext, sectio
     return output;
   } catch (error) {
     const failure = error as BusinessError;
-    hilog.error(0x0000, 'TinybotExport', 'Image export failed: stage=%{public}s section=%{public}d kind=%{public}s code=%{public}d error=%{public}s',
-      stage, currentSection, sections[currentSection]?.kind || '', failure.code || 0, failure.message || JSON.stringify(error));
+    Diagnostics.log('error', 'export', 'image_failed',
+      { phase: stage, chunk: currentSection, code: failure.code || 0 }, error as Error);
     throw error as Error;
   } finally {
     await result?.release();

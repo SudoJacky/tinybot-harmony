@@ -10,7 +10,7 @@ devecocli build
 .\scripts\test.ps1
 ```
 
-`test.ps1` 先跑 Node 验证脚本（词条与内置 Skill 检查、账号、日志、浏览器、渲染、设置、预览、工具、编排、团队、引导、法务文档），再用 DevEco 的 `hvigorw test` 跑 Hypium 单元测试，并检查报告确实刷新且 `Failure: 0, Error: 0`、通过数非零。
+`test.ps1` 先跑 Node 验证脚本（词条与内置 Skill 检查、账号、日志、浏览器、渲染、设置、预览、工具、编排、团队、文件备份恢复、引导、法务文档），再用 DevEco 的 `hvigorw test` 跑 Hypium 单元测试，并检查报告确实刷新且 `Failure: 0, Error: 0`、通过数非零。
 
 很多脚本读取的是编译产物——**先构建，再运行**。文中标注“需构建”的项在没有产物时会失败，这不是代码回归。
 
@@ -21,6 +21,7 @@ devecocli build
 | `build-locales.cjs --check` | 词条键一致性、占位符、代码中的 `t()` 引用 | 否 |
 | `build-builtin-skills.cjs --check` | 内置 Skill 打包是否为最新 | 否 |
 | `test-conversation-export.cjs` | 导出时的 Markdown/HTML 标识、PNG 元数据 CRC 与像素载荷、长会话完整拼接、失败清理 | 否 |
+| `test-workspace-backup-ui.cjs` | 编译后文件页的失败保存、内容无法预览时导出原始备份、重试与新文件状态 | 是 |
 | `test-huawei-account.cjs` | 登录/取消、错误码脱敏、重启恢复、账号切换、退出与迟到回调、存储失败、未登录请求拦截 | 否 |
 | `test-developer-diagnostics.cjs` | 诊断采集、导出与生命周期 | 否 |
 | `test-unified-logging.cjs` | 日志级别、脱敏、导出与禁用路径 | 否 |
@@ -60,7 +61,7 @@ devecocli build
 
 ## 需要单独运行的验证
 
-Hypium `ProjectFolders` 覆盖共享文件夹名称、数量、URI 去重、加载校验与模型上下文路径。`test-productivity-native.cjs` 还覆盖共享目录列表、嵌套创建、路径穿越与符号链接拒绝、重命名失败时保留原文，以及跨项目别名的版本竞争；系统选择器、持久化授权与设备重启后的激活需在 API 26 真机验证。
+Hypium `ProjectFolders` 覆盖共享文件夹名称、数量、URI 去重、加载校验与模型上下文路径。`test-productivity-native.cjs` 还覆盖共享目录列表、嵌套创建、路径穿越与符号链接拒绝、不依赖重命名的直接写入、备份失败时禁止写入、部分写入后的备份保留与恢复，以及跨项目别名的版本竞争；系统选择器、持久化授权与设备重启后的激活需在 API 26 真机验证。
 
 以下脚本不在 `test.ps1` 中，按改动范围单独执行：
 
