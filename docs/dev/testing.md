@@ -27,7 +27,7 @@ devecocli build
 | `test-browser-annotation.cjs` | 批注几何、导出与图片投递 | 否 |
 | `test-code-highlight.cjs` | Markdown 代码高亮 | 否 |
 | `test-stream-reveal.cjs` | 流式文字渐显 | 否 |
-| `test-markdown-performance.cjs` | 增量解析与全文一致性、稳定块复用、离屏高度占位、渐显收尾 | 是 |
+| `test-markdown-performance.cjs` | 增量解析与全文一致性（含逐字符到达的图片行）、稳定块复用、离屏高度占位、渐显收尾 | 是 |
 | `test-speech-orb.cjs` | 语音输入 UI 生命周期 | 是 |
 | `test-voice-composer.cjs` | 语音输入区交互 | 是 |
 | `test-drawing-board.cjs` | 画板初始化/导出/像素释放/附件保存 | 是 |
@@ -69,7 +69,7 @@ devecocli build
 | `test-thinking-motion.cjs` | 思考状态循环、交叉渐变与离屏暂停 |
 | `test-project-tree.cjs` | 侧栏项目分组、普通聊天、空项目、同名项目、置顶与归档 |
 | `test-thread-list-renderer.cjs` | 会话改名/删除/归档/置顶的排序与菜单、项目分组刷新 |
-| `test-message-actions-renderer.cjs` | 改写、重新生成、分支按钮的忙碌/保存失败禁用 |
+| `test-message-actions-renderer.cjs` | 改写、重新生成、分支按钮的忙碌/保存失败禁用，以及仅回答展示的 AI 标记 |
 | `test-team-renderer.cjs` | 团队、工具详情与编排子调用更新回调 |
 | `test-chat-disclosures.cjs` | 流式更新、过程重开、历史加载时的展开状态 |
 | `test-launch-actions-renderer.cjs` | 快捷入口保存草稿、创建独立会话、忙碌拒绝 |
