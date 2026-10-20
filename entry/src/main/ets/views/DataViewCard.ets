@@ -37,6 +37,7 @@ function tick(value: number): string {
 
 @Component
 export struct DataViewCard {
+  @Prop snapshotMode: boolean = false;
   @StorageProp('tinybot.appearance.style') @Watch('refreshPalette') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop @Watch('refreshData') content: string;
   @State private view: DataView | undefined = undefined;
@@ -258,13 +259,15 @@ export struct DataViewCard {
         }
         Row({ space: 4 }) {
           SymbolGlyph($r('sys.symbol.link')).fontSize(13).fontColor([$r('app.color.text_tertiary')])
-          Text(this.view.source).fontSize(11).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+          Text(this.view.source).fontSize(11).maxLines(this.snapshotMode ? 100 : 2).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
             .fontColor($r('app.color.text_tertiary')).copyOption(CopyOptions.LocalDevice)
-          if (this.isChart()) {
+          if (this.isChart() && !this.snapshotMode) {
             Button(this.table ? t("看图表") : t("看数据")).attributeModifier(Btn.textSmall).padding({ left: 8, right: 8 })
               .onClick(() => { this.table = !this.table; })
           }
-          Button(t("导出 CSV")).attributeModifier(Btn.textSmall).padding({ left: 8, right: 8 }).onClick(() => this.exportCsv())
+          if (!this.snapshotMode) {
+            Button(t("导出 CSV")).attributeModifier(Btn.textSmall).padding({ left: 8, right: 8 }).onClick(() => this.exportCsv())
+          }
         }.width('100%').margin({ bottom: -6 })
       }
       if (this.error) {

@@ -29,6 +29,8 @@ $env:DEVECO_STUDIO_HOME = $StudioPath
 if ($LASTEXITCODE -ne 0) { throw 'Markdown code highlighting tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-stream-reveal.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Streaming text reveal tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-conversation-export.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Conversation export metadata, PNG composition and cleanup tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-markdown-performance.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Markdown incremental parsing and renderer tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-speech-orb.cjs')

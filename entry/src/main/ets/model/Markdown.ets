@@ -16,6 +16,9 @@ function parseMarkdown(source: string): MarkdownParse {
   while (index < lines.length) {
     const line = lines[index];
     if (!line.trim()) { index++; continue; }
+    // Our export header is metadata, not prose. Fence bodies are consumed below
+    // as one block, so examples of the marker inside code remain visible.
+    if (/^<!-- tinybot-export-aigc \{[^\r\n]*\} -->$/.test(line)) { index++; continue; }
     starts.push(offsets[index]);
     const fence = line.match(/^\s*(```+|~~~+)(.*)$/);
     if (fence) {

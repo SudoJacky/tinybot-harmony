@@ -6,6 +6,7 @@ import { systemShare } from '@kit.ShareKit';
 import { util } from '@kit.ArkTS';
 import { Attachment } from '../model/Productivity';
 import { Attachments, readBounded, writeBytes } from './Attachments';
+import { exportMetadata, stampHtml, stampMarkdown } from '../model/ExportMetadata';
 
 export async function selectAttachments(context: common.UIAbilityContext, photo: boolean, maximum: number): Promise<Attachment[]> {
   if (maximum < 1) { throw new Error(t("每条消息最多添加 4 个附件。")); }
@@ -16,11 +17,20 @@ export async function selectAttachments(context: common.UIAbilityContext, photo:
   return result;
 }
 
-export async function exportFile(context: common.UIAbilityContext, source: string, name: string): Promise<void> {
+export async function exportFile(context: common.UIAbilityContext, source: string, name: string, aiAssisted: boolean = false): Promise<void> {
   const uris = await new picker.DocumentViewPicker(context).save({ newFileNames: [name] });
   if (!uris.length) { return; }
   const input = await fs.open(source, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
-  try { await writeBytes(uris[0], await readBounded(input.fd, 20 * 1024 * 1024)); }
+  try {
+    let bytes = await readBounded(input.fd, 20 * 1024 * 1024);
+    if (aiAssisted && /\.(md|markdown|html|htm)$/i.test(name)) {
+      const text = new util.TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decodeToString(new Uint8Array(bytes));
+      const metadata = exportMetadata(util.generateRandomUUID());
+      bytes = new util.TextEncoder().encodeInto(/\.html?$/i.test(name) ? stampHtml(text, metadata) : stampMarkdown(text, metadata)).buffer as ArrayBuffer;
+      if (bytes.byteLength > 20 * 1024 * 1024) { throw new Error(t('文件超出读取上限。')); }
+    }
+    await writeBytes(uris[0], bytes);
+  }
   finally { await fs.close(input); }
 }
 
