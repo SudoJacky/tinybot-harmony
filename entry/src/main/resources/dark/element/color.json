@@ -1,5 +1,6 @@
 {
   "color": [
+    { "name": "tiny_coral", "value": "#D97B5B" },
     { "name": "code_keyword", "value": "#D6A8EE" },
     { "name": "code_string", "value": "#A2D6AA" },
     { "name": "code_number", "value": "#F0BD8D" },

@@ -3,8 +3,21 @@ import { t } from './I18n';
 
 export interface OnboardingTask { title: string; prompt: string; preview: string; icon: string; }
 
-export interface OnboardingExampleColumn { label: string; value: string; }
-export interface OnboardingExample { title: string; documentTitle: string; columns: OnboardingExampleColumn[]; }
+export interface OnboardingExample {
+  kind: 'research' | 'trip' | 'digest';
+  title: string;
+  description: string;
+}
+export interface OnboardingResearch extends OnboardingExample {
+  heading: string; subject: string; traffic: number[]; hours: string[];
+  peak: string; tags: string[]; suggestion: string; offer: string; source: string;
+}
+export interface OnboardingTrip extends OnboardingExample {
+  heading: string; duration: string; weather: string; stops: string[]; footer: string;
+}
+export interface OnboardingDigest extends OnboardingExample {
+  heading: string; compression: string; conclusions: string[]; verification: string;
+}
 
 export function onboardingIntroduction(): string[] {
   return [
@@ -15,23 +28,24 @@ export function onboardingIntroduction(): string[] {
 }
 
 export function onboardingExamples(): OnboardingExample[] {
-  return [
-    { title: t('市场调研'), documentTitle: t('社区咖啡店 · 调研速览'), columns: [
-      { label: t('客群'), value: t('附近上班族') },
-      { label: t('需求'), value: t('快速取餐') },
-      { label: t('建议'), value: t('早餐咖啡组合') }
-    ] },
-    { title: t('旅行规划'), documentTitle: t('杭州 · 三天两晚'), columns: [
-      { label: t('第 1 天'), value: t('西湖漫步') },
-      { label: t('第 2 天'), value: t('灵隐访古') },
-      { label: t('第 3 天'), value: t('运河街巷') }
-    ] },
-    { title: t('资料整理'), documentTitle: t('报告 · 三点摘要'), columns: [
-      { label: t('发现'), value: t('需求增长') },
-      { label: t('问题'), value: t('交付偏慢') },
-      { label: t('下一步'), value: t('优化流程') }
-    ] }
-  ];
+  const research: OnboardingResearch = {
+    kind: 'research', title: t('市场调研'), heading: t('调研速览'), subject: t('社区咖啡店'),
+    traffic: [10, 20, 34, 27, 15, 8], hours: ['7', '8', '9', '10', '11', '12'],
+    peak: t('早高峰占 62%'), tags: [t('上班族'), t('快速取餐')],
+    suggestion: t('建议：早餐咖啡组合'), offer: t('¥15 咖啡＋可颂'), source: t('基于 3 份资料'),
+    description: t('示例：社区咖啡店调研速览，早高峰占六成，建议主推早餐咖啡组合。')
+  };
+  const trip: OnboardingTrip = {
+    kind: 'trip', title: t('旅行规划'), heading: t('杭州'), duration: t('三天两晚'), weather: t('晴 22°'),
+    stops: [t('西湖漫步'), t('灵隐访古'), t('运河街巷')], footer: t('步行约 9km · 2 晚住宿'),
+    description: t('示例：杭州三天两晚行程，西湖、灵隐与运河，步行约九公里，两晚住宿。')
+  };
+  const digest: OnboardingDigest = {
+    kind: 'digest', title: t('资料整理'), heading: t('报告 · 三点摘要'), compression: t('42 页 → 3 点'),
+    conclusions: [t('需求增长 ↑18%'), t('交付偏慢 +2 天'), t('下一步 优化排期')], verification: t('待核实'),
+    description: t('示例：四十二页报告整理为三点摘要，需求增长百分之十八，交付偏慢两天待核实，下一步优化排期。')
+  };
+  return [research, trip, digest];
 }
 
 // First-run shortcuts reuse the existing cloud and local provider presets.

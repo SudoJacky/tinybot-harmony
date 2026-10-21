@@ -63,16 +63,23 @@ function probe(relative, name, methods, globals = {}) {
   }).join('\n') + '\n} exports.Probe = Probe;'), { exports, t: value => value, ...globals });
   return new exports.Probe();
 }
+const idleTimers = new Map(); let idleTimerId = 0;
 const animations = [], TouchType = { Down: 0, Move: 1, Up: 2, Cancel: 3 };
 const mascot = Object.assign(probe('views/OnboardingMascot', 'OnboardingMascot',
   ['aboutToAppear', 'aboutToDisappear', 'visibilityChanged', 'syncPlayback', 'lift', 'eyeHeight', 'look',
     'clamp', 'startDrag', 'moveDrag', 'springBack', 'endDrag', 'cancelDrag', 'react', 'hello',
-    'moodChanged', 'isSleepy', 'eyeScaleX', 'eyeScaleY', 'eyeMoodY', 'moodGazeX', 'moodGazeY', 'smileOpacity', 'unit', 'smilePath',
+    'moodChanged', 'moodTilt', 'isSleepy', 'eyeScaleX', 'eyeScaleY', 'eyeMoodY', 'moodGazeX', 'moodGazeY', 'smileOpacity', 'unit', 'smilePath',
     'wakeChanged', 'sleepAmount', 'sleepBreath', 'sleepDrift', 'bodyScaleX', 'bodyScaleY', 'bodyAngle',
-    'cancelPeek', 'coverChanged'],
-  { TouchType, Curve: { EaseOut: {}, EaseInOut: {} }, curves: { springMotion: () => ({}) } }), {
+    'cancelPeek', 'coverChanged', 'resetCover', 'cancelIdle', 'scheduleBlink', 'scheduleGlance', 'resetAttention',
+    'cancelWakeMotion', 'playWakeBeat', 'expression', 'followSpark', 'keyInputChanged',
+    'connectedChanged', 'farewellChanged', 'speechChanged', 'dreamChanged', 'sparkScale', 'sparkOpacity'],
+  { TouchType, Curve: { EaseOut: {}, EaseInOut: {} }, curves: { springMotion: () => ({}) },
+    setTimeout: (callback, delay) => { const id = ++idleTimerId; idleTimers.set(id, { callback, delay }); return id; },
+    clearTimeout: id => idleTimers.delete(id) }), {
   mounted: false, visible: false, playing: false, foreground: true, active: true, phase: 0, diameter: 220, feedbackRevision: 0,
   mood: 'neutral', moodVisual: 'neutral', sleepy: false, waking: false, lookX: 0, lookY: 0,
+  blink: 0, idleX: 0, idleY: 0, idleRevision: 0, glanceRevision: 0, blinkTimer: -1, glanceTimer: -1, wakeTimers: [], wakeRevision: 0, wakeBeat: 0,
+  reaction: 0, feedback: 0, dragX: 0, dragY: 0, sparkX: 0, sparkY: 0, sparkReaction: 0,
   coverEyes: false, peekProgress: 0, peekRevision: 0, peekTimer: -1,
   appearance: { effectStrength: 1 }, getUIContext: () => ({ createAnimator: options => {
     const animator = { options, plays: 0, pauses: 0, cancelled: false,
@@ -89,7 +96,9 @@ animator.onFrame(0.6); assert.equal(mascot.phase, 0.25);
 mascot.visible = true; mascot.appearance.effectStrength = 0; mascot.syncPlayback();
 assert.equal(mascot.playing, false); assert.equal(mascot.lift(), 0);
 mascot.appearance.effectStrength = 1; mascot.syncPlayback(); assert.equal(animations.length, 1);
-mascot.phase = 0.58; assert.ok(mascot.eyeHeight() < 0.11);
+mascot.phase = 0.58; assert.equal(mascot.eyeHeight(), 1, 'Blink no longer follows the float phase');
+assert.ok(idleTimers.get(mascot.blinkTimer).delay >= 2500 && idleTimers.get(mascot.blinkTimer).delay <= 6000);
+mascot.blink = 1; assert.ok(mascot.eyeHeight() < 0.11); mascot.blink = 0;
 mascot.look({ type: TouchType.Down, touches: [{ x: 1000, y: -100 }] });
 assert.equal(mascot.gazeX, 7); assert.equal(mascot.gazeY, -5);
 mascot.look({ type: TouchType.Cancel, touches: [] }); assert.equal(mascot.gazeX, 0);
@@ -103,6 +112,9 @@ mascot.getUIContext = () => ({ animateTo: (options, action) => { action(); if (o
 mascot.diameter = 220; assert.equal(mascot.smilePath(), 'M 7 10.5 Q 31.5 45.5 56 10.5');
 mascot.diameter = 110; assert.equal(mascot.smilePath(), 'M 3.5 5.25 Q 15.75 22.75 28 5.25',
   'The smile must use physical pixels and scale with the character instead of collapsing to a dot');
+const oldGlance = idleTimers.get(mascot.glanceTimer).callback;
+mascot.resetAttention(); oldGlance();
+assert.equal(mascot.idleX, 0, 'Interaction invalidates a pending idle glance');
 mascot.allowDrag = true; mascot.startDrag({ offsetX: 1000, offsetY: -1000 });
 assert.equal(mascot.dragX, 64); assert.equal(mascot.dragY, -44); assert.equal(mascot.lift(), 0);
 mascot.moveDrag({ offsetX: -1000, offsetY: 1000 }); assert.equal(mascot.dragX, -64); assert.equal(mascot.dragY, 44);
@@ -111,12 +123,12 @@ assert.equal(mascot.visible, true); assert.equal(mascot.dragging, true);
 assert.equal(mascot.dragX, -64); assert.equal(mascot.dragY, 44,
   'A shrinking but still visible mascot must not snap home while the finger is down');
 mascot.mood = 'curious'; mascot.moodChanged();
-assert.equal(mascot.moodGazeX(), 3); assert.equal(mascot.moodGazeY(), -2);
+assert.equal(mascot.moodGazeX(), 0); assert.equal(mascot.moodGazeY(), 0);
 assert.equal(mascot.dragging, true); assert.equal(mascot.dragX, -64,
   'Expression changes must preserve a held gesture and the same animation instance');
 mascot.mood = 'surprised'; mascot.moodChanged(); const wideEye = mascot.eyeScaleY();
-mascot.mood = 'focused'; mascot.moodChanged(); assert.ok(mascot.eyeScaleY() < wideEye);
-mascot.mood = 'happy'; mascot.moodChanged(); assert.ok(mascot.smileOpacity() > 0);
+mascot.mood = 'focused'; mascot.moodChanged(); assert.equal(mascot.expression(), 'surprised', 'Dragging takes precedence over the background mood');
+mascot.mood = 'happy'; mascot.moodChanged(); assert.equal(mascot.smileOpacity(), 0, 'Held drag keeps its surprised expression');
 mascot.mood = 'neutral'; mascot.moodChanged(); assert.equal(mascot.smileOpacity(), 0);
 assert.equal(animations.length, 1, 'A mood change must not recreate the continuous animator');
 mascot.moveDrag({ offsetX: 52, offsetY: 24 }); assert.equal(mascot.dragX, 52); assert.equal(mascot.dragY, 24);
@@ -138,29 +150,54 @@ mascot.appearance.effectStrength = 1; mascot.syncPlayback();
 const originalUi = mascot.getUIContext, wakeAnimations = [];
 mascot.getUIContext = () => ({ animateTo: (options, action) => { wakeAnimations.push(options); action(); } });
 mascot.waking = true; mascot.wakeChanged();
-assert.equal(wakeAnimations[0].duration, 1200, 'Opening the eye and stretching must have time to settle');
-assert.equal(mascot.eyeHeight(), 1); assert.equal(mascot.sleepAmount(), 0, 'Sleep letters fade away as Tiny wakes');
-assert.equal(animations.length, 1, 'Sleeping and waking must reuse the continuous animator');
+assert.equal(wakeAnimations[0].duration, 120, 'A wake starts with an immediate startle');
+assert.equal(mascot.wakeBeat, 1);
+const beats = mascot.wakeTimers.map(id => idleTimers.get(id));
+assert.deepEqual(Array.from(beats, item => item.delay), [150, 300, 450, 800, 1050, 1300]);
+beats[0].callback(); assert.equal(mascot.wakeProgress, 0.38);
+beats[1].callback(); assert.equal(mascot.wakeProgress, 0);
+beats[2].callback(); assert.equal(mascot.expression(), 'surprised'); assert.equal(mascot.sleepAmount(), 0);
+beats[3].callback(); assert.equal(mascot.moodGazeX(), -7);
+beats[4].callback(); assert.equal(mascot.moodGazeX(), 7);
+beats[5].callback(); assert.equal(mascot.expression(), 'happy'); assert.equal(mascot.moodGazeX(), 0);
+assert.ok(mascot.smileOpacity() > 0, 'The final wake beat recognizes the user with a smile');
+assert.equal(animations.length, 1, 'Waking reuses the continuous idle animator');
 mascot.waking = false; mascot.wakeChanged(); assert.equal(mascot.eyeHeight(), 0.12);
+const wakeCount = wakeAnimations.length;
 mascot.appearance.effectStrength = 0; mascot.waking = true; mascot.wakeChanged();
-assert.equal(mascot.eyeHeight(), 1); assert.equal(wakeAnimations.length, 1, 'Motion-off wake must be immediate');
+assert.equal(mascot.eyeHeight(), 1); assert.equal(wakeAnimations.length, wakeCount, 'Motion-off wake must be immediate');
+beats[2].callback(); assert.equal(mascot.wakeBeat, 7, 'Cancelled wake callbacks cannot restore an old beat');
 mascot.getUIContext = originalUi; mascot.sleepy = false; mascot.waking = false;
 mascot.appearance.effectStrength = 1; mascot.tapCount = 0; mascot.reacting = false; mascot.react();
 const feedbackEnd = returns.shift(); assert.equal(mascot.reaction, 1);
 mascot.active = false; mascot.syncPlayback(); feedbackEnd();
 assert.equal(mascot.reaction, 0); assert.equal(returns.length, 0, 'A covered route must not start a follow-up tap animation');
+mascot.active = true; mascot.syncPlayback();
+const finishReaction = () => { while (returns.length) { returns.shift()(); } };
+mascot.speechLine = 0; mascot.speechChanged(); assert.equal(mascot.feedback, 3);
+assert.equal(mascot.reaction, 1); finishReaction(); assert.equal(mascot.reaction, 0);
+assert.equal(mascot.bodyAngle(), 0, 'A greeting returns to its neutral pose without a second click');
+mascot.connected = true; mascot.energized = true; mascot.connectedChanged();
+assert.equal(mascot.checkProgress, 1); assert.equal(mascot.feedback, 0);
+assert.equal(mascot.reaction, 1); assert.ok(mascot.sparkScale() > 1);
+finishReaction(); assert.equal(mascot.reaction, 0); assert.ok(mascot.sparkOpacity() >= 0.84);
+mascot.mood = 'oops'; mascot.moodChanged(); assert.equal(mascot.feedback, 2); finishReaction();
+mascot.appearance.effectStrength = 0; mascot.syncPlayback(); mascot.connected = false; mascot.connectedChanged();
+assert.equal(mascot.checkProgress, 0); assert.equal(mascot.reaction, 0);
 mascot.aboutToDisappear(); animator.onFrame(0.8); assert.equal(mascot.phase, 0.58); assert.ok(animator.cancelled);
+assert.equal(idleTimers.size, 0, 'Hidden/disposed actors retain no blink, glance or wake timers');
 console.log('PASS mascot touch feedback, blink/float, single animation, background/offscreen pause, effects-off mode and disposal');
 
 const peeks = new Map(), handMotions = []; let peekId = 0;
 const shy = Object.assign(probe('views/OnboardingMascot', 'OnboardingMascot',
-  ['attentionChanged', 'coverChanged', 'cancelPeek', 'moodGazeX', 'moodGazeY', 'syncPlayback', 'aboutToDisappear'],
+  ['attentionChanged', 'coverChanged', 'resetCover', 'keyInputChanged', 'cancelPeek', 'moodGazeX', 'moodGazeY', 'syncPlayback', 'aboutToDisappear'],
   { Curve: { EaseOut: {}, EaseInOut: {} },
     setTimeout: (callback, delay) => { const id = ++peekId; peeks.set(id, { callback, delay }); return id; },
     clearTimeout: id => peeks.delete(id) }), {
   mounted: true, visible: true, playing: true, foreground: true, active: true, scene: 3,
   coverEyes: false, coverProgress: 0, peekProgress: 0, peekRevision: 0, peekTimer: -1, feedbackRevision: 0,
-  lookX: -5, lookY: 4, attentionX: 0, attentionY: 0, appearance: { effectStrength: 1 },
+  lookX: -5, lookY: 4, attentionX: 0, attentionY: 0, idleX: 0, idleY: 0,
+  expression: () => 'neutral', resetAttention() {}, cancelIdle() {}, cancelWakeMotion() {}, scheduleBlink() {}, scheduleGlance() {}, appearance: { effectStrength: 1 },
   animator: { pause() {}, play() {}, cancel() {} },
   getUIContext: () => ({ animateTo: (options, action) => { handMotions.push(options); action(); } })
 });
@@ -175,6 +212,10 @@ shy.active = true; shy.syncPlayback(); coveredPeek();
 assert.equal(shy.peekProgress, 0); assert.equal(peeks.size, 1, 'A covered-route callback cannot advance a new peek');
 const peek = peeks.get(shy.peekTimer); peeks.delete(shy.peekTimer); peek.callback();
 assert.equal(shy.peekProgress, 1); assert.equal(shy.moodGazeX(), 4);
+shy.keyInputChanged(); assert.equal(shy.peekProgress, 0, 'Typing catches Tiny peeking');
+assert.equal(peeks.get(shy.peekTimer).delay, 1000);
+const caughtPeek = peeks.get(shy.peekTimer).callback; shy.keyInputChanged(); caughtPeek();
+assert.equal(shy.peekProgress, 0, 'Continued typing keeps the hands closed');
 shy.coverEyes = false; shy.coverChanged(); assert.equal(shy.coverProgress, 0); assert.equal(shy.moodGazeX(), 5);
 shy.coverEyes = true; shy.coverChanged(); const blurredPeek = peeks.get(shy.peekTimer).callback;
 shy.coverEyes = false; shy.coverChanged(); blurredPeek();
@@ -248,20 +289,24 @@ function page() {
 
   let resolve, calls = 0;
   const scheduled = new Map(), delays = new Map(), prepared = [], focusedFields = []; let timerId = 0, providerSaves = 0, scrolls = 0;
+  let keyboardMode = 7;
+  const keyboardModes = [];
   const panel = Object.assign(probe('views/OnboardingPanel', 'OnboardingPanel',
     ['aboutToAppear', 'aboutToDisappear', 'activeChanged', 'foregroundChanged', 'connectionChanged', 'animate',
-      'cancelWake', 'wake', 'continueWake', 'finish', 'move', 'selectTask', 'onMessageChange', 'currentPrompt',
+      'cancelWake', 'cancelTyping', 'cancelFeedback', 'sayGoodbye', 'actorMood', 'greetActor', 'wake', 'continueWake', 'finish', 'move', 'selectTask', 'onMessageChange', 'currentPrompt',
       'primaryEnabled', 'primaryAvailable', 'primaryLabel', 'primaryAction', 'connectSelected', 'connectProvider', 'settleTransition',
       'selectProvider', 'providerSelectionChanged', 'taskSelectionChanged', 'signInAccount',
-      'providerLookX', 'connectionDiameter', 'setKeyFocused', 'keepKeyVisible'],
+      'providerLookX', 'connectionDiameter', 'setConnectionFocus', 'endConnectionEditing', 'keepConnectionInputVisible'],
     { onboardingTasks: model.onboardingTasks, onboardingProviders: model.onboardingProviders,
-      Motion: { fast: 160, medium: 220, standard: {} }, Edge: { Top: 0, Bottom: 1 },
+      Motion: { fast: 160, medium: 220, standard: {} }, Edge: { Top: 0, Bottom: 1 }, KeyboardAvoidMode: { NONE: 4 },
       setTimeout: (callback, delay) => { const id = ++timerId; scheduled.set(id, callback); delays.set(id, delay); return id; },
       clearTimeout: id => scheduled.delete(id) }), {
+    hasWoken: false, typing: false, typingRevision: 0, typingTimer: -1, farewell: false, farewellTimer: -1,
     saving: false, busy: false, step: 0, selectedTask: 1, message: model.onboardingTasks()[1].prompt,
     active: true, foreground: true, configured: false, transitioning: false, transitionRevision: 0,
-    providerEditing: false, connectionAttempted: false, keyFocused: false, bodyHeight: 560,
-    connectionScroller: { scrollBy: () => { scrolls++; } },
+    providerEditing: false, connectionAttempted: false, keyFocused: false, connectionEditing: false, focusedConnectionField: '', bodyHeight: 560,
+    keyboardViewport: { keyboardHeight: 0, bottom: 0, observe() {}, dispose() {} }, previousKeyboardMode: undefined,
+    connectionScroller: { scrollBy: () => { scrolls++; }, scrollTo() {} },
     app: { providerProfiles: [], active: {}, error: '',
       providerEditor: { apiKey: '', error: '', fieldError: () => '', reset(profile) { this.id = profile.id; this.apiKey = ''; } },
       beginProvider(preset, id) {
@@ -282,9 +327,12 @@ function page() {
     } },
     appearance: { effectStrength: 1 },
     getUIContext: () => ({ animateTo: (options, action) => { action(); options.onFinish?.(); },
+      getKeyboardAvoidMode: () => keyboardMode,
+      setKeyboardAvoidMode: mode => { keyboardMode = mode; keyboardModes.push(mode); },
       px2vp: value => value, vp2px: value => value,
       getComponentUtils: () => ({ getRectangleById: id => id === 'onboarding-inline-key' ?
-        { windowOffset: { y: 200 }, size: { height: 44 } } : { windowOffset: { y: 100 }, size: { height: 100 } } }),
+        { windowOffset: { y: 200 }, size: { height: 44 } } : id === 'onboarding-panel' ?
+        { windowOffset: { y: 0 }, size: { height: 800 } } : { windowOffset: { y: 100 }, size: { height: 100 } } }),
       getFocusController: () => ({ requestFocus: id => focusedFields.push(id), clearFocus() {} }) }),
     onFinish: () => { calls++; return new Promise(done => { resolve = done; }); }
   });
@@ -314,16 +362,17 @@ function page() {
   const coveredWake = scheduled.get(panel.wakeTimer);
   panel.active = false; panel.activeChanged(); assert.equal(scheduled.size, 0); assert.equal(panel.step, 1);
   panel.active = true; assert.equal(panel.wakeReady, true); panel.continueWake(); assert.equal(panel.step, 2);
-  panel.move(-1); panel.wake(); coveredWake();
+  panel.move(-1); assert.equal(panel.wakeReady, true); panel.wake(); assert.equal(scheduled.size, 0, 'Returning to an awake Tiny does not restart the wake');
+  panel.hasWoken = false; panel.wake(); coveredWake();
   assert.equal(panel.step, 1); assert.equal(scheduled.size, 1, 'An old wake callback must not navigate or clear the new timer');
   panel.foreground = false; panel.foregroundChanged();
   assert.equal(scheduled.size, 0); assert.equal(panel.step, 1);
-  panel.foreground = true; panel.continueWake(); panel.move(-1); panel.wake();
+  panel.foreground = true; panel.continueWake(); panel.move(-1); panel.hasWoken = false; panel.wake();
   const wakeId = panel.wakeTimer, completedWake = scheduled.get(wakeId);
   scheduled.delete(wakeId); completedWake();
   assert.equal(panel.step, 2, 'A completed foreground wake opens the introduction');
   assert.equal(panel.waking, false); assert.equal(scheduled.size, 0);
-  panel.move(-1); panel.wake();
+  panel.move(-1); panel.hasWoken = false; panel.wake();
   const detachedWake = scheduled.values().next().value; panel.aboutToDisappear(); detachedWake();
   assert.equal(scheduled.size, 0, 'Leaving the panel must clear pending wake navigation');
   assert.equal(panel.step, 1, 'A detached wake callback must not navigate');
@@ -347,9 +396,40 @@ function page() {
   panel.providerSelectionChanged('zai', false);
   assert.equal(panel.selectedPreset, 'ollama'); assert.equal(panel.primaryLabel(), '保存服务');
   assert.equal(panel.providerLookX(), 5); assert.equal(prepared.at(-1).preset, 'ollama');
-  const expandedDiameter = panel.connectionDiameter(); panel.setKeyFocused(true);
+  const expandedDiameter = panel.connectionDiameter(); panel.setConnectionFocus('key', true);
   assert.equal(panel.keyFocused, true); assert.ok(panel.connectionDiameter() < expandedDiameter); assert.equal(scrolls, 1);
-  panel.setKeyFocused(false); assert.equal(panel.keyFocused, false);
+  assert.equal(panel.connectionEditing, true); assert.equal(keyboardMode, 4, 'Key entry overlays the keyboard instead of resizing the whole page');
+  panel.setConnectionFocus('key', true); assert.equal(keyboardModes.length, 1, 'Duplicate focus/edit events cannot overwrite the previous keyboard mode');
+  panel.keyboardViewport.keyboardHeight = 600; panel.keyboardViewport.onKeyboard(true);
+  panel.setConnectionFocus('url', true);
+  assert.equal(panel.keyFocused, false, 'URL editing never covers the eyes or starts peeking');
+  assert.equal(panel.connectionEditing, true); assert.equal(panel.connectionDiameter(), 96);
+  assert.equal(panel.focusedConnectionField, 'url'); assert.equal(keyboardMode, 4);
+  panel.setConnectionFocus('key', false);
+  assert.equal(panel.focusedConnectionField, 'url', 'Late blur from the previous field cannot cancel the new field');
+  panel.setConnectionFocus('key', true); panel.setConnectionFocus('url', false);
+  assert.equal(panel.keyFocused, true); assert.equal(panel.focusedConnectionField, 'key');
+  assert.equal(keyboardModes.length, 1, 'Switching fields keeps the keyboard layout and its original restoration mode');
+  panel.keyboardViewport.keyboardHeight = 0; panel.keyboardViewport.onKeyboard(false);
+  assert.equal(panel.connectionEditing, true); assert.equal(panel.keyFocused, true); assert.equal(keyboardMode, 4,
+    'Switching from URL to secure keyboard can report zero height after the new field starts editing');
+  panel.keyboardViewport.keyboardHeight = 600; panel.keyboardViewport.onKeyboard(true);
+  panel.setConnectionFocus('key', false); assert.equal(panel.keyFocused, false);
+  assert.equal(panel.connectionEditing, true, 'Providers stay hidden while the keyboard is closing');
+  assert.equal(keyboardMode, 4);
+  panel.keyboardViewport.keyboardHeight = 0; panel.keyboardViewport.onKeyboard(false);
+  assert.equal(panel.connectionEditing, false); assert.equal(keyboardMode, 7, 'Closing restores the previous page keyboard mode');
+  panel.setConnectionFocus('url', true);
+  assert.equal(panel.connectionEditing, true); assert.equal(panel.keyFocused, false);
+  panel.keyboardViewport.keyboardHeight = 600; panel.keyboardViewport.onKeyboard(true);
+  panel.keyboardViewport.keyboardHeight = 0; panel.keyboardViewport.onKeyboard(false);
+  panel.setConnectionFocus('url', false);
+  assert.equal(panel.connectionEditing, false); assert.equal(panel.focusedConnectionField, '');
+  assert.equal(keyboardMode, 7, 'Closing the URL keyboard also restores the previous mode');
+  panel.setConnectionFocus('key', true); panel.active = false; panel.activeChanged();
+  assert.equal(panel.connectionEditing, false); assert.equal(keyboardMode, 7, 'Covered routes must not inherit overlay mode');
+  panel.setConnectionFocus('key', true); assert.equal(panel.connectionEditing, false, 'Hidden focus callbacks cannot reclaim keyboard mode');
+  panel.active = true;
   await panel.connectSelected();
   assert.equal(providerSaves, 1); assert.equal(panel.providerEditing, false);
   assert.equal(panel.app.active.modelRef.providerId, 'saved-ollama'); assert.equal(panel.primaryLabel(), '继续');
@@ -421,7 +501,7 @@ function page() {
       setTimeout: (callback, delay) => { const id = ++introTimerId; introTimers.set(id, { callback, delay }); return id; },
       clearTimeout: id => introTimers.delete(id) }), {
     mounted: false, visible: false, active: true, foreground: true, appearance: { effectStrength: 1 },
-    line: 0, timer: -1, revision: 0, bodyHeight: 560,
+    line: 0, spokenLine: -1, onSpeak() {}, timer: -1, revision: 0, bodyHeight: 560, speechHeight: 88,
     getUIContext: () => ({ animateTo: (_, action) => action() })
   });
   const advanceIntro = () => {
@@ -441,6 +521,12 @@ function page() {
   intro.visibilityChanged(1); intro.appearance.effectStrength = 0; intro.syncPlayback();
   assert.equal(introTimers.size, 0, 'Motion-off introduction has no automatic text changes');
   intro.bodyHeight = 420; assert.ok(intro.actorDiameter() < 200, 'Short viewports make room for examples');
+  intro.bodyHeight = 562; intro.speechHeight = 111;
+  assert.ok(intro.actorDiameter() + intro.speechHeight + 332 <= intro.bodyHeight,
+    'Three-line English speech must leave the entire caption and pagination in view');
+  intro.speechHeight = 187;
+  assert.ok(intro.actorDiameter() + intro.speechHeight + 332 <= intro.bodyHeight,
+    'Static reduced-motion speech keeps page controls visible by shrinking the decorative actor');
   intro.appearance.effectStrength = 1; intro.syncPlayback();
   advanceIntro(); assert.equal(intro.line, 2); assert.equal(introTimers.size, 0,
     'The introduction stops scheduling timers after the last line; finished examples stay visible');
@@ -451,9 +537,74 @@ function page() {
   assert.equal(introTimers.size, 0); assert.equal(intro.line, 0);
   console.log('PASS introduction reading intervals, finite playback, stale callbacks, background/offscreen pause, reduced motion and disposal');
 
+  const deckTimers = new Map(); let deckTimerId = 0;
+  const looks = [], deckAnimations = [];
+  const deck = Object.assign(probe('views/OnboardingExampleDeck', 'OnboardingExampleDeck',
+    ['aboutToAppear', 'aboutToDisappear', 'stopPlayback', 'syncPlayback', 'scheduleTour', 'select', 'choose', 'side', 'fan', 'sideOffset'],
+    { Motion: { enter: {} },
+      setTimeout: (callback, delay) => { const id = ++deckTimerId; deckTimers.set(id, { callback, delay }); return id; },
+      clearTimeout: id => deckTimers.delete(id) }), {
+    mounted: false, active: true, speechLine: 0, appearance: { effectStrength: 1 }, compact: false,
+    selected: 0, stageWidth: 328, manual: false, tourStep: -1, timer: -1, lookTimer: -1, revision: 0,
+    onLook: down => looks.push(down),
+    getUIContext: () => ({ animateTo: (options, action) => { deckAnimations.push(options); action(); } })
+  });
+  const tickDeck = id => { const pending = deckTimers.get(id); assert.ok(pending); deckTimers.delete(id); pending.callback(); };
+  deck.aboutToAppear(); assert.equal(deckTimers.size, 0);
+  deck.speechLine = 1; deck.syncPlayback(); assert.equal(deck.selected, 0);
+  assert.equal(deckTimers.get(deck.timer).delay, 1000);
+  assert.equal(deck.lookTimer, -1); assert.equal(looks.at(-1), true, 'The automatic tour holds one downward gaze');
+  tickDeck(deck.timer); assert.equal(deck.selected, 1); assert.equal(looks.at(-1), true);
+  const staleTour = deckTimers.get(deck.timer).callback;
+  deck.active = false; deck.syncPlayback(); assert.equal(deckTimers.size, 0); assert.equal(looks.at(-1), false);
+  deck.active = true; deck.syncPlayback(); staleTour(); assert.equal(deck.selected, 1);
+  tickDeck(deck.timer); assert.equal(deck.selected, 2);
+  tickDeck(deck.timer); assert.equal(deck.selected, 0); assert.equal(deck.timer, -1); assert.equal(looks.at(-1), false);
+  deck.speechLine = 2; deck.syncPlayback(); assert.equal(deckTimers.size, 0);
+  deck.active = false; deck.syncPlayback(); deck.active = true; deck.syncPlayback();
+  assert.equal(deckTimers.size, 0, 'Completed tour never loops after foregrounding');
+  deck.tourStep = -1; deck.speechLine = 1; deck.syncPlayback();
+  const supersededTour = deckTimers.get(deck.timer).callback;
+  deck.choose(2); supersededTour(); assert.equal(deck.selected, 2); assert.equal(deck.timer, -1);
+  deck.speechLine = 2; deck.syncPlayback(); assert.equal(deck.selected, 2, 'Speech must not reset a manually selected page');
+  deck.choose(3); assert.equal(deck.selected, 0); deck.choose(-1); assert.equal(deck.selected, 2);
+  const staleLook = deckTimers.get(deck.lookTimer).callback;
+  deck.appearance.effectStrength = 0; deck.syncPlayback(); assert.equal(deckTimers.size, 0);
+  const animationCount = deckAnimations.length; deck.choose(1);
+  assert.equal(deck.selected, 1); assert.equal(deckAnimations.length, animationCount); assert.equal(deckTimers.size, 0);
+  assert.equal(deck.fan(), false); assert.equal(deck.side(0), -1); assert.equal(deck.side(2), 1);
+  deck.appearance.effectStrength = 1; deck.compact = true; assert.equal(deck.fan(), false);
+  deck.compact = false; assert.equal(deck.fan(), true);
+  deck.stageWidth = 328; assert.equal(deck.sideOffset(), 79, 'Side pages fit the measured stage width');
+  deck.choose(0); deck.aboutToDisappear(); const lookCount = looks.length; staleLook();
+  assert.equal(looks.length, lookCount); assert.equal(deckTimers.size, 0);
+  deck.choose(1); assert.equal(deck.selected, 0, 'Unmounted deck ignores input');
+  console.log('PASS finite speech-synced deck, manual takeover, swipes, stale callbacks, hidden/disposed cleanup, compact and motion-off interaction');
+
+  const revealTimers = new Map(); let revealId = 0;
+  const paper = Object.assign(probe('views/OnboardingExamplePage', 'OnboardingExamplePage',
+    ['aboutToAppear', 'aboutToDisappear', 'cancelReveal', 'syncReveal', 'motion'],
+    { Motion: { enter: {} },
+      setTimeout: callback => { revealTimers.set(++revealId, callback); return revealId; },
+      clearTimeout: id => revealTimers.delete(id) }), {
+    mounted: false, selected: true, playing: true, appearance: { effectStrength: 1 },
+    revealed: true, timer: -1, revision: 0
+  });
+  paper.aboutToAppear(); assert.equal(paper.revealed, false);
+  assert.equal(paper.motion(320, 40).duration, 0, 'Reset is immediate, never a reverse animation');
+  const staleReveal = revealTimers.get(paper.timer);
+  paper.playing = false; paper.syncReveal(); staleReveal();
+  assert.equal(paper.revealed, true); assert.equal(revealTimers.size, 0);
+  paper.playing = true; paper.syncReveal(); const reveal = revealTimers.get(paper.timer); revealTimers.delete(paper.timer); reveal();
+  assert.equal(paper.motion(320, 40).delay, 40);
+  paper.appearance.effectStrength = 0; paper.syncReveal();
+  assert.equal(paper.revealed, true); assert.equal(paper.motion(320, 40).duration, 0); assert.equal(paper.motion(320, 40).delay, 0);
+  paper.appearance.effectStrength = 1; paper.syncReveal(); paper.aboutToDisappear(); assert.equal(revealTimers.size, 0);
+  console.log('PASS paper reveals, per-element timing, immediate resets and background/disposal/reduced-motion cleanup');
+
   const journeys = [];
   const actor = Object.assign(probe('views/OnboardingPanel', 'OnboardingPanel',
-    ['stageChanged', 'locateActor', 'placeActor', 'followActorScroll', 'greetActor', 'animate', 'keepKeyVisible'],
+    ['stageChanged', 'locateActor', 'placeActor', 'followActorScroll', 'greetActor', 'animate', 'keepConnectionInputVisible'],
     { Motion: { standard: {} } }), {
     step: 1, active: true, foreground: true, transitioning: false, saving: false,
     actorReady: false, actorScene: -1, actorX: 0, actorY: 0, actorSize: 180, greeted: false,
@@ -477,15 +628,38 @@ function page() {
   actor.appearance.effectStrength = 0; actor.placeActor(32, 52, 64, true);
   assert.equal(actor.actorX, 32); assert.equal(actor.actorSize, 64); assert.equal(journeys.length, 1);
   actor.step = 3; actor.keyFocused = true;
-  actor.locateActor(3, { width: 80, height: 80, globalPosition: { x: 0, y: -200 } });
-  assert.equal(actor.actorY, 48); assert.equal(actor.actorSize, 96, 'Key entry keeps Tiny visible above the scrolling fields');
-  actor.followActorScroll(3, 'slot'); assert.equal(actor.actorY, 48, 'Scrolling the key into view must not scroll Tiny away');
+  actor.locateActor(3, { width: 96, height: 96, globalPosition: { x: 0, y: 200 } });
+  assert.equal(actor.actorY, 148); assert.equal(actor.actorSize, 96, 'Key entry uses its actual slot without a second pinned reserve');
+  actor.followActorScroll(3, 'slot'); assert.equal(actor.actorY, 120, 'The actor follows measured layout rather than competing with a hard-coded keyboard position');
   actor.keyFocused = false;
   actor.step = 4;
   actor.locateActor(4, { width: 64, height: 64, globalPosition: { x: 48, y: 180 } });
   assert.equal(actor.actorX, 56, 'The final task positions Tiny beside its speech bubble');
-  actor.greetActor(); assert.equal(actor.greeted, true);
-  actor.transitioning = true; actor.greetActor(); assert.equal(actor.greeted, true);
-  actor.transitioning = false; actor.greetActor(); assert.equal(actor.greeted, false);
+  actor.hasWoken = true; actor.step = 1;
+  actor.wake = () => { throw Error('An awake Tiny must not restart its wake journey'); };
+  actor.greetActor(); actor.greetActor();
+  panel.active = true; panel.foreground = true; panel.step = 4; panel.transitioning = false; panel.saving = false;
+  panel.appearance.effectStrength = 1;
+  panel.onMessageChange('Draft'); assert.equal(panel.actorMood(), 'focused');
+  const oldTyping = scheduled.get(panel.typingTimer);
+  panel.onMessageChange('Draft updated'); oldTyping(); assert.equal(panel.typing, true);
+  const typingEnd = scheduled.get(panel.typingTimer); scheduled.delete(panel.typingTimer); typingEnd();
+  assert.equal(panel.actorMood(), 'happy', 'A one-second typing pause settles into a smile');
+  panel.error = 'Could not save'; assert.equal(panel.actorMood(), 'oops'); panel.error = '';
+  panel.saving = true; assert.equal(panel.actorMood(), 'focused'); panel.saving = false;
+  let departures = 0;
+  panel.onFinish = async () => { departures++; };
+  const goodbye = panel.finish('start', 'Keep this draft');
+  assert.equal(panel.farewell, true); assert.equal(departures, 0, 'The farewell runs before popping the page');
+  await panel.finish('start', 'Duplicate'); assert.equal(departures, 0);
+  const goodbyeEnd = scheduled.get(panel.farewellTimer); scheduled.delete(panel.farewellTimer); goodbyeEnd();
+  await goodbye; assert.equal(departures, 1); assert.equal(panel.saving, false);
+  const cancelledGoodbye = panel.finish('start', 'Do not navigate in background');
+  panel.foreground = false; panel.foregroundChanged(); await cancelledGoodbye;
+  assert.equal(departures, 1); assert.equal(panel.farewell, false);
+  panel.foreground = true; panel.appearance.effectStrength = 0;
+  await panel.finish('start', 'Immediate reduced-motion departure'); assert.equal(departures, 2);
+  assert.equal(panel.farewellTimer, -1);
+  console.log('PASS typing debounce, stale input callbacks, saving/error moods, farewell completion, duplicate taps, background cancellation and motion-off departure');
   console.log('PASS persistent actor measured destinations, continuous transform, exiting-page isolation, scroll tracking and final-task interaction');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -20,7 +20,8 @@ const emitted = path.join(root, 'entry/build/default/cache/default/default@Compi
 assert.ok(fs.statSync(emitted).mtimeMs >= fs.statSync(source).mtimeMs, 'Rebuild ContextDetails before testing');
 const tree = ts.createSourceFile(emitted, fs.readFileSync(emitted, 'utf8'), ts.ScriptTarget.Latest, true);
 const component = tree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'ContextDetails');
-const methods = ['records', 'usage', 'counted'].map(name => component.members.find(node => node.name?.getText(tree) === name).getText(tree)).join('\n');
+const methods = ['records', 'usage', 'counted', 'rows', 'tokens', 'total', 'ratio', 'remaining', 'compact', 'percent', 'segmentWidth']
+  .map(name => component.members.find(node => node.name?.getText(tree) === name).getText(tree)).join('\n');
 const context = { exports: {}, summarizeUsage, t: key => key };
 vm.runInNewContext(ts.transpileModule(`class Panel { ${methods} } exports.Panel = Panel;`, {
   compilerOptions: { target: ts.ScriptTarget.ES2021 }
@@ -70,3 +71,27 @@ assert.equal(panel.counted(0, 1), '0');
 app.active = new ThreadViewModel({ id: 'empty', title: 'Empty', updatedAt: 3, messages: [] });
 assert.equal(panel.usage().requests, 0); assert.equal(panel.counted(0, 0), '未报告');
 console.log('PASS live updates, failed/cancelled/missing reports, partial markers, real zero values, active conversation isolation and empty history');
+
+// Calibration can be higher or lower than the local breakdown. Segment widths
+// must track the real occupied fraction without rewriting category estimates.
+app.contextWindow = 1000;
+app.contextDetails = [{ id: 'sys', kind: 'system', tokens: 300 }, { id: 'tool', kind: 'definitions', tokens: 100 }];
+for (const used of [0, 200, 600, 1200]) {
+  app.contextUsed = used;
+  assert.ok(Math.abs(panel.segmentWidth('system') + panel.segmentWidth('definitions') - Math.min(used / 10, 100)) < 1e-9);
+  assert.equal(panel.segmentWidth('user'), 0);
+  assert.equal(panel.tokens('system'), 300, 'Calibration must not fabricate per-category token counts');
+  assert.equal(panel.remaining(), Math.max(0, 1000 - used));
+}
+assert.equal(panel.percent(panel.ratio()), '120%', 'Do not conceal over-limit usage behind a clamped bar');
+app.contextDetails.push({ id: 'draft', kind: 'user', tokens: 100 });
+app.contextUsed = 500;
+assert.equal(panel.segmentWidth('user'), 10, 'Draft updates participate in the live segment distribution');
+app.contextDetails = []; app.contextUsed = 0;
+assert.equal(panel.segmentWidth('system'), 0);
+app.contextWindow = 0;
+assert.equal(panel.ratio(), 0); assert.equal(panel.segmentWidth('system'), 0);
+assert.equal(panel.percent(0), '0%'); assert.equal(panel.percent(0.00001), '<0.1%');
+assert.equal(panel.compact(5391), '5.4k'); assert.equal(panel.compact(1000000), '1M');
+assert.equal(panel.compact(1200000), '1.2M'); assert.equal(panel.compact(0), '0');
+console.log('PASS calibrated segments, draft updates, empty/zero-window data, overflow and compact number formatting');
