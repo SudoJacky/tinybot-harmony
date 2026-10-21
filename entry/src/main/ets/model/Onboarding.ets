@@ -3,6 +3,37 @@ import { t } from './I18n';
 
 export interface OnboardingTask { title: string; prompt: string; preview: string; icon: string; }
 
+export interface OnboardingExampleColumn { label: string; value: string; }
+export interface OnboardingExample { title: string; documentTitle: string; columns: OnboardingExampleColumn[]; }
+
+export function onboardingIntroduction(): string[] {
+  return [
+    t('嗨，我是 Tiny，你的 AI 小助手。'),
+    t('我能陪你做市场调研、规划旅行，也能帮你读懂资料。'),
+    t('不用一次想清楚。先说个想法，我陪你把它变成下一步。')
+  ];
+}
+
+export function onboardingExamples(): OnboardingExample[] {
+  return [
+    { title: t('市场调研'), documentTitle: t('社区咖啡店 · 调研速览'), columns: [
+      { label: t('客群'), value: t('附近上班族') },
+      { label: t('需求'), value: t('快速取餐') },
+      { label: t('建议'), value: t('早餐咖啡组合') }
+    ] },
+    { title: t('旅行规划'), documentTitle: t('杭州 · 三天两晚'), columns: [
+      { label: t('第 1 天'), value: t('西湖漫步') },
+      { label: t('第 2 天'), value: t('灵隐访古') },
+      { label: t('第 3 天'), value: t('运河街巷') }
+    ] },
+    { title: t('资料整理'), documentTitle: t('报告 · 三点摘要'), columns: [
+      { label: t('发现'), value: t('需求增长') },
+      { label: t('问题'), value: t('交付偏慢') },
+      { label: t('下一步'), value: t('优化流程') }
+    ] }
+  ];
+}
+
 // First-run shortcuts reuse the existing cloud and local provider presets.
 export interface OnboardingProvider { preset: string; name: string; }
 

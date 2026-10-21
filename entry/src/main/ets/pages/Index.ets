@@ -425,7 +425,7 @@ struct Index {
   destination(name: string, param: Object) {
     if (name === 'onboarding') {
       NavDestination() {
-        OnboardingPanel({ active: this.onboardingActive, configured: this.app.configured,
+        OnboardingPanel({ app: this.app, active: this.onboardingActive, configured: this.app.configured,
           connectedPreset: this.currentProviderPreset(), busy: this.app.busy, account: this.account,
           onFinish: (action: string, prompt: string) => this.finishOnboarding(action, prompt),
           onConnect: (preset: string) => this.connectOnboardingProvider(preset),
