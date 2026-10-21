@@ -1,4 +1,8 @@
-param([string]$HapPath = (Join-Path $PSScriptRoot '../entry/build/default/outputs/default/entry-default-unsigned.hap'))
+param(
+    [string]$HapPath = (Join-Path $PSScriptRoot '../entry/build/default/outputs/default/entry-default-unsigned.hap'),
+    [switch]$RequireReleaseProfile,
+    [string]$StudioRoot = $env:DEVECO_STUDIO_HOME
+)
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -33,10 +37,51 @@ try {
             throw "Unexpected debug or legacy content: $($entry.FullName)"
         }
     }
+    if ($RequireReleaseProfile) {
+        if (-not $StudioRoot) { $StudioRoot = Join-Path $env:ProgramFiles 'Huawei/DevEco Studio' }
+        $declared = @($manifest.module.requestPermissions | ForEach-Object { $_.name })
+        # The platform report explicitly requires this ACL for Tinybot. SDK provisionEnable
+        # alone is not an ACL classifier (it is also true for INTERNET and MICROPHONE).
+        $requiredAcl = @('ohos.permission.FILE_ACCESS_PERSIST' | Where-Object { $_ -in $declared })
+        $auditRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../.cache'))
+        $auditPath = Join-Path $auditRoot ('release-profile-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $auditPath -Force | Out-Null
+        try {
+            $profilePath = Join-Path $auditPath 'embedded.p7b'
+            $arguments = @('-jar', (Join-Path $StudioRoot 'sdk/default/openharmony/toolchains/lib/hap-sign-tool.jar'), 'verify-app',
+                '-inFile', (Resolve-Path -LiteralPath $HapPath).Path, '-outCertChain', (Join-Path $auditPath 'chain.cer'), '-outProfile', $profilePath)
+            $quotedArguments = $arguments | ForEach-Object { '"' + $_ + '"' }
+            $verification = Start-Process -FilePath (Join-Path $StudioRoot 'jbr/bin/java.exe') -ArgumentList $quotedArguments `
+                -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput (Join-Path $auditPath 'verify.log') -RedirectStandardError (Join-Path $auditPath 'verify-error.log')
+            if ($verification.ExitCode -ne 0) { throw 'Signed HAP verification failed; provide the final signed HAP, not an unsigned package.' }
+            if ($PSVersionTable.PSVersion.Major -lt 6) { Add-Type -AssemblyName System.Security }
+            else { Add-Type -AssemblyName System.Security.Cryptography.Pkcs }
+            $cms = [Security.Cryptography.Pkcs.SignedCms]::new()
+            $cms.Decode([IO.File]::ReadAllBytes($profilePath))
+            $cms.CheckSignature($true)
+            $profile = [Text.Encoding]::UTF8.GetString($cms.ContentInfo.Content) | ConvertFrom-Json
+            $issues = @()
+            if ($profile.type -ne 'release') { $issues += "Profile type is '$($profile.type)', expected release" }
+            if ($profile.'bundle-info'.'bundle-name' -ne $manifest.app.bundleName) { $issues += 'Profile bundle name differs from HAP' }
+            $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+            if (-not $profile.validity -or $now -lt $profile.validity.'not-before' -or $now -ge $profile.validity.'not-after') { $issues += 'Profile is outside its validity period' }
+            $allowed = @($profile.acls.'allowed-acls')
+            $missing = @($requiredAcl | Where-Object { $_ -notin $allowed })
+            $extra = @($allowed | Where-Object { $_ -notin $declared })
+            if ($missing.Count -gt 0) { $issues += "Profile missing ACL: $($missing -join ', ')" }
+            if ($extra.Count -gt 0) { $issues += "Profile ACL absent from HAP declarations: $($extra -join ', ')" }
+            if ($issues.Count -gt 0) { throw ($issues -join '; ') }
+        } finally {
+            $resolvedAudit = [IO.Path]::GetFullPath($auditPath)
+            if (-not $resolvedAudit.StartsWith($auditRoot + [IO.Path]::DirectorySeparatorChar)) { throw 'Unsafe audit cleanup path' }
+            Remove-Item -LiteralPath $resolvedAudit -Recurse -Force
+        }
+    }
     [pscustomobject]@{
         Package = (Resolve-Path -LiteralPath $HapPath).Path
         PackageMiB = [Math]::Round((Get-Item -LiteralPath $HapPath).Length / 1MB, 3)
         NativeMiB = [Math]::Round(($nativeLibraries | Measure-Object CompressedLength -Sum).Sum / 1MB, 3)
         Architectures = 'arm64-v8a'
+        ProfileCheck = $(if ($RequireReleaseProfile) { 'Embedded release Profile and ACL checked; platform acceptance still required' } else { 'Not checked: package structure only' })
     }
 } finally { $package.Dispose() }

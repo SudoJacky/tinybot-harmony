@@ -38,6 +38,18 @@ powershell -ExecutionPolicy Bypass -File scripts\prepare-distribution.ps1 -Studi
 
 创建应用、申请证书、上传、云测试与审核结果都必须在平台完成，本地准备不包含这些结论。
 
+### 发布 Profile 与 ACL
+
+项目共享文件夹声明了 `ohos.permission.FILE_ACCESS_PERSIST`，保存和激活目录授权依赖该权限。发布前需确认 API 26 手机场景的开放范围，按平台要求获取授权后的发布 Profile。
+
+最终签名后，对实际上传 APP 中的每个 HAP 检查嵌入的 Profile：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/check-release-package.ps1 -HapPath "<最终签名的 entry.hap>" -RequireReleaseProfile
+```
+
+检查会验证 HAP 签名、包内 Profile 的签名完整性、发布类型、包名、有效期，以及本次平台明确要求的 `FILE_ACCESS_PERSIST` 授权，并拒绝 Profile 中未在包内声明的 ACL。SDK 的 `provisionEnable=true` 不能单独用于判定哪些权限必须进入 ACL。此检查不是所有权限的通用分类器，也不代表平台已授权、证书链在线状态或审核通过。未传 `-RequireReleaseProfile` 时仅检查包结构，不能视为可上架。不要用调试 Profile、旁边另存的 Profile 或手工改写的 `.p7b` 代替最终签名包内的材料。
+
 ## 平台资料
 
 - 主体与联系方式、政策公开地址、备案与分类资料按平台当前字段填写。
