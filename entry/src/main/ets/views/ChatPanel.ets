@@ -1322,7 +1322,7 @@ export struct ChatPanel {
         }
         this.composer()
         if (this.viewport.keyboardHeight === 0) {
-          Text(t('AI可能会犯错，请仔细鉴别。')).fontFamily(this.appearance.fontFamily).id('ai-disclaimer')
+          Text(t('AI生成内容可能有误，请仔细鉴别。')).fontFamily(this.appearance.fontFamily).id('ai-disclaimer')
             .fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
             .textAlign(TextAlign.Center).width('100%').padding({ left: Space.sm, right: Space.sm })
         }

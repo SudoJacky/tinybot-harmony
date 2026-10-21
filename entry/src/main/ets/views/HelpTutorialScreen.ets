@@ -165,7 +165,7 @@ export struct HelpTutorialScreen {
       Stack() { this.glyph($r('sys.symbol.square_and_pencil'), 22) }.width(64).height(48).borderRadius(24)
         .backgroundColor($r('app.color.surface')).position({ x: 264, y: 578 })
     }
-    Text(this.text('AI可能会犯错，请仔细鉴别。')).fontFamily(this.appearance.fontFamily).fontSize(10).fontColor($r('app.color.text_tertiary'))
+    Text(this.text('AI生成内容可能有误，请仔细鉴别。')).fontFamily(this.appearance.fontFamily).fontSize(10).fontColor($r('app.color.text_tertiary'))
       .textAlign(TextAlign.Center).width(340).height(20).position({ x: 10, y: 698 })
   }
 

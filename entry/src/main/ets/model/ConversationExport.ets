@@ -108,7 +108,7 @@ export function conversationSections(thread: ThreadData, profiles: ProviderProfi
   const result: ConversationSection[] = [{ kind: 'title', text: thread.title, user: false }];
   const latest = latestPreviewIds(thread.messages.map((message): PreviewMessage => ({ id: message.id, steps: message.steps || [] })));
   for (const message of thread.messages) { addMessage(result, message, profiles, latest); }
-  result.push({ kind: 'footer', text: 'Tinybot · ' + t('含 AI 生成内容') + '\n' + t('AI可能会犯错，请仔细鉴别。'), user: false });
+  result.push({ kind: 'footer', text: 'Tinybot · ' + t('含 AI 生成内容') + '\n' + t('AI生成内容可能有误，请仔细鉴别。'), user: false });
   result.forEach((section: ConversationSection, index: number) => {
     if (section.user) {
       section.bubbleStart = section.kind === 'role';

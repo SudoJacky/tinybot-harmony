@@ -117,7 +117,7 @@ function crc32(bytes) {
   ] };
   const sections = conversationSections(thread);
   assert.equal(sections.filter(s => s.kind === 'text' && !s.user).map(s => s.text).join(''), long);
-  assert.ok(sections.at(-1).text.includes('AI可能会犯错，请仔细鉴别。'));
+  assert.ok(sections.at(-1).text.includes('AI生成内容可能有误，请仔细鉴别。'));
   assert.equal(sections.filter(s => s.kind === 'role').length, 3);
   const branded = conversationSections(thread, [{ id: 'provider', name: 'Provider name', presetId: 'deepseek' }]);
   const assistant = branded.find(s => s.kind === 'role' && !s.user);
