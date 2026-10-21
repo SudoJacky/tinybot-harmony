@@ -6,7 +6,9 @@ import { monochromeProviderLogo, providerLogo } from '../common/ProviderBrand';
 import { OnboardingProvider, OnboardingTask, onboardingProviders, onboardingTasks } from '../model/Onboarding';
 import { HuaweiAccount } from '../services/HuaweiAccount';
 import { OnboardingMascot } from './OnboardingMascot';
-import { OnboardingCapability } from './OnboardingCapability';
+import { OnboardingIntroduction } from './OnboardingIntroduction';
+import { OnboardingProviderForm } from './OnboardingProviderForm';
+import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { t } from '../model/I18n';
 
 @Component
@@ -20,6 +22,7 @@ export struct OnboardingPanel {
   @Prop @Watch('connectionChanged') connectedPreset: string = '';
   @Prop busy: boolean = false;
   @ObjectLink account: HuaweiAccount;
+  @ObjectLink app: ChatViewModel;
   onFinish: (action: string, prompt: string) => Promise<void> = async () => {};
   onConnect: (preset: string) => void = () => {};
   onLegal: (page: string) => void = () => {};
@@ -27,14 +30,15 @@ export struct OnboardingPanel {
   @State private agreed: boolean = false;
   @State private greeted: boolean = false;
   @State private selectedPreset: string = '';
+  @State private providerEditing: boolean = false;
+  @State private connectionAttempted: boolean = false;
+  @State private keyFocused: boolean = false;
   @State private selectedTask: number = -1;
   @State private message: string = '';
-  @State private capIndex: number = 0;
   @State private saving: boolean = false;
   @State private error: string = '';
   @State private waking: boolean = false;
   @State private wakeReady: boolean = false;
-  @State private wakeScale: number = 1;
   @State private bodyHeight: number = 560;
   @State private pageDirection: number = 1;
   @State private transitioning: boolean = false;
@@ -42,8 +46,6 @@ export struct OnboardingPanel {
   @State private actorX: number = 0;
   @State private actorY: number = 0;
   @State private actorSize: number = 180;
-  @State private demoTick: number = 0;
-  @State private demoRevealed: boolean = false;
   private stageLeft: number = 0;
   private stageTop: number = 0;
   private stageWidth: number = 0;
@@ -51,8 +53,9 @@ export struct OnboardingPanel {
   private actorArea?: Area;
   private transitionRevision: number = 0;
   private wakeTimer: number = -1;
+  private wakeRevision: number = 0;
   private mounted: boolean = false;
-  private capController: SwiperController = new SwiperController();
+  private connectionScroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
     this.mounted = true;
@@ -61,20 +64,24 @@ export struct OnboardingPanel {
 
   aboutToDisappear(): void {
     this.mounted = false;
+    this.app.providerEditor.apiKey = '';
     this.cancelWake(false);
     this.settleTransition();
   }
 
   private activeChanged(): void {
-    if (!this.active) { this.cancelWake(true); this.settleTransition(); }
+    if (!this.active) { this.keyFocused = false; this.cancelWake(true); this.settleTransition(); }
   }
 
   private foregroundChanged(): void {
-    if (!this.foreground) { this.cancelWake(true); this.settleTransition(); }
+    if (!this.foreground) { this.keyFocused = false; this.cancelWake(true); this.settleTransition(); }
   }
 
   private connectionChanged(): void {
-    if (this.configured && this.connectedPreset.length > 0) { this.selectedPreset = this.connectedPreset; }
+    if (this.configured) {
+      this.selectedPreset = this.connectedPreset;
+      if (!this.saving) { this.providerEditing = false; this.keyFocused = false; }
+    }
     this.error = '';
   }
 
@@ -86,9 +93,10 @@ export struct OnboardingPanel {
     }
   }
 
-  // Scene zero has one pending timer. Hidden/covered/backgrounded routes keep the
+  // The wake scene has one pending timer. Hidden/covered/backgrounded routes keep the
   // wake result as an explicit Continue instead of navigating behind the user's back.
   private cancelWake(showContinue: boolean): void {
+    this.wakeRevision++;
     if (this.wakeTimer >= 0) {
       clearTimeout(this.wakeTimer);
       this.wakeTimer = -1;
@@ -97,18 +105,18 @@ export struct OnboardingPanel {
   }
 
   private wake(): void {
-    if (this.step !== 1 || !this.active || !this.foreground || this.saving || this.waking) { return; }
+    if (this.step !== 1 || !this.active || !this.foreground || this.saving || this.transitioning || this.waking) { return; }
+    this.cancelWake(false);
+    const revision = this.wakeRevision;
     this.error = '';
     this.wakeReady = false;
     this.waking = true;
-    this.animate((): void => { this.wakeScale = 1.04; }, Motion.fast);
     this.wakeTimer = setTimeout(() => {
+      if (!this.mounted || revision !== this.wakeRevision) { return; }
       this.wakeTimer = -1;
-      if (!this.mounted) { return; }
       if (this.step !== 1 || !this.active || !this.foreground) { this.wakeReady = true; return; }
-      this.wakeScale = 1;
       this.move(1);
-    }, 350);
+    }, this.appearance.effectStrength > 0 ? 1800 : 0);
   }
 
   private continueWake(): void {
@@ -116,24 +124,22 @@ export struct OnboardingPanel {
     this.cancelWake(false);
     this.wakeReady = false;
     this.waking = false;
-    this.wakeScale = 1;
     this.move(1);
   }
 
   private move(delta: number): void {
     if (this.saving || this.transitioning || !this.active || !this.foreground || !this.mounted) { return; }
-    const next = Math.max(0, Math.min(5, this.step + delta));
+    const next = Math.max(0, Math.min(4, this.step + delta));
     if (next === this.step) { return; }
     this.cancelWake(false);
     this.error = '';
     this.pageDirection = next > this.step ? 1 : -1;
     const change = (): void => {
       this.step = next;
+      this.keyFocused = false;
       this.greeted = false;
-      this.demoRevealed = false;
       this.waking = false;
       this.wakeReady = false;
-      this.wakeScale = 1;
     };
     if (this.appearance.effectStrength === 0) { change(); return; }
     const revision = ++this.transitionRevision;
@@ -188,7 +194,6 @@ export struct OnboardingPanel {
     if (this.step === 1) { return t('第一次见面'); }
     if (this.step === 2) { return t('认识 Tiny'); }
     if (this.step === 3) { return t('连接模型'); }
-    if (this.step === 4) { return t('Tiny 能做什么'); }
     return t('第一个任务');
   }
 
@@ -200,11 +205,10 @@ export struct OnboardingPanel {
     if (this.step === 1) { return t('继续'); }
     if (this.step === 2) { return t('继续'); }
     if (this.step === 3) {
-      if (this.configured) { return t('继续'); }
-      if (this.selectedPreset === 'ollama') { return t('连接模型'); }
-      return this.selectedPreset.length > 0 ? t('填写 API Key') : t('选择服务商');
+      if (this.saving) { return t('正在保存…'); }
+      if (this.configured && !this.providerEditing) { return t('继续'); }
+      return this.providerEditing ? t('保存服务') : t('选择服务商');
     }
-    if (this.step === 4) { return t('试着聊一句'); }
     return t('带进聊天');
   }
 
@@ -220,9 +224,10 @@ export struct OnboardingPanel {
     }
     if (this.step === 1) { return this.wakeReady && this.active && this.foreground; }
     if (this.step === 3) {
-      return this.configured ? true : (!this.busy && this.selectedPreset.length > 0);
+      return this.configured && !this.providerEditing ? true :
+        (!this.busy && this.providerEditing && this.selectedPreset.length > 0);
     }
-    if (this.step === 5) { return !this.busy && this.message.trim().length > 0; }
+    if (this.step === 4) { return !this.busy && this.message.trim().length > 0; }
     return true;
   }
 
@@ -234,10 +239,10 @@ export struct OnboardingPanel {
     }
     if (this.step === 1) { this.continueWake(); return; }
     if (this.step === 3) {
-      if (this.configured) { this.move(1); } else { this.connectSelected(); }
+      if (this.configured && !this.providerEditing) { this.move(1); } else { this.connectSelected(); }
       return;
     }
-    if (this.step === 5) { this.finish('start', this.currentPrompt()); return; }
+    if (this.step === 4) { this.finish('start', this.currentPrompt()); return; }
     this.move(1);
   }
 
@@ -268,9 +273,22 @@ export struct OnboardingPanel {
   private wakeDiameter(): number { return Math.round(this.wakeTileSize() * 0.9); }
 
   private selectProvider(preset: string): void {
-    if (this.saving || this.transitioning) { return; }
+    if (this.saving || this.busy || this.transitioning) { return; }
+    if (preset.length > 0) {
+      try {
+        const existing = this.app.providerProfiles.find(profile => profile.presetId === preset);
+        if (!this.app.beginProvider(preset, existing?.id || '')) {
+          throw new Error(this.app.error || t('请先完成当前任务，再开始新的对话。'));
+        }
+      } catch (error) { this.error = (error as Error).message; return; }
+    } else { this.app.providerEditor.apiKey = ''; }
     this.error = '';
-    this.animate((): void => { this.selectedPreset = preset; }, Motion.fast);
+    this.animate((): void => {
+      this.selectedPreset = preset;
+      this.providerEditing = preset.length > 0;
+      this.connectionAttempted = false;
+      this.keyFocused = false;
+    }, 320);
   }
 
   private providerSelectionChanged(preset: string, selected: boolean): void {
@@ -278,15 +296,70 @@ export struct OnboardingPanel {
     if (selected || this.selectedPreset === preset) { this.selectProvider(selected ? preset : ''); }
   }
 
-  private connectSelected(): void {
-    if (this.saving || this.busy || this.transitioning || !this.active) { return; }
-    if (this.selectedPreset.length === 0) {
+  private async connectSelected(): Promise<void> {
+    if (this.saving || this.busy || this.transitioning || !this.active || !this.foreground || !this.mounted) { return; }
+    if (this.selectedPreset.length === 0 || !this.providerEditing) {
       this.error = t('先选择一个模型服务。');
       return;
     }
-    // This is a real provider editor hand-off. Onboarding is completed later,
-    // only after the user explicitly finishes the first-task scene.
-    this.connectProvider(this.selectedPreset);
+    this.connectionAttempted = true;
+    const editor = this.app.providerEditor;
+    const invalid = ['name', 'url', 'key', 'models', 'context'].find(field => editor.fieldError(field).length > 0);
+    if (invalid) {
+      this.error = editor.fieldError(invalid);
+      this.getUIContext().getFocusController().requestFocus('onboarding-inline-' + invalid);
+      return;
+    }
+    this.saving = true;
+    this.error = '';
+    try {
+      if (!await this.app.saveProvider()) {
+        throw new Error(editor.error || this.app.error || t('模型服务未保存，请稍后重试。'));
+      }
+      const profile = this.app.providerProfiles.find(item => item.presetId === this.selectedPreset);
+      if (!profile) { throw new Error(t('模型服务已保存，但无法找到对应配置，请重新打开设置。')); }
+      editor.reset(profile);
+      const current = this.app.active.modelRef;
+      const modelId = current?.providerId === profile.id && profile.models.includes(current.modelId) ?
+        current.modelId : profile.models[0];
+      if ((current?.providerId !== profile.id || current.modelId !== modelId) &&
+        !await this.app.selectModel(profile.id, modelId)) {
+        throw new Error(this.app.error || t('模型服务已保存，但未能切换当前模型，请重试。'));
+      }
+      this.providerEditing = false;
+      this.keyFocused = false;
+      this.getUIContext().getFocusController().clearFocus();
+    } catch (error) { this.error = (error as Error).message; }
+    finally { this.saving = false; }
+  }
+
+  private providerLookX(): number {
+    const index = onboardingProviders().findIndex(provider => provider.preset === this.selectedPreset);
+    return index < 0 ? 0 : (index - 1) * 5;
+  }
+
+  private connectionDiameter(): number {
+    if (this.keyFocused) { return 96; }
+    return this.providerEditing ? Math.max(96, Math.min(128, this.bodyHeight - 380)) : 160;
+  }
+
+  private setKeyFocused(focused: boolean): void {
+    if (!this.mounted || focused === this.keyFocused) { return; }
+    this.animate(() => { this.keyFocused = focused; }, 320);
+    if (focused) { this.keepKeyVisible(); }
+  }
+
+  private keepKeyVisible(): void {
+    if (this.step !== 3 || !this.keyFocused) { return; }
+    const ui = this.getUIContext();
+    const input = ui.getComponentUtils().getRectangleById('onboarding-inline-key');
+    const viewport = ui.getComponentUtils().getRectangleById('onboarding-connection-scroll');
+    const inset = ui.vp2px(8);
+    const top = viewport.windowOffset.y + inset;
+    const bottom = viewport.windowOffset.y + viewport.size.height - inset;
+    const delta = input.windowOffset.y < top ? input.windowOffset.y - top :
+      Math.max(0, input.windowOffset.y + input.size.height - bottom);
+    if (delta !== 0) { this.connectionScroller.scrollBy(0, ui.px2vp(delta)); }
   }
 
   private connectProvider(preset: string): void {
@@ -297,6 +370,9 @@ export struct OnboardingPanel {
   }
 
   private statusTitle(): string {
+    if (this.providerEditing) {
+      return this.keyFocused ? t('你来填密钥，我先回避一下。') : t('填写连接信息，让 Tiny 准备好。');
+    }
     return this.configured ? t('模型已配置') : t('连接模型后，就能开始聊天。');
   }
 
@@ -330,26 +406,11 @@ export struct OnboardingPanel {
     return this.message.trim();
   }
 
-  private showCapability(index: number): void {
-    if (this.transitioning || index < 0 || index > 2) { return; }
-    this.capabilityChanged(index);
-    this.capController.changeIndex(index);
-  }
-
-  private capabilityChanged(index: number): void {
-    if (index === this.capIndex) { return; }
-    this.animate(() => { this.demoRevealed = false; this.capIndex = index; }, Motion.fast);
-  }
-
   private actorMood(): string {
     if (this.step === 0) { return this.account.signedIn ? 'proud' : 'curious'; }
     if (this.step === 1) { return this.waking ? 'surprised' : 'sleepy'; }
     if (this.step === 2) { return this.greeted ? 'proud' : 'happy'; }
     if (this.step === 3) { return this.configured ? 'proud' : 'curious'; }
-    if (this.step === 4) {
-      if (this.demoRevealed || this.capIndex === 2) { return 'proud'; }
-      return this.capIndex === 1 ? 'focused' : 'curious';
-    }
     return this.message.trim().length > 0 ? 'happy' : 'curious';
   }
 
@@ -357,10 +418,7 @@ export struct OnboardingPanel {
     if (!this.active || !this.foreground || this.transitioning || this.saving) { return; }
     if (this.step === 1) { this.wake(); }
     else {
-      this.animate(() => {
-        if (this.step === 4) { this.demoRevealed = !this.demoRevealed; this.demoTick++; }
-        else { this.greeted = !this.greeted; }
-      });
+      this.animate(() => { this.greeted = !this.greeted; });
     }
   }
 
@@ -370,6 +428,7 @@ export struct OnboardingPanel {
     this.stageWidth = Number(area.width);
     this.bodyHeight = Number(area.height);
     if (this.actorArea && this.actorScene === this.step) { this.locateActor(this.step, this.actorArea); }
+    this.keepKeyVisible();
   }
 
   private locateActor(scene: number, area: Area): void {
@@ -377,9 +436,13 @@ export struct OnboardingPanel {
     this.actorArea = area;
     this.actorScene = scene;
     if (this.stageWidth <= 0) { return; }
+    if (scene === 3 && this.keyFocused) {
+      this.placeActor(this.stageWidth / 2, 48, 96, true);
+      return;
+    }
     const size = Number(area.width);
-    // Swiper cards share a stationary centre; the scenery moves around Tiny.
-    const x = scene === 5 ? Number(area.globalPosition.x) - this.stageLeft + size / 2 : this.stageWidth / 2;
+    // Other scenes centre Tiny; the final task anchors it beside the prompt.
+    const x = scene === 4 ? Number(area.globalPosition.x) - this.stageLeft + size / 2 : this.stageWidth / 2;
     const y = Number(area.globalPosition.y) - this.stageTop + Number(area.height) / 2;
     this.placeActor(x, y, size, true);
   }
@@ -397,10 +460,14 @@ export struct OnboardingPanel {
 
   private followActorScroll(scene: number, id: string): void {
     if (scene !== this.step || this.actorScene !== scene || !this.actorReady) { return; }
+    if (scene === 3 && this.keyFocused) {
+      this.placeActor(this.stageWidth / 2, 48, 96, false);
+      return;
+    }
     const ui = this.getUIContext();
     const rect = ui.getComponentUtils().getRectangleById(id);
     const size = ui.px2vp(rect.size.width);
-    const x = scene === 5 ? ui.px2vp(rect.windowOffset.x) - this.stageLeft + size / 2 : this.stageWidth / 2;
+    const x = scene === 4 ? ui.px2vp(rect.windowOffset.x) - this.stageLeft + size / 2 : this.stageWidth / 2;
     const y = ui.px2vp(rect.windowOffset.y + rect.size.height / 2) - this.stageTop;
     this.placeActor(x, y, size, false);
   }
@@ -415,16 +482,17 @@ export struct OnboardingPanel {
   @Builder
   persistentActor() {
     Column() {
-      OnboardingMascot({ diameter: 220, scene: this.step === 4 ? 0 : this.step,
-        mood: this.actorMood(), greeted: this.step === 1 ? this.waking : this.greeted || this.demoRevealed,
-        sleepy: this.step === 1 && !this.waking, energized: this.step !== 1,
+      OnboardingMascot({ diameter: 220, scene: this.step,
+        mood: this.actorMood(), greeted: this.step !== 1 && this.greeted,
+        sleepy: this.step === 1, waking: this.step === 1 && this.waking, energized: this.step !== 1,
+        lookX: this.step === 3 ? this.providerLookX() : 0,
+        lookY: this.step === 3 && this.selectedPreset.length > 0 ? 4 : 0,
+        coverEyes: this.step === 3 && this.keyFocused && this.active && this.foreground,
+        connected: this.configured && !this.providerEditing,
         allowDrag: this.step === 2 && !this.transitioning,
         active: this.active && this.foreground && this.actorReady,
         onHello: () => this.greetActor() })
     }.id('onboarding-persistent-actor').width(220).height(220)
-      // The theatre's underlying button and Swiper own the entire gesture chain.
-      .hitTestBehavior(this.step === 4 ? HitTestMode.BLOCK_DESCENDANTS : HitTestMode.Default)
-      .accessibilityLevel(this.step === 4 ? 'no-hide-descendants' : 'auto')
       .scale({ x: this.actorSize / 220, y: this.actorSize / 220 })
       .position({ x: this.actorX - 110, y: this.actorY - 110 })
       .opacity(this.actorReady ? 1 : 0)
@@ -443,13 +511,12 @@ export struct OnboardingPanel {
         .systemMaterial(this.appearance.control)
         .accessibilityRole(AccessibilityRoleType.BUTTON)
         .accessibilityText(t('上一步')).enabled(!this.saving).onClick(() => this.move(-1))
+        Text(this.sceneLabel()).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor(this.muted())
+          .margin({ left: 4 }).layoutWeight(1).maxLines(1)
       } else {
-        Text('Tinybot').fontFamily(this.appearance.fontFamily).fontSize(17).fontWeight(FontWeight.Bold)
-          .fontColor(this.ink()).letterSpacing(0.4)
+        Blank().layoutWeight(1)
       }
-      Text(this.sceneLabel()).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor(this.muted())
-        .margin({ left: 4 }).layoutWeight(1).maxLines(1)
-      Button(t('跳过'), { type: ButtonType.Capsule, stateEffect: true })
+      Button(t('跳过引导'), { type: ButtonType.Capsule, stateEffect: true })
         .id('onboarding-skip').height(44).padding({ left: 14, right: 14 })
         .backgroundColor(Color.Transparent).fontFamily(this.appearance.fontFamily).fontSize(13)
         .fontColor(this.muted()).enabled(!this.saving)
@@ -468,7 +535,7 @@ export struct OnboardingPanel {
         .id('onboarding-account-status').fontFamily(this.appearance.fontFamily).fontSize(21)
         .fontWeight(FontWeight.Bold).fontColor(this.ink()).textAlign(TextAlign.Center)
       Text(!this.account.ready ? t('正在确认登录状态，请稍候。') : this.account.signedIn ?
-        t('登录状态已确认，可以继续。') : t('登录后即可使用 AI 生成功能。'))
+        t('登录状态已确认，可以继续。') : t('根据监管需要，须登录以使用AI生成功能。\n我们承诺不会收集任何隐私信息至Tinybot服务器。'))
         .fontFamily(this.appearance.fontFamily).fontSize(14).lineHeight(21).fontColor(this.muted())
         .textAlign(TextAlign.Center).width('100%').padding({ left: 8, right: 8 })
       if (this.account.error.length > 0) {
@@ -479,26 +546,23 @@ export struct OnboardingPanel {
           .fontFamily(this.appearance.fontFamily).fontSize(12).lineHeight(18).fontColor(this.muted())
           .textAlign(TextAlign.Center).width('100%').padding({ left: 8, right: 8 })
       } else {
-        Column({ space: 4 }) {
-          Row({ space: 10 }) {
-            Checkbox().id('onboarding-account-consent').select(this.agreed)
-              .selectedColor(this.brand()).enabled(!this.account.busy)
-              .onChange((value: boolean) => { this.agreed = value; if (value) { this.error = ''; } })
-            Text(t('我已阅读并同意用户协议和隐私政策')).fontFamily(this.appearance.fontFamily)
-              .fontSize(13).lineHeight(19).fontColor(this.ink()).layoutWeight(1)
-          }.width('100%').padding({ left: 2, right: 2 })
-          Row({ space: 2 }) {
-            Button(t('用户协议')).id('onboarding-account-terms').height(40).padding({ left: 8, right: 8 })
-              .backgroundColor(Color.Transparent).fontFamily(this.appearance.fontFamily).fontSize(12)
-              .fontColor(this.brandInk()).enabled(!this.account.busy)
-              .accessibilityText(t('用户协议')).onClick(() => this.onLegal('terms'))
-            Text('·').fontSize(12).fontColor(this.faint())
-            Button(t('隐私政策')).id('onboarding-account-privacy').height(40).padding({ left: 8, right: 8 })
-              .backgroundColor(Color.Transparent).fontFamily(this.appearance.fontFamily).fontSize(12)
-              .fontColor(this.brandInk()).enabled(!this.account.busy)
-              .accessibilityText(t('隐私政策')).onClick(() => this.onLegal('privacy'))
-          }.width('100%').justifyContent(FlexAlign.Start)
-        }
+        Row({ space: 10 }) {
+          Checkbox().id('onboarding-account-consent').select(this.agreed)
+            .selectedColor(this.brand()).enabled(!this.account.busy)
+            .accessibilityText(t('我已阅读并同意用户协议和隐私政策'))
+            .onChange((value: boolean) => { this.agreed = value; if (value) { this.error = ''; } })
+          Text() {
+            Span(t('我已阅读并同意'))
+            Span(t('用户协议')).fontColor(this.brandInk())
+              .decoration({ type: TextDecorationType.Underline })
+              .onClick(() => this.onLegal('terms'))
+            Span(t('和'))
+            Span(t('隐私政策')).fontColor(this.brandInk())
+              .decoration({ type: TextDecorationType.Underline })
+              .onClick(() => this.onLegal('privacy'))
+          }.id('onboarding-account-agreement').fontFamily(this.appearance.fontFamily)
+            .fontSize(13).lineHeight(19).fontColor(this.ink()).layoutWeight(1).enabled(!this.account.busy)
+        }.width('100%').padding({ left: 2, right: 2 })
       }
     }.width('100%').constraintSize({ minHeight: this.bodyHeight }).justifyContent(FlexAlign.Center)
       .padding({ top: 12, bottom: 12 })
@@ -513,9 +577,8 @@ export struct OnboardingPanel {
       }.id('onboarding-wake-tile').width(this.wakeTileSize()).height(this.wakeTileSize())
         .justifyContent(FlexAlign.Center).backgroundColor(this.bubble()).borderRadius(this.wakeTileSize() * 0.24)
         .shadow({ radius: 30, color: this.appearance.accentGlow, offsetY: 8 })
-        .scale({ x: this.wakeScale, y: this.wakeScale })
         .accessibilityGroup(true).accessibilityRole(AccessibilityRoleType.BUTTON)
-        .accessibilityText(this.waking ? t('Tiny 已经醒了') : t('轻点叫醒 Tiny'))
+        .accessibilityText(this.waking ? t('Tiny 正在醒来') : t('轻点叫醒 Tiny'))
         .onClick(() => this.wake())
       Blank()
     }.width('100%').layoutWeight(1)
@@ -523,29 +586,18 @@ export struct OnboardingPanel {
 
   @Builder
   introductionScene() {
-    Column({ space: 28 }) {
-      Text(t('嗨，我是 Tiny，你的 AI 小助手。'))
-        .fontFamily(this.appearance.fontFamily).fontSize(17).lineHeight(25).fontColor(this.ink())
-        .width('100%').padding({ left: 18, right: 18, top: 16, bottom: 16 })
-        .backgroundColor(this.bubble()).borderRadius(20)
-        .shadow({ radius: 18, color: this.dark ? '#33000000' : '#14000000', offsetY: 8 })
-      Stack({ alignContent: Alignment.Center }) {
-        this.actorSlot(2, 220)
-      }
-      .width('100%').height(260)
-    }
-    .width('100%').constraintSize({ minHeight: this.bodyHeight }).justifyContent(FlexAlign.Center)
-    .padding({ top: 24, bottom: 24 })
+    OnboardingIntroduction({ active: this.active && this.foreground && this.step === 2,
+      bodyHeight: this.bodyHeight, onActorArea: (area: Area) => this.locateActor(2, area) })
   }
 
   @Builder
   connectionScene() {
     Column({ space: 14 }) {
       Text(this.statusTitle()).id('onboarding-provider-status').fontFamily(this.appearance.fontFamily)
-        .fontSize(18).fontWeight(FontWeight.Medium).fontColor(this.ink()).textAlign(TextAlign.Center)
-        .width('100%').padding(18).backgroundColor(this.bubble()).borderRadius(20)
+        .fontSize(this.keyFocused ? 14 : 18).fontWeight(FontWeight.Medium).fontColor(this.ink()).textAlign(TextAlign.Center)
+        .width('100%').padding(this.keyFocused ? 10 : 18).backgroundColor(this.bubble()).borderRadius(20)
         .shadow({ radius: 14, color: this.dark ? '#33000000' : '#14000000', offsetY: 6 })
-      this.actorSlot(3, 160)
+      this.actorSlot(3, this.connectionDiameter())
       Row({ space: 10 }) {
         ForEach(onboardingProviders(), (provider: OnboardingProvider) => {
           Toggle({ type: ToggleType.Button, isOn: this.selectedPreset === provider.preset }) {
@@ -566,60 +618,28 @@ export struct OnboardingPanel {
               color: this.selectedPreset === provider.preset ? this.brand() : Color.Transparent, radius: 18 })
             .accessibilityText(t('选择 {0}', [provider.name]))
             .accessibilityDescription(this.selectedPreset === provider.preset ? t('已选择') : '')
+            .enabled(!this.saving && !this.busy)
             .onChange((selected: boolean) => this.providerSelectionChanged(provider.preset, selected))
         }, (provider: OnboardingProvider) => provider.preset)
       }.width('100%').margin({ top: 6 })
+      ForEach(this.providerEditing ? [this.selectedPreset] : [], (preset: string) => {
+        OnboardingProviderForm({ editor: this.app.providerEditor, locked: this.saving || this.busy,
+          attempted: this.connectionAttempted, onKeyFocus: (focused: boolean) => this.setKeyFocused(focused),
+          onError: (message: string) => { this.error = message; } })
+          .transition(this.appearance.effectStrength > 0 ? Motion.rise(0, 12) : TransitionEffect.IDENTITY)
+      }, (preset: string) => preset)
       Text(t('消息和附件会发送给你选择的服务商。')).fontFamily(this.appearance.fontFamily).fontSize(12)
         .lineHeight(18).fontColor(this.muted()).textAlign(TextAlign.Center).width('100%')
-    }.width('100%').constraintSize({ minHeight: this.bodyHeight }).justifyContent(FlexAlign.Center)
-      .padding({ top: 18, bottom: 18 })
-  }
-
-  @Builder
-  capabilityScene() {
-    Column() {
-      Swiper(this.capController) {
-        ForEach([0, 1, 2], (index: number) => {
-          Column() {
-            OnboardingCapability({ index: index, demoTick: this.demoTick,
-              active: this.active && this.foreground && this.step === 4 && this.capIndex === index,
-              onActorArea: (area: Area) => this.locateActor(4, area),
-              onActorTap: () => this.greetActor(),
-              onActorScroll: (id: string) => this.followActorScroll(4, id) })
-          }
-          .width('100%').height('100%')
-        }, (index: number) => index.toString())
-      }
-      .id('onboarding-capabilities').width('100%').layoutWeight(1).index(this.capIndex)
-      .loop(false).indicator(false).duration(this.appearance.effectStrength > 0 ? 320 : 0)
-      .onChange((index: number) => this.capabilityChanged(index))
-    }
-    .width('100%').layoutWeight(1)
-  }
-
-  @Builder
-  capabilityDots() {
-    Row({ space: 2 }) {
-        ForEach([0, 1, 2], (index: number) => {
-          Button({ type: ButtonType.Circle, stateEffect: false }) {
-            Row().width(this.capIndex === index ? 24 : 7).height(7).borderRadius(4)
-              .backgroundColor(this.capIndex === index ? this.brand() : this.line())
-          }
-          .id('onboarding-cap-dot-' + index)
-          .width(44).height(44).padding(0).backgroundColor(Color.Transparent)
-          .accessibilityText(t('第 {0} 张能力卡片', [index + 1]))
-          .accessibilityDescription(this.capIndex === index ? t('当前') : '')
-          .onClick(() => this.showCapability(index))
-        }, (index: number) => index.toString())
-    }
-    .width('100%').height(44).justifyContent(FlexAlign.Center)
+    }.width('100%').constraintSize({ minHeight: this.bodyHeight })
+      .justifyContent(this.providerEditing ? FlexAlign.Start : FlexAlign.Center)
+      .padding({ top: this.providerEditing ? 8 : 18, bottom: 18 })
   }
 
   @Builder
   taskScene() {
     Column({ space: 16 }) {
       Row({ space: 8 }) {
-        this.actorSlot(5, 64)
+        this.actorSlot(4, 64)
         Text(t('想先做点什么？')).fontFamily(this.appearance.fontFamily).fontSize(15).lineHeight(23)
           .fontColor(this.ink()).layoutWeight(1).padding(14).backgroundColor(this.bubble())
           .borderRadius({ topLeft: 18, topRight: 18, bottomLeft: 5, bottomRight: 18 })
@@ -667,7 +687,7 @@ export struct OnboardingPanel {
           }.width('100%').justifyContent(FlexAlign.Center)
         }
       } else if (this.step === 1) {
-        Text(this.waking ? t('它醒了。') : t('轻点，叫醒它'))
+        Text(this.wakeReady ? t('Tiny 醒了，继续认识它吧。') : this.waking ? t('它正在慢慢醒来…') : t('轻点，叫醒它'))
           .id('onboarding-wake-hint').fontFamily(this.appearance.fontFamily).fontSize(14)
           .fontColor(this.muted()).height(44).textAlign(TextAlign.Center).width('100%')
       } else if (this.step === 3) {
@@ -687,8 +707,6 @@ export struct OnboardingPanel {
         }
         .width('100%').justifyContent(FlexAlign.Center)
       } else if (this.step === 4) {
-        this.capabilityDots()
-      } else if (this.step === 5) {
         Text(t('只准备草稿，由你发送。')).fontFamily(this.appearance.fontFamily).fontSize(12)
           .fontColor(this.muted()).height(44).textAlign(TextAlign.Center).width('100%')
       } else {
@@ -724,16 +742,19 @@ export struct OnboardingPanel {
           Column() {
             if (scene === 1) {
               this.wakeScene()
-            } else if (scene === 4) {
-              this.capabilityScene()
+            } else if (scene === 3) {
+              if (this.keyFocused) { Blank().height(96).width('100%') }
+              Scroll(this.connectionScroller) { this.connectionScene() }
+                .id('onboarding-connection-scroll').layoutWeight(1).width('100%').align(Alignment.Top)
+                .scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring)
+                .onAreaChange(() => this.keepKeyVisible())
+                .onDidScroll(() => this.followActorScroll(3, 'onboarding-actor-slot-3'))
             } else {
               Scroll() {
                 if (scene === 0) {
                   this.accountScene()
                 } else if (scene === 2) {
                   this.introductionScene()
-                } else if (scene === 3) {
-                  this.connectionScene()
                 } else {
                   this.taskScene()
                 }
