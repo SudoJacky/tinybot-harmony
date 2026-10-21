@@ -4,7 +4,7 @@
 
 ## 版本与产物
 
-当前版本线：`1.0.1` / `versionCode=1000001`，包名 `com.sudojacky.tinybot`，设备类型 `phone`，最低与目标 HarmonyOS API 26，发布包仅 `arm64-v8a`（模拟器使用单独构建的调试包，不随正式包分发）。
+当前版本线：`1.0.2` / `versionCode=1000002`，包名 `com.sudojacky.tinybot`，设备类型 `phone`，最低与目标 HarmonyOS API 26，发布包仅 `arm64-v8a`（模拟器使用单独构建的调试包，不随正式包分发）。
 
 运行准备脚本后生成独立目录与 ZIP：
 

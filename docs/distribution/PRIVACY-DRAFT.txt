@@ -1,5 +1,5 @@
-Tinybot v1.0.1 · 协议与隐私资料来源
-更新日期：2026-10-18
+Tinybot v1.0.2 · 协议与隐私资料来源
+更新日期：2026-10-21
 
 应用实际使用的正文：
 entry/src/main/resources/rawfile/privacy-policy.md
