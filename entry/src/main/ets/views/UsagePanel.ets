@@ -4,15 +4,53 @@ import { RequestUsage, UsageOrigin, UsageToolActivity } from '../model/Usage';
 import { UsageActivity, UsageDay, UsageGroup, UsageModel, UsagePeriod, UsageSession, UsageStatistics, UsageFilter, reportedTokens } from '../model/UsageStatistics';
 import { UsageCursor, UsageQuery } from '../model/UsageQuery';
 import { UsageLedger } from '../services/UsageLedger';
+import { ContributionCell, ContributionWeek, UsageContributions, usageContributions } from '../model/UsageContributions';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { Btn, Font, Space, compactNumber } from '../common/Theme';
 import { Banner, EmptyState, GroupCard, NavRow, RowDivider, SectionHeader, Segmented, StatTile, Tag } from '../common/Widgets';
 
 @Component
+struct UsageFilterChip {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
+  kind: string = '';
+  @Prop label: string = '';
+  @Prop active: boolean = false;
+  onSelect: () => void = () => {};
+  build() {
+    Button({ type: ButtonType.Normal }) {
+      Row({ space: 4 }) {
+        Text(this.label).fontFamily(this.appearance.fontFamily).fontSize(12).maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+          .fontColor(this.active ? this.appearance.accent : $r('app.color.text_secondary'))
+        SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(10).fontColor([$r('app.color.text_tertiary')])
+      }.width('100%')
+    }.id('usage-' + this.kind).layoutWeight(1).height(36).borderRadius(10)
+      .padding({ left: 10, right: 10 }).backgroundColor(this.active ? this.appearance.accentTint : $r('app.color.surface'))
+      .accessibilityText((this.kind === 'provider' ? t('服务') : this.kind === 'model' ? t('模型') : t('会话')) + ' · ' + this.label)
+      .onClick(() => this.onSelect())
+  }
+}
+
+@Component
+struct UsageProfileStat {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
+  @Prop label: string = '';
+  @Prop value: string = '';
+  build() {
+    Column({ space: 4 }) {
+      Text(this.value).fontFamily(this.appearance.fontFamily).fontSize(17).fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.text_primary')).maxLines(1).minFontSize(12).maxFontSize(17)
+      Text(this.label).fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.text_secondary')).maxLines(2)
+    }.layoutWeight(1).alignItems(HorizontalAlign.Start).padding(10).constraintSize({ minHeight: 62 })
+      .borderRadius(10).backgroundColor($r('app.color.surface_variant'))
+  }
+}
+
+@Component
 export struct UsagePanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
-  @State private range: number = 2;
+  @State private range: number = 3;
   @State private provider: string = '';
   @State private model: string = '';
   private providers: string[] = [];
@@ -31,6 +69,9 @@ export struct UsagePanel {
   @State private skillPage: number = 0;
   @State private detailToolPage: number = 0;
   @State private stats: UsageStatistics = new UsageStatistics();
+  @State private contributions: UsageContributions = new UsageContributions();
+  @State private showTokenDetails: boolean = false;
+  private contributionScroller: Scroller = new Scroller();
   @State private error: string = '';
   @State private requestPage: number = 0;
   @State private modelPage: number = 0;
@@ -38,6 +79,8 @@ export struct UsagePanel {
   @State private day: string = '';
   @State private showFilter: boolean = false;
   @State private filterKind: string = 'provider';
+  private filterClosing: boolean = false;
+  private pendingFilter: string = '';
   private unsubscribe?: () => void;
 
   @State private loading: boolean = true;
@@ -74,7 +117,7 @@ export struct UsagePanel {
   private turnCursors: (UsageCursor | undefined)[] = [undefined];
   private requestNext?: UsageCursor;
   private turnNext?: UsageCursor;
-  private currentFilter: UsageFilter = { range: 2, provider: '', model: '', threadId: '', now: Date.now() };
+  private currentFilter: UsageFilter = { range: 3, provider: '', model: '', threadId: '', now: Date.now() };
 
   aboutToAppear(): void {
     this.mounted = true; this.refresh();
@@ -89,6 +132,7 @@ export struct UsagePanel {
     });
   }
   aboutToDisappear(): void {
+    this.pendingFilter = '';
     this.mounted = false; this.generation++; this.detailGeneration++;
     this.unsubscribe?.(); clearTimeout(this.refreshTimer); this.query?.cancel();
   }
@@ -147,7 +191,7 @@ export struct UsagePanel {
     view.models = full.models.slice(this.modelPage * 5, this.modelPage * 5 + 5);
     view.tools = full.tools.slice(this.toolPage * 10, this.toolPage * 10 + 10);
     view.skills = full.skills.slice(this.skillPage * 10, this.skillPage * 10 + 10);
-    this.stats = view; this.revisionKey++;
+    this.stats = view; this.contributions = usageContributions(full.days); this.revisionKey++;
   }
   private async loadDetails(): Promise<void> {
     const query = this.query; if (!query || this.loading) { return; }
@@ -189,7 +233,7 @@ export struct UsagePanel {
     this.requestPage = 0; this.modelPage = 0; this.day = ''; this.expanded = '';
     this.expandedSession = ''; this.expandedTurn = ''; this.expandedWeek = ''; this.sessionPage = 0; this.weekPage = 0; this.toolPage = 0; this.skillPage = 0;
     this.requestCursors = [undefined]; this.turnCursors = [undefined]; this.requestRows = []; this.turnRows = []; this.turnRequests = [];
-    this.stats = new UsageStatistics(); this.fullStats = this.stats;
+    this.stats = new UsageStatistics(); this.fullStats = this.stats; this.contributions = new UsageContributions();
     this.refresh();
   }
   private moveFilter(page: number): void { this.filterPage = page; this.filterItems = this.filterAll.slice(page * 50, page * 50 + 50); }
@@ -209,14 +253,24 @@ export struct UsagePanel {
   }
   private selectedFilter(): string { return this.filterKind === 'provider' ? this.provider : this.filterKind === 'model' ? this.model : this.threadFilter; }
   private openFilter(kind: string): void {
+    if (this.filterClosing) { this.pendingFilter = kind; return; }
     this.filterKind = kind; this.filterAll = this.filterOptions(); this.filterCount = this.filterAll.length; this.moveFilter(0);
     this.showFilter = true;
+  }
+  private closeFilter(): void {
+    this.filterClosing = true;
+    this.showFilter = false;
+  }
+  private filterDidClose(): void {
+    this.filterClosing = false;
+    const next = this.pendingFilter; this.pendingFilter = '';
+    if (this.mounted && next) { this.openFilter(next); }
   }
   private chooseFilter(id: string): void {
     if (this.filterKind === 'provider') { this.provider = id; this.model = ''; }
     else if (this.filterKind === 'model') { this.model = id; }
     else { this.threadFilter = id; }
-    this.showFilter = false;
+    this.closeFilter();
     this.filter();
   }
   private number(value: number): string { return value.toLocaleString(getLocale()); }
@@ -251,21 +305,14 @@ export struct UsagePanel {
 
   @Builder
   filters() {
-    Column({ space: Space.md }) {
+    Column({ space: Space.sm }) {
       Segmented({ options: [t('今天'), t('近 7 天'), t('近 30 天'), t('全部')], selected: this.range, compIdPrefix: 'usage-range',
         onSelect: (index: number) => { this.range = index; this.filter(); } })
-      GroupCard() {
-        Column() {
-          NavRow({ title: t('服务'), subtitle: this.provider ? this.providerName(this.provider) : t('全部服务'), compId: 'usage-provider',
-            onTap: () => this.openFilter('provider') })
-          RowDivider()
-          NavRow({ title: t('模型'), subtitle: this.model || t('全部模型'), compId: 'usage-model',
-            onTap: () => this.openFilter('model') })
-          RowDivider()
-          NavRow({ title: t('会话'), subtitle: this.threadFilter ? this.sessionName(this.threadFilter) : t('全部会话'), compId: 'usage-thread',
-            onTap: () => this.openFilter('thread') })
-        }
-      }
+      Row({ space: Space.sm }) {
+        UsageFilterChip({ kind: 'provider', label: this.provider ? this.providerName(this.provider) : t('全部服务'), active: !!this.provider, onSelect: () => this.openFilter('provider') })
+        UsageFilterChip({ kind: 'model', label: this.model || t('全部模型'), active: !!this.model, onSelect: () => this.openFilter('model') })
+        UsageFilterChip({ kind: 'thread', label: this.threadFilter ? this.sessionName(this.threadFilter) : t('全部会话'), active: !!this.threadFilter, onSelect: () => this.openFilter('thread') })
+      }.width('100%')
     }.width('100%').padding({ top: Space.sm })
   }
 
@@ -279,60 +326,128 @@ export struct UsagePanel {
 
   @Builder
   overview() {
-    SectionHeader({ title: t('用量概览') })
-    GroupCard() {
-      Column({ space: Space.md }) {
-        Text(t('总 Token')).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
-        Text(this.total(this.stats.totals.total)).fontFamily(this.appearance.fontFamily).id('usage-total').fontSize(34).fontWeight(FontWeight.Bold)
-          .fontColor(this.appearance.accent).maxLines(1).minFontSize(20).maxFontSize(34)
-        Row({ space: Space.sm }) {
-          StatTile({ value: this.total(this.stats.totals.input), label: t('输入 Token') })
-          StatTile({ value: this.total(this.stats.totals.output), label: t('输出 Token') })
-        }.width('100%')
-        this.metric(t('缓存读取（输入内）'), this.count(this.stats.totals.cachedReports ? this.stats.totals.cached : undefined))
-        this.metric(t('缓存写入（输入内）'), this.count(this.stats.totals.cacheWriteReports ? this.stats.totals.cacheWrite : undefined))
-        this.metric(t('推理（输出内）'), this.count(this.stats.totals.reasoningReports ? this.stats.totals.reasoning : undefined))
-      }.width('100%').alignItems(HorizontalAlign.Start).padding(Space.lg)
-    }
+    Column() {
+      GroupCard() {
+        Column({ space: Space.md }) {
+          Row() {
+            Text(t('总 Token')).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
+            Blank()
+            Tag({ text: [t('今天'), t('近 7 天'), t('近 30 天'), t('全部')][this.range] })
+          }.width('100%')
+          Text(this.total(this.stats.totals.total)).fontFamily(this.appearance.fontFamily).id('usage-total').fontSize(38).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary')).maxLines(1).minFontSize(20).maxFontSize(38)
+          Row({ space: 6 }) {
+            UsageProfileStat({ label: t('输入 Token'), value: this.total(this.stats.totals.input) })
+            UsageProfileStat({ label: t('输出 Token'), value: this.total(this.stats.totals.output) })
+            UsageProfileStat({ label: t('请求'), value: this.number(this.stats.totals.calls) })
+          }.width('100%')
+          this.trend()
+        }.width('100%').alignItems(HorizontalAlign.Start).padding(Space.lg)
+      }
+    }.width('100%').margin({ top: Space.md })
     Row({ space: Space.sm }) {
-      StatTile({ value: this.number(this.stats.totals.calls), label: t('请求') })
       StatTile({ value: this.number(this.stats.totals.reported), label: t('已报告用量') })
       StatTile({ value: this.number(this.stats.totals.missing), label: t('未报告') })
     }.width('100%').margin({ top: Space.sm })
     Text(t('失败 {0} · 已取消 {1} · 进行中 / 结果不确定 {2}', [this.stats.totals.failed, this.stats.totals.cancelled, this.stats.totals.pending])).fontFamily(this.appearance.fontFamily)
       .fontSize(Font.caption).fontColor($r('app.color.text_secondary')).width('100%').margin({ top: Space.sm })
+    Column() {
+      GroupCard() {
+        Column() {
+          NavRow({ title: t('Token 明细'), trailing: 'expand', active: this.showTokenDetails, compId: 'usage-token-details',
+            onTap: () => { this.showTokenDetails = !this.showTokenDetails; } })
+          if (this.showTokenDetails) {
+            Column({ space: Space.md }) {
+              this.metric(t('缓存读取（输入内）'), this.count(this.stats.totals.cachedReports ? this.stats.totals.cached : undefined))
+              this.metric(t('缓存写入（输入内）'), this.count(this.stats.totals.cacheWriteReports ? this.stats.totals.cacheWrite : undefined))
+              this.metric(t('推理（输出内）'), this.count(this.stats.totals.reasoningReports ? this.stats.totals.reasoning : undefined))
+            }.width('100%').padding({ left: Space.lg, right: Space.lg, bottom: Space.lg })
+          }
+        }.width('100%')
+      }
+    }.width('100%').margin({ top: Space.md })
+  }
+
+
+  private cellDescription(cell: ContributionCell): string {
+    if (!cell.day) { return cell.date; }
+    return cell.date + ' · ' + (cell.day.calls > 0 && cell.day.reported === 0 ? t('未报告') : this.number(cell.day.total) + ' Token') +
+      ' · ' + t('{0} 次请求 · {1} 次未报告', [cell.day.calls, cell.day.missing]);
+  }
+
+  @Builder
+  contributionCell(cell: ContributionCell) {
+    Stack() {
+      Rect().width(16).height(16).radius(3).fill($r('app.color.surface_variant'))
+      if (cell.level > 0) {
+        Rect().width(16).height(16).radius(3).fill(this.appearance.accent).opacity(cell.level / 4)
+      }
+      if (cell.day && cell.day.missing > 0) {
+        Circle().width(4).height(4).fill($r('app.color.text_secondary'))
+      }
+    }.width(20).height(20).opacity(cell.day ? 1 : 0.25)
+      .border({ width: cell.day && cell.date === this.selectedDay().date ? 1 : 0, color: this.appearance.accent, radius: 4 })
+      .id('usage-day-' + cell.date).accessibilityText(this.cellDescription(cell)).accessibilityLevel(cell.day ? 'yes' : 'no')
+      .enabled(!!cell.day).onClick(() => { this.day = cell.date; })
   }
 
   @Builder
   trend() {
-    SectionHeader({ title: t('每日趋势') })
-    GroupCard() {
-      Column({ space: Space.sm }) {
-        Text(compactNumber(Math.max(0, ...this.stats.days.map((item: UsageDay) => item.total))) + ' Token').fontFamily(this.appearance.fontFamily)
-          .fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).width('100%')
-        Row({ space: this.stats.days.length > 7 ? 3 : 8 }) {
-          ForEach(this.stats.days, (item: UsageDay) => {
-            Column() {
-              Column().width('100%').height(item.total > 0 ? Math.max(3, item.total / this.stats.peak * 100) : 2)
-                .backgroundColor(item.date === this.selectedDay().date ? this.appearance.accent : $r('app.color.text_tertiary')).borderRadius(3)
-            }.layoutWeight(1).height(110).justifyContent(FlexAlign.End)
-              .id('usage-day-' + item.date).accessibilityText(item.date + ' · ' + (item.calls > 0 && item.reported === 0 ? t('未报告') : this.number(item.total) + ' Token'))
-              .onClick(() => { this.day = item.date; })
-          }, (item: UsageDay) => JSON.stringify(item))
-        }.width('100%')
-        Row() {
-          Text(this.stats.days[0]?.date.slice(5) || '').fontFamily(this.appearance.fontFamily)
-            .fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
-          Blank()
-          Text(this.stats.days[this.stats.days.length - 1]?.date.slice(5) || '').fontFamily(this.appearance.fontFamily)
-            .fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
-        }.width('100%')
-        Text(this.selectedDay().date + ' · ' + (this.selectedDay().calls > 0 && this.selectedDay().reported === 0 ? t('未报告') : this.number(this.selectedDay().total) + ' Token')).fontFamily(this.appearance.fontFamily)
-          .fontSize(14).fontColor($r('app.color.text_primary')).width('100%')
+    Column({ space: Space.sm }) {
+      Row() {
+        Text(t('Token 活动')).fontFamily(this.appearance.fontFamily).fontSize(14).fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_primary'))
+        Blank()
+        Text(this.range === 3 ? t('近一年') : [t('今天'), t('近 7 天'), t('近 30 天')][this.range])
+          .fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.text_secondary'))
+      }.width('100%')
+      Row({ space: 6 }) {
+        Column({ space: 2 }) {
+          Text('').height(16)
+          ForEach([t('一'), '', t('三'), '', t('五'), '', t('周日简称')], (label: string, index: number) => {
+            Text(label).fontFamily(this.appearance.fontFamily).fontSize(10).height(20).fontColor($r('app.color.text_tertiary'))
+          }, (label: string, index: number) => String(index))
+        }.width(14)
+        Scroll(this.contributionScroller) {
+          Row({ space: 2 }) {
+            ForEach(this.contributions.weeks, (week: ContributionWeek) => {
+              Column({ space: 2 }) {
+                Text(week.month).fontFamily(this.appearance.fontFamily).fontSize(10).height(16).width(20)
+                  .fontColor($r('app.color.text_tertiary')).textAlign(TextAlign.Start)
+                ForEach(week.cells, (cell: ContributionCell) => { this.contributionCell(cell) },
+                  (cell: ContributionCell) => cell.date + ':' + this.revisionKey)
+              }
+            }, (week: ContributionWeek) => week.key + ':' + this.revisionKey)
+          }.onAreaChange((previous: Area, current: Area) => {
+            // Scrolling changes the content position too; only a new calendar width should reset it.
+            if (Number(previous.width) !== Number(current.width)) {
+              this.contributionScroller.scrollEdge(Edge.End);
+            }
+          })
+        }.id('usage-contributions').layoutWeight(1).scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
+      }.width('100%')
+      Row({ space: 4 }) {
+        Text(t('少')).fontFamily(this.appearance.fontFamily).fontSize(10).fontColor($r('app.color.text_tertiary'))
+        ForEach([0, 1, 2, 3, 4], (level: number) => {
+          Stack() {
+            Rect().width(9).height(9).radius(2).fill($r('app.color.surface_variant'))
+            if (level > 0) { Rect().width(9).height(9).radius(2).fill(this.appearance.accent).opacity(level / 4) }
+          }.width(9).height(9)
+        })
+        Text(t('多')).fontFamily(this.appearance.fontFamily).fontSize(10).fontColor($r('app.color.text_tertiary'))
+        Blank()
+        Circle().width(4).height(4).fill($r('app.color.text_secondary'))
+        Text(t('含未报告')).fontFamily(this.appearance.fontFamily).fontSize(10).fontColor($r('app.color.text_tertiary'))
+      }.width('100%')
+      Text(t('{0} 天活跃 · 最长连续 {1} 天', [this.contributions.activeDays, this.contributions.longestStreak]))
+        .fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary')).width('100%')
+      Column({ space: 4 }) {
+        Text(this.selectedDay().date + ' · ' + (this.selectedDay().calls > 0 && this.selectedDay().reported === 0 ? t('未报告') : this.number(this.selectedDay().total) + ' Token'))
+          .fontFamily(this.appearance.fontFamily).fontSize(13).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary')).width('100%')
         Text(t('{0} 次请求 · {1} 次未报告', [this.selectedDay().calls, this.selectedDay().missing])).fontFamily(this.appearance.fontFamily)
-          .fontSize(Font.caption).fontColor($r('app.color.text_secondary')).width('100%')
-      }.width('100%').padding(Space.lg)
-    }
+          .fontSize(11).fontColor($r('app.color.text_secondary')).width('100%')
+      }.width('100%').padding(10).borderRadius(10).backgroundColor($r('app.color.surface_variant'))
+    }.width('100%').alignItems(HorizontalAlign.Start).margin({ top: 4 })
   }
 
   @Builder
@@ -523,7 +638,6 @@ export struct UsagePanel {
             this.overview()
           }
           if (this.stats.totals.calls > 0 && this.tab === 0) {
-            this.trend()
             SectionHeader({ title: t('按用途统计') })
             GroupCard() {
               Column({ space: Space.md }) {
@@ -564,7 +678,9 @@ export struct UsagePanel {
       }
     }.width('100%').height('100%').padding({ left: Space.page, right: Space.page }).scrollBar(BarState.Off)
       .edgeEffect(EdgeEffect.Spring).contentEndOffset(Space.xl)
-      .bindSheet($$this.showFilter, this.filterSheet(), { title: { title: this.filterTitle() },
-        height: SheetSize.FIT_CONTENT, dragBar: true, systemMaterial: this.appearance.surface })
+      // A closing sheet must not write false into a newer request through a two-way binding.
+      .bindSheet(this.showFilter, this.filterSheet(), { title: { title: this.filterTitle() },
+        height: SheetSize.FIT_CONTENT, dragBar: true, systemMaterial: this.appearance.surface,
+        onWillDismiss: () => this.closeFilter(), onDisappear: () => this.filterDidClose() })
   }
 }

@@ -106,7 +106,9 @@ export default function usageStatisticsTests(): void {
       const records = [request('old', new Date(2025, 0, 1).getTime()), request('yesterday', new Date(2026, 0, 2, 23, 59).getTime()), request('today', now)];
       expect(summarizeUsage(records, 0, '', '', now).totals.calls).assertEqual(1);
       const all = summarizeUsage(records, 3, '', '', now);
-      expect(all.totals.calls).assertEqual(3); expect(all.days.length).assertEqual(30);
+      expect(all.totals.calls).assertEqual(3); expect(all.days.length).assertEqual(365);
+      expect(all.days[0].date).assertEqual('2025-01-04');
+      expect(all.days[364].date).assertEqual('2026-01-03');
       expect(all.days.reduce((sum, day) => sum + day.calls, 0)).assertEqual(2);
     });
     it('filtersExactProviderAndModelAndDoesNotMergeSameModelAcrossProviders', 0, () => {

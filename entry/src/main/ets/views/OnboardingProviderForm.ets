@@ -10,10 +10,14 @@ export struct OnboardingProviderForm {
   @ObjectLink editor: ProviderEditorViewModel;
   @Prop locked: boolean = false;
   @Prop attempted: boolean = false;
-  onKeyFocus: (focused: boolean) => void = () => {};
+  onFieldFocus: (field: string, focused: boolean) => void = () => {};
+  onKeyInput: () => void = () => {};
   onError: (message: string) => void = () => {};
 
-  aboutToDisappear(): void { this.onKeyFocus(false); }
+  aboutToDisappear(): void {
+    this.onFieldFocus('url', false);
+    this.onFieldFocus('key', false);
+  }
 
   private async openKeyPage(): Promise<void> {
     if (this.locked || !this.editor.apiKeyUrl) { return; }
@@ -41,6 +45,8 @@ export struct OnboardingProviderForm {
           .id('onboarding-inline-url').fontFamily(this.appearance.fontFamily).fontSize(14).height(44)
           .type(InputType.URL).maxLength(1024).borderRadius(12)
           .backgroundColor($r('app.color.surface_variant')).fontColor($r('app.color.text_primary'))
+          .onFocus(() => this.onFieldFocus('url', true)).onBlur(() => this.onFieldFocus('url', false))
+          .onEditChange((editing: boolean) => this.onFieldFocus('url', editing))
           .onChange((value: string) => { this.editor.baseUrl = value; this.onError(''); })
         this.fieldError('url')
       }.width('100%')
@@ -63,9 +69,9 @@ export struct OnboardingProviderForm {
             .type(InputType.Password).showPasswordIcon(true).copyOption(CopyOptions.None).maxLength(512)
             .borderRadius(12).backgroundColor($r('app.color.surface_variant'))
             .fontColor($r('app.color.text_primary')).accessibilityText('API Key')
-            .onFocus(() => this.onKeyFocus(true)).onBlur(() => this.onKeyFocus(false))
-            .onEditChange((editing: boolean) => this.onKeyFocus(editing))
-            .onChange((value: string) => { this.editor.apiKey = value; this.onError(''); })
+            .onFocus(() => this.onFieldFocus('key', true)).onBlur(() => this.onFieldFocus('key', false))
+            .onEditChange((editing: boolean) => this.onFieldFocus('key', editing))
+            .onChange((value: string) => { this.editor.apiKey = value; this.onKeyInput(); this.onError(''); })
           this.fieldError('key')
         }.width('100%')
         if (this.editor.apiKeyUrl) {

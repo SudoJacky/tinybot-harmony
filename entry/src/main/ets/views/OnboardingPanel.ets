@@ -1,4 +1,4 @@
-import { uiMaterial } from '@kit.ArkUI';
+import { KeyboardAvoidMode, uiMaterial } from '@kit.ArkUI';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Motion } from '../common/Theme';
 import { Banner } from '../common/Widgets';
@@ -9,6 +9,7 @@ import { OnboardingMascot } from './OnboardingMascot';
 import { OnboardingIntroduction } from './OnboardingIntroduction';
 import { OnboardingProviderForm } from './OnboardingProviderForm';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
+import { WindowViewport } from '../viewmodel/WindowViewport';
 import { t } from '../model/I18n';
 
 @Component
@@ -28,11 +29,16 @@ export struct OnboardingPanel {
   onLegal: (page: string) => void = () => {};
   @State private step: number = 0;
   @State private agreed: boolean = false;
-  @State private greeted: boolean = false;
+  @State private hasWoken: boolean = false;
+  @State private typing: boolean = false;
+  @State private farewell: boolean = false;
+  @State private keyStroke: number = 0;
+  @State private speechLine: number = -1;
   @State private selectedPreset: string = '';
   @State private providerEditing: boolean = false;
   @State private connectionAttempted: boolean = false;
   @State private keyFocused: boolean = false;
+  @State private connectionEditing: boolean = false;
   @State private selectedTask: number = -1;
   @State private message: string = '';
   @State private saving: boolean = false;
@@ -40,12 +46,19 @@ export struct OnboardingPanel {
   @State private waking: boolean = false;
   @State private wakeReady: boolean = false;
   @State private bodyHeight: number = 560;
+  @State private introductionHeight: number = 560;
   @State private pageDirection: number = 1;
   @State private transitioning: boolean = false;
   @State private actorReady: boolean = false;
   @State private actorX: number = 0;
   @State private actorY: number = 0;
   @State private actorSize: number = 180;
+  @State private introductionLookDown: boolean = false;
+  @State private introductionLookX: number = 0;
+  private typingTimer: number = -1;
+  private typingRevision: number = 0;
+  private farewellTimer: number = -1;
+  private farewellResolve?: (ready: boolean) => void;
   private stageLeft: number = 0;
   private stageTop: number = 0;
   private stageWidth: number = 0;
@@ -56,25 +69,39 @@ export struct OnboardingPanel {
   private wakeRevision: number = 0;
   private mounted: boolean = false;
   private connectionScroller: Scroller = new Scroller();
+  private keyboardViewport: WindowViewport = new WindowViewport();
+  private previousKeyboardMode?: KeyboardAvoidMode;
+  private focusedConnectionField: string = '';
 
   aboutToAppear(): void {
     this.mounted = true;
+    this.keyboardViewport.onKeyboard = (shown: boolean): void => {
+      if (!this.mounted) { return; }
+      // Changing between URL and secure keyboards briefly reports height zero
+      // after the new field has already started editing.
+      if (!shown && !this.focusedConnectionField) { this.endConnectionEditing(); }
+      else if (shown) { this.keepConnectionInputVisible(); }
+    };
+    this.keyboardViewport.observe(this.getUIContext());
     if (this.configured && this.connectedPreset.length > 0) { this.selectedPreset = this.connectedPreset; }
   }
 
   aboutToDisappear(): void {
     this.mounted = false;
+    this.endConnectionEditing();
+    this.keyboardViewport.dispose();
     this.app.providerEditor.apiKey = '';
     this.cancelWake(false);
+    this.cancelFeedback();
     this.settleTransition();
   }
 
   private activeChanged(): void {
-    if (!this.active) { this.keyFocused = false; this.cancelWake(true); this.settleTransition(); }
+    if (!this.active) { this.endConnectionEditing(); this.cancelWake(true); this.cancelFeedback(); this.settleTransition(); }
   }
 
   private foregroundChanged(): void {
-    if (!this.foreground) { this.keyFocused = false; this.cancelWake(true); this.settleTransition(); }
+    if (!this.foreground) { this.endConnectionEditing(); this.cancelWake(true); this.cancelFeedback(); this.settleTransition(); }
   }
 
   private connectionChanged(): void {
@@ -101,16 +128,17 @@ export struct OnboardingPanel {
       clearTimeout(this.wakeTimer);
       this.wakeTimer = -1;
     }
-    if (showContinue && this.waking && this.step === 1) { this.wakeReady = true; }
+    if (showContinue && this.waking && this.step === 1) { this.waking = false; this.wakeReady = true; }
   }
 
   private wake(): void {
-    if (this.step !== 1 || !this.active || !this.foreground || this.saving || this.transitioning || this.waking) { return; }
+    if (this.step !== 1 || this.hasWoken || !this.active || !this.foreground || this.saving || this.transitioning || this.waking) { return; }
     this.cancelWake(false);
     const revision = this.wakeRevision;
     this.error = '';
     this.wakeReady = false;
     this.waking = true;
+    this.hasWoken = true;
     this.wakeTimer = setTimeout(() => {
       if (!this.mounted || revision !== this.wakeRevision) { return; }
       this.wakeTimer = -1;
@@ -131,15 +159,17 @@ export struct OnboardingPanel {
     if (this.saving || this.transitioning || !this.active || !this.foreground || !this.mounted) { return; }
     const next = Math.max(0, Math.min(4, this.step + delta));
     if (next === this.step) { return; }
+    this.endConnectionEditing();
     this.cancelWake(false);
+    this.cancelFeedback();
     this.error = '';
     this.pageDirection = next > this.step ? 1 : -1;
     const change = (): void => {
       this.step = next;
       this.keyFocused = false;
-      this.greeted = false;
+      this.speechLine = -1;
       this.waking = false;
-      this.wakeReady = false;
+      this.wakeReady = next === 1 && this.hasWoken;
     };
     if (this.appearance.effectStrength === 0) { change(); return; }
     const revision = ++this.transitionRevision;
@@ -181,12 +211,42 @@ export struct OnboardingPanel {
     this.saving = true;
     this.error = '';
     try {
+      if (action === 'start' && this.step === 4 && !await this.sayGoodbye()) { return; }
       await this.onFinish(action, action === 'skip' ? '' : prompt);
     } catch (error) {
       this.error = (error as Error).message;
     } finally {
       this.saving = false;
+      this.farewell = false;
     }
+  }
+
+  private cancelTyping(): void {
+    this.typingRevision++;
+    if (this.typingTimer >= 0) { clearTimeout(this.typingTimer); this.typingTimer = -1; }
+    this.typing = false;
+  }
+
+  private cancelFeedback(): void {
+    this.cancelTyping();
+    if (this.farewellTimer >= 0) { clearTimeout(this.farewellTimer); this.farewellTimer = -1; }
+    const resolve = this.farewellResolve;
+    this.farewellResolve = undefined;
+    this.farewell = false;
+    resolve?.(false);
+  }
+
+  private sayGoodbye(): Promise<boolean> {
+    if (this.appearance.effectStrength === 0) { return Promise.resolve(true); }
+    this.farewell = true;
+    return new Promise<boolean>((resolve) => {
+      this.farewellResolve = resolve;
+      this.farewellTimer = setTimeout(() => {
+        this.farewellTimer = -1;
+        this.farewellResolve = undefined;
+        resolve(this.mounted && this.active && this.foreground);
+      }, 520);
+    });
   }
 
   private sceneLabel(): string {
@@ -339,24 +399,50 @@ export struct OnboardingPanel {
   }
 
   private connectionDiameter(): number {
-    if (this.keyFocused) { return 96; }
+    if (this.connectionEditing) { return 96; }
     return this.providerEditing ? Math.max(96, Math.min(128, this.bodyHeight - 380)) : 160;
   }
 
-  private setKeyFocused(focused: boolean): void {
-    if (!this.mounted || focused === this.keyFocused) { return; }
-    this.animate(() => { this.keyFocused = focused; }, 320);
-    if (focused) { this.keepKeyVisible(); }
+  private setConnectionFocus(field: string, focused: boolean): void {
+    if (!this.mounted || !this.active || !this.foreground || this.step !== 3) { return; }
+    if (focused ? this.focusedConnectionField === field : this.focusedConnectionField !== field) { return; }
+    this.focusedConnectionField = focused ? field : '';
+    if (focused && !this.connectionEditing) {
+      const ui = this.getUIContext();
+      if (this.previousKeyboardMode === undefined) { this.previousKeyboardMode = ui.getKeyboardAvoidMode(); }
+      // Keep the full page and its footer in place; the native keyboard covers them.
+      ui.setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
+      this.connectionEditing = true;
+      this.connectionScroller.scrollTo({ xOffset: 0, yOffset: 0, animation: false });
+    }
+    this.animate(() => { this.keyFocused = this.focusedConnectionField === 'key'; }, 320);
+    if (!focused && this.keyboardViewport.keyboardHeight === 0) { this.endConnectionEditing(); }
+    else { this.keepConnectionInputVisible(); }
   }
 
-  private keepKeyVisible(): void {
-    if (this.step !== 3 || !this.keyFocused) { return; }
+  private endConnectionEditing(): void {
+    if (!this.connectionEditing && this.previousKeyboardMode === undefined) { return; }
+    this.keyFocused = false;
+    this.connectionEditing = false;
+    this.focusedConnectionField = '';
+    if (this.previousKeyboardMode !== undefined) {
+      this.getUIContext().setKeyboardAvoidMode(this.previousKeyboardMode);
+      this.previousKeyboardMode = undefined;
+    }
+    this.connectionScroller.scrollTo({ xOffset: 0, yOffset: 0, animation: false });
+  }
+
+  private keepConnectionInputVisible(): void {
+    if (this.step !== 3 || !this.connectionEditing || !this.focusedConnectionField || !this.active || !this.foreground) { return; }
     const ui = this.getUIContext();
-    const input = ui.getComponentUtils().getRectangleById('onboarding-inline-key');
+    const input = ui.getComponentUtils().getRectangleById('onboarding-inline-' + this.focusedConnectionField);
     const viewport = ui.getComponentUtils().getRectangleById('onboarding-connection-scroll');
     const inset = ui.vp2px(8);
     const top = viewport.windowOffset.y + inset;
-    const bottom = viewport.windowOffset.y + viewport.size.height - inset;
+    const panel = ui.getComponentUtils().getRectangleById('onboarding-panel');
+    const keyboardTop = panel.windowOffset.y + panel.size.height + ui.vp2px(this.keyboardViewport.bottom) -
+      this.keyboardViewport.keyboardHeight;
+    const bottom = Math.min(viewport.windowOffset.y + viewport.size.height, keyboardTop) - inset;
     const delta = input.windowOffset.y < top ? input.windowOffset.y - top :
       Math.max(0, input.windowOffset.y + input.size.height - bottom);
     if (delta !== 0) { this.connectionScroller.scrollBy(0, ui.px2vp(delta)); }
@@ -380,6 +466,7 @@ export struct OnboardingPanel {
     if (this.transitioning) { return; }
     const tasks = onboardingTasks();
     if (index < 0 || index >= tasks.length) { return; }
+    this.cancelTyping();
     this.error = '';
     this.animate((): void => {
       this.selectedTask = index;
@@ -388,7 +475,17 @@ export struct OnboardingPanel {
   }
 
   private onMessageChange(value: string): void {
+    this.cancelTyping();
     this.message = value;
+    if (this.mounted && this.active && this.foreground && this.step === 4 && value.length > 0) {
+      this.typing = true;
+      const revision = this.typingRevision;
+      this.typingTimer = setTimeout(() => {
+        if (revision !== this.typingRevision || !this.mounted || !this.active || !this.foreground) { return; }
+        this.typingTimer = -1;
+        this.typing = false;
+      }, 1000);
+    }
     if (this.error.length > 0) { this.error = ''; }
     const tasks = onboardingTasks();
     if (this.selectedTask >= 0 && this.selectedTask < tasks.length && value !== tasks[this.selectedTask].prompt) {
@@ -407,19 +504,18 @@ export struct OnboardingPanel {
   }
 
   private actorMood(): string {
-    if (this.step === 0) { return this.account.signedIn ? 'proud' : 'curious'; }
-    if (this.step === 1) { return this.waking ? 'surprised' : 'sleepy'; }
-    if (this.step === 2) { return this.greeted ? 'proud' : 'happy'; }
+    if (this.step <= 1 && !this.hasWoken) { return 'sleepy'; }
+    if (this.farewell) { return 'happy'; }
+    if (this.error.length > 0 || (this.step === 0 && this.account.error.length > 0)) { return 'oops'; }
+    if (this.saving || this.typing) { return 'focused'; }
+    if (this.step <= 2) { return 'happy'; }
     if (this.step === 3) { return this.configured ? 'proud' : 'curious'; }
     return this.message.trim().length > 0 ? 'happy' : 'curious';
   }
 
   private greetActor(): void {
     if (!this.active || !this.foreground || this.transitioning || this.saving) { return; }
-    if (this.step === 1) { this.wake(); }
-    else {
-      this.animate(() => { this.greeted = !this.greeted; });
-    }
+    if (this.step === 1 && !this.hasWoken) { this.wake(); }
   }
 
   private stageChanged(area: Area): void {
@@ -428,7 +524,7 @@ export struct OnboardingPanel {
     this.stageWidth = Number(area.width);
     this.bodyHeight = Number(area.height);
     if (this.actorArea && this.actorScene === this.step) { this.locateActor(this.step, this.actorArea); }
-    this.keepKeyVisible();
+    this.keepConnectionInputVisible();
   }
 
   private locateActor(scene: number, area: Area): void {
@@ -436,10 +532,6 @@ export struct OnboardingPanel {
     this.actorArea = area;
     this.actorScene = scene;
     if (this.stageWidth <= 0) { return; }
-    if (scene === 3 && this.keyFocused) {
-      this.placeActor(this.stageWidth / 2, 48, 96, true);
-      return;
-    }
     const size = Number(area.width);
     // Other scenes centre Tiny; the final task anchors it beside the prompt.
     const x = scene === 4 ? Number(area.globalPosition.x) - this.stageLeft + size / 2 : this.stageWidth / 2;
@@ -460,10 +552,6 @@ export struct OnboardingPanel {
 
   private followActorScroll(scene: number, id: string): void {
     if (scene !== this.step || this.actorScene !== scene || !this.actorReady) { return; }
-    if (scene === 3 && this.keyFocused) {
-      this.placeActor(this.stageWidth / 2, 48, 96, false);
-      return;
-    }
     const ui = this.getUIContext();
     const rect = ui.getComponentUtils().getRectangleById(id);
     const size = ui.px2vp(rect.size.width);
@@ -473,8 +561,8 @@ export struct OnboardingPanel {
   }
 
   @Builder
-  actorSlot(scene: number, size: number) {
-    Column().width(size).height(size).id('onboarding-actor-slot-' + scene)
+  actorSlot(scene: number, size: () => number) {
+    Column().width(size()).height(size()).id('onboarding-actor-slot-' + scene)
       .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
       .onAreaChange((_old: Area, area: Area) => this.locateActor(scene, area))
   }
@@ -483,11 +571,17 @@ export struct OnboardingPanel {
   persistentActor() {
     Column() {
       OnboardingMascot({ diameter: 220, scene: this.step,
-        mood: this.actorMood(), greeted: this.step !== 1 && this.greeted,
-        sleepy: this.step === 1, waking: this.step === 1 && this.waking, energized: this.step !== 1,
-        lookX: this.step === 3 ? this.providerLookX() : 0,
-        lookY: this.step === 3 && this.selectedPreset.length > 0 ? 4 : 0,
+        mood: this.actorMood(), farewell: this.farewell, speechLine: this.step === 2 ? this.speechLine : -1,
+        dream: this.step === 0 && this.account.signedIn,
+        sleepy: this.step <= 1 && (!this.hasWoken || this.waking), waking: this.step === 1 && this.waking,
+        energized: this.configured && !this.providerEditing,
+        lookX: this.step === 2 ? this.introductionLookX : this.step === 3 ? this.providerLookX() :
+          this.step === 4 && (this.typing || this.selectedTask >= 0) ? 6 : 0,
+        lookY: this.step === 2 && this.introductionLookDown ? 8 :
+          this.step === 3 && this.selectedPreset.length > 0 ? 4 : this.step === 4 ?
+            this.typing ? 8 : this.selectedTask >= 0 ? 3 + this.selectedTask * 2 : 0 : 0,
         coverEyes: this.step === 3 && this.keyFocused && this.active && this.foreground,
+        keyStroke: this.keyStroke,
         connected: this.configured && !this.providerEditing,
         allowDrag: this.step === 2 && !this.transitioning,
         active: this.active && this.foreground && this.actorReady,
@@ -529,7 +623,7 @@ export struct OnboardingPanel {
   accountScene() {
     Column({ space: 16 }) {
       Stack({ alignContent: Alignment.Center }) {
-        this.actorSlot(0, 132)
+        this.actorSlot(0, () => 132)
       }.width('100%').height(144)
       Text(this.account.signedIn ? t('已登录华为账号') : t('登录华为账号'))
         .id('onboarding-account-status').fontFamily(this.appearance.fontFamily).fontSize(21)
@@ -573,12 +667,12 @@ export struct OnboardingPanel {
     Column() {
       Blank()
       Column() {
-        this.actorSlot(1, this.wakeDiameter())
+        this.actorSlot(1, () => this.wakeDiameter())
       }.id('onboarding-wake-tile').width(this.wakeTileSize()).height(this.wakeTileSize())
         .justifyContent(FlexAlign.Center).backgroundColor(this.bubble()).borderRadius(this.wakeTileSize() * 0.24)
         .shadow({ radius: 30, color: this.appearance.accentGlow, offsetY: 8 })
         .accessibilityGroup(true).accessibilityRole(AccessibilityRoleType.BUTTON)
-        .accessibilityText(this.waking ? t('Tiny 正在醒来') : t('轻点叫醒 Tiny'))
+        .accessibilityText(this.waking ? t('Tiny 正在醒来') : this.hasWoken ? t('Tiny 醒了，继续认识它吧。') : t('轻点叫醒 Tiny'))
         .onClick(() => this.wake())
       Blank()
     }.width('100%').layoutWeight(1)
@@ -587,17 +681,19 @@ export struct OnboardingPanel {
   @Builder
   introductionScene() {
     OnboardingIntroduction({ active: this.active && this.foreground && this.step === 2,
-      bodyHeight: this.bodyHeight, onActorArea: (area: Area) => this.locateActor(2, area) })
+      bodyHeight: this.introductionHeight, onActorArea: (area: Area) => this.locateActor(2, area),
+      onLook: (down: boolean, x: number) => { this.introductionLookDown = down; this.introductionLookX = x; },
+      onSpeak: (line: number) => { this.speechLine = line; } })
   }
 
   @Builder
   connectionScene() {
     Column({ space: 14 }) {
       Text(this.statusTitle()).id('onboarding-provider-status').fontFamily(this.appearance.fontFamily)
-        .fontSize(this.keyFocused ? 14 : 18).fontWeight(FontWeight.Medium).fontColor(this.ink()).textAlign(TextAlign.Center)
-        .width('100%').padding(this.keyFocused ? 10 : 18).backgroundColor(this.bubble()).borderRadius(20)
+        .fontSize(this.connectionEditing ? 14 : 18).fontWeight(FontWeight.Medium).fontColor(this.ink()).textAlign(TextAlign.Center)
+        .width('100%').padding(this.connectionEditing ? 10 : 18).backgroundColor(this.bubble()).borderRadius(20)
         .shadow({ radius: 14, color: this.dark ? '#33000000' : '#14000000', offsetY: 6 })
-      this.actorSlot(3, this.connectionDiameter())
+      this.actorSlot(3, () => this.connectionDiameter())
       Row({ space: 10 }) {
         ForEach(onboardingProviders(), (provider: OnboardingProvider) => {
           Toggle({ type: ToggleType.Button, isOn: this.selectedPreset === provider.preset }) {
@@ -622,9 +718,13 @@ export struct OnboardingPanel {
             .onChange((selected: boolean) => this.providerSelectionChanged(provider.preset, selected))
         }, (provider: OnboardingProvider) => provider.preset)
       }.width('100%').margin({ top: 6 })
+        .visibility(this.connectionEditing ? Visibility.None : Visibility.Visible)
+        .opacity(this.connectionEditing ? 0 : 1)
       ForEach(this.providerEditing ? [this.selectedPreset] : [], (preset: string) => {
         OnboardingProviderForm({ editor: this.app.providerEditor, locked: this.saving || this.busy,
-          attempted: this.connectionAttempted, onKeyFocus: (focused: boolean) => this.setKeyFocused(focused),
+          attempted: this.connectionAttempted,
+          onFieldFocus: (field: string, focused: boolean) => this.setConnectionFocus(field, focused),
+          onKeyInput: () => { this.keyStroke++; },
           onError: (message: string) => { this.error = message; } })
           .transition(this.appearance.effectStrength > 0 ? Motion.rise(0, 12) : TransitionEffect.IDENTITY)
       }, (preset: string) => preset)
@@ -639,7 +739,7 @@ export struct OnboardingPanel {
   taskScene() {
     Column({ space: 16 }) {
       Row({ space: 8 }) {
-        this.actorSlot(4, 64)
+        this.actorSlot(4, () => 64)
         Text(t('想先做点什么？')).fontFamily(this.appearance.fontFamily).fontSize(15).lineHeight(23)
           .fontColor(this.ink()).layoutWeight(1).padding(14).backgroundColor(this.bubble())
           .borderRadius({ topLeft: 18, topRight: 18, bottomLeft: 5, bottomRight: 18 })
@@ -743,11 +843,10 @@ export struct OnboardingPanel {
             if (scene === 1) {
               this.wakeScene()
             } else if (scene === 3) {
-              if (this.keyFocused) { Blank().height(96).width('100%') }
               Scroll(this.connectionScroller) { this.connectionScene() }
                 .id('onboarding-connection-scroll').layoutWeight(1).width('100%').align(Alignment.Top)
                 .scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring)
-                .onAreaChange(() => this.keepKeyVisible())
+                .onAreaChange(() => this.keepConnectionInputVisible())
                 .onDidScroll(() => this.followActorScroll(3, 'onboarding-actor-slot-3'))
             } else {
               Scroll() {
@@ -761,6 +860,9 @@ export struct OnboardingPanel {
               }
               .height('100%').width('100%').align(Alignment.Top)
               .scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring)
+              .onAreaChange((_old: Area, area: Area) => {
+                if (scene === 2) { this.introductionHeight = Number(area.height); }
+              })
               .onDidScroll(() => this.followActorScroll(scene, 'onboarding-actor-slot-' + scene))
             }
           }

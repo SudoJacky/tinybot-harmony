@@ -630,24 +630,6 @@ export struct ChatPanel {
   contextSheet() {
     Scroll() {
       Column({ space: Space.lg }) {
-        Column({ space: 10 }) {
-          Row() {
-            Text(`${Math.round(this.contextRatio() * 100)}%`).fontFamily(this.appearance.fontFamily).fontSize(28).fontWeight(FontWeight.Bold)
-              .fontColor(this.contextColor())
-            Blank()
-            Text(t("约 {0} / {1} tokens", [this.app.contextUsed, this.app.contextWindow])).fontFamily(this.appearance.fontFamily).id('context-label')
-              .fontSize(13).fontColor($r('app.color.text_secondary'))
-          }.width('100%').alignItems(VerticalAlign.Bottom)
-          Progress({ value: this.app.contextUsed, total: Math.max(1, this.app.contextWindow), type: ProgressType.Linear })
-            .width('100%').color(this.contextColor()).backgroundColor($r('app.color.surface_variant'))
-            .style({ strokeWidth: 8, strokeRadius: 4 })
-          Text(t('剩余约 {0} tokens', [Math.max(0, this.app.contextWindow - this.app.contextUsed)])).fontFamily(this.appearance.fontFamily).fontSize(12)
-            .fontColor($r('app.color.text_tertiary'))
-          if (this.app.contextStatus.length > 0) {
-            Text(this.app.contextStatus).fontFamily(this.appearance.fontFamily).id('context-status').fontSize(13).lineHeight(19).width('100%')
-              .fontColor($r('app.color.text_secondary'))
-          }
-        }.padding(Space.lg).borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
         ContextDetails({ app: this.app })
         if (this.thread.compaction) {
           Column({ space: 10 }) {

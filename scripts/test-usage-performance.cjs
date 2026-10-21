@@ -17,6 +17,7 @@ function load(file) {
 }
 const { UsageQuery, USAGE_PAGE_SIZE } = load(path.join(__dirname, '../entry/src/main/ets/model/UsageQuery'));
 const { summarizeUsage } = load(path.join(__dirname, '../entry/src/main/ets/model/UsageStatistics'));
+const { usageContributions } = load(path.join(__dirname, '../entry/src/main/ets/model/UsageContributions'));
 const now = Date.now();
 const filter = { range: 3, provider: '', model: '', threadId: '', now };
 function record(i) {
@@ -25,6 +26,38 @@ function record(i) {
     origin: { threadId: 'thread-' + i % 5000, threadTitle: 'Thread ' + i % 5000, turnId: 'turn-' + i % 10000, purpose: 'conversation' } };
 }
 (async () => {
+  const calendarNow = new Date(2026, 0, 3, 12).getTime();
+  const calendarRecord = (id, year, month, date, tokens = { input: 100, output: 20 }) => ({
+    id, provider: 'one', model: 'test', startedAt: new Date(year, month, date, 12).getTime(),
+    durationMs: 1, status: 'complete', tokens
+  });
+  const history = [calendarRecord('old', 2024, 0, 1), calendarRecord('dec30', 2025, 11, 30),
+    calendarRecord('dec31', 2025, 11, 31), calendarRecord('jan1', 2026, 0, 1, null),
+    calendarRecord('zero', 2026, 0, 3, { input: 0, output: 0 }), calendarRecord('future', 2026, 0, 4)];
+  const calendarStats = summarizeUsage(history, 3, '', '', calendarNow);
+  assert.equal(calendarStats.totals.calls, 5, 'all-time totals include old history but exclude future records');
+  assert.equal(calendarStats.days.length, 365);
+  const calendar = usageContributions(calendarStats.days);
+  assert.equal(calendar.activeDays, 4, 'zero and unreported requests still represent activity');
+  assert.equal(calendar.longestStreak, 3, 'streak crosses year boundary and ends on an inactive day');
+  const cells = calendar.weeks.flatMap(week => week.cells);
+  assert.equal(cells.filter(cell => cell.day).length, 365, 'every day appears exactly once');
+  assert.equal(new Set(cells.map(cell => cell.date)).size, cells.length);
+  assert.equal(cells.find(cell => cell.date === '2026-01-01').day.missing, 1);
+  assert.equal(cells.find(cell => cell.date === '2026-01-03').day.missing, 0);
+  assert.equal(cells.find(cell => cell.date === '2026-01-04').day, undefined, 'future padding cannot be selected');
+  assert.equal(cells.find(cell => cell.date === '2025-12-31').level, 4);
+  const todayCalendar = usageContributions(summarizeUsage(history, 0, '', '', calendarNow).days);
+  assert.equal(todayCalendar.weeks.length, 13);
+  assert.equal(todayCalendar.weeks.flatMap(week => week.cells).filter(cell => cell.day).length, 1);
+  assert.equal(todayCalendar.activeDays, 1); assert.equal(todayCalendar.longestStreak, 1);
+  const emptyCalendar = usageContributions(summarizeUsage(history, 2, 'absent', '', calendarNow).days);
+  assert.equal(emptyCalendar.activeDays, 0); assert.equal(emptyCalendar.longestStreak, 0);
+  // Local calendar days stay contiguous even when an offset changes at DST boundaries.
+  const spring = usageContributions(summarizeUsage([], 2, '', '', new Date(2026, 2, 20, 12).getTime()).days);
+  const springDates = spring.weeks.flatMap(week => week.cells).filter(cell => cell.day).map(cell => cell.date);
+  assert.equal(springDates.length, 30); assert.equal(new Set(springDates).size, 30);
+  console.log('PASS contribution calendar: year boundary, gaps, missing vs zero, future padding, filters and local dates');
   const small = Array.from({ length: 97 }, (_, i) => record(i)).reverse();
   const query = new UsageQuery(small); let cursor; const ids = [];
   do {

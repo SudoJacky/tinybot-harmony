@@ -137,7 +137,7 @@ export class UsageAccumulator {
   private start: number;
   constructor(filter: UsageFilter, details: boolean = false, turnThread: string = '') {
     this.filter = filter; this.details = details; this.turnThread = turnThread; this.start = usageStart(filter);
-    const count = filter.range === 0 ? 1 : filter.range === 1 ? 7 : 30;
+    const count = filter.range === 0 ? 1 : filter.range === 1 ? 7 : filter.range === 3 ? 365 : 30;
     const start = new Date(filter.now); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - count + 1);
     for (let index = 0; index < count; index++) {
       const date = new Date(start.getTime()); date.setDate(date.getDate() + index);

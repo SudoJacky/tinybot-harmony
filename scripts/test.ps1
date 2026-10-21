@@ -65,6 +65,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Native tool parameter schema and execution tes
 if ($LASTEXITCODE -ne 0) { throw 'Compact tool discovery, permission and runtime tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-context-usage.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Conversation context usage aggregation tests failed. Build the app first.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-usage-filter-sheet.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Usage filter sheet lifecycle tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-memory.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Memory maintenance integration tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-code-sandbox.cjs')
