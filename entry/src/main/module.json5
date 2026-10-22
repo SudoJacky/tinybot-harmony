@@ -12,6 +12,8 @@
     "compressNativeLibs": true,
     "pages": "$profile:main_pages",
     "metadata": [
+      { "name": "appgallery_privacy_hosted", "value": "1" },
+      { "name": "appgallery_privacy_link_privacy_statement", "value": "https://agreement-drcn.hispace.dbankcloud.cn/index.html?lang=zh&agreementId=2067046195590618816" },
       { "name": "client_id", "value": "6917617825245755680" },
       { "name": "ohos.fileshare.supportPreservePersistentPermission" }
     ],

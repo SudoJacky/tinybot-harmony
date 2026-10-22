@@ -311,7 +311,7 @@ export struct OnboardingPanel {
   private async signInAccount(): Promise<void> {
     if (this.saving || this.transitioning || !this.active || !this.foreground) { return; }
     if (!this.account.ready) { this.error = t('正在确认登录状态，请稍候。'); return; }
-    if (!this.agreed) { this.error = t('请先阅读并同意用户协议和隐私政策。'); return; }
+    if (!this.agreed) { this.error = t('请先阅读并同意用户协议。'); return; }
     this.error = '';
     await this.account.signIn();
   }
@@ -643,17 +643,13 @@ export struct OnboardingPanel {
         Row({ space: 10 }) {
           Checkbox().id('onboarding-account-consent').select(this.agreed)
             .selectedColor(this.brand()).enabled(!this.account.busy)
-            .accessibilityText(t('我已阅读并同意用户协议和隐私政策'))
+            .accessibilityText(t('我已阅读并同意用户协议'))
             .onChange((value: boolean) => { this.agreed = value; if (value) { this.error = ''; } })
           Text() {
             Span(t('我已阅读并同意'))
             Span(t('用户协议')).fontColor(this.brandInk())
               .decoration({ type: TextDecorationType.Underline })
               .onClick(() => this.onLegal('terms'))
-            Span(t('和'))
-            Span(t('隐私政策')).fontColor(this.brandInk())
-              .decoration({ type: TextDecorationType.Underline })
-              .onClick(() => this.onLegal('privacy'))
           }.id('onboarding-account-agreement').fontFamily(this.appearance.fontFamily)
             .fontSize(13).lineHeight(19).fontColor(this.ink()).layoutWeight(1).enabled(!this.account.busy)
         }.width('100%').padding({ left: 2, right: 2 })

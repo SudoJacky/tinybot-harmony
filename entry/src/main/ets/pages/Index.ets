@@ -50,6 +50,7 @@ import { OnboardingPanel } from '../views/OnboardingPanel';
 import { OnboardingPreferences } from '../services/OnboardingPreferences';
 import { HuaweiAccount, huaweiAccount } from '../services/HuaweiAccount';
 import { HuaweiAccountPanel } from '../views/HuaweiAccountPanel';
+import { HostedPrivacy, hostedPrivacy } from '../services/HostedPrivacy';
 
 const DRAWER_MAX_WIDTH: number = 340;
 const CHAT_HEADER_HEIGHT: number = 56;
@@ -57,6 +58,8 @@ const CHAT_HEADER_HEIGHT: number = 56;
 @Entry
 @Component
 struct Index {
+  @State private privacy: HostedPrivacy = hostedPrivacy;
+  @StorageProp('tinybot.privacy.allowed') @Watch('privacyChanged') private privacyAllowed: boolean = false;
   @State private exportingImage: boolean = false;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
@@ -89,6 +92,7 @@ struct Index {
 
   onPageShow(): void {
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+    if (!this.privacy.allowed) { return; }
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     this.account.initialize(context).then(() => this.account.refresh());
     if (!this.session) {
@@ -98,6 +102,7 @@ struct Index {
       });
     }
     this.app.initialize(this.session).then(() => {
+      if (!this.privacy.allowed) { return; }
       ShareInbox.subscribe(() => this.receiveShare());
       if (this.app.ready && !this.unsubscribeLaunch) {
         this.unsubscribeLaunch = LaunchActions.subscribe(() => this.receiveLaunch());
@@ -108,6 +113,14 @@ struct Index {
 
   private onboardingPreferences(): OnboardingPreferences {
     return new OnboardingPreferences(this.getUIContext().getHostContext() as common.UIAbilityContext);
+  }
+
+  private privacyChanged(): void {
+    if (this.privacyAllowed) { this.onPageShow(); }
+    else {
+      this.app.stop(); this.browser.close(); this.browserExpanded = false; this.showToolScope = false;
+      this.voiceRequest = ''; this.paths.clear(); this.setDrawer(false);
+    }
   }
 
   private offerOnboarding(): void {
@@ -153,6 +166,7 @@ struct Index {
   }
 
   private async receiveLaunch(): Promise<void> {
+    if (!this.privacy.allowed) { return; }
     const action = LaunchActions.take();
     if (!action) { return; }
     if (this.launching || this.receiving || this.app.busy || this.app.saveError) {
@@ -174,6 +188,7 @@ struct Index {
   }
 
   private async receiveShare(): Promise<void> {
+    if (!this.privacy.allowed) { return; }
     if (this.receiving || !this.session || !this.app.ready) { return; }
     this.receiving = true;
     try {
@@ -299,6 +314,33 @@ struct Index {
   }
 
   private async openSupport(page: string): Promise<void> {
+    if (page === 'privacy') {
+      this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t('隐私政策'),
+        message: t('您可以查看隐私政策，或拒绝隐私授权。'),
+        primaryButton: { value: t('查看'), action: () => { this.openSupport('view-privacy'); } },
+        secondaryButton: { value: t('拒绝'), fontColor: $r('app.color.danger'),
+          action: () => { this.openSupport('revoke-privacy'); } } });
+      return;
+    }
+    if (page === 'revoke-privacy') {
+      this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t('拒绝隐私政策？'),
+        message: t('拒绝后将撤回隐私授权，停止当前对话并退出应用。下次打开时，需重新同意才能继续使用。已有会话、文件和设置会保留。'),
+        primaryButton: { value: t('取消'), action: () => {} },
+        secondaryButton: { value: t('拒绝并退出'), fontColor: $r('app.color.danger'), action: () => {
+          try { this.privacy.revokeConsent(); }
+          catch (error) {
+            this.getUIContext().getPromptAction().showToast({ message: (error as Error).message });
+          }
+        } } });
+      return;
+    }
+    if (page === 'view-privacy') {
+      try { await this.privacy.openPolicy(this.getUIContext().getHostContext() as common.UIAbilityContext); }
+      catch (error) {
+        this.getUIContext().getPromptAction().showToast({ message: t('无法打开托管隐私政策，请重试。') });
+      }
+      return;
+    }
     if (page === 'guide') {
       this.onboardingDraftThread = ''; this.onboardingActive = true; this.paths.pushPath({ name: 'onboarding' }); return;
     }
@@ -668,6 +710,18 @@ struct Index {
 
   build() {
     Stack() {
+      if (!this.privacyAllowed) {
+        Column({ space: Space.lg }) {
+          Text('Tinybot').fontSize(28).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
+          if (this.privacy.error) {
+            Text(this.privacy.error).id('privacy-status').fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
+            Button(t('重试')).id('retry-privacy').attributeModifier(Btn.primary)
+              .enabled(!this.privacy.busy).onClick(() => this.privacy.requestConsent())
+            Button(t('退出应用')).id('exit-privacy').attributeModifier(Btn.tonal).onClick(() => this.privacy.exit())
+          }
+        }.padding(Space.xl).width('100%').height('100%').justifyContent(FlexAlign.Center)
+          .backgroundColor($r('app.color.page_background'))
+      } else {
       ForEach([this.locale], (_locale: string) => {
     Stack() {
     Navigation(this.paths) {
@@ -729,6 +783,7 @@ struct Index {
         onAnnotation: (threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string) => this.addBrowserAnnotation(threadId, pixel, page, note),
         onSettings: () => { this.setBrowserExpanded(false); this.openSettings(); },
         onDismiss: () => this.setBrowserExpanded(false) })
+      }
     }.width('100%').height('100%')
     .bindSheet($$this.showToolScope, this.toolScopeSheet(), { title: { title: t('工具范围') },
       height: this.app.active.agentMode === 'custom' ? SheetSize.LARGE : SheetSize.FIT_CONTENT,

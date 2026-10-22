@@ -13,7 +13,11 @@ if (-not (Test-Path -LiteralPath $nodePath) -or -not (Test-Path -LiteralPath $hv
 & $nodePath (Join-Path $projectPath 'scripts/build-locales.cjs') --check
 if ($LASTEXITCODE -ne 0) { throw 'Locale validation failed. Run node scripts/build-locales.cjs after editing translations.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-huawei-account.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Huawei account login, secure state and generation authorization tests failed.' }
+if ($LASTEXITCODE -ne 0) { throw 'Huawei account tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-hosted-privacy.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Hosted privacy state and startup gating tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-app-information.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'App review navigation and error handling tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/build-builtin-skills.cjs') --check
 if ($LASTEXITCODE -ne 0) { throw 'Built-in Skills are stale. Run node scripts/build-builtin-skills.cjs.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-developer-diagnostics.cjs')

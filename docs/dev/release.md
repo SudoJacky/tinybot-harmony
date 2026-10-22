@@ -21,7 +21,7 @@ powershell -ExecutionPolicy Bypass -File scripts\prepare-distribution.ps1 -Studi
 | `assets/tinybot-icon.png` | 工程使用的图标 |
 | `screenshots/` | 本机已准备的商店截图，需单独核对版本 |
 | `licenses/` | Apache-2.0 与随包第三方许可证 |
-| `policies/` | 应用实际使用的隐私政策与用户协议原文 |
+| `policies/` | 随包用户协议原文；隐私政策由华为托管 |
 | `RELEASE-NOTES.txt`、`STORE-LISTING.txt`、`CLOUD-TEST.txt`、`RELEASE-GAPS.txt` | 版本文案与验证资料 |
 | `package-info.json`、`SHA256SUMS.txt` | 从实际包读取的元数据、大小、原生 Build ID 与 SHA-256 |
 
@@ -55,7 +55,7 @@ powershell -ExecutionPolicy Bypass -File scripts/check-release-package.ps1 -HapP
 - 主体与联系方式、政策公开地址、备案与分类资料按平台当前字段填写。
 - 商店截图必须来自本版，且不含密钥、私有地址或个人聊天。
 - 审核需要完整 AI 体验时，在平台私有审核备注提供专用、限额且可撤销的服务配置；不要把凭据写进代码、交付包或截图。
-- 应用内已接入用户协议、隐私政策的完整离线阅读与首次使用协议流程，公开地址仍需在平台补充。
+- 隐私政策由华为托管及系统弹窗管理，用户协议保留本地阅读和独立同意流程。正式分发前核对平台托管版本与系统签署状态。
 
 ## 回归检查
 

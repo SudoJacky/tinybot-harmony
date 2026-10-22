@@ -23,6 +23,7 @@ devecocli build
 | `test-conversation-export.cjs` | 导出时的 Markdown/HTML 标识、PNG 元数据 CRC 与像素载荷、长会话完整拼接、失败清理 | 否 |
 | `test-workspace-backup-ui.cjs` | 编译后文件页的失败保存、内容无法预览时导出原始备份、重试与新文件状态 | 是 |
 | `test-huawei-account.cjs` | 登录/取消、错误码脱敏、重启恢复、账号切换、退出与迟到回调、存储失败、未登录请求拦截 | 否 |
+| `test-app-information.cjs` | 实际评分入口打开当前应用写评论页、重复点击、跳转或包信息读取失败提示与重试 | 否 |
 | `test-developer-diagnostics.cjs` | 诊断采集、导出与生命周期 | 否 |
 | `test-unified-logging.cjs` | 日志级别、脱敏、导出与禁用路径 | 否 |
 | `test-browser.cjs` | 浏览器权限、接管与运行暂停 | 否 |
@@ -56,7 +57,8 @@ devecocli build
 | `test-custom-tools.cjs` | 完整版/自定义选择、12 项能力覆盖、旧配置迁移、目录与执行限制 | 否 |
 | `test-custom-tools-renderer.cjs` | 能力行回调、联动开关、忙碌/归档时禁用 | 是 |
 | `test-help-demo.cjs` | 帮助演示动画生命周期 | 是 |
-| `test-legal-documents.cjs` | 用户协议与隐私政策的实际编译读取路径、完整正文与错误展示 | 是 |
+| `test-hosted-privacy.cjs` | 系统签署版本、拒绝/重签、事件重新查询和 EntryAbility 同意前业务隔离 | 否 |
+| `test-legal-documents.cjs` | 本地用户协议的实际编译读取路径、完整正文、错误展示与不再携带隐私正文 | 是 |
 | `test-onboarding.cjs` | 首次使用判断、持久化、旧草稿保护、六幕引导的账号同意/登录/稍后登录、唤醒与暂停恢复 | 是 |
 
 ## 需要单独运行的验证

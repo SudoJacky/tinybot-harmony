@@ -5,6 +5,7 @@ const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFi
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 const root = path.resolve(__dirname, '../entry/src'), cache = new Map(), secrets = new Map();
 const alias = 'tinybot.huawei.account.v1';
+let privacyAgreed = true;
 const system = { current: 'user-A', responseState: undefined, loginError: undefined, checkError: undefined,
   beforeLogin: async () => {}, beforeCheck: async () => {}, failWrite: false, failRemove: false, checks: 0, logins: 0 };
 const authentication = {
@@ -48,6 +49,7 @@ function load(file) {
     target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS, experimentalDecorators: true
   } }).outputText, { exports, Observed: value => value, setTimeout, clearTimeout, console, require: id => {
     if (id === '@kit.AccountKit') return { authentication };
+    if (id === './HostedPrivacy') return { hostedPrivacy: { requireConsent() { if (!privacyAgreed) throw Error('System privacy consent required'); } } };
     if (id === '@kit.AssetStoreKit') return { asset };
     if (id === '@kit.ArkTS') return { util: { generateRandomUUID: randomUUID,
       TextEncoder: class { encodeInto(text) { return Buffer.from(text); } },
@@ -70,6 +72,11 @@ const deferred = () => { let resolve; const promise = new Promise(done => { reso
   assert.equal(account.signedIn, false); assert.equal(system.logins, 0, 'Opening app never signs in without consent');
   await assert.rejects(account.requireLogin(), /登录/);
   await account.signIn(); assert.equal(account.signedIn, true); assert.equal(secrets.get(alias), 'user-A');
+  privacyAgreed = false;
+  await assert.rejects(account.requireLogin(), /System privacy/);
+  const loginCount = system.logins;
+  await account.signIn(); assert.equal(system.logins, loginCount, 'No Account Kit request before system privacy consent');
+  privacyAgreed = true; await account.signIn();
   assert.doesNotMatch(JSON.stringify([...secrets]), /TOKEN|CODE|union/);
   const restored = new HuaweiAccount(); await restored.initialize({}); assert.equal(restored.signedIn, true);
   system.current = 'user-B'; await assert.rejects(restored.requireLogin(), /发生变化/);

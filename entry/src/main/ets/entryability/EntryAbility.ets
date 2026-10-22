@@ -7,6 +7,7 @@ import { McpOAuth } from '../services/McpOAuth';
 import { LaunchActions } from '../services/LaunchActions';
 import { DeveloperDiagnostics } from '../services/DeveloperDiagnostics';
 import { huaweiAccount } from '../services/HuaweiAccount';
+import { hostedPrivacy } from '../services/HostedPrivacy';
 /*
  * Copyright (c) 2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -32,6 +33,8 @@ declare namespace globalThis {
 
 export default class EntryAbility extends UIAbility {
   private mainWindow?: window.Window;
+  private servicesStarted: boolean = false;
+  private pendingWants: Want[] = [];
 
   // Pages extend their backgrounds under the system bars, so match the status bar text to the theme.
   private applySystemBars(): void {
@@ -52,26 +55,45 @@ export default class EntryAbility extends UIAbility {
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     globalThis._brushEngineContext = this.context;
-    DeveloperDiagnostics.initialize(this.context);
-    // Prepare ArkWeb before mounting the first generated surface on the UI rendering path.
-    const webStarted = Date.now();
-    Diagnostics.log('info', 'web', 'engine_start');
-    webview.WebviewController.initializeWebEngine();
-    if (Diagnostics.acceptsLog('info')) { Diagnostics.log('info', 'web', 'engine_ready', { elapsedMs: Date.now() - webStarted }); };
     LanguagePreferences.initialize(this.context);
     AppearancePreferences.initialize(this.context);
-    ShareInbox.receive(want, this.context.getApplicationContext().filesDir);
-    LaunchActions.receive(want);
+    this.pendingWants.push(want);
+    // AppGallery presents startup consent automatically. A second request would stack two system dialogs.
+    hostedPrivacy.initialize(this.context, (allowed: boolean) => {
+      if (allowed) { this.startServices(); }
+      else { DeveloperDiagnostics.stop(); }
+    });
     Diagnostics.log('info', 'app', 'created');
   }
 
+  private startServices(): void {
+    if (!this.servicesStarted) {
+      this.servicesStarted = true;
+      DeveloperDiagnostics.initialize(this.context);
+      // Prepare ArkWeb only after system consent, before mounting generated surfaces.
+      const webStarted = Date.now();
+      Diagnostics.log('info', 'web', 'engine_start');
+      webview.WebviewController.initializeWebEngine();
+      if (Diagnostics.acceptsLog('info')) { Diagnostics.log('info', 'web', 'engine_ready', { elapsedMs: Date.now() - webStarted }); }
+    }
+    for (const want of this.pendingWants) { this.receiveWant(want); }
+    this.pendingWants = [];
+  }
+
   onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+    hostedPrivacy.refresh();
+    if (!hostedPrivacy.allowed) { this.pendingWants.push(want); return; }
+    this.receiveWant(want);
+  }
+
+  private receiveWant(want: Want): void {
     McpOAuth.receive(want.uri || '');
     ShareInbox.receive(want, this.context.getApplicationContext().filesDir);
     LaunchActions.receive(want);
   }
 
   onDestroy(): void {
+    hostedPrivacy.dispose();
     DeveloperDiagnostics.stop();
     Diagnostics.log('info', 'app', 'destroyed');
   }
@@ -98,8 +120,8 @@ export default class EntryAbility extends UIAbility {
   }
 
   onForeground(): void {
-    huaweiAccount.refresh();
-    DeveloperDiagnostics.setForeground(true);
+    hostedPrivacy.refresh();
+    if (hostedPrivacy.allowed) { huaweiAccount.refresh(); DeveloperDiagnostics.setForeground(true); }
     AppStorage.setOrCreate('tinybot.foreground', true);
     LaunchActions.setForeground(true);
     LanguagePreferences.refresh();
