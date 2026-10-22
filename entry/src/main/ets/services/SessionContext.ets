@@ -11,7 +11,7 @@ export function sessionPromptSections(config: ModelConfig, extensions: Extension
   return [{ name: 'identity', content: DEFAULT_SYSTEM_PROMPT },
     { name: 'runtime', content: runtimeInstructions(MAX_AGENT_STEPS) },
     { name: 'user_preferences', content: userDocumentContext(config.userDocument || '') },
-    { name: 'skills', content: skillCatalog(extensions.skills, selected) }];
+    { name: 'skills', content: skillCatalog(extensions.skills, selected), dynamic: true }];
 }
 
 export function sessionContextSource(thread: ThreadData, sections: () => PromptSection[], persist: () => Promise<void>,
@@ -22,7 +22,7 @@ export function sessionContextSource(thread: ThreadData, sections: () => PromptS
 // The caller owns the thread and commit boundary; this module owns budgeting and compaction policy.
 export async function prepareSessionContext(thread: ThreadData, model: ModelSession, cancellation: Cancellation,
   manual: boolean, config: ModelConfig, instructions: string, tools: ToolDefinition[],
-  persist: () => Promise<void>, progress: (status: string) => void): Promise<ModelMessage[]> {
-  const context = new RequestContext(sessionContextSource(thread, () => [{ name: 'instructions', content: instructions }], persist, progress), config);
+  persist: () => Promise<void>, progress: (status: string) => void, sections?: PromptSection[]): Promise<ModelMessage[]> {
+  const context = new RequestContext(sessionContextSource(thread, () => sections || [{ name: 'instructions', content: instructions }], persist, progress), config);
   return (await context.prepare(model, tools, cancellation, [], manual)).messages;
 }

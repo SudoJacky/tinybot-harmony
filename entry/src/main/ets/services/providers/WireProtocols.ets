@@ -100,6 +100,7 @@ export function responsesRequest(model: string, messages: ModelMessage[], tools:
 
 interface ImageSource { type: string; media_type: string; data: string; }
 export interface AnthropicBlock {
+  cache_control?: AnthropicCacheControl;
   thinking?: string;
   signature?: string;
   data?: string;
@@ -122,21 +123,23 @@ interface AnthropicTool {
   input_schema: ToolParameters;
 }
 export interface AnthropicRequest {
+  cache_control?: AnthropicCacheControl;
   output_config?: ReasoningOptions;
   thinking?: AnthropicThinkingOptions;
   model: string;
   stream: boolean;
   max_tokens: number;
-  system?: string;
+  system?: string | AnthropicBlock[];
   messages: AnthropicMessage[];
   tools?: AnthropicTool[];
 }
 
 interface AnthropicThinkingOptions { type: string; }
+interface AnthropicCacheControl { type: string; }
 
 export function anthropicRequest(model: string, messages: ModelMessage[], tools: ToolDefinition[],
   // Messages requires max_tokens; retain the compatible fallback for unknown models.
-  maxOutput: number = 4096): AnthropicRequest {
+  maxOutput: number = 4096, promptCaching: boolean = false): AnthropicRequest {
   const result: AnthropicMessage[] = [];
   const system: string[] = [];
   for (const message of messages) {
@@ -170,7 +173,10 @@ export function anthropicRequest(model: string, messages: ModelMessage[], tools:
     if (previous && previous.role === role) { previous.content = previous.content.concat(blocks); }
     else { result.push({ role: role, content: blocks }); }
   }
-  return { model: model, stream: true, max_tokens: maxOutput, system: system.length > 0 ? system.join('\n\n') : undefined,
+  const systemText = system.join('\n\n');
+  return { model: model, stream: true, max_tokens: maxOutput,
+    cache_control: promptCaching ? { type: 'ephemeral' } : undefined,
+    system: !systemText ? undefined : promptCaching ? [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }] : systemText,
     messages: result, tools: tools.length > 0 ? tools.map((tool: ToolDefinition): AnthropicTool => {
       return { name: tool.function.name, description: tool.function.description, input_schema: tool.function.parameters };
     }) : undefined };

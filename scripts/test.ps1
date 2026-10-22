@@ -63,6 +63,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Resource management integration tests failed.'
 if ($LASTEXITCODE -ne 0) { throw 'Native tool parameter schema and execution tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-tool-discovery.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Compact tool discovery, permission and runtime tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-prefix-cache.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Request prefix, durable context, team sharing and cache configuration tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-context-usage.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Conversation context usage aggregation tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-usage-filter-sheet.cjs')

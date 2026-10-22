@@ -126,12 +126,16 @@ async function main() {
   const source = { state: {}, entries: () => [], sections: () => sessionPromptSections(config, defaultExtensions()), persist: async () => {}, progress() {} };
   const manager = new RequestContext(source, config);
   const initial = manager.inspect(tools.definitions());
-  assert.ok(!initial.messages[0].content.includes('new OrbitControls'));
+  assert.ok(!initial.messages.some(message => message.content.includes('new OrbitControls')));
   const query = await invoke(tools, 'tool_search', { query: 'publish_preview' });
   assert.equal(query.loaded[0], 'publish_preview');
   assert.ok(names(tools).includes('publish_preview'));
   assert.equal(query.loaded[0], 'publish_preview', 'Exact name ranks first; shared terms may load related tools');
-  assert.ok(manager.inspect(tools.definitions()).messages[0].content.includes(INTERACTIVE_UI_INSTRUCTIONS.trim()));
+  const expandedRequest = manager.inspect(tools.definitions());
+  assert.ok(expandedRequest.messages.some(message => message.runtimeContext && message.content.includes(INTERACTIVE_UI_INSTRUCTIONS.trim())));
+  assert.equal(expandedRequest.messages[0].content, initial.messages[0].content, 'Tool discovery leaves the system prefix unchanged');
+  assert.deepEqual(plain(toolSchemas(tools.definitions()).slice(0, initialNames.length)),
+    plain(toolSchemas(new ToolDiscovery(catalog).definitions())), 'New schemas follow existing declarations');
   const selectedPreview = tools.definitions().find(tool => tool.function.name === 'publish_preview');
   assert.deepEqual(plain(selectedPreview.function.parameters), plain(catalog.definitions().find(tool => tool.function.name === 'publish_preview').function.parameters));
   assert.ok(!JSON.stringify(toolSchemas(tools.definitions())).includes('promptGuidelines'));
@@ -192,11 +196,11 @@ async function main() {
   assert.equal(JSON.parse(f.repository.saved).threads[0].messages.at(-1).steps[0].tools[0].call.function.name, 'tool_search');
   f.provider.respond = async () => reply();
   f.session.setDraft('A fresh ordinary turn'); await f.session.send();
-  assert.ok(!f.provider.requests.at(-1).tools.some(tool => tool.function.name === 'execute_code'));
+  assert.ok(f.provider.requests.at(-1).tools.some(tool => tool.function.name === 'execute_code'), 'Durable discovery survives the next turn');
   const inspector = f.session.runtime.inspectContext(source, config, base);
   assert.equal(inspector.context.toolTokens, initial.context.toolTokens);
   assert.deepEqual(plain(discoveredToolDefinitions([])), []);
-  console.log('PASS real SessionService/AgentRuntime discovery -> loaded schema -> tool execution -> saved receipt -> fresh compact next turn and matching context inspector');
+  console.log('PASS real SessionService/AgentRuntime discovery -> loaded schema -> tool execution -> saved receipt -> retained next-turn discovery and matching context inspector');
 
   const start = f.provider.requests.length;
   f.provider.respond = async index => index === start ? reply(call('orchestrate', { code: `

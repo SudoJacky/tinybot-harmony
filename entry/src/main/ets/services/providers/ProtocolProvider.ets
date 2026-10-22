@@ -54,7 +54,7 @@ export class ProtocolProvider implements ModelProvider {
     const parser: ModelStream = this.info.protocol === 'responses' ? new ResponsesStream(receiveText, receiveReasoning) :
       this.info.protocol === 'anthropic-messages' ? new AnthropicStream(receiveText, receiveReasoning) : new ChatStream(receiveText, receiveReasoning);
     const body: Object = this.info.protocol === 'responses' ? responsesRequest(input.model, messages, input.tools, input.maxOutputTokens) :
-      this.info.protocol === 'anthropic-messages' ? anthropicRequest(input.model, messages, input.tools, input.maxOutputTokens) :
+      this.info.protocol === 'anthropic-messages' ? anthropicRequest(input.model, messages, input.tools, input.maxOutputTokens, this.info.promptCaching === true) :
       chatRequest(input.model, messages, input.tools, this.options, input.maxOutputTokens);
     if (input.requestUsage !== false && this.info.protocol === 'chat-completions') { (body as ChatRequest).stream_options = { include_usage: true }; }
     applyReasoningEffort(this.info.protocol, input.model, input.reasoning, body);

@@ -50,9 +50,10 @@ export function contextBreakdown(messages: ModelMessage[], tools: ToolDefinition
         messageId: source?.messageId, step: source?.step });
       contentTokens = userTokens;
     }
-    if (kind === 'system' && message.content === renderPrompt(sections)) {
+    const stableSections = sections.filter((section) => !section.dynamic);
+    if (kind === 'system' && message.content === renderPrompt(stableSections)) {
       let rendered = ''; let counted = 0;
-      sections.filter((section) => section.content.trim().length > 0).forEach((section, sectionIndex) => {
+      stableSections.filter((section) => section.content.trim().length > 0).forEach((section, sectionIndex) => {
         rendered += (rendered ? '\n\n' : '') + renderPrompt([section]);
         const total = estimateTextTokens(rendered);
         rows.push({ id: id + '-section-' + sectionIndex, kind: kind, name: section.name, tokens: total - counted });

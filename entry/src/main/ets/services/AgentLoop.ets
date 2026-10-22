@@ -105,17 +105,18 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
       if (!prepared && context.contextWindow !== undefined && estimateContextTokens(requestMessages, definitions) > contextInputBudget(context.contextWindow)) {
         throw new Error(t("本轮内容超过上下文预算，执行已停止。已完成的工具结果已保留；请压缩历史、缩小任务或提高窗口设置。"));
       }
-      const step: AgentStep = { content: '', tools: [], steering: input, uiValidation: 'pending', context: prepared?.context };
+      const step: AgentStep = { content: '', tools: [], steering: input, runtimeContext: prepared?.runtimeContext,
+        uiValidation: 'pending', context: prepared?.context };
       turn.steps = turn.steps.concat([step]);
       observer.event({ type: 'step_start', step: round });
       if (input) {
         repeatReminder.reset();
         // Record input in the transcript and remove it from the outbox in one checkpoint.
         observer.steering?.consume(input.id);
-        await observer.checkpoint();
-        cancellation.check();
         if (!prepared) { messages.push({ role: 'user', content: input.text, attachments: input.attachments }); }
       }
+      // Model-visible additions and queued steering share the same durable admission boundary.
+      if (input || step.runtimeContext !== undefined) { await observer.checkpoint(); cancellation.check(); }
       let response: ModelTurn;
       try {
         response = await requestWithRetry(step, async () => {

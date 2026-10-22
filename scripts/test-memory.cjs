@@ -88,10 +88,10 @@ async function main() {
   const restored = await fixture(await f.repository.load()); await restored.send('重启后继续');
   assert.equal(background(restored.requests[0].messages[0].content), frozen);
   await f.session.newThread(); await f.send('你好'); await settle();
-  assert.ok(f.requests.at(-1).messages[0].content.includes('用户喜欢简短回答'));
+  assert.ok(f.requests.at(-1).messages.filter(message => message.runtimeContext).at(-1).content.includes('用户喜欢简短回答'));
   const edited = f.session.snapshot().productivity; edited.memories[0].content = '手动更新'; edited.memories[0].automatic = false;
   assert.equal(await f.session.saveProductivity(edited), true); await f.send('再继续');
-  assert.ok(f.requests.at(-1).messages[0].content.includes('手动更新'));
+  assert.ok(f.requests.at(-1).messages.filter(message => message.runtimeContext).at(-1).content.includes('手动更新'));
   console.log('PASS real memory tool receipts, immediate durable writes, frozen snapshots across restart and manual invalidation');
 
   const failed = await fixture(); let attempts = 0;

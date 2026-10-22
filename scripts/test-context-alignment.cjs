@@ -41,6 +41,7 @@ const { Cancellation } = from('services/Cancellation');
 const { runAgentLoop } = from('services/AgentLoop');
 const { ContextOverflowError, httpProviderError } = from('services/providers/ProviderErrors');
 const { ProtocolProvider } = from('services/providers/ProtocolProvider');
+const { profileProvider } = from('services/providers/DefaultProviders');
 const { WorkspaceTools } = from('services/WorkspaceTools');
 const { WebTools } = from('services/WebTools');
 const { RuleTools } = from('services/RuleTools');
@@ -61,6 +62,11 @@ const restore = thread => {
 };
 
 async function main() {
+  const cacheProfile = { id: 'claude', name: 'Claude', presetId: 'anthropic', protocol: 'anthropic-messages',
+    baseUrl: 'https://api.anthropic.com/v1', credentialAlias: 'key', noApiKey: false, enabled: true, models: ['claude'] };
+  const cacheEffects = { hydrate: async messages => messages, recordUsage() {} };
+  assert.equal(profileProvider(cacheProfile, cacheEffects).info.promptCaching, true);
+  assert.equal(profileProvider({ ...cacheProfile, presetId: 'openai-compatible' }, cacheEffects).info.promptCaching, false);
   const skill = parseSkill('---\nname: report\ndescription: Report guidance\ndisable-model-invocation: true\n---\nUse this exact procedure.');
   skill.files = [{ path: 'references/source.md', content: 'evidence' }];
   const thread = fixture(); thread.messages[0].content = '/skill:report\nReview the source';
@@ -84,24 +90,26 @@ async function main() {
   const readonly = new RuleTools(workspace, true);
   const manager = new RequestContext(source(fixture()), config());
   const readPrompt = manager.inspect(readonly.definitions());
-  assert.ok(readPrompt.messages[0].content.includes('read_file'));
-  assert.ok(!readPrompt.messages[0].content.includes('read_file_lines'));
-  assert.ok(!readPrompt.messages[0].content.includes('write_file') && !readPrompt.messages[0].content.includes('edit_file'));
+  const readGuidance = readPrompt.messages.find(message => message.runtimeContext).content;
+  assert.ok(readGuidance.includes('read_file'));
+  assert.ok(!readGuidance.includes('read_file_lines'));
+  assert.ok(!readGuidance.includes('write_file') && !readGuidance.includes('edit_file'));
   const writePrompt = manager.inspect(workspace.definitions());
-  assert.ok(writePrompt.messages[0].content.includes('write_file 会覆盖同名文件'));
+  assert.ok(writePrompt.messages.find(message => message.runtimeContext).content.includes('write_file 会覆盖同名文件'));
+  assert.equal(writePrompt.messages[0].content, readPrompt.messages[0].content);
   assert.ok(writePrompt.context.tokens > readPrompt.context.tokens);
   const web = new WebTools({}).definitions();
-  const webPrompt = manager.inspect(web).messages[0].content;
+  const webPrompt = manager.inspect(web).messages.find(message => message.runtimeContext).content;
   for (const tool of web) {
     assert.ok(webPrompt.includes(tool.function.name));
     for (const guideline of tool.promptGuidelines) {
       assert.ok(webPrompt.includes(guideline));
-      assert.ok(!readPrompt.messages[0].content.includes(guideline));
+      assert.ok(!readGuidance.includes(guideline));
     }
   }
   const defs = workspace.definitions();
   defs[0].promptGuidelines = ['shared rule', 'shared rule']; defs[1].promptGuidelines = ['shared rule'];
-  assert.equal(manager.inspect(defs).messages[0].content.split('shared rule').length - 1, 1);
+  assert.equal(manager.inspect(defs).messages.find(message => message.runtimeContext).content.split('shared rule').length - 1, 1);
   for (const request of [chatRequest('test', [], defs), responsesRequest('test', [], defs), anthropicRequest('test', [], defs)]) {
     const json = JSON.stringify(request.tools);
     assert.ok(!json.includes('promptSnippet') && !json.includes('promptGuidelines') && !json.includes('shared rule'));
