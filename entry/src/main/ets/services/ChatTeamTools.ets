@@ -13,6 +13,7 @@ import { Cancellation } from './Cancellation';
 import { TeamCoordinator, TeamToolLane, TeamTools } from './TeamCoordinator';
 import { ToolSet } from './ToolSet';
 import { workspaceRelativePath } from './WorkspaceTools';
+import { PromptSection } from '../model/ContextProjection';
 
 export { CHAT_TEAM_INSTRUCTIONS } from '../model/SystemPrompt';
 
@@ -30,6 +31,7 @@ interface MemberIdentity { id: string; displayName: string; }
 interface TeamPage { runId: string; status: string; error: string; revision: number; members: MemberIdentity[]; tasks: TaskStatus[]; results: ResultReference[]; afterSequence: number; hasMore: boolean; }
 interface ActiveTeam { coordinator: TeamCoordinator; done: Promise<void>; }
 export interface ChatTeamContext {
+  contextSections?: PromptSection[];
   toolSelection?: ToolSelection;
   usageOrigin?: UsageOrigin;
   configFor?: (reference: ModelReference) => ModelConfig;
@@ -175,6 +177,7 @@ export class ChatTeamTools implements AgentTools {
     if (this.active.has(run.id)) { return; }
     const coordinator = new TeamCoordinator(); const employeeTools = new Map<string, EmployeeTools>();
     const done = coordinator.execute(run, {
+      contextSections: this.context.contextSections,
       toolSelection: this.context.toolSelection,
       usageOrigin: this.context.usageOrigin,
       runtime: this.context.runtime, config: this.context.configFor ? this.context.configFor(run.model) : this.context.config, createId: this.context.createId, lane: this.lane,

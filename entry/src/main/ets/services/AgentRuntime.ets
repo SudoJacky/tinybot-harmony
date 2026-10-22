@@ -12,7 +12,7 @@ import { contextSettings } from '../model/ConversationContext';
 import { PromptSection, runEntries } from '../model/ContextProjection';
 import { ContextSource, PreparedRequest, RequestContext } from './RequestContext';
 import { OrchestrationExecutor, OrchestrationTools } from './OrchestrationTools';
-import { discoveredToolDefinitions, ToolDiscovery } from './ToolDiscovery';
+import { discoveredToolDefinitions, discoveredToolNames, ToolDiscovery } from './ToolDiscovery';
 
 export type RunStatus = 'running' | 'complete' | 'stopped' | 'failed';
 export type RunPhase = 'preparing' | 'executing' | 'finalizing';
@@ -112,7 +112,8 @@ export class AgentRuntime {
   }
 
   inspectContext(source: ContextSource, config: ModelConfig, tools: AgentTools, extra: ToolDefinition[] = [], selection: ToolSelection = {}): PreparedRequest {
-    return new RequestContext(source, config).inspect(discoveredToolDefinitions(this.contextTools(tools, source, config, selection).definitions().concat(extra.filter((tool) => toolEnabled(tool.function.name, selection)))));
+    return new RequestContext(source, config).inspect(discoveredToolDefinitions(this.contextTools(tools, source, config, selection).definitions()
+      .concat(extra.filter((tool) => toolEnabled(tool.function.name, selection))), discoveredToolNames(source.entries())));
   }
 
   get isRunning(): boolean {
@@ -197,7 +198,7 @@ export class AgentRuntime {
             persist: hooks.checkpoint, progress: () => {} };
           const source = hooks.context || defaultSource;
           const preparedContext = new RequestContext(source, config);
-          const executionTools = new ToolDiscovery(this.contextTools(tools, source, config, selection));
+          const executionTools = new ToolDiscovery(this.contextTools(tools, source, config, selection), discoveredToolNames(source.entries()));
           const boundModel = model;
           await runAgentLoop({ model: model, messages: messages, tools: executionTools, toolExecution: toolExecution,
             prepareRequest: async (definitions, pending, cancellation, recoverOverflow) => {

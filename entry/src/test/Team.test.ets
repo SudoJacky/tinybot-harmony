@@ -89,7 +89,7 @@ export default function teamTests(): void {
       const f = new Fixture(); const entered = new Gate(); const release = new Gate(); let started = 0;
       f.provider.respond = async (request) => {
         started++; if (started <= 2) { if (started === 2) { entered.open(); } await release.promise; return '上游证据'; }
-        expect(request.messages[1].content.includes('上游证据')).assertTrue(); return '最终报告';
+        expect(request.messages[2].content.includes('上游证据')).assertTrue(); return '最终报告';
       };
       const work = f.execute(); await entered.promise;
       expect(f.run.tasks[0].status).assertEqual('running'); expect(f.run.tasks[1].status).assertEqual('running'); expect(f.run.tasks[2].status).assertEqual('pending');

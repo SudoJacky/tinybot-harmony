@@ -53,7 +53,7 @@ class Employees implements ModelProvider {
       const remove = signal.onCancel(() => this.gate?.open()); await this.gate.promise; remove(); signal.check();
     }
     if (this.fail) { throw new Error('employee offline'); }
-    const task = (JSON.parse(request.messages[1].content) as Assignment).task;
+    const task = (JSON.parse(request.messages[2].content) as Assignment).task;
     if (this.noHandoff || request.messages.some((message) => message.role === 'tool')) { onText('员工内部草稿'); return { content: '员工内部草稿', toolCalls: [] }; }
     return { content: '', toolCalls: [call('team_complete_task', JSON.stringify({ summary: task.id + '-result', unresolved: [], artifacts: this.artifacts }))] };
   }
@@ -98,7 +98,8 @@ export default function chatTeamTests(): void {
       const member = f.thread.teams![0].members[0];
       expect(member.name).assertEqual(employeeName(member.id, getLocale(), []));
       expect(f.host.page(id, 0).members[0].displayName).assertEqual(member.name);
-      expect(f.provider.requests[0].messages[0].content.includes(member.name)).assertTrue();
+      expect(f.provider.requests[0].messages[0].content.includes(member.name)).assertFalse();
+      expect(f.provider.requests[0].messages.some((message) => message.role === 'user' && message.content.includes(member.name))).assertTrue();
       const restored = (JSON.parse(f.saved) as ThreadData).teams!;
       recoverTeams(restored); expect(restored[0].members[0].name).assertEqual(member.name);
       await f.host.close();

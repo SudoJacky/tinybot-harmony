@@ -691,7 +691,8 @@ export class SessionService {
     const draftRevision = this.draftRevision;
     const thread = this.active; const config = this.currentConfig;
     const sections = sessionPromptSections(config, this.extensions);
-    sections.push({ name: 'workspace', content: projectContext(this.data, thread) }, { name: 'memory', content: this.memoryPrompt(thread, true) });
+    sections.push({ name: 'workspace', content: projectContext(this.data, thread), dynamic: true },
+      { name: 'memory', content: this.memoryPrompt(thread, true), dynamic: true });
     this.addModeInstructions(sections, thread);
     const instructions = renderPrompt(sections); const tools = this.chatTools(thread);
     this.status.phase = 'compacting'; this.status.error = ''; this.publish('state');
@@ -700,7 +701,7 @@ export class SessionService {
         usageOrigin: { threadId: thread.id, threadTitle: thread.title, turnId: this.resources.createId(), purpose: 'compaction' } }, {
         prepare: async () => {}, checkpoint: () => this.persist(thread.id),
         prepareContext: (model, _messages, cancellation) => prepareSessionContext(thread, model, cancellation, true,
-          config, instructions, tools.definitions(), () => this.persist(thread.id), (status) => this.contextProgress(status))
+          config, instructions, tools.definitions(), () => this.persist(thread.id), (status) => this.contextProgress(status), sections)
       });
       if (result.status !== 'complete') { this.status.error = result.status === 'stopped' ? t("上下文压缩已停止。") : result.error; }
       else if (fromCommand && this.draftRevision === draftRevision && isCompactCommand(thread.draft || '')) {
@@ -754,10 +755,10 @@ export class SessionService {
     this.pendingToolSelections.delete(thread.id);
     let tools = this.chatTools(thread, selected);
     const sections = sessionPromptSections(config, this.extensions, selected);
-    sections.push({ name: 'memory', content: this.memoryPrompt(thread, true) });
-    sections.push({ name: 'workspace', content: projectContext(this.data, thread) });
+    sections.push({ name: 'memory', content: this.memoryPrompt(thread, true), dynamic: true });
+    sections.push({ name: 'workspace', content: projectContext(this.data, thread), dynamic: true });
     this.addModeInstructions(sections, thread);
-    const instructions = renderPrompt(sections);
+    const instructions = renderPrompt(sections.filter((section) => !section.dynamic));
     const user: MessageData = { id: this.resources.createId(), role: 'user', content: text, skillPrompt: expandSkillCommand(text, this.extensions.skills), status: 'complete', error: '',
       attachments: attachments, references: queuedId ? [] : thread.references };
     if (!queuedId) { thread.attachments = []; thread.references = []; }
@@ -775,9 +776,11 @@ export class SessionService {
         usageOrigin: { threadId: thread.id, threadTitle: thread.title, turnId: user.id, turnLabel: text.slice(0, 80), skill: selected || undefined },
         configFor: (model) => { const saved = this.configFor(model); saved.systemPrompt = workerConfig.systemPrompt; return saved; },
         base: () => this.tools(thread, selected), runtime: () => this.runtime.fork(), createId: () => this.resources.createId(),
+        contextSections: sections.filter((section) => section.dynamic),
         checkpoint: () => this.persist(thread.id), changed: () => this.publishTeams(thread) });
       this.chatTeams = chatTeams; tools = this.chatTools(thread, selected, chatTeams);
-      sections.push({ name: 'team', content: CHAT_TEAM_INSTRUCTIONS + '\n本聊天已有团队（以此处ID为准，禁止跨会话访问）：' +
+      sections.push({ name: 'team', content: CHAT_TEAM_INSTRUCTIONS });
+      sections.push({ name: 'team-state', dynamic: true, content: '本聊天已有团队（以此处ID为准，禁止跨会话访问）：' +
         JSON.stringify((thread.teams || []).filter((run) => run.ownerMessageId).map((run) => run.id + ' ' + run.status)) });
     }
     if (queuedId) { thread.pendingInputs = (thread.pendingInputs || []).filter((item: PendingInput) => item.id !== queuedId); }
@@ -1204,12 +1207,13 @@ export class SessionService {
       if (this.data.threads.length === 0) { this.status.contextTokens = 0; this.status.contextBreakdown = []; this.status.contextSource = 'estimate'; return; }
       const config = this.currentConfig;
       const sections = sessionPromptSections(config, this.extensions);
-      sections.push({ name: 'memory', content: this.memoryPrompt(this.active) });
-      sections.push({ name: 'workspace', content: projectContext(this.data, this.active) });
+      sections.push({ name: 'memory', content: this.memoryPrompt(this.active), dynamic: true });
+      sections.push({ name: 'workspace', content: projectContext(this.data, this.active), dynamic: true });
       this.addModeInstructions(sections, this.active);
       const teamEnabled = this.selectedTeamMode(this.active);
       if (teamEnabled) {
-        sections.push({ name: 'team', content: CHAT_TEAM_INSTRUCTIONS + '\n本聊天已有团队（以此处ID为准，禁止跨会话访问）：' +
+        sections.push({ name: 'team', content: CHAT_TEAM_INSTRUCTIONS });
+        sections.push({ name: 'team-state', dynamic: true, content: '本聊天已有团队（以此处ID为准，禁止跨会话访问）：' +
           JSON.stringify((this.active.teams || []).filter((run) => run.ownerMessageId).map((run) => run.id + ' ' + run.status)) });
       }
       const source = sessionContextSource(this.active, () => sections, async () => {}, () => {});

@@ -7,8 +7,10 @@ import { Attachment, validateAttachments } from './Productivity';
 import { RequestUsage } from './Usage';
 import { PendingInput, validatePendingInput } from './PendingInput';
 import { ContextState } from './Conversation';
+import { RequestPrefixDiagnostics } from './RequestPrefix';
 
 export interface ContextDiagnostics {
+  prefix?: RequestPrefixDiagnostics;
   compactionReason?: string;
   tokens: number;
   heuristicTokens: number;
@@ -82,6 +84,7 @@ export function toolSchemas(tools: ToolDefinition[]): ToolDefinition[] {
 }
 
 export interface ModelMessage {
+  runtimeContext?: boolean;
   previewScreenshot?: boolean;
   anthropicContent?: AnthropicContentBlock[];
   attachments?: Attachment[];
@@ -134,6 +137,8 @@ export function migrateWebIcons(steps: AgentStep[]): void {
 
 export interface RequestRetry { attempt: number; delayMs: number; code: string; waiting: boolean; }
 export interface AgentStep {
+  // App-owned input snapshot, committed before the request and replayed unchanged.
+  runtimeContext?: string;
   retries?: RequestRetry[];
   toolReminder?: string;
   requestError?: string; // A failed request is kept for diagnostics, never replayed as model output.
@@ -178,7 +183,7 @@ export function toolError(error: string | Error | null | undefined): string {
 }
 
 export function stepMessages(step: AgentStep, includeSteering: boolean = true): ModelMessage[] {
-  const prefix: ModelMessage[] = includeSteering && step.steering ? [{ role: 'user', content: step.steering.text, attachments: step.steering.attachments }] : [];
+  const prefix = stepInputs(step, includeSteering);
   if (step.requestError) { return prefix; }
   const result: ModelMessage[] = [{
     role: 'assistant', content: step.content, reasoningContent: step.reasoningContent, anthropicContent: step.anthropicContent,
@@ -202,6 +207,13 @@ export function stepMessages(step: AgentStep, includeSteering: boolean = true): 
   if (step.continuation) { result.push({ role: 'user', content: step.continuation }); }
   if (step.toolReminder) { result.push({ role: 'user', content: step.toolReminder }); }
   return prefix.concat(result);
+}
+
+export function stepInputs(step: AgentStep, includeSteering: boolean = true): ModelMessage[] {
+  const messages: ModelMessage[] = step.runtimeContext === undefined ? [] :
+    [{ role: 'user', content: step.runtimeContext, runtimeContext: true }];
+  if (includeSteering && step.steering) { messages.push({ role: 'user', content: step.steering.text, attachments: step.steering.attachments }); }
+  return messages;
 }
 
 // Pending calls were never started; running calls may already have changed files.
@@ -233,6 +245,7 @@ export function validateSteps(steps: AgentStep[]): void {
       throw new Error('Invalid request retry record.');
     }
     if (!step || typeof step.content !== 'string' || !Array.isArray(step.tools) ||
+      (step.runtimeContext !== undefined && typeof step.runtimeContext !== 'string') ||
       (step.requestError !== undefined && (step.requestError !== 'context_overflow' || step.tools.length > 0)) ||
       (step.continuation !== undefined && typeof step.continuation !== 'string') ||
       (step.toolReminder !== undefined && (typeof step.toolReminder !== 'string' || step.toolReminder.length > 2000)) ||

@@ -3,6 +3,7 @@ import { ToolFailure, parseToolArguments } from '../model/ToolFailure';
 import { toolTitle } from '../model/ToolPresentation';
 import { AgentTools, ToolInvocationContext } from './AgentLoop';
 import { Cancellation } from './Cancellation';
+import { ContextEntry } from '../model/ContextProjection';
 
 // Visibility is separate from mandatory file permissions in ToolGroups.
 const DIRECT_TOOLS: string[] = ['read_file', 'write_file', 'edit_file', 'orchestrate',
@@ -89,16 +90,43 @@ export function discoveredToolDefinitions(catalog: ToolDefinition[], loaded: str
   if (catalog.some((tool) => tool.function.name === 'tool_search')) {
     throw new ToolFailure('INTERNAL_ERROR', 'Reserved tool name: tool_search', 'inspect_error');
   }
-  const direct = catalog.filter((tool) => DIRECT_TOOLS.includes(tool.function.name) || loaded.includes(tool.function.name));
-  const deferred = catalog.filter((tool) => !DIRECT_TOOLS.includes(tool.function.name));
-  return deferred.length > 0 ? direct.concat([searchDefinition(deferred)]) : direct;
+  const ordered = catalog.slice().sort((a, b) => a.function.name < b.function.name ? -1 : a.function.name > b.function.name ? 1 : 0);
+  const direct = ordered.filter((tool) => DIRECT_TOOLS.includes(tool.function.name));
+  const deferred = ordered.filter((tool) => !DIRECT_TOOLS.includes(tool.function.name));
+  const initial = deferred.length > 0 ? direct.concat([searchDefinition(deferred)]) : direct;
+  // Once exposed, declarations keep their position. Newly discovered schemas follow the existing list.
+  return initial.concat(loaded.flatMap((name) => deferred.filter((tool) => tool.function.name === name)));
 }
 
-// Fresh per run. The inner catalog has already passed configuration, role and selection filters.
+interface DiscoveryResult { loaded?: string[]; }
+
+// Discovery receipts are the durable authority; revocation is enforced by the current inner catalog.
+export function discoveredToolNames(entries: ContextEntry[]): string[] {
+  const loaded = new Set<string>();
+  for (const entry of entries) {
+    const calls = new Set<string>(entry.messages.flatMap((message) => message.toolCalls || []).map((call) => call.id));
+    for (const receipt of entry.results || []) {
+      // Orchestration children execute through their own catalog without exposing root schemas.
+      if (!calls.has(receipt.call.id) || ['pending', 'cancelled'].includes(receipt.status)) { continue; }
+      if (receipt.call.function.name === 'tool_search') {
+        if (receipt.status !== 'complete') { continue; }
+        const result = JSON.parse(receipt.output) as DiscoveryResult;
+        if (result.loaded !== undefined) {
+          if (!Array.isArray(result.loaded) || result.loaded.some((name) => typeof name !== 'string')) {
+            throw new ToolFailure('INVALID_RESULT', 'Invalid saved tool discovery receipt.', 'inspect_result');
+          }
+          for (const name of result.loaded) { loaded.add(name); }
+        }
+      } else { loaded.add(receipt.call.function.name); }
+    }
+  }
+  return Array.from(loaded);
+}
+
 export class ToolDiscovery implements AgentTools {
   private inner: AgentTools;
   private loaded: Set<string> = new Set<string>();
-  constructor(inner: AgentTools) { this.inner = inner; }
+  constructor(inner: AgentTools, loaded: string[] = []) { this.inner = inner; this.loaded = new Set<string>(loaded); }
   definitions(): ToolDefinition[] { return discoveredToolDefinitions(this.inner.definitions(), Array.from(this.loaded)); }
   executionDefinitions(): ToolDefinition[] {
     return this.inner.definitions().concat(this.definitions().filter((tool) => tool.function.name === 'tool_search'));

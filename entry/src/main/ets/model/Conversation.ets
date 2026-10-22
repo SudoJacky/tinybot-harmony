@@ -6,7 +6,7 @@ import { REASONING_EFFORTS } from './ReasoningEffort';
 import { ThreadReference, referenceContext, validateThreadReferences } from './ThreadReferences';
 import { TeamRun, recoverTeams } from './Team';
 import { Attachment, ProductivityData, validateAttachments, validateProductivity } from './Productivity';
-import { AgentStep, ModelMessage, interruptTools, migrateWebIcons, stepMessages, validateSteps } from './Agent';
+import { AgentStep, ModelMessage, interruptTools, migrateWebIcons, stepMessages, stepInputs, validateSteps } from './Agent';
 import { builtinProviderInfos, DEFAULT_PROVIDER_ID, LEGACY_PROVIDER_ID } from './Provider';
 import { contextSettings, validateCompaction } from './ConversationContext';
 import { ModelReference, ProviderProfile, validateProfile, validateReference } from './ProviderProfiles';
@@ -140,7 +140,8 @@ export function requestHistory(messages: MessageData[], systemPrompt: string): M
       const steps = answer.steps || [];
       const hasTools = steps.some((step: AgentStep) => step.tools.length > 0);
       const hasSteering = steps.some((step: AgentStep) => step.steering !== undefined);
-      if (answer.status !== 'complete' && !hasTools && !hasSteering) {
+      const hasContext = steps.some((step: AgentStep) => step.runtimeContext !== undefined);
+      if (answer.status !== 'complete' && !hasTools && !hasSteering && !hasContext) {
         continue;
       }
       result.push({ role: 'user', content: (message.skillPrompt ?? message.content) + referenceContext(message.references, message.id), attachments: message.attachments });
@@ -150,8 +151,8 @@ export function requestHistory(messages: MessageData[], systemPrompt: string): M
         for (const step of steps) {
           if (step.tools.length > 0 || (answer.status === 'complete' && step.content.length > 0)) {
             result.push(...stepMessages(step));
-          } else if (step.steering) {
-            result.push({ role: 'user', content: step.steering.text, attachments: step.steering.attachments });
+          } else if (step.steering || step.runtimeContext !== undefined) {
+            result.push(...stepInputs(step));
           }
         }
         if (answer.status !== 'complete') {

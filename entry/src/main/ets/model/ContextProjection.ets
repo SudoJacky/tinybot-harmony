@@ -1,9 +1,9 @@
-import { AgentStep, AgentTurn, ModelMessage, ToolExecution, stepMessages } from './Agent';
+import { AgentStep, AgentTurn, ModelMessage, ToolExecution, stepMessages, stepInputs } from './Agent';
 import { CompactionData, ThreadData, requestHistory } from './Conversation';
 import { fileOperationsContext } from './FileOperations';
 import { referenceContext } from './ThreadReferences';
 
-export interface PromptSection { name: string; content: string; }
+export interface PromptSection { name: string; content: string; dynamic?: boolean; }
 export interface ContextEntry {
   referenceText?: string;
   messageId: string;
@@ -44,13 +44,13 @@ export function threadEntries(thread: ThreadData): ContextEntry[] {
         const step = steps[index];
         // A streamed partial response is never request history.
         if (step.uiValidation === 'pending' || step.tools.some((tool) => ['pending', 'running'].includes(tool.status))) {
-          entries.push({ messageId: user.id, step: index, messages: step.steering ? [{ role: 'user', content: step.steering.text, attachments: step.steering.attachments }] : [] });
+          entries.push({ messageId: user.id, step: index, messages: stepInputs(step) });
           continue;
         }
         if (step.tools.length || answer.status === 'complete' || active || step.uiValidation) {
           entries.push(stepEntry(user.id, answer.id, step, index));
-        } else if (step.steering) {
-          entries.push({ messageId: user.id, step: index, messages: [{ role: 'user', content: step.steering.text, attachments: step.steering.attachments }] });
+        } else if (step.steering || step.runtimeContext !== undefined) {
+          entries.push({ messageId: user.id, step: index, messages: stepInputs(step) });
         } else { entries.push({ messageId: user.id, step: index, messages: [] }); }
       }
       if (!active && answer.status !== 'complete' && entries[entries.length - 1].step !== undefined) {
@@ -100,7 +100,7 @@ export function runEntries(messages: ModelMessage[], turn: AgentTurn, id: string
   turn.steps.forEach((step, index) => {
     if (step.uiValidation !== 'pending' && !step.tools.some((tool) => ['pending', 'running'].includes(tool.status))) {
       entries.push(stepEntry(id, id, step, index));
-    } else { entries.push({ messageId: id, step: index, messages: step.steering ? [{ role: 'user', content: step.steering.text, attachments: step.steering.attachments }] : [] }); }
+    } else { entries.push({ messageId: id, step: index, messages: stepInputs(step) }); }
   });
   entries.push({ messageId: id, step: turn.steps.length, messages: [] });
   return entries;

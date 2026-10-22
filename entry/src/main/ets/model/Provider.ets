@@ -3,6 +3,7 @@ export const DEFAULT_PROVIDER_ID: string = 'deepseek';
 export const LEGACY_PROVIDER_ID: string = 'openai-compatible';
 
 export interface ProviderInfo {
+  promptCaching?: boolean;
   id: string;
   name: string;
   protocol: string;
@@ -16,7 +17,7 @@ export interface ProviderInfo {
 }
 
 export function copyProviderInfo(info: ProviderInfo): ProviderInfo {
-  return { id: info.id, name: info.name, protocol: info.protocol,
+  return { id: info.id, name: info.name, protocol: info.protocol, promptCaching: info.promptCaching,
     defaultBaseUrl: info.defaultBaseUrl, defaultModel: info.defaultModel,
     models: info.models?.slice(), description: info.description,
     endpointPlaceholder: info.endpointPlaceholder, noApiKey: info.noApiKey, apiKeyUrl: info.apiKeyUrl };
@@ -49,7 +50,7 @@ export function builtinProviderInfos(): ProviderInfo[] {
     { id: 'openai-responses', name: 'OpenAI Responses', protocol: 'responses',
       defaultBaseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4.1', models: ['gpt-4.1'],
       apiKeyUrl: 'https://platform.openai.com/api-keys' },
-    { id: 'anthropic', name: 'Anthropic', protocol: 'anthropic-messages',
+    { id: 'anthropic', name: 'Anthropic', protocol: 'anthropic-messages', promptCaching: true,
       defaultBaseUrl: 'https://api.anthropic.com/v1', defaultModel: '', models: [],
       apiKeyUrl: 'https://platform.claude.com/settings/keys' }
   ];

@@ -24,6 +24,11 @@ import { ToolApproval } from '../main/ets/services/ToolApproval';
 import { InputForm } from '../main/ets/model/RichArtifacts';
 import { MemoryOperation } from '../main/ets/model/MemoryMaintenance';
 
+function runtimeContext(request: ProviderRequest): string {
+  const snapshots = request.messages.filter((message) => message.runtimeContext);
+  return snapshots.length ? snapshots[snapshots.length - 1].content : '';
+}
+
 class Gate {
   private release: () => void = () => {};
   promise: Promise<void> = new Promise<void>((resolve) => { this.release = resolve; });
@@ -307,22 +312,22 @@ export default function sessionServiceTests(): void {
       const project = f.session.snapshot().projects![0];
       const firstId = f.session.snapshot().activeThreadId;
       f.session.setDraft('Unique task from session A'); await f.session.send(); await settleTitles();
-      expect(f.provider.requests.filter((request) => !isTitleRequest(request))[0].messages[0].content.includes('Use integer cents.')).assertTrue();
+      expect(runtimeContext(f.provider.requests.filter((request) => !isTitleRequest(request))[0]).includes('Use integer cents.')).assertTrue();
       expect(await f.session.newThread(project.id)).assertTrue();
       f.session.setDraft('Task B'); await f.session.send(); await settleTitles();
       const requests = f.provider.requests.filter((request) => !isTitleRequest(request));
-      expect(requests[requests.length - 1].messages[0].content.includes('Use integer cents.')).assertTrue();
+      expect(runtimeContext(requests[requests.length - 1]).includes('Use integer cents.')).assertTrue();
       expect(JSON.stringify(requests[requests.length - 1].messages).includes('Unique task from session A')).assertFalse();
       expect(await f.session.saveProject('Calculator', 'Use decimal strings.', project.id)).assertTrue();
       expect(await f.session.selectThread(firstId)).assertTrue();
       f.session.setDraft('Continue A'); await f.session.send(); await settleTitles();
       const updated = f.provider.requests.filter((request) => !isTitleRequest(request));
-      expect(updated[updated.length - 1].messages[0].content.includes('Use decimal strings.')).assertTrue();
-      expect(updated[updated.length - 1].messages[0].content.includes('Use integer cents.')).assertFalse();
+      expect(runtimeContext(updated[updated.length - 1]).includes('Use decimal strings.')).assertTrue();
+      expect(runtimeContext(updated[updated.length - 1]).includes('Use integer cents.')).assertFalse();
       expect(await f.session.selectThread('thread-1')).assertTrue();
       f.session.setDraft('Standalone'); await f.session.send(); await settleTitles();
       const ordinary = f.provider.requests.filter((request) => !isTitleRequest(request));
-      expect(ordinary[ordinary.length - 1].messages[0].content.includes('Use decimal strings.')).assertFalse();
+      expect(runtimeContext(ordinary[ordinary.length - 1]).includes('Use decimal strings.')).assertFalse();
     });
     it('regeneratesWithinTheProjectAndPreservesTheOriginalConversation', 0, async () => {
       const f = new Fixture(); await f.session.initialize();
@@ -336,7 +341,7 @@ export default function sessionServiceTests(): void {
       expect(branch.parentThreadId).assertEqual(original.id);
       expect(JSON.stringify(data.threads.find((thread) => thread.id === original.id)!.messages)).assertEqual(saved);
       const requests = f.provider.requests.filter((request) => !isTitleRequest(request));
-      const prompt = requests[requests.length - 1].messages[0].content;
+      const prompt = runtimeContext(requests[requests.length - 1]);
       expect(prompt.includes('共享工作区')).assertTrue();
       expect(prompt.includes('独立的新工作区')).assertFalse();
     });
@@ -1033,8 +1038,8 @@ export default function sessionServiceTests(): void {
         { id: 'p', content: 'other secret', threadId: 'other', updatedAt: 1 }];
       expect(await f.session.saveProductivity(data)).assertTrue();
       f.session.setDraft('hello'); await f.session.send();
-      expect(f.provider.requests[0].messages[0].content.includes('global fact')).assertTrue();
-      expect(f.provider.requests[0].messages[0].content.includes('other secret')).assertFalse();
+      expect(runtimeContext(f.provider.requests[0]).includes('global fact')).assertTrue();
+      expect(runtimeContext(f.provider.requests[0]).includes('other secret')).assertFalse();
     });
     it('queuesAttachmentsWithTheirInstructionAndRestoresThemForEditing', 0, async () => {
       const f = new Fixture(); await f.session.initialize();
@@ -1061,7 +1066,7 @@ export default function sessionServiceTests(): void {
       await f.session.send();
       release.open(); await running;
       expect(f.provider.requests.length).assertEqual(4);
-      expect(f.provider.requests[1].messages.filter((item) => item.role === 'user').map((item) => item.content).join(',')).assertEqual('first,steer');
+      expect(f.provider.requests[1].messages.filter((item) => item.role === 'user' && !item.runtimeContext).map((item) => item.content).join(',')).assertEqual('first,steer');
       const thread = active(f.session.snapshot());
       expect(thread.messages.filter((item) => item.role === 'user').map((item) => item.content).join(',')).assertEqual('first,second,third');
       expect(thread.messages[1].steps?.some((step) => step.steering?.text === 'steer')).assertTrue();
