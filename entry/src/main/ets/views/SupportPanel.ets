@@ -176,6 +176,7 @@ export struct SupportPanel {
 
   @Builder
   updates() {
+    this.article(t('1.0.4 · 2026-10-23'), t('优化模型请求的前缀复用，提高缓存命中机会。接入华为托管隐私政策与系统隐私弹窗，同意后进入应用，拒绝后退出；关于页支持查看政策及撤回授权，保留已有会话与设置。'))
     this.article(t('1.0.3 · 2026-10-21'), t('聊天底部提示更新为“AI生成内容可能有误，请仔细鉴别。”，同步帮助演示、对话图片导出、英文翻译和相关文档引用。'))
     this.article(t('1.0.2 · 2026-10-21'), t('新增 Tiny 首次使用引导与三页作品示例，优化模型配置时的键盘避让和吉祥物动效。接入华为账号登录，支持项目共享文件夹、Markdown 图片预览和带 AI 标识的对话图片导出。新增用量贡献热力图与上下文分段统计，修复共享工作区备份恢复、工具结果保留及流式回复稳定性问题。'))
     this.article(t('1.0.1 · 2026-10-18'), t('移除图片生成设置、工具开关与执行接口，保留图片输入、图片理解和历史图片查看。自定义工具调整为 12 项能力，兼容旧版图片模型与工具禁用配置。'))
@@ -195,10 +196,8 @@ export struct SupportPanel {
       DeveloperPanel({ onDisabled: () => this.onOpen('about') })
     } else if (this.page === 'licenses') {
       ThirdPartyLicensesPanel()
-    } else if (this.page === 'privacy') {
-      LegalDocumentPanel({ kind: 'privacy' })
     } else if (this.page === 'terms') {
-      LegalDocumentPanel({ kind: 'terms' })
+      LegalDocumentPanel()
     } else {
       Scroll() {
         Column({ space: Space.md }) {

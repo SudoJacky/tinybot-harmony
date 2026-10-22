@@ -86,6 +86,7 @@ console.log('PASS obfuscated release keeps annotation model properties and callb
 // Run the emitted ability startup: ambient global declarations must still resolve
 // to the platform global object after top-level name obfuscation.
 const initialized = [];
+let privacyChanged;
 const startupScope = { exports: {}, Date, AppStorage: { setOrCreate() {} }, require: id => {
   if (id === '@ohos:app.ability.UIAbility') return { default: class {} };
   if (id === '@ohos:web.webview') return { default: { WebviewController: {
@@ -95,7 +96,13 @@ const startupScope = { exports: {}, Date, AppStorage: { setOrCreate() {} }, requ
   assert.ok(normalized, 'Unexpected ability dependency: ' + id);
   const dependency = Object.entries(names).find(([, mapping]) => mapping?.obfName?.replace(/\.ets$/, '') === normalized[1]);
   assert.ok(dependency, 'Missing ability dependency mapping: ' + id);
-  const symbol = path.basename(dependency[0], '.ets') === 'NativeActions' ? 'ShareInbox' : path.basename(dependency[0], '.ets');
+  const moduleName = path.basename(dependency[0], '.ets');
+  const symbol = { NativeActions: 'ShareInbox', HostedPrivacy: 'hostedPrivacy', HuaweiAccount: 'huaweiAccount' }[moduleName] || moduleName;
+  if (symbol === 'hostedPrivacy') {
+    return { [names.PropertyCache[symbol] || symbol]: {
+      initialize(_context, onChange) { privacyChanged = onChange; }
+    } };
+  }
   const implementation = symbol === 'Diagnostics' ? { log() {}, acceptsLog: () => false } : {
     initialize() { initialized.push(symbol); }, receive() {}, setForeground() {}, refresh() {}, activate() {}
   };
@@ -110,5 +117,9 @@ const ability = new startupScope.exports.default();
 ability.context = { getApplicationContext: () => ({ filesDir: '/test/files' }) };
 ability.onCreate({}, {});
 assert.equal(startupScope._brushEngineContext, ability.context, 'Pen Kit receives the real global context');
-assert.deepEqual(initialized, ['DeveloperDiagnostics', 'web', 'LanguagePreferences', 'AppearancePreferences']);
-console.log('PASS obfuscated release starts the ability and initializes the global Pen Kit context, Web engine and preferences');
+assert.deepEqual(initialized, ['LanguagePreferences', 'AppearancePreferences']);
+privacyChanged(true);
+assert.deepEqual(initialized, ['LanguagePreferences', 'AppearancePreferences', 'DeveloperDiagnostics', 'web']);
+privacyChanged(true);
+assert.equal(initialized.filter(item => item === 'web').length, 1);
+console.log('PASS obfuscated release initializes global Pen Kit context and preferences, defers business until consent, and starts Web only once');

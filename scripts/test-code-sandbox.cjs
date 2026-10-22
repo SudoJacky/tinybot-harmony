@@ -31,7 +31,7 @@ function load(name) {
     if (id === '@kit.ArkTS') return { util: { generateRandomUUID: crypto.randomUUID } };
     if (id === '../model/I18n') return { t: text => text };
     if (id === '../model/Team' || id === '../model/SystemPrompt') return {};
-    return load(id);
+    return load(path.resolve(path.dirname(file), id));
   }, Set, Map, Object, JSON, Error }, { filename: file });
   return exports;
 }

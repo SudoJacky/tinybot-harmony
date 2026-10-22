@@ -4,6 +4,7 @@ import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { t } from '../model/I18n';
 import { CredentialStore } from './CredentialStore';
+import { hostedPrivacy } from './HostedPrivacy';
 
 const ACCOUNT_ALIAS: string = 'tinybot.huawei.account.v1';
 
@@ -43,6 +44,7 @@ export class HuaweiAccount {
     this.busy = true; this.signedIn = false; this.error = ''; this.revision++;
     let phase: string = 'login';
     try {
+      hostedPrivacy.requireConsent();
       const provider = new authentication.HuaweiIDProvider();
       const request = provider.createLoginWithHuaweiIDRequest();
       request.forceLogin = true; request.state = util.generateRandomUUID();
@@ -85,12 +87,14 @@ export class HuaweiAccount {
   }
 
   async requireLogin(): Promise<void> {
+    hostedPrivacy.requireConsent();
     await this.initialization;
     const revision = this.revision;
     if (this.ready && !this.busy && this.openID) { await this.refresh(); }
     if (!this.ready || this.busy || !this.signedIn || revision !== this.revision) {
       throw new Error(this.error || t('请先登录华为账号，再使用 AI 生成功能。'));
     }
+    hostedPrivacy.requireConsent();
   }
 
   private checkAccount(): Promise<void> {

@@ -1,4 +1,4 @@
-// Build first: exercise the actual emitted legal reader with both packaged documents.
+// Build first: exercise the actual emitted local user-agreement reader.
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
 const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio');
@@ -22,7 +22,7 @@ function reader(kind, read) {
   return Object.assign(new exportsObject.Probe(), { kind, content: '', error: '',
     getUIContext: () => ({ getHostContext: () => ({ resourceManager: { getRawFileContentSync: read } }) }) });
 }
-for (const [kind, file] of [['privacy', 'privacy-policy.md'], ['terms', 'user-agreement.md']]) {
+for (const [kind, file] of [['terms', 'user-agreement.md']]) {
   const bytes = fs.readFileSync(path.join(root, 'entry/src/main/resources/rawfile', file));
   const view = reader(kind, resource => { assert.equal(resource, file); return bytes; });
   view.aboutToAppear(); assert.equal(view.error, ''); assert.equal(view.content, bytes.toString('utf8'));
@@ -34,4 +34,5 @@ for (const [kind, file] of [['privacy', 'privacy-policy.md'], ['terms', 'user-ag
     const failed = reader(kind, read); failed.aboutToAppear(); assert.ok(failed.error, 'Missing, empty and invalid resources must show an error');
   }
 }
-console.log('PASS both emitted document readers, complete Markdown text, and visible missing/empty/invalid resource errors');
+assert.ok(!fs.existsSync(path.join(root, 'entry/src/main/resources/rawfile/privacy-policy.md')), 'Hosted privacy must not ship a second policy');
+console.log('PASS emitted user agreement reader, complete Markdown text, visible resource errors and no packaged privacy policy');

@@ -1,25 +1,25 @@
-Tinybot v1.0.3 · 发布准备说明
-更新日期：2026-10-21
+Tinybot v1.0.4 · 发布准备说明
+更新日期：2026-10-23
 
 一、版本与产物
 
-需为本版重新运行准备脚本；既有 1.0.2 产物不作为 1.0.3 提交。
+需为本版重新运行准备脚本；既有 1.0.3 产物不作为 1.0.4 提交。
 
 包名：com.sudojacky.tinybot
-版本：1.0.3，versionCode=1000003
+版本：1.0.4，versionCode=1000004
 设备：phone，最低与目标 HarmonyOS API 26
 发布包：release，app.debug=false，仅 arm64-v8a
 模拟器：使用单独构建的调试包，包含 x86_64；不随正式发布包分发。
 
 运行 scripts/prepare-distribution.ps1 后生成独立目录及 ZIP：
-packages/Tinybot-1.0.3-1000003-release-UNSIGNED.app：待云签名的完整发布包。
-packages/Tinybot-1.0.3-1000003-release-UNSIGNED.hap：同一 APP 内的 entry 模块。
+packages/Tinybot-1.0.4-1000004-release-UNSIGNED.app：待云签名的完整发布包。
+packages/Tinybot-1.0.4-1000004-release-UNSIGNED.hap：同一 APP 内的 entry 模块。
 symbols/app-symbol.zip：ArkTS 符号表。
 symbols/native/arm64-v8a/：与发布包 Build ID 一致的未裁剪原生沙箱库。
 assets/tinybot-icon.png：工程使用的图标。
 screenshots/：仅附带本机已准备的商店截图；拍摄版本与内容需单独核对，历史图不作为本版验证结果。
 licenses/：工程 Apache-2.0 和随包第三方许可证。
-policies/：应用实际使用的隐私政策与用户协议原文。
+policies/：随包用户协议原文；隐私政策使用华为托管。
 RELEASE-NOTES.txt、STORE-LISTING.txt、CLOUD-TEST.txt、RELEASE-GAPS.txt：版本文案与验证资料。
 PRIVACY-DRAFT.txt：指向应用实际使用的政策文件，替代旧版独立草稿。
 package-info.json、SHA256SUMS.txt：从实际包读取的元数据、文件大小、原生 Build ID 和 SHA-256。
@@ -38,12 +38,12 @@ powershell -ExecutionPolicy Bypass -File scripts\prepare-distribution.ps1 -Studi
 
 在 DevEco Studio 的 Build > Upload Product 中选择工程原始产物：
 build\outputs\default\tinybot-harmony-default-unsigned.app
-关联现有包名 com.sudojacky.tinybot，核对 1.0.3 / 1000003，使用对应发布证书或云管理签名，附带本版符号表。最终签名包的哈希会变化，以最终文件重新记录。
+关联现有包名 com.sudojacky.tinybot，核对 1.0.4 / 1000004，使用对应发布证书或云管理签名，附带本版符号表。最终签名包的哈希会变化，以最终文件重新记录。
 
 此步骤需在实际平台完成；本地准备不包含创建应用、申请证书、上传、云测试或审核结果。控制台字段以当前平台为准。如版本号已使用，增加 versionCode 后重新构建。
 
 四、资料与回归
 
-应用内已接入用户协议、隐私政策的完整离线阅读和首次使用协议流程。公开政策地址、商店截图、审核体验配置等平台资料见 RELEASE-GAPS.txt。
+应用内保留用户协议离线阅读；隐私政策使用华为托管和系统签署流程。公开政策地址、商店截图、审核体验配置等平台资料见 RELEASE-GAPS.txt。
 使用相同签名从旧版覆盖升级，检查会话、模型配置、草稿和工作区；不卸载或清空用户数据。只在干净的独立测试环境检查全新安装。
 完整回归步骤与本次实测记录见 CLOUD-TEST.txt。

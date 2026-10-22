@@ -46,7 +46,7 @@ filesDir/
 | 网页读取 | 目标 URL 与固定 User-Agent | 目标网站；请求不携带模型密钥、Cookie 或自定义认证头 |
 | 应用内浏览器 | 页面操作与快照请求 | 目标网站；登录态属于本次浏览器会话 |
 | 云备份 | 脱敏后的快照文件 | 个人华为云空间 |
-| 评分和评论 | 由系统弹窗处理，应用不收集问题描述或诊断资料 | 华为应用市场 |
+| 评分和评论 | 跳转应用市场写评论页，应用不收集评论内容或诊断资料 | 华为应用市场 |
 | 打开外部链接 | 固定网址 | 系统浏览器 |
 
 Markdown 导出、备份导出与诊断导出都不会携带 API 密钥；模型密钥也不会出现在工具结果、日志或搜索配置里。
@@ -87,18 +87,24 @@ Markdown 导出、备份导出与诊断导出都不会携带 API 密钥；模型
 | 目标网站 | 网页读取或应用内浏览器 | 内容作为不可信资料交给模型 |
 | 华为账号（Account Kit） | 登录与账号状态检查 | 仅使用 OpenID |
 | 华为云空间 | 创建、刷新、恢复、删除云备份 | 快照保存在用户的云空间 |
-| 华为应用市场 | 用户主动点击评分和评论 | 系统弹窗处理评分与评论表单 |
+| 华为应用市场 | 用户主动点击评分和评论 | 应用市场页面处理评分与评论表单 |
 | MCP 服务器 | 用户配置并启用后 | 远程工具由该服务器执行，调用前需要确认 |
 
 仓库中的内嵌链接与开源许可入口使用系统浏览器打开，例如 GitHub 仓库与 Apache 2.0 许可证。
 
-## 应用内协议阅读
+## 系统隐私托管与本地用户协议
 
-- 用户协议正文随包保存在 `entry/src/main/resources/rawfile/user-agreement.md`，隐私政策正文保存在 `entry/src/main/resources/rawfile/privacy-policy.md`。
-- 两者由同一个原生阅读组件呈现，使用现有 Markdown 渲染，支持滚动、复制与系统明暗主题，不需要联网。
-- 隐私政策来自已发布的隐私声明，更新与生效日期为 2026.10.17；用户协议版本日期为 2026年10月18日，不把该日期写成已经对所有用户生效的时间。
-- 阅读页面只提供阅读，不设置同意按钮、不构造同意记录；首次使用告知与单独授权属于独立流程。
-- 当前没有 Tinybot 账号、会员订阅或应用内购买；争议处理采用法定管辖。
+- 隐私政策使用华为应用市场标准化隐私声明托管。应用不再携带 `privacy-policy.md` 或自建隐私声明阅读页，也不重复显示隐私同意弹窗。
+- `HostedPrivacy` 在启动时查询 AppGallery Kit 的托管信息、当前版本签署状态，并订阅 `usual.event.PRIVACY_STATE_CHANGED`。事件只用于触发重新查询，不直接信任事件中的同意标记。
+- 只有当前隐私政策 ID、版本和系统同意状态匹配时，才初始化账号、会话、ArkWeb、诊断以及分享/快捷入口业务。启动时由 AppGallery 自动展示系统标准弹窗，应用不再主动叠加第二次请求；拒绝后退出，下次启动继续弹出。已有有效同意时直接进入，不显示手动打开弹窗的启动按钮；系统接口失败时保持业务关闭并显示错误及重试、退出入口。前台恢复和每次模型请求继续检查系统状态。
+- “设置 → 关于 Tinybot / 华为账号 → 隐私政策”先显示“查看 / 拒绝”选择。选择查看后，通过 `getAppPrivacyMgmtInfo()` 获取系统托管地址并交给系统浏览器，不使用硬编码地址作为运行时降级。
+- 选择“拒绝”后，再次提示撤回授权会退出应用；只有点击“拒绝并退出”才调用系统 `disableService()` 撤销同意记录，停止当前对话并退出。取消确认不会撤回授权。已有会话、文件和设置保留；下次打开并重新通过系统弹窗同意后可继续使用。撤回失败会显示错误码，不宣称撤回成功。
+- 用户协议没有托管，仍随包保存在 `entry/src/main/resources/rawfile/user-agreement.md`，使用原生 Markdown 组件离线全文阅读。引导和登录页面的勾选框仅表示同意用户协议，不代表同意系统隐私政策。
+- 用户协议版本日期为 2026年10月18日。当前没有 Tinybot 账号、会员订阅或应用内购买；争议处理采用法定管辖。
+
+调试包在 entry 的 `module.json5` 预置 `appgallery_privacy_hosted` 和隐私政策 HTTPS 地址，使用官方 debug 模拟接入方式。正式分发的托管配置以应用市场为准，用户协议不设置托管 metadata。真机必须能正常访问应用市场；首次安装后托管信息可能尚未就绪，查询失败不放行业务。此能力不支持模拟器。
+
+官方说明：[隐私管理服务](https://developer.huawei.com/consumer/cn/doc/doccenter-capabilities/store-privacy)。
 
 ## 用户可以控制的范围
 
@@ -126,5 +132,5 @@ Markdown 导出、备份导出与诊断导出都不会携带 API 密钥；模型
 | 用量账本 | `entry/src/main/ets/services/UsageLedger.ets` |
 | 诊断日志白名单与导出 | `entry/src/main/ets/model/Diagnostics.ets`、`entry/src/main/ets/services/DeveloperDiagnostics.ets` |
 | 协议阅读页 | `entry/src/main/ets/views/LegalDocumentPanel.ets` |
-| 隐私政策原文 | `entry/src/main/resources/rawfile/privacy-policy.md` |
+| 系统隐私托管与签署状态 | `entry/src/main/ets/services/HostedPrivacy.ets` |
 | 用户协议原文 | `entry/src/main/resources/rawfile/user-agreement.md` |

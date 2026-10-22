@@ -140,7 +140,7 @@ try {
     Copy-Item -LiteralPath 'entry/src/main/cpp/third_party/quickjs/LICENSE' -Destination (Join-Path $OutputDirectory 'licenses/QuickJS-MIT.txt')
     Copy-Item -Path 'entry/src/main/resources/rawfile/licenses/*.txt' -Destination (Join-Path $OutputDirectory 'licenses')
     Copy-Item -LiteralPath 'entry/src/main/resources/rawfile/interactive-web/THREE-LICENSE.txt' -Destination (Join-Path $OutputDirectory 'licenses/Threejs-MIT.txt')
-    foreach ($document in @('privacy-policy.md', 'user-agreement.md')) {
+    foreach ($document in @('user-agreement.md')) {
         Copy-Item -LiteralPath (Join-Path 'entry/src/main/resources/rawfile' $document) -Destination (Join-Path $OutputDirectory 'policies')
     }
     if (Test-Path -LiteralPath 'artifacts/store-screenshots') {
@@ -157,9 +157,9 @@ try {
         preparedAt = (Get-Date).ToString('o')
         bundleName = $manifest.app.bundleName
         developerType = 'individual'
-        developerName = $null
-        contactEmail = $null
-        privacyPolicyUrl = $null
+        developerName = '顾志豪'
+        contactEmail = 'zhihao_gu@foxmail.com'
+        privacyPolicyUrl = ($manifest.module.metadata | Where-Object { $_.name -eq 'appgallery_privacy_link_privacy_statement' } | Select-Object -First 1).value
         versionName = $manifest.app.versionName
         versionCode = $manifest.app.versionCode
         buildMode = 'release'

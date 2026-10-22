@@ -70,15 +70,12 @@ export struct HuaweiAccountPanel {
       if (this.account.error) { Banner({ text: this.account.error, compId: 'huawei-account-error' }) }
       Row({ space: 10 }) {
         Checkbox().id('huawei-account-consent').select(this.agreed).selectedColor(this.appearance.accent)
-          .enabled(!this.account.busy).accessibilityText(t('我已阅读并同意用户协议和隐私政策'))
+          .enabled(!this.account.busy).accessibilityText(t('我已阅读并同意用户协议'))
           .onChange((value: boolean) => { this.agreed = value; })
         Text() {
           Span(t('我已阅读并同意'))
           Span(t('用户协议')).fontColor(this.appearance.accent).decoration({ type: TextDecorationType.Underline })
             .onClick(() => this.onSupport('terms'))
-          Span(t('和'))
-          Span(t('隐私政策')).fontColor(this.appearance.accent).decoration({ type: TextDecorationType.Underline })
-            .onClick(() => this.onSupport('privacy'))
         }.id('huawei-account-agreement').fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(19)
           .fontColor($r('app.color.text_primary')).layoutWeight(1).enabled(!this.account.busy)
       }.width('100%').padding({ left: 2, right: 2 })
