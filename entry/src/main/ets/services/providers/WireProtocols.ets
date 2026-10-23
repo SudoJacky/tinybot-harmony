@@ -9,6 +9,7 @@ export function protocolHeaders(protocol: string, apiKey: string): Record<string
   if (protocol === 'anthropic-messages') { headers['anthropic-version'] = '2023-06-01'; }
   if (apiKey.length > 0) {
     if (protocol === 'anthropic-messages') { headers['x-api-key'] = apiKey; }
+    else if (protocol === 'gemini') { headers['x-goog-api-key'] = apiKey; }
     else { headers['Authorization'] = 'Bearer ' + apiKey; }
   }
   return headers;
@@ -17,6 +18,12 @@ export function protocolHeaders(protocol: string, apiKey: string): Record<string
 export function protocolUrl(protocol: string, baseUrl: string, allowHttp: boolean): string {
   completionUrl(baseUrl, allowHttp);
   const base = baseUrl.trim().replace(/\/+$/, '');
+  if (protocol === 'gemini') {
+    if (/\/(chat\/completions|responses|messages)$/.test(base) || /:(streamGenerateContent|generateContent)$/.test(base)) {
+      throw new Error(t('服务地址的接口路径与所选协议不一致。'));
+    }
+    return /^https?:\/\/[^/]+$/.test(base) ? base + '/v1beta' : base;
+  }
   const suffix = protocol === 'chat-completions' ? '/chat/completions' : protocol === 'responses' ? '/responses' :
     protocol === 'anthropic-messages' ? '/messages' : '';
   if (!suffix) { throw new Error(t("不支持的模型协议：") + protocol); }

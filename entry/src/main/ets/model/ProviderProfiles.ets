@@ -38,7 +38,7 @@ export function modelIds(value: string): string[] {
 export function validateProfile(profile: ProviderProfile): void {
   if (!profile || typeof profile.id !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(profile.id) ||
     typeof profile.name !== 'string' || profile.name.trim().length === 0 || profile.name.length > 80 ||
-    !['chat-completions', 'responses', 'anthropic-messages'].includes(profile.protocol) || typeof profile.baseUrl !== 'string' ||
+    !['chat-completions', 'responses', 'anthropic-messages', 'gemini'].includes(profile.protocol) || typeof profile.baseUrl !== 'string' ||
     typeof profile.credentialAlias !== 'string' || typeof profile.noApiKey !== 'boolean' ||
     typeof profile.enabled !== 'boolean' || !Array.isArray(profile.models) ||
     profile.models.some((id: string) => typeof id !== 'string' || id.trim() !== id || id.length === 0) ||

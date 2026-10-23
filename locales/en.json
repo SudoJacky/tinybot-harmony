@@ -2198,5 +2198,17 @@
   "拒绝后将撤回隐私授权，停止当前对话并退出应用。下次打开时，需重新同意才能继续使用。已有会话、文件和设置会保留。": "Declining withdraws privacy consent, stops the current conversation, and exits the app. Accept again on your next launch to continue. Existing conversations, files, and settings will be kept.",
   "查看": "View",
   "1.0.4 · 2026-10-23": "1.0.4 · 2026-10-23",
-  "优化模型请求的前缀复用，提高缓存命中机会。接入华为托管隐私政策与系统隐私弹窗，同意后进入应用，拒绝后退出；关于页支持查看政策及撤回授权，保留已有会话与设置。": "Improved request prefix reuse to increase cache hit opportunities. Added Huawei-hosted privacy policies and system consent dialogs: accept to enter or decline to exit. View the policy or withdraw consent from About while preserving existing conversations and settings."
+  "优化模型请求的前缀复用，提高缓存命中机会。接入华为托管隐私政策与系统隐私弹窗，同意后进入应用，拒绝后退出；关于页支持查看政策及撤回授权，保留已有会话与设置。": "Improved request prefix reuse to increase cache hit opportunities. Added Huawei-hosted privacy policies and system consent dialogs: accept to enter or decline to exit. View the policy or withdraw consent from About while preserving existing conversations and settings.",
+  "Gemini 内容记录无效或过大。": "Gemini content is invalid or too large.",
+  "Gemini 工具调用无效。": "Invalid Gemini function call.",
+  "Gemini 模型 ID 无效。": "Invalid Gemini model ID.",
+  "Gemini 工具结果缺少对应的调用。": "Gemini function response has no matching call.",
+  "Gemini 图片必须是 base64 图片数据。": "Gemini images must use base64 image data.",
+  "Gemini 连接结束，但未收到完整回答的结束标记。": "Gemini connection ended without a complete response marker.",
+  "Gemini 流式事件无效。": "Invalid Gemini streaming event.",
+  "Gemini 模型服务返回错误。": "Gemini returned a service error.",
+  "Gemini 请求或回答被拦截。": "Gemini blocked the request or response.",
+  "Gemini 在结束后继续返回数据。": "Gemini returned data after completion.",
+  "Gemini 回答达到输出上限、被拦截或执行未完成。": "Gemini response reached the output limit, was blocked, or did not complete.",
+  "Google Gemini 原生接口": "Native Google Gemini API"
 }

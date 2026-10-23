@@ -23,7 +23,8 @@ interface WireUsage {
   cache_read_input_tokens?: number; cache_creation_input_tokens?: number;
   prompt_tokens_details?: Details; completion_tokens_details?: Details; input_tokens_details?: Details; output_tokens_details?: Details;
 }
-interface UsageEvent { type?: string; usage?: WireUsage; message?: UsageEvent; response?: UsageEvent; }
+interface GeminiUsage { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number; cachedContentTokenCount?: number; }
+interface UsageEvent { type?: string; usage?: WireUsage; usageMetadata?: GeminiUsage; message?: UsageEvent; response?: UsageEvent; }
 function count(value: number | undefined): number | undefined { return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined; }
 export class UsageStream {
   private pending: string = '';
@@ -51,6 +52,16 @@ export class UsageStream {
     if (text === '[DONE]') { return; }
     let event: UsageEvent;
     try { event = JSON.parse(text) as UsageEvent; } catch (_) { return; }
+    if (event?.usageMetadata) {
+      const metadata = event.usageMetadata;
+      const input = count(metadata.promptTokenCount); const output = count(metadata.candidatesTokenCount);
+      const reasoning = count(metadata.thoughtsTokenCount); const cached = count(metadata.cachedContentTokenCount);
+      if (input !== undefined) { this.input = input; }
+      if (output !== undefined) { this.output = output + (reasoning || 0); }
+      if (reasoning !== undefined) { this.reasoning = reasoning; }
+      if (cached !== undefined) { this.cached = cached; }
+      return;
+    }
     const usage = event?.usage || event?.message?.usage || event?.response?.usage;
     if (!usage) { return; }
     const input = count(usage.prompt_tokens ?? usage.input_tokens); const output = count(usage.completion_tokens ?? usage.output_tokens);

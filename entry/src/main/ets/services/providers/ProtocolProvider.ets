@@ -10,6 +10,8 @@ import { copyProviderInfo, ProviderInfo } from '../../model/Provider';
 import { Cancellation, RunCancelledError } from '../Cancellation';
 import { ChatStream } from '../ChatStream';
 import { ModelStream, ResponsesStream, AnthropicStream } from './EventStreams';
+import { GeminiStream } from './GeminiStream';
+import { geminiRequest, geminiStreamUrl } from './GeminiProtocol';
 import { protocolUrl, protocolHeaders, responsesRequest, anthropicRequest, ResponsesRequest } from './WireProtocols';
 import { ModelProvider, ProviderRequest, ProviderEffects } from './Provider';
 import { ChatCompletionsOptions, chatRequest, ChatRequest } from './ChatCompletionsProtocol';
@@ -36,7 +38,8 @@ export class ProtocolProvider implements ModelProvider {
   async stream(input: ProviderRequest, cancellation: Cancellation,
     onText: (text: string) => void, onReasoning?: (text: string) => void): Promise<ModelTurn> {
     cancellation.check();
-    const endpoint = this.endpoint(input.baseUrl);
+    const root = this.endpoint(input.baseUrl);
+    const endpoint = this.info.protocol === 'gemini' ? geminiStreamUrl(root, input.model) : root;
     const messages = await this.effects.hydrate(input.messages);
     cancellation.check();
     const usage = new UsageStream(); let firstToken: number | undefined = undefined;
@@ -52,8 +55,10 @@ export class ProtocolProvider implements ModelProvider {
     };
     const decoder = new util.TextDecoder('utf-8');
     const parser: ModelStream = this.info.protocol === 'responses' ? new ResponsesStream(receiveText, receiveReasoning) :
+      this.info.protocol === 'gemini' ? new GeminiStream(receiveText, receiveReasoning) :
       this.info.protocol === 'anthropic-messages' ? new AnthropicStream(receiveText, receiveReasoning) : new ChatStream(receiveText, receiveReasoning);
     const body: Object = this.info.protocol === 'responses' ? responsesRequest(input.model, messages, input.tools, input.maxOutputTokens) :
+      this.info.protocol === 'gemini' ? geminiRequest(messages, input.tools, input.maxOutputTokens) :
       this.info.protocol === 'anthropic-messages' ? anthropicRequest(input.model, messages, input.tools, input.maxOutputTokens, this.info.promptCaching === true) :
       chatRequest(input.model, messages, input.tools, this.options, input.maxOutputTokens);
     if (input.requestUsage !== false && this.info.protocol === 'chat-completions') { (body as ChatRequest).stream_options = { include_usage: true }; }

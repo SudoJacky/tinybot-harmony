@@ -134,7 +134,8 @@ export class Styles {
 const PROTOCOL_NAMES: Record<string, string> = {
   'chat-completions': 'Chat Completions',
   'responses': 'OpenAI Responses',
-  'anthropic-messages': 'Anthropic Messages'
+  'anthropic-messages': 'Anthropic Messages',
+  'gemini': 'Google Gemini'
 };
 
 export function protocolName(protocol: string): string {

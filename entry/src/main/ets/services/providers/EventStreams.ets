@@ -15,7 +15,7 @@ function parseEvent(payload: string): Object {
 }
 
 // Shared framing only; completion semantics belong to each protocol.
-class EventFrames {
+export class EventFrames {
   private pending: string = '';
   private lines: string[] = [];
   private frameSize: number = 0;
