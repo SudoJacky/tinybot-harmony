@@ -131,10 +131,13 @@ CPU Profile 是单独操作：`hidebug.startJsCpuProfiling()` 最多运行 30 �
 
 ## 性能验证脚本
 
+每步的 `context.prefix` 和 `context.request_prefix` 日志记录 system/工具指纹、完整相同消息数、共享字符数及变化类别：`cold` 表示本轮尚无比较基线，`append` 表示消息是前次请求的追加扩展，其余为 `tools`、`system` 或 `history` 变化。指纹仅供诊断，实际比较使用原字符串；这些字段不表示服务端缓存命中，也不包含提示词或结果正文。
+
 | 脚本 | 覆盖 |
 | --- | --- |
 | `node scripts/test-developer-diagnostics.cjs` | 关闭路径零开销、容量与分位数、解锁限制、失效异步结果、采样生命周期、可选帧回调、CPU profiler 停止、批量落盘、短写、轮转、失败重试、清除与导出 |
 | `node scripts/test-unified-logging.cjs` | 前置门控不读字段/时钟、白名单与脱敏、引用编号、异常分类、HiLog 适配器、调用点登记 |
+| `node scripts/test-prefix-cache.cjs` | 前缀扩展、快照落盘、跨轮及重载、权限撤销、压缩重准入、团队公共上下文与缓存配置 |
 | `node scripts/test-settings-performance.cjs` | 真实会话与 ViewModel 下的设置保存、保存期间继续输入、标题请求不复制历史 |
 | `node scripts/test-markdown-performance.cjs` | 增量 Markdown 与全量解析在每个到达边界的一致性、分块渲染 |
 | `node scripts/test-usage-performance.cjs` | 10 万条用量记录的统计、分页、取消与事件循环响应 |

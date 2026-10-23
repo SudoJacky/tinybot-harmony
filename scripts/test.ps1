@@ -16,6 +16,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Locale validation failed. Run node scripts/bui
 if ($LASTEXITCODE -ne 0) { throw 'Huawei account tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-hosted-privacy.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Hosted privacy state and startup gating tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-announcements.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Announcement startup, persistence and dialog tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-app-information.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'App review navigation and error handling tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/build-builtin-skills.cjs') --check

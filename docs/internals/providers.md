@@ -139,11 +139,12 @@ API Key 保存在系统 Asset Store，写入属性为 `DEVICE_UNLOCKED` 且 `Syn
 | 工具调用 | `tool_calls` | `function_call` 条目 | `tool_use` 内容块 |
 | 图片 | `image_url` | `input_image` | base64 `image` 块 |
 
-Anthropic 适配还有三点行为差异：
+Anthropic 适配还有以下行为差异：
 
 - 如果助手消息带有 `anthropicContent`，会原样、按序重放完整内容块（含签名思考），而不是从文本与工具调用重新拼装；重放前会做结构校验。
 - 流式解析按内容块索引推进，`message_start`、`content_block_start/delta/stop`、`message_delta`、`message_stop` 的状态必须自洽；结束原因只接受 `end_turn`、`stop_sequence`、`tool_use`。
 - 推理强度写入 `output_config.effort`；对支持自适应思考的模型额外设置 `thinking: { type: 'adaptive' }`，不虚构 `budget_tokens` 映射。
+- 使用 Anthropic 预设且协议为 `anthropic-messages` 时，发送顶层 `cache_control: { type: 'ephemeral' }` 跟随增长的历史，并在稳定 system 文本块上放置一个显式缓存断点。能力从预设传入实际配置实例，不按地址或模型名称猜测；自定义兼容预设不会自动增加该字段。缓存命中、生命周期与计费由服务端决定。
 
 ## 密钥读取时机
 

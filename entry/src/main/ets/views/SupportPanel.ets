@@ -12,6 +12,8 @@ import { DeveloperGate, Diagnostics } from '../model/Diagnostics';
 import { DeveloperDiagnostics } from '../services/DeveloperDiagnostics';
 import { DeveloperPanel } from './DeveloperPanel';
 import { Btn } from '../common/Theme';
+import { Announcements, announcements } from '../services/Announcements';
+import { MarkdownView } from './MarkdownView';
 
 export function supportTitle(page: string): string {
   if (page === 'developer') { return t('开发者模式'); }
@@ -30,6 +32,7 @@ export struct SupportPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop page: string = 'about';
   @State private version: string = '';
+  @State private announcementService: Announcements = announcements;
   @State private error: string = '';
   @State private showDeveloperPassword: boolean = false;
   @State private developerPassword: string = '';
@@ -207,7 +210,23 @@ export struct SupportPanel {
           } else if (this.page === 'updates') {
             this.updates()
           } else if (this.page === 'announcements') {
-            this.article(t('暂无公告'), t('有新的公告时，会显示在这里。'))
+            if (!this.announcementService.configured) {
+              this.article(t('公告'), t('公告暂未开放。'))
+            } else if (this.announcementService.loading) {
+              LoadingProgress().width(32).height(32)
+            } else if (this.announcementService.error) {
+              Banner({ text: this.announcementService.error, compId: 'announcement-error' })
+            } else if (this.announcementService.current) {
+              GroupCard() {
+                Column({ space: Space.md }) {
+                  Text(this.announcementService.current.title).fontFamily(this.appearance.fontFamily)
+                    .fontSize(Font.title).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary')).width('100%')
+                  MarkdownView({ content: this.announcementService.current.body, fontSize: Font.body })
+                }.width('100%').alignItems(HorizontalAlign.Start).padding(Space.lg)
+              }
+            } else {
+              this.article(t('暂无公告'), t('有新的公告时，会显示在这里。'))
+            }
           } else {
             this.about()
           }
