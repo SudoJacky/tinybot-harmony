@@ -1,3 +1,5 @@
+import { ConversationShareData, sharingMessages } from '../model/ConversationShare';
+import { ConversationSharePanel } from '../views/ConversationSharePanel';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { monochromeProviderLogo, providerLogo } from '../common/ProviderBrand';
 import { WebUiPreflightHost } from '../views/WebUiPreflightHost';
@@ -6,10 +8,6 @@ import { BrowserPanel } from '../views/BrowserPanel';
 import { BrowserSession } from '../services/BrowserSession';
 import { AnnotationPage, browserAnnotationText } from '../model/BrowserAnnotation';
 import { image } from '@kit.ImageKit';
-import { fileIo as fs } from '@kit.CoreFileKit';
-import { conversationSections, ConversationSection } from '../model/ConversationExport';
-import { conversationImage } from '../services/ConversationImageExport';
-import { ConversationExportSection } from '../views/ConversationExportSection';
 import { Attachments } from '../services/Attachments';
 import { t } from '../model/I18n';
 import { agentModeName } from '../model/AgentMode';
@@ -25,12 +23,9 @@ import { ToolApproval } from '../services/ToolApproval';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { requestAppReview } from '../services/AppInformation';
-import { util } from '@kit.ArkTS';
 import { KeyboardAvoidMode, SymbolGlyphModifier } from '@kit.ArkUI';
-import { Attachment } from '../model/Productivity';
-import { writeBytes } from '../services/Attachments';
-import { ShareInbox, exportFile, shareFile } from '../services/NativeActions';
-import { ChatViewModel, MessageViewModel } from '../viewmodel/ChatViewModel';
+import { ShareInbox } from '../services/NativeActions';
+import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { ChatPanel } from '../views/ChatPanel';
 import { SettingsPanel, UserDocumentPanel } from '../views/SettingsPanel';
 import { AppearancePanel, appearanceChoiceTitle } from '../views/AppearancePanel';
@@ -64,7 +59,6 @@ struct Index {
   @State private privacy: HostedPrivacy = hostedPrivacy;
   @StorageProp('tinybot.privacy.allowed') @Watch('privacyChanged') private privacyAllowed: boolean = false;
   @StorageProp('tinybot.foreground') @Watch('offerAnnouncement') private foreground: boolean = false;
-  @State private exportingImage: boolean = false;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
   @State private app: ChatViewModel = new ChatViewModel();
@@ -202,10 +196,29 @@ struct Index {
     this.paths.pushPath({ name: 'provider' });
   }
 
+  private async createChat(): Promise<void> {
+    if (!this.app.ready || this.app.busy || this.app.saveError) { return; }
+    const previousId = this.app.active.id;
+    // SessionService decides whether the current chat is untouched and reusable.
+    if (await this.app.newThread() && this.app.active.id === previousId) {
+      this.getUIContext().getPromptAction().showToast({
+        systemMaterial: this.appearance.surface, message: t('已在新对话中'), duration: 1600
+      });
+    }
+  }
+
   private async receiveLaunch(): Promise<void> {
     if (!this.privacy.allowed) { return; }
     const action = LaunchActions.take();
     if (!action) { return; }
+    // The session restores the last active chat on cold start. Returning to it must
+    // not create a chat, flush/replace a draft, or interrupt a running answer.
+    if (action === 'continue-chat') {
+      if (this.launching || this.receiving || this.onboardingActive) { return; }
+      this.voiceRequest = '';
+      this.paths.clear(); this.setDrawer(false);
+      return;
+    }
     if (this.launching || this.receiving || this.app.busy || this.app.saveError) {
       this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t('请先完成当前操作或保存，再使用快捷入口。') });
       return;
@@ -416,52 +429,19 @@ struct Index {
     }
   }
 
-  private async exportChat(share: boolean): Promise<void> {
-    const thread = this.app.active;
-    let temporary = '';
-    try {
-      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      const text = '# ' + thread.title + '\n\n' + thread.messages.map((item: MessageViewModel) =>
-        '## ' + (item.role === 'user' ? t("用户") : 'Tinybot') + '\n\n' + item.content +
-        (item.attachments.length ? t("\n\n附件：") + item.attachments.map((file: Attachment) => file.name).join('、') : '')).join('\n\n');
-      const path = context.cacheDir + '/conversation-' + util.generateRandomUUID() + '.md';
-      temporary = path;
-      await writeBytes(path, new util.TextEncoder().encodeInto(text).buffer as ArrayBuffer);
-      const name = (thread.title.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40) || t("Tinybot对话")) + '.md';
-      if (share) { await shareFile(context, path, name); }
-      else { await exportFile(context, path, name, thread.messages.some((item) => item.role === 'assistant')); }
-    } catch (error) { this.app.error = (error as Error).message; }
-    finally { if (temporary && await fs.access(temporary)) { await fs.unlink(temporary); } }
-  }
-
-  @Builder
-  imageExportSection(section: ConversationSection) { ConversationExportSection({ section: section }) }
-
-  private async exportChatImage(): Promise<void> {
-    if (this.exportingImage || this.app.busy || !this.app.active.messages.length) { return; }
-    this.exportingImage = true;
-    this.getUIContext().getPromptAction().showToast({ message: t('正在导出图片…') });
-    let temporary = '';
-    try {
-      // Capture one immutable conversation, even if the user changes chats while exporting.
-      const snapshot = this.app.exportSnapshot();
-      const thread = snapshot.threads.find((item) => item.id === this.app.active.id)!;
-      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      const ui = this.getUIContext();
-      temporary = await conversationImage(context, conversationSections(thread, snapshot.providerProfiles || []), (section: ConversationSection) =>
-        ui.getComponentSnapshot().createFromBuilder(() => { this.imageExportSection(section); }, 0, true,
-          { scale: 720 / ui.vp2px(360), waitUntilRenderFinished: true }),
-        context.resourceManager.getColorSync($r('app.color.page_background').id));
-      const name = (thread.title.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40) || t('Tinybot对话')) + '.png';
-      await exportFile(context, temporary, name);
-    } catch (error) {
-      const failure = error as BusinessError;
-      this.app.error = t('导出图片失败：{0}', [failure.message || JSON.stringify(error) || String(error)]);
+  private openConversationShare(): void {
+    if (!this.app.ready || this.app.busy || !this.app.active.messages.length) { return; }
+    const snapshot = this.app.exportSnapshot();
+    const data: ConversationShareData = {
+      thread: snapshot.threads.find((thread) => thread.id === this.app.active.id)!,
+      profiles: snapshot.providerProfiles || []
+    };
+    data.thread.messages = sharingMessages(data.thread.messages);
+    if (!data.thread.messages.length) {
+      this.getUIContext().getPromptAction().showToast({ message: t('暂无可分享的正文') });
+      return;
     }
-    finally {
-      this.exportingImage = false;
-      if (temporary && await fs.access(temporary)) { await fs.unlink(temporary); }
-    }
+    this.paths.pushPath({ name: 'share-conversation', param: data });
   }
 
   // Conversation-level actions live in the header; the composer "+" sheet holds per-message inputs.
@@ -488,13 +468,9 @@ struct Index {
         MenuItem({ startIcon: $r('app.media.message_branch'), content: t("创建分支") })
           .enabled(!this.app.busy && this.app.saveError.length === 0 && this.app.active.messages.length > 0)
           .onClick(() => this.fork())
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.share')), content: t("分享对话") })
-          .enabled(this.app.active.messages.length > 0).onClick(() => this.exportChat(true))
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.square_and_arrow_down')), content: t("导出为 Markdown") })
-          .enabled(this.app.active.messages.length > 0).onClick(() => this.exportChat(false))
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.picture')), content: this.exportingImage ? t('正在导出图片…') : t('导出为图片') })
-          .id('export-chat-image').enabled(!this.app.busy && !this.exportingImage && this.app.active.messages.length > 0)
-          .onClick(() => this.exportChatImage())
+        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.share')), content: t('分享会话') })
+          .id('share-conversation').enabled(this.app.ready && !this.app.busy && this.app.active.messages.length > 0)
+          .onClick(() => this.openConversationShare())
       }
       MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.gearshape')), content: t('设置') })
         .onClick(() => this.openSettings())
@@ -554,6 +530,8 @@ struct Index {
         .backgroundColor($r('app.color.page_background')).onBackPressed(() => this.app.busy)
     } else if (name === 'search-settings') {
       NavDestination() { SearchSettingsPanel({ app: this.app }) }.title(t('搜索服务'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'share-conversation') {
+      ConversationSharePanel({ data: param as ConversationShareData })
     } else if (name === 'files') {
       WorkspacePanel({ app: this.app, initialPath: (param as string) || '' })
     } else if (name === 'account') {
@@ -707,7 +685,7 @@ struct Index {
       IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t("新建对话"), compId: 'new-chat',
         material: this.appearance.control, tint: $r('sys.color.font_primary'),
         disabled: !this.app.ready || this.app.busy || this.app.saveError.length > 0,
-        onTap: () => { this.app.newThread(); } })
+        onTap: () => { this.createChat(); } })
     }.width('100%').height(CHAT_HEADER_HEIGHT).padding({ left: 6, right: 6 })
       .hitTestBehavior(HitTestMode.Transparent)
     }.width('100%').height(CHAT_HEADER_HEIGHT).clip(true).hitTestBehavior(HitTestMode.Transparent)
@@ -751,7 +729,22 @@ struct Index {
       if (!this.privacyAllowed) {
         Column({ space: Space.lg }) {
           Text('Tinybot').fontSize(28).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
-          if (this.privacy.error) {
+          if (this.privacy.simulatorDebug) {
+            Text(t('模拟器调试隐私说明')).id('debug-privacy-title')
+              .fontSize(20).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
+            Text(t('此入口仅用于 Debug 包的模拟器调试。同意仅在本次运行有效，不代表已完成华为系统隐私授权。'))
+              .fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
+            Text(t('进入后会初始化账号、会话和诊断等服务。使用在线功能时，对话、附件及必要信息可能发送给配置的服务商，请仅使用测试数据。'))
+              .fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
+            if (this.privacy.error) {
+              Text(this.privacy.error).id('privacy-status').fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
+            }
+            Button(t('隐私政策')).id('debug-privacy-policy').attributeModifier(Btn.tonal)
+              .onClick(() => this.openSupport('privacy'))
+            Button(t('同意并进入调试')).id('accept-debug-privacy').attributeModifier(Btn.primary)
+              .onClick(() => this.privacy.acceptDebugConsent())
+            Button(t('退出应用')).id('exit-debug-privacy').attributeModifier(Btn.tonal).onClick(() => this.privacy.exit())
+          } else if (this.privacy.error) {
             Text(this.privacy.error).id('privacy-status').fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
             Button(t('重试')).id('retry-privacy').attributeModifier(Btn.primary)
               .enabled(!this.privacy.busy).onClick(() => this.privacy.requestConsent())

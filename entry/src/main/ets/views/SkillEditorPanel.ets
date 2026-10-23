@@ -100,7 +100,7 @@ export struct SkillEditorPanel {
               }.width('100%')
             }.padding({ top: this.editor.files.length > 0 ? Space.md : 0 })
           }.padding(Space.lg).borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
-          Text(t('内容会发送给模型；最多保存 20 个 Skills。')).fontFamily(this.appearance.fontFamily)
+          Text(t('内容会发送给模型。')).fontFamily(this.appearance.fontFamily)
             .fontSize(Font.caption).lineHeight(18).fontColor($r('app.color.text_tertiary')).width('100%')
             .padding({ left: 4, right: 4, top: Space.md })
         }.padding({ left: Space.page, right: Space.page, bottom: Space.xl }).width('100%')

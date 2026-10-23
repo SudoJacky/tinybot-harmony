@@ -116,6 +116,43 @@ function crc32(bytes) {
     { role: 'user', content: 'last' }
   ] };
   const sections = conversationSections(thread);
+  const { selectedConversation, sharingMessages, conversationMarkdown, conversationFileName } = load('model/ConversationShare');
+  const selectable = { ...thread, messages: thread.messages.map((message, i) => ({ ...message, id: 'm' + i })) };
+  const selected = selectedConversation(selectable, ['m2', 'm0']);
+  assert.equal(selected.messages.map(message => message.id).join(','), 'm0,m2', 'selection retains conversation order');
+  assert.equal(selected.messages.length, 2);
+  const selectedImage = conversationSections(selected).map(section => section.text).join('\n');
+  const selectedMarkdown = conversationMarkdown(selected);
+  for (const output of [selectedImage, selectedMarkdown]) {
+    assert.ok(output.includes('first') && output.includes('last'));
+    assert.ok(!output.includes(long), 'unselected assistant must not leak into either format');
+    assert.ok(output.includes('AI生成内容可能有误，请仔细鉴别。'));
+  }
+  selected.messages[0].content = 'changed';
+  assert.equal(selectable.messages[0].content, 'first', 'export snapshot cannot mutate source messages');
+  assert.throws(() => selectedConversation(selectable, []), /请至少选择/);
+  assert.throws(() => selectedConversation(selectable, ['missing']), /请至少选择/);
+  assert.equal(conversationFileName('a/b:c', 'png'), 'a_b_c.png');
+  const processMessage = { id: 'answer', role: 'assistant', status: 'complete', error: 'PRIVATE diagnostic',
+    content: 'PRIVATE narration\n\nFinal body', steps: [
+      { content: 'PRIVATE narration', reasoningContent: 'PRIVATE thought', tools: [{
+        status: 'complete', call: { id: 'tool', function: { name: 'read_web' } }, output: 'PRIVATE receipt'
+      }] },
+      { content: 'PRIVATE failed attempt', requestError: 'overflow', tools: [] },
+      { content: 'Final body', reasoningContent: 'PRIVATE final thought', tools: [] }
+    ] };
+  const bodyOnly = selectedConversation({ title: 'Body only', messages: [processMessage] }, ['answer']);
+  assert.equal(bodyOnly.messages[0].content, 'Final body');
+  assert.ok(!JSON.stringify(bodyOnly).includes('PRIVATE'), 'share snapshot contains no process or reasoning fields');
+  for (const output of [conversationSections(bodyOnly).map(section => section.text).join('\n'),
+    conversationMarkdown({ title: 'Body only', messages: [processMessage] })]) {
+    assert.ok(output.includes('Final body') && !output.includes('PRIVATE'));
+  }
+  assert.ok(processMessage.steps[0].reasoningContent, 'sharing does not mutate chat history');
+  assert.equal(sharingMessages([{ ...processMessage, steps: [{ content: '', reasoningContent: 'thought only', tools: [] }] }]).length, 0);
+  assert.equal(sharingMessages([{ ...processMessage, steps: [processMessage.steps[0]] }]).length, 0, 'no fallback to aggregate narration');
+  assert.equal(sharingMessages([{ ...processMessage, steps: [{ content: 'invalid UI', uiValidation: 'failed', tools: [] }] }]).length, 0);
+  assert.equal(sharingMessages([{ id: 'legacy', role: 'assistant', content: 'Legacy body' }])[0].content, 'Legacy body');
   assert.equal(sections.filter(s => s.kind === 'text' && !s.user).map(s => s.text).join(''), long);
   assert.ok(sections.at(-1).text.includes('AI生成内容可能有误，请仔细鉴别。'));
   assert.equal(sections.filter(s => s.kind === 'role').length, 3);

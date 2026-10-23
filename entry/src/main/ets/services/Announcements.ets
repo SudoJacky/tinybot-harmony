@@ -6,8 +6,8 @@ import { Diagnostics } from '../model/Diagnostics';
 import { t } from '../model/I18n';
 import { hostedPrivacy } from './HostedPrivacy';
 
-// Reserved for a public HTTPS JSON endpoint. Empty deliberately disables network access.
-export const ANNOUNCEMENT_URL: string = '';
+// Public feed selects one active announcement; an explicitly empty endpoint disables fetching.
+export const ANNOUNCEMENT_URL: string = 'https://sudotinybot.cn/api/announcement';
 const SEEN_KEY: string = 'seenAnnouncementIds';
 
 @Observed

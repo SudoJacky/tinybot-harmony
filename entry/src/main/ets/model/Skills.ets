@@ -1,6 +1,5 @@
 import { t } from './I18n';
 export const MAX_SKILL_TEXT: number = 32000;
-export const MAX_SKILLS: number = 20;
 export const MAX_SKILL_TOTAL: number = 512000;
 
 export interface SkillFile {
@@ -102,7 +101,7 @@ export function validateExtensions(value: ExtensionSettings): void {
   if (value?.browserPolicy !== undefined && !['unset', 'enabled', 'disabled'].includes(value.browserPolicy)) {
     throw new Error('Invalid browser permission setting.');
   }
-  if (!value || typeof value.webEnabled !== 'boolean' || !Array.isArray(value.skills) || value.skills.length > MAX_SKILLS) {
+  if (!value || typeof value.webEnabled !== 'boolean' || !Array.isArray(value.skills)) {
     throw new Error(t("联网或 Skills 设置损坏。"));
   }
   if (value.seededBuiltinSkills !== undefined && (!Array.isArray(value.seededBuiltinSkills) ||

@@ -20,7 +20,8 @@ devecocli build
 | --- | --- | --- |
 | `build-locales.cjs --check` | 词条键一致性、占位符、代码中的 `t()` 引用 | 否 |
 | `build-builtin-skills.cjs --check` | 内置 Skill 打包是否为最新 | 否 |
-| `test-conversation-export.cjs` | 导出时的 Markdown/HTML 标识、PNG 元数据 CRC 与像素载荷、长会话完整拼接、失败清理 | 否 |
+| `test-conversation-export.cjs` | 所选消息顺序与隔离、Markdown/HTML 标识、PNG 元数据 CRC 与像素载荷、长会话完整拼接、失败清理 | 否 |
+| `test-conversation-share.cjs` | 消息勾选、预览后保存/分享、Markdown 选择范围、重复点击、失败与离开页面的临时文件清理 | 是（Debug 构建） |
 | `test-workspace-backup-ui.cjs` | 编译后文件页的失败保存、内容无法预览时导出原始备份、重试与新文件状态 | 是 |
 | `test-huawei-account.cjs` | 登录/取消、错误码脱敏、重启恢复、账号切换、退出与迟到回调、存储失败、未登录请求拦截 | 否 |
 | `test-app-information.cjs` | 实际评分入口打开当前应用写评论页、重复点击、跳转或包信息读取失败提示与重试 | 否 |
@@ -53,6 +54,7 @@ devecocli build
 | `test-tool-details.cjs` | 分类回执、失败状态与无损分页 | 否 |
 | `test-window-viewport.cjs` | 窗口与视口尺寸 | 是 |
 | `test-answer-speech-native.cjs` | 回答朗读分段、取消、后台释放 | 是 |
+| `test-launch-actions-renderer.cjs` | 桌面快捷入口与服务卡片的编译后路由、草稿保留、忙碌和隐私门禁、语音一次性消费，以及两种尺寸的 FormLink | 是 |
 | `test-team-toggle.cjs` | 团队开关与继承 | 否 |
 | `test-custom-tools.cjs` | 完整版/自定义选择、12 项能力覆盖、旧配置迁移、目录与执行限制 | 否 |
 | `test-custom-tools-renderer.cjs` | 能力行回调、联动开关、忙碌/归档时禁用 | 是 |

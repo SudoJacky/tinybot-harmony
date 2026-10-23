@@ -51,7 +51,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 (async () => {
   const service = fresh(); await service.checkOnStartup({}); assert.equal(requests, 0, 'Consent precedes network');
   privacy.allowed = true;
-  await new Announcements().checkOnStartup({}); assert.equal(requests, 0, 'Unconfigured endpoint performs no I/O');
+  await new Announcements('').checkOnStartup({}); assert.equal(requests, 0, 'Unconfigured endpoint performs no I/O');
   const invalidEndpoint = new Announcements('http://notices.example/feed.json'); await invalidEndpoint.checkOnStartup({});
   assert.ok(invalidEndpoint.error); assert.equal(requests, 0);
   await Promise.all([service.checkOnStartup({}), service.checkOnStartup({})]);
@@ -149,7 +149,12 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   class Markdown { constructor(_parent, params) { this.type = 'Markdown'; this.params = params; } }
   class ErrorBanner { constructor(_parent, params) { this.type = 'Banner'; this.params = params; } }
   vm.runInNewContext(compile('export class Renderer {\n' + methods + '\n}'), { exports: rendererExports,
-    ...Object.fromEntries(['Flex', 'Text', 'Scroll', 'Column', 'If', 'Button'].map(type => [type, element(type)])),
+    ...Object.fromEntries(['Flex', 'Text', 'Scroll', 'Column', 'Row', 'If', 'Button'].map(type => [type, element(type)])),
+    Image: new Proxy({}, { get: (_, key) => (...args) => {
+      if (key === 'create') nodes.push({ type: 'Image', value: args[0], parent: stack.at(-1), props: {} });
+      else nodes.at(-1).props[key] = args[0];
+    } }),
+    TextAlign: { Center: 'center' }, VerticalAlign: { Center: 'center' },
     FlexDirection: { Column: 'column' }, FontWeight: { Bold: 'bold' }, TextOverflow: { Ellipsis: 'ellipsis' },
     Alignment: { TopStart: 'top-start' }, BarState: { Auto: 'auto' }, EdgeEffect: { None: 'none' },
     Space: { xl: 24, lg: 16, sm: 8 }, Font: { title: 17, body: 16 }, Btn: { primary: 'primary' }, t: key => key,
@@ -158,15 +163,24 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   const longBody = '# Maintenance\n\n' + 'Long **announcement** paragraph.\n\n'.repeat(500) + '## Final section\n\nLast line.';
   let clicks = 0;
   const renderer = Object.assign(new rendererExports.Renderer(), { announcement: notice('long-ui', longBody), error: '',
+    titleHeight: 0, bodyHeight: 0, footerHeight: 0,
     appearance: { fontFamily: 'system' }, onConfirm: () => clicks++,
     observeComponentCreation2: callback => callback(1, true), ifElseBranchUpdateFunction: (_branch, callback) => callback() });
   renderer.initialRender(); assert.equal(stack.length, 0);
   const nodeById = id => nodes.find(node => node.props?.id === id);
   const scroll = nodeById('announcement-body'), button = nodeById('announcement-confirm');
   assert.equal(nodeById('announcement-dialog').props.constraintSize.maxHeight, '80%');
-  assert.equal(scroll.props.flexShrink, 1);
+  assert.equal(nodeById('announcement-dialog').type, 'Column');
+  assert.equal(nodeById('announcement-dialog').props.height, 240, 'Short content has a minimum desired height');
+  assert.equal(scroll.props.layoutWeight, 1);
   assert.equal(button.parent.parent, scroll.parent, 'Footer is a sibling of the body, never scrolled away');
-  assert.equal(button.parent.props.flexShrink, 0, 'The body yields height to the fixed action');
+  assert.equal(button.parent.props.layoutWeight, undefined, 'Only the body takes remaining space');
+  nodeById('announcement-header').props.onAreaChange({}, { height: 26 });
+  nodeById('announcement-content').props.onAreaChange({}, { height: 480 });
+  nodeById('announcement-footer').props.onAreaChange({}, { height: 48 });
+  nodes.length = 0; renderer.initialRender();
+  assert.equal(nodeById('announcement-dialog').props.height, 634, 'Desired height follows measured Markdown and fixed controls');
+  assert.equal(nodeById('announcement-dialog').props.constraintSize.maxHeight, '80%', 'Long content remains capped by the viewport');
   assert.equal(nodes.find(node => node.type === 'Markdown').params.content, longBody, 'Long Markdown reaches the renderer without truncation');
   button.props.onClick(); assert.equal(clicks, 1);
   nodes.length = 0; renderer.error = 'Save failed'; renderer.initialRender();

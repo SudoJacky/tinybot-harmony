@@ -410,16 +410,6 @@ export struct ThreadList {
             disabled: this.app.busy || !!this.app.saveError, onTap: () => this.editProject() })
         }
       }.width('100%').height(48).padding({ left: 4 })
-      if (!this.selecting) {
-        Button() {
-          Row({ space: Space.sm }) {
-            SymbolGlyph($r('sys.symbol.square_and_pencil')).fontSize(18).fontColor([this.appearance.onAccentContainer])
-            Text(t("新对话")).fontFamily(this.appearance.fontFamily).fontSize(15).fontWeight(FontWeight.Medium).fontColor(this.appearance.onAccentContainer)
-          }
-        }.fontFamily(this.appearance.fontFamily).id('history-new-chat').attributeModifier(Btn.tonal).width('100%')
-        .enabled(!this.app.busy && this.app.saveError.length === 0)
-        .onClick(async () => { if (await this.app.newThread('')) { this.onSelected(); } })
-      }
       Search({ value: this.query, placeholder: t("搜索对话") }).textFont({ family: this.appearance.fontFamily })
         .placeholderFont({ family: this.appearance.fontFamily }).id('search-threads').height(40)
         .backgroundColor($r('app.color.surface_variant')).placeholderColor($r('app.color.text_tertiary'))

@@ -1,6 +1,6 @@
 import { Want } from '@kit.AbilityKit';
 
-export type LaunchAction = 'new-chat' | 'voice-input';
+export type LaunchAction = 'new-chat' | 'voice-input' | 'continue-chat';
 
 // Keep the latest explicit launch intent until both the foreground and loaded page can receive it.
 export class LaunchActions {
@@ -10,8 +10,8 @@ export class LaunchActions {
 
   static receive(want: Want): void {
     const action = want.parameters?.['tinybotAction'];
-    if (action !== 'new-chat' && action !== 'voice-input') { return; }
-    LaunchActions.pending = action === 'new-chat' ? 'new-chat' : 'voice-input';
+    if (action !== 'new-chat' && action !== 'voice-input' && action !== 'continue-chat') { return; }
+    LaunchActions.pending = action as LaunchAction;
     LaunchActions.notify();
   }
 
