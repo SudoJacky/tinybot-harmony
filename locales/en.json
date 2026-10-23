@@ -2210,5 +2210,7 @@
   "Gemini 请求或回答被拦截。": "Gemini blocked the request or response.",
   "Gemini 在结束后继续返回数据。": "Gemini returned data after completion.",
   "Gemini 回答达到输出上限、被拦截或执行未完成。": "Gemini response reached the output limit, was blocked, or did not complete.",
-  "Google Gemini 原生接口": "Native Google Gemini API"
+  "Google Gemini 原生接口": "Native Google Gemini API",
+  "后台执行已被系统或用户中止，本轮已停止。请回到应用后重试。": "Background execution was stopped by the system or user. This turn was stopped. Return to the app to retry.",
+  "未获得长时后台执行权限，本轮已停止。请保持应用在前台后重试。": "Long-running background permission is unavailable. This turn was stopped. Keep the app in the foreground to retry."
 }

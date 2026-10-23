@@ -8,6 +8,7 @@ import { LaunchActions } from '../services/LaunchActions';
 import { DeveloperDiagnostics } from '../services/DeveloperDiagnostics';
 import { huaweiAccount } from '../services/HuaweiAccount';
 import { hostedPrivacy } from '../services/HostedPrivacy';
+import { backgroundGeneration } from '../services/BackgroundGeneration';
 /*
  * Copyright (c) 2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -93,6 +94,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onDestroy(): void {
+    backgroundGeneration.dispose();
     hostedPrivacy.dispose();
     DeveloperDiagnostics.stop();
     Diagnostics.log('info', 'app', 'destroyed');
@@ -120,6 +122,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onForeground(): void {
+    backgroundGeneration.setForeground(true);
     hostedPrivacy.refresh();
     if (hostedPrivacy.allowed) { huaweiAccount.refresh(); DeveloperDiagnostics.setForeground(true); }
     AppStorage.setOrCreate('tinybot.foreground', true);
@@ -130,6 +133,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onBackground(): void {
+    backgroundGeneration.setForeground(false);
     DeveloperDiagnostics.setForeground(false);
     AppStorage.setOrCreate('tinybot.foreground', false);
     LaunchActions.setForeground(false);

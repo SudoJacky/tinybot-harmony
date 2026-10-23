@@ -102,6 +102,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
     '../services/AppearancePreferences': { AppearancePreferences: { initialize: noOp, refresh: noOp, activate: noOp } },
     '../services/McpOAuth': { McpOAuth: { receive: noOp } },
     '../services/LaunchActions': { LaunchActions: { receive: noOp, setForeground: noOp } },
+    '../services/BackgroundGeneration': { backgroundGeneration: { setForeground: noOp, dispose: noOp } },
     '../services/DeveloperDiagnostics': { DeveloperDiagnostics: { initialize() { initialized++; }, stop() { stops++; }, setForeground: noOp } },
     '../services/HuaweiAccount': { huaweiAccount: { refresh() { accountRefresh++; } } },
     '../services/HostedPrivacy': { hostedPrivacy }, '@kit.AbilityKit': { UIAbility: class {} }
