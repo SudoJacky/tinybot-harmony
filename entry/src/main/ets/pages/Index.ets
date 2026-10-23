@@ -51,6 +51,9 @@ import { OnboardingPreferences } from '../services/OnboardingPreferences';
 import { HuaweiAccount, huaweiAccount } from '../services/HuaweiAccount';
 import { HuaweiAccountPanel } from '../views/HuaweiAccountPanel';
 import { HostedPrivacy, hostedPrivacy } from '../services/HostedPrivacy';
+import { announcements } from '../services/Announcements';
+import { AnnouncementDialog } from '../views/AnnouncementDialog';
+import { Diagnostics } from '../model/Diagnostics';
 
 const DRAWER_MAX_WIDTH: number = 340;
 const CHAT_HEADER_HEIGHT: number = 56;
@@ -60,6 +63,7 @@ const CHAT_HEADER_HEIGHT: number = 56;
 struct Index {
   @State private privacy: HostedPrivacy = hostedPrivacy;
   @StorageProp('tinybot.privacy.allowed') @Watch('privacyChanged') private privacyAllowed: boolean = false;
+  @StorageProp('tinybot.foreground') @Watch('offerAnnouncement') private foreground: boolean = false;
   @State private exportingImage: boolean = false;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
@@ -78,8 +82,9 @@ struct Index {
   private session?: SessionService;
   @State private approval: ToolApproval = new ToolApproval();
   @State private browser: BrowserSession = new BrowserSession();
-  @State private browserExpanded: boolean = false;
-  @State private showToolScope: boolean = false;
+  @State @Watch('offerAnnouncement') private browserExpanded: boolean = false;
+  @State @Watch('offerAnnouncement') private showToolScope: boolean = false;
+  private announcementDialog?: CustomDialogController;
   private receiving: boolean = false;
   private ratingOpen: boolean = false;
   private unsubscribeLaunch?: () => void;
@@ -94,6 +99,7 @@ struct Index {
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
     if (!this.privacy.allowed) { return; }
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    announcements.checkOnStartup(context).then(() => this.offerAnnouncement());
     this.account.initialize(context).then(() => this.account.refresh());
     if (!this.session) {
       this.session = createNativeSessionService(context.filesDir, context.getApplicationContext().filesDir, this.approval, context, this.browser);
@@ -108,7 +114,37 @@ struct Index {
         this.unsubscribeLaunch = LaunchActions.subscribe(() => this.receiveLaunch());
       }
       this.offerOnboarding();
+      this.offerAnnouncement();
     });
+  }
+
+  private offerAnnouncement(): void {
+    if (!this.privacy.allowed || !this.foreground || !this.app.ready || !this.onboardingChecked ||
+      this.paths.size() > 0 || this.browserExpanded || this.showToolScope || this.ratingOpen || this.announcementDialog) { return; }
+    const item = announcements.pending();
+    if (!item) { return; }
+    try {
+      this.announcementDialog = new CustomDialogController({
+        builder: AnnouncementDialog({ announcement: item, onConfirm: () => {
+          announcements.acknowledge(item.id);
+          this.closeAnnouncement();
+        } }),
+        systemMaterial: this.appearance.surface, autoCancel: false, alignment: DialogAlignment.Center,
+        onDidAppear: () => {
+          if (!this.privacy.allowed) { this.closeAnnouncement(); return; }
+          announcements.didOffer();
+        },
+        onDidDisappear: () => { this.announcementDialog = undefined; }
+      });
+      this.announcementDialog.open();
+    } catch (error) {
+      this.announcementDialog = undefined;
+      Diagnostics.log('error', 'announcements', 'present_failed', undefined, error as Error);
+    }
+  }
+
+  private closeAnnouncement(): void {
+    this.announcementDialog?.close();
   }
 
   private onboardingPreferences(): OnboardingPreferences {
@@ -118,6 +154,7 @@ struct Index {
   private privacyChanged(): void {
     if (this.privacyAllowed) { this.onPageShow(); }
     else {
+      this.closeAnnouncement();
       this.app.stop(); this.browser.close(); this.browserExpanded = false; this.showToolScope = false;
       this.voiceRequest = ''; this.paths.clear(); this.setDrawer(false);
     }
@@ -258,6 +295,7 @@ struct Index {
   }
 
   aboutToDisappear(): void {
+    this.closeAnnouncement();
     this.unsubscribeLaunch?.(); this.unsubscribeLaunch = undefined;
     this.app.stop();
     this.app.flushDraft();
@@ -770,7 +808,7 @@ struct Index {
       backgroundEffect: { radius: 0, color: Color.Transparent }
     })
     .hideBackButton(true).titleMode(NavigationTitleMode.Mini).hideToolBar(true).mode(NavigationMode.Stack)
-    .onNavBarStateChange((visible: boolean) => { this.chatVisible = visible; })
+    .onNavBarStateChange((visible: boolean) => { this.chatVisible = visible; if (visible) { this.offerAnnouncement(); } })
     .navDestination(this.destination).width('100%').height('100%')
     // Cover both the navigation title bar and content, keeping the measured drawer mounted.
     if (this.app.ready) {

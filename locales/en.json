@@ -2210,5 +2210,9 @@
   "Gemini 请求或回答被拦截。": "Gemini blocked the request or response.",
   "Gemini 在结束后继续返回数据。": "Gemini returned data after completion.",
   "Gemini 回答达到输出上限、被拦截或执行未完成。": "Gemini response reached the output limit, was blocked, or did not complete.",
-  "Google Gemini 原生接口": "Native Google Gemini API"
+  "Google Gemini 原生接口": "Native Google Gemini API",
+  "知道了": "Got it",
+  "公告暂未开放。": "Announcements are not available yet.",
+  "公告加载失败，将在下次启动时重试。": "Could not load announcements. We will try again next time you start the app.",
+  "无法保存公告已读记录，下次启动可能再次提示。": "Could not save the read status. This announcement may appear again next time you start the app."
 }
