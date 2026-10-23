@@ -6,8 +6,11 @@ import { CredentialStore } from './CredentialStore';
 import { protocolUrl, protocolHeaders, sameCredentialScope } from './providers/WireProtocols';
 interface ListedModel { id: string; }
 interface ModelList { data: ListedModel[]; }
+interface GeminiListedModel { name: string; supportedGenerationMethods: string[]; }
+interface GeminiModelList { models?: GeminiListedModel[]; nextPageToken?: string; }
 export async function discoverModels(draft: ProviderDraft, profiles: ProviderProfile[]): Promise<string[]> {
-  const endpoint = protocolUrl(draft.protocol, draft.baseUrl, true).replace(/\/(chat\/completions|responses|messages)$/, '/models');
+  const root = protocolUrl(draft.protocol, draft.baseUrl, true);
+  const endpoint = draft.protocol === 'gemini' ? root + '/models?pageSize=1000' : root.replace(/\/(chat\/completions|responses|messages)$/, '/models');
   let key = draft.apiKey.trim();
   if (!draft.noApiKey && !key) {
     const existing = profiles.find((item) => item.id === draft.id);
@@ -19,6 +22,30 @@ export async function discoverModels(draft: ProviderDraft, profiles: ProviderPro
   const request = http.createHttp();
   try {
     const headers = protocolHeaders(draft.protocol, draft.noApiKey ? '' : key); headers['Accept'] = 'application/json';
+    if (draft.protocol === 'gemini') {
+      const ids: Set<string> = new Set<string>(); const pages: Set<string> = new Set<string>();
+      let pageToken = '';
+      do {
+        const url = endpoint + (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
+        const result = await request.request(url, { method: http.RequestMethod.GET, header: headers, usingCache: false,
+          connectTimeout: 15000, readTimeout: 30000, maxRedirects: 0, maxLimit: 1024 * 1024, expectDataType: http.HttpDataType.STRING });
+        if (result.responseCode !== 200) { throw new Error(t('模型发现 HTTP ') + result.responseCode + t('；可继续手动添加模型 ID。')); }
+        const parsed = JSON.parse(result.result as string) as GeminiModelList;
+        if (!parsed || (parsed.models !== undefined && !Array.isArray(parsed.models)) ||
+          (parsed.nextPageToken !== undefined && typeof parsed.nextPageToken !== 'string')) { throw new Error(t('服务未返回兼容的模型列表。')); }
+        for (const item of parsed.models || []) {
+          if (item && typeof item.name === 'string' && /^models\/[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(item.name) &&
+            Array.isArray(item.supportedGenerationMethods) && item.supportedGenerationMethods.includes('generateContent')) {
+            ids.add(item.name.slice(7));
+          }
+        }
+        pageToken = parsed.nextPageToken || '';
+        if (pageToken && pages.has(pageToken)) { throw new Error(t('服务未返回兼容的模型列表。')); }
+        pages.add(pageToken);
+      } while (pageToken && ids.size < 200);
+      if (!ids.size) { throw new Error(t('服务返回了空模型列表。')); }
+      return Array.from(ids).slice(0, 200);
+    }
     const result = await request.request(endpoint, { method: http.RequestMethod.GET, header: headers, usingCache: false,
       connectTimeout: 15000, readTimeout: 30000, maxRedirects: 0, maxLimit: 1024 * 1024, expectDataType: http.HttpDataType.STRING });
     if (result.responseCode !== 200) { throw new Error(t("模型发现 HTTP ") + result.responseCode + t("；可继续手动添加模型 ID。")); }

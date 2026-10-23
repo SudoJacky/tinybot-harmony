@@ -28,10 +28,9 @@ export struct ProviderEditorPanel {
   @State private modelQuery: string = '';
   private alive: boolean = true;
   private scroller: Scroller = new Scroller();
-  private protocols: string[] = ['chat-completions', 'responses', 'anthropic-messages'];
-  // Card labels stay short to fit three across; the full name shows in the caption below.
-  private protocolLabels: string[] = ['Chat Completions', 'Responses', 'Messages'];
-  private protocolLogos: Resource[] = [$r('app.media.logo_openai'), $r('app.media.logo_openai'), $r('app.media.logo_anthropic')];
+  private protocols: string[] = ['chat-completions', 'responses', 'anthropic-messages', 'gemini'];
+  private protocolLabels: string[] = ['Chat Completions', 'Responses', 'Messages', 'Gemini'];
+  private protocolLogos: Resource[] = [$r('app.media.logo_openai'), $r('app.media.logo_openai'), $r('app.media.logo_anthropic'), $r('app.media.logo_google')];
 
   aboutToAppear(): void { this.alive = true; this.modelError = this.initialModelError; }
   aboutToDisappear(): void { this.alive = false; if (this.page === 'service') { this.editor.apiKey = ''; } }
@@ -100,33 +99,35 @@ export struct ProviderEditorPanel {
   }
   private protocolHint(protocol: string): string {
     return protocol === 'chat-completions' ? t('兼容大多数 OpenAI 格式的服务') :
-      protocol === 'responses' ? t('OpenAI 新一代接口') : t('Claude 模型使用的接口');
+      protocol === 'responses' ? t('OpenAI 新一代接口') : protocol === 'gemini' ? t('Google Gemini 原生接口') : t('Claude 模型使用的接口');
   }
-  // Three side-by-side cards with the vendor mark; the selected card takes the accent outline.
+  // Two columns keep all four protocol names readable on phone screens.
   @Builder
   protocolPicker() {
     Column({ space: Space.sm }) {
-      Row({ space: Space.sm }) {
+      Grid() {
         ForEach(this.protocols, (protocol: string, index: number) => {
-          Column({ space: 6 }) {
-            Image(this.protocolLogos[index]).width(24).height(24).objectFit(ImageFit.Contain)
-              .fillColor(this.editor.protocol === protocol ? this.appearance.accent : $r('app.color.text_secondary'))
-            Text(this.protocolLabels[index]).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(17).maxLines(2).textAlign(TextAlign.Center)
-              .fontWeight(this.editor.protocol === protocol ? FontWeight.Medium : FontWeight.Normal)
-              .fontColor(this.editor.protocol === protocol ? $r('app.color.text_primary') : $r('app.color.text_secondary'))
+          GridItem() {
+            Column({ space: 6 }) {
+              Image(this.protocolLogos[index]).width(24).height(24).objectFit(ImageFit.Contain)
+                .fillColor(this.editor.protocol === protocol ? this.appearance.accent : $r('app.color.text_secondary'))
+              Text(this.protocolLabels[index]).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(17).maxLines(2).textAlign(TextAlign.Center)
+                .fontWeight(this.editor.protocol === protocol ? FontWeight.Medium : FontWeight.Normal)
+                .fontColor(this.editor.protocol === protocol ? $r('app.color.text_primary') : $r('app.color.text_secondary'))
+            }
+            .id('provider-protocol-' + protocol).width('100%').height('100%')
+            .justifyContent(FlexAlign.Center).padding({ left: 6, right: 6, top: 10, bottom: 10 })
+            .borderRadius(Radius.md)
+            .backgroundColor(this.editor.protocol === protocol ? this.appearance.accentTint : $r('app.color.surface_variant'))
+            .border({ width: 1.5, color: this.editor.protocol === protocol ? this.appearance.accent : Color.Transparent })
+            .animation({ duration: Motion.fast, curve: Motion.standard })
+            .clickEffect(Motion.press)
+            .accessibilityGroup(true)
+            .accessibilityText(protocolName(protocol) + (this.editor.protocol === protocol ? t("，已选中") : ''))
+            .onClick(() => { this.editor.changeProtocol(protocol); })
           }
-          .id('provider-protocol-' + protocol).layoutWeight(1).constraintSize({ minHeight: 76 })
-          .justifyContent(FlexAlign.Center).padding({ left: 6, right: 6, top: 10, bottom: 10 })
-          .borderRadius(Radius.md)
-          .backgroundColor(this.editor.protocol === protocol ? this.appearance.accentTint : $r('app.color.surface_variant'))
-          .border({ width: 1.5, color: this.editor.protocol === protocol ? this.appearance.accent : Color.Transparent })
-          .animation({ duration: Motion.fast, curve: Motion.standard })
-          .clickEffect(Motion.press)
-          .accessibilityGroup(true)
-          .accessibilityText(protocolName(protocol) + (this.editor.protocol === protocol ? t("，已选中") : ''))
-          .onClick(() => { this.editor.changeProtocol(protocol); })
         }, (protocol: string) => protocol)
-      }.width('100%').alignItems(VerticalAlign.Top)
+      }.width('100%').height(164).columnsTemplate('1fr 1fr').rowsTemplate('1fr 1fr').columnsGap(Space.sm).rowsGap(Space.sm)
       Text(protocolName(this.editor.protocol) + ' · ' + this.protocolHint(this.editor.protocol)).fontFamily(this.appearance.fontFamily)
         .fontSize(12).lineHeight(18).fontColor($r('app.color.text_secondary')).width('100%')
     }.width('100%')

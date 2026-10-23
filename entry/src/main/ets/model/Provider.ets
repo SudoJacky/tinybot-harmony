@@ -50,6 +50,9 @@ export function builtinProviderInfos(): ProviderInfo[] {
     { id: 'openai-responses', name: 'OpenAI Responses', protocol: 'responses',
       defaultBaseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4.1', models: ['gpt-4.1'],
       apiKeyUrl: 'https://platform.openai.com/api-keys' },
+    { id: 'google', name: 'Google Gemini', protocol: 'gemini',
+      defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta', defaultModel: '', models: [],
+      apiKeyUrl: 'https://aistudio.google.com/apikey' },
     { id: 'anthropic', name: 'Anthropic', protocol: 'anthropic-messages', promptCaching: true,
       defaultBaseUrl: 'https://api.anthropic.com/v1', defaultModel: '', models: [],
       apiKeyUrl: 'https://platform.claude.com/settings/keys' }

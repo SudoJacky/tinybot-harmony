@@ -3,6 +3,7 @@ import { FileDiff } from './FileDiff';
 import { ToolFailure, ToolResultError } from './ToolFailure';
 import { TurnFileChange } from './TurnFileChanges';
 import { AnthropicContentBlock, validateAnthropicContent } from './AnthropicContent';
+import { GeminiPart, validateGeminiContent } from './GeminiContent';
 import { Attachment, validateAttachments } from './Productivity';
 import { RequestUsage } from './Usage';
 import { PendingInput, validatePendingInput } from './PendingInput';
@@ -84,6 +85,7 @@ export function toolSchemas(tools: ToolDefinition[]): ToolDefinition[] {
 }
 
 export interface ModelMessage {
+  geminiContent?: GeminiPart[];
   runtimeContext?: boolean;
   previewScreenshot?: boolean;
   anthropicContent?: AnthropicContentBlock[];
@@ -97,6 +99,7 @@ export interface ModelMessage {
 }
 
 export interface ModelTurn {
+  geminiContent?: GeminiPart[];
   anthropicContent?: AnthropicContentBlock[];
   usage?: RequestUsage;
   content: string;
@@ -137,6 +140,7 @@ export function migrateWebIcons(steps: AgentStep[]): void {
 
 export interface RequestRetry { attempt: number; delayMs: number; code: string; waiting: boolean; }
 export interface AgentStep {
+  geminiContent?: GeminiPart[];
   // App-owned input snapshot, committed before the request and replayed unchanged.
   runtimeContext?: string;
   retries?: RequestRetry[];
@@ -186,7 +190,7 @@ export function stepMessages(step: AgentStep, includeSteering: boolean = true): 
   const prefix = stepInputs(step, includeSteering);
   if (step.requestError) { return prefix; }
   const result: ModelMessage[] = [{
-    role: 'assistant', content: step.content, reasoningContent: step.reasoningContent, anthropicContent: step.anthropicContent,
+    role: 'assistant', content: step.content, reasoningContent: step.reasoningContent, anthropicContent: step.anthropicContent, geminiContent: step.geminiContent,
     toolCalls: step.tools.length ? step.tools.map((tool: ToolExecution) => tool.call) : undefined
   }];
   for (const tool of step.tools) {
@@ -239,6 +243,7 @@ export function validateSteps(steps: AgentStep[]): void {
   const ids = new Set<string>();
   const inputIds = new Set<string>();
   for (const step of steps) {
+    if (step?.geminiContent !== undefined) validateGeminiContent(step.geminiContent);
     if (step?.anthropicContent !== undefined) validateAnthropicContent(step.anthropicContent);
     if (step?.retries !== undefined && (!Array.isArray(step.retries) || step.retries.length > 2 || step.retries.some((retry, index) =>
       !retry || retry.attempt !== index + 1 || ![1000, 2000].includes(retry.delayMs) || typeof retry.code !== 'string' || retry.code.length > 40 || typeof retry.waiting !== 'boolean'))) {

@@ -29,6 +29,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Browser permission, takeover and runtime pause
 & $nodePath (Join-Path $projectPath 'scripts/test-browser-annotation.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Browser annotation geometry, export and image delivery tests failed.' }
 $env:DEVECO_STUDIO_HOME = $StudioPath
+& $nodePath (Join-Path $projectPath 'scripts/test-gemini.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Gemini protocol and signed tool loop tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-code-highlight.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Markdown code highlighting tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-stream-reveal.cjs')

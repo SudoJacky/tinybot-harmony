@@ -161,6 +161,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
       step.content = response.content;
       step.reasoningContent = response.reasoningContent;
       step.anthropicContent = response.anthropicContent;
+      step.geminiContent = response.geminiContent;
       step.usage = response.usage;
       turn.content = turn.steps.filter((item) => !item.requestError).map((item: AgentStep) => item.content).filter((content: string) => content.length > 0).join('\n\n');
       validateToolCalls(response.toolCalls);
