@@ -104,6 +104,10 @@ Markdown 导出、备份导出与诊断导出都不会携带 API 密钥；模型
 
 调试包在 entry 的 `module.json5` 预置 `appgallery_privacy_hosted` 和隐私政策 HTTPS 地址，使用官方 debug 模拟接入方式。正式分发的托管配置以应用市场为准，用户协议不设置托管 metadata。真机必须能正常访问应用市场；首次安装后托管信息可能尚未就绪，查询失败不放行业务。此能力不支持模拟器。
 
+模拟器使用独立的本地调试同意流程：仅当构建生成的 `DEBUG` 为 `true`、`BUILD_MODE_NAME` 为 `debug`，且系统 `deviceInfo.productModel` 为 `emulator` 时启用。启动页展示调试隐私说明和政策查看入口，明确点击“同意并进入调试”才初始化业务；退出则不进入。该同意只在本次运行内有效，冷启动需重新确认，撤回会关闭业务并退出；不保存到磁盘，也不读写 AppGallery 签署记录。模拟器查看政策使用包内 metadata 的 HTTPS 地址。
+
+真机 Debug 包及所有 Release 包继续使用系统托管流程，接口失败时不会自动放行。模拟器 Debug 同意不代表完成了系统隐私授权，完整托管流程仍须在真机或云真机验证；在线调试请使用测试数据。
+
 官方说明：[隐私管理服务](https://developer.huawei.com/consumer/cn/doc/doccenter-capabilities/store-privacy)。
 
 ## 用户可以控制的范围

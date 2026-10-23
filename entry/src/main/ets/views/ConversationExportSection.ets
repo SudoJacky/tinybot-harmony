@@ -71,12 +71,11 @@ export struct ConversationExportSection {
       } else if (this.section.kind === 'title') {
         Row({ space: 10 }) {
           Image($r('app.media.tinybot')).syncLoad(true).width(32).height(32)
-          Column({ space: 2 }) {
-            Text('Tinybot').fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
-            Text(this.section.text).fontFamily(this.appearance.fontFamily).fontSize(21).lineHeight(29)
-              .fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary')).width('100%')
-          }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-        }.width('100%').padding({ top: 14, bottom: 20 })
+          Text('Tinybot').fontFamily(this.appearance.fontFamily).fontSize(23).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary'))
+        }.width('100%').padding({ top: 20, bottom: 18 })
+        Text(this.section.text).fontFamily(this.appearance.fontFamily).fontSize(15).lineHeight(22)
+          .fontColor($r('app.color.text_secondary')).width('100%').padding({ bottom: 16 })
         Divider().color($r('app.color.divider'))
       } else if (this.section.kind === 'role' || this.section.kind === 'footer') {
         Text(this.section.text).fontFamily(this.appearance.fontFamily).fontSize(this.textSize()).lineHeight(this.textSize() * 1.65)

@@ -1,5 +1,5 @@
 import { BUILTIN_SKILL_DOCUMENTS, BuiltinSkillDocument } from './BuiltinSkillCatalog';
-import { ExtensionSettings, MAX_SKILLS, MAX_SKILL_TOTAL, SkillData, SkillFile, parseSkill, validateExtensions } from './Skills';
+import { ExtensionSettings, MAX_SKILL_TOTAL, SkillData, SkillFile, parseSkill, validateExtensions } from './Skills';
 
 // Called on the detached startup snapshot. Persist the installation record with the documents.
 // Editing, disabling, renaming or deleting a seeded Skill must survive subsequent starts.
@@ -14,7 +14,7 @@ export function seedBuiltinSkills(settings: ExtensionSettings): boolean {
     if (!settings.skills.some((skill) => skill.name === entry.name)) {
       const size = entry.document.length + entry.files.reduce((sum, file) => sum + file.content.length, 0);
       // Leave pending entries available for a later start when the user has freed capacity.
-      if (settings.skills.length >= MAX_SKILLS || total + size > MAX_SKILL_TOTAL) { continue; }
+      if (total + size > MAX_SKILL_TOTAL) { continue; }
       const skill = parseSkill(entry.document);
       skill.files = entry.files.map((file): SkillFile => ({ path: file.path, content: file.content }));
       settings.skills.push(skill); total += size;

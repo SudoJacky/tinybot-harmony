@@ -117,6 +117,13 @@ test('shortcut delivery waits for foreground and subscriber; invalid wants and r
   LaunchActions.receive({ parameters: { tinybotAction: 'new-chat' } });
   const detach = LaunchActions.subscribe(() => received.push(LaunchActions.take()));
   assert.equal(received.length, 3); detach(); LaunchActions.setForeground(false);
+  LaunchActions.receive({ parameters: { tinybotAction: 'continue-chat' } });
+  assert.equal(LaunchActions.take(), undefined, 'Cold-start card intent waits for foreground');
+  LaunchActions.setForeground(true);
+  const stop = LaunchActions.subscribe(() => received.push(LaunchActions.take()));
+  assert.equal(received.at(-1), 'continue-chat');
+  assert.equal(LaunchActions.take(), undefined, 'Card intent is consumed exactly once');
+  stop(); LaunchActions.setForeground(false);
 });
 (async () => {
   for (const { name, fn } of tests) {

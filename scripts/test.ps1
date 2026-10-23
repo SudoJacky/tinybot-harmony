@@ -89,6 +89,10 @@ if ($LASTEXITCODE -ne 0) { throw 'Tool detail presentation tests failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Window viewport integration tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-answer-speech-native.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Answer speech and launch shortcut tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-launch-actions-renderer.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Desktop service card and launch action renderer tests failed. Build the app first.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-conversation-share.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Conversation sharing tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-team-toggle.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Team mode persistence and projection tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-custom-tools.cjs')

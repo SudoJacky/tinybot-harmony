@@ -4,7 +4,7 @@
 
 ## 版本与产物
 
-当前版本线：`1.0.3` / `versionCode=1000003`，包名 `com.sudojacky.tinybot`，设备类型 `phone`，最低与目标 HarmonyOS API 26，发布包仅 `arm64-v8a`（模拟器使用单独构建的调试包，不随正式包分发）。
+当前版本线：`1.0.5` / `versionCode=1000005`，包名 `com.sudojacky.tinybot`，设备类型 `phone`，最低与目标 HarmonyOS API 26，发布包仅 `arm64-v8a`（模拟器使用单独构建的调试包，不随正式包分发）。
 
 运行准备脚本后生成独立目录与 ZIP：
 
@@ -26,6 +26,8 @@ powershell -ExecutionPolicy Bypass -File scripts\prepare-distribution.ps1 -Studi
 | `package-info.json`、`SHA256SUMS.txt` | 从实际包读取的元数据、大小、原生 Build ID 与 SHA-256 |
 
 脚本先做 ArkTS 检查，再构建 Release APP，验证版本、`app.debug=false`、包内容、arm64 沙箱库与符号 Build ID，最后产出目录和 ZIP。已有输出不覆盖；可用 `-OutputDirectory` 指定新目录。`-SkipBuild` 仅打包既有产物，仍校验结构与版本，但不能证明包含最新代码。
+
+当前独立 ArkTS 检查器可能无法解析构建生成的 `BuildProfile` 模块；v1.0.5 的完整 Debug / Release 构建可正常解析。遇到该错误时保留错误记录，先用 `devecocli build --product default --build-mode release` 完成真实构建与包检查，再对本次产物使用 `prepare-distribution.ps1 -SkipBuild` 整理资料；不要复用旧版本产物或放宽隐私授权条件。此方式不代表独立检查器通过。
 
 ## 签名与上传
 

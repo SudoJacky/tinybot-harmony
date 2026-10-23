@@ -1,5 +1,11 @@
 {
   "string": [
+    { "name": "widget_name", "value": "Tiny 快捷卡片" },
+    { "name": "widget_description", "value": "新建对话、打开语音输入，或继续上次对话。" },
+    { "name": "widget_greeting", "value": "今天想做点什么？" },
+    { "name": "widget_greeting_small", "value": "想聊点什么？" },
+    { "name": "widget_new_chat", "value": "新建对话" },
+    { "name": "widget_continue", "value": "继续上次对话" },
     { "name": "shortcut_new_chat", "value": "新对话" },
     { "name": "shortcut_voice_input", "value": "语音输入" },
     { "name": "microphone_reason", "value": "用于将你说的话转换为消息草稿中的文字" },

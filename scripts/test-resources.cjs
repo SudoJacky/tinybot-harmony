@@ -116,20 +116,27 @@ async function main() {
   assert.equal(collision.enabled, false); assert.equal(builtinSkillInfo(collision), undefined);
   assert.equal(legacy.webEnabled, false); assert.equal(legacy.browserPolicy, 'disabled');
   assert.equal(seedBuiltinSkills(legacy), false);
-  const full = { webEnabled: true, skills: Array.from({ length: 20 }, (_, i) => parseSkill(document('user-' + i))) };
-  assert.equal(seedBuiltinSkills(full), false); assert.equal(full.skills.length, 20);
-  full.skills.pop(); assert.equal(seedBuiltinSkills(full), true); assert.equal(full.skills.length, 20);
+  const manyData = seed();
+  manyData.extensions = { webEnabled: true, skills: Array.from({ length: 20 }, (_, i) => parseSkill(document('user-' + i))) };
+  const many = await fixture(manyData);
+  assert.equal(many.session.snapshot().extensions.skills.length, 20 + bundledNames.length);
+  assert.equal(await many.session.saveSkill('', document('extra-skill'), []), true);
+  const reloadedMany = await fixture(await many.repo.load());
+  assert.equal(reloadedMany.session.snapshot().extensions.skills.length, 21 + bundledNames.length);
+  const extra = JSON.parse(await invoke(new SkillTools(reloadedMany.session.snapshot().extensions.skills), 'read_skill', { name: 'extra-skill' }));
+  assert.equal(extra.content, document('extra-skill'));
   const crowded = { webEnabled: true, skills: Array.from({ length: 16 }, (_, i) => {
     const item = parseSkill(document('large-' + i)); item.files = [{ path: 'reference.txt', content: 'x'.repeat(32000 - item.document.length) }]; return item;
   }) };
   validateExtensions(crowded); assert.equal(seedBuiltinSkills(crowded), false);
+  assert.throws(() => saveSkillCandidate(crowded, '', document('over-budget'), []), /512000/);
   const unavailable = await fixture(seed(), async () => { throw Error('builtin disk full'); });
   assert.equal(unavailable.session.state.ready, false); assert.match(unavailable.session.state.error, /builtin disk full/);
   assert.equal((await unavailable.repo.load()).extensions, undefined);
   const retried = await fixture(await unavailable.repo.load());
   assert.equal(retried.session.snapshot().extensions.skills.length, bundledNames.length);
   assert.throws(() => validateExtensions({ webEnabled: true, skills: [], seededBuiltinSkills: ['../escape'] }));
-  console.log('PASS upgrades preserve same-name user Skills and network settings, defer at capacity, and retry failed startup persistence');
+  console.log('PASS Skills exceed 20 through startup/save/reload/read, retain the text budget, preserve user settings and retry failed startup persistence');
 
   for (const bad of [null, [], {}, { action:'save', name:'x', url:'https://x', auth:'bearer', token:'SECRET' }, { action:'remove' }, {action:'test',id:'x',url:'https://x'}]) assert.throws(() => parseMcpRequest(JSON.stringify(bad)));
   for (const bad of [{action:'create',name:'overwrite',document:document()}, {action:'update',name:'x'}, {action:'install',document:document()}]) assert.throws(() => parseSkillRequest(JSON.stringify(bad)));

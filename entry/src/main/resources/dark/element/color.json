@@ -1,5 +1,8 @@
 {
   "color": [
+    { "name": "widget_background", "value": "#1D2824" },
+    { "name": "widget_tint", "value": "#27342F" },
+    { "name": "widget_mascot_outline", "value": "#52645A" },
     { "name": "tiny_coral", "value": "#D97B5B" },
     { "name": "code_keyword", "value": "#D6A8EE" },
     { "name": "code_string", "value": "#A2D6AA" },
