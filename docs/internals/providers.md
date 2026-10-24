@@ -122,7 +122,7 @@ API Key 保存在系统 Asset Store，写入属性为 `DEVICE_UNLOCKED` 且 `Syn
 
 - `stream: true`；有工具时传 `tools` 与 `tool_choice: 'auto'`，无工具时不传。
 - 只有调用方显式给出 `maxOutputTokens` 才写 `max_tokens`，正常聊天不主动设置输出上限。
-- 有图片时 `content` 转为 `[{type:'text'}, {type:'image_url'}]` 数组，否则保持字符串。
+- 有图片时 `content` 转为内容块数组，仅在正文非空时添加 `text` 块，再按顺序添加 `image_url` 块；纯图片消息不附带文本块。Responses 对 `input_text` 与 `input_image` 采用相同规则。无图片时保持字符串。
 - `reasoning_content` 仅在 `replayReasoning` 为真且角色为 assistant 时回传；OpenAI 与 Ollama 预设关闭该行为。
 - `requestUsage !== false` 时附加 `stream_options: { include_usage: true }`。
 

@@ -87,7 +87,8 @@ export function responsesRequest(model: string, messages: ModelMessage[], tools:
     } else {
       if (message.role !== 'user' && message.role !== 'assistant') { throw new Error(t("不支持的消息角色。")); }
       if ((message.images || []).length > 0) {
-        const content: ResponsesContent[] = [{ type: 'input_text', text: message.content }];
+        const content: ResponsesContent[] = [];
+        if (message.content.length > 0) { content.push({ type: 'input_text', text: message.content }); }
         for (const url of message.images || []) { content.push({ type: 'input_image', image_url: url }); }
         input.push({ role: message.role, content: content });
       } else if (message.content.length > 0) { input.push({ role: message.role, content: message.content }); }

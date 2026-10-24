@@ -3,6 +3,7 @@ import { Attachment, PromptTemplate, defaultProductivity, expandTemplate, memory
 import { markdownBlocks, markdownSpans } from '../main/ets/model/Markdown';
 import { chatRequest } from '../main/ets/services/providers/ChatCompletionsProtocol';
 import { responsesRequest, anthropicRequest } from '../main/ets/services/providers/WireProtocols';
+import { geminiRequest } from '../main/ets/services/providers/GeminiProtocol';
 import { ModelMessage } from '../main/ets/model/Agent';
 import { estimateContextTokens } from '../main/ets/model/ConversationContext';
 import { mcpResponse } from '../main/ets/services/McpClient';
@@ -41,6 +42,19 @@ export default function productivityTests(): void {
       expect(anthropic.includes('"media_type":"image/jpeg"')).assertTrue();
       expect(anthropic.includes('"data":"YQ=="')).assertTrue();
       expect(messages[0].content).assertEqual('describe');
+    });
+    it('encodesImageOnlyMessagesWithoutTextBlocksForAllProtocols', 0, () => {
+      const url = 'data:image/jpeg;base64,YQ==';
+      const messages: ModelMessage[] = [{ role: 'user', content: '', images: [url] }];
+      expect(JSON.stringify(chatRequest('vision', messages, []).messages[0].content))
+        .assertEqual('[{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,YQ=="}}]');
+      expect(JSON.stringify(responsesRequest('vision', messages, []).input[0].content))
+        .assertEqual('[{"type":"input_image","image_url":"data:image/jpeg;base64,YQ=="}]');
+      expect(JSON.stringify(anthropicRequest('vision', messages, []).messages[0].content))
+        .assertEqual('[{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"YQ=="}}]');
+      expect(JSON.stringify(geminiRequest(messages, []).contents[0].parts))
+        .assertEqual('[{"inlineData":{"mimeType":"image/jpeg","data":"YQ=="}}]');
+      expect(messages[0].content).assertEqual('');
     });
     it('budgetsImageAndTextAttachments', 0, () => {
       const messages: ModelMessage[] = [{ role: 'user', content: 'test' }];
