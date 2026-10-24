@@ -72,7 +72,7 @@ Hypium `ProjectFolders` 覆盖共享文件夹名称、数量、URI 去重、加�
 | 脚本 | 场景 |
 | --- | --- |
 | `test-productivity-native.cjs` | 原生文件迁移、云备份、MCP 传输与确认流程；也可用 `DEVECO_STUDIO_HOME` 指定 SDK |
-| `test-release-models.cjs` | Release 混淆产物的 Ability 初始化、画板全局上下文与模型兼容性 |
+| `test-release-models.cjs` | Release 混淆产物的 Ability 初始化、画板全局上下文、画板动态加载/显示/再次打开与模型兼容性 |
 | `test-send-motion.cjs` | 发送动效的编译后生命周期与坐标换算 |
 | `test-thinking-motion.cjs` | 思考状态循环、交叉渐变与离屏暂停 |
 | `test-project-tree.cjs` | 侧栏项目分组、普通聊天、空项目、同名项目、置顶与归档 |
