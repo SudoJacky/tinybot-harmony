@@ -653,7 +653,7 @@ export class SessionService {
     if (text.length === 0 && (this.active.attachments || []).length === 0 && !(this.active.references || []).length) { return; }
     const threadId = this.active.id;
     if ((this.resources.authorizeGeneration && !await this.authorizeGeneration()) || !this.canMutate || this.active.id !== threadId || (this.active.draft || '').trim() !== text) { return; }
-    await this.runTasks(text || ((this.active.references || []).length ? t('请参考引用的会话。') : t('请分析附件。')));
+    await this.runTasks(text);
   }
   private async authorizeGeneration(): Promise<boolean> {
     try { await this.resources.authorizeGeneration?.(); return true; }
@@ -738,7 +738,7 @@ export class SessionService {
   private async runTask(thread: ThreadData, text: string, queuedId?: string): Promise<boolean> {
     const attachments = queuedId ? thread.pendingInputs?.find((item) => item.id === queuedId)?.attachments || [] : thread.attachments || [];
     const command = teamCommand(text);
-    if (command !== undefined) { text = command || t('请分析附件。'); }
+    if (command !== undefined) { text = command; }
     const options = this.data.productivity?.options || defaultAssistantOptions();
     const reference = thread.modelRef ? routeModel(options, text, attachments.concat(...thread.messages.map((item) =>
       (item.role === 'user' ? item.attachments || [] : []).concat(...(item.steps || []).map((step) => step.steering?.attachments || [])))).some((item) => item.mime.startsWith('image/')), thread.modelRef) : undefined;
@@ -763,8 +763,8 @@ export class SessionService {
       attachments: attachments, references: queuedId ? [] : thread.references };
     if (!queuedId) { thread.attachments = []; thread.references = []; }
     const answer: MessageData = { id: this.resources.createId(), role: 'assistant', content: '', status: 'generating', error: '', modelRef: reference };
-    const generateTitle = shouldGenerateTitle(thread);
-    if (thread.messages.length === 0 && !thread.titleEdited) { thread.title = titleCharacters(text.replace(/\s+/g, ' '), 32); }
+    const generateTitle = text.length > 0 && shouldGenerateTitle(thread);
+    if (text.length > 0 && thread.messages.length === 0 && !thread.titleEdited) { thread.title = titleCharacters(text.replace(/\s+/g, ' '), 32); }
     const fallbackTitle = thread.title;
     // Team catalogs must see attachments after they move from the composer to history.
     thread.messages = thread.messages.concat([user, answer]);

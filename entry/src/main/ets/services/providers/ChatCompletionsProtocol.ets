@@ -43,7 +43,8 @@ export function chatRequest(model: string, messages: ModelMessage[], tools: Tool
     max_tokens: maxOutputTokens,
     tool_choice: tools.length > 0 ? 'auto' : undefined,
     messages: messages.map((message: ModelMessage): ChatWireMessage => {
-      const content: ChatContent[] = [{ type: 'text', text: message.content }];
+      const content: ChatContent[] = [];
+      if (message.content.length > 0) { content.push({ type: 'text', text: message.content }); }
       for (const url of message.images || []) { content.push({ type: 'image_url', image_url: { url: url } }); }
       return { role: message.role, content: (message.images || []).length > 0 ? content : message.content,
         tool_calls: message.toolCalls, tool_call_id: message.toolCallId,

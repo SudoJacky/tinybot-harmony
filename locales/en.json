@@ -2235,5 +2235,7 @@
   "暂无可分享的正文": "No message body to share",
   "附件": "Attachments",
   "1.0.5 · 2026-10-23": "1.0.5 · 2026-10-23",
-  "新增桌面服务卡片和原生 Gemini API。统一分享会话入口，可选择消息、预览图片后保存或分享，仅保留正文与 AI 声明。优化在线公告、新对话操作，移除固定的 Skill 数量限制，并增加仅供 Debug 模拟器使用的隐私调试流程。": "Added home screen cards and native Gemini API support. Share selected message bodies as Markdown or preview an image before saving or sharing, with the AI notice retained. Improved announcements and new-chat actions, removed the fixed Skill count limit, and added an explicit privacy flow for Debug emulators only."
+  "新增桌面服务卡片和原生 Gemini API。统一分享会话入口，可选择消息、预览图片后保存或分享，仅保留正文与 AI 声明。优化在线公告、新对话操作，移除固定的 Skill 数量限制，并增加仅供 Debug 模拟器使用的隐私调试流程。": "Added home screen cards and native Gemini API support. Share selected message bodies as Markdown or preview an image before saving or sharing, with the AI notice retained. Improved announcements and new-chat actions, removed the fixed Skill count limit, and added an explicit privacy flow for Debug emulators only.",
+  "1.0.6 · 2026-10-24": "1.0.6 · 2026-10-24",
+  "修复 Release 版本画板无法打开的问题。仅发送图片、附件或会话引用时保留空正文，不自动补充提示语；纯图片请求不附带空文本块，并避免空正文触发标题生成。": "Fix the drawing board failing to open in Release builds. Image-, attachment-, and reference-only messages keep an empty body without an automatic prompt. Image-only requests omit empty text blocks, and empty input does not trigger title generation."
 }

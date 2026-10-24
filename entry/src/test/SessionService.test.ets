@@ -954,16 +954,42 @@ export default function sessionServiceTests(): void {
       expect(active(f.session.snapshot()).messages[1].modelRef?.modelId).assertEqual('deep');
     });
     it('sendsAttachmentsWithoutTextAndRetainsThemForHistory', 0, async () => {
-      const f = new Fixture(); await f.session.initialize();
-      const attachment: Attachment = { id: 'photo', name: 'photo', path: 'photo.jpg', mime: 'image/jpeg', size: 12 };
-      expect(await f.session.setAttachments([attachment])).assertTrue();
-      await f.session.send();
+      for (const draft of ['', '/team', '@team']) {
+        const f = new Fixture(titleSeed()); await f.session.initialize();
+        const attachment: Attachment = { id: 'photo', name: 'photo', path: 'photo.jpg', mime: 'image/jpeg', size: 12 };
+        expect(await f.session.setAttachments([attachment])).assertTrue();
+        f.session.setDraft(draft); await f.session.send();
+        expect(f.provider.requests.length).assertEqual(1);
+        expect(f.provider.requests[0].messages[1].content).assertEqual('');
+        expect(f.provider.requests[0].messages[1].attachments?.[0].id).assertEqual('photo');
+        expect(active(f.session.snapshot()).attachments?.length).assertEqual(0);
+        expect(active(f.session.snapshot()).messages[0].content).assertEqual('');
+        expect(active(f.session.snapshot()).messages[0].attachments?.length).assertEqual(1);
+        const restored = parseAppData(f.repository.saved);
+        expect(active(restored).title).assertEqual('新对话');
+        expect(active(restored).messages[0].content).assertEqual('');
+        expect(active(restored).messages[0].attachments?.[0].path).assertEqual('photo.jpg');
+        const reopened = new Fixture(restored); await reopened.session.initialize();
+        await reopened.session.restoreMessageDraft(active(restored).messages[0].id);
+        expect(active(reopened.session.snapshot()).draft).assertEqual('');
+        expect(active(reopened.session.snapshot()).attachments?.[0].id).assertEqual('photo');
+        reopened.session.setDraft('请分析附件。'); await reopened.session.send();
+        const submitted = reopened.provider.requests[0].messages.filter((message) => message.role === 'user' && !message.runtimeContext);
+        expect(submitted[submitted.length - 1].content).assertEqual('请分析附件。');
+        expect(active(reopened.session.snapshot()).messages[2].content).assertEqual('请分析附件。');
+      }
+    });
+    it('sendsReferencesWithoutInventingUserText', 0, async () => {
+      const data = titleSeed(); const source = historySeed().threads[0]; source.id = 'source'; data.threads.push(source);
+      const f = new Fixture(data); await f.session.initialize();
+      expect(await f.session.referenceThread('source')).assertTrue(); await f.session.send();
+      const user = active(f.session.snapshot()).messages[0];
+      expect(user.content).assertEqual(''); expect(user.references?.[0].threadId).assertEqual('source');
       expect(f.provider.requests.length).assertEqual(1);
-      expect(f.provider.requests[0].messages[1].attachments?.[0].id).assertEqual('photo');
-      expect(active(f.session.snapshot()).attachments?.length).assertEqual(0);
-      expect(active(f.session.snapshot()).messages[0].attachments?.length).assertEqual(1);
-      const restored = parseAppData(f.repository.saved);
-      expect(active(restored).messages[0].attachments?.[0].path).assertEqual('photo.jpg');
+      const sent = f.provider.requests[0].messages.find((message) => message.role === 'user' && !message.runtimeContext);
+      expect(sent?.content.includes('historical answer')).assertTrue();
+      expect(sent?.content.includes('请参考引用的会话。')).assertFalse();
+      expect(active(await f.repository.load()).messages[0].content).assertEqual('');
     });
     it('readsLargeComposerAttachmentsInNormalAndTeamChats', 0, async () => {
       for (const team of [false, true]) {
