@@ -7,7 +7,8 @@ const compile = source => ts.transpileModule(source, { compilerOptions: {
   module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021, experimentalDecorators: true
 } }).outputText;
 const raster = { effects: [], released: 0, fail: false };
-const image = { PixelMapFormat: {}, AlphaType: {}, createEmptyPixelMap(options) {
+// Empty canvases come from image.createPixelMapSync(), the overload that exists on API 12+.
+const image = { PixelMapFormat: {}, AlphaType: {}, createPixelMapSync(options) {
   raster.size = options.size; return { release: async () => { raster.released++; } };
 } };
 const drawing = { CapStyle: { ROUND_CAP: 2 }, Canvas: class {

@@ -2,6 +2,7 @@ import { t } from '../model/I18n';
 import { util } from '@kit.ArkTS';
 import { zlib } from '@kit.BasicServicesKit';
 import { pdfService } from '@kit.PDFKit';
+import { ApiLevel } from '../common/ApiLevel';
 interface ZipEntry { name: string; method: number; packed: number; size: number; offset: number; }
 function xmlText(xml: string): string {
   return xml.replace(/<\/(?:w:p|a:p|row)>/g, '\n').replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(x[0-9a-f]+|[0-9]+);/gi, (_match: string, value: string) => {
@@ -67,13 +68,50 @@ export async function officeText(bytes: ArrayBuffer): Promise<string> {
   if (!text.trim()) { throw new Error(t("文档没有可提取的文字。")); }
   return text.length > 31000 ? text.slice(0, 31000) + '\n[文字超过上限，以下内容未提取]' : text;
 }
+// PDFKit is a separate system module. On HarmonyOS 6.0.0(20) it is not installed at all, so the
+// pdfService namespace itself is undefined and no page API can be reached. Probing the namespace
+// is the only reliable capability check: presence of the syscap does not mean the module exists.
+let pdfModuleChecked = false;
+let pdfModuleAvailable = false;
+
+export function pdfTextAvailable(): boolean {
+  if (!pdfModuleChecked) {
+    pdfModuleChecked = true;
+    try { pdfModuleAvailable = pdfService.PdfDocument !== undefined; } catch (_) { pdfModuleAvailable = false; }
+  }
+  return pdfModuleAvailable;
+}
+
+// Called before a PDF is read or an attachment is created, so the user sees the system
+// requirement instead of an empty text copy or a failed import after the file was accepted.
+export function assertPdfTextAvailable(): void {
+  if (!pdfTextAvailable()) {
+    throw new Error(t('此系统的 PDF 组件未提供文字提取。请把 PDF 页面截图作为图片发送，或改用 Office/文本文件。'));
+  }
+}
+
+// pdfService.PdfPage.getTextContent() arrives with 6.1.0(23). On a system that has PDFKit but not
+// that method, the graphics-object listing (5.0.0(12)) exposes the same text runs through
+// TextObject.text, so extraction keeps working instead of returning an empty page.
+function pageText(page: pdfService.PdfPage): string {
+  if (ApiLevel.pdfTextContent) { return page.getTextContent(); }
+  const lines: string[] = [];
+  for (const object of page.getGraphicsObjects()) {
+    if (object.type !== pdfService.GraphicsObjectType.OBJECT_TEXT) { continue; }
+    const text = (object as pdfService.TextObject).text;
+    if (typeof text === 'string' && text.trim().length > 0) { lines.push(text); }
+  }
+  return lines.join('\n');
+}
+
 export function pdfText(path: string): string {
+  assertPdfTextAvailable();
   const document = new pdfService.PdfDocument();
   try {
     document.loadDocument(path); const count = document.getPageCount(); let text = '';
     for (let i = 0; i < Math.min(count, 100); i++) {
       const page = document.getPage(i);
-      try { text += '\n[第 ' + (i + 1) + ' 页]\n' + page.getTextContent(); } finally { page.release(); }
+      try { text += '\n[第 ' + (i + 1) + ' 页]\n' + pageText(page); } finally { page.release(); }
       if (text.length > 31000) { return text.slice(0, 31000) + '\n[文字超过上限，以下内容未提取]'; }
     }
     if (count > 100) { text += '\n[仅提取前 100 页]'; }

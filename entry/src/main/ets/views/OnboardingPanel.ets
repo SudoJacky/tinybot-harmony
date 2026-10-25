@@ -1,5 +1,6 @@
-import { KeyboardAvoidMode, uiMaterial } from '@kit.ArkUI';
+import { KeyboardAvoidMode } from '@kit.ArkUI';
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { systemMaterialAttribute } from '../common/MaterialAttributes';
 import { Motion } from '../common/Theme';
 import { Banner } from '../common/Widgets';
 import { monochromeProviderLogo, providerLogo } from '../common/ProviderBrand';
@@ -600,9 +601,9 @@ export struct OnboardingPanel {
         Toggle({ type: ToggleType.Button, isOn: false }) {
           SymbolGlyph($r('sys.symbol.chevron_left')).fontSize(20).fontColor([this.ink()])
         }
-        .id('onboarding-back').width(44).height(44).backgroundColor(Color.Transparent)
-        .padding(0).borderRadius(22).selectedColor(Color.Transparent)
-        .systemMaterial(this.appearance.control)
+        .id('onboarding-back').width(44).height(44).backgroundColor(this.appearance.controlBackground)
+        .padding(0).borderRadius(22).selectedColor(this.appearance.controlBackground)
+        .attributeModifier(systemMaterialAttribute<ToggleAttribute>(this.appearance.control))
         .accessibilityRole(AccessibilityRoleType.BUTTON)
         .accessibilityText(t('上一步')).enabled(!this.saving).onClick(() => this.move(-1))
         Text(this.sceneLabel()).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor(this.muted())
@@ -705,7 +706,7 @@ export struct OnboardingPanel {
             .borderRadius(18)
             .backgroundColor(this.selectedPreset === provider.preset ? this.brandSoft() : this.bubble())
             .selectedColor(this.brandSoft())
-            .systemMaterial(this.appearance.control)
+            .attributeModifier(systemMaterialAttribute<ToggleAttribute>(this.appearance.control))
             .border({ width: this.selectedPreset === provider.preset ? 2 : 1,
               color: this.selectedPreset === provider.preset ? this.brand() : Color.Transparent, radius: 18 })
             .accessibilityText(t('选择 {0}', [provider.name]))
@@ -749,7 +750,7 @@ export struct OnboardingPanel {
             .borderRadius(24)
             .backgroundColor(this.selectedTask === index ? this.brandSoft() : this.bubble())
             .selectedColor(this.brandSoft())
-            .systemMaterial(this.appearance.control)
+            .attributeModifier(systemMaterialAttribute<ToggleAttribute>(this.appearance.control))
             .border({ width: 1, color: this.brandInk(), radius: 24 })
             .accessibilityText(t('选择建议：{0}', [task.title]))
             .accessibilityDescription(this.selectedTask === index ? t('已选择') : task.preview)
@@ -818,7 +819,7 @@ export struct OnboardingPanel {
           .height(48).width('100%').clickEffect(this.appearance.effectStrength > 0 ? null : Motion.press)
           .backgroundColor(this.primaryAvailable() ? this.appearance.accent : this.disabledFill())
           .selectedColor(this.primaryAvailable() ? this.appearance.accent : this.disabledFill())
-          .systemMaterial(this.primaryAvailable() ? this.appearance.accentControl : uiMaterial.Material.empty)
+          .attributeModifier(systemMaterialAttribute<ToggleAttribute>(this.primaryAvailable() ? this.appearance.accentControl : undefined))
           .enabled(this.primaryAvailable())
           .accessibilityRole(AccessibilityRoleType.BUTTON)
           .accessibilityText(this.primaryLabel())

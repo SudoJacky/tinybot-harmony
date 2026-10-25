@@ -46,3 +46,4 @@ scripts/*
 !scripts/test-hosted-privacy.cjs
 !scripts/test-conversation-share.cjs
 !scripts/test-feedback.cjs
+!scripts/test-api20-compat.cjs

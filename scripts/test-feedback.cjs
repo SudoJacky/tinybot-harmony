@@ -41,27 +41,32 @@ function harness(initialToken, persisted = new Map()) {
     async write(alias, secret) { events.push('save-token'); if (failWrite) throw Error('locked'); assert.equal(secure, undefined); secure = secret; }
   }
   let created = 0, destroyed = 0;
-  const http = { RequestMethod: { GET: 'GET', POST: 'POST', DELETE: 'DELETE' }, HttpDataType: { STRING: 'STRING', ARRAY_BUFFER: 'ARRAY_BUFFER' }, createHttp() {
+  // The HTTP transport itself is covered by test-compat-http.cjs. This harness pins the contract
+  // FeedbackService depends on: a redirect-refusing exchange, the bearer header only on the
+  // origin, a JSON body for metadata and raw bytes for attachments.
+  const compat = { request: async (spec, registerAbort) => {
     created++;
-    return {
-      async request(url, options) {
-        calls.push({ url, ...options }); events.push(url.endsWith('/identity') ? 'identity' : options.method);
-        assert.equal(new URL(url).origin, 'https://sudotinybot.cn');
-        assert.equal(new URL(url).searchParams.has('token'), false);
-        assert.equal(options.usingCache, false); assert.equal(options.maxRedirects, 0);
-        assert.equal(options.header.Cookie, undefined); assert.equal(options.header.Origin, undefined);
-        if (options.method === 'POST' && !url.endsWith('/attachments')) assert.equal(options.header['Content-Type'], 'application/json');
-        if (!url.endsWith('/identity')) assert.equal(options.header.Authorization, 'Bearer ' + secure);
-        const response = responses.shift(); assert.notEqual(response, undefined, 'Unexpected request');
-        if (response instanceof Error) throw response;
-        if (typeof response === 'function') return response();
-        return response;
-      },
-      destroy() { destroyed++; }
-    };
+    calls.push({ url: spec.url, method: spec.method, header: spec.headers, extraData: spec.body,
+      expectDataType: spec.dataType === 'buffer' ? 'ARRAY_BUFFER' : 'STRING', maxRedirects: 0, usingCache: false });
+    try {
+      events.push(spec.url.endsWith('/identity') ? 'identity' : spec.method);
+      assert.equal(spec.redirect, 'refuse', 'Feedback never follows a redirect');
+      assert.equal(new URL(spec.url).origin, 'https://sudotinybot.cn');
+      assert.equal(new URL(spec.url).searchParams.has('token'), false);
+      assert.equal(spec.headers.Cookie, undefined); assert.equal(spec.headers.Origin, undefined);
+      if (spec.method === 'POST' && !spec.url.endsWith('/attachments')) assert.equal(spec.headers['Content-Type'], 'application/json');
+      if (!spec.url.endsWith('/identity')) assert.equal(spec.headers.Authorization, 'Bearer ' + secure);
+      const response = responses.shift(); assert.notEqual(response, undefined, 'Unexpected request');
+      if (response instanceof Error) throw response;
+      const value = typeof response === 'function' ? await response() : response;
+      const bytes = value.result instanceof ArrayBuffer ? value.result : new ArrayBuffer(0);
+      return { status: value.responseCode, header: value.header || {}, bytes,
+        text: spec.dataType === 'string' ? String(value.result) : '' };
+    } finally { destroyed++; }
   } };
   const { FeedbackService } = load('services/FeedbackService.ets', {
-    '@kit.ArkData': { preferences: { getPreferencesSync: () => store } }, '@kit.NetworkKit': { http },
+    '@kit.ArkData': { preferences: { getPreferencesSync: () => store } },
+    './CompatHttp': { CompatHttp: compat },
     './CredentialStore': { CredentialStore: Vault }, './FeedbackFiles': { FeedbackFiles: {
       configure() {}, read: async () => new ArrayBuffer(12), remove: async () => {}
     } }, './HostedPrivacy': { hostedPrivacy: {

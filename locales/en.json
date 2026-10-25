@@ -2345,5 +2345,11 @@
   "无法整理最近的诊断日志，请稍后重试。": "Unable to prepare recent diagnostic logs. Please try again later.",
   "附加最近日志，帮助定位问题": "Attach recent logs to help investigate",
   "已自动整理本次运行最近 15 分钟的诊断日志，普通模式仅含警告和错误。不含聊天正文、密钥或账号凭证；确认后才会随反馈上传。": "Diagnostic logs from the last 15 minutes of this app run have been prepared. Normal mode includes warnings and errors only. Chat content, keys, and account credentials are excluded. Logs are uploaded with feedback only after you confirm.",
-  "仅发送你填写的内容和所选附件，请勿包含密码、密钥或聊天隐私。最近日志仅在勾选后附加。": "Only your feedback and selected files are sent. Do not include passwords, keys, or private chats. Recent logs are attached only when selected."
+  "仅发送你填写的内容和所选附件，请勿包含密码、密钥或聊天隐私。最近日志仅在勾选后附加。": "Only your feedback and selected files are sent. Do not include passwords, keys, or private chats. Recent logs are attached only when selected.",
+  "此系统不支持": "Not supported on this system",
+  "当前系统不提供沉浸光感材质，界面使用普通配色。": "This system has no immersive material; the interface uses plain colors.",
+  "响应超过大小上限。": "The response exceeded the size limit.",
+  "无法创建空白画布，请检查可用内存。": "Unable to create an empty canvas; check available memory.",
+  "无法安装重定向校验。": "Unable to install the redirect check.",
+  "此系统的 PDF 组件未提供文字提取。请把 PDF 页面截图作为图片发送，或改用 Office/文本文件。": "This system has no PDF text extraction. Send PDF pages as images, or use an Office or text file."
 }

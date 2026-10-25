@@ -2,7 +2,17 @@
 
 使用 ArkTS + ArkUI 编写的原生 HarmonyOS 个人 AI 助手。手机直接连接用户配置的模型服务，数据保存在应用沙箱中；不依赖 Tinybot 桌面进程。
 
-最低与目标版本均为 **HarmonyOS API 26**。当前准备发布版本为 **1.0.6 / 1000006**，参阅[更新说明](docs/distribution/RELEASE-NOTES.txt)。
+最低版本为 **HarmonyOS 6.0.0（API 20）**，目标版本为 **API 26**：同一个包在 HarmonyOS 6 上使用普通界面，在 HarmonyOS 7 上保留沉浸光感材质。当前准备发布版本为 **1.0.6 / 1000006**，参阅[更新说明](docs/distribution/RELEASE-NOTES.txt)。
+
+系统能力差异（运行时会给出真实状态，不会静默降级）：
+
+| 能力 | HarmonyOS 6.0.0（API 20） | HarmonyOS 7（API 26） |
+| --- | --- | --- |
+| 沉浸光感材质 | 不提供，界面使用普通配色；外观设置显示“此系统不支持” | 保留原有材质与交互 |
+| PDF 文字提取 | 系统未提供 PDFKit 模块，导入 PDF 时明确报错并建议改用截图或 Office/文本文件 | 按原逻辑提取文字 |
+| 其余功能 | 聊天、附件、网页读取与搜索、MCP/OAuth、图片与长图导出、画板、JS 沙箱 | 同左 |
+
+网络请求在 API 20 上通过 Remote Communication Kit 关闭自动重定向，携带凭据的请求不会跟随重定向。
 
 ## 主要功能
 

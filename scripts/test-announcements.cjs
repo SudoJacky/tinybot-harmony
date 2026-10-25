@@ -32,19 +32,23 @@ const store = {
   putSync: (key, value) => working.set(key, value.slice()),
   flushSync() { if (failFlush) throw Error('disk failure'); disk = new Map(working); }
 };
-const http = { RequestMethod: { GET: 'GET' }, HttpDataType: { STRING: 'STRING' }, createHttp: () => ({
-  async request(url, options) {
-    requests++; assert.equal(url, 'https://notices.example/feed.json');
-    assert.equal(options.usingCache, false); assert.equal(options.maxRedirects, 0);
-    assert.equal(options.connectTimeout, 5000); assert.equal(options.maxLimit, 262144);
-    if (pendingResponse) return pendingResponse;
-    return result;
-  }, destroy() { destroyed++; }
-}) };
+// The transport itself is covered by test-compat-http.cjs. Here the feed logic only needs the
+// contract it depends on: one redirect-refusing GET with the 256 KiB ceiling and a text body.
+const compatHttp = { request: async spec => {
+  requests++;
+  assert.equal(spec.url, 'https://notices.example/feed.json');
+  assert.equal(spec.method, 'GET'); assert.equal(spec.redirect, 'refuse');
+  assert.equal(spec.connectTimeout, 5000); assert.equal(spec.readTimeout, 5000);
+  assert.equal(spec.maxBytes, 262144); assert.equal(spec.dataType, 'string');
+  destroyed++;
+  const response = pendingResponse ? await pendingResponse : result;
+  return { status: response.responseCode, header: {}, text: response.result, bytes: new ArrayBuffer(0) };
+} };
 const { Announcements } = load('services/Announcements.ets', {
-  '@kit.ArkData': { preferences: { getPreferencesSync: () => store } }, '@kit.NetworkKit': { http },
+  '@kit.ArkData': { preferences: { getPreferencesSync: () => store } },
   '../model/Announcement': model, '../model/Diagnostics': { Diagnostics: diagnostics },
-  '../model/I18n': { t: key => key }, './HostedPrivacy': { hostedPrivacy: privacy }
+  '../model/I18n': { t: key => key }, './HostedPrivacy': { hostedPrivacy: privacy },
+  './CompatHttp': { CompatHttp: compatHttp }
 });
 const fresh = () => new Announcements('https://notices.example/feed.json');
 const tick = () => new Promise(resolve => setImmediate(resolve));

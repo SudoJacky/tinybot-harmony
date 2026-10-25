@@ -1,7 +1,7 @@
 import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
-import { http } from '@kit.NetworkKit';
 import { CredentialStore } from './CredentialStore';
+import { CompatHttp, CompatResponse } from './CompatHttp';
 import { hostedPrivacy } from './HostedPrivacy';
 import { FeedbackFiles } from './FeedbackFiles';
 import { t } from '../model/I18n';
@@ -101,39 +101,40 @@ export class FeedbackService {
     this.token = this.unsavedToken; this.unsavedToken = '';
   }
 
-  private async exchange(path: string, bucket: string, token: string, method: http.RequestMethod, body?: string | ArrayBuffer,
-    expected: number = 200, extraHeaders: Record<string, string> = {}, binary: boolean = false): Promise<http.HttpResponse> {
+  private async exchange(path: string, bucket: string, token: string, method: string, body?: string | ArrayBuffer,
+    expected: number = 200, extraHeaders: Record<string, string> = {}, binary: boolean = false): Promise<CompatResponse> {
     hostedPrivacy.requireConsent();
     const remaining = Math.ceil(((this.cooldowns[bucket] || 0) - Date.now()) / 1000);
     if (remaining > 0) { throw new FeedbackHttpError(429, remaining); }
-    const request = http.createHttp();
     try {
       const headers: Record<string, string> = { 'Accept': 'application/json' };
       if (token) { headers['Authorization'] = 'Bearer ' + token; }
       if (body !== undefined) { headers['Content-Type'] = 'application/json'; }
       Object.keys(extraHeaders).forEach((key: string) => { headers[key] = extraHeaders[key]; });
-      const response = await request.request(BASE + path, {
-        method: method, header: headers, extraData: body, usingCache: false, maxRedirects: 0,
-        maxLimit: binary ? 5 * 1024 * 1024 : 1024 * 1024,
-        connectTimeout: 10000, readTimeout: 30000, expectDataType: binary ? http.HttpDataType.ARRAY_BUFFER : http.HttpDataType.STRING
+      // A submission and its attachments carry the feedback identity, so a redirect is refused
+      // rather than followed to another origin.
+      const response = await CompatHttp.request({
+        url: BASE + path, method: method, headers: headers,
+        body: body,
+        connectTimeout: 10000, readTimeout: 30000, maxBytes: binary ? 5 * 1024 * 1024 : 1024 * 1024,
+        dataType: binary ? 'buffer' : 'string', redirect: 'refuse'
       });
-      if (response.responseCode !== expected) {
-        const values = response.header as Record<string, string>;
-        const key = Object.keys(values).find((name: string) => name.toLowerCase() === 'retry-after');
-        const seconds = Math.max(1, Math.ceil(Number(key ? values[key] : '60') || 60));
-        if (response.responseCode === 429) { this.cooldowns[bucket] = Date.now() + seconds * 1000; }
-        throw new FeedbackHttpError(response.responseCode, seconds);
+      if (response.status !== expected) {
+        const key = Object.keys(response.header).find((name: string) => name.toLowerCase() === 'retry-after');
+        const seconds = Math.max(1, Math.ceil(Number(key ? response.header[key] : '60') || 60));
+        if (response.status === 429) { this.cooldowns[bucket] = Date.now() + seconds * 1000; }
+        throw new FeedbackHttpError(response.status, seconds);
       }
       return response;
     } catch (error) {
       if (error instanceof FeedbackHttpError) { throw error; }
       throw new Error(t('无法连接反馈服务，请检查网络后重试。'));
-    } finally { request.destroy(); }
+    }
   }
   private async request(path: string, bucket: string, token: string, body?: string, expected: number = 200): Promise<string> {
-    const response = await this.exchange(path, bucket, token, body === undefined ? http.RequestMethod.GET : http.RequestMethod.POST, body, expected);
-    if (typeof response.result !== 'string') { throw new Error(t('反馈服务返回的数据无效，请稍后刷新。')); }
-    return response.result;
+    const response = await this.exchange(path, bucket, token, body === undefined ? 'GET' : 'POST', body, expected);
+    if (!response.text) { throw new Error(t('反馈服务返回的数据无效，请稍后刷新。')); }
+    return response.text;
   }
 
   async submit(): Promise<boolean> {
@@ -261,10 +262,10 @@ export class FeedbackService {
         const file = copyUpload(original); file.state = 'uncertain'; file.error = '';
         file.beforeIds = item.attachments.map((remote: FeedbackAttachment) => remote.id);
         this.replaceUpload(file); sending = true;
-        const response = await this.exchange('/' + encodeURIComponent(item.id) + '/attachments', 'upload', this.token, http.RequestMethod.POST, bytes, 201,
+        const response = await this.exchange('/' + encodeURIComponent(item.id) + '/attachments', 'upload', this.token, 'POST', bytes, 201,
           { 'Content-Type': file.mimeType, 'X-Attachment-Kind': file.kind, 'X-File-Name': encodeURIComponent(file.filename) });
-        if (typeof response.result !== 'string') { throw new Error('Invalid attachment response'); }
-        const remote = parseFeedbackAttachment(response.result);
+        if (!response.text) { throw new Error('Invalid attachment response'); }
+        const remote = parseFeedbackAttachment(response.text);
         if (remote.kind !== file.kind || remote.filename !== file.filename.replace(/\.[^.]+$/, remote.kind === 'image' ? '.webp' : '.log')) {
           throw new Error('Mismatched attachment response');
         }
@@ -327,16 +328,16 @@ export class FeedbackService {
   }
   async attachmentBytes(item: FeedbackItem, file: FeedbackAttachment): Promise<ArrayBuffer> {
     const response = await this.exchange('/' + encodeURIComponent(item.id) + '/attachments/' + encodeURIComponent(file.id), 'query', this.token,
-      http.RequestMethod.GET, undefined, 200, { 'Accept': file.mimeType }, true);
-    if (!(response.result instanceof ArrayBuffer) || response.result.byteLength !== file.size) { throw new Error(t('反馈附件数据无效，请重新加载。')); }
-    return response.result;
+      'GET', undefined, 200, { 'Accept': file.mimeType }, true);
+    if (response.bytes.byteLength !== file.size) { throw new Error(t('反馈附件数据无效，请重新加载。')); }
+    return response.bytes;
   }
   async deleteAttachment(item: FeedbackItem, file: FeedbackAttachment): Promise<void> {
     if (this.busy) { return; }
     this.busy = true; this.error = '';
     try {
-      const response = await this.exchange('/' + encodeURIComponent(item.id) + '/attachments/' + encodeURIComponent(file.id), 'query', this.token, http.RequestMethod.DELETE);
-      const result = JSON.parse(response.result as string) as Record<string, boolean>;
+      const response = await this.exchange('/' + encodeURIComponent(item.id) + '/attachments/' + encodeURIComponent(file.id), 'query', this.token, 'DELETE');
+      const result = JSON.parse(response.text) as Record<string, boolean>;
       if (result.deleted !== true) { throw new Error('Invalid deletion response'); }
       const next = JSON.parse(JSON.stringify(item)) as FeedbackItem;
       next.attachments = item.attachments.filter((old: FeedbackAttachment) => old.id !== file.id); this.detail = next;

@@ -5,9 +5,10 @@ import { drawing } from '@kit.ArkGraphics2D';
 import { util } from '@kit.ArkTS';
 import { Attachment, validateAttachments } from '../model/Productivity';
 import { ModelMessage } from '../model/Agent';
-import { officeText, pdfText } from './DocumentText';
+import { assertPdfTextAvailable, officeText, pdfText } from './DocumentText';
 import { readUtf8File } from './TextFiles';
 import { attachmentContext } from '../model/AttachmentContext';
+import { createEmptyPixel } from './EmptyPixel';
 
 export class Attachments {
   private static root: string = '';
@@ -23,7 +24,7 @@ export class Attachments {
     const info = await pixel.getImageInfo();
     const scale = Math.min(1, 1600 / Math.max(info.size.width, info.size.height));
     if (scale < 1) { await pixel.scale(scale, scale); }
-    const opaque = image.createEmptyPixelMap({ editable: true, pixelFormat: image.PixelMapFormat.RGBA_8888,
+    const opaque = createEmptyPixel({ editable: true, pixelFormat: image.PixelMapFormat.RGBA_8888,
       alphaType: image.AlphaType.OPAQUE, size: {
         width: Math.max(1, Math.round(info.size.width * scale)), height: Math.max(1, Math.round(info.size.height * scale)) } });
     try {
@@ -56,6 +57,8 @@ export class Attachments {
     const file = await fs.open(uri, fs.OpenMode.READ_ONLY);
     try {
       const document = !photo && /\.(pdf|docx|xlsx|pptx)(?:\?|$)/i.test(uri);
+      // Reject a PDF before anything is read, copied or attached when the system has no PDFKit.
+      if (!photo && /\.pdf(?:\?|$)/i.test(uri)) { assertPdfTextAvailable(); }
       const stat = await fs.stat(file.fd);
       if (!stat.isFile()) { throw new Error(t('请选择普通文件。')); }
       if ((photo && stat.size > 20 * 1024 * 1024) || (document && stat.size > 8 * 1024 * 1024)) { throw new Error(t('图片最多 20 MB，文档最多 8 MB。')); }
