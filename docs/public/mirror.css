@@ -1,9 +1,0 @@
-/* Keep wide reference tables inside the viewport on phones. */
-@media (max-width: 959px) {
-  .VPDoc .vp-doc table {
-    display: block;
-    width: 100%;
-    max-width: 100%;
-    overflow-x: auto;
-  }
-}
