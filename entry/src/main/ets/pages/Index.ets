@@ -895,19 +895,26 @@ struct Index {
   @Builder
   header() {
     if (this.windowWidth >= 840) {
+      // The title bar has no backdrop for the API-26 light-sense material, which
+      // composites as white and erases the control fill; use the opaque control
+      // tint here and keep the material path on the phone header.
       Row({ space: 4 }) {
         if (this.workbench().historyWidth === 0) {
           IconButton({ icon: $r('sys.symbol.line_3_horizontal'), label: t('对话列表'), compId: 'open-history',
+            fill: $r('app.color.surface_variant'),
             disabled: !this.app.ready, onTap: () => this.setDrawer(true) })
         }
         Text(this.app.active.messages.length > 0 ? this.app.active.displayTitle : '').fontSize(15).fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.text_secondary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
-        Button({ type: ButtonType.Circle }) {
+        Button({ type: ButtonType.Circle, stateEffect: true }) {
           SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(19).fontColor([$r('app.color.text_secondary')])
-        }.id('workbench-chat-more').width(44).height(44).backgroundColor(Color.Transparent).accessibilityText(t('更多操作'))
+        }.id('workbench-chat-more').width(44).height(44).borderRadius(22)
+          .backgroundColor($r('app.color.surface_variant'))
+          .accessibilityText(t('更多操作'))
           .enabled(this.app.ready).bindMenu(this.moreMenu, { systemMaterial: this.appearance.surface, mask: false })
         IconButton({ icon: this.detailPaneOpen ? $r('sys.symbol.close_sidebar') : $r('sys.symbol.open_sidebar'),
           label: this.detailPaneOpen ? t('关闭侧栏') : t('打开侧栏'), compId: 'workbench-toggle-detail',
+          fill: $r('app.color.surface_variant'),
           disabled: !this.app.ready, onTap: () => this.toggleDetailPane() })
       }.width('100%').height(CHAT_HEADER_HEIGHT).padding({ left: 12, right: 12 })
         .hitTestBehavior(HitTestMode.Transparent)
