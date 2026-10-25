@@ -215,7 +215,7 @@ struct ProcessGroup {
       if (!this.richOnly) {
         ForEach(this.items(), (item: ProcessItem) => {
           if (item.tool < 0) {
-            ThinkingDisclosure({ content: this.message.stepViews[item.step]?.reasoningContent || '',
+            ThinkingDisclosure({ step: this.message.stepViews[item.step],
               disclosure: this.message.disclosures.get('thinking-' + item.step), streaming: this.thinkingNow(item.step),
               identity: this.message.id + '-' + item.step, onInspect: () => { this.message.processOpen = true; this.onInspect(); } })
           } else if (this.toolAt(item)) {

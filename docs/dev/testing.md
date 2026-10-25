@@ -70,7 +70,7 @@ hdc rport tcp:18770 tcp:18770
 | `test-preview-publication.cjs` | 预览发布集成 | 否 |
 | `test-preview-references.cjs` | 真实发布与最终引用修复、流式/停止门禁、历史兼容、快照恢复、原位静态导出和无外框样式 | 是 |
 | `test-preview-lifecycle.cjs` | 预览资源与惰性生命周期 | 是 |
-| `test-turn-workflow.cjs` | 流式时间线投影与保留的过程行 | 是 |
+| `test-turn-workflow.cjs` | 流式时间线投影、思考单行实时更新与保留的过程行 | 是 |
 | `test-resources.cjs` | 资源管理集成 | 否 |
 | `test-tool-schemas.cjs` | 用 SDK 的 JSON Schema 校验器检查工具参数、编辑必填字段与三种协议请求结构 | 否 |
 | `test-tool-discovery.cjs` | 默认完整工具及说明、稳定声明、旧发现回执兼容、权限撤销、编排保护和内部可选 BM25 检索 | 否 |
