@@ -43,7 +43,7 @@ import { MessageBubble } from './MessageBubble';
 import { ImageViewer } from './ImageViewer';
 import { InputQueuePanel } from './InputQueuePanel';
 import { ContextDetails } from './ContextDetails';
-import { Btn, Font, Motion, Radius, Space, fileSize } from '../common/Theme';
+import { Btn, Font, Motion, Radius, Space, fileSize, systemInsets } from '../common/Theme';
 import { Banner, IconBadge, IconButton } from '../common/Widgets';
 import { WindowViewport } from '../viewmodel/WindowViewport';
 import { MessageListSource } from '../viewmodel/MessageListSource';
@@ -123,6 +123,7 @@ export struct ChatPanel {
   @State private followOutput: boolean = true;
   @State private atBottom: boolean = true;
   @State private showContext: boolean = false;
+  @State private insetBottom: number = 0;
   @State private showQueue: boolean = false;
   @State private showSummary: boolean = false;
   @State private showMemoryDraft: boolean = false;
@@ -165,6 +166,7 @@ export struct ChatPanel {
 
   aboutToAppear(): void {
     this.syncMessages();
+    systemInsets(this.getUIContext()).then((insets: number[]) => { this.insetBottom = insets[1]; });
     this.viewport.onKeyboard = (shown: boolean): void => {
       if (shown && this.composerFocused) { this.inspectingOutput = false; this.followOutput = true; this.follow(); }
     };
@@ -745,7 +747,7 @@ export struct ChatPanel {
           Text(t("使用当前模型为较早消息生成摘要，会消耗 Token。")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
             .fontColor($r('app.color.text_tertiary'))
         }.width('100%')
-      }.width('100%').padding({ left: Space.page, right: Space.page, bottom: Space.xl })
+      }.width('100%').padding({ left: Space.page, right: Space.page, bottom: Space.xl + this.insetBottom })
     }.width('100%').height('100%').scrollBar(BarState.Off)
   }
 
@@ -1342,7 +1344,9 @@ export struct ChatPanel {
         .accessibilityText(this.app.contextLabel)
         .onClick(() => { this.showContext = true; })
         .bindSheet($$this.showContext, this.contextSheet(), {
-          title: { title: t("上下文") }, detents: [SheetSize.MEDIUM, SheetSize.LARGE], dragBar: true,
+          title: { title: t("上下文") }, detents: [SheetSize.LARGE, SheetSize.MEDIUM],
+          detentSelection: SheetSize.LARGE, preferType: this.workbench ? SheetType.CENTER : SheetType.BOTTOM,
+          maskColor: '#33000000', dragBar: true,
           backgroundColor: $r('app.color.page_background'), onDisappear: () => { this.showSummary = false; }
         })
         if (!this.app.generating && this.app.configured && supportsReasoningEffort(

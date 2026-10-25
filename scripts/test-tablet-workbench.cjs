@@ -274,7 +274,20 @@ assert.ok(launcherSource.includes("'detail-launcher-browser'"));
 const toolScopeSource = fs.readFileSync(path.join(compiledRoot, 'views/ToolScopePanel.ts'), 'utf8');
 assert.match(toolScopeSource, /systemInsets/, 'The tool sheet reads the navigation inset');
 assert.match(toolScopeSource, /Space\.lg \+ this\.insetBottom/, 'The last capability clears the navigation indicator');
-console.log('PASS emitted side-panel tabs, launcher entries and inset-safe tool sheet');
+assert.match(toolScopeSource, /embedded: true/, 'The capability list joins the sheet\'s single scroll surface');
+assert.match(toolScopeSource, /Scroll\.create\(\)/, 'The tool scope has one outer scroll region');
+
+// Both long sheets are modal cards: a visible mask dismisses on an outside tap,
+// a fixed large detent bounds the scroll viewport, and the content reserves the
+// navigation inset. The capability sheet also uses one scroll surface.
+assert.ok(indexSource.includes("preferType: this.windowWidth >= 840 ? SheetType.CENTER : SheetType.BOTTOM"));
+assert.ok(indexSource.includes("maskColor: '#33000000'"));
+assert.ok(indexSource.includes("detents: this.app.active.agentMode === 'custom' ? [SheetSize.LARGE] : undefined"));
+assert.ok(chatSource.includes("preferType: this.workbench ? SheetType.CENTER : SheetType.BOTTOM"));
+assert.ok(chatSource.includes('detentSelection: SheetSize.LARGE'));
+assert.ok(chatSource.includes("maskColor: '#33000000'"));
+assert.match(chatSource, /contextSheet\.call\(this\)/);
+console.log('PASS emitted side-panel tabs, launcher entries and modal inset-safe sheets');
 
 const dialogs = [], toasts = [];
 const Editor = probe('views/WorkspacePanel', 'WorkspacePanel', ['dirty', 'fileName', 'leave', 'requestClose', 'backRequested', 'openRequested', 'reference'], { t: value => value, $r: value => value });

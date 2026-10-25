@@ -1184,6 +1184,9 @@ struct Index {
     .onAreaChange((_old: Area, area: Area) => this.windowChanged(Number(area.width)))
     .bindSheet($$this.showToolScope, this.toolScopeSheet(), { title: { title: t('工具范围') },
       height: this.app.active.agentMode === 'custom' ? SheetSize.LARGE : SheetSize.FIT_CONTENT,
+      detents: this.app.active.agentMode === 'custom' ? [SheetSize.LARGE] : undefined,
+      preferType: this.windowWidth >= 840 ? SheetType.CENTER : SheetType.BOTTOM,
+      maskColor: '#33000000',
       dragBar: true, backgroundColor: $r('app.color.page_background'), systemMaterial: this.appearance.readingSurface })
   }
 }
