@@ -14,12 +14,14 @@ import { DeveloperPanel } from './DeveloperPanel';
 import { Btn } from '../common/Theme';
 import { Announcements, announcements } from '../services/Announcements';
 import { MarkdownView } from './MarkdownView';
+import { FeedbackPanel } from './FeedbackPanel';
 
 export function supportTitle(page: string): string {
   if (page === 'developer') { return t('开发者模式'); }
   if (page === 'help') { return t('使用帮助'); }
   if (page === 'updates') { return t('更新说明'); }
   if (page === 'announcements') { return t('公告'); }
+  if (page === 'feedback') { return t('反馈与建议'); }
   if (page === 'guide') { return t('首次使用指引'); }
   if (page === 'licenses') { return t('第三方开源许可协议'); }
   if (page === 'privacy') { return t('隐私政策'); }
@@ -39,6 +41,7 @@ export struct SupportPanel {
   @State private developerError: string = '';
   private developerGate: DeveloperGate = new DeveloperGate();
   onOpen: (page: string) => void = () => {};
+  onClose: () => void = () => {};
 
   aboutToDisappear(): void { this.cancelDeveloperUnlock(); }
   private cancelDeveloperUnlock(): void {
@@ -122,8 +125,8 @@ export struct SupportPanel {
         NavRow({ title: t('GitHub 仓库'), icon: $r('sys.symbol.link'), subtitle: 'SudoJacky/tinybot-harmony', compId: 'about-github',
           onTap: () => this.openWebsite('https://github.com/SudoJacky/tinybot-harmony') })
         RowDivider()
-        NavRow({ title: t('报告软件问题（Issues）'), icon: $r('sys.symbol.exclamationmark_circle'), compId: 'about-issues',
-          onTap: () => this.openWebsite('https://github.com/SudoJacky/tinybot-harmony/issues') })
+        NavRow({ title: t('反馈与建议'), icon: $r('sys.symbol.exclamationmark_circle'), compId: 'about-feedback',
+          onTap: () => this.onOpen('feedback') })
       }
     }
     GroupCard() {
@@ -197,7 +200,9 @@ export struct SupportPanel {
   }
 
   build() {
-    if (this.page === 'developer') {
+    if (this.page === 'feedback') {
+      FeedbackPanel({ onClose: this.onClose })
+    } else if (this.page === 'developer') {
       DeveloperPanel({ onDisabled: () => this.onOpen('about') })
     } else if (this.page === 'licenses') {
       ThirdPartyLicensesPanel()

@@ -97,7 +97,7 @@ const { DeveloperDiagnostics: d } = evaluate('services/DeveloperDiagnostics', {
     startJsCpuProfiling() { cpuStarts++; }, stopJsCpuProfiling() { cpuStops++; files.set('/application-files/tinybot-cpu.json', '{}'); } },
     hiAppEvent: { domain: { OS: 'OS' }, event: { MAIN_THREAD_JANK: 'MAIN_THREAD_JANK', APP_FREEZE: 'APP_FREEZE', APP_CRASH: 'APP_CRASH', RESOURCE_OVERLIMIT: 'RESOURCE_OVERLIMIT' },
       addWatcher() { watches++; return {}; }, removeWatcher() { watches--; } } },
-  '../model/Diagnostics': { Diagnostics: collector }, './PerformanceProbe': { collectPerformanceResources() {} }, './NativeDiagnosticLog': { configureNativeDiagnosticLog() {} },
+  '../model/Diagnostics': { Diagnostics: collector }, './PerformanceProbe': { collectPerformanceResources() {} }, './NativeDiagnosticLog': { configureNativeDiagnosticLog() {}, clearRecentDiagnosticLogs() {} },
   './AppInformation': { readAppInformation: () => ({ bundleName: 'test', versionName: '0.1.6', versionCode: 10006 }) }
 }, { AppStorage: { setOrCreate: (k, v) => storage.set(k, v), get: k => storage.get(k) }, setInterval: fn => { const id = ++next; timers.set(id, fn); return id; },
   clearInterval: id => timers.delete(id), setTimeout: fn => { const id = ++next; timers.set(id, fn); return id; }, clearTimeout: id => timers.delete(id) });

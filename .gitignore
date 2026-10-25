@@ -41,3 +41,8 @@
 .ui-audit/
 /.dsh/
 /.playwright-cli/
+scripts/*
+!scripts/test-usage-filter-sheet.cjs
+!scripts/test-hosted-privacy.cjs
+!scripts/test-conversation-share.cjs
+!scripts/test-feedback.cjs

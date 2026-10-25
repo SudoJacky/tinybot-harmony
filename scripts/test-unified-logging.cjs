@@ -16,7 +16,7 @@ function load(name) {
   return exports;
 }
 const { DiagnosticsCollector, Diagnostics } = load(path.join(root, 'model/Diagnostics'));
-const { configureNativeDiagnosticLog } = load(path.join(root, 'services/NativeDiagnosticLog'));
+const { configureNativeDiagnosticLog, recentDiagnosticLogs, clearRecentDiagnosticLogs } = load(path.join(root, 'services/NativeDiagnosticLog'));
 configureNativeDiagnosticLog();
 let now = 100, clocks = 0, reads = 0;
 Diagnostics.configureClock(() => { clocks++; return now; });
@@ -28,6 +28,7 @@ for (let index = 0; index < 100000; index++) {
 }
 assert.equal(reads, 0); assert.equal(clocks, 0); assert.equal(serialization, 0); assert.equal(native.length, 0);
 assert.equal(Diagnostics.eventsSince(0).length, 0);
+assert.equal(recentDiagnosticLogs().records.length, 0, 'Disabled Debug/Info must not populate recent logs');
 console.log('PASS closed Debug/Info perform no field/error reads, clocks, serialization, buffering or native writes');
 
 const secret = 'PRIVATE_API_KEY_0123456789';
@@ -37,7 +38,11 @@ assert.equal(clocks, 0); assert.equal(native.length, 2); assert.equal(serializat
 assert.equal(Diagnostics.snapshot().logging.records.length, 0); assert.equal(Diagnostics.eventsSince(0).length, 0);
 assert.ok(!JSON.stringify(native).includes(secret)); assert.ok(!JSON.stringify(native).includes('secret.example'));
 assert.equal(JSON.parse(native[1].args.at(-1)).fields.errorKind, 'timeout');
-console.log('PASS closed Warn/Error use only sanitized HiLog and do not read the collector clock or retain diagnostic events');
+const recent = recentDiagnosticLogs(); assert.equal(recent.records.length, 2);
+assert.ok(!JSON.stringify(recent).includes(secret)); assert.ok(!JSON.stringify(recent).includes('secret.example'));
+assert.equal(recent.records[1].data.fields.errorKind, 'timeout');
+clearRecentDiagnosticLogs(); assert.equal(recentDiagnosticLogs().records.length, 0);
+console.log('PASS closed Warn/Error retain sanitized recent records and HiLog output without enabling diagnostic capture');
 
 Diagnostics.start(); Diagnostics.detailed = false;
 Diagnostics.log('debug', 'speech', 'vad', fields); assert.equal(reads, 0);
