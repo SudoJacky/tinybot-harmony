@@ -825,10 +825,10 @@ export default function sessionServiceTests(): void {
       expect(f.provider.requests.length).assertEqual(0); expect(active(await f.repository.load()).teamEnabled === true).assertFalse();
       expect(active(f.session.snapshot()).draft).assertEqual('');
       f.session.setDraft('简单回答即可'); await f.session.send();
-      expect(f.provider.requests[0].tools.some((tool) => tool.function.name === 'tool_search' && tool.function.description.includes('team_recruit'))).assertTrue();
+      expect(f.provider.requests[0].tools.some((tool) => tool.function.name === 'team_recruit')).assertTrue();
       expect(await f.session.setTeamEnabled(false)).assertTrue(); f.session.setDraft('普通模式'); await f.session.send();
       expect(f.provider.requests[1].tools.some((tool) => tool.function.name === 'team_recruit')).assertFalse();
-      expect(f.provider.requests[1].tools.some((tool) => tool.function.name === 'tool_search' && tool.function.description.includes('team_recruit'))).assertFalse();
+      expect(f.provider.requests[1].tools.some((tool) => tool.function.name === 'team_recruit')).assertFalse();
     });
     it('chatCoordinatorRecruitsAndIntegratesWithoutManualPlanOrSecondTurn', 0, async () => {
       const f = new Fixture(); await f.session.initialize(); let parentRequests = 0;

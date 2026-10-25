@@ -57,7 +57,7 @@ async function main() {
     execute: async incoming => { assert.equal(incoming.function.name, 'lookup_alpha'); return 'evidence'; } };
   const requests = [], saved = [];
   let failTransport = false;
-  let replies = [reply('', [call('search', 'tool_search', { query: 'lookup_alpha' })]),
+  let replies = [reply('', [call('lookup-first', 'lookup_alpha')]),
     reply('', [call('lookup', 'lookup_alpha')]), reply('done')];
   const provider = { info: { id: 'test', name: 'Test', protocol: 'chat-completions', defaultBaseUrl: '', defaultModel: 'test' },
     endpoint: url => url, stream: async request => {
@@ -85,15 +85,15 @@ async function main() {
   assert.equal((await run('Find evidence')).status, 'complete');
   assert.equal(requests.length, 3);
   assert.equal(requests[0].messages[0].content, requests[1].messages[0].content);
-  assert.deepEqual(requests[1].tools.slice(0, requests[0].tools.length), requests[0].tools, 'Schema additions append');
+  assert.deepEqual(requests[1].tools, requests[0].tools, 'Direct tool calls leave the complete catalog unchanged');
   assert.deepEqual(requests[1].messages.slice(0, requests[0].messages.length), requests[0].messages);
   assert.deepEqual(requests[2].messages.slice(0, requests[1].messages.length), requests[1].messages);
-  assert.equal(thread.messages[1].steps.filter(step => step.runtimeContext !== undefined).length, 2, 'Discovery updates context exactly once');
-  assert.deepEqual(plain(thread.messages[1].steps.map(step => step.context.prefix.change)), ['cold', 'tools', 'append']);
+  assert.equal(thread.messages[1].steps.filter(step => step.runtimeContext !== undefined).length, 1, 'Full catalog needs only the initial context snapshot');
+  assert.deepEqual(plain(thread.messages[1].steps.map(step => step.context.prefix.change)), ['cold', 'append', 'append']);
   const logs = Diagnostics.snapshot().logging.records;
-  assert.ok(logs.some(event => event.log.event === 'request_prefix' && event.log.fields.change === 'tools'));
+  assert.ok(!logs.some(event => event.log.event === 'request_prefix' && event.log.fields.change === 'tools'));
   assert.ok(!JSON.stringify(logs).includes(environment)); Diagnostics.stop();
-  console.log('PASS persisted input admission, unchanged system, append-ordered schemas, deduplicated snapshots and content-free diagnostics');
+  console.log('PASS persisted input admission, unchanged system and schemas, deduplicated snapshots and content-free diagnostics');
 
   thread = restore(thread);
   const history = plain(projectedHistory(threadEntries(thread)));
@@ -105,7 +105,7 @@ async function main() {
     ['orchestrate'], 'Nested execution does not expose new root schemas on reopening');
   const resumed = await run('Continue'); assert.equal(resumed.status, 'complete', resumed.error);
   const continued = requests.at(-1);
-  assert.deepEqual(continued.tools, requests[2].tools, 'Discovery survives cold reload');
+  assert.deepEqual(continued.tools, requests[2].tools, 'Direct catalog survives cold reload');
   assert.deepEqual(continued.messages.slice(0, requests[2].messages.length), requests[2].messages);
   assert.equal(thread.messages.at(-1).steps[0].runtimeContext, undefined, 'No duplicate snapshot after reopening');
   environment = 'workspace version 2';

@@ -71,7 +71,7 @@ hdc rport tcp:18770 tcp:18770
 | `test-turn-workflow.cjs` | 流式时间线投影与保留的过程行 | 是 |
 | `test-resources.cjs` | 资源管理集成 | 否 |
 | `test-tool-schemas.cjs` | 用 SDK 的 JSON Schema 校验器检查工具参数、编辑必填字段与三种协议请求结构 | 否 |
-| `test-tool-discovery.cjs` | BM25 排序与中英分词、递归参数检索、默认工具、按需 schema、权限撤销、串行执行 | 否 |
+| `test-tool-discovery.cjs` | 默认完整工具及说明、稳定声明、旧发现回执兼容、权限撤销、编排保护和内部可选 BM25 检索 | 否 |
 | `test-context-usage.cjs` | 上下文预算与用量 | 否 |
 | `test-memory.cjs` | 记忆候选、来源与保存失败回滚 | 否 |
 | `test-code-sandbox.cjs` | 沙箱执行、限额与恢复 | 否 |

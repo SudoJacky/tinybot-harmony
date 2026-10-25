@@ -8,7 +8,7 @@
 | --- | --- |
 | 属于内置组还是可选能力 | `model/ToolGroups.ets` 的 `TOOL_GROUPS` 与 `TOOL_CAPABILITIES` |
 | 是否只读 | 只读组在“只读模式”下仍可执行；写入组会被 `RuleTools` 拦截 |
-| 是否默认直接可见 | `ToolDiscovery` 的 `DIRECT_TOOLS` 常驻；其余工具由 `tool_search` 检索后按需展开 |
+| 是否默认直接可见 | 所有已启用且获授权工具默认直接提供；无需加入额外白名单 |
 | 是否需要逐次审批 | 需要时走 `ToolApproval`，参考 `InteractionTools` 与 `McpTools` |
 
 ## 1. 实现工具类
@@ -78,9 +78,7 @@ return new RuleTools(new ToolSet(groups), productivity?.options?.readOnly === tr
 
 ## 5. 决定可见性
 
-默认情况下工具通过 `tool_search` 按需出现。要让它常驻，把名字加入 `services/ToolDiscovery.ets` 的 `DIRECT_TOOLS`；这会让每一次请求都携带它的 schema，谨慎使用。
-
-检索按 BM25 排序，中文按二元组切分，英文做复数折叠；工具名、描述、`promptSnippet` 和递归参数描述都会进入索引。
+默认情况下工具启用并通过权限过滤后立即提供完整 schema，无需 `tool_search` 或修改 `DIRECT_TOOLS`。维护稳定的定义与排序，避免普通调用改变声明集；用能力开关、只读与角色规则控制可用性。
 
 ## 6. 提示词与 UI 呈现
 
