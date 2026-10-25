@@ -88,9 +88,18 @@ jobs:
           trap 'rm -f "$RUNNER_TEMP/docs-key"' EXIT
           tar -C docs/.vitepress/dist -czf "$RUNNER_TEMP/docs.tar.gz" .
           archive_sha=$(sha256sum "$RUNNER_TEMP/docs.tar.gz" | cut -d ' ' -f 1)
-          ssh -i "$RUNNER_TEMP/docs-key" \
-            -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=15 \
-            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/docs-known-hosts" \
-            tinybot-docs-deploy@121.36.225.61 \
-            "publish $archive_sha $SOURCE_COMMIT $DEPLOY_RUN" < "$RUNNER_TEMP/docs.tar.gz"
+          for attempt in 1 2 3; do
+            if ssh -i "$RUNNER_TEMP/docs-key" \
+              -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=15 \
+              -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/docs-known-hosts" \
+              tinybot-docs-deploy@121.36.225.61 \
+              "publish $archive_sha $SOURCE_COMMIT $DEPLOY_RUN" < "$RUNNER_TEMP/docs.tar.gz"; then
+              break
+            else
+              result=$?
+            fi
+            if [ "$result" -ne 255 ] || [ "$attempt" -eq 3 ]; then exit "$result"; fi
+            echo "::warning::SSH transport failed; retrying the same verified archive (attempt $attempt)."
+            sleep 5
+          done
           echo "Published https://sudotinybot.cn/docs/ from $SOURCE_COMMIT" >> "$GITHUB_STEP_SUMMARY"
