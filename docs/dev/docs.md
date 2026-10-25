@@ -57,6 +57,12 @@ npm run build
 
 `.github/workflows/docs.yml` 在推送到 `main` 且改动 `docs/` 时构建并部署到 GitHub Pages。仓库设置中需要把 Pages 的来源设为 **GitHub Actions**。站点地址为 `https://sudojacky.github.io/tinybot-harmony/`，对应 `config.mts` 的 `base`；仓库改名或迁移时必须同步修改。
 
+同一次工作流还会独立构建并自动发布到 <https://sudotinybot.cn/docs/>。文档合入 `main` 后无需手动部署官网；仅应用代码变化不会触发文档构建。可在 Actions 的 **Docs** 工作流查看 `Publish sudotinybot.cn documentation` 结果或手动重新运行。
+
+镜像构建设置 `DOCS_TARGET=sudotinybot`，使用 `/docs/` 基路径、官网 sitemap 和返回官网入口。默认构建仍面向 GitHub Pages。两个站点的文章来自同一次提交，不需维护两份 Markdown。
+
+发布凭据保存在仓库的 `DOCS_DEPLOY_KEY` 和 `DOCS_DEPLOY_KNOWN_HOSTS` Actions Secrets。独立 SSH 密钥只允许调用服务器的文档发布程序，无 root、Shell、端口转发或后台数据权限。服务器校验归档后原子切换文档目录；构建或发布失败保留上一版。官网、公告、反馈服务无需重启。
+
 ## 常见问题
 
 | 现象 | 处理 |

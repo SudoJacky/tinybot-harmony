@@ -1,22 +1,26 @@
 import { defineConfig } from 'vitepress'
 
+const mirror = process.env.DOCS_TARGET === 'sudotinybot'
+
 export default defineConfig({
   lang: 'zh-CN',
   title: 'Tinybot',
   description: '运行在 HarmonyOS 上的个人 AI Agent',
-  base: '/tinybot-harmony/',
+  base: mirror ? '/docs/' : '/tinybot-harmony/',
   cleanUrls: false,
   srcExclude: ['local/**', 'distribution/**', 'README.md'],
   markdown: {
     lineNumbers: true,
     theme: { light: 'github-light', dark: 'github-dark' }
   },
-  sitemap: { hostname: 'https://sudojacky.github.io/tinybot-harmony/' },
+  sitemap: { hostname: mirror ? 'https://sudotinybot.cn/docs/' : 'https://sudojacky.github.io/tinybot-harmony/' },
+  head: mirror ? [['link', { rel: 'stylesheet', href: '/docs/mirror.css' }]] : [],
   themeConfig: {
     logo: '/logo.svg',
     siteTitle: 'Tinybot',
     outline: { level: [2, 3], label: '本页目录' },
     nav: [
+      ...(mirror ? [{ text: '返回官网', link: 'https://sudotinybot.cn/' }] : []),
       { text: '开始', link: '/getting-started/install', activeMatch: '/getting-started/' },
       { text: '指南', link: '/guide/', activeMatch: '/guide/' },
       { text: '架构', link: '/internals/overview', activeMatch: '/internals/' },
