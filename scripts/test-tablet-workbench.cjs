@@ -196,6 +196,32 @@ assert.match(chatSource.slice(menuAt, menuAt + 1600), /this\.modelMenuHeight\(\)
 assert.match(chatSource, /modelMenuHeight\(\): number \{/, 'The catalog-sized height is computed once');
 console.log('PASS emitted composer model seat opens one compact, catalog-sized model menu');
 
+// The tablet plus opens the add menu in place: attachments and places in the
+// root pane, with prompt templates drilling into a second pane instead of a sheet.
+const addAt = chatSource.indexOf("'add-attachment'");
+assert.ok(addAt > 0, 'Locate the emitted composer add trigger');
+const addSource = chatSource.slice(addAt - 1200, addAt + 2200);
+assert.match(addSource, /this\.showPlusMenu = !this\.showPlusMenu;/, 'The add trigger toggles the tablet menu');
+assert.match(addSource, /__Common__\.bindPopup\(this\.showPlusMenu, \{ builder: \{ builder: this\.plusMenu\.bind\(this\) \}/,
+  'The add trigger owns the menu popup');
+assert.match(addSource, /this\.showPlus = true;/, 'Phones keep the existing add sheet');
+const plusRootAt = chatSource.indexOf('plusRootPane(parent = null)');
+assert.ok(plusRootAt > 0, 'Locate the emitted add root pane');
+const plusRoot = chatSource.slice(plusRootAt, plusRootAt + 12000);
+for (const id of ['plus-menu-photo', 'plus-menu-text', 'plus-menu-drawing', 'plus-menu-workspace',
+  'plus-menu-memory', 'plus-menu-team', 'plus-menu-reference', 'plus-menu-templates']) {
+  assert.ok(plusRoot.includes("'" + id + "'"), 'The add menu keeps ' + id);
+}
+const plusTemplatesAt = chatSource.indexOf('plusTemplatesPane(parent = null)');
+assert.ok(plusTemplatesAt > 0, 'Locate the emitted template pane');
+const plusTemplates = chatSource.slice(plusTemplatesAt, plusTemplatesAt + 9000);
+assert.ok(plusTemplates.includes("'plus-menu-back'"), 'The template pane can return to the root');
+assert.ok(plusTemplates.includes("'plus-menu-manage'"), 'The template pane links to management');
+assert.ok(plusTemplates.includes('plusTemplateRow'), 'The template pane lists selectable templates');
+assert.ok(chatSource.includes("'plus-template-' + item.id"), 'Template rows apply in place');
+assert.ok(chatSource.includes('plusMenuRow(icon: Resource'), 'Rows share one compact geometry');
+console.log('PASS emitted composer plus opens the tablet add menu with a template drill-down');
+
 const dialogs = [], toasts = [];
 const Editor = probe('views/WorkspacePanel', 'WorkspacePanel', ['dirty', 'fileName', 'leave', 'requestClose', 'backRequested', 'openRequested', 'reference'], { t: value => value, $r: value => value });
 let closed = 0, rebound = 0;

@@ -64,7 +64,7 @@ hdc rport tcp:18770 tcp:18770
 | `test-settings-performance.cjs` | 设置响应与持久化 | 是 |
 | `test-settings-navigation.cjs` | 设置子页草稿、保存失败、凭据保留与返回 | 是 |
 | `test-page-transitions.cjs` | 页面首帧、进入/退出、快速反向操作、退出后释放、保留隐藏编辑器与浏览器、同步动画完成与浏览器关闭时序 | 是 |
-| `test-tablet-workbench.cjs` | 窗口断点与图标栏切换、拖动分栏的上下限、输入区模型菜单、聊天状态保留、文件编辑退出确认与工作区隔离、最终回答预览的侧区路由与单实例切换 | 是 |
+| `test-tablet-workbench.cjs` | 窗口断点与图标栏切换、拖动分栏的上下限、输入区模型菜单与添加菜单、聊天状态保留、文件编辑退出确认与工作区隔离、最终回答预览的侧区路由与单实例切换 | 是 |
 | `test-history-drawer.cjs` | 侧栏关闭动画、拖动与中断恢复 | 是 |
 | `test-harness-features.cjs` | 搜索、交付、引用与运行时可靠性 | 否 |
 | `test-preview-publication.cjs` | 预览发布集成 | 否 |
