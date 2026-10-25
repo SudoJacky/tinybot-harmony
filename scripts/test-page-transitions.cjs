@@ -63,9 +63,11 @@ const zero = fixture(false, true); zero.show(); zero.frames.shift().onIdle(); ze
 assert.equal(zero.page.present, false); assert.equal(zero.page.renderContent, false);
 console.log('PASS hidden retained editors/Web hosts survive, disposed callbacks are inert, synchronous completion releases correctly');
 
-const Browser = probe('pages/Index', 'Index', ['closeBrowser', 'browserPresenceChanged', 'setBrowserExpanded']);
+const Browser = probe('pages/Index', 'Index', ['closeBrowser', 'browserPresenceChanged', 'setBrowserExpanded',
+  'removeDetailTab', 'detailTabPresent', 'detailTabsAvailable']);
 const calls = [];
 const browser = Object.assign(new Browser(), { browserExpanded: true, browserPresent: true, browserClosing: false,
+  detailTabs: ['browser'], activeDetailTab: 'browser', detailPaneOpen: true,
   browser: { open: true, takeOver: () => calls.push('pause'), close: () => calls.push('close') },
   getUIContext: () => ({ getFocusController: () => ({ clearFocus() {} }) }) });
 browser.closeBrowser(); assert.deepEqual(calls, ['pause']); assert.equal(browser.browserExpanded, false);

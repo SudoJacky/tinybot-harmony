@@ -20,6 +20,9 @@ export struct BrowserPanel {
   @Prop presented: boolean = false;
   @Prop threadId: string = '';
   @Prop canAnnotate: boolean = false;
+  // The docked tab strip owns the page title, collapse and close controls; the
+  // browser keeps its address and navigation rows plus its settings shortcut.
+  @Prop tabbed: boolean = false;
   onAnnotation: (threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string) => Promise<void> = async () => {};
   onDismiss: () => void = () => {};
   onClose: () => void = () => {};
@@ -82,6 +85,7 @@ export struct BrowserPanel {
   build() {
     Column({ space: Space.sm }) {
       if ((this.browser.open || this.presented) && this.driver) {
+        if (!this.tabbed) {
         Row({ space: Space.sm }) {
           IconButton({ icon: $r('sys.symbol.chevron_down'), label: t('收起浏览器'), compId: 'browser-collapse', onTap: this.onDismiss })
           Column({ space: 2 }) {
@@ -95,6 +99,7 @@ export struct BrowserPanel {
             onTap: this.onClose })
         }.width('100%').height(56).padding({ left: Space.sm, right: Space.sm }).enabled(!this.capturing)
           .border({ width: { bottom: 0.5 }, color: $r('app.color.divider') })
+        }
         Row({ space: Space.sm }) {
           TextInput({ text: this.browser.editingAddress || this.addressDirty ? this.address : this.browser.url, placeholder: t('网页地址') }).fontFamily(this.appearance.fontFamily)
             .id('browser-address').layoutWeight(1).type(InputType.URL).enterKeyType(EnterKeyType.Go)
@@ -106,13 +111,17 @@ export struct BrowserPanel {
             })
             .onSubmit(() => this.navigate())
           Button(t('打开')).fontFamily(this.appearance.fontFamily).id('browser-go').attributeModifier(Btn.textSmall).onClick(() => this.navigate())
-        }.padding({ left: Space.md, right: Space.md }).width('100%').enabled(!this.capturing)
+        }.padding({ left: Space.md, right: Space.md, top: this.tabbed ? Space.sm : 0 }).width('100%').enabled(!this.capturing)
         Row({ space: Space.sm }) {
           IconButton({ icon: $r('sys.symbol.chevron_left'), label: t('上一页'), compId: 'browser-back',
             disabled: !this.browser.canGoBack, onTap: () => this.driver?.userBack() })
           IconButton({ icon: $r('sys.symbol.chevron_right'), label: t('下一页'), compId: 'browser-forward',
             disabled: !this.browser.canGoForward, onTap: () => this.driver?.userForward() })
           IconButton({ icon: $r('sys.symbol.arrow_clockwise'), label: t('重新加载'), compId: 'browser-reload', onTap: () => this.driver?.userReload() })
+          if (this.tabbed) {
+            IconButton({ icon: $r('sys.symbol.gearshape'), label: t('设置'), compId: 'browser-settings-tabbed',
+              onTap: this.onSettings })
+          }
           Blank()
           IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: this.capturing ? t('截图中…') : t('批注当前页面'), compId: 'browser-annotate',
             disabled: !this.canAnnotate || this.capturing || this.browser.url.length === 0, onTap: () => this.annotate() })

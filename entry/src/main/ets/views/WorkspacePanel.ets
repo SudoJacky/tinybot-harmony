@@ -30,8 +30,14 @@ export struct WorkspacePanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop initialPath: string = '';
   @Prop embedded: boolean = false;
+  // The docked detail strip owns the title and close control; keep only the
+  // file preview's own navigation inside the tab body.
+  @Prop tabbed: boolean = false;
   @Prop @Watch('openRequested') requestId: number = 0;
   @Prop @Watch('backRequested') closeRequest: number = 0;
+  // The docked tab's own close control skips the breadcrumb navigation that
+  // Back performs and still runs the unsaved-changes guard.
+  @Prop @Watch('tabCloseRequested') tabCloseRequest: number = 0;
   onClose: () => void = () => {};
   @State private workspaceTitle: string = '';
   private ownerWorkspaceId: string = '';
@@ -89,6 +95,7 @@ export struct WorkspacePanel {
   }
   private openRequested(): void { this.leave(() => this.bindWorkspace()); }
   private requestClose(): void { this.leave(this.onClose); }
+  private tabCloseRequested(): void { this.requestClose(); }
   private backRequested(): void {
     if (this.busy) { return; }
     if (this.previewing) { this.closePreview(); }
@@ -377,7 +384,7 @@ export struct WorkspacePanel {
             .backgroundColor(Color.Transparent).accessibilityText(t('更多操作')).enabled(!this.locked())
             .bindMenu(this.backupMenu, { systemMaterial: this.appearance.surface, mask: false })
         }
-        if (this.embedded) {
+        if (this.embedded && !this.tabbed) {
           IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭文件'), compId: 'close-workbench-file-preview',
             disabled: this.busy, onTap: () => this.requestClose() })
         }
@@ -485,13 +492,15 @@ export struct WorkspacePanel {
     if (this.embedded) {
       Stack() {
       Column() {
-        Row() {
-          Text(this.workspaceTitle).fontSize(16).fontWeight(FontWeight.Medium).maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1).fontColor($r('app.color.text_primary'))
-          IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭文件'), compId: 'close-workbench-files',
-            disabled: this.busy, onTap: () => this.requestClose() })
-        }.height(56).width('100%').padding({ left: 16, right: 6 })
-          .border({ width: { bottom: 0.5 }, color: $r('app.color.divider') })
+        if (!this.tabbed) {
+          Row() {
+            Text(this.workspaceTitle).fontSize(16).fontWeight(FontWeight.Medium).maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1).fontColor($r('app.color.text_primary'))
+            IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭文件'), compId: 'close-workbench-files',
+              disabled: this.busy, onTap: () => this.requestClose() })
+          }.height(56).width('100%').padding({ left: 16, right: 6 })
+            .border({ width: { bottom: 0.5 }, color: $r('app.color.divider') })
+        }
         Column() { this.listing() }.layoutWeight(1).width('100%')
       }.width('100%').height('100%').backgroundColor($r('app.color.surface'))
         .enabled(!this.previewing && !this.previewPresent)

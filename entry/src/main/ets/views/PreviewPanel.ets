@@ -12,6 +12,7 @@ export struct PreviewPanel {
   @Prop threadId: string = '';
   @Prop messageId: string = '';
   @Prop previewId: string = '';
+  @Prop tabbed: boolean = false;
   onClose: () => void = () => {};
   private message(): MessageViewModel | undefined { return this.app.active.messages.find((message) => message.id === this.messageId); }
   private previews(): PublishedPreview[] {
@@ -21,12 +22,14 @@ export struct PreviewPanel {
   }
   build() {
     Column() {
-      Row() {
-        Text(this.previews()[0]?.title || t('预览')).fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium)
-          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1).fontColor($r('app.color.text_primary'))
-        IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭预览'), compId: 'close-workbench-preview', onTap: this.onClose })
-      }.height(56).width('100%').padding({ left: 16, right: 6 })
-        .border({ width: { bottom: 0.5 }, color: $r('app.color.divider') })
+      if (!this.tabbed) {
+        Row() {
+          Text(this.previews()[0]?.title || t('预览')).fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1).fontColor($r('app.color.text_primary'))
+          IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭预览'), compId: 'close-workbench-preview', onTap: this.onClose })
+        }.height(56).width('100%').padding({ left: 16, right: 6 })
+          .border({ width: { bottom: 0.5 }, color: $r('app.color.divider') })
+      }
       Scroll() {
         Column() {
           ForEach(this.previews(), (preview: PublishedPreview) => {

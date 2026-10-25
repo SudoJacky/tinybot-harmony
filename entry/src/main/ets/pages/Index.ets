@@ -55,6 +55,8 @@ import { PreviewPanel } from '../views/PreviewPanel';
 import { AnimatedPage } from '../common/AnimatedPage';
 import { HistoryRail } from '../views/HistoryRail';
 import { PaneDivider } from '../common/PaneDivider';
+import { DetailLauncher } from '../views/DetailLauncher';
+import { DetailTabItem, DetailTabs } from '../views/DetailTabs';
 
 const DRAWER_MAX_WIDTH: number = 340;
 const CHAT_HEADER_HEIGHT: number = 56;
@@ -79,6 +81,12 @@ struct Index {
   @State private workspacePath: string = '';
   @State private workspaceRequest: number = 0;
   @State private workspaceCloseRequest: number = 0;
+  @State private workspaceTabCloseRequest: number = 0;
+  // Docked detail panes are tabs. Presence flags above stay the source of truth
+  // for each panel; these track order, focus and whether the column is shown.
+  @State private detailPaneOpen: boolean = false;
+  @State private detailTabs: string[] = [];
+  @State private activeDetailTab: string = '';
   @State private previewId: string = '';
   @State private previewMessageId: string = '';
   @State private previewThreadId: string = '';
@@ -178,6 +186,7 @@ struct Index {
       this.app.stop(); this.browser.close(); this.browserExpanded = false; this.showToolScope = false;
       this.voiceRequest = ''; this.paths.clear(); this.setDrawer(false);
       this.workspaceOpen = false; this.previewVisible = false; this.previewId = '';
+      this.detailPaneOpen = false; this.detailTabs = []; this.activeDetailTab = '';
       this.workspacePresent = false; this.previewPresent = false; this.browserPresent = false; this.browserClosing = false;
     }
   }
@@ -287,21 +296,128 @@ struct Index {
   }
 
   private hasPreview(): boolean { return this.previewId.length > 0 && this.previewThreadId === this.app.active.id; }
+  // The pane stays laid out through its exit animations: the presence flags are
+  // raised until AnimatedPage reports that the outgoing body is gone.
   private detailOpen(): boolean {
-    return !!(this.workspaceOpen || this.browserExpanded || this.hasPreview() || this.workspacePresent || this.previewPresent || this.browserPresent);
+    return !!(this.detailPaneOpen || this.workspacePresent || this.previewPresent || this.browserPresent);
   }
-  private closePreview(): void { this.previewVisible = false; }
+
+  // A tab is available while its panel owns content. A preview whose conversation
+  // changed keeps its order slot but leaves the strip until that chat returns.
+  private detailTabPresent(tab: string): boolean {
+    if (tab === 'files') { return this.workspaceOpen; }
+    if (tab === 'preview') { return this.previewVisible && this.hasPreview(); }
+    if (tab === 'browser') { return this.browserExpanded && this.browser.open; }
+    return false;
+  }
+
+  private detailTabsAvailable(): string[] {
+    return this.detailTabs.filter((tab: string) => this.detailTabPresent(tab));
+  }
+
+  private currentDetailTab(): string {
+    const available = this.detailTabsAvailable();
+    if (available.includes(this.activeDetailTab)) { return this.activeDetailTab; }
+    return available.length > 0 ? available[0] : '';
+  }
+
+  private detailTabVisible(tab: string): boolean {
+    return this.detailPaneOpen && this.currentDetailTab() === tab;
+  }
+
+  private detailTabItems(): DetailTabItem[] {
+    const items: DetailTabItem[] = [];
+    for (const tab of this.detailTabsAvailable()) {
+      if (tab === 'files') {
+        items.push(new DetailTabItem('files', t('工作区文件'), $r('sys.symbol.folder')));
+      } else if (tab === 'preview') {
+        items.push(new DetailTabItem('preview', t('预览'), $r('sys.symbol.doc_text')));
+      } else if (tab === 'browser') {
+        const title = this.browser.title.trim();
+        items.push(new DetailTabItem('browser', title.length > 0 && title !== 'about:blank' ? title : t('应用内浏览器'),
+          $r('sys.symbol.connection')));
+      }
+    }
+    return items;
+  }
+
+  private openDetailTab(tab: string): void {
+    if (!this.detailTabs.includes(tab)) { this.detailTabs = this.detailTabs.concat(tab); }
+    this.activeDetailTab = tab;
+    this.detailPaneOpen = true;
+    this.getUIContext().getFocusController().clearFocus();
+    this.setDrawer(false);
+  }
+
+  private removeDetailTab(tab: string): void {
+    const remaining = this.detailTabs.filter((item: string) => item !== tab);
+    this.detailTabs = remaining;
+    const available = remaining.filter((item: string) => this.detailTabPresent(item));
+    if (this.activeDetailTab === tab) { this.activeDetailTab = available.length > 0 ? available[0] : ''; }
+    if (available.length === 0) { this.detailPaneOpen = false; }
+  }
+
+  private closeDetailTab(tab: string): void {
+    if (tab === 'browser') { this.closeBrowser(); return; }
+    if (tab === 'preview') { this.closePreview(); return; }
+    if (tab === 'files') { this.workspaceTabCloseRequest++; }
+  }
+
+  private workspaceClosed(): void {
+    this.workspaceOpen = false;
+    this.removeDetailTab('files');
+  }
+
+  private closePreview(): void {
+    this.previewVisible = false;
+    this.removeDetailTab('preview');
+  }
+
+  // The strip's add menu activates an existing tab instead of sending another
+  // open request into a mounted editor.
+  private addFilesTab(): void {
+    if (this.detailTabPresent('files')) { this.openDetailTab('files'); return; }
+    this.openFiles();
+  }
+
+  private addBrowserTab(): void {
+    if (this.detailTabPresent('browser')) { this.openDetailTab('browser'); return; }
+    this.openBrowser();
+  }
+
+  private toggleDetailPane(): void {
+    this.getUIContext().getFocusController().clearFocus();
+    if (this.detailPaneOpen) { this.detailPaneOpen = false; return; }
+    this.detailPaneOpen = true;
+    const available = this.detailTabsAvailable();
+    if (!available.includes(this.activeDetailTab)) { this.activeDetailTab = available.length > 0 ? available[0] : ''; }
+    this.setDrawer(false);
+  }
+
   private previewPresenceChanged(present: boolean): void {
     this.previewPresent = present;
     if (!present && !this.previewVisible) { this.previewId = ''; }
   }
+
   private browserPresenceChanged(present: boolean): void {
     this.browserPresent = present;
-    if (!present && !this.browser.open) { this.browserExpanded = false; }
+    if (!present && !this.browser.open) {
+      this.browserExpanded = false;
+      this.removeDetailTab('browser');
+    }
     if (!present && this.browserClosing && !this.browserExpanded) { this.browserClosing = false; this.browser.close(); }
   }
+
   private closeBrowser(): void {
     this.browser.takeOver(); this.browserClosing = true; this.setBrowserExpanded(false);
+    this.removeDetailTab('browser');
+  }
+
+  // Collapsing the phone header hides the tab without closing the browser
+  // session; the chat's browser status card can bring it back as a tab.
+  private hideBrowserTab(): void {
+    this.browserExpanded = false;
+    this.removeDetailTab('browser');
   }
   private workbench(): WorkbenchLayout {
     return new WorkbenchLayout(this.windowWidth, this.detailOpen(), !this.historyCollapsed,
@@ -367,21 +483,23 @@ struct Index {
   }
   private openPreview(messageId: string, previewId: string): void {
     this.previewThreadId = this.app.active.id; this.previewMessageId = messageId; this.previewId = previewId; this.previewVisible = true;
-    this.setBrowserExpanded(false); this.setDrawer(false);
+    this.openDetailTab('preview');
   }
 
   onBackPress(): boolean {
-    if (this.browserExpanded) {
+    const active = this.currentDetailTab();
+    if (this.detailPaneOpen && active === 'browser') {
       if (this.browser.editingAddress) { this.getUIContext().getFocusController().clearFocus(); return true; }
       if (this.browser.owner === 'user' && this.browser.userBack()) { return true; }
-      this.setBrowserExpanded(false); return true;
+      this.hideBrowserTab(); return true;
     }
     if (this.drawerOpen || this.drawerDragging) {
       this.setDrawer(false);
       return true;
     }
-    if (this.hasPreview()) { this.closePreview(); return true; }
-    if (this.workspaceOpen) { this.workspaceCloseRequest++; return true; }
+    if (this.detailPaneOpen && active === 'preview' && this.hasPreview()) { this.closePreview(); return true; }
+    if (this.detailPaneOpen && active === 'files' && this.workspaceOpen) { this.workspaceCloseRequest++; return true; }
+    if (this.detailPaneOpen) { this.detailPaneOpen = false; return true; }
     return false;
   }
 
@@ -400,7 +518,7 @@ struct Index {
         secondaryButton: { value: t('允许并启用'), action: () => this.enableAndOpenBrowser() } });
       return;
     }
-    try { this.browser.openForUser(); this.setBrowserExpanded(true); }
+    try { this.browser.openForUser(); this.setBrowserExpanded(true); this.openDetailTab('browser'); }
     catch (error) {
       this.browser.report((error as Error).message);
       this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: (error as Error).message });
@@ -531,7 +649,7 @@ struct Index {
   private openFiles(path: string = ''): void {
     this.getUIContext().getFocusController().clearFocus();
     this.workspacePath = path; this.workspaceRequest++; this.workspaceOpen = true;
-    this.closePreview(); this.setBrowserExpanded(false); this.setDrawer(false);
+    this.openDetailTab('files');
   }
 
   private openTools(tab: string): void {
@@ -758,8 +876,9 @@ struct Index {
           SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(19).fontColor([$r('app.color.text_secondary')])
         }.id('workbench-chat-more').width(44).height(44).backgroundColor(Color.Transparent).accessibilityText(t('更多操作'))
           .enabled(this.app.ready).bindMenu(this.moreMenu, { systemMaterial: this.appearance.surface, mask: false })
-        IconButton({ icon: $r('sys.symbol.folder'), label: t('文件与预览'), compId: 'workbench-open-files',
-          disabled: !this.app.ready, onTap: () => this.openFiles() })
+        IconButton({ icon: this.detailPaneOpen ? $r('sys.symbol.close_sidebar') : $r('sys.symbol.open_sidebar'),
+          label: this.detailPaneOpen ? t('关闭侧栏') : t('打开侧栏'), compId: 'workbench-toggle-detail',
+          disabled: !this.app.ready, onTap: () => this.toggleDetailPane() })
       }.width('100%').height(CHAT_HEADER_HEIGHT).padding({ left: 12, right: 12 })
         .hitTestBehavior(HitTestMode.Transparent)
     } else { this.phoneHeader() }
@@ -909,7 +1028,7 @@ struct Index {
     Stack() {
     Row() {
     if (this.workbench().rail) {
-      HistoryRail({ active: this.app.ready, filesActive: this.workspaceOpen && !this.browserExpanded && !this.previewVisible,
+      HistoryRail({ active: this.app.ready, filesActive: this.detailPaneOpen && this.currentDetailTab() === 'files',
         onExpand: () => this.toggleHistory(),
         onNewChat: () => { this.createChat(); this.setDrawer(false); },
         onSearch: () => this.openHistorySearch(),
@@ -931,7 +1050,8 @@ struct Index {
             ChatPanel({ app: this.app, thread: this.app.active, workbench: this.windowWidth >= 840,
                 onToolScope: () => { this.showToolScope = true; }, approval: this.approval, browser: this.browser, account: this.account,
                 onAccount: () => { this.paths.pushPath({ name: 'account' }); },
-                onBrowser: () => this.setBrowserExpanded(true), onSettings: () => this.openSettings(),
+                onBrowser: () => { this.setBrowserExpanded(true); this.openDetailTab('browser'); },
+                onSettings: () => this.openSettings(),
                 topInset: CHAT_HEADER_HEIGHT,
                 onHeaderProgress: (progress: number): void => { this.headerProgress = progress; },
                 voiceRequest: this.voiceRequest, onVoiceShortcutConsumed: () => { this.voiceRequest = ''; },
@@ -1002,45 +1122,62 @@ struct Index {
       }, (locale: string) => locale)
       // These hosts keep their position in the tree across all width breakpoints.
       // Only their geometry changes; resizing never reinitializes the session or editor.
+      // One docked surface owns the strip and the panel bodies. The bodies keep
+      // their position in the tree across tab switches so editors, previews and
+      // the Web host keep their state; only the tab strip decides which is shown.
       Stack() {
-      AnimatedPage({ visible: this.workspaceOpen && !this.browserExpanded && !this.previewVisible,
-        retained: this.workspaceOpen, onPresenceChanged: (present: boolean) => { this.workspacePresent = present; } }) {
-        WorkspacePanel({ app: this.app, embedded: true, initialPath: this.workspacePath,
-          requestId: this.workspaceRequest, closeRequest: this.workspaceCloseRequest,
-          onClose: () => { this.workspaceOpen = false; } })
-      }
-      }.id('workbench-files').width(this.workbench().docked ? this.workbench().detailWidth - 6 : '100%')
+        Column() {
+          if (this.workbench().docked && this.detailPaneOpen && this.detailTabsAvailable().length > 0) {
+            DetailTabs({ tabs: this.detailTabItems(), active: this.currentDetailTab(),
+              onSelect: (id: string) => { this.activeDetailTab = id; },
+              onClose: (id: string) => this.closeDetailTab(id),
+              onAddFiles: () => this.addFilesTab(),
+              onAddBrowser: () => this.addBrowserTab(),
+              onCollapse: () => { this.detailPaneOpen = false; } })
+          }
+          Stack() {
+            AnimatedPage({ visible: this.detailTabVisible('files'), retained: this.workspaceOpen,
+              onPresenceChanged: (present: boolean) => { this.workspacePresent = present; } }) {
+              WorkspacePanel({ app: this.app, embedded: true, tabbed: this.workbench().docked,
+                initialPath: this.workspacePath, requestId: this.workspaceRequest,
+                closeRequest: this.workspaceCloseRequest, tabCloseRequest: this.workspaceTabCloseRequest,
+                onClose: () => this.workspaceClosed() })
+            }
+            AnimatedPage({ visible: this.detailTabVisible('preview') && this.hasPreview(),
+              retained: this.previewVisible && this.hasPreview(),
+              onPresenceChanged: (present: boolean) => this.previewPresenceChanged(present) }) {
+              PreviewPanel({ app: this.app, threadId: this.previewThreadId, messageId: this.previewMessageId,
+                previewId: this.previewId, tabbed: this.workbench().docked, onClose: () => this.closePreview() })
+            }
+            // The Web host stays mounted even when its tab is closed: the browser
+            // session opens against an attached view, and reopening a tab reuses it.
+            AnimatedPage({ visible: this.detailTabVisible('browser'), retained: true,
+              vertical: this.windowWidth < 840, onPresenceChanged: (present: boolean) => this.browserPresenceChanged(present) }) {
+              BrowserPanel({ browser: this.browser, expanded: this.detailTabVisible('browser'), presented: this.browserPresent,
+                tabbed: this.workbench().docked, threadId: this.app.active.id,
+                canAnnotate: this.app.canQueueInput && this.app.active.attachments.length < 4,
+                onAnnotation: (threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string) => this.addBrowserAnnotation(threadId, pixel, page, note),
+                onSettings: () => { this.hideBrowserTab(); this.openSettings(); },
+                onClose: () => this.closeBrowser(), onDismiss: () => this.hideBrowserTab() })
+            }
+            AnimatedPage({ visible: this.workbench().docked && this.detailPaneOpen && this.detailTabsAvailable().length === 0 }) {
+              DetailLauncher({ onFiles: () => this.openFiles(), onBrowser: () => this.openBrowser(),
+                onClose: () => { this.detailPaneOpen = false; } })
+            }
+          }.width('100%').layoutWeight(1)
+        }.width('100%').height('100%')
+        .backgroundColor(this.detailOpen() ? $r('app.color.surface') : Color.Transparent)
+      }.width(this.workbench().docked ? this.workbench().detailWidth - 6 : '100%')
         .height(this.windowWidth >= 840 ? 'calc(100% - 12vp)' : '100%')
         .borderRadius(this.windowWidth >= 840 ? Radius.xl : 0).clip(true)
         .position({ x: this.workbench().detailX, y: this.windowWidth >= 840 ? 6 : 0 })
-        .hitTestBehavior(this.workspaceOpen && !this.browserExpanded && !this.previewVisible ? HitTestMode.Default : HitTestMode.None)
+        .hitTestBehavior(this.detailOpen() ? HitTestMode.Default : HitTestMode.None)
+        .enabled(this.detailOpen())
+        // A closed host keeps its retained bodies mounted but must not lay a
+        // full-window transparent layer over the page.
+        .visibility(this.detailOpen() ? Visibility.Visible : Visibility.Hidden)
+        .accessibilityLevel(this.detailOpen() ? 'auto' : 'no-hide-descendants')
         .border({ width: { left: this.workbench().docked ? 0.5 : 0 }, color: $r('app.color.divider') })
-      Stack() {
-      AnimatedPage({ visible: this.previewVisible && this.hasPreview() && !this.browserExpanded,
-        retained: this.hasPreview(), onPresenceChanged: (present: boolean) => this.previewPresenceChanged(present) }) {
-        PreviewPanel({ app: this.app, threadId: this.previewThreadId, messageId: this.previewMessageId, previewId: this.previewId,
-          onClose: () => this.closePreview() })
-      }
-      }.width(this.workbench().docked ? this.workbench().detailWidth - 6 : '100%')
-        .height(this.windowWidth >= 840 ? 'calc(100% - 12vp)' : '100%')
-        .borderRadius(this.windowWidth >= 840 ? Radius.xl : 0).clip(true).position({ x: this.workbench().detailX, y: this.windowWidth >= 840 ? 6 : 0 })
-        .hitTestBehavior(this.previewVisible && this.hasPreview() && !this.browserExpanded ? HitTestMode.Default : HitTestMode.None)
-        .border({ width: { left: this.workbench().docked ? 0.5 : 0 }, color: $r('app.color.divider') })
-      Stack() {
-      AnimatedPage({ visible: this.browserExpanded && this.browser.open, retained: true, vertical: this.windowWidth < 840,
-        onPresenceChanged: (present: boolean) => this.browserPresenceChanged(present) }) {
-        BrowserPanel({ browser: this.browser, expanded: this.browserExpanded, presented: this.browserPresent,
-          threadId: this.app.active.id, canAnnotate: this.app.canQueueInput && this.app.active.attachments.length < 4,
-          onAnnotation: (threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string) => this.addBrowserAnnotation(threadId, pixel, page, note),
-          onSettings: () => { this.setBrowserExpanded(false); this.openSettings(); },
-          onClose: () => this.closeBrowser(), onDismiss: () => this.setBrowserExpanded(false) })
-      }
-      }.width(this.workbench().docked ? this.workbench().detailWidth - 6 : '100%')
-        .height(this.windowWidth >= 840 ? 'calc(100% - 12vp)' : '100%')
-        .borderRadius(this.windowWidth >= 840 ? Radius.xl : 0).clip(true).position({ x: this.workbench().detailX, y: this.windowWidth >= 840 ? 6 : 0 })
-        .hitTestBehavior(this.browserExpanded && this.browser.open ? HitTestMode.Default : HitTestMode.None)
-        .accessibilityLevel(this.browserExpanded && this.browser.open ? 'auto' : 'no-hide-descendants')
-        .border({ width: { left: this.browserExpanded && this.workbench().docked ? 0.5 : 0 }, color: $r('app.color.divider') })
       }
     }.width('100%').height('100%')
     .backgroundColor($r('app.color.page_background'))

@@ -73,11 +73,15 @@ assert.ok(new WorkbenchLayout(1440, true, true, 280).detailWidth > 300, 'First o
 console.log('PASS phone, rail, two-pane and three-pane boundaries, drag clamps and protected minimums');
 
 const Page = probe('pages/Index', 'Index', ['hasPreview', 'detailOpen', 'workbench', 'windowChanged', 'openFiles', 'openPreview', 'closePreview', 'previewPresenceChanged', 'onBackPress',
-  'beginResize', 'resizeHistory', 'resizeDetail', 'endResize'], { WorkbenchLayout });
+  'beginResize', 'resizeHistory', 'resizeDetail', 'endResize', 'openDetailTab', 'removeDetailTab', 'closeDetailTab',
+  'workspaceClosed', 'toggleDetailPane', 'currentDetailTab', 'detailTabVisible', 'detailTabsAvailable',
+  'detailTabPresent', 'hideBrowserTab'], { WorkbenchLayout });
+assert.equal(typeof Page.prototype.detailTabsAvailable, 'function', 'Tab availability is part of the emitted page');
 const draft = { text: 'unsent input', attachments: ['image'] }, active = { id: 'thread', draft, messages: [] };
 const session = {}, browser = {};
 const page = Object.assign(new Page(), { app: { active }, session, browser, windowWidth: 0,
   workspaceOpen: false, workspaceRequest: 0, workspaceCloseRequest: 0,
+  detailTabs: [], activeDetailTab: '', detailPaneOpen: false, workspaceTabCloseRequest: 0,
   previewId: '', previewThreadId: '', browserExpanded: false,
   drawerOpen: true, drawerDragging: true, drawerReveal: 0.6, drawerContentActive: true, drawerAnimation: 4,
   getUIContext: () => ({ getFocusController: () => ({ clearFocus() {} }) }),
@@ -127,6 +131,33 @@ assert.equal(page.workbench().detailWidth, 300);
 page.historyCollapsed = true;
 assert.equal(page.workbench().rail, true, 'Collapsing keeps the sheet state intact');
 console.log('PASS rail state, drag clamps and committed widths keep the chat and detail minima');
+
+// Docked panes are tabs: opening a second pane keeps the first, the active tab
+// falls back on close, collapsing retains tabs, and the last tab closes the pane.
+page.openFiles('notes.md');
+assert.deepEqual(page.detailTabs, ['files']);
+page.openPreview('message', 'preview');
+assert.deepEqual(page.detailTabs, ['files', 'preview']);
+assert.equal(page.currentDetailTab(), 'preview');
+page.openFiles('other.md');
+assert.deepEqual(page.detailTabs, ['files', 'preview'], 'Files reuses its tab');
+assert.equal(page.currentDetailTab(), 'files');
+assert.equal(page.workspacePath, 'other.md');
+page.closeDetailTab('preview');
+assert.deepEqual(page.detailTabs, ['files']);
+assert.equal(page.currentDetailTab(), 'files');
+assert.equal(page.detailOpen(), true);
+page.toggleDetailPane();
+assert.equal(page.detailPaneOpen, false);
+assert.deepEqual(page.detailTabs, ['files'], 'Collapsing the column keeps its tabs');
+page.toggleDetailPane();
+assert.equal(page.detailPaneOpen, true);
+assert.equal(page.currentDetailTab(), 'files');
+page.workspaceClosed();
+assert.deepEqual(page.detailTabs, []);
+assert.equal(page.detailPaneOpen, false);
+assert.equal(page.detailOpen(), false, 'Closing the last tab releases the docked column');
+console.log('PASS files and preview share one tabbed column and collapse without losing their panes');
 
 // A narrow overlay defaults to the center of Stack; anchor the real emitted sidebar at the window origin.
 const drawerAttributes = {};
@@ -221,6 +252,29 @@ assert.ok(plusTemplates.includes('plusTemplateRow'), 'The template pane lists se
 assert.ok(chatSource.includes("'plus-template-' + item.id"), 'Template rows apply in place');
 assert.ok(chatSource.includes('plusMenuRow(icon: Resource'), 'Rows share one compact geometry');
 console.log('PASS emitted composer plus opens the tablet add menu with a template drill-down');
+
+// The docked column exposes files and the browser as tabs: the header toggle
+// opens the launcher, the strip adds/closes/activates chips, and the closed host
+// can never cover the page. The tool sheet reserves the navigation inset.
+const compiledRoot = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets');
+const indexSource = fs.readFileSync(path.join(compiledRoot, 'pages/Index.ts'), 'utf8');
+assert.ok(indexSource.includes("'workbench-toggle-detail'"), 'The header exposes the side panel toggle');
+assert.match(indexSource, /DetailTabs\(this, \{ tabs: this\.detailTabItems\(\), active: this\.currentDetailTab\(\)/,
+  'The strip receives the available tabs and the current one');
+assert.match(indexSource, /new DetailLauncher\(this, \{ onFiles:/, 'The empty column offers the two entry choices');
+assert.match(indexSource, /Visibility\.Hidden/, 'A closed detail host cannot cover the page');
+const tabsSource = fs.readFileSync(path.join(compiledRoot, 'views/DetailTabs.ts'), 'utf8');
+for (const token of ["'detail-tab-' + tab.id", "'detail-tab-close-' + tab.id", "'detail-add-tab'", "'detail-add-files'",
+  "'detail-add-browser'", "'detail-collapse'"]) {
+  assert.ok(tabsSource.includes(token), 'The strip keeps ' + token);
+}
+const launcherSource = fs.readFileSync(path.join(compiledRoot, 'views/DetailLauncher.ts'), 'utf8');
+assert.ok(launcherSource.includes("'detail-launcher-files'"));
+assert.ok(launcherSource.includes("'detail-launcher-browser'"));
+const toolScopeSource = fs.readFileSync(path.join(compiledRoot, 'views/ToolScopePanel.ts'), 'utf8');
+assert.match(toolScopeSource, /systemInsets/, 'The tool sheet reads the navigation inset');
+assert.match(toolScopeSource, /Space\.lg \+ this\.insetBottom/, 'The last capability clears the navigation indicator');
+console.log('PASS emitted side-panel tabs, launcher entries and inset-safe tool sheet');
 
 const dialogs = [], toasts = [];
 const Editor = probe('views/WorkspacePanel', 'WorkspacePanel', ['dirty', 'fileName', 'leave', 'requestClose', 'backRequested', 'openRequested', 'reference'], { t: value => value, $r: value => value });
