@@ -14,6 +14,28 @@ devecocli build
 
 很多脚本读取的是编译产物——**先构建，再运行**。文中标注“需构建”的项在没有产物时会失败，这不是代码回归。
 
+## 两个系统版本
+
+同一个 HAP 同时面向 HarmonyOS 6（API 20）与 HarmonyOS 7（API 26）。行为脚本用 `deviceInfo.sdkApiVersion` 模拟两条分支：26 走原有 http 与材质实现，20 走 rcp 传输与普通界面，因此不需要两台设备也能覆盖分支逻辑；真机/模拟器仍要跑一遍交互：
+
+1. 列出设备，确认串口与系统版本：`devecocli device list`（API 20 模拟器名为 `Mate 90 Pro_OS6`）。
+2. `devecocli run --device <serial>`：首次启动应到隐私说明，同意后进入引导与主页，没有任何 JS 崩溃。
+3. 依次打开：主页菜单与公告 Sheet、设置各页、外观（“光感效果”应显示“此系统不支持”）、画板（模拟器无手写能力时显示真实不支持状态）。
+4. 冷启动、返回、前后台切换各一次，再查崩溃日志：`devecocli log --crash --bundle-name com.sudojacky.tinybot`。
+
+### 重定向验证夹具
+
+`scripts/redirect-fixture-server.cjs` 提供 301/302/303/307/308、相对 `Location`、循环、多跳、慢响应、404 与凭据回显，并把每次命中写成一行 JSON：
+
+```powershell
+node scripts\redirect-fixture-server.cjs 18770
+hdc rport tcp:18770 tcp:18770
+# 设备侧验证后查看命中记录：是否只有首跳、是否带上 Authorization
+```
+
+判定标准：定向拒绝的重定向请求只出现首跳，第二跳地址不得出现；`redirect: 'return'` 的网页读取应看到逐跳请求，且第 6 次跳转被拒绝。
+
+
 ## 脚本矩阵
 
 | 脚本 | 覆盖内容 | 需构建 |
@@ -37,7 +59,8 @@ devecocli build
 | `test-voice-composer.cjs` | 语音输入区交互 | 是 |
 | `test-drawing-board.cjs` | 画板初始化/导出/像素释放/附件保存 | 是 |
 | `test-skill-completion.cjs` | Skill 补全与输入框回调 | 是 |
-| `test-appearance.cjs` | 外观偏好、保存回滚、启动应用顺序 | — |
+| `test-appearance.cjs` | 外观偏好、保存回滚、启动应用顺序；API 20 不读取任何 `uiMaterial` 值，普通控件底色支持明暗主题；API 26 关闭光感时向组件传入 `Material.empty` | — |
+| `test-api20-compat.cjs` | 运行时能力判断、定向拒绝/返回 3xx 的传输（http 与 rcp 两条路径）、SSE/MCP 实时回调与取消、接收过程中限制响应大小、空 PixelMap 创建、PDF 文字回退与模块缺失提示、网页逐跳校验、搜索拒绝重定向 | — |
 | `test-settings-performance.cjs` | 设置响应与持久化 | 是 |
 | `test-settings-navigation.cjs` | 设置子页草稿、保存失败、凭据保留与返回 | 是 |
 | `test-history-drawer.cjs` | 侧栏关闭动画、拖动与中断恢复 | 是 |
@@ -77,7 +100,7 @@ Hypium `ProjectFolders` 覆盖共享文件夹名称、数量、URI 去重、加�
 | `test-send-motion.cjs` | 发送动效的编译后生命周期与坐标换算 |
 | `test-thinking-motion.cjs` | 思考状态循环、交叉渐变与离屏暂停 |
 | `test-project-tree.cjs` | 侧栏项目分组、普通聊天、空项目、同名项目、置顶与归档 |
-| `test-thread-list-renderer.cjs` | 会话改名/删除/归档/置顶的排序与菜单、项目分组刷新 |
+| `test-thread-list-renderer.cjs` | 会话改名/删除/归档/置顶的排序与菜单、项目分组刷新；API 20 圆形按钮使用底色与轮廓，重绘时立即应用填充，避免绿色背景闪烁；保留显式主色填充及 API 26 材质动画 |
 | `test-message-actions-renderer.cjs` | 改写、重新生成、分支按钮的忙碌/保存失败禁用，以及仅回答展示的 AI 标记 |
 | `test-team-renderer.cjs` | 团队、工具详情与编排子调用更新回调 |
 | `test-chat-disclosures.cjs` | 流式更新、过程重开、历史加载时的展开状态 |

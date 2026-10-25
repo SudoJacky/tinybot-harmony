@@ -7,6 +7,7 @@ import { McpOAuth } from '../services/McpOAuth';
 import { LaunchActions } from '../services/LaunchActions';
 import { DeveloperDiagnostics } from '../services/DeveloperDiagnostics';
 import { huaweiAccount } from '../services/HuaweiAccount';
+
 import { hostedPrivacy } from '../services/HostedPrivacy';
 /*
  * Copyright (c) 2026 Huawei Device Co., Ltd.
@@ -65,6 +66,10 @@ export default class EntryAbility extends UIAbility {
     });
     Diagnostics.log('info', 'app', 'created');
   }
+
+
+
+
 
   private startServices(): void {
     if (!this.servicesStarted) {

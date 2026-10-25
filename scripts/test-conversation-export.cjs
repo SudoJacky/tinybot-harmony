@@ -19,7 +19,7 @@ const image = {
     if (pixel.final && packFailure) throw Error('encoder failed');
     return buffer(png);
   }, release: async () => released.push('packer') }),
-  createEmptyPixelMap: options => ({ final: true, options, release: async () => released.push('result') }),
+  createPixelMapSync: options => ({ final: true, options, release: async () => released.push('result') }),
   createImageSource: fd => ({ createPixelMap: async () => ({ fd, release: async () => released.push(fd) }),
     release: async () => released.push('source') })
 };

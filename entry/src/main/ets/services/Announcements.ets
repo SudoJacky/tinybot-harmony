@@ -1,6 +1,6 @@
 import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
-import { http } from '@kit.NetworkKit';
+import { CompatHttp } from './CompatHttp';
 import { Announcement, parseAnnouncement } from '../model/Announcement';
 import { Diagnostics } from '../model/Diagnostics';
 import { t } from '../model/I18n';
@@ -44,21 +44,16 @@ export class Announcements {
         throw new Error('Invalid announcement storage');
       }
       this.seen = stored.slice();
-      const request = http.createHttp();
       Diagnostics.log('info', 'announcements', 'fetch_started');
-      try {
-        const response = await request.request(this.endpoint, {
-          method: http.RequestMethod.GET, header: { 'Accept': 'application/json' }, usingCache: false,
-          connectTimeout: 5000, readTimeout: 5000, maxRedirects: 0, maxLimit: 256 * 1024,
-          expectDataType: http.HttpDataType.STRING
-        });
-        status = response.responseCode;
-        if (status !== 200) { throw new Error('Announcement HTTP ' + status); }
-        if (typeof response.result !== 'string') { throw new Error('Invalid announcement JSON response'); }
-        const current = parseAnnouncement(response.result);
-        if (hostedPrivacy.allowed) { this.current = current; }
-        Diagnostics.log('info', 'announcements', 'fetch_completed', { http: status, elapsedMs: Date.now() - started, count: current ? 1 : 0 });
-      } finally { request.destroy(); }
+      const response = await CompatHttp.request({
+        url: this.endpoint, method: 'GET', headers: { 'Accept': 'application/json' },
+        connectTimeout: 5000, readTimeout: 5000, maxBytes: 256 * 1024, dataType: 'string', redirect: 'refuse'
+      });
+      status = response.status;
+      if (status !== 200) { throw new Error('Announcement HTTP ' + status); }
+      const current = parseAnnouncement(response.text);
+      if (hostedPrivacy.allowed) { this.current = current; }
+      Diagnostics.log('info', 'announcements', 'fetch_completed', { http: status, elapsedMs: Date.now() - started, count: current ? 1 : 0 });
     } catch (error) {
       this.error = t('公告加载失败，将在下次启动时重试。');
       Diagnostics.log('error', 'announcements', 'fetch_failed', { http: status, elapsedMs: Date.now() - started }, error as Error);

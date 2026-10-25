@@ -1,4 +1,5 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { menuMaterialAttribute, systemMaterialAttribute } from '../common/MaterialAttributes';
 import { t } from '../model/I18n';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { SearchProviderId, defaultSearchConfig, deepSeekSearchProfiles } from '../model/WebSearch';
@@ -48,8 +49,9 @@ export struct SearchSettingsPanel {
       Column({ space: Space.md }) {
         Select([{ value: 'DeepSeek' }, { value: 'Tavily' }]).selected(this.provider === 'deepseek' ? 0 : 1)
           .value(this.provider === 'deepseek' ? 'DeepSeek' : 'Tavily').enabled(!this.saving).id('search-provider')
-          .backgroundColor(Color.Transparent).fontColor($r('sys.color.font_primary'))
-          .systemMaterial(this.appearance.control).menuSystemMaterial(this.appearance.surface)
+          .backgroundColor(this.appearance.controlBackground).fontColor($r('sys.color.font_primary'))
+          .attributeModifier(systemMaterialAttribute<SelectAttribute>(this.appearance.control))
+          .attributeModifier(menuMaterialAttribute(this.appearance.surface))
           .onSelect((index: number) => this.changeProvider(index))
         Text(t('搜索词会发送给所选服务。')).fontFamily(this.appearance.fontFamily)
           .fontSize(14).fontColor($r('app.color.text_secondary'))
@@ -64,8 +66,9 @@ export struct SearchSettingsPanel {
               .selected(this.candidates().findIndex((item) => item.id === this.sourceId))
               .value(this.candidates().find((item) => item.id === this.sourceId)?.name || t('请选择用于联网搜索的 DeepSeek 服务。'))
               .enabled(!this.saving).id('search-credential-source')
-              .backgroundColor(Color.Transparent).fontColor($r('sys.color.font_primary'))
-              .systemMaterial(this.appearance.control).menuSystemMaterial(this.appearance.surface)
+              .backgroundColor(this.appearance.controlBackground).fontColor($r('sys.color.font_primary'))
+              .attributeModifier(systemMaterialAttribute<SelectAttribute>(this.appearance.control))
+              .attributeModifier(menuMaterialAttribute(this.appearance.surface))
               .onSelect((index: number) => { this.sourceId = this.candidates()[index].id; })
           } else if (this.candidates().length === 1) {
             Text(t('将复用 {0} 的密钥，无需重复填写。', [this.candidates()[0].name])).fontFamily(this.appearance.fontFamily)

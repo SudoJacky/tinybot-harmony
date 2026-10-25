@@ -2,8 +2,10 @@ import { image } from '@kit.ImageKit';
 import { common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { HandwriteComponent, HandwriteController, HiddenToolType, PenType } from '@kit.Penkit';
+import { HandwriteComponent, HandwriteController, HiddenConfig, HiddenToolType, PenType } from '@kit.Penkit';
+import { ApiLevel } from '../common/ApiLevel';
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { systemMaterialAttribute } from '../common/MaterialAttributes';
 import { Btn, Font, Radius, Space, systemInsets } from '../common/Theme';
 import { IconButton } from '../common/Widgets';
 import { DrawingBoardOptions, DrawingDraft } from '../model/DrawingDraft';
@@ -47,6 +49,12 @@ export struct DrawingBoard {
       this.ready = true;
     });
   }
+  // HiddenToolType/hiddenTools arrive with API 26. Older systems keep the stock toolbar rather
+  // than evaluating the missing enum; the canvas, controller and export are all API 20 safe.
+  private hiddenTools(): HiddenConfig | undefined {
+    if (!ApiLevel.drawingTools) { return undefined; }
+    return { hiddenOptionalTools: [HiddenToolType.MOSAIC, HiddenToolType.LASER] };
+  }
   private initialize(): void {
     if (!this.controller) { return; }
     try { this.controller.load(this.notePath); }
@@ -83,7 +91,7 @@ export struct DrawingBoard {
               .fontSize(Font.small).fontWeight(FontWeight.Medium).fontColor(this.appearance.onAccent)
           }
         }.id('drawing-add').attributeModifier(Btn.primary).height(44).padding({ left: 16, right: 16 })
-          .systemMaterial(this.appearance.accentControl).accessibilityText(t('添加到消息'))
+          .attributeModifier(systemMaterialAttribute<ButtonAttribute>(this.appearance.accentControl)).accessibilityText(t('添加到消息'))
           .enabled(this.ready && !this.draft.saving).onClick(() => this.add())
       }.width('100%')
     }.width('100%').height(52).padding({ left: 4, right: 4 })
@@ -94,7 +102,7 @@ export struct DrawingBoard {
         if (this.supported) {
           Column() {
             HandwriteComponent({ handwriteController: this.controller as HandwriteController, defaultPenType: PenType.BALLPOINT_PEN,
-              hiddenTools: { hiddenOptionalTools: [HiddenToolType.MOSAIC, HiddenToolType.LASER] },
+              hiddenTools: this.hiddenTools(),
               onInit: () => this.initialize() })
           }.id('drawing-canvas').width('100%').layoutWeight(1).backgroundColor('#ffffff').enabled(!this.draft.saving)
             .borderRadius(Radius.xl).clip(true).border({ width: 0.5, color: $r('app.color.divider') })

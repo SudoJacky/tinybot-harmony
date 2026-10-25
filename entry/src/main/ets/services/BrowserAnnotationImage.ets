@@ -1,13 +1,14 @@
 import { image } from '@kit.ImageKit';
 import { drawing } from '@kit.ArkGraphics2D';
 import { AnnotationStroke } from '../model/BrowserAnnotation';
+import { createEmptyPixel } from './EmptyPixel';
 
 export async function renderBrowserAnnotation(source: image.PixelMap, strokes: AnnotationStroke[]): Promise<image.PixelMap> {
   const info = await source.getImageInfo();
   const scale = Math.min(1, 1600 / Math.max(info.size.width, info.size.height));
   const width = Math.max(1, Math.round(info.size.width * scale));
   const height = Math.max(1, Math.round(info.size.height * scale));
-  const pixel = image.createEmptyPixelMap({ editable: true, pixelFormat: image.PixelMapFormat.RGBA_8888,
+  const pixel = createEmptyPixel({ editable: true, pixelFormat: image.PixelMapFormat.RGBA_8888,
     alphaType: image.AlphaType.OPAQUE, size: { width: width, height: height } });
   try {
     const canvas = new drawing.Canvas(pixel);

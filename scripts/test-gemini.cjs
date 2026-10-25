@@ -8,6 +8,8 @@ let streamScript = () => { throw Error('Unexpected stream'); }, jsonScript = () 
 let destroyed = 0;
 class Decoder { decoder = new TextDecoder(); decodeToString(bytes, options) { return this.decoder.decode(bytes, options); } }
 const kits = {
+  '@kit.BasicServicesKit': { deviceInfo: { sdkApiVersion: 26 } },
+  '@kit.RemoteCommunicationKit': { rcp: { createSession() { throw Error('The API 20 transport must not run on API 26'); } } },
   '@kit.ArkTS': { util: { TextDecoder: Decoder, generateRandomUUID: () => crypto.randomUUID() } },
   '@kit.PerformanceAnalysisKit': { hilog: { info() {}, warn() {}, error() {} } },
   '@kit.AssetStoreKit': { asset: {} },

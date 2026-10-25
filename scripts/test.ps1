@@ -28,6 +28,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Built-in Skills are stale. Run node scripts/bu
 if ($LASTEXITCODE -ne 0) { throw 'Developer diagnostics collection, export and lifecycle tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-unified-logging.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Unified runtime log levels, redaction, export and disabled-path tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-api20-compat.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'API 20 capability gates, redirect-safe transport, bitmap, PDF and web-reading tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-browser.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Browser permission, takeover and runtime pause tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-browser-annotation.cjs')

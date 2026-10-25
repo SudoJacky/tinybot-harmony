@@ -1,7 +1,8 @@
 import { ToolFailure, toolHttpFailure } from '../model/ToolFailure';
 import { t } from '../model/I18n';
-import { http } from '@kit.NetworkKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { util } from '@kit.ArkTS';
+import { CompatHttp } from './CompatHttp';
 import { McpServer } from '../model/Productivity';
 import { Cancellation, RunCancelledError } from './Cancellation';
 import { McpOAuth } from './McpOAuth';
@@ -73,13 +74,12 @@ export class McpClient implements McpConnection {
     const headers: Record<string, string> = { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream', 'MCP-Protocol-Version': this.version };
     if (key) { headers['Authorization'] = 'Bearer ' + key; }
     if (this.session) { headers['Mcp-Session-Id'] = this.session; }
-    const request = http.createHttp();
     return new Promise<Object>((resolve, reject) => {
       let done = false; let code = 0; let text = ''; let bytes = 0; let ended = false;
-      let remove = (): void => {}; let timer = -1;
+      let remove = (): void => {}; let timer = -1; let stop = (): void => {};
       const decoder = new util.TextDecoder('utf-8');
       const finish = (error?: Error | ToolFailure | RunCancelledError, result?: Object): void => {
-        if (done) { return; } done = true; clearTimeout(timer); remove(); request.destroy();
+        if (done) { return; } done = true; clearTimeout(timer); remove(); stop();
         if (error) { reject(error); } else { const empty: Record<string, string> = {}; resolve(result || empty); }
       };
       const inspect = (): void => {
@@ -106,30 +106,38 @@ export class McpClient implements McpConnection {
         }
       });
       if (done) { return; }
-      request.on('headersReceive', (value: Object) => {
-        const received = value as Record<string, string>;
-        for (const name of Object.keys(received)) {
-          if (name.toLowerCase() === 'mcp-session-id') {
-            const session = received[name];
-            if (typeof session === 'string' && /^[\x21-\x7e]{1,512}$/.test(session)) { this.session = session; }
+      // CompatHttp refuses redirects and delivers live chunks on both systems. The parser can
+      // finish as soon as its matching result arrives and cancel a still-open SSE connection.
+      stop = CompatHttp.stream({
+        url: this.server.url, method: 'POST', headers: headers, body: JSON.stringify(body),
+        connectTimeout: 15000, readTimeout: 60000, maxBytes: 2 * 1024 * 1024, dataType: 'string', redirect: 'refuse'
+      }, {
+        onStatus: (status: number): void => { code = status; inspect(); },
+        onHeaders: (received: Record<string, string>): void => {
+          for (const name of Object.keys(received)) {
+            if (name.toLowerCase() === 'mcp-session-id') {
+              const session = received[name];
+              if (typeof session === 'string' && /^[\x21-\x7e]{1,512}$/.test(session)) { this.session = session; }
+            }
           }
+        },
+        onData: (buffer: ArrayBuffer): void => {
+          if (done) { return; } bytes += buffer.byteLength;
+          if (bytes > 1024 * 1024) { finish(new ToolFailure('LIMIT_EXCEEDED', t("MCP 响应超过 1 MB。"), 'reduce_input')); return; }
+          try { text += decoder.decodeToString(new Uint8Array(buffer), { stream: true }); inspect(); }
+          catch (_) { finish(new ToolFailure('INVALID_RESPONSE', t("MCP 返回了无法解析的数据。"), 'inspect_service')); }
+        },
+        onEnd: (): void => {
+          if (done) { return; }
+          try { ended = true; text += decoder.decodeToString(new Uint8Array(0)); inspect(); }
+          catch (_) { finish(new ToolFailure('INVALID_RESPONSE', t("MCP 返回了无法解析的数据。"), 'inspect_service')); }
+        },
+        onError: (error: Error): void => {
+          const code = (error as BusinessError).code;
+          finish(new ToolFailure('NETWORK_ERROR', t("MCP 网络请求失败（") + code + '）。', 'inspect_result_before_retry', { service: 'mcp', nativeCode: code }));
         }
       });
-      request.on('dataReceive', (buffer: ArrayBuffer) => {
-        if (done) { return; } bytes += buffer.byteLength;
-        if (bytes > 1024 * 1024) { finish(new ToolFailure('LIMIT_EXCEEDED', t("MCP 响应超过 1 MB。"), 'reduce_input')); return; }
-        try { text += decoder.decodeToString(new Uint8Array(buffer), { stream: true }); inspect(); }
-        catch (_) { finish(new ToolFailure('INVALID_RESPONSE', t("MCP 返回了无法解析的数据。"), 'inspect_service')); }
-      });
-      request.on('dataEnd', () => {
-        if (done) { return; }
-        try { ended = true; text += decoder.decodeToString(new Uint8Array(0)); inspect(); }
-        catch (_) { finish(new ToolFailure('INVALID_RESPONSE', t("MCP 返回了无法解析的数据。"), 'inspect_service')); }
-      });
-      try { request.requestInStream(this.server.url, { method: http.RequestMethod.POST, header: headers, extraData: JSON.stringify(body),
-        usingCache: false, connectTimeout: 15000, readTimeout: 60000, maxRedirects: 0 }, (error, status) => {
-        if (error) { finish(new ToolFailure('NETWORK_ERROR', t("MCP 网络请求失败（") + error.code + '）。', 'inspect_result_before_retry', { service: 'mcp', nativeCode: error.code })); } else { code = status; inspect(); }
-      }); } catch (error) { finish(error as Error); }
+      if (done) { stop(); }
     });
   }
 }

@@ -1,4 +1,5 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { systemMaterialAttribute } from '../common/MaterialAttributes';
 import { t } from '../model/I18n';
 import { SwipeRow } from '../common/SwipeRow';
 import { util } from '@kit.ArkTS';
@@ -317,7 +318,7 @@ export struct ProductivityPanel {
               Toggle({ type: ToggleType.Switch, isOn: item.enabled }).id('toggle-mcp-' + item.id)
                 .attributeModifier(Styles.toggle)
                 .selectedColor(this.appearance.accent).enabled(!this.locked())
-                .systemMaterial(this.appearance.control)
+                .attributeModifier(systemMaterialAttribute<ToggleAttribute>(this.appearance.control))
                 .onChange((value: boolean) => { this.toggle(item, value); })
             }.width('100%')
             Row({ space: 6 }) {
@@ -409,7 +410,7 @@ export struct ProductivityPanel {
               }.layoutWeight(1).alignItems(HorizontalAlign.Start)
               Toggle({ type: ToggleType.Switch, isOn: this.noAuth }).id('mcp-no-auth').selectedColor(this.appearance.accent)
                 .attributeModifier(Styles.toggle)
-                .systemMaterial(this.appearance.control)
+                .attributeModifier(systemMaterialAttribute<ToggleAttribute>(this.appearance.control))
                 .onChange((value) => { this.noAuth = value; })
             }.width('100%').padding({ left: Space.lg, right: Space.md, top: 10, bottom: 10 }).margin({ top: Space.sm })
             .borderRadius(Radius.sm).backgroundColor($r('app.color.surface'))

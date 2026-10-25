@@ -1,5 +1,4 @@
 import { ToolFailure, toolHttpFailure } from '../model/ToolFailure';
-import { http } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { SearchConfig, SearchResult, SEARCH_REQUEST_MODEL, validateSearchConfig, searchCredentialAlias } from '../model/WebSearch';
@@ -11,11 +10,7 @@ import { RequestUsage } from '../model/Usage';
 import { Cancellation, RunCancelledError } from './Cancellation';
 import { CredentialReader } from './providers/Provider';
 import { SearchTransport } from './WebSearchTools';
-
-class RejectSearchRedirect implements http.HttpInterceptor {
-  interceptorType: http.InterceptorType = http.InterceptorType.REDIRECTION;
-  async interceptorHandle(_request: http.HttpRequestContext, _response: http.HttpResponse): Promise<boolean> { return false; }
-}
+import { CompatHttp, CompatResponse } from './CompatHttp';
 
 export class NativeSearchTransport implements SearchTransport {
   private config: SearchConfig;
@@ -49,32 +44,29 @@ export class NativeSearchTransport implements SearchTransport {
     } catch (error) { record.status = cancellation.cancelled ? 'cancelled' : 'failed'; throw error as Error; }
     finally { record.durationMs = Date.now() - record.startedAt; this.recordUsage(record); }
   }
+  // The search key must never reach a redirect target, so the request refuses redirects on every
+  // supported system and a 3xx therefore surfaces as an ordinary HTTP failure.
   private request(input: SearchHttpRequest, cancellation: Cancellation): Promise<string> {
-    const request = http.createHttp();
     return new Promise<string>((resolve, reject) => {
-      let settled = false; let timer = -1; let unsubscribe = (): void => {};
+      let settled = false; let timer = -1; let unsubscribe = (): void => {}; let abort = (): void => {};
       const finish = (body: string, error?: Error | ToolFailure | RunCancelledError): void => {
-        if (settled) { return; } settled = true; clearTimeout(timer); unsubscribe(); request.destroy();
-        if (error) { reject(error); } else { resolve(body); }
+        if (settled) { return; } settled = true; clearTimeout(timer); unsubscribe();
+        if (error) { abort(); reject(error); } else { resolve(body); }
       };
       timer = setTimeout(() => finish('', new ToolFailure('TIMEOUT', 'Search timed out after 60 seconds.', 'check_connection')), 60000);
       unsubscribe = cancellation.onCancel(() => finish('', new RunCancelledError() as Error));
       if (settled) { return; }
-      try {
-        const chain = new http.HttpInterceptorChain();
-        if (!chain.addChain([new RejectSearchRedirect()]) || !chain.apply(request)) { throw new ToolFailure('INTERNAL_ERROR', 'Unable to prevent search redirects.', 'inspect_error'); }
-        request.request(input.endpoint, {
-          method: http.RequestMethod.POST, usingCache: false, expectDataType: http.HttpDataType.STRING,
-          maxLimit: 1024 * 1024, maxRedirects: 5, connectTimeout: 15000, readTimeout: 60000,
-          header: input.headers, extraData: input.body
-        }, (error: BusinessError, response: http.HttpResponse) => {
-          if (error) { finish('', new ToolFailure('NETWORK_ERROR', 'Search network error (' + error.code + ').', 'check_connection', { nativeCode: error.code })); return; }
-          if (response.responseCode === 402) { finish('', new ToolFailure('QUOTA_EXHAUSTED', 'Search was rejected because the account balance is insufficient.', 'check_quota')); return; }
-          if (response.responseCode !== 200) { finish('', toolHttpFailure(response.responseCode, 'Search HTTP ' + response.responseCode + '. Check the search service configuration and API Key.', 'search')); return; }
-          if (typeof response.result !== 'string') { finish('', new ToolFailure('INVALID_RESPONSE', 'Search returned invalid data.', 'inspect_service')); return; }
-          finish(response.result);
-        });
-      } catch (error) { finish('', error as Error); }
+      CompatHttp.request({
+        url: input.endpoint, method: 'POST', headers: input.headers, body: input.body,
+        connectTimeout: 15000, readTimeout: 60000, maxBytes: 1024 * 1024, dataType: 'string', redirect: 'refuse'
+      }, (stop: () => void) => { abort = stop; }).then((response: CompatResponse) => {
+        if (response.status === 402) { finish('', new ToolFailure('QUOTA_EXHAUSTED', 'Search was rejected because the account balance is insufficient.', 'check_quota')); return; }
+        if (response.status !== 200) { finish('', toolHttpFailure(response.status, 'Search HTTP ' + response.status + '. Check the search service configuration and API Key.', 'search')); return; }
+        finish(response.text);
+      }).catch((error: Error) => {
+        const failure = error as BusinessError;
+        finish('', new ToolFailure('NETWORK_ERROR', 'Search network error (' + failure.code + ').', 'check_connection', { nativeCode: failure.code }));
+      });
     });
   }
 }

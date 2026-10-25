@@ -1,5 +1,6 @@
 import { Diagnostics } from '../model/Diagnostics';
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { menuMaterialAttribute, systemMaterialAttribute } from '../common/MaterialAttributes';
 import { WebUiView } from './WebUiView';
 import { LengthMetrics } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
@@ -89,8 +90,9 @@ struct UiNodeView {
           Text(this.label()).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
           Select(this.options()).value(String(this.value())).selected((this.node.options || []).indexOf(String(this.value())))
             .enabled(this.interactive).accessibilityText(this.label())
-            .backgroundColor(Color.Transparent).fontColor($r('sys.color.font_primary'))
-            .systemMaterial(this.appearance.control).menuSystemMaterial(this.appearance.surface)
+            .backgroundColor(this.appearance.controlBackground).fontColor($r('sys.color.font_primary'))
+            .attributeModifier(systemMaterialAttribute<SelectAttribute>(this.appearance.control))
+            .attributeModifier(menuMaterialAttribute(this.appearance.surface))
             .onSelect((_index: number, value: string) => this.onEdit(this.node, value, true))
         } else if (this.node.kind === 'segmented') {
           Text(this.label()).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
@@ -127,14 +129,14 @@ struct UiNodeView {
             Text(this.label()).fontFamily(this.appearance.fontFamily).fontSize(15).layoutWeight(1).fontColor($r('app.color.text_primary'))
             Toggle({ type: ToggleType.Switch, isOn: this.value() === true }).enabled(this.interactive)
               .attributeModifier(Styles.toggle)
-              .systemMaterial(this.appearance.control)
+              .attributeModifier(systemMaterialAttribute<ToggleAttribute>(this.appearance.control))
               .accessibilityText(this.label()).onChange((value: boolean) => this.onEdit(this.node, value, true))
           }.width('100%')
         } else if (this.node.kind === 'slider') {
           Text(this.label() + ': ' + String(this.value())).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
           Slider({ value: Number(this.value()), min: this.node.min, max: this.node.max, step: this.node.step || 1 })
             .enabled(this.interactive).accessibilityText(this.label())
-            .systemMaterial(this.appearance.control)
+            .attributeModifier(systemMaterialAttribute<SliderAttribute>(this.appearance.control))
             .onChange((value: number, mode: SliderChangeMode) => this.onEdit(this.node, value, mode === SliderChangeMode.End || mode === SliderChangeMode.Click))
         } else if (this.node.kind === 'progress') {
           Text(this.label()).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
