@@ -45,3 +45,52 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  mirror:
+    name: Publish sudotinybot.cn documentation
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+      - run: npm ci
+        working-directory: docs
+      - name: Build documentation for the website
+        run: npm run build
+        working-directory: docs
+        env:
+          DOCS_TARGET: sudotinybot
+      - name: Publish with the restricted documentation key
+        env:
+          DOCS_DEPLOY_KEY: ${{ secrets.DOCS_DEPLOY_KEY }}
+          DOCS_DEPLOY_KNOWN_HOSTS: ${{ secrets.DOCS_DEPLOY_KNOWN_HOSTS }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          DEPLOY_RUN: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          test -n "$DOCS_DEPLOY_KEY"
+          test -n "$DOCS_DEPLOY_KNOWN_HOSTS"
+          test -s docs/.vitepress/dist/index.html
+          test -s docs/.vitepress/dist/404.html
+          install -m 700 -d "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$DOCS_DEPLOY_KEY" > "$RUNNER_TEMP/docs-key"
+          printf '%s\n' "$DOCS_DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/docs-known-hosts"
+          trap 'rm -f "$RUNNER_TEMP/docs-key"' EXIT
+          tar -C docs/.vitepress/dist -czf "$RUNNER_TEMP/docs.tar.gz" .
+          archive_sha=$(sha256sum "$RUNNER_TEMP/docs.tar.gz" | cut -d ' ' -f 1)
+          ssh -i "$RUNNER_TEMP/docs-key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/docs-known-hosts" \
+            tinybot-docs-deploy@121.36.225.61 \
+            "publish $archive_sha $SOURCE_COMMIT $DEPLOY_RUN" < "$RUNNER_TEMP/docs.tar.gz"
+          echo "Published https://sudotinybot.cn/docs/ from $SOURCE_COMMIT" >> "$GITHUB_STEP_SUMMARY"
