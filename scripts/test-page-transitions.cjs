@@ -69,8 +69,10 @@ const Browser = probe('pages/Index', 'Index', ['closeBrowser', 'browserPresenceC
 const calls = [];
 const browser = Object.assign(new Browser(), { browserExpanded: true, browserPresent: true, browserClosing: false,
   detailTabs: ['browser'], activeDetailTab: 'browser', detailPaneOpen: true, detailReveal: 1,
+  detailClosing: false, detailClosingLauncher: false, detailAnim: 0,
   browser: { open: true, takeOver: () => calls.push('pause'), close: () => calls.push('close') },
-  getUIContext: () => ({ getFocusController: () => ({ clearFocus() {} }), animateTo(_options, update) { update(); } }) });
+  getUIContext: () => ({ getFocusController: () => ({ clearFocus() {} }),
+    animateTo(_options, update) { update(); if (_options.onFinish) { _options.onFinish(); } } }) });
 browser.closeBrowser(); assert.deepEqual(calls, ['pause']); assert.equal(browser.browserExpanded, false);
 browser.browserPresenceChanged(false); assert.deepEqual(calls, ['pause', 'close']);
 browser.browserExpanded = true; browser.closeBrowser(); browser.setBrowserExpanded(true); browser.browserPresenceChanged(false);

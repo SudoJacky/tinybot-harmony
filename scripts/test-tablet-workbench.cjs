@@ -82,10 +82,12 @@ const draft = { text: 'unsent input', attachments: ['image'] }, active = { id: '
 const session = {}, browser = {};
 const page = Object.assign(new Page(), { app: { active }, session, browser, windowWidth: 0,
   workspaceOpen: false, workspaceRequest: 0, workspaceCloseRequest: 0,
-  detailTabs: [], activeDetailTab: '', detailPaneOpen: false, detailReveal: 0, workspaceTabCloseRequest: 0,
+  detailTabs: [], activeDetailTab: '', detailPaneOpen: false, detailReveal: 0,
+  detailClosing: false, detailClosingLauncher: false, detailAnim: 0, workspaceTabCloseRequest: 0,
   previewId: '', previewThreadId: '', browserExpanded: false,
   drawerOpen: true, drawerDragging: true, drawerReveal: 0.6, drawerContentActive: true, drawerAnimation: 4,
-  getUIContext: () => ({ getFocusController: () => ({ clearFocus() {} }), animateTo(_options, update) { update(); } }),
+  getUIContext: () => ({ getFocusController: () => ({ clearFocus() {} }),
+    animateTo(_options, update) { update(); if (_options.onFinish) { _options.onFinish(); } } }),
   setDrawer() {}, setBrowserExpanded(value) { this.browserExpanded = value; } });
 page.windowChanged(1200);
 assert.equal(page.drawerOpen, false); assert.equal(page.drawerReveal, 0); assert.equal(page.drawerAnimation, 5);
@@ -281,6 +283,7 @@ assert.match(indexSource, /detailReveal/, 'The column reveal drives one shared a
 assert.match(indexSource, /this\.detailGeometry\(\)\.detailWidth \* this\.detailReveal/, 'The chat spacer follows the column reveal');
 assert.match(indexSource, /this\.windowWidth - this\.detailGeometry\(\)\.detailWidth \* this\.detailReveal/, 'The panel slides from the right edge');
 assert.match(indexSource, /duration: open \? Motion\.medium : Motion\.fast/, 'Opening and closing share the pane body timing');
+assert.match(indexSource, /detailClosingLauncher/, 'The empty launcher stays visible while the column closes');
 
 // Both long sheets are modal cards: a visible mask dismisses on an outside tap,
 // a fixed large detent bounds the scroll viewport, and the content reserves the

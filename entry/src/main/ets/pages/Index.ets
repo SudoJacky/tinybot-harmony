@@ -88,6 +88,11 @@ struct Index {
   // 0 = the column is fully off-screen, 1 = fully docked. The chat width and
   // the column geometry both read this value so they move as one animation.
   @State private detailReveal: number = 0;
+  // Kept true until the close animation completes: the reveal state already
+  // holds its 0 target, so it cannot by itself keep the host visible.
+  @State private detailClosing: boolean = false;
+  @State private detailClosingLauncher: boolean = false;
+  private detailAnim: number = 0;
   @State private detailTabs: string[] = [];
   @State private activeDetailTab: string = '';
   @State private previewId: string = '';
@@ -189,7 +194,8 @@ struct Index {
       this.app.stop(); this.browser.close(); this.browserExpanded = false; this.showToolScope = false;
       this.voiceRequest = ''; this.paths.clear(); this.setDrawer(false);
       this.workspaceOpen = false; this.previewVisible = false; this.previewId = '';
-      this.detailPaneOpen = false; this.detailReveal = 0; this.detailTabs = []; this.activeDetailTab = '';
+      this.detailAnim++; this.detailPaneOpen = false; this.detailReveal = 0; this.detailClosing = false;
+      this.detailClosingLauncher = false; this.detailTabs = []; this.activeDetailTab = '';
       this.workspacePresent = false; this.previewPresent = false; this.browserPresent = false; this.browserClosing = false;
     }
   }
@@ -299,10 +305,12 @@ struct Index {
   }
 
   private hasPreview(): boolean { return this.previewId.length > 0 && this.previewThreadId === this.app.active.id; }
-  // The pane stays laid out through its exit animations: the presence flags are
-  // raised until AnimatedPage reports that the outgoing body is gone.
+  // The pane stays laid out through its exit animations: the reveal keeps an
+  // empty launcher visible while it slides away, and the presence flags are
+  // raised until AnimatedPage reports that an outgoing body is gone.
   private detailOpen(): boolean {
-    return !!(this.detailPaneOpen || this.workspacePresent || this.previewPresent || this.browserPresent);
+    return !!(this.detailPaneOpen || this.detailClosing || this.workspacePresent ||
+      this.previewPresent || this.browserPresent);
   }
 
   // Geometry for the open column, independent of the exit-presence flags. The
@@ -312,12 +320,16 @@ struct Index {
       this.historyPreferredWidth, this.detailPreferredWidth);
   }
 
-  private setDetailPane(open: boolean): void {
+  private setDetailPane(open: boolean, fromLauncher: boolean = false): void {
+    const token = ++this.detailAnim;
     this.detailPaneOpen = open;
+    this.detailClosing = !open;
+    this.detailClosingLauncher = !open && fromLauncher;
     const target = open ? 1 : 0;
-    this.getUIContext().animateTo({ duration: open ? Motion.medium : Motion.fast, curve: Motion.standard }, () => {
-      this.detailReveal = target;
-    });
+    this.getUIContext().animateTo({ duration: open ? Motion.medium : Motion.fast, curve: Motion.standard,
+      onFinish: () => { if (token === this.detailAnim) { this.detailClosing = false; this.detailClosingLauncher = false; } } }, () => {
+        this.detailReveal = target;
+      });
   }
 
   // A tab is available while its panel owns content. A preview whose conversation
@@ -405,7 +417,7 @@ struct Index {
 
   private toggleDetailPane(): void {
     this.getUIContext().getFocusController().clearFocus();
-    if (this.detailPaneOpen) { this.setDetailPane(false); return; }
+    if (this.detailPaneOpen) { this.setDetailPane(false, this.detailTabsAvailable().length === 0); return; }
     this.setDetailPane(true);
     const available = this.detailTabsAvailable();
     if (!available.includes(this.activeDetailTab)) { this.activeDetailTab = available.length > 0 ? available[0] : ''; }
@@ -517,7 +529,7 @@ struct Index {
     }
     if (this.detailPaneOpen && active === 'preview' && this.hasPreview()) { this.closePreview(); return true; }
     if (this.detailPaneOpen && active === 'files' && this.workspaceOpen) { this.workspaceCloseRequest++; return true; }
-    if (this.detailPaneOpen) { this.setDetailPane(false); return true; }
+    if (this.detailPaneOpen) { this.setDetailPane(false, this.detailTabsAvailable().length === 0); return true; }
     return false;
   }
 
@@ -1178,9 +1190,11 @@ struct Index {
                 onSettings: () => { this.hideBrowserTab(); this.openSettings(); },
                 onClose: () => this.closeBrowser(), onDismiss: () => this.hideBrowserTab() })
             }
-            AnimatedPage({ visible: this.workbench().docked && this.detailPaneOpen && this.detailTabsAvailable().length === 0 }) {
+            AnimatedPage({ visible: this.workbench().docked &&
+              ((this.detailPaneOpen && this.detailTabsAvailable().length === 0) ||
+                (this.detailClosing && this.detailClosingLauncher)) }) {
               DetailLauncher({ onFiles: () => this.openFiles(), onBrowser: () => this.openBrowser(),
-                onClose: () => { this.setDetailPane(false); } })
+                onClose: () => { this.setDetailPane(false, true); } })
             }
           }.width('100%').layoutWeight(1)
         }.width(this.workbench().docked ? this.detailGeometry().detailWidth - 6 : '100%').height('100%')
