@@ -85,6 +85,9 @@ struct Index {
   // Docked detail panes are tabs. Presence flags above stay the source of truth
   // for each panel; these track order, focus and whether the column is shown.
   @State private detailPaneOpen: boolean = false;
+  // 0 = the column is fully off-screen, 1 = fully docked. The chat width and
+  // the column geometry both read this value so they move as one animation.
+  @State private detailReveal: number = 0;
   @State private detailTabs: string[] = [];
   @State private activeDetailTab: string = '';
   @State private previewId: string = '';
@@ -186,7 +189,7 @@ struct Index {
       this.app.stop(); this.browser.close(); this.browserExpanded = false; this.showToolScope = false;
       this.voiceRequest = ''; this.paths.clear(); this.setDrawer(false);
       this.workspaceOpen = false; this.previewVisible = false; this.previewId = '';
-      this.detailPaneOpen = false; this.detailTabs = []; this.activeDetailTab = '';
+      this.detailPaneOpen = false; this.detailReveal = 0; this.detailTabs = []; this.activeDetailTab = '';
       this.workspacePresent = false; this.previewPresent = false; this.browserPresent = false; this.browserClosing = false;
     }
   }
@@ -302,6 +305,21 @@ struct Index {
     return !!(this.detailPaneOpen || this.workspacePresent || this.previewPresent || this.browserPresent);
   }
 
+  // Geometry for the open column, independent of the exit-presence flags. The
+  // reveal scales this width so the chat gains exactly what the column loses.
+  private detailGeometry(): WorkbenchLayout {
+    return new WorkbenchLayout(this.windowWidth, true, !this.historyCollapsed,
+      this.historyPreferredWidth, this.detailPreferredWidth);
+  }
+
+  private setDetailPane(open: boolean): void {
+    this.detailPaneOpen = open;
+    const target = open ? 1 : 0;
+    this.getUIContext().animateTo({ duration: open ? Motion.medium : Motion.fast, curve: Motion.standard }, () => {
+      this.detailReveal = target;
+    });
+  }
+
   // A tab is available while its panel owns content. A preview whose conversation
   // changed keeps its order slot but leaves the strip until that chat returns.
   private detailTabPresent(tab: string): boolean {
@@ -344,7 +362,7 @@ struct Index {
   private openDetailTab(tab: string): void {
     if (!this.detailTabs.includes(tab)) { this.detailTabs = this.detailTabs.concat(tab); }
     this.activeDetailTab = tab;
-    this.detailPaneOpen = true;
+    this.setDetailPane(true);
     this.getUIContext().getFocusController().clearFocus();
     this.setDrawer(false);
   }
@@ -354,7 +372,7 @@ struct Index {
     this.detailTabs = remaining;
     const available = remaining.filter((item: string) => this.detailTabPresent(item));
     if (this.activeDetailTab === tab) { this.activeDetailTab = available.length > 0 ? available[0] : ''; }
-    if (available.length === 0) { this.detailPaneOpen = false; }
+    if (available.length === 0) { this.setDetailPane(false); }
   }
 
   private closeDetailTab(tab: string): void {
@@ -387,8 +405,8 @@ struct Index {
 
   private toggleDetailPane(): void {
     this.getUIContext().getFocusController().clearFocus();
-    if (this.detailPaneOpen) { this.detailPaneOpen = false; return; }
-    this.detailPaneOpen = true;
+    if (this.detailPaneOpen) { this.setDetailPane(false); return; }
+    this.setDetailPane(true);
     const available = this.detailTabsAvailable();
     if (!available.includes(this.activeDetailTab)) { this.activeDetailTab = available.length > 0 ? available[0] : ''; }
     this.setDrawer(false);
@@ -499,7 +517,7 @@ struct Index {
     }
     if (this.detailPaneOpen && active === 'preview' && this.hasPreview()) { this.closePreview(); return true; }
     if (this.detailPaneOpen && active === 'files' && this.workspaceOpen) { this.workspaceCloseRequest++; return true; }
-    if (this.detailPaneOpen) { this.detailPaneOpen = false; return true; }
+    if (this.detailPaneOpen) { this.setDetailPane(false); return true; }
     return false;
   }
 
@@ -1094,7 +1112,7 @@ struct Index {
     .margin({ top: this.windowWidth >= 840 ? 6 : 0, bottom: this.windowWidth >= 840 ? 6 : 0,
       right: this.windowWidth >= 840 && !this.workbench().docked ? 6 : 0 })
     .borderRadius(this.windowWidth >= 840 ? Radius.xl : 0).clip(this.windowWidth >= 840)
-    Column().width(this.workbench().docked ? this.workbench().detailWidth : 0).height('100%')
+    Column().width(this.workbench().docked ? this.detailGeometry().detailWidth * this.detailReveal : 0).height('100%')
     }.width('100%').height('100%')
     // Cover both the navigation title bar and content, keeping the measured drawer mounted.
     if (this.app.ready) {
@@ -1110,13 +1128,13 @@ struct Index {
         .width(12).height('calc(100% - 12vp)')
         .position({ x: this.workbench().historyWidth - 4, y: 6 })
     }
-    if (this.app.ready && this.workbench().docked && !this.drawerOpen && !this.drawerDragging && this.drawerReveal <= 0) {
+    if (this.app.ready && this.workbench().docked && this.detailReveal >= 1 && !this.drawerOpen && !this.drawerDragging && this.drawerReveal <= 0) {
       PaneDivider({ label: t('调整侧区宽度'),
         onResizeStart: () => this.beginResize(true),
         onResize: (dx: number) => this.resizeDetail(dx),
         onResizeEnd: () => this.endResize(true) })
         .width(12).height('calc(100% - 12vp)')
-        .position({ x: this.workbench().detailX - 8, y: 6 })
+        .position({ x: this.detailGeometry().detailX - 8, y: 6 })
     }
     }.width('100%').height('100%')
       }, (locale: string) => locale)
@@ -1125,15 +1143,15 @@ struct Index {
       // One docked surface owns the strip and the panel bodies. The bodies keep
       // their position in the tree across tab switches so editors, previews and
       // the Web host keep their state; only the tab strip decides which is shown.
-      Stack() {
+      Stack({ alignContent: Alignment.TopStart }) {
         Column() {
-          if (this.workbench().docked && this.detailPaneOpen && this.detailTabsAvailable().length > 0) {
+          if (this.workbench().docked && this.detailOpen() && this.detailTabsAvailable().length > 0) {
             DetailTabs({ tabs: this.detailTabItems(), active: this.currentDetailTab(),
               onSelect: (id: string) => { this.activeDetailTab = id; },
               onClose: (id: string) => this.closeDetailTab(id),
               onAddFiles: () => this.addFilesTab(),
               onAddBrowser: () => this.addBrowserTab(),
-              onCollapse: () => { this.detailPaneOpen = false; } })
+              onCollapse: () => { this.setDetailPane(false); } })
           }
           Stack() {
             AnimatedPage({ visible: this.detailTabVisible('files'), retained: this.workspaceOpen,
@@ -1162,15 +1180,16 @@ struct Index {
             }
             AnimatedPage({ visible: this.workbench().docked && this.detailPaneOpen && this.detailTabsAvailable().length === 0 }) {
               DetailLauncher({ onFiles: () => this.openFiles(), onBrowser: () => this.openBrowser(),
-                onClose: () => { this.detailPaneOpen = false; } })
+                onClose: () => { this.setDetailPane(false); } })
             }
           }.width('100%').layoutWeight(1)
-        }.width('100%').height('100%')
+        }.width(this.workbench().docked ? this.detailGeometry().detailWidth - 6 : '100%').height('100%')
         .backgroundColor(this.detailOpen() ? $r('app.color.surface') : Color.Transparent)
-      }.width(this.workbench().docked ? this.workbench().detailWidth - 6 : '100%')
+      }.width(this.workbench().docked ? Math.max(0, this.detailGeometry().detailWidth * this.detailReveal - 6) : '100%')
         .height(this.windowWidth >= 840 ? 'calc(100% - 12vp)' : '100%')
         .borderRadius(this.windowWidth >= 840 ? Radius.xl : 0).clip(true)
-        .position({ x: this.workbench().detailX, y: this.windowWidth >= 840 ? 6 : 0 })
+        .position({ x: this.workbench().docked ? this.windowWidth - this.detailGeometry().detailWidth * this.detailReveal : 0,
+          y: this.windowWidth >= 840 ? 6 : 0 })
         .hitTestBehavior(this.detailOpen() ? HitTestMode.Default : HitTestMode.None)
         .enabled(this.detailOpen())
         // A closed host keeps its retained bodies mounted but must not lay a

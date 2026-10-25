@@ -75,16 +75,17 @@ console.log('PASS phone, rail, two-pane and three-pane boundaries, drag clamps a
 const Page = probe('pages/Index', 'Index', ['hasPreview', 'detailOpen', 'workbench', 'windowChanged', 'openFiles', 'openPreview', 'closePreview', 'previewPresenceChanged', 'onBackPress',
   'beginResize', 'resizeHistory', 'resizeDetail', 'endResize', 'openDetailTab', 'removeDetailTab', 'closeDetailTab',
   'workspaceClosed', 'toggleDetailPane', 'currentDetailTab', 'detailTabVisible', 'detailTabsAvailable',
-  'detailTabPresent', 'hideBrowserTab'], { WorkbenchLayout });
+  'detailTabPresent', 'hideBrowserTab', 'setDetailPane', 'detailGeometry'],
+  { WorkbenchLayout, Motion: { medium: 220, fast: 160 } });
 assert.equal(typeof Page.prototype.detailTabsAvailable, 'function', 'Tab availability is part of the emitted page');
 const draft = { text: 'unsent input', attachments: ['image'] }, active = { id: 'thread', draft, messages: [] };
 const session = {}, browser = {};
 const page = Object.assign(new Page(), { app: { active }, session, browser, windowWidth: 0,
   workspaceOpen: false, workspaceRequest: 0, workspaceCloseRequest: 0,
-  detailTabs: [], activeDetailTab: '', detailPaneOpen: false, workspaceTabCloseRequest: 0,
+  detailTabs: [], activeDetailTab: '', detailPaneOpen: false, detailReveal: 0, workspaceTabCloseRequest: 0,
   previewId: '', previewThreadId: '', browserExpanded: false,
   drawerOpen: true, drawerDragging: true, drawerReveal: 0.6, drawerContentActive: true, drawerAnimation: 4,
-  getUIContext: () => ({ getFocusController: () => ({ clearFocus() {} }) }),
+  getUIContext: () => ({ getFocusController: () => ({ clearFocus() {} }), animateTo(_options, update) { update(); } }),
   setDrawer() {}, setBrowserExpanded(value) { this.browserExpanded = value; } });
 page.windowChanged(1200);
 assert.equal(page.drawerOpen, false); assert.equal(page.drawerReveal, 0); assert.equal(page.drawerAnimation, 5);
@@ -276,6 +277,10 @@ assert.match(toolScopeSource, /systemInsets/, 'The tool sheet reads the navigati
 assert.match(toolScopeSource, /Space\.lg \+ this\.insetBottom/, 'The last capability clears the navigation indicator');
 assert.match(toolScopeSource, /embedded: true/, 'The capability list joins the sheet\'s single scroll surface');
 assert.match(toolScopeSource, /Scroll\.create\(\)/, 'The tool scope has one outer scroll region');
+assert.match(indexSource, /detailReveal/, 'The column reveal drives one shared animation');
+assert.match(indexSource, /this\.detailGeometry\(\)\.detailWidth \* this\.detailReveal/, 'The chat spacer follows the column reveal');
+assert.match(indexSource, /this\.windowWidth - this\.detailGeometry\(\)\.detailWidth \* this\.detailReveal/, 'The panel slides from the right edge');
+assert.match(indexSource, /duration: open \? Motion\.medium : Motion\.fast/, 'Opening and closing share the pane body timing');
 
 // Both long sheets are modal cards: a visible mask dismisses on an outside tap,
 // a fixed large detent bounds the scroll viewport, and the content reserves the
