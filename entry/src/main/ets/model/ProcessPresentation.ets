@@ -1,5 +1,6 @@
 import { t } from './I18n';
-import { AgentStep, ToolExecution } from './Agent';
+import { AgentStep, ToolExecution, toolReceipts } from './Agent';
+import { referencePreviewId } from './PreviewReferences';
 
 export interface ProcessSummary { operations: number; failures: number; }
 // tool < 0 marks the step's thinking; otherwise an index into the step's tools.
@@ -61,8 +62,8 @@ export function buildTimeline(steps: AgentStep[]): TimelineEntry[] {
     const items: ProcessItem[] = [];
     if ((step.reasoningContent || '').trim().length > 0) { items.push({ step: index, tool: -1 }); }
     // A published surface creates a narration entry without joining every HTML snapshot.
-    if (step.content.trim().length > 0 || step.tools.some((tool) => tool.status === 'complete' &&
-      tool.call.function.name === 'publish_preview' && (tool.previewContent || '').trim().length > 0)) {
+    if (step.content.trim().length > 0 || toolReceipts(step.tools).some((tool) => tool.status === 'complete' &&
+      tool.call.function.name === 'publish_preview' && (tool.previewContent || '').trim().length > 0 && !referencePreviewId(tool))) {
       group = appendItems(entries, group, items);
       group = undefined; entries.push({ kind: 'text', key: 'text-' + index, step: index, items: [] });
       items.splice(0);
@@ -90,9 +91,12 @@ export function foldsToAnswer(entries: TimelineEntry[]): boolean {
 }
 
 export function persistentTool(tool: ToolExecution): boolean {
-  const name = tool.call.function.name;
-  return (name === 'publish_data_view' && tool.status === 'complete') ||
-    (name === 'request_user_input' && ['interrupted', 'cancelled'].includes(tool.status));
+  return persistentTools([tool]).length > 0;
+}
+
+export function persistentTools(tools: ToolExecution[]): ToolExecution[] {
+  return toolReceipts(tools).filter((tool) => (tool.call.function.name === 'publish_data_view' && tool.status === 'complete') ||
+    (tool.call.function.name === 'request_user_input' && ['interrupted', 'cancelled'].includes(tool.status)));
 }
 
 interface ToolTarget { path?: string; url?: string; }

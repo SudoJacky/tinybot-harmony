@@ -73,7 +73,7 @@
 
 | 范围 | 可用工具 |
 | --- | --- |
-| `execution` | 继承当前已启用的工作工具，但过滤掉 `publish_data_view` 与所有 `team_*` 工具 |
+| `execution` | 继承当前已启用的工作工具，但过滤掉所有 `team_*` 工具 |
 | `research` | 读取类工具，加上 `read_web`、`search_web`、`read_reference`、`write_file`、`edit_file` |
 | `review` | 仅读取类工具：文件读取与检索、附件、Skill、更新计划、代码沙箱 |
 

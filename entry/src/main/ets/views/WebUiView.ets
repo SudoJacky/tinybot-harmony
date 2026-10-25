@@ -220,6 +220,7 @@ export struct WebUiView {
       Stack({ alignContent: Alignment.TopStart }) {
       if (this.renderWeb) {
       Web({ src: 'about:blank', controller: this.controller })
+        .backgroundColor(Color.Transparent)
         .width('100%').height(this.heightValue).javaScriptAccess(true).domStorageAccess(false).databaseAccess(false)
         .fileAccess(false).onlineImageAccess(false).blockNetwork(true)
         .onControllerAttached(() => { if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'attached', { instanceId: this.instanceId }); }; this.attached = true; this.syncActivity(); })

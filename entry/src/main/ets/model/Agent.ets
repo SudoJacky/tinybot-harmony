@@ -122,6 +122,17 @@ export interface ToolExecution {
 
 export interface PreviewScreenshot { image: Attachment; width: number; height: number; viewportWidth: number; }
 
+// Orchestration children share this conversation's workspace. Team workers remain separate.
+// Keep committed child results even when their outer orchestration fails or is interrupted.
+export function toolReceipts(tools: ToolExecution[]): ToolExecution[] {
+  const result: ToolExecution[] = [];
+  for (const tool of tools) {
+    result.push(tool);
+    if (tool.call.function.name === 'orchestrate') { result.push(...(tool.children || [])); }
+  }
+  return result;
+}
+
 interface LegacyWebIcon { favicon?: string; }
 export function migrateWebIcons(steps: AgentStep[]): void {
   for (const step of steps) {
@@ -196,7 +207,7 @@ export function stepMessages(step: AgentStep, includeSteering: boolean = true): 
   for (const tool of step.tools) {
     result.push({ role: 'tool', toolCallId: tool.call.id, content: tool.output });
   }
-  for (const tool of step.tools.filter((item) => item.status === 'complete' && !!item.previewScreenshot)) {
+  for (const tool of toolReceipts(step.tools).filter((item) => item.status === 'complete' && !!item.previewScreenshot)) {
     const screenshot = tool.previewScreenshot as PreviewScreenshot;
     result.push({ role: 'user', previewScreenshot: true, attachments: [screenshot.image],
       content: 'Client-rendered preview screenshot for publish_preview call ' + tool.call.id +
@@ -271,33 +282,38 @@ export function validateSteps(steps: AgentStep[]): void {
         throw new Error(t("本地工具记录损坏，原文件已保留。"));
       }
       ids.add(tool.call.id);
-      if (tool.previewContent !== undefined && (tool.call.function.name !== 'publish_preview' || tool.status !== 'complete' ||
-        typeof tool.previewContent !== 'string' || tool.previewContent.length > 96100)) {
-        throw new Error('Invalid published preview snapshot');
-      }
-      if (tool.previewScreenshot !== undefined) {
-        const screenshot = tool.previewScreenshot;
-        if (tool.call.function.name !== 'publish_preview' || tool.status !== 'complete' || !tool.previewContent ||
-          !screenshot || !Number.isSafeInteger(screenshot.width) || screenshot.width < 1 || screenshot.width > 1600 ||
-          !Number.isSafeInteger(screenshot.height) || screenshot.height < 1 || screenshot.height > 1600 ||
-          !Number.isFinite(screenshot.viewportWidth) || screenshot.viewportWidth <= 0 || screenshot.image?.mime !== 'image/jpeg') {
-          throw new Error('Invalid preview screenshot');
-        }
-        validateAttachments([screenshot.image]);
-      }
+      validatePreviewReceipt(tool);
       if (tool.children !== undefined) {
         if (tool.call.function.name !== 'orchestrate' || !Array.isArray(tool.children) || tool.children.length > 32) {
           throw new Error('Invalid orchestration receipts');
         }
         for (const child of tool.children) {
           validateToolCalls([child?.call]);
-          if (child.children !== undefined || child.previewContent !== undefined || child.previewScreenshot !== undefined || ids.has(child.call.id) || typeof child.output !== 'string' ||
+          if (child.children !== undefined || ids.has(child.call.id) || typeof child.output !== 'string' ||
             !['pending', 'running', 'complete', 'failed', 'cancelled', 'interrupted'].includes(child.status)) {
             throw new Error('Invalid orchestration child receipt');
           }
           ids.add(child.call.id);
+          validatePreviewReceipt(child);
         }
       }
     }
+  }
+}
+
+function validatePreviewReceipt(tool: ToolExecution): void {
+  if (tool.previewContent !== undefined && (tool.call.function.name !== 'publish_preview' || tool.status !== 'complete' ||
+    typeof tool.previewContent !== 'string' || tool.previewContent.length > 96100)) {
+    throw new Error('Invalid published preview snapshot');
+  }
+  if (tool.previewScreenshot !== undefined) {
+    const screenshot = tool.previewScreenshot;
+    if (tool.call.function.name !== 'publish_preview' || tool.status !== 'complete' || !tool.previewContent ||
+      !screenshot || !Number.isSafeInteger(screenshot.width) || screenshot.width < 1 || screenshot.width > 1600 ||
+      !Number.isSafeInteger(screenshot.height) || screenshot.height < 1 || screenshot.height > 1600 ||
+      !Number.isFinite(screenshot.viewportWidth) || screenshot.viewportWidth <= 0 || screenshot.image?.mime !== 'image/jpeg') {
+      throw new Error('Invalid preview screenshot');
+    }
+    validateAttachments([screenshot.image]);
   }
 }

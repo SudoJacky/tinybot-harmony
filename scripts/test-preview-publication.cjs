@@ -20,7 +20,7 @@ const { WebUiPreflight } = from('services/WebUiPreflight');
 const { Cancellation } = from('services/Cancellation');
 const { runAgentLoop } = from('services/AgentLoop');
 const { parseUiSurface } = from('model/InteractiveUi');
-const { stepDisplayContent } = from('model/PublishedPreview');
+const { stepDisplayContent, publishedAnswerParts } = from('model/PublishedPreview');
 const { buildTimeline } = from('model/ProcessPresentation');
 const { validateSteps } = from('model/Agent');
 const { parseAppData, requestHistory } = from('model/Conversation');
@@ -39,7 +39,7 @@ const call = (name, args) => ({ id: 'call-' + ++serial, type: 'function', functi
 async function run(args, signal = new Cancellation()) {
   const inputs = [], checkpoints = [], turn = { content: '', steps: [] };
   await runAgentLoop({ turn, tools, maxSteps: 3, messages: [], model: { stream: async messages => {
-    inputs.push(clone(messages)); return inputs.length === 1 ? { content: '', toolCalls: [call('publish_preview', args)] } : { content: 'Ready.', toolCalls: [] };
+    inputs.push(clone(messages)); const receipt=turn.steps[0]?.tools[0]; const ref=receipt?.status==='complete'?JSON.parse(receipt.output).reference:''; return inputs.length === 1 ? { content: '', toolCalls: [call('publish_preview', args)] } : { content: 'Ready.\n\n'+(ref||''), toolCalls: [] };
   } } }, signal, { event: () => {}, checkpoint: async () => checkpoints.push(clone(turn)) });
   return { turn, inputs, checkpoints, receipt: turn.steps[0].tools[0] };
 }
@@ -55,7 +55,7 @@ async function main() {
   assert.ok(!JSON.stringify(published.inputs).includes('<svg'));
   const specOf = result => JSON.parse(parseUiSurface(result.receipt.previewContent, '0').nodes[0].data);
   assert.equal(specOf(published).html, svg); assert.equal(specOf(published).autoHeight, true);
-  assert.ok(buildTimeline(published.turn.steps).some(x => x.kind === 'text' && x.step === 0));
+  assert.ok(!buildTimeline(published.turn.steps).some(x => x.kind === 'text' && x.step === 0), 'Tool publication does not create a preview entry');
   assert.ok(published.checkpoints.some(x => x.steps[0].tools[0]?.previewContent === published.receipt.previewContent));
   const js = 'const text = "</script> and \\"quotes\\"";\nawait Promise.resolve();\ndocument.body.textContent = text;';
   files.set('scene.js', js);
@@ -64,11 +64,12 @@ async function main() {
   assert.equal(scene.receipt.status, 'complete'); assert.equal(spec.js, js); assert.equal(spec.html, '');
   assert.equal(spec.library, 'three'); assert.equal(spec.height, 560); assert.equal(spec.autoHeight, false);
   files.set('scene.js', 'changed'); files.delete('scene.js');
-  const content = stepDisplayContent(scene.turn.steps[0]);
+  assert.equal(stepDisplayContent(scene.turn.steps[0]), '');
+  const content = scene.receipt.previewContent;
   assert.equal(JSON.parse(parseUiSurface(content, '0').nodes[0].data).js, js);
   const view = new AgentStepViewModel({ content: '', tools: [{ ...scene.receipt, status: 'running', previewContent: undefined }] });
   const retained = view.tools[0]; view.update(scene.turn.steps[0]);
-  assert.equal(view.tools[0], retained); assert.equal(stepDisplayContent(view), content);
+  assert.equal(view.tools[0], retained); assert.equal(stepDisplayContent(view), '');
   // ArkUI can synchronously render when an observed tool changes to complete.
   // Exercise that callback during the real projection, before update() returns.
   const { stepPreviews } = from('model/PublishedPreview');
@@ -79,7 +80,7 @@ async function main() {
     get: () => liveStatus,
     set: value => { liveStatus = value; if (value === 'complete') {
       const cards = stepPreviews('live', live, 0, ['live:' + liveTool.call.id]);
-      assert.equal(cards.length, 1); assert.equal(cards[0].path, 'scene.js'); rendered++;
+      assert.equal(cards.length, 0, 'Completing a tool never mounts a new preview'); rendered++;
     } }
   });
   live.update(scene.turn.steps[0]);
@@ -132,14 +133,15 @@ async function main() {
     { id: 'u', role: 'user', content: 'Preview', status: 'complete', error: '' },
     { id: 'a', role: 'assistant', content: 'Ready.', status: 'complete', error: '', steps: scene.turn.steps } ];
   const restored = parseAppData(JSON.stringify(data));
-  assert.equal(stepDisplayContent(restored.threads[0].messages[1].steps[0]), content);
+  assert.equal(stepDisplayContent(restored.threads[0].messages[1].steps[0]), '');
+  assert.equal(publishedAnswerParts('a',restored.threads[0].messages[1].steps,1,'complete',[]).find(p=>p.kind==='preview').preview.content,content);
   assert.ok(!JSON.stringify(requestHistory(restored.threads[0].messages, '')).includes(js));
   const fixture = new Fixture(restored); await fixture.session.initialize();
   const reboot = new Fixture(parseAppData(fixture.repository.saved)); await reboot.session.initialize();
   assert.equal(await reboot.session.forkThread('a'), true);
   const snapshot = reboot.session.snapshot(), branchId = snapshot.activeThreadId;
-  assert.equal(stepDisplayContent(snapshot.threads.find(t => t.id === branchId).messages[1].steps[0]), content);
-  assert.equal(stepDisplayContent(snapshot.threads.find(t => t.id === 'thread-1').messages[1].steps[0]), content);
+  assert.equal(publishedAnswerParts('a',snapshot.threads.find(t => t.id === branchId).messages[1].steps,1,'complete',[]).find(p=>p.kind==='preview').preview.content,content);
+  assert.equal(publishedAnswerParts('a',snapshot.threads.find(t => t.id === 'thread-1').messages[1].steps,1,'complete',[]).find(p=>p.kind==='preview').preview.content,content);
   console.log('PASS source snapshots survive actual session restart and fork without replaying source into model history');
 
   // Real runtime recovery: reject inline JSONL, write JS, fail startup, read/edit that file, republish.
@@ -183,7 +185,8 @@ async function main() {
     if (index === 4) return { content: '', toolCalls: [call('edit_file', { path: sourcePath,
       edits: [{ oldText: 'throw Error("broken startup");', newText: 'document.body.textContent = "Ready";' }] })] };
     if (index === 5) return { content: '', toolCalls: [call('publish_preview', retryArgs)] };
-    return { content: 'Ready.', toolCalls: [] };
+    const saved = parseAppData(recovery.repository.saved).threads[0].messages[1].steps[5].tools[0];
+    return { content: 'Ready.\n\n'+JSON.parse(saved.output).reference, toolCalls: [] };
   };
   await recovery.session.initialize(); recovery.session.setDraft('Publish'); await recovery.session.send(); release();
   const recovered = parseAppData(recovery.repository.saved).threads[0].messages[1];

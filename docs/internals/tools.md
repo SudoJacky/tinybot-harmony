@@ -26,7 +26,7 @@ SessionResources.tools()
 ├─ WorkspaceTools        find_files / list_files / read_file / search_file_content / write_file / edit_file
 ├─ AttachmentTools       read_attachment
 ├─ SkillTools            read_skill / list_skills
-├─ InteractionTools      request_user_input / update_plan / publish_data_view
+├─ InteractionTools      request_user_input / update_plan
 ├─ CodeExecutionTools    execute_code
 ├─ PresentTools          present_files
 ├─ PreviewTools          publish_preview
@@ -62,7 +62,7 @@ SessionResources.tools()
 | `calculation` | 是 | `execute_code` |
 | `orchestration` | 是 | `orchestrate` |
 | `interaction` | 是 | `request_user_input` `update_plan` |
-| `delivery` | 是 | `publish_preview` `publish_data_view` `present_files` |
+| `delivery` | 是 | `publish_preview` `present_files` |
 | `skill-read` | 是 | `read_skill` `list_skills` |
 | `mcp-discovery` | 是 | `mcp_search_tools` `mcp_list_tools` |
 | `mcp-execution` | 否 | `mcp_call` |
@@ -83,14 +83,14 @@ SessionResources.tools()
 | `user-input` | 执行与协作 | `request_user_input` |
 | `plan` | 执行与协作 | `update_plan` |
 | `team` | 执行与协作 | 团队 9 个入口 |
-| `preview` | 预览与交付 | `publish_preview` `publish_data_view` |
+| `preview` | 预览与交付 | `publish_preview` |
 | `file-delivery` | 预览与交付 | `present_files` |
 | `mcp` | MCP 服务 | 发现与调用 3 个入口 |
 | `mcp-manage` | MCP 服务 | `mcp_manage` |
 
 完整版（`full`）在注册与只读过滤之后放行全部工具；自定义（`custom`）按能力整组关闭。`toolEnabled()` 对基础文件工具、记忆/Skills 工具始终返回真，其余名字按所属能力判断：能力内任一工具被禁用，整组都不再执行。保存的禁用列表会被 `normalizeDisabledTools()` 归一化为整组，旧配置只关闭部分成员时加载为整组关闭。同一限制同时作用于直接调用、编排子调用和团队员工。
 
-旧存档中已经移除的 `generate_image`、`read_tool_result` 禁用记录会在加载时清除，不会导致存档加载失败。
+旧存档中已移除的 `generate_image`、`read_tool_result` 禁用记录会在加载时清除。`publish_data_view` 已移除；其旧禁用项迁移为 `publish_preview`，继续保留原有预览能力开关。旧工具发现记录不会恢复已移除入口；历史图表回执仍支持展示、CSV 导出及会话导出。
 
 MCP 已接受的完整工具结果保存在会话回执中，并原样进入模型请求；框架不再生成首尾预览或提供 `read_tool_result` 分页补读。超大结果同时占用上下文、内存与磁盘，仍受网络层和远端服务自身限制。编排子回执保留在工具详情并参与压缩时的文件操作证据汇总。
 
@@ -148,6 +148,16 @@ MCP 已接受的完整工具结果保存在会话回执中，并原样进入模�
 初始声明与检索目录按名称规范排序，已展开声明按发现顺序追加。发现回执不授予权限：恢复名称后仍与当前授权目录取交集，停用或撤销的工具立即移除。工具提示通过追加式运行时快照更新，不改写 system；普通兼容协议新增或移除 schema 仍可能截断 provider 的前缀复用。
 
 `ToolDiscovery.executionDefinitions()` 另外返回未展开的完整目录，供调度判断 `sequential` 与并发，不影响模型可见范围。工具是否展开不改变执行顺序、持久化要求或审批。
+
+## 可视化与交付编排
+
+`orchestrate` 允许调用 `execute_code`、`publish_preview`、`present_files`，与文件、资料读取工具共用当前授权目录。可以顺序完成“读取 → 计算检查 → 写文件 → 发布 → 交付”，无需为每个依赖步骤重新请求模型。依赖步骤必须 `await`；未捕获的失败会停止脚本，禁止把已失败的写入当成发布依据。
+
+预览、图表与交付使用原来的子调用回执。`toolReceipts()` 统一读取顶层调用及当前工作区中的一层编排子调用，供聊天展示、截图回传、版本选择、文件交付、导出和备份使用。不会展开团队员工的独立工作区。源文件内容不复制进模型结果，编排应返回简短的发布回执和路径；截图作为独立图像消息送入下一次模型请求。
+
+预览发布回执包含 `reference`，编排需把它返回给模型，再由模型在最终回复的插入位置独占一行复制。工具阶段不自动挂载新预览；turn 成功结束后才在正文引用位置展示无外框页面。旧回执保留历史展示。
+
+子调用仍逐项保存意图和结果，遵守串行边界、只读与自定义权限。外层编排失败或取消不撤销已成功的子发布；失败的发布不会产生卡片。修复时按失败回执读取当前版本、局部编辑并重新发布，避免重复已有成功副作用。
 
 ## beforeFinish 续跑
 

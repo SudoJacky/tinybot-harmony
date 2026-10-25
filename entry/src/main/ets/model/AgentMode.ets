@@ -3,8 +3,8 @@ import { BASIC_FILE_TOOLS, OPTIONAL_TOOL_NAMES, MANAGED_TOOL_NAMES, TOOL_CAPABIL
 
 export type AgentMode = 'full' | 'custom';
 export const AGENT_MODES: AgentMode[] = ['full', 'custom'];
-// Tools that no longer exist but may still appear in saved selections; normalization drops them.
-export const REMOVED_TOOL_NAMES: string[] = ['generate_image', 'read_tool_result'];
+// Tools that no longer exist but may still appear in saved selections.
+export const REMOVED_TOOL_NAMES: string[] = ['generate_image', 'read_tool_result', 'publish_data_view'];
 export interface ToolSelection { agentMode?: AgentMode; disabledTools?: string[]; }
 
 export function validateAgentMode(mode: string): void {
@@ -15,7 +15,7 @@ export function validateToolSelection(selection: ToolSelection): void {
   if (selection.agentMode !== undefined) { validateAgentMode(selection.agentMode); }
   const disabled = selection.disabledTools;
   if (disabled === undefined) { return; }
-  // Accept removed tools in old saves; normalization discards them before use.
+  // Accept removed tools in old saves; normalize their selections before use.
   const known = OPTIONAL_TOOL_NAMES.concat(MANAGED_TOOL_NAMES, REMOVED_TOOL_NAMES);
   if (!Array.isArray(disabled) || disabled.length > known.length || new Set(disabled).size !== disabled.length ||
     disabled.some((name) => !known.includes(name))) {
@@ -31,7 +31,9 @@ export function toolEnabled(name: string, selection: ToolSelection): boolean {
 
 // Preserve denials within selectable capabilities; discard obsolete memory/Skills overrides.
 export function normalizeDisabledTools(names: string[]): string[] {
-  return TOOL_CAPABILITIES.filter((capability) => capability.tools.some((name) => names.includes(name)))
+  // The retired chart tool shared the preview switch; retain that denial on upgrade.
+  const migrated = names.includes('publish_data_view') ? names.concat(['publish_preview']) : names;
+  return TOOL_CAPABILITIES.filter((capability) => capability.tools.some((name) => migrated.includes(name)))
     .flatMap((capability) => capability.tools);
 }
 

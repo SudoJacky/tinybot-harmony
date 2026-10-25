@@ -65,6 +65,8 @@ if ($LASTEXITCODE -ne 0) { throw 'History drawer activity and animation lifecycl
 if ($LASTEXITCODE -ne 0) { throw 'Search, delivery, references and runtime reliability tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-preview-publication.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Preview publication integration tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-preview-references.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Preview reference placement and compatibility tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-preview-lifecycle.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Preview resource and lazy lifecycle tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-turn-workflow.cjs')

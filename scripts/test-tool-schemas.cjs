@@ -32,6 +32,7 @@ const { Cancellation } = from('services/Cancellation');
 const { chatRequest } = from('services/providers/ChatCompletionsProtocol');
 const { responsesRequest, anthropicRequest } = from('services/providers/WireProtocols');
 const { toolDetailContent } = from('model/ToolDetailContent');
+const { parseDataView, dataCsv } = from('model/RichArtifacts');
 const { parseSkillRequest } = from('model/ResourceManagement');
 const call = (name, args) => ({ id: 'call', type: 'function', function: { name, arguments: JSON.stringify(args) } });
 const invoke = (tools, name, args, signal = new Cancellation()) => tools.execute(call(name, args), signal);
@@ -64,14 +65,15 @@ async function main() {
   const operations = [{ action: 'add', scope: 'thread', content: 'Keep it short' }];
   const files = [{ path: 'references/a.md', content: 'Reference' }];
   const nativeArgs = new Map([
-    ['request_user_input', form], ['update_plan', plan], ['publish_data_view', view],
+    ['request_user_input', form], ['update_plan', plan],
     ['memory', { operations }], ['skill_manage', { action: 'create', document: 'SKILL', files }],
     ['mcp_call', { server: 'remote', tool: 'echo', arguments: { nested: { values: [1, true, null] } } }],
     ['execute_code', { code: 'return input;', input: { values: [1, 2] } }],
     ['edit_file', { path: 'a.txt', edits: [{ oldText: 'a', newText: 'b' }] }]
   ]);
   for (const [name, args] of nativeArgs) check(name, args);
-  for (const name of ['request_user_input', 'update_plan', 'publish_data_view']) check(name, { data: JSON.stringify(nativeArgs.get(name)) }, false);
+  assert.ok(!schemas.has('publish_data_view'), 'Retired chart tool has no provider schema');
+  for (const name of ['request_user_input', 'update_plan']) check(name, { data: JSON.stringify(nativeArgs.get(name)) }, false);
   check('memory', { operations: JSON.stringify(operations) }, false);
   check('skill_manage', { action: 'create', files: JSON.stringify(files) }, false);
   check('skill_manage', { action: 'install', paths: ['a.md'] });
@@ -97,7 +99,13 @@ async function main() {
   console.log('PASS native parameter schemas, invalid legacy shapes, edit bounds and all three provider formats with strict unchanged');
 
   assert.deepEqual(JSON.parse(await invoke(interaction, 'update_plan', plan)), plan);
-  assert.deepEqual(JSON.parse(await invoke(interaction, 'publish_data_view', view)), view);
+  await assert.rejects(invoke(interaction, 'publish_data_view', view), error => error.code === 'TOOL_UNAVAILABLE');
+  assert.deepEqual(plain(parseDataView(JSON.stringify(view))), view, 'Legacy chart payloads remain readable');
+  assert.throws(() => parseDataView(JSON.stringify({ ...view, rows: [{ values: ['A', 'wrong', true] }] })));
+  const legacyView = parseDataView(JSON.stringify({ ...view, rows: [{ values: ['=SUM(A1)', 2, true] }] }));
+  assert.ok(dataCsv(legacyView).includes("\"'=SUM(A1)\""), 'Legacy CSV export still prevents formulas');
+  const legacyChart = toolDetailContent('publish_data_view', JSON.stringify({ data: JSON.stringify(view) }), JSON.stringify(view), 'complete');
+  assert.ok(JSON.stringify(legacyChart).includes('Values'), 'Legacy chart details remain available');
   const waiting = invoke(interaction, 'request_user_input', form);
   assert.equal(approval.form.title, 'Choose'); approval.submit(['A']);
   const submitted = await waiting;
@@ -108,11 +116,10 @@ async function main() {
   assert.deepEqual(plain(detail.sections), plain(legacyDetail.sections));
   const cancelled = new Cancellation(); const pending = invoke(interaction, 'request_user_input', form, cancelled);
   cancelled.cancel(); await assert.rejects(pending); assert.equal(approval.form, undefined);
-  for (const name of ['request_user_input', 'update_plan', 'publish_data_view']) {
+  for (const name of ['request_user_input', 'update_plan']) {
     await assert.rejects(invoke(interaction, name, { data: JSON.stringify(nativeArgs.get(name)) }));
   }
   await assert.rejects(invoke(interaction, 'update_plan', { steps: [{ step: 'No active step', status: 'pending' }] }));
-  await assert.rejects(invoke(interaction, 'publish_data_view', { ...view, rows: [{ values: ['A', 'wrong', true] }] }));
   assert.deepEqual(JSON.parse(await invoke(memory, 'memory', { operations })), operations);
   await assert.rejects(invoke(memory, 'memory', { operations: JSON.stringify(operations) }));
   await assert.rejects(invoke(memory, 'memory', { operations: Array(6).fill(operations[0]) }));
