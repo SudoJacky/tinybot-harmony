@@ -1,5 +1,6 @@
 import { Diagnostics } from '../model/Diagnostics';
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { menuMaterialAttribute, systemMaterialAttribute } from '../common/MaterialAttributes';
 import { WebUiView } from './WebUiView';
 import { LengthMetrics } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
@@ -89,8 +90,9 @@ struct UiNodeView {
           Text(this.label()).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
           Select(this.options()).value(String(this.value())).selected((this.node.options || []).indexOf(String(this.value())))
             .enabled(this.interactive).accessibilityText(this.label())
-            .backgroundColor(Color.Transparent).fontColor($r('sys.color.font_primary'))
-            .systemMaterial(this.appearance.control).menuSystemMaterial(this.appearance.surface)
+            .backgroundColor(this.appearance.controlBackground).fontColor($r('sys.color.font_primary'))
+            .attributeModifier(systemMaterialAttribute<SelectAttribute>(this.appearance.control))
+            .attributeModifier(menuMaterialAttribute(this.appearance.surface))
             .onSelect((_index: number, value: string) => this.onEdit(this.node, value, true))
         } else if (this.node.kind === 'segmented') {
           Text(this.label()).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
@@ -127,14 +129,14 @@ struct UiNodeView {
             Text(this.label()).fontFamily(this.appearance.fontFamily).fontSize(15).layoutWeight(1).fontColor($r('app.color.text_primary'))
             Toggle({ type: ToggleType.Switch, isOn: this.value() === true }).enabled(this.interactive)
               .attributeModifier(Styles.toggle)
-              .systemMaterial(this.appearance.control)
+              .attributeModifier(systemMaterialAttribute<ToggleAttribute>(this.appearance.control))
               .accessibilityText(this.label()).onChange((value: boolean) => this.onEdit(this.node, value, true))
           }.width('100%')
         } else if (this.node.kind === 'slider') {
           Text(this.label() + ': ' + String(this.value())).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
           Slider({ value: Number(this.value()), min: this.node.min, max: this.node.max, step: this.node.step || 1 })
             .enabled(this.interactive).accessibilityText(this.label())
-            .systemMaterial(this.appearance.control)
+            .attributeModifier(systemMaterialAttribute<SliderAttribute>(this.appearance.control))
             .onChange((value: number, mode: SliderChangeMode) => this.onEdit(this.node, value, mode === SliderChangeMode.End || mode === SliderChangeMode.Click))
         } else if (this.node.kind === 'progress') {
           Text(this.label()).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
@@ -165,6 +167,7 @@ struct UiNodeView {
 
 @Component
 struct UiSurface {
+  @Prop frameless: boolean = false;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   presentation?: UiPresentation;
   @Prop @Watch('refresh') source: string;
@@ -258,10 +261,12 @@ struct UiSurface {
   }
   build() {
     Column({ space: 12 }) {
+      if (!this.frameless) {
       Row({ space: 8 }) {
         Text(this.title || t('交互界面')).fontFamily(this.appearance.fontFamily).fontSize(17).fontWeight(FontWeight.Medium).layoutWeight(1).fontColor($r('app.color.text_primary'))
         if (this.busy || (!this.complete && !this.failed)) { LoadingProgress().width(18).height(18) }
       }.width('100%')
+      }
       ForEach(this.nodes.filter((node: UiNode) => !node.parent && uiNodeVisible(node, this.values)), (node: UiNode) => {
         UiNodeView({ node: this.nodes.find((item: UiNode) => item.id === node.id) as UiNode, nodes: this.nodes, values: this.values, interactive: this.complete && this.available && !this.busy,
           ready: this.complete && !this.streaming, snapshotMode: this.snapshotMode,
@@ -278,13 +283,14 @@ struct UiSurface {
         Button(t('保存输入')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.textSmall).enabled(this.available && !this.busy && this.invalid.length === 0)
           .onClick(() => { this.interact(''); })
       }
-    }.width('100%').alignItems(HorizontalAlign.Start).padding(14).borderRadius(Radius.md)
-    .backgroundColor($r('app.color.surface')).border({ width: 1, color: $r('app.color.divider') })
+    }.width('100%').alignItems(HorizontalAlign.Start).padding(this.frameless ? 0 : 14).borderRadius(this.frameless ? 0 : Radius.md)
+    .backgroundColor(this.frameless ? Color.Transparent : $r('app.color.surface')).border({ width: this.frameless ? 0 : 1, color: $r('app.color.divider') })
   }
 }
 
 @Component
 export struct InteractiveAnswer {
+  @Prop frameless: boolean = false;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   presentation?: UiPresentation;
   @Prop surfaceOffset: number = 0;
@@ -314,7 +320,7 @@ export struct InteractiveAnswer {
           Text(this.validation === 'pending' ? t('正在检查交互内容…') : t('交互内容检查未通过。')).fontFamily(this.appearance.fontFamily)
             .fontSize(13).fontColor($r('app.color.text_secondary'))
         } else {
-          UiSurface({ source: this.parts[index].content, closed: this.parts[index].closed, streaming: this.streaming, available: this.available,
+          UiSurface({ source: this.parts[index].content, closed: this.parts[index].closed, streaming: this.streaming, available: this.available, frameless: this.frameless,
             surfaceKey: this.step + ':' + (Number(part.key) + this.surfaceOffset), presentation: this.presentation,
             snapshotMode: this.snapshotMode, onWebReady: this.onWebReady, saved: this.saved, onInteract: this.onInteract })
         }

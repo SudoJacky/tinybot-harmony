@@ -6,6 +6,7 @@ import { fileIo as fs, picker } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { AppData, ThreadData, parseAppData, defaultConfig } from '../model/Conversation';
 import { Attachment } from '../model/Productivity';
+import { toolReceipts } from '../model/Agent';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { workspaceRelativePath } from './WorkspaceTools';
 import { Attachments, readBounded, writeBytes } from './Attachments';
@@ -25,7 +26,7 @@ function threadAttachments(thread: ThreadData): Attachment[] {
   for (const message of thread.messages) {
     for (const step of message.steps || []) {
       result.push(...step.steering?.attachments || []);
-      for (const tool of step.tools) { if (tool.previewScreenshot) { result.push(tool.previewScreenshot.image); } }
+      for (const tool of toolReceipts(step.tools)) { if (tool.previewScreenshot) { result.push(tool.previewScreenshot.image); } }
     }
   }
   return result;

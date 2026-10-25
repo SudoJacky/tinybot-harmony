@@ -9,6 +9,7 @@ import { ConversationSection } from '../model/ConversationExport';
 import { exportMetadata, stampPng } from '../model/ExportMetadata';
 import { t } from '../model/I18n';
 import { writeBytes } from './Attachments';
+import { createEmptyPixel } from './EmptyPixel';
 
 const MAX_PIXELS = 24 * 1024 * 1024;
 const MAX_BYTES = 20 * 1024 * 1024;
@@ -50,7 +51,7 @@ export async function conversationImage(context: common.UIAbilityContext, sectio
     }
     if (!width || !height) { throw new Error(t('会话图片尺寸无效，未导出。')); }
     stage = 'compose';
-    result = image.createEmptyPixelMap({ editable: true, pixelFormat: image.PixelMapFormat.RGBA_8888,
+    result = createEmptyPixel({ editable: true, pixelFormat: image.PixelMapFormat.RGBA_8888,
       alphaType: image.AlphaType.OPAQUE, size: { width: width, height: height } });
     const canvas = new drawing.Canvas(result);
     canvas.drawColor(255, (background >>> 16) & 255, (background >>> 8) & 255, background & 255);

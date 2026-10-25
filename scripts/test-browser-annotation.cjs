@@ -7,7 +7,8 @@ const compile = source => ts.transpileModule(source, { compilerOptions: {
   module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021, experimentalDecorators: true
 } }).outputText;
 const raster = { effects: [], released: 0, fail: false };
-const image = { PixelMapFormat: {}, AlphaType: {}, createEmptyPixelMap(options) {
+// Empty canvases come from image.createPixelMapSync(), the overload that exists on API 12+.
+const image = { PixelMapFormat: {}, AlphaType: {}, createPixelMapSync(options) {
   raster.size = options.size; return { release: async () => { raster.released++; } };
 } };
 const drawing = { CapStyle: { ROUND_CAP: 2 }, Canvas: class {
@@ -83,11 +84,17 @@ const deadline = setTimeout(() => { console.error('Annotation test stalled'); pr
   const saved = await f.repository.load(); assert.ok(saved.threads[0].messages[1].steps.some(step => step.steering?.attachments?.[0]?.id === 'annotation'));
   const backupTree = ts.createSourceFile('Backup.ets', fs.readFileSync(path.join(root, 'main/ets/services/Backup.ets'), 'utf8'), ts.ScriptTarget.Latest, true);
   const collect = backupTree.statements.find(node => ts.isFunctionDeclaration(node) && node.name.text === 'threadAttachments');
-  const backupScope = { exports: {} };
+  const backupScope = { exports: {}, toolReceipts: from('model/Agent').toolReceipts };
   vm.runInNewContext(compile(collect.getText(backupTree) + '\nexports.collect = threadAttachments;'), backupScope);
   thread.pendingInputs = [{ id: 'pending-image', mode: 'followUp', text, attachments: [photo('pending-backup')] }];
+  thread.messages[1].steps.push({ content: '', tools: [{ call: { id: 'backup-orchestrate', type: 'function',
+    function: { name: 'orchestrate', arguments: '{}' } }, status: 'failed', output: '{}', children: [{
+      call: { id: 'backup-preview', type: 'function', function: { name: 'publish_preview', arguments: '{}' } },
+      status: 'complete', output: '{}', previewScreenshot: { image: photo('nested-preview'), width: 360, height: 240, viewportWidth: 360 }
+    }] }] });
   const backupImages = backupScope.exports.collect(thread).map(item => item.id);
   assert.ok(backupImages.includes('annotation')); assert.ok(backupImages.includes('pending-backup')); assert.ok(backupImages.includes('queued'));
+  assert.ok(backupImages.includes('nested-preview'), 'Committed child screenshots are included even if their orchestration failed');
   console.log('PASS running-session annotation staging preserves drafts, requires explicit submission and delivers images in steering, follow-ups, replay and persisted history');
 
   const edit = new Fixture(); await edit.session.initialize();

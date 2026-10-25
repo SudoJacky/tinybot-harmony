@@ -1,6 +1,7 @@
 import { Diagnostics } from '../model/Diagnostics';
 import { HuaweiAccount } from '../services/HuaweiAccount';
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { systemMaterialAttribute } from '../common/MaterialAttributes';
 import { t } from '../model/I18n';
 import { agentModeName } from '../model/AgentMode';
 import { ProjectData } from '../model/Project';
@@ -692,7 +693,8 @@ export struct ChatPanel {
         Toggle({ type: ToggleType.Button, isOn: false }) {
           SymbolGlyph($r('sys.symbol.arrow_down')).fontSize(18).fontColor([$r('sys.color.font_primary')])
         }.id('scroll-to-latest').width(38).height(38).padding(0).borderRadius(19)
-        .backgroundColor(Color.Transparent).selectedColor(Color.Transparent).systemMaterial(this.appearance.control)
+        .backgroundColor(this.appearance.controlBackground).selectedColor(this.appearance.controlBackground)
+        .attributeModifier(systemMaterialAttribute<ToggleAttribute>(this.appearance.control))
         .accessibilityText(t("查看最新消息")).accessibilityRole(AccessibilityRoleType.BUTTON)
         .onClick(() => { this.scrollToLatest(); })
         .margin({ bottom: Space.md })
@@ -1011,8 +1013,8 @@ export struct ChatPanel {
       }
     }.id('composer-team-toggle').height(32).padding({ left: 12, right: 12 }).borderRadius(16)
       .margin({ left: 14, bottom: Space.sm })
-      .backgroundColor(Color.Transparent).selectedColor(this.appearance.accent)
-      .systemMaterial(this.thread.teamEnabled ? this.appearance.accentControl : this.appearance.control)
+      .backgroundColor(this.appearance.controlBackground).selectedColor(this.appearance.accent)
+      .attributeModifier(systemMaterialAttribute<ToggleAttribute>(this.thread.teamEnabled ? this.appearance.accentControl : this.appearance.control))
       .enabled(this.app.ready && !this.app.busy && !this.thread.archived && this.app.saveError.length === 0)
       .accessibilityText(t('团队模式'))
       .accessibilityDescription(this.thread.teamEnabled ? t('关闭团队模式') : t('开启团队模式'))

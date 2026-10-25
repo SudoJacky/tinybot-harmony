@@ -87,8 +87,8 @@ class EmployeeTools implements AgentTools {
     this.base = base; this.host = host; this.run = run; this.attempt = attempt;
     const reads = ['find_files', 'list_files', 'read_file', 'read_file_lines', 'read_attachment', 'search_file_content', 'read_skill', 'update_plan', 'execute_code'];
     const research = reads.concat(['read_web', 'search_web', 'read_reference', 'write_file', 'edit_file']);
-    this.catalog = base.definitions().filter((item) => item.function.name !== 'publish_data_view' &&
-      !item.function.name.startsWith('team_') && (profile === 'execution' || (profile === 'research' ? research : reads).includes(item.function.name)));
+    this.catalog = base.definitions().filter((item) => !item.function.name.startsWith('team_') &&
+      (profile === 'execution' || (profile === 'research' ? research : reads).includes(item.function.name)));
     this.allowed = new Set(this.catalog.map((item) => item.function.name));
     this.catalog.push(definition('team_complete_task', '完成分配工作后必须调用：内部交接摘要、未解决事项、实际产物相对路径。交接后不要再修改文件。', {
       'summary': stringProperty('包含已完成工作和完成标准的核验结果，最多12000字符'), 'unresolved': strings('未满足的标准和问题；没有则空数组'), 'artifacts': strings('实际文本文件的工作区相对路径；没有则空数组，最多8个')

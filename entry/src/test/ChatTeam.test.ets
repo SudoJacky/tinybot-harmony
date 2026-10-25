@@ -23,7 +23,7 @@ class BaseTools implements AgentTools {
   files: Map<string, string> = new Map<string, string>();
   calls: string[] = [];
   definitions(): ToolDefinition[] {
-    return ['read_file', 'write_file', 'mcp_call', 'publish_data_view', 'read_web', 'execute_code'].map((name): ToolDefinition => {
+    return ['read_file', 'write_file', 'mcp_call', 'publish_preview', 'read_web', 'execute_code'].map((name): ToolDefinition => {
       return { type: 'function', function: { name: name, description: name, parameters: { type: 'object', properties: {}, required: [], additionalProperties: false } } };
     });
   }
@@ -167,10 +167,8 @@ export default function chatTeamTests(): void {
       const f = new Fixture(); const args = JSON.parse(recruitArgs()) as ProfileRecruit;
       args.members[0].toolProfile = 'review'; const id = await f.recruit(JSON.stringify(args)); await f.wait(id);
       const names = f.provider.requests[0].tools.map((tool) => tool.function.name);
-      expect(names.includes('team_recruit')).assertFalse(); expect(names.includes('publish_data_view')).assertFalse();
-      const discovery = f.provider.requests[0].tools.find((tool) => tool.function.name === 'tool_search')?.function.description || '';
-      expect(discovery.includes('execute_code')).assertTrue();
-      expect(discovery.includes('team_recruit') || discovery.includes('publish_data_view') || discovery.includes('mcp_call')).assertFalse();
+      expect(names.includes('team_recruit')).assertFalse(); expect(names.includes('publish_preview')).assertFalse();
+      expect(names.includes('tool_search')).assertFalse(); expect(names.includes('execute_code')).assertTrue();
       expect(names.includes('write_file')).assertFalse(); expect(names.includes('mcp_call')).assertFalse(); expect(names.includes('read_file')).assertTrue(); await f.host.close();
     });
     it('missing_handoff_is_failed_even_if_employee_finishes_text', 0, async () => {

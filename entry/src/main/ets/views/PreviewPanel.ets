@@ -16,7 +16,7 @@ export struct PreviewPanel {
   private message(): MessageViewModel | undefined { return this.app.active.messages.find((message) => message.id === this.messageId); }
   private previews(): PublishedPreview[] {
     const message = this.message();
-    return message ? message.stepViews.flatMap((step, index) => stepPreviews(message.id, step, index, this.app.active.latestPreviewIds))
+    return message ? message.stepViews.flatMap((step, index) => stepPreviews(message.id, step, index, this.app.active.latestPreviewIds, true))
       .filter((preview) => preview.id === this.previewId) : [];
   }
   build() {

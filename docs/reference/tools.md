@@ -6,9 +6,9 @@
 
 - `ToolSet` 把各组工具汇总成一张表，同名工具直接抛出 `INTERNAL_ERROR`；`definitions()` 与 `execute()` 共用这张表，模型看不到的工具也无法调用。
 - `SelectedTools` 按会话的 `agentMode`/`disabledTools` 过滤，`RuleTools` 再按只读规则过滤；团队员工的 `EmployeeTools` 另按 `toolProfile` 收窄。三者与“服务是否配置”取交集。
-- `ToolDiscovery` 把结果拆成常驻与按需两段。首轮通常只暴露 `read_file`、`write_file`、`edit_file`、`orchestrate` 和 `tool_search`；`read_attachment`、`read_reference`、`team_complete_task` 在对应资源存在时常驻。其余工具要通过 `tool_search` 加载，一次最多 6 个，下一次请求才带完整 schema，本轮保持可见，新一轮重置。
+- 已启用、已配置且通过只读、会话选择和角色过滤的工具，从首次请求起直接提供完整 schema 和使用说明，按名称稳定排序；`tool_search` 默认不提供。附件、引用和员工交接仍按对应资源及角色加入。旧发现回执保留为历史，不影响当前目录。
 - 参数对象默认 `additionalProperties: false`：出现未声明字段按参数错误处理，不是忽略。
-- `generate_image` 与 `read_tool_result` 已从目录移除，只保留在旧配置兼容列表（`REMOVED_TOOL_NAMES`）和旧回执展示里。
+- `generate_image`、`read_tool_result` 与 `publish_data_view` 已从目录移除。历史图表仍能显示、导出 CSV 及参与会话导出；新图表、表格和指标卡统一写入 HTML/JS/SVG，再以 `publish_preview` 发布。
 
 ## 能力分组
 
@@ -21,17 +21,16 @@
 | 网页读取与搜索 | `read_web`、`search_web` | 2 | `extensions.webEnabled`；`search_web` 还要求搜索服务已启用 |
 | 浏览器 | `browser_open`、`browser_snapshot`、`browser_action`、`browser_handoff`、`browser_close` | 5 | `extensions.browserPolicy` 为 `disabled` 时整组不出现 |
 | 代码计算 | `execute_code` | 1 | 只读模式仍可用 |
-| 工具编排 | `orchestrate` | 1 | 关闭后仍可用 `tool_search` 检索文件工具 |
+| 工具编排 | `orchestrate` | 1 | 关闭后仍可直接调用已授权文件工具 |
 | 信息确认 | `request_user_input` | 1 | 只读模式仍可用 |
 | 任务计划 | `update_plan` | 1 | 只读模式仍可用 |
 | 团队协作 | `team_recruit`、`team_wait`、`team_inspect`、`team_read_result`、`team_control`、`team_resume`、`team_complete_task`、`team_list_messages`、`team_read_message` | 9 | 会话启用团队后加入；员工三项只在子任务内出现 |
-| 预览与图表 | `publish_preview`、`publish_data_view` | 2 | 只读模式仍可用 |
+| 预览与图表 | `publish_preview` | 1 | 只读模式仍可用 |
 | 文件交付 | `present_files` | 1 | 只读模式仍可用 |
 | MCP 远程工具 | `mcp_search_tools`、`mcp_list_tools`、`mcp_call` | 3 | 存在已启用且未被本会话停用的服务 |
 | MCP 服务管理 | `mcp_manage` | 1 | 只读模式不可用 |
 | Skills | `read_skill`、`list_skills`、`skill_manage` | 3 | Skills 页面逐项启用；`skill_manage` 只读模式不可用 |
 | 长期记忆 | `memory` | 1 | `autoMemory` 开启且非只读 |
-| 按需检索 | `tool_search` | 1 | 存在被折叠的工具时自动加入 |
 
 ## 工作区文件
 
@@ -72,22 +71,20 @@
 | 工具 | 用途 | 参数 | 约束与回执 |
 | --- | --- | --- | --- |
 | `execute_code` | 在隔离 QuickJS 中跑同步 JavaScript | `code` 必填（函数体）；`input` 可选原生 JSON 值，默认 `null` | 2 秒预算、32 MiB Runtime 分配、日志合计 32 KiB；无文件、网络、定时器、模块导入或宿主工具，Promise 不支持。回执 `{status, stdout, stderr, result, error, logsTruncated, resultTruncated, durationMs}`；`status` 非 `ok` 记为失败 |
-| `orchestrate` | 用异步 JavaScript 组合调用已授权工具 | `code` 必填 | 可嵌套 14 个工具（文件、网页、Skills 读取、MCP 发现与调用）；上限 32 次调用、4 个并发宿主工具、2 秒脚本计算、120 秒总时长、32 MiB JS 内存、1 MiB 结果；子调用回执保存在父回执里，取消后未开始的子调用标为 `NOT_EXECUTED`；不支持嵌套编排 |
-| `tool_search` | 按名称或关键词加载工具 schema | `query` 必填（≤300 字符） | 空字符串只列目录；BM25 排序（`k1=1.2`、`b=0.75`），最多 6 个命中；命中后下一请求携带完整 schema。检索结果不扩大权限 |
+| `orchestrate` | 用异步 JavaScript 组合调用已授权工具 | `code` 必填 | 可嵌套 17 个工具（文件、网页、Skills 读取、MCP 发现与调用、计算、预览与文件交付）；上限 32 次调用、4 个并发宿主工具、2 秒脚本计算、120 秒总时长、32 MiB JS 内存、1 MiB 结果；子调用回执保存在父回执里，取消后未开始的子调用标为 `NOT_EXECUTED`；不支持嵌套编排 |
 
-## 交互、计划与数据展示
+## 交互与计划
 
 | 工具 | 用途 | 参数 | 约束与回执 |
 | --- | --- | --- | --- |
 | `request_user_input` | 用原生表单收集信息 | `title` 必填（1–200）；`fields` 必填 1–10 项，`name` 以字母开头且只含字母数字下划线（≤40），`label` 1–300，`type` 为 `text/number/select/multiselect`，`required` 可选，选择字段需 2–10 个不同选项 | 已有待处理提问时报 `INTERACTION_PENDING`；等待提交后继续，停止会把等待中的表单按取消结束；中断的表单可从工具记录重填 |
 | `update_plan` | 展示并更新任务步骤 | `steps` 必填 1–20 项 `{step, status}`；`explanation` 可选（1–2000） | 每次提交完整计划；未全部完成时恰好一个 `in_progress`；回执保存步骤，供聊天内计划卡片渲染 |
-| `publish_data_view` | 展示表格、柱状图、折线图、瀑布图或指标卡 | `title`、`kind`、`source`、`columns`、`rows` 必填；`insight` 可选 | 2–20 列、1–200 行；图表首列为名称、其余为数值，瀑布图仅两列且第二列为变化量；必须给真实来源，回执保存数据，界面不执行模型脚本 |
 
 ## 预览与文件交付
 
 | 工具 | 用途 | 参数 | 约束与回执 |
 | --- | --- | --- | --- |
-| `publish_preview` | 把工作区文件发布成聊天内 Web 卡片 | `path` 必填（`.js`、`.html`、`.svg`）；`title` 可选（≤160，默认文件名）；`library` 可选 `none`/`three`（默认 `none`）；`height` 可选 200–800 | JS 在空白页执行、可操作 `document.body`；`library="three"` 预加载 THREE 与 OrbitControls；无 import、网络、本地文件或存储访问；JSONL 已不支持。发布前做启动预检并截图，成功后保存不可变快照；回执 `{published, path, title, nodes, screenshot}` |
+| `publish_preview` | 准备工作区文件预览，最终回复引用插入 | `path` 必填（`.js`、`.html`、`.svg`）；`title` 可选（≤160，默认文件名）；`library` 可选 `none`/`three`（默认 `none`）；`height` 可选 200–800 | JS 在空白页执行、可操作 `document.body`；`library="three"` 预加载 THREE 与 OrbitControls；无 import、网络、本地文件或存储访问；JSONL 已不支持。发布前做启动预检并截图，成功后保存不可变快照；回执含 `previewId` 和 `reference`，最终回复独占一行复制引用，turn 完成后原位展示；工具阶段不自动展示 |
 | `present_files` | 交付工作区文件 | `files` 必填 1–8 项 `{path, description?}`，说明 ≤300 字符 | 只校验文件真实存在，不创建也不复制内容；重复路径直接拒绝；成功回执在回答末尾生成文件卡片 |
 
 ## 长期记忆
@@ -132,7 +129,7 @@
 | 路径 | 职责 |
 | --- | --- |
 | `entry/src/main/ets/services/ToolSet.ets` | 目录汇总与分发，重名工具直接失败 |
-| `entry/src/main/ets/services/ToolDiscovery.ets` | 常驻与按需拆分、BM25 检索、`tool_search` |
+| `entry/src/main/ets/services/ToolDiscovery.ets` | 默认完整授权目录排序；内部显式 opt-in 发现模式 |
 | `entry/src/main/ets/services/SelectedTools.ets` | 按会话选择过滤目录与调用 |
 | `entry/src/main/ets/services/RuleTools.ets` | 只读规则过滤 |
 | `entry/src/main/ets/services/WorkspaceTools.ets` | 文件工具定义、参数校验与路径约束 |

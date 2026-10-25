@@ -1,8 +1,13 @@
 import { Diagnostics } from '../model/Diagnostics';
 import { uiMaterial } from '@kit.ArkUI';
 import { LightEffect } from '../model/Appearance';
+import { ApiLevel } from './ApiLevel';
 
-// Read the device once, when the first native component requests its material.
+// Immersive material is the only API-26 surface feature this app uses, so every eval of the
+// uiMaterial namespace is confined to this file. On systems without the native module
+// (@ohos.arkui.uiMaterial is missing below API 26) each getter resolves to undefined and the
+// caller keeps its plain color, border and shadow settings. API 26 still uses Material.empty
+// when the user switches effects off; undefined would restore the component's default material.
 export class AppMaterials {
   private static selectedStyle?: uiMaterial.ImmersiveStyle;
   private static controlMaterial?: uiMaterial.Material;
@@ -11,6 +16,12 @@ export class AppMaterials {
   private static readingSurfaceMaterial?: uiMaterial.Material;
   private static effect: LightEffect = 'auto';
   private static accent: ResourceColor = $r('app.color.accent_material');
+  // Set when the material module is reported present but its constructor still fails, so a
+  // half-updated system degrades to the plain interface instead of crashing every surface.
+  private static unavailable: boolean = !ApiLevel.material;
+
+  // True when immersive material can actually be applied on this system.
+  static get available(): boolean { return !AppMaterials.unavailable; }
 
   static configure(effect: LightEffect, accent: ResourceColor): void {
     if (AppMaterials.effect === effect && AppMaterials.accent === accent) { return; }
@@ -22,7 +33,7 @@ export class AppMaterials {
     AppMaterials.readingSurfaceMaterial = undefined;
   }
 
-  static get style(): uiMaterial.ImmersiveStyle {
+  private static get style(): uiMaterial.ImmersiveStyle | undefined {
     if (AppMaterials.effect === 'gentle') { return uiMaterial.ImmersiveStyle.THICK; }
     if (AppMaterials.effect === 'standard') { return uiMaterial.ImmersiveStyle.THIN; }
     if (AppMaterials.effect === 'vivid') { return uiMaterial.ImmersiveStyle.ULTRA_THIN; }
@@ -46,48 +57,69 @@ export class AppMaterials {
     return AppMaterials.selectedStyle;
   }
 
+  // One construction path: a constructor failure on a partially updated system disables the
+  // feature for the rest of the session instead of repeating the same crash on every surface.
+  private static build(candidate: () => uiMaterial.Material | undefined): uiMaterial.Material | undefined {
+    if (AppMaterials.unavailable) { return undefined; }
+    try { return candidate(); } catch (error) {
+      AppMaterials.unavailable = true;
+      AppMaterials.controlMaterial = undefined;
+      AppMaterials.accentControlMaterial = undefined;
+      AppMaterials.surfaceMaterial = undefined;
+      AppMaterials.readingSurfaceMaterial = undefined;
+      Diagnostics.log('error', 'appearance', 'material_unavailable', { code: ApiLevel.sdk }, error as Error);
+      return undefined;
+    }
+  }
+
   // Navigation, native Select/Slider/Toggle controls, and onboarding action/choice buttons.
-  static get control(): uiMaterial.Material {
+  static get control(): uiMaterial.Material | undefined {
+    if (!AppMaterials.available) { return undefined; }
     if (AppMaterials.effect === 'off') { return uiMaterial.Material.empty; }
     if (!AppMaterials.controlMaterial) {
-      AppMaterials.controlMaterial = new uiMaterial.ImmersiveMaterial({
+      AppMaterials.controlMaterial = AppMaterials.build(() => new uiMaterial.ImmersiveMaterial({
         // Shadows overlap and clip at title-bar edges, creating an unwanted gray strip.
         style: AppMaterials.style, applyShadow: false, colorInvert: true,
         interactive: AppMaterials.effect !== 'gentle', lightEffect: AppMaterials.lightEffect()
-      });
+      }));
     }
     return AppMaterials.controlMaterial;
   }
 
-  static get accentControl(): uiMaterial.Material {
+  static get accentControl(): uiMaterial.Material | undefined {
+    if (!AppMaterials.available) { return undefined; }
     if (AppMaterials.effect === 'off') { return uiMaterial.Material.empty; }
     if (!AppMaterials.accentControlMaterial) {
-      AppMaterials.accentControlMaterial = new uiMaterial.ImmersiveMaterial({
+      AppMaterials.accentControlMaterial = AppMaterials.build(() => new uiMaterial.ImmersiveMaterial({
         style: AppMaterials.style, materialColor: AppMaterials.accent, applyShadow: false,
         interactive: AppMaterials.effect !== 'gentle', lightEffect: AppMaterials.lightEffect()
-      });
+      }));
     }
     return AppMaterials.accentControlMaterial;
   }
 
   // Menus and popups use the next gentler app tier; controls keep the selected device/user tier.
-  static get surface(): uiMaterial.Material {
+  static get surface(): uiMaterial.Material | undefined {
+    if (!AppMaterials.available) { return undefined; }
     if (AppMaterials.effect === 'off') { return uiMaterial.Material.empty; }
     if (!AppMaterials.surfaceMaterial) {
-      const style = AppMaterials.style === uiMaterial.ImmersiveStyle.ULTRA_THIN ?
-        uiMaterial.ImmersiveStyle.THIN : uiMaterial.ImmersiveStyle.THICK;
-      AppMaterials.surfaceMaterial = new uiMaterial.ImmersiveMaterial({ style: style, colorInvert: true });
+      const selected = AppMaterials.style;
+      AppMaterials.surfaceMaterial = AppMaterials.build(() => new uiMaterial.ImmersiveMaterial({
+        style: selected === uiMaterial.ImmersiveStyle.ULTRA_THIN ? uiMaterial.ImmersiveStyle.THIN : uiMaterial.ImmersiveStyle.THICK,
+        colorInvert: true
+      }));
     }
     return AppMaterials.surfaceMaterial;
   }
 
   // Long sheets need a denser, tinted backing so underlying text cannot compete with their content.
-  static get readingSurface(): uiMaterial.Material {
+  static get readingSurface(): uiMaterial.Material | undefined {
+    if (!AppMaterials.available) { return undefined; }
     if (AppMaterials.effect === 'off') { return uiMaterial.Material.empty; }
     if (!AppMaterials.readingSurfaceMaterial) {
-      AppMaterials.readingSurfaceMaterial = new uiMaterial.ImmersiveMaterial({
+      AppMaterials.readingSurfaceMaterial = AppMaterials.build(() => new uiMaterial.ImmersiveMaterial({
         style: uiMaterial.ImmersiveStyle.THICK, materialColor: $r('app.color.reading_surface_tint'), colorInvert: false
-      });
+      }));
     }
     return AppMaterials.readingSurfaceMaterial;
   }

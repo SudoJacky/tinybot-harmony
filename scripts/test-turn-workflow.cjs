@@ -200,6 +200,14 @@ assert.equal([...foldedView.children.values()].filter(child => child instanceof 
 assert.equal([...foldedView.children.values()].filter(child => child instanceof ThinkingDisclosure).length, 0);
 assert.equal([...foldedView.children.values()].filter(child => child instanceof RichToolResult).length, 1,
   'Published content remains available while the process is folded');
+const nestedChart = tool('nested-chart', 'complete'); nestedChart.call.function.name = 'publish_data_view';
+const outer = tool('nested-workflow', 'failed'); outer.call.function.name = 'orchestrate'; outer.children = [nestedChart];
+processData.steps[1].tools = [outer]; processMessage.update(processData);
+const foldedNested = mountProcess(true);
+const richNested = [...foldedNested.children.values()].filter(child => child instanceof RichToolResult);
+assert.equal(richNested.length, 1, 'Committed child chart survives a folded failed orchestration');
+assert.equal(richNested[0].toolName, 'publish_data_view');
+assert.equal(richNested[0].callId, 'nested-chart');
 
 // The actual thought component handles its own compact toggle and bounded body.
 const thoughtSource = path.join(root, 'views/ThinkingDisclosure.ets');

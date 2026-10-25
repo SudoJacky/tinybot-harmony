@@ -3,6 +3,8 @@ import { AppearanceOptions, accentAlpha, accentPalette } from '../model/Appearan
 import { AppMaterials } from './AppMaterials';
 
 // Every component observes the same replacement value. Appearance changes never remount the page.
+// Material getters are undefined when the system has no immersive material module (API 20);
+// controls use an opaque theme color when their material cannot supply a visible shape.
 @Observed
 export class AppearanceStyle {
   accent: ResourceColor = $r('app.color.accent');
@@ -15,10 +17,15 @@ export class AppearanceStyle {
   accentOutline: ResourceColor = $r('app.color.accent_outline');
   fontFamily: string = '';
   effectStrength: number = 1;
-  get control(): uiMaterial.Material { return AppMaterials.control; }
-  get accentControl(): uiMaterial.Material { return AppMaterials.accentControl; }
-  get surface(): uiMaterial.Material { return AppMaterials.surface; }
-  get readingSurface(): uiMaterial.Material { return AppMaterials.readingSurface; }
+  get control(): uiMaterial.Material | undefined { return AppMaterials.control; }
+  get accentControl(): uiMaterial.Material | undefined { return AppMaterials.accentControl; }
+  get surface(): uiMaterial.Material | undefined { return AppMaterials.surface; }
+  get readingSurface(): uiMaterial.Material | undefined { return AppMaterials.readingSurface; }
+  // Whether the light-sense material is really applied, so settings can show its true state.
+  get materialAvailable(): boolean { return AppMaterials.available; }
+  get controlBackground(): ResourceColor {
+    return this.materialAvailable ? Color.Transparent : $r('app.color.surface_variant');
+  }
 }
 
 export function makeAppearanceStyle(options: AppearanceOptions, dark: boolean): AppearanceStyle {

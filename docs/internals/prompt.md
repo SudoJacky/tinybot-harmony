@@ -19,7 +19,7 @@
 | 9 | `tools` | `toolPromptSections()` | 每个可见工具一行 `name: promptSnippet` |
 | 10 | `tool_guidelines` | `toolPromptSections()` | 去重后的 `promptGuidelines` 列表 |
 
-`skills`、`memory`、`workspace`、`tools` 与 `tool_guidelines` 属于动态片段。工具提示在请求准备阶段排在动态会话片段之后，因此反映实际展开的目录。没有 `promptSnippet` 的工具（例如 `tool_search`）不会出现在清单里，但完整 schema 仍在工具数组中。
+`skills`、`memory`、`workspace`、`tools` 与 `tool_guidelines` 属于动态片段。工具提示在请求准备阶段排在动态会话片段之后，因此反映当前完整授权目录。没有 `promptSnippet` 的工具不会出现在清单里，但完整 schema 仍在工具数组中。
 
 固定团队协作规则进入主 Agent 的 system，团队 ID 与状态另放在动态 `team-state` 片段。员工共享稳定 system 和员工规则，再接公共项目背景与团队名单，最后接各自身份、职责、任务和依赖结果；员工不继承招募指令。
 
@@ -32,9 +32,9 @@
 - **工具数组**：`toolSchemas()` 只保留 `type` 与 `function`，由 provider 适配层按各自协议序列化。
 - **运行时快照**：每个带 `promptSnippet` 的工具贡献一行用途，`promptGuidelines` 汇总为规则，帮助模型判断何时调用，不重复参数结构。
 
-两条通道使用同一份目录。目录已经过只读、会话选择、角色与配置过滤，再经 `ToolDiscovery` 折叠为“直接工具 + `tool_search`”；未展开的按需工具既不在工具数组里，也不贡献提示文本。
+两条通道使用同一份目录。目录已经过只读、会话选择、角色与配置过滤，再按名称稳定排序；所有已启用且获授权的工具都进入工具数组并贡献自己的提示文本。`tool_search` 默认不提供。
 
-因此提示词里的工具清单会随发现结果增长：本轮通过 `tool_search` 展开的工具，下一次请求同时获得 schema 与提示行。预览编写规则挂在 `publish_preview` 的 `promptGuidelines` 上，只有该工具被展开后才进入系统上下文，普通聊天不再常驻这部分说明。
+同一授权目录下，工具清单不随调用增长。旧发现回执不再决定新请求目录。预览规则挂在 `publish_preview` 的 `promptGuidelines` 上，该能力启用时从首次请求起提供；关闭后随目录一起移除。
 
 ## Skills 内容快照
 

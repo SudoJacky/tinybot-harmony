@@ -55,6 +55,7 @@ if (!process.argv.includes('--model-only')) {
   class ViewPU{
     constructor(){this.effects=new Map();this.nodes=new Map();this.branches=new Map();this.lists=new Map();this.scopes=[];}
     finalizeConstruction(){}
+    createStorageProp(_key,value){return new Property(value);}
     getUIContext(){return{animateTo:(_options,change)=>change()};}
     observeComponentCreation2(callback){const id=++serial;for(const scope of this.scopes)scope.add(id);this.effects.set(id,{callback,owners:[...this.scopes]});this.run(id,true);}
     run(id,initial){const saved=this.scopes,previous=this.current;this.scopes=[...this.effects.get(id).owners];this.current=id;currentView=this;this.effects.get(id).callback(id,initial);this.scopes=saved;this.current=previous;}
@@ -67,7 +68,7 @@ if (!process.argv.includes('--model-only')) {
   }
   const globals={exports:{},ViewPU,SynchedPropertyNesedObjectPU:Property,
     makeBuilderParameterProxy:(_name,getters)=>new Proxy({},{get:(_,key)=>getters[key]()}),
-    require:id=>{if(id.includes('I18n&'))return {t:text=>text};if(id.includes('Theme&'))return {Font:{},Motion:{},Radius:{},Space:{}};throw Error('Unexpected dependency '+id);}};
+    require:id=>{if(id.includes('AppearanceStyle&'))return {AppearanceStyle:class {fontFamily='sans-serif';}};if(id.includes('I18n&'))return {t:text=>text};if(id.includes('Theme&'))return {Font:{},Motion:{},Radius:{},Space:{}};if(id.includes('MaterialAttributes&'))return {systemMaterialAttribute:()=>({}),menuMaterialAttribute:()=>({})};if(id.includes('ApiLevel&'))return {ApiLevel:{material:false,drawingTools:false,redirectLimit:false,pdfTextContent:false,sdk:20}};throw Error('Unexpected dependency '+id);}};
   for(const type of ['If','Column','Row','Button','SymbolGlyph','Text','LoadingProgress','Scroll','ForEach'])globals[type]=new Proxy({},{get:(_,property)=>(...args)=>{
     if(property==='pop')return;const id=currentView.current;let node=currentView.nodes.get(id);if(!node){node={type,elementId:id};currentView.nodes.set(id,node);}node[property==='create'?'value':property]=args[0];
   }});

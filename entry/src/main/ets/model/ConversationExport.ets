@@ -1,11 +1,12 @@
 import { AppData, ThreadData, MessageData } from './Conversation';
-import { ToolExecution } from './Agent';
+import { ToolExecution, toolReceipts } from './Agent';
 import { Attachment } from './Productivity';
 import { MarkdownBlock, markdownBlocks } from './Markdown';
 import { t } from './I18n';
 import { parseDataView } from './RichArtifacts';
 import { ProviderProfile } from './ProviderProfiles';
-import { latestPreviewIds, PreviewMessage } from './PublishedPreview';
+import { latestPreviewIds, PreviewMessage, publishedAnswerParts } from './PublishedPreview';
+import { referencePreviewId } from './PreviewReferences';
 
 export interface ConversationSection {
   kind: string;
@@ -76,16 +77,26 @@ function addMessage(sections: ConversationSection[], message: MessageData, profi
   for (const reference of message.references || []) { addText(sections, reference.title, user); }
   addAttachments(sections, message.attachments || [], user);
   if (!user && message.steps?.length) {
-    for (const step of message.steps) {
+    for (let index = 0; index < message.steps.length; index++) {
+      const step = message.steps[index];
       if (step.steering) {
         sections.push({ kind: 'role', text: t('用户'), user: true });
         addText(sections, step.steering.text, true); addAttachments(sections, step.steering.attachments || [], true);
         sections.push({ kind: 'role', text: role.text, user: false, provider: role.provider,
           providerPreset: role.providerPreset, model: role.model });
       }
-      if (!step.requestError) { addText(sections, step.content, false); }
-      for (const tool of step.tools) {
-        if (tool.previewScreenshot && (tool.call.function.name !== 'publish_preview' || latest.includes(message.id + ':' + tool.call.id))) {
+      if (!step.requestError && !step.uiValidation) {
+        for (const part of publishedAnswerParts(message.id, message.steps, index, message.status, latest)) {
+          if (part.kind === 'text') { addText(sections, part.content, false); }
+          const screenshot = part.preview?.screenshot;
+          if (part.kind === 'preview' && screenshot) {
+            sections.push({ kind: 'attachment-image', text: screenshot.image.name, user: false,
+              attachment: screenshot.image, imageRatio: screenshot.height / screenshot.width });
+          }
+        }
+      }
+      for (const tool of toolReceipts(step.tools)) {
+        if (tool.previewScreenshot && !referencePreviewId(tool) && (tool.call.function.name !== 'publish_preview' || latest.includes(message.id + ':' + tool.call.id))) {
           sections.push({ kind: 'attachment-image', text: tool.previewScreenshot.image.name, user: false,
             attachment: tool.previewScreenshot.image, imageRatio: tool.previewScreenshot.height / tool.previewScreenshot.width });
         }

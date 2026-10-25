@@ -18,6 +18,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Huawei account tests failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Hosted privacy state and startup gating tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-announcements.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Announcement startup, persistence and dialog tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-feedback.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Feedback identity, submission and reply tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-app-information.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'App review navigation and error handling tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/build-builtin-skills.cjs') --check
@@ -26,6 +28,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Built-in Skills are stale. Run node scripts/bu
 if ($LASTEXITCODE -ne 0) { throw 'Developer diagnostics collection, export and lifecycle tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-unified-logging.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Unified runtime log levels, redaction, export and disabled-path tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-api20-compat.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'API 20 capability gates, redirect-safe transport, bitmap, PDF and web-reading tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-browser.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Browser permission, takeover and runtime pause tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-browser-annotation.cjs')
@@ -65,6 +69,8 @@ if ($LASTEXITCODE -ne 0) { throw 'History drawer activity and animation lifecycl
 if ($LASTEXITCODE -ne 0) { throw 'Search, delivery, references and runtime reliability tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-preview-publication.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Preview publication integration tests failed.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-preview-references.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Preview reference placement and compatibility tests failed.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-preview-lifecycle.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Preview resource and lazy lifecycle tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-turn-workflow.cjs')

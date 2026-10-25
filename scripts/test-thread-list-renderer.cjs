@@ -153,22 +153,42 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
   assert.ok(fs.statSync(widgetEmitted).mtimeMs >= fs.statSync(widgetSource).mtimeMs, 'Build Widgets before testing');
   const widgetTree = ts.createSourceFile(widgetEmitted, fs.readFileSync(widgetEmitted, 'utf8'), ts.ScriptTarget.Latest, true);
   const icon = widgetTree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'IconButton');
-  let accessibilityLabel;
+  let accessibilityLabel, buttonBackground, buttonBorder, buttonAnimation, backgroundAnimation;
+  const materialAttributes = { exports: {} };
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(root,
+    'entry/src/main/ets/common/MaterialAttributes.ets'), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }
+  }).outputText, materialAttributes);
   class Property {
     constructor(value) { this.value = value; }
     get() { if (current !== undefined) readers.add(current); return this.value; }
     set(value) { this.value = value; }
     reset(value) { this.value = value; }
   }
-  const widgets = { ...globals, exports: {}, AppearanceStyle: class {},
+  const widgets = { ...globals, exports: {}, Color: { Transparent: 'transparent' },
+    Context: { animation: value => { buttonAnimation = value; } },
+    systemMaterialAttribute: materialAttributes.exports.systemMaterialAttribute,
+    AppearanceStyle: class { controlBackground = 'transparent'; materialAvailable = true; },
     ViewPU: class extends ViewPU { createStorageProp(_key, value) { return new Property(value); } },
     SynchedPropertySimpleOneWayPU: Property, SynchedPropertyObjectOneWayPU: Property, ObservedObject: { GetRawObject: v => v },
-    Button: new Proxy({}, { get: (_, key) => key === 'accessibilityText' ? value => { accessibilityLabel = value; } : () => {} }) };
+    Button: new Proxy({}, { get: (_, key) => key === 'accessibilityText' ? value => { accessibilityLabel = value; } :
+      key === 'backgroundColor' ? value => { buttonBackground = value; backgroundAnimation = buttonAnimation; } :
+      key === 'border' ? value => { buttonBorder = value; } : () => {} }) };
   vm.runInNewContext(ts.transpileModule(icon.getText(widgetTree), { compilerOptions: {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021
   } }).outputText, widgets);
   const button = new widgets.exports.IconButton(undefined, { label: '新对话 · Original' }); button.initialRender();
   assert.equal(accessibilityLabel, '新对话 · Original');
+  assert.equal(buttonBackground, 'transparent', 'Supported devices retain the material background');
+  assert.ok(backgroundAnimation, 'Material-capable devices retain their existing color animation');
+  assert.equal(buttonBorder.width, 0);
+  button.appearance = { controlBackground: 'plain-control', materialAvailable: false }; button.flush();
+  assert.equal(buttonBackground, 'plain-control', 'API 20 circular buttons have an opaque background');
+  assert.equal(backgroundAnimation, null, 'API 20 repaint applies explicit fills without interpolating native theme defaults');
+  assert.equal(buttonBorder.width, 0.5, 'A thin outline preserves the circle on similar page colors');
+  button.updateStateVars({ icon: button.icon, tint: button.tint, fill: '#216451', disabled: false, label: button.label }); button.flush();
+  assert.equal(buttonBackground, '#216451', 'Explicit primary/action fills remain intact');
+  assert.equal(buttonBorder.width, 0);
   button.updateStateVars({ icon: button.icon, tint: button.tint, fill: button.fill, disabled: false, label: '新对话 · Renamed' }); button.flush();
   assert.equal(accessibilityLabel, '新对话 · Renamed', 'Retained project buttons must update their accessibility names');
   console.log('PASS retained sidebar: rename, pin/unpin labels and ordering, delete/archive/restore, new chat, project create/edit and filtered-view creation');

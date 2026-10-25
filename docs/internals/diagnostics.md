@@ -37,6 +37,8 @@ Diagnostics.log('error', 'network', 'request_failed', { code: error.code }, erro
 
 接口本身也会再次检查，调用者不必依赖前置门控保证正确性。只有 `NativeDiagnosticLog` 适配器可以写 HiLog，它与采集缓冲收到同一份脱敏数据。沙箱用户程序的 `console` 输出属于工具结果，不并入应用诊断日志。
 
+`NativeDiagnosticLog` 同时在内存保留最近 15 分钟、最多 1,000 条已被日志门控接受且完成脱敏的记录，供用户主动附加反馈日志。普通模式仍只接受现有 Warn/Error，不扩大 Debug/Info 的采集范围，不启动性能采样或日志落盘。缓冲随进程退出丢失，清除诊断数据也会清空它。反馈勾选时才序列化为带应用版本、UTC 时间、记录数和省略数量的 UTF-8 `.log`（JSON Lines）并直接附加，用户提交反馈时发送，不增加检查确认弹窗。该路径不调用会停止采集的 `exportCapture()`，也不读取聊天文件、系统原始日志或完整开发者归档。
+
 ## 名称与字段白名单
 
 `DiagnosticLog.ets` 维护模块、事件、数值字段、布尔字段、字符串枚举与引用字段的目录，所有输出都经同一层脱敏（redaction）。新增日志必须先登记，事件名不能拼接正文或自由文本。
@@ -151,6 +153,7 @@ CPU Profile 是单独操作：`hidebug.startJsCpuProfiling()` 最多运行 30 �
 | --- | --- |
 | `entry/src/main/ets/model/Diagnostics.ets` | 采集器、事件环、指标聚合、日志入口与开发者解锁门 |
 | `entry/src/main/ets/model/DiagnosticLog.ets` | 模块/事件目录、字段白名单与脱敏 |
+| `entry/src/main/ets/model/RecentDiagnosticLog.ets` | 最近运行日志的有界内存缓冲与反馈文本打包 |
 | `entry/src/main/ets/services/NativeDiagnosticLog.ets` | 唯一的 HiLog 输出适配器 |
 | `entry/src/main/ets/services/DeveloperDiagnostics.ets` | 开关持久化、采样生命周期、滚动日志、导出与清除 |
 | `entry/src/main/ets/services/PerformanceProbe.ets` | taskpool 中的原生内存、CPU 与线程探测 |

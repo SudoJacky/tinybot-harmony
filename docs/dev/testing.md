@@ -14,6 +14,28 @@ devecocli build
 
 很多脚本读取的是编译产物——**先构建，再运行**。文中标注“需构建”的项在没有产物时会失败，这不是代码回归。
 
+## 两个系统版本
+
+同一个 HAP 同时面向 HarmonyOS 6（API 20）与 HarmonyOS 7（API 26）。行为脚本用 `deviceInfo.sdkApiVersion` 模拟两条分支：26 走原有 http 与材质实现，20 走 rcp 传输与普通界面，因此不需要两台设备也能覆盖分支逻辑；真机/模拟器仍要跑一遍交互：
+
+1. 列出设备，确认串口与系统版本：`devecocli device list`（API 20 模拟器名为 `Mate 90 Pro_OS6`）。
+2. `devecocli run --device <serial>`：首次启动应到隐私说明，同意后进入引导与主页，没有任何 JS 崩溃。
+3. 依次打开：主页菜单与公告 Sheet、设置各页、外观（“光感效果”应显示“此系统不支持”）、画板（模拟器无手写能力时显示真实不支持状态）。
+4. 冷启动、返回、前后台切换各一次，再查崩溃日志：`devecocli log --crash --bundle-name com.sudojacky.tinybot`。
+
+### 重定向验证夹具
+
+`scripts/redirect-fixture-server.cjs` 提供 301/302/303/307/308、相对 `Location`、循环、多跳、慢响应、404 与凭据回显，并把每次命中写成一行 JSON：
+
+```powershell
+node scripts\redirect-fixture-server.cjs 18770
+hdc rport tcp:18770 tcp:18770
+# 设备侧验证后查看命中记录：是否只有首跳、是否带上 Authorization
+```
+
+判定标准：定向拒绝的重定向请求只出现首跳，第二跳地址不得出现；`redirect: 'return'` 的网页读取应看到逐跳请求，且第 6 次跳转被拒绝。
+
+
 ## 脚本矩阵
 
 | 脚本 | 覆盖内容 | 需构建 |
@@ -25,6 +47,7 @@ devecocli build
 | `test-workspace-backup-ui.cjs` | 编译后文件页的失败保存、内容无法预览时导出原始备份、重试与新文件状态 | 是 |
 | `test-huawei-account.cjs` | 登录/取消、错误码脱敏、重启恢复、账号切换、退出与迟到回调、存储失败、未登录请求拦截 | 否 |
 | `test-app-information.cjs` | 实际评分入口打开当前应用写评论页、重复点击、跳转或包信息读取失败提示与重试 | 否 |
+| `test-feedback.cjs` | 匿名身份、UTF-16 限制、组合分页、已读、限流与恢复；附件上传、部分成功、超时核对、鉴权下载删除；最近 15 分钟日志缓冲、条数/字节边界、直接打包附加、选中状态同步与取消勾选，无日志检查弹窗；加 `--ui` 验证编译后的页面回调 | `--ui` 需 Debug 构建 |
 | `test-developer-diagnostics.cjs` | 诊断采集、导出与生命周期 | 否 |
 | `test-unified-logging.cjs` | 日志级别、脱敏、导出与禁用路径 | 否 |
 | `test-browser.cjs` | 浏览器权限、接管与运行暂停 | 否 |
@@ -36,23 +59,25 @@ devecocli build
 | `test-voice-composer.cjs` | 语音输入区交互 | 是 |
 | `test-drawing-board.cjs` | 画板初始化/导出/像素释放/附件保存 | 是 |
 | `test-skill-completion.cjs` | Skill 补全与输入框回调 | 是 |
-| `test-appearance.cjs` | 外观偏好、保存回滚、启动应用顺序 | — |
+| `test-appearance.cjs` | 外观偏好、保存回滚、启动应用顺序；API 20 不读取任何 `uiMaterial` 值，普通控件底色支持明暗主题；API 26 关闭光感时向组件传入 `Material.empty` | — |
+| `test-api20-compat.cjs` | 运行时能力判断、定向拒绝/返回 3xx 的传输（http 与 rcp 两条路径）、SSE/MCP 实时回调与取消、接收过程中限制响应大小、空 PixelMap 创建、PDF 文字回退与模块缺失提示、网页逐跳校验、搜索拒绝重定向 | — |
 | `test-settings-performance.cjs` | 设置响应与持久化 | 是 |
 | `test-settings-navigation.cjs` | 设置子页草稿、保存失败、凭据保留与返回 | 是 |
 | `test-page-transitions.cjs` | 页面首帧、进入/退出、快速反向操作、退出后释放、保留隐藏编辑器与浏览器、同步动画完成与浏览器关闭时序 | 是 |
-| `test-tablet-workbench.cjs` | 窗口断点切换、聊天状态保留、文件编辑退出确认与工作区隔离、侧区预览路由 | 是 |
+| `test-tablet-workbench.cjs` | 窗口断点切换、聊天状态保留、文件编辑退出确认与工作区隔离、最终回答预览的侧区路由与单实例切换 | 是 |
 | `test-history-drawer.cjs` | 侧栏关闭动画、拖动与中断恢复 | 是 |
 | `test-harness-features.cjs` | 搜索、交付、引用与运行时可靠性 | 否 |
 | `test-preview-publication.cjs` | 预览发布集成 | 否 |
+| `test-preview-references.cjs` | 真实发布与最终引用修复、流式/停止门禁、历史兼容、快照恢复、原位静态导出和无外框样式 | 是 |
 | `test-preview-lifecycle.cjs` | 预览资源与惰性生命周期 | 是 |
 | `test-turn-workflow.cjs` | 流式时间线投影与保留的过程行 | 是 |
 | `test-resources.cjs` | 资源管理集成 | 否 |
 | `test-tool-schemas.cjs` | 用 SDK 的 JSON Schema 校验器检查工具参数、编辑必填字段与三种协议请求结构 | 否 |
-| `test-tool-discovery.cjs` | BM25 排序与中英分词、递归参数检索、默认工具、按需 schema、权限撤销、串行执行 | 否 |
+| `test-tool-discovery.cjs` | 默认完整工具及说明、稳定声明、旧发现回执兼容、权限撤销、编排保护和内部可选 BM25 检索 | 否 |
 | `test-context-usage.cjs` | 上下文预算与用量 | 否 |
 | `test-memory.cjs` | 记忆候选、来源与保存失败回滚 | 否 |
 | `test-code-sandbox.cjs` | 沙箱执行、限额与恢复 | 否 |
-| `test-orchestration.cjs` | 编排子调用、串行边界与回执 | 否 |
+| `test-orchestration.cjs` | 编排子调用、串行边界与回执；计算/写文件/预览/CSV/交付闭环，旧图表入口拒绝、历史图表恢复与导出，截图回传、失败修复、部分成功、取消与权限 | 否 |
 | `test-tool-details.cjs` | 分类回执、失败状态与无损分页 | 否 |
 | `test-window-viewport.cjs` | 窗口与视口尺寸 | 是 |
 | `test-answer-speech-native.cjs` | 回答朗读分段、取消、后台释放 | 是 |
@@ -78,7 +103,7 @@ Hypium `ProjectFolders` 覆盖共享文件夹名称、数量、URI 去重、加�
 | `test-send-motion.cjs` | 发送动效的编译后生命周期与坐标换算 |
 | `test-thinking-motion.cjs` | 思考状态循环、交叉渐变与离屏暂停 |
 | `test-project-tree.cjs` | 侧栏项目分组、普通聊天、空项目、同名项目、置顶与归档 |
-| `test-thread-list-renderer.cjs` | 会话改名/删除/归档/置顶的排序与菜单、项目分组刷新 |
+| `test-thread-list-renderer.cjs` | 会话改名/删除/归档/置顶的排序与菜单、项目分组刷新；API 20 圆形按钮使用底色与轮廓，重绘时立即应用填充，避免绿色背景闪烁；保留显式主色填充及 API 26 材质动画 |
 | `test-message-actions-renderer.cjs` | 改写、重新生成、分支按钮的忙碌/保存失败禁用，以及仅回答展示的 AI 标记 |
 | `test-team-renderer.cjs` | 团队、工具详情与编排子调用更新回调 |
 | `test-chat-disclosures.cjs` | 流式更新、过程重开、历史加载时的展开状态 |

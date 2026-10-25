@@ -8,10 +8,16 @@ import { WorkspaceFiles } from './WorkspaceFiles';
 import { workspaceRelativePath } from './WorkspaceTools';
 import { UiDiagnosticError, repairGuidance } from '../model/UiRepair';
 import { INTERACTIVE_UI_INSTRUCTIONS } from '../model/InteractiveUiInstructions';
+import { previewReference } from '../model/PreviewReferences';
 
 interface PreviewArguments { path: string; title?: string; library?: string; height?: number; }
 interface PreviewImageInfo { width: number; height: number; viewportWidth: number; }
-interface PreviewReceipt { published: boolean; path: string; title: string; nodes: number; screenshot?: PreviewImageInfo; }
+interface PreviewVerification { startup: string; screenshot: string; interaction: string; }
+interface PreviewReceipt {
+  previewId: string; reference: string;
+  published: boolean; path: string; title: string; nodes: number; version: string;
+  verification: PreviewVerification; screenshot?: PreviewImageInfo;
+}
 
 // Resolve/read once, validate that exact snapshot, then attach it to the durable receipt.
 export class PreviewTools implements AgentTools {
@@ -25,7 +31,7 @@ export class PreviewTools implements AgentTools {
   definitions(): ToolDefinition[] {
     return [{ type: 'function', executionMode: 'sequential', promptSnippet: '发布文件预览',
       promptGuidelines: [INTERACTIVE_UI_INSTRUCTIONS],
-      function: { name: 'publish_preview', description: '发布工作区 .js、.html 或 .svg 文件到聊天内的隔离 Web 卡片。JS 在空白页面中执行，可操作 document.body，支持 await；library="three" 预加载 THREE 和独立 OrbitControls。无 imports、网络、本地文件或存储访问。发布前检查启动并截图，成功后保存不可变快照。JSONL 不再支持。',
+      function: { name: 'publish_preview', description: '准备工作区 .js、.html 或 .svg 的隔离 Web 预览。启动检查和截图通过后保存不可变快照，返回 previewId 与 reference；工具阶段不展示。必须在最终回复的插入位置独占一行复制 reference，不放代码块，turn 成功结束后显示。JS 支持 DOM 和 await；library="three" 提供 THREE 和独立 OrbitControls。无 imports、网络、文件或存储权限。JSONL 不支持。',
         parameters: { type: 'object', properties: {
           'path': { type: 'string', description: '现有工作区文件相对路径，.js/.html/.svg' },
           'title': { type: 'string', description: '预览标题，最多 160 字符，默认文件名' },
@@ -76,7 +82,11 @@ export class PreviewTools implements AgentTools {
       cancellation.check();
       context.execution.previewContent = content;
       context.execution.previewScreenshot = screenshot;
-      const receipt: PreviewReceipt = { published: true, path: path, title: document.title, nodes: document.nodes.length,
+      const previewId = 'pv_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 14);
+      const receipt: PreviewReceipt = { published: true, previewId: previewId, reference: previewReference(previewId),
+        path: path, title: document.title, nodes: document.nodes.length,
+        version: snapshot.version,
+        verification: { startup: 'passed', screenshot: screenshot ? 'captured' : 'not_requested', interaction: 'not_checked' },
         screenshot: screenshot ? { width: screenshot.width, height: screenshot.height, viewportWidth: screenshot.viewportWidth } : undefined };
       return JSON.stringify(receipt);
     } catch (error) {

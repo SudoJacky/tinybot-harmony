@@ -184,6 +184,7 @@ try {
     })
     [IO.File]::WriteAllLines((Join-Path $OutputDirectory 'SHA256SUMS.txt'), $checksums, $utf8)
     [IO.Compression.ZipFile]::CreateFromDirectory($OutputDirectory, $zipPath)
+    & (Join-Path $projectRoot 'prepare-upload.ps1') -DistributionDirectory $OutputDirectory -StudioRoot $StudioRoot
     Write-Output "Prepared: $OutputDirectory"
     Write-Output "Delivery ZIP: $zipPath"
     Write-Output 'Unsigned release input only. Use DevEco Studio Upload Product for cloud signing.'

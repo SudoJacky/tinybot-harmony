@@ -137,6 +137,37 @@ clicked.call(card); surfaces = 0; card.initialRender(); assert.equal(surfaces, 0
 card.inspected = false; card.initialRender(); assert.equal(surfaces, 1);
 console.log('PASS emitted preview card detaches the inline surface while inspected and restores it on close');
 
+card.inline = true; card.expanded = false;
+surfaces = 0; card.initialRender(); assert.equal(surfaces, 1);
+clicked.call(card); surfaces = 0; card.initialRender(); assert.equal(surfaces, 0);
+card.inspected = false; card.initialRender(); assert.equal(surfaces, 1);
+console.log('PASS final-answer inline preview transfers its live surface to the side panel and restores it on close');
+
+// Exercise the emitted final-answer card arguments, including the real inspect callback.
+const bubble = emitted('views/MessageBubble', 'MessageBubble');
+let inlineArguments;
+function findInlineCard(node) {
+  if (ts.isNewExpression(node) && node.expression.getText(bubble.tree) === 'PublishedPreviewCard') {
+    const args = node.arguments?.[1];
+    if (args && ts.isObjectLiteralExpression(args) && args.properties.some(p => p.name?.getText(bubble.tree) === 'inline')) {
+      inlineArguments = args.getText(bubble.tree);
+    }
+  }
+  ts.forEachChild(node, findInlineCard);
+}
+findInlineCard(bubble.cls); assert.ok(inlineArguments, 'Locate the actual final-answer preview card');
+const inlineExports = {};
+vm.runInNewContext(ts.transpileModule('exports.bind = function(entry, partIndex) { return (' + inlineArguments + '); };', {
+  compilerOptions: { target: ts.ScriptTarget.ES2021 }
+}).outputText, { exports: inlineExports });
+let inspectedTarget;
+const inlineBubble = { message: { id: 'answer' }, previewInspectable: true, inspectedPreviewId: 'final-preview',
+  answerParts: () => [{ preview: { id: 'final-preview' } }], onInspectPreview: (...args) => { inspectedTarget = args; } };
+const inlineProps = inlineExports.bind.call(inlineBubble, { step: 0 }, 0);
+assert.equal(inlineProps.inline, true); assert.equal(inlineProps.inspectable, true); assert.equal(inlineProps.inspected, true);
+inlineProps.onInspect(); assert.deepEqual(inspectedTarget, ['answer', 'final-preview']);
+console.log('PASS emitted final-answer preview wires side-panel availability, active identity and inspect action');
+
 
 // Use the real session/runtime and a gated streaming provider, without any network or credentials.
 const modules = new Map();
@@ -158,6 +189,17 @@ function load(file) {
 (async () => {
   const { Fixture } = load(path.join(root, 'entry/src/test/SessionService.test'));
   const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/ChatViewModel'));
+  const { stepPreviews } = load(path.join(root, 'entry/src/main/ets/model/PublishedPreview'));
+  const SidePreview = probe('views/PreviewPanel', 'PreviewPanel', ['message', 'previews'], { stepPreviews });
+  const publishedStep = { content: '', tools: [{ status: 'complete', call: { id: 'publish', function: { name: 'publish_preview' } },
+    output: JSON.stringify({ path: 'demo.html', title: 'Demo', previewId: 'pv_final', reference: '[[tinybot-preview:pv_final]]' }),
+    previewContent: 'published snapshot' }] };
+  const side = Object.assign(new SidePreview(), { messageId: 'answer', previewId: 'answer:publish',
+    app: { active: { messages: [{ id: 'answer', stepViews: [publishedStep] }], latestPreviewIds: ['answer:publish'] } } });
+  assert.equal(stepPreviews('answer', publishedStep, 0, []).length, 0, 'Referenced previews stay out of legacy cards');
+  assert.equal(side.previews().length, 1); assert.equal(side.previews()[0].content, 'published snapshot');
+  side.previewId = 'foreign-preview'; assert.equal(side.previews().length, 0);
+  console.log('PASS emitted side panel resolves final-answer snapshots while excluding unrelated previews');
   const fixture = new Fixture(), app = new ChatViewModel();
   await app.initialize(fixture.session);
   const Chat = probe('views/ChatPanel', 'ChatPanel', ['centeredWelcome', 'composerExpanded']);

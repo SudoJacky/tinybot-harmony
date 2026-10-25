@@ -84,6 +84,9 @@ export struct AppearancePanel {
       effect === 'gentle' ? t('更厚的材质，较弱的高光，不启用交互形变。') :
       effect === 'standard' ? t('薄材质，适中的高光与交互反馈。') : t('更通透的材质，完整的高光与交互反馈。');
   }
+  // API 20 always renders plain controls. Show its effective off state while keeping the saved
+  // preference for systems that support immersive material.
+  private materialAvailable(): boolean { return this.appearance.materialAvailable; }
   private fontName(family: string): string { return family || t('跟随系统'); }
   private scaleNames(): string[] { return [t('小'), t('标准'), t('大'), t('更大')]; }
 
@@ -194,10 +197,16 @@ export struct AppearancePanel {
                 compId: 'appearance-font-' + index, onTap: () => this.selectFont(family) })
             }, (family: string) => family)
           } else {
+            if (!this.materialAvailable()) {
+              Banner({ text: t('当前系统不提供沉浸光感材质，界面使用普通配色。'), danger: false,
+                compId: 'appearance-effect-unavailable' })
+            }
             ForEach(LIGHT_EFFECTS, (effect: LightEffect, index: number) => {
               if (index > 0) { RowDivider() }
-              NavRow({ title: this.effectName(effect), subtitle: this.effectDescription(effect), active: this.options.lightEffect === effect,
-                trailing: 'select', compId: 'appearance-effect-' + effect, onTap: () => this.selectEffect(effect) })
+              NavRow({ title: this.effectName(effect), subtitle: this.effectDescription(effect),
+                active: this.materialAvailable() ? this.options.lightEffect === effect : effect === 'off',
+                trailing: 'select', disabled: !this.materialAvailable(), compId: 'appearance-effect-' + effect,
+                onTap: () => this.selectEffect(effect) })
             }, (effect: LightEffect) => effect)
           }
         }
@@ -293,7 +302,9 @@ export struct AppearancePanel {
         }
         SectionHeader({ title: t('光感与材质') })
         GroupCard() {
-          NavRow({ title: t('光感效果'), icon: $r('sys.symbol.wand_and_stars'), value: this.effectName(this.options.lightEffect),
+          NavRow({ title: t('光感效果'), icon: $r('sys.symbol.wand_and_stars'),
+            value: this.materialAvailable() ? this.effectName(this.options.lightEffect) : t('关闭'),
+            subtitle: this.materialAvailable() ? '' : t('使用纯色控件，关闭光感材质。'),
             compId: 'appearance-effect', onTap: () => this.open('effect') })
         }
         if (this.error) { Banner({ text: this.error, compId: 'appearance-error' }) }

@@ -115,7 +115,7 @@ const kits = {
   '@kit.MediaLibraryKit': {}, '@kit.ShareKit': {}, '@kit.ArkGraphics2D': { drawing: {} },
   '@kit.ArkTS': { util: { generateRandomUUID: () => crypto.randomUUID(), TextEncoder: Encoder, TextDecoder: Decoder,
     Base64Helper: class { async encodeToString(bytes) { return Buffer.from(bytes).toString('base64'); } encodeToStringSync(bytes) { return Buffer.from(bytes).toString('base64'); } decodeSync(text) { return Uint8Array.from(Buffer.from(text,'base64')); } } } },
-  '@kit.AssetStoreKit': { asset: {} }, '@kit.BasicServicesKit': { zlib: {
+  '@kit.AssetStoreKit': { asset: {} }, '@kit.BasicServicesKit': { deviceInfo: { sdkApiVersion: 26 }, zlib: {
     ReturnStatus: { STREAM_END: 1 }, CompressFlushMode: { FINISH: 4 }, createZipSync: () => { let current; return {
       inflateInit2: async()=>{}, inflateEnd: async()=>{}, getZStream:async()=>current,
       inflate:async stream=>{const bytes=zlib.inflateRawSync(Buffer.from(stream.nextIn),{maxOutputLength:stream.availableOut});new Uint8Array(stream.nextOut).set(bytes);current={totalOut:bytes.length};return 1;}
@@ -257,7 +257,7 @@ async function test(name, run) {
       drawImage(value,x,y){assert.equal(value,pixel);assert.equal(x,0);assert.equal(y,0);assert.equal(this.target.white,true);this.target.composited=true;}
     }};
     kits['@kit.ImageKit'].image={PixelMapFormat:{RGBA_8888:3},AlphaType:{OPAQUE:1},
-      createEmptyPixelMap:options=>{assert.equal(options.size.width,1600);assert.equal(options.size.height,1200);
+      createPixelMapSync:options=>{assert.equal(options.size.width,1600);assert.equal(options.size.height,1200);
         const target={getImageInfo:async()=>({size:options.size}),release:async()=>{opaqueReleases++;}};composites.push(target);return target;},
       createImagePacker:()=>({packing:async(value,options)=>{
         if(value!==pixel){assert.equal(value.composited,true,'native ink must be composited on white before JPEG packing');}
@@ -1269,8 +1269,9 @@ async function test(name, run) {
     const invoke=(name,args)=>tools.execute({id:name,type:'function',function:{name,arguments:JSON.stringify(args)}},new Cancellation());
     await assert.rejects(invoke('generate_image',{prompt:'a circle'}),error=>error.code==='TOOL_UNAVAILABLE');
     const discovery=new ToolDiscovery(tools);
-    const found=JSON.parse(await discovery.execute({id:'search',type:'function',function:{name:'tool_search',arguments:'{"query":""}'}},new Cancellation()));
-    assert.ok(!found.tools.some(tool=>tool.name==='generate_image'));
+    assert.ok(!discovery.definitions().some(tool=>tool.function.name==='generate_image'));
+    assert.ok(!discovery.definitions().some(tool=>tool.function.name==='tool_search'));
+    await assert.rejects(discovery.execute({id:'search',type:'function',function:{name:'tool_search',arguments:'{"query":""}'}},new Cancellation()),error=>error.code==='TOOL_UNAVAILABLE');
     assert.ok(tools.definitions().some(tool=>tool.function.name==='read_attachment'));
   });
   await test('model discovery validates credential origin and uses the protocol endpoint',async()=>{

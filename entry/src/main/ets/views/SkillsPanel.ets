@@ -1,4 +1,5 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { systemMaterialAttribute } from '../common/MaterialAttributes';
 import { t } from '../model/I18n';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { SkillData } from '../model/Skills';
@@ -41,7 +42,7 @@ export struct SkillsPanel {
         Toggle({ type: ToggleType.Switch, isOn: skill.enabled }).id('toggle-skill-' + skill.name)
           .attributeModifier(Styles.toggle)
           .selectedColor(this.appearance.accent).enabled(!this.locked())
-          .systemMaterial(this.appearance.control)
+          .attributeModifier(systemMaterialAttribute<ToggleAttribute>(this.appearance.control))
           .onChange((value: boolean) => { if (value !== skill.enabled) { this.app.changeSkill(skill.name); } })
       }.width('100%')
       if (skill.description.length > 0) {

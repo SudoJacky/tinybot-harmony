@@ -5,13 +5,20 @@ const ts = require(studio + '/sdk/default/openharmony/ets/build-tools/ets-loader
 const root = path.resolve(__dirname, '../entry/src/main/ets'), cache = new Map();
 let network, requests = [], destroys = 0, interceptors = [];
 const kits = {
+  '@kit.BasicServicesKit': { deviceInfo: { sdkApiVersion: 26 }, BusinessError: class extends Error {} },
+  '@kit.RemoteCommunicationKit': { rcp: { createSession() { throw Error('The API 20 transport must not run here'); } } },
   '@kit.ArkTS': { util: { generateRandomUUID: require('node:crypto').randomUUID,
     TextEncoder: class { encodeInto(s) { return new TextEncoder().encode(s); } } } },
   '@kit.NetworkKit': { http: { RequestMethod: { POST: 'POST' }, HttpDataType: { STRING: 'string' },
     InterceptorType: { REDIRECTION: 'redirect' }, HttpInterceptorChain: class {
       addChain(items) { interceptors.push(...items); return true; } apply() { return true; }
     }, createHttp: () => ({ destroy: () => destroys++, request: (url, options, cb) => {
-      requests.push({ url, options }); network(url, options, cb);
+      requests.push({ url, options });
+      // http.request offers both a callback and a promise form; the compat layer awaits it.
+      return new Promise((resolve, reject) => network(url, options, (error, response) => {
+        if (cb) { cb(error, response); }
+        if (error) { reject(error); } else { resolve(response); }
+      }));
     } }) } }
 };
 function load(file) {
@@ -280,7 +287,8 @@ async function main() {
   };
   const tool = new WebSearchTools(native); const found = JSON.parse(await tool.execute(call('search_web', { query: 'test', maxResults: 1 }), new Cancellation()));
   assert.equal(found.sources.length, 1); assert.equal(requests.at(-1).url, 'https://api.deepseek.com/v1/tools/search');
-  assert.equal(await interceptors.at(-1).interceptorHandle({}, {}), false); assert.equal(recorded.at(-1).tokens, undefined);
+  assert.equal(requests.at(-1).options.maxRedirects, 0, 'Search refuses redirects before sending the key');
+  assert.equal(recorded.at(-1).tokens, undefined);
   assert.ok(!JSON.stringify(recorded).includes('test-secret'));
   assert.equal(recorded.at(-1).model, 'search');
   assert.equal(credentialReads.at(-1), 'model-key');

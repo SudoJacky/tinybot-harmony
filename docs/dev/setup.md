@@ -4,7 +4,7 @@
 
 ## 前置条件
 
-- DevEco Studio，API 26 SDK（与 `build-profile.json5` 中的 `compatibleSdkVersion` 一致）。
+- DevEco Studio，API 26 SDK。编译始终使用 API 26 SDK；`compatibleSdkVersion` 为 `6.0.0(20)`，产物可在 HarmonyOS 6（API 20）与 HarmonyOS 7（API 26）上安装。
 - DevEco CLI（`devecocli`），真机调试还需要华为开发者账号。
 - Node.js 用于仓库内的 `scripts/*.cjs` 验证脚本。
 

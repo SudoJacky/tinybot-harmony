@@ -1,6 +1,7 @@
 import { ConversationShareData, sharingMessages } from '../model/ConversationShare';
 import { ConversationSharePanel } from '../views/ConversationSharePanel';
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { systemMaterialAttribute } from '../common/MaterialAttributes';
 import { monochromeProviderLogo, providerLogo } from '../common/ProviderBrand';
 import { WebUiPreflightHost } from '../views/WebUiPreflightHost';
 import { PreviewCaptureHost } from '../views/PreviewCaptureHost';
@@ -623,8 +624,9 @@ struct Index {
     } else if (name === 'support') {
       NavDestination() {
         SupportPanel({ page: param as string,
-          onOpen: (page: string) => this.openSupport(page) })
-      }.title(supportTitle(param as string), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+          onOpen: (page: string) => this.openSupport(page), onClose: () => { this.paths.pop(); } })
+      }.title(supportTitle(param as string), { systemMaterial: this.appearance.control })
+        .hideTitleBar((param as string) === 'feedback').backgroundColor($r('app.color.page_background'))
     } else if (name === 'user-document') {
       NavDestination() {
         UserDocumentPanel({ app: this.app, settings: this.app.settings, onSaved: () => { this.paths.pop(); } })
@@ -760,8 +762,9 @@ struct Index {
       .onClick(() => { this.paths.pushPath({ name: 'models' }); })
       Button({ type: ButtonType.Circle, stateEffect: true }) {
         SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(20).fontColor([$r('sys.color.font_primary')])
-      }.id('chat-more').width(44).height(44).borderRadius(22).backgroundColor(Color.Transparent)
-      .systemMaterial(this.appearance.control).accessibilityText(t("更多操作"))
+      }.id('chat-more').width(44).height(44).borderRadius(22).backgroundColor(this.appearance.controlBackground)
+      .border({ width: this.appearance.materialAvailable ? 0 : 0.5, color: $r('app.color.divider') })
+      .attributeModifier(systemMaterialAttribute<ButtonAttribute>(this.appearance.control)).accessibilityText(t("更多操作"))
       .enabled(this.app.ready).bindMenu(this.moreMenu, {
         systemMaterial: this.appearance.surface, mask: false })
       IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t("新建对话"), compId: 'new-chat',
