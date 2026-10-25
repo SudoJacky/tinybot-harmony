@@ -17,10 +17,12 @@ export struct BrowserPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink browser: BrowserSession;
   @Prop @Watch('syncBrowserVisibility') expanded: boolean = false;
+  @Prop presented: boolean = false;
   @Prop threadId: string = '';
   @Prop canAnnotate: boolean = false;
   onAnnotation: (threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string) => Promise<void> = async () => {};
   onDismiss: () => void = () => {};
+  onClose: () => void = () => {};
   onSettings: () => void = () => {};
   @State private address: string = '';
   @State private addressDirty: boolean = false;
@@ -79,7 +81,7 @@ export struct BrowserPanel {
   }
   build() {
     Column({ space: Space.sm }) {
-      if (this.browser.open && this.driver) {
+      if ((this.browser.open || this.presented) && this.driver) {
         Row({ space: Space.sm }) {
           IconButton({ icon: $r('sys.symbol.chevron_down'), label: t('收起浏览器'), compId: 'browser-collapse', onTap: this.onDismiss })
           Column({ space: 2 }) {
@@ -90,8 +92,9 @@ export struct BrowserPanel {
           }.layoutWeight(1).alignItems(HorizontalAlign.Start)
           IconButton({ icon: $r('sys.symbol.gearshape'), label: t('设置'), compId: 'browser-settings', onTap: this.onSettings })
           IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭浏览器'), compId: 'browser-close',
-            onTap: () => { this.browser.close(); this.onDismiss(); } })
-        }.width('100%').padding({ left: Space.sm, right: Space.sm, top: Space.sm }).enabled(!this.capturing)
+            onTap: this.onClose })
+        }.width('100%').height(56).padding({ left: Space.sm, right: Space.sm }).enabled(!this.capturing)
+          .border({ width: { bottom: 0.5 }, color: $r('app.color.divider') })
         Row({ space: Space.sm }) {
           TextInput({ text: this.browser.editingAddress || this.addressDirty ? this.address : this.browser.url, placeholder: t('网页地址') }).fontFamily(this.appearance.fontFamily)
             .id('browser-address').layoutWeight(1).type(InputType.URL).enterKeyType(EnterKeyType.Go)
@@ -172,11 +175,8 @@ export struct BrowserPanel {
         }.width('100%').layoutWeight(1).clip(true)
           .onAreaChange((_old: Area, next: Area) => { this.webWidth = Number(next.width); this.webHeight = Number(next.height); })
       }
-    }.id('agent-browser-panel').width('100%').height('100%').backgroundColor($r('app.color.page_background'))
-      // Slide the mounted page as one surface; leave input gating outside the animation.
-      .translate({ y: this.expanded ? '0%' : '100%' })
-      .animation({ duration: this.expanded ? Motion.drawer : Motion.medium, curve: Motion.drawerCurve })
-      .opacity(this.browser.open ? 1 : 0)
+    }.id('agent-browser-panel').width('100%').height('100%').backgroundColor($r('app.color.surface'))
+      // The shared AnimatedPage owns presentation; this Web host stays attached while hidden.
       .hitTestBehavior(this.expanded && this.browser.open ? HitTestMode.Default : HitTestMode.None)
       .enabled(this.expanded && this.browser.open)
       .accessibilityLevel(this.expanded && this.browser.open ? 'auto' : 'no-hide-descendants')

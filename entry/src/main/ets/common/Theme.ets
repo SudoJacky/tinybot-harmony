@@ -3,7 +3,7 @@ import { common } from '@kit.AbilityKit';
 import { curves, window } from '@kit.ArkUI';
 import { SwitchSize } from './SwitchSize';
 import { currentAppearanceStyle } from './AppearanceStyle';
-// Shared design tokens and control styles for the phone UI. Colors live in resources (light/dark).
+// Shared phone/tablet tokens. Neutral surfaces live in resources; accents follow appearance preferences.
 
 // Motion tokens mirrored from the desktop workbench so both clients move alike. The system
 // "animation scale" setting (including turning animations off) applies to every curve below.
@@ -74,12 +74,13 @@ export class AppButton implements AttributeModifier<ButtonAttribute> {
   applyNormalAttribute(instance: ButtonAttribute): void {
     const appearance = currentAppearanceStyle();
     const large = this.size >= 44;
-    instance.type(ButtonType.Capsule).height(this.size).fontSize(large ? 15 : 13).fontWeight(FontWeight.Medium)
+    instance.type(ButtonType.Normal).borderRadius(large ? 12 : Radius.sm).height(this.size).fontFamily(appearance.fontFamily)
+      .fontSize(large ? 15 : 13).fontWeight(FontWeight.Medium)
       .padding({ left: large ? 20 : 14, right: large ? 20 : 14 });
     if (this.kind === 'primary') {
       instance.backgroundColor(appearance.accent).fontColor(appearance.onAccent);
     } else if (this.kind === 'tonal') {
-      instance.backgroundColor(appearance.accentContainer).fontColor(appearance.onAccentContainer);
+      instance.backgroundColor($r('app.color.surface_variant')).fontColor($r('app.color.text_primary'));
     } else if (this.kind === 'danger') {
       instance.backgroundColor($r('app.color.danger_container')).fontColor($r('app.color.danger'));
     } else if (this.kind === 'plain') {

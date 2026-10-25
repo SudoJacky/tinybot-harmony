@@ -24,6 +24,7 @@ class ThreadSection {
 struct ThreadRow {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop query: string = '';
+  @Prop workbench: boolean = false;
   @Prop lastBranch: boolean = false;
   @Prop activePath: boolean = false;
   @Prop selecting: boolean = false;
@@ -112,7 +113,10 @@ struct ThreadRow {
               Text(this.thread.displayTitle).fontFamily(this.appearance.fontFamily).fontSize(15).maxLines(1).layoutWeight(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
                 .fontWeight(this.active() ? FontWeight.Medium : FontWeight.Normal)
-                .fontColor(this.active() ? this.appearance.onAccentContainer : $r('app.color.text_primary'))
+                .fontColor(this.workbench ? $r('app.color.text_primary') : this.active() ? this.appearance.onAccentContainer : $r('app.color.text_primary'))
+              if (this.workbench) {
+                Text(shortTime(this.thread.updatedAt)).fontSize(11).fontColor($r('app.color.text_tertiary')).maxLines(1)
+              }
             }.width('100%')
             if (this.query.trim()) { Text(this.snippet()).fontFamily(this.appearance.fontFamily).fontSize(12).maxLines(2).fontColor(this.appearance.accent) }
             if (this.thread.parentThreadId) { Text('↳ ' + (this.app.threads.find((item) => item.id === this.thread.parentThreadId)?.title || t("原对话已删除"))).fontFamily(this.appearance.fontFamily).fontSize(11).maxLines(1).fontColor($r('app.color.text_secondary')) }
@@ -121,7 +125,7 @@ struct ThreadRow {
               if (this.thread.draft.length > 0) {
                 Text(t("草稿")).fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.danger'))
               }
-            }
+            }.visibility(this.workbench ? Visibility.None : Visibility.Visible)
           }.layoutWeight(1).alignItems(HorizontalAlign.Start)
           if (!this.selecting) {
             Button({ type: ButtonType.Circle }) {
@@ -131,7 +135,8 @@ struct ThreadRow {
               systemMaterial: this.appearance.surface, mask: false })
           }
         }
-        .width('100%').padding({ left: Space.md, right: 4, top: 10, bottom: 10 })
+        .width('100%').padding({ left: this.workbench && !this.thread.parentThreadId ? 28 : Space.md, right: 4,
+          top: this.workbench ? 8 : 10, bottom: this.workbench ? 8 : 10 }).constraintSize({ minHeight: 44 })
         .onClick(async () => {
           if (this.locked()) { return; }
           if (this.selecting) { this.onSelectionChanged(!this.selected); return; }
@@ -141,8 +146,8 @@ struct ThreadRow {
           systemMaterial: this.appearance.surface, mask: false })
       }
     }
-    .width('calc(100% - 28vp)').borderRadius(Radius.md)
-    .backgroundColor((this.selecting ? this.selected : this.active()) ? this.appearance.accentContainer : Color.Transparent)
+    .width(this.workbench && !this.thread.parentThreadId ? '100%' : 'calc(100% - 28vp)').borderRadius(this.workbench ? 10 : Radius.md)
+    .backgroundColor((this.selecting ? this.selected : this.active()) ? $r('app.color.selection') : Color.Transparent)
     .opacity(this.locked() && !this.active() ? 0.6 : 1)
     .onAreaChange((_old: Area, area: Area) => { this.rowHeight = Number(area.height); })
     Shape() {
@@ -156,6 +161,7 @@ struct ThreadRow {
       .width(28).height(this.rowHeight).fill(Color.Transparent).strokeWidth('1.25px')
       .strokeLineCap(LineCapStyle.Round).position({ x: 0, y: 0 })
       .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+      .visibility(this.workbench && !this.thread.parentThreadId ? Visibility.None : Visibility.Visible)
     }.id('thread-row-' + this.thread.id).width('100%')
   }
 }
@@ -164,6 +170,10 @@ struct ThreadRow {
 @Component
 export struct ThreadList {
   @Prop active: boolean = true;
+  @Prop workbench: boolean = false;
+  @State private searchOpen: boolean = false;
+  onNewChat: () => void = () => {};
+  onTools: () => void = () => {};
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   onSelected: () => void = () => {};
@@ -356,20 +366,74 @@ export struct ThreadList {
   }
 
   @Builder
+  workbenchMenu() {
+    Menu() {
+      MenuItem({ content: this.archived ? t('对话') : t('已归档'),
+        symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.archivebox')) }).id('workbench-archive-toggle')
+        .onClick(() => { this.archived = !this.archived; this.visibleCounts = {}; this.selectedIds = []; })
+      MenuItem({ content: this.selecting ? t('取消') : t('多选'),
+        symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.checkmark_circle')) }).id('workbench-selection-toggle')
+        .onClick(() => { if (this.selecting) { this.endSelection(); } else { this.selecting = true; } })
+    }
+  }
+
+  @Builder
+  workbenchNavigation() {
+    Button({ type: ButtonType.Normal }) {
+      Row({ space: 10 }) {
+        Blank().layoutWeight(1)
+        SymbolGlyph($r('sys.symbol.square_and_pencil')).fontSize(19).fontColor([$r('app.color.text_primary')])
+        Text(t('新建对话')).fontSize(15).fontColor($r('app.color.text_primary'))
+        Blank().layoutWeight(1)
+      }.width('100%')
+    }.id('workbench-new-chat').width('100%').height(44).padding({ left: 14, right: 14 }).borderRadius(12)
+      .backgroundColor($r('app.color.page_background')).border({ width: 0.5, color: $r('app.color.divider'), radius: 12 })
+      .enabled(!this.locked()).onClick(this.onNewChat)
+    Column({ space: 2 }) {
+      Button() {
+        Row({ space: 12 }) {
+          SymbolGlyph($r('sys.symbol.folder')).fontSize(19).fontColor([$r('app.color.text_secondary')])
+          Text(t('工作区文件')).fontSize(15).fontColor($r('app.color.text_primary')).layoutWeight(1).textAlign(TextAlign.Start)
+        }.width('100%')
+      }.id('workbench-sidebar-files').width('100%').height(44).padding({ left: 12, right: 12 })
+        .borderRadius(10).backgroundColor(Color.Transparent).onClick(this.onFiles)
+      Button() {
+        Row({ space: 12 }) {
+          SymbolGlyph($r('sys.symbol.wrench_and_screwdriver')).fontSize(19).fontColor([$r('app.color.text_secondary')])
+          Text(t('记忆与工具')).fontSize(15).fontColor($r('app.color.text_primary')).layoutWeight(1).textAlign(TextAlign.Start)
+        }.width('100%')
+      }.id('workbench-sidebar-tools').width('100%').height(44).padding({ left: 12, right: 12 })
+        .borderRadius(10).backgroundColor(Color.Transparent).onClick(this.onTools)
+    }.width('100%').padding({ top: 8, bottom: 12 })
+    Row({ space: 0 }) {
+      Text(this.archived ? t('已归档') : t('工作区')).fontSize(13).fontColor($r('app.color.text_tertiary')).layoutWeight(1)
+      IconButton({ icon: $r('sys.symbol.magnifyingglass'), label: t('搜索对话'), compId: 'workbench-search',
+        diameter: 36, iconSize: 17, onTap: () => { this.searchOpen = !this.searchOpen; } })
+      Button({ type: ButtonType.Circle }) {
+        SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(17).fontColor([$r('app.color.text_secondary')])
+      }.id('workbench-history-options').width(36).height(36).backgroundColor(Color.Transparent)
+        .accessibilityText(t('对话管理')).enabled(!this.locked()).bindMenu(this.workbenchMenu)
+      IconButton({ icon: $r('sys.symbol.folder_badge_plus'), label: t('新建项目'), compId: 'workbench-project-create',
+        diameter: 36, iconSize: 18, disabled: this.locked(), onTap: () => this.editProject() })
+    }.width('100%').height(36).padding({ left: 4 })
+  }
+
+  @Builder
   sectionHeader(id: string) {
     Row({ space: 2 }) {
       Button({ type: ButtonType.Normal }) {
         Row({ space: 7 }) {
           Stack({ alignContent: Alignment.Center }) {
-            SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(12)
+            SymbolGlyph(this.workbench ? $r('sys.symbol.folder') : $r('sys.symbol.chevron_down')).fontSize(this.workbench ? 18 : 12)
               .fontColor([$r('app.color.text_tertiary')])
           }.width(24).height(24)
-            .rotate({ angle: this.groupOpen(id) ? 0 : -90, centerX: '50%', centerY: '50%' })
+            .rotate({ angle: this.workbench || this.groupOpen(id) ? 0 : -90, centerX: '50%', centerY: '50%' })
             .animation({ duration: Motion.medium, curve: Motion.standard })
           Text(this.sectionTitle(id)).fontFamily(this.appearance.fontFamily).fontSize(14).fontWeight(FontWeight.Medium).maxLines(1).layoutWeight(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .fontColor((this.app.active.projectId || '') === id ? this.appearance.accent : $r('app.color.text_secondary'))
           Text(String(this.sectionThreads(id).length)).fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.text_tertiary'))
+            .visibility(this.workbench ? Visibility.None : Visibility.Visible)
         }.width('100%')
       }.fontFamily(this.appearance.fontFamily).id('project-group-' + (id || 'ordinary')).layoutWeight(1).height(44).padding({ right: 4 })
         .backgroundColor(Color.Transparent).borderRadius(10).onClick(() => this.toggleGroup(id))
@@ -402,6 +466,7 @@ export struct ThreadList {
       Row({ space: Space.sm }) {
         Image($r('app.media.tinybot')).width(28).height(28)
         Text('Tinybot').fontFamily(this.appearance.fontFamily).fontSize(20).fontWeight(FontWeight.Bold).layoutWeight(1).fontColor($r('app.color.text_primary'))
+        if (!this.workbench) {
         Button(this.selecting ? t('取消') : t('多选')).fontFamily(this.appearance.fontFamily).id('thread-selection-mode').attributeModifier(Btn.textSmall)
           .enabled(!this.locked() && (this.selecting || this.filtered().length > 0))
           .onClick(() => { if (this.selecting) { this.endSelection(); } else { this.selecting = true; } })
@@ -409,12 +474,16 @@ export struct ThreadList {
           IconButton({ icon: $r('sys.symbol.folder_badge_plus'), label: t('新建项目'), compId: 'project-create',
             disabled: this.app.busy || !!this.app.saveError, onTap: () => this.editProject() })
         }
+        }
       }.width('100%').height(48).padding({ left: 4 })
+      if (this.workbench) { this.workbenchNavigation() }
       Search({ value: this.query, placeholder: t("搜索对话") }).textFont({ family: this.appearance.fontFamily })
         .placeholderFont({ family: this.appearance.fontFamily }).id('search-threads').height(40)
         .backgroundColor($r('app.color.surface_variant')).placeholderColor($r('app.color.text_tertiary'))
         .enabled(!this.locked())
         .onChange((value: string) => { this.query = value; this.visibleCounts = {}; this.selectedIds = []; })
+        .visibility(!this.workbench || this.searchOpen || this.query.length > 0 ? Visibility.Visible : Visibility.None)
+      if (!this.workbench) {
       Segmented({ options: [t("对话"), t("已归档")], selected: this.archived ? 1 : 0,
         optionIds: ['active-threads', 'archived-threads'], controlHeight: 38, labelSize: 13,
         trackRadius: 19, thumbRadius: 16, gap: 2, thumbShadow: false,
@@ -422,6 +491,7 @@ export struct ThreadList {
           if (this.locked()) { return; }
           this.archived = index === 1; this.visibleCounts = {}; this.selectedIds = [];
         } })
+      }
       if (this.selecting) {
         Row({ space: Space.sm }) {
           Text(t('已选 {0} 项', [this.selectedIds.length])).fontFamily(this.appearance.fontFamily).id('thread-selection-count')
@@ -445,7 +515,7 @@ export struct ThreadList {
               ListItemGroup({ header: this.sectionHeader(id), space: 0 }) {
                 if (this.groupOpen(id)) {
                   ForEach(this.sectionThreads(id).slice(0, this.visibleCount(id)), (thread: ThreadViewModel) => {
-                    ListItem() { ThreadRow({ thread: thread, app: this.app, query: this.query, onSelected: this.onSelected,
+                    ListItem() { ThreadRow({ thread: thread, app: this.app, workbench: this.workbench, query: this.query, onSelected: this.onSelected,
                       selecting: this.selecting, selected: this.selectedIds.includes(thread.id),
                       onSelectionChanged: (selected: boolean) => this.selectThread(thread.id, selected),
                       lastBranch: this.lastBranch(id, thread.id),

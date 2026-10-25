@@ -1,0 +1,204 @@
+// Build first: exercise production window callbacks and emitted editor/preview handlers.
+const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict');
+const root = path.resolve(__dirname, '..');
+const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio');
+const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
+function sourceModule(file) {
+  const exports = {};
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(root, file), 'utf8'), { compilerOptions: {
+    target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS
+  } }).outputText, { exports });
+  return exports;
+}
+const { WorkbenchLayout } = sourceModule('entry/src/main/ets/model/WorkbenchLayout.ets');
+function emitted(file, name) {
+  const original = path.join(root, 'entry/src/main/ets', file + '.ets');
+  const compiled = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets', file + '.ts');
+  assert.ok(fs.statSync(compiled).mtimeMs >= fs.statSync(original).mtimeMs, 'Build before testing ' + file);
+  const tree = ts.createSourceFile(compiled, fs.readFileSync(compiled, 'utf8'), ts.ScriptTarget.Latest, true);
+  return { tree, cls: tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === name) };
+}
+function probe(file, name, methods, globals = {}) {
+  const { tree, cls } = emitted(file, name), exports = {};
+  const selected = cls.members.filter(n => methods.includes(n.name?.getText(tree)));
+  assert.equal(selected.length, methods.length);
+  vm.runInNewContext(ts.transpileModule('class Probe {' + selected.map(n => n.getText(tree)).join('\n') + '} exports.Probe = Probe;', {
+    compilerOptions: { target: ts.ScriptTarget.ES2021 }
+  }).outputText, { exports, ...globals });
+  return exports.Probe;
+}
+for (const width of [320, 600, 839, 840, 960, 1199, 1200, 1600, 2400]) {
+  for (const details of [false, true]) {
+    const layout = new WorkbenchLayout(width, details);
+    assert.equal(layout.docked, details && width >= 840);
+    if (layout.docked) {
+      const chat = width - layout.historyWidth - layout.detailWidth;
+      assert.ok(chat >= 480, `Chat remains usable at ${width} vp`);
+      assert.equal(layout.detailX + layout.detailWidth, width);
+    } else assert.equal(layout.detailX, 0);
+  }
+}
+assert.equal(new WorkbenchLayout(839, false).historyWidth, 0);
+assert.equal(new WorkbenchLayout(840, false).historyWidth, 280);
+assert.equal(new WorkbenchLayout(1199, true).historyWidth, 0);
+assert.equal(new WorkbenchLayout(1200, true).historyWidth, 280);
+console.log('PASS phone, two-pane and three-pane boundaries, including constrained chat width');
+
+const Page = probe('pages/Index', 'Index', ['hasPreview', 'detailOpen', 'workbench', 'windowChanged', 'openFiles', 'openPreview', 'closePreview', 'previewPresenceChanged', 'onBackPress'], { WorkbenchLayout });
+const draft = { text: 'unsent input', attachments: ['image'] }, active = { id: 'thread', draft, messages: [] };
+const session = {}, browser = {};
+const page = Object.assign(new Page(), { app: { active }, session, browser, windowWidth: 0,
+  workspaceOpen: false, workspaceRequest: 0, workspaceCloseRequest: 0,
+  previewId: '', previewThreadId: '', browserExpanded: false,
+  drawerOpen: true, drawerDragging: true, drawerReveal: 0.6, drawerContentActive: true, drawerAnimation: 4,
+  getUIContext: () => ({ getFocusController: () => ({ clearFocus() {} }) }),
+  setDrawer() {}, setBrowserExpanded(value) { this.browserExpanded = value; } });
+page.windowChanged(1200);
+assert.equal(page.drawerOpen, false); assert.equal(page.drawerReveal, 0); assert.equal(page.drawerAnimation, 5);
+page.openFiles('notes.md'); assert.equal(page.workspaceOpen, true); assert.equal(page.workspacePath, 'notes.md');
+for (const width of [840, 400, 1200, 900, 600, 1600]) {
+  page.windowChanged(width);
+  assert.equal(page.app.active, active); assert.equal(active.draft, draft);
+  assert.equal(page.session, session); assert.equal(page.browser, browser);
+  assert.equal(page.workspaceOpen, true); assert.equal(page.workspacePath, 'notes.md');
+  assert.equal(page.workspaceRequest, 1, 'Resize must not send another editor-open request');
+}
+assert.equal(page.onBackPress(), true); assert.equal(page.workspaceCloseRequest, 1);
+assert.equal(page.workspaceOpen, true, 'Back delegates to the editor so unsaved changes cannot be dropped');
+page.openPreview('message', 'preview'); assert.equal(page.hasPreview(), true);
+active.id = 'other'; assert.equal(page.hasPreview(), false, 'Preview cannot leak into another conversation');
+active.id = 'thread'; assert.equal(page.onBackPress(), true);
+assert.equal(page.previewVisible, false); assert.equal(page.previewId, 'preview', 'Keep outgoing preview data until its exit finishes');
+page.previewPresenceChanged(false); assert.equal(page.previewId, '');
+console.log('PASS actual resize/open/back callbacks preserve draft, session and editor, and isolate previews');
+
+// A narrow overlay defaults to the center of Stack; anchor the real emitted sidebar at the window origin.
+const drawerAttributes = {};
+const ui = new Proxy({}, { get: (_, name) => value => { drawerAttributes[name] = value; } });
+const gesture = new Proxy({}, { get: () => () => {} });
+const Drawer = probe('pages/Index', 'Index', ['drawer'], { Stack: ui, Column: gesture,
+  Gesture: gesture, PanGesture: gesture, GesturePriority: {}, PanDirection: {}, HitTestMode: {}, Alignment: {} });
+let first = true;
+Object.assign(new Drawer(), { workbench: () => new WorkbenchLayout(1440, true),
+  observeComponentCreation2(callback) { if (first) { first = false; callback(1, true); } } }).drawer();
+assert.equal(drawerAttributes.width, 280); assert.equal(drawerAttributes.position.x, 0); assert.equal(drawerAttributes.position.y, 0);
+console.log('PASS emitted sidebar is anchored at the window origin rather than centered over chat');
+
+const dialogs = [], toasts = [];
+const Editor = probe('views/WorkspacePanel', 'WorkspacePanel', ['dirty', 'fileName', 'leave', 'requestClose', 'backRequested', 'openRequested', 'reference'], { t: value => value, $r: value => value });
+let closed = 0, rebound = 0;
+const editor = Object.assign(new Editor(), { embedded: true, busy: false, editing: true, previewing: true,
+  content: 'unsaved edit', original: 'original', selected: 'note.md', directory: '', ownerWorkspaceId: 'project-one',
+  app: { activeWorkspaceId: 'project-two', active: { draft: 'keep' }, setDraft() { throw Error('Cross-workspace reference'); } },
+  onClose() { closed++; }, bindWorkspace() { rebound++; }, toast: text => toasts.push(text),
+  getUIContext: () => ({ showAlertDialog: dialog => dialogs.push(dialog) }), appearance: {} });
+editor.requestClose(); assert.equal(closed, 0); assert.equal(dialogs.length, 1);
+dialogs.at(-1).primaryButton.action(); assert.equal(editor.content, 'unsaved edit'); assert.equal(closed, 0);
+editor.openRequested(); assert.equal(rebound, 0);
+dialogs.at(-1).secondaryButton.action(); assert.equal(rebound, 1);
+editor.requestClose(); dialogs.at(-1).secondaryButton.action(); assert.equal(closed, 1);
+editor.reference(); assert.equal(editor.app.active.draft, 'keep'); assert.equal(toasts.length, 1);
+editor.busy = true; editor.requestClose(); assert.equal(closed, 1);
+console.log('PASS unsaved editor requires explicit discard, cancel retains content, cross-workspace reference is rejected');
+
+const { tree, cls } = emitted('views/PreviewPanel', 'PreviewPanel');
+let handler;
+function visit(node) {
+  if (ts.isPropertyAssignment(node) && node.name.getText(tree) === 'onInteract' && node.initializer.getText(tree).includes('this.app.interactUi')) handler = node.initializer.getText(tree);
+  ts.forEachChild(node, visit);
+}
+visit(cls); assert.ok(handler, 'Locate the actual side-preview interaction handler');
+const previewExports = {};
+vm.runInNewContext(ts.transpileModule('exports.bind = function() { return (' + handler + '); };', {
+  compilerOptions: { target: ts.ScriptTarget.ES2021 }
+}).outputText, { exports: previewExports });
+let interaction;
+const preview = { threadId: 'owner-thread', messageId: 'owner-message', app: { active: { id: 'different-thread' },
+  interactUi(...args) { interaction = args; } } };
+previewExports.bind.call(preview)('surface', { count: 2 }, 'save');
+assert.equal(interaction[0], 'owner-thread'); assert.equal(interaction[1], 'owner-message');
+assert.equal(interaction[2], 'surface'); assert.equal(interaction[3].count, 2);
+console.log('PASS emitted side-preview interactions keep original conversation, message and surface identity');
+// Run the actual emitted card render branches: an inspected preview has only one live surface.
+let surfaces = 0, clicked, label;
+const noopUi = new Proxy({}, { get: () => () => {} });
+const cardGlobals = { Column: noopUi, If: new Proxy({}, { get: (_, name) => name === 'canRetake' ? () => false : () => {} }),
+  Button: new Proxy({}, { get: (_, name) => name === 'onClick' ? callback => { clicked = callback; } :
+    name === 'createWithLabel' ? value => { label = value; } : () => {} }),
+  Btn: {}, Space: {}, HorizontalAlign: {}, t: value => value, ViewPU: { create() {} },
+  InteractiveAnswer: class { constructor() { surfaces++; } } };
+const Card = probe('views/PublishedPreviewCard', 'PublishedPreviewCard', ['initialRender'], cardGlobals);
+const card = Object.assign(new Card(), { inspectable: true, inspected: false, expanded: true,
+  preview: { id: 'preview', path: 'demo.html', content: 'demo', superseded: false },
+  onInspect() { this.inspected = true; },
+  observeComponentCreation2(callback) { callback(1, true); }, ifElseBranchUpdateFunction(_branch, render) { render(); } });
+card.initialRender(); assert.equal(surfaces, 1); assert.equal(label, '在侧区打开');
+clicked.call(card); surfaces = 0; card.initialRender(); assert.equal(surfaces, 0); assert.equal(label, '在侧区查看');
+card.inspected = false; card.initialRender(); assert.equal(surfaces, 1);
+console.log('PASS emitted preview card detaches the inline surface while inspected and restores it on close');
+
+
+// Use the real session/runtime and a gated streaming provider, without any network or credentials.
+const modules = new Map();
+function load(file) {
+  file = path.resolve(file.endsWith('.ets') ? file : file + '.ets');
+  if (modules.has(file)) return modules.get(file);
+  const exports = {}; modules.set(file, exports);
+  let content = fs.readFileSync(file, 'utf8');
+  if (file.endsWith('SessionService.test.ets')) content += '\nexport { Fixture, seed };';
+  vm.runInNewContext(ts.transpileModule(content, { compilerOptions: {
+    target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS, experimentalDecorators: true
+  } }).outputText, { exports, Observed: cls => cls, setTimeout, clearTimeout, console, require: id => {
+    if (id === '@ohos/hypium') return {};
+    if (!id.startsWith('.')) throw Error('Unexpected dependency ' + id);
+    return load(path.resolve(path.dirname(file), id));
+  } }, { filename: file });
+  return exports;
+}
+(async () => {
+  const { Fixture } = load(path.join(root, 'entry/src/test/SessionService.test'));
+  const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/ChatViewModel'));
+  const fixture = new Fixture(), app = new ChatViewModel();
+  await app.initialize(fixture.session);
+  const Chat = probe('views/ChatPanel', 'ChatPanel', ['centeredWelcome', 'composerExpanded']);
+  const chat = Object.assign(new Chat(), { app, thread: app.active, workbench: true, panelHeight: 800,
+    viewport: { keyboardHeight: 0 }, voiceMode: false, composerFocused: false, importing: false,
+    showPlus: false, showContext: false, showReasoning: false, showQueue: false,
+    hasDraft: () => app.draft.length > 0, speechActive: () => false, voiceOverlayVisible: () => false });
+  assert.equal(chat.centeredWelcome(), true); assert.equal(chat.composerExpanded(), true);
+  chat.workbench = false;
+  assert.equal(chat.centeredWelcome(), false); assert.equal(chat.composerExpanded(), false, 'Phone retains its compact idle composer');
+  chat.workbench = true; app.setDraft('typed without moving the editor');
+  assert.equal(chat.centeredWelcome(), true, 'Typing alone must not move the tablet editor');
+  chat.viewport.keyboardHeight = 600; assert.equal(chat.centeredWelcome(), false, 'Dock above the soft keyboard');
+  chat.viewport.keyboardHeight = 0; chat.panelHeight = 400; assert.equal(chat.centeredWelcome(), false, 'Short windows remain usable');
+  chat.panelHeight = 800; assert.equal(chat.centeredWelcome(), true);
+  chat.voiceMode = true; assert.equal(chat.centeredWelcome(), false, 'Voice mode docks before hold starts so recording cannot move its target');
+  chat.voiceMode = false; assert.equal(chat.centeredWelcome(), true);
+
+  let started, finish, calls = 0;
+  const streaming = new Promise(resolve => { started = resolve; });
+  const hold = new Promise(resolve => { finish = resolve; });
+  fixture.provider.stream = async (_request, cancellation, onText) => {
+    calls++; onText('first'); started(); await hold; cancellation.check();
+    onText('first second'); return { content: 'first second', toolCalls: [] };
+  };
+  app.setDraft('window resize during answer');
+  const sending = app.send(() => {}); await streaming;
+  chat.thread = app.active; assert.equal(chat.centeredWelcome(), false, 'The first actual turn docks the same composer');
+  app.setDraft('unsent follow-up');
+  const runningPage = Object.assign(new Page(), page, { app, session: fixture.session });
+  const threadId = app.active.id, answerId = app.active.messages.at(-1).id;
+  for (const width of [1440, 960, 500, 840, 1200, 400, 1440]) {
+    runningPage.windowChanged(width);
+    assert.equal(app.busy, true, 'Resizing must not stop the real runtime');
+    assert.equal(app.active.id, threadId); assert.equal(app.active.messages.at(-1).id, answerId);
+    assert.equal(app.active.draft, 'unsent follow-up'); assert.equal(calls, 1);
+  }
+  finish(); await sending; await app.flushDraft();
+  assert.equal(app.busy, false); assert.equal(app.active.messages.at(-1).content, 'first second');
+  const restored = await fixture.repository.load();
+  assert.equal(restored.threads[0].draft, 'unsent follow-up');
+  assert.equal(restored.threads[0].messages.at(-1).status, 'complete');
+  console.log('PASS native welcome/composer behavior with real session: typing, keyboard, short windows, first turn, streaming and saved drafts');
+})().catch(error => { console.error(error); process.exitCode = 1; });

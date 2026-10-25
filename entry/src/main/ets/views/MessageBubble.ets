@@ -243,6 +243,9 @@ export struct MessageBubble {
   onRead: (id: string) => void = () => {};
   @Prop webEnabled: boolean = false;
   onOpenFile: (path: string) => void = () => {};
+  @Prop previewInspectable: boolean = false;
+  @Prop inspectedPreviewId: string = '';
+  onInspectPreview: (messageId: string, previewId: string) => void = () => {};
   @Prop actionsEnabled: boolean = true;
   onRegenerate: (id: string) => void = () => {};
   @Prop uiAvailable: boolean = false;
@@ -596,6 +599,8 @@ export struct MessageBubble {
                 ForEach(stepPreviews(this.message.id, this.message.stepViews[entry.step], entry.step, this.latestPreviewIds),
                   (preview: PublishedPreview) => {
                     PublishedPreviewCard({ preview: stepPreviews(this.message.id, this.message.stepViews[entry.step], entry.step, this.latestPreviewIds).find((item) => item.id === preview.id) as PublishedPreview,
+                      inspectable: this.previewInspectable, inspected: this.inspectedPreviewId === preview.id,
+                      onInspect: () => this.onInspectPreview(this.message.id, preview.id),
                       saved: this.message.uiStates, presentation: this.message.uiPresentation, available: this.uiAvailable, onInteract: this.onUi })
                   }, (preview: PublishedPreview) => preview.id)
               } else {

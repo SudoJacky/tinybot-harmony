@@ -38,7 +38,7 @@ import { SkillsPanel } from '../views/SkillsPanel';
 import { SkillEditorPanel } from '../views/SkillEditorPanel';
 import { SessionService } from '../services/SessionService';
 import { createNativeSessionService } from '../services/NativeSessionService';
-import { Btn, Motion, Space } from '../common/Theme';
+import { Btn, Motion, Radius, Space } from '../common/Theme';
 import { IconButton } from '../common/Widgets';
 import { LaunchActions } from '../services/LaunchActions';
 import { OnboardingPanel } from '../views/OnboardingPanel';
@@ -49,6 +49,9 @@ import { HostedPrivacy, hostedPrivacy } from '../services/HostedPrivacy';
 import { announcements } from '../services/Announcements';
 import { AnnouncementDialog } from '../views/AnnouncementDialog';
 import { Diagnostics } from '../model/Diagnostics';
+import { WorkbenchLayout } from '../model/WorkbenchLayout';
+import { PreviewPanel } from '../views/PreviewPanel';
+import { AnimatedPage } from '../common/AnimatedPage';
 
 const DRAWER_MAX_WIDTH: number = 340;
 const CHAT_HEADER_HEIGHT: number = 56;
@@ -63,6 +66,19 @@ struct Index {
   @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
   @State private app: ChatViewModel = new ChatViewModel();
   @State private account: HuaweiAccount = huaweiAccount;
+  @State private windowWidth: number = 0;
+  @State private workspaceOpen: boolean = false;
+  @State private workspacePresent: boolean = false;
+  @State private previewPresent: boolean = false;
+  @State private browserPresent: boolean = false;
+  @State private previewVisible: boolean = false;
+  private browserClosing: boolean = false;
+  @State private workspacePath: string = '';
+  @State private workspaceRequest: number = 0;
+  @State private workspaceCloseRequest: number = 0;
+  @State private previewId: string = '';
+  @State private previewMessageId: string = '';
+  @State private previewThreadId: string = '';
   @State private drawerOpen: boolean = false;
   @State private drawerContentActive: boolean = false;
   private drawerAnimation: number = 0;
@@ -90,6 +106,7 @@ struct Index {
   @State private onboardingActive: boolean = false;
 
   onPageShow(): void {
+    this.paths.disableAnimation(false);
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
     if (!this.privacy.allowed) { return; }
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -151,6 +168,8 @@ struct Index {
       this.closeAnnouncement();
       this.app.stop(); this.browser.close(); this.browserExpanded = false; this.showToolScope = false;
       this.voiceRequest = ''; this.paths.clear(); this.setDrawer(false);
+      this.workspaceOpen = false; this.previewVisible = false; this.previewId = '';
+      this.workspacePresent = false; this.previewPresent = false; this.browserPresent = false; this.browserClosing = false;
     }
   }
 
@@ -258,6 +277,38 @@ struct Index {
     } finally { this.receiving = false; }
   }
 
+  private hasPreview(): boolean { return this.previewId.length > 0 && this.previewThreadId === this.app.active.id; }
+  private detailOpen(): boolean {
+    return !!(this.workspaceOpen || this.browserExpanded || this.hasPreview() || this.workspacePresent || this.previewPresent || this.browserPresent);
+  }
+  private closePreview(): void { this.previewVisible = false; }
+  private previewPresenceChanged(present: boolean): void {
+    this.previewPresent = present;
+    if (!present && !this.previewVisible) { this.previewId = ''; }
+  }
+  private browserPresenceChanged(present: boolean): void {
+    this.browserPresent = present;
+    if (!present && !this.browser.open) { this.browserExpanded = false; }
+    if (!present && this.browserClosing && !this.browserExpanded) { this.browserClosing = false; this.browser.close(); }
+  }
+  private closeBrowser(): void {
+    this.browser.takeOver(); this.browserClosing = true; this.setBrowserExpanded(false);
+  }
+  private workbench(): WorkbenchLayout { return new WorkbenchLayout(this.windowWidth, this.detailOpen()); }
+  private windowChanged(width: number): void {
+    if (width <= 0 || width === this.windowWidth) { return; }
+    this.windowWidth = width;
+    if (this.workbench().historyWidth > 0) {
+      // Invalidate any closing animation; the same history host becomes the sidebar.
+      this.drawerAnimation++; this.drawerOpen = false; this.drawerDragging = false;
+      this.drawerReveal = 0; this.drawerContentActive = false;
+    }
+  }
+  private openPreview(messageId: string, previewId: string): void {
+    this.previewThreadId = this.app.active.id; this.previewMessageId = messageId; this.previewId = previewId; this.previewVisible = true;
+    this.setBrowserExpanded(false); this.setDrawer(false);
+  }
+
   onBackPress(): boolean {
     if (this.browserExpanded) {
       if (this.browser.editingAddress) { this.getUIContext().getFocusController().clearFocus(); return true; }
@@ -268,11 +319,14 @@ struct Index {
       this.setDrawer(false);
       return true;
     }
+    if (this.hasPreview()) { this.closePreview(); return true; }
+    if (this.workspaceOpen) { this.workspaceCloseRequest++; return true; }
     return false;
   }
 
   private setBrowserExpanded(expanded: boolean): void {
     this.getUIContext().getFocusController().clearFocus();
+    if (expanded) { this.browserClosing = false; }
     this.browserExpanded = expanded;
   }
 
@@ -331,7 +385,7 @@ struct Index {
   }
 
   private startDrawerDrag(event: GestureEvent, fromChat: boolean = false): void {
-    if (!this.app.ready || (fromChat && (this.drawerOpen || event.offsetX <= 0 ||
+    if (this.workbench().historyWidth > 0 || !this.app.ready || (fromChat && (this.drawerOpen || event.offsetX <= 0 ||
       event.offsetX <= Math.abs(event.offsetY) * 1.5))) { return; }
     this.getUIContext().getFocusController().clearFocus();
     this.drawerDragStart = this.drawerReveal;
@@ -413,9 +467,10 @@ struct Index {
     } finally { this.ratingOpen = false; }
   }
 
-  private openFiles(): void {
+  private openFiles(path: string = ''): void {
     this.getUIContext().getFocusController().clearFocus();
-    this.paths.pushPath({ name: 'files' });
+    this.workspacePath = path; this.workspaceRequest++; this.workspaceOpen = true;
+    this.closePreview(); this.setBrowserExpanded(false); this.setDrawer(false);
   }
 
   private openTools(tab: string): void {
@@ -629,15 +684,42 @@ struct Index {
 
   @Builder
   header() {
+    if (this.windowWidth >= 840) {
+      Row({ space: 4 }) {
+        if (this.workbench().historyWidth === 0) {
+          IconButton({ icon: $r('sys.symbol.line_3_horizontal'), label: t('对话列表'), compId: 'open-history',
+            disabled: !this.app.ready, onTap: () => this.setDrawer(true) })
+        }
+        Text(this.app.active.messages.length > 0 ? this.app.active.displayTitle : '').fontSize(15).fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_secondary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+        Button({ type: ButtonType.Circle }) {
+          SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(19).fontColor([$r('app.color.text_secondary')])
+        }.id('workbench-chat-more').width(44).height(44).backgroundColor(Color.Transparent).accessibilityText(t('更多操作'))
+          .enabled(this.app.ready).bindMenu(this.moreMenu, { systemMaterial: this.appearance.surface, mask: false })
+        IconButton({ icon: $r('sys.symbol.folder'), label: t('文件与预览'), compId: 'workbench-open-files',
+          disabled: !this.app.ready, onTap: () => this.openFiles() })
+      }.width('100%').height(CHAT_HEADER_HEIGHT).padding({ left: 12, right: 12 })
+        .hitTestBehavior(HitTestMode.Transparent)
+    } else { this.phoneHeader() }
+  }
+
+  @Builder
+  phoneHeader() {
     Stack() {
       Column().id('chat-header-backdrop').width('100%').height(CHAT_HEADER_HEIGHT)
         .backgroundEffect({ radius: 12, color: $r('app.color.chat_header_background') })
         .translate({ y: -CHAT_HEADER_HEIGHT * this.headerProgress }).opacity(1 - this.headerProgress)
         .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
     Row({ space: 4 }) {
+      if (this.workbench().historyWidth === 0) {
       IconButton({ icon: $r('sys.symbol.line_3_horizontal'), label: t("对话列表"), compId: 'open-history',
         material: this.appearance.control, tint: $r('sys.color.font_primary'),
         disabled: !this.app.ready, onTap: () => this.setDrawer(true) })
+      }
+      if (this.windowWidth >= 840) {
+        IconButton({ icon: $r('sys.symbol.folder'), label: t('工作区文件'), compId: 'workbench-open-files',
+          disabled: !this.app.ready, onTap: () => this.openFiles() })
+      }
       Column({ space: 1 }) {
         Text(this.app.ready ? (this.app.activeProject ? this.app.activeProject.name + ' · ' : '') + this.app.active.displayTitle : 'Tinybot').fontSize(16).fontWeight(FontWeight.Medium)
           .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
@@ -698,25 +780,30 @@ struct Index {
       Column()
         .width('100%').height('100%').backgroundColor($r('app.color.scrim'))
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-        .opacity(this.drawerReveal)
+        .opacity(this.workbench().historyWidth > 0 ? 0 : this.drawerReveal)
+        .hitTestBehavior(this.workbench().historyWidth > 0 ? HitTestMode.None : HitTestMode.Default)
         .onClick(() => this.setDrawer(false))
       Stack() {
         Column().width('100%').height('100%').backgroundColor($r('app.color.page_background'))
-          .borderRadius({ topRight: 20, bottomRight: 20 })
+          .borderRadius({ topRight: this.workbench().historyWidth > 0 ? 0 : 20, bottomRight: this.workbench().historyWidth > 0 ? 0 : 20 })
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-        ThreadList({ app: this.app, active: this.drawerContentActive, onSelected: () => this.setDrawer(false), onFiles: () => { this.setDrawer(false); this.openFiles(); }, onSettings: () => {
+        ThreadList({ app: this.app, workbench: this.windowWidth >= 840,
+          onNewChat: () => { this.createChat(); this.setDrawer(false); }, onTools: () => { this.setDrawer(false); this.openTools('memory'); },
+          active: this.workbench().historyWidth > 0 || this.drawerContentActive, onSelected: () => this.setDrawer(false), onFiles: () => { this.setDrawer(false); this.openFiles(); }, onSettings: () => {
           this.setDrawer(false);
           this.openSettings();
         } })
       }
-      .width('84%').constraintSize({ maxWidth: DRAWER_MAX_WIDTH }).height('100%')
+      .width(this.workbench().historyWidth > 0 ? this.workbench().historyWidth : '84%').constraintSize({ maxWidth: DRAWER_MAX_WIDTH }).height('100%')
       .id('history-drawer')
-      .translate({ x: (this.drawerReveal - 1) * this.drawerWidth })
+      .translate({ x: this.workbench().historyWidth > 0 ? 0 : (this.drawerReveal - 1) * this.drawerWidth })
       .onAreaChange((_old: Area, next: Area) => { this.drawerWidth = Math.max(1, next.width as number); })
-    }.width('100%').height('100%')
-    .hitTestBehavior(this.drawerOpen || this.drawerDragging ? HitTestMode.Default : HitTestMode.None)
-    .enabled(this.drawerOpen || this.drawerDragging)
-    .accessibilityLevel(this.drawerOpen || this.drawerDragging ? 'auto' : 'no-hide-descendants')
+    }.width(this.workbench().historyWidth > 0 ? this.workbench().historyWidth : '100%').height('100%')
+    .position({ x: 0, y: 0 })
+    .border({ width: { right: this.workbench().historyWidth > 0 ? 0.5 : 0 }, color: $r('app.color.divider') })
+    .hitTestBehavior(this.workbench().historyWidth > 0 || this.drawerOpen || this.drawerDragging ? HitTestMode.Default : HitTestMode.None)
+    .enabled(this.workbench().historyWidth > 0 || this.drawerOpen || this.drawerDragging)
+    .accessibilityLevel(this.workbench().historyWidth > 0 || this.drawerOpen || this.drawerDragging ? 'auto' : 'no-hide-descendants')
     .gesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Horizontal, distance: 8 })
       .onActionStart((event: GestureEvent) => this.startDrawerDrag(event))
       .onActionUpdate((event: GestureEvent) => this.updateDrawerDrag(event))
@@ -755,28 +842,33 @@ struct Index {
       } else {
       ForEach([this.locale], (_locale: string) => {
     Stack() {
+    Row() {
+    Column().width(this.workbench().historyWidth).height('100%')
     Navigation(this.paths) {
       Stack() {
         // Render the capture card at chat width behind the opaque page.
         PreviewCaptureHost()
-        Column().width('100%').height('100%').backgroundColor($r('app.color.page_background'))
-          .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+        Column().width('100%').height('100%').backgroundColor(this.windowWidth >= 840 ? $r('app.color.surface') : $r('app.color.page_background'))
+          .expandSafeArea([SafeAreaType.SYSTEM], this.windowWidth >= 840 ? [] : [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         Column() {
           if (this.app.ready) {
-            ChatPanel({ app: this.app, thread: this.app.active, approval: this.approval, browser: this.browser, account: this.account,
+            ChatPanel({ app: this.app, thread: this.app.active, workbench: this.windowWidth >= 840,
+                onModels: () => { this.paths.pushPath({ name: 'models' }); }, onToolScope: () => { this.showToolScope = true; }, approval: this.approval, browser: this.browser, account: this.account,
                 onAccount: () => { this.paths.pushPath({ name: 'account' }); },
                 onBrowser: () => this.setBrowserExpanded(true), onSettings: () => this.openSettings(),
                 topInset: CHAT_HEADER_HEIGHT,
                 onHeaderProgress: (progress: number): void => { this.headerProgress = progress; },
                 voiceRequest: this.voiceRequest, onVoiceShortcutConsumed: () => { this.voiceRequest = ''; },
-                activeThreadId: this.app.active.id, speechEnabled: this.chatVisible && !this.drawerOpen && !this.drawerDragging && !this.browserExpanded,
+                activeThreadId: this.app.active.id, speechEnabled: this.chatVisible && !this.drawerOpen && !this.drawerDragging && (!this.detailOpen() || this.workbench().docked),
                 onHistoryDragStart: (event: GestureEvent) => this.startDrawerDrag(event, true),
                 onHistoryDragUpdate: (event: GestureEvent) => this.updateDrawerDrag(event),
                 onHistoryDragEnd: (event: GestureEvent) => this.endDrawerDrag(event),
                 onHistoryDragCancel: () => this.cancelDrawerDrag(),
-                onFiles: () => this.openFiles(), onOpenFile: (path: string) => this.paths.pushPath({ name: 'files', param: path }),
+                onFiles: () => this.openFiles(), onOpenFile: (path: string) => this.openFiles(path),
+                previewInspectable: this.windowWidth >= 840, inspectedPreviewId: this.hasPreview() ? this.previewId : '',
+                onInspectPreview: (messageId: string, previewId: string) => this.openPreview(messageId, previewId),
                 onTools: (tab: string) => this.openTools(tab) })
-              .layoutWeight(1)
+              .width('100%').constraintSize({ maxWidth: 800 }).layoutWeight(1)
           } else {
             Column({ space: Space.lg }) {
               if (this.app.loading) {
@@ -794,7 +886,7 @@ struct Index {
         WebUiPreflightHost()
       }.width('100%').height('100%')
     }
-    .backgroundColor($r('app.color.page_background'))
+    .backgroundColor(this.windowWidth >= 840 ? $r('app.color.surface') : $r('app.color.page_background'))
     // Native button materials only work inside the actual navigation title bar.
     .title({ builder: this.header, height: CHAT_HEADER_HEIGHT }, {
       barStyle: BarStyle.STACK, backgroundColor: Color.Transparent,
@@ -802,20 +894,63 @@ struct Index {
     })
     .hideBackButton(true).titleMode(NavigationTitleMode.Mini).hideToolBar(true).mode(NavigationMode.Stack)
     .onNavBarStateChange((visible: boolean) => { this.chatVisible = visible; if (visible) { this.offerAnnouncement(); } })
-    .navDestination(this.destination).width('100%').height('100%')
+    .navDestination(this.destination).layoutWeight(1).height(this.windowWidth >= 840 ? 'calc(100% - 12vp)' : '100%')
+    .margin({ top: this.windowWidth >= 840 ? 6 : 0, bottom: this.windowWidth >= 840 ? 6 : 0,
+      right: this.windowWidth >= 840 && !this.workbench().docked ? 6 : 0 })
+    .borderRadius(this.windowWidth >= 840 ? Radius.xl : 0).clip(this.windowWidth >= 840)
+    Column().width(this.workbench().docked ? this.workbench().detailWidth : 0).height('100%')
+    }.width('100%').height('100%')
     // Cover both the navigation title bar and content, keeping the measured drawer mounted.
     if (this.app.ready) {
       this.drawer()
     }
     }.width('100%').height('100%')
       }, (locale: string) => locale)
-      BrowserPanel({ browser: this.browser, expanded: this.browserExpanded,
-        threadId: this.app.active.id, canAnnotate: this.app.canQueueInput && this.app.active.attachments.length < 4,
-        onAnnotation: (threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string) => this.addBrowserAnnotation(threadId, pixel, page, note),
-        onSettings: () => { this.setBrowserExpanded(false); this.openSettings(); },
-        onDismiss: () => this.setBrowserExpanded(false) })
+      // These hosts keep their position in the tree across all width breakpoints.
+      // Only their geometry changes; resizing never reinitializes the session or editor.
+      Stack() {
+      AnimatedPage({ visible: this.workspaceOpen && !this.browserExpanded && !this.previewVisible,
+        retained: this.workspaceOpen, onPresenceChanged: (present: boolean) => { this.workspacePresent = present; } }) {
+        WorkspacePanel({ app: this.app, embedded: true, initialPath: this.workspacePath,
+          requestId: this.workspaceRequest, closeRequest: this.workspaceCloseRequest,
+          onClose: () => { this.workspaceOpen = false; } })
+      }
+      }.id('workbench-files').width(this.workbench().docked ? this.workbench().detailWidth - 6 : '100%')
+        .height(this.windowWidth >= 840 ? 'calc(100% - 12vp)' : '100%')
+        .borderRadius(this.windowWidth >= 840 ? Radius.xl : 0).clip(true)
+        .position({ x: this.workbench().detailX, y: this.windowWidth >= 840 ? 6 : 0 })
+        .hitTestBehavior(this.workspaceOpen && !this.browserExpanded && !this.previewVisible ? HitTestMode.Default : HitTestMode.None)
+        .border({ width: { left: this.workbench().docked ? 0.5 : 0 }, color: $r('app.color.divider') })
+      Stack() {
+      AnimatedPage({ visible: this.previewVisible && this.hasPreview() && !this.browserExpanded,
+        retained: this.hasPreview(), onPresenceChanged: (present: boolean) => this.previewPresenceChanged(present) }) {
+        PreviewPanel({ app: this.app, threadId: this.previewThreadId, messageId: this.previewMessageId, previewId: this.previewId,
+          onClose: () => this.closePreview() })
+      }
+      }.width(this.workbench().docked ? this.workbench().detailWidth - 6 : '100%')
+        .height(this.windowWidth >= 840 ? 'calc(100% - 12vp)' : '100%')
+        .borderRadius(this.windowWidth >= 840 ? Radius.xl : 0).clip(true).position({ x: this.workbench().detailX, y: this.windowWidth >= 840 ? 6 : 0 })
+        .hitTestBehavior(this.previewVisible && this.hasPreview() && !this.browserExpanded ? HitTestMode.Default : HitTestMode.None)
+        .border({ width: { left: this.workbench().docked ? 0.5 : 0 }, color: $r('app.color.divider') })
+      Stack() {
+      AnimatedPage({ visible: this.browserExpanded && this.browser.open, retained: true, vertical: this.windowWidth < 840,
+        onPresenceChanged: (present: boolean) => this.browserPresenceChanged(present) }) {
+        BrowserPanel({ browser: this.browser, expanded: this.browserExpanded, presented: this.browserPresent,
+          threadId: this.app.active.id, canAnnotate: this.app.canQueueInput && this.app.active.attachments.length < 4,
+          onAnnotation: (threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string) => this.addBrowserAnnotation(threadId, pixel, page, note),
+          onSettings: () => { this.setBrowserExpanded(false); this.openSettings(); },
+          onClose: () => this.closeBrowser(), onDismiss: () => this.setBrowserExpanded(false) })
+      }
+      }.width(this.workbench().docked ? this.workbench().detailWidth - 6 : '100%')
+        .height(this.windowWidth >= 840 ? 'calc(100% - 12vp)' : '100%')
+        .borderRadius(this.windowWidth >= 840 ? Radius.xl : 0).clip(true).position({ x: this.workbench().detailX, y: this.windowWidth >= 840 ? 6 : 0 })
+        .hitTestBehavior(this.browserExpanded && this.browser.open ? HitTestMode.Default : HitTestMode.None)
+        .accessibilityLevel(this.browserExpanded && this.browser.open ? 'auto' : 'no-hide-descendants')
+        .border({ width: { left: this.browserExpanded && this.workbench().docked ? 0.5 : 0 }, color: $r('app.color.divider') })
       }
     }.width('100%').height('100%')
+    .backgroundColor($r('app.color.page_background'))
+    .onAreaChange((_old: Area, area: Area) => this.windowChanged(Number(area.width)))
     .bindSheet($$this.showToolScope, this.toolScopeSheet(), { title: { title: t('工具范围') },
       height: this.app.active.agentMode === 'custom' ? SheetSize.LARGE : SheetSize.FIT_CONTENT,
       dragBar: true, backgroundColor: $r('app.color.page_background'), systemMaterial: this.appearance.readingSurface })
