@@ -83,7 +83,7 @@ scripts/        构建辅助、自动化测试与冒烟服务
 | `services/Cancellation.ets` | 单次运行共享的取消信号 |
 | `services/ToolSet.ets` | 工具目录与执行路由，未启用的工具不能执行 |
 | `services/ToolExecution.ets` | 工具批次的顺序/并发调度与前后检查点 |
-| `services/ToolDiscovery.ets` | 按需工具目录与 `tool_search` 展开 |
+| `services/ToolDiscovery.ets` | 默认完整工具目录排序及内部可选发现模式 |
 | `services/WorkspaceTools.ets` / `NativeWorkspaceFiles.ets` | 工作区工具定义与沙箱文件读写 |
 | `services/providers/ProviderRegistry.ets` | 显式注册、配置绑定、每次请求前的凭据解析 |
 | `services/providers/ProtocolProvider.ets` | NetworkKit 请求、取消、UTF-8 增量解码与空闲超时 |

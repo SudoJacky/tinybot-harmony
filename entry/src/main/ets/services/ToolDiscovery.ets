@@ -5,8 +5,9 @@ import { AgentTools, ToolInvocationContext } from './AgentLoop';
 import { Cancellation } from './Cancellation';
 import { ContextEntry } from '../model/ContextProjection';
 
-// Visibility is separate from mandatory file permissions in ToolGroups.
+// Only the explicit opt-in discovery mode uses this subset; default sessions expose the full authorized catalog.
 const DIRECT_TOOLS: string[] = ['read_file', 'write_file', 'edit_file', 'orchestrate',
+  'publish_preview', 'present_files',
   'read_attachment', 'read_reference', 'team_complete_task'];
 interface SearchArguments { query: string; }
 interface ToolSummary { name: string; description: string; }
@@ -86,11 +87,12 @@ function searchDefinition(deferred: ToolDefinition[]): ToolDefinition {
 }
 
 // Shared by request preparation and the context inspector; discovery changes visibility, never permission.
-export function discoveredToolDefinitions(catalog: ToolDefinition[], loaded: string[] = []): ToolDefinition[] {
+export function discoveredToolDefinitions(catalog: ToolDefinition[], loaded: string[] = [], discovery: boolean = false): ToolDefinition[] {
   if (catalog.some((tool) => tool.function.name === 'tool_search')) {
     throw new ToolFailure('INTERNAL_ERROR', 'Reserved tool name: tool_search', 'inspect_error');
   }
   const ordered = catalog.slice().sort((a, b) => a.function.name < b.function.name ? -1 : a.function.name > b.function.name ? 1 : 0);
+  if (!discovery) { return ordered; }
   const direct = ordered.filter((tool) => DIRECT_TOOLS.includes(tool.function.name));
   const deferred = ordered.filter((tool) => !DIRECT_TOOLS.includes(tool.function.name));
   const initial = deferred.length > 0 ? direct.concat([searchDefinition(deferred)]) : direct;
@@ -126,8 +128,12 @@ export function discoveredToolNames(entries: ContextEntry[]): string[] {
 export class ToolDiscovery implements AgentTools {
   private inner: AgentTools;
   private loaded: Set<string> = new Set<string>();
-  constructor(inner: AgentTools, loaded: string[] = []) { this.inner = inner; this.loaded = new Set<string>(loaded); }
-  definitions(): ToolDefinition[] { return discoveredToolDefinitions(this.inner.definitions(), Array.from(this.loaded)); }
+  private discovery: boolean;
+  // Production sessions expose the complete policy-filtered catalog. Search remains explicit opt-in.
+  constructor(inner: AgentTools, loaded: string[] = [], discovery: boolean = false) {
+    this.inner = inner; this.loaded = new Set<string>(loaded); this.discovery = discovery;
+  }
+  definitions(): ToolDefinition[] { return discoveredToolDefinitions(this.inner.definitions(), Array.from(this.loaded), this.discovery); }
   executionDefinitions(): ToolDefinition[] {
     return this.inner.definitions().concat(this.definitions().filter((tool) => tool.function.name === 'tool_search'));
   }
@@ -139,6 +145,9 @@ export class ToolDiscovery implements AgentTools {
     if (call.function.name !== 'tool_search') {
       this.loaded.add(call.function.name);
       return this.inner.execute(call, cancellation, context);
+    }
+    if (!this.discovery) {
+      throw new ToolFailure('TOOL_UNAVAILABLE', 'tool_search is not enabled. Enabled tools are already provided directly.', 'check_available_tools');
     }
     const args = parseToolArguments(call.function.arguments) as SearchArguments;
     if (!args || Array.isArray(args) || typeof args.query !== 'string' || args.query.length > 300 || Object.keys(args).some((key) => key !== 'query')) {

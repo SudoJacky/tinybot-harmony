@@ -21,7 +21,7 @@
 | 网页读取与搜索 | `read_web`、`search_web` | 2 | `extensions.webEnabled`；`search_web` 还要求搜索服务已启用 |
 | 浏览器 | `browser_open`、`browser_snapshot`、`browser_action`、`browser_handoff`、`browser_close` | 5 | `extensions.browserPolicy` 为 `disabled` 时整组不出现 |
 | 代码计算 | `execute_code` | 1 | 只读模式仍可用 |
-| 工具编排 | `orchestrate` | 1 | 关闭后仍可用 `tool_search` 检索文件工具 |
+| 工具编排 | `orchestrate` | 1 | 关闭后仍可直接调用已授权文件工具 |
 | 信息确认 | `request_user_input` | 1 | 只读模式仍可用 |
 | 任务计划 | `update_plan` | 1 | 只读模式仍可用 |
 | 团队协作 | `team_recruit`、`team_wait`、`team_inspect`、`team_read_result`、`team_control`、`team_resume`、`team_complete_task`、`team_list_messages`、`team_read_message` | 9 | 会话启用团队后加入；员工三项只在子任务内出现 |
@@ -31,7 +31,6 @@
 | MCP 服务管理 | `mcp_manage` | 1 | 只读模式不可用 |
 | Skills | `read_skill`、`list_skills`、`skill_manage` | 3 | Skills 页面逐项启用；`skill_manage` 只读模式不可用 |
 | 长期记忆 | `memory` | 1 | `autoMemory` 开启且非只读 |
-| 按需检索 | `tool_search` | 1 | 存在被折叠的工具时自动加入 |
 
 ## 工作区文件
 
@@ -73,7 +72,6 @@
 | --- | --- | --- | --- |
 | `execute_code` | 在隔离 QuickJS 中跑同步 JavaScript | `code` 必填（函数体）；`input` 可选原生 JSON 值，默认 `null` | 2 秒预算、32 MiB Runtime 分配、日志合计 32 KiB；无文件、网络、定时器、模块导入或宿主工具，Promise 不支持。回执 `{status, stdout, stderr, result, error, logsTruncated, resultTruncated, durationMs}`；`status` 非 `ok` 记为失败 |
 | `orchestrate` | 用异步 JavaScript 组合调用已授权工具 | `code` 必填 | 可嵌套 17 个工具（文件、网页、Skills 读取、MCP 发现与调用、计算、预览与文件交付）；上限 32 次调用、4 个并发宿主工具、2 秒脚本计算、120 秒总时长、32 MiB JS 内存、1 MiB 结果；子调用回执保存在父回执里，取消后未开始的子调用标为 `NOT_EXECUTED`；不支持嵌套编排 |
-| `tool_search` | 按名称或关键词加载工具 schema | `query` 必填（≤300 字符） | 空字符串只列目录；BM25 排序（`k1=1.2`、`b=0.75`），最多 6 个命中；命中后下一请求携带完整 schema。检索结果不扩大权限 |
 
 ## 交互与计划
 
@@ -131,7 +129,7 @@
 | 路径 | 职责 |
 | --- | --- |
 | `entry/src/main/ets/services/ToolSet.ets` | 目录汇总与分发，重名工具直接失败 |
-| `entry/src/main/ets/services/ToolDiscovery.ets` | 常驻与按需拆分、BM25 检索、`tool_search` |
+| `entry/src/main/ets/services/ToolDiscovery.ets` | 默认完整授权目录排序；内部显式 opt-in 发现模式 |
 | `entry/src/main/ets/services/SelectedTools.ets` | 按会话选择过滤目录与调用 |
 | `entry/src/main/ets/services/RuleTools.ets` | 只读规则过滤 |
 | `entry/src/main/ets/services/WorkspaceTools.ets` | 文件工具定义、参数校验与路径约束 |

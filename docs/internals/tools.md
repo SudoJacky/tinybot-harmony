@@ -19,7 +19,7 @@ return group.execute(call, cancellation, context);
 
 ## 组装顺序
 
-会话资源先按配置组装分组，再依次套上只读、会话选择、编排和按需发现四层包装：
+会话资源先按配置组装分组，再依次套上只读、会话选择、编排和目录排序四层包装：
 
 ```text
 SessionResources.tools()
@@ -43,7 +43,7 @@ SessionResources.tools()
         ↓
       OrchestrationTools  orchestrate
         ↓
-      ToolDiscovery       按需目录 + tool_search
+      ToolDiscovery       完整授权目录，稳定排序
 ```
 
 会话层还会在外侧再包一层资源管理工具和记忆工具；它们受助手设置、Skills 页面与只读规则约束，不进入下面的可选能力开关。
@@ -130,24 +130,15 @@ MCP 已接受的完整工具结果保存在会话回执中，并原样进入模�
 - 执行前若有执行门（`ExecutionGate`，由浏览器会话实现），批处理会先等待门放行；工具完成后还会再等一次并刷新回执，因此用户接管浏览器后模型看到的是新快照。
 - 诊断开启时，工具开始与结束各记一条事件，只含轮次、参数字符数、结果字符数与失败/取消标记，不含正文。
 
-## 工具发现与按需展开
+## 默认完整工具目录
 
-默认初始目录为 `read_file`、`write_file`、`edit_file`、`orchestrate` 和 `tool_search`。附件补读、会话引用补读与员工交接入口同样直接保留。其余工具折叠为一份名称清单，写在 `tool_search` 的 description 里。
+模型从首次请求起直接获得所有已启用、已配置且通过权限过滤的工具 schema 与使用说明，包括文件、计算、浏览器、交互、预览、文件交付、MCP 包装入口及当前角色允许的团队工具。目录按名称稳定排序，不再根据本轮调用或旧发现记录逐步扩展。`tool_search` 默认不提供。
 
-| 项目 | 行为 |
-| --- | --- |
-| 查询 | `query` 字符串，最多 300 字符；只允许这一个字段 |
-| 空查询 | 返回当前获授权的按需工具名称与简短用途，不加载任何 schema |
-| 非空查询 | 按 BM25 排序，最多加载 6 个匹配工具 |
-| 生效范围 | 匹配工具的完整 schema 在下一次请求出现；新声明追加在已有声明之后 |
-| 新一轮 | 从已保存的工具发现和调用回执恢复已展开名称，跨轮及重开会话保留 |
-| 权限 | 检索只改变可见性；被关闭、未配置或角色不允许的工具不会出现 |
+工具目录仍受只读、会话能力开关、角色、资源是否存在和服务配置约束。Skills 和记忆工具继续由对应设置控制。停用或撤销的工具不会因为旧消息调用过而重新出现；附件和引用入口只在有对应资源时加入。
 
-检索实现与 pi 使用相同参数（`k1=1.2`、`b=0.75`），索引工具名、用途说明以及参数名和参数说明。英文按驼峰与下划线切分、去停用词并做简单单复数归一；中文按重叠双字切分，不引入分词词典或向量依赖。同分保持目录顺序，无匹配时返回空列表。
+普通工具调用不会改变顶层声明集，也不需要一次发现请求。首次请求会携带更多 schema；同一授权目录下后续请求保持一致，避免因按需加载工具而重建 provider 缓存前缀。用户修改能力配置、服务或角色时，目录仍会相应变化；不承诺固定缓存命中率。
 
-初始声明与检索目录按名称规范排序，已展开声明按发现顺序追加。发现回执不授予权限：恢复名称后仍与当前授权目录取交集，停用或撤销的工具立即移除。工具提示通过追加式运行时快照更新，不改写 system；普通兼容协议新增或移除 schema 仍可能截断 provider 的前缀复用。
-
-`ToolDiscovery.executionDefinitions()` 另外返回未展开的完整目录，供调度判断 `sequential` 与并发，不影响模型可见范围。工具是否展开不改变执行顺序、持久化要求或审批。
+旧 `tool_search` 回执保留为普通历史记录，默认运行与上下文检查不再解析它们来决定可见性。`ToolDiscovery` 内部保留显式 opt-in 的 BM25 发现模式供兼容调用使用，产品会话默认不启用。编排子调用的白名单、调度、持久化、参数校验和审批保持原有规则。
 
 ## 可视化与交付编排
 
@@ -218,7 +209,7 @@ HTTP 状态在适配层按数值分类：401 → `AUTH_REQUIRED`，403 → `PERM
 | --- | --- |
 | `entry/src/main/ets/services/ToolSet.ets` | 目录刷新、同名检查、执行路由、`beforeFinish` 聚合 |
 | `entry/src/main/ets/services/ToolExecution.ets` | 批处理、意图与结果检查点、执行门、诊断与用量活动 |
-| `entry/src/main/ets/services/ToolDiscovery.ets` | 精简目录、`tool_search`、BM25 排序、加载集合 |
+| `entry/src/main/ets/services/ToolDiscovery.ets` | 默认完整目录稳定排序；显式 opt-in 兼容发现模式 |
 | `entry/src/main/ets/services/SelectedTools.ets` | full/custom 选择的目录与执行双重过滤 |
 | `entry/src/main/ets/services/RuleTools.ets` | 全局只读过滤 |
 | `entry/src/main/ets/model/ToolGroups.ets` | 分组、能力、基础与受管工具清单 |

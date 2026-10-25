@@ -1269,8 +1269,9 @@ async function test(name, run) {
     const invoke=(name,args)=>tools.execute({id:name,type:'function',function:{name,arguments:JSON.stringify(args)}},new Cancellation());
     await assert.rejects(invoke('generate_image',{prompt:'a circle'}),error=>error.code==='TOOL_UNAVAILABLE');
     const discovery=new ToolDiscovery(tools);
-    const found=JSON.parse(await discovery.execute({id:'search',type:'function',function:{name:'tool_search',arguments:'{"query":""}'}},new Cancellation()));
-    assert.ok(!found.tools.some(tool=>tool.name==='generate_image'));
+    assert.ok(!discovery.definitions().some(tool=>tool.function.name==='generate_image'));
+    assert.ok(!discovery.definitions().some(tool=>tool.function.name==='tool_search'));
+    await assert.rejects(discovery.execute({id:'search',type:'function',function:{name:'tool_search',arguments:'{"query":""}'}},new Cancellation()),error=>error.code==='TOOL_UNAVAILABLE');
     assert.ok(tools.definitions().some(tool=>tool.function.name==='read_attachment'));
   });
   await test('model discovery validates credential origin and uses the protocol endpoint',async()=>{

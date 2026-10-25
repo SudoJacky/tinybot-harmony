@@ -152,8 +152,9 @@ async function main() {
   await f.session.send();
   const advertised = f.provider.requests[0].tools.map(item => item.function.name);
   for (const name of ['read_web', 'mcp_call', 'memory']) assert.ok(!advertised.includes(name));
-  for (const name of ['read_file', 'write_file', 'edit_file', 'orchestrate', 'tool_search']) assert.ok(advertised.includes(name));
-  for (const name of ['list_files', 'find_files', 'search_file_content']) assert.ok(!advertised.includes(name));
+  for (const name of ['read_file', 'write_file', 'edit_file', 'orchestrate']) assert.ok(advertised.includes(name));
+  for (const name of ['list_files', 'find_files', 'search_file_content']) assert.ok(advertised.includes(name));
+  assert.ok(!advertised.includes('tool_search'));
   assert.deepEqual(f.calls, [], 'a forged direct call cannot execute a hidden tool');
   const saved = await f.repository.load(); assert.equal(saved.threads[0].agentMode, 'custom');
   assert.equal(saved.threads[0].disabledTools.length, disabledCount);
@@ -161,7 +162,7 @@ async function main() {
   assert.equal(restored.session.snapshot().threads[0].disabledTools.length, disabledCount);
   await app.setAgentMode('full'); f.session.setDraft('full mode');
   f.provider.respond = async () => reply(); await f.session.send();
-  assert.ok(f.provider.requests.at(-1).tools.some(item => item.function.name === 'tool_search' && item.function.description.includes('read_web')));
+  assert.ok(f.provider.requests.at(-1).tools.some(item => item.function.name === 'read_web'));
   assert.equal((await f.repository.load()).threads[0].disabledTools.length, disabledCount, 'full mode preserves custom configuration');
   await app.setAgentMode('custom'); assert.equal(app.active.disabledTools.length, disabledCount);
   assert.equal(await f.session.forkThread(), true); assert.equal(f.session.active.agentMode, 'custom');
@@ -180,8 +181,9 @@ async function main() {
   assert.ok(sdk.provider.requests.at(-1).tools.some(item => item.function.name === 'read_file'));
   await sdk.session.setDisabledTools(optional); sdk.session.setDraft('basic files only'); await sdk.session.send();
   const basic = sdk.provider.requests.at(-1).tools;
-  assert.deepEqual(Array.from(basic, item => item.function.name).sort(), ['read_file', 'write_file', 'edit_file', 'tool_search'].sort());
-  for (const name of ['list_files', 'find_files', 'search_file_content']) assert.ok(basic.find(tool => tool.function.name === 'tool_search').function.description.includes(name));
+  assert.deepEqual(Array.from(basic, item => item.function.name).sort(),
+    ['list_files','find_files','read_file','search_file_content','write_file','edit_file','list_skills','read_skill','skill_manage'].sort());
+  for (const name of ['list_files', 'find_files', 'search_file_content']) assert.ok(basic.some(tool => tool.function.name === name));
   console.log('PASS SDK children respect custom selection and disabling orchestration retains direct file tools');
 
   const frozen = fixture(); await frozen.session.initialize(); await frozen.session.setToolEnabled('read_web', false);
@@ -220,11 +222,11 @@ async function main() {
   let reviews=0; memory.session.reviewMemory = async () => { reviews++; };
   memory.provider.respond = async index => index===0 ? reply(call('memory',{operations:[]})) : reply();
   memory.session.setDraft('remember this'); await memory.session.send();
-  assert.ok(memory.provider.requests[0].tools.find(tool => tool.function.name==='tool_search').function.description.includes('memory:'));
+  assert.ok(memory.provider.requests[0].tools.some(tool => tool.function.name==='memory'));
   assert.equal(memory.session.active.messages.at(-1).steps[0].tools[0].status,'complete'); assert.equal(reviews,1);
   await memory.session.setSettingsToggle('autoMemory',false);
   memory.provider.respond=async()=>reply(); memory.session.setDraft('memory off'); await memory.session.send();
-  assert.ok(!memory.provider.requests.at(-1).tools.find(tool => tool.function.name==='tool_search').function.description.includes('memory:'));
+  assert.ok(!memory.provider.requests.at(-1).tools.some(tool => tool.function.name==='memory'));
   assert.equal(reviews,1);
   assert.equal(memory.session.active.messages.at(-1).status, 'complete');
   console.log('PASS autoMemory is the single switch for memory tools/background review, including legacy overrides and all optional capabilities off');
