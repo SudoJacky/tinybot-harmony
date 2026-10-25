@@ -59,6 +59,10 @@ if ($LASTEXITCODE -ne 0) { throw 'Appearance preference and palette tests failed
 if ($LASTEXITCODE -ne 0) { throw 'Settings responsiveness and persistence tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-settings-navigation.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'Settings subpage drafts, credentials and return callbacks failed. Build the app first.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-page-transitions.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Page enter/exit lifecycle tests failed. Build the app first.' }
+& $nodePath (Join-Path $projectPath 'scripts/test-tablet-workbench.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Tablet workbench layout and retained-state tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-history-drawer.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'History drawer activity and animation lifecycle tests failed. Build the app first.' }
 & $nodePath (Join-Path $projectPath 'scripts/test-harness-features.cjs')

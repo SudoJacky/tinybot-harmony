@@ -23,6 +23,7 @@ const Page = probe('pages/Index', 'Index', ['setDrawer', 'startDrawerDrag', 'upd
 });
 const animations = [];
 const page = Object.assign(new Page(), { app: { ready: true }, drawerOpen: false, drawerDragging: false,
+  workbench: () => ({ historyWidth: 0 }),
   drawerContentActive: false, drawerAnimation: 0, drawerReveal: 0, drawerWidth: 340,
   getUIContext: () => ({ getFocusController: () => ({ clearFocus() {} }),
     animateTo(options, update) { animations.push(options); update(); } }) });

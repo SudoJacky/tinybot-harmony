@@ -215,7 +215,7 @@ struct ProcessGroup {
       if (!this.richOnly) {
         ForEach(this.items(), (item: ProcessItem) => {
           if (item.tool < 0) {
-            ThinkingDisclosure({ content: this.message.stepViews[item.step]?.reasoningContent || '',
+            ThinkingDisclosure({ step: this.message.stepViews[item.step],
               disclosure: this.message.disclosures.get('thinking-' + item.step), streaming: this.thinkingNow(item.step),
               identity: this.message.id + '-' + item.step, onInspect: () => { this.message.processOpen = true; this.onInspect(); } })
           } else if (this.toolAt(item)) {
@@ -247,6 +247,9 @@ export struct MessageBubble {
   onRead: (id: string) => void = () => {};
   @Prop webEnabled: boolean = false;
   onOpenFile: (path: string) => void = () => {};
+  @Prop previewInspectable: boolean = false;
+  @Prop inspectedPreviewId: string = '';
+  onInspectPreview: (messageId: string, previewId: string) => void = () => {};
   @Prop actionsEnabled: boolean = true;
   onRegenerate: (id: string) => void = () => {};
   @Prop uiAvailable: boolean = false;
@@ -604,6 +607,8 @@ export struct MessageBubble {
                   streaming: this.message.status === 'generating' && entry.step === this.message.stepViews.length - 1 })
                 } else if (this.answerParts(entry.step)[partIndex].kind === 'preview') {
                   PublishedPreviewCard({ preview: this.answerParts(entry.step)[partIndex].preview as PublishedPreview, inline: true,
+                    inspectable: this.previewInspectable, inspected: this.inspectedPreviewId === this.answerParts(entry.step)[partIndex].preview?.id,
+                    onInspect: () => this.onInspectPreview(this.message.id, (this.answerParts(entry.step)[partIndex].preview as PublishedPreview).id),
                     saved: this.message.uiStates, presentation: this.message.uiPresentation, available: this.uiAvailable, onInteract: this.onUi })
                 } else if (this.answerParts(entry.step)[partIndex].kind === 'error') {
                   Text(this.answerParts(entry.step)[partIndex].content).fontSize(13).fontColor($r('app.color.danger'))
@@ -612,6 +617,8 @@ export struct MessageBubble {
                 ForEach(stepPreviews(this.message.id, this.message.stepViews[entry.step], entry.step, this.latestPreviewIds),
                   (preview: PublishedPreview) => {
                     PublishedPreviewCard({ preview: stepPreviews(this.message.id, this.message.stepViews[entry.step], entry.step, this.latestPreviewIds).find((item) => item.id === preview.id) as PublishedPreview,
+                      inspectable: this.previewInspectable, inspected: this.inspectedPreviewId === preview.id,
+                      onInspect: () => this.onInspectPreview(this.message.id, preview.id),
                       saved: this.message.uiStates, presentation: this.message.uiPresentation, available: this.uiAvailable, onInteract: this.onUi })
                   }, (preview: PublishedPreview) => preview.id)
               } else {

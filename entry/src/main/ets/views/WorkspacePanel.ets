@@ -1,3 +1,4 @@
+import { AnimatedPage } from '../common/AnimatedPage';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { SwipeRow } from '../common/SwipeRow';
@@ -17,7 +18,7 @@ import { DataTable } from './DataTable';
 import { parseDelimited } from '../model/RichArtifacts';
 import { FileBaseline, WorkspaceEntry } from '../services/WorkspaceFiles';
 import { Btn, Font, Radius, Space, systemInsets } from '../common/Theme';
-import { Banner, BottomBar, EmptyState } from '../common/Widgets';
+import { Banner, BottomBar, EmptyState, IconButton } from '../common/Widgets';
 
 const IMAGE_FILE: RegExp = /\.(png|jpe?g|webp|gif|bmp)$/i;
 const MARKDOWN_FILE: RegExp = /\.(md|markdown)$/i;
@@ -28,6 +29,19 @@ function pad(value: number): string { return value < 10 ? '0' + value : value.to
 export struct WorkspacePanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop initialPath: string = '';
+  @Prop embedded: boolean = false;
+  // The docked detail strip owns the title and close control; keep only the
+  // file preview's own navigation inside the tab body.
+  @Prop tabbed: boolean = false;
+  @Prop @Watch('openRequested') requestId: number = 0;
+  @Prop @Watch('backRequested') closeRequest: number = 0;
+  // The docked tab's own close control skips the breadcrumb navigation that
+  // Back performs and still runs the unsaved-changes guard.
+  @Prop @Watch('tabCloseRequested') tabCloseRequest: number = 0;
+  onClose: () => void = () => {};
+  @State private workspaceTitle: string = '';
+  private ownerWorkspaceId: string = '';
+  private ownerProject: boolean = false;
   @ObjectLink app: ChatViewModel;
   @State private directory: string = '';
   @State private swipeRow: string = '';
@@ -38,6 +52,7 @@ export struct WorkspacePanel {
   @State private imagePath: string = '';
   @State private previewError: string = '';
   @State private previewing: boolean = false;
+  @State private previewPresent: boolean = false;
   @State private editing: boolean = false;
   @State private busy: boolean = false;
   @State private refreshing: boolean = false;
@@ -51,16 +66,41 @@ export struct WorkspacePanel {
   @State private insetBottom: number = 0;
   private files?: NativeWorkspaceFiles;
   aboutToAppear(): void {
+    this.bindWorkspace();
+    systemInsets(this.getUIContext()).then((insets: number[]) => { this.insetTop = insets[0]; this.insetBottom = insets[1]; });
+  }
+
+  private bindWorkspace(): void {
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-    this.files = new NativeWorkspaceFiles(new WorkspaceStore(context.getApplicationContext().filesDir).pathFor(this.app.activeWorkspaceId),
+    this.ownerWorkspaceId = this.app.activeWorkspaceId;
+    this.ownerProject = !!this.app.activeProject;
+    this.workspaceTitle = this.app.activeProject ? t('项目文件') + ' · ' + this.app.activeProject.name : t('工作区文件');
+    this.files = new NativeWorkspaceFiles(new WorkspaceStore(context.getApplicationContext().filesDir).pathFor(this.ownerWorkspaceId),
       this.app.activeProject?.sharedFolders || []);
+    this.directory = ''; this.previewing = false; this.editing = false; this.error = '';
     if (this.initialPath) {
       const slash = this.initialPath.lastIndexOf('/');
       this.directory = slash < 0 ? '' : this.initialPath.slice(0, slash);
       this.open({ name: this.initialPath.slice(slash + 1), kind: 'file' });
     }
     this.refresh();
-    systemInsets(this.getUIContext()).then((insets: number[]) => { this.insetTop = insets[0]; this.insetBottom = insets[1]; });
+  }
+
+  private leave(action: () => void): void {
+    if (this.busy) { return; }
+    if (!this.dirty()) { action(); return; }
+    this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t('放弃未保存的修改？'),
+      message: this.fileName(this.selected), primaryButton: { value: t('继续编辑'), action: () => {} },
+      secondaryButton: { value: t('放弃'), fontColor: $r('app.color.danger'), action: action } });
+  }
+  private openRequested(): void { this.leave(() => this.bindWorkspace()); }
+  private requestClose(): void { this.leave(this.onClose); }
+  private tabCloseRequested(): void { this.requestClose(); }
+  private backRequested(): void {
+    if (this.busy) { return; }
+    if (this.previewing) { this.closePreview(); }
+    else if (this.directory) { this.go(this.crumbs().slice(0, -1).join('/')); }
+    else { this.requestClose(); }
   }
 
   private locked(): boolean { return this.busy || this.app.busy; }
@@ -73,7 +113,9 @@ export struct WorkspacePanel {
   private async refresh(): Promise<void> {
     if (!this.files) { return; }
     try {
-      const list = await this.files.list(this.directory || '.', new Cancellation());
+      const files = this.files; const directory = this.directory;
+      const list = await files.list(directory || '.', new Cancellation());
+      if (files !== this.files || directory !== this.directory) { return; }
       // Folders first, then files, each alphabetical.
       this.entries = list.entries.sort((a, b) => (a.kind === 'directory' ? 0 : 1) - (b.kind === 'directory' ? 0 : 1) || a.name.localeCompare(b.name));
       this.truncated = list.truncated; this.error = '';
@@ -86,6 +128,7 @@ export struct WorkspacePanel {
     if (!this.files || this.busy || entry.kind === 'symlink') { return; }
     const path = this.join(entry.name);
     if (entry.kind === 'directory') { this.go(path); return; }
+    this.busy = true;
     this.selected = path; this.editing = false; this.content = ''; this.original = ''; this.imagePath = ''; this.previewError = '';
     this.baseline = undefined; this.csv = []; this.selection = '';
     try {
@@ -94,7 +137,7 @@ export struct WorkspacePanel {
       else { this.content = (await this.files.read(path, new Cancellation())).content; this.original = this.content; }
       if (/\.(csv|tsv)$/i.test(path)) { this.csv = parseDelimited(this.content, /\.tsv$/i.test(path) ? '\t' : ','); }
     } catch (error) { this.previewError = t("无法预览：") + (error as Error).message; }
-    this.previewing = true;
+    this.previewing = true; this.busy = false;
   }
 
   private uniqueName(name: string): string {
@@ -185,13 +228,16 @@ export struct WorkspacePanel {
   private confirmRestore(): void {
     if (!this.baseline?.existed || this.locked() || this.editing || this.previewError) { return; }
     const scope = this.baseline.sourceUri ? t('共享文件将直接写回备份内容；恢复失败时备份会保留。') :
-      this.app.active.projectId ? t('这会恢复项目中的累计修改，可能包含其他会话的改动。') : '';
+      this.ownerProject ? t('这会恢复项目中的累计修改，可能包含其他会话的改动。') : '';
     this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t('恢复修改前版本？'),
       message: (scope ? scope + '\n' : '') + t('当前内容将被保存基线替换。'),
       primaryButton: { value: t('取消'), action: () => {} },
       secondaryButton: { value: t('恢复'), fontColor: $r('app.color.danger'), action: () => this.restoreBackup() } });
   }
   private reference(): void {
+    if (this.embedded && this.app.activeWorkspaceId !== this.ownerWorkspaceId) {
+      this.toast(t('请先切换回此文件所属的对话或项目。')); return;
+    }
     const text = this.selection || this.content.slice(0, 4000);
     const line = this.content.slice(0, this.selectedStart).split('\n').length;
     this.app.setDraft(this.app.active.draft + t("\n\n引用文件 ") + this.selected + t("，第 ") + line + t(" 行附近：\n") + text.slice(0, 4000) + t("\n修改要求："));
@@ -212,7 +258,7 @@ export struct WorkspacePanel {
       const absolute = await this.files.checkedPath(path);
       if (kind === 'export') {
         await exportFile(context, absolute, this.fileName(path),
-          aiAssistedFile(this.app.exportSnapshot(), this.app.activeWorkspaceId, path));
+          aiAssistedFile(this.app.exportSnapshot(), this.ownerWorkspaceId, path));
       }
       if (kind === 'share') { await shareFile(context, absolute, this.fileName(path)); }
     } catch (error) { if (this.previewing) { this.previewError = (error as Error).message; } else { this.error = (error as Error).message; } }
@@ -321,7 +367,7 @@ export struct WorkspacePanel {
         Column({ space: 1 }) {
           Text(this.fileName(this.selected)).fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium).maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
-          Text(this.editing ? (this.dirty() ? t("编辑中 · 未保存") : t("编辑中")) : this.directory || t("工作区")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).maxLines(1)
+          Text(this.editing ? (this.dirty() ? t("编辑中 · 未保存") : t("编辑中")) : this.embedded ? this.workspaceTitle : this.directory || t("工作区")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).maxLines(1)
             .fontColor(this.dirty() ? this.appearance.accent : $r('app.color.text_tertiary'))
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
         if (this.editing) {
@@ -337,6 +383,10 @@ export struct WorkspacePanel {
           }.fontFamily(this.appearance.fontFamily).id('workspace-backup-menu').width(40).height(40)
             .backgroundColor(Color.Transparent).accessibilityText(t('更多操作')).enabled(!this.locked())
             .bindMenu(this.backupMenu, { systemMaterial: this.appearance.surface, mask: false })
+        }
+        if (this.embedded && !this.tabbed) {
+          IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭文件'), compId: 'close-workbench-file-preview',
+            disabled: this.busy, onTap: () => this.requestClose() })
         }
       }.width('100%').height(56).padding({ left: 4, right: Space.page })
       if (this.previewError.length > 0) {
@@ -379,12 +429,12 @@ export struct WorkspacePanel {
         }.width('100%').padding({ left: Space.page, right: Space.page })
         .border({ width: { top: 0.5 }, color: $r('app.color.divider') })
       }
-    }.width('100%').height('100%').backgroundColor($r('app.color.page_background'))
-    .padding({ top: this.insetTop, bottom: this.editing ? 0 : this.insetBottom })
+    }.width('100%').height('100%').backgroundColor(this.embedded ? $r('app.color.surface') : $r('app.color.page_background'))
+    .padding({ top: this.embedded ? 0 : this.insetTop, bottom: this.editing ? 0 : this.insetBottom })
   }
 
-  build() {
-    NavDestination() {
+  @Builder
+  listing() {
       Column() {
         if (this.directory) {
           this.breadcrumbs()
@@ -435,17 +485,46 @@ export struct WorkspacePanel {
           }.width('100%')
         }
       }.width('100%').height('100%')
+
+  }
+
+  build() {
+    if (this.embedded) {
+      Stack() {
+      Column() {
+        if (!this.tabbed) {
+          Row() {
+            Text(this.workspaceTitle).fontSize(16).fontWeight(FontWeight.Medium).maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1).fontColor($r('app.color.text_primary'))
+            IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭文件'), compId: 'close-workbench-files',
+              disabled: this.busy, onTap: () => this.requestClose() })
+          }.height(56).width('100%').padding({ left: 16, right: 6 })
+            .border({ width: { bottom: 0.5 }, color: $r('app.color.divider') })
+        }
+        Column() { this.listing() }.layoutWeight(1).width('100%')
+      }.width('100%').height('100%').backgroundColor($r('app.color.surface'))
+        .enabled(!this.previewing && !this.previewPresent)
+        .accessibilityLevel(this.previewing || this.previewPresent ? 'no-hide-descendants' : 'auto')
+      Stack() {
+      AnimatedPage({ visible: this.previewing,
+        onPresenceChanged: (present: boolean) => { this.previewPresent = present; } }) { this.preview() }
+      }.width('100%').height('100%').hitTestBehavior(this.previewing ? HitTestMode.Default : HitTestMode.None)
+      }.width('100%').height('100%')
+    } else {
+    NavDestination() {
+      Column() { this.listing() }.width('100%').height('100%')
       .bindContentCover($$this.previewing, this.preview(), {
         modalTransition: ModalTransition.DEFAULT, backgroundColor: $r('app.color.page_background'),
         onWillDismiss: (action: DismissContentCoverAction) => { if (this.dirty()) { this.closePreview(); } else { action.dismiss(); } }
       })
     }
-    .title(this.crumbs().length > 0 ? this.crumbs()[this.crumbs().length - 1] : this.app.activeProject ? t("项目文件") + " · " + this.app.activeProject.name : t("工作区文件"), { systemMaterial: this.appearance.control })
+    .title(this.crumbs().length > 0 ? this.crumbs()[this.crumbs().length - 1] : this.workspaceTitle, { systemMaterial: this.appearance.control })
     .backgroundColor($r('app.color.page_background'))
     // Back goes up one folder before leaving the page, matching system file managers.
     .onBackPressed(() => {
       if (!this.directory) { return false; }
       this.go(this.crumbs().slice(0, -1).join('/')); return true;
     })
+    }
   }
 }

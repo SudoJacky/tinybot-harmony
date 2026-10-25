@@ -57,7 +57,7 @@ const globals = { exports: {}, ViewPU, ObservedObject: { GetRawObject: value => 
   Text: new Proxy({}, { get: (_, key) => key === 'create' ? value => texts.set(current, value) : () => {} }) };
 for (const name of ['ForEach','If','ListItem','Row','Stack','SymbolGlyph','Button','Menu','MenuItem']) globals[name] = noop;
 globals.MenuItem = new Proxy({}, { get: (_, key) => key === 'create' ? value => menuItems.set(current, value) : () => {} });
-for (const name of ['ButtonType','Color','Alignment','FontWeight','TextOverflow']) globals[name] = {};
+for (const name of ['ButtonType','Color','Alignment','FontWeight','TextOverflow','Visibility']) globals[name] = {};
 globals.CheckBoxShape = {};
 globals.Checkbox = new Proxy({}, { get: (_, key) => key === 'select' ? value => { checkboxSelected = value; } :
   key === 'onChange' ? callback => { checkboxChange = callback; } : () => {} });

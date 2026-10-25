@@ -42,7 +42,8 @@ const ui = kind => new Proxy({}, { get: (_, name) => value => {
     if (['id', 'onClick', 'enabled'].includes(name)) button[name] = value;
   }
 } });
-const globals = { exports: {}, ViewPU, SynchedPropertyNesedObjectPU: Property, BarState: {},
+const globals = { exports: {}, ViewPU, SynchedPropertyNesedObjectPU: Property, ObservedPropertySimplePU: Property,
+  SynchedPropertySimpleOneWayPU: Property, BarState: {},
   require: id => {
     if (id.includes('I18n&')) return { t: (text, values) => values ? text + ':' + values.join('/') : text };
     if (id.includes('ToolGroups&')) return groups;

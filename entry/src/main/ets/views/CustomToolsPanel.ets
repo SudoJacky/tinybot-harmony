@@ -12,6 +12,9 @@ export struct CustomToolsPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   @ObjectLink thread: ThreadViewModel;
+  // The tool-scope sheet already owns one scroll container; embedded mode drops
+  // the inner Scroll so the whole sheet scrolls as a single surface.
+  @Prop embedded: boolean = false;
 
   private editable(): boolean { return !this.app.busy && !this.thread.archived && this.app.saveError.length === 0; }
   private isEnabled(capability: ToolCapability): boolean {
@@ -19,8 +22,8 @@ export struct CustomToolsPanel {
   }
   private enabledCount(): number { return TOOL_CAPABILITIES.filter((capability) => this.isEnabled(capability)).length; }
 
-  build() {
-    Scroll() {
+  @Builder
+  content() {
       Column({ space: Space.sm }) {
         Row({ space: Space.xs }) {
           Text(t('已开启 {0} / {1} 项能力', [this.enabledCount(), TOOL_CAPABILITIES.length])).fontFamily(this.appearance.fontFamily)
@@ -52,7 +55,14 @@ export struct CustomToolsPanel {
             }
           }
         }, (section: string) => section)
-      }.width('100%').padding({ left: Space.md, right: Space.md, bottom: Space.lg })
-    }.width('100%').height('100%').scrollBar(BarState.Auto)
+      }.width('100%').padding({ left: Space.md, right: Space.md, bottom: this.embedded ? 0 : Space.lg })
+  }
+
+  build() {
+    if (this.embedded) {
+      this.content()
+    } else {
+      Scroll() { this.content() }.width('100%').height('100%').scrollBar(BarState.Auto)
+    }
   }
 }

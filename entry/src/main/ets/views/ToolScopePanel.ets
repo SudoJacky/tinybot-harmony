@@ -1,5 +1,5 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
-import { Space } from '../common/Theme';
+import { Space, systemInsets } from '../common/Theme';
 import { GroupCard, NavRow, RowDivider } from '../common/Widgets';
 import { AgentMode, AGENT_MODES, agentModeName } from '../model/AgentMode';
 import { ChatViewModel, ThreadViewModel } from '../viewmodel/ChatViewModel';
@@ -10,6 +10,13 @@ export struct ToolScopePanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   @ObjectLink thread: ThreadViewModel;
+  @State private insetBottom: number = 0;
+
+  aboutToAppear(): void {
+    // A large sheet floats over the window, not inside the page's safe area: the
+    // last capability row would otherwise sit under the navigation indicator.
+    systemInsets(this.getUIContext()).then((insets: number[]) => { this.insetBottom = insets[1]; });
+  }
 
   private editable(): boolean {
     return this.app.ready && !this.app.busy && !this.thread.archived && this.app.saveError.length === 0 && this.thread.id === this.app.active.id;
@@ -20,7 +27,8 @@ export struct ToolScopePanel {
     await this.app.setAgentMode(mode);
   }
 
-  build() {
+  @Builder
+  content() {
     Column({ space: Space.md }) {
       Column({ space: Space.md }) {
         GroupCard() {
@@ -34,8 +42,18 @@ export struct ToolScopePanel {
         }
       }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.md })
       if (this.thread.agentMode === 'custom') {
-        CustomToolsPanel({ app: this.app, thread: this.thread }).layoutWeight(1)
+        CustomToolsPanel({ app: this.app, thread: this.thread, embedded: true })
       }
-    }.width('100%').height(this.thread.agentMode === 'custom' ? '100%' : undefined).padding({ bottom: Space.lg })
+    }.width('100%').padding({ bottom: Space.lg + this.insetBottom })
+  }
+
+  build() {
+    // One scroll surface for the mode rows and every capability row. The sheet
+    // is a fixed-height card, so the inner panel must not scroll on its own.
+    if (this.thread.agentMode === 'custom') {
+      Scroll() { this.content() }.width('100%').height('100%').scrollBar(BarState.Auto)
+    } else {
+      this.content()
+    }
   }
 }

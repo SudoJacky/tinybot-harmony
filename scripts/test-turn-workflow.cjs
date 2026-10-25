@@ -184,13 +184,13 @@ firstThought.disclosure.open = true; firstThought.disclosure.limit = 8000;
 processData.steps[0] = step('', [{ ...tool('one', 'complete'), output: 'latest' }, tool('two', 'failed')], '最新思考');
 processData.steps.push(step('', [], '下一步思考')); processMessage.update(processData);
 processView.flush();
-assert.equal(firstThought.content, '最新思考');
+assert.equal(firstThought.step.reasoningContent, '最新思考');
 assert.equal(firstThought.disclosure.open, true, 'Live updates preserve an explicitly opened thought');
 assert.equal([...processView.children.values()].find(child => child instanceof ToolRow && child.execution.call.id === 'one'), firstTool);
 assert.equal(firstTool.execution.output, 'latest');
 assert.equal([...processView.children.values()].filter(child => child instanceof ToolRow).length, 2);
 const nextThought = [...processView.children.values()].find(child => child instanceof ThinkingDisclosure && child.identity === 'turn-1');
-assert.equal(nextThought.content, '下一步思考'); assert.equal(nextThought.disclosure.open, false);
+assert.equal(nextThought.step.reasoningContent, '下一步思考'); assert.equal(nextThought.disclosure.open, false);
 assert.equal(nextThought.streaming, true); assert.equal(firstThought.streaming, false);
 const preview = tool('preview', 'complete'); preview.call.function.name = 'publish_data_view';
 processData.steps[1].tools.push(preview); processMessage.update(processData);
@@ -213,7 +213,11 @@ assert.equal(richNested[0].callId, 'nested-chart');
 const thoughtSource = path.join(root, 'views/ThinkingDisclosure.ets');
 const thoughtEmitted = emitted.replace(/MessageBubble\.ts$/, 'ThinkingDisclosure.ts');
 assert.ok(fs.statSync(thoughtEmitted).mtimeMs >= fs.statSync(thoughtSource).mtimeMs, 'Build thought component before testing');
-const thoughtTree = ts.createSourceFile(thoughtEmitted, fs.readFileSync(thoughtEmitted, 'utf8'), ts.ScriptTarget.Latest, true);
+const thoughtText = fs.readFileSync(thoughtEmitted, 'utf8');
+assert.match(thoughtText, /this\.step\.reasoningContent/, 'The thought line observes the step reasoning directly');
+assert.match(thoughtText, /scrollEdge\(Edge\.End\)/, 'The live thought line advances to its newest words');
+assert.match(thoughtText, /ScrollDirection\.Horizontal/, 'The live thought line scrolls inside one row');
+const thoughtTree = ts.createSourceFile(thoughtEmitted, thoughtText, ts.ScriptTarget.Latest, true);
 const thoughtComponent = thoughtTree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'ThinkingDisclosure');
 const rowUi = new Proxy({}, { get: (_target, name) => value => {
   const node = activeView.rows.get(activeElement) || {}; node[name] = value; activeView.rows.set(activeElement, node);
@@ -221,12 +225,15 @@ const rowUi = new Proxy({}, { get: (_target, name) => value => {
 const transition = { combine() { return this; }, animation() { return this; } };
 Object.assign(context, { Row: rowUi, Blank: noUi, Stack: noUi, SymbolGlyph: noUi, TextOverflow: {}, Alignment: {},
   Context: noUi, ThinkingLine: class extends Child {}, TransitionEffect: { OPACITY: transition, translate() {} } });
+const thoughtMethods = ['initialRender', 'lineText', 'scrollLineEnd'].map(name =>
+  thoughtComponent.members.find(n => n.name?.getText(thoughtTree) === name).getText(thoughtTree)).join('\n');
 vm.runInNewContext(ts.transpileModule(`class ThoughtProbe extends RenderView {
-  ${thoughtComponent.members.find(n => n.name?.getText(thoughtTree) === 'initialRender').getText(thoughtTree)}
+  ${thoughtMethods}
 } exports.ThoughtProbe = ThoughtProbe;`, { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, context);
 const thoughtDisclosure = new DisclosureStore().get('thought');
 function mountThought() {
-  const view = Object.assign(new context.exports.ThoughtProbe(), { content: '思'.repeat(5100), identity: 'thought', streaming: false,
+  const view = Object.assign(new context.exports.ThoughtProbe(), { step: { reasoningContent: '思'.repeat(5100) },
+    identity: 'thought', streaming: false,
     disclosure: thoughtDisclosure, appearance: {}, onInspect() {}, getUIContext: () => ({ animateTo: (_options, update) => update() }) });
   view.initialRender(); return view;
 }
@@ -238,7 +245,7 @@ thoughtToggle.onClick(); thoughtView.flush();
 assert.equal(thoughtDisclosure.open, true); assert.equal(thoughtBody().create.length, 4000);
 [...thoughtView.texts.values()].find(node => node.id === 'thinking-more-thought').onClick(); thoughtView.flush();
 assert.equal(thoughtBody().create.length, 5100);
-thoughtView.content = '更新后的思考'; thoughtView.flush(); assert.equal(thoughtBody().create, '更新后的思考');
+thoughtView.step.reasoningContent = '更新后的思考'; thoughtView.flush(); assert.equal(thoughtBody().create, '更新后的思考');
 thoughtToggle.onClick(); thoughtView.flush(); assert.equal(thoughtDisclosure.open, false);
 assert.ok(![...mountThought().texts.values()].some(node => node.id === 'thinking-content-thought'), 'Remount preserves explicit collapse');
 thoughtToggle.onClick(); assert.equal(thoughtDisclosure.limit, 8000, 'Reopening retains the reading limit');
