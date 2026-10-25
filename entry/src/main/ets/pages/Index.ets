@@ -568,8 +568,9 @@ struct Index {
     } else if (name === 'support') {
       NavDestination() {
         SupportPanel({ page: param as string,
-          onOpen: (page: string) => this.openSupport(page) })
-      }.title(supportTitle(param as string), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+          onOpen: (page: string) => this.openSupport(page), onClose: () => { this.paths.pop(); } })
+      }.title(supportTitle(param as string), { systemMaterial: this.appearance.control })
+        .hideTitleBar((param as string) === 'feedback').backgroundColor($r('app.color.page_background'))
     } else if (name === 'user-document') {
       NavDestination() {
         UserDocumentPanel({ app: this.app, settings: this.app.settings, onSaved: () => { this.paths.pop(); } })

@@ -25,6 +25,7 @@ devecocli build
 | `test-workspace-backup-ui.cjs` | 编译后文件页的失败保存、内容无法预览时导出原始备份、重试与新文件状态 | 是 |
 | `test-huawei-account.cjs` | 登录/取消、错误码脱敏、重启恢复、账号切换、退出与迟到回调、存储失败、未登录请求拦截 | 否 |
 | `test-app-information.cjs` | 实际评分入口打开当前应用写评论页、重复点击、跳转或包信息读取失败提示与重试 | 否 |
+| `test-feedback.cjs` | 匿名身份、UTF-16 限制、组合分页、已读、限流与恢复；附件上传、部分成功、超时核对、鉴权下载删除；最近 15 分钟日志缓冲、条数/字节边界、直接打包附加、选中状态同步与取消勾选，无日志检查弹窗；加 `--ui` 验证编译后的页面回调 | `--ui` 需 Debug 构建 |
 | `test-developer-diagnostics.cjs` | 诊断采集、导出与生命周期 | 否 |
 | `test-unified-logging.cjs` | 日志级别、脱敏、导出与禁用路径 | 否 |
 | `test-browser.cjs` | 浏览器权限、接管与运行暂停 | 否 |

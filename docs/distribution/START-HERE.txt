@@ -22,6 +22,7 @@ licenses/：工程 Apache-2.0 和随包第三方许可证。
 policies/：随包用户协议原文；隐私政策使用华为托管。
 RELEASE-NOTES.txt、STORE-LISTING.txt、CLOUD-TEST.txt、RELEASE-GAPS.txt：版本文案与验证资料。
 PRIVACY-DRAFT.txt：指向应用实际使用的政策文件，替代旧版独立草稿。
+ACL-APPLICATION.txt：FILE_ACCESS_PERSIST 权限用途、平台问题说明、审核操作路径与授权后检查步骤。
 package-info.json、SHA256SUMS.txt：从实际包读取的元数据、文件大小、原生 Build ID 和 SHA-256。
 
 二、本地生成
