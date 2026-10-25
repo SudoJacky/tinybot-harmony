@@ -12,7 +12,8 @@ interface ChildReference { callId: string; tool: string; status: string; }
 interface ExecutionStatus { status: string; calls?: ChildReference[]; }
 interface CatalogEntry { name: string; description: string; parameters: Object; }
 const NESTED_TOOLS: string[] = ['find_files', 'list_files', 'read_file', 'read_attachment', 'search_file_content',
-  'write_file', 'edit_file', 'read_web', 'search_web', 'read_reference', 'read_skill', 'mcp_list_tools', 'mcp_search_tools', 'mcp_call'];
+  'write_file', 'edit_file', 'read_web', 'search_web', 'read_reference', 'read_skill', 'mcp_list_tools', 'mcp_search_tools', 'mcp_call',
+  'execute_code', 'publish_preview', 'present_files'];
 
 // Wrap the final policy-filtered catalog, outside any TeamToolLane. Only children enter that lane.
 export class OrchestrationTools implements AgentTools {
@@ -34,6 +35,9 @@ export class OrchestrationTools implements AgentTools {
         'These helpers do not cancel tasks; consume all outcomes or await remaining calls before returning. ' +
         'text(value) appends a string or JSON to stdout; console logs are also captured (32 KiB combined, truncation flagged). ' +
         'Logs arrive with the final tool receipt, not live. Return the final JSON summary explicitly. ' +
+        'For charts, tables and other visualizations, await computation checks and source file writes before publish_preview; ' +
+        'return their receipts including reference, then copy references as standalone lines in the final answer to insert previews. ' +
+        'No live preview is displayed during tool execution. Use present_files when source delivery is needed. Prepared child previews and screenshots are preserved even if later work fails. ' +
         'Tool failures reject; report partial failures explicitly. ' +
         'No direct network, filesystem, modules, timers or nested orchestration. Permissions and MCP approvals still apply. ' +
         'Limits: 32 calls, 4 active host tools, 2 seconds script computation, 120 seconds elapsed, 32 MiB JS memory, 1 MiB result. ' +

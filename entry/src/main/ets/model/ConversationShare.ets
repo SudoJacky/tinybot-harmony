@@ -1,6 +1,8 @@
 import { ThreadData, MessageData } from './Conversation';
 import { ProviderProfile } from './ProviderProfiles';
 import { t } from './I18n';
+import { AgentStep } from './Agent';
+import { previewReferenceParts, previewReferenceTargets } from './PreviewReferences';
 
 export interface ConversationShareData {
   thread: ThreadData;
@@ -17,7 +19,11 @@ export function sharingMessages(messages: MessageData[]): MessageData[] {
       const last = steps[steps.length - 1];
       body = last && !last.tools.length ? last.content : '';
     }
-    return { id: message.id, role: message.role, content: body, status: message.status, error: '',
+    const referenced = previewReferenceParts(body).filter((part) => part.kind === 'preview').map((part) => part.previewId);
+    const previews = previewReferenceTargets(message.steps || []).filter((target) => referenced.includes(target.previewId));
+    // Keep only referenced artifact metadata for static image export, never process narration or unrelated tool results.
+    const steps: AgentStep[] | undefined = previews.length ? [{ content: '', tools: previews.map((target) => target.tool) }, { content: body, tools: [] }] : undefined;
+    return { id: message.id, role: message.role, content: body, status: message.status, error: '', steps: steps,
       attachments: message.attachments, modelRef: message.modelRef };
   }).filter((message) => message.content.trim().length > 0 || (message.attachments?.length || 0) > 0);
 }
@@ -32,9 +38,15 @@ export function selectedConversation(thread: ThreadData, ids: string[]): ThreadD
 
 export function conversationMarkdown(thread: ThreadData): string {
   return '# ' + thread.title + '\n\n' + sharingMessages(thread.messages).map((message) =>
-    '## ' + (message.role === 'user' ? t('用户') : 'Tinybot') + '\n\n' + message.content +
+    '## ' + (message.role === 'user' ? t('用户') : 'Tinybot') + '\n\n' + markdownPreviewText(message) +
     (message.attachments?.length ? t('\n\n附件：') + message.attachments.map((file) => file.name).join('、') : '')
   ).join('\n\n') + '\n\n---\n\nTinybot · ' + t('含 AI 生成内容') + '\n\n' + t('AI生成内容可能有误，请仔细鉴别。') + '\n';
+}
+function markdownPreviewText(message: MessageData): string {
+  if (message.role !== 'assistant') { return message.content; }
+  const targets = previewReferenceTargets(message.steps || []);
+  return previewReferenceParts(message.content).map((part) => part.kind === 'text' ? part.content :
+    '[' + (targets.find((target) => target.previewId === part.previewId)?.title || 'Preview unavailable') + ']\n').join('');
 }
 
 export function conversationFileName(title: string, extension: string): string {

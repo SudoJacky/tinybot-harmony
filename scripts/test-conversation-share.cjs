@@ -13,7 +13,8 @@ function load(name) {
   const exports = {}; cache.set(name, exports);
   const source = fs.readFileSync(path.join(root, 'entry/src/main/ets/model', name + '.ets'), 'utf8');
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText,
-    { exports, require: id => load(id.replace('./', '')), Uint8Array, ArrayBuffer, DataView });
+    { exports, require: id => load(path.posix.normalize(path.posix.join(path.posix.dirname(name), id))),
+      Observed: cls => cls, Uint8Array, ArrayBuffer, DataView });
   return exports;
 }
 const emitted = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/views/ConversationSharePanel.ts');

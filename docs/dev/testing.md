@@ -66,6 +66,7 @@ hdc rport tcp:18770 tcp:18770
 | `test-history-drawer.cjs` | 侧栏关闭动画、拖动与中断恢复 | 是 |
 | `test-harness-features.cjs` | 搜索、交付、引用与运行时可靠性 | 否 |
 | `test-preview-publication.cjs` | 预览发布集成 | 否 |
+| `test-preview-references.cjs` | 真实发布与最终引用修复、流式/停止门禁、历史兼容、快照恢复、原位静态导出和无外框样式 | 是 |
 | `test-preview-lifecycle.cjs` | 预览资源与惰性生命周期 | 是 |
 | `test-turn-workflow.cjs` | 流式时间线投影与保留的过程行 | 是 |
 | `test-resources.cjs` | 资源管理集成 | 否 |
@@ -74,7 +75,7 @@ hdc rport tcp:18770 tcp:18770
 | `test-context-usage.cjs` | 上下文预算与用量 | 否 |
 | `test-memory.cjs` | 记忆候选、来源与保存失败回滚 | 否 |
 | `test-code-sandbox.cjs` | 沙箱执行、限额与恢复 | 否 |
-| `test-orchestration.cjs` | 编排子调用、串行边界与回执 | 否 |
+| `test-orchestration.cjs` | 编排子调用、串行边界与回执；计算/写文件/预览/CSV/交付闭环，旧图表入口拒绝、历史图表恢复与导出，截图回传、失败修复、部分成功、取消与权限 | 否 |
 | `test-tool-details.cjs` | 分类回执、失败状态与无损分页 | 否 |
 | `test-window-viewport.cjs` | 窗口与视口尺寸 | 是 |
 | `test-answer-speech-native.cjs` | 回答朗读分段、取消、后台释放 | 是 |

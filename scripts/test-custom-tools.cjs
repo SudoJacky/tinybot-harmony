@@ -51,8 +51,9 @@ function fixture(data = seed()) {
   f.calls = calls; return f;
 }
 async function main() {
-  assert.equal(all.length, 39); assert.equal(new Set(all).size, 39); assert.equal(BASIC_FILE_TOOLS.length, 6);
-  assert.equal(optional.length, 29);
+  assert.equal(all.length, 38); assert.equal(new Set(all).size, 38); assert.equal(BASIC_FILE_TOOLS.length, 6);
+  assert.equal(optional.length, 28);
+  assert.ok(!all.includes('publish_data_view'));
   assert.ok(!all.includes('generate_image'));
   const removed = seed(); removed.productivity.options.image = {providerId:'old', modelId:'image'};
   removed.threads[0].agentMode = 'custom'; removed.threads[0].disabledTools = ['generate_image'];
@@ -71,7 +72,7 @@ async function main() {
     ['read_attachment', 'read_reference']);
   const covered = Array.from(TOOL_CAPABILITIES.flatMap(capability => capability.tools));
   assert.equal(TOOL_CAPABILITIES.length, 12);
-  assert.equal(new Set(covered).size, 29); assert.deepEqual(covered.slice().sort(), optional.slice().sort());
+  assert.equal(new Set(covered).size, 28); assert.deepEqual(covered.slice().sort(), optional.slice().sort());
   const obsolete = {agentMode:'custom', disabledTools:Array.from(MANAGED_TOOL_NAMES).concat(['generate_image', 'read_tool_result'])};
   validateToolSelection(obsolete);
   assert.deepEqual(Array.from(normalizeDisabledTools(obsolete.disabledTools)), []);
@@ -97,6 +98,11 @@ async function main() {
   const legacyData = seed(); legacyData.threads[0].agentMode = 'custom';
   legacyData.threads[0].disabledTools = ['browser_action','publish_data_view','team_complete_task','mcp_call',...MANAGED_TOOL_NAMES];
   const migrated = parseAppData(JSON.stringify(legacyData));
+  assert.ok(!migrated.threads[0].disabledTools.includes('publish_data_view'));
+  assert.ok(migrated.threads[0].disabledTools.includes('publish_preview'), 'Retired chart denial preserves the preview capability switch');
+  const retiredOnly = seed(); retiredOnly.threads[0].agentMode = 'custom';
+  retiredOnly.threads[0].disabledTools = ['publish_data_view'];
+  assert.deepEqual(Array.from(parseAppData(JSON.stringify(retiredOnly)).threads[0].disabledTools), ['publish_preview']);
   assert.deepEqual(Array.from(migrated.threads[0].disabledTools).sort(),
     Array.from(normalizeDisabledTools(legacyData.threads[0].disabledTools)).sort());
   const legacy = fixture(migrated), legacyApp = new ChatViewModel(); await legacyApp.initialize(legacy.session);

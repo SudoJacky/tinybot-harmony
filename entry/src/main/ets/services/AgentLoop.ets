@@ -15,6 +15,7 @@ import { executeToolBatch } from './ToolExecution';
 import { RepeatToolReminder } from './RepeatToolReminder';
 import { UiDiagnosticError, uiFailureReport } from '../model/UiRepair';
 import { requestWithRetry } from './RequestRetry';
+import { previewReferenceError } from '../model/PreviewReferences';
 
 export interface SteeringInput {
   peek: () => PendingInput | undefined;
@@ -181,13 +182,16 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
         step.uiValidation = uiFailureReport(new UiDiagnosticError('UNSUPPORTED_PREVIEW_FORMAT',
           'Inline tinybot-ui / JSONL answers are no longer supported. Write a .js, .html or .svg file and call publish_preview; use library="three" for Three.js.') as Error);
         validationFailures++;
-      } else { step.uiValidation = ''; }
+      } else {
+        step.uiValidation = step.tools.length === 0 ? previewReferenceError(turn.steps, response.content) : '';
+        if (step.uiValidation) { validationFailures++; }
+      }
       turn.content = turn.steps.filter((item) => !item.requestError && !item.uiValidation).map((item) => item.content).filter((content) => content.length > 0).join('\n\n');
       observer.event({ type: 'model_end', step: round });
       if (step.uiValidation) {
         for (const tool of step.tools) { tool.status = 'cancelled'; tool.output = toolError(new ToolFailure('NOT_EXECUTED', 'UI validation failed; this tool was not executed.', 'fix_interface')); }
       }
-      if (hasUi) { await observer.checkpoint(); cancellation.check(); }
+      if (step.uiValidation) { await observer.checkpoint(); cancellation.check(); }
       if (step.uiValidation && (validationFailures >= 3 || round === limit - 1)) {
         throw new Error('UI validation failed after repair attempts: ' + step.uiValidation);
       }

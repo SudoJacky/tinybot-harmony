@@ -1,4 +1,4 @@
-import { AgentStep } from './Agent';
+import { AgentStep, toolReceipts } from './Agent';
 
 export interface PresentedFile { path: string; description?: string; }
 interface DeliveryReceipt { files?: PresentedFile[]; }
@@ -6,8 +6,8 @@ interface DeliveryReceipt { files?: PresentedFile[]; }
 export function deliveredFiles(steps: AgentStep[]): PresentedFile[] {
   const files: PresentedFile[] = [];
   for (const step of steps) {
-    for (const tool of step.tools) {
-      // Children must be explicitly presented by the parent, in its own workspace.
+    for (const tool of toolReceipts(step.tools)) {
+      // Team-worker files must still be presented explicitly in this workspace.
       if (tool.call.function.name !== 'present_files' || tool.status !== 'complete') { continue; }
       let receipt: DeliveryReceipt;
       try { receipt = JSON.parse(tool.output) as DeliveryReceipt; }
