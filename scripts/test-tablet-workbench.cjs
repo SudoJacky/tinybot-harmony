@@ -27,24 +27,53 @@ function probe(file, name, methods, globals = {}) {
   }).outputText, { exports, ...globals });
   return exports.Probe;
 }
-for (const width of [320, 600, 839, 840, 960, 1199, 1200, 1600, 2400]) {
+const RAIL = WorkbenchLayout.RAIL_WIDTH;
+for (const width of [320, 600, 839, 840, 960, 979, 980, 1024, 1199, 1200, 1600, 2400]) {
   for (const details of [false, true]) {
     const layout = new WorkbenchLayout(width, details);
-    assert.equal(layout.docked, details && width >= 840);
+    if (width < 840) {
+      assert.equal(layout.historyWidth, 0, `Phone keeps no persistent history host at ${width} vp`);
+      assert.equal(layout.rail, false);
+      assert.equal(layout.docked, false);
+      assert.equal(layout.detailX, 0);
+      continue;
+    }
+    assert.equal(layout.docked, details);
+    assert.ok(layout.expanded || layout.rail, 'Tablet keeps either the full column or the rail');
+    assert.equal(layout.expanded, !layout.rail);
+    if (layout.rail) assert.equal(layout.historyWidth, RAIL);
+    else assert.ok(layout.historyWidth >= 264 && layout.historyWidth <= 420);
     if (layout.docked) {
-      const chat = width - layout.historyWidth - layout.detailWidth;
-      assert.ok(chat >= 480, `Chat remains usable at ${width} vp`);
+      assert.ok(layout.chatWidth >= 440, `Chat keeps its 440 vp minimum at ${width}`);
+      assert.ok(layout.detailWidth >= 300, `Detail keeps its 300 vp minimum at ${width}`);
+      assert.ok(layout.detailWidth <= width * 0.7 + 0.001, 'Detail stays inside the 70% cap');
       assert.equal(layout.detailX + layout.detailWidth, width);
     } else assert.equal(layout.detailX, 0);
   }
 }
 assert.equal(new WorkbenchLayout(839, false).historyWidth, 0);
 assert.equal(new WorkbenchLayout(840, false).historyWidth, 280);
-assert.equal(new WorkbenchLayout(1199, true).historyWidth, 0);
-assert.equal(new WorkbenchLayout(1200, true).historyWidth, 280);
-console.log('PASS phone, two-pane and three-pane boundaries, including constrained chat width');
+assert.equal(new WorkbenchLayout(840, true).rail, true, 'A docked pane turns the column into the rail');
+assert.equal(new WorkbenchLayout(840, true).historyWidth, RAIL);
+assert.equal(new WorkbenchLayout(1019, true).rail, true);
+assert.equal(new WorkbenchLayout(1020, true).rail, false, 'The column returns as soon as both panes fit');
+assert.equal(new WorkbenchLayout(1199, true).expanded, true);
+assert.equal(new WorkbenchLayout(1440, true).historyWidth, 280);
+assert.equal(new WorkbenchLayout(1440, true).rail, false);
+assert.equal(new WorkbenchLayout(900, true, true).canExpand, false);
+assert.equal(new WorkbenchLayout(900, false, false).rail, true, 'The rail survives without a docked pane');
+assert.equal(new WorkbenchLayout(1440, true, false).historyWidth, RAIL);
+assert.equal(new WorkbenchLayout(1440, true, true, 100).historyWidth, 264, 'History drag clamps low');
+assert.equal(new WorkbenchLayout(1440, true, true, 900).historyWidth, 420, 'History drag clamps high');
+assert.equal(new WorkbenchLayout(1440, true, true, 280, 2000).detailWidth, 720, 'Detail gives way to the chat minimum');
+assert.equal(new WorkbenchLayout(1440, true, true, 280, 2000).chatWidth, 440);
+assert.equal(new WorkbenchLayout(1440, true, true, 280, 2000).detailMaxWidth, 720);
+assert.equal(new WorkbenchLayout(1440, true, true, 280, 100).detailWidth, 300, 'Detail drag clamps low');
+assert.ok(new WorkbenchLayout(1440, true, true, 280).detailWidth > 300, 'First open picks a proportional width');
+console.log('PASS phone, rail, two-pane and three-pane boundaries, drag clamps and protected minimums');
 
-const Page = probe('pages/Index', 'Index', ['hasPreview', 'detailOpen', 'workbench', 'windowChanged', 'openFiles', 'openPreview', 'closePreview', 'previewPresenceChanged', 'onBackPress'], { WorkbenchLayout });
+const Page = probe('pages/Index', 'Index', ['hasPreview', 'detailOpen', 'workbench', 'windowChanged', 'openFiles', 'openPreview', 'closePreview', 'previewPresenceChanged', 'onBackPress',
+  'beginResize', 'resizeHistory', 'resizeDetail', 'endResize'], { WorkbenchLayout });
 const draft = { text: 'unsent input', attachments: ['image'] }, active = { id: 'thread', draft, messages: [] };
 const session = {}, browser = {};
 const page = Object.assign(new Page(), { app: { active }, session, browser, windowWidth: 0,
@@ -72,6 +101,33 @@ assert.equal(page.previewVisible, false); assert.equal(page.previewId, 'preview'
 page.previewPresenceChanged(false); assert.equal(page.previewId, '');
 console.log('PASS actual resize/open/back callbacks preserve draft, session and editor, and isolate previews');
 
+page.windowWidth = 1600; page.historyCollapsed = true;
+assert.equal(page.workbench().rail, true); assert.equal(page.workbench().historyWidth, 56);
+assert.equal(page.detailOpen(), true);
+page.historyCollapsed = false; assert.equal(page.workbench().expanded, true);
+page.historyPreferredWidth = 0; page.detailPreferredWidth = 0;
+page.beginResize(false); page.resizeHistory(80);
+assert.equal(page.workbench().historyWidth, 360);
+page.endResize(false); assert.equal(page.historyPreferredWidth, 360);
+page.beginResize(false); page.resizeHistory(-2000); page.endResize(false);
+assert.equal(page.workbench().historyWidth, 264);
+page.historyPreferredWidth = 0; page.windowWidth = 1020;
+page.beginResize(false); page.resizeHistory(400); page.endResize(false);
+assert.equal(page.workbench().expanded, true, 'A drag stops before it would collapse the column');
+assert.equal(page.workbench().historyWidth, 280);
+assert.equal(page.workbench().detailWidth, 300);
+assert.equal(page.workbench().chatWidth, 440);
+page.windowWidth = 1600;
+page.beginResize(true); page.resizeDetail(-2000);
+assert.equal(page.workbench().detailWidth, page.workbench().detailMaxWidth);
+assert.equal(page.workbench().chatWidth, 440);
+page.endResize(true); assert.equal(page.detailPreferredWidth, page.workbench().detailWidth);
+page.beginResize(true); page.resizeDetail(2000); page.endResize(true);
+assert.equal(page.workbench().detailWidth, 300);
+page.historyCollapsed = true;
+assert.equal(page.workbench().rail, true, 'Collapsing keeps the sheet state intact');
+console.log('PASS rail state, drag clamps and committed widths keep the chat and detail minima');
+
 // A narrow overlay defaults to the center of Stack; anchor the real emitted sidebar at the window origin.
 const drawerAttributes = {};
 const ui = new Proxy({}, { get: (_, name) => value => { drawerAttributes[name] = value; } });
@@ -83,6 +139,42 @@ Object.assign(new Drawer(), { workbench: () => new WorkbenchLayout(1440, true),
   observeComponentCreation2(callback) { if (first) { first = false; callback(1, true); } } }).drawer();
 assert.equal(drawerAttributes.width, 280); assert.equal(drawerAttributes.position.x, 0); assert.equal(drawerAttributes.position.y, 0);
 console.log('PASS emitted sidebar is anchored at the window origin rather than centered over chat');
+// With a rail host the drawer becomes an overlay again: full-width scrim host,
+// an 84% panel and no persistent right edge.
+let railFirst = true;
+Object.assign(new Drawer(), { workbench: () => new WorkbenchLayout(900, true),
+  observeComponentCreation2(callback) { if (railFirst) { railFirst = false; callback(1, true); } } }).drawer();
+assert.equal(drawerAttributes.width, '100%');
+console.log('PASS emitted drawer falls back to the overlay host beside the rail');
+
+// Rail composition: the six desktop actions, in top-to-bottom order, each wired
+// to the callback the page handed to the rail.
+const railProps = [];
+class RailButtonStub { constructor(parent, params) { this.params = params; railProps.push(params); } }
+const railUi = new Proxy({}, { get: () => () => {} });
+const railGlobals = {
+  Stack: railUi, Column: railUi, Blank: railUi, Button: railUi, SymbolGlyph: railUi,
+  ViewPU: { create() {} }, ViewStackProcessor: { visualState() {} }, HorizontalAlign: { Center: 0 },
+  SafeAreaType: { SYSTEM: 0 }, SafeAreaEdge: { TOP: 0, BOTTOM: 1 }, HitTestMode: { None: 0 },
+  Color: { Transparent: 0 }, ButtonType: { Normal: 0 }, t: value => value, $r: value => value,
+  RailButton: RailButtonStub
+};
+const Rail = probe('views/HistoryRail', 'HistoryRail', ['initialRender'], railGlobals);
+const actions = [];
+const rail = Object.assign(new Rail(), {
+  appearance: { accentContainer: 1, accent: 2 }, active: true, filesActive: true,
+  onExpand: () => actions.push('expand'), onNewChat: () => actions.push('new'), onSearch: () => actions.push('search'),
+  onFiles: () => actions.push('files'), onTools: () => actions.push('tools'), onSettings: () => actions.push('settings'),
+  observeComponentCreation2(callback) { callback(1, true); }
+});
+rail.initialRender();
+assert.deepEqual(railProps.map((button) => button.compId), ['workbench-rail-expand', 'workbench-rail-new-chat',
+  'workbench-rail-search', 'workbench-rail-files', 'workbench-rail-tools', 'workbench-rail-settings']);
+for (const button of railProps) { button.onTap(); }
+assert.deepEqual(actions, ['expand', 'new', 'search', 'files', 'tools', 'settings']);
+assert.equal(railProps[3].active, true, 'The open files pane marks its rail control');
+assert.equal(railProps[0].label, '展开会话列表');
+console.log('PASS emitted rail keeps six desktop actions in order and forwards each tap');
 
 const dialogs = [], toasts = [];
 const Editor = probe('views/WorkspacePanel', 'WorkspacePanel', ['dirty', 'fileName', 'leave', 'requestClose', 'backRequested', 'openRequested', 'reference'], { t: value => value, $r: value => value });

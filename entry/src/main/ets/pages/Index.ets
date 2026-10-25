@@ -53,6 +53,8 @@ import { Diagnostics } from '../model/Diagnostics';
 import { WorkbenchLayout } from '../model/WorkbenchLayout';
 import { PreviewPanel } from '../views/PreviewPanel';
 import { AnimatedPage } from '../common/AnimatedPage';
+import { HistoryRail } from '../views/HistoryRail';
+import { PaneDivider } from '../common/PaneDivider';
 
 const DRAWER_MAX_WIDTH: number = 340;
 const CHAT_HEADER_HEIGHT: number = 56;
@@ -83,6 +85,12 @@ struct Index {
   @State private drawerOpen: boolean = false;
   @State private drawerContentActive: boolean = false;
   private drawerAnimation: number = 0;
+  // History column preference: collapsed shows the rail, the width only changes on drag.
+  @State private historyCollapsed: boolean = false;
+  @State private historyPreferredWidth: number = 0;
+  @State private detailPreferredWidth: number = 0;
+  @State private historySearchRequest: number = 0;
+  private resizeBase: number = 0;
   @State private chatVisible: boolean = true;
   @State private headerProgress: number = 0;
   @State private drawerReveal: number = 0;
@@ -295,7 +303,59 @@ struct Index {
   private closeBrowser(): void {
     this.browser.takeOver(); this.browserClosing = true; this.setBrowserExpanded(false);
   }
-  private workbench(): WorkbenchLayout { return new WorkbenchLayout(this.windowWidth, this.detailOpen()); }
+  private workbench(): WorkbenchLayout {
+    return new WorkbenchLayout(this.windowWidth, this.detailOpen(), !this.historyCollapsed,
+      this.historyPreferredWidth, this.detailPreferredWidth);
+  }
+
+  // The rail expands the column only when it still fits; otherwise it reveals the
+  // overlay drawer, so history keeps working on a narrow split-screen window.
+  private toggleHistory(): void {
+    if (this.workbench().expanded) { this.setHistoryCollapsed(true); }
+    else if (this.workbench().canExpand) { this.setHistoryCollapsed(false); }
+    else { this.setDrawer(true); }
+  }
+
+  private setHistoryCollapsed(collapsed: boolean): void {
+    if (this.historyCollapsed === collapsed) { return; }
+    this.getUIContext().animateTo({ duration: Motion.medium, curve: Motion.standard }, () => {
+      this.historyCollapsed = collapsed;
+    });
+  }
+
+  // One tap from the rail opens the overlay drawer with the search field focused.
+  private openHistorySearch(): void {
+    this.setDrawer(true);
+    this.historySearchRequest++;
+  }
+
+  private beginResize(detail: boolean): void {
+    this.resizeBase = detail ? this.workbench().detailWidth : this.workbench().historyWidth;
+  }
+
+  private resizeHistory(dx: number): void {
+    // Growing the column must not make the docked pane impossible: unlike the
+    // desktop frame there is no second track to renegotiate, so stop at the width
+    // where both remaining panes keep their minima instead of collapsing mid-drag.
+    const layout = this.workbench();
+    const limit = layout.docked
+      ? layout.width - WorkbenchLayout.CHAT_MIN - WorkbenchLayout.DETAIL_MIN : WorkbenchLayout.HISTORY_MAX;
+    this.historyPreferredWidth = Math.max(WorkbenchLayout.HISTORY_MIN,
+      Math.min(WorkbenchLayout.HISTORY_MAX, limit, this.resizeBase + dx));
+  }
+
+  private resizeDetail(dx: number): void {
+    const layout = this.workbench();
+    this.detailPreferredWidth = Math.max(WorkbenchLayout.DETAIL_MIN,
+      Math.min(layout.detailMaxWidth, this.resizeBase - dx));
+  }
+
+  // Commit the clamped result so the next window resize does not replay the raw drag.
+  private endResize(detail: boolean): void {
+    if (detail) { this.detailPreferredWidth = this.workbench().detailWidth; }
+    else { this.historyPreferredWidth = this.workbench().historyWidth; }
+  }
+
   private windowChanged(width: number): void {
     if (width <= 0 || width === this.windowWidth) { return; }
     this.windowWidth = width;
@@ -386,7 +446,7 @@ struct Index {
   }
 
   private startDrawerDrag(event: GestureEvent, fromChat: boolean = false): void {
-    if (this.workbench().historyWidth > 0 || !this.app.ready || (fromChat && (this.drawerOpen || event.offsetX <= 0 ||
+    if (this.workbench().expanded || !this.app.ready || (fromChat && (this.drawerOpen || event.offsetX <= 0 ||
       event.offsetX <= Math.abs(event.offsetY) * 1.5))) { return; }
     this.getUIContext().getFocusController().clearFocus();
     this.drawerDragStart = this.drawerReveal;
@@ -783,30 +843,32 @@ struct Index {
       Column()
         .width('100%').height('100%').backgroundColor($r('app.color.scrim'))
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-        .opacity(this.workbench().historyWidth > 0 ? 0 : this.drawerReveal)
-        .hitTestBehavior(this.workbench().historyWidth > 0 ? HitTestMode.None : HitTestMode.Default)
+        .opacity(this.workbench().expanded ? 0 : this.drawerReveal)
+        .hitTestBehavior(this.workbench().expanded ? HitTestMode.None : HitTestMode.Default)
         .onClick(() => this.setDrawer(false))
       Stack() {
         Column().width('100%').height('100%').backgroundColor($r('app.color.page_background'))
-          .borderRadius({ topRight: this.workbench().historyWidth > 0 ? 0 : 20, bottomRight: this.workbench().historyWidth > 0 ? 0 : 20 })
+          .borderRadius({ topRight: this.workbench().expanded ? 0 : 20, bottomRight: this.workbench().expanded ? 0 : 20 })
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         ThreadList({ app: this.app, workbench: this.windowWidth >= 840,
+          collapseHistory: this.workbench().expanded, searchRequest: this.historySearchRequest,
+          onCollapseHistory: () => this.setHistoryCollapsed(true),
           onNewChat: () => { this.createChat(); this.setDrawer(false); }, onTools: () => { this.setDrawer(false); this.openTools('memory'); },
-          active: this.workbench().historyWidth > 0 || this.drawerContentActive, onSelected: () => this.setDrawer(false), onFiles: () => { this.setDrawer(false); this.openFiles(); }, onSettings: () => {
+          active: this.workbench().expanded || this.drawerContentActive, onSelected: () => this.setDrawer(false), onFiles: () => { this.setDrawer(false); this.openFiles(); }, onSettings: () => {
           this.setDrawer(false);
           this.openSettings();
         } })
       }
-      .width(this.workbench().historyWidth > 0 ? this.workbench().historyWidth : '84%').constraintSize({ maxWidth: DRAWER_MAX_WIDTH }).height('100%')
+      .width(this.workbench().expanded ? this.workbench().historyWidth : '84%').constraintSize({ maxWidth: DRAWER_MAX_WIDTH }).height('100%')
       .id('history-drawer')
-      .translate({ x: this.workbench().historyWidth > 0 ? 0 : (this.drawerReveal - 1) * this.drawerWidth })
+      .translate({ x: this.workbench().expanded ? 0 : (this.drawerReveal - 1) * this.drawerWidth })
       .onAreaChange((_old: Area, next: Area) => { this.drawerWidth = Math.max(1, next.width as number); })
-    }.width(this.workbench().historyWidth > 0 ? this.workbench().historyWidth : '100%').height('100%')
+    }.width(this.workbench().expanded ? this.workbench().historyWidth : '100%').height('100%')
     .position({ x: 0, y: 0 })
-    .border({ width: { right: this.workbench().historyWidth > 0 ? 0.5 : 0 }, color: $r('app.color.divider') })
-    .hitTestBehavior(this.workbench().historyWidth > 0 || this.drawerOpen || this.drawerDragging ? HitTestMode.Default : HitTestMode.None)
-    .enabled(this.workbench().historyWidth > 0 || this.drawerOpen || this.drawerDragging)
-    .accessibilityLevel(this.workbench().historyWidth > 0 || this.drawerOpen || this.drawerDragging ? 'auto' : 'no-hide-descendants')
+    .border({ width: { right: this.workbench().expanded ? 0.5 : 0 }, color: $r('app.color.divider') })
+    .hitTestBehavior(this.workbench().expanded || this.drawerOpen || this.drawerDragging ? HitTestMode.Default : HitTestMode.None)
+    .enabled(this.workbench().expanded || this.drawerOpen || this.drawerDragging)
+    .accessibilityLevel(this.workbench().expanded || this.drawerOpen || this.drawerDragging ? 'auto' : 'no-hide-descendants')
     .gesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Horizontal, distance: 8 })
       .onActionStart((event: GestureEvent) => this.startDrawerDrag(event))
       .onActionUpdate((event: GestureEvent) => this.updateDrawerDrag(event))
@@ -846,7 +908,18 @@ struct Index {
       ForEach([this.locale], (_locale: string) => {
     Stack() {
     Row() {
-    Column().width(this.workbench().historyWidth).height('100%')
+    if (this.workbench().rail) {
+      HistoryRail({ active: this.app.ready, filesActive: this.workspaceOpen && !this.browserExpanded && !this.previewVisible,
+        onExpand: () => this.toggleHistory(),
+        onNewChat: () => { this.createChat(); this.setDrawer(false); },
+        onSearch: () => this.openHistorySearch(),
+        onFiles: () => this.openFiles(),
+        onTools: () => this.openTools('memory'),
+        onSettings: () => this.openSettings() })
+        .width(this.workbench().historyWidth).height('100%')
+    } else {
+      Column().width(this.workbench().historyWidth).height('100%')
+    }
     Navigation(this.paths) {
       Stack() {
         // Render the capture card at chat width behind the opaque page.
@@ -906,6 +979,24 @@ struct Index {
     // Cover both the navigation title bar and content, keeping the measured drawer mounted.
     if (this.app.ready) {
       this.drawer()
+    }
+    // Draggable seams sit above the drawer layer: the persistent column and the
+    // overlay drawer never coexist, so a grip here can never steal a list tap.
+    if (this.app.ready && this.workbench().expanded) {
+      PaneDivider({ label: t('调整会话栏宽度'),
+        onResizeStart: () => this.beginResize(false),
+        onResize: (dx: number) => this.resizeHistory(dx),
+        onResizeEnd: () => this.endResize(false) })
+        .width(12).height('calc(100% - 12vp)')
+        .position({ x: this.workbench().historyWidth - 4, y: 6 })
+    }
+    if (this.app.ready && this.workbench().docked && !this.drawerOpen && !this.drawerDragging && this.drawerReveal <= 0) {
+      PaneDivider({ label: t('调整侧区宽度'),
+        onResizeStart: () => this.beginResize(true),
+        onResize: (dx: number) => this.resizeDetail(dx),
+        onResizeEnd: () => this.endResize(true) })
+        .width(12).height('calc(100% - 12vp)')
+        .position({ x: this.workbench().detailX - 8, y: 6 })
     }
     }.width('100%').height('100%')
       }, (locale: string) => locale)

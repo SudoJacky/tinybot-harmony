@@ -171,7 +171,12 @@ struct ThreadRow {
 export struct ThreadList {
   @Prop active: boolean = true;
   @Prop workbench: boolean = false;
+  // The persistent workbench column can collapse itself into the rail; the overlay
+  // drawer cannot, so it omits the control.
+  @Prop collapseHistory: boolean = false;
+  @Prop @Watch('searchRequested') searchRequest: number = 0;
   @State private searchOpen: boolean = false;
+  onCollapseHistory: () => void = () => {};
   onNewChat: () => void = () => {};
   onTools: () => void = () => {};
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
@@ -191,6 +196,18 @@ export struct ThreadList {
   @State private projectInstructions: string = '';
   @State private projectFolders: SharedFolder[] = [];
   @State private projectFolderError: string = '';
+
+  // The rail's search control opens this sidebar already in search mode. The
+  // field mounts in the same frame as the drawer content, so focus follows one
+  // short turn later instead of racing the initial layout.
+  private searchRequested(): void {
+    this.searchOpen = true;
+    setTimeout(() => {
+      if (!this.searchOpen || !this.active) { return; }
+      try { this.getUIContext().getFocusController().requestFocus('search-threads'); }
+      catch (_) { /* The drawer may have closed while the focus request was queued. */ }
+    }, 80);
+  }
 
   private filtered(): ThreadViewModel[] {
     return this.app.filteredThreads(this.query, this.archived);
@@ -474,6 +491,10 @@ export struct ThreadList {
           IconButton({ icon: $r('sys.symbol.folder_badge_plus'), label: t('新建项目'), compId: 'project-create',
             disabled: this.app.busy || !!this.app.saveError, onTap: () => this.editProject() })
         }
+        } else if (this.collapseHistory) {
+          // Desktop parity: the panel toggle lives in the sidebar's logo row.
+          IconButton({ icon: $r('sys.symbol.line_3_horizontal'), label: t('收起会话栏'), compId: 'workbench-collapse-history',
+            diameter: 36, iconSize: 18, onTap: this.onCollapseHistory })
         }
       }.width('100%').height(48).padding({ left: 4 })
       if (this.workbench) { this.workbenchNavigation() }
