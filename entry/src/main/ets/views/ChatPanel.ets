@@ -10,6 +10,7 @@ import { LaunchActions } from '../services/LaunchActions';
 import { supportsReasoningEffort, reasoningEfforts, reasoningEffortName, isHighestReasoningEffort } from '../model/ReasoningEffort';
 import { ComposerGlow } from '../common/ComposerGlow';
 import { ReasoningEffortPicker } from './ReasoningEffortPicker';
+import { ModelPickerPanel } from './ModelPickerPanel';
 import { SpeechInput } from '../services/SpeechInput';
 import { DictationDraft } from '../model/DictationDraft';
 import { VoiceHoldButton } from '../common/VoiceHoldButton';
@@ -69,7 +70,6 @@ export struct ChatPanel {
   @Prop topInset: number = 0;
   @Prop workbench: boolean = false;
   @State private panelHeight: number = 0;
-  onModels: () => void = () => {};
   onToolScope: () => void = () => {};
   onHeaderProgress: (progress: number) => void = () => {};
   private lastHeaderProgress: number = -1;
@@ -94,6 +94,7 @@ export struct ChatPanel {
   onBrowser: () => void = () => {};
   @State private importing: boolean = false;
   @State private showPlus: boolean = false;
+  @State private showModelMenu: boolean = false;
   @State private showDrawing: boolean = false;
   @State private drawingDraft: DrawingDraft = new DrawingDraft();
   private drawingThreadId: string = '';
@@ -426,7 +427,8 @@ export struct ChatPanel {
   private composerExpanded(): boolean {
     if (this.voiceMode) { return false; }
     return this.workbench || this.composerFocused || this.app.draft.length > 0 || this.hasDraft() || this.importing || this.speechActive() ||
-      this.app.generating || this.thread.pendingInputs.length > 0 || this.showPlus || this.showContext || this.showReasoning || this.showQueue;
+      this.app.generating || this.thread.pendingInputs.length > 0 || this.showPlus || this.showContext || this.showReasoning ||
+      this.showModelMenu || this.showQueue;
   }
 
   private canSend(): boolean {
@@ -1072,6 +1074,32 @@ export struct ChatPanel {
       } })
   }
 
+  // Desktop parity: the model seat opens a card above the composer instead of
+  // leaving the conversation. Compact keeps the same grouped, searchable list in
+  // a bounded popup with clear rows for touch.
+  @Builder
+  modelMenu() {
+    Column() {
+      ModelPickerPanel({ app: this.app, compact: true,
+        onSelected: () => { this.showModelMenu = false; },
+        onSettings: () => { this.showModelMenu = false; this.onSettings(); } })
+    }.width(340).height(this.modelMenuHeight()).borderRadius(20).clip(true)
+  }
+
+  // Size the card to the catalog instead of reserving a full menu's height: two
+  // models must not leave a blank half-screen, and a long catalog still scrolls.
+  private modelMenuHeight(): number {
+    const choices = this.app.modelChoices;
+    if (choices.length === 0) { return 260; }
+    const providers: string[] = [];
+    for (const choice of choices) {
+      if (!providers.includes(choice.providerId)) { providers.push(choice.providerId); }
+    }
+    const rows = Math.min(choices.length, 8);
+    const base = 62 + providers.length * 26 + rows * 46 + (this.app.error.length > 0 ? 56 : 0);
+    return Math.min(380, Math.max(180, base));
+  }
+
   private reasoningKey(): string {
     return JSON.stringify([this.thread.id, this.thread.modelRef?.providerId || '', this.thread.modelRef?.modelId || '',
       this.app.providerProfiles.find((item) => item.id === this.thread.modelRef?.providerId)?.protocol || '']);
@@ -1232,13 +1260,26 @@ export struct ChatPanel {
         if (this.workbench) {
           Button() {
             Row({ space: 4 }) {
-              Text(this.thread.modelRef?.modelId || t('选择模型')).fontSize(12).maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+              Text(this.thread.modelRef?.modelId || t('选择模型')).fontSize(13).maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis }).constraintSize({ maxWidth: 170 })
               SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(9).fontColor([$r('app.color.text_secondary')])
-            }.width('100%')
-          }.id('workbench-model-picker').width(138).height(36).padding({ left: 8, right: 8 }).borderRadius(18)
+                .rotate({ angle: this.showModelMenu ? 180 : 0 })
+                .animation({ duration: Motion.fast, curve: Motion.standard })
+            }.padding({ left: 8, right: 8 })
+          }.id('workbench-model-picker').height(36).borderRadius(18)
+            .constraintSize({ minWidth: 96, maxWidth: 220 })
             .backgroundColor(Color.Transparent).fontColor($r('app.color.text_secondary'))
-            .enabled(!this.app.busy && !this.thread.archived && !this.app.saveError).onClick(this.onModels)
+            .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
+            .enabled(!this.app.busy && !this.thread.archived && !this.app.saveError)
+            .accessibilityText(t('选择模型') + '：' + (this.thread.modelRef?.modelId || t('选择模型')))
+            .onClick(() => {
+              this.getUIContext().getFocusController().clearFocus();
+              this.showModelMenu = !this.showModelMenu;
+            })
+            .bindPopup(this.showModelMenu, { builder: this.modelMenu, placement: Placement.Top,
+              popupColor: $r('app.color.page_background'), backgroundBlurStyle: BlurStyle.NONE,
+              radius: 20, enableArrow: false, autoCancel: true, mask: false, targetSpace: 8,
+              onStateChange: (event) => { this.showModelMenu = event.isVisible; } })
         }
         IconButton({ icon: $r('sys.symbol.mic'), label: t('切换到语音输入'), compId: 'start-speech', diameter: 36,
           iconSize: 19, fill: $r('app.color.surface_variant'), disabled: !this.canRecordSpeech(),

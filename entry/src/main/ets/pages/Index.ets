@@ -929,7 +929,7 @@ struct Index {
         Column() {
           if (this.app.ready) {
             ChatPanel({ app: this.app, thread: this.app.active, workbench: this.windowWidth >= 840,
-                onModels: () => { this.paths.pushPath({ name: 'models' }); }, onToolScope: () => { this.showToolScope = true; }, approval: this.approval, browser: this.browser, account: this.account,
+                onToolScope: () => { this.showToolScope = true; }, approval: this.approval, browser: this.browser, account: this.account,
                 onAccount: () => { this.paths.pushPath({ name: 'account' }); },
                 onBrowser: () => this.setBrowserExpanded(true), onSettings: () => this.openSettings(),
                 topInset: CHAT_HEADER_HEIGHT,

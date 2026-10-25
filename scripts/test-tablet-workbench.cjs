@@ -176,6 +176,26 @@ assert.equal(railProps[3].active, true, 'The open files pane marks its rail cont
 assert.equal(railProps[0].label, '展开会话列表');
 console.log('PASS emitted rail keeps six desktop actions in order and forwards each tap');
 
+// The workbench model seat opens a compact card above the composer instead of
+// navigating away from the conversation, and sizes that card to the catalog.
+const chatSourcePath = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/views/ChatPanel.ts');
+assert.ok(fs.statSync(chatSourcePath).mtimeMs >= fs.statSync(path.join(root, 'entry/src/main/ets/views/ChatPanel.ets')).mtimeMs,
+  'Build before testing ChatPanel');
+const chatSource = fs.readFileSync(chatSourcePath, 'utf8');
+const triggerAt = chatSource.indexOf("Button.id('workbench-model-picker')");
+assert.ok(triggerAt > 0, 'Locate the emitted composer model trigger');
+const triggerSource = chatSource.slice(triggerAt, triggerAt + 2400);
+assert.match(triggerSource, /this\.showModelMenu = !this\.showModelMenu;/, 'The model trigger toggles the menu');
+assert.match(triggerSource, /Button\.bindPopup\(this\.showModelMenu, \{ builder: \{ builder: this\.modelMenu\.bind\(this\) \}/,
+  'The model trigger owns the menu popup');
+const menuAt = chatSource.indexOf('modelMenu(parent = null)');
+assert.ok(menuAt > 0, 'Locate the emitted model menu builder');
+assert.match(chatSource.slice(menuAt, menuAt + 1600), /ModelPickerPanel\(this, \{ app: this\.app, compact: true/,
+  'The popup reuses the searchable model list in compact mode');
+assert.match(chatSource.slice(menuAt, menuAt + 1600), /this\.modelMenuHeight\(\)/, 'The card height follows the catalog');
+assert.match(chatSource, /modelMenuHeight\(\): number \{/, 'The catalog-sized height is computed once');
+console.log('PASS emitted composer model seat opens one compact, catalog-sized model menu');
+
 const dialogs = [], toasts = [];
 const Editor = probe('views/WorkspacePanel', 'WorkspacePanel', ['dirty', 'fileName', 'leave', 'requestClose', 'backRequested', 'openRequested', 'reference'], { t: value => value, $r: value => value });
 let closed = 0, rebound = 0;
