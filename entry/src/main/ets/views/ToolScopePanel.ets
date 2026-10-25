@@ -1,5 +1,5 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
-import { Space } from '../common/Theme';
+import { Space, systemInsets } from '../common/Theme';
 import { GroupCard, NavRow, RowDivider } from '../common/Widgets';
 import { AgentMode, AGENT_MODES, agentModeName } from '../model/AgentMode';
 import { ChatViewModel, ThreadViewModel } from '../viewmodel/ChatViewModel';
@@ -10,6 +10,13 @@ export struct ToolScopePanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   @ObjectLink thread: ThreadViewModel;
+  @State private insetBottom: number = 0;
+
+  aboutToAppear(): void {
+    // A large sheet floats over the window, not inside the page's safe area: the
+    // last capability row would otherwise sit under the navigation indicator.
+    systemInsets(this.getUIContext()).then((insets: number[]) => { this.insetBottom = insets[1]; });
+  }
 
   private editable(): boolean {
     return this.app.ready && !this.app.busy && !this.thread.archived && this.app.saveError.length === 0 && this.thread.id === this.app.active.id;
@@ -36,6 +43,7 @@ export struct ToolScopePanel {
       if (this.thread.agentMode === 'custom') {
         CustomToolsPanel({ app: this.app, thread: this.thread }).layoutWeight(1)
       }
-    }.width('100%').height(this.thread.agentMode === 'custom' ? '100%' : undefined).padding({ bottom: Space.lg })
+    }.width('100%').height(this.thread.agentMode === 'custom' ? '100%' : undefined)
+      .padding({ bottom: Space.lg + this.insetBottom })
   }
 }
