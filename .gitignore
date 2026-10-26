@@ -52,3 +52,5 @@ scripts/*
 !scripts/test-api20-compat.cjs
 !scripts/test-preview-references.cjs
 !scripts/test-storage-usage.cjs
+!scripts/test-bing-search.cjs
+!scripts/test-bing-search-dom.cjs

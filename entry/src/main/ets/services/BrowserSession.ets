@@ -4,6 +4,7 @@ import { ToolCall } from '../model/Agent';
 import { ToolFailure, ToolResultError } from '../model/ToolFailure';
 import { ExecutionGate } from './AgentLoop';
 import { Cancellation, RunCancelledError } from './Cancellation';
+import { BingSearchPage } from '../model/BingSearch';
 
 export interface BrowserElement { id: number; role: string; label: string; type: string; value?: string; }
 export interface BrowserViewport { x: number; y: number; width: number; height: number; scrollHeight: number; }
@@ -17,6 +18,7 @@ export interface BrowserActionFeedback { id: number; x: number; y: number; }
 export interface BrowserDriver {
   open(url: string): Promise<void>;
   snapshot(id: string): Promise<BrowserPage>;
+  readBingSearch?(query: string, maximum: number): Promise<BingSearchPage>;
   act(action: BrowserAction): Promise<void>;
   userBack(): boolean;
   close(): void;
@@ -229,6 +231,22 @@ export class BrowserSession implements ExecutionGate {
       throw new ToolFailure('STALE_BROWSER_SNAPSHOT', 'Browser ownership changed. Read a new snapshot before acting.', 'read_browser_snapshot');
     }
     return this.perform(action.action, () => this.requireDriver().act(action), cancellation);
+  }
+  async readBingSearch(query: string, maximum: number, cancellation: Cancellation): Promise<BingSearchPage> {
+    await this.wait(cancellation); this.requireOwned(cancellation);
+    if (this.operating) { throw new ToolFailure('BROWSER_BUSY', 'A browser operation is still in progress.', 'wait_for_owner'); }
+    const driver = this.requireDriver();
+    if (!driver.readBingSearch) { throw new ToolFailure('BROWSER_UNAVAILABLE', 'Browser search extraction is unavailable.', 'inspect_browser'); }
+    const epoch = this.epoch;
+    this.operating = true;
+    try {
+      const page = await driver.readBingSearch(query, maximum);
+      await this.wait(cancellation); this.requireOwned(cancellation);
+      if (epoch !== this.epoch) { throw new ToolFailure('STALE_BROWSER_SNAPSHOT', 'Browser control changed during search extraction.', 'inspect_browser_before_retry'); }
+      this.log('search_observed', { revision: 1, status: page.state, count: page.sources.length, nodes: page.candidates, total: page.invalid });
+      return page;
+    } catch (error) { this.log('search_failed', { revision: 1 }, error as Error); throw error as Error; }
+    finally { this.operating = false; }
   }
   private async perform(operation: string, execute: () => Promise<void>, cancellation: Cancellation): Promise<BrowserReceipt> {
     if (this.operating) { throw new ToolFailure('BROWSER_BUSY', 'A browser operation is still in progress.', 'wait_for_owner'); }

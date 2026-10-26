@@ -2407,5 +2407,10 @@
   "重新统计": "Measure again",
   "工作区文件请在文件面板中管理；已删除会话残留的文件可以直接删除，整个目录请使用“建议清理”。": "Manage workspace files in the file panel; files left by deleted conversations can be deleted here, and whole folders belong in Suggested cleanup.",
   "部分目录无法读取，统计结果可能不完整。": "Some folders could not be read; the totals may be incomplete.",
-  "部分目录无法读取，清理可能不完整。": "Some folders could not be read; cleanup may be incomplete."
+  "部分目录无法读取，清理可能不完整。": "Some folders could not be read; cleanup may be incomplete.",
+  "必应（内置浏览器）": "Bing (in-app browser)",
+  "无需 API Key，通过应用内浏览器访问必应。需要允许浏览器使用；遇到验证时，请完成验证后交还控制。": "No API key required. Searches Bing in the in-app browser. Allow browser access; if verification appears, complete it and return control.",
+  "关闭“允许网页读取与搜索”或禁用应用内浏览器都会停用内置搜索。": "Turning off web reading and search or disabling the in-app browser also disables built-in search.",
+  "内置搜索需要使用浏览器访问必应并读取搜索结果。": "Built-in search needs the browser to open Bing and read search results.",
+  "必应需要验证。请在浏览器中完成验证，保留当前搜索页面，然后交还控制。": "Bing requires verification. Complete it in the browser, keep the current search page open, then return control."
 }
