@@ -51,6 +51,8 @@ hdc rport tcp:18770 tcp:18770
 | `test-developer-diagnostics.cjs` | 诊断采集、导出与生命周期 | 否 |
 | `test-unified-logging.cjs` | 日志级别、脱敏、导出与禁用路径 | 否 |
 | `test-browser.cjs` | 浏览器权限、接管与运行暂停 | 否 |
+| `test-bing-search.cjs` | 内置搜索配置、ArkWeb 返回值解码、浏览器权限与控制权、取消和验证接管 | 否 |
+| `test-bing-search-dom.cjs` | 真实 DOM 中桌面版与移动版标题链接、来源去重、重定向解码、异常链接和验证码识别；需可解析的 Playwright 依赖与本机 Edge | 否 |
 | `test-browser-annotation.cjs` | 批注几何、导出与图片投递 | 否 |
 | `test-code-highlight.cjs` | Markdown 代码高亮 | 否 |
 | `test-stream-reveal.cjs` | 流式文字渐显 | 否 |

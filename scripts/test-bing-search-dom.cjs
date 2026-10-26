@@ -9,6 +9,8 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.resolve(__dirname, '.
 }).outputText, { exports: exported, require: name => { throw Error('Unexpected dependency ' + name); } });
 const { bingSearchScript } = exported;
 const item = (href, title = 'Title', snippet = 'Evidence') => `<li class="b_algo"><h2><a href="${href}">${title}</a></h2><div class="b_caption"><p>${snippet}</p></div></li>`;
+// Mate 70 Pro+ / ArkWeb: attribution link precedes an anchor wrapping the h2.
+const mobileItem = (href, title = 'Mobile title', snippet = 'Mobile evidence') => `<li class="b_algo"><div class="b_tpcn"><a class="tilk" href="https://attribution.example/">Site name</a></div><div class="b_algoheader"><a href="${href}"><h2>${title}</h2><span>Extra link text</span></a></div><div class="b_caption"><p>${snippet}</p></div></li>`;
 const root = html => `<ol id="b_results">${html}</ol>`;
 (async () => {
   const browser = await chromium.launch({ channel: 'msedge', headless: true });
@@ -26,6 +28,24 @@ const root = html => `<ol id="b_results">${html}</ol>`;
     assert.equal(result.state, 'results'); assert.equal(result.sources.length, 2);
     assert.deepEqual(result.sources[0], { url: new URL(target).href, title: '中文标题', snippet: '正文摘要' });
     assert.equal(result.sources.some(source => source.url.includes('bing.com')), false);
+    result = await extract(root(mobileItem('https://developer.huawei.com/consumer/cn/arkui/', '<strong>ArkUI</strong> 官方文档', '移动版摘要') + mobileItem(redirect) + item('https://desktop.example/page')),
+      { url: 'https://cn.bing.com/search?q=' + encodeURIComponent('鸿蒙 & browser') });
+    assert.equal(result.state, 'results'); assert.equal(result.candidates, 3); assert.equal(result.invalid, 0);
+    assert.deepEqual(result.sources[0], { url: 'https://developer.huawei.com/consumer/cn/arkui/', title: 'ArkUI 官方文档', snippet: '移动版摘要' });
+    assert.equal(result.sources[1].url, new URL(target).href);
+    assert.equal(result.sources[2].url, 'https://desktop.example/page');
+    result = await extract(root(mobileItem(redirect) + item(redirect) + mobileItem('https://second.example')), { maximum: 1 });
+    assert.equal(result.state, 'results'); assert.equal(result.sources.length, 1); assert.equal(result.candidates, 3);
+    for (const href of ['javascript:alert(1)', 'https://user:password@example.com', 'https://cn.bing.com/ck/a?u=unknown']) {
+      result = await extract(root(mobileItem(href))); assert.equal(result.state, 'invalid_results'); assert.equal(result.invalid, 1);
+    }
+    for (const body of [
+      '<li class="b_algo"><a href="https://attribution.example/">Site name</a><h2>Unlinked title</h2></li>',
+      '<li class="b_algo"><a><h2>No href</h2></a></li>',
+      '<li class="b_algo"><a href="https://example.com"><h2> </h2>Non-title text</a></li>'
+    ]) {
+      assert.equal((await extract(root(body))).state, 'invalid_results', 'Only a nonempty heading-associated link is a result');
+    }
     result = await extract(root(item('https://one.example') + item('https://two.example')), { maximum: 1 });
     assert.equal(result.sources.length, 1); assert.equal(result.candidates, 2);
     result = await extract(root(item('https://one.example') + '<li class="b_algo" hidden><h2>Hidden placeholder</h2></li>'));
@@ -46,7 +66,7 @@ const root = html => `<ol id="b_results">${html}</ol>`;
     assert.equal((await extract(root(item('https://one.example')), { url: 'https://bing.com.example/search?q=test' })).state, 'unexpected_page');
     result = await extract(root(item('https://one.example')), { query: `x'); globalThis.injected=true; // 中文` });
     assert.equal(result.state, 'results'); assert.equal(await page.evaluate('globalThis.injected'), undefined);
-    console.log('PASS real DOM: organic results, Unicode redirect decoding, deduplication, caps, invalid links, empty pages, challenges, page identity and injection safety');
+    console.log('PASS real DOM: desktop/mobile heading links, title isolation, organic results, Unicode redirect decoding, deduplication, caps, invalid links, empty pages, challenges, page identity and injection safety');
     await page.close();
 
     if (process.argv.includes('--live')) {

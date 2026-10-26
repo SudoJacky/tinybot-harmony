@@ -161,6 +161,8 @@ struct Index {
       this.paths.size() > 0 || this.browserExpanded || this.showToolScope || this.ratingOpen || this.announcementDialog) { return; }
     const item = announcements.pending();
     if (!item) { return; }
+    // Tablets and wide windows follow the window width; 0 keeps the platform default.
+    const width = WorkbenchLayout.dialogWidth(this.windowWidth);
     try {
       this.announcementDialog = new CustomDialogController({
         builder: AnnouncementDialog({ announcement: item, onConfirm: () => {
@@ -168,6 +170,7 @@ struct Index {
           this.closeAnnouncement();
         } }),
         systemMaterial: this.appearance.surface, autoCancel: false, alignment: DialogAlignment.Center,
+        width: width > 0 ? width : undefined,
         onDidAppear: () => {
           if (!this.privacy.allowed) { this.closeAnnouncement(); return; }
           announcements.didOffer();

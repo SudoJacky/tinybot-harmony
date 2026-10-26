@@ -14,6 +14,7 @@ function load(file, imports = {}) {
   return exports;
 }
 const model = load('model/Announcement.ets');
+const { WorkbenchLayout } = load('model/WorkbenchLayout.ets');
 const notice = (id = 'notice-1', body = 'Maintenance tonight') => ({ id, title: 'Service notice', body });
 const feed = item => JSON.stringify({ schemaVersion: 1, announcement: item });
 assert.equal(model.parseAnnouncement(feed(null)), null);
@@ -101,12 +102,13 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
     open() { if (failDialog) throw Error('No window'); dialogs.push(this); }
     close() { this.closed = true; this.options.onDidDisappear(); }
   }
-  vm.runInNewContext(compile('export class Probe {\n' + method + '\n}'), {
+  const uiGlobals = {
     exports, announcements: uiService, Diagnostics: diagnostics, CustomDialogController: Controller,
-    AnnouncementDialog: props => props, DialogAlignment: { Center: 'center' }
-  });
+    AnnouncementDialog: props => props, DialogAlignment: { Center: 'center' }, WorkbenchLayout
+  };
+  vm.runInNewContext(compile('export class Probe {\n' + method + '\n}'), uiGlobals);
   const probe = Object.assign(new exports.Probe(), { privacy, foreground: true, app: { ready: true }, onboardingChecked: true,
-    paths: { size: () => depth }, appearance: { surface: 0 } });
+    paths: { size: () => depth }, appearance: { surface: 0 }, windowWidth: 390 });
   for (const field of ['foreground', 'onboardingChecked']) {
     probe[field] = false; probe.offerAnnouncement(); probe[field] = true;
   }
@@ -118,6 +120,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   failDialog = false; probe.offerAnnouncement(); probe.offerAnnouncement();
   assert.equal(dialogs.length, 1, 'Do not open again while the native dialog is mounting');
   const dialog = dialogs[0];
+  assert.equal(dialog.options.width, undefined, 'Phone announcements retain the platform width');
   assert.equal(dialog.options.builder.announcement.body, notice().body);
   assert.ok(uiService.pending(), 'Only a visible dialog consumes the per-launch offer');
   dialog.options.onDidAppear(); assert.equal(uiService.pending(), null);
@@ -131,6 +134,18 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   failFlush = false; content.confirm(); assert.equal(content.error, ''); assert.equal(dialog.closed, true);
   assert.equal(probe.announcementDialog, undefined);
   const restart = fresh(); await restart.checkOnStartup({}); assert.equal(restart.pending(), null);
+  for (const [windowWidth, expectedWidth] of [[1024, 717], [1440, 800]]) {
+    result.result = feed(notice('notice-tablet-' + windowWidth));
+    const tabletService = fresh();
+    await tabletService.checkOnStartup({});
+    uiGlobals.announcements = tabletService;
+    probe.windowWidth = windowWidth;
+    probe.offerAnnouncement();
+    const tabletDialog = dialogs.at(-1);
+    assert.equal(tabletDialog.options.width, expectedWidth, 'Announcement controller receives the tablet width');
+    tabletDialog.options.onDidAppear();
+    tabletDialog.options.builder.onConfirm();
+  }
   probe.announcementDialog = new Controller({ onDidDisappear: () => { probe.announcementDialog = undefined; } });
   const abandoned = probe.announcementDialog; probe.closeAnnouncement(); assert.equal(abandoned.closed, true);
   assert.ok(source.includes('this.closeAnnouncement();\n      this.app.stop()'), 'Privacy withdrawal closes the dialog');

@@ -2412,5 +2412,7 @@
   "无需 API Key，通过应用内浏览器访问必应。需要允许浏览器使用；遇到验证时，请完成验证后交还控制。": "No API key required. Searches Bing in the in-app browser. Allow browser access; if verification appears, complete it and return control.",
   "关闭“允许网页读取与搜索”或禁用应用内浏览器都会停用内置搜索。": "Turning off web reading and search or disabling the in-app browser also disables built-in search.",
   "内置搜索需要使用浏览器访问必应并读取搜索结果。": "Built-in search needs the browser to open Bing and read search results.",
-  "必应需要验证。请在浏览器中完成验证，保留当前搜索页面，然后交还控制。": "Bing requires verification. Complete it in the browser, keep the current search page open, then return control."
+  "必应需要验证。请在浏览器中完成验证，保留当前搜索页面，然后交还控制。": "Bing requires verification. Complete it in the browser, keep the current search page open, then return control.",
+  "1.1.0 · 2026-10-26": "1.1.0 · 2026-10-26",
+  "新增平板工作台、反馈与建议、存储空间管理及无需搜索密钥的内置必应搜索，支持 HarmonyOS 6（API 20）。已启用的工具直接提供给模型，交互预览在最终回复中展示。修复必应移动页面无法提取搜索结果的问题，并优化平板公告宽度。": "Adds the tablet workbench, feedback, storage management, and built-in Bing search without a search API key, with HarmonyOS 6 (API 20) support. Enabled tools are provided directly to the model, and interactive previews appear in the final response. Fixes result extraction on mobile Bing pages and improves announcement width on tablets."
 }
