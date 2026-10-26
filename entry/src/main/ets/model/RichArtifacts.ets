@@ -88,10 +88,3 @@ export function parseDelimited(text: string, delimiter: string): string[][] {
   if (rows.length > 200 || rows.some((item) => item.length > 50)) { throw new Error(t("表格预览最多 200 行、50 列，请缩小文件或查看源码。")); }
   return rows;
 }
-export function lineDiff(before: string, after: string): string {
-  if (before === after) { return '没有变化'; }
-  const left = before.split('\n'); const right = after.split('\n'); let start = 0; let end = 0;
-  while (start < left.length && start < right.length && left[start] === right[start]) { start++; }
-  while (end < left.length - start && end < right.length - start && left[left.length - 1 - end] === right[right.length - 1 - end]) { end++; }
-  return '@@ 第 ' + (start + 1) + ' 行起 @@\n' + left.slice(start, left.length - end).map((line) => '- ' + line).join('\n') + '\n' + right.slice(start, right.length - end).map((line) => '+ ' + line).join('\n');
-}

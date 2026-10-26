@@ -1,8 +1,8 @@
 import { describe, expect, it } from '@ohos/hypium';
 import { AgentTurn, ModelMessage, ModelTurn, ToolDefinition } from '../main/ets/model/Agent';
 import { MessageData, ThreadData, emptyData, parseAppData } from '../main/ets/model/Conversation';
-import { CompactionPlan, contextSettings, contextInputBudget, estimateContextTokens, estimateTextTokens,
-  planContextCompaction } from '../main/ets/model/ConversationContext';
+import { CompactionPlan, estimateContextTokens, estimateTextTokens, planContextCompaction } from '../main/ets/model/ConversationContext';
+import { contextSettings, contextInputBudget } from '../main/ets/model/ContextSettings';
 import { matchingThreads, threadTitle } from '../main/ets/model/SessionManagement';
 import { compactContext } from '../main/ets/services/ContextCompactor';
 import { prepareSessionContext } from '../main/ets/services/SessionContext';

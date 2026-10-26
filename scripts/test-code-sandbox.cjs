@@ -14,7 +14,7 @@ const native = {
   execute(id) {
     if (active) throw Error('busy');
     submissions++;
-    return new Promise(resolve => { active = { id, resolve }; });
+    return new Promise((resolve, reject) => { active = { id, resolve, reject }; });
   },
   cancel(id) { cancels.push(id); },
 };
@@ -89,6 +89,21 @@ async function main() {
   nextSignal.cancel();
   assert.deepEqual(cancels, [id], 'completed execution unsubscribed');
   console.log('PASS cancellation waits for cleanup, busy rejection, unique IDs, recovery and listener cleanup');
+
+  const { Diagnostics } = load('../model/Diagnostics');
+  const logs = []; Diagnostics.configureLogSink(record => logs.push(record));
+  const failedSignal = new Cancellation();
+  const failed = executor.execute('return 42;', 'null', failedSignal);
+  const failure = Object.assign(new Error('Native sandbox execution failed [execution=' + active.id + ', napiStatus=0]: allocator failure'),
+    { code: 'NATIVE_EXCEPTION' });
+  const failedJob = active; active = undefined; failedJob.reject(failure);
+  await assert.rejects(failed, error => error === failure);
+  failedSignal.cancel();
+  assert.deepEqual(cancels, [id], 'failed execution also releases its cancellation listener');
+  assert.equal(logs.at(-1).event, 'execution_failed');
+  assert.equal(logs.at(-1).fields.errorCode, 'NATIVE_EXCEPTION');
+  assert.ok(!JSON.stringify(logs).includes(failure.message), 'diagnostics do not retain arbitrary native error text');
+  console.log('PASS native failures preserve their cause and emit sanitized diagnostics without leaking listeners');
 
   const { TeamToolLane } = load('TeamCoordinator');
   const lane = new TeamToolLane();

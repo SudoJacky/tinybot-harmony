@@ -20,7 +20,7 @@ function load(file) {
   return exports;
 }
 const from = name => load(path.join(root, 'main/ets', name));
-const { ToolDiscovery, discoveredToolDefinitions } = from('services/ToolDiscovery');
+const { ToolCatalog, orderedToolDefinitions } = from('services/ToolCatalog');
 const { ToolSet } = from('services/ToolSet');
 const { OrchestrationTools } = from('services/OrchestrationTools');
 const { AgentRuntime } = from('services/AgentRuntime');
@@ -62,43 +62,6 @@ const executor = { async execute(code, catalog, invoke) {
   catch (error) { return JSON.stringify({ status: 'error', error: error.message }); }
 } };
 async function main() {
-  const searchable = (name, description, properties = {}) => ({ ...definition(name), promptSnippet: '专用工具',
-    function: { name, description, parameters: { type: 'object', properties, required: [], additionalProperties: false } } });
-  const ranked = async (query, entries) => (await invoke(new ToolDiscovery({ definitions: () => entries, execute: async () => '{}' }, [], true),
-    'tool_search', { query })).loaded;
-  const corpus = [
-    searchable('mcp__github__list_issues', 'List issues in a repository.', { state: { type: 'string', description: 'open or closed' } }),
-    searchable('mcp__github__create_pull_request', 'Open a pull request.'),
-    searchable('mcp__linear__search_issues', 'Search Linear issues by text.'),
-    searchable('mcp__docs__search', 'Search the documentation.')
-  ];
-  assert.deepEqual(await ranked('issue', corpus), ['mcp__linear__search_issues', 'mcp__github__list_issues']);
-  assert.equal((await ranked('pull requests', corpus))[0], 'mcp__github__create_pull_request');
-  assert.deepEqual(await ranked('closed', corpus), ['mcp__github__list_issues']);
-  assert.deepEqual(await ranked('listIssues for the GitHub_repo', corpus), await ranked('list issue git hub repo', corpus));
-  assert.deepEqual(await ranked('searches queries HTTPServer', corpus), await ranked('search query http server', corpus));
-  for (const query of ['the and with', 'kubernetes', 'tickets', 'umentation', '!!!']) assert.deepEqual(await ranked(query, corpus), []);
-  const weighted = [searchable('frequent', 'common '.repeat(40)), searchable('rare', 'raretoken'),
-    searchable('other', 'common'), searchable('another', 'common')];
-  assert.equal((await ranked('common raretoken', weighted))[0], 'rare', 'Rare terms outweigh repeated common terms');
-  assert.deepEqual(await ranked('common common common raretoken', weighted), await ranked('common raretoken', weighted));
-  assert.deepEqual(await ranked('needle', [searchable('long', 'needle ' + 'filler '.repeat(30)), searchable('short', 'needle')]),
-    ['short', 'long'], 'BM25 normalizes document length');
-  const ties = ['zeta', 'alpha', 'eta', 'beta', 'theta', 'gamma', 'iota', 'delta'].map(name => searchable(name, 'needle'));
-  assert.deepEqual(await ranked('needle', ties), ties.slice(0, 6).map(tool => tool.function.name), 'Stable ties and a six-result limit');
-  const nested = [searchable('nested', 'Process records', { payload: { type: 'array', description: 'Rows', items: {
-    type: 'object', description: 'Record', properties: { referenceId: { description: 'Identifier', anyOf: [
-      { type: 'string', description: 'Opaque locator' }, { type: 'number', description: 'Numeric locator' }
-    ] } }
-  } } }), searchable('unrelated', 'Something else')];
-  for (const query of ['payload', 'referenceId', 'opaque locator']) assert.deepEqual(await ranked(query, nested), ['nested']);
-  const chinese = [searchable('preview', '发布交互文件预览'), searchable('image', '生成图片'), searchable('web', '检索网页')];
-  assert.deepEqual(await ranked('文件预览', chinese), ['preview']);
-  assert.deepEqual(await ranked('生成图片', chinese), ['image']);
-  assert.deepEqual(await ranked('天气', chinese), []);
-  console.log('PASS BM25 relevance, frequency saturation, length normalization, deduplicated queries, stable ties, English/Chinese tokenization and recursive schema search');
-
-
   const approval = new ToolApproval();
   const code = new CodeExecutionTools({ execute: async (_code, input) => JSON.stringify({ status: 'ok', result: JSON.parse(input) }) });
   const contents = new Map([['data.txt', 'needle'], ['unread.txt', 'original']]);
@@ -110,7 +73,7 @@ async function main() {
     new PreviewTools({}, async () => {}), new PresentTools(async path => path),
     new ResourceTools(async args => JSON.stringify(args), async () => '{}'), new MemoryTools(async () => '{}'),
     new McpTools([{ id: 'remote', name: 'Remote', enabled: true, url: 'https://example.com/mcp' }], approval, () => ({})), new WebTools({})]);
-  const catalog = new OrchestrationTools(base, executor), tools = new ToolDiscovery(catalog);
+  const catalog = new OrchestrationTools(base, executor), tools = new ToolCatalog(catalog);
   assert.deepEqual(names(tools), names(catalog).sort(), 'All authorized schemas are visible initially in stable name order');
   for (const name of ['list_files','find_files','search_file_content','execute_code','read_web','mcp_list_tools','mcp_call',
     'request_user_input','update_plan','publish_preview','present_files']) assert.ok(names(tools).includes(name), name);
@@ -125,22 +88,20 @@ async function main() {
   assert.ok(initial.messages.some(m=>m.runtimeContext&&m.content.includes(INTERACTIVE_UI_INSTRUCTIONS.trim())));
   const inspector=new AgentRuntime(new ProviderRegistry(),{read:async()=>''},undefined,undefined,executor).inspectContext(source,config,base);
   assert.equal(inspector.context.toolTokens,initial.context.toolTokens,'Context inspector counts the same full catalog');
-  assert.deepEqual(plain(discoveredToolDefinitions(catalog.definitions(),['execute_code','publish_data_view'])),plain(tools.definitions()),
-    'Historical discovery does not filter or reactivate tools under direct defaults');
-  const optional=new ToolDiscovery(catalog,[],true);
-  assert.ok(names(optional).includes('tool_search'));assert.ok(!names(optional).includes('execute_code'));
-  assert.ok((await invoke(optional,'tool_search',{query:'execute_code'})).loaded.includes('execute_code'));
-  console.log('PASS full initial schemas/guidelines, stable calls, matching context inspector, stale-search rejection and explicit opt-in discovery');
+  assert.deepEqual(plain(orderedToolDefinitions(catalog.definitions())), plain(tools.definitions()));
+  const reserved = { ...definition('tool_search') };
+  assert.throws(() => orderedToolDefinitions([reserved]), error => error.code === 'INTERNAL_ERROR');
+  console.log('PASS full initial schemas/guidelines, stable calls, matching context inspector and retired-search rejection');
 
-  const restricted=new ToolDiscovery(new RuleTools(new SelectedTools(catalog,{agentMode:'custom',disabledTools:['publish_preview','execute_code']}),true));
+  const restricted=new ToolCatalog(new RuleTools(new SelectedTools(catalog,{agentMode:'custom',disabledTools:['publish_preview','execute_code']}),true));
   for(const name of ['publish_preview','execute_code','memory','skill_manage','mcp_call','write_file','edit_file'])assert.ok(!names(restricted).includes(name),name);
   for(const name of ['list_files','find_files','read_file','search_file_content','present_files'])assert.ok(names(restricted).includes(name),name);
   await assert.rejects(invoke(restricted,'publish_preview',{path:'a.js'}),error=>error.code==='PERMISSION_DENIED');
   let enabled=true;
-  const live=new ToolDiscovery({definitions:()=>enabled?[definition('read_web')]:[],execute:async()=>{if(!enabled)throw Error('disabled');return '{}';}});
+  const live=new ToolCatalog({definitions:()=>enabled?[definition('read_web')]:[],execute:async()=>{if(!enabled)throw Error('disabled');return '{}';}});
   enabled=false;assert.ok(!names(live).includes('read_web'));await assert.rejects(invoke(live,'read_web',{}));
   let finished=false;
-  await new ToolDiscovery({definitions:()=>[],execute:async()=>'{}',beforeFinish:async()=>{finished=true;return 'handoff required';}}).beforeFinish(new Cancellation());
+  await new ToolCatalog({definitions:()=>[],execute:async()=>'{}',beforeFinish:async()=>{finished=true;return 'handoff required';}}).beforeFinish(new Cancellation());
   assert.ok(finished);
   console.log('PASS custom/readonly policy, mandatory files, independent delivery, live revocation and completion guards');
 
@@ -188,5 +149,20 @@ async function main() {
     assert.equal(contents.get('unread.txt'),'original');
   }
   console.log('PASS direct schemas retain orchestration, durable children and path/read-before-edit protection');
+
+  let exclusive = false, active = 0, overlapped = false, rounds = 0;
+  const changing = new ToolCatalog({
+    definitions: () => [definition('changing', exclusive ? 'sequential' : 'parallel')],
+    execute: async () => {
+      if (++active > 1) overlapped = true;
+      await new Promise(resolve => setTimeout(resolve, 0)); active--; return '{}';
+    }
+  });
+  await runAgentLoop({ tools: changing, messages: [], turn: { content: '', steps: [] }, maxSteps: 3,
+    model: { stream: async () => {
+      exclusive = true; return rounds++ === 0 ? reply(call('changing'), call('changing')) : reply();
+    } } }, new Cancellation(), { event() {}, checkpoint: async () => {} });
+  assert.equal(overlapped, false, 'Execution uses current catalog metadata after the model returns');
+  console.log('PASS live execution metadata retains sequential barriers without deferred discovery');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

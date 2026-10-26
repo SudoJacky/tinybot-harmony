@@ -28,7 +28,7 @@ const { AgentRuntime } = from('services/AgentRuntime');
 const { ProviderRegistry } = from('services/providers/ProviderRegistry');
 const { RequestContext } = from('services/RequestContext');
 const { sessionContextSource } = from('services/SessionContext');
-const { discoveredToolDefinitions, discoveredToolNames, ToolDiscovery } = from('services/ToolDiscovery');
+const { ToolCatalog } = from('services/ToolCatalog');
 const { threadEntries, projectedHistory } = from('model/ContextProjection');
 const { defaultConfig, emptyData, parseAppData, requestHistory } = from('model/Conversation');
 const { RequestPrefix } = from('model/RequestPrefix');
@@ -98,11 +98,6 @@ async function main() {
   thread = restore(thread);
   const history = plain(projectedHistory(threadEntries(thread)));
   assert.deepEqual(plain(requestHistory(thread.messages, '')), history, 'Both history projections retain snapshots in the same order');
-  assert.ok(discoveredToolNames(threadEntries(thread)).includes('lookup_alpha'));
-  const nested = { call: call('nested', 'never_exposed'), status: 'complete', output: '{}' };
-  assert.deepEqual(plain(discoveredToolNames([{ messageId: 'nested', messages: [{ role: 'assistant', content: '',
-    toolCalls: [call('outer', 'orchestrate')] }], results: [{ call: call('outer', 'orchestrate'), status: 'complete', output: '{}', children: [nested] }, nested] }])),
-    ['orchestrate'], 'Nested execution does not expose new root schemas on reopening');
   const resumed = await run('Continue'); assert.equal(resumed.status, 'complete', resumed.error);
   const continued = requests.at(-1);
   assert.deepEqual(continued.tools, requests[2].tools, 'Direct catalog survives cold reload');
@@ -117,7 +112,7 @@ async function main() {
   allowed = false;
   assert.equal((await run('Continue after revocation')).status, 'complete');
   assert.ok(!requests.at(-1).tools.some(tool => tool.function.name === 'lookup_alpha'));
-  const denied = new ToolDiscovery({ definitions: () => [], execute: async () => { throw Error('revoked'); } }, ['lookup_alpha']);
+  const denied = new ToolCatalog({ definitions: () => [], execute: async () => { throw Error('revoked'); } });
   assert.equal(denied.definitions().length, 0);
   await assert.rejects(denied.execute(call('denied', 'lookup_alpha'), new Cancellation()), /revoked/);
   const malformed = plain(thread); malformed.messages[1].steps[0].runtimeContext = 3;

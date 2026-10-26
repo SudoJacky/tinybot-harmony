@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@ohos/hypium';
 import { ChatStream } from '../main/ets/services/ChatStream';
 import { emptyData, MessageData, parseAppData, requestHistory } from '../main/ets/model/Conversation';
-import { completionUrl } from '../main/ets/services/providers/ChatCompletionsProtocol';
+import { completionUrl } from '../main/ets/model/ProviderEndpoint';
 import { threadWorkspacePath } from '../main/ets/model/Workspace';
 
 const TEXT = 'data: {"choices":[{"index":0,"delta":{"content":"你好，Tinybot 🌱"},"finish_reason":null}]}\r\n\r\n';

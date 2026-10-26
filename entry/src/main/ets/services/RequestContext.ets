@@ -1,7 +1,8 @@
 import { ContextDiagnostics, ModelMessage, ModelTurn, ToolDefinition, toolSchemas } from '../model/Agent';
 import { toolPromptSections } from '../model/ToolPrompt';
 import { CompactionData, ContextState, ModelConfig } from '../model/Conversation';
-import { CompactionPlan, planContextCompaction, contextInputBudget, contextSettings, estimateContextTokens, estimateTextTokens } from '../model/ConversationContext';
+import { CompactionPlan, planContextCompaction, estimateContextTokens, estimateTextTokens } from '../model/ConversationContext';
+import { contextInputBudget, contextSettings } from '../model/ContextSettings';
 import { ContextEntry, PromptSection, projectedHistory, renderPrompt } from '../model/ContextProjection';
 import { Cancellation } from './Cancellation';
 import { compactContext } from './ContextCompactor';

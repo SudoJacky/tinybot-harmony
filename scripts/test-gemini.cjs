@@ -36,7 +36,8 @@ function load(file) {
 const from = name => load(path.join(root, name));
 const { geminiRequest, geminiStreamUrl } = from('services/providers/GeminiProtocol');
 const { GeminiStream } = from('services/providers/GeminiStream');
-const { protocolUrl, protocolHeaders, sameCredentialScope } = from('services/providers/WireProtocols');
+const { protocolHeaders } = from('services/providers/WireProtocols');
+const { protocolUrl, sameCredentialScope } = from('model/ProviderEndpoint');
 const { ProtocolProvider } = from('services/providers/ProtocolProvider');
 const { builtinProviderInfos } = from('model/Provider');
 const { validateProfile } = from('model/ProviderProfiles');

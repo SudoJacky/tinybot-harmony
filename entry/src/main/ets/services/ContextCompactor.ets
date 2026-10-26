@@ -1,7 +1,8 @@
 import { t } from '../model/I18n';
 import { ModelMessage, ToolDefinition } from '../model/Agent';
 import { CompactionData } from '../model/Conversation';
-import { CompactionPlan, ContextSettings, SUMMARY_MAX_TOKENS, estimateContextTokens, estimateTextTokens } from '../model/ConversationContext';
+import { CompactionPlan, estimateContextTokens, estimateTextTokens } from '../model/ConversationContext';
+import { ContextSettings, SUMMARY_MAX_TOKENS } from '../model/ContextSettings';
 import { Cancellation } from './Cancellation';
 import { ModelSession } from './providers/Provider';
 

@@ -13,7 +13,7 @@ import { referenceContext } from '../model/ThreadReferences';
 import { TeamRun } from '../model/Team';
 import { Attachment, ProductivityData, defaultProductivity, expandTemplate } from '../model/Productivity';
 import { AppData, ModelConfig, defaultConfig, copyModelConfig } from '../model/Conversation';
-import { contextSettings } from '../model/ConversationContext';
+import { contextSettings } from '../model/ContextSettings';
 import { ModelChoice, ProviderProfile, availableModels } from '../model/ProviderProfiles';
 import { ProviderInfo, builtinProviderInfos } from '../model/Provider';
 import { ExtensionSettings, SkillData, defaultExtensions } from '../model/Skills';

@@ -27,7 +27,8 @@ const tools=new PreviewTools(files,async()=>{},(content,signal)=>PreviewCapture.
  let captures=0;const detach=PreviewCapture.subscribe(requests=>{if(requests[0]){captures++;setTimeout(()=>PreviewCapture.complete(requests[0].id,snapshot),0);}});
  const turn={content:'',steps:[]},requests=[],checkpoints=[];
  await runAgentLoop({turn,tools,maxSteps:3,messages:[],model:{stream:async messages=>{requests.push(JSON.parse(JSON.stringify(messages)));
-   return requests.length===1?{content:'',toolCalls:[call]}:{content:'Inspected the card.',toolCalls:[]};}}},new Cancellation(),
+   const reference=requests.length>1?JSON.parse(turn.steps[0].tools[0].output).reference:'';
+   return requests.length===1?{content:'',toolCalls:[call]}:{content:'Inspected the card.\n\n'+reference,toolCalls:[]};}}},new Cancellation(),
  {event(){},checkpoint:async()=>checkpoints.push(JSON.parse(JSON.stringify(turn)))});
  assert.equal(captures,1);assert.equal(turn.steps[0].tools[0].status,'complete');assert.ok(checkpoints.some(c=>c.steps[0].tools[0]?.previewScreenshot));
  validateSteps(turn.steps);const restored=JSON.parse(JSON.stringify(turn.steps[0]));
