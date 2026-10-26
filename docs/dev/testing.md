@@ -10,7 +10,7 @@ devecocli build
 .\scripts\test.ps1
 ```
 
-`test.ps1` 先跑 Node 验证脚本（词条与内置 Skill 检查、账号、日志、浏览器、渲染、设置、预览、工具、编排、团队、文件备份恢复、引导、法务文档），再用 DevEco 的 `hvigorw test` 跑 Hypium 单元测试，并检查报告确实刷新且 `Failure: 0, Error: 0`、通过数非零。
+`test.ps1` 默认运行 `source` 与 `debug` 两组 Node 验证脚本（词条与内置 Skill 检查、账号、日志、浏览器、渲染、设置、预览、工具、编排、团队、文件备份恢复、引导、法务文档），再用 DevEco 的 `hvigorw test` 跑 Hypium 单元测试，并检查报告确实刷新且 `Failure: 0, Error: 0`、通过数非零。
 
 很多脚本读取的是编译产物——**先构建，再运行**。文中标注“需构建”的项在没有产物时会失败，这不是代码回归。
 
@@ -73,7 +73,7 @@ hdc rport tcp:18770 tcp:18770
 | `test-turn-workflow.cjs` | 流式时间线投影、思考单行实时更新与保留的过程行 | 是 |
 | `test-resources.cjs` | 资源管理集成 | 否 |
 | `test-tool-schemas.cjs` | 用 SDK 的 JSON Schema 校验器检查工具参数、编辑必填字段与三种协议请求结构 | 否 |
-| `test-tool-discovery.cjs` | 默认完整工具及说明、稳定声明、旧发现回执兼容、权限撤销、编排保护和内部可选 BM25 检索 | 否 |
+| `test-tool-catalog.cjs` | 完整工具及说明、稳定声明、旧发现回执兼容、权限撤销与编排保护 | 否 |
 | `test-context-usage.cjs` | 上下文预算与用量 | 否 |
 | `test-memory.cjs` | 记忆候选、来源与保存失败回滚 | 否 |
 | `test-code-sandbox.cjs` | 沙箱执行、限额与恢复 | 否 |
@@ -88,13 +88,24 @@ hdc rport tcp:18770 tcp:18770
 | `test-help-demo.cjs` | 帮助演示动画生命周期 | 是 |
 | `test-hosted-privacy.cjs` | 系统签署版本、拒绝/重签、事件重新查询和 EntryAbility 同意前业务隔离 | 否 |
 | `test-legal-documents.cjs` | 本地用户协议的实际编译读取路径、完整正文、错误展示与不再携带隐私正文 | 是 |
-| `test-onboarding.cjs` | 首次使用判断、持久化、旧草稿保护、六幕引导的账号同意/登录/稍后登录、唤醒与暂停恢复 | 是 |
+| `test-onboarding.cjs` | 首次使用判断、持久化、旧草稿保护、五步引导的账号同意/登录/稍后登录、唤醒与暂停恢复 | 是 |
 
 ## 需要单独运行的验证
 
 Hypium `ProjectFolders` 覆盖共享文件夹名称、数量、URI 去重、加载校验与模型上下文路径。`test-productivity-native.cjs` 还覆盖共享目录列表、嵌套创建、路径穿越与符号链接拒绝、不依赖重命名的直接写入、备份失败时禁止写入、部分写入后的备份保留与恢复，以及跨项目别名的版本竞争；系统选择器、持久化授权与设备重启后的激活需在 API 26 真机验证。
 
-以下脚本不在 `test.ps1` 中，按改动范围单独执行：
+测试分组由 `scripts/run-tests.cjs` 统一登记，新增 `test-*.cjs` 未登记或登记的文件缺失时，入口会直接失败。脚本串行执行。
+
+```powershell
+.\scripts\test.ps1 -Suite source             # 直接读取源码的主机测试，无需先构建
+.\scripts\test.ps1 -Suite debug              # 源码 + Debug 产物测试，再运行 Hypium（默认）
+.\scripts\test.ps1 -Suite release            # 源码 + Release 产物测试，再运行 Hypium
+.\scripts\test.ps1 -Suite browser            # 显式运行 Playwright 浏览器测试，需已安装依赖
+.\scripts\test.ps1 -Suite debug -List        # 只列出测试并校验登记完整性
+.\scripts\test.ps1 -Suite debug -SkipHypium # 只运行 Node 测试
+```
+
+Debug 和 Release 组要求已有相应构建产物；浏览器组不属于默认入口。完整清单以 `-List` 输出为准。以下为专项覆盖索引，也可直接运行单个脚本：
 
 | 脚本 | 场景 |
 | --- | --- |

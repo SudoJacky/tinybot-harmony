@@ -1,6 +1,6 @@
 # 工具注册与执行
 
-Tinybot 的工具目录同时决定模型能看到哪些工具、以及哪些调用可以被执行。这页说明工具如何分组注册、`definitions()` 暴露什么、一次调用如何经过执行流水线形成回执（receipt），以及发现、续跑、去重和错误如何回到模型；逐项参数与返回值见[工具参考](/reference/tools)，权限与审批见[审批、权限与沙箱](/internals/permissions)。
+Tinybot 的工具目录同时决定模型能看到哪些工具、以及哪些调用可以被执行。这页说明工具如何分组注册、`definitions()` 暴露什么、一次调用如何经过执行流水线形成回执（receipt），以及目录下发、续跑、去重和错误如何回到模型；逐项参数与返回值见[工具参考](/reference/tools)，权限与审批见[审批、权限与沙箱](/internals/permissions)。
 
 ## 目录即权限
 
@@ -43,7 +43,7 @@ SessionResources.tools()
         ↓
       OrchestrationTools  orchestrate
         ↓
-      ToolDiscovery       完整授权目录，稳定排序
+      ToolCatalog         完整授权目录，稳定排序
 ```
 
 会话层还会在外侧再包一层资源管理工具和记忆工具；它们受助手设置、Skills 页面与只读规则约束，不进入下面的可选能力开关。
@@ -138,7 +138,7 @@ MCP 已接受的完整工具结果保存在会话回执中，并原样进入模�
 
 普通工具调用不会改变顶层声明集，也不需要一次发现请求。首次请求会携带更多 schema；同一授权目录下后续请求保持一致，避免因按需加载工具而重建 provider 缓存前缀。用户修改能力配置、服务或角色时，目录仍会相应变化；不承诺固定缓存命中率。
 
-旧 `tool_search` 回执保留为普通历史记录，默认运行与上下文检查不再解析它们来决定可见性。`ToolDiscovery` 内部保留显式 opt-in 的 BM25 发现模式供兼容调用使用，产品会话默认不启用。编排子调用的白名单、调度、持久化、参数校验和审批保持原有规则。
+旧 `tool_search` 回执保留为普通历史记录，默认运行与上下文检查不再解析它们来决定可见性。BM25 发现模式及延迟加载状态已移除；`ToolCatalog` 统一排序当前已授权工具，并明确拒绝新的 `tool_search` 调用。编排子调用的白名单、调度、持久化、参数校验和审批保持原有规则。
 
 ## 可视化与交付编排
 
@@ -209,7 +209,7 @@ HTTP 状态在适配层按数值分类：401 → `AUTH_REQUIRED`，403 → `PERM
 | --- | --- |
 | `entry/src/main/ets/services/ToolSet.ets` | 目录刷新、同名检查、执行路由、`beforeFinish` 聚合 |
 | `entry/src/main/ets/services/ToolExecution.ets` | 批处理、意图与结果检查点、执行门、诊断与用量活动 |
-| `entry/src/main/ets/services/ToolDiscovery.ets` | 默认完整目录稳定排序；显式 opt-in 兼容发现模式 |
+| `entry/src/main/ets/services/ToolCatalog.ets` | 完整授权目录稳定排序；拒绝已退役的工具搜索入口 |
 | `entry/src/main/ets/services/SelectedTools.ets` | full/custom 选择的目录与执行双重过滤 |
 | `entry/src/main/ets/services/RuleTools.ets` | 全局只读过滤 |
 | `entry/src/main/ets/model/ToolGroups.ets` | 分组、能力、基础与受管工具清单 |

@@ -35,7 +35,7 @@
 | 代码执行 | `status`、`stdout`、`stderr`、`result`、`error`、`logsTruncated`、`resultTruncated`、`durationMs` |
 | 工具编排 | 上述状态字段加 `calls[{callId, tool, status}]` |
 | 表单 | 提交结果 JSON（含 `status` 与 `values`） |
-| 计划、图表 | 校验后的结构化对象（步骤数组、列与行） |
+| 计划 | 校验后的结构化对象（步骤数组） |
 | 预览 | `published`、`path`、`title`、`nodes`、`screenshot` |
 | 文件交付 | `files[{path, description?}]` |
 | 记忆 | `success`、`receipt{added, updated, removed, duplicates, characters}`、`limit`、`memories` |

@@ -127,7 +127,7 @@ NativeSessionService：组装原生文件、工作区、凭据、网络和 Provi
 | 轮次、流式与重试 | [轮次、流式与重试](/internals/agent-loop) | 运行生命周期、SSE 分帧、重试与取消 |
 | 模型服务与凭据 | [模型服务与凭据](/internals/providers) | 注册与绑定、协议转换、密钥读取、账号校验 |
 | 系统提示词与上下文 | [系统提示词与上下文](/internals/prompt) | 指令分层、投影、预算与压缩 |
-| 工具注册与执行 | [工具注册与执行](/internals/tools) | 目录组合、按需发现、回执 |
+| 工具注册与执行 | [工具注册与执行](/internals/tools) | 目录组合、权限过滤、回执 |
 | 审批、权限与沙箱 | [审批、权限与沙箱](/internals/permissions) | 只读、逐次审批、代码沙箱 |
 | 工作区与文件 | [工作区与文件](/internals/workspace) | 路径约束、版本校验、原子替换 |
 | 交互预览与 Web UI | [交互预览与 Web UI](/internals/preview) | 预览发布、验证与恢复 |
