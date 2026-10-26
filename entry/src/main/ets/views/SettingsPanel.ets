@@ -194,7 +194,7 @@ export struct SettingsPanel {
               subtitle: t('不影响模型服务与浏览器权限。'), disabled: !this.canEdit(),
               onChange: (value: boolean) => this.saveToggle('webEnabled', value) })
             RowDivider()
-            NavRow({ title: t('搜索服务'), icon: $r('sys.symbol.magnifyingglass'), subtitle: 'DeepSeek / Tavily', compId: 'open-search-settings',
+            NavRow({ title: t('搜索服务'), icon: $r('sys.symbol.magnifyingglass'), subtitle: 'DeepSeek / Tavily / Bing', compId: 'open-search-settings',
               disabled: !this.canEdit(), onTap: this.onSearch })
             RowDivider()
             SwitchRow({ title: t('应用内浏览器'), icon: $r('sys.symbol.link'), compId: 'browser-enabled', isOn: this.browser.policy === 'enabled',

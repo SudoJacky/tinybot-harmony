@@ -16,6 +16,20 @@ export class WorkbenchLayout {
   static readonly DETAIL_MIN: number = 300;
   static readonly DETAIL_MAX_RATIO: number = 0.7;
   static readonly DETAIL_DEFAULT_RATIO: number = 0.4;
+  // The platform caps a custom dialog at 400 vp, which reads as a narrow column in the
+  // middle of a tablet. Above the compact width the dialog follows the window instead:
+  // 70% of it, clamped so long paragraphs keep a readable line length.
+  static readonly DIALOG_MIN_WINDOW: number = 600;
+  static readonly DIALOG_WIDTH_RATIO: number = 0.7;
+  static readonly DIALOG_MIN: number = 440;
+  static readonly DIALOG_MAX: number = 800;
+
+  // Dialog width in vp, or 0 to keep the platform default (phones and split-screen columns).
+  static dialogWidth(windowWidth: number): number {
+    if (!(windowWidth >= WorkbenchLayout.DIALOG_MIN_WINDOW)) { return 0; }
+    return Math.round(Math.min(Math.max(windowWidth * WorkbenchLayout.DIALOG_WIDTH_RATIO,
+      WorkbenchLayout.DIALOG_MIN), WorkbenchLayout.DIALOG_MAX));
+  }
 
   width: number;
   docked: boolean;

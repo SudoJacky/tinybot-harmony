@@ -70,7 +70,21 @@ assert.equal(new WorkbenchLayout(1440, true, true, 280, 2000).chatWidth, 440);
 assert.equal(new WorkbenchLayout(1440, true, true, 280, 2000).detailMaxWidth, 720);
 assert.equal(new WorkbenchLayout(1440, true, true, 280, 100).detailWidth, 300, 'Detail drag clamps low');
 assert.ok(new WorkbenchLayout(1440, true, true, 280).detailWidth > 300, 'First open picks a proportional width');
-console.log('PASS phone, rail, two-pane and three-pane boundaries, drag clamps and protected minimums');
+assert.equal(WorkbenchLayout.dialogWidth(360), 0, 'Phones keep the platform dialog width');
+assert.equal(WorkbenchLayout.dialogWidth(599), 0);
+assert.equal(WorkbenchLayout.dialogWidth(600), 440, 'The first compact-safe dialog is wider than the 400 vp platform cap');
+assert.equal(WorkbenchLayout.dialogWidth(840), 588);
+assert.equal(WorkbenchLayout.dialogWidth(1024), 717);
+assert.equal(WorkbenchLayout.dialogWidth(1440), 800, 'Wide windows stop at the readable cap');
+assert.equal(WorkbenchLayout.dialogWidth(2560), 800);
+assert.equal(WorkbenchLayout.dialogWidth(0), 0, 'An unmeasured window keeps the default');
+for (const width of [600, 700, 840, 900, 1024, 1200, 1440, 2000]) {
+  const dialog = WorkbenchLayout.dialogWidth(width);
+  assert.ok(dialog >= 440 && dialog <= 800, 'Dialog stays inside the readable range at ' + width);
+  assert.ok(dialog < width, 'Dialog leaves a margin at ' + width);
+}
+console.log('PASS phone, rail, two-pane and three-pane boundaries, drag clamps, protected minimums and dialog width');
+
 
 const Page = probe('pages/Index', 'Index', ['hasPreview', 'detailOpen', 'workbench', 'windowChanged', 'openFiles', 'openPreview', 'closePreview', 'previewPresenceChanged', 'onBackPress',
   'beginResize', 'resizeHistory', 'resizeDetail', 'endResize', 'openDetailTab', 'removeDetailTab', 'closeDetailTab',

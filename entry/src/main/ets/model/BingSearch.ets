@@ -27,8 +27,11 @@ export function bingSearchScript(query: string, maximum: number): string {
     const items = [...root.querySelectorAll('li.b_algo')].filter(visible);
     candidates = items.length;
     for (const item of items) {
-      const anchor = item.querySelector('h2 a');
-      if (!anchor || !anchor.textContent.trim()) { invalid++; continue; }
+      const heading = item.querySelector('h2');
+      // Desktop nests the link in h2; mobile ArkWeb results wrap h2 in the link.
+      const anchor = heading?.querySelector('a[href]') || heading?.closest('a[href]');
+      const title = heading?.textContent.trim();
+      if (!anchor || !item.contains(anchor) || !title) { invalid++; continue; }
       try {
         let target = new URL(anchor.href);
         if (bingHost(target.hostname) && target.pathname === '/ck/a') {
@@ -42,7 +45,7 @@ export function bingSearchScript(query: string, maximum: number): string {
         const url = target.href;
         if (seen.has(url)) continue;
         seen.add(url);
-        if (sources.length < maximum) sources.push({ url, title: anchor.textContent.trim().slice(0, 500),
+        if (sources.length < maximum) sources.push({ url, title: title.slice(0, 500),
           snippet: (item.querySelector('.b_caption p')?.textContent || '').trim().slice(0, 4000) });
       } catch (_) { invalid++; }
     }
