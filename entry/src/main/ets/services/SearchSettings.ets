@@ -10,7 +10,9 @@ export async function saveSearchSettings(data: AppData, draft: SearchDraft, cred
   const productivity = data.productivity || defaultProductivity(); const options = productivity.options || defaultAssistantOptions();
   const previous = options.search; const key = draft.apiKey.trim();
   const config: SearchConfig = { provider: draft.provider, enabled: draft.enabled };
-  if (draft.provider === 'deepseek') {
+  if (draft.provider === 'bing-browser') {
+    if (key || draft.baseUrl.trim() || draft.modelProviderId) { throw new Error('Built-in Bing search does not use API credentials or a custom endpoint.'); }
+  } else if (draft.provider === 'deepseek') {
     if (key) { throw new Error(t('DeepSeek 搜索复用模型服务密钥，无需填写独立密钥。')); }
     config.modelProviderId = draft.enabled ? deepSeekSearchProfile(data.providerProfiles || [], draft.modelProviderId).id : draft.modelProviderId;
   } else {
@@ -20,7 +22,7 @@ export async function saveSearchSettings(data: AppData, draft: SearchDraft, cred
   }
   if (draft.enabled && draft.provider === 'tavily' && !config.credentialAlias) { throw new Error('请填写搜索 API Key；更换搜索地址后需要重新填写。'); }
   validateSearchConfig(config);
-  if (draft.enabled && !key) {
+  if (draft.enabled && draft.provider !== 'bing-browser' && !key) {
     const savedKey = await credentials.read(searchCredentialAlias(config, data.providerProfiles || []));
     if (!savedKey.trim()) { throw new Error(t('API Key 为空，请在对应服务中重新配置。')); }
   }

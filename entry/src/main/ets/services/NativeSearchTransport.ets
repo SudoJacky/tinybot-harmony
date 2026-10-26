@@ -22,6 +22,7 @@ export class NativeSearchTransport implements SearchTransport {
   constructor(config: SearchConfig, credentials: CredentialReader, threadId: string, recordUsage: (record: RequestUsage) => void,
     profiles: () => ProviderProfile[]) {
     validateSearchConfig(config);
+    if (config.provider === 'bing-browser') { throw new Error('Built-in Bing search requires the browser transport.'); }
     this.config = JSON.parse(JSON.stringify(config)) as SearchConfig; this.credentials = credentials; this.threadId = threadId; this.recordUsage = recordUsage;
     this.profiles = profiles; this.provider = config.provider === 'tavily' ? new TavilySearchProvider() : new DeepSeekSearchProvider();
   }
