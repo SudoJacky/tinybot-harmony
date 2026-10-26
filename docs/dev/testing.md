@@ -61,6 +61,7 @@ hdc rport tcp:18770 tcp:18770
 | `test-skill-completion.cjs` | Skill 补全与输入框回调 | 是 |
 | `test-appearance.cjs` | 外观偏好、保存回滚、启动应用顺序；API 20 不读取任何 `uiMaterial` 值，普通控件底色支持明暗主题；API 26 关闭光感时向组件传入 `Material.empty` | — |
 | `test-api20-compat.cjs` | 运行时能力判断、定向拒绝/返回 3xx 的传输（http 与 rcp 两条路径）、SSE/MCP 实时回调与取消、接收过程中限制响应大小、空 PixelMap 创建、PDF 文字回退与模块缺失提示、网页逐跳校验、搜索拒绝重定向 | — |
+| `test-storage-usage.cjs` | 双私有根目录、空名称附件引用、含修改备份与空备份目录的残留工作区、临时文件去重、部分删除的实际释放量、清理结果携带读取失败 | 否 |
 | `test-settings-performance.cjs` | 设置响应与持久化 | 是 |
 | `test-settings-navigation.cjs` | 设置子页草稿、保存失败、凭据保留与返回 | 是 |
 | `test-page-transitions.cjs` | 页面首帧、进入/退出、快速反向操作、退出后释放、保留隐藏编辑器与浏览器、同步动画完成与浏览器关闭时序 | 是 |

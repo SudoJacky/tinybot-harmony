@@ -29,6 +29,7 @@ export struct SettingsPanel {
   onSkills: () => void = () => {};
   onUserDocument: () => void = () => {};
   onUsage: () => void = () => {};
+  onStorage: () => void = () => {};
   onModels: () => void = () => {};
   onSearch: () => void = () => {};
   onBackup: () => void = () => {};
@@ -230,6 +231,9 @@ export struct SettingsPanel {
           Column() {
             NavRow({ title: t('Token 用量'), compId: 'open-usage',
               icon: $r('sys.symbol.clock'), onTap: () => this.onUsage() })
+            RowDivider()
+            NavRow({ title: t('存储空间'), compId: 'open-storage', icon: $r('sys.symbol.rectangle_stack'),
+              subtitle: t('查看分类占用并清理缓存'), disabled: !this.canEdit(), onTap: () => this.onStorage() })
             RowDivider()
             NavRow({ title: t('备份与恢复'), compId: 'open-backup', icon: $r('sys.symbol.folder_badge_plus'),
               disabled: !this.canEdit(), onTap: () => this.onBackup() })

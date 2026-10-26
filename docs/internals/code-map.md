@@ -54,6 +54,7 @@ scripts/               构建辅助、自动化测试与冒烟服务
 | `views/ProviderEditorPanel.ets` | 模型服务编辑页：预设、协议、地址、密钥、模型列表 |
 | `views/WorkspacePanel.ets` | 工作区文件浏览、编辑、导入与导出 |
 | `views/UsagePanel.ets` | 用量总览、会话、活动与请求明细 |
+| `views/StoragePanel.ets` | 存储总览、分类明细与安全清理 |
 | `views/BrowserPanel.ets` | 应用内浏览器宿主，保持 Web 实例常驻 |
 | `views/PreviewCaptureHost.ets` | 预览截图宿主：按聊天宽度整卡渲染并截图 |
 
@@ -102,6 +103,7 @@ scripts/               构建辅助、自动化测试与冒烟服务
 | `services/CredentialStore.ets` / `ProfileSettings.ets` | 系统安全存储、服务配置提交与密钥生命周期 |
 | `services/HuaweiAccount.ets` | 华为账号登录、状态校验与 `requireLogin()` |
 | `services/Backup.ets` / `CloudBackup.ets` | 本机导出与华为云备份 |
+| `services/StorageUsage.ets` | Ability/Application 双私有目录扫描、分类计数、孤儿附件与残留工作区识别、读取失败标记、部分删除按实际字节统计 |
 | `model/Diagnostics.ets` / `services/NativeDiagnosticLog.ets` | 埋点聚合、脱敏白名单与唯一 HiLog 输出适配器 |
 | `services/WebTools.ets`、`McpTools.ets`、`SkillTools.ets`、`PresentTools.ets` 等 | 各组工具的实现，统一注册进 `ToolSet` |
 
@@ -123,6 +125,7 @@ scripts/               构建辅助、自动化测试与冒烟服务
 | `model/WorkspaceStore.ets` | 应用级工作区根目录与目录校验 |
 | `model/Diagnostics.ets` / `DiagnosticLog.ets` | 事件、计时与字段白名单 |
 | `model/Usage*.ets` | 用量记录、统计、查询与归属 |
+| `model/StoragePlan.ets` | 存储分类、孤儿判定、缓存/临时文件过期规则与报表结构 |
 
 ## common
 
