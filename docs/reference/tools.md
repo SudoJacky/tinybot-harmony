@@ -25,7 +25,7 @@
 | 信息确认 | `request_user_input` | 1 | 只读模式仍可用 |
 | 任务计划 | `update_plan` | 1 | 只读模式仍可用 |
 | 团队协作 | `team_recruit`、`team_wait`、`team_inspect`、`team_read_result`、`team_control`、`team_resume`、`team_complete_task`、`team_list_messages`、`team_read_message` | 9 | 会话启用团队后加入；员工三项只在子任务内出现 |
-| 预览与图表 | `publish_preview` | 1 | 只读模式仍可用 |
+| 预览 | `publish_preview` | 1 | 只读模式仍可用 |
 | 文件交付 | `present_files` | 1 | 只读模式仍可用 |
 | MCP 远程工具 | `mcp_search_tools`、`mcp_list_tools`、`mcp_call` | 3 | 存在已启用且未被本会话停用的服务 |
 | MCP 服务管理 | `mcp_manage` | 1 | 只读模式不可用 |
@@ -129,7 +129,7 @@
 | 路径 | 职责 |
 | --- | --- |
 | `entry/src/main/ets/services/ToolSet.ets` | 目录汇总与分发，重名工具直接失败 |
-| `entry/src/main/ets/services/ToolDiscovery.ets` | 默认完整授权目录排序；内部显式 opt-in 发现模式 |
+| `entry/src/main/ets/services/ToolCatalog.ets` | 完整授权目录稳定排序；旧搜索回执只保留为历史 |
 | `entry/src/main/ets/services/SelectedTools.ets` | 按会话选择过滤目录与调用 |
 | `entry/src/main/ets/services/RuleTools.ets` | 只读规则过滤 |
 | `entry/src/main/ets/services/WorkspaceTools.ets` | 文件工具定义、参数校验与路径约束 |

@@ -1,13 +1,13 @@
 Tinybot v1.0.6 · 发布准备说明
-更新日期：2026-10-24
+更新日期：2026-10-26
 
 一、版本与产物
 
 需为本版重新运行准备脚本；既有 1.0.5 产物不作为 1.0.6 提交。
 
 包名：com.sudojacky.tinybot
-版本：1.0.6，versionCode=1000006
-设备：phone，最低 HarmonyOS 6.0.0（API 20），目标 API 26；同一包覆盖两套系统
+版本：1.0.6，versionCode=1000006（10-26 增补改动后需重新出包）
+设备：phone、tablet，最低 HarmonyOS 6.0.0（API 20），目标 API 26；同一包覆盖两套系统
 发布包：release，app.debug=false，仅 arm64-v8a
 模拟器：使用单独构建的调试包，包含 x86_64；不随正式发布包分发。
 
@@ -15,6 +15,8 @@ Tinybot v1.0.6 · 发布准备说明
 - 沉浸光感材质仅 API 26 提供；API 20 使用普通配色，外观设置显示“此系统不支持”。
 - PDF 文字提取依赖系统 PDFKit；API 20 未提供该模块，导入 PDF 会在读取前明确提示，不生成空白文本。
 - 携带凭据的网络请求在 API 20 上同样不跟随重定向。
+
+10-24 之后又合入了平板工作台、反馈与建议、API 20 兼容、已启用工具直接提供（移除 tool_search 发现）与最终回复内的交互预览；本资料未包含这些改动的验证记录，重新出包时需同步更新版本说明、商店文案与 CLOUD-TEST.txt。
 
 运行 scripts/prepare-distribution.ps1 后生成独立目录及 ZIP：
 packages/Tinybot-1.0.6-1000006-release-UNSIGNED.app：待云签名的完整发布包。

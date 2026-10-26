@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Tinybot
   text: 运行在 HarmonyOS 上的 AI Agent
-  tagline: 把模型、工具、项目工作区、团队与预览收进一台手机；这份文档讲清它怎么用，也讲清它怎么实现。
+  tagline: 把模型、工具、项目工作区、团队与预览收进手机与平板；这份文档讲清它怎么用，也讲清它怎么实现。
   actions:
     - theme: brand
       text: 快速开始

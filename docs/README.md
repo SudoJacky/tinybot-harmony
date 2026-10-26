@@ -25,7 +25,7 @@ npm run dev      # http://localhost:5173/tinybot-harmony/
 npm run build    # 产物在 docs/.vitepress/dist
 ```
 
-写作约定、链接规则与发布方式见[文档站维护](dev/docs.md)。
+写作约定、链接规则与发布方式见[文档站维护](/dev/docs)。
 
 ## 约定
 

@@ -59,7 +59,7 @@ devecocli build
 | 主题 | 入口 |
 | --- | --- |
 | 安装与第一次对话 | [入门](docs/getting-started/install.md) |
-| 手机功能与设置 | [使用指南](docs/guide/index.md) |
+| 功能与设置 | [使用指南](docs/guide/index.md) |
 | 项目、会话与文件归属 | [项目与共享工作区](docs/guide/projects.md) |
 | 模块职责与运行生命周期 | [架构总览](docs/internals/overview.md) |
 | 工具协议、权限与恢复 | [工具注册与执行](docs/internals/tools.md) |

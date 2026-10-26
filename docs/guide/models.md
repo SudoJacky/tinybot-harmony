@@ -12,6 +12,7 @@ Tinybot 自身不提供模型，它把对话内容发送给用户配置的模型
 | DashScope · 阿里云百炼 | chat-completions | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus`、`qwen-max`、`qwen-turbo` |
 | OpenAI | chat-completions | `https://api.openai.com/v1` | `gpt-4.1` |
 | OpenAI Responses | responses | `https://api.openai.com/v1` | `gpt-4.1` |
+| Google Gemini | gemini | `https://generativelanguage.googleapis.com/v1beta` | 需手动填写 |
 | Z.ai · 智谱 | chat-completions | `https://open.bigmodel.cn/api/paas/v4` | `glm-5.3`、`glm-5.3-flash`、`glm-5.2` |
 | Anthropic | anthropic-messages | `https://api.anthropic.com/v1` | 需手动填写 |
 | Ollama | chat-completions | 需填写手机可访问的服务器地址 | 需填写服务器上已安装的模型 |
@@ -21,17 +22,19 @@ Tinybot 自身不提供模型，它把对话内容发送给用户配置的模型
 
 平板上，对话输入区右下角的模型按钮会直接展开模型菜单：按服务分组列出可用模型，当前模型带勾选，模型较多时可在菜单内搜索；选择后立即生效并关闭菜单，草稿、附件和正在生成的回答都不受影响。推理强度仍在输入区的强度芯片中单独调整。手机上仍从标题栏进入“选择模型”页。
 
-三种流式协议对应不同的请求路径与认证方式：
+四种流式协议对应不同的请求路径与认证方式：
 
 | 协议 | 请求路径 | 认证 | 说明 |
 | --- | --- | --- | --- |
 | `chat-completions` | 基础地址 + `/chat/completions` | `Authorization: Bearer` | 兼容大多数 OpenAI 格式服务；可请求流式用量 |
 | `responses` | 基础地址 + `/responses` | `Authorization: Bearer` | OpenAI 新一代接口，system 段落合并为 `instructions` |
 | `anthropic-messages` | 基础地址 + `/messages` | `x-api-key` 与 `anthropic-version: 2023-06-01` | Messages 要求 `max_tokens`，应用兜底 4096 |
+| `gemini` | 基础地址 + `/models/<模型 ID>:streamGenerateContent?alt=sse` | `x-goog-api-key` | system 合并为 `systemInstruction`，助手角色记为 `model`；模型 ID 需手动填写 |
 
 请求一律以 `stream: true` 发出。兼容选项的实际行为：
 
 - 服务地址末尾的斜杠会被去掉；地址已经包含 `/chat/completions`、`/responses` 或 `/messages` 时不再重复拼接。
+- Gemini 只填主机（如 `https://generativelanguage.googleapis.com`）时自动补 `/v1beta`；模型名可带或不带 `models/` 前缀。
 - 地址后缀与所选协议不一致时保存失败，提示“服务地址的接口路径与所选协议不一致。”
 - Anthropic 只填主机（如 `https://api.anthropic.com`）时自动补 `/v1/messages`。
 - 允许显式填写 HTTP 以连接本地或内网模型；界面同时提示 HTTP 未加密，只适用于可信网络。
@@ -95,7 +98,7 @@ Tinybot 自身不提供模型，它把对话内容发送给用户配置的模型
 | 单个工具参数 | 最多 96 KiB；代码沙箱工具另有自己的输入口径 |
 | 单步推理内容 | 最多 1 MiB |
 | 请求重试 | 仅在尚未派发工具时，对明确的临时传输错误或空闲超时重试 2 次，等待 1 秒、2 秒 |
-| 推理强度发送位置 | Chat Completions 用 `reasoning_effort`；Responses 用 `reasoning.effort`；Anthropic 用 `output_config.effort`，部分模型另加 `thinking: adaptive` |
+| 推理强度发送位置 | Chat Completions 用 `reasoning_effort`；Responses 用 `reasoning.effort`；Anthropic 用 `output_config.effort`，部分模型另加 `thinking: adaptive`；Gemini 不提供推理强度档位 |
 
 ## 上下文统计与压缩
 
@@ -163,6 +166,7 @@ DeepSeek 官方
 | 自建 OpenAI 兼容网关 | 例如 `https://gateway.example.com/v1` | chat-completions | 换基础路径需重填密钥；模型名可与官方同名 |
 | OpenAI Responses | `https://api.openai.com/v1` | responses | 与 Chat Completions 共用同一密钥入口 |
 | Anthropic Messages | `https://api.anthropic.com/v1` | anthropic-messages | 模型 ID 需手动填写 |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta` | gemini | 模型 ID 需手动填写；密钥走 `x-goog-api-key` |
 
 Ollama 通过其 OpenAI 兼容接口连接服务器，不在手机内运行模型。`127.0.0.1` 指向手机本身，应填写手机能访问的实际服务器地址。使用受保护的代理时可关闭“无需 API Key”并填写密钥。
 
