@@ -17,6 +17,8 @@ import { ProductivityPanel, ProductivityEditorRoute, productivityEditorTitle } f
 import { ModelSettingsPanel } from '../views/AssistantPanel';
 import { BackupPanel } from '../views/BackupPanel';
 import { UsagePanel } from '../views/UsagePanel';
+import { StorageCategoryPanel, StoragePanel } from '../views/StoragePanel';
+import { storageCategoryKey } from '../model/StoragePlan';
 import { BranchesPanel } from '../views/BranchesPanel';
 import { WorkspacePanel } from '../views/WorkspacePanel';
 import { SearchSettingsPanel } from '../views/SearchSettingsPanel';
@@ -778,6 +780,15 @@ struct Index {
       NavDestination() { BackupPanel({ app: this.app }) }.title(t('备份与恢复'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'usage') {
       NavDestination() { UsagePanel({ app: this.app }) }.title(t('Token 用量'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'storage') {
+      NavDestination() {
+        StoragePanel({ app: this.app, onCategory: (id: string) => { this.paths.pushPath({ name: 'storage-category', param: id }); } })
+      }.title(t('存储空间'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'storage-category') {
+      NavDestination() {
+        StorageCategoryPanel({ app: this.app, category: param as string })
+      }.title(t(storageCategoryKey(param as string)), { systemMaterial: this.appearance.control })
+        .backgroundColor($r('app.color.page_background'))
     } else if (name === 'productivity') {
       NavDestination() { ProductivityPanel({ app: this.app, tab: (param as string) || 'memory', onUse: () => { this.paths.clear(); },
         onEdit: (tab: string, id: string, onReturn: (warning: string) => void) => {
@@ -809,6 +820,7 @@ struct Index {
           browser: this.browser,
           onAddProvider: () => { this.paths.pushPath({ name: 'provider-presets' }); },
           onUsage: () => { this.paths.pushPath({ name: 'usage' }); },
+          onStorage: () => { this.paths.pushPath({ name: 'storage' }); },
           onModels: () => { this.paths.pushPath({ name: 'model-settings' }); },
           onSearch: () => { this.paths.pushPath({ name: 'search-settings' }); },
           onAppearance: () => { this.paths.pushPath({ name: 'appearance' }); },

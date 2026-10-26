@@ -174,6 +174,12 @@ export function fileSize(bytes: number): string {
   return (bytes / 1024 / 1024).toFixed(1) + ' MB';
 }
 
+// Storage totals reach gigabytes, where one decimal place of MB is unreadable.
+export function storageSize(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) { return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB'; }
+  return fileSize(bytes);
+}
+
 // Token counts and other large integers: 980 / 12.4K / 3.1M.
 export function compactNumber(value: number): string {
   if (value < 1000) { return Math.round(value).toString(); }

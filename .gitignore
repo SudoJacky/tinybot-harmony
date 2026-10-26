@@ -51,3 +51,4 @@ scripts/*
 !scripts/test-feedback.cjs
 !scripts/test-api20-compat.cjs
 !scripts/test-preview-references.cjs
+!scripts/test-storage-usage.cjs
