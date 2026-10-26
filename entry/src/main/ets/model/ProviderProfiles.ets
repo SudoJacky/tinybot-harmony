@@ -1,8 +1,8 @@
 import { t } from './I18n';
 import { ModelConfig } from './Conversation';
 import { builtinProviderInfos } from './Provider';
-import { contextSettings } from './ConversationContext';
-import { protocolUrl } from '../services/providers/WireProtocols';
+import { contextSettings } from './ContextSettings';
+import { protocolUrl } from './ProviderEndpoint';
 
 export interface ModelReference {
   providerId: string;

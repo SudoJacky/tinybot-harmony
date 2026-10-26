@@ -1,122 +1,32 @@
-param([string]$StudioPath = $env:DEVECO_STUDIO_HOME)
+param(
+    [string]$StudioPath = $env:DEVECO_STUDIO_HOME,
+    [ValidateSet('source', 'debug', 'release', 'browser')][string]$Suite = 'debug',
+    [switch]$List,
+    [switch]$SkipHypium
+)
 
 $ErrorActionPreference = 'Stop'
-if (-not $StudioPath) {
-    $StudioPath = Join-Path $env:ProgramFiles 'Huawei\DevEco Studio'
-}
+if (-not $StudioPath) { $StudioPath = Join-Path $env:ProgramFiles 'Huawei\DevEco Studio' }
 $projectPath = Split-Path -Parent $PSScriptRoot
 $nodePath = Join-Path $StudioPath 'tools\node\node.exe'
 $hvigorPath = Join-Path $StudioPath 'tools\hvigor\bin\hvigorw.js'
-if (-not (Test-Path -LiteralPath $nodePath) -or -not (Test-Path -LiteralPath $hvigorPath)) {
+if (-not (Test-Path -LiteralPath $nodePath)) {
     throw 'DevEco Studio not found. Set DEVECO_STUDIO_HOME or pass -StudioPath.'
 }
-& $nodePath (Join-Path $projectPath 'scripts/build-locales.cjs') --check
-if ($LASTEXITCODE -ne 0) { throw 'Locale validation failed. Run node scripts/build-locales.cjs after editing translations.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-huawei-account.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Huawei account tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-hosted-privacy.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Hosted privacy state and startup gating tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-announcements.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Announcement startup, persistence and dialog tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-feedback.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Feedback identity, submission and reply tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-app-information.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'App review navigation and error handling tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/build-builtin-skills.cjs') --check
-if ($LASTEXITCODE -ne 0) { throw 'Built-in Skills are stale. Run node scripts/build-builtin-skills.cjs.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-developer-diagnostics.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Developer diagnostics collection, export and lifecycle tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-unified-logging.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Unified runtime log levels, redaction, export and disabled-path tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-api20-compat.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'API 20 capability gates, redirect-safe transport, bitmap, PDF and web-reading tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-browser.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Browser permission, takeover and runtime pause tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-browser-annotation.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Browser annotation geometry, export and image delivery tests failed.' }
 $env:DEVECO_STUDIO_HOME = $StudioPath
-& $nodePath (Join-Path $projectPath 'scripts/test-gemini.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Gemini protocol and signed tool loop tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-code-highlight.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Markdown code highlighting tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-stream-reveal.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Streaming text reveal tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-conversation-export.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Conversation export metadata, PNG composition and cleanup tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-markdown-performance.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Markdown incremental parsing and renderer tests failed. Build the app first.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-speech-orb.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Voice input UI lifecycle tests failed. Build the app first.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-voice-composer.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Voice composer tests failed. Build the app first.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-drawing-board.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Drawing board and composer attachment tests failed. Build the app first.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-skill-completion.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Skill completion and composer callback tests failed. Build the app first.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-appearance.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Appearance preference and palette tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-settings-performance.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Settings responsiveness and persistence tests failed. Build the app first.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-settings-navigation.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Settings subpage drafts, credentials and return callbacks failed. Build the app first.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-page-transitions.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Page enter/exit lifecycle tests failed. Build the app first.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-tablet-workbench.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Tablet workbench layout and retained-state tests failed. Build the app first.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-history-drawer.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'History drawer activity and animation lifecycle tests failed. Build the app first.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-harness-features.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Search, delivery, references and runtime reliability tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-preview-publication.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Preview publication integration tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-preview-references.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Preview reference placement and compatibility tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-preview-lifecycle.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Preview resource and lazy lifecycle tests failed. Build the app first.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-turn-workflow.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Streaming timeline projection and retained process row tests failed. Build the app first.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-resources.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Resource management integration tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-tool-schemas.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Native tool parameter schema and execution tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-tool-discovery.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Compact tool discovery, permission and runtime tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-prefix-cache.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Request prefix, durable context, team sharing and cache configuration tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-context-usage.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Conversation context usage aggregation tests failed. Build the app first.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-usage-filter-sheet.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Usage filter sheet lifecycle tests failed. Build the app first.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-memory.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Memory maintenance integration tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-code-sandbox.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Code sandbox adapter tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-orchestration.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Orchestration integration tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-tool-details.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Tool detail presentation tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-window-viewport.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Window viewport integration tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-answer-speech-native.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Answer speech and launch shortcut tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-launch-actions-renderer.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Desktop service card and launch action renderer tests failed. Build the app first.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-conversation-share.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Conversation sharing tests failed. Build the app first.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-team-toggle.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Team mode persistence and projection tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-custom-tools.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Custom tool selection and inherited execution tests failed.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-custom-tools-renderer.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Custom tool selection UI callback tests failed. Build the app first.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-workspace-backup-ui.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Workspace backup and failed-save UI callbacks failed. Build the app first.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-help-demo.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Help demo animation lifecycle tests failed. Build the app first.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-legal-documents.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'Bundled legal document reading and text preservation tests failed. Build the app first.' }
-& $nodePath (Join-Path $projectPath 'scripts/test-onboarding.cjs')
-if ($LASTEXITCODE -ne 0) { throw 'First-use onboarding persistence, native mascot and navigation tests failed. Build the app first.' }
+if ($List) {
+    & $nodePath (Join-Path $PSScriptRoot 'run-tests.cjs') --suite $Suite --list
+    if ($LASTEXITCODE -ne 0) { throw 'Test manifest validation failed.' }
+    return
+}
+foreach ($generator in @('build-locales.cjs', 'build-builtin-skills.cjs')) {
+    & $nodePath (Join-Path $PSScriptRoot $generator) --check
+    if ($LASTEXITCODE -ne 0) { throw "$generator validation failed." }
+}
+& $nodePath (Join-Path $PSScriptRoot 'run-tests.cjs') --suite $Suite
+if ($LASTEXITCODE -ne 0) { throw "$Suite test suite failed." }
+if ($SkipHypium -or $Suite -in @('source', 'browser')) { return }
+if (-not (Test-Path -LiteralPath $hvigorPath)) { throw 'Hvigor was not found in the selected DevEco Studio.' }
 $env:DEVECO_SDK_HOME = Join-Path $StudioPath 'sdk'
 $env:JAVA_HOME = Join-Path $StudioPath 'jbr'
 $startedAt = Get-Date

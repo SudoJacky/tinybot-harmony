@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@ohos/hypium';
-import { contextSettings } from '../main/ets/model/ConversationContext';
+import { contextSettings } from '../main/ets/model/ContextSettings';
 import { DEFAULT_SYSTEM_PROMPT } from '../main/ets/model/SystemPrompt';
 import { CONVERSATION_TITLE_PROMPT, sanitizeConversationTitle, titleCharacters } from '../main/ets/model/ConversationTitle';
 import { ModelTurn, ToolCall, ToolDefinition } from '../main/ets/model/Agent';

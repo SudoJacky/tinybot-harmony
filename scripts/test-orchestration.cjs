@@ -6,7 +6,7 @@ const ts = require(studio + '/sdk/default/openharmony/ets/build-tools/ets-loader
 const root = path.resolve('entry/src/main/ets'), cache = new Map();
 let nativeJob;
 const native = {
-  orchestrate(id, source, catalog, invoke) { return new Promise(resolve=>{ nativeJob={id,invoke,resolve,cancels:0,replies:[]}; }); },
+  orchestrate(id, source, catalog, invoke) { return new Promise((resolve,reject)=>{ nativeJob={id,invoke,resolve,reject,cancels:0,replies:[]}; }); },
   cancelOrchestration(id) { assert.equal(id,nativeJob.id);nativeJob.cancels++; },
   settle(id,callId,output,error) { nativeJob.replies.push({id,callId,output,error}); }
 };
@@ -138,6 +138,16 @@ async function main() {
   releaseHost();await observation;assert.equal(finished,true);
   nativeJob.invoke(2,'read_file','{}');await sleep(0);assert.equal(hostCalls,1,'late callbacks cannot dispatch tools');
   console.log('PASS Native adapter propagates cancel, waits for JS and host cleanup, and rejects late dispatch');
+  const { Diagnostics } = load(root+'/model/Diagnostics');
+  const logs=[]; Diagnostics.configureLogSink(record=>logs.push(record));
+  const failed=adapter.execute('return 1;','[]',async()=>'',new Cancellation());
+  const failure=Object.assign(new Error('Native orchestration failed: Cannot dispatch host tool'),{code:'NATIVE_EXCEPTION'});
+  nativeJob.reject(failure);
+  await assert.rejects(failed,error=>error===failure);
+  assert.equal(logs.at(-1).event,'orchestration_failed');
+  assert.equal(logs.at(-1).fields.errorCode,'NATIVE_EXCEPTION');
+  assert.ok(!JSON.stringify(logs).includes(failure.message));
+  console.log('PASS native orchestration failures preserve the original error and emit sanitized diagnostics');
 }
 
 async function visualizeScenarios() {

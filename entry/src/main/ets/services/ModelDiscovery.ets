@@ -2,7 +2,8 @@ import { t } from '../model/I18n';
 import { ProviderDraft } from './ProfileSettings';
 import { ProviderProfile } from '../model/ProviderProfiles';
 import { CredentialStore } from './CredentialStore';
-import { protocolUrl, protocolHeaders, sameCredentialScope } from './providers/WireProtocols';
+import { protocolHeaders } from './providers/WireProtocols';
+import { protocolUrl, sameCredentialScope } from '../model/ProviderEndpoint';
 import { CompatHttp } from './CompatHttp';
 interface ListedModel { id: string; }
 interface ModelList { data: ListedModel[]; }

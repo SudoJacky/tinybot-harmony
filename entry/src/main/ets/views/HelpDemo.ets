@@ -1,7 +1,7 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { AnimatorResult } from '@kit.ArkUI';
 import { Radius } from '../common/Theme';
-import { HelpDemoKind, TutorialStep, TutorialRect, TUTORIAL_STEP_MS, tutorialSteps, tutorialRect,
+import { HelpDemoKind, TutorialStep, TutorialRect, TUTORIAL_WIDTH, TUTORIAL_HEIGHT, TUTORIAL_STEP_MS, tutorialSteps, tutorialRect,
   tutorialResultRect, tutorialEase, tutorialPage } from '../model/HelpTutorial';
 import { HelpTutorialScreen, tutorialText } from './HelpTutorialScreen';
 
@@ -53,8 +53,8 @@ export struct HelpDemo {
   }
   private zoom(): number {
     const rect = this.cameraRect();
-    const base = Math.min((this.stageWidth - 24) / 360, 296 / 720);
-    const focused = Math.min(1.2, (this.stageWidth - 24) / Math.min(360, rect.width + 80), 296 / Math.max(180, rect.height + 100));
+    const base = Math.min((this.stageWidth - 24) / TUTORIAL_WIDTH, 296 / TUTORIAL_HEIGHT);
+    const focused = Math.min(1.2, (this.stageWidth - 24) / Math.min(TUTORIAL_WIDTH, rect.width + 80), 296 / Math.max(180, rect.height + 100));
     return base + (focused - base) * this.focus();
   }
   private cameraRect(): TutorialRect {
@@ -78,11 +78,11 @@ export struct HelpDemo {
   }
   private cameraX(): number {
     const rect = this.cameraRect();
-    return this.cameraOffset(this.stageWidth, 360, 180 + (rect.x + rect.width / 2 - 180) * this.focus());
+    return this.cameraOffset(this.stageWidth, TUTORIAL_WIDTH, TUTORIAL_WIDTH / 2 + (rect.x + rect.width / 2 - TUTORIAL_WIDTH / 2) * this.focus());
   }
   private cameraY(): number {
     const rect = this.cameraRect();
-    return this.cameraOffset(320, 720, 360 + (rect.y + rect.height / 2 - 360) * this.focus());
+    return this.cameraOffset(320, TUTORIAL_HEIGHT, TUTORIAL_HEIGHT / 2 + (rect.y + rect.height / 2 - TUTORIAL_HEIGHT / 2) * this.focus());
   }
   private pointerX(): number {
     const rect = tutorialRect(this.steps[this.index].control);
@@ -138,11 +138,11 @@ export struct HelpDemo {
             HelpTutorialScreen({ screen: this.steps[this.index].after, locale: this.locale,
               typing: tutorialEase((this.phase - 0.55) / 0.25), overlayOnly: this.isOverlay(), motion: this.phase })
               .opacity(this.navigation())
-              .translate({ x: this.pageChange() && !this.isOverlay() ? 360 * (1 - this.navigation()) : 0,
+              .translate({ x: this.pageChange() && !this.isOverlay() ? TUTORIAL_WIDTH * (1 - this.navigation()) : 0,
                 y: this.steps[this.index].after === 'plus' || this.steps[this.index].after === 'presets' ? 200 * (1 - this.navigation()) : 0 })
           }
           this.touch()
-        }.width(360).height(720).borderRadius(18).clip(true)
+        }.width(TUTORIAL_WIDTH).height(TUTORIAL_HEIGHT).borderRadius(18).clip(true)
           .border({ width: 0.5, color: $r('app.color.divider') })
           .scale({ x: this.zoom(), y: this.zoom(), centerX: 0, centerY: 0 })
           .translate({ x: this.cameraX(), y: this.cameraY() }).opacity(this.stageAlpha())

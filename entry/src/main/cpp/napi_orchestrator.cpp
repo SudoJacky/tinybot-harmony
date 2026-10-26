@@ -1,5 +1,6 @@
 #include "napi/native_api.h"
 #include "sandbox.h"
+#include "native_job_result.h"
 #include <condition_variable>
 #include <deque>
 #include <memory>
@@ -10,7 +11,8 @@
 namespace {
 struct Invocation { std::string job; int id; std::string name; std::string arguments; };
 struct Job : tinybot::ToolHost {
-    std::string id, source, catalog, output;
+    std::string id, source, catalog;
+    tinybot::NativeJobResult result;
     tinybot::Budget budget;
     napi_async_work work = nullptr;
     napi_deferred deferred = nullptr;
@@ -72,20 +74,24 @@ void CallJs(napi_env env, napi_value callback, void *, void *data) {
 }
 void Execute(napi_env, void *data) {
     auto &job = *static_cast<Job *>(data);
-    try { job.output = tinybot::Orchestrate(job.source, job.catalog, job.budget, job).ToJson(); }
-    catch (...) { job.output.clear(); }
+    job.result.Execute([&]() { return tinybot::Orchestrate(job.source, job.catalog, job.budget, job).ToJson(); });
     napi_release_threadsafe_function(job.callback, napi_tsfn_release);
 }
 void Complete(napi_env env, napi_status status, void *data) {
     std::unique_ptr<Job> job(static_cast<Job *>(data));
     { std::lock_guard<std::mutex> lock(jobsMutex); jobs.erase(job->id); }
-    napi_value result;
-    if (status == napi_ok && !job->output.empty() &&
-        napi_create_string_utf8(env, job->output.c_str(), job->output.size(), &result) == napi_ok) {
+    napi_value result = nullptr;
+    if (status == napi_ok && job->result.error.empty() && !job->result.output.empty()) {
+        status = napi_create_string_utf8(env, job->result.output.c_str(), job->result.output.size(), &result);
+    }
+    if (status == napi_ok && result != nullptr) {
         napi_resolve_deferred(env, job->deferred, result);
     } else {
-        napi_value message; napi_create_string_utf8(env, "Native orchestration failed", NAPI_AUTO_LENGTH, &message);
-        napi_create_error(env, nullptr, message, &result); napi_reject_deferred(env, job->deferred, result);
+        napi_value message = nullptr, code = nullptr;
+        const std::string detail = job->result.FailureMessage("Native orchestration", job->id, status);
+        napi_create_string_utf8(env, detail.c_str(), detail.size(), &message);
+        napi_create_string_utf8(env, job->result.FailureCode(status), NAPI_AUTO_LENGTH, &code);
+        napi_create_error(env, code, message, &result); napi_reject_deferred(env, job->deferred, result);
     }
     napi_delete_async_work(env, job->work);
 }

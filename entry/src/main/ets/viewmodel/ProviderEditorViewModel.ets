@@ -1,7 +1,7 @@
 import { ProviderProfile, modelIds } from '../model/ProviderProfiles';
 import { ProviderInfo, builtinProviderInfos } from '../model/Provider';
 import { ProviderDraft } from '../services/ProfileSettings';
-import { protocolUrl, sameCredentialScope } from '../services/providers/WireProtocols';
+import { protocolUrl, sameCredentialScope } from '../model/ProviderEndpoint';
 import { t } from '../model/I18n';
 
 @Observed

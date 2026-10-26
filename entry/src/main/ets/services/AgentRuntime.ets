@@ -8,11 +8,11 @@ import { AgentTools, ExecutionGate, LoopEvent, LoopEventType, SteeringInput, run
 import { Cancellation, RunCancelledError } from './Cancellation';
 import { CredentialReader, ModelRequestOptions, ModelSession } from './providers/Provider';
 import { ProviderRegistry } from './providers/ProviderRegistry';
-import { contextSettings } from '../model/ConversationContext';
+import { contextSettings } from '../model/ContextSettings';
 import { PromptSection, runEntries } from '../model/ContextProjection';
 import { ContextSource, PreparedRequest, RequestContext } from './RequestContext';
 import { OrchestrationExecutor, OrchestrationTools } from './OrchestrationTools';
-import { discoveredToolDefinitions, ToolDiscovery } from './ToolDiscovery';
+import { orderedToolDefinitions, ToolCatalog } from './ToolCatalog';
 
 export type RunStatus = 'running' | 'complete' | 'stopped' | 'failed';
 export type RunPhase = 'preparing' | 'executing' | 'finalizing';
@@ -104,7 +104,7 @@ export class AgentRuntime {
 
   fork(): AgentRuntime { return new AgentRuntime(this.providers, this.credentials, this.usage, this.validateAnswer, this.orchestrator, this.gate); }
 
-  private contextTools(tools: AgentTools, _source: ContextSource, _config: ModelConfig, selection: ToolSelection = {}): AgentTools {
+  private contextTools(tools: AgentTools, selection: ToolSelection = {}): AgentTools {
     validateToolSelection(selection);
     const contextTools = new SelectedTools(tools, selection);
     const composed = this.orchestrator && toolEnabled('orchestrate', selection) ? new OrchestrationTools(contextTools, this.orchestrator) : contextTools;
@@ -112,7 +112,7 @@ export class AgentRuntime {
   }
 
   inspectContext(source: ContextSource, config: ModelConfig, tools: AgentTools, extra: ToolDefinition[] = [], selection: ToolSelection = {}): PreparedRequest {
-    return new RequestContext(source, config).inspect(discoveredToolDefinitions(this.contextTools(tools, source, config, selection).definitions()
+    return new RequestContext(source, config).inspect(orderedToolDefinitions(this.contextTools(tools, selection).definitions()
       .concat(extra.filter((tool) => toolEnabled(tool.function.name, selection)))));
   }
 
@@ -198,7 +198,7 @@ export class AgentRuntime {
             persist: hooks.checkpoint, progress: () => {} };
           const source = hooks.context || defaultSource;
           const preparedContext = new RequestContext(source, config);
-          const executionTools = new ToolDiscovery(this.contextTools(tools, source, config, selection));
+          const executionTools = new ToolCatalog(this.contextTools(tools, selection));
           const boundModel = model;
           await runAgentLoop({ model: model, messages: messages, tools: executionTools, toolExecution: toolExecution,
             prepareRequest: async (definitions, pending, cancellation, recoverOverflow) => {

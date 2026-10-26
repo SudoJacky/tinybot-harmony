@@ -42,6 +42,9 @@
 /.dsh/
 /.playwright-cli/
 scripts/*
+!scripts/run-tests.cjs
+!scripts/test-tool-catalog.cjs
+!scripts/test-model-dependencies.cjs
 !scripts/test-usage-filter-sheet.cjs
 !scripts/test-hosted-privacy.cjs
 !scripts/test-conversation-share.cjs

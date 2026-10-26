@@ -1,7 +1,8 @@
 import { util } from '@kit.ArkTS';
 import sandbox from 'libtinybot_sandbox.so';
-import { Cancellation } from './Cancellation';
+import { Cancellation, RunCancelledError } from './Cancellation';
 import { OrchestrationExecutor } from './OrchestrationTools';
+import { Diagnostics } from '../model/Diagnostics';
 
 export class NativeOrchestrationExecutor implements OrchestrationExecutor {
   async execute(source: string, catalog: string, invoke: (name: string, argumentsJson: string) => Promise<string>,
@@ -33,6 +34,11 @@ export class NativeOrchestrationExecutor implements OrchestrationExecutor {
       if (bridgeError) { throw bridgeError as Error; }
       cancellation.check();
       return output;
+    } catch (error) {
+      if (!(error instanceof RunCancelledError)) {
+        Diagnostics.log('error', 'sandbox', 'orchestration_failed', { sessionId: id }, error as Error);
+      }
+      throw error as Error;
     } finally {
       accepting = false;
       // Stop and drain admitted work even when JS fails or leaves a tool unawaited.
