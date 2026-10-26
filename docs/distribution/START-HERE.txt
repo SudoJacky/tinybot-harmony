@@ -1,12 +1,12 @@
-Tinybot v1.0.6 · 发布准备说明
+Tinybot v1.1.0 · 发布准备说明
 更新日期：2026-10-26
 
 一、版本与产物
 
-需为本版重新运行准备脚本；既有 1.0.5 产物不作为 1.0.6 提交。
+本版产物需从 1.1.0 源码重新构建；历史版本产物不作为本版提交。
 
 包名：com.sudojacky.tinybot
-版本：1.0.6，versionCode=1000006（10-26 增补改动后需重新出包）
+版本：1.1.0，versionCode=1001000
 设备：phone、tablet，最低 HarmonyOS 6.0.0（API 20），目标 API 26；同一包覆盖两套系统
 发布包：release，app.debug=false，仅 arm64-v8a
 模拟器：使用单独构建的调试包，包含 x86_64；不随正式发布包分发。
@@ -16,11 +16,11 @@ Tinybot v1.0.6 · 发布准备说明
 - PDF 文字提取依赖系统 PDFKit；API 20 未提供该模块，导入 PDF 会在读取前明确提示，不生成空白文本。
 - 携带凭据的网络请求在 API 20 上同样不跟随重定向。
 
-10-24 之后又合入了平板工作台、反馈与建议、API 20 兼容、已启用工具直接提供（移除 tool_search 发现）与最终回复内的交互预览；本资料未包含这些改动的验证记录，重新出包时需同步更新版本说明、商店文案与 CLOUD-TEST.txt。
+本版包含平板工作台、反馈、API 20 兼容、工具调用与预览改进、存储管理、内置必应搜索及移动搜索修复、平板公告宽度调整。验证记录和外部待办分别见 CLOUD-TEST.txt、RELEASE-GAPS.txt。
 
 运行 scripts/prepare-distribution.ps1 后生成独立目录及 ZIP：
-packages/Tinybot-1.0.6-1000006-release-UNSIGNED.app：待云签名的完整发布包。
-packages/Tinybot-1.0.6-1000006-release-UNSIGNED.hap：同一 APP 内的 entry 模块。
+packages/Tinybot-1.1.0-1001000-release-UNSIGNED.app：待云签名的完整发布包。
+packages/Tinybot-1.1.0-1001000-release-UNSIGNED.hap：同一 APP 内的 entry 模块。
 symbols/app-symbol.zip：ArkTS 符号表。
 symbols/native/arm64-v8a/：与发布包 Build ID 一致的未裁剪原生沙箱库。
 assets/tinybot-icon.png：工程使用的图标。
@@ -34,10 +34,10 @@ package-info.json、SHA256SUMS.txt：从实际包读取的元数据、文件大�
 
 二、本地生成
 
-在项目根目录运行：
-powershell -ExecutionPolicy Bypass -File scripts\prepare-distribution.ps1 -StudioRoot "C:\Program Files\Huawei\DevEco Studio"
+在项目根目录使用 PowerShell 7 运行（避免 Windows PowerShell 5.1 的 UTF-8 脚本编码问题）：
+pwsh -ExecutionPolicy Bypass -File scripts\prepare-distribution.ps1 -StudioRoot "C:\Program Files\Huawei\DevEco Studio"
 
-脚本先检查 ArkTS，再构建 Release APP，验证版本、debug 标志、包内容、arm64 沙箱库和符号 Build ID，最后生成交付目录及 ZIP。已有输出不覆盖；可使用 -OutputDirectory 指定新目录。
+脚本先检查 ArkTS，再构建 Release；需确认 APP 已使用 assembleApp 从本轮 Release 产物组装，验证版本、debug 标志、包内容、arm64 沙箱库和符号 Build ID，最后生成交付目录及 ZIP。已有输出不覆盖；可使用 -OutputDirectory 指定新目录。
 -SkipBuild 仅打包既有产物，仍校验包结构和版本，但不能证明包含最新代码。
 
 三、签名与上传
@@ -46,7 +46,7 @@ powershell -ExecutionPolicy Bypass -File scripts\prepare-distribution.ps1 -Studi
 
 在 DevEco Studio 的 Build > Upload Product 中选择工程原始产物：
 build\outputs\default\tinybot-harmony-default-unsigned.app
-关联现有包名 com.sudojacky.tinybot，核对 1.0.6 / 1000006，使用对应发布证书或云管理签名，附带本版符号表。最终签名包的哈希会变化，以最终文件重新记录。
+关联现有包名 com.sudojacky.tinybot，核对 1.1.0 / 1001000，使用对应发布证书或云管理签名，附带本版符号表。最终签名包的哈希会变化，以最终文件重新记录。
 
 此步骤需在实际平台完成；本地准备不包含创建应用、申请证书、上传、云测试或审核结果。控制台字段以当前平台为准。如版本号已使用，增加 versionCode 后重新构建。
 
