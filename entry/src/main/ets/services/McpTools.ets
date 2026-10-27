@@ -55,11 +55,11 @@ export class McpTools implements AgentTools {
       const tools = await client.list(cancellation);
       const words = (args.query || '').toLowerCase().split(/\s+/).filter((item) => !!item);
       if (call.function.name === 'mcp_search_tools' && !words.length) { throw new ToolFailure('INVALID_ARGUMENTS', t("请提供工具检索关键词。"), 'fix_arguments'); }
-      const selected = call.function.name === 'mcp_search_tools' ? tools.filter((tool) => words.some((word) => (tool.name + ' ' + (tool.description || '')).toLowerCase().includes(word))).slice(0, 12) : tools;
-      const output = JSON.stringify(selected);
-      if (output.length > 48000) { return JSON.stringify({ message: '目录过大，请使用 mcp_search_tools 检索所需工具。', tools: tools.map((item) => item.name).slice(0, 200) }); }
+      const matches = call.function.name === 'mcp_search_tools' ? tools.filter((tool) => words.some((word) => (tool.name + ' ' + (tool.description || '')).toLowerCase().includes(word))) : tools;
+      const selected = call.function.name === 'mcp_search_tools' ? matches.slice(0, 12) : matches;
       const previous = this.catalog.get(server.id) || []; this.catalog.set(server.id, previous.filter((item) => !selected.some((match) => match.name === item.name)).concat(selected));
-      return output;
+      return matches.length > selected.length ? JSON.stringify({ tools: selected, totalMatches: matches.length,
+        truncated: true, recovery: 'refine_query', message: 'Only the first 12 matching schemas were returned. Refine query or use mcp_list_tools for the complete catalog.' }) : JSON.stringify(selected);
     }
     if (call.function.name !== 'mcp_call' || typeof args.tool !== 'string') { throw new ToolFailure('INVALID_ARGUMENTS', t("MCP 参数无效。"), 'fix_arguments'); }
     if (!this.catalog.get(server.id)?.some((item) => item.name === args.tool)) { throw new ToolFailure('SCHEMA_REQUIRED', t("请先使用 mcp_list_tools 读取目录。"), 'discover_tools'); }

@@ -1314,6 +1314,7 @@ struct Index {
             AnimatedPage({ visible: this.detailTabVisible('browser'), retained: true,
               vertical: this.windowWidth < 840, onPresenceChanged: (present: boolean) => this.browserPresenceChanged(present) }) {
               BrowserPanel({ browser: this.browser, expanded: this.detailTabVisible('browser'), presented: this.browserPresent,
+                onPresent: () => { this.setBrowserExpanded(true); this.openDetailTab('browser'); },
                 tabbed: this.workbench().docked, threadId: this.app.active.id,
                 canAnnotate: this.app.canQueueInput && this.app.active.attachments.length < 4,
                 onAnnotation: (threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string) => this.addBrowserAnnotation(threadId, pixel, page, note),

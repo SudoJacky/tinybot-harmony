@@ -20,6 +20,7 @@ interface FileArguments {
   offset?: number;
   limit?: number;
   column?: number;
+  maxBytes?: number;
   glob?: string;
   ignoreCase?: boolean;
   context?: number;
@@ -60,9 +61,10 @@ export class WorkspaceTools implements AgentTools {
     const definitions: ToolDefinition[] = [
       this.extraDefinition('list_files', '列出工作区目录，每页最多 200 项；用 nextOffset 续页。',
         { 'path': { type: 'string', description: '目录相对路径，根目录用 .' }, 'offset': { type: 'integer', description: '列表偏移，默认 0；接续 nextOffset' } }, ['path']),
-      this.extraDefinition('read_file', '按行读取工作区 UTF-8 文本，最多 2000 行或 50 KiB；截断时按 nextOffset/nextColumn 续读。',
+      this.extraDefinition('read_file', '按行读取工作区 UTF-8 文本，默认每页 2000 行或 50 KiB；可调大 limit/maxBytes，无固定内容大小上限。截断时按 nextOffset/nextColumn 续读。',
         { 'path': { type: 'string', description: '文件相对路径' }, 'offset': { type: 'integer', description: '起始行，默认 1' },
-          'limit': { type: 'integer', description: '最多读取的行数，默认 2000' }, 'column': { type: 'integer', description: '首行起始 UTF-16 列，默认 1；续读时使用 nextColumn' } }, ['path']),
+          'limit': { type: 'integer', description: '最多读取的行数，默认 2000' }, 'maxBytes': { type: 'integer', minimum: 4, description: '本页 UTF-8 正文字节预算，默认 51200，可调大' },
+          'column': { type: 'integer', description: '首行起始 UTF-16 列，默认 1；续读时使用 nextColumn' } }, ['path']),
       this.definition('write_file', '创建或完整覆盖 UTF-8 文件，自动建父目录。覆盖前须在本轮读取或成功写入；版本变化后重读。', true),
       this.searchDefinition(false), this.searchDefinition(true),
       this.extraDefinition('edit_file', '按原文批量替换。本轮先读取或成功写入，版本变化后重读。各 oldText 匹配同一份原文，须唯一且不重叠；全部校验后一次写入。仅兼容 CRLF/LF。',
@@ -113,7 +115,7 @@ export class WorkspaceTools implements AgentTools {
       throw new ToolFailure('FS_INVALID_ARGUMENTS', t("工具参数必须是有效的 JSON 对象。"), 'fix_arguments');
     }
     if (!args || Array.isArray(args) || typeof args.path !== 'string' ||
-      Object.keys(args).some((key: string) => !['path', 'content', 'oldText', 'newText', 'edits', 'query', 'offset', 'limit', 'column', 'glob', 'ignoreCase', 'context', 'cursor'].includes(key)) ||
+      Object.keys(args).some((key: string) => !['path', 'content', 'oldText', 'newText', 'edits', 'query', 'offset', 'limit', 'column', 'maxBytes', 'glob', 'ignoreCase', 'context', 'cursor'].includes(key)) ||
       (name === 'write_file' && typeof args.content !== 'string')) {
       throw new ToolFailure('FS_INVALID_ARGUMENTS', t("工具参数不符合要求：必须包含 path，写入还需要 content。"), 'fix_arguments');
     }
@@ -140,7 +142,7 @@ export class WorkspaceTools implements AgentTools {
       return JSON.stringify(await this.files.list(path, cancellation, args.offset));
     }
     if (name === 'read_file') {
-      return this.read(path, cancellation, args.offset, args.limit, args.column);
+      return this.read(path, cancellation, args.offset, args.limit, args.column, args.maxBytes);
     }
     const version = this.observed.get(path);
     return this.receipt(await this.files.write(path, args.content as string, cancellation,
@@ -158,16 +160,16 @@ export class WorkspaceTools implements AgentTools {
     return JSON.stringify({ path: receipt.path, bytes: receipt.bytes, written: receipt.written });
   }
 
-  private async read(path: string, cancellation: Cancellation, offset?: number, limit?: number, column?: number): Promise<string> {
+  private async read(path: string, cancellation: Cancellation, offset?: number, limit?: number, column?: number, maxBytes?: number): Promise<string> {
     const result = await this.files.read(path, cancellation);
-    const output = this.readPage(path, result.content, offset, limit, column);
+    const output = this.readPage(path, result.content, offset, limit, column, maxBytes);
     this.observed.set(path, result.version);
     return output;
   }
 
-  private readPage(path: string, content: string, offset?: number, limit?: number, column?: number): string {
+  private readPage(path: string, content: string, offset?: number, limit?: number, column?: number, maxBytes?: number): string {
     // BOM belongs to the encoding, not the text the model should copy into oldText.
-    const page = textPage(content.startsWith('\uFEFF') ? content.slice(1) : content, offset, limit, column);
+    const page = textPage(content.startsWith('\uFEFF') ? content.slice(1) : content, offset, limit, column, maxBytes);
     return JSON.stringify({ path: path, content: page.content, startLine: page.startLine, totalLines: page.totalLines,
       truncated: page.truncated, nextOffset: page.nextOffset, nextColumn: page.nextColumn });
   }

@@ -9,7 +9,9 @@ export interface OrchestrationExecutor {
 }
 interface CodeArguments { code: string; }
 interface ChildReference { callId: string; tool: string; status: string; }
-interface ExecutionStatus { status: string; calls?: ChildReference[]; }
+interface ChildIssue { callId: string; tool: string; status: string; receipt: Object; }
+interface ChildFailure { code?: string; recovery?: string; conclusion?: Object; }
+interface ExecutionStatus { status: string; calls?: ChildReference[]; issues?: ChildIssue[]; }
 interface CatalogEntry { name: string; description: string; parameters: Object; }
 const NESTED_TOOLS: string[] = ['find_files', 'list_files', 'read_file', 'read_attachment', 'search_file_content',
   'write_file', 'edit_file', 'read_web', 'search_web', 'read_reference', 'read_skill', 'mcp_list_tools', 'mcp_search_tools', 'mcp_call',
@@ -40,7 +42,7 @@ export class OrchestrationTools implements AgentTools {
         'No live preview is displayed during tool execution. Use present_files when source delivery is needed. Prepared child previews and screenshots are preserved even if later work fails. ' +
         'Tool failures reject; report partial failures explicitly. ' +
         'No direct network, filesystem, modules, timers or nested orchestration. Permissions and MCP approvals still apply. ' +
-        'Limits: 32 calls, 4 active host tools, 2 seconds script computation, 120 seconds elapsed, 32 MiB JS memory, 1 MiB result. ' +
+        'Limits: 32 calls, 4 active host tools, 2 seconds script computation, 120 seconds elapsed, 32 MiB JS memory. No separate code, argument or result size caps. ' +
         'Return a compact summary and artifact paths; full child receipts remain in the conversation. ' +
         'Use direct calls for simple one-step work and Team/user-interaction tools. Available nested tools: ' +
         this.nested().map((tool) => tool.function.name).join(', '),
@@ -87,7 +89,10 @@ export class OrchestrationTools implements AgentTools {
         signal.check();
         try { await invocation.executeChild(child, this.inner, signal); }
         catch (error) { fatal = error as Error; signal.cancel(); throw error as Error; }
-        if (child.status !== 'complete') { throw new Error(child.output); }
+        if (child.status !== 'complete') {
+          const failure = JSON.parse(child.output) as ChildFailure;
+          throw new ToolResultError(child.output, failure.code || 'EXECUTION_FAILED', failure.recovery || 'inspect_result_before_retry');
+        }
         return child.output;
       });
       const settled = work.then(() => {}, () => {}); admitted.push(settled);
@@ -112,6 +117,14 @@ export class OrchestrationTools implements AgentTools {
     cancellation.check();
     const status = JSON.parse(result) as ExecutionStatus;
     status.calls = children.map((child): ChildReference => ({ callId: child.call.id, tool: child.call.function.name, status: child.status }));
+    status.issues = [];
+    for (const child of children) {
+      let receipt: Object;
+      try { receipt = JSON.parse(child.output) as Object; } catch (_) { receipt = child.output; }
+      if (child.status !== 'complete' || (receipt as ChildFailure)?.conclusion) {
+        status.issues.push({ callId: child.call.id, tool: child.call.function.name, status: child.status, receipt: receipt });
+      }
+    }
     const output = JSON.stringify(status);
     if (status.status !== 'ok') { throw new ToolResultError(output, status.status === 'timeout' ? 'TIMEOUT' : 'EXECUTION_FAILED', 'inspect_children_before_retry'); }
     return output;

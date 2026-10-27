@@ -36,6 +36,13 @@ int main() {
     Host host;
     auto result = Run("const a = await tools.read({}); return a + await tools.read({});", host);
     Check(result.status == "ok" && result.resultJson == "14" && host.count == 2, "dependent async tools");
+    Host large;
+    result = Run(std::string(150000, ' ') + "const r = await tools.read({code:'x'.repeat(1200000)}); return r.code;", large);
+    Check(result.status == "ok" && result.resultJson.size() == 1200002 && large.count == 1,
+        "large source, child arguments, child reply and final result have no content ceiling");
+    Host detailed;
+    result = Run("throw new Error('diagnostic:' + 'x'.repeat(10000));", detailed);
+    Check(result.status == "error" && result.error.size() > 10000, "complete error message survives native execution");
     Host parallel;
     result = Run("return await Promise.all([tools.read({n:1}),tools.read({n:2})]);", parallel);
     Check(result.status == "ok" && result.resultJson == "[{\"n\":1},{\"n\":2}]" && parallel.maxQueued == 2, "parallel tool dispatch and JSON results");

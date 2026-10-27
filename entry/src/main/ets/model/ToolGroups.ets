@@ -6,7 +6,7 @@ export const TOOL_GROUPS: ToolGroup[] = [
   { id: 'workspace-write', readOnly: false, tools: ['write_file', 'edit_file'] },
   { id: 'context-read', readOnly: true, tools: ['read_attachment', 'read_reference'] },
   { id: 'web', readOnly: true, tools: ['read_web', 'search_web'] },
-  { id: 'browser', readOnly: true, tools: ['browser_open', 'browser_snapshot', 'browser_action', 'browser_handoff', 'browser_close'] },
+  { id: 'browser', readOnly: true, tools: ['browser_open', 'browser_snapshot', 'browser_action', 'browser_capture', 'browser_wait', 'browser_handoff', 'browser_close'] },
   { id: 'calculation', readOnly: true, tools: ['execute_code'] },
   { id: 'orchestration', readOnly: true, tools: ['orchestrate'] },
   { id: 'interaction', readOnly: true, tools: ['request_user_input', 'update_plan'] },

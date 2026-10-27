@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <deque>
 #include <memory>
+#include <limits>
 #include <mutex>
 #include <stdexcept>
 #include <unordered_map>
@@ -99,8 +100,8 @@ napi_value Start(napi_env env, napi_callback_info info) {
     napi_value args[5]; size_t argc = 5;
     auto job = std::make_unique<Job>(); napi_valuetype callbackType;
     if (napi_get_cb_info(env, info, &argc, args, nullptr, nullptr) != napi_ok || argc != 4 ||
-        !Read(env, args[0], 128, job->id) || job->id.empty() || !Read(env, args[1], 96 * 1024, job->source) || job->source.empty() ||
-        !Read(env, args[2], 256 * 1024, job->catalog) || napi_typeof(env, args[3], &callbackType) != napi_ok || callbackType != napi_function) {
+        !Read(env, args[0], 128, job->id) || job->id.empty() || !Read(env, args[1], std::numeric_limits<size_t>::max() - 1, job->source) || job->source.empty() ||
+        !Read(env, args[2], std::numeric_limits<size_t>::max() - 1, job->catalog) || napi_typeof(env, args[3], &callbackType) != napi_ok || callbackType != napi_function) {
         napi_throw_type_error(env, nullptr, "Expected execution id, code, catalog and callback"); return nullptr;
     }
     { std::lock_guard<std::mutex> lock(jobsMutex);
@@ -123,7 +124,7 @@ napi_value Settle(napi_env env, napi_callback_info info) {
     napi_value args[5], result; size_t argc = 5; std::string id; tinybot::ToolReply reply;
     if (napi_get_cb_info(env, info, &argc, args, nullptr, nullptr) != napi_ok || argc != 4 ||
         !Read(env, args[0], 128, id) || napi_get_value_int32(env, args[1], &reply.id) != napi_ok ||
-        !Read(env, args[2], 1024 * 1024, reply.value) || napi_get_value_bool(env, args[3], &reply.error) != napi_ok) {
+        !Read(env, args[2], std::numeric_limits<size_t>::max() - 1, reply.value) || napi_get_value_bool(env, args[3], &reply.error) != napi_ok) {
         napi_throw_type_error(env, nullptr, "Invalid orchestration reply"); return nullptr;
     }
     Reply(id, std::move(reply)); napi_get_undefined(env, &result); return result;

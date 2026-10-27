@@ -11,7 +11,7 @@ struct NativeJobResult {
     template <typename Operation> void Execute(Operation operation)
     {
         try { output = operation(); }
-        catch (const std::exception &failure) { error = std::string(failure.what()).substr(0, 4096); }
+        catch (const std::exception &failure) { error = failure.what(); }
         catch (...) { error = "Unknown native exception"; }
     }
 

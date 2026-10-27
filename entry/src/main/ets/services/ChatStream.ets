@@ -1,5 +1,5 @@
 import { t } from '../model/I18n';
-import { MAX_REASONING_CONTENT, MAX_TOOL_ARGUMENTS, MAX_TOOL_CALLS, ModelTurn, ToolCall, validateToolCalls } from '../model/Agent';
+import { MAX_REASONING_CONTENT, MAX_TOOL_CALLS, ModelTurn, ToolCall, validateToolCalls } from '../model/Agent';
 import { ModelStream } from './providers/EventStreams';
 import { ProviderErrorData, ContextOverflowError, isContextOverflow } from './providers/ProviderErrors';
 
@@ -41,7 +41,6 @@ export class ChatStream implements ModelStream {
   private content: string = '';
   private reasoningContent: string = '';
   private calls: Map<number, ToolCall> = new Map<number, ToolCall>();
-  private frameSize: number = 0;
   private onText: (text: string) => void;
   private onReasoning?: (text: string) => void;
 
@@ -52,9 +51,6 @@ export class ChatStream implements ModelStream {
 
   push(text: string): void {
     this.pending += text;
-    if (this.pending.length > 1024 * 1024) {
-      throw new Error(t("模型服务返回的数据帧过大。"));
-    }
     let newline = this.pending.indexOf('\n');
     while (newline >= 0) {
       const line = this.pending.slice(0, newline).replace(/\r$/, '');
@@ -62,10 +58,6 @@ export class ChatStream implements ModelStream {
       if (line.length === 0) {
         this.dispatch();
       } else if (line.startsWith('data:')) {
-        this.frameSize += line.length;
-        if (this.frameSize > 1024 * 1024) {
-          throw new Error(t("模型服务返回的数据帧过大。"));
-        }
         this.lines.push(line.slice(5).replace(/^ /, ''));
       }
       newline = this.pending.indexOf('\n');
@@ -108,7 +100,6 @@ export class ChatStream implements ModelStream {
     }
     const payload = this.lines.join('\n');
     this.lines = [];
-    this.frameSize = 0;
     if (this.done) {
       throw new Error(t("模型在结束标记后继续返回数据。"));
     }
@@ -194,7 +185,7 @@ export class ChatStream implements ModelStream {
     call.type = delta.type || call.type;
     call.function.name += delta.function?.name || '';
     call.function.arguments += delta.function?.arguments || '';
-    if (call.id.length > 128 || call.function.name.length > 64 || (call.function.name !== 'execute_code' && call.function.arguments.length > MAX_TOOL_ARGUMENTS)) {
+    if (call.id.length > 128 || call.function.name.length > 64) {
       throw new Error(t("模型返回的工具调用过大。"));
     }
   }

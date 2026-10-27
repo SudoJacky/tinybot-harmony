@@ -4,6 +4,7 @@ import { UsageToolActivity } from '../model/Usage';
 import { AgentTools, LoopObserver } from './AgentLoop';
 import { Cancellation, RunCancelledError } from './Cancellation';
 import { ToolFailure, ToolResultError, parseToolArguments } from '../model/ToolFailure';
+import { toolOutcome } from '../model/ToolOutcome';
 
 export class ToolPersistenceError extends Error {}
 // Execution order may differ from source order; the step's receipt array never moves.
@@ -54,6 +55,7 @@ export async function executeToolBatch(step: AgentStep, round: number, tools: Ag
       try { observer.toolActivity?.(step.usage.id, activity); } catch (_) { /* Telemetry cannot stop a task. */ }
     };
     recordActivity();
+    let partial = false;
     try {
       const args = parseToolArguments(tool.call.function.arguments);
       if (!args || typeof args !== 'object' || Array.isArray(args)) {
@@ -84,13 +86,20 @@ export async function executeToolBatch(step: AgentStep, round: number, tools: Ag
           if (!(error instanceof RunCancelledError && cancellation.cancelled)) { throw error as Error; }
         }
       }
-      tool.output = output;
-      tool.status = 'complete';
+      const outcome = toolOutcome(output);
+      partial = outcome.partial;
+      tool.output = outcome.output;
+      tool.status = outcome.failed ? 'failed' : 'complete';
     } catch (error) {
       if (error instanceof ToolPersistenceError) { throw error; }
       if (!cancellation.cancelled) { await observer.waitForExecution?.(cancellation); }
       tool.output = toolError(error as Error);
       tool.status = error instanceof RunCancelledError || (error instanceof ToolResultError && error.code === 'CANCELLED') ? 'cancelled' : 'failed';
+    }
+    if (tool.status === 'failed') {
+      Diagnostics.log('warn', 'tool', 'failed', { operationId: diagnosticId, round: round, chars: tool.output.length });
+    } else if (partial) {
+      Diagnostics.log('info', 'tool', 'partial', { operationId: diagnosticId, round: round, chars: tool.output.length });
     }
     if (Diagnostics.recording) { Diagnostics.end('tool.execute', diagnosticMark, { failed: tool.status === 'failed' ? 1 : 0, cancelled: tool.status === 'cancelled' ? 1 : 0, outputChars: tool.output.length, round: round }); }
     activity.status = tool.status; activity.durationMs = Date.now() - activity.startedAt; recordActivity();

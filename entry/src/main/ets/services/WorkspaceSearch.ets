@@ -1,11 +1,13 @@
 import { WorkspaceFiles } from './WorkspaceFiles';
 import { Cancellation } from './Cancellation';
 import { ToolFailure } from '../model/ToolFailure';
+import { toolError } from '../model/Agent';
 
 export interface SearchOptions { path: string; query?: string; glob?: string; ignoreCase?: boolean; context?: number; limit?: number; cursor?: string; }
 interface SearchTask { path: string; directory: boolean; offset: number; version?: string; }
 interface SearchState { key: string; tasks: SearchTask[]; }
 interface SearchMatch { path: string; line: number; text: string; column: number; before: string[]; after: string[]; }
+interface SkippedFile { path: string; reason: Object; }
 let searchInstance: number = 0;
 
 // Deliberately support globs, not arbitrary regexes. A basename pattern applies at every depth.
@@ -50,7 +52,7 @@ export class WorkspaceSearch {
       if (!saved || saved.key !== key) { throw new ToolFailure('FS_INVALID_CURSOR', 'Search cursor expired or parameters changed. Restart without cursor.', 'restart_search', { path: args.path }); }
       tasks = saved.tasks.map((item: SearchTask): SearchTask => ({ path: item.path, directory: item.directory, offset: item.offset, version: item.version }));
     }
-    const matches: SearchMatch[] = []; const paths: string[] = []; const skipped: string[] = [];
+    const matches: SearchMatch[] = []; const paths: string[] = []; const skipped: string[] = []; const skippedDetails: SkippedFile[] = [];
     let checked = 0; let directories = 0;
     const needle = args.ignoreCase ? (args.query || '').toLowerCase() : args.query || '';
     while (tasks.length && checked < 200 && directories < 100 && (find ? paths.length : matches.length) < limit) {
@@ -75,7 +77,10 @@ export class WorkspaceSearch {
       if (find) { paths.push(task.path); continue; }
       let content: string; let version: string;
       try { const file = await this.files.read(task.path, cancellation); content = file.content; version = file.version; }
-      catch (error) { cancellation.check(); if (task.version !== undefined) { throw error as Error; } skipped.push(task.path); continue; }
+      catch (error) {
+        cancellation.check(); if (task.version !== undefined) { throw error as Error; }
+        skipped.push(task.path); skippedDetails.push({ path: task.path, reason: JSON.parse(toolError(error as Error)) as Object }); continue;
+      }
       if (task.version !== undefined && task.version !== version) { throw new ToolFailure('FS_STALE_SEARCH', 'File changed while paging search results. Restart the search.', 'restart_search', { path: task.path }); }
       const lines = content.split('\n');
       let line = task.offset;
@@ -99,6 +104,8 @@ export class WorkspaceSearch {
       if (this.cursors.size > 32) { this.cursors.delete(Array.from(this.cursors.keys())[0]); }
     }
     return find ? JSON.stringify({ paths: paths, checkedFiles: checked, truncated: tasks.length > 0, nextCursor: cursor }) :
-      JSON.stringify({ matches: matches, skipped: skipped, checkedFiles: checked, truncated: tasks.length > 0, nextCursor: cursor });
+      JSON.stringify({ matches: matches, skipped: skipped, skippedDetails: skippedDetails,
+        reductions: matches.length ? ['Search results contain excerpts of up to 600 characters per line. Use read_file for complete source before editing.'] : [],
+        checkedFiles: checked, truncated: tasks.length > 0, nextCursor: cursor });
   }
 }

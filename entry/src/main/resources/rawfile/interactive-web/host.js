@@ -1,7 +1,8 @@
 /* Trusted outer host. Generated code runs only in an opaque-origin sandbox frame. */
 (() => {
   'use strict';
-  const library = JSON.parse(document.getElementById('vendor').textContent).library;
+  const config = JSON.parse(document.getElementById('vendor').textContent);
+  const library = config.library;
   let port, frame, initialized = false;
   const send = data => port.postMessage(JSON.stringify(data));
   const script = text => '<script>' + text.replace(/<\/script/gi, '<\\/script') + '</script>';
@@ -14,7 +15,7 @@
       failed = true;
       let detail = String(error?.stack || error?.message || error);
       if (detail.includes('THREE.OrbitControls')) detail = 'Use new OrbitControls(camera, renderer.domElement); OrbitControls is a separate preloaded global, not THREE.OrbitControls.\n' + detail;
-      send({ type: 'error', message: detail.slice(0, 2000) });
+      send({ type: 'error', message: detail });
     };
     function tick(time) {
       raf = 0;
@@ -56,7 +57,6 @@
         if (!active) return Promise.reject(new Error('This interface is currently read-only.'));
         if (pending) return Promise.reject(new Error('A save is already in progress.'));
         const serialized = JSON.stringify(values);
-        if (serialized.length > 12000) return Promise.reject(new Error('State exceeds 12,000 characters.'));
         return new Promise((resolve, reject) => { pending = { id: ++seq, resolve, reject }; send({ type: 'save', id: seq, values: JSON.parse(serialized) }); });
       }
     }), writable: false });
@@ -96,6 +96,7 @@
       '<style>html{color-scheme:light}body{margin:0;font:15px system-ui;color:#17251f;background:white}*{box-sizing:border-box}canvas{display:block;max-width:100%;touch-action:none}button,input,select{font:inherit}button{min-height:40px}</style>' +
       '<style>' + spec.css.replace(/<\/style/gi, '<\\/style') + '</style>' +
       (data.autoHeight ? '<style>html,body{min-height:0!important;overflow:auto}</style>' : '') + script(bootstrap) +
+      (data.automation && config.browserScript ? script(config.browserScript) : '') +
       (spec.library === 'three' ? script(library) : '') + '</head><body>' + spec.html +
       script('Promise.resolve((async()=>{\n' + spec.js + '\n})()).then(__tinybotReady).catch(__tinybotError);\n//# sourceURL=tinybot-generated.js') + '</body></html>';
     document.body.append(frame);
@@ -108,16 +109,19 @@
           const data = JSON.parse(event.data);
           if (data.type === 'init') mount(data);
           else if (frame) frame.contentWindow.postMessage({ channel: 'tinybot-host', ...data }, '*');
-        } catch (error) { send({ type: 'error', message: String(error.message).slice(0, 2000) }); }
+        } catch (error) { send({ type: 'error', message: String(error.stack || error.message) }); }
       };
       port.start();
     } else if (frame && event.source === frame.contentWindow && event.data?.channel === 'tinybot-frame') {
       const data = event.data;
-      if (data.type === 'save') send({ type: 'save', id: data.id, values: data.values });
+      if (data.type === 'browserResult' && typeof data.message === 'string') {
+        send({type:'browserResult',id:data.id,message:data.message});
+      }
+      else if (data.type === 'save') send({ type: 'save', id: data.id, values: data.values });
       else if (data.type === 'resize') send({ type: 'resize', height: data.height });
       else if (data.type === 'ready') send({ type: 'ready' });
       else if (data.type === 'snapshotReady') send({ type: 'snapshotReady' });
-      else if (data.type === 'error') send({ type: 'error', message: String(data.message).slice(0, 2000) });
+      else if (data.type === 'error') send({ type: 'error', message: String(data.message) });
     }
   });
   window.__tinybotHostReady = true;

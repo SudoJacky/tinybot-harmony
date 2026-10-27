@@ -153,6 +153,7 @@ export class StorageUsage {
           for (const item of step.steering?.attachments || []) { add(item); }
           for (const tool of toolReceipts(step.tools)) {
             if (tool.previewScreenshot) { add(tool.previewScreenshot.image); }
+            for (const frame of tool.browserObservation?.frames || []) { add(frame.image); }
           }
         }
       }

@@ -10,12 +10,29 @@ import { IconButton } from '../common/Widgets';
 import { t } from '../model/I18n';
 import { KeyCode } from '@kit.InputKit';
 import { Diagnostics } from '../model/Diagnostics';
+import { WebUiView } from './WebUiView';
+import { UiValues } from '../model/InteractiveUi';
+import { Attachments } from '../services/Attachments';
+import { PreviewBrowserRuntime } from '../services/PreviewBrowserRuntime';
+
+@Component
+struct BrowserPreviewPage {
+  content: string = '';
+  runtime?: PreviewBrowserRuntime;
+  @Prop interactive: boolean = false;
+  @State private values: UiValues = {};
+  build() {
+    WebUiView({ content: this.content, browserRuntime: this.runtime, values: this.values, interactive: this.interactive,
+      onSave: async (values: UiValues): Promise<UiValues> => { this.values = values; return values; } })
+  }
+}
 
 // Always keep this host mounted. Expanding changes presentation, never the Web instance.
 @Component
 export struct BrowserPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink browser: BrowserSession;
+  @StorageProp('tinybot.foreground') @Watch('syncBrowserVisibility') private foreground: boolean = true;
   @Prop @Watch('syncBrowserVisibility') expanded: boolean = false;
   @Prop presented: boolean = false;
   @Prop threadId: string = '';
@@ -27,6 +44,7 @@ export struct BrowserPanel {
   onDismiss: () => void = () => {};
   onClose: () => void = () => {};
   onSettings: () => void = () => {};
+  onPresent: () => void = () => {};
   @State private address: string = '';
   @State private addressDirty: boolean = false;
   @State private capturing: boolean = false;
@@ -38,9 +56,15 @@ export struct BrowserPanel {
   private annotationThreadId: string = '';
   private mounted: boolean = false;
   private driver?: NativeBrowserDriver;
-  aboutToAppear(): void { this.mounted = true; this.driver = new NativeBrowserDriver(this.browser); this.browser.attach(this.driver); this.syncBrowserVisibility(); }
+  aboutToAppear(): void {
+    this.mounted = true;
+    this.driver = new NativeBrowserDriver(this.browser, (pixel) => Attachments.savePreview(pixel), () => Math.min(this.webWidth, this.browser.preview?.viewportWidth || this.webWidth));
+    this.browser.attach(this.driver, this.onPresent); this.syncBrowserVisibility();
+  }
   aboutToDisappear(): void { this.mounted = false; if (this.driver) { this.browser.detach(this.driver); } }
-  private syncBrowserVisibility(): void { this.driver?.setFeedbackVisible(this.expanded); }
+  private syncBrowserVisibility(): void {
+    this.driver?.setFeedbackVisible(this.expanded); this.browser.setPresentation(this.expanded, this.foreground);
+  }
   private async annotate(): Promise<void> {
     if (!this.driver || this.capturing || this.showAnnotation || !this.canAnnotate) { return; }
     this.capturing = true; this.annotationThreadId = this.threadId;
@@ -142,6 +166,15 @@ export struct BrowserPanel {
             .width('100%').padding({ left: Space.md, right: Space.md })
         }
         Stack({ alignContent: Alignment.TopStart }) {
+        if (this.browser.preview) {
+          ForEach([this.browser.previewInstance], (_instance: number) => {
+            BrowserPreviewPage({ content: this.browser.previewSpec, interactive: this.expanded && this.foreground,
+              runtime: this.driver?.previewRuntime })
+              .width(this.browser.preview?.viewportWidth || '100%').constraintSize({ maxWidth: '100%' })
+              .onTouch((event: TouchEvent) => this.driver?.userTouch(event))
+              .onMouse((event: MouseEvent) => { if (event.action === MouseAction.Press) { this.browser.takeOver(); } })
+          }, (instance: number) => String(instance))
+        } else {
         Web({ src: 'about:blank', controller: this.driver.controller })
           .enabled(!this.capturing)
           .id('agent-browser-web').width('100%').height('100%').javaScriptAccess(true).domStorageAccess(true)
@@ -169,6 +202,7 @@ export struct BrowserPanel {
               KeyCode.KEYCODE_SHIFT_LEFT, KeyCode.KEYCODE_SHIFT_RIGHT].includes(event.keyCode)) { this.browser.takeOver(); }
             return false;
           })
+        }
           ForEach(this.expanded && this.browser.owner === 'agent' && this.browser.actionFeedback ? [this.browser.actionFeedback] : [],
             (feedback: BrowserActionFeedback) => {
               Stack() {
@@ -182,7 +216,10 @@ export struct BrowserPanel {
                   TransitionEffect.OPACITY.combine(TransitionEffect.scale({ x: 1.4, y: 1.4 })).animation({ duration: Motion.medium, curve: Motion.standard })))
             }, (feedback: BrowserActionFeedback) => String(feedback.id))
         }.width('100%').layoutWeight(1).clip(true)
-          .onAreaChange((_old: Area, next: Area) => { this.webWidth = Number(next.width); this.webHeight = Number(next.height); })
+          .onAreaChange((_old: Area, next: Area) => {
+            if (this.webWidth !== Number(next.width) || this.webHeight !== Number(next.height)) { this.browser.invalidateObservation(); }
+            this.webWidth = Number(next.width); this.webHeight = Number(next.height);
+          })
       }
     }.id('agent-browser-panel').width('100%').height('100%').backgroundColor($r('app.color.surface'))
       // The shared AnimatedPage owns presentation; this Web host stays attached while hidden.

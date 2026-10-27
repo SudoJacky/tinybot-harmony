@@ -90,9 +90,11 @@ const data = {
     id: 'thread-1', title: 'Notes', updatedAt: 1, messages: [{
       id: 'm1', role: 'user', content: 'hi', status: 'complete', error: '',
       attachments: [
-        { id: 'a', name: 'a.jpg', mime: 'image/jpeg', path: 'a.jpg', size: 30 },
-        { id: 'c', name: '', mime: 'image/jpeg', path: 'c.jpg', size: 12 }
-      ]
+        { id: 'a', name: 'a.jpg', mime: 'image/jpeg', path: 'a.jpg', size: 30 }
+      ],
+      steps: [{ content: '', tools: [{ browserObservation: { frames: [
+        { image: { id: 'c', name: '', mime: 'image/jpeg', path: 'c.jpg', size: 12 } }
+      ] } }] }]
     }], pendingInputs: []
   }]
 };

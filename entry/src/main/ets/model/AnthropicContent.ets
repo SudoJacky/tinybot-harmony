@@ -18,7 +18,7 @@ export interface AnthropicContentBlock {
 }
 
 export function validateAnthropicContent(blocks: AnthropicContentBlock[]): void {
-  if (!Array.isArray(blocks) || blocks.length > 129 || JSON.stringify(blocks).length > 2 * 1024 * 1024) {
+  if (!Array.isArray(blocks) || blocks.length > 129) {
     throw new Error(t('Anthropic 思考记录无效或过大。'));
   }
   for (const block of blocks) {

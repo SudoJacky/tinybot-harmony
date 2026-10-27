@@ -106,7 +106,7 @@ void CaptureError(JSContext *ctx, ExecutionResult &result)
     size_t length = 0;
     // Coercion can execute user code, so the same interrupt and memory budget remain installed.
     const char *text = JS_ToCStringLen(ctx, &length, exception);
-    result.error = text ? std::string(text, Utf8Prefix(text, length, 4096)) : "JavaScript execution failed";
+    result.error = text ? std::string(text, length) : "JavaScript execution failed";
     if (text) { JS_FreeCString(ctx, text); }
     JS_FreeValue(ctx, exception);
 }
@@ -194,7 +194,6 @@ JSValue InvokeTool(JSContext *ctx, JSValueConst, int argc, JSValueConst *argv, i
     if (!raw) { JS_FreeValue(ctx, json); return JS_EXCEPTION; }
     std::string arguments(raw, size);
     JS_FreeCString(ctx, raw); JS_FreeValue(ctx, json);
-    if (size > 96 * 1024) { return JS_ThrowRangeError(ctx, "Tool arguments exceed 96 KiB"); }
     JSValue resolving[2];
     JSValue promise = JS_NewPromiseCapability(ctx, resolving);
     if (JS_IsException(promise)) { return promise; }
@@ -275,7 +274,6 @@ void RunAsync(JSContext *ctx, const std::string &source, const std::string &cata
                 else if (!JS_IsNull(json)) {
                     size_t size = 0; const char *raw = JS_ToCStringLen(ctx, &size, json);
                     if (!raw) { CaptureError(ctx, result); }
-                    else if (size > 1024 * 1024) { result.status = "error"; result.error = "Result exceeds 1 MiB"; }
                     else { result.resultJson.assign(raw, size); }
                     if (raw) { JS_FreeCString(ctx, raw); }
                 }
@@ -292,7 +290,6 @@ void RunAsync(JSContext *ctx, const std::string &source, const std::string &cata
             auto pending = std::find_if(state.pending.begin(), state.pending.end(), [&](const PendingTool &item) { return item.id == reply.id; });
             if (pending == state.pending.end()) { result.status = "error"; result.error = "Unknown tool response"; break; }
             JSValue value;
-            if (reply.value.size() > 1024 * 1024) { reply.error = true; reply.value = "Tool result exceeds 1 MiB; read a smaller range"; }
             if (reply.error) {
                 value = JS_NewError(ctx);
                 JS_SetPropertyStr(ctx, value, "message", JS_NewStringLen(ctx, reply.value.data(), reply.value.size()));
