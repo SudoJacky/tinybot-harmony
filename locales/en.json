@@ -2416,5 +2416,7 @@
   "1.1.0 · 2026-10-26": "1.1.0 · 2026-10-26",
   "新增平板工作台、反馈与建议、存储空间管理及无需搜索密钥的内置必应搜索，支持 HarmonyOS 6（API 20）。已启用的工具直接提供给模型，交互预览在最终回复中展示。修复必应移动页面无法提取搜索结果的问题，并优化平板公告宽度。": "Adds the tablet workbench, feedback, storage management, and built-in Bing search without a search API key, with HarmonyOS 6 (API 20) support. Enabled tools are provided directly to the model, and interactive previews appear in the final response. Fixes result extraction on mobile Bing pages and improves announcement width on tablets.",
   "后台执行已被系统或用户中止，本轮已停止。请回到应用后重试。": "Background execution was stopped by the system or user. This turn was stopped. Return to the app to retry.",
-  "未获得长时后台执行权限，本轮已停止。请保持应用在前台后重试。": "Long-running background permission is unavailable. This turn was stopped. Keep the app in the foreground to retry."
+  "未能启动后台任务，本轮已停止。请保持应用在前台后重试。": "Could not start the background task. This turn was stopped. Keep the app in the foreground to retry.",
+  "后台流式传输已达到本次运行时限，本轮已停止。请回到应用后重试。": "The background streaming window has ended. This turn was stopped. Return to the app to retry.",
+  "后台任务释放失败，本轮已停止。请回到应用后重试。": "Could not release the background task. This turn was stopped. Return to the app to retry."
 }

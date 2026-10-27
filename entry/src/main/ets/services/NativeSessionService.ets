@@ -69,7 +69,7 @@ class NativeUsageRecorder implements UsageRecorder {
 
 export class NativeSessionResources implements SessionResources {
   authorizeGeneration(): Promise<void> { return huaweiAccount.requireLogin(); }
-  async prepareGeneration(): Promise<void> { if (this.context) { await backgroundGeneration.waitForReady(); } }
+  async prepareGeneration(): Promise<void> { if (this.context) { await backgroundGeneration.beginTurn(); } }
   private workspaces: WorkspaceStore;
   private providers: ProviderRegistry;
   private approval: ToolApproval;

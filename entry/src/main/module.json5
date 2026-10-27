@@ -21,7 +21,6 @@
     "requestPermissions": [
       { "name": "ohos.permission.INTERNET" },
       { "name": "ohos.permission.KEEP_BACKGROUND_RUNNING" },
-      { "name": "ohos.permission.KEEP_BACKGROUND_RUNNING_SYSTEM" },
       { "name": "ohos.permission.FILE_ACCESS_PERSIST" },
       {
         "name": "ohos.permission.MICROPHONE",
@@ -33,7 +32,7 @@
       {
         "name": "EntryAbility",
         "srcEntry": "./ets/entryability/EntryAbility.ets",
-        "backgroundModes": ["taskKeeping"],
+        "backgroundModes": ["dataTransfer"],
         "description": "$string:EntryAbility_desc",
         "icon": "$media:tinybot_layered_icon",
         "label": "$string:EntryAbility_label",
