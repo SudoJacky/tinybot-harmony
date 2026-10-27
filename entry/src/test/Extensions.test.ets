@@ -7,7 +7,7 @@ import { Cancellation } from '../main/ets/services/Cancellation';
 import { ModelSession } from '../main/ets/services/providers/Provider';
 import { SkillTools } from '../main/ets/services/SkillTools';
 import { ToolSet } from '../main/ets/services/ToolSet';
-import { MAX_WEB_TEXT, WebDocument, WebTools, WebTransport, extractWebPage, validateWebAddress } from '../main/ets/services/WebTools';
+import { WebDocument, WebTools, WebTransport, extractWebPage, validateWebAddress } from '../main/ets/services/WebTools';
 
 const DOCUMENT: string = '---\nname: summarize\ndescription: 总结网页和资料\n---\n先读取 references/guide.md，再总结用户提供的网页。';
 
@@ -144,15 +144,18 @@ export default function extensionTests(): void {
       expect(page.truncated).assertFalse();
     });
 
-    it('boundsTextAndRejectsBinaryOrEmptyDocuments', 0, () => {
+    it('paginatesLargeTextAndRejectsBinaryOrEmptyDocuments', 0, () => {
       const transport = new FixtureWeb();
-      const page = extractWebPage({ url: 'https://example.com', contentType: 'text/plain', body: '中'.repeat(MAX_WEB_TEXT + 1) }, transport);
+      const body = '中'.repeat(100001);
+      const document: WebDocument = { url: 'https://example.com', contentType: 'text/plain', body: body };
+      const page = extractWebPage(document, transport);
       expect(page.truncated).assertTrue();
       expect(page.content.length).assertEqual(8000);
       expect(page.nextOffset).assertEqual(8000);
-      const tail = extractWebPage({ url: 'https://example.com', contentType: 'text/plain', body: '中'.repeat(MAX_WEB_TEXT + 1) }, transport, 8000, MAX_WEB_TEXT);
-      expect(page.content.length + tail.content.length).assertEqual(MAX_WEB_TEXT + 1);
+      const tail = extractWebPage(document, transport, 8000, body.length);
+      expect(page.content + tail.content).assertEqual(body);
       expect(tail.nextOffset === undefined).assertTrue();
+      expect(extractWebPage(document, transport, 0, body.length).content).assertEqual(body);
       rejects(() => { extractWebPage({ url: 'https://example.com', contentType: 'application/pdf', body: '%PDF' }, transport); }, '内容类型');
       rejects(() => { extractWebPage({ url: 'https://example.com', contentType: 'text/html', body: '<script>run()</script>' }, transport); }, '没有可读取');
       rejects(() => { extractWebPage({ url: 'https://example.com', contentType: 'text/plain', body: '\u0000' }, transport); }, '二进制');
