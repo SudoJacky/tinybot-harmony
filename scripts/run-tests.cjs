@@ -68,6 +68,7 @@ const suites = {
     'test-page-transitions.cjs',
     'test-plan-progress.cjs',
     'test-preview-lifecycle.cjs',
+    'test-preview-surface.cjs',
     'test-preview-references.cjs',
     'test-project-tree.cjs',
     'test-send-motion.cjs',

@@ -347,15 +347,23 @@ assert.equal(interaction[0], 'owner-thread'); assert.equal(interaction[1], 'owne
 assert.equal(interaction[2], 'surface'); assert.equal(interaction[3].count, 2);
 console.log('PASS emitted side-preview interactions keep original conversation, message and surface identity');
 // Run the actual emitted card render branches: an inspected preview has only one live surface.
-let surfaces = 0, clicked, label;
+let surfaces = 0, clicked, label, fullscreenButton, fullscreenCover, fullscreenBounds;
 const noopUi = new Proxy({}, { get: () => () => {} });
-const cardGlobals = { Column: noopUi, If: new Proxy({}, { get: (_, name) => name === 'canRetake' ? () => false : () => {} }),
+const cardGlobals = { Column: new Proxy({}, { get: (_, name) => name === 'bindContentCover' ? (...args) => { fullscreenCover = args; } : () => {} }),
+  Stack: new Proxy({}, { get: (_, name) => name === 'onAreaChange' ? callback => { fullscreenBounds = callback; } : () => {} }),
+  __Common__: noopUi,
+  If: new Proxy({}, { get: (_, name) => name === 'canRetake' ? () => false : () => {} }),
   Button: new Proxy({}, { get: (_, name) => name === 'onClick' ? callback => { clicked = callback; } :
     name === 'createWithLabel' ? value => { label = value; } : () => {} }),
-  Btn: {}, Space: {}, HorizontalAlign: {}, t: value => value, ViewPU: { create() {} },
-  InteractiveAnswer: class { constructor() { surfaces++; } } };
-const Card = probe('views/PublishedPreviewCard', 'PublishedPreviewCard', ['initialRender'], cardGlobals);
+  Btn: {}, Space: {}, HorizontalAlign: {}, Alignment: { TopEnd: 'top-right' }, ModalTransition: { ALPHA: 0 }, $r: value => value,
+  IconButton: class { constructor(_parent, props) { fullscreenButton = props; } },
+  t: value => value, ViewPU: { create() {} },
+  NodeContainer: new Proxy({}, { get: (_, name) => name === 'create' ? () => { surfaces++; } : () => {} }),
+  InteractiveAnswer: class { constructor() { throw Error('A preview card must host the existing node, not create another page'); } } };
+const Card = probe('views/PublishedPreviewCard', 'PublishedPreviewCard', ['initialRender', 'openFullscreen', 'closeFullscreen'], cardGlobals);
 const card = Object.assign(new Card(), { inspectable: true, inspected: false, expanded: true,
+  fullscreen: false, inlineHeight: 400, fullscreenView() {},
+  surface: { inlineMount: {}, entered: 0, exited: 0, enterFullscreen() { this.entered++; }, exitFullscreen() { this.exited++; } },
   preview: { id: 'preview', path: 'demo.html', content: 'demo', superseded: false },
   onInspect() { this.inspected = true; },
   observeComponentCreation2(callback) { callback(1, true); }, ifElseBranchUpdateFunction(_branch, render) { render(); } });
@@ -369,6 +377,38 @@ surfaces = 0; card.initialRender(); assert.equal(surfaces, 1);
 clicked.call(card); surfaces = 0; card.initialRender(); assert.equal(surfaces, 0);
 card.inspected = false; card.initialRender(); assert.equal(surfaces, 1);
 console.log('PASS final-answer inline preview transfers its live surface to the side panel and restores it on close');
+
+card.inspectable = false; card.inspected = false; surfaces = 0; card.initialRender();
+assert.equal(fullscreenButton.label, '全屏预览', 'Fullscreen must be available on phones without the side-panel entry');
+fullscreenBounds({}, { height: 420 }); assert.equal(card.inlineHeight, 420);
+fullscreenButton.onTap(); assert.equal(card.fullscreen, true);
+surfaces = 0; card.initialRender(); assert.equal(surfaces, 1, 'The inline host must remain mounted while its page moves to fullscreen');
+assert.equal(card.surface.entered, 1);
+fullscreenBounds({}, { height: 900 }); assert.equal(card.inlineHeight, 420, 'The inline placeholder must keep the chat row stable');
+fullscreenCover[2].onWillDismiss(); assert.equal(card.fullscreen, false, 'System back must dismiss fullscreen'); assert.equal(card.surface.exited, 1);
+card.openFullscreen(); assert.equal(card.fullscreen, false, 'Do not bind a second cover while the first native host is disappearing');
+fullscreenCover[2].onDisappear(); assert.equal(card.fullscreenClosing, false);
+surfaces = 0; card.initialRender(); assert.equal(surfaces, 1, 'Closing fullscreen restores the inline preview');
+console.log('PASS phone preview fullscreen entry, single live surface, stable row geometry and system-back exit');
+
+let fullscreenHost, fullscreenExit, fullscreenArea, resizedHeight;
+const Fullscreen = probe('views/PreviewFullscreen', 'PreviewFullscreen', ['initialRender', 'host'], {
+  Column: new Proxy({}, { get: (_, name) => name === 'onAreaChange' ? callback => { fullscreenArea = callback; } : () => {} }),
+  Row: noopUi, Text: noopUi, If: new Proxy({}, { get: (_, name) => name === 'canRetake' ? () => false : () => {} }),
+  IconButton: class { constructor(_parent, props) { fullscreenExit = props; } },
+  NodeContainer: new Proxy({}, { get: (_, name) => name === 'create' ? controller => { fullscreenHost = controller; } : () => {} }),
+  InteractiveAnswer: class { constructor() { throw Error('Fullscreen must not create another page'); } },
+  FontWeight: {}, TextOverflow: {}, SafeAreaType: {}, SafeAreaEdge: {}, t: value => value, $r: value => value, ViewPU: { create() {} }
+});
+let fullscreenInteractions = 0, fullscreenClosed = false;
+const surface = { fullscreenMount: {}, resizeFullscreen(height) { resizedHeight = height; } };
+const fullscreen = Object.assign(new Fullscreen(), { title: 'Preview', surface, appearance: {},
+  onClose() { fullscreenClosed = true; },
+  observeComponentCreation2(callback) { callback(1, true); }, ifElseBranchUpdateFunction(_branch, render) { render(); } });
+fullscreen.initialRender(); assert.equal(fullscreenHost, surface.fullscreenMount);
+fullscreenArea({}, { height: 520 }); assert.equal(resizedHeight, 520);
+fullscreenExit.onTap(); assert.equal(fullscreenClosed, true); assert.equal(fullscreenExit.label, '退出全屏');
+console.log('PASS fullscreen viewer hosts the same surface, updates its viewport and exposes an exit button');
 
 // Exercise the emitted final-answer card arguments, including the real inspect callback.
 const bubble = emitted('views/MessageBubble', 'MessageBubble');

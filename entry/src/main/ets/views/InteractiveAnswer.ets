@@ -25,6 +25,7 @@ struct UiNodeView {
   @Prop interactive: boolean = false;
   @Prop ready: boolean = false;
   @Prop snapshotMode: boolean = false;
+  @Prop viewportHeight: number = 0;
   onWebReady: (id: string, error: string) => void = () => {};
   @Prop layoutWidth: number | string = '100%';
   onWebSave: (values: UiValues) => Promise<UiValues> = async () => { throw new Error('Web UI save handler missing'); };
@@ -55,7 +56,7 @@ struct UiNodeView {
   childrenView() {
     ForEach(this.children(), (child: UiNode) => {
       UiNodeView({ node: this.nodes.find((item: UiNode) => item.id === child.id) as UiNode, nodes: this.nodes, values: this.values, interactive: this.interactive,
-        ready: this.ready, snapshotMode: this.snapshotMode, onWebReady: this.onWebReady, presentation: this.presentation, surfaceKey: this.surfaceKey,
+        ready: this.ready, snapshotMode: this.snapshotMode, viewportHeight: this.viewportHeight, onWebReady: this.onWebReady, presentation: this.presentation, surfaceKey: this.surfaceKey,
         layoutWidth: this.childWidth(), onWebSave: this.onWebSave, onEdit: this.onEdit, onAction: this.onAction, onCommit: this.onCommit, onInvalid: this.onInvalid })
     }, (child: UiNode) => child.id)
   }
@@ -149,6 +150,7 @@ struct UiNodeView {
         } else if (this.node.kind === 'web') {
           if (this.ready) {
           WebUiView({ content: this.node.data || '', values: this.values, interactive: this.interactive, onSave: this.onWebSave,
+            viewportHeight: this.viewportHeight,
             retainedHeight: this.presentation?.webHeights.get(this.surfaceKey + '/' + this.node.id) || 0,
             onHeight: (height: number) => { this.presentation?.webHeights.set(this.surfaceKey + '/' + this.node.id, height); },
             snapshotMode: this.snapshotMode, preflight: this.snapshotMode, onValidation: (error: string) => this.onWebReady(this.node.id, error) })
@@ -174,6 +176,7 @@ struct UiSurface {
   @Prop @Watch('refresh') closed: boolean;
   @Prop @Watch('refresh') streaming: boolean;
   @Prop available: boolean = false;
+  @Prop viewportHeight: number = 0;
   @Prop snapshotMode: boolean = false;
   onWebReady: (id: string, error: string) => void = () => {};
   surfaceKey: string = '';
@@ -269,7 +272,7 @@ struct UiSurface {
       }
       ForEach(this.nodes.filter((node: UiNode) => !node.parent && uiNodeVisible(node, this.values)), (node: UiNode) => {
         UiNodeView({ node: this.nodes.find((item: UiNode) => item.id === node.id) as UiNode, nodes: this.nodes, values: this.values, interactive: this.complete && this.available && !this.busy,
-          ready: this.complete && !this.streaming, snapshotMode: this.snapshotMode,
+          ready: this.complete && !this.streaming, snapshotMode: this.snapshotMode, viewportHeight: this.viewportHeight,
           presentation: this.presentation, surfaceKey: this.surfaceKey,
           onWebReady: (id: string, error: string) => this.onWebReady(this.surfaceKey + '/' + id, error), onWebSave: (values: UiValues) => this.saveWeb(values),
           onEdit: (item: UiNode, value: UiValue, commit: boolean) => this.edit(item, value, commit),
@@ -290,6 +293,7 @@ struct UiSurface {
 
 @Component
 export struct InteractiveAnswer {
+  @Prop viewportHeight: number = 0;
   @Prop frameless: boolean = false;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   presentation?: UiPresentation;
@@ -322,7 +326,7 @@ export struct InteractiveAnswer {
         } else {
           UiSurface({ source: this.parts[index].content, closed: this.parts[index].closed, streaming: this.streaming, available: this.available, frameless: this.frameless,
             surfaceKey: this.step + ':' + (Number(part.key) + this.surfaceOffset), presentation: this.presentation,
-            snapshotMode: this.snapshotMode, onWebReady: this.onWebReady, saved: this.saved, onInteract: this.onInteract })
+            snapshotMode: this.snapshotMode, viewportHeight: this.viewportHeight, onWebReady: this.onWebReady, saved: this.saved, onInteract: this.onInteract })
         }
       }, (part: UiPart) => part.kind + '-' + part.key)
     }.width('100%').alignItems(HorizontalAlign.Start)

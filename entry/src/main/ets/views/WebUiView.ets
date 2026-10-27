@@ -23,6 +23,7 @@ export struct WebUiView {
   @Prop preflight: boolean = false;
   @Prop snapshotMode: boolean = false;
   @Prop retainedHeight: number = 0;
+  @Prop @Watch('viewportChanged') viewportHeight: number = 0;
   browserRuntime?: PreviewBrowserRuntime;
   private browserAttachment: number = -1;
   onHeight: (height: number) => void = () => {};
@@ -51,11 +52,20 @@ export struct WebUiView {
   private reloadPending: boolean = false;
   private snapshotRequested: boolean = false;
   private instanceId: number = ++webViewSequence;
+  private measuredHeight: number = 0;
+  private viewportChanged(): void {
+    if (this.viewportHeight > 0) { this.heightValue = this.viewportHeight; }
+    else if (this.spec) {
+      this.heightValue = webUiAutoHeight(this.spec) ? this.measuredHeight || this.retainedHeight || this.spec.height : this.spec.height;
+      if (this.measuredHeight > 0 && webUiAutoHeight(this.spec)) { this.onHeight(this.heightValue); }
+    }
+  }
   aboutToAppear(): void {
     this.mounted = true;
     try {
       this.spec = parseWebUi(this.content);
       this.heightValue = webUiAutoHeight(this.spec) && this.retainedHeight > 0 ? this.retainedHeight : this.spec.height;
+      this.viewportChanged();
     } catch (error) { this.report(error as Error); return; }
     this.visibilityChanged();
   }
@@ -127,11 +137,13 @@ export struct WebUiView {
     if (!this.preflight && (this.scrolling || !this.visible || !this.foreground)) { this.reloadPending = true; return; }
     this.reloadPending = false;
     const generation = ++this.generation;
+    this.measuredHeight = 0;
     this.closePorts(); this.ready = false; this.error = ''; this.snapshotRequested = false;
     const oldSnapshot = this.snapshot; this.snapshot = undefined; await oldSnapshot?.release();
     try {
       this.spec = parseWebUi(this.content);
       if (!webUiAutoHeight(this.spec)) { this.heightValue = this.spec.height; }
+      this.viewportChanged();
       const assets = await webUiAssets(this.getUIContext().getHostContext() as common.UIAbilityContext, this.spec.library === 'three');
       if (!this.mounted || generation !== this.generation) { return; }
       if (!this.preflight && (this.scrolling || !this.visible || !this.foreground)) { this.reloadPending = true; return; }
@@ -186,7 +198,9 @@ export struct WebUiView {
       }
       if (message.type === 'error') { throw new Error(message.message); }
       if (message.type === 'resize') {
-        if (this.spec && webUiAutoHeight(this.spec)) { this.heightValue = Math.max(48, Math.min(800, Math.ceil(message.height as number))); }
+        if (this.spec && webUiAutoHeight(this.spec)) { this.measuredHeight = Math.max(48, Math.min(800, Math.ceil(message.height as number))); }
+        if (this.viewportHeight > 0) { return; }
+        if (this.spec && webUiAutoHeight(this.spec)) { this.heightValue = this.measuredHeight; }
         this.onHeight(this.heightValue);
         return;
       }
