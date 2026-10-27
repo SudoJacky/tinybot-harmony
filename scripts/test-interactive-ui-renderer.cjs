@@ -238,6 +238,7 @@ if (failed) process.exitCode = 1;
       if (id === '@ohos:multimedia.image') return { default: { createPixelMapFromSurface: id => { assert.equal(id, 'web-surface'); return captureSurface(); } } };
       if (id === '@ohos:hilog') return { default: { info() {}, warn() {}, error() {} } };
       if (id.includes('WebUi&')) return model(path.join(root, 'model/WebUi'));
+      if (id.includes('BrowserScripts&')) return model(path.join(root, 'model/BrowserScripts'));
       if (id.includes('WebUiAssets&')) return { webUiAssets: async () => ['', ''] };
       return globals.require(id);
     }

@@ -4,6 +4,7 @@ import { UsageToolActivity } from '../model/Usage';
 import { AgentTools, LoopObserver } from './AgentLoop';
 import { Cancellation, RunCancelledError } from './Cancellation';
 import { ToolFailure, ToolResultError, parseToolArguments } from '../model/ToolFailure';
+import { CheckpointQueue } from './CheckpointQueue';
 import { toolOutcome } from '../model/ToolOutcome';
 
 export class ToolPersistenceError extends Error {}
@@ -13,12 +14,12 @@ export async function executeToolBatch(step: AgentStep, round: number, tools: Ag
   mode: ToolExecutionMode = 'parallel'): Promise<void> {
   const sequential = mode === 'sequential' || step.tools.some((tool) =>
     definitions.find((definition) => definition.function.name === tool.call.function.name)?.executionMode === 'sequential');
-  let saves: Promise<void> = Promise.resolve();
-  const checkpoint = (): Promise<void> => {
-    const work = saves.then(() => observer.checkpoint());
-    // A failed save is returned to its caller; later completed receipts still get saved.
-    saves = work.then(() => {}, () => {});
-    return work;
+  const saves = new CheckpointQueue(observer.checkpoint);
+  const checkpoint = (): Promise<void> => saves.save();
+  const publish = (type: 'tool_start' | 'tool_end', tool: ToolExecution): void => {
+    const mark = Diagnostics.begin();
+    try { observer.event({ type: type, step: round, toolCallId: tool.call.id }); }
+    finally { if (Diagnostics.recording) { Diagnostics.end('tool.publish', mark); } }
   };
   const prepare = async (batch: ToolExecution[]): Promise<void> => {
     await observer.waitForExecution?.(cancellation);
@@ -36,7 +37,7 @@ export async function executeToolBatch(step: AgentStep, round: number, tools: Ag
   const execute = async (tool: ToolExecution): Promise<void> => {
     await observer.waitForExecution?.(cancellation);
     if (cancellation.cancelled) { tool.status = 'pending'; cancellation.check(); }
-    observer.event({ type: 'tool_start', step: round, toolCallId: tool.call.id });
+    publish('tool_start', tool);
     if (cancellation.cancelled) { tool.status = 'pending'; cancellation.check(); }
     const diagnosticId = Diagnostics.nextId(); const diagnosticMark = Diagnostics.begin(diagnosticId);
     if (Diagnostics.recording) { Diagnostics.event('tool.start', { round: round, argumentChars: tool.call.function.arguments.length }, diagnosticId); }
@@ -69,7 +70,7 @@ export async function executeToolBatch(step: AgentStep, round: number, tools: Ag
             await executeToolBatch(nestedStep, round, nestedTools, nestedTools.definitions(), signal, {
               checkpoint: checkpoint, toolActivity: observer.toolActivity, waitForExecution: observer.waitForExecution,
               refreshToolResult: observer.refreshToolResult,
-              event: (event) => observer.event({ type: event.type, step: round, toolCallId: tool.call.id })
+              event: (event) => observer.event({ type: event.type, step: round, toolCallId: event.toolCallId, parentToolCallId: tool.call.id })
             });
           } catch (error) {
             if (error instanceof RunCancelledError) { throw error; }
@@ -103,7 +104,7 @@ export async function executeToolBatch(step: AgentStep, round: number, tools: Ag
     }
     if (Diagnostics.recording) { Diagnostics.end('tool.execute', diagnosticMark, { failed: tool.status === 'failed' ? 1 : 0, cancelled: tool.status === 'cancelled' ? 1 : 0, outputChars: tool.output.length, round: round }); }
     activity.status = tool.status; activity.durationMs = Date.now() - activity.startedAt; recordActivity();
-    observer.event({ type: 'tool_end', step: round, toolCallId: tool.call.id });
+    publish('tool_end', tool);
     // Cancellation never discards an operation that already committed successfully.
     await checkpoint();
   };

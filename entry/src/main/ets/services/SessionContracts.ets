@@ -11,11 +11,15 @@ import { AgentTools } from './AgentLoop';
 import { ContextTokenItem } from '../model/ContextBreakdown';
 import { ProjectData } from '../model/Project';
 import { SharedFolder } from '../model/SharedFolders';
+import { ToolExecution } from '../model/Agent';
+
+export interface MessageCheckpoint { threadId: string; messageId: string; }
 
 export interface SessionRepository {
   load(): Promise<AppData>;
   // Capture call-time values synchronously. Omitted IDs mean a full save; otherwise unchanged threads are reused.
-  save(data: AppData, changedThreadIds?: string[]): Promise<void>;
+  // Runtime checkpoints change one message plus thread metadata. Other saves recapture changed threads in full.
+  save(data: AppData, changedThreadIds?: string[], message?: MessageCheckpoint): Promise<void>;
 }
 
 export interface SessionResources {
@@ -62,7 +66,7 @@ export interface SessionPreferences {
 
 // Structural changes carry detached snapshots; preference changes omit transcripts.
 export interface SessionEvent {
-  kind: 'snapshot' | 'preferences' | 'message' | 'text' | 'reasoning' | 'draft' | 'state' | 'thread' | 'teams' | 'task-complete';
+  kind: 'snapshot' | 'preferences' | 'message' | 'tool' | 'text' | 'reasoning' | 'draft' | 'state' | 'thread' | 'teams' | 'task-complete';
   state: SessionState;
   preferences?: SessionPreferences;
   data?: AppData;
@@ -71,6 +75,8 @@ export interface SessionEvent {
   threadId?: string;
   message?: MessageData;
   messageId?: string;
+  tool?: ToolExecution;
+  parentToolCallId?: string;
   content?: string;
   step?: number;
   stepContent?: string;

@@ -12,6 +12,7 @@ const source = path.resolve(__dirname, '../entry/src/main/ets');
 const fixture = path.resolve(__dirname, '../.hvigor/native-productivity-' + crypto.randomUUID());
 fs.mkdirSync(fixture, { recursive: true });
 const handles = new Map(), handlePaths = new Map(), writableHandles = new Set(); let failManifest = false; let failSharedRename = false;
+let failConversationWorker = false;
 let sharedWriteFailure = ''; let cancelSharedWrite; let failBackupRename = false; const usageWrites = [];
 const cloudLocations = new Map(); let failCloudCopy = false; let cloudCopyError;
 const nativePath = p => {
@@ -113,7 +114,10 @@ const kits = {
     fileUri: {getUriFromPath:p=>'file://'+p, FileUri: class { constructor(uri) { this.path = decodeURIComponent(new URL(uri).pathname); } }},
     picker: { DocumentViewPicker: class { async save() {return [selectedFile];} async select() {return [selectedFile];} } } }, '@kit.ImageKit': { image: {} }, '@kit.NetworkKit': { http },
   '@kit.MediaLibraryKit': {}, '@kit.ShareKit': {}, '@kit.ArkGraphics2D': { drawing: {} },
-  '@kit.ArkTS': { util: { generateRandomUUID: () => crypto.randomUUID(), TextEncoder: Encoder, TextDecoder: Decoder,
+  '@kit.ArkTS': { taskpool: { execute: async (work, ...args) => {
+    if (failConversationWorker) throw Error('conversation worker unavailable');
+    return work(...args);
+  } }, util: { generateRandomUUID: () => crypto.randomUUID(), TextEncoder: Encoder, TextDecoder: Decoder,
     Base64Helper: class { async encodeToString(bytes) { return Buffer.from(bytes).toString('base64'); } encodeToStringSync(bytes) { return Buffer.from(bytes).toString('base64'); } decodeSync(text) { return Uint8Array.from(Buffer.from(text,'base64')); } } } },
   '@kit.AssetStoreKit': { asset: {} }, '@kit.BasicServicesKit': { deviceInfo: { sdkApiVersion: 26 }, zlib: {
     ReturnStatus: { STREAM_END: 1 }, CompressFlushMode: { FINISH: 4 }, createZipSync: () => { let current; return {
@@ -149,6 +153,12 @@ CredentialStore.prototype.write = async (alias, secret) => { if (secrets.has(ali
 CredentialStore.prototype.update = async (alias, secret) => { assert.ok(secrets.has(alias)); secrets.set(alias,secret); };
 CredentialStore.prototype.remove = async alias => { secrets.delete(alias); };
 const server = { id:'s',name:'Fixture',url:'https://fixture.invalid/mcp',enabled:true,credentialAlias:'fixture-key' };
+function approvalRequested(approval) {
+  const request = approval.request.bind(approval);
+  return new Promise(resolve => { approval.request = (...args) => {
+    approval.request = request; const pending = request(...args); resolve(); return pending;
+  }; });
+}
 function respond(request, result, sse = false) {
   const value = JSON.stringify({ jsonrpc:'2.0',id:JSON.parse(request.options.extraData).id,result });
   request.emit('headersReceive', { 'Mcp-Session-Id':'fixture-session' }); request.callback(null,200);
@@ -168,9 +178,13 @@ function idleRuntime(vault) {
   const { ProviderRegistry } = load(path.join(source, 'services/providers/ProviderRegistry'));
   return new AgentRuntime(new ProviderRegistry(), vault);
 }
-let completedTests = 0;
+let completedTests = 0, currentTest = '', suiteCompleted = false;
+process.on('beforeExit', () => {
+  if (!suiteCompleted) { console.error('Native adapter integration did not finish: ' + currentTest); process.exitCode = 1; }
+});
 async function test(name, run) {
   if (process.env.TEST_FILTER && !name.includes(process.env.TEST_FILTER)) return;
+  currentTest = name;
   await run(); completedTests++; console.log('PASS '+name);
 }
 (async () => {
@@ -236,6 +250,30 @@ async function test(name, run) {
     const persisted = JSON.parse(fs.readFileSync(path.join(fixture, 'sessions-v2', inactiveFile), 'utf8'));
     assert.equal(persisted.messages[1].status, recovered.threads[1].messages[1].status);
     assert.equal(persisted.messages[1].error, recovered.threads[1].messages[1].error);
+  });
+  await test('runtime checkpoints reuse history and worker failures retain the durable snapshot', async () => {
+    const root=path.join(fixture,'runtime-checkpoints');fs.mkdirSync(root);
+    const data=model.emptyData();data.activeThreadId='runtime';data.threads=[{id:'runtime',title:'Original',updatedAt:1,messages:[
+      {id:'question',role:'user',content:'historical context',status:'complete',error:''},
+      {id:'answer',role:'assistant',content:'working',status:'generating',error:''}
+    ]}];
+    const repository=new ConversationStore(root);await repository.save(data);
+    const history=data.threads[0].messages[0],answer=data.threads[0].messages[1];
+    Object.defineProperty(history,'content',{configurable:true,enumerable:true,get(){throw Error('Historical message reserialized');}});
+    const hint={threadId:'runtime',messageId:'answer'};
+    answer.content='checkpoint';const saving=repository.save(data,['runtime'],hint);answer.content='later';await saving;
+    let restored=await new ConversationStore(root).load();assert.equal(restored.threads[0].messages[1].content,'checkpoint');
+    assert.equal(restored.threads[0].messages[0].content,'historical context');
+    Object.defineProperty(history,'content',{configurable:true,enumerable:true,writable:true,value:'edited history'});
+    await repository.save(data,['runtime']);
+    failConversationWorker=true;data.threads[0].title='Failed candidate';
+    try {await assert.rejects(repository.save(data,['runtime'],hint),/worker unavailable/);} finally {failConversationWorker=false;}
+    restored=await new ConversationStore(root).load();assert.equal(restored.threads[0].title,'Original');
+    assert.equal(restored.threads[0].messages[0].content,'edited history');
+    history.content='authoritative history after failure';data.threads[0].title='Retry';
+    await repository.save(data,['runtime'],hint);
+    restored=await new ConversationStore(root).load();assert.equal(restored.threads[0].title,'Retry');
+    assert.equal(restored.threads[0].messages[0].content,'authoritative history after failure');
   });
   await test('managed text attachments hydrate without mutating persisted history',async()=>{
     Attachments.configure(fixture);const incoming=path.join(fixture,'input.txt');fs.writeFileSync(incoming,'材料内容');
@@ -717,8 +755,9 @@ async function test(name, run) {
     const call=(name,args)=>({id:name,type:'function',function:{name,arguments:JSON.stringify(args)}});
     await mcp.execute(call('mcp_list_tools',{server:'s'}),signal);
     const step={content:'',tools:[{call:call('mcp_call',{server:'s',tool:'large',arguments:{}}),status:'pending',output:''}]};
+    const approvalReady=approvalRequested(approval);
     const run=executeToolBatch(step,0,mcp,mcp.definitions(),signal,{checkpoint:async()=>{},event:()=>{}});
-    await new Promise(r=>setTimeout(r,0));approval.respond(true);await run;
+    await approvalReady;approval.respond(true);await run;
     assert.equal(step.tools[0].status,'complete');assert.equal(JSON.parse(step.tools[0].output).content[0].text,payload);
     const root=path.join(fixture,'full-mcp');fs.mkdirSync(root);const disk=new ConversationStore(root),data=model.emptyData();
     data.activeThreadId='full';data.threads=[{id:'full',title:'Full MCP',updatedAt:1,messages:[{id:'u',role:'user',content:'Read',status:'complete',error:''},
@@ -837,8 +876,9 @@ async function test(name, run) {
     await tools.execute(call('mcp_list_tools',{server:'s'}),new Cancellation());
     const run=async(allow)=>{
       const step={content:'',tools:[{call:call('mcp_call',{server:'s',tool:'write',arguments:{}}),status:'pending',output:''}]};
+      const ready=approvalRequested(approval);
       const pending=executeToolBatch(step,0,tools,tools.definitions(),new Cancellation(),{checkpoint:async()=>{},event:()=>{}});
-      await new Promise(setImmediate);approval.respond(allow);await pending;return step.tools[0];
+      await ready;approval.respond(allow);await pending;return step.tools[0];
     };
     let receipt=await run(false);assert.equal(JSON.parse(receipt.output).code,'USER_DENIED');assert.equal(remoteCalls,0);
     receipt=await run(true);let result=JSON.parse(receipt.output);assert.equal(receipt.status,'failed');assert.equal(result.code,'REMOTE_TOOL_ERROR');assert.deepEqual(result.details.result,remote);assert.equal(remoteCalls,1);
@@ -1544,5 +1584,6 @@ async function test(name, run) {
     Broken.record({...legacy[0],id:'after-failure'});await Broken.queue;
     assert.equal(fs.readFileSync(nativePath(root+'/usage-records/1.json'),'utf8'),'broken');
   });
+  suiteCompleted = true;
   console.log(completedTests+' native adapter integration checks passed. Fixtures: '+fixture);
 })().catch(error=>{console.error(error);process.exitCode=1;});

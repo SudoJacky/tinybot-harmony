@@ -1,7 +1,7 @@
 import { t } from '../model/I18n';
 import { ToolCall, ToolDefinition, ToolProperty } from '../model/Agent';
 import { AgentTools, ToolInvocationContext } from './AgentLoop';
-import { fileDiff } from '../model/FileDiff';
+import { WorkspaceDiffComputer, workspaceDiffs } from '../model/WorkspaceDiff';
 import { TextEdit, validateEdits } from '../model/WorkspaceEdit';
 import { ToolFailure, parseToolArguments } from '../model/ToolFailure';
 import { repairGuidance } from '../model/UiRepair';
@@ -51,9 +51,12 @@ export class WorkspaceTools implements AgentTools {
   private searcher: WorkspaceSearch;
   private baselines: Map<string, TurnBaseline> = new Map<string, TurnBaseline>();
   private writeOrder: number = 0;
+  private computeDiffs: WorkspaceDiffComputer;
 
-  constructor(files: WorkspaceFiles) {
+  constructor(files: WorkspaceFiles, computeDiffs: WorkspaceDiffComputer = async (path, before, after, baseline, created, baselineCreated) =>
+    workspaceDiffs(path, before, after, baseline, created, baselineCreated)) {
     this.files = files;
+    this.computeDiffs = computeDiffs;
     this.searcher = new WorkspaceSearch(files);
   }
 
@@ -149,13 +152,14 @@ export class WorkspaceTools implements AgentTools {
       { version: version === undefined ? null : version }), context);
   }
 
-  private receipt(receipt: WorkspaceWrite, context?: ToolInvocationContext): string {
+  private async receipt(receipt: WorkspaceWrite, context?: ToolInvocationContext): Promise<string> {
     if (receipt.written) { this.observed.set(receipt.path, receipt.version); }
     if (context && receipt.written && receipt.before !== undefined && receipt.after !== undefined) {
-      context.execution.fileDiff = fileDiff(receipt.path, receipt.before, receipt.after, receipt.created === true);
       let baseline = this.baselines.get(receipt.path);
       if (!baseline) { baseline = { content: receipt.before, created: receipt.created === true }; this.baselines.set(receipt.path, baseline); }
-      context.execution.turnFileChange = { order: ++this.writeOrder, diff: fileDiff(receipt.path, baseline.content, receipt.after, baseline.created) };
+      const diffs = await this.computeDiffs(receipt.path, receipt.before, receipt.after, baseline.content, receipt.created === true, baseline.created);
+      context.execution.fileDiff = diffs.current;
+      context.execution.turnFileChange = { order: ++this.writeOrder, diff: diffs.cumulative };
     }
     return JSON.stringify({ path: receipt.path, bytes: receipt.bytes, written: receipt.written });
   }

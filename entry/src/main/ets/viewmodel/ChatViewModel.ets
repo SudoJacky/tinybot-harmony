@@ -123,6 +123,12 @@ export class ChatViewModel {
         thread?.messages.find((message) => message.id === event.message?.id)?.update(event.message);
         thread?.refreshPreviews();
       }
+      if (event.kind === 'tool' && event.tool) {
+        const thread = this.threads.find((item) => item.id === event.threadId);
+        thread?.messages.find((item) => item.id === event.messageId)?.updateTool(event.step || 0, event.tool, event.parentToolCallId);
+        if (event.tool.status === 'complete' && (event.tool.call.function.name === 'publish_preview' ||
+          (event.tool.children || []).some((child) => child.call.function.name === 'publish_preview'))) { thread?.refreshPreviews(); }
+      }
       if (event.kind === 'reasoning') {
         const message = this.threads.find((thread) => thread.id === event.threadId)?.messages.find((item) => item.id === event.messageId);
         if (message) {
@@ -135,7 +141,7 @@ export class ChatViewModel {
           message.updateText(event.content || '', event.step || 0, event.stepContent || '');
         }
       }
-      if (['text', 'reasoning', 'message', 'snapshot', 'thread', 'teams'].includes(event.kind)) { this.onOutput(); }
+      if (['text', 'reasoning', 'message', 'tool', 'snapshot', 'thread', 'teams'].includes(event.kind)) { this.onOutput(); }
     } finally { if (Diagnostics.recording) { Diagnostics.end('viewmodel.project', diagnosticMark); } }
   }
   private projectState(state: SessionState): void {

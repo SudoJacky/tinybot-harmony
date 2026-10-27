@@ -46,6 +46,7 @@ export interface LoopEvent {
   type: LoopEventType;
   step: number;
   toolCallId?: string;
+  parentToolCallId?: string;
   delta?: string;
 }
 
