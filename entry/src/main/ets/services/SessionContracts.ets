@@ -61,7 +61,7 @@ export interface SessionPreferences {
 
 // Structural changes carry detached snapshots; preference changes omit transcripts.
 export interface SessionEvent {
-  kind: 'snapshot' | 'preferences' | 'message' | 'text' | 'reasoning' | 'draft' | 'state' | 'thread' | 'teams';
+  kind: 'snapshot' | 'preferences' | 'message' | 'text' | 'reasoning' | 'draft' | 'state' | 'thread' | 'teams' | 'task-complete';
   state: SessionState;
   preferences?: SessionPreferences;
   data?: AppData;

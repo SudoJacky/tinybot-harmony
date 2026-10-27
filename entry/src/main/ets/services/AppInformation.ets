@@ -1,4 +1,5 @@
 import { bundleManager, common } from '@kit.AbilityKit';
+import { commentManager } from '@kit.AppGalleryKit';
 
 export interface AppInformation {
   bundleName: string;
@@ -13,11 +14,6 @@ export function readAppInformation(): AppInformation {
 }
 
 export async function requestAppReview(context: common.UIAbilityContext): Promise<void> {
-  // An explicit user action opens the store's review page instead of a rate-limited prompt.
-  // Starting the page does not mean the user submitted a review.
-  const info = readAppInformation();
-  await context.startAbility({
-    action: 'ohos.want.action.appdetail',
-    uri: 'store://appgallery.huawei.com/app/detail?id=' + encodeURIComponent(info.bundleName) + '&action=write-review'
-  });
+  // The API does not report whether a review was submitted. Never record it as a rating.
+  await commentManager.showCommentDialog(context);
 }

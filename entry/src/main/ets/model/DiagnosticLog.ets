@@ -25,6 +25,7 @@ const ERROR_CODES: string[] = ['STALE_BROWSER_SNAPSHOT', 'STALE_INTERACTIVE_STAT
 const EVENTS: Record<string, string[]> = {};
 EVENTS.app = ['bar_failed', 'created', 'destroyed', 'window_created', 'window_failed', 'window_loaded', 'window_destroyed', 'foreground', 'background'];
 EVENTS.announcements = ['disabled', 'fetch_started', 'fetch_completed', 'fetch_failed', 'presented', 'present_failed', 'acknowledged', 'save_failed'];
+EVENTS.review = ['task_completed', 'presented', 'present_failed', 'accepted', 'deferred', 'disabled', 'request_completed', 'request_failed', 'save_failed'];
 EVENTS.appearance = ['material', 'material_unavailable', 'loaded', 'applied', 'save_failed', 'fonts_loaded', 'fonts_failed', 'insets_failed'];
 EVENTS.backup = ['started', 'restored', 'restore_prepared', 'cleanup_failed'];
 EVENTS.background = ['acquired', 'released', 'cancelled', 'suspended', 'release_failed', 'stop_failed', 'transition_failed', 'window_expired'];

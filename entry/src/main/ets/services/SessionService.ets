@@ -788,6 +788,9 @@ export class SessionService {
         catch (error) { this.status.error = t("任务已完成，但结果归档失败：") + (error as Error).message; }
       }
       if (options.autoMemory && !readOnly) { this.reviewMemory(thread, user, copyModelConfig(config)); }
+      if (!this.status.error) {
+        this.emit({ kind: 'task-complete', state: this.state, threadId: thread.id, messageId: answer.id });
+      }
     }
     return answer.status === 'complete' && this.status.saveError.length === 0;
   }
