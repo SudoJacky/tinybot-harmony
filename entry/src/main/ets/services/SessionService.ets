@@ -1,4 +1,5 @@
 import { Diagnostics } from '../model/Diagnostics';
+import { ToolExecution } from '../model/Agent';
 import { projectFor, workspaceIdFor, validateProjects, projectContext } from '../model/Project';
 import { SharedFolder } from '../model/SharedFolders';
 import { proposeSessionMemory, reviewSessionMemory, addMemoryDraft } from './SessionMemory';
@@ -736,7 +737,14 @@ export class SessionService {
       answer.status = event.run.status === 'running' ? 'generating' : event.run.status; answer.error = event.run.error;
       this.status.acceptingSteering = this.runtime.acceptsSteering && !thread.queuePaused;
       if (event.type === 'run_finishing' && event.run.status !== 'complete') { thread.queuePaused = true; }
-      if (event.type === 'reasoning_delta') {
+      if (event.type === 'tool_start' || event.type === 'tool_end') {
+        const step = answer.steps[event.step || 0];
+        const parent = event.parentToolCallId ? step.tools.find((tool) => tool.call.id === event.parentToolCallId) : undefined;
+        const tool = (parent ? parent.children || [] : step.tools).find((item) => item.call.id === event.toolCallId);
+        if (!tool) { throw new Error('Tool event has no matching execution: ' + event.toolCallId); }
+        this.emit({ kind: 'tool', state: this.state, threadId: thread.id, messageId: answer.id,
+          step: event.step, parentToolCallId: event.parentToolCallId, tool: JSON.parse(JSON.stringify(tool)) as ToolExecution });
+      } else if (event.type === 'reasoning_delta') {
         this.emit({ kind: 'reasoning', state: this.state, threadId: thread.id, messageId: answer.id,
           step: event.step, stepContent: event.run.turn.steps[event.step || 0].reasoningContent || '' });
       } else if (event.type === 'text_delta') {
@@ -764,7 +772,7 @@ export class SessionService {
           this.status.contextBreakdown = prepared.breakdown;
           this.status.contextSource = prepared.context.source;
         },
-        checkpoint: () => { this.publishThread(thread); return this.persist(thread.id); },
+        checkpoint: () => { this.publishThread(thread); return this.persist(thread.id, answer.id); },
         steering: {
           peek: () => nextPendingInput(thread.pendingInputs || [], thread.queuePaused === true, true),
           consume: (id: string) => { thread.pendingInputs = (thread.pendingInputs || []).filter((item: PendingInput) => item.id !== id); }
@@ -1249,12 +1257,13 @@ export class SessionService {
   private async persistDraftChanges(revision: number): Promise<void> {
     while (revision !== this.draftRevision) { revision = this.draftRevision; await this.persist(); }
   }
-  private async persist(threadId?: string): Promise<void> {
+  private async persist(threadId?: string, messageId?: string): Promise<void> {
     // Draft autosaves and team checkpoints must capture resources after the transaction publishes them.
     if (this.pendingCommit) { await this.pendingCommit; }
     const preferences = this.syncEmptyThreadPreferences(this.data); const draftRevision = this.draftRevision;
     try {
-      await this.repository.save(this.data, threadId === undefined ? undefined : preferences.concat([threadId], Array.from(this.dirtyDrafts)));
+      await this.repository.save(this.data, threadId === undefined ? undefined : preferences.concat([threadId], Array.from(this.dirtyDrafts)),
+        threadId !== undefined && messageId !== undefined ? { threadId: threadId, messageId: messageId } : undefined);
       if (draftRevision === this.draftRevision) { this.dirtyDrafts.clear(); }
       this.status.saveError = '';
     }

@@ -32,6 +32,7 @@ export interface AgentEvent {
   run: AgentRunState;
   step?: number;
   toolCallId?: string;
+  parentToolCallId?: string;
   delta?: string;
 }
 
@@ -213,7 +214,7 @@ export class AgentRuntime {
             event: (event: LoopEvent) => {
               if (this.active === active) {
                 this.emit({ type: event.type, run: active.state, step: event.step,
-                  toolCallId: event.toolCallId, delta: event.delta });
+                  toolCallId: event.toolCallId, parentToolCallId: event.parentToolCallId, delta: event.delta });
               }
             },
             checkpoint: hooks.checkpoint, steering: hooks.steering,

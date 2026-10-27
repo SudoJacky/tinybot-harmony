@@ -46,6 +46,7 @@ import { ProjectFolderAccess } from './ProjectFolderAccess';
 import { SessionService } from './SessionService';
 import { NativeWorkspaceFiles } from './NativeWorkspaceFiles';
 import { WorkspaceTools } from './WorkspaceTools';
+import { nativeWorkspaceDiffs } from './NativeWorkspaceDiff';
 import { NativeWebTransport } from './NativeWebTransport';
 import { WebTools } from './WebTools';
 import { SkillTools } from './SkillTools';
@@ -93,7 +94,7 @@ export class NativeSessionResources implements SessionResources {
   tools(id: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments: Attachment[] = [], live?: LiveResources, workspaceId?: string, project?: ProjectData): AgentTools {
     const root = this.workspaces.pathFor(workspaceId || id);
     const files = new NativeWorkspaceFiles(root, project?.sharedFolders || []);
-    const groups: AgentTools[] = [new WorkspaceTools(files), new AttachmentTools(attachments),
+    const groups: AgentTools[] = [new WorkspaceTools(files, nativeWorkspaceDiffs), new AttachmentTools(attachments),
       new SkillTools(extensions.skills, selected, live ? () => live.skills() : undefined), new InteractionTools(this.approval)];
     groups.push(new CodeExecutionTools(new NativeCodeExecutor()));
     groups.push(new PresentTools((path: string) => files.checkedPath(path)));

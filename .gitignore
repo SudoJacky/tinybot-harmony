@@ -44,6 +44,7 @@
 scripts/*
 !scripts/run-tests.cjs
 !scripts/test-tool-catalog.cjs
+!scripts/test-tool-responsiveness.cjs
 !scripts/test-model-dependencies.cjs
 !scripts/test-usage-filter-sheet.cjs
 !scripts/test-hosted-privacy.cjs

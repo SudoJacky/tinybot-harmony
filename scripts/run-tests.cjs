@@ -39,6 +39,7 @@ const suites = {
     'test-system-bars-native.cjs',
     'test-team-toggle.cjs',
     'test-tool-catalog.cjs',
+    'test-tool-responsiveness.cjs',
     'test-tool-details.cjs',
     'test-tool-schemas.cjs',
     'test-unified-logging.cjs',

@@ -1,9 +1,11 @@
 import { Diagnostics } from './Diagnostics';
 import { t } from './I18n';
 import { fileIo as fs } from '@kit.CoreFileKit';
-import { util } from '@kit.ArkTS';
+import { taskpool, util } from '@kit.ArkTS';
 import { AppData, ThreadData, emptyData, parseAppData } from './Conversation';
-import { SessionRepository } from '../services/SessionContracts';
+import { MessageCheckpoint, SessionRepository } from '../services/SessionContracts';
+import { ConversationCapture } from './ConversationCapture';
+import { writeConversationFile } from '../services/ConversationWriter';
 
 interface ThreadFile { id: string; file: string; }
 interface Manifest { version: number; data: AppData; threads: ThreadFile[]; }
@@ -14,7 +16,7 @@ export class ConversationStore implements SessionRepository {
   private legacy: string;
   private pendingSave: Promise<void> = Promise.resolve();
   private serialized: Map<string, string> = new Map<string, string>();
-  private captured: Map<string, string> = new Map<string, string>();
+  private capture: ConversationCapture = new ConversationCapture();
   private captureFailed: boolean = false;
   private files: Map<string, string> = new Map<string, string>();
   constructor(filesDir: string) { this.root = filesDir + '/sessions-v2'; this.legacy = filesDir + '/tinybot-v1.json'; }
@@ -36,25 +38,17 @@ export class ConversationStore implements SessionRepository {
     manifest.data.threads = threads;
     const data = parseAppData(JSON.stringify(manifest.data));
     // Recovery/normalization belongs to the loaded state, even for an inactive thread.
-    this.captured = new Map<string, string>();
-    for (const thread of data.threads) { this.captured.set(thread.id, JSON.stringify(thread)); }
+    this.capture.clear(); this.capture.capture(data);
     this.captureFailed = false;
     return data;
   }
-  save(data: AppData, changedThreadIds?: string[]): Promise<void> {
+  save(data: AppData, changedThreadIds?: string[], message?: MessageCheckpoint): Promise<void> {
     // Capture synchronously, before any queued IO. Immutable strings can be shared across saves.
     // Failed candidates may have been rolled back by the caller. Re-capture its authoritative state.
     const mark = Diagnostics.begin();
-    const changed = changedThreadIds === undefined || this.captureFailed ? undefined : new Set(changedThreadIds);
-    const next = new Map<string, string>();
-    for (const thread of data.threads) {
-      const previous = this.captured.get(thread.id);
-      next.set(thread.id, previous === undefined || changed === undefined || changed.has(thread.id) ? JSON.stringify(thread) : previous);
-    }
-    const metadata: AppData = { version: data.version, config: data.config, threads: [], activeThreadId: data.activeThreadId,
-      providerProfiles: data.providerProfiles, extensions: data.extensions, productivity: data.productivity, projects: data.projects };
-    const header = JSON.stringify(metadata);
-    this.captured = next;
+    if (this.captureFailed) { this.capture.clear(); }
+    const snapshot = this.capture.capture(data, this.captureFailed ? undefined : changedThreadIds, message);
+    const header = snapshot.header; const next = snapshot.threads;
     this.captureFailed = false;
     if (Diagnostics.recording) { Diagnostics.end('storage.capture', mark, { threads: data.threads.length, changed: changedThreadIds ? changedThreadIds.length : data.threads.length, metadataChars: header.length }); }
     const saved = this.pendingSave.then(() => this.commit(header, next));
@@ -86,16 +80,9 @@ export class ConversationStore implements SessionRepository {
   }
   private async write(path: string, text: string): Promise<void> {
     const mark = Diagnostics.begin();
-    const bytes = new util.TextEncoder().encodeInto(text);
-    const file = await fs.open(path, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+    let bytes = 0;
     try {
-      let written = 0;
-      while (written < bytes.byteLength) {
-        const count = await fs.write(file.fd, bytes.buffer.slice(written), { offset: written });
-        if (count <= 0) { throw new Error(t("本地会话写入未完成。")); }
-        written += count;
-      }
-      await fs.fsync(file.fd);
-    } finally { await fs.close(file); if (Diagnostics.recording) { Diagnostics.end('storage.write', mark, { bytes: bytes.byteLength }); } }
+      bytes = await taskpool.execute(writeConversationFile, path, text) as number;
+    } finally { if (Diagnostics.recording) { Diagnostics.end('storage.write', mark, { bytes: bytes }); } }
   }
 }

@@ -58,9 +58,9 @@ const settle = () => new Promise(resolve => setTimeout(resolve, 0));
 const call = (name, args = {}) => ({ id: name, type: 'function', function: { name, arguments: JSON.stringify(args) } });
 function fixture(policy = 'enabled') {
   const browser = new BrowserSession(), cancellation = new Cancellation();
-  const driver = { effects: [], page: 'Initial page', hold: undefined,
+  const driver = { effects: [], page: 'Initial page', hold: undefined, acted: gate(),
     async open(url) { this.effects.push('open'); this.url = url; },
-    async act(action) { this.effects.push(action.action); if (this.hold) await this.hold.promise; },
+    async act(action) { this.effects.push(action.action); this.acted.resolve(); if (this.hold) await this.hold.promise; },
     async snapshot(id) { return { snapshotId: id, url: this.url, title: this.page, text: this.page,
       elements: [{ id: 1, role: 'button', label: 'Submit', type: '' }], truncated: false, embeddedFrames: 0, trust: 'untrusted' }; },
     close() { this.effects.push('close'); },
@@ -210,7 +210,7 @@ async function acquired() {
     let finished = false;
     const batch = executeToolBatch(step, 0, tools, tools.definitions(), f.cancellation,
       { checkpoint: async () => {}, event: () => {}, waitForExecution: signal => f.browser.wait(signal) }).then(() => { finished = true; });
-    await settle(); assert.deepEqual(f.driver.effects, ['open', 'click']);
+    await f.driver.acted.promise; assert.deepEqual(f.driver.effects, ['open', 'click']);
     f.browser.takeOver(); f.driver.page = 'User edited page'; f.driver.hold.resolve(); await settle();
     assert.equal(f.cancellation.cancelled, false); assert.equal(finished, false); assert.equal(nextTool, 0);
     assert.equal(step.tools[0].output, ''); assert.equal(step.tools[0].status, 'running');
@@ -222,17 +222,17 @@ async function acquired() {
     console.log('PASS takeover drains the issued action, withholds its receipt and later tools, refreshes on handoff and never replays');
   }
   {
-    const f = await acquired(); let next = 0;
+    const f = await acquired(); let next = 0; const entered = gate();
     const step = { content: '', tools: ['first', 'second'].map(name => ({ call: call(name), status: 'pending', output: '' })) };
-    const tools = { definitions: () => [], execute: async value => { if (value.function.name === 'first') { f.browser.takeOver(); return 'already finished'; } next++; return 'next'; } };
+    const tools = { definitions: () => [], execute: async value => { if (value.function.name === 'first') { f.browser.takeOver(); entered.resolve(); return 'already finished'; } next++; return 'next'; } };
     const batch = executeToolBatch(step, 0, tools, [], f.cancellation,
       { checkpoint: async () => {}, event: () => {}, waitForExecution: signal => f.browser.wait(signal) }, 'sequential');
-    await settle(); assert.equal(step.tools[0].output, ''); assert.equal(next, 0);
+    await entered.promise; assert.equal(step.tools[0].output, ''); assert.equal(next, 0);
     f.browser.handoff(); await batch; assert.equal(step.tools[0].output, 'already finished'); assert.equal(next, 1);
     console.log('PASS runtime gate also holds non-browser tool results at the completion boundary');
   }
   {
-    const f = await acquired(); let checkpoints = 0, requests = 0; const turn = { content: '', steps: [] };
+    const f = await acquired(); let checkpoints = 0, requests = 0; const turn = { content: '', steps: [] }; const persisted = gate();
     const model = { stream: async messages => {
       requests++;
       if (requests === 1) return { content: '', toolCalls: [call('browser_snapshot')] };
@@ -241,9 +241,9 @@ async function acquired() {
       return { content: 'Done', toolCalls: [] };
     } };
     const running = runAgentLoop({ model, messages: [], tools: f.tools, turn, maxSteps: 3 }, f.cancellation,
-      { event: () => {}, checkpoint: async () => { if (++checkpoints === 2) { f.browser.takeOver(); f.driver.page = 'Changed after the tool completed'; } },
+      { event: () => {}, checkpoint: async () => { if (++checkpoints === 2) { f.browser.takeOver(); f.driver.page = 'Changed after the tool completed'; persisted.resolve(); } },
         waitForExecution: signal => f.browser.wait(signal), refreshToolResult: (value, output, signal) => f.browser.refreshResult(value, output, signal) });
-    await settle(); assert.equal(requests, 1); assert.equal(f.browser.paused, true);
+    await persisted.promise; assert.equal(requests, 1); assert.equal(f.browser.paused, true);
     f.browser.handoff(); await running; assert.equal(requests, 2);
     console.log('PASS takeover during receipt persistence refreshes the completed page result before the next model request');
   }
@@ -277,7 +277,7 @@ async function acquired() {
     const batch = executeToolBatch(step, 0, f.tools, f.tools.definitions(), f.cancellation,
       { event: () => {}, checkpoint: async () => {}, waitForExecution: signal => f.browser.wait(signal), refreshToolResult: (value, output, signal) => f.browser.refreshResult(value, output, signal) });
     const stopped = assert.rejects(batch, error => error.code === 'CANCELLED');
-    await settle(); f.browser.takeOver(); f.driver.hold.resolve(); await settle(); f.cancellation.cancel(); await stopped;
+    await f.driver.acted.promise; f.browser.takeOver(); f.driver.hold.resolve(); await settle(); f.cancellation.cancel(); await stopped;
     assert.equal(step.tools[0].status, 'complete'); assert.equal(JSON.parse(step.tools[0].output).completed, true);
     assert.equal(f.driver.effects.filter(value => value === 'click').length, 1);
     console.log('PASS stopping a pending task still checkpoints an already completed browser action');

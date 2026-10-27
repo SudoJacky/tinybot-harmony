@@ -1,5 +1,6 @@
 import { LogData, LogFields, LogLevel, LogSanitizer, knownLogEvent, logRank, LOG_LEVELS } from './DiagnosticLog';
 export interface PerfValues {
+  batchSize?: number;
   current?: number;
   sourceChars?: number;
   changedBlocks?: number;

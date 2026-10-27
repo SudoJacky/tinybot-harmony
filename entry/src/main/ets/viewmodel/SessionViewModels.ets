@@ -27,7 +27,14 @@ export class ToolExecutionViewModel implements ToolExecution {
   status: string;
   output: string;
   children: ToolExecution[] = [];
-  constructor(data: ToolExecution) { this.previewScreenshot = data.previewScreenshot; this.previewContent = data.previewContent; this.turnFileChange = data.turnFileChange; this.fileDiff = data.fileDiff; this.websiteIcon = data.websiteIcon; this.call = data.call; this.status = data.status; this.output = data.output; this.children = data.children?.slice() || []; }
+  constructor(data: ToolExecution) { this.call = data.call; this.status = data.status; this.output = data.output; this.update(data); }
+  update(data: ToolExecution): void {
+    this.output = data.output; this.previewScreenshot = data.previewScreenshot; this.previewContent = data.previewContent;
+    this.turnFileChange = data.turnFileChange; this.fileDiff = data.fileDiff; this.websiteIcon = data.websiteIcon;
+    this.children = data.children?.slice() || [];
+    // Publish receipt fields before the status that makes them visible.
+    this.status = data.status;
+  }
 }
 
 @Observed
@@ -48,10 +55,7 @@ export class AgentStepViewModel implements AgentStep {
     this.tools = data.tools.map((tool: ToolExecution, index: number) => {
       const existing = this.tools[index];
       if (existing && existing.call.id === tool.call.id) {
-        existing.output = tool.output; existing.previewScreenshot = tool.previewScreenshot; existing.previewContent = tool.previewContent;
-        existing.turnFileChange = tool.turnFileChange; existing.fileDiff = tool.fileDiff; existing.websiteIcon = tool.websiteIcon; existing.children = tool.children?.slice() || [];
-        // Status observers may render synchronously: publish the complete receipt first.
-        existing.status = tool.status;
+        existing.update(tool);
         return existing;
       }
       return new ToolExecutionViewModel(tool);
@@ -99,6 +103,32 @@ export class MessageViewModel {
     const hadText = step.content.trim().length > 0;
     step.content = stepContent;
     if (hadText !== (stepContent.trim().length > 0)) { this.timeline = buildTimeline(this.stepViews); }
+  }
+  updateTool(index: number, tool: ToolExecution, parentId?: string): void {
+    const step = this.steps[index]; const view = this.stepViews[index];
+    if (!step || !view) { throw new Error('Tool update has no matching step: ' + index); }
+    const id = parentId || tool.call.id;
+    const position = step.tools.findIndex((item) => item.call.id === id);
+    const execution = view.tools[position];
+    if (position < 0 || !execution) { throw new Error('Tool update has no matching parent: ' + id); }
+    if (parentId) {
+      const parent = step.tools[position];
+      const children = (parent.children || []).slice();
+      const child = children.findIndex((item) => item.call.id === tool.call.id);
+      if (child < 0) { children.push(tool); } else { children[child] = tool; }
+      parent.children = children; execution.children = children;
+    } else {
+      step.tools[position] = tool; execution.update(tool);
+    }
+    if (tool.call.function.name === 'update_plan' && tool.status === 'complete') { this.plan.update(this.steps, this.status); }
+    // V1 observation needs a shallow invalidation for workflow labels; retain every
+    // other step, tool, disclosure and timeline instead of reprojecting the turn.
+    this.steps = this.steps.slice();
+    this.stepViews = this.stepViews.slice();
+    if (tool.status === 'complete' && (tool.call.function.name === 'publish_preview' ||
+      (tool.children || []).some((child) => child.call.function.name === 'publish_preview'))) {
+      this.timeline = buildTimeline(this.stepViews);
+    }
   }
   update(data: MessageData): void {
     this.uiStates = data.uiStates || [];

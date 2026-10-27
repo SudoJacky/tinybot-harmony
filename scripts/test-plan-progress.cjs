@@ -86,6 +86,16 @@ if (!process.argv.includes('--model-only')) {
     change(f,plan('completed','completed'),'complete');assert.equal([...f.panel.nodes.values()].filter(node=>node.type==='LoadingProgress').length,0);assert.ok([...f.panel.nodes.values()].some(node=>node.value==='计划已完成'));
     f.panel.find('chat-plan-toggle').onClick();f.panel.flush();assert.equal(f.panel.find('chat-plan-steps'),undefined);
   });
+  test('incremental tool receipts retain the plan spinner and update progress in place',()=>{
+    const read={call:{id:'read',type:'function',function:{name:'read_file',arguments:'{}'}},status:'running',output:''};
+    const f=mounted(message('reply',[tool('plan',plan()),read]));
+    const spinner=[...f.panel.nodes.values()].find(node=>node.type==='LoadingProgress').elementId;
+    const steps=f.model.plan.steps;
+    f.model.updateTool(0,{...read,status:'complete',output:'read result'});f.panel.flush();
+    assert.equal(f.model.plan.steps,steps);assert.ok(f.panel.nodes.has(spinner));
+    f.model.updateTool(0,tool('plan',plan('completed','in_progress')));f.panel.flush();
+    assert.equal(f.panel.find('chat-plan-current-step').value,'Verify');assert.ok(f.panel.nodes.has(spinner));
+  });
   test('plan row edits, additions and removals update retained keyed rows',()=>{
     const f=mounted();f.model.plan.expanded=true;f.panel.flush();
     change(f,{steps:[{step:'Changed task',status:'in_progress'},...Array.from({length:19},(_,i)=>({step:'Later '+i,status:'pending'}))]});
