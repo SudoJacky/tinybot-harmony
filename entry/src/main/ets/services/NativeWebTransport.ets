@@ -2,6 +2,7 @@ import { ToolFailure, toolHttpFailure } from '../model/ToolFailure';
 import { t } from '../model/I18n';
 import { url, util } from '@kit.ArkTS';
 import { Cancellation, RunCancelledError } from './Cancellation';
+import { NetworkTransfers } from './NetworkTransfers';
 import { MAX_WEB_BYTES, WebDocument, WebTransport, validateWebAddress } from './WebTools';
 import { CompatHttp, CompatResponse } from './CompatHttp';
 
@@ -58,35 +59,38 @@ export class NativeWebTransport implements WebTransport {
   // One hop at a time: each hop is a fresh request with no model credentials, cookies, or
   // caller-supplied headers. CompatHttp returns the 3xx response instead of following it on
   // every supported system, so the hop validation below is the only redirect logic in play.
-  private request(address: string, cancellation: Cancellation, timeout: number): Promise<CompatResponse> {
+  private async request(address: string, cancellation: Cancellation, timeout: number): Promise<CompatResponse> {
     cancellation.check();
     if (timeout <= 0) { throw new ToolFailure('TIMEOUT', t("网页读取超过 30 秒。"), 'check_connection'); }
-    return new Promise<CompatResponse>((resolve, reject) => {
-      let settled = false;
-      let timer = -1;
-      let unsubscribe = (): void => {};
-      let abort = (): void => {};
-      const finish = (response?: CompatResponse, error?: Error | ToolFailure | RunCancelledError): void => {
+    const endTransfer = await NetworkTransfers.begin(cancellation);
+    try {
+      return await new Promise<CompatResponse>((resolve, reject) => {
+        let settled = false;
+        let timer = -1;
+        let unsubscribe = (): void => {};
+        let abort = (): void => {};
+        const finish = (response?: CompatResponse, error?: Error | ToolFailure | RunCancelledError): void => {
+          if (settled) { return; }
+          settled = true;
+          clearTimeout(timer);
+          unsubscribe();
+          if (error) { abort(); reject(error); }
+          else if (response) { resolve(response); }
+          else { abort(); reject(new ToolFailure('INVALID_RESPONSE', t("网页请求没有返回结果。"), 'inspect_service')); }
+        };
+        timer = setTimeout(() => finish(undefined, new ToolFailure('TIMEOUT', t("网页读取超过 30 秒。"), 'check_connection')), timeout);
+        unsubscribe = cancellation.onCancel(() => finish(undefined, new RunCancelledError() as Error));
         if (settled) { return; }
-        settled = true;
-        clearTimeout(timer);
-        unsubscribe();
-        if (error) { abort(); reject(error); }
-        else if (response) { resolve(response); }
-        else { abort(); reject(new ToolFailure('INVALID_RESPONSE', t("网页请求没有返回结果。"), 'inspect_service')); }
-      };
-      timer = setTimeout(() => finish(undefined, new ToolFailure('TIMEOUT', t("网页读取超过 30 秒。"), 'check_connection')), timeout);
-      unsubscribe = cancellation.onCancel(() => finish(undefined, new RunCancelledError() as Error));
-      if (settled) { return; }
-      CompatHttp.request({
-        url: address, method: 'GET',
-        headers: { 'Accept': 'text/html, text/plain, text/markdown, application/json, application/xhtml+xml',
-          'User-Agent': 'Tinybot-Harmony/0.1' },
-        connectTimeout: Math.min(timeout, 10000), readTimeout: timeout, maxBytes: MAX_WEB_BYTES,
-        dataType: 'buffer', redirect: 'return'
-      }, (stop: () => void) => { abort = stop; })
-        .then((response: CompatResponse) => finish(response))
-        .catch((error: Error) => finish(undefined, error));
-    });
+        CompatHttp.request({
+          url: address, method: 'GET',
+          headers: { 'Accept': 'text/html, text/plain, text/markdown, application/json, application/xhtml+xml',
+            'User-Agent': 'Tinybot-Harmony/0.1' },
+          connectTimeout: Math.min(timeout, 10000), readTimeout: timeout, maxBytes: MAX_WEB_BYTES,
+          dataType: 'buffer', redirect: 'return'
+        }, (stop: () => void) => { abort = stop; })
+          .then((response: CompatResponse) => finish(response))
+          .catch((error: Error) => finish(undefined, error));
+      });
+    } finally { await endTransfer(); }
   }
 }

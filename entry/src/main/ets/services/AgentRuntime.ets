@@ -59,6 +59,7 @@ export interface AgentRunHooks {
 
 interface ActiveRun {
   state: AgentRunState;
+  stopReason?: string;
   cancellation: Cancellation;
   idle: Promise<void>;
   resolveIdle: () => void;
@@ -130,11 +131,12 @@ export class AgentRuntime {
     return () => { this.listeners.delete(listener); };
   }
 
-  abort(): void {
+  abort(reason?: string): void {
     const active = this.active;
     if (!active || active.state.phase === 'finalizing' || active.cancellation.cancelled) {
       return;
     }
+    active.stopReason = reason;
     active.cancellation.cancel();
     this.emit({ type: 'run_stopping', run: active.state });
   }
@@ -225,7 +227,7 @@ export class AgentRuntime {
         active.state.status = 'complete';
       } catch (error) {
         active.state.status = error instanceof RunCancelledError ? 'stopped' : 'failed';
-        active.state.error = (error as Error).message;
+        active.state.error = error instanceof RunCancelledError && active.stopReason ? active.stopReason : (error as Error).message;
       }
       active.state.phase = 'finalizing';
       this.emit({ type: 'run_finishing', run: active.state });

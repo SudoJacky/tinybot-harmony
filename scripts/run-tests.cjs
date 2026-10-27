@@ -8,6 +8,7 @@ const suites = {
     'test-api20-compat.cjs',
     'test-app-information.cjs',
     'test-appearance.cjs',
+    'test-background-generation.cjs',
     'test-bing-search.cjs',
     'test-browser-annotation.cjs',
     'test-browser.cjs',
