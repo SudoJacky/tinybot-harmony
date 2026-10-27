@@ -1,5 +1,5 @@
-Tinybot v1.1.0 · 协议与隐私资料来源
-更新日期：2026-10-24
+Tinybot v1.1.1 · 协议与隐私资料来源
+更新日期：2026-10-28
 
 用户协议未托管，随包正文：
 entry/src/main/resources/rawfile/user-agreement.md

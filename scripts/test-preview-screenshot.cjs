@@ -3,12 +3,14 @@ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),asse
 const studio=process.env.DEVECO_STUDIO_HOME||path.join(process.env.ProgramFiles,'Huawei/DevEco Studio');
 const ts=require(path.join(studio,'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 const root=path.resolve(__dirname,'../entry/src/main/ets'),cache=new Map();
+let clock;
 function load(file){file=path.resolve(file+'.ets');if(cache.has(file))return cache.get(file);const exports={};cache.set(file,exports);
  vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2021,experimentalDecorators:true}}).outputText,
- {exports,Error,setTimeout,clearTimeout,Observed:c=>c,require:id=>load(path.resolve(path.dirname(file),id))},{filename:file});return exports;}
+ {exports,Error,setTimeout:(fn,ms)=>clock?clock.set(fn,ms):setTimeout(fn,ms),clearTimeout:id=>clock?clock.clear(id):clearTimeout(id),Observed:c=>c,require:id=>load(path.resolve(path.dirname(file),id))},{filename:file});return exports;}
 const from=name=>load(path.join(root,name));
 const {PreviewCapture}=from('services/PreviewCapture'),{PreviewTools}=from('services/PreviewTools');
 const {Cancellation}=from('services/Cancellation'),{runAgentLoop}=from('services/AgentLoop');
+const {WebUiPreflight}=from('services/WebUiPreflight');
 const {stepMessages,validateSteps}=from('model/Agent'),{ProviderRegistry}=from('services/providers/ProviderRegistry');
 const {chatRequest}=from('services/providers/ChatCompletionsProtocol'),{responsesRequest,anthropicRequest}=from('services/providers/WireProtocols');
 const snapshot={image:{id:'preview-image',name:'Preview screenshot.jpg',mime:'image/jpeg',path:'preview-image.jpg',size:128},width:1100,height:840,viewportWidth:344};
@@ -54,4 +56,53 @@ const tools=new PreviewTools(files,async()=>{},(content,signal)=>PreviewCapture.
  assert.equal(receipt.previewContent,undefined);assert.equal(receipt.previewScreenshot,undefined);
  const broken=JSON.parse(JSON.stringify(restored));broken.tools[0].previewScreenshot.image.path='../escape.jpg';assert.throws(()=>validateSteps([broken]));
  console.log('PASS capture failures never publish a fake screenshot and persisted image paths are validated');
+
+ // Exercise the whole publication path across foreground loss in both native render stages.
+ let now=0,sequence=0;const timers=new Map();
+ clock={set(fn,ms){const id=++sequence;timers.set(id,{fn,at:now+ms});return id;},clear(id){timers.delete(id);}};
+ const flush=async()=>{for(let i=0;i<16;i++)await Promise.resolve();};
+ const advance=async ms=>{now+=ms;for(const [id,timer] of [...timers])if(timer.at<=now){timers.delete(id);timer.fn();}await flush();};
+ let probes=[],images=[],reads=0;
+ const probeStop=WebUiPreflight.subscribe(items=>{probes=items;});
+ const captureStop=PreviewCapture.subscribe(items=>{images=items;});
+ const nativeTools=new PreviewTools({read:async()=>{reads++;return files.read();}},
+  (content,signal)=>WebUiPreflight.validate(content,signal),(content,signal)=>PreviewCapture.capture(content,signal));
+ const foreground=value=>{WebUiPreflight.setForeground(value);PreviewCapture.setForeground(value);};
+ foreground(false);
+ const execution={call,status:'running',output:''};let settled=false;
+ const publication=nativeTools.execute(call,new Cancellation(),{execution}).finally(()=>{settled=true;});
+ await flush();await advance(60000);
+ assert.equal(settled,false);assert.equal(probes.length,0);assert.equal(images.length,0);assert.equal(timers.size,0);
+ foreground(true);const oldProbe=probes[0];await advance(5000);
+ foreground(false);await advance(60000);assert.equal(settled,false);assert.equal(probes.length,0);
+ WebUiPreflight.complete(oldProbe.id,'Background renderer timed out');assert.equal(settled,false);
+ foreground(true);assert.notEqual(probes[0].id,oldProbe.id);assert.equal(probes[0].content,oldProbe.content);
+ WebUiPreflight.complete(oldProbe.id,'Late callback from the previous renderer');assert.equal(probes.length,1);
+ WebUiPreflight.complete(probes[0].id);await flush();const oldImage=images[0];
+ foreground(false);await advance(60000);assert.equal(settled,false);assert.equal(images.length,0);assert.equal(timers.size,0);
+ assert.equal(PreviewCapture.isCurrent(oldImage.id),false);
+ foreground(true);assert.notEqual(images[0].id,oldImage.id);assert.equal(images[0].content,oldImage.content);
+ PreviewCapture.complete(oldImage.id,snapshot);assert.equal(images.length,1);
+ assert.equal(PreviewCapture.isCurrent(images[0].id),true);
+ PreviewCapture.complete(images[0].id,snapshot);const published=JSON.parse(await publication);
+ assert.equal(published.published,true);assert.equal(reads,1);assert.equal(execution.previewScreenshot,snapshot);
+ assert.equal(probes.length,0);assert.equal(images.length,0);assert.equal(timers.size,0);
+ console.log('PASS actual publication waits in background, resumes the immutable source once, and rejects stale preflight/capture callbacks');
+
+ foreground(false);const cancelledSignal=new Cancellation();
+ const cancelledPublication=nativeTools.execute(call,cancelledSignal,{execution:{call,status:'running',output:''}});
+ await flush();const cancellationCheck=assert.rejects(cancelledPublication,e=>e.code==='CANCELLED');
+ cancelledSignal.cancel();await cancellationCheck;foreground(true);
+ assert.equal(probes.length,0);assert.equal(images.length,0);assert.equal(timers.size,0);
+ const timeoutPublication=nativeTools.execute(call,new Cancellation(),{execution:{call,status:'running',output:''}});
+ const timeoutCheck=assert.rejects(timeoutPublication,e=>e.details?.category==='WEB_STARTUP_FAILED'&&/timed out/.test(e.message));
+ await flush();await advance(30000);await timeoutCheck;
+ const failedPublication=nativeTools.execute(call,new Cancellation(),{execution:{call,status:'running',output:''}});
+ const failureCheck=assert.rejects(failedPublication,e=>e.details?.category==='WEB_STARTUP_FAILED'&&/SyntaxError/.test(e.message));
+ await flush();WebUiPreflight.complete(probes[0].id,'SyntaxError: invalid preview');await failureCheck;
+ const captureTimeout=nativeTools.execute(call,new Cancellation(),{execution:{call,status:'running',output:''}});
+ const captureTimeoutCheck=assert.rejects(captureTimeout,e=>e.details?.category==='SCREENSHOT_FAILED'&&/timed out/.test(e.message));
+ await flush();WebUiPreflight.complete(probes[0].id);await flush();await advance(30000);await captureTimeoutCheck;
+ probeStop();captureStop();clock=undefined;
+ console.log('PASS background cancellation releases waits; foreground startup failures and both render deadlines still reject publication');
 })().catch(error=>{console.error(error);process.exitCode=1;});

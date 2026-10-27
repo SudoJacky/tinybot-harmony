@@ -85,7 +85,7 @@ export struct WebUiView {
   }
   private visibilityChanged(): void {
     if (!this.mounted) { return; }
-    if (this.preflight || (this.visible && this.foreground)) {
+    if (this.foreground && (this.preflight || this.visible)) {
       clearTimeout(this.releaseTimer); this.releaseTimer = -1;
       if ((this.preflight || !this.scrolling) && !this.renderWeb && !this.error) {
         this.controller = new webview.WebviewController(); this.renderWeb = true;
@@ -104,12 +104,15 @@ export struct WebUiView {
   }
   private foregroundChanged(): void {
     clearTimeout(this.releaseTimer); this.releaseTimer = -1;
+    // Probe/capture queues replace paused attempts when the ability returns. ArkWeb
+    // cannot complete painting in the background; do not emit a false startup failure.
+    if (!this.foreground && (this.preflight || this.snapshotMode)) { clearTimeout(this.timer); }
     this.visibilityChanged();
   }
   private syncActivity(): void {
     if (!this.renderWeb || !this.attached) { return; }
     // Scrolling delays creation/loading, never painting an already visible document.
-    const active = this.preflight || (this.visible && this.foreground);
+    const active = this.foreground && (this.preflight || this.visible);
     if (this.nativeActive === active) { return; }
     try {
       if (active) { this.controller.onActive(); } else { this.controller.onInactive(); }
@@ -134,7 +137,7 @@ export struct WebUiView {
   }
   private async restart(): Promise<void> {
     if (!this.mounted || !this.attached || !this.initialPageLoaded) { return; }
-    if (!this.preflight && (this.scrolling || !this.visible || !this.foreground)) { this.reloadPending = true; return; }
+    if (!this.foreground || (!this.preflight && (this.scrolling || !this.visible))) { this.reloadPending = true; return; }
     this.reloadPending = false;
     const generation = ++this.generation;
     this.measuredHeight = 0;
@@ -146,7 +149,7 @@ export struct WebUiView {
       this.viewportChanged();
       const assets = await webUiAssets(this.getUIContext().getHostContext() as common.UIAbilityContext, this.spec.library === 'three');
       if (!this.mounted || generation !== this.generation) { return; }
-      if (!this.preflight && (this.scrolling || !this.visible || !this.foreground)) { this.reloadPending = true; return; }
+      if (!this.foreground || (!this.preflight && (this.scrolling || !this.visible))) { this.reloadPending = true; return; }
       const host = webUiHost(assets[0], assets[1], this.browserRuntime ? browserAutomationScript() : '');
       if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'load_start', { instanceId: this.instanceId, chars: host.length }); };
       this.hostNavigationPending = true;
@@ -177,16 +180,17 @@ export struct WebUiView {
       if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'port_connected', { instanceId: this.instanceId }); };
       // loadData may use an opaque data: origin; transfer only to the verified top-level host.
       this.controller.postMessage('tinybot-web-port', [this.ports[1]], '*');
-      this.ports[0].postMessageEvent(JSON.stringify({ type: 'init', spec: this.spec, autoHeight: webUiAutoHeight(this.spec), values: this.values, active: this.preflight || (this.interactive && this.visible && this.foreground), preflight: this.preflight, snapshotMode: this.snapshotMode, automation: !!this.browserRuntime }));
+      this.ports[0].postMessageEvent(JSON.stringify({ type: 'init', spec: this.spec, autoHeight: webUiAutoHeight(this.spec), values: this.values, active: this.foreground && (this.preflight || (this.interactive && this.visible)), preflight: this.preflight, snapshotMode: this.snapshotMode, automation: !!this.browserRuntime }));
     } catch (error) { this.report(error as Error); }
   }
   private sync(): void {
     if (!this.mounted || !this.ports.length) { return; }
-    try { this.ports[0].postMessageEvent(JSON.stringify({ type: 'state', values: this.values, active: this.preflight || (this.interactive && this.visible && this.foreground) })); }
+    try { this.ports[0].postMessageEvent(JSON.stringify({ type: 'state', values: this.values, active: this.foreground && (this.preflight || (this.interactive && this.visible)) })); }
     catch (error) { this.report(error as Error); }
   }
   private async receive(data: webview.WebMessage, generation: number): Promise<void> {
     if (!this.mounted || generation !== this.generation) { return; }
+    if (!this.foreground && (this.preflight || this.snapshotMode)) { return; }
     let id: number = 0;
     try {
       if (typeof data !== 'string') { throw new Error('Web UI: expected a text message'); }
@@ -225,9 +229,9 @@ export struct WebUiView {
         this.snapshotRequested = false;
         // RAF completes before ArkWeb commits its independent native surface. Allow that commit to settle.
         await new Promise<void>((resolve) => { setTimeout(resolve, 1000); });
-        if (!this.mounted || generation !== this.generation || this.error) { return; }
+        if (!this.mounted || !this.foreground || generation !== this.generation || this.error) { return; }
         const pixel = await image.createPixelMapFromSurface(this.controller.getSurfaceId());
-        if (!this.mounted || generation !== this.generation || this.error) { await pixel.release(); return; }
+        if (!this.mounted || !this.foreground || generation !== this.generation || this.error) { await pixel.release(); return; }
         this.snapshot = pixel;
         this.onValidation(''); return;
       }

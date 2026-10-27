@@ -3,13 +3,21 @@ import { Cancellation, RunCancelledError } from './Cancellation';
 import { UiDiagnosticError } from '../model/UiRepair';
 
 export interface WebUiProbe { id: number; content: string; values: UiValues; }
-interface PendingProbe { probe: WebUiProbe; start: () => void; finish: (error?: Error) => void; }
+interface PendingProbe { probe: WebUiProbe; start: () => void; pause: () => void; finish: (error?: Error) => void; }
 
 // One rendered probe at a time, shared by chat and team runtimes. Never persists probe state.
 export class WebUiPreflight {
   private static sequence: number = 0;
   private static queue: PendingProbe[] = [];
   private static listener?: (probes: WebUiProbe[]) => void;
+  private static foreground: boolean = true;
+
+  static setForeground(foreground: boolean): void {
+    if (WebUiPreflight.foreground === foreground) { return; }
+    WebUiPreflight.foreground = foreground;
+    if (!foreground) { WebUiPreflight.queue[0]?.pause(); }
+    WebUiPreflight.publish();
+  }
 
   static subscribe(listener: (probes: WebUiProbe[]) => void): () => void {
     if (WebUiPreflight.listener) { throw new Error('Web UI preflight host already attached'); }
@@ -20,30 +28,41 @@ export class WebUiPreflight {
     };
   }
   private static publish(): void {
+    if (!WebUiPreflight.foreground) { WebUiPreflight.listener?.([]); return; }
     WebUiPreflight.queue[0]?.start();
     WebUiPreflight.listener?.(WebUiPreflight.queue.slice(0, 1).map((item) => item.probe));
   }
   static complete(id: number, error: string = ''): void {
+    if (!WebUiPreflight.foreground) { return; }
     WebUiPreflight.queue.find((item) => item.probe.id === id)?.finish(error ? new Error(error) : undefined);
   }
   private static check(content: string, values: UiValues, cancellation: Cancellation): Promise<void> {
     cancellation.check();
     if (!WebUiPreflight.listener) { return Promise.reject(new Error('Web UI preflight host is unavailable')); }
     return new Promise<void>((resolve, reject) => {
-      const id = ++WebUiPreflight.sequence;
       let settled = false;
       let unsubscribe = (): void => {};
       let timer: number = -1;
       const start = (): void => {
+        const id = pending.probe.id;
         if (timer < 0) { timer = setTimeout(() => WebUiPreflight.complete(id, 'Web UI preflight timed out before startup completed'), 30000); }
       };
       const finish = (error?: Error): void => {
         if (settled) { return; }
         settled = true; clearTimeout(timer); unsubscribe();
-        WebUiPreflight.queue = WebUiPreflight.queue.filter((item) => item.probe.id !== id); WebUiPreflight.publish();
+        WebUiPreflight.queue = WebUiPreflight.queue.filter((item) => item !== pending); WebUiPreflight.publish();
         if (error) { reject(error); } else { resolve(); }
       };
-      WebUiPreflight.queue.push({ probe: { id: id, content: content, values: values }, start: start, finish: finish });
+      const pending: PendingProbe = {
+        probe: { id: ++WebUiPreflight.sequence, content: content, values: values }, start: start, finish: finish,
+        pause: (): void => {
+          clearTimeout(timer); timer = -1;
+          // A foreground host mounts a fresh validation attempt for the same immutable source.
+          // Keep the old object/id detached so delayed Web callbacks cannot settle the new attempt.
+          pending.probe = { id: ++WebUiPreflight.sequence, content: content, values: values };
+        }
+      };
+      WebUiPreflight.queue.push(pending);
       unsubscribe = cancellation.onCancel(() => finish(new RunCancelledError() as Error));
       WebUiPreflight.publish();
     });

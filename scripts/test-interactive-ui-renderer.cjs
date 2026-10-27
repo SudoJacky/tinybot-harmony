@@ -228,6 +228,7 @@ if (failed) process.exitCode = 1;
     createWebMessagePorts() { return [port, { close() {} }]; }
     postMessage() {}
     onActive() {}
+    onInactive() { this.pauses = (this.pauses || 0) + 1; }
     getSurfaceId() { return 'web-surface'; }
   }
   let captureSurface = async () => ({ release: async () => {} });
@@ -310,6 +311,18 @@ if (failed) process.exitCode = 1;
     const stale=view.receive('{"type":"snapshotReady"}',view.generation);await entered;view.generation++;
     let released=false;finishCapture({release:async()=>{released=true;}});await stale;
     assert.equal(released,true);assert.equal(view.snapshot,undefined);assert.equal(diagnostics.length,0);
+    view.error='';view.foreground=false;
+    await view.receive('{"type":"error","message":"Background startup timed out"}',view.generation);
+    await view.receive('{"type":"ready"}',view.generation);
+    assert.equal(view.error,'');assert.equal(diagnostics.length,0,'Background render callbacks cannot report source failures');
+    view.foreground=true;
+    await view.receive('{"type":"ready"}',view.generation);
+    entered=new Promise(resolve=>enteredCapture=resolve);
+    const backgroundCapture=view.receive('{"type":"snapshotReady"}',view.generation);await entered;
+    view.foreground=false;released=false;
+    finishCapture({release:async()=>{released=true;}});await backgroundCapture;
+    assert.equal(released,true);assert.equal(view.snapshot,undefined);assert.equal(diagnostics.length,0);
+    view.foreground=true;
     captureSurface=async()=>{throw Error('Surface read failed');};view.error='';
     await view.receive('{"type":"ready"}',view.generation);
     await view.receive('{"type":"snapshotReady"}',view.generation);

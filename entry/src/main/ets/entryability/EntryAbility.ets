@@ -10,6 +10,8 @@ import { huaweiAccount } from '../services/HuaweiAccount';
 
 import { hostedPrivacy } from '../services/HostedPrivacy';
 import { backgroundGeneration } from '../services/BackgroundGeneration';
+import { WebUiPreflight } from '../services/WebUiPreflight';
+import { PreviewCapture } from '../services/PreviewCapture';
 /*
  * Copyright (c) 2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -131,6 +133,8 @@ export default class EntryAbility extends UIAbility {
     hostedPrivacy.refresh();
     if (hostedPrivacy.allowed) { huaweiAccount.refresh(); DeveloperDiagnostics.setForeground(true); }
     AppStorage.setOrCreate('tinybot.foreground', true);
+    WebUiPreflight.setForeground(true);
+    PreviewCapture.setForeground(true);
     LaunchActions.setForeground(true);
     LanguagePreferences.refresh();
     // Ability has brought to foreground
@@ -138,6 +142,8 @@ export default class EntryAbility extends UIAbility {
   }
 
   onBackground(): void {
+    WebUiPreflight.setForeground(false);
+    PreviewCapture.setForeground(false);
     backgroundGeneration.setForeground(false);
     DeveloperDiagnostics.setForeground(false);
     AppStorage.setOrCreate('tinybot.foreground', false);
