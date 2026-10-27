@@ -51,8 +51,8 @@ function fixture(data = seed()) {
   f.calls = calls; return f;
 }
 async function main() {
-  assert.equal(all.length, 38); assert.equal(new Set(all).size, 38); assert.equal(BASIC_FILE_TOOLS.length, 6);
-  assert.equal(optional.length, 28);
+  assert.equal(all.length, 40); assert.equal(new Set(all).size, 40); assert.equal(BASIC_FILE_TOOLS.length, 6);
+  assert.equal(optional.length, 30);
   assert.ok(!all.includes('publish_data_view'));
   assert.ok(!all.includes('generate_image'));
   const removed = seed(); removed.productivity.options.image = {providerId:'old', modelId:'image'};
@@ -72,7 +72,7 @@ async function main() {
     ['read_attachment', 'read_reference']);
   const covered = Array.from(TOOL_CAPABILITIES.flatMap(capability => capability.tools));
   assert.equal(TOOL_CAPABILITIES.length, 12);
-  assert.equal(new Set(covered).size, 28); assert.deepEqual(covered.slice().sort(), optional.slice().sort());
+  assert.equal(new Set(covered).size, 30); assert.deepEqual(covered.slice().sort(), optional.slice().sort());
   const obsolete = {agentMode:'custom', disabledTools:Array.from(MANAGED_TOOL_NAMES).concat(['generate_image', 'read_tool_result'])};
   validateToolSelection(obsolete);
   assert.deepEqual(Array.from(normalizeDisabledTools(obsolete.disabledTools)), []);

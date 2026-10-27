@@ -4,6 +4,7 @@ import { FileDiff } from './FileDiff';
 export function toolTitle(name: string): string {
   const titles: Record<string, string> = {
     'browser_open': t('打开浏览器'), 'browser_snapshot': t('读取浏览器页面'), 'browser_action': t('操作浏览器'),
+    'browser_capture': t('截取浏览器画面'), 'browser_wait': t('等待浏览器状态'),
     'browser_handoff': t('请你接管浏览器'), 'browser_close': t('关闭浏览器'),
     'search_web': t('联网搜索'), 'present_files': t('交付文件'), 'publish_preview': t('发布预览'), 'read_reference': t('补读会话引用'),
     'team_recruit': t('招募员工'), 'team_wait': t('等待员工交接'), 'team_inspect': t('查看团队'), 'team_read_result': t('读取交接结果'),

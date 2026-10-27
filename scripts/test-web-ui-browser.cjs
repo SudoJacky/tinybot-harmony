@@ -10,7 +10,8 @@ const assets='entry/src/main/resources/rawfile/interactive-web/';
 const fixtures=path.join(__dirname,'fixtures/interactive-web/');
 const example=JSON.parse(fs.readFileSync(path.join(fixtures,'example.json'),'utf8')).content.split('\n');
 const begin=JSON.parse(example[1]);const spec=parseWebUi(JSON.parse(example[2]).node.data);
-const html=webUiHost(fs.readFileSync(assets+'host.js','utf8'),fs.readFileSync(assets+'three.bundle.js','utf8'));
+const {browserAutomationScript}=model('BrowserScripts');
+const html=webUiHost(fs.readFileSync(assets+'host.js','utf8'),fs.readFileSync(assets+'three.bundle.js','utf8'),browserAutomationScript());
 assert.throws(()=>parseWebUi(JSON.stringify({...spec,library:'cdn'})));assert.throws(()=>parseWebUiMessage('{"type":"submit"}'));assert.throws(()=>parseWebUiMessage('{"type":"save","id":0,"values":{}}'));
 assert.throws(()=>parseWebUi(JSON.stringify({...spec,autoHeight:'yes'})));
 assert.throws(()=>parseWebUiMessage('{"type":"resize","height":-1}'));
@@ -21,11 +22,11 @@ assert.throws(()=>parseWebUiMessage('{"type":"resize","height":"200"}'));
   const page=await browser.newPage({viewport:{width:400,height:600}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
   const consoleErrors=[];page.on('console',message=>{if(message.type()==='error')consoleErrors.push(message.text());});
   const requests=[];await page.route('**/*',route=>{requests.push(route.request().url());route.abort();});
-  async function mount(values,specOverride=spec,expectedError='',preflight=false,snapshotMode=false){
+  async function mount(values,specOverride=spec,expectedError='',preflight=false,snapshotMode=false,automation=false){
    // setContent retains the previous window and message listeners; a remount needs a fresh host.
    await page.goto('about:blank');
    await page.setContent(html);
-   await page.evaluate(({spec,values,preflight,autoHeight,snapshotMode})=>{
+   await page.evaluate(({spec,values,preflight,autoHeight,snapshotMode,automation})=>{
     window.messages=[];window.saved=values;window.failSave=false;
     const channel=new MessageChannel();window.nativePort=channel.port1;
     channel.port1.onmessage=event=>{const data=JSON.parse(event.data);window.messages.push(data);if(data.type==='resize'&&autoHeight){
@@ -35,8 +36,8 @@ assert.throws(()=>parseWebUiMessage('{"type":"resize","height":"200"}'));
       else {window.saved=data.values;channel.port1.postMessage(JSON.stringify({type:'ack',id:data.id,values:data.values}));}
     }};
     window.postMessage('tinybot-web-port','*',[channel.port2]);
-    channel.port1.postMessage(JSON.stringify({type:'init',spec,values,active:true,preflight,autoHeight,snapshotMode}));
-   },{spec:specOverride,values,preflight,autoHeight:webUiAutoHeight(specOverride),snapshotMode});
+    channel.port1.postMessage(JSON.stringify({type:'init',spec,values,active:true,preflight,autoHeight,snapshotMode,automation}));
+   },{spec:specOverride,values,preflight,autoHeight:webUiAutoHeight(specOverride),snapshotMode,automation});
    try { await page.waitForFunction(()=>window.messages.some(m=>m.type==='ready'||m.type==='error')); }
    catch(error){console.error({errors,consoleErrors,frames:page.frames().map(f=>f.url()),host:await page.evaluate(()=>({ready:window.__tinybotHostReady,messages:window.messages}))});throw error;}
    const messages=await page.evaluate(()=>window.messages);
@@ -178,6 +179,39 @@ assert.throws(()=>parseWebUiMessage('{"type":"resize","height":"200"}'));
   await page.evaluate(values=>nativePort.postMessage(JSON.stringify({type:'state',values,active:true})),initial2d);
   await frame.waitForFunction(()=>document.getElementById('count').textContent==='当前计数：0');
   console.log('PASS Canvas demo commits DOM edits and applies native reset through the same bridge');
+
+  const controlSpec={version:1,html:'<button id="add">Add</button><input aria-label="Name"><span id="count">0</span>',css:'',library:'none',height:360,
+    js:'document.querySelector("#add").onclick=async()=>{const count=(tinybot.state.count||0)+1;await tinybot.save({count});document.querySelector("#count").textContent=String(count)};'};
+  frame=await mount({},controlSpec,'',false,false,true);
+  let controlSequence=0;
+  async function command(operation,args={}){
+    const id=++controlSequence;
+    await page.evaluate(({id,operation,args})=>nativePort.postMessage(JSON.stringify({type:'browserCommand',id,operation,argumentsJson:JSON.stringify(args)})),{id,operation,args});
+    await page.waitForFunction(id=>messages.some(m=>m.type==='browserResult'&&m.id===id),id);
+    return JSON.parse(await page.evaluate(id=>messages.find(m=>m.type==='browserResult'&&m.id===id).message,id));
+  }
+  let observation=await command('snapshot',{snapshotId:'test-1'});
+  const add=observation.elements.find(element=>element.label==='Add');
+  assert.ok(add);assert.equal(observation.embeddedFrames,0);
+  assert.equal((await command('action',{action:'click',snapshotId:'test-1',elementId:add.id})).ok,true);
+  await frame.waitForFunction(()=>document.querySelector('#count').textContent==='1');
+  assert.equal(await page.evaluate(()=>saved.count),1,'test saves use session state, not preflight rejection');
+  observation=await command('snapshot',{snapshotId:'test-2'});
+  const name=observation.elements.find(element=>element.label==='Name');
+  assert.equal((await command('action',{action:'type',snapshotId:'test-2',elementId:name.id,text:'Ada'})).ok,true);
+  observation=await command('snapshot',{snapshotId:'test-3'});
+  assert.equal(observation.elements.find(element=>element.label==='Name').value,'Ada');
+  assert.equal((await command('action',{action:'click',snapshotId:'test-1',elementId:add.id})).code,'STALE_BROWSER_SNAPSHOT');
+  await command('paint');
+  await frame.evaluate(()=>setTimeout(()=>{throw Error('late interaction failure')},0));
+  await page.waitForFunction(()=>messages.some(message=>message.type==='error'&&message.message.includes('late interaction failure')));
+  observation=await command('snapshot',{snapshotId:'after-error'});assert.ok(observation.text.includes('1'));
+  errors.length=0;
+  frame=await mount({},controlSpec);
+  await page.evaluate(()=>nativePort.postMessage(JSON.stringify({type:'browserCommand',id:999,operation:'snapshot',argumentsJson:'{"snapshotId":"forbidden"}'})));
+  await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(()=>messages.some(message=>message.type==='browserResult')),false,'normal previews do not install browser control');
+  console.log('PASS isolated preview browser observes/acts through the native port, saves temporary state, rejects stale handles, synchronizes paint and reports late errors');
   await mount(begin.state,spec,'',true);
   console.log('PASS actual Three.js scene passes startup preflight');
   const bad={version:1,html:'',css:'',js:'new THREE.OrbitControls();',library:'three',height:360};

@@ -12,11 +12,11 @@ const PAGE_STATE: string = `
       node.tagName === 'SELECT' ? [...node.options].map(o => [o.value, o.text]) : null]);
   };`;
 
-export function browserSnapshotScript(id: string): string {
+function snapshotScript(idExpression: string): string {
   return `(() => {
     ${SENSITIVE_INPUT}
     ${PAGE_STATE}
-    const snapshotId = ${JSON.stringify(id)};
+    const snapshotId = ${idExpression};
     const visible = node => { const r = node.getBoundingClientRect(); const s = getComputedStyle(node); return r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth && s.visibility !== 'hidden' && s.display !== 'none'; };
     const nodes = [...document.querySelectorAll('a[href],button,input,textarea,select,[role="button"],[role="link"],[contenteditable="true"]')].filter(visible);
     const retained = nodes.slice(0, 80);
@@ -24,6 +24,7 @@ export function browserSnapshotScript(id: string): string {
     const elements = retained.map((node, index) => ({ id: index + 1,
       role: node.getAttribute('role') || node.tagName.toLowerCase(),
       label: label(node),
+      value: sensitive(node) ? undefined : String(node.value ?? '').slice(0, 1000), checked: sensitive(node) ? undefined : node.checked,
       type: sensitive(node) ? 'user-only' : (node.type || ''), disabled: !!node.disabled || node.getAttribute('aria-disabled') === 'true',
       options: node.tagName === 'SELECT' ? [...node.options].slice(0, 50).map(o => ({ value: o.value.slice(0, 200), label: o.text.slice(0, 200) })) : undefined
     }));
@@ -35,11 +36,11 @@ export function browserSnapshotScript(id: string): string {
   })()`;
 }
 
-export function browserActionScript(action: BrowserAction, preview: boolean = false): string {
+function actionScript(actionExpression: string, preview: boolean): string {
   return `(() => {
     ${SENSITIVE_INPUT}
     ${PAGE_STATE}
-    const args = ${JSON.stringify(action)};
+    const args = ${actionExpression};
     const preview = ${preview};
     const fail = (code, message) => JSON.stringify({ code, message });
     if (args.action === 'scroll') { window.scrollBy({ top: args.deltaY, behavior: 'instant' }); return JSON.stringify({ ok: true }); }
@@ -75,4 +76,35 @@ export function browserActionScript(action: BrowserAction, preview: boolean = fa
     } else return fail('INVALID_ARGUMENTS', 'Unknown DOM action.');
     return JSON.stringify({ ok: true });
   })()`;
+}
+
+export function browserSnapshotScript(id: string): string { return snapshotScript(JSON.stringify(id)); }
+export function browserActionScript(action: BrowserAction, preview: boolean = false): string {
+  return actionScript(JSON.stringify(action), preview);
+}
+
+// Trusted code installed inside the opaque iframe; no eval or model-supplied scripts/selectors.
+export function browserAutomationScript(): string {
+  return `(() => {
+    const observe = inputId => ${snapshotScript('inputId')};
+    const act = inputAction => ${actionScript('inputAction', false)};
+    addEventListener('message', event => {
+      const data = event.data;
+      if (event.source !== parent || data?.channel !== 'tinybot-host' || data.type !== 'browserCommand') return;
+      try {
+        const args = JSON.parse(data.argumentsJson);
+        if (data.operation === 'paint') {
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            parent.postMessage({channel:'tinybot-frame',type:'browserResult',id:data.id,message:'{}'}, '*');
+          }));
+        } else {
+          const message = data.operation === 'snapshot' ? observe(args.snapshotId) : act(args);
+          parent.postMessage({channel:'tinybot-frame',type:'browserResult',id:data.id,message}, '*');
+        }
+      } catch (error) {
+        parent.postMessage({channel:'tinybot-frame',type:'browserResult',id:data.id,
+          message:JSON.stringify({code:'BROWSER_ACTION_FAILED',message:String(error.message)})}, '*');
+      }
+    });
+  })();`;
 }

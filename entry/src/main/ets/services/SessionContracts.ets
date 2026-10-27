@@ -1,3 +1,4 @@
+import { BrowserPreview } from '../model/BrowserPreview';
 import { LogFields } from '../model/DiagnosticLog';
 import { TeamRun } from '../model/Team';
 import { ProductivityData, Attachment, McpServer } from '../model/Productivity';
@@ -23,7 +24,7 @@ export interface SessionResources {
   afterTask?(threadId: string, messageId: string, content: string, workspaceId?: string): Promise<void>;
   createId(): string;
   ensureWorkspace(threadId: string, workspaceId?: string): Promise<void>;
-  tools(threadId: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments?: Attachment[], live?: LiveResources, workspaceId?: string, project?: ProjectData): AgentTools;
+  tools(threadId: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments?: Attachment[], live?: LiveResources, workspaceId?: string, project?: ProjectData, resolvePreview?: (previewId: string) => BrowserPreview): AgentTools;
   persistProjectFolders?(folders: SharedFolder[]): Promise<void>;
   revokeProjectFolders?(folders: SharedFolder[]): Promise<void>;
   activateProjectFolders?(projects: ProjectData[]): Promise<void>;

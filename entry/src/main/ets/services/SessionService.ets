@@ -1,3 +1,4 @@
+import { resolveBrowserPreview } from '../model/BrowserPreview';
 import { Diagnostics } from '../model/Diagnostics';
 import { projectFor, workspaceIdFor, validateProjects, projectContext } from '../model/Project';
 import { SharedFolder } from '../model/SharedFolders';
@@ -1137,7 +1138,7 @@ export class SessionService {
     return new SelectedTools(new RuleTools(new ToolSet([this.resources.tools(thread.id, this.extensions, selected, extras,
       (thread.attachments || []).concat(...thread.messages.map((item) => (item.attachments || [])
         .concat(...(item.steps || []).map((step) => step.steering?.attachments || [])))), live, projectFor(this.data, thread)?.workspaceId,
-      projectFor(this.data, thread)), new ReferenceTools(() => thread.messages)]), extras.options.readOnly), this.selectedToolSelection(thread));
+      projectFor(this.data, thread), (previewId) => resolveBrowserPreview(thread.messages, previewId)), new ReferenceTools(() => thread.messages)]), extras.options.readOnly), this.selectedToolSelection(thread));
   }
   private refreshContext(): void {
     const diagnosticMark = Diagnostics.begin();

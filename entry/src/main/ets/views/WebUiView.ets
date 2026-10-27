@@ -8,6 +8,8 @@ import { UiValues } from '../model/InteractiveUi';
 import { WebUiSpec, parseWebUi, parseWebUiMessage, webUiHost, webUiAutoHeight, WEB_UI_ORIGIN } from '../model/WebUi';
 import { webUiAssets } from '../services/WebUiAssets';
 import { Btn } from '../common/Theme';
+import { PreviewBrowserRuntime } from '../services/PreviewBrowserRuntime';
+import { browserAutomationScript } from '../model/BrowserScripts';
 
 let activeWebViews: number = 0;
 let webViewSequence: number = 0;
@@ -21,6 +23,8 @@ export struct WebUiView {
   @Prop preflight: boolean = false;
   @Prop snapshotMode: boolean = false;
   @Prop retainedHeight: number = 0;
+  browserRuntime?: PreviewBrowserRuntime;
+  private browserAttachment: number = -1;
   onHeight: (height: number) => void = () => {};
   @StorageLink('tinybot.foreground') @Watch('foregroundChanged') private foreground: boolean = true;
   @StorageProp('tinybot.chat.scrolling') @Watch('visibilityChanged') private scrolling: boolean = false;
@@ -57,6 +61,7 @@ export struct WebUiView {
   }
   aboutToDisappear(): void { this.mounted = false; clearTimeout(this.releaseTimer); this.releaseWeb(); this.snapshot?.release(); }
   private releaseWeb(): void {
+    this.browserRuntime?.detach(this.browserAttachment);
     this.attached = false; this.initialPageLoaded = false; this.hostNavigationPending = false;
     this.nativeActive = undefined;
     this.reloadPending = false;
@@ -103,11 +108,16 @@ export struct WebUiView {
     } catch (error) { this.report(error as Error); }
   }
   private closePorts(): void {
+    this.browserRuntime?.detach(this.browserAttachment); this.browserAttachment = -1;
     clearTimeout(this.timer);
     for (const port of this.ports) { port.close(); }
     this.ports = [];
   }
   private report(error: Error): void {
+    this.browserRuntime?.recordError(error.message);
+    if (this.browserRuntime?.isReady) {
+      Diagnostics.log('error', 'web', 'failed', { instanceId: this.instanceId, generation: this.generation }, error); return;
+    }
     this.error = error.message; this.ready = false; clearTimeout(this.timer);
     Diagnostics.log('error', 'web', 'failed', { instanceId: this.instanceId, generation: this.generation }, error);
     if (this.preflight) { this.onValidation(error.message); }
@@ -125,7 +135,7 @@ export struct WebUiView {
       const assets = await webUiAssets(this.getUIContext().getHostContext() as common.UIAbilityContext, this.spec.library === 'three');
       if (!this.mounted || generation !== this.generation) { return; }
       if (!this.preflight && (this.scrolling || !this.visible || !this.foreground)) { this.reloadPending = true; return; }
-      const host = webUiHost(assets[0], assets[1]);
+      const host = webUiHost(assets[0], assets[1], this.browserRuntime ? browserAutomationScript() : '');
       if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'load_start', { instanceId: this.instanceId, chars: host.length }); };
       this.hostNavigationPending = true;
       const mark = Diagnostics.begin(this.instanceId);
@@ -149,10 +159,13 @@ export struct WebUiView {
       const generation = this.generation;
       this.ports = this.controller.createWebMessagePorts();
       this.ports[0].onMessageEvent((data: webview.WebMessage) => { this.receive(data, generation); });
+      this.browserAttachment = this.browserRuntime?.attach((id, operation, argumentsJson) => {
+        this.ports[0].postMessageEvent(JSON.stringify({ type: 'browserCommand', id: id, operation: operation, argumentsJson: argumentsJson }));
+      }, () => image.createPixelMapFromSurface(this.controller.getSurfaceId())) ?? -1;
       if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'port_connected', { instanceId: this.instanceId }); };
       // loadData may use an opaque data: origin; transfer only to the verified top-level host.
       this.controller.postMessage('tinybot-web-port', [this.ports[1]], '*');
-      this.ports[0].postMessageEvent(JSON.stringify({ type: 'init', spec: this.spec, autoHeight: webUiAutoHeight(this.spec), values: this.values, active: this.preflight || (this.interactive && this.visible && this.foreground), preflight: this.preflight, snapshotMode: this.snapshotMode }));
+      this.ports[0].postMessageEvent(JSON.stringify({ type: 'init', spec: this.spec, autoHeight: webUiAutoHeight(this.spec), values: this.values, active: this.preflight || (this.interactive && this.visible && this.foreground), preflight: this.preflight, snapshotMode: this.snapshotMode, automation: !!this.browserRuntime }));
     } catch (error) { this.report(error as Error); }
   }
   private sync(): void {
@@ -166,6 +179,11 @@ export struct WebUiView {
     try {
       if (typeof data !== 'string') { throw new Error('Web UI: expected a text message'); }
       const message = parseWebUiMessage(data); id = message.id || 0;
+      if (message.type === 'browserResult' && this.browserRuntime) { this.browserRuntime.receive(id, message.message as string); return; }
+      if (message.type === 'error' && this.browserRuntime?.isReady) {
+        this.browserRuntime.recordError(message.message as string);
+        Diagnostics.log('error', 'web', 'failed', { instanceId: this.instanceId }, message.message); return;
+      }
       if (message.type === 'error') { throw new Error(message.message); }
       if (message.type === 'resize') {
         if (this.spec && webUiAutoHeight(this.spec)) { this.heightValue = Math.max(48, Math.min(800, Math.ceil(message.height as number))); }
@@ -175,6 +193,7 @@ export struct WebUiView {
       if (message.type === 'ready') {
         if (this.error) { return; } // A late ready must not erase a startup failure.
         clearTimeout(this.timer); this.ready = true;
+        this.browserRuntime?.ready();
         if (Diagnostics.recording) { Diagnostics.event('web.ready', { generation: this.generation }, this.instanceId); }
         if (Diagnostics.acceptsLog('info')) { Diagnostics.log('info', 'web', 'ready', { instanceId: this.instanceId, library: this.spec?.library || 'none', preflight: this.preflight }); };
         if (this.snapshotMode) {
@@ -243,7 +262,7 @@ export struct WebUiView {
         .onConsole((event) => { if (event.message.getMessageLevel() === MessageLevel.Error) { this.report(new Error(event.message.getMessage().slice(0, 2000))); } return false; })
         .onErrorReceive((event) => { if (event.request.isMainFrame()) { this.report(new Error(event.error.getErrorInfo())); } else { Diagnostics.log('error', 'web', 'resource_failed', { instanceId: this.instanceId }, event.error.getErrorInfo()); } })
         .onPermissionRequest((event) => { event.request.deny(); })
-        .onRenderExited(() => { this.report(new Error(t('交互内容渲染进程已退出，请重试。'))); })
+        .onRenderExited(() => { this.browserRuntime?.detach(this.browserAttachment); this.report(new Error(t('交互内容渲染进程已退出，请重试。'))); })
       }
       if (this.snapshot) { Image(this.snapshot).width('100%').height(this.heightValue).objectFit(ImageFit.Fill) }
       if (!this.ready && !this.error) {

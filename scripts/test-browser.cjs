@@ -307,7 +307,7 @@ async function acquired() {
   {
     const f = fixture('disabled'); const tools = new ToolSet([f.tools]);
     assert.equal(tools.definitions().length, 0);
-    await f.browser.setEnabled(true); assert.equal(tools.definitions().length, 5);
+    await f.browser.setEnabled(true); assert.equal(tools.definitions().length, 7);
     await f.browser.setEnabled(false); assert.equal(tools.definitions().length, 0);
     await assert.rejects(tools.execute(call('browser_open', { url: 'https://example.com', reason: 'Disabled' }), f.cancellation), error => error.code === 'TOOL_UNAVAILABLE');
     assert.equal(f.browser.permissionPending, false);
@@ -393,6 +393,18 @@ async function acquired() {
     assert.equal(captureResult.released, 1, 'Discarded captures release their native surface pixels');
     captureResult.before = async () => {};
     console.log('PASS native annotation captures the Web surface and rejects page changes with pixel cleanup');
+  }
+  {
+    const { NativeBrowserDriver } = load(path.join(root, 'main/ets/services/NativeBrowserDriver'));
+    const f = fixture(); f.browser.openForUser();
+    const driver = new NativeBrowserDriver(f.browser);
+    f.browser.preview = { previewId: 'pv_test', title: 'Local', version: 'v1', content: '' };
+    driver.previewRuntime.capture = async () => capturedPixel;
+    driver.controller.accessBackward = () => { throw Error('Detached external Web controller'); };
+    driver.controller.accessForward = () => { throw Error('Detached external Web controller'); };
+    assert.equal(driver.userBack(), false); assert.equal(driver.userForward(), false); driver.historyChanged();
+    const capture = await driver.capture(); assert.equal(capture.url, 'Preview: Local'); assert.equal(capture.pixel, capturedPixel);
+    console.log('PASS local preview history and annotation never access the detached external Web controller');
   }
   {
     const { NativeBrowserDriver } = load(path.join(root, 'main/ets/services/NativeBrowserDriver'));

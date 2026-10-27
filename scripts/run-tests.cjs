@@ -29,6 +29,7 @@ const suites = {
     'test-orchestration.cjs',
     'test-prefix-cache.cjs',
     'test-preview-publication.cjs',
+    'test-preview-browser.cjs',
     'test-preview-screenshot.cjs',
     'test-productivity-native.cjs',
     'test-request-context.cjs',

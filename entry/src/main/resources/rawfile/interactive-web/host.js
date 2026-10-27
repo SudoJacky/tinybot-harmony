@@ -1,7 +1,8 @@
 /* Trusted outer host. Generated code runs only in an opaque-origin sandbox frame. */
 (() => {
   'use strict';
-  const library = JSON.parse(document.getElementById('vendor').textContent).library;
+  const config = JSON.parse(document.getElementById('vendor').textContent);
+  const library = config.library;
   let port, frame, initialized = false;
   const send = data => port.postMessage(JSON.stringify(data));
   const script = text => '<script>' + text.replace(/<\/script/gi, '<\\/script') + '</script>';
@@ -96,6 +97,7 @@
       '<style>html{color-scheme:light}body{margin:0;font:15px system-ui;color:#17251f;background:white}*{box-sizing:border-box}canvas{display:block;max-width:100%;touch-action:none}button,input,select{font:inherit}button{min-height:40px}</style>' +
       '<style>' + spec.css.replace(/<\/style/gi, '<\\/style') + '</style>' +
       (data.autoHeight ? '<style>html,body{min-height:0!important;overflow:auto}</style>' : '') + script(bootstrap) +
+      (data.automation && config.browserScript ? script(config.browserScript) : '') +
       (spec.library === 'three' ? script(library) : '') + '</head><body>' + spec.html +
       script('Promise.resolve((async()=>{\n' + spec.js + '\n})()).then(__tinybotReady).catch(__tinybotError);\n//# sourceURL=tinybot-generated.js') + '</body></html>';
     document.body.append(frame);
@@ -113,7 +115,11 @@
       port.start();
     } else if (frame && event.source === frame.contentWindow && event.data?.channel === 'tinybot-frame') {
       const data = event.data;
-      if (data.type === 'save') send({ type: 'save', id: data.id, values: data.values });
+      if (data.type === 'browserResult' && typeof data.message === 'string') {
+        if (JSON.stringify(data).length > 18000) send({type:'browserResult',id:data.id,message:JSON.stringify({code:'OBSERVATION_TOO_LARGE',message:'Preview observation exceeds bridge limit.'})});
+        else send({type:'browserResult',id:data.id,message:data.message});
+      }
+      else if (data.type === 'save') send({ type: 'save', id: data.id, values: data.values });
       else if (data.type === 'resize') send({ type: 'resize', height: data.height });
       else if (data.type === 'ready') send({ type: 'ready' });
       else if (data.type === 'snapshotReady') send({ type: 'snapshotReady' });
