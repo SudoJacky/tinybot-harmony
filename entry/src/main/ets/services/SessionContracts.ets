@@ -20,6 +20,7 @@ export interface SessionRepository {
 
 export interface SessionResources {
   authorizeGeneration?(): Promise<void>;
+  prepareGeneration?(): Promise<void>;
   recoverUi?(threadId: string, content: string, error: Error, cancellation: Cancellation, workspaceId?: string): Promise<string>;
   afterTask?(threadId: string, messageId: string, content: string, workspaceId?: string): Promise<void>;
   createId(): string;
@@ -61,7 +62,7 @@ export interface SessionPreferences {
 
 // Structural changes carry detached snapshots; preference changes omit transcripts.
 export interface SessionEvent {
-  kind: 'snapshot' | 'preferences' | 'message' | 'text' | 'reasoning' | 'draft' | 'state' | 'thread' | 'teams';
+  kind: 'snapshot' | 'preferences' | 'message' | 'text' | 'reasoning' | 'draft' | 'state' | 'thread' | 'teams' | 'task-complete';
   state: SessionState;
   preferences?: SessionPreferences;
   data?: AppData;

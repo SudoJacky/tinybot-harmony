@@ -8,6 +8,7 @@ import { DeepSeekSearchProvider } from './search/DeepSeekSearchProvider';
 import { TavilySearchProvider } from './search/TavilySearchProvider';
 import { RequestUsage } from '../model/Usage';
 import { Cancellation, RunCancelledError } from './Cancellation';
+import { NetworkTransfers } from './NetworkTransfers';
 import { CredentialReader } from './providers/Provider';
 import { SearchTransport } from './WebSearchTools';
 import { CompatHttp, CompatResponse } from './CompatHttp';
@@ -47,27 +48,30 @@ export class NativeSearchTransport implements SearchTransport {
   }
   // The search key must never reach a redirect target, so the request refuses redirects on every
   // supported system and a 3xx therefore surfaces as an ordinary HTTP failure.
-  private request(input: SearchHttpRequest, cancellation: Cancellation): Promise<string> {
-    return new Promise<string>((resolve, reject) => {
-      let settled = false; let timer = -1; let unsubscribe = (): void => {}; let abort = (): void => {};
-      const finish = (body: string, error?: Error | ToolFailure | RunCancelledError): void => {
-        if (settled) { return; } settled = true; clearTimeout(timer); unsubscribe();
-        if (error) { abort(); reject(error); } else { resolve(body); }
-      };
-      timer = setTimeout(() => finish('', new ToolFailure('TIMEOUT', 'Search timed out after 60 seconds.', 'check_connection')), 60000);
-      unsubscribe = cancellation.onCancel(() => finish('', new RunCancelledError() as Error));
-      if (settled) { return; }
-      CompatHttp.request({
-        url: input.endpoint, method: 'POST', headers: input.headers, body: input.body,
-        connectTimeout: 15000, readTimeout: 60000, maxBytes: 1024 * 1024, dataType: 'string', redirect: 'refuse'
-      }, (stop: () => void) => { abort = stop; }).then((response: CompatResponse) => {
-        if (response.status === 402) { finish('', new ToolFailure('QUOTA_EXHAUSTED', 'Search was rejected because the account balance is insufficient.', 'check_quota')); return; }
-        if (response.status !== 200) { finish('', toolHttpFailure(response.status, 'Search HTTP ' + response.status + '. Check the search service configuration and API Key.', 'search')); return; }
-        finish(response.text);
-      }).catch((error: Error) => {
-        const failure = error as BusinessError;
-        finish('', new ToolFailure('NETWORK_ERROR', 'Search network error (' + failure.code + ').', 'check_connection', { nativeCode: failure.code }));
+  private async request(input: SearchHttpRequest, cancellation: Cancellation): Promise<string> {
+    const endTransfer = await NetworkTransfers.begin(cancellation);
+    try {
+      return await new Promise<string>((resolve, reject) => {
+        let settled = false; let timer = -1; let unsubscribe = (): void => {}; let abort = (): void => {};
+        const finish = (body: string, error?: Error | ToolFailure | RunCancelledError): void => {
+          if (settled) { return; } settled = true; clearTimeout(timer); unsubscribe();
+          if (error) { abort(); reject(error); } else { resolve(body); }
+        };
+        timer = setTimeout(() => finish('', new ToolFailure('TIMEOUT', 'Search timed out after 60 seconds.', 'check_connection')), 60000);
+        unsubscribe = cancellation.onCancel(() => finish('', new RunCancelledError() as Error));
+        if (settled) { return; }
+        CompatHttp.request({
+          url: input.endpoint, method: 'POST', headers: input.headers, body: input.body,
+          connectTimeout: 15000, readTimeout: 60000, maxBytes: 1024 * 1024, dataType: 'string', redirect: 'refuse'
+        }, (stop: () => void) => { abort = stop; }).then((response: CompatResponse) => {
+          if (response.status === 402) { finish('', new ToolFailure('QUOTA_EXHAUSTED', 'Search was rejected because the account balance is insufficient.', 'check_quota')); return; }
+          if (response.status !== 200) { finish('', toolHttpFailure(response.status, 'Search HTTP ' + response.status + '. Check the search service configuration and API Key.', 'search')); return; }
+          finish(response.text);
+        }).catch((error: Error) => {
+          const failure = error as BusinessError;
+          finish('', new ToolFailure('NETWORK_ERROR', 'Search network error (' + failure.code + ').', 'check_connection', { nativeCode: failure.code }));
+        });
       });
-    });
+    } finally { await endTransfer(); }
   }
 }

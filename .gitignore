@@ -51,6 +51,7 @@ scripts/*
 !scripts/test-conversation-share.cjs
 !scripts/test-feedback.cjs
 !scripts/test-api20-compat.cjs
+!scripts/test-review-invitation.cjs
 !scripts/test-preview-references.cjs
 !scripts/test-preview-browser.cjs
 !scripts/test-preview-surface.cjs

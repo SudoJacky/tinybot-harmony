@@ -1437,6 +1437,12 @@ async function test(name, run) {
     }
   });
   await test('provider keeps active streams beyond three minutes and stops idle or cancelled streams', async () => {
+    const {NetworkTransfers}=load(path.join(source,'services/NetworkTransfers'));
+    let networkScopes=0, scopeStarts=0, scopeEnds=0;
+    const unobserve=NetworkTransfers.observe(async()=>{
+      networkScopes++;scopeStarts++;
+      return async()=>{networkScopes--;scopeEnds++;};
+    });
     const {ProtocolProvider}=load(path.join(source,'services/providers/ProtocolProvider'));
     const provider=new ProtocolProvider({id:'test',name:'Test',protocol:'chat-completions',defaultBaseUrl:'https://fixture.invalid/v1',defaultModel:'test'}, providerEffects);
     const input={model:'test',baseUrl:'https://fixture.invalid/v1',apiKey:'',messages:[{role:'user',content:'hello'}],tools:[],usageOrigin:{threadId:'trace-thread',turnId:'trace-turn',purpose:'conversation',step:2}};
@@ -1446,7 +1452,7 @@ async function test(name, run) {
     fakeTimers={set(fn,ms){const id=++sequence;timers.set(id,{fn,at:now+ms});return id;},clear(id){timers.delete(id);}};
     const advance=ms=>{now+=ms;for(const [id,item] of [...timers])if(item.at<=now){timers.delete(id);item.fn();}};
     const emit=text=>transport.emit('dataReceive',Uint8Array.from(Buffer.from(text)).buffer);
-    httpScript=request=>{transport=request;request.callback(null,200);};
+    httpScript=request=>{assert.equal(networkScopes,1,'Native model I/O requires an admitted transfer');transport=request;request.callback(null,200);};
     try {
       const pending=provider.stream(input,new Cancellation(),()=>{});
       await new Promise(setImmediate);
@@ -1460,6 +1466,7 @@ async function test(name, run) {
       emit('data: {"choices":[{"index":0,"delta":{"content":"done"}}]}\n\ndata: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
       transport.emit('dataEnd');
       assert.equal((await pending).content,'done');assert.equal(timers.size,0);
+      assert.equal(networkScopes,0,'Successful SSE ends its scope before returning to tools');
       const idle=provider.stream({...input, requestUsage: false},new Cancellation(),()=>{});
       const timedOut=assert.rejects(idle,/120/);
       await new Promise(setImmediate);
@@ -1485,7 +1492,8 @@ async function test(name, run) {
       const tracked=UsageLedger.list().filter(item=>!recordsBefore.has(item.id));
       assert.equal(tracked.length,5);assert.equal(tracked.map(item=>item.status).sort().join(','),'cancelled,complete,failed,failed,failed');
       assert.ok(tracked.every(item=>item.origin.threadId==='trace-thread'&&item.origin.turnId==='trace-turn'&&item.origin.step===2),'all outcomes keep their origin');
-    } finally {fakeTimers=undefined;}
+      assert.equal(scopeStarts,5);assert.equal(scopeEnds,5);assert.equal(networkScopes,0,'Idle, cancelled and startup failure all release scope ownership');
+    } finally {fakeTimers=undefined;unobserve();}
   });
   await test('usage ledger preserves new requests while restoring persisted records',async()=>{
     const {UsageLedger}=load(path.join(source,'services/UsageLedger'));const root='/sandbox/ledger';fs.mkdirSync(nativePath(root),{recursive:true});
