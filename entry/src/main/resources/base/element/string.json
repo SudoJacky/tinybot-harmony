@@ -1,5 +1,11 @@
 {
   "string": [
+    { "name": "widget_name", "value": "Tiny quick actions" },
+    { "name": "widget_description", "value": "Start a chat, open voice input, or return to your last chat." },
+    { "name": "widget_greeting", "value": "What's on your mind?" },
+    { "name": "widget_greeting_small", "value": "Let's talk" },
+    { "name": "widget_new_chat", "value": "New chat" },
+    { "name": "widget_continue", "value": "Continue last chat" },
     { "name": "shortcut_new_chat", "value": "New chat" },
     { "name": "shortcut_voice_input", "value": "Voice input" },
     { "name": "microphone_reason", "value": "Convert your speech to text in the message draft" },

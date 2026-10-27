@@ -41,3 +41,16 @@
 .ui-audit/
 /.dsh/
 /.playwright-cli/
+scripts/*
+!scripts/run-tests.cjs
+!scripts/test-tool-catalog.cjs
+!scripts/test-model-dependencies.cjs
+!scripts/test-usage-filter-sheet.cjs
+!scripts/test-hosted-privacy.cjs
+!scripts/test-conversation-share.cjs
+!scripts/test-feedback.cjs
+!scripts/test-api20-compat.cjs
+!scripts/test-preview-references.cjs
+!scripts/test-storage-usage.cjs
+!scripts/test-bing-search.cjs
+!scripts/test-bing-search-dom.cjs

@@ -7,6 +7,7 @@ import { McpOAuth } from '../services/McpOAuth';
 import { LaunchActions } from '../services/LaunchActions';
 import { DeveloperDiagnostics } from '../services/DeveloperDiagnostics';
 import { huaweiAccount } from '../services/HuaweiAccount';
+
 import { hostedPrivacy } from '../services/HostedPrivacy';
 import { backgroundGeneration } from '../services/BackgroundGeneration';
 /*
@@ -66,6 +67,10 @@ export default class EntryAbility extends UIAbility {
     });
     Diagnostics.log('info', 'app', 'created');
   }
+
+
+
+
 
   private startServices(): void {
     if (!this.servicesStarted) {

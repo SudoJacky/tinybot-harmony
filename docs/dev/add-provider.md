@@ -4,13 +4,14 @@
 
 ## 协议与预设
 
-`model/ProviderProfiles.ets` 的 `validateProfile` 只接受三种协议：
+`model/ProviderProfiles.ets` 的 `validateProfile` 只接受四种协议：
 
 | 协议 ID | 用途 |
 | --- | --- |
 | `chat-completions` | OpenAI Chat Completions 兼容接口（DeepSeek、DashScope、Z.ai、Ollama 等） |
 | `responses` | OpenAI Responses |
 | `anthropic-messages` | Anthropic Messages |
+| `gemini` | Google Gemini `generateContent` 系列接口（`x-goog-api-key` 鉴权） |
 
 内置预设集中在 `model/Provider.ets` 的 `builtinProviderInfos()`，包含默认地址、默认模型、候选模型、密钥申请地址和说明。新增一个兼容服务的最小改动是往这个数组里加一条：
 
@@ -42,7 +43,7 @@
 
 ## 新协议适配
 
-当服务商不兼容上述三种协议时，实现 `ModelProvider`：
+当服务商不兼容上述四种协议时，实现 `ModelProvider`：
 
 ```ts
 export interface ModelProvider {
@@ -57,7 +58,7 @@ export interface ModelProvider {
 - `stream()` 自行把 `ModelMessage` 和 `ToolDefinition` 编码成协议请求，解析流式增量和工具调用，返回 `ModelTurn`。
 - `tool_calls`、`tool_call_id` 等 HTTP 字段只应出现在这一层；领域层始终使用 `ToolCall`。
 - 取消通过 `Cancellation` 贯穿：准备、读密钥、网络与解码都要检查。
-- 新增协议后，把协议 ID 加进 `validateProfile` 的白名单和 `WireProtocols.protocolUrl`，再补 `ReasoningRequest` 的档位映射。
+- 新增协议后，把协议 ID 加进 `validateProfile` 的白名单、`WireProtocols.protocolUrl`（Gemini 走单独的 `geminiStreamUrl()`）与 `ProtocolProvider` 的解析器选择，再按需补 `ReasoningRequest` 的档位映射。
 
 ## 凭据
 
@@ -70,7 +71,8 @@ export interface ModelProvider {
 | 验证 | 命令或位置 |
 | --- | --- |
 | 注册、绑定、配置快照 | `ProviderRegistry.test.ets` |
-| 三协议请求结构与 schema | `node scripts/test-tool-schemas.cjs` |
+| Chat Completions / Responses / Anthropic 请求结构与 schema | `node scripts/test-tool-schemas.cjs` |
+| Gemini 请求编码 | `Productivity.test.ets` |
 | 推理档位序列化 | `ReasoningEffort.test.ets` |
 | 真实协议联调 | 在设备上用实际密钥，通过设置页配置后发送含工具调用的请求 |
 

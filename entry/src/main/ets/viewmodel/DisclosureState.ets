@@ -4,8 +4,6 @@ export class DisclosureState {
   children: DisclosureStore = new DisclosureStore();
   open: boolean = false;
   limit: number = 0;
-  rawOpen: boolean = false;
-  rawLimit: number = 2000;
   detailTab: string = 'result';
   detailPage: number = 0;
 }

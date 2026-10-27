@@ -1,6 +1,6 @@
 import { Diagnostics } from '../model/Diagnostics';
-import { projectName, projectFor, workspaceIdFor, validateProjects, projectContext } from '../model/Project';
-import { SharedFolder, validateSharedFolders } from '../model/SharedFolders';
+import { projectFor, workspaceIdFor, validateProjects, projectContext } from '../model/Project';
+import { SharedFolder } from '../model/SharedFolders';
 import { proposeSessionMemory, reviewSessionMemory, addMemoryDraft } from './SessionMemory';
 import { McpSettings, McpSettingsCommand, McpSettingsResult, McpSettingsHost } from './McpSettings';
 import { t } from '../model/I18n';
@@ -10,7 +10,7 @@ import { SelectedTools } from './SelectedTools';
 import { BASIC_FILE_TOOLS, OPTIONAL_TOOL_NAMES, TOOL_CAPABILITIES } from '../model/ToolGroups';
 import { stepDisplayContent } from '../model/PublishedPreview';
 import { UiValues, UiSavedState, parseUiSurface, validateUiState, validateUiStates, copyUiValues } from '../model/InteractiveUi';
-import { prepareBackupServices } from '../model/BackupRestore';
+import { importedSessionCandidate, savedProjectCandidate, forkedThreadCandidate } from './SessionCandidates';
 import { RequestUsage } from '../model/Usage';
 import { attributeLegacyUsage } from '../model/UsageAttribution';
 import { reasoningEfforts, supportsReasoningEffort } from '../model/ReasoningEffort';
@@ -31,7 +31,7 @@ import { LiveResources, SkillRequest, McpRequest, McpSummary, saveSkillCandidate
 import { Cancellation } from './Cancellation';
 import { ToolSet } from './ToolSet';
 import { AppData, MessageData, ModelConfig, ThreadData, copyModelConfig, emptyData } from '../model/Conversation';
-import { contextSettings } from '../model/ConversationContext';
+import { contextSettings } from '../model/ContextSettings';
 import { ModelReference, ProviderProfile, migrateProfiles, modelConfig } from '../model/ProviderProfiles';
 import { InputMode, MAX_INPUT_TEXT, PendingInput, nextPendingInput, validatePendingInputs } from '../model/PendingInput';
 import { BrowserPolicy, ExtensionSettings, SkillData, SkillFile, defaultExtensions, explicitSkill, expandSkillCommand, parseSkill, validateExtensions } from '../model/Skills';
@@ -171,32 +171,9 @@ export class SessionService {
   }
   async importSnapshot(imported: AppData): Promise<boolean> {
     return this.mutate(t("导入失败："), async () => {
-      imported = JSON.parse(JSON.stringify(imported)) as AppData;
-      const candidate = this.snapshot(); const known = new Set(candidate.threads.map((item) => item.id));
-      imported.threads = imported.threads.filter((item) => !known.has(item.id));
-      prepareBackupServices(this.data, imported, () => this.resources.createId());
-      candidate.projects = (candidate.projects || []).concat((imported.projects || []).filter((project) =>
-        !(candidate.projects || []).some((item) => item.id === project.id)));
-      candidate.threads = candidate.threads.concat(imported.threads);
-      validateProjects(candidate);
-      for (const thread of imported.threads) { await this.ensureThreadWorkspace(thread, candidate); }
-      // Restore preferences on a fresh install without overwriting an existing personal document.
-      if (!(candidate.config.userDocument || '').trim()) { candidate.config.userDocument = imported.config.userDocument || ''; }
-      candidate.providerProfiles = (candidate.providerProfiles || []).concat(imported.providerProfiles || []);
-      const extensions = candidate.extensions || defaultExtensions();
-      for (const skill of imported.extensions?.skills || []) { if (!extensions.skills.some((item) => item.name === skill.name)) { extensions.skills.push(skill); } }
-      candidate.extensions = extensions; validateExtensions(extensions);
-      const extras = candidate.productivity || defaultProductivity(); const source = imported.productivity || defaultProductivity();
-      for (const memory of source.memories) {
-        if (!extras.memories.some((item) => item.id === memory.id)) { extras.memories.push(memory); }
-      }
-      for (const template of source.templates) {
-        // Older restores regenerated template IDs, including the built-in templates.
-        if (!extras.templates.some((item) => item.id === template.id ||
-          (item.name === template.name && item.content === template.content))) { extras.templates.push(template); }
-      }
-      extras.servers = extras.servers.concat(source.servers);
-      candidate.productivity = extras; validateProductivity(extras); await this.commitSettings(candidate);
+      const importedCandidate = importedSessionCandidate(this.data, imported, () => this.resources.createId());
+      for (const thread of importedCandidate.threads) { await this.ensureThreadWorkspace(thread, importedCandidate.data); }
+      await this.commitSettings(importedCandidate.data);
     });
   }
   private get active(): ThreadData { return this.requireThread(this.data.activeThreadId); }
@@ -330,22 +307,7 @@ export class SessionService {
   async forkThread(messageId: string = ''): Promise<boolean> {
     return this.mutate(t("创建分支失败："), async () => {
       const source = this.active;
-      const index = messageId ? source.messages.findIndex((item) => item.id === messageId) : source.messages.length - 1;
-      if (messageId && index < 0) { throw new Error(t("消息已不存在。")); }
-      const end = index < 0 ? 0 : index % 2 === 0 ? index : index + 1;
-      const branch = this.freshThread(); branch.title = source.title.slice(0, 26) + t(' · 分支'); branch.titleEdited = true;
-      branch.parentThreadId = source.id; branch.parentMessageId = index >= 0 ? source.messages[index].id : undefined; branch.modelRef = source.modelRef;
-      branch.projectId = source.projectId;
-      branch.reasoningEffort = source.reasoningEffort;
-      branch.teamEnabled = source.teamEnabled;
-      const selection = this.selectedToolSelection(source);
-      branch.agentMode = selection.agentMode; branch.disabledTools = selection.disabledTools;
-      branch.disabledMcpIds = source.disabledMcpIds?.slice();
-      branch.messages = JSON.parse(JSON.stringify(source.messages.slice(0, end))) as MessageData[];
-      branch.draft = index >= 0 && index % 2 === 0 ? source.messages[index].content : '';
-      branch.attachments = index >= 0 && index % 2 === 0 ? JSON.parse(JSON.stringify(source.messages[index].attachments || [])) as Attachment[] : [];
-      branch.references = index >= 0 && index % 2 === 0 ? (source.messages[index].references || []).map((item): ThreadReference => ({
-        threadId: item.threadId, title: item.title, content: item.content, capturedAt: item.capturedAt, truncated: item.truncated, fullContent: item.fullContent })) : [];
+      const branch = forkedThreadCandidate(source, () => this.freshThread(), this.selectedToolSelection(source), messageId);
       await this.ensureThreadWorkspace(branch);
       // Preserve historical messages verbatim. Context describes shared project files or a fresh standalone workspace.
       const extras = this.data.productivity || defaultProductivity();
@@ -365,42 +327,18 @@ export class SessionService {
 
   async saveProject(name: string, instructions: string, id?: string, folders?: SharedFolder[]): Promise<boolean> {
     return this.mutate(t('保存项目失败：'), async () => {
-      const candidate = this.snapshot();
-      const projects = candidate.projects || [];
-      let project = id ? projects.find((item) => item.id === id) : undefined;
-      if (id && !project) { throw new Error(t('会话关联的项目不存在。')); }
-      validateSharedFolders(folders);
-      const previous = id ? (this.data.projects || []).find((item) => item.id === id) : undefined;
-      const previousFolders = previous?.sharedFolders || [];
-      const nextFolders = folders === undefined ? (project?.sharedFolders || []).slice() :
-        JSON.parse(JSON.stringify(folders)) as SharedFolder[];
-      const now = Date.now();
-      if (project) {
-        project.name = projectName(name); project.instructions = instructions; project.updatedAt = now;
-        project.sharedFolders = nextFolders;
-      } else {
-        const projectId = this.resources.createId();
-        project = { id: projectId, name: projectName(name), workspaceId: 'project-' + projectId,
-          instructions: instructions, createdAt: now, updatedAt: now, sharedFolders: nextFolders };
-        projects.push(project);
-        const thread = this.freshThread(); thread.projectId = project.id;
-        candidate.threads.unshift(thread); candidate.activeThreadId = thread.id;
-      }
-      candidate.projects = projects;
+      const change = savedProjectCandidate(this.data, name, instructions,
+        () => this.freshThread(), () => this.resources.createId(), id, folders);
       // Newly picked URIs still hold the picker's temporary grant; persist them before committing.
-      const previousUris = new Set<string>(previousFolders.map((folder: SharedFolder) => folder.uri));
-      const added = nextFolders.filter((folder: SharedFolder) => !previousUris.has(folder.uri));
-      if (added.length > 0) {
+      if (change.addedFolders.length > 0) {
         if (!this.resources.persistProjectFolders) { throw new Error(t('当前平台无法保存共享文件夹权限。')); }
-        await this.resources.persistProjectFolders(added);
+        await this.resources.persistProjectFolders(change.addedFolders);
       }
-      validateProjects(candidate);
-      if (!id) { await this.resources.ensureWorkspace(project.workspaceId); }
-      await this.commitSettings(candidate);
-      const nextUris = new Set<string>(nextFolders.map((folder: SharedFolder) => folder.uri));
-      const removed = previousFolders.filter((folder: SharedFolder) => !nextUris.has(folder.uri) &&
-        !projects.some((item) => (item.sharedFolders || []).some((shared) => shared.uri === folder.uri)));
-      if (removed.length > 0 && this.resources.revokeProjectFolders) { await this.resources.revokeProjectFolders(removed); }
+      if (!id) { await this.resources.ensureWorkspace(change.project.workspaceId); }
+      await this.commitSettings(change.data);
+      if (change.removedFolders.length > 0 && this.resources.revokeProjectFolders) {
+        await this.resources.revokeProjectFolders(change.removedFolders);
+      }
     });
   }
 
@@ -653,7 +591,7 @@ export class SessionService {
     if (text.length === 0 && (this.active.attachments || []).length === 0 && !(this.active.references || []).length) { return; }
     const threadId = this.active.id;
     if ((this.resources.authorizeGeneration && !await this.authorizeGeneration()) || !this.canMutate || this.active.id !== threadId || (this.active.draft || '').trim() !== text) { return; }
-    await this.runTasks(text || ((this.active.references || []).length ? t('请参考引用的会话。') : t('请分析附件。')));
+    await this.runTasks(text);
   }
   private async authorizeGeneration(): Promise<boolean> {
     try { await this.resources.authorizeGeneration?.(); return true; }
@@ -739,7 +677,7 @@ export class SessionService {
   private async runTask(thread: ThreadData, text: string, queuedId?: string): Promise<boolean> {
     const attachments = queuedId ? thread.pendingInputs?.find((item) => item.id === queuedId)?.attachments || [] : thread.attachments || [];
     const command = teamCommand(text);
-    if (command !== undefined) { text = command || t('请分析附件。'); }
+    if (command !== undefined) { text = command; }
     const options = this.data.productivity?.options || defaultAssistantOptions();
     const reference = thread.modelRef ? routeModel(options, text, attachments.concat(...thread.messages.map((item) =>
       (item.role === 'user' ? item.attachments || [] : []).concat(...(item.steps || []).map((step) => step.steering?.attachments || [])))).some((item) => item.mime.startsWith('image/')), thread.modelRef) : undefined;
@@ -764,8 +702,8 @@ export class SessionService {
       attachments: attachments, references: queuedId ? [] : thread.references };
     if (!queuedId) { thread.attachments = []; thread.references = []; }
     const answer: MessageData = { id: this.resources.createId(), role: 'assistant', content: '', status: 'generating', error: '', modelRef: reference };
-    const generateTitle = shouldGenerateTitle(thread);
-    if (thread.messages.length === 0 && !thread.titleEdited) { thread.title = titleCharacters(text.replace(/\s+/g, ' '), 32); }
+    const generateTitle = text.length > 0 && shouldGenerateTitle(thread);
+    if (text.length > 0 && thread.messages.length === 0 && !thread.titleEdited) { thread.title = titleCharacters(text.replace(/\s+/g, ' '), 32); }
     const fallbackTitle = thread.title;
     // Team catalogs must see attachments after they move from the composer to history.
     thread.messages = thread.messages.concat([user, answer]);

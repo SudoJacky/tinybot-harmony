@@ -1,6 +1,6 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
-import { defaultContextWindow } from '../model/ConversationContext';
+import { defaultContextWindow } from '../model/ContextSettings';
 import { reasoningEfforts, reasoningEffortName } from '../model/ReasoningEffort';
 import { AssistantOptions, ModelCapability, defaultAssistantOptions } from '../model/AssistantOptions';
 import { ModelReference } from '../model/ProviderProfiles';

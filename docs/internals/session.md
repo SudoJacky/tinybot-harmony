@@ -42,6 +42,8 @@ export interface SessionRepository {
 
 `send`、`stop`、`compactHistory`、`enqueueInput`、`resumeQueue` 不走 `mutate`：它们会进入 `running` 或 `compacting`，失败信息直接写到 `status.error`。发送、压缩、重新生成、恢复队列与表单续跑在开始前还会调用 `resources.authorizeGeneration()`（原生实现为华为账号 `requireLogin()`）。
 
+仅有附件或会话引用时也可以发送，用户消息正文保持为空，不补写默认分析或参考指令；`/team`、`@team` 携带附件而未附任务文字时同样不补写。正文为空的首条消息保留当前会话标题，不触发基于文本的标题生成。
+
 ## 状态与事件
 
 `SessionState` 对界面公开的阶段：

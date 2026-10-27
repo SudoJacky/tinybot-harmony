@@ -29,6 +29,7 @@ export struct SettingsPanel {
   onSkills: () => void = () => {};
   onUserDocument: () => void = () => {};
   onUsage: () => void = () => {};
+  onStorage: () => void = () => {};
   onModels: () => void = () => {};
   onSearch: () => void = () => {};
   onBackup: () => void = () => {};
@@ -193,7 +194,7 @@ export struct SettingsPanel {
               subtitle: t('不影响模型服务与浏览器权限。'), disabled: !this.canEdit(),
               onChange: (value: boolean) => this.saveToggle('webEnabled', value) })
             RowDivider()
-            NavRow({ title: t('搜索服务'), icon: $r('sys.symbol.magnifyingglass'), subtitle: 'DeepSeek / Tavily', compId: 'open-search-settings',
+            NavRow({ title: t('搜索服务'), icon: $r('sys.symbol.magnifyingglass'), subtitle: 'DeepSeek / Tavily / Bing', compId: 'open-search-settings',
               disabled: !this.canEdit(), onTap: this.onSearch })
             RowDivider()
             SwitchRow({ title: t('应用内浏览器'), icon: $r('sys.symbol.link'), compId: 'browser-enabled', isOn: this.browser.policy === 'enabled',
@@ -230,6 +231,9 @@ export struct SettingsPanel {
           Column() {
             NavRow({ title: t('Token 用量'), compId: 'open-usage',
               icon: $r('sys.symbol.clock'), onTap: () => this.onUsage() })
+            RowDivider()
+            NavRow({ title: t('存储空间'), compId: 'open-storage', icon: $r('sys.symbol.rectangle_stack'),
+              subtitle: t('查看分类占用并清理缓存'), disabled: !this.canEdit(), onTap: () => this.onStorage() })
             RowDivider()
             NavRow({ title: t('备份与恢复'), compId: 'open-backup', icon: $r('sys.symbol.folder_badge_plus'),
               disabled: !this.canEdit(), onTap: () => this.onBackup() })

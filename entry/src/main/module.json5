@@ -5,7 +5,8 @@
     "description": "$string:module_desc",
     "mainElement": "EntryAbility",
     "deviceTypes": [
-      "phone"
+      "phone",
+      "tablet"
     ],
     "deliveryWithInstall": true,
     "installationFree": false,
@@ -61,6 +62,17 @@
       }
     ],
     "extensionAbilities": [
+      {
+        "name": "TinybotFormAbility",
+        "srcEntry": "./ets/entryformability/TinybotFormAbility.ets",
+        "label": "$string:widget_name",
+        "description": "$string:widget_description",
+        "type": "form",
+        "exported": true,
+        "metadata": [
+          { "name": "ohos.extension.form", "resource": "$profile:form_config" }
+        ]
+      },
       {
         "name": "EntryBackupAbility",
         "srcEntry": "./ets/entrybackupability/EntryBackupAbility.ets",

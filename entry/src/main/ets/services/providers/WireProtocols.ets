@@ -2,7 +2,6 @@ import { t } from '../../model/I18n';
 import { AnthropicContentBlock, validateAnthropicContent } from '../../model/AnthropicContent';
 import { ModelMessage, ToolDefinition, ToolParameters } from '../../model/Agent';
 import { supportsReasoningEffort } from '../../model/ReasoningEffort';
-import { completionUrl } from './ChatCompletionsProtocol';
 
 export function protocolHeaders(protocol: string, apiKey: string): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' };
@@ -13,36 +12,6 @@ export function protocolHeaders(protocol: string, apiKey: string): Record<string
     else { headers['Authorization'] = 'Bearer ' + apiKey; }
   }
   return headers;
-}
-
-export function protocolUrl(protocol: string, baseUrl: string, allowHttp: boolean): string {
-  completionUrl(baseUrl, allowHttp);
-  const base = baseUrl.trim().replace(/\/+$/, '');
-  if (protocol === 'gemini') {
-    if (/\/(chat\/completions|responses|messages)$/.test(base) || /:(streamGenerateContent|generateContent)$/.test(base)) {
-      throw new Error(t('服务地址的接口路径与所选协议不一致。'));
-    }
-    return /^https?:\/\/[^/]+$/.test(base) ? base + '/v1beta' : base;
-  }
-  const suffix = protocol === 'chat-completions' ? '/chat/completions' : protocol === 'responses' ? '/responses' :
-    protocol === 'anthropic-messages' ? '/messages' : '';
-  if (!suffix) { throw new Error(t("不支持的模型协议：") + protocol); }
-  for (const ending of ['/chat/completions', '/responses', '/messages']) {
-    if (base.endsWith(ending) && ending !== suffix) { throw new Error(t("服务地址的接口路径与所选协议不一致。")); }
-  }
-  if (base.endsWith(suffix)) { return base; }
-  if (protocol === 'anthropic-messages' && /^https?:\/\/[^/]+$/.test(base)) { return base + '/v1/messages'; }
-  return base + suffix;
-}
-
-// Credentials belong to the API service root, not its request wire format.
-// Keep scheme, host, port and base path scoped; strip only the protocol's endpoint.
-export function sameCredentialScope(oldProtocol: string, oldUrl: string, protocol: string, baseUrl: string): boolean {
-  try {
-    const previous = protocolUrl(oldProtocol, oldUrl, true).replace(/\/(chat\/completions|responses|messages)$/, '');
-    const next = protocolUrl(protocol, baseUrl, true).replace(/\/(chat\/completions|responses|messages)$/, '');
-    return previous === next;
-  } catch (_) { return false; }
 }
 
 interface ResponsesContent { type: string; text?: string; image_url?: string; }
@@ -87,7 +56,8 @@ export function responsesRequest(model: string, messages: ModelMessage[], tools:
     } else {
       if (message.role !== 'user' && message.role !== 'assistant') { throw new Error(t("不支持的消息角色。")); }
       if ((message.images || []).length > 0) {
-        const content: ResponsesContent[] = [{ type: 'input_text', text: message.content }];
+        const content: ResponsesContent[] = [];
+        if (message.content.length > 0) { content.push({ type: 'input_text', text: message.content }); }
         for (const url of message.images || []) { content.push({ type: 'input_image', image_url: url }); }
         input.push({ role: message.role, content: content });
       } else if (message.content.length > 0) { input.push({ role: message.role, content: message.content }); }

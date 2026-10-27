@@ -8,6 +8,8 @@ let streamScript = () => { throw Error('Unexpected stream'); }, jsonScript = () 
 let destroyed = 0;
 class Decoder { decoder = new TextDecoder(); decodeToString(bytes, options) { return this.decoder.decode(bytes, options); } }
 const kits = {
+  '@kit.BasicServicesKit': { deviceInfo: { sdkApiVersion: 26 } },
+  '@kit.RemoteCommunicationKit': { rcp: { createSession() { throw Error('The API 20 transport must not run on API 26'); } } },
   '@kit.ArkTS': { util: { TextDecoder: Decoder, generateRandomUUID: () => crypto.randomUUID() } },
   '@kit.PerformanceAnalysisKit': { hilog: { info() {}, warn() {}, error() {} } },
   '@kit.AssetStoreKit': { asset: {} },
@@ -34,7 +36,8 @@ function load(file) {
 const from = name => load(path.join(root, name));
 const { geminiRequest, geminiStreamUrl } = from('services/providers/GeminiProtocol');
 const { GeminiStream } = from('services/providers/GeminiStream');
-const { protocolUrl, protocolHeaders, sameCredentialScope } = from('services/providers/WireProtocols');
+const { protocolHeaders } = from('services/providers/WireProtocols');
+const { protocolUrl, sameCredentialScope } = from('model/ProviderEndpoint');
 const { ProtocolProvider } = from('services/providers/ProtocolProvider');
 const { builtinProviderInfos } = from('model/Provider');
 const { validateProfile } = from('model/ProviderProfiles');

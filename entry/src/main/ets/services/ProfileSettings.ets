@@ -2,7 +2,7 @@ import { t } from '../model/I18n';
 import { AppData, copyModelConfig } from '../model/Conversation';
 import { ProviderProfile, modelConfig, modelIds, validateProfile } from '../model/ProviderProfiles';
 import { CredentialReader } from './providers/Provider';
-import { sameCredentialScope } from './providers/WireProtocols';
+import { sameCredentialScope } from '../model/ProviderEndpoint';
 
 export interface CredentialVault extends CredentialReader {
   write(alias: string, secret: string): Promise<void>;

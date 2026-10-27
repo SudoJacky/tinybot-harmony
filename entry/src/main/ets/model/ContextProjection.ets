@@ -1,3 +1,4 @@
+import { contextBoundary } from './ContextCheckpoint';
 import { AgentStep, AgentTurn, ModelMessage, ToolExecution, stepMessages, stepInputs } from './Agent';
 import { CompactionData, ThreadData, requestHistory } from './Conversation';
 import { fileOperationsContext } from './FileOperations';
@@ -64,13 +65,6 @@ export function threadEntries(thread: ThreadData): ContextEntry[] {
     }
   }
   return entries;
-}
-
-export function contextBoundary(entries: ContextEntry[], checkpoint?: CompactionData): number {
-  if (!checkpoint) { return 0; }
-  const index = entries.findIndex((entry) => entry.messageId === checkpoint.firstKeptMessageId && entry.step === checkpoint.firstKeptStep);
-  if (index < 0) { throw new Error('Context checkpoint boundary is missing; original transcript preserved.'); }
-  return index;
 }
 
 export function projectedHistory(entries: ContextEntry[], checkpoint?: CompactionData): ModelMessage[] {

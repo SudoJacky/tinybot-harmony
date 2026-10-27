@@ -38,7 +38,7 @@ for(const kind of ['chat','attachments','preferences','backup','failure','prepar
  for(const [index,step] of steps.entries()) {
   assert.ok(zh[step.caption]&&en[step.caption],'Missing caption translation: '+step.caption);
   const rect=api.tutorialRect(step.control);
-  assert.ok(rect.x>=0&&rect.y>=0&&rect.x+rect.width<=360&&rect.y+rect.height<=720);
+  assert.ok(rect.x>=0&&rect.y>=0&&rect.x+rect.width<=api.TUTORIAL_WIDTH&&rect.y+rect.height<=api.TUTORIAL_HEIGHT);
   Object.assign(probe,{steps,index,phase:.43});
   if(['composer','document-input','key','send','stop','mic'].includes(step.control)) {
    assert.equal(probe.pageChange(),false,'Typing and message updates must keep the current page stationary');

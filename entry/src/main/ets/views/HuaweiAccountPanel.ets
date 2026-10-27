@@ -1,5 +1,5 @@
-import { uiMaterial } from '@kit.ArkUI';
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { systemMaterialAttribute } from '../common/MaterialAttributes';
 import { Banner, GroupCard, NavRow, RowDivider } from '../common/Widgets';
 import { Btn, Font, Motion, Space } from '../common/Theme';
 import { t } from '../model/I18n';
@@ -108,7 +108,7 @@ export struct HuaweiAccountPanel {
             .clickEffect(this.appearance.effectStrength > 0 ? null : Motion.press)
             .backgroundColor(this.loginAvailable() ? this.appearance.accent : $r('app.color.surface_variant'))
             .selectedColor(this.loginAvailable() ? this.appearance.accent : $r('app.color.surface_variant'))
-            .systemMaterial(this.loginAvailable() ? this.appearance.accentControl : uiMaterial.Material.empty)
+            .attributeModifier(systemMaterialAttribute<ToggleAttribute>(this.loginAvailable() ? this.appearance.accentControl : undefined))
             .enabled(this.loginAvailable()).accessibilityRole(AccessibilityRoleType.BUTTON)
             .accessibilityText(this.account.busy ? t('正在登录…') : t('华为账号登录'))
             .onClick(() => this.signIn())

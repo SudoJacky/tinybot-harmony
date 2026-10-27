@@ -307,13 +307,6 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     await fs.rename(temporary, await this.baselinePath(path));
   }
 
-  async accept(path: string): Promise<void> {
-    workspaceRelativePath(path, false);
-    const mount = this.mountPath(path);
-    return withFileMutation(mount ? this.externalUri(mount.folder, mount.relative) : this.root + '/' + path,
-      () => this.acceptUnlocked(path));
-  }
-
   private async acceptUnlocked(path: string): Promise<void> {
     if (await this.baseline(path)) { await fs.unlink(await this.baselinePath(path)); }
   }

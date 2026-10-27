@@ -1,7 +1,7 @@
 import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
-import { http } from '@kit.NetworkKit';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
+import { CompatHttp } from './CompatHttp';
 import { util } from '@kit.ArkTS';
 import { CredentialStore } from './CredentialStore';
 import { McpServer } from '../model/Productivity';
@@ -18,27 +18,29 @@ function secure(address: string): string {
 }
 function origin(address: string): string { secure(address); return /^https:\/\/[^/]+/.exec(address)?.[0] || ''; }
 function encode(values: Record<string, string>): string { return Object.keys(values).map((key) => encodeURIComponent(key) + '=' + encodeURIComponent(values[key])).join('&'); }
+// OAuth requests carry a client secret, an authorization code or a refresh token, so every one
+// of them refuses redirects: the flow validates each hop itself.
 export async function oauthJson(address: string, body?: Object | string): Promise<Object> {
-  secure(address); const request = http.createHttp();
-  try {
-    const response = await request.request(address, { method: body === undefined ? http.RequestMethod.GET : http.RequestMethod.POST,
-      header: { 'Accept': 'application/json', 'Content-Type': typeof body === 'string' ? 'application/x-www-form-urlencoded' : 'application/json' },
-      extraData: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body), usingCache: false,
-      maxRedirects: 0, maxLimit: 1024 * 1024, connectTimeout: 15000, readTimeout: 30000, expectDataType: http.HttpDataType.STRING });
-    if (response.responseCode < 200 || response.responseCode >= 300) { throw new Error('OAuth HTTP ' + response.responseCode + t("。请核对服务或已注册的客户端 ID。")); }
-    return JSON.parse(response.result as string) as Object;
-  } finally { request.destroy(); }
+  secure(address);
+  const response = await CompatHttp.request({
+    url: address, method: body === undefined ? 'GET' : 'POST',
+    headers: { 'Accept': 'application/json', 'Content-Type': typeof body === 'string' ? 'application/x-www-form-urlencoded' : 'application/json' },
+    body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body),
+    connectTimeout: 15000, readTimeout: 30000, maxBytes: 1024 * 1024, dataType: 'string', redirect: 'refuse'
+  });
+  if (response.status < 200 || response.status >= 300) { throw new Error('OAuth HTTP ' + response.status + t("。请核对服务或已注册的客户端 ID。")); }
+  return JSON.parse(response.text) as Object;
 }
 async function resourceMetadata(address: string): Promise<ResourceMetadata> {
   const host = origin(address); const path = address.slice(host.length).split('?')[0];
-  const request = http.createHttp(); let metadataUrl = '';
-  try {
-    const response = await request.request(address, { method: http.RequestMethod.GET, maxRedirects: 0, usingCache: false,
-      connectTimeout: 15000, readTimeout: 15000, maxLimit: 1024 * 1024, expectDataType: http.HttpDataType.STRING });
-    const headers = response.header as Record<string, string>;
-    const name = Object.keys(headers).find((key) => key.toLowerCase() === 'www-authenticate');
-    if (name && typeof headers[name] === 'string') { metadataUrl = /resource_metadata="([^"]+)"/.exec(headers[name])?.[1] || ''; }
-  } finally { request.destroy(); }
+  let metadataUrl = '';
+  const response = await CompatHttp.request({
+    url: address, method: 'GET', headers: {}, connectTimeout: 15000, readTimeout: 15000,
+    maxBytes: 1024 * 1024, dataType: 'string', redirect: 'refuse'
+  });
+  const headers = response.header;
+  const name = Object.keys(headers).find((key) => key.toLowerCase() === 'www-authenticate');
+  if (name && typeof headers[name] === 'string') { metadataUrl = /resource_metadata="([^"]+)"/.exec(headers[name])?.[1] || ''; }
   let result: ResourceMetadata;
   if (metadataUrl) { result = await oauthJson(metadataUrl) as ResourceMetadata; }
   else {

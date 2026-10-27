@@ -4,6 +4,8 @@ const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFi
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 const root = path.resolve('entry/src/main/ets'), modules = new Map(), storage = new Map(), events = [], logs = [];
 let disk = new Map(), working = new Map(), failFlush = false, failApply = false, deviceLevel = 0, levelReads = 0;
+// The runtime API level decides whether the immersive-material module exists at all.
+let deviceSdk = 26;
 const store = { getSync: (key, fallback) => working.has(key) ? working.get(key) : fallback,
   putSync: (key, value) => working.set(key, value), flushSync() {
     if (failFlush) { failFlush = false; throw Error('disk write failed'); }
@@ -14,13 +16,14 @@ class ImmersiveMaterial extends Material { constructor(options) { super(); this.
 const uiMaterial = { Material, ImmersiveMaterial, ImmersiveStyle: { THICK: 3, THIN: 1, ULTRA_THIN: 0 },
   MaterialLevel: { EXQUISITE: 0, GENTLE: 1, SMOOTH: 2 }, getGlobalMaterialLevel: () => { levelReads++; return deviceLevel; } };
 const colorModes = { COLOR_MODE_DARK: 0, COLOR_MODE_LIGHT: 1, COLOR_MODE_NOT_SET: -1 };
-const kits = { '@kit.ArkUI': { uiMaterial, ThemeControl: { setDefaultTheme: value => events.push(['theme', value]) } },
+const kits = { '@kit.BasicServicesKit': { deviceInfo: { get sdkApiVersion() { return deviceSdk; } } },
+  '@kit.ArkUI': { uiMaterial, ThemeControl: { setDefaultTheme: value => events.push(['theme', value]) } },
   '@kit.ArkData': { preferences: { getPreferencesSync: () => store } },
   '@kit.AbilityKit': { ConfigurationConstant: { ColorMode: colorModes } },
   '@kit.PerformanceAnalysisKit': { hilog: { info: (...args) => logs.push(args), error: (...args) => logs.push(args) } } };
 function load(file, cache = modules) {
   file = path.resolve(file); if (cache.has(file)) return cache.get(file);
-  const loaded = { exports: {}, Observed: value => value, $r: name => name,
+  const loaded = { exports: {}, Observed: value => value, $r: name => name, Color: { Transparent: 'transparent' },
     AppStorage: { get: key => storage.get(key), setOrCreate: (key, value) => storage.set(key, value) },
     require: name => kits[name] || load(path.resolve(path.dirname(file), name + '.ets'), cache) };
   cache.set(file, loaded.exports);
@@ -69,6 +72,7 @@ assert.deepEqual(events.map(([type]) => type), ['mode', 'fontScale'], 'Prepare w
 preferences.activate();
 assert.deepEqual(events.map(([type]) => type), ['mode', 'fontScale', 'theme'], 'Mounting only applies the ArkUI theme, without resizing the first frame');
 assert.equal(currentAppearanceStyle().accent, '#216451');
+assert.equal(currentAppearanceStyle().controlBackground, 'transparent', 'API 26 keeps its material backing');
 const defaultMaterial = currentAppearanceStyle().control;
 const readingMaterial = currentAppearanceStyle().readingSurface;
 assert.equal(readingMaterial.options.style, uiMaterial.ImmersiveStyle.THICK);
@@ -79,9 +83,19 @@ assert.equal(currentAppearanceStyle().readingSurface, readingMaterial, 'Reuse th
 const selected = { ...model.defaultAppearance(), mode: 'dark', accent: 'custom', customColor: '#FAF8EE',
   fontScale: 1.3, fontFamily: 'Noto Serif', lightEffect: 'off' };
 preferences.select(selected);
+// API 26 needs an explicit empty material: undefined restores the component's default effect.
 assert.equal(currentAppearanceStyle().control, Material.empty);
 assert.equal(currentAppearanceStyle().surface, Material.empty);
 assert.equal(currentAppearanceStyle().readingSurface, Material.empty);
+assert.equal(currentAppearanceStyle().accentControl, Material.empty);
+const { systemMaterialAttribute, menuMaterialAttribute } = load(root + '/common/MaterialAttributes.ets');
+const applied = [], nativeControl = { systemMaterial: value => applied.push(['control', value]),
+  menuSystemMaterial: value => applied.push(['menu', value]) };
+systemMaterialAttribute(defaultMaterial).applyNormalAttribute(nativeControl);
+systemMaterialAttribute(currentAppearanceStyle().control).applyNormalAttribute(nativeControl);
+menuMaterialAttribute(currentAppearanceStyle().surface).applyNormalAttribute(nativeControl);
+assert.equal(applied[1][1], Material.empty, 'Turning off clears material on an existing node');
+assert.equal(applied[2][1], Material.empty, 'Select menus explicitly turn off too');
 assert.equal(currentAppearanceStyle().effectStrength, 0);
 assert.equal(currentAppearanceStyle().fontFamily, 'Noto Serif');
 assert.ok(events.some(([type, value]) => type === 'mode' && value === colorModes.COLOR_MODE_DARK));
@@ -142,4 +156,43 @@ for (const [level, controlStyle, surfaceStyle] of [
   AppMaterials.configure('off', '#216451');
   for (const role of ['control', 'accentControl', 'surface', 'readingSurface']) assert.equal(AppMaterials[role], Material.empty);
 }
-console.log('PASS appearance: preset/custom contrast, validation, persistence, save/apply rollback, system mode, material levels/cache and reset');
+
+// API 20: the native uiMaterial module does not exist. Every read of the namespace must be
+// skipped, not merely tolerated, so a throwing stand-in replaces it while these modules load.
+deviceSdk = 20;
+const throwingMaterial = new Proxy({}, { get(_target, property) {
+  throw new Error('uiMaterial.' + String(property) + ' must never be read on API 20');
+} });
+const api26Kit = kits['@kit.ArkUI'];
+kits['@kit.ArkUI'] = { ...api26Kit, uiMaterial: throwingMaterial };
+const lowLevels = new Map();
+const lowStyleModule = load(root + '/common/AppearanceStyle.ets', lowLevels);
+const lowMaterials = load(root + '/common/AppMaterials.ets', lowLevels).AppMaterials;
+assert.equal(lowMaterials.available, false, 'API 20 reports no immersive material');
+for (const role of ['control', 'accentControl', 'surface', 'readingSurface']) {
+  assert.equal(lowMaterials[role], undefined, 'API 20 resolves ' + role + ' without touching uiMaterial');
+}
+const low = lowStyleModule.makeAppearanceStyle(model.defaultAppearance(), false);
+assert.equal(low.accent, '#216451', 'Plain palette stays complete without material');
+assert.equal(low.onAccent, '#FFFFFF');
+assert.equal(low.effectStrength, 1);
+assert.equal(low.materialAvailable, false);
+assert.equal(low.controlBackground, 'app.color.surface_variant', 'Unsupported material gets an opaque themed control backing');
+assert.equal(low.control, undefined);
+assert.equal(low.readingSurface, undefined);
+const lowDark = lowStyleModule.makeAppearanceStyle({ ...model.defaultAppearance(), mode: 'dark', accent: 'blue' }, true);
+assert.equal(lowDark.accent, model.accentPalette('blue', true).accent, 'Dark accent palette survives without material');
+assert.equal(lowDark.controlBackground, 'app.color.surface_variant', 'Dark controls resolve the dark theme resource');
+const lowOff = lowStyleModule.makeAppearanceStyle({ ...model.defaultAppearance(), lightEffect: 'off' }, false);
+assert.equal(lowOff.effectStrength, 0);
+assert.equal(lowOff.control, undefined);
+const forbiddenNative = new Proxy({}, { get() { throw Error('API 26 component method read on API 20'); } });
+systemMaterialAttribute(lowOff.control).applyNormalAttribute(forbiddenNative);
+menuMaterialAttribute(lowOff.surface).applyNormalAttribute(forbiddenNative);
+for (const effect of ['auto', 'gentle', 'standard', 'vivid']) {
+  lowMaterials.configure(effect, '#216451');
+  assert.equal(lowMaterials.surface, undefined, 'Saved light-sense preference never materialises on API 20');
+}
+kits['@kit.ArkUI'] = api26Kit;
+deviceSdk = 26;
+console.log('PASS appearance: preset/custom contrast, validation, persistence, save/apply rollback, system mode, material levels/cache, reset and API 20 plain interface');

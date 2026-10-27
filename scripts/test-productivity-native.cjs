@@ -115,7 +115,7 @@ const kits = {
   '@kit.MediaLibraryKit': {}, '@kit.ShareKit': {}, '@kit.ArkGraphics2D': { drawing: {} },
   '@kit.ArkTS': { util: { generateRandomUUID: () => crypto.randomUUID(), TextEncoder: Encoder, TextDecoder: Decoder,
     Base64Helper: class { async encodeToString(bytes) { return Buffer.from(bytes).toString('base64'); } encodeToStringSync(bytes) { return Buffer.from(bytes).toString('base64'); } decodeSync(text) { return Uint8Array.from(Buffer.from(text,'base64')); } } } },
-  '@kit.AssetStoreKit': { asset: {} }, '@kit.BasicServicesKit': { zlib: {
+  '@kit.AssetStoreKit': { asset: {} }, '@kit.BasicServicesKit': { deviceInfo: { sdkApiVersion: 26 }, zlib: {
     ReturnStatus: { STREAM_END: 1 }, CompressFlushMode: { FINISH: 4 }, createZipSync: () => { let current; return {
       inflateInit2: async()=>{}, inflateEnd: async()=>{}, getZStream:async()=>current,
       inflate:async stream=>{const bytes=zlib.inflateRawSync(Buffer.from(stream.nextIn),{maxOutputLength:stream.availableOut});new Uint8Array(stream.nextOut).set(bytes);current={totalOut:bytes.length};return 1;}
@@ -257,7 +257,7 @@ async function test(name, run) {
       drawImage(value,x,y){assert.equal(value,pixel);assert.equal(x,0);assert.equal(y,0);assert.equal(this.target.white,true);this.target.composited=true;}
     }};
     kits['@kit.ImageKit'].image={PixelMapFormat:{RGBA_8888:3},AlphaType:{OPAQUE:1},
-      createEmptyPixelMap:options=>{assert.equal(options.size.width,1600);assert.equal(options.size.height,1200);
+      createPixelMapSync:options=>{assert.equal(options.size.width,1600);assert.equal(options.size.height,1200);
         const target={getImageInfo:async()=>({size:options.size}),release:async()=>{opaqueReleases++;}};composites.push(target);return target;},
       createImagePacker:()=>({packing:async(value,options)=>{
         if(value!==pixel){assert.equal(value.composited,true,'native ink must be composited on white before JPEG packing');}
@@ -373,10 +373,16 @@ async function test(name, run) {
     assert.equal(joined,content);assert.ok(pages>2);
     const range=await invoke('read_file',{path:'large.txt',offset:2200,limit:2});assert.equal(range.content,content.split('\n').slice(2199,2201).join('\n')+'\n');
     const search=await invoke('search_file_content',{path:'.',query:'TAIL-MARKER'});assert.equal(search.matches.length,2);assert.equal(search.skipped.length,0);
-    await files.accept('large.txt');
-    await invoke('edit_file',{path:'large.txt',oldText:'TAIL-MARKER',newText:'EDITED'});
-    assert.equal((await files.baseline('large.txt')).content,content);
-    await files.restore('large.txt',content.replace('TAIL-MARKER','EDITED'));assert.equal((await files.read('large.txt',signal)).content,content);
+    assert.equal((await files.baseline('large.txt')).existed,false,'Creating a file retains its original missing-file baseline');
+    // A separately seeded existing file exercises edits without a test-only baseline reset API.
+    fs.writeFileSync(nativePath(root+'/existing-large.txt'),content);
+    await invoke('read_file',{path:'existing-large.txt'});
+    await invoke('edit_file',{path:'existing-large.txt',oldText:'TAIL-MARKER',newText:'EDITED'});
+    assert.equal((await files.baseline('existing-large.txt')).content,content);
+    await files.restore('existing-large.txt',content.replace('TAIL-MARKER','EDITED'));
+    assert.equal((await files.read('existing-large.txt',signal)).content,content);
+    assert.equal(await files.baseline('existing-large.txt'),undefined);
+    assert.equal((await files.baseline('large.txt')).existed,false,'Restoring another file cannot discard the original creation backup');
     for(const args of [{offset:0},{offset:999999},{limit:0},{offset:1,column:999999}])await assert.rejects(invoke('read_file',{path:'large.txt',...args}));
     // Exactly full byte pages must preserve the following newline, including an empty last line.
     for(const sample of ['x'.repeat(50*1024)+'\n','x'.repeat(50*1024-1)+'🙂\n','\n'.repeat(2001)]){
@@ -513,8 +519,9 @@ async function test(name, run) {
     fs.writeFileSync(nativePath(external+'/note.txt'),'outside edit');
     await assert.rejects(renamed.restore('shared/Renamed/note.txt','changed'),/文件已变化/);
     assert.equal((await renamed.baseline('shared/Renamed/note.txt')).content,'original');
-    await renamed.accept('shared/Renamed/note.txt');
-    assert.equal(await files.baseline(p),undefined);
+    await renamed.restore('shared/Renamed/note.txt','outside edit');
+    assert.equal(fs.readFileSync(nativePath(external+'/note.txt'),'utf8'),'original');
+    assert.equal(await files.baseline(p),undefined,'Successful restore clears the same URI backup through either mount name');
   });
   await test('cancelled shared writes retain cancellation semantics and a recoverable pre-change backup',async()=>{
     const root='/sandbox/workspace/shared-cancel',external='/sandbox/external/shared-cancel';
@@ -1258,7 +1265,7 @@ async function test(name, run) {
     const {defaultExtensions}=load(path.join(source,'model/Skills'));
     const {defaultProductivity}=load(path.join(source,'model/Productivity'));
     const {defaultAssistantOptions}=load(path.join(source,'model/AssistantOptions'));
-    const {ToolDiscovery}=load(path.join(source,'services/ToolDiscovery'));
+    const {ToolCatalog}=load(path.join(source,'services/ToolCatalog'));
     const resources=new NativeSessionResources('/sandbox/removed-images',new ProviderRegistry(),new ToolApproval());
     resources.configureProviders([{id:'image-provider',name:'Legacy',protocol:'chat-completions',baseUrl:'https://images.invalid/v1',
       credentialAlias:'fixture-key',noApiKey:false,enabled:true,models:['image-test']}]);
@@ -1268,9 +1275,10 @@ async function test(name, run) {
     assert.ok(!tools.definitions().some(tool=>tool.function.name==='generate_image'));
     const invoke=(name,args)=>tools.execute({id:name,type:'function',function:{name,arguments:JSON.stringify(args)}},new Cancellation());
     await assert.rejects(invoke('generate_image',{prompt:'a circle'}),error=>error.code==='TOOL_UNAVAILABLE');
-    const discovery=new ToolDiscovery(tools);
-    const found=JSON.parse(await discovery.execute({id:'search',type:'function',function:{name:'tool_search',arguments:'{"query":""}'}},new Cancellation()));
-    assert.ok(!found.tools.some(tool=>tool.name==='generate_image'));
+    const discovery=new ToolCatalog(tools);
+    assert.ok(!discovery.definitions().some(tool=>tool.function.name==='generate_image'));
+    assert.ok(!discovery.definitions().some(tool=>tool.function.name==='tool_search'));
+    await assert.rejects(discovery.execute({id:'search',type:'function',function:{name:'tool_search',arguments:'{"query":""}'}},new Cancellation()),error=>error.code==='TOOL_UNAVAILABLE');
     assert.ok(tools.definitions().some(tool=>tool.function.name==='read_attachment'));
   });
   await test('model discovery validates credential origin and uses the protocol endpoint',async()=>{

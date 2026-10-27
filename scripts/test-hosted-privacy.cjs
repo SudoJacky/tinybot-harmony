@@ -7,11 +7,14 @@ const state = new Map();
 const link = { type: 1, id: 'policy', versionCode: 2, url: 'https://example.com/policy?v=2' };
 let info = { type: 1, privacyInfo: [link] }, records = [], failure, notify, nextRequest, requests = 0, subscriptions = 0;
 let revokeFailure, requestFailure, exitFailure, revocations = 0, exits = 0;
+let privacyReads = 0;
+const buildProfile = { DEBUG: true, BUILD_MODE_NAME: 'debug' };
+const deviceInfo = { productModel: 'Mate 70 Pro+' };
 const privacyManager = {
   AppPrivacyMgmtType: { FULL_MODE: 1 }, AppPrivacyLinkType: { PRIVACY_STATEMENT_LINK: 1 },
   AppPrivacyType: { PRIVACY_AGREEMENT: 1 }, AppPrivacyResultType: { FULL_MODE_AGREED: 1 },
-  getAppPrivacyMgmtInfo() { if (failure) throw failure; return info; },
-  getAppPrivacyResult() { if (failure) throw failure; return records; },
+  getAppPrivacyMgmtInfo() { privacyReads++; if (failure) throw failure; return info; },
+  getAppPrivacyResult() { privacyReads++; if (failure) throw failure; return records; },
   disableService() { revocations++; if (revokeFailure) throw revokeFailure; records = []; },
   async requestAppPrivacyConsent() { requests++; if (requestFailure) throw requestFailure; if (nextRequest) return nextRequest; return { results: records }; }
 };
@@ -30,7 +33,8 @@ function load(file, imports) {
   return exports;
 }
 const { HostedPrivacy, hostedPrivacy } = load('services/HostedPrivacy.ets', {
-  '@kit.AppGalleryKit': { privacyManager }, '@kit.BasicServicesKit': { commonEventManager },
+  '@kit.AppGalleryKit': { privacyManager }, '@kit.BasicServicesKit': { commonEventManager, deviceInfo },
+  'BuildProfile': buildProfile,
   '../model/I18n': { t: (key, args = []) => key.replace(/\{(\d+)\}/g, (_, i) => args[i]) }
 });
 const agreed = (versionCode = 2) => [{ type: 1, id: 'policy', versionCode, result: 1 }];
@@ -166,4 +170,62 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   await probe.openSupport('privacy'); dialogs.at(-1).secondaryButton.action(); dialogs.at(-1).secondaryButton.action();
   assert.equal(uiPrivacy.allowed, false); assert.equal(exits, beforeDialogsExits + 1); uiPrivacy.dispose();
   console.log('PASS actual privacy menu: view link, two-step rejection, cancel preserves consent, failure stays open, confirm revokes and exits');
+
+  // An AppGallery error is never permission to bypass consent on hardware or release builds.
+  for (const [debug, mode, model] of [
+    [true, 'debug', 'Mate 70 Pro+'], [false, 'release', 'Mate 70 Pro+'],
+    [false, 'release', 'emulator'], [true, 'release', 'emulator'],
+    [false, 'debug', 'emulator'], [true, 'debug', 'unknown']
+  ]) {
+    buildProfile.DEBUG = debug; buildProfile.BUILD_MODE_NAME = mode; deviceInfo.productModel = model;
+    failure = { code: 1006700003 };
+    const guarded = new HostedPrivacy(); await guarded.initialize(context, () => {});
+    assert.equal(guarded.simulatorDebug, false);
+    guarded.acceptDebugConsent(); assert.equal(guarded.allowed, false);
+    assert.match(guarded.error, /1006700003/);
+    assert.throws(() => guarded.requireConsent(), /1006700003/);
+    failure = undefined; records = agreed(); guarded.refresh();
+    assert.equal(guarded.allowed, true, 'Non-emulator paths still require real system consent');
+    guarded.dispose();
+  }
+  console.log('PASS debug hardware, release hardware, release emulator and unknown devices cannot use debug consent');
+
+  buildProfile.DEBUG = true; buildProfile.BUILD_MODE_NAME = 'debug'; deviceInfo.productModel = 'emulator';
+  failure = { code: 1006700003 };
+  const counts = [privacyReads, requests, revocations, subscriptions];
+  const debugContext = { ...context, currentHapModuleInfo: { metadata: [
+    { name: 'appgallery_privacy_link_privacy_statement', value: 'https://example.com/debug-policy' }
+  ] } };
+  const debugService = new HostedPrivacy();
+  debugService.acceptDebugConsent(); assert.equal(debugService.allowed, false, 'Consent needs an active lifecycle');
+  await debugService.initialize(debugContext, () => {});
+  assert.equal(debugService.simulatorDebug, true); assert.equal(debugService.error, '');
+  debugService.refresh(); await debugService.requestConsent();
+  assert.equal(debugService.allowed, false, 'Refresh/retry never auto-accepts debug consent');
+  assert.throws(() => debugService.requireConsent(), /模拟器调试/);
+  await debugService.openPolicy(debugContext); assert.equal(opened.at(-1).uri, 'https://example.com/debug-policy');
+  debugService.acceptDebugConsent(); debugService.requireConsent(); assert.equal(debugService.allowed, true);
+  debugService.refresh(); assert.equal(debugService.allowed, true, 'Foreground keeps this run consent');
+  debugService.revokeConsent(); assert.equal(debugService.allowed, false);
+  debugService.acceptDebugConsent(); assert.equal(debugService.allowed, false, 'No consent while exiting');
+  debugService.dispose(); await debugService.initialize(debugContext, () => {});
+  assert.equal(debugService.allowed, false, 'New launch requires a fresh explicit choice');
+  await debugService.exit(); debugService.acceptDebugConsent(); assert.equal(debugService.allowed, false);
+  debugService.dispose();
+  assert.deepEqual([privacyReads, requests, revocations, subscriptions], counts, 'No AppGallery interaction in emulator debug flow');
+
+  const beforeDebugServices = [initialized, engines, wants.length];
+  const debugAbility = new EntryAbility(); debugAbility.context = debugContext;
+  debugAbility.onCreate({ uri: 'debug-initial' }, {}); debugAbility.onWindowStageCreate(stage);
+  await tick(); debugAbility.onForeground(); debugAbility.onNewWant({ uri: 'debug-shared' }, {});
+  assert.deepEqual([initialized, engines, wants.length], beforeDebugServices, 'Business and pending intents wait for explicit consent');
+  hostedPrivacy.acceptDebugConsent(); await tick();
+  assert.deepEqual([initialized, engines, wants.length], beforeDebugServices.map((n, i) => n + (i === 2 ? 2 : 1)));
+  hostedPrivacy.acceptDebugConsent(); debugAbility.onForeground();
+  assert.equal(engines, beforeDebugServices[1] + 1, 'Duplicate clicks do not restart services');
+  hostedPrivacy.revokeConsent(); assert.equal(hostedPrivacy.allowed, false);
+  const afterRevokeWants = wants.length; debugAbility.onNewWant({ uri: 'blocked-debug' }, {});
+  assert.equal(wants.length, afterRevokeWants); debugAbility.onDestroy();
+  assert.deepEqual([privacyReads, requests, revocations, subscriptions], counts);
+  console.log('PASS emulator explicit consent, policy viewing, foreground, rejection, withdrawal, cold restart and actual ability gating');
 })().catch(error => { console.error(error); process.exitCode = 1; });

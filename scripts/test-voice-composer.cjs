@@ -3,7 +3,8 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio');
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 const root = path.resolve(__dirname, '..');
-const scope = { Diagnostics: require('./load-diagnostics.cjs').Diagnostics, exports: {}, t: text => text, hilog: { info() {}, error() {} }, Error };
+const scope = { Diagnostics: require('./load-diagnostics.cjs').Diagnostics, exports: {}, t: text => text, hilog: { info() {}, error() {} }, Error,
+  systemInsets: () => Promise.resolve([0, 0]) };
 for (const file of ['model/DictationDraft', 'model/VoiceGesture']) {
   const source = fs.readFileSync(path.join(root, 'entry/src/main/ets', file + '.ets'), 'utf8');
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS,

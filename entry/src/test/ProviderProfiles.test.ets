@@ -2,11 +2,12 @@ import { ProviderEffects } from '../main/ets/services/providers/Provider';
 import { describe, expect, it } from '@ohos/hypium';
 import { ProviderEditorViewModel } from '../main/ets/viewmodel/ProviderEditorViewModel';
 import { defaultConfig, emptyData, parseAppData } from '../main/ets/model/Conversation';
-import { contextSettings } from '../main/ets/model/ConversationContext';
+import { contextSettings } from '../main/ets/model/ContextSettings';
 import { chatRequest } from '../main/ets/services/providers/ChatCompletionsProtocol';
 import { ModelMessage, ToolDefinition, ToolProperty, ToolParameters, ToolDefinitionFunction } from '../main/ets/model/Agent';
 import { ProviderProfile, availableModels, migrateProfiles, modelConfig, modelIds, validateProfile } from '../main/ets/model/ProviderProfiles';
-import { protocolUrl, protocolHeaders, responsesRequest, anthropicRequest } from '../main/ets/services/providers/WireProtocols';
+import { protocolHeaders, responsesRequest, anthropicRequest } from '../main/ets/services/providers/WireProtocols';
+import { protocolUrl } from '../main/ets/model/ProviderEndpoint';
 import { ResponsesStream, AnthropicStream, ModelStream } from '../main/ets/services/providers/EventStreams';
 import { profileProvider } from '../main/ets/services/providers/DefaultProviders';
 

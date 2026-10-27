@@ -23,3 +23,6 @@
 # Pen Kit's ambient namespace augments the platform global object.
 -keep-global-name
 globalThis
+
+# Dynamic import namespace accesses must match this exported builder name.
+drawingBoardBuilder

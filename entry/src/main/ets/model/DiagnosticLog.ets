@@ -18,22 +18,25 @@ export interface LogFields {
 export interface LogData { level: LogLevel; module: string; event: string; fields: Record<string, LogValue>; }
 export interface LogError extends Error { code?: number | string; }
 const ERROR_CODES: string[] = ['STALE_BROWSER_SNAPSHOT', 'STALE_INTERACTIVE_STATE', 'INVALID_ARGUMENTS', 'PERMISSION_DENIED',
-  'CANCELLED', 'READ_ONLY', 'FILE_NOT_FOUND', 'TOOL_NOT_FOUND', 'TIMEOUT', 'CONTEXT_OVERFLOW'];
+  'CANCELLED', 'READ_ONLY', 'FILE_NOT_FOUND', 'TOOL_NOT_FOUND', 'TIMEOUT', 'CONTEXT_OVERFLOW',
+  'NATIVE_EXCEPTION', 'NATIVE_EMPTY_RESULT', 'NATIVE_NAPI_FAILED'];
 
 // Names and string values are catalogs, not free text. Unknown keys never reach either output.
 const EVENTS: Record<string, string[]> = {};
 EVENTS.app = ['bar_failed', 'created', 'destroyed', 'window_created', 'window_failed', 'window_loaded', 'window_destroyed', 'foreground', 'background'];
-EVENTS.appearance = ['material', 'loaded', 'applied', 'save_failed', 'fonts_loaded', 'fonts_failed', 'insets_failed'];
+EVENTS.announcements = ['disabled', 'fetch_started', 'fetch_completed', 'fetch_failed', 'presented', 'present_failed', 'acknowledged', 'save_failed'];
+EVENTS.appearance = ['material', 'material_unavailable', 'loaded', 'applied', 'save_failed', 'fonts_loaded', 'fonts_failed', 'insets_failed'];
 EVENTS.backup = ['started', 'restored', 'restore_prepared', 'cleanup_failed'];
 EVENTS.background = ['acquired', 'released', 'cancelled', 'suspended', 'acquire_failed', 'release_failed', 'stop_failed', 'observe_failed'];
 EVENTS.speech = ['preparing', 'listening', 'vad', 'complete', 'finishing', 'recognition_failed', 'cancel_failed', 'playback_requested', 'playback_failed', 'cleanup_failed', 'late_cleanup_failed'];
 EVENTS.voice = ['focus_requested', 'released', 'draft_failed'];
 EVENTS.web = ['engine_start', 'engine_ready', 'release', 'activate', 'failed', 'load_start', 'load_returned', 'host_ready', 'port_connected', 'ready', 'state_saved', 'attached', 'page_end', 'navigation_blocked', 'resource_failed'];
 EVENTS.preview = ['failed', 'captured', 'thumbnail_failed'];
+EVENTS.sandbox = ['execution_failed', 'orchestration_failed'];
 EVENTS.export = ['image_failed'];
 EVENTS.network = ['request_start', 'request_end', 'context_overflow', 'first_data', 'request_failed'];
 EVENTS.context = ['inspected', 'request_prefix'];
-EVENTS.browser = ['permission', 'control_user', 'control_agent', 'task_released', 'closed', 'failed', 'acquired', 'permission_wait', 'operation', 'observation_changed', 'opened_by_user', 'annotation_started', 'annotation_captured', 'annotation_failed'];
+EVENTS.browser = ['permission', 'control_user', 'control_agent', 'task_released', 'closed', 'failed', 'acquired', 'permission_wait', 'operation', 'observation_changed', 'opened_by_user', 'annotation_started', 'annotation_captured', 'annotation_failed', 'search_observed', 'search_failed'];
 EVENTS.session = ['mcp_failed', 'tasks_failed', 'run_failed', 'title_failed', 'interactive_failed', 'resource_failed', 'memory_failed', 'memory_review_failed', 'mutation_failed', 'save_failed', 'observer_failed'];
 EVENTS.memory = ['committed', 'review_started', 'review_discarded'];
 EVENTS.resources = ['credential_rollback_failed', 'team_selected', 'committed', 'preferences_saved'];
@@ -52,7 +55,7 @@ STRINGS.action = ['send', 'cancel', 'edit', 'press', 'none'];
 STRINGS.policy = ['unset', 'enabled', 'disabled'];
 STRINGS.scheme = ['http', 'https', 'about', 'data', 'file', 'other'];
 STRINGS.library = ['three', 'echarts', 'none'];
-STRINGS.status = ['running', 'complete', 'failed', 'cancelled', 'pending', 'running_or_unknown'];
+STRINGS.status = ['running', 'complete', 'failed', 'cancelled', 'pending', 'running_or_unknown', 'results', 'empty', 'verification', 'unexpected_page', 'invalid_results'];
 
 export function knownLogEvent(module: string, event: string): boolean { return Object.keys(EVENTS).includes(module) && EVENTS[module].includes(event); }
 export function logRank(level: LogLevel): number { return LOG_LEVELS.indexOf(level); }

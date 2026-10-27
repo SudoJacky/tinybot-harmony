@@ -14,6 +14,10 @@ export struct PublishedPreviewCard {
   presentation?: UiPresentation;
   @Prop @Watch('revisionChanged') preview: PublishedPreview;
   @Prop available: boolean = false;
+  @Prop inspectable: boolean = false;
+  @Prop inspected: boolean = false;
+  onInspect: () => void = () => {};
+  @Prop inline: boolean = false;
   saved: UiSavedState[] = [];
   onInteract: (key: string, values: UiValues, action: string) => Promise<UiValues> = async () => { throw new Error('Preview interaction handler missing'); };
   @State private expanded: boolean = false;
@@ -32,7 +36,11 @@ export struct PublishedPreviewCard {
   }
   build() {
     Column({ space: Space.sm }) {
-      if (this.preview.superseded || !this.expanded) {
+      if (this.inspectable || this.inspected) {
+        Button(this.inspected ? t('在侧区查看') : t('在侧区打开')).attributeModifier(Btn.textSmall)
+          .id('inspect-preview-' + this.preview.id).onClick(this.onInspect)
+      }
+      if (!this.inline && (this.preview.superseded || !this.expanded)) {
         Row({ space: Space.md }) {
           if (this.preview.screenshot && !this.imageError) {
             Image('file://' + Attachments.path(this.preview.screenshot.image)).width(88).height(64).objectFit(ImageFit.Contain)
@@ -51,9 +59,9 @@ export struct PublishedPreviewCard {
             .id('preview-toggle-' + this.preview.id).onClick(() => { this.expanded = !this.expanded; })
         }.width('100%').padding(12).borderRadius(Radius.md).backgroundColor($r('app.color.surface'))
       }
-      if (this.expanded) {
+      if ((this.inline || this.expanded) && !this.inspected) {
         InteractiveAnswer({ content: this.preview.content, step: this.preview.step, surfaceOffset: this.preview.surfaceOffset,
-          allowSurface: !/\.jsonl$/i.test(this.preview.path),
+          allowSurface: !/\.jsonl$/i.test(this.preview.path), frameless: this.inline,
           saved: this.saved, presentation: this.presentation, available: this.available, onInteract: this.onInteract, selectable: false })
       }
     }.width('100%').alignItems(HorizontalAlign.Start)

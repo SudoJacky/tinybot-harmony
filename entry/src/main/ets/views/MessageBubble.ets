@@ -1,6 +1,7 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { ToolExecution } from '../model/Agent';
 import { t } from '../model/I18n';
-import { stepDisplayContent, stepPreviews, PublishedPreview } from '../model/PublishedPreview';
+import { stepDisplayContent, stepPreviews, PublishedPreview, PublishedAnswerPart, publishedAnswerParts } from '../model/PublishedPreview';
 import { PublishedPreviewCard } from './PublishedPreviewCard';
 import { PresentedFile, deliveredFiles } from '../model/Deliverables';
 import { turnFileChanges } from '../model/TurnFileChanges';
@@ -24,7 +25,7 @@ import { ThreadReference } from '../model/ThreadReferences';
 import { DisclosureState } from '../viewmodel/DisclosureState';
 import { ToolDetails } from './ToolDetails';
 import { OrchestrationReceipts } from './OrchestrationReceipts';
-import { ProcessItem, TimelineEntry, durationLabel, elapsedMs, foldsToAnswer, persistentTool,
+import { ProcessItem, TimelineEntry, durationLabel, elapsedMs, foldsToAnswer, persistentTool, persistentTools,
   summarizeProcess, turnPhase, workflowEntryState } from '../model/ProcessPresentation';
 import { toolFavicon, toolStat, toolTitle, toolStatusLabel } from '../model/ToolPresentation';
 import { WebsiteIcon } from '../common/WebsiteIcon';
@@ -77,22 +78,24 @@ function activeTool(tool: ToolExecutionViewModel): boolean { return tool.status 
 @Component
 struct RichToolResult {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
-  @ObjectLink execution: ToolExecutionViewModel;
+  @Prop toolName: string = '';
+  @Prop status: string = '';
+  @Prop output: string = '';
+  @Prop callId: string = '';
   onResume: (id: string) => void = () => {};
 
-  private name(): string { return this.execution.call.function.name; }
   build() {
     Column({ space: Space.sm }) {
-      if (this.name() === 'request_user_input' && ['interrupted', 'cancelled'].includes(this.execution.status)) {
+      if (this.toolName === 'request_user_input' && ['interrupted', 'cancelled'].includes(this.status)) {
         Button() {
           Row({ space: 6 }) {
             SymbolGlyph($r('sys.symbol.arrow_clockwise')).fontSize(15).fontColor([this.appearance.onAccentContainer])
             Text(t("重新填写并继续")).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor(this.appearance.onAccentContainer)
           }
-        }.fontFamily(this.appearance.fontFamily).attributeModifier(Btn.tonalSmall).onClick(() => this.onResume(this.execution.call.id))
+        }.fontFamily(this.appearance.fontFamily).attributeModifier(Btn.tonalSmall).onClick(() => this.onResume(this.callId))
       }
-      if (this.execution.status === 'complete' && this.name() === 'publish_data_view') {
-        DataViewCard({ content: this.execution.output })
+      if (this.status === 'complete' && this.toolName === 'publish_data_view') {
+        DataViewCard({ content: this.output })
       }
     }.width('100%').alignItems(HorizontalAlign.Start)
   }
@@ -193,11 +196,11 @@ struct ProcessGroup {
   private toolAt(item: ProcessItem): ToolExecutionViewModel | undefined {
     return item.tool < 0 ? undefined : this.message.stepViews[item.step]?.tools[item.tool];
   }
-  private richTools(): ToolExecutionViewModel[] {
-    const tools: ToolExecutionViewModel[] = [];
+  private richTools(): ToolExecution[] {
+    const tools: ToolExecution[] = [];
     for (const item of this.items()) {
       const tool = this.toolAt(item);
-      if (tool && persistentTool(tool)) { tools.push(tool); }
+      if (tool) { tools.push(...persistentTools([tool])); }
     }
     return tools;
   }
@@ -212,7 +215,7 @@ struct ProcessGroup {
       if (!this.richOnly) {
         ForEach(this.items(), (item: ProcessItem) => {
           if (item.tool < 0) {
-            ThinkingDisclosure({ content: this.message.stepViews[item.step]?.reasoningContent || '',
+            ThinkingDisclosure({ step: this.message.stepViews[item.step],
               disclosure: this.message.disclosures.get('thinking-' + item.step), streaming: this.thinkingNow(item.step),
               identity: this.message.id + '-' + item.step, onInspect: () => { this.message.processOpen = true; this.onInspect(); } })
           } else if (this.toolAt(item)) {
@@ -222,9 +225,10 @@ struct ProcessGroup {
           }
         }, (item: ProcessItem) => item.step + '-' + item.tool)
       }
-      ForEach(this.richTools(), (tool: ToolExecutionViewModel) => {
-        RichToolResult({ execution: tool, onResume: this.onResume })
-      }, (tool: ToolExecutionViewModel) => tool.call.id)
+      ForEach(this.richTools(), (tool: ToolExecution) => {
+        RichToolResult({ toolName: tool.call.function.name, status: tool.status, output: tool.output,
+          callId: tool.call.id, onResume: this.onResume })
+      }, (tool: ToolExecution) => tool.call.id)
     }.width('100%').alignItems(HorizontalAlign.Start)
   }
 }
@@ -243,6 +247,9 @@ export struct MessageBubble {
   onRead: (id: string) => void = () => {};
   @Prop webEnabled: boolean = false;
   onOpenFile: (path: string) => void = () => {};
+  @Prop previewInspectable: boolean = false;
+  @Prop inspectedPreviewId: string = '';
+  onInspectPreview: (messageId: string, previewId: string) => void = () => {};
   @Prop actionsEnabled: boolean = true;
   onRegenerate: (id: string) => void = () => {};
   @Prop uiAvailable: boolean = false;
@@ -312,6 +319,9 @@ export struct MessageBubble {
       const tool = this.message.stepViews[item.step]?.tools[item.tool];
       return tool !== undefined && persistentTool(tool);
     });
+  }
+  private answerParts(index: number): PublishedAnswerPart[] {
+    return publishedAnswerParts(this.message.id, this.message.stepViews, index, this.message.status, this.latestPreviewIds);
   }
   private processSummary(): string {
     const elapsed = elapsedMs(this.message.steps);
@@ -589,13 +599,26 @@ export struct MessageBubble {
               if (entry.kind === 'steering') {
                 this.steering(entry.step)
               } else if (entry.kind === 'text') {
-                InteractiveAnswer({ content: this.message.stepViews[entry.step].content, step: entry.step, selectable: false, allowSurface: false,
+                ForEach(this.answerParts(entry.step), (part: PublishedAnswerPart, partIndex: number) => {
+                if (this.answerParts(entry.step)[partIndex].kind === 'text') {
+                InteractiveAnswer({ content: this.answerParts(entry.step)[partIndex].content, step: entry.step, selectable: false, allowSurface: false,
                   validation: this.message.stepViews[entry.step]?.uiValidation || '',
                   saved: this.message.uiStates, presentation: this.message.uiPresentation, available: this.uiAvailable, onInteract: this.onUi,
                   streaming: this.message.status === 'generating' && entry.step === this.message.stepViews.length - 1 })
+                } else if (this.answerParts(entry.step)[partIndex].kind === 'preview') {
+                  PublishedPreviewCard({ preview: this.answerParts(entry.step)[partIndex].preview as PublishedPreview, inline: true,
+                    inspectable: this.previewInspectable, inspected: this.inspectedPreviewId === this.answerParts(entry.step)[partIndex].preview?.id,
+                    onInspect: () => this.onInspectPreview(this.message.id, (this.answerParts(entry.step)[partIndex].preview as PublishedPreview).id),
+                    saved: this.message.uiStates, presentation: this.message.uiPresentation, available: this.uiAvailable, onInteract: this.onUi })
+                } else if (this.answerParts(entry.step)[partIndex].kind === 'error') {
+                  Text(this.answerParts(entry.step)[partIndex].content).fontSize(13).fontColor($r('app.color.danger'))
+                }
+                }, (part: PublishedAnswerPart) => part.key)
                 ForEach(stepPreviews(this.message.id, this.message.stepViews[entry.step], entry.step, this.latestPreviewIds),
                   (preview: PublishedPreview) => {
                     PublishedPreviewCard({ preview: stepPreviews(this.message.id, this.message.stepViews[entry.step], entry.step, this.latestPreviewIds).find((item) => item.id === preview.id) as PublishedPreview,
+                      inspectable: this.previewInspectable, inspected: this.inspectedPreviewId === preview.id,
+                      onInspect: () => this.onInspectPreview(this.message.id, preview.id),
                       saved: this.message.uiStates, presentation: this.message.uiPresentation, available: this.uiAvailable, onInteract: this.onUi })
                   }, (preview: PublishedPreview) => preview.id)
               } else {

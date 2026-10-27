@@ -1,5 +1,5 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
-import { TutorialControl, TutorialScreen, tutorialRect } from '../model/HelpTutorial';
+import { TutorialControl, TutorialScreen, TUTORIAL_WIDTH, TUTORIAL_HEIGHT, tutorialRect } from '../model/HelpTutorial';
 import { EN_MESSAGES, ZH_MESSAGES } from '../model/LocaleCatalog';
 import { SpeechOrb } from '../common/SpeechOrb';
 import { Font, Radius } from '../common/Theme';
@@ -260,8 +260,8 @@ export struct HelpTutorialScreen {
 
   @Builder
   presets() {
-    Column().width(360).height(720).backgroundColor('#55000000')
-    Column().width(360).height(672).borderRadius({ topLeft: 24, topRight: 24 })
+    Column().width(TUTORIAL_WIDTH).height(TUTORIAL_HEIGHT).backgroundColor('#55000000')
+    Column().width(TUTORIAL_WIDTH).height(672).borderRadius({ topLeft: 24, topRight: 24 })
       .backgroundColor($r('app.color.page_background')).position({ x: 0, y: 48 })
     Text(this.text('添加模型服务')).fontFamily(this.appearance.fontFamily).fontSize(22).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
       .position({ x: 16, y: 66 })
@@ -336,8 +336,8 @@ export struct HelpTutorialScreen {
 
   @Builder
   plus() {
-    Column().width(360).height(720).backgroundColor('#33000000')
-    Column().width(360).height(330).borderRadius({ topLeft: 24, topRight: 24 })
+    Column().width(TUTORIAL_WIDTH).height(TUTORIAL_HEIGHT).backgroundColor('#33000000')
+    Column().width(TUTORIAL_WIDTH).height(330).borderRadius({ topLeft: 24, topRight: 24 })
       .backgroundColor($r('app.color.page_background')).position({ x: 0, y: 390 })
     Column().width(32).height(4).borderRadius(2).backgroundColor($r('app.color.divider')).position({ x: 164, y: 402 })
     Row({ space: 8 }) {
@@ -420,7 +420,7 @@ export struct HelpTutorialScreen {
         if (this.screen === 'plus') { this.plus() }
       }
       }
-    }.width(360).height(720).clip(true).backgroundColor(this.overlayOnly ? Color.Transparent : $r('app.color.page_background'))
+    }.width(TUTORIAL_WIDTH).height(TUTORIAL_HEIGHT).clip(true).backgroundColor(this.overlayOnly ? Color.Transparent : $r('app.color.page_background'))
       .hitTestBehavior(HitTestMode.None).accessibilityLevel('no-hide-descendants')
   }
 }

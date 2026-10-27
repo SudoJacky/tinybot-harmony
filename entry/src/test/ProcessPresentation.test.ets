@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@ohos/hypium';
 import { AgentStep, ToolExecution } from '../main/ets/model/Agent';
 import { setLocale } from '../main/ets/model/I18n';
-import { buildTimeline, describeTools, durationLabel, elapsedMs, foldsToAnswer, persistentTool, summarizeProcess,
+import { buildTimeline, durationLabel, elapsedMs, foldsToAnswer, persistentTool, summarizeProcess,
   thoughtTail } from '../main/ets/model/ProcessPresentation';
 import { toolStat } from '../main/ets/model/ToolPresentation';
 import { RequestUsage } from '../main/ets/model/Usage';
@@ -59,15 +59,6 @@ export default function processPresentationTests(): void {
       expect(persistentTool(tool('form', 'interrupted', 'request_user_input'))).assertTrue();
       expect(persistentTool(tool('form', 'cancelled', 'request_user_input'))).assertTrue();
       expect(persistentTool(tool('ordinary'))).assertFalse();
-    });
-    it('describesAGroupAsASentenceCountingEachFileOnce', 0, () => {
-      setLocale('zh-CN');
-      const tools = [tool('a', 'complete', 'edit_file', '', '{"path":"a.ets"}'), tool('b', 'complete', 'edit_file', '', '{"path":"a.ets"}'),
-        tool('c', 'complete', 'read_file', '', '{"path":"b.ets"}'), tool('d', 'complete', 'read_file', '', '{"path":"c.ets"}')];
-      expect(describeTools(tools)).assertEqual('编辑了 1 个文件，读取了 2 个文件');
-      setLocale('en');
-      expect(describeTools(tools)).assertEqual('Edited 1 file(s) · Read 2 file(s)');
-      setLocale('zh-CN');
     });
     it('summarizesElapsedTimeThoughtTailAndToolResults', 0, () => {
       setLocale('zh-CN');

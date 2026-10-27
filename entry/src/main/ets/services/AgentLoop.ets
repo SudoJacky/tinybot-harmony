@@ -5,7 +5,8 @@ import { AgentStep, AgentTurn, MAX_AGENT_STEPS, ModelMessage, ToolCall, ToolDefi
   interruptTools, stepMessages, toolError, validateToolCalls } from '../model/Agent';
 import { Cancellation } from './Cancellation';
 import { ModelSession } from './providers/Provider';
-import { contextInputBudget, estimateContextTokens } from '../model/ConversationContext';
+import { estimateContextTokens } from '../model/ConversationContext';
+import { contextInputBudget } from '../model/ContextSettings';
 import { PendingInput, validatePendingInput } from '../model/PendingInput';
 import { UsageToolActivity } from '../model/Usage';
 import { PreparedRequest } from './RequestContext';
@@ -15,6 +16,7 @@ import { executeToolBatch } from './ToolExecution';
 import { RepeatToolReminder } from './RepeatToolReminder';
 import { UiDiagnosticError, uiFailureReport } from '../model/UiRepair';
 import { requestWithRetry } from './RequestRetry';
+import { previewReferenceError } from '../model/PreviewReferences';
 
 export interface SteeringInput {
   peek: () => PendingInput | undefined;
@@ -23,8 +25,6 @@ export interface SteeringInput {
 
 export interface AgentTools {
   definitions(): ToolDefinition[];
-  // Visibility may be deferred; scheduling still needs the full authorized execution metadata.
-  executionDefinitions?(): ToolDefinition[];
   execute(call: ToolCall, cancellation: Cancellation, context?: ToolInvocationContext): Promise<string>;
   beforeFinish?(cancellation: Cancellation): Promise<string | undefined>;
 }
@@ -181,13 +181,16 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
         step.uiValidation = uiFailureReport(new UiDiagnosticError('UNSUPPORTED_PREVIEW_FORMAT',
           'Inline tinybot-ui / JSONL answers are no longer supported. Write a .js, .html or .svg file and call publish_preview; use library="three" for Three.js.') as Error);
         validationFailures++;
-      } else { step.uiValidation = ''; }
+      } else {
+        step.uiValidation = step.tools.length === 0 ? previewReferenceError(turn.steps, response.content) : '';
+        if (step.uiValidation) { validationFailures++; }
+      }
       turn.content = turn.steps.filter((item) => !item.requestError && !item.uiValidation).map((item) => item.content).filter((content) => content.length > 0).join('\n\n');
       observer.event({ type: 'model_end', step: round });
       if (step.uiValidation) {
         for (const tool of step.tools) { tool.status = 'cancelled'; tool.output = toolError(new ToolFailure('NOT_EXECUTED', 'UI validation failed; this tool was not executed.', 'fix_interface')); }
       }
-      if (hasUi) { await observer.checkpoint(); cancellation.check(); }
+      if (step.uiValidation) { await observer.checkpoint(); cancellation.check(); }
       if (step.uiValidation && (validationFailures >= 3 || round === limit - 1)) {
         throw new Error('UI validation failed after repair attempts: ' + step.uiValidation);
       }
@@ -218,7 +221,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
         }
         throw new Error(t("已达到本轮 {0} 次模型调用上限，执行已停止。你可以继续发送指令。", [limit]));
       }
-      await executeToolBatch(step, round, context.tools, context.tools.executionDefinitions?.() || definitions, cancellation, observer, context.toolExecution);
+      await executeToolBatch(step, round, context.tools, context.tools.definitions(), cancellation, observer, context.toolExecution);
       await observer.waitForExecution?.(cancellation);
       step.toolReminder = repeatReminder.observe(step);
       if (step.toolReminder) { await observer.checkpoint(); cancellation.check(); }

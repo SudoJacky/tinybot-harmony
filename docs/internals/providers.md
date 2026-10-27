@@ -1,6 +1,6 @@
 # 模型服务与凭据
 
-这一页说明模型服务（Provider）如何注册与绑定、请求发出前凭据（credential）和账号各检查一次什么，以及三种协议的转换差异。配置界面与使用限制见[模型服务与上下文](/guide/models)。
+这一页说明模型服务（Provider）如何注册与绑定、请求发出前凭据（credential）和账号各检查一次什么，以及四种协议的转换差异。配置界面与使用限制见[模型服务与上下文](/guide/models)。
 
 ## 三个概念
 
@@ -32,6 +32,7 @@ export interface ModelProvider {
 | `ollama` | Ollama | `chat-completions` | 空，手动填写局域网地址 | 空，手动填写 |
 | `openai-compatible` | 自定义兼容服务 | `chat-completions` | 空 | 空 |
 | `openai-responses` | OpenAI Responses | `responses` | `https://api.openai.com/v1` | `gpt-4.1` |
+| `google` | Google Gemini | `gemini` | `https://generativelanguage.googleapis.com/v1beta` | 空，手动填写 |
 | `anthropic` | Anthropic | `anthropic-messages` | `https://api.anthropic.com/v1` | 空，手动填写 |
 
 Ollama 预设标记 `noApiKey`，并使用端点占位符提示填写手机可访问的服务器地址。内置云端预设带 `apiKeyUrl`，编辑页据此显示官方密钥入口；该链接不随服务改名变化，自定义服务与启用“无需 API Key”的配置不显示。
@@ -117,12 +118,13 @@ API Key 保存在系统 Asset Store，写入属性为 `DEVICE_UNLOCKED` 且 `Syn
 | `chat-completions` | `/chat/completions` | 地址已带其他协议的接口路径时报“接口路径与所选协议不一致” |
 | `responses` | `/responses` | 同上 |
 | `anthropic-messages` | `/messages` | 只有主机没有路径时补 `/v1/messages` |
+| `gemini` | `/models/<模型 ID>:streamGenerateContent?alt=sse` | 只有主机时补 `/v1beta`；地址含其他协议的接口路径或生成方法时报“接口路径与所选协议不一致” |
 
 `chatRequest()` 的固定行为：
 
 - `stream: true`；有工具时传 `tools` 与 `tool_choice: 'auto'`，无工具时不传。
 - 只有调用方显式给出 `maxOutputTokens` 才写 `max_tokens`，正常聊天不主动设置输出上限。
-- 有图片时 `content` 转为 `[{type:'text'}, {type:'image_url'}]` 数组，否则保持字符串。
+- 有图片时 `content` 转为内容块数组，仅在正文非空时添加 `text` 块，再按顺序添加 `image_url` 块；纯图片消息不附带文本块。Responses 对 `input_text` 与 `input_image` 采用相同规则。无图片时保持字符串。
 - `reasoning_content` 仅在 `replayReasoning` 为真且角色为 assistant 时回传；OpenAI 与 Ollama 预设关闭该行为。
 - `requestUsage !== false` 时附加 `stream_options: { include_usage: true }`。
 
@@ -139,11 +141,20 @@ API Key 保存在系统 Asset Store，写入属性为 `DEVICE_UNLOCKED` 且 `Syn
 | 工具调用 | `tool_calls` | `function_call` 条目 | `tool_use` 内容块 |
 | 图片 | `image_url` | `input_image` | base64 `image` 块 |
 
-Anthropic 适配还有三点行为差异：
+Anthropic 适配还有以下行为差异：
 
 - 如果助手消息带有 `anthropicContent`，会原样、按序重放完整内容块（含签名思考），而不是从文本与工具调用重新拼装；重放前会做结构校验。
 - 流式解析按内容块索引推进，`message_start`、`content_block_start/delta/stop`、`message_delta`、`message_stop` 的状态必须自洽；结束原因只接受 `end_turn`、`stop_sequence`、`tool_use`。
 - 推理强度写入 `output_config.effort`；对支持自适应思考的模型额外设置 `thinking: { type: 'adaptive' }`，不虚构 `budget_tokens` 映射。
+- 使用 Anthropic 预设且协议为 `anthropic-messages` 时，发送顶层 `cache_control: { type: 'ephemeral' }` 跟随增长的历史，并在稳定 system 文本块上放置一个显式缓存断点。能力从预设传入实际配置实例，不按地址或模型名称猜测；自定义兼容预设不会自动增加该字段。缓存命中、生命周期与计费由服务端决定。
+
+Gemini 适配（`GeminiProtocol.ets`、`GeminiStream.ets`）：
+
+- 端点由模型名拼接为 `<base>/models/<id>:streamGenerateContent?alt=sse`；模型名可带 `models/` 前缀，不合法时报“Gemini 模型 ID 无效”。
+- 鉴权使用 `x-goog-api-key`；system 段落合并为 `systemInstruction`，助手角色写作 `model`，相邻同角色消息合并为一个 `contents` 条目。
+- 工具以 `functionDeclarations` 下发，schema 放在 `parametersJsonSchema`；工具结果用 `functionResponse` 关联调用，缺少对应调用直接报错。
+- 图片以 `inlineData` 传入 base64 数据；带 `geminiContent` 的助手消息按原始 parts 重放。
+- 不提供推理强度档位，`applyReasoningEffort()` 不为该协议写入字段。
 
 ## 密钥读取时机
 
@@ -187,6 +198,9 @@ Anthropic 适配还有三点行为差异：
 | `entry/src/main/ets/services/providers/WireProtocols.ets` | 请求头、端点后缀、Responses 与 Anthropic 请求体 |
 | `entry/src/main/ets/services/providers/ChatCompletionsProtocol.ets` | Chat Completions 请求转换与地址校验 |
 | `entry/src/main/ets/services/providers/EventStreams.ets` | Responses 与 Anthropic 流解析 |
+| `entry/src/main/ets/services/providers/GeminiProtocol.ets` | Gemini 端点、请求体、工具与图片编码 |
+| `entry/src/main/ets/services/providers/GeminiStream.ets` | Gemini SSE 解析、工具调用与思考文本 |
+| `entry/src/main/ets/model/GeminiContent.ets` | Gemini 原生内容块的校验与重放 |
 | `entry/src/main/ets/services/providers/ProviderErrors.ets` | HTTP 错误、临时错误与上下文溢出分类 |
 | `entry/src/main/ets/services/CredentialStore.ets` | 系统安全存储读写 |
 | `entry/src/main/ets/services/ProfileSettings.ets` | 服务配置提交与密钥生命周期 |

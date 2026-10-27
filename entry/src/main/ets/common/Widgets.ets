@@ -1,4 +1,5 @@
 import { AppearanceStyle } from './AppearanceStyle';
+import { systemMaterialAttribute } from './MaterialAttributes';
 import { t } from '../model/I18n';
 import { Btn, Font, Motion, Radius, Space } from './Theme';
 import { LiquidToggle } from './LiquidToggle';
@@ -25,12 +26,17 @@ export struct IconButton {
     Button({ type: ButtonType.Circle, stateEffect: true }) {
       SymbolGlyph(this.icon).fontSize(this.iconSize).fontColor([this.tint])
     }.fontFamily(this.appearance.fontFamily)
-    .id(this.compId).width(this.diameter).height(this.diameter).backgroundColor(this.fill)
-    .animation({ duration: Motion.fast, curve: Motion.standard })
+    .id(this.compId).width(this.diameter).height(this.diameter)
+    .backgroundColor(this.fill === Color.Transparent ? this.appearance.controlBackground : this.fill)
+    .border({ width: !this.appearance.materialAvailable && this.fill === Color.Transparent ? 0.5 : 0,
+      color: $r('app.color.divider') })
+    // API 20 resets the native button color during repaint. Apply plain fills immediately so
+    // draft/message updates cannot interpolate through the system's green accent color.
+    .animation(this.appearance.materialAvailable ? { duration: Motion.fast, curve: Motion.standard } : null)
     .clickEffect(this.disabled || this.material ? null : Motion.pressSmall)
     .enabled(!this.disabled).accessibilityText(this.label).onClick(() => this.onTap())
     .borderRadius(this.diameter / 2)
-    .systemMaterial(this.material)
+    .attributeModifier(systemMaterialAttribute<ButtonAttribute>(this.material))
   }
 }
 

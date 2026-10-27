@@ -1,4 +1,5 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { menuMaterialAttribute, systemMaterialAttribute } from '../common/MaterialAttributes';
 import { t } from '../model/I18n';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { SearchProviderId, defaultSearchConfig, deepSeekSearchProfiles } from '../model/WebSearch';
@@ -27,7 +28,7 @@ export struct SearchSettingsPanel {
     return deepSeekSearchProfiles(this.app.providerProfiles);
   }
   private changeProvider(index: number): void {
-    this.provider = index === 0 ? 'deepseek' : 'tavily';
+    this.provider = index === 0 ? 'deepseek' : index === 1 ? 'tavily' : 'bing-browser';
     const saved = this.app.productivity.options?.search;
     const config = saved?.provider === this.provider ? saved : defaultSearchConfig(this.provider);
     this.baseUrl = config.provider === 'tavily' ? config.baseUrl! : ''; this.apiKey = ''; this.savedKey = !!config.credentialAlias; this.error = '';
@@ -46,10 +47,12 @@ export struct SearchSettingsPanel {
   build() {
     Scroll() {
       Column({ space: Space.md }) {
-        Select([{ value: 'DeepSeek' }, { value: 'Tavily' }]).selected(this.provider === 'deepseek' ? 0 : 1)
-          .value(this.provider === 'deepseek' ? 'DeepSeek' : 'Tavily').enabled(!this.saving).id('search-provider')
-          .backgroundColor(Color.Transparent).fontColor($r('sys.color.font_primary'))
-          .systemMaterial(this.appearance.control).menuSystemMaterial(this.appearance.surface)
+        Select([{ value: 'DeepSeek' }, { value: 'Tavily' }, { value: t('必应（内置浏览器）') }])
+          .selected(this.provider === 'deepseek' ? 0 : this.provider === 'tavily' ? 1 : 2)
+          .value(this.provider === 'deepseek' ? 'DeepSeek' : this.provider === 'tavily' ? 'Tavily' : t('必应（内置浏览器）')).enabled(!this.saving).id('search-provider')
+          .backgroundColor(this.appearance.controlBackground).fontColor($r('sys.color.font_primary'))
+          .attributeModifier(systemMaterialAttribute<SelectAttribute>(this.appearance.control))
+          .attributeModifier(menuMaterialAttribute(this.appearance.surface))
           .onSelect((index: number) => this.changeProvider(index))
         Text(t('搜索词会发送给所选服务。')).fontFamily(this.appearance.fontFamily)
           .fontSize(14).fontColor($r('app.color.text_secondary'))
@@ -64,8 +67,9 @@ export struct SearchSettingsPanel {
               .selected(this.candidates().findIndex((item) => item.id === this.sourceId))
               .value(this.candidates().find((item) => item.id === this.sourceId)?.name || t('请选择用于联网搜索的 DeepSeek 服务。'))
               .enabled(!this.saving).id('search-credential-source')
-              .backgroundColor(Color.Transparent).fontColor($r('sys.color.font_primary'))
-              .systemMaterial(this.appearance.control).menuSystemMaterial(this.appearance.surface)
+              .backgroundColor(this.appearance.controlBackground).fontColor($r('sys.color.font_primary'))
+              .attributeModifier(systemMaterialAttribute<SelectAttribute>(this.appearance.control))
+              .attributeModifier(menuMaterialAttribute(this.appearance.surface))
               .onSelect((index: number) => { this.sourceId = this.candidates()[index].id; })
           } else if (this.candidates().length === 1) {
             Text(t('将复用 {0} 的密钥，无需重复填写。', [this.candidates()[0].name])).fontFamily(this.appearance.fontFamily)
@@ -74,15 +78,20 @@ export struct SearchSettingsPanel {
             Text(t('请先在设置中添加并启用 DeepSeek 官方模型服务，配置 API Key。')).fontFamily(this.appearance.fontFamily)
               .id('search-provider-key-missing').fontSize(13).fontColor($r('app.color.text_secondary'))
           }
-        } else {
+        } else if (this.provider === 'tavily') {
           Text(t('搜索接口基础地址')).fontFamily(this.appearance.fontFamily).fontColor($r('app.color.text_secondary'))
           TextInput({ text: this.baseUrl, placeholder: 'https://api.tavily.com' }).fontFamily(this.appearance.fontFamily).id('search-base-url')
             .enabled(!this.saving).onChange((value: string) => { this.baseUrl = value; })
           Text('API Key').fontFamily(this.appearance.fontFamily).fontColor($r('app.color.text_secondary'))
           TextInput({ text: this.apiKey, placeholder: this.savedKey ? t('留空保留已保存的搜索密钥') : 'API Key' }).fontFamily(this.appearance.fontFamily).type(InputType.Password)
             .id('search-api-key').enabled(!this.saving).onChange((value: string) => { this.apiKey = value; })
+        } else {
+          Text(t('无需 API Key，通过应用内浏览器访问必应。需要允许浏览器使用；遇到验证时，请完成验证后交还控制。'))
+            .fontFamily(this.appearance.fontFamily).fontSize(14).fontColor($r('app.color.text_secondary'))
+            .id('search-browser-description')
         }
-        Text(t('密钥保存在系统安全存储，不随备份导出。关闭“允许网页读取与搜索”也会停用搜索。')).fontFamily(this.appearance.fontFamily)
+        Text(this.provider === 'bing-browser' ? t('关闭“允许网页读取与搜索”或禁用应用内浏览器都会停用内置搜索。') :
+          t('密钥保存在系统安全存储，不随备份导出。关闭“允许网页读取与搜索”也会停用搜索。')).fontFamily(this.appearance.fontFamily)
           .fontSize(12).fontColor($r('app.color.text_secondary'))
         if (this.error) { Banner({ text: this.error, danger: true }) }
         Button(t('保存')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.primary).enabled(!this.saving && !this.app.busy && !this.app.saveError)

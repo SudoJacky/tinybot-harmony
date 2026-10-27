@@ -43,12 +43,17 @@ const ui = kind => new Proxy({}, { get: (_, name) => value => {
     node.titleBuilder = value.builder; value.builder();
   }
 } });
+// API 26 hides two brushes through HiddenConfig; API 20 has neither the type nor the option.
+let drawingTools = true;
+let hiddenToolType = { MOSAIC: 7, LASER: 3145728 };
 const globals = { exports: {}, ViewPU, SynchedPropertyNesedObjectPU: Property, ObservedPropertySimplePU: Property,
   wrapBuilder: builder => ({ builder }),
   canIUse: () => supported, TextAlign: {}, FontWeight: {}, SafeAreaType: {}, SafeAreaEdge: {},
   NavPathStack: class {}, BarStyle: {}, Color: {}, NavigationTitleMode: {}, NavigationMode: {},
   require: id => {
-    if (id.includes('HandwritePaint')) return { HandwriteComponent: Child, HandwriteController: Controller, PenType: { BALLPOINT_PEN: 2 }, HiddenToolType: { MOSAIC: 7, LASER: 3145728 } };
+    if (id.includes('HandwritePaint')) return { HandwriteComponent: Child, HandwriteController: Controller, PenType: { BALLPOINT_PEN: 2 }, HiddenToolType: hiddenToolType };
+    if (id.includes('ApiLevel&')) return { ApiLevel: { get drawingTools() { return drawingTools; } } };
+    if (id.includes('MaterialAttributes&')) return { systemMaterialAttribute: () => ({}), menuMaterialAttribute: () => ({}) };
     if (id === '@ohos:util') return { default: { generateRandomUUID: () => 'unique' } };
     if (id.includes('I18n&')) return { t: value => value };
     if (id.includes('Theme&')) return { Btn: {}, Font: {}, Radius: {}, Motion: {}, Space: {}, systemInsets: async () => [36, 24] };
@@ -66,6 +71,8 @@ const node = id => [...nodes.values()].find(value => value.id === id);
   assert.equal(node('drawing-add').enabled, false, 'Export waits for native loading');
   const native = [...board.children.values()].find(value => value.handwriteController);
   assert.equal(native.handwriteController, board.controller); assert.equal(native.defaultPenType, 2);
+  assert.ok(native.hiddenTools, 'API 26 receives the hidden-tool configuration');
+  assert.deepEqual([...native.hiddenTools.hiddenOptionalTools], [7, 3145728], 'API 26 hides mosaic and laser');
   native.onInit(); assert.equal(board.controller.path, '/cache/drawing-unique');
   board.controller.loaded({ code: 0, message: 'load success' }); board.flush();
   assert.equal(node('drawing-add').enabled, true); assert.equal(draft.dirty(), false);
@@ -98,6 +105,22 @@ const node = id => [...nodes.values()].find(value => value.id === id);
   await unsupported.add(); assert.equal(unsupported.draft.saving, false);
   supported = true;
   console.log('PASS unsupported drawing screen avoids native initialization and keeps export disabled');
+
+  // API 20 has no HiddenToolType/HiddenConfig. Reading either value there is the failure this
+  // guards against, so the enum itself becomes unreadable while the low-version board is built.
+  drawingTools = false;
+  hiddenToolType = new Proxy({}, { get(_target, property) {
+    throw Error('HiddenToolType.' + String(property) + ' must never be read on API 20');
+  } });
+  const lowBoard = new globals.exports.DrawingBoard(undefined, { draft: new DrawingDraft() });
+  lowBoard.aboutToAppear(); lowBoard.initialRender();
+  const lowNative = [...lowBoard.children.values()].find(value => value.handwriteController);
+  assert.ok(lowNative, 'The canvas itself stays available on API 20');
+  assert.equal(lowNative.hiddenTools, undefined, 'API 20 keeps the stock brush toolbar');
+  assert.equal(lowNative.defaultPenType, 2);
+  drawingTools = true;
+  hiddenToolType = { MOSAIC: 7, LASER: 3145728 };
+  console.log('PASS API 20 drawing board keeps the canvas and stock toolbar without reading HiddenToolType');
 
   // Exercise the actual composer integration, including the async disk-write boundary.
   const tree = ts.createSourceFile('ChatPanel.ts', emitted('ChatPanel'), ts.ScriptTarget.Latest, true);

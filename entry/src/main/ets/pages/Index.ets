@@ -1,4 +1,7 @@
+import { ConversationShareData, sharingMessages } from '../model/ConversationShare';
+import { ConversationSharePanel } from '../views/ConversationSharePanel';
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { systemMaterialAttribute } from '../common/MaterialAttributes';
 import { monochromeProviderLogo, providerLogo } from '../common/ProviderBrand';
 import { WebUiPreflightHost } from '../views/WebUiPreflightHost';
 import { PreviewCaptureHost } from '../views/PreviewCaptureHost';
@@ -6,10 +9,6 @@ import { BrowserPanel } from '../views/BrowserPanel';
 import { BrowserSession } from '../services/BrowserSession';
 import { AnnotationPage, browserAnnotationText } from '../model/BrowserAnnotation';
 import { image } from '@kit.ImageKit';
-import { fileIo as fs } from '@kit.CoreFileKit';
-import { conversationSections, ConversationSection } from '../model/ConversationExport';
-import { conversationImage } from '../services/ConversationImageExport';
-import { ConversationExportSection } from '../views/ConversationExportSection';
 import { Attachments } from '../services/Attachments';
 import { t } from '../model/I18n';
 import { agentModeName } from '../model/AgentMode';
@@ -18,6 +17,8 @@ import { ProductivityPanel, ProductivityEditorRoute, productivityEditorTitle } f
 import { ModelSettingsPanel } from '../views/AssistantPanel';
 import { BackupPanel } from '../views/BackupPanel';
 import { UsagePanel } from '../views/UsagePanel';
+import { StorageCategoryPanel, StoragePanel } from '../views/StoragePanel';
+import { storageCategoryKey } from '../model/StoragePlan';
 import { BranchesPanel } from '../views/BranchesPanel';
 import { WorkspacePanel } from '../views/WorkspacePanel';
 import { SearchSettingsPanel } from '../views/SearchSettingsPanel';
@@ -25,12 +26,9 @@ import { ToolApproval } from '../services/ToolApproval';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { requestAppReview } from '../services/AppInformation';
-import { util } from '@kit.ArkTS';
 import { KeyboardAvoidMode, SymbolGlyphModifier } from '@kit.ArkUI';
-import { Attachment } from '../model/Productivity';
-import { writeBytes } from '../services/Attachments';
-import { ShareInbox, exportFile, shareFile } from '../services/NativeActions';
-import { ChatViewModel, MessageViewModel } from '../viewmodel/ChatViewModel';
+import { ShareInbox } from '../services/NativeActions';
+import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { ChatPanel } from '../views/ChatPanel';
 import { SettingsPanel, UserDocumentPanel } from '../views/SettingsPanel';
 import { AppearancePanel, appearanceChoiceTitle } from '../views/AppearancePanel';
@@ -43,7 +41,7 @@ import { SkillsPanel } from '../views/SkillsPanel';
 import { SkillEditorPanel } from '../views/SkillEditorPanel';
 import { SessionService } from '../services/SessionService';
 import { createNativeSessionService } from '../services/NativeSessionService';
-import { Btn, Motion, Space } from '../common/Theme';
+import { Btn, Motion, Radius, Space } from '../common/Theme';
 import { IconButton } from '../common/Widgets';
 import { LaunchActions } from '../services/LaunchActions';
 import { OnboardingPanel } from '../views/OnboardingPanel';
@@ -51,6 +49,16 @@ import { OnboardingPreferences } from '../services/OnboardingPreferences';
 import { HuaweiAccount, huaweiAccount } from '../services/HuaweiAccount';
 import { HuaweiAccountPanel } from '../views/HuaweiAccountPanel';
 import { HostedPrivacy, hostedPrivacy } from '../services/HostedPrivacy';
+import { announcements } from '../services/Announcements';
+import { AnnouncementDialog } from '../views/AnnouncementDialog';
+import { Diagnostics } from '../model/Diagnostics';
+import { WorkbenchLayout } from '../model/WorkbenchLayout';
+import { PreviewPanel } from '../views/PreviewPanel';
+import { AnimatedPage } from '../common/AnimatedPage';
+import { HistoryRail } from '../views/HistoryRail';
+import { PaneDivider } from '../common/PaneDivider';
+import { DetailLauncher } from '../views/DetailLauncher';
+import { DetailTabItem, DetailTabs } from '../views/DetailTabs';
 
 const DRAWER_MAX_WIDTH: number = 340;
 const CHAT_HEADER_HEIGHT: number = 56;
@@ -60,14 +68,47 @@ const CHAT_HEADER_HEIGHT: number = 56;
 struct Index {
   @State private privacy: HostedPrivacy = hostedPrivacy;
   @StorageProp('tinybot.privacy.allowed') @Watch('privacyChanged') private privacyAllowed: boolean = false;
-  @State private exportingImage: boolean = false;
+  @StorageProp('tinybot.foreground') @Watch('offerAnnouncement') private foreground: boolean = false;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
   @State private app: ChatViewModel = new ChatViewModel();
   @State private account: HuaweiAccount = huaweiAccount;
+  @State private windowWidth: number = 0;
+  @State private workspaceOpen: boolean = false;
+  @State private workspacePresent: boolean = false;
+  @State private previewPresent: boolean = false;
+  @State private browserPresent: boolean = false;
+  @State private previewVisible: boolean = false;
+  private browserClosing: boolean = false;
+  @State private workspacePath: string = '';
+  @State private workspaceRequest: number = 0;
+  @State private workspaceCloseRequest: number = 0;
+  @State private workspaceTabCloseRequest: number = 0;
+  // Docked detail panes are tabs. Presence flags above stay the source of truth
+  // for each panel; these track order, focus and whether the column is shown.
+  @State private detailPaneOpen: boolean = false;
+  // 0 = the column is fully off-screen, 1 = fully docked. The chat width and
+  // the column geometry both read this value so they move as one animation.
+  @State private detailReveal: number = 0;
+  // Kept true until the close animation completes: the reveal state already
+  // holds its 0 target, so it cannot by itself keep the host visible.
+  @State private detailClosing: boolean = false;
+  @State private detailClosingLauncher: boolean = false;
+  private detailAnim: number = 0;
+  @State private detailTabs: string[] = [];
+  @State private activeDetailTab: string = '';
+  @State private previewId: string = '';
+  @State private previewMessageId: string = '';
+  @State private previewThreadId: string = '';
   @State private drawerOpen: boolean = false;
   @State private drawerContentActive: boolean = false;
   private drawerAnimation: number = 0;
+  // History column preference: collapsed shows the rail, the width only changes on drag.
+  @State private historyCollapsed: boolean = false;
+  @State private historyPreferredWidth: number = 0;
+  @State private detailPreferredWidth: number = 0;
+  @State private historySearchRequest: number = 0;
+  private resizeBase: number = 0;
   @State private chatVisible: boolean = true;
   @State private headerProgress: number = 0;
   @State private drawerReveal: number = 0;
@@ -78,8 +119,9 @@ struct Index {
   private session?: SessionService;
   @State private approval: ToolApproval = new ToolApproval();
   @State private browser: BrowserSession = new BrowserSession();
-  @State private browserExpanded: boolean = false;
-  @State private showToolScope: boolean = false;
+  @State @Watch('offerAnnouncement') private browserExpanded: boolean = false;
+  @State @Watch('offerAnnouncement') private showToolScope: boolean = false;
+  private announcementDialog?: CustomDialogController;
   private receiving: boolean = false;
   private ratingOpen: boolean = false;
   private unsubscribeLaunch?: () => void;
@@ -91,9 +133,11 @@ struct Index {
   @State private onboardingActive: boolean = false;
 
   onPageShow(): void {
+    this.paths.disableAnimation(false);
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
     if (!this.privacy.allowed) { return; }
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    announcements.checkOnStartup(context).then(() => this.offerAnnouncement());
     this.account.initialize(context).then(() => this.account.refresh());
     if (!this.session) {
       this.session = createNativeSessionService(context.filesDir, context.getApplicationContext().filesDir, this.approval, context, this.browser);
@@ -108,7 +152,40 @@ struct Index {
         this.unsubscribeLaunch = LaunchActions.subscribe(() => this.receiveLaunch());
       }
       this.offerOnboarding();
+      this.offerAnnouncement();
     });
+  }
+
+  private offerAnnouncement(): void {
+    if (!this.privacy.allowed || !this.foreground || !this.app.ready || !this.onboardingChecked ||
+      this.paths.size() > 0 || this.browserExpanded || this.showToolScope || this.ratingOpen || this.announcementDialog) { return; }
+    const item = announcements.pending();
+    if (!item) { return; }
+    // Tablets and wide windows follow the window width; 0 keeps the platform default.
+    const width = WorkbenchLayout.dialogWidth(this.windowWidth);
+    try {
+      this.announcementDialog = new CustomDialogController({
+        builder: AnnouncementDialog({ announcement: item, onConfirm: () => {
+          announcements.acknowledge(item.id);
+          this.closeAnnouncement();
+        } }),
+        systemMaterial: this.appearance.surface, autoCancel: false, alignment: DialogAlignment.Center,
+        width: width > 0 ? width : undefined,
+        onDidAppear: () => {
+          if (!this.privacy.allowed) { this.closeAnnouncement(); return; }
+          announcements.didOffer();
+        },
+        onDidDisappear: () => { this.announcementDialog = undefined; }
+      });
+      this.announcementDialog.open();
+    } catch (error) {
+      this.announcementDialog = undefined;
+      Diagnostics.log('error', 'announcements', 'present_failed', undefined, error as Error);
+    }
+  }
+
+  private closeAnnouncement(): void {
+    this.announcementDialog?.close();
   }
 
   private onboardingPreferences(): OnboardingPreferences {
@@ -118,8 +195,13 @@ struct Index {
   private privacyChanged(): void {
     if (this.privacyAllowed) { this.onPageShow(); }
     else {
+      this.closeAnnouncement();
       this.app.stop(); this.browser.close(); this.browserExpanded = false; this.showToolScope = false;
       this.voiceRequest = ''; this.paths.clear(); this.setDrawer(false);
+      this.workspaceOpen = false; this.previewVisible = false; this.previewId = '';
+      this.detailAnim++; this.detailPaneOpen = false; this.detailReveal = 0; this.detailClosing = false;
+      this.detailClosingLauncher = false; this.detailTabs = []; this.activeDetailTab = '';
+      this.workspacePresent = false; this.previewPresent = false; this.browserPresent = false; this.browserClosing = false;
     }
   }
 
@@ -165,10 +247,29 @@ struct Index {
     this.paths.pushPath({ name: 'provider' });
   }
 
+  private async createChat(): Promise<void> {
+    if (!this.app.ready || this.app.busy || this.app.saveError) { return; }
+    const previousId = this.app.active.id;
+    // SessionService decides whether the current chat is untouched and reusable.
+    if (await this.app.newThread() && this.app.active.id === previousId) {
+      this.getUIContext().getPromptAction().showToast({
+        systemMaterial: this.appearance.surface, message: t('已在新对话中'), duration: 1600
+      });
+    }
+  }
+
   private async receiveLaunch(): Promise<void> {
     if (!this.privacy.allowed) { return; }
     const action = LaunchActions.take();
     if (!action) { return; }
+    // The session restores the last active chat on cold start. Returning to it must
+    // not create a chat, flush/replace a draft, or interrupt a running answer.
+    if (action === 'continue-chat') {
+      if (this.launching || this.receiving || this.onboardingActive) { return; }
+      this.voiceRequest = '';
+      this.paths.clear(); this.setDrawer(false);
+      return;
+    }
     if (this.launching || this.receiving || this.app.busy || this.app.saveError) {
       this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t('请先完成当前操作或保存，再使用快捷入口。') });
       return;
@@ -208,21 +309,238 @@ struct Index {
     } finally { this.receiving = false; }
   }
 
+  private hasPreview(): boolean { return this.previewId.length > 0 && this.previewThreadId === this.app.active.id; }
+  // The pane stays laid out through its exit animations: the reveal keeps an
+  // empty launcher visible while it slides away, and the presence flags are
+  // raised until AnimatedPage reports that an outgoing body is gone.
+  private detailOpen(): boolean {
+    return !!(this.detailPaneOpen || this.detailClosing || this.workspacePresent ||
+      this.previewPresent || this.browserPresent);
+  }
+
+  // Geometry for the open column, independent of the exit-presence flags. The
+  // reveal scales this width so the chat gains exactly what the column loses.
+  private detailGeometry(): WorkbenchLayout {
+    return new WorkbenchLayout(this.windowWidth, true, !this.historyCollapsed,
+      this.historyPreferredWidth, this.detailPreferredWidth);
+  }
+
+  private setDetailPane(open: boolean, fromLauncher: boolean = false): void {
+    const token = ++this.detailAnim;
+    this.detailPaneOpen = open;
+    this.detailClosing = !open;
+    this.detailClosingLauncher = !open && fromLauncher;
+    const target = open ? 1 : 0;
+    this.getUIContext().animateTo({ duration: open ? Motion.medium : Motion.fast, curve: Motion.standard,
+      onFinish: () => { if (token === this.detailAnim) { this.detailClosing = false; this.detailClosingLauncher = false; } } }, () => {
+        this.detailReveal = target;
+      });
+  }
+
+  // A tab is available while its panel owns content. A preview whose conversation
+  // changed keeps its order slot but leaves the strip until that chat returns.
+  private detailTabPresent(tab: string): boolean {
+    if (tab === 'files') { return this.workspaceOpen; }
+    if (tab === 'preview') { return this.previewVisible && this.hasPreview(); }
+    if (tab === 'browser') { return this.browserExpanded && this.browser.open; }
+    return false;
+  }
+
+  private detailTabsAvailable(): string[] {
+    return this.detailTabs.filter((tab: string) => this.detailTabPresent(tab));
+  }
+
+  private currentDetailTab(): string {
+    const available = this.detailTabsAvailable();
+    if (available.includes(this.activeDetailTab)) { return this.activeDetailTab; }
+    return available.length > 0 ? available[0] : '';
+  }
+
+  private detailTabVisible(tab: string): boolean {
+    return this.detailPaneOpen && this.currentDetailTab() === tab;
+  }
+
+  private detailTabItems(): DetailTabItem[] {
+    const items: DetailTabItem[] = [];
+    for (const tab of this.detailTabsAvailable()) {
+      if (tab === 'files') {
+        items.push(new DetailTabItem('files', t('工作区文件'), $r('sys.symbol.folder')));
+      } else if (tab === 'preview') {
+        items.push(new DetailTabItem('preview', t('预览'), $r('sys.symbol.doc_text')));
+      } else if (tab === 'browser') {
+        const title = this.browser.title.trim();
+        items.push(new DetailTabItem('browser', title.length > 0 && title !== 'about:blank' ? title : t('应用内浏览器'),
+          $r('sys.symbol.connection')));
+      }
+    }
+    return items;
+  }
+
+  private openDetailTab(tab: string): void {
+    if (!this.detailTabs.includes(tab)) { this.detailTabs = this.detailTabs.concat(tab); }
+    this.activeDetailTab = tab;
+    this.setDetailPane(true);
+    this.getUIContext().getFocusController().clearFocus();
+    this.setDrawer(false);
+  }
+
+  private removeDetailTab(tab: string): void {
+    const remaining = this.detailTabs.filter((item: string) => item !== tab);
+    this.detailTabs = remaining;
+    const available = remaining.filter((item: string) => this.detailTabPresent(item));
+    if (this.activeDetailTab === tab) { this.activeDetailTab = available.length > 0 ? available[0] : ''; }
+    if (available.length === 0) { this.setDetailPane(false); }
+  }
+
+  private closeDetailTab(tab: string): void {
+    if (tab === 'browser') { this.closeBrowser(); return; }
+    if (tab === 'preview') { this.closePreview(); return; }
+    if (tab === 'files') { this.workspaceTabCloseRequest++; }
+  }
+
+  private workspaceClosed(): void {
+    this.workspaceOpen = false;
+    this.removeDetailTab('files');
+  }
+
+  private closePreview(): void {
+    this.previewVisible = false;
+    this.removeDetailTab('preview');
+  }
+
+  // The strip's add menu activates an existing tab instead of sending another
+  // open request into a mounted editor.
+  private addFilesTab(): void {
+    if (this.detailTabPresent('files')) { this.openDetailTab('files'); return; }
+    this.openFiles();
+  }
+
+  private addBrowserTab(): void {
+    if (this.detailTabPresent('browser')) { this.openDetailTab('browser'); return; }
+    this.openBrowser();
+  }
+
+  private toggleDetailPane(): void {
+    this.getUIContext().getFocusController().clearFocus();
+    if (this.detailPaneOpen) { this.setDetailPane(false, this.detailTabsAvailable().length === 0); return; }
+    this.setDetailPane(true);
+    const available = this.detailTabsAvailable();
+    if (!available.includes(this.activeDetailTab)) { this.activeDetailTab = available.length > 0 ? available[0] : ''; }
+    this.setDrawer(false);
+  }
+
+  private previewPresenceChanged(present: boolean): void {
+    this.previewPresent = present;
+    if (!present && !this.previewVisible) { this.previewId = ''; }
+  }
+
+  private browserPresenceChanged(present: boolean): void {
+    this.browserPresent = present;
+    if (!present && !this.browser.open) {
+      this.browserExpanded = false;
+      this.removeDetailTab('browser');
+    }
+    if (!present && this.browserClosing && !this.browserExpanded) { this.browserClosing = false; this.browser.close(); }
+  }
+
+  private closeBrowser(): void {
+    this.browser.takeOver(); this.browserClosing = true; this.setBrowserExpanded(false);
+    this.removeDetailTab('browser');
+  }
+
+  // Collapsing the phone header hides the tab without closing the browser
+  // session; the chat's browser status card can bring it back as a tab.
+  private hideBrowserTab(): void {
+    this.browserExpanded = false;
+    this.removeDetailTab('browser');
+  }
+  private workbench(): WorkbenchLayout {
+    return new WorkbenchLayout(this.windowWidth, this.detailOpen(), !this.historyCollapsed,
+      this.historyPreferredWidth, this.detailPreferredWidth);
+  }
+
+  // The rail expands the column only when it still fits; otherwise it reveals the
+  // overlay drawer, so history keeps working on a narrow split-screen window.
+  private toggleHistory(): void {
+    if (this.workbench().expanded) { this.setHistoryCollapsed(true); }
+    else if (this.workbench().canExpand) { this.setHistoryCollapsed(false); }
+    else { this.setDrawer(true); }
+  }
+
+  private setHistoryCollapsed(collapsed: boolean): void {
+    if (this.historyCollapsed === collapsed) { return; }
+    this.getUIContext().animateTo({ duration: Motion.medium, curve: Motion.standard }, () => {
+      this.historyCollapsed = collapsed;
+    });
+  }
+
+  // One tap from the rail opens the overlay drawer with the search field focused.
+  private openHistorySearch(): void {
+    this.setDrawer(true);
+    this.historySearchRequest++;
+  }
+
+  private beginResize(detail: boolean): void {
+    this.resizeBase = detail ? this.workbench().detailWidth : this.workbench().historyWidth;
+  }
+
+  private resizeHistory(dx: number): void {
+    // Growing the column must not make the docked pane impossible: unlike the
+    // desktop frame there is no second track to renegotiate, so stop at the width
+    // where both remaining panes keep their minima instead of collapsing mid-drag.
+    const layout = this.workbench();
+    const limit = layout.docked
+      ? layout.width - WorkbenchLayout.CHAT_MIN - WorkbenchLayout.DETAIL_MIN : WorkbenchLayout.HISTORY_MAX;
+    this.historyPreferredWidth = Math.max(WorkbenchLayout.HISTORY_MIN,
+      Math.min(WorkbenchLayout.HISTORY_MAX, limit, this.resizeBase + dx));
+  }
+
+  private resizeDetail(dx: number): void {
+    const layout = this.workbench();
+    this.detailPreferredWidth = Math.max(WorkbenchLayout.DETAIL_MIN,
+      Math.min(layout.detailMaxWidth, this.resizeBase - dx));
+  }
+
+  // Commit the clamped result so the next window resize does not replay the raw drag.
+  private endResize(detail: boolean): void {
+    if (detail) { this.detailPreferredWidth = this.workbench().detailWidth; }
+    else { this.historyPreferredWidth = this.workbench().historyWidth; }
+  }
+
+  private windowChanged(width: number): void {
+    if (width <= 0 || width === this.windowWidth) { return; }
+    this.windowWidth = width;
+    if (this.workbench().historyWidth > 0) {
+      // Invalidate any closing animation; the same history host becomes the sidebar.
+      this.drawerAnimation++; this.drawerOpen = false; this.drawerDragging = false;
+      this.drawerReveal = 0; this.drawerContentActive = false;
+    }
+  }
+  private openPreview(messageId: string, previewId: string): void {
+    this.previewThreadId = this.app.active.id; this.previewMessageId = messageId; this.previewId = previewId; this.previewVisible = true;
+    this.openDetailTab('preview');
+  }
+
   onBackPress(): boolean {
-    if (this.browserExpanded) {
+    const active = this.currentDetailTab();
+    if (this.detailPaneOpen && active === 'browser') {
       if (this.browser.editingAddress) { this.getUIContext().getFocusController().clearFocus(); return true; }
       if (this.browser.owner === 'user' && this.browser.userBack()) { return true; }
-      this.setBrowserExpanded(false); return true;
+      this.hideBrowserTab(); return true;
     }
     if (this.drawerOpen || this.drawerDragging) {
       this.setDrawer(false);
       return true;
     }
+    if (this.detailPaneOpen && active === 'preview' && this.hasPreview()) { this.closePreview(); return true; }
+    if (this.detailPaneOpen && active === 'files' && this.workspaceOpen) { this.workspaceCloseRequest++; return true; }
+    if (this.detailPaneOpen) { this.setDetailPane(false, this.detailTabsAvailable().length === 0); return true; }
     return false;
   }
 
   private setBrowserExpanded(expanded: boolean): void {
     this.getUIContext().getFocusController().clearFocus();
+    if (expanded) { this.browserClosing = false; }
     this.browserExpanded = expanded;
   }
 
@@ -235,7 +553,7 @@ struct Index {
         secondaryButton: { value: t('允许并启用'), action: () => this.enableAndOpenBrowser() } });
       return;
     }
-    try { this.browser.openForUser(); this.setBrowserExpanded(true); }
+    try { this.browser.openForUser(); this.setBrowserExpanded(true); this.openDetailTab('browser'); }
     catch (error) {
       this.browser.report((error as Error).message);
       this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: (error as Error).message });
@@ -258,6 +576,7 @@ struct Index {
   }
 
   aboutToDisappear(): void {
+    this.closeAnnouncement();
     this.unsubscribeLaunch?.(); this.unsubscribeLaunch = undefined;
     this.app.stop();
     this.app.flushDraft();
@@ -280,7 +599,7 @@ struct Index {
   }
 
   private startDrawerDrag(event: GestureEvent, fromChat: boolean = false): void {
-    if (!this.app.ready || (fromChat && (this.drawerOpen || event.offsetX <= 0 ||
+    if (this.workbench().expanded || !this.app.ready || (fromChat && (this.drawerOpen || event.offsetX <= 0 ||
       event.offsetX <= Math.abs(event.offsetY) * 1.5))) { return; }
     this.getUIContext().getFocusController().clearFocus();
     this.drawerDragStart = this.drawerReveal;
@@ -362,9 +681,10 @@ struct Index {
     } finally { this.ratingOpen = false; }
   }
 
-  private openFiles(): void {
+  private openFiles(path: string = ''): void {
     this.getUIContext().getFocusController().clearFocus();
-    this.paths.pushPath({ name: 'files' });
+    this.workspacePath = path; this.workspaceRequest++; this.workspaceOpen = true;
+    this.openDetailTab('files');
   }
 
   private openTools(tab: string): void {
@@ -378,52 +698,19 @@ struct Index {
     }
   }
 
-  private async exportChat(share: boolean): Promise<void> {
-    const thread = this.app.active;
-    let temporary = '';
-    try {
-      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      const text = '# ' + thread.title + '\n\n' + thread.messages.map((item: MessageViewModel) =>
-        '## ' + (item.role === 'user' ? t("用户") : 'Tinybot') + '\n\n' + item.content +
-        (item.attachments.length ? t("\n\n附件：") + item.attachments.map((file: Attachment) => file.name).join('、') : '')).join('\n\n');
-      const path = context.cacheDir + '/conversation-' + util.generateRandomUUID() + '.md';
-      temporary = path;
-      await writeBytes(path, new util.TextEncoder().encodeInto(text).buffer as ArrayBuffer);
-      const name = (thread.title.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40) || t("Tinybot对话")) + '.md';
-      if (share) { await shareFile(context, path, name); }
-      else { await exportFile(context, path, name, thread.messages.some((item) => item.role === 'assistant')); }
-    } catch (error) { this.app.error = (error as Error).message; }
-    finally { if (temporary && await fs.access(temporary)) { await fs.unlink(temporary); } }
-  }
-
-  @Builder
-  imageExportSection(section: ConversationSection) { ConversationExportSection({ section: section }) }
-
-  private async exportChatImage(): Promise<void> {
-    if (this.exportingImage || this.app.busy || !this.app.active.messages.length) { return; }
-    this.exportingImage = true;
-    this.getUIContext().getPromptAction().showToast({ message: t('正在导出图片…') });
-    let temporary = '';
-    try {
-      // Capture one immutable conversation, even if the user changes chats while exporting.
-      const snapshot = this.app.exportSnapshot();
-      const thread = snapshot.threads.find((item) => item.id === this.app.active.id)!;
-      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      const ui = this.getUIContext();
-      temporary = await conversationImage(context, conversationSections(thread, snapshot.providerProfiles || []), (section: ConversationSection) =>
-        ui.getComponentSnapshot().createFromBuilder(() => { this.imageExportSection(section); }, 0, true,
-          { scale: 720 / ui.vp2px(360), waitUntilRenderFinished: true }),
-        context.resourceManager.getColorSync($r('app.color.page_background').id));
-      const name = (thread.title.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40) || t('Tinybot对话')) + '.png';
-      await exportFile(context, temporary, name);
-    } catch (error) {
-      const failure = error as BusinessError;
-      this.app.error = t('导出图片失败：{0}', [failure.message || JSON.stringify(error) || String(error)]);
+  private openConversationShare(): void {
+    if (!this.app.ready || this.app.busy || !this.app.active.messages.length) { return; }
+    const snapshot = this.app.exportSnapshot();
+    const data: ConversationShareData = {
+      thread: snapshot.threads.find((thread) => thread.id === this.app.active.id)!,
+      profiles: snapshot.providerProfiles || []
+    };
+    data.thread.messages = sharingMessages(data.thread.messages);
+    if (!data.thread.messages.length) {
+      this.getUIContext().getPromptAction().showToast({ message: t('暂无可分享的正文') });
+      return;
     }
-    finally {
-      this.exportingImage = false;
-      if (temporary && await fs.access(temporary)) { await fs.unlink(temporary); }
-    }
+    this.paths.pushPath({ name: 'share-conversation', param: data });
   }
 
   // Conversation-level actions live in the header; the composer "+" sheet holds per-message inputs.
@@ -450,13 +737,9 @@ struct Index {
         MenuItem({ startIcon: $r('app.media.message_branch'), content: t("创建分支") })
           .enabled(!this.app.busy && this.app.saveError.length === 0 && this.app.active.messages.length > 0)
           .onClick(() => this.fork())
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.share')), content: t("分享对话") })
-          .enabled(this.app.active.messages.length > 0).onClick(() => this.exportChat(true))
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.square_and_arrow_down')), content: t("导出为 Markdown") })
-          .enabled(this.app.active.messages.length > 0).onClick(() => this.exportChat(false))
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.picture')), content: this.exportingImage ? t('正在导出图片…') : t('导出为图片') })
-          .id('export-chat-image').enabled(!this.app.busy && !this.exportingImage && this.app.active.messages.length > 0)
-          .onClick(() => this.exportChatImage())
+        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.share')), content: t('分享会话') })
+          .id('share-conversation').enabled(this.app.ready && !this.app.busy && this.app.active.messages.length > 0)
+          .onClick(() => this.openConversationShare())
       }
       MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.gearshape')), content: t('设置') })
         .onClick(() => this.openSettings())
@@ -500,6 +783,15 @@ struct Index {
       NavDestination() { BackupPanel({ app: this.app }) }.title(t('备份与恢复'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'usage') {
       NavDestination() { UsagePanel({ app: this.app }) }.title(t('Token 用量'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'storage') {
+      NavDestination() {
+        StoragePanel({ app: this.app, onCategory: (id: string) => { this.paths.pushPath({ name: 'storage-category', param: id }); } })
+      }.title(t('存储空间'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'storage-category') {
+      NavDestination() {
+        StorageCategoryPanel({ app: this.app, category: param as string })
+      }.title(t(storageCategoryKey(param as string)), { systemMaterial: this.appearance.control })
+        .backgroundColor($r('app.color.page_background'))
     } else if (name === 'productivity') {
       NavDestination() { ProductivityPanel({ app: this.app, tab: (param as string) || 'memory', onUse: () => { this.paths.clear(); },
         onEdit: (tab: string, id: string, onReturn: (warning: string) => void) => {
@@ -516,6 +808,8 @@ struct Index {
         .backgroundColor($r('app.color.page_background')).onBackPressed(() => this.app.busy)
     } else if (name === 'search-settings') {
       NavDestination() { SearchSettingsPanel({ app: this.app }) }.title(t('搜索服务'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'share-conversation') {
+      ConversationSharePanel({ data: param as ConversationShareData })
     } else if (name === 'files') {
       WorkspacePanel({ app: this.app, initialPath: (param as string) || '' })
     } else if (name === 'account') {
@@ -529,6 +823,7 @@ struct Index {
           browser: this.browser,
           onAddProvider: () => { this.paths.pushPath({ name: 'provider-presets' }); },
           onUsage: () => { this.paths.pushPath({ name: 'usage' }); },
+          onStorage: () => { this.paths.pushPath({ name: 'storage' }); },
           onModels: () => { this.paths.pushPath({ name: 'model-settings' }); },
           onSearch: () => { this.paths.pushPath({ name: 'search-settings' }); },
           onAppearance: () => { this.paths.pushPath({ name: 'appearance' }); },
@@ -552,8 +847,9 @@ struct Index {
     } else if (name === 'support') {
       NavDestination() {
         SupportPanel({ page: param as string,
-          onOpen: (page: string) => this.openSupport(page) })
-      }.title(supportTitle(param as string), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+          onOpen: (page: string) => this.openSupport(page), onClose: () => { this.paths.pop(); } })
+      }.title(supportTitle(param as string), { systemMaterial: this.appearance.control })
+        .hideTitleBar((param as string) === 'feedback').backgroundColor($r('app.color.page_background'))
     } else if (name === 'user-document') {
       NavDestination() {
         UserDocumentPanel({ app: this.app, settings: this.app.settings, onSaved: () => { this.paths.pop(); } })
@@ -613,15 +909,50 @@ struct Index {
 
   @Builder
   header() {
+    if (this.windowWidth >= 840) {
+      // The title bar has no backdrop for the API-26 light-sense material, which
+      // composites as white and erases the control fill; use the opaque control
+      // tint here and keep the material path on the phone header.
+      Row({ space: 4 }) {
+        if (this.workbench().historyWidth === 0) {
+          IconButton({ icon: $r('sys.symbol.line_3_horizontal'), label: t('对话列表'), compId: 'open-history',
+            fill: $r('app.color.surface_variant'),
+            disabled: !this.app.ready, onTap: () => this.setDrawer(true) })
+        }
+        Text(this.app.active.messages.length > 0 ? this.app.active.displayTitle : '').fontSize(15).fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_secondary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+        Button({ type: ButtonType.Circle, stateEffect: true }) {
+          SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(19).fontColor([$r('app.color.text_secondary')])
+        }.id('workbench-chat-more').width(44).height(44).borderRadius(22)
+          .backgroundColor($r('app.color.surface_variant'))
+          .accessibilityText(t('更多操作'))
+          .enabled(this.app.ready).bindMenu(this.moreMenu, { systemMaterial: this.appearance.surface, mask: false })
+        IconButton({ icon: this.detailPaneOpen ? $r('sys.symbol.close_sidebar') : $r('sys.symbol.open_sidebar'),
+          label: this.detailPaneOpen ? t('关闭侧栏') : t('打开侧栏'), compId: 'workbench-toggle-detail',
+          fill: $r('app.color.surface_variant'),
+          disabled: !this.app.ready, onTap: () => this.toggleDetailPane() })
+      }.width('100%').height(CHAT_HEADER_HEIGHT).padding({ left: 12, right: 12 })
+        .hitTestBehavior(HitTestMode.Transparent)
+    } else { this.phoneHeader() }
+  }
+
+  @Builder
+  phoneHeader() {
     Stack() {
       Column().id('chat-header-backdrop').width('100%').height(CHAT_HEADER_HEIGHT)
         .backgroundEffect({ radius: 12, color: $r('app.color.chat_header_background') })
         .translate({ y: -CHAT_HEADER_HEIGHT * this.headerProgress }).opacity(1 - this.headerProgress)
         .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
     Row({ space: 4 }) {
+      if (this.workbench().historyWidth === 0) {
       IconButton({ icon: $r('sys.symbol.line_3_horizontal'), label: t("对话列表"), compId: 'open-history',
         material: this.appearance.control, tint: $r('sys.color.font_primary'),
         disabled: !this.app.ready, onTap: () => this.setDrawer(true) })
+      }
+      if (this.windowWidth >= 840) {
+        IconButton({ icon: $r('sys.symbol.folder'), label: t('工作区文件'), compId: 'workbench-open-files',
+          disabled: !this.app.ready, onTap: () => this.openFiles() })
+      }
       Column({ space: 1 }) {
         Text(this.app.ready ? (this.app.activeProject ? this.app.activeProject.name + ' · ' : '') + this.app.active.displayTitle : 'Tinybot').fontSize(16).fontWeight(FontWeight.Medium)
           .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
@@ -662,14 +993,15 @@ struct Index {
       .onClick(() => { this.paths.pushPath({ name: 'models' }); })
       Button({ type: ButtonType.Circle, stateEffect: true }) {
         SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(20).fontColor([$r('sys.color.font_primary')])
-      }.id('chat-more').width(44).height(44).borderRadius(22).backgroundColor(Color.Transparent)
-      .systemMaterial(this.appearance.control).accessibilityText(t("更多操作"))
+      }.id('chat-more').width(44).height(44).borderRadius(22).backgroundColor(this.appearance.controlBackground)
+      .border({ width: this.appearance.materialAvailable ? 0 : 0.5, color: $r('app.color.divider') })
+      .attributeModifier(systemMaterialAttribute<ButtonAttribute>(this.appearance.control)).accessibilityText(t("更多操作"))
       .enabled(this.app.ready).bindMenu(this.moreMenu, {
         systemMaterial: this.appearance.surface, mask: false })
       IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t("新建对话"), compId: 'new-chat',
         material: this.appearance.control, tint: $r('sys.color.font_primary'),
         disabled: !this.app.ready || this.app.busy || this.app.saveError.length > 0,
-        onTap: () => { this.app.newThread(); } })
+        onTap: () => { this.createChat(); } })
     }.width('100%').height(CHAT_HEADER_HEIGHT).padding({ left: 6, right: 6 })
       .hitTestBehavior(HitTestMode.Transparent)
     }.width('100%').height(CHAT_HEADER_HEIGHT).clip(true).hitTestBehavior(HitTestMode.Transparent)
@@ -682,25 +1014,32 @@ struct Index {
       Column()
         .width('100%').height('100%').backgroundColor($r('app.color.scrim'))
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-        .opacity(this.drawerReveal)
+        .opacity(this.workbench().expanded ? 0 : this.drawerReveal)
+        .hitTestBehavior(this.workbench().expanded ? HitTestMode.None : HitTestMode.Default)
         .onClick(() => this.setDrawer(false))
       Stack() {
         Column().width('100%').height('100%').backgroundColor($r('app.color.page_background'))
-          .borderRadius({ topRight: 20, bottomRight: 20 })
+          .borderRadius({ topRight: this.workbench().expanded ? 0 : 20, bottomRight: this.workbench().expanded ? 0 : 20 })
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-        ThreadList({ app: this.app, active: this.drawerContentActive, onSelected: () => this.setDrawer(false), onFiles: () => { this.setDrawer(false); this.openFiles(); }, onSettings: () => {
+        ThreadList({ app: this.app, workbench: this.windowWidth >= 840,
+          collapseHistory: this.workbench().expanded, searchRequest: this.historySearchRequest,
+          onCollapseHistory: () => this.setHistoryCollapsed(true),
+          onNewChat: () => { this.createChat(); this.setDrawer(false); }, onTools: () => { this.setDrawer(false); this.openTools('memory'); },
+          active: this.workbench().expanded || this.drawerContentActive, onSelected: () => this.setDrawer(false), onFiles: () => { this.setDrawer(false); this.openFiles(); }, onSettings: () => {
           this.setDrawer(false);
           this.openSettings();
         } })
       }
-      .width('84%').constraintSize({ maxWidth: DRAWER_MAX_WIDTH }).height('100%')
+      .width(this.workbench().expanded ? this.workbench().historyWidth : '84%').constraintSize({ maxWidth: DRAWER_MAX_WIDTH }).height('100%')
       .id('history-drawer')
-      .translate({ x: (this.drawerReveal - 1) * this.drawerWidth })
+      .translate({ x: this.workbench().expanded ? 0 : (this.drawerReveal - 1) * this.drawerWidth })
       .onAreaChange((_old: Area, next: Area) => { this.drawerWidth = Math.max(1, next.width as number); })
-    }.width('100%').height('100%')
-    .hitTestBehavior(this.drawerOpen || this.drawerDragging ? HitTestMode.Default : HitTestMode.None)
-    .enabled(this.drawerOpen || this.drawerDragging)
-    .accessibilityLevel(this.drawerOpen || this.drawerDragging ? 'auto' : 'no-hide-descendants')
+    }.width(this.workbench().expanded ? this.workbench().historyWidth : '100%').height('100%')
+    .position({ x: 0, y: 0 })
+    .border({ width: { right: this.workbench().expanded ? 0.5 : 0 }, color: $r('app.color.divider') })
+    .hitTestBehavior(this.workbench().expanded || this.drawerOpen || this.drawerDragging ? HitTestMode.Default : HitTestMode.None)
+    .enabled(this.workbench().expanded || this.drawerOpen || this.drawerDragging)
+    .accessibilityLevel(this.workbench().expanded || this.drawerOpen || this.drawerDragging ? 'auto' : 'no-hide-descendants')
     .gesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Horizontal, distance: 8 })
       .onActionStart((event: GestureEvent) => this.startDrawerDrag(event))
       .onActionUpdate((event: GestureEvent) => this.updateDrawerDrag(event))
@@ -713,7 +1052,22 @@ struct Index {
       if (!this.privacyAllowed) {
         Column({ space: Space.lg }) {
           Text('Tinybot').fontSize(28).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
-          if (this.privacy.error) {
+          if (this.privacy.simulatorDebug) {
+            Text(t('模拟器调试隐私说明')).id('debug-privacy-title')
+              .fontSize(20).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
+            Text(t('此入口仅用于 Debug 包的模拟器调试。同意仅在本次运行有效，不代表已完成华为系统隐私授权。'))
+              .fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
+            Text(t('进入后会初始化账号、会话和诊断等服务。使用在线功能时，对话、附件及必要信息可能发送给配置的服务商，请仅使用测试数据。'))
+              .fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
+            if (this.privacy.error) {
+              Text(this.privacy.error).id('privacy-status').fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
+            }
+            Button(t('隐私政策')).id('debug-privacy-policy').attributeModifier(Btn.tonal)
+              .onClick(() => this.openSupport('privacy'))
+            Button(t('同意并进入调试')).id('accept-debug-privacy').attributeModifier(Btn.primary)
+              .onClick(() => this.privacy.acceptDebugConsent())
+            Button(t('退出应用')).id('exit-debug-privacy').attributeModifier(Btn.tonal).onClick(() => this.privacy.exit())
+          } else if (this.privacy.error) {
             Text(this.privacy.error).id('privacy-status').fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
             Button(t('重试')).id('retry-privacy').attributeModifier(Btn.primary)
               .enabled(!this.privacy.busy).onClick(() => this.privacy.requestConsent())
@@ -724,28 +1078,45 @@ struct Index {
       } else {
       ForEach([this.locale], (_locale: string) => {
     Stack() {
+    Row() {
+    if (this.workbench().rail) {
+      HistoryRail({ active: this.app.ready, filesActive: this.detailPaneOpen && this.currentDetailTab() === 'files',
+        onExpand: () => this.toggleHistory(),
+        onNewChat: () => { this.createChat(); this.setDrawer(false); },
+        onSearch: () => this.openHistorySearch(),
+        onFiles: () => this.openFiles(),
+        onTools: () => this.openTools('memory'),
+        onSettings: () => this.openSettings() })
+        .width(this.workbench().historyWidth).height('100%')
+    } else {
+      Column().width(this.workbench().historyWidth).height('100%')
+    }
     Navigation(this.paths) {
       Stack() {
         // Render the capture card at chat width behind the opaque page.
         PreviewCaptureHost()
-        Column().width('100%').height('100%').backgroundColor($r('app.color.page_background'))
-          .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+        Column().width('100%').height('100%').backgroundColor(this.windowWidth >= 840 ? $r('app.color.surface') : $r('app.color.page_background'))
+          .expandSafeArea([SafeAreaType.SYSTEM], this.windowWidth >= 840 ? [] : [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         Column() {
           if (this.app.ready) {
-            ChatPanel({ app: this.app, thread: this.app.active, approval: this.approval, browser: this.browser, account: this.account,
+            ChatPanel({ app: this.app, thread: this.app.active, workbench: this.windowWidth >= 840,
+                onToolScope: () => { this.showToolScope = true; }, approval: this.approval, browser: this.browser, account: this.account,
                 onAccount: () => { this.paths.pushPath({ name: 'account' }); },
-                onBrowser: () => this.setBrowserExpanded(true), onSettings: () => this.openSettings(),
+                onBrowser: () => { this.setBrowserExpanded(true); this.openDetailTab('browser'); },
+                onSettings: () => this.openSettings(),
                 topInset: CHAT_HEADER_HEIGHT,
                 onHeaderProgress: (progress: number): void => { this.headerProgress = progress; },
                 voiceRequest: this.voiceRequest, onVoiceShortcutConsumed: () => { this.voiceRequest = ''; },
-                activeThreadId: this.app.active.id, speechEnabled: this.chatVisible && !this.drawerOpen && !this.drawerDragging && !this.browserExpanded,
+                activeThreadId: this.app.active.id, speechEnabled: this.chatVisible && !this.drawerOpen && !this.drawerDragging && (!this.detailOpen() || this.workbench().docked),
                 onHistoryDragStart: (event: GestureEvent) => this.startDrawerDrag(event, true),
                 onHistoryDragUpdate: (event: GestureEvent) => this.updateDrawerDrag(event),
                 onHistoryDragEnd: (event: GestureEvent) => this.endDrawerDrag(event),
                 onHistoryDragCancel: () => this.cancelDrawerDrag(),
-                onFiles: () => this.openFiles(), onOpenFile: (path: string) => this.paths.pushPath({ name: 'files', param: path }),
+                onFiles: () => this.openFiles(), onOpenFile: (path: string) => this.openFiles(path),
+                previewInspectable: this.windowWidth >= 840, inspectedPreviewId: this.hasPreview() ? this.previewId : '',
+                onInspectPreview: (messageId: string, previewId: string) => this.openPreview(messageId, previewId),
                 onTools: (tab: string) => this.openTools(tab) })
-              .layoutWeight(1)
+              .width('100%').constraintSize({ maxWidth: 800 }).layoutWeight(1)
           } else {
             Column({ space: Space.lg }) {
               if (this.app.loading) {
@@ -763,30 +1134,114 @@ struct Index {
         WebUiPreflightHost()
       }.width('100%').height('100%')
     }
-    .backgroundColor($r('app.color.page_background'))
+    .backgroundColor(this.windowWidth >= 840 ? $r('app.color.surface') : $r('app.color.page_background'))
     // Native button materials only work inside the actual navigation title bar.
     .title({ builder: this.header, height: CHAT_HEADER_HEIGHT }, {
       barStyle: BarStyle.STACK, backgroundColor: Color.Transparent,
       backgroundEffect: { radius: 0, color: Color.Transparent }
     })
     .hideBackButton(true).titleMode(NavigationTitleMode.Mini).hideToolBar(true).mode(NavigationMode.Stack)
-    .onNavBarStateChange((visible: boolean) => { this.chatVisible = visible; })
-    .navDestination(this.destination).width('100%').height('100%')
+    .onNavBarStateChange((visible: boolean) => { this.chatVisible = visible; if (visible) { this.offerAnnouncement(); } })
+    .navDestination(this.destination).layoutWeight(1).height(this.windowWidth >= 840 ? 'calc(100% - 12vp)' : '100%')
+    .margin({ top: this.windowWidth >= 840 ? 6 : 0, bottom: this.windowWidth >= 840 ? 6 : 0,
+      right: this.windowWidth >= 840 && !this.workbench().docked ? 6 : 0 })
+    .borderRadius(this.windowWidth >= 840 ? Radius.xl : 0).clip(this.windowWidth >= 840)
+    Column().width(this.workbench().docked ? this.detailGeometry().detailWidth * this.detailReveal : 0).height('100%')
+    }.width('100%').height('100%')
     // Cover both the navigation title bar and content, keeping the measured drawer mounted.
     if (this.app.ready) {
       this.drawer()
     }
+    // Draggable seams sit above the drawer layer: the persistent column and the
+    // overlay drawer never coexist, so a grip here can never steal a list tap.
+    if (this.app.ready && this.workbench().expanded) {
+      PaneDivider({ label: t('调整会话栏宽度'),
+        onResizeStart: () => this.beginResize(false),
+        onResize: (dx: number) => this.resizeHistory(dx),
+        onResizeEnd: () => this.endResize(false) })
+        .width(12).height('calc(100% - 12vp)')
+        .position({ x: this.workbench().historyWidth - 4, y: 6 })
+    }
+    if (this.app.ready && this.workbench().docked && this.detailReveal >= 1 && !this.drawerOpen && !this.drawerDragging && this.drawerReveal <= 0) {
+      PaneDivider({ label: t('调整侧区宽度'),
+        onResizeStart: () => this.beginResize(true),
+        onResize: (dx: number) => this.resizeDetail(dx),
+        onResizeEnd: () => this.endResize(true) })
+        .width(12).height('calc(100% - 12vp)')
+        .position({ x: this.detailGeometry().detailX - 8, y: 6 })
+    }
     }.width('100%').height('100%')
       }, (locale: string) => locale)
-      BrowserPanel({ browser: this.browser, expanded: this.browserExpanded,
-        threadId: this.app.active.id, canAnnotate: this.app.canQueueInput && this.app.active.attachments.length < 4,
-        onAnnotation: (threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string) => this.addBrowserAnnotation(threadId, pixel, page, note),
-        onSettings: () => { this.setBrowserExpanded(false); this.openSettings(); },
-        onDismiss: () => this.setBrowserExpanded(false) })
+      // These hosts keep their position in the tree across all width breakpoints.
+      // Only their geometry changes; resizing never reinitializes the session or editor.
+      // One docked surface owns the strip and the panel bodies. The bodies keep
+      // their position in the tree across tab switches so editors, previews and
+      // the Web host keep their state; only the tab strip decides which is shown.
+      Stack({ alignContent: Alignment.TopStart }) {
+        Column() {
+          if (this.workbench().docked && this.detailOpen() && this.detailTabsAvailable().length > 0) {
+            DetailTabs({ tabs: this.detailTabItems(), active: this.currentDetailTab(),
+              onSelect: (id: string) => { this.activeDetailTab = id; },
+              onClose: (id: string) => this.closeDetailTab(id),
+              onAddFiles: () => this.addFilesTab(),
+              onAddBrowser: () => this.addBrowserTab(),
+              onCollapse: () => { this.setDetailPane(false); } })
+          }
+          Stack() {
+            AnimatedPage({ visible: this.detailTabVisible('files'), retained: this.workspaceOpen,
+              onPresenceChanged: (present: boolean) => { this.workspacePresent = present; } }) {
+              WorkspacePanel({ app: this.app, embedded: true, tabbed: this.workbench().docked,
+                initialPath: this.workspacePath, requestId: this.workspaceRequest,
+                closeRequest: this.workspaceCloseRequest, tabCloseRequest: this.workspaceTabCloseRequest,
+                onClose: () => this.workspaceClosed() })
+            }
+            AnimatedPage({ visible: this.detailTabVisible('preview') && this.hasPreview(),
+              retained: this.previewVisible && this.hasPreview(),
+              onPresenceChanged: (present: boolean) => this.previewPresenceChanged(present) }) {
+              PreviewPanel({ app: this.app, threadId: this.previewThreadId, messageId: this.previewMessageId,
+                previewId: this.previewId, tabbed: this.workbench().docked, onClose: () => this.closePreview() })
+            }
+            // The Web host stays mounted even when its tab is closed: the browser
+            // session opens against an attached view, and reopening a tab reuses it.
+            AnimatedPage({ visible: this.detailTabVisible('browser'), retained: true,
+              vertical: this.windowWidth < 840, onPresenceChanged: (present: boolean) => this.browserPresenceChanged(present) }) {
+              BrowserPanel({ browser: this.browser, expanded: this.detailTabVisible('browser'), presented: this.browserPresent,
+                tabbed: this.workbench().docked, threadId: this.app.active.id,
+                canAnnotate: this.app.canQueueInput && this.app.active.attachments.length < 4,
+                onAnnotation: (threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string) => this.addBrowserAnnotation(threadId, pixel, page, note),
+                onSettings: () => { this.hideBrowserTab(); this.openSettings(); },
+                onClose: () => this.closeBrowser(), onDismiss: () => this.hideBrowserTab() })
+            }
+            AnimatedPage({ visible: this.workbench().docked &&
+              ((this.detailPaneOpen && this.detailTabsAvailable().length === 0) ||
+                (this.detailClosing && this.detailClosingLauncher)) }) {
+              DetailLauncher({ onFiles: () => this.openFiles(), onBrowser: () => this.openBrowser(),
+                onClose: () => { this.setDetailPane(false, true); } })
+            }
+          }.width('100%').layoutWeight(1)
+        }.width(this.workbench().docked ? this.detailGeometry().detailWidth - 6 : '100%').height('100%')
+        .backgroundColor(this.detailOpen() ? $r('app.color.surface') : Color.Transparent)
+      }.width(this.workbench().docked ? Math.max(0, this.detailGeometry().detailWidth * this.detailReveal - 6) : '100%')
+        .height(this.windowWidth >= 840 ? 'calc(100% - 12vp)' : '100%')
+        .borderRadius(this.windowWidth >= 840 ? Radius.xl : 0).clip(true)
+        .position({ x: this.workbench().docked ? this.windowWidth - this.detailGeometry().detailWidth * this.detailReveal : 0,
+          y: this.windowWidth >= 840 ? 6 : 0 })
+        .hitTestBehavior(this.detailOpen() ? HitTestMode.Default : HitTestMode.None)
+        .enabled(this.detailOpen())
+        // A closed host keeps its retained bodies mounted but must not lay a
+        // full-window transparent layer over the page.
+        .visibility(this.detailOpen() ? Visibility.Visible : Visibility.Hidden)
+        .accessibilityLevel(this.detailOpen() ? 'auto' : 'no-hide-descendants')
+        .border({ width: { left: this.workbench().docked ? 0.5 : 0 }, color: $r('app.color.divider') })
       }
     }.width('100%').height('100%')
+    .backgroundColor($r('app.color.page_background'))
+    .onAreaChange((_old: Area, area: Area) => this.windowChanged(Number(area.width)))
     .bindSheet($$this.showToolScope, this.toolScopeSheet(), { title: { title: t('工具范围') },
       height: this.app.active.agentMode === 'custom' ? SheetSize.LARGE : SheetSize.FIT_CONTENT,
+      detents: this.app.active.agentMode === 'custom' ? [SheetSize.LARGE] : undefined,
+      preferType: this.windowWidth >= 840 ? SheetType.CENTER : SheetType.BOTTOM,
+      maskColor: '#33000000',
       dragBar: true, backgroundColor: $r('app.color.page_background'), systemMaterial: this.appearance.readingSurface })
   }
 }

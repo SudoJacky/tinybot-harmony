@@ -3,6 +3,7 @@ import { image } from '@kit.ImageKit';
 import { AnnotationPage } from '../model/BrowserAnnotation';
 import { ToolFailure } from '../model/ToolFailure';
 import { browserActionScript, browserSnapshotScript } from '../model/BrowserScripts';
+import { bingSearchScript, BingSearchPage } from '../model/BingSearch';
 import { BrowserAction, BrowserDriver, BrowserPage, BrowserSession } from './BrowserSession';
 
 interface BrowserTarget { x: number; y: number; }
@@ -123,6 +124,23 @@ export class NativeBrowserDriver implements BrowserDriver {
       throw new ToolFailure('INVALID_RESPONSE', 'ArkWeb script result is not an encoded string.', 'inspect_browser');
     }
     return value;
+  }
+  async readBingSearch(query: string, maximum: number): Promise<BingSearchPage> {
+    await this.ready();
+    const page = JSON.parse(await this.script(bingSearchScript(query, maximum))) as BingSearchPage;
+    if (!page || !['results', 'empty', 'verification', 'pending', 'unexpected_page', 'invalid_results'].includes(page.state) ||
+      !Array.isArray(page.sources) || page.sources.length > maximum || !Number.isInteger(page.candidates) || !Number.isInteger(page.invalid) ||
+      page.candidates < 0 || page.invalid < 0 || (page.state === 'results' && !page.sources.length) ||
+      (page.state === 'empty' && page.sources.length > 0)) {
+      throw new ToolFailure('INVALID_RESPONSE', 'Malformed Bing extraction result (extractor=1).', 'inspect_browser');
+    }
+    for (const source of page.sources) {
+      if (typeof source.url !== 'string' || !/^https?:\/\/[^\s/?#@\\]+(?:[/?#][^\s\\]*)?$/.test(source.url) ||
+        typeof source.title !== 'string' || !source.title || typeof source.snippet !== 'string') {
+        throw new ToolFailure('INVALID_RESPONSE', 'Malformed Bing source (extractor=1).', 'inspect_browser');
+      }
+    }
+    return page;
   }
   async act(action: BrowserAction): Promise<void> {
     this.browser.clearActionFeedback();

@@ -1,4 +1,5 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { systemMaterialAttribute } from '../common/MaterialAttributes';
 import { t } from '../model/I18n';
 import { reasoningEffortName } from '../model/ReasoningEffort';
 import { IconButton } from '../common/Widgets';
@@ -79,7 +80,7 @@ export struct ReasoningEffortPicker {
         .showSteps(true).stepSize(4).stepColor($r('app.color.text_tertiary'))
         .enabled(!this.disabled && !this.saving)
         .accessibilityText(t('推理强度') + '：' + reasoningEffortName(this.efforts[this.previewIndex]))
-        .systemMaterial(this.appearance.control)
+        .attributeModifier(systemMaterialAttribute<SliderAttribute>(this.appearance.control))
         .onChange((value: number, mode: SliderChangeMode) => {
           if (this.disabled || this.saving) return;
           this.dragging = mode === SliderChangeMode.Begin || mode === SliderChangeMode.Moving;

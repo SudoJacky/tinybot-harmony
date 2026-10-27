@@ -4,21 +4,25 @@ import { t } from './I18n';
 export const DEEPSEEK_SEARCH_BASE_URL: string = 'https://api.deepseek.com/v1';
 export const DEEPSEEK_SEARCH_ENDPOINT: string = DEEPSEEK_SEARCH_BASE_URL + '/tools/search';
 export const SEARCH_REQUEST_MODEL: string = 'search';
-export type SearchProviderId = 'deepseek' | 'tavily';
+export type SearchProviderId = 'deepseek' | 'tavily' | 'bing-browser';
 export interface SearchConfig { provider: SearchProviderId; enabled: boolean; baseUrl?: string; credentialAlias?: string; modelProviderId?: string; }
 export interface SearchDraft { provider: SearchProviderId; enabled: boolean; baseUrl: string; apiKey: string; modelProviderId?: string; }
 export interface SearchSource { url: string; title: string; snippet: string; publishedAt?: string; }
 export interface SearchResult { sources: SearchSource[]; }
 
 export function defaultSearchConfig(provider: SearchProviderId = 'deepseek'): SearchConfig {
-  return provider === 'deepseek' ? { provider: provider, enabled: false } :
+  return provider !== 'tavily' ? { provider: provider, enabled: false } :
     { provider: provider, enabled: false, baseUrl: 'https://api.tavily.com', credentialAlias: '' };
 }
 export function validateSearchConfig(config: SearchConfig): void {
-  if (!config || !['deepseek', 'tavily'].includes(config.provider) || typeof config.enabled !== 'boolean') {
+  if (!config || !['deepseek', 'tavily', 'bing-browser'].includes(config.provider) || typeof config.enabled !== 'boolean') {
     throw new Error('Invalid search settings.');
   }
-  if (config.provider === 'deepseek') {
+  if (config.provider === 'bing-browser') {
+    if (config.baseUrl !== undefined || config.credentialAlias !== undefined || config.modelProviderId !== undefined) {
+      throw new Error('Built-in Bing search does not use API credentials or a custom endpoint.');
+    }
+  } else if (config.provider === 'deepseek') {
     if (config.baseUrl !== undefined || config.credentialAlias !== undefined ||
       (config.enabled && !config.modelProviderId) || (config.modelProviderId !== undefined &&
       (typeof config.modelProviderId !== 'string' || !config.modelProviderId || config.modelProviderId.length > 64))) {
@@ -50,5 +54,6 @@ export function deepSeekSearchProfile(profiles: ProviderProfile[], selectedId?: 
 }
 // Resolve the live alias at dispatch, so rotation/removal cannot leave a stale copied key.
 export function searchCredentialAlias(config: SearchConfig, profiles: ProviderProfile[]): string {
+  if (config.provider === 'bing-browser') { throw new Error('Built-in Bing search does not use API credentials.'); }
   return config.provider === 'deepseek' ? deepSeekSearchProfile(profiles, config.modelProviderId).credentialAlias : config.credentialAlias!;
 }

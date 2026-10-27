@@ -32,6 +32,15 @@ class Sidebar { ${cls('ThreadList').members.filter(n => methods.includes(n.name?
 exports.Sidebar = Sidebar;`, { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, globals);
 const { Fixture, seed } = load(path.join(root, 'entry/src/test/SessionService.test'));
 const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/ChatViewModel'));
+const indexSource = path.join(root, 'entry/src/main/ets/pages/Index.ets');
+const indexEmitted = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/pages/Index.ts');
+assert.ok(fs.statSync(indexEmitted).mtimeMs >= fs.statSync(indexSource).mtimeMs, 'Build Index before testing');
+const indexTree = ts.createSourceFile(indexEmitted, fs.readFileSync(indexEmitted, 'utf8'), ts.ScriptTarget.Latest, true);
+const indexClass = indexTree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'Index');
+const createChat = indexClass.members.find(n => n.name?.getText(indexTree) === 'createChat').getText(indexTree);
+vm.runInNewContext(ts.transpileModule(`class Header { ${createChat} } exports.Header = Header;`, {
+  compilerOptions: { target: ts.ScriptTarget.ES2021 }
+}).outputText, globals);
 (async () => {
   const data = seed();
   data.projects = ['alpha', 'beta', 'empty'].map(id => ({ id, name: 'Same name', instructions: '', workspaceId: 'project-' + id, createdAt: 1, updatedAt: 1 }));
@@ -80,4 +89,33 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
   assert.equal(await app.saveProject('Beta', '', 'beta', []), true);
   assert.equal(revoked.length, 1, 'The final project removal revokes the unused system grant');
   console.log('PASS project tree: membership, ordinary chats, duplicate names, empty projects, pin order, search, archive, collapse, independent pagination and new-chat destinations');
+
+  const empty = seed(); empty.threads[0].title = '新对话';
+  const headerFixture = new Fixture(empty), headerApp = new ChatViewModel(); await headerApp.initialize(headerFixture.session);
+  const toasts = [];
+  const header = Object.assign(new globals.exports.Header(), { app: headerApp, appearance: { surface: {} },
+    getUIContext: () => ({ getPromptAction: () => ({ showToast: value => toasts.push(value.message) }) }) });
+  const initialWrites = headerFixture.repository.writes.length;
+  await header.createChat(); await header.createChat();
+  assert.deepEqual(toasts, ['已在新对话中', '已在新对话中']);
+  assert.equal(headerApp.active.id, 'thread-1'); assert.equal(headerApp.threads.length, 1);
+  assert.equal(headerFixture.repository.writes.length, initialWrites, 'An untouched chat requires no extra persistence');
+  headerApp.setDraft('Keep this unsent draft'); await header.createChat();
+  assert.notEqual(headerApp.active.id, 'thread-1'); assert.equal(headerApp.threads.length, 2);
+  assert.equal(toasts.length, 2, 'Creating a new chat never claims the previous chat was empty');
+  assert.equal(JSON.parse(headerFixture.repository.saved).threads.find(item => item.id === 'thread-1').draft, 'Keep this unsent draft');
+  await header.createChat(); assert.equal(toasts.length, 3); assert.equal(headerApp.threads.length, 2);
+  const oldHeaderApp = header.app;
+  header.app = app; // Reuse the real project/session fixture from above.
+  await app.newThread('alpha'); const emptyProjectId = app.active.id;
+  await header.createChat(); assert.equal(app.active.id, emptyProjectId); assert.equal(toasts.length, 4);
+  app.setDraft('Project draft'); await header.createChat();
+  assert.notEqual(app.active.id, emptyProjectId); assert.equal(app.active.projectId, 'alpha'); assert.equal(toasts.length, 4);
+  header.app = oldHeaderApp;
+  headerApp.setDraft('Must survive a save failure');
+  headerFixture.repository.beforeSave = async () => { throw Error('Disk unavailable'); };
+  await header.createChat(); assert.equal(toasts.length, 4, 'A failed creation cannot show an already-new toast');
+  assert.ok(headerApp.saveError); await header.createChat(); assert.equal(toasts.length, 4);
+  assert.equal(headerFixture.provider.requests.length, 0);
+  console.log('PASS actual header with real sessions: untouched toast, repeated taps, draft persistence, project membership and save failure');
 })().catch(error => { console.error(error); process.exitCode = 1; });

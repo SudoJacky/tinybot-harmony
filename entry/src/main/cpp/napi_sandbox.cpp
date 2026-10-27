@@ -1,5 +1,6 @@
 #include "napi/native_api.h"
 #include "sandbox.h"
+#include "native_job_result.h"
 #include <memory>
 #include <mutex>
 #include <limits>
@@ -11,7 +12,7 @@ struct Job {
     std::string source;
     std::string input;
     tinybot::Budget budget;
-    std::string output;
+    tinybot::NativeJobResult result;
     napi_async_work work = nullptr;
     napi_deferred deferred = nullptr;
 };
@@ -36,21 +37,24 @@ void Release(Job *job)
 void Execute(napi_env, void *data)
 {
     auto *job = static_cast<Job *>(data);
-    try { job->output = tinybot::ExecuteCode(job->source, job->input, job->budget).ToJson(); }
-    catch (...) { job->output.clear(); }
+    job->result.Execute([&]() { return tinybot::ExecuteCode(job->source, job->input, job->budget).ToJson(); });
 }
 void Complete(napi_env env, napi_status status, void *data)
 {
     std::unique_ptr<Job> job(static_cast<Job *>(data));
     Release(job.get()); // Runtime destruction finishes before another execution is admitted.
     napi_value result = nullptr;
-    if (status == napi_ok && !job->output.empty() &&
-        napi_create_string_utf8(env, job->output.c_str(), job->output.size(), &result) == napi_ok) {
+    if (status == napi_ok && job->result.error.empty() && !job->result.output.empty()) {
+        status = napi_create_string_utf8(env, job->result.output.c_str(), job->result.output.size(), &result);
+    }
+    if (status == napi_ok && result != nullptr) {
         napi_resolve_deferred(env, job->deferred, result);
     } else {
-        napi_value message = nullptr;
-        napi_create_string_utf8(env, "Native sandbox execution failed", NAPI_AUTO_LENGTH, &message);
-        napi_create_error(env, nullptr, message, &result);
+        napi_value message = nullptr, code = nullptr;
+        const std::string detail = job->result.FailureMessage("Native sandbox execution", job->id, status);
+        napi_create_string_utf8(env, detail.c_str(), detail.size(), &message);
+        napi_create_string_utf8(env, job->result.FailureCode(status), NAPI_AUTO_LENGTH, &code);
+        napi_create_error(env, code, message, &result);
         napi_reject_deferred(env, job->deferred, result);
     }
     napi_delete_async_work(env, job->work);

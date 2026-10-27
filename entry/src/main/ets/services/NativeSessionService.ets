@@ -5,6 +5,7 @@ import { PreviewCapture } from './PreviewCapture';
 import { savePreviewRepair } from './PreviewRecovery';
 import { WebSearchTools } from './WebSearchTools';
 import { NativeSearchTransport } from './NativeSearchTransport';
+import { BrowserSearchTransport } from './BrowserSearchTransport';
 import { ProductivityData, Attachment, McpServer } from '../model/Productivity';
 import { LiveResources, McpRequest } from '../model/ResourceManagement';
 import { SkillData } from '../model/Skills';
@@ -104,7 +105,11 @@ export class NativeSessionResources implements SessionResources {
     if (this.browser) { groups.push(new BrowserTools(this.browser, id, productivity?.options?.readOnly === true)); }
     const search = productivity?.options?.search;
     if (extensions.webEnabled && search?.enabled) {
-      groups.push(new WebSearchTools(new NativeSearchTransport(search, new CredentialStore(), id, (record) => UsageLedger.record(record), () => this.profiles)));
+      if (search.provider === 'bing-browser') {
+        if (this.browser?.policy !== 'disabled') { groups.push(new WebSearchTools(new BrowserSearchTransport(this.browser, id), 'sequential')); }
+      } else {
+        groups.push(new WebSearchTools(new NativeSearchTransport(search, new CredentialStore(), id, (record) => UsageLedger.record(record), () => this.profiles)));
+      }
     }
     if (productivity) { groups.push(new McpTools(productivity.servers, this.approval, (server) => new McpClient(server), live ? () => live.servers() : undefined)); }
     return new RuleTools(new ToolSet(groups), productivity?.options?.readOnly === true);

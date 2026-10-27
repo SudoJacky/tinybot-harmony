@@ -74,8 +74,10 @@ events.change('https://example.com/edited'); events.blur(); compiled.navigate.ca
 assert.equal(navigated, 'https://example.com/edited', 'The Go button must use the draft even after blur');
 events.loaded({ url: navigated }); assert.equal(panel.addressDirty, false); assert.equal(events.display(), navigated);
 let backwards = 0, collapsed = 0, cleared = 0;
-const view = { browserExpanded: true, browser: { editingAddress: false, owner: 'agent', userBack() { backwards++; return true; } },
-  setBrowserExpanded() { collapsed++; }, getUIContext() { return { getFocusController() { return { clearFocus() { cleared++; } }; } }; } };
+const view = { browserExpanded: true, detailPaneOpen: true, currentDetailTab: () => 'browser',
+  browser: { editingAddress: false, owner: 'agent', userBack() { backwards++; return true; } },
+  hideBrowserTab() { collapsed++; this.browserExpanded = false; },
+  getUIContext() { return { getFocusController() { return { clearFocus() { cleared++; } }; } }; } };
 assert.equal(compiled.back.call(view), true); assert.equal(backwards, 0); assert.equal(collapsed, 1);
 view.browser.owner = 'user'; compiled.back.call(view);
 assert.equal(backwards, 1); assert.equal(collapsed, 1, 'User history is navigated before collapsing');
@@ -99,6 +101,8 @@ function page(policy) {
     report(message) { events.push(['report', message]); },
     async setEnabled() { events.push('save'); this.policy = 'enabled'; } };
   view.setBrowserExpanded = value => events.push(['expanded', value]);
+  // Permission behavior is under test here; the tab side effect has its own suite.
+  view.openDetailTab = () => {};
   view.getUIContext = () => ({ showAlertDialog(dialog) { view.dialog = dialog; },
     getPromptAction: () => ({ showToast: value => events.push(['toast', value.message]) }) });
   return { view, events };

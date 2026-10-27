@@ -1,23 +1,36 @@
 import { privacyManager } from '@kit.AppGalleryKit';
 import { common } from '@kit.AbilityKit';
-import { BusinessError, commonEventManager } from '@kit.BasicServicesKit';
+import { BusinessError, commonEventManager, deviceInfo } from '@kit.BasicServicesKit';
+import { DEBUG, BUILD_MODE_NAME } from 'BuildProfile';
 import { t } from '../model/I18n';
 
-// AppGallery owns the policy, its version and consent. Never persist a second local consent flag.
+// AppGallery owns production consent. Emulator debug consent is explicit and memory-only.
 @Observed
 export class HostedPrivacy {
   allowed: boolean = false;
   busy: boolean = false;
   error: string = '';
+  private debugConsent: boolean = false;
   private context?: common.UIAbilityContext;
   private closing: boolean = false;
   private subscriber?: commonEventManager.CommonEventSubscriber;
   private onChange: (allowed: boolean) => void = () => {};
 
+  get simulatorDebug(): boolean {
+    return DEBUG && (BUILD_MODE_NAME as string) === 'debug' && deviceInfo.productModel === 'emulator';
+  }
+
+  acceptDebugConsent(): void {
+    if (!this.simulatorDebug || !this.context || this.closing) { return; }
+    this.debugConsent = true;
+    this.refresh();
+  }
+
   async initialize(context: common.UIAbilityContext, onChange: (allowed: boolean) => void): Promise<void> {
     this.context = context; this.onChange = onChange;
-    this.closing = false; this.busy = false; this.error = '';
+    this.closing = false; this.busy = false; this.error = ''; this.debugConsent = false;
     this.publish(false);
+    if (this.simulatorDebug) { return; }
     try {
       const subscriber = await commonEventManager.createSubscriber({ events: ['usual.event.PRIVACY_STATE_CHANGED'] });
       if (this.context !== context) { return; }
@@ -34,6 +47,11 @@ export class HostedPrivacy {
 
   refresh(): void {
     if (!this.context) { return; }
+    if (this.simulatorDebug) {
+      this.error = '';
+      this.publish(this.debugConsent);
+      return;
+    }
     try {
       const link = this.policy();
       const records = privacyManager.getAppPrivacyResult();
@@ -46,11 +64,15 @@ export class HostedPrivacy {
 
   requireConsent(): void {
     this.refresh();
-    if (!this.allowed) { throw new Error(this.error || t('请先在系统弹窗中同意隐私政策。')); }
+    if (!this.allowed) {
+      throw new Error(this.error || (this.simulatorDebug ? t('请先确认模拟器调试隐私说明。') : t('请先在系统弹窗中同意隐私政策。')));
+    }
   }
 
   async requestConsent(): Promise<void> {
     if (!this.context || this.busy || this.closing) { return; }
+    // Retrying a system request must never implicitly accept local debug consent.
+    if (this.simulatorDebug) { return; }
     this.refresh();
     if (this.allowed) { return; }
     const context = this.context;
@@ -79,11 +101,24 @@ export class HostedPrivacy {
   }
 
   async openPolicy(context: common.UIAbilityContext): Promise<void> {
+    if (this.simulatorDebug) {
+      const url = context.currentHapModuleInfo.metadata?.find((item) =>
+        item.name === 'appgallery_privacy_link_privacy_statement')?.value;
+      if (!url || !/^https:\/\/[^/\s]+/i.test(url)) { throw new Error(t('隐私托管尚未就绪，请稍后重试。')); }
+      await context.startAbility({ action: 'ohos.want.action.viewData', uri: url });
+      return;
+    }
     const link = this.policy();
     await context.startAbility({ action: 'ohos.want.action.viewData', uri: link.url });
   }
 
   revokeConsent(): void {
+    if (this.simulatorDebug) {
+      this.debugConsent = false;
+      this.refresh();
+      this.exit();
+      return;
+    }
     try { privacyManager.disableService(); }
     catch (error) {
       const failure = error as BusinessError;
@@ -119,6 +154,7 @@ export class HostedPrivacy {
   }
 
   dispose(): void {
+    this.debugConsent = false;
     this.context = undefined; this.onChange = () => {};
     if (this.subscriber) { commonEventManager.unsubscribe(this.subscriber); this.subscriber = undefined; }
     this.publish(false);

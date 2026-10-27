@@ -6,14 +6,18 @@
 
 ```text
 entry/src/main/ets/
-  pages/        页面入口与原生导航
-  views/        页面内的 ArkUI 组件
-  viewmodel/    ArkUI 状态投影与编辑器状态
-  services/     会话、运行内核、工具与平台适配
-  model/        数据结构、校验、纯逻辑与本地存储
-  common/       设计令牌、通用控件与动效
-entry/src/test/ Hypium 本地测试（不依赖真机与真实密钥）
-scripts/        构建辅助、自动化测试与冒烟服务
+  pages/               页面入口与原生导航
+  views/               页面内的 ArkUI 组件
+  viewmodel/           ArkUI 状态投影与编辑器状态
+  services/            会话、运行内核、工具与平台适配
+  model/               数据结构、校验、纯逻辑与本地存储
+  common/              设计令牌、通用控件与动效
+  entryability/        UIAbility 生命周期与首屏装载
+  entrybackupability/  系统备份扩展（华为云空间）
+  entryformability/    桌面服务卡片扩展
+  widget/              卡片页面（2×2、2×4）
+entry/src/test/        Hypium 本地测试（不依赖真机与真实密钥）
+scripts/               构建辅助、自动化测试与冒烟服务
 ```
 
 ## 目录职责
@@ -26,6 +30,8 @@ scripts/        构建辅助、自动化测试与冒烟服务
 | `services/` | 会话服务、运行内核、工具目录、协议适配、备份与诊断 | 依赖通过构造函数注入，平台实现放在 `Native*` 适配器 |
 | `model/` | 数据结构、校验、上下文投影、用量与持久化 | 不依赖 ArkUI；文件系统只在 `ConversationStore`、`WorkspaceStore` 等存储模块使用 |
 | `common/` | 主题令牌、通用控件、动效与品牌资源 | 只用 ArkUI 组件与资源，不读取会话 |
+| `entryability/`、`entrybackupability/`、`entryformability/` | 三个扩展入口：应用生命周期与首屏装载、系统备份、桌面服务卡片 | 只做平台适配，业务交给 `services/` |
+| `widget/` | 卡片页面：2×2 与 2×4 两种尺寸的展示与快捷入口 | 不联网、不定时刷新，跟随系统语言与主题 |
 
 ## pages
 
@@ -48,6 +54,7 @@ scripts/        构建辅助、自动化测试与冒烟服务
 | `views/ProviderEditorPanel.ets` | 模型服务编辑页：预设、协议、地址、密钥、模型列表 |
 | `views/WorkspacePanel.ets` | 工作区文件浏览、编辑、导入与导出 |
 | `views/UsagePanel.ets` | 用量总览、会话、活动与请求明细 |
+| `views/StoragePanel.ets` | 存储总览、分类明细与安全清理 |
 | `views/BrowserPanel.ets` | 应用内浏览器宿主，保持 Web 实例常驻 |
 | `views/PreviewCaptureHost.ets` | 预览截图宿主：按聊天宽度整卡渲染并截图 |
 
@@ -71,6 +78,7 @@ scripts/        构建辅助、自动化测试与冒烟服务
 | 文件 | 说明 |
 | --- | --- |
 | `services/SessionService.ets` | 会话数据唯一所有者：命令准入、队列、检查点、压缩、设置提交 |
+| `services/SessionCandidates.ets` | 导入、项目设置与会话分支的候选数据变换；不做 IO 或提交 |
 | `services/SessionContracts.ets` | `SessionRepository`、`SessionResources`、`SessionState`、`SessionEvent` 等契约 |
 | `services/NativeSessionService.ets` | 原生组合根：文件仓库、工作区、凭据、ProviderRegistry、工具资源 |
 | `services/AgentRuntime.ets` | 单次运行生命周期、事件订阅、`abort`、`waitForIdle`、`fork` |
@@ -83,17 +91,19 @@ scripts/        构建辅助、自动化测试与冒烟服务
 | `services/Cancellation.ets` | 单次运行共享的取消信号 |
 | `services/ToolSet.ets` | 工具目录与执行路由，未启用的工具不能执行 |
 | `services/ToolExecution.ets` | 工具批次的顺序/并发调度与前后检查点 |
-| `services/ToolDiscovery.ets` | 按需工具目录与 `tool_search` 展开 |
+| `services/ToolCatalog.ets` | 完整授权工具目录的稳定排序与旧搜索入口拒绝 |
 | `services/WorkspaceTools.ets` / `NativeWorkspaceFiles.ets` | 工作区工具定义与沙箱文件读写 |
 | `services/providers/ProviderRegistry.ets` | 显式注册、配置绑定、每次请求前的凭据解析 |
 | `services/providers/ProtocolProvider.ets` | NetworkKit 请求、取消、UTF-8 增量解码与空闲超时 |
-| `services/providers/WireProtocols.ets` | 三种协议的请求体、请求头与端点拼接 |
+| `services/providers/WireProtocols.ets` | Chat Completions、Responses、Anthropic 的请求体、请求头与端点拼接 |
 | `services/providers/ChatCompletionsProtocol.ets` | Chat Completions 的消息转换与地址校验 |
 | `services/providers/EventStreams.ets` | Responses 与 Anthropic 流式解析 |
+| `services/providers/GeminiProtocol.ets` / `GeminiStream.ets` | Gemini 请求编码与流式解析 |
 | `services/providers/ProviderErrors.ets` | 临时错误、上下文溢出与 HTTP 错误分类 |
 | `services/CredentialStore.ets` / `ProfileSettings.ets` | 系统安全存储、服务配置提交与密钥生命周期 |
 | `services/HuaweiAccount.ets` | 华为账号登录、状态校验与 `requireLogin()` |
 | `services/Backup.ets` / `CloudBackup.ets` | 本机导出与华为云备份 |
+| `services/StorageUsage.ets` | Ability/Application 双私有目录扫描、分类计数、孤儿附件与残留工作区识别、读取失败标记、部分删除按实际字节统计 |
 | `model/Diagnostics.ets` / `services/NativeDiagnosticLog.ets` | 埋点聚合、脱敏白名单与唯一 HiLog 输出适配器 |
 | `services/WebTools.ets`、`McpTools.ets`、`SkillTools.ets`、`PresentTools.ets` 等 | 各组工具的实现，统一注册进 `ToolSet` |
 
@@ -115,6 +125,7 @@ scripts/        构建辅助、自动化测试与冒烟服务
 | `model/WorkspaceStore.ets` | 应用级工作区根目录与目录校验 |
 | `model/Diagnostics.ets` / `DiagnosticLog.ets` | 事件、计时与字段白名单 |
 | `model/Usage*.ets` | 用量记录、统计、查询与归属 |
+| `model/StoragePlan.ets` | 存储分类、孤儿判定、缓存/临时文件过期规则与报表结构 |
 
 ## common
 
@@ -153,7 +164,7 @@ scripts/        构建辅助、自动化测试与冒烟服务
 | 类别 | 代表文件 | 用途 |
 | --- | --- | --- |
 | 测试入口 | `test.ps1` | 依次运行词条校验、批量 `.cjs` 测试与 Hypium 用例；可用 `DEVECO_STUDIO_HOME` 指定 SDK |
-| 构建后校验 | `test-usage-performance.cjs`、`test-tool-schemas.cjs`、`test-tool-discovery.cjs`、`test-markdown-performance.cjs` | 针对实际编译产物验证协议、性能与渲染回调 |
+| 构建后校验 | `test-usage-performance.cjs`、`test-tool-schemas.cjs`、`test-tool-catalog.cjs`、`test-markdown-performance.cjs` | 针对实际编译产物验证协议、性能与渲染回调 |
 | 模拟服务 | `request-context-smoke-server.cjs`、`team-smoke-server.cjs`、`interactive-ui-smoke-server.cjs`、`web-ui-preflight-smoke-server.cjs` | 本地起服务，验证流式协议、团队与预览路径 |
 | 资源生成 | `build-locales.cjs`、`build-builtin-skills.cjs`、`build-app-icons.cjs`、`build-web-ui-vendor.cjs` | 由源文件生成词条、内置 Skill、图标与 Web 运行库 |
 | 发布 | `prepare-distribution.ps1`、`check-release-package.ps1` | 整理分发目录与检查发布包 |

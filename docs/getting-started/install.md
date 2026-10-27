@@ -6,20 +6,28 @@
 
 | 项目 | 要求 | 依据 |
 | --- | --- | --- |
-| 设备形态 | 手机（`phone`），不声明平板或 PC | `entry/src/main/module.json5` 的 `deviceTypes` |
-| 最低系统 | HarmonyOS API 26，`compatibleSdkVersion` 为 `26.0.0` | `build-profile.json5` |
-| 目标系统 | `targetSdkVersion` 为 `26.0.0` | `build-profile.json5` |
+| 设备形态 | 手机与平板（`phone`、`tablet`），不声明 PC | `entry/src/main/module.json5` 的 `deviceTypes` |
+| 最低系统 | HarmonyOS 6.0.0（API 20），`compatibleSdkVersion` 为 `6.0.0(20)` | `build-profile.template.json5` |
+| 目标系统 | `targetSdkVersion` 为 `26.0.0` | `build-profile.template.json5` |
 | 发布包架构 | 仅 `arm64-v8a` | `docs/distribution/START-HERE.txt` |
 | 模拟器 | 使用单独构建的调试包（含 `x86_64`），不随正式包分发 | `docs/distribution/START-HERE.txt` |
 
-当前版本为 1.0.3 / 1000003，包名 `com.sudojacky.tinybot`。应用不内置模型额度，也不在手机内运行大模型；模型能力、费用与可用性由你配置的模型服务（Provider）决定。
+当前版本为 1.1.0 / 1001000，包名 `com.sudojacky.tinybot`。应用不内置模型额度，也不在手机内运行大模型；模型能力、费用与可用性由你配置的模型服务（Provider）决定。
+
+### HarmonyOS 6 上的能力差异
+
+同一个安装包可以在 HarmonyOS 6（API 20）与 HarmonyOS 7（API 26）上运行，系统没有的能力会在使用时给出明确提示：
+
+- **沉浸光感材质**：HarmonyOS 6 没有该系统模块，界面使用普通配色。外观设置中的“光感效果”显示“此系统不支持”，并保留你之前保存的偏好，换到支持的设备后继续生效。
+- **PDF 文字提取**：HarmonyOS 6 未提供 PDFKit 模块，导入 PDF 会在读取前提示“此系统的 PDF 组件未提供文字提取”，不会保存空白文本。可把 PDF 页面截图作为图片附件发送，或改用 Office、文本文件。
+- **网络重定向**：携带凭据的请求（模型服务、搜索、MCP、OAuth、反馈、公告）在 API 20 上同样不跟随重定向，网页读取仍逐跳校验并最多五跳。
 
 ## 安装包从哪里来
 
 | 来源 | 产物 | 前置条件 |
 | --- | --- | --- |
 | 华为应用市场 | 已签名的发布包 | 应用已上架且对该设备可见；上架状态、年龄分级与发布地区以市场页面为准 |
-| 交付目录 | `packages/Tinybot-1.0.3-1000003-release-UNSIGNED.app` 与同名 `.hap` | 需完成正式签名后才能安装或提交审核 |
+| 交付目录 | `packages/Tinybot-<版本>-<versionCode>-release-UNSIGNED.app`（当前为 `Tinybot-1.1.0-1001000-release-UNSIGNED.app`） 与同名 `.hap` | 需完成正式签名后才能安装或提交审核 |
 | 本地构建 | `entry/build/default/outputs/default/entry-default-unsigned.hap` | 需要 DevEco Studio API 26 SDK 与 DevEco CLI，见[环境、构建与签名](/dev/setup) |
 
 交付目录由准备脚本生成：
@@ -76,12 +84,13 @@ Tiny 从登录页开始休息，叫醒后会在本次引导中保持清醒，返
 
 ## 网络与权限
 
-应用只声明两项权限：
+应用声明三项权限：
 
 | 权限 | 用途 | 申请方式 |
 | --- | --- | --- |
 | `ohos.permission.INTERNET` | 访问你配置的模型服务、网页读取、搜索、MCP 与云备份 | 安装时授予，无运行时弹窗 |
 | `ohos.permission.MICROPHONE` | 语音输入，使用系统语音识别服务（支持中文离线识别） | 首次开始录音时由系统弹窗询问，场景为使用时（`inuse`） |
+| `ohos.permission.FILE_ACCESS_PERSIST` | 项目共享文件夹：在项目内保留你通过系统选择器授予的目录读写授权 | 系统授权，跟随你选择的目录长期有效，可随项目解除挂载而撤销 |
 
 其余外部文件访问都通过系统选择器返回的 URI 完成，不申请图库或整个外部文件夹权限：
 

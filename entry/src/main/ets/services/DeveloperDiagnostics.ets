@@ -9,7 +9,7 @@ import { hidebug, hiAppEvent } from '@kit.PerformanceAnalysisKit';
 import { Diagnostics, PerfEvent, PerfSnapshot } from '../model/Diagnostics';
 import { collectPerformanceResources, ResourceProbe } from './PerformanceProbe';
 import { readAppInformation, AppInformation } from './AppInformation';
-import { configureNativeDiagnosticLog } from './NativeDiagnosticLog';
+import { clearRecentDiagnosticLogs, configureNativeDiagnosticLog } from './NativeDiagnosticLog';
 
 interface HeapProbe { usedKiB: number; totalKiB: number; arraysKiB: number; }
 interface TraceEntry { name: string; cat: string; ph: string; ts: number; dur?: number; pid: number; tid: number; args: Record<string, Object>; s?: string; }
@@ -290,5 +290,6 @@ export class DeveloperDiagnostics {
       }
     }
     Diagnostics.clear();
+    clearRecentDiagnosticLogs();
   }
 }

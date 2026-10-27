@@ -9,6 +9,7 @@ class Property { constructor(value) { this.value = value; } get() { return this.
 const context = { cacheDir: '/cache' }, cached = new Map(), exportsSeen = [], removed = [], dialogs = [];
 class ViewPU {
   finalizeConstruction() {}
+  declareWatch() {}
   createStorageProp() { return new Property({}); }
   getUIContext() { return { getHostContext: () => context, getPromptAction: () => ({ showToast() {} }), showAlertDialog: d => dialogs.push(d) }; }
 }

@@ -38,8 +38,8 @@ const tool = first.disclosures.get('tool-read-1');
 first.processOpen = true;
 first.usageOpen = true;
 thought.open = true; thought.limit = 8000;
-tool.open = true; tool.limit = 12000; tool.rawOpen = true; tool.rawLimit = 6000;
-tool.detailTab = 'logs'; tool.detailPage = 2;
+tool.open = true; tool.limit = 12000;
+tool.detailTab = 'raw'; tool.detailPage = 2;
 const child = tool.children.get('child'); child.open = true; child.detailPage = 1;
 
 // New streaming snapshots and later steps must not erase existing reading state.
@@ -51,9 +51,7 @@ assert.equal(thread.messages[0], first);
 assert.equal(buildTimeline(first.stepViews)[0].key, groupKey);
 assert.equal(first.disclosures.get('tool-read-1'), tool);
 assert.equal(tool.limit, 12000);
-assert.equal(tool.rawOpen, true);
-assert.equal(tool.rawLimit, 6000);
-assert.equal(tool.detailTab, 'logs'); assert.equal(tool.detailPage, 2);
+assert.equal(tool.detailTab, 'raw'); assert.equal(tool.detailPage, 2);
 assert.equal(tool.children.get('child'), child); assert.equal(child.open, true); assert.equal(child.detailPage, 1);
 assert.equal(first.disclosures.get('thinking-0').limit, 8000);
 assert.equal(first.disclosures.get('thinking-0').open, true);
@@ -81,7 +79,8 @@ assert.equal(reloaded.messages[0].processOpen, false);
 assert.equal(reloaded.messages[0].usageOpen, false);
 assert.equal(reloaded.messages[0].disclosures.get('thinking-0').limit, 0);
 assert.equal(reloaded.messages[0].disclosures.get('thinking-0').open, false);
-assert.equal(reloaded.messages[0].disclosures.get('tool-read-1').rawLimit, 2000);
+assert.equal(reloaded.messages[0].disclosures.get('tool-read-1').detailTab, 'result');
+assert.equal(reloaded.messages[0].disclosures.get('tool-read-1').detailPage, 0);
 assert.equal(Object.hasOwn(data.messages[0], 'disclosures'), false);
 console.log('PASS message isolation and compact history defaults without persisted UI state');
 

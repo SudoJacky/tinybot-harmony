@@ -123,3 +123,58 @@ assert.deepEqual(initialized, ['LanguagePreferences', 'AppearancePreferences', '
 privacyChanged(true);
 assert.equal(initialized.filter(item => item === 'web').length, 1);
 console.log('PASS obfuscated release initializes global Pen Kit context and preferences, defers business until consent, and starts Web only once');
+
+// Follow the emitted dynamic import across the real release module/export boundary.
+// The platform WrappedBuilder is intercepted after module evaluation, without loading Pen Kit on the host.
+(async () => {
+  const releaseFile = name => {
+    const source = 'entry/src/main/ets/views/' + name + '.ets';
+    const file = path.join(emitted, names[source].obfName.replace(/\.ets$/, '.ts'));
+    assert.ok(fs.statSync(file).mtimeMs >= fs.statSync(path.join(root, source)).mtimeMs, 'Rebuild release: ' + name);
+    return file;
+  };
+  const boardExports = {}, renders = [];
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(releaseFile('DrawingBoard'), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }
+  }).outputText, { exports: boardExports, ViewPU: class {},
+    wrapBuilder: builder => { assert.equal(typeof builder, 'function'); return { builder: options => renders.push(options) }; },
+    require: () => ({})
+  });
+  const chatFile = releaseFile('ChatPanel');
+  const tree = ts.createSourceFile(chatFile, fs.readFileSync(chatFile, 'utf8'), ts.ScriptTarget.Latest, true);
+  const component = tree.statements.find(node => ts.isClassDeclaration(node) && node.members.some(member => member.name?.getText(tree) === 'openDrawing'));
+  const methods = ['openDrawing', 'drawingSheet'].map(name => {
+    const member = component.members.find(node => node.name?.getText(tree) === name);
+    assert.ok(member, 'Missing release method: ' + name); return member.getText(tree);
+  }).join('\n');
+  const DrawingDraft = release('model/DrawingDraft', 'DrawingDraft');
+  let loads = 0;
+  const scope = { exports: {}, deviceInfo: { productModel: 'phone' }, canIUse: () => true,
+    [names.PropertyCache.DrawingDraft]: DrawingDraft, [names.PropertyCache.t]: value => value,
+    makeBuilderParameterProxy: (_name, parameters) => Object.fromEntries(Object.entries(parameters).map(([key, read]) => [key, read()])),
+    If: { create() {}, pop() {} }, require: id => {
+      assert.equal(id, '@normalized:N&&&' + names['entry/src/main/ets/views/DrawingBoard.ets'].obfName.replace(/\.ets$/, '') + '&');
+      loads++; return boardExports;
+    }
+  };
+  vm.runInNewContext(ts.transpileModule(`class Composer { ${methods} } exports.Composer = Composer;`, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }
+  }).outputText, scope);
+  const composer = Object.assign(new scope.exports.Composer(), {
+    thread: { id: 'release-chat', attachments: [] }, app: { error: '' }, showDrawing: false,
+    canAttach: () => true, getUIContext: () => ({ getFocusController: () => ({ clearFocus() {} }) }),
+    observeComponentCreation2: callback => callback(1, true), ifElseBranchUpdateFunction: (_branch, create) => create()
+  });
+  await composer.openDrawing();
+  assert.equal(composer.app.error, '');
+  assert.ok(composer.drawingBuilder, 'Release dynamic import must resolve the exported drawing builder');
+  assert.equal(composer.showDrawing, true); assert.equal(composer.drawingOpening, false);
+  assert.ok(composer.drawingDraft instanceof DrawingDraft);
+  composer.drawingSheet();
+  assert.equal(renders.length, 1); assert.equal(renders[0].draft, composer.drawingDraft);
+  assert.equal(typeof renders[0].onClose, 'function'); assert.equal(typeof renders[0].onAdd, 'function');
+  await composer.openDrawing(); assert.equal(loads, 1, 'An open drawing must not load another screen');
+  composer.showDrawing = false; await composer.openDrawing(); composer.drawingSheet();
+  assert.equal(loads, 2); assert.equal(renders.length, 2);
+  console.log('PASS obfuscated release dynamically loads, renders and reopens the actual drawing builder');
+})().catch(error => { console.error(error); process.exitCode = 1; });

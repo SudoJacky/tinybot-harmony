@@ -1,0 +1,18 @@
+{
+  "forms": [
+    {
+      "name": "tiny_quick_actions",
+      "displayName": "$string:widget_name",
+      "description": "$string:widget_description",
+      "src": "./ets/widget/pages/WidgetCard.ets",
+      "uiSyntax": "arkts",
+      "window": { "designWidth": 720, "autoDesignWidth": true },
+      "colorMode": "auto",
+      "isDynamic": false,
+      "isDefault": true,
+      "updateEnabled": false,
+      "defaultDimension": "2*4",
+      "supportDimensions": ["2*2", "2*4"]
+    }
+  ]
+}

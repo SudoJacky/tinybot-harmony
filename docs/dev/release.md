@@ -4,12 +4,14 @@
 
 ## 版本与产物
 
-当前版本线：`1.0.3` / `versionCode=1000003`，包名 `com.sudojacky.tinybot`，设备类型 `phone`，最低与目标 HarmonyOS API 26，发布包仅 `arm64-v8a`（模拟器使用单独构建的调试包，不随正式包分发）。
+当前版本线：`1.1.0` / `versionCode=1001000`，包名 `com.sudojacky.tinybot`，设备类型 `phone`、`tablet`，最低 HarmonyOS 6.0.0（API 20）、目标 API 26，发布包仅 `arm64-v8a`（模拟器使用单独构建的调试包，不随正式包分发）。
 
-运行准备脚本后生成独立目录与 ZIP：
+产物检查必须核对真实 HAP/APP 的 `minAPIVersion=60000020`、`targetAPIVersion=260000026`、版本号与 ABI，不能只检查模板文字。API 20 与 API 26 使用同一个包，发布说明必须同时写明两套系统的能力差异（沉浸光感材质、PDF 文字提取）。
+
+使用 PowerShell 7 运行准备脚本后生成独立目录与 ZIP（Windows PowerShell 5.1 的默认编码无法正确读取脚本中的 UTF-8 文本）：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\prepare-distribution.ps1 -StudioRoot "C:\Program Files\Huawei\DevEco Studio"
+pwsh -ExecutionPolicy Bypass -File scripts\prepare-distribution.ps1 -StudioRoot "C:\Program Files\Huawei\DevEco Studio"
 ```
 
 | 产物 | 说明 |
@@ -25,9 +27,23 @@ powershell -ExecutionPolicy Bypass -File scripts\prepare-distribution.ps1 -Studi
 | `RELEASE-NOTES.txt`、`STORE-LISTING.txt`、`CLOUD-TEST.txt`、`RELEASE-GAPS.txt` | 版本文案与验证资料 |
 | `package-info.json`、`SHA256SUMS.txt` | 从实际包读取的元数据、大小、原生 Build ID 与 SHA-256 |
 
-脚本先做 ArkTS 检查，再构建 Release APP，验证版本、`app.debug=false`、包内容、arm64 沙箱库与符号 Build ID，最后产出目录和 ZIP。已有输出不覆盖；可用 `-OutputDirectory` 指定新目录。`-SkipBuild` 仅打包既有产物，仍校验结构与版本，但不能证明包含最新代码。
+脚本先做 ArkTS 检查，再构建 Release；还需确认 APP 已使用 `assembleApp` 从本轮 Release 产物组装，验证版本、`app.debug=false`、包内容、arm64 沙箱库与符号 Build ID，最后产出目录和 ZIP。已有输出不覆盖；可用 `-OutputDirectory` 指定新目录。`-SkipBuild` 仅打包既有产物，仍校验结构与版本，但不能证明包含最新代码。
+
+当前独立 ArkTS 检查器可能无法解析构建生成的 `BuildProfile` 模块；v1.0.5 的完整 Debug / Release 构建可正常解析。遇到该错误时保留错误记录，先用 `devecocli build --product default --build-mode release` 完成真实构建与包检查，再运行 Hvigor `--mode project -p product=default -p buildMode=release assembleApp --no-daemon` 组装 APP，然后对本次产物使用 `prepare-distribution.ps1 -SkipBuild` 整理资料；不要复用旧版本产物或放宽隐私授权条件。此方式不代表独立检查器通过。
 
 ## 签名与上传
+
+交付脚本生成 ZIP 后会自动将未签名 APP、`pack.info`、`pac.json` 和符号表同步到主工程的 `build/outputs/default/`。在 Git worktree 中运行时，通过 Git 公共目录定位主工程，不共用各 worktree 的构建缓存。
+
+已有交付包时，双击主工程根目录 `prepare-upload.cmd`，或执行：
+
+```powershell
+.\prepare-upload.ps1
+# 指定交付目录；也可用于同步独立 worktree 生成的交付包
+.\prepare-upload.ps1 -DistributionDirectory "<交付目录>"
+```
+
+默认按交付资料中的 `preparedAt` 选择主工程 `artifacts/distribution/` 中当前版本的最新完整交付包。同步前核对主工程版本、包名、实际 APP/HAP 的 Release 标志和版本，以及 APP/符号表的 SHA-256；不匹配则报错，原检测目录不变。已有输出在替换前整体备份到 `artifacts/upload-backups/`；内容一致时跳过替换，保留已有签名与上传结果。该脚本只整理已有交付包，不触发重新编译或平台上传。
 
 本地自动签名使用调试 Profile，**Release 编译不等于发布签名**；UNSIGNED 文件必须正式签名才能安装或发布。
 
@@ -62,8 +78,9 @@ powershell -ExecutionPolicy Bypass -File scripts/check-release-package.ps1 -HapP
 1. 用相同签名从旧版覆盖升级，检查会话、模型配置、草稿、工作区与附件。
 2. 在干净的独立环境检查全新安装与首次使用引导。
 3. 检查长回答滚动、工具调用与审批、交互预览、沙箱限额恢复、云备份恢复。
-4. 至少在一台 API 26 arm64 真机与一台模拟器上验证启动、首屏与退出。
-5. 记录实际设备、构建类型与时间；历史截图和设备结果不能代替本版验证。
+4. 至少在一台 API 26 arm64 真机、一台 API 20 ARM64 真机与一台模拟器上验证启动、首屏与退出；同一构建需在两套系统各跑一遍关键流程。
+5. 记录两套系统的能力差异结果：API 20 的普通界面与“光感效果：此系统不支持”、API 26 的材质回归、API 20 导入 PDF 时的明确提示，以及携带凭据的请求不跟随重定向。
+6. 记录实际设备、构建类型与时间；历史截图和设备结果不能代替本版验证。
 
 ## 验证边界
 

@@ -1,6 +1,6 @@
 # 交互预览与 Web UI
 
-模型把 JavaScript、HTML 或 SVG 写进工作区，再调用 `publish_preview`，聊天里就会出现一张隔离的 ArkWeb 卡片。这页说明发布参数、从读取到截图的完整生命周期、快照如何随会话保存，以及它和独立浏览器为什么是两套东西。预览对应的源文件如需下载或分享，使用 `present_files` 交付，见[文件与工作区](/guide/files)。
+模型把 JavaScript、HTML 或 SVG 写进工作区，再调用 `publish_preview` 准备预览快照，最后在回复中插入工具返回的引用；turn 成功结束后，聊天在引用位置挂载隔离的 ArkWeb 页面。这页说明发布参数、从读取到截图的完整生命周期、快照如何随会话保存，以及它和独立浏览器为什么是两套东西。预览对应的源文件如需下载或分享，使用 `present_files` 交付，见[文件与工作区](/guide/files)。
 
 ## publish_preview 参数
 
@@ -23,16 +23,26 @@ workspaceRelativePath(path)        校验相对路径与扩展名
   → WebUiPreflight.validate()       设备上的启动检查（30 秒超时）
   → PreviewCapture.capture()        同一卡片、聊天宽度截图
   → 写入 execution.previewContent 与 previewScreenshot
-  → 返回 { published, path, title, nodes, screenshot }
+  → 返回 { published, previewId, reference, path, title, nodes, version, verification, screenshot }
 ```
 
 - JS 文件被放进 `js` 字段，`html` 为空；HTML/SVG 放进 `html`，`js` 为空。CSS 让 `html,body` 至少填满视口，SVG 居中并按宽度缩放。
 - HTML/SVG 未指定 `height` 时 `autoHeight` 为真，由页面测量内容高度并回传；显式指定则固定高度。
 - 预检与截图都在发布前完成。任一步失败都不会产生“已发布”回执，源文件保持不变。
-- 成功回执只含路径、标题、节点数与截图尺寸，不含源码；模型不会因为发布而再次收到整份文件。
+- 成功回执包含路径、标题、节点数、源版本、验证状态与截图尺寸，不含源码；模型不会因为发布而再次收到整份文件。`verification.startup=passed` 表示启动检查通过，`screenshot=captured` 表示获得截图，`interaction=not_checked` 明确表示后续交互尚未验证。
 - 截图作为一条独立的 user 消息附在工具结果之后，明确标注为“不可信的视觉输出”，用于检查间距、裁切与可读性；不支持图片的模型会收到文字说明。
 
+## 最终回复中的引用
+
+成功回执包含 `previewId` 及可原样复制的 `reference`，格式为 `[[tinybot-preview:pv_…]]`。引用必须独占一行，位于最终回复希望插入预览的位置，不能放在代码块、引用块或普通段落内部。前后可以写普通 Markdown。每个源文件最后一次成功发布的版本必须被引用；也可以显式引用本轮较早的成功版本，重复引用同一 ID 会被拒绝。引用仅解析本条回复工具记录里的成功快照，不接收任意路径或其他会话的 ID。
+
+工具阶段仍在隐藏容器中进行启动检查和截图，成功快照保存在工具记录中，正文不自动追加预览。最终文字可以流式显示，iframe 只在整个 turn 成功完成后挂载；中间回复、修复尝试、失败或取消均不挂载新预览。漏写、格式错误、重复或不存在的引用会反馈给模型修复最终回复，最多三次，不重复已经完成的写入或发布。
+
+新引用预览没有额外的标题、白底、边框与内边距；页面自身决定布局。截图同样使用无外框容器。旧回执没有 `previewId`，继续按历史卡片方式展示，不需要改写存档。静态图片导出把截图放在引用位置；Markdown 导出把引用转换为预览标题，不泄露内部标记或过程记录。
+
 ## 快照与恢复
+
+发布工具也可在 `orchestrate` 中调用，效果与直接发布一致：子调用的卡片、截图、版本与源码快照保存到会话，截图进入下一次模型请求；外层编排后续失败不会删除已发布成果。图表与文件交付同样支持编排内调用。参见[工具编排](/internals/tools#可视化与交付编排)。
 
 成功发布时，渲染内容作为不可变快照（snapshot）保存在工具记录的 `previewContent` 中，截图的宽、高、卡片宽度与图片一起保存。这些字段都是本地展示元数据，不进入模型上下文。
 
@@ -44,7 +54,7 @@ workspaceRelativePath(path)        校验相对路径与扩展名
 | 会话重启、切换或分支 | 直接使用保存的快照，不重新读取源文件 |
 | 截图失败 | 整个发布失败，不写入预览 |
 
-`previewContent` 上限为 96100 字符，截图宽高必须在 1–1600 之间且为 JPEG；`validateSteps()` 在加载历史时校验这些约束，损坏的记录会让本地工具记录整体失败并保留原文件。聊天里只把“同一路径最后一次成功发布”标为最新，其余版本按历史内容展示。
+`previewContent` 上限为 96100 字符，截图宽高必须在 1–1600 之间且为 JPEG；`validateSteps()` 在加载历史时校验这些约束，损坏的记录会让本地工具记录整体失败并保留原文件。历史卡片只把“同一路径最后一次成功发布”标为最新；新引用按明确的快照展示，不随源文件编辑或其他消息的新版发布而改变。
 
 ## 隔离的 ArkWeb 卡片
 
@@ -127,3 +137,9 @@ workspaceRelativePath(path)        校验相对路径与扩展名
 | `entry/src/main/ets/services/AgentLoop.ets` | 拒绝内联 UI 与 JSONL、限制修复次数 |
 | `entry/src/main/ets/services/BrowserSession.ets` | 独立浏览器会话、控制权与接管 |
 | `scripts/build-web-ui-vendor.cjs` | Three.js 归档校验与打包 |
+
+## 图表与数据交付
+
+新图表、表格及指标卡统一采用工作区 HTML/JS/SVG 文件与 `publish_preview`，不再注册 `publish_data_view`。先计算并校验，再写入页面，显示来源、单位、时间范围和原始数值；需要下载时生成实际 CSV/JSON，以 `present_files` 交付。预览沙箱不能直接读写工作区文件。
+
+历史 `publish_data_view` 回执保留原生卡片、查看数据、CSV 导出和会话导出，包括编排子调用中的旧图表；无需迁移或改写已有消息。

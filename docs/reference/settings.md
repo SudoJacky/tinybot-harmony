@@ -29,7 +29,7 @@
 | `providerProfiles[].id` | 服务实例 ID | `provider-<uuid>` 或预设 ID | 保存后重建注册表 |
 | `providerProfiles[].name` | 显示名称 | 预设名称 | 立即 |
 | `providerProfiles[].presetId` | 内置预设来源 | 自定义服务为空 | 仅用于展示与图标 |
-| `providerProfiles[].protocol` | `chat-completions`、`responses`、`anthropic-messages` | 由预设决定 | 下一次请求 |
+| `providerProfiles[].protocol` | `chat-completions`、`responses`、`anthropic-messages`、`gemini` | 由预设决定 | 下一次请求 |
 | `providerProfiles[].baseUrl` | 服务地址，保存时去掉末尾斜杠 | 预设地址 | 下一次请求 |
 | `providerProfiles[].credentialAlias` | 密钥别名；无密钥时为空 | 空 | 保存成功后写入 |
 | `providerProfiles[].noApiKey` | 无需密钥（如本地 Ollama） | `false` | 下一次请求 |

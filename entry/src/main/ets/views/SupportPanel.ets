@@ -12,12 +12,16 @@ import { DeveloperGate, Diagnostics } from '../model/Diagnostics';
 import { DeveloperDiagnostics } from '../services/DeveloperDiagnostics';
 import { DeveloperPanel } from './DeveloperPanel';
 import { Btn } from '../common/Theme';
+import { Announcements, announcements } from '../services/Announcements';
+import { MarkdownView } from './MarkdownView';
+import { FeedbackPanel } from './FeedbackPanel';
 
 export function supportTitle(page: string): string {
   if (page === 'developer') { return t('开发者模式'); }
   if (page === 'help') { return t('使用帮助'); }
   if (page === 'updates') { return t('更新说明'); }
   if (page === 'announcements') { return t('公告'); }
+  if (page === 'feedback') { return t('反馈与建议'); }
   if (page === 'guide') { return t('首次使用指引'); }
   if (page === 'licenses') { return t('第三方开源许可协议'); }
   if (page === 'privacy') { return t('隐私政策'); }
@@ -30,12 +34,14 @@ export struct SupportPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop page: string = 'about';
   @State private version: string = '';
+  @State private announcementService: Announcements = announcements;
   @State private error: string = '';
   @State private showDeveloperPassword: boolean = false;
   @State private developerPassword: string = '';
   @State private developerError: string = '';
   private developerGate: DeveloperGate = new DeveloperGate();
   onOpen: (page: string) => void = () => {};
+  onClose: () => void = () => {};
 
   aboutToDisappear(): void { this.cancelDeveloperUnlock(); }
   private cancelDeveloperUnlock(): void {
@@ -119,8 +125,8 @@ export struct SupportPanel {
         NavRow({ title: t('GitHub 仓库'), icon: $r('sys.symbol.link'), subtitle: 'SudoJacky/tinybot-harmony', compId: 'about-github',
           onTap: () => this.openWebsite('https://github.com/SudoJacky/tinybot-harmony') })
         RowDivider()
-        NavRow({ title: t('报告软件问题（Issues）'), icon: $r('sys.symbol.exclamationmark_circle'), compId: 'about-issues',
-          onTap: () => this.openWebsite('https://github.com/SudoJacky/tinybot-harmony/issues') })
+        NavRow({ title: t('反馈与建议'), icon: $r('sys.symbol.exclamationmark_circle'), compId: 'about-feedback',
+          onTap: () => this.onOpen('feedback') })
       }
     }
     GroupCard() {
@@ -176,6 +182,9 @@ export struct SupportPanel {
 
   @Builder
   updates() {
+    this.article(t('1.1.0 · 2026-10-26'), t('新增平板工作台、反馈与建议、存储空间管理及无需搜索密钥的内置必应搜索，支持 HarmonyOS 6（API 20）。已启用的工具直接提供给模型，交互预览在最终回复中展示。修复必应移动页面无法提取搜索结果的问题，并优化平板公告宽度。'))
+    this.article(t('1.0.6 · 2026-10-24'), t('修复 Release 版本画板无法打开的问题。仅发送图片、附件或会话引用时保留空正文，不自动补充提示语；纯图片请求不附带空文本块，并避免空正文触发标题生成。'))
+    this.article(t('1.0.5 · 2026-10-23'), t('新增桌面服务卡片和原生 Gemini API。统一分享会话入口，可选择消息、预览图片后保存或分享，仅保留正文与 AI 声明。优化在线公告、新对话操作，移除固定的 Skill 数量限制，并增加仅供 Debug 模拟器使用的隐私调试流程。'))
     this.article(t('1.0.4 · 2026-10-23'), t('优化模型请求的前缀复用，提高缓存命中机会。接入华为托管隐私政策与系统隐私弹窗，同意后进入应用，拒绝后退出；关于页支持查看政策及撤回授权，保留已有会话与设置。'))
     this.article(t('1.0.3 · 2026-10-21'), t('聊天底部提示更新为“AI生成内容可能有误，请仔细鉴别。”，同步帮助演示、对话图片导出、英文翻译和相关文档引用。'))
     this.article(t('1.0.2 · 2026-10-21'), t('新增 Tiny 首次使用引导与三页作品示例，优化模型配置时的键盘避让和吉祥物动效。接入华为账号登录，支持项目共享文件夹、Markdown 图片预览和带 AI 标识的对话图片导出。新增用量贡献热力图与上下文分段统计，修复共享工作区备份恢复、工具结果保留及流式回复稳定性问题。'))
@@ -192,7 +201,9 @@ export struct SupportPanel {
   }
 
   build() {
-    if (this.page === 'developer') {
+    if (this.page === 'feedback') {
+      FeedbackPanel({ onClose: this.onClose })
+    } else if (this.page === 'developer') {
       DeveloperPanel({ onDisabled: () => this.onOpen('about') })
     } else if (this.page === 'licenses') {
       ThirdPartyLicensesPanel()
@@ -207,7 +218,23 @@ export struct SupportPanel {
           } else if (this.page === 'updates') {
             this.updates()
           } else if (this.page === 'announcements') {
-            this.article(t('暂无公告'), t('有新的公告时，会显示在这里。'))
+            if (!this.announcementService.configured) {
+              this.article(t('公告'), t('公告暂未开放。'))
+            } else if (this.announcementService.loading) {
+              LoadingProgress().width(32).height(32)
+            } else if (this.announcementService.error) {
+              Banner({ text: this.announcementService.error, compId: 'announcement-error' })
+            } else if (this.announcementService.current) {
+              GroupCard() {
+                Column({ space: Space.md }) {
+                  Text(this.announcementService.current.title).fontFamily(this.appearance.fontFamily)
+                    .fontSize(Font.title).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary')).width('100%')
+                  MarkdownView({ content: this.announcementService.current.body, fontSize: Font.body })
+                }.width('100%').alignItems(HorizontalAlign.Start).padding(Space.lg)
+              }
+            } else {
+              this.article(t('暂无公告'), t('有新的公告时，会显示在这里。'))
+            }
           } else {
             this.about()
           }

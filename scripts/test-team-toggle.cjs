@@ -22,9 +22,8 @@ function load(file) {
 const { Fixture, seed } = load(path.join(root, 'test/SessionService.test'));
 const { ChatViewModel, MessageViewModel } = load(path.join(root, 'main/ets/viewmodel/ChatViewModel'));
 const gate = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
-// Team tools are deferred; the initial request exposes authorized names through tool_search.
-const teamAvailable = request => request.tools.some(tool => tool.function.name === 'tool_search' &&
-  /\bteam_recruit:/.test(tool.function.description));
+// Authorized team tools are declared directly from the initial request.
+const teamAvailable = request => request.tools.some(tool => tool.function.name === 'team_recruit');
 (async () => {
   const data = seed();
   data.projects = [{ id: 'project', name: 'Project', instructions: '', workspaceId: 'project-workspace', createdAt: 1, updatedAt: 1 }];

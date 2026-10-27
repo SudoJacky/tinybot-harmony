@@ -134,7 +134,7 @@ function customPalette(color: string, dark: boolean): AccentPalette {
   if (!dark) {
     for (let step = 0; colorContrast(accent, '#FFFFFF') < 4.5 && step < 30; step++) { accent = mix(accent, '#000000', 0.1); }
   }
-  const container = dark ? mix(color, '#121A18', 0.72) : mix(color, '#FFFFFF', 0.85);
+  const container = dark ? mix(color, '#151719', 0.72) : mix(color, '#FFFFFF', 0.85);
   return new AccentPalette(accent, readableForeground(accent), container, readableForeground(container), container);
 }
 
