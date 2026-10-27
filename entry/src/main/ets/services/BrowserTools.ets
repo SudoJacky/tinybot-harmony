@@ -87,8 +87,8 @@ export class BrowserTools implements AgentTools {
     if (call.function.name === 'browser_wait') {
       const condition = args.condition;
       if (!condition || Array.isArray(condition) || Object.keys(condition).some((key) => !['type', 'text', 'value'].includes(key)) ||
-        !['text', 'element', 'value'].includes(condition.type) || typeof condition.text !== 'string' || !condition.text || condition.text.length > 1000 ||
-        (condition.type === 'value' && (typeof condition.value !== 'string' || condition.value.length > 10000)) ||
+        !['text', 'element', 'value'].includes(condition.type) || typeof condition.text !== 'string' || !condition.text ||
+        (condition.type === 'value' && typeof condition.value !== 'string') ||
         (condition.type !== 'value' && condition.value !== undefined) || !Number.isInteger(args.timeoutMs) || (args.timeoutMs as number) < 0 || (args.timeoutMs as number) > 10000) {
         throw new ToolFailure('INVALID_ARGUMENTS', 'Provide a text/element/value condition and timeoutMs 0–10000.', 'fix_arguments');
       }
@@ -111,7 +111,7 @@ export class BrowserTools implements AgentTools {
       (typeof args.snapshotId !== 'string' || !Number.isInteger(args.elementId) || (args.elementId as number) < 1)) {
       throw new ToolFailure('INVALID_ARGUMENTS', 'Element actions need a snapshotId and positive elementId.', 'fix_arguments');
     }
-    if (['type', 'select'].includes(args.action) && (typeof args.text !== 'string' || args.text.length > 10000)) { throw new ToolFailure('INVALID_ARGUMENTS', 'Input text must be at most 10000 characters.', 'fix_arguments'); }
+    if (['type', 'select'].includes(args.action) && typeof args.text !== 'string') { throw new ToolFailure('INVALID_ARGUMENTS', 'Input text must be a string.', 'fix_arguments'); }
     if (args.action === 'scroll' && (typeof args.deltaY !== 'number' || !Number.isFinite(args.deltaY) || Math.abs(args.deltaY) > 10000)) { throw new ToolFailure('INVALID_ARGUMENTS', 'Scroll deltaY must be within 10000 pixels.', 'fix_arguments'); }
     if (args.capture !== undefined) {
       captureOptions(args.capture);

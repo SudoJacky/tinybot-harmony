@@ -50,8 +50,8 @@ async function main(){
  assert.equal(requests,1);assert.equal(cancelled.steps[0].uiValidation,'pending');
  console.log('PASS repairs bounded, cancellation is not retried, pending surface remains withheld');
  const call={id:'large',type:'function',function:{name:'execute_code',arguments:JSON.stringify({code:' '.repeat(128*1024)+'return 42;'})}};
-  validateToolCalls([call]);call.function.name='write_file';assert.throws(()=>validateToolCalls([call]));
-  console.log('PASS execute_code arguments exceed old 96 KiB cap without changing other tool budgets');
+  validateToolCalls([call]);call.function.name='write_file';validateToolCalls([call]);
+  console.log('PASS tool arguments exceed the old 96 KiB cap while structural validation remains active');
   call.function.name='execute_code';
   const {ChatStream}=load(root+'/services/ChatStream');const chat=new ChatStream(()=>{});
   chat.push('data: '+JSON.stringify({choices:[{index:0,delta:{tool_calls:[{...call,index:0}]}}]})+'\n\n');

@@ -51,22 +51,16 @@ export function repairGuidance(code: string, path?: string, title?: string, libr
 }
 
 export interface PreviewRepairSource { surface: string; path: string; version: string; retry: PreviewRetry; }
-function boundedDiagnostic(text: string, limit: number): string {
-  // JSON escaping can expand one character to six. Bound encoded size as well as raw size.
-  let result = text.slice(0, limit);
-  while (JSON.stringify(result).length > limit) { result = result.slice(0, Math.floor(result.length * 0.8)); }
-  return result;
-}
-// Keep the persisted report bounded without truncating JSON or fabricating source locations.
+// Preserve complete diagnostics and source locations for repair and session reload.
 export function uiFailureReport(error: Error, sources: PreviewRepairSource[] = [], storageError?: string): string {
   const diagnostic = error instanceof UiDiagnosticError ? error : new UiDiagnosticError('INVALID_FIELD', error.message);
   if (diagnostic.code === 'UNSUPPORTED_PREVIEW_FORMAT') {
-    return JSON.stringify({ error: boundedDiagnostic(diagnostic.message, 1800), category: diagnostic.code,
+    return JSON.stringify({ error: diagnostic.message, category: diagnostic.code,
       repair: repairGuidance(diagnostic.code), publication: 'No preview was published. The legacy format is not migrated.' });
   }
-  return JSON.stringify({ error: boundedDiagnostic(diagnostic.message, 1800), category: diagnostic.code,
+  return JSON.stringify({ error: diagnostic.message, category: diagnostic.code,
     location: diagnostic.location, locationScope: 'jsonl_source', excerpt: diagnostic.excerpt, sources: sources,
-    storageError: storageError === undefined ? undefined : boundedDiagnostic(storageError, 500), repair: repairGuidance(diagnostic.code),
+    storageError: storageError, repair: repairGuidance(diagnostic.code),
     publication: sources.length ? 'No surface from this response was published. Repair the indicated source, then publish each required saved surface using its retry call. Saved files contain raw JSONL without Markdown fences; a missing outer fence needs no file edit. If storageError is present, some sources were not saved: do not assume this list is complete.' :
       'No editable source was saved. Use an existing workspace source if available and permitted; otherwise provide a corrected complete surface.' });
 }

@@ -23,6 +23,10 @@ int main()
     tinybot::NativeJobResult unknown;
     unknown.Execute([]() -> std::string { throw 42; });
     Check(unknown.error == "Unknown native exception", "unknown exceptions fail explicitly");
+    tinybot::NativeJobResult longFailure;
+    const std::string longDetail(12000, 'x');
+    longFailure.Execute([&]() -> std::string { throw std::runtime_error(longDetail); });
+    Check(longFailure.error == longDetail, "native error details are retained without silent clipping");
     tinybot::NativeJobResult empty;
     empty.Execute([]() { return std::string(); });
     Check(std::string(empty.FailureCode(0)) == "NATIVE_EMPTY_RESULT", "empty output is not successful execution");

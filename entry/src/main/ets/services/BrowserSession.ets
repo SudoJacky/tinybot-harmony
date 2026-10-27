@@ -14,7 +14,7 @@ export interface BrowserPage {
   snapshotId: string; url: string; title: string; text: string; elements: BrowserElement[];
   truncated: boolean; embeddedFrames: number; trust: string;
   textScope?: string; elementsScope?: string; viewport?: BrowserViewport;
-  previewId?: string; version?: string; errors?: string[];
+  previewId?: string; version?: string; errors?: string[]; reductions?: string[];
 }
 export interface BrowserCaptureOptions { count: number; intervalMs: number; }
 export interface BrowserWaitCondition { type: string; text?: string; elementId?: number; value?: string; }

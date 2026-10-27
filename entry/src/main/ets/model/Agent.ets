@@ -9,6 +9,7 @@ import { RequestUsage } from './Usage';
 import { PendingInput, validatePendingInput } from './PendingInput';
 import { ContextState } from './Conversation';
 import { RequestPrefixDiagnostics } from './RequestPrefix';
+import { toolOutcome } from './ToolOutcome';
 
 export interface ContextDiagnostics {
   prefix?: RequestPrefixDiagnostics;
@@ -23,9 +24,9 @@ export interface ContextDiagnostics {
 }
 
 export const MAX_TOOL_CALLS: number = 8;
-export const MAX_TOOL_ARGUMENTS: number = 96 * 1024;
 export const MAX_AGENT_STEPS: number = 200;
 export const MAX_REASONING_CONTENT: number = 1024 * 1024;
+interface NativeToolError extends Error { code?: string | number; }
 
 export interface ToolFunction {
   name: string;
@@ -187,7 +188,7 @@ export function validateToolCalls(calls: ToolCall[]): void {
     if (!call || typeof call.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(call.id) ||
       ids.has(call.id) || call.type !== 'function' || !call.function ||
       typeof call.function.name !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(call.function.name) ||
-      typeof call.function.arguments !== 'string' || (call.function.name !== 'execute_code' && call.function.arguments.length > MAX_TOOL_ARGUMENTS)) {
+      typeof call.function.arguments !== 'string') {
       throw new Error(t("模型返回了无效或重复的工具调用。"));
     }
     ids.add(call.id);
@@ -195,11 +196,12 @@ export function validateToolCalls(calls: ToolCall[]): void {
 }
 
 export function toolError(error: string | Error | null | undefined): string {
-  if (error instanceof ToolResultError) { return error.output; }
+  if (error instanceof ToolResultError) { return toolOutcome(error.output, true).output; }
   if (error instanceof ToolFailure) {
-    return JSON.stringify({ error: error.message, code: error.code, recovery: error.recovery, details: error.details });
+    return toolOutcome(JSON.stringify({ error: error.message, code: error.code, recovery: error.recovery, details: error.details }), true).output;
   }
-  return JSON.stringify({ error: typeof error === 'string' ? error : error?.message || String(error), code: 'UNKNOWN_ERROR', recovery: 'inspect_error' });
+  return toolOutcome(JSON.stringify({ error: typeof error === 'string' ? error : error?.message || String(error),
+    code: 'UNKNOWN_ERROR', recovery: 'inspect_error', nativeCode: (error as NativeToolError)?.code }), true).output;
 }
 
 export function stepMessages(step: AgentStep, includeSteering: boolean = true): ModelMessage[] {
@@ -324,7 +326,7 @@ function validatePreviewReceipt(tool: ToolExecution): void {
       !observation || typeof observation.instanceId !== 'string' || observation.instanceId.length > 160 ||
       !Array.isArray(observation.frames) || observation.frames.length > 6 ||
       !Array.isArray(observation.errors) || observation.errors.length > 16 ||
-      observation.errors.some((error) => typeof error !== 'string' || error.length > 2000) ||
+      observation.errors.some((error) => typeof error !== 'string') ||
       (observation.previewId !== undefined && !/^pv_[A-Za-z0-9_-]{1,77}$/.test(observation.previewId)) ||
       (observation.version !== undefined && (typeof observation.version !== 'string' || observation.version.length > 256))) {
       throw new Error('Invalid browser observation');
@@ -340,7 +342,7 @@ function validatePreviewReceipt(tool: ToolExecution): void {
     }
   }
   if (tool.previewContent !== undefined && (tool.call.function.name !== 'publish_preview' || tool.status !== 'complete' ||
-    typeof tool.previewContent !== 'string' || tool.previewContent.length > 96100)) {
+    typeof tool.previewContent !== 'string')) {
     throw new Error('Invalid published preview snapshot');
   }
   if (tool.previewScreenshot !== undefined) {

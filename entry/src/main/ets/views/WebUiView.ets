@@ -273,7 +273,7 @@ export struct WebUiView {
           if (blocked) { Diagnostics.log('warn', 'web', 'navigation_blocked', { instanceId: this.instanceId, scheme: url.split(':')[0] }); }
           return blocked;
         })
-        .onConsole((event) => { if (event.message.getMessageLevel() === MessageLevel.Error) { this.report(new Error(event.message.getMessage().slice(0, 2000))); } return false; })
+        .onConsole((event) => { if (event.message.getMessageLevel() === MessageLevel.Error) { this.report(new Error(event.message.getMessage())); } return false; })
         .onErrorReceive((event) => { if (event.request.isMainFrame()) { this.report(new Error(event.error.getErrorInfo())); } else { Diagnostics.log('error', 'web', 'resource_failed', { instanceId: this.instanceId }, event.error.getErrorInfo()); } })
         .onPermissionRequest((event) => { event.request.deny(); })
         .onRenderExited(() => { this.browserRuntime?.detach(this.browserAttachment); this.report(new Error(t('交互内容渲染进程已退出，请重试。'))); })

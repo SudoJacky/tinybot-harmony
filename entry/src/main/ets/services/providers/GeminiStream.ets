@@ -16,7 +16,6 @@ export class GeminiStream implements ModelStream {
   private calls: ToolCall[] = [];
   private content: string = '';
   private reasoning: string = '';
-  private size: number = 0;
   private done: boolean = false;
   private callPrefix: string = 'gemini_' + util.generateRandomUUID();
   private onText: (text: string) => void;
@@ -51,8 +50,7 @@ export class GeminiStream implements ModelStream {
       (candidate.content?.role !== undefined && candidate.content.role !== 'model')) { throw new Error(t('Gemini 流式事件无效。')); }
     const parts = candidate.content?.parts || [];
     validateGeminiContent(parts);
-    this.size += JSON.stringify(parts).length;
-    if (this.size > 2 * 1024 * 1024 || this.parts.length + parts.length > 65536) { throw new Error(t('Gemini 内容记录无效或过大。')); }
+    if (this.parts.length + parts.length > 65536) { throw new Error(t('Gemini 内容记录无效或过大。')); }
     for (const part of parts) {
       this.parts.push(part);
       if (part.functionCall) {

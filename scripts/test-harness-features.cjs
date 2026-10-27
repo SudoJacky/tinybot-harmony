@@ -101,8 +101,9 @@ async function main() {
   assert.equal(JSON.parse(await web.execute(call('read_web',{url:'https://example.com/page'}),new Cancellation())).favicon,undefined);
   const longBody = '<h1>Financial statement</h1><table><tr><td>Revenue 94827</td></tr></table>' +
     '<p>Definition and references '.repeat(1200) + 'TAIL_MARKER';
+  let downloadBudget;
   const pagedWeb = new WebTools({ resolve: (reference, base) => new URL(reference, base).href,
-    get: async () => ({url:'https://example.com/report',contentType:'text/html',body:longBody}) });
+    get: async (_address,_signal,maxBytes) => {downloadBudget=maxBytes;return {url:'https://example.com/report',contentType:'text/html',body:longBody};} });
   const readPage = args => pagedWeb.execute(call('read_web',{url:'https://example.com/report',...args}),new Cancellation()).then(JSON.parse);
   const head = await readPage({});
   assert.equal(head.content.length,8000); assert.equal(head.nextOffset,8000); assert.equal(head.truncated,true);
@@ -120,7 +121,9 @@ async function main() {
     const page=JSON.parse(await structuredWeb.execute(call('read_web',{url:'https://example.com/feed'}),new Cancellation()));
     assert.equal(page.content,body);assert.equal(page.truncated,false);
   }
-  for (const args of [{offset:-1},{offset:0.5},{maxChars:0},{maxChars:20001},{selector:'script'}]) {
+  assert.equal((await readPage({maxChars:20001})).content.length,20001);
+  await readPage({maxBytes:2*1024*1024});assert.equal(downloadBudget,2*1024*1024);
+  for (const args of [{offset:-1},{offset:0.5},{maxChars:0},{maxBytes:0},{selector:'script'}]) {
     await assert.rejects(readPage(args),/read_web requires/);
   }
   console.log('PASS bounded web pages retain every character and source, expose continuation and reject invalid ranges');

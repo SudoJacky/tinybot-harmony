@@ -31,7 +31,7 @@ function fields(value: Object, allowed: string[]): void {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((key) => !allowed.includes(key))) { fail('unknown or malformed fields'); }
 }
 export function validateUiValues(values: UiValues): void {
-  if (!values || typeof values !== 'object' || Array.isArray(values) || Object.keys(values).length > 64 || JSON.stringify(values).length > 12000) { fail('state exceeds 64 fields / 12,000 characters'); }
+  if (!values || typeof values !== 'object' || Array.isArray(values) || Object.keys(values).length > 64) { fail('state must be an object with at most 64 fields'); }
   for (const key of Object.keys(values)) {
     const value = values[key];
     if (!uiIdentifier(key) || !['string', 'number', 'boolean'].includes(typeof value) || (typeof value === 'number' && !Number.isFinite(value))) { fail('invalid state field ' + key); }
@@ -96,7 +96,6 @@ export class UiCompiler {
     this.source = source;
     if (this.diagnostic) { throw this.diagnostic; }
     try {
-      if (source.length > 96000) { fail('surface exceeds 96,000 characters'); }
       let end = source.indexOf('\n', this.offset);
       while (end >= 0) { this.line(source.slice(this.offset, end)); this.offset = end + 1; end = source.indexOf('\n', this.offset); }
       if (final && this.offset < source.length) { this.line(source.slice(this.offset)); this.offset = source.length; }
@@ -142,7 +141,10 @@ export class UiCompiler {
   private node(node: UiNode): void {
     fields(node, ['id', 'kind', 'parent', 'text', 'bind', 'action', 'options', 'min', 'max', 'step', 'visibleKey', 'visibleValue', 'source', 'data']);
     if (!uiIdentifier(node.id) || !KINDS.includes(node.kind)) { fail('invalid node id or kind'); }
-    text(node.text, 8000); text(node.data, node.kind === 'web' ? 64000 : 16000);
+    text(node.text, 8000);
+    if (node.kind === 'web') {
+      if (typeof node.data !== 'string') { fail('web data must be a string'); }
+    } else { text(node.data, 16000); }
     if (node.kind === 'web' && (!node.data || node.bind !== undefined || node.action !== undefined)) { fail(node.id + ': web requires static data and uses state-only messages'); }
     if (node.kind === 'web') {
       try { parseWebUi(node.data || ''); }
@@ -198,7 +200,9 @@ export class UiCompiler {
   private action(action: UiAction): void {
     fields(action, ['id', 'kind', 'code', 'prompt', 'text', 'values']);
     if (!uiIdentifier(action.id) || !['compute', 'set', 'reset', 'submit', 'copy'].includes(action.kind) || this.document.actions.length >= 32 || this.document.actions.some((item) => item.id === action.id)) { fail('invalid or duplicate action'); }
-    if (action.kind === 'compute') { text(action.code, 16000, true); } else if (action.code !== undefined) { fail('code only allowed for compute'); }
+    if (action.kind === 'compute') {
+      if (typeof action.code !== 'string' || !action.code.trim()) { fail('compute requires non-empty code'); }
+    } else if (action.code !== undefined) { fail('code only allowed for compute'); }
     if (action.kind === 'submit') { text(action.prompt, 2000, true); } else if (action.prompt !== undefined) { fail('prompt only allowed for submit'); }
     if (action.kind === 'copy') { text(action.text, 8000, true); uiText(action.text as string, this.document.initial); }
     else if (action.text !== undefined) { fail('text only allowed for copy'); }

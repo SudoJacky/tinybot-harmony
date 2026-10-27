@@ -3,7 +3,8 @@ import { BrowserAction } from '../services/BrowserSession';
 // Fixed scripts only: the model never supplies JavaScript, selectors, native bridges or cookies.
 const SENSITIVE_INPUT: string = `const sensitive = node => node.matches('input[type="password"],input[type="hidden"],input[type="file"]') || /password|one-time-code|cc-number|cc-csc/.test(node.autocomplete || '') || /password|passwd|secret|token|otp|verification|验证码|密码/i.test((node.name || '') + ' ' + (node.id || ''));`;
 const PAGE_STATE: string = `
-  const label = node => (node.getAttribute('aria-label') || node.labels?.[0]?.innerText || node.innerText || node.getAttribute('placeholder') || node.title || node.name || '').trim().slice(0, 240);
+  const rawLabel = node => (node.getAttribute('aria-label') || node.labels?.[0]?.innerText || node.innerText || node.getAttribute('placeholder') || node.title || node.name || '').trim();
+  const label = node => rawLabel(node).slice(0, 240);
   const viewport = () => JSON.stringify([scrollX, scrollY, innerWidth, innerHeight, visualViewport?.offsetLeft, visualViewport?.offsetTop, visualViewport?.scale, visualViewport?.width, visualViewport?.height]);
   const identity = node => {
     const r = node.getBoundingClientRect();
@@ -17,22 +18,29 @@ function snapshotScript(idExpression: string): string {
     ${SENSITIVE_INPUT}
     ${PAGE_STATE}
     const snapshotId = ${idExpression};
+    const reductions = new Set();
+    const clip = (text, max, field) => { if (text.length > max) reductions.add(field + ' shortened to ' + max + ' characters.'); return text.slice(0, max); };
     const visible = node => { const r = node.getBoundingClientRect(); const s = getComputedStyle(node); return r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth && s.visibility !== 'hidden' && s.display !== 'none'; };
     const nodes = [...document.querySelectorAll('a[href],button,input,textarea,select,[role="button"],[role="link"],[contenteditable="true"]')].filter(visible);
     const retained = nodes.slice(0, 80);
     globalThis.__tinybotBrowserSnapshot = { id: snapshotId, nodes: retained, viewport: viewport(), identities: retained.map(identity) };
     const elements = retained.map((node, index) => ({ id: index + 1,
       role: node.getAttribute('role') || node.tagName.toLowerCase(),
-      label: label(node),
-      value: sensitive(node) ? undefined : String(node.value ?? '').slice(0, 1000), checked: sensitive(node) ? undefined : node.checked,
+      label: clip(rawLabel(node), 240, 'Element label'),
+      value: sensitive(node) ? undefined : clip(String(node.value ?? ''), 1000, 'Input value'), checked: sensitive(node) ? undefined : node.checked,
       type: sensitive(node) ? 'user-only' : (node.type || ''), disabled: !!node.disabled || node.getAttribute('aria-disabled') === 'true',
-      options: node.tagName === 'SELECT' ? [...node.options].slice(0, 50).map(o => ({ value: o.value.slice(0, 200), label: o.text.slice(0, 200) })) : undefined
+      options: node.tagName === 'SELECT' ? [...node.options].slice(0, 50).map(o => ({ value: clip(o.value, 200, 'Option value'), label: clip(o.text, 200, 'Option label') })) : undefined
     }));
     const text = document.body?.innerText || '';
-    return JSON.stringify({ snapshotId, url: location.href, title: document.title.slice(0, 300), text: text.slice(0, 16000), elements,
+    if (nodes.length > 80) reductions.add('Only the first 80 visible interactive elements are included. Scroll and take a new snapshot for other controls.');
+    if (retained.some(node => node.tagName === 'SELECT' && node.options.length > 50)) reductions.add('Select option lists shortened to 50 options.');
+    if (retained.some(sensitive)) reductions.add('Sensitive control values were redacted; use user handoff for these fields.');
+    const title = clip(document.title, 300, 'Page title');
+    const body = clip(text, 16000, 'Document text');
+    return JSON.stringify({ snapshotId, url: location.href, title, text: body, elements, reductions: [...reductions],
       textScope: 'document', elementsScope: 'viewport',
       viewport: { x: scrollX, y: scrollY, width: innerWidth, height: innerHeight, scrollHeight: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0) },
-      truncated: text.length > 16000 || nodes.length > 80, embeddedFrames: document.querySelectorAll('iframe,frame').length, trust: 'untrusted' });
+      truncated: reductions.size > 0, embeddedFrames: document.querySelectorAll('iframe,frame').length, trust: 'untrusted' });
   })()`;
 }
 

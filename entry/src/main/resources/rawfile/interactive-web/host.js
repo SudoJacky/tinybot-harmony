@@ -15,7 +15,7 @@
       failed = true;
       let detail = String(error?.stack || error?.message || error);
       if (detail.includes('THREE.OrbitControls')) detail = 'Use new OrbitControls(camera, renderer.domElement); OrbitControls is a separate preloaded global, not THREE.OrbitControls.\n' + detail;
-      send({ type: 'error', message: detail.slice(0, 2000) });
+      send({ type: 'error', message: detail });
     };
     function tick(time) {
       raf = 0;
@@ -57,7 +57,6 @@
         if (!active) return Promise.reject(new Error('This interface is currently read-only.'));
         if (pending) return Promise.reject(new Error('A save is already in progress.'));
         const serialized = JSON.stringify(values);
-        if (serialized.length > 12000) return Promise.reject(new Error('State exceeds 12,000 characters.'));
         return new Promise((resolve, reject) => { pending = { id: ++seq, resolve, reject }; send({ type: 'save', id: seq, values: JSON.parse(serialized) }); });
       }
     }), writable: false });
@@ -110,20 +109,19 @@
           const data = JSON.parse(event.data);
           if (data.type === 'init') mount(data);
           else if (frame) frame.contentWindow.postMessage({ channel: 'tinybot-host', ...data }, '*');
-        } catch (error) { send({ type: 'error', message: String(error.message).slice(0, 2000) }); }
+        } catch (error) { send({ type: 'error', message: String(error.stack || error.message) }); }
       };
       port.start();
     } else if (frame && event.source === frame.contentWindow && event.data?.channel === 'tinybot-frame') {
       const data = event.data;
       if (data.type === 'browserResult' && typeof data.message === 'string') {
-        if (JSON.stringify(data).length > 18000) send({type:'browserResult',id:data.id,message:JSON.stringify({code:'OBSERVATION_TOO_LARGE',message:'Preview observation exceeds bridge limit.'})});
-        else send({type:'browserResult',id:data.id,message:data.message});
+        send({type:'browserResult',id:data.id,message:data.message});
       }
       else if (data.type === 'save') send({ type: 'save', id: data.id, values: data.values });
       else if (data.type === 'resize') send({ type: 'resize', height: data.height });
       else if (data.type === 'ready') send({ type: 'ready' });
       else if (data.type === 'snapshotReady') send({ type: 'snapshotReady' });
-      else if (data.type === 'error') send({ type: 'error', message: String(data.message).slice(0, 2000) });
+      else if (data.type === 'error') send({ type: 'error', message: String(data.message) });
     }
   });
   window.__tinybotHostReady = true;

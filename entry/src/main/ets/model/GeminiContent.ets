@@ -15,7 +15,7 @@ export interface GeminiPart {
 }
 
 export function validateGeminiContent(parts: GeminiPart[]): void {
-  if (!Array.isArray(parts) || parts.length > 65536 || JSON.stringify(parts).length > 2 * 1024 * 1024) {
+  if (!Array.isArray(parts) || parts.length > 65536) {
     throw new Error(t('Gemini 内容记录无效或过大。'));
   }
   for (const part of parts) {

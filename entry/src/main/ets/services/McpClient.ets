@@ -75,7 +75,7 @@ export class McpClient implements McpConnection {
     if (key) { headers['Authorization'] = 'Bearer ' + key; }
     if (this.session) { headers['Mcp-Session-Id'] = this.session; }
     return new Promise<Object>((resolve, reject) => {
-      let done = false; let code = 0; let text = ''; let bytes = 0; let ended = false;
+      let done = false; let code = 0; let text = ''; let ended = false;
       let remove = (): void => {}; let timer = -1; let stop = (): void => {};
       const decoder = new util.TextDecoder('utf-8');
       const finish = (error?: Error | ToolFailure | RunCancelledError, result?: Object): void => {
@@ -91,7 +91,7 @@ export class McpClient implements McpConnection {
         if (notification) { finish(); return; }
         const response = mcpResponse(text, id);
         if (response?.error) {
-          const message = typeof response.error.message === 'string' ? response.error.message.slice(0, 500) : '服务返回无效错误信息';
+          const message = typeof response.error.message === 'string' ? response.error.message : '服务返回无效错误信息';
           finish(new ToolFailure('REMOTE_ERROR', t("MCP 错误 ") + response.error.code + '：' + message, 'inspect_result_before_retry', { remoteCode: response.error.code, service: 'mcp' }));
         }
         else if (response?.result !== undefined) { finish(undefined, response.result); }
@@ -110,7 +110,7 @@ export class McpClient implements McpConnection {
       // finish as soon as its matching result arrives and cancel a still-open SSE connection.
       stop = CompatHttp.stream({
         url: this.server.url, method: 'POST', headers: headers, body: JSON.stringify(body),
-        connectTimeout: 15000, readTimeout: 60000, maxBytes: 2 * 1024 * 1024, dataType: 'string', redirect: 'refuse'
+        connectTimeout: 15000, readTimeout: 60000, dataType: 'string', redirect: 'refuse'
       }, {
         onStatus: (status: number): void => { code = status; inspect(); },
         onHeaders: (received: Record<string, string>): void => {
@@ -122,8 +122,7 @@ export class McpClient implements McpConnection {
           }
         },
         onData: (buffer: ArrayBuffer): void => {
-          if (done) { return; } bytes += buffer.byteLength;
-          if (bytes > 1024 * 1024) { finish(new ToolFailure('LIMIT_EXCEEDED', t("MCP 响应超过 1 MB。"), 'reduce_input')); return; }
+          if (done) { return; }
           try { text += decoder.decodeToString(new Uint8Array(buffer), { stream: true }); inspect(); }
           catch (_) { finish(new ToolFailure('INVALID_RESPONSE', t("MCP 返回了无法解析的数据。"), 'inspect_service')); }
         },

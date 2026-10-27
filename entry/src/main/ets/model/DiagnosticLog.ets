@@ -32,6 +32,7 @@ EVENTS.voice = ['focus_requested', 'released', 'draft_failed'];
 EVENTS.web = ['engine_start', 'engine_ready', 'release', 'activate', 'failed', 'load_start', 'load_returned', 'host_ready', 'port_connected', 'ready', 'state_saved', 'attached', 'page_end', 'navigation_blocked', 'resource_failed'];
 EVENTS.preview = ['failed', 'captured', 'thumbnail_failed', 'surface_moved'];
 EVENTS.sandbox = ['execution_failed', 'orchestration_failed'];
+EVENTS.tool = ['failed', 'partial'];
 EVENTS.export = ['image_failed'];
 EVENTS.network = ['request_start', 'request_end', 'context_overflow', 'first_data', 'request_failed'];
 EVENTS.context = ['inspected', 'request_prefix'];

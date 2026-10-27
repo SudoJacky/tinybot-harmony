@@ -370,8 +370,14 @@ async function main() {
   responder = () => ({ status: 404, header: {}, text: '', bytes: new ArrayBuffer(0) });
   await assert.rejects(hopTransport.get('https://example.com/x', cancellation), /HTTP 404/);
 
-  responder = () => ({ status: 200, header: { 'content-type': 'text/plain' }, text: '', bytes: new ArrayBuffer(2 * 1024 * 1024) });
-  await assert.rejects(hopTransport.get('https://example.com/big', cancellation), /1 MiB/, 'The 1 MiB ceiling is kept');
+  let downloadBudget;
+  responder = request => { downloadBudget=request.maxBytes; return {
+    status: 200, header: { 'content-type': 'text/plain' }, text: '', bytes: new TextEncoder().encode('x'.repeat(2 * 1024 * 1024)).buffer
+  }; };
+  await assert.rejects(hopTransport.get('https://example.com/big', cancellation), error=>
+    error.code==='LIMIT_EXCEEDED'&&error.recovery==='increase_download_budget');
+  document=await hopTransport.get('https://example.com/big',cancellation,2*1024*1024);
+  assert.equal(document.body.length,2*1024*1024);assert.equal(downloadBudget,2*1024*1024,'Download budget is adjustable, with no fixed 1 MiB content ceiling');
 
   responder = () => page('x');
   const dead = { cancelled: false, check() { throw new Error('cancelled by user'); }, onCancel: () => () => {} };

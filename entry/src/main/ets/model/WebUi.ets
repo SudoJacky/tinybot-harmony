@@ -12,7 +12,6 @@ function invalidWebField(field: string, expected: string): never {
   throw new UiDiagnosticError('INVALID_FIELD', 'Web UI: ' + field + ' expected ' + expected, { field: 'node.data.' + field });
 }
 export function parseWebUi(source: string): WebUiSpec {
-  if (source.length > 64000) { throw new Error('Web UI: content exceeds 64,000 characters'); }
   const spec = parseUiJson(source, 'node.data') as WebUiSpec;
   if (!spec || typeof spec !== 'object' || Array.isArray(spec)) { throw new UiDiagnosticError('INVALID_FIELD', 'Web UI: node.data expected an object', { field: 'node.data' }); }
   if (Object.keys(spec).some((key) => !['version', 'html', 'css', 'js', 'library', 'height', 'autoHeight'].includes(key))) {
@@ -28,7 +27,6 @@ export function parseWebUi(source: string): WebUiSpec {
   return spec;
 }
 export function parseWebUiMessage(source: string): WebUiMessage {
-  if (source.length > 18000) { throw new Error('Web UI: bridge message too large'); }
   const message = JSON.parse(source) as WebUiMessage;
   if (!message || typeof message !== 'object' || Array.isArray(message) || !['ready', 'error', 'save', 'resize', 'snapshotReady', 'browserResult'].includes(message.type) ||
     Object.keys(message).some((key) => !['type', 'id', 'values', 'message', 'height'].includes(key))) { throw new Error('Web UI: invalid bridge message'); }
@@ -38,7 +36,7 @@ export function parseWebUiMessage(source: string): WebUiMessage {
   if (message.type === 'save' && (!Number.isSafeInteger(message.id) || (message.id || 0) < 1 || !message.values || typeof message.values !== 'object' || Array.isArray(message.values))) {
     throw new Error('Web UI: invalid state save');
   }
-  if (message.type === 'error' && (typeof message.message !== 'string' || message.message.length > 2000)) { throw new Error('Web UI: invalid error'); }
+  if (message.type === 'error' && typeof message.message !== 'string') { throw new Error('Web UI: invalid error'); }
   if (message.type === 'browserResult' && (!Number.isSafeInteger(message.id) || (message.id || 0) < 1 ||
     typeof message.message !== 'string')) { throw new Error('Web UI: invalid browser result'); }
   return message;

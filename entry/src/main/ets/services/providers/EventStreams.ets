@@ -1,6 +1,6 @@
 import { t } from '../../model/I18n';
 import { AnthropicContentBlock, validateAnthropicContent } from '../../model/AnthropicContent';
-import { MAX_REASONING_CONTENT, MAX_TOOL_ARGUMENTS, MAX_TOOL_CALLS, ModelTurn, ToolCall, validateToolCalls } from '../../model/Agent';
+import { MAX_REASONING_CONTENT, MAX_TOOL_CALLS, ModelTurn, ToolCall, validateToolCalls } from '../../model/Agent';
 import { AnthropicBlock } from './WireProtocols';
 import { ProviderErrorData, ContextOverflowError, isContextOverflow } from './ProviderErrors';
 
@@ -18,22 +18,18 @@ function parseEvent(payload: string): Object {
 export class EventFrames {
   private pending: string = '';
   private lines: string[] = [];
-  private frameSize: number = 0;
   private receive: (payload: string) => void;
   constructor(receive: (payload: string) => void) { this.receive = receive; }
   push(text: string): void {
     this.pending += text;
-    if (this.pending.length > 1024 * 1024) { throw new Error(t("模型数据帧过大。")); }
     let newline = this.pending.indexOf('\n');
     while (newline >= 0) {
       const line = this.pending.slice(0, newline).replace(/\r$/, '');
       this.pending = this.pending.slice(newline + 1);
       if (line.length === 0 && this.lines.length > 0) {
         const payload = this.lines.join('\n');
-        this.lines = []; this.frameSize = 0; this.receive(payload);
+        this.lines = []; this.receive(payload);
       } else if (line.startsWith('data:')) {
-        this.frameSize += line.length;
-        if (this.frameSize > 1024 * 1024) { throw new Error(t("模型数据帧过大。")); }
         this.lines.push(line.slice(5).replace(/^ /, ''));
       }
       newline = this.pending.indexOf('\n');
@@ -314,7 +310,6 @@ export class AnthropicStream implements ModelStream {
           call.function.arguments = ''; this.fragments.add(index);
         }
         call.function.arguments += delta.partial_json;
-        if ((call.function.name !== 'execute_code' && call.function.arguments.length > MAX_TOOL_ARGUMENTS)) { throw new Error(t("Anthropic 工具输入过大。")); }
       } else { throw new Error(t("Anthropic 内容片段无效或不支持。")); }
     }
   }

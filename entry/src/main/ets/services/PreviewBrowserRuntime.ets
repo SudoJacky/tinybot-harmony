@@ -13,15 +13,23 @@ export class PreviewBrowserRuntime {
   private started: boolean = false;
   private attachment: number = 0;
   private onDocumentChanged: () => void;
+  private omittedErrors: number = 0;
   errors: string[] = [];
   constructor(onDocumentChanged: () => void = () => {}) { this.onDocumentChanged = onDocumentChanged; }
   get isReady(): boolean { return this.started; }
   attach(send: (id: number, operation: string, argumentsJson: string) => void, surface: () => Promise<image.PixelMap>): number {
-    this.detach(); this.errors = []; this.send = send; this.surface = surface;
+    this.detach(); this.errors = []; this.omittedErrors = 0; this.send = send; this.surface = surface;
     this.onDocumentChanged(); return this.attachment;
   }
   ready(): void { this.started = true; }
-  recordError(message: string): void { this.errors = this.errors.concat([message.slice(0, 2000)]).slice(-16); }
+  recordError(message: string): void {
+    const retained = this.omittedErrors ? this.errors.slice(1) : this.errors;
+    retained.push(message);
+    if (retained.length > 16 || (this.omittedErrors > 0 && retained.length > 15)) {
+      this.omittedErrors += retained.length - 15;
+      this.errors = ['Earlier ' + this.omittedErrors + ' page errors were omitted from the rolling observation; the latest 15 errors are retained in full.', ...retained.slice(-15)];
+    } else { this.errors = this.omittedErrors ? [this.errors[0], ...retained] : retained; }
+  }
   detach(attachment?: number): void {
     if (attachment !== undefined && attachment !== this.attachment) { return; }
     this.attachment++;

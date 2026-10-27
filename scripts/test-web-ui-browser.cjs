@@ -75,6 +75,21 @@ assert.throws(()=>parseWebUiMessage('{"type":"resize","height":"200"}'));
    await tool.execute(call,new Cancellation(),{execution:receipt});
    return JSON.parse(parseUiSurface(receipt.previewContent,'0').nodes[0].data);
   }
+  const largeSource='/*'+ 'large preview source '.repeat(15000)+'*/\n'+
+    'document.body.innerHTML=Array.from({length:80},(_,i)=>`<input aria-label="Field ${i}" style="position:absolute;top:0" value="${"x".repeat(2000)}">`).join("");';
+  const largePreview=await publishScript(largeSource);
+  frame=await mount({},largePreview,'',false,false,true);
+  await page.evaluate(()=>nativePort.postMessage(JSON.stringify({type:'browserCommand',id:808,operation:'snapshot',argumentsJson:'{"snapshotId":"large"}'})));
+  await page.waitForFunction(()=>messages.some(m=>m.type==='browserResult'&&m.id===808));
+  const largeMessage=await page.evaluate(()=>messages.find(m=>m.type==='browserResult'&&m.id===808));
+  assert.ok(JSON.stringify(largeMessage).length>18000);
+  assert.equal(parseWebUiMessage(JSON.stringify(largeMessage)).id,808);
+  const largeObservation=JSON.parse(largeMessage.message);
+  assert.equal(largeObservation.elements.length,80);assert.equal(largeObservation.truncated,true);
+  assert.ok(largeObservation.reductions.some(n=>n.includes('Input value shortened')));
+  await frame.evaluate(()=>window.__tinybotError(new Error('long diagnostic '+ 'x'.repeat(10000))));
+  await page.waitForFunction(()=>messages.some(m=>m.type==='error'&&m.message.length>10000));
+  console.log('PASS large published code renders, observations exceed the old bridge cap, reductions are explicit and errors remain complete');
   const literal='</script> "quotes"\nUnicode: 中文';
   const plainJs=await publishScript('await Promise.resolve(); document.body.textContent = '+JSON.stringify(literal)+';');
   frame=await mount({},plainJs);
