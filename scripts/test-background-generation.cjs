@@ -57,7 +57,16 @@ function load(file) {
   return exports;
 }
 const tick = () => new Promise(setImmediate);
-const settle = async () => { await tick(); await tick(); };
+const settle = async () => {
+  // Drain due checkpoint batches without advancing background lease deadlines.
+  for (let quiet = 0; quiet < 2;) {
+    await tick();
+    const due = [...timers].filter(([, timer]) => timer.at <= now);
+    if (!due.length) { quiet++; continue; }
+    quiet = 0;
+    for (const [id, timer] of due) { if (timers.delete(id)) timer.fn(); }
+  }
+};
 async function advance(ms) {
   const target = now + ms;
   while (true) {
