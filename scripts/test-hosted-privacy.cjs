@@ -97,6 +97,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   console.log('PASS policy/version matching, refusal exit, withdrawal exit, retryable failures, serialization and stale completion');
 
   let initialized = 0, engines = 0, wants = [], accountRefresh = 0, loads = 0, stops = 0;
+  const renderLifecycle = [];
   const noOp = () => {};
   const { default: EntryAbility } = load('entryability/EntryAbility.ets', {
     '../model/Diagnostics': { Diagnostics: { log: noOp, acceptsLog: () => false } },
@@ -107,6 +108,8 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
     '../services/McpOAuth': { McpOAuth: { receive: noOp } },
     '../services/LaunchActions': { LaunchActions: { receive: noOp, setForeground: noOp } },
     '../services/BackgroundGeneration': { backgroundGeneration: { setForeground: noOp, dispose: noOp } },
+    '../services/WebUiPreflight': { WebUiPreflight: { setForeground: value => renderLifecycle.push(['preflight', value]) } },
+    '../services/PreviewCapture': { PreviewCapture: { setForeground: value => renderLifecycle.push(['capture', value]) } },
     '../services/DeveloperDiagnostics': { DeveloperDiagnostics: { initialize() { initialized++; }, stop() { stops++; }, setForeground: noOp } },
     '../services/HuaweiAccount': { huaweiAccount: { refresh() { accountRefresh++; } } },
     '../services/HostedPrivacy': { hostedPrivacy }, '@kit.AbilityKit': { UIAbility: class {} }
@@ -118,6 +121,10 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   const ability = new EntryAbility(); ability.context = context;
   ability.onCreate({ uri: 'initial' }, {}); await tick();
   ability.onForeground(); ability.onNewWant({ uri: 'shared' }, {});
+  assert.deepEqual(renderLifecycle.slice(-2), [['preflight', true], ['capture', true]]);
+  ability.onBackground();
+  assert.deepEqual(renderLifecycle.slice(-2), [['preflight', false], ['capture', false]]);
+  ability.onForeground();
   ability.onWindowStageCreate(stage); await tick();
   assert.equal(requests, beforeStartupRequests, 'AppGallery owns the startup dialog; do not stack an explicit request');
   ability.onForeground(); await tick(); assert.equal(requests, beforeStartupRequests, 'Foreground cannot duplicate the automatic dialog');

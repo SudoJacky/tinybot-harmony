@@ -32,25 +32,26 @@ struct PreviewCaptureView {
   aboutToDisappear(): void { this.mounted = false; clearTimeout(this.timer); }
   private schedule(): void {
     clearTimeout(this.timer);
-    if (this.mounted && !this.capturing && !this.waiting.size && this.cardWidth > 0) {
+    if (this.mounted && PreviewCapture.isCurrent(this.request.id) && !this.capturing && !this.waiting.size && this.cardWidth > 0) {
       // Area changes reset the delay; capture the settled layout, not the loading placeholder.
       this.timer = setTimeout(() => { this.capture(); }, 200);
     }
   }
   private async capture(): Promise<void> {
+    if (!this.mounted || !PreviewCapture.isCurrent(this.request.id)) { return; }
     this.capturing = true;
     let pixel: image.PixelMap | undefined;
     try {
       pixel = await this.getUIContext().getComponentSnapshot().get('preview-capture-' + this.request.id,
         { waitUntilRenderFinished: true });
-      if (!this.mounted) { return; }
+      if (!this.mounted || !PreviewCapture.isCurrent(this.request.id)) { return; }
       const attachment = await Attachments.savePreview(pixel);
       const info = await pixel.getImageInfo();
-      if (!this.mounted) { return; }
+      if (!this.mounted || !PreviewCapture.isCurrent(this.request.id)) { return; }
       if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'preview', 'captured', { operationId: this.request.id, width: info.size.width, height: info.size.height, widthVp: this.cardWidth }); };
       PreviewCapture.complete(this.request.id, { image: attachment, width: info.size.width, height: info.size.height, viewportWidth: this.cardWidth });
     } catch (error) {
-      if (this.mounted) { PreviewCapture.complete(this.request.id, undefined, error as Error); }
+      if (this.mounted && PreviewCapture.isCurrent(this.request.id)) { PreviewCapture.complete(this.request.id, undefined, error as Error); }
     } finally { await pixel?.release(); }
   }
   build() {

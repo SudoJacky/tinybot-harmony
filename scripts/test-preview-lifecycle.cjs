@@ -139,7 +139,9 @@ web.saving = true; web.visible = false; web.visibilityChanged(); advance(600); a
 web.saving = false; web.visibilityChanged(); advance(5000); assert.equal(web.renderWeb, false);
 web.visible = true; web.visibilityChanged(); web.aboutToDisappear(); advance(1000); assert.equal(web.mounted, false); assert.equal(web.renderWeb, false);
 const check = make({ preflight: true, foreground: false }); check.aboutToAppear();
-assert.equal(check.renderWeb, true, 'Hidden validation must still render'); check.visibilityChanged(); advance(1000); assert.equal(check.renderWeb, true);
+assert.equal(check.renderWeb, false, 'Background validation must wait for a foreground render host');
+check.visibilityChanged(); advance(30000); assert.equal(check.renderWeb, false);
+check.foreground = true; check.foregroundChanged(); assert.equal(check.renderWeb, true, 'Foreground validation renders even while its host is visually hidden');
 check.aboutToDisappear(); assert.equal(check.renderWeb, false); assert.equal(timers.size, 0); assert.equal(context.activeWebViews, 0);
 const scrolling = make({ visible: true, scrolling: true }); const beforeScroll = controllers;
 scrolling.aboutToAppear(); assert.equal(controllers, beforeScroll); assert.equal(scrolling.renderWeb, false);

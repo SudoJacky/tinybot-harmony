@@ -2,7 +2,7 @@
 
 使用 ArkTS + ArkUI 编写的原生 HarmonyOS 个人 AI 助手。手机和平板直接连接用户配置的模型服务，数据保存在应用沙箱中；不依赖 Tinybot 桌面进程。
 
-最低版本为 **HarmonyOS 6.0.0（API 20）**，目标版本为 **API 26**：同一个包在 HarmonyOS 6 上使用普通界面，在 HarmonyOS 7 上保留沉浸光感材质。当前准备发布版本为 **1.1.0 / 1001000**，参阅[更新说明](docs/distribution/RELEASE-NOTES.txt)。
+最低版本为 **HarmonyOS 6.0.0（API 20）**，目标版本为 **API 26**：同一个包在 HarmonyOS 6 上使用普通界面，在 HarmonyOS 7 上保留沉浸光感材质。当前准备发布版本为 **1.1.1 / 1001001**，参阅[更新说明](docs/distribution/RELEASE-NOTES.txt)。
 
 系统能力差异（运行时会给出真实状态，不会静默降级）：
 
