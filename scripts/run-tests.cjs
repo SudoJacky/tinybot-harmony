@@ -32,6 +32,7 @@ const suites = {
     'test-preview-screenshot.cjs',
     'test-productivity-native.cjs',
     'test-request-context.cjs',
+    'test-review-invitation.cjs',
     'test-resources.cjs',
     'test-speech-native.cjs',
     'test-storage-usage.cjs',

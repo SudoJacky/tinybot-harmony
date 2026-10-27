@@ -148,8 +148,10 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   }
   probe.announcementDialog = new Controller({ onDidDisappear: () => { probe.announcementDialog = undefined; } });
   const abandoned = probe.announcementDialog; probe.closeAnnouncement(); assert.equal(abandoned.closed, true);
-  assert.ok(source.includes('this.closeAnnouncement();\n      this.app.stop()'), 'Privacy withdrawal closes the dialog');
-  assert.ok(source.includes('aboutToDisappear(): void {\n    this.closeAnnouncement();'), 'Page teardown closes the dialog');
+  assert.match(source.slice(source.indexOf('  private privacyChanged('), source.indexOf('  private offerOnboarding(')),
+    /this\.closeAnnouncement\(\);/, 'Privacy withdrawal closes the dialog');
+  assert.match(source.slice(source.indexOf('  aboutToDisappear('), source.indexOf('  private setDrawer(')),
+    /this\.closeAnnouncement\(\);/, 'Page teardown closes the dialog');
   console.log('PASS custom dialog startup gating, mounting deduplication, actual appearance, failed-save retry and lifecycle cleanup');
 
   // Inspect the actual ArkUI-emitted tree: the action must remain outside the scrolling content.

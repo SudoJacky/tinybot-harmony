@@ -1,4 +1,12 @@
 {
+  "你已评价过此应用，感谢反馈。": "You have already reviewed this app. Thank you for your feedback.",
+  "愿意评价 Tinybot 吗？": "Would you like to review Tinybot?",
+  "你的评分和评论能帮助我们改进 Tinybot，也能帮助更多人了解它。": "Your rating and review help us improve Tinybot and help more people discover it.",
+  "去评分": "Rate Tinybot",
+  "暂不": "Not now",
+  "不再提醒": "Don't ask again",
+  "无法保存评分邀请记录：{0}": "Could not save review invitation history: {0}",
+  "无法显示评分邀请：{0}": "Could not show the review invitation: {0}",
   "全部关闭": "Disable all",
   "文件交付": "File delivery",
   "团队协作": "Team collaboration",
