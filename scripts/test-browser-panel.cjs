@@ -20,6 +20,20 @@ function visit(node) {
 visit(panelTree);
 const indexTree = emitted('pages/Index');
 const index = indexTree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'Index');
+let presentCallback;
+function findPresentation(node) {
+  if (ts.isPropertyAssignment(node) && node.name.getText(indexTree) === 'onPresent') presentCallback = node.initializer.getText(indexTree);
+  ts.forEachChild(node, findPresentation);
+}
+findPresentation(indexTree); assert.ok(presentCallback, 'Preview capture must be able to present the browser');
+const presentationExports = {};
+vm.runInNewContext(ts.transpileModule('export function callback(){return (' + presentCallback + ');}', {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }
+}).outputText, { exports: presentationExports });
+const presented = { owner: 'agent', expanded: false, tab: '', setBrowserExpanded(value) { this.expanded = value; }, openDetailTab(value) { this.tab = value; } };
+presentationExports.callback.call(presented)();
+assert.equal(presented.expanded, true); assert.equal(presented.tab, 'browser'); assert.equal(presented.owner, 'agent');
+console.log('PASS emitted preview presentation expands the browser and selects its tab without taking control');
 const back = index.members.find(n => n.name?.getText(indexTree) === 'onBackPress').body.getText(indexTree);
 const panelClass = panelTree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'BrowserPanel');
 const navigate = panelClass.members.find(n => n.name?.getText(panelTree) === 'navigate').body.getText(panelTree);

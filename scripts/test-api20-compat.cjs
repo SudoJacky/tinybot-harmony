@@ -232,9 +232,16 @@ async function main() {
   cache.set(path.resolve(root, 'services/McpOAuth.ets'), { McpOAuth: { bearer: async () => 'fixture-token' } });
   const { McpClient } = load('services/McpClient');
   const { Cancellation } = load('services/Cancellation');
+  const { NetworkTransfers } = load('services/NetworkTransfers');
+  let activeTransfers = 0, admittedTransfers = 0;
+  const unobserveTransfers = NetworkTransfers.observe(async () => {
+    activeTransfers++; admittedTransfers++;
+    return async () => { activeTransfers--; };
+  });
   let mcpFetchEnded = false, mcpResult;
   rcpCancelled = 0;
   customFetch = (request, configuration, session) => new Promise((_resolve, reject) => {
+    assert.equal(activeTransfers, 1, 'Native MCP I/O starts only inside its admitted transfer scope');
     session.rejectPending = reject;
     queueMicrotask(() => {
       const events = configuration.requestConfiguration.tracing?.httpEventsHandler;
@@ -252,11 +259,24 @@ async function main() {
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(Array.isArray(mcpResult?.tools), true, 'MCP resolves the matching result before server EOF');
     await rpc;
+    assert.equal(activeTransfers, 0, 'Native MCP result releases its transfer before returning');
+    assert.equal(admittedTransfers, 1);
     assert.equal(client.session, 'mcp-held');
     assert.equal(rcpCancelled, 1, 'MCP completion aborts its held native stream');
     assert.equal(mcpFetchEnded, true, 'Cancellation settles the in-flight fetch');
   } finally { signal.cancel(); await rpc.catch(() => {}); }
+  unobserveTransfers();
   customFetch = undefined;
+  const webScopes = load('services/NetworkTransfers').NetworkTransfers;
+  let webAdmissions = 0, webReleases = 0;
+  const unobserveWeb = webScopes.observe(async () => {
+    webAdmissions++; return async () => { webReleases++; };
+  });
+  rcpResponse = { statusCode: 200, headers: { 'content-type': 'text/html' }, body: new TextEncoder().encode('<p>scoped</p>').buffer };
+  const scopedWeb = new (load('services/NativeWebTransport').NativeWebTransport)();
+  assert.equal((await scopedWeb.get('https://example.com/scoped', new Cancellation())).body, '<p>scoped</p>');
+  assert.equal(webAdmissions, 1); assert.equal(webReleases, 1, 'Native web reading releases before returning the document');
+  unobserveWeb();
 
   // --- empty PixelMap ---------------------------------------------------------------------
   atApi(26);
@@ -370,8 +390,14 @@ async function main() {
   responder = () => ({ status: 404, header: {}, text: '', bytes: new ArrayBuffer(0) });
   await assert.rejects(hopTransport.get('https://example.com/x', cancellation), /HTTP 404/);
 
-  responder = () => ({ status: 200, header: { 'content-type': 'text/plain' }, text: '', bytes: new ArrayBuffer(2 * 1024 * 1024) });
-  await assert.rejects(hopTransport.get('https://example.com/big', cancellation), /1 MiB/, 'The 1 MiB ceiling is kept');
+  let downloadBudget;
+  responder = request => { downloadBudget=request.maxBytes; return {
+    status: 200, header: { 'content-type': 'text/plain' }, text: '', bytes: new TextEncoder().encode('x'.repeat(2 * 1024 * 1024)).buffer
+  }; };
+  await assert.rejects(hopTransport.get('https://example.com/big', cancellation), error=>
+    error.code==='LIMIT_EXCEEDED'&&error.recovery==='increase_download_budget');
+  document=await hopTransport.get('https://example.com/big',cancellation,2*1024*1024);
+  assert.equal(document.body.length,2*1024*1024);assert.equal(downloadBudget,2*1024*1024,'Download budget is adjustable, with no fixed 1 MiB content ceiling');
 
   responder = () => page('x');
   const dead = { cancelled: false, check() { throw new Error('cancelled by user'); }, onCancel: () => () => {} };
@@ -385,6 +411,11 @@ async function main() {
   const searchConfig = { provider: 'deepseek', enabled: true, modelProviderId: 'deepseek-provider' };
   const SearchTransport = load('services/NativeSearchTransport').NativeSearchTransport;
   const search = new SearchTransport(searchConfig, vault, 'thread', () => {}, () => providerProfiles);
+  const searchTransfers = load('services/NetworkTransfers').NetworkTransfers;
+  let searchAdmissions = 0, searchReleases = 0;
+  const unobserveSearch = searchTransfers.observe(async () => {
+    searchAdmissions++; return async () => { searchReleases++; };
+  });
   httpCalls = []; rcpCalls = [];
   httpResponse = { responseCode: 302, header: { Location: 'https://evil.example' }, result: '' };
   await assert.rejects(search.search('query', 1, cancellation), error => {
@@ -397,6 +428,8 @@ async function main() {
   assert.equal(httpCalls[0].options.maxRedirects, 0, 'The search key stays on its origin');
   assert.equal(httpCalls[0].options.header.Authorization, 'Bearer search-secret');
   assert.equal(rcpCalls.length, 0);
+  assert.equal(searchAdmissions, 1); assert.equal(searchReleases, 1, 'HTTP failures also end the native search scope');
+  unobserveSearch();
 
   console.log('PASS API 20 compatibility: capability gates, redirect-safe transport (http and rcp), ' +
     'live SSE/MCP delivery, bounded native reception/cancellation, empty bitmap creation, PDF text fallback, web hop validation and search redirect refusal');

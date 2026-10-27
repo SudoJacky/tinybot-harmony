@@ -1,4 +1,16 @@
 {
+  "全屏预览": "Fullscreen preview",
+  "退出全屏": "Exit fullscreen",
+  "截取浏览器画面": "Capture browser frames",
+  "等待浏览器状态": "Wait for browser state",
+  "你已评价过此应用，感谢反馈。": "You have already reviewed this app. Thank you for your feedback.",
+  "愿意评价 Tinybot 吗？": "Would you like to review Tinybot?",
+  "你的评分和评论能帮助我们改进 Tinybot，也能帮助更多人了解它。": "Your rating and review help us improve Tinybot and help more people discover it.",
+  "去评分": "Rate Tinybot",
+  "暂不": "Not now",
+  "不再提醒": "Don't ask again",
+  "无法保存评分邀请记录：{0}": "Could not save review invitation history: {0}",
+  "无法显示评分邀请：{0}": "Could not show the review invitation: {0}",
   "全部关闭": "Disable all",
   "文件交付": "File delivery",
   "团队协作": "Team collaboration",
@@ -2414,5 +2426,9 @@
   "内置搜索需要使用浏览器访问必应并读取搜索结果。": "Built-in search needs the browser to open Bing and read search results.",
   "必应需要验证。请在浏览器中完成验证，保留当前搜索页面，然后交还控制。": "Bing requires verification. Complete it in the browser, keep the current search page open, then return control.",
   "1.1.0 · 2026-10-26": "1.1.0 · 2026-10-26",
-  "新增平板工作台、反馈与建议、存储空间管理及无需搜索密钥的内置必应搜索，支持 HarmonyOS 6（API 20）。已启用的工具直接提供给模型，交互预览在最终回复中展示。修复必应移动页面无法提取搜索结果的问题，并优化平板公告宽度。": "Adds the tablet workbench, feedback, storage management, and built-in Bing search without a search API key, with HarmonyOS 6 (API 20) support. Enabled tools are provided directly to the model, and interactive previews appear in the final response. Fixes result extraction on mobile Bing pages and improves announcement width on tablets."
+  "新增平板工作台、反馈与建议、存储空间管理及无需搜索密钥的内置必应搜索，支持 HarmonyOS 6（API 20）。已启用的工具直接提供给模型，交互预览在最终回复中展示。修复必应移动页面无法提取搜索结果的问题，并优化平板公告宽度。": "Adds the tablet workbench, feedback, storage management, and built-in Bing search without a search API key, with HarmonyOS 6 (API 20) support. Enabled tools are provided directly to the model, and interactive previews appear in the final response. Fixes result extraction on mobile Bing pages and improves announcement width on tablets.",
+  "后台执行已被系统或用户中止，本轮已停止。请回到应用后重试。": "Background execution was stopped by the system or user. This turn was stopped. Return to the app to retry.",
+  "未能启动后台任务，本轮已停止。请保持应用在前台后重试。": "Could not start the background task. This turn was stopped. Keep the app in the foreground to retry.",
+  "后台流式传输已达到本次运行时限，本轮已停止。请回到应用后重试。": "The background streaming window has ended. This turn was stopped. Return to the app to retry.",
+  "后台任务释放失败，本轮已停止。请回到应用后重试。": "Could not release the background task. This turn was stopped. Return to the app to retry."
 }

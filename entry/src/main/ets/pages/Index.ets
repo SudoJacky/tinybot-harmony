@@ -26,6 +26,8 @@ import { ToolApproval } from '../services/ToolApproval';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { requestAppReview } from '../services/AppInformation';
+import { ReviewPreferences } from '../services/ReviewPreferences';
+import { ReviewChoice, ReviewInvitationDialog } from '../views/ReviewInvitationDialog';
 import { KeyboardAvoidMode, SymbolGlyphModifier } from '@kit.ArkUI';
 import { ShareInbox } from '../services/NativeActions';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
@@ -68,7 +70,7 @@ const CHAT_HEADER_HEIGHT: number = 56;
 struct Index {
   @State private privacy: HostedPrivacy = hostedPrivacy;
   @StorageProp('tinybot.privacy.allowed') @Watch('privacyChanged') private privacyAllowed: boolean = false;
-  @StorageProp('tinybot.foreground') @Watch('offerAnnouncement') private foreground: boolean = false;
+  @StorageProp('tinybot.foreground') @Watch('foregroundChanged') private foreground: boolean = false;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
   @State private app: ChatViewModel = new ChatViewModel();
@@ -124,6 +126,10 @@ struct Index {
   private announcementDialog?: CustomDialogController;
   private receiving: boolean = false;
   private ratingOpen: boolean = false;
+  private reviewDialog?: CustomDialogController;
+  private reviewTimer: number = -1;
+  private reviewAfterDismiss: boolean = false;
+  private reviewDisposed: boolean = false;
   private unsubscribeLaunch?: () => void;
   private launching: boolean = false;
   @State private voiceRequest: string = '';
@@ -133,6 +139,7 @@ struct Index {
   @State private onboardingActive: boolean = false;
 
   onPageShow(): void {
+    this.reviewDisposed = false;
     this.paths.disableAnimation(false);
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
     if (!this.privacy.allowed) { return; }
@@ -143,6 +150,7 @@ struct Index {
       this.session = createNativeSessionService(context.filesDir, context.getApplicationContext().filesDir, this.approval, context, this.browser);
       this.session.subscribe((event) => {
         if (event.state.ready && event.state.phase === 'idle' && !event.state.saveError && ShareInbox.peek()) { this.receiveShare(); }
+        if (event.kind === 'task-complete' && event.threadId) { this.taskCompleted(event.threadId); }
       });
     }
     this.app.initialize(this.session).then(() => {
@@ -158,7 +166,7 @@ struct Index {
 
   private offerAnnouncement(): void {
     if (!this.privacy.allowed || !this.foreground || !this.app.ready || !this.onboardingChecked ||
-      this.paths.size() > 0 || this.browserExpanded || this.showToolScope || this.ratingOpen || this.announcementDialog) { return; }
+      this.paths.size() > 0 || this.browserExpanded || this.showToolScope || this.ratingOpen || this.reviewDialog || this.announcementDialog) { return; }
     const item = announcements.pending();
     if (!item) { return; }
     // Tablets and wide windows follow the window width; 0 keeps the platform default.
@@ -188,6 +196,91 @@ struct Index {
     this.announcementDialog?.close();
   }
 
+  private reviewPreferences(): ReviewPreferences {
+    return new ReviewPreferences(this.getUIContext().getHostContext() as common.UIAbilityContext);
+  }
+
+  private reviewSaveFailed(error: Error): void {
+    Diagnostics.log('error', 'review', 'save_failed', undefined, error);
+    this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface,
+      message: t('无法保存评分邀请记录：{0}', [error.message]) });
+  }
+
+  private taskCompleted(threadId: string): void {
+    if (!this.privacy.allowed || this.reviewDisposed) { return; }
+    try {
+      const history = this.reviewPreferences(); history.recordTask();
+      Diagnostics.log('info', 'review', 'task_completed');
+      if (!this.foreground || !history.shouldAsk(Date.now())) { return; }
+    } catch (error) { this.reviewSaveFailed(error as Error); return; }
+    clearTimeout(this.reviewTimer);
+    // Let the final answer settle and queued work finish. A blocked opportunity is discarded,
+    // never replayed on startup, foreground entry or return from a settings page.
+    this.reviewTimer = setTimeout(() => { this.reviewTimer = -1; this.offerReviewInvitation(threadId); }, 1500);
+  }
+
+  private canOfferReview(threadId: string): boolean {
+    return !this.reviewDisposed && this.privacy.allowed && this.foreground && this.app.ready && !this.app.busy &&
+      !this.app.error && !this.app.saveError && this.app.active.id === threadId && !this.app.draft.trim() &&
+      this.app.active.attachments.length === 0 && this.app.active.references.length === 0 &&
+      this.app.active.pendingInputs.length === 0 && this.paths.size() === 0 && this.chatVisible &&
+      !this.onboardingActive && !this.receiving && !this.launching && !ShareInbox.peek() &&
+      !this.drawerOpen && !this.drawerDragging && !this.detailPaneOpen && !this.browserExpanded && !this.showToolScope &&
+      !this.voiceRequest && !this.approval.title && !this.approval.form && !this.ratingOpen &&
+      !this.announcementDialog && !announcements.loading && !announcements.pending();
+  }
+
+  private offerReviewInvitation(threadId: string): void {
+    if (this.reviewDialog || !this.canOfferReview(threadId)) { return; }
+    try {
+      if (!this.reviewPreferences().shouldAsk(Date.now())) { return; }
+      const width = WorkbenchLayout.dialogWidth(this.windowWidth);
+      this.reviewDialog = new CustomDialogController({
+        builder: ReviewInvitationDialog({ onChoose: (choice: ReviewChoice) => this.chooseReviewInvitation(choice) }),
+        systemMaterial: this.appearance.surface, autoCancel: true, alignment: DialogAlignment.Center,
+        width: width > 0 ? width : undefined,
+        onDidAppear: () => {
+          if (!this.canOfferReview(threadId)) { this.closeReviewInvitation(); return; }
+          try { this.reviewPreferences().didAsk(Date.now()); Diagnostics.log('info', 'review', 'presented'); }
+          catch (error) { this.closeReviewInvitation(); this.reviewSaveFailed(error as Error); }
+        },
+        onDidDisappear: () => {
+          const open = this.reviewAfterDismiss; this.reviewAfterDismiss = false; this.reviewDialog = undefined;
+          if (open && !this.reviewDisposed && this.privacy.allowed && this.foreground) { this.openSupport('rating'); }
+        }
+      });
+      this.reviewDialog.open();
+    } catch (error) {
+      this.reviewDialog = undefined;
+      Diagnostics.log('error', 'review', 'present_failed', undefined, error as Error);
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface,
+        message: t('无法显示评分邀请：{0}', [(error as Error).message]) });
+    }
+  }
+
+  private chooseReviewInvitation(choice: ReviewChoice): void {
+    if (choice === 'never') {
+      try { this.reviewPreferences().stopInvitations(); }
+      catch (error) { Diagnostics.log('error', 'review', 'save_failed', undefined, error as Error); throw error as Error; }
+    }
+    Diagnostics.log('info', 'review', choice === 'review' ? 'accepted' : choice === 'never' ? 'disabled' : 'deferred');
+    this.reviewAfterDismiss = choice === 'review'; this.reviewDialog?.close();
+  }
+
+  private closeReviewInvitation(): void {
+    this.cancelReviewOffer(); this.reviewAfterDismiss = false;
+    this.reviewDialog?.close();
+  }
+
+  private cancelReviewOffer(): void {
+    clearTimeout(this.reviewTimer); this.reviewTimer = -1;
+  }
+
+  private foregroundChanged(): void {
+    if (!this.foreground) { this.closeReviewInvitation(); }
+    this.offerAnnouncement();
+  }
+
   private onboardingPreferences(): OnboardingPreferences {
     return new OnboardingPreferences(this.getUIContext().getHostContext() as common.UIAbilityContext);
   }
@@ -196,6 +289,7 @@ struct Index {
     if (this.privacyAllowed) { this.onPageShow(); }
     else {
       this.closeAnnouncement();
+      this.closeReviewInvitation();
       this.app.stop(); this.browser.close(); this.browserExpanded = false; this.showToolScope = false;
       this.voiceRequest = ''; this.paths.clear(); this.setDrawer(false);
       this.workspaceOpen = false; this.previewVisible = false; this.previewId = '';
@@ -576,6 +670,7 @@ struct Index {
   }
 
   aboutToDisappear(): void {
+    this.reviewDisposed = true; this.closeReviewInvitation();
     this.closeAnnouncement();
     this.unsubscribeLaunch?.(); this.unsubscribeLaunch = undefined;
     this.app.stop();
@@ -672,8 +767,21 @@ struct Index {
     try {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       await requestAppReview(context);
+      Diagnostics.log('info', 'review', 'request_completed');
+      // Stop automatic requests after accepting the system flow, even if the user dismissed it.
+      // This is invitation history, not proof that a rating was submitted. Manual access stays available.
+      try { this.reviewPreferences().stopInvitations(); }
+      catch (error) { this.reviewSaveFailed(error as Error); }
     } catch (error) {
       const failure = error as BusinessError;
+      Diagnostics.log('error', 'review', 'request_failed', undefined, failure);
+      if (failure.code === 1021500007 || failure.code === 1021500009) {
+        try { this.reviewPreferences().stopInvitations(); }
+        catch (storageError) { this.reviewSaveFailed(storageError as Error); }
+        this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface,
+          message: t('你已评价过此应用，感谢反馈。') });
+        return;
+      }
       const detail = failure.code ? failure.code + ' · ' + failure.message : failure.message;
       this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t('评分和评论'),
         message: t('暂时无法打开评分和评论，请稍后重试。错误：{0}', [detail]),
@@ -1206,6 +1314,7 @@ struct Index {
             AnimatedPage({ visible: this.detailTabVisible('browser'), retained: true,
               vertical: this.windowWidth < 840, onPresenceChanged: (present: boolean) => this.browserPresenceChanged(present) }) {
               BrowserPanel({ browser: this.browser, expanded: this.detailTabVisible('browser'), presented: this.browserPresent,
+                onPresent: () => { this.setBrowserExpanded(true); this.openDetailTab('browser'); },
                 tabbed: this.workbench().docked, threadId: this.app.active.id,
                 canAnnotate: this.app.canQueueInput && this.app.active.attachments.length < 4,
                 onAnnotation: (threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string) => this.addBrowserAnnotation(threadId, pixel, page, note),
@@ -1236,6 +1345,7 @@ struct Index {
       }
     }.width('100%').height('100%')
     .backgroundColor($r('app.color.page_background'))
+    .onTouch((event: TouchEvent) => { if (event.type === TouchType.Down) { this.cancelReviewOffer(); } })
     .onAreaChange((_old: Area, area: Area) => this.windowChanged(Number(area.width)))
     .bindSheet($$this.showToolScope, this.toolScopeSheet(), { title: { title: t('工具范围') },
       height: this.app.active.agentMode === 'custom' ? SheetSize.LARGE : SheetSize.FIT_CONTENT,

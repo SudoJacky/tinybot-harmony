@@ -1,3 +1,4 @@
+import { BrowserPreview } from '../model/BrowserPreview';
 import { ProviderEffects } from './providers/Provider';
 import { PresentTools } from './PresentTools';
 import { PreviewTools } from './PreviewTools';
@@ -54,6 +55,7 @@ import { ToolSet } from './ToolSet';
 import { profileProvider } from './providers/DefaultProviders';
 import { ProviderRegistry } from './providers/ProviderRegistry';
 import { huaweiAccount } from './HuaweiAccount';
+import { backgroundGeneration } from './BackgroundGeneration';
 
 class NativeProviderEffects implements ProviderEffects {
   hydrate(messages: ModelMessage[]): Promise<ModelMessage[]> { return Attachments.hydrate(messages); }
@@ -69,6 +71,7 @@ class NativeUsageRecorder implements UsageRecorder {
 
 export class NativeSessionResources implements SessionResources {
   authorizeGeneration(): Promise<void> { return huaweiAccount.requireLogin(); }
+  async prepareGeneration(): Promise<void> { if (this.context) { await backgroundGeneration.beginTurn(); } }
   private workspaces: WorkspaceStore;
   private providers: ProviderRegistry;
   private approval: ToolApproval;
@@ -91,7 +94,7 @@ export class NativeSessionResources implements SessionResources {
   persistProjectFolders(folders: SharedFolder[]): Promise<void> { return ProjectFolderAccess.persist(folders); }
   revokeProjectFolders(folders: SharedFolder[]): Promise<void> { return ProjectFolderAccess.revoke(folders); }
   activateProjectFolders(projects: ProjectData[]): Promise<void> { return ProjectFolderAccess.activateAll(projects); }
-  tools(id: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments: Attachment[] = [], live?: LiveResources, workspaceId?: string, project?: ProjectData): AgentTools {
+  tools(id: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments: Attachment[] = [], live?: LiveResources, workspaceId?: string, project?: ProjectData, resolvePreview?: (previewId: string) => BrowserPreview): AgentTools {
     const root = this.workspaces.pathFor(workspaceId || id);
     const files = new NativeWorkspaceFiles(root, project?.sharedFolders || []);
     const groups: AgentTools[] = [new WorkspaceTools(files, nativeWorkspaceDiffs), new AttachmentTools(attachments),
@@ -101,7 +104,7 @@ export class NativeSessionResources implements SessionResources {
     groups.push(new PreviewTools(files, (content, cancellation) => WebUiPreflight.validate(content, cancellation),
       (content, cancellation) => PreviewCapture.capture(content, cancellation)));
     if (extensions.webEnabled) { groups.push(new WebTools(new NativeWebTransport())); }
-    if (this.browser) { groups.push(new BrowserTools(this.browser, id, productivity?.options?.readOnly === true)); }
+    if (this.browser) { groups.push(new BrowserTools(this.browser, id, productivity?.options?.readOnly === true, resolvePreview)); }
     const search = productivity?.options?.search;
     if (extensions.webEnabled && search?.enabled) {
       if (search.provider === 'bing-browser') {
@@ -141,6 +144,7 @@ export function createNativeSessionService(filesDir: string, workspaceFilesDir: 
   const session = new SessionService(new ConversationStore(filesDir), new AgentRuntime(providers, credentials, new NativeUsageRecorder(),
     (content, cancellation) => WebUiPreflight.validate(content, cancellation), new NativeOrchestrationExecutor(), browser), credentials,
     new NativeSessionResources(workspaceFilesDir, providers, approval, context, browser));
+  if (context) { backgroundGeneration.attach(session, context); }
   if (browser) {
     browser.configure((policy) => session.setBrowserPolicy(policy), (event, fields, error) => Diagnostics.log(error === undefined ? 'info' : 'error', 'browser', event, fields, error));
     session.subscribe((event) => { if (event.data) { browser.updatePolicy(event.data.extensions?.browserPolicy || 'unset'); } });

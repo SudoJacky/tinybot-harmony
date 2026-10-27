@@ -12,9 +12,12 @@ export interface TextPage {
 
 // Columns are 1-based UTF-16 positions. A cursor never splits a surrogate pair.
 // Long individual lines can be continued too; Harmony has no shell fallback.
-export function textPage(content: string, offset: number = 1, limit: number = MAX_READ_LINES, column: number = 1): TextPage {
+export function textPage(content: string, offset: number = 1, limit: number = MAX_READ_LINES, column: number = 1,
+  maxBytes: number = MAX_READ_BYTES): TextPage {
   if (!Number.isSafeInteger(offset) || offset < 1 || !Number.isSafeInteger(limit) || limit < 1 ||
-    !Number.isSafeInteger(column) || column < 1) { throw new Error('offset, limit and column must be positive integers.'); }
+    !Number.isSafeInteger(column) || column < 1 || !Number.isSafeInteger(maxBytes) || maxBytes < 4) {
+    throw new Error('offset, limit and column must be positive integers; maxBytes must be an integer of at least 4 to fit any Unicode character.');
+  }
   const lines = content.split('\n');
   if (offset > lines.length) { throw new Error('offset is beyond the end of the file.'); }
   const first = lines[offset - 1];
@@ -25,7 +28,7 @@ export function textPage(content: string, offset: number = 1, limit: number = MA
   const result: TextPage = { content: '', startLine: offset, totalLines: lines.length, truncated: false };
   const chunks: string[] = [];
   let bytes = 0;
-  const end = Math.min(lines.length, offset - 1 + Math.min(limit, MAX_READ_LINES));
+  const end = Math.min(lines.length, offset - 1 + limit);
   for (let index = offset - 1; index < end; index++) {
     const line = lines[index];
     const start = index === offset - 1 ? column - 1 : 0;
@@ -35,7 +38,7 @@ export function textPage(content: string, offset: number = 1, limit: number = MA
       const paired = code >= 0xd800 && code <= 0xdbff && position + 1 < line.length &&
         line.charCodeAt(position + 1) >= 0xdc00 && line.charCodeAt(position + 1) <= 0xdfff;
       const size = paired ? 4 : code < 0x80 ? 1 : code < 0x800 ? 2 : 3;
-      if (bytes + size > MAX_READ_BYTES) { break; }
+      if (bytes + size > maxBytes) { break; }
       bytes += size; position += paired ? 2 : 1;
     }
     chunks.push(line.slice(start, position));
@@ -45,7 +48,7 @@ export function textPage(content: string, offset: number = 1, limit: number = MA
     }
     if (index + 1 < lines.length) {
       // Include separators in the budget, so joining successive pages is lossless.
-      if (bytes === MAX_READ_BYTES) {
+      if (bytes === maxBytes) {
         result.nextOffset = index + 1; result.nextColumn = position + 1;
         break;
       }

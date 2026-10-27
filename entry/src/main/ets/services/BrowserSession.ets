@@ -5,6 +5,8 @@ import { ToolFailure, ToolResultError } from '../model/ToolFailure';
 import { ExecutionGate } from './AgentLoop';
 import { Cancellation, RunCancelledError } from './Cancellation';
 import { BingSearchPage } from '../model/BingSearch';
+import { BrowserPreview } from '../model/BrowserPreview';
+import { BrowserFrame, BrowserObservation } from '../model/Agent';
 
 export interface BrowserElement { id: number; role: string; label: string; type: string; value?: string; }
 export interface BrowserViewport { x: number; y: number; width: number; height: number; scrollHeight: number; }
@@ -12,11 +14,16 @@ export interface BrowserPage {
   snapshotId: string; url: string; title: string; text: string; elements: BrowserElement[];
   truncated: boolean; embeddedFrames: number; trust: string;
   textScope?: string; elementsScope?: string; viewport?: BrowserViewport;
+  previewId?: string; version?: string; errors?: string[]; reductions?: string[];
 }
-export interface BrowserAction { action: string; snapshotId?: string; elementId?: number; text?: string; deltaY?: number; }
+export interface BrowserCaptureOptions { count: number; intervalMs: number; }
+export interface BrowserWaitCondition { type: string; text?: string; elementId?: number; value?: string; }
+export interface BrowserAction { action: string; snapshotId?: string; elementId?: number; text?: string; deltaY?: number; capture?: BrowserCaptureOptions; }
 export interface BrowserActionFeedback { id: number; x: number; y: number; }
 export interface BrowserDriver {
   open(url: string): Promise<void>;
+  openPreview?(preview: BrowserPreview, cancellation?: Cancellation): Promise<void>;
+  captureFrame?(): Promise<BrowserFrame>;
   snapshot(id: string): Promise<BrowserPage>;
   readBingSearch?(query: string, maximum: number): Promise<BingSearchPage>;
   act(action: BrowserAction): Promise<void>;
@@ -29,6 +36,9 @@ export interface BrowserReceipt { operation: string; completed: boolean; userInt
 @Observed
 export class BrowserSession implements ExecutionGate {
   policy: BrowserPolicy = 'unset';
+  preview?: BrowserPreview;
+  previewSpec: string = '';
+  previewInstance: number = 0;
   open: boolean = false;
   owner: string = 'none';
   url: string = '';
@@ -57,15 +67,28 @@ export class BrowserSession implements ExecutionGate {
   private issuedOperation?: Promise<void>;
   private feedbackSequence: number = 0;
   private feedbackTimer: number = -1;
+  private present?: () => void;
+  private observationGeneration: number = 0;
+  private documentGeneration: number = 0;
+  private observationVisible: boolean = false;
+  private observationForeground: boolean = true;
 
   get paused(): boolean { return this.permissionPending || (!!this.lease && this.owner === 'user'); }
   get hasTask(): boolean { return this.lease !== undefined; }
   configure(savePolicy: (policy: BrowserPolicy) => Promise<void>, log: (event: string, fields?: LogFields, error?: Error | string) => void): void {
     this.savePolicy = savePolicy; this.log = log;
   }
-  attach(driver: BrowserDriver): void {
+  attach(driver: BrowserDriver, present?: () => void): void {
     if (this.driver && this.driver !== driver) { throw new Error('Browser driver is already attached.'); }
     this.driver = driver;
+    this.present = present;
+  }
+  requestPresentation(): void { this.present?.(); }
+  invalidateObservation(): void { this.observationGeneration++; }
+  documentChanged(): void { this.documentGeneration++; this.invalidateObservation(); }
+  setPresentation(visible: boolean, foreground: boolean): void {
+    if (this.observationVisible !== visible || this.observationForeground !== foreground) { this.invalidateObservation(); }
+    this.observationVisible = visible; this.observationForeground = foreground;
   }
   detach(driver: BrowserDriver): void {
     if (this.driver !== driver) { return; }
@@ -110,6 +133,7 @@ export class BrowserSession implements ExecutionGate {
   }
   private wake(): void { for (const finish of Array.from(this.waiters)) { finish(); } }
   takeOver(reason: string = ''): void {
+    this.invalidateObservation();
     this.clearActionFeedback();
     if (!this.open || this.owner === 'user') { return; }
     this.owner = 'user'; this.epoch++; this.handoffReason = reason;
@@ -130,6 +154,7 @@ export class BrowserSession implements ExecutionGate {
     this.log('task_released', { generation: this.epoch });
   }
   close(): void {
+    this.invalidateObservation();
     this.clearActionFeedback();
     this.epoch++; this.open = false; this.owner = 'none'; this.handoffReason = ''; this.editingAddress = false;
     this.driver?.close(); this.wake(); this.log('closed', { generation: this.epoch });
@@ -191,7 +216,7 @@ export class BrowserSession implements ExecutionGate {
       throw new ToolFailure('BROWSER_NOT_OWNED', 'Call browser_open to acquire the browser before using it.', 'acquire_browser');
     }
   }
-  async acquire(threadId: string, url: string, reason: string, cancellation: Cancellation): Promise<BrowserReceipt> {
+  async acquire(threadId: string, url: string, reason: string, cancellation: Cancellation, preview?: BrowserPreview): Promise<BrowserReceipt> {
     await this.wait(cancellation);
     if (this.policy === 'disabled') { throw new ToolFailure('PERMISSION_DENIED', 'User disabled the in-app browser. Do not ask again; it can be enabled in Settings.', 'respect_user_decision'); }
     if (this.lease && this.lease !== cancellation) {
@@ -213,7 +238,13 @@ export class BrowserSession implements ExecutionGate {
     cancellation.check();
     if (this.policy !== 'enabled') { throw new ToolFailure('PERMISSION_DENIED', 'Browser is disabled.', 'respect_user_decision'); }
     this.open = true; this.owner = 'agent'; this.url = url; this.error = ''; this.epoch++;
-    return this.perform('open', () => this.requireDriver().open(url), cancellation);
+    return this.perform('open', async () => {
+      if (preview) {
+        const driver = this.requireDriver();
+        if (!driver.openPreview) { throw new ToolFailure('BROWSER_UNAVAILABLE', 'Preview browser is unavailable.', 'inspect_browser'); }
+        await driver.openPreview(preview, cancellation);
+      } else { await this.requireDriver().open(url); }
+    }, cancellation);
   }
   async snapshot(cancellation: Cancellation): Promise<BrowserPage> {
     while (true) {
@@ -225,12 +256,99 @@ export class BrowserSession implements ExecutionGate {
       this.pageChanged(page.url, page.title); return page;
     }
   }
-  async act(action: BrowserAction, cancellation: Cancellation): Promise<BrowserReceipt> {
+  async act(action: BrowserAction, cancellation: Cancellation, observation?: BrowserObservation): Promise<BrowserReceipt> {
     await this.wait(cancellation); this.requireOwned(cancellation);
+    if (action.capture || this.preview) { await this.ensurePresented(cancellation); }
     if (['click', 'type', 'select'].includes(action.action) && !action.snapshotId?.endsWith('-' + this.epoch)) {
       throw new ToolFailure('STALE_BROWSER_SNAPSHOT', 'Browser ownership changed. Read a new snapshot before acting.', 'read_browser_snapshot');
     }
-    return this.perform(action.action, () => this.requireDriver().act(action), cancellation);
+    return this.perform(action.action, async () => {
+      const epoch = this.epoch, generation = this.observationGeneration;
+      await this.requireDriver().act(action);
+      if (action.capture && observation) {
+        try { await this.sample(action.capture, cancellation, observation, epoch, generation); }
+        catch (error) {
+          throw new ToolResultError(JSON.stringify({ operation: action.action, completed: true,
+            userIntervened: epoch !== this.epoch, error: (error as Error).message, captured: observation.frames.length }),
+            error instanceof RunCancelledError ? 'CANCELLED' : 'BROWSER_OBSERVATION_FAILED', 'inspect_browser_before_retry');
+        }
+      }
+    }, cancellation);
+  }
+  createObservation(): BrowserObservation {
+    return { previewId: this.preview?.previewId, version: this.preview?.version,
+      instanceId: this.threadId + '-' + this.documentGeneration + '-' + this.previewInstance,
+      frames: [], errors: [] };
+  }
+  async capture(options: BrowserCaptureOptions, cancellation: Cancellation, observation: BrowserObservation): Promise<BrowserReceipt> {
+    await this.wait(cancellation); this.requireOwned(cancellation);
+    await this.ensurePresented(cancellation);
+    return this.perform('capture', async () => {
+      try { await this.sample(options, cancellation, observation, this.epoch, this.observationGeneration); }
+      catch (error) {
+        const failure = error as ToolFailure;
+        throw new ToolResultError(JSON.stringify({ operation: 'capture', completed: false,
+          captured: observation.frames.length, error: failure.message }), failure.code || 'BROWSER_OBSERVATION_FAILED', 'inspect_browser');
+      }
+    }, cancellation);
+  }
+  private async ensurePresented(cancellation: Cancellation): Promise<void> {
+    this.requestPresentation(); const start = Date.now();
+    while (!this.observationVisible) {
+      cancellation.check(); this.requireOwned(cancellation);
+      if (!this.observationForeground || Date.now() - start > 2000) {
+        throw new ToolFailure('BROWSER_NOT_VISIBLE', 'Show the browser in the foreground before sampling.', 'inspect_browser');
+      }
+      await new Promise<void>((resolve) => { setTimeout(resolve, 25); });
+    }
+    if (!this.observationForeground) { throw new ToolFailure('BROWSER_NOT_VISIBLE', 'App must be foreground for sampling.', 'inspect_browser'); }
+  }
+  private async sample(options: BrowserCaptureOptions, cancellation: Cancellation, observation: BrowserObservation,
+    epoch: number, generation: number): Promise<void> {
+    const start = Date.now();
+    const deadline = start + (options.count - 1) * options.intervalMs + 5000;
+    observation.instanceId = this.threadId + '-' + this.documentGeneration + '-' + this.previewInstance;
+    const check = (): void => {
+      cancellation.check(); this.requireOwned(cancellation);
+      if (Date.now() > deadline) { throw new ToolFailure('TIMEOUT', 'Browser sampling exceeded its capture deadline.', 'inspect_browser'); }
+      if (epoch !== this.epoch || generation !== this.observationGeneration || !this.observationVisible || !this.observationForeground) {
+        throw new ToolFailure('BROWSER_OBSERVATION_INTERRUPTED', 'Sampling stopped: page, visibility or control changed.', 'inspect_browser');
+      }
+    };
+    const driver = this.requireDriver();
+    if (!driver.captureFrame) { throw new ToolFailure('BROWSER_UNAVAILABLE', 'Browser capture is unavailable.', 'inspect_browser'); }
+    this.log('capture_started', { count: options.count, previewId: this.preview?.previewId });
+    try {
+      for (let index = 0; index < options.count; index++) {
+        while (Date.now() - start < index * options.intervalMs) {
+          check(); await new Promise<void>((resolve) => { setTimeout(resolve, Math.min(50, index * options.intervalMs - (Date.now() - start))); });
+        }
+        check(); const frame = await driver.captureFrame(); check();
+        frame.elapsedMs = frame.capturedAt - start; observation.frames.push(frame);
+        observation.errors = (await driver.snapshot('capture-' + (++this.sequence) + '-' + epoch)).errors || [];
+        this.log('frame_captured', { count: index + 1, elapsedMs: frame.elapsedMs, width: frame.width, height: frame.height });
+      }
+    } finally { this.log('capture_finished', { count: observation.frames.length, elapsedMs: Date.now() - start }); }
+  }
+  async waitFor(condition: BrowserWaitCondition, timeoutMs: number, cancellation: Cancellation): Promise<BrowserReceipt> {
+    await this.wait(cancellation); this.requireOwned(cancellation);
+    if (this.preview) { await this.ensurePresented(cancellation); }
+    return this.perform('wait', async () => {
+      const epoch = this.epoch, generation = this.observationGeneration, start = Date.now();
+      while (true) {
+        cancellation.check(); this.requireOwned(cancellation);
+        if (epoch !== this.epoch || generation !== this.observationGeneration) {
+          throw new ToolFailure('BROWSER_OBSERVATION_INTERRUPTED', 'Page, visibility or control changed while waiting.', 'inspect_browser');
+        }
+        const page = await this.requireDriver().snapshot('wait-' + (++this.sequence) + '-' + epoch);
+        const found = condition.type === 'text' ? page.text.includes(condition.text as string) :
+          page.elements.some((element) => element.label === condition.text &&
+            (condition.type === 'element' || element.value === condition.value));
+        if (found) { return; }
+        if (Date.now() - start >= timeoutMs) { throw new ToolFailure('TIMEOUT', 'Browser condition did not become true.', 'inspect_browser'); }
+        await new Promise<void>((resolve) => { setTimeout(resolve, 100); });
+      }
+    }, cancellation);
   }
   async readBingSearch(query: string, maximum: number, cancellation: Cancellation): Promise<BingSearchPage> {
     await this.wait(cancellation); this.requireOwned(cancellation);

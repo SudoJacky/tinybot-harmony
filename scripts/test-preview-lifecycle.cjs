@@ -87,7 +87,7 @@ const logs = [], context = { Diagnostics: from('model/Diagnostics').Diagnostics,
   clearTimeout(id) { timers.delete(id); }
 };
 function advance(ms) { now += ms; for (const [id, timer] of [...timers]) if (timer.at <= now) { timers.delete(id); timer.fn(); } }
-const Web = native('WebUiView', 'WebUiView', ['aboutToAppear', 'aboutToDisappear', 'releaseWeb', 'visibilityChanged', 'foregroundChanged', 'syncActivity', 'closePorts', 'sync', 'report', 'receive', 'restart'], context);
+const Web = native('WebUiView', 'WebUiView', ['viewportChanged', 'aboutToAppear', 'aboutToDisappear', 'releaseWeb', 'visibilityChanged', 'foregroundChanged', 'syncActivity', 'closePorts', 'sync', 'report', 'receive', 'restart'], context);
 const spec = JSON.stringify({ version: 1, html: '<p>Preview</p>', css: '', js: '', library: 'none', height: 400, autoHeight: true });
 const make = (extra = {}) => Object.assign(new Web(), { content: spec, mounted: false, visible: false, foreground: true, scrolling: false, preflight: false,
   renderWeb: false, saving: false, error: '', generation: 0, ports: [], timer: -1, releaseTimer: -1, retainedHeight: 650, reloadPending: false,
@@ -180,6 +180,19 @@ assert.equal(timers.size, 0);
 console.log('PASS emitted List callbacks wait for 200ms of rest, cancel on a new gesture and clear pending work when leaving chat');
 
 (async () => {
+  const fullscreen = make({ visible: true, viewportHeight: 1040 }); fullscreen.aboutToAppear();
+  assert.equal(fullscreen.heightValue, 1040, 'Fullscreen must exceed the normal card height limit');
+  const fullscreenController = fullscreen.controller, fullscreenGeneration = fullscreen.generation;
+  fullscreen.viewportHeight = 470; fullscreen.viewportChanged();
+  assert.equal(fullscreen.heightValue, 470); assert.equal(fullscreen.controller, fullscreenController);
+  assert.equal(fullscreen.generation, fullscreenGeneration, 'Resizing the viewport must not reload the page');
+  let measured = 0; fullscreen.onHeight = () => { measured++; };
+  await fullscreen.receive(JSON.stringify({ type: 'resize', height: 120 }), fullscreen.generation);
+  assert.equal(fullscreen.heightValue, 470); assert.equal(measured, 0, 'Fullscreen measurement must not overwrite inline height retention');
+  fullscreen.viewportHeight = 0; fullscreen.viewportChanged(); assert.equal(fullscreen.heightValue, 120);
+  assert.equal(measured, 1, 'Exit must retain changes to content height made during fullscreen');
+  fullscreen.aboutToDisappear();
+  console.log('PASS fullscreen viewport follows available height without reloading or overwriting inline height retention');
   const deferred = make({ visible: true, attached: true, initialPageLoaded: true,
     getUIContext: () => ({ getHostContext: () => ({}) }) });
   deferred.aboutToAppear();
@@ -221,8 +234,10 @@ console.log('PASS emitted List callbacks wait for 200ms of rest, cancel on a new
   const reopened = makeUi(); reopened.aboutToAppear(); assert.equal(reopened.values.count, 8); assert.equal(reopened.dirty, true);
   reopened.onInteract = async (key, values) => { assert.equal(key, '0:3'); return values; };
   await reopened.saveWeb({ count: 9 }); assert.equal(presentation.drafts.has('0:3'), false); assert.equal(reopened.values.count, 9);
-  const Card = native('PublishedPreviewCard', 'PublishedPreviewCard', ['aboutToAppear', 'revisionChanged', 'thumbnailSize'], {});
-  const card = Object.assign(new Card(), { preview: { superseded: false } }); card.aboutToAppear(); assert.equal(card.expanded, true);
+  const Card = native('PublishedPreviewCard', 'PublishedPreviewCard', ['surfaceChanged', 'aboutToAppear', 'revisionChanged', 'thumbnailSize'], {
+    PreviewSurfaceOptions: class { constructor(preview) { this.preview = preview; } }
+  });
+  const card = Object.assign(new Card(), { preview: { superseded: false }, surface: { setOptions() {} } }); card.aboutToAppear(); assert.equal(card.expanded, true);
   card.preview = { superseded: true }; card.revisionChanged(); assert.equal(card.expanded, false);
   card.expanded = true; card.revisionChanged(); assert.equal(card.expanded, true, 'Updates must preserve explicitly opened history');
   card.preview.screenshot = { width: 719, height: 1600 };

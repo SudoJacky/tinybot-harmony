@@ -4,6 +4,7 @@ import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { ApiLevel } from '../common/ApiLevel';
 import { t } from '../model/I18n';
+import { ToolFailure } from '../model/ToolFailure';
 
 // One HTTP exchange with an explicit redirect policy, on every supported system.
 //
@@ -22,7 +23,7 @@ export interface CompatRequest {
   body?: string | ArrayBuffer;
   connectTimeout: number;
   readTimeout: number;
-  maxBytes: number;
+  maxBytes?: number;
   dataType: 'string' | 'buffer';
   // 'return' hands back the 3xx response so the caller validates the next hop itself.
   // 'refuse' means the caller must never talk to a redirect target.
@@ -195,7 +196,10 @@ export class CompatHttp {
       },
       onDataReceive: (chunk: ArrayBuffer): number => {
         if (closed) { return 0; }
-        if (chunk.byteLength > spec.maxBytes - bytes) { fail(new Error(t('响应超过大小上限。'))); return 0; }
+        if (spec.maxBytes !== undefined && chunk.byteLength > spec.maxBytes - bytes) {
+          fail(new ToolFailure('RESPONSE_BUDGET_EXCEEDED', t('响应超过大小上限。') +
+            ' Requested budget: ' + spec.maxBytes + ' bytes; increase maxBytes when supported.', 'increase_download_budget') as Error); return 0;
+        }
         bytes += chunk.byteLength;
         handlers.onData(chunk);
         return chunk.byteLength;

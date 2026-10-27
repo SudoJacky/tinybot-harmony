@@ -98,6 +98,10 @@ async function main() {
   const fail = fixture(); const partial = await fail.run(`return (await Promise.allSettled([tools.read_file({path:'a.json'}),tools.read_file({path:'missing'})])).map(x=>x.status);`);
   assert.deepEqual(JSON.parse(partial.tools[0].output).result, ['fulfilled','rejected']);
   assert.deepEqual(Array.from(partial.tools[0].children,x=>x.status), ['complete','failed']);
+  const partialReceipt=JSON.parse(partial.tools[0].output);
+  assert.equal(partialReceipt.conclusion.status,'partial');
+  assert.equal(partialReceipt.issues[0].tool,'read_file');
+  assert.equal(partialReceipt.issues[0].receipt.error,'missing file');
   console.log('PASS read-only policy and inspectable partial failures');
 
   const bounds = fixture(); await bounds.run(`await Promise.all(Array.from({length:12},()=>tools.read_file({path:'a.json'}))); return 12;`);
@@ -138,6 +142,22 @@ async function main() {
   releaseHost();await observation;assert.equal(finished,true);
   nativeJob.invoke(2,'read_file','{}');await sleep(0);assert.equal(hostCalls,1,'late callbacks cannot dispatch tools');
   console.log('PASS Native adapter propagates cancel, waits for JS and host cleanup, and rejects late dispatch');
+  const largeReply='x'.repeat(1200000);
+  const largePending=adapter.execute('return await tools.read_file({});','[]',async()=>largeReply,new Cancellation());
+  nativeJob.invoke(1,'read_file','{}');await sleep(0);
+  assert.equal(nativeJob.replies[0].output,largeReply);assert.equal(nativeJob.replies[0].error,false);
+  nativeJob.resolve('{"status":"ok"}');await largePending;
+  const {ToolFailure}=load(root+'/model/ToolFailure');
+  const longError='native child diagnostic '.repeat(600);
+  const errorPending=adapter.execute('return await tools.read_file({});','[]',async()=>{
+    throw new ToolFailure('FS_STALE_VERSION',longError,'read_file',{path:'large.js',version:'v2'});
+  },new Cancellation());
+  nativeJob.invoke(1,'read_file','{}');await sleep(0);
+  const errorReply=JSON.parse(nativeJob.replies[0].output);
+  assert.equal(errorReply.error,longError);assert.equal(errorReply.code,'FS_STALE_VERSION');
+  assert.equal(errorReply.details.version,'v2');assert.equal(errorReply.conclusion.status,'failed');
+  nativeJob.resolve('{"status":"error"}');await errorPending;
+  console.log('PASS native adapter retains multi-megabyte replies and complete structured child failure diagnostics');
   const { Diagnostics } = load(root+'/model/Diagnostics');
   const logs=[]; Diagnostics.configureLogSink(record=>logs.push(record));
   const failed=adapter.execute('return 1;','[]',async()=>'',new Cancellation());
@@ -291,7 +311,7 @@ async function visualizeScenarios() {
       return await tools.publish_preview({path:'recover.html',height:300});`),id:'recovery-first'}]};
     if(round===1){
       const failed=JSON.parse(messages.filter(x=>x.role==='tool').at(-1).content);
-      const diagnostic=JSON.parse(failed.error),retry=diagnostic.details.repair.retry;
+      const diagnostic=failed.issues.find(issue=>issue.tool==='publish_preview').receipt,retry=diagnostic.details.repair.retry;
       assert.equal(diagnostic.details.version,'v1');assert.equal(retry.arguments.path,'recover.html');
       return {content:'',toolCalls:[{...call(`await tools.read_file({path:'recover.html'});
         await tools.edit_file({path:'recover.html',oldText:'BROKEN',newText:'<p>Repaired</p>'});

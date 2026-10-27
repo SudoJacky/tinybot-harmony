@@ -5,12 +5,19 @@ import { ToolFailure } from '../model/ToolFailure';
 import { browserActionScript, browserSnapshotScript } from '../model/BrowserScripts';
 import { bingSearchScript, BingSearchPage } from '../model/BingSearch';
 import { BrowserAction, BrowserDriver, BrowserPage, BrowserSession } from './BrowserSession';
+import { BrowserPreview } from '../model/BrowserPreview';
+import { BrowserFrame } from '../model/Agent';
+import { Attachment } from '../model/Productivity';
+import { parseUiSurface } from '../model/InteractiveUi';
+import { PreviewBrowserRuntime } from './PreviewBrowserRuntime';
+import { Cancellation } from './Cancellation';
 
 interface BrowserTarget { x: number; y: number; }
 interface BrowserScriptResult { ok?: boolean; code?: string; message?: string; target?: BrowserTarget; }
 export interface NativeBrowserCapture extends AnnotationPage { pixel: image.PixelMap; width: number; height: number; }
 
 export class NativeBrowserDriver implements BrowserDriver {
+  previewRuntime: PreviewBrowserRuntime = new PreviewBrowserRuntime();
   controller: webview.WebviewController = new webview.WebviewController();
   private browser: BrowserSession;
   private initialized: boolean = false;
@@ -21,8 +28,13 @@ export class NativeBrowserDriver implements BrowserDriver {
   private touchStart?: TouchObject;
   private touchMoved: boolean = false;
   private feedbackVisible: boolean = false;
-  constructor(browser: BrowserSession) { this.browser = browser; }
-  pageBegin(): void { this.browser.clearActionFeedback(); this.loading = true; this.error = ''; this.browser.error = ''; }
+  private saveFrame?: (pixel: image.PixelMap) => Promise<Attachment>;
+  private viewportWidth: () => number;
+  constructor(browser: BrowserSession, saveFrame?: (pixel: image.PixelMap) => Promise<Attachment>, viewportWidth: () => number = () => 1) {
+    this.browser = browser; this.saveFrame = saveFrame; this.viewportWidth = viewportWidth;
+    this.previewRuntime = new PreviewBrowserRuntime(() => this.browser.documentChanged());
+  }
+  pageBegin(): void { this.browser.documentChanged(); this.browser.clearActionFeedback(); this.loading = true; this.error = ''; this.browser.error = ''; }
   setFeedbackVisible(visible: boolean): void {
     this.feedbackVisible = visible;
     if (!visible) { this.browser.clearActionFeedback(); }
@@ -33,10 +45,12 @@ export class NativeBrowserDriver implements BrowserDriver {
     this.browser.pageChanged(url, this.controller.getTitle()); this.historyChanged(); this.wake();
   }
   historyChanged(): void {
+    if (this.browser.preview) { return; }
     this.browser.canGoBack = this.controller.accessBackward();
     this.browser.canGoForward = this.controller.accessForward();
   }
   userTouch(event: TouchEvent): void {
+    if (this.browser.preview && event.type === TouchType.Down) { this.browser.takeOver(); }
     if (event.type === TouchType.Down) { this.browser.clearActionFeedback(); }
     const point = event.changedTouches[0];
     if (event.type === TouchType.Down && !this.touchStart && point) {
@@ -79,15 +93,66 @@ export class NativeBrowserDriver implements BrowserDriver {
     if (this.error) { throw new ToolFailure('BROWSER_LOAD_FAILED', this.error, 'inspect_browser'); }
   }
   async open(url: string): Promise<void> {
+    if (this.browser.preview) {
+      this.previewRuntime.detach(); this.browser.preview = undefined; this.browser.previewSpec = '';
+      this.controller = new webview.WebviewController(); this.initialized = false; this.loading = false;
+      this.browser.invalidateObservation();
+    }
     await this.ready();
     this.navigate(url);
     await this.ready();
+  }
+  async openPreview(preview: BrowserPreview, cancellation?: Cancellation): Promise<void> {
+    const document = parseUiSurface(preview.content, '0');
+    const nodes = document.nodes.filter((item) => item.kind === 'web');
+    if (nodes.length !== 1) { throw new ToolFailure('PREVIEW_INVALID', 'Preview browser requires one web surface.', 'publish_preview'); }
+    this.previewRuntime.detach(); this.previewRuntime.errors = [];
+    this.browser.invalidateObservation(); this.browser.previewSpec = nodes[0].data || '';
+    this.browser.preview = preview; this.browser.previewInstance++;
+    this.browser.canGoBack = false; this.browser.canGoForward = false;
+    this.browser.requestPresentation();
+    const generation = this.browser.previewInstance, start = Date.now();
+    while (!this.previewRuntime.isReady) {
+      cancellation?.check();
+      if (!this.browser.open || generation !== this.browser.previewInstance) { throw new Error('Preview opening was interrupted'); }
+      if (this.previewRuntime.errors.length) { throw new Error(this.previewRuntime.errors.join('\n')); }
+      if (Date.now() - start > 20000) { throw new Error('Preview browser startup timed out'); }
+      await new Promise<void>((resolve) => { setTimeout(resolve, 25); });
+    }
+    this.browser.error = '';
+    this.browser.pageChanged('Preview: ' + preview.title, preview.title);
+  }
+  async captureFrame(): Promise<BrowserFrame> {
+    if (!this.saveFrame) { throw new Error('Browser screenshot storage is unavailable'); }
+    const pixel = this.browser.preview ? await this.previewRuntime.capture() : await this.captureBrowserSurface();
+    const capturedAt = Date.now();
+    try {
+      const attachment = await this.saveFrame(pixel);
+      const info = await pixel.getImageInfo();
+      return { image: attachment, width: info.size.width, height: info.size.height,
+        viewportWidth: this.viewportWidth(), elapsedMs: 0, capturedAt: capturedAt };
+    } finally { await pixel.release(); }
+  }
+  private async captureBrowserSurface(): Promise<image.PixelMap> {
+    await this.ready(); return image.createPixelMapFromSurface(this.controller.getSurfaceId());
   }
   private navigate(url: string): void {
     this.clearInitialHistory = this.clearInitialHistory || this.controller.getUrl() === 'about:blank';
     this.loading = true; this.error = ''; this.controller.loadUrl(url);
   }
   async capture(): Promise<NativeBrowserCapture> {
+    if (this.browser.preview) {
+      if (this.browser.owner !== 'user') { throw new ToolFailure('BROWSER_NOT_OWNED', 'Take control before annotating a preview.', 'inspect_browser'); }
+      const generation = this.browser.previewInstance, title = this.browser.preview.title;
+      const pixel = await this.previewRuntime.capture();
+      try {
+        if (!this.browser.open || this.browser.owner !== 'user' || generation !== this.browser.previewInstance) {
+          throw new ToolFailure('STALE_BROWSER_SNAPSHOT', 'Preview changed during annotation capture.', 'inspect_browser');
+        }
+        const info = await pixel.getImageInfo();
+        return { pixel: pixel, url: 'Preview: ' + title, title: title, width: info.size.width, height: info.size.height };
+      } catch (error) { await pixel.release(); throw error as Error; }
+    }
     await this.ready();
     const url = this.controller.getUrl();
     if (!/^https?:\/\//i.test(url) || this.browser.owner !== 'user') {
@@ -104,6 +169,12 @@ export class NativeBrowserDriver implements BrowserDriver {
     } catch (error) { await pixel.release(); throw error as Error; }
   }
   async snapshot(id: string): Promise<BrowserPage> {
+    if (this.browser.preview) {
+      const page = await this.previewRuntime.snapshot(id);
+      page.url = 'Preview: ' + this.browser.preview.title; page.title = this.browser.preview.title;
+      page.previewId = this.browser.preview.previewId; page.version = this.browser.preview.version;
+      page.errors = this.previewRuntime.errors.slice(); return page;
+    }
     await this.ready();
     const page = JSON.parse(await this.script(browserSnapshotScript(id))) as BrowserPage;
     if (!page || page.snapshotId !== id || typeof page.text !== 'string' || !Array.isArray(page.elements)) {
@@ -143,6 +214,11 @@ export class NativeBrowserDriver implements BrowserDriver {
     return page;
   }
   async act(action: BrowserAction): Promise<void> {
+    if (this.browser.preview) {
+      if (action.action === 'reload') { await this.openPreview(this.browser.preview); return; }
+      if (['back', 'forward'].includes(action.action)) { throw new ToolFailure('BROWSER_HISTORY_EMPTY', 'Local preview has no browsing history.', 'inspect_browser'); }
+      await this.previewRuntime.act(action); return;
+    }
     this.browser.clearActionFeedback();
     await this.ready();
     if (action.action === 'back' || action.action === 'forward' || action.action === 'reload') {
@@ -183,20 +259,31 @@ export class NativeBrowserDriver implements BrowserDriver {
     return result;
   }
   close(): void {
+    this.previewRuntime.detach(); this.browser.preview = undefined; this.browser.previewSpec = '';
     this.browser.clearActionFeedback();
     this.initialized = false; this.loading = false; this.clearInitialHistory = false; this.error = ''; this.wake();
     this.touchStart = undefined;
     this.browser.canGoBack = false; this.browser.canGoForward = false;
     // Removing the mounted Web closes the renderer. Never run another page action here.
   }
-  userNavigate(url: string): void { this.browser.takeOver(); this.navigate(url); }
+  userNavigate(url: string): void {
+    this.browser.takeOver();
+    if (!this.browser.preview) { this.navigate(url); return; }
+    this.open(url).catch((error: Error) => this.failed(error.message));
+  }
   userBack(): boolean {
+    if (this.browser.preview) { return false; }
     if (!this.controller.accessBackward()) { return false; }
     this.browser.takeOver(); this.loading = true; this.error = ''; this.controller.backward(); return true;
   }
   userForward(): boolean {
+    if (this.browser.preview) { return false; }
     if (!this.controller.accessForward()) { return false; }
     this.browser.takeOver(); this.loading = true; this.error = ''; this.controller.forward(); return true;
   }
-  userReload(): void { this.browser.takeOver(); this.loading = true; this.error = ''; this.controller.refresh(); }
+  userReload(): void {
+    this.browser.takeOver();
+    if (this.browser.preview) { this.openPreview(this.browser.preview).catch((error: Error) => this.failed(error.message)); return; }
+    this.loading = true; this.error = ''; this.controller.refresh();
+  }
 }

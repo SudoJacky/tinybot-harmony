@@ -4,13 +4,13 @@ import { ToolCall, ToolDefinition } from '../model/Agent';
 import { AgentTools, ToolInvocationContext } from './AgentLoop';
 import { Cancellation } from './Cancellation';
 
+// Default download buffer budget, adjustable by the caller rather than a content ceiling.
 export const MAX_WEB_BYTES: number = 1024 * 1024;
-export const MAX_WEB_TEXT: number = 20000;
 const DEFAULT_WEB_TEXT: number = 8000;
 
 export interface WebDocument { url: string; contentType: string; body: string; }
 export interface WebTransport {
-  get(address: string, cancellation: Cancellation): Promise<WebDocument>;
+  get(address: string, cancellation: Cancellation, maxBytes?: number): Promise<WebDocument>;
   resolve(reference: string, base: string): string;
 }
 export interface WebLink { title: string; url: string; }
@@ -27,7 +27,7 @@ export interface WebPage {
   linksTruncated: boolean;
   trust: string;
 }
-interface WebArguments { url: string; offset?: number; maxChars?: number; }
+interface WebArguments { url: string; offset?: number; maxChars?: number; maxBytes?: number; }
 
 export function validateWebAddress(value: string): string {
   if (typeof value !== 'string' || value.length > 4096 || /[\s\u0000-\u001f\\]/.test(value)) {
@@ -96,7 +96,7 @@ export function extractWebPage(document: WebDocument, transport: WebTransport, o
     const clean = document.body.replace(/<!--[\s\S]*?-->/g, '')
       .replace(/<(script|style|template|svg|noscript)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
     favicon = pageFavicon(clean, document.url, transport);
-    title = plainText(/<title\b[^>]*>([\s\S]*?)<\/title\s*>/i.exec(clean)?.[1] || '').slice(0, 300);
+    title = plainText(/<title\b[^>]*>([\s\S]*?)<\/title\s*>/i.exec(clean)?.[1] || '');
     // Prefer the article/main region, but do not execute JavaScript or load subresources.
     content = /<(?:main|article)\b[^>]*>([\s\S]*?)<\/(?:main|article)\s*>/i.exec(clean)?.[1] ||
       clean.replace(/<head\b[^>]*>[\s\S]*?<\/head\s*>/gi, '');
@@ -111,7 +111,7 @@ export function extractWebPage(document: WebDocument, transport: WebTransport, o
         try { address = validateWebAddress(transport.resolve(reference, document.url)); } catch (_) { address = ''; }
         if (address.length > 0 && !seen.has(address)) {
           seen.add(address);
-          if (links.length < 30) { links.push({ title: plainText(match[4]).slice(0, 200), url: address }); }
+          if (links.length < 30) { links.push({ title: plainText(match[4]), url: address }); }
           else { linksTruncated = true; }
         }
       }
@@ -134,11 +134,12 @@ export class WebTools implements AgentTools {
     return [{ type: 'function', promptSnippet: '读取已知 URL 的静态网页',
       promptGuidelines: ['read_web 不提供联网搜索。引用使用工具返回的来源 URL，区分网页陈述与推断；读取失败、内容过期或截断时说明证据局限。',
         '按需读取正文，使用 nextOffset 继续读取所需部分，不必把全部脚注放入上下文。SEC 财报先从 FilingSummary.xml 定位报表，不要猜测 R 编号。'], function: {
-      name: 'read_web', description: '读取指定 HTTP/HTTPS 网页的静态正文、标题和链接，供引用来源。不是搜索引擎或浏览器；不登录、不执行 JavaScript。最多下载 1 MiB，正文默认返回 8000 字符，可指定 offset/maxChars 分页，单页最多 20000 字符。truncated 标记非全文；nextOffset 存在时可继续读取。HTTP 403 时可用浏览器或更换有依据的公开来源。',
+      name: 'read_web', description: '读取指定 HTTP/HTTPS 网页的静态正文、标题和链接，供引用来源。不是搜索引擎或浏览器；不登录、不执行 JavaScript。下载缓冲预算默认 1 MiB，可调大 maxBytes；正文默认返回 8000 字符，可指定 offset/maxChars 分页或调大每页字符数。truncated 标记非全文；nextOffset 存在时可继续读取。HTTP 403 时可用浏览器或更换有依据的公开来源。',
       parameters: { type: 'object', properties: {
         'url': { type: 'string', description: '用户提供或已知来源的完整网页 URL，不要编造地址。' },
         'offset': { type: 'integer', description: '正文字符偏移，首次为 0；继续读取时使用返回的 nextOffset。', minimum: 0 },
-        'maxChars': { type: 'integer', description: '本次所需正文字符数，默认 8000。', minimum: 1, maximum: MAX_WEB_TEXT }
+        'maxChars': { type: 'integer', description: '本次所需正文字符数，默认 8000，可调大。', minimum: 1 },
+        'maxBytes': { type: 'integer', description: '下载缓冲字节预算，默认 1048576；下载超出预算时可调大。', minimum: 1 }
       }, required: ['url'], additionalProperties: false }
     } }];
   }
@@ -147,12 +148,13 @@ export class WebTools implements AgentTools {
     cancellation.check();
     if (call.function.name !== 'read_web') { throw new ToolFailure('TOOL_UNAVAILABLE', t("不支持的网页工具。"), 'check_available_tools'); }
     const args = parseToolArguments(call.function.arguments) as WebArguments;
-    if (!args || Array.isArray(args) || typeof args.url !== 'string' || Object.keys(args).some((key: string) => !['url', 'offset', 'maxChars'].includes(key)) ||
+    if (!args || Array.isArray(args) || typeof args.url !== 'string' || Object.keys(args).some((key: string) => !['url', 'offset', 'maxChars', 'maxBytes'].includes(key)) ||
       (args.offset !== undefined && (!Number.isSafeInteger(args.offset) || args.offset < 0)) ||
-      (args.maxChars !== undefined && (!Number.isSafeInteger(args.maxChars) || args.maxChars < 1 || args.maxChars > MAX_WEB_TEXT))) {
-      throw new ToolFailure('INVALID_ARGUMENTS', 'read_web requires url, optional nonnegative integer offset and maxChars from 1 to 20000.', 'fix_arguments');
+      (args.maxChars !== undefined && (!Number.isSafeInteger(args.maxChars) || args.maxChars < 1)) ||
+      (args.maxBytes !== undefined && (!Number.isSafeInteger(args.maxBytes) || args.maxBytes < 1))) {
+      throw new ToolFailure('INVALID_ARGUMENTS', 'read_web requires url, optional nonnegative integer offset and positive integer maxChars/maxBytes.', 'fix_arguments');
     }
-    const document = await this.transport.get(validateWebAddress(args.url), cancellation);
+    const document = await this.transport.get(validateWebAddress(args.url), cancellation, args.maxBytes);
     cancellation.check();
     const page = extractWebPage(document, this.transport, args.offset, args.maxChars);
     if (context) { context.execution.websiteIcon = page.favicon; }

@@ -100,6 +100,10 @@ function addMessage(sections: ConversationSection[], message: MessageData, profi
           sections.push({ kind: 'attachment-image', text: tool.previewScreenshot.image.name, user: false,
             attachment: tool.previewScreenshot.image, imageRatio: tool.previewScreenshot.height / tool.previewScreenshot.width });
         }
+        for (const frame of tool.browserObservation?.frames || []) {
+          sections.push({ kind: 'attachment-image', text: 'Browser +' + frame.elapsedMs + 'ms', user: false,
+            attachment: frame.image, imageRatio: frame.height / frame.width });
+        }
         if (tool.status === 'complete' && tool.call.function.name === 'publish_data_view') {
           const view = parseDataView(tool.output);
           if (view.kind === 'table') {

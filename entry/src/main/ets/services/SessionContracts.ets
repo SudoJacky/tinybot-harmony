@@ -1,3 +1,4 @@
+import { BrowserPreview } from '../model/BrowserPreview';
 import { LogFields } from '../model/DiagnosticLog';
 import { TeamRun } from '../model/Team';
 import { ProductivityData, Attachment, McpServer } from '../model/Productivity';
@@ -23,11 +24,12 @@ export interface SessionRepository {
 
 export interface SessionResources {
   authorizeGeneration?(): Promise<void>;
+  prepareGeneration?(): Promise<void>;
   recoverUi?(threadId: string, content: string, error: Error, cancellation: Cancellation, workspaceId?: string): Promise<string>;
   afterTask?(threadId: string, messageId: string, content: string, workspaceId?: string): Promise<void>;
   createId(): string;
   ensureWorkspace(threadId: string, workspaceId?: string): Promise<void>;
-  tools(threadId: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments?: Attachment[], live?: LiveResources, workspaceId?: string, project?: ProjectData): AgentTools;
+  tools(threadId: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments?: Attachment[], live?: LiveResources, workspaceId?: string, project?: ProjectData, resolvePreview?: (previewId: string) => BrowserPreview): AgentTools;
   persistProjectFolders?(folders: SharedFolder[]): Promise<void>;
   revokeProjectFolders?(folders: SharedFolder[]): Promise<void>;
   activateProjectFolders?(projects: ProjectData[]): Promise<void>;
@@ -64,7 +66,7 @@ export interface SessionPreferences {
 
 // Structural changes carry detached snapshots; preference changes omit transcripts.
 export interface SessionEvent {
-  kind: 'snapshot' | 'preferences' | 'message' | 'tool' | 'text' | 'reasoning' | 'draft' | 'state' | 'thread' | 'teams';
+  kind: 'snapshot' | 'preferences' | 'message' | 'tool' | 'text' | 'reasoning' | 'draft' | 'state' | 'thread' | 'teams' | 'task-complete';
   state: SessionState;
   preferences?: SessionPreferences;
   data?: AppData;

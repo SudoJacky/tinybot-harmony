@@ -372,23 +372,29 @@ async function test(name, run) {
     assert.equal(fs.readFileSync(nativePath(Attachments.path(restoredItem)),'utf8'),content);
     Attachments.configure(fixture);
   });
-  await test('preview screenshot bytes survive backup, restored references and missing-image validation',async()=>{
+  await test('preview and partial browser screenshot bytes survive backup, restored references and missing-image validation',async()=>{
     const {createBackupFile,readBackupFile}=load(path.join(source,'services/Backup'));
     const root='/sandbox/preview-backup';fs.mkdirSync(nativePath(root+'/attachments'),{recursive:true});fs.mkdirSync(nativePath(root+'/cache'));
     Attachments.configure(root);const bytes=Buffer.from('preview-jpeg');fs.writeFileSync(nativePath(root+'/attachments/shot.jpg'),bytes);
     const shot={image:{id:'shot',name:'Preview.jpg',mime:'image/jpeg',path:'shot.jpg',size:bytes.length},width:100,height:80,viewportWidth:344};
+    const browserBytes=Buffer.from('browser-jpeg');fs.writeFileSync(nativePath(root+'/attachments/browser.jpg'),browserBytes);
+    const browserFrame={...shot,image:{id:'browser',name:'Browser.jpg',mime:'image/jpeg',path:'browser.jpg',size:browserBytes.length},elapsedMs:123,capturedAt:Date.now()};
     const data=model.emptyData();data.activeThreadId='preview-backup';data.threads=[{id:'preview-backup',title:'Preview',updatedAt:1,messages:[
       {id:'user',role:'user',content:'Create preview',status:'complete',error:''},
       {id:'assistant',role:'assistant',content:'',status:'complete',error:'',steps:[{content:'',tools:[{
         call:{id:'publish',type:'function',function:{name:'publish_preview',arguments:'{"path":"art.svg"}'}},status:'complete',output:'{}',
         previewContent:'```tinybot-ui\n{"op":"begin","version":1,"title":"Preview","state":{}}\n{"op":"end"}\n```',previewScreenshot:shot
-      }]}]}
+      },{call:{id:'capture',type:'function',function:{name:'browser_capture',arguments:'{"count":2,"intervalMs":250}'}},
+        status:'failed',output:'{"error":"Interrupted after first frame"}',
+        browserObservation:{instanceId:'test-instance',frames:[browserFrame],errors:[]}}]}]}
     ]}];
     const context={cacheDir:root+'/cache',getApplicationContext:()=>({filesDir:root})};
     const backup=await createBackupFile(context,data);const envelope=JSON.parse(fs.readFileSync(nativePath(backup),'utf8'));
-    assert.equal(envelope.attachments.length,1);
+    assert.equal(envelope.attachments.length,2);
     const restored=await readBackupFile(context,backup,model.emptyData());const image=restored.threads[0].messages[1].steps[0].tools[0].previewScreenshot.image;
     assert.notEqual(image.id,'shot');assert.deepEqual(fs.readFileSync(nativePath(Attachments.path(image))),bytes);
+    const browserImage=restored.threads[0].messages[1].steps[0].tools[1].browserObservation.frames[0].image;
+    assert.notEqual(browserImage.id,'browser');assert.deepEqual(fs.readFileSync(nativePath(Attachments.path(browserImage))),browserBytes);
     envelope.attachments=[];fs.writeFileSync(nativePath(backup),JSON.stringify(envelope));
     await assert.rejects(readBackupFile(context,backup,model.emptyData()),/备份缺少附件/);
     Attachments.configure(fixture);
@@ -1471,6 +1477,12 @@ async function test(name, run) {
     }
   });
   await test('provider keeps active streams beyond three minutes and stops idle or cancelled streams', async () => {
+    const {NetworkTransfers}=load(path.join(source,'services/NetworkTransfers'));
+    let networkScopes=0, scopeStarts=0, scopeEnds=0;
+    const unobserve=NetworkTransfers.observe(async()=>{
+      networkScopes++;scopeStarts++;
+      return async()=>{networkScopes--;scopeEnds++;};
+    });
     const {ProtocolProvider}=load(path.join(source,'services/providers/ProtocolProvider'));
     const provider=new ProtocolProvider({id:'test',name:'Test',protocol:'chat-completions',defaultBaseUrl:'https://fixture.invalid/v1',defaultModel:'test'}, providerEffects);
     const input={model:'test',baseUrl:'https://fixture.invalid/v1',apiKey:'',messages:[{role:'user',content:'hello'}],tools:[],usageOrigin:{threadId:'trace-thread',turnId:'trace-turn',purpose:'conversation',step:2}};
@@ -1480,7 +1492,7 @@ async function test(name, run) {
     fakeTimers={set(fn,ms){const id=++sequence;timers.set(id,{fn,at:now+ms});return id;},clear(id){timers.delete(id);}};
     const advance=ms=>{now+=ms;for(const [id,item] of [...timers])if(item.at<=now){timers.delete(id);item.fn();}};
     const emit=text=>transport.emit('dataReceive',Uint8Array.from(Buffer.from(text)).buffer);
-    httpScript=request=>{transport=request;request.callback(null,200);};
+    httpScript=request=>{assert.equal(networkScopes,1,'Native model I/O requires an admitted transfer');transport=request;request.callback(null,200);};
     try {
       const pending=provider.stream(input,new Cancellation(),()=>{});
       await new Promise(setImmediate);
@@ -1494,6 +1506,7 @@ async function test(name, run) {
       emit('data: {"choices":[{"index":0,"delta":{"content":"done"}}]}\n\ndata: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
       transport.emit('dataEnd');
       assert.equal((await pending).content,'done');assert.equal(timers.size,0);
+      assert.equal(networkScopes,0,'Successful SSE ends its scope before returning to tools');
       const idle=provider.stream({...input, requestUsage: false},new Cancellation(),()=>{});
       const timedOut=assert.rejects(idle,/120/);
       await new Promise(setImmediate);
@@ -1519,7 +1532,8 @@ async function test(name, run) {
       const tracked=UsageLedger.list().filter(item=>!recordsBefore.has(item.id));
       assert.equal(tracked.length,5);assert.equal(tracked.map(item=>item.status).sort().join(','),'cancelled,complete,failed,failed,failed');
       assert.ok(tracked.every(item=>item.origin.threadId==='trace-thread'&&item.origin.turnId==='trace-turn'&&item.origin.step===2),'all outcomes keep their origin');
-    } finally {fakeTimers=undefined;}
+      assert.equal(scopeStarts,5);assert.equal(scopeEnds,5);assert.equal(networkScopes,0,'Idle, cancelled and startup failure all release scope ownership');
+    } finally {fakeTimers=undefined;unobserve();}
   });
   await test('usage ledger preserves new requests while restoring persisted records',async()=>{
     const {UsageLedger}=load(path.join(source,'services/UsageLedger'));const root='/sandbox/ledger';fs.mkdirSync(nativePath(root),{recursive:true});

@@ -103,8 +103,8 @@ function fixture(source = answer) {
     assert.throws(()=>ui.validateUiState(doc,{amount:100,people:'2',result:50,show:true}));
     assert.throws(()=>ui.validateUiStates([{key:'0:0',values:{}},{key:'0:0',values:{}}]));
   });
-  test('surface and node budgets are enforced', () => {
-    assert.throws(()=>new ui.UiCompiler().update(' '.repeat(96001),false));
+  test('surface source has no character ceiling; native node budget remains enforced', () => {
+    new ui.UiCompiler().update(' '.repeat(96001),false);
     const rs=[records[0],...Array.from({length:129},(_,i)=>({op:'node',node:{id:'n'+i,kind:'text',text:'x'}})),records.at(-1)];
     assert.throws(()=>new ui.UiCompiler().update(jsonl(rs),true));
   });

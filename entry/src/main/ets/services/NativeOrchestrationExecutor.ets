@@ -3,6 +3,7 @@ import sandbox from 'libtinybot_sandbox.so';
 import { Cancellation, RunCancelledError } from './Cancellation';
 import { OrchestrationExecutor } from './OrchestrationTools';
 import { Diagnostics } from '../model/Diagnostics';
+import { toolError } from '../model/Agent';
 
 export class NativeOrchestrationExecutor implements OrchestrationExecutor {
   async execute(source: string, catalog: string, invoke: (name: string, argumentsJson: string) => Promise<string>,
@@ -21,10 +22,8 @@ export class NativeOrchestrationExecutor implements OrchestrationExecutor {
       const work = async (): Promise<void> => {
         try {
           const output = await invoke(name, argumentsJson);
-          if (new util.TextEncoder().encodeInto(output).length > 1024 * 1024) {
-            settle(callId, 'Tool result exceeds 1 MiB; use a smaller read range. The full receipt was saved.', true);
-          } else { settle(callId, output, false); }
-        } catch (error) { settle(callId, (error as Error).message.slice(0, 4096), true); }
+          settle(callId, output, false);
+        } catch (error) { settle(callId, toolError(error as Error), true); }
       };
       pending.push(work());
     });

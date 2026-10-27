@@ -1,3 +1,4 @@
+import { resolveBrowserPreview } from '../model/BrowserPreview';
 import { Diagnostics } from '../model/Diagnostics';
 import { ToolExecution } from '../model/Agent';
 import { projectFor, workspaceIdFor, validateProjects, projectContext } from '../model/Project';
@@ -604,11 +605,12 @@ export class SessionService {
     if ((this.resources.authorizeGeneration && !await this.authorizeGeneration()) || !this.canMutate || this.active.id !== threadId) { return; }
     this.active.queuePaused = false; await this.runTasks();
   }
-  async stop(): Promise<void> {
+  async stop(reason?: string): Promise<void> {
     if (!this.status.ready || (this.status.phase !== 'running' && this.status.phase !== 'compacting')) { return; }
     this.active.queuePaused = true; this.status.acceptingSteering = false;
+    if (reason) { this.status.error = reason; }
     this.chatTeams?.stop();
-    this.recovering?.cancel(); this.runtime.abort(); this.publish('snapshot');
+    this.recovering?.cancel(); this.runtime.abort(reason); this.publish('snapshot');
     try { await this.persist(); } catch (_) { /* Persist failure remains visible; no queue is drained. */ }
   }
   waitForIdle(): Promise<void> {
@@ -638,11 +640,11 @@ export class SessionService {
     try {
       const result = await this.runtime.run({ sessionId: thread.id, config: config, messages: [], contextOnly: true, tools: tools,
         usageOrigin: { threadId: thread.id, threadTitle: thread.title, turnId: this.resources.createId(), purpose: 'compaction' } }, {
-        prepare: async () => {}, checkpoint: () => this.persist(thread.id),
+        prepare: async () => { await this.resources.prepareGeneration?.(); }, checkpoint: () => this.persist(thread.id),
         prepareContext: (model, _messages, cancellation) => prepareSessionContext(thread, model, cancellation, true,
           config, instructions, tools.definitions(), () => this.persist(thread.id), (status) => this.contextProgress(status), sections)
       });
-      if (result.status !== 'complete') { this.status.error = result.status === 'stopped' ? t("上下文压缩已停止。") : result.error; }
+      if (result.status !== 'complete') { this.status.error = result.status === 'stopped' ? this.status.error || t("上下文压缩已停止。") : result.error; }
       else if (fromCommand && this.draftRevision === draftRevision && isCompactCommand(thread.draft || '')) {
         this.setDraft('', thread.id); await this.persist(thread.id);
       }
@@ -761,7 +763,8 @@ export class SessionService {
         recoverUi: !readOnly && this.resources.recoverUi ? (content, error, cancellation) =>
           this.resources.recoverUi!(thread.id, content, error, cancellation, projectFor(this.data, thread)?.workspaceId) : undefined,
         prepare: async (cancellation) => {
-          cancellation.check(); cancellation.onCancel(() => chatTeams?.stop()); await this.ensureThreadWorkspace(thread);
+          cancellation.check(); cancellation.onCancel(() => chatTeams?.stop());
+          await this.resources.prepareGeneration?.(); cancellation.check(); await this.ensureThreadWorkspace(thread);
           cancellation.check();
           // The runtime's initial checkpoint has durably saved the first user message.
           if (generateTitle) { this.generateTitle(thread.id, user.id, text, fallbackTitle, copyModelConfig(config)); }
@@ -794,6 +797,9 @@ export class SessionService {
         catch (error) { this.status.error = t("任务已完成，但结果归档失败：") + (error as Error).message; }
       }
       if (options.autoMemory && !readOnly) { this.reviewMemory(thread, user, copyModelConfig(config)); }
+      if (!this.status.error) {
+        this.emit({ kind: 'task-complete', state: this.state, threadId: thread.id, messageId: answer.id });
+      }
     }
     return answer.status === 'complete' && this.status.saveError.length === 0;
   }
@@ -1145,7 +1151,7 @@ export class SessionService {
     return new SelectedTools(new RuleTools(new ToolSet([this.resources.tools(thread.id, this.extensions, selected, extras,
       (thread.attachments || []).concat(...thread.messages.map((item) => (item.attachments || [])
         .concat(...(item.steps || []).map((step) => step.steering?.attachments || [])))), live, projectFor(this.data, thread)?.workspaceId,
-      projectFor(this.data, thread)), new ReferenceTools(() => thread.messages)]), extras.options.readOnly), this.selectedToolSelection(thread));
+      projectFor(this.data, thread), (previewId) => resolveBrowserPreview(thread.messages, previewId)), new ReferenceTools(() => thread.messages)]), extras.options.readOnly), this.selectedToolSelection(thread));
   }
   private refreshContext(): void {
     const diagnosticMark = Diagnostics.begin();
