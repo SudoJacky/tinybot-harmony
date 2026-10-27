@@ -164,13 +164,13 @@ export default function reasoningEffortTests(): void {
       expect(request.messages[2].content[0].tool_use_id).assertEqual('call_1');
       expect(JSON.stringify(responsesRequest('gpt-5.2', history, [])).includes('signed-opaque')).assertFalse();
     });
-    it('rejectsUnsignedTruncatedAndOversizedThinking', 0, () => {
+    it('rejectsUnsignedAndTruncatedThinkingButAcceptsLargeRedactedContent', 0, () => {
       const missing = THINKING_WIRE.replace('"signature":"signed-"', '"signature":""').replace('"signature":"opaque"', '"signature":""');
       const parser = new AnthropicStream(() => {}); parser.push(missing);
       rejects(() => { parser.finish(); });
       const truncated = new AnthropicStream(() => {}); truncated.push(THINKING_WIRE.slice(0, -10));
       rejects(() => { truncated.finish(); });
-      rejects(() => validateAnthropicContent([{ type: 'redacted_thinking', data: 'a'.repeat(2 * 1024 * 1024) }]));
+      validateAnthropicContent([{ type: 'redacted_thinking', data: 'a'.repeat(2 * 1024 * 1024) }]);
     });
   });
 }

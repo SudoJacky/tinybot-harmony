@@ -189,11 +189,14 @@ export default function agentTests(): void {
       mismatch.push(toolWire([call('a', 'list_files', '{}')]).replace(FINISH_TOOLS, FINISH_TEXT));
       rejects(() => { mismatch.finish(); }, '不匹配');
     });
-    it('rejectsOversizedBatchAndArguments', 0, () => {
+    it('rejectsOversizedBatchAndPreservesLargeArguments', 0, () => {
       const calls: ToolCall[] = [];
       for (let index = 0; index < 9; index++) { calls.push(call('a' + index, 'list_files', '{}')); }
       rejects(() => { new ChatStream(() => {}).push(toolWire(calls)); }, '片段');
-      rejects(() => { new ChatStream(() => {}).push(toolWire([call('a', 'write_file', 'x'.repeat(96 * 1024 + 1))])); }, '过大');
+      const args = JSON.stringify({ path: 'large.txt', content: 'x'.repeat(96 * 1024 + 1) });
+      const parser = new ChatStream(() => {});
+      parser.push(toolWire([call('a', 'write_file', args)]));
+      expect(parser.finish().toolCalls[0].function.arguments).assertEqual(args);
     });
   });
 
