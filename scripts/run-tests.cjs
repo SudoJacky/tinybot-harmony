@@ -114,7 +114,7 @@ function selectedTests(suite) {
   const stale = registered.filter(name => !present.includes(name));
   if (missing.length || stale.length) throw Error('Test manifest mismatch. Unregistered: ' + missing.join(', ') + '; missing files: ' + stale.join(', '));
   const names = suite === 'debug' || suite === 'release' ? suites.source.concat(suites[suite]) : suites[suite];
-  return names.map(file => ({ file, args: suite === 'debug' && file === 'test-feedback.cjs' ? ['--ui'] : [] }));
+  return names.map(file => ({ file, args: suite === 'debug' && ['test-feedback.cjs', 'test-file-attachments.cjs'].includes(file) ? ['--ui'] : [] }));
 }
 
 function main(args) {

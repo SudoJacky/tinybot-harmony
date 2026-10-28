@@ -127,6 +127,7 @@ function card(wide) {
   const panel = controller('views/ChatPanel', 'ChatPanel', ['receiveVoiceShortcut', 'speechAvailabilityChanged', 'speechThreadChanged']);
   let starts = 0, stops = 0, consumed = 0;
   panel.reading = { stop: () => stops++ }; panel.endSpeech = () => {}; panel.onHeaderProgress = () => {};
+  panel.cancelAttachmentDrop = () => {};
   panel.enterVoiceMode = () => starts++; panel.onVoiceShortcutConsumed = () => consumed++;
   panel.voiceRequest = 'new'; panel.activeThreadId = 'old'; panel.thread = { id: 'old' }; panel.speechEnabled = false;
   panel.receiveVoiceShortcut(); assert.equal(starts, 0);

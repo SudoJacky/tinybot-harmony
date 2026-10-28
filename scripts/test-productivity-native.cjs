@@ -1383,6 +1383,25 @@ async function test(name, run) {
       cloudStart=async sync=>{sync.callback({state:4,error:0});};assert.equal(await CloudBackup.sync(),true);
     } finally {fakeTimers=undefined;}
   });
+  await test('mini apps laboratory setting gates native tool catalog and dispatch', async()=>{
+    const {NativeSessionResources}=load(path.join(source,'services/NativeSessionService'));
+    const {ProviderRegistry}=load(path.join(source,'services/providers/ProviderRegistry'));
+    const {defaultExtensions}=load(path.join(source,'model/Skills'));
+    const {defaultProductivity}=load(path.join(source,'model/Productivity'));
+    const resources=new NativeSessionResources('/sandbox/labs',new ProviderRegistry(),new ToolApproval());
+    const data=defaultProductivity(), ext=defaultExtensions(); ext.webEnabled=false;
+    data.options=load(path.join(source,'model/AssistantOptions')).defaultAssistantOptions();
+    for(const enabled of [undefined,false,true,false]) {
+      data.options.miniAppsEnabled=enabled;
+      const tools=resources.tools('chat',ext,'',data);
+      for(const name of ['list_mini_apps','publish_mini_app']) {
+        assert.equal(tools.definitions().some(tool=>tool.function.name===name),enabled===true);
+        if(enabled!==true) await assert.rejects(tools.execute({id:name,type:'function',function:{name,arguments:'{}'}},new Cancellation()),
+          error=>['TOOL_UNAVAILABLE','PERMISSION_DENIED'].includes(error.code));
+      }
+      assert.ok(tools.definitions().some(tool=>tool.function.name==='publish_preview'),'Ordinary previews remain available');
+    }
+  });
   await test('removed image generation stays unavailable with legacy model configuration', async()=>{
     const {NativeSessionResources}=load(path.join(source,'services/NativeSessionService'));
     const {ProviderRegistry}=load(path.join(source,'services/providers/ProviderRegistry'));

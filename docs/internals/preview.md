@@ -46,6 +46,8 @@ workspaceRelativePath(path)        校验相对路径与扩展名
 
 成功发布时，渲染内容作为不可变快照（snapshot）保存在工具记录的 `previewContent` 中，截图的宽、高、卡片宽度与图片一起保存。这些字段都是本地展示元数据，不进入模型上下文。
 
+历史版本的 `publish_mini_app` 成功记录也可能包含 `previewContent` 和 `previewScreenshot`。会话读取保留这些字段并校验类型、完成状态和截图结构，避免旧记录阻断全部会话加载；兼容读取不会把它们转换成 `publish_preview` 或重新执行小程序。
+
 | 行为 | 结果 |
 | --- | --- |
 | 修改或删除源文件 | 已发布预览不变，仍显示发布时的快照 |

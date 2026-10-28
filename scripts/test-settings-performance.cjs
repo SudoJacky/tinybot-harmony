@@ -53,6 +53,23 @@ async function setup() {
   return { f, app, ...panel(app) };
 }
 (async () => {
+  const labs = await setup();
+  assert.equal(defaultAssistantOptions().miniAppsEnabled, false);
+  assert.equal(labs.value.savedToggleValue('miniAppsEnabled'), false, 'Existing preferences without the field remain disabled');
+  labs.value.saveToggle('miniAppsEnabled', true); await labs.value.pendingSave;
+  assert.equal(labs.app.productivity.options.miniAppsEnabled, true);
+  const restored = new Fixture(await labs.f.repository.load()), restoredApp = new ChatViewModel();
+  await restoredApp.initialize(restored.session); restoredApp.openSettings();
+  const restoredPanel = panel(restoredApp);
+  assert.equal(restoredPanel.value.savedToggleValue('miniAppsEnabled'), true);
+  restoredPanel.value.saveToggle('miniAppsEnabled', false); await restoredPanel.value.pendingSave;
+  assert.equal((await restored.repository.load()).productivity.options.miniAppsEnabled, false);
+  labs.f.repository.beforeSave = async () => { throw Error('labs save failure'); };
+  labs.value.saveToggle('miniAppsEnabled', false); await labs.value.pendingSave;
+  assert.equal(labs.value.assistantDraft.miniAppsEnabled, true);
+  assert.equal(labs.app.productivity.options.miniAppsEnabled, true);
+  assert.equal(labs.toasts.length, 1);
+  console.log('PASS Labs defaults off, compiled toggle saves on/off, survives reload and rolls back on save failure');
   const data = seed();
   data.threads = Array.from({ length: 20 }, (_, index) => ({ ...data.threads[0], id: 'chat-' + index,
     messages: Array.from({ length: 50 }, (_, i) => ({ id: 'message-' + i, role: i % 2 ? 'assistant' : 'user',

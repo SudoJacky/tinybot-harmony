@@ -23,6 +23,7 @@ import { curves, FrameCallback, SymbolGlyphModifier } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { Attachment, MAX_MESSAGE_ATTACHMENTS, PromptTemplate } from '../model/Productivity';
 import { Attachments } from '../services/Attachments';
+import { AttachmentDrop, ATTACHMENT_DROP_TYPES, importDroppedAttachments } from '../services/AttachmentDrop';
 import { image } from '@kit.ImageKit';
 import { DrawingBoardOptions, DrawingDraft } from '../model/DrawingDraft';
 import { deviceInfo } from '@kit.BasicServicesKit';
@@ -93,6 +94,9 @@ export struct ChatPanel {
   @ObjectLink browser: BrowserSession;
   onBrowser: () => void = () => {};
   @State private importing: boolean = false;
+  @State private dropHover: boolean = false;
+  private attachmentDrop: AttachmentDrop = new AttachmentDrop();
+  private dropGeneration: number = 0;
   @State private showPlus: boolean = false;
   // Tablets open the add actions as a menu above the plus; phones keep the sheet.
   @State private showPlusMenu: boolean = false;
@@ -188,6 +192,7 @@ export struct ChatPanel {
   }
 
   aboutToDisappear(): void {
+    this.cancelAttachmentDrop();
     this.setScrollActivity(false);
     this.viewport.dispose();
     this.endSpeech();
@@ -218,6 +223,7 @@ export struct ChatPanel {
     else { this.receiveVoiceShortcut(); }
   }
   private speechThreadChanged(): void {
+    this.cancelAttachmentDrop();
     this.composerSelectionStart = -1; this.composerSelectionEnd = -1;
     this.lastHeaderProgress = -1;
     this.onHeaderProgress(0);
@@ -438,6 +444,59 @@ export struct ChatPanel {
 
   private canSend(): boolean {
     return !this.speechActive() && this.app.ready && !this.app.busy && !this.importing && !this.thread.archived && this.hasDraft() && this.app.saveError.length === 0;
+  }
+
+  private cancelAttachmentDrop(): void {
+    this.dropGeneration++; this.dropHover = false;
+    try { this.attachmentDrop.cancel(this.getUIContext()); }
+    catch (error) { this.app.error = t('添加拖入附件失败：') + (error as Error).message; }
+  }
+
+  private dropEditable(): boolean {
+    return this.app.ready && !this.app.busy && !this.speechActive() && !this.thread.archived &&
+      !this.showDrawing && !this.previewing && this.app.saveError.length === 0;
+  }
+
+  private dragAttachment(event: DragEvent): void {
+    this.dropHover = this.dropEditable() && !this.importing && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS;
+    event.setResult(this.dropHover ? DragResult.DROP_ENABLED : DragResult.DROP_DISABLED);
+    event.dragBehavior = DragBehavior.COPY;
+  }
+
+  private composerDrop(event: DragEvent): void {
+    // Keep the TextArea's native text insertion; file drops use the same handler as the surrounding chat.
+    const types = Object.keys(event.getSummary().summary);
+    if (types.length > 0 && types.every((type: string) =>
+      ['general.plain-text', 'general.text', 'general.hyperlink', 'general.html'].includes(type))) { return; }
+    this.receiveAttachmentDrop(event);
+  }
+
+  private async receiveAttachmentDrop(event: DragEvent): Promise<void> {
+    this.dropHover = false;
+    event.dragBehavior = DragBehavior.COPY;
+    if (!this.dropEditable() || this.importing || this.thread.attachments.length >= MAX_MESSAGE_ATTACHMENTS) {
+      event.setResult(DragResult.DRAG_FAILED);
+      this.app.error = this.thread.attachments.length >= MAX_MESSAGE_ATTACHMENTS ?
+        t('每条消息最多添加 {0} 个附件。', [MAX_MESSAGE_ATTACHMENTS]) : t('当前无法添加附件，请稍后重试。');
+      return;
+    }
+    const threadId = this.thread.id; const generation = this.dropGeneration;
+    const maximum = MAX_MESSAGE_ATTACHMENTS - this.thread.attachments.length;
+    this.importing = true;
+    try {
+      const pending = this.attachmentDrop.load(event);
+      // This acknowledges ownership of the drop; the attachment strip stays busy until persistence completes.
+      event.setResult(DragResult.DRAG_SUCCESSFUL);
+      const data = await pending;
+      await importDroppedAttachments(data, maximum,
+        () => generation === this.dropGeneration && threadId === this.app.active.id && this.dropEditable(),
+        async (items: Attachment[]): Promise<void> => {
+          if (!await this.app.setAttachments(this.thread.attachments.concat(items))) {
+            throw new Error(this.app.saveError || this.app.error || t('当前无法添加附件，请稍后重试。'));
+          }
+        });
+    } catch (error) { this.app.error = t('添加拖入附件失败：') + (error as Error).message; }
+    finally { this.importing = false; }
   }
 
   private async attach(photo: boolean): Promise<void> {
@@ -1281,6 +1340,8 @@ export struct ChatPanel {
         placeholder: this.speechActive() ? t('请说出要输入的内容') : this.thread.archived ? t("已归档的对话无法继续") : this.app.generating ? t("补充要求，或排队下一项任务…")
           : !this.composerExpanded() ? t('输入消息…') : this.thread.teamEnabled ? t("描述目标，主 Agent 会按需组建团队…") : t('输入消息，/ 命令，$ 技能，@ 引用会话') }).fontFamily(this.appearance.fontFamily)
         .id('composer').fontSize(Font.body).fontColor($r('app.color.text_primary'))
+        .allowDrop(ATTACHMENT_DROP_TYPES.concat(['general.plain-text', 'general.hyperlink', 'general.html']))
+        .onDrop((event: DragEvent) => this.composerDrop(event))
         .placeholderColor($r('app.color.text_tertiary')).backgroundColor(Color.Transparent)
         .width('100%')
         .constraintSize({ minHeight: this.workbench && !this.voiceMode ? 88 : 44, maxHeight: this.composerExpanded() ? 160 : 44 }).maxLength(24000)
@@ -1619,7 +1680,19 @@ export struct ChatPanel {
     }.height('100%').width('100%')
       .bindSheet($$this.showMemoryDraft, this.memoryDraftSheet(), { title: { title: t("提炼并确认记忆") }, detents: [SheetSize.LARGE], dragBar: true, keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY,
         backgroundColor: $r('app.color.page_background') })
+      if (this.dropHover) {
+        Column() {
+          Text(t('松开以添加到当前会话')).fontFamily(this.appearance.fontFamily).fontSize(Font.body)
+            .fontColor($r('app.color.text_primary')).padding(20).backgroundColor($r('app.color.page_background')).borderRadius(Radius.xl)
+        }.width('100%').height('100%').justifyContent(FlexAlign.Center).backgroundColor('#33000000')
+          .hitTestBehavior(HitTestMode.None).id('attachment-drop-hint')
+      }
     }.width('100%').height('100%')
+      .allowDrop(ATTACHMENT_DROP_TYPES)
+      .onDragEnter((event: DragEvent) => this.dragAttachment(event))
+      .onDragMove((event: DragEvent) => this.dragAttachment(event))
+      .onDragLeave(() => { this.dropHover = false; })
+      .onDrop((event: DragEvent) => { this.receiveAttachmentDrop(event); }, { disableDataPrefetch: true })
       .onAreaChange((_old: Area, area: Area) => { this.panelHeight = Number(area.height); })
       .bindContentCover(this.showDrawing || this.previewing, this.chatCover(), { modalTransition: ModalTransition.ALPHA,
         backgroundColor: $r('app.color.page_background'), onWillDismiss: () => {

@@ -341,13 +341,16 @@ function validatePreviewReceipt(tool: ToolExecution): void {
       validateAttachments([frame.image]);
     }
   }
-  if (tool.previewContent !== undefined && (tool.call.function.name !== 'publish_preview' || tool.status !== 'complete' ||
+  // Earlier mini-app publishers also persisted snapshots. Preserve these historical receipts;
+  // accepting their metadata does not register them as live publish_preview surfaces.
+  const previewPublisher = ['publish_preview', 'publish_mini_app'].includes(tool.call.function.name);
+  if (tool.previewContent !== undefined && (!previewPublisher || tool.status !== 'complete' ||
     typeof tool.previewContent !== 'string')) {
     throw new Error('Invalid published preview snapshot');
   }
   if (tool.previewScreenshot !== undefined) {
     const screenshot = tool.previewScreenshot;
-    if (tool.call.function.name !== 'publish_preview' || tool.status !== 'complete' || !tool.previewContent ||
+    if (!previewPublisher || tool.status !== 'complete' || !tool.previewContent ||
       !screenshot || !Number.isSafeInteger(screenshot.width) || screenshot.width < 1 || screenshot.width > 1600 ||
       !Number.isSafeInteger(screenshot.height) || screenshot.height < 1 || screenshot.height > 1600 ||
       !Number.isFinite(screenshot.viewportWidth) || screenshot.viewportWidth <= 0 || screenshot.image?.mime !== 'image/jpeg') {

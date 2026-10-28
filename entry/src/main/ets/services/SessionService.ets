@@ -571,6 +571,7 @@ export class SessionService {
       const preferences = this.preferencesSnapshot();
       const options = preferences.productivity.options || defaultAssistantOptions();
       if (kind === 'autoMemory') { options.autoMemory = value; }
+      else if (kind === 'miniAppsEnabled') { options.miniAppsEnabled = value; }
       else if (kind === 'readOnly') { options.readOnly = value; }
       else if (kind === 'saveSummary') { options.saveSummary = value; }
       else if (kind === 'autoCompact') { preferences.config.autoCompact = value; }

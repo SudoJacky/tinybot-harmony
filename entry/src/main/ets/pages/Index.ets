@@ -873,8 +873,10 @@ struct Index {
           .id('share-conversation').enabled(this.app.ready && !this.app.busy && this.app.active.messages.length > 0)
           .onClick(() => this.openConversationShare())
       }
-      MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.rectangle_stack')), content: t('小程序') })
-        .id('open-mini-apps-menu').enabled(this.app.ready).onClick(() => this.paths.pushPath({ name: 'mini-apps' }))
+      if (this.app.productivity.options?.miniAppsEnabled === true) {
+        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.rectangle_stack')), content: t('小程序') })
+          .id('open-mini-apps-menu').enabled(this.app.ready).onClick(() => this.paths.pushPath({ name: 'mini-apps' }))
+      }
       MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.gearshape')), content: t('设置') })
         .onClick(() => this.openSettings())
     }
@@ -899,7 +901,11 @@ struct Index {
         .onShown(() => { this.onboardingActive = true; })
         .onHidden(() => { this.onboardingActive = false; })
     } else if (name === 'mini-apps') {
-      NavDestination() { MiniAppsPanel({ app: this.app, onChat: () => this.revealChat() }) }
+      NavDestination() {
+        if (this.app.productivity.options?.miniAppsEnabled === true) {
+          MiniAppsPanel({ app: this.app, onChat: () => this.revealChat() })
+        } else { Text(t('请先在设置的实验室中开启小程序。')) }
+      }
         .title(t('小程序'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'branches') {
       NavDestination() { BranchesPanel({ app: this.app, onSelected: () => this.paths.clear() }) }.title(t("会话分支"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
@@ -964,6 +970,10 @@ struct Index {
       NavDestination() {
         HuaweiAccountPanel({ account: this.account, taskBusy: this.app.sharedBusy, onSupport: (page: string) => this.openSupport(page) })
       }.title(t('华为账号'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'laboratory') {
+      NavDestination() {
+        SettingsPanel({ app: this.app, settings: this.app.settings, account: this.account, browser: this.browser, laboratoryOnly: true })
+      }.title(t('实验室'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'settings') {
       NavDestination() {
         SettingsPanel({ app: this.app, settings: this.app.settings, account: this.account,
@@ -974,6 +984,7 @@ struct Index {
           onStorage: () => { this.paths.pushPath({ name: 'storage' }); },
           onModels: () => { this.paths.pushPath({ name: 'model-settings' }); },
           onSearch: () => { this.paths.pushPath({ name: 'search-settings' }); },
+          onLaboratory: () => { this.paths.pushPath({ name: 'laboratory' }); },
           onAppearance: () => { this.paths.pushPath({ name: 'appearance' }); },
           onLanguage: () => { this.paths.pushPath({ name: 'language' }); },
           onBackup: () => { this.paths.pushPath({ name: 'backup' }); },

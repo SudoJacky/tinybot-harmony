@@ -19,6 +19,7 @@ export struct SettingsPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.language') private language: string = 'system';
   @Prop presetsOnly: boolean = false;
+  @Prop laboratoryOnly: boolean = false;
   @State private assistantDraft: AssistantOptions = defaultAssistantOptions();
   @ObjectLink app: ChatViewModel;
   @ObjectLink settings: SettingsViewModel;
@@ -33,6 +34,7 @@ export struct SettingsPanel {
   onStorage: () => void = () => {};
   onModels: () => void = () => {};
   onSearch: () => void = () => {};
+  onLaboratory: () => void = () => {};
   onBackup: () => void = () => {};
   onAppearance: () => void = () => {};
   onLanguage: () => void = () => {};
@@ -53,6 +55,7 @@ export struct SettingsPanel {
 
   private setToggleDraft(kind: SettingsToggle, value: boolean): void {
     if (kind === 'autoMemory') { this.assistantDraft.autoMemory = value; }
+    else if (kind === 'miniAppsEnabled') { this.assistantDraft.miniAppsEnabled = value; }
     else if (kind === 'readOnly') { this.assistantDraft.readOnly = value; }
     else if (kind === 'saveSummary') { this.assistantDraft.saveSummary = value; }
     else if (kind === 'autoCompact') { this.settings.autoCompact = value; }
@@ -62,6 +65,7 @@ export struct SettingsPanel {
   private savedToggleValue(kind: SettingsToggle): boolean {
     const options = this.app.productivity.options || defaultAssistantOptions();
     if (kind === 'autoMemory') { return options.autoMemory; }
+    if (kind === 'miniAppsEnabled') { return options.miniAppsEnabled === true; }
     if (kind === 'readOnly') { return options.readOnly; }
     if (kind === 'saveSummary') { return options.saveSummary; }
     if (kind === 'autoCompact') { return this.app.config.autoCompact !== false; }
@@ -124,6 +128,22 @@ export struct SettingsPanel {
     } else if (this.app.error.length > 0) {
       Banner({ text: this.app.error, compId: 'provider-list-error' }).margin({ top: Space.sm })
     }
+  }
+
+  @Builder
+  laboratoryPage() {
+    Scroll() {
+      Column() {
+        this.statusBanners()
+        SectionHeader({ title: t('实验功能') })
+        GroupCard() {
+          SwitchRow({ title: t('小程序'), icon: $r('sys.symbol.rectangle_stack'), compId: 'mini-apps-enabled',
+            subtitle: t('创建和使用可保存数据的小程序。关闭后保留已有小程序和数据。'),
+            isOn: this.assistantDraft.miniAppsEnabled === true, disabled: !this.canEdit(),
+            onChange: (value: boolean) => this.saveToggle('miniAppsEnabled', value) })
+        }
+      }.width('100%').padding(Space.page)
+    }.width('100%').height('100%').align(Alignment.Top).scrollBar(BarState.Auto)
   }
 
   @Builder
@@ -217,6 +237,11 @@ export struct SettingsPanel {
               disabled: !this.canEdit(), onTap: () => this.onTools('mcp') })
           }
         }
+        SectionHeader({ title: t('实验室') })
+        GroupCard() {
+          NavRow({ title: t('实验室'), subtitle: t('选择要体验的实验功能'), icon: $r('sys.symbol.wand_and_stars'),
+            compId: 'open-laboratory', onTap: this.onLaboratory })
+        }
         SectionHeader({ title: t('界面与语言') })
         GroupCard() {
           Column() {
@@ -259,6 +284,7 @@ export struct SettingsPanel {
   }
   build() {
     if (this.presetsOnly) { this.presetsPage() }
+    else if (this.laboratoryOnly) { this.laboratoryPage() }
     else { this.settingsPage() }
   }
 }

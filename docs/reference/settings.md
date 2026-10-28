@@ -4,6 +4,8 @@
 
 ## 持久化位置
 
+“设置 → 实验室 → 小程序”控制小程序功能。`productivity.options.miniAppsEnabled` 默认为 `false`，旧配置缺少该字段时也视为关闭。开启后显示小程序入口并提供 `list_mini_apps`、`publish_mini_app` 工具；关闭后隐藏入口并阻止相关工具调用，保留已有小程序、数据和历史记录。普通页面预览不受此开关影响。有任务正在执行时，需等任务完成后再修改。
+
 | 位置 | 载体 | 内容 | 进入备份 |
 | --- | --- | --- | --- |
 | `sessions-v2/index.json` | 会话索引的 `data` 字段 | `config`、`providerProfiles`、`extensions`、`productivity`、`projects`、`activeThreadId` | 是（凭据字段被剥离） |

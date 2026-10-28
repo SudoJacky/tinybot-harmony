@@ -31,6 +31,11 @@ const fileIo = {
   }
 };
 const kits = {
+  '@kit.ArkData': {
+    uniformTypeDescriptor: { getTypeDescriptor: type => ({ belongsTo: parent => type === parent ||
+      (parent === 'general.image' && ['general.jpeg', 'general.png', 'general.heic'].includes(type)) }) },
+    unifiedDataChannel: { ProgressIndicator: { NONE: 0 }, ListenerStatus: { FINISHED: 0, PROCESSING: 1, CANCELED: 2 } }
+  },
   '@kit.CoreFileKit': { fileIo, picker: { DocumentViewPicker: class {
     async select(options) { pickerMaximum = options.maxSelectNumber; return selectedUris; }
   } } },
@@ -301,6 +306,89 @@ async function main() {
   assert.equal(limits.length, 7); assert.ok(limits.every(limit => limit === MAX_MESSAGE_ATTACHMENTS));
   assert.equal(handles.size, 0);
   console.log('PASS system share accepts ten images/files, rejects eleven before importing, and all declared share types match the limit');
+
+  const { AttachmentDrop, droppedFiles, importDroppedAttachments } = load('services/AttachmentDrop');
+  const record = (uri, type = 'general.file') => ({ getTypes: () => ['general.file-uri', type],
+    getType: () => type, getEntry: () => ({ oriUri: uri, fileType: type }) });
+  const dragData = records => ({ getRecords: () => records });
+  const uri = 'file://' + root + '/session.txt', photoUri = 'file://' + root + '/selected-0.jpg';
+  const mixed = dragData([record(uri), record(photoUri, 'general.jpeg'), record(uri)]);
+  assert.equal(droppedFiles(mixed, 2).length, 2);
+  assert.throws(() => droppedFiles(mixed, 1), /10/);
+  assert.throws(() => droppedFiles(dragData([]), 10), /没有收到/);
+  assert.throws(() => droppedFiles(dragData([record('https://example.com/image.png', 'general.png')]), 10), /本地/);
+  const legacyImage = { getTypes: () => ['general.image'], getType: () => 'general.image', imageUri: photoUri };
+  assert.equal(droppedFiles(dragData([legacyImage]), 10)[0].photo, true);
+  const bitmap = { getTypes: () => ['openharmony.pixel-map'], getType: () => 'openharmony.pixel-map' };
+  assert.throws(() => droppedFiles(dragData([bitmap]), 10), /纯位图/);
+  await importDroppedAttachments(mixed, 10, () => true, async items => {
+    assert.equal(await reopened.setAttachments(items), true);
+    assert.equal(reopened.active.attachments.length, 2);
+    assert.equal(reopened.active.attachments[1].mime, 'image/jpeg');
+  });
+  assert.equal(load('model/Conversation').parseAppData(JSON.stringify(saved)).threads.find(t => t.id === saved.activeThreadId).attachments.length, 2);
+
+  const originalImport = Attachments.import; const importedPaths = [];
+  Attachments.import = async (...args) => { const item = await originalImport(...args); importedPaths.push(Attachments.path(item)); return item; };
+  try {
+    let committed = false, checks = 0;
+    await assert.rejects(importDroppedAttachments(mixed, 10, () => ++checks < 2, async () => { committed = true; }), /对话已切换/);
+    assert.equal(committed, false); assert.equal(fs.existsSync(disk(importedPaths.at(-1))), false);
+    await assert.rejects(importDroppedAttachments(dragData([record(photoUri, 'general.jpeg'), record('file:///missing-file')]),
+      10, () => true, async () => { committed = true; }), /ENOENT/);
+    assert.equal(fs.existsSync(disk(importedPaths.at(-1))), false); assert.equal(committed, false);
+    await assert.rejects(importDroppedAttachments(dragData([record(photoUri, 'general.jpeg')]), 10, () => true,
+      async () => { throw Error('save failed'); }), /save failed/);
+    assert.equal(fs.existsSync(disk(importedPaths.at(-1))), true, 'Keep adopted draft files for retry save');
+  } finally { Attachments.import = originalImport; }
+
+  let listener; const event = { startDataLoading: options => { listener = options.dataProgressListener; return 'drop-key'; } };
+  const receiver = new AttachmentDrop();
+  const pending = receiver.load(event);
+  listener({ status: 1, progress: 25 }, null);
+  listener({ status: 0, progress: 100 }, mixed);
+  listener({ status: 0, progress: 100 }, dragData([]));
+  assert.equal(await pending, mixed);
+  const canceled = receiver.load(event); const late = listener; let canceledKey = '';
+  receiver.cancel({ getDragController: () => ({ cancelDataLoading: key => { canceledKey = key; } }) });
+  await assert.rejects(canceled, /对话已切换/); assert.equal(canceledKey, 'drop-key');
+  late({ status: 0, progress: 100 }, mixed);
+  const failed = receiver.load(event); listener({ status: 204, progress: -1 }, null);
+  await assert.rejects(failed, /204/);
+  await assert.rejects(receiver.load({ startDataLoading: () => { throw Error('native load failed'); } }), /native load failed/);
+  console.log('PASS drag records, mixed imports and persisted drafts; overflow, unsupported data, navigation cleanup, partial failures, save retry, native cancellation and late callbacks');
+
+  if (process.argv.includes('--ui')) {
+    const panelSource = path.join(source, 'views/ChatPanel.ets');
+    const emitted = path.resolve(source, '../../../build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/views/ChatPanel.ts');
+    assert.ok(fs.statSync(emitted).mtimeMs >= fs.statSync(panelSource).mtimeMs, 'Rebuild ChatPanel');
+    const tree = ts.createSourceFile(emitted, fs.readFileSync(emitted, 'utf8'), ts.ScriptTarget.Latest, true);
+    const panel = tree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'ChatPanel');
+    const methods = ['dropEditable', 'dragAttachment', 'composerDrop', 'receiveAttachmentDrop', 'cancelAttachmentDrop'];
+    const selected = panel.members.filter(member => member.name && methods.includes(member.name.getText(tree)));
+    assert.equal(selected.length, methods.length);
+    const exports = {}, DragResult = { DRAG_FAILED: 1, DRAG_SUCCESSFUL: 0, DROP_ENABLED: 4, DROP_DISABLED: 5 };
+    vm.runInNewContext(compile('class Panel {' + selected.map(member => member.getText(tree)).join('\n') + '} exports.Panel = Panel;'),
+      { exports, t, Error, Object, MAX_MESSAGE_ATTACHMENTS, DragResult, DragBehavior: { COPY: 1 }, importDroppedAttachments });
+    const ui = new exports.Panel(); let commits = 0;
+    Object.assign(ui, { attachmentDrop: new AttachmentDrop(), dropGeneration: 0, importing: false,
+      speechActive: () => false, getUIContext: () => ({ getDragController: () => ({ cancelDataLoading() {} }) }),
+      thread: { id: 'drop-chat', archived: false, attachments: [] },
+      app: { ready: true, busy: false, saveError: '', error: '', active: { id: 'drop-chat' },
+        setAttachments: async items => { commits++; ui.thread.attachments = items; return true; } } });
+    const nativeEvent = { ...event, setResult(value) { this.result = value; } };
+    ui.dragAttachment(nativeEvent); assert.equal(ui.dropHover, true);
+    let run = ui.receiveAttachmentDrop(nativeEvent);
+    assert.equal(ui.importing, true); assert.equal(ui.dropHover, false);
+    listener({ status: 0, progress: 100 }, mixed); await run;
+    assert.equal(commits, 1); assert.equal(ui.thread.attachments.length, 2); assert.equal(ui.importing, false);
+    run = ui.receiveAttachmentDrop(nativeEvent); ui.app.active.id = 'other'; ui.cancelAttachmentDrop(); await run;
+    assert.equal(commits, 1); assert.match(ui.app.error, /对话已切换/);
+    ui.app.active.id = 'drop-chat'; ui.thread.attachments = Array(10).fill({});
+    await ui.receiveAttachmentDrop(nativeEvent); assert.equal(nativeEvent.result, DragResult.DRAG_FAILED); assert.equal(commits, 1);
+    ui.composerDrop({ getSummary: () => ({ summary: { 'general.plain-text': 4 } }), setResult() { assert.fail('Native text drop was intercepted'); } });
+    console.log('PASS compiled ChatPanel callbacks: hover, attachment strip, current conversation, navigation cancellation, full draft and native text drop');
+  }
   }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => console.log('Fixtures: ' + fixture));
