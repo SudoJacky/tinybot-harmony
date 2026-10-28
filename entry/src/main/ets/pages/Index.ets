@@ -380,7 +380,7 @@ struct Index {
         } finally { this.launching = false; }
       }
       this.voiceRequest = '';
-      this.paths.clear(); this.setDrawer(false);
+      this.revealChat();
       return;
     }
     if (this.launching || this.receiving || !this.app.canNavigate) {
@@ -394,7 +394,7 @@ struct Index {
       if (!LaunchActions.isForeground()) { return; }
       // Desktop shortcuts always create a standalone chat, regardless of the previously selected project.
       if (!await this.app.newThread('')) { throw new Error(this.app.error || this.app.saveError || t('无法创建新对话。')); }
-      this.paths.clear(); this.setDrawer(false);
+      this.revealChat();
       this.voiceRequest = action === 'voice-input' && LaunchActions.isForeground() ? this.app.active.id : '';
     } catch (error) {
       this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: (error as Error).message });
@@ -413,12 +413,18 @@ struct Index {
         else if (await this.app.newThread()) {
           this.app.setDraft(input.text);
           if (!await this.app.setAttachments(input.attachments)) { return; }
-          await this.app.flushDraft(); this.paths.clear();
+          await this.app.flushDraft(); this.revealChat();
           if (this.app.saveError) { return; }
         } else { return; }
         ShareInbox.take(); input = ShareInbox.peek();
       }
     } finally { this.receiving = false; }
+  }
+
+  private revealChat(): void {
+    this.paths.clear(); this.setDrawer(false);
+    // Collapse the phone overlay without disposing retained editors or their drafts.
+    if (!this.workbench().docked) { this.setDetailPane(false); }
   }
 
   private hasPreview(): boolean { return this.previewId.length > 0 && this.previewThreadId === this.app.active.id; }
@@ -893,7 +899,7 @@ struct Index {
         .onShown(() => { this.onboardingActive = true; })
         .onHidden(() => { this.onboardingActive = false; })
     } else if (name === 'mini-apps') {
-      NavDestination() { MiniAppsPanel({ app: this.app, onChat: () => this.paths.clear() }) }
+      NavDestination() { MiniAppsPanel({ app: this.app, onChat: () => this.revealChat() }) }
         .title(t('小程序'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'branches') {
       NavDestination() { BranchesPanel({ app: this.app, onSelected: () => this.paths.clear() }) }.title(t("会话分支"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
