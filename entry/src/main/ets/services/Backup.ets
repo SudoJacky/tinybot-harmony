@@ -11,9 +11,10 @@ import { WorkspaceStore } from '../model/WorkspaceStore';
 import { workspaceRelativePath } from './WorkspaceTools';
 import { Attachments, readBounded, writeBytes } from './Attachments';
 import { exportFile } from './NativeActions';
+import { MiniApps } from './MiniApps';
 interface BackupFile { threadId?: string; workspaceId?: string; path: string; bytes: string; }
 interface BackupAttachment { id: string; bytes: string; }
-interface BackupEnvelope { format: string; data: AppData; attachments: BackupAttachment[]; files: BackupFile[]; }
+interface BackupEnvelope { format: string; data: AppData; attachments: BackupAttachment[]; files: BackupFile[]; miniAppWorkspaceIds?: string[]; }
 const MAX_BACKUP = 20 * 1024 * 1024;
 async function encodeFile(path: string): Promise<string> {
   const file = await fs.open(path, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
@@ -54,7 +55,10 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
   for (const item of allAttachments(data)) { const bytes = await encodeFile(Attachments.path(item)); size += bytes.length; if (size > MAX_BACKUP) { throw new Error(t("备份超过 20 MB，请先清理不需要的附件。")); } envelope.attachments.push({ id: item.id, bytes: bytes }); }
   const workspaces = new WorkspaceStore(context.getApplicationContext().filesDir);
   const projectRoots = new Set((data.projects || []).map((project) => project.workspaceId));
-  const roots = Array.from(projectRoots).concat(data.threads.filter((thread) => !thread.projectId).map((thread) => thread.id));
+  const ownedRoots = Array.from(projectRoots).concat(data.threads.filter((thread) => !thread.projectId).map((thread) => thread.id));
+  const appRoots = (await new MiniApps(context.getApplicationContext().filesDir).list()).map((entry) => entry.workspaceId);
+  envelope.miniAppWorkspaceIds = Array.from(new Set(appRoots.filter((id) => !ownedRoots.includes(id))));
+  const roots = Array.from(new Set(ownedRoots.concat(envelope.miniAppWorkspaceIds)));
   for (const workspaceId of roots) {
     const root = workspaces.pathFor(workspaceId); const pending = [''];
     if (!projectRoots.has(workspaceId) && !await fs.access(root)) { continue; }
@@ -103,6 +107,15 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
   if (legacy && ((data.projects || []).length > 0 || data.threads.some((thread) => thread.projectId !== undefined))) { throw new Error(t('备份格式无效。')); }
   const workspaceIds = new Set(data.threads.filter((thread) => !thread.projectId).map((thread) => thread.id)
     .concat((data.projects || []).map((project) => project.workspaceId)));
+  const retainedRoots = envelope.miniAppWorkspaceIds || [];
+  if (!Array.isArray(retainedRoots) || retainedRoots.some((id) => typeof id !== 'string') || new Set(retainedRoots).size !== retainedRoots.length ||
+    (legacy && retainedRoots.length > 0)) { throw new Error(t('备份文件无效。')); }
+  for (const id of retainedRoots) {
+    if (workspaceIds.has(id) || !envelope.files.some((item) => item.workspaceId === id && /^mini-apps\/[^/]+\/app\.json$/.test(item.path))) {
+      throw new Error(t('备份文件无效。'));
+    }
+    workspaceIds.add(id);
+  }
   const known = new Set(local.threads.map((thread) => thread.id));
   const workspace = new WorkspaceStore(context.getApplicationContext().filesDir);
   for (const id of Array.from(workspaceIds)) { workspace.pathFor(id); }
@@ -129,6 +142,10 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
   // New projects are restored into fresh roots; existing projects keep their local root and bytes.
   // Until the session manifest commits, prepared files are unreferenced and cannot replace local projects.
   const destinations = new Map<string, string>();
+  for (const id of retainedRoots) {
+    if (!await fs.access(workspace.pathFor(id))) { destinations.set(id, id); }
+    else { await workspace.requireWorkspace(id); }
+  }
   for (const thread of data.threads) { if (!thread.projectId) { destinations.set(thread.id, thread.id); } }
   data.projects = (data.projects || []).map((project): ProjectData => {
     const existing = (local.projects || []).find((item) => item.id === project.id);

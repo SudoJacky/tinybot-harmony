@@ -21,6 +21,7 @@ import { StorageCategoryPanel, StoragePanel } from '../views/StoragePanel';
 import { storageCategoryKey } from '../model/StoragePlan';
 import { BranchesPanel } from '../views/BranchesPanel';
 import { WorkspacePanel } from '../views/WorkspacePanel';
+import { MiniAppsPanel } from '../views/MiniAppsPanel';
 import { SearchSettingsPanel } from '../views/SearchSettingsPanel';
 import { ToolApproval } from '../services/ToolApproval';
 import { common } from '@kit.AbilityKit';
@@ -849,6 +850,8 @@ struct Index {
           .id('share-conversation').enabled(this.app.ready && !this.app.busy && this.app.active.messages.length > 0)
           .onClick(() => this.openConversationShare())
       }
+      MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.rectangle_stack')), content: t('小程序') })
+        .id('open-mini-apps-menu').enabled(this.app.ready).onClick(() => this.paths.pushPath({ name: 'mini-apps' }))
       MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.gearshape')), content: t('设置') })
         .onClick(() => this.openSettings())
     }
@@ -872,6 +875,9 @@ struct Index {
         })
         .onShown(() => { this.onboardingActive = true; })
         .onHidden(() => { this.onboardingActive = false; })
+    } else if (name === 'mini-apps') {
+      NavDestination() { MiniAppsPanel({ app: this.app, onChat: () => this.paths.clear() }) }
+        .title(t('小程序'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'branches') {
       NavDestination() { BranchesPanel({ app: this.app, onSelected: () => this.paths.clear() }) }.title(t("会话分支"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'appearance') {
@@ -1130,6 +1136,7 @@ struct Index {
           .borderRadius({ topRight: this.workbench().expanded ? 0 : 20, bottomRight: this.workbench().expanded ? 0 : 20 })
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         ThreadList({ app: this.app, workbench: this.windowWidth >= 840,
+          onMiniApps: () => { this.setDrawer(false); this.paths.pushPath({ name: 'mini-apps' }); },
           collapseHistory: this.workbench().expanded, searchRequest: this.historySearchRequest,
           onCollapseHistory: () => this.setHistoryCollapsed(true),
           onNewChat: () => { this.createChat(); this.setDrawer(false); }, onTools: () => { this.setDrawer(false); this.openTools('memory'); },

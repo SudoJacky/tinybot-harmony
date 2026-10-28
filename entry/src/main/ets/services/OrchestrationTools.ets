@@ -15,7 +15,7 @@ interface ExecutionStatus { status: string; calls?: ChildReference[]; issues?: C
 interface CatalogEntry { name: string; description: string; parameters: Object; }
 const NESTED_TOOLS: string[] = ['find_files', 'list_files', 'read_file', 'read_attachment', 'search_file_content',
   'write_file', 'edit_file', 'read_web', 'search_web', 'read_reference', 'read_skill', 'mcp_list_tools', 'mcp_search_tools', 'mcp_call',
-  'execute_code', 'publish_preview', 'present_files'];
+  'execute_code', 'publish_preview', 'present_files', 'list_mini_apps', 'publish_mini_app'];
 
 // Wrap the final policy-filtered catalog, outside any TeamToolLane. Only children enter that lane.
 export class OrchestrationTools implements AgentTools {

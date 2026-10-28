@@ -26,6 +26,7 @@ const suites = {
     'test-interactive-ui.cjs',
     'test-liquid-toggle.cjs',
     'test-memory.cjs',
+    'test-mini-apps.cjs',
     'test-model-dependencies.cjs',
     'test-orchestration.cjs',
     'test-prefix-cache.cjs',
