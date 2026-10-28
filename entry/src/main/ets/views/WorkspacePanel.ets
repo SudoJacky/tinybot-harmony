@@ -9,8 +9,8 @@ import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { NativeWorkspaceFiles } from '../services/NativeWorkspaceFiles';
 import { Cancellation } from '../services/Cancellation';
-import { importTextFile } from '../services/TextFiles';
-import { Attachments, writeBytes } from '../services/Attachments';
+import { writeBytes } from '../services/Attachments';
+import { isDocumentPath } from '../services/DocumentFiles';
 import { exportFile, shareFile } from '../services/NativeActions';
 import { aiAssistedFile } from '../model/ConversationExport';
 import { MarkdownView } from './MarkdownView';
@@ -157,13 +157,10 @@ export struct WorkspacePanel {
       if (!uris.length) { return; }
       this.busy = true; let count = 0;
       for (const uri of uris) {
-        const document = /\.(pdf|docx|xlsx|pptx)(?:\?|$)/i.test(uri);
-        const text = document ? (await Attachments.import(uri, false)).text || '' : await importTextFile(uri);
         let name = uri.slice(uri.lastIndexOf('/') + 1).split('?')[0];
         try { name = decodeURIComponent(name); } catch (_) { /* Keep literal URI name. */ }
         name = name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(-80) || t("导入-") + Date.now() + '.txt';
-        if (document) { name += '.txt'; }
-        await this.files.write(this.join(this.uniqueName(name)), text, new Cancellation());
+        await this.files.importFile(uri, this.join(this.uniqueName(name)));
         count++; await this.refresh();
       }
       this.toast(t("已导入 ") + count + t(" 个文件"));
@@ -373,7 +370,7 @@ export struct WorkspacePanel {
         if (this.editing) {
           Button(this.busy ? t("保存中…") : t("保存")).fontFamily(this.appearance.fontFamily).id('workspace-edit-save').attributeModifier(Btn.primarySmall)
             .enabled(!this.locked()).onClick(() => this.save())
-        } else if (this.imagePath.length === 0 && this.previewError.length === 0) {
+        } else if (this.imagePath.length === 0 && this.previewError.length === 0 && !isDocumentPath(this.selected) && !this.selected.startsWith('attachments/')) {
           Button(t("编辑")).fontFamily(this.appearance.fontFamily).id('workspace-edit-save').attributeModifier(Btn.tonalSmall).enabled(!this.locked())
             .onClick(() => { this.editing = true; })
         }

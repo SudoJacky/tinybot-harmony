@@ -252,7 +252,10 @@ export class SessionService {
     if (this.status.phase === 'running') {
       if (!this.canQueueInput) { return false; }
       try {
-        validateAttachments(items); this.active.attachments = items; this.publish('snapshot');
+        const thread = this.active;
+        const prepared = await this.prepareAttachments(items, thread);
+        if (this.active !== thread || !this.canQueueInput) { throw new Error(t('对话已切换，请在当前对话重新添加附件。')); }
+        this.active.attachments = prepared; this.publish('snapshot');
         await this.persist(this.active.id); return true;
       } catch (error) {
         this.status.error = t('保存附件失败：') + (error as Error).message;
@@ -261,8 +264,14 @@ export class SessionService {
     }
     return this.mutate(t("保存附件失败："), async () => {
       if (this.active.archived) { throw new Error(t("请先恢复对话。")); }
-      validateAttachments(items); this.active.attachments = items; await this.persist();
+      this.active.attachments = await this.prepareAttachments(items, this.active); await this.persist();
     });
+  }
+  private async prepareAttachments(items: Attachment[], thread: ThreadData): Promise<Attachment[]> {
+    validateAttachments(items);
+    if (!items.some((item) => item.original)) { return items; }
+    if (!this.resources.prepareAttachments) { throw new Error('Workspace file attachment storage is unavailable.'); }
+    return this.resources.prepareAttachments(items, thread.id, projectFor(this.data, thread)?.workspaceId);
   }
   async appendDraftAttachment(threadId: string, item: Attachment, text: string): Promise<void> {
     if (this.active.id !== threadId) { throw new Error(t('对话已切换，请在当前对话重新添加附件。')); }
@@ -311,6 +320,13 @@ export class SessionService {
       const source = this.active;
       const branch = forkedThreadCandidate(source, () => this.freshThread(), this.selectedToolSelection(source), messageId);
       await this.ensureThreadWorkspace(branch);
+      branch.attachments = await this.prepareAttachments(branch.attachments || [], branch);
+      for (const message of branch.messages) {
+        if (message.attachments) { message.attachments = await this.prepareAttachments(message.attachments, branch); }
+        for (const step of message.steps || []) {
+          if (step.steering?.attachments) { step.steering.attachments = await this.prepareAttachments(step.steering.attachments, branch); }
+        }
+      }
       // Preserve historical messages verbatim. Context describes shared project files or a fresh standalone workspace.
       const extras = this.data.productivity || defaultProductivity();
       const copied = extras.memories.filter((item) => item.threadId === source.id).map((item): MemoryEntry => {

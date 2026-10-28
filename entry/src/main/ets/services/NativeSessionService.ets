@@ -91,6 +91,10 @@ export class NativeSessionResources implements SessionResources {
   ensureWorkspace(id: string, workspaceId?: string): Promise<void> {
     return workspaceId ? this.workspaces.requireWorkspace(workspaceId) : this.workspaces.ensureThread(id);
   }
+  async prepareAttachments(items: Attachment[], threadId: string, workspaceId?: string): Promise<Attachment[]> {
+    await this.ensureWorkspace(threadId, workspaceId);
+    return Attachments.inWorkspace(items, workspaceId || threadId);
+  }
   persistProjectFolders(folders: SharedFolder[]): Promise<void> { return ProjectFolderAccess.persist(folders); }
   revokeProjectFolders(folders: SharedFolder[]): Promise<void> { return ProjectFolderAccess.revoke(folders); }
   activateProjectFolders(projects: ProjectData[]): Promise<void> { return ProjectFolderAccess.activateAll(projects); }

@@ -7,6 +7,9 @@ export interface Attachment {
   path: string;
   size: number;
   text?: string;
+  // Original files are staged until setAttachments binds them to a workspace.
+  original?: boolean;
+  workspaceId?: string;
 }
 
 export interface MemoryEntry {
@@ -55,14 +58,25 @@ export function validateAttachments(items: Attachment[]): void {
   for (const item of items) {
     if (!item || !/^[a-zA-Z0-9-]{1,80}$/.test(item.id) || ids.has(item.id) ||
       typeof item.name !== 'string' || item.name.length > 200 || typeof item.path !== 'string' ||
-      item.path !== item.id + (item.mime === 'image/jpeg' ? '.jpg' : '.txt') ||
-      !['image/jpeg', 'text/plain'].includes(item.mime) || !Number.isSafeInteger(item.size) || item.size < 0 ||
+      !validAttachmentStorage(item) || !Number.isSafeInteger(item.size) || item.size < 0 ||
       (item.mime === 'image/jpeg' && item.size > 4 * 1024 * 1024) ||
       (item.text !== undefined && (typeof item.text !== 'string' || item.text.includes('\u0000')))) {
       throw new Error(t("附件记录无效。"));
     }
     ids.add(item.id);
   }
+}
+
+function validAttachmentStorage(item: Attachment): boolean {
+  if (item.original === true) {
+    return item.text === undefined && typeof item.mime === 'string' && item.mime.length > 0 && item.mime.length <= 150 &&
+      item.name.length > 0 && !/[\\/:*?"<>|\u0000-\u001f\u007f]/.test(item.name) &&
+      !['.', '..'].includes(item.name) && !item.name.startsWith('.tinybot-') &&
+      item.path === 'attachments/' + item.id + '/' + item.name &&
+      (item.workspaceId === undefined || (typeof item.workspaceId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(item.workspaceId)));
+  }
+  return item.original === undefined && item.workspaceId === undefined &&
+    ['image/jpeg', 'text/plain'].includes(item.mime) && item.path === item.id + (item.mime === 'image/jpeg' ? '.jpg' : '.txt');
 }
 
 export function validateProductivity(data: ProductivityData): void {

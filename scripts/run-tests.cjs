@@ -19,6 +19,7 @@ const suites = {
     'test-conversation-export.cjs',
     'test-custom-tools.cjs',
     'test-feedback.cjs',
+    'test-file-attachments.cjs',
     'test-gemini.cjs',
     'test-harness-features.cjs',
     'test-hosted-privacy.cjs',

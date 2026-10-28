@@ -6,6 +6,8 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { Cancellation } from './Cancellation';
 import { workspaceRelativePath } from './WorkspaceTools';
 import { readUtf8File } from './TextFiles';
+import { copyFileBytes } from './FileBytes';
+import { isDocumentPath, readDocumentFile } from './DocumentFiles';
 import { TextEdit, applyTextEdits, validateEdits } from '../model/WorkspaceEdit';
 import { withFileMutation } from './FileMutationQueue';
 import { ToolFailure } from '../model/ToolFailure';
@@ -30,6 +32,39 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
   constructor(workspaceDir: string, sharedFolders: SharedFolder[] = []) {
     this.root = workspaceDir;
     this.mounts = sharedFolders.slice();
+  }
+
+  async importFile(source: string, path: string, reuse: boolean = false): Promise<void> {
+    if (this.isShared(path)) { throw new Error('Import files into the private workspace.'); }
+    await withFileMutation(this.root + '/' + path, async () => {
+      const destination = await this.resolve(path, true, new Cancellation());
+      if (await this.optionalStat(destination)) {
+        await this.checkedPath(path);
+        if (reuse && await this.fileDigest(source) === await this.fileDigest(destination)) { return; }
+        throw new Error('The destination already exists with different content: ' + path);
+      }
+      await copyFileBytes(source, destination);
+    });
+  }
+
+  private async fileDigest(path: string): Promise<string> {
+    const file = await fs.open(path, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
+    try {
+      const hash = cryptoFramework.createMd('SHA256');
+      const buffer = new ArrayBuffer(64 * 1024);
+      while (true) {
+        const count = await fs.read(file.fd, buffer); if (!count) { break; }
+        await hash.update({ data: new Uint8Array(buffer.slice(0, count)) });
+      }
+      return new util.Base64Helper().encodeToStringSync((await hash.digest()).data);
+    } finally { await fs.close(file); }
+  }
+
+  private assertTextWritable(path: string): void {
+    if (path.startsWith('attachments/') || isDocumentPath(path)) {
+      throw new ToolFailure('READ_ONLY', 'Original attachments and binary documents cannot be edited as text. Save changes to a separate text file.',
+        'choose_another_path', { path: path });
+    }
   }
 
   async checkedPath(path: string): Promise<string> {
@@ -87,7 +122,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
       cancellation.check();
       const file = await this.openExternal(mount.folder, mount.relative, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
       try {
-        const content = await readUtf8File(file.fd, cancellation);
+        const content = await readDocumentFile(file.fd, path, this.root, cancellation);
         return { path: path, content: content, version: await contentVersion(content) };
       } finally {
         await fs.close(file);
@@ -97,7 +132,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     cancellation.check();
     const file = await fs.open(absolute, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
     try {
-      const content = await readUtf8File(file.fd, cancellation);
+      const content = await readDocumentFile(file.fd, path, this.root, cancellation);
       return { path: path, content: content, version: await contentVersion(content) };
     } finally {
       await fs.close(file);
@@ -105,6 +140,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
   }
 
   async write(path: string, content: string, cancellation: Cancellation, guard?: WorkspaceWriteGuard): Promise<WorkspaceWrite> {
+    this.assertTextWritable(path);
     workspaceRelativePath(path, false);
     if (this.isShared(path)) {
       const mount = await this.requireMount(path, true);
@@ -115,6 +151,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
   }
 
   async edit(path: string, edits: TextEdit[], version: string, cancellation: Cancellation): Promise<WorkspaceWrite> {
+    this.assertTextWritable(path);
     workspaceRelativePath(path, false);
     validateEdits(edits);
     if (this.isShared(path)) {
