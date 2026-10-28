@@ -590,8 +590,10 @@ export struct ThreadList {
         .id('open-settings').width('100%').height(48).padding({ left: Space.md, right: Space.md }).borderRadius(Radius.md)
         .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
         .onClick(() => this.onSettings())
-        Button(t('小程序')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.tonal).width('100%')
-          .id('open-mini-apps').enabled(this.app.ready).onClick(this.onMiniApps)
+        if (this.app.productivity.options?.miniAppsEnabled === true) {
+          Button(t('小程序')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.tonal).width('100%')
+            .id('open-mini-apps').enabled(this.app.ready).onClick(this.onMiniApps)
+        }
       }
     }
     .padding({ left: Space.md, right: Space.md, top: Space.sm, bottom: Space.sm })

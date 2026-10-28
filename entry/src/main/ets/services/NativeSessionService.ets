@@ -114,7 +114,7 @@ export class NativeSessionResources implements SessionResources {
       new SkillTools(extensions.skills, selected, live ? () => live.skills() : undefined), new InteractionTools(this.approval)];
     groups.push(new CodeExecutionTools(new NativeCodeExecutor()));
     groups.push(new MiniAppTools(this.miniApps, workspaceId || id, id, files,
-      (page, storage, cancellation) => WebUiPreflight.validateMiniApp(page, storage, cancellation)));
+      (page, storage, cancellation) => WebUiPreflight.validateMiniApp(page, storage, cancellation), productivity?.options?.miniAppsEnabled === true));
     groups.push(new PresentTools((path: string) => files.checkedPath(path)));
     groups.push(new PreviewTools(files, (content, cancellation) => WebUiPreflight.validate(content, cancellation),
       (content, cancellation) => PreviewCapture.capture(content, cancellation)));

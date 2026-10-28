@@ -74,6 +74,54 @@ async function main() {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tinybot-config-compat-'));
   assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()));
   try {
+    // Earlier builds attached preview snapshots to successful mini-app publications.
+    // Read and rewrite them without dropping metadata or treating them as ordinary preview tools.
+    const legacy = fixture();
+    const legacyTool = { call: { id: 'legacy-mini', type: 'function', function: { name: 'publish_mini_app', arguments: '{}' } },
+      status: 'complete', output: JSON.stringify({ appId: 'mini-existing', published: true, prepared: true,
+        revisionId: 'rev-existing', previewId: 'pv_existing', reference: '[[tinybot-preview:pv_existing]]',
+        path: 'app.html', title: 'Existing mini app', miniApp: { retained: true } }),
+      previewContent: '```tinybot-ui\nlegacy snapshot\n```',
+      previewScreenshot: { width: 100, height: 100, viewportWidth: 100,
+        image: { id: 'legacy-image', name: 'Preview.jpg', path: 'legacy-image.jpg', size: 3, mime: 'image/jpeg' } } };
+    legacy.threads[0].messages[1].steps = [{ content: '', tools: [plain(legacyTool), {
+      call: { id: 'parent', type: 'function', function: { name: 'orchestrate', arguments: '{}' } },
+      status: 'complete', output: '{}', children: [{ ...plain(legacyTool), call: { ...plain(legacyTool.call), id: 'legacy-child' } }]
+    }] }];
+    const legacyStore = new ConversationStore(directory);
+    await legacyStore.save(parseAppData(JSON.stringify(legacy)));
+    const reloadedLegacy = await new ConversationStore(directory).load();
+    assert.deepEqual(plain(reloadedLegacy.threads[0].messages[1].steps), legacy.threads[0].messages[1].steps);
+    for (const corrupt of [tool => { tool.previewContent = {}; }, tool => { tool.status = 'failed'; },
+      tool => { tool.call.function.name = 'read_file'; }, tool => { tool.previewScreenshot.width = -1; }]) {
+      const broken = plain(legacy); corrupt(broken.threads[0].messages[1].steps[0].tools[0]);
+      assert.throws(() => parseAppData(JSON.stringify(broken)), /Invalid (published preview snapshot|preview screenshot)/);
+    }
+    console.log('PASS legacy mini-app snapshots and screenshots survive real store reload, including orchestration children; invalid snapshots remain rejected');
+
+    const replayIndex = process.argv.indexOf('--sessions');
+    if (replayIndex !== -1) {
+      const savedSessions = path.resolve(process.argv[replayIndex + 1]);
+      const replayDir = path.join(directory, 'device-replay');
+      await fsp.mkdir(replayDir);
+      await fsp.cp(savedSessions, path.join(replayDir, 'sessions-v2'), { recursive: true });
+      const manifest = JSON.parse(await fsp.readFile(path.join(savedSessions, 'index.json'), 'utf8'));
+      const expected = [];
+      for (const entry of manifest.threads) {
+        const thread = JSON.parse(await fsp.readFile(path.join(savedSessions, entry.file), 'utf8'));
+        expected.push(...thread.messages.flatMap(message => (message.steps || []).flatMap(step =>
+          step.tools.flatMap(tool => [tool, ...(tool.children || [])]).filter(tool => tool.previewContent !== undefined))));
+      }
+      const replayStore = new ConversationStore(replayDir);
+      const replay = await replayStore.load();
+      assert.equal(replay.threads.length, manifest.threads.length);
+      await replayStore.save(replay);
+      const cold = await new ConversationStore(replayDir).load();
+      const actual = cold.threads.flatMap(thread => thread.messages.flatMap(message => (message.steps || []).flatMap(step =>
+        step.tools.flatMap(tool => [tool, ...(tool.children || [])]).filter(tool => tool.previewContent !== undefined))));
+      assert.deepEqual(plain(actual), expected);
+      console.log(`PASS device snapshot: ${cold.threads.length} conversations and ${actual.length} preview records load, save and cold reload without losing preview metadata`);
+    }
     // A compatible addition must survive the actual manifest write and cold reload.
     const additive = emptyData(); additive.futureRoot = { retained: true };
     const first = new ConversationStore(directory); await first.save(parseAppData(JSON.stringify(additive)));

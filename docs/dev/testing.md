@@ -58,6 +58,7 @@ hdc rport tcp:18770 tcp:18770
 | `test-stream-reveal.cjs` | 流式文字渐显 | 否 |
 | `test-markdown-performance.cjs` | 增量解析与全文一致性（含逐字符到达的图片行）、稳定块复用、离屏高度占位、渐显收尾 | 是 |
 | `test-speech-orb.cjs` | 语音输入 UI 生命周期 | 是 |
+| `test-file-attachments.cjs` | 原件导入、读取、备份与草稿保存；拖入数据格式、去重、容量校验、会话切换、部分失败清理、保存重试和迟到回调；加 `--ui` 验证编译后的聊天接收回调 | `--ui` 需 Debug 构建 |
 | `test-voice-composer.cjs` | 语音输入区交互 | 是 |
 | `test-drawing-board.cjs` | 画板初始化/导出/像素释放/附件保存 | 是 |
 | `test-skill-completion.cjs` | Skill 补全与输入框回调 | 是 |

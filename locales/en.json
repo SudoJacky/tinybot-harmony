@@ -1,4 +1,15 @@
 {
+  "实验室": "Labs",
+  "实验功能": "Experimental features",
+  "选择要体验的实验功能": "Choose experimental features to try",
+  "创建和使用可保存数据的小程序。关闭后保留已有小程序和数据。": "Create and use mini apps with saved data. Existing apps and data are kept when disabled.",
+  "请先在设置的实验室中开启小程序。": "Enable mini apps in Settings → Labs first.",
+  "请拖入本地图片或文件，暂不支持链接、文件夹或纯位图。": "Drop local images or files. Links, folders, and raw bitmaps are not supported yet.",
+  "没有收到可添加的附件。": "No attachments were received.",
+  "对话已切换或当前无法添加附件，请重新拖入。": "The conversation changed or cannot accept attachments. Please drop the files again.",
+  "拖入数据读取失败（{0}）。": "Failed to load dropped data ({0}).",
+  "添加拖入附件失败：": "Failed to add dropped attachments: ",
+  "松开以添加到当前会话": "Release to attach to this conversation",
   "任务已完成": "Task completed",
   "本轮回答已完成，点击查看对话。": "Your answer is ready. Tap to open the conversation.",
   "无法打开通知对应的对话。": "Unable to open the conversation for this notification.",
@@ -2503,5 +2514,9 @@
   "部分配置来自较新版本，相关功能暂不可用。原配置已保留。": "Some settings come from a newer version. The affected features are unavailable; the original settings are preserved.",
   "配置兼容性": "Configuration compatibility",
   "自动路由使用了当前版本不支持的模型协议，自动路由已停用；仍使用所选模型，原配置已保留。": "Automatic routing uses a model protocol this version does not support. Routing is disabled and the selected model is used; the original configuration is preserved.",
-  "每条消息最多 10 个附件 · 图片需模型支持视觉输入": "Up to 10 attachments per message · Images need a vision model"
+  "每条消息最多 10 个附件 · 图片需模型支持视觉输入": "Up to 10 attachments per message · Images need a vision model",
+  "1.2.0 · 2026-10-28": "1.2.0 · 2026-10-28",
+  "新增并行会话、本地小程序与数据保存、后台完成通知和系统文档分享，单条消息最多 10 个附件。默认开启必应搜索，优化搜索设置并增加 QQ 社区入口。支持全屏预览与实际页面验证；改善工具响应和大内容处理，修复后台预览误超时、分享后聊天遮挡及配置兼容问题。": "Added parallel conversations, local mini apps with persistent data, background completion notifications, and system document sharing, with up to 10 attachments per message. Bing search is enabled by default, search settings are improved, and a QQ community link is available. Added fullscreen previews and real-page verification; improved tool responsiveness and large-content handling, and fixed background preview timeouts, chat overlays after sharing, and configuration compatibility.",
+  "1.2.1 · 2026-10-29": "1.2.1 · 2026-10-29",
+  "支持将图片或文件拖入当前聊天作为附件。设置新增实验室，小程序默认关闭，可按需开启，关闭后保留已有数据。修复旧版小程序预览记录导致会话无法加载的问题。": "Drag images or files into the current chat as attachments. Settings now includes a Laboratory with mini apps disabled by default. Enable them when needed; turning them off preserves existing data. Fixed older mini-app preview records preventing conversations from loading."
 }

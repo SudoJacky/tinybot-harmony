@@ -6,6 +6,7 @@ import { MiniAppStorage, MiniAppSnapshot, miniAppId, miniAppPage, miniAppPath } 
 import { WorkspaceFiles } from './WorkspaceFiles';
 import { workspaceRelativePath } from './WorkspaceTools';
 import { Cancellation } from './Cancellation';
+import { t } from '../model/I18n';
 
 interface PublishArguments { path: string; title: string; description?: string; appId?: string; library?: string; }
 interface AppSummary { appId: string; title: string; description: string; archived: boolean; sourcePath: string; dataPath: string; updatedAt: number; }
@@ -14,12 +15,15 @@ export class MiniAppTools implements AgentTools {
   private workspaceId: string;
   private threadId: string;
   private files: WorkspaceFiles;
+  private enabled: boolean;
   private validate: (page: string, storage: MiniAppStorage, cancellation: Cancellation) => Promise<void>;
   constructor(apps: MiniApps, workspaceId: string, threadId: string, files: WorkspaceFiles,
-    validate: (page: string, storage: MiniAppStorage, cancellation: Cancellation) => Promise<void>) {
+    validate: (page: string, storage: MiniAppStorage, cancellation: Cancellation) => Promise<void>, enabled: boolean = false) {
+    this.enabled = enabled;
     this.apps = apps; this.workspaceId = workspaceId; this.threadId = threadId; this.files = files; this.validate = validate;
   }
   definitions(): ToolDefinition[] {
+    if (!this.enabled) { return []; }
     const listing: ToolDefinition = { type: 'function', function: { name: 'list_mini_apps', description: 'List local mini apps in this workspace, including stable app IDs, source and data paths. Use before updating an existing app.',
       parameters: { type: 'object', properties: {}, required: [], additionalProperties: false } } };
     const publish: ToolDefinition = { type: 'function', executionMode: 'sequential', function: { name: 'publish_mini_app',
@@ -40,6 +44,7 @@ export class MiniAppTools implements AgentTools {
     return [listing, publish];
   }
   async execute(call: ToolCall, cancellation: Cancellation): Promise<string> {
+    if (!this.enabled) { throw new ToolFailure('PERMISSION_DENIED', t('请先在设置的实验室中开启小程序。'), 'check_permissions'); }
     const args = parseToolArguments(call.function.arguments) as PublishArguments;
     if (!args || typeof args !== 'object' || Array.isArray(args)) { throw new ToolFailure('INVALID_ARGUMENTS', 'Expected an object', 'fix_arguments'); }
     cancellation.check();

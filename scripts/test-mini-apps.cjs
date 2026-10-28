@@ -127,11 +127,17 @@ async function main() {
   console.log('PASS restart persistence, workspace isolation, optimistic concurrent saves, page update/rollback, archive and disk failure');
 
   let failValidation = false, validationCount = 0;
+  const disabledTools = new MiniAppTools(apps,'chat','chat',files('chat'), async () => { assert.fail('Disabled tools must not validate pages'); });
+  assert.equal(disabledTools.definitions().length, 0);
+  const existingApp = plain(await repo.get(app.id)), existingData = plain(await repo.load(app.id));
+  await assert.rejects(invoke(disabledTools,'list_mini_apps',{}), error => error.code === 'PERMISSION_DENIED');
+  await assert.rejects(invoke(disabledTools,'publish_mini_app',{path:'ledger.js',title:'Disabled',appId:app.id}), error => error.code === 'PERMISSION_DENIED');
+  assert.deepEqual(plain(await repo.get(app.id)), existingApp); assert.deepEqual(plain(await repo.load(app.id)), existingData);
   const tools = new MiniAppTools(apps,'chat','chat',files('chat'), async (text,storage) => {
     validationCount++; assert.ok(JSON.parse(text).js); await storage.load();
     await assert.rejects(storage.save({},'initial'),/startup/);
     if(failValidation) throw Error('startup failed');
-  });
+  }, true);
   const created = await invoke(tools,'publish_mini_app',{path:'ledger.js',title:'New ledger'});
   assert.equal(created.published,true); assert.equal(created.startup,'passed');
   failValidation=true;

@@ -157,7 +157,7 @@ const Chat = native('ChatPanel', 'ChatPanel', ['setScrollActivity', 'stopScrollA
   Diagnostics: context.Diagnostics, clearTimeout: context.clearTimeout, setTimeout: context.setTimeout,
   AppStorage: { get: key => scrollState.get(key), setOrCreate(key, value) { scrollState.set(key, value); scrollChanges.push(value); } }
 });
-const chat = Object.assign(new Chat(), { scrollStopTimer: -1, viewport: { dispose() {} }, endSpeech() {}, reading: { stop() {} } });
+const chat = Object.assign(new Chat(), { scrollStopTimer: -1, viewport: { dispose() {} }, endSpeech() {}, reading: { stop() {} }, cancelAttachmentDrop() {} });
 const chatFile = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/views/ChatPanel.ts');
 const chatTree = ts.createSourceFile(chatFile, fs.readFileSync(chatFile, 'utf8'), ts.ScriptTarget.Latest, true);
 const scrollCallbacks = {};

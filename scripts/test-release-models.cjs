@@ -23,7 +23,7 @@ function load(file) {
   }, { filename: file });
   return exports;
 }
-function release(file, symbol) {
+function release(file, symbol, type = 'function') {
   const source = 'entry/src/main/ets/' + file + '.ets';
   const mapping = names[source];
   assert.ok(mapping, 'Missing release name mapping: ' + source);
@@ -32,7 +32,7 @@ function release(file, symbol) {
   const exported = names.PropertyCache[symbol];
   assert.ok(exported && exported !== symbol, 'Expected an obfuscated export: ' + symbol);
   const value = load(path.join(emitted, mapping.obfName.replace(/\.ets$/, '.ts')))[exported];
-  assert.equal(typeof value, 'function', 'Missing release export: ' + symbol);
+  assert.equal(typeof value, type, 'Missing release export: ' + symbol);
   return value;
 }
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -150,6 +150,7 @@ console.log('PASS obfuscated release initializes global Pen Kit context and pref
   const DrawingDraft = release('model/DrawingDraft', 'DrawingDraft');
   let loads = 0;
   const scope = { exports: {}, deviceInfo: { productModel: 'phone' }, canIUse: () => true,
+    [names.PropertyCache.MAX_MESSAGE_ATTACHMENTS]: release('model/Productivity', 'MAX_MESSAGE_ATTACHMENTS', 'number'),
     [names.PropertyCache.DrawingDraft]: DrawingDraft, [names.PropertyCache.t]: value => value,
     makeBuilderParameterProxy: (_name, parameters) => Object.fromEntries(Object.entries(parameters).map(([key, read]) => [key, read()])),
     If: { create() {}, pop() {} }, require: id => {

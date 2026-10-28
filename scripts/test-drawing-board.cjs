@@ -141,7 +141,8 @@ const node = id => [...nodes.values()].find(value => value.id === id);
     }
     if (name === 'bindSheet' && !args[0].value && modal?.owner === owner) modal = undefined;
   } });
-  const overlayScope = { exports: {}, Stack: overlayUi, Column: overlayUi, ModalTransition: {}, SheetSize: {}, SheetKeyboardAvoidMode: {}, t: value => value };
+  const overlayScope = { exports: {}, Stack: overlayUi, Column: overlayUi, ModalTransition: {}, SheetSize: {}, SheetKeyboardAvoidMode: {},
+    ATTACHMENT_DROP_TYPES: [], t: value => value };
   vm.runInNewContext(compile(`exports.bind = function() { ${bindings} };`), overlayScope);
   const overlay = { showDrawing: true, previewing: false, showMemoryDraft: false, closeDrawing() { this.closed = true; },
     observeComponentCreation2(callback) { callback(++owner, false); } };
