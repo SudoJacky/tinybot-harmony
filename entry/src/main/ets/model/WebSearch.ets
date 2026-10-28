@@ -5,19 +5,40 @@ export const DEEPSEEK_SEARCH_BASE_URL: string = 'https://api.deepseek.com/v1';
 export const DEEPSEEK_SEARCH_ENDPOINT: string = DEEPSEEK_SEARCH_BASE_URL + '/tools/search';
 export const SEARCH_REQUEST_MODEL: string = 'search';
 export type SearchProviderId = 'deepseek' | 'tavily' | 'bing-browser';
-export interface SearchConfig { provider: SearchProviderId; enabled: boolean; baseUrl?: string; credentialAlias?: string; modelProviderId?: string; }
-export interface SearchDraft { provider: SearchProviderId; enabled: boolean; baseUrl: string; apiKey: string; modelProviderId?: string; }
+export interface TavilySettings { baseUrl: string; credentialAlias: string; }
+export interface DeepSeekSearchSettings { modelProviderId?: string; }
+export interface SearchConfig {
+  provider: string; enabled: boolean; baseUrl?: string; credentialAlias?: string; modelProviderId?: string;
+  // Keep inactive providers configured; the fields above describe the active provider for older versions.
+  tavily?: TavilySettings; deepseek?: DeepSeekSearchSettings;
+}
+export interface TavilyDraft { baseUrl: string; apiKey: string; clearKey?: boolean; }
+export interface SearchDraft {
+  provider: SearchProviderId; enabled: boolean; baseUrl: string; apiKey: string; modelProviderId?: string;
+  clearKey?: boolean; tavily?: TavilyDraft; deepseek?: DeepSeekSearchSettings;
+}
 export interface SearchSource { url: string; title: string; snippet: string; publishedAt?: string; }
 export interface SearchResult { sources: SearchSource[]; }
 
-export function defaultSearchConfig(provider: SearchProviderId = 'deepseek'): SearchConfig {
-  return provider !== 'tavily' ? { provider: provider, enabled: false } :
+// The keyless Bing provider is usable immediately; API providers need a key or model service first.
+export function defaultSearchConfig(provider: SearchProviderId = 'bing-browser'): SearchConfig {
+  return provider !== 'tavily' ? { provider: provider, enabled: provider === 'bing-browser' } :
     { provider: provider, enabled: false, baseUrl: 'https://api.tavily.com', credentialAlias: '' };
 }
-export function validateSearchConfig(config: SearchConfig): void {
-  if (!config || !['deepseek', 'tavily', 'bing-browser'].includes(config.provider) || typeof config.enabled !== 'boolean') {
+export function isSupportedSearchProvider(provider: string): boolean { return ['deepseek', 'tavily', 'bing-browser'].includes(provider); }
+export function validateSearchConfig(config: SearchConfig, stored: boolean = false): void {
+  if (!config || typeof config.provider !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,79}$/.test(config.provider) ||
+    (!stored && !isSupportedSearchProvider(config.provider)) || typeof config.enabled !== 'boolean') {
     throw new Error('Invalid search settings.');
   }
+  if (config.tavily !== undefined) {
+    validateSearchConfig({ provider: 'tavily', enabled: false, baseUrl: config.tavily?.baseUrl, credentialAlias: config.tavily?.credentialAlias });
+  }
+  if (config.deepseek !== undefined && (!config.deepseek || typeof config.deepseek !== 'object' || Array.isArray(config.deepseek) || (config.deepseek.modelProviderId !== undefined &&
+    (typeof config.deepseek.modelProviderId !== 'string' || !config.deepseek.modelProviderId || config.deepseek.modelProviderId.length > 64)))) {
+    throw new Error('Invalid DeepSeek search settings.');
+  }
+  if (!isSupportedSearchProvider(config.provider)) { return; }
   if (config.provider === 'bing-browser') {
     if (config.baseUrl !== undefined || config.credentialAlias !== undefined || config.modelProviderId !== undefined) {
       throw new Error('Built-in Bing search does not use API credentials or a custom endpoint.');
@@ -54,6 +75,7 @@ export function deepSeekSearchProfile(profiles: ProviderProfile[], selectedId?: 
 }
 // Resolve the live alias at dispatch, so rotation/removal cannot leave a stale copied key.
 export function searchCredentialAlias(config: SearchConfig, profiles: ProviderProfile[]): string {
+  validateSearchConfig(config);
   if (config.provider === 'bing-browser') { throw new Error('Built-in Bing search does not use API credentials.'); }
   return config.provider === 'deepseek' ? deepSeekSearchProfile(profiles, config.modelProviderId).credentialAlias : config.credentialAlias!;
 }

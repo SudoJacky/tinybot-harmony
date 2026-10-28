@@ -62,14 +62,17 @@ function fixture(policy = 'enabled') {
   data.productivity.options.search = { provider: 'tavily', enabled: true, baseUrl: 'https://api.tavily.com', credentialAlias: 'old-key' };
   const vault = { read: async () => assert.fail('Built-in search must not read credentials'), write: async () => assert.fail('Must not create a key'), remove: async alias => removed.push(alias) };
   await saveSearchSettings(data, draft, vault, () => assert.fail('Must not create credential IDs'), async value => { saved = plain(value); });
-  assert.deepEqual(saved.productivity.options.search, { provider: 'bing-browser', enabled: true });
-  assert.deepEqual(removed, ['old-key']);
+  assert.deepEqual(saved.productivity.options.search, { provider: 'bing-browser', enabled: true,
+    tavily: { baseUrl: 'https://api.tavily.com', credentialAlias: 'old-key' } });
+  assert.deepEqual(removed, []);
   assert.deepEqual(plain(parseAppData(JSON.stringify(saved)).productivity.options.search), saved.productivity.options.search);
-  assert.deepEqual(plain(defaultSearchConfig('bing-browser')), { provider: 'bing-browser', enabled: false });
+  assert.deepEqual(plain(defaultSearchConfig()), { provider: 'bing-browser', enabled: true });
+  assert.deepEqual(plain(defaultSearchConfig('deepseek')), { provider: 'deepseek', enabled: false });
+  assert.deepEqual(plain(defaultAssistantOptions().search), { provider: 'bing-browser', enabled: true });
   for (const field of ['baseUrl', 'credentialAlias', 'modelProviderId']) assert.throws(() => validateSearchConfig({ ...saved.productivity.options.search, [field]: 'invalid' }));
   assert.throws(() => searchCredentialAlias(saved.productivity.options.search, []));
   await assert.rejects(saveSearchSettings(emptyData(), { ...draft, apiKey: 'unneeded' }, vault, () => '', async () => {}));
-  console.log('PASS keyless settings, persisted config validation and previous API key cleanup');
+  console.log('PASS keyless settings, persisted config validation and inactive API key retention');
 
   {
     const { NativeBrowserDriver } = from('services/NativeBrowserDriver');

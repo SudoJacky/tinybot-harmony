@@ -30,7 +30,7 @@ export interface ExtensionSettings {
   seededBuiltinSkills?: string[];
 }
 
-export function defaultExtensions(): ExtensionSettings { return { webEnabled: true, skills: [] }; }
+export function defaultExtensions(): ExtensionSettings { return { browserPolicy: 'enabled', webEnabled: true, skills: [] }; }
 
 export function skillPath(path: string): string {
   if (typeof path !== 'string' || path.length === 0 || path.length > 256 || /[\\:\u0000-\u001f\u007f]/.test(path) ||

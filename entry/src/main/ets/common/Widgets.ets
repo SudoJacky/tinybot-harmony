@@ -97,6 +97,9 @@ export struct NavRow {
   tintImage: boolean = false;
   compId: string = '';
   onTap: () => void = () => {};
+  actionLabel: string = '';
+  actionId: string = '';
+  onAction: () => void = () => {};
 
   build() {
     Row({ space: Space.md }) {
@@ -124,6 +127,13 @@ export struct NavRow {
             .fontColor(this.muted ? $r('app.color.text_tertiary') : $r('app.color.text_secondary'))
         }
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+      if (this.actionLabel.length > 0) {
+        Button(this.actionLabel).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.textSmall)
+          .id(this.actionId).constraintSize({ minHeight: 44 }).enabled(!this.disabled)
+          .accessibilityText(this.title + '，' + this.actionLabel)
+          // ArkUI click gestures do not bubble: the child button wins over the row.
+          .onClick(() => this.onAction())
+      }
       if (this.value.length > 0) {
         Text(this.value).fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(1).fontColor($r('app.color.text_tertiary'))
       }

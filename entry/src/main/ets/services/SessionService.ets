@@ -35,6 +35,7 @@ import { ToolSet } from './ToolSet';
 import { AppData, MessageData, ModelConfig, ThreadData, copyModelConfig, emptyData } from '../model/Conversation';
 import { contextSettings } from '../model/ContextSettings';
 import { ModelReference, ProviderProfile, migrateProfiles, modelConfig } from '../model/ProviderProfiles';
+import { defaultSearchConfig } from '../model/WebSearch';
 import { InputMode, MAX_INPUT_TEXT, PendingInput, nextPendingInput, validatePendingInputs } from '../model/PendingInput';
 import { BrowserPolicy, ExtensionSettings, SkillData, SkillFile, defaultExtensions, explicitSkill, expandSkillCommand, parseSkill, validateExtensions } from '../model/Skills';
 import { seedBuiltinSkills } from '../model/BuiltinSkills';
@@ -227,6 +228,11 @@ export class SessionService {
       data.extensions = data.extensions || defaultExtensions();
       const builtinsChanged = seedBuiltinSkills(data.extensions);
       data.productivity = data.productivity || defaultProductivity();
+      // Older builds stored neither key; materialize today's defaults so upgrades match a fresh install.
+      let defaultsApplied = false;
+      if (data.extensions.browserPolicy === undefined) { data.extensions.browserPolicy = 'enabled'; defaultsApplied = true; }
+      if (!data.productivity.options) { data.productivity.options = defaultAssistantOptions(); defaultsApplied = true; }
+      else if (!data.productivity.options.search) { data.productivity.options.search = defaultSearchConfig(); defaultsApplied = true; }
       for (const project of data.projects || []) { await this.resources.ensureWorkspace(project.id, project.workspaceId); }
       if (this.resources.activateProjectFolders) { await this.resources.activateProjectFolders(data.projects || []); }
       for (const thread of data.threads) {
@@ -242,7 +248,7 @@ export class SessionService {
       if (!active) { active = this.freshThread(); await this.resources.ensureWorkspace(active.id); data.threads.unshift(active); }
       data.activeThreadId = active.id;
       const preferencesChanged = this.syncEmptyThreadPreferences(data);
-      if (created || migrate || builtinsChanged || preferencesChanged.length > 0) { await this.persist(); }
+      if (created || migrate || builtinsChanged || defaultsApplied || preferencesChanged.length > 0) { await this.persist(); }
       this.refreshContext();
       this.application.saveError = '';
       this.application.ready = true;
