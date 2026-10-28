@@ -2432,5 +2432,17 @@
   "后台流式传输已达到本次运行时限，本轮已停止。请回到应用后重试。": "The background streaming window has ended. This turn was stopped. Return to the app to retry.",
   "后台任务释放失败，本轮已停止。请回到应用后重试。": "Could not release the background task. This turn was stopped. Return to the app to retry.",
   "1.1.1 · 2026-10-28": "1.1.1 · 2026-10-28",
-  "新增网络传输期间的后台保活与评价邀请。预览支持原生浏览器验证和全屏查看；优化工具执行响应与大内容处理。修复后台预览校验误超时，返回前台后继续发布。": "Added background support for active network transfers and review invitations. Previews now support on-device browser verification and fullscreen viewing. Improved tool execution responsiveness and large-content handling, and fixed preview validation timing out in the background so publication resumes in the foreground."
+  "新增网络传输期间的后台保活与评价邀请。预览支持原生浏览器验证和全屏查看；优化工具执行响应与大内容处理。修复后台预览校验误超时，返回前台后继续发布。": "Added background support for active network transfers and review invitations. Previews now support on-device browser verification and fullscreen viewing. Improved tool execution responsiveness and large-content handling, and fixed preview validation timing out in the background so publication resumes in the foreground.",
+  "当前版本不支持保存的搜索服务，搜索已停用；原配置已保留。": "This version does not support the saved search provider. Search is disabled; the original configuration is preserved.",
+  "当前版本不支持部分模型协议，对应模型暂不可用；原配置已保留。": "This version does not support some model protocols. Those models are unavailable; the original configuration is preserved.",
+  "当前版本不支持保存的浏览器权限，浏览器已停用；原配置已保留。": "This version does not support the saved browser permission. The browser is disabled; the original configuration is preserved.",
+  "当前版本不支持部分会话的工具模式，这些会话的工具已停用；原配置已保留。": "This version does not support the tool mode in some chats. Tools in those chats are disabled; the original configuration is preserved.",
+  "当前版本不认识部分工具限制，已保留这些限制。": "This version does not recognize some tool restrictions. Those restrictions are preserved.",
+  "当前版本不支持部分 MCP 认证方式，对应服务已停用；原配置已保留。": "This version does not support some MCP authentication methods. Those services are disabled; the original configuration is preserved.",
+  "当前版本不支持部分推理强度，运行时使用模型默认值；原配置已保留。": "This version does not support some reasoning efforts. The model default is used at runtime; the original configuration is preserved.",
+  "当前版本不支持此 MCP 认证方式，请重新配置或升级应用。": "This version does not support this MCP authentication method. Reconfigure it or upgrade the app.",
+  "当前版本不支持": "Unsupported in this version",
+  "部分配置来自较新版本，相关功能暂不可用。原配置已保留。": "Some settings come from a newer version. The affected features are unavailable; the original settings are preserved.",
+  "配置兼容性": "Configuration compatibility",
+  "自动路由使用了当前版本不支持的模型协议，自动路由已停用；仍使用所选模型，原配置已保留。": "Automatic routing uses a model protocol this version does not support. Routing is disabled and the selected model is used; the original configuration is preserved."
 }

@@ -1,5 +1,4 @@
 import { Attachment } from '../model/Productivity';
-import { AgentMode } from '../model/AgentMode';
 import { FileDiff } from '../model/FileDiff';
 import { TurnFileChange } from '../model/TurnFileChanges';
 import { MemoryReviewRecord } from '../model/MemoryMaintenance';
@@ -155,7 +154,7 @@ export class ThreadViewModel {
       this.latestPreviewIds = ids;
     }
   }
-  agentMode: AgentMode = 'full';
+  agentMode: string = 'full';
   disabledTools: string[] = [];
   projectId?: string;
   memoryReview?: MemoryReviewRecord;

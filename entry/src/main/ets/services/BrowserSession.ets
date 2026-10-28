@@ -94,7 +94,8 @@ export class BrowserSession implements ExecutionGate {
     if (this.driver !== driver) { return; }
     this.close(); this.driver = undefined;
   }
-  updatePolicy(policy: BrowserPolicy): void {
+  updatePolicy(storedPolicy: string): void {
+    const policy: BrowserPolicy = storedPolicy === 'enabled' || storedPolicy === 'unset' ? storedPolicy : 'disabled';
     this.policy = policy;
     if (policy === 'disabled') { this.close(); }
     if (policy !== 'unset') { this.answerPermission(policy === 'enabled'); }

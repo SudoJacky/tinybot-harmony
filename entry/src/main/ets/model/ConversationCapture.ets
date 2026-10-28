@@ -41,9 +41,14 @@ export class ConversationCapture {
       const text = threadJson(thread, texts);
       next.set(thread.id, { text: text, messages: messages }); threads.set(thread.id, text);
     }
-    const metadata: AppData = { version: data.version, config: data.config, threads: [], activeThreadId: data.activeThreadId,
-      providerProfiles: data.providerProfiles, extensions: data.extensions, productivity: data.productivity, projects: data.projects };
-    const header = JSON.stringify(metadata);
+    // Serialize root metadata generically too: a newer build may own more fields.
+    // Do not deep-clone data here; that would walk all transcripts on every checkpoint.
+    const fields = data as Object as Record<string, Object>; const parts: string[] = [];
+    for (const key of Object.keys(data)) {
+      const text = key === 'threads' ? '[]' : JSON.stringify(fields[key]);
+      if (text !== undefined) { parts.push(JSON.stringify(key) + ':' + text); }
+    }
+    const header = '{' + parts.join(',') + '}';
     this.captured = next;
     return { header: header, threads: threads };
   }

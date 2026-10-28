@@ -1,5 +1,9 @@
 import { t } from './I18n';
 
+export function isSupportedProtocol(protocol: string): boolean {
+  return ['chat-completions', 'responses', 'anthropic-messages', 'gemini'].includes(protocol);
+}
+
 export function completionUrl(baseUrl: string, allowHttp: boolean = false): string {
   const base = baseUrl.trim().replace(/\/+$/, '');
   if (!/^https?:\/\/[^\s/?#@:\\]+(?::\d+)?(?:\/[^\s?#\\]*)?$/.test(base) ||

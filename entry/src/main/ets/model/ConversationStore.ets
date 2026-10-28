@@ -6,6 +6,7 @@ import { AppData, ThreadData, emptyData, parseAppData } from './Conversation';
 import { MessageCheckpoint, SessionRepository } from '../services/SessionContracts';
 import { ConversationCapture } from './ConversationCapture';
 import { writeConversationFile } from '../services/ConversationWriter';
+import { mergeSavedConfiguration } from './SavedConfiguration';
 
 interface ThreadFile { id: string; file: string; }
 interface Manifest { version: number; data: AppData; threads: ThreadFile[]; }
@@ -19,6 +20,7 @@ export class ConversationStore implements SessionRepository {
   private capture: ConversationCapture = new ConversationCapture();
   private captureFailed: boolean = false;
   private files: Map<string, string> = new Map<string, string>();
+  private manifest?: Manifest;
   constructor(filesDir: string) { this.root = filesDir + '/sessions-v2'; this.legacy = filesDir + '/tinybot-v1.json'; }
   async load(): Promise<AppData> {
     if (!await fs.access(this.root + '/index.json')) {
@@ -37,6 +39,8 @@ export class ConversationStore implements SessionRepository {
     }
     manifest.data.threads = threads;
     const data = parseAppData(JSON.stringify(manifest.data));
+    manifest.data.threads = [];
+    this.manifest = manifest;
     // Recovery/normalization belongs to the loaded state, even for an inactive thread.
     this.capture.clear(); this.capture.capture(data);
     this.captureFailed = false;
@@ -66,9 +70,11 @@ export class ConversationStore implements SessionRepository {
       }
       entries.push({ id: id, file: name });
     }
-    const manifest: Manifest = { version: 2, data: JSON.parse(header) as AppData, threads: entries };
+    const edited: Manifest = { version: 2, data: JSON.parse(header) as AppData, threads: entries };
+    const manifest = mergeSavedConfiguration(this.manifest, edited);
     await this.write(this.root + '/index.json.tmp', JSON.stringify(manifest));
     await fs.rename(this.root + '/index.json.tmp', this.root + '/index.json');
+    this.manifest = manifest;
     const old = Array.from(this.files.values());
     this.files.clear(); this.serialized = next;
     for (const entry of entries) { this.files.set(entry.id, entry.file); }

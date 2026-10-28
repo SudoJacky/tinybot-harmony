@@ -1,4 +1,5 @@
 import { t } from './I18n';
+import { isConfigurationName } from './ConfigurationValue';
 export const MAX_SKILL_TEXT: number = 32000;
 export const MAX_SKILL_TOTAL: number = 512000;
 
@@ -23,7 +24,7 @@ export interface SkillData {
 export type BrowserPolicy = 'unset' | 'enabled' | 'disabled';
 
 export interface ExtensionSettings {
-  browserPolicy?: BrowserPolicy;
+  browserPolicy?: string;
   webEnabled: boolean;
   skills: SkillData[];
   // Names already considered during bundled-Skill installation, including user-owned collisions.
@@ -98,7 +99,7 @@ export function parseSkill(document: string): SkillData {
 }
 
 export function validateExtensions(value: ExtensionSettings): void {
-  if (value?.browserPolicy !== undefined && !['unset', 'enabled', 'disabled'].includes(value.browserPolicy)) {
+  if (value?.browserPolicy !== undefined && !isConfigurationName(value.browserPolicy)) {
     throw new Error('Invalid browser permission setting.');
   }
   if (!value || typeof value.webEnabled !== 'boolean' || !Array.isArray(value.skills)) {

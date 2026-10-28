@@ -2,7 +2,7 @@ import { AppearanceStyle } from '../common/AppearanceStyle';
 import { menuMaterialAttribute, systemMaterialAttribute } from '../common/MaterialAttributes';
 import { t } from '../model/I18n';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
-import { SearchProviderId, defaultSearchConfig, deepSeekSearchProfiles } from '../model/WebSearch';
+import { SearchProviderId, defaultSearchConfig, deepSeekSearchProfiles, isSupportedSearchProvider } from '../model/WebSearch';
 import { ProviderProfile } from '../model/ProviderProfiles';
 import { Btn, Space } from '../common/Theme';
 import { Banner, SwitchRow } from '../common/Widgets';
@@ -12,7 +12,7 @@ export struct SearchSettingsPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   @State private searchEnabled: boolean = false;
-  @State private provider: SearchProviderId = 'deepseek';
+  @State private provider: string = 'deepseek';
   @State private sourceId: string = '';
   @State private baseUrl: string = '';
   @State private apiKey: string = '';
@@ -23,14 +23,16 @@ export struct SearchSettingsPanel {
     const config = this.app.productivity.options?.search || defaultSearchConfig();
     this.searchEnabled = config.enabled; this.baseUrl = config.provider === 'tavily' ? config.baseUrl! : ''; this.savedKey = !!config.credentialAlias;
     this.provider = config.provider; this.sourceId = this.candidates().some((item) => item.id === config.modelProviderId) ? config.modelProviderId! : '';
+    this.error = isSupportedSearchProvider(config.provider) ? '' : t('当前版本不支持保存的搜索服务，搜索已停用；原配置已保留。');
   }
   private candidates(): ProviderProfile[] {
     return deepSeekSearchProfiles(this.app.providerProfiles);
   }
   private changeProvider(index: number): void {
-    this.provider = index === 0 ? 'deepseek' : index === 1 ? 'tavily' : 'bing-browser';
+    const provider: SearchProviderId = index === 0 ? 'deepseek' : index === 1 ? 'tavily' : 'bing-browser';
+    this.provider = provider;
     const saved = this.app.productivity.options?.search;
-    const config = saved?.provider === this.provider ? saved : defaultSearchConfig(this.provider);
+    const config = saved?.provider === this.provider ? saved : defaultSearchConfig(provider);
     this.baseUrl = config.provider === 'tavily' ? config.baseUrl! : ''; this.apiKey = ''; this.savedKey = !!config.credentialAlias; this.error = '';
     this.sourceId = this.candidates().some((item) => item.id === config.modelProviderId) ? config.modelProviderId! : '';
   }
@@ -38,7 +40,7 @@ export struct SearchSettingsPanel {
     if (this.app.busy || this.saving) { return; }
     this.saving = true; this.error = '';
     try {
-      const ok = await this.app.saveSearch({ provider: this.provider, enabled: this.searchEnabled, baseUrl: this.baseUrl,
+      const ok = await this.app.saveSearch({ provider: this.provider as SearchProviderId, enabled: this.searchEnabled, baseUrl: this.baseUrl,
         apiKey: this.apiKey, modelProviderId: this.provider === 'deepseek' && this.sourceId ? this.sourceId : undefined });
       this.error = this.app.error;
       if (ok) { this.apiKey = ''; this.aboutToAppear(); this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t('搜索设置已保存') }); }
@@ -48,8 +50,8 @@ export struct SearchSettingsPanel {
     Scroll() {
       Column({ space: Space.md }) {
         Select([{ value: 'DeepSeek' }, { value: 'Tavily' }, { value: t('必应（内置浏览器）') }])
-          .selected(this.provider === 'deepseek' ? 0 : this.provider === 'tavily' ? 1 : 2)
-          .value(this.provider === 'deepseek' ? 'DeepSeek' : this.provider === 'tavily' ? 'Tavily' : t('必应（内置浏览器）')).enabled(!this.saving).id('search-provider')
+          .selected(this.provider === 'deepseek' ? 0 : this.provider === 'tavily' ? 1 : this.provider === 'bing-browser' ? 2 : -1)
+          .value(this.provider === 'deepseek' ? 'DeepSeek' : this.provider === 'tavily' ? 'Tavily' : this.provider === 'bing-browser' ? t('必应（内置浏览器）') : t('当前版本不支持')).enabled(!this.saving).id('search-provider')
           .backgroundColor(this.appearance.controlBackground).fontColor($r('sys.color.font_primary'))
           .attributeModifier(systemMaterialAttribute<SelectAttribute>(this.appearance.control))
           .attributeModifier(menuMaterialAttribute(this.appearance.surface))
@@ -85,7 +87,7 @@ export struct SearchSettingsPanel {
           Text('API Key').fontFamily(this.appearance.fontFamily).fontColor($r('app.color.text_secondary'))
           TextInput({ text: this.apiKey, placeholder: this.savedKey ? t('留空保留已保存的搜索密钥') : 'API Key' }).fontFamily(this.appearance.fontFamily).type(InputType.Password)
             .id('search-api-key').enabled(!this.saving).onChange((value: string) => { this.apiKey = value; })
-        } else {
+        } else if (this.provider === 'bing-browser') {
           Text(t('无需 API Key，通过应用内浏览器访问必应。需要允许浏览器使用；遇到验证时，请完成验证后交还控制。'))
             .fontFamily(this.appearance.fontFamily).fontSize(14).fontColor($r('app.color.text_secondary'))
             .id('search-browser-description')
@@ -94,7 +96,7 @@ export struct SearchSettingsPanel {
           t('密钥保存在系统安全存储，不随备份导出。关闭“允许网页读取与搜索”也会停用搜索。')).fontFamily(this.appearance.fontFamily)
           .fontSize(12).fontColor($r('app.color.text_secondary'))
         if (this.error) { Banner({ text: this.error, danger: true }) }
-        Button(t('保存')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.primary).enabled(!this.saving && !this.app.busy && !this.app.saveError)
+        Button(t('保存')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.primary).enabled(isSupportedSearchProvider(this.provider) && !this.saving && !this.app.busy && !this.app.saveError)
           .id('save-search-settings').onClick(() => this.save())
       }.width('100%').padding(Space.page).alignItems(HorizontalAlign.Start)
     }.width('100%').height('100%').align(Alignment.Top).backgroundColor($r('app.color.page_background'))

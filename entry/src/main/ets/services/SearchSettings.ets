@@ -9,7 +9,9 @@ export async function saveSearchSettings(data: AppData, draft: SearchDraft, cred
   createId: () => string, commit: (data: AppData) => Promise<void>): Promise<string> {
   const productivity = data.productivity || defaultProductivity(); const options = productivity.options || defaultAssistantOptions();
   const previous = options.search; const key = draft.apiKey.trim();
-  const config: SearchConfig = { provider: draft.provider, enabled: draft.enabled };
+  const config: SearchConfig = previous?.provider === draft.provider ? JSON.parse(JSON.stringify(previous)) as SearchConfig :
+    { provider: draft.provider, enabled: draft.enabled };
+  config.enabled = draft.enabled;
   if (draft.provider === 'bing-browser') {
     if (key || draft.baseUrl.trim() || draft.modelProviderId) { throw new Error('Built-in Bing search does not use API credentials or a custom endpoint.'); }
   } else if (draft.provider === 'deepseek') {

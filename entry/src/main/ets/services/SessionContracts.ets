@@ -45,6 +45,7 @@ export interface SessionResources {
 export type SessionPhase = 'idle' | 'loading' | 'saving' | 'running' | 'compacting' | 'memory';
 
 export interface SessionState {
+  compatibilityWarnings?: string[];
   ready: boolean;
   phase: SessionPhase;
   error: string;

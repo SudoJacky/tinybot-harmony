@@ -1,5 +1,6 @@
 import { t } from './I18n';
 import { AssistantOptions, validateAssistantOptions } from './AssistantOptions';
+import { isConfigurationName } from './ConfigurationValue';
 export interface Attachment {
   id: string;
   name: string;
@@ -41,6 +42,8 @@ export interface ProductivityData {
   templates: PromptTemplate[];
   servers: McpServer[];
 }
+
+export function supportedMcpAuth(server: McpServer): boolean { return server.authType === undefined || server.authType === 'oauth'; }
 
 export function defaultProductivity(): ProductivityData {
   return { memories: [], servers: [], templates: [
@@ -88,7 +91,7 @@ export function validateProductivity(data: ProductivityData): void {
     ids.add('t' + template.id);
   }
   for (const server of data.servers) {
-    if (server?.authType !== undefined && server.authType !== 'oauth') { throw new Error(t("MCP 认证类型无效。")); }
+    if (server?.authType !== undefined && !isConfigurationName(server.authType)) { throw new Error(t("MCP 认证类型无效。")); }
     if (!server || !/^[a-zA-Z0-9-]{1,80}$/.test(server.id) || ids.has('s' + server.id) ||
       typeof server.name !== 'string' || !server.name.trim() || server.name.length > 40 ||
       typeof server.url !== 'string' || !/^https:\/\/[^\s/?#@\\]+(?:\/[^\s#\\]*)?$/.test(server.url) ||

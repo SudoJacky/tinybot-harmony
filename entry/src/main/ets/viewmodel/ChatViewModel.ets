@@ -68,6 +68,7 @@ export class ChatViewModel {
   acceptingSteering: boolean = false;
   error: string = '';
   saveError: string = '';
+  compatibilityWarnings: string[] = [];
   draft: string = '';
   contextTokens: number = 0;
   contextItems: ContextTokenItem[] = [];
@@ -149,6 +150,8 @@ export class ChatViewModel {
     this.ready = state.ready; this.loading = state.phase === 'loading'; this.busy = state.phase !== 'idle';
     this.generating = state.phase === 'running' || state.phase === 'compacting';
     this.acceptingSteering = state.acceptingSteering; this.error = state.error; this.saveError = state.saveError;
+    const warnings = state.compatibilityWarnings || [];
+    if (JSON.stringify(warnings) !== JSON.stringify(this.compatibilityWarnings)) { this.compatibilityWarnings = warnings; }
     this.contextStatus = state.contextStatus; this.contextTokens = state.contextTokens;
     // Session snapshots clone this array for every token; retain the observed value
     // until its contents change so deltas do not invalidate the whole chat panel.

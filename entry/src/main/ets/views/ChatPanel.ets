@@ -1549,6 +1549,13 @@ export struct ChatPanel {
             actionEnabled: !this.app.busy && this.app.saveError.length === 0,
             onAction: () => { this.app.archiveThread(this.thread.id); } })
         }
+        if (this.app.compatibilityWarnings.length > 0) {
+          Banner({ text: t('部分配置来自较新版本，相关功能暂不可用。原配置已保留。'), danger: false,
+            compId: 'configuration-compatibility', actionLabel: t('查看详情'), actionId: 'configuration-compatibility-details',
+            onAction: () => this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface,
+              title: t('配置兼容性'), message: this.app.compatibilityWarnings.join('\n\n'),
+              confirm: { value: t('知道了'), action: () => {} } }) })
+        }
         if (this.app.error.length > 0) {
           Banner({ text: this.app.error, compId: 'chat-error', actionLabel: t("关闭"), actionId: 'dismiss-error',
             onAction: () => { this.app.error = ''; } })

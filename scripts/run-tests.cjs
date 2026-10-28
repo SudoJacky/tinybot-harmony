@@ -15,6 +15,7 @@ const suites = {
     'test-chat-disclosures.cjs',
     'test-code-highlight.cjs',
     'test-code-sandbox.cjs',
+    'test-config-compatibility.cjs',
     'test-context-alignment.cjs',
     'test-conversation-export.cjs',
     'test-custom-tools.cjs',
