@@ -5,6 +5,8 @@ const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/et
 const root = path.resolve(__dirname, '../entry/src'), cache = new Map(), leases = new Map(), callbacks = new Map(), timers = new Map();
 let sequence = 0, startCalls = 0, stopCalls = 0, acquireFailure, releaseFailure, now = 0, timerId = 0;
 let beforeStart = async () => {}, beforeStop = async () => {}, beforeAck = async () => {};
+let notificationsEnabled = true, authorizationCalls = 0, authorizationFailure, publishFailure, beforeNotificationAgent = async () => {};
+const notifications = [];
 const context = { abilityInfo: { bundleName: 'cn.tinybot.app', name: 'EntryAbility' } };
 const noOp = () => {};
 const backgroundTaskManager = {
@@ -26,8 +28,18 @@ const backgroundTaskManager = {
 const mocks = {
   '@kit.AbilityKit': { UIAbility: class {}, wantAgent: {
     OperationType: { START_ABILITY: 1 }, WantAgentFlags: { UPDATE_PRESENT_FLAG: 2 },
-    async getWantAgent(info) { assert.equal(info.wants[0].bundleName, context.abilityInfo.bundleName); return { notification: true }; }
+    async getWantAgent(info) {
+      assert.equal(info.wants[0].bundleName, context.abilityInfo.bundleName);
+      if (info.requestCode === 1) await beforeNotificationAgent();
+      return { info };
+    }
   } }, '@kit.BackgroundTasksKit': { backgroundTaskManager }, '@ohos/hypium': {},
+  '@kit.NotificationKit': { notificationManager: {
+    isNotificationEnabled: async () => notificationsEnabled,
+    async requestEnableNotification(ctx) { assert.equal(ctx, context); authorizationCalls++; if (authorizationFailure) throw authorizationFailure; notificationsEnabled = true; },
+    async publish(request) { if (publishFailure) throw publishFailure; notifications.push(request); },
+    SlotType: { SERVICE_INFORMATION: 2 }, ContentType: { NOTIFICATION_CONTENT_BASIC_TEXT: 0 }
+  } },
   '@kit.ArkWeb': { webview: { WebviewController: { initializeWebEngine: noOp } } },
   '../services/NativeActions': { ShareInbox: { receive: noOp } },
   '../services/LanguagePreferences': { LanguagePreferences: { initialize: noOp, refresh: noOp } },
@@ -79,15 +91,17 @@ async function advance(ms) {
 (async () => {
   const { default: EntryAbility } = load(path.join(root, 'main/ets/entryability/EntryAbility'));
   const { backgroundGeneration } = load(path.join(root, 'main/ets/services/BackgroundGeneration'));
+  const { completionNotifications, CompletionNotifications } = load(path.join(root, 'main/ets/services/CompletionNotifications'));
   const { NetworkTransfers } = load(path.join(root, 'main/ets/services/NetworkTransfers'));
   const { Cancellation, RunCancelledError } = load(path.join(root, 'main/ets/services/Cancellation'));
   const { Diagnostics } = load(path.join(root, 'main/ets/model/Diagnostics'));
   const { Fixture } = load(path.join(root, 'test/SessionService.test'));
-  const logs = []; Diagnostics.configureLogSink(event => logs.push(event)); const ability = new EntryAbility();
+  const logs = []; Diagnostics.start(); Diagnostics.configureLogSink(event => logs.push(event)); const ability = new EntryAbility();
   async function fixture(data) {
     ability.onForeground(); await settle();
     const f = new Fixture(data); await f.session.initialize(); backgroundGeneration.attach(f.session, context);
-    f.resources.prepareGeneration = () => backgroundGeneration.beginTurn();
+    completionNotifications.attach(f.session, context);
+    f.resources.prepareGeneration = async () => { await completionNotifications.prepare(); await backgroundGeneration.beginTurn(); };
     const original = f.provider.stream.bind(f.provider);
     f.provider.stream = async (request, signal, ...args) => {
       const end = await NetworkTransfers.begin(signal);
@@ -95,6 +109,7 @@ async function advance(ms) {
     };
     f.provider.respond = (_index, signal) => new Promise((resolve, reject) => {
       f.complete = (content = 'done', toolCalls = []) => resolve({ content, toolCalls });
+      f.fail = reject;
       signal.onCancel(() => reject(new RunCancelledError()));
     });
     return f;
@@ -110,7 +125,53 @@ async function advance(ms) {
   assert.equal(leases.size, 0); ability.onBackground(); await settle(); assert.equal(leases.size, 1);
   f.complete(); await pending; await settle(); assert.equal(leases.size, 0); assert.equal(timers.size, 0);
   assert.equal((await f.repository.load()).threads[0].messages.at(-1).status, 'complete');
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].content.normal.title, '任务已完成');
+  assert.equal(notifications[0].wantAgent.info.wants[0].parameters.tinybotThreadId, f.session.snapshot().activeThreadId);
+  assert.equal(notifications[0].tapDismissed, true);
   console.log('PASS actual model request admission owns dataTransfer only while backgrounded and releases before completion');
+
+  let notificationCount = notifications.length;
+  f = await fixture(); ({ pending } = await send(f)); f.complete(); await pending; await settle();
+  assert.equal(notifications.length, notificationCount, 'Foreground completion stays quiet');
+  f = await fixture(); ({ pending } = await send(f)); ability.onBackground(); await settle();
+  let releaseAgent; beforeNotificationAgent = () => new Promise(resolve => { releaseAgent = resolve; });
+  f.complete(); await pending; await settle(); assert.equal(typeof releaseAgent, 'function');
+  ability.onForeground(); releaseAgent(); beforeNotificationAgent = async () => {}; await settle();
+  assert.equal(notifications.length, notificationCount, 'Returning while WantAgent is prepared suppresses the notification');
+  f = await fixture(); ({ pending } = await send(f)); ability.onBackground(); await settle();
+  notificationsEnabled = false; f.complete(); await pending; await settle(); notificationsEnabled = true;
+  assert.equal(notifications.length, notificationCount); assert.ok(logs.some(event => event.event === 'disabled'));
+  f = await fixture(); ({ pending } = await send(f)); ability.onBackground(); await settle();
+  publishFailure = Object.assign(Error('publish failure'), { code: 1600001 });
+  f.complete(); await pending; await settle(); publishFailure = undefined;
+  assert.equal((await f.repository.load()).threads[0].messages.at(-1).status, 'complete');
+  assert.ok(logs.some(event => event.event === 'publish_failed' && event.fields.errorCode === 1600001));
+  assert.equal(notifications.length, notificationCount);
+  console.log('PASS foreground/racing return and disabled notifications stay quiet; publishing failure preserves the completed answer and logs its code');
+
+  const permissionProbe = new CompletionNotifications(); permissionProbe.attach(f.session, context);
+  notificationsEnabled = false; await permissionProbe.prepare(); assert.equal(authorizationCalls, 0);
+  permissionProbe.setForeground(true); authorizationFailure = Object.assign(Error('declined'), { code: 1600004 });
+  await permissionProbe.prepare(); await permissionProbe.prepare(); assert.equal(authorizationCalls, 1);
+  assert.ok(logs.some(event => event.event === 'authorization_denied'));
+  permissionProbe.dispose(); authorizationFailure = undefined;
+  const allowedProbe = new CompletionNotifications(); allowedProbe.attach(f.session, context); allowedProbe.setForeground(true);
+  await allowedProbe.prepare(); assert.equal(authorizationCalls, 2); assert.equal(notificationsEnabled, true); allowedProbe.dispose();
+  console.log('PASS notification authorization only runs in foreground, denial is observable and is not repeatedly requested');
+
+  f = await fixture(); ({ pending } = await send(f)); ability.onBackground(); await settle();
+  f.fail(Error('provider failed')); await pending; await settle();
+  assert.equal((await f.repository.load()).threads[0].messages.at(-1).status, 'failed');
+  assert.equal(notifications.length, notificationCount);
+  f = await fixture(); ({ pending } = await send(f)); ability.onBackground(); await settle();
+  f.repository.beforeSave = async () => { throw Error('disk full'); };
+  f.complete(); await pending; await settle();
+  assert.ok(f.session.state.saveError); assert.equal(notifications.length, notificationCount);
+  f = await fixture(); ({ pending } = await send(f)); ability.onBackground(); await settle();
+  completionNotifications.dispose(); f.complete(); await pending; await settle();
+  assert.equal(notifications.length, notificationCount);
+  console.log('PASS failed runs, unsaved answers and detached sessions do not publish completion notifications');
 
   f = await fixture(); let finishTool;
   f.resources.agentTools = {
@@ -120,10 +181,12 @@ async function advance(ms) {
   ({ pending } = await send(f)); ability.onBackground(); await settle(); const beforeTools = startCalls;
   f.complete('', [{ id: 'tool', type: 'function', function: { name: 'echo', arguments: '{}' } }]); await settle();
   assert.equal(typeof finishTool, 'function'); assert.equal(f.session.state.phase, 'running');
+  assert.equal(notifications.length, notificationCount, 'Tool completion is not turn completion');
   assert.equal(leases.size, 0, 'Local tool/user/browser waits have no network lease'); assert.equal(timers.size, 0);
   ability.onForeground(); ability.onBackground(); await settle(); assert.equal(startCalls, beforeTools);
   finishTool(); await settle(); assert.equal(leases.size, 1); assert.equal(f.provider.requests.length, 2);
   f.complete(); await pending; await settle(); assert.equal(leases.size, 0);
+  assert.equal(notifications.length, notificationCount + 1); notificationCount = notifications.length;
   console.log('PASS real tool-loop releases before local work and admits a new task only when the next model request starts');
 
   f = await fixture(); ({ pending } = await send(f)); ability.onBackground(); await settle();
@@ -132,6 +195,7 @@ async function advance(ms) {
   const stopped = (await f.repository.load()).threads[0];
   assert.match(stopped.messages.at(-1).error, /后台执行已被系统或用户中止/); assert.equal(stopped.queuePaused, true);
   assert.equal(stopped.pendingInputs.length, 1); ability.onForeground(); ability.onBackground(); await settle();
+  assert.equal(notifications.length, notificationCount, 'System cancellation is not successful completion');
   await assert.rejects(backgroundGeneration.beginTurn(), /后台执行|CANCELLED/);
   assert.equal(startCalls, cancelledCalls); assert.equal(leases.size, 0);
   // A distinct foreground user send may clear the latch; foreground lifecycle alone never does.

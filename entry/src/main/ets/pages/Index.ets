@@ -363,7 +363,23 @@ struct Index {
     // The session restores the last active chat on cold start. Returning to it must
     // not create a chat, flush/replace a draft, or interrupt a running answer.
     if (action === 'continue-chat') {
+      const threadId = LaunchActions.takeThreadId();
       if (this.launching || this.receiving || this.onboardingActive) { return; }
+      if (threadId && threadId !== this.app.active.id) {
+        this.launching = true;
+        try {
+          await this.app.flushDraft();
+          if (this.app.saveError) { throw new Error(this.app.saveError); }
+          await this.session?.waitForIdle();
+          if (!LaunchActions.isForeground()) { return; }
+          if (!await this.app.selectThread(threadId)) {
+            throw new Error(this.app.error || this.app.saveError || t('无法打开通知对应的对话。'));
+          }
+        } catch (error) {
+          this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: (error as Error).message });
+          return;
+        } finally { this.launching = false; }
+      }
       this.voiceRequest = '';
       this.paths.clear(); this.setDrawer(false);
       return;

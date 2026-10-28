@@ -6,8 +6,9 @@ const assert = require('node:assert/strict');
 const studio = process.env.DEVECO_STUDIO_HOME || 'C:/Program Files/Huawei/DevEco Studio';
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 const root = path.resolve(__dirname, '..');
-let intent, foreground = true;
-const launch = { take: () => { const result = intent; intent = undefined; return result; }, isForeground: () => foreground };
+let intent, notificationThreadId, foreground = true;
+const launch = { take: () => { const result = intent; intent = undefined; return result; }, isForeground: () => foreground,
+  takeThreadId: () => { const id = notificationThreadId; notificationThreadId = undefined; return id; } };
 function controller(file, name, methods, extra = {}) {
   const source = path.join(root, 'entry/src/main/ets', file + '.ets');
   const emitted = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets', file + '.ts');
@@ -91,6 +92,17 @@ function card(wide) {
   view.privacy.allowed = true; await view.receiveLaunch(); assert.equal(view.events.length, 2);
   console.log('PASS continue-chat preserves the active conversation and unsaved draft, including busy answers and consent gating');
 
+  view = page(); intent = 'continue-chat'; notificationThreadId = 'completed';
+  view.session = { waitForIdle: async () => view.events.push('idle') };
+  view.app.selectThread = async id => { view.events.push(['selected', id]); view.app.active.id = id; return true; };
+  await view.receiveLaunch();
+  assert.deepEqual(view.events, ['saved', 'idle', ['selected', 'completed'], 'navigation', ['drawer', false]]);
+  assert.equal(view.app.active.id, 'completed'); assert.equal(view.launching, false);
+  view = page(); intent = 'continue-chat'; notificationThreadId = 'deleted';
+  view.app.selectThread = async () => { view.app.error = 'Conversation deleted'; return false; };
+  await view.receiveLaunch(); assert.deepEqual(view.events, ['saved', ['toast', 'Conversation deleted']]);
+  console.log('PASS notification click saves the draft, waits for active work and opens its own conversation; missing conversations report failure');
+
   const panel = controller('views/ChatPanel', 'ChatPanel', ['receiveVoiceShortcut', 'speechAvailabilityChanged', 'speechThreadChanged']);
   let starts = 0, stops = 0, consumed = 0;
   panel.reading = { stop: () => stops++ }; panel.endSpeech = () => {}; panel.onHeaderProgress = () => {};
@@ -133,6 +145,14 @@ function card(wide) {
     }
   }
   const formConfig = JSON.parse(fs.readFileSync(path.join(root, 'entry/src/main/resources/base/profile/form_config.json'), 'utf8'));
+  actualLaunch.setForeground(false);
+  actualLaunch.receive({ parameters: { tinybotAction: 'continue-chat', tinybotThreadId: 'notification-chat' } });
+  assert.equal(actualLaunch.take(), undefined);
+  actualLaunch.setForeground(true); assert.equal(actualLaunch.take(), 'continue-chat');
+  assert.equal(actualLaunch.takeThreadId(), 'notification-chat'); assert.equal(actualLaunch.takeThreadId(), undefined);
+  actualLaunch.receive({ parameters: { tinybotAction: 'continue-chat', tinybotThreadId: 'stale' } });
+  actualLaunch.receive({ parameters: { tinybotAction: 'continue-chat' } });
+  assert.equal(actualLaunch.take(), 'continue-chat'); assert.equal(actualLaunch.takeThreadId(), undefined);
   assert.deepEqual(formConfig.forms[0].supportDimensions, ['2*2', '2*4']);
   assert.equal(formConfig.forms[0].isDynamic, false); assert.equal(formConfig.forms[0].updateEnabled, false);
   assert.equal(formConfig.forms[0].colorMode, 'auto');
