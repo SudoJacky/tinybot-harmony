@@ -4,7 +4,8 @@ import { TextEdit } from '../model/WorkspaceEdit';
 export interface WorkspaceEntry { name: string; kind: string; }
 export interface WorkspaceListing { path: string; entries: WorkspaceEntry[]; truncated: boolean; nextOffset?: number; }
 export interface WorkspaceText { path: string; content: string; version: string; }
-// null means create only; omitted guard is reserved for explicit user operations.
+// null means create only. Interactive editors must pass the version they opened;
+// omission is an unconditional write for callers that explicitly own that policy.
 export interface WorkspaceWriteGuard { version: string | null; }
 export interface WorkspaceWrite {
   path: string; bytes: number; written: boolean;

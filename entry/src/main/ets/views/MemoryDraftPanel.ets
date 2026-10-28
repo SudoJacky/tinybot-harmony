@@ -28,7 +28,7 @@ export struct MemoryDraftPanel {
     finally { if (!this.disposed) { this.loading = false; } }
   }
   private chosen(): string[] { return this.items.filter((_item, index) => this.selected[index]); }
-  private ready(): boolean { return !this.loading && !this.saving && !this.app.busy && this.chosen().length > 0 && this.chosen().every((item) => item.trim().length > 0); }
+  private ready(): boolean { return !this.loading && !this.saving && !this.app.sharedBusy && this.chosen().length > 0 && this.chosen().every((item) => item.trim().length > 0); }
   private close(): void { if (this.saving) { return; } this.disposed = true; if (this.loading) { this.app.cancelMemoryDraft(); } this.onClose(); }
   private async save(): Promise<void> {
     if (!this.ready()) { return; }

@@ -2432,5 +2432,6 @@
   "后台流式传输已达到本次运行时限，本轮已停止。请回到应用后重试。": "The background streaming window has ended. This turn was stopped. Return to the app to retry.",
   "后台任务释放失败，本轮已停止。请回到应用后重试。": "Could not release the background task. This turn was stopped. Return to the app to retry.",
   "1.1.1 · 2026-10-28": "1.1.1 · 2026-10-28",
-  "新增网络传输期间的后台保活与评价邀请。预览支持原生浏览器验证和全屏查看；优化工具执行响应与大内容处理。修复后台预览校验误超时，返回前台后继续发布。": "Added background support for active network transfers and review invitations. Previews now support on-device browser verification and fullscreen viewing. Improved tool execution responsiveness and large-content handling, and fixed preview validation timing out in the background so publication resumes in the foreground."
+  "新增网络传输期间的后台保活与评价邀请。预览支持原生浏览器验证和全屏查看；优化工具执行响应与大内容处理。修复后台预览校验误超时，返回前台后继续发布。": "Added background support for active network transfers and review invitations. Previews now support on-device browser verification and fullscreen viewing. Improved tool execution responsiveness and large-content handling, and fixed preview validation timing out in the background so publication resumes in the foreground.",
+  "正在执行": "Running"
 }

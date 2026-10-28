@@ -15,7 +15,7 @@ export interface McpSettingsHost {
   check: () => void;
   prepare: (server: McpServer, request: McpRequest, cancellation: Cancellation) => Promise<McpServer>;
   test: (server: McpServer, cancellation: Cancellation) => Promise<number>;
-  commit: (data: ProductivityData, id: string, action: string) => Promise<void>;
+  commit: (data: ProductivityData, id: string, action: string, previous?: McpServer) => Promise<void>;
 }
 
 // Both settings and chat commit configuration before retiring the previous credential.
@@ -72,7 +72,7 @@ export class McpSettings {
         validateProductivity(next);
       }
       cancellation.check(); host.check();
-      await host.commit(next, id, request.action);
+      await host.commit(next, id, request.action, previous);
       createdAlias = '';
     } catch (error) {
       let message = (error as Error).message;

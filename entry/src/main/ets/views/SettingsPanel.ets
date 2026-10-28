@@ -41,7 +41,7 @@ export struct SettingsPanel {
   private toggleRevisions: Map<SettingsToggle, number> = new Map<SettingsToggle, number>();
 
   // A brief save leaves the page untouched; a reply, compaction or team run locks it with a notice.
-  private blocked(): boolean { return this.app.busy && !this.app.saving; }
+  private blocked(): boolean { return this.app.sharedBusy && !this.app.saving; }
   // Editors need a mutable session; unsaved chat data must be resolved first.
   private canEdit(): boolean { return !this.blocked() && this.app.saveError.length === 0; }
   aboutToAppear(): void { this.resetAssistantDraft(); }
@@ -275,15 +275,15 @@ export struct UserDocumentPanel {
         TextArea({ text: this.settings.userDocument, placeholder: t('例如：\n# 关于我\n请称呼我为…\n\n# 回答偏好\n先给结论，再给必要的例子。') }).fontFamily(this.appearance.fontFamily).id('user-document')
           .attributeModifier(Styles.area).layoutWeight(1)
           .backgroundColor($r('app.color.surface'))
-          .enabled(!this.app.busy && this.app.saveError.length === 0)
+          .enabled(!this.app.sharedBusy && this.app.saveError.length === 0)
           .onChange((value: string) => { this.settings.userDocument = value; })
         if (this.settings.error.length > 0) {
           Banner({ text: this.settings.error })
         }
       }.layoutWeight(1).padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.md })
       BottomBar() {
-        Button(this.app.busy ? t("正在保存…") : t("保存")).fontFamily(this.appearance.fontFamily).id('save-settings').attributeModifier(Btn.primary).width('100%')
-          .enabled(!this.app.busy && this.app.saveError.length === 0)
+        Button(this.app.saving ? t("正在保存…") : t("保存")).fontFamily(this.appearance.fontFamily).id('save-settings').attributeModifier(Btn.primary).width('100%')
+          .enabled(!this.app.sharedBusy && this.app.saveError.length === 0)
           .onClick(async () => { if (await this.app.saveSettings()) { this.onSaved(); } })
       }
     }.width('100%').height('100%')

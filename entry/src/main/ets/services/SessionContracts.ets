@@ -45,6 +45,9 @@ export interface SessionResources {
 export type SessionPhase = 'idle' | 'loading' | 'saving' | 'running' | 'compacting' | 'memory';
 
 export interface SessionState {
+  // phase/context/error describe the selected chat; these fields describe the application.
+  runningThreadIds?: string[];
+  canNavigate?: boolean;
   ready: boolean;
   phase: SessionPhase;
   error: string;

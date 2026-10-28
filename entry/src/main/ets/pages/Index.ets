@@ -315,7 +315,7 @@ struct Index {
     this.onboardingFinishing = true;
     try {
       if (action !== 'skip') {
-        if (this.app.busy) { throw new Error(t('请先完成当前任务，再开始新的对话。')); }
+        if (!this.app.canNavigate) { throw new Error(t('无法创建新对话。')); }
         await this.app.flushDraft();
         if (this.app.saveError) { throw new Error(this.app.saveError); }
         if (this.onboardingDraftThread !== this.app.active.id) {
@@ -342,7 +342,7 @@ struct Index {
   }
 
   private async createChat(): Promise<void> {
-    if (!this.app.ready || this.app.busy || this.app.saveError) { return; }
+    if (!this.app.canNavigate) { return; }
     const previousId = this.app.active.id;
     // SessionService decides whether the current chat is untouched and reusable.
     if (await this.app.newThread() && this.app.active.id === previousId) {
@@ -364,7 +364,7 @@ struct Index {
       this.paths.clear(); this.setDrawer(false);
       return;
     }
-    if (this.launching || this.receiving || this.app.busy || this.app.saveError) {
+    if (this.launching || this.receiving || !this.app.canNavigate) {
       this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t('请先完成当前操作或保存，再使用快捷入口。') });
       return;
     }
@@ -922,7 +922,7 @@ struct Index {
       WorkspacePanel({ app: this.app, initialPath: (param as string) || '' })
     } else if (name === 'account') {
       NavDestination() {
-        HuaweiAccountPanel({ account: this.account, taskBusy: this.app.busy, onSupport: (page: string) => this.openSupport(page) })
+        HuaweiAccountPanel({ account: this.account, taskBusy: this.app.sharedBusy, onSupport: (page: string) => this.openSupport(page) })
       }.title(t('华为账号'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'settings') {
       NavDestination() {
@@ -1108,7 +1108,7 @@ struct Index {
         systemMaterial: this.appearance.surface, mask: false })
       IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t("新建对话"), compId: 'new-chat',
         material: this.appearance.control, tint: $r('sys.color.font_primary'),
-        disabled: !this.app.ready || this.app.busy || this.app.saveError.length > 0,
+        disabled: !this.app.canNavigate,
         onTap: () => { this.createChat(); } })
     }.width('100%').height(CHAT_HEADER_HEIGHT).padding({ left: 6, right: 6 })
       .hitTestBehavior(HitTestMode.Transparent)
