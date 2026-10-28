@@ -29,6 +29,7 @@ export interface SessionResources {
   afterTask?(threadId: string, messageId: string, content: string, workspaceId?: string): Promise<void>;
   createId(): string;
   ensureWorkspace(threadId: string, workspaceId?: string): Promise<void>;
+  prepareAttachments?(items: Attachment[], threadId: string, workspaceId?: string): Promise<Attachment[]>;
   tools(threadId: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments?: Attachment[], live?: LiveResources, workspaceId?: string, project?: ProjectData, resolvePreview?: (previewId: string) => BrowserPreview): AgentTools;
   persistProjectFolders?(folders: SharedFolder[]): Promise<void>;
   revokeProjectFolders?(folders: SharedFolder[]): Promise<void>;

@@ -3,6 +3,7 @@ import { util } from '@kit.ArkTS';
 import { zlib } from '@kit.BasicServicesKit';
 import { pdfService } from '@kit.PDFKit';
 import { ApiLevel } from '../common/ApiLevel';
+import { Cancellation } from './Cancellation';
 interface ZipEntry { name: string; method: number; packed: number; size: number; offset: number; }
 function xmlText(xml: string): string {
   return xml.replace(/<\/(?:w:p|a:p|row)>/g, '\n').replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(x[0-9a-f]+|[0-9]+);/gi, (_match: string, value: string) => {
@@ -14,8 +15,8 @@ export function zipEntries(bytes: ArrayBuffer): ZipEntry[] {
   const view = new DataView(bytes); let end = bytes.byteLength - 22;
   while (end >= Math.max(0, bytes.byteLength - 65557) && view.getUint32(end, true) !== 0x06054b50) { end--; }
   if (end < 0 || view.getUint32(end, true) !== 0x06054b50) { throw new Error(t("Office 文件不是有效 ZIP 文档。")); }
-  const count = view.getUint16(end + 10, true); let offset = view.getUint32(end + 16, true); let size = 0;
-  if (count > 3000 || view.getUint16(end + 4, true) !== 0 || view.getUint16(end + 6, true) !== 0) { throw new Error(t("不支持分卷或超大 Office 文档。")); }
+  const count = view.getUint16(end + 10, true); let offset = view.getUint32(end + 16, true);
+  if (view.getUint16(end + 4, true) !== 0 || view.getUint16(end + 6, true) !== 0) { throw new Error(t('不支持分卷 Office 文档。')); }
   const entries: ZipEntry[] = [];
   for (let i = 0; i < count; i++) {
     if (offset + 46 > bytes.byteLength || view.getUint32(offset, true) !== 0x02014b50 || (view.getUint16(offset + 8, true) & 1)) { throw new Error(t("Office 压缩目录无效或文档已加密。")); }
@@ -24,7 +25,7 @@ export function zipEntries(bytes: ArrayBuffer): ZipEntry[] {
     const entry: ZipEntry = { name: new util.TextDecoder('utf-8', { fatal: true }).decodeToString(new Uint8Array(bytes.slice(offset + 46, offset + 46 + nameLength))),
       method: view.getUint16(offset + 10, true), packed: view.getUint32(offset + 20, true), size: view.getUint32(offset + 24, true), offset: view.getUint32(offset + 42, true) };
     if (/^(word\/document\.xml|ppt\/slides\/slide\d+\.xml|xl\/(sharedStrings\.xml|worksheets\/sheet\d+\.xml))$/.test(entry.name)) {
-      size += entry.size; if (size > 8 * 1024 * 1024 || entry.size > 2 * 1024 * 1024) { throw new Error(t("Office 文档文字数据过大。")); } entries.push(entry);
+      entries.push(entry);
     }
     offset += length;
   }
@@ -48,12 +49,13 @@ async function unzipEntry(bytes: ArrayBuffer, entry: ZipEntry): Promise<string> 
   } else if (entry.method !== 0 || result.byteLength !== entry.size) { throw new Error(t("不支持此 Office 压缩方式。")); }
   return new util.TextDecoder('utf-8', { fatal: true }).decodeToString(new Uint8Array(result));
 }
-export async function officeText(bytes: ArrayBuffer): Promise<string> {
+export async function officeText(bytes: ArrayBuffer, cancellation: Cancellation = new Cancellation()): Promise<string> {
   const entries = zipEntries(bytes).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
   const shared: string[] = []; const strings = entries.find((item) => item.name === 'xl/sharedStrings.xml');
   if (strings) { const xml = await unzipEntry(bytes, strings); for (const match of xml.match(/<si[\s>][\s\S]*?<\/si>/g) || []) { shared.push(xmlText(match)); } }
   const sections: string[] = [];
   for (const entry of entries.filter((item) => item.name !== 'xl/sharedStrings.xml')) {
+    cancellation.check();
     const xml = await unzipEntry(bytes, entry); let text = '';
     if (entry.name.startsWith('xl/')) {
       for (const cell of xml.match(/<c\b[^>]*>[\s\S]*?<\/c>/g) || []) {
@@ -66,7 +68,7 @@ export async function officeText(bytes: ArrayBuffer): Promise<string> {
   }
   const text = sections.join('\n\n');
   if (!text.trim()) { throw new Error(t("文档没有可提取的文字。")); }
-  return text.length > 31000 ? text.slice(0, 31000) + '\n[文字超过上限，以下内容未提取]' : text;
+  return text;
 }
 // PDFKit is a separate system module. On HarmonyOS 6.0.0(20) it is not installed at all, so the
 // pdfService namespace itself is undefined and no page API can be reached. Probing the namespace
@@ -104,17 +106,16 @@ function pageText(page: pdfService.PdfPage): string {
   return lines.join('\n');
 }
 
-export function pdfText(path: string): string {
+export function pdfText(path: string, cancellation: Cancellation = new Cancellation()): string {
   assertPdfTextAvailable();
   const document = new pdfService.PdfDocument();
   try {
     document.loadDocument(path); const count = document.getPageCount(); let text = '';
-    for (let i = 0; i < Math.min(count, 100); i++) {
+    for (let i = 0; i < count; i++) {
+      cancellation.check();
       const page = document.getPage(i);
       try { text += '\n[第 ' + (i + 1) + ' 页]\n' + pageText(page); } finally { page.release(); }
-      if (text.length > 31000) { return text.slice(0, 31000) + '\n[文字超过上限，以下内容未提取]'; }
     }
-    if (count > 100) { text += '\n[仅提取前 100 页]'; }
     if (!text.replace(/\[第 \d+ 页\]/g, '').trim()) { throw new Error(t("PDF 没有可提取的文字，扫描件请使用图片输入。")); }
     return text;
   } finally { document.releaseDocument(); }

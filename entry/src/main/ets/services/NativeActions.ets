@@ -4,12 +4,12 @@ import { fileIo as fs, picker, fileUri } from '@kit.CoreFileKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { systemShare } from '@kit.ShareKit';
 import { util } from '@kit.ArkTS';
-import { Attachment } from '../model/Productivity';
+import { Attachment, MAX_MESSAGE_ATTACHMENTS } from '../model/Productivity';
 import { Attachments, readBounded, writeBytes } from './Attachments';
 import { exportMetadata, stampHtml, stampMarkdown } from '../model/ExportMetadata';
 
 export async function selectAttachments(context: common.UIAbilityContext, photo: boolean, maximum: number): Promise<Attachment[]> {
-  if (maximum < 1) { throw new Error(t("每条消息最多添加 4 个附件。")); }
+  if (maximum < 1) { throw new Error(t('每条消息最多添加 {0} 个附件。', [MAX_MESSAGE_ATTACHMENTS])); }
   const uris = photo ? (await new photoAccessHelper.PhotoViewPicker().select({ MIMEType: photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE,
     maxSelectNumber: maximum })).photoUris : await new picker.DocumentViewPicker(context).select({ maxSelectNumber: maximum, fileSuffixFilters: [t('资料|.txt,.md,.csv,.tsv,.json,.log,.pdf,.docx,.xlsx,.pptx')] });
   const result: Attachment[] = [];
@@ -57,7 +57,9 @@ export class ShareInbox {
     const input: SharedInput = { text: '', attachments: [], error: '' };
     try {
       const records = (await systemShare.getSharedData(want)).getRecords();
-      if (records.length > 4) { throw new Error(t("一次最多接收 4 项分享内容。")); }
+      if (records.length > MAX_MESSAGE_ATTACHMENTS) {
+        throw new Error(t('一次最多接收 {0} 项分享内容。', [MAX_MESSAGE_ATTACHMENTS]));
+      }
       for (const record of records) {
         if (record.content) { input.text += (input.text ? '\n\n' : '') + record.content; }
         if (record.uri) {

@@ -21,7 +21,7 @@ import { ThreadReference, referenceQuery } from '../model/ThreadReferences';
 import { ThreadReferenceCard } from './ThreadReferenceCard';
 import { curves, FrameCallback, SymbolGlyphModifier } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
-import { Attachment, PromptTemplate } from '../model/Productivity';
+import { Attachment, MAX_MESSAGE_ATTACHMENTS, PromptTemplate } from '../model/Productivity';
 import { Attachments } from '../services/Attachments';
 import { image } from '@kit.ImageKit';
 import { DrawingBoardOptions, DrawingDraft } from '../model/DrawingDraft';
@@ -444,7 +444,7 @@ export struct ChatPanel {
     if (this.importing || this.app.busy) { return; }
     this.importing = true; const id = this.thread.id;
     try {
-      const items = await selectAttachments(this.getUIContext().getHostContext() as common.UIAbilityContext, photo, 4 - this.thread.attachments.length);
+      const items = await selectAttachments(this.getUIContext().getHostContext() as common.UIAbilityContext, photo, MAX_MESSAGE_ATTACHMENTS - this.thread.attachments.length);
       if (id !== this.app.active.id) { throw new Error(t("对话已切换，请在当前对话重新添加附件。")); }
       await this.app.setAttachments(this.thread.attachments.concat(items));
     } catch (error) { this.app.error = (error as Error).message; }
@@ -456,7 +456,7 @@ export struct ChatPanel {
     this.memoryMessageId = messageId; this.memoryThreadId = this.thread.id; this.showMemoryDraft = true;
   }
   private async openDrawing(): Promise<void> {
-    if (this.drawingOpening || this.showDrawing || !this.canAttach() || this.thread.attachments.length >= 4) { return; }
+    if (this.drawingOpening || this.showDrawing || !this.canAttach() || this.thread.attachments.length >= MAX_MESSAGE_ATTACHMENTS) { return; }
     if (deviceInfo.productModel === 'emulator' || !canIUse('SystemCapability.Stylus.Handwrite')) {
       this.app.error = t('此设备不支持系统手写画板。'); return;
     }
@@ -465,7 +465,7 @@ export struct ChatPanel {
     try {
       // Pen Kit is a system HSP absent from emulators. Keep it outside the startup module graph.
       const board = await import('./DrawingBoard');
-      if (!this.canAttach() || this.thread.id !== threadId || this.thread.attachments.length >= 4) { return; }
+      if (!this.canAttach() || this.thread.id !== threadId || this.thread.attachments.length >= MAX_MESSAGE_ATTACHMENTS) { return; }
       this.drawingBuilder = board.drawingBoardBuilder;
       this.getUIContext().getFocusController().clearFocus();
       this.drawingThreadId = threadId; this.drawingDraft = new DrawingDraft(); this.showDrawing = true;
@@ -481,7 +481,7 @@ export struct ChatPanel {
   }
   private async addDrawing(pixel: image.PixelMap): Promise<void> {
     if (this.drawingThreadId !== this.app.active.id) { throw new Error(t('对话已切换，请在当前对话重新添加附件。')); }
-    if (!this.canAttach() || this.thread.attachments.length >= 4) { throw new Error(t('当前无法添加附件，请稍后重试。')); }
+    if (!this.canAttach() || this.thread.attachments.length >= MAX_MESSAGE_ATTACHMENTS) { throw new Error(t('当前无法添加附件，请稍后重试。')); }
     this.importing = true;
     try {
       const item = await Attachments.saveDrawing(pixel);
@@ -809,13 +809,13 @@ export struct ChatPanel {
   plusRootPane() {
     Column({ space: 2 }) {
       this.plusMenuRow($r('sys.symbol.picture'), t('图片'), 'plus-menu-photo',
-        this.canAttach() && this.thread.attachments.length < 4, false, '',
+        this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, false, '',
         () => this.dismissPlusMenu(() => this.attach(true)))
       this.plusMenuRow($r('sys.symbol.doc_text'), t('文本文件'), 'plus-menu-text',
-        this.canAttach() && this.thread.attachments.length < 4, false, '',
+        this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, false, '',
         () => this.dismissPlusMenu(() => this.attach(false)))
       this.plusMenuRow($r('sys.symbol.square_and_pencil'), t('画板'), 'plus-menu-drawing',
-        this.canAttach() && this.thread.attachments.length < 4, false, '',
+        this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, false, '',
         () => this.dismissPlusMenu(() => this.openDrawing()))
       Divider().strokeWidth(0.5).color($r('app.color.divider')).margin({ left: 10, right: 10, top: 4, bottom: 4 })
       this.plusMenuRow($r('sys.symbol.folder'), t('工作区'), 'plus-menu-workspace', !this.app.busy, true, '',
@@ -835,7 +835,7 @@ export struct ChatPanel {
         }))
       this.plusMenuRow($r('sys.symbol.doc_plaintext'), t('提示词模板'), 'plus-menu-templates', !this.app.busy, true,
         String(this.app.productivity.templates.length), () => { this.plusPane = 'templates'; })
-      Text(this.thread.attachments.length >= 4 ? t('已达到每条消息 4 个附件的上限') : t('图片需模型支持视觉输入 · 文本文件最多 64 KB'))
+      Text(this.thread.attachments.length >= MAX_MESSAGE_ATTACHMENTS ? t('已达到每条消息 {0} 个附件的上限', [MAX_MESSAGE_ATTACHMENTS]) : t('每条消息最多 {0} 个附件 · 图片需模型支持视觉输入', [MAX_MESSAGE_ATTACHMENTS]))
         .fontFamily(this.appearance.fontFamily).fontSize(11).lineHeight(16).fontColor($r('app.color.text_tertiary'))
         .width('100%').padding({ left: 10, right: 10, top: 6, bottom: 8 })
     }.width('100%')
@@ -901,11 +901,11 @@ export struct ChatPanel {
       Column({ space: Space.lg }) {
         Row() {
           this.plusTile($r('sys.symbol.picture'), t("图片"), 'attach-photo',
-            this.canAttach() && this.thread.attachments.length < 4, () => this.fromSheet(() => this.attach(true)))
+            this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, () => this.fromSheet(() => this.attach(true)))
           this.plusTile($r('sys.symbol.doc_text'), t("文本文件"), 'attach-text',
-            this.canAttach() && this.thread.attachments.length < 4, () => this.fromSheet(() => this.attach(false)))
+            this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, () => this.fromSheet(() => this.attach(false)))
           this.plusTile($r('sys.symbol.square_and_pencil'), t('画板'), 'attach-drawing',
-            this.canAttach() && this.thread.attachments.length < 4, () => this.fromSheet(() => this.openDrawing()))
+            this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, () => this.fromSheet(() => this.openDrawing()))
         }.width('100%').alignItems(VerticalAlign.Top)
         Row() {
           this.plusTile($r('sys.symbol.folder'), t("工作区"), 'open-workspace', !this.app.busy,
@@ -916,7 +916,7 @@ export struct ChatPanel {
             !this.app.busy && !this.thread.archived && this.app.saveError.length === 0,
             () => { this.showPlus = false; this.toggleTeam(!this.thread.teamEnabled); })
         }.width('100%').alignItems(VerticalAlign.Top)
-        Text(this.thread.attachments.length >= 4 ? t("已达到每条消息 4 个附件的上限") : t("图片需模型支持视觉输入 · 文本文件最多 64 KB")).fontFamily(this.appearance.fontFamily)
+        Text(this.thread.attachments.length >= MAX_MESSAGE_ATTACHMENTS ? t('已达到每条消息 {0} 个附件的上限', [MAX_MESSAGE_ATTACHMENTS]) : t('每条消息最多 {0} 个附件 · 图片需模型支持视觉输入', [MAX_MESSAGE_ATTACHMENTS])).fontFamily(this.appearance.fontFamily)
           .fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).width('100%').textAlign(TextAlign.Center)
         Button(t('引用其他会话')).fontFamily(this.appearance.fontFamily).id('add-thread-reference').attributeModifier(Btn.tonal).width('100%')
           .enabled(this.canAttach() && this.thread.references.length < 4)

@@ -155,7 +155,7 @@ const node = id => [...nodes.values()].find(value => value.id === id);
   const names = ['canAttach', 'openDrawing', 'closeDrawing', 'addDrawing'];
   const methods = names.map(name => component.members.find(value => value.name?.getText(tree) === name).getText(tree)).join('\n');
   let boardLoads = 0;
-  const scope = { exports: {}, DrawingDraft, Attachments: {}, canIUse: () => supported, deviceInfo: { productModel: 'phone' },
+  const scope = { exports: {}, DrawingDraft, MAX_MESSAGE_ATTACHMENTS: 10, Attachments: {}, canIUse: () => supported, deviceInfo: { productModel: 'phone' },
     require: id => { assert.ok(id.includes('DrawingBoard')); boardLoads++; return { drawingBoardBuilder: { builder() {} } }; }, t: value => value };
   vm.runInNewContext(compile(`class Composer { ${methods} } exports.Composer = Composer;`), scope);
   const composer = new scope.exports.Composer();
@@ -184,7 +184,10 @@ const node = id => [...nodes.values()].find(value => value.id === id);
   composer.app.active.id = 'chat'; scope.Attachments.saveDrawing = () => new Promise(resolve => { finishWrite = resolve; });
   const switched = composer.addDrawing(pixel); composer.app.active.id = 'other'; finishWrite(image);
   await assert.rejects(switched, /对话已切换/); assert.equal(additions, 1); assert.equal(composer.importing, false);
-  composer.app.active.id = 'chat'; composer.thread.attachments = [image, image, image, image];
+  composer.app.active.id = 'chat'; composer.thread.attachments = Array(9).fill(image);
+  scope.Attachments.saveDrawing = async () => image;
+  composer.app.setAttachments = async items => { composer.thread.attachments = items; return true; };
+  await composer.addDrawing(pixel); assert.equal(composer.thread.attachments.length, 10);
   await assert.rejects(composer.addDrawing(pixel), /当前无法添加附件/);
   composer.showDrawing = false; await composer.openDrawing(); assert.equal(composer.showDrawing, false);
   composer.thread.attachments = [];

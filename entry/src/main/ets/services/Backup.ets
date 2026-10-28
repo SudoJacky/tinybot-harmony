@@ -1,5 +1,5 @@
 import { Diagnostics } from '../model/Diagnostics';
-import { ProjectData, validateProjects } from '../model/Project';
+import { ProjectData, validateProjects, workspaceIdFor } from '../model/Project';
 import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
 import { fileIo as fs, picker } from '@kit.CoreFileKit';
@@ -11,6 +11,7 @@ import { WorkspaceStore } from '../model/WorkspaceStore';
 import { workspaceRelativePath } from './WorkspaceTools';
 import { Attachments, readBounded, writeBytes } from './Attachments';
 import { exportFile } from './NativeActions';
+import { NativeWorkspaceFiles } from './NativeWorkspaceFiles';
 interface BackupFile { threadId?: string; workspaceId?: string; path: string; bytes: string; }
 interface BackupAttachment { id: string; bytes: string; }
 interface BackupEnvelope { format: string; data: AppData; attachments: BackupAttachment[]; files: BackupFile[]; }
@@ -51,6 +52,15 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
     if (search.provider === 'tavily') { search.credentialAlias = ''; } else { search.modelProviderId = undefined; }
   }
   let size = JSON.stringify(data).length * 3;
+  const originals = new Set<string>();
+  for (const thread of data.threads) {
+    for (const item of threadAttachments(thread)) {
+      if (item.original) {
+        if (item.workspaceId !== workspaceIdFor(data, thread)) { throw new Error(t('备份附件无效。')); }
+        originals.add(item.workspaceId + '/' + item.path);
+      }
+    }
+  }
   for (const item of allAttachments(data)) { const bytes = await encodeFile(Attachments.path(item)); size += bytes.length; if (size > MAX_BACKUP) { throw new Error(t("备份超过 20 MB，请先清理不需要的附件。")); } envelope.attachments.push({ id: item.id, bytes: bytes }); }
   const workspaces = new WorkspaceStore(context.getApplicationContext().filesDir);
   const projectRoots = new Set((data.projects || []).map((project) => project.workspaceId));
@@ -68,6 +78,8 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
         if (stat.isSymbolicLink()) { throw new Error(t("备份不支持符号链接：") + path); }
         if (stat.isDirectory()) { pending.push(path); }
         else if (stat.isFile()) {
+          // Original attachment bytes are already in the attachment section, including shared project copies.
+          if (originals.has(workspaceId + '/' + path)) { continue; }
           const bytes = await encodeFile(absolute); size += bytes.length;
           if (size > MAX_BACKUP || envelope.files.length >= 1000) { throw new Error(t("备份最多 20 MB、1000 个文件。")); }
           envelope.files.push({ workspaceId: workspaceId, path: path, bytes: bytes });
@@ -146,7 +158,7 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
     if ((local.projects || []).some((item) => item.id === project.id)) { await workspace.requireWorkspace(project.workspaceId); }
   }
   const attachmentRoot = context.getApplicationContext().filesDir + '/attachments'; if (!await fs.access(attachmentRoot)) { await fs.mkdir(attachmentRoot); }
-  for (const item of allAttachments(data)) { const id = attachmentIds.get(item.id) as string; const path = id + (item.mime === 'image/jpeg' ? '.jpg' : '.txt'); await writeBytes(attachmentRoot + '/' + path, (binaries.get(item.id) as Uint8Array).buffer as ArrayBuffer); }
+  for (const item of allAttachments(data).filter((item) => !item.original)) { const id = attachmentIds.get(item.id) as string; const path = id + (item.mime === 'image/jpeg' ? '.jpg' : '.txt'); await writeBytes(attachmentRoot + '/' + path, (binaries.get(item.id) as Uint8Array).buffer as ArrayBuffer); }
   for (const id of Array.from(destinations.values())) { await workspace.ensureThread(id); }
   for (let index = 0; index < envelope.files.length; index++) {
     const item = envelope.files[index];
@@ -170,6 +182,17 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
   for (const thread of data.threads) {
     thread.pendingInputs = []; thread.queuePaused = true;
     for (const item of threadAttachments(thread)) {
+      if (item.original) {
+        const workspaceId = workspaceIdFor(data, thread);
+        await workspace.ensureThread(workspaceId);
+        const temporary = attachmentRoot + '/restore-' + util.generateRandomUUID() + '.bin';
+        try {
+          await writeBytes(temporary, (binaries.get(item.id) as Uint8Array).buffer as ArrayBuffer);
+          await new NativeWorkspaceFiles(workspace.pathFor(workspaceId)).importFile(temporary, item.path, true);
+        } finally { if (await fs.access(temporary)) { await fs.unlink(temporary); } }
+        item.workspaceId = workspaceId;
+        continue;
+      }
       const id = attachmentIds.get(item.id); if (id) { item.id = id; item.path = id + (item.mime === 'image/jpeg' ? '.jpg' : '.txt'); }
     }
   }

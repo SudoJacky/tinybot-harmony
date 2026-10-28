@@ -483,7 +483,10 @@ export struct MessageBubble {
         }.padding({ left: 10, right: 12, top: 8, bottom: 8 }).borderRadius(Radius.md)
         .backgroundColor($r('app.color.surface')).border({ width: 0.5, color: $r('app.color.divider') })
         .constraintSize({ maxWidth: 240 })
-        .onClick(() => { this.selectingText = false; this.documentName = item.name; this.documentText = item.text || ''; this.documentOpen = true; })
+        .onClick(() => {
+          if (item.original) { this.onOpenFile(item.path); return; }
+          this.selectingText = false; this.documentName = item.name; this.documentText = item.text || ''; this.documentOpen = true;
+        })
       }, (item: Attachment) => item.id)
       if (this.message.content.length > 0) {
         Text(this.message.content).fontFamily(this.appearance.fontFamily).fontSize(Font.body).lineHeight(24)

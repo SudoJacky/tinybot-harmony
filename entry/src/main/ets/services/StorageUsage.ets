@@ -141,7 +141,7 @@ export class StorageUsage {
   // Attachment paths referenced by any live thread, including pending inputs and tool screenshots.
   private static references(data: AppData): Map<string, string> {
     const result = new Map<string, string>();
-    const add = (item: Attachment): void => { if (item && item.path) { result.set(item.path, item.name); } };
+    const add = (item: Attachment): void => { if (item && item.path && !item.workspaceId) { result.set(item.path, item.name); } };
     for (const thread of data.threads) {
       for (const item of thread.attachments || []) { add(item); }
       for (const input of thread.pendingInputs || []) {

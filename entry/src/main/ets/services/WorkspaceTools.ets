@@ -64,7 +64,7 @@ export class WorkspaceTools implements AgentTools {
     const definitions: ToolDefinition[] = [
       this.extraDefinition('list_files', '列出工作区目录，每页最多 200 项；用 nextOffset 续页。',
         { 'path': { type: 'string', description: '目录相对路径，根目录用 .' }, 'offset': { type: 'integer', description: '列表偏移，默认 0；接续 nextOffset' } }, ['path']),
-      this.extraDefinition('read_file', '按行读取工作区 UTF-8 文本，默认每页 2000 行或 50 KiB；可调大 limit/maxBytes，无固定内容大小上限。截断时按 nextOffset/nextColumn 续读。',
+      this.extraDefinition('read_file', '按路径读取工作区文件。UTF-8 文本直接读取；PDF、DOCX、XLSX、PPTX 按需提取文字（扫描 PDF 不支持 OCR，图片和排版不包含在文字中）。无固定文件大小上限。默认每页 2000 行或 50 KiB，可调大 limit/maxBytes。截断时按 nextOffset/nextColumn 续读。原文件不会被修改。',
         { 'path': { type: 'string', description: '文件相对路径' }, 'offset': { type: 'integer', description: '起始行，默认 1' },
           'limit': { type: 'integer', description: '最多读取的行数，默认 2000' }, 'maxBytes': { type: 'integer', minimum: 4, description: '本页 UTF-8 正文字节预算，默认 51200，可调大' },
           'column': { type: 'integer', description: '首行起始 UTF-16 列，默认 1；续读时使用 nextColumn' } }, ['path']),
@@ -77,7 +77,7 @@ export class WorkspaceTools implements AgentTools {
             properties: { 'oldText': { type: 'string', description: '唯一匹配的非空原文', minLength: 1 }, 'newText': { type: 'string', description: '替换文字，可以为空' } },
             required: ['oldText', 'newText'], additionalProperties: false } } }, ['path', 'edits'])
     ];
-    const snippets: Record<string, string> = { 'find_files': '按名称或 glob 查找文件', 'list_files': '定位工作区文件', 'read_file': '读取文本文件',
+    const snippets: Record<string, string> = { 'find_files': '按名称或 glob 查找文件', 'list_files': '定位工作区文件', 'read_file': '读取文本和文档文件',
       'search_file_content': '查找文件内容', 'edit_file': '唯一匹配局部修改', 'write_file': '创建或完整覆盖文件' };
     const guidelines: Record<string, string[]> = {
       'list_files': ['先用 list_files 定位工作区文件。'],
