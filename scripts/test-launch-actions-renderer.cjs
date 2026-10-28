@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const studio = process.env.DEVECO_STUDIO_HOME || 'C:/Program Files/Huawei/DevEco Studio';
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 const root = path.resolve(__dirname, '..');
-let intent, notificationThreadId, foreground = true;
+let intent, notificationThreadId, sharedInput, foreground = true;
 const launch = { take: () => { const result = intent; intent = undefined; return result; }, isForeground: () => foreground,
   takeThreadId: () => { const id = notificationThreadId; notificationThreadId = undefined; return id; } };
 function controller(file, name, methods, extra = {}) {
@@ -23,7 +23,9 @@ function controller(file, name, methods, extra = {}) {
   return new globals.exports.Probe();
 }
 function page() {
-  const page = controller('pages/Index', 'Index', ['receiveLaunch']);
+  const page = controller('pages/Index', 'Index', ['receiveLaunch', 'receiveShare', 'revealChat'], {
+    ShareInbox: { peek: () => sharedInput, take: () => { sharedInput = undefined; } }
+  });
   page.events = []; page.voiceRequest = ''; page.appearance = { surface: {} };
   page.privacy = { allowed: true };
   page.app = { busy: false, canNavigate: true, saveError: '', error: '', active: { id: 'old', projectId: 'project' },
@@ -32,6 +34,9 @@ function page() {
   };
   page.paths = { clear: () => page.events.push('navigation') };
   page.setDrawer = value => page.events.push(['drawer', value]);
+  page.detailPaneOpen = true; page.workspaceOpen = true; page.editorDraft = 'Unsaved text';
+  page.workbench = () => ({ docked: false });
+  page.setDetailPane = value => { page.detailPaneOpen = value; };
   page.getUIContext = () => ({ getPromptAction: () => ({ showToast: value => page.events.push(['toast', value.message]) }) });
   return page;
 }
@@ -99,10 +104,25 @@ function card(wide) {
   await view.receiveLaunch();
   assert.deepEqual(view.events, ['saved', ['selected', 'completed'], 'navigation', ['drawer', false]]);
   assert.equal(view.app.active.id, 'completed'); assert.equal(view.launching, false);
+  assert.equal(view.detailPaneOpen, false); assert.equal(view.workspaceOpen, true); assert.equal(view.editorDraft, 'Unsaved text');
   view = page(); intent = 'continue-chat'; notificationThreadId = 'deleted';
   view.app.selectThread = async () => { view.app.error = 'Conversation deleted'; return false; };
   await view.receiveLaunch(); assert.deepEqual(view.events, ['saved', ['toast', 'Conversation deleted']]);
   console.log('PASS notification click saves the draft and opens its conversation while another runs; missing conversations report failure');
+
+  for (const docked of [false, true]) {
+    view = page(); view.app.ready = true; view.app.busy = true;
+    view.workbench = () => ({ docked });
+    view.session = { canNavigate: true, waitForIdle: () => { throw Error('Share must not wait for background chats'); } };
+    view.app.setDraft = value => { view.app.draft = value; };
+    view.app.setAttachments = async items => { view.app.attachments = items; return true; };
+    sharedInput = { text: '', attachments: [{ id: 'shared-file', original: true }] };
+    await view.receiveShare();
+    assert.equal(sharedInput, undefined); assert.equal(view.app.draft, '');
+    assert.equal(view.app.attachments[0].id, 'shared-file'); assert.equal(view.app.active.id, 'new');
+    assert.equal(view.detailPaneOpen, docked); assert.equal(view.workspaceOpen, true); assert.equal(view.editorDraft, 'Unsaved text');
+  }
+  console.log('PASS shared files reveal the phone chat, preserve editor drafts and retain docked tablet panes while other chats run');
 
   const panel = controller('views/ChatPanel', 'ChatPanel', ['receiveVoiceShortcut', 'speechAvailabilityChanged', 'speechThreadChanged']);
   let starts = 0, stops = 0, consumed = 0;
