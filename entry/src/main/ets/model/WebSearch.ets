@@ -20,8 +20,9 @@ export interface SearchDraft {
 export interface SearchSource { url: string; title: string; snippet: string; publishedAt?: string; }
 export interface SearchResult { sources: SearchSource[]; }
 
-export function defaultSearchConfig(provider: SearchProviderId = 'deepseek'): SearchConfig {
-  return provider !== 'tavily' ? { provider: provider, enabled: false } :
+// The keyless Bing provider is usable immediately; API providers need a key or model service first.
+export function defaultSearchConfig(provider: SearchProviderId = 'bing-browser'): SearchConfig {
+  return provider !== 'tavily' ? { provider: provider, enabled: provider === 'bing-browser' } :
     { provider: provider, enabled: false, baseUrl: 'https://api.tavily.com', credentialAlias: '' };
 }
 export function isSupportedSearchProvider(provider: string): boolean { return ['deepseek', 'tavily', 'bing-browser'].includes(provider); }

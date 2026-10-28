@@ -63,10 +63,10 @@
 | 键 | 含义 | 默认 | 生效时机 |
 | --- | --- | --- | --- |
 | `extensions.webEnabled` | 允许网页读取与联网搜索 | `true` | 下一轮工具目录 |
-| `extensions.browserPolicy` | 应用内浏览器：`unset`、`enabled`、`disabled` | `unset`（默认关闭，首次需要时询问） | 立即 |
+| `extensions.browserPolicy` | 应用内浏览器：`unset`、`enabled`、`disabled` | `enabled`（默认开启，可随时关闭；`unset` 表示尚未确认，首次使用时询问） | 立即 |
 | `extensions.skills[]` | Skill 名称、正文、参考文件、启用与 `manualOnly` | 空 | 下一轮 |
 | `extensions.seededBuiltinSkills[]` | 已处理过的内置 Skill 名称 | 空 | 内置安装时写入 |
-| `productivity.options.search` | 搜索服务配置，见下节 | `deepseek` 且未启用 | 下一轮创建工具时 |
+| `productivity.options.search` | 搜索服务配置，见下节 | `bing-browser` 且已启用 | 下一轮创建工具时 |
 | `threads[].agentMode` | `full` 或 `custom` | 旧会话按完整版 | 当前会话立即 |
 | `threads[].disabledTools[]` | 被关闭的可选工具名 | 空 | 当前会话立即，随下一条消息保存 |
 | `threads[].disabledMcpIds[]` | 本会话停用的 MCP 服务 | 空 | 下一轮 |
@@ -75,20 +75,21 @@
 - 只读模式会移除写文件、编辑、`mcp_call`、`memory`、`skill_manage`、`mcp_manage`，并限制浏览器点击与输入；基础文件读取、代码沙箱、计划、预览和交付仍可用。
 - 自定义模式只关闭 12 项可选能力，基础文件工具与记忆、Skills 由专门设置控制；旧配置里只关闭部分子工具时，加载会把整项能力关闭。
 - 执行期间页面锁定，保存失败会回滚开关并提示；有保存错误时编辑入口不可用。
+- 从旧版本升级时，未写入的 `browserPolicy` 与 `search` 会补为当前默认值（应用内浏览器开启、必应搜索开启）；已保存的选择保持不变。
 
 ## 搜索服务
 
 | 键 | 含义 | 默认 |
 | --- | --- | --- |
-| `search.provider` | `deepseek` 或 `tavily` | `deepseek` |
-| `search.enabled` | 是否启用联网搜索 | `false` |
+| `search.provider` | `deepseek`、`tavily` 或 `bing-browser` | `bing-browser` |
+| `search.enabled` | 是否启用联网搜索 | `true` |
 | `search.modelProviderId` | 复用哪个 DeepSeek 服务的密钥 | 留空自动选择，多个候选时必须指定 |
 | `search.baseUrl` | Tavily 地址，必须 HTTPS | `https://api.tavily.com` |
 | `search.credentialAlias` | Tavily 密钥别名 | 空 |
 | `search.tavily` | 跨提供方保留的 Tavily `baseUrl` 与 `credentialAlias` | 首次编辑或切走 Tavily 时记录 |
 | `search.deepseek.modelProviderId` | 跨提供方保留的 DeepSeek 服务选择 | 留空自动选择 |
 
-DeepSeek 搜索复用官方地址的模型服务密钥，不需要单独填写；Tavily 的密钥保存为 `tinybot-search-<uuid>`。更换搜索地址后必须重填密钥；启用时若读不到已保存的密钥，保存会失败而不是留下空配置。
+必应（`bing-browser`）不需要密钥、地址或模型服务，通过应用内浏览器访问必应；应用内浏览器被关闭时内置搜索同时停用。DeepSeek 搜索复用官方地址的模型服务密钥，不需要单独填写；Tavily 的密钥保存为 `tinybot-search-<uuid>`。更换搜索地址后必须重填密钥；启用时若读不到已保存的密钥，保存会失败而不是留下空配置。
 
 搜索页列表维护独立草稿，详情页只编辑并返回；列表底部统一保存。切换提供方保留其他提供方配置。为兼容旧版本，当前提供方仍使用顶层 `baseUrl` / `credentialAlias` / `modelProviderId`，加载旧 Tavily 配置后首次保存会保留其别名；原始密钥只写入安全存储。备份导出与恢复都会清空非当前提供方的 Tavily 别名。
 

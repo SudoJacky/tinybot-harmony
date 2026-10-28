@@ -1632,7 +1632,7 @@
   "删除选中的 {0} 段对话？": "Delete {0} selected chats?",
   "删除后无法恢复。会话工作区中的文件会保留。": "This cannot be undone. Files in the chat workspaces will be kept.",
   "应用内浏览器": "In-app browser",
-  "默认关闭，首次需要时询问。": "Off by default. Ask when first needed.",
+  "尚未设置，首次使用时询问。": "Not set yet. Ask on first use.",
   "已关闭，助手不会再次请求启用。": "Disabled. The assistant will not ask to enable it again.",
   "允许助手操作网页；你可以随时接管。": "Allow the assistant to operate web pages. You can take over at any time.",
   "收起浏览器": "Collapse browser",

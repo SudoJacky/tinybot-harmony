@@ -1,5 +1,5 @@
 import { t } from './I18n';
-import { SearchConfig, validateSearchConfig } from './WebSearch';
+import { SearchConfig, defaultSearchConfig, validateSearchConfig } from './WebSearch';
 import { REASONING_EFFORTS } from './ReasoningEffort';
 import { ModelReference, validateReference } from './ProviderProfiles';
 export interface ModelCapability extends ModelReference { images: boolean; reasoning: string; contextWindow?: number; requestUsage: boolean; }
@@ -10,7 +10,7 @@ export interface AssistantOptions {
   capabilities: ModelCapability[];
 }
 export function defaultAssistantOptions(): AssistantOptions {
-  return { autoMemory: true, saveSummary: false, readOnly: false, autoRoute: false, capabilities: [] };
+  return { search: defaultSearchConfig(), autoMemory: true, saveSummary: false, readOnly: false, autoRoute: false, capabilities: [] };
 }
 export function validateAssistantOptions(value: AssistantOptions): void {
   if (value?.search !== undefined) { validateSearchConfig(value.search, true); }

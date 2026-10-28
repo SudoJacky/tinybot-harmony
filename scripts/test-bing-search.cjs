@@ -66,7 +66,9 @@ function fixture(policy = 'enabled') {
     tavily: { baseUrl: 'https://api.tavily.com', credentialAlias: 'old-key' } });
   assert.deepEqual(removed, []);
   assert.deepEqual(plain(parseAppData(JSON.stringify(saved)).productivity.options.search), saved.productivity.options.search);
-  assert.deepEqual(plain(defaultSearchConfig('bing-browser')), { provider: 'bing-browser', enabled: false });
+  assert.deepEqual(plain(defaultSearchConfig()), { provider: 'bing-browser', enabled: true });
+  assert.deepEqual(plain(defaultSearchConfig('deepseek')), { provider: 'deepseek', enabled: false });
+  assert.deepEqual(plain(defaultAssistantOptions().search), { provider: 'bing-browser', enabled: true });
   for (const field of ['baseUrl', 'credentialAlias', 'modelProviderId']) assert.throws(() => validateSearchConfig({ ...saved.productivity.options.search, [field]: 'invalid' }));
   assert.throws(() => searchCredentialAlias(saved.productivity.options.search, []));
   await assert.rejects(saveSearchSettings(emptyData(), { ...draft, apiKey: 'unneeded' }, vault, () => '', async () => {}));
