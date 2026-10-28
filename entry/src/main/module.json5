@@ -47,7 +47,11 @@
           { "actions": ["ohos.want.action.sendData"], "uris": [
             { "scheme": "file", "utd": "general.text", "maxFileSupported": 4 },
             { "scheme": "file", "utd": "general.hyperlink", "maxFileSupported": 4 },
-            { "scheme": "file", "utd": "general.image", "maxFileSupported": 4 }
+            { "scheme": "file", "utd": "general.image", "maxFileSupported": 4 },
+            { "scheme": "file", "utd": "com.adobe.pdf", "maxFileSupported": 4 },
+            { "scheme": "file", "utd": "org.openxmlformats.wordprocessingml.document", "maxFileSupported": 4 },
+            { "scheme": "file", "utd": "org.openxmlformats.spreadsheetml.sheet", "maxFileSupported": 4 },
+            { "scheme": "file", "utd": "org.openxmlformats.presentationml.presentation", "maxFileSupported": 4 }
           ] },
           {
             "entities": [

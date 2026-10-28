@@ -393,7 +393,7 @@ struct Index {
       while (input) {
         if (input.error) { this.app.error = input.error; }
         else if (await this.app.newThread()) {
-          this.app.setDraft(input.text || t("请分析分享的附件。"));
+          this.app.setDraft(input.text);
           if (!await this.app.setAttachments(input.attachments)) { return; }
           await this.app.flushDraft(); this.paths.clear();
           if (this.app.saveError) { return; }
