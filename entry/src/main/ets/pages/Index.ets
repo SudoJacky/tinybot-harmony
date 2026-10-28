@@ -10,6 +10,7 @@ import { BrowserSession } from '../services/BrowserSession';
 import { AnnotationPage, browserAnnotationText } from '../model/BrowserAnnotation';
 import { image } from '@kit.ImageKit';
 import { Attachments } from '../services/Attachments';
+import { MAX_MESSAGE_ATTACHMENTS } from '../model/Productivity';
 import { t } from '../model/I18n';
 import { agentModeName } from '../model/AgentMode';
 import { ToolScopePanel } from '../views/ToolScopePanel';
@@ -663,7 +664,7 @@ struct Index {
   }
   private async addBrowserAnnotation(threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string): Promise<void> {
     if (threadId !== this.app.active.id) { throw new Error(t('对话已切换，请在当前对话重新添加附件。')); }
-    if (!this.app.canQueueInput || this.app.active.attachments.length >= 4) { throw new Error(t('当前无法添加附件，请稍后重试。')); }
+    if (!this.app.canQueueInput || this.app.active.attachments.length >= MAX_MESSAGE_ATTACHMENTS) { throw new Error(t('当前无法添加附件，请稍后重试。')); }
     const item = await Attachments.saveBrowserAnnotation(pixel);
     await this.app.appendDraftAttachment(threadId, item, browserAnnotationText(page, note));
     this.paths.clear(); this.setDrawer(false); this.setBrowserExpanded(false);
@@ -1316,7 +1317,7 @@ struct Index {
               BrowserPanel({ browser: this.browser, expanded: this.detailTabVisible('browser'), presented: this.browserPresent,
                 onPresent: () => { this.setBrowserExpanded(true); this.openDetailTab('browser'); },
                 tabbed: this.workbench().docked, threadId: this.app.active.id,
-                canAnnotate: this.app.canQueueInput && this.app.active.attachments.length < 4,
+                canAnnotate: this.app.canQueueInput && this.app.active.attachments.length < MAX_MESSAGE_ATTACHMENTS,
                 onAnnotation: (threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string) => this.addBrowserAnnotation(threadId, pixel, page, note),
                 onSettings: () => { this.hideBrowserTab(); this.openSettings(); },
                 onClose: () => this.closeBrowser(), onDismiss: () => this.hideBrowserTab() })

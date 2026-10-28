@@ -1,5 +1,6 @@
 import { t } from './I18n';
 import { AssistantOptions, validateAssistantOptions } from './AssistantOptions';
+export const MAX_MESSAGE_ATTACHMENTS: number = 10;
 export interface Attachment {
   id: string;
   name: string;
@@ -53,7 +54,9 @@ export function defaultProductivity(): ProductivityData {
 }
 
 export function validateAttachments(items: Attachment[]): void {
-  if (!Array.isArray(items) || items.length > 4) { throw new Error(t("每条消息最多添加 4 个附件。")); }
+  if (!Array.isArray(items) || items.length > MAX_MESSAGE_ATTACHMENTS) {
+    throw new Error(t('每条消息最多添加 {0} 个附件。', [MAX_MESSAGE_ATTACHMENTS]));
+  }
   const ids = new Set<string>();
   for (const item of items) {
     if (!item || !/^[a-zA-Z0-9-]{1,80}$/.test(item.id) || ids.has(item.id) ||

@@ -6,9 +6,10 @@ const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/et
 const source = path.resolve(__dirname, '../entry/src/main/ets');
 const fixture = path.resolve(__dirname, '../.hvigor/file-attachments-' + crypto.randomUUID());
 fs.mkdirSync(fixture, { recursive: true });
-const disk = value => value.startsWith('/sandbox/') ? path.join(fixture, value.slice(9)) : value;
+const disk = value => value.startsWith('file://') ? disk(value.slice(7)) : value.startsWith('/sandbox/') ? path.join(fixture, value.slice(9)) : value;
 const handles = new Map(), cache = new Map();
 let copyFailure = false, pdfReads = 0, pdfPages = [], jsReads = 0;
+let selectedUris = [], sharedRecords = [], pickerMaximum;
 const fileIo = {
   OpenMode: { READ_ONLY: 1, CREATE: 2, WRITE_ONLY: 4, TRUNC: 8, NOFOLLOW: 16 },
   access: async p => fs.existsSync(disk(p)), mkdir: (p, recursive = false) => fs.promises.mkdir(disk(p), { recursive }),
@@ -30,7 +31,18 @@ const fileIo = {
   }
 };
 const kits = {
-  '@kit.CoreFileKit': { fileIo }, '@kit.ImageKit': { image: {} }, '@kit.ArkGraphics2D': { drawing: {} },
+  '@kit.CoreFileKit': { fileIo, picker: { DocumentViewPicker: class {
+    async select(options) { pickerMaximum = options.maxSelectNumber; return selectedUris; }
+  } } },
+  '@kit.MediaLibraryKit': { photoAccessHelper: { PhotoViewMIMETypes: { IMAGE_TYPE: 1 }, PhotoViewPicker: class {
+    async select(options) { pickerMaximum = options.maxSelectNumber; return { photoUris: selectedUris }; }
+  } } },
+  '@kit.ShareKit': { systemShare: { getSharedData: async () => ({ getRecords: () => sharedRecords }) } },
+  '@kit.ImageKit': { image: {
+    createImageSource: () => ({ getImageInfo: async () => ({ size: { width: 16, height: 16 } }),
+      createPixelMap: async () => ({ release: async () => {} }), release: async () => {} }),
+    createImagePacker: () => ({ packing: async () => Uint8Array.from([255, 216, 255]).buffer, release: async () => {} })
+  } }, '@kit.ArkGraphics2D': { drawing: {} },
   '@kit.ArkTS': { util: {
     generateRandomUUID: () => crypto.randomUUID(),
     TextEncoder: class { encodeInto(text) { return new TextEncoder().encode(text); } },
@@ -247,5 +259,47 @@ async function main() {
   assert.ok(fs.existsSync(disk(Attachments.path(intoExisting.threads[0].attachments[0]))));
   assert.equal(handles.size, 0);
   console.log('PASS original attachments restore into fresh and existing project workspaces');
+
+  // Exercise real selection, import, session persistence and model hydration at the shared limit.
+  {
+  cache.delete(path.join(source, 'services/NativeActions.ets'));
+  const { selectAttachments, ShareInbox } = load('services/NativeActions');
+  const { MAX_MESSAGE_ATTACHMENTS } = load('model/Productivity');
+  Attachments.configure(root);
+  selectedUris = Array.from({ length: 10 }, (_, index) => {
+    const uri = root + '/selected-' + index + '.jpg'; fs.writeFileSync(disk(uri), Buffer.from([255, 216, 255])); return uri;
+  });
+  const photos = await selectAttachments({}, true, MAX_MESSAGE_ATTACHMENTS);
+  assert.equal(pickerMaximum, 10); assert.equal(photos.length, 10); validateAttachments(photos);
+  assert.equal(await reopened.setAttachments(photos), true);
+  assert.equal(load('model/Conversation').parseAppData(JSON.stringify(saved)).threads.find(t => t.id === saved.activeThreadId).attachments.length, 10);
+  assert.equal((await Attachments.hydrate([{ role: 'user', content: '', attachments: photos }]))[0].images.length, 10);
+  const beforeOverflow = JSON.stringify(saved);
+  assert.equal(await reopened.setAttachments(photos.concat([{ ...photos[0], id: 'eleventh', path: 'eleventh.jpg' }])), false);
+  assert.match(reopened.state.error, /10/); assert.equal(JSON.stringify(saved), beforeOverflow);
+  selectedUris = Array(10).fill(root + '/session.txt');
+  const documents = await selectAttachments({}, false, MAX_MESSAGE_ATTACHMENTS);
+  assert.equal(pickerMaximum, 10); assert.equal(documents.length, 10);
+  assert.equal(await reopened.setAttachments(documents), true);
+  assert.equal(await reopened.setAttachments(documents.slice(0, 5).concat(photos.slice(0, 5))), true);
+  await assert.rejects(selectAttachments({}, false, 0), /10/);
+  console.log('PASS ten images, ten files and mixed attachments persist and reload; ten images reach model input and an eleventh cannot replace the draft');
+
+  for (const photo of [false, true]) {
+    sharedRecords = Array.from({ length: 10 }, (_, index) => ({ utd: photo ? 'general.image' : 'general.text',
+      uri: 'file://' + root + (photo ? '/selected-' + index + '.jpg' : '/session.txt') }));
+    await ShareInbox.receive({ action: 'ohos.want.action.sendData' }, root);
+    const received = ShareInbox.take(); assert.equal(received.error, ''); assert.equal(received.attachments.length, 10);
+    validateAttachments(received.attachments);
+  }
+  sharedRecords.push(sharedRecords[0]);
+  await ShareInbox.receive({ action: 'ohos.want.action.sendData' }, root);
+  const overflow = ShareInbox.take(); assert.match(overflow.error, /10/); assert.equal(overflow.attachments.length, 0);
+  const manifest = fs.readFileSync(path.resolve(source, '../module.json5'), 'utf8');
+  const limits = [...manifest.matchAll(/"maxFileSupported":\s*(\d+)/g)].map(match => Number(match[1]));
+  assert.equal(limits.length, 7); assert.ok(limits.every(limit => limit === MAX_MESSAGE_ATTACHMENTS));
+  assert.equal(handles.size, 0);
+  console.log('PASS system share accepts ten images/files, rejects eleven before importing, and all declared share types match the limit');
+  }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => console.log('Fixtures: ' + fixture));
