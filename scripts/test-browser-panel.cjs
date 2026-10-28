@@ -226,6 +226,7 @@ const TouchType = { Down: 0, Move: 1, Up: 2, Cancel: 3 };
 
   const draftEvents = [];
   const page = probe(indexTree, index, ['addBrowserAnnotation'], {
+    MAX_MESSAGE_ATTACHMENTS: 10,
     Attachments: { saveBrowserAnnotation: async () => { draftEvents.push('image'); return { id: 'capture' }; } },
     browserAnnotationText: (page, note) => page.url + '\n' + note
   });

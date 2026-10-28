@@ -102,6 +102,7 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync(emitted, 'utf8'), { compil
     throw new ToolFailure('FS_NOT_OBSERVED','another session created this name');
   };
   await panel.newNote();assert.match(panel.error,/文件已变化/);
+  files.importFile=async(uri,p)=>{creates.push(p);throw new ToolFailure('FS_NOT_OBSERVED','another session created this name');};
   picked=['file://fixtures/note.txt'];await panel.importFiles();assert.match(panel.error,/文件已变化/);
   assert.equal(creates.length,2,'Collisions are reported without silently choosing a different name or overwriting');
   assert.equal(panel.busy,false);

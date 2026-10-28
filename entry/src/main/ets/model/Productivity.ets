@@ -1,7 +1,7 @@
 import { t } from './I18n';
 import { AssistantOptions, validateAssistantOptions } from './AssistantOptions';
-export const MAX_MESSAGE_ATTACHMENTS: number = 10;
 import { isConfigurationName } from './ConfigurationValue';
+export const MAX_MESSAGE_ATTACHMENTS: number = 10;
 export interface Attachment {
   id: string;
   name: string;

@@ -153,7 +153,7 @@ struct Index {
     if (!this.session) {
       this.session = createNativeSessionService(context.filesDir, context.getApplicationContext().filesDir, this.approval, context, this.browser);
       this.session.subscribe((event) => {
-        if (event.state.ready && event.state.phase === 'idle' && !event.state.saveError && ShareInbox.peek()) { this.receiveShare(); }
+        if (event.state.canNavigate && ShareInbox.peek()) { this.receiveShare(); }
         if (event.kind === 'task-complete' && event.threadId) { this.taskCompleted(event.threadId); }
       });
     }
@@ -370,7 +370,6 @@ struct Index {
         try {
           await this.app.flushDraft();
           if (this.app.saveError) { throw new Error(this.app.saveError); }
-          await this.session?.waitForIdle();
           if (!LaunchActions.isForeground()) { return; }
           if (!await this.app.selectThread(threadId)) {
             throw new Error(this.app.error || this.app.saveError || t('无法打开通知对应的对话。'));
@@ -407,8 +406,7 @@ struct Index {
     if (this.receiving || !this.session || !this.app.ready) { return; }
     this.receiving = true;
     try {
-      await this.session.waitForIdle();
-      if (!this.session.canMutate) { return; }
+      if (!this.session.canNavigate) { return; }
       let input = ShareInbox.peek();
       while (input) {
         if (input.error) { this.app.error = input.error; }

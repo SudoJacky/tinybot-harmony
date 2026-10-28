@@ -16,6 +16,7 @@ let failConversationWorker = false;
 let sharedWriteFailure = ''; let cancelSharedWrite; let failBackupRename = false; const usageWrites = [];
 const cloudLocations = new Map(); let failCloudCopy = false; let cloudCopyError;
 const nativePath = p => {
+  if (typeof p === "number") return handlePaths.get(p);
   if (p.startsWith('file://')) p = decodeURIComponent(new URL(p).pathname);
   return p.startsWith('/sandbox/') ? path.join(fixture, p.slice(1)) : p;
 };
@@ -278,8 +279,10 @@ async function test(name, run) {
   await test('managed text attachments hydrate without mutating persisted history',async()=>{
     Attachments.configure(fixture);const incoming=path.join(fixture,'input.txt');fs.writeFileSync(incoming,'材料内容');
     const item=await Attachments.import(incoming,false);const messages=[{role:'user',content:'总结',attachments:[item]}];
-    const hydrated=await Attachments.hydrate(messages);assert.match(hydrated[0].content,/材料内容/);assert.equal(messages[0].content,'总结');
-    fs.writeFileSync(incoming,Buffer.from([0xff,0xff]));await assert.rejects(Attachments.import(incoming,false));
+    const hydrated=await Attachments.hydrate(messages);assert.ok(!hydrated[0].content.includes('材料内容'));assert.equal(messages[0].content,'总结');
+    assert.equal(fs.readFileSync(Attachments.path(item),'utf8'),'材料内容');
+    fs.writeFileSync(incoming,Buffer.from([0xff,0xff]));const binary=await Attachments.import(incoming,false);
+    assert.deepEqual(fs.readFileSync(Attachments.path(binary)),Buffer.from([0xff,0xff]));
   });
   await test('drawing attachments encode, persist and hydrate images for all model protocols',async()=>{
     Attachments.configure(fixture);
@@ -320,7 +323,7 @@ async function test(name, run) {
       assert.equal(opaqueReleases,2,'temporary opaque images are released on success and failure');
     } finally {kits['@kit.ImageKit'].image=previousImage;kits['@kit.ArkGraphics2D'].drawing=previousGraphics;}
   });
-  await test('large text attachments persist intact and are read in bounded pages after reload',async()=>{
+  await test('legacy large text attachments persist intact and are read in bounded pages after reload',async()=>{
     const {AttachmentTools}=load(path.join(source,'services/AttachmentTools'));
     const {estimateContextTokens}=load(path.join(source,'model/ConversationContext'));
     const {attachmentTokens}=load(path.join(source,'model/ContextBreakdown'));
@@ -328,7 +331,8 @@ async function test(name, run) {
     // Cross both old byte/character limits, a chunk boundary and a UTF-8 character boundary.
     const content='a'.repeat(65535)+'中文🙂\n'+'附件正文🙂'.repeat(18000)+'\nEND';
     fs.writeFileSync(incoming,content);
-    const item=await Attachments.import(incoming,false);
+    const item={id:'legacy-large',name:'large.txt',mime:'text/plain',path:'legacy-large.txt',size:Buffer.byteLength(content),text:content};
+    fs.writeFileSync(Attachments.path(item),content);
     assert.equal(item.text,content);assert.equal(item.size,Buffer.byteLength(content));
     assert.equal(fs.readFileSync(Attachments.path(item),'utf8'),content);
     const data=model.emptyData();data.activeThreadId='large-attachment';
@@ -355,20 +359,21 @@ async function test(name, run) {
     await assert.rejects(tools.execute({function:{name:'read_attachment',arguments:JSON.stringify({id:item.id})}},cancelled));
     fs.writeFileSync(incoming,'x'.repeat(4*1024*1024+1));
     const overImageLimit=await Attachments.import(incoming,false);assert.equal(overImageLimit.size,4*1024*1024+1);
-    assert.equal(model.parseAppData(JSON.stringify({...data,threads:[{...data.threads[0],attachments:[overImageLimit]}]})).threads[0].attachments[0].text.length,4*1024*1024+1);
-    fs.writeFileSync(incoming,'');assert.equal((await Attachments.import(incoming,false)).text,'');
-    fs.writeFileSync(incoming,'valid\0binary');await assert.rejects(Attachments.import(incoming,false),/文本/);
-    fs.writeFileSync(incoming,Buffer.concat([Buffer.alloc(65535,97),Buffer.from([0xe4,0xb8])]));await assert.rejects(Attachments.import(incoming,false));
+    assert.equal(model.parseAppData(JSON.stringify({...data,threads:[{...data.threads[0],attachments:[overImageLimit]}]})).threads[0].attachments[0].size,4*1024*1024+1);
+    fs.writeFileSync(incoming,'');assert.equal((await Attachments.import(incoming,false)).size,0);
+    fs.writeFileSync(incoming,'valid\0binary');assert.equal((await Attachments.import(incoming,false)).size,12);
+    fs.writeFileSync(incoming,Buffer.concat([Buffer.alloc(65535,97),Buffer.from([0xe4,0xb8])]));assert.equal((await Attachments.import(incoming,false)).size,65537);
   });
   await test('text attachments above the image cap survive backup and restore within the total backup budget',async()=>{
     const {createBackupFile,readBackupFile}=load(path.join(source,'services/Backup'));
     const root='/sandbox/large-backup';fs.mkdirSync(nativePath(root),{recursive:true});fs.mkdirSync(nativePath(root+'/cache'));
     Attachments.configure(root);const content='b'.repeat(4*1024*1024+1);fs.writeFileSync(nativePath(root+'/input.txt'),content);
-    const item=await Attachments.import(root+'/input.txt',false);const data=model.emptyData();
+    const {WorkspaceStore}=load(path.join(source,'model/WorkspaceStore'));await new WorkspaceStore(root).ensureThread('large-backup');
+    const [item]=await Attachments.inWorkspace([await Attachments.import(root+'/input.txt',false)],'large-backup');const data=model.emptyData();
     data.activeThreadId='large-backup';data.threads=[{id:'large-backup',title:'Large backup',updatedAt:1,messages:[],attachments:[item]}];
     const context={cacheDir:root+'/cache',getApplicationContext:()=>({filesDir:root})};
     const backup=await createBackupFile(context,data);const restored=await readBackupFile(context,backup,model.emptyData());
-    const restoredItem=restored.threads[0].attachments[0];assert.equal(restoredItem.text,content);
+    const restoredItem=restored.threads[0].attachments[0];assert.equal(restoredItem.text,undefined);
     assert.equal(fs.readFileSync(nativePath(Attachments.path(restoredItem)),'utf8'),content);
     Attachments.configure(fixture);
   });

@@ -2502,5 +2502,6 @@
   "当前版本不支持": "Unsupported in this version",
   "部分配置来自较新版本，相关功能暂不可用。原配置已保留。": "Some settings come from a newer version. The affected features are unavailable; the original settings are preserved.",
   "配置兼容性": "Configuration compatibility",
-  "自动路由使用了当前版本不支持的模型协议，自动路由已停用；仍使用所选模型，原配置已保留。": "Automatic routing uses a model protocol this version does not support. Routing is disabled and the selected model is used; the original configuration is preserved."
+  "自动路由使用了当前版本不支持的模型协议，自动路由已停用；仍使用所选模型，原配置已保留。": "Automatic routing uses a model protocol this version does not support. Routing is disabled and the selected model is used; the original configuration is preserved.",
+  "每条消息最多 10 个附件 · 图片需模型支持视觉输入": "Up to 10 attachments per message · Images need a vision model"
 }

@@ -113,6 +113,7 @@ async function main() {
     assert.equal(session.snapshot().productivity.options.search.enabled, true, 'Runtime disable must not overwrite saved intent');
     assert.ok(session.state.compatibilityWarnings.length >= 3);
 
+
     // Saving an unrelated preference exercises commitPreferences, then reload as a newer reader.
     assert.equal(await session.setSettingsToggle('autoMemory', false), true, session.state.error);
     const restored = await new ConversationStore(directory).load();
@@ -160,6 +161,12 @@ async function main() {
     assert.ok(requests[1].tools.some(tool => tool.function.name === 'read_file'));
     assert.equal((await new ConversationStore(directory).load()).threads[0].agentMode, 'full');
     console.log('PASS explicitly choosing a supported mode restores tools and clears its compatibility warning');
+
+    const originalThread = session.active.id;
+    const warnings = plain(session.state.compatibilityWarnings);
+    assert.equal(await session.newThread(), true);
+    assert.deepEqual(plain(session.state.compatibilityWarnings), warnings, 'Application warnings survive switching execution state');
+    assert.equal(await session.selectThread(originalThread), true);
 
     const searchData = emptyData(); searchData.productivity = defaultProductivity(); searchData.productivity.options = defaultAssistantOptions();
     searchData.productivity.options.search = { provider: 'tavily', enabled: false, baseUrl: 'https://api.tavily.com',

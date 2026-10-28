@@ -160,6 +160,7 @@ export class SessionService {
   get state(): SessionState {
     const state = JSON.parse(JSON.stringify(this.status)) as SessionState;
     state.ready = this.application.ready; state.saveError = this.application.saveError;
+    state.compatibilityWarnings = this.application.compatibilityWarnings?.slice() || [];
     if (this.application.phase !== 'idle') { state.phase = this.application.phase; }
     state.runningThreadIds = this.runningThreadIds; state.canNavigate = this.canNavigate;
     return state;
@@ -1408,7 +1409,7 @@ export class SessionService {
   }
   private refreshCompatibility(): void {
     const issues = configurationIssues(this.data, this.pendingToolSelections);
-    this.status.compatibilityWarnings = Array.from(new Set(issues.map((issue) => issue.message)));
+    this.application.compatibilityWarnings = Array.from(new Set(issues.map((issue) => issue.message)));
     const next = new Set<string>();
     // Checkpoints do not scan configurations. Settings commits log newly affected fields only.
     for (const issue of issues) {

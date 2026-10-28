@@ -41,7 +41,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
       if (await this.optionalStat(destination)) {
         await this.checkedPath(path);
         if (reuse && await this.fileDigest(source) === await this.fileDigest(destination)) { return; }
-        throw new Error('The destination already exists with different content: ' + path);
+        throw new ToolFailure('FS_NOT_OBSERVED', 'The destination already exists with different content: ' + path, 'read_file', { path: path });
       }
       await copyFileBytes(source, destination);
     });

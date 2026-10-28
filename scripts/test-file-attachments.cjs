@@ -217,7 +217,8 @@ async function main() {
     ensureWorkspace: (id, workspaceId) => workspace.ensureThread(workspaceId || id),
     prepareAttachments: async (items, id, workspaceId) => { await workspace.ensureThread(workspaceId || id); return Attachments.inWorkspace(items, workspaceId || id); }
   };
-  const session = new SessionService(repository, {}, {}, resources);
+  const runtime = { fork() { return this; } };
+  const session = new SessionService(repository, runtime, {}, resources);
   session.refreshContext = () => {}; // Model projection itself is verified above against Attachments.hydrate.
   await session.initialize();
   fs.writeFileSync(disk(root + '/session.txt'), 'session document');
@@ -233,7 +234,7 @@ async function main() {
   history.threads[0].messages = [{ id: 'user', role: 'user', content: 'Read', status: 'complete', error: '', attachments: [committed] },
     { id: 'answer', role: 'assistant', content: 'Done', status: 'complete', error: '' }];
   saved = history;
-  const reopened = new SessionService(repository, {}, {}, resources); reopened.refreshContext = () => {};
+  const reopened = new SessionService(repository, runtime, {}, resources); reopened.refreshContext = () => {};
   await reopened.initialize(); assert.equal(await reopened.forkThread('answer'), true);
   const fork = saved.threads.find(thread => thread.id === saved.activeThreadId), copied = fork.messages[0].attachments[0];
   assert.equal(copied.workspaceId, fork.id); assert.equal(copied.path, committed.path);

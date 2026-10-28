@@ -347,7 +347,7 @@ export struct HelpTutorialScreen {
       this.tile(this.text('记忆'), $r('sys.symbol.lightbulb'))
       this.tile(this.text('Agent 团队'), $r('sys.symbol.person_2'))
     }.position({ x: 24, y: 438 })
-    Text(this.text('图片需模型支持视觉输入 · 文本文件最多 64 KB')).fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.text_tertiary'))
+    Text(this.text('每条消息最多 10 个附件 · 图片需模型支持视觉输入')).fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.text_tertiary'))
       .width(328).textAlign(TextAlign.Center).position({ x: 16, y: 538 })
     Text(this.text('引用其他会话')).fontFamily(this.appearance.fontFamily).fontSize(15).fontColor(this.appearance.accent).textAlign(TextAlign.Center)
       .width(328).height(44).borderRadius(22).backgroundColor(this.appearance.accentContainer).position({ x: 16, y: 572 })

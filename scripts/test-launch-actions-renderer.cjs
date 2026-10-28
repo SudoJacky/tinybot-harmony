@@ -26,7 +26,7 @@ function page() {
   const page = controller('pages/Index', 'Index', ['receiveLaunch']);
   page.events = []; page.voiceRequest = ''; page.appearance = { surface: {} };
   page.privacy = { allowed: true };
-  page.app = { busy: false, saveError: '', error: '', active: { id: 'old', projectId: 'project' },
+  page.app = { busy: false, canNavigate: true, saveError: '', error: '', active: { id: 'old', projectId: 'project' },
     flushDraft: async () => page.events.push('saved'),
     newThread: async project => { page.events.push(['new', project]); page.app.active.id = 'new'; return true; }
   };
@@ -64,9 +64,9 @@ function card(wide) {
   assert.equal(view.voiceRequest, 'new'); await view.receiveLaunch(); assert.equal(view.events.length, 4);
   console.log('PASS shortcut preserves old draft, creates a standalone chat and dispatches voice exactly once');
 
-  view = page(); view.app.busy = true; intent = 'new-chat'; await view.receiveLaunch();
+  view = page(); view.app.canNavigate = false; intent = 'new-chat'; await view.receiveLaunch();
   assert.equal(view.events.length, 1); assert.equal(view.events[0][0], 'toast');
-  view.app.busy = false; await view.receiveLaunch(); assert.equal(view.events.length, 1);
+  view.app.canNavigate = true; await view.receiveLaunch(); assert.equal(view.events.length, 1);
   view = page(); view.app.flushDraft = async () => { view.app.saveError = 'save failed'; };
   intent = 'voice-input'; await view.receiveLaunch();
   assert.deepEqual(view.events, [['toast', 'save failed']]); assert.equal(view.voiceRequest, '');
@@ -93,15 +93,16 @@ function card(wide) {
   console.log('PASS continue-chat preserves the active conversation and unsaved draft, including busy answers and consent gating');
 
   view = page(); intent = 'continue-chat'; notificationThreadId = 'completed';
-  view.session = { waitForIdle: async () => view.events.push('idle') };
+  view.app.busy = true;
+  view.session = { waitForIdle: async () => { throw Error('Navigation must not wait for other conversations'); } };
   view.app.selectThread = async id => { view.events.push(['selected', id]); view.app.active.id = id; return true; };
   await view.receiveLaunch();
-  assert.deepEqual(view.events, ['saved', 'idle', ['selected', 'completed'], 'navigation', ['drawer', false]]);
+  assert.deepEqual(view.events, ['saved', ['selected', 'completed'], 'navigation', ['drawer', false]]);
   assert.equal(view.app.active.id, 'completed'); assert.equal(view.launching, false);
   view = page(); intent = 'continue-chat'; notificationThreadId = 'deleted';
   view.app.selectThread = async () => { view.app.error = 'Conversation deleted'; return false; };
   await view.receiveLaunch(); assert.deepEqual(view.events, ['saved', ['toast', 'Conversation deleted']]);
-  console.log('PASS notification click saves the draft, waits for active work and opens its own conversation; missing conversations report failure');
+  console.log('PASS notification click saves the draft and opens its conversation while another runs; missing conversations report failure');
 
   const panel = controller('views/ChatPanel', 'ChatPanel', ['receiveVoiceShortcut', 'speechAvailabilityChanged', 'speechThreadChanged']);
   let starts = 0, stops = 0, consumed = 0;

@@ -60,7 +60,7 @@ function render(page) { nodes = []; components = []; stack = []; page.initialRen
 const component = id => { const found = components.find(c => c.props.compId === id); assert.ok(found, id); return found.props; };
 const node = id => { const found = nodes.find(n => n.id === id); assert.ok(found, id); return found; };
 (async () => {
-  const app = { busy: false, saveError: '', error: '', providerProfiles: [], extensions: { webEnabled: true, browserPolicy: 'enabled' },
+  const app = { sharedBusy: false, saveError: '', error: '', providerProfiles: [], extensions: { webEnabled: true, browserPolicy: 'enabled' },
     productivity: { options: { search: { provider: 'bing-browser', enabled: true } } } };
   let writes = 0, fail = true, returned, request;
   app.saveSearch = async draft => {
@@ -100,8 +100,8 @@ const node = id => { const found = nodes.find(n => n.id === id); assert.ok(found
   cancelled.aboutToAppear(); cancelled.draft.apiKey = 'discard'; cancelled.aboutToDisappear(); returned(undefined);
   assert.equal(list.draft.apiKey, ''); assert.equal(list.dirty(), false);
   app.extensions.webEnabled = false; render(list); assert.ok(component('search-web-disabled'));
-  app.busy = true; render(list); assert.equal(component('search-provider-tavily').disabled, true);
-  const provider = list.draft.provider; list.select('tavily'); assert.equal(list.draft.provider, provider); app.busy = false;
+  app.sharedBusy = true; render(list); assert.equal(component('search-provider-tavily').disabled, true);
+  const provider = list.draft.provider; list.select('tavily'); assert.equal(list.draft.provider, provider); app.sharedBusy = false;
   list.edit('bing-browser'); const bing = view(Object.assign(new Detail(), { app, request })); bing.aboutToAppear(); render(bing);
   assert.ok(node('search-browser-web-status')); assert.ok(node('search-browser-permission-status'));
   assert.ok(node('search-browser-description')); assert.ok(!nodes.some(n => n.kind === 'TextInput'));
