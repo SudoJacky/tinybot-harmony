@@ -22,6 +22,8 @@ import { storageCategoryKey } from '../model/StoragePlan';
 import { BranchesPanel } from '../views/BranchesPanel';
 import { WorkspacePanel } from '../views/WorkspacePanel';
 import { SearchSettingsPanel } from '../views/SearchSettingsPanel';
+import { SearchProviderPanel } from '../views/SearchProviderPanel';
+import { SearchEditorDraft, SearchProviderRoute, searchProviderName } from '../model/SearchEditor';
 import { ToolApproval } from '../services/ToolApproval';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -915,7 +917,18 @@ struct Index {
       }.title(productivityEditorTitle((param as ProductivityEditorRoute).tab, (param as ProductivityEditorRoute).id), { systemMaterial: this.appearance.control })
         .backgroundColor($r('app.color.page_background')).onBackPressed(() => this.app.busy)
     } else if (name === 'search-settings') {
-      NavDestination() { SearchSettingsPanel({ app: this.app }) }.title(t('搜索服务'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+      NavDestination() {
+        SearchSettingsPanel({ app: this.app, onEdit: (request: SearchProviderRoute, onReturn: (draft?: SearchEditorDraft) => void) => {
+          this.paths.pushPath({ name: 'search-provider', param: request,
+            onPop: (info: PopInfo) => { onReturn(info.result as SearchEditorDraft | undefined); } });
+        } })
+      }.title(t('搜索服务'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'search-provider') {
+      NavDestination() {
+        SearchProviderPanel({ app: this.app, request: param as SearchProviderRoute,
+          onDone: (draft?: SearchEditorDraft) => { this.paths.pop(draft); } })
+      }.title(searchProviderName((param as SearchProviderRoute).provider), { systemMaterial: this.appearance.control })
+        .backgroundColor($r('app.color.page_background'))
     } else if (name === 'share-conversation') {
       ConversationSharePanel({ data: param as ConversationShareData })
     } else if (name === 'files') {

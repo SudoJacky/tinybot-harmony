@@ -106,7 +106,7 @@ export class NativeSessionResources implements SessionResources {
     if (extensions.webEnabled) { groups.push(new WebTools(new NativeWebTransport())); }
     if (this.browser) { groups.push(new BrowserTools(this.browser, id, productivity?.options?.readOnly === true, resolvePreview)); }
     const search = productivity?.options?.search;
-    if (extensions.webEnabled && search?.enabled) {
+    if (extensions.webEnabled && search?.enabled && ['deepseek', 'tavily', 'bing-browser'].includes(search.provider)) {
       if (search.provider === 'bing-browser') {
         if (this.browser?.policy !== 'disabled') { groups.push(new WebSearchTools(new BrowserSearchTransport(this.browser, id), 'sequential')); }
       } else {

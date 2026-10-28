@@ -48,6 +48,7 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
   for (const server of data.productivity?.servers || []) { server.credentialAlias = ''; server.authType = undefined; server.enabled = false; }
   if (data.productivity?.options?.search) {
     const search = data.productivity.options.search; search.enabled = false;
+    if (search.tavily) { search.tavily.credentialAlias = ''; }
     if (search.provider === 'tavily') { search.credentialAlias = ''; } else { search.modelProviderId = undefined; }
   }
   let size = JSON.stringify(data).length * 3;
@@ -176,6 +177,7 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
   for (const server of data.productivity?.servers || []) { server.enabled = false; server.credentialAlias = ''; server.authType = undefined; }
   if (data.productivity?.options?.search) {
     const search = data.productivity.options.search; search.enabled = false;
+    if (search.tavily) { search.tavily.credentialAlias = ''; }
     if (search.provider === 'tavily') { search.credentialAlias = ''; } else { search.modelProviderId = undefined; }
   }
   const userDocument = data.config.userDocument || '';

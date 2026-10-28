@@ -1062,9 +1062,16 @@ async function test(name, run) {
     data.threads=[{id:'thread',title:'source',updatedAt:1,messages:[{id:'u',role:'user',content:'hello',status:'complete',error:'',attachments:[attachment]},{id:'a',role:'assistant',content:'answer',status:'complete',error:''}],modelRef:{providerId:'provider',modelId:'model'}}];
     data.providerProfiles=[{id:'provider',name:'Provider',protocol:'chat-completions',baseUrl:'https://api.invalid/v1',credentialAlias:'SECRET-ALIAS',noApiKey:false,enabled:true,models:['model'],contextWindow:32768}];
     data.productivity={memories:[{id:'m',content:'fact',threadId:'thread',updatedAt:1,sourceThreadId:'thread',sourceMessageId:'u'}],templates:[],servers:[]};
+    data.productivity.options={autoMemory:false,saveSummary:false,readOnly:false,autoRoute:false,capabilities:[],
+      search:{provider:'bing-browser',enabled:true,tavily:{baseUrl:'https://api.tavily.com',credentialAlias:'SECRET-INACTIVE-TAVILY'}}};
     const context={cacheDir:root+'/cache',getApplicationContext:()=>({filesDir:root})};await exportBackup(context,JSON.parse(JSON.stringify(data)));
     const exported=fs.readFileSync(nativePath(selectedFile),'utf8');assert.ok(!exported.includes('SECRET-ALIAS'));
+    assert.ok(!exported.includes('SECRET-INACTIVE-TAVILY'));
+    // Also reject device-local aliases supplied by an imported file, even for inactive providers.
+    const imported=JSON.parse(exported);imported.data.productivity.options.search.tavily.credentialAlias='IMPORTED-TAVILY-ALIAS';
+    fs.writeFileSync(nativePath(selectedFile),JSON.stringify(imported));
     const restored=await readBackup(context,model.emptyData());assert.equal(restored.threads[0].id,'thread');assert.equal(restored.providerProfiles[0].enabled,false);
+    assert.equal(restored.productivity.options.search.tavily.credentialAlias,'');
     assert.equal(JSON.parse(exported).data.config.userDocument, data.config.userDocument);
     assert.equal(restored.config.userDocument, data.config.userDocument);
     assert.equal(restored.productivity.memories[0].threadId,restored.threads[0].id);assert.equal(restored.productivity.memories[0].sourceMessageId,restored.threads[0].messages[0].id);

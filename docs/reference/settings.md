@@ -85,8 +85,12 @@
 | `search.modelProviderId` | 复用哪个 DeepSeek 服务的密钥 | 留空自动选择，多个候选时必须指定 |
 | `search.baseUrl` | Tavily 地址，必须 HTTPS | `https://api.tavily.com` |
 | `search.credentialAlias` | Tavily 密钥别名 | 空 |
+| `search.tavily` | 跨提供方保留的 Tavily `baseUrl` 与 `credentialAlias` | 首次编辑或切走 Tavily 时记录 |
+| `search.deepseek.modelProviderId` | 跨提供方保留的 DeepSeek 服务选择 | 留空自动选择 |
 
 DeepSeek 搜索复用官方地址的模型服务密钥，不需要单独填写；Tavily 的密钥保存为 `tinybot-search-<uuid>`。更换搜索地址后必须重填密钥；启用时若读不到已保存的密钥，保存会失败而不是留下空配置。
+
+搜索页列表维护独立草稿，详情页只编辑并返回；列表底部统一保存。切换提供方保留其他提供方配置。为兼容旧版本，当前提供方仍使用顶层 `baseUrl` / `credentialAlias` / `modelProviderId`，加载旧 Tavily 配置后首次保存会保留其别名；原始密钥只写入安全存储。备份导出与恢复都会清空非当前提供方的 Tavily 别名。
 
 ## MCP 服务
 

@@ -1,102 +1,110 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
-import { menuMaterialAttribute, systemMaterialAttribute } from '../common/MaterialAttributes';
 import { t } from '../model/I18n';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
-import { SearchProviderId, defaultSearchConfig, deepSeekSearchProfiles } from '../model/WebSearch';
-import { ProviderProfile } from '../model/ProviderProfiles';
+import { isSupportedSearchProvider } from '../model/WebSearch';
+import { SearchEditorDraft, SearchProviderRoute, searchEditorDraft, searchProviderName, searchProviderStatus, searchSaveDraft } from '../model/SearchEditor';
 import { Btn, Space } from '../common/Theme';
-import { Banner, SwitchRow } from '../common/Widgets';
+import { Banner, BottomBar, GroupCard, NavRow, RowDivider, SectionHeader, SwitchRow } from '../common/Widgets';
 
 @Component
 export struct SearchSettingsPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
-  @State private searchEnabled: boolean = false;
-  @State private provider: SearchProviderId = 'deepseek';
-  @State private sourceId: string = '';
-  @State private baseUrl: string = '';
-  @State private apiKey: string = '';
-  @State private savedKey: boolean = false;
+  @State private draft: SearchEditorDraft = searchEditorDraft();
+  @State private saved: string = '';
   @State private saving: boolean = false;
   @State private error: string = '';
+  private initialized: boolean = false;
+  onEdit: (request: SearchProviderRoute, onReturn: (draft?: SearchEditorDraft) => void) => void = () => {};
+
   aboutToAppear(): void {
-    const config = this.app.productivity.options?.search || defaultSearchConfig();
-    this.searchEnabled = config.enabled; this.baseUrl = config.provider === 'tavily' ? config.baseUrl! : ''; this.savedKey = !!config.credentialAlias;
-    this.provider = config.provider; this.sourceId = this.candidates().some((item) => item.id === config.modelProviderId) ? config.modelProviderId! : '';
+    if (!this.initialized) { this.reset(); this.initialized = true; }
   }
-  private candidates(): ProviderProfile[] {
-    return deepSeekSearchProfiles(this.app.providerProfiles);
+  private reset(): void {
+    this.draft = searchEditorDraft(this.app.productivity.options?.search);
+    this.saved = JSON.stringify(this.draft);
   }
-  private changeProvider(index: number): void {
-    this.provider = index === 0 ? 'deepseek' : index === 1 ? 'tavily' : 'bing-browser';
-    const saved = this.app.productivity.options?.search;
-    const config = saved?.provider === this.provider ? saved : defaultSearchConfig(this.provider);
-    this.baseUrl = config.provider === 'tavily' ? config.baseUrl! : ''; this.apiKey = ''; this.savedKey = !!config.credentialAlias; this.error = '';
-    this.sourceId = this.candidates().some((item) => item.id === config.modelProviderId) ? config.modelProviderId! : '';
+  private locked(): boolean { return this.saving || this.app.busy || !!this.app.saveError; }
+  private dirty(): boolean { return JSON.stringify(this.draft) !== this.saved; }
+  private providers(): string[] {
+    const providers = ['deepseek', 'tavily', 'bing-browser'];
+    const saved = this.app.productivity.options?.search?.provider;
+    if (saved && !isSupportedSearchProvider(saved)) { providers.push(saved); }
+    return providers;
+  }
+  private select(provider: string): void {
+    if (this.locked()) { return; }
+    this.draft.provider = provider; this.error = '';
+  }
+  private edit(provider: string): void {
+    if (this.locked()) { return; }
+    const request: SearchProviderRoute = { provider: provider, draft: JSON.parse(JSON.stringify(this.draft)) as SearchEditorDraft };
+    this.onEdit(request, (result?: SearchEditorDraft) => {
+      if (!result) { return; }
+      // Opening details never selects a provider, and returning does not reset other edits.
+      if (provider === 'deepseek') { this.draft.modelProviderId = result.modelProviderId; }
+      else if (provider === 'tavily') {
+        this.draft.baseUrl = result.baseUrl; this.draft.apiKey = result.apiKey; this.draft.clearKey = result.clearKey;
+      }
+      this.error = '';
+    });
   }
   private async save(): Promise<void> {
-    if (this.app.busy || this.saving) { return; }
+    if (this.locked() || !this.dirty() || !isSupportedSearchProvider(this.draft.provider)) { return; }
     this.saving = true; this.error = '';
     try {
-      const ok = await this.app.saveSearch({ provider: this.provider, enabled: this.searchEnabled, baseUrl: this.baseUrl,
-        apiKey: this.apiKey, modelProviderId: this.provider === 'deepseek' && this.sourceId ? this.sourceId : undefined });
+      const ok = await this.app.saveSearch(searchSaveDraft(this.draft));
       this.error = this.app.error;
-      if (ok) { this.apiKey = ''; this.aboutToAppear(); this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t('搜索设置已保存') }); }
+      if (ok) {
+        this.reset();
+        this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t('搜索设置已保存') });
+      }
     } finally { this.saving = false; }
   }
   build() {
-    Scroll() {
-      Column({ space: Space.md }) {
-        Select([{ value: 'DeepSeek' }, { value: 'Tavily' }, { value: t('必应（内置浏览器）') }])
-          .selected(this.provider === 'deepseek' ? 0 : this.provider === 'tavily' ? 1 : 2)
-          .value(this.provider === 'deepseek' ? 'DeepSeek' : this.provider === 'tavily' ? 'Tavily' : t('必应（内置浏览器）')).enabled(!this.saving).id('search-provider')
-          .backgroundColor(this.appearance.controlBackground).fontColor($r('sys.color.font_primary'))
-          .attributeModifier(systemMaterialAttribute<SelectAttribute>(this.appearance.control))
-          .attributeModifier(menuMaterialAttribute(this.appearance.surface))
-          .onSelect((index: number) => this.changeProvider(index))
-        Text(t('搜索词会发送给所选服务。')).fontFamily(this.appearance.fontFamily)
-          .fontSize(14).fontColor($r('app.color.text_secondary'))
-        SwitchRow({ title: t('启用联网搜索'), isOn: this.searchEnabled, disabled: this.saving || this.app.busy,
-          onChange: (value: boolean) => { this.searchEnabled = value; } })
-        if (this.provider === 'deepseek') {
-          Text(t('DeepSeek 搜索按请求次数计费，不再产生模型用量。')).fontFamily(this.appearance.fontFamily)
-            .fontSize(14).fontColor($r('app.color.text_secondary'))
-          if (this.candidates().length > 1) {
-            Text(t('DeepSeek 服务')).fontFamily(this.appearance.fontFamily).fontColor($r('app.color.text_secondary'))
-            Select(this.candidates().map((item: ProviderProfile): SelectOption => ({ value: item.name })))
-              .selected(this.candidates().findIndex((item) => item.id === this.sourceId))
-              .value(this.candidates().find((item) => item.id === this.sourceId)?.name || t('请选择用于联网搜索的 DeepSeek 服务。'))
-              .enabled(!this.saving).id('search-credential-source')
-              .backgroundColor(this.appearance.controlBackground).fontColor($r('sys.color.font_primary'))
-              .attributeModifier(systemMaterialAttribute<SelectAttribute>(this.appearance.control))
-              .attributeModifier(menuMaterialAttribute(this.appearance.surface))
-              .onSelect((index: number) => { this.sourceId = this.candidates()[index].id; })
-          } else if (this.candidates().length === 1) {
-            Text(t('将复用 {0} 的密钥，无需重复填写。', [this.candidates()[0].name])).fontFamily(this.appearance.fontFamily)
-              .id('search-provider-key-ready').fontSize(13).fontColor($r('app.color.text_secondary'))
-          } else {
-            Text(t('请先在设置中添加并启用 DeepSeek 官方模型服务，配置 API Key。')).fontFamily(this.appearance.fontFamily)
-              .id('search-provider-key-missing').fontSize(13).fontColor($r('app.color.text_secondary'))
+    Column() {
+      Scroll() {
+        Column() {
+          GroupCard() {
+            Column() {
+              SwitchRow({ title: t('启用联网搜索'), isOn: this.draft.enabled,
+                disabled: this.locked() || !isSupportedSearchProvider(this.draft.provider), compId: 'search-enabled',
+                onChange: (enabled: boolean) => { this.draft.enabled = enabled; } })
+              if (!this.app.extensions.webEnabled) {
+                Banner({ text: t('“允许网页读取与搜索”已关闭，启用后才能使用搜索。'), danger: false,
+                  icon: $r('sys.symbol.exclamationmark_circle'), compId: 'search-web-disabled' }).padding({ left: Space.md, right: Space.md, bottom: Space.sm })
+              }
+            }
           }
-        } else if (this.provider === 'tavily') {
-          Text(t('搜索接口基础地址')).fontFamily(this.appearance.fontFamily).fontColor($r('app.color.text_secondary'))
-          TextInput({ text: this.baseUrl, placeholder: 'https://api.tavily.com' }).fontFamily(this.appearance.fontFamily).id('search-base-url')
-            .enabled(!this.saving).onChange((value: string) => { this.baseUrl = value; })
-          Text('API Key').fontFamily(this.appearance.fontFamily).fontColor($r('app.color.text_secondary'))
-          TextInput({ text: this.apiKey, placeholder: this.savedKey ? t('留空保留已保存的搜索密钥') : 'API Key' }).fontFamily(this.appearance.fontFamily).type(InputType.Password)
-            .id('search-api-key').enabled(!this.saving).onChange((value: string) => { this.apiKey = value; })
-        } else {
-          Text(t('无需 API Key，通过应用内浏览器访问必应。需要允许浏览器使用；遇到验证时，请完成验证后交还控制。'))
-            .fontFamily(this.appearance.fontFamily).fontSize(14).fontColor($r('app.color.text_secondary'))
-            .id('search-browser-description')
-        }
-        Text(this.provider === 'bing-browser' ? t('关闭“允许网页读取与搜索”或禁用应用内浏览器都会停用内置搜索。') :
-          t('密钥保存在系统安全存储，不随备份导出。关闭“允许网页读取与搜索”也会停用搜索。')).fontFamily(this.appearance.fontFamily)
-          .fontSize(12).fontColor($r('app.color.text_secondary'))
-        if (this.error) { Banner({ text: this.error, danger: true }) }
-        Button(t('保存')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.primary).enabled(!this.saving && !this.app.busy && !this.app.saveError)
-          .id('save-search-settings').onClick(() => this.save())
-      }.width('100%').padding(Space.page).alignItems(HorizontalAlign.Start)
-    }.width('100%').height('100%').align(Alignment.Top).backgroundColor($r('app.color.page_background'))
+          SectionHeader({ title: t('服务提供方') })
+          GroupCard() {
+            Column() {
+              ForEach(this.providers(), (provider: string, index: number) => {
+                if (index > 0) { RowDivider() }
+                NavRow({ title: searchProviderName(provider),
+                  subtitle: searchProviderStatus(provider, this.draft, this.app.providerProfiles, this.app.extensions.browserPolicy || 'unset'),
+                  trailing: 'select', active: this.draft.provider === provider, disabled: this.locked(),
+                  compId: 'search-provider-' + (isSupportedSearchProvider(provider) ? provider : 'unknown'),
+                  actionLabel: isSupportedSearchProvider(provider) && provider !== 'bing-browser' ? t('配置') : t('详情'),
+                  actionId: 'search-configure-' + (isSupportedSearchProvider(provider) ? provider : 'unknown'),
+                  onTap: () => this.select(provider), onAction: () => this.edit(provider) })
+              }, (provider: string) => provider)
+            }
+          }
+        }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.md })
+      }.width('100%').layoutWeight(1).align(Alignment.Top)
+      BottomBar() {
+        Column({ space: Space.sm }) {
+          if (this.error || this.app.saveError) { Banner({ text: this.error || this.app.saveError, compId: 'search-save-error' }) }
+          if (this.dirty()) {
+            Text(t('有未保存的更改')).fontFamily(this.appearance.fontFamily).fontSize(13)
+              .fontColor($r('app.color.text_secondary')).id('search-unsaved-changes')
+          }
+          Button(this.saving ? t('正在保存…') : t('保存')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.primary).width('100%')
+            .enabled(!this.locked() && this.dirty() && isSupportedSearchProvider(this.draft.provider))
+            .id('save-search-settings').onClick(() => this.save())
+        }.width('100%')
+      }
+    }.width('100%').height('100%').backgroundColor($r('app.color.page_background'))
   }
 }

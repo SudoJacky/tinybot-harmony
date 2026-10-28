@@ -228,7 +228,7 @@ async function main() {
   await saveSearchSettings(data, draft, vault, () => 'unique', async next => { committed = plain(next); });
   const config = committed.productivity.options.search;
   assert.equal(writesToVault, 0);
-  assert.deepEqual(config, { provider: 'deepseek', enabled: true, modelProviderId: profile.id });
+  assert.deepEqual(config, { provider: 'deepseek', enabled: true, modelProviderId: profile.id, deepseek: { modelProviderId: profile.id } });
   assert.deepEqual(plain(parseAppData(JSON.stringify(committed)).productivity.options.search), config);
   assert.equal(searchCredentialAlias(config, [{ ...profile, credentialAlias: 'rotated' }]), 'rotated');
   assert.throws(() => searchCredentialAlias(config, [{ ...profile, baseUrl: 'https://elsewhere.example' }]));

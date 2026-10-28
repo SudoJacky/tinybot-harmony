@@ -59,3 +59,5 @@ scripts/*
 !scripts/test-storage-usage.cjs
 !scripts/test-bing-search.cjs
 !scripts/test-bing-search-dom.cjs
+!scripts/test-search-settings.cjs
+!scripts/test-search-settings-ui.cjs
