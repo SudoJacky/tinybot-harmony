@@ -2,6 +2,8 @@ import { BrowserPreview } from '../model/BrowserPreview';
 import { ProviderEffects } from './providers/Provider';
 import { PresentTools } from './PresentTools';
 import { PreviewTools } from './PreviewTools';
+import { MiniApps } from './MiniApps';
+import { MiniAppTools } from './MiniAppTools';
 import { PreviewCapture } from './PreviewCapture';
 import { savePreviewRepair } from './PreviewRecovery';
 import { WebSearchTools } from './WebSearchTools';
@@ -73,6 +75,7 @@ export class NativeSessionResources implements SessionResources {
   authorizeGeneration(): Promise<void> { return huaweiAccount.requireLogin(); }
   async prepareGeneration(): Promise<void> { if (this.context) { await backgroundGeneration.beginTurn(); } }
   private workspaces: WorkspaceStore;
+  private miniApps: MiniApps;
   private providers: ProviderRegistry;
   private approval: ToolApproval;
   private browser?: BrowserSession;
@@ -80,6 +83,7 @@ export class NativeSessionResources implements SessionResources {
   private context?: common.UIAbilityContext;
   constructor(workspaceFilesDir: string, providers: ProviderRegistry, approval: ToolApproval, context?: common.UIAbilityContext, browser?: BrowserSession) {
     this.browser = browser;
+    this.miniApps = new MiniApps(workspaceFilesDir);
     this.context = context;
     this.workspaces = new WorkspaceStore(workspaceFilesDir); this.providers = providers; this.approval = approval;
   }
@@ -104,6 +108,8 @@ export class NativeSessionResources implements SessionResources {
     const groups: AgentTools[] = [new WorkspaceTools(files, nativeWorkspaceDiffs), new AttachmentTools(attachments),
       new SkillTools(extensions.skills, selected, live ? () => live.skills() : undefined), new InteractionTools(this.approval)];
     groups.push(new CodeExecutionTools(new NativeCodeExecutor()));
+    groups.push(new MiniAppTools(this.miniApps, workspaceId || id, id, files,
+      (page, storage, cancellation) => WebUiPreflight.validateMiniApp(page, storage, cancellation)));
     groups.push(new PresentTools((path: string) => files.checkedPath(path)));
     groups.push(new PreviewTools(files, (content, cancellation) => WebUiPreflight.validate(content, cancellation),
       (content, cancellation) => PreviewCapture.capture(content, cancellation)));
