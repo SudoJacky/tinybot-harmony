@@ -440,4 +440,15 @@ async function acquired() {
     assert.equal(f.session.snapshot().extensions.browserPolicy, 'disabled');
     console.log('PASS permission persists independently, survives ordinary settings saves and preserves concurrent drafts');
   }
+  {
+    // Upgrades from a build that never stored these keys adopt today's defaults once.
+    const data = seed(); delete data.extensions.browserPolicy; delete data.productivity.options.search;
+    const f = new Fixture(data); await f.session.initialize();
+    const saved = await f.repository.load();
+    assert.equal(f.session.snapshot().extensions.browserPolicy, 'enabled');
+    assert.equal(saved.extensions.browserPolicy, 'enabled');
+    assert.deepEqual(JSON.parse(JSON.stringify(f.session.snapshot().productivity.options.search)), { provider: 'bing-browser', enabled: true });
+    assert.deepEqual(JSON.parse(JSON.stringify(saved.productivity.options.search)), { provider: 'bing-browser', enabled: true });
+    console.log('PASS missing browser permission and search settings adopt enabled in-app browser and Bing search');
+  }
 })().catch(error => { console.error(error); process.exitCode = 1; });

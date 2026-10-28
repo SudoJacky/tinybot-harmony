@@ -94,7 +94,8 @@ export class BrowserSession implements ExecutionGate {
     if (this.driver !== driver) { return; }
     this.close(); this.driver = undefined;
   }
-  updatePolicy(policy: BrowserPolicy): void {
+  updatePolicy(storedPolicy: string): void {
+    const policy: BrowserPolicy = storedPolicy === 'enabled' || storedPolicy === 'unset' ? storedPolicy : 'disabled';
     this.policy = policy;
     if (policy === 'disabled') { this.close(); }
     if (policy !== 'unset') { this.answerPermission(policy === 'enabled'); }
@@ -120,13 +121,13 @@ export class BrowserSession implements ExecutionGate {
   cancelPermission(): void { this.answerPermission(false); }
   async wait(cancellation: Cancellation): Promise<void> {
     cancellation.check();
-    while (this.paused) {
+    while (this.lease === cancellation && this.paused) {
       await new Promise<void>((resolve) => {
         let remove = (): void => {};
         const finish = (): void => { this.waiters.delete(finish); remove(); resolve(); };
         this.waiters.add(finish);
         remove = cancellation.onCancel(finish);
-        if (!this.paused) { finish(); }
+        if (this.lease !== cancellation || !this.paused) { finish(); }
       });
       cancellation.check();
     }

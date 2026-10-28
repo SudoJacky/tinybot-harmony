@@ -1,5 +1,7 @@
 import { t } from './I18n';
 import { AssistantOptions, validateAssistantOptions } from './AssistantOptions';
+import { isConfigurationName } from './ConfigurationValue';
+export const MAX_MESSAGE_ATTACHMENTS: number = 10;
 export interface Attachment {
   id: string;
   name: string;
@@ -7,6 +9,9 @@ export interface Attachment {
   path: string;
   size: number;
   text?: string;
+  // Original files are staged until setAttachments binds them to a workspace.
+  original?: boolean;
+  workspaceId?: string;
 }
 
 export interface MemoryEntry {
@@ -42,6 +47,8 @@ export interface ProductivityData {
   servers: McpServer[];
 }
 
+export function supportedMcpAuth(server: McpServer): boolean { return server.authType === undefined || server.authType === 'oauth'; }
+
 export function defaultProductivity(): ProductivityData {
   return { memories: [], servers: [], templates: [
     { id: 'summarize', name: '总结材料', content: '请总结以下材料，提炼要点、待办事项及仍需确认的问题：\n\n{{input}}' },
@@ -50,19 +57,32 @@ export function defaultProductivity(): ProductivityData {
 }
 
 export function validateAttachments(items: Attachment[]): void {
-  if (!Array.isArray(items) || items.length > 4) { throw new Error(t("每条消息最多添加 4 个附件。")); }
+  if (!Array.isArray(items) || items.length > MAX_MESSAGE_ATTACHMENTS) {
+    throw new Error(t('每条消息最多添加 {0} 个附件。', [MAX_MESSAGE_ATTACHMENTS]));
+  }
   const ids = new Set<string>();
   for (const item of items) {
     if (!item || !/^[a-zA-Z0-9-]{1,80}$/.test(item.id) || ids.has(item.id) ||
       typeof item.name !== 'string' || item.name.length > 200 || typeof item.path !== 'string' ||
-      item.path !== item.id + (item.mime === 'image/jpeg' ? '.jpg' : '.txt') ||
-      !['image/jpeg', 'text/plain'].includes(item.mime) || !Number.isSafeInteger(item.size) || item.size < 0 ||
+      !validAttachmentStorage(item) || !Number.isSafeInteger(item.size) || item.size < 0 ||
       (item.mime === 'image/jpeg' && item.size > 4 * 1024 * 1024) ||
       (item.text !== undefined && (typeof item.text !== 'string' || item.text.includes('\u0000')))) {
       throw new Error(t("附件记录无效。"));
     }
     ids.add(item.id);
   }
+}
+
+function validAttachmentStorage(item: Attachment): boolean {
+  if (item.original === true) {
+    return item.text === undefined && typeof item.mime === 'string' && item.mime.length > 0 && item.mime.length <= 150 &&
+      item.name.length > 0 && !/[\\/:*?"<>|\u0000-\u001f\u007f]/.test(item.name) &&
+      !['.', '..'].includes(item.name) && !item.name.startsWith('.tinybot-') &&
+      item.path === 'attachments/' + item.id + '/' + item.name &&
+      (item.workspaceId === undefined || (typeof item.workspaceId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(item.workspaceId)));
+  }
+  return item.original === undefined && item.workspaceId === undefined &&
+    ['image/jpeg', 'text/plain'].includes(item.mime) && item.path === item.id + (item.mime === 'image/jpeg' ? '.jpg' : '.txt');
 }
 
 export function validateProductivity(data: ProductivityData): void {
@@ -88,7 +108,7 @@ export function validateProductivity(data: ProductivityData): void {
     ids.add('t' + template.id);
   }
   for (const server of data.servers) {
-    if (server?.authType !== undefined && server.authType !== 'oauth') { throw new Error(t("MCP 认证类型无效。")); }
+    if (server?.authType !== undefined && !isConfigurationName(server.authType)) { throw new Error(t("MCP 认证类型无效。")); }
     if (!server || !/^[a-zA-Z0-9-]{1,80}$/.test(server.id) || ids.has('s' + server.id) ||
       typeof server.name !== 'string' || !server.name.trim() || server.name.length > 40 ||
       typeof server.url !== 'string' || !/^https:\/\/[^\s/?#@\\]+(?:\/[^\s#\\]*)?$/.test(server.url) ||

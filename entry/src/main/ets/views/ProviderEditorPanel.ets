@@ -34,7 +34,7 @@ export struct ProviderEditorPanel {
 
   aboutToAppear(): void { this.alive = true; this.modelError = this.initialModelError; }
   aboutToDisappear(): void { this.alive = false; if (this.page === 'service') { this.editor.apiKey = ''; } }
-  private locked(): boolean { return this.app.busy || this.discovering; }
+  private locked(): boolean { return this.app.sharedBusy || this.discovering; }
   private async openApiKeyPage(): Promise<void> {
     const url = this.editor.apiKeyUrl;
     if (!url || this.locked()) { return; }
@@ -355,7 +355,7 @@ export struct ProviderEditorPanel {
       BottomBar() {
         Column({ space: 8 }) {
           if (this.editor.error) { Banner({ text: this.editor.error, compId: 'provider-error' }) }
-          Button(this.app.busy ? t('正在保存…') : this.editor.id ? t('保存更改') : t('保存服务')).fontFamily(this.appearance.fontFamily).id('save-provider')
+          Button(this.app.saving ? t('正在保存…') : this.editor.id ? t('保存更改') : t('保存服务')).fontFamily(this.appearance.fontFamily).id('save-provider')
             .attributeModifier(Btn.primary).width('100%').enabled(!this.locked()).onClick(() => this.save())
         }
       }

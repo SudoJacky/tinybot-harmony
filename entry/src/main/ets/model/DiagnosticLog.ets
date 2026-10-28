@@ -2,6 +2,7 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 export const LOG_LEVELS: LogLevel[] = ['debug', 'info', 'warn', 'error'];
 export type LogValue = string | number | boolean;
 export interface LogFields {
+  setting?: string; dataVersion?: number; serverId?: string;
   change?: string; commonMessages?: number; sharedCharacters?: number; systemHash?: number; toolsHash?: number;
   operationId?: number; instanceId?: number; generation?: number; active?: number; count?: number; total?: number;
   chars?: number; bytes?: number; elapsedMs?: number; durationMs?: number; http?: number; code?: number;
@@ -19,7 +20,7 @@ export interface LogData { level: LogLevel; module: string; event: string; field
 export interface LogError extends Error { code?: number | string; }
 const ERROR_CODES: string[] = ['STALE_BROWSER_SNAPSHOT', 'STALE_INTERACTIVE_STATE', 'INVALID_ARGUMENTS', 'PERMISSION_DENIED',
   'CANCELLED', 'READ_ONLY', 'FILE_NOT_FOUND', 'TOOL_NOT_FOUND', 'TIMEOUT', 'CONTEXT_OVERFLOW',
-  'NATIVE_EXCEPTION', 'NATIVE_EMPTY_RESULT', 'NATIVE_NAPI_FAILED'];
+  'NATIVE_EXCEPTION', 'NATIVE_EMPTY_RESULT', 'NATIVE_NAPI_FAILED', 'FS_STALE_VERSION', 'FS_NOT_OBSERVED', 'FS_EXTERNAL_IO'];
 
 // Names and string values are catalogs, not free text. Unknown keys never reach either output.
 const EVENTS: Record<string, string[]> = {};
@@ -28,28 +29,34 @@ EVENTS.announcements = ['disabled', 'fetch_started', 'fetch_completed', 'fetch_f
 EVENTS.review = ['task_completed', 'presented', 'present_failed', 'accepted', 'deferred', 'disabled', 'request_completed', 'request_failed', 'save_failed'];
 EVENTS.appearance = ['material', 'material_unavailable', 'loaded', 'applied', 'save_failed', 'fonts_loaded', 'fonts_failed', 'insets_failed'];
 EVENTS.backup = ['started', 'restored', 'restore_prepared', 'cleanup_failed'];
+EVENTS['mini-app'] = ['manifest_failed', 'storage_failed', 'action_failed'];
 EVENTS.background = ['acquired', 'released', 'cancelled', 'suspended', 'release_failed', 'stop_failed', 'transition_failed', 'window_expired'];
+EVENTS.notification = ['authorization_checked', 'authorization_denied', 'authorization_failed', 'disabled', 'published', 'publish_failed'];
 EVENTS.speech = ['preparing', 'listening', 'vad', 'complete', 'finishing', 'recognition_failed', 'cancel_failed', 'playback_requested', 'playback_failed', 'cleanup_failed', 'late_cleanup_failed'];
 EVENTS.voice = ['focus_requested', 'released', 'draft_failed'];
 EVENTS.web = ['engine_start', 'engine_ready', 'release', 'activate', 'failed', 'load_start', 'load_returned', 'host_ready', 'port_connected', 'ready', 'state_saved', 'attached', 'page_end', 'navigation_blocked', 'resource_failed'];
 EVENTS.preview = ['failed', 'captured', 'thumbnail_failed', 'surface_moved'];
 EVENTS.sandbox = ['execution_failed', 'orchestration_failed'];
 EVENTS.tool = ['failed', 'partial'];
+EVENTS.workspace = ['mutation_failed'];
 EVENTS.export = ['image_failed'];
 EVENTS.network = ['request_start', 'request_end', 'context_overflow', 'first_data', 'request_failed'];
 EVENTS.context = ['inspected', 'request_prefix'];
 EVENTS.browser = ['permission', 'control_user', 'control_agent', 'task_released', 'closed', 'failed', 'acquired', 'permission_wait', 'operation', 'observation_changed', 'opened_by_user', 'annotation_started', 'annotation_captured', 'annotation_failed', 'search_observed', 'search_failed', 'capture_started', 'frame_captured', 'capture_finished'];
-EVENTS.session = ['mcp_failed', 'tasks_failed', 'run_failed', 'title_failed', 'interactive_failed', 'resource_failed', 'memory_failed', 'memory_review_failed', 'mutation_failed', 'save_failed', 'observer_failed'];
+EVENTS.session = ['run_started', 'run_finished', 'run_cancelled', 'mcp_failed', 'tasks_failed', 'run_failed', 'title_failed', 'interactive_failed', 'resource_failed', 'memory_failed', 'memory_review_failed', 'mutation_failed', 'save_failed', 'observer_failed'];
 EVENTS.memory = ['committed', 'review_started', 'review_discarded'];
 EVENTS.resources = ['credential_rollback_failed', 'team_selected', 'committed', 'preferences_saved'];
+EVENTS.configuration = ['unsupported', 'load_failed'];
 EVENTS.diagnostics = ['started', 'stopped', 'marker', 'failed', 'level_changed'];
 const NUMBERS: string[] = ['operationId', 'instanceId', 'generation', 'active', 'count', 'total', 'chars', 'bytes', 'elapsedMs', 'durationMs', 'http', 'code',
-  'commonMessages', 'sharedCharacters', 'systemHash', 'toolsHash',
+  'commonMessages', 'sharedCharacters', 'systemHash', 'toolsHash', 'dataVersion',
   'messages', 'tools', 'nodes', 'keys', 'width', 'height', 'widthVp', 'request', 'chunk', 'eventCode', 'newChats', 'skippedChats', 'level', 'style',
   'tokens', 'budget', 'removed', 'retained', 'duplicates', 'characters', 'added', 'updated', 'round', 'revision', 'threads', 'changedThreads', 'selected'];
 const BOOLEANS: string[] = ['enabled', 'failed', 'cancelled', 'speaking', 'preflight', 'closed', 'streaming', 'ready', 'hasModel', 'retryable'];
-const REFERENCES: string[] = ['threadId', 'messageId', 'sessionId', 'providerId', 'previewId', 'surfaceId'];
+const REFERENCES: string[] = ['threadId', 'messageId', 'sessionId', 'providerId', 'previewId', 'surfaceId', 'serverId'];
 const STRINGS: Record<string, string[]> = {};
+STRINGS.setting = ['search.provider', 'providerProfiles.protocol', 'options.autoRoute', 'extensions.browserPolicy', 'config.reasoning',
+  'capabilities.reasoning', 'threads.agentMode', 'threads.disabledTools', 'threads.reasoningEffort', 'servers.authType'];
 STRINGS.change = ['cold', 'append', 'tools', 'system', 'history'];
 STRINGS.protocol = ['chat-completions', 'responses', 'anthropic-messages', 'gemini'];
 STRINGS.phase = ['idle', 'preparing', 'listening', 'complete', 'finishing', 'error', 'creating', 'playing', 'stopping', 'connecting', 'streaming', 'capture', 'compose', 'encode'];

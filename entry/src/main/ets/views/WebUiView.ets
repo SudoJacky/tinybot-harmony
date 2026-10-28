@@ -10,6 +10,7 @@ import { webUiAssets } from '../services/WebUiAssets';
 import { Btn } from '../common/Theme';
 import { PreviewBrowserRuntime } from '../services/PreviewBrowserRuntime';
 import { browserAutomationScript } from '../model/BrowserScripts';
+import { MiniAppStorage, MiniAppSnapshot } from '../model/MiniApp';
 
 let activeWebViews: number = 0;
 let webViewSequence: number = 0;
@@ -25,6 +26,7 @@ export struct WebUiView {
   @Prop retainedHeight: number = 0;
   @Prop @Watch('viewportChanged') viewportHeight: number = 0;
   browserRuntime?: PreviewBrowserRuntime;
+  storage?: MiniAppStorage;
   private browserAttachment: number = -1;
   onHeight: (height: number) => void = () => {};
   @StorageLink('tinybot.foreground') @Watch('foregroundChanged') private foreground: boolean = true;
@@ -195,6 +197,30 @@ export struct WebUiView {
     try {
       if (typeof data !== 'string') { throw new Error('Web UI: expected a text message'); }
       const message = parseWebUiMessage(data); id = message.id || 0;
+      if (message.type === 'storageLoad' || message.type === 'storageSave') {
+        try {
+          if (!this.storage) { throw new Error(t('此预览未绑定小程序存储，请从小程序入口打开。')); }
+          let snapshot: MiniAppSnapshot;
+          if (message.type === 'storageLoad') { snapshot = await this.storage.load(); }
+          else {
+            if (this.preflight || this.snapshotMode || !this.interactive || !this.visible || !this.foreground || this.saving) {
+              throw new Error(t('当前无法保存，请等待任务结束后重试。'));
+            }
+            this.saving = true;
+            try { snapshot = await this.storage.save(message.value as Object | null, message.revision as string); }
+            finally { this.saving = false; this.visibilityChanged(); }
+          }
+          if (this.mounted && generation === this.generation && this.ports.length) {
+            this.ports[0].postMessageEvent(JSON.stringify({ type: 'storageResult', id: id, snapshot: snapshot }));
+          }
+        } catch (error) {
+          Diagnostics.log('error', 'mini-app', 'storage_failed', { operationId: id }, error as Error);
+          if (this.mounted && generation === this.generation && this.ports.length) {
+            this.ports[0].postMessageEvent(JSON.stringify({ type: 'storageResult', id: id, error: (error as Error).message }));
+          }
+        }
+        return;
+      }
       if (message.type === 'browserResult' && this.browserRuntime) { this.browserRuntime.receive(id, message.message as string); return; }
       if (message.type === 'error' && this.browserRuntime?.isReady) {
         this.browserRuntime.recordError(message.message as string);

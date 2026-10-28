@@ -25,20 +25,16 @@ export interface SessionRepository {
 
 ## 命令准入
 
-所有会修改数据的命令先经过两个只读判断：
+会话分别持有 `ThreadExecution`（由 `AgentRuntime.fork()` 创建），应用状态负责加载、共享设置写入和保存错误。`SessionState` 投影选中会话，并附带 `runningThreadIds`、`canNavigate` 和全局配置兼容提示。
 
-| 判断 | 条件 | 作用 |
-| --- | --- | --- |
-| `canMutate` | `ready`、`phase === 'idle'`、`saveError` 为空 | 允许发送、切换会话、改设置、建分支等 |
-| `canQueueInput` | `ready`、未归档、`saveError` 为空，且 `phase` 为 `idle` 或 `running` | 允许追加指令或加入队列 |
+| 判断 | 条件与用途 |
+| --- | --- |
+| `canNavigate` | 应用就绪、共享提交空闲且没有保存错误；允许在其他会话运行时切换或新建会话 |
+| `canMutate` | 满足导航条件且选中会话空闲；允许当前会话修改 |
+| `canMutateShared` | 满足导航条件且所有会话均无活动任务；允许修改共享配置 |
+| `canQueueInput` | 满足导航条件、当前会话未归档且处于空闲或运行阶段；允许追加与排队 |
 
-`mutate(prefix, action, publication)` 是设置类命令的统一包装：
-
-1. 检查 `canMutate`，不满足直接返回 `false`。
-2. 记录 `draftRevision`，把 `phase` 置为 `saving` 并发布 `state`。
-3. 执行动作（大多在 `snapshot()` 副本上修改，成功后一次性提交）。
-4. 提交后调用 `persistDraftChanges(draftRevision)`，把保存期间产生的新草稿补写一次。
-5. 失败时把 `prefix + 错误信息` 写入 `status.error` 并上报 `mutation_failed`；`finally` 恢复 `idle` 并发布快照或偏好。
+`mutate(prefix, action, publication, scope)` 按共享、会话或导航作用域准入，使用统一写入队列提交候选数据，补存期间产生的草稿。保存错误保留并停止所有活动任务，显式重试成功后才恢复准入。兼容检查保留未来版本的未知配置字段，对不支持的功能禁用运行并展示提示，不改写原始配置。
 
 `send`、`stop`、`compactHistory`、`enqueueInput`、`resumeQueue` 不走 `mutate`：它们会进入 `running` 或 `compacting`，失败信息直接写到 `status.error`。发送、压缩、重新生成、恢复队列与表单续跑在开始前还会调用 `resources.authorizeGeneration()`（原生实现为华为账号 `requireLogin()`）。
 

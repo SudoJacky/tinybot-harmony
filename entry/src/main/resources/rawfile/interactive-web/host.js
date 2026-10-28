@@ -9,6 +9,7 @@
   function childRuntime(initial) {
     let state = initial.values, active = initial.active, seq = 0, pending, animate, raf = 0, previous = 0, failed = false;
     const listeners = new Set();
+    const storagePending = new Map();
     const copy = value => JSON.parse(JSON.stringify(value));
     const send = value => parent.postMessage({ channel: 'tinybot-frame', ...value }, '*');
     const failure = error => {
@@ -42,16 +43,34 @@
         resume();
       } else if (data.type === 'snapshot' && initial.snapshotMode) {
         requestAnimationFrame(() => requestAnimationFrame(() => { if (!failed) send({ type: 'snapshotReady' }); }));
+      } else if (data.type === 'storageResult' && storagePending.has(data.id)) {
+        const request = storagePending.get(data.id); storagePending.delete(data.id);
+        if (data.error) request.reject(new Error(data.error));
+        else request.resolve(copy(data.snapshot));
       } else if (data.type === 'ack' && pending?.id === data.id) {
         const saved = pending; pending = undefined;
         if (data.error) saved.reject(new Error(data.error));
         else { state = data.values; saved.resolve(copy(state)); }
       }
     });
+    function storageRequest(type, value, revision) {
+      if (type === 'storageSave' && (initial.preflight || initial.snapshotMode || !active)) {
+        return Promise.reject(new Error('Save mini app data only during an active user interaction.'));
+      }
+      if (type === 'storageSave' && (value === undefined || typeof revision !== 'string' || !revision)) {
+        return Promise.reject(new Error('Use the revision returned by tinybot.storage.load() or save().'));
+      }
+      const request = JSON.parse(JSON.stringify({ type, id: ++seq, value, revision }));
+      return new Promise((resolve, reject) => { storagePending.set(request.id, { resolve, reject }); send(request); });
+    }
     Object.defineProperty(window, 'tinybot', { value: Object.freeze({
       get state() { return copy(state); }, get active() { return active; },
       onState(listener) { listeners.add(listener); return () => listeners.delete(listener); },
       animate(callback) { animate = callback; resume(); return () => { animate = undefined; resume(); }; },
+      storage: Object.freeze({
+        load() { return storageRequest('storageLoad'); },
+        save(value, revision) { return storageRequest('storageSave', value, revision); }
+      }),
       save(values) {
         if (initial.preflight) return Promise.reject(new Error('Save state only on user interaction, not during initialization/preflight.'));
         if (!active) return Promise.reject(new Error('This interface is currently read-only.'));
@@ -117,6 +136,8 @@
       if (data.type === 'browserResult' && typeof data.message === 'string') {
         send({type:'browserResult',id:data.id,message:data.message});
       }
+      else if (data.type === 'storageLoad') send({ type: 'storageLoad', id: data.id });
+      else if (data.type === 'storageSave') send({ type: 'storageSave', id: data.id, value: data.value, revision: data.revision });
       else if (data.type === 'save') send({ type: 'save', id: data.id, values: data.values });
       else if (data.type === 'resize') send({ type: 'resize', height: data.height });
       else if (data.type === 'ready') send({ type: 'ready' });

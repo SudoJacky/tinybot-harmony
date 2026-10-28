@@ -19,11 +19,11 @@ export struct SkillEditorPanel {
   @State private expandedPath: string = '';
 
   private idle(): boolean {
-    return !this.importing && !this.app.busy;
+    return !this.importing && !this.app.sharedBusy;
   }
 
   private async importText(reference: boolean): Promise<void> {
-    if (this.importing || this.app.busy) { return; }
+    if (this.importing || this.app.sharedBusy) { return; }
     this.importing = true;
     this.editor.error = '';
     try {

@@ -3,6 +3,7 @@ import { t } from '../model/I18n';
 import { defaultContextWindow } from '../model/ContextSettings';
 import { reasoningEfforts, reasoningEffortName } from '../model/ReasoningEffort';
 import { AssistantOptions, ModelCapability, defaultAssistantOptions } from '../model/AssistantOptions';
+import { mergeSavedConfiguration } from '../model/SavedConfiguration';
 import { ModelReference } from '../model/ProviderProfiles';
 import { ProductivityData } from '../model/Productivity';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
@@ -34,7 +35,7 @@ export struct ModelSettingsPanel {
     const reference = this.reference(this.capabilityIndex + 1);
     const item = this.options.capabilities.find((item) => item.providerId === reference?.providerId && item.modelId === reference?.modelId);
     this.images = item?.images !== false; this.usage = item?.requestUsage !== false;
-    this.reasoning = this.efforts().includes(item?.reasoning || 'default') ? item?.reasoning || 'default' : 'default';
+    this.reasoning = item?.reasoning || 'default';
     this.contextWindow = item?.contextWindow === undefined ? '' : String(item.contextWindow);
   }
   private contextPlaceholder(): string {
@@ -48,7 +49,9 @@ export struct ModelSettingsPanel {
     if (reference) {
       const capability: ModelCapability = { providerId: reference.providerId, modelId: reference.modelId, images: this.images,
         reasoning: this.reasoning, requestUsage: this.usage, contextWindow: this.contextWindow.trim() ? Number(this.contextWindow) : undefined };
-      this.options.capabilities = this.options.capabilities.filter((item) => item.providerId !== reference.providerId || item.modelId !== reference.modelId).concat([capability]);
+      const previous = this.options.capabilities.find((item) => item.providerId === reference.providerId && item.modelId === reference.modelId);
+      const saved = mergeSavedConfiguration(previous, capability);
+      this.options.capabilities = this.options.capabilities.filter((item) => item.providerId !== reference.providerId || item.modelId !== reference.modelId).concat([saved]);
     }
     extras.options = this.options;
     if (!await this.app.saveProductivity(extras)) { this.error = this.app.error; }

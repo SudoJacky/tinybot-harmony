@@ -5,6 +5,7 @@ export type LaunchAction = 'new-chat' | 'voice-input' | 'continue-chat';
 // Keep the latest explicit launch intent until both the foreground and loaded page can receive it.
 export class LaunchActions {
   private static pending?: LaunchAction;
+  private static threadId?: string;
   private static foreground: boolean = false;
   private static listener?: () => void;
 
@@ -12,6 +13,8 @@ export class LaunchActions {
     const action = want.parameters?.['tinybotAction'];
     if (action !== 'new-chat' && action !== 'voice-input' && action !== 'continue-chat') { return; }
     LaunchActions.pending = action as LaunchAction;
+    const threadId = want.parameters?.['tinybotThreadId'];
+    LaunchActions.threadId = action === 'continue-chat' && typeof threadId === 'string' ? threadId : undefined;
     LaunchActions.notify();
   }
 
@@ -32,6 +35,10 @@ export class LaunchActions {
   }
 
   static isForeground(): boolean { return LaunchActions.foreground; }
+
+  static takeThreadId(): string | undefined {
+    const id = LaunchActions.threadId; LaunchActions.threadId = undefined; return id;
+  }
 
   private static notify(): void {
     if (LaunchActions.foreground && LaunchActions.pending) { LaunchActions.listener?.(); }

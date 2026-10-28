@@ -1,6 +1,7 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { HuaweiAccount } from '../services/HuaweiAccount';
 import { t } from '../model/I18n';
+import { searchSettingsSummary } from '../model/SearchEditor';
 import { languageName } from './LanguagePanel';
 import { BrowserSession } from '../services/BrowserSession';
 import { ChatViewModel, SettingsViewModel } from '../viewmodel/ChatViewModel';
@@ -41,7 +42,7 @@ export struct SettingsPanel {
   private toggleRevisions: Map<SettingsToggle, number> = new Map<SettingsToggle, number>();
 
   // A brief save leaves the page untouched; a reply, compaction or team run locks it with a notice.
-  private blocked(): boolean { return this.app.busy && !this.app.saving; }
+  private blocked(): boolean { return this.app.sharedBusy && !this.app.saving; }
   // Editors need a mutable session; unsaved chat data must be resolved first.
   private canEdit(): boolean { return !this.blocked() && this.app.saveError.length === 0; }
   aboutToAppear(): void { this.resetAssistantDraft(); }
@@ -194,11 +195,11 @@ export struct SettingsPanel {
               subtitle: t('不影响模型服务与浏览器权限。'), disabled: !this.canEdit(),
               onChange: (value: boolean) => this.saveToggle('webEnabled', value) })
             RowDivider()
-            NavRow({ title: t('搜索服务'), icon: $r('sys.symbol.magnifyingglass'), subtitle: 'DeepSeek / Tavily / Bing', compId: 'open-search-settings',
+            NavRow({ title: t('搜索服务'), icon: $r('sys.symbol.magnifyingglass'), subtitle: searchSettingsSummary(this.app.productivity.options?.search), compId: 'open-search-settings',
               disabled: !this.canEdit(), onTap: this.onSearch })
             RowDivider()
             SwitchRow({ title: t('应用内浏览器'), icon: $r('sys.symbol.link'), compId: 'browser-enabled', isOn: this.browser.policy === 'enabled',
-              subtitle: this.browser.policy === 'unset' ? t('默认关闭，首次需要时询问。') : this.browser.policy === 'disabled' ? t('已关闭，助手不会再次请求启用。') : t('允许助手操作网页；你可以随时接管。'),
+              subtitle: this.browser.policy === 'unset' ? t('尚未设置，首次使用时询问。') : this.browser.policy === 'disabled' ? t('已关闭，助手不会再次请求启用。') : t('允许助手操作网页；你可以随时接管。'),
               disabled: this.browser.permissionSaving || !this.app.ready || this.app.saveError.length > 0,
               onChange: async (value: boolean) => { try { await this.browser.setEnabled(value); }
                 catch (error) { this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: (error as Error).message }); } } })
@@ -275,15 +276,15 @@ export struct UserDocumentPanel {
         TextArea({ text: this.settings.userDocument, placeholder: t('例如：\n# 关于我\n请称呼我为…\n\n# 回答偏好\n先给结论，再给必要的例子。') }).fontFamily(this.appearance.fontFamily).id('user-document')
           .attributeModifier(Styles.area).layoutWeight(1)
           .backgroundColor($r('app.color.surface'))
-          .enabled(!this.app.busy && this.app.saveError.length === 0)
+          .enabled(!this.app.sharedBusy && this.app.saveError.length === 0)
           .onChange((value: string) => { this.settings.userDocument = value; })
         if (this.settings.error.length > 0) {
           Banner({ text: this.settings.error })
         }
       }.layoutWeight(1).padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.md })
       BottomBar() {
-        Button(this.app.busy ? t("正在保存…") : t("保存")).fontFamily(this.appearance.fontFamily).id('save-settings').attributeModifier(Btn.primary).width('100%')
-          .enabled(!this.app.busy && this.app.saveError.length === 0)
+        Button(this.app.saving ? t("正在保存…") : t("保存")).fontFamily(this.appearance.fontFamily).id('save-settings').attributeModifier(Btn.primary).width('100%')
+          .enabled(!this.app.sharedBusy && this.app.saveError.length === 0)
           .onClick(async () => { if (await this.app.saveSettings()) { this.onSaved(); } })
       }
     }.width('100%').height('100%')

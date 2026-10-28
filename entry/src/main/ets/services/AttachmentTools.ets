@@ -12,7 +12,7 @@ export class AttachmentTools implements AgentTools {
   private attachments: Attachment[];
   constructor(attachments: Attachment[]) { this.attachments = attachments; }
   definitions(): ToolDefinition[] {
-    if (!this.attachments.some((item) => item.mime === 'text/plain')) { return []; }
+    if (!this.attachments.some((item) => !item.original && item.mime === 'text/plain')) { return []; }
     return [{ type: 'function', executionMode: 'parallel', promptSnippet: '分段读取对话附件',
       promptGuidelines: ['大附件全文未放入消息。用 read_attachment 读取；需要全文时按返回的续读位置继续。'],
       function: { name: 'read_attachment', description: '按 id 读取本对话的文本附件。默认每页 2000 行或 50 KiB；可调大 limit/maxBytes。' +
@@ -29,7 +29,7 @@ export class AttachmentTools implements AgentTools {
     const args = parseToolArguments(call.function.arguments) as AttachmentArguments;
     if (!args || Array.isArray(args) || typeof args.id !== 'string' ||
       Object.keys(args).some((key) => !['id', 'offset', 'limit', 'column', 'maxBytes'].includes(key))) { throw new ToolFailure('INVALID_ARGUMENTS', 'Invalid attachment arguments.', 'fix_arguments'); }
-    const item = this.attachments.find((attachment) => attachment.id === args.id && attachment.mime === 'text/plain');
+    const item = this.attachments.find((attachment) => attachment.id === args.id && !attachment.original && attachment.mime === 'text/plain');
     if (!item || typeof item.text !== 'string') { throw new ToolFailure('NOT_FOUND', 'Text attachment is unavailable in this conversation.', 'check_resource'); }
     const page = textPage(item.text, args.offset, args.limit, args.column, args.maxBytes);
     return JSON.stringify({ id: item.id, name: item.name, content: page.content, startLine: page.startLine,

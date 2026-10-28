@@ -2,7 +2,8 @@ import { t } from './I18n';
 import { ToolSelection, validateToolSelection, normalizeDisabledTools } from './AgentMode';
 import { ProjectData, validateProjects } from './Project';
 import { UiSavedState, validateUiStates } from './InteractiveUi';
-import { REASONING_EFFORTS } from './ReasoningEffort';
+import { isConfigurationName } from './ConfigurationValue';
+import { mergeSavedConfiguration } from './SavedConfiguration';
 import { ThreadReference, referenceContext, validateThreadReferences } from './ThreadReferences';
 import { TeamRun, recoverTeams } from './Team';
 import { Attachment, ProductivityData, validateAttachments, validateProductivity } from './Productivity';
@@ -60,9 +61,8 @@ export interface CompactionData {
 }
 
 export function copyModelConfig(config: ModelConfig, configured: boolean = config.configured): ModelConfig {
-  return { configured: configured, providerId: config.providerId, baseUrl: config.baseUrl, model: config.model,
-    systemPrompt: config.systemPrompt, userDocument: config.userDocument, credentialAlias: config.credentialAlias,
-    contextWindow: config.contextWindow, autoCompact: config.autoCompact, reasoning: config.reasoning, requestUsage: config.requestUsage, images: config.images };
+  const result = JSON.parse(JSON.stringify(config)) as ModelConfig;
+  result.configured = configured; return result;
 }
 
 export interface ContextState { compaction?: CompactionData; }
@@ -96,6 +96,7 @@ export interface ThreadData extends ContextState, ToolSelection {
 
 export interface AppData {
   projects?: ProjectData[];
+  // Storage shape, not app release. Additive settings and enum values keep this version.
   version: number;
   // Includes the provider/model and reasoning selection shared by empty chats.
   config: ModelConfig;
@@ -121,6 +122,12 @@ export function defaultConfig(): ModelConfig {
 
 export function emptyData(): AppData {
   return { version: 2, projects: [], config: defaultConfig(), threads: [], activeThreadId: '' };
+}
+
+export function copyAppMetadata(data: AppData): AppData {
+  const edited: AppData = { version: data.version, config: data.config, activeThreadId: data.activeThreadId, threads: [] };
+  const copy = mergeSavedConfiguration(data, edited);
+  copy.threads = data.threads; return copy;
 }
 
 // Replay completed text and tool receipts. Interrupted prose is excluded, but file effects remain known.
@@ -180,7 +187,7 @@ export function parseAppData(text: string): AppData {
   const threadIds = new Set<string>();
   if (data.extensions !== undefined) { validateExtensions(data.extensions); }
   contextSettings(data.config);
-  if (data.config.reasoning !== undefined && !REASONING_EFFORTS.includes(data.config.reasoning)) {
+  if (data.config.reasoning !== undefined && !isConfigurationName(data.config.reasoning)) {
     throw new Error(t('推理强度设置无效。'));
   }
   if (data.providerProfiles !== undefined) {
@@ -188,7 +195,7 @@ export function parseAppData(text: string): AppData {
     const ids = new Set<string>();
     const aliases = new Set<string>();
     for (const profile of data.providerProfiles) {
-      validateProfile(profile);
+      validateProfile(profile, true);
       if (ids.has(profile.id) || (profile.credentialAlias.length > 0 && aliases.has(profile.credentialAlias))) {
         throw new Error(t("模型服务 ID 或密钥别名重复。"));
       }
@@ -227,10 +234,10 @@ export function parseAppData(text: string): AppData {
         throw new Error(t('本地记忆状态损坏，原文件已保留。'));
       }
     }
-    if (thread.reasoningEffort !== undefined && !REASONING_EFFORTS.includes(thread.reasoningEffort)) {
+    if (thread.reasoningEffort !== undefined && !isConfigurationName(thread.reasoningEffort)) {
       throw new Error(t('推理强度设置无效。'));
     }
-    validateToolSelection(thread);
+    validateToolSelection(thread, true);
     if (thread.disabledTools !== undefined) { thread.disabledTools = normalizeDisabledTools(thread.disabledTools); }
     if (thread.teamEnabled !== undefined && typeof thread.teamEnabled !== 'boolean') { throw new Error(t("团队模式设置损坏。")); }
     if (thread.teams !== undefined) { recoverTeams(thread.teams); }

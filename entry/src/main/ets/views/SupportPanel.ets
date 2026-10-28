@@ -1,6 +1,7 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
+import { pasteboard } from '@kit.BasicServicesKit';
 import { ThirdPartyLicensesPanel } from './ThirdPartyLicensesPanel';
 import { LegalDocumentPanel } from './LegalDocumentPanel';
 import { readAppInformation } from '../services/AppInformation';
@@ -15,6 +16,9 @@ import { Btn } from '../common/Theme';
 import { Announcements, announcements } from '../services/Announcements';
 import { MarkdownView } from './MarkdownView';
 import { FeedbackPanel } from './FeedbackPanel';
+
+const QQ_GROUP_NUMBER: string = '337943922';
+const QQ_GROUP_INVITE_URL: string = 'https://qm.qq.com/q/lqgqSxGCK4';
 
 export function supportTitle(page: string): string {
   if (page === 'developer') { return t('开发者模式'); }
@@ -36,6 +40,9 @@ export struct SupportPanel {
   @State private version: string = '';
   @State private announcementService: Announcements = announcements;
   @State private error: string = '';
+  @State private copyingGroup: boolean = false;
+  @State private openingGroup: boolean = false;
+  @State private groupError: string = '';
   @State private showDeveloperPassword: boolean = false;
   @State private developerPassword: string = '';
   @State private developerError: string = '';
@@ -83,6 +90,30 @@ export struct SupportPanel {
     }
   }
 
+  private async copyGroupNumber(): Promise<void> {
+    if (this.copyingGroup) { return; }
+    this.copyingGroup = true; this.groupError = '';
+    try {
+      await pasteboard.getSystemPasteboard().setData(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, QQ_GROUP_NUMBER));
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface,
+        message: t('群号已复制，请在 QQ 中搜索群号加入。') });
+    } catch (error) {
+      this.groupError = t('复制群号失败：{0}', [(error as Error).message]);
+    } finally { this.copyingGroup = false; }
+  }
+
+  private async openGroupInvite(): Promise<void> {
+    if (this.openingGroup) { return; }
+    this.openingGroup = true; this.groupError = '';
+    try {
+      // Let the system resolve Tencent's invite URL; a browser can handle it when no app matches.
+      await (this.getUIContext().getHostContext() as common.UIAbilityContext)
+        .openLink(QQ_GROUP_INVITE_URL, { appLinkingOnly: false });
+    } catch (error) {
+      this.groupError = t('无法打开加群链接，请复制群号后在 QQ 中搜索。原因：{0}', [(error as Error).message]);
+    } finally { this.openingGroup = false; }
+  }
+
   aboutToAppear(): void {
     if (this.page !== 'about') { return; }
     try {
@@ -127,6 +158,15 @@ export struct SupportPanel {
         RowDivider()
         NavRow({ title: t('反馈与建议'), icon: $r('sys.symbol.exclamationmark_circle'), compId: 'about-feedback',
           onTap: () => this.onOpen('feedback') })
+        RowDivider()
+        NavRow({ title: t('QQ 交流群'), icon: $r('sys.symbol.person_2'), subtitle: t('{0} · 点击加群', [QQ_GROUP_NUMBER]),
+          compId: 'about-qq-group', disabled: this.openingGroup || this.copyingGroup,
+          actionLabel: t('复制群号'), actionId: 'about-copy-qq-group',
+          onTap: () => this.openGroupInvite(), onAction: () => this.copyGroupNumber() })
+        if (this.groupError) {
+          Banner({ text: this.groupError, compId: 'about-qq-group-error' })
+            .margin({ left: Space.md, right: Space.md, bottom: Space.sm })
+        }
       }
     }
     GroupCard() {

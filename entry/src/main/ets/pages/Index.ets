@@ -10,6 +10,7 @@ import { BrowserSession } from '../services/BrowserSession';
 import { AnnotationPage, browserAnnotationText } from '../model/BrowserAnnotation';
 import { image } from '@kit.ImageKit';
 import { Attachments } from '../services/Attachments';
+import { MAX_MESSAGE_ATTACHMENTS } from '../model/Productivity';
 import { t } from '../model/I18n';
 import { agentModeName } from '../model/AgentMode';
 import { ToolScopePanel } from '../views/ToolScopePanel';
@@ -21,7 +22,10 @@ import { StorageCategoryPanel, StoragePanel } from '../views/StoragePanel';
 import { storageCategoryKey } from '../model/StoragePlan';
 import { BranchesPanel } from '../views/BranchesPanel';
 import { WorkspacePanel } from '../views/WorkspacePanel';
+import { MiniAppsPanel } from '../views/MiniAppsPanel';
 import { SearchSettingsPanel } from '../views/SearchSettingsPanel';
+import { SearchProviderPanel } from '../views/SearchProviderPanel';
+import { SearchEditorDraft, SearchProviderRoute, searchProviderName } from '../model/SearchEditor';
 import { ToolApproval } from '../services/ToolApproval';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -149,7 +153,7 @@ struct Index {
     if (!this.session) {
       this.session = createNativeSessionService(context.filesDir, context.getApplicationContext().filesDir, this.approval, context, this.browser);
       this.session.subscribe((event) => {
-        if (event.state.ready && event.state.phase === 'idle' && !event.state.saveError && ShareInbox.peek()) { this.receiveShare(); }
+        if (event.state.canNavigate && ShareInbox.peek()) { this.receiveShare(); }
         if (event.kind === 'task-complete' && event.threadId) { this.taskCompleted(event.threadId); }
       });
     }
@@ -315,7 +319,7 @@ struct Index {
     this.onboardingFinishing = true;
     try {
       if (action !== 'skip') {
-        if (this.app.busy) { throw new Error(t('请先完成当前任务，再开始新的对话。')); }
+        if (!this.app.canNavigate) { throw new Error(t('无法创建新对话。')); }
         await this.app.flushDraft();
         if (this.app.saveError) { throw new Error(this.app.saveError); }
         if (this.onboardingDraftThread !== this.app.active.id) {
@@ -342,7 +346,7 @@ struct Index {
   }
 
   private async createChat(): Promise<void> {
-    if (!this.app.ready || this.app.busy || this.app.saveError) { return; }
+    if (!this.app.canNavigate) { return; }
     const previousId = this.app.active.id;
     // SessionService decides whether the current chat is untouched and reusable.
     if (await this.app.newThread() && this.app.active.id === previousId) {
@@ -359,12 +363,27 @@ struct Index {
     // The session restores the last active chat on cold start. Returning to it must
     // not create a chat, flush/replace a draft, or interrupt a running answer.
     if (action === 'continue-chat') {
+      const threadId = LaunchActions.takeThreadId();
       if (this.launching || this.receiving || this.onboardingActive) { return; }
+      if (threadId && threadId !== this.app.active.id) {
+        this.launching = true;
+        try {
+          await this.app.flushDraft();
+          if (this.app.saveError) { throw new Error(this.app.saveError); }
+          if (!LaunchActions.isForeground()) { return; }
+          if (!await this.app.selectThread(threadId)) {
+            throw new Error(this.app.error || this.app.saveError || t('无法打开通知对应的对话。'));
+          }
+        } catch (error) {
+          this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: (error as Error).message });
+          return;
+        } finally { this.launching = false; }
+      }
       this.voiceRequest = '';
       this.paths.clear(); this.setDrawer(false);
       return;
     }
-    if (this.launching || this.receiving || this.app.busy || this.app.saveError) {
+    if (this.launching || this.receiving || !this.app.canNavigate) {
       this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t('请先完成当前操作或保存，再使用快捷入口。') });
       return;
     }
@@ -387,13 +406,12 @@ struct Index {
     if (this.receiving || !this.session || !this.app.ready) { return; }
     this.receiving = true;
     try {
-      await this.session.waitForIdle();
-      if (!this.session.canMutate) { return; }
+      if (!this.session.canNavigate) { return; }
       let input = ShareInbox.peek();
       while (input) {
         if (input.error) { this.app.error = input.error; }
         else if (await this.app.newThread()) {
-          this.app.setDraft(input.text || t("请分析分享的附件。"));
+          this.app.setDraft(input.text);
           if (!await this.app.setAttachments(input.attachments)) { return; }
           await this.app.flushDraft(); this.paths.clear();
           if (this.app.saveError) { return; }
@@ -663,7 +681,7 @@ struct Index {
   }
   private async addBrowserAnnotation(threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string): Promise<void> {
     if (threadId !== this.app.active.id) { throw new Error(t('对话已切换，请在当前对话重新添加附件。')); }
-    if (!this.app.canQueueInput || this.app.active.attachments.length >= 4) { throw new Error(t('当前无法添加附件，请稍后重试。')); }
+    if (!this.app.canQueueInput || this.app.active.attachments.length >= MAX_MESSAGE_ATTACHMENTS) { throw new Error(t('当前无法添加附件，请稍后重试。')); }
     const item = await Attachments.saveBrowserAnnotation(pixel);
     await this.app.appendDraftAttachment(threadId, item, browserAnnotationText(page, note));
     this.paths.clear(); this.setDrawer(false); this.setBrowserExpanded(false);
@@ -849,6 +867,8 @@ struct Index {
           .id('share-conversation').enabled(this.app.ready && !this.app.busy && this.app.active.messages.length > 0)
           .onClick(() => this.openConversationShare())
       }
+      MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.rectangle_stack')), content: t('小程序') })
+        .id('open-mini-apps-menu').enabled(this.app.ready).onClick(() => this.paths.pushPath({ name: 'mini-apps' }))
       MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.gearshape')), content: t('设置') })
         .onClick(() => this.openSettings())
     }
@@ -872,6 +892,9 @@ struct Index {
         })
         .onShown(() => { this.onboardingActive = true; })
         .onHidden(() => { this.onboardingActive = false; })
+    } else if (name === 'mini-apps') {
+      NavDestination() { MiniAppsPanel({ app: this.app, onChat: () => this.paths.clear() }) }
+        .title(t('小程序'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'branches') {
       NavDestination() { BranchesPanel({ app: this.app, onSelected: () => this.paths.clear() }) }.title(t("会话分支"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'appearance') {
@@ -915,14 +938,25 @@ struct Index {
       }.title(productivityEditorTitle((param as ProductivityEditorRoute).tab, (param as ProductivityEditorRoute).id), { systemMaterial: this.appearance.control })
         .backgroundColor($r('app.color.page_background')).onBackPressed(() => this.app.busy)
     } else if (name === 'search-settings') {
-      NavDestination() { SearchSettingsPanel({ app: this.app }) }.title(t('搜索服务'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+      NavDestination() {
+        SearchSettingsPanel({ app: this.app, onEdit: (request: SearchProviderRoute, onReturn: (draft?: SearchEditorDraft) => void) => {
+          this.paths.pushPath({ name: 'search-provider', param: request,
+            onPop: (info: PopInfo) => { onReturn(info.result as SearchEditorDraft | undefined); } });
+        } })
+      }.title(t('搜索服务'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'search-provider') {
+      NavDestination() {
+        SearchProviderPanel({ app: this.app, request: param as SearchProviderRoute,
+          onDone: (draft?: SearchEditorDraft) => { this.paths.pop(draft); } })
+      }.title(searchProviderName((param as SearchProviderRoute).provider), { systemMaterial: this.appearance.control })
+        .backgroundColor($r('app.color.page_background'))
     } else if (name === 'share-conversation') {
       ConversationSharePanel({ data: param as ConversationShareData })
     } else if (name === 'files') {
       WorkspacePanel({ app: this.app, initialPath: (param as string) || '' })
     } else if (name === 'account') {
       NavDestination() {
-        HuaweiAccountPanel({ account: this.account, taskBusy: this.app.busy, onSupport: (page: string) => this.openSupport(page) })
+        HuaweiAccountPanel({ account: this.account, taskBusy: this.app.sharedBusy, onSupport: (page: string) => this.openSupport(page) })
       }.title(t('华为账号'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'settings') {
       NavDestination() {
@@ -1108,7 +1142,7 @@ struct Index {
         systemMaterial: this.appearance.surface, mask: false })
       IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t("新建对话"), compId: 'new-chat',
         material: this.appearance.control, tint: $r('sys.color.font_primary'),
-        disabled: !this.app.ready || this.app.busy || this.app.saveError.length > 0,
+        disabled: !this.app.canNavigate,
         onTap: () => { this.createChat(); } })
     }.width('100%').height(CHAT_HEADER_HEIGHT).padding({ left: 6, right: 6 })
       .hitTestBehavior(HitTestMode.Transparent)
@@ -1130,6 +1164,7 @@ struct Index {
           .borderRadius({ topRight: this.workbench().expanded ? 0 : 20, bottomRight: this.workbench().expanded ? 0 : 20 })
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         ThreadList({ app: this.app, workbench: this.windowWidth >= 840,
+          onMiniApps: () => { this.setDrawer(false); this.paths.pushPath({ name: 'mini-apps' }); },
           collapseHistory: this.workbench().expanded, searchRequest: this.historySearchRequest,
           onCollapseHistory: () => this.setHistoryCollapsed(true),
           onNewChat: () => { this.createChat(); this.setDrawer(false); }, onTools: () => { this.setDrawer(false); this.openTools('memory'); },
@@ -1316,7 +1351,7 @@ struct Index {
               BrowserPanel({ browser: this.browser, expanded: this.detailTabVisible('browser'), presented: this.browserPresent,
                 onPresent: () => { this.setBrowserExpanded(true); this.openDetailTab('browser'); },
                 tabbed: this.workbench().docked, threadId: this.app.active.id,
-                canAnnotate: this.app.canQueueInput && this.app.active.attachments.length < 4,
+                canAnnotate: this.app.canQueueInput && this.app.active.attachments.length < MAX_MESSAGE_ATTACHMENTS,
                 onAnnotation: (threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string) => this.addBrowserAnnotation(threadId, pixel, page, note),
                 onSettings: () => { this.hideBrowserTab(); this.openSettings(); },
                 onClose: () => this.closeBrowser(), onDismiss: () => this.hideBrowserTab() })

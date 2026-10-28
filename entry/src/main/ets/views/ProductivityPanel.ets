@@ -75,7 +75,7 @@ export struct ProductivityPanel {
   }
   aboutToDisappear(): void { this.cancellation.cancel(); this.token = ''; }
 
-  private locked(): boolean { return this.busy || this.app.busy; }
+  private locked(): boolean { return this.busy || this.app.sharedBusy; }
   private currentIndex(): number { return Math.max(0, TABS.indexOf(this.tab)); }
   private selectTab(index: number): void {
     if (this.tab === TABS[index]) { return; }

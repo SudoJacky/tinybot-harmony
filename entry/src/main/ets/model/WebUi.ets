@@ -2,7 +2,7 @@ import { parseUiJson } from './UiJson';
 import { UiDiagnosticError } from './UiRepair';
 // Versioned Web content embedded in a completed native UI surface.
 export interface WebUiSpec { version: number; html: string; css: string; js: string; library: string; height: number; autoHeight?: boolean; }
-export interface WebUiMessage { type: string; id?: number; values?: Record<string, string | number | boolean>; message?: string; height?: number; }
+export interface WebUiMessage { type: string; id?: number; values?: Record<string, string | number | boolean>; message?: string; height?: number; value?: Object | null; revision?: string; }
 export function webUiAutoHeight(spec: WebUiSpec): boolean {
   // Previously published SVG/HTML snapshots used this exact wrapper. Keep those compact too.
   return spec.autoHeight ?? (spec.library === 'none' && spec.js === '' &&
@@ -28,8 +28,12 @@ export function parseWebUi(source: string): WebUiSpec {
 }
 export function parseWebUiMessage(source: string): WebUiMessage {
   const message = JSON.parse(source) as WebUiMessage;
-  if (!message || typeof message !== 'object' || Array.isArray(message) || !['ready', 'error', 'save', 'resize', 'snapshotReady', 'browserResult'].includes(message.type) ||
-    Object.keys(message).some((key) => !['type', 'id', 'values', 'message', 'height'].includes(key))) { throw new Error('Web UI: invalid bridge message'); }
+  if (!message || typeof message !== 'object' || Array.isArray(message) || !['ready', 'error', 'save', 'resize', 'snapshotReady', 'browserResult', 'storageLoad', 'storageSave'].includes(message.type) ||
+    Object.keys(message).some((key) => !['type', 'id', 'values', 'message', 'height', 'value', 'revision'].includes(key))) { throw new Error('Web UI: invalid bridge message'); }
+  if (message.type === 'storageLoad' || message.type === 'storageSave') {
+    if (!Number.isSafeInteger(message.id) || (message.id || 0) < 1 || (message.type === 'storageSave' &&
+      (message.value === undefined || typeof message.revision !== 'string' || !message.revision))) { throw new Error('Web UI: invalid storage request'); }
+  }
   if (message.type === 'resize' && (typeof message.height !== 'number' || !Number.isFinite(message.height) || message.height < 0)) {
     throw new Error('Web UI: invalid content height');
   }

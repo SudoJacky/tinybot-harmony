@@ -11,6 +11,8 @@ export const TOOL_GROUPS: ToolGroup[] = [
   { id: 'orchestration', readOnly: true, tools: ['orchestrate'] },
   { id: 'interaction', readOnly: true, tools: ['request_user_input', 'update_plan'] },
   { id: 'delivery', readOnly: true, tools: ['publish_preview', 'present_files'] },
+  { id: 'mini-app-read', readOnly: true, tools: ['list_mini_apps'] },
+  { id: 'mini-app-write', readOnly: false, tools: ['publish_mini_app'] },
   { id: 'skill-read', readOnly: true, tools: ['read_skill', 'list_skills'] },
   { id: 'mcp-discovery', readOnly: true, tools: ['mcp_search_tools', 'mcp_list_tools'] },
   { id: 'mcp-execution', readOnly: false, tools: ['mcp_call'] },
@@ -36,7 +38,7 @@ export const TOOL_CAPABILITIES: ToolCapability[] = [
   { id: 'user-input', section: 'execution', tools: ['request_user_input'] },
   { id: 'plan', section: 'execution', tools: ['update_plan'] },
   { id: 'team', section: 'execution', tools: groupTools(['team-coordination', 'team-handoff']) },
-  { id: 'preview', section: 'delivery', tools: ['publish_preview'] },
+  { id: 'preview', section: 'delivery', tools: ['publish_preview', 'list_mini_apps', 'publish_mini_app'] },
   { id: 'file-delivery', section: 'delivery', tools: ['present_files'] },
   { id: 'mcp', section: 'extensions', tools: groupTools(['mcp-discovery', 'mcp-execution']) },
   { id: 'mcp-manage', section: 'extensions', tools: ['mcp_manage'] }

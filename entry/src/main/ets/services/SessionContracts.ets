@@ -29,6 +29,7 @@ export interface SessionResources {
   afterTask?(threadId: string, messageId: string, content: string, workspaceId?: string): Promise<void>;
   createId(): string;
   ensureWorkspace(threadId: string, workspaceId?: string): Promise<void>;
+  prepareAttachments?(items: Attachment[], threadId: string, workspaceId?: string): Promise<Attachment[]>;
   tools(threadId: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments?: Attachment[], live?: LiveResources, workspaceId?: string, project?: ProjectData, resolvePreview?: (previewId: string) => BrowserPreview): AgentTools;
   persistProjectFolders?(folders: SharedFolder[]): Promise<void>;
   revokeProjectFolders?(folders: SharedFolder[]): Promise<void>;
@@ -45,6 +46,10 @@ export interface SessionResources {
 export type SessionPhase = 'idle' | 'loading' | 'saving' | 'running' | 'compacting' | 'memory';
 
 export interface SessionState {
+  // phase/context/error describe the selected chat; these fields describe the application.
+  runningThreadIds?: string[];
+  canNavigate?: boolean;
+  compatibilityWarnings?: string[];
   ready: boolean;
   phase: SessionPhase;
   error: string;

@@ -669,10 +669,22 @@ export default function sessionServiceTests(): void {
       unsupported.config.model = 'claude-haiku-4-5';
       const other = new Fixture(unsupported); await other.session.initialize();
       expect(await other.session.setReasoningEffort('high')).assertFalse();
-      const broken = seed(); broken.threads[0].reasoningEffort = 'invalid';
+      const broken = seed(); broken.threads[0].reasoningEffort = '';
       let rejected = false;
       try { parseAppData(JSON.stringify(broken)); } catch (_) { rejected = true; }
       expect(rejected).assertTrue();
+    });
+    it('preservesNewerReasoningOnLoadAndUnrelatedSavesWhileUsingRuntimeDefaults', 0, async () => {
+      const data = historySeed(); data.config.reasoning = 'future-effort'; data.threads[0].reasoningEffort = 'future-effort';
+      const f = new Fixture(data); await f.session.initialize();
+      expect(f.session.state.ready).assertTrue(); expect(f.session.currentConfig.reasoning).assertEqual('default');
+      expect((f.session.state.compatibilityWarnings || []).length > 0).assertTrue();
+      expect(await f.session.setSettingsToggle('readOnly', true)).assertTrue();
+      const saved = await f.repository.load();
+      expect(saved.config.reasoning).assertEqual('future-effort');
+      expect(active(saved).reasoningEffort).assertEqual('future-effort');
+      const restarted = new Fixture(saved); await restarted.session.initialize();
+      expect(restarted.session.state.ready).assertTrue(); expect(restarted.session.currentConfig.reasoning).assertEqual('default');
     });
     it('emptyChatsShareUnsentSelectionsAcrossRestartWithoutLosingDrafts', 0, async () => {
       const data = seed(); (data.providerProfiles || [])[0].models.push('another');
@@ -761,7 +773,7 @@ export default function sessionServiceTests(): void {
       expect(f.session.currentConfig.model).assertEqual('model');
       expect(active(f.session.snapshot()).reasoningEffort === undefined).assertTrue();
       expect(active(f.session.snapshot()).draft).assertEqual('unsent');
-      const corrupt = seed(); corrupt.config.reasoning = 'invalid';
+      const corrupt = seed(); corrupt.config.reasoning = '';
       let rejected = false; try { parseAppData(JSON.stringify(corrupt)); } catch (_) { rejected = true; }
       expect(rejected).assertTrue();
     });
@@ -1087,7 +1099,8 @@ export default function sessionServiceTests(): void {
       f.session.setDraft('second'); await f.session.enqueueInput('followUp');
       f.session.setDraft('third'); await f.session.enqueueInput('followUp');
       f.session.setDraft('unsent draft');
-      expect(await f.session.newThread()).assertFalse();
+      expect(await f.session.newThread()).assertTrue();
+      expect(await f.session.selectThread('thread-1')).assertTrue();
       expect(await f.session.selectModel('test', 'model')).assertFalse();
       await f.session.send();
       release.open(); await running;
@@ -1115,7 +1128,7 @@ export default function sessionServiceTests(): void {
       const running = f.session.resumeQueue(); await saving.promise;
       let idle = false; const waiting = f.session.waitForIdle().then(() => { idle = true; });
       expect(f.provider.requests.length).assertEqual(1); expect(idle).assertFalse();
-      expect(await f.session.newThread()).assertFalse();
+      expect(f.session.canNavigate).assertTrue();
       saved.open(); await second.promise;
       expect(idle).assertFalse(); expect(f.session.state.phase).assertEqual('running');
       finish.open(); await running; await waiting;

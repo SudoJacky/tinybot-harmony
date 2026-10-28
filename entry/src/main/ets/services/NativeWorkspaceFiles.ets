@@ -6,6 +6,8 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { Cancellation } from './Cancellation';
 import { workspaceRelativePath } from './WorkspaceTools';
 import { readUtf8File } from './TextFiles';
+import { copyFileBytes } from './FileBytes';
+import { isDocumentPath, readDocumentFile } from './DocumentFiles';
 import { TextEdit, applyTextEdits, validateEdits } from '../model/WorkspaceEdit';
 import { withFileMutation } from './FileMutationQueue';
 import { ToolFailure } from '../model/ToolFailure';
@@ -30,6 +32,39 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
   constructor(workspaceDir: string, sharedFolders: SharedFolder[] = []) {
     this.root = workspaceDir;
     this.mounts = sharedFolders.slice();
+  }
+
+  async importFile(source: string, path: string, reuse: boolean = false): Promise<void> {
+    if (this.isShared(path)) { throw new Error('Import files into the private workspace.'); }
+    await withFileMutation(this.root + '/' + path, async () => {
+      const destination = await this.resolve(path, true, new Cancellation());
+      if (await this.optionalStat(destination)) {
+        await this.checkedPath(path);
+        if (reuse && await this.fileDigest(source) === await this.fileDigest(destination)) { return; }
+        throw new ToolFailure('FS_NOT_OBSERVED', 'The destination already exists with different content: ' + path, 'read_file', { path: path });
+      }
+      await copyFileBytes(source, destination);
+    });
+  }
+
+  private async fileDigest(path: string): Promise<string> {
+    const file = await fs.open(path, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
+    try {
+      const hash = cryptoFramework.createMd('SHA256');
+      const buffer = new ArrayBuffer(64 * 1024);
+      while (true) {
+        const count = await fs.read(file.fd, buffer); if (!count) { break; }
+        await hash.update({ data: new Uint8Array(buffer.slice(0, count)) });
+      }
+      return new util.Base64Helper().encodeToStringSync((await hash.digest()).data);
+    } finally { await fs.close(file); }
+  }
+
+  private assertTextWritable(path: string): void {
+    if (path.startsWith('attachments/') || isDocumentPath(path)) {
+      throw new ToolFailure('READ_ONLY', 'Original attachments and binary documents cannot be edited as text. Save changes to a separate text file.',
+        'choose_another_path', { path: path });
+    }
   }
 
   async checkedPath(path: string): Promise<string> {
@@ -81,13 +116,28 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
   }
 
   async read(path: string, cancellation: Cancellation): Promise<WorkspaceText> {
+    // Public shared-folder writes happen in place. Readers must wait for the whole
+    // mutation, otherwise a partial write could become an observed file version.
+    return withFileMutation(await this.fileKey(path), () => this.readUnlocked(path, cancellation));
+  }
+
+  private async fileKey(path: string): Promise<string> {
+    workspaceRelativePath(path, false);
+    if (this.isShared(path)) {
+      const mount = await this.requireMount(path);
+      return this.externalUri(mount.folder, mount.relative);
+    }
+    return this.root + '/' + path;
+  }
+
+  private async readUnlocked(path: string, cancellation: Cancellation): Promise<WorkspaceText> {
     if (this.isShared(path)) {
       const mount = await this.requireMount(path);
       if (!mount.relative) { throw new Error(t("请选择共享文件夹中的文件。")); }
       cancellation.check();
       const file = await this.openExternal(mount.folder, mount.relative, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
       try {
-        const content = await readUtf8File(file.fd, cancellation);
+        const content = await readDocumentFile(file.fd, path, this.root, cancellation);
         return { path: path, content: content, version: await contentVersion(content) };
       } finally {
         await fs.close(file);
@@ -97,7 +147,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     cancellation.check();
     const file = await fs.open(absolute, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
     try {
-      const content = await readUtf8File(file.fd, cancellation);
+      const content = await readDocumentFile(file.fd, path, this.root, cancellation);
       return { path: path, content: content, version: await contentVersion(content) };
     } finally {
       await fs.close(file);
@@ -105,6 +155,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
   }
 
   async write(path: string, content: string, cancellation: Cancellation, guard?: WorkspaceWriteGuard): Promise<WorkspaceWrite> {
+    this.assertTextWritable(path);
     workspaceRelativePath(path, false);
     if (this.isShared(path)) {
       const mount = await this.requireMount(path, true);
@@ -115,6 +166,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
   }
 
   async edit(path: string, edits: TextEdit[], version: string, cancellation: Cancellation): Promise<WorkspaceWrite> {
+    this.assertTextWritable(path);
     workspaceRelativePath(path, false);
     validateEdits(edits);
     if (this.isShared(path)) {
@@ -125,16 +177,48 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     return withFileMutation(this.root + '/' + path, () => this.mutate(path, '', edits, cancellation, { version: version }));
   }
 
-  async remove(path: string): Promise<void> {
-    if (this.isShared(path)) {
-      const mount = await this.requireMount(path);
-      if (!mount.relative) { throw new Error(t("不能删除共享文件夹本身。")); }
-      await this.unlinkExternal(mount.folder, mount.relative);
-      return;
-    }
+  // App-owned state is atomic and version-checked, but is not an agent edit to review/revert.
+  async writeMiniApp(path: string, content: string, cancellation: Cancellation, guard?: WorkspaceWriteGuard): Promise<WorkspaceWrite> {
     workspaceRelativePath(path, false);
-    const absolute = await this.resolve(path, false, new Cancellation());
-    await fs.unlink(absolute);
+    if (!/^mini-apps\/[A-Za-z0-9][A-Za-z0-9_-]{0,127}\/(app|data)\.json$/.test(path)) { throw new Error('Invalid managed mini app path'); }
+    return withFileMutation(this.root + '/' + path, () => this.mutate(path, content, [], cancellation, guard, false));
+  }
+
+  // Capture before showing the confirmation, including for binary/image files.
+  async removalVersion(path: string): Promise<string> {
+    return withFileMutation(await this.fileKey(path), () => this.removalVersionUnlocked(path));
+  }
+
+  private async removalVersionUnlocked(path: string): Promise<string> {
+    const mount = this.isShared(path) ? await this.requireMount(path) : undefined;
+    const absolute = mount ? '' : await this.resolve(path, false, new Cancellation());
+    const stat = mount ? await this.externalStat(mount.folder, mount.relative) : await this.optionalStat(absolute);
+    if (!stat) { throw new ToolFailure('FS_STALE_VERSION', t('文件已变化，请重新打开并检查。'), 'read_file', { path: path }); }
+    if (!stat.isFile() || stat.isSymbolicLink()) { throw new Error(t('请选择普通文件。')); }
+    const file = mount ? await this.openExternal(mount.folder, mount.relative, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW) :
+      await fs.open(absolute, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
+    try {
+      const hash = cryptoFramework.createMd('SHA256');
+      const buffer = new ArrayBuffer(64 * 1024);
+      while (true) {
+        const count = await fs.read(file.fd, buffer);
+        if (count === 0) { break; }
+        await hash.update({ data: new Uint8Array(buffer, 0, count) });
+      }
+      return new util.Base64Helper().encodeToStringSync((await hash.digest()).data);
+    } finally { await fs.close(file); }
+  }
+
+  async remove(path: string, version: string): Promise<void> {
+    return withFileMutation(await this.fileKey(path), async () => {
+      if (await this.removalVersionUnlocked(path) !== version) {
+        throw new ToolFailure('FS_STALE_VERSION', t('文件已变化，请重新打开并检查。'), 'read_file', { path: path });
+      }
+      if (this.isShared(path)) {
+        const mount = await this.requireMount(path);
+        await this.unlinkExternal(mount.folder, mount.relative);
+      } else { await fs.unlink(await this.resolve(path, false, new Cancellation())); }
+    });
   }
 
   private async mutate(path: string, content: string, edits: TextEdit[], cancellation: Cancellation,
@@ -146,7 +230,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
       throw new Error(t("只能写入普通文件，不能覆盖目录或符号链接。"));
     }
     if (guard && guard.version === null && existing) { throw new ToolFailure('FS_NOT_OBSERVED', t('覆盖已有文件前，请先用 read_file 读取。'), 'read_file', { path: path }); }
-    const original = existing ? await this.read(path, cancellation) : undefined;
+    const original = existing ? await this.readUnlocked(path, cancellation) : undefined;
     if (guard && guard.version !== null && (!original || original.version !== guard.version)) {
       throw new ToolFailure('FS_STALE_VERSION', t('文件自上次读取后已变化，请重新读取再修改。'), 'read_file', { path: path });
     }
@@ -196,7 +280,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
       throw new Error(t("只能写入普通文件，不能覆盖目录或符号链接。"));
     }
     if (guard && guard.version === null && existing) { throw new ToolFailure('FS_NOT_OBSERVED', t('覆盖已有文件前，请先用 read_file 读取。'), 'read_file', { path: path }); }
-    const original = existing ? await this.read(path, cancellation) : undefined;
+    const original = existing ? await this.readUnlocked(path, cancellation) : undefined;
     if (guard && guard.version !== null && (!original || original.version !== guard.version)) {
       throw new ToolFailure('FS_STALE_VERSION', t('文件自上次读取后已变化，请重新读取再修改。'), 'read_file', { path: path });
     }
@@ -318,7 +402,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
       return withFileMutation(this.externalUri(mount.folder, mount.relative), async () => {
         const baseline = await this.baseline(path);
         if (!baseline) { throw new Error(t("没有保存的修改基线。")); }
-        const current = await this.read(path, new Cancellation());
+        const current = await this.readUnlocked(path, new Cancellation());
         if (current.content !== expected) { throw new Error(t("文件已变化，请重新打开并检查。")); }
         if (baseline.existed) {
           await this.mutateExternal(mount, path, baseline.content, [], new Cancellation(), { version: current.version }, false);
@@ -332,7 +416,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
   private async restoreUnlocked(path: string, expected: string): Promise<void> {
     const baseline = await this.baseline(path);
     if (!baseline) { throw new Error(t("没有保存的修改基线。")); }
-    const current = await this.read(path, new Cancellation());
+    const current = await this.readUnlocked(path, new Cancellation());
     if (current.content !== expected) { throw new Error(t("文件已变化，请重新打开并检查。")); }
     if (baseline.existed) { await this.mutate(path, baseline.content, [], new Cancellation(), { version: current.version }, false); }
     else { await fs.unlink(await this.checkedPath(path)); }

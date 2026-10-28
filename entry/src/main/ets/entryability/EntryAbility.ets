@@ -10,6 +10,7 @@ import { huaweiAccount } from '../services/HuaweiAccount';
 
 import { hostedPrivacy } from '../services/HostedPrivacy';
 import { backgroundGeneration } from '../services/BackgroundGeneration';
+import { completionNotifications } from '../services/CompletionNotifications';
 import { WebUiPreflight } from '../services/WebUiPreflight';
 import { PreviewCapture } from '../services/PreviewCapture';
 /*
@@ -101,6 +102,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onDestroy(): void {
+    completionNotifications.dispose();
     backgroundGeneration.dispose();
     hostedPrivacy.dispose();
     DeveloperDiagnostics.stop();
@@ -129,6 +131,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onForeground(): void {
+    completionNotifications.setForeground(true);
     backgroundGeneration.setForeground(true);
     hostedPrivacy.refresh();
     if (hostedPrivacy.allowed) { huaweiAccount.refresh(); DeveloperDiagnostics.setForeground(true); }
@@ -142,6 +145,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onBackground(): void {
+    completionNotifications.setForeground(false);
     WebUiPreflight.setForeground(false);
     PreviewCapture.setForeground(false);
     backgroundGeneration.setForeground(false);

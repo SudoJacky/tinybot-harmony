@@ -3,7 +3,7 @@ import { t } from '../model/I18n';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { util } from '@kit.ArkTS';
 import { CompatHttp } from './CompatHttp';
-import { McpServer } from '../model/Productivity';
+import { McpServer, supportedMcpAuth } from '../model/Productivity';
 import { Cancellation, RunCancelledError } from './Cancellation';
 import { NetworkTransfers } from './NetworkTransfers';
 import { McpOAuth } from './McpOAuth';
@@ -37,7 +37,10 @@ export class McpClient implements McpConnection {
   private version: string = '2025-06-18';
   private initialized: boolean = false;
   private sequence: number = 0;
-  constructor(server: McpServer) { this.server = server; }
+  constructor(server: McpServer) {
+    if (!supportedMcpAuth(server)) { throw new ToolFailure('NOT_CONFIGURED', t('当前版本不支持此 MCP 认证方式，请重新配置或升级应用。'), 'check_settings'); }
+    this.server = server;
+  }
 
   private async initialize(cancellation: Cancellation): Promise<void> {
     if (this.initialized) { return; }

@@ -15,7 +15,7 @@ export struct SkillsPanel {
   onUse: () => void = () => {};
 
   private locked(): boolean {
-    return this.app.busy || this.app.saveError.length > 0;
+    return this.app.sharedBusy || this.app.saveError.length > 0;
   }
 
   private confirmDelete(skill: SkillData): void {

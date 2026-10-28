@@ -141,7 +141,7 @@ export class StorageUsage {
   // Attachment paths referenced by any live thread, including pending inputs and tool screenshots.
   private static references(data: AppData): Map<string, string> {
     const result = new Map<string, string>();
-    const add = (item: Attachment): void => { if (item && item.path) { result.set(item.path, item.name); } };
+    const add = (item: Attachment): void => { if (item && item.path && !item.workspaceId) { result.set(item.path, item.name); } };
     for (const thread of data.threads) {
       for (const item of thread.attachments || []) { add(item); }
       for (const input of thread.pendingInputs || []) {
@@ -218,7 +218,8 @@ export class StorageUsage {
     const cleanDirs: string[] = [];
     for (const dir of orphanDirs) {
       const reviewPath = workspaceRoot + '/' + dir + '/' + REVIEW_DIR;
-      if (!await StorageUsage.reviewHasBackups(reviewPath, failures)) { cleanDirs.push(dir); }
+      const appsPath = workspaceRoot + '/' + dir + '/mini-apps';
+      if (!await StorageUsage.reviewHasBackups(reviewPath, failures) && !await StorageUsage.reviewHasBackups(appsPath, failures)) { cleanDirs.push(dir); }
     }
     const result: StorageEntry[] = [];
     for (const dir of cleanDirs) {
@@ -348,6 +349,9 @@ export class StorageUsage {
     const orphans = new Set<string>(orphanWorkspaceIds(Array.from(dirs),
       data.threads.filter((thread: ThreadData): boolean => !thread.projectId).map((thread: ThreadData): string => thread.id),
       (data.projects || []).map((project): string => project.workspaceId)));
+    for (const id of Array.from(orphans)) {
+      if (await StorageUsage.reviewHasBackups(StorageUsage.workspaceRoot(roots) + '/' + id + '/mini-apps', failures)) { orphans.delete(id); }
+    }
     const result: StorageEntry[] = [];
     for (const file of files) {
       if (StorageUsage.isReview(file)) { continue; }

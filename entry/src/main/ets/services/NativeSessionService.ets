@@ -2,11 +2,15 @@ import { BrowserPreview } from '../model/BrowserPreview';
 import { ProviderEffects } from './providers/Provider';
 import { PresentTools } from './PresentTools';
 import { PreviewTools } from './PreviewTools';
+import { MiniApps } from './MiniApps';
+import { MiniAppTools } from './MiniAppTools';
 import { PreviewCapture } from './PreviewCapture';
 import { savePreviewRepair } from './PreviewRecovery';
 import { WebSearchTools } from './WebSearchTools';
 import { NativeSearchTransport } from './NativeSearchTransport';
 import { BrowserSearchTransport } from './BrowserSearchTransport';
+import { isSupportedSearchProvider } from '../model/WebSearch';
+import { isSupportedProtocol } from '../model/ProviderEndpoint';
 import { ProductivityData, Attachment, McpServer } from '../model/Productivity';
 import { LiveResources, McpRequest } from '../model/ResourceManagement';
 import { SkillData } from '../model/Skills';
@@ -56,6 +60,7 @@ import { profileProvider } from './providers/DefaultProviders';
 import { ProviderRegistry } from './providers/ProviderRegistry';
 import { huaweiAccount } from './HuaweiAccount';
 import { backgroundGeneration } from './BackgroundGeneration';
+import { completionNotifications } from './CompletionNotifications';
 
 class NativeProviderEffects implements ProviderEffects {
   hydrate(messages: ModelMessage[]): Promise<ModelMessage[]> { return Attachments.hydrate(messages); }
@@ -71,8 +76,11 @@ class NativeUsageRecorder implements UsageRecorder {
 
 export class NativeSessionResources implements SessionResources {
   authorizeGeneration(): Promise<void> { return huaweiAccount.requireLogin(); }
-  async prepareGeneration(): Promise<void> { if (this.context) { await backgroundGeneration.beginTurn(); } }
+  async prepareGeneration(): Promise<void> {
+    if (this.context) { await completionNotifications.prepare(); await backgroundGeneration.beginTurn(); }
+  }
   private workspaces: WorkspaceStore;
+  private miniApps: MiniApps;
   private providers: ProviderRegistry;
   private approval: ToolApproval;
   private browser?: BrowserSession;
@@ -80,6 +88,7 @@ export class NativeSessionResources implements SessionResources {
   private context?: common.UIAbilityContext;
   constructor(workspaceFilesDir: string, providers: ProviderRegistry, approval: ToolApproval, context?: common.UIAbilityContext, browser?: BrowserSession) {
     this.browser = browser;
+    this.miniApps = new MiniApps(workspaceFilesDir);
     this.context = context;
     this.workspaces = new WorkspaceStore(workspaceFilesDir); this.providers = providers; this.approval = approval;
   }
@@ -91,6 +100,10 @@ export class NativeSessionResources implements SessionResources {
   ensureWorkspace(id: string, workspaceId?: string): Promise<void> {
     return workspaceId ? this.workspaces.requireWorkspace(workspaceId) : this.workspaces.ensureThread(id);
   }
+  async prepareAttachments(items: Attachment[], threadId: string, workspaceId?: string): Promise<Attachment[]> {
+    await this.ensureWorkspace(threadId, workspaceId);
+    return Attachments.inWorkspace(items, workspaceId || threadId);
+  }
   persistProjectFolders(folders: SharedFolder[]): Promise<void> { return ProjectFolderAccess.persist(folders); }
   revokeProjectFolders(folders: SharedFolder[]): Promise<void> { return ProjectFolderAccess.revoke(folders); }
   activateProjectFolders(projects: ProjectData[]): Promise<void> { return ProjectFolderAccess.activateAll(projects); }
@@ -100,13 +113,15 @@ export class NativeSessionResources implements SessionResources {
     const groups: AgentTools[] = [new WorkspaceTools(files, nativeWorkspaceDiffs), new AttachmentTools(attachments),
       new SkillTools(extensions.skills, selected, live ? () => live.skills() : undefined), new InteractionTools(this.approval)];
     groups.push(new CodeExecutionTools(new NativeCodeExecutor()));
+    groups.push(new MiniAppTools(this.miniApps, workspaceId || id, id, files,
+      (page, storage, cancellation) => WebUiPreflight.validateMiniApp(page, storage, cancellation)));
     groups.push(new PresentTools((path: string) => files.checkedPath(path)));
     groups.push(new PreviewTools(files, (content, cancellation) => WebUiPreflight.validate(content, cancellation),
       (content, cancellation) => PreviewCapture.capture(content, cancellation)));
     if (extensions.webEnabled) { groups.push(new WebTools(new NativeWebTransport())); }
     if (this.browser) { groups.push(new BrowserTools(this.browser, id, productivity?.options?.readOnly === true, resolvePreview)); }
     const search = productivity?.options?.search;
-    if (extensions.webEnabled && search?.enabled) {
+    if (extensions.webEnabled && search?.enabled && isSupportedSearchProvider(search.provider)) {
       if (search.provider === 'bing-browser') {
         if (this.browser?.policy !== 'disabled') { groups.push(new WebSearchTools(new BrowserSearchTransport(this.browser, id), 'sequential')); }
       } else {
@@ -122,7 +137,9 @@ export class NativeSessionResources implements SessionResources {
   configureProviders(profiles: ProviderProfile[]): void {
     this.profiles = JSON.parse(JSON.stringify(profiles)) as ProviderProfile[];
     for (const info of this.providers.list()) { this.providers.unregister(info.id); }
-    for (const profile of profiles) { this.providers.register(profileProvider(profile, new NativeProviderEffects())); }
+    for (const profile of profiles) {
+      if (isSupportedProtocol(profile.protocol)) { this.providers.register(profileProvider(profile, new NativeProviderEffects())); }
+    }
   }
   reportError(event: string, error: Error | string, fields?: LogFields): void { Diagnostics.log('error', 'session', event, fields, error); }
   reportMemory(event: string, fields?: LogFields): void { Diagnostics.log('info', 'memory', event, fields); }
@@ -144,7 +161,7 @@ export function createNativeSessionService(filesDir: string, workspaceFilesDir: 
   const session = new SessionService(new ConversationStore(filesDir), new AgentRuntime(providers, credentials, new NativeUsageRecorder(),
     (content, cancellation) => WebUiPreflight.validate(content, cancellation), new NativeOrchestrationExecutor(), browser), credentials,
     new NativeSessionResources(workspaceFilesDir, providers, approval, context, browser));
-  if (context) { backgroundGeneration.attach(session, context); }
+  if (context) { backgroundGeneration.attach(session, context); completionNotifications.attach(session, context); }
   if (browser) {
     browser.configure((policy) => session.setBrowserPolicy(policy), (event, fields, error) => Diagnostics.log(error === undefined ? 'info' : 'error', 'browser', event, fields, error));
     session.subscribe((event) => { if (event.data) { browser.updatePolicy(event.data.extensions?.browserPolicy || 'unset'); } });

@@ -205,5 +205,13 @@ const data = {
   assert.ok(broken.failedPaths.includes('/app/attachments'));
   assert.equal(broken.categories.find(item => item.id === 'attachments').bytes, 0);
   failPath = '';
-  console.log('PASS storage dual roots, empty-name references, baseline-safe cleanup, empty review folders, partial deletion, dedupe and read-error reporting');
+  put('/app/workspace/deleted-chat/mini-apps/ledger/app.json', 100);
+  put('/app/workspace/deleted-chat/mini-apps/ledger/data.json', 80);
+  const appsScan = await StorageUsage.scan(context, data);
+  assert.equal(appsScan.orphanWorkspaces, 0, 'mini apps retain a deleted chat workspace without review baselines');
+  const appEntries = await StorageUsage.entries(context, data, 'workspace');
+  assert.ok(appEntries.entries.filter(item => item.path.includes('/deleted-chat/')).every(item => !item.removable));
+  await StorageUsage.cleanSafe(context, data);
+  assert.ok(files.has('/app/workspace/deleted-chat/mini-apps/ledger/data.json'));
+  console.log('PASS storage dual roots, mini-app retention, baseline-safe cleanup, partial deletion and read-error reporting');
 })().catch(error => { console.error(error); process.exitCode = 1; });

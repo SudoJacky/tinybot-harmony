@@ -232,7 +232,7 @@ function page() {
   const view = Object.assign(probe('pages/Index', 'Index', ['offerOnboarding', 'finishOnboarding', 'openSupport', 'connectOnboardingProvider'],
     { ShareInbox: { peek: () => undefined } }), {
     onboardingChecked: false, onboardingDraftThread: '', onboardingFinishing: false, onboardingActive: true, receiving: false, launching: false,
-    app: { ready: true, busy: false, saveError: '', error: '', draft: 'Keep my draft',
+    app: { ready: true, canNavigate: true, busy: false, saveError: '', error: '', draft: 'Keep my draft',
       active: { id: 'old', messages: [{ id: 'old-message' }], attachments: [], projectId: 'project' },
       exportSnapshot: fresh, flushDraft: async () => events.push('flush'),
       newThread: async project => { events.push(['new', project]); view.app.active = { id: 'new', messages: [], attachments: [] }; return true; },

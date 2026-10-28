@@ -107,7 +107,7 @@ export class AgentRuntime {
   fork(): AgentRuntime { return new AgentRuntime(this.providers, this.credentials, this.usage, this.validateAnswer, this.orchestrator, this.gate); }
 
   private contextTools(tools: AgentTools, selection: ToolSelection = {}): AgentTools {
-    validateToolSelection(selection);
+    validateToolSelection(selection, true);
     const contextTools = new SelectedTools(tools, selection);
     const composed = this.orchestrator && toolEnabled('orchestrate', selection) ? new OrchestrationTools(contextTools, this.orchestrator) : contextTools;
     return composed;
@@ -165,7 +165,7 @@ export class AgentRuntime {
         let bindingError: Error | undefined = undefined;
         const config = copyModelConfig(request.config);
         const selection = JSON.parse(JSON.stringify(request.toolSelection || {})) as ToolSelection;
-        validateToolSelection(selection);
+        validateToolSelection(selection, true);
         try {
           model = this.providers.bind(config, this.credentials, request.usageOrigin);
           if (this.gate) { model = new ControlledModel(model, this.gate); }
