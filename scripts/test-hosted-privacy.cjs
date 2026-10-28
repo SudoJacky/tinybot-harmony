@@ -108,6 +108,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
     '../services/McpOAuth': { McpOAuth: { receive: noOp } },
     '../services/LaunchActions': { LaunchActions: { receive: noOp, setForeground: noOp } },
     '../services/BackgroundGeneration': { backgroundGeneration: { setForeground: noOp, dispose: noOp } },
+    '../services/CompletionNotifications': { completionNotifications: { setForeground: noOp, dispose: noOp } },
     '../services/WebUiPreflight': { WebUiPreflight: { setForeground: value => renderLifecycle.push(['preflight', value]) } },
     '../services/PreviewCapture': { PreviewCapture: { setForeground: value => renderLifecycle.push(['capture', value]) } },
     '../services/DeveloperDiagnostics': { DeveloperDiagnostics: { initialize() { initialized++; }, stop() { stops++; }, setForeground: noOp } },

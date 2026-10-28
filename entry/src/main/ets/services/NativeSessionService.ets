@@ -56,6 +56,7 @@ import { profileProvider } from './providers/DefaultProviders';
 import { ProviderRegistry } from './providers/ProviderRegistry';
 import { huaweiAccount } from './HuaweiAccount';
 import { backgroundGeneration } from './BackgroundGeneration';
+import { completionNotifications } from './CompletionNotifications';
 
 class NativeProviderEffects implements ProviderEffects {
   hydrate(messages: ModelMessage[]): Promise<ModelMessage[]> { return Attachments.hydrate(messages); }
@@ -71,7 +72,9 @@ class NativeUsageRecorder implements UsageRecorder {
 
 export class NativeSessionResources implements SessionResources {
   authorizeGeneration(): Promise<void> { return huaweiAccount.requireLogin(); }
-  async prepareGeneration(): Promise<void> { if (this.context) { await backgroundGeneration.beginTurn(); } }
+  async prepareGeneration(): Promise<void> {
+    if (this.context) { await completionNotifications.prepare(); await backgroundGeneration.beginTurn(); }
+  }
   private workspaces: WorkspaceStore;
   private providers: ProviderRegistry;
   private approval: ToolApproval;
@@ -144,7 +147,7 @@ export function createNativeSessionService(filesDir: string, workspaceFilesDir: 
   const session = new SessionService(new ConversationStore(filesDir), new AgentRuntime(providers, credentials, new NativeUsageRecorder(),
     (content, cancellation) => WebUiPreflight.validate(content, cancellation), new NativeOrchestrationExecutor(), browser), credentials,
     new NativeSessionResources(workspaceFilesDir, providers, approval, context, browser));
-  if (context) { backgroundGeneration.attach(session, context); }
+  if (context) { backgroundGeneration.attach(session, context); completionNotifications.attach(session, context); }
   if (browser) {
     browser.configure((policy) => session.setBrowserPolicy(policy), (event, fields, error) => Diagnostics.log(error === undefined ? 'info' : 'error', 'browser', event, fields, error));
     session.subscribe((event) => { if (event.data) { browser.updatePolicy(event.data.extensions?.browserPolicy || 'unset'); } });
