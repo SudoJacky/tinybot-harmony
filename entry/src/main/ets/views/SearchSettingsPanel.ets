@@ -35,7 +35,7 @@ export struct SearchSettingsPanel {
     this.sourceId = this.candidates().some((item) => item.id === config.modelProviderId) ? config.modelProviderId! : '';
   }
   private async save(): Promise<void> {
-    if (this.app.busy || this.saving) { return; }
+    if (this.app.sharedBusy || this.saving) { return; }
     this.saving = true; this.error = '';
     try {
       const ok = await this.app.saveSearch({ provider: this.provider, enabled: this.searchEnabled, baseUrl: this.baseUrl,
@@ -56,7 +56,7 @@ export struct SearchSettingsPanel {
           .onSelect((index: number) => this.changeProvider(index))
         Text(t('搜索词会发送给所选服务。')).fontFamily(this.appearance.fontFamily)
           .fontSize(14).fontColor($r('app.color.text_secondary'))
-        SwitchRow({ title: t('启用联网搜索'), isOn: this.searchEnabled, disabled: this.saving || this.app.busy,
+        SwitchRow({ title: t('启用联网搜索'), isOn: this.searchEnabled, disabled: this.saving || this.app.sharedBusy,
           onChange: (value: boolean) => { this.searchEnabled = value; } })
         if (this.provider === 'deepseek') {
           Text(t('DeepSeek 搜索按请求次数计费，不再产生模型用量。')).fontFamily(this.appearance.fontFamily)
@@ -94,7 +94,7 @@ export struct SearchSettingsPanel {
           t('密钥保存在系统安全存储，不随备份导出。关闭“允许网页读取与搜索”也会停用搜索。')).fontFamily(this.appearance.fontFamily)
           .fontSize(12).fontColor($r('app.color.text_secondary'))
         if (this.error) { Banner({ text: this.error, danger: true }) }
-        Button(t('保存')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.primary).enabled(!this.saving && !this.app.busy && !this.app.saveError)
+        Button(t('保存')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.primary).enabled(!this.saving && !this.app.sharedBusy && !this.app.saveError)
           .id('save-search-settings').onClick(() => this.save())
       }.width('100%').padding(Space.page).alignItems(HorizontalAlign.Start)
     }.width('100%').height('100%').align(Alignment.Top).backgroundColor($r('app.color.page_background'))

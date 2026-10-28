@@ -1087,7 +1087,8 @@ export default function sessionServiceTests(): void {
       f.session.setDraft('second'); await f.session.enqueueInput('followUp');
       f.session.setDraft('third'); await f.session.enqueueInput('followUp');
       f.session.setDraft('unsent draft');
-      expect(await f.session.newThread()).assertFalse();
+      expect(await f.session.newThread()).assertTrue();
+      expect(await f.session.selectThread('thread-1')).assertTrue();
       expect(await f.session.selectModel('test', 'model')).assertFalse();
       await f.session.send();
       release.open(); await running;
@@ -1115,7 +1116,7 @@ export default function sessionServiceTests(): void {
       const running = f.session.resumeQueue(); await saving.promise;
       let idle = false; const waiting = f.session.waitForIdle().then(() => { idle = true; });
       expect(f.provider.requests.length).assertEqual(1); expect(idle).assertFalse();
-      expect(await f.session.newThread()).assertFalse();
+      expect(f.session.canNavigate).assertTrue();
       saved.open(); await second.promise;
       expect(idle).assertFalse(); expect(f.session.state.phase).assertEqual('running');
       finish.open(); await running; await waiting;

@@ -3,7 +3,6 @@ import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { Diagnostics } from '../model/Diagnostics';
 import { t } from '../model/I18n';
 import { SessionService } from './SessionService';
-import { SessionPhase } from './SessionContracts';
 import { Cancellation, RunCancelledError } from './Cancellation';
 import { EndNetworkTransfer, NetworkTransfers } from './NetworkTransfers';
 
@@ -63,9 +62,9 @@ export class BackgroundGeneration {
 
   attach(session: SessionService, context: common.UIAbilityContext): void {
     this.dispose(); this.session = session; this.context = context;
-    this.unsubscribe = session.subscribe((event) => this.update(event.state.phase));
+    this.unsubscribe = session.subscribe((event) => this.update(session.hasActiveRuns));
     this.unobserveTransfers = NetworkTransfers.observe((cancellation) => this.beginTransfer(cancellation));
-    this.update(session.state.phase);
+    this.update(session.hasActiveRuns);
   }
 
   setForeground(foreground: boolean): void {
@@ -96,8 +95,7 @@ export class BackgroundGeneration {
     this.reconcileLifecycle();
   }
 
-  private update(phase: SessionPhase): void {
-    const active = phase === 'running' || phase === 'compacting';
+  private update(active: boolean): void {
     if (active === this.active) { return; }
     this.active = active;
     // Session activity only authorizes request scopes. It never creates a background task.
@@ -234,7 +232,7 @@ export class BackgroundGeneration {
     const session = this.session;
     if (session && this.active && !this.stopping) {
       this.stopping = true;
-      session.stop(this.blockedReason).then(() => session.waitForIdle())
+      session.stopAll(this.blockedReason).then(() => session.waitForIdle())
         .catch((error: Error) => Diagnostics.log('error', 'background', 'stop_failed', undefined, error))
         .finally(() => { this.stopping = false; });
     }

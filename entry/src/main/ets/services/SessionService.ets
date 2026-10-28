@@ -49,13 +49,23 @@ import { PromptSection, renderPrompt } from '../model/ContextProjection';
 interface UiComputeReceipt { status: string; result: UiValues; error: string; resultTruncated: boolean; }
 interface FormReceipt { status: string; }
 
+class ThreadExecution {
+  state: SessionState = { ready: true, phase: 'idle', error: '', saveError: '',
+    contextStatus: '', contextTokens: 0, acceptingSteering: false };
+  runtime: AgentRuntime;
+  teams?: ChatTeamTools;
+  recovering?: Cancellation;
+  constructor(runtime: AgentRuntime) { this.runtime = runtime; }
+}
+
 // Sole owner of application/session data and admission. No ArkUI or platform Kit imports.
 export class SessionService {
   private pendingCommit?: Promise<void>;
   private memoryReviewRunning: boolean = false;
-  private chatTeams?: ChatTeamTools;
+  private executions: Map<string, ThreadExecution> = new Map<string, ThreadExecution>();
+  private sharedOperation: Promise<void> = Promise.resolve();
   private data: AppData = emptyData();
-  private status: SessionState = { ready: false, phase: 'idle', error: '', saveError: '',
+  private application: SessionState = { ready: false, phase: 'idle', error: '', saveError: '',
     contextStatus: '', contextTokens: 0, acceptingSteering: false };
   private repository: SessionRepository;
   private resources: SessionResources;
@@ -68,7 +78,6 @@ export class SessionService {
   // Composer choices stay outside persisted data until a user message is submitted.
   private pendingTeamModes: Map<string, boolean> = new Map<string, boolean>();
   private pendingToolSelections: Map<string, ToolSelection> = new Map<string, ToolSelection>();
-  private recovering?: Cancellation;
   private listeners: Set<(event: SessionEvent) => void> = new Set<(event: SessionEvent) => void>();
 
   constructor(repository: SessionRepository, runtime: AgentRuntime, credentials: CredentialVault, resources: SessionResources) {
@@ -131,14 +140,35 @@ export class SessionService {
     }
   }
 
-  get state(): SessionState { return JSON.parse(JSON.stringify(this.status)) as SessionState; }
-  get canMutate(): boolean { return this.status.ready && this.status.phase === 'idle' && this.status.saveError.length === 0; }
+  private execution(id: string = this.data.activeThreadId): ThreadExecution {
+    let execution = this.executions.get(id);
+    if (!execution) { execution = new ThreadExecution(this.runtime.fork()); this.executions.set(id, execution); }
+    return execution;
+  }
+  private get status(): SessionState { return this.application.ready ? this.execution().state : this.application; }
+  get runningThreadIds(): string[] {
+    return Array.from(this.executions.keys()).filter((id) => this.executions.get(id)!.state.phase !== 'idle');
+  }
+  get hasActiveRuns(): boolean { return this.runningThreadIds.length > 0; }
+  get canNavigate(): boolean { return this.application.ready && this.application.phase === 'idle' && !this.application.saveError; }
+  get state(): SessionState {
+    const state = JSON.parse(JSON.stringify(this.status)) as SessionState;
+    state.ready = this.application.ready; state.saveError = this.application.saveError;
+    if (this.application.phase !== 'idle') { state.phase = this.application.phase; }
+    state.runningThreadIds = this.runningThreadIds; state.canNavigate = this.canNavigate;
+    return state;
+  }
+  get canMutate(): boolean { return this.canNavigate && this.status.phase === 'idle'; }
+  private get canMutateShared(): boolean { return this.canNavigate && !this.hasActiveRuns; }
   get canQueueInput(): boolean {
-    return this.status.ready && !this.active.archived && this.status.saveError.length === 0 &&
+    return this.canNavigate && !this.active.archived &&
       (this.status.phase === 'idle' || this.status.phase === 'running');
   }
   get currentConfig(): ModelConfig {
-    const reference = this.active.modelRef;
+    return this.threadConfig(this.active);
+  }
+  private threadConfig(thread: ThreadData): ModelConfig {
+    const reference = thread.modelRef;
     if (!reference) { return copyModelConfig(this.data.config, false); }
     const profile = this.providerProfiles.find((item: ProviderProfile) => item.id === reference.providerId);
     if (!profile || !profile.enabled || !profile.models.includes(reference.modelId)) {
@@ -146,16 +176,15 @@ export class SessionService {
       unavailable.contextWindow = profile?.contextWindow || this.data.config.contextWindow;
       return unavailable;
     }
-    return this.configFor(reference);
+    return this.configFor(reference, thread);
   }
-  private configFor(reference: ModelReference): ModelConfig {
+  private configFor(reference: ModelReference, thread: ThreadData = this.active): ModelConfig {
     const config = modelConfig(this.providerProfiles, reference, this.data.config);
     const capability = this.data.productivity?.options?.capabilities.find((item) => item.providerId === reference.providerId && item.modelId === reference.modelId);
     if (capability) {
       config.images = capability.images; config.reasoning = capability.reasoning; config.requestUsage = capability.requestUsage;
       if (capability.contextWindow !== undefined) { config.contextWindow = capability.contextWindow; }
     }
-    const thread = this.data.threads.find((item) => item.id === this.data.activeThreadId);
     const protocol = this.providerProfiles.find((item) => item.id === reference.providerId)?.protocol || '';
     // An automatically routed model (or a worker using another model) retains its own defaults.
     if (supportsReasoningEffort(protocol, reference.modelId) && thread?.modelRef?.providerId === reference.providerId &&
@@ -169,7 +198,7 @@ export class SessionService {
     return this.mutate(t("保存会话工具设置失败："), async () => {
       const ids = (this.active.disabledMcpIds || []).filter((item) => item !== id);
       this.active.disabledMcpIds = enabled ? ids : ids.concat([id]); await this.persist();
-    });
+    }, 'snapshot', 'thread');
   }
   async importSnapshot(imported: AppData): Promise<boolean> {
     return this.mutate(t("导入失败："), async () => {
@@ -188,8 +217,8 @@ export class SessionService {
   }
 
   async initialize(): Promise<void> {
-    if (this.status.ready || this.status.phase !== 'idle') { return; }
-    this.status.phase = 'loading'; this.status.error = ''; this.publish('state');
+    if (this.application.ready || this.application.phase !== 'idle') { return; }
+    this.application.phase = 'loading'; this.application.error = ''; this.publish('state');
     try {
       const data = await this.repository.load();
       validateProjects(data);
@@ -214,10 +243,11 @@ export class SessionService {
       data.activeThreadId = active.id;
       const preferencesChanged = this.syncEmptyThreadPreferences(data);
       if (created || migrate || builtinsChanged || preferencesChanged.length > 0) { await this.persist(); }
-      this.status.ready = true;
       this.refreshContext();
-    } catch (error) { this.status.error = t("打开本地会话或工作区失败：") + (error as Error).message; }
-    finally { this.status.phase = 'idle'; this.publish('snapshot'); }
+      this.application.saveError = '';
+      this.application.ready = true;
+    } catch (error) { this.application.error = t("打开本地会话或工作区失败：") + (error as Error).message; }
+    finally { this.application.phase = 'idle'; this.publish('snapshot'); }
   }
 
   async saveSearch(draft: SearchDraft): Promise<boolean> {
@@ -249,23 +279,23 @@ export class SessionService {
     });
   }
   async setAttachments(items: Attachment[]): Promise<boolean> {
-    if (this.status.phase === 'running') {
+    const thread = this.active; const status = this.status;
+    if (status.phase === 'running') {
       if (!this.canQueueInput) { return false; }
       try {
-        const thread = this.active;
         const prepared = await this.prepareAttachments(items, thread);
         if (this.active !== thread || !this.canQueueInput) { throw new Error(t('对话已切换，请在当前对话重新添加附件。')); }
         this.active.attachments = prepared; this.publish('snapshot');
         await this.persist(this.active.id); return true;
       } catch (error) {
-        this.status.error = t('保存附件失败：') + (error as Error).message;
+        status.error = t('保存附件失败：') + (error as Error).message;
         this.resources.reportError('mutation_failed', error as Error); this.publish('snapshot'); return false;
       }
     }
     return this.mutate(t("保存附件失败："), async () => {
-      if (this.active.archived) { throw new Error(t("请先恢复对话。")); }
-      this.active.attachments = await this.prepareAttachments(items, this.active); await this.persist();
-    });
+      if (thread.archived) { throw new Error(t("请先恢复对话。")); }
+      thread.attachments = await this.prepareAttachments(items, thread); await this.persist(thread.id);
+    }, 'snapshot', 'thread');
   }
   private async prepareAttachments(items: Attachment[], thread: ThreadData): Promise<Attachment[]> {
     validateAttachments(items);
@@ -275,7 +305,7 @@ export class SessionService {
   }
   async appendDraftAttachment(threadId: string, item: Attachment, text: string): Promise<void> {
     if (this.active.id !== threadId) { throw new Error(t('对话已切换，请在当前对话重新添加附件。')); }
-    if (!this.canQueueInput) { throw new Error(this.status.saveError || t('当前无法添加附件，请稍后重试。')); }
+    if (!this.canQueueInput) { throw new Error(this.application.saveError || t('当前无法添加附件，请稍后重试。')); }
     const attachments = (this.active.attachments || []).concat([item]);
     validateAttachments(attachments);
     const draft = [this.active.draft || '', text].filter((value) => value.length > 0).join('\n\n');
@@ -295,14 +325,14 @@ export class SessionService {
       this.active.references = references;
       this.setDraft(removeReferenceQuery(this.active.draft || ''), this.active.id);
       await this.persist();
-    });
+    }, 'snapshot', 'thread');
   }
   async removeThreadReference(id: string): Promise<boolean> {
     return this.mutate(t('更新会话引用失败：'), async () => {
       if (this.active.archived) { throw new Error(t('请先恢复对话。')); }
       this.active.references = (this.active.references || []).filter((item) => item.threadId !== id);
       await this.persist();
-    });
+    }, 'snapshot', 'thread');
   }
   async restoreMessageDraft(id: string): Promise<boolean> {
     return this.mutate(t('恢复草稿失败：'), async () => {
@@ -313,7 +343,7 @@ export class SessionService {
       this.active.references = (message.references || []).map((item): ThreadReference => ({ threadId: item.threadId, title: item.title,
         content: item.content, capturedAt: item.capturedAt, truncated: item.truncated, fullContent: item.fullContent }));
       this.setDraft(message.content, this.active.id); await this.persist();
-    });
+    }, 'snapshot', 'thread');
   }
   async forkThread(messageId: string = ''): Promise<boolean> {
     return this.mutate(t("创建分支失败："), async () => {
@@ -336,7 +366,7 @@ export class SessionService {
         servers: extras.servers, options: extras.options };
       validateProductivity(next); this.data.productivity = next;
       this.data.threads.unshift(branch); this.data.activeThreadId = branch.id; await this.persist();
-    });
+    }, 'snapshot', 'thread');
   }
 
   private ensureThreadWorkspace(thread: ThreadData, data: AppData = this.data): Promise<void> {
@@ -361,7 +391,7 @@ export class SessionService {
   }
 
   async newThread(projectId?: string): Promise<boolean> {
-    if (!this.canMutate) { return false; }
+    if (!this.canNavigate) { return false; }
     const current = this.active;
     // Repeated new-chat actions are idempotent while the current composer is untouched.
     // Keep its workspace and local model/team choices; never discard prepared input.
@@ -372,32 +402,35 @@ export class SessionService {
     return this.mutate(t("新建对话失败："), async () => {
       const thread = this.freshThread(); thread.projectId = projectId; await this.ensureThreadWorkspace(thread);
       this.data.threads.unshift(thread); this.data.activeThreadId = thread.id;
-      this.status.contextStatus = ''; await this.persist();
-    });
+      await this.persist();
+    }, 'snapshot', 'navigation');
   }
 
   // A regenerated answer is a new branch; existing answers and later turns stay intact.
-  async regenerateReply(messageId: string): Promise<boolean> {
+  async regenerateReply(messageId: string, started?: (threadId: string) => void): Promise<boolean> {
     if (!this.canMutate) { return false; }
     const threadId = this.active.id;
     if ((this.resources.authorizeGeneration && !await this.authorizeGeneration()) || !this.canMutate || this.active.id !== threadId) { return false; }
     const index = this.active.messages.findIndex((item) => item.id === messageId && item.role === 'assistant');
     if (index < 1 || this.active.messages[index - 1].role !== 'user') { return false; }
     if (!await this.forkThread(this.active.messages[index - 1].id)) { return false; }
+    started?.(this.active.id);
     await this.send(); return true;
   }
   async selectThread(id: string): Promise<boolean> {
     return this.mutate(t("打开对话失败："), async () => {
       const thread = this.requireThread(id); await this.ensureThreadWorkspace(thread);
-      this.data.activeThreadId = id; this.status.contextStatus = ''; await this.persist();
-    });
+      this.data.activeThreadId = id; await this.persist();
+    }, 'snapshot', 'navigation');
   }
   async deleteThread(id: string): Promise<boolean> {
     return this.deleteThreads([id]);
   }
   async deleteThreads(ids: string[]): Promise<boolean> {
+    if (ids.some((id) => this.runningThreadIds.includes(id))) { return false; }
     if (ids.length === 0) { return false; }
     return this.mutate(t("删除对话失败："), async () => {
+      const running = this.runningThreadIds;
       for (const id of ids) { this.requireThread(id); }
       const selected = new Set(ids);
       const candidate = this.snapshot();
@@ -405,28 +438,30 @@ export class SessionService {
       await this.replaceActive(selected, candidate);
       // Deleting a conversation deliberately retains its workspace.
       candidate.threads = candidate.threads.filter((thread) => !selected.has(thread.id));
-      await this.commitSettings(candidate);
-      for (const id of ids) { this.pendingTeamModes.delete(id); this.pendingToolSelections.delete(id); }
+      await this.commitSettings(candidate, running);
+      for (const id of ids) { this.executions.delete(id); this.pendingTeamModes.delete(id); this.pendingToolSelections.delete(id); }
       if (activeChanged) { this.status.contextStatus = ''; }
-    });
+    }, 'snapshot', 'navigation');
   }
   async renameThread(id: string, title: string): Promise<boolean> {
     return this.mutate(t("重命名失败："), async () => {
       const thread = this.requireThread(id); thread.title = threadTitle(title); thread.titleEdited = true; await this.persist();
-    });
+    }, 'snapshot', 'navigation');
   }
   async pinThread(id: string): Promise<boolean> {
     return this.mutate(t("置顶状态保存失败："), async () => {
       const thread = this.requireThread(id); thread.pinned = !thread.pinned; await this.persist();
-    });
+    }, 'snapshot', 'navigation');
   }
   async archiveThread(id: string): Promise<boolean> {
     const thread = this.data.threads.find((item) => item.id === id);
     return this.archiveThreads([id], !thread?.archived);
   }
   async archiveThreads(ids: string[], archived: boolean): Promise<boolean> {
+    if (ids.some((id) => this.runningThreadIds.includes(id))) { return false; }
     if (ids.length === 0) { return false; }
     return this.mutate(t("归档状态保存失败："), async () => {
+      const running = this.runningThreadIds;
       for (const id of ids) { this.requireThread(id); }
       const selected = new Set(ids);
       const candidate = this.snapshot();
@@ -435,13 +470,13 @@ export class SessionService {
       for (const thread of candidate.threads) {
         if (selected.has(thread.id)) { thread.archived = archived; }
       }
-      await this.commitSettings(candidate);
+      await this.commitSettings(candidate, running);
       if (activeChanged) { this.status.contextStatus = ''; }
-    });
+    }, 'snapshot', 'navigation');
   }
 
   setDraft(text: string, threadId: string = this.data.activeThreadId): void {
-    if (!this.status.ready || text.length > MAX_INPUT_TEXT) { return; }
+    if (!this.application.ready || text.length > MAX_INPUT_TEXT) { return; }
     const thread = this.data.threads.find((item) => item.id === threadId);
     if (!thread || thread.archived) { return; }
     thread.draft = text;
@@ -449,20 +484,20 @@ export class SessionService {
     this.emit({ kind: 'draft', state: this.state, threadId: thread.id, content: text });
   }
   async flushDraft(): Promise<void> {
-    if (!this.status.ready || this.status.phase === 'saving' || this.status.saveError.length > 0) { return; }
+    if (!this.application.ready || this.application.phase === 'saving' || this.application.saveError.length > 0) { return; }
     // Runtime checkpoints and draft writes use the repository's same ordered save lane.
     try { await this.persist(this.data.activeThreadId); } catch (_) { /* persist publishes the retained unsaved state. */ }
   }
   async retrySave(): Promise<void> {
-    if (!this.status.ready || this.status.phase !== 'idle') { return; }
-    this.status.phase = 'saving'; this.publish('state');
-    try { await this.persistDraftChanges(-1); }
+    if (!this.application.ready || this.application.phase !== 'idle' || this.hasActiveRuns) { return; }
+    this.application.phase = 'saving'; this.publish('state');
+    try { await this.persistDraftChanges(-1); this.application.saveError = ''; }
     catch (_) { /* Keep the explicit retry error visible. */ }
-    finally { this.status.phase = 'idle'; this.publish('snapshot'); }
+    finally { this.application.phase = 'idle'; this.publish('snapshot'); }
   }
 
   async selectModel(providerId: string, modelId: string): Promise<boolean> {
-    if (!this.status.ready || this.active.archived) { return false; }
+    if (!this.application.ready || this.active.archived) { return false; }
     return this.mutate(t("选择模型失败："), async () => {
       const reference: ModelReference = { providerId: providerId, modelId: modelId };
       const config = modelConfig(this.providerProfiles, reference, this.data.config);
@@ -477,10 +512,10 @@ export class SessionService {
         candidate.config = config;
       }
       await this.commitSettings(candidate); this.status.contextStatus = '';
-    });
+    }, 'snapshot', 'thread');
   }
   async setReasoningEffort(value: string): Promise<boolean> {
-    if (!this.status.ready || this.active.archived) return false;
+    if (!this.application.ready || this.active.archived) return false;
     return this.mutate(t('保存推理强度失败：'), async () => {
       const protocol = this.providerProfiles.find((item) => item.id === this.active.modelRef?.providerId)?.protocol || '';
       if (!reasoningEfforts(protocol, this.active.modelRef?.modelId || '').includes(value) || !this.currentConfig.configured) {
@@ -493,7 +528,7 @@ export class SessionService {
       thread.reasoningEffort = value === 'default' ? undefined : value;
       if (thread.messages.length === 0) { candidate.config.reasoning = thread.reasoningEffort; }
       await this.commitSettings(candidate);
-    });
+    }, 'snapshot', 'thread');
   }
 
   async saveProvider(draft: ProviderDraft): Promise<boolean> {
@@ -532,18 +567,20 @@ export class SessionService {
     }, 'preferences');
   }
   async setBrowserPolicy(policy: BrowserPolicy): Promise<void> {
-    if (!this.status.ready || this.status.saveError) { throw new Error(this.status.saveError || 'Session is not ready.'); }
+    if (!this.application.ready || this.application.saveError) { throw new Error(this.application.saveError || 'Session is not ready.'); }
     if (!['unset', 'enabled', 'disabled'].includes(policy)) { throw new Error('Invalid browser permission setting.'); }
     // This field can change while the runtime is paused. Publish only this field, never an old transcript snapshot.
-    const candidate = this.snapshot();
-    candidate.extensions = candidate.extensions || defaultExtensions();
-    candidate.extensions.browserPolicy = policy;
-    await this.commitCandidate(candidate, () => {
-      if (!this.data.extensions) { this.data.extensions = defaultExtensions(); }
-      this.data.extensions.browserPolicy = policy;
+    await this.exclusive(async () => {
+      const candidate = this.snapshot();
+      candidate.extensions = candidate.extensions || defaultExtensions();
+      candidate.extensions.browserPolicy = policy;
+      await this.commitCandidate(candidate, () => {
+        if (!this.data.extensions) { this.data.extensions = defaultExtensions(); }
+        this.data.extensions.browserPolicy = policy;
+      });
+      await this.persist();
+      this.publish('snapshot');
     });
-    await this.persist();
-    this.publish('snapshot');
   }
   async saveSkill(originalName: string, document: string, files: SkillFile[]): Promise<boolean> {
     return this.mutate(t("保存 Skill 失败："), async () => {
@@ -562,38 +599,40 @@ export class SessionService {
   }
 
   async enqueueInput(mode: InputMode): Promise<void> {
-    if (!this.canQueueInput || (this.active.draft || '').trim().length === 0) { return; }
-    this.status.error = '';
+    const thread = this.active; const status = this.status;
+    if (!this.canQueueInput || (thread.draft || '').trim().length === 0) { return; }
+    status.error = '';
     try {
-      if ((this.active.references || []).length > 0) { throw new Error(t('会话引用请在当前任务完成后发送，或先移除引用再排队。')); }
-      if (/^\/compact(?:\s|$)/i.test((this.active.draft || '').trim())) { throw new Error(t('/compact 请在当前任务完成后单独发送。')); }
-      if (mode === 'steer' && (!this.status.acceptingSteering || !this.runtime.acceptsSteering)) {
+      if ((thread.references || []).length > 0) { throw new Error(t('会话引用请在当前任务完成后发送，或先移除引用再排队。')); }
+      if (/^\/compact(?:\s|$)/i.test((thread.draft || '').trim())) { throw new Error(t('/compact 请在当前任务完成后单独发送。')); }
+      if (mode === 'steer' && (!status.acceptingSteering || !this.execution(thread.id).runtime.acceptsSteering)) {
         throw new Error(t("本轮正在结束或已停止，请将指令加入队列。"));
       }
-      const text = (this.active.draft || '').trim();
+      const text = (thread.draft || '').trim();
       if (mode === 'steer' && explicitSkill(text).length > 0) { throw new Error(t("运行中保持当前工具与 Skills；显式调用 /skill: 请使用“加入队列”。")); }
       const input: PendingInput = { id: this.resources.createId(), mode: mode, text: text };
-      if ((this.active.attachments || []).length) { input.attachments = this.active.attachments; }
-      const pending = (this.active.pendingInputs || []).concat([input]);
-      validatePendingInputs(pending); this.active.pendingInputs = pending;
-      if (this.status.phase !== 'running') { this.active.queuePaused = true; }
-      this.active.draft = ''; this.active.attachments = []; this.publish('snapshot'); await this.persist();
+      if ((thread.attachments || []).length) { input.attachments = thread.attachments; }
+      const pending = (thread.pendingInputs || []).concat([input]);
+      validatePendingInputs(pending); thread.pendingInputs = pending;
+      if (status.phase !== 'running') { thread.queuePaused = true; }
+      thread.draft = ''; thread.attachments = []; this.publish('snapshot'); await this.persist();
     } catch (error) {
-      this.status.error = t("指令未能提交：") + (error as Error).message;
-      if (this.status.saveError.length > 0) { this.active.queuePaused = true; this.runtime.abort(); }
+      status.error = t("指令未能提交：") + (error as Error).message;
+      if (this.application.saveError.length > 0) { thread.queuePaused = true; this.execution(thread.id).runtime.abort(); }
       this.publish('snapshot');
     }
   }
   async removePendingInput(id: string, edit: boolean = false): Promise<void> {
+    const thread = this.active; const status = this.status;
     if (!this.canQueueInput) { return; }
-    const input = (this.active.pendingInputs || []).find((item: PendingInput) => item.id === id);
-    if (!input) { this.status.error = t("这条指令已经开始执行，不能再撤回。"); this.publish('state'); return; }
-    if (edit && ((this.active.draft || '').trim().length > 0 || (this.active.attachments || []).length > 0)) { this.status.error = t("请先发送或清空当前草稿，再撤回编辑。"); this.publish('state'); return; }
-    this.active.pendingInputs = (this.active.pendingInputs || []).filter((item: PendingInput) => item.id !== id);
-    if (edit) { this.active.draft = input.text; this.active.attachments = input.attachments || []; }
-    this.status.error = ''; this.publish('snapshot');
+    const input = (thread.pendingInputs || []).find((item: PendingInput) => item.id === id);
+    if (!input) { status.error = t("这条指令已经开始执行，不能再撤回。"); this.publish('state'); return; }
+    if (edit && ((thread.draft || '').trim().length > 0 || (thread.attachments || []).length > 0)) { status.error = t("请先发送或清空当前草稿，再撤回编辑。"); this.publish('state'); return; }
+    thread.pendingInputs = (thread.pendingInputs || []).filter((item: PendingInput) => item.id !== id);
+    if (edit) { thread.draft = input.text; thread.attachments = input.attachments || []; }
+    status.error = ''; this.publish('snapshot');
     try { await this.persist(); }
-    catch (_) { this.active.queuePaused = true; this.runtime.abort(); this.publish('snapshot'); }
+    catch (_) { thread.queuePaused = true; this.execution(thread.id).runtime.abort(); this.publish('snapshot'); }
   }
 
   async send(): Promise<void> {
@@ -612,8 +651,9 @@ export class SessionService {
     await this.runTasks(text);
   }
   private async authorizeGeneration(): Promise<boolean> {
+    const status = this.status;
     try { await this.resources.authorizeGeneration?.(); return true; }
-    catch (error) { this.status.error = (error as Error).message; this.publish('state'); return false; }
+    catch (error) { status.error = (error as Error).message; this.publish('state'); return false; }
   }
   async resumeQueue(): Promise<void> {
     if (!this.canMutate || this.active.archived || (this.active.pendingInputs || []).length === 0) { return; }
@@ -621,29 +661,39 @@ export class SessionService {
     if ((this.resources.authorizeGeneration && !await this.authorizeGeneration()) || !this.canMutate || this.active.id !== threadId) { return; }
     this.active.queuePaused = false; await this.runTasks();
   }
-  async stop(reason?: string): Promise<void> {
-    if (!this.status.ready || (this.status.phase !== 'running' && this.status.phase !== 'compacting')) { return; }
-    this.active.queuePaused = true; this.status.acceptingSteering = false;
-    if (reason) { this.status.error = reason; }
-    this.chatTeams?.stop();
-    this.recovering?.cancel(); this.runtime.abort(reason); this.publish('snapshot');
-    try { await this.persist(); } catch (_) { /* Persist failure remains visible; no queue is drained. */ }
+  private cancelThread(threadId: string, reason?: string): void {
+    const execution = this.executions.get(threadId);
+    if (!execution || execution.state.phase === 'idle') { return; }
+    this.requireThread(threadId).queuePaused = true; execution.state.acceptingSteering = false;
+    if (reason) { execution.state.error = reason; }
+    Diagnostics.log('info', 'session', 'run_cancelled', { threadId: threadId });
+    execution.teams?.stop(); execution.recovering?.cancel(); execution.runtime.abort(reason);
+  }
+  async stop(reason?: string, threadId: string = this.data.activeThreadId): Promise<void> {
+    this.cancelThread(threadId, reason); this.publish('snapshot');
+    try { await this.persist(threadId); } catch (_) { /* Persist failure remains visible; no queue is drained. */ }
+  }
+  async stopAll(reason?: string): Promise<void> {
+    for (const id of this.runningThreadIds) { this.cancelThread(id, reason); }
+    this.publish('state');
+    try { await this.persist(); } catch (_) { /* persist reports the failure and stops every run. */ }
   }
   waitForIdle(): Promise<void> {
-    if (this.status.phase === 'idle') { return Promise.resolve(); }
+    if (!this.hasActiveRuns && this.application.phase === 'idle') { return Promise.resolve(); }
     return new Promise<void>((resolve) => {
       const unsubscribe = this.subscribe((event: SessionEvent) => {
-        if (event.state.phase === 'idle') { unsubscribe(); resolve(); }
+        if (!this.hasActiveRuns && this.application.phase === 'idle') { unsubscribe(); resolve(); }
       });
     });
   }
 
   async compactHistory(fromCommand: boolean = false): Promise<void> {
     if (!this.canMutate || this.active.archived) { return; }
+    const execution = this.execution(); const status = execution.state;
     const threadId = this.active.id;
     if ((this.resources.authorizeGeneration && !await this.authorizeGeneration()) || !this.canMutate || this.active.id !== threadId) { return; }
     if (!this.currentConfig.configured) {
-      this.status.error = t('当前对话没有可用模型，请选择模型，或添加、启用模型服务。'); this.publish('state'); return;
+      status.error = t('当前对话没有可用模型，请选择模型，或添加、启用模型服务。'); this.publish('state'); return;
     }
     const draftRevision = this.draftRevision;
     const thread = this.active; const config = this.currentConfig;
@@ -652,57 +702,62 @@ export class SessionService {
       { name: 'memory', content: this.memoryPrompt(thread, true), dynamic: true });
     this.addModeInstructions(sections, thread);
     const instructions = renderPrompt(sections); const tools = this.chatTools(thread);
-    this.status.phase = 'compacting'; this.status.error = ''; this.publish('state');
+    status.phase = 'compacting'; status.error = ''; this.publish('state');
     try {
-      const result = await this.runtime.run({ sessionId: thread.id, config: config, messages: [], contextOnly: true, tools: tools,
+      const result = await execution.runtime.run({ sessionId: thread.id, config: config, messages: [], contextOnly: true, tools: tools,
         usageOrigin: { threadId: thread.id, threadTitle: thread.title, turnId: this.resources.createId(), purpose: 'compaction' } }, {
         prepare: async () => { await this.resources.prepareGeneration?.(); }, checkpoint: () => this.persist(thread.id),
         prepareContext: (model, _messages, cancellation) => prepareSessionContext(thread, model, cancellation, true,
-          config, instructions, tools.definitions(), () => this.persist(thread.id), (status) => this.contextProgress(status), sections)
+          config, instructions, tools.definitions(), () => this.persist(thread.id), (status) => this.contextProgress(thread.id, status), sections)
       });
-      if (result.status !== 'complete') { this.status.error = result.status === 'stopped' ? this.status.error || t("上下文压缩已停止。") : result.error; }
+      if (result.status !== 'complete') { status.error = result.status === 'stopped' ? status.error || t("上下文压缩已停止。") : result.error; }
       else if (fromCommand && this.draftRevision === draftRevision && isCompactCommand(thread.draft || '')) {
         this.setDraft('', thread.id); await this.persist(thread.id);
       }
-    } catch (error) { this.status.error = t("上下文压缩失败：") + (error as Error).message; }
+    } catch (error) { status.error = t("上下文压缩失败：") + (error as Error).message; }
     finally {
-      this.status.phase = 'idle';
-      if (this.status.error.length > 0) { this.status.contextStatus = ''; }
-      this.refreshContext(); this.publish('snapshot');
+      status.phase = 'idle';
+      if (status.error.length > 0) { status.contextStatus = ''; }
+      this.refreshContext(thread.id); this.publish('snapshot');
     }
   }
 
   private async runTasks(initial?: string): Promise<void> {
+    const execution = this.execution(); const status = execution.state;
     const thread = this.active;
     if (initial !== undefined && (thread.pendingInputs || []).length === 0) { thread.queuePaused = false; }
-    this.status.phase = 'running'; this.publish('state');
+    status.phase = 'running'; this.publish('state');
+    Diagnostics.log('info', 'session', 'run_started', { threadId: thread.id, count: this.runningThreadIds.length });
     try {
       if (initial !== undefined && !await this.runTask(thread, initial)) { return; }
       let next = nextPendingInput(thread.pendingInputs || [], thread.queuePaused === true);
-      while (next && this.status.saveError.length === 0) {
+      while (next && this.application.saveError.length === 0) {
         if (!await this.runTask(thread, next.text, next.id)) { return; }
         next = nextPendingInput(thread.pendingInputs || [], thread.queuePaused === true);
       }
     } catch (error) {
-      thread.queuePaused = true; this.status.error = t("执行失败：") + (error as Error).message;
-      this.resources.reportError('tasks_failed', this.status.error);
+      thread.queuePaused = true; status.error = t("执行失败：") + (error as Error).message;
+      this.resources.reportError('tasks_failed', status.error, { threadId: thread.id });
     } finally {
-      this.status.acceptingSteering = false; this.status.phase = 'idle';
-      this.refreshContext(); this.publish('snapshot');
+      status.acceptingSteering = false; status.phase = 'idle';
+      Diagnostics.log('info', 'session', 'run_finished', { threadId: thread.id, count: this.runningThreadIds.length,
+        failed: !!status.error || thread.messages[thread.messages.length - 1]?.status === 'failed' });
+      this.refreshContext(thread.id); this.publish('snapshot');
     }
   }
 
   private async runTask(thread: ThreadData, text: string, queuedId?: string): Promise<boolean> {
+    const execution = this.execution(thread.id); const status = execution.state;
     const attachments = queuedId ? thread.pendingInputs?.find((item) => item.id === queuedId)?.attachments || [] : thread.attachments || [];
     const command = teamCommand(text);
     if (command !== undefined) { text = command; }
     const options = this.data.productivity?.options || defaultAssistantOptions();
     const reference = thread.modelRef ? routeModel(options, text, attachments.concat(...thread.messages.map((item) =>
       (item.role === 'user' ? item.attachments || [] : []).concat(...(item.steps || []).map((step) => step.steering?.attachments || [])))).some((item) => item.mime.startsWith('image/')), thread.modelRef) : undefined;
-    const config = reference ? this.configFor(reference) : this.currentConfig; const selected = explicitSkill(text);
-    if (!config.configured) { this.status.error = t("当前对话没有可用模型，请选择模型，或添加、启用模型服务。"); thread.queuePaused = true; return false; }
+    const config = reference ? this.configFor(reference, thread) : this.threadConfig(thread); const selected = explicitSkill(text);
+    if (!config.configured) { status.error = t("当前对话没有可用模型，请选择模型，或添加、启用模型服务。"); thread.queuePaused = true; return false; }
     if (selected.length > 0 && !this.extensions.skills.some((skill: SkillData) => skill.enabled && skill.name === selected)) {
-      this.status.error = t("指定的 Skill 不存在或已停用，请到设置中的 Skills 管理检查。"); thread.queuePaused = true; return false;
+      status.error = t("指定的 Skill 不存在或已停用，请到设置中的 Skills 管理检查。"); thread.queuePaused = true; return false;
     }
     // Commit the choice with the message through the runtime's initial checkpoint, before requesting the model.
     thread.teamEnabled = command !== undefined || this.selectedTeamMode(thread);
@@ -731,11 +786,11 @@ export class SessionService {
       chatTeams = new ChatTeamTools({ thread: thread, messageId: answer.id, config: workerConfig,
         toolSelection: selection,
         usageOrigin: { threadId: thread.id, threadTitle: thread.title, turnId: user.id, turnLabel: text.slice(0, 80), skill: selected || undefined },
-        configFor: (model) => { const saved = this.configFor(model); saved.systemPrompt = workerConfig.systemPrompt; return saved; },
-        base: () => this.tools(thread, selected), runtime: () => this.runtime.fork(), createId: () => this.resources.createId(),
+        configFor: (model) => { const saved = this.configFor(model, thread); saved.systemPrompt = workerConfig.systemPrompt; return saved; },
+        base: () => this.tools(thread, selected), runtime: () => execution.runtime.fork(), createId: () => this.resources.createId(),
         contextSections: sections.filter((section) => section.dynamic),
         checkpoint: () => this.persist(thread.id), changed: () => this.publishTeams(thread) });
-      this.chatTeams = chatTeams; tools = this.chatTools(thread, selected, chatTeams);
+      execution.teams = chatTeams; tools = this.chatTools(thread, selected, chatTeams);
       sections.push({ name: 'team', content: CHAT_TEAM_INSTRUCTIONS });
       sections.push({ name: 'team-state', dynamic: true, content: '本聊天已有团队（以此处ID为准，禁止跨会话访问）：' +
         JSON.stringify((thread.teams || []).filter((run) => run.ownerMessageId).map((run) => run.id + ' ' + run.status)) });
@@ -744,16 +799,16 @@ export class SessionService {
     else { thread.draft = ''; }
     thread.updatedAt = Date.now();
     this.data.threads = [thread].concat(this.data.threads.filter((item) => item.id !== thread.id));
-    this.status.error = ''; this.status.contextStatus = ''; this.refreshContext(); this.publish('snapshot');
-    const unsubscribe = this.runtime.subscribe((event: AgentEvent) => {
+    status.error = ''; status.contextStatus = ''; this.refreshContext(thread.id); this.publish('snapshot');
+    const unsubscribe = execution.runtime.subscribe((event: AgentEvent) => {
       if (event.run.sessionId !== thread.id) { return; }
       answer.content = event.run.turn.content; answer.steps = event.run.turn.steps;
       if (event.type === 'step_start') {
         const context = answer.steps[event.step || 0]?.context;
-        if (context) { this.status.contextTokens = context.tokens; }
+        if (context) { status.contextTokens = context.tokens; }
       }
       answer.status = event.run.status === 'running' ? 'generating' : event.run.status; answer.error = event.run.error;
-      this.status.acceptingSteering = this.runtime.acceptsSteering && !thread.queuePaused;
+      status.acceptingSteering = execution.runtime.acceptsSteering && !thread.queuePaused;
       if (event.type === 'run_finishing' && event.run.status !== 'complete') { thread.queuePaused = true; }
       if (event.type === 'tool_start' || event.type === 'tool_end') {
         const step = answer.steps[event.step || 0];
@@ -774,7 +829,7 @@ export class SessionService {
       }
     });
     try {
-      await this.runtime.run({ sessionId: thread.id, config: config, messages: [], tools: tools, toolSelection: selection,
+      await execution.runtime.run({ sessionId: thread.id, config: config, messages: [], tools: tools, toolSelection: selection,
         usageOrigin: { threadId: thread.id, threadTitle: thread.title, turnId: user.id, turnLabel: text.slice(0, 80), purpose: 'conversation', skill: selected || undefined } }, {
         recoverUi: !readOnly && this.resources.recoverUi ? (content, error, cancellation) =>
           this.resources.recoverUi!(thread.id, content, error, cancellation, projectFor(this.data, thread)?.workspaceId) : undefined,
@@ -785,11 +840,11 @@ export class SessionService {
           // The runtime's initial checkpoint has durably saved the first user message.
           if (generateTitle) { this.generateTitle(thread.id, user.id, text, fallbackTitle, copyModelConfig(config)); }
         },
-        context: sessionContextSource(thread, () => sections, () => this.persist(thread.id), (status) => this.contextProgress(status)),
+        context: sessionContextSource(thread, () => sections, () => this.persist(thread.id), (status) => this.contextProgress(thread.id, status)),
         contextChanged: (prepared) => {
-          this.status.contextTokens = prepared.context.tokens;
-          this.status.contextBreakdown = prepared.breakdown;
-          this.status.contextSource = prepared.context.source;
+          status.contextTokens = prepared.context.tokens;
+          status.contextBreakdown = prepared.breakdown;
+          status.contextSource = prepared.context.source;
         },
         checkpoint: () => { this.publishThread(thread); return this.persist(thread.id, answer.id); },
         steering: {
@@ -801,23 +856,23 @@ export class SessionService {
       answer.status = 'failed'; answer.error = (error as Error).message; thread.queuePaused = true;
       try { await this.persist(thread.id); } catch (_) { /* The in-memory receipt remains available for retry. */ }
     } finally {
-      await chatTeams?.close(); this.chatTeams = undefined;
-      unsubscribe(); this.status.acceptingSteering = false;
+      await chatTeams?.close(); execution.teams = undefined;
+      unsubscribe(); status.acceptingSteering = false;
       if (answer.status !== 'complete') { thread.queuePaused = true; }
-      if (answer.status === 'failed') { this.resources.reportError('run_failed', answer.error); }
-      if (this.status.contextStatus.startsWith(t("正在压缩"))) { this.status.contextStatus = ''; }
+      if (answer.status === 'failed') { this.resources.reportError('run_failed', answer.error, { threadId: thread.id, messageId: answer.id }); }
+      if (status.contextStatus.startsWith(t("正在压缩"))) { status.contextStatus = ''; }
     }
-    if (answer.status === 'complete' && !this.status.saveError) {
+    if (answer.status === 'complete' && !this.application.saveError) {
       if (options.saveSummary && !readOnly) {
         try { await this.resources.afterTask?.(thread.id, answer.id, answer.content, projectFor(this.data, thread)?.workspaceId); }
-        catch (error) { this.status.error = t("任务已完成，但结果归档失败：") + (error as Error).message; }
+        catch (error) { status.error = t("任务已完成，但结果归档失败：") + (error as Error).message; }
       }
       if (options.autoMemory && !readOnly) { this.reviewMemory(thread, user, copyModelConfig(config)); }
-      if (!this.status.error) {
+      if (!status.error) {
         this.emit({ kind: 'task-complete', state: this.state, threadId: thread.id, messageId: answer.id });
       }
     }
-    return answer.status === 'complete' && this.status.saveError.length === 0;
+    return answer.status === 'complete' && this.application.saveError.length === 0;
   }
   private async generateTitle(threadId: string, sourceId: string, input: string, fallback: string, config: ModelConfig): Promise<void> {
     try {
@@ -839,29 +894,31 @@ export class SessionService {
       const title = sanitizeConversationTitle(content);
       if (!title) { throw new Error('Empty conversation title'); }
       // Commit only between foreground operations, then revalidate against live data.
-      while (this.status.phase !== 'idle') { await this.waitForIdle(); }
-      if (!this.canMutate) { return; }
+      while (this.hasActiveRuns || this.application.phase !== 'idle') { await this.waitForIdle(); }
+      if (!this.canMutateShared) { return; }
       const thread = this.data.threads.find((item) => item.id === threadId);
       if (!thread || thread.archived || thread.titleEdited || thread.title !== fallback || thread.messages[0]?.id !== sourceId) { return; }
-      this.status.phase = 'saving'; this.publish('state');
+      this.application.phase = 'saving'; this.publish('state');
       try {
-        const target = JSON.parse(JSON.stringify(thread)) as ThreadData;
-        target.title = title;
-        // A title changes one thread. Keep unrelated transcripts out of capture and UI projection.
-        const candidate: AppData = { version: this.data.version, config: this.data.config,
-          extensions: this.data.extensions, productivity: this.data.productivity,
-          providerProfiles: this.data.providerProfiles, projects: this.data.projects,
-          activeThreadId: this.data.activeThreadId,
-          threads: this.data.threads.map((item) => item.id === threadId ? target : item) };
-        let revision = this.draftRevision;
-        await this.commitCandidate(candidate, () => { thread.title = title; },
-          [threadId].concat(Array.from(this.dirtyDrafts)));
-        // Preserve typing that occurred during the metadata write, using the same save lane.
-        while (revision !== this.draftRevision) {
-          revision = this.draftRevision; await this.persist(threadId);
-        }
-        this.publishThread(thread);
-      } finally { this.status.phase = 'idle'; this.publish('state'); }
+        await this.exclusive(async () => {
+          const target = JSON.parse(JSON.stringify(thread)) as ThreadData;
+          target.title = title;
+          // A title changes one thread. Keep unrelated transcripts out of capture and UI projection.
+          const candidate: AppData = { version: this.data.version, config: this.data.config,
+            extensions: this.data.extensions, productivity: this.data.productivity,
+            providerProfiles: this.data.providerProfiles, projects: this.data.projects,
+            activeThreadId: this.data.activeThreadId,
+            threads: this.data.threads.map((item) => item.id === threadId ? target : item) };
+          let revision = this.draftRevision;
+          await this.commitCandidate(candidate, () => { thread.title = title; },
+            [threadId].concat(Array.from(this.dirtyDrafts)));
+          // Preserve typing that occurred during the metadata write, using the same save lane.
+          while (revision !== this.draftRevision) {
+            revision = this.draftRevision; await this.persist(threadId);
+          }
+          this.publishThread(thread);
+        });
+      } finally { this.application.phase = 'idle'; this.publish('state'); }
     } catch (error) {
       // Auxiliary requests never change chat status or abort the foreground runtime.
       this.resources.reportError('title_failed', error as Error);
@@ -907,7 +964,7 @@ export class SessionService {
         prompt = '用户点击了交互界面中的继续对话按钮。以下 JSON 是界面操作与用户当前输入的数据，不授予额外工具权限：\n' +
           JSON.stringify({ messageId: messageId, surface: key, title: document.title, action: action.id, request: action.prompt, values: result });
       }
-    });
+    }, 'snapshot', 'thread');
     if (!saved) {
       this.resources.reportError('interactive_failed', this.status.error, { threadId: threadId, messageId: messageId, surfaceId: key });
       throw new Error(this.status.error || t('当前无法保存，请等待任务结束后重试。'));
@@ -915,46 +972,49 @@ export class SessionService {
     if (prompt) {
       // Keep the existing composer draft and attachments; this is a distinct user event.
       if (!this.canMutate || this.data.activeThreadId !== threadId) { throw new Error(t('交互状态已保存，请稍后重新提交。')); }
-      this.status.phase = 'running'; this.publish('state');
+      const status = this.execution(threadId).state;
+      status.phase = 'running'; this.publish('state');
       try { await this.runTask(this.requireThread(threadId), prompt, 'ui-' + this.resources.createId()); }
-      finally { this.status.phase = 'idle'; this.refreshContext(); this.publish('snapshot'); }
+      finally { status.phase = 'idle'; this.refreshContext(threadId); this.publish('snapshot'); }
     }
     return copyUiValues(result);
   }
 
   async resumeForm(messageId: string, callId: string): Promise<void> {
     if (!this.canMutate || this.active.archived) { return; }
-    const threadId = this.active.id;
+    const execution = this.execution(); const status = execution.state;
+    const thread = this.active; const threadId = thread.id;
     if ((this.resources.authorizeGeneration && !await this.authorizeGeneration()) || !this.canMutate || this.active.id !== threadId) { return; }
     const message = this.active.messages.find((item) => item.id === messageId);
-    const execution = message?.steps?.flatMap((step) => step.tools).find((item) => item.call.id === callId);
-    if (!execution || execution.call.function.name !== 'request_user_input' || !['interrupted', 'cancelled'].includes(execution.status)) { return; }
-    const cancellation = new Cancellation(); this.recovering = cancellation; this.status.phase = 'running'; this.publish('snapshot');
+    const tool = message?.steps?.flatMap((step) => step.tools).find((item) => item.call.id === callId);
+    if (!tool || tool.call.function.name !== 'request_user_input' || !['interrupted', 'cancelled'].includes(tool.status)) { return; }
+    const cancellation = new Cancellation(); execution.recovering = cancellation; status.phase = 'running'; this.publish('snapshot');
     try {
-      const result = await this.tools(this.active).execute(execution.call, cancellation); cancellation.check();
+      const result = await this.tools(thread).execute(tool.call, cancellation); cancellation.check();
       const submitted = (JSON.parse(result) as FormReceipt).status === 'submitted';
-      execution.output = result; execution.status = submitted ? 'complete' : 'cancelled';
-      await this.persist();
-      cancellation.check(); this.recovering = undefined;
-      if (submitted) { await this.runTask(this.active, t('已补全上轮表单，请根据已保存的表单结果继续任务；不要重复执行已完成的工具。'), 'form-resume-' + callId); }
-    } catch (error) { this.status.error = (error as Error).message; }
-    finally { this.recovering = undefined; this.status.phase = 'idle'; this.refreshContext(); this.publish('snapshot'); }
+      tool.output = result; tool.status = submitted ? 'complete' : 'cancelled';
+      await this.persist(thread.id);
+      cancellation.check(); execution.recovering = undefined;
+      if (submitted) { await this.runTask(thread, t('已补全上轮表单，请根据已保存的表单结果继续任务；不要重复执行已完成的工具。'), 'form-resume-' + callId); }
+    } catch (error) { status.error = (error as Error).message; }
+    finally { execution.recovering = undefined; status.phase = 'idle'; this.refreshContext(thread.id); this.publish('snapshot'); }
   }
 
-  cancelMemoryDraft(): void { if (this.status.phase === 'memory') { this.runtime.abort(); } }
+  cancelMemoryDraft(): void { if (this.status.phase === 'memory') { this.execution().runtime.abort(); } }
 
   async proposeMemory(messageId: string): Promise<string[]> {
     if (!this.canMutate) { throw new Error(t("请等待当前任务结束后再提炼记忆。")); }
+    const execution = this.execution(); const status = execution.state;
     const thread = this.active; const index = thread.messages.findIndex((item) => item.id === messageId);
     const source = thread.messages[index];
     if (!source || source.status === 'generating' || !source.content.trim()) { throw new Error(t("这条消息暂时无法提炼记忆。")); }
     const reference = this.data.productivity?.options?.memory;
-    const config = reference ? this.configFor(reference) : this.currentConfig;
+    const config = reference ? this.configFor(reference, thread) : this.threadConfig(thread);
     if (!config.configured) { throw new Error(t("请先配置记忆模型或当前模型，也可以手动写一条记忆。")); }
-    this.status.phase = 'memory'; this.status.contextStatus = t("正在提炼记忆候选…"); this.publish('state');
+    status.phase = 'memory'; status.contextStatus = t("正在提炼记忆候选…"); this.publish('state');
     try {
-      return await proposeSessionMemory(this.runtime, thread, source, config, this.data.productivity?.memories || []);
-    } finally { this.status.phase = 'idle'; this.status.contextStatus = ''; this.publish('state'); }
+      return await proposeSessionMemory(execution.runtime, thread, source, config, this.data.productivity?.memories || []);
+    } finally { status.phase = 'idle'; status.contextStatus = ''; this.publish('state'); }
   }
 
   async saveMemoryDraft(threadId: string, messageId: string, items: string[], global: boolean): Promise<number> {
@@ -987,7 +1047,7 @@ export class SessionService {
         (request, cancellation) => this.manageMcp(thread, request, cancellation))]), this.selectedToolSelection(thread));
     }
     if (!options.autoMemory || this.readOnly(thread)) { return tools; }
-    return new SelectedTools(new ToolSet([tools, new MemoryTools(async (operations, cancellation) => {
+    return new SelectedTools(new ToolSet([tools, new MemoryTools(async (operations, cancellation) => this.exclusive(async () => {
       const user = thread.messages.slice().reverse().find((message) => message.role === 'user');
       if (!user) { throw new Error(t('记忆变更缺少有效的用户消息来源。')); }
       // The host supplies provenance; the model cannot impersonate another conversation's source.
@@ -999,12 +1059,12 @@ export class SessionService {
       if (operations.length > 0) { await this.commitMemory(thread, change); }
       return JSON.stringify({ success: true, receipt: change.receipt, limit: MEMORY_CHAR_LIMIT,
         memories: change.memories.filter((item) => !item.threadId || item.threadId === thread.id) });
-    })]), this.selectedToolSelection(thread));
+    }))]), this.selectedToolSelection(thread));
   }
 
   private checkResourceMutation(thread: ThreadData, cancellation: Cancellation): void {
     cancellation.check();
-    if (this.readOnly(thread) || thread.archived || this.status.saveError) { throw new Error('Resource changes are unavailable in this session.'); }
+    if (this.readOnly(thread) || thread.archived || this.application.saveError) { throw new Error('Resource changes are unavailable in this session.'); }
   }
 
   private async commitResources(thread: ThreadData, candidate: AppData, detail: string): Promise<void> {
@@ -1026,19 +1086,21 @@ export class SessionService {
       if (!this.resources.installSkill) { throw new Error('Skill downloads are unavailable.'); }
       imported = await this.resources.installSkill(request.source || '', request.paths || [], cancellation);
     }
-    const candidate = this.snapshot();
-    if (['create', 'update', 'install'].includes(request.action)) {
-      if (request.action === 'update' && request.files === undefined) { throw new Error('Update requires the complete files JSON array; use [] to remove all references.'); }
-      const files = imported ? imported.files : request.files || [];
-      candidate.extensions = saveSkillCandidate(this.extensions, request.name || '', imported ? imported.document : request.document || '', files, imported);
-    } else { candidate.extensions = changeSkillCandidate(this.extensions, request.name || '', request.action); }
-    this.checkResourceMutation(thread, cancellation);
-    const name = imported?.name || (request.document ? parseSkill(request.document).name : request.name || '');
-    await this.commitResources(thread, candidate, 'skill ' + request.action + ' ' + name);
-    const skill = this.extensions.skills.find((item) => item.name === name);
-    return JSON.stringify({ success: true, action: request.action, name: name, enabled: skill?.enabled,
-      available: !!skill?.enabled && !skill.manualOnly, source: skill?.source, files: skill?.files.map((file) => file.path),
-      next: 'Use read_skill for current instructions. Scripts are reference text only; no Shell/Python/Node runtime.' });
+    return this.exclusive(async () => {
+      const candidate = this.snapshot();
+      if (['create', 'update', 'install'].includes(request.action)) {
+        if (request.action === 'update' && request.files === undefined) { throw new Error('Update requires the complete files JSON array; use [] to remove all references.'); }
+        const files = imported ? imported.files : request.files || [];
+        candidate.extensions = saveSkillCandidate(this.extensions, request.name || '', imported ? imported.document : request.document || '', files, imported);
+      } else { candidate.extensions = changeSkillCandidate(this.extensions, request.name || '', request.action); }
+      this.checkResourceMutation(thread, cancellation);
+      const name = imported?.name || (request.document ? parseSkill(request.document).name : request.name || '');
+      await this.commitResources(thread, candidate, 'skill ' + request.action + ' ' + name);
+      const skill = this.extensions.skills.find((item) => item.name === name);
+      return JSON.stringify({ success: true, action: request.action, name: name, enabled: skill?.enabled,
+        available: !!skill?.enabled && !skill.manualOnly, source: skill?.source, files: skill?.files.map((file) => file.path),
+        next: 'Use read_skill for current instructions. Scripts are reference text only; no Shell/Python/Node runtime.' });
+    });
   }
 
   async changeMcp(request: McpSettingsCommand, cancellation: Cancellation): Promise<McpSettingsResult> {
@@ -1063,15 +1125,25 @@ export class SessionService {
         if (!this.resources.testMcp) { throw new Error('MCP connection testing is unavailable.'); }
         return this.resources.testMcp(server, signal);
       },
-      commit: async (extras, id, action) => {
-        const candidate = this.snapshot(); candidate.productivity = extras;
-        if (thread) {
+      commit: async (extras, id, action, previous) => {
+        if (!thread) { const candidate = this.snapshot(); candidate.productivity = extras; await this.commitSettings(candidate); return; }
+        // Network discovery and user approval do not hold the shared write lane.
+        await this.exclusive(async () => {
+          this.checkResourceMutation(thread, cancellation);
+          const candidate = this.snapshot(); const live = candidate.productivity || defaultProductivity();
+          if (JSON.stringify(live.servers.find((item) => item.id === id)) !== JSON.stringify(previous)) {
+            throw new Error('MCP server changed during setup. Retry with the current configuration.');
+          }
+          const server = extras.servers.find((item) => item.id === id);
+          live.servers = live.servers.filter((item) => item.id !== id);
+          if (server) { live.servers.push(server); }
+          candidate.productivity = live;
           const target = candidate.threads.find((item) => item.id === thread.id);
           if (target && ['save', 'enable', 'remove'].includes(action)) {
             target.disabledMcpIds = (target.disabledMcpIds || []).filter((value) => value !== id);
           }
           await this.commitResources(thread, candidate, 'mcp ' + action + ' ' + id);
-        } else { await this.commitSettings(candidate); }
+        });
       }
     };
     return this.mcpSettings.execute(request, host, cancellation);
@@ -1121,32 +1193,34 @@ export class SessionService {
     const reviewedId = turns[turns.length - 1].id;
     try {
       const reference = this.data.productivity?.options?.memory;
-      const selected = reference ? this.configFor(reference) : config;
+      const selected = reference ? this.configFor(reference, thread) : config;
       const runtime = this.runtime.fork();
       this.resources.reportMemory?.('review_started', { threadId: threadId, messageId: reviewedId });
       const operations = await reviewSessionMemory(runtime, thread, user, selected, existing, turns);
       // Background model work never owns the write lane. Re-enter only between foreground operations.
-      while (this.status.phase !== 'idle') { await this.waitForIdle(); }
+      while (this.hasActiveRuns || this.application.phase !== 'idle') { await this.waitForIdle(); }
       const current = this.data.threads.find((item) => item.id === threadId);
       const options = this.data.productivity?.options || defaultAssistantOptions();
-      if (!current || current.archived || !options.autoMemory || this.readOnly(current) || !this.canMutate) {
+      if (!current || current.archived || !options.autoMemory || this.readOnly(current) || !this.canMutateShared) {
         this.resources.reportMemory?.('review_discarded', { threadId: threadId }); return;
       }
       const live = this.data.productivity?.memories || [];
       // A late review must never replace a newer foreground/manual edit or revive a deleted fact.
       if (JSON.stringify(live) !== JSON.stringify(existing)) { throw new Error(t('记忆已在复盘期间变更，本次结果未保存，将在后续对话重试。')); }
-      this.status.phase = 'saving'; this.publish('state');
+      this.application.phase = 'saving'; this.publish('state');
       const revision = this.draftRevision;
       try {
-        const change = applyMemoryOperations(live, operations, threadId, turns.map((item) => item.id), () => this.resources.createId(), true);
-        await this.commitMemory(current, change, reviewedId);
-        await this.persistDraftChanges(revision);
-      } finally { this.status.phase = 'idle'; this.refreshContext(); this.publish('snapshot'); }
+        await this.exclusive(async () => {
+          const change = applyMemoryOperations(live, operations, threadId, turns.map((item) => item.id), () => this.resources.createId(), true);
+          await this.commitMemory(current, change, reviewedId);
+          await this.persistDraftChanges(revision);
+        });
+      } finally { this.application.phase = 'idle'; this.refreshContext(); this.publish('snapshot'); }
     } catch (error) {
       const message = (error as Error).message;
       this.resources.reportError('memory_review_failed', message, { threadId: threadId, messageId: reviewedId });
       // Keep the review cursor unchanged so failed work remains eligible for a later retry.
-      while (this.status.phase !== 'idle') { await this.waitForIdle(); }
+      while (this.hasActiveRuns || this.application.phase !== 'idle') { await this.waitForIdle(); }
       const current = this.data.threads.find((item) => item.id === threadId);
       if (current) {
         current.memoryReview = { added: 0, updated: 0, removed: 0, duplicates: 0,
@@ -1169,29 +1243,30 @@ export class SessionService {
         .concat(...(item.steps || []).map((step) => step.steering?.attachments || [])))), live, projectFor(this.data, thread)?.workspaceId,
       projectFor(this.data, thread), (previewId) => resolveBrowserPreview(thread.messages, previewId)), new ReferenceTools(() => thread.messages)]), extras.options.readOnly), this.selectedToolSelection(thread));
   }
-  private refreshContext(): void {
+  private refreshContext(threadId: string = this.data.activeThreadId): void {
+    if (!this.data.threads.length) { return; }
+    const thread = this.requireThread(threadId); const status = this.execution(threadId).state;
     const diagnosticMark = Diagnostics.begin();
     try {
-      if (this.data.threads.length === 0) { this.status.contextTokens = 0; this.status.contextBreakdown = []; this.status.contextSource = 'estimate'; return; }
-      const config = this.currentConfig;
+      const config = this.threadConfig(thread);
       const sections = sessionPromptSections(config, this.extensions);
-      sections.push({ name: 'memory', content: this.memoryPrompt(this.active), dynamic: true });
-      sections.push({ name: 'workspace', content: projectContext(this.data, this.active), dynamic: true });
-      this.addModeInstructions(sections, this.active);
-      const teamEnabled = this.selectedTeamMode(this.active);
+      sections.push({ name: 'memory', content: this.memoryPrompt(thread), dynamic: true });
+      sections.push({ name: 'workspace', content: projectContext(this.data, thread), dynamic: true });
+      this.addModeInstructions(sections, thread);
+      const teamEnabled = this.selectedTeamMode(thread);
       if (teamEnabled) {
         sections.push({ name: 'team', content: CHAT_TEAM_INSTRUCTIONS });
         sections.push({ name: 'team-state', dynamic: true, content: '本聊天已有团队（以此处ID为准，禁止跨会话访问）：' +
-          JSON.stringify((this.active.teams || []).filter((run) => run.ownerMessageId).map((run) => run.id + ' ' + run.status)) });
+          JSON.stringify((thread.teams || []).filter((run) => run.ownerMessageId).map((run) => run.id + ' ' + run.status)) });
       }
-      const source = sessionContextSource(this.active, () => sections, async () => {}, () => {});
-      const prepared = this.runtime.inspectContext(source, config, this.chatTools(this.active), teamEnabled ? coordinatorDefinitions() : [], this.selectedToolSelection(this.active));
-      this.status.contextTokens = prepared.context.tokens;
-      this.status.contextBreakdown = prepared.breakdown;
-      this.status.contextSource = prepared.context.source;
+      const source = sessionContextSource(thread, () => sections, async () => {}, () => {});
+      const prepared = this.runtime.inspectContext(source, config, this.chatTools(thread), teamEnabled ? coordinatorDefinitions() : [], this.selectedToolSelection(thread));
+      status.contextTokens = prepared.context.tokens;
+      status.contextBreakdown = prepared.breakdown;
+      status.contextSource = prepared.context.source;
     } finally { if (Diagnostics.recording) { Diagnostics.end('context.inspect', diagnosticMark); } }
   }
-  private contextProgress(status: string): void { this.status.contextStatus = status; this.publish('state'); }
+  private contextProgress(threadId: string, progress: string): void { this.execution(threadId).state.contextStatus = progress; this.publish('state'); }
   private requireThread(id: string): ThreadData {
     const thread = this.data.threads.find((item) => item.id === id);
     if (!thread) { throw new Error(t("对话不存在：") + id); } return thread;
@@ -1208,7 +1283,7 @@ export class SessionService {
     const reference: ModelReference | undefined = data.config.configured ?
       { providerId: data.config.providerId, modelId: data.config.model } : undefined;
     for (const thread of data.threads) {
-      if (thread.messages.length > 0) { continue; }
+      if (thread.messages.length > 0 || this.executions.get(thread.id)?.state.phase === 'running') { continue; }
       if (thread.modelRef?.providerId === reference?.providerId && thread.modelRef?.modelId === reference?.modelId &&
         thread.reasoningEffort === data.config.reasoning) { continue; }
       thread.modelRef = reference ? { providerId: reference.providerId, modelId: reference.modelId } : undefined;
@@ -1226,20 +1301,30 @@ export class SessionService {
     if (!candidate.threads.some((item) => item.id === next.id)) { candidate.threads.unshift(next); }
     candidate.activeThreadId = next.id;
   }
-  private async mutate(prefix: string, action: () => Promise<void>, publication: 'snapshot' | 'preferences' = 'snapshot'): Promise<boolean> {
-    if (!this.canMutate) { return false; }
+  private async exclusive<T>(action: () => Promise<T>): Promise<T> {
+    const previous = this.sharedOperation;
+    let release = (): void => {};
+    this.sharedOperation = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try { return await action(); } finally { release(); }
+  }
+  private async mutate(prefix: string, action: () => Promise<void>, publication: 'snapshot' | 'preferences' = 'snapshot', scope: 'shared' | 'thread' | 'navigation' = 'shared'): Promise<boolean> {
+    if (!(scope === 'shared' ? this.canMutateShared : scope === 'navigation' ? this.canNavigate : this.canMutate)) { return false; }
     const startedAt = Date.now();
     const draftRevision = this.draftRevision;
-    this.status.phase = 'saving'; this.status.error = ''; this.publish('state');
+    this.application.phase = 'saving';
+    if (scope !== 'navigation') { this.status.error = ''; }
+    this.publish('state');
     try {
-      await action();
+      await this.exclusive(action);
       // A settings commit must not overwrite typing that happened while disk/key IO was pending.
       await this.persistDraftChanges(draftRevision);
-      this.refreshContext(); return true;
+      if (this.status.phase === 'idle') { this.refreshContext(); }
+      return true;
     }
     catch (error) { this.status.error = prefix + (error as Error).message; this.resources.reportError('mutation_failed', error as Error); return false; }
     finally {
-      this.status.phase = 'idle'; this.publish(publication);
+      this.application.phase = 'idle'; this.publish(publication);
       if (publication === 'preferences') {
         this.resources.reportResources?.('preferences_saved', { durationMs: Date.now() - startedAt, failed: this.status.error.length > 0 });
       }
@@ -1266,7 +1351,11 @@ export class SessionService {
       this.data.productivity = preferences.productivity;
     }, Array.from(this.dirtyDrafts));
   }
-  private async commitSettings(candidate: AppData): Promise<void> {
+  private async commitSettings(candidate: AppData, runningThreadIds: string[] = this.runningThreadIds): Promise<void> {
+    const running = new Set(runningThreadIds);
+    // Capture current transcripts, including runs that finished while workspace IO was pending.
+    // Retain these same objects through the disk await so later deltas cannot be detached.
+    candidate.threads = candidate.threads.map((thread) => running.has(thread.id) ? this.requireThread(thread.id) : thread);
     this.syncEmptyThreadPreferences(candidate);
     await this.commitCandidate(candidate, () => {
       for (const thread of candidate.threads) {
@@ -1287,13 +1376,11 @@ export class SessionService {
       await this.repository.save(this.data, threadId === undefined ? undefined : preferences.concat([threadId], Array.from(this.dirtyDrafts)),
         threadId !== undefined && messageId !== undefined ? { threadId: threadId, messageId: messageId } : undefined);
       if (draftRevision === this.draftRevision) { this.dirtyDrafts.clear(); }
-      this.status.saveError = '';
     }
     catch (error) {
-      this.status.saveError = t('会话尚未保存，请重试保存。当前内容仍保留在页面中。原因：') + (error as Error).message;
-      this.chatTeams?.stop();
-      if (this.status.phase === 'running') { this.active.queuePaused = true; this.runtime.abort(); }
-      this.resources.reportError('save_failed', this.status.saveError); this.publish('state'); throw new Error(this.status.saveError);
+      this.application.saveError = t('会话尚未保存，请重试保存。当前内容仍保留在页面中。原因：') + (error as Error).message;
+      for (const id of this.runningThreadIds) { this.cancelThread(id, this.application.saveError); }
+      this.resources.reportError('save_failed', this.application.saveError); this.publish('state'); throw new Error(this.application.saveError);
     }
   }
   private publishThread(thread: ThreadData): void {

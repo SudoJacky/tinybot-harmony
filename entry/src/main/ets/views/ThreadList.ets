@@ -38,7 +38,7 @@ struct ThreadRow {
   @State private name: string = '';
 
   private locked(): boolean {
-    return this.app.busy || this.app.saveError.length > 0;
+    return !this.app.canNavigate;
   }
 
   private active(): boolean {
@@ -62,9 +62,11 @@ struct ThreadRow {
           .onClick(() => this.app.pinThread(this.thread.id))
         MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.archivebox')),
           content: this.thread.archived ? t("恢复对话") : t("归档") })
+          .enabled(!this.app.runningThreadIds.includes(this.thread.id))
           .onClick(() => this.app.archiveThread(this.thread.id))
         MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.trash')).fontColor([$r('app.color.danger')]),
           content: t("删除") }).contentFontColor($r('app.color.danger'))
+          .enabled(!this.app.runningThreadIds.includes(this.thread.id))
           .onClick(() => {
             this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface,
               title: t("删除这段对话？"), message: this.thread.title + t("\n会话工作区中的文件会保留。"),
@@ -107,6 +109,9 @@ struct ThreadRow {
           }
           Column({ space: 4 }) {
             Row({ space: 4 }) {
+              if (this.app.runningThreadIds.includes(this.thread.id)) {
+                LoadingProgress().width(14).height(14).color(this.appearance.accent).accessibilityText(t('正在执行'))
+              }
               if (this.thread.pinned) {
                 SymbolGlyph($r('sys.symbol.pin_fill')).fontSize(13).fontColor([this.appearance.accent])
               }
@@ -213,7 +218,7 @@ export struct ThreadList {
   private filtered(): ThreadViewModel[] {
     return this.app.filteredThreads(this.query, this.archived);
   }
-  private locked(): boolean { return this.app.busy || this.app.saveError.length > 0; }
+  private locked(): boolean { return !this.app.canNavigate; }
   private endSelection(): void { this.selecting = false; this.selectedIds = []; }
   private selectThread(id: string, selected: boolean): void {
     if (this.locked()) { return; }
@@ -229,11 +234,11 @@ export struct ThreadList {
     this.selectedIds = this.allSelected() ? [] : this.filtered().map((thread) => thread.id);
   }
   private async archiveSelected(): Promise<void> {
-    if (this.locked() || this.selectedIds.length === 0) { return; }
+    if (this.locked() || this.selectedIds.length === 0 || this.selectedIds.some((id) => this.app.runningThreadIds.includes(id))) { return; }
     if (await this.app.archiveThreads(this.selectedIds.slice(), !this.archived)) { this.endSelection(); }
   }
   private confirmDeleteSelected(): void {
-    if (this.locked() || this.selectedIds.length === 0) { return; }
+    if (this.locked() || this.selectedIds.length === 0 || this.selectedIds.some((id) => this.app.runningThreadIds.includes(id))) { return; }
     const ids = this.selectedIds.slice();
     this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface,
       title: t('删除选中的 {0} 段对话？', [ids.length]),
@@ -346,7 +351,7 @@ export struct ThreadList {
         Text(t('项目内的会话共享文件和项目说明，各自保留对话历史。')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
         if (this.app.error) { Banner({ text: this.app.error }) }
         Button(t('保存')).fontFamily(this.appearance.fontFamily).id('project-save').attributeModifier(Btn.primary).width('100%')
-          .enabled(!this.app.busy && !this.app.saveError && this.projectName.trim().length > 0)
+          .enabled(!this.app.sharedBusy && !this.app.saveError && this.projectName.trim().length > 0)
           .onClick(async () => {
             const creating = !this.projectId;
             if (await this.app.saveProject(this.projectName, this.projectInstructions, this.projectId || undefined, this.projectFolders)) {
@@ -459,13 +464,13 @@ export struct ThreadList {
       if (!this.selecting) {
         IconButton({ icon: $r('sys.symbol.plus'), label: t('新对话') + ' · ' + this.sectionTitle(id),
           compId: 'project-new-chat-' + (id || 'ordinary'), diameter: 32, iconSize: 16,
-          disabled: this.app.busy || !!this.app.saveError,
+          disabled: !this.app.canNavigate,
           onTap: async () => { if (await this.app.newThread(id)) { this.onSelected(); } } })
         if (id) {
           Button({ type: ButtonType.Circle }) {
             SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
           }.fontFamily(this.appearance.fontFamily).id('project-actions-' + id).width(32).height(32).backgroundColor(Color.Transparent)
-            .accessibilityText(t('编辑项目') + ' · ' + this.sectionTitle(id)).enabled(!this.app.busy && !this.app.saveError)
+            .accessibilityText(t('编辑项目') + ' · ' + this.sectionTitle(id)).enabled(!this.app.sharedBusy && !this.app.saveError)
             .bindMenu(this.projectActions(id), { systemMaterial: this.appearance.surface, mask: false })
         }
       }
@@ -490,7 +495,7 @@ export struct ThreadList {
           .onClick(() => { if (this.selecting) { this.endSelection(); } else { this.selecting = true; } })
         if (!this.selecting) {
           IconButton({ icon: $r('sys.symbol.folder_badge_plus'), label: t('新建项目'), compId: 'project-create',
-            disabled: this.app.busy || !!this.app.saveError, onTap: () => this.editProject() })
+            disabled: this.app.sharedBusy || !!this.app.saveError, onTap: () => this.editProject() })
         }
         } else if (this.collapseHistory) {
           // Desktop parity: the panel toggle lives in the sidebar's logo row.
@@ -561,7 +566,7 @@ export struct ThreadList {
         .edgeEffect(EdgeEffect.Spring)
       }
       if (this.app.saveError.length > 0) {
-        Banner({ text: this.app.saveError, actionLabel: t("重试"), actionEnabled: !this.app.busy,
+        Banner({ text: this.app.saveError, actionLabel: t("重试"), actionEnabled: !this.app.sharedBusy,
           onAction: () => { this.app.retrySave(); } })
       } else if (this.app.error.length > 0) {
         Banner({ text: this.app.error })

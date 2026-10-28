@@ -2457,5 +2457,6 @@
   "从当前会话的预览添加": "Add a preview from this chat",
   "当前会话还没有可保存的页面预览。": "This chat has no page previews to save yet.",
   "没有已移除的小程序。": "No removed mini apps.",
-  "让 Tinybot 创建一个记账本或习惯记录器，保存后会显示在这里。": "Ask Tinybot to create a ledger or habit tracker. Saved apps appear here."
+  "让 Tinybot 创建一个记账本或习惯记录器，保存后会显示在这里。": "Ask Tinybot to create a ledger or habit tracker. Saved apps appear here.",
+  "正在执行": "Running"
 }

@@ -120,13 +120,13 @@ export class BrowserSession implements ExecutionGate {
   cancelPermission(): void { this.answerPermission(false); }
   async wait(cancellation: Cancellation): Promise<void> {
     cancellation.check();
-    while (this.paused) {
+    while (this.lease === cancellation && this.paused) {
       await new Promise<void>((resolve) => {
         let remove = (): void => {};
         const finish = (): void => { this.waiters.delete(finish); remove(); resolve(); };
         this.waiters.add(finish);
         remove = cancellation.onCancel(finish);
-        if (!this.paused) { finish(); }
+        if (this.lease !== cancellation || !this.paused) { finish(); }
       });
       cancellation.check();
     }

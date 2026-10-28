@@ -205,6 +205,22 @@ async function advance(ms) {
   await endSecond(); await endSecond(); assert.equal(leases.size, 0);
   console.log('PASS parallel request scopes and idempotent end callbacks do not lose native ownership');
 
+  f = await fixture(); ({ pending } = await send(f)); const firstComplete = f.complete;
+  await f.session.newThread(); assert.equal(f.session.state.phase, 'idle');
+  ability.onBackground(); await settle(); assert.equal(leases.size, 1, 'Selecting an idle chat must retain the first request');
+  const second = await send(f, 'parallel chat'); const secondComplete = f.complete;
+  firstComplete(); await pending; await settle();
+  assert.equal(leases.size, 1, 'Completing A must retain B network ownership');
+  secondComplete(); await second.pending; await settle(); assert.equal(leases.size, 0);
+  console.log('PASS actual parallel conversations retain background ownership across navigation and independent completion');
+
+  f = await fixture(); ({ pending } = await send(f)); await f.session.newThread();
+  const cancelledSecond = await send(f, 'cancel both'); ability.onBackground(); await settle(); await cancelTask();
+  await Promise.all([pending, cancelledSecond.pending]);
+  assert.equal(f.session.hasActiveRuns, false); assert.equal(leases.size, 0);
+  assert.ok((await f.repository.load()).threads.every(thread => thread.queuePaused));
+  console.log('PASS native background cancellation stops all conversations rather than only the selected chat');
+
   const saved = await new Fixture().repository.load();
   saved.threads[0].messages = [
     { id: 'user', role: 'user', content: 'form', status: 'complete', error: '' },

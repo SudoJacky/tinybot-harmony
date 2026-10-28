@@ -64,6 +64,9 @@ export class ChatViewModel {
   }
   loading: boolean = false;
   busy: boolean = false;
+  canNavigate: boolean = false;
+  runningThreadIds: string[] = [];
+  get sharedBusy(): boolean { return this.busy || this.runningThreadIds.length > 0; }
   generating: boolean = false;
   acceptingSteering: boolean = false;
   error: string = '';
@@ -93,7 +96,7 @@ export class ChatViewModel {
   get saving(): boolean { return this.phase === 'saving'; }
   private selectedConfig: ModelConfig = defaultConfig();
   private draftTimer: number = -1;
-  private onOutput: () => void = () => {};
+  private outputs: Map<string, () => void> = new Map<string, () => void>();
 
   async initialize(session: SessionService): Promise<void> {
     if (!this.session) { this.session = session; session.subscribe((event: SessionEvent) => this.project(event)); }
@@ -141,10 +144,15 @@ export class ChatViewModel {
           message.updateText(event.content || '', event.step || 0, event.stepContent || '');
         }
       }
-      if (['text', 'reasoning', 'message', 'tool', 'snapshot', 'thread', 'teams'].includes(event.kind)) { this.onOutput(); }
+      if (['text', 'reasoning', 'message', 'tool', 'snapshot', 'thread', 'teams'].includes(event.kind)) {
+        if (!event.threadId || event.threadId === this.active.id) { this.outputs.get(this.active.id)?.(); }
+      }
     } finally { if (Diagnostics.recording) { Diagnostics.end('viewmodel.project', diagnosticMark); } }
   }
   private projectState(state: SessionState): void {
+    this.canNavigate = state.canNavigate === true;
+    const running = state.runningThreadIds || [];
+    if (running.join(',') !== this.runningThreadIds.join(',')) { this.runningThreadIds = running; }
     this.phase = state.phase;
     this.ready = state.ready; this.loading = state.phase === 'loading'; this.busy = state.phase !== 'idle';
     this.generating = state.phase === 'running' || state.phase === 'compacting';
@@ -196,7 +204,7 @@ export class ChatViewModel {
   get contextWindow(): number { return contextSettings(this.currentConfig).window; }
   get contextLabel(): string { return t('上下文约 {0} / {1} tokens', [this.contextUsed, this.contextWindow]); }
   get canQueueInput(): boolean {
-    return this.ready && !this.active.archived && this.saveError.length === 0 && (this.phase === 'idle' || this.phase === 'running');
+    return this.canNavigate && !this.active.archived && (this.phase === 'idle' || this.phase === 'running');
   }
   filteredThreads(query: string, archived: boolean): ThreadViewModel[] { return matchingThreads(this.threads, query, archived) as ThreadViewModel[]; }
 
@@ -251,16 +259,18 @@ export class ChatViewModel {
     if (this.session) { await this.session.flushDraft(); }
   }
   async send(onUpdate: () => void): Promise<void> {
-    this.onOutput = onUpdate;
-    try { await this.requireSession().send(); } finally { this.onOutput = () => {}; }
+    const threadId = this.active.id; this.outputs.set(threadId, onUpdate);
+    try { await this.requireSession().send(); } finally { if (this.outputs.get(threadId) === onUpdate) { this.outputs.delete(threadId); } }
   }
   async regenerateReply(id: string, onUpdate: () => void): Promise<boolean> {
-    this.onOutput = onUpdate;
-    try { return await this.requireSession().regenerateReply(id); } finally { this.onOutput = () => {}; }
+    let threadId = '';
+    try {
+      return await this.requireSession().regenerateReply(id, (id) => { threadId = id; this.outputs.set(id, onUpdate); });
+    } finally { if (this.outputs.get(threadId) === onUpdate) { this.outputs.delete(threadId); } }
   }
   async resumeQueue(onUpdate: () => void): Promise<void> {
-    this.onOutput = onUpdate;
-    try { await this.requireSession().resumeQueue(); } finally { this.onOutput = () => {}; }
+    const threadId = this.active.id; this.outputs.set(threadId, onUpdate);
+    try { await this.requireSession().resumeQueue(); } finally { if (this.outputs.get(threadId) === onUpdate) { this.outputs.delete(threadId); } }
   }
   interactUi(threadId: string, messageId: string, key: string, values: UiValues, actionId: string): Promise<UiValues> {
     return this.requireSession().interactUi(threadId, messageId, key, values, actionId);

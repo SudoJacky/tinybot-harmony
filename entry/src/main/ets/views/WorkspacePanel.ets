@@ -17,6 +17,8 @@ import { MarkdownView } from './MarkdownView';
 import { DataTable } from './DataTable';
 import { parseDelimited } from '../model/RichArtifacts';
 import { FileBaseline, WorkspaceEntry } from '../services/WorkspaceFiles';
+import { ToolFailure } from '../model/ToolFailure';
+import { Diagnostics } from '../model/Diagnostics';
 import { Btn, Font, Radius, Space, systemInsets } from '../common/Theme';
 import { Banner, BottomBar, EmptyState, IconButton } from '../common/Widgets';
 
@@ -49,6 +51,7 @@ export struct WorkspacePanel {
   @State private selected: string = '';
   @State private content: string = '';
   @State private original: string = '';
+  private version: string = '';
   @State private imagePath: string = '';
   @State private previewError: string = '';
   @State private previewing: boolean = false;
@@ -110,6 +113,12 @@ export struct WorkspacePanel {
   private crumbs(): string[] { return this.directory ? this.directory.split('/') : []; }
   private dirty(): boolean { return this.editing && this.content !== this.original; }
 
+  private mutationError(error: Error): string {
+    Diagnostics.log('warn', 'workspace', 'mutation_failed', undefined, error);
+    return error instanceof ToolFailure && (error.code === 'FS_STALE_VERSION' || error.code === 'FS_NOT_OBSERVED') ?
+      t('文件已变化，请重新打开并检查。') : error.message;
+  }
+
   private async refresh(): Promise<void> {
     if (!this.files) { return; }
     try {
@@ -118,23 +127,26 @@ export struct WorkspacePanel {
       if (files !== this.files || directory !== this.directory) { return; }
       // Folders first, then files, each alphabetical.
       this.entries = list.entries.sort((a, b) => (a.kind === 'directory' ? 0 : 1) - (b.kind === 'directory' ? 0 : 1) || a.name.localeCompare(b.name));
-      this.truncated = list.truncated; this.error = '';
+      this.truncated = list.truncated;
     } catch (error) { this.error = (error as Error).message; }
     finally { this.refreshing = false; }
   }
-  private go(directory: string): void { this.directory = directory; this.refresh(); }
+  private go(directory: string): void { if (this.busy) { return; } this.directory = directory; this.error = ''; this.refresh(); }
 
   private async open(entry: WorkspaceEntry): Promise<void> {
     if (!this.files || this.busy || entry.kind === 'symlink') { return; }
     const path = this.join(entry.name);
     if (entry.kind === 'directory') { this.go(path); return; }
     this.busy = true;
-    this.selected = path; this.editing = false; this.content = ''; this.original = ''; this.imagePath = ''; this.previewError = '';
+    this.selected = path; this.editing = false; this.content = ''; this.original = ''; this.version = ''; this.imagePath = ''; this.previewError = '';
     this.baseline = undefined; this.csv = []; this.selection = '';
     try {
       this.baseline = await this.files.baseline(path);
       if (IMAGE_FILE.test(entry.name)) { this.imagePath = await this.files.checkedPath(path); }
-      else { this.content = (await this.files.read(path, new Cancellation())).content; this.original = this.content; }
+      else {
+        const read = await this.files.read(path, new Cancellation());
+        this.content = read.content; this.original = read.content; this.version = read.version;
+      }
       if (/\.(csv|tsv)$/i.test(path)) { this.csv = parseDelimited(this.content, /\.tsv$/i.test(path) ? '\t' : ','); }
     } catch (error) { this.previewError = t("无法预览：") + (error as Error).message; }
     this.previewing = true; this.busy = false;
@@ -152,10 +164,11 @@ export struct WorkspacePanel {
   private async importFiles(): Promise<void> {
     if (!this.files || this.locked()) { return; }
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    this.busy = true; this.error = '';
     try {
       const uris = await new picker.DocumentViewPicker(context).select({ maxSelectNumber: 5, fileSuffixFilters: [t("资料|.txt,.md,.csv,.tsv,.json,.log,.pdf,.docx,.xlsx,.pptx")] });
       if (!uris.length) { return; }
-      this.busy = true; let count = 0;
+      let count = 0;
       for (const uri of uris) {
         let name = uri.slice(uri.lastIndexOf('/') + 1).split('?')[0];
         try { name = decodeURIComponent(name); } catch (_) { /* Keep literal URI name. */ }
@@ -164,7 +177,7 @@ export struct WorkspacePanel {
         count++; await this.refresh();
       }
       this.toast(t("已导入 ") + count + t(" 个文件"));
-    } catch (error) { this.error = (error as Error).message; }
+    } catch (error) { this.error = this.mutationError(error as Error); }
     finally { this.busy = false; await this.refresh(); }
   }
 
@@ -172,13 +185,13 @@ export struct WorkspacePanel {
     if (!this.files || this.locked()) { return; }
     const now = new Date();
     const path = this.join(this.uniqueName(t("笔记-") + (now.getMonth() + 1) + pad(now.getDate()) + '-' + pad(now.getHours()) + pad(now.getMinutes()) + '.md'));
-    this.busy = true;
+    this.busy = true; this.error = '';
     try {
-      await this.files.write(path, '', new Cancellation()); await this.refresh();
+      const saved = await this.files.write(path, '', new Cancellation(), { version: null }); await this.refresh();
       this.baseline = await this.files.baseline(path);
-      this.selected = path; this.content = ''; this.original = ''; this.imagePath = ''; this.previewError = '';
+      this.selected = path; this.content = ''; this.original = ''; this.version = saved.version; this.imagePath = ''; this.previewError = '';
       this.editing = true; this.previewing = true;
-    } catch (error) { this.error = (error as Error).message; }
+    } catch (error) { this.error = this.mutationError(error as Error); }
     finally { this.busy = false; }
   }
 
@@ -186,11 +199,13 @@ export struct WorkspacePanel {
     if (!this.files || this.locked()) { return; }
     this.busy = true;
     try {
-      await this.files.write(this.selected, this.content, new Cancellation());
+      const content = this.content;
+      const saved = await this.files.write(this.selected, content, new Cancellation(), { version: this.version });
+      this.version = saved.version; this.original = content;
       this.baseline = await this.files.baseline(this.selected);
-      this.original = this.content; this.editing = false; this.previewError = ''; this.toast(t("已保存")); await this.refresh();
+      this.editing = this.content !== content; this.previewError = ''; this.toast(t("已保存")); await this.refresh();
     } catch (error) {
-      this.previewError = (error as Error).message;
+      this.previewError = this.mutationError(error as Error);
       try { this.baseline = await this.files.baseline(this.selected); }
       catch (backupError) { this.previewError += '\n' + (backupError as Error).message; }
     }
@@ -241,13 +256,13 @@ export struct WorkspacePanel {
     this.previewing = false; this.toast(t("引用已加入当前对话草稿"));
   }
 
-  private async fileAction(kind: string, path: string): Promise<void> {
+  private async fileAction(kind: string, path: string, version: string = ''): Promise<void> {
     if (!this.files || this.locked()) { return; }
-    this.busy = true;
+    this.busy = true; this.error = '';
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     try {
       if (kind === 'delete') {
-        await this.files.remove(path);
+        await this.files.remove(path, version);
         if (this.selected === path) { this.previewing = false; this.selected = ''; }
         this.toast(t("已删除"));
         return;
@@ -258,14 +273,23 @@ export struct WorkspacePanel {
           aiAssistedFile(this.app.exportSnapshot(), this.ownerWorkspaceId, path));
       }
       if (kind === 'share') { await shareFile(context, absolute, this.fileName(path)); }
-    } catch (error) { if (this.previewing) { this.previewError = (error as Error).message; } else { this.error = (error as Error).message; } }
+    } catch (error) { if (this.previewing) { this.previewError = this.mutationError(error as Error); } else { this.error = this.mutationError(error as Error); } }
     finally { this.busy = false; await this.refresh(); }
   }
 
-  private confirmDelete(path: string): void {
-    this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t("删除文件？"), message: this.fileName(path) + t("\n删除后无法恢复。"),
-      primaryButton: { value: t("取消"), action: () => {} },
-      secondaryButton: { value: t("删除"), fontColor: $r('app.color.danger'), action: () => this.fileAction('delete', path) } });
+  private async confirmDelete(path: string): Promise<void> {
+    if (!this.files || this.locked()) { return; }
+    const files = this.files;
+    this.busy = true; this.error = '';
+    try {
+      const version = await files.removalVersion(path);
+      this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t("删除文件？"), message: this.fileName(path) + t("\n删除后无法恢复。"),
+        primaryButton: { value: t("取消"), action: () => {} },
+        secondaryButton: { value: t("删除"), fontColor: $r('app.color.danger'), action: async () => {
+          if (files === this.files) { await this.fileAction('delete', path, version); }
+        } } });
+    } catch (error) { if (this.previewing) { this.previewError = this.mutationError(error as Error); } else { this.error = this.mutationError(error as Error); } }
+    finally { this.busy = false; }
   }
 
   private closePreview(): void {

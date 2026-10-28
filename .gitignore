@@ -43,6 +43,7 @@
 /.playwright-cli/
 scripts/*
 !scripts/run-tests.cjs
+!scripts/test-parallel-sessions.cjs
 !scripts/test-tool-catalog.cjs
 !scripts/test-tool-responsiveness.cjs
 !scripts/test-tool-outcomes.cjs

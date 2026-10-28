@@ -631,8 +631,8 @@ async function test(name, run) {
     const native=new NativeWorkspaceFiles(root),tools=new WorkspaceTools(native),signal=new Cancellation();
     const invoke=(name,args,context)=>tools.execute({id:name,type:'function',function:{name,arguments:JSON.stringify(args)}},signal,context);
     await invoke('write_file',{path:'a.txt',content:'alpha\nbeta\ntail\n'});
-    let reads=0,commits=0;const read=native.read.bind(native),rename=fileIo.rename;
-    native.read=async(...args)=>{reads++;return read(...args);};
+    let reads=0,commits=0;const open=fileIo.open,rename=fileIo.rename;
+    fileIo.open=async(p,flags)=>{if(p===root+'/a.txt' && flags & fileIo.OpenMode.READ_ONLY)reads++;return open(p,flags);};
     fileIo.rename=async(a,b)=>{if(b===root+'/a.txt')commits++;return rename(a,b);};
     const execution={status:'running'};
     try {
@@ -641,7 +641,7 @@ async function test(name, run) {
       assert.equal(reads,1);assert.equal(commits,1);
       assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),'beta\nalpha\ntail\n');
       assert.ok(execution.fileDiff.added>0);assert.ok(execution.fileDiff.removed>0);
-    } finally {fileIo.rename=rename;}
+    } finally {fileIo.rename=rename;fileIo.open=open;}
     await invoke('edit_file',{path:'a.txt',oldText:'tail',newText:'$& $1 $` literal'});
     assert.ok(fs.readFileSync(nativePath(root+'/a.txt'),'utf8').endsWith('$& $1 $` literal\n'));
   });
@@ -745,6 +745,72 @@ async function test(name, run) {
       await b.write('a.txt','third',signal);assert.equal(fs.readFileSync(nativePath(root+'/a.txt'),'utf8'),'third');
       assert.equal(fs.readdirSync(nativePath(root)).filter(p=>p.endsWith('.tmp')).length,0);
     }finally{release();await first;await second;fileIo.rename=rename;}
+  });
+  await test('delete waits for an active write and rejects the version confirmed before that write',async()=>{
+    const root='/sandbox/workspace/delete-race';fs.mkdirSync(nativePath(root),{recursive:true});
+    const a=new NativeWorkspaceFiles(root),b=new NativeWorkspaceFiles(root),signal=new Cancellation();
+    const initial=await a.write('a.txt','initial',signal,{version:null});
+    const confirmed=await b.removalVersion('a.txt');
+    let release,entered;const blocked=new Promise(r=>release=r),started=new Promise(r=>entered=r);
+    const rename=fileIo.rename;let holding=true,writer,deleted,deleteFinished=false;
+    fileIo.rename=async(from,to)=>{if(to===root+'/a.txt'&&holding){holding=false;entered();await blocked;}return rename(from,to);};
+    try {
+      writer=a.write('a.txt','new content',signal,{version:initial.version});await started;
+      deleted=b.remove('a.txt',confirmed).then(()=>{deleteFinished=true;return undefined;},e=>{deleteFinished=true;return e;});
+      await b.write('independent.txt','other file',signal,{version:null});
+      assert.equal(deleteFinished,false,'Deletion must wait for publication, not unlink underneath a writer');
+      release();await writer;assert.equal((await deleted).code,'FS_STALE_VERSION');
+      assert.equal((await a.read('a.txt',signal)).content,'new content');
+    } finally {release();await writer;await deleted;fileIo.rename=rename;}
+    const observed=await a.read('a.txt',signal),version=await b.removalVersion('a.txt');
+    const results=await Promise.allSettled([b.remove('a.txt',version),a.remove('a.txt',version)]);
+    assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+    assert.equal(results.find(r=>r.status==='rejected').reason.code,'FS_STALE_VERSION');
+    await assert.rejects(a.write('a.txt','stale editor',signal,{version:observed.version}),e=>e.code==='FS_STALE_VERSION');
+    assert.equal(fs.existsSync(nativePath(root+'/a.txt')),false,'Stale saves must not resurrect deleted files');
+  });
+  await test('binary deletion uses a guarded snapshot and releases its lock after native failure',async()=>{
+    const root='/sandbox/workspace/delete-binary';fs.mkdirSync(nativePath(root),{recursive:true});
+    const file=nativePath(root+'/image.png'),files=new NativeWorkspaceFiles(root);
+    const bytes=Buffer.alloc(70000,0xff);bytes[0]=0;fs.writeFileSync(file,bytes);
+    const initial=await files.removalVersion('image.png');
+    assert.equal(initial,crypto.createHash('sha256').update(bytes).digest('base64'));
+    bytes[69999]=1;fs.writeFileSync(file,bytes);
+    await assert.rejects(files.remove('image.png',initial),e=>e.code==='FS_STALE_VERSION');
+    const current=await files.removalVersion('image.png');
+    const unlink=fileIo.unlink;fileIo.unlink=async()=>{throw Error('injected unlink failure');};
+    try {await assert.rejects(files.remove('image.png',current),/injected unlink failure/);}
+    finally {fileIo.unlink=unlink;}
+    await files.remove('image.png',current);assert.equal(fs.existsSync(file),false);
+  });
+  await test('shared-folder aliases queue readers and deletes behind an in-place write',async()=>{
+    const root='/sandbox/workspace/shared-read-race',external='/sandbox/external-read-race';
+    fs.mkdirSync(nativePath(root),{recursive:true});fs.mkdirSync(nativePath(external),{recursive:true});
+    fs.writeFileSync(nativePath(external+'/note.txt'),'old contents');
+    const folder={id:'mount',name:'Docs',uri:'file://'+external,addedAt:1};
+    const a=new NativeWorkspaceFiles(root,[folder]);
+    const b=new NativeWorkspaceFiles(root,[{...folder,id:'alias',name:'Alias'}]),signal=new Cancellation();
+    const before=await a.read('shared/Docs/note.txt',signal),confirmed=await b.removalVersion('shared/Alias/note.txt');
+    let release,entered;const blocked=new Promise(r=>release=r),started=new Promise(r=>entered=r);
+    const write=fileIo.write;let holding=true,writer,reader,deletion,readFinished=false,deleteFinished=false;
+    fileIo.write=async(fd,bytes,options)=>{
+      if(holding&&handlePaths.get(fd)===nativePath(external+'/note.txt')) {
+        holding=false;await handles.get(fd).write(new Uint8Array(bytes).slice(0,3),0,3,options.offset);
+        entered();await blocked;
+      }
+      return write(fd,bytes,options);
+    };
+    try {
+      writer=a.write(before.path,'replacement text',signal,{version:before.version});await started;
+      reader=b.read('shared/Alias/note.txt',signal).then(value=>{readFinished=true;return value;});
+      deletion=b.remove('shared/Alias/note.txt',confirmed).then(()=>{deleteFinished=true;return undefined;},e=>{deleteFinished=true;return e;});
+      await a.write('unrelated.txt','independent',signal,{version:null});
+      assert.equal(readFinished,false);assert.equal(deleteFinished,false);
+      release();await writer;assert.equal((await reader).content,'replacement text');
+      assert.equal((await deletion).code,'FS_STALE_VERSION');
+      await b.remove('shared/Alias/note.txt',await b.removalVersion('shared/Alias/note.txt'));
+      assert.equal(fs.existsSync(nativePath(external+'/note.txt')),false);
+    } finally {release();await writer;await reader;await deletion;fileIo.write=write;}
   });
   await test('oversized MCP results survive storage and reach the model verbatim without projection',async()=>{
     const {stepMessages}=load(path.join(source,'model/Agent'));
