@@ -49,6 +49,7 @@ export interface SessionState {
   // phase/context/error describe the selected chat; these fields describe the application.
   runningThreadIds?: string[];
   canNavigate?: boolean;
+  compatibilityWarnings?: string[];
   ready: boolean;
   phase: SessionPhase;
   error: string;

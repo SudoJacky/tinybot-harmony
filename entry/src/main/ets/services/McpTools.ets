@@ -1,7 +1,7 @@
 import { ToolFailure, parseToolArguments } from '../model/ToolFailure';
 import { t } from '../model/I18n';
 import { ToolCall, ToolDefinition } from '../model/Agent';
-import { McpServer } from '../model/Productivity';
+import { McpServer, supportedMcpAuth } from '../model/Productivity';
 import { AgentTools } from './AgentLoop';
 import { Cancellation } from './Cancellation';
 import { McpConnection, McpConnectionFactory, McpToolInfo } from './McpConnection';
@@ -19,7 +19,7 @@ export class McpTools implements AgentTools {
   private connect: McpConnectionFactory;
   private live?: () => McpServer[];
   constructor(servers: McpServer[], approval: ToolApproval, connect: McpConnectionFactory, live?: () => McpServer[]) {
-    this.connect = connect; this.servers = servers.filter((item) => item.enabled); this.approval = approval; this.live = live;
+    this.connect = connect; this.servers = servers.filter((item) => item.enabled && supportedMcpAuth(item)); this.approval = approval; this.live = live;
   }
   definitions(): ToolDefinition[] {
     if (!this.live && !this.servers.length) { return []; }
@@ -43,7 +43,7 @@ export class McpTools implements AgentTools {
     cancellation.check();
     const args = parseToolArguments(call.function.arguments) as McpArguments;
     if (!args || typeof args.server !== 'string') { throw new ToolFailure('INVALID_ARGUMENTS', t("MCP 参数无效。"), 'fix_arguments'); }
-    const server = (this.live ? this.live() : this.servers).find((item) => item.id === args.server && item.enabled);
+    const server = (this.live ? this.live() : this.servers).find((item) => item.id === args.server && item.enabled && supportedMcpAuth(item));
     if (!server) { throw new ToolFailure('NOT_CONFIGURED', t("MCP 服务未启用。"), 'check_settings'); }
     const version = JSON.stringify(server);
     if (this.versions.get(server.id) !== version) {

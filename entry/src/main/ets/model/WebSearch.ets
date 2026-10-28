@@ -1,5 +1,6 @@
 import { ProviderProfile } from './ProviderProfiles';
 import { t } from './I18n';
+import { isConfigurationName } from './ConfigurationValue';
 // Official Search API; the account key is reused from a DeepSeek model provider.
 export const DEEPSEEK_SEARCH_BASE_URL: string = 'https://api.deepseek.com/v1';
 export const DEEPSEEK_SEARCH_ENDPOINT: string = DEEPSEEK_SEARCH_BASE_URL + '/tools/search';
@@ -27,8 +28,11 @@ export function defaultSearchConfig(provider: SearchProviderId = 'bing-browser')
 }
 export function isSupportedSearchProvider(provider: string): boolean { return ['deepseek', 'tavily', 'bing-browser'].includes(provider); }
 export function validateSearchConfig(config: SearchConfig, stored: boolean = false): void {
-  if (!config || typeof config.provider !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,79}$/.test(config.provider) ||
-    (!stored && !isSupportedSearchProvider(config.provider)) || typeof config.enabled !== 'boolean') {
+  if (!config || !isConfigurationName(config.provider) || typeof config.enabled !== 'boolean' ||
+    (!stored && !isSupportedSearchProvider(config.provider)) ||
+    (config.baseUrl !== undefined && (typeof config.baseUrl !== 'string' || config.baseUrl.length > 2048)) ||
+    (config.credentialAlias !== undefined && (typeof config.credentialAlias !== 'string' || config.credentialAlias.length > 200)) ||
+    (config.modelProviderId !== undefined && (typeof config.modelProviderId !== 'string' || !config.modelProviderId || config.modelProviderId.length > 64))) {
     throw new Error('Invalid search settings.');
   }
   if (config.tavily !== undefined) {

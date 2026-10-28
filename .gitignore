@@ -64,3 +64,4 @@ scripts/*
 !scripts/test-bing-search-dom.cjs
 !scripts/test-search-settings.cjs
 !scripts/test-search-settings-ui.cjs
+!scripts/test-config-compatibility.cjs

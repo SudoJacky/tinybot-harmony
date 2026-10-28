@@ -3,6 +3,7 @@ import { AppData, copyModelConfig } from '../model/Conversation';
 import { ProviderProfile, modelConfig, modelIds, validateProfile } from '../model/ProviderProfiles';
 import { CredentialReader } from './providers/Provider';
 import { sameCredentialScope } from '../model/ProviderEndpoint';
+import { mergeSavedConfiguration } from '../model/SavedConfiguration';
 
 export interface CredentialVault extends CredentialReader {
   write(alias: string, secret: string): Promise<void>;
@@ -40,11 +41,12 @@ export class ProfileSettings {
     if (!draft.noApiKey && key.length === 0 && (!previous?.credentialAlias || !sameScope)) {
       throw new Error(t("请填写 API Key；更换服务基础地址时需要重新填写，其他服务的密钥不会被复用。"));
     }
-    const profile: ProviderProfile = { id: previous?.id || 'provider-' + this.createId(), name: draft.name.trim(),
+    const edited: ProviderProfile = { id: previous?.id || 'provider-' + this.createId(), name: draft.name.trim(),
       presetId: draft.presetId, protocol: draft.protocol, baseUrl: draft.baseUrl.trim().replace(/\/+$/, ''),
       credentialAlias: draft.noApiKey ? '' : key.length > 0 ? 'pending-key' : previous?.credentialAlias || '',
       noApiKey: draft.noApiKey, enabled: draft.enabled, models: modelIds(draft.models),
       contextWindow: draft.contextWindow.trim() ? Number(draft.contextWindow) : undefined };
+    const profile = mergeSavedConfiguration(previous, edited);
     validateProfile(profile);
     // An alias can survive a restore/signing change while its secure asset is unavailable.
     // Do not report a successful save when a blank editor would retain a missing key.

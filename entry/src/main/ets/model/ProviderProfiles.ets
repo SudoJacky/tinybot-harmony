@@ -2,7 +2,8 @@ import { t } from './I18n';
 import { ModelConfig } from './Conversation';
 import { builtinProviderInfos } from './Provider';
 import { contextSettings } from './ContextSettings';
-import { protocolUrl } from './ProviderEndpoint';
+import { isSupportedProtocol, protocolUrl } from './ProviderEndpoint';
+import { isConfigurationName } from './ConfigurationValue';
 
 export interface ModelReference {
   providerId: string;
@@ -35,18 +36,18 @@ export function modelIds(value: string): string[] {
   return ids;
 }
 
-export function validateProfile(profile: ProviderProfile): void {
+export function validateProfile(profile: ProviderProfile, stored: boolean = false): void {
   if (!profile || typeof profile.id !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(profile.id) ||
     typeof profile.name !== 'string' || profile.name.trim().length === 0 || profile.name.length > 80 ||
-    !['chat-completions', 'responses', 'anthropic-messages', 'gemini'].includes(profile.protocol) || typeof profile.baseUrl !== 'string' ||
+    !isConfigurationName(profile.protocol) || (!stored && !isSupportedProtocol(profile.protocol)) || typeof profile.baseUrl !== 'string' ||
     typeof profile.credentialAlias !== 'string' || typeof profile.noApiKey !== 'boolean' ||
     typeof profile.enabled !== 'boolean' || !Array.isArray(profile.models) ||
     profile.models.some((id: string) => typeof id !== 'string' || id.trim() !== id || id.length === 0) ||
     (profile.noApiKey ? profile.credentialAlias.length > 0 : profile.credentialAlias.length === 0) ||
-    (profile.presetId !== undefined && !builtinProviderInfos().some((info) => info.id === profile.presetId))) {
+    (profile.presetId !== undefined && !isConfigurationName(profile.presetId))) {
     throw new Error(t("模型服务配置无效，名称、协议、凭据或模型列表需要检查。"));
   }
-  protocolUrl(profile.protocol, profile.baseUrl, true);
+  if (isSupportedProtocol(profile.protocol)) { protocolUrl(profile.protocol, profile.baseUrl, true); }
   modelIds(profile.models.join('\n'));
   contextSettings({ configured: false, providerId: profile.id, baseUrl: '', model: '', systemPrompt: '',
     credentialAlias: '', contextWindow: profile.contextWindow });
@@ -75,7 +76,7 @@ export function migrateProfiles(config: ModelConfig): ProviderProfile[] {
 export function availableModels(profiles: ProviderProfile[]): ModelChoice[] {
   const result: ModelChoice[] = [];
   for (const profile of profiles) {
-    if (profile.enabled) {
+    if (profile.enabled && isSupportedProtocol(profile.protocol)) {
       for (const id of profile.models) { result.push({ providerId: profile.id, modelId: id, providerName: profile.name }); }
     }
   }
@@ -85,10 +86,13 @@ export function availableModels(profiles: ProviderProfile[]): ModelChoice[] {
 export function modelConfig(profiles: ProviderProfile[], reference: ModelReference, preferences: ModelConfig): ModelConfig {
   validateReference(reference);
   const profile = profiles.find((item: ProviderProfile) => item.id === reference.providerId);
-  if (!profile || !profile.enabled || !profile.models.includes(reference.modelId)) {
+  if (!profile || !profile.enabled || !isSupportedProtocol(profile.protocol) || !profile.models.includes(reference.modelId)) {
     throw new Error(t("这段对话选择的模型服务已停用、删除或移除该模型，请重新选择。"));
   }
-  return { configured: true, providerId: profile.id, baseUrl: profile.baseUrl, model: reference.modelId,
-    credentialAlias: profile.credentialAlias, contextWindow: profile.contextWindow,
-    systemPrompt: preferences.systemPrompt, userDocument: preferences.userDocument, autoCompact: preferences.autoCompact };
+  const config = JSON.parse(JSON.stringify(preferences)) as ModelConfig;
+  config.configured = true; config.providerId = profile.id; config.baseUrl = profile.baseUrl; config.model = reference.modelId;
+  config.credentialAlias = profile.credentialAlias; config.contextWindow = profile.contextWindow;
+  // Model-specific options are resolved by SessionService, rather than copied from another model.
+  config.reasoning = undefined; config.images = undefined; config.requestUsage = undefined;
+  return config;
 }

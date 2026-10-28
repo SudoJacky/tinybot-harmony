@@ -9,6 +9,8 @@ import { savePreviewRepair } from './PreviewRecovery';
 import { WebSearchTools } from './WebSearchTools';
 import { NativeSearchTransport } from './NativeSearchTransport';
 import { BrowserSearchTransport } from './BrowserSearchTransport';
+import { isSupportedSearchProvider } from '../model/WebSearch';
+import { isSupportedProtocol } from '../model/ProviderEndpoint';
 import { ProductivityData, Attachment, McpServer } from '../model/Productivity';
 import { LiveResources, McpRequest } from '../model/ResourceManagement';
 import { SkillData } from '../model/Skills';
@@ -119,7 +121,7 @@ export class NativeSessionResources implements SessionResources {
     if (extensions.webEnabled) { groups.push(new WebTools(new NativeWebTransport())); }
     if (this.browser) { groups.push(new BrowserTools(this.browser, id, productivity?.options?.readOnly === true, resolvePreview)); }
     const search = productivity?.options?.search;
-    if (extensions.webEnabled && search?.enabled && ['deepseek', 'tavily', 'bing-browser'].includes(search.provider)) {
+    if (extensions.webEnabled && search?.enabled && isSupportedSearchProvider(search.provider)) {
       if (search.provider === 'bing-browser') {
         if (this.browser?.policy !== 'disabled') { groups.push(new WebSearchTools(new BrowserSearchTransport(this.browser, id), 'sequential')); }
       } else {
@@ -135,7 +137,9 @@ export class NativeSessionResources implements SessionResources {
   configureProviders(profiles: ProviderProfile[]): void {
     this.profiles = JSON.parse(JSON.stringify(profiles)) as ProviderProfile[];
     for (const info of this.providers.list()) { this.providers.unregister(info.id); }
-    for (const profile of profiles) { this.providers.register(profileProvider(profile, new NativeProviderEffects())); }
+    for (const profile of profiles) {
+      if (isSupportedProtocol(profile.protocol)) { this.providers.register(profileProvider(profile, new NativeProviderEffects())); }
+    }
   }
   reportError(event: string, error: Error | string, fields?: LogFields): void { Diagnostics.log('error', 'session', event, fields, error); }
   reportMemory(event: string, fields?: LogFields): void { Diagnostics.log('info', 'memory', event, fields); }

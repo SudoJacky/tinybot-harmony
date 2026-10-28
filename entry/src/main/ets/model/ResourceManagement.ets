@@ -1,6 +1,7 @@
 import { ToolFailure, parseToolArguments } from './ToolFailure';
 import { ExtensionSettings, SkillData, SkillFile, parseSkill, validateExtensions } from './Skills';
 import { McpServer, ProductivityData, validateProductivity } from './Productivity';
+import { mergeSavedConfiguration } from './SavedConfiguration';
 
 export interface SkillRequest {
   action: string;
@@ -36,7 +37,8 @@ export function saveSkillCandidate(settings: ExtensionSettings, original: string
   skill.files = JSON.parse(JSON.stringify(files)) as SkillFile[];
   skill.source = imported?.source || existing?.source;
   if (!imported && skill.source) { skill.source.modified = true; }
-  next.skills = existing ? next.skills.map((item) => item.name === original ? skill : item) : next.skills.concat([skill]);
+  const saved = mergeSavedConfiguration(existing, skill);
+  next.skills = existing ? next.skills.map((item) => item.name === original ? saved : item) : next.skills.concat([saved]);
   validateExtensions(next); return next;
 }
 
@@ -53,7 +55,7 @@ export function changeSkillCandidate(settings: ExtensionSettings, name: string, 
 export function saveMcpCandidate(data: ProductivityData, server: McpServer): ProductivityData {
   const next = JSON.parse(JSON.stringify(data)) as ProductivityData;
   const index = next.servers.findIndex((item) => item.id === server.id);
-  if (index < 0) { next.servers.push(server); } else { next.servers[index] = server; }
+  if (index < 0) { next.servers.push(server); } else { next.servers[index] = mergeSavedConfiguration(next.servers[index], server); }
   validateProductivity(next); return next;
 }
 

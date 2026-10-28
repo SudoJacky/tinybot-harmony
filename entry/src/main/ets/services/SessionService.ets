@@ -1,15 +1,17 @@
 import { resolveBrowserPreview } from '../model/BrowserPreview';
 import { Diagnostics } from '../model/Diagnostics';
+import { configurationIssues } from '../model/ConfigurationCompatibility';
+import { isSupportedProtocol } from '../model/ProviderEndpoint';
 import { ToolExecution } from '../model/Agent';
 import { projectFor, workspaceIdFor, validateProjects, projectContext } from '../model/Project';
 import { SharedFolder } from '../model/SharedFolders';
 import { proposeSessionMemory, reviewSessionMemory, addMemoryDraft } from './SessionMemory';
 import { McpSettings, McpSettingsCommand, McpSettingsResult, McpSettingsHost } from './McpSettings';
 import { t } from '../model/I18n';
-import { AgentMode, toolEnabled, ToolSelection, validateToolSelection, normalizeDisabledTools } from '../model/AgentMode';
+import { AgentMode, toolEnabled, ToolSelection, validateAgentMode, validateToolSelection, normalizeDisabledTools } from '../model/AgentMode';
 import { RuleTools } from './RuleTools';
 import { SelectedTools } from './SelectedTools';
-import { BASIC_FILE_TOOLS, OPTIONAL_TOOL_NAMES, TOOL_CAPABILITIES } from '../model/ToolGroups';
+import { OPTIONAL_TOOL_NAMES, TOOL_CAPABILITIES } from '../model/ToolGroups';
 import { stepDisplayContent } from '../model/PublishedPreview';
 import { UiValues, UiSavedState, parseUiSurface, validateUiState, validateUiStates, copyUiValues } from '../model/InteractiveUi';
 import { importedSessionCandidate, savedProjectCandidate, forkedThreadCandidate } from './SessionCandidates';
@@ -22,7 +24,7 @@ import { saveSearchSettings } from './SearchSettings';
 import { SearchDraft } from '../model/WebSearch';
 import { TeamRun, teamCommand } from '../model/Team';
 import { ChatTeamTools, CHAT_TEAM_INSTRUCTIONS, coordinatorDefinitions } from './ChatTeamTools';
-import { Attachment, MemoryEntry, McpServer, ProductivityData, defaultProductivity, validateAttachments, validateProductivity, memoryContext } from '../model/Productivity';
+import { Attachment, MemoryEntry, McpServer, ProductivityData, defaultProductivity, validateAttachments, validateProductivity, memoryContext, supportedMcpAuth } from '../model/Productivity';
 import { defaultAssistantOptions, routeModel } from '../model/AssistantOptions';
 import { validateMemorySuggestions } from '../model/MemorySuggestions';
 import { MEMORY_CHAR_LIMIT, MEMORY_REVIEW_INTERVAL, MemoryOperation, MemoryChange,
@@ -32,10 +34,10 @@ import { ResourceTools } from './ResourceTools';
 import { LiveResources, SkillRequest, McpRequest, McpSummary, saveSkillCandidate, changeSkillCandidate } from '../model/ResourceManagement';
 import { Cancellation } from './Cancellation';
 import { ToolSet } from './ToolSet';
-import { AppData, MessageData, ModelConfig, ThreadData, copyModelConfig, emptyData } from '../model/Conversation';
+import { AppData, MessageData, ModelConfig, ThreadData, copyModelConfig, copyAppMetadata, emptyData } from '../model/Conversation';
 import { contextSettings } from '../model/ContextSettings';
 import { ModelReference, ProviderProfile, migrateProfiles, modelConfig } from '../model/ProviderProfiles';
-import { defaultSearchConfig } from '../model/WebSearch';
+import { defaultSearchConfig, isSupportedSearchProvider } from '../model/WebSearch';
 import { InputMode, MAX_INPUT_TEXT, PendingInput, nextPendingInput, validatePendingInputs } from '../model/PendingInput';
 import { BrowserPolicy, ExtensionSettings, SkillData, SkillFile, defaultExtensions, explicitSkill, expandSkillCommand, parseSkill, validateExtensions } from '../model/Skills';
 import { seedBuiltinSkills } from '../model/BuiltinSkills';
@@ -80,6 +82,7 @@ export class SessionService {
   private pendingTeamModes: Map<string, boolean> = new Map<string, boolean>();
   private pendingToolSelections: Map<string, ToolSelection> = new Map<string, ToolSelection>();
   private listeners: Set<(event: SessionEvent) => void> = new Set<(event: SessionEvent) => void>();
+  private compatibilityIssues: Set<string> = new Set<string>();
 
   constructor(repository: SessionRepository, runtime: AgentRuntime, credentials: CredentialVault, resources: SessionResources) {
     this.repository = repository;
@@ -106,6 +109,7 @@ export class SessionService {
   }
   async setAgentMode(mode: AgentMode): Promise<boolean> {
     if (!this.canMutate || this.active.archived) { return false; }
+    validateAgentMode(mode);
     const selection = this.selectedToolSelection(this.active); selection.agentMode = mode;
     this.selectTools(selection);
     return true;
@@ -115,16 +119,17 @@ export class SessionService {
     this.selectTools({ agentMode: 'custom', disabledTools: names.slice() }); return true;
   }
   async setToolEnabled(name: string, enabled: boolean): Promise<boolean> {
-    if (!BASIC_FILE_TOOLS.includes(name) && !OPTIONAL_TOOL_NAMES.includes(name)) { throw new Error(t('自定义工具设置无效。')); }
+    if (!OPTIONAL_TOOL_NAMES.includes(name)) { throw new Error(t('自定义工具设置无效。')); }
     const members = TOOL_CAPABILITIES.find((capability) => capability.tools.includes(name))?.tools || [name];
     const disabled = (this.selectedToolSelection(this.active).disabledTools || []).filter((item) => !members.includes(item));
     if (!enabled) { disabled.push(...members); }
     return this.setDisabledTools(disabled);
   }
   private selectTools(selection: ToolSelection): void {
-    validateToolSelection(selection);
+    validateToolSelection(selection, true);
     if (selection.disabledTools !== undefined) { selection.disabledTools = normalizeDisabledTools(selection.disabledTools); }
     this.pendingToolSelections.set(this.active.id, selection);
+    this.refreshCompatibility();
     this.refreshContext(); this.publishThread(this.active);
   }
   private selectedToolSelection(thread: ThreadData): ToolSelection {
@@ -172,7 +177,7 @@ export class SessionService {
     const reference = thread.modelRef;
     if (!reference) { return copyModelConfig(this.data.config, false); }
     const profile = this.providerProfiles.find((item: ProviderProfile) => item.id === reference.providerId);
-    if (!profile || !profile.enabled || !profile.models.includes(reference.modelId)) {
+    if (!profile || !profile.enabled || !isSupportedProtocol(profile.protocol) || !profile.models.includes(reference.modelId)) {
       const unavailable = copyModelConfig(this.data.config, false);
       unavailable.contextWindow = profile?.contextWindow || this.data.config.contextWindow;
       return unavailable;
@@ -241,6 +246,7 @@ export class SessionService {
         if (migrate && data.config.configured) { thread.modelRef = { providerId: data.config.providerId, modelId: data.config.model }; }
       }
       this.data = data;
+      this.refreshCompatibility();
       this.resources.configureProviders(this.providerProfiles);
       let active = data.threads.find((thread) => thread.id === data.activeThreadId && !thread.archived) ||
         data.threads.find((thread) => !thread.archived);
@@ -252,7 +258,8 @@ export class SessionService {
       this.refreshContext();
       this.application.saveError = '';
       this.application.ready = true;
-    } catch (error) { this.application.error = t("打开本地会话或工作区失败：") + (error as Error).message; }
+    } catch (error) { this.application.error = t("打开本地会话或工作区失败：") + (error as Error).message;
+      Diagnostics.log('error', 'configuration', 'load_failed', undefined, error as Error); }
     finally { this.application.phase = 'idle'; this.publish('snapshot'); }
   }
 
@@ -759,7 +766,7 @@ export class SessionService {
     if (command !== undefined) { text = command; }
     const options = this.data.productivity?.options || defaultAssistantOptions();
     const reference = thread.modelRef ? routeModel(options, text, attachments.concat(...thread.messages.map((item) =>
-      (item.role === 'user' ? item.attachments || [] : []).concat(...(item.steps || []).map((step) => step.steering?.attachments || [])))).some((item) => item.mime.startsWith('image/')), thread.modelRef) : undefined;
+      (item.role === 'user' ? item.attachments || [] : []).concat(...(item.steps || []).map((step) => step.steering?.attachments || [])))).some((item) => item.mime.startsWith('image/')), thread.modelRef, this.providerProfiles) : undefined;
     const config = reference ? this.configFor(reference, thread) : this.threadConfig(thread); const selected = explicitSkill(text);
     if (!config.configured) { status.error = t("当前对话没有可用模型，请选择模型，或添加、启用模型服务。"); thread.queuePaused = true; return false; }
     if (selected.length > 0 && !this.extensions.skills.some((skill: SkillData) => skill.enabled && skill.name === selected)) {
@@ -910,11 +917,8 @@ export class SessionService {
           const target = JSON.parse(JSON.stringify(thread)) as ThreadData;
           target.title = title;
           // A title changes one thread. Keep unrelated transcripts out of capture and UI projection.
-          const candidate: AppData = { version: this.data.version, config: this.data.config,
-            extensions: this.data.extensions, productivity: this.data.productivity,
-            providerProfiles: this.data.providerProfiles, projects: this.data.projects,
-            activeThreadId: this.data.activeThreadId,
-            threads: this.data.threads.map((item) => item.id === threadId ? target : item) };
+          const candidate = copyAppMetadata(this.data);
+          candidate.threads = this.data.threads.map((item) => item.id === threadId ? target : item);
           let revision = this.draftRevision;
           await this.commitCandidate(candidate, () => { thread.title = title; },
             [threadId].concat(Array.from(this.dirtyDrafts)));
@@ -1160,7 +1164,7 @@ export class SessionService {
     if (request.action === 'list') {
       return JSON.stringify((this.data.productivity?.servers || []).map((item): McpSummary => ({
         id: item.id, name: item.name, url: item.url, enabled: item.enabled,
-        available: item.enabled && !(thread.disabledMcpIds || []).includes(item.id),
+        available: item.enabled && supportedMcpAuth(item) && !(thread.disabledMcpIds || []).includes(item.id),
         auth: item.authType || (item.credentialAlias ? 'bearer' : 'none')
       })));
     }
@@ -1240,6 +1244,7 @@ export class SessionService {
   private tools(thread: ThreadData, selected: string = ''): AgentTools {
     const extras = JSON.parse(JSON.stringify(this.data.productivity || defaultProductivity())) as ProductivityData;
     extras.options = extras.options || defaultAssistantOptions();
+    if (extras.options.search && !isSupportedSearchProvider(extras.options.search.provider)) { extras.options.search.enabled = false; }
     extras.options.readOnly = this.readOnly(thread);
     extras.servers = extras.servers.filter((item) => !(thread.disabledMcpIds || []).includes(item.id));
     const live: LiveResources = { skills: () => this.extensions.skills,
@@ -1349,12 +1354,12 @@ export class SessionService {
   }
   private async commitPreferences(preferences: SessionPreferences): Promise<void> {
     // The repository captures values before IO. Reuse unchanged transcript files and retain live drafts.
-    const candidate: AppData = { version: this.data.version, config: preferences.config, extensions: preferences.extensions,
-      productivity: preferences.productivity, threads: this.data.threads, activeThreadId: this.data.activeThreadId,
-      providerProfiles: this.data.providerProfiles, projects: this.data.projects };
+    const candidate = copyAppMetadata(this.data);
+    candidate.config = preferences.config; candidate.extensions = preferences.extensions; candidate.productivity = preferences.productivity;
     await this.commitCandidate(candidate, () => {
       this.data.config = preferences.config; this.data.extensions = preferences.extensions;
       this.data.productivity = preferences.productivity;
+      this.refreshCompatibility();
     }, Array.from(this.dirtyDrafts));
   }
   private async commitSettings(candidate: AppData, runningThreadIds: string[] = this.runningThreadIds): Promise<void> {
@@ -1369,6 +1374,7 @@ export class SessionService {
         if (current) { thread.draft = current.draft; }
       }
       this.data = candidate;
+      this.refreshCompatibility();
     });
   }
   private async persistDraftChanges(revision: number): Promise<void> {
@@ -1399,6 +1405,20 @@ export class SessionService {
       agentMode: this.selectedToolSelection(thread).agentMode, disabledTools: this.selectedToolSelection(thread).disabledTools };
     this.emit({ kind: 'thread', state: this.state, threadId: thread.id,
       thread: JSON.parse(JSON.stringify(metadata)) as ThreadData });
+  }
+  private refreshCompatibility(): void {
+    const issues = configurationIssues(this.data, this.pendingToolSelections);
+    this.status.compatibilityWarnings = Array.from(new Set(issues.map((issue) => issue.message)));
+    const next = new Set<string>();
+    // Checkpoints do not scan configurations. Settings commits log newly affected fields only.
+    for (const issue of issues) {
+      const key = issue.setting + ':' + (issue.threadId || '') + ':' + (issue.providerId || '') + ':' + (issue.serverId || ''); next.add(key);
+      if (!this.compatibilityIssues.has(key)) {
+        Diagnostics.log('warn', 'configuration', 'unsupported', { setting: issue.setting, dataVersion: this.data.version,
+          threadId: issue.threadId, providerId: issue.providerId, serverId: issue.serverId });
+      }
+    }
+    this.compatibilityIssues = next;
   }
   private publishTeams(thread: ThreadData): void {
     this.emit({ kind: 'teams', state: this.state, threadId: thread.id,
