@@ -533,17 +533,29 @@ async function encryptedBackupTest() {
     if(failSave)throw Error('injected backup settings failure');
     assert.ok(!JSON.stringify(value).includes(secret));saved=JSON.parse(JSON.stringify(value));
   }};
-  const resources={createId:()=>crypto.randomUUID(),configureProviders(){},reportError(){},ensureWorkspace:async()=>{}};
+  const {ProviderRegistry}=load('services/providers/ProviderRegistry');
+  const registry=new ProviderRegistry();let sent;
+  const resources={createId:()=>crypto.randomUUID(),configureProviders(profiles){
+    for(const item of registry.list())registry.unregister(item.id);
+    for(const profile of profiles)registry.register({info:{id:profile.id,name:profile.name,protocol:profile.protocol,
+      defaultBaseUrl:profile.baseUrl,defaultModel:profile.models[0],models:profile.models},
+      endpoint:base=>base+'/chat/completions',async stream(request){sent=request;return {content:'restored service works',toolCalls:[]};}});
+  },reportError(){},ensureWorkspace:async()=>{}};
   const session=new SessionService(repository,{fork(){return this;}},vault,resources);session.refreshContext=()=>{};await session.initialize();
   const imported=await readBackupFile(context,backup,session.snapshot());
   assert.ok(!JSON.stringify(imported).includes(secret),'AppData never contains raw keys');
   failSave=true;assert.equal(await session.importSnapshot(imported),false);assert.equal(stored.size,1,'failed commit removes new aliases');
   assert.equal(saved.providerProfiles.length,0);
+  assert.equal(registry.list().length,0,'a failed restore must not expose uncommitted services');
   failSave=false;assert.equal(await session.importSnapshot(imported),true,session.state.error);
   const profile=saved.providerProfiles[0];assert.notEqual(profile.credentialAlias,'original-alias');assert.equal(stored.get(profile.credentialAlias),secret);
   assert.equal(profile.enabled,true);assert.equal(profile.noApiKey,false);assert.equal(profile.name,'My API');
   assert.equal(saved.config.configured,true);assert.equal(saved.config.model,'model-a');
   assert.equal(saved.threads.find(t=>t.id===saved.activeThreadId).modelRef.providerId,profile.id);
+  const {Cancellation}=load('services/Cancellation');
+  const answer=await registry.bind(session.currentConfig,vault).stream([{role:'user',content:'hello'}],[],new Cancellation(),()=>{});
+  assert.equal(answer.content,'restored service works','the restored model is usable before restarting or editing settings');
+  assert.equal(sent.model,'model-a');assert.equal(sent.baseUrl,'https://api.example.com/v1');assert.equal(sent.apiKey,secret);
   const existingCount=stored.size,existingAlias=profile.credentialAlias;
   stored.set(existingAlias,'LOCAL-KEY');
   const repeated=await readBackupFile(context,backup,session.snapshot());

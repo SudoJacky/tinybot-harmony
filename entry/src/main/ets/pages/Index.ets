@@ -425,7 +425,9 @@ struct Index {
     if (!this.app.canNavigate) { return; }
     const previousId = this.app.active.id;
     // SessionService decides whether the current chat is untouched and reusable.
-    if (await this.app.newThread() && this.app.active.id === previousId) {
+    if (!await this.app.newThread()) { return; }
+    this.revealChat();
+    if (this.app.active.id === previousId) {
       this.getUIContext().getPromptAction().showToast({
         systemMaterial: this.appearance.surface, message: t('已在新对话中'), duration: 1600
       });
@@ -1273,7 +1275,8 @@ struct Index {
           collapseHistory: this.workbench().expanded, searchRequest: this.historySearchRequest,
           onCollapseHistory: () => this.setHistoryCollapsed(true),
           onNewChat: () => { this.createChat(); this.setDrawer(false); }, onTools: () => { this.setDrawer(false); this.openTools('memory'); },
-          active: this.chatVisible && (this.workbench().expanded || this.drawerOpen && this.drawerContentActive), onSelected: () => this.setDrawer(false), onFiles: () => { this.setDrawer(false); this.openFiles(); }, onSettings: () => {
+          active: !this.onboardingActive && (this.workbench().expanded || this.drawerContentActive),
+          onSelected: () => this.revealChat(), onFiles: () => { this.setDrawer(false); this.openFiles(); }, onSettings: () => {
           this.setDrawer(false);
           this.openSettings();
         } })

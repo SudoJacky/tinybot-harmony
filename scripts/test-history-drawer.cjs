@@ -55,3 +55,45 @@ list.active = true; list.initialRender(); assert.equal(renders, 1);
 list.active = false; list.initialRender(); assert.equal(renders, 1);
 assert.equal(list.query, 'retained query'); assert.equal(list.visibleCounts.ordinary, 40);
 console.log('PASS inactive history skips its content while preserving search and pagination state');
+
+// Exercise both initial and retained sidebar props emitted by ArkUI.
+const compiledPage = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/pages/Index.ts');
+const pageTree = ts.createSourceFile(compiledPage, fs.readFileSync(compiledPage, 'utf8'), ts.ScriptTarget.Latest, true);
+let initialProps, updatedProps;
+function visit(node) {
+  if (ts.isCallExpression(node) && node.expression.getText(pageTree) === 'this.observeComponentCreation2' &&
+      node.arguments[1]?.getText(pageTree).includes('name: "ThreadList"')) {
+    function child(n) {
+      if (ts.isNewExpression(n) && n.expression.getText(pageTree) === 'ThreadList') initialProps = n.arguments[1].getText(pageTree);
+      if (ts.isCallExpression(n) && n.expression.getText(pageTree) === 'this.updateStateVarsOfChildByElmtId') updatedProps = n.arguments[1].getText(pageTree);
+      ts.forEachChild(n, child);
+    }
+    child(node.arguments[0]);
+  }
+  ts.forEachChild(node, visit);
+}
+visit(pageTree); assert.ok(initialProps && updatedProps);
+const sidebarProps = vm.runInNewContext(`(function(initial) { return initial ? (${initialProps}) : (${updatedProps}); })`);
+for (const initial of [true, false]) {
+  const state = { app: {}, workbench: () => ({expanded: true}), onboardingActive: false, chatVisible: false, drawerContentActive: false };
+  assert.equal(sidebarProps.call(state, initial).active, true, 'Settings must retain the expanded sidebar');
+  state.workbench = () => ({expanded: false});
+  assert.equal(sidebarProps.call(state, initial).active, false, 'A hidden phone drawer must stay inactive');
+  state.drawerContentActive = true;
+  assert.equal(sidebarProps.call(state, initial).active, true, 'An opened overlay or its exit animation retains content');
+  state.onboardingActive = true;
+  assert.equal(sidebarProps.call(state, initial).active, false, 'Initial setup keeps history inactive');
+}
+const NavigationPage = probe('pages/Index', 'Index', ['createChat', 'revealChat'], {t: value => value});
+(async () => {
+  let cleared = 0, drawerClosed = 0, created = 0;
+  const nav = Object.assign(new NavigationPage(), {paths: {clear(){cleared++;}},
+    app: {canNavigate:true,active:{id:'old'},async newThread(){created++;this.active.id='new';return true;}},
+    workbench:()=>({expanded:true,docked:true}),setDrawer(open){assert.equal(open,false);drawerClosed++;}});
+  sidebarProps.call(nav,true).onSelected();
+  assert.equal(cleared,1,'Selecting a visible conversation exits Settings');
+  await nav.createChat();assert.equal(cleared,2);assert.equal(created,1);assert.equal(drawerClosed,2);
+  nav.app.newThread=async()=>false;
+  await nav.createChat();assert.equal(cleared,2,'Failed creation leaves the current page intact');
+  console.log('PASS tablet sidebar survives destinations; selection and successful new chat return to chat');
+})().catch(error=>{console.error(error);process.exitCode=1;});
