@@ -16,8 +16,8 @@ class Frame {
   this.parent.children=this.parent.children.filter(child=>child!==this);parent.children.push(this);this.parent=parent;}
 }
 class Builder {
- constructor(){this.frame=new Frame();this.frame.page={document:{id:Symbol('document')},controller:{id:Symbol('web')},ports:[{}],score:7,initializations:0};builders.push(this);}
- build(){builds++;this.frame.page.initializations++;}
+ constructor(context){this.context=context;this.frame=new Frame();this.frame.page={document:{id:Symbol('document')},controller:{id:Symbol('web')},ports:[{}],score:7,initializations:0};builders.push(this);}
+ build(_builder,options){this.options={...options};builds++;this.frame.page.initializations++;}
  getFrameNode(){return this.frame;}
  update(options){this.options={...options};}
  dispose(){disposals++;this.frame.page.disposed=true;if(this.frame.parent)this.frame.parent.children=this.frame.parent.children.filter(child=>child!==this.frame);}
@@ -65,3 +65,32 @@ collapsed.inlineMount.aboutToDisappear();assert.equal(disposals,2,'A collapsed/i
 mount(collapsed.inlineMount);assert.equal(builds,3,'Reopening a deliberately removed inline host creates a fresh lifetime');collapsed.dispose();
 assert.ok(logs.every(log=>log[1]==='preview'&&log[2]==='surface_moved'));
 console.log('PASS ordinary inline removal retains the existing lazy-release policy and node transfers are observable');
+
+// MatePad: sending in a restored conversation makes LazyForEach temporarily detach a cached
+// NodeContainer, then call aboutToAppear again WITHOUT makeNode (the card is not destroyed).
+const cached=new PreviewSurface();cached.setOptions(options());const cachedHost=mount(cached.inlineMount);
+const cachedContext=builders.at(-1).context;
+let cachedCover;
+for(let index=0;index<20;index++){
+ const previous=cachedHost.children[0],beforeBuilds=builds,beforeDisposals=disposals;
+ cached.inlineMount.aboutToDisappear();cachedHost.live=false;
+ assert.equal(disposals,beforeDisposals+1,'Detached inline renderers are released');
+ const nextOptions=options();nextOptions.available=index%2===0;cached.setOptions(nextOptions);
+ cachedHost.live=true;cached.inlineMount.aboutToAppear();
+ assert.equal(builds,beforeBuilds+1,'Cached host reappearance recreates its released renderer');
+ assert.equal(builders.at(-1).context,cachedContext,'Recreate in the original host UIContext');
+ assert.equal(builders.at(-1).options.available,nextOptions.available,'Use current interaction availability');
+ assert.deepEqual(builders.at(-1).options.saved,nextOptions.saved,'Restore persisted preview state');
+ assert.equal(cachedHost.children.length,1);assert.notEqual(cachedHost.children[0],previous);
+ assert.equal(previous.page.disposed,true);
+ const live=cachedHost.children[0],beforeCoverBuilds=builds;
+ cached.enterFullscreen();
+ if(index===0){cachedCover=mount(cached.fullscreenMount);}
+ else{cachedCover.live=true;cached.fullscreenMount.aboutToAppear();}
+ assert.equal(live.getParent(),cachedCover);assert.equal(builds,beforeCoverBuilds);
+ cached.fullscreenMount.aboutToDisappear();cachedCover.live=false;
+ assert.equal(live.getParent(),cachedHost,'Reused fullscreen hosts restore the same live renderer');
+}
+cached.dispose();
+assert.equal(disposals,builds,'Every renderer is released exactly once after all owners are disposed');
+console.log('PASS cached inline and fullscreen hosts reappear without makeNode across 20 restored-chat lifecycle cycles');
