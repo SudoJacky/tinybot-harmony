@@ -2559,5 +2559,7 @@
   "使用中 ({0})": "Active ({0})",
   "已移除 ({0})": "Removed ({0})",
   "更新于 {0}": "Updated {0}",
-  "{0}（{1}）": "{0} ({1})"
+  "{0}（{1}）": "{0} ({1})",
+  "1.2.2 · 2026-10-29": "1.2.2 · 2026-10-29",
+  "支持多个会话并行执行任务、后台传输与完成通知。小程序可在实验室开启，支持数据保存、更新、重命名和移除后恢复，列表新增分类数量、相对时间和下拉刷新。支持系统文档分享与拖入附件，每条消息最多 10 个附件，文档保留原件并按需读取。新增全屏预览与实际页面验证，优化内置必应搜索和服务设置，增加 QQ 社区与评价邀请。模型 API Key 随华为账号加密备份，同账号可恢复。修复旧小程序清单兼容、恢复后模型服务未注册、后台预览误超时、平板侧栏空白及菜单背景缺失，改善工具响应、大内容处理和配置兼容。": "Run tasks in parallel conversations with background transfers and completion notifications. Enable mini apps in Labs to save data, update pages, rename apps, and restore removed apps. The collection adds category counts, relative dates, and pull-to-refresh. Share documents or drop attachments into chats, with up to 10 attachments per message; originals are retained and read on demand. Use fullscreen previews and on-device page verification, improved Bing search and provider settings, and new QQ community and review entries. Model API keys are encrypted using your HUAWEI ID for same-account restore. Fixes cover older mini app manifests, unregistered providers after restore, background preview timeouts, blank tablet sidebars, and missing menu backgrounds, with improvements to tool responsiveness, large content, and configuration compatibility."
 }

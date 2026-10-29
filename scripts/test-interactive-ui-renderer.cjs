@@ -201,7 +201,7 @@ test('rows respond to actual width and omit hidden children without changing vis
 });
 if (failed) process.exitCode = 1;
 
-// ArkWeb lifecycle regression: loadData must wait for the initial blank document.
+// ArkWeb lifecycle regression: attachment loads the host without an initial blank navigation.
 (async () => {
   const copySource = [
     {op:'begin',version:1,title:'Copy',state:{people:4,each:30,completed:0}},
@@ -233,7 +233,10 @@ if (failed) process.exitCode = 1;
   }
   let captureSurface = async () => ({ release: async () => {} });
   const webGlobals = { ...globals, exports: {}, MessageLevel: { Error: 3 }, Stack: noUi, Image: noUi, ImageFit: {}, Alignment: {}, HitTestMode: {},
-    Web: new Proxy({}, { get: (_, name) => (...args) => { if (name.startsWith('on')) callbacks[name] = args[0]; } }),
+    Web: new Proxy({}, { get: (_, name) => (...args) => {
+      if (name === 'create') callbacks.source = args[0].src;
+      if (name.startsWith('on')) callbacks[name] = args[0];
+    } }),
     require: id => {
       if (id === '@ohos:web.webview') return { default: { WebviewController: Controller } };
       if (id === '@ohos:multimedia.image') return { default: { createPixelMapFromSurface: id => { assert.equal(id, 'web-surface'); return captureSurface(); } } };
@@ -255,8 +258,9 @@ if (failed) process.exitCode = 1;
   try {
     view.visible = true;
     view.aboutToAppear(); view.initialRender(); callbacks.onControllerAttached(); await settle();
-    assert.equal(loads.length,0,'initial navigation must finish before loadData');
-    callbacks.onPageEnd({url:'about:blank'}); await settle(); assert.equal(loads.length,1);
+    assert.equal(callbacks.source,'','Do not create an initial blank document');
+    assert.equal(loads.length,1,'attachment loads the host directly');
+    assert.equal(sent.length,0,'the bridge waits for the host page to finish loading');
     assert.equal(intercept('data:text/html;charset=UTF-8;base64,host',false),true);
     assert.equal(intercept('data:text/html;charset=UTF-8;base64,host'),false);
     assert.equal(intercept('data:text/html;charset=UTF-8;base64,another'),true);
@@ -277,7 +281,8 @@ if (failed) process.exitCode = 1;
     assert.equal(view.heightValue,800,'old document cannot resize the new view');
     view.interactive=true;
     console.log('PASS ArkWeb sizes auto-height previews independently of state saving, bounds height and ignores stale documents');
-    console.log('PASS ArkWeb waits for its initial document and permits exactly one native data load');
+    assert.equal(loads.length,1,'page completion must not start another navigation');
+    console.log('PASS ArkWeb loads the host on attachment and permits exactly one native data load');
     await view.receive('{"type":"save","id":1,"values":{"count":1}}',view.generation);
     const savedAck = sent.find(message => message.type === 'ack' && message.id === 1);
     assert.ok(savedAck); assert.equal(savedAck.values.count,1);
