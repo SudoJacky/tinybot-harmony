@@ -275,6 +275,30 @@ console.log('PASS emitted composer plus opens the tablet add menu with a templat
 // can never cover the page. The tool sheet reserves the navigation inset.
 const compiledRoot = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets');
 const indexSource = fs.readFileSync(path.join(compiledRoot, 'pages/Index.ts'), 'utf8');
+// The permanent tablet title occupies its own layout space. Phone scrolling
+// still uses the overlay title and its matching message-list inset.
+const titleTree = ts.createSourceFile('Index.ts', indexSource, ts.ScriptTarget.Latest, true);
+let titleOptions;
+const chatInsets = [];
+function visitTitle(node) {
+  if (ts.isCallExpression(node) && node.expression.getText(titleTree) === 'Navigation.title') {
+    titleOptions = node.arguments[1].getText(titleTree);
+  }
+  if (ts.isPropertyAssignment(node) && node.name.getText(titleTree) === 'topInset') {
+    chatInsets.push(node.initializer.getText(titleTree));
+  }
+  ts.forEachChild(node, visitTitle);
+}
+visitTitle(titleTree); assert.ok(titleOptions); assert.ok(chatInsets.length >= 2);
+const titleProbe = vm.runInNewContext(`(function() {return {options: (${titleOptions}), insets: [${chatInsets.join(',')}]};})`,
+  {BarStyle: {STANDARD:'standard',STACK:'stack'},Color:{Transparent:'transparent'},CHAT_HEADER_HEIGHT:56});
+for (const width of [600,839,840,1116,1600]) {
+  const actual = titleProbe.call({windowWidth:width});
+  assert.equal(actual.options.barStyle, width >= 840 ? 'standard' : 'stack');
+  assert.ok(actual.insets.every(inset => inset === (width >= 840 ? 0 : 56)),
+    'Initial and updated ChatPanel props must match the native title layout');
+}
+console.log('PASS tablet title reserves layout space; phone overlay keeps its matching content inset');
 assert.ok(indexSource.includes("'workbench-toggle-detail'"), 'The header exposes the side panel toggle');
 assert.match(indexSource, /DetailTabs\(this, \{ tabs: this\.detailTabItems\(\), active: this\.currentDetailTab\(\)/,
   'The strip receives the available tabs and the current one');

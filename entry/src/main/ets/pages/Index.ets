@@ -1159,9 +1159,8 @@ struct Index {
   @Builder
   header() {
     if (this.windowWidth >= 840) {
-      // The title bar has no backdrop for the API-26 light-sense material, which
-      // composites as white and erases the control fill; use the opaque control
-      // tint here and keep the material path on the phone header.
+      // On the plain tablet title surface, API-26 light-sense material erases
+      // the control fill; keep an opaque tint and reserve material for phones.
       Row({ space: 4 }) {
         if (this.workbench().historyWidth === 0) {
           IconButton({ icon: $r('sys.symbol.line_3_horizontal'), label: t('对话列表'), compId: 'open-history',
@@ -1355,7 +1354,7 @@ struct Index {
                 onAccount: () => { this.paths.pushPath({ name: 'account' }); },
                 onBrowser: () => { this.setBrowserExpanded(true); this.openDetailTab('browser'); },
                 onSettings: () => this.openSettings(),
-                topInset: CHAT_HEADER_HEIGHT,
+                topInset: this.windowWidth >= 840 ? 0 : CHAT_HEADER_HEIGHT,
                 onHeaderProgress: (progress: number): void => { this.headerProgress = progress; },
                 voiceRequest: this.voiceRequest, onVoiceShortcutConsumed: () => { this.voiceRequest = ''; },
                 activeThreadId: this.app.active.id, speechEnabled: this.chatVisible && !this.drawerOpen && !this.drawerDragging && (!this.detailOpen() || this.workbench().docked),
@@ -1388,7 +1387,8 @@ struct Index {
     .backgroundColor(this.windowWidth >= 840 ? $r('app.color.surface') : $r('app.color.page_background'))
     // Native button materials only work inside the actual navigation title bar.
     .title({ builder: this.header, height: CHAT_HEADER_HEIGHT }, {
-      barStyle: BarStyle.STACK, backgroundColor: Color.Transparent,
+      barStyle: this.windowWidth >= 840 ? BarStyle.STANDARD : BarStyle.STACK,
+      backgroundColor: this.windowWidth >= 840 ? $r('app.color.surface') : Color.Transparent,
       backgroundEffect: { radius: 0, color: Color.Transparent }
     })
     .hideBackButton(true).titleMode(NavigationTitleMode.Mini).hideToolBar(true).mode(NavigationMode.Stack)

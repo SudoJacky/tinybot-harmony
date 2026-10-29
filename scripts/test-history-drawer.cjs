@@ -56,6 +56,49 @@ list.active = false; list.initialRender(); assert.equal(renders, 1);
 assert.equal(list.query, 'retained query'); assert.equal(list.visibleCounts.ordinary, 40);
 console.log('PASS inactive history skips its content while preserving search and pagination state');
 
+// Run the emitted height callback and both navigation compositions. A keyboard
+// resize must keep all actions available without retaining the tall button stack.
+let areaChanged, buttonId;
+const compactButtons = new Map(), tallButtons = new Map();
+const uiGlobals = { t: value => value, ViewPU: { create() {} }, ViewStackProcessor: noop,
+  IconButton: class { constructor(_parent, props) { compactButtons.set(props.compId, props); } },
+  Column: new Proxy({}, {get: (_, key) => key === 'onAreaChange' ? callback => { areaChanged = callback; } : () => {}}),
+  Button: new Proxy({}, {get: (_, key) => key === 'id' ? id => {buttonId = id;} :
+    key === 'onClick' ? callback => {tallButtons.set(buttonId, callback);} : () => {}}) };
+for (const name of ['If','Row','Blank','Image','Text','SymbolGlyph','Search','Divider']) uiGlobals[name] = noop;
+for (const name of ['Space','Font','FontWeight','TextAlign','Color','ButtonType','Visibility','FlexAlign',
+  'Radius','SheetSize','SheetKeyboardAvoidMode']) uiGlobals[name] = {};
+const CompactList = probe('views/ThreadList', 'ThreadList',
+  ['initialRender','listContent','workbenchNavigation','compactNavigation'], uiGlobals);
+const compactActions = [];
+const compact = Object.assign(new CompactList(), {
+  active: true, workbench: true, panelHeight: 0, collapseHistory: true, searchOpen: true, query: '你好',
+  appearance: {}, app: {saveError:'',error:'',providerProfiles:[],productivity:{}},
+  locked: () => false, filtered: () => [], sections: () => [], workbenchMenu() {},
+  onNewChat: () => compactActions.push('new'), onFiles: () => compactActions.push('files'),
+  onTools: () => compactActions.push('tools'), onCollapseHistory: () => compactActions.push('collapse'),
+  observeComponentCreation2(callback) {callback(1, true);},
+  ifElseBranchUpdateFunction(_branch, render) {render();}
+});
+compact.initialRender();
+assert.ok(tallButtons.has('workbench-new-chat'));
+areaChanged({}, {height: '352'});
+compactButtons.clear(); tallButtons.clear(); compact.initialRender();
+assert.equal(tallButtons.has('workbench-new-chat'), false, 'Do not keep the tall navigation under the keyboard');
+for (const id of ['workbench-new-chat','workbench-sidebar-files','workbench-sidebar-tools','workbench-collapse-history']) {
+  assert.equal(compactButtons.get(id).diameter, 36);
+  compactButtons.get(id).onTap();
+}
+assert.deepEqual(compactActions, ['new','files','tools','collapse']);
+assert.equal(compact.query, '你好', 'Layout adaptation preserves the query');
+areaChanged({}, {height: 660});
+compactButtons.clear(); tallButtons.clear(); compact.initialRender();
+assert.ok(tallButtons.has('workbench-new-chat'), 'Dismissal restores the full navigation');
+assert.equal(compactButtons.has('workbench-new-chat'), false);
+compact.workbench = false; compact.panelHeight = 352;
+assert.equal(compact.compactNavigation(), false, 'Phone navigation keeps its existing composition');
+console.log('PASS keyboard resize switches the actual sidebar controls and restores them without losing search');
+
 // Exercise both initial and retained sidebar props emitted by ArkUI.
 const compiledPage = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/pages/Index.ts');
 const pageTree = ts.createSourceFile(compiledPage, fs.readFileSync(compiledPage, 'utf8'), ts.ScriptTarget.Latest, true);

@@ -187,6 +187,7 @@ export struct ThreadList {
   @Prop collapseHistory: boolean = false;
   @Prop @Watch('searchRequested') searchRequest: number = 0;
   @State @Watch('searchVisibilityChanged') private searchOpen: boolean = false;
+  @State private panelHeight: number = 0;
   private mounted: boolean = false;
   private focusRequest: number = 0;
   onCollapseHistory: () => void = () => {};
@@ -417,6 +418,7 @@ export struct ThreadList {
 
   @Builder
   workbenchNavigation() {
+    if (!this.compactNavigation()) {
     Button({ type: ButtonType.Normal }) {
       Row({ space: 10 }) {
         Blank().layoutWeight(1)
@@ -443,6 +445,7 @@ export struct ThreadList {
       }.id('workbench-sidebar-tools').width('100%').height(44).padding({ left: 12, right: 12 })
         .borderRadius(10).backgroundColor(Color.Transparent).onClick(this.onTools)
     }.width('100%').padding({ top: 8, bottom: 12 })
+    }
     Row({ space: 0 }) {
       Text(this.archived ? t('已归档') : t('工作区')).fontSize(13).fontColor($r('app.color.text_tertiary')).layoutWeight(1)
       IconButton({ icon: $r('sys.symbol.magnifyingglass'), label: t('搜索对话'), compId: 'workbench-search',
@@ -492,18 +495,34 @@ export struct ThreadList {
     }.width('100%').padding({ top: 4 }).backgroundColor($r('app.color.page_background'))
   }
 
+  private compactNavigation(): boolean {
+    // Measure the available panel, including keyboard and floating-window resize.
+    return this.workbench && this.panelHeight > 0 && this.panelHeight < 520;
+  }
+
   build() {
     Column() {
       if (this.active) { this.listContent() }
     }.width('100%').height('100%')
+      .onAreaChange((_oldArea: Area, area: Area) => { this.panelHeight = Number(area.height); })
   }
 
   @Builder
   listContent() {
-    Column({ space: Space.md }) {
+    Column({ space: this.compactNavigation() ? Space.sm : Space.md }) {
       Row({ space: Space.sm }) {
         Image($r('app.media.tinybot')).width(28).height(28)
+        if (this.compactNavigation()) {
+          Blank().layoutWeight(1)
+          IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('新建对话'), compId: 'workbench-new-chat',
+            diameter: 36, iconSize: 19, disabled: this.locked(), onTap: this.onNewChat })
+          IconButton({ icon: $r('sys.symbol.folder'), label: t('工作区文件'), compId: 'workbench-sidebar-files',
+            diameter: 36, iconSize: 19, onTap: this.onFiles })
+          IconButton({ icon: $r('sys.symbol.wrench_and_screwdriver'), label: t('记忆与工具'), compId: 'workbench-sidebar-tools',
+            diameter: 36, iconSize: 19, onTap: this.onTools })
+        } else {
         Text('Tinybot').fontFamily(this.appearance.fontFamily).fontSize(20).fontWeight(FontWeight.Bold).layoutWeight(1).fontColor($r('app.color.text_primary'))
+        }
         if (!this.workbench) {
         Button(this.selecting ? t('取消') : t('多选')).fontFamily(this.appearance.fontFamily).id('thread-selection-mode').attributeModifier(Btn.textSmall)
           .enabled(!this.locked() && (this.selecting || this.filtered().length > 0))
@@ -517,7 +536,7 @@ export struct ThreadList {
           IconButton({ icon: $r('sys.symbol.line_3_horizontal'), label: t('收起会话栏'), compId: 'workbench-collapse-history',
             diameter: 36, iconSize: 18, onTap: this.onCollapseHistory })
         }
-      }.width('100%').height(48).padding({ left: 4 })
+      }.width('100%').height(this.compactNavigation() ? 40 : 48).padding({ left: 4 })
       if (this.workbench) { this.workbenchNavigation() }
       Search({ value: this.query, placeholder: t("搜索对话") }).textFont({ family: this.appearance.fontFamily })
         .placeholderFont({ family: this.appearance.fontFamily }).id('search-threads').height(40)
