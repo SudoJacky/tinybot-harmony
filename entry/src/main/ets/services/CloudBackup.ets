@@ -166,9 +166,24 @@ export class CloudBackup {
           if (!stat.isFile() || stat.isSymbolicLink()) { throw new Error(t('备份文件无效。')); }
         }
         await copyFileBytes(source, temporary);
-        // The complete, flushed file replaces the previous snapshot in one rename.
-        // Never unlink the old backup first: copy/flush/rename failures must retain it.
-        await fs.rename(temporary, target);
+        // Cloud directories reject rename over an existing destination. Keep the old
+        // snapshot discoverable even if the process stops before promotion completes.
+        let previous = '';
+        if (await fs.access(target)) {
+          const info = await fs.stat(target);
+          previous = directory + '/tinybot-' + Math.trunc(info.mtime * 1000) + '-' + util.generateRandomUUID() + '.tinybot';
+          await fs.rename(target, previous);
+        }
+        try { await fs.rename(temporary, target); }
+        catch (error) {
+          Diagnostics.log('error', 'backup', 'replace_failed', undefined, error as Error);
+          if (previous) {
+            try { await fs.rename(previous, target); }
+            catch (rollbackError) { Diagnostics.log('error', 'backup', 'rollback_failed', undefined, rollbackError as Error); }
+          }
+          throw error as Error;
+        }
+        if (previous) { try { await fs.unlink(previous); } catch (error) { logCleanup(error as Error); } }
       } catch (error) {
         if ((error as BusinessError).code === 13900012) {
           throw new Error(t('无法写入华为云空间（13900012）。请在系统云空间中开启 Tinybot 后重试。'));

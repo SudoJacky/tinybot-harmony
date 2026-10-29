@@ -16,7 +16,7 @@ fs.mkdirSync(fixture, { recursive: true });
 const handles = new Map(), handlePaths = new Map(), writableHandles = new Set(); let failManifest = false; let failSharedRename = false;
 let failConversationWorker = false;
 let sharedWriteFailure = ''; let cancelSharedWrite; let failBackupRename = false; const usageWrites = [];
-const cloudLocations = new Map(); let failCloudCopy = false, failCloudRename = false, failCloudFsync = false; let cloudCopyError;
+const cloudLocations = new Map(); let failCloudCopy = false, failCloudRename = false, failCloudRollback = false, failCloudFsync = false; let cloudCopyError;
 const nativePath = p => {
   if (typeof p === "number") return handlePaths.get(p);
   if (p.startsWith('file://')) p = decodeURIComponent(new URL(p).pathname);
@@ -75,7 +75,9 @@ const fileIo = {
     if (failBackupRename && b.includes('/.tinybot-review/')) throw Object.assign(Error('injected backup rename failure'), {code:13900025});
     if (failManifest && b.endsWith('/index.json')) { throw new Error('injected manifest failure'); }
     if(b.includes("/usage-records/"))usageWrites.push(b);
-    if (failCloudRename && b.endsWith('tinybot-latest.tinybot')) throw Error('injected cloud rename failure');
+    if (b.includes('/tinybot-backups/') && fs.existsSync(nativePath(b))) throw Object.assign(Error('Invalid argument'), {code:13900020});
+    if (failCloudRename && a.endsWith('.partial') && b.endsWith('tinybot-latest.tinybot')) throw Error('injected cloud rename failure');
+    if (failCloudRollback && a.endsWith('.tinybot') && b.endsWith('tinybot-latest.tinybot')) throw Error('injected cloud rollback failure');
     await fs.promises.rename(nativePath(a),nativePath(b));
     if (b.endsWith('tinybot-latest.tinybot')) cloudLocations.set(b,1);
   }
@@ -1261,7 +1263,8 @@ async function test(name, run) {
     const rename=fileIo.rename;
     fileIo.rename=async(a,b)=>{
       if(b===firstPath){
-        assert.equal(fs.readFileSync(nativePath(b),'utf8'),original,'old backup remains until replacement');
+        const retained = fs.readdirSync(nativePath(context.cloudFileDir+'/tinybot-backups')).filter(n=>n.endsWith('.tinybot'));
+        assert.ok(retained.some(n=>fs.readFileSync(nativePath(context.cloudFileDir+'/tinybot-backups/'+n),'utf8')===original),'old backup remains recoverable until replacement');
         assert.equal(legacyBackupFixture(fs.readFileSync(nativePath(a))).data.threads[0].title,'Updated backup');
       }
       return rename(a,b);
@@ -1322,6 +1325,28 @@ async function test(name, run) {
     try { await assert.rejects(CloudBackup.create(context,snapshot),/13900012.*Tinybot/); } finally {cloudCopyError=undefined;}
     assert.equal((await CloudBackup.list(context)).length,before);
     assert.equal(fs.readdirSync(nativePath(context.cacheDir)).length,0);
+  });
+  await test('failed cloud replacement and rollback retain a discoverable complete backup',async()=>{
+    const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
+    const context={cloudFileDir:'/sandbox/cloud',cacheDir:'/sandbox/backup-app/cache',getApplicationContext:()=>({filesDir:'/sandbox/backup-app'})};
+    const directory=context.cloudFileDir+'/tinybot-backups',latest=directory+'/tinybot-latest.tinybot';
+    const retained=fs.readFileSync(nativePath(latest));
+    const previousDate=(await CloudBackup.list(context))[0].createdAt;
+    const snapshot=legacyBackupFixture(retained).data;
+    snapshot.threads[0].title='Must not replace retained backup';
+    failCloudRename=true;failCloudRollback=true;
+    try { await assert.rejects(CloudBackup.create(context,snapshot),/injected cloud rename failure/); }
+    finally {failCloudRename=false;failCloudRollback=false;}
+    const items=await CloudBackup.list(context);
+    assert.equal(items.length,1);
+    assert.notEqual(items[0].name,'tinybot-latest.tinybot');
+    assert.equal(items[0].createdAt,Math.trunc(previousDate));
+    assert.deepEqual(fs.readFileSync(nativePath(directory+'/'+items[0].name)),retained);
+    assert.ok(fs.readdirSync(nativePath(directory)).every(n=>!n.endsWith('.partial')));
+    assert.equal(fs.readdirSync(nativePath(context.cacheDir)).length,0);
+    const restored=await CloudBackup.restore(context,items[0].name,model.emptyData());
+    assert.equal(restored.threads[0].title,legacyBackupFixture(retained).data.threads[0].title);
+    await fileIo.rename(directory+'/'+items[0].name,latest);
   });
   await test('cloud restore awaits its own download completion and skips existing chats',async()=>{
     const {CloudBackup}=load(path.join(source,'services/CloudBackup'));

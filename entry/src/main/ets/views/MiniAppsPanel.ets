@@ -4,7 +4,7 @@ import { util } from '@kit.ArkTS';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Btn, Space, Radius } from '../common/Theme';
 import { t } from '../model/I18n';
-import { MiniAppEntry, MiniAppStorage } from '../model/MiniApp';
+import { MiniAppEntry, MiniAppStorage, miniAppInCollection, miniAppCanRollback } from '../model/MiniApp';
 import { MiniApps } from '../services/MiniApps';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { PublishedPreview, stepPreviews } from '../model/PublishedPreview';
@@ -37,7 +37,7 @@ export struct MiniAppsPanel {
     return this.store;
   }
   aboutToAppear(): void { this.run(async () => { await this.reload(); }); }
-  private async reload(): Promise<void> { this.entries = await this.apps().list(); }
+  private async reload(): Promise<void> { this.entries = (await this.apps().list()).filter((entry) => miniAppInCollection(entry.app)); }
   private async run(action: () => Promise<void>): Promise<void> {
     if (this.busy) { return; }
     this.busy = true; this.error = ''; this.notice = '';
@@ -117,7 +117,7 @@ export struct MiniAppsPanel {
             .onClick(() => this.run(async () => { await this.open(entry); }))
           Button(t('继续修改')).attributeModifier(Btn.textSmall).margin(4).enabled(!this.app.busy)
             .onClick(() => this.run(async () => { await this.edit(entry); }))
-          if (entry.app.previousPage) {
+          if (miniAppCanRollback(entry.app)) {
             Button(t('恢复上一版页面')).attributeModifier(Btn.textSmall).margin(4)
               .onClick(() => this.run(async () => { await this.apps().repository(entry.workspaceId).change(entry.app.id, 'rollback'); await this.reload(); }))
           }
