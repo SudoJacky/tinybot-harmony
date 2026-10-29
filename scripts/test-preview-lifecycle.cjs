@@ -216,6 +216,33 @@ assert.equal(timers.size, 0);
 console.log('PASS emitted List callbacks wait for 200ms of rest, cancel on a new gesture and clear pending work when leaving chat');
 
 (async () => {
+  // Execute the emitted Web callbacks: attachment starts the host load without a
+  // throwaway document; page-end notifications must never initiate another load.
+  const webFile = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/views/WebUiView.ts');
+  const webTree = ts.createSourceFile(webFile, fs.readFileSync(webFile, 'utf8'), ts.ScriptTarget.Latest, true);
+  const webCallbacks = {};
+  (function visit(node) {
+    if (ts.isCallExpression(node) && ['Web.create', 'Web.onControllerAttached', 'Web.onPageEnd'].includes(node.expression.getText(webTree))) {
+      const callback = { exports: {}, Diagnostics: context.Diagnostics };
+      vm.runInNewContext('exports.run = function(event) { const value = (' + node.arguments[0].getText(webTree) + '); return typeof value === "function" ? value(event) : value; };', callback);
+      webCallbacks[node.expression.getText(webTree)] = callback.exports.run;
+    }
+    ts.forEachChild(node, visit);
+  })(webTree);
+  const cold = make({ visible: true, getUIContext: () => ({ getHostContext: () => ({}) }) });
+  cold.aboutToAppear();
+  assert.equal(webCallbacks['Web.create'].call(cold).src, '', 'Do not navigate to about:blank before loading the host');
+  await cold.restart(); assert.equal(cold.controller.loads || 0, 0, 'Wait for the native controller to attach');
+  webCallbacks['Web.onControllerAttached'].call(cold);
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+  assert.equal(cold.controller.loads, 1, 'Attachment loads the host without waiting for a blank page-end');
+  assert.equal(cold.hostNavigationPending, true);
+  let probes = 0; cold.pageReady = () => { probes++; };
+  webCallbacks['Web.onPageEnd'].call(cold, { url: context.WEB_UI_ORIGIN });
+  webCallbacks['Web.onPageEnd'].call(cold, { url: 'about:srcdoc' });
+  assert.equal(probes, 2); assert.equal(cold.controller.loads, 1, 'Page-end only probes readiness');
+  cold.aboutToDisappear();
+  console.log('PASS emitted Web attachment loads one host document without an initial blank navigation');
   const fullscreen = make({ visible: true, viewportHeight: 1040 }); fullscreen.aboutToAppear();
   assert.equal(fullscreen.heightValue, 1040, 'Fullscreen must exceed the normal card height limit');
   const fullscreenController = fullscreen.controller, fullscreenGeneration = fullscreen.generation;
@@ -229,7 +256,7 @@ console.log('PASS emitted List callbacks wait for 200ms of rest, cancel on a new
   assert.equal(measured, 1, 'Exit must retain changes to content height made during fullscreen');
   fullscreen.aboutToDisappear();
   console.log('PASS fullscreen viewport follows available height without reloading or overwriting inline height retention');
-  const deferred = make({ visible: true, attached: true, initialPageLoaded: true,
+  const deferred = make({ visible: true, attached: true,
     getUIContext: () => ({ getHostContext: () => ({}) }) });
   deferred.aboutToAppear();
   let assetsReady;
