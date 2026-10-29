@@ -111,6 +111,13 @@ async function main() {
   assert.equal(competing.filter(x=>x.status==='fulfilled').length,1);
   assert.equal(competing.filter(x=>x.status==='rejected').length,1);
   const before = await repo.load(app.id);
+  const beforeName = plain(await repo.get(app.id));
+  await repo.rename(app.id, '  Personal ledger  ');
+  assert.deepEqual(plain(await repo.get(app.id)), {...beforeName, title:'Personal ledger'});
+  assert.deepEqual(plain(await repo.load(app.id)), plain(before), 'Rename changes neither page nor stored user data');
+  await assert.rejects(repo.rename(app.id, '  '), /1–160/);
+  await assert.rejects(repo.rename(app.id, 'x'.repeat(161)), /1–160/);
+  assert.equal((await other.get('ledger')).title, 'Other', 'Same ID in another workspace stays unchanged');
   const changed = miniAppPage('ledger.js','document.body.textContent="updated"');
   await repo.publish(app.id,'Updated','','ledger.js','chat',changed,true,signal);
   assert.deepEqual(plain(await repo.load(app.id)),plain(before));
@@ -201,6 +208,9 @@ async function versionTwoTest() {
   write('app.json',manifest); write('data.json',{version:1,value:{old:7}});
   write('data-v2.json',{version:1,value:{count:42}}); write('trial-v2.json',{version:1,value:{count:9},baseRevisionId:'v1',baseDataRevision:'old',edited:true});
   const originalHistory = plain(manifest.revisions), oldData = fs.readFileSync(disk(appDir+'/data.json'));
+  await repo.rename('versioned', 'My counter');
+  assert.deepEqual(plain(await repo.get('versioned')), {...plain(manifest), title:'My counter'},
+    'Renaming v2 preserves immutable revisions, adoptions and the active data file');
   assert.equal((await apps.list()).length,1);
   let data = await repo.load('versioned'); assert.deepEqual(plain(data.value),{count:42});
   data = await repo.save('versioned',{count:43},data.revision);
