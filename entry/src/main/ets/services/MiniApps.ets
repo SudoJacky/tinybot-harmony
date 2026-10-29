@@ -78,6 +78,16 @@ export class MiniAppRepository {
       return { value: data.value, revision: result.version };
     });
   }
+  async rename(id: string, title: string): Promise<void> {
+    const name = title.trim();
+    if (!name || name.length > 160) { throw new Error('Mini app name must contain 1–160 characters'); }
+    await withFileMutation(this.lockKey + ':' + miniAppId(id), async (): Promise<void> => {
+      const path = miniAppPath(id, 'app.json'), cancellation = new Cancellation();
+      const file = await this.files.read(path, cancellation), app = parseMiniApp(file.content, id);
+      app.title = name;
+      await this.files.write(path, JSON.stringify(app), cancellation, { version: file.version });
+    });
+  }
   async change(id: string, action: string): Promise<MiniAppRecord> {
     return withFileMutation(this.lockKey + ':' + miniAppId(id), async (): Promise<MiniAppRecord> => {
       const path = miniAppPath(id, 'app.json'), cancellation = new Cancellation();

@@ -168,6 +168,14 @@ export function shortTime(time: number, now: number = Date.now()): string {
   return date.getFullYear() + '/' + (date.getMonth() + 1) + '/' + date.getDate();
 }
 
+export function relativeTime(time: number, now: number = Date.now()): string {
+  const elapsed = Math.max(0, now - time);
+  if (elapsed < 60000) { return t('刚刚'); }
+  if (time >= startOfDay(now) && elapsed < 3600000) { return t('{0} 分钟前', [Math.floor(elapsed / 60000)]); }
+  if (time >= startOfDay(now)) { return t('{0} 小时前', [Math.floor(elapsed / 3600000)]); }
+  return shortTime(time, now);
+}
+
 export function fileSize(bytes: number): string {
   if (bytes < 1024) { return bytes + ' B'; }
   if (bytes < 1024 * 1024) { return (bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0) + ' KB'; }
