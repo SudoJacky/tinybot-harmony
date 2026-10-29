@@ -11,7 +11,7 @@ import { AnnotationPage, browserAnnotationText } from '../model/BrowserAnnotatio
 import { image } from '@kit.ImageKit';
 import { Attachments } from '../services/Attachments';
 import { MAX_MESSAGE_ATTACHMENTS } from '../model/Productivity';
-import { t } from '../model/I18n';
+import { getLocale, t } from '../model/I18n';
 import { agentModeName } from '../model/AgentMode';
 import { ToolScopePanel } from '../views/ToolScopePanel';
 import { ProductivityPanel, ProductivityEditorRoute, productivityEditorTitle } from '../views/ProductivityPanel';
@@ -52,6 +52,9 @@ import { IconButton } from '../common/Widgets';
 import { LaunchActions } from '../services/LaunchActions';
 import { OnboardingPanel } from '../views/OnboardingPanel';
 import { OnboardingPreferences } from '../services/OnboardingPreferences';
+import { StartupBackup } from '../services/StartupBackup';
+import { CloudBackup, CloudBackupItem, cloudBackupError } from '../services/CloudBackup';
+import { StartupBackupDialog } from '../views/StartupBackupDialog';
 import { HuaweiAccount, huaweiAccount } from '../services/HuaweiAccount';
 import { HuaweiAccountPanel } from '../views/HuaweiAccountPanel';
 import { HostedPrivacy, hostedPrivacy } from '../services/HostedPrivacy';
@@ -137,10 +140,15 @@ struct Index {
   private unsubscribeLaunch?: () => void;
   private launching: boolean = false;
   @State private voiceRequest: string = '';
+  private startupBackup?: StartupBackup;
+  private startupBackupChecking: boolean = false;
+  private startupBackupRestoring: boolean = false;
+  private startupBackupDialog?: CustomDialogController;
   private onboardingChecked: boolean = false;
   private onboardingDraftThread: string = '';
   private onboardingFinishing: boolean = false;
   @State private onboardingActive: boolean = false;
+  @State private providerEditorActive: boolean = false;
 
   onPageShow(): void {
     this.reviewDisposed = false;
@@ -151,6 +159,8 @@ struct Index {
     announcements.checkOnStartup(context).then(() => this.offerAnnouncement());
     this.account.initialize(context).then(() => this.account.refresh());
     if (!this.session) {
+      try { this.startupBackup = new StartupBackup(context); }
+      catch (error) { Diagnostics.log('warn', 'backup', 'startup_capture_failed', undefined, error as Error); }
       this.session = createNativeSessionService(context.filesDir, context.getApplicationContext().filesDir, this.approval, context, this.browser);
       this.session.subscribe((event) => {
         if (event.state.canNavigate && ShareInbox.peek()) { this.receiveShare(); }
@@ -164,12 +174,13 @@ struct Index {
         this.unsubscribeLaunch = LaunchActions.subscribe(() => this.receiveLaunch());
       }
       this.offerOnboarding();
+      this.offerStartupBackup();
       this.offerAnnouncement();
     });
   }
 
   private offerAnnouncement(): void {
-    if (!this.privacy.allowed || !this.foreground || !this.app.ready || !this.onboardingChecked ||
+    if (!this.privacy.allowed || !this.foreground || !this.app.ready || !this.onboardingChecked || this.startupBackupChecking || this.startupBackupDialog ||
       this.paths.size() > 0 || this.browserExpanded || this.showToolScope || this.ratingOpen || this.reviewDialog || this.announcementDialog) { return; }
     const item = announcements.pending();
     if (!item) { return; }
@@ -228,7 +239,7 @@ struct Index {
       !this.app.error && !this.app.saveError && this.app.active.id === threadId && !this.app.draft.trim() &&
       this.app.active.attachments.length === 0 && this.app.active.references.length === 0 &&
       this.app.active.pendingInputs.length === 0 && this.paths.size() === 0 && this.chatVisible &&
-      !this.onboardingActive && !this.receiving && !this.launching && !ShareInbox.peek() &&
+      !this.onboardingActive && !this.startupBackupDialog && !this.startupBackupRestoring && !this.receiving && !this.launching && !ShareInbox.peek() &&
       !this.drawerOpen && !this.drawerDragging && !this.detailPaneOpen && !this.browserExpanded && !this.showToolScope &&
       !this.voiceRequest && !this.approval.title && !this.approval.form && !this.ratingOpen &&
       !this.announcementDialog && !announcements.loading && !announcements.pending();
@@ -281,7 +292,8 @@ struct Index {
   }
 
   private foregroundChanged(): void {
-    if (!this.foreground) { this.closeReviewInvitation(); }
+    if (!this.foreground) { this.closeReviewInvitation(); this.startupBackupDialog?.close(); }
+    if (this.foreground) { this.offerStartupBackup(); }
     this.offerAnnouncement();
   }
 
@@ -293,7 +305,7 @@ struct Index {
     if (this.privacyAllowed) { this.onPageShow(); }
     else {
       this.closeAnnouncement();
-      this.closeReviewInvitation();
+      this.closeReviewInvitation(); this.startupBackupDialog?.close();
       this.app.stop(); this.browser.close(); this.browserExpanded = false; this.showToolScope = false;
       this.voiceRequest = ''; this.paths.clear(); this.setDrawer(false);
       this.workspaceOpen = false; this.previewVisible = false; this.previewId = '';
@@ -312,6 +324,63 @@ struct Index {
         this.onboardingDraftThread = ''; this.onboardingActive = true; this.paths.pushPath({ name: 'onboarding' });
       }
     } catch (error) { this.app.error = t('无法读取首次使用记录：{0}', [(error as Error).message]); }
+  }
+
+  private canOfferStartupBackup(): boolean {
+    return !this.reviewDisposed && this.privacy.allowed && this.foreground && this.app.ready && this.app.canNavigate &&
+      !this.app.busy && !this.receiving && !this.launching && !ShareInbox.peek() && !this.providerEditorActive &&
+      !this.announcementDialog && !this.reviewDialog && (this.paths.size() === 0 || this.onboardingActive) &&
+      this.startupBackup !== undefined && this.startupBackup.untouched(this.app.exportSnapshot());
+  }
+
+  private async offerStartupBackup(): Promise<void> {
+    if (!this.startupBackup || this.startupBackupChecking || this.startupBackupDialog || !this.canOfferStartupBackup()) { return; }
+    this.startupBackupChecking = true;
+    try {
+      const item = await this.startupBackup.find(this.app.exportSnapshot());
+      if (!item || !this.canOfferStartupBackup()) { return; }
+      const width = WorkbenchLayout.dialogWidth(this.windowWidth);
+      this.startupBackupDialog = new CustomDialogController({
+        builder: StartupBackupDialog({ date: new Date(item.createdAt).toLocaleString(getLocale()),
+          onRestore: () => this.restoreStartupBackup(item) }),
+        systemMaterial: this.appearance.surface, autoCancel: false, alignment: DialogAlignment.Center,
+        width: width > 0 ? width : undefined,
+        onDidAppear: () => {
+          if (!this.canOfferStartupBackup()) { this.startupBackupDialog?.close(); return; }
+          try { this.startupBackup?.finish(); }
+          catch (error) {
+            this.startupBackupDialog?.close();
+            this.app.error = (error as Error).message;
+            Diagnostics.log('error', 'backup', 'startup_marker_failed', undefined, error as Error);
+          }
+        },
+        onDidDisappear: () => {
+          this.startupBackupDialog = undefined;
+          if (!this.reviewDisposed && this.privacy.allowed && this.foreground) {
+            this.receiveShare(); this.receiveLaunch(); this.offerAnnouncement();
+          }
+        }
+      });
+      this.startupBackupDialog.open();
+    } catch (error) {
+      this.startupBackupDialog = undefined;
+      Diagnostics.log('warn', 'backup', 'startup_lookup_failed', undefined, error as Error);
+    } finally { this.startupBackupChecking = false; this.offerAnnouncement(); }
+  }
+
+  private async restoreStartupBackup(item: CloudBackupItem): Promise<void> {
+    if (this.startupBackupRestoring || !this.canOfferStartupBackup()) { throw new Error(t('当前已开始配置，请到设置中手动恢复备份。')); }
+    this.startupBackupRestoring = true;
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const restored = await CloudBackup.restore(context, item.name, this.app.exportSnapshot());
+      if (!this.canOfferStartupBackup()) { throw new Error(t('当前已开始配置，请到设置中手动恢复备份。')); }
+      if (!await this.app.importSnapshot(restored)) { throw new Error(this.app.error || this.app.saveError); }
+      this.onboardingPreferences().complete();
+      this.paths.clear(); this.onboardingActive = false;
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t('备份已恢复，已跳过已有内容') });
+    } catch (error) { throw new Error(cloudBackupError(error as Error)); }
+    finally { this.startupBackupRestoring = false; }
   }
 
   private async finishOnboarding(action: string, prompt: string): Promise<void> {
@@ -357,7 +426,7 @@ struct Index {
   }
 
   private async receiveLaunch(): Promise<void> {
-    if (!this.privacy.allowed) { return; }
+    if (!this.privacy.allowed || this.startupBackupDialog || this.startupBackupRestoring) { return; }
     const action = LaunchActions.take();
     if (!action) { return; }
     // The session restores the last active chat on cold start. Returning to it must
@@ -403,7 +472,7 @@ struct Index {
 
   private async receiveShare(): Promise<void> {
     if (!this.privacy.allowed) { return; }
-    if (this.receiving || !this.session || !this.app.ready) { return; }
+    if (this.receiving || this.startupBackupDialog || this.startupBackupRestoring || !this.session || !this.app.ready) { return; }
     this.receiving = true;
     try {
       if (!this.session.canNavigate) { return; }
@@ -694,7 +763,7 @@ struct Index {
   }
 
   aboutToDisappear(): void {
-    this.reviewDisposed = true; this.closeReviewInvitation();
+    this.reviewDisposed = true; this.closeReviewInvitation(); this.startupBackupDialog?.close();
     this.closeAnnouncement();
     this.unsubscribeLaunch?.(); this.unsubscribeLaunch = undefined;
     this.app.stop();
@@ -1031,6 +1100,8 @@ struct Index {
           onModels: (error: string) => { this.paths.pushPath({ name: 'provider-models', param: error }); },
           onDiscovered: (models: string[]) => { this.paths.pushPath({ name: 'provider-discovery', param: models }); } })
       }.title(this.app.providerEditor.id.length > 0 ? t("编辑服务") : t("添加服务"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+        .onWillShow(() => { this.providerEditorActive = true; })
+        .onWillHide(() => { this.providerEditorActive = false; })
         .onBackPressed(() => {
           if (this.app.busy) { return true; }
           if (!this.app.providerEditor.hasChanges) { return false; }

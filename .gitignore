@@ -54,6 +54,8 @@ scripts/*
 !scripts/test-feedback.cjs
 !scripts/test-api20-compat.cjs
 !scripts/test-file-attachments.cjs
+!scripts/backup-fixture.cjs
+!scripts/test-startup-backup.cjs
 !scripts/test-mini-apps.cjs
 !scripts/test-review-invitation.cjs
 !scripts/test-preview-references.cjs

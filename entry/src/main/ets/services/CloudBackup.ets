@@ -6,6 +6,7 @@ import { util } from '@kit.ArkTS';
 import { AppData } from '../model/Conversation';
 import { t } from '../model/I18n';
 import { createBackupFile, readBackupFile } from './Backup';
+import { copyFileBytes } from './FileBytes';
 
 export interface CloudBackupItem {
   name: string;
@@ -14,8 +15,9 @@ export interface CloudBackupItem {
   location: number;
 }
 
-const SNAPSHOT_NAME = /^tinybot-(\d{13})-[0-9a-f-]{36}\.json$/;
-const MAX_BACKUP = 20 * 1024 * 1024;
+const SNAPSHOT_NAME = /^tinybot-(\d{13})-[0-9a-f-]{36}\.(?:json|tinybot)$/;
+const LATEST_BACKUP = 'tinybot-latest.tinybot';
+function validBackupName(name: string): boolean { return name === LATEST_BACKUP || SNAPSHOT_NAME.test(name); }
 let operating: boolean = false;
 
 // Native sync APIs have limited concurrency. This lock also covers a reopened page.
@@ -88,11 +90,17 @@ async function download(path: string): Promise<void> {
   const cache = new cloudSync.CloudFileCache();
   const uri = fileUri.getUriFromPath(path);
   let subscribed = false; let started = false; let complete = false; let timer: number = -1;
+  let processed = 0;
   let callback: (progress: cloudSync.DownloadProgress) => void = () => {};
   try {
     await new Promise<void>((resolve, reject) => {
+      const resetTimeout = (): void => {
+        clearTimeout(timer);
+        timer = setTimeout(() => reject(new Error(t('备份下载超时，请检查网络后重试。'))), 60000);
+      };
       callback = (progress: cloudSync.DownloadProgress): void => {
         if (progress.uri !== uri) { return; }
+        if (progress.processed > processed) { processed = progress.processed; resetTimeout(); }
         if (progress.state === cloudSync.State.COMPLETED && progress.error === cloudSync.DownloadErrorType.NO_ERROR) {
           complete = true; resolve();
         } else if (progress.state === cloudSync.State.FAILED || progress.state === cloudSync.State.STOPPED || progress.error !== cloudSync.DownloadErrorType.NO_ERROR) {
@@ -100,7 +108,7 @@ async function download(path: string): Promise<void> {
         }
       };
       cache.on('progress', callback); subscribed = true;
-      timer = setTimeout(() => reject(new Error(t('备份下载超时，请检查网络后重试。'))), 60000);
+      resetTimeout();
       started = true; cache.start(uri).catch((error: Error) => reject(error));
     });
   } finally {
@@ -118,12 +126,12 @@ export class CloudBackup {
     const result: CloudBackupItem[] = [];
     for (const name of await fs.listFile(directory)) {
       const match = name.match(SNAPSHOT_NAME);
-      if (!match) { continue; }
+      if (!validBackupName(name)) { continue; }
       const stat = await fs.lstat(directory + '/' + name);
       if (stat.isFile() && !stat.isSymbolicLink()) {
         // lstat lacks native FileInfo; reading its location can crash libfs.
-        const location = (await fs.stat(directory + '/' + name)).location;
-        result.push({ name: name, createdAt: Number(match[1]), size: stat.size, location: location });
+        const info = await fs.stat(directory + '/' + name);
+        result.push({ name: name, createdAt: match ? Number(match[1]) : info.mtime * 1000, size: stat.size, location: info.location });
       }
     }
     return result.sort((a: CloudBackupItem, b: CloudBackupItem) => b.createdAt - a.createdAt);
@@ -133,7 +141,7 @@ export class CloudBackup {
 
   static remove(context: common.UIAbilityContext, name: string): Promise<boolean> {
     return exclusive(async () => {
-      if (!SNAPSHOT_NAME.test(name)) { throw new Error(t('备份文件无效。')); }
+      if (!validBackupName(name)) { throw new Error(t('备份文件无效。')); }
       const path = await backupDirectory(context) + '/' + name;
       const stat = await fs.lstat(path);
       if (!stat.isFile() || stat.isSymbolicLink()) { throw new Error(t('备份文件无效。')); }
@@ -149,13 +157,18 @@ export class CloudBackup {
     return exclusive(async () => {
       const directory = await backupDirectory(context);
       const source = await createBackupFile(context, data);
-      const name = 'tinybot-' + Date.now() + '-' + util.generateRandomUUID() + '.json';
-      const temporary = directory + '/' + name + '.partial';
+      const target = directory + '/' + LATEST_BACKUP;
+      const temporary = directory + '/tinybot-' + util.generateRandomUUID() + '.partial';
       try {
         if (!await fs.access(directory)) { await fs.mkdir(directory); }
-        await fs.copyFile(source, temporary);
-        // Only complete snapshots are discoverable; never overwrite an older backup.
-        await fs.rename(temporary, directory + '/' + name);
+        if (await fs.access(target)) {
+          const stat = await fs.lstat(target);
+          if (!stat.isFile() || stat.isSymbolicLink()) { throw new Error(t('备份文件无效。')); }
+        }
+        await copyFileBytes(source, temporary);
+        // The complete, flushed file replaces the previous snapshot in one rename.
+        // Never unlink the old backup first: copy/flush/rename failures must retain it.
+        await fs.rename(temporary, target);
       } catch (error) {
         if ((error as BusinessError).code === 13900012) {
           throw new Error(t('无法写入华为云空间（13900012）。请在系统云空间中开启 Tinybot 后重试。'));
@@ -171,10 +184,10 @@ export class CloudBackup {
 
   static restore(context: common.UIAbilityContext, name: string, local: AppData): Promise<AppData> {
     return exclusive(async () => {
-      if (!SNAPSHOT_NAME.test(name)) { throw new Error(t('备份文件无效。')); }
+      if (!validBackupName(name)) { throw new Error(t('备份文件无效。')); }
       const path = await backupDirectory(context) + '/' + name;
       const stat = await fs.lstat(path);
-      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_BACKUP) { throw new Error(t('备份文件无效。')); }
+      if (!stat.isFile() || stat.isSymbolicLink()) { throw new Error(t('备份文件无效。')); }
       if ((await fs.stat(path)).location === 2) { await download(path); }
       return readBackupFile(context, path, local);
     });

@@ -1,3 +1,5 @@
+const backupAccount = { openID: 'fixture-openid-A', error: undefined, async backupOpenID() { if (this.error) throw this.error; if (!this.openID) throw Error('请登录创建备份时使用的华为账号。'); return this.openID; } };
+const { legacyBackupFixture, backupCrypto } = require('./backup-fixture.cjs');
 // Real workspace bytes and production attachment/read/backup code; only Harmony APIs are replaced.
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
 const assert = require('node:assert/strict'), crypto = require('node:crypto'), zlib = require('node:zlib');
@@ -36,6 +38,7 @@ const fileIo = {
   }
 };
 const kits = {
+  '@kit.AssetStoreKit': { asset: {} },
   '@kit.CoreFileKit': { fileIo }, '@kit.ImageKit': { image: {} }, '@kit.ArkGraphics2D': { drawing: {} },
   '@kit.ArkTS': { util: {
     generateRandomUUID: () => crypto.randomUUID(),
@@ -43,7 +46,7 @@ const kits = {
     TextDecoder: class { constructor(encoding, options) { this.decoder = new TextDecoder(encoding, options); } decodeToString(bytes, options) { return this.decoder.decode(bytes, options); } },
     Base64Helper: class { encodeToStringSync(bytes) { return Buffer.from(bytes).toString('base64'); } async encodeToString(bytes) { return this.encodeToStringSync(bytes); } decodeSync(text) { return Uint8Array.from(Buffer.from(text, 'base64')); } }
   } },
-  '@kit.CryptoArchitectureKit': { cryptoFramework: { createMd: () => { const hash = crypto.createHash('sha256'); return {
+  '@kit.CryptoArchitectureKit': { cryptoFramework: { ...backupCrypto, createMd: () => { const hash = crypto.createHash('sha256'); return {
     update: async value => hash.update(value.data), digest: async () => ({ data: Uint8Array.from(hash.digest()) })
   }; } } },
   '@kit.BasicServicesKit': { zlib: { ReturnStatus: { STREAM_END: 1 }, CompressFlushMode: { FINISH: 4 }, createZipSync: () => {
@@ -69,7 +72,7 @@ function load(name) {
   const exports = {}; cache.set(file, exports);
   vm.runInNewContext(compile(fs.readFileSync(file, 'utf8')), { exports, ArrayBuffer, Uint8Array, DataView, Error, Map, Set, console,
     setTimeout, clearTimeout, Observed: cls => cls,
-    require: id => id.startsWith('.') ? load(path.resolve(path.dirname(file), id)) : assert.ok(id in kits, id) || kits[id]
+    require: id => id === './HuaweiAccount' ? { huaweiAccount: backupAccount } : id.startsWith('.') ? load(path.resolve(path.dirname(file), id)) : assert.ok(id in kits, id) || kits[id]
   }, { filename: file });
   return exports;
 }
@@ -163,7 +166,7 @@ async function main() {
   fs.mkdirSync(disk(context.cacheDir),{recursive:true});
   const data=emptyData(); data.threads=[];
   const backup=await createBackupFile(context,data);
-  const envelope=JSON.parse(fs.readFileSync(disk(backup),'utf8'));
+  const envelope=legacyBackupFixture(fs.readFileSync(disk(backup)));
   assert.deepEqual([...envelope.miniAppWorkspaceIds].sort(),['chat','other']);
   assert.ok(envelope.files.some(x=>x.path==='mini-apps/ledger/data.json'));
   const restoreRoot='/sandbox/restored'; fs.mkdirSync(disk(restoreRoot),{recursive:true});

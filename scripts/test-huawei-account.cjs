@@ -72,8 +72,15 @@ const deferred = () => { let resolve; const promise = new Promise(done => { reso
   assert.equal(account.signedIn, false); assert.equal(system.logins, 0, 'Opening app never signs in without consent');
   await assert.rejects(account.requireLogin(), /登录/);
   await account.signIn(); assert.equal(account.signedIn, true); assert.equal(secrets.get(alias), 'user-A');
+  assert.equal(await account.backupOpenID({}), 'user-A');
+  const otherDevice = new HuaweiAccount(); await account.signOut();
+  assert.equal(await otherDevice.backupOpenID({}), 'user-A', 'explicit backup action obtains the same account ID after a fresh login');
+  await otherDevice.signOut(); system.loginError = { code: authentication.AuthenticationErrorCode.USER_CANCELED };
+  await assert.rejects(otherDevice.backupOpenID({}), /取消/);
+  system.loginError = undefined; await account.signIn();
   privacyAgreed = false;
   await assert.rejects(account.requireLogin(), /System privacy/);
+  await assert.rejects(account.backupOpenID({}), /System privacy/);
   const loginCount = system.logins;
   await account.signIn(); assert.equal(system.logins, loginCount, 'No Account Kit request before system privacy consent');
   privacyAgreed = true; await account.signIn();

@@ -4,7 +4,7 @@ import { McpServer } from './Productivity';
 import { t } from './I18n';
 
 // Only remap the detached import. Local settings and credential aliases remain untouched.
-export function prepareBackupServices(local: AppData, restored: AppData, createId: () => string): void {
+export function prepareBackupServices(local: AppData, restored: AppData, createId: () => string): Map<string, string> {
   const providers = new Map<string, string>();
   const additions: ProviderProfile[] = [];
   for (const profile of restored.providerProfiles || []) {
@@ -37,6 +37,7 @@ export function prepareBackupServices(local: AppData, restored: AppData, createI
     for (const run of thread.teams || []) { remapModel(run.model, providers); }
     thread.disabledMcpIds = (thread.disabledMcpIds || []).map((id) => servers.get(id) || id);
   }
+  return providers;
 }
 
 function remapModel(reference: ModelReference | undefined, providers: Map<string, string>): void {
