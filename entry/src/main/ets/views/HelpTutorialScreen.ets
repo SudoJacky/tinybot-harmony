@@ -378,7 +378,7 @@ export struct HelpTutorialScreen {
     this.pageTitle(this.text('备份与恢复'))
     this.heading(this.text('华为云空间'), 92)
     this.card(16, 132, 328, 200)
-    this.controlRow('cloud-backup', this.text('备份到华为云空间'), $r('sys.symbol.cloud'), this.text('模型密钥不会导出'))
+    this.controlRow('cloud-backup', this.text('备份到华为云空间'), $r('sys.symbol.cloud'), this.text('模型密钥随华为账号加密备份'))
     this.line(212)
     this.rowAt(this.text('刷新备份列表'), $r('sys.symbol.arrow_clockwise'), 212)
     this.line(268)

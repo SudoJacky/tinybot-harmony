@@ -1,12 +1,19 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
-import { SymbolGlyphModifier } from '@kit.ArkUI';
+import { FrameCallback, SymbolGlyphModifier } from '@kit.ArkUI';
+import { Diagnostics } from '../model/Diagnostics';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { discoverModels } from '../services/ModelDiscovery';
 import { ProviderEditorViewModel } from '../viewmodel/ProviderEditorViewModel';
 import { Btn, Motion, Radius, Space, Styles, protocolName } from '../common/Theme';
 import { Banner, BottomBar, GroupCard, IconButton, NavRow, RowDivider, SectionHeader, SwitchRow } from '../common/Widgets';
+
+class ProviderFocusFrame extends FrameCallback {
+  private action: () => void;
+  constructor(action: () => void) { super(); this.action = action; }
+  onIdle(): void { this.action(); }
+}
 
 @Component
 export struct ProviderEditorPanel {
@@ -15,25 +22,41 @@ export struct ProviderEditorPanel {
   @ObjectLink editor: ProviderEditorViewModel;
   onSaved: () => void = () => {};
   @Prop page: string = 'service';
+  @Prop @Watch('focusAvailabilityChanged') active: boolean = true;
+  @StorageProp('tinybot.foreground') @Watch('focusAvailabilityChanged') private foreground: boolean = true;
   @Prop foundModels: string[] = [];
   @Prop initialModelError: string = '';
   onModels: (error: string) => void = () => {};
   onDiscovered: (models: string[]) => void = () => {};
   @State private discovering: boolean = false;
-  @State private advanced: boolean = false;
+  @State @Watch('advancedChanged') private advanced: boolean = false;
   @State private replacingKey: boolean = false;
   @State private attempted: boolean = false;
   @State private modelError: string = '';
   @State private selectedModels: string[] = [];
   @State private modelQuery: string = '';
   private alive: boolean = true;
+  private focusRequest: number = 0;
   private scroller: Scroller = new Scroller();
   private protocols: string[] = ['chat-completions', 'responses', 'anthropic-messages', 'gemini'];
   private protocolLabels: string[] = ['Chat Completions', 'Responses', 'Messages', 'Gemini'];
   private protocolLogos: Resource[] = [$r('app.media.logo_openai'), $r('app.media.logo_openai'), $r('app.media.logo_anthropic'), $r('app.media.logo_google')];
 
   aboutToAppear(): void { this.alive = true; this.modelError = this.initialModelError; }
-  aboutToDisappear(): void { this.alive = false; if (this.page === 'service') { this.editor.apiKey = ''; } }
+  aboutToDisappear(): void { this.alive = false; this.focusRequest++; if (this.page === 'service') { this.editor.apiKey = ''; } }
+  private focusAvailabilityChanged(): void { if (!this.active || !this.foreground) { this.focusRequest++; } }
+  private advancedChanged(): void { if (!this.advanced) { this.focusRequest++; } }
+  private focusField(field: string): void {
+    const request = ++this.focusRequest;
+    this.getUIContext().postFrameCallback(new ProviderFocusFrame(() => {
+      if (request !== this.focusRequest || !this.alive || !this.active || !this.foreground || this.page !== 'service' || this.locked()) { return; }
+      if (field === 'context' && !this.advanced || field === 'key' &&
+        (this.editor.noApiKey || this.editor.canKeepKey && !this.replacingKey)) { return; }
+      this.scroller.scrollEdge(field === 'context' ? Edge.Bottom : Edge.Top);
+      Diagnostics.log('debug', 'focus', 'provider_requested', { request: request });
+      this.getUIContext().getFocusController().requestFocus(field === 'context' ? 'context-window' : 'provider-' + field);
+    }));
+  }
   private locked(): boolean { return this.app.sharedBusy || this.discovering; }
   private async openApiKeyPage(): Promise<void> {
     const url = this.editor.apiKeyUrl;
@@ -67,11 +90,7 @@ export struct ProviderEditorPanel {
       if (invalid === 'context') { this.advanced = true; }
       this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t('请检查标出的设置项。') });
       if (invalid === 'models') { this.onModels(this.editor.fieldError('models')); return; }
-      setTimeout(() => {
-        if (!this.alive) { return; }
-        this.scroller.scrollEdge(invalid === 'context' ? Edge.Bottom : Edge.Top);
-        this.getUIContext().getFocusController().requestFocus(invalid === 'context' ? 'context-window' : 'provider-' + invalid);
-      }, 100);
+      this.focusField(invalid);
       return;
     }
     this.getUIContext().getFocusController().clearFocus();
@@ -247,7 +266,7 @@ export struct ProviderEditorPanel {
                 this.label(t('服务名称'))
                 TextInput({ text: this.editor.name, placeholder: t('例如：我的 DeepSeek、公司代理') }).fontFamily(this.appearance.fontFamily).id('provider-name')
                   .attributeModifier(Styles.input).maxLength(80).enterKeyType(EnterKeyType.Next)
-                  .onSubmit(() => { this.getUIContext().getFocusController().requestFocus('provider-url'); })
+                  .onSubmit(() => this.focusField('url'))
                   .onChange((value: string) => { this.editor.name = value; })
                 this.fieldError('name')
               }

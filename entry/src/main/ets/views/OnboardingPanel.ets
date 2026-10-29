@@ -1,4 +1,5 @@
-import { KeyboardAvoidMode } from '@kit.ArkUI';
+import { FrameCallback, KeyboardAvoidMode } from '@kit.ArkUI';
+import { Diagnostics } from '../model/Diagnostics';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { systemMaterialAttribute } from '../common/MaterialAttributes';
 import { Motion } from '../common/Theme';
@@ -12,6 +13,12 @@ import { OnboardingProviderForm } from './OnboardingProviderForm';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { WindowViewport } from '../viewmodel/WindowViewport';
 import { t } from '../model/I18n';
+
+class OnboardingFocusFrame extends FrameCallback {
+  private action: () => void;
+  constructor(action: () => void) { super(); this.action = action; }
+  onIdle(): void { this.action(); }
+}
 
 @Component
 export struct OnboardingPanel {
@@ -69,6 +76,7 @@ export struct OnboardingPanel {
   private wakeTimer: number = -1;
   private wakeRevision: number = 0;
   private mounted: boolean = false;
+  private focusRequest: number = 0;
   private connectionScroller: Scroller = new Scroller();
   private keyboardViewport: WindowViewport = new WindowViewport();
   private previousKeyboardMode?: KeyboardAvoidMode;
@@ -335,6 +343,7 @@ export struct OnboardingPanel {
 
   private selectProvider(preset: string): void {
     if (this.saving || this.busy || this.transitioning) { return; }
+    this.focusRequest++;
     if (preset.length > 0) {
       try {
         const existing = this.app.providerProfiles.find(profile => profile.presetId === preset);
@@ -368,7 +377,7 @@ export struct OnboardingPanel {
     const invalid = ['name', 'url', 'key', 'models', 'context'].find(field => editor.fieldError(field).length > 0);
     if (invalid) {
       this.error = editor.fieldError(invalid);
-      this.getUIContext().getFocusController().requestFocus('onboarding-inline-' + invalid);
+      this.focusConnectionField(invalid);
       return;
     }
     this.saving = true;
@@ -399,6 +408,19 @@ export struct OnboardingPanel {
     return index < 0 ? 0 : (index - 1) * 5;
   }
 
+  private focusConnectionField(field: string): void {
+    const request = ++this.focusRequest;
+    const preset = this.selectedPreset;
+    this.getUIContext().postFrameCallback(new OnboardingFocusFrame(() => {
+      if (request !== this.focusRequest || !this.mounted || !this.active || !this.foreground || this.step !== 3 ||
+        this.saving || this.busy || this.transitioning || !this.providerEditing || this.selectedPreset !== preset) { return; }
+      // The inline form has URL plus either key or local-model input; name/context live in the full editor.
+      if (field !== 'url' && field !== (this.app.providerEditor.noApiKey ? 'models' : 'key')) { return; }
+      Diagnostics.log('debug', 'focus', 'onboarding_requested', { request: request });
+      this.getUIContext().getFocusController().requestFocus('onboarding-inline-' + field);
+    }));
+  }
+
   private connectionDiameter(): number {
     if (this.connectionEditing) { return 96; }
     return this.providerEditing ? Math.max(96, Math.min(128, this.bodyHeight - 380)) : 160;
@@ -422,6 +444,7 @@ export struct OnboardingPanel {
   }
 
   private endConnectionEditing(): void {
+    this.focusRequest++;
     if (!this.connectionEditing && this.previousKeyboardMode === undefined) { return; }
     this.keyFocused = false;
     this.connectionEditing = false;

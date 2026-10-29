@@ -1,3 +1,5 @@
+const backupAccount = { openID: 'fixture-openid-A', error: undefined, async backupOpenID() { if (this.error) throw this.error; if (!this.openID) throw Error('请登录创建备份时使用的华为账号。'); return this.openID; } };
+const { legacyBackupFixture, backupCrypto } = require('./backup-fixture.cjs');
 // Real workspace bytes and production attachment/read/backup code; only Harmony APIs are replaced.
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
 const assert = require('node:assert/strict'), crypto = require('node:crypto'), zlib = require('node:zlib');
@@ -11,6 +13,11 @@ const handles = new Map(), cache = new Map();
 let copyFailure = false, pdfReads = 0, pdfPages = [], jsReads = 0;
 let selectedUris = [], sharedRecords = [], pickerMaximum;
 const fileIo = {
+  rmdir: async p => {
+    const target = path.resolve(disk(p));
+    assert.ok(target.startsWith(fixture + path.sep));
+    await fs.promises.rm(target, { recursive: true });
+  },
   OpenMode: { READ_ONLY: 1, CREATE: 2, WRITE_ONLY: 4, TRUNC: 8, NOFOLLOW: 16 },
   access: async p => fs.existsSync(disk(p)), mkdir: (p, recursive = false) => fs.promises.mkdir(disk(p), { recursive }),
   lstat: async p => { try { return await fs.promises.lstat(disk(p)); } catch (error) { if (error.code === 'ENOENT') error.code = 13900002; throw error; } },
@@ -31,6 +38,7 @@ const fileIo = {
   }
 };
 const kits = {
+  '@kit.AssetStoreKit': { asset: {} },
   '@kit.ArkData': {
     uniformTypeDescriptor: { getTypeDescriptor: type => ({ belongsTo: parent => type === parent ||
       (parent === 'general.image' && ['general.jpeg', 'general.png', 'general.heic'].includes(type)) }) },
@@ -54,7 +62,7 @@ const kits = {
     TextDecoder: class { constructor(encoding, options) { this.decoder = new TextDecoder(encoding, options); } decodeToString(bytes, options) { return this.decoder.decode(bytes, options); } },
     Base64Helper: class { encodeToStringSync(bytes) { return Buffer.from(bytes).toString('base64'); } async encodeToString(bytes) { return this.encodeToStringSync(bytes); } decodeSync(text) { return Uint8Array.from(Buffer.from(text, 'base64')); } }
   } },
-  '@kit.CryptoArchitectureKit': { cryptoFramework: { createMd: () => { const hash = crypto.createHash('sha256'); return {
+  '@kit.CryptoArchitectureKit': { cryptoFramework: { ...backupCrypto, createMd: () => { const hash = crypto.createHash('sha256'); return {
     update: async value => hash.update(value.data), digest: async () => ({ data: Uint8Array.from(hash.digest()) })
   }; } } },
   '@kit.BasicServicesKit': { zlib: { ReturnStatus: { STREAM_END: 1 }, CompressFlushMode: { FINISH: 4 }, createZipSync: () => {
@@ -80,7 +88,7 @@ function load(name) {
   const exports = {}; cache.set(file, exports);
   vm.runInNewContext(compile(fs.readFileSync(file, 'utf8')), { exports, ArrayBuffer, Uint8Array, DataView, Error, Map, Set, console,
     setTimeout, clearTimeout, Observed: cls => cls,
-    require: id => id.startsWith('.') ? load(path.resolve(path.dirname(file), id)) : assert.ok(id in kits, id) || kits[id]
+    require: id => id === './HuaweiAccount' ? { huaweiAccount: backupAccount } : id.startsWith('.') ? load(path.resolve(path.dirname(file), id)) : assert.ok(id in kits, id) || kits[id]
   }, { filename: file });
   return exports;
 }
@@ -188,7 +196,7 @@ async function main() {
   data.threads = [{ id: 'chat', title: 'Files', updatedAt: 1, messages: [], attachments: [item, pdf] },
     { id: 'branch', title: 'Branch', updatedAt: 1, messages: [], attachments: [branchItem] }];
   const context = { cacheDir: root + '/cache', getApplicationContext: () => ({ filesDir: root }) };
-  const backup = await createBackupFile(context, data), envelope = JSON.parse(fs.readFileSync(disk(backup), 'utf8'));
+  const backup = await createBackupFile(context, data), envelope = legacyBackupFixture(fs.readFileSync(disk(backup)));
   assert.equal(envelope.attachments.length, 2); assert.ok(!envelope.files.some(file => file.path === item.path));
   const restoredRoot = '/sandbox/restored'; fs.mkdirSync(disk(restoredRoot + '/cache'), { recursive: true });
   const restoredContext = { cacheDir: restoredRoot + '/cache', getApplicationContext: () => ({ filesDir: restoredRoot }) };
@@ -358,6 +366,8 @@ async function main() {
   await assert.rejects(receiver.load({ startDataLoading: () => { throw Error('native load failed'); } }), /native load failed/);
   console.log('PASS drag records, mixed imports and persisted drafts; overflow, unsupported data, navigation cleanup, partial failures, save retry, native cancellation and late callbacks');
 
+  await largeBackupTest();
+  await encryptedBackupTest();
   if (process.argv.includes('--ui')) {
     const panelSource = path.join(source, 'views/ChatPanel.ets');
     const emitted = path.resolve(source, '../../../build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/views/ChatPanel.ts');
@@ -390,5 +400,158 @@ async function main() {
     console.log('PASS compiled ChatPanel callbacks: hover, attachment strip, current conversation, navigation cancellation, full draft and native text drop');
   }
   }
+}
+async function largeBackupTest() {
+  const { createBackupFile, readBackupFile, exportBackup } = load('services/Backup');
+  const { writeBackupArchive, openBackupArchive, cleanupBackupArchive } = load('services/BackupArchive');
+  const app = '/sandbox/large-backup', target = '/sandbox/large-restored';
+  fs.mkdirSync(disk(app + '/workspace/large'), { recursive: true });
+  fs.mkdirSync(disk(app + '/cache'), { recursive: true });
+  fs.mkdirSync(disk(target + '/cache'), { recursive: true });
+  const context = { cacheDir: app + '/cache', getApplicationContext: () => ({ filesDir: app }) };
+  const restoreContext = { cacheDir: target + '/cache', getApplicationContext: () => ({ filesDir: target }) };
+  const sourceFile = app + '/workspace/large/payload.bin';
+  const payload = crypto.randomBytes(24 * 1024 * 1024 + 17);
+  fs.writeFileSync(disk(sourceFile), payload);
+  fs.writeFileSync(disk(app + '/workspace/large/empty.txt'), '');
+  const data = emptyData(); data.activeThreadId = 'large';
+  data.threads = [{ id: 'large', title: 'Large backup', updatedAt: 1, messages: [] }];
+  const originalRead = fileIo.read, originalWrite = fileIo.write;
+  let maximumRead = 0, maximumWrite = 0;
+  fileIo.read = async (fd, bytes) => { maximumRead = Math.max(maximumRead, bytes.byteLength); return originalRead(fd, bytes); };
+  fileIo.write = async (fd, bytes, options) => { maximumWrite = Math.max(maximumWrite, bytes.byteLength); return originalWrite(fd, bytes, options); };
+  try {
+    const backup = await createBackupFile(context, data);
+    assert.ok(backup.endsWith('.tinybot'));
+    const size = fs.statSync(disk(backup)).size;
+    assert.ok(size > 20 * 1024 * 1024 && size < payload.length + 4096, 'raw files have no Base64 expansion');
+    const restored = await readBackupFile(restoreContext, backup, emptyData());
+    assert.equal(restored.threads[0].id, 'large');
+    assert.deepEqual(fs.readFileSync(disk(target + '/workspace/large/payload.bin')), payload);
+    assert.equal(fs.statSync(disk(target + '/workspace/large/empty.txt')).size, 0);
+    assert.ok(maximumRead <= 256 * 1024 && maximumWrite <= 256 * 1024, 'binary I/O stays bounded');
+    assert.deepEqual(fs.readdirSync(disk(target + '/cache')), [], 'successful restore cleans staging');
+    const picker = kits['@kit.CoreFileKit'].picker.DocumentViewPicker.prototype;
+    picker.save = async options => { assert.ok(options.newFileNames[0].endsWith('.tinybot')); return [app + '/exported.tinybot']; };
+    await exportBackup(context, data);
+    assert.deepEqual(fs.readFileSync(disk(app + '/exported.tinybot')), fs.readFileSync(disk(backup)));
+    picker.save = async () => [];
+    const cacheBefore = fs.readdirSync(disk(context.cacheDir));
+    await exportBackup(context, data);
+    assert.deepEqual(fs.readdirSync(disk(context.cacheDir)), cacheBefore, 'cancelled export cleans its temporary archive');
+    assert.ok(maximumRead <= 256 * 1024, 'export does not call the old bounded whole-file reader');
+
+    const pristine = fs.readFileSync(disk(backup));
+    const corrupt = Buffer.from(pristine); corrupt[corrupt.length - 33] ^= 1;
+    const bad = app + '/cache/bad.tinybot';
+    const rejected = '/sandbox/rejected-backup'; fs.mkdirSync(disk(rejected + '/cache'), { recursive: true });
+    const rejectContext = { cacheDir: rejected + '/cache', getApplicationContext: () => ({ filesDir: rejected }) };
+    for (const bytes of [corrupt, pristine.subarray(0, -1), Buffer.concat([pristine, Buffer.from([0])])]) {
+      fs.writeFileSync(disk(bad), bytes);
+      await assert.rejects(readBackupFile(rejectContext, bad, emptyData()), /不完整或已损坏/);
+      assert.deepEqual(fs.readdirSync(disk(rejected)), ['cache'], 'corruption never reaches app files');
+      assert.deepEqual(fs.readdirSync(disk(rejected + '/cache')), [], 'failed restore cleans staging');
+    }
+    const invalidIndex = Buffer.from(pristine.subarray(0, 12)); invalidIndex.writeUInt32LE(0xffffffff, 8);
+    fs.writeFileSync(disk(bad), invalidIndex);
+    await assert.rejects(readBackupFile(rejectContext, bad, emptyData()), /不完整或已损坏/);
+
+    // A valid checksum does not authorize unsafe paths or invalid blob references.
+    const envelope = { format: 'tinybot-harmony.backup.v3', data, attachments: [],
+      files: [{ workspaceId: 'large', path: '../escape', bytes: '0' }] };
+    await writeBackupArchive(bad, JSON.stringify(envelope), [app + '/workspace/large/empty.txt']);
+    await assert.rejects(readBackupFile(rejectContext, bad, emptyData()), /路径/);
+    envelope.files[0].path = 'valid.txt'; envelope.files[0].bytes = '1';
+    await writeBackupArchive(bad, JSON.stringify(envelope), [app + '/workspace/large/empty.txt']);
+    await assert.rejects(readBackupFile(rejectContext, bad, emptyData()), /备份文件无效/);
+    assert.deepEqual(fs.readdirSync(disk(rejected + '/cache')), []);
+
+    // Native APIs can return short reads/writes without an error.
+    fileIo.read = async (fd, bytes) => {
+      const part = new ArrayBuffer(Math.min(7, bytes.byteLength));
+      const count = await originalRead(fd, part); new Uint8Array(bytes).set(new Uint8Array(part, 0, count)); return count;
+    };
+    fileIo.write = (fd, bytes, options) => originalWrite(fd, bytes.slice(0, 11), options);
+    envelope.files[0].bytes = '0';
+    await writeBackupArchive(bad, JSON.stringify(envelope), [app + '/workspace/large/empty.txt']);
+    await readBackupFile(rejectContext, bad, emptyData());
+    fileIo.read = originalRead;
+    fileIo.write = async () => { throw Error('injected backup disk full'); };
+    const failed = app + '/cache/failed.tinybot';
+    await assert.rejects(writeBackupArchive(failed, JSON.stringify(envelope), [sourceFile]), /disk full/);
+    assert.equal(fs.existsSync(disk(failed)), false, 'failed writes never leave a completed backup');
+    fileIo.write = async () => 0;
+    await assert.rejects(writeBackupArchive(failed, JSON.stringify(envelope), []), /写入未完成/);
+    assert.equal(fs.existsSync(disk(failed)), false);
+    fileIo.write = originalWrite;
+    // These exceed the former limits using real files, not source-text assertions.
+    const metadataLength = 64 * 1024 * 1024 + 1;
+    await writeBackupArchive(bad, 'x'.repeat(metadataLength), []);
+    const opened = await openBackupArchive(bad, context.cacheDir);
+    assert.equal(opened.metadata.length, metadataLength);
+    await cleanupBackupArchive(opened.directory);
+    const legacyData = emptyData(); legacyData.config.userDocument = 'y'.repeat(20 * 1024 * 1024 + 1);
+    fs.writeFileSync(disk(bad), JSON.stringify({ format:'tinybot-harmony.backup.v2', data:legacyData, attachments:[], files:[] }));
+    const legacyRestored = await readBackupFile(restoreContext, bad, emptyData());
+    assert.equal(legacyRestored.config.userDocument.length, legacyData.config.userDocument.length);
+    assert.equal(handles.size, 0, 'all descriptors are released');
+    console.log('PASS >20 MiB backup/export/legacy import, >64 MiB index, bounded I/O, corruption rejection and failure cleanup');
+  } finally { fileIo.read = originalRead; fileIo.write = originalWrite; }
+}
+async function encryptedBackupTest() {
+  const {createBackupFile,readBackupFile}=load('services/Backup');
+  const {SessionService}=load('services/SessionService');
+  const app='/sandbox/encrypted-backup';fs.mkdirSync(disk(app+'/cache'),{recursive:true});
+  const context={cacheDir:app+'/cache',getApplicationContext:()=>({filesDir:app})};
+  const data=emptyData();data.providerProfiles=[{id:'api',name:'My API',protocol:'chat-completions',baseUrl:'https://api.example.com/v1',
+    credentialAlias:'original-alias',noApiKey:false,enabled:true,models:['model-a']}];
+  data.config={...data.config,configured:true,providerId:'api',model:'model-a',baseUrl:'https://api.example.com/v1',credentialAlias:'original-alias'};
+  const secret='sk-PRIVATE-DO-NOT-WRITE-PLAINTEXT',openID='fixture-openid-A';
+  const stored=new Map([['original-alias',secret]]);
+  const vault={read:async id=>stored.get(id)||'',write:async(id,value)=>{assert.ok(!stored.has(id));stored.set(id,value);},remove:async id=>stored.delete(id)};
+  const before=JSON.stringify(data);
+  const backup=await createBackupFile(context,data,vault);
+  const bytes=fs.readFileSync(disk(backup));assert.ok(!bytes.includes(Buffer.from(secret)));assert.ok(!bytes.includes(Buffer.from(openID)));
+  assert.ok(bytes.includes(Buffer.from('https://api.example.com/v1')),'public API configuration stays readable');
+  assert.equal(JSON.stringify(data),before);
+  const again=await createBackupFile(context,data,vault);
+  assert.notDeepEqual(fs.readFileSync(disk(again)),bytes,'fresh salt and nonce for each backup');
+  const cacheBefore=fs.readdirSync(disk(context.cacheDir));
+  backupAccount.openID='';await assert.rejects(readBackupFile(context,backup,emptyData()),/请登录/);
+  backupAccount.openID='fixture-openid-B';await assert.rejects(readBackupFile(context,backup,emptyData()),/账号与备份不匹配/);
+  backupAccount.openID=openID;
+  assert.deepEqual(fs.readdirSync(disk(context.cacheDir)),cacheBefore,'wrong account is rejected before extraction');
+  const bad=legacyBackupFixture(bytes),modified=app+'/modified.json';
+  bad.data.providerProfiles[0].baseUrl='https://attacker.invalid/v1';fs.writeFileSync(disk(modified),JSON.stringify(bad));
+  await assert.rejects(readBackupFile(context,modified,emptyData()),/配置不一致/);
+  bad.data.providerProfiles[0].baseUrl='https://api.example.com/v1';
+  const ciphertext=Buffer.from(bad.protectedKeys.ciphertext,'base64');ciphertext[0]^=1;bad.protectedKeys.ciphertext=ciphertext.toString('base64');
+  fs.writeFileSync(disk(modified),JSON.stringify(bad));await assert.rejects(readBackupFile(context,modified,emptyData()),/账号与备份不匹配/);
+  assert.equal(stored.size,1,'read/validation alone never writes credentials');
+  let saved=emptyData(),failSave=false;
+  const repository={load:async()=>JSON.parse(JSON.stringify(saved)),save:async value=>{
+    if(failSave)throw Error('injected backup settings failure');
+    assert.ok(!JSON.stringify(value).includes(secret));saved=JSON.parse(JSON.stringify(value));
+  }};
+  const resources={createId:()=>crypto.randomUUID(),configureProviders(){},reportError(){},ensureWorkspace:async()=>{}};
+  const session=new SessionService(repository,{fork(){return this;}},vault,resources);session.refreshContext=()=>{};await session.initialize();
+  const imported=await readBackupFile(context,backup,session.snapshot());
+  assert.ok(!JSON.stringify(imported).includes(secret),'AppData never contains raw keys');
+  failSave=true;assert.equal(await session.importSnapshot(imported),false);assert.equal(stored.size,1,'failed commit removes new aliases');
+  assert.equal(saved.providerProfiles.length,0);
+  failSave=false;assert.equal(await session.importSnapshot(imported),true,session.state.error);
+  const profile=saved.providerProfiles[0];assert.notEqual(profile.credentialAlias,'original-alias');assert.equal(stored.get(profile.credentialAlias),secret);
+  assert.equal(profile.enabled,true);assert.equal(profile.noApiKey,false);assert.equal(profile.name,'My API');
+  assert.equal(saved.config.configured,true);assert.equal(saved.config.model,'model-a');
+  assert.equal(saved.threads.find(t=>t.id===saved.activeThreadId).modelRef.providerId,profile.id);
+  const existingCount=stored.size,existingAlias=profile.credentialAlias;
+  stored.set(existingAlias,'LOCAL-KEY');
+  const repeated=await readBackupFile(context,backup,session.snapshot());
+  assert.equal(await session.importSnapshot(repeated),true,session.state.error);assert.equal(stored.size,existingCount);
+  assert.equal(stored.get(existingAlias),'LOCAL-KEY','matching local services and credentials always win');
+  backupAccount.openID='';await assert.rejects(createBackupFile(context,data,vault),/请登录/);backupAccount.openID=openID;
+  const noKey=JSON.parse(JSON.stringify(data));noKey.providerProfiles[0].noApiKey=true;noKey.providerProfiles[0].credentialAlias='';
+  const noKeyPath=await createBackupFile(context,noKey,vault);assert.equal(legacyBackupFixture(fs.readFileSync(disk(noKeyPath))).protectedKeys.version,2);
+  console.log('PASS encrypted API keys, fresh nonces, no plaintext secrets, account/tamper rejection, secure-store restore, transactional rollback and local-key preservation');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => console.log('Fixtures: ' + fixture));

@@ -151,13 +151,47 @@ const preflight = make({ preflight: true, scrolling: true }); preflight.aboutToA
 preflight.aboutToDisappear(); assert.equal(context.activeWebViews, 0);
 console.log('PASS visible Web paints while scrolling, background preserves bound controller/ready/ports, foreground offscreen release and deferred cold loads');
 
+// Attribute console failures without suppressing them or exporting page URLs/content.
+const { LogSanitizer, knownLogEvent } = from('model/DiagnosticLog');
+const consoleLogs = [], sanitizer = new LogSanitizer();
+const ConsoleWeb = native('WebUiView', 'WebUiView', ['consoleError', 'report'], {
+  WEB_UI_ORIGIN: context.WEB_UI_ORIGIN, clearTimeout() {},
+  Diagnostics: { log(level, module, event, fields, error) {
+    assert.ok(knownLogEvent(module, event));
+    consoleLogs.push({ event, fields: sanitizer.sanitize(fields, error, true) });
+  } }
+});
+const consoleWeb = Object.assign(new ConsoleWeb(), { instanceId: 7, generation: 3, ready: true, preflight: true,
+  mounted: true, attached: true, visible: false, foreground: false, onValidation(error) { this.validationError = error; } });
+const observerError = 'Uncaught TypeError: window._pageSceneObservers[k].disconnect is not function';
+const consoleMessage = (source, detail = observerError) => ({ getSourceId: () => source, getLineNumber: () => 42, getMessage: () => detail });
+consoleWeb.consoleError(consoleMessage('injected-scene.js'));
+assert.equal(consoleWeb.error, observerError + '\n[source: injected-scene.js, line: 42]');
+assert.equal(consoleWeb.validationError, consoleWeb.error); assert.equal(consoleWeb.ready, false);
+const { errorKind: consoleErrorKind, ...consoleFields } = JSON.parse(JSON.stringify(consoleLogs[0].fields));
+assert.deepEqual(consoleFields, { instanceId: 7, generation: 3,
+  scriptSource: 'other', line: 42, ready: true, preflight: true, mounted: true, attached: true,
+  visible: false, foreground: false, pageSceneObserver: true });
+for (const [source, category] of [['tinybot-generated.js', 'generated'], [context.WEB_UI_ORIGIN, 'host'],
+  ['about:srcdoc', 'frame'], ['about:blank', 'blank'], ['data:text/html,PRIVATE_PAGE', 'data'],
+  ['https://example.invalid/PRIVATE_PAGE?secret=PRIVATE_KEY', 'other'], ['', 'unknown']]) {
+  consoleLogs.length = 0;
+  consoleWeb.consoleError(consoleMessage(source, 'User script failed'));
+  assert.equal(consoleLogs[0].fields.scriptSource, category);
+  assert.equal(consoleLogs[0].fields.pageSceneObserver, false);
+  assert.ok(!JSON.stringify(consoleLogs).includes('PRIVATE_'));
+  if (category === 'data') assert.ok(!consoleWeb.error.includes('PRIVATE_PAGE'));
+}
+assert.ok(fs.readFileSync(path.join(srcRoot, 'views/WebUiView.ets'), 'utf8').includes('this.consoleError(event.message)'));
+console.log('PASS Web console source/line/lifecycle attribution, retained error handling and diagnostic privacy');
+
 // Follow the actual List event callbacks into the storage observed by WebUiView.
 const scrollState = new Map(), scrollChanges = [];
 const Chat = native('ChatPanel', 'ChatPanel', ['setScrollActivity', 'stopScrollActivity', 'aboutToDisappear'], {
   Diagnostics: context.Diagnostics, clearTimeout: context.clearTimeout, setTimeout: context.setTimeout,
   AppStorage: { get: key => scrollState.get(key), setOrCreate(key, value) { scrollState.set(key, value); scrollChanges.push(value); } }
 });
-const chat = Object.assign(new Chat(), { scrollStopTimer: -1, viewport: { dispose() {} }, endSpeech() {}, reading: { stop() {} }, cancelAttachmentDrop() {} });
+const chat = Object.assign(new Chat(), { focusOwner: 0, scrollStopTimer: -1, viewport: { dispose() {} }, endSpeech() {}, reading: { stop() {} }, cancelAttachmentDrop() {}, cancelPlusAction() {} });
 const chatFile = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/views/ChatPanel.ts');
 const chatTree = ts.createSourceFile(chatFile, fs.readFileSync(chatFile, 'utf8'), ts.ScriptTarget.Latest, true);
 const scrollCallbacks = {};

@@ -58,11 +58,11 @@ const helper = tree.statements.find(node => ts.isClassDeclaration(node) && node.
 vm.runInNewContext(compile(`${helper.getText(tree)}; class Model { ${use} } exports.Model = Model;
 class Panel { ${['speechActive','currentSkillQuery','skillSuggested','skillMatches','selectSkill','skillSuggestions'].map(method).join('\n')} } exports.Panel = Panel;`), scope);
 const app = new scope.exports.Model(); let mutable = true;
-Object.assign(app, { extensions: settings, active: { archived: false }, draft: '$随手', busy: false, saveError: '',
+Object.assign(app, { extensions: settings, active: { id: 'chat', archived: false }, draft: '$随手', busy: false, saveError: '',
   requireSession: () => ({ canMutate: mutable }), setDraft(text) { this.draft = text; }, send() { throw Error('Picker must not send'); } });
 const panel = new scope.exports.Panel();
 Object.assign(panel, { app, thread: { id: 'chat', archived: false }, appearance: {}, voiceMode: false, speech: { phase: 'idle' },
-  composerSelectionStart: -1, composerSelectionEnd: -1, keyboardFocusRequest: 0,
+  composerSelectionStart: -1, composerSelectionEnd: -1, keyboardFocusRequest: 0, speechEnabled: true, foreground: true,
   composerController: { caretPosition: value => caret.push(value) },
   getUIContext: () => ({ postFrameCallback: frame => frames.push(frame), getFocusController: () => ({ requestFocus: id => focus.push(id) }) }),
   observeComponentCreation2(callback) { active = {}; nodes.push(active); callback(nodes.length, true); },

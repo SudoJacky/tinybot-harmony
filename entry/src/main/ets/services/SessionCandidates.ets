@@ -8,7 +8,7 @@ import { ProjectData, projectName, validateProjects } from '../model/Project';
 import { SharedFolder, validateSharedFolders } from '../model/SharedFolders';
 import { ThreadReference } from '../model/ThreadReferences';
 
-export interface SessionImportCandidate { data: AppData; threads: ThreadData[]; }
+export interface SessionImportCandidate { data: AppData; threads: ThreadData[]; providerIds: Map<string, string>; }
 
 // Build detached candidates only. SessionService owns admission, platform effects and commits.
 export function importedSessionCandidate(local: AppData, imported: AppData, createId: () => string): SessionImportCandidate {
@@ -16,7 +16,7 @@ export function importedSessionCandidate(local: AppData, imported: AppData, crea
   const restored = JSON.parse(JSON.stringify(imported)) as AppData;
   const known = new Set(candidate.threads.map((item) => item.id));
   restored.threads = restored.threads.filter((item) => !known.has(item.id));
-  prepareBackupServices(local, restored, createId);
+  const providerIds = prepareBackupServices(local, restored, createId);
   candidate.projects = (candidate.projects || []).concat((restored.projects || []).filter((project) =>
     !(candidate.projects || []).some((item) => item.id === project.id)));
   candidate.threads = candidate.threads.concat(restored.threads);
@@ -41,7 +41,7 @@ export function importedSessionCandidate(local: AppData, imported: AppData, crea
   }
   extras.servers = extras.servers.concat(source.servers);
   candidate.productivity = extras; validateProductivity(extras);
-  return { data: candidate, threads: restored.threads };
+  return { data: candidate, threads: restored.threads, providerIds: providerIds };
 }
 
 export interface ProjectCandidate {

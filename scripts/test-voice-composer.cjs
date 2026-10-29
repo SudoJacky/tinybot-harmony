@@ -42,7 +42,7 @@ function panel() {
   let nativeReady = true;
   const value = new scope.exports.Panel();
   Object.assign(value, { speechEnabled: true, importing: false, speechHolding: false, voiceMode: false, speechTarget: 'send',
-    keyboardFocusRequest: 0,
+    keyboardFocusRequest: 0, foreground: true,
     thread: { id: 'chat', archived: false }, appearance: {}, viewport: { observe() {} },
     reading: { stop() {} }, syncMessages() {}, receiveVoiceShortcut() {}, follow() {},
     app: { active: { id: 'chat' }, draft: '原草稿', ready: true, busy: false, canQueueInput: false,

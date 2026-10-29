@@ -1,3 +1,8 @@
+import { BackupKeyPayload, attachBackupKeys } from './BackupKeyRestore';
+import { CredentialStore } from './CredentialStore';
+import { huaweiAccount } from './HuaweiAccount';
+import { CredentialVault } from './ProfileSettings';
+import { EncryptedBackupKeys, encryptBackupKeys, decryptBackupKeys } from './BackupKeys';
 import { Diagnostics } from '../model/Diagnostics';
 import { ProjectData, validateProjects, workspaceIdFor } from '../model/Project';
 import { t } from '../model/I18n';
@@ -9,18 +14,30 @@ import { Attachment } from '../model/Productivity';
 import { toolReceipts } from '../model/Agent';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { workspaceRelativePath } from './WorkspaceTools';
-import { Attachments, readBounded, writeBytes } from './Attachments';
-import { exportFile } from './NativeActions';
+import { Attachments, writeBytes } from './Attachments';
+import { copyFileBytes } from './FileBytes';
+import { readUtf8File } from './TextFiles';
+import { OpenBackupArchive, openBackupArchive, writeBackupArchive, cleanupBackupArchive } from './BackupArchive';
 import { NativeWorkspaceFiles } from './NativeWorkspaceFiles';
 import { MiniApps } from './MiniApps';
 interface BackupFile { threadId?: string; workspaceId?: string; path: string; bytes: string; }
 interface BackupAttachment { id: string; bytes: string; }
-interface BackupEnvelope { format: string; data: AppData; attachments: BackupAttachment[]; files: BackupFile[]; miniAppWorkspaceIds?: string[]; }
-const MAX_BACKUP = 20 * 1024 * 1024;
-async function encodeFile(path: string): Promise<string> {
-  const file = await fs.open(path, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
-  try { return new util.Base64Helper().encodeToString(new Uint8Array(await readBounded(file.fd, MAX_BACKUP))); }
-  finally { await fs.close(file); }
+interface BackupEnvelope { protectedKeys?: EncryptedBackupKeys; format: string; data: AppData; attachments: BackupAttachment[]; files: BackupFile[]; miniAppWorkspaceIds?: string[]; }
+// v3 bytes fields are canonical decimal blob indices; v1/v2 fields contain Base64.
+function blobIndex(value: string, archive: OpenBackupArchive): number {
+  const index = Number(value);
+  if (!Number.isSafeInteger(index) || index < 0 || index >= archive.files.length || String(index) !== value) {
+    throw new Error(t('备份文件无效。'));
+  }
+  return index;
+}
+function payloadSize(value: string, archive?: OpenBackupArchive): number {
+  if (archive) { return archive.sizes[blobIndex(value, archive)]; }
+  return new util.Base64Helper().decodeSync(value).byteLength;
+}
+async function writePayload(value: string, path: string, archive?: OpenBackupArchive): Promise<void> {
+  if (archive) { await copyFileBytes(archive.files[blobIndex(value, archive)], path); }
+  else { await writeBytes(path, new util.Base64Helper().decodeSync(value).buffer as ArrayBuffer); }
 }
 function threadAttachments(thread: ThreadData): Attachment[] {
   const result = (thread.attachments || []).concat(...thread.messages.map((message) => message.attachments || []));
@@ -39,11 +56,14 @@ function allAttachments(data: AppData): Attachment[] {
   for (const thread of data.threads) { for (const item of threadAttachments(thread)) { result.set(item.id, item); } }
   return Array.from(result.values());
 }
-// Both local export and Huawei Cloud use the same validated, credential-free snapshot.
-export async function createBackupFile(context: common.UIAbilityContext, snapshot: AppData): Promise<string> {
+// Local export and Huawei Cloud share one archive; API keys only appear in the encrypted section.
+export async function createBackupFile(context: common.UIAbilityContext, snapshot: AppData, vault: CredentialVault = new CredentialStore()): Promise<string> {
   const data = JSON.parse(JSON.stringify(snapshot)) as AppData;
-  const envelope: BackupEnvelope = { format: 'tinybot-harmony.backup.v2', data: data, attachments: [], files: [] };
+  const envelope: BackupEnvelope = { format: 'tinybot-harmony.backup.v3', data: data, attachments: [], files: [] };
   validateProjects(data);
+  if ((snapshot.providerProfiles || []).length) {
+    envelope.protectedKeys = await encryptBackupKeys(snapshot, await huaweiAccount.backupOpenID(context), vault);
+  }
   const userDocument = data.config.userDocument || '';
   data.config = defaultConfig(); data.config.userDocument = userDocument;
   for (const profile of data.providerProfiles || []) { profile.credentialAlias = ''; profile.noApiKey = true; profile.enabled = false; }
@@ -53,7 +73,7 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
     if (search.tavily) { search.tavily.credentialAlias = ''; }
     if (search.provider === 'tavily') { search.credentialAlias = ''; } else { search.modelProviderId = undefined; }
   }
-  let size = JSON.stringify(data).length * 3;
+  const sources: string[] = [];
   const originals = new Set<string>();
   for (const thread of data.threads) {
     for (const item of threadAttachments(thread)) {
@@ -63,7 +83,11 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
       }
     }
   }
-  for (const item of allAttachments(data)) { const bytes = await encodeFile(Attachments.path(item)); size += bytes.length; if (size > MAX_BACKUP) { throw new Error(t("备份超过 20 MB，请先清理不需要的附件。")); } envelope.attachments.push({ id: item.id, bytes: bytes }); }
+  for (const item of allAttachments(data)) {
+    const source = Attachments.path(item);
+    if ((await fs.stat(source)).size !== item.size) { throw new Error(t('备份缺少附件或大小不一致。')); }
+    envelope.attachments.push({ id: item.id, bytes: String(sources.length) }); sources.push(source);
+  }
   const workspaces = new WorkspaceStore(context.getApplicationContext().filesDir);
   const projectRoots = new Set((data.projects || []).map((project) => project.workspaceId));
   const ownedRoots = Array.from(projectRoots).concat(data.threads.filter((thread) => !thread.projectId).map((thread) => thread.id));
@@ -85,35 +109,74 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
         else if (stat.isFile()) {
           // Original attachment bytes are already in the attachment section, including shared project copies.
           if (originals.has(workspaceId + '/' + path)) { continue; }
-          const bytes = await encodeFile(absolute); size += bytes.length;
-          if (size > MAX_BACKUP || envelope.files.length >= 1000) { throw new Error(t("备份最多 20 MB、1000 个文件。")); }
-          envelope.files.push({ workspaceId: workspaceId, path: path, bytes: bytes });
+          envelope.files.push({ workspaceId: workspaceId, path: path, bytes: String(sources.length) }); sources.push(absolute);
         }
       }
     }
   }
-  const bytes = new util.TextEncoder().encodeInto(JSON.stringify(envelope));
-  if (bytes.byteLength > MAX_BACKUP) { throw new Error(t("备份超过 20 MB。")); }
-  const path = context.cacheDir + '/backup-' + util.generateRandomUUID() + '.json';
-  await writeBytes(path, bytes.buffer as ArrayBuffer);
+  const path = context.cacheDir + '/backup-' + util.generateRandomUUID() + '.tinybot';
+  await writeBackupArchive(path, JSON.stringify(envelope), sources);
   return path;
 }
 export async function exportBackup(context: common.UIAbilityContext, data: AppData): Promise<void> {
   const path = await createBackupFile(context, data);
-  try { await exportFile(context, path, 'Tinybot备份.json'); }
+  try {
+    const uris = await new picker.DocumentViewPicker(context).save({ newFileNames: ['Tinybot备份.tinybot'] });
+    if (!uris.length) { return; }
+    const input = await fs.open(path, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
+    try {
+      const output = await fs.open(uris[0], fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+      try {
+        await fs.copyFile(input.fd, output.fd);
+        if ((await fs.stat(input.fd)).size !== (await fs.stat(output.fd)).size) { throw new Error(t('文件写入未完成。')); }
+        await fs.fsync(output.fd);
+      } finally { await fs.close(output); }
+    } finally { await fs.close(input); }
+  }
   finally { await fs.unlink(path); }
 }
 export async function readBackup(context: common.UIAbilityContext, local: AppData): Promise<AppData | undefined> {
-  const uris = await new picker.DocumentViewPicker(context).select({ maxSelectNumber: 1, fileSuffixFilters: ['Tinybot 备份|.json'] });
+  const uris = await new picker.DocumentViewPicker(context).select({ maxSelectNumber: 1, fileSuffixFilters: ['Tinybot 备份|.tinybot,.json'] });
   if (!uris.length) { return undefined; }
   return readBackupFile(context, uris[0], local);
 }
 export async function readBackupFile(context: common.UIAbilityContext, path: string, local: AppData): Promise<AppData> {
-  const file = await fs.open(path, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW); let text = '';
-  try { text = new util.TextDecoder('utf-8', { fatal: true }).decodeToString(new Uint8Array(await readBounded(file.fd, MAX_BACKUP))); }
-  finally { await fs.close(file); }
-  const envelope = JSON.parse(text) as BackupEnvelope;
-  if (!envelope || !['tinybot-harmony.backup.v1', 'tinybot-harmony.backup.v2'].includes(envelope.format) || !Array.isArray(envelope.attachments) || !Array.isArray(envelope.files) || envelope.files.length > 1000) { throw new Error(t("备份格式无效。")); }
+  const started = Date.now();
+  let archive: OpenBackupArchive | undefined;
+  try {
+    let keys: BackupKeyPayload | undefined;
+    const unlock = async (envelope: BackupEnvelope): Promise<void> => {
+      if (envelope?.protectedKeys !== undefined) {
+        if (!envelope.protectedKeys || envelope.protectedKeys.version !== 2) { throw new Error(t('备份密钥格式无效。')); }
+        const credential = await huaweiAccount.backupOpenID(context);
+        keys = await decryptBackupKeys(envelope.protectedKeys, credential, envelope.data);
+      }
+    };
+    archive = await openBackupArchive(path, context.cacheDir, async (metadata: string) => {
+      const envelope = JSON.parse(metadata) as BackupEnvelope;
+      await unlock(envelope);
+    });
+    let text = archive?.metadata || '';
+    if (!archive) {
+      const file = await fs.open(path, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
+      try { text = await readUtf8File(file.fd); }
+      finally { await fs.close(file); }
+    }
+    const envelope = JSON.parse(text) as BackupEnvelope;
+    const formats = archive ? ['tinybot-harmony.backup.v3'] : ['tinybot-harmony.backup.v1', 'tinybot-harmony.backup.v2'];
+    if (!envelope || !formats.includes(envelope.format) || !Array.isArray(envelope.attachments) || !Array.isArray(envelope.files)) { throw new Error(t('备份格式无效。')); }
+    if (!archive) { await unlock(envelope); }
+    const result = await restoreEnvelope(context, local, envelope, archive);
+    if (keys) { attachBackupKeys(result, keys); }
+    Diagnostics.log('info', 'backup', 'restore_completed', { durationMs: Date.now() - started, newChats: result.threads.length });
+    return result;
+  } catch (error) {
+    Diagnostics.log('error', 'backup', 'restore_failed', { durationMs: Date.now() - started }, error as Error);
+    throw error as Error;
+  } finally { if (archive) { await cleanupBackupArchive(archive.directory); } }
+}
+async function restoreEnvelope(context: common.UIAbilityContext, local: AppData, envelope: BackupEnvelope,
+  archive?: OpenBackupArchive): Promise<AppData> {
   const data = parseAppData(JSON.stringify(envelope.data));
   // Keep record identities across devices and repeated restores. Local records win.
   const legacy = envelope.format === 'tinybot-harmony.backup.v1';
@@ -132,20 +195,24 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
   const known = new Set(local.threads.map((thread) => thread.id));
   const workspace = new WorkspaceStore(context.getApplicationContext().filesDir);
   for (const id of Array.from(workspaceIds)) { workspace.pathFor(id); }
-  const attachmentIds = new Map<string, string>(); const binaries = new Map<string, Uint8Array>(); const paths = new Set<string>();
+  const attachmentIds = new Map<string, string>(); const binaries = new Map<string, string>(); const paths = new Set<string>();
   for (const item of envelope.attachments) {
-    if (!item || typeof item.id !== 'string' || typeof item.bytes !== 'string' || item.bytes.length > MAX_BACKUP || binaries.has(item.id)) { throw new Error(t("备份附件无效。")); }
-    binaries.set(item.id, new util.Base64Helper().decodeSync(item.bytes)); attachmentIds.set(item.id, util.generateRandomUUID());
+    if (!item || typeof item.id !== 'string' || typeof item.bytes !== 'string' || binaries.has(item.id)) { throw new Error(t("备份附件无效。")); }
+    payloadSize(item.bytes, archive);
+    binaries.set(item.id, item.bytes); attachmentIds.set(item.id, util.generateRandomUUID());
   }
-  for (const item of allAttachments(data)) { if (!binaries.has(item.id) || binaries.get(item.id)?.byteLength !== item.size) { throw new Error(t("备份缺少附件或大小不一致。")); } }
-  const workspaceBytes: Uint8Array[] = [];
+  for (const item of allAttachments(data)) { if (!binaries.has(item.id) || payloadSize(binaries.get(item.id) as string, archive) !== item.size) { throw new Error(t("备份缺少附件或大小不一致。")); } }
   for (const item of envelope.files) {
     if (!item) { throw new Error(t("备份文件无效。")); }
     const id = legacy ? item.threadId : item.workspaceId;
-    if (typeof id !== 'string' || !workspaceIds.has(id) || (legacy ? item.workspaceId !== undefined : item.threadId !== undefined) || typeof item.bytes !== 'string' || item.bytes.length > MAX_BACKUP) { throw new Error(t("备份文件无效。")); }
+    if (typeof id !== 'string' || !workspaceIds.has(id) || (legacy ? item.workspaceId !== undefined : item.threadId !== undefined) || typeof item.bytes !== 'string') { throw new Error(t("备份文件无效。")); }
     workspaceRelativePath(item.path, false); const key = id + '/' + item.path;
     if (paths.has(key)) { throw new Error(t("备份包含重复文件。")); } paths.add(key);
-    workspaceBytes.push(new util.Base64Helper().decodeSync(item.bytes));
+    payloadSize(item.bytes, archive);
+  }
+  if (archive) {
+    const references = envelope.attachments.map((item) => item.bytes).concat(envelope.files.map((item) => item.bytes));
+    if (references.length !== archive.files.length || new Set(references).size !== references.length) { throw new Error(t('备份文件无效。')); }
   }
   const totalThreads = data.threads.length;
   data.threads = data.threads.filter((thread) => !known.has(thread.id));
@@ -176,7 +243,7 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
     if ((local.projects || []).some((item) => item.id === project.id)) { await workspace.requireWorkspace(project.workspaceId); }
   }
   const attachmentRoot = context.getApplicationContext().filesDir + '/attachments'; if (!await fs.access(attachmentRoot)) { await fs.mkdir(attachmentRoot); }
-  for (const item of allAttachments(data).filter((item) => !item.original)) { const id = attachmentIds.get(item.id) as string; const path = id + (item.mime === 'image/jpeg' ? '.jpg' : '.txt'); await writeBytes(attachmentRoot + '/' + path, (binaries.get(item.id) as Uint8Array).buffer as ArrayBuffer); }
+  for (const item of allAttachments(data).filter((item) => !item.original)) { const id = attachmentIds.get(item.id) as string; const path = id + (item.mime === 'image/jpeg' ? '.jpg' : '.txt'); await writePayload(binaries.get(item.id) as string, attachmentRoot + '/' + path, archive); }
   for (const id of Array.from(destinations.values())) { await workspace.ensureThread(id); }
   for (let index = 0; index < envelope.files.length; index++) {
     const item = envelope.files[index];
@@ -193,7 +260,15 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
       const stat = await fs.lstat(root + '/' + item.path);
       if (!stat.isFile() || stat.isSymbolicLink()) { throw new Error(t('备份文件无效。')); }
     }
-    await writeBytes(root + '/' + item.path, workspaceBytes[index].buffer as ArrayBuffer);
+    if (archive) {
+      await new NativeWorkspaceFiles(root).importFile(archive.files[blobIndex(item.bytes, archive)], item.path, true);
+    } else {
+      const temporary = attachmentRoot + '/restore-' + util.generateRandomUUID() + '.bin';
+      try {
+        await writePayload(item.bytes, temporary);
+        await new NativeWorkspaceFiles(root).importFile(temporary, item.path, true);
+      } finally { if (await fs.access(temporary)) { await fs.unlink(temporary); } }
+    }
   }
   // Keep service IDs until SessionService can match them against this device's settings.
   for (const profile of data.providerProfiles || []) { profile.enabled = false; profile.noApiKey = true; profile.credentialAlias = ''; }
@@ -203,11 +278,16 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
       if (item.original) {
         const workspaceId = workspaceIdFor(data, thread);
         await workspace.ensureThread(workspaceId);
-        const temporary = attachmentRoot + '/restore-' + util.generateRandomUUID() + '.bin';
-        try {
-          await writeBytes(temporary, (binaries.get(item.id) as Uint8Array).buffer as ArrayBuffer);
-          await new NativeWorkspaceFiles(workspace.pathFor(workspaceId)).importFile(temporary, item.path, true);
-        } finally { if (await fs.access(temporary)) { await fs.unlink(temporary); } }
+        const value = binaries.get(item.id) as string;
+        const files = new NativeWorkspaceFiles(workspace.pathFor(workspaceId));
+        if (archive) { await files.importFile(archive.files[blobIndex(value, archive)], item.path, true); }
+        else {
+          const temporary = attachmentRoot + '/restore-' + util.generateRandomUUID() + '.bin';
+          try {
+            await writePayload(value, temporary);
+            await files.importFile(temporary, item.path, true);
+          } finally { if (await fs.access(temporary)) { await fs.unlink(temporary); } }
+        }
         item.workspaceId = workspaceId;
         continue;
       }

@@ -1,3 +1,4 @@
+import { commitBackupKeys } from './BackupKeyRestore';
 import { resolveBrowserPreview } from '../model/BrowserPreview';
 import { Diagnostics } from '../model/Diagnostics';
 import { configurationIssues } from '../model/ConfigurationCompatibility';
@@ -211,7 +212,8 @@ export class SessionService {
     return this.mutate(t("导入失败："), async () => {
       const importedCandidate = importedSessionCandidate(this.data, imported, () => this.resources.createId());
       for (const thread of importedCandidate.threads) { await this.ensureThreadWorkspace(thread, importedCandidate.data); }
-      await this.commitSettings(importedCandidate.data);
+      await commitBackupKeys(this.data, imported, importedCandidate, this.credentials, () => this.resources.createId(),
+        (data) => this.commitSettings(data));
     });
   }
   private get active(): ThreadData { return this.requireThread(this.data.activeThreadId); }

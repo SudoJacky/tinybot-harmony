@@ -182,8 +182,9 @@ export interface SessionRepository {
 
 备份与恢复都在 `SessionService` 的入口上完成，模型与存储不感知具体来源：
 
-- `createBackupFile()` 深拷贝快照，保留用户文档，清空模型服务与 MCP 的密钥别名、把服务置为停用；再打包附件与工作区文件（上限 20 MB、1000 个文件）。因此备份不携带任何密钥。
+- `createBackupFile()` 深拷贝快照，保留用户文档，清空公开模型服务与 MCP 的密钥别名、把服务置为停用；模型 API Key 及其服务绑定另存到 OpenID 派生密钥加密区。再通过 `BackupArchive` 分块打包附件与工作区原始字节（容量、索引和文件数量不设应用固定上限，实际受设备资源约束）。
 - `importSnapshot()` 先丢弃与本地重复的会话 ID，再调用 `prepareBackupServices()`：协议与基础地址能明确匹配的服务沿用本地 ID；无法匹配的新增为停用、无密钥的副本，并重写会话、消息与团队记录中的 `modelRef`。MCP 服务按 URL 同样处理。
+- `BackupKeys` 解密后的密钥通过 `WeakMap` 随导入对象仅在内存中传递，不放进可序列化的 `AppData`。`commitBackupKeys()` 为新增模型服务恢复经认证的原始配置、写入安全存储；提交失败删除新增别名，已匹配的本机服务与密钥始终保留。无加密区的旧备份沿用停用副本流程。
 - 用户文档只在本机为空时恢复；Skills 按名称去重；记忆按 ID 去重，模板按 ID 或名称加内容去重，MCP 服务直接追加；工作区目录逐个补齐后才提交。
 - 提交走 `commitSettings()`，与普通设置共用原子保存与回滚路径。
 
