@@ -87,7 +87,7 @@ powershell -ExecutionPolicy Bypass -File scripts/check-release-package.ps1 -HapP
 - 模拟器与本地测试结果不代表 AGC 云测试、审核或真实设备验证通过。
 - 华为云空间真实上传、同账号跨设备恢复、实际人声识别、外部 MCP OAuth 服务需要对应设备、账号或服务才能验证。
 - JavaScript 沙箱是同进程 QuickJS 解释器隔离，通过已授权工具访问工作区，沿用权限与确认，不提供任意外部目录、Python 或 Shell。
-- 删除会话保留工作区文件；附件和用量记录不会逐条即时回收；备份不导出模型与 MCP 凭据。
+- 删除会话保留工作区文件；附件和用量记录不会逐条即时回收；备份包含经账号信息加密的模型 API Key，MCP 与搜索凭据不导出，对话与文件不加密。
 
 ## 交付前清单
 

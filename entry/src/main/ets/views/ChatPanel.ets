@@ -76,6 +76,8 @@ export struct ChatPanel {
   onHeaderProgress: (progress: number) => void = () => {};
   private lastHeaderProgress: number = -1;
   @Prop @Watch('speechAvailabilityChanged') speechEnabled: boolean = true;
+  @StorageProp('tinybot.foreground') @Watch('focusForegroundChanged') private foreground: boolean = true;
+  private focusOwner: number = 0;
   @Prop @Watch('speechThreadChanged') activeThreadId: string = '';
   @Prop @Watch('receiveVoiceShortcut') voiceRequest: string = '';
   private consumedVoiceRequest: string = '';
@@ -99,6 +101,9 @@ export struct ChatPanel {
   private attachmentDrop: AttachmentDrop = new AttachmentDrop();
   private dropGeneration: number = 0;
   @State private showPlus: boolean = false;
+  private pendingPlusAction?: () => void;
+  private plusActionThreadId: string = '';
+  private plusMenuTimer: number = -1;
   // Tablets open the add actions as a menu above the plus; phones keep the sheet.
   @State private showPlusMenu: boolean = false;
   @State private plusPane: string = 'root';
@@ -193,6 +198,8 @@ export struct ChatPanel {
   }
 
   aboutToDisappear(): void {
+    this.focusOwner++;
+    this.cancelPlusAction();
     this.cancelAttachmentDrop();
     this.setScrollActivity(false);
     this.viewport.dispose();
@@ -220,10 +227,14 @@ export struct ChatPanel {
     return this.speech.phase === 'preparing' || this.speech.phase === 'listening' || this.speech.phase === 'finishing';
   }
   private speechAvailabilityChanged(): void {
-    if (!this.speechEnabled) { this.endSpeech(); this.reading.stop(); }
+    if (!this.speechEnabled) { this.focusOwner++; this.cancelPlusAction(); this.endSpeech(); this.reading.stop(); }
     else { this.receiveVoiceShortcut(); }
   }
+  private focusForegroundChanged(): void {
+    if (!this.foreground) { this.focusOwner++; this.keyboardFocusRequest++; this.cancelPlusAction(); }
+  }
   private speechThreadChanged(): void {
+    this.cancelPlusAction();
     this.cancelAttachmentDrop();
     this.composerSelectionStart = -1; this.composerSelectionEnd = -1;
     this.lastHeaderProgress = -1;
@@ -257,7 +268,9 @@ export struct ChatPanel {
     const threadId = this.thread.id;
     const request = ++this.keyboardFocusRequest;
     this.getUIContext().postFrameCallback(new ComposerKeyboardFrame(() => {
-      if (request !== this.keyboardFocusRequest || this.thread.id !== threadId || !this.speechEnabled ||
+      if (request !== this.keyboardFocusRequest || this.thread.id !== threadId || this.app.active.id !== threadId ||
+        !this.speechEnabled || !this.foreground || this.showPlus || this.showPlusMenu || this.showDrawing || this.previewing ||
+        this.showContext || this.showQueue || this.showSummary || this.showMemoryDraft || this.showReasoning || this.showModelMenu ||
         this.thread.archived || this.voiceMode || this.speechActive()) { return; }
       if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'voice', 'focus_requested', { request: request }); };
       this.getUIContext().getFocusController().requestFocus('composer');
@@ -569,10 +582,19 @@ export struct ChatPanel {
     MemoryDraftPanel({ app: this.app, threadId: this.memoryThreadId, messageId: this.memoryMessageId, onClose: () => { this.showMemoryDraft = false; } })
   }
   private async fork(id: string): Promise<void> {
+    const owner = this.focusOwner;
     const editing = this.thread.messages.some((message) => message.id === id && message.role === 'user');
     if (await this.app.forkThread(id)) {
+      if (owner !== this.focusOwner || !this.speechEnabled || !this.foreground) { return; }
       this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t("已切换到新分支，原对话保留在列表中") });
-      if (editing) { this.getUIContext().getFocusController().requestFocus('composer'); }
+      if (editing) {
+        const branchId = this.app.active.id;
+        // The model switches before ArkUI applies the new thread prop and its Watch callback.
+        this.getUIContext().postFrameCallback(new ComposerKeyboardFrame(() => {
+          if (owner === this.focusOwner && this.speechEnabled && this.foreground &&
+            this.thread.id === branchId && this.app.active.id === branchId) { this.showSpeechKeyboard(); }
+        }));
+      }
     }
   }
   private async regenerate(id: string): Promise<void> {
@@ -583,16 +605,49 @@ export struct ChatPanel {
   private canAttach(): boolean {
     return !this.speechActive() && !this.app.busy && !this.importing && !this.thread.archived && this.app.saveError.length === 0;
   }
-  // Close the sheet first so the system picker does not open on top of a dismissing sheet.
+  // A fixed delay can expire while the native sheet still owns the focus scope.
+  // Consume the action only from bindSheet's animation-complete onDisappear callback.
   private fromSheet(action: () => void): void {
+    this.pendingPlusAction = action;
+    this.plusActionThreadId = this.thread.id;
+    Diagnostics.log('info', 'composer', 'sheet_action_queued');
     this.showPlus = false;
-    setTimeout(action, 250);
+  }
+  private finishPlusAction(): void {
+    const action = this.pendingPlusAction;
+    const threadId = this.plusActionThreadId;
+    this.pendingPlusAction = undefined; this.plusActionThreadId = '';
+    if (!action) { return; }
+    if (this.showPlus || !this.speechEnabled || !this.foreground || this.thread.id !== threadId ||
+      this.app.active.id !== threadId || !this.canAttach()) {
+      Diagnostics.log('info', 'composer', 'sheet_action_cancelled');
+      return;
+    }
+    Diagnostics.log('info', 'composer', 'sheet_action_dispatched');
+    action();
+  }
+  private cancelPlusAction(): void {
+    clearTimeout(this.plusMenuTimer); this.plusMenuTimer = -1;
+    if (this.pendingPlusAction) { Diagnostics.log('info', 'composer', 'sheet_action_cancelled'); }
+    this.pendingPlusAction = undefined; this.plusActionThreadId = '';
+  }
+  private addThreadReference(): void {
+    if (referenceQuery(this.app.draft) === undefined) { this.app.setDraft(this.app.draft + (this.app.draft ? ' @' : '@')); }
+    this.showSpeechKeyboard();
   }
 
-  // Same dismissal rule for the tablet menu before a system picker opens.
+  // The popup delay must never carry an action into another route or conversation.
   private dismissPlusMenu(action: () => void): void {
+    clearTimeout(this.plusMenuTimer);
+    const owner = this.focusOwner;
+    const threadId = this.thread.id;
     this.showPlusMenu = false;
-    setTimeout(action, 250);
+    this.plusMenuTimer = setTimeout(() => {
+      this.plusMenuTimer = -1;
+      if (owner !== this.focusOwner || this.thread.id !== threadId || this.app.active.id !== threadId ||
+        !this.speechEnabled || !this.foreground || this.showPlusMenu || !this.canAttach()) { return; }
+      action();
+    }, 250);
   }
   private removeAttachment(id: string): void {
     this.app.setAttachments(this.thread.attachments.filter((file: Attachment) => file.id !== id));
@@ -887,12 +942,7 @@ export struct ChatPanel {
         () => { this.showPlusMenu = false; this.toggleTeam(!this.thread.teamEnabled); })
       Divider().strokeWidth(0.5).color($r('app.color.divider')).margin({ left: 10, right: 10, top: 4, bottom: 4 })
       this.plusMenuRow($r('sys.symbol.link'), t('引用其他会话'), 'plus-menu-reference',
-        this.canAttach() && this.thread.references.length < 4, false, '', () => this.dismissPlusMenu(() => {
-          if (referenceQuery(this.app.draft) === undefined) {
-            this.app.setDraft(this.app.draft + (this.app.draft ? ' @' : '@'));
-          }
-          this.getUIContext().getFocusController().requestFocus('composer');
-        }))
+        this.canAttach() && this.thread.references.length < 4, false, '', () => this.dismissPlusMenu(() => this.addThreadReference()))
       this.plusMenuRow($r('sys.symbol.doc_plaintext'), t('提示词模板'), 'plus-menu-templates', !this.app.busy, true,
         String(this.app.productivity.templates.length), () => { this.plusPane = 'templates'; })
       Text(this.thread.attachments.length >= MAX_MESSAGE_ATTACHMENTS ? t('已达到每条消息 {0} 个附件的上限', [MAX_MESSAGE_ATTACHMENTS]) : t('每条消息最多 {0} 个附件 · 图片需模型支持视觉输入', [MAX_MESSAGE_ATTACHMENTS]))
@@ -980,10 +1030,7 @@ export struct ChatPanel {
           .fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).width('100%').textAlign(TextAlign.Center)
         Button(t('引用其他会话')).fontFamily(this.appearance.fontFamily).id('add-thread-reference').attributeModifier(Btn.tonal).width('100%')
           .enabled(this.canAttach() && this.thread.references.length < 4)
-          .onClick(() => this.fromSheet(() => {
-            if (referenceQuery(this.app.draft) === undefined) { this.app.setDraft(this.app.draft + (this.app.draft ? ' @' : '@')); }
-            this.getUIContext().getFocusController().requestFocus('composer');
-          }))
+          .onClick(() => this.fromSheet(() => this.addThreadReference()))
         Column() {
           Row() {
             Text(t("提示词模板")).fontFamily(this.appearance.fontFamily).fontSize(13).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_secondary'))
@@ -1102,8 +1149,10 @@ export struct ChatPanel {
     const threadId = this.thread.id;
     const request = ++this.keyboardFocusRequest;
     this.getUIContext().postFrameCallback(new ComposerKeyboardFrame(() => {
-      if (request !== this.keyboardFocusRequest || this.thread.id !== threadId || this.app.draft !== next.text ||
-        this.thread.archived || this.voiceMode || this.speechActive()) { return; }
+      if (request !== this.keyboardFocusRequest || this.thread.id !== threadId || this.app.active.id !== threadId ||
+        !this.speechEnabled || !this.foreground || this.showPlus || this.showPlusMenu || this.showDrawing || this.previewing ||
+        this.showContext || this.showQueue || this.showSummary || this.showMemoryDraft || this.showReasoning || this.showModelMenu ||
+        this.app.draft !== next.text || this.thread.archived || this.voiceMode || this.speechActive()) { return; }
       this.getUIContext().getFocusController().requestFocus('composer');
       this.composerController.caretPosition(next.caret);
     }));
@@ -1530,7 +1579,7 @@ export struct ChatPanel {
     // Anchor the sheet to the stable shell, not an add button that moves when the composer expands.
     .bindSheet($$this.showPlus, this.plusSheet(), {
       detents: [SheetSize.MEDIUM, SheetSize.LARGE], dragBar: true, showClose: false,
-      backgroundColor: $r('app.color.page_background')
+      backgroundColor: $r('app.color.page_background'), onDisappear: () => this.finishPlusAction()
     })
   }
 

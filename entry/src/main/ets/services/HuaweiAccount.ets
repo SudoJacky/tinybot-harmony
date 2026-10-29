@@ -97,6 +97,20 @@ export class HuaweiAccount {
     hostedPrivacy.requireConsent();
   }
 
+  // Only called by an explicit backup/restore action. Discovery must never open login UI.
+  async backupOpenID(context: common.UIAbilityContext): Promise<string> {
+    await this.initialize(context);
+    await this.refresh();
+    if (!this.signedIn && !this.busy) { await this.signIn(); }
+    if (!this.signedIn || this.busy) { throw new Error(this.error || t('请登录创建备份时使用的华为账号。')); }
+    const revision = this.revision;
+    await this.requireLogin();
+    if (revision !== this.revision || !this.signedIn || !this.openID) {
+      throw new Error(t('华为账号已退出或发生变化，请重新登录。'));
+    }
+    return this.openID;
+  }
+
   private checkAccount(): Promise<void> {
     if (!this.checking || this.checkingRevision !== this.revision) {
       const revision = this.revision;

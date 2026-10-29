@@ -1,7 +1,8 @@
 import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
-import { SymbolGlyphModifier } from '@kit.ArkUI';
+import { FrameCallback, SymbolGlyphModifier } from '@kit.ArkUI';
+import { Diagnostics } from '../model/Diagnostics';
 import { common } from '@kit.AbilityKit';
 import { picker } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
@@ -170,15 +171,24 @@ struct ThreadRow {
 }
 
 // Project tree; presentation grouping never changes a thread's stored project membership.
+class ThreadSearchFrame extends FrameCallback {
+  private action: () => void;
+  constructor(action: () => void) { super(); this.action = action; }
+  onIdle(): void { this.action(); }
+}
+
 @Component
 export struct ThreadList {
-  @Prop active: boolean = true;
+  @Prop @Watch('searchAvailabilityChanged') active: boolean = true;
+  @StorageProp('tinybot.foreground') @Watch('searchAvailabilityChanged') private foreground: boolean = true;
   @Prop workbench: boolean = false;
   // The persistent workbench column can collapse itself into the rail; the overlay
   // drawer cannot, so it omits the control.
   @Prop collapseHistory: boolean = false;
   @Prop @Watch('searchRequested') searchRequest: number = 0;
-  @State private searchOpen: boolean = false;
+  @State @Watch('searchVisibilityChanged') private searchOpen: boolean = false;
+  private mounted: boolean = false;
+  private focusRequest: number = 0;
   onCollapseHistory: () => void = () => {};
   onNewChat: () => void = () => {};
   onTools: () => void = () => {};
@@ -201,16 +211,23 @@ export struct ThreadList {
   @State private projectFolders: SharedFolder[] = [];
   @State private projectFolderError: string = '';
 
-  // The rail's search control opens this sidebar already in search mode. The
-  // field mounts in the same frame as the drawer content, so focus follows one
-  // short turn later instead of racing the initial layout.
+  aboutToAppear(): void {
+    this.mounted = true;
+    if (this.searchRequest > 0) { this.searchRequested(); }
+  }
+  aboutToDisappear(): void { this.mounted = false; this.focusRequest++; }
+  private searchAvailabilityChanged(): void { if (!this.active || !this.foreground) { this.focusRequest++; } }
+  private searchVisibilityChanged(): void { if (!this.searchOpen) { this.focusRequest++; } }
+
+  // The rail can mount the search field and request its focus in the same frame.
   private searchRequested(): void {
     this.searchOpen = true;
-    setTimeout(() => {
-      if (!this.searchOpen || !this.active) { return; }
-      try { this.getUIContext().getFocusController().requestFocus('search-threads'); }
-      catch (_) { /* The drawer may have closed while the focus request was queued. */ }
-    }, 80);
+    const request = ++this.focusRequest;
+    this.getUIContext().postFrameCallback(new ThreadSearchFrame(() => {
+      if (request !== this.focusRequest || !this.mounted || !this.searchOpen || !this.active || !this.foreground || this.locked()) { return; }
+      Diagnostics.log('debug', 'focus', 'search_requested', { request: request });
+      this.getUIContext().getFocusController().requestFocus('search-threads');
+    }));
   }
 
   private filtered(): ThreadViewModel[] {

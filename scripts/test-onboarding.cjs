@@ -57,10 +57,11 @@ function probe(relative, name, methods, globals = {}) {
   const tree = ts.createSourceFile(emitted, fs.readFileSync(emitted, 'utf8'), ts.ScriptTarget.Latest, true);
   const component = tree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === name);
   const exports = {};
-  vm.runInNewContext(compile('class Probe {\n' + methods.map(method => {
+  const frames = tree.statements.filter(node => ts.isClassDeclaration(node) && node.heritageClauses?.some(h => h.getText(tree).includes('FrameCallback')));
+  vm.runInNewContext(compile(frames.map(node => node.getText(tree)).join('\n') + '\nclass Probe {\n' + methods.map(method => {
     const member = component.members.find(node => node.name?.getText(tree) === method);
     assert.ok(member, 'Missing compiled method: ' + method); return member.getText(tree);
-  }).join('\n') + '\n} exports.Probe = Probe;'), { exports, t: value => value, ...globals });
+  }).join('\n') + '\n} exports.Probe = Probe;'), { exports, FrameCallback: class {}, t: value => value, ...globals });
   return new exports.Probe();
 }
 const idleTimers = new Map(); let idleTimerId = 0;
@@ -288,22 +289,22 @@ function page() {
   console.log('PASS emitted first-run/replay routing, duplicate-open guard, shared-intent protection, draft preservation, explicit connect and failure-safe retry without model calls');
 
   let resolve, calls = 0;
-  const scheduled = new Map(), delays = new Map(), prepared = [], focusedFields = []; let timerId = 0, providerSaves = 0, scrolls = 0;
+  const scheduled = new Map(), delays = new Map(), prepared = [], focusedFields = [], focusFrames = []; let timerId = 0, providerSaves = 0, scrolls = 0;
   let keyboardMode = 7;
   const keyboardModes = [];
   const panel = Object.assign(probe('views/OnboardingPanel', 'OnboardingPanel',
     ['aboutToAppear', 'aboutToDisappear', 'activeChanged', 'foregroundChanged', 'connectionChanged', 'animate',
       'cancelWake', 'cancelTyping', 'cancelFeedback', 'sayGoodbye', 'actorMood', 'greetActor', 'wake', 'continueWake', 'finish', 'move', 'selectTask', 'onMessageChange', 'currentPrompt',
-      'primaryEnabled', 'primaryAvailable', 'primaryLabel', 'primaryAction', 'connectSelected', 'connectProvider', 'settleTransition',
+      'primaryEnabled', 'primaryAvailable', 'primaryLabel', 'primaryAction', 'connectSelected', 'connectProvider', 'focusConnectionField', 'settleTransition',
       'selectProvider', 'providerSelectionChanged', 'taskSelectionChanged', 'signInAccount',
       'providerLookX', 'connectionDiameter', 'setConnectionFocus', 'endConnectionEditing', 'keepConnectionInputVisible'],
-    { onboardingTasks: model.onboardingTasks, onboardingProviders: model.onboardingProviders,
+    { onboardingTasks: model.onboardingTasks, onboardingProviders: model.onboardingProviders, Diagnostics: { log() {} },
       Motion: { fast: 160, medium: 220, standard: {} }, Edge: { Top: 0, Bottom: 1 }, KeyboardAvoidMode: { NONE: 4 },
       setTimeout: (callback, delay) => { const id = ++timerId; scheduled.set(id, callback); delays.set(id, delay); return id; },
       clearTimeout: id => scheduled.delete(id) }), {
     hasWoken: false, typing: false, typingRevision: 0, typingTimer: -1, farewell: false, farewellTimer: -1,
     saving: false, busy: false, step: 0, selectedTask: 1, message: model.onboardingTasks()[1].prompt,
-    active: true, foreground: true, configured: false, transitioning: false, transitionRevision: 0,
+    active: true, foreground: true, configured: false, transitioning: false, transitionRevision: 0, focusRequest: 0,
     providerEditing: false, connectionAttempted: false, keyFocused: false, connectionEditing: false, focusedConnectionField: '', bodyHeight: 560,
     keyboardViewport: { keyboardHeight: 0, bottom: 0, observe() {}, dispose() {} }, previousKeyboardMode: undefined,
     connectionScroller: { scrollBy: () => { scrolls++; }, scrollTo() {} },
@@ -326,7 +327,7 @@ function page() {
       panel.account.signedIn = true;
     } },
     appearance: { effectStrength: 1 },
-    getUIContext: () => ({ animateTo: (options, action) => { action(); options.onFinish?.(); },
+    getUIContext: () => ({ animateTo: (options, action) => { action(); options.onFinish?.(); }, postFrameCallback: frame => focusFrames.push(frame),
       getKeyboardAvoidMode: () => keyboardMode,
       setKeyboardAvoidMode: mode => { keyboardMode = mode; keyboardModes.push(mode); },
       px2vp: value => value, vp2px: value => value,
@@ -449,6 +450,7 @@ function page() {
   const successfulProviderSave = panel.app.saveProvider;
   panel.app.providerEditor.fieldError = field => field === 'key' ? 'missing key' : '';
   await panel.connectSelected(); assert.equal(panel.error, 'missing key'); assert.equal(providerSaves, 1);
+  focusFrames.splice(0).forEach(frame => frame.onIdle());
   assert.equal(focusedFields.at(-1), 'onboarding-inline-key', 'Invalid input must be focused without attempting a save');
   panel.app.providerEditor.fieldError = () => '';
   panel.app.providerEditor.error = 'vault failed'; panel.app.saveProvider = async () => false;

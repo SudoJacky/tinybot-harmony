@@ -1,3 +1,5 @@
+const backupAccount = { openID: 'fixture-openid-A', error: undefined, async backupOpenID() { if (this.error) throw this.error; if (!this.openID) throw Error('请登录创建备份时使用的华为账号。'); return this.openID; } };
+const { legacyBackupFixture, backupCrypto } = require('./backup-fixture.cjs');
 // Platform-adapter integration tests with real temporary files and a scripted HTTP transport.
 // Run: node scripts/test-productivity-native.cjs
 const fs = require('node:fs');
@@ -14,13 +16,18 @@ fs.mkdirSync(fixture, { recursive: true });
 const handles = new Map(), handlePaths = new Map(), writableHandles = new Set(); let failManifest = false; let failSharedRename = false;
 let failConversationWorker = false;
 let sharedWriteFailure = ''; let cancelSharedWrite; let failBackupRename = false; const usageWrites = [];
-const cloudLocations = new Map(); let failCloudCopy = false; let cloudCopyError;
+const cloudLocations = new Map(); let failCloudCopy = false, failCloudRename = false, failCloudFsync = false; let cloudCopyError;
 const nativePath = p => {
   if (typeof p === "number") return handlePaths.get(p);
   if (p.startsWith('file://')) p = decodeURIComponent(new URL(p).pathname);
   return p.startsWith('/sandbox/') ? path.join(fixture, p.slice(1)) : p;
 };
 const fileIo = {
+  rmdir: async p => {
+    const target = path.resolve(nativePath(p));
+    assert.ok(target.startsWith(fixture + path.sep));
+    await fs.promises.rm(target, { recursive: true });
+  },
   OpenMode: { READ_ONLY: 1, CREATE: 2, WRITE_ONLY: 4, TRUNC: 8, NOFOLLOW: 16, READ_WRITE: 32 },
   access: async p => fs.existsSync(nativePath(p)), mkdir: (p, recursive = false) => fs.promises.mkdir(nativePath(p), { recursive }), readText: p => fs.promises.readFile(nativePath(p), 'utf8'),
   listFile: async p => fs.promises.readdir(nativePath(p)),
@@ -46,6 +53,7 @@ const fileIo = {
   stat: async file => {
     const stat = await (typeof file === 'number' ? handles.get(file).stat() : fs.promises.stat(nativePath(file)));
     stat.location = cloudLocations.get(file) ?? 1;
+    stat.mtime = Math.floor(stat.mtimeMs / 1000);
     return stat;
   },
   lstat: async p => {
@@ -57,7 +65,7 @@ const fileIo = {
     } catch(e) { if(e.code==='ENOENT')e.code=13900002;throw e; }
   },
   copyFile: async (a,b) => { if (cloudCopyError) throw cloudCopyError; if (failCloudCopy) { fs.writeFileSync(nativePath(b),'partial'); throw Error('injected cloud write failure'); } await fs.promises.copyFile(nativePath(a),nativePath(b)); },
-  fsync: async fd => { if(sharedWriteFailure==='fsync' && handlePaths.get(fd).includes('external'))throw Object.assign(Error('injected shared fsync failure'),{code:13900005});await handles.get(fd).sync(); },
+  fsync: async fd => { if(failCloudFsync && handlePaths.get(fd).endsWith('.partial'))throw Error('injected cloud flush failure'); if(sharedWriteFailure==='fsync' && handlePaths.get(fd).includes('external'))throw Object.assign(Error('injected shared fsync failure'),{code:13900005});await handles.get(fd).sync(); },
   truncate: async (fd,len) => { if(sharedWriteFailure==='truncate' && handlePaths.get(fd).includes('external'))throw Object.assign(Error('injected shared truncate failure'),{code:13900005});await handles.get(fd).truncate(len); },
   unlink: p => fs.promises.unlink(nativePath(p)),
   rename: async (a,b) => {
@@ -67,7 +75,9 @@ const fileIo = {
     if (failBackupRename && b.includes('/.tinybot-review/')) throw Object.assign(Error('injected backup rename failure'), {code:13900025});
     if (failManifest && b.endsWith('/index.json')) { throw new Error('injected manifest failure'); }
     if(b.includes("/usage-records/"))usageWrites.push(b);
+    if (failCloudRename && b.endsWith('tinybot-latest.tinybot')) throw Error('injected cloud rename failure');
     await fs.promises.rename(nativePath(a),nativePath(b));
+    if (b.endsWith('tinybot-latest.tinybot')) cloudLocations.set(b,1);
   }
 };
 // Reproduce the empty-input behavior observed on the physical HarmonyOS device.
@@ -127,7 +137,7 @@ const kits = {
     }; }
   } },
   '@kit.PDFKit': { pdfService: {} },
-  '@kit.CryptoArchitectureKit': { cryptoFramework: { createRandom:()=>({generateRandom:async n=>({data:Uint8Array.from(crypto.randomBytes(n))})}),
+  '@kit.CryptoArchitectureKit': { cryptoFramework: { ...backupCrypto, createRandom:()=>({generateRandom:async n=>({data:Uint8Array.from(crypto.randomBytes(n))})}),
     createMd:()=>{const hash=crypto.createHash('sha256');return{update:async blob=>hash.update(blob.data),digest:async()=>({data:Uint8Array.from(hash.digest())})};} } },
 };
 function load(file) {
@@ -135,7 +145,7 @@ function load(file) {
   if (cache.has(file)) return cache.get(file);
   const exports = {}; cache.set(file, exports);
   const compiled = ts.transpileModule(fs.readFileSync(file,'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021, experimentalDecorators: true } }).outputText;
-  vm.runInNewContext(compiled, { exports, require: id => id.startsWith('.') ? load(path.resolve(path.dirname(file), id)) : kits[id],
+  vm.runInNewContext(compiled, { exports, require: id => id === './HuaweiAccount' ? { huaweiAccount: backupAccount } : id.startsWith('.') ? load(path.resolve(path.dirname(file), id)) : kits[id],
     Observed: cls => cls, canIUse: () => true, setTimeout: scheduleTimer, clearTimeout: cancelTimer, Uint8Array, ArrayBuffer, DataView, Map, Set, Object, JSON, Error, console }, { filename: file });
   return exports;
 }
@@ -394,7 +404,7 @@ async function test(name, run) {
         browserObservation:{instanceId:'test-instance',frames:[browserFrame],errors:[]}}]}]}
     ]}];
     const context={cacheDir:root+'/cache',getApplicationContext:()=>({filesDir:root})};
-    const backup=await createBackupFile(context,data);const envelope=JSON.parse(fs.readFileSync(nativePath(backup),'utf8'));
+    const backup=await createBackupFile(context,data);const envelope=legacyBackupFixture(fs.readFileSync(nativePath(backup)));
     assert.equal(envelope.attachments.length,2);
     const restored=await readBackupFile(context,backup,model.emptyData());const image=restored.threads[0].messages[1].steps[0].tools[0].previewScreenshot.image;
     assert.notEqual(image.id,'shot');assert.deepEqual(fs.readFileSync(nativePath(Attachments.path(image))),bytes);
@@ -1091,7 +1101,7 @@ async function test(name, run) {
     const data=model.emptyData();data.projects=[{id:'p',workspaceId:'shared',name:'Shared',instructions:'Rules',createdAt:1,updatedAt:1}];
     data.threads=['a','b'].map(id=>({id,projectId:'p',title:id,updatedAt:1,messages:[]}));data.activeThreadId='a';
     fs.writeFileSync(nativePath(root+'/workspace/shared/code.js'),'backup');
-    const backup=await createBackupFile(context,data);const envelope=JSON.parse(fs.readFileSync(nativePath(backup),'utf8'));
+    const backup=await createBackupFile(context,data);const envelope=legacyBackupFixture(fs.readFileSync(nativePath(backup)));
     assert.equal(envelope.format,'tinybot-harmony.backup.v2');assert.equal(envelope.files.length,1);assert.equal(envelope.files[0].workspaceId,'shared');
     const restored=await readBackupFile(context,backup,model.emptyData());
     assert.equal(restored.projects[0].id,'p');assert.notEqual(restored.projects[0].workspaceId,'shared');
@@ -1112,7 +1122,7 @@ async function test(name, run) {
     // No conversations are necessary to preserve a project's files.
     data.threads=[];data.activeThreadId='';
     const emptyBackup=await createBackupFile(context,data);
-    assert.equal(JSON.parse(fs.readFileSync(nativePath(emptyBackup),'utf8')).files.length,1);
+    assert.equal(legacyBackupFixture(fs.readFileSync(nativePath(emptyBackup))).files.length,1);
     // An actual v1 envelope has no project metadata and uses thread IDs for file ownership.
     const legacy=model.emptyData();legacy.version=1;delete legacy.projects;
     legacy.threads=[{id:'old-chat',title:'Old',updatedAt:1,messages:[]}];legacy.activeThreadId='old-chat';
@@ -1136,10 +1146,10 @@ async function test(name, run) {
     data.productivity.options={autoMemory:false,saveSummary:false,readOnly:false,autoRoute:false,capabilities:[],
       search:{provider:'bing-browser',enabled:true,tavily:{baseUrl:'https://api.tavily.com',credentialAlias:'SECRET-INACTIVE-TAVILY'}}};
     const context={cacheDir:root+'/cache',getApplicationContext:()=>({filesDir:root})};await exportBackup(context,JSON.parse(JSON.stringify(data)));
-    const exported=fs.readFileSync(nativePath(selectedFile),'utf8');assert.ok(!exported.includes('SECRET-ALIAS'));
+    const exported=JSON.stringify(legacyBackupFixture(fs.readFileSync(nativePath(selectedFile))));assert.ok(!exported.includes('SECRET-ALIAS'));
     assert.ok(!exported.includes('SECRET-INACTIVE-TAVILY'));
     // Also reject device-local aliases supplied by an imported file, even for inactive providers.
-    const imported=JSON.parse(exported);imported.data.productivity.options.search.tavily.credentialAlias='IMPORTED-TAVILY-ALIAS';
+    const imported=legacyBackupFixture(fs.readFileSync(nativePath(selectedFile)));imported.data.productivity.options.search.tavily.credentialAlias='IMPORTED-TAVILY-ALIAS';
     fs.writeFileSync(nativePath(selectedFile),JSON.stringify(imported));
     const restored=await readBackup(context,model.emptyData());assert.equal(restored.threads[0].id,'thread');assert.equal(restored.providerProfiles[0].enabled,false);
     assert.equal(restored.productivity.options.search.tavily.credentialAlias,'');
@@ -1177,7 +1187,7 @@ async function test(name, run) {
     data.productivity.memories=[{id:'memory',content:'fact',threadId:'chat-1',sourceThreadId:'chat-0',sourceMessageId:'question-0',updatedAt:1}];
     for(const thread of data.threads){fs.mkdirSync(nativePath(root+'/workspace/'+thread.id),{recursive:true});fs.writeFileSync(nativePath(root+'/workspace/'+thread.id+'/note.txt'),'backup');}
     const context={cacheDir:root+'/cache',getApplicationContext:()=>({filesDir:root})};
-    const backup=await createBackupFile(context,data);const original=JSON.parse(fs.readFileSync(nativePath(backup),'utf8'));
+    const backup=await createBackupFile(context,data);const original=legacyBackupFixture(fs.readFileSync(nativePath(backup)));
     const vault={read:async()=>'',write:async()=>{},remove:async()=>{}};
     const resources={createId:()=>crypto.randomUUID(),ensureWorkspace:async()=>{},configureProviders:()=>{},reportError:()=>{},tools:()=>({definitions:()=>[]})};
     const repository=new ConversationStore(nativePath(root));
@@ -1221,7 +1231,7 @@ async function test(name, run) {
     fs.writeFileSync(nativePath(backup),JSON.stringify(original));await assert.rejects(readBackupFile(context,backup,restarted.snapshot()));
     Attachments.configure('/sandbox/backup-app');
   });
-  await test('cloud snapshots are opt-in, immutable, credential-free and stay pending until native upload',async()=>{
+  await test('cloud backups replace the latest snapshot, preserve history and stay pending until native upload',async()=>{
     const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
     const context={cloudFileDir:'/sandbox/cloud',cacheDir:'/sandbox/backup-app/cache',getApplicationContext:()=>({filesDir:'/sandbox/backup-app'})};
     await assert.rejects(CloudBackup.list(context),/云空间/);
@@ -1237,15 +1247,32 @@ async function test(name, run) {
     assert.equal(JSON.stringify(data),before,'export never mutates live configuration');
     const firstPath=context.cloudFileDir+'/tinybot-backups/'+items[0].name;
     const original=fs.readFileSync(nativePath(firstPath),'utf8');assert.ok(!original.includes('SECRET-CLOUD'));
-    assert.equal(JSON.parse(original).data.providerProfiles[0].enabled,false);
+    assert.equal(legacyBackupFixture(fs.readFileSync(nativePath(firstPath))).data.providerProfiles[0].enabled,false);
     assert.equal(fs.readdirSync(nativePath(context.cacheDir)).length,0,'temporary plaintext snapshot is removed');
     cloudLocations.set(firstPath,2);
     assert.equal((await CloudBackup.list(context))[0].location,2,'reopening lists cloud-only metadata without downloading');
     assert.equal(cacheInstances.length,0);
     cloudLocations.set(firstPath,3);
-    await CloudBackup.create(context,data);items=await CloudBackup.list(context);
-    assert.equal(items.length,2);assert.equal(fs.readFileSync(nativePath(firstPath),'utf8'),original);
-    assert.equal(items.find(i=>i.name===path.basename(firstPath)).location,3);
+    assert.equal(items[0].name,'tinybot-latest.tinybot');
+    assert.ok(Math.abs(items[0].createdAt-Date.now())<2000,'latest date comes from native mtime in seconds');
+    const historical='tinybot-1700000000000-'+crypto.randomUUID()+'.json';
+    fs.writeFileSync(nativePath(context.cloudFileDir+'/tinybot-backups/'+historical),'historical backup');
+    data.threads[0].title='Updated backup';
+    const rename=fileIo.rename;
+    fileIo.rename=async(a,b)=>{
+      if(b===firstPath){
+        assert.equal(fs.readFileSync(nativePath(b),'utf8'),original,'old backup remains until replacement');
+        assert.equal(legacyBackupFixture(fs.readFileSync(nativePath(a))).data.threads[0].title,'Updated backup');
+      }
+      return rename(a,b);
+    };
+    try { await CloudBackup.create(context,data); } finally { fileIo.rename=rename; }
+    items=await CloudBackup.list(context);assert.equal(items.length,2,'one latest plus untouched historical backup');
+    assert.equal(fs.readFileSync(nativePath(context.cloudFileDir+'/tinybot-backups/'+historical),'utf8'),'historical backup');
+    assert.equal(legacyBackupFixture(fs.readFileSync(nativePath(firstPath))).data.threads[0].title,'Updated backup');
+    assert.equal(items.find(i=>i.name==='tinybot-latest.tinybot').location,1,'replacement needs uploading again');
+    await CloudBackup.create(context,data);assert.equal((await CloudBackup.list(context)).length,2);
+    fs.unlinkSync(nativePath(context.cloudFileDir+'/tinybot-backups/'+historical));
     assert.ok(syncInstances.every(s=>!s.callback),'native listeners are removed');
   });
   await test('cloud metadata lookup excludes directories and symbolic links before querying location',async()=>{
@@ -1270,23 +1297,36 @@ async function test(name, run) {
     const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
     const context={cloudFileDir:'/sandbox/cloud',cacheDir:'/sandbox/backup-app/cache',getApplicationContext:()=>({filesDir:'/sandbox/backup-app'})};
     const before=(await CloudBackup.list(context)).length;
+    const latest=context.cloudFileDir+'/tinybot-backups/tinybot-latest.tinybot';
+    const snapshot=legacyBackupFixture(fs.readFileSync(nativePath(latest))).data;
+    snapshot.threads[0].title='Pending backup';
     cloudStart=async sync=>{sync.callback({state:cloudSync.SyncState.UPLOAD_FAILED,error:cloudSync.ErrorType.CLOUD_STORAGE_FULL});};
-    await assert.rejects(CloudBackup.create(context,model.emptyData()),/云空间已满/);
-    assert.equal((await CloudBackup.list(context)).length,before+1,'failed upload retains a retryable snapshot');
+    await assert.rejects(CloudBackup.create(context,snapshot),/云空间已满/);
+    assert.equal((await CloudBackup.list(context)).length,before,'failed upload retains the replacement for retry');
+    assert.equal(legacyBackupFixture(fs.readFileSync(nativePath(latest))).data.threads[0].title,'Pending backup');
+    const retained=fs.readFileSync(nativePath(latest));
     failCloudCopy=true;
-    try { await assert.rejects(CloudBackup.create(context,model.emptyData()),/injected cloud write/); } finally { failCloudCopy=false; }
-    assert.equal((await CloudBackup.list(context)).length,before+1);
+    try { await assert.rejects(CloudBackup.create(context,snapshot),/injected cloud write/); } finally { failCloudCopy=false; }
+    assert.equal((await CloudBackup.list(context)).length,before);
     assert.ok(fs.readdirSync(nativePath(context.cloudFileDir+'/tinybot-backups')).every(n=>!n.endsWith('.partial')));
     assert.equal(fs.readdirSync(nativePath(context.cacheDir)).length,0);
+    assert.deepEqual(fs.readFileSync(nativePath(latest)),retained);
+    for (const stage of ['flush','rename']) {
+      failCloudFsync=stage==='flush';failCloudRename=stage==='rename';
+      try { await assert.rejects(CloudBackup.create(context,snapshot),new RegExp('injected cloud '+stage)); }
+      finally {failCloudFsync=false;failCloudRename=false;}
+      assert.deepEqual(fs.readFileSync(nativePath(latest)),retained,'failed '+stage+' preserves the last complete backup');
+      assert.ok(fs.readdirSync(nativePath(context.cloudFileDir+'/tinybot-backups')).every(n=>!n.endsWith('.partial')));
+    }
     cloudCopyError=Object.assign(Error('Permission denied'),{code:13900012});
-    try { await assert.rejects(CloudBackup.create(context,model.emptyData()),/13900012.*Tinybot/); } finally {cloudCopyError=undefined;}
-    assert.equal((await CloudBackup.list(context)).length,before+1);
+    try { await assert.rejects(CloudBackup.create(context,snapshot),/13900012.*Tinybot/); } finally {cloudCopyError=undefined;}
+    assert.equal((await CloudBackup.list(context)).length,before);
     assert.equal(fs.readdirSync(nativePath(context.cacheDir)).length,0);
   });
   await test('cloud restore awaits its own download completion and skips existing chats',async()=>{
     const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
     const context={cloudFileDir:'/sandbox/cloud',cacheDir:'/sandbox/backup-app/cache',getApplicationContext:()=>({filesDir:'/sandbox/backup-app'})};
-    const items=await CloudBackup.list(context);const item=items.find(i=>i.location===3);
+    const items=await CloudBackup.list(context);const item=items.find(i=>i.name==='tinybot-latest.tinybot');
     const file=context.cloudFileDir+'/tinybot-backups/'+item.name;cloudLocations.set(file,2);
     const workspaces=()=>fs.readdirSync(nativePath('/sandbox/backup-app/workspace')).length;
     const before=workspaces();cacheStart=async()=>{};
@@ -1315,7 +1355,7 @@ async function test(name, run) {
     cacheStart=async cache=>{cache.callback({uri:cache.uri,state:2,error:2});};
     await assert.rejects(CloudBackup.restore(context,item.name,model.emptyData()),/下载失败/);
     assert.equal(cacheInstances.at(-1).stopped,true);assert.equal(cacheInstances.at(-1).callback,undefined);
-    cloudLocations.set(file,3);const original=fs.readFileSync(nativePath(file),'utf8');const bad=JSON.parse(original);bad.files[0].path='../escape';
+    cloudLocations.set(file,3);const original=fs.readFileSync(nativePath(file));const bad=legacyBackupFixture(original);bad.files[0].path='../escape';
     fs.writeFileSync(nativePath(file),JSON.stringify(bad));
     try { await assert.rejects(CloudBackup.restore(context,item.name,model.emptyData()),/路径/); } finally { fs.writeFileSync(nativePath(file),original); }
     assert.equal(fs.readdirSync(nativePath('/sandbox/backup-app/workspace')).join(','),before);
@@ -1335,7 +1375,15 @@ async function test(name, run) {
       const item=(await CloudBackup.list(context))[0];cloudLocations.set('/sandbox/cloud/tinybot-backups/'+item.name,2);cacheStart=async()=>{};
       const download=CloudBackup.restore(context,item.name,model.emptyData());const rejected=assert.rejects(download,/下载超时/);
       while (!timers.size) await new Promise(setImmediate);
-      assert.equal([...timers.values()][0].ms,60000);[...timers.values()][0].fn();await rejected;
+      assert.equal([...timers.values()][0].ms,60000);
+      const firstTimer = [...timers.keys()][0], cache = cacheInstances.at(-1);
+      cache.callback({uri:cache.uri,state:0,error:0,processed:1024});
+      assert.equal(timers.has(firstTimer),false,'new download bytes extend the idle timeout');
+      const progressTimer = [...timers.keys()][0];
+      cache.callback({uri:cache.uri,state:0,error:0,processed:1024});
+      cache.callback({uri:'file://other',state:0,error:0,processed:2048});
+      assert.equal([...timers.keys()][0],progressTimer,'stalled or unrelated callbacks do not extend the timeout');
+      [...timers.values()][0].fn();await rejected;
       assert.equal(timers.size,0);assert.equal(cacheInstances.at(-1).callback,undefined);assert.equal(cacheInstances.at(-1).stopped,true);
     } finally {fakeTimers=undefined;}
   });

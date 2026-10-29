@@ -100,10 +100,12 @@ export struct BackupPanel {
   backupTab() {
     Scroll() {
       Column() {
+        Text(t('模型 API Key 随当前华为账号加密备份，换设备登录同一账号即可恢复，无需设置备份密码。对话和文件不加密。'))
+          .fontSize(13).fontColor($r('app.color.text_secondary')).width('100%').padding(Space.md)
         SectionHeader({ title: t('华为云空间') })
         GroupCard() {
           Column() {
-            NavRow({ title: t('备份到华为云空间'), subtitle: t('包含对话、附件、工作区、Skills、模板与记忆，最多 20 MB'),
+            NavRow({ title: t('备份到华为云空间'), subtitle: t('备份全部内容，再次备份将覆盖上一份云备份'),
               compId: 'create-cloud-backup', icon: $r('sys.symbol.cloud'), disabled: this.locked(), onTap: () => this.cloud('create') })
             RowDivider()
             NavRow({ title: t('刷新备份列表'), subtitle: t('获取其他设备的备份，并重试待上传的备份'),
@@ -127,12 +129,12 @@ export struct BackupPanel {
               ForEach(this.cloudItems, (item: CloudBackupItem, index: number) => {
                 if (index > 0) { RowDivider() }
                 Row() {
-                  NavRow({ title: this.date(item), icon: $r('sys.symbol.archivebox'), subtitle: this.detail(item), compId: 'cloud-backup-' + item.name,
+                  NavRow({ title: item.name === 'tinybot-latest.tinybot' ? t('最新备份 · {0}', [this.date(item)]) : this.date(item), icon: $r('sys.symbol.archivebox'), subtitle: this.detail(item), compId: 'cloud-backup-' + item.name,
                     disabled: this.locked(), onTap: () => this.confirmRestore(item) }).layoutWeight(1)
                   IconButton({ icon: $r('sys.symbol.trash'), tint: $r('app.color.danger'), label: t('删除备份'),
                     compId: 'delete-cloud-backup-' + item.name, disabled: this.locked(), onTap: () => this.confirmDelete(item) })
                 }.width('100%').padding({ right: Space.sm })
-              }, (item: CloudBackupItem) => item.name + ':' + item.location + ':' + item.size)
+              }, (item: CloudBackupItem) => item.name + ':' + item.createdAt + ':' + item.location + ':' + item.size)
             }
           }
         } else if (this.cloudLoaded) {
@@ -151,7 +153,7 @@ export struct BackupPanel {
         }
         Row({ space: Space.sm }) {
           SymbolGlyph($r('sys.symbol.lock')).fontSize(16).fontColor([$r('app.color.text_secondary')])
-          Text(t('API 密钥和 Token 不会导出。恢复会保留本机已有密钥和服务设置；新增服务仍需配置凭据。')).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(19).layoutWeight(1)
+          Text(t('模型服务 API Key 使用账号信息加密备份；其他 Token 不导出。恢复保留本机已有密钥，新服务的密钥写入系统安全存储。')).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(19).layoutWeight(1)
             .fontColor($r('app.color.text_secondary'))
         }.width('100%').alignItems(VerticalAlign.Top).padding(Space.md).margin({ top: Space.md })
         .borderRadius(Radius.md).backgroundColor($r('app.color.surface_variant'))

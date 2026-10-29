@@ -76,7 +76,7 @@ function page() {
     reviewTimer: -1, paths: { size: () => 0 }, appearance: {}, windowWidth: 390, approval: {},
     app: { ready: true, busy: false, draft: '', active: { id: 'chat', attachments: [], references: [], pendingInputs: [] } },
     getUIContext: () => ({ getHostContext: () => ({}), getPromptAction: () => ({ showToast() {} }) }),
-    openSupport: name => { assert.equal(name, 'rating'); systemRequests++; }, offerAnnouncement() {}
+    openSupport: name => { assert.equal(name, 'rating'); systemRequests++; }, offerAnnouncement() {}, offerStartupBackup() {}
   });
 }
 function fireTimers() { const pending = [...timers.values()]; timers.clear(); for (const fn of pending) fn(); }
@@ -89,6 +89,7 @@ for (const [target, key, value] of [
   [p, 'foreground', false], [p, 'reviewDisposed', true], [p, 'chatVisible', false], [p, 'onboardingActive', true],
   [p, 'browserExpanded', true], [p, 'detailPaneOpen', true], [p, 'drawerOpen', true], [p, 'showToolScope', true],
   [p, 'ratingOpen', true], [p, 'announcementDialog', {}], [p, 'voiceRequest', 'voice'],
+  [p, 'startupBackupDialog', {}], [p, 'startupBackupRestoring', true],
   [p.app, 'busy', true], [p.app, 'error', 'failed'], [p.app, 'saveError', 'disk'], [p.app, 'draft', 'typing'],
   [p.app.active, 'attachments', [{}]], [p.app.active, 'references', [{}]], [p.app.active, 'pendingInputs', [{}]],
   [p.approval, 'title', 'approval'], [p.approval, 'form', {}], [p.privacy, 'allowed', false]

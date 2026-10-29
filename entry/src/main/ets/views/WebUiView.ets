@@ -137,6 +137,23 @@ export struct WebUiView {
     Diagnostics.log('error', 'web', 'failed', { instanceId: this.instanceId, generation: this.generation }, error);
     if (this.preflight) { this.onValidation(error.message); }
   }
+  private consoleError(message: ConsoleMessage): void {
+    const source = message.getSourceId();
+    const line = message.getLineNumber();
+    const detail = message.getMessage();
+    // Console errors can originate in the host, generated content, or injected scripts.
+    // Preserve attribution without writing arbitrary URLs or page contents to diagnostic logs.
+    const scriptSource = source === 'tinybot-generated.js' ? 'generated' : source === WEB_UI_ORIGIN ? 'host' :
+      source === 'about:srcdoc' ? 'frame' : source === 'about:blank' ? 'blank' :
+        source.startsWith('data:') ? 'data' : source ? 'other' : 'unknown';
+    Diagnostics.log('error', 'web', 'console_error', { instanceId: this.instanceId, generation: this.generation,
+      scriptSource: scriptSource, line: line, ready: this.ready, preflight: this.preflight,
+      mounted: this.mounted, attached: this.attached, visible: this.visible, foreground: this.foreground,
+      pageSceneObserver: detail.includes('_pageSceneObservers') }, detail);
+    // data: sources can contain the entire generated page. Show only their category.
+    const location = scriptSource === 'data' ? 'data:' : source.slice(0, 240) || 'unknown';
+    this.report(new Error(detail + '\n[source: ' + location + ', line: ' + line + ']'));
+  }
   private async restart(): Promise<void> {
     if (!this.mounted || !this.attached || !this.initialPageLoaded) { return; }
     if (!this.foreground || (!this.preflight && (this.scrolling || !this.visible))) { this.reloadPending = true; return; }
@@ -303,7 +320,7 @@ export struct WebUiView {
           if (blocked) { Diagnostics.log('warn', 'web', 'navigation_blocked', { instanceId: this.instanceId, scheme: url.split(':')[0] }); }
           return blocked;
         })
-        .onConsole((event) => { if (event.message.getMessageLevel() === MessageLevel.Error) { this.report(new Error(event.message.getMessage())); } return false; })
+        .onConsole((event) => { if (event.message.getMessageLevel() === MessageLevel.Error) { this.consoleError(event.message); } return false; })
         .onErrorReceive((event) => { if (event.request.isMainFrame()) { this.report(new Error(event.error.getErrorInfo())); } else { Diagnostics.log('error', 'web', 'resource_failed', { instanceId: this.instanceId }, event.error.getErrorInfo()); } })
         .onPermissionRequest((event) => { event.request.deny(); })
         .onRenderExited(() => { this.browserRuntime?.detach(this.browserAttachment); this.report(new Error(t('交互内容渲染进程已退出，请重试。'))); })
