@@ -1,3 +1,4 @@
+import { materialMenuContent, materialMenuHeader } from '../common/MaterialMenu';
 import { Diagnostics } from '../model/Diagnostics';
 import { HuaweiAccount } from '../services/HuaweiAccount';
 import { AppearanceStyle } from '../common/AppearanceStyle';
@@ -19,7 +20,7 @@ import { VoiceAction, VoiceTargetRect, voiceActionAtPoint } from '../model/Voice
 import { pasteboard } from '@kit.BasicServicesKit';
 import { ThreadReference, referenceQuery } from '../model/ThreadReferences';
 import { ThreadReferenceCard } from './ThreadReferenceCard';
-import { curves, FrameCallback, SymbolGlyphModifier } from '@kit.ArkUI';
+import { curves, FrameCallback } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { Attachment, MAX_MESSAGE_ATTACHMENTS, PromptTemplate } from '../model/Productivity';
 import { Attachments } from '../services/Attachments';
@@ -675,12 +676,17 @@ export struct ChatPanel {
   }
 
   @Builder
+  projectMenuHeader() {
+    materialMenuHeader(t('在项目中新建对话'))
+  }
+
+  @Builder
   projectMenu() {
     Menu() {
-      MenuItemGroup({ header: t('在项目中新建对话') }) {
-        MenuItem({ content: t('普通聊天') }).onClick(() => { this.app.newThread(''); })
+      MenuItemGroup({ header: this.projectMenuHeader }) {
+        MenuItem(() => materialMenuContent.bind(this)({ label: t('普通聊天') })).onClick(() => { this.app.newThread(''); })
         ForEach(this.app.projects, (project: ProjectData) => {
-          MenuItem({ content: project.name }).onClick(() => { this.app.newThread(project.id); })
+          MenuItem(() => materialMenuContent.bind(this)({ label: project.name })).onClick(() => { this.app.newThread(project.id); })
         }, (project: ProjectData) => project.id)
       }
     }
@@ -689,8 +695,8 @@ export struct ChatPanel {
   @Builder
   workbenchModeMenu() {
     Menu() {
-      MenuItem({ content: t('标准模式') }).onClick(() => this.toggleTeam(false))
-      MenuItem({ content: t('团队模式') }).onClick(() => this.toggleTeam(true))
+      MenuItem(() => materialMenuContent.bind(this)({ label: t('标准模式') })).onClick(() => this.toggleTeam(false))
+      MenuItem(() => materialMenuContent.bind(this)({ label: t('团队模式') })).onClick(() => this.toggleTeam(true))
     }
   }
 
@@ -705,7 +711,7 @@ export struct ChatPanel {
         }.constraintSize({ maxWidth: 240 })
       }.id('workbench-project-picker').height(40).padding({ left: 10, right: 10 }).borderRadius(10)
         .backgroundColor(Color.Transparent).fontColor($r('app.color.text_primary')).enabled(!this.app.busy && !this.app.saveError)
-        .bindMenu(this.projectMenu, { systemMaterial: this.appearance.surface, mask: false })
+        .bindMenu(this.projectMenu, { systemMaterial: this.appearance.menu, mask: false })
       Button() {
         Row({ space: 6 }) {
           SymbolGlyph($r('sys.symbol.person_2')).fontSize(17).fontColor([$r('app.color.text_secondary')])
@@ -715,7 +721,7 @@ export struct ChatPanel {
       }.id('workbench-team-mode').height(40).padding({ left: 10, right: 10 }).borderRadius(10)
         .backgroundColor(Color.Transparent).fontColor($r('app.color.text_secondary'))
         .enabled(!this.app.busy && !this.thread.archived && !this.app.saveError)
-        .bindMenu(this.workbenchModeMenu, { systemMaterial: this.appearance.surface, mask: false })
+        .bindMenu(this.workbenchModeMenu, { systemMaterial: this.appearance.menu, mask: false })
     }.width('100%').padding({ left: 6, bottom: 4 })
   }
 
@@ -879,7 +885,7 @@ export struct ChatPanel {
   @Builder
   sendMenu() {
     Menu() {
-      MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.text_and_plus')), content: t("加入队列") })
+      MenuItem(() => materialMenuContent.bind(this)({ label: t("加入队列"), icon: $r('sys.symbol.text_and_plus') }))
         .enabled(this.app.canQueueInput && this.hasDraft())
         .onClick(() => this.app.enqueueInput('followUp'))
     }
@@ -1471,7 +1477,7 @@ export struct ChatPanel {
           .accessibilityText(t('推理强度') + '：' + reasoningEffortName(this.displayedEffort()))
           .onClick(() => { this.getUIContext().getFocusController().clearFocus(); this.showReasoning = !this.showReasoning; })
           .bindPopup(this.showReasoning, { builder: this.reasoningPicker, placement: Placement.Top,
-            systemMaterial: this.appearance.surface, radius: 20, enableArrow: false, autoCancel: true,
+            systemMaterial: this.appearance.menu, radius: 20, enableArrow: false, autoCancel: true,
             mask: false,
             onStateChange: (event) => {
               this.showReasoning = event.isVisible;
@@ -1555,7 +1561,7 @@ export struct ChatPanel {
             tint: this.canSend() ? this.appearance.onAccent : $r('app.color.text_tertiary'),
             disabled: !this.canSend(), onTap: () => this.send() })
             .bindContextMenu(this.sendMenu, ResponseType.LongPress, {
-              systemMaterial: this.appearance.surface, mask: false })
+              systemMaterial: this.appearance.menu, mask: false })
           }.width((this.workbench || this.hasDraft()) && !this.speechActive() ? 40 : 0).height(36)
             .padding({ left: (this.workbench || this.hasDraft()) && !this.speechActive() ? 4 : 0 }).clip(true)
             .opacity((this.workbench || this.hasDraft()) && !this.speechActive() ? 1 : 0)

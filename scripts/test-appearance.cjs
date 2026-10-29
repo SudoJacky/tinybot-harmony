@@ -74,28 +74,42 @@ assert.deepEqual(events.map(([type]) => type), ['mode', 'fontScale', 'theme'], '
 assert.equal(currentAppearanceStyle().accent, '#216451');
 assert.equal(currentAppearanceStyle().controlBackground, 'transparent', 'API 26 keeps its material backing');
 const defaultMaterial = currentAppearanceStyle().control;
+const menuMaterial = currentAppearanceStyle().menu;
+assert.equal(menuMaterial.options.style, uiMaterial.ImmersiveStyle.THIN);
+assert.equal(menuMaterial.options.colorInvert, true);
+assert.equal(currentAppearanceStyle().noMaterial, Material.empty);
 const readingMaterial = currentAppearanceStyle().readingSurface;
 assert.equal(readingMaterial.options.style, uiMaterial.ImmersiveStyle.THICK);
 assert.equal(readingMaterial.options.materialColor, 'app.color.reading_surface_tint');
 assert.equal(readingMaterial.options.colorInvert, false);
 preferences.refresh(); assert.equal(currentAppearanceStyle().control, defaultMaterial, 'Do not recreate unchanged materials');
 assert.equal(currentAppearanceStyle().readingSurface, readingMaterial, 'Reuse the long-sheet material');
+assert.equal(currentAppearanceStyle().menu, menuMaterial, 'Reuse unchanged adaptive menu material');
 const selected = { ...model.defaultAppearance(), mode: 'dark', accent: 'custom', customColor: '#FAF8EE',
   fontScale: 1.3, fontFamily: 'Noto Serif', lightEffect: 'off' };
 preferences.select(selected);
 // API 26 needs an explicit empty material: undefined restores the component's default effect.
 assert.equal(currentAppearanceStyle().control, Material.empty);
 assert.equal(currentAppearanceStyle().surface, Material.empty);
+assert.equal(currentAppearanceStyle().menu, Material.empty);
 assert.equal(currentAppearanceStyle().readingSurface, Material.empty);
 assert.equal(currentAppearanceStyle().accentControl, Material.empty);
 const { systemMaterialAttribute, menuMaterialAttribute } = load(root + '/common/MaterialAttributes.ets');
-const applied = [], nativeControl = { systemMaterial: value => applied.push(['control', value]),
+const optionColors = [];
+const colorMethods = {
+  optionFontColor: value => optionColors.push(['text', value]),
+  selectedOptionFontColor: value => optionColors.push(['selectedText', value]),
+  selectedOptionBgColor: value => optionColors.push(['selectedBackground', value])
+};
+const applied = [], nativeControl = { ...colorMethods, systemMaterial: value => applied.push(['control', value]),
   menuSystemMaterial: value => applied.push(['menu', value]) };
 systemMaterialAttribute(defaultMaterial).applyNormalAttribute(nativeControl);
 systemMaterialAttribute(currentAppearanceStyle().control).applyNormalAttribute(nativeControl);
-menuMaterialAttribute(currentAppearanceStyle().surface).applyNormalAttribute(nativeControl);
+menuMaterialAttribute(currentAppearanceStyle().menu).applyNormalAttribute(nativeControl);
 assert.equal(applied[1][1], Material.empty, 'Turning off clears material on an existing node');
 assert.equal(applied[2][1], Material.empty, 'Select menus explicitly turn off too');
+assert.deepEqual(optionColors, [['text', 'sys.color.font_primary'], ['selectedText', 'sys.color.font_primary'],
+  ['selectedBackground', 'sys.color.comp_background_tertiary']], 'Option text uses adaptive system colors');
 assert.equal(currentAppearanceStyle().effectStrength, 0);
 assert.equal(currentAppearanceStyle().fontFamily, 'Noto Serif');
 assert.ok(events.some(([type, value]) => type === 'mode' && value === colorModes.COLOR_MODE_DARK));
@@ -154,7 +168,7 @@ for (const [level, controlStyle, surfaceStyle] of [
     assert.equal(AppMaterials.readingSurface.options.style, uiMaterial.ImmersiveStyle.THICK);
   }
   AppMaterials.configure('off', '#216451');
-  for (const role of ['control', 'accentControl', 'surface', 'readingSurface']) assert.equal(AppMaterials[role], Material.empty);
+  for (const role of ['control', 'accentControl', 'surface', 'menu', 'empty', 'readingSurface']) assert.equal(AppMaterials[role], Material.empty);
 }
 
 // API 20: the native uiMaterial module does not exist. Every read of the namespace must be
@@ -169,7 +183,7 @@ const lowLevels = new Map();
 const lowStyleModule = load(root + '/common/AppearanceStyle.ets', lowLevels);
 const lowMaterials = load(root + '/common/AppMaterials.ets', lowLevels).AppMaterials;
 assert.equal(lowMaterials.available, false, 'API 20 reports no immersive material');
-for (const role of ['control', 'accentControl', 'surface', 'readingSurface']) {
+for (const role of ['control', 'accentControl', 'surface', 'menu', 'empty', 'readingSurface']) {
   assert.equal(lowMaterials[role], undefined, 'API 20 resolves ' + role + ' without touching uiMaterial');
 }
 const low = lowStyleModule.makeAppearanceStyle(model.defaultAppearance(), false);
@@ -186,9 +200,14 @@ assert.equal(lowDark.controlBackground, 'app.color.surface_variant', 'Dark contr
 const lowOff = lowStyleModule.makeAppearanceStyle({ ...model.defaultAppearance(), lightEffect: 'off' }, false);
 assert.equal(lowOff.effectStrength, 0);
 assert.equal(lowOff.control, undefined);
-const forbiddenNative = new Proxy({}, { get() { throw Error('API 26 component method read on API 20'); } });
+const forbiddenNative = new Proxy(colorMethods, { get(target, property) {
+  if (Object.hasOwn(target, property)) return target[property];
+  throw Error('API 26 component method read on API 20');
+} });
 systemMaterialAttribute(lowOff.control).applyNormalAttribute(forbiddenNative);
-menuMaterialAttribute(lowOff.surface).applyNormalAttribute(forbiddenNative);
+optionColors.length = 0;
+menuMaterialAttribute(lowOff.menu).applyNormalAttribute(forbiddenNative);
+assert.equal(optionColors.length, 3, 'Plain API 20 menus still receive supported option colors');
 for (const effect of ['auto', 'gentle', 'standard', 'vivid']) {
   lowMaterials.configure(effect, '#216451');
   assert.equal(lowMaterials.surface, undefined, 'Saved light-sense preference never materialises on API 20');

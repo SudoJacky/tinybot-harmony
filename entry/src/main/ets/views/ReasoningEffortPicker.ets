@@ -63,12 +63,13 @@ export struct ReasoningEffortPicker {
         Blank().width(32)
         Column({ space: 2 }) {
           Text(reasoningEffortName(this.efforts[this.previewIndex])).fontFamily(this.appearance.fontFamily)
-            .fontSize(16).fontWeight(FontWeight.Medium).fontColor(this.appearance.accent)
-          Text(this.modelName).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
+            .fontSize(16).fontWeight(FontWeight.Medium).fontColor($r('sys.color.font_primary'))
+          Text(this.modelName).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('sys.color.font_secondary'))
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }.layoutWeight(1)
         IconButton({ icon: $r('sys.symbol.arrow_counterclockwise'), label: t('恢复 Auto 推理强度'),
           compId: 'reset-reasoning-effort', diameter: 32, iconSize: 17,
+          tint: $r('sys.color.icon_primary'),
           disabled: this.disabled || this.saving || this.value === 'default',
           onTap: () => { this.select(0); } })
       }.width('100%')

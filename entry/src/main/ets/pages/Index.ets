@@ -32,7 +32,8 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { requestAppReview } from '../services/AppInformation';
 import { ReviewPreferences } from '../services/ReviewPreferences';
 import { ReviewChoice, ReviewInvitationDialog } from '../views/ReviewInvitationDialog';
-import { KeyboardAvoidMode, SymbolGlyphModifier } from '@kit.ArkUI';
+import { KeyboardAvoidMode } from '@kit.ArkUI';
+import { materialMenuContent, materialMenuHeader } from '../common/MaterialMenu';
 import { ShareInbox } from '../services/NativeActions';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { ChatPanel } from '../views/ChatPanel';
@@ -192,7 +193,13 @@ struct Index {
           announcements.acknowledge(item.id);
           this.closeAnnouncement();
         } }),
-        systemMaterial: this.appearance.surface, autoCancel: false, alignment: DialogAlignment.Center,
+        // A dense frosted backing keeps long announcements readable over arbitrary chat content.
+        systemMaterial: this.appearance.noMaterial,
+        backgroundBlurStyle: BlurStyle.COMPONENT_ULTRA_THICK,
+        backgroundBlurStyleOptions: {
+          colorMode: AppStorage.get<boolean>('tinybot.appearance.dark') === true ? ThemeColorMode.DARK : ThemeColorMode.LIGHT
+        },
+        autoCancel: false, alignment: DialogAlignment.Center,
         width: width > 0 ? width : undefined,
         onDidAppear: () => {
           if (!this.privacy.allowed) { this.closeAnnouncement(); return; }
@@ -921,32 +928,42 @@ struct Index {
   }
 
   @Builder
+  moreMenuHeader() {
+    materialMenuHeader(t('本对话'))
+  }
+
+  @Builder
+  moreMenuContent(icon: Resource, label: string, image: boolean = false) {
+    materialMenuContent({ label: label, icon: icon, image: image })
+  }
+
+  @Builder
   moreMenu() {
     Menu() {
-      MenuItemGroup({ header: t("本对话") }) {
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.wrench_and_screwdriver')),
-          content: t('工具范围：{0}', [agentModeName(this.app.active.agentMode)]) }).id('open-tool-scope')
+      MenuItemGroup({ header: this.moreMenuHeader }) {
+        MenuItem(() => this.moreMenuContent($r('sys.symbol.wrench_and_screwdriver'),
+          t('工具范围：{0}', [agentModeName(this.app.active.agentMode)]))).id('open-tool-scope')
           .enabled(this.app.ready && !this.app.busy && !this.app.active.archived && this.app.saveError.length === 0)
           .onClick(() => { this.showToolScope = true; })
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.folder')), content: t("工作区文件") })
+        MenuItem(() => this.moreMenuContent($r('sys.symbol.folder'), t('工作区文件')))
           .enabled(!this.app.busy).onClick(() => this.openFiles())
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.connection')), content: t('应用内浏览器') })
+        MenuItem(() => this.moreMenuContent($r('sys.symbol.connection'), t('应用内浏览器')))
           .id('open-browser').enabled(this.app.ready && !this.browser.permissionSaving && this.app.saveError.length === 0)
           .onClick(() => this.openBrowser())
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.rectangle_stack')), content: t("分支关系") })
+        MenuItem(() => this.moreMenuContent($r('sys.symbol.rectangle_stack'), t('分支关系')))
           .enabled(!this.app.busy).onClick(() => this.paths.pushPath({ name: 'branches' }))
-        MenuItem({ startIcon: $r('app.media.message_branch'), content: t("创建分支") })
+        MenuItem(() => this.moreMenuContent($r('app.media.message_branch'), t('创建分支'), true))
           .enabled(!this.app.busy && this.app.saveError.length === 0 && this.app.active.messages.length > 0)
           .onClick(() => this.fork())
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.share')), content: t('分享会话') })
+        MenuItem(() => this.moreMenuContent($r('sys.symbol.share'), t('分享会话')))
           .id('share-conversation').enabled(this.app.ready && !this.app.busy && this.app.active.messages.length > 0)
           .onClick(() => this.openConversationShare())
       }
       if (this.app.productivity.options?.miniAppsEnabled === true) {
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.rectangle_stack')), content: t('小程序') })
+        MenuItem(() => this.moreMenuContent($r('sys.symbol.rectangle_stack'), t('小程序')))
           .id('open-mini-apps-menu').enabled(this.app.ready).onClick(() => this.paths.pushPath({ name: 'mini-apps' }))
       }
-      MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.gearshape')), content: t('设置') })
+      MenuItem(() => this.moreMenuContent($r('sys.symbol.gearshape'), t('设置')))
         .onClick(() => this.openSettings())
     }
   }
@@ -1156,7 +1173,7 @@ struct Index {
         }.id('workbench-chat-more').width(44).height(44).borderRadius(22)
           .backgroundColor($r('app.color.surface_variant'))
           .accessibilityText(t('更多操作'))
-          .enabled(this.app.ready).bindMenu(this.moreMenu, { systemMaterial: this.appearance.surface, mask: false })
+          .enabled(this.app.ready).bindMenu(this.moreMenu, { systemMaterial: this.appearance.menu, mask: false })
         IconButton({ icon: this.detailPaneOpen ? $r('sys.symbol.close_sidebar') : $r('sys.symbol.open_sidebar'),
           label: this.detailPaneOpen ? t('关闭侧栏') : t('打开侧栏'), compId: 'workbench-toggle-detail',
           fill: $r('app.color.surface_variant'),
@@ -1227,7 +1244,7 @@ struct Index {
       .border({ width: this.appearance.materialAvailable ? 0 : 0.5, color: $r('app.color.divider') })
       .attributeModifier(systemMaterialAttribute<ButtonAttribute>(this.appearance.control)).accessibilityText(t("更多操作"))
       .enabled(this.app.ready).bindMenu(this.moreMenu, {
-        systemMaterial: this.appearance.surface, mask: false })
+        systemMaterial: this.appearance.menu, mask: false })
       IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t("新建对话"), compId: 'new-chat',
         material: this.appearance.control, tint: $r('sys.color.font_primary'),
         disabled: !this.app.canNavigate,

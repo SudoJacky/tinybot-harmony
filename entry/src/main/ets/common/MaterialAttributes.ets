@@ -27,6 +27,10 @@ class MenuMaterialAttribute implements AttributeModifier<SelectAttribute> {
   constructor(material?: uiMaterial.Material) { this.material = material; }
 
   applyNormalAttribute(instance: SelectAttribute): void {
+    // Select's option labels have their own colors, independent of the trigger's fontColor.
+    instance.optionFontColor($r('sys.color.font_primary'));
+    instance.selectedOptionFontColor($r('sys.color.font_primary'));
+    instance.selectedOptionBgColor($r('sys.color.comp_background_tertiary'));
     const material = this.material;
     if (!material) { return; }
     instance.menuSystemMaterial(material);

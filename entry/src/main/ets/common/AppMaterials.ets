@@ -13,6 +13,7 @@ export class AppMaterials {
   private static controlMaterial?: uiMaterial.Material;
   private static accentControlMaterial?: uiMaterial.Material;
   private static surfaceMaterial?: uiMaterial.Material;
+  private static menuMaterial?: uiMaterial.Material;
   private static readingSurfaceMaterial?: uiMaterial.Material;
   private static effect: LightEffect = 'auto';
   private static accent: ResourceColor = $r('app.color.accent_material');
@@ -23,6 +24,11 @@ export class AppMaterials {
   // True when immersive material can actually be applied on this system.
   static get available(): boolean { return !AppMaterials.unavailable; }
 
+  // Explicitly opt out of native immersive effects while keeping older systems supported.
+  static get empty(): uiMaterial.Material | undefined {
+    return AppMaterials.available ? uiMaterial.Material.empty : undefined;
+  }
+
   static configure(effect: LightEffect, accent: ResourceColor): void {
     if (AppMaterials.effect === effect && AppMaterials.accent === accent) { return; }
     AppMaterials.effect = effect;
@@ -30,6 +36,7 @@ export class AppMaterials {
     AppMaterials.controlMaterial = undefined;
     AppMaterials.accentControlMaterial = undefined;
     AppMaterials.surfaceMaterial = undefined;
+    AppMaterials.menuMaterial = undefined;
     AppMaterials.readingSurfaceMaterial = undefined;
   }
 
@@ -66,6 +73,7 @@ export class AppMaterials {
       AppMaterials.controlMaterial = undefined;
       AppMaterials.accentControlMaterial = undefined;
       AppMaterials.surfaceMaterial = undefined;
+      AppMaterials.menuMaterial = undefined;
       AppMaterials.readingSurfaceMaterial = undefined;
       Diagnostics.log('error', 'appearance', 'material_unavailable', { code: ApiLevel.sdk }, error as Error);
       return undefined;
@@ -98,7 +106,7 @@ export class AppMaterials {
     return AppMaterials.accentControlMaterial;
   }
 
-  // Menus and popups use the next gentler app tier; controls keep the selected device/user tier.
+  // General overlays use the next gentler app tier; adaptive menus use the separate menu material.
   static get surface(): uiMaterial.Material | undefined {
     if (!AppMaterials.available) { return undefined; }
     if (AppMaterials.effect === 'off') { return uiMaterial.Material.empty; }
@@ -110,6 +118,18 @@ export class AppMaterials {
       }));
     }
     return AppMaterials.surfaceMaterial;
+  }
+
+  // Backdrop-driven foreground inversion only works with THIN or ULTRA_THIN material.
+  static get menu(): uiMaterial.Material | undefined {
+    if (!AppMaterials.available) { return undefined; }
+    if (AppMaterials.effect === 'off') { return uiMaterial.Material.empty; }
+    if (!AppMaterials.menuMaterial) {
+      AppMaterials.menuMaterial = AppMaterials.build(() => new uiMaterial.ImmersiveMaterial({
+        style: uiMaterial.ImmersiveStyle.THIN, colorInvert: true
+      }));
+    }
+    return AppMaterials.menuMaterial;
   }
 
   // Long sheets need a denser, tinted backing so underlying text cannot compete with their content.

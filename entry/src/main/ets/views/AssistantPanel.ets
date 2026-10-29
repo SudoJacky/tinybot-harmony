@@ -1,3 +1,4 @@
+import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { defaultContextWindow } from '../model/ContextSettings';
@@ -67,7 +68,8 @@ export struct ModelSettingsPanel {
   choiceMenu(options: string[], selected: number, onSelect: (index: number) => void) {
     Menu() {
       ForEach(options, (label: string, index: number) => {
-        MenuItem({ content: label }).selected(index === selected).selectIcon(true).onClick(() => onSelect(index))
+        MenuItem(() => materialMenuContent.bind(this)({ label: label, selected: index === selected }))
+          .selected(index === selected).onClick(() => onSelect(index))
       }, (label: string, index: number) => index + label)
     }
   }
@@ -91,7 +93,7 @@ export struct ModelSettingsPanel {
     .opacity(enabled ? 1 : 0.4).enabled(enabled)
     .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
     .bindMenu(this.choiceMenu(options, selected, onSelect), {
-      systemMaterial: this.appearance.surface, mask: false })
+      systemMaterial: this.appearance.menu, mask: false })
   }
 
   @Builder

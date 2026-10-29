@@ -1,5 +1,6 @@
+import { materialMenuContent } from './MaterialMenu';
 import { AppearanceStyle } from './AppearanceStyle';
-import { AnimatorResult, SymbolGlyphModifier } from '@kit.ArkUI';
+import { AnimatorResult } from '@kit.ArkUI';
 import { t } from '../model/I18n';
 import { Motion, Radius } from './Theme';
 import { SwipeRowMotion as Swipe } from './SwipeRowMotion';
@@ -105,15 +106,14 @@ export struct SwipeRow {
   actionsMenu() {
     Menu() {
       if (this.onShare) {
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.share')), content: t('分享') })
+        MenuItem(() => materialMenuContent.bind(this)({ label: t('分享'), icon: $r('sys.symbol.share') }))
           .enabled(!this.disabled).onClick(() => this.onShare?.())
       }
       if (this.onExport) {
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.square_and_arrow_down')), content: t('导出到文件') })
+        MenuItem(() => materialMenuContent.bind(this)({ label: t('导出到文件'), icon: $r('sys.symbol.square_and_arrow_down') }))
           .enabled(!this.disabled).onClick(() => this.onExport?.())
       }
-      MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.trash')).fontColor([$r('app.color.danger')]),
-        content: t('删除') }).contentFontColor($r('app.color.danger'))
+      MenuItem(() => materialMenuContent.bind(this)({ label: t('删除'), icon: $r('sys.symbol.trash'), danger: true }))
         .enabled(!this.disabled).onClick(() => this.requestDelete())
     }
   }
@@ -148,7 +148,7 @@ export struct SwipeRow {
     })
     .onVisibleAreaChange([0], (visible: boolean) => { if (!visible) { this.stop(); this.reveal = 0; this.dragging = false; } })
     .bindContextMenu(this.actionsMenu, ResponseType.LongPress, {
-      systemMaterial: this.appearance.surface, mask: false })
+      systemMaterial: this.appearance.menu, mask: false })
     .priorityGesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Horizontal, distance: 12 })
       .onActionStart((event: GestureEvent) => this.start(event))
       .onActionUpdate((event: GestureEvent) => this.move(event))
