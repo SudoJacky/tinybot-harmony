@@ -93,7 +93,7 @@ struct UiNodeView {
             .enabled(this.interactive).accessibilityText(this.label())
             .backgroundColor(this.appearance.controlBackground).fontColor($r('sys.color.font_primary'))
             .attributeModifier(systemMaterialAttribute<SelectAttribute>(this.appearance.control))
-            .attributeModifier(menuMaterialAttribute(this.appearance.surface))
+            .attributeModifier(menuMaterialAttribute(this.appearance.menu))
             .onSelect((_index: number, value: string) => this.onEdit(this.node, value, true))
         } else if (this.node.kind === 'segmented') {
           Text(this.label()).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))

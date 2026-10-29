@@ -18,8 +18,10 @@ export class AppearanceStyle {
   fontFamily: string = '';
   effectStrength: number = 1;
   get control(): uiMaterial.Material | undefined { return AppMaterials.control; }
+  get noMaterial(): uiMaterial.Material | undefined { return AppMaterials.empty; }
   get accentControl(): uiMaterial.Material | undefined { return AppMaterials.accentControl; }
   get surface(): uiMaterial.Material | undefined { return AppMaterials.surface; }
+  get menu(): uiMaterial.Material | undefined { return AppMaterials.menu; }
   get readingSurface(): uiMaterial.Material | undefined { return AppMaterials.readingSurface; }
   // Whether the light-sense material is really applied, so settings can show its true state.
   get materialAvailable(): boolean { return AppMaterials.available; }

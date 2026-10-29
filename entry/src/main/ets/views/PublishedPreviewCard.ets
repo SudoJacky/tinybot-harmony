@@ -90,6 +90,7 @@ export struct PublishedPreviewCard {
         Stack({ alignContent: Alignment.TopEnd }) {
         NodeContainer(this.surface.inlineMount).width('100%').height(this.fullscreen ? this.inlineHeight : undefined)
         IconButton({ icon: $r('sys.symbol.arrow_up_left_and_arrow_down_right'), label: t('全屏预览'),
+          fill: $r('app.color.surface'), tint: $r('app.color.text_primary'),
           disabled: this.fullscreenClosing,
           compId: 'fullscreen-preview-' + this.preview.id, onTap: () => this.openFullscreen() })
           .margin({ top: 6, right: 6 })

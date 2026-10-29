@@ -1,3 +1,4 @@
+import { materialMenuContent } from '../common/MaterialMenu';
 import { AnimatedPage } from '../common/AnimatedPage';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
@@ -371,9 +372,9 @@ export struct WorkspacePanel {
   @Builder
   backupMenu() {
     Menu() {
-      MenuItem({ content: t('导出修改前备份') }).id('workspace-export-backup')
+      MenuItem(() => materialMenuContent({ label: t('导出修改前备份') })).id('workspace-export-backup')
         .enabled(!this.locked()).onClick(() => this.exportBaseline())
-      MenuItem({ content: t('恢复原版') }).id('workspace-restore')
+      MenuItem(() => materialMenuContent({ label: t('恢复原版') })).id('workspace-restore')
         .enabled(!this.locked() && this.previewError.length === 0).onClick(() => this.confirmRestore())
     }
   }
@@ -403,7 +404,7 @@ export struct WorkspacePanel {
             SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(22).fontColor([$r('app.color.text_primary')])
           }.fontFamily(this.appearance.fontFamily).id('workspace-backup-menu').width(40).height(40)
             .backgroundColor(Color.Transparent).accessibilityText(t('更多操作')).enabled(!this.locked())
-            .bindMenu(this.backupMenu, { systemMaterial: this.appearance.surface, mask: false })
+            .bindMenu(this.backupMenu, { systemMaterial: this.appearance.menu, mask: false })
         }
         if (this.embedded && !this.tabbed) {
           IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭文件'), compId: 'close-workbench-file-preview',

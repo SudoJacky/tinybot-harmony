@@ -37,7 +37,7 @@ export struct SearchProviderPanel {
         .enabled(!this.locked()).id('search-credential-source')
         .backgroundColor(this.appearance.controlBackground).fontColor($r('sys.color.font_primary'))
         .attributeModifier(systemMaterialAttribute<SelectAttribute>(this.appearance.control))
-        .attributeModifier(menuMaterialAttribute(this.appearance.surface))
+        .attributeModifier(menuMaterialAttribute(this.appearance.menu))
         .onSelect((index: number) => { this.draft.modelProviderId = this.candidates()[index].id; })
       Text(t('复用所选官方模型服务的密钥，无需重复填写。')).fontFamily(this.appearance.fontFamily)
         .id('search-provider-key-ready').fontSize(13).fontColor($r('app.color.text_secondary'))

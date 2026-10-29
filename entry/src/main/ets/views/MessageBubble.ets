@@ -1,3 +1,4 @@
+import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { ToolExecution } from '../model/Agent';
 import { t } from '../model/I18n';
@@ -7,7 +8,6 @@ import { PresentedFile, deliveredFiles } from '../model/Deliverables';
 import { turnFileChanges } from '../model/TurnFileChanges';
 import { TurnChangesCard } from './TurnChangesCard';
 import { pasteboard } from '@kit.BasicServicesKit';
-import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { MarkdownView } from './MarkdownView';
 import { ImageViewer } from './ImageViewer';
 import { InteractiveAnswer } from './InteractiveAnswer';
@@ -368,25 +368,24 @@ export struct MessageBubble {
   actions() {
     Menu() {
       if (this.message.content.length > 0) {
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.rectangle_on_rectangle')), content: t("复制") })
+        MenuItem(() => materialMenuContent({ label: t("复制"), icon: $r('sys.symbol.rectangle_on_rectangle') }))
           .onClick(() => this.copy())
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.textformat')), content: t('选择文本') }).onClick(() => this.selectText())
+        MenuItem(() => materialMenuContent({ label: t('选择文本'), icon: $r('sys.symbol.textformat') })).onClick(() => this.selectText())
       }
-      MenuItem({ startIcon: $r('app.media.message_branch'),
-        content: this.message.role === 'user' ? t("从这里改写（新分支）") : t("从这里创建分支") })
+      MenuItem(() => materialMenuContent({ label: this.message.role === 'user' ? t("从这里改写（新分支）") : t("从这里创建分支"),
+        icon: $r('app.media.message_branch'), image: true }))
         .enabled(this.actionsEnabled).onClick(() => this.onFork(this.message.id))
       if (this.message.role === 'assistant' && this.message.status !== 'generating') {
         if (this.message.content.trim().length > 0) {
-          MenuItem({ symbolStartIcon: new SymbolGlyphModifier(this.readingMessageId === this.message.id ?
-            $r('sys.symbol.stop_circle_fill') : $r('sys.symbol.speaker_wave_2')),
-            content: this.readingMessageId === this.message.id ? t('停止朗读') : t('朗读回答') })
+          MenuItem(() => materialMenuContent({ label: this.readingMessageId === this.message.id ? t('停止朗读') : t('朗读回答'),
+            icon: this.readingMessageId === this.message.id ? $r('sys.symbol.stop_circle_fill') : $r('sys.symbol.speaker_wave_2') }))
             .id('read-answer-' + this.message.id).onClick(() => this.onRead(this.message.id))
         }
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.arrow_clockwise')), content: t('重新生成（保留原回答）') })
+        MenuItem(() => materialMenuContent({ label: t('重新生成（保留原回答）'), icon: $r('sys.symbol.arrow_clockwise') }))
           .enabled(this.actionsEnabled).onClick(() => this.onRegenerate(this.message.id))
       }
       if (this.message.content.length > 0) {
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.lightbulb')), content: t("提炼为记忆…") })
+        MenuItem(() => materialMenuContent({ label: t("提炼为记忆…"), icon: $r('sys.symbol.lightbulb') }))
           .enabled(this.actionsEnabled).onClick(() => this.onRemember(this.message.id))
       }
     }
@@ -686,7 +685,7 @@ export struct MessageBubble {
           this.assistantMessage()
         }
       }.width('100%').bindContextMenu(this.actions, ResponseType.LongPress, {
-        systemMaterial: this.appearance.surface, mask: false })
+        systemMaterial: this.appearance.menu, mask: false })
       .bindSheet($$this.documentOpen, this.documentViewer(), { height: '90%', showClose: false, dragBar: true,
         backgroundColor: $r('app.color.page_background') })
     }.width('100%')

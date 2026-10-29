@@ -1,3 +1,4 @@
+import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
@@ -55,17 +56,14 @@ struct ThreadRow {
   actions() {
     Menu() {
       if (!this.selecting) {
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.square_and_pencil')), content: t("重命名") })
+        MenuItem(() => materialMenuContent({ label: t("重命名"), icon: $r('sys.symbol.square_and_pencil') }))
           .onClick(() => { this.name = this.thread.title; this.editing = true; })
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.pin')),
-          content: this.thread.pinned ? t("取消置顶") : t("置顶") })
+        MenuItem(() => materialMenuContent({ label: this.thread.pinned ? t("取消置顶") : t("置顶"), icon: $r('sys.symbol.pin') }))
           .onClick(() => this.app.pinThread(this.thread.id))
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.archivebox')),
-          content: this.thread.archived ? t("恢复对话") : t("归档") })
+        MenuItem(() => materialMenuContent({ label: this.thread.archived ? t("恢复对话") : t("归档"), icon: $r('sys.symbol.archivebox') }))
           .enabled(!this.app.runningThreadIds.includes(this.thread.id))
           .onClick(() => this.app.archiveThread(this.thread.id))
-        MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.trash')).fontColor([$r('app.color.danger')]),
-          content: t("删除") }).contentFontColor($r('app.color.danger'))
+        MenuItem(() => materialMenuContent({ label: t("删除"), icon: $r('sys.symbol.trash'), danger: true }))
           .enabled(!this.app.runningThreadIds.includes(this.thread.id))
           .onClick(() => {
             this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface,
@@ -137,7 +135,7 @@ struct ThreadRow {
               SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
             }.fontFamily(this.appearance.fontFamily).width(32).height(32).backgroundColor(Color.Transparent).accessibilityText(t("对话管理"))
             .enabled(!this.locked()).bindMenu(this.actions, {
-              systemMaterial: this.appearance.surface, mask: false })
+              systemMaterial: this.appearance.menu, mask: false })
           }
         }
         .width('100%').padding({ left: this.workbench && !this.thread.parentThreadId ? 28 : Space.md, right: 4,
@@ -148,7 +146,7 @@ struct ThreadRow {
           if (this.query.trim() ? await this.app.openMessage(this.thread.id, this.matchId(), this.query.trim()) : await this.app.selectThread(this.thread.id)) { this.onSelected(); }
         })
         .bindContextMenu(this.actions, ResponseType.LongPress, {
-          systemMaterial: this.appearance.surface, mask: false })
+          systemMaterial: this.appearance.menu, mask: false })
       }
     }
     .width(this.workbench && !this.thread.parentThreadId ? '100%' : 'calc(100% - 28vp)').borderRadius(this.workbench ? 10 : Radius.md)
@@ -381,9 +379,9 @@ export struct ThreadList {
   @Builder
   projectActions(id: string) {
     Menu() {
-      MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.folder')), content: t('项目文件') })
+      MenuItem(() => materialMenuContent({ label: t('项目文件'), icon: $r('sys.symbol.folder') }))
         .onClick(async () => { if (await this.app.openProject(id)) { this.onFiles(); } })
-      MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.square_and_pencil')), content: t('编辑项目') })
+      MenuItem(() => materialMenuContent({ label: t('编辑项目'), icon: $r('sys.symbol.square_and_pencil') }))
         .onClick(() => this.editProject(id))
     }
   }
@@ -471,7 +469,7 @@ export struct ThreadList {
             SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
           }.fontFamily(this.appearance.fontFamily).id('project-actions-' + id).width(32).height(32).backgroundColor(Color.Transparent)
             .accessibilityText(t('编辑项目') + ' · ' + this.sectionTitle(id)).enabled(!this.app.sharedBusy && !this.app.saveError)
-            .bindMenu(this.projectActions(id), { systemMaterial: this.appearance.surface, mask: false })
+            .bindMenu(this.projectActions(id), { systemMaterial: this.appearance.menu, mask: false })
         }
       }
     }.width('100%').padding({ top: 4 }).backgroundColor($r('app.color.page_background'))

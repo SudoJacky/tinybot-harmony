@@ -1,8 +1,8 @@
+import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { Motion, Radius, Space } from '../common/Theme';
 import { IconButton } from '../common/Widgets';
-import { SymbolGlyphModifier } from '@kit.ArkUI';
 
 export class DetailTabItem {
   id: string;
@@ -32,9 +32,9 @@ export struct DetailTabs {
   @Builder
   addMenu() {
     Menu() {
-      MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.folder')), content: t('工作区文件') })
+      MenuItem(() => materialMenuContent({ label: t('工作区文件'), icon: $r('sys.symbol.folder') }))
         .id('detail-add-files').onClick(() => this.onAddFiles())
-      MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.connection')), content: t('应用内浏览器') })
+      MenuItem(() => materialMenuContent({ label: t('应用内浏览器'), icon: $r('sys.symbol.connection') }))
         .id('detail-add-browser').onClick(() => this.onAddBrowser())
     }
   }
@@ -75,7 +75,7 @@ export struct DetailTabs {
           SymbolGlyph($r('sys.symbol.plus')).fontSize(16).fontColor([$r('app.color.text_secondary')])
         }.id('detail-add-tab').width(32).height(32).padding(0).backgroundColor(Color.Transparent)
           .clickEffect(Motion.pressSmall).accessibilityText(t('添加侧栏面板'))
-          .bindMenu(this.addMenu, { systemMaterial: this.appearance.surface, mask: false })
+          .bindMenu(this.addMenu, { systemMaterial: this.appearance.menu, mask: false })
         IconButton({ icon: $r('sys.symbol.close_sidebar'), label: t('关闭侧栏'), compId: 'detail-collapse',
           diameter: 32, iconSize: 17, onTap: this.onCollapse })
       }.width('100%').height(48).padding({ right: 4 })

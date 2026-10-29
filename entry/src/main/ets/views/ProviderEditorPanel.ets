@@ -1,7 +1,7 @@
+import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
-import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { discoverModels } from '../services/ModelDiscovery';
 import { ProviderEditorViewModel } from '../viewmodel/ProviderEditorViewModel';
@@ -144,9 +144,8 @@ export struct ProviderEditorPanel {
   @Builder
   serviceActions() {
     Menu() {
-      MenuItem({ symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.trash')).fontColor([$r('app.color.danger')]),
-        content: t('删除此服务') }).id('delete-provider-' + this.editor.id)
-        .contentFontColor($r('app.color.danger')).enabled(!this.locked()).onClick(() => this.confirmDelete())
+      MenuItem(() => materialMenuContent({ label: t('删除此服务'), icon: $r('sys.symbol.trash'), danger: true })).id('delete-provider-' + this.editor.id)
+        .enabled(!this.locked()).onClick(() => this.confirmDelete())
     }
   }
 
@@ -229,7 +228,7 @@ export struct ProviderEditorPanel {
           Blank()
           Button(t('更多操作')).fontFamily(this.appearance.fontFamily).id('provider-more-actions').attributeModifier(Btn.text).height(44)
             .enabled(!this.locked()).bindMenu(this.serviceActions, {
-              systemMaterial: this.appearance.surface, mask: false })
+              systemMaterial: this.appearance.menu, mask: false })
         }.width('100%').padding({ left: Space.page, right: Space.page })
       }
       Scroll(this.scroller) {
