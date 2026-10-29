@@ -1,28 +1,26 @@
-Tinybot v1.2.1 · 发布准备说明
+Tinybot v1.2.2 · 发布准备说明
 更新日期：2026-10-29
 
 一、版本与产物
 
-本版产物需从 1.2.1 源码重新构建；历史版本产物不作为本版提交。
+本版产物需从 1.2.2 源码重新构建；历史版本产物不作为本版提交。
 
 包名：com.sudojacky.tinybot
-版本：1.2.1，versionCode=1002001
+版本：1.2.2，versionCode=1002002
 设备：phone、tablet，最低 HarmonyOS 6.0.0（API 20），目标 API 26；同一包覆盖两套系统
 发布包：release，app.debug=false，仅 arm64-v8a
 模拟器：使用单独构建的调试包，包含 x86_64；不随正式发布包分发。
 
 两套系统的能力差异（需在发布说明和商店文案中保持一致）：
-- 沉浸光感材质仅 API 26 提供；API 20 使用普通配色，外观设置显示“此系统不支持”。
+- 沉浸光感材质需要 API 26 及设备支持；API 20 或不支持该材质的设备使用普通界面。
 - PDF 文字提取依赖系统 PDFKit；API 20 未提供该模块，仍可保留 PDF 原件，读取时明确提示不支持文字提取，不生成空白文本。
 - 携带凭据的网络请求在 API 20 上同样不跟随重定向。
 
-1.2.1 支持将图片或文件拖入当前聊天并添加为草稿附件。设置新增“实验室”，小程序默认关闭，开启后可创建和使用，关闭仍保留已有数据。修复旧版小程序预览记录导致会话无法加载的问题。
-
-此前版本新增并行会话、本地小程序与数据持久化、后台完成通知和系统文档分享，单条消息支持 10 个附件。默认开启内置必应搜索，重做搜索设置，新增 QQ 社区入口、全屏预览与实际页面验证。优化后台传输、工具响应和大内容处理，修复后台预览误超时、分享后聊天被遮挡及配置兼容问题。验证记录和外部待办分别见 CLOUD-TEST.txt、RELEASE-GAPS.txt。
+1.2.2 新增并行会话、本地小程序与数据保存、后台完成通知，支持系统文档分享和图片、文件拖入聊天，每条消息最多 10 个附件。小程序默认关闭，可在实验室开启；支持重命名、导出、恢复上一版及移除后恢复。优化收藏列表、全屏预览、搜索设置与工具响应，新增 QQ 社区入口和评价邀请。模型 API Key 随华为账号加密备份，同账号换设备可恢复。修复旧小程序清单兼容、恢复后模型服务未注册、后台预览误超时，以及平板侧栏空白、标题遮挡和菜单背景缺失等问题。验证记录和外部待办分别见 CLOUD-TEST.txt、RELEASE-GAPS.txt。
 
 运行 scripts/prepare-distribution.ps1 后生成独立目录及 ZIP：
-packages/Tinybot-1.2.1-1002001-release-UNSIGNED.app：待云签名的完整发布包。
-packages/Tinybot-1.2.1-1002001-release-UNSIGNED.hap：同一 APP 内的 entry 模块。
+packages/Tinybot-1.2.2-1002002-release-UNSIGNED.app：待云签名的完整发布包。
+packages/Tinybot-1.2.2-1002002-release-UNSIGNED.hap：同一 APP 内的 entry 模块。
 symbols/app-symbol.zip：ArkTS 符号表。
 symbols/native/arm64-v8a/：与发布包 Build ID 一致的未裁剪原生沙箱库。
 assets/tinybot-icon.png：工程使用的图标。
@@ -48,7 +46,7 @@ pwsh -ExecutionPolicy Bypass -File scripts\prepare-distribution.ps1 -StudioRoot 
 
 在 DevEco Studio 的 Build > Upload Product 中选择工程原始产物：
 build\outputs\default\tinybot-harmony-default-unsigned.app
-关联现有包名 com.sudojacky.tinybot，核对 1.2.1 / 1002001，使用对应发布证书或云管理签名，附带本版符号表。最终签名包的哈希会变化，以最终文件重新记录。
+关联现有包名 com.sudojacky.tinybot，核对 1.2.2 / 1002002，使用对应发布证书或云管理签名，附带本版符号表。最终签名包的哈希会变化，以最终文件重新记录。
 
 此步骤需在实际平台完成；本地准备不包含创建应用、申请证书、上传、云测试或审核结果。控制台字段以当前平台为准。如版本号已使用，增加 versionCode 后重新构建。
 
