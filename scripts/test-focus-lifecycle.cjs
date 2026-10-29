@@ -122,7 +122,7 @@ check('tablet menu action cannot run after a thread switch or navigation', () =>
     const f = chat(); let calls = 0; f.panel.dismissPlusMenu(() => calls++); change(f.panel); f.timers(); assert.equal(calls, 0);
   }
 });
-check('native route visibility is wired to the retained service editor and sidebar', () => {
+check('native route visibility is wired to the retained service editor', () => {
   const relative = 'entry/src/main/ets/pages/Index';
   const source = path.join(root, relative + '.ets');
   const built = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug', relative + '.ts');
@@ -142,7 +142,8 @@ check('native route visibility is wired to the retained service editor and sideb
   }
   const code = fs.readFileSync(built, 'utf8');
   assert.match(code, /active: this\.providerEditorActive/);
-  assert.match(code, /active: this\.chatVisible &&/);
+  // Sidebar visibility across destinations is covered behaviorally by
+  // test-history-drawer: the persistent tablet list stays active on Settings.
 });
 (async () => { for (const item of checks) { try { await item.action(); console.log('PASS ' + item.name); }
   catch (error) { console.error('FAIL ' + item.name + ': ' + error.message); process.exitCode = 1; } } })();
