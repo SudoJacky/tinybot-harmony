@@ -6,6 +6,7 @@ const root = path.resolve('entry/src/main/ets'), modules = new Map(), storage = 
 let disk = new Map(), working = new Map(), failFlush = false, failApply = false, deviceLevel = 0, levelReads = 0;
 // The runtime API level decides whether the immersive-material module exists at all.
 let deviceSdk = 26;
+let deviceMaterialSupported = true, capabilityReads = 0;
 const store = { getSync: (key, fallback) => working.has(key) ? working.get(key) : fallback,
   putSync: (key, value) => working.set(key, value), flushSync() {
     if (failFlush) { failFlush = false; throw Error('disk write failed'); }
@@ -14,6 +15,7 @@ const store = { getSync: (key, fallback) => working.has(key) ? working.get(key) 
 class Material { static empty = { empty: true }; }
 class ImmersiveMaterial extends Material { constructor(options) { super(); this.options = options; } }
 const uiMaterial = { Material, ImmersiveMaterial, ImmersiveStyle: { THICK: 3, THIN: 1, ULTRA_THIN: 0 },
+  isImmersiveMaterialSupported: () => { capabilityReads++; return deviceMaterialSupported; },
   MaterialLevel: { EXQUISITE: 0, GENTLE: 1, SMOOTH: 2 }, getGlobalMaterialLevel: () => { levelReads++; return deviceLevel; } };
 const colorModes = { COLOR_MODE_DARK: 0, COLOR_MODE_LIGHT: 1, COLOR_MODE_NOT_SET: -1 };
 const kits = { '@kit.BasicServicesKit': { deviceInfo: { get sdkApiVersion() { return deviceSdk; } } },
@@ -214,4 +216,25 @@ for (const effect of ['auto', 'gentle', 'standard', 'vivid']) {
 }
 kits['@kit.ArkUI'] = api26Kit;
 deviceSdk = 26;
-console.log('PASS appearance: preset/custom contrast, validation, persistence, save/apply rollback, system mode, material levels/cache, reset and API 20 plain interface');
+// API 26 can expose the module while refusing immersive rendering on this device.
+// Exercise the actual style getters for every saved preference, without creating
+// materials or reading their quality level, and retain plain native menu defaults.
+deviceMaterialSupported = false;
+const capabilityBefore = capabilityReads, levelBefore = levelReads;
+const unsupportedModules = new Map();
+const unsupportedStyle = load(root + '/common/AppearanceStyle.ets', unsupportedModules);
+const unsupportedMaterials = load(root + '/common/AppMaterials.ets', unsupportedModules).AppMaterials;
+for (const effect of ['auto','gentle','standard','vivid','off']) {
+  const style = unsupportedStyle.makeAppearanceStyle({...model.defaultAppearance(), lightEffect:effect}, false);
+  assert.equal(style.materialAvailable, false);
+  assert.equal(style.controlBackground, 'app.color.surface_variant');
+  for (const role of ['control','accentControl','surface','menu','readingSurface','noMaterial']) {
+    assert.equal(style[role], undefined, 'Unsupported API 26 device preserves default rendering for ' + role);
+  }
+  systemMaterialAttribute(style.control).applyNormalAttribute(forbiddenNative);
+  menuMaterialAttribute(style.menu).applyNormalAttribute(forbiddenNative);
+}
+assert.equal(unsupportedMaterials.available, false);
+assert.equal(capabilityReads, capabilityBefore + 1, 'Device capability is immutable and queried once');
+assert.equal(levelReads, levelBefore, 'Unsupported devices never request an immersive quality tier');
+console.log('PASS appearance: palette, persistence, rollback, material cache and plain controls on API 20 / unsupported API 26 devices');

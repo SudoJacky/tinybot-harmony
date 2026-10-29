@@ -5,9 +5,9 @@ import { ApiLevel } from './ApiLevel';
 
 // Immersive material is the only API-26 surface feature this app uses, so every eval of the
 // uiMaterial namespace is confined to this file. On systems without the native module
-// (@ohos.arkui.uiMaterial is missing below API 26) each getter resolves to undefined and the
-// caller keeps its plain color, border and shadow settings. API 26 still uses Material.empty
-// when the user switches effects off; undefined would restore the component's default material.
+// (@ohos.arkui.uiMaterial is missing below API 26), or on devices that report no immersive
+// support, getters resolve to undefined and retain plain/native default rendering. Supported
+// devices use Material.empty when effects are switched off; undefined restores default material.
 export class AppMaterials {
   private static selectedStyle?: uiMaterial.ImmersiveStyle;
   private static controlMaterial?: uiMaterial.Material;
@@ -17,9 +17,10 @@ export class AppMaterials {
   private static readingSurfaceMaterial?: uiMaterial.Material;
   private static effect: LightEffect = 'auto';
   private static accent: ResourceColor = $r('app.color.accent_material');
-  // Set when the material module is reported present but its constructor still fails, so a
-  // half-updated system degrades to the plain interface instead of crashing every surface.
-  private static unavailable: boolean = !ApiLevel.material;
+  // API availability does not imply device support. Unsupported API-26 devices
+  // accept ImmersiveMaterial but do not render it, leaving overlay content exposed.
+  // A subsequent construction failure also disables material for the session.
+  private static unavailable: boolean = !ApiLevel.material || !uiMaterial.isImmersiveMaterialSupported();
 
   // True when immersive material can actually be applied on this system.
   static get available(): boolean { return !AppMaterials.unavailable; }
