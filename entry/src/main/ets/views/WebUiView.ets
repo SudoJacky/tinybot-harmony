@@ -44,7 +44,6 @@ export struct WebUiView {
   private mounted: boolean = false;
   private attached: boolean = false;
   private nativeActive: boolean | undefined = undefined;
-  private initialPageLoaded: boolean = false;
   private visible: boolean = false;
   private generation: number = 0;
   private timer: number = -1;
@@ -74,7 +73,7 @@ export struct WebUiView {
   aboutToDisappear(): void { this.mounted = false; clearTimeout(this.releaseTimer); this.releaseWeb(); this.snapshot?.release(); }
   private releaseWeb(): void {
     this.browserRuntime?.detach(this.browserAttachment);
-    this.attached = false; this.initialPageLoaded = false; this.hostNavigationPending = false;
+    this.attached = false; this.hostNavigationPending = false;
     this.nativeActive = undefined;
     this.reloadPending = false;
     this.generation++; this.closePorts(); this.ready = false;
@@ -155,7 +154,7 @@ export struct WebUiView {
     this.report(new Error(detail + '\n[source: ' + location + ', line: ' + line + ']'));
   }
   private async restart(): Promise<void> {
-    if (!this.mounted || !this.attached || !this.initialPageLoaded) { return; }
+    if (!this.mounted || !this.attached) { return; }
     if (!this.foreground || (!this.preflight && (this.scrolling || !this.visible))) { this.reloadPending = true; return; }
     this.reloadPending = false;
     const generation = ++this.generation;
@@ -299,16 +298,16 @@ export struct WebUiView {
       }
       Stack({ alignContent: Alignment.TopStart }) {
       if (this.renderWeb) {
-      Web({ src: 'about:blank', controller: this.controller })
+      // Load only the host after attachment. Replacing an initial about:blank document
+      // triggers ArkWeb's broken page-scene observer cleanup on HarmonyOS 7.
+      Web({ src: '', controller: this.controller })
         .backgroundColor(Color.Transparent)
         .width('100%').height(this.heightValue).javaScriptAccess(true).domStorageAccess(false).databaseAccess(false)
         .fileAccess(false).onlineImageAccess(false).blockNetwork(true)
-        .onControllerAttached(() => { if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'attached', { instanceId: this.instanceId }); }; this.attached = true; this.syncActivity(); })
+        .onControllerAttached(() => { if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'attached', { instanceId: this.instanceId }); }; this.attached = true; this.syncActivity(); this.restart(); })
         .onPageEnd((event) => {
           if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'page_end', { instanceId: this.instanceId, scheme: event.url.split(':')[0] }); };
-          // Wait for Web's initial about:blank navigation before replacing it with the host.
-          if (!this.initialPageLoaded) { this.initialPageLoaded = true; this.restart(); }
-          else { this.pageReady(); }
+          this.pageReady();
         })
         .onLoadIntercept((event) => {
           const url = event.data.getRequestUrl();
