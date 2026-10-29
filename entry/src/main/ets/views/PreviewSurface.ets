@@ -30,20 +30,25 @@ class PreviewSurfaceMount extends NodeController {
   private owner: PreviewSurface;
   private fullscreen: boolean;
   private root?: FrameNode;
+  private context?: UIContext;
   constructor(owner: PreviewSurface, fullscreen: boolean) { super(); this.owner = owner; this.fullscreen = fullscreen; }
   makeNode(context: UIContext): FrameNode | null {
     const root = typeNode.createNode(context, 'Stack');
     root.commonAttribute.width('100%');
     this.root = root;
+    this.context = context;
     this.owner.prepare(context);
     return root;
   }
   aboutToAppear(): void {
-    if (!this.root) { throw new Error('Preview host has no root'); }
+    if (!this.root || !this.context) { throw new Error('Preview host was not created'); }
+    // LazyForEach may reattach a cached host without calling makeNode again.
+    // Its renderer was released on disappearance, so restore it before mounting.
+    this.owner.prepare(this.context);
     // Move only after the target host has entered the live tree.
     this.owner.attach(this.root, this.fullscreen);
   }
-  aboutToDisappear(): void { this.owner.detach(this.fullscreen); this.root = undefined; }
+  aboutToDisappear(): void { this.owner.detach(this.fullscreen); }
 }
 
 // Owned by one chat card, never persisted or shared between chats. One builder owns the live page.
