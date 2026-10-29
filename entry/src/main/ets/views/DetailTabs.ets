@@ -32,9 +32,9 @@ export struct DetailTabs {
   @Builder
   addMenu() {
     Menu() {
-      MenuItem(() => materialMenuContent({ label: t('工作区文件'), icon: $r('sys.symbol.folder') }))
+      MenuItem(() => materialMenuContent.bind(this)({ label: t('工作区文件'), icon: $r('sys.symbol.folder') }))
         .id('detail-add-files').onClick(() => this.onAddFiles())
-      MenuItem(() => materialMenuContent({ label: t('应用内浏览器'), icon: $r('sys.symbol.connection') }))
+      MenuItem(() => materialMenuContent.bind(this)({ label: t('应用内浏览器'), icon: $r('sys.symbol.connection') }))
         .id('detail-add-browser').onClick(() => this.onAddBrowser())
     }
   }

@@ -372,9 +372,9 @@ export struct WorkspacePanel {
   @Builder
   backupMenu() {
     Menu() {
-      MenuItem(() => materialMenuContent({ label: t('导出修改前备份') })).id('workspace-export-backup')
+      MenuItem(() => materialMenuContent.bind(this)({ label: t('导出修改前备份') })).id('workspace-export-backup')
         .enabled(!this.locked()).onClick(() => this.exportBaseline())
-      MenuItem(() => materialMenuContent({ label: t('恢复原版') })).id('workspace-restore')
+      MenuItem(() => materialMenuContent.bind(this)({ label: t('恢复原版') })).id('workspace-restore')
         .enabled(!this.locked() && this.previewError.length === 0).onClick(() => this.confirmRestore())
     }
   }

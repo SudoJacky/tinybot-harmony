@@ -68,7 +68,7 @@ export struct ModelSettingsPanel {
   choiceMenu(options: string[], selected: number, onSelect: (index: number) => void) {
     Menu() {
       ForEach(options, (label: string, index: number) => {
-        MenuItem(() => materialMenuContent({ label: label, selected: index === selected }))
+        MenuItem(() => materialMenuContent.bind(this)({ label: label, selected: index === selected }))
           .selected(index === selected).onClick(() => onSelect(index))
       }, (label: string, index: number) => index + label)
     }

@@ -33,7 +33,7 @@ function rowVisit(node) {
 }
 rowVisit(cls('ThreadRow')); assert.equal(rowUpdates.length, 1);
 assert.ok(checkboxUpdate && rowClick, 'Locate real checkbox and selection click callbacks');
-let serial = 0, current, initial;
+let serial = 0, current, initial, activeMenu;
 const effects = new Map(), lists = new Map(), branches = new Map(), texts = new Map(), groups = new Set(), readers = new Set(), menuItems = new Map();
 let checkboxSelected, checkboxChange;
 class ViewPU {
@@ -54,13 +54,28 @@ const globals = { exports: {}, ViewPU, ObservedObject: { GetRawObject: value => 
   IconButton: class {}, SymbolGlyphModifier: class { fontColor() { return this; } }, Context: noop,
   TransitionEffect: { OPACITY: { animation() { return this; } } },
   ListItemGroup: { create(options) { if (initial) { groups.add(current); options.header(); } }, pop() {} },
-  Text: new Proxy({}, { get: (_, key) => key === 'create' ? value => texts.set(current, value) : () => {} }) };
-for (const name of ['ForEach','If','ListItem','Row','Stack','SymbolGlyph','Button','Menu','MenuItem']) globals[name] = noop;
-globals.MenuItem = new Proxy({}, { get: (_, key) => key === 'create' ? value => menuItems.set(current, value) : () => {} });
+  Text: new Proxy({}, { get: (_, key) => key === 'create' ? value => {
+    texts.set(current, value);
+    if (activeMenu !== undefined) menuItems.get(activeMenu).content = value;
+  } : () => {} }) };
+for (const name of ['ForEach','If','ListItem','Row','Stack','SymbolGlyph','Image','Button','Menu','MenuItem']) globals[name] = noop;
+globals.MenuItem = new Proxy({}, { get: (_, key) => key === 'create' ? value => {
+  menuItems.set(current, typeof value === 'function' ? {} : value);
+  if (typeof value === 'function') {
+    const previous = activeMenu; activeMenu = current;
+    try { value(); } finally { activeMenu = previous; }
+  }
+} : () => {} });
 for (const name of ['ButtonType','Color','Alignment','FontWeight','TextOverflow','Visibility']) globals[name] = {};
 globals.CheckBoxShape = {};
 globals.Checkbox = new Proxy({}, { get: (_, key) => key === 'select' ? value => { checkboxSelected = value; } :
   key === 'onChange' ? callback => { checkboxChange = callback; } : () => {} });
+// Execute the actual emitted custom content: a no-op stub would hide a missing Builder receiver.
+const menuSource = fs.readFileSync(path.join(path.dirname(emitted), '../common/MaterialMenu.ts'), 'utf8');
+vm.runInNewContext(ts.transpileModule(menuSource, { compilerOptions: {
+  target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS
+} }).outputText, globals);
+globals.materialMenuContent = globals.exports.materialMenuContent;
 const names = ['filtered','sections','sectionThreads','sectionTitle','groupOpen','visibleCount','onActivePath','lastBranch','loadMore','toggleGroup','sectionHeader','projectActions',
   'locked','endSelection','selectThread','allSelected','selectAll','archiveSelected','confirmDeleteSelected'];
 vm.runInNewContext(ts.transpileModule(`${cls('ThreadSection').getText(tree)}

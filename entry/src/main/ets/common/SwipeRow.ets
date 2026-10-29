@@ -106,14 +106,14 @@ export struct SwipeRow {
   actionsMenu() {
     Menu() {
       if (this.onShare) {
-        MenuItem(() => materialMenuContent({ label: t('分享'), icon: $r('sys.symbol.share') }))
+        MenuItem(() => materialMenuContent.bind(this)({ label: t('分享'), icon: $r('sys.symbol.share') }))
           .enabled(!this.disabled).onClick(() => this.onShare?.())
       }
       if (this.onExport) {
-        MenuItem(() => materialMenuContent({ label: t('导出到文件'), icon: $r('sys.symbol.square_and_arrow_down') }))
+        MenuItem(() => materialMenuContent.bind(this)({ label: t('导出到文件'), icon: $r('sys.symbol.square_and_arrow_down') }))
           .enabled(!this.disabled).onClick(() => this.onExport?.())
       }
-      MenuItem(() => materialMenuContent({ label: t('删除'), icon: $r('sys.symbol.trash'), danger: true }))
+      MenuItem(() => materialMenuContent.bind(this)({ label: t('删除'), icon: $r('sys.symbol.trash'), danger: true }))
         .enabled(!this.disabled).onClick(() => this.requestDelete())
     }
   }

@@ -164,7 +164,7 @@ export struct ProviderEditorPanel {
   @Builder
   serviceActions() {
     Menu() {
-      MenuItem(() => materialMenuContent({ label: t('删除此服务'), icon: $r('sys.symbol.trash'), danger: true })).id('delete-provider-' + this.editor.id)
+      MenuItem(() => materialMenuContent.bind(this)({ label: t('删除此服务'), icon: $r('sys.symbol.trash'), danger: true })).id('delete-provider-' + this.editor.id)
         .enabled(!this.locked()).onClick(() => this.confirmDelete())
     }
   }

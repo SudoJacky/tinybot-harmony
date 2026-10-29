@@ -57,14 +57,14 @@ struct ThreadRow {
   actions() {
     Menu() {
       if (!this.selecting) {
-        MenuItem(() => materialMenuContent({ label: t("重命名"), icon: $r('sys.symbol.square_and_pencil') }))
+        MenuItem(() => materialMenuContent.bind(this)({ label: t("重命名"), icon: $r('sys.symbol.square_and_pencil') }))
           .onClick(() => { this.name = this.thread.title; this.editing = true; })
-        MenuItem(() => materialMenuContent({ label: this.thread.pinned ? t("取消置顶") : t("置顶"), icon: $r('sys.symbol.pin') }))
+        MenuItem(() => materialMenuContent.bind(this)({ label: this.thread.pinned ? t("取消置顶") : t("置顶"), icon: $r('sys.symbol.pin') }))
           .onClick(() => this.app.pinThread(this.thread.id))
-        MenuItem(() => materialMenuContent({ label: this.thread.archived ? t("恢复对话") : t("归档"), icon: $r('sys.symbol.archivebox') }))
+        MenuItem(() => materialMenuContent.bind(this)({ label: this.thread.archived ? t("恢复对话") : t("归档"), icon: $r('sys.symbol.archivebox') }))
           .enabled(!this.app.runningThreadIds.includes(this.thread.id))
           .onClick(() => this.app.archiveThread(this.thread.id))
-        MenuItem(() => materialMenuContent({ label: t("删除"), icon: $r('sys.symbol.trash'), danger: true }))
+        MenuItem(() => materialMenuContent.bind(this)({ label: t("删除"), icon: $r('sys.symbol.trash'), danger: true }))
           .enabled(!this.app.runningThreadIds.includes(this.thread.id))
           .onClick(() => {
             this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface,
@@ -396,9 +396,9 @@ export struct ThreadList {
   @Builder
   projectActions(id: string) {
     Menu() {
-      MenuItem(() => materialMenuContent({ label: t('项目文件'), icon: $r('sys.symbol.folder') }))
+      MenuItem(() => materialMenuContent.bind(this)({ label: t('项目文件'), icon: $r('sys.symbol.folder') }))
         .onClick(async () => { if (await this.app.openProject(id)) { this.onFiles(); } })
-      MenuItem(() => materialMenuContent({ label: t('编辑项目'), icon: $r('sys.symbol.square_and_pencil') }))
+      MenuItem(() => materialMenuContent.bind(this)({ label: t('编辑项目'), icon: $r('sys.symbol.square_and_pencil') }))
         .onClick(() => this.editProject(id))
     }
   }

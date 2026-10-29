@@ -676,12 +676,17 @@ export struct ChatPanel {
   }
 
   @Builder
+  projectMenuHeader() {
+    materialMenuHeader(t('在项目中新建对话'))
+  }
+
+  @Builder
   projectMenu() {
     Menu() {
-      MenuItemGroup({ header: () => materialMenuHeader(t('在项目中新建对话')) }) {
-        MenuItem(() => materialMenuContent({ label: t('普通聊天') })).onClick(() => { this.app.newThread(''); })
+      MenuItemGroup({ header: this.projectMenuHeader }) {
+        MenuItem(() => materialMenuContent.bind(this)({ label: t('普通聊天') })).onClick(() => { this.app.newThread(''); })
         ForEach(this.app.projects, (project: ProjectData) => {
-          MenuItem(() => materialMenuContent({ label: project.name })).onClick(() => { this.app.newThread(project.id); })
+          MenuItem(() => materialMenuContent.bind(this)({ label: project.name })).onClick(() => { this.app.newThread(project.id); })
         }, (project: ProjectData) => project.id)
       }
     }
@@ -690,8 +695,8 @@ export struct ChatPanel {
   @Builder
   workbenchModeMenu() {
     Menu() {
-      MenuItem(() => materialMenuContent({ label: t('标准模式') })).onClick(() => this.toggleTeam(false))
-      MenuItem(() => materialMenuContent({ label: t('团队模式') })).onClick(() => this.toggleTeam(true))
+      MenuItem(() => materialMenuContent.bind(this)({ label: t('标准模式') })).onClick(() => this.toggleTeam(false))
+      MenuItem(() => materialMenuContent.bind(this)({ label: t('团队模式') })).onClick(() => this.toggleTeam(true))
     }
   }
 
@@ -880,7 +885,7 @@ export struct ChatPanel {
   @Builder
   sendMenu() {
     Menu() {
-      MenuItem(() => materialMenuContent({ label: t("加入队列"), icon: $r('sys.symbol.text_and_plus') }))
+      MenuItem(() => materialMenuContent.bind(this)({ label: t("加入队列"), icon: $r('sys.symbol.text_and_plus') }))
         .enabled(this.app.canQueueInput && this.hasDraft())
         .onClick(() => this.app.enqueueInput('followUp'))
     }

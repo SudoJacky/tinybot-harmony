@@ -96,7 +96,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   const source = fs.readFileSync(path.join(root, 'pages/Index.ets'), 'utf8').replace(/\r\n/g, '\n');
   const method = source.slice(source.indexOf('  private offerAnnouncement('), source.indexOf('  private onboardingPreferences('));
   const exports = {}, dialogs = [];
-  let depth = 0, failDialog = false;
+  let depth = 0, failDialog = false, dark = false;
   class Controller {
     constructor(options) { this.options = options; this.closed = false; }
     open() { if (failDialog) throw Error('No window'); dialogs.push(this); }
@@ -104,11 +104,13 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   }
   const uiGlobals = {
     exports, announcements: uiService, Diagnostics: diagnostics, CustomDialogController: Controller,
-    AnnouncementDialog: props => props, DialogAlignment: { Center: 'center' }, WorkbenchLayout
+    AnnouncementDialog: props => props, DialogAlignment: { Center: 'center' }, WorkbenchLayout,
+    BlurStyle: { COMPONENT_ULTRA_THICK: 'ultra-thick' }, ThemeColorMode: { DARK: 'dark', LIGHT: 'light' },
+    AppStorage: { get: key => { assert.equal(key, 'tinybot.appearance.dark'); return dark; } }
   };
   vm.runInNewContext(compile('export class Probe {\n' + method + '\n}'), uiGlobals);
   const probe = Object.assign(new exports.Probe(), { privacy, foreground: true, app: { ready: true }, onboardingChecked: true,
-    paths: { size: () => depth }, appearance: { surface: 0 }, windowWidth: 390 });
+    paths: { size: () => depth }, appearance: { surface: 0, noMaterial: 'empty-material' }, windowWidth: 390 });
   for (const field of ['foreground', 'onboardingChecked']) {
     probe[field] = false; probe.offerAnnouncement(); probe[field] = true;
   }
@@ -120,6 +122,9 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   failDialog = false; probe.offerAnnouncement(); probe.offerAnnouncement();
   assert.equal(dialogs.length, 1, 'Do not open again while the native dialog is mounting');
   const dialog = dialogs[0];
+  assert.equal(dialog.options.systemMaterial, 'empty-material');
+  assert.equal(dialog.options.backgroundBlurStyle, 'ultra-thick');
+  assert.equal(dialog.options.backgroundBlurStyleOptions.colorMode, 'light');
   assert.equal(dialog.options.width, undefined, 'Phone announcements retain the platform width');
   assert.equal(dialog.options.builder.announcement.body, notice().body);
   assert.ok(uiService.pending(), 'Only a visible dialog consumes the per-launch offer');
@@ -135,6 +140,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   assert.equal(probe.announcementDialog, undefined);
   const restart = fresh(); await restart.checkOnStartup({}); assert.equal(restart.pending(), null);
   for (const [windowWidth, expectedWidth] of [[1024, 717], [1440, 800]]) {
+    dark = windowWidth === 1440;
     result.result = feed(notice('notice-tablet-' + windowWidth));
     const tabletService = fresh();
     await tabletService.checkOnStartup({});
@@ -142,6 +148,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
     probe.windowWidth = windowWidth;
     probe.offerAnnouncement();
     const tabletDialog = dialogs.at(-1);
+    assert.equal(tabletDialog.options.backgroundBlurStyleOptions.colorMode, dark ? 'dark' : 'light');
     assert.equal(tabletDialog.options.width, expectedWidth, 'Announcement controller receives the tablet width');
     tabletDialog.options.onDidAppear();
     tabletDialog.options.builder.onConfirm();
