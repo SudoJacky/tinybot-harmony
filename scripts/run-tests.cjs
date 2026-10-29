@@ -58,6 +58,8 @@ const suites = {
     'test-window-viewport.cjs',
   ],
   debug: [
+    'test-composer-dismissal.cjs',
+    'test-focus-lifecycle.cjs',
     'test-announcements.cjs',
     'test-browser-panel.cjs',
     'test-context-usage.cjs',

@@ -1096,7 +1096,7 @@ struct Index {
       }.title(this.app.skillEditor.originalName.length > 0 ? t("编辑 Skill") : t("添加 Skill"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'provider') {
       NavDestination() {
-        ProviderEditorPanel({ app: this.app, editor: this.app.providerEditor, onSaved: () => { this.paths.pop(); },
+        ProviderEditorPanel({ app: this.app, editor: this.app.providerEditor, active: this.providerEditorActive, onSaved: () => { this.paths.pop(); },
           onModels: (error: string) => { this.paths.pushPath({ name: 'provider-models', param: error }); },
           onDiscovered: (models: string[]) => { this.paths.pushPath({ name: 'provider-discovery', param: models }); } })
       }.title(this.app.providerEditor.id.length > 0 ? t("编辑服务") : t("添加服务"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
@@ -1256,7 +1256,7 @@ struct Index {
           collapseHistory: this.workbench().expanded, searchRequest: this.historySearchRequest,
           onCollapseHistory: () => this.setHistoryCollapsed(true),
           onNewChat: () => { this.createChat(); this.setDrawer(false); }, onTools: () => { this.setDrawer(false); this.openTools('memory'); },
-          active: this.workbench().expanded || this.drawerContentActive, onSelected: () => this.setDrawer(false), onFiles: () => { this.setDrawer(false); this.openFiles(); }, onSettings: () => {
+          active: this.chatVisible && (this.workbench().expanded || this.drawerOpen && this.drawerContentActive), onSelected: () => this.setDrawer(false), onFiles: () => { this.setDrawer(false); this.openFiles(); }, onSettings: () => {
           this.setDrawer(false);
           this.openSettings();
         } })

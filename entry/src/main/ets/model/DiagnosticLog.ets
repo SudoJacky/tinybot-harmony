@@ -2,6 +2,8 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 export const LOG_LEVELS: LogLevel[] = ['debug', 'info', 'warn', 'error'];
 export type LogValue = string | number | boolean;
 export interface LogFields {
+  scriptSource?: string; line?: number; pageSceneObserver?: boolean;
+  mounted?: boolean; attached?: boolean; visible?: boolean; foreground?: boolean;
   setting?: string; dataVersion?: number; serverId?: string;
   change?: string; commonMessages?: number; sharedCharacters?: number; systemHash?: number; toolsHash?: number;
   operationId?: number; instanceId?: number; generation?: number; active?: number; count?: number; total?: number;
@@ -35,7 +37,9 @@ EVENTS.background = ['acquired', 'released', 'cancelled', 'suspended', 'release_
 EVENTS.notification = ['authorization_checked', 'authorization_denied', 'authorization_failed', 'disabled', 'published', 'publish_failed'];
 EVENTS.speech = ['preparing', 'listening', 'vad', 'complete', 'finishing', 'recognition_failed', 'cancel_failed', 'playback_requested', 'playback_failed', 'cleanup_failed', 'late_cleanup_failed'];
 EVENTS.voice = ['focus_requested', 'released', 'draft_failed'];
-EVENTS.web = ['engine_start', 'engine_ready', 'release', 'activate', 'failed', 'load_start', 'load_returned', 'host_ready', 'port_connected', 'ready', 'state_saved', 'attached', 'page_end', 'navigation_blocked', 'resource_failed'];
+EVENTS.composer = ['sheet_action_queued', 'sheet_action_dispatched', 'sheet_action_cancelled'];
+EVENTS.focus = ['search_requested', 'provider_requested', 'onboarding_requested'];
+EVENTS.web = ['engine_start', 'engine_ready', 'release', 'activate', 'failed', 'console_error', 'load_start', 'load_returned', 'host_ready', 'port_connected', 'ready', 'state_saved', 'attached', 'page_end', 'navigation_blocked', 'resource_failed'];
 EVENTS.preview = ['failed', 'captured', 'thumbnail_failed', 'surface_moved'];
 EVENTS.sandbox = ['execution_failed', 'orchestration_failed'];
 EVENTS.tool = ['failed', 'partial'];
@@ -49,13 +53,14 @@ EVENTS.memory = ['committed', 'review_started', 'review_discarded'];
 EVENTS.resources = ['credential_rollback_failed', 'team_selected', 'committed', 'preferences_saved'];
 EVENTS.configuration = ['unsupported', 'load_failed'];
 EVENTS.diagnostics = ['started', 'stopped', 'marker', 'failed', 'level_changed'];
-const NUMBERS: string[] = ['operationId', 'instanceId', 'generation', 'active', 'count', 'total', 'chars', 'bytes', 'elapsedMs', 'durationMs', 'http', 'code',
+const NUMBERS: string[] = ['line', 'operationId', 'instanceId', 'generation', 'active', 'count', 'total', 'chars', 'bytes', 'elapsedMs', 'durationMs', 'http', 'code',
   'commonMessages', 'sharedCharacters', 'systemHash', 'toolsHash', 'dataVersion',
   'messages', 'tools', 'nodes', 'keys', 'width', 'height', 'widthVp', 'request', 'chunk', 'eventCode', 'newChats', 'skippedChats', 'level', 'style',
   'tokens', 'budget', 'removed', 'retained', 'duplicates', 'characters', 'added', 'updated', 'round', 'revision', 'threads', 'changedThreads', 'selected'];
-const BOOLEANS: string[] = ['enabled', 'failed', 'cancelled', 'speaking', 'preflight', 'closed', 'streaming', 'ready', 'hasModel', 'retryable'];
+const BOOLEANS: string[] = ['pageSceneObserver', 'mounted', 'attached', 'visible', 'foreground', 'enabled', 'failed', 'cancelled', 'speaking', 'preflight', 'closed', 'streaming', 'ready', 'hasModel', 'retryable'];
 const REFERENCES: string[] = ['threadId', 'messageId', 'sessionId', 'providerId', 'previewId', 'surfaceId', 'serverId'];
 const STRINGS: Record<string, string[]> = {};
+STRINGS.scriptSource = ['generated', 'host', 'frame', 'blank', 'data', 'other', 'unknown'];
 STRINGS.setting = ['search.provider', 'providerProfiles.protocol', 'options.autoRoute', 'extensions.browserPolicy', 'config.reasoning',
   'capabilities.reasoning', 'threads.agentMode', 'threads.disabledTools', 'threads.reasoningEffort', 'servers.authType'];
 STRINGS.change = ['cold', 'append', 'tools', 'system', 'history'];
