@@ -54,7 +54,10 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Release build failed.' }
     }
 
-    $appPath = Join-Path $projectRoot 'build/outputs/default/tinybot-harmony-default-unsigned.app'
+    # Hvigor names the APP after the checkout directory, which differs in a worktree.
+    $appOutputs = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'build/outputs/default') -Filter '*-default-unsigned.app' -File)
+    if ($appOutputs.Count -ne 1) { throw 'Expected exactly one unsigned APP output. Check the current build outputs before packaging.' }
+    $appPath = $appOutputs[0].FullName
     $symbolsPath = Join-Path $projectRoot 'build/outputs/default/symbol/release/app-symbol.zip'
     if (-not (Test-Path -LiteralPath $symbolsPath)) {
         $symbolsPath = Join-Path $projectRoot 'build/outputs/default/symbol/app-symbol.zip'
@@ -172,7 +175,7 @@ try {
         signing = 'unsigned; cloud-managed release signing required before upload/install'
         uploadedToAGC = $false
         rebuiltThisRun = (-not $SkipBuild.IsPresent)
-        originalBuildAppPath = 'build/outputs/default/tinybot-harmony-default-unsigned.app'
+        originalBuildAppPath = 'build/outputs/default/' + $appOutputs[0].Name
         pending = @('Release signing and platform upload', 'Verify platform identity, contact and policy URL', 'Current store screenshots and listing fields', 'ARM64 device and cloud tests; review model access')
         files = $files
     }
