@@ -38,7 +38,8 @@ assert.ok(fs.statSync(indexEmitted).mtimeMs >= fs.statSync(indexSource).mtimeMs,
 const indexTree = ts.createSourceFile(indexEmitted, fs.readFileSync(indexEmitted, 'utf8'), ts.ScriptTarget.Latest, true);
 const indexClass = indexTree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'Index');
 const createChat = indexClass.members.find(n => n.name?.getText(indexTree) === 'createChat').getText(indexTree);
-vm.runInNewContext(ts.transpileModule(`class Header { ${createChat} } exports.Header = Header;`, {
+const revealChat = indexClass.members.find(n => n.name?.getText(indexTree) === 'revealChat').getText(indexTree);
+vm.runInNewContext(ts.transpileModule(`class Header { ${createChat} ${revealChat} } exports.Header = Header;`, {
   compilerOptions: { target: ts.ScriptTarget.ES2021 }
 }).outputText, globals);
 (async () => {
@@ -94,6 +95,7 @@ vm.runInNewContext(ts.transpileModule(`class Header { ${createChat} } exports.He
   const headerFixture = new Fixture(empty), headerApp = new ChatViewModel(); await headerApp.initialize(headerFixture.session);
   const toasts = [];
   const header = Object.assign(new globals.exports.Header(), { app: headerApp, appearance: { surface: {} },
+    paths: {clear(){}},setDrawer(){},workbench:()=>({docked:true}),
     getUIContext: () => ({ getPromptAction: () => ({ showToast: value => toasts.push(value.message) }) }) });
   const initialWrites = headerFixture.repository.writes.length;
   await header.createChat(); await header.createChat();

@@ -214,6 +214,7 @@ export class SessionService {
       for (const thread of importedCandidate.threads) { await this.ensureThreadWorkspace(thread, importedCandidate.data); }
       await commitBackupKeys(this.data, imported, importedCandidate, this.credentials, () => this.resources.createId(),
         (data) => this.commitSettings(data));
+      this.resources.configureProviders(this.providerProfiles);
     });
   }
   private get active(): ThreadData { return this.requireThread(this.data.activeThreadId); }
