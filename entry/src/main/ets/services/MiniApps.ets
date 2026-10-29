@@ -1,6 +1,7 @@
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
-import { MINI_APP_DIR, MiniAppEntry, MiniAppRecord, MiniAppSnapshot, MiniAppStorage, miniAppId, miniAppPath, parseMiniApp } from '../model/MiniApp';
+import { MINI_APP_DIR, MiniAppEntry, MiniAppRecord, MiniAppRevision, VersionedMiniAppRecord, MiniAppSnapshot, MiniAppStorage,
+  miniAppId, miniAppPath, parseMiniApp, miniAppDataFile, miniAppInCollection, miniAppPreviousRevision } from '../model/MiniApp';
 import { WebUiSpec, parseWebUi } from '../model/WebUi';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { NativeWorkspaceFiles } from './NativeWorkspaceFiles';
@@ -31,9 +32,19 @@ export class MiniAppRepository {
       const old = snapshot ? parseMiniApp(snapshot.content, id) : undefined;
       if (old?.archived) { throw new Error('Restore the mini app before publishing an update'); }
       const now = Date.now();
-      const app: MiniAppRecord = { version: 1, id: id, title: title, description: description, sourcePath: sourcePath,
+      let app: MiniAppRecord = { version: 1, id: id, title: title, description: description, sourcePath: sourcePath,
         sourceThreadId: sourceThreadId, createdAt: old?.createdAt ?? now, updatedAt: now, lastOpenedAt: old?.lastOpenedAt ?? 0,
         archived: false, page: parseWebUi(JSON.stringify(page)), previousPage: old?.page };
+      if (old?.version === 2) {
+        const history = old as VersionedMiniAppRecord;
+        const current = history.revisions.find((revision) => revision.id === history.currentRevisionId);
+        const number = history.revisions.length + 1;
+        const revision: MiniAppRevision = { id: 'v' + number + '-' + util.generateRandomUUID(), number: number,
+          title: title, description: description, summary: 'Updated page', sourcePath: sourcePath, sourceThreadId: sourceThreadId,
+          createdAt: now, dataSchema: current?.dataSchema ?? 1, page: app.page };
+        history.revisions.push(revision);
+        this.useRevision(history, revision, now); app = history;
+      }
       parseMiniApp(JSON.stringify(app), id);
       if (!old) { await this.files.write(miniAppPath(id, 'data.json'), JSON.stringify({ version: 1, value: null }), cancellation, { version: null }); }
       // Commit only the page/metadata; an update never writes user data.
@@ -42,24 +53,28 @@ export class MiniAppRepository {
     });
   }
   async load(id: string): Promise<MiniAppSnapshot> {
+    return withFileMutation(this.lockKey + ':' + miniAppId(id), async (): Promise<MiniAppSnapshot> => {
     const app = await this.get(id);
-    if (app.archived) { throw new Error('This mini app has been removed'); }
+    if (app.archived || !miniAppInCollection(app)) { throw new Error('This mini app has not been added or has been removed'); }
     return this.readData(id);
+    });
   }
   async readData(id: string): Promise<MiniAppSnapshot> {
-    const file = await this.files.read(miniAppPath(id, 'data.json'), new Cancellation());
+    const app = await this.get(id);
+    const file = await this.files.read(miniAppPath(id, miniAppDataFile(app)), new Cancellation());
     const data = JSON.parse(file.content) as StoredData;
     if (!data || data.version !== 1 || data.value === undefined) { throw new Error('Invalid mini app data: ' + id); }
     return { value: data.value, revision: file.version };
   }
   async save(id: string, value: Object | null, revision: string): Promise<MiniAppSnapshot> {
     return withFileMutation(this.lockKey + ':' + miniAppId(id), async (): Promise<MiniAppSnapshot> => {
-      if ((await this.get(id)).archived) { throw new Error('This mini app has been removed'); }
+      const app = await this.get(id);
+      if (app.archived || !miniAppInCollection(app)) { throw new Error('This mini app has not been added or has been removed'); }
       if (typeof revision !== 'string' || !revision) { throw new Error('Load mini app data before saving'); }
       const content = JSON.stringify({ version: 1, value: value });
       const data = JSON.parse(content) as StoredData;
       if (data.value === undefined) { throw new Error('Mini app data must be JSON'); }
-      const result = await this.files.write(miniAppPath(id, 'data.json'), content, new Cancellation(), { version: revision });
+      const result = await this.files.write(miniAppPath(id, miniAppDataFile(app)), content, new Cancellation(), { version: revision });
       return { value: data.value, revision: result.version };
     });
   }
@@ -69,13 +84,24 @@ export class MiniAppRepository {
       const file = await this.files.read(path, cancellation), app = parseMiniApp(file.content, id);
       if (action === 'archive') { app.archived = true; }
       else if (action === 'restore') { app.archived = false; }
-      else if (action === 'open') { if (app.archived) { throw new Error('This mini app has been removed'); } app.lastOpenedAt = Date.now(); }
+      else if (action === 'open') { if (app.archived || !miniAppInCollection(app)) { throw new Error('This mini app has not been added or has been removed'); } app.lastOpenedAt = Date.now(); }
       else if (action === 'rollback') {
-        if (!app.previousPage || app.archived) { throw new Error('No previous mini app version available'); }
-        const previous = app.previousPage; app.previousPage = app.page; app.page = previous; app.updatedAt = Date.now();
+        if (app.version === 2) {
+          const previous = miniAppPreviousRevision(app);
+          if (!previous || app.archived) { throw new Error('No compatible previous mini app version available'); }
+          this.useRevision(app as VersionedMiniAppRecord, previous, Date.now());
+        } else {
+          if (!app.previousPage || app.archived) { throw new Error('No previous mini app version available'); }
+          const previous = app.previousPage; app.previousPage = app.page; app.page = previous; app.updatedAt = Date.now();
+        }
       } else { throw new Error('Unknown mini app action'); }
       await this.files.write(path, JSON.stringify(app), cancellation, { version: file.version }); return app;
     });
+  }
+  private useRevision(app: VersionedMiniAppRecord, revision: MiniAppRevision, now: number): void {
+    app.currentRevisionId = revision.id; app.page = revision.page; app.title = revision.title; app.description = revision.description;
+    app.sourcePath = revision.sourcePath; app.sourceThreadId = revision.sourceThreadId; app.updatedAt = now;
+    app.adoptions.push({ revisionId: revision.id, adoptedAt: now, dataFile: app.dataFile });
   }
   binding(id: string): MiniAppStorage { return new MiniAppBinding(this, miniAppId(id)); }
 }

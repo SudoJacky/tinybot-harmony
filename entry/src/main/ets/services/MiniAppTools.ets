@@ -2,7 +2,7 @@ import { ToolCall, ToolDefinition } from '../model/Agent';
 import { AgentTools } from './AgentLoop';
 import { ToolFailure, parseToolArguments } from '../model/ToolFailure';
 import { MiniApps, MiniAppValidationStorage } from './MiniApps';
-import { MiniAppStorage, MiniAppSnapshot, miniAppId, miniAppPage, miniAppPath } from '../model/MiniApp';
+import { MiniAppStorage, MiniAppSnapshot, miniAppId, miniAppPage, miniAppPath, miniAppDataFile, miniAppInCollection } from '../model/MiniApp';
 import { WorkspaceFiles } from './WorkspaceFiles';
 import { workspaceRelativePath } from './WorkspaceTools';
 import { Cancellation } from './Cancellation';
@@ -50,9 +50,9 @@ export class MiniAppTools implements AgentTools {
     cancellation.check();
     if (call.function.name === 'list_mini_apps') {
       if (Object.keys(args).length) { throw new ToolFailure('INVALID_ARGUMENTS', 'No arguments expected', 'fix_arguments'); }
-      return JSON.stringify((await this.apps.list(this.workspaceId)).map((entry): AppSummary => ({ appId: entry.app.id, title: entry.app.title,
+      return JSON.stringify((await this.apps.list(this.workspaceId)).filter((entry) => miniAppInCollection(entry.app)).map((entry): AppSummary => ({ appId: entry.app.id, title: entry.app.title,
         description: entry.app.description, archived: entry.app.archived, sourcePath: entry.app.sourcePath,
-        dataPath: miniAppPath(entry.app.id, 'data.json'), updatedAt: entry.app.updatedAt })));
+        dataPath: miniAppPath(entry.app.id, miniAppDataFile(entry.app)), updatedAt: entry.app.updatedAt })));
     }
     if (call.function.name !== 'publish_mini_app') { throw new ToolFailure('TOOL_UNAVAILABLE', 'Unknown mini app tool', 'check_available_tools'); }
     if (Object.keys(args).some((key) => !['path', 'title', 'description', 'appId', 'library'].includes(key)) ||
@@ -69,6 +69,6 @@ export class MiniAppTools implements AgentTools {
     cancellation.check();
     const app = await repository.publish(id, args.title.trim(), args.description || '', path, this.threadId, page, args.appId !== undefined, cancellation);
     return JSON.stringify({ appId: app.id, title: app.title, published: true, updated: args.appId !== undefined,
-      sourcePath: app.sourcePath, dataPath: miniAppPath(app.id, 'data.json'), startup: 'passed', interaction: 'not_checked', openFrom: 'Mini apps collection' });
+      sourcePath: app.sourcePath, dataPath: miniAppPath(app.id, miniAppDataFile(app)), startup: 'passed', interaction: 'not_checked', openFrom: 'Mini apps collection' });
   }
 }

@@ -180,7 +180,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
   // App-owned state is atomic and version-checked, but is not an agent edit to review/revert.
   async writeMiniApp(path: string, content: string, cancellation: Cancellation, guard?: WorkspaceWriteGuard): Promise<WorkspaceWrite> {
     workspaceRelativePath(path, false);
-    if (!/^mini-apps\/[A-Za-z0-9][A-Za-z0-9_-]{0,127}\/(app|data)\.json$/.test(path)) { throw new Error('Invalid managed mini app path'); }
+    if (!/^mini-apps\/[A-Za-z0-9][A-Za-z0-9_-]{0,127}\/(app|data(?:-[A-Za-z0-9_-]+)?)\.json$/.test(path)) { throw new Error('Invalid managed mini app path'); }
     return withFileMutation(this.root + '/' + path, () => this.mutate(path, content, [], cancellation, guard, false));
   }
 

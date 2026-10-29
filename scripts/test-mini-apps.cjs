@@ -78,7 +78,7 @@ function load(name) {
 }
 const { MiniApps, MiniAppValidationStorage } = load('services/MiniApps');
 const { MiniAppTools } = load('services/MiniAppTools');
-const { miniAppPage, miniAppPath } = load('model/MiniApp');
+const { miniAppPage, miniAppPath, parseMiniApp, miniAppCanRollback, miniAppInCollection } = load('model/MiniApp');
 const { parseWebUiMessage } = load('model/WebUi');
 const { NativeWorkspaceFiles } = load('services/NativeWorkspaceFiles');
 const { WorkspaceStore } = load('model/WorkspaceStore');
@@ -182,7 +182,68 @@ async function main() {
   await apps.remove('other','ledger');
   assert.equal((await apps.list('other')).length,0); assert.equal((await apps.list('chat')).length,2);
   console.log('PASS backup/restore after deleting source chats, local data wins, permanent deletion stays scoped');
+  await versionTwoTest();
   if(process.argv.includes('--browser')) await browserTest(repo,app.id);
+}
+async function versionTwoTest() {
+  const dir = '/sandbox/v2', workspace = new WorkspaceStore(dir), apps = new MiniApps(dir);
+  fs.mkdirSync(disk(dir), {recursive:true}); await workspace.ensureThread('v2-workspace');
+  const repo = apps.repository('v2-workspace'), appDir = workspace.pathFor('v2-workspace') + '/mini-apps/versioned';
+  const page = miniAppPage('counter.js', 'document.body.textContent="current"');
+  const revision = (number, schema) => ({id:'v'+number,number,title:'Counter '+number,description:'fixture',summary:'revision',
+    sourcePath:'counter.js',sourceThreadId:'v2-workspace',createdAt:100+number,dataSchema:schema,page:{...page,js:'document.body.textContent="v'+number+'"'}});
+  const revisions = [revision(1,1),revision(2,2)];
+  const manifest = {version:2,id:'versioned',title:'Counter 2',description:'fixture',sourcePath:'counter.js',sourceThreadId:'v2-workspace',
+    createdAt:101,updatedAt:102,lastOpenedAt:0,archived:false,page:revisions[1].page,currentRevisionId:'v2',dataFile:'data-v2.json',revisions,
+    adoptions:[{revisionId:'v1',adoptedAt:101,dataFile:'data.json'},{revisionId:'v2',adoptedAt:102,dataFile:'data-v2.json'}]};
+  fs.mkdirSync(disk(appDir), {recursive:true});
+  const write = (name,value) => fs.writeFileSync(disk(appDir+'/'+name), JSON.stringify(value));
+  write('app.json',manifest); write('data.json',{version:1,value:{old:7}});
+  write('data-v2.json',{version:1,value:{count:42}}); write('trial-v2.json',{version:1,value:{count:9},baseRevisionId:'v1',baseDataRevision:'old',edited:true});
+  const originalHistory = plain(manifest.revisions), oldData = fs.readFileSync(disk(appDir+'/data.json'));
+  assert.equal((await apps.list()).length,1);
+  let data = await repo.load('versioned'); assert.deepEqual(plain(data.value),{count:42});
+  data = await repo.save('versioned',{count:43},data.revision);
+  assert.deepEqual(fs.readFileSync(disk(appDir+'/data.json')),oldData,'Save must not overwrite the old schema file');
+  assert.equal(miniAppCanRollback(await repo.get('versioned')),false);
+  await assert.rejects(repo.change('versioned','rollback'),/compatible/);
+  await repo.change('versioned','open'); await repo.change('versioned','archive'); await repo.change('versioned','restore');
+  assert.deepEqual(plain((await repo.get('versioned')).revisions),originalHistory);
+  const updated = await repo.publish('versioned','Updated','fixture','counter.js','v2-workspace',page,true,signal);
+  assert.equal(updated.version,2); assert.equal(updated.revisions.length,3); assert.equal(updated.revisions[2].dataSchema,2);
+  assert.equal(updated.currentRevisionId,updated.revisions[2].id); assert.equal(updated.dataFile,'data-v2.json');
+  assert.deepEqual(plain(updated.revisions.slice(0,2)),originalHistory);
+  assert.equal(miniAppCanRollback(updated),true);
+  await repo.change('versioned','rollback');
+  assert.equal((await repo.get('versioned')).currentRevisionId,'v2');
+  assert.equal((await repo.get('versioned')).page.js,revisions[1].page.js);
+  assert.deepEqual(plain(await repo.load('versioned')),plain(data));
+  await repo.change('versioned','rollback');
+  assert.equal((await repo.get('versioned')).currentRevisionId,updated.currentRevisionId);
+  for (const mutate of [m=>m.dataFile='../data.json',m=>m.currentRevisionId='missing',m=>m.revisions[0]=null,
+    m=>m.revisions[0].dataSchema=0,m=>m.adoptions[0].dataFile='../../other.json',m=>m.adoptions[0].revisionId='missing']) {
+    const invalid=plain(manifest); mutate(invalid); assert.throws(()=>parseMiniApp(JSON.stringify(invalid),'versioned'));
+  }
+  const draft=plain(manifest); draft.currentRevisionId=''; draft.adoptions=[];
+  assert.equal(miniAppInCollection(parseMiniApp(JSON.stringify(draft),'versioned')),false,'Unadopted v2 trials stay outside the collection');
+  const context={filesDir:dir,cacheDir:dir+'/cache',getApplicationContext(){return this;}};
+  fs.mkdirSync(disk(context.cacheDir));
+  const {createBackupFile,readBackupFile}=load('services/Backup');
+  const backup=await createBackupFile(context,emptyData());
+  const restoredDir='/sandbox/v2-restored'; fs.mkdirSync(disk(restoredDir));
+  const target={filesDir:restoredDir,cacheDir:restoredDir,getApplicationContext(){return this;}};
+  await readBackupFile(target,backup,emptyData());
+  const restored=new MiniApps(restoredDir).repository('v2-workspace');
+  assert.deepEqual(plain(await restored.get('versioned')),plain(await repo.get('versioned')));
+  assert.deepEqual(plain((await restored.load('versioned')).value),{count:43});
+  for (const name of ['app.json','data.json','data-v2.json','trial-v2.json']) {
+    assert.deepEqual(fs.readFileSync(disk(new WorkspaceStore(restoredDir).pathFor('v2-workspace')+'/mini-apps/versioned/'+name)),
+      fs.readFileSync(disk(appDir+'/'+name)), 'Archive round trip preserves '+name+' byte for byte');
+  }
+  const local=await restored.load('versioned'); await restored.save('versioned',{count:44},local.revision);
+  await readBackupFile(target,backup,emptyData());
+  assert.deepEqual(plain((await restored.load('versioned')).value),{count:44},'Repeated restore keeps local v2 data');
+  console.log('PASS v2 validation, active data file, non-destructive updates/rollback, schema boundary and byte-exact archive restore');
 }
 async function browserTest(repo,id) {
   const {chromium}=require('playwright');
