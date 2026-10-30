@@ -25,6 +25,8 @@ export struct ProductivityPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   @State tab: string = 'memory';
+  @Prop requestedTab: string = 'memory';
+  @Prop @Watch('applyRequestedTab') tabRequest: number = 0;
   @Prop editorOnly: boolean = false;
   @Prop entryId: string = '';
   onUse: () => void = () => {};
@@ -60,7 +62,7 @@ export struct ProductivityPanel {
   private tabs: TabsController = new TabsController();
   private cancellation: Cancellation = new Cancellation();
   aboutToAppear(): void {
-    if (!this.editorOnly) { return; }
+    if (!this.editorOnly) { this.applyRequestedTab(); return; }
     this.reset(); this.editingId = this.entryId;
     if (this.tab === 'memory') {
       const item = this.app.productivity.memories.find((item) => item.id === this.entryId);
@@ -77,6 +79,9 @@ export struct ProductivityPanel {
 
   private locked(): boolean { return this.busy || this.app.sharedBusy; }
   private currentIndex(): number { return Math.max(0, TABS.indexOf(this.tab)); }
+  private applyRequestedTab(): void {
+    if (!this.editorOnly) { this.selectTab(Math.max(0, TABS.indexOf(this.requestedTab))); }
+  }
   private selectTab(index: number): void {
     if (this.tab === TABS[index]) { return; }
     this.swipeRow = ''; this.tab = TABS[index]; this.tabs.changeIndex(index);

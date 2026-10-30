@@ -12,9 +12,10 @@ const source = fs.readFileSync(file, 'utf8').replace('struct Index {', 'class In
 const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
 const cls = tree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'Index');
 const methods = ['openTools', 'openSettings', 'openMiniApps', 'createChat', 'revealChat',
-  'openFiles', 'openDetailTab', 'openHistorySearch', 'toggleHistory', 'setHistoryCollapsed'];
+  'openFiles', 'openDetailTab', 'openHistorySearch', 'toggleHistory', 'setHistoryCollapsed',
+  'confirmProviderDiscard', 'confirmRootNavigation'];
 const body = methods.map(name => cls.members.find(node => node.name?.getText(tree) === name).getText(tree)).join('\n');
-const globals = { exports: {}, t: text => text, LaunchMode: { POP_TO_SINGLETON: 2 }, Diagnostics: { log() {} }, Motion: {} };
+const globals = { exports: {}, t: text => text, $r: value => value, LaunchMode: { POP_TO_SINGLETON: 2 }, Diagnostics: { log() {} }, Motion: {} };
 vm.runInNewContext(ts.transpileModule(`class Page { ${body} } exports.Page = Page;`, {
   compilerOptions: { target: ts.ScriptTarget.ES2021 }
 }).outputText, globals);
@@ -41,10 +42,10 @@ const miniAppsCallback = vm.runInNewContext(`(function() { return (${miniAppsCal
 assert.equal(miniAppsMenuCallbacks.length, 1, 'Find the mini-app entry in the more menu');
 const miniAppsMenuCallback = vm.runInNewContext(`(function() { return (${miniAppsMenuCallbacks[0]}); })`);
 function fixture() {
-  const routes = [], toasts = [];
+  const routes = [], toasts = [], dialogs = [];
   let resets = 0;
   const page = Object.assign(new globals.exports.Page(), {
-    app: { canNavigate: true, active: { id: 'chat' }, error: '', saveError: '',
+    app: { canNavigate: true, active: { id: 'chat' }, error: '', saveError: '', busy: false, providerEditor: { hasChanges: false },
       openSettings() { resets++; }, async newThread() { return true; } },
     paths: {
       getAllPathName: () => routes.map(route => route.name), size: () => routes.length,
@@ -56,12 +57,14 @@ function fixture() {
       clear() { routes.length = 0; }
     },
     appearance: {}, detailTabs: [], workspaceRequest: 0, historySearchRequest: 0, historyCollapsed: false,
+    toolsTab: 'memory', toolsTabRequest: 0,
     setDrawer(open) { this.drawerOpen = open; }, setDetailPane(open) { this.detailPaneOpen = open; },
     workbench() { return { docked: true, canExpand: true, expanded: !this.historyCollapsed }; },
-    getUIContext: () => ({ animateTo(_options, update) { update(); }, getFocusController: () => ({ clearFocus() {} }),
+    getUIContext: () => ({ showAlertDialog(value) { dialogs.push(value); },
+      animateTo(_options, update) { update(); }, getFocusController: () => ({ clearFocus() {} }),
       getPromptAction: () => ({ showToast(value) { toasts.push(value.message); } }) })
   });
-  return { page, routes, toasts, resets: () => resets };
+  return { page, routes, toasts, dialogs, resets: () => resets };
 }
 test('repeated taps on the actual sidebar mini-app entry keep one page', () => {
   const { page, routes } = fixture();
@@ -152,4 +155,76 @@ test('blocked new chat reports the save error without discarding the current pag
   await page.createChat();
   assert.equal(routes.length, 1);
   assert.deepEqual(toasts, ['Unsaved changes']);
+});
+
+const panelOriginal = path.join(__dirname, '../entry/src/main/ets/views/ProductivityPanel.ets');
+const panelFile = file === original ? panelOriginal : path.join(path.dirname(file), '../views/ProductivityPanel.ts');
+if (panelFile !== panelOriginal) assert.ok(fs.statSync(panelFile).mtimeMs >= fs.statSync(panelOriginal).mtimeMs);
+const panelSource = fs.readFileSync(panelFile, 'utf8').replace('struct ProductivityPanel {', 'class ProductivityPanel {');
+const panelTree = ts.createSourceFile(panelFile, panelSource, ts.ScriptTarget.Latest, true);
+const panelClass = panelTree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'ProductivityPanel');
+const panelBody = ['applyRequestedTab', 'selectTab'].map(name => panelClass.members.find(node => node.name?.getText(panelTree) === name).getText(panelTree)).join('\n');
+const panelGlobals = { exports: {}, TABS: ['memory', 'templates', 'mcp'] };
+vm.runInNewContext(ts.transpileModule(`class Panel { ${panelBody} } exports.Panel = Panel;`, {
+  compilerOptions: { target: ts.ScriptTarget.ES2021 }
+}).outputText, panelGlobals);
+assert.match(panelSource, file === original ? /@Watch\('applyRequestedTab'\)/ : /declareWatch\(["']tabRequest["'], this.applyRequestedTab\)/);
+const bindings = {};
+function findBindings(node) {
+  ts.forEachChild(node, findBindings);
+  if (ts.isPropertyAssignment(node) && ['requestedTab', 'tabRequest'].includes(node.name.getText(tree))) {
+    bindings[node.name.getText(tree)] = vm.runInNewContext(`(function() { return ${node.initializer.getText(tree)}; })`);
+  }
+}
+findBindings(tree);
+test('settings shortcuts synchronize the retained tools panel and repeated requests', () => {
+  const { page, routes } = fixture();
+  const indexes = [];
+  const panel = Object.assign(new panelGlobals.exports.Panel(), { tab: 'memory', editorOnly: false, tabs: { changeIndex: index => indexes.push(index) } });
+  const update = () => {
+    panel.requestedTab = bindings.requestedTab.call(page);
+    const request = bindings.tabRequest.call(page);
+    if (panel.tabRequest !== request) { panel.tabRequest = request; panel.applyRequestedTab(); }
+  };
+  page.openTools('memory'); update();
+  for (const [tab, index] of [['mcp', 2], ['templates', 1]]) {
+    page.openSettings(); page.openTools(tab); update();
+    assert.equal(panel.tab, tab); assert.equal(indexes.at(-1), index);
+    assert.deepEqual(routes.map(route => route.name), ['productivity']);
+  }
+  panel.selectTab(2);
+  page.openTools('templates'); update();
+  assert.equal(panel.tab, 'templates', 'Repeat request must override manual tab selection');
+});
+
+for (const destination of ['settings', 'productivity', 'mini-apps']) {
+  const navigate = page => destination === 'settings' ? page.openSettings() : destination === 'productivity' ? page.openTools('mcp') : page.openMiniApps();
+  test(`${destination} singleton reuse confirms before removing a provider draft`, () => {
+    const { page, routes, dialogs } = fixture();
+    routes.push({ name: destination }, { name: 'provider' }, { name: 'provider-models' });
+    page.app.providerEditor.hasChanges = true;
+    navigate(page);
+    assert.equal(routes.length, 3);
+    assert.equal(dialogs.length, 1);
+    dialogs[0].primaryButton.action();
+    assert.equal(routes.length, 3, 'Continue editing retains the editor and its children');
+    navigate(page); dialogs[1].secondaryButton.action();
+    assert.deepEqual(routes.map(route => route.name), [destination]);
+  });
+  test(`${destination} singleton reuse is blocked during provider operations`, () => {
+    const { page, routes, dialogs } = fixture();
+    routes.push({ name: destination }, { name: 'provider' });
+    page.app.busy = true;
+    navigate(page);
+    assert.equal(routes.length, 2); assert.equal(dialogs.length, 0);
+  });
+}
+
+test('opening a new root above the provider retains its draft without a discard prompt', () => {
+  const { page, routes, dialogs } = fixture();
+  routes.push({ name: 'settings' }, { name: 'provider' });
+  page.app.providerEditor.hasChanges = true;
+  page.openTools('mcp');
+  assert.deepEqual(routes.map(route => route.name), ['settings', 'provider', 'productivity']);
+  assert.equal(dialogs.length, 0);
 });
