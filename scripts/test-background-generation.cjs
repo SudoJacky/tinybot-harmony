@@ -42,6 +42,7 @@ const mocks = {
   } },
   '@kit.ArkWeb': { webview: { WebviewController: { initializeWebEngine: noOp } } },
   '../services/NativeActions': { ShareInbox: { receive: noOp } },
+  '../services/NativeDiagnosticLog': { configureNativeDiagnosticLog: noOp },
   '../services/LanguagePreferences': { LanguagePreferences: { initialize: noOp, refresh: noOp } },
   '../services/AppearancePreferences': { AppearancePreferences: { initialize: noOp, refresh: noOp } },
   '../services/McpOAuth': { McpOAuth: { receive: noOp } },
