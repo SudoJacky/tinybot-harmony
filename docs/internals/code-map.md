@@ -55,6 +55,10 @@ scripts/               构建辅助、自动化测试与冒烟服务
 | `views/WorkspacePanel.ets` | 工作区文件浏览、编辑、导入与导出 |
 | `views/UsagePanel.ets` | 用量总览、会话、活动与请求明细 |
 | `views/StoragePanel.ets` | 存储总览、分类明细与安全清理 |
+| `views/StartupBackupDialog.ets` | 新安装恢复最新备份的确认与进度 |
+| `views/SearchSettingsPanel.ets` / `SearchProviderPanel.ets` | 搜索服务列表草稿与各提供方详情 |
+| `views/MiniAppsPanel.ets` | 小程序集合、打开、导出、恢复与移除 |
+| `views/PreviewFullscreen.ets` / `PublishedPreviewCard.ets` | 预览卡片、侧区入口与全屏容器 |
 | `views/BrowserPanel.ets` | 应用内浏览器宿主，保持 Web 实例常驻 |
 | `views/PreviewCaptureHost.ets` | 预览截图宿主：按聊天宽度整卡渲染并截图 |
 
@@ -104,6 +108,15 @@ scripts/               构建辅助、自动化测试与冒烟服务
 | `services/HuaweiAccount.ets` | 华为账号登录、状态校验与 `requireLogin()` |
 | `services/Backup.ets` / `CloudBackup.ets` | 本机导出与华为云备份 |
 | `services/StorageUsage.ets` | Ability/Application 双私有目录扫描、分类计数、孤儿附件与残留工作区识别、读取失败标记、部分删除按实际字节统计 |
+| `services/BackupArchive.ets` | v3 二进制归档、256 KiB 分块、整包 SHA-256 与临时解包 |
+| `services/BackupKeys.ets` / `BackupKeyRestore.ets` | OpenID 派生密钥、API Key 认证加密与安全存储恢复 |
+| `services/StartupBackup.ets` | 新安装识别、云端最新备份查询与一次性提示记录 |
+| `services/MiniApps.ets` / `MiniAppTools.ets` | 小程序发布、数据版本、归档与工具入口 |
+| `services/AttachmentDrop.ets` | 拖入数据的类型识别、去重、导入与取消清理 |
+| `services/BackgroundGeneration.ets` | 后台网络传输的长时任务、时限与中止处理 |
+| `services/CompletionNotifications.ets` | 完成通知授权与点击回到会话 |
+| `services/SearchSettings.ets` | 搜索提供方草稿、密钥切换与保存 |
+| `services/NativeActions.ets` | 系统选择器、导出、分享与系统分享入口 |
 | `model/Diagnostics.ets` / `services/NativeDiagnosticLog.ets` | 埋点聚合、脱敏白名单与唯一 HiLog 输出适配器 |
 | `services/WebTools.ets`、`McpTools.ets`、`SkillTools.ets`、`PresentTools.ets` 等 | 各组工具的实现，统一注册进 `ToolSet` |
 
@@ -126,6 +139,9 @@ scripts/               构建辅助、自动化测试与冒烟服务
 | `model/Diagnostics.ets` / `DiagnosticLog.ets` | 事件、计时与字段白名单 |
 | `model/Usage*.ets` | 用量记录、统计、查询与归属 |
 | `model/StoragePlan.ets` | 存储分类、孤儿判定、缓存/临时文件过期规则与报表结构 |
+| `model/BackupRestore.ets` | 备份中服务、MCP 与会话模型引用的重映射 |
+| `model/MiniApp.ets` | 小程序清单、ID、路径、版本历史与页面校验 |
+| `model/ToolGroups.ets` | 只读分组与 12 项可选能力清单 |
 
 ## common
 
@@ -141,6 +157,7 @@ scripts/               构建辅助、自动化测试与冒烟服务
 | `common/SendBubbleMotion.ets` | 发送气泡从输入区落入列表 |
 | `common/SpeechOrb.ets` / `VoiceHoldButton.ets` | 语音输入反馈与按住说话 |
 | `common/ProviderBrand.ets` / `WebsiteIcon.ets` | 服务商品牌与站点图标 |
+| `common/MaterialMenu.ets` | 材质菜单构建与设备能力降级 |
 
 ## 测试与脚本
 

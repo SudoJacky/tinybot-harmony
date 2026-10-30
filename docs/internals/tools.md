@@ -28,6 +28,7 @@ SessionResources.tools()
 ├─ SkillTools            read_skill / list_skills
 ├─ InteractionTools      request_user_input / update_plan
 ├─ CodeExecutionTools    execute_code
+├─ MiniAppTools          list_mini_apps / publish_mini_app  （实验室开启时）
 ├─ PresentTools          present_files
 ├─ PreviewTools          publish_preview
 ├─ WebTools              read_web              （允许联网时）
@@ -58,11 +59,13 @@ SessionResources.tools()
 | `workspace-write` | 否 | `write_file` `edit_file` |
 | `context-read` | 是 | `read_attachment` `read_reference` |
 | `web` | 是 | `read_web` `search_web` |
-| `browser` | 是 | `browser_open` `browser_snapshot` `browser_action` `browser_handoff` `browser_close` |
+| `browser` | 是 | `browser_open` `browser_snapshot` `browser_action` `browser_capture` `browser_wait` `browser_handoff` `browser_close` |
 | `calculation` | 是 | `execute_code` |
 | `orchestration` | 是 | `orchestrate` |
 | `interaction` | 是 | `request_user_input` `update_plan` |
 | `delivery` | 是 | `publish_preview` `present_files` |
+| `mini-app-read` | 是 | `list_mini_apps` |
+| `mini-app-write` | 否 | `publish_mini_app` |
 | `skill-read` | 是 | `read_skill` `list_skills` |
 | `mcp-discovery` | 是 | `mcp_search_tools` `mcp_list_tools` |
 | `mcp-execution` | 否 | `mcp_call` |
@@ -77,13 +80,13 @@ SessionResources.tools()
 | --- | --- | --- |
 | `context-read` | 资料与检索 | `read_attachment` `read_reference` |
 | `web` | 资料与检索 | `read_web` `search_web` |
-| `browser` | 资料与检索 | 浏览器 5 个入口 |
+| `browser` | 资料与检索 | 浏览器 7 个入口 |
 | `calculation` | 执行与协作 | `execute_code` |
 | `orchestration` | 执行与协作 | `orchestrate` |
 | `user-input` | 执行与协作 | `request_user_input` |
 | `plan` | 执行与协作 | `update_plan` |
 | `team` | 执行与协作 | 团队 9 个入口 |
-| `preview` | 预览与交付 | `publish_preview` |
+| `preview` | 预览与交付 | `publish_preview`、`list_mini_apps`、`publish_mini_app` |
 | `file-delivery` | 预览与交付 | `present_files` |
 | `mcp` | MCP 服务 | 发现与调用 3 个入口 |
 | `mcp-manage` | MCP 服务 | `mcp_manage` |
@@ -107,7 +110,7 @@ MCP 已接受的完整工具结果保存在会话回执中，并原样进入模�
 | `promptSnippet` | 一行用途，进入运行时快照的工具清单 | 否 |
 | `promptGuidelines` | 使用规则，进入 `tool_guidelines` 片段 | 否 |
 
-`toolSchemas()` 在发送前只保留 `type` 与 `function`，提示字段不会混入 provider 请求。标记为 `sequential` 的工具会让**整批**调用串行：任一步出现写文件、编辑、交互与数据展示、预览发布、编排或任一 MCP 工具，该步其余调用都排在后面执行。
+`toolSchemas()` 在发送前只保留 `type` 与 `function`，提示字段不会混入 provider 请求。标记为 `sequential` 的工具会让**整批**调用串行：任一步出现写文件、编辑、交互与数据展示、预览发布、小程序发布、编排或任一 MCP 工具，该步其余调用都排在后面执行。
 
 ## 执行流水线
 
@@ -132,7 +135,7 @@ MCP 已接受的完整工具结果保存在会话回执中，并原样进入模�
 
 ## 默认完整工具目录
 
-模型从首次请求起直接获得所有已启用、已配置且通过权限过滤的工具 schema 与使用说明，包括文件、计算、浏览器、交互、预览、文件交付、MCP 包装入口及当前角色允许的团队工具。目录按名称稳定排序，不再根据本轮调用或旧发现记录逐步扩展。`tool_search` 默认不提供。
+模型从首次请求起直接获得所有已启用、已配置且通过权限过滤的工具 schema 与使用说明，包括文件、计算、浏览器、交互、预览、小程序、文件交付、MCP 包装入口及当前角色允许的团队工具。目录按名称稳定排序，不再根据本轮调用或旧发现记录逐步扩展。`tool_search` 默认不提供。
 
 工具目录仍受只读、会话能力开关、角色、资源是否存在和服务配置约束。Skills 和记忆工具继续由对应设置控制。停用或撤销的工具不会因为旧消息调用过而重新出现；附件和引用入口只在有对应资源时加入。
 
@@ -142,7 +145,7 @@ MCP 已接受的完整工具结果保存在会话回执中，并原样进入模�
 
 ## 可视化与交付编排
 
-`orchestrate` 允许调用 `execute_code`、`publish_preview`、`present_files`，与文件、资料读取工具共用当前授权目录。可以顺序完成“读取 → 计算检查 → 写文件 → 发布 → 交付”，无需为每个依赖步骤重新请求模型。依赖步骤必须 `await`；未捕获的失败会停止脚本，禁止把已失败的写入当成发布依据。
+`orchestrate` 允许调用 `execute_code`、`publish_preview`、`publish_mini_app`、`list_mini_apps`、`present_files`，与文件、资料读取工具共用当前授权目录。可以顺序完成“读取 → 计算检查 → 写文件 → 发布 → 交付”，无需为每个依赖步骤重新请求模型。依赖步骤必须 `await`；未捕获的失败会停止脚本，禁止把已失败的写入当成发布依据。
 
 预览、图表与交付使用原来的子调用回执。`toolReceipts()` 统一读取顶层调用及当前工作区中的一层编排子调用，供聊天展示、截图回传、版本选择、文件交付、导出和备份使用。不会展开团队员工的独立工作区。源文件内容不复制进模型结果，编排应返回简短的发布回执和路径；截图作为独立图像消息送入下一次模型请求。
 

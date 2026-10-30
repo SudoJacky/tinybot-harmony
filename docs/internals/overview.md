@@ -43,6 +43,7 @@ NativeSessionService：组装原生文件、工作区、凭据、网络和 Provi
 | 凭据 | `CredentialStore` | `AgentRuntime`、`ProfileSettings`、`McpSettings` |
 | 资源 | `NativeSessionResources` | 工作区、工具集、Skill/MCP 安装、错误上报 |
 | 模型服务注册表 | `ProviderRegistry(() => huaweiAccount.requireLogin())` | 注册、绑定与每次请求前的账号预检 |
+| 后台与通知 | `BackgroundGeneration`、`CompletionNotifications` | 订阅会话事件；前台发起时申请通知权限，后台传输持有长时任务 |
 
 `SessionService` 的构造函数只接收四类依赖：`SessionRepository`、`AgentRuntime`、`CredentialVault`、`SessionResources`。测试里使用真实 `AgentRuntime` 搭配可控模型与存储，验证队列、收尾保存、停止与恢复等行为，因此会话服务并不要求真机或真实密钥。
 
@@ -102,7 +103,8 @@ NativeSessionService：组装原生文件、工作区、凭据、网络和 Provi
 
 ## 并发与等待
 
-- `AgentRuntime.run()` 一次只允许一个活动任务；重入会直接抛错。标题生成、记忆提炼与团队员工使用 `fork()` 得到独立实例，因此不会与主任务争抢活动槽位。
+- 每个会话有自己的 `ThreadExecution`；同一会话一次只允许一个活动任务，重入会直接抛错，但不同会话可以并行生成。标题生成、记忆提炼与团队员工使用 `fork()` 得到独立实例，因此不会与主任务争抢活动槽位。
+- 会话并行时，共享配置（服务、搜索、MCP 等）要等所有会话空闲才允许提交；文件写入按路径串行并校验版本。
 - `AgentRuntime.waitForIdle()` 等待本轮收尾（含最终检查点）；`SessionService.waitForIdle()` 等待 `phase` 回到 `idle`，覆盖整次会话操作与队列。
 - 后台辅助任务（标题、记忆复盘）在写入前会先等到前台 `phase === 'idle'`，再基于实时数据重新校验，避免覆盖用户刚做的修改。
 - 耗时探测与日志适配器不参与请求路径；慢资源探测通过 `PerformanceProbe` 移到 taskpool，详见[运行诊断与性能](/internals/diagnostics)。
@@ -130,7 +132,7 @@ NativeSessionService：组装原生文件、工作区、凭据、网络和 Provi
 | 工具注册与执行 | [工具注册与执行](/internals/tools) | 目录组合、权限过滤、回执 |
 | 审批、权限与沙箱 | [审批、权限与沙箱](/internals/permissions) | 只读、逐次审批、代码沙箱 |
 | 工作区与文件 | [工作区与文件](/internals/workspace) | 路径约束、版本校验、原子替换 |
-| 交互预览与 Web UI | [交互预览与 Web UI](/internals/preview) | 预览发布、验证与恢复 |
+| 交互预览与 Web UI | [交互预览与 Web UI](/internals/preview) | 预览发布、验证与恢复；本地小程序与持久数据 |
 | 运行诊断与性能 | [运行诊断与性能](/internals/diagnostics) | 埋点、脱敏日志、导出 |
 
 面向使用者的说明见[模型服务与上下文](/guide/models)、[项目与共享工作区](/guide/projects)；扩展模型服务见[新增模型服务](/dev/add-provider)。
@@ -147,6 +149,8 @@ NativeSessionService：组装原生文件、工作区、凭据、网络和 Provi
 | `entry/src/main/ets/services/NativeSessionService.ets` | 原生组合根，注入文件、工作区、凭据、ProviderRegistry |
 | `entry/src/main/ets/services/AgentRuntime.ets` | 单次运行生命周期、订阅、abort、waitForIdle |
 | `entry/src/main/ets/services/AgentLoop.ets` | 模型/工具循环、检查点、执行上限 |
+| `entry/src/main/ets/services/MiniApps.ets` | 本地小程序页面与数据存储 |
+| `entry/src/main/ets/services/CompletionNotifications.ets` | 完成通知订阅与发布 |
 | `entry/src/main/ets/services/RequestContext.ets` | 每次请求的组装、预算与压缩边界 |
 | `entry/src/main/ets/services/providers/ProviderRegistry.ets` | 显式注册、配置绑定、凭据解析 |
 | `entry/src/main/ets/model/ConversationStore.ets` | v2 索引、独立会话文件、原子保存 |

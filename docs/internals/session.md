@@ -61,12 +61,22 @@ export interface SessionRepository {
 | `preferences` | `preferences` | 配置、扩展与产品数据，不含聊天记录 |
 | `thread` | `thread`（仅元数据，`messages: []`） | 队列、草稿、模型选择等会话级变化 |
 | `message` | `message`（深拷贝） | 完整的助手消息，含步骤与工具回执 |
+| `tool` | `tool`（单条回执）、`step`、`parentToolCallId` | 工具开始与结束时刷新单条执行记录 |
 | `text` / `reasoning` | `content`、`step`、`stepContent` | 流式正文与思考增量 |
 | `draft` | `content` | 草稿单独推送，不复制历史 |
 | `state` | `state` | 阶段、错误与上下文统计变化 |
 | `teams` | `teams` | 团队运行状态 |
+| `task-complete` | `threadId`、`messageId` | 一轮回答成功保存且没有保存/归档错误后发出；完成通知只订阅这个事件 |
 
 监听器抛出的异常由 `emit()` 捕获并上报 `observer_failed`，不会中断其他监听器或运行。
+
+## 并行运行与后台传输
+
+每个会话有自己的 `ThreadExecution`（由 `AgentRuntime.fork()` 创建），因此可以在一个会话生成时切换到另一个会话继续发送。共享配置写入要等所有会话空闲（`canMutateShared`），会话自身的草稿、队列、停止状态互不影响。
+
+- 模型流请求处于活动状态时，应用退到后台会申请 `dataTransfer` 长时任务。通知权限只在用户于前台发起任务时申请一次，后台任务不会弹出权限请求。
+- 后台流式窗口最长约 9 分钟。系统或用户中止任务、释放失败或到达窗口上限时，本轮以明确原因停止，所有活动任务终止并暂停队列；回到前台后可重试。
+- 完成通知只在 `task-complete` 后发送，即回答已成功保存且没有保存错误；前台完成、失败、停止或未保存的回答不会发通知。点击通知回到 `threadId` 对应的会话。
 
 ## 待发送指令与队列调度
 

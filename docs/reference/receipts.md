@@ -31,13 +31,14 @@
 | 写文件、编辑文件 | `{path, bytes, written}` |
 | 网页正文 | `url`、`title`、`content`、`links`、`offset`、`totalChars`、`nextOffset`、`truncated`、`linksTruncated`、`trust` |
 | 联网搜索 | `sources[{url, title, snippet, publishedAt?}]` |
-| 浏览器 | `operation`、`completed`、`userIntervened`、`page` |
+| 浏览器 | `operation`、`completed`、`userIntervened`、`page`；截图另有 `captured`、`timesMs`、`errors` |
 | 代码执行 | `status`、`stdout`、`stderr`、`result`、`error`、`logsTruncated`、`resultTruncated`、`durationMs` |
 | 工具编排 | 上述状态字段加 `calls[{callId, tool, status}]` |
 | 表单 | 提交结果 JSON（含 `status` 与 `values`） |
 | 计划 | 校验后的结构化对象（步骤数组） |
 | 预览 | `published`、`path`、`title`、`nodes`、`screenshot` |
 | 文件交付 | `files[{path, description?}]` |
+| 小程序 | `appId`、`published`、`updated`、`startup`、`interaction`、`sourcePath`、`dataPath` |
 | 记忆 | `success`、`receipt{added, updated, removed, duplicates, characters}`、`limit`、`memories` |
 | 团队 | `runId`、`status`、`revision`、`members`、`tasks`、`results`、`afterSequence`、`hasMore` |
 | MCP 调用 | 远程服务返回的原始结果对象（含 `content`、`structuredContent`、`isError`） |
@@ -130,6 +131,11 @@
 | `BROWSER_LOAD_FAILED` | 页面加载失败 | 导航未完成或返回错误页 | `inspect_browser` |
 | `BROWSER_HISTORY_EMPTY` | 没有可回退历史 | 在首屏执行 `back` 或 `forward` | `inspect_browser` |
 | `STALE_BROWSER_SNAPSHOT` | 快照已过期 | `snapshotId` 或 `elementId` 不属于最新快照 | `read_browser_snapshot` |
+| `STALE_BROWSER_ELEMENT` | 元素不在视口内 | 点击或输入的目标已滚出可见区域 | `read_browser_snapshot` |
+| `BROWSER_NOT_VISIBLE` | 浏览器不可见 | 截图或等待时浏览器不在前台或不可见 | `inspect_browser` |
+| `BROWSER_OBSERVATION_INTERRUPTED` | 观察被中断 | 截图或等待期间页面、可见性或控制权变化 | `inspect_browser` |
+| `BROWSER_OBSERVATION_FAILED` | 观察失败 | 截图帧或等待条件失败，已采集帧保留在回执中 | `inspect_browser_before_retry` |
+| `PREVIEW_NOT_FOUND` | 预览快照不可用 | `browser_open` 的 `previewId` 不属于当前会话或已失效 | `publish_preview` |
 
 ### 预览、MCP 与团队
 

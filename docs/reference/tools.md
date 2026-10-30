@@ -19,13 +19,13 @@
 | 基础文件（固定保留） | `list_files`、`find_files`、`read_file`、`search_file_content`、`write_file`、`edit_file` | 6 | 自定义模式不可关闭 |
 | 附件与历史结果 | `read_attachment`、`read_reference` | 2 | 本对话存在对应资源时才出现 |
 | 网页读取与搜索 | `read_web`、`search_web` | 2 | `extensions.webEnabled`；`search_web` 还要求搜索服务已启用 |
-| 浏览器 | `browser_open`、`browser_snapshot`、`browser_action`、`browser_handoff`、`browser_close` | 5 | `extensions.browserPolicy` 为 `disabled` 时整组不出现 |
+| 浏览器 | `browser_open`、`browser_snapshot`、`browser_action`、`browser_capture`、`browser_wait`、`browser_handoff`、`browser_close` | 7 | `extensions.browserPolicy` 为 `disabled` 时整组不出现 |
 | 代码计算 | `execute_code` | 1 | 只读模式仍可用 |
 | 工具编排 | `orchestrate` | 1 | 关闭后仍可直接调用已授权文件工具 |
 | 信息确认 | `request_user_input` | 1 | 只读模式仍可用 |
 | 任务计划 | `update_plan` | 1 | 只读模式仍可用 |
 | 团队协作 | `team_recruit`、`team_wait`、`team_inspect`、`team_read_result`、`team_control`、`team_resume`、`team_complete_task`、`team_list_messages`、`team_read_message` | 9 | 会话启用团队后加入；员工三项只在子任务内出现 |
-| 预览 | `publish_preview` | 1 | 只读模式仍可用 |
+| 预览与小程序 | `publish_preview`、`list_mini_apps`、`publish_mini_app` | 3 | 只读模式提供前两项；小程序工具还要求实验室开关已开启 |
 | 文件交付 | `present_files` | 1 | 只读模式仍可用 |
 | MCP 远程工具 | `mcp_search_tools`、`mcp_list_tools`、`mcp_call` | 3 | 存在已启用且未被本会话停用的服务 |
 | MCP 服务管理 | `mcp_manage` | 1 | 只读模式不可用 |
@@ -39,7 +39,7 @@
 | 工具 | 用途 | 参数 | 约束与回执 |
 | --- | --- | --- | --- |
 | `list_files` | 列目录 | `path` string 必填（根目录为 `.`）；`offset` integer 默认 0 | 每页 200 项，`truncated`/`nextOffset` 续页；过滤 `.tinybot-` 内部项；符号链接只报告类型，不跟随。回执 `{path, entries[{name,kind}], truncated, nextOffset}` |
-| `read_file` | 按行读 UTF-8 文本 | `path` 必填；`offset` integer 默认 1；`limit` integer 默认 2000（上限 2000）；`column` integer 默认 1 | 单页最多 2000 行或 50 KiB，长行可按 UTF-16 列续读；返回 `content/startLine/totalLines/truncated/nextOffset/nextColumn`，内容去掉 BOM。成功读取才授权本轮后续覆盖 |
+| `read_file` | 按行读 UTF-8 文本，或按需提取 PDF/Office 文字 | `path` 必填；`offset` integer 默认 1；`limit` integer 默认 2000（上限 2000）；`column` integer 默认 1；`maxBytes` 默认 51200 | 单页最多 2000 行或 50 KiB，长行可按 UTF-16 列续读；返回 `content/startLine/totalLines/truncated/nextOffset/nextColumn`，内容去掉 BOM。文档读取时提取文字、不做 OCR；HarmonyOS 6 缺少 PDFKit 时读取 PDF 明确报错。成功读取才授权本轮后续覆盖 |
 | `write_file` | 创建或完整覆盖 | `path`、`content` 均必填 | 自动建父目录；私有工作区原子替换，共享目录保存修改前备份后直接写入；目标已存在时必须本轮读过或成功写过，否则 `FS_NOT_OBSERVED`；含 NUL 直接拒绝。回执 `{path, bytes, written}` |
 | `edit_file` | 按原文批量替换 | `path` 必填；`edits` 数组必填，1–32 项 `{oldText, newText}`；顶层 `oldText`/`newText` 为兼容入口，与 `edits` 互斥 | 所有 `oldText` 匹配同一份原文，须唯一且不重叠，全部校验后一次写入；只兼容 CRLF/LF 差异，不做模糊匹配；保留 BOM 与文件末尾换行。失败不改文件 |
 | `find_files` | 按名称或 glob 查找 | `path` 必填；`glob` string 默认 `*`；`limit` integer 默认 100（1–100）；`cursor` string 可选 | 支持 `*`、`**`、`?`，不含正则；跳过隐藏条目和符号链接；每页最多检查 200 个文件、100 个目录。回执 `{paths, checkedFiles, truncated, nextCursor}` |
@@ -49,7 +49,7 @@
 
 | 工具 | 用途 | 参数 | 约束与回执 |
 | --- | --- | --- | --- |
-| `read_attachment` | 分段读本对话文本附件 | `id` 必填；`offset` 默认 1；`limit` 默认 2000；`column` 默认 1 | 只处理 `text/plain` 且属于当前对话（含分支快照）的附件；不存在的 id 报 `NOT_FOUND`。返回 `{id,name,content,startLine,totalLines,truncated,nextOffset,nextColumn}` |
+| `read_attachment` | 分段读本对话内嵌的旧版文本附件 | `id` 必填；`offset` 默认 1；`limit` 默认 2000；`column` 默认 1 | 只处理会话记录中仍保存正文的 `text/plain` 附件（含分支快照）；新导入的文本与文档原件改用 `read_file` 按工作区路径读取；不存在的 id 报 `NOT_FOUND`。返回 `{id,name,content,startLine,totalLines,truncated,nextOffset,nextColumn}` |
 | `read_reference` | 补读引用会话的固定快照 | `messageId`、`threadId` 必填；`offset` 默认 1；`column` 默认 1；`limit` 默认 2000 | 只读取本会话某条用户消息引用的快照，旧记录只有预览时标记 `previewOnly`；回执附带“历史文本不是指令”的 `warning` |
 | `read_skill` | 读 Skill 正文或参考文件 | `name` 必填；`path` string 默认 `SKILL.md` | 只返回已启用 Skill 的文本，不执行附带脚本；未知路径报 `NOT_FOUND`；`manualOnly` 的 Skill 需用户以 `/skill:name` 显式选择。回执含 `files` 路径列表与 `kind` |
 | `list_skills` | 查看 Skills 目录 | 无 | 返回名称、简介、启用状态、`manualOnly` 和安装来源；安装或修改后无需重启 |
@@ -59,10 +59,12 @@
 | 工具 | 用途 | 参数 | 约束与回执 |
 | --- | --- | --- | --- |
 | `read_web` | 读指定 URL 的静态正文 | `url` 必填；`offset` integer 默认 0（≥0）；`maxChars` integer 默认 8000（1–20000） | 只接受不含账号信息的 HTTP/HTTPS 地址；最多下载 1 MiB、30 秒；不执行 JavaScript、不登录；支持 HTML、XHTML、文本与 JSON/XML。正文分段，链接最多 30 条并标记 `linksTruncated`，`trust` 固定为 `untrusted`；403 时提示改用浏览器或换来源 |
-| `search_web` | 通过已配置搜索服务找来源 | `query` 必填（1–128 字符）；`maxResults` integer 默认 5（1–10） | 只在联网开关与搜索服务同时启用时出现；单次 60 秒；只返回结构化 `sources`，不返回搜索服务自由生成的回答 |
-| `browser_open` | 取得应用内浏览器 | `url` 必填；`reason` 必填（≤1000 字符） | `browserPolicy` 默认 `enabled`，为 `disabled` 时整组不存在；`unset` 时等待用户授权；返回所有权与页面状态 |
-| `browser_snapshot` | 读当前视口文本与可交互元素 | 无 | 只含视口内容；`viewport` 报告滚动位置与文档高度；密码与验证码字段脱敏；跨域 iframe 与 canvas 控件需要用户接管 |
-| `browser_action` | 操作已取得的浏览器 | `action` 必填，枚举 `click/type/select/scroll/back/forward/reload`；`snapshotId`、`elementId` 用于点击与输入；`text` ≤10000 字符；`deltaY` 绝对值 ≤10000 | 元素动作必须来自最新快照，旧快照报 `STALE_BROWSER_SNAPSHOT`；只读模式只允许 `scroll/back/forward/reload`；页面加载 30 秒超时 |
+| `search_web` | 通过已配置搜索服务找来源 | `query` 必填（1–128 字符）；`maxResults` integer 默认 5（1–10） | 只在联网开关与搜索服务同时启用时出现；单次 60 秒；返回结构化 `sources`，SearXNG 部分引擎失败时另附 `warnings`，不返回搜索服务自由生成的回答 |
+| `browser_open` | 取得应用内浏览器，或打开本条会话已发布的预览快照 | `url` 或 `previewId` 必须二选一；`reason` 必填（≤1000 字符） | `browserPolicy` 默认 `enabled`，为 `disabled` 时整组不存在；`unset` 时等待用户授权；`previewId` 只能指向当前会话成功发布的快照，不重新读取源文件 |
+| `browser_snapshot` | 读页面正文与当前视口的可交互元素 | 无 | 正文来自整份文档，可用元素只取当前视口（最多 80 个）；`viewport` 报告滚动位置与文档高度；密码与验证码字段脱敏；跨域 iframe 与 canvas 控件需要用户接管 |
+| `browser_action` | 操作已取得的浏览器 | `action` 必填，枚举 `click/type/select/scroll/back/forward/reload`；`snapshotId`、`elementId` 用于点击与输入；`text` ≤10000 字符；`deltaY` 绝对值 ≤10000；`capture` 可在动作后采样 `{count, intervalMs}` | 元素动作必须来自最新快照，旧快照或元素移出视口报 `STALE_BROWSER_SNAPSHOT` / `STALE_BROWSER_ELEMENT`；只读模式只允许 `scroll/back/forward/reload`；页面加载 30 秒超时 |
+| `browser_capture` | 不重新加载页面，连续截取 1–6 帧 | `count` 1–6；`intervalMs` 250–10000，且总间隔 ≤10000 ms | 浏览器必须可见且应用在前台；部分帧失败时保留已采集帧；截图作为观察结果，不证明帧率 |
+| `browser_wait` | 在本地等待正文、元素标签或输入值出现 | `condition` 必填：`type` 为 `text/element/value`，`text` 非空，`type=value` 时另需 `value`；`timeoutMs` 0–10000 | 超时返回 `TIMEOUT`；等待不执行动作，也不代表所有交互已验证 |
 | `browser_handoff` | 交还给用户处理登录或验证 | `reason` 必填（≤1000 字符） | 任务暂停到用户明确交还，不尝试绕过验证 |
 | `browser_close` | 关闭本任务取得的浏览器 | 无 | 回执 `{"closed":true}` |
 
@@ -71,7 +73,7 @@
 | 工具 | 用途 | 参数 | 约束与回执 |
 | --- | --- | --- | --- |
 | `execute_code` | 在隔离 QuickJS 中跑同步 JavaScript | `code` 必填（函数体）；`input` 可选原生 JSON 值，默认 `null` | 2 秒预算、32 MiB Runtime 分配、日志合计 32 KiB；无文件、网络、定时器、模块导入或宿主工具，Promise 不支持。回执 `{status, stdout, stderr, result, error, logsTruncated, resultTruncated, durationMs}`；`status` 非 `ok` 记为失败 |
-| `orchestrate` | 用异步 JavaScript 组合调用已授权工具 | `code` 必填 | 可嵌套 17 个工具（文件、网页、Skills 读取、MCP 发现与调用、计算、预览与文件交付）；上限 32 次调用、4 个并发宿主工具、2 秒脚本计算、120 秒总时长、32 MiB JS 内存、1 MiB 结果；子调用回执保存在父回执里，取消后未开始的子调用标为 `NOT_EXECUTED`；不支持嵌套编排 |
+| `orchestrate` | 用异步 JavaScript 组合调用已授权工具 | `code` 必填 | 可嵌套 19 个工具（文件、附件与引用、网页与搜索、Skills 读取、MCP 发现与调用、计算、预览、小程序与文件交付）；上限 32 次调用、4 个并发宿主工具、2 秒脚本计算、120 秒总时长、32 MiB JS 内存、1 MiB 结果；子调用回执保存在父回执里，取消后未开始的子调用标为 `NOT_EXECUTED`；不支持嵌套编排 |
 
 ## 交互与计划
 
@@ -86,6 +88,17 @@
 | --- | --- | --- | --- |
 | `publish_preview` | 准备工作区文件预览，最终回复引用插入 | `path` 必填（`.js`、`.html`、`.svg`）；`title` 可选（≤160，默认文件名）；`library` 可选 `none`/`three`（默认 `none`）；`height` 可选 200–800 | JS 在空白页执行、可操作 `document.body`；`library="three"` 预加载 THREE 与 OrbitControls；无 import、网络、本地文件或存储访问；JSONL 已不支持。发布前做启动预检并截图，成功后保存不可变快照；回执含 `previewId` 和 `reference`，最终回复独占一行复制引用，turn 完成后原位展示；工具阶段不自动展示 |
 | `present_files` | 交付工作区文件 | `files` 必填 1–8 项 `{path, description?}`，说明 ≤300 字符 | 只校验文件真实存在，不创建也不复制内容；重复路径直接拒绝；成功回执在回答末尾生成文件卡片 |
+
+## 小程序
+
+小程序在“设置 → 实验室 → 小程序”开启后才提供给模型，默认关闭；关闭后入口和相关工具都隐藏，已有小程序与数据保留。
+
+| 工具 | 用途 | 参数 | 约束与回执 |
+| --- | --- | --- | --- |
+| `list_mini_apps` | 列出当前工作区已进入集合的本地小程序 | 无 | 返回 `appId`、标题、描述、归档状态、源文件路径、`dataPath` 与更新时间；尚未采用的试用版不列出；更新前应先查询 |
+| `publish_mini_app` | 创建或更新可持久化的单页小程序 | `path` 必填（`.js`、`.html`、`.svg`）；`title` 1–160；`description` ≤1000；`appId` 更新时必填；`library` 为 `none`/`three` | 页面只允许单页；发布前用只读数据快照做启动校验，启动脚本不能写数据；更新不会覆盖清单指定的数据文件；已归档的小程序必须先恢复才能更新；回执包含 `appId`、`startup` 与 `interaction`（固定 `not_checked`） |
+
+小程序页面通过 `tinybot.storage.load()` 取得 `{value, revision}`，在用户交互后用 `save(value, revision)` 保存；版本过期时保存失败，页面应重新加载并对齐，不能盲目覆盖。不要为临时视觉或一次性图表使用小程序，这类内容继续使用 `publish_preview`。
 
 ## 长期记忆
 

@@ -22,12 +22,14 @@ Tinybot 不使用数据库：会话、配置、用量、附件和工作区都是
 
 <app filesDir>/
 ├─ attachments/
-│  ├─ <id>.jpg                   图片附件，JPEG
-│  ├─ <id>.txt                   文本附件正文
-│  └─ extract-<uuid>.pdf         PDF 抽取时的临时副本
+│  └─ <id>.jpg                   图片附件，JPEG
 ├─ workspace/
 │  └─ <workspaceId>/
 │     ├─ …                       会话或项目文件
+│     ├─ attachments/<附件ID>/<文件名>   文本与文档原件
+│     ├─ mini-apps/<appId>/
+│     │  ├─ app.json             小程序清单、页面与版本历史
+│     │  └─ data*.json           用户数据；v2 由清单的 dataFile 指定正式文件
 │     └─ .tinybot-review/        修改前基线，界面审阅用
 └─ tinybot-cpu.json              CPU Profile 导出
 
@@ -40,7 +42,9 @@ Tinybot 不使用数据库：会话、配置、用量、附件和工作区都是
 
 <cloudFileDir>/
 └─ tinybot-backups/
-   ├─ tinybot-<13位时间戳>-<uuid>.json
+   ├─ tinybot-latest.tinybot     当前最新备份
+   ├─ tinybot-<13位时间戳>-<uuid>.tinybot   历史备份
+   ├─ tinybot-<13位时间戳>-<uuid>.json      旧版 JSON 备份
    └─ *.partial                  未完成的临时文件
 ```
 
@@ -78,23 +82,25 @@ Tinybot 不使用数据库：会话、配置、用量、附件和工作区都是
 
 ## 附件与图片
 
-- 图片导入时按最长边缩到 1600 px、JPEG 质量 85，压缩后超过 4 MB 直接拒绝；原图上限 20 MB、8000 万像素。文档（PDF、DOCX、XLSX、PPTX）上限 8 MB，抽取为纯文本后按文本附件保存。
-- 文本附件正文同时存在于会话记录的 `text` 字段与 `<id>.txt` 文件；图片只存 `<id>.jpg`，模型请求前再编码成 data URL。
+- 图片导入时按最长边缩到 1600 px、JPEG 质量 85，压缩后超过 4 MB 直接拒绝；原图上限 20 MB、8000 万像素。图片保存在 `attachments/<id>.jpg`，模型请求前再编码成 data URL。
+- 文本、PDF、DOCX、XLSX、PPTX 不再提前抽取或改写：导入时按原字节复制，绑定到消息时再复制到工作区 `attachments/<附件ID>/<文件名>`。读取时按需解析，扫描件不做 OCR。
 - 预览截图、网页批注、手绘示意都走同一条图片保存路径，写入 `attachments` 并作为附件记录引用。
-- 每条消息最多 4 个附件；恢复时要求字节数与记录中的 `size` 一致，缺失或不一致直接拒绝。
-- 代码里没有按会话回收附件的路径：删除会话只移除索引与消息，附件文件仍留在 `attachments` 中。
+- 每条消息最多 10 个附件；恢复时要求字节数与记录中的 `size` 一致，缺失或不一致直接拒绝。
+- 代码里没有按会话回收附件的路径：删除会话只移除索引与消息，附件文件与工作区原件仍保留，可在“存储空间”中按分类查看。
 
 ## 工作区
 
 - 路径为 `workspace/<workspaceId>`：普通会话用会话 ID，项目会话用项目的稳定 `workspaceId`（新建时为 `project-<uuid>`）。目录在首次进入会话或创建项目时建立，已有会话启动时自动补建。
 - 工作区工具只能读写该目录内的相对路径，拒绝符号链接与越界；写入通过 `.tinybot-<uuid>.tmp` 临时文件和重命名完成，列表会过滤这类内部项。
 - `.tinybot-review/` 保存被修改文件的原始基线（`{path, existed, content}`，私有文件名用 URL 编码后的相对路径）。共享文件的备份也在此目录，文件名用 `shared-<URI的SHA-256摘要>.json`，并记录 `sourceUri` 绑定原文件，避免挂载改名或替换后误用。写入无需确认保留；已有文件备份可通过文件页“更多操作”菜单恢复或导出，成功恢复后对应基线删除。这些本地备份元数据不进入普通工作区备份。
+- `mini-apps/` 保存本地小程序的页面与用户数据；页面、版本历史和正式数据引用在 `app.json`，用户数据独立存放，更新页面不会覆盖数据。移除小程序只把 `app.json` 标为归档，永久删除需要先归档再确认，并删除整个 `mini-apps/<appId>` 目录。
 - 删除会话不删除工作区；项目在当前版本只有创建与编辑，没有删除入口。卸载应用或清除应用数据才会删除这些文件。
 - 单个工作区及备份的容量、索引和文件数量不设应用固定上限，二进制内容分块读写，实际受设备内存和存储约束。
 
 ## 备份文件
 
 - 本地导出与华为云备份共用同一份快照：新格式为 `tinybot-harmony.backup.v3`（可读旧 v1/v2 JSON）。索引包含 `data`、`attachments`、`files`，`bytes` 字段在 v3 中是十进制 blob 下标字符串，在 v1/v2 中仍是 Base64。
+- 只保留小程序、原会话已删除的工作区也会进入备份：快照记录这些工作区，并保留 v1/v2 小程序清单、版本历史、正式数据、迁移前数据与试用文件；恢复时按独立工作区重建，已有工作区以本机数据为准。
 - 快照会重置 `config`（只保留 `userDocument`）、清空服务凭据别名并停用服务与搜索；恢复时再与本机设置匹配。
 - 云目录固定为 `<cloudFileDir>/tinybot-backups`，最新备份固定为 `tinybot-latest.tinybot`，先写唯一的 `.partial` 文件并 `fsync`，再重命名替换最新备份，失败不先删除旧文件。列表同时收录旧的时间戳 `.tinybot` 和 `.json`。最新备份时间取原生 `stat().mtime`（秒转毫秒）。
 - 本地导出的临时文件写在 `cacheDir/backup-<uuid>.tinybot`，交给系统文件选择器后删除。
@@ -121,9 +127,9 @@ envelope 的可选 `protectedKeys` 区域为 `{version:2,salt,iv,ciphertext}`，
 | --- | --- | --- |
 | 单份云备份或本地导出 | 无应用固定容量或数量上限，受设备资源约束 | 写入失败保留旧云备份；不会发布部分文件 |
 | 单个工作区 | 没有应用级上限 | 只受设备存储限制 |
-| 单条消息附件 | 4 个 | 导入与记录校验共用同一上限 |
+| 单条消息附件 | 10 个 | 导入与记录校验共用同一上限 |
 | 单张图片 | 原始 20 MB、8000 万像素；保存后 4 MB | 最长边缩到 1600 px、JPEG 质量 85 |
-| 单份文档 | 8 MB | 抽取为文本后按文本附件保存 |
+| 单份文档 | 无应用级大小上限 | 按原字节复制；读取预算由文本分页控制 |
 | 会话文件 | 没有条数上限 | 每个会话一个独立文件 |
 | 用量账本 | 没有条数上限 | 每页 256 条，按需追加 |
 | 诊断日志 | 每份约 4 MiB，保留两份 | 约 5 秒一批，超出时轮转 |
@@ -137,7 +143,9 @@ envelope 的可选 `protectedKeys` 区域为 `{version:2,salt,iv,ciphertext}`，
 | `usage-records/*` | 每次请求与工具结束后异步写入 | 无入口，随应用数据清除 | 否 |
 | `attachments/*` | 导入附件、截图、批注、手绘 | 无自动回收，随应用数据清除 | 是 |
 | `workspace/<id>/*` | 文件工具写入、文件页编辑 | 删除会话不清理；随应用数据清除 | 是 |
-| `workspace/<id>/.tinybot-review` | 首次修改文件前 | 接受修改或恢复后删除 | 否 |
+| `workspace/<id>/attachments` | 附件绑定到消息时复制原件 | 删除会话不清理；随应用数据清除 | 是 |
+| `workspace/<id>/mini-apps` | 发布或更新小程序、保存用户数据 | 移除只归档；归档后永久删除 | 是 |
+| `workspace/<id>/.tinybot-review` | 首次修改文件前 | 恢复原版后删除，或随应用数据清除 | 否 |
 | `tinybot-backups/*.{tinybot,json}` | 手动备份 | 单份删除或系统清理 | — |
 | `performance-*.jsonl` | 开发者模式采集期间 | 清除诊断数据 | 否 |
 | `cacheDir/*` | 导出、分享、诊断包 | 系统缓存回收或清除诊断数据 | 否 |
@@ -156,3 +164,6 @@ envelope 的可选 `protectedKeys` 区域为 `{version:2,salt,iv,ciphertext}`，
 | `entry/src/main/ets/services/NativeWorkspaceFiles.ets` | 工作区写入、版本哈希与修改基线 |
 | `entry/src/main/ets/services/DeveloperDiagnostics.ets` | 诊断日志轮转、导出与清除 |
 | `entry/src/main/ets/services/NativeActions.ets` | 分享副本与本地导出临时文件 |
+| `entry/src/main/ets/model/MiniApp.ets` | 小程序清单、ID、路径与版本数据校验 |
+| `entry/src/main/ets/services/MiniApps.ets` | 小程序发布、数据读写、归档、恢复与永久删除 |
+| `entry/src/main/ets/views/MiniAppsPanel.ets` | 小程序收藏、打开、导出与移除界面 |

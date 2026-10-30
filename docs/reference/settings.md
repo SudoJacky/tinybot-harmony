@@ -4,18 +4,18 @@
 
 ## 持久化位置
 
-“设置 → 实验室 → 小程序”控制小程序功能。`productivity.options.miniAppsEnabled` 默认为 `false`，旧配置缺少该字段时也视为关闭。开启后显示小程序入口并提供 `list_mini_apps`、`publish_mini_app` 工具；关闭后隐藏入口并阻止相关工具调用，保留已有小程序、数据和历史记录。普通页面预览不受此开关影响。有任务正在执行时，需等任务完成后再修改。
-
 | 位置 | 载体 | 内容 | 进入备份 |
 | --- | --- | --- | --- |
 | `sessions-v2/index.json` | 会话索引的 `data` 字段 | `config`、`providerProfiles`、`extensions`、`productivity`、`projects`、`activeThreadId` | 是（凭据字段被剥离） |
 | `sessions-v2/<uuid>.json` | 独立会话文件 | 每个会话的模型选择、推理强度、工具选择、团队、停用的 MCP 服务 | 是 |
-| `tinybot-ui` Preferences | 键值 | `appearance`、`language`、`onboardingComplete` | 否 |
+| `tinybot-ui` Preferences | 键值 | `appearance`、`language`、`onboardingComplete`、`reviewInvitation`、`startupBackupState` | 否 |
 | `tinybot-developer` Preferences | 键值 | `enabled`（开发者模式） | 否 |
-| Asset Store | 凭据别名 | 模型 API Key、MCP Token、搜索 Key | 否 |
+| Asset Store | 凭据别名 | 模型 API Key、MCP Token、搜索 Key | 否；模型 API Key 另以账号加密区随备份导出 |
 | `usage-records` | 分块账本 | 请求与工具用量 | 否 |
 
 语言偏好与用量账本都不在备份范围内；换机恢复后需要重新选择语言，用量从零开始累计。
+
+`startupBackupState` 记录新安装备份提示的阶段（`pending`、`done`）：只有安装时间等于更新时间、没有 v2 清单或 v1 会话、且未完成引导的全新安装才可能设为 `pending`；升级或旧版本没有该键时直接视为 `done`，不会反复弹窗。
 
 ## 模型服务
 
@@ -74,24 +74,36 @@
 | `threads[].disabledMcpIds[]` | 本会话停用的 MCP 服务 | 空 | 下一轮 |
 | `threads[].teamEnabled` | 是否启用团队工具 | 未设置 | 当前回合 |
 
-- 只读模式会移除写文件、编辑、`mcp_call`、`memory`、`skill_manage`、`mcp_manage`，并限制浏览器点击与输入；基础文件读取、代码沙箱、计划、预览和交付仍可用。
-- 自定义模式只关闭 12 项可选能力，基础文件工具与记忆、Skills 由专门设置控制；旧配置里只关闭部分子工具时，加载会把整项能力关闭。
+- 只读模式会移除写文件、编辑、`publish_mini_app`、`mcp_call`、`memory`、`skill_manage`、`mcp_manage`，并限制浏览器点击与输入；基础文件读取、代码沙箱、计划、预览、`list_mini_apps` 和交付仍可用。
+- 自定义模式只关闭 12 项可选能力，基础文件工具固定保留，记忆与 Skills 由专门设置控制；小程序工具同时要求实验室开关开启且“预览与小程序”能力未关闭。旧配置里只关闭部分子工具时，加载会把整项能力关闭。
 - 执行期间页面锁定，保存失败会回滚开关并提示；有保存错误时编辑入口不可用。
 - 从旧版本升级时，未写入的 `browserPolicy` 与 `search` 会补为当前默认值（应用内浏览器开启、必应搜索开启）；已保存的选择保持不变。
+
+## 实验室与小程序
+
+| 键 | 含义 | 默认 | 生效时机 |
+| --- | --- | --- | --- |
+| `productivity.options.miniAppsEnabled` | 开启小程序入口与相关工具 | `false` | 下一次创建工具目录；界面入口在保存后刷新 |
+
+- 关闭时隐藏会话列表的“小程序”入口，并从目录移除 `list_mini_apps`、`publish_mini_app`；直接调用报 `PERMISSION_DENIED`。
+- 开启后，自定义模式仍需启用“预览与小程序”能力；只读模式继续禁止 `publish_mini_app`。
+- 关闭不删除已有小程序：`workspace/<workspaceId>/mini-apps/` 下的 `app.json` 与 `data.json` 原样保留，历史记录也不改写。
+- 普通页面预览不受此开关影响；开启小程序不等于允许联网或读取本地文件。
 
 ## 搜索服务
 
 | 键 | 含义 | 默认 |
 | --- | --- | --- |
-| `search.provider` | `deepseek`、`tavily` 或 `bing-browser` | `bing-browser` |
+| `search.provider` | `deepseek`、`tavily`、`searxng` 或 `bing-browser` | `bing-browser` |
 | `search.enabled` | 是否启用联网搜索 | `true` |
 | `search.modelProviderId` | 复用哪个 DeepSeek 服务的密钥 | 留空自动选择，多个候选时必须指定 |
-| `search.baseUrl` | Tavily 地址，必须 HTTPS | `https://api.tavily.com` |
+| `search.baseUrl` | 当前提供方的基础地址：Tavily 必须 HTTPS，SearXNG 支持 HTTP/HTTPS 与子路径 | Tavily 为 `https://api.tavily.com`；SearXNG 留空 |
 | `search.credentialAlias` | Tavily 密钥别名 | 空 |
 | `search.tavily` | 跨提供方保留的 Tavily `baseUrl` 与 `credentialAlias` | 首次编辑或切走 Tavily 时记录 |
 | `search.deepseek.modelProviderId` | 跨提供方保留的 DeepSeek 服务选择 | 留空自动选择 |
+| `search.searxng.baseUrl` | 跨提供方保留的 SearXNG 实例基础地址 | 空 |
 
-必应（`bing-browser`）不需要密钥、地址或模型服务，通过应用内浏览器访问必应；应用内浏览器被关闭时内置搜索同时停用。DeepSeek 搜索复用官方地址的模型服务密钥，不需要单独填写；Tavily 的密钥保存为 `tinybot-search-<uuid>`。更换搜索地址后必须重填密钥；启用时若读不到已保存的密钥，保存会失败而不是留下空配置。
+必应（`bing-browser`）不需要密钥、地址或模型服务，通过应用内浏览器访问必应；应用内浏览器被关闭时内置搜索同时停用。DeepSeek 搜索复用官方地址的模型服务密钥，不需要单独填写；Tavily 的密钥保存为 `tinybot-search-<uuid>`，更换 Tavily 地址后必须重填，启用时若读不到已保存的密钥则保存失败。SearXNG 只需实例基础地址，不使用 API Key；地址不含 `/search` 或查询参数，实例需在 `settings.yml` 的 `search.formats` 中启用 `json`。
 
 搜索页列表维护独立草稿，详情页只编辑并返回；列表底部统一保存。切换提供方保留其他提供方配置。为兼容旧版本，当前提供方仍使用顶层 `baseUrl` / `credentialAlias` / `modelProviderId`，加载旧 Tavily 配置后首次保存会保留其别名；原始密钥只写入安全存储。备份导出与恢复都会清空非当前提供方的 Tavily 别名。
 
@@ -133,6 +145,10 @@
 
 外观以一条 JSON 字符串存在 `tinybot-ui` 的 `appearance` 键下，启动时在首帧之前应用；保存会先写盘再应用，失败回滚到上一份。语言偏好只影响界面文案，不重写模型请求、用户消息或已保存内容；切换语言会重建视图树，但保留会话视图模型、导航栈与草稿。
 
+## 评价邀请
+
+邀请记录保存在 `tinybot-ui` 的 `reviewInvitation` 键：成功任务计数、最近一次询问时间与“不再提醒”。本机完成第 5 个任务后才会询问，两次询问至少间隔 7 天；计数只统计本机实际完成的任务，恢复或导入的会话不会增加。该记录不进入聊天备份，随卸载或清除数据消失；系统评价弹窗的返回值不代表评论已发布。
+
 ## 诊断
 
 | 键 | 含义 | 默认 |
@@ -150,6 +166,7 @@
 | 称呼与回答偏好 | 下一轮 |
 | 模型服务的新增、修改、删除 | 保存后立即重建服务注册表；会话已选模型在下一次请求解析 |
 | 搜索服务 | 下一轮创建工具时 |
+| 实验室小程序开关 | 保存后刷新入口；下一轮创建工具目录时生效 |
 | MCP 保存、启用、停用 | 保存后全局配置立即更新；会话级停用立即影响下一轮 |
 | 自定义工具选择 | 当前会话立即，随下一条有效消息保存 |
 | 推理强度 | 当前会话下一条消息；空会话跟随默认值 |
