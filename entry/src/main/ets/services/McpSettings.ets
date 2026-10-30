@@ -1,4 +1,5 @@
 import { McpServer, ProductivityData, validateProductivity } from '../model/Productivity';
+import { Diagnostics } from '../model/Diagnostics';
 import { McpRequest, saveMcpCandidate } from '../model/ResourceManagement';
 import { Cancellation } from './Cancellation';
 import { CredentialVault } from './ProfileSettings';
@@ -75,10 +76,14 @@ export class McpSettings {
       await host.commit(next, id, request.action, previous);
       createdAlias = '';
     } catch (error) {
+      Diagnostics.log('error', 'configuration', 'save_failed', { credentialScope: 'mcp' }, error as Error);
       let message = (error as Error).message;
       if (createdAlias) {
         try { await this.credentials.remove(createdAlias); }
-        catch (cleanup) { message += '; MCP credential rollback failed: ' + (cleanup as Error).message; }
+        catch (cleanup) {
+          Diagnostics.log('error', 'resources', 'credential_rollback_failed', { credentialScope: 'mcp' }, cleanup as Error);
+          message += '; MCP credential rollback failed: ' + (cleanup as Error).message;
+        }
       }
       this.report('MCP setup failed: id=' + id + ' ' + message); throw new Error(message);
     }
@@ -86,6 +91,7 @@ export class McpSettings {
     if (previous?.credentialAlias && !host.current().servers.some((item) => item.credentialAlias === previous.credentialAlias)) {
       try { await this.credentials.remove(previous.credentialAlias); }
       catch (error) {
+        Diagnostics.log('warn', 'resources', 'credential_cleanup_failed', { credentialScope: 'mcp' }, error as Error);
         warning = 'Configuration saved, but old credential cleanup failed: ' + (error as Error).message;
         this.report(warning);
       }

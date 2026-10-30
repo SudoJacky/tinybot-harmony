@@ -57,6 +57,7 @@ export async function executeToolBatch(step: AgentStep, round: number, tools: Ag
     };
     recordActivity();
     let partial = false;
+    let failure: Error | undefined;
     try {
       const args = parseToolArguments(tool.call.function.arguments);
       if (!args || typeof args !== 'object' || Array.isArray(args)) {
@@ -93,12 +94,18 @@ export async function executeToolBatch(step: AgentStep, round: number, tools: Ag
       tool.status = outcome.failed ? 'failed' : 'complete';
     } catch (error) {
       if (error instanceof ToolPersistenceError) { throw error; }
+      failure = error as Error;
       if (!cancellation.cancelled) { await observer.waitForExecution?.(cancellation); }
       tool.output = toolError(error as Error);
       tool.status = error instanceof RunCancelledError || (error instanceof ToolResultError && error.code === 'CANCELLED') ? 'cancelled' : 'failed';
     }
     if (tool.status === 'failed') {
-      Diagnostics.log('warn', 'tool', 'failed', { operationId: diagnosticId, round: round, chars: tool.output.length });
+      if (!failure && Diagnostics.acceptsLog('warn')) {
+        // toolOutcome guarantees a JSON failure receipt even for non-JSON tool output.
+        const receipt = JSON.parse(tool.output) as ToolFailure;
+        failure = new ToolFailure(receipt.code || 'EXECUTION_FAILED', 'Tool returned a failure receipt.', '', receipt.details) as Error;
+      }
+      Diagnostics.log('warn', 'tool', 'failed', { operationId: diagnosticId, round: round, chars: tool.output.length }, failure);
     } else if (partial) {
       Diagnostics.log('info', 'tool', 'partial', { operationId: diagnosticId, round: round, chars: tool.output.length });
     }

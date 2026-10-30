@@ -1,4 +1,5 @@
 import { Diagnostics } from '../model/Diagnostics';
+import { configureNativeDiagnosticLog } from '../services/NativeDiagnosticLog';
 import { webview } from '@kit.ArkWeb';
 import { ShareInbox } from '../services/NativeActions';
 import { LanguagePreferences } from '../services/LanguagePreferences';
@@ -59,6 +60,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    configureNativeDiagnosticLog();
     globalThis._brushEngineContext = this.context;
     LanguagePreferences.initialize(this.context);
     AppearancePreferences.initialize(this.context);

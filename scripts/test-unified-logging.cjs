@@ -97,6 +97,7 @@ for (const file of fs.readdirSync(root, { recursive: true }).filter(file => file
   if (file.replaceAll('\\', '/') === 'services/NativeDiagnosticLog.ets') continue;
   assert.ok(!/\bhilog\s*\./.test(source), 'Direct HiLog bypass: ' + file);
   assert.ok(!/import\s*\{[^}]*\bhilog\b/.test(source), 'Direct HiLog import: ' + file);
+  assert.ok(!/\bconsole\s*\.\s*(?:warn|error)\s*\(/.test(source), 'Direct console error bypass: ' + file);
   for (const match of source.matchAll(/Diagnostics\.log\('(debug|info|warn|error)', '([^']+)', '([^']+)'/g)) {
     const fresh = new DiagnosticsCollector(); fresh.start(); fresh.logLevel = 'debug'; fresh.log(match[1], match[2], match[3]);
     assert.equal(fresh.snapshot().logging.rejected, 0, 'Unregistered production log: ' + match[0]); migratedCalls++;
@@ -111,8 +112,45 @@ assert.equal(transportFields.code,2300056);assert.equal(transportFields.bytes,12
 assert.equal(transportFields.phase,'streaming');assert.equal(transportFields.retryable,true);
 assert.ok(!JSON.stringify(transportFields).includes(secret));assert.equal(transportFields.url,undefined);
 console.log('PASS transport stage, retry decision and numeric evidence survive redaction without payloads or URLs');
+const { ToolFailure, toolHttpFailure } = load(path.join(root, 'model/ToolFailure'));
+const sanitizer = new LogSanitizer();
+const rateLimit = sanitizer.sanitize(undefined, toolHttpFailure(429, secret, 'mcp'), true);
+assert.equal(rateLimit.errorCode, 'RATE_LIMITED'); assert.equal(rateLimit.http, 429); assert.equal(rateLimit.service, 'mcp');
+const detail = { nativeCode: 2300056, remoteCode: -32000, service: 'mcp',
+  get path() { throw Error('Private details must not be inspected'); }, result: { token: secret } };
+const nativeFailure = sanitizer.sanitize(undefined, new ToolFailure('NETWORK_ERROR', secret, secret, detail), true);
+assert.equal(nativeFailure.nativeCode, 2300056); assert.equal(nativeFailure.remoteCode, -32000);
+assert.ok(!JSON.stringify(nativeFailure).includes(secret));
+assert.equal(sanitizer.sanitize(undefined, new ToolFailure(secret, secret, secret, { service: secret }), true).service, undefined);
+console.log('PASS structured tool failures retain known codes and numeric service evidence without private details');
 Diagnostics.stop();
 const begin = performance.now();
 for (let index = 0; index < 1000000; index++) Diagnostics.log('info', 'network', 'request_start');
 // Benchmark is separate from deterministic zero-work assertions; never use host timing as device proof.
 console.log(JSON.stringify({ iterations: 1000000, hostDurationMs: +(performance.now() - begin).toFixed(2), note: 'Host microbenchmark only' }));
+
+// Replay the real persistence failure boundary through the production log sanitizer/sink.
+const sessionFile = path.join(root, 'services/SessionService.ets');
+const sessionTree = ts.createSourceFile(sessionFile, fs.readFileSync(sessionFile, 'utf8'), ts.ScriptTarget.Latest, true);
+const sessionClass = sessionTree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'SessionService');
+const persist = sessionClass.members.find(node => node.name?.getText(sessionTree) === 'persist');
+const persistScope = { exports: {}, t: text => text };
+vm.runInNewContext(ts.transpileModule(`class Probe { ${persist.getText(sessionTree)} } exports.Probe = Probe;`, {
+  compilerOptions: { target: ts.ScriptTarget.ES2021 }
+}).outputText, persistScope);
+(async () => {
+  Diagnostics.start();
+  const failure = Object.assign(Error('disk full PRIVATE_PATH'), { code: 28 });
+  const view = Object.assign(new persistScope.exports.Probe(), {
+    data: {}, draftRevision: 0, dirtyDrafts: new Set(), application: {}, runningThreadIds: [],
+    syncEmptyThreadPreferences: () => [], publish() {}, repository: { async save() { throw failure; } },
+    resources: { reportError: (event, error, fields) => Diagnostics.log('error', 'session', event, fields, error) }
+  });
+  await assert.rejects(view.persist('private-thread', 'private-message'), /disk full/);
+  const record = recentDiagnosticLogs().records.at(-1).data;
+  assert.equal(record.fields.errorCode, 28, 'Preserve the native error object before formatting a user-facing message');
+  assert.equal(record.fields.errorKind, 'storage');
+  assert.equal(record.fields.threadId, 'ref-1'); assert.equal(record.fields.messageId, 'ref-2');
+  assert.ok(!JSON.stringify(record).includes('PRIVATE_PATH'));
+  console.log('PASS persistence failure retains native error code and anonymized operation references');
+})().catch(error => { console.error(error); process.exitCode = 1; });

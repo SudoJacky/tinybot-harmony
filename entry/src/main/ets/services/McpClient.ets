@@ -1,4 +1,5 @@
 import { ToolFailure, toolHttpFailure } from '../model/ToolFailure';
+import { Diagnostics } from '../model/Diagnostics';
 import { t } from '../model/I18n';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { util } from '@kit.ArkTS';
@@ -87,6 +88,9 @@ export class McpClient implements McpConnection {
         const decoder = new util.TextDecoder('utf-8');
         const finish = (error?: Error | ToolFailure | RunCancelledError, result?: Object): void => {
           if (done) { return; } done = true; clearTimeout(timer); remove(); stop();
+          if (error && !(error instanceof RunCancelledError) && method !== 'notifications/cancelled') {
+            Diagnostics.log('error', 'mcp', 'request_failed', { rpcMethod: method, request: id, http: code, chars: text.length }, error);
+          }
           if (error) { reject(error); } else { const empty: Record<string, string> = {}; resolve(result || empty); }
         };
         const inspect = (): void => {
@@ -109,7 +113,9 @@ export class McpClient implements McpConnection {
           finish(new RunCancelledError(t("MCP 已停止等待，已提交的远程操作可能仍在执行。")));
           if (method === 'tools/call') {
             const params: Record<string, string | number> = { 'requestId': id, 'reason': 'User cancelled' };
-            this.post('notifications/cancelled', params, new Cancellation(), true).catch(() => {});
+            this.post('notifications/cancelled', params, new Cancellation(), true).catch((error: Error) => {
+              Diagnostics.log('warn', 'mcp', 'cancel_notice_failed', { request: id }, error);
+            });
           }
         });
         if (done) { return; }
@@ -131,12 +137,14 @@ export class McpClient implements McpConnection {
           onData: (buffer: ArrayBuffer): void => {
             if (done) { return; }
             try { text += decoder.decodeToString(new Uint8Array(buffer), { stream: true }); inspect(); }
-            catch (_) { finish(new ToolFailure('INVALID_RESPONSE', t("MCP 返回了无法解析的数据。"), 'inspect_service')); }
+            catch (error) { finish(new ToolFailure('INVALID_RESPONSE', t("MCP 返回了无法解析的数据。"), 'inspect_service',
+              { service: 'mcp', nativeCode: (error as BusinessError).code })); }
           },
           onEnd: (): void => {
             if (done) { return; }
             try { ended = true; text += decoder.decodeToString(new Uint8Array(0)); inspect(); }
-            catch (_) { finish(new ToolFailure('INVALID_RESPONSE', t("MCP 返回了无法解析的数据。"), 'inspect_service')); }
+            catch (error) { finish(new ToolFailure('INVALID_RESPONSE', t("MCP 返回了无法解析的数据。"), 'inspect_service',
+              { service: 'mcp', nativeCode: (error as BusinessError).code })); }
           },
           onError: (error: Error): void => {
             const code = (error as BusinessError).code;

@@ -26,10 +26,15 @@ const names = ['aboutToAppear', 'aboutToDisappear', 'removeTemporary', 'ensureAc
   'generateImage', 'reselect', 'outputImage', 'outputMarkdown'];
 const methods = names.map(name => component.members.find(node => node.name?.getText(tree) === name).getText(tree)).join('\n');
 const files = new Map(), outputs = [], privacy = { allowed: true };
-let imageCalls = 0, resolveImage, deferImage = false, failOutput = false;
-const globals = { exports: {}, console, t, $r: () => ({ id: 1 }), hostedPrivacy: privacy,
+const diagnosticLogs = [], { Diagnostics } = load('Diagnostics');
+Diagnostics.configureLogSink(data => diagnosticLogs.push(data));
+let imageCalls = 0, resolveImage, deferImage = false, failOutput = false, failCleanup = false;
+const globals = { exports: {}, console, t, Diagnostics, $r: () => ({ id: 1 }), hostedPrivacy: privacy,
   ...load('ConversationShare'), ...load('ConversationExport'), ...load('ExportMetadata'),
-  fs: { access: async p => files.has(p), unlink: async p => files.delete(p) },
+  fs: { access: async p => files.has(p), unlink: async p => {
+    if (failCleanup) throw Object.assign(Error('unlink PRIVATE_CACHE_PATH'), { code: 13900005 });
+    files.delete(p);
+  } },
   util: { generateRandomUUID: () => 'test', TextEncoder: class { encodeInto(value) { return new TextEncoder().encode(value); } } },
   writeBytes: async (p, bytes) => files.set(p, Buffer.from(bytes)),
   image: { createImageSource: () => ({ getImageInfo: async () => ({ size: { width: 720, height: 1440 } }), release: async () => {} }) },
@@ -38,7 +43,7 @@ const globals = { exports: {}, console, t, $r: () => ({ id: 1 }), hostedPrivacy:
     if (deferImage) await new Promise(resolve => { resolveImage = resolve; });
     files.set('preview.png', sections.map(s => s.text).join('\n')); return 'preview.png';
   },
-  exportFile: async (_ctx, p, name) => { if (failOutput) throw Error('disk full'); outputs.push({ kind: 'save', name, value: files.get(p) }); },
+  exportFile: async (_ctx, p, name) => { if (failOutput) throw Object.assign(Error('disk full'), { code: 28 }); outputs.push({ kind: 'save', name, value: files.get(p) }); },
   shareFile: async (_ctx, p, name) => { outputs.push({ kind: 'share', name, value: files.get(p) }); }
 };
 vm.runInNewContext(ts.transpileModule(`class Probe { ${methods} } exports.Probe = Probe;`, {
@@ -65,6 +70,8 @@ function panel() {
   assert.equal(outputs[0].value, outputs[1].value, 'both actions use preview bytes');
   assert.ok(files.has(view.previewPath));
   failOutput = true; await view.outputImage(false); failOutput = false;
+  assert.equal(diagnosticLogs.at(-1).event, 'save_failed');
+  assert.equal(diagnosticLogs.at(-1).fields.format, 'image'); assert.equal(diagnosticLogs.at(-1).fields.errorCode, 28);
   assert.equal(view.error, 'disk full'); assert.equal(view.busy, false); assert.ok(files.has(view.previewPath));
   await view.reselect(); assert.ok(!files.has('preview.png'));
   await view.outputMarkdown(false); await view.outputMarkdown(true);
@@ -84,10 +91,18 @@ function panel() {
   view.aboutToDisappear(); resolveImage(); await work;
   assert.equal(files.size, 0, 'leaving during rendering removes late output');
   assert.equal(view.previewPath, ''); deferImage = false;
+  const beforeCancellation = diagnosticLogs.length;
   const revoked = panel(); privacy.allowed = false; await revoked.outputMarkdown(true);
   assert.equal(revoked.error, '分享已取消'); assert.equal(files.size, 0);
   privacy.allowed = true; deferImage = true;
   const pending = revoked.generateImage(); privacy.allowed = false; resolveImage(); await pending;
   assert.equal(files.size, 0, 'revocation during rendering discards output');
+  assert.equal(diagnosticLogs.length, beforeCancellation, 'Expected navigation/consent cancellation is not logged as a failure');
+  const cleaning = panel(); cleaning.previewPath = 'private/cache.png'; files.set(cleaning.previewPath, 'temporary');
+  failCleanup = true; cleaning.aboutToDisappear(); await new Promise(resolve => setTimeout(resolve, 0)); failCleanup = false;
+  assert.equal(diagnosticLogs.at(-1).event, 'cleanup_failed'); assert.equal(diagnosticLogs.at(-1).level, 'warn');
+  assert.equal(diagnosticLogs.at(-1).fields.errorCode, 13900005);
+  assert.ok(!JSON.stringify(diagnosticLogs).includes('PRIVATE_CACHE_PATH'));
+  files.clear();
   console.log('PASS selection, preview, save/share bytes, Markdown scope, failures, duplicate taps, cleanup and privacy revocation');
 })().catch(error => { console.error(error); process.exitCode = 1; });

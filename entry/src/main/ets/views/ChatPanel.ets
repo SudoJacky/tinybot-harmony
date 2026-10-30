@@ -1429,6 +1429,12 @@ export struct ChatPanel {
           IconButton({ icon: $r('sys.symbol.keyboard'), label: t('切换到键盘输入'), compId: 'voice-keyboard', diameter: 36,
             iconSize: 20, fill: $r('app.color.surface_variant'), disabled: this.speechActive() || this.speechHolding,
             onTap: () => this.showSpeechKeyboard() })
+          if (this.app.generating) {
+            IconButton({ icon: $r('sys.symbol.square_fill'), label: t("停止"), compId: 'stop-generation', diameter: 36,
+              iconSize: 14, fill: $r('app.color.text_primary'), tint: $r('app.color.page_background'),
+              onTap: () => { this.app.stop(); } })
+              .transition(Motion.pop())
+          }
         }.width('100%').height(56).padding({ left: 8, right: 8 })
       } else {
       Row() {

@@ -1,4 +1,5 @@
 import { common } from '@kit.AbilityKit';
+import { Diagnostics } from '../model/Diagnostics';
 import { preferences } from '@kit.ArkData';
 import { i18n } from '@kit.LocalizationKit';
 import { AppLanguage, languagePreference, resolveLocale, setLocale } from '../model/I18n';
@@ -12,7 +13,10 @@ export class LanguagePreferences {
     try {
       LanguagePreferences.store = preferences.getPreferencesSync(context, { name: 'tinybot-ui' });
       LanguagePreferences.preference = languagePreference(String(LanguagePreferences.store.getSync('language', 'system')));
-    } catch (_) { LanguagePreferences.preference = 'system'; }
+    } catch (error) {
+      Diagnostics.log('warn', 'language', 'load_failed', undefined, error as Error);
+      LanguagePreferences.preference = 'system';
+    }
     LanguagePreferences.refresh();
   }
   static refresh(): void {
@@ -27,6 +31,7 @@ export class LanguagePreferences {
     const previous = LanguagePreferences.preference;
     try { store.putSync('language', value); store.flushSync(); }
     catch (error) {
+      Diagnostics.log('error', 'language', 'save_failed', undefined, error as Error);
       store.putSync('language', previous);
       throw new Error((error as Error).message);
     }

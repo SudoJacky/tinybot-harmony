@@ -2,6 +2,8 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 export const LOG_LEVELS: LogLevel[] = ['debug', 'info', 'warn', 'error'];
 export type LogValue = string | number | boolean;
 export interface LogFields {
+  operation?: string; credentialScope?: string; rpcMethod?: string;
+  sdk?: number; initialSupported?: boolean; supported?: boolean; available?: boolean; reason?: string; format?: string;
   scriptSource?: string; line?: number; pageSceneObserver?: boolean;
   mounted?: boolean; attached?: boolean; visible?: boolean; foreground?: boolean;
   setting?: string; dataVersion?: number; serverId?: string;
@@ -13,24 +15,39 @@ export interface LogFields {
   tokens?: number; budget?: number; removed?: number; retained?: number; duplicates?: number; characters?: number;
   added?: number; updated?: number;
   round?: number; revision?: number; threads?: number; changedThreads?: number; selected?: number;
-  enabled?: boolean; failed?: boolean; cancelled?: boolean; speaking?: boolean; preflight?: boolean; closed?: boolean;
+  enabled?: boolean; failed?: boolean; cancelled?: boolean; uncertain?: boolean; speaking?: boolean; preflight?: boolean; closed?: boolean;
   streaming?: boolean; ready?: boolean; hasModel?: boolean; retryable?: boolean;
   protocol?: string; phase?: string; action?: string; policy?: string; scheme?: string; library?: string; status?: string;
   threadId?: string; messageId?: string; sessionId?: string; providerId?: string; previewId?: string; surfaceId?: string;
 }
 export interface LogData { level: LogLevel; module: string; event: string; fields: Record<string, LogValue>; }
-export interface LogError extends Error { code?: number | string; }
+interface LogFailureDetails { httpStatus?: number; nativeCode?: number; remoteCode?: number; service?: string; }
+export interface LogError extends Error { code?: number | string; details?: LogFailureDetails; }
 const ERROR_CODES: string[] = ['STALE_BROWSER_SNAPSHOT', 'STALE_INTERACTIVE_STATE', 'INVALID_ARGUMENTS', 'PERMISSION_DENIED',
   'CANCELLED', 'READ_ONLY', 'FILE_NOT_FOUND', 'TOOL_NOT_FOUND', 'TIMEOUT', 'CONTEXT_OVERFLOW',
-  'NATIVE_EXCEPTION', 'NATIVE_EMPTY_RESULT', 'NATIVE_NAPI_FAILED', 'FS_STALE_VERSION', 'FS_NOT_OBSERVED', 'FS_EXTERNAL_IO'];
+  'NATIVE_EXCEPTION', 'NATIVE_EMPTY_RESULT', 'NATIVE_NAPI_FAILED', 'FS_STALE_VERSION', 'FS_NOT_OBSERVED', 'FS_EXTERNAL_IO',
+  'ALREADY_EXISTS', 'AUTH_REQUIRED', 'BROWSER_BUSY', 'BROWSER_CLOSED', 'BROWSER_HISTORY_EMPTY', 'BROWSER_LOAD_FAILED',
+  'BROWSER_NOT_OWNED', 'BROWSER_NOT_VISIBLE', 'BROWSER_OBSERVATION_FAILED', 'BROWSER_OBSERVATION_INTERRUPTED', 'BROWSER_UNAVAILABLE',
+  'CONTENT_UNAVAILABLE', 'EVIDENCE_REQUIRED', 'EXECUTION_FAILED', 'FS_AMBIGUOUS_MATCH', 'FS_INCOMPLETE_LIST',
+  'FS_INVALID_ARGUMENTS', 'FS_INVALID_CURSOR', 'FS_INVALID_EDITS', 'FS_INVALID_PATH', 'FS_MATCH_NOT_FOUND',
+  'FS_OVERLAPPING_EDITS', 'FS_STALE_SEARCH', 'HANDOFF_REQUIRED', 'HTTP_ERROR', 'INTERNAL_ERROR', 'INVALID_RESPONSE',
+  'INVALID_RESULT', 'INVALID_STATE', 'LIMIT_EXCEEDED', 'NETWORK_ERROR', 'NOT_CONFIGURED', 'NOT_EXECUTED', 'NOT_FOUND',
+  'OUTCOME_UNKNOWN', 'PREVIEW_INVALID', 'PREVIEW_NOT_FOUND', 'PREVIEW_NOT_READY', 'QUOTA_EXHAUSTED', 'RATE_LIMITED',
+  'REMOTE_ERROR', 'REMOTE_TOOL_ERROR', 'RESPONSE_BUDGET_EXCEEDED', 'SCHEMA_REQUIRED', 'SEARCH_LAYOUT_CHANGED',
+  'SEARCH_PAGE_CHANGED', 'SEARCH_VERIFICATION_REQUIRED', 'STALE_BROWSER_ELEMENT', 'STALE_RESOURCE', 'TOOL_UNAVAILABLE',
+  'UNKNOWN_ERROR', 'UNSUPPORTED_CONTENT', 'UNSUPPORTED_PREVIEW_FORMAT', 'UNSUPPORTED_PROTOCOL', 'USER_DENIED'];
 
 // Names and string values are catalogs, not free text. Unknown keys never reach either output.
 const EVENTS: Record<string, string[]> = {};
 EVENTS.app = ['bar_failed', 'created', 'destroyed', 'window_created', 'window_failed', 'window_loaded', 'window_destroyed', 'foreground', 'background'];
 EVENTS.announcements = ['disabled', 'fetch_started', 'fetch_completed', 'fetch_failed', 'presented', 'present_failed', 'acknowledged', 'save_failed'];
 EVENTS.review = ['task_completed', 'presented', 'present_failed', 'accepted', 'deferred', 'disabled', 'request_completed', 'request_failed', 'save_failed'];
-EVENTS.appearance = ['material', 'material_unavailable', 'loaded', 'applied', 'save_failed', 'fonts_loaded', 'fonts_failed', 'insets_failed'];
-EVENTS.backup = ['started', 'restored', 'restore_prepared', 'cleanup_failed', 'replace_failed', 'rollback_failed', 'archive_written', 'archive_write_failed', 'archive_verified',
+EVENTS.appearance = ['material', 'material_support', 'material_unavailable', 'loaded', 'applied', 'save_failed', 'fonts_loaded', 'fonts_failed', 'insets_failed'];
+EVENTS.language = ['load_failed', 'save_failed'];
+EVENTS.account = ['restore_failed', 'response_invalid', 'state_changed', 'sign_in_cancelled', 'sign_in_failed', 'sign_out_failed', 'state_failed'];
+EVENTS.feedback = ['initialize_failed', 'save_failed', 'credential_failed', 'request_failed', 'submit_failed', 'list_failed',
+  'detail_failed', 'upload_failed', 'cleanup_failed', 'reconcile_failed', 'delete_failed'];
+EVENTS.backup = ['started', 'restored', 'restore_prepared', 'key_decrypt_failed', 'cleanup_failed', 'replace_failed', 'rollback_failed', 'archive_written', 'archive_write_failed', 'archive_verified',
   'restore_completed', 'restore_failed', 'startup_capture_failed', 'startup_marker_failed', 'startup_lookup_failed'];
 EVENTS['mini-app'] = ['manifest_failed', 'storage_failed', 'action_failed'];
 EVENTS.background = ['acquired', 'released', 'cancelled', 'suspended', 'release_failed', 'stop_failed', 'transition_failed', 'window_expired'];
@@ -43,29 +60,39 @@ EVENTS.web = ['engine_start', 'engine_ready', 'release', 'activate', 'failed', '
 EVENTS.preview = ['failed', 'captured', 'thumbnail_failed', 'surface_moved'];
 EVENTS.sandbox = ['execution_failed', 'orchestration_failed'];
 EVENTS.tool = ['failed', 'partial'];
-EVENTS.workspace = ['mutation_failed'];
-EVENTS.export = ['image_failed'];
+EVENTS.workspace = ['mutation_failed', 'folder_support_failed', 'folder_picker_support_failed', 'folder_persist_failed', 'folder_activate_failed', 'folder_revoke_failed', 'folder_startup_failed'];
+EVENTS.storage = ['scan_failed', 'metric_failed', 'cleanup_failed'];
+EVENTS.mcp = ['request_failed', 'cancel_notice_failed', 'browser_launch_failed'];
+EVENTS.export = ['image_failed', 'preview_failed', 'cleanup_failed', 'share_failed', 'save_failed'];
 EVENTS.network = ['request_start', 'request_end', 'context_overflow', 'first_data', 'request_failed'];
 EVENTS.context = ['inspected', 'request_prefix'];
 EVENTS.browser = ['permission', 'control_user', 'control_agent', 'task_released', 'closed', 'failed', 'acquired', 'permission_wait', 'operation', 'observation_changed', 'opened_by_user', 'annotation_started', 'annotation_captured', 'annotation_failed', 'search_observed', 'search_failed', 'capture_started', 'frame_captured', 'capture_finished'];
 EVENTS.session = ['run_started', 'run_finished', 'run_cancelled', 'mcp_failed', 'tasks_failed', 'run_failed', 'title_failed', 'interactive_failed', 'resource_failed', 'memory_failed', 'memory_review_failed', 'mutation_failed', 'save_failed', 'observer_failed'];
 EVENTS.memory = ['committed', 'review_started', 'review_discarded'];
-EVENTS.resources = ['credential_rollback_failed', 'team_selected', 'committed', 'preferences_saved'];
-EVENTS.configuration = ['unsupported', 'load_failed'];
+EVENTS.resources = ['credential_rollback_failed', 'credential_cleanup_failed', 'team_selected', 'committed', 'preferences_saved'];
+EVENTS.configuration = ['unsupported', 'load_failed', 'save_failed'];
 EVENTS.diagnostics = ['started', 'stopped', 'marker', 'failed', 'level_changed'];
-const NUMBERS: string[] = ['line', 'operationId', 'instanceId', 'generation', 'active', 'count', 'total', 'chars', 'bytes', 'elapsedMs', 'durationMs', 'http', 'code',
+const NUMBERS: string[] = ['sdk', 'line', 'operationId', 'instanceId', 'generation', 'active', 'count', 'total', 'chars', 'bytes', 'elapsedMs', 'durationMs', 'http', 'code',
   'commonMessages', 'sharedCharacters', 'systemHash', 'toolsHash', 'dataVersion',
   'messages', 'tools', 'nodes', 'keys', 'width', 'height', 'widthVp', 'request', 'chunk', 'eventCode', 'newChats', 'skippedChats', 'level', 'style',
   'tokens', 'budget', 'removed', 'retained', 'duplicates', 'characters', 'added', 'updated', 'round', 'revision', 'threads', 'changedThreads', 'selected'];
-const BOOLEANS: string[] = ['pageSceneObserver', 'mounted', 'attached', 'visible', 'foreground', 'enabled', 'failed', 'cancelled', 'speaking', 'preflight', 'closed', 'streaming', 'ready', 'hasModel', 'retryable'];
+const BOOLEANS: string[] = ['initialSupported', 'supported', 'available', 'pageSceneObserver', 'mounted', 'attached', 'visible', 'foreground', 'enabled', 'failed', 'cancelled', 'uncertain', 'speaking', 'preflight', 'closed', 'streaming', 'ready', 'hasModel', 'retryable'];
 const REFERENCES: string[] = ['threadId', 'messageId', 'sessionId', 'providerId', 'previewId', 'surfaceId', 'serverId'];
 const STRINGS: Record<string, string[]> = {};
+STRINGS.operation = ['access', 'read', 'list', 'stat', 'parse', 'unlink', 'rmdir', 'bundle_stats', 'free_size', 'total_size'];
+STRINGS.credentialScope = ['provider', 'search', 'mcp', 'backup'];
+STRINGS.rpcMethod = ['initialize', 'tools/list', 'tools/call', 'notifications/initialized', 'notifications/cancelled'];
+STRINGS.service = ['mcp', 'search', 'web', 'bing-browser'];
+STRINGS.reason = ['api_level', 'device_unsupported', 'construction_failed', 'capability_changed', 'supported'];
+STRINGS.format = ['image', 'markdown'];
 STRINGS.scriptSource = ['generated', 'host', 'frame', 'blank', 'data', 'other', 'unknown'];
 STRINGS.setting = ['search.provider', 'providerProfiles.protocol', 'options.autoRoute', 'extensions.browserPolicy', 'config.reasoning',
-  'capabilities.reasoning', 'threads.agentMode', 'threads.disabledTools', 'threads.reasoningEffort', 'servers.authType'];
+  'capabilities.reasoning', 'threads.agentMode', 'threads.disabledTools', 'threads.reasoningEffort', 'servers.authType',
+  'feedback.seenReplies', 'feedback.pendingSubmission', 'feedback.uploadQueue'];
 STRINGS.change = ['cold', 'append', 'tools', 'system', 'history'];
 STRINGS.protocol = ['chat-completions', 'responses', 'anthropic-messages', 'gemini'];
-STRINGS.phase = ['idle', 'preparing', 'listening', 'complete', 'finishing', 'error', 'creating', 'playing', 'stopping', 'connecting', 'streaming', 'capture', 'compose', 'encode'];
+STRINGS.phase = ['idle', 'preparing', 'listening', 'complete', 'finishing', 'error', 'creating', 'playing', 'stopping', 'connecting', 'streaming', 'capture', 'compose', 'encode',
+  'login', 'state', 'storage', 'credential', 'identity', 'submit', 'query', 'upload'];
 STRINGS.action = ['send', 'cancel', 'edit', 'press', 'none', 'open', 'click', 'type', 'select', 'scroll', 'back', 'forward', 'reload', 'capture', 'wait'];
 STRINGS.policy = ['unset', 'enabled', 'disabled'];
 STRINGS.scheme = ['http', 'https', 'about', 'data', 'file', 'other'];
@@ -100,7 +127,18 @@ export class LogSanitizer {
       const detail = typeof error === 'string' ? error : error.message;
       const code = typeof error === 'string' ? undefined : (error as LogError).code;
       if (typeof code === 'number' && Number.isFinite(code)) { result.errorCode = code; }
-      else if (typeof code === 'string' && ERROR_CODES.includes(code)) { result.errorCode = code; }
+      else if (typeof code === 'string' && ERROR_CODES.includes(code)) {
+        result.errorCode = code;
+        // Tool failures contain payloads and paths too. Copy only numeric protocol evidence
+        // and known service names; never enumerate or serialize the details object.
+        const details = (error as LogError).details;
+        if (details && typeof details === 'object') {
+          if (typeof details.httpStatus === 'number' && Number.isFinite(details.httpStatus)) { result.http = details.httpStatus; }
+          if (typeof details.nativeCode === 'number' && Number.isFinite(details.nativeCode)) { result.nativeCode = details.nativeCode; }
+          if (typeof details.remoteCode === 'number' && Number.isFinite(details.remoteCode)) { result.remoteCode = details.remoteCode; }
+          if (typeof details.service === 'string' && STRINGS.service.includes(details.service)) { result.service = details.service; }
+        }
+      }
       // Arbitrary exception text may contain credentials, bodies or paths. Classify but never retain it.
       const text = (typeof detail === 'string' ? detail.slice(0, 2048) : '').toLowerCase();
       result.errorKind = /cancel|abort|取消|停止/.test(text) ? 'cancelled' : /timeout|timed out|超时/.test(text) ? 'timeout' :

@@ -3,18 +3,21 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
-const studio = process.env.DEVECO_STUDIO_HOME || 'D:/DevEco Studio';
+const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio');
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 const root = path.resolve(__dirname, '../entry/src/main/ets');
 const cache = new Map(), stored = new Map(), visible = new Map();
-let systemLanguage = 'zh-Hans-CN', failFlush = false;
+let systemLanguage = 'zh-Hans-CN', failFlush = false, failRead = false;
 const preferenceStore = {
   getSync: (key, fallback) => stored.has(key) ? stored.get(key) : fallback,
   putSync: (key, value) => stored.set(key, value),
   flushSync: () => { if (failFlush) throw new Error('Injected storage failure'); }
 };
 const kits = {
-  '@kit.ArkData': { preferences: { getPreferencesSync: () => preferenceStore } },
+  '@kit.ArkData': { preferences: { getPreferencesSync: () => {
+    if (failRead) throw Object.assign(Error('PRIVATE_PREFERENCE_PATH'), { code: 15500019 });
+    return preferenceStore;
+  } } },
   '@kit.LocalizationKit': { i18n: { System: { getSystemLanguage: () => systemLanguage } } }
 };
 function load(relative) {
@@ -29,6 +32,8 @@ function load(relative) {
   return exports;
 }
 const { LanguagePreferences: language } = load(path.join(root, 'services/LanguagePreferences'));
+const languageLogs = [];
+load(path.join(root, 'model/Diagnostics')).Diagnostics.configureLogSink(data => languageLogs.push(data));
 const { getLocale, t } = load(path.join(root, 'model/I18n'));
 language.initialize({});
 assert.equal(getLocale(), 'zh-CN');
@@ -42,6 +47,7 @@ language.initialize({});
 assert.equal(getLocale(), 'zh-CN');
 failFlush = true;
 assert.throws(() => language.select('en'), /Injected/);
+assert.equal(languageLogs.at(-1).event, 'save_failed');
 assert.equal(stored.get('language'), 'zh-CN');
 assert.equal(visible.get('tinybot.locale'), 'zh-CN');
 failFlush = false;
@@ -51,6 +57,9 @@ systemLanguage = 'zh-TW'; language.refresh();
 assert.equal(getLocale(), 'zh-CN');
 stored.set('language', 'unsupported'); language.initialize({});
 assert.equal(visible.get('tinybot.language'), 'system');
+failRead = true; language.initialize({}); failRead = false;
+assert.equal(languageLogs.at(-1).event, 'load_failed'); assert.equal(languageLogs.at(-1).fields.errorCode, 15500019);
+assert.ok(!JSON.stringify(languageLogs).includes('PRIVATE_PREFERENCE_PATH'));
 console.log('PASS system changes, explicit override, restart persistence, save failure rollback and invalid preference fallback');
 
 async function testLanguagePage() {

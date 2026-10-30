@@ -68,9 +68,10 @@ export class NativeBrowserDriver implements BrowserDriver {
       if (event.touches.length <= 1) { this.touchStart = undefined; }
     } else if (event.type === TouchType.Cancel) { this.touchStart = undefined; }
   }
-  failed(message: string): void {
+  failed(error: Error | string): void {
     this.browser.clearActionFeedback();
-    this.error = message; this.loading = false; this.browser.report(message); this.wake();
+    this.error = typeof error === 'string' ? error : error.message;
+    this.loading = false; this.browser.report(error); this.wake();
   }
   private wake(): void { for (const finish of Array.from(this.waiters)) { finish(); } }
   private async ready(): Promise<void> {
@@ -84,7 +85,7 @@ export class NativeBrowserDriver implements BrowserDriver {
         const timer = setTimeout(() => {
           this.waiters.delete(finish);
           const failure = new ToolFailure('TIMEOUT', 'Browser page loading exceeded 30 seconds.', 'inspect_browser');
-          this.browser.report(failure.message); reject(failure);
+          this.browser.report(failure); reject(failure);
         }, 30000);
         this.waiters.add(finish); finish();
       });
@@ -269,7 +270,7 @@ export class NativeBrowserDriver implements BrowserDriver {
   userNavigate(url: string): void {
     this.browser.takeOver();
     if (!this.browser.preview) { this.navigate(url); return; }
-    this.open(url).catch((error: Error) => this.failed(error.message));
+    this.open(url).catch((error: Error) => this.failed(error));
   }
   userBack(): boolean {
     if (this.browser.preview) { return false; }
@@ -283,7 +284,7 @@ export class NativeBrowserDriver implements BrowserDriver {
   }
   userReload(): void {
     this.browser.takeOver();
-    if (this.browser.preview) { this.openPreview(this.browser.preview).catch((error: Error) => this.failed(error.message)); return; }
+    if (this.browser.preview) { this.openPreview(this.browser.preview).catch((error: Error) => this.failed(error)); return; }
     this.loading = true; this.error = ''; this.controller.refresh();
   }
 }

@@ -75,7 +75,7 @@ export struct BrowserPanel {
       if (!this.mounted) { await capture.pixel.release(); return; }
       this.annotationCapture = capture; this.annotation = new BrowserAnnotation(); this.showAnnotation = true;
       Diagnostics.log('info', 'browser', 'annotation_captured', { width: capture.width, height: capture.height });
-    } catch (error) { this.browser.report((error as Error).message); }
+    } catch (error) { this.browser.report(error as Error); }
     finally { this.capturing = false; }
   }
   private closeAnnotation(): void {
@@ -104,7 +104,7 @@ export struct BrowserPanel {
       this.driver?.userNavigate(validateWebAddress((this.browser.editingAddress || this.addressDirty ? this.address : this.browser.url).trim()));
       this.getUIContext().getFocusController().clearFocus();
     }
-    catch (error) { this.browser.report((error as Error).message); }
+    catch (error) { this.browser.report(error as Error); }
   }
   build() {
     Column({ space: Space.sm }) {
