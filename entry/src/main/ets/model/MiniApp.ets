@@ -1,10 +1,21 @@
 import { WebUiSpec, parseWebUi } from './WebUi';
 
 export const MINI_APP_DIR: string = 'mini-apps';
+export const MINI_APP_ICON_IDS: string[] = ['default', 'document', 'list', 'check', 'clock', 'folder', 'idea', 'star',
+  'people', 'note', 'picture', 'tools', 'voice', 'audio', 'link', 'message'];
+export const MINI_APP_ICON_COLOR_IDS: string[] = ['green', 'blue', 'orange', 'purple', 'rose'];
+export function miniAppIconId(icon: string): string {
+  if (!MINI_APP_ICON_IDS.includes(icon)) { throw new Error('Invalid mini app icon: ' + icon); }
+  return icon;
+}
+export function miniAppIconColorId(color: string): string {
+  if (!MINI_APP_ICON_COLOR_IDS.includes(color)) { throw new Error('Invalid mini app icon color: ' + color); }
+  return color;
+}
 export interface MiniAppRecord {
   version: number; id: string; title: string; description: string; sourcePath: string; sourceThreadId: string;
   createdAt: number; updatedAt: number; lastOpenedAt: number; archived: boolean;
-  page: WebUiSpec; previousPage?: WebUiSpec;
+  page: WebUiSpec; previousPage?: WebUiSpec; icon?: string; iconColor?: string;
 }
 export interface MiniAppRevision {
   id: string; number: number; title: string; description: string; summary: string;
@@ -33,6 +44,8 @@ export function parseMiniApp(text: string, id: string): MiniAppRecord {
     typeof app.archived !== 'boolean' || ![app.createdAt, app.updatedAt, app.lastOpenedAt].every((time: number) => Number.isFinite(time) && time >= 0)) {
     throw new Error('Invalid mini app manifest: ' + id);
   }
+  if (app.icon !== undefined) { miniAppIconId(app.icon); }
+  if (app.iconColor !== undefined) { miniAppIconColorId(app.iconColor); }
   app.page = parseWebUi(JSON.stringify(app.page));
   if (app.previousPage) { app.previousPage = parseWebUi(JSON.stringify(app.previousPage)); }
   if (app.version === 2) {

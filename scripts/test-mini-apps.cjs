@@ -115,13 +115,38 @@ async function main() {
   await repo.rename(app.id, '  Personal ledger  ');
   assert.deepEqual(plain(await repo.get(app.id)), {...beforeName, title:'Personal ledger'});
   assert.deepEqual(plain(await repo.load(app.id)), plain(before), 'Rename changes neither page nor stored user data');
+  const beforeIcon = plain(await repo.get(app.id));
+  assert.equal(beforeIcon.icon, undefined, 'Legacy manifests need no migration');
+  assert.equal(beforeIcon.iconColor, undefined, 'Legacy colors need no migration');
+  await repo.setIcon(app.id, 'list', 'blue');
+  assert.deepEqual(plain(await repo.get(app.id)), {...beforeIcon, icon:'list', iconColor:'blue'}, 'Only icon and color metadata change');
+  assert.equal((await restarted.get(app.id)).icon, 'list', 'Icon selection survives restart');
+  assert.equal((await restarted.get(app.id)).iconColor, 'blue', 'Color selection survives restart');
+  assert.deepEqual(plain(await repo.load(app.id)), plain(before), 'Icon selection cannot change user data');
+  for (const icon of ['', 'unknown', null, 1]) {
+    await assert.rejects(repo.setIcon(app.id, icon), /Invalid mini app icon/);
+    assert.throws(()=>parseMiniApp(JSON.stringify({...beforeIcon,icon}),app.id), /Invalid mini app icon/);
+  }
+  for (const iconColor of ['', '#FF0000', 'unknown', null, 1]) {
+    await assert.rejects(repo.setIcon(app.id, 'clock', iconColor), /Invalid mini app icon color/);
+    assert.throws(()=>parseMiniApp(JSON.stringify({...beforeIcon,iconColor}),app.id), /Invalid mini app icon color/);
+  }
+  await repo.setIcon(app.id,'note');
+  assert.equal((await repo.get(app.id)).iconColor,'blue','An icon-only update retains the selected color');
+  await repo.setIcon(app.id,'list');
+  assert.equal((await other.get('ledger')).icon, undefined, 'Icon selection stays in its workspace');
+  assert.equal((await other.get('ledger')).iconColor, undefined, 'Color selection stays in its workspace');
   await assert.rejects(repo.rename(app.id, '  '), /1–160/);
   await assert.rejects(repo.rename(app.id, 'x'.repeat(161)), /1–160/);
   assert.equal((await other.get('ledger')).title, 'Other', 'Same ID in another workspace stays unchanged');
   const changed = miniAppPage('ledger.js','document.body.textContent="updated"');
   await repo.publish(app.id,'Updated','','ledger.js','chat',changed,true,signal);
+  assert.equal((await repo.get(app.id)).icon, 'list', 'Page publication retains the user-selected icon');
+  assert.equal((await repo.get(app.id)).iconColor, 'blue', 'Page publication retains the selected color');
   assert.deepEqual(plain(await repo.load(app.id)),plain(before));
   await repo.change(app.id,'rollback'); assert.equal((await repo.get(app.id)).page.js,page.js);
+  assert.equal((await repo.get(app.id)).icon, 'list', 'Page rollback retains the selected icon');
+  assert.equal((await repo.get(app.id)).iconColor, 'blue', 'Page rollback retains the selected color');
   assert.deepEqual(plain(await repo.load(app.id)),plain(before));
   await assert.rejects(new MiniAppValidationStorage(before).save({},before.revision),/startup/);
   await repo.change(app.id,'archive');
@@ -129,6 +154,11 @@ async function main() {
   assert.ok((await apps.list()).some(x=>x.app.id===app.id&&x.app.archived));
   await repo.change(app.id,'restore'); assert.deepEqual(plain(await repo.load(app.id)),plain(before));
   const nativeRename = fileIo.rename;
+  fileIo.rename = async (a,b) => { if(b.endsWith('/app.json'))throw Error('icon write failed'); return nativeRename(a,b); };
+  await assert.rejects(repo.setIcon(app.id,'clock','orange'), /icon write failed/);
+  fileIo.rename = nativeRename;
+  assert.equal((await repo.get(app.id)).icon,'list','Failed icon save leaves committed metadata intact');
+  assert.equal((await repo.get(app.id)).iconColor,'blue','Failed save cannot commit half of the icon/color pair');
   fileIo.rename = async (a,b) => { if(b.endsWith('/data.json'))throw Error('disk write failed'); return nativeRename(a,b); };
   await assert.rejects(repo.save(app.id,{lost:true},before.revision),/disk write failed/);
   fileIo.rename = nativeRename;
@@ -182,6 +212,8 @@ async function main() {
   const restored=new MiniApps(restoreRoot);
   assert.equal((await restored.list()).length,3);
   assert.deepEqual(plain(await restored.repository('chat').load('ledger')),plain(before));
+  assert.equal((await restored.repository('chat').get('ledger')).icon,'list','Backup restores selected icons');
+  assert.equal((await restored.repository('chat').get('ledger')).iconColor,'blue','Backup restores selected colors');
   const modified=await restored.repository('chat').save('ledger',{local:true},before.revision);
   await readBackupFile(restore,backup,emptyData());
   assert.deepEqual(plain(await restored.repository('chat').load('ledger')),plain(modified),'restore keeps local data');
@@ -211,6 +243,9 @@ async function versionTwoTest() {
   await repo.rename('versioned', 'My counter');
   assert.deepEqual(plain(await repo.get('versioned')), {...plain(manifest), title:'My counter'},
     'Renaming v2 preserves immutable revisions, adoptions and the active data file');
+  const beforeIcon = plain(await repo.get('versioned'));
+  await repo.setIcon('versioned','star','rose');
+  assert.deepEqual(plain(await repo.get('versioned')), {...beforeIcon,icon:'star',iconColor:'rose'}, 'v2 icon/color changes preserve revisions and adoption history');
   assert.equal((await apps.list()).length,1);
   let data = await repo.load('versioned'); assert.deepEqual(plain(data.value),{count:42});
   data = await repo.save('versioned',{count:43},data.revision);
@@ -220,12 +255,16 @@ async function versionTwoTest() {
   await repo.change('versioned','open'); await repo.change('versioned','archive'); await repo.change('versioned','restore');
   assert.deepEqual(plain((await repo.get('versioned')).revisions),originalHistory);
   const updated = await repo.publish('versioned','Updated','fixture','counter.js','v2-workspace',page,true,signal);
+  assert.equal(updated.icon,'star','v2 page publication retains the user-selected icon');
+  assert.equal(updated.iconColor,'rose','v2 page publication retains the selected color');
   assert.equal(updated.version,2); assert.equal(updated.revisions.length,3); assert.equal(updated.revisions[2].dataSchema,2);
   assert.equal(updated.currentRevisionId,updated.revisions[2].id); assert.equal(updated.dataFile,'data-v2.json');
   assert.deepEqual(plain(updated.revisions.slice(0,2)),originalHistory);
   assert.equal(miniAppCanRollback(updated),true);
   await repo.change('versioned','rollback');
   assert.equal((await repo.get('versioned')).currentRevisionId,'v2');
+  assert.equal((await repo.get('versioned')).icon,'star','v2 rollback retains the selected icon');
+  assert.equal((await repo.get('versioned')).iconColor,'rose','v2 rollback retains the selected color');
   assert.equal((await repo.get('versioned')).page.js,revisions[1].page.js);
   assert.deepEqual(plain(await repo.load('versioned')),plain(data));
   await repo.change('versioned','rollback');

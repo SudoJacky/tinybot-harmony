@@ -119,8 +119,8 @@ struct Index {
   @State private historyPreferredWidth: number = 0;
   @State private detailPreferredWidth: number = 0;
   @State private historySearchRequest: number = 0;
-  @State private miniAppAddAvailable: boolean = false;
-  @State private miniAppAddRequest: number = 0;
+  @State private miniAppCreateAvailable: boolean = false;
+  @State private miniAppCreateRequest: number = 0;
   private resizeBase: number = 0;
   @State private chatVisible: boolean = true;
   @State private headerProgress: number = 0;
@@ -1053,14 +1053,14 @@ struct Index {
     } else if (name === 'mini-apps') {
       NavDestination() {
         if (this.app.productivity.options?.miniAppsEnabled === true) {
-          MiniAppsPanel({ app: this.app, onChat: () => this.revealChat(), addRequest: this.miniAppAddRequest,
+          MiniAppsPanel({ app: this.app, onChat: () => this.revealChat(), createRequest: this.miniAppCreateRequest,
             previewRevision: this.app.active.id + ':' + this.app.active.latestPreviewIds.join(','),
-            onAddAvailable: (available: boolean) => { this.miniAppAddAvailable = available; } })
+            onCreateAvailable: (available: boolean) => { this.miniAppCreateAvailable = available; } })
         } else { Text(t('请先在设置的实验室中开启小程序。')) }
       }
         .title(t('小程序'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
-        .menus(this.miniAppAddAvailable ? [{ value: t('从当前会话的预览添加'), symbolIcon: new SymbolGlyphModifier($r('sys.symbol.plus')),
-          isEnabled: !this.app.busy, action: () => { this.miniAppAddRequest++; } }] : [])
+        .menus(this.miniAppCreateAvailable ? [{ value: t('创建'), symbolIcon: new SymbolGlyphModifier($r('sys.symbol.plus')),
+          isEnabled: this.app.ready && !this.app.busy, action: () => { this.miniAppCreateRequest++; } }] : [])
     } else if (name === 'branches') {
       NavDestination() { BranchesPanel({ app: this.app, onSelected: () => this.paths.clear() }) }.title(t("会话分支"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'appearance') {
