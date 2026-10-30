@@ -4,6 +4,7 @@ const { spawnSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const suites = {
   source: [
+    'test-sidebar-navigation.cjs',
     'test-parallel-sessions.cjs',
     'test-answer-speech-native.cjs',
     'test-api20-compat.cjs',
