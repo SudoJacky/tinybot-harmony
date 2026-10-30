@@ -3,6 +3,7 @@ import { util } from '@kit.ArkTS';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { t } from '../model/I18n';
 import { Diagnostics } from '../model/Diagnostics';
+import { Cancellation } from './Cancellation';
 
 // v3: 8-byte magic, uint32 LE index length, UTF-8 index, raw blobs, SHA-256.
 // Only the index is materialized. Binary I/O and hashing use 256 KiB chunks.
@@ -23,9 +24,10 @@ async function readExactly(fd: number, length: number): Promise<Uint8Array> {
   return result;
 }
 
-async function writeAll(fd: number, bytes: Uint8Array, position: number): Promise<number> {
+async function writeAll(fd: number, bytes: Uint8Array, position: number, cancellation?: Cancellation): Promise<number> {
   let offset = 0;
   while (offset < bytes.length) {
+    cancellation?.check();
     const count = await fs.write(fd, bytes.buffer.slice(bytes.byteOffset + offset, bytes.byteOffset + Math.min(offset + CHUNK, bytes.length)), { offset: position + offset });
     if (count <= 0) { throw new Error(t('文件写入未完成。')); }
     offset += count;
@@ -38,9 +40,11 @@ export async function cleanupBackupArchive(directory: string): Promise<void> {
   catch (error) { Diagnostics.log('warn', 'backup', 'cleanup_failed', undefined, error as Error); }
 }
 
-export async function writeBackupArchive(path: string, metadata: string, sources: string[]): Promise<void> {
+export async function writeBackupArchive(path: string, metadata: string, sources: string[], cancellation?: Cancellation): Promise<void> {
+  cancellation?.check();
   const sizes: number[] = [];
   for (const source of sources) {
+    cancellation?.check();
     const stat = await fs.lstat(source);
     if (!stat.isFile() || stat.isSymbolicLink() || !Number.isSafeInteger(stat.size) || stat.size < 0) { throw new Error(t('备份文件无效。')); }
     sizes.push(stat.size);
@@ -54,18 +58,20 @@ export async function writeBackupArchive(path: string, metadata: string, sources
   let complete = false;
   try {
     const hash = cryptoFramework.createMd('SHA256');
-    let position = await writeAll(output.fd, header, 0);
+    let position = await writeAll(output.fd, header, 0, cancellation);
     await hash.update({ data: header });
-    position = await writeAll(output.fd, bytes, position); await hash.update({ data: bytes });
+    position = await writeAll(output.fd, bytes, position, cancellation); await hash.update({ data: bytes });
     for (let index = 0; index < sources.length; index++) {
+      cancellation?.check();
       const input = await fs.open(sources[index], fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
       try {
         const stat = await fs.stat(input.fd);
         if (!stat.isFile() || stat.size !== sizes[index]) { throw new Error(t('备份期间文件发生变化，请重试。')); }
         let remaining = sizes[index];
         while (remaining > 0) {
+          cancellation?.check();
           const chunk = await readExactly(input.fd, Math.min(CHUNK, remaining));
-          position = await writeAll(output.fd, chunk, position); await hash.update({ data: chunk });
+          position = await writeAll(output.fd, chunk, position, cancellation); await hash.update({ data: chunk });
           remaining -= chunk.length;
         }
         if (await fs.read(input.fd, new ArrayBuffer(1)) !== 0 || Number((await fs.stat(input.fd)).mtime) !== Number(stat.mtime)) {
@@ -73,7 +79,8 @@ export async function writeBackupArchive(path: string, metadata: string, sources
         }
       } finally { await fs.close(input); }
     }
-    position = await writeAll(output.fd, (await hash.digest()).data, position);
+    cancellation?.check();
+    position = await writeAll(output.fd, (await hash.digest()).data, position, cancellation);
     await fs.fsync(output.fd);
     Diagnostics.log('info', 'backup', 'archive_written', { count: sources.length, bytes: position });
     complete = true;

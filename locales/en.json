@@ -2594,5 +2594,21 @@
   "无需密钥 · 未配置实例": "No key required · Instance not configured",
   "SearXNG 实例地址": "SearXNG instance URL",
   "无需 API Key，支持 HTTP/HTTPS 实例和子路径。请填写实例基础地址，不含 /search 或查询参数。": "No API key required. Supports HTTP/HTTPS instances and subpaths. Enter the instance base URL without /search or query parameters.",
-  "实例需在 settings.yml 的 search.formats 中启用 json；未启用时通常返回 403。": "Enable json under search.formats in the instance settings.yml; otherwise requests usually return 403."
+  "实例需在 settings.yml 的 search.formats 中启用 json；未启用时通常返回 403。": "Enable json under search.formats in the instance settings.yml; otherwise requests usually return 403.",
+  "自动云备份": "Automatic cloud backup",
+  "自动云备份已关闭": "Automatic cloud backup is off",
+  "正在自动备份…": "Backing up automatically…",
+  "自动备份已上传 · {0}": "Automatic backup uploaded · {0}",
+  "自动备份等待上传，卸载前请确认云端状态。": "Automatic backup is waiting to upload. Check its cloud status before uninstalling.",
+  "无法保存自动备份设置：{0}": "Unable to save automatic backup settings: {0}",
+  "自动备份 · {0}": "Automatic backup · {0}",
+  "离开应用时，有变更才申请短时任务备份；强制关闭可能中断。自动备份独立保存。": "When leaving the app, request a short background task to back up changes. Force closing may interrupt it. Automatic backups are stored separately.",
+  "离开应用时，有变更才自动备份；需登录并开启云空间。": "Back up changes when leaving the app. Huawei ID sign-in and Cloud are required.",
+  "后台备份时间已结束，请稍后重试。": "The background backup window has ended. Please try again later.",
+  "请在系统弹窗中确认隐私政策；若弹窗未出现，请点击“继续授权”。": "Confirm the privacy policy in the system dialog. If it does not appear, tap Continue authorization.",
+  "继续授权": "Continue authorization",
+  "共享文件夹 {0} 的系统授权已失效，请在项目设置中移除后重新添加该文件夹。": "System access to shared folder {0} has expired. Remove and add the folder again in project settings.",
+  "重装应用或撤销目录授权后，请移除并重新添加共享文件夹。": "After reinstalling the app or revoking folder access, remove and add shared folders again.",
+  "1.2.3 · 2026-10-30": "1.2.3 · 2026-10-30",
+  "新增退后台自动云备份，已登录并开启 Tinybot 云空间时默认启用，可在备份设置关闭，上传状态清晰可见。隐私等待页新增“继续授权”入口。修复聊天输入、会话切换与 Markdown 渲染回调问题；浏览器和文档提取按需加载，改善启动时的初始化。修复光感材质能力误判，完善网络状态权限与共享文件夹重新授权提示。自动备份受系统后台时限约束，卸载前请确认已上传。": "Added automatic cloud backup when the app enters the background, enabled by default when signed in with Tinybot Cloud Space available. Turn it off in backup settings and check the upload status there. The privacy waiting screen now offers Continue authorization. Fixed rendering callbacks for chat input, conversation switching and Markdown. Browser and document extraction modules now load on demand. Fixed incorrect light-sense capability detection, added the network-state permission and clarified how to reauthorize shared folders. Automatic backups are subject to system background limits; confirm the upload before uninstalling."
 }

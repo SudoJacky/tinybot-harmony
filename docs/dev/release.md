@@ -4,7 +4,7 @@
 
 ## 版本与产物
 
-当前版本线：`1.2.2` / `versionCode=1002002`，包名 `com.sudojacky.tinybot`，设备类型 `phone`、`tablet`，最低 HarmonyOS 6.0.0（API 20）、目标 API 26，发布包仅 `arm64-v8a`（模拟器使用单独构建的调试包，不随正式包分发）。
+当前版本线：`1.2.3` / `versionCode=1002003`，包名 `com.sudojacky.tinybot`，设备类型 `phone`、`tablet`，最低 HarmonyOS 6.0.0（API 20）、目标 API 26，发布包仅 `arm64-v8a`（模拟器使用单独构建的调试包，不随正式包分发）。
 
 产物检查必须核对真实 HAP/APP 的 `minAPIVersion=60000020`、`targetAPIVersion=260000026`、版本号与 ABI，不能只检查模板文字。API 20 与 API 26 使用同一个包，发布说明必须同时写明两套系统的能力差异（沉浸光感材质、PDF 文字提取）。沉浸光感还需设备支持，API 26 本身不能证明材质可用。
 
@@ -29,7 +29,7 @@ pwsh -ExecutionPolicy Bypass -File scripts\prepare-distribution.ps1 -StudioRoot 
 
 脚本先做 ArkTS 检查，再构建 Release；还需确认 APP 已使用 `assembleApp` 从本轮 Release 产物组装，验证版本、`app.debug=false`、包内容、arm64 沙箱库与符号 Build ID，最后产出目录和 ZIP。已有输出不覆盖；可用 `-OutputDirectory` 指定新目录。`-SkipBuild` 仅打包既有产物，仍校验结构与版本，但不能证明包含最新代码。
 
-当前独立 ArkTS 检查器可能无法解析构建生成的 `BuildProfile` 模块；v1.0.5 的完整 Debug / Release 构建可正常解析。遇到该错误时保留错误记录，先用 `devecocli build --product default --build-mode release` 完成真实构建与包检查，再运行 Hvigor `--mode project -p product=default -p buildMode=release assembleApp --no-daemon` 组装 APP，然后对本次产物使用 `prepare-distribution.ps1 -SkipBuild` 整理资料；不要复用旧版本产物或放宽隐私授权条件。此方式不代表独立检查器通过。
+当前独立 ArkTS 检查器可能无法解析构建生成的 `BuildProfile` 模块；完整 Debug / Release 构建可正常解析。遇到该错误时保留错误记录，先用 `devecocli build --product default --build-mode release` 完成真实构建与包检查，再运行 Hvigor `--mode project -p product=default -p buildMode=release assembleApp --no-daemon` 组装 APP，然后对本次产物使用 `prepare-distribution.ps1 -SkipBuild` 整理资料；不要复用旧版本产物或放宽隐私授权条件。此方式不代表独立检查器通过。
 
 ## 签名与上传
 

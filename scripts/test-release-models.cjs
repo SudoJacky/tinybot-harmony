@@ -97,7 +97,10 @@ const startupScope = { exports: {}, Date, AppStorage: { setOrCreate() {} }, requ
   const dependency = Object.entries(names).find(([, mapping]) => mapping?.obfName?.replace(/\.ets$/, '') === normalized[1]);
   assert.ok(dependency, 'Missing ability dependency mapping: ' + id);
   const moduleName = path.basename(dependency[0], '.ets');
-  const symbol = { NativeActions: 'ShareInbox', HostedPrivacy: 'hostedPrivacy', HuaweiAccount: 'huaweiAccount' }[moduleName] || moduleName;
+  if (moduleName === 'NativeDiagnosticLog') {
+    return { [names.PropertyCache.configureNativeDiagnosticLog || 'configureNativeDiagnosticLog']: () => {} };
+  }
+  const symbol = { NativeActions: 'ShareInbox', HostedPrivacy: 'hostedPrivacy', HuaweiAccount: 'huaweiAccount', AutoCloudBackup: 'autoCloudBackup' }[moduleName] || moduleName;
   if (symbol === 'hostedPrivacy') {
     return { [names.PropertyCache[symbol] || symbol]: {
       initialize(_context, onChange) { privacyChanged = onChange; }
@@ -119,10 +122,10 @@ ability.onCreate({}, {});
 assert.equal(startupScope._brushEngineContext, ability.context, 'Pen Kit receives the real global context');
 assert.deepEqual(initialized, ['LanguagePreferences', 'AppearancePreferences']);
 privacyChanged(true);
-assert.deepEqual(initialized, ['LanguagePreferences', 'AppearancePreferences', 'DeveloperDiagnostics', 'web']);
+assert.deepEqual(initialized, ['LanguagePreferences', 'AppearancePreferences', 'DeveloperDiagnostics']);
 privacyChanged(true);
-assert.equal(initialized.filter(item => item === 'web').length, 1);
-console.log('PASS obfuscated release initializes global Pen Kit context and preferences, defers business until consent, and starts Web only once');
+assert.equal(initialized.filter(item => item === 'web').length, 0);
+console.log('PASS obfuscated release initializes global Pen Kit context and preferences, defers business until consent, and leaves Web initialization to its first view');
 
 // Follow the emitted dynamic import across the real release module/export boundary.
 // The platform WrappedBuilder is intercepted after module evaluation, without loading Pen Kit on the host.

@@ -2,6 +2,7 @@ import { t } from '../model/I18n';
 import { Diagnostics } from '../model/Diagnostics';
 import { ProjectData } from '../model/Project';
 import { SharedFolder } from '../model/SharedFolders';
+import { ToolFailure } from '../model/ToolFailure';
 import { fileShare } from '@kit.CoreFileKit';
 
 const FOLDER_CAPABILITY: string = 'SystemCapability.FileManagement.AppFileService.FolderAuthorization';
@@ -46,6 +47,15 @@ export class ProjectFolderAccess {
       const policies: fileShare.PolicyInfo[] = pending.map((folder: SharedFolder): fileShare.PolicyInfo => {
         return { uri: folder.uri, operationMode: READ_WRITE };
       });
+      // A restored URI is only a bookmark. Uninstalling or revoking access removes
+      // the system grant; activation cannot recreate it without a new picker selection.
+      const grants = await fileShare.checkPersistentPermission(policies);
+      const missing = pending.filter((_folder: SharedFolder, index: number) => !grants[index]);
+      if (missing.length > 0) {
+        throw new ToolFailure('SHARED_FOLDER_AUTH_REQUIRED',
+          t('共享文件夹 {0} 的系统授权已失效，请在项目设置中移除后重新添加该文件夹。', [missing.map((folder: SharedFolder) => folder.name).join('、')]),
+          'reselect_shared_folder');
+      }
       try {
         await fileShare.activatePermission(policies);
       } catch (error) {

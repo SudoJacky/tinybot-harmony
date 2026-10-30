@@ -1,6 +1,5 @@
 import { Diagnostics } from '../model/Diagnostics';
 import { configureNativeDiagnosticLog } from '../services/NativeDiagnosticLog';
-import { webview } from '@kit.ArkWeb';
 import { ShareInbox } from '../services/NativeActions';
 import { LanguagePreferences } from '../services/LanguagePreferences';
 import { AppearancePreferences } from '../services/AppearancePreferences';
@@ -10,6 +9,7 @@ import { DeveloperDiagnostics } from '../services/DeveloperDiagnostics';
 import { huaweiAccount } from '../services/HuaweiAccount';
 
 import { hostedPrivacy } from '../services/HostedPrivacy';
+import { autoCloudBackup } from '../services/AutoCloudBackup';
 import { backgroundGeneration } from '../services/BackgroundGeneration';
 import { completionNotifications } from '../services/CompletionNotifications';
 import { WebUiPreflight } from '../services/WebUiPreflight';
@@ -81,11 +81,7 @@ export default class EntryAbility extends UIAbility {
     if (!this.servicesStarted) {
       this.servicesStarted = true;
       DeveloperDiagnostics.initialize(this.context);
-      // Prepare ArkWeb only after system consent, before mounting generated surfaces.
-      const webStarted = Date.now();
-      Diagnostics.log('info', 'web', 'engine_start');
-      webview.WebviewController.initializeWebEngine();
-      if (Diagnostics.acceptsLog('info')) { Diagnostics.log('info', 'web', 'engine_ready', { elapsedMs: Date.now() - webStarted }); }
+      // ArkWeb initializes with the first Web view; native chat needs no engine prewarm.
     }
     for (const want of this.pendingWants) { this.receiveWant(want); }
     this.pendingWants = [];
@@ -104,6 +100,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onDestroy(): void {
+    autoCloudBackup.dispose();
     completionNotifications.dispose();
     backgroundGeneration.dispose();
     hostedPrivacy.dispose();
@@ -133,6 +130,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onForeground(): void {
+    autoCloudBackup.setForeground(true);
     completionNotifications.setForeground(true);
     backgroundGeneration.setForeground(true);
     hostedPrivacy.refresh();
@@ -147,6 +145,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onBackground(): void {
+    autoCloudBackup.onBackground();
     completionNotifications.setForeground(false);
     WebUiPreflight.setForeground(false);
     PreviewCapture.setForeground(false);

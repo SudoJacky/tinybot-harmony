@@ -15,10 +15,12 @@ export struct MarkdownView {
   private blocks: MarkdownBlock[] = [];
   private document: MarkdownDocument = new MarkdownDocument();
   private mounted: boolean = false;
+  private disposed: boolean = false;
   private renderTimer: number = -1;
-  aboutToAppear(): void { Diagnostics.adjust('render.documents', 1); this.refresh(); this.mounted = true; }
-  aboutToDisappear(): void { Diagnostics.adjust('render.documents', -1); this.mounted = false; clearTimeout(this.renderTimer); this.renderTimer = -1; }
+  aboutToAppear(): void { this.disposed = false; Diagnostics.adjust('render.documents', 1); this.refresh(); this.mounted = true; }
+  aboutToDisappear(): void { this.disposed = true; Diagnostics.adjust('render.documents', -1); this.mounted = false; clearTimeout(this.renderTimer); this.renderTimer = -1; }
   private refresh(): void {
+    if (this.disposed) { return; }
     const mark = Diagnostics.begin(this.perfId);
     const update = this.document.update(this.content);
     if (Diagnostics.recording) {
@@ -38,6 +40,7 @@ export struct MarkdownView {
     this.syncChunks(Math.floor(update.start / MARKDOWN_CHUNK_BLOCKS));
   }
   private syncChunks(start: number): void {
+    if (this.disposed) { return; }
     const mark = Diagnostics.begin(this.perfId);
     const previous = this.chunks.length;
     start = Math.min(start, this.chunks.length);

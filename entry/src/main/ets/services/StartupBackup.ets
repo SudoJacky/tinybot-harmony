@@ -36,7 +36,7 @@ export class StartupBackup {
     // Pull remote metadata before listing; a new device may not have a cached directory yet.
     const synced = await CloudBackup.sync();
     const items = await CloudBackup.list(this.context);
-    const latest = items.find((item) => item.name === 'tinybot-latest.tinybot') || items[0];
+    const latest = items[0];
     if (!latest && synced) { this.finish(); }
     return latest;
   }

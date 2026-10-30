@@ -1,3 +1,4 @@
+import { Radius } from '../common/Theme';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { prettyToolText, toolTitle, toolStatusLabel } from '../model/ToolPresentation';
@@ -205,7 +206,7 @@ export struct ToolDetails {
           .onClick(() => this.inspect('raw'))
       }
     }.width('100%').alignItems(HorizontalAlign.Start).padding({ bottom: 4 })
-    .bindSheet($$this.expanded, this.viewer(), { height: '90%', showClose: false, dragBar: true,
+    .bindSheet($$this.expanded, this.viewer(), { radius: Radius.sheet, height: '90%', showClose: false, dragBar: true,
       backgroundColor: $r('app.color.page_background') })
   }
 }

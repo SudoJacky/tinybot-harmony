@@ -44,7 +44,7 @@ export struct ThreadReferenceCard {
     }.id('reference-' + this.reference.threadId).width('100%').padding({ left: 10, right: 6, top: 6, bottom: 6 })
     .borderRadius(Radius.md).backgroundColor($r('app.color.surface_variant'))
     .onClick(() => { this.previewing = true; })
-    .bindSheet($$this.previewing, this.preview(), { title: { title: t('会话引用') }, detents: [SheetSize.LARGE], dragBar: true,
+    .bindSheet($$this.previewing, this.preview(), { radius: Radius.sheet, title: { title: t('会话引用') }, detents: [SheetSize.LARGE], dragBar: true,
       backgroundColor: $r('app.color.page_background') })
   }
 }

@@ -9,7 +9,7 @@ assert.ok(fs.statSync(built).mtimeMs >= fs.statSync(source).mtimeMs, 'Rebuild Ch
 const tree = ts.createSourceFile(built, fs.readFileSync(built, 'utf8'), ts.ScriptTarget.Latest, true);
 const cls = tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'ChatPanel');
 const names = ['fromSheet', 'dismissPlusMenu', 'finishPlusAction', 'cancelPlusAction', 'canAttach', 'endSpeech',
-  'addThreadReference', 'showSpeechKeyboard', 'speechActive', 'aboutToDisappear', 'speechAvailabilityChanged', 'speechThreadChanged'];
+  'addThreadReference', 'showSpeechKeyboard', 'speechActive', 'aboutToDisappear', 'speechAvailabilityChanged', 'speechThreadChanged', 'afterRender', 'publishHeaderProgress'];
 const methods = cls.members.filter(n => names.includes(n.name?.getText(tree)));
 function find(node, predicate) {
   if (predicate(node)) return node;
@@ -33,8 +33,9 @@ function fixture() {
     { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText,
     { exports, FrameCallback: class {}, setTimeout: fn => timers.push(fn), clearTimeout() {},
       Diagnostics: { acceptsLog: () => true, log: (...args) => logs.push(args) },
-      SheetSize: {}, Placement: {}, BlurStyle: {}, referenceQuery: text => text.includes('@') ? '' : undefined });
+      Radius: { sheet: {} }, SheetSize: {}, Placement: {}, BlurStyle: {}, referenceQuery: text => text.includes('@') ? '' : undefined });
   const panel = Object.assign(new exports.Panel(), { speechEnabled: true, foreground: true, focusOwner: 0, keyboardFocusRequest: 0,
+    composerMounted: true, lifecycle: 0, composerSelectionStart: -1, composerSelectionEnd: -1,
     thread: { id: 'chat', archived: false }, activeThreadId: 'chat', speechThreadId: 'chat', speech: { phase: 'idle', cancel() {} },
     app: { active: { id: 'chat' }, draft: '', busy: false, saveError: '', setDraft(text) { this.draft = text; } },
     showPlus: true, showPlusMenu: false, voiceMode: false, importing: false,

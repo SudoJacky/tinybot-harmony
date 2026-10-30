@@ -5,7 +5,7 @@ import { pasteboard } from '@kit.BasicServicesKit';
 import { ThirdPartyLicensesPanel } from './ThirdPartyLicensesPanel';
 import { LegalDocumentPanel } from './LegalDocumentPanel';
 import { readAppInformation } from '../services/AppInformation';
-import { Font, Space } from '../common/Theme';
+import { Font, Radius, Space } from '../common/Theme';
 import { Banner, GroupCard, NavRow, RowDivider, SectionHeader } from '../common/Widgets';
 import { HelpDemo } from './HelpDemo';
 import { HelpDemoKind } from '../model/HelpTutorial';
@@ -145,7 +145,7 @@ export struct SupportPanel {
       if (this.version) {
         Text(t('版本 {0}', [this.version])).fontFamily(this.appearance.fontFamily).id('about-version').fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
           .onClick(() => this.versionTapped())
-          .bindSheet($$this.showDeveloperPassword, this.developerPasswordSheet(), { title: { title: t('开启开发者模式') }, height: SheetSize.FIT_CONTENT,
+          .bindSheet($$this.showDeveloperPassword, this.developerPasswordSheet(), { radius: Radius.sheet, title: { title: t('开启开发者模式') }, height: SheetSize.FIT_CONTENT,
             dragBar: true, keyboardAvoidMode: SheetKeyboardAvoidMode.TRANSLATE_AND_RESIZE, systemMaterial: this.appearance.surface,
             onDisappear: () => this.cancelDeveloperUnlock() })
       }
@@ -222,6 +222,7 @@ export struct SupportPanel {
 
   @Builder
   updates() {
+    this.article(t('1.2.3 · 2026-10-30'), t('新增退后台自动云备份，已登录并开启 Tinybot 云空间时默认启用，可在备份设置关闭，上传状态清晰可见。隐私等待页新增“继续授权”入口。修复聊天输入、会话切换与 Markdown 渲染回调问题；浏览器和文档提取按需加载，改善启动时的初始化。修复光感材质能力误判，完善网络状态权限与共享文件夹重新授权提示。自动备份受系统后台时限约束，卸载前请确认已上传。'))
     this.article(t("1.2.2 · 2026-10-29"), t("支持多个会话并行执行任务、后台传输与完成通知。小程序可在实验室开启，支持数据保存、更新、重命名和移除后恢复，列表新增分类数量、相对时间和下拉刷新。支持系统文档分享与拖入附件，每条消息最多 10 个附件，文档保留原件并按需读取。新增全屏预览与实际页面验证，优化内置必应搜索和服务设置，增加 QQ 社区与评价邀请。模型 API Key 随华为账号加密备份，同账号可恢复。修复旧小程序清单兼容、恢复后模型服务未注册、后台预览误超时、平板侧栏空白及菜单背景缺失，改善工具响应、大内容处理和配置兼容。"))
     this.article(t("1.2.1 · 2026-10-29"), t("支持将图片或文件拖入当前聊天作为附件。设置新增实验室，小程序默认关闭，可按需开启，关闭后保留已有数据。修复旧版小程序预览记录导致会话无法加载的问题。"))
     this.article(t("1.2.0 · 2026-10-28"), t("新增并行会话、本地小程序与数据保存、后台完成通知和系统文档分享，单条消息最多 10 个附件。默认开启必应搜索，优化搜索设置并增加 QQ 社区入口。支持全屏预览与实际页面验证；改善工具响应和大内容处理，修复后台预览误超时、分享后聊天遮挡及配置兼容问题。"))

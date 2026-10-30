@@ -76,6 +76,9 @@ const deferred = () => { let resolve; const promise = new Promise(done => { reso
   await account.signIn(); assert.equal(account.signedIn, true); assert.equal(secrets.get(alias), 'user-A');
   assert.equal(await account.backupOpenID({}), 'user-A');
   const otherDevice = new HuaweiAccount(); await account.signOut();
+  const automaticLogins = system.logins;
+  await assert.rejects(otherDevice.backupOpenID({}, false), /登录/);
+  assert.equal(system.logins, automaticLogins, 'Automatic backup must never trigger a login dialog');
   assert.equal(await otherDevice.backupOpenID({}), 'user-A', 'explicit backup action obtains the same account ID after a fresh login');
   await otherDevice.signOut(); system.loginError = { code: authentication.AuthenticationErrorCode.USER_CANCELED };
   await assert.rejects(otherDevice.backupOpenID({}), /取消/);

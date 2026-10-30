@@ -7,6 +7,7 @@ import { AppData } from '../model/Conversation';
 import { t } from '../model/I18n';
 import { createBackupFile, readBackupFile } from './Backup';
 import { copyFileBytes } from './FileBytes';
+import { Cancellation } from './Cancellation';
 
 export interface CloudBackupItem {
   name: string;
@@ -17,7 +18,9 @@ export interface CloudBackupItem {
 
 const SNAPSHOT_NAME = /^tinybot-(\d{13})-[0-9a-f-]{36}\.(?:json|tinybot)$/;
 const LATEST_BACKUP = 'tinybot-latest.tinybot';
-function validBackupName(name: string): boolean { return name === LATEST_BACKUP || SNAPSHOT_NAME.test(name); }
+const AUTO_BACKUP = /^tinybot-auto-[0-9a-f-]{36}\.tinybot$/;
+function validBackupName(name: string): boolean { return name === LATEST_BACKUP || SNAPSHOT_NAME.test(name) || AUTO_BACKUP.test(name); }
+export interface CloudBackupOptions { name: string; interactive: boolean; cancellation?: Cancellation; }
 let operating: boolean = false;
 
 // Native sync APIs have limited concurrency. This lock also covers a reopened page.
@@ -61,11 +64,13 @@ function logCleanup(error: Error): void {
 
 // start() only acknowledges the request; completion is delivered through progress.
 // A bounded wait leaves upload to the OS and never claims that a local file is backed up.
-async function requestSync(): Promise<boolean> {
+async function requestSync(cancellation?: Cancellation): Promise<boolean> {
+  cancellation?.check();
   const sync = new cloudSync.FileSync();
   let subscribed = false;
   let timer: number = -1;
   let callback: (progress: cloudSync.SyncProgress) => void = () => {};
+  let unsubscribe: () => void = () => {};
   try {
     return await new Promise<boolean>((resolve, reject) => {
       callback = (progress: cloudSync.SyncProgress): void => {
@@ -78,10 +83,12 @@ async function requestSync(): Promise<boolean> {
       };
       sync.on('progress', callback); subscribed = true;
       timer = setTimeout(() => resolve(false), 30000);
+      if (cancellation) { unsubscribe = cancellation.onCancel(() => reject(new Error(t('后台备份时间已结束，请稍后重试。')))); }
       sync.start().catch((error: Error) => reject(error));
     });
   } finally {
     clearTimeout(timer);
+    unsubscribe();
     if (subscribed) { try { sync.off('progress', callback); } catch (error) { logCleanup(error as Error); } }
   }
 }
@@ -119,6 +126,10 @@ async function download(path: string): Promise<void> {
 }
 
 export class CloudBackup {
+  static get busy(): boolean { return operating; }
+  static async available(context: common.UIAbilityContext): Promise<boolean> {
+    return !!context.cloudFileDir && await fs.access(context.cloudFileDir);
+  }
   // Listing cached metadata does not create or upload any snapshot.
   static async list(context: common.UIAbilityContext): Promise<CloudBackupItem[]> {
     const directory = await backupDirectory(context);
@@ -137,7 +148,7 @@ export class CloudBackup {
     return result.sort((a: CloudBackupItem, b: CloudBackupItem) => b.createdAt - a.createdAt);
   }
 
-  static sync(): Promise<boolean> { return exclusive(() => requestSync()); }
+  static sync(cancellation?: Cancellation): Promise<boolean> { return exclusive(() => requestSync(cancellation)); }
 
   static remove(context: common.UIAbilityContext, name: string): Promise<boolean> {
     return exclusive(async () => {
@@ -153,19 +164,25 @@ export class CloudBackup {
     });
   }
 
-  static create(context: common.UIAbilityContext, data: AppData): Promise<boolean> {
+  static create(context: common.UIAbilityContext, data: AppData, options?: CloudBackupOptions): Promise<boolean> {
     return exclusive(async () => {
+      const cancellation = options?.cancellation;
+      cancellation?.check();
+      const name = options?.name || LATEST_BACKUP;
+      if (name !== LATEST_BACKUP && !AUTO_BACKUP.test(name)) { throw new Error(t('备份文件无效。')); }
       const directory = await backupDirectory(context);
-      const source = await createBackupFile(context, data);
-      const target = directory + '/' + LATEST_BACKUP;
+      const source = await createBackupFile(context, data, undefined, options?.interactive !== false, cancellation);
+      const target = directory + '/' + name;
       const temporary = directory + '/tinybot-' + util.generateRandomUUID() + '.partial';
       try {
+        cancellation?.check();
         if (!await fs.access(directory)) { await fs.mkdir(directory); }
         if (await fs.access(target)) {
           const stat = await fs.lstat(target);
           if (!stat.isFile() || stat.isSymbolicLink()) { throw new Error(t('备份文件无效。')); }
         }
         await copyFileBytes(source, temporary);
+        cancellation?.check();
         // Cloud directories reject rename over an existing destination. Keep the old
         // snapshot discoverable even if the process stops before promotion completes.
         let previous = '';
@@ -193,7 +210,7 @@ export class CloudBackup {
         await fs.unlink(source);
         if (await fs.access(temporary)) { await fs.unlink(temporary); }
       }
-      return requestSync();
+      return requestSync(cancellation);
     });
   }
 

@@ -3,6 +3,7 @@ import { common } from '@kit.AbilityKit';
 import { BusinessError, commonEventManager, deviceInfo } from '@kit.BasicServicesKit';
 import { DEBUG, BUILD_MODE_NAME } from 'BuildProfile';
 import { t } from '../model/I18n';
+import { Diagnostics } from '../model/Diagnostics';
 
 // AppGallery owns production consent. Emulator debug consent is explicit and memory-only.
 @Observed
@@ -13,6 +14,7 @@ export class HostedPrivacy {
   private debugConsent: boolean = false;
   private context?: common.UIAbilityContext;
   private closing: boolean = false;
+  private initializedAt: number = 0;
   private subscriber?: commonEventManager.CommonEventSubscriber;
   private onChange: (allowed: boolean) => void = () => {};
 
@@ -28,6 +30,7 @@ export class HostedPrivacy {
 
   async initialize(context: common.UIAbilityContext, onChange: (allowed: boolean) => void): Promise<void> {
     this.context = context; this.onChange = onChange;
+    this.initializedAt = Date.now();
     this.closing = false; this.busy = false; this.error = ''; this.debugConsent = false;
     this.publish(false);
     if (this.simulatorDebug) { return; }
@@ -37,12 +40,12 @@ export class HostedPrivacy {
       this.subscriber = subscriber;
       commonEventManager.subscribe(subscriber, (error) => {
         if (this.context !== context) { return; }
-        if (error) { this.fail(error); return; }
+        if (error) { this.fail('subscribe_failed', error); return; }
         // Do not trust the event payload (including other app clones); query our own current record.
         this.refresh();
       });
       this.refresh();
-    } catch (error) { this.fail(error as BusinessError); }
+    } catch (error) { this.fail('subscribe_failed', error as BusinessError); }
   }
 
   refresh(): void {
@@ -52,14 +55,17 @@ export class HostedPrivacy {
       this.publish(this.debugConsent);
       return;
     }
+    let failureEvent: string = 'info_failed';
     try {
       const link = this.policy();
+      failureEvent = 'result_failed';
       const records = privacyManager.getAppPrivacyResult();
+      failureEvent = 'state_failed';
       const consent = records.find((record) => record.type === privacyManager.AppPrivacyType.PRIVACY_AGREEMENT &&
         record.id === link.id && record.versionCode === link.versionCode);
       this.error = '';
       this.publish(consent?.result === privacyManager.AppPrivacyResultType.FULL_MODE_AGREED);
-    } catch (error) { this.fail(error as BusinessError); }
+    } catch (error) { this.fail(failureEvent, error as BusinessError); }
   }
 
   requireConsent(): void {
@@ -83,7 +89,7 @@ export class HostedPrivacy {
         this.refresh();
         if (!this.allowed && !this.error) { await this.exit(); }
       }
-    } catch (error) { if (this.context === context) { this.fail(error as BusinessError); } }
+    } catch (error) { if (this.context === context) { this.fail('request_failed', error as BusinessError); } }
     finally { if (this.context === context) { this.busy = false; } }
   }
 
@@ -139,7 +145,8 @@ export class HostedPrivacy {
     return link;
   }
 
-  private fail(error: BusinessError): void {
+  private fail(event: string, error: BusinessError): void {
+    Diagnostics.log('warn', 'privacy', event, { elapsedMs: Date.now() - this.initializedAt }, error);
     this.error = t('无法确认系统隐私授权（{0}），请重试。', [typeof error.code === 'number' ? error.code : 0]);
     this.publish(false);
   }

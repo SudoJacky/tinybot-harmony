@@ -108,11 +108,11 @@ export class HuaweiAccount {
     hostedPrivacy.requireConsent();
   }
 
-  // Only called by an explicit backup/restore action. Discovery must never open login UI.
-  async backupOpenID(context: common.UIAbilityContext): Promise<string> {
+  // Automatic backup may check an existing login, but must never open login UI.
+  async backupOpenID(context: common.UIAbilityContext, interactive: boolean = true): Promise<string> {
     await this.initialize(context);
     await this.refresh();
-    if (!this.signedIn && !this.busy) { await this.signIn(); }
+    if (interactive && !this.signedIn && !this.busy) { await this.signIn(); }
     if (!this.signedIn || this.busy) { throw new Error(this.error || t('请登录创建备份时使用的华为账号。')); }
     const revision = this.revision;
     await this.requireLogin();

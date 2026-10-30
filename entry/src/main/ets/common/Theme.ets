@@ -46,6 +46,8 @@ export class Space {
 }
 
 export class Radius {
+  // Give bindSheet a typed radius; API 26 logs an error for an omitted value.
+  static readonly sheet: BorderRadiuses = { topLeft: 24, topRight: 24, bottomLeft: 24, bottomRight: 24 };
   static readonly sm: number = 10;
   static readonly md: number = 14;
   static readonly lg: number = 18;
