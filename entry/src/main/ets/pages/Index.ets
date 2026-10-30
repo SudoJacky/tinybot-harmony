@@ -425,10 +425,21 @@ struct Index {
   }
 
   private async createChat(): Promise<void> {
-    if (!this.app.canNavigate) { return; }
+    if (!this.app.canNavigate) {
+      Diagnostics.log('warn', 'navigation', 'new_chat_blocked', { count: this.paths.size() });
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface,
+        message: this.app.saveError || this.app.error || t('请先完成当前操作或保存，再使用快捷入口。') });
+      return;
+    }
     const previousId = this.app.active.id;
     // SessionService decides whether the current chat is untouched and reusable.
-    if (!await this.app.newThread()) { return; }
+    if (!await this.app.newThread()) {
+      Diagnostics.log('error', 'navigation', 'new_chat_failed', { count: this.paths.size() }, this.app.saveError || this.app.error);
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface,
+        message: this.app.saveError || this.app.error || t('无法创建新对话。') });
+      return;
+    }
+    Diagnostics.log('info', 'navigation', 'new_chat_revealed', { count: this.paths.size() });
     this.revealChat();
     if (this.app.active.id === previousId) {
       this.getUIContext().getPromptAction().showToast({
@@ -828,8 +839,15 @@ struct Index {
   }
 
   private openSettings(): void {
-    this.app.openSettings();
-    this.paths.pushPath({ name: 'settings' });
+    const names = this.paths.getAllPathName();
+    if (names[names.length - 1] === 'settings') {
+      Diagnostics.log('debug', 'navigation', 'settings_repeated', { count: names.length });
+      return;
+    }
+    // Persistent tablet navigation must reuse roots and preserve their settings drafts.
+    if (!names.includes('settings')) { this.app.openSettings(); }
+    this.paths.pushPath({ name: 'settings' }, { launchMode: LaunchMode.POP_TO_SINGLETON });
+    Diagnostics.log('info', 'navigation', 'settings_opened', { count: names.length, total: this.paths.size() });
   }
 
   private async openSupport(page: string): Promise<void> {
@@ -900,9 +918,26 @@ struct Index {
     this.openDetailTab('files');
   }
 
-  private openTools(tab: string): void {
+  private openMiniApps(): void {
+    const names = this.paths.getAllPathName();
+    if (names[names.length - 1] === 'mini-apps') {
+      Diagnostics.log('debug', 'navigation', 'mini_apps_repeated', { count: names.length });
+      return;
+    }
     this.getUIContext().getFocusController().clearFocus();
-    this.paths.pushPath({ name: 'productivity', param: tab });
+    this.paths.pushPath({ name: 'mini-apps' }, { launchMode: LaunchMode.POP_TO_SINGLETON });
+    Diagnostics.log('info', 'navigation', 'mini_apps_opened', { count: names.length, total: this.paths.size() });
+  }
+
+  private openTools(tab: string): void {
+    const names = this.paths.getAllPathName();
+    if (names[names.length - 1] === 'productivity') {
+      Diagnostics.log('debug', 'navigation', 'tools_repeated', { count: names.length });
+      return;
+    }
+    this.getUIContext().getFocusController().clearFocus();
+    this.paths.pushPath({ name: 'productivity', param: tab }, { launchMode: LaunchMode.POP_TO_SINGLETON });
+    Diagnostics.log('info', 'navigation', 'tools_opened', { count: names.length, total: this.paths.size() });
   }
 
   private async fork(): Promise<void> {
@@ -966,7 +1001,7 @@ struct Index {
       }
       if (this.app.productivity.options?.miniAppsEnabled === true) {
         MenuItem(() => this.moreMenuContent($r('sys.symbol.rectangle_stack'), t('小程序')))
-          .id('open-mini-apps-menu').enabled(this.app.ready).onClick(() => this.paths.pushPath({ name: 'mini-apps' }))
+          .id('open-mini-apps-menu').enabled(this.app.ready).onClick(() => this.openMiniApps())
       }
       MenuItem(() => this.moreMenuContent($r('sys.symbol.gearshape'), t('设置')))
         .onClick(() => this.openSettings())
@@ -1277,7 +1312,7 @@ struct Index {
           .borderRadius({ topRight: this.workbench().expanded ? 0 : 20, bottomRight: this.workbench().expanded ? 0 : 20 })
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         ThreadList({ app: this.app, workbench: this.windowWidth >= 840,
-          onMiniApps: () => { this.setDrawer(false); this.paths.pushPath({ name: 'mini-apps' }); },
+          onMiniApps: () => { this.setDrawer(false); this.openMiniApps(); },
           collapseHistory: this.workbench().expanded, searchRequest: this.historySearchRequest,
           onCollapseHistory: () => this.setHistoryCollapsed(true),
           onNewChat: () => { this.createChat(); this.setDrawer(false); }, onTools: () => { this.setDrawer(false); this.openTools('memory'); },

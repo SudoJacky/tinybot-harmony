@@ -39,6 +39,8 @@ EVENTS.speech = ['preparing', 'listening', 'vad', 'complete', 'finishing', 'reco
 EVENTS.voice = ['focus_requested', 'released', 'draft_failed'];
 EVENTS.composer = ['sheet_action_queued', 'sheet_action_dispatched', 'sheet_action_cancelled'];
 EVENTS.focus = ['search_requested', 'provider_requested', 'onboarding_requested'];
+EVENTS.navigation = ['tools_opened', 'tools_repeated', 'settings_opened', 'settings_repeated', 'mini_apps_opened', 'mini_apps_repeated',
+  'new_chat_blocked', 'new_chat_failed', 'new_chat_revealed'];
 EVENTS.web = ['engine_start', 'engine_ready', 'release', 'activate', 'failed', 'console_error', 'load_start', 'load_returned', 'host_ready', 'port_connected', 'ready', 'state_saved', 'attached', 'page_end', 'navigation_blocked', 'resource_failed'];
 EVENTS.preview = ['failed', 'captured', 'thumbnail_failed', 'surface_moved'];
 EVENTS.sandbox = ['execution_failed', 'orchestration_failed'];
