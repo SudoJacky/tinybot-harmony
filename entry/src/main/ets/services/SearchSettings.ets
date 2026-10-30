@@ -1,4 +1,5 @@
 import { AppData } from '../model/Conversation';
+import { Diagnostics } from '../model/Diagnostics';
 import { ProductivityData, defaultProductivity } from '../model/Productivity';
 import { defaultAssistantOptions } from '../model/AssistantOptions';
 import { SearchConfig, SearchDraft, TavilySettings, validateSearchConfig, deepSeekSearchProfile, searchCredentialAlias } from '../model/WebSearch';
@@ -24,6 +25,11 @@ export async function saveSearchSettings(data: AppData, draft: SearchDraft, cred
   config.provider = draft.provider; config.enabled = draft.enabled;
   config.baseUrl = undefined; config.credentialAlias = undefined; config.modelProviderId = undefined;
   config.tavily = retained;
+  if (previous?.provider === 'searxng' || draft.searxng || draft.provider === 'searxng') {
+    config.searxng = config.searxng || { baseUrl: '' };
+    config.searxng.baseUrl = (draft.searxng ? draft.searxng.baseUrl :
+      draft.provider === 'searxng' ? draft.baseUrl : previous?.baseUrl || '').trim().replace(/\/+$/, '');
+  }
   if (previous?.provider === 'deepseek' || draft.deepseek) {
     config.deepseek = config.deepseek || {};
     config.deepseek.modelProviderId = draft.deepseek ? draft.deepseek.modelProviderId : previous?.modelProviderId;
@@ -44,10 +50,13 @@ export async function saveSearchSettings(data: AppData, draft: SearchDraft, cred
     config.deepseek = config.deepseek || {}; config.deepseek.modelProviderId = config.modelProviderId;
   } else if (draft.provider === 'tavily') {
     config.baseUrl = config.tavily?.baseUrl; config.credentialAlias = config.tavily?.credentialAlias;
+  } else if (draft.provider === 'searxng') {
+    if (draft.apiKey.trim() || draft.modelProviderId) { throw new Error('SearXNG search does not use API credentials.'); }
+    config.baseUrl = config.searxng?.baseUrl;
   }
   if (draft.enabled && draft.provider === 'tavily' && !config.credentialAlias) { throw new Error(t('请填写搜索 API Key；更换搜索地址后需要重新填写。')); }
   validateSearchConfig(config);
-  if (draft.enabled && draft.provider !== 'bing-browser' && !(draft.provider === 'tavily' && key)) {
+  if (draft.enabled && (draft.provider === 'deepseek' || draft.provider === 'tavily') && !(draft.provider === 'tavily' && key)) {
     const savedKey = await credentials.read(searchCredentialAlias(config, data.providerProfiles || []));
     if (!savedKey.trim()) { throw new Error(t('API Key 为空，请在对应服务中重新配置。')); }
   }
@@ -61,13 +70,22 @@ export async function saveSearchSettings(data: AppData, draft: SearchDraft, cred
     }
     options.search = config; productivity.options = options; data.productivity = productivity; await commit(data);
   } catch (error) {
+    Diagnostics.log('error', 'configuration', 'save_failed', { credentialScope: 'search' }, error as Error);
     data.productivity = previousProductivity;
-    if (created) { await credentials.remove(created); }
+    if (created) {
+      try { await credentials.remove(created); }
+      catch (cleanupError) {
+        Diagnostics.log('error', 'resources', 'credential_rollback_failed', { credentialScope: 'search' }, cleanupError as Error);
+      }
+    }
     throw error as Error;
   }
   if (retained?.credentialAlias && retained.credentialAlias !== config.tavily?.credentialAlias) {
     try { await credentials.remove(retained.credentialAlias); }
-    catch (_) { return '搜索设置已保存，但旧密钥清理失败。'; }
+    catch (error) {
+      Diagnostics.log('warn', 'resources', 'credential_cleanup_failed', { credentialScope: 'search' }, error as Error);
+      return '搜索设置已保存，但旧密钥清理失败。';
+    }
   }
   return '';
 }

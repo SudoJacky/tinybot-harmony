@@ -109,7 +109,7 @@ export class BrowserSession implements ExecutionGate {
       await this.savePolicy(policy);
       this.updatePolicy(policy);
       this.log('permission', { policy: policy });
-    } catch (error) { this.report((error as Error).message); throw error as Error; }
+    } catch (error) { this.report(error as Error); throw error as Error; }
     finally { this.permissionSaving = false; }
   }
   private answerPermission(allowed: boolean): void {
@@ -199,7 +199,10 @@ export class BrowserSession implements ExecutionGate {
   clearActionFeedback(): void {
     clearTimeout(this.feedbackTimer); this.feedbackTimer = -1; this.actionFeedback = undefined;
   }
-  report(message: string): void { this.error = message; this.log('failed', undefined, message); }
+  report(error: Error | string): void {
+    this.error = typeof error === 'string' ? error : error.message;
+    this.log('failed', undefined, error);
+  }
   pageChanged(url: string, title: string): void { this.url = url === 'about:blank' ? '' : url; this.title = title; }
   userBack(): boolean { return this.requireDriver().userBack(); }
   private requireDriver(): BrowserDriver {
@@ -385,7 +388,7 @@ export class BrowserSession implements ExecutionGate {
         // A changed observation is returned to the model for a fresh read, not a page-loading error.
         if (failure instanceof ToolFailure && ['STALE_BROWSER_SNAPSHOT', 'STALE_BROWSER_ELEMENT'].includes(failure.code)) {
           this.log('observation_changed', undefined, failure);
-        } else { this.report(failure.message); }
+        } else { this.report(failure); }
         throw failure;
       }
       if (cancellation.cancelled) { return { operation: operation, completed: true, userIntervened: epoch !== this.epoch }; }
@@ -397,7 +400,7 @@ export class BrowserSession implements ExecutionGate {
         // Observation can fail after a successful click. Keep that committed fact in the failure receipt.
         if (cancellation.cancelled) { return { operation: operation, completed: true, userIntervened: epoch !== this.epoch }; }
         const failure = error as Error;
-        this.report(failure.message);
+        this.report(failure);
         throw new ToolResultError(JSON.stringify({ operation: operation, completed: true, userIntervened: epoch !== this.epoch, error: failure.message }),
           failure instanceof ToolFailure ? failure.code : 'BROWSER_OBSERVATION_FAILED', 'inspect_browser_before_retry');
       }

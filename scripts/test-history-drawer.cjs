@@ -127,10 +127,12 @@ for (const initial of [true, false]) {
   state.onboardingActive = true;
   assert.equal(sidebarProps.call(state, initial).active, false, 'Initial setup keeps history inactive');
 }
-const NavigationPage = probe('pages/Index', 'Index', ['createChat', 'revealChat'], {t: value => value});
+const NavigationPage = probe('pages/Index', 'Index', ['createChat', 'revealChat'], {t: value => value, Diagnostics: { log() {} }});
 (async () => {
   let cleared = 0, drawerClosed = 0, created = 0;
-  const nav = Object.assign(new NavigationPage(), {paths: {clear(){cleared++;}},
+  const toasts = [];
+  const nav = Object.assign(new NavigationPage(), {paths: {clear(){cleared++;}, size: () => 0}, appearance: {},
+    getUIContext: () => ({ getPromptAction: () => ({ showToast: value => toasts.push(value.message) }) }),
     app: {canNavigate:true,active:{id:'old'},async newThread(){created++;this.active.id='new';return true;}},
     workbench:()=>({expanded:true,docked:true}),setDrawer(open){assert.equal(open,false);drawerClosed++;}});
   sidebarProps.call(nav,true).onSelected();
@@ -138,5 +140,6 @@ const NavigationPage = probe('pages/Index', 'Index', ['createChat', 'revealChat'
   await nav.createChat();assert.equal(cleared,2);assert.equal(created,1);assert.equal(drawerClosed,2);
   nav.app.newThread=async()=>false;
   await nav.createChat();assert.equal(cleared,2,'Failed creation leaves the current page intact');
+  assert.deepEqual(toasts, ['无法创建新对话。']);
   console.log('PASS tablet sidebar survives destinations; selection and successful new chat return to chat');
 })().catch(error=>{console.error(error);process.exitCode=1;});

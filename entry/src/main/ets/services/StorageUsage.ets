@@ -1,4 +1,5 @@
 import { common } from '@kit.AbilityKit';
+import { Diagnostics } from '../model/Diagnostics';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { fileIo as fs, storageStatistics } from '@kit.CoreFileKit';
 import { AppData, ThreadData } from '../model/Conversation';
@@ -67,8 +68,11 @@ export class StorageUsage {
     return message.indexOf('enoent') >= 0 || message.indexOf('no such file') >= 0;
   }
 
-  private static failed(failures: string[], path: string): void {
-    if (failures.indexOf(path) < 0) { failures.push(path); }
+  private static failed(failures: string[], path: string, error: Error, operation: string): void {
+    if (failures.indexOf(path) < 0) {
+      failures.push(path);
+      Diagnostics.log('warn', 'storage', 'scan_failed', { operation: operation, count: failures.length }, error);
+    }
   }
 
   private static async listFiles(root: string, failures: string[]): Promise<DiskFile[]> {
@@ -76,7 +80,7 @@ export class StorageUsage {
     try {
       if (!await fs.access(root)) { return result; }
     } catch (error) {
-      if (!StorageUsage.missing(error as Error)) { StorageUsage.failed(failures, root); }
+      if (!StorageUsage.missing(error as Error)) { StorageUsage.failed(failures, root, error as Error, 'access'); }
       return result;
     }
     const pending: string[] = [''];
@@ -86,7 +90,7 @@ export class StorageUsage {
       let names: string[] = [];
       try { names = await fs.listFile(directory); }
       catch (error) {
-        if (!StorageUsage.missing(error as Error)) { StorageUsage.failed(failures, directory); }
+        if (!StorageUsage.missing(error as Error)) { StorageUsage.failed(failures, directory, error as Error, 'list'); }
         continue;
       }
       for (const name of names) {
@@ -100,7 +104,7 @@ export class StorageUsage {
             result.push({ path: absolute, relative: relative, bytes: stat.size, modifiedAt: stat.mtime * 1000 });
           }
         } catch (error) {
-          if (!StorageUsage.missing(error as Error)) { StorageUsage.failed(failures, directory); }
+          if (!StorageUsage.missing(error as Error)) { StorageUsage.failed(failures, directory, error as Error, 'stat'); }
           continue;
         }
       }
@@ -117,13 +121,13 @@ export class StorageUsage {
     try {
       if (!await fs.access(root)) { return result; }
     } catch (error) {
-      if (!StorageUsage.missing(error as Error)) { StorageUsage.failed(failures, root); }
+      if (!StorageUsage.missing(error as Error)) { StorageUsage.failed(failures, root, error as Error, 'access'); }
       return result;
     }
     let names: string[] = [];
     try { names = await fs.listFile(root); }
     catch (error) {
-      if (!StorageUsage.missing(error as Error)) { StorageUsage.failed(failures, root); }
+      if (!StorageUsage.missing(error as Error)) { StorageUsage.failed(failures, root, error as Error, 'list'); }
       return result;
     }
     for (const name of names) {
@@ -131,7 +135,7 @@ export class StorageUsage {
         const stat = await fs.lstat(root + '/' + name);
         if (stat.isDirectory() && !stat.isSymbolicLink()) { result.push(name); }
       } catch (error) {
-        if (!StorageUsage.missing(error as Error)) { StorageUsage.failed(failures, root + '/' + name); }
+        if (!StorageUsage.missing(error as Error)) { StorageUsage.failed(failures, root + '/' + name, error as Error, 'stat'); }
         continue;
       }
     }
@@ -191,14 +195,17 @@ export class StorageUsage {
 
   // An empty review folder no longer protects a leftover workspace; unreadable ones still do.
   private static async reviewHasBackups(path: string, failures: string[]): Promise<boolean> {
+    let operation: string = 'access';
     try {
       if (!await fs.access(path)) { return false; }
+      operation = 'stat';
       const stat = await fs.lstat(path);
       if (stat.isSymbolicLink() || !stat.isDirectory()) { return true; }
+      operation = 'list';
       return (await fs.listFile(path)).length > 0;
     } catch (error) {
       if (StorageUsage.missing(error as Error)) { return false; }
-      StorageUsage.failed(failures, path);
+      StorageUsage.failed(failures, path, error as Error, operation);
       return true;
     }
   }
@@ -272,13 +279,15 @@ export class StorageUsage {
     const diagnosticPaths: string[] = [roots.abilityFilesDir + '/performance-current.jsonl',
       roots.abilityFilesDir + '/performance-previous.jsonl', roots.appFilesDir + '/tinybot-cpu.json'];
     for (const path of diagnosticPaths) {
+      let operation: string = 'access';
       try {
         if (await fs.access(path)) {
+          operation = 'stat';
           const stat = await fs.lstat(path);
           if (stat.isFile() && !stat.isSymbolicLink()) { diagnosticsBytes += stat.size; diagnosticsFiles++; }
         }
       } catch (error) {
-        if (!StorageUsage.missing(error as Error)) { StorageUsage.failed(failures, path); }
+        if (!StorageUsage.missing(error as Error)) { StorageUsage.failed(failures, path, error as Error, operation); }
         continue;
       }
     }
@@ -291,9 +300,11 @@ export class StorageUsage {
     try {
       const stats = await storageStatistics.getCurrentBundleStats();
       report.appBytes = stats.appSize; report.dataBytes = stats.dataSize; report.cacheBytes = stats.cacheSize;
-    } catch (_) { /* Categories still describe local data without the system rollup. */ }
-    try { report.freeBytes = await storageStatistics.getFreeSize(); } catch (_) { report.freeBytes = 0; }
-    try { report.deviceBytes = await storageStatistics.getTotalSize(); } catch (_) { report.deviceBytes = 0; }
+    } catch (error) { Diagnostics.log('warn', 'storage', 'metric_failed', { operation: 'bundle_stats' }, error as Error); }
+    try { report.freeBytes = await storageStatistics.getFreeSize(); }
+    catch (error) { Diagnostics.log('warn', 'storage', 'metric_failed', { operation: 'free_size' }, error as Error); }
+    try { report.deviceBytes = await storageStatistics.getTotalSize(); }
+    catch (error) { Diagnostics.log('warn', 'storage', 'metric_failed', { operation: 'total_size' }, error as Error); }
 
     const candidates = await StorageUsage.safeCandidates(roots, data, now, failures);
     for (const entry of candidates) {
@@ -319,12 +330,12 @@ export class StorageUsage {
     let text = '';
     try { text = await fs.readText(root + '/index.json'); }
     catch (error) {
-      if (!StorageUsage.missing(error as Error)) { StorageUsage.failed(failures, root + '/index.json'); }
+      if (!StorageUsage.missing(error as Error)) { StorageUsage.failed(failures, root + '/index.json', error as Error, 'read'); }
       return result;
     }
     let manifest: SessionManifest = {};
     try { manifest = JSON.parse(text) as SessionManifest; }
-    catch (_) { StorageUsage.failed(failures, root + '/index.json'); return result; }
+    catch (error) { StorageUsage.failed(failures, root + '/index.json', error as Error, 'parse'); return result; }
     for (const item of manifest.threads || []) {
       try {
         const stat = await fs.lstat(root + '/' + item.file);
@@ -334,7 +345,7 @@ export class StorageUsage {
           detail: t('{0} 条消息', [thread ? thread.messages.length : 0]), bytes: stat.size,
           category: 'sessions', removable: false, directory: false });
       } catch (error) {
-        if (!StorageUsage.missing(error as Error)) { StorageUsage.failed(failures, root); }
+        if (!StorageUsage.missing(error as Error)) { StorageUsage.failed(failures, root, error as Error, 'stat'); }
         continue;
       }
     }
@@ -408,8 +419,10 @@ export class StorageUsage {
       const paths: string[] = [roots.abilityFilesDir + '/performance-current.jsonl',
         roots.abilityFilesDir + '/performance-previous.jsonl', roots.appFilesDir + '/tinybot-cpu.json'];
       for (const path of paths) {
+        let operation: string = 'access';
         try {
           if (await fs.access(path)) {
+            operation = 'stat';
             const stat = await fs.lstat(path);
             if (stat.isFile() && !stat.isSymbolicLink()) {
               result.push({ path: path, label: baseName(path), detail: t('开发者模式中清理'), bytes: stat.size,
@@ -417,7 +430,7 @@ export class StorageUsage {
             }
           }
         } catch (error) {
-          if (!StorageUsage.missing(error as Error)) { StorageUsage.failed(failures, path); }
+          if (!StorageUsage.missing(error as Error)) { StorageUsage.failed(failures, path, error as Error, operation); }
           continue;
         }
       }
@@ -443,32 +456,38 @@ export class StorageUsage {
     return false;
   }
 
+  private static deleteFailure(error: Error, operation: string): DeleteOutcome {
+    const missing = StorageUsage.missing(error);
+    if (!missing) { Diagnostics.log('warn', 'storage', 'cleanup_failed', { operation: operation }, error); }
+    return { bytes: 0, complete: missing };
+  }
+
   // Best effort: a partial tree returns the bytes that were actually removed and complete=false.
   private static async deletePath(path: string): Promise<DeleteOutcome> {
     try {
       const stat = await fs.lstat(path);
       if (stat.isSymbolicLink()) {
         try { await fs.unlink(path); return { bytes: 0, complete: true }; }
-        catch (error) { return { bytes: 0, complete: StorageUsage.missing(error as Error) }; }
+        catch (error) { return StorageUsage.deleteFailure(error as Error, 'unlink'); }
       }
       if (stat.isDirectory()) {
         let bytes = 0, complete = true;
         let names: string[] = [];
         try { names = await fs.listFile(path); }
-        catch (error) { return { bytes: 0, complete: StorageUsage.missing(error as Error) }; }
+        catch (error) { return StorageUsage.deleteFailure(error as Error, 'list'); }
         for (const name of names) {
           const outcome = await StorageUsage.deletePath(path + '/' + name);
           bytes += outcome.bytes;
           if (!outcome.complete) { complete = false; }
         }
         try { await fs.rmdir(path); }
-        catch (error) { if (!StorageUsage.missing(error as Error)) { complete = false; } }
+        catch (error) { if (!StorageUsage.deleteFailure(error as Error, 'rmdir').complete) { complete = false; } }
         return { bytes: bytes, complete: complete };
       }
       try { await fs.unlink(path); return { bytes: stat.size, complete: true }; }
-      catch (error) { return { bytes: 0, complete: StorageUsage.missing(error as Error) }; }
+      catch (error) { return StorageUsage.deleteFailure(error as Error, 'unlink'); }
     } catch (error) {
-      return { bytes: 0, complete: StorageUsage.missing(error as Error) };
+      return StorageUsage.deleteFailure(error as Error, 'stat');
     }
   }
 
@@ -482,7 +501,10 @@ export class StorageUsage {
         const outcome = await StorageUsage.deletePath(entry.path);
         freedBytes += outcome.bytes;
         if (outcome.complete) { removed++; } else { failed++; }
-      } catch (_) { failed++; }
+      } catch (error) {
+        Diagnostics.log('warn', 'storage', 'cleanup_failed', undefined, error as Error);
+        failed++;
+      }
     }
     return { freedBytes: freedBytes, removed: removed, failed: failed, incomplete: false, failedPaths: [] };
   }

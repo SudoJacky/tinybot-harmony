@@ -1,11 +1,12 @@
 import { t } from './I18n';
 import { ProviderProfile } from './ProviderProfiles';
-import { SearchConfig, SearchDraft, SearchProviderId, defaultSearchConfig, deepSeekSearchProfiles, isSupportedSearchProvider } from './WebSearch';
+import { SearchConfig, SearchDraft, SearchProviderId, defaultSearchConfig, deepSeekSearchProfiles, isSupportedSearchProvider, isSearXngBaseUrl } from './WebSearch';
 
 // Only this in-memory draft carries entered secrets. Details return a copy to the list.
 export interface SearchEditorDraft {
   provider: string; enabled: boolean; modelProviderId: string;
   baseUrl: string; apiKey: string; savedBaseUrl: string; savedKey: boolean; clearKey: boolean;
+  searxngBaseUrl: string;
 }
 export interface SearchProviderRoute { provider: string; draft: SearchEditorDraft; }
 
@@ -14,10 +15,11 @@ export function searchEditorDraft(saved: SearchConfig = defaultSearchConfig()): 
   return { provider: saved.provider, enabled: saved.enabled,
     modelProviderId: (saved.provider === 'deepseek' ? saved.modelProviderId : saved.deepseek?.modelProviderId) || '',
     baseUrl: tavily?.baseUrl || 'https://api.tavily.com', apiKey: '', savedBaseUrl: tavily?.baseUrl || '',
-    savedKey: !!tavily?.credentialAlias, clearKey: false };
+    savedKey: !!tavily?.credentialAlias, clearKey: false,
+    searxngBaseUrl: (saved.provider === 'searxng' ? saved.baseUrl : saved.searxng?.baseUrl) || '' };
 }
 export function searchProviderName(provider: string): string {
-  return provider === 'deepseek' ? 'DeepSeek' : provider === 'tavily' ? 'Tavily' :
+  return provider === 'deepseek' ? 'DeepSeek' : provider === 'tavily' ? 'Tavily' : provider === 'searxng' ? 'SearXNG' :
     provider === 'bing-browser' ? t('必应（内置浏览器）') : t('未知提供方（当前版本不支持）');
 }
 export function tavilyKeyReady(draft: SearchEditorDraft): boolean {
@@ -35,6 +37,9 @@ export function searchProviderStatus(provider: string, draft: SearchEditorDraft,
   if (provider === 'bing-browser') {
     return browserPolicy === 'enabled' ? t('无需密钥 · 已就绪') : t('无需密钥 · 需要启用浏览器');
   }
+  if (provider === 'searxng') {
+    return isSearXngBaseUrl(draft.searxngBaseUrl.trim()) ? t('无需密钥 · 已配置实例') : t('无需密钥 · 未配置实例');
+  }
   return t('配置已保留，请选择受支持的提供方或升级应用。');
 }
 export function searchSettingsSummary(config: SearchConfig = defaultSearchConfig()): string {
@@ -44,5 +49,6 @@ export function searchSaveDraft(draft: SearchEditorDraft): SearchDraft {
   if (!isSupportedSearchProvider(draft.provider)) { throw new Error(t('配置已保留，请选择受支持的提供方或升级应用。')); }
   return { provider: draft.provider as SearchProviderId, enabled: draft.enabled, baseUrl: '', apiKey: '',
     deepseek: { modelProviderId: draft.modelProviderId || undefined },
+    searxng: { baseUrl: draft.searxngBaseUrl },
     tavily: { baseUrl: draft.baseUrl, apiKey: draft.apiKey, clearKey: draft.clearKey } };
 }

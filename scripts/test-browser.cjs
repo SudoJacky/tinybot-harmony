@@ -46,6 +46,15 @@ function load(file) {
   return exports;
 }
 const { BrowserSession } = load(path.join(root, 'main/ets/services/BrowserSession'));
+const diagnosticLogs = [];
+load(path.join(root, 'main/ets/model/Diagnostics')).Diagnostics.configureLogSink(data => diagnosticLogs.push(data));
+const reportProbe = new BrowserSession();
+reportProbe.configure(async () => {}, (event, fields, error) =>
+  load(path.join(root, 'main/ets/model/Diagnostics')).Diagnostics.log('error', 'browser', event, fields, error));
+reportProbe.report(Object.assign(Error('PRIVATE_BROWSER_PATH'), { code: 17100001 }));
+assert.equal(reportProbe.error, 'PRIVATE_BROWSER_PATH');
+assert.equal(diagnosticLogs.at(-1).fields.errorCode, 17100001);
+assert.ok(!JSON.stringify(diagnosticLogs).includes('PRIVATE_BROWSER_PATH'));
 const { BrowserTools } = load(path.join(root, 'main/ets/services/BrowserTools'));
 const { Cancellation } = load(path.join(root, 'main/ets/services/Cancellation'));
 const { executeToolBatch } = load(path.join(root, 'main/ets/services/ToolExecution'));

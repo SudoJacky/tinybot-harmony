@@ -1,4 +1,5 @@
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
+import { Diagnostics } from '../model/Diagnostics';
 import { util } from '@kit.ArkTS';
 import { AppData } from '../model/Conversation';
 import { ModelReference, ProviderProfile, validateProfile } from '../model/ProviderProfiles';
@@ -59,7 +60,10 @@ export async function decryptBackupKeys(value: EncryptedBackupKeys, credential: 
     const cipher = cryptoFramework.createCipher('AES256|GCM|NoPadding');
     await cipher.init(cryptoFramework.CryptoMode.DECRYPT_MODE, key, params);
     try { plaintext = (await cipher.doFinal({ data: bytes.slice(0, -16) })).data; }
-    catch (_) { throw new Error(t('当前华为账号与备份不匹配，或加密的 API Key 已损坏。')); }
+    catch (error) {
+      Diagnostics.log('error', 'backup', 'key_decrypt_failed', undefined, error as Error);
+      throw new Error(t('当前华为账号与备份不匹配，或加密的 API Key 已损坏。'));
+    }
   } finally { key.clearMem(); }
   let payload: BackupKeyPayload;
   try { payload = JSON.parse(new util.TextDecoder('utf-8', { fatal: true }).decodeToString(plaintext)) as BackupKeyPayload; }

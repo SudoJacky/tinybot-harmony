@@ -20,10 +20,24 @@ export class AppMaterials {
   // API availability does not imply device support. Unsupported API-26 devices
   // accept ImmersiveMaterial but do not render it, leaving overlay content exposed.
   // A subsequent construction failure also disables material for the session.
-  private static unavailable: boolean = !ApiLevel.material || !uiMaterial.isImmersiveMaterialSupported();
+  private static readonly supported: boolean = ApiLevel.material && uiMaterial.isImmersiveMaterialSupported();
+  private static unavailable: boolean = !AppMaterials.supported;
 
   // True when immersive material can actually be applied on this system.
   static get available(): boolean { return !AppMaterials.unavailable; }
+
+  // Called from settings after startup, when the native diagnostic sink is installed.
+  // Compare with the import-time result without changing the rendering decision.
+  static reportSupport(): void {
+    const supported = ApiLevel.material && uiMaterial.isImmersiveMaterialSupported();
+    const failed = AppMaterials.supported && AppMaterials.unavailable;
+    const reason = !ApiLevel.material ? 'api_level' : supported !== AppMaterials.supported ? 'capability_changed' :
+      failed ? 'construction_failed' : !supported ? 'device_unsupported' : 'supported';
+    Diagnostics.log(AppMaterials.available && reason === 'supported' ? 'info' : 'warn', 'appearance', 'material_support', {
+      sdk: ApiLevel.sdk, initialSupported: AppMaterials.supported, supported: supported,
+      available: AppMaterials.available, failed: failed, reason: reason
+    });
+  }
 
   // Explicitly opt out of native immersive effects while keeping older systems supported.
   static get empty(): uiMaterial.Material | undefined {

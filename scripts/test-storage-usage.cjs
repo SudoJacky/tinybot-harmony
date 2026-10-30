@@ -18,7 +18,7 @@ function load(file) {
     if (id === '../model/WorkspaceStore') return { WorkspaceStore: class { constructor(filesDir) { this.rootDir = filesDir + '/workspace'; } pathFor(id) { return this.rootDir + '/' + id; } } };
     if (id === '../model/Agent') return { toolReceipts: tools => tools || [] };
     if (id === '../model/I18n') return { t: value => value };
-    if (id.startsWith('../')) return load(path.resolve(path.dirname(file), id));
+    if (id.startsWith('.')) return load(path.resolve(path.dirname(file), id));
     throw new Error('Unexpected import: ' + id);
   } }, { filename: file });
   return exports;
@@ -26,7 +26,7 @@ function load(file) {
 
 const files = new Map(), dirs = new Set(['/', '/app', '/files', '/cache']);
 const now = Date.now();
-let failPath = '', failUnlink = '';
+let failPath = '', failUnlink = '', failMetric = '';
 function put(file, size, ageMs = 0) {
   files.set(file, { size, modifiedAt: now - ageMs });
   const parts = file.split('/');
@@ -60,7 +60,7 @@ const fake = {
     throw new Error('ENOENT ' + p);
   },
   listFile: async p => {
-    if (failPath && p === failPath) throw new Error('EIO ' + p);
+    if (failPath && p === failPath) throw Object.assign(new Error('EIO PRIVATE_PATH ' + p), { code: 13900013 });
     if (!dirs.has(p)) throw new Error('ENOTDIR ' + p);
     const prefix = p === '/' ? '/' : p + '/';
     return [...files.keys(), ...dirs].filter(item => item !== p && item.startsWith(prefix) &&
@@ -68,7 +68,7 @@ const fake = {
   },
   readText: async p => JSON.stringify({ threads: [{ id: 'thread-1', file: 'thread-1.json' }] }),
   unlink: async p => {
-    if (failUnlink && p === failUnlink) throw new Error('EACCES ' + p);
+    if (failUnlink && p === failUnlink) throw Object.assign(new Error('EACCES PRIVATE_PATH ' + p), { code: 13900013 });
     if (!files.delete(p)) throw new Error('ENOENT ' + p);
   },
   rmdir: async p => {
@@ -79,10 +79,12 @@ const fake = {
 };
 const stats = {
   getCurrentBundleStats: async () => ({ appSize: 300, dataSize: 1000, cacheSize: 560 }),
-  getFreeSize: async () => 8000,
+  getFreeSize: async () => { if (failMetric) throw Object.assign(Error('PRIVATE_METRIC_PATH'), { code: 201 }); return 8000; },
   getTotalSize: async () => 10000
 };
 const { StorageUsage } = load(path.join(sourceRoot, 'services/StorageUsage'));
+const diagnosticLogs = [];
+load(path.join(sourceRoot, 'model/Diagnostics')).Diagnostics.configureLogSink(data => diagnosticLogs.push(data));
 const plan = load(path.join(sourceRoot, 'model/StoragePlan'));
 const data = {
   version: 2, activeThreadId: 'thread-1', projects: [],
@@ -142,6 +144,10 @@ const data = {
   assert.equal(protectedScan.orphanWorkspaces, 1, 'only the folder without baselines remains cleanable');
   assert.equal(protectedScan.safeBytes, 750, 'an unreadable review folder keeps its workspace out of cleanup');
   failPath = '';
+  assert.equal(diagnosticLogs.findLast(data => data.event === 'scan_failed').fields.errorCode, 13900013);
+  failMetric = 'free'; await StorageUsage.scan(context, data); failMetric = '';
+  const metricFailure = diagnosticLogs.findLast(data => data.event === 'metric_failed');
+  assert.equal(metricFailure.fields.operation, 'free_size'); assert.equal(metricFailure.fields.errorCode, 201);
 
   const result = await StorageUsage.cleanSafe(context, data);
   assert.equal(result.freedBytes, 750); assert.equal(result.removed, 4); assert.equal(result.failed, 0);
@@ -182,6 +188,9 @@ const data = {
   assert.equal(partial.removed, 0);
   assert.ok(!files.has('/app/workspace/partial/a.md'));
   assert.ok(files.has('/app/workspace/partial/b.md'));
+  const cleanupFailure = diagnosticLogs.find(data => data.event === 'cleanup_failed' && data.fields.operation === 'unlink');
+  assert.equal(cleanupFailure.fields.errorCode, 13900013);
+  assert.ok(!JSON.stringify(diagnosticLogs).includes('PRIVATE_'));
   failUnlink = '';
   const rest = await StorageUsage.remove(context, [partialEntry]);
   assert.equal(rest.freedBytes, 50);

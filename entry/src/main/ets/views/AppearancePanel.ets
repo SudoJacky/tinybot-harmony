@@ -1,5 +1,6 @@
 import { Diagnostics } from '../model/Diagnostics';
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { AppMaterials } from '../common/AppMaterials';
 import { AppearanceOptions, AppearanceMode, AccentName, LightEffect, APPEARANCE_MODES, ACCENT_NAMES,
   FONT_SCALES, LIGHT_EFFECTS, accentPalette, defaultAppearance, copyAppearance, colorHsv, hsvColor } from '../model/Appearance';
 import { AppearancePreferences } from '../services/AppearancePreferences';
@@ -40,6 +41,7 @@ export struct AppearancePanel {
 
   aboutToAppear(): void {
     this.mounted = true;
+    if (!this.choice || this.choice === 'effect') { AppMaterials.reportSupport(); }
     if (this.choice === 'custom') { this.updateColor(this.options.customColor); }
     if (this.choice === 'font') { this.loadFonts(); }
   }

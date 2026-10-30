@@ -61,6 +61,8 @@ function load(file) {
   return exports;
 }
 const { HuaweiAccount } = load(path.join(root, 'main/ets/services/HuaweiAccount'));
+const accountLogs = [];
+load(path.join(root, 'main/ets/model/Diagnostics')).Diagnostics.configureLogSink(data => accountLogs.push(data));
 const { CredentialStore } = load(path.join(root, 'main/ets/services/CredentialStore'));
 const { ProviderRegistry } = load(path.join(root, 'main/ets/services/providers/ProviderRegistry'));
 const { Cancellation } = load(path.join(root, 'main/ets/services/Cancellation'));
@@ -110,9 +112,15 @@ const deferred = () => { let resolve; const promise = new Promise(done => { reso
   system.responseState = undefined; system.failWrite = true; await account.signIn(); assert.equal(account.signedIn, false);
   system.failWrite = false; system.loginError = { code: 1001500001, message: 'DO-NOT-LOG-TOKEN' }; await account.signIn();
   assert.match(account.error, /1001500001/); assert.doesNotMatch(account.error, /DO-NOT/);
+  const loginFailure = accountLogs.findLast(data => data.event === 'sign_in_failed');
+  assert.equal(loginFailure.fields.errorCode, 1001500001); assert.equal(loginFailure.fields.phase, 'login');
+  assert.ok(!JSON.stringify(accountLogs).includes('DO-NOT-LOG-TOKEN'));
+  const beforeCancel = accountLogs.length;
   system.loginError = { code: 1001502012 }; await account.signIn(); assert.match(account.error, /取消/);
+  assert.equal(accountLogs.length, beforeCancel, 'User cancellation adds no warning/error');
   system.loginError = undefined; await account.signIn();
   system.failRemove = true; await account.signOut(); assert.equal(account.signedIn, false); assert.match(account.error, /无法清除/);
+  assert.equal(accountLogs.at(-1).event, 'sign_out_failed');
   system.failRemove = false; await account.signOut(); await account.signIn();
   system.current = ''; await assert.rejects(account.requireLogin(), /已退出/); assert.equal(secrets.has(alias), false);
   const vault = new CredentialStore(); assert.equal(await vault.readOptional('missing'), undefined);

@@ -37,6 +37,16 @@ async function batch(base, signal = new Cancellation(), args = {}) {
   return step.tools[0];
 }
 async function main() {
+  const diagnostics = from('model/Diagnostics').Diagnostics, records = [];
+  diagnostics.configureLogSink(data => records.push(data));
+  await batch(async () => { throw new ToolFailure('NETWORK_ERROR', 'PRIVATE_TOOL_MESSAGE', '', { service: 'mcp', nativeCode: 2300056 }); });
+  let failureLog = records.findLast(data => data.module === 'tool' && data.event === 'failed');
+  assert.equal(failureLog.fields.errorCode, 'NETWORK_ERROR'); assert.equal(failureLog.fields.nativeCode, 2300056);
+  await batch(async () => JSON.stringify({ error: 'PRIVATE_TOOL_RESULT', code: 'HTTP_ERROR', details: { httpStatus: 503, service: 'web' } }));
+  failureLog = records.findLast(data => data.module === 'tool' && data.event === 'failed');
+  assert.equal(failureLog.fields.errorCode, 'HTTP_ERROR'); assert.equal(failureLog.fields.http, 503);
+  assert.ok(!JSON.stringify(records).includes('PRIVATE_TOOL_'));
+  console.log('PASS real tool execution logs structured causes for thrown errors and returned failure receipts');
   const large = '中文🙂 "\\\n'.repeat(150000), args = { path: 'large.js', content: large };
   validateToolCalls([call('write_file', args)]);
   const { ChatStream } = from('services/ChatStream');

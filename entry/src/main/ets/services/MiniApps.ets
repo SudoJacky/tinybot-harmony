@@ -1,7 +1,7 @@
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { MINI_APP_DIR, MiniAppEntry, MiniAppRecord, MiniAppRevision, VersionedMiniAppRecord, MiniAppSnapshot, MiniAppStorage,
-  miniAppId, miniAppPath, parseMiniApp, miniAppDataFile, miniAppInCollection, miniAppPreviousRevision } from '../model/MiniApp';
+  miniAppId, miniAppPath, parseMiniApp, miniAppDataFile, miniAppInCollection, miniAppPreviousRevision, miniAppIconId, miniAppIconColorId } from '../model/MiniApp';
 import { WebUiSpec, parseWebUi } from '../model/WebUi';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { NativeWorkspaceFiles } from './NativeWorkspaceFiles';
@@ -34,7 +34,7 @@ export class MiniAppRepository {
       const now = Date.now();
       let app: MiniAppRecord = { version: 1, id: id, title: title, description: description, sourcePath: sourcePath,
         sourceThreadId: sourceThreadId, createdAt: old?.createdAt ?? now, updatedAt: now, lastOpenedAt: old?.lastOpenedAt ?? 0,
-        archived: false, page: parseWebUi(JSON.stringify(page)), previousPage: old?.page };
+        archived: false, page: parseWebUi(JSON.stringify(page)), previousPage: old?.page, icon: old?.icon, iconColor: old?.iconColor };
       if (old?.version === 2) {
         const history = old as VersionedMiniAppRecord;
         const current = history.revisions.find((revision) => revision.id === history.currentRevisionId);
@@ -85,6 +85,17 @@ export class MiniAppRepository {
       const path = miniAppPath(id, 'app.json'), cancellation = new Cancellation();
       const file = await this.files.read(path, cancellation), app = parseMiniApp(file.content, id);
       app.title = name;
+      await this.files.write(path, JSON.stringify(app), cancellation, { version: file.version });
+    });
+  }
+  async setIcon(id: string, icon: string, color?: string): Promise<void> {
+    miniAppIconId(icon);
+    if (color !== undefined) { miniAppIconColorId(color); }
+    await withFileMutation(this.lockKey + ':' + miniAppId(id), async (): Promise<void> => {
+      const path = miniAppPath(id, 'app.json'), cancellation = new Cancellation();
+      const file = await this.files.read(path, cancellation), app = parseMiniApp(file.content, id);
+      app.icon = icon;
+      if (color !== undefined) { app.iconColor = color; }
       await this.files.write(path, JSON.stringify(app), cancellation, { version: file.version });
     });
   }

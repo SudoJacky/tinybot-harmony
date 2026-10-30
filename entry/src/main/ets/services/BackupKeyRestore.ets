@@ -1,4 +1,5 @@
 import { AppData } from '../model/Conversation';
+import { Diagnostics } from '../model/Diagnostics';
 import { ModelReference, ProviderProfile, modelConfig } from '../model/ProviderProfiles';
 import { isOnboardingCandidate } from '../model/Onboarding';
 import { t } from '../model/I18n';
@@ -44,10 +45,14 @@ export async function commitBackupKeys(local: AppData, imported: AppData, candid
     await commit(candidate.data);
     restoredKeys.delete(imported);
   } catch (error) {
+    Diagnostics.log('error', 'backup', 'restore_failed', { credentialScope: 'backup' }, error as Error);
     let message = (error as Error).message;
     for (const alias of created) {
       try { await vault.remove(alias); }
-      catch (_) { message += t('；未生效的备份密钥清理失败。'); }
+      catch (cleanupError) {
+        Diagnostics.log('error', 'resources', 'credential_rollback_failed', { credentialScope: 'backup' }, cleanupError as Error);
+        message += t('；未生效的备份密钥清理失败。');
+      }
     }
     throw new Error(message);
   }

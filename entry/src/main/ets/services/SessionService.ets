@@ -1397,7 +1397,8 @@ export class SessionService {
     catch (error) {
       this.application.saveError = t('会话尚未保存，请重试保存。当前内容仍保留在页面中。原因：') + (error as Error).message;
       for (const id of this.runningThreadIds) { this.cancelThread(id, this.application.saveError); }
-      this.resources.reportError('save_failed', this.application.saveError); this.publish('state'); throw new Error(this.application.saveError);
+      this.resources.reportError('save_failed', error as Error, { threadId: threadId, messageId: messageId });
+      this.publish('state'); throw new Error(this.application.saveError);
     }
   }
   private publishThread(thread: ThreadData): void {

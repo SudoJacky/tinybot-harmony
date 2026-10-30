@@ -1,4 +1,5 @@
 import { t } from '../model/I18n';
+import { Diagnostics } from '../model/Diagnostics';
 import { ProjectData } from '../model/Project';
 import { SharedFolder } from '../model/SharedFolders';
 import { fileShare } from '@kit.CoreFileKit';
@@ -11,11 +12,13 @@ let queue: Promise<void> = Promise.resolve();
 // Persist once when the user saves a project, then activate again after each process start.
 export class ProjectFolderAccess {
   static supported(): boolean {
-    try { return canIUse(FOLDER_CAPABILITY); } catch (_) { return false; }
+    try { return canIUse(FOLDER_CAPABILITY); }
+    catch (error) { Diagnostics.log('warn', 'workspace', 'folder_support_failed', undefined, error as Error); return false; }
   }
 
   static canSelectFolders(): boolean {
-    try { return canIUse('SystemCapability.FileManagement.UserFileService.FolderSelection'); } catch (_) { return false; }
+    try { return canIUse('SystemCapability.FileManagement.UserFileService.FolderSelection'); }
+    catch (error) { Diagnostics.log('warn', 'workspace', 'folder_picker_support_failed', undefined, error as Error); return false; }
   }
 
   static async persist(folders: SharedFolder[]): Promise<void> {
@@ -30,6 +33,7 @@ export class ProjectFolderAccess {
       const missing = policies.filter((policy: fileShare.PolicyInfo, index: number) => !existing[index]);
       if (missing.length > 0) { await fileShare.persistPermission(missing); }
     } catch (error) {
+      Diagnostics.log('error', 'workspace', 'folder_persist_failed', { count: folders.length }, error as Error);
       throw new Error(t('无法保存共享文件夹权限：') + (error as Error).message);
     }
   }
@@ -45,6 +49,7 @@ export class ProjectFolderAccess {
       try {
         await fileShare.activatePermission(policies);
       } catch (error) {
+        Diagnostics.log('warn', 'workspace', 'folder_activate_failed', { count: pending.length }, error as Error);
         const name = pending[0].name;
         throw new Error(t('无法访问共享文件夹 {0}：', [name]) + (error as Error).message);
       }
@@ -62,7 +67,8 @@ export class ProjectFolderAccess {
     const policies: fileShare.PolicyInfo[] = folders.map((folder: SharedFolder): fileShare.PolicyInfo => {
       return { uri: folder.uri, operationMode: READ_WRITE };
     });
-    try { await fileShare.revokePermission(policies); } catch (_) { /* Permission may already be gone. */ }
+    try { await fileShare.revokePermission(policies); }
+    catch (error) { Diagnostics.log('warn', 'workspace', 'folder_revoke_failed', { count: folders.length }, error as Error); }
     for (const folder of folders) { activated.delete(folder.uri); }
   }
 
@@ -71,7 +77,8 @@ export class ProjectFolderAccess {
     for (const project of projects) {
       const folders = project.sharedFolders || [];
       if (folders.length === 0) { continue; }
-      try { await ProjectFolderAccess.activate(folders); } catch (_) { /* Surface on first file access. */ }
+      try { await ProjectFolderAccess.activate(folders); }
+      catch (error) { Diagnostics.log('warn', 'workspace', 'folder_startup_failed', { count: folders.length }, error as Error); }
     }
   }
 

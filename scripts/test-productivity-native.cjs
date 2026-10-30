@@ -8,7 +8,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const zlib = require('node:zlib');
-const studio = process.env.DEVECO_STUDIO_HOME || 'D:/DevEco Studio';
+const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio');
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 const source = path.resolve(__dirname, '../entry/src/main/ets');
 const fixture = path.resolve(__dirname, '../.hvigor/native-productivity-' + crypto.randomUUID());
@@ -16,6 +16,7 @@ fs.mkdirSync(fixture, { recursive: true });
 const handles = new Map(), handlePaths = new Map(), writableHandles = new Set(); let failManifest = false; let failSharedRename = false;
 let failConversationWorker = false;
 let sharedWriteFailure = ''; let cancelSharedWrite; let failBackupRename = false; const usageWrites = [];
+const folderFailures = {};
 const cloudLocations = new Map(); let failCloudCopy = false, failCloudRename = false, failCloudRollback = false, failCloudFsync = false; let cloudCopyError;
 const nativePath = p => {
   if (typeof p === "number") return handlePaths.get(p);
@@ -123,7 +124,11 @@ const http = { RequestMethod: { POST: 'POST', GET: 'GET' }, HttpDataType: { STRI
 const kits = {
   '@kit.PerformanceAnalysisKit': { hilog: { info() {}, error() {}, warn() {} } },
   '@kit.CoreFileKit': { fileIo, cloudSync,
-    fileShare: { OperationMode: { READ_MODE: 1, WRITE_MODE: 2 }, activatePermission: async () => {} },
+    fileShare: { OperationMode: { READ_MODE: 1, WRITE_MODE: 2 },
+      checkPersistentPermission: async policies => policies.map(() => false),
+      persistPermission: async () => { if (folderFailures.persist) throw folderFailures.persist; },
+      activatePermission: async () => { if (folderFailures.activate) throw folderFailures.activate; },
+      revokePermission: async () => { if (folderFailures.revoke) throw folderFailures.revoke; } },
     fileUri: {getUriFromPath:p=>'file://'+p, FileUri: class { constructor(uri) { this.path = decodeURIComponent(new URL(uri).pathname); } }},
     picker: { DocumentViewPicker: class { async save() {return [selectedFile];} async select() {return [selectedFile];} } } }, '@kit.ImageKit': { image: {} }, '@kit.NetworkKit': { http },
   '@kit.MediaLibraryKit': {}, '@kit.ShareKit': {}, '@kit.ArkGraphics2D': { drawing: {} },
@@ -159,6 +164,9 @@ const { McpClient } = load(path.join(source,'services/McpClient'));
 const { McpTools } = load(path.join(source,'services/McpTools'));
 const { ToolApproval } = load(path.join(source,'services/ToolApproval'));
 const { CredentialStore } = load(path.join(source,'services/CredentialStore'));
+const diagnosticLogs = [], diagnostics = load(path.join(source, 'model/Diagnostics')).Diagnostics;
+let noticeLogged = () => {};
+diagnostics.configureLogSink(data => { diagnosticLogs.push(data); if (data.event === 'cancel_notice_failed') noticeLogged(); });
 const { NativeWorkspaceFiles } = load(path.join(source,'services/NativeWorkspaceFiles'));
 const secrets = new Map();
 CredentialStore.prototype.read = async alias => secrets.get(alias) || (alias ? 'fixture-secret' : '');
@@ -202,6 +210,42 @@ async function test(name, run) {
 }
 (async () => {
   let store;
+  await test('shared folder diagnostic retains authorization failures and keeps retries available', async () => {
+    const { ProjectFolderAccess } = load(path.join(source, 'services/ProjectFolderAccess'));
+    const folders = [{ name: 'PRIVATE_FOLDER', uri: 'file://PRIVATE_URI' }];
+    folderFailures.activate = Object.assign(Error('PRIVATE_ACTIVATION'), { code: 201 });
+    await ProjectFolderAccess.activateAll([{ sharedFolders: folders }]);
+    assert.equal(diagnosticLogs.findLast(data => data.event === 'folder_activate_failed').fields.errorCode, 201);
+    folderFailures.activate = undefined;
+    await ProjectFolderAccess.activate(folders);
+    folderFailures.persist = Object.assign(Error('PRIVATE_PERSIST'), { code: 13900012 });
+    await assert.rejects(ProjectFolderAccess.persist(folders));
+    assert.equal(diagnosticLogs.findLast(data => data.event === 'folder_persist_failed').fields.errorCode, 13900012);
+    folderFailures.persist = undefined;
+    folderFailures.revoke = Object.assign(Error('PRIVATE_REVOKE'), { code: 201 });
+    await ProjectFolderAccess.revoke(folders);
+    assert.equal(diagnosticLogs.findLast(data => data.event === 'folder_revoke_failed').fields.errorCode, 201);
+    folderFailures.revoke = undefined;
+    assert.ok(!JSON.stringify(diagnosticLogs).includes('PRIVATE_'));
+  });
+  await test('MCP cancellation diagnostic records failed remote notice while preserving local cancellation', async () => {
+    let callStarted;
+    const started = new Promise(resolve => { callStarted = resolve; });
+    const logged = new Promise(resolve => { noticeLogged = resolve; });
+    httpScript = req => {
+      const method = JSON.parse(req.options.extraData).method;
+      if (method === 'initialize') respond(req, { protocolVersion: '2025-06-18' });
+      else if (method === 'notifications/initialized') req.callback(null, 202);
+      else if (method === 'tools/call') callStarted();
+      else if (method === 'notifications/cancelled') req.callback(Object.assign(Error('PRIVATE_NOTICE'), { code: 2300056 }));
+      else assert.fail('Unexpected RPC method');
+    };
+    const signal = new Cancellation(), pending = new McpClient(server).call('write', {}, signal);
+    await started; signal.cancel(); await assert.rejects(pending, /停止/); await logged; noticeLogged = () => {};
+    const record = diagnosticLogs.findLast(data => data.event === 'cancel_notice_failed');
+    assert.equal(record.level, 'warn'); assert.equal(record.fields.nativeCode, 2300056);
+    assert.ok(!JSON.stringify(record).includes('PRIVATE_NOTICE'));
+  });
   await test('atomic legacy migration, unchanged thread reuse and interrupted commit recovery', async () => {
     const data=model.emptyData(); data.activeThreadId='legacy'; data.threads=[{id:'legacy',title:'original',updatedAt:1,messages:[]}];
     const legacy=JSON.stringify(data); fs.writeFileSync(path.join(fixture,'tinybot-v1.json'),legacy);
@@ -1016,6 +1060,12 @@ async function test(name, run) {
     const alias=await McpOAuth.login(server,context);assert.equal(tokenRequests,1);
     const authenticated={...server,credentialAlias:alias,authType:'oauth'};const tokens=await Promise.all([McpOAuth.bearer(authenticated),McpOAuth.bearer(authenticated)]);
     assert.deepEqual(tokens,['second','second']);assert.equal(tokenRequests,2);await assert.rejects(McpOAuth.bearer({...authenticated,url:'https://other.invalid/mcp'}),/不匹配/);
+    await assert.rejects(McpOAuth.login(server, { startAbility: async () => {
+      throw Object.assign(Error('PRIVATE_AUTHORIZATION_URI'), { code: 16000042 });
+    } }, 'native-app'), /浏览器/);
+    const launchFailure = diagnosticLogs.findLast(data => data.event === 'browser_launch_failed');
+    assert.equal(launchFailure.fields.errorCode, 16000042);
+    assert.ok(!JSON.stringify(launchFailure).includes('PRIVATE_AUTHORIZATION_URI'));
   });
 
   await test('project sessions use the same native tools, deliveries and task-output root while standalone chats stay isolated', async()=>{

@@ -26,7 +26,7 @@ assert.ok(fs.statSync(emitted).mtimeMs >= fs.statSync(source).mtimeMs, 'Build be
 const tree = ts.createSourceFile(emitted, fs.readFileSync(emitted, 'utf8'), ts.ScriptTarget.Latest, true);
 const cls = name => tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === name);
 const methods = ['filtered', 'sections', 'sectionThreads', 'sectionTitle', 'groupOpen', 'visibleCount', 'loadMore', 'toggleGroup', 'onActivePath', 'lastBranch'];
-const globals = { exports: {}, t: key => key, Motion: { medium: 220, standard: 'ease' } };
+const globals = { exports: {}, t: key => key, Motion: { medium: 220, standard: 'ease' }, Diagnostics: { log() {} } };
 vm.runInNewContext(ts.transpileModule(`${cls('ThreadSection').getText(tree)}
 class Sidebar { ${cls('ThreadList').members.filter(n => methods.includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')} }
 exports.Sidebar = Sidebar;`, { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, globals);
@@ -95,7 +95,7 @@ vm.runInNewContext(ts.transpileModule(`class Header { ${createChat} ${revealChat
   const headerFixture = new Fixture(empty), headerApp = new ChatViewModel(); await headerApp.initialize(headerFixture.session);
   const toasts = [];
   const header = Object.assign(new globals.exports.Header(), { app: headerApp, appearance: { surface: {} },
-    paths: {clear(){}},setDrawer(){},workbench:()=>({docked:true}),
+    paths: {clear(){}, size: () => 0},setDrawer(){},workbench:()=>({docked:true}),
     getUIContext: () => ({ getPromptAction: () => ({ showToast: value => toasts.push(value.message) }) }) });
   const initialWrites = headerFixture.repository.writes.length;
   await header.createChat(); await header.createChat();
@@ -116,8 +116,9 @@ vm.runInNewContext(ts.transpileModule(`class Header { ${createChat} ${revealChat
   header.app = oldHeaderApp;
   headerApp.setDraft('Must survive a save failure');
   headerFixture.repository.beforeSave = async () => { throw Error('Disk unavailable'); };
-  await header.createChat(); assert.equal(toasts.length, 4, 'A failed creation cannot show an already-new toast');
-  assert.ok(headerApp.saveError); await header.createChat(); assert.equal(toasts.length, 4);
+  await header.createChat(); assert.equal(toasts.length, 5, 'A failed creation reports its error above the current page');
+  assert.ok(headerApp.saveError); assert.equal(toasts.at(-1), headerApp.saveError);
+  await header.createChat(); assert.equal(toasts.length, 6); assert.equal(toasts.at(-1), headerApp.saveError);
   assert.equal(headerFixture.provider.requests.length, 0);
   console.log('PASS actual header with real sessions: untouched toast, repeated taps, draft persistence, project membership and save failure');
 })().catch(error => { console.error(error); process.exitCode = 1; });
