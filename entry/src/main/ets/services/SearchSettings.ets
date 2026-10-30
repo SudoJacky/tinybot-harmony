@@ -25,6 +25,11 @@ export async function saveSearchSettings(data: AppData, draft: SearchDraft, cred
   config.provider = draft.provider; config.enabled = draft.enabled;
   config.baseUrl = undefined; config.credentialAlias = undefined; config.modelProviderId = undefined;
   config.tavily = retained;
+  if (previous?.provider === 'searxng' || draft.searxng || draft.provider === 'searxng') {
+    config.searxng = config.searxng || { baseUrl: '' };
+    config.searxng.baseUrl = (draft.searxng ? draft.searxng.baseUrl :
+      draft.provider === 'searxng' ? draft.baseUrl : previous?.baseUrl || '').trim().replace(/\/+$/, '');
+  }
   if (previous?.provider === 'deepseek' || draft.deepseek) {
     config.deepseek = config.deepseek || {};
     config.deepseek.modelProviderId = draft.deepseek ? draft.deepseek.modelProviderId : previous?.modelProviderId;
@@ -45,10 +50,13 @@ export async function saveSearchSettings(data: AppData, draft: SearchDraft, cred
     config.deepseek = config.deepseek || {}; config.deepseek.modelProviderId = config.modelProviderId;
   } else if (draft.provider === 'tavily') {
     config.baseUrl = config.tavily?.baseUrl; config.credentialAlias = config.tavily?.credentialAlias;
+  } else if (draft.provider === 'searxng') {
+    if (draft.apiKey.trim() || draft.modelProviderId) { throw new Error('SearXNG search does not use API credentials.'); }
+    config.baseUrl = config.searxng?.baseUrl;
   }
   if (draft.enabled && draft.provider === 'tavily' && !config.credentialAlias) { throw new Error(t('请填写搜索 API Key；更换搜索地址后需要重新填写。')); }
   validateSearchConfig(config);
-  if (draft.enabled && draft.provider !== 'bing-browser' && !(draft.provider === 'tavily' && key)) {
+  if (draft.enabled && (draft.provider === 'deepseek' || draft.provider === 'tavily') && !(draft.provider === 'tavily' && key)) {
     const savedKey = await credentials.read(searchCredentialAlias(config, data.providerProfiles || []));
     if (!savedKey.trim()) { throw new Error(t('API Key 为空，请在对应服务中重新配置。')); }
   }
