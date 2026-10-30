@@ -128,6 +128,44 @@ Debug 和 Release 组要求已有相应构建产物；浏览器组不属于默�
 | `test-usage-performance.cjs` | 10 万条请求的统计、分页、取消与事件循环响应 |
 | `test-i18n-native.cjs` | 语言偏好与持久化 |
 
+### 其他已登记脚本
+
+下表补齐其余已登记脚本；构建要求与运行参数以 `test.ps1 -List` 输出为准。
+
+| 脚本 | 场景 |
+| --- | --- |
+| `test-announcements.cjs` | 公告解析、原生传输与启动弹窗 |
+| `test-background-generation.cjs` | 后台长时任务所有权、取消与真实请求范围 |
+| `test-browser-dom.cjs` | 在真实浏览器中执行发布版浏览器脚本（Playwright） |
+| `test-browser-panel.cjs` | 编译后的地址回调与系统返回 |
+| `test-composer-dismissal.cjs` | 输入框引用按钮在原生关闭过程中的回调与重复触发 |
+| `test-config-compatibility.cjs` | 新版本快照回放、未知字段保留与降级提示 |
+| `test-context-alignment.cjs` | 真实请求/上下文代码与脚本化模型的对齐 |
+| `test-focus-lifecycle.cjs` | 焦点、菜单生命周期与原生渲染/定时器/导航时钟 |
+| `test-gemini.cjs` | Gemini 原生协议编码、流解析与工具调用 |
+| `test-liquid-toggle.cjs` | 液态开关的弹簧与手势状态 |
+| `test-message-images-renderer.cjs` | 消息图片属性与原生模态所有权 |
+| `test-mini-apps.cjs` | 小程序工作区字节、数据版本、归档与备份恢复 |
+| `test-mini-apps-panel.cjs` | 编译后小程序集合界面与异步动作路径 |
+| `test-model-dependencies.cjs` | 类型擦除后的值依赖检查 |
+| `test-parallel-sessions.cjs` | 并行会话、运行时、视图模型与有序存储 |
+| `test-plan-progress.cjs` | 计划投影与编译后的 ArkUI 回调 |
+| `test-prefix-cache.cjs` | 请求前缀、持久化投影与协议编码 |
+| `test-preview-browser.cjs` | 预览浏览器的真实工具、会话与回执集成 |
+| `test-preview-screenshot.cjs` | 发布、截图持久化与下一次模型请求 |
+| `test-preview-surface.cjs` | 编译后预览表面的节点身份与生命周期 |
+| `test-request-context.cjs` | 请求边界、预算与协议投射 |
+| `test-review-invitation.cjs` | 完成信号、本机邀请历史与邀请控制器 |
+| `test-search-settings-ui.cjs` | 搜索设置列表与详情页的编译后回调 |
+| `test-search-settings.cjs` | 搜索设置持久化、提供方切换与密钥保留 |
+| `test-speech-native.cjs` | 语音适配器的权限、引擎与生命周期回调 |
+| `test-system-bars-native.cjs` | 系统栏回调与主题切换 |
+| `test-tool-outcomes.cjs` | 工具结果回执、续跑与模型继续 |
+| `test-tool-responsiveness.cjs` | 工具事件、投影与持久化路径的响应 |
+| `test-usage-filter-sheet.cjs` | 用量筛选弹层的编译后方法 |
+| `test-web-ui-browser.cjs` | ArkWeb 隔离宿主的浏览器集成（Playwright） |
+| `test-web-ui-preflight.cjs` | UI 预检、修复轮次与探针生命周期 |
+
 ## 单元测试覆盖什么
 
 `entry/src/test/` 下的 Hypium 测试不依赖真机和模型密钥，覆盖：流式分帧与工具参数组装、多轮执行、取消、步数上限、执行前落盘失败、工具错误恢复、历史协议还原、工作区路径边界、Provider 注册、配置快照、事件顺序、运行收尾、指令顺序、压缩与历史回放、会话隔离。

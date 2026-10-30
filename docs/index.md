@@ -29,4 +29,8 @@ features:
     details: 新增工具、新增模型服务、维护词条与发布交付，都给出改动位置、验证命令和容易踩的边界。
     link: /dev/setup
     linkText: 开始开发
+  - title: 从预览到小程序
+    details: 一次性图表用交互预览，需要长期打开并保存数据时收藏为本地小程序；两者都不联网，也都不继承浏览器会话。
+    link: /guide/files#小程序收藏
+    linkText: 了解小程序
 ---

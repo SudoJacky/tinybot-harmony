@@ -41,11 +41,11 @@
 | 完整版 `full` | 所有已配置且获授权的工具 | 保留自定义配置，切回时恢复 |
 | 自定义 `custom` | 关闭的能力整组移除 | 选择在下一条有效消息生效，执行期间不可修改 |
 
-基础文件工具（`list_files`、`find_files`、`read_file`、`search_file_content`、`write_file`、`edit_file`）在自定义模式中固定保留。记忆与 Skills 的 4 个入口由助手设置和 Skills 页面单独控制，不受这项开关影响。
+基础文件工具（`list_files`、`find_files`、`read_file`、`search_file_content`、`write_file`、`edit_file`）在自定义模式中固定保留。记忆与 Skills 的 4 个入口由助手设置和 Skills 页面单独控制，小程序的 2 个入口由实验室开关控制，都不受这 12 项能力开关影响。
 
 能力开关在界面上的位置与默认值见[设置项](/reference/settings)。除会话选择外，还有两层独立限制：
 
-- **全局只读**：`RuleTools` 在目录与执行两处过滤 `readOnly: false` 的分组（写文件、`mcp_call`、扩展管理、记忆）。开启后模型看不到这些工具，直接调用返回 `PERMISSION_DENIED`；结果归档与自动记忆整理也不再执行。
+- **全局只读**：`RuleTools` 在目录与执行两处过滤 `readOnly: false` 的分组（写文件、`publish_mini_app`、`mcp_call`、扩展管理、记忆）。开启后模型看不到这些工具，直接调用返回 `PERMISSION_DENIED`；结果归档与自动记忆整理也不再执行。
 - **员工角色**：团队员工沿用同一份目录，再按任务职责与只读状态取交集；员工不能招募员工，聊天团队员工必须通过 `team_complete_task` 交接。
 
 全量提供不改变任何一层权限：模型只收到已通过选择、只读与角色过滤的目录，`tool_search` 默认不提供。编排子调用同样经过参数校验、路径校验与 MCP 审批。
@@ -99,7 +99,7 @@
 
 源码通过 `input` 读取 JSON 副本，通过 `return` 返回可序列化值。Promise 返回值或待执行 job 会被拒绝，`Atomics.wait` 被禁用。状态为 `ok`、`error`、`timeout`、`cancelled`、`memory_limit`、`unsupported_async`；失败时 `result` 为 `null`，日志截断不影响计算成功。
 
-`orchestrate` 使用异步函数体，通过 `tools.*` 调用已授权工具。外层脚本受 32 次子调用、4 个并发宿主通道、120 秒墙钟、32 MiB Runtime 与 1 MiB 返回值约束；脚本源码与每个子调用参数各最多 96 KiB，结果超过 1 MiB 时以错误回执替代。子调用沿用原工具的参数、路径与审批规则；Team 控制、用户表单、预览发布和 `execute_code` 本身不开放为嵌套工具。
+`orchestrate` 使用异步函数体，通过 `tools.*` 调用已授权工具。外层脚本受 32 次子调用、4 个并发宿主通道、120 秒墙钟、32 MiB Runtime 与 1 MiB 返回值约束；脚本源码与每个子调用参数各最多 96 KiB，结果超过 1 MiB 时以错误回执替代。子调用沿用原工具的参数、路径与审批规则；Team 控制、用户表单、任务计划、浏览器、记忆与资源管理不开放为嵌套工具，预览、小程序与 `execute_code` 可以嵌套调用。
 
 两者都是同进程解释器隔离：中断是协作式检查，内建 C 运算与 Runtime 清理不是操作系统抢占，解释器漏洞或崩溃仍可能影响应用进程。需要更强边界时应新增进程或 WASM 后端，而不是给现有工具开放宿主权限。
 
@@ -111,7 +111,7 @@
 | --- | --- |
 | 网页读取 | 仅 HTTP/HTTPS；GET；不携带模型密钥、Cookie 或自定义认证头；重定向逐跳重新校验，最多跟随 5 次；整次读取最多 30 秒、响应最多 1 MiB |
 | 联网搜索 | 独立服务与密钥；只接受结构化来源，不把模型自由回答当作来源 |
-| 应用内浏览器 | 独立 `BrowserSession` 与浏览器面板，受启用策略、控制权与用户接管约束；仅 HTTP/HTTPS |
+| 应用内浏览器 | 独立 `BrowserSession` 与浏览器面板，受启用策略、控制权与用户接管约束；仅 HTTP/HTTPS；可检查已发布的预览快照，截图与等待要求前台可见 |
 | MCP | 配置校验要求 HTTPS 地址且不含账号或片段；支持 Bearer Token 与 OAuth；每次 `mcp_call` 单独确认；请求 60 秒、响应 1 MiB |
 | 模型请求 | 由 provider 适配层发起，与工具网络权限分开；连接超时 15 秒，首段与流空闲超时 120 秒 |
 

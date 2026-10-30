@@ -90,6 +90,7 @@ Tiny 从登录页开始休息，叫醒后会在本次引导中保持清醒，返
 | --- | --- | --- |
 | `ohos.permission.INTERNET` | 访问你配置的模型服务、网页读取、搜索、MCP 与云备份 | 安装时授予，无运行时弹窗 |
 | `ohos.permission.MICROPHONE` | 语音输入，使用系统语音识别服务（支持中文离线识别） | 首次开始录音时由系统弹窗询问，场景为使用时（`inuse`） |
+| `ohos.permission.KEEP_BACKGROUND_RUNNING` | 应用退到后台后继续正在进行的模型流传输 | 由系统长时任务机制管理，完成或中止后释放 |
 | `ohos.permission.FILE_ACCESS_PERSIST` | 项目共享文件夹：在项目内保留你通过系统选择器授予的目录读写授权 | 系统授权，跟随你选择的目录长期有效，可随项目解除挂载而撤销 |
 
 其余外部文件访问都通过系统选择器返回的 URI 完成，不申请图库或整个外部文件夹权限：
@@ -113,8 +114,10 @@ Tiny 从登录页开始休息，叫醒后会在本次引导中保持清醒，返
 <filesDir>/usage-records/<页>.json       用量账本分块
 <filesDir>/usage-ledger.json             旧版账本（迁移后保留）
 <filesDir>/workspace/<工作区ID>/         会话或项目工作区
+<filesDir>/workspace/<工作区ID>/attachments/<附件ID>/<文件名>   文本与文档原件
+<filesDir>/workspace/<工作区ID>/mini-apps/<appId>/             小程序页面与数据
 <filesDir>/workspace/<工作区ID>/.tinybot-review/   文件审阅基线
-<filesDir>/attachments/<uuid>.jpg|.txt   附件副本
+<filesDir>/attachments/<uuid>.jpg        图片附件副本
 ```
 
 另有三类数据不在上述目录：

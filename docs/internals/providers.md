@@ -70,7 +70,7 @@ AgentRuntime.run()
         克隆 usageOrigin，附加 purpose / step
   → ProtocolProvider.stream(request, ...)
         endpoint(input.baseUrl) → protocolUrl(protocol, ...)
-        effects.hydrate(messages)              文本附件并入正文，图片转 data URL（单图 4 MB）
+        effects.hydrate(messages)              附件路径与说明并入正文，图片转 data URL（单图 4 MB）
         组装请求体与请求头，发起流式 HTTP
 ```
 
