@@ -27,7 +27,7 @@ export struct SearchSettingsPanel {
   private locked(): boolean { return this.saving || this.app.sharedBusy || !!this.app.saveError; }
   private dirty(): boolean { return JSON.stringify(this.draft) !== this.saved; }
   private providers(): string[] {
-    const providers = ['deepseek', 'tavily', 'bing-browser'];
+    const providers = ['deepseek', 'tavily', 'searxng', 'bing-browser'];
     const saved = this.app.productivity.options?.search?.provider;
     if (saved && !isSupportedSearchProvider(saved)) { providers.push(saved); }
     return providers;
@@ -46,6 +46,7 @@ export struct SearchSettingsPanel {
       else if (provider === 'tavily') {
         this.draft.baseUrl = result.baseUrl; this.draft.apiKey = result.apiKey; this.draft.clearKey = result.clearKey;
       }
+      else if (provider === 'searxng') { this.draft.searxngBaseUrl = result.searxngBaseUrl; }
       this.error = '';
     });
   }

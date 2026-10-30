@@ -5,28 +5,33 @@ import { isConfigurationName } from './ConfigurationValue';
 export const DEEPSEEK_SEARCH_BASE_URL: string = 'https://api.deepseek.com/v1';
 export const DEEPSEEK_SEARCH_ENDPOINT: string = DEEPSEEK_SEARCH_BASE_URL + '/tools/search';
 export const SEARCH_REQUEST_MODEL: string = 'search';
-export type SearchProviderId = 'deepseek' | 'tavily' | 'bing-browser';
+export type SearchProviderId = 'deepseek' | 'tavily' | 'searxng' | 'bing-browser';
 export interface TavilySettings { baseUrl: string; credentialAlias: string; }
+export interface SearXngSettings { baseUrl: string; }
 export interface DeepSeekSearchSettings { modelProviderId?: string; }
 export interface SearchConfig {
   provider: string; enabled: boolean; baseUrl?: string; credentialAlias?: string; modelProviderId?: string;
   // Keep inactive providers configured; the fields above describe the active provider for older versions.
-  tavily?: TavilySettings; deepseek?: DeepSeekSearchSettings;
+  tavily?: TavilySettings; deepseek?: DeepSeekSearchSettings; searxng?: SearXngSettings;
 }
 export interface TavilyDraft { baseUrl: string; apiKey: string; clearKey?: boolean; }
 export interface SearchDraft {
   provider: SearchProviderId; enabled: boolean; baseUrl: string; apiKey: string; modelProviderId?: string;
-  clearKey?: boolean; tavily?: TavilyDraft; deepseek?: DeepSeekSearchSettings;
+  clearKey?: boolean; tavily?: TavilyDraft; deepseek?: DeepSeekSearchSettings; searxng?: SearXngSettings;
 }
 export interface SearchSource { url: string; title: string; snippet: string; publishedAt?: string; }
-export interface SearchResult { sources: SearchSource[]; }
+export interface SearchResult { sources: SearchSource[]; warnings?: string[]; }
 
-// The keyless Bing provider is usable immediately; API providers need a key or model service first.
+// Bing is usable immediately; other providers need credentials or an instance URL first.
 export function defaultSearchConfig(provider: SearchProviderId = 'bing-browser'): SearchConfig {
+  if (provider === 'searxng') { return { provider: provider, enabled: false, baseUrl: '' }; }
   return provider !== 'tavily' ? { provider: provider, enabled: provider === 'bing-browser' } :
     { provider: provider, enabled: false, baseUrl: 'https://api.tavily.com', credentialAlias: '' };
 }
-export function isSupportedSearchProvider(provider: string): boolean { return ['deepseek', 'tavily', 'bing-browser'].includes(provider); }
+export function isSupportedSearchProvider(provider: string): boolean { return ['deepseek', 'tavily', 'searxng', 'bing-browser'].includes(provider); }
+export function isSearXngBaseUrl(value: string): boolean {
+  return value.length <= 2048 && /^https?:\/\/[^\s/?#@\\]+(?:\/[^\s?#\\]*)?$/.test(value);
+}
 export function validateSearchConfig(config: SearchConfig, stored: boolean = false): void {
   if (!config || !isConfigurationName(config.provider) || typeof config.enabled !== 'boolean' ||
     (!stored && !isSupportedSearchProvider(config.provider)) ||
@@ -38,6 +43,10 @@ export function validateSearchConfig(config: SearchConfig, stored: boolean = fal
   if (config.tavily !== undefined) {
     validateSearchConfig({ provider: 'tavily', enabled: false, baseUrl: config.tavily?.baseUrl, credentialAlias: config.tavily?.credentialAlias });
   }
+  if (config.searxng !== undefined && (!config.searxng || typeof config.searxng !== 'object' || Array.isArray(config.searxng) ||
+    typeof config.searxng.baseUrl !== 'string' || (config.searxng.baseUrl !== '' && !isSearXngBaseUrl(config.searxng.baseUrl)))) {
+    throw new Error('Invalid SearXNG search settings.');
+  }
   if (config.deepseek !== undefined && (!config.deepseek || typeof config.deepseek !== 'object' || Array.isArray(config.deepseek) || (config.deepseek.modelProviderId !== undefined &&
     (typeof config.deepseek.modelProviderId !== 'string' || !config.deepseek.modelProviderId || config.deepseek.modelProviderId.length > 64)))) {
     throw new Error('Invalid DeepSeek search settings.');
@@ -46,6 +55,11 @@ export function validateSearchConfig(config: SearchConfig, stored: boolean = fal
   if (config.provider === 'bing-browser') {
     if (config.baseUrl !== undefined || config.credentialAlias !== undefined || config.modelProviderId !== undefined) {
       throw new Error('Built-in Bing search does not use API credentials or a custom endpoint.');
+    }
+  } else if (config.provider === 'searxng') {
+    if (config.credentialAlias !== undefined || config.modelProviderId !== undefined || typeof config.baseUrl !== 'string' ||
+      ((config.enabled || config.baseUrl !== '') && !isSearXngBaseUrl(config.baseUrl))) {
+      throw new Error(t('请填写有效的 SearXNG 实例地址（HTTP 或 HTTPS，不含查询参数）。'));
     }
   } else if (config.provider === 'deepseek') {
     if (config.baseUrl !== undefined || config.credentialAlias !== undefined ||
@@ -81,5 +95,6 @@ export function deepSeekSearchProfile(profiles: ProviderProfile[], selectedId?: 
 export function searchCredentialAlias(config: SearchConfig, profiles: ProviderProfile[]): string {
   validateSearchConfig(config);
   if (config.provider === 'bing-browser') { throw new Error('Built-in Bing search does not use API credentials.'); }
+  if (config.provider === 'searxng') { throw new Error('SearXNG search does not use API credentials.'); }
   return config.provider === 'deepseek' ? deepSeekSearchProfile(profiles, config.modelProviderId).credentialAlias : config.credentialAlias!;
 }

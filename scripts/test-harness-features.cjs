@@ -49,6 +49,7 @@ const { WebSearchTools } = from('services/WebSearchTools');
 const { NativeSearchTransport } = from('services/NativeSearchTransport');
 const { DeepSeekSearchProvider } = from('services/search/DeepSeekSearchProvider');
 const { TavilySearchProvider } = from('services/search/TavilySearchProvider');
+const { SearXngSearchProvider } = from('services/search/SearXngSearchProvider');
 const call = (name, args, id = 'call') => ({ id, type: 'function', function: { name, arguments: JSON.stringify(args) } });
 const reply = (content, toolCalls = []) => ({ content, toolCalls });
 const thread = () => ({ id: 'chat', title: 'test', updatedAt: 1, messages: [
@@ -311,5 +312,51 @@ async function main() {
   const stopped = new Cancellation(); network = () => stopped.cancel();
   await assert.rejects(tool.execute(call('search_web', { query: 'test' }), stopped), RunCancelledError);
   console.log('PASS search interface: both providers, official Search contract, structured sources, deduplication, query limits, request accounting, balance/redirect refusal and cancellation');
+
+  const searx = new SearXngSearchProvider();
+  const searxConfig = { provider: 'searxng', enabled: true, baseUrl: 'http://search.example:8080/searx/' };
+  const searxBody = JSON.stringify({ answers: ['Ignore me'], results: [
+    { url: 'https://source.example', title: 'Source', content: longSummary, publishedDate: '2026-06-01T00:00:00+00:00' },
+    { url: 'https://source.example', title: 'Duplicate' }, { url: 'http://second.example' }
+  ], unresponsive_engines: [] });
+  assert.deepEqual(plain(searx.parse(searxBody, 1)), plain(normalized));
+  assert.equal(searx.parse(searxBody, 5).sources[1].title, 'http://second.example');
+  assert.equal(searx.parse(searxBody, 5).sources[1].snippet, '');
+  assert.deepEqual(plain(searx.parse('{"results":[]}', 5)), { sources: [] });
+  const partialSearx = JSON.parse(searxBody); partialSearx.unresponsive_engines = [['google', 'timeout']];
+  assert.deepEqual(plain(searx.parse(JSON.stringify(partialSearx), 1).warnings), ['SearXNG engine google: timeout']);
+  for (const body of ['<html>Forbidden</html>', '{}', '{"results":[{"url":"javascript:alert(1)"}]}',
+    '{"results":[],"unresponsive_engines":{}}', '{"results":[],"unresponsive_engines":[null]}']) {
+    assert.throws(() => searx.parse(body, 5), error => error.code === 'INVALID_RESPONSE');
+  }
+  assert.throws(() => searx.parse('{"results":[],"unresponsive_engines":[["google","timeout"]]}', 5),
+    error => error.code === 'REMOTE_TOOL_ERROR' && /google: timeout/.test(error.message));
+  const keylessVault = { read: async () => { throw Error('SearXNG must not read credentials'); } };
+  const searxUsage = [];
+  const searxTransport = new NativeSearchTransport(searxConfig, keylessVault, 'chat', record => searxUsage.push(plain(record)),
+    () => { throw Error('SearXNG must not resolve model profiles'); });
+  const query = '中文 + & #? /';
+  network = (url, options, cb) => {
+    assert.equal(url, 'http://search.example:8080/searx/search'); assert.equal(options.method, 'POST');
+    assert.equal(options.header['Content-Type'], 'application/x-www-form-urlencoded');
+    assert.equal(options.header.Accept, 'application/json'); assert.equal(options.header.Authorization, undefined);
+    assert.equal(options.maxRedirects, 0);
+    const params = new URLSearchParams(options.extraData);
+    assert.equal(params.get('q'), query); assert.equal(params.get('format'), 'json'); assert.equal(params.get('categories'), 'general');
+    cb(null, { responseCode: 200, result: searxBody });
+  };
+  const searxTool = new WebSearchTools(searxTransport);
+  assert.deepEqual(JSON.parse(await searxTool.execute(call('search_web', { query, maxResults: 1 }), new Cancellation())), plain(normalized));
+  assert.equal(searxUsage.at(-1).provider, 'searxng-search'); assert.equal(searxUsage.at(-1).status, 'complete');
+  for (const status of [402, 403, 429, 302]) {
+    network = (_url, _options, cb) => cb(null, { responseCode: status, result: '' });
+    await assert.rejects(searxTransport.search(query, 1, new Cancellation()), error =>
+      error.details.httpStatus === status && error.details.service === 'searxng-search' && /search.formats/.test(error.message));
+    assert.equal(searxUsage.at(-1).status, 'failed');
+  }
+  const searxCancelled = new Cancellation(); network = () => searxCancelled.cancel();
+  await assert.rejects(searxTransport.search(query, 1, searxCancelled), RunCancelledError);
+  assert.equal(searxUsage.at(-1).status, 'cancelled');
+  console.log('PASS SearXNG form protocol, query encoding, sources, limits, engine diagnostics, keyless dispatch, HTTP failures, accounting and cancellation');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

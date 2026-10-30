@@ -106,6 +106,40 @@ function fixture() {
   assert.equal(multi.draft().modelProviderId, 'deepseek');
   console.log('PASS editing an inactive provider commits atomically while validating the selected provider');
 
+  const searx = fixture(); draft = searx.draft(); draft.provider = 'searxng';
+  await assert.rejects(searx.save(searchSaveDraft(draft)), /SearXNG/);
+  draft.searxngBaseUrl = ' http://192.168.1.2:8080/searx/ ';
+  await searx.save(searchSaveDraft(draft));
+  assert.equal(searx.config().baseUrl, 'http://192.168.1.2:8080/searx');
+  assert.equal(searx.config().credentialAlias, undefined);
+  assert.equal(searx.config().tavily.credentialAlias, 'old-key');
+  assert.equal(searx.reads.length, 0); assert.equal(searx.writes.length, 0); assert.equal(searx.removed.length, 0);
+  assert.throws(() => searchCredentialAlias(searx.config(), []), /does not use API credentials/);
+  const searxBefore = plain(searx.data);
+  draft = searx.draft(); draft.searxngBaseUrl = 'https://new.example';
+  await assert.rejects(searx.save(searchSaveDraft(draft), async () => { throw Error('Disk failure'); }), /Disk failure/);
+  assert.deepEqual(plain(searx.data), searxBefore);
+  draft = searx.draft(); draft.provider = 'bing-browser'; await searx.save(searchSaveDraft(draft));
+  assert.equal(searx.config().searxng.baseUrl, 'http://192.168.1.2:8080/searx');
+  draft = searx.draft(); draft.provider = 'searxng'; await searx.save(searchSaveDraft(draft));
+  assert.equal(searx.config().baseUrl, 'http://192.168.1.2:8080/searx');
+  draft = searx.draft(); draft.provider = 'tavily'; await searx.save(searchSaveDraft(draft));
+  assert.equal(searx.config().credentialAlias, 'old-key');
+  assert.equal(searx.draft().searxngBaseUrl, 'http://192.168.1.2:8080/searx');
+  for (const baseUrl of ['http://localhost:8080', 'https://search.example/prefix', 'http://[::1]:8080']) {
+    validateSearchConfig({ provider: 'searxng', enabled: true, baseUrl });
+  }
+  for (const baseUrl of ['', 'ftp://search.example', 'https://user:password@search.example',
+    'https://search.example/?format=json', 'https://search.example/#fragment', 'https://search.example/with space']) {
+    assert.throws(() => validateSearchConfig({ provider: 'searxng', enabled: true, baseUrl }));
+  }
+  for (const extra of [{ credentialAlias: 'unexpected' }, { modelProviderId: 'unexpected' }, { searxng: [] }, { searxng: null }]) {
+    assert.throws(() => validateSearchConfig({ provider: 'searxng', enabled: true, baseUrl: 'https://search.example', ...extra }));
+  }
+  assert.match(searchProviderStatus('searxng', searchEditorDraft(), [], 'disabled'), /未配置实例/);
+  assert.match(searchProviderStatus('searxng', searx.draft(), [], 'disabled'), /已配置实例/);
+  console.log('PASS SearXNG endpoint validation, keyless saves, rollback, cold reload and independent provider configuration');
+
   const future = fixture();
   future.data.productivity.options.search = { provider: 'future-search', enabled: true, custom: { keep: 'unchanged' } };
   const futureData = parseAppData(JSON.stringify(future.data));

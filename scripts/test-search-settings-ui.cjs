@@ -66,7 +66,8 @@ const node = id => { const found = nodes.find(n => n.id === id); assert.ok(found
   app.saveSearch = async draft => {
     writes++; if (fail) { app.error = 'Disk failure'; return false; }
     app.error = ''; app.productivity.options.search = { provider: draft.provider, enabled: draft.enabled,
-      tavily: { baseUrl: draft.tavily.baseUrl, credentialAlias: 'saved' }, deepseek: draft.deepseek }; return true;
+      tavily: { baseUrl: draft.tavily.baseUrl, credentialAlias: 'saved' }, deepseek: draft.deepseek, searxng: draft.searxng,
+      baseUrl: draft.provider === 'searxng' ? draft.searxng.baseUrl : undefined }; return true;
   };
   const list = view(Object.assign(new List(), { app, initialized: false, saving: false, error: '',
     onEdit: (r, callback) => { request = r; returned = callback; } }));
@@ -95,6 +96,21 @@ const node = id => { const found = nodes.find(n => n.id === id); assert.ok(found
   assert.equal(list.draft.apiKey, 'draft-secret'); assert.equal(list.dirty(), true);
   fail = false; await list.save(); assert.equal(writes, 2); assert.equal(list.draft.apiKey, ''); assert.equal(list.dirty(), false);
   console.log('PASS emitted list selection, configure action, isolated details, Done, dirty notice and failed-save retry');
+
+  render(list); component('search-provider-searxng').onAction();
+  const searxDetail = view(Object.assign(new Detail(), { app, request, onDone: returned }));
+  searxDetail.aboutToAppear(); render(searxDetail);
+  assert.equal(nodes.some(n => n.id === 'search-api-key'), false);
+  assert.ok(node('search-provider-draft-notice'));
+  node('search-searxng-base-url').onChange('http://192.168.1.2:8080');
+  assert.equal(list.draft.searxngBaseUrl, '', 'SearXNG detail changes remain isolated until Done');
+  node('search-provider-done').onClick(); searxDetail.aboutToDisappear();
+  assert.equal(list.draft.searxngBaseUrl, 'http://192.168.1.2:8080');
+  assert.equal(list.draft.provider, 'bing-browser');
+  render(list); component('search-provider-searxng').onTap(); await list.save();
+  assert.equal(app.productivity.options.search.provider, 'searxng');
+  assert.equal(list.draft.searxngBaseUrl, 'http://192.168.1.2:8080'); assert.equal(list.dirty(), false);
+  console.log('PASS SearXNG configuration, isolated details, provider selection and save/reload');
 
   list.edit('tavily'); const cancelled = view(Object.assign(new Detail(), { app, request, onDone: returned }));
   cancelled.aboutToAppear(); cancelled.draft.apiKey = 'discard'; cancelled.aboutToDisappear(); returned(undefined);
