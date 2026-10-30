@@ -98,13 +98,15 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 
   let initialized = 0, engines = 0, wants = [], accountRefresh = 0, loads = 0, stops = 0;
   const renderLifecycle = [];
+  const bootOrder = [];
   const noOp = () => {};
   const { default: EntryAbility } = load('entryability/EntryAbility.ets', {
     '../model/Diagnostics': { Diagnostics: { log: noOp, acceptsLog: () => false } },
     '@kit.ArkWeb': { webview: { WebviewController: { initializeWebEngine() { engines++; } } } },
     '../services/NativeActions': { ShareInbox: { receive: want => wants.push(want) } },
-    '../services/LanguagePreferences': { LanguagePreferences: { initialize: noOp, refresh: noOp } },
-    '../services/AppearancePreferences': { AppearancePreferences: { initialize: noOp, refresh: noOp, activate: noOp } },
+    '../services/NativeDiagnosticLog': { configureNativeDiagnosticLog: () => bootOrder.push('logging') },
+    '../services/LanguagePreferences': { LanguagePreferences: { initialize: () => bootOrder.push('language'), refresh: noOp } },
+    '../services/AppearancePreferences': { AppearancePreferences: { initialize: () => bootOrder.push('appearance'), refresh: noOp, activate: noOp } },
     '../services/McpOAuth': { McpOAuth: { receive: noOp } },
     '../services/LaunchActions': { LaunchActions: { receive: noOp, setForeground: noOp } },
     '../services/BackgroundGeneration': { backgroundGeneration: { setForeground: noOp, dispose: noOp } },
@@ -121,6 +123,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
     getMainWindowSync: () => ({ setWindowSystemBarProperties: () => Promise.resolve() }) };
   const ability = new EntryAbility(); ability.context = context;
   ability.onCreate({ uri: 'initial' }, {}); await tick();
+  assert.deepEqual(bootOrder, ['logging', 'language', 'appearance'], 'Early settings failures already have a native diagnostic sink');
   ability.onForeground(); ability.onNewWant({ uri: 'shared' }, {});
   assert.deepEqual(renderLifecycle.slice(-2), [['preflight', true], ['capture', true]]);
   ability.onBackground();

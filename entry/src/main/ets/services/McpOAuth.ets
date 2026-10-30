@@ -1,4 +1,5 @@
 import { t } from '../model/I18n';
+import { Diagnostics } from '../model/Diagnostics';
 import { common } from '@kit.AbilityKit';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { CompatHttp } from './CompatHttp';
@@ -95,7 +96,10 @@ export class McpOAuth {
         clearTimeout(timeout); remove(); McpOAuth.callback = undefined; resolve(value);
       };
       remove = cancellation.onCancel(() => { clearTimeout(timeout); McpOAuth.callback = undefined; reject(new RunCancelledError()); });
-      context.startAbility({ action: 'ohos.want.action.viewData', uri: authorization }).catch(() => { clearTimeout(timeout); remove(); McpOAuth.callback = undefined; reject(new Error(t("无法打开系统浏览器。"))); });
+      context.startAbility({ action: 'ohos.want.action.viewData', uri: authorization }).catch((error: Error) => {
+        Diagnostics.log('error', 'mcp', 'browser_launch_failed', undefined, error);
+        clearTimeout(timeout); remove(); McpOAuth.callback = undefined; reject(new Error(t("无法打开系统浏览器。")));
+      });
     });
     cancellation.check();
     const code = /[?&]code=([^&]+)/.exec(callback)?.[1];

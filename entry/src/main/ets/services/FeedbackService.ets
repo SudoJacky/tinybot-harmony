@@ -1,4 +1,5 @@
 import { common } from '@kit.AbilityKit';
+import { Diagnostics } from '../model/Diagnostics';
 import { preferences } from '@kit.ArkData';
 import { CredentialStore } from './CredentialStore';
 import { CompatHttp, CompatResponse } from './CompatHttp';
@@ -55,6 +56,7 @@ export class FeedbackService {
   async initialize(context: common.Context): Promise<void> {
     if (this.ready || this.busy) { return; }
     this.busy = true; this.error = '';
+    let phase: string = 'storage';
     try {
       FeedbackFiles.configure(context);
       this.store = preferences.getPreferencesSync(context, { name: 'tinybot-feedback' });
@@ -75,10 +77,14 @@ export class FeedbackService {
       this.uploads = queue.files; this.attachmentFeedbackId = queue.feedbackId;
       // The durable receipt proves that text was saved even if the process stopped before clearing the draft.
       if (queue.feedbackId) { this.save('pendingSubmission', ''); this.uncertain = false; this.body = ''; this.contact = ''; }
+      phase = 'credential';
       const token = await this.vault.readOptional(ALIAS);
       if (token !== undefined && !validFeedbackToken(token)) { throw new Error(t('本机反馈凭证无法读取，已保留原凭证。')); }
       this.token = token || ''; this.ready = true;
-    } catch (_) { this.error = t('无法读取本机反馈记录或安全凭证，请解锁设备后重试。'); }
+    } catch (error) {
+      Diagnostics.log('error', 'feedback', 'initialize_failed', { phase: phase }, error as Error);
+      this.error = t('无法读取本机反馈记录或安全凭证，请解锁设备后重试。');
+    }
     finally { this.busy = false; }
   }
 
@@ -86,7 +92,8 @@ export class FeedbackService {
     if (!this.store) { throw new Error(t('反馈尚未就绪，请重新打开页面。')); }
     const previous = this.store.getSync(key, '');
     try { this.store.putSync(key, value); this.store.flushSync(); }
-    catch (_) {
+    catch (error) {
+      Diagnostics.log('error', 'feedback', 'save_failed', { setting: 'feedback.' + key }, error as Error);
       this.store.putSync(key, previous);
       throw new Error(t('无法保存本机反馈记录，请检查存储空间后重试。'));
     }
@@ -97,7 +104,10 @@ export class FeedbackService {
     // Retain a freshly issued token in memory if secure storage failed; retry saving it before any POST.
     if (!this.unsavedToken) { this.unsavedToken = parseFeedbackIdentity(await this.request('/identity', 'identity', '', '{"schemaVersion":1}', 201)).token; }
     try { await this.vault.write(ALIAS, this.unsavedToken); }
-    catch (_) { throw new Error(t('无法安全保存反馈凭证，尚未提交反馈。请解锁设备后重试。')); }
+    catch (error) {
+      Diagnostics.log('error', 'feedback', 'credential_failed', undefined, error as Error);
+      throw new Error(t('无法安全保存反馈凭证，尚未提交反馈。请解锁设备后重试。'));
+    }
     this.token = this.unsavedToken; this.unsavedToken = '';
   }
 
@@ -106,6 +116,7 @@ export class FeedbackService {
     hostedPrivacy.requireConsent();
     const remaining = Math.ceil(((this.cooldowns[bucket] || 0) - Date.now()) / 1000);
     if (remaining > 0) { throw new FeedbackHttpError(429, remaining); }
+    const started = Date.now();
     try {
       const headers: Record<string, string> = { 'Accept': 'application/json' };
       if (token) { headers['Authorization'] = 'Bearer ' + token; }
@@ -127,6 +138,8 @@ export class FeedbackService {
       }
       return response;
     } catch (error) {
+      Diagnostics.log('error', 'feedback', 'request_failed', { phase: bucket, elapsedMs: Date.now() - started,
+        http: error instanceof FeedbackHttpError ? error.status : 0 }, error as Error);
       if (error instanceof FeedbackHttpError) { throw error; }
       throw new Error(t('无法连接反馈服务，请检查网络后重试。'));
     }
@@ -154,10 +167,14 @@ export class FeedbackService {
       this.body = ''; this.contact = ''; this.type = 'other'; this.notice = t('反馈已提交，可在“我的反馈”查看处理状态和回复。');
       if (this.uploads.length) {
         try { await this.uploadFiles(); }
-        catch (_) { this.error = t('反馈正文已提交，附件尚未全部上传。请在附件任务中继续。'); }
+        catch (error) {
+          Diagnostics.log('error', 'feedback', 'upload_failed', undefined, error as Error);
+          this.error = t('反馈正文已提交，附件尚未全部上传。请在附件任务中继续。');
+        }
       }
       return true;
     } catch (error) {
+      Diagnostics.log('error', 'feedback', 'submit_failed', { uncertain: this.uncertain }, error as Error);
       if (sent && error instanceof FeedbackHttpError && error.status >= 400 && error.status < 500) {
         try { this.save('pendingSubmission', ''); this.uncertain = false; }
         catch (storageError) { this.error = (storageError as Error).message; return false; }
@@ -185,7 +202,10 @@ export class FeedbackService {
         (cursor ? '&before=' + encodeURIComponent(cursor) : ''), 'query', this.token));
       this.items = more ? this.items.concat(page.items.filter((item: FeedbackItem) => !this.items.some((old: FeedbackItem) => old.id === item.id))) : page.items;
       this.nextCursor = page.nextCursor; this.counts = page.counts; this.filter = filter; this.typeFilter = type;
-    } catch (error) { this.error = error instanceof FeedbackHttpError ? error.message : t('无法加载反馈，请检查网络后重试。'); }
+    } catch (error) {
+      Diagnostics.log('error', 'feedback', 'list_failed', undefined, error as Error);
+      this.error = error instanceof FeedbackHttpError ? error.message : t('无法加载反馈，请检查网络后重试。');
+    }
     finally { this.busy = false; }
   }
 
@@ -199,7 +219,10 @@ export class FeedbackService {
       if (item.id !== id) { throw new Error('Mismatched feedback ID'); }
       this.detail = item;
       this.items = this.items.map((old: FeedbackItem) => old.id === item.id ? item : old);
-    } catch (error) { this.error = error instanceof FeedbackHttpError ? error.message : t('无法读取反馈详情或保存已读状态，请稍后重试。'); }
+    } catch (error) {
+      Diagnostics.log('error', 'feedback', 'detail_failed', undefined, error as Error);
+      this.error = error instanceof FeedbackHttpError ? error.message : t('无法读取反馈详情或保存已读状态，请稍后重试。');
+    }
     finally { this.busy = false; }
   }
 
@@ -232,14 +255,20 @@ export class FeedbackService {
     try {
       this.commitUploads(this.uploads.filter((item: FeedbackUpload) => item.localId !== id));
       await FeedbackFiles.remove(file.path);
-    } catch (_) { this.error = t('无法移除本机附件，请稍后重试。'); }
+    } catch (error) {
+      Diagnostics.log('warn', 'feedback', 'cleanup_failed', undefined, error as Error);
+      this.error = t('无法移除本机附件，请稍后重试。');
+    }
   }
   async clearUploadTask(): Promise<void> {
     if (this.busy) { return; }
     try {
       const files = this.uploads.slice(); this.commitUploads([], '');
       for (const file of files) { await FeedbackFiles.remove(file.path); }
-    } catch (_) { this.error = t('无法移除本机附件，请稍后重试。'); }
+    } catch (error) {
+      Diagnostics.log('warn', 'feedback', 'cleanup_failed', undefined, error as Error);
+      this.error = t('无法移除本机附件，请稍后重试。');
+    }
   }
   private replaceUpload(file: FeedbackUpload): void {
     this.commitUploads(this.uploads.map((old: FeedbackUpload) => old.localId === file.localId ? file : old));
@@ -271,6 +300,7 @@ export class FeedbackService {
         }
         file.state = 'uploaded'; file.remoteId = remote.id; this.replaceUpload(file); item.attachments.push(remote);
       } catch (error) {
+        Diagnostics.log('error', 'feedback', 'upload_failed', { chunk: index + 1, total: this.uploads.length }, error as Error);
         const definite = !sending || error instanceof FeedbackHttpError && (error.status >= 400 && error.status < 500 || error.status === 507);
         const file = copyUpload(this.uploads[index]); file.state = definite ? 'failed' : 'uncertain';
         file.error = error instanceof FeedbackHttpError ? error.message : t('附件上传未完成，请核对后重试。');
@@ -290,7 +320,10 @@ export class FeedbackService {
     if (!this.ready || this.busy || !this.attachmentFeedbackId) { return; }
     this.busy = true; this.error = '';
     try { await this.uploadFiles(); }
-    catch (error) { this.error = error instanceof FeedbackHttpError ? error.message : t('反馈正文已提交，附件尚未全部上传。请在附件任务中继续。'); }
+    catch (error) {
+      Diagnostics.log('error', 'feedback', 'upload_failed', undefined, error as Error);
+      this.error = error instanceof FeedbackHttpError ? error.message : t('反馈正文已提交，附件尚未全部上传。请在附件任务中继续。');
+    }
     finally { this.busy = false; this.progress = ''; }
   }
   async reconcileUploads(): Promise<void> {
@@ -306,7 +339,10 @@ export class FeedbackService {
         const next = copyUpload(file); next.state = 'uploaded'; next.remoteId = found.id; next.error = ''; return next;
       });
       this.commitUploads(files); this.detail = item; this.uploadsChecked = true;
-    } catch (error) { this.error = error instanceof FeedbackHttpError ? error.message : t('无法核对附件，请稍后刷新。'); }
+    } catch (error) {
+      Diagnostics.log('error', 'feedback', 'reconcile_failed', undefined, error as Error);
+      this.error = error instanceof FeedbackHttpError ? error.message : t('无法核对附件，请稍后刷新。');
+    }
     finally { this.busy = false; }
   }
   resolveUploadUncertainty(): void {
@@ -342,7 +378,10 @@ export class FeedbackService {
       const next = JSON.parse(JSON.stringify(item)) as FeedbackItem;
       next.attachments = item.attachments.filter((old: FeedbackAttachment) => old.id !== file.id); this.detail = next;
       this.items = this.items.map((old: FeedbackItem) => old.id === item.id ? this.detail as FeedbackItem : old);
-    } catch (error) { this.error = error instanceof FeedbackHttpError ? error.message : t('无法确认附件删除结果，请刷新详情后核对。'); }
+    } catch (error) {
+      Diagnostics.log('error', 'feedback', 'delete_failed', undefined, error as Error);
+      this.error = error instanceof FeedbackHttpError ? error.message : t('无法确认附件删除结果，请刷新详情后核对。');
+    }
     finally { this.busy = false; }
   }
 }

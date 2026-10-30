@@ -1,4 +1,5 @@
 import { t } from '../model/I18n';
+import { Diagnostics } from '../model/Diagnostics';
 import { AppData, copyModelConfig } from '../model/Conversation';
 import { ProviderProfile, modelConfig, modelIds, validateProfile } from '../model/ProviderProfiles';
 import { CredentialReader } from './providers/Provider';
@@ -73,16 +74,23 @@ export class ProfileSettings {
       if (first && profile.enabled && active && !active.modelRef) { active.modelRef = { providerId: profile.id, modelId: profile.models[0] }; }
       await commit(data);
     } catch (error) {
+      Diagnostics.log('error', 'configuration', 'save_failed', { credentialScope: 'provider' }, error as Error);
       let message = '保存模型服务失败：' + (error as Error).message;
       if (createdAlias.length > 0) {
         try { await this.credentials.remove(createdAlias); }
-        catch (cleanupError) { message += '；未生效的密钥清理失败：' + (cleanupError as Error).message; }
+        catch (cleanupError) {
+          Diagnostics.log('error', 'resources', 'credential_rollback_failed', { credentialScope: 'provider' }, cleanupError as Error);
+          message += '；未生效的密钥清理失败：' + (cleanupError as Error).message;
+        }
       }
       throw new Error(message);
     }
     if (previous && previous.credentialAlias !== profile.credentialAlias) {
       try { await this.credentials.remove(previous.credentialAlias); }
-      catch (error) { return '模型服务已保存，但旧密钥清理失败：' + (error as Error).message; }
+      catch (error) {
+        Diagnostics.log('warn', 'resources', 'credential_cleanup_failed', { credentialScope: 'provider' }, error as Error);
+        return '模型服务已保存，但旧密钥清理失败：' + (error as Error).message;
+      }
     }
     return '';
   }
@@ -94,7 +102,10 @@ export class ProfileSettings {
     if (data.config.providerId === id) { data.config = copyModelConfig(data.config, false); data.config.credentialAlias = ''; }
     await commit(data);
     try { await this.credentials.remove(profile.credentialAlias); }
-    catch (error) { return '服务已删除，但密钥清理失败：' + (error as Error).message; }
+    catch (error) {
+      Diagnostics.log('warn', 'resources', 'credential_cleanup_failed', { credentialScope: 'provider' }, error as Error);
+      return '服务已删除，但密钥清理失败：' + (error as Error).message;
+    }
     return '';
   }
 }

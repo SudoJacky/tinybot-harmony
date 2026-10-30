@@ -1,4 +1,6 @@
 import { common } from '@kit.AbilityKit';
+import { Diagnostics } from '../model/Diagnostics';
+import { LogError } from '../model/DiagnosticLog';
 import { util } from '@kit.ArkTS';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { image } from '@kit.ImageKit';
@@ -36,13 +38,15 @@ export struct ConversationSharePanel {
     this.mounted = false;
     const path = this.previewPath;
     this.previewPath = '';
-    this.removeTemporary(path).catch((error: Error) => console.error('Conversation share cleanup: ' + error.message));
+    this.removeTemporary(path).catch((error: Error) => Diagnostics.log('warn', 'export', 'cleanup_failed', undefined, error));
   }
   private async removeTemporary(path: string): Promise<void> {
     if (path && await fs.access(path)) { await fs.unlink(path); }
   }
   private ensureActive(): void {
-    if (!this.mounted || !hostedPrivacy.allowed) { throw new Error(t('分享已取消')); }
+    if (!this.mounted || !hostedPrivacy.allowed) {
+      const error = new Error(t('分享已取消')) as LogError; error.code = 'CANCELLED'; throw error;
+    }
   }
   private select(id: string, checked: boolean): void {
     if (this.busy) { return; }
@@ -84,10 +88,14 @@ export struct ConversationSharePanel {
       this.ensureActive();
       this.previewPath = temporary; temporary = '';
     } catch (error) {
+      if ((error as LogError).code !== 'CANCELLED') { Diagnostics.log('error', 'export', 'preview_failed', undefined, error as Error); }
       if (this.mounted) { this.error = t('导出图片失败：{0}', [(error as Error).message || String(error)]); }
     } finally {
       try { await this.removeTemporary(temporary); }
-      catch (error) { if (this.mounted) { this.error = (error as Error).message; } }
+      catch (error) {
+        Diagnostics.log('warn', 'export', 'cleanup_failed', undefined, error as Error);
+        if (this.mounted) { this.error = (error as Error).message; }
+      }
       finally { this.busy = false; }
     }
   }
@@ -96,7 +104,10 @@ export struct ConversationSharePanel {
     const path = this.previewPath;
     this.previewPath = ''; this.error = '';
     try { await this.removeTemporary(path); }
-    catch (error) { this.error = (error as Error).message; }
+    catch (error) {
+      Diagnostics.log('warn', 'export', 'cleanup_failed', undefined, error as Error);
+      this.error = (error as Error).message;
+    }
   }
   private async outputImage(share: boolean): Promise<void> {
     if (this.busy || !this.previewPath) { return; }
@@ -106,7 +117,12 @@ export struct ConversationSharePanel {
       const name = conversationFileName(this.data.thread.title, 'png');
       if (share) { await shareFile(this.context(), this.previewPath, name); }
       else { await exportFile(this.context(), this.previewPath, name); }
-    } catch (error) { if (this.mounted) { this.error = (error as Error).message; } }
+    } catch (error) {
+      if ((error as LogError).code !== 'CANCELLED') {
+        Diagnostics.log('error', 'export', share ? 'share_failed' : 'save_failed', { format: 'image' }, error as Error);
+      }
+      if (this.mounted) { this.error = (error as Error).message; }
+    }
     finally { this.busy = false; }
   }
   private async outputMarkdown(share: boolean): Promise<void> {
@@ -125,10 +141,18 @@ export struct ConversationSharePanel {
       const name = conversationFileName(thread.title, 'md');
       if (share) { await shareFile(context, temporary, name); }
       else { await exportFile(context, temporary, name); }
-    } catch (error) { if (this.mounted) { this.error = (error as Error).message; } }
+    } catch (error) {
+      if ((error as LogError).code !== 'CANCELLED') {
+        Diagnostics.log('error', 'export', share ? 'share_failed' : 'save_failed', { format: 'markdown' }, error as Error);
+      }
+      if (this.mounted) { this.error = (error as Error).message; }
+    }
     finally {
       try { await this.removeTemporary(temporary); }
-      catch (error) { if (this.mounted) { this.error = (error as Error).message; } }
+      catch (error) {
+        Diagnostics.log('warn', 'export', 'cleanup_failed', undefined, error as Error);
+        if (this.mounted) { this.error = (error as Error).message; }
+      }
       finally { this.busy = false; }
     }
   }

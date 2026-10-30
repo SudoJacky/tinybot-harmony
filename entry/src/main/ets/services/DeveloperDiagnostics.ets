@@ -9,7 +9,7 @@ import { hidebug, hiAppEvent } from '@kit.PerformanceAnalysisKit';
 import { Diagnostics, PerfEvent, PerfSnapshot } from '../model/Diagnostics';
 import { collectPerformanceResources, ResourceProbe } from './PerformanceProbe';
 import { readAppInformation, AppInformation } from './AppInformation';
-import { clearRecentDiagnosticLogs, configureNativeDiagnosticLog } from './NativeDiagnosticLog';
+import { clearRecentDiagnosticLogs } from './NativeDiagnosticLog';
 
 interface HeapProbe { usedKiB: number; totalKiB: number; arraysKiB: number; }
 interface TraceEntry { name: string; cat: string; ph: string; ts: number; dur?: number; pid: number; tid: number; args: Record<string, Object>; s?: string; }
@@ -41,7 +41,6 @@ export class DeveloperDiagnostics {
   private static cpuTimer: number = -1;
 
   static initialize(context: common.Context): void {
-    configureNativeDiagnosticLog();
     DeveloperDiagnostics.context = context;
     Diagnostics.configureClock(() => systemDateTime.getUptime(systemDateTime.TimeType.STARTUP, true) / 1000000);
     try {

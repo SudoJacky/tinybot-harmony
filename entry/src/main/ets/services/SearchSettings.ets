@@ -1,4 +1,5 @@
 import { AppData } from '../model/Conversation';
+import { Diagnostics } from '../model/Diagnostics';
 import { ProductivityData, defaultProductivity } from '../model/Productivity';
 import { defaultAssistantOptions } from '../model/AssistantOptions';
 import { SearchConfig, SearchDraft, TavilySettings, validateSearchConfig, deepSeekSearchProfile, searchCredentialAlias } from '../model/WebSearch';
@@ -61,13 +62,22 @@ export async function saveSearchSettings(data: AppData, draft: SearchDraft, cred
     }
     options.search = config; productivity.options = options; data.productivity = productivity; await commit(data);
   } catch (error) {
+    Diagnostics.log('error', 'configuration', 'save_failed', { credentialScope: 'search' }, error as Error);
     data.productivity = previousProductivity;
-    if (created) { await credentials.remove(created); }
+    if (created) {
+      try { await credentials.remove(created); }
+      catch (cleanupError) {
+        Diagnostics.log('error', 'resources', 'credential_rollback_failed', { credentialScope: 'search' }, cleanupError as Error);
+      }
+    }
     throw error as Error;
   }
   if (retained?.credentialAlias && retained.credentialAlias !== config.tavily?.credentialAlias) {
     try { await credentials.remove(retained.credentialAlias); }
-    catch (_) { return '搜索设置已保存，但旧密钥清理失败。'; }
+    catch (error) {
+      Diagnostics.log('warn', 'resources', 'credential_cleanup_failed', { credentialScope: 'search' }, error as Error);
+      return '搜索设置已保存，但旧密钥清理失败。';
+    }
   }
   return '';
 }

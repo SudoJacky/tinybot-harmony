@@ -1,4 +1,5 @@
 import { authentication } from '@kit.AccountKit';
+import { Diagnostics } from '../model/Diagnostics';
 import { common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -34,7 +35,8 @@ export class HuaweiAccount {
     try {
       this.openID = await this.vault.readOptional(ACCOUNT_ALIAS) || '';
       if (this.openID) { await this.checkAccount(); }
-    } catch (_) {
+    } catch (error) {
+      Diagnostics.log('error', 'account', 'restore_failed', undefined, error as Error);
       this.signedIn = false; this.error = t('无法恢复华为账号登录状态，请重新登录。');
     } finally { this.ready = true; }
   }
@@ -51,11 +53,13 @@ export class HuaweiAccount {
       const response = await new authentication.AuthenticationController(this.context).executeRequest(request) as authentication.LoginWithHuaweiIDResponse;
       const openID = response.data?.openID;
       if (response.state !== request.state || !openID || openID.length > 256) {
+        Diagnostics.log('warn', 'account', 'response_invalid');
         this.error = t('华为账号登录响应校验失败，请重新登录。'); return;
       }
       phase = 'state';
       const result = await provider.getHuaweiIDState({ idType: authentication.IdType.OPEN_ID, idValue: openID });
       if (result.state !== authentication.State.AUTHORIZED) {
+        Diagnostics.log('warn', 'account', 'state_changed', { eventCode: result.state });
         this.error = t('华为账号已退出或发生变化，请重新登录。'); return;
       }
       // Commit local identity only after both the request and the current device account have been checked.
@@ -64,6 +68,9 @@ export class HuaweiAccount {
       await this.vault.write(ACCOUNT_ALIAS, openID);
       this.openID = openID; this.signedIn = true;
     } catch (error) {
+      if ((error as BusinessError).code === authentication.AuthenticationErrorCode.USER_CANCELED && phase === 'login') {
+        Diagnostics.log('info', 'account', 'sign_in_cancelled');
+      } else { Diagnostics.log('error', 'account', 'sign_in_failed', { phase: phase }, error as Error); }
       this.error = phase === 'storage' ? t('无法保存华为账号登录记录，请重试。') : phase === 'state' ?
         t('华为账号状态检查失败（{0}），请重试。', [(error as BusinessError).code || 0]) : accountError(error as BusinessError);
     } finally { this.busy = false; }
@@ -73,7 +80,10 @@ export class HuaweiAccount {
     if (this.busy) { return; }
     this.busy = true; this.revision++; this.openID = ''; this.signedIn = false; this.error = '';
     try { await this.vault.remove(ACCOUNT_ALIAS); }
-    catch (_) { this.error = t('无法清除本机登录记录，请重试退出登录。'); }
+    catch (error) {
+      Diagnostics.log('error', 'account', 'sign_out_failed', undefined, error as Error);
+      this.error = t('无法清除本机登录记录，请重试退出登录。');
+    }
     finally { this.busy = false; }
   }
 
@@ -81,7 +91,8 @@ export class HuaweiAccount {
     if (!this.ready || this.busy || !this.openID) { return; }
     const revision = this.revision;
     try { await this.checkAccount(); }
-    catch (_) {
+    catch (error) {
+      Diagnostics.log('error', 'account', 'state_failed', undefined, error as Error);
       if (revision === this.revision) { this.signedIn = false; this.error = t('无法检查华为账号状态，请重试或重新登录。'); }
     }
   }
@@ -127,6 +138,7 @@ export class HuaweiAccount {
     const result = await new authentication.HuaweiIDProvider().getHuaweiIDState({ idType: authentication.IdType.OPEN_ID, idValue: openID });
     if (revision !== this.revision) { return; }
     if (result.state !== authentication.State.AUTHORIZED) {
+      Diagnostics.log('warn', 'account', 'state_changed', { eventCode: result.state });
       this.signedIn = false; this.openID = ''; this.error = t('华为账号已退出或发生变化，请重新登录。');
       await this.vault.remove(ACCOUNT_ALIAS); return;
     }

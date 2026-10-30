@@ -237,4 +237,34 @@ for (const effect of ['auto','gentle','standard','vivid','off']) {
 assert.equal(unsupportedMaterials.available, false);
 assert.equal(capabilityReads, capabilityBefore + 1, 'Device capability is immutable and queried once');
 assert.equal(levelReads, levelBefore, 'Unsupported devices never request an immersive quality tier');
+// The settings diagnostic must distinguish all causes of the same unavailable banner.
+function supportReport(sdk, initiallySupported, currentlySupported, failConstruction = false) {
+  deviceSdk = sdk; deviceMaterialSupported = initiallySupported;
+  const cache = new Map(), records = [];
+  load(root + '/model/Diagnostics.ets', cache).Diagnostics.configureLogSink(data => records.push(data));
+  const materials = load(root + '/common/AppMaterials.ets', cache).AppMaterials;
+  const constructor = uiMaterial.ImmersiveMaterial;
+  try {
+    if (failConstruction) {
+      uiMaterial.ImmersiveMaterial = class { constructor() { throw Object.assign(Error('native failure'), { code: 401 }); } };
+      assert.equal(materials.control, undefined);
+    }
+    deviceMaterialSupported = currentlySupported;
+    materials.reportSupport();
+    return records.find(data => data.event === 'material_support');
+  } finally { uiMaterial.ImmersiveMaterial = constructor; }
+}
+for (const [sdk, initial, current, failed, reason] of [
+  [20, false, false, false, 'api_level'],
+  [26, false, false, false, 'device_unsupported'],
+  [26, true, true, true, 'construction_failed'],
+  [26, false, true, false, 'capability_changed']
+]) {
+  const report = supportReport(sdk, initial, current, failed);
+  assert.equal(report.level, 'warn');
+  assert.deepEqual({ ...report.fields }, { sdk, initialSupported: initial, supported: current,
+    available: false, failed, reason }, 'Retain the actual support evidence after log sanitization');
+}
+deviceSdk = 26; deviceMaterialSupported = true;
+console.log('PASS material support diagnostics distinguish API level, device rejection, construction failure and changed native result');
 console.log('PASS appearance: palette, persistence, rollback, material cache and plain controls on API 20 / unsupported API 26 devices');

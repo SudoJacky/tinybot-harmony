@@ -15,6 +15,7 @@ function load(file, imports) {
 }
 const model = load('model/Feedback.ets', { './I18n': { t } });
 const recentModel = load('model/RecentDiagnosticLog.ets', {});
+const { DiagnosticsCollector } = load('model/Diagnostics.ets', { './DiagnosticLog': load('model/DiagnosticLog.ets', {}) });
 const token = 'fi_' + 's'.repeat(43), id = '5c5f0c81-f428-44d5-a5ab-7acd507bd013';
 const time = '2026-10-24T04:01:00.000Z';
 const item = (values = {}) => ({ id, body: '建议', contact: '', createdAt: time, status: 'new', type: 'other', attachments: [], reply: null, ...values });
@@ -28,6 +29,8 @@ const upload = (kind = 'image') => ({ localId: kind + '-local', kind, filename: 
 const attachment = (kind = 'image') => ({ id: kind === 'image' ? 'a60dfdf2-5c0d-4639-8b95-3651d39d8354' : 'b60dfdf2-5c0d-4639-8b95-3651d39d8354',
   kind, filename: kind === 'image' ? '截图-image.webp' : 'log-local.log', mimeType: kind === 'image' ? 'image/webp' : 'text/plain; charset=utf-8', size: 12, createdAt: time });
 function harness(initialToken, persisted = new Map()) {
+  const diagnosticLogs = [], diagnostics = new DiagnosticsCollector();
+  diagnostics.configureLogSink(data => diagnosticLogs.push(data));
   let secure = initialToken, failRead = false, failWrite = false, failFlush = false, allowed = true;
   const calls = [], events = [], responses = [];
   const disk = persisted, working = new Map(disk);
@@ -65,6 +68,7 @@ function harness(initialToken, persisted = new Map()) {
     } finally { destroyed++; }
   } };
   const { FeedbackService } = load('services/FeedbackService.ets', {
+    '../model/Diagnostics': { Diagnostics: diagnostics },
     '@kit.ArkData': { preferences: { getPreferencesSync: () => store } },
     './CompatHttp': { CompatHttp: compat },
     './CredentialStore': { CredentialStore: Vault }, './FeedbackFiles': { FeedbackFiles: {
@@ -74,7 +78,7 @@ function harness(initialToken, persisted = new Map()) {
     } }, '../model/I18n': { t }, '../model/Feedback': model
   });
   return {
-    service: new FeedbackService(), fresh: () => new FeedbackService(), disk, events, calls,
+    service: new FeedbackService(), fresh: () => new FeedbackService(), disk, events, calls, diagnosticLogs,
     enqueue(body, status = 200, header = {}) { responses.push({ result: JSON.stringify(body), responseCode: status, header }); },
     fail(error = Error('timeout')) { responses.push(error); }, defer(fn) { responses.push(fn); },
     set failRead(v) { failRead = v; }, set failWrite(v) { failWrite = v; }, set failFlush(v) { failFlush = v; },
@@ -232,6 +236,9 @@ async function main() {
   assert.equal(s.detail.status, 'new', 'Reply does not imply handled');
   h.enqueue({ error: 'ignored' }, 404); await s.open(id); assert.match(s.error, /不存在/);
   h.enqueue({ error: 'ignored' }, 401); await s.load(); assert.match(s.error, /凭证无效/); assert.equal(h.token, token);
+  const httpFailure = h.diagnosticLogs.findLast(data => data.event === 'request_failed');
+  assert.equal(httpFailure.fields.http, 401); assert.equal(httpFailure.fields.phase, 'query');
+  assert.ok(!JSON.stringify(h.diagnosticLogs).includes(token));
   h.balanced();
 
   const storage = await setup(); storage.service.body = '建议'; storage.failWrite = true; storage.enqueue(identity, 201);
@@ -239,13 +246,19 @@ async function main() {
   storage.failWrite = false; storage.enqueue(receipt, 201); assert.equal(await storage.service.submit(), true);
   assert.equal(storage.calls.length, 2, 'Retry saving the same token rather than creating another identity'); storage.balanced();
   const locked = harness(token); locked.failRead = true; await locked.service.initialize({});
+  assert.equal(locked.diagnosticLogs.at(-1).event, 'initialize_failed');
+  assert.equal(locked.diagnosticLogs.at(-1).fields.phase, 'credential');
   locked.service.body = '建议'; assert.equal(await locked.service.submit(), false); assert.equal(locked.calls.length, 0);
   const corrupt = await setup('broken-token'); assert.equal(corrupt.service.ready, false); assert.equal(corrupt.calls.length, 0);
   const noDisk = await setup(token); noDisk.failFlush = true; noDisk.service.body = '建议';
   assert.equal(await noDisk.service.submit(), false); assert.equal(noDisk.calls.length, 0, 'No POST before pending record flush');
 
-  const timeout = await setup(token); timeout.service.body = 'uncertain text'; timeout.fail();
+  const timeout = await setup(token); timeout.service.body = 'uncertain text';
+  timeout.fail(Object.assign(Error('timeout PRIVATE_FEEDBACK_BODY'), { code: 2300056 }));
   assert.equal(await timeout.service.submit(), false); assert.equal(timeout.service.uncertain, true);
+  const transportFailure = timeout.diagnosticLogs.find(data => data.event === 'request_failed');
+  assert.equal(transportFailure.fields.errorCode, 2300056); assert.equal(transportFailure.fields.phase, 'submit');
+  assert.ok(!JSON.stringify(timeout.diagnosticLogs).includes('PRIVATE_FEEDBACK_BODY'));
   assert.equal(timeout.service.body, 'uncertain text');
   assert.equal(await timeout.service.submit(), false); assert.equal(timeout.calls.length, 1, 'No automatic duplicate submission');
   const crash = timeout.fresh(); await crash.initialize({}); assert.equal(crash.uncertain, true); assert.equal(crash.body, 'uncertain text');

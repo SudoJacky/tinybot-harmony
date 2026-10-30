@@ -17,6 +17,8 @@ function load(file) {
 }
 const from = name => load(path.join(root, name)), plain = value => JSON.parse(JSON.stringify(value));
 const { saveSearchSettings } = from('services/SearchSettings');
+const diagnosticLogs = [];
+from('model/Diagnostics').Diagnostics.configureLogSink(data => diagnosticLogs.push(data));
 const { emptyData, parseAppData } = from('model/Conversation');
 const { defaultProductivity } = from('model/Productivity');
 const { defaultAssistantOptions } = from('model/AssistantOptions');
@@ -68,6 +70,16 @@ function fixture() {
   assert.equal(f.keys.get(f.config().credentialAlias), 'replacement-secret');
   assert.ok(!JSON.stringify(f.data).includes('replacement-secret'));
   console.log('PASS endpoint isolation, explicit key replacement, failed commit rollback and post-commit cleanup');
+  const rollback = fixture(), rollbackDraft = rollback.draft(); rollbackDraft.apiKey = 'PRIVATE_NEW_KEY';
+  const primary = Object.assign(Error('primary commit failure'), { code: 28 });
+  rollback.vault.remove = async () => { throw Object.assign(Error('PRIVATE_ALIAS cleanup failed'), { code: 201 }); };
+  await assert.rejects(rollback.save(searchSaveDraft(rollbackDraft), async () => { throw primary; }), error => error === primary);
+  const primaryLog = diagnosticLogs.findLast(data => data.event === 'save_failed');
+  const cleanupLog = diagnosticLogs.findLast(data => data.event === 'credential_rollback_failed');
+  assert.equal(primaryLog.fields.errorCode, 28); assert.equal(cleanupLog.fields.errorCode, 201);
+  assert.equal(cleanupLog.fields.credentialScope, 'search');
+  assert.ok(!JSON.stringify(diagnosticLogs).includes('PRIVATE_'));
+  console.log('PASS rollback failure cannot replace the original settings commit failure; both retain native codes');
 
   const clear = fixture(); draft = clear.draft(); draft.clearKey = true;
   await assert.rejects(clear.save(searchSaveDraft(draft)), /重新填写/);
