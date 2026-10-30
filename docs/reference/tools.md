@@ -59,7 +59,7 @@
 | 工具 | 用途 | 参数 | 约束与回执 |
 | --- | --- | --- | --- |
 | `read_web` | 读指定 URL 的静态正文 | `url` 必填；`offset` integer 默认 0（≥0）；`maxChars` integer 默认 8000（1–20000） | 只接受不含账号信息的 HTTP/HTTPS 地址；最多下载 1 MiB、30 秒；不执行 JavaScript、不登录；支持 HTML、XHTML、文本与 JSON/XML。正文分段，链接最多 30 条并标记 `linksTruncated`，`trust` 固定为 `untrusted`；403 时提示改用浏览器或换来源 |
-| `search_web` | 通过已配置搜索服务找来源 | `query` 必填（1–128 字符）；`maxResults` integer 默认 5（1–10） | 只在联网开关与搜索服务同时启用时出现；单次 60 秒；只返回结构化 `sources`，不返回搜索服务自由生成的回答 |
+| `search_web` | 通过已配置搜索服务找来源 | `query` 必填（1–128 字符）；`maxResults` integer 默认 5（1–10） | 只在联网开关与搜索服务同时启用时出现；单次 60 秒；返回结构化 `sources`，SearXNG 部分引擎失败时另附 `warnings`，不返回搜索服务自由生成的回答 |
 | `browser_open` | 取得应用内浏览器，或打开本条会话已发布的预览快照 | `url` 或 `previewId` 必须二选一；`reason` 必填（≤1000 字符） | `browserPolicy` 默认 `enabled`，为 `disabled` 时整组不存在；`unset` 时等待用户授权；`previewId` 只能指向当前会话成功发布的快照，不重新读取源文件 |
 | `browser_snapshot` | 读页面正文与当前视口的可交互元素 | 无 | 正文来自整份文档，可用元素只取当前视口（最多 80 个）；`viewport` 报告滚动位置与文档高度；密码与验证码字段脱敏；跨域 iframe 与 canvas 控件需要用户接管 |
 | `browser_action` | 操作已取得的浏览器 | `action` 必填，枚举 `click/type/select/scroll/back/forward/reload`；`snapshotId`、`elementId` 用于点击与输入；`text` ≤10000 字符；`deltaY` 绝对值 ≤10000；`capture` 可在动作后采样 `{count, intervalMs}` | 元素动作必须来自最新快照，旧快照或元素移出视口报 `STALE_BROWSER_SNAPSHOT` / `STALE_BROWSER_ELEMENT`；只读模式只允许 `scroll/back/forward/reload`；页面加载 30 秒超时 |

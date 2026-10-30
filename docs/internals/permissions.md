@@ -41,7 +41,7 @@
 | 完整版 `full` | 所有已配置且获授权的工具 | 保留自定义配置，切回时恢复 |
 | 自定义 `custom` | 关闭的能力整组移除 | 选择在下一条有效消息生效，执行期间不可修改 |
 
-基础文件工具（`list_files`、`find_files`、`read_file`、`search_file_content`、`write_file`、`edit_file`）在自定义模式中固定保留。记忆与 Skills 的 4 个入口由助手设置和 Skills 页面单独控制，小程序的 2 个入口由实验室开关控制，都不受这 12 项能力开关影响。
+基础文件工具（`list_files`、`find_files`、`read_file`、`search_file_content`、`write_file`、`edit_file`）在自定义模式中固定保留。记忆与 Skills 的 4 个入口由助手设置和 Skills 页面单独控制，不受这 12 项能力开关影响。小程序的 2 个入口同时受实验室开关和自定义模式的“预览与小程序”能力控制；该能力包含 `publish_preview`、`list_mini_apps` 与 `publish_mini_app`，关闭任一成员会停用整组，目录发现与实际执行均遵守此限制。
 
 能力开关在界面上的位置与默认值见[设置项](/reference/settings)。除会话选择外，还有两层独立限制：
 
