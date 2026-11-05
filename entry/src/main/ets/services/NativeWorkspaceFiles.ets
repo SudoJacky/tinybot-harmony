@@ -61,6 +61,8 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
   }
 
   private assertTextWritable(path: string): void {
+    if (path.startsWith('life-boards/')) { throw new Error('Board layout is app-owned; use manage_life_board'); }
+    if (path.startsWith('life-panels/')) { throw new Error('Life Panel state is app-owned; use publish_life_panel to update its definition'); }
     if (path.startsWith('attachments/') || isDocumentPath(path)) {
       throw new ToolFailure('READ_ONLY', 'Original attachments and binary documents cannot be edited as text. Save changes to a separate text file.',
         'choose_another_path', { path: path });
@@ -185,6 +187,17 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
   }
 
   // Capture before showing the confirmation, including for binary/image files.
+  async writeLifePanel(path: string, content: string, cancellation: Cancellation, guard?: WorkspaceWriteGuard): Promise<WorkspaceWrite> {
+    if (!/^life-panels\/[A-Za-z0-9][A-Za-z0-9_-]{0,127}\/panel\.json$/.test(path)) { throw new Error('Invalid managed Life Panel path'); }
+    workspaceRelativePath(path, false);
+    return withFileMutation(this.root + '/' + path, () => this.mutate(path, content, [], cancellation, guard, false));
+  }
+  async writeLifeBoard(path: string, content: string, cancellation: Cancellation, guard?: WorkspaceWriteGuard): Promise<WorkspaceWrite> {
+    if (!/^life-boards\/[A-Za-z0-9][A-Za-z0-9_-]{0,127}\/board\.json$/.test(path)) { throw new Error('Invalid managed board path'); }
+    workspaceRelativePath(path, false);
+    return withFileMutation(this.root + '/' + path, () => this.mutate(path, content, [], cancellation, guard, false));
+  }
+
   async removalVersion(path: string): Promise<string> {
     return withFileMutation(await this.fileKey(path), () => this.removalVersionUnlocked(path));
   }

@@ -198,6 +198,7 @@ export struct ThreadList {
   onSelected: () => void = () => {};
   onSettings: () => void = () => {};
   onMiniApps: () => void = () => {};
+  onLifePanels: () => void = () => {};
   onFiles: () => void = () => {};
   @State private query: string = '';
   @State private archived: boolean = false;
@@ -624,6 +625,8 @@ export struct ThreadList {
         .id('open-settings').width('100%').height(48).padding({ left: Space.md, right: Space.md }).borderRadius(Radius.md)
         .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
         .onClick(() => this.onSettings())
+        Button('Life Panel').fontFamily(this.appearance.fontFamily).attributeModifier(Btn.tonal).width('100%')
+          .id('open-life-panels').enabled(this.app.ready).onClick(this.onLifePanels)
         if (this.app.productivity.options?.miniAppsEnabled === true) {
           Button(t('小程序')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.tonal).width('100%')
             .id('open-mini-apps').enabled(this.app.ready).onClick(this.onMiniApps)

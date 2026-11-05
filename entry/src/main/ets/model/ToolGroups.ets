@@ -13,6 +13,8 @@ export const TOOL_GROUPS: ToolGroup[] = [
   { id: 'delivery', readOnly: true, tools: ['publish_preview', 'present_files'] },
   { id: 'mini-app-read', readOnly: true, tools: ['list_mini_apps'] },
   { id: 'mini-app-write', readOnly: false, tools: ['publish_mini_app'] },
+  { id: 'life-panel-read', readOnly: true, tools: ['get_life_panel_catalog', 'list_life_panels', 'list_life_boards'] },
+  { id: 'life-panel-write', readOnly: false, tools: ['publish_life_panel', 'manage_life_board', 'manage_life_panel_task'] },
   { id: 'skill-read', readOnly: true, tools: ['read_skill', 'list_skills'] },
   { id: 'mcp-discovery', readOnly: true, tools: ['mcp_search_tools', 'mcp_list_tools'] },
   { id: 'mcp-execution', readOnly: false, tools: ['mcp_call'] },
@@ -38,7 +40,7 @@ export const TOOL_CAPABILITIES: ToolCapability[] = [
   { id: 'user-input', section: 'execution', tools: ['request_user_input'] },
   { id: 'plan', section: 'execution', tools: ['update_plan'] },
   { id: 'team', section: 'execution', tools: groupTools(['team-coordination', 'team-handoff']) },
-  { id: 'preview', section: 'delivery', tools: ['publish_preview', 'list_mini_apps', 'publish_mini_app'] },
+  { id: 'preview', section: 'delivery', tools: ['publish_preview', 'list_mini_apps', 'publish_mini_app', 'get_life_panel_catalog', 'list_life_panels', 'publish_life_panel', 'list_life_boards', 'manage_life_board', 'manage_life_panel_task'] },
   { id: 'file-delivery', section: 'delivery', tools: ['present_files'] },
   { id: 'mcp', section: 'extensions', tools: groupTools(['mcp-discovery', 'mcp-execution']) },
   { id: 'mcp-manage', section: 'extensions', tools: ['mcp_manage'] }

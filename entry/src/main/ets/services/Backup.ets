@@ -20,9 +20,13 @@ import { readUtf8File } from './TextFiles';
 import { OpenBackupArchive, openBackupArchive, writeBackupArchive, cleanupBackupArchive } from './BackupArchive';
 import { NativeWorkspaceFiles } from './NativeWorkspaceFiles';
 import { MiniApps } from './MiniApps';
+import { LifePanels } from './LifePanels';
+import { LifeBoards } from './LifeBoards';
+import { parseLifeBoard } from '../model/LifeBoard';
+import { Cancellation } from './Cancellation';
 interface BackupFile { threadId?: string; workspaceId?: string; path: string; bytes: string; }
 interface BackupAttachment { id: string; bytes: string; }
-interface BackupEnvelope { protectedKeys?: EncryptedBackupKeys; format: string; data: AppData; attachments: BackupAttachment[]; files: BackupFile[]; miniAppWorkspaceIds?: string[]; }
+interface BackupEnvelope { protectedKeys?: EncryptedBackupKeys; format: string; data: AppData; attachments: BackupAttachment[]; files: BackupFile[]; miniAppWorkspaceIds?: string[]; lifePanelWorkspaceIds?: string[]; lifeBoardWorkspaceIds?: string[]; }
 // v3 bytes fields are canonical decimal blob indices; v1/v2 fields contain Base64.
 function blobIndex(value: string, archive: OpenBackupArchive): number {
   const index = Number(value);
@@ -93,7 +97,11 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
   const ownedRoots = Array.from(projectRoots).concat(data.threads.filter((thread) => !thread.projectId).map((thread) => thread.id));
   const appRoots = (await new MiniApps(context.getApplicationContext().filesDir).list()).map((entry) => entry.workspaceId);
   envelope.miniAppWorkspaceIds = Array.from(new Set(appRoots.filter((id) => !ownedRoots.includes(id))));
-  const roots = Array.from(new Set(ownedRoots.concat(envelope.miniAppWorkspaceIds)));
+  const panelRoots = (await new LifePanels(context.getApplicationContext().filesDir).list()).map((entry) => entry.workspaceId);
+  envelope.lifePanelWorkspaceIds = Array.from(new Set(panelRoots.filter((id) => !ownedRoots.includes(id) && !envelope.miniAppWorkspaceIds!.includes(id))));
+  const boardRoots = (await new LifeBoards(context.getApplicationContext().filesDir).list()).map((entry) => entry.workspaceId);
+  envelope.lifeBoardWorkspaceIds = Array.from(new Set(boardRoots.filter((id) => !ownedRoots.includes(id) && !envelope.miniAppWorkspaceIds!.includes(id) && !envelope.lifePanelWorkspaceIds!.includes(id))));
+  const roots = Array.from(new Set(ownedRoots.concat(envelope.miniAppWorkspaceIds, envelope.lifePanelWorkspaceIds, envelope.lifeBoardWorkspaceIds)));
   for (const workspaceId of roots) {
     const root = workspaces.pathFor(workspaceId); const pending = [''];
     if (!projectRoots.has(workspaceId) && !await fs.access(root)) { continue; }
@@ -192,7 +200,19 @@ async function restoreEnvelope(context: common.UIAbilityContext, local: AppData,
     }
     workspaceIds.add(id);
   }
+  const panelRoots = envelope.lifePanelWorkspaceIds || [];
+  if (!Array.isArray(panelRoots) || panelRoots.some((id) => typeof id !== 'string') || new Set(panelRoots).size !== panelRoots.length ||
+    (legacy && panelRoots.length > 0)) { throw new Error(t('备份文件无效。')); }
+  for (const id of panelRoots) {
+    if (workspaceIds.has(id) || !envelope.files.some((item) => item.workspaceId === id && /^life-panels\/[^/]+\/panel\.json$/.test(item.path))) { throw new Error(t('备份文件无效。')); }
+    workspaceIds.add(id);
+  }
   const known = new Set(local.threads.map((thread) => thread.id));
+  const boardRoots = envelope.lifeBoardWorkspaceIds || [];
+  if (!Array.isArray(boardRoots) || boardRoots.some((id) => typeof id !== 'string') || new Set(boardRoots).size !== boardRoots.length || (legacy && boardRoots.length)) { throw new Error(t('备份文件无效。')); }
+  for (const id of boardRoots) {
+    if (workspaceIds.has(id) || !envelope.files.some((item) => item.workspaceId === id && /^life-boards\/[^/]+\/board\.json$/.test(item.path))) { throw new Error(t('备份文件无效。')); } workspaceIds.add(id);
+  }
   const workspace = new WorkspaceStore(context.getApplicationContext().filesDir);
   for (const id of Array.from(workspaceIds)) { workspace.pathFor(id); }
   const attachmentIds = new Map<string, string>(); const binaries = new Map<string, string>(); const paths = new Set<string>();
@@ -222,7 +242,7 @@ async function restoreEnvelope(context: common.UIAbilityContext, local: AppData,
   // New projects are restored into fresh roots; existing projects keep their local root and bytes.
   // Until the session manifest commits, prepared files are unreferenced and cannot replace local projects.
   const destinations = new Map<string, string>();
-  for (const id of retainedRoots) {
+  for (const id of retainedRoots.concat(panelRoots, boardRoots)) {
     if (!await fs.access(workspace.pathFor(id))) { destinations.set(id, id); }
     else { await workspace.requireWorkspace(id); }
   }
@@ -235,6 +255,11 @@ async function restoreEnvelope(context: common.UIAbilityContext, local: AppData,
     destinations.set(previous, project.workspaceId);
     return project;
   });
+  const boardWorkspaceMap = new Map<string, string>();
+  for (const id of Array.from(workspaceIds)) { boardWorkspaceMap.set(id, destinations.get(id) || id); }
+  for (const project of envelope.data.projects || []) {
+    const restored = (data.projects || []).find((item) => item.id === project.id); if (restored) { boardWorkspaceMap.set(project.workspaceId, restored.workspaceId); }
+  }
   const merged: AppData = { version: 2, config: local.config, activeThreadId: local.activeThreadId,
     threads: local.threads.concat(data.threads), projects: (local.projects || []).concat((data.projects || [])
       .filter((project) => !(local.projects || []).some((item) => item.id === project.id))) };
@@ -271,6 +296,13 @@ async function restoreEnvelope(context: common.UIAbilityContext, local: AppData,
     }
   }
   // Keep service IDs until SessionService can match them against this device's settings.
+  for (const item of envelope.files.filter((item) => /^life-boards\/[^/]+\/board\.json$/.test(item.path))) {
+    const destination = destinations.get(item.workspaceId || ''); if (!destination) { continue; }
+    const files = new NativeWorkspaceFiles(workspace.pathFor(destination)), signal = new Cancellation(), file = await files.read(item.path, signal);
+    const board = parseLifeBoard(file.content, item.path.split('/')[1]);
+    board.items.forEach((reference) => { reference.workspaceId = boardWorkspaceMap.get(reference.workspaceId) || reference.workspaceId; });
+    if (JSON.stringify(board) !== file.content) { await files.writeLifeBoard(item.path, JSON.stringify(board), signal, { version: file.version }); }
+  }
   for (const profile of data.providerProfiles || []) { profile.enabled = false; profile.noApiKey = true; profile.credentialAlias = ''; }
   for (const thread of data.threads) {
     thread.pendingInputs = []; thread.queuePaused = true;

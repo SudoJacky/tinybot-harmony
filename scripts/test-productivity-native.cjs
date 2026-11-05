@@ -1068,6 +1068,34 @@ async function test(name, run) {
     assert.ok(!JSON.stringify(launchFailure).includes('PRIVATE_AUTHORIZATION_URI'));
   });
 
+  await test('configured API OAuth uses PKCE, declared scopes and rotating tokens without MCP resource discovery',async()=>{
+    const {McpOAuth}=load(path.join(source,'services/McpOAuth'));let challenge='',requests=0;
+    const json=value=>({responseCode:200,header:{},result:JSON.stringify(value)});
+    jsonScript=(url,options)=>{
+      assert.equal(url,'https://api-auth.invalid/token');assert.equal(options.maxRedirects,0);requests++;
+      const params=new URLSearchParams(options.extraData);assert.equal(params.get('resource'),null,'Generic OAuth does not force RFC8707 resource parameters');
+      if(params.get('grant_type')==='authorization_code') {
+        assert.equal(params.get('client_id'),'registered-panel-app');assert.equal(params.get('redirect_uri'),'tinybot-harmony://oauth/callback');
+        assert.equal(crypto.createHash('sha256').update(params.get('code_verifier')).digest('base64url'),challenge);
+        return json({access_token:'api-first',refresh_token:'api-refresh',expires_in:1,token_type:'Bearer'});
+      }
+      assert.equal(params.get('refresh_token'),'api-refresh');return json({access_token:'api-second',refresh_token:'api-rotated',expires_in:3600,token_type:'Bearer'});
+    };
+    const config={clientId:'registered-panel-app',authorizationEndpoint:'https://api-auth.invalid/authorize',tokenEndpoint:'https://api-auth.invalid/token',scopes:['read:metrics']};
+    const context={startAbility:async want=>{const url=new URL(want.uri);challenge=url.searchParams.get('code_challenge');assert.equal(url.searchParams.get('scope'),'read:metrics');
+      assert.equal(url.searchParams.get('code_challenge_method'),'S256');assert.equal(url.searchParams.get('resource'),null);
+      McpOAuth.receive('tinybot-harmony://oauth/callback?state=wrong&code=ignored');
+      setTimeout(()=>McpOAuth.receive('tinybot-harmony://oauth/callback?state='+url.searchParams.get('state')+'&code=api-code'),0);}};
+    const alias=await McpOAuth.loginConfigured('https://api.invalid/metrics',config,context);
+    const resource={url:'https://api.invalid/metrics',credentialAlias:alias,authType:'oauth'};
+    assert.deepEqual(await Promise.all([McpOAuth.bearer(resource),McpOAuth.bearer(resource)]),['api-second','api-second']);assert.equal(requests,2);
+    assert.equal(JSON.parse(secrets.get(alias)).refreshToken,'api-rotated');
+    await assert.rejects(McpOAuth.bearer({...resource,url:'https://other.invalid/metrics'}),/不匹配/);
+    await assert.rejects(McpOAuth.loginConfigured(resource.url,{...config,tokenEndpoint:'http://insecure.invalid/token'},context),/HTTPS/);
+    const {oauthJson}=load(path.join(source,'services/McpOAuth'));
+    jsonScript=()=>({responseCode:200,header:{},result:'ACCESS_TOKEN_PRIVATE invalid json'});
+    await assert.rejects(oauthJson(config.tokenEndpoint,'grant_type=refresh_token'),error=>error.message==='OAuth service returned invalid JSON');
+  });
   await test('project sessions use the same native tools, deliveries and task-output root while standalone chats stay isolated', async()=>{
     const {NativeSessionResources}=load(path.join(source,'services/NativeSessionService'));
     const {ProviderRegistry}=load(path.join(source,'services/providers/ProviderRegistry'));
@@ -1143,6 +1171,35 @@ async function test(name, run) {
     fs.renameSync(nativePath(root+'/workspace/'+project.workspaceId),nativePath(root+'/workspace/missing-project'));
     const missing=create();await missing.initialize();assert.equal(missing.state.ready,false);assert.match(missing.state.error,/项目工作区/);
     assert.equal(fs.existsSync(nativePath(root+'/workspace/'+project.workspaceId)),false);
+  });
+  await test('independent panel Agent reads scoped files with restricted tools, persists runs, rejects bad output and cancels without a source chat',async()=>{
+    const {ProviderRegistry}=load(path.join(source,'services/providers/ProviderRegistry'));
+    const {installNativePanelAgent}=load(path.join(source,'services/NativePanelAgent'));
+    const {LifePanels}=load(path.join(source,'services/LifePanels'));
+    const {WorkspaceStore}=load(path.join(source,'model/WorkspaceStore'));
+    const root='/sandbox/panel-agent',workspace=new WorkspaceStore(root);fs.mkdirSync(nativePath(root),{recursive:true});await workspace.ensureThread('owner');
+    fs.writeFileSync(nativePath(workspace.pathFor('owner')+'/count.json'),'{"count":7}');
+    const settings=model.emptyData();settings.config={...settings.config,providerId:'panel-agent-test',model:'fixture',baseUrl:'https://fixture.invalid/v1',credentialAlias:''};
+    settings.extensions={...settings.extensions,webEnabled:false};settings.threads=[];
+    const registry=new ProviderRegistry();let mode='valid',requests=0,entered;
+    registry.register({info:{id:'panel-agent-test',name:'Panel test'},endpoint:address=>address,
+      async stream(request,cancellation,onText){
+        requests++;const names=request.tools.map(tool=>tool.function.name);
+        for(const forbidden of ['write_file','edit_file','browser_open','mcp_call','request_user_input','publish_life_panel'])assert.ok(!names.includes(forbidden),forbidden);
+        assert.ok(names.includes('read_file'));assert.ok(request.messages.some(m=>m.content.includes('Read count.json')));
+        if(mode==='cancel')return new Promise((resolve,reject)=>{entered=true;cancellation.onCancel(()=>reject(Error('cancelled')));});
+        if(mode==='bad')return {content:'Unable to obtain a value',toolCalls:[]};
+        if(!request.messages.some(message=>message.role==='tool'))return {content:'',toolCalls:[{id:'read-count',type:'function',function:{name:'read_file',arguments:'{"path":"count.json"}'}}]};
+        assert.ok(request.messages.some(message=>message.role==='tool'&&message.content.includes('7')));
+        onText('{"count":7}');return {content:'{"count":7}',toolCalls:[]};
+      }});
+    installNativePanelAgent(root,registry,new CredentialStore(),()=>settings);
+    const panels=new LifePanels(root),repo=panels.repository('owner'),spec={version:1,title:'Count',size:'S',source:{type:'agent',prompt:'Read count.json and return its current count'},refreshMinutes:15,data:{count:0},nodes:[{id:'count',kind:'Metric',value:{path:'/data/count'}}]};
+    await repo.publish('summary',spec,'summary.panel.json','deleted-chat',false,new Cancellation());
+    let record=await repo.refresh('summary',new Cancellation());assert.equal(record.data.count,7);assert.equal(requests,2);assert.equal(record.runs[0].status,'complete');
+    mode='bad';await assert.rejects(repo.refresh('summary',new Cancellation()));record=await repo.get('summary');assert.equal(record.data.count,7);assert.equal(record.runs[0].status,'failed');
+    mode='cancel';const signal=new Cancellation(),pending=repo.refresh('summary',signal);while(!entered)await new Promise(r=>setTimeout(r,0));signal.cancel();await assert.rejects(pending);
+    record=await repo.get('summary');assert.equal(record.data.count,7);assert.equal(record.runs[0].status,'cancelled');assert.equal(settings.threads.length,0);
   });
   await test('project backup stores shared files once, restores fresh roots and preserves local project files on repeated import',async()=>{
     const {createBackupFile,readBackupFile}=load(path.join(source,'services/Backup'));
@@ -1523,6 +1580,11 @@ async function test(name, run) {
           error=>['TOOL_UNAVAILABLE','PERMISSION_DENIED'].includes(error.code));
       }
       assert.ok(tools.definitions().some(tool=>tool.function.name==='publish_preview'),'Ordinary previews remain available');
+      for(const name of ['get_life_panel_catalog','list_life_panels','publish_life_panel']) {
+        assert.ok(tools.definitions().some(tool=>tool.function.name===name),'Life Panel is independent of the Mini apps laboratory flag');
+      }
+      const catalog=JSON.parse(await tools.execute({id:'catalog',function:{name:'get_life_panel_catalog',arguments:'{}'}},new Cancellation()));
+      assert.equal(catalog.protocol,'tinybot.life-panel');
     }
   });
   await test('removed image generation stays unavailable with legacy model configuration', async()=>{

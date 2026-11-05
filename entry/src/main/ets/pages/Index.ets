@@ -24,6 +24,10 @@ import { storageCategoryKey } from '../model/StoragePlan';
 import { BranchesPanel } from '../views/BranchesPanel';
 import { WorkspacePanel } from '../views/WorkspacePanel';
 import { MiniAppsPanel } from '../views/MiniAppsPanel';
+import { LifePanelsPanel } from '../views/LifePanelsPanel';
+import { parsePanelTarget } from '../model/LifeBoard';
+import { LifePanels } from '../services/LifePanels';
+import { PanelExpiryUpdates } from '../services/PanelExpiryUpdates';
 import { SearchSettingsPanel } from '../views/SearchSettingsPanel';
 import { SearchProviderPanel } from '../views/SearchProviderPanel';
 import { SearchEditorDraft, SearchProviderRoute, searchProviderName } from '../model/SearchEditor';
@@ -121,6 +125,10 @@ struct Index {
   @State private historySearchRequest: number = 0;
   @State private miniAppCreateAvailable: boolean = false;
   @State private miniAppCreateRequest: number = 0;
+  @State private lifePanelsActive: boolean = false;
+  @StorageProp('tinybot.life-panel.target') @Watch('panelLinkChanged') private panelLink: string = '';
+  @State private lifePanelTarget: string = '';
+  private lastPanelLink: string = '';
   private resizeBase: number = 0;
   @State private chatVisible: boolean = true;
   @State private headerProgress: number = 0;
@@ -145,6 +153,7 @@ struct Index {
   private launching: boolean = false;
   @State private voiceRequest: string = '';
   private startupBackup?: StartupBackup;
+  private panelUpdates?: PanelExpiryUpdates;
   private startupBackupChecking: boolean = false;
   private startupBackupRestoring: boolean = false;
   private startupBackupDialog?: CustomDialogController;
@@ -175,6 +184,9 @@ struct Index {
     }
     this.app.initialize(this.session).then(() => {
       if (!this.privacy.allowed) { return; }
+      if (!this.panelUpdates) { this.panelUpdates = new PanelExpiryUpdates(new LifePanels(context.getApplicationContext().filesDir)); }
+      this.updateLifePanelActivity();
+      this.panelLinkChanged();
       ShareInbox.subscribe(() => this.receiveShare());
       if (this.app.ready && !this.unsubscribeLaunch) {
         this.unsubscribeLaunch = LaunchActions.subscribe(() => this.receiveLaunch());
@@ -304,10 +316,13 @@ struct Index {
   }
 
   private foregroundChanged(): void {
+    this.updateLifePanelActivity();
     if (!this.foreground) { this.closeReviewInvitation(); this.startupBackupDialog?.close(); }
     if (this.foreground) { this.offerStartupBackup(); }
     this.offerAnnouncement();
   }
+
+  private updateLifePanelActivity(): void { this.panelUpdates?.setActive(this.foreground && this.privacy.allowed && this.app.ready && !this.reviewDisposed); }
 
   private onboardingPreferences(): OnboardingPreferences {
     return new OnboardingPreferences(this.getUIContext().getHostContext() as common.UIAbilityContext);
@@ -316,6 +331,7 @@ struct Index {
   private privacyChanged(): void {
     if (this.privacyAllowed) { this.onPageShow(); }
     else {
+      this.panelUpdates?.setActive(false);
       this.closeAnnouncement();
       this.closeReviewInvitation(); this.startupBackupDialog?.close();
       this.app.stop(); this.browser.close(); this.browserExpanded = false; this.showToolScope = false;
@@ -788,6 +804,7 @@ struct Index {
   }
 
   aboutToDisappear(): void {
+    this.panelUpdates?.setActive(false);
     this.reviewDisposed = true; this.closeReviewInvitation(); this.startupBackupDialog?.close();
     this.closeAnnouncement();
     this.unsubscribeLaunch?.(); this.unsubscribeLaunch = undefined;
@@ -950,6 +967,18 @@ struct Index {
     Diagnostics.log('info', 'navigation', 'mini_apps_opened', { count: names.length, total: this.paths.size() });
   }
 
+  private panelLinkChanged(): void {
+    if (!this.panelLink || this.panelLink === this.lastPanelLink || !this.app.ready || !this.privacy.allowed) { return; }
+    try { parsePanelTarget(this.panelLink); this.lastPanelLink = this.panelLink; this.openLifePanels(false, this.panelLink); }
+    catch (error) { Diagnostics.log('error', 'life-panel', 'action_failed', {}, error as Error); }
+  }
+  private openLifePanels(discardConfirmed: boolean = false, target: string = ''): void {
+    if (this.confirmRootNavigation('life-panels', discardConfirmed, () => this.openLifePanels(true, target))) { return; }
+    this.lifePanelTarget = target;
+    this.getUIContext().getFocusController().clearFocus();
+    this.paths.pushPath({ name: 'life-panels' }, { launchMode: LaunchMode.POP_TO_SINGLETON });
+  }
+
   private openTools(tab: string, discardConfirmed: boolean = false): void {
     if (this.confirmRootNavigation('productivity', discardConfirmed, () => this.openTools(tab, true))) { return; }
     this.toolsTab = tab;
@@ -1027,6 +1056,8 @@ struct Index {
         MenuItem(() => this.moreMenuContent($r('sys.symbol.rectangle_stack'), t('小程序')))
           .id('open-mini-apps-menu').enabled(this.app.ready).onClick(() => this.openMiniApps())
       }
+      MenuItem(() => this.moreMenuContent($r('sys.symbol.rectangle_stack'), 'Life Panel'))
+        .id('open-life-panels-menu').enabled(this.app.ready).onClick(() => this.openLifePanels())
       MenuItem(() => this.moreMenuContent($r('sys.symbol.gearshape'), t('设置')))
         .onClick(() => this.openSettings())
     }
@@ -1050,6 +1081,11 @@ struct Index {
         })
         .onShown(() => { this.onboardingActive = true; })
         .onHidden(() => { this.onboardingActive = false; })
+    } else if (name === 'life-panels') {
+      NavDestination() {
+        LifePanelsPanel({ app: this.app, onChat: () => this.revealChat(), active: this.lifePanelsActive, requestedTarget: this.lifePanelTarget })
+      }.title('Life Panel', { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+        .onShown(() => { this.lifePanelsActive = true; }).onHidden(() => { this.lifePanelsActive = false; })
     } else if (name === 'mini-apps') {
       NavDestination() {
         if (this.app.productivity.options?.miniAppsEnabled === true) {
@@ -1331,6 +1367,7 @@ struct Index {
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         ThreadList({ app: this.app, workbench: this.windowWidth >= 840,
           onMiniApps: () => { this.setDrawer(false); this.openMiniApps(); },
+          onLifePanels: () => { this.setDrawer(false); this.openLifePanels(); },
           collapseHistory: this.workbench().expanded, searchRequest: this.historySearchRequest,
           onCollapseHistory: () => this.setHistoryCollapsed(true),
           onNewChat: () => { this.createChat(); this.setDrawer(false); }, onTools: () => { this.setDrawer(false); this.openTools('memory'); },
