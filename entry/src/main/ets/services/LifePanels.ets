@@ -1,3 +1,5 @@
+import { PanelInputs, resolvePanelInputs } from '../model/PanelContract';
+import { ToolFailure } from '../model/ToolFailure';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { WorkspaceStore } from '../model/WorkspaceStore';
@@ -18,15 +20,16 @@ import { PanelAgentRefresh, PanelAgentRunner } from './PanelAgentRefresh';
 import { PanelChanges } from './PanelChanges';
 import { MailService } from './MailService';
 import { threadWorkspacePath } from '../model/Workspace';
-import { PanelSource } from '../model/PanelSource';
+import { PanelSource, panelQueryAddress } from '../model/PanelSource';
 import { withWorkspaceLifecycle } from './WorkspaceRetention';
 import { PanelTaskFailure } from './PanelTaskFailure';
 import { PanelListQuery, PanelListPage, PanelSummary } from '../model/LifePanel';
 import { validatePanelViewState } from '../model/LifePanel';
 import { MiniAppStorage, MiniAppSnapshot } from '../model/MiniApp';
+export interface PanelPublishOptions { replaceData?: boolean; expectedRevision?: number; publicationKey?: string; sourceVerified?: boolean; }
 interface PanelCursor { version: number; after: string; workspaceId: string; archived: boolean; }
 
-export interface PanelSourceReader { read(spec: PanelSpec, cancellation: Cancellation, id?: string, data?: Object): Promise<Object>; validate?(spec: PanelSpec, cancellation: Cancellation): Promise<void>; }
+export interface PanelSourceReader { read(spec: PanelSpec, cancellation: Cancellation, id?: string, data?: Object, inputs?: PanelInputs): Promise<Object>; validate?(spec: PanelSpec, cancellation: Cancellation): Promise<void>; }
 export class NativePanelSourceReader implements PanelSourceReader {
   private files: WorkspaceFiles;
   private namespace: string;
@@ -55,16 +58,16 @@ export class NativePanelSourceReader implements PanelSourceReader {
     if (content.length > 256 * 1024) { throw new Error('Panel source exceeds 256 KiB'); }
     try { JSON.parse(content); } catch (_) { throw new Error('Panel source did not return valid JSON'); }
   }
-  async read(spec: PanelSpec, cancellation: Cancellation, id: string = '', data?: Object): Promise<Object> {
+  async read(spec: PanelSpec, cancellation: Cancellation, id: string = '', data?: Object, inputs?: PanelInputs): Promise<Object> {
     const source = spec.source;
     if (!source) { throw new Error('This panel has no refreshable source'); }
-    if (source.type === 'agent') { return PanelAgentRefresh.run(this.namespace, id, spec, data || spec.data, cancellation); }
+    if (source.type === 'agent') { return PanelAgentRefresh.run(this.namespace, id, spec, data || spec.data, cancellation, inputs); }
     if (source.type === 'mail') {
       const snapshot = await new MailService().query(source.mail!, cancellation); cancellation.check();
       return this.transform.run(panelPointer(snapshot, source.pointer || ''), source.transform, cancellation, id);
     }
-    const content = source.type === 'api' ? await new PanelApiTransport(new PanelCredentials(this.namespace)).read(id, source, cancellation) :
-      source.type === 'json-url' ? (await new NativeWebTransport().get(source.url!, cancellation, 256 * 1024)).body :
+    const content = source.type === 'api' ? await new PanelApiTransport(new PanelCredentials(this.namespace)).read(id, source, cancellation, inputs) :
+      source.type === 'json-url' ? (await new NativeWebTransport().get(panelQueryAddress(source, inputs), cancellation, 256 * 1024)).body :
       await this.local(source, cancellation);
     cancellation.check();
     if (content.length > 256 * 1024) { throw new Error('Panel source exceeds 256 KiB'); }
@@ -89,6 +92,23 @@ export class PanelRepository {
   constructor(files: WorkspaceFiles, key: string, reader: PanelSourceReader) { this.files = files; this.key = key; this.reader = reader; }
   isRefreshing(id: string): boolean { return refreshing.has(this.key + ':' + panelId(id)); }
   async get(id: string): Promise<PanelRecord> { return parsePanelRecord((await this.files.read(panelPath(id), new Cancellation())).content, id); }
+  async lookup(id: string): Promise<PanelRecord | undefined> {
+    const cancellation = new Cancellation(); panelId(id);
+    let offset = 0, hasDirectory = false;
+    do {
+      const page = await this.files.list('', cancellation, offset);
+      hasDirectory = page.entries.some((entry) => entry.name === 'life-panels');
+      if (hasDirectory || !page.truncated) { break; } offset = page.nextOffset!;
+    } while (true);
+    if (!hasDirectory) { return undefined; }
+    offset = 0;
+    do {
+      const page = await this.files.list('life-panels', cancellation, offset);
+      if (page.entries.some((entry) => entry.name === id)) { return this.get(id); }
+      if (!page.truncated) { return undefined; } offset = page.nextOffset!;
+    } while (true);
+  }
+
   binding(id: string, configRevision: number): MiniAppStorage { return new PanelStorage(this, id, configRevision); }
   async saveViewState(id: string, configRevision: number, value: Object | null, revision: string): Promise<MiniAppSnapshot> {
     const snapshot: MiniAppSnapshot = { value: value, revision: util.generateRandomUUID() };
@@ -100,7 +120,18 @@ export class PanelRepository {
     });
     return record.viewState!;
   }
-  async publish(id: string, definition: PanelSpec, sourcePath: string, threadId: string, update: boolean, cancellation: Cancellation): Promise<PanelRecord> {
+  async probe(spec: PanelSpec, id: string, data: Object, inputs: PanelInputs, cancellation: Cancellation): Promise<Object> {
+    await this.reader.validate?.(spec, cancellation);
+    const result = spec.source ? await this.reader.read(spec, cancellation, id, data, resolvePanelInputs(spec.inputs, inputs)) : data;
+    validatePanelData(spec, result, {}); return result;
+  }
+  async recordRuntimeError(id: string, revision: number, message: string): Promise<void> {
+    await this.mutate(id, (record: PanelRecord): boolean => {
+      if (record.configRevision !== revision || record.runtimeError === message.slice(0, 4000)) { return false; }
+      record.runtimeError = message.slice(0, 4000); return true;
+    });
+  }
+  async publish(id: string, definition: PanelSpec, sourcePath: string, threadId: string, update: boolean, cancellation: Cancellation, options: PanelPublishOptions = {}): Promise<PanelRecord> {
     parsePanelSpec(JSON.stringify(definition));
     if (definition.source?.type === 'workspace-json') {
       const path = workspaceRelativePath(definition.source.path!, false);
@@ -111,11 +142,14 @@ export class PanelRepository {
       await this.reader.validate?.(definition, cancellation);
       const path = panelPath(id), previous = update ? await this.files.read(path, cancellation) : undefined;
       const old = previous ? parsePanelRecord(previous.content, id) : undefined, now = Date.now();
-      // A new definition explicitly supplies its initial snapshot. User edits are never copied into source data.
+      if (options.expectedRevision !== undefined && old?.configRevision !== options.expectedRevision) { throw new ToolFailure('PANEL_REVISION_CONFLICT', 'Card changed during editing; read current definition and validate again', 'read_current_card'); }
+      const preserve = !!old && !options.replaceData;
+      const sameSource = !!old && JSON.stringify(old.definition.source) === JSON.stringify(definition.source);
+      // View edits preserve live data. Replacing source data must be explicit and validated.
       const record: PanelRecord = { version: 1, id: id, definition: definition, configRevision: (old?.configRevision || 0) + 1,
-        sourcePath: sourcePath, sourceThreadId: threadId, data: definition.data, user: old?.user || {},
-        createdAt: old?.createdAt || now, updatedAt: now, refreshedAt: 0, attemptedAt: 0, error: '', archived: false,
-        paused: old?.paused || false, runs: old?.runs || [], viewState: old?.viewState };
+        sourcePath: sourcePath, sourceThreadId: threadId, data: preserve ? old!.data : definition.data, user: old?.user || {},
+        createdAt: old?.createdAt || now, updatedAt: now, refreshedAt: preserve ? sameSource ? old!.refreshedAt : 0 : options.sourceVerified ? now : 0, attemptedAt: preserve && sameSource ? old!.attemptedAt : 0, error: preserve && sameSource ? old!.error : '', archived: false,
+        paused: old?.paused || false, runs: old?.runs || [], viewState: old?.viewState, inputs: resolvePanelInputs(definition.inputs, old?.inputs || {}), runtimeError: '', publicationKey: options.publicationKey || old?.publicationKey };
       validatePanelData(definition, record.data, record.user);
       await this.files.write(path, JSON.stringify(record), cancellation, { version: previous?.version || null });
       PanelChanges.emit();
@@ -152,20 +186,24 @@ export class PanelRepository {
     return this.mutate(id, (record: PanelRecord) => { record.definition.size = size; record.configRevision++; record.updatedAt = Date.now(); });
   }
   // All repository instances share one request per persistent ID. No duplicate manual/expiry fetches.
-  refresh(id: string, cancellation: Cancellation, trigger: string = 'manual'): Promise<PanelRecord> {
+  refresh(id: string, cancellation: Cancellation, trigger: string = 'manual', inputs?: PanelInputs): Promise<PanelRecord> {
     if (!['manual', 'automatic'].includes(trigger)) { throw new Error('Invalid panel refresh trigger'); }
     const key = this.key + ':' + panelId(id), existing = refreshing.get(key);
-    if (existing) { return existing; }
+    if (existing) { return inputs ? Promise.reject(new ToolFailure('PANEL_BUSY', 'Wait for the current refresh before changing inputs', 'wait_then_retry')) : existing; }
     const signal = new Cancellation(), remove = cancellation.onCancel(() => signal.cancel()); refreshSignals.set(key, signal); refreshTriggers.set(key, trigger);
-    const pending = this.fetch(id, signal, trigger).finally(() => { remove(); refreshing.delete(key); refreshSignals.delete(key); refreshTriggers.delete(key); }); refreshing.set(key, pending); return pending;
+    const pending = this.fetch(id, signal, trigger, inputs).finally(() => { remove(); refreshing.delete(key); refreshSignals.delete(key); refreshTriggers.delete(key); }); refreshing.set(key, pending); return pending;
   }
-  private async fetch(id: string, cancellation: Cancellation, trigger: string): Promise<PanelRecord> {
+  private async fetch(id: string, cancellation: Cancellation, trigger: string, inputs?: PanelInputs): Promise<PanelRecord> {
     const started = Date.now(); let revision = 0, admitted = false;
     cancellation.check();
     const runId = util.generateRandomUUID();
     const before = await this.mutate(id, (record: PanelRecord): boolean => {
       if (trigger === 'automatic' && !panelDue(record, started)) { return false; }
       if (record.archived || !record.definition.source) { throw new Error('Panel has no active refresh source'); }
+      const requested: PanelInputs = {};
+      for (const name of Object.keys(record.inputs || ({} as PanelInputs))) { requested[name] = record.inputs![name]; }
+      for (const name of Object.keys(inputs || ({} as PanelInputs))) { requested[name] = inputs![name]; }
+      record.inputs = resolvePanelInputs(record.definition.inputs, requested);
       revision = record.configRevision; admitted = true;
       const history = record.runs || [];
       history.filter((run) => run.status === 'running').forEach((run) => { run.status = 'interrupted'; run.finishedAt = started; });
@@ -177,9 +215,9 @@ export class PanelRepository {
     if (!admitted) { Diagnostics.log('debug', 'life-panel', 'refresh_skipped', { previewId: id }); return before; }
     Diagnostics.log('info', 'life-panel', 'refresh_started', { previewId: id, revision: revision });
     try {
-      const data = await this.reader.read(before.definition, cancellation, id, before.data); cancellation.check();
+      const data = await this.reader.read(before.definition, cancellation, id, before.data, before.inputs); cancellation.check();
       try { validatePanelData(before.definition, data, before.user); }
-      catch (error) { if (before.definition.source?.type === 'agent') { throw new PanelTaskFailure('validation', 'DATA_INVALID'); } throw error as Error; }
+      catch (error) { if (before.definition.source?.type === 'agent' && !(error instanceof ToolFailure)) { throw new PanelTaskFailure('validation', 'DATA_INVALID'); } throw error as Error; }
       const record = await this.mutate(id, (current: PanelRecord) => {
         if (current.configRevision !== revision || current.archived) { throw new Error('Panel definition changed during refresh'); }
         current.data = data; current.refreshedAt = Date.now(); current.attemptedAt = started; current.error = '';

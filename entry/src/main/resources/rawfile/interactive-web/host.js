@@ -10,8 +10,15 @@
     let state = initial.values, active = initial.active, seq = 0, pending, animate, raf = 0, previous = 0, failed = false;
     const listeners = new Set();
     const storagePending = new Map();
-    let panel = initial.panel || null, refreshPending;
+    let panel = initial.panel || null, refreshPending, checking = false;
     const panelListeners = new Set();
+    function theme() {
+      if (!panel) return;
+      document.documentElement.style.colorScheme = panel.theme || 'light';
+      for (const [name, value] of Object.entries(panel.tokens || {})) document.documentElement.style.setProperty('--tinybot-' + name, value);
+      document.documentElement.lang = panel.locale || 'zh-CN';
+    }
+    theme();
     const copy = value => JSON.parse(JSON.stringify(value));
     const send = value => parent.postMessage({ channel: 'tinybot-frame', ...value }, '*');
     const failure = error => {
@@ -41,7 +48,7 @@
       const data = event.data;
       if (data.type === 'state') {
         state = data.values; active = data.active;
-        panel = data.panel || null;
+        panel = data.panel || null; theme();
         for (const listener of panelListeners) listener(copy(panel));
         for (const listener of listeners) listener(copy(state));
         resume();
@@ -61,7 +68,7 @@
       }
     });
     function storageRequest(type, value, revision) {
-      if (type === 'storageSave' && (initial.preflight || initial.snapshotMode || !active)) {
+      if (type === 'storageSave' && ((initial.preflight && !checking) || initial.snapshotMode || !active)) {
         return Promise.reject(new Error('Save mini app data only during an active user interaction.'));
       }
       if (type === 'storageSave' && (value === undefined || typeof revision !== 'string' || !revision)) {
@@ -81,10 +88,10 @@
       panel: Object.freeze({
         get context() { return copy(panel); },
         onUpdate(listener) { panelListeners.add(listener); return () => panelListeners.delete(listener); },
-        refresh() {
+        refresh(inputs) {
           if (!active || initial.preflight || initial.snapshotMode || !panel?.canRefresh) return Promise.reject(new Error('Card refresh is unavailable in this view.'));
           if (refreshPending) return Promise.reject(new Error('A refresh is already in progress.'));
-          return new Promise((resolve, reject) => { refreshPending = { id: ++seq, resolve, reject }; send({ type: 'panelRefresh', id: seq }); });
+          return new Promise((resolve, reject) => { refreshPending = { id: ++seq, resolve, reject }; send({ type: 'panelRefresh', id: seq, inputs }); });
         }
       }),
       save(values) {
@@ -112,7 +119,56 @@
         try { animate(0, 0); } catch (error) { failure(error); }
       }
       // Catch initial unhandled rejections, timers and WebGL errors before publication.
-      setTimeout(() => { if (!failed) send({ type: 'ready' }); }, initial.preflight ? 250 : 0);
+      setTimeout(async () => {
+        if (failed) return;
+        try {
+          if (initial.panelProbe) {
+            const pause = () => new Promise(resolve => setTimeout(resolve, 100));
+            const eventually = async assertion => {
+              const deadline = Date.now() + 2000;
+              for (;;) {
+                try { await assertion(); return; }
+                catch (error) { if (failed || Date.now() >= deadline) throw error; await pause(); }
+              }
+            };
+            const checks = initial.panelProbe.checks || [];
+            for (let index = 0; index < checks.length; index++) {
+              const check = checks[index];
+              try {
+                if (check.action === 'stored') {
+                  await eventually(async () => {
+                    const saved = await tinybot.storage.load();
+                    const actual = check.path.split('/').slice(1).reduce((value, key) => value?.[key.replace(/~1/g, '/').replace(/~0/g, '~')], saved.value);
+                    if (JSON.stringify(actual) !== JSON.stringify(check.expected)) throw Error('Saved value does not match expected value at ' + check.path);
+                  });
+                } else {
+                  const nodes = document.querySelectorAll(check.selector);
+                  if (nodes.length !== 1) throw Error('Selector must match exactly one element, found ' + nodes.length);
+                  const element = nodes[0], rect = element.getBoundingClientRect();
+                  if (!rect.width || !rect.height || getComputedStyle(element).visibility === 'hidden') throw Error('Element is not visible');
+                  if (['click', 'input', 'select'].includes(check.action) && element.disabled) throw Error('Control is disabled');
+                  if (['click', 'input', 'select'].includes(check.action)) checking = true;
+                  if (check.action === 'click') element.click();
+                  else if (check.action === 'input' || check.action === 'select') {
+                    element.value = check.value; element.dispatchEvent(new Event('input', {bubbles:true})); element.dispatchEvent(new Event('change', {bubbles:true}));
+                  } else if (check.action === 'text') await eventually(() => {
+                    if (!element.textContent.includes(check.value)) throw Error('Expected text not found: ' + check.value);
+                  });
+                  await pause();
+                }
+              } catch (error) { throw Error('check[' + index + '] ' + check.action + ' ' + (check.selector || check.path) + ': ' + error.message); }
+              if (failed) return;
+            }
+            if (Math.max(document.body.scrollWidth, document.documentElement.scrollWidth) > innerWidth + 2) throw Error('Horizontal overflow at width ' + innerWidth);
+            const unnamed = [...document.querySelectorAll('button,input:not([type=hidden]),select,textarea')].find(el => el.getBoundingClientRect().width &&
+              !el.textContent.trim() && !el.getAttribute('aria-label') && !el.getAttribute('aria-labelledby') && !el.labels?.length && !el.getAttribute('title'));
+            if (unnamed) throw Error('Control needs an accessible label: ' + unnamed.tagName.toLowerCase() + (unnamed.id ? '#' + unnamed.id : ''));
+            await eventually(() => { if (storagePending.size) throw Error('Storage operation did not finish'); });
+            await pause(); checking = false;
+          }
+          if (!failed) send({ type: 'ready' });
+        } catch (error) { checking = false; failure(error); }
+      }, initial.preflight ? 250 : 0);
     };
     window.__tinybotError = failure;
   }
@@ -124,11 +180,11 @@
     frame.setAttribute('sandbox', 'allow-scripts');
     frame.setAttribute('allow', "camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'");
     frame.title = 'Interactive content';
-    const bootstrap = '(' + childRuntime.toString() + ')(' + JSON.stringify({ values: data.values, panel: data.panel, active: data.active, preflight: data.preflight === true, autoHeight: data.autoHeight === true, snapshotMode: data.snapshotMode === true }).replace(/</g, '\\u003c') + ');';
+    const bootstrap = '(' + childRuntime.toString() + ')(' + JSON.stringify({ values: data.values, panel: data.panel, panelProbe: data.panelProbe, active: data.active, preflight: data.preflight === true, autoHeight: data.autoHeight === true, snapshotMode: data.snapshotMode === true }).replace(/</g, '\\u003c') + ');';
     const csp = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
     frame.srcdoc = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
       '<meta http-equiv="Content-Security-Policy" content="' + csp + '">' +
-      '<style>html{color-scheme:light}body{margin:0;font:15px system-ui;color:#17251f;background:white}*{box-sizing:border-box}canvas{display:block;max-width:100%;touch-action:none}button,input,select{font:inherit}button{min-height:40px}</style>' +
+      '<style>html{color-scheme:light}body{margin:0;font:15px system-ui;color:var(--tinybot-text,#17251f);background:var(--tinybot-surface,white)}*{box-sizing:border-box}canvas{display:block;max-width:100%;touch-action:none}button,input,select{font:inherit}button{min-height:40px}button,input,select,textarea{transition:background-color 160ms,box-shadow 160ms,transform 120ms}button:active{transform:scale(.97)}:focus-visible{outline:2px solid var(--tinybot-accent,#246959);outline-offset:2px}@media(prefers-reduced-motion:reduce){button,input,select,textarea{transition:none}}</style>' +
       '<style>' + spec.css.replace(/<\/style/gi, '<\\/style') + '</style>' +
       (data.autoHeight ? '<style>html,body{min-height:0!important;overflow:auto}</style>' : '') + script(bootstrap) +
       (data.automation && config.browserScript ? script(config.browserScript) : '') +
@@ -153,7 +209,7 @@
         send({type:'browserResult',id:data.id,message:data.message});
       }
       else if (data.type === 'storageLoad') send({ type: 'storageLoad', id: data.id });
-      else if (data.type === 'panelRefresh') send({ type: 'panelRefresh', id: data.id });
+      else if (data.type === 'panelRefresh') send({ type: 'panelRefresh', id: data.id, inputs: data.inputs });
       else if (data.type === 'storageSave') send({ type: 'storageSave', id: data.id, value: data.value, revision: data.revision });
       else if (data.type === 'save') send({ type: 'save', id: data.id, values: data.values });
       else if (data.type === 'resize') send({ type: 'resize', height: data.height });

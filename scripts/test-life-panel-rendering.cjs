@@ -30,11 +30,11 @@ function renderer(name) {
     };
     return noop;
   } });
-  const globals = { exports: {}, console, Date, Math, Object, Map, Set, Error,
+  const globals = { exports: {}, console, Date, Math, Object, Map, Set, Error, Context: { animation: noop },
     ViewStackProcessor: { StartGetAccessRecordingFor: noop, StopGetAccessRecording: noop },
     gradientColor: () => '#FFFFFF', getLocale: () => 'zh-CN', panelRunTrigger: () => '手动触发', panelErrorText: text => text,
     t: (text, args = []) => text.replace(/\{(\d+)\}/g, (_, i) => args[i]), relativeTime: time => String(time),
-    IconButton: class {}, ButtonType: {}, EdgeEffect: {}, Axis: {}, Color: {}, HitTestMode: {}, ScrollAlign: {}, Btn: {}, ViewPU: { create: noop }, ObservedObject: { GetRawObject: value => value }, referenceKey: item => item.workspaceId + '/' + item.panelId,
+    Motion:{rise:()=>({}),medium:180,fast:100,thumb:'spring',standard:'ease'},IconButton: class {}, ButtonType: {}, EdgeEffect: {}, Axis: {}, Color: {}, HitTestMode: {}, ScrollAlign: {}, Btn: {}, ViewPU: { create: noop }, ObservedObject: { GetRawObject: value => value }, referenceKey: item => item.workspaceId + '/' + item.panelId,
     LifePanelCard: class { constructor(parent, params, _storage, id) { children.set(id, { ...params }); } },
     LongPressGesture: element('gesture'), PanGesture: element('gesture'), GestureGroup: element('gesture'),
     GestureMode: {}, ScrollDirection: {}, BarState: {}, FontWeight: {}, FlexAlign: {}, TextAlign: {}, HorizontalAlign: {}, Alignment: {},
@@ -64,7 +64,7 @@ let running = false;
 const first = { workspaceId:'workspace', panel:{id:'metric',configRevision:1,archived:false,refreshedAt:10,
   data:{total:42},runs:[],definition:{title:'Metric',size:'M',source:{type:'workspace-json'}}} };
 Object.assign(p,{entries:[first],boards:[],boardSelection:'',selected:'',removed:false,error:'',pending:[],now:10,
-  boardScroller:{scrollToIndex(){}},appearance:{},boardWidth:360,refreshing:false,cardHeights:{},dragging:'',dragX:0,dragY:0,creating:false,app:{ready:true,busy:false},sheetOpen:false,sheetKind:'',
+  boardScroller:{scrollToIndex(){}},appearance:{},boardWidth:360,refreshing:false,cardHeights:{},dragging:'',resizing:'',dragBefore:'',cardQuery:'',dragX:0,dragY:0,creating:false,app:{ready:true,busy:false},sheetOpen:false,sheetKind:'',
   rect:()=>({x:0,y:0,width:360,height:180}),boardHeight:()=>180,
   panels:()=>({repository:()=>({isRefreshing:()=>running,binding:()=>undefined})})});
 p.initialRender();

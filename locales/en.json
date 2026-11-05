@@ -2791,5 +2791,20 @@
   "拖动调整尺寸": "Drag to resize",
   "修改卡片「{0}」：": "Update card “{0}”:",
   "把计时器、打卡工具、数据图表放在同一看板。卡片可以直接操作，也能随任务更新。": "Keep timers, habit trackers and charts on one board. Interact directly with cards and update their data through tasks.",
-  "看板：{0}": "Board: {0}"
+  "看板：{0}": "Board: {0}",
+  "让 AI 修复": "Repair with AI",
+  "正在生成并验证卡片…": "Generating and validating cards…",
+  "本轮已结束，可查看对话继续调整": "This run has ended. Open the conversation to continue.",
+  "修复当前错误并验证主要操作。": "Fix the current error and verify the main interactions.",
+  "布局已保存": "Layout saved",
+  "搜索已有卡片": "Search existing cards",
+  "添加的是共享卡片，修改会同步到其他看板": "Cards are shared. Changes also apply to other boards.",
+  "正在生成…": "Generating…",
+  "生成并验证": "Generate and validate",
+  "查看编辑对话": "Open editing conversation",
+  "长按标题拖动换位，拖动右下角调整尺寸": "Hold a title to reorder; drag the bottom-right handle to resize",
+  "无法打开编辑对话": "Could not open the editing conversation",
+  "已添加到看板": "Added to board",
+  "已从看板移除": "Removed from board",
+  "看板已保存": "Board saved"
 }

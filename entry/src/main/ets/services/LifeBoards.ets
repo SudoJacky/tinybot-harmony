@@ -18,7 +18,7 @@ export class LifeBoards {
   async save(workspaceId: string, id: string, title: string, description: string, items?: BoardItem[], archive?: boolean): Promise<LifeBoard> {
     const nextId = id || 'board-' + util.generateRandomUUID();
     return this.change(workspaceId, nextId, !id, async (before?: LifeBoard): Promise<LifeBoard> => ({ version: 1, id: nextId,
-      title: title.trim(), description: description.trim(), items: items === undefined ? before?.items || [] : items,
+      editorThreadId: before?.editorThreadId, title: title.trim(), description: description.trim(), items: items === undefined ? before?.items || [] : items,
       archived: archive === undefined ? before?.archived || false : archive, createdAt: before?.createdAt || Date.now(), updatedAt: Date.now() }));
   }
   private async change(workspaceId: string, id: string, create: boolean, operation: (board?: LifeBoard) => Promise<LifeBoard>): Promise<LifeBoard> {
@@ -32,6 +32,9 @@ export class LifeBoards {
       for (const item of board.items) { await this.panels.repository(item.workspaceId).get(item.panelId); }
       await files.writeLifeBoard(path, JSON.stringify(board), cancellation, { version: old?.version || null }); PanelChanges.emit(); return board;
     }));
+  }
+  async setEditor(workspaceId: string, id: string, threadId: string): Promise<void> {
+    await this.change(workspaceId, id, false, async (previous?: LifeBoard): Promise<LifeBoard> => { previous!.editorThreadId = threadId; return previous!; });
   }
   async pin(workspaceId: string, id: string, reference: PanelReference, present: boolean): Promise<LifeBoard> {
     validateReference(reference);

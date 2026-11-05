@@ -22,22 +22,27 @@ assert.throws(()=>parseWebUiMessage('{"type":"resize","height":"200"}'));
   const page=await browser.newPage({viewport:{width:400,height:600}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
   const consoleErrors=[];page.on('console',message=>{if(message.type()==='error')consoleErrors.push(message.text());});
   const requests=[];await page.route('**/*',route=>{requests.push(route.request().url());route.abort();});
-  async function mount(values,specOverride=spec,expectedError='',preflight=false,snapshotMode=false,automation=false){
+  async function mount(values,specOverride=spec,expectedError='',preflight=false,snapshotMode=false,automation=false,panelProbe){
    // setContent retains the previous window and message listeners; a remount needs a fresh host.
    await page.goto('about:blank');
    await page.setContent(html);
-   await page.evaluate(({spec,values,preflight,autoHeight,snapshotMode,automation})=>{
-    window.messages=[];window.saved=values;window.failSave=false;
+   await page.evaluate(({spec,values,preflight,autoHeight,snapshotMode,automation,panelProbe})=>{
+    window.messages=[];window.saved=values;window.failSave=false;window.probeState={value:{count:9},revision:'initial'};
     const channel=new MessageChannel();window.nativePort=channel.port1;
-    channel.port1.onmessage=event=>{const data=JSON.parse(event.data);window.messages.push(data);if(data.type==='resize'&&autoHeight){
+    channel.port1.onmessage=event=>{const data=JSON.parse(event.data);window.messages.push(data);
+    if(data.type==='storageLoad'||data.type==='storageSave'){
+      if(data.type==='storageSave')window.probeState={value:data.value,revision:String(Number(window.probeState.revision)||0)+':next'};
+      channel.port1.postMessage(JSON.stringify({type:'storageResult',id:data.id,snapshot:window.probeState}));
+    }
+    if(data.type==='resize'&&autoHeight){
       document.documentElement.style.height=Math.max(48,Math.min(800,data.height))+'px';
     }if(data.type==='save'){
       if(window.failSave)channel.port1.postMessage(JSON.stringify({type:'ack',id:data.id,error:'Disk write failed'}));
       else {window.saved=data.values;channel.port1.postMessage(JSON.stringify({type:'ack',id:data.id,values:data.values}));}
     }};
     window.postMessage('tinybot-web-port','*',[channel.port2]);
-    channel.port1.postMessage(JSON.stringify({type:'init',spec,values,active:true,preflight,autoHeight,snapshotMode,automation}));
-   },{spec:specOverride,values,preflight,autoHeight:webUiAutoHeight(specOverride),snapshotMode,automation});
+    channel.port1.postMessage(JSON.stringify({type:'init',spec,values,active:true,preflight,autoHeight,snapshotMode,automation,panelProbe}));
+   },{spec:specOverride,values,preflight,autoHeight:webUiAutoHeight(specOverride),snapshotMode,automation,panelProbe});
    try { await page.waitForFunction(()=>window.messages.some(m=>m.type==='ready'||m.type==='error')); }
    catch(error){console.error({errors,consoleErrors,frames:page.frames().map(f=>f.url()),host:await page.evaluate(()=>({ready:window.__tinybotHostReady,messages:window.messages}))});throw error;}
    const messages=await page.evaluate(()=>window.messages);
@@ -48,6 +53,22 @@ assert.throws(()=>parseWebUiMessage('{"type":"resize","height":"200"}'));
    }else assert.equal(messages.find(m=>m.type==='error'),undefined,JSON.stringify(messages));
    return page.frames().find(f=>f.parentFrame());
   }
+  const cardProbe={version:1,library:'none',height:320,html:'<button id="reset">Reset</button><output id="count">9</output>',css:'',js:`
+    document.querySelector('#reset').onclick=async()=>{await new Promise(r=>setTimeout(r,450));const s=await tinybot.storage.load();await tinybot.storage.save({count:0},s.revision);document.querySelector('#count').textContent='0';};`};
+  const checks=[{action:'click',selector:'#reset'},{action:'text',selector:'#count',value:'0'},{action:'stored',path:'/count',expected:0}];
+  for(const width of [174,360]){
+    await page.setViewportSize({width,height:600});
+    await mount({},cardProbe,'',true,false,false,{width,checks});
+    assert.equal(await page.evaluate(()=>probeState.value.count),0,'Declared delayed interaction uses detached test storage');
+  }
+  await mount({},cardProbe,'check[0] click #missing',true,false,false,{width:360,checks:[{action:'click',selector:'#missing'}]});
+  await mount({},cardProbe,'check[0] text #count',true,false,false,{width:360,checks:[{action:'text',selector:'#count',value:'wrong'}]});
+  await mount({},{...cardProbe,js:'tinybot.storage.save({count:0},"initial")'},'active user interaction',true,false,false,{width:360,checks:[]});
+  await mount({},{...cardProbe,html:'<div style="width:900px">Wide</div>',js:''},'Horizontal overflow',true,false,false,{width:360,checks:[]});
+  await mount({},{...cardProbe,html:'<button id="unnamed"></button>',js:''},'accessible label',true,false,false,{width:360,checks:[]});
+  await page.setViewportSize({width:400,height:600});
+  errors.length=0; // The negative probes above deliberately raise runtime errors.
+  console.log('PASS real-browser panel probes: two widths, delayed click/text/storage assertions, actionable selector/result/overflow/label errors and startup-write rejection');
   const {PreviewTools}=model('../services/PreviewTools'),{Cancellation}=model('../services/Cancellation');
   const {parseUiSurface}=model('InteractiveUi');
   const previewSource='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text x="5" y="30">Pelican</text></svg>';
@@ -229,12 +250,13 @@ assert.throws(()=>parseWebUiMessage('{"type":"resize","height":"200"}'));
   console.log('PASS isolated preview browser observes/acts through the native port, saves temporary state, rejects stale handles, synchronizes paint and reports late errors');
   const panelSpec={version:1,html:'<input aria-label="Note"><output id="total"></output><button id="refresh">Refresh</button><span id="status"></span>',css:'',library:'none',height:320,
     js:`function render(context){document.querySelector('#total').textContent=context?.data.total ?? 'none';}render(tinybot.panel.context);tinybot.panel.onUpdate(render);
-      document.querySelector('#refresh').onclick=async()=>{try{await tinybot.panel.refresh();document.querySelector('#status').textContent='done';}catch(e){document.querySelector('#status').textContent=e.message;}};`};
+      document.querySelector('#refresh').onclick=async()=>{try{await tinybot.panel.refresh({symbol:'B'});document.querySelector('#status').textContent='done';}catch(e){document.querySelector('#status').textContent=e.message;}};`};
   frame=await mount({},panelSpec);
-  await page.evaluate(()=>nativePort.postMessage(JSON.stringify({type:'state',values:{},active:true,panel:{data:{total:7},title:'Card',status:'ready',canRefresh:true,locale:'en'}})));
+  await page.evaluate(()=>nativePort.postMessage(JSON.stringify({type:'state',values:{},active:true,panel:{data:{total:7},title:'Card',status:'ready',canRefresh:true,locale:'en',theme:'dark',tokens:{accent:'#123456'}}})));
   await frame.locator('#total').filter({hasText:'7'}).waitFor();await frame.getByLabel('Note').fill('retained DOM');
   await frame.locator('#refresh').click();await page.waitForFunction(()=>messages.some(m=>m.type==='panelRefresh'));
-  const refreshMessage=await page.evaluate(()=>messages.find(m=>m.type==='panelRefresh'));assert.equal(parseWebUiMessage(JSON.stringify(refreshMessage)).type,'panelRefresh');
+  assert.equal(await frame.evaluate(()=>document.documentElement.style.colorScheme),'dark');assert.equal(await frame.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--tinybot-accent')),'#123456');
+  const refreshMessage=await page.evaluate(()=>messages.find(m=>m.type==='panelRefresh'));assert.equal(refreshMessage.inputs.symbol,'B');assert.equal(parseWebUiMessage(JSON.stringify(refreshMessage)).type,'panelRefresh');
   await page.evaluate(id=>{nativePort.postMessage(JSON.stringify({type:'state',values:{},active:true,panel:{data:{total:8},title:'Card',status:'ready',canRefresh:true,locale:'en'}}));nativePort.postMessage(JSON.stringify({type:'panelResult',id}));},refreshMessage.id);
   await frame.locator('#status').filter({hasText:'done'}).waitFor();assert.equal(await frame.locator('#total').textContent(),'8');assert.equal(await frame.getByLabel('Note').inputValue(),'retained DOM');
   await page.evaluate(()=>nativePort.postMessage(JSON.stringify({type:'state',values:{},active:false,panel:{data:{total:8},canRefresh:true}})));

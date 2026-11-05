@@ -4,7 +4,7 @@ export interface PanelReference { workspaceId: string; panelId: string; }
 export interface BoardItem extends PanelReference { size: string; height?: number; }
 export interface LifeBoard {
   version: number; id: string; title: string; description: string; items: BoardItem[];
-  archived: boolean; createdAt: number; updatedAt: number;
+  editorThreadId?: string; archived: boolean; createdAt: number; updatedAt: number;
 }
 export interface BoardEntry { workspaceId: string; board: LifeBoard; }
 export interface PanelTarget { workspaceId: string; panelId?: string; boardId?: string; request?: number; }
@@ -16,9 +16,10 @@ export function validateReference(reference: PanelReference): void {
 export function boardPath(id: string): string { return 'life-boards/' + panelId(id) + '/board.json'; }
 export function parseLifeBoard(content: string, id: string): LifeBoard {
   const board = JSON.parse(content) as LifeBoard;
-  if (!board || Object.keys(board).some((key: string) => !['version', 'id', 'title', 'description', 'items', 'archived', 'createdAt', 'updatedAt'].includes(key)) || board.version !== 1 || board.id !== panelId(id) || typeof board.title !== 'string' || !board.title.trim() || board.title.length > 80 ||
+  if (!board || Object.keys(board).some((key: string) => !['version', 'id', 'title', 'description', 'items', 'archived', 'createdAt', 'updatedAt', 'editorThreadId'].includes(key)) || board.version !== 1 || board.id !== panelId(id) || typeof board.title !== 'string' || !board.title.trim() || board.title.length > 80 ||
     typeof board.description !== 'string' || board.description.length > 500 || !Array.isArray(board.items) || board.items.length > 100 ||
     typeof board.archived !== 'boolean' || !Number.isFinite(board.createdAt) || !Number.isFinite(board.updatedAt) || board.createdAt < 0 || board.updatedAt < 0) { throw new Error('Invalid Life Panel board'); }
+  if (board.editorThreadId !== undefined && (typeof board.editorThreadId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(board.editorThreadId))) { throw new Error('Invalid board editor thread'); }
   const seen: Set<string> = new Set<string>();
   board.items.forEach((item: BoardItem) => {
     validateReference(item);

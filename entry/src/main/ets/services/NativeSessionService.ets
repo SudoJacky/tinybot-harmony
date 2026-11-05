@@ -123,7 +123,7 @@ export class NativeSessionResources implements SessionResources {
       new SkillTools(extensions.skills, selected, live ? () => live.skills() : undefined), new InteractionTools(this.approval)];
     groups.push(new CodeExecutionTools(new NativeCodeExecutor()));
     groups.push(new LifePanelTools(this.lifePanels, workspaceId || id, id, files, this.lifeBoards,
-      (page, storage, context, cancellation) => WebUiPreflight.validatePanel(page, storage, context, cancellation)));
+      (page, storage, context, cancellation, options) => WebUiPreflight.validatePanel(page, storage, context, cancellation, options)));
     groups.push(new MailTools());
     groups.push(new MiniAppTools(this.miniApps, workspaceId || id, id, files,
       (page, storage, cancellation) => WebUiPreflight.validateMiniApp(page, storage, cancellation), productivity?.options?.miniAppsEnabled === true));

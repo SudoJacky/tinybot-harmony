@@ -1,3 +1,4 @@
+import { PanelInputs, PanelProbeOptions } from '../model/PanelContract';
 import { Diagnostics } from '../model/Diagnostics';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { webview } from '@kit.ArkWeb';
@@ -18,12 +19,15 @@ let webViewSequence: number = 0;
 
 @Component
 export struct WebUiView {
+  @Prop preferParentScroll: boolean = false;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop @Watch('restart') content: string = '';
   @Prop @Watch('sync') values: UiValues = {};
   @Prop @Watch('sync') interactive: boolean = false;
   @Prop @Watch('sync') panelContext: WebUiPanelContext | undefined = undefined;
-  onPanelRefresh?: () => Promise<void>;
+  onPanelRefresh?: (inputs?: PanelInputs) => Promise<void>;
+  panelProbe?: PanelProbeOptions;
+  onRuntimeError: (message: string) => void = () => {};
   @Prop preflight: boolean = false;
   @Prop snapshotMode: boolean = false;
   @Prop retainedHeight: number = 0;
@@ -131,6 +135,7 @@ export struct WebUiView {
     this.ports = [];
   }
   private report(error: Error): void {
+    if (!this.preflight && !this.snapshotMode) { this.onRuntimeError(error.message); }
     this.browserRuntime?.recordError(error.message);
     if (this.browserRuntime?.isReady) {
       Diagnostics.log('error', 'web', 'failed', { instanceId: this.instanceId, generation: this.generation }, error); return;
@@ -201,7 +206,7 @@ export struct WebUiView {
       if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'port_connected', { instanceId: this.instanceId }); };
       // loadData may use an opaque data: origin; transfer only to the verified top-level host.
       this.controller.postMessage('tinybot-web-port', [this.ports[1]], '*');
-      this.ports[0].postMessageEvent(JSON.stringify({ type: 'init', spec: this.spec, autoHeight: webUiAutoHeight(this.spec), values: this.values, panel: this.panelContext, active: this.foreground && (this.preflight || (this.interactive && this.visible)), preflight: this.preflight, snapshotMode: this.snapshotMode, automation: !!this.browserRuntime }));
+      this.ports[0].postMessageEvent(JSON.stringify({ type: 'init', spec: this.spec, autoHeight: webUiAutoHeight(this.spec), values: this.values, panel: this.panelContext, active: this.foreground && (this.preflight || (this.interactive && this.visible)), preflight: this.preflight, panelProbe: this.panelProbe, snapshotMode: this.snapshotMode, automation: !!this.browserRuntime }));
     } catch (error) { this.report(error as Error); }
   }
   private sync(): void {
@@ -222,7 +227,7 @@ export struct WebUiView {
           if (this.preflight || this.snapshotMode || !this.foreground || !this.visible || !this.interactive || !this.panelContext?.canRefresh || !this.onPanelRefresh) {
             throw new Error('Card refresh is unavailable in this view');
           }
-          await this.onPanelRefresh();
+          await this.onPanelRefresh(message.inputs);
         } catch (error) { failure = (error as Error).message; }
         if (this.mounted && generation === this.generation && this.ports.length) {
           this.ports[0].postMessageEvent(JSON.stringify({ type: 'panelResult', id: id, error: failure }));
@@ -235,7 +240,7 @@ export struct WebUiView {
           let snapshot: MiniAppSnapshot;
           if (message.type === 'storageLoad') { snapshot = await this.storage.load(); }
           else {
-            if (this.preflight || this.snapshotMode || !this.interactive || !this.visible || !this.foreground || this.saving) {
+            if (this.snapshotMode || !this.foreground || this.saving || (!this.panelProbe && (this.preflight || !this.interactive || !this.visible))) {
               throw new Error(t('当前无法保存，请等待任务结束后重试。'));
             }
             this.saving = true;
@@ -318,6 +323,8 @@ export struct WebUiView {
       // triggers ArkWeb's broken page-scene observer cleanup on HarmonyOS 7.
       Web({ src: '', controller: this.controller })
         .backgroundColor(Color.Transparent)
+        .nestedScroll({ scrollUp: this.preferParentScroll ? NestedScrollMode.PARENT_FIRST : NestedScrollMode.SELF_FIRST,
+          scrollDown: this.preferParentScroll ? NestedScrollMode.PARENT_FIRST : NestedScrollMode.SELF_FIRST })
         .width('100%').height(this.heightValue).javaScriptAccess(true).domStorageAccess(false).databaseAccess(false)
         .fileAccess(false).onlineImageAccess(false).blockNetwork(true)
         .onControllerAttached(() => { if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'attached', { instanceId: this.instanceId }); }; this.attached = true; this.syncActivity(); this.restart(); })

@@ -232,7 +232,7 @@ if (failed) process.exitCode = 1;
     getSurfaceId() { return 'web-surface'; }
   }
   let captureSurface = async () => ({ release: async () => {} });
-  const webGlobals = { ...globals, exports: {}, MessageLevel: { Error: 3 }, Stack: noUi, Image: noUi, ImageFit: {}, Alignment: {}, HitTestMode: {},
+  const webGlobals = { ...globals, exports: {}, MessageLevel: { Error: 3 }, Stack: noUi, Image: noUi, ImageFit: {}, Alignment: {}, HitTestMode: {}, NestedScrollMode:{SELF_FIRST:1,PARENT_FIRST:2},
     Web: new Proxy({}, { get: (_, name) => (...args) => {
       if (name === 'create') callbacks.source = args[0].src;
       if (name.startsWith('on')) callbacks[name] = args[0];

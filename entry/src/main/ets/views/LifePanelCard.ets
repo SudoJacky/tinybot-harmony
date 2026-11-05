@@ -1,6 +1,7 @@
+import { PanelInputs, resolvePanelInputs } from '../model/PanelContract';
 import { panelErrorText } from '../model/PanelPresentation';
 import { AppearanceStyle } from '../common/AppearanceStyle';
-import { Btn, Radius } from '../common/Theme';
+import { Btn, Radius, Motion, gradientColor } from '../common/Theme';
 import { t, getLocale } from '../model/I18n';
 import { MiniAppStorage } from '../model/MiniApp';
 import { WebUiPanelContext } from '../model/WebUi';
@@ -144,6 +145,7 @@ struct PanelComponent {
 @Component
 export struct LifePanelCard {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
+  @StorageProp('tinybot.appearance.dark') private dark: boolean = false;
   @Prop panel: PanelRecord;
   @Prop busy: boolean = false;
   @Prop interactive: boolean = true;
@@ -154,15 +156,17 @@ export struct LifePanelCard {
   @Prop editing: boolean = false;
   @Prop viewHeight: number = 320;
   storage?: MiniAppStorage;
-  onRun: () => Promise<void> = async () => {};
-  onMoveStart: () => void = () => {};
+  onRun: (inputs?: PanelInputs) => Promise<void> = async () => {};
+  onRuntimeError: (message: string, revision: number) => void = () => {};
+  onMoveStart: (event: GestureEvent) => void = () => {};
   onMoveUpdate: (event: GestureEvent) => void = () => {};
   onMoveEnd: (event: GestureEvent) => void = () => {};
   onMoveCancel: () => void = () => {};
   onResize: (event: GestureEvent, finished: boolean) => void = () => {};
   private context(): WebUiPanelContext {
     return { data: this.panel.data, title: this.panel.definition.title, status: this.busy ? 'running' : this.panel.error ? 'failed' : 'ready',
-      canRefresh: !!this.panel.definition.source && !this.panel.archived, locale: getLocale() };
+      canRefresh: !!this.panel.definition.source && !this.panel.archived, locale: getLocale(), theme: this.dark ? 'dark' : 'light', inputs: resolvePanelInputs(this.panel.definition.inputs, this.panel.inputs || {}),
+      tokens: { 'text': gradientColor($r('app.color.text_primary'), 1), 'surface': gradientColor($r('app.color.surface'), 1), 'accent': gradientColor(this.appearance.accent, 1) } };
   }
   onOpen: () => void = () => {};
   onRefresh: () => void = () => {};
@@ -194,20 +198,27 @@ export struct LifePanelCard {
       Row({ space: 6 }) {
         if (this.editing) {
           Text('⠿').fontSize(24).fontColor($r('app.color.text_secondary')).width(40).height(44).textAlign(TextAlign.Center)
-            .accessibilityText(t('拖动卡片')).id('panel-drag-' + this.panel.id)
+            .clickEffect(Motion.pressSmall).accessibilityText(t('拖动卡片')).id('panel-drag-' + this.panel.id)
             .gesture(PanGesture().onActionStart(this.onMoveStart).onActionUpdate(this.onMoveUpdate).onActionEnd(this.onMoveEnd).onActionCancel(this.onMoveCancel))
         }
         Button({ type: ButtonType.Normal }) {
           Text(this.panel.definition.title).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
             .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%').textAlign(TextAlign.Start)
         }.backgroundColor(Color.Transparent).padding(0).layoutWeight(1).constraintSize({ minHeight: 40 })
-          .onClick(() => { if (!this.editing) { this.onOpen(); } }).accessibilityText(t('打开卡片「{0}」', [this.panel.definition.title]))
+          .clickEffect(Motion.press).onClick(() => { if (!this.editing) { this.onOpen(); } })
+          .gesture(GestureGroup(GestureMode.Sequence, LongPressGesture({ repeat: false, duration: 350 }).onAction((event: GestureEvent) => { if (this.onBoard && this.interactive) { this.onMoveStart(event); } }),
+            PanGesture().onActionUpdate(this.onMoveUpdate).onActionEnd(this.onMoveEnd)).onCancel(this.onMoveCancel))
+          .accessibilityText(t('打开卡片「{0}」', [this.panel.definition.title]))
         if (this.interactive && !this.editing) {
           Button({ type: ButtonType.Normal }) { Text('⋯').fontSize(24).fontColor($r('app.color.text_secondary')) }
             .backgroundColor(Color.Transparent).borderRadius(8).width(36).height(40).padding(0)
-            .bindMenu(this.menu()).accessibilityText(t('卡片选项'))
+            .clickEffect(Motion.pressSmall).bindMenu(this.menu()).accessibilityText(t('卡片选项'))
         }
       }.width('100%').padding(this.panel.definition.view ? { left: 12, right: 12, top: 4, bottom: 4 } : 0)
+      if (this.panel.runtimeError) {
+        Text(this.panel.runtimeError).fontSize(12).fontColor($r('app.color.danger')).maxLines(3).padding(12)
+        Button(t('让 AI 修复')).attributeModifier(Btn.tonal).onClick(this.onEdit).margin(8)
+      }
       if (this.panel.error) {
         Text(panelErrorText(this.panel.error)).fontSize(12).fontColor($r('app.color.danger')).maxLines(this.detail ? 8 : 3)
           .width('100%').accessibilityText(t('刷新失败：{0}', [panelErrorText(this.panel.error)]))
@@ -224,7 +235,8 @@ export struct LifePanelCard {
       if (this.panel.definition.view) {
         if (this.storage) {
           WebUiView({ content: JSON.stringify(this.panel.definition.view), storage: this.storage, panelContext: this.context(),
-            interactive: this.interactive && !this.panel.archived && !this.editing, viewportHeight: this.viewHeight, onPanelRefresh: this.onRun })
+            interactive: this.interactive && !this.panel.archived && !this.editing, preferParentScroll: !this.detail, viewportHeight: this.viewHeight, onPanelRefresh: this.onRun,
+            onRuntimeError: (message: string) => this.onRuntimeError(message, this.panel.configRevision) })
         } else {
           Button(t('打开交互卡片')).attributeModifier(Btn.tonal).onClick(this.onOpen)
             .margin({ left: 12, right: 12, top: 8, bottom: 8 })
@@ -232,7 +244,7 @@ export struct LifePanelCard {
       } else {
       Column({ space: 10 }) {
         ForEach(this.panel.definition.nodes.filter((node: PanelNode) => !node.parent), (node: PanelNode) => {
-          PanelComponent({ panel: this.panel, node: node, interactive: this.interactive && !this.busy && !this.panel.archived,
+          PanelComponent({ panel: this.panel, node: node, interactive: this.interactive && !this.editing && !this.busy && !this.panel.archived,
             expanded: this.detail || (this.cardSize || this.panel.definition.size) === 'L', compact: !this.detail && (this.cardSize || this.panel.definition.size) === 'S',
             onToggle: this.onToggle, onRefresh: this.onRefresh })
         }, (node: PanelNode) => node.id)
@@ -252,7 +264,8 @@ export struct LifePanelCard {
         Row() {
           Text(t('拖动调整尺寸')).fontSize(11).fontColor($r('app.color.text_secondary')).layoutWeight(1)
           Text('↘').fontSize(24).width(44).height(44).textAlign(TextAlign.Center).id('panel-resize-' + this.panel.id)
-            .accessibilityText(t('调整卡片尺寸')).gesture(PanGesture()
+            .clickEffect(Motion.pressSmall).accessibilityText(t('调整卡片尺寸')).gesture(PanGesture()
+              .onActionStart((event: GestureEvent) => this.onResize(event, false))
               .onActionUpdate((event: GestureEvent) => this.onResize(event, false))
               .onActionEnd((event: GestureEvent) => this.onResize(event, true)).onActionCancel(this.onMoveCancel))
         }.width('100%').padding(this.panel.definition.view ? { left: 12, right: 12 } : 0)
