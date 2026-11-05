@@ -354,7 +354,7 @@ export struct FeedbackPanel {
         }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.md })
       }
     }.width('100%').height('100%')
-      .bindSheet($$this.showPreview, this.attachmentPreview(), { title: { title: this.previewName }, height: SheetSize.LARGE, dragBar: true,
+      .bindSheet($$this.showPreview, this.attachmentPreview(), { radius: Radius.sheet, title: { title: this.previewName }, height: SheetSize.LARGE, dragBar: true,
         systemMaterial: this.appearance.surface, onDisappear: () => this.cleanPreview() })
   }
 }

@@ -293,7 +293,7 @@ visitTitle(titleTree); assert.ok(titleOptions); assert.ok(chatInsets.length >= 2
 const titleProbe = vm.runInNewContext(`(function() {return {options: (${titleOptions}), insets: [${chatInsets.join(',')}]};})`,
   {BarStyle: {STANDARD:'standard',STACK:'stack'},Color:{Transparent:'transparent'},CHAT_HEADER_HEIGHT:56});
 for (const width of [600,839,840,1116,1600]) {
-  const actual = titleProbe.call({windowWidth:width});
+  const actual = titleProbe.call({windowWidth:width, appearance: {noMaterial: {}}});
   assert.equal(actual.options.barStyle, width >= 840 ? 'standard' : 'stack');
   assert.ok(actual.insets.every(inset => inset === (width >= 840 ? 0 : 56)),
     'Initial and updated ChatPanel props must match the native title layout');

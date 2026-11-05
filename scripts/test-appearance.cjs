@@ -243,6 +243,7 @@ function supportReport(sdk, initiallySupported, currentlySupported, failConstruc
   const cache = new Map(), records = [];
   load(root + '/model/Diagnostics.ets', cache).Diagnostics.configureLogSink(data => records.push(data));
   const materials = load(root + '/common/AppMaterials.ets', cache).AppMaterials;
+  void materials.available;
   const constructor = uiMaterial.ImmersiveMaterial;
   try {
     if (failConstruction) {
@@ -266,5 +267,15 @@ for (const [sdk, initial, current, failed, reason] of [
     available: false, failed, reason }, 'Retain the actual support evidence after log sanitization');
 }
 deviceSdk = 26; deviceMaterialSupported = true;
+{
+  deviceMaterialSupported = false;
+  const before = capabilityReads;
+  const delayed = load(root + '/common/AppMaterials.ets', new Map()).AppMaterials;
+  assert.equal(capabilityReads, before, 'Importing a service cannot probe native UI capability before a window exists');
+  deviceMaterialSupported = true;
+  assert.equal(delayed.available, true, 'First UI use observes the ready native context');
+  assert.ok(delayed.control);
+  assert.equal(capabilityReads, before + 1);
+}
 console.log('PASS material support diagnostics distinguish API level, device rejection, construction failure and changed native result');
 console.log('PASS appearance: palette, persistence, rollback, material cache and plain controls on API 20 / unsupported API 26 devices');

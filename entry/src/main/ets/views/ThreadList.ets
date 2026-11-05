@@ -364,6 +364,7 @@ export struct ThreadList {
         ForEach(this.projectFolders, (folder: SharedFolder) => { this.projectFolderRow(folder) },
           (folder: SharedFolder) => folder.id)
         Text(t('项目内的会话可以读写这些文件夹。')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+        Text(t('重装应用或撤销目录授权后，请移除并重新添加共享文件夹。')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
         if (this.projectFolderError.length > 0) { Banner({ text: this.projectFolderError }) }
         Text(t('项目内的会话共享文件和项目说明，各自保留对话历史。')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
         if (this.app.error) { Banner({ text: this.app.error }) }
@@ -635,7 +636,7 @@ export struct ThreadList {
     }
     .padding({ left: Space.md, right: Space.md, top: Space.sm, bottom: Space.sm })
     .height('100%').width('100%').backgroundColor($r('app.color.page_background'))
-    .bindSheet($$this.projectEditing, this.projectEditor(), { title: { title: this.projectId ? t('编辑项目') : t('新建项目') },
+    .bindSheet($$this.projectEditing, this.projectEditor(), { radius: Radius.sheet, title: { title: this.projectId ? t('编辑项目') : t('新建项目') },
       detents: [SheetSize.LARGE], dragBar: true, keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY })
   }
 }

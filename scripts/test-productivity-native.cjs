@@ -1,4 +1,4 @@
-const backupAccount = { openID: 'fixture-openid-A', error: undefined, async backupOpenID() { if (this.error) throw this.error; if (!this.openID) throw Error('请登录创建备份时使用的华为账号。'); return this.openID; } };
+const backupAccount = { openID: 'fixture-openid-A', error: undefined, interactive: undefined, async backupOpenID(_context, interactive = true) { this.interactive = interactive; if (this.error) throw this.error; if (!this.openID) throw Error('请登录创建备份时使用的华为账号。'); return this.openID; } };
 const { legacyBackupFixture, backupCrypto } = require('./backup-fixture.cjs');
 // Platform-adapter integration tests with real temporary files and a scripted HTTP transport.
 // Run: node scripts/test-productivity-native.cjs
@@ -17,6 +17,7 @@ const handles = new Map(), handlePaths = new Map(), writableHandles = new Set();
 let failConversationWorker = false;
 let sharedWriteFailure = ''; let cancelSharedWrite; let failBackupRename = false; const usageWrites = [];
 const folderFailures = {};
+let pdfKitLoads = 0;
 const cloudLocations = new Map(); let failCloudCopy = false, failCloudRename = false, failCloudRollback = false, failCloudFsync = false; let cloudCopyError;
 const nativePath = p => {
   if (typeof p === "number") return handlePaths.get(p);
@@ -125,9 +126,9 @@ const kits = {
   '@kit.PerformanceAnalysisKit': { hilog: { info() {}, error() {}, warn() {} } },
   '@kit.CoreFileKit': { fileIo, cloudSync,
     fileShare: { OperationMode: { READ_MODE: 1, WRITE_MODE: 2 },
-      checkPersistentPermission: async policies => policies.map(() => false),
+      checkPersistentPermission: async policies => policies.map(policy => folderFailures.grants ? folderFailures.grants.has(policy.uri) : true),
       persistPermission: async () => { if (folderFailures.persist) throw folderFailures.persist; },
-      activatePermission: async () => { if (folderFailures.activate) throw folderFailures.activate; },
+      activatePermission: async () => { folderFailures.activations = (folderFailures.activations || 0) + 1; if (folderFailures.activate) throw folderFailures.activate; },
       revokePermission: async () => { if (folderFailures.revoke) throw folderFailures.revoke; } },
     fileUri: {getUriFromPath:p=>'file://'+p, FileUri: class { constructor(uri) { this.path = decodeURIComponent(new URL(uri).pathname); } }},
     picker: { DocumentViewPicker: class { async save() {return [selectedFile];} async select() {return [selectedFile];} } } }, '@kit.ImageKit': { image: {} }, '@kit.NetworkKit': { http },
@@ -152,7 +153,10 @@ function load(file) {
   if (cache.has(file)) return cache.get(file);
   const exports = {}; cache.set(file, exports);
   const compiled = ts.transpileModule(fs.readFileSync(file,'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021, experimentalDecorators: true } }).outputText;
-  vm.runInNewContext(compiled, { exports, require: id => id === './HuaweiAccount' ? { huaweiAccount: backupAccount } : id.startsWith('.') ? load(path.resolve(path.dirname(file), id)) : kits[id],
+  vm.runInNewContext(compiled, { exports, require: id => {
+    if (id === '@kit.PDFKit') pdfKitLoads++;
+    return id === './HuaweiAccount' ? { huaweiAccount: backupAccount } : id.startsWith('.') ? load(path.resolve(path.dirname(file), id)) : kits[id];
+  },
     Observed: cls => cls, canIUse: () => true, setTimeout: scheduleTimer, clearTimeout: cancelTimer, Uint8Array, ArrayBuffer, DataView, Map, Set, Object, JSON, Error, console }, { filename: file });
   return exports;
 }
@@ -213,11 +217,19 @@ async function test(name, run) {
   await test('shared folder diagnostic retains authorization failures and keeps retries available', async () => {
     const { ProjectFolderAccess } = load(path.join(source, 'services/ProjectFolderAccess'));
     const folders = [{ name: 'PRIVATE_FOLDER', uri: 'file://PRIVATE_URI' }];
+    folderFailures.grants = new Set();
+    await assert.rejects(ProjectFolderAccess.activate(folders), error =>
+      error.code === 'SHARED_FOLDER_AUTH_REQUIRED' && error.recovery === 'reselect_shared_folder' && /项目设置/.test(error.message));
+    assert.equal(folderFailures.activations || 0, 0, 'Restored bookmarks without grants cannot be activated');
+    await ProjectFolderAccess.activateAll([{ sharedFolders: folders }]);
+    assert.equal(diagnosticLogs.findLast(data => data.event === 'folder_startup_failed').fields.errorCode, 'SHARED_FOLDER_AUTH_REQUIRED');
+    folderFailures.grants = new Set(folders.map(folder => folder.uri));
     folderFailures.activate = Object.assign(Error('PRIVATE_ACTIVATION'), { code: 201 });
     await ProjectFolderAccess.activateAll([{ sharedFolders: folders }]);
     assert.equal(diagnosticLogs.findLast(data => data.event === 'folder_activate_failed').fields.errorCode, 201);
     folderFailures.activate = undefined;
     await ProjectFolderAccess.activate(folders);
+    folderFailures.grants = new Set();
     folderFailures.persist = Object.assign(Error('PRIVATE_PERSIST'), { code: 13900012 });
     await assert.rejects(ProjectFolderAccess.persist(folders));
     assert.equal(diagnosticLogs.findLast(data => data.event === 'folder_persist_failed').fields.errorCode, 13900012);
@@ -226,7 +238,23 @@ async function test(name, run) {
     await ProjectFolderAccess.revoke(folders);
     assert.equal(diagnosticLogs.findLast(data => data.event === 'folder_revoke_failed').fields.errorCode, 201);
     folderFailures.revoke = undefined;
+    folderFailures.grants = undefined;
     assert.ok(!JSON.stringify(diagnosticLogs).includes('PRIVATE_'));
+  });
+  await test('plain workspace files do not load PDFKit; document reads load it on demand and release temporary files', async () => {
+    const before = pdfKitLoads;
+    const documents = load(path.join(source, 'services/DocumentFiles'));
+    assert.equal(pdfKitLoads, before);
+    const filePath = path.join(fixture, 'lazy-document.txt'); fs.writeFileSync(filePath, 'plain workspace text');
+    const file = await fileIo.open(filePath, fileIo.OpenMode.READ_ONLY);
+    try {
+      assert.equal(await documents.readDocumentFile(file.fd, 'note.txt', fixture, new Cancellation()), 'plain workspace text');
+      assert.equal(pdfKitLoads, before, 'Ordinary file access must not load a native PDF module');
+      // The fixture intentionally has no PDF component. Its actionable capability error must remain visible.
+      await assert.rejects(documents.readDocumentFile(file.fd, 'note.pdf', fixture, new Cancellation()), /PDF 组件未提供文字提取/);
+      assert.equal(pdfKitLoads, before + 1);
+      assert.ok(!fs.readdirSync(fixture).some(name => name.startsWith('.tinybot-pdf-')));
+    } finally { await fileIo.close(file); }
   });
   await test('MCP cancellation diagnostic records failed remote notice while preserving local cancellation', async () => {
     let callStarted;
@@ -1393,6 +1421,35 @@ async function test(name, run) {
     fs.unlinkSync(nativePath(context.cloudFileDir+'/tinybot-backups/'+historical));
     assert.ok(syncInstances.every(s=>!s.callback),'native listeners are removed');
   });
+  await test('automatic cloud archive restores records independently and preserves the manual snapshot',async()=>{
+    const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
+    const context={cloudFileDir:'/sandbox/cloud',cacheDir:'/sandbox/backup-app/cache',getApplicationContext:()=>({filesDir:'/sandbox/backup-app'})};
+    const directory=context.cloudFileDir+'/tinybot-backups',manual=directory+'/tinybot-latest.tinybot';
+    const before=fs.readFileSync(nativePath(manual));
+    const snapshot=legacyBackupFixture(before).data;
+    const name='tinybot-auto-'+crypto.randomUUID()+'.tinybot',automatic=directory+'/'+name;
+    cloudStart=async sync=>{sync.callback({state:cloudSync.SyncState.COMPLETED,error:0});};
+    assert.equal(await CloudBackup.create(context,snapshot,{name,interactive:false}),true);
+    assert.equal(backupAccount.interactive,false,'Automatic account lookup is non-interactive through the real archive path');
+    assert.deepEqual(fs.readFileSync(nativePath(manual)),before);
+    assert.ok((await CloudBackup.list(context)).some(item=>item.name===name));
+    const restored=await CloudBackup.restore(context,name,model.emptyData());
+    assert.equal(restored.threads.length,snapshot.threads.length);
+    assert.equal(restored.threads[0].title,snapshot.threads[0].title);
+    const complete=fs.readFileSync(nativePath(automatic));failCloudCopy=true;
+    try{await assert.rejects(CloudBackup.create(context,snapshot,{name,interactive:false}),/injected cloud write/);}
+    finally{failCloudCopy=false;}
+    assert.deepEqual(fs.readFileSync(nativePath(automatic)),complete,'Failed replacement preserves the last automatic restore point');
+    const cancellation=new Cancellation(),copy=fileIo.copyFile;
+    fileIo.copyFile=async(a,b)=>{await copy(a,b);cancellation.cancel();};
+    try{await assert.rejects(CloudBackup.create(context,snapshot,{name,interactive:false,cancellation}),error=>error.code==='CANCELLED');}
+    finally{fileIo.copyFile=copy;}
+    assert.deepEqual(fs.readFileSync(nativePath(automatic)),complete,'Expiry before promotion preserves the complete snapshot');
+    assert.ok(fs.readdirSync(nativePath(directory)).every(file=>!file.endsWith('.partial')));
+    await assert.rejects(CloudBackup.create(context,snapshot,{name:'../escape.tinybot',interactive:false}),/备份文件无效/);
+    assert.deepEqual(fs.readFileSync(nativePath(manual)),before);
+    fs.unlinkSync(nativePath(automatic));
+  });
   await test('cloud metadata lookup excludes directories and symbolic links before querying location',async()=>{
     const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
     const context={cloudFileDir:'/sandbox/cloud'};
@@ -1410,6 +1467,28 @@ async function test(name, run) {
       await assert.rejects(CloudBackup.restore(context,name,model.emptyData()),/备份文件无效/);
       await assert.rejects(CloudBackup.remove(context,name),/备份文件无效/);
     } finally {fileIo.lstat=originalLstat;fileIo.stat=originalStat;fs.rmdirSync(nativePath(file));}
+  });
+  await test('short-task expiry cancels archive writes and sync waiting without retaining partial files or locks',async()=>{
+    const {writeBackupArchive}=load(path.join(source,'services/BackupArchive'));
+    const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
+    const root='/sandbox/cancelled-archive';fs.mkdirSync(nativePath(root));
+    const input=root+'/input.bin',output=root+'/cancelled.tinybot';fs.writeFileSync(nativePath(input),'source bytes');
+    const signal=new Cancellation(),write=fileIo.write;
+    fileIo.write=async(...args)=>{const result=await write(...args);signal.cancel();return result;};
+    try{await assert.rejects(writeBackupArchive(output,'{}',[input],signal),error=>error.code==='CANCELLED');}
+    finally{fileIo.write=write;}
+    assert.equal(fs.existsSync(nativePath(output)),false);assert.equal(fs.readFileSync(nativePath(input),'utf8'),'source bytes');
+    cloudStart=async()=>{};const syncSignal=new Cancellation();const pending=CloudBackup.sync(syncSignal);
+    const rejected=assert.rejects(pending,/后台备份时间已结束/);await new Promise(setImmediate);syncSignal.cancel();await rejected;
+    assert.equal(CloudBackup.busy,false);assert.equal(syncInstances.at(-1).callback,undefined);
+    cloudStart=async sync=>sync.callback({state:cloudSync.SyncState.COMPLETED,error:0});assert.equal(await CloudBackup.sync(),true);
+    const {NativeWorkspaceFiles}=load(path.join(source,'services/NativeWorkspaceFiles'));
+    const workspace=root+'/workspace/thread';fs.mkdirSync(nativePath(workspace),{recursive:true});
+    const files=new NativeWorkspaceFiles(workspace);const before=NativeWorkspaceFiles.contentRevision;
+    await files.writeMiniApp('mini-apps/probe/data.json','{"version":1,"value":2}',new Cancellation(),{version:null});
+    assert.ok(NativeWorkspaceFiles.contentRevision>before,'Managed mini app data changes invalidate automatic backup');
+    const after=NativeWorkspaceFiles.contentRevision;await files.read('mini-apps/probe/data.json',new Cancellation());
+    assert.equal(NativeWorkspaceFiles.contentRevision,after,'Reading does not create a backup change');
   });
   await test('cloud quota failure preserves the pending snapshot; failed writes never become restore points',async()=>{
     const {CloudBackup}=load(path.join(source,'services/CloudBackup'));

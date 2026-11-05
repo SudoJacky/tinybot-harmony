@@ -702,7 +702,7 @@ export struct MessageBubble {
         }
       }.width('100%').bindContextMenu(this.actions, ResponseType.LongPress, {
         systemMaterial: this.appearance.menu, mask: false })
-      .bindSheet($$this.documentOpen, this.documentViewer(), { height: '90%', showClose: false, dragBar: true,
+      .bindSheet($$this.documentOpen, this.documentViewer(), { radius: Radius.sheet, height: '90%', showClose: false, dragBar: true,
         backgroundColor: $r('app.color.page_background') })
     }.width('100%')
     // A closed sheet on the cover's node can dismiss the image preview on API 26.

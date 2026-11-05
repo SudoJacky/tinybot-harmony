@@ -6,7 +6,7 @@ import { UsageCursor, UsageQuery } from '../model/UsageQuery';
 import { UsageLedger } from '../services/UsageLedger';
 import { ContributionCell, ContributionWeek, UsageContributions, usageContributions } from '../model/UsageContributions';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
-import { Btn, Font, Space, compactNumber } from '../common/Theme';
+import { Btn, Font, Radius, Space, compactNumber } from '../common/Theme';
 import { Banner, EmptyState, GroupCard, NavRow, RowDivider, SectionHeader, Segmented, StatTile, Tag } from '../common/Widgets';
 
 @Component
@@ -679,7 +679,7 @@ export struct UsagePanel {
     }.width('100%').height('100%').padding({ left: Space.page, right: Space.page }).scrollBar(BarState.Off)
       .edgeEffect(EdgeEffect.Spring).contentEndOffset(Space.xl)
       // A closing sheet must not write false into a newer request through a two-way binding.
-      .bindSheet(this.showFilter, this.filterSheet(), { title: { title: this.filterTitle() },
+      .bindSheet(this.showFilter, this.filterSheet(), { radius: Radius.sheet, title: { title: this.filterTitle() },
         height: SheetSize.FIT_CONTENT, dragBar: true, systemMaterial: this.appearance.surface,
         onWillDismiss: () => this.closeFilter(), onDisappear: () => this.filterDidClose() })
   }

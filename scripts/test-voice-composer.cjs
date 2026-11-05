@@ -31,7 +31,7 @@ for (const helper of tree.statements.filter(n => ts.isClassDeclaration(n) && n.n
   }).outputText, scope);
   scope[helper.name.text] = scope.exports[helper.name.text];
 }
-const names = ['aboutToAppear', 'speechActive', 'voiceOverlayVisible', 'canRecordSpeech', 'enterVoiceMode',
+const names = ['aboutToAppear', 'afterRender', 'speechActive', 'voiceOverlayVisible', 'canRecordSpeech', 'enterVoiceMode',
   'showSpeechKeyboard', 'startSpeech', 'moveSpeech', 'cancelSpeechHold', 'releaseSpeech', 'applySpeechDraft', 'completeSpeech', 'endSpeech'];
 const methods = names.map(name => component.members.find(n => n.name?.getText(tree) === name).getText(tree)).join('\n');
 vm.runInNewContext(ts.transpileModule(`class Panel { ${methods} } exports.Panel = Panel;`, {
@@ -42,7 +42,7 @@ function panel() {
   let nativeReady = true;
   const value = new scope.exports.Panel();
   Object.assign(value, { speechEnabled: true, importing: false, speechHolding: false, voiceMode: false, speechTarget: 'send',
-    keyboardFocusRequest: 0, foreground: true,
+    keyboardFocusRequest: 0, foreground: true, lifecycle: 0, composerMounted: false,
     thread: { id: 'chat', archived: false }, appearance: {}, viewport: { observe() {} },
     reading: { stop() {} }, syncMessages() {}, receiveVoiceShortcut() {}, follow() {},
     app: { active: { id: 'chat' }, draft: '原草稿', ready: true, busy: false, canQueueInput: false,

@@ -3,11 +3,12 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio');
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 const root = path.resolve(__dirname, '../entry/src'), cache = new Map();
-const nativeResult = { type: 3, value: '' };
+const nativeResult = { type: 3, value: '', controllers: 0 };
 const captureResult = { released: 0, before: async () => {} };
 const capturedPixel = { getImageInfo: async () => ({ size: { width: 900, height: 1200 } }), release: async () => { captureResult.released++; } };
 const TouchType = { Down: 0, Up: 1, Move: 2, Cancel: 3 };
 const nativeWebview = { JsMessageType: { STRING: 3, NONE: 0 }, WebviewController: class {
+  constructor() { nativeResult.controllers++; }
   backAvailable = false; forwardAvailable = false; effects = [];
   url = 'about:blank';
   accessBackward() { return this.backAvailable; }
@@ -85,6 +86,17 @@ async function acquired() {
   return { ...f, receipt };
 }
 (async () => {
+  {
+    const { NativeBrowserDriver } = load(path.join(root, 'main/ets/services/NativeBrowserDriver'));
+    const before = nativeResult.controllers, driver = new NativeBrowserDriver(new BrowserSession());
+    assert.equal(nativeResult.controllers, before, 'The retained browser driver must not load a native engine');
+    driver.close();
+    assert.equal(nativeResult.controllers, before, 'Closing an unused driver must not create a controller');
+    const controller = driver.controller;
+    assert.equal(nativeResult.controllers, before + 1);
+    assert.equal(driver.controller, controller, 'First browser use creates exactly one reusable controller');
+    console.log('PASS retained browser driver defers native controller creation until first browser use');
+  }
   {
     const { NativeBrowserDriver } = load(path.join(root, 'main/ets/services/NativeBrowserDriver'));
     const f = await acquired(), driver = new NativeBrowserDriver(f.browser), calls = [];

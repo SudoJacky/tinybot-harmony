@@ -68,7 +68,7 @@ function panel(cloud) {
     Diagnostics: { log() {} }, t });
   return Object.assign(new exports.Probe(), { visible: true, foreground: true, busy: false,
     cloudError: '', cloudListError: '', cloudErrorCode: 0, cloudStatus: '', cloudLoaded: false,
-    app: { busy: false, exportSnapshot: () => ({}) }, context: () => ({}) });
+    app: { busy: false, exportSnapshot: () => ({}) }, automatic: { confirmUploaded() {} }, context: () => ({}) });
 }
 
 test('registration completion cannot hide a failed start or release the cloud lock', async () => {

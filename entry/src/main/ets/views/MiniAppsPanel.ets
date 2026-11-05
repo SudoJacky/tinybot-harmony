@@ -514,12 +514,12 @@ export struct MiniAppsPanel {
           try { await this.run(async () => { await this.reload(); }); } finally { this.refreshing = false; }
         })
       }
-      Column().width(0).height(0).bindSheet($$this.renaming, this.renameEditor(), { title: { title: t('重命名') },
+      Column().width(0).height(0).bindSheet($$this.renaming, this.renameEditor(), { radius: Radius.sheet, title: { title: t('重命名') },
         height: 240, backgroundColor: $r('app.color.page_background'), keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY })
-      Column().width(0).height(0).bindSheet($$this.choosingIcon, this.iconPicker(), { title: { title: t('图标与颜色') },
+      Column().width(0).height(0).bindSheet($$this.choosingIcon, this.iconPicker(), { radius: Radius.sheet, title: { title: t('图标与颜色') },
         detents: [SheetSize.LARGE], backgroundColor: $r('app.color.page_background') })
     }.width('100%').height('100%').backgroundColor($r('app.color.page_background'))
-      .bindSheet($$this.adding, this.previewPicker(), { title: { title: t('从当前会话的预览添加') },
+      .bindSheet($$this.adding, this.previewPicker(), { radius: Radius.sheet, title: { title: t('从当前会话的预览添加') },
         detents: [SheetSize.LARGE], backgroundColor: $r('app.color.page_background') })
   }
 }

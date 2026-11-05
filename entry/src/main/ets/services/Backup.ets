@@ -61,13 +61,15 @@ function allAttachments(data: AppData): Attachment[] {
   return Array.from(result.values());
 }
 // Local export and Huawei Cloud share one archive; API keys only appear in the encrypted section.
-export async function createBackupFile(context: common.UIAbilityContext, snapshot: AppData, vault: CredentialVault = new CredentialStore()): Promise<string> {
+export async function createBackupFile(context: common.UIAbilityContext, snapshot: AppData, vault: CredentialVault = new CredentialStore(), interactive: boolean = true, cancellation?: Cancellation): Promise<string> {
+  cancellation?.check();
   const data = JSON.parse(JSON.stringify(snapshot)) as AppData;
   const envelope: BackupEnvelope = { format: 'tinybot-harmony.backup.v3', data: data, attachments: [], files: [] };
   validateProjects(data);
   if ((snapshot.providerProfiles || []).length) {
-    envelope.protectedKeys = await encryptBackupKeys(snapshot, await huaweiAccount.backupOpenID(context), vault);
+    envelope.protectedKeys = await encryptBackupKeys(snapshot, await huaweiAccount.backupOpenID(context, interactive), vault);
   }
+  cancellation?.check();
   const userDocument = data.config.userDocument || '';
   data.config = defaultConfig(); data.config.userDocument = userDocument;
   for (const profile of data.providerProfiles || []) { profile.credentialAlias = ''; profile.noApiKey = true; profile.enabled = false; }
@@ -88,6 +90,7 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
     }
   }
   for (const item of allAttachments(data)) {
+    cancellation?.check();
     const source = Attachments.path(item);
     if ((await fs.stat(source)).size !== item.size) { throw new Error(t('备份缺少附件或大小不一致。')); }
     envelope.attachments.push({ id: item.id, bytes: String(sources.length) }); sources.push(source);
@@ -111,6 +114,7 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
     if (!projectRoots.has(workspaceId) && !await fs.access(root)) { continue; }
     await workspaces.requireWorkspace(workspaceId);
     while (pending.length) {
+      cancellation?.check();
       const directory = pending.shift() || '';
       for (const name of await fs.listFile(root + (directory ? '/' + directory : ''))) {
         if (name.startsWith('.tinybot-')) { continue; }
@@ -133,7 +137,7 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
     }
   }
   const path = context.cacheDir + '/backup-' + util.generateRandomUUID() + '.tinybot';
-  await writeBackupArchive(path, JSON.stringify(envelope), sources);
+  await writeBackupArchive(path, JSON.stringify(envelope), sources, cancellation);
   return path;
 }
 export async function exportBackup(context: common.UIAbilityContext, data: AppData): Promise<void> {

@@ -27,7 +27,7 @@ export interface LogError extends Error {
   httpStatus?: number; nativeCode?: number; providerCode?: string; stage?: string;
 }
 const ERROR_CODES: string[] = ['STALE_BROWSER_SNAPSHOT', 'STALE_INTERACTIVE_STATE', 'INVALID_ARGUMENTS', 'PERMISSION_DENIED',
-  'CANCELLED', 'READ_ONLY', 'FILE_NOT_FOUND', 'TOOL_NOT_FOUND', 'TIMEOUT', 'CONTEXT_OVERFLOW',
+  'CANCELLED', 'READ_ONLY', 'FILE_NOT_FOUND', 'TOOL_NOT_FOUND', 'TIMEOUT', 'CONTEXT_OVERFLOW', 'SHARED_FOLDER_AUTH_REQUIRED',
   'NATIVE_EXCEPTION', 'NATIVE_EMPTY_RESULT', 'NATIVE_NAPI_FAILED', 'FS_STALE_VERSION', 'FS_NOT_OBSERVED', 'FS_EXTERNAL_IO',
   'ALREADY_EXISTS', 'AUTH_REQUIRED', 'BROWSER_BUSY', 'BROWSER_CLOSED', 'BROWSER_HISTORY_EMPTY', 'BROWSER_LOAD_FAILED',
   'BROWSER_NOT_OWNED', 'BROWSER_NOT_VISIBLE', 'BROWSER_OBSERVATION_FAILED', 'BROWSER_OBSERVATION_INTERRUPTED', 'BROWSER_UNAVAILABLE',
@@ -43,6 +43,7 @@ const ERROR_CODES: string[] = ['STALE_BROWSER_SNAPSHOT', 'STALE_INTERACTIVE_STAT
 // Names and string values are catalogs, not free text. Unknown keys never reach either output.
 const EVENTS: Record<string, string[]> = {};
 EVENTS.app = ['bar_failed', 'created', 'destroyed', 'window_created', 'window_failed', 'window_loaded', 'window_destroyed', 'foreground', 'background'];
+EVENTS.privacy = ['subscribe_failed', 'info_failed', 'result_failed', 'state_failed', 'request_failed'];
 EVENTS.announcements = ['disabled', 'fetch_started', 'fetch_completed', 'fetch_failed', 'presented', 'present_failed', 'acknowledged', 'save_failed'];
 EVENTS.review = ['task_completed', 'presented', 'present_failed', 'accepted', 'deferred', 'disabled', 'request_completed', 'request_failed', 'save_failed'];
 EVENTS.appearance = ['material', 'material_support', 'material_unavailable', 'loaded', 'applied', 'save_failed', 'fonts_loaded', 'fonts_failed', 'insets_failed'];
@@ -53,7 +54,7 @@ EVENTS.feedback = ['attachment_failed', 'log_failed', 'initialize_failed', 'save
   'detail_failed', 'upload_failed', 'cleanup_failed', 'reconcile_failed', 'delete_failed'];
 EVENTS.backup = ['started', 'restored', 'restore_prepared', 'key_decrypt_failed', 'cleanup_failed', 'replace_failed', 'rollback_failed', 'archive_written', 'archive_write_failed', 'archive_verified',
   'restore_completed', 'restore_failed', 'startup_capture_failed', 'startup_marker_failed', 'startup_lookup_failed',
-  'cloud_retry_finished', 'cloud_failed', 'cloud_retry', 'cloud_sync_progress', 'cloud_sync_finished', 'cloud_list_failed', 'cloud_settings_failed'];
+  'cloud_retry_finished', 'cloud_failed', 'cloud_retry', 'cloud_sync_progress', 'cloud_sync_finished', 'cloud_list_failed', 'cloud_settings_failed', 'auto_failed', 'auto_settings_failed', 'auto_task_failed', 'auto_expired', 'auto_release_failed'];
 EVENTS['mini-app'] = ['manifest_failed', 'storage_failed', 'action_failed'];
 EVENTS['life-panel'] = ['published', 'refresh_skipped', 'refresh_started', 'refresh_complete', 'refresh_cancelled', 'refresh_failed', 'manifest_failed', 'action_failed', 'expiry_failed', 'connection_failed', 'api_response', 'api_failed', 'transform_started', 'transform_complete', 'transform_failed'];
 EVENTS.background = ['acquired', 'released', 'cancelled', 'suspended', 'release_failed', 'stop_failed', 'transition_failed', 'window_expired'];

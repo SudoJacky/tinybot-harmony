@@ -116,7 +116,8 @@ export struct DrawingBoard {
     }
       // Button materials require the native navigation title-bar context.
       .title({ builder: this.header, height: 52 }, { barStyle: BarStyle.STANDARD,
-        backgroundColor: Color.Transparent, backgroundEffect: { radius: 0, color: Color.Transparent } })
+        backgroundColor: Color.Transparent, systemMaterial: this.appearance.noMaterial,
+        backgroundEffect: { radius: 0, color: Color.Transparent } })
       .hideBackButton(true).titleMode(NavigationTitleMode.Mini).hideToolBar(true).mode(NavigationMode.Stack)
       .width('100%').height('100%').padding({ left: Space.md, right: Space.md,
         top: this.insetTop + 4, bottom: this.insetBottom + Space.sm })

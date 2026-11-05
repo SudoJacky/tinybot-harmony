@@ -9,6 +9,8 @@ function load(file) {
   }).outputText, { exports, Observed: value => value, require: id => load(path.posix.normalize(path.posix.join(path.posix.dirname(file), id))) });
   return exports;
 }
+(async () => {
+const flush = async () => { await Promise.resolve(); };
 const { MarkdownDocument, markdownBlocks } = load('model/Markdown');
 const { MarkdownChunkModel, MARKDOWN_CHUNK_BLOCKS } = load('viewmodel/MarkdownChunkModel');
 const { StreamReveal } = load('model/StreamReveal');
@@ -45,7 +47,14 @@ function methods(file, name, names) {
   assert.ok(fs.statSync(emitted).mtimeMs >= fs.statSync(source).mtimeMs, 'Build before renderer tests');
   const tree = ts.createSourceFile(emitted, fs.readFileSync(emitted, 'utf8'), ts.ScriptTarget.Latest, true);
   const cls = tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === file);
-  return `class ${name} { ${cls.members.filter(n => names.includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')} } exports.${name} = ${name};`;
+  const members = cls.members.filter(n => names.includes(n.name?.getText(tree))).map(n => n.getText(tree));
+  const constructor = cls.members.find(ts.isConstructorDeclaration);
+  for (const statement of constructor.body.statements) {
+    if (!ts.isExpressionStatement(statement) || !ts.isBinaryExpression(statement.expression)) continue;
+    const assignment = statement.expression, name = assignment.left.getText(tree).replace(/^this\./, '');
+    if (names.includes(name)) members.push(name + ' = ' + assignment.right.getText(tree) + ';');
+  }
+  return `class ${name} { ${members.join('\n')} } exports.${name} = ${name};`;
 }
 let parseCalls = 0, highlightChars = 0, clock = 1000, timers = new Map(), nextTimer = 0;
 const sandbox = { Diagnostics: load('model/Diagnostics').Diagnostics, exports: {}, StreamReveal, MarkdownDocument, MarkdownChunkModel, MARKDOWN_CHUNK_BLOCKS,
@@ -67,10 +76,10 @@ Object.assign(sandbox, { Text: noop, ForEach: noop, Column: column, Blank: blank
   Image: imageNode, ImageViewer: noop, ModalTransition: { ALPHA: 0 }, IMAGE_HEIGHT: 220, t: text => text, TextOverflow: {}, ImageFit: {}, FlexAlign: {},
   CopyOptions: { LocalDevice: 1, None: 0 }, Space: {}, Radius: {}, Alignment: {}, BarState: {}, ScrollDirection: {}, Color: {}, FontWeight: {}, FontStyle: {}, TextDecorationType: {} });
 const source = methods('MarkdownView', 'DocumentView', ['refresh', 'syncChunks', 'aboutToAppear', 'aboutToDisappear']) + '\n' +
-  methods('MarkdownChunkView', 'BlockView', ['refresh', 'refreshCode', 'inlineSpans', 'proseText', 'prose', 'initialRender', 'invalidateMeasure', 'codeBlock', 'codeShown', 'codeLines', 'codeColor', 'revealColor', 'columnWidths', 'scheduleReveal', 'image', 'imageAlt', 'imageUrl', 'aboutToAppear', 'aboutToDisappear']) + '\n' + methods('ChatPanel', 'ChatLayout', ['messageAreaChanged']);
+  methods('MarkdownChunkView', 'BlockView', ['refresh', 'refreshCode', 'inlineSpans', 'proseText', 'prose', 'initialRender', 'invalidateMeasure', 'codeBlock', 'codeShown', 'codeLines', 'codeColor', 'revealColor', 'columnWidths', 'scheduleReveal', 'afterRender', 'image', 'imageAlt', 'imageUrl', 'imagePreviewBuilder', 'aboutToAppear', 'aboutToDisappear']) + '\n' + methods('ChatPanel', 'ChatLayout', ['messageAreaChanged']);
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, sandbox);
 const makeBlock = (block, animate = false) => Object.assign(new sandbox.exports.BlockView(), {
-  model: new MarkdownChunkModel([block], animate), streaming: true, index: 0, mounted: false, visible: true,
+  model: new MarkdownChunkModel([block], animate), streaming: true, index: 0, mounted: false, disposed: false, generation: 0, visible: true,
   inlineCache: new Map(), highlighted: new Map(), tableWidths: [], reveal: new StreamReveal(), expanded: [], codeTokens: [], imageFailed: [],
   previewing: false, previewSource: '', revealTimer: -1, copyTimer: -1
 });
@@ -172,13 +181,13 @@ const branches = []; row.ifElseBranchUpdateFunction = (id, fn) => { branches.pus
 row.initialRender(); const rootBranch = callbacks[1];
 const outerArea = areaCallbacks.find(fn => fn.toString().includes('measuredWidth'));
 const innerArea = areaCallbacks.find(fn => !fn.toString().includes('measuredWidth'));
-innerArea({}, { width: 400, height: 120 }); outerArea({}, { width: 400, height: 120 });
-visibilityCallbacks.at(-1)(false); rootBranch(1, false);
+innerArea({}, { width: 400, height: 120 }); outerArea({}, { width: 400, height: 120 }); await flush();
+visibilityCallbacks.at(-1)(false); await flush(); rootBranch(1, false);
 assert.equal(branches.at(-1), 1); assert.equal(placeholderHeights.at(-1), 120);
 row.streaming = false; row.refresh(); assert.equal(row.measuredHeight, 120, 'completion must not remount all offscreen content');
 row.invalidateMeasure(); assert.equal(row.measuredHeight, 0); rootBranch(1, false); assert.equal(branches.at(-1), 0);
 areaCallbacks.at(-1)({}, { width: 400, height: 130 });
-outerArea({}, { width: 500, height: 130 }); assert.equal(row.measuredHeight, 0, 'width change must remeasure');
+outerArea({}, { width: 500, height: 130 }); await flush(); assert.equal(row.measuredHeight, 0, 'width change must remeasure');
 row.measuredHeight = 130; row.model.update(markdownBlocks('new content')); row.refresh(); assert.equal(row.measuredHeight, 0);
 visibilityCallbacks.at(-1)(true); row.aboutToDisappear(); codeRow.aboutToDisappear(); assert.equal(timers.size, 0);
 // An image block renders the parsed URL at the fixed streaming height; after a load error it
@@ -197,19 +206,38 @@ assert.equal(imageBranches.at(-1), 0, 'a failed image switches to the tap-throug
 assert.equal(images.length, 1, 'the failed branch must not request the image again');
 imageRow.model.update(markdownBlocks('普通文字')); imageRow.refresh();
 assert.equal(imageRow.imageFailed.length, 0, 'failed state is dropped when the block is no longer an image');
+row.aboutToAppear();
 sandbox.Diagnostics.start();
 const same = { width: 400, height: 120 };
 for (let index = 0; index < 1000; index++) { innerArea(same, same); layout.messageAreaChanged('old', same, same); }
+await flush();
 let diagnostics = sandbox.Diagnostics.snapshot();
 assert.equal(diagnostics.metrics.find(m => m.name === 'layout.chunkCallback').count, 1000);
 assert.equal(diagnostics.metrics.find(m => m.name === 'layout.messageCallback').count, 1000);
 assert.equal(diagnostics.events.filter(e => e.name.startsWith('layout.')).length, 0, 'Unchanged geometry must aggregate instead of flooding the timeline');
-innerArea(same, { width: 400, height: 121 });
+innerArea(same, { width: 400, height: 121 }); await flush();
 assert.equal(sandbox.Diagnostics.snapshot().events.filter(e => e.name === 'layout.chunk').length, 1);
 documentView.content = 'diagnostic **render**'; documentView.refresh();
 diagnostics = sandbox.Diagnostics.snapshot();
 assert.ok(diagnostics.metrics.some(m => m.name === 'markdown.sourceChars' && m.max === documentView.content.length));
 assert.ok(diagnostics.events.some(e => e.name === 'markdown.parse'));
 sandbox.Diagnostics.stop();
+// ArkUI can deliver retained model, geometry and visibility callbacks while tearing down.
+const finalHeight = row.measuredHeight, finalReveal = row.revealTime, finalChunks = documentView.chunks.length;
+row.aboutToDisappear(); documentView.aboutToDisappear();
+row.model.update(markdownBlocks('late model change')); row.refresh(); row.refreshCode(); row.invalidateMeasure();
+innerArea({}, { width: 1, height: 999 }); outerArea({}, { width: 1, height: 999 });
+visibilityCallbacks.at(-1)(true);
+documentView.content = 'late document update'; documentView.refresh(); documentView.syncChunks(0); await flush();
+assert.equal(row.measuredHeight, finalHeight); assert.equal(row.revealTime, finalReveal);
+assert.equal(documentView.chunks.length, finalChunks); assert.equal(timers.size, 0, 'Disposed views cannot start another render/reveal cycle');
+console.log('PASS disposed Markdown views ignore retained model, visibility and geometry callbacks');
+const previewRow = makeBlock(markdownBlocks('![test](https://example.com/a.png)')[0]); let previewBuilds = 0;
+previewRow.imagePreview = () => { previewBuilds++; };
+previewRow.imagePreviewBuilder(); assert.equal(previewBuilds, 0, 'A hidden cover cannot build a new UI subtree');
+previewRow.previewing = true; previewRow.imagePreviewBuilder(); assert.equal(previewBuilds, 1);
+previewRow.aboutToDisappear(); previewRow.imagePreviewBuilder(); assert.equal(previewBuilds, 1, 'Native cover callbacks cannot build after disposal');
 console.log('PASS actual emitted layout callbacks aggregate unchanged geometry; changed geometry and document size survive in diagnostics');
 console.log('PASS Markdown: all stream boundaries, tables/fences/CRLF/Unicode, images, replacement, stable groups, live render callbacks, span cache, code preview/expansion, exact-height offscreen release, remeasure, batched mount/cancel/resume and layout following');
+
+})().catch(error => { console.error(error); process.exitCode = 1; });

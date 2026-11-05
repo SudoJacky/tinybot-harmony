@@ -89,8 +89,8 @@ check('onboarding only focuses rendered fields after the frame', async () => {
   }
 });
 function chat() { return fixture('ChatPanel', ['fork', 'showSpeechKeyboard', 'speechActive', 'selectSkill', 'dismissPlusMenu',
-  'speechAvailabilityChanged', 'focusForegroundChanged'], {
-  focusOwner: 0, foreground: true, speechEnabled: true, keyboardFocusRequest: 0,
+  'speechAvailabilityChanged', 'focusForegroundChanged', 'afterRender'], {
+  focusOwner: 0, foreground: true, speechEnabled: true, keyboardFocusRequest: 0, composerMounted: true, lifecycle: 0,
   thread: { id: 'source', messages: [{ id: 'user', role: 'user' }], archived: false },
   app: { active: { id: 'source' }, draft: '', forkThread: async () => true, useSkill() { this.draft = '/skill:test '; return true; } },
   appearance: {}, speech: { phase: 'idle' }, voiceMode: false, composerController: { caretPosition() {} },

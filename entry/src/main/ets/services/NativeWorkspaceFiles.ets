@@ -26,6 +26,7 @@ async function contentVersion(content: string): Promise<string> {
 interface MountPath { folder: SharedFolder; relative: string; }
 
 export class NativeWorkspaceFiles implements WorkspaceFiles {
+  static contentRevision: number = 0;
   private root: string;
   private mounts: SharedFolder[];
 
@@ -44,6 +45,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
         throw new ToolFailure('FS_NOT_OBSERVED', 'The destination already exists with different content: ' + path, 'read_file', { path: path });
       }
       await copyFileBytes(source, destination);
+      NativeWorkspaceFiles.contentRevision++;
     });
   }
 
@@ -231,6 +233,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
         const mount = await this.requireMount(path);
         await this.unlinkExternal(mount.folder, mount.relative);
       } else { await fs.unlink(await this.resolve(path, false, new Cancellation())); }
+      NativeWorkspaceFiles.contentRevision++;
     });
   }
 
@@ -271,6 +274,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
       cancellation.check();
       await fs.rename(temporary, absolute);
       committed = true;
+      NativeWorkspaceFiles.contentRevision++;
       return { path: path, bytes: bytes.byteLength, written: true, before: before, after: content, created: !existing, version: version };
     } catch (error) {
       if (!committed) {
@@ -432,7 +436,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     const current = await this.readUnlocked(path, new Cancellation());
     if (current.content !== expected) { throw new Error(t("文件已变化，请重新打开并检查。")); }
     if (baseline.existed) { await this.mutate(path, baseline.content, [], new Cancellation(), { version: current.version }, false); }
-    else { await fs.unlink(await this.checkedPath(path)); }
+    else { await fs.unlink(await this.checkedPath(path)); NativeWorkspaceFiles.contentRevision++; }
     await this.acceptUnlocked(path);
   }
 

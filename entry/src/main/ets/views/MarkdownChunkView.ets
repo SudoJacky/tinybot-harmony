@@ -46,12 +46,24 @@ export struct MarkdownChunkView {
   private reveal: StreamReveal = new StreamReveal();
   private revealTimer: number = -1;
   private mounted: boolean = false;
-  aboutToAppear(): void { Diagnostics.adjust('render.chunks', 1); this.refresh(); this.mounted = true; }
+  private disposed: boolean = false;
+  private generation: number = 0;
+  private imagePreviewBuilder: CustomBuilder = () => {
+    if (!this.disposed && this.previewing) { this.imagePreview(); }
+  };
+  aboutToAppear(): void { this.generation++; this.disposed = false; Diagnostics.adjust('render.chunks', 1); this.refresh(); this.mounted = true; }
   aboutToDisappear(): void {
+    this.generation++;
+    this.disposed = true;
     Diagnostics.adjust('render.chunks', -1);
     this.mounted = false; clearTimeout(this.copyTimer); clearTimeout(this.revealTimer); this.revealTimer = -1;
   }
+  private afterRender(action: () => void): void {
+    const generation = this.generation;
+    Promise.resolve().then(() => { if (!this.disposed && generation === this.generation) { action(); } });
+  }
   private refresh(): void {
+    if (this.disposed) { return; }
     const mark = Diagnostics.begin(this.perfId);
     const now = Date.now();
     const blocks = this.model.blocks;
@@ -86,8 +98,9 @@ export struct MarkdownChunkView {
     this.scheduleReveal();
     if (Diagnostics.recording) { Diagnostics.end('render.chunkRefresh', mark, { blocks: blocks.length, visible: this.visible ? 1 : 0, blockOffset: this.blockOffset }); }
   }
-  private invalidateMeasure(): void { this.measuredHeight = 0; }
+  private invalidateMeasure(): void { if (!this.disposed) { this.measuredHeight = 0; } }
   private refreshCode(): void {
+    if (this.disposed) { return; }
     this.highlighted.forEach((_value: string, index: number) => {
       if (index >= this.model.blocks.length) { this.highlighted.delete(index); }
     });
@@ -140,9 +153,12 @@ export struct MarkdownChunkView {
   private async copy(text: string, index: number): Promise<void> {
     try {
       await pasteboard.getSystemPasteboard().setData(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text));
+      if (this.disposed) { return; }
       this.copied = index; clearTimeout(this.copyTimer);
-      this.copyTimer = setTimeout(() => { this.copied = -1; this.copyTimer = -1; }, 1600);
-    } catch (_) { this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t("复制失败，请长按文本复制。") }); }
+      this.copyTimer = setTimeout(() => { if (!this.disposed) { this.copied = -1; } this.copyTimer = -1; }, 1600);
+    } catch (_) {
+      if (!this.disposed) { this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t("复制失败，请长按文本复制。") }); }
+    }
   }
   private codeLines(block: MarkdownBlock): number { return block.text.split('\n').length; }
   private codeShown(block: MarkdownBlock, index: number): string {
@@ -302,10 +318,10 @@ export struct MarkdownChunkView {
         .width('100%').height(IMAGE_HEIGHT).objectFit(ImageFit.Contain)
         .borderRadius(Radius.md).backgroundColor($r('app.color.surface_variant'))
         .accessibilityText(this.imageAlt(index) || t('图片'))
-        .onError(() => {
-          if (this.imageFailed.includes(index)) { return; }
+        .onError(() => this.afterRender(() => {
+          if (this.disposed || this.imageFailed.includes(index)) { return; }
           this.imageFailed = this.imageFailed.concat([index]); this.invalidateMeasure();
-        })
+        }))
         .onClick(() => { this.previewSource = this.imageUrl(index); this.previewing = true; })
     }
   }
@@ -342,28 +358,31 @@ export struct MarkdownChunkView {
             }
           }, (_block: MarkdownBlock, index: number) => `${index}`)
         }.width('100%').alignItems(HorizontalAlign.Start)
-        .onAreaChange((previous: Area, area: Area) => { this.measuredHeight = Number(area.height);
+        .onAreaChange((previous: Area, area: Area) => this.afterRender(() => {
+          const height = Number(area.height);
+          if (this.measuredHeight !== height) { this.measuredHeight = height; }
           if (Diagnostics.recording) {
             Diagnostics.measure('layout.chunkCallback', 1, 'count');
             if (previous.height !== area.height || previous.width !== area.width) {
               Diagnostics.event('layout.chunk', { heightVp: this.measuredHeight, widthVp: Number(area.width), offset: this.blockOffset }, this.perfId);
             }
-          } })
+          } }))
       } else {
         // Preserve the exact measured extent while releasing offscreen Text/Span nodes.
         Blank().width('100%').height(this.measuredHeight)
       }
     }.width('100%').alignItems(HorizontalAlign.Start)
-    .bindContentCover($$this.previewing, this.imagePreview(), { modalTransition: ModalTransition.ALPHA })
-    .onAreaChange((_previous: Area, area: Area) => {
+    .bindContentCover($$this.previewing, this.imagePreviewBuilder, { modalTransition: ModalTransition.ALPHA })
+    .onAreaChange((_previous: Area, area: Area) => this.afterRender(() => {
       const width = Number(area.width);
       if (this.measuredWidth > 0 && width !== this.measuredWidth) { this.invalidateMeasure(); }
       this.measuredWidth = width;
-    })
-    .onVisibleAreaChange([0], (visible: boolean) => {
+    }))
+    .onVisibleAreaChange([0], (visible: boolean) => this.afterRender(() => {
       if (Diagnostics.recording) { Diagnostics.event('render.visibility', { visible: visible ? 1 : 0, heightVp: this.measuredHeight }, this.perfId); }
-      this.visible = visible; clearTimeout(this.revealTimer); this.revealTimer = -1;
+      if (this.visible !== visible) { this.visible = visible; }
+      clearTimeout(this.revealTimer); this.revealTimer = -1;
       if (visible) { this.revealTime = Date.now(); this.scheduleReveal(); }
-    })
+    }))
   }
 }

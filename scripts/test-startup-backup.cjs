@@ -29,7 +29,9 @@ async function main(){
   // Session initialization creates a manifest, but first-run identity has already been captured.
   files.add('/app/sessions-v2/index.json');working=new Map(saved);state=new StartupBackup(context);
   assert.equal((await state.find(fresh())).name,'tinybot-latest.tinybot');assert.equal(syncs,1);
-  state.finish();working=new Map(saved);state=new StartupBackup(context);assert.equal(await state.find(fresh()),undefined);assert.equal(syncs,1);
+  items.unshift({name:'tinybot-auto-11111111-1111-4111-8111-111111111111.tinybot',createdAt:200,size:100,location:2});
+  assert.equal((await state.find(fresh())).name,items[0].name,'Newest automatic backup is preferred over an older manual backup');
+  state.finish();working=new Map(saved);state=new StartupBackup(context);assert.equal(await state.find(fresh()),undefined);assert.equal(syncs,2);
   for(const upgrade of ['timestamp','manifest','legacy','completed','pending-upgrade']){
     reset();
     if(upgrade==='timestamp') info.updateTime=200;

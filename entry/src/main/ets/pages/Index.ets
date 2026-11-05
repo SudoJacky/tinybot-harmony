@@ -65,6 +65,7 @@ import { StartupBackupDialog } from '../views/StartupBackupDialog';
 import { HuaweiAccount, huaweiAccount } from '../services/HuaweiAccount';
 import { HuaweiAccountPanel } from '../views/HuaweiAccountPanel';
 import { HostedPrivacy, hostedPrivacy } from '../services/HostedPrivacy';
+import { autoCloudBackup } from '../services/AutoCloudBackup';
 import { announcements } from '../services/Announcements';
 import { AnnouncementDialog } from '../views/AnnouncementDialog';
 import { Diagnostics } from '../model/Diagnostics';
@@ -190,6 +191,7 @@ struct Index {
       catch (error) { Diagnostics.log('warn', 'backup', 'startup_capture_failed', undefined, error as Error); }
       this.session = createNativeSessionService(context.filesDir, context.getApplicationContext().filesDir, this.approval, context, this.browser);
       this.session.subscribe((event) => {
+        if (event.kind !== 'state') { autoCloudBackup.changed(); }
         if (event.state.canNavigate && ShareInbox.peek()) { this.receiveShare(); }
         if (event.kind === 'task-complete' && event.threadId) { this.taskCompleted(event.threadId); }
       });
@@ -199,6 +201,11 @@ struct Index {
       if (!this.panelUpdates) { this.panelUpdates = new PanelExpiryUpdates(new LifePanels(context.getApplicationContext().filesDir)); }
       this.updateLifePanelActivity();
       this.panelLinkChanged();
+      try {
+        autoCloudBackup.initialize(context, () => this.app.exportSnapshot(), () =>
+          this.app.ready && !this.app.saving && !this.app.saveError && !this.startupBackupChecking &&
+          !this.startupBackupRestoring && !this.startupBackupDialog);
+      } catch (error) { Diagnostics.log('warn', 'backup', 'auto_settings_failed', undefined, error as Error); }
       ShareInbox.subscribe(() => this.receiveShare());
       if (this.app.ready && !this.unsubscribeLaunch) {
         this.unsubscribeLaunch = LaunchActions.subscribe(() => this.receiveLaunch());
@@ -344,6 +351,7 @@ struct Index {
     if (this.privacyAllowed) { this.startBusiness(); }
     else {
       this.panelUpdates?.setActive(false);
+      autoCloudBackup.dispose();
       this.closeAnnouncement();
       this.closeReviewInvitation(); this.startupBackupDialog?.close();
       this.app.stop(); this.browser.close(); this.browserExpanded = false; this.showToolScope = false;
@@ -818,6 +826,7 @@ struct Index {
   aboutToDisappear(): void {
     this.privacy.onPageHide();
     this.panelUpdates?.setActive(false);
+    autoCloudBackup.dispose();
     this.reviewDisposed = true; this.closeReviewInvitation(); this.startupBackupDialog?.close();
     this.closeAnnouncement();
     this.unsubscribeLaunch?.(); this.unsubscribeLaunch = undefined;
@@ -1433,10 +1442,11 @@ struct Index {
             Button(t('退出应用')).id('exit-debug-privacy').attributeModifier(Btn.tonal).onClick(() => this.privacy.exit())
           } else if (this.privacy.checking) {
             Text(t('正在确认隐私授权…')).id('privacy-status').fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
-          } else if (this.privacy.error) {
-            Text(this.privacy.error).id('privacy-status').fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
-            Button(t('重试')).id('retry-privacy').attributeModifier(Btn.primary)
-              .enabled(!this.privacy.busy).onClick(() => this.privacy.refresh('manual_retry'))
+          } else {
+            Text(this.privacy.error || t('请在系统弹窗中确认隐私政策；若弹窗未出现，请点击“继续授权”。'))
+              .id('privacy-status').fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
+            Button(this.privacy.error ? t('重试') : t('继续授权')).id('retry-privacy').attributeModifier(Btn.primary)
+              .enabled(!this.privacy.busy).onClick(() => this.privacy.requestConsent())
             Button(t('退出应用')).id('exit-privacy').attributeModifier(Btn.tonal).onClick(() => this.privacy.exit())
           }
         }.padding(Space.xl).width('100%').height('100%').justifyContent(FlexAlign.Center)
@@ -1471,7 +1481,7 @@ struct Index {
                 onBrowser: () => { this.setBrowserExpanded(true); this.openDetailTab('browser'); },
                 onSettings: () => this.openSettings(),
                 topInset: this.windowWidth >= 840 ? 0 : CHAT_HEADER_HEIGHT,
-                onHeaderProgress: (progress: number): void => { this.headerProgress = progress; },
+                onHeaderProgress: (progress: number): void => { if (this.headerProgress !== progress) { this.headerProgress = progress; } },
                 voiceRequest: this.voiceRequest, onVoiceShortcutConsumed: () => { this.voiceRequest = ''; },
                 activeThreadId: this.app.active.id, speechEnabled: this.chatVisible && !this.drawerOpen && !this.drawerDragging && (!this.detailOpen() || this.workbench().docked),
                 onHistoryDragStart: (event: GestureEvent) => this.startDrawerDrag(event, true),
@@ -1505,6 +1515,7 @@ struct Index {
     .title({ builder: this.header, height: CHAT_HEADER_HEIGHT }, {
       barStyle: this.windowWidth >= 840 ? BarStyle.STANDARD : BarStyle.STACK,
       backgroundColor: this.windowWidth >= 840 ? $r('app.color.surface') : Color.Transparent,
+      systemMaterial: this.appearance.noMaterial,
       backgroundEffect: { radius: 0, color: Color.Transparent }
     })
     .hideBackButton(true).titleMode(NavigationTitleMode.Mini).hideToolBar(true).mode(NavigationMode.Stack)
@@ -1606,7 +1617,7 @@ struct Index {
     .backgroundColor($r('app.color.page_background'))
     .onTouch((event: TouchEvent) => { if (event.type === TouchType.Down) { this.cancelReviewOffer(); } })
     .onAreaChange((_old: Area, area: Area) => this.windowChanged(Number(area.width)))
-    .bindSheet($$this.showToolScope, this.toolScopeSheet(), { title: { title: t('工具范围') },
+    .bindSheet($$this.showToolScope, this.toolScopeSheet(), { radius: Radius.sheet, title: { title: t('工具范围') },
       height: this.app.active.agentMode === 'custom' ? SheetSize.LARGE : SheetSize.FIT_CONTENT,
       detents: this.app.active.agentMode === 'custom' ? [SheetSize.LARGE] : undefined,
       preferType: this.windowWidth >= 840 ? SheetType.CENTER : SheetType.BOTTOM,

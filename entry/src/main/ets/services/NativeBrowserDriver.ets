@@ -18,7 +18,13 @@ export interface NativeBrowserCapture extends AnnotationPage { pixel: image.Pixe
 
 export class NativeBrowserDriver implements BrowserDriver {
   previewRuntime: PreviewBrowserRuntime = new PreviewBrowserRuntime();
-  controller: webview.WebviewController = new webview.WebviewController();
+  private webController?: webview.WebviewController;
+  get controller(): webview.WebviewController {
+    // The retained browser host exists even before a tab is opened. Constructing
+    // its native controller there loads ArkWeb into otherwise native chat sessions.
+    if (!this.webController) { this.webController = new webview.WebviewController(); }
+    return this.webController;
+  }
   private browser: BrowserSession;
   private initialized: boolean = false;
   private loading: boolean = false;
@@ -96,7 +102,7 @@ export class NativeBrowserDriver implements BrowserDriver {
   async open(url: string): Promise<void> {
     if (this.browser.preview) {
       this.previewRuntime.detach(); this.browser.preview = undefined; this.browser.previewSpec = '';
-      this.controller = new webview.WebviewController(); this.initialized = false; this.loading = false;
+      this.webController = new webview.WebviewController(); this.initialized = false; this.loading = false;
       this.browser.invalidateObservation();
     }
     await this.ready();

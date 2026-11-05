@@ -124,20 +124,23 @@ function card(wide) {
   }
   console.log('PASS shared files reveal the phone chat, preserve editor drafts and retain docked tablet panes while other chats run');
 
-  const panel = controller('views/ChatPanel', 'ChatPanel', ['receiveVoiceShortcut', 'speechAvailabilityChanged', 'speechThreadChanged']);
+  const panel = controller('views/ChatPanel', 'ChatPanel', ['receiveVoiceShortcut', 'speechAvailabilityChanged', 'speechThreadChanged', 'afterRender', 'publishHeaderProgress']);
+  panel.composerMounted = true; panel.lifecycle = 0;
+  const renderCallbacks = () => new Promise(setImmediate);
   let starts = 0, stops = 0, consumed = 0;
   panel.reading = { stop: () => stops++ }; panel.endSpeech = () => {}; panel.onHeaderProgress = () => {};
   panel.cancelAttachmentDrop = () => {};
   panel.cancelPlusAction = () => {}; panel.focusOwner = 0;
   panel.enterVoiceMode = () => starts++; panel.onVoiceShortcutConsumed = () => consumed++;
   panel.voiceRequest = 'new'; panel.activeThreadId = 'old'; panel.thread = { id: 'old' }; panel.speechEnabled = false;
-  panel.receiveVoiceShortcut(); assert.equal(starts, 0);
-  panel.activeThreadId = 'new'; panel.thread.id = 'new'; panel.speechThreadChanged(); assert.equal(starts, 0);
-  panel.speechEnabled = true; panel.speechAvailabilityChanged(); assert.equal(starts, 1); assert.equal(consumed, 1);
-  panel.receiveVoiceShortcut(); panel.speechAvailabilityChanged(); assert.equal(starts, 1);
-  panel.speechEnabled = false; panel.speechAvailabilityChanged(); assert.ok(stops >= 2);
+  panel.app = { active: panel.thread };
+  panel.receiveVoiceShortcut(); await renderCallbacks(); assert.equal(starts, 0);
+  panel.activeThreadId = 'new'; panel.thread.id = 'new'; panel.speechThreadChanged(); await renderCallbacks(); assert.equal(starts, 0);
+  panel.speechEnabled = true; panel.speechAvailabilityChanged(); await renderCallbacks(); assert.equal(starts, 1); assert.equal(consumed, 1);
+  panel.receiveVoiceShortcut(); panel.speechAvailabilityChanged(); await renderCallbacks(); assert.equal(starts, 1);
+  panel.speechEnabled = false; panel.speechAvailabilityChanged(); await renderCallbacks(); assert.ok(stops >= 2);
   foreground = false; panel.voiceRequest = 'next'; panel.activeThreadId = 'next'; panel.thread.id = 'next';
-  panel.speechEnabled = true; panel.receiveVoiceShortcut(); foreground = true; panel.receiveVoiceShortcut();
+  panel.speechEnabled = true; panel.receiveVoiceShortcut(); await renderCallbacks(); foreground = true; panel.receiveVoiceShortcut(); await renderCallbacks();
   assert.equal(starts, 1);
   console.log('PASS voice waits for the target chat and visible page; consumed or background requests cannot record again');
 

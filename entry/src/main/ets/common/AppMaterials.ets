@@ -20,22 +20,30 @@ export class AppMaterials {
   // API availability does not imply device support. Unsupported API-26 devices
   // accept ImmersiveMaterial but do not render it, leaving overlay content exposed.
   // A subsequent construction failure also disables material for the session.
-  private static readonly supported: boolean = ApiLevel.material && uiMaterial.isImmersiveMaterialSupported();
-  private static unavailable: boolean = !AppMaterials.supported;
+  private static supported?: boolean;
+  private static unavailable: boolean = false;
 
   // True when immersive material can actually be applied on this system.
-  static get available(): boolean { return !AppMaterials.unavailable; }
+  static get available(): boolean {
+    // Native support is not ready during module evaluation, before the UI context exists.
+    // Resolve it at first rendering use instead of caching a transient false for the process.
+    if (AppMaterials.supported === undefined) {
+      AppMaterials.supported = ApiLevel.material && uiMaterial.isImmersiveMaterialSupported();
+    }
+    return AppMaterials.supported && !AppMaterials.unavailable;
+  }
 
   // Called from settings after startup, when the native diagnostic sink is installed.
-  // Compare with the import-time result without changing the rendering decision.
+  // Compare with the first rendering result without changing the rendering decision.
   static reportSupport(): void {
+    const available = AppMaterials.available;
     const supported = ApiLevel.material && uiMaterial.isImmersiveMaterialSupported();
     const failed = AppMaterials.supported && AppMaterials.unavailable;
     const reason = !ApiLevel.material ? 'api_level' : supported !== AppMaterials.supported ? 'capability_changed' :
       failed ? 'construction_failed' : !supported ? 'device_unsupported' : 'supported';
-    Diagnostics.log(AppMaterials.available && reason === 'supported' ? 'info' : 'warn', 'appearance', 'material_support', {
+    Diagnostics.log(available && reason === 'supported' ? 'info' : 'warn', 'appearance', 'material_support', {
       sdk: ApiLevel.sdk, initialSupported: AppMaterials.supported, supported: supported,
-      available: AppMaterials.available, failed: failed, reason: reason
+      available: available, failed: failed, reason: reason
     });
   }
 

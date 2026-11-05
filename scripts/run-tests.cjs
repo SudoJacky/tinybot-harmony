@@ -50,6 +50,7 @@ const suites = {
     'test-speech-native.cjs',
     'test-storage-usage.cjs',
     'test-startup-backup.cjs',
+    'test-auto-cloud-backup.cjs',
     'test-stream-reveal.cjs',
     'test-system-bars-native.cjs',
     'test-team-toggle.cjs',
@@ -83,6 +84,7 @@ const suites = {
     'test-launch-actions-renderer.cjs',
     'test-legal-documents.cjs',
     'test-markdown-performance.cjs',
+    'test-render-callbacks.cjs',
     'test-message-actions-renderer.cjs',
     'test-message-images-renderer.cjs',
     'test-onboarding.cjs',
@@ -126,7 +128,7 @@ function selectedTests(suite) {
   const stale = registered.filter(name => !present.includes(name));
   if (missing.length || stale.length) throw Error('Test manifest mismatch. Unregistered: ' + missing.join(', ') + '; missing files: ' + stale.join(', '));
   const names = suite === 'debug' || suite === 'release' ? suites.source.concat(suites[suite]) : suites[suite];
-  return names.map(file => ({ file, args: suite === 'debug' && ['test-feedback.cjs', 'test-file-attachments.cjs', 'test-startup-backup.cjs', 'test-provider-balance.cjs'].includes(file) ? ['--ui'] : [] }));
+  return names.map(file => ({ file, args: suite === 'debug' && ['test-feedback.cjs', 'test-file-attachments.cjs', 'test-startup-backup.cjs', 'test-provider-balance.cjs', 'test-auto-cloud-backup.cjs'].includes(file) ? ['--ui'] : [] }));
 }
 
 function main(args) {

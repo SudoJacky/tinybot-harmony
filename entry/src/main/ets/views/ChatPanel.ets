@@ -66,8 +66,12 @@ export struct ChatPanel {
   @ObjectLink @Watch('syncMessages') app: ChatViewModel;
   @ObjectLink @Watch('syncMessages') thread: ThreadViewModel;
   private messageSource: MessageListSource = new MessageListSource();
+  private messageSyncRevision: number = 0;
   private syncMessages(): void {
-    this.messageSource.update(this.thread.id, this.app.visibleMessages);
+    const revision = ++this.messageSyncRevision;
+    this.afterRender(() => {
+      if (revision === this.messageSyncRevision) { this.messageSource.update(this.thread.id, this.app.visibleMessages); }
+    });
   }
   @Prop topInset: number = 0;
   @Prop workbench: boolean = false;
@@ -142,6 +146,10 @@ export struct ChatPanel {
   @State private composerFocused: boolean = false;
   @State private composerSelectionStart: number = -1;
   @State private composerSelectionEnd: number = -1;
+  private composerMounted: boolean = false;
+  private lifecycle: number = 0;
+  private composerEditRevision: number = 0;
+  private composerSelectionRevision: number = 0;
   @State private sendingMessageId: string = '';
   @State private sendOrigin: SendOrigin | undefined = undefined;
   @State private viewport: WindowViewport = new WindowViewport();
@@ -175,11 +183,13 @@ export struct ChatPanel {
   }
 
   aboutToAppear(): void {
+    this.lifecycle++;
+    this.composerMounted = true;
     this.syncMessages();
     systemInsets(this.getUIContext()).then((insets: number[]) => { this.insetBottom = insets[1]; });
-    this.viewport.onKeyboard = (shown: boolean): void => {
+    this.viewport.onKeyboard = (shown: boolean): void => this.afterRender(() => {
       if (shown && this.composerFocused) { this.inspectingOutput = false; this.followOutput = true; this.follow(); }
-    };
+    });
     this.viewport.observe(this.getUIContext());
     this.speech.onResult = (text: string): void => {
       if (!this.dictationDraft || this.speechThreadId !== this.app.active.id || !this.speechEnabled) {
@@ -198,6 +208,9 @@ export struct ChatPanel {
   }
 
   aboutToDisappear(): void {
+    this.lifecycle++;
+    this.composerMounted = false;
+    this.composerEditRevision++; this.composerSelectionRevision++;
     this.focusOwner++;
     this.cancelPlusAction();
     this.cancelAttachmentDrop();
@@ -227,29 +240,46 @@ export struct ChatPanel {
     return this.speech.phase === 'preparing' || this.speech.phase === 'listening' || this.speech.phase === 'finishing';
   }
   private speechAvailabilityChanged(): void {
-    if (!this.speechEnabled) { this.focusOwner++; this.cancelPlusAction(); this.endSpeech(); this.reading.stop(); }
-    else { this.receiveVoiceShortcut(); }
+    if (!this.speechEnabled) { this.focusOwner++; }
+    this.afterRender(() => {
+      if (!this.speechEnabled) { this.cancelPlusAction(); this.endSpeech(); this.reading.stop(); }
+      else { this.receiveVoiceShortcut(); }
+    });
   }
   private focusForegroundChanged(): void {
-    if (!this.foreground) { this.focusOwner++; this.keyboardFocusRequest++; this.cancelPlusAction(); }
+    if (!this.foreground) {
+      this.focusOwner++; this.keyboardFocusRequest++;
+      this.afterRender(() => { if (!this.foreground) { this.cancelPlusAction(); } });
+    }
   }
   private speechThreadChanged(): void {
-    this.cancelPlusAction();
-    this.cancelAttachmentDrop();
-    this.composerSelectionStart = -1; this.composerSelectionEnd = -1;
-    this.lastHeaderProgress = -1;
-    this.onHeaderProgress(0);
-    this.sendingMessageId = ''; this.sendOrigin = undefined;
-    if (this.speechThreadId !== this.activeThreadId) { this.endSpeech(); }
-    this.reading.stop();
-    this.receiveVoiceShortcut();
+    this.composerEditRevision++; this.composerSelectionRevision++;
+    this.focusOwner++;
+    const threadId = this.activeThreadId;
+    this.afterRender(() => {
+      if (this.activeThreadId !== threadId) { return; }
+      this.cancelPlusAction(); this.cancelAttachmentDrop();
+      if (this.composerSelectionStart !== -1) { this.composerSelectionStart = -1; }
+      if (this.composerSelectionEnd !== -1) { this.composerSelectionEnd = -1; }
+      this.lastHeaderProgress = -1; this.publishHeaderProgress(0);
+      if (this.sendingMessageId) { this.sendingMessageId = ''; }
+      if (this.sendOrigin) { this.sendOrigin = undefined; }
+      if (this.speechThreadId !== this.activeThreadId) { this.endSpeech(); }
+      this.reading.stop(); this.receiveVoiceShortcut();
+    });
   }
   private receiveVoiceShortcut(): void {
+    this.afterRender(() => {
     if (!this.voiceRequest || this.voiceRequest === this.consumedVoiceRequest ||
       this.voiceRequest !== this.activeThreadId || this.voiceRequest !== this.thread.id || !this.speechEnabled) { return; }
     this.consumedVoiceRequest = this.voiceRequest;
     this.onVoiceShortcutConsumed();
     if (LaunchActions.isForeground()) { this.enterVoiceMode(); }
+    });
+  }
+  private afterRender(action: () => void): void {
+    const lifecycle = this.lifecycle;
+    Promise.resolve().then(() => { if (this.composerMounted && lifecycle === this.lifecycle) { action(); } });
   }
   private readAnswer(id: string): void {
     if (this.reading.messageId === id) { this.reading.stop(); return; }
@@ -392,6 +422,24 @@ export struct ChatPanel {
     const lastIndex = earlier + this.app.visibleMessages.length + team - 1;
     this.scroller.scrollToIndex(lastIndex, true, ScrollAlign.END);
   }
+  private updateScrollState(reachedEnd: boolean = false): void {
+    const threadId = this.thread.id;
+    // Native layout/snapshot flushes can invoke scrolling callbacks inside a render.
+    Promise.resolve().then(() => {
+      if (!this.composerMounted || this.thread.id !== threadId) { return; }
+      const atEnd = this.scroller.isAtEnd();
+      if (this.atBottom !== atEnd) { this.atBottom = atEnd; }
+      if (reachedEnd && atEnd && !this.inspectingOutput && !this.followOutput) { this.followOutput = true; }
+      this.updateHeaderProgress();
+    });
+  }
+  private publishHeaderProgress(progress: number): void {
+    const threadId = this.thread.id;
+    // Prop watchers/onAppear may run while the parent is rendering this panel.
+    Promise.resolve().then(() => {
+      if (this.composerMounted && this.thread.id === threadId && this.app.active.id === threadId) { this.onHeaderProgress(progress); }
+    });
+  }
 
   private updateHeaderProgress(): void {
     // Item coordinates already include contentStartOffset; no accumulated gesture deltas or offset baselines.
@@ -401,7 +449,7 @@ export struct ChatPanel {
     const progress = fraction * fraction * (3 - 2 * fraction);
     if (progress !== this.lastHeaderProgress) {
       this.lastHeaderProgress = progress;
-      this.onHeaderProgress(progress);
+      this.publishHeaderProgress(progress);
     }
   }
 
@@ -739,7 +787,7 @@ export struct ChatPanel {
         }
       }.id('workbench-welcome').width('100%').height('100%').justifyContent(FlexAlign.Center)
         .padding({ left: 20, right: 20 })
-        .onAppear(() => { this.lastHeaderProgress = 0; this.onHeaderProgress(0); })
+        .onAppear(() => { this.lastHeaderProgress = 0; this.publishHeaderProgress(0); })
     } else {
     Scroll() {
       Column({ space: Space.md }) {
@@ -765,7 +813,7 @@ export struct ChatPanel {
       }.width('100%').constraintSize({ minHeight: '100%' })
       .padding({ left: 20, right: 20, top: this.topInset + Space.lg, bottom: Space.md })
     }.layoutWeight(1).width('100%').scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring)
-      .onAppear(() => { this.lastHeaderProgress = 0; this.onHeaderProgress(0); })
+      .onAppear(() => { this.lastHeaderProgress = 0; this.publishHeaderProgress(0); })
     }
   }
 
@@ -815,8 +863,8 @@ export struct ChatPanel {
       .onScrollStart(() => this.setScrollActivity(true))
       .onScrollStop(() => this.stopScrollActivity())
       .onTouch((event: TouchEvent) => { if (event.type === TouchType.Down) { this.followOutput = false; } })
-      .onReachEnd(() => { if (!this.inspectingOutput) { this.followOutput = true; } })
-      .onDidScroll(() => { this.atBottom = this.scroller.isAtEnd(); this.updateHeaderProgress(); })
+      .onReachEnd(() => this.updateScrollState(true))
+      .onDidScroll(() => this.updateScrollState())
       .onAreaChange((previous: Area, current: Area) => {
         // RESIZE moves the composer but does not scroll the List. Follow its final viewport size.
         if (previous.height !== current.height && this.composerFocused && this.viewport.keyboardHeight > 0) { this.follow(); }
@@ -1369,6 +1417,57 @@ export struct ChatPanel {
         onStateChange: (event) => { this.showPlusMenu = event.isVisible; } })
   }
 
+  // TextArea can report text/selection synchronously while ArkUI rebuilds it.
+  // Commit after that render, and never apply an old editor callback to a new chat.
+  private composerChanged(threadId: string, value: string): void {
+    if (!this.composerMounted || !this.app.ready || this.thread.id !== threadId ||
+      this.app.active.id !== threadId || this.speechActive()) { return; }
+    const revision = ++this.composerEditRevision;
+    const previous = this.app.draft;
+    if (previous === value) { return; }
+    Promise.resolve().then(() => {
+      if (!this.composerMounted || !this.app.ready || revision !== this.composerEditRevision ||
+        this.thread.id !== threadId || this.app.active.id !== threadId || this.app.draft !== previous || this.speechActive()) { return; }
+      this.app.setDraft(value);
+    });
+  }
+
+  private composerSelectionChanged(threadId: string, start: number, end: number): void {
+    if (!this.composerMounted || this.thread.id !== threadId || this.app.active.id !== threadId) { return; }
+    const revision = ++this.composerSelectionRevision;
+    Promise.resolve().then(() => {
+      if (!this.composerMounted || revision !== this.composerSelectionRevision ||
+        this.thread.id !== threadId || this.app.active.id !== threadId) { return; }
+      if (this.composerSelectionStart !== start) { this.composerSelectionStart = start; }
+      if (this.composerSelectionEnd !== end) { this.composerSelectionEnd = end; }
+    });
+  }
+
+  @Builder
+  composerEditor(threadId: string) {
+      TextArea({ text: this.app.draft, controller: this.composerController,
+        placeholder: this.speechActive() ? t('请说出要输入的内容') : this.thread.archived ? t("已归档的对话无法继续") : this.app.generating ? t("补充要求，或排队下一项任务…")
+          : !this.composerExpanded() ? t('输入消息…') : this.thread.teamEnabled ? t("描述目标，主 Agent 会按需组建团队…") : t('输入消息，/ 命令，$ 技能，@ 引用会话') }).fontFamily(this.appearance.fontFamily)
+        .id('composer').fontSize(Font.body).fontColor($r('app.color.text_primary'))
+        .allowDrop(ATTACHMENT_DROP_TYPES.concat(['general.plain-text', 'general.hyperlink', 'general.html']))
+        .onDrop((event: DragEvent) => this.composerDrop(event))
+        .placeholderColor($r('app.color.text_tertiary')).backgroundColor(Color.Transparent)
+        .width('100%')
+        .constraintSize({ minHeight: this.workbench && !this.voiceMode ? 88 : 44, maxHeight: this.composerExpanded() ? 160 : 44 }).maxLength(24000)
+        .padding({ left: this.composerExpanded() ? 6 : 46, right: this.composerExpanded() ? 6 : 42,
+          top: 10, bottom: this.composerExpanded() ? 4 : 10 }).borderRadius(0)
+        .align(this.composerExpanded() ? Alignment.TopStart : Alignment.Start)
+        .animation({ duration: Motion.medium, curve: Motion.standard })
+        .visibility(this.voiceMode ? Visibility.Hidden : Visibility.Visible)
+        .enabled(!this.thread.archived).focusable(!this.voiceMode && !this.speechActive()).enableKeyboardOnFocus(!this.voiceMode && !this.speechActive())
+        .onWillChange((value: EditableTextChangeValue) => !this.speechActive() || value.content === this.app.draft)
+        .onChange((value: string) => this.composerChanged(threadId, value))
+        .onTextSelectionChange((start: number, end: number) => this.composerSelectionChanged(threadId, start, end))
+        .onFocus(() => { this.composerFocused = true; this.inspectingOutput = false; this.followOutput = true; this.follow(); })
+        .onBlur(() => { this.composerFocused = false; })
+        .onEditChange((editing: boolean) => { this.composerFocused = editing; })
+  }
+
   @Builder
   composer() {
     Stack({ alignContent: Alignment.Bottom }) {
@@ -1391,31 +1490,11 @@ export struct ChatPanel {
       if (this.thread.attachments.length > 0 || this.importing) {
         this.attachmentStrip()
       }
-      TextArea({ text: this.app.draft, controller: this.composerController,
-        placeholder: this.speechActive() ? t('请说出要输入的内容') : this.thread.archived ? t("已归档的对话无法继续") : this.app.generating ? t("补充要求，或排队下一项任务…")
-          : !this.composerExpanded() ? t('输入消息…') : this.thread.teamEnabled ? t("描述目标，主 Agent 会按需组建团队…") : t('输入消息，/ 命令，$ 技能，@ 引用会话') }).fontFamily(this.appearance.fontFamily)
-        .id('composer').fontSize(Font.body).fontColor($r('app.color.text_primary'))
-        .allowDrop(ATTACHMENT_DROP_TYPES.concat(['general.plain-text', 'general.hyperlink', 'general.html']))
-        .onDrop((event: DragEvent) => this.composerDrop(event))
-        .placeholderColor($r('app.color.text_tertiary')).backgroundColor(Color.Transparent)
-        .width('100%')
-        .constraintSize({ minHeight: this.workbench && !this.voiceMode ? 88 : 44, maxHeight: this.composerExpanded() ? 160 : 44 }).maxLength(24000)
-        .padding({ left: this.composerExpanded() ? 6 : 46, right: this.composerExpanded() ? 6 : 42,
-          top: 10, bottom: this.composerExpanded() ? 4 : 10 }).borderRadius(0)
-        .align(this.composerExpanded() ? Alignment.TopStart : Alignment.Start)
-        .animation({ duration: Motion.medium, curve: Motion.standard })
-        .visibility(this.voiceMode ? Visibility.Hidden : Visibility.Visible)
-        .enabled(!this.thread.archived).focusable(!this.voiceMode && !this.speechActive()).enableKeyboardOnFocus(!this.voiceMode && !this.speechActive())
-        .onWillChange((value: EditableTextChangeValue) => !this.speechActive() || value.content === this.app.draft)
-        .onChange((value: string) => {
-          if (!this.speechActive()) { this.app.setDraft(value); }
-        })
-        .onTextSelectionChange((start: number, end: number) => {
-          this.composerSelectionStart = start; this.composerSelectionEnd = end;
-        })
-        .onFocus(() => { this.composerFocused = true; this.inspectingOutput = false; this.followOutput = true; this.follow(); })
-        .onBlur(() => { this.composerFocused = false; })
-        .onEditChange((editing: boolean) => { this.composerFocused = editing; })
+      // A native editor owns one chat. Recreate only it when the chat changes, so
+      // retained callbacks cannot keep the previous builder argument or edit another draft.
+      ForEach([this.thread.id], (threadId: string) => {
+        this.composerEditor(threadId)
+      }, (threadId: string) => threadId)
     }
     .width('100%').padding({ left: 8, right: 8, top: this.composerExpanded() ? 4 : 6,
       bottom: this.composerExpanded() ? (this.speechActive() ? 52 : 48) : 6 })
@@ -1465,7 +1544,7 @@ export struct ChatPanel {
         .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
         .accessibilityText(this.app.contextLabel)
         .onClick(() => { this.showContext = true; })
-        .bindSheet($$this.showContext, this.contextSheet(), {
+        .bindSheet($$this.showContext, this.contextSheet(), { radius: Radius.sheet,
           title: { title: t("上下文") }, detents: [SheetSize.LARGE, SheetSize.MEDIUM],
           detentSelection: SheetSize.LARGE, preferType: this.workbench ? SheetType.CENTER : SheetType.BOTTOM,
           maskColor: '#33000000', dragBar: true,
@@ -1499,7 +1578,7 @@ export struct ChatPanel {
           .id('toggle-input-queue').height(30).padding({ left: 10, right: 12 }).borderRadius(15)
           .backgroundColor(this.appearance.accentContainer)
           .onClick(() => { this.showQueue = true; })
-          .bindSheet($$this.showQueue, this.queueSheet(), {
+          .bindSheet($$this.showQueue, this.queueSheet(), { radius: Radius.sheet,
             title: { title: t("待发送队列") }, detents: [SheetSize.MEDIUM, SheetSize.LARGE], dragBar: true,
             backgroundColor: $r('app.color.page_background')
           })
@@ -1588,7 +1667,7 @@ export struct ChatPanel {
       : { radius: 12, color: '#0A000000', offsetY: 2 })
     .animation({ duration: Motion.medium, curve: Motion.standard })
     // Anchor the sheet to the stable shell, not an add button that moves when the composer expands.
-    .bindSheet($$this.showPlus, this.plusSheet(), {
+    .bindSheet($$this.showPlus, this.plusSheet(), { radius: Radius.sheet,
       detents: [SheetSize.MEDIUM, SheetSize.LARGE], dragBar: true, showClose: false,
       backgroundColor: $r('app.color.page_background'), onDisappear: () => this.finishPlusAction()
     })
@@ -1739,7 +1818,7 @@ export struct ChatPanel {
       }.width('100%').padding({ left: this.workbench ? 24 : 10, right: this.workbench ? 24 : 10, bottom: Space.sm })
       Blank().height(0).layoutWeight(this.centeredWelcome() ? 1 : 0)
     }.height('100%').width('100%')
-      .bindSheet($$this.showMemoryDraft, this.memoryDraftSheet(), { title: { title: t("提炼并确认记忆") }, detents: [SheetSize.LARGE], dragBar: true, keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY,
+      .bindSheet($$this.showMemoryDraft, this.memoryDraftSheet(), { radius: Radius.sheet, title: { title: t("提炼并确认记忆") }, detents: [SheetSize.LARGE], dragBar: true, keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY,
         backgroundColor: $r('app.color.page_background') })
       if (this.dropHover) {
         Column() {

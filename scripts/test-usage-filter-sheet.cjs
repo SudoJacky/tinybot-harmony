@@ -19,7 +19,7 @@ function visit(node) {
 visit(component);
 assert.ok(sheetCall);
 let binding;
-const sandbox = { exports: {}, clearTimeout, SheetSize: { FIT_CONTENT: 0 }, List: {
+const sandbox = { exports: {}, clearTimeout, Radius: { sheet: {} }, SheetSize: { FIT_CONTENT: 0 }, List: {
   bindSheet: (visible, builder, options) => { binding = { visible, options }; }
 } };
 vm.runInNewContext(ts.transpileModule(`class Page { ${methods}

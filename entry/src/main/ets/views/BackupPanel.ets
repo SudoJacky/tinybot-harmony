@@ -5,15 +5,17 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { Diagnostics } from '../model/Diagnostics';
 import { exportBackup, readBackup } from '../services/Backup';
 import { CloudBackup, CloudBackupItem, cloudBackupError } from '../services/CloudBackup';
+import { AutoCloudBackup, autoCloudBackup } from '../services/AutoCloudBackup';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { Space, Radius } from '../common/Theme';
-import { Banner, GroupCard, IconButton, NavRow, RowDivider, SectionHeader } from '../common/Widgets';
+import { Banner, GroupCard, IconButton, NavRow, RowDivider, SectionHeader, SwitchRow } from '../common/Widgets';
 
 @Component
 export struct BackupPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   @StorageProp('tinybot.foreground') @Watch('foregroundChanged') private foreground: boolean = true;
+  @State private automatic: AutoCloudBackup = autoCloudBackup;
   @State private busy: boolean = false;
   @State private error: string = '';
   @State private cloudError: string = '';
@@ -36,6 +38,10 @@ export struct BackupPanel {
 
   private context(): common.UIAbilityContext { return this.getUIContext().getHostContext() as common.UIAbilityContext; }
   private locked(): boolean { return this.app.busy || this.busy; }
+  private toggleAutomatic(value: boolean): void {
+    try { this.automatic.setEnabled(value); }
+    catch (error) { this.cloudError = t('无法保存自动备份设置：{0}', [(error as Error).message]); }
+  }
 
   private loadCloudList(recoverAvailability: boolean = false): Promise<void> {
     if (!this.cloudListing) {
@@ -48,7 +54,7 @@ export struct BackupPanel {
     try {
       const items = await CloudBackup.list(this.context());
       if (this.visible) {
-        this.cloudItems = items; this.cloudLoaded = true; this.cloudListError = '';
+        this.automatic.confirmUploaded(items); this.cloudItems = items; this.cloudLoaded = true; this.cloudListError = '';
         // Availability recovering does not mean a failed upload has succeeded.
         if (recoverAvailability && this.cloudErrorCode === 22400001) { this.cloudError = ''; this.cloudErrorCode = 0; }
       }
@@ -143,6 +149,11 @@ export struct BackupPanel {
         SectionHeader({ title: t('华为云空间') })
         GroupCard() {
           Column() {
+            SwitchRow({ title: t('自动云备份'), subtitle: t('离开应用时，有变更才申请短时任务备份；强制关闭可能中断。自动备份独立保存。'),
+              compId: 'auto-cloud-backup', isOn: this.automatic.enabled, onChange: (value: boolean) => this.toggleAutomatic(value) })
+            Text(this.automatic.status).id('auto-cloud-backup-status').fontSize(13)
+              .fontColor($r('app.color.text_secondary')).width('100%').padding({ left: Space.lg, right: Space.lg, bottom: Space.md })
+            RowDivider()
             NavRow({ title: t('备份到华为云空间'), subtitle: t('备份全部内容，再次备份将覆盖上一份云备份'),
               compId: 'create-cloud-backup', icon: $r('sys.symbol.cloud'), disabled: this.locked(), onTap: () => this.cloud('create') })
             RowDivider()
@@ -167,7 +178,8 @@ export struct BackupPanel {
               ForEach(this.cloudItems, (item: CloudBackupItem, index: number) => {
                 if (index > 0) { RowDivider() }
                 Row() {
-                  NavRow({ title: item.name === 'tinybot-latest.tinybot' ? t('最新备份 · {0}', [this.date(item)]) : this.date(item), icon: $r('sys.symbol.archivebox'), subtitle: this.detail(item), compId: 'cloud-backup-' + item.name,
+                  NavRow({ title: item.name.startsWith('tinybot-auto-') ? t('自动备份 · {0}', [this.date(item)]) :
+                    item.name === 'tinybot-latest.tinybot' ? t('最新备份 · {0}', [this.date(item)]) : this.date(item), icon: $r('sys.symbol.archivebox'), subtitle: this.detail(item), compId: 'cloud-backup-' + item.name,
                     disabled: this.locked(), onTap: () => this.confirmRestore(item) }).layoutWeight(1)
                   IconButton({ icon: $r('sys.symbol.trash'), tint: $r('app.color.danger'), label: t('删除备份'),
                     compId: 'delete-cloud-backup-' + item.name, disabled: this.locked(), onTap: () => this.confirmDelete(item) })

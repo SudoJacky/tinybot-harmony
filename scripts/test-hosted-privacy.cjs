@@ -214,7 +214,8 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
     '../services/WebUiPreflight': { WebUiPreflight: { setForeground: value => renderLifecycle.push(['preflight', value]) } },
     '../services/PreviewCapture': { PreviewCapture: { setForeground: value => renderLifecycle.push(['capture', value]) } },
     '../services/DeveloperDiagnostics': { DeveloperDiagnostics: { initialize() { initialized++; }, stop() { stops++; }, setForeground: noOp } },
-    '../services/HostedPrivacy': { hostedPrivacy }, '@kit.AbilityKit': { UIAbility: class {} }
+    '../services/HostedPrivacy': { hostedPrivacy }, '@kit.AbilityKit': { UIAbility: class {} },
+    '../services/AutoCloudBackup': { autoCloudBackup: { setForeground: noOp, onBackground: noOp, dispose: noOp } }
   });
   records = [];
   const beforeStartupReads = privacyReads;
@@ -237,19 +238,19 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   assert.equal(initialized, 0); assert.equal(engines, 0); assert.equal(wants.length, 0);
   records = agreed(); notify(null, {});
   await tick();
-  assert.equal(initialized, 1); assert.equal(engines, 1); assert.equal(wants.length, 2);
-  ability.onForeground(); notify(null, {}); assert.equal(engines, 1); assert.equal(loads, 1);
+  assert.equal(initialized, 1); assert.equal(engines, 0); assert.equal(wants.length, 2);
+  ability.onForeground(); notify(null, {}); assert.equal(engines, 0); assert.equal(loads, 1);
   hostedPrivacy.revokeConsent(); assert.equal(stops, 1);
   ability.onForeground(); ability.onNewWant({ uri: 'blocked' }, {});
   assert.equal(wants.length, 2);
-  records = agreed(); notify(null, {}); assert.equal(wants.length, 2); assert.equal(engines, 1);
+  records = agreed(); notify(null, {}); assert.equal(wants.length, 2); assert.equal(engines, 0);
   ability.onDestroy(); assert.equal(subscriptions, 0);
   records = []; const beforeRestartRequests = requests, beforeRestartExits = exits;
   const restarted = new EntryAbility(); restarted.context = context;
   restarted.onCreate({}, {}); restarted.onWindowStageCreate(stage); await tick();
   hostedPrivacy.onPageShow();
   assert.equal(requests, beforeRestartRequests); assert.equal(exits, beforeRestartExits);
-  assert.equal(initialized, 1); assert.equal(engines, 1); restarted.onDestroy();
+  assert.equal(initialized, 1); assert.equal(engines, 0); restarted.onDestroy();
   records = agreed(); const beforeAgreedRequests = requests;
   const accepted = new EntryAbility(); accepted.context = context;
   accepted.onCreate({}, {}); accepted.onWindowStageCreate(stage); await tick();
@@ -339,9 +340,9 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   hostedPrivacy.onPageShow();
   assert.deepEqual([initialized, engines, wants.length], beforeDebugServices, 'Business and pending intents wait for explicit consent');
   hostedPrivacy.acceptDebugConsent(); await tick();
-  assert.deepEqual([initialized, engines, wants.length], beforeDebugServices.map((n, i) => n + (i === 2 ? 2 : 1)));
+  assert.deepEqual([initialized, engines, wants.length], beforeDebugServices.map((n, i) => n + (i === 2 ? 2 : i === 0 ? 1 : 0)));
   hostedPrivacy.acceptDebugConsent(); debugAbility.onForeground();
-  assert.equal(engines, beforeDebugServices[1] + 1, 'Duplicate clicks do not restart services');
+  assert.equal(engines, beforeDebugServices[1], 'Native startup never preloads ArkWeb');
   hostedPrivacy.revokeConsent(); assert.equal(hostedPrivacy.allowed, false);
   const afterRevokeWants = wants.length; debugAbility.onNewWant({ uri: 'blocked-debug' }, {});
   assert.equal(wants.length, afterRevokeWants); debugAbility.onDestroy();

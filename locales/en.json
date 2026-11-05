@@ -2718,5 +2718,21 @@
   "服务要求重定向，请填写最终 API 地址后重试。": "The service requires a redirect. Enter the final API URL and try again.",
   "服务拒绝了请求参数，请检查协议、模型和请求配置。": "The service rejected the request parameters. Check the protocol, model and request configuration.",
   "模型服务返回错误，请结合 HTTP 状态和服务错误码检查服务配置。": "The model service returned an error. Use the HTTP status and service error code to check its configuration.",
-  "服务未返回余额明细。": "The service returned no balance breakdown."
+  "服务未返回余额明细。": "The service returned no balance breakdown.",
+  "自动云备份": "Automatic cloud backup",
+  "自动云备份已关闭": "Automatic cloud backup is off",
+  "正在自动备份…": "Backing up automatically…",
+  "自动备份已上传 · {0}": "Automatic backup uploaded · {0}",
+  "自动备份等待上传，卸载前请确认云端状态。": "Automatic backup is waiting to upload. Check its cloud status before uninstalling.",
+  "无法保存自动备份设置：{0}": "Unable to save automatic backup settings: {0}",
+  "自动备份 · {0}": "Automatic backup · {0}",
+  "离开应用时，有变更才申请短时任务备份；强制关闭可能中断。自动备份独立保存。": "When leaving the app, request a short background task to back up changes. Force closing may interrupt it. Automatic backups are stored separately.",
+  "离开应用时，有变更才自动备份；需登录并开启云空间。": "Back up changes when leaving the app. Huawei ID sign-in and Cloud are required.",
+  "后台备份时间已结束，请稍后重试。": "The background backup window has ended. Please try again later.",
+  "请在系统弹窗中确认隐私政策；若弹窗未出现，请点击“继续授权”。": "Confirm the privacy policy in the system dialog. If it does not appear, tap Continue authorization.",
+  "继续授权": "Continue authorization",
+  "共享文件夹 {0} 的系统授权已失效，请在项目设置中移除后重新添加该文件夹。": "System access to shared folder {0} has expired. Remove and add the folder again in project settings.",
+  "重装应用或撤销目录授权后，请移除并重新添加共享文件夹。": "After reinstalling the app or revoking folder access, remove and add shared folders again.",
+  "1.2.3 · 2026-10-30": "1.2.3 · 2026-10-30",
+  "新增退后台自动云备份，已登录并开启 Tinybot 云空间时默认启用，可在备份设置关闭，上传状态清晰可见。隐私等待页新增“继续授权”入口。修复聊天输入、会话切换与 Markdown 渲染回调问题；浏览器和文档提取按需加载，改善启动时的初始化。修复光感材质能力误判，完善网络状态权限与共享文件夹重新授权提示。自动备份受系统后台时限约束，卸载前请确认已上传。": "Added automatic cloud backup when the app enters the background, enabled by default when signed in with Tinybot Cloud Space available. Turn it off in backup settings and check the upload status there. The privacy waiting screen now offers Continue authorization. Fixed rendering callbacks for chat input, conversation switching and Markdown. Browser and document extraction modules now load on demand. Fixed incorrect light-sense capability detection, added the network-state permission and clarified how to reauthorize shared folders. Automatic backups are subject to system background limits; confirm the upload before uninstalling."
 }

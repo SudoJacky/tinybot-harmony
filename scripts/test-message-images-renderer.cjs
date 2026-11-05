@@ -73,7 +73,7 @@ const overlayUi = new Proxy({}, { get: (_, name) => (...args) => {
     else if (sheet?.owner === owner) sheet = undefined;
   }
 } });
-const overlays = { exports: {}, Column: overlayUi, ModalTransition: {}, ResponseType: {} };
+const overlays = { exports: {}, Radius: { sheet: {} }, Column: overlayUi, ModalTransition: {}, ResponseType: {} };
 vm.runInNewContext(compile(`exports.bind = function() { ${bindings} };`), overlays);
 const view = { previewing: true, documentOpen: false, appearance: {}, actions() {},
   observeComponentCreation2(callback) { callback(++owner, false); } };
