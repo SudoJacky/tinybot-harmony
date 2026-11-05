@@ -20,6 +20,8 @@ export class HostedPrivacy {
   private pageVisible: boolean = false;
   private pageShown: boolean = false;
   private subscribed: boolean = false;
+  private subscribing: boolean = false;
+  private subscriptionGeneration: number = 0;
   private retryTimer: number = -1;
   private initializedAt: number = 0;
   private subscriber?: commonEventManager.CommonEventSubscriber;
@@ -37,25 +39,58 @@ export class HostedPrivacy {
 
   async initialize(context: common.UIAbilityContext, onChange: (allowed: boolean) => void): Promise<void> {
     this.cancelQuery();
+    this.resetSubscription();
     this.context = context; this.onChange = onChange;
     this.closing = false; this.busy = false; this.error = ''; this.debugConsent = false;
     this.pageVisible = false; this.pageShown = false; this.subscribed = false; this.initializedAt = Date.now();
     this.publish(false);
     if (this.simulatorDebug) { return; }
+    await this.subscribe('subscription_ready');
+  }
+
+  private async subscribe(source: string): Promise<void> {
+    if (!this.context || this.closing || this.simulatorDebug || this.subscribed || this.subscribing) { return; }
+    const context = this.context, generation = this.subscriptionGeneration;
+    this.subscribing = true;
+    let subscriber: commonEventManager.CommonEventSubscriber | undefined = undefined;
     try {
-      const subscriber = await commonEventManager.createSubscriber({ events: ['usual.event.PRIVACY_STATE_CHANGED'] });
-      if (this.context !== context) { return; }
+      subscriber = await commonEventManager.createSubscriber({ events: ['usual.event.PRIVACY_STATE_CHANGED'] });
+      if (this.context !== context || this.subscriptionGeneration !== generation || this.closing) { this.unsubscribe(subscriber); return; }
       this.subscriber = subscriber;
+      let failed = false;
       commonEventManager.subscribe(subscriber, (error) => {
-        if (this.context !== context) { return; }
-        if (error) { this.fail(error, 'subscribe', 'privacy_event'); return; }
+        if (this.context !== context || this.subscriptionGeneration !== generation || this.subscriber !== subscriber || this.closing) { return; }
+        if (error) {
+          failed = true; this.subscriber = undefined; this.subscribed = false;
+          this.unsubscribe(subscriber!); this.fail(error, 'subscribe', 'privacy_event'); return;
+        }
         // Do not trust the event payload (including other app clones); query our own current record.
         this.refresh('privacy_event');
       });
+      if (failed) { return; }
       this.subscribed = true;
+      Diagnostics.log('info', 'privacy', 'subscription_ready', { operation: 'subscribe', phase: source, elapsedMs: Date.now() - this.initializedAt });
       // onPageShow may have arrived while the subscriber was being created.
-      if (this.pageVisible) { this.refresh('subscription_ready'); }
-    } catch (error) { this.fail(error as BusinessError, 'subscribe', 'subscription_ready'); }
+      if (this.pageVisible) { this.refresh(source); }
+    } catch (error) {
+      if (this.context !== context || this.subscriptionGeneration !== generation || this.closing) { return; }
+      if (subscriber && this.subscriber === subscriber) { this.subscriber = undefined; this.unsubscribe(subscriber); }
+      this.subscribed = false; this.fail(error as BusinessError, 'subscribe', source);
+    } finally { if (this.subscriptionGeneration === generation) { this.subscribing = false; } }
+  }
+
+  private unsubscribe(subscriber: commonEventManager.CommonEventSubscriber): void {
+    const report = (error: BusinessError): void => {
+      Diagnostics.log('error', 'privacy', 'subscription_cleanup_failed', { operation: 'unsubscribe', code: typeof error.code === 'number' ? error.code : 0 });
+    };
+    try { commonEventManager.unsubscribe(subscriber, (error) => { if (error) { report(error); } }); }
+    catch (error) { report(error as BusinessError); }
+  }
+
+  private resetSubscription(): void {
+    this.subscriptionGeneration++; this.subscribing = false; this.subscribed = false;
+    const subscriber = this.subscriber; this.subscriber = undefined;
+    if (subscriber) { this.unsubscribe(subscriber); }
   }
 
   onPageShow(): void {
@@ -76,7 +111,12 @@ export class HostedPrivacy {
       this.publish(this.debugConsent);
       return;
     }
-    if (!this.subscribed) { return; }
+    if (!this.subscribed) {
+      // Repair only the missing dependency. Re-running initialize would clear page
+      // visibility and the callback that starts services for this ability instance.
+      if (this.pageVisible) { this.subscribe(source); }
+      return;
+    }
     this.checking = true; this.error = '';
     this.query(source, 1);
   }
@@ -218,10 +258,10 @@ export class HostedPrivacy {
 
   dispose(): void {
     this.onPageHide();
-    this.pageShown = false; this.subscribed = false;
+    this.pageShown = false;
+    this.resetSubscription();
     this.debugConsent = false;
     this.context = undefined; this.onChange = () => {};
-    if (this.subscriber) { commonEventManager.unsubscribe(this.subscriber); this.subscriber = undefined; }
     this.publish(false);
   }
 }

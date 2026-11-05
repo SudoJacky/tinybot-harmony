@@ -9,6 +9,8 @@ let info = { type: 1, privacyInfo: [link] }, records = [], failure, notify, next
 let revokeFailure, requestFailure, exitFailure, revocations = 0, exits = 0;
 let privacyReads = 0;
 let resultFailure, timerId = 0;
+let createFailure, subscribeFailure, callbackFailure, createWait, subscriberCreates = 0;
+const activeSubscribers = new Map();
 const timers = new Map(), privacyLogs = [];
 function nextRetry(delay) {
   assert.equal(timers.size, 1, 'Only one privacy retry can be pending');
@@ -31,9 +33,9 @@ const privacyManager = {
   async requestAppPrivacyConsent() { requests++; if (requestFailure) throw requestFailure; if (nextRequest) return nextRequest; return { results: records }; }
 };
 const commonEventManager = {
-  async createSubscriber(options) { assert.equal(options.events[0], 'usual.event.PRIVACY_STATE_CHANGED'); return {}; },
-  subscribe(_subscriber, callback) { subscriptions++; notify = callback; },
-  unsubscribe() { subscriptions--; notify = undefined; }
+  async createSubscriber(options) { subscriberCreates++; assert.equal(options.events[0], 'usual.event.PRIVACY_STATE_CHANGED'); if (createFailure) throw createFailure; return createWait ? await createWait : {}; },
+  subscribe(subscriber, callback) { if (subscribeFailure) throw subscribeFailure; activeSubscribers.set(subscriber, callback); subscriptions = activeSubscribers.size; notify = callback; if (callbackFailure) callback(callbackFailure); },
+  unsubscribe(subscriber, callback) { activeSubscribers.delete(subscriber); subscriptions = activeSubscribers.size; notify = Array.from(activeSubscribers.values()).at(-1); callback?.(); }
 };
 function load(file, imports) {
   const exports = {};
@@ -58,6 +60,51 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   let changes = [], opened = [];
   const context = { startAbility: async want => opened.push(want), getApplicationContext: () => ({ filesDir: '/app' }),
     terminateSelf: async () => { exits++; if (exitFailure) throw exitFailure; } };
+  // Recovery must repair the failed subscription before re-reading an already agreed policy.
+  for (const fault of ['create', 'subscribe']) {
+    for (const recovery of ['manual_retry', 'page_show']) {
+      const failure = { code: 1500007, message: 'PRIVATE SUBSCRIBER DATA' };
+      createFailure = fault === 'create' ? failure : undefined; subscribeFailure = fault === 'subscribe' ? failure : undefined;
+      records = agreed(); const recovering = new HostedPrivacy(), reads = privacyReads, beforeRequests = requests;
+      await recovering.initialize(context, () => {}); recovering.onPageShow(); await tick();
+      assert.equal(recovering.allowed, false); assert.match(recovering.error, /1500007/); assert.equal(privacyReads, reads);
+      assert.equal(recovering.checking, false); assert.equal(recovering.busy, false, 'Failure releases the query/consent guards');
+      createFailure = subscribeFailure = undefined;
+      if (recovery === 'page_show') { recovering.onPageHide(); recovering.onPageShow(); }
+      else { recovering.refresh('manual_retry'); }
+      await tick();
+      assert.equal(recovering.allowed, true, fault + ' failure must recover via ' + recovery + ' without restarting');
+      assert.equal(recovering.error, ''); assert.equal(subscriptions, 1); assert.equal(requests, beforeRequests);
+      recovering.dispose(); assert.equal(subscriptions, 0);
+    }
+  }
+  // One in-flight subscription serves repeated recovery triggers without reinitializing the lifecycle.
+  let releaseCreate; createWait = new Promise(resolve => releaseCreate = resolve);
+  const coalesced = new HostedPrivacy(), beforeCreates = subscriberCreates;
+  const preparing = coalesced.initialize(context, () => {}); coalesced.onPageShow();
+  coalesced.refresh('manual_retry'); coalesced.onPageShow(); coalesced.refresh('manual_retry');
+  assert.equal(subscriberCreates, beforeCreates + 1);
+  createWait = undefined; releaseCreate({}); await preparing; assert.equal(coalesced.allowed, true); assert.equal(subscriptions, 1);
+  const oldCallback = notify; oldCallback({code:1500007}); assert.equal(coalesced.allowed, false); assert.equal(subscriptions, 0);
+  coalesced.refresh('manual_retry'); await tick(); assert.equal(coalesced.allowed, true); assert.equal(subscriptions, 1);
+  const beforeStaleEvent=privacyReads; oldCallback({code:1500007}); oldCallback(null,{});
+  assert.equal(privacyReads,beforeStaleEvent); assert.equal(coalesced.allowed,true,'Late callbacks cannot invalidate a replacement subscription');
+  coalesced.dispose();
+  callbackFailure={code:1500007}; const synchronous=new HostedPrivacy(); await synchronous.initialize(context,()=>{}); synchronous.onPageShow(); await tick();
+  assert.equal(synchronous.allowed,false); assert.match(synchronous.error,/1500007/); assert.equal(subscriptions,0);
+  callbackFailure=undefined;synchronous.refresh('manual_retry');await tick();assert.equal(synchronous.allowed,true);synchronous.dispose();
+  // Disposal/reinitialization with the SAME context object must reject the old pending completion.
+  createWait=new Promise(resolve=>releaseCreate=resolve);const staleService=new HostedPrivacy();
+  const oldInitialization=staleService.initialize(context,()=>{});staleService.onPageShow();staleService.dispose();
+  createWait=undefined;await staleService.initialize(context,()=>{});staleService.onPageShow();assert.equal(subscriptions,1);
+  const beforeLateCreate=privacyReads;releaseCreate({});await oldInitialization;
+  assert.equal(subscriptions,1);assert.equal(staleService.allowed,true);assert.equal(privacyReads,beforeLateCreate);staleService.dispose();
+  createWait=new Promise(resolve=>releaseCreate=resolve);const hidden=new HostedPrivacy(),hiddenReads=privacyReads;
+  const hiddenInit=hidden.initialize(context,()=>{});hidden.onPageShow();hidden.onPageHide();
+  createWait=undefined;releaseCreate({});await hiddenInit;assert.equal(privacyReads,hiddenReads);
+  hidden.onPageShow();assert.equal(hidden.allowed,true);hidden.dispose();assert.equal(subscriptions,0);
+  records = []; privacyReads = 0;
+  console.log('PASS subscriber creation/start failures recover via retry and foreground page show without a second consent dialog');
   const service = new HostedPrivacy();
   await service.initialize(context, allowed => changes.push(allowed));
   assert.equal(privacyReads, 0, 'onCreate initialization must not query privacy');
