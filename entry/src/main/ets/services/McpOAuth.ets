@@ -11,7 +11,9 @@ interface ResourceMetadata { resource: string; authorization_servers: string[]; 
 interface AuthMetadata { issuer: string; authorization_endpoint: string; token_endpoint: string; registration_endpoint?: string; code_challenge_methods_supported?: string[]; }
 interface Registration { client_id: string; }
 interface OAuthTokens { access_token: string; refresh_token?: string; expires_in?: number; token_type: string; }
-interface StoredOAuth { resource: string; clientId: string; tokenEndpoint: string; accessToken: string; refreshToken?: string; expiresAt: number; }
+interface StoredOAuth { resource: string; clientId: string; tokenEndpoint: string; accessToken: string; refreshToken?: string; expiresAt: number; resourceParameter?: string; }
+export interface OAuthConfiguration { clientId: string; authorizationEndpoint: string; tokenEndpoint: string; scopes?: string[]; resource?: string; }
+export interface OAuthResource { url: string; credentialAlias: string; authType?: string; }
 const REDIRECT = 'tinybot-harmony://oauth/callback';
 function secure(address: string): string {
   if (!/^https:\/\/[^\s/?#@\\]+(?:\/[^\s#\\]*)?$/.test(address)) { throw new Error(t("OAuth 端点必须使用 HTTPS，且不能包含账号或片段。")); }
@@ -30,7 +32,8 @@ export async function oauthJson(address: string, body?: Object | string): Promis
     connectTimeout: 15000, readTimeout: 30000, maxBytes: 1024 * 1024, dataType: 'string', redirect: 'refuse'
   });
   if (response.status < 200 || response.status >= 300) { throw new Error('OAuth HTTP ' + response.status + t("。请核对服务或已注册的客户端 ID。")); }
-  return JSON.parse(response.text) as Object;
+  try { return JSON.parse(response.text) as Object; }
+  catch (_) { throw new Error('OAuth service returned invalid JSON'); }
 }
 async function resourceMetadata(address: string): Promise<ResourceMetadata> {
   const host = origin(address); const path = address.slice(host.length).split('?')[0];
@@ -77,14 +80,23 @@ export class McpOAuth {
       clientId = (await oauthJson(metadata.registration_endpoint, registration) as Registration).client_id;
       if (typeof clientId !== 'string' || !clientId) { throw new Error(t("OAuth 客户端注册未返回 ID。")); }
     }
+    return McpOAuth.loginConfigured(server.url, { clientId: clientId, authorizationEndpoint: metadata.authorization_endpoint,
+      tokenEndpoint: metadata.token_endpoint, scopes: resource.scopes_supported, resource: server.url }, context, cancellation);
+  }
+  static async loginConfigured(address: string, config: OAuthConfiguration, context: common.UIAbilityContext, cancellation: Cancellation = new Cancellation()): Promise<string> {
+    cancellation.check(); secure(address); secure(config.authorizationEndpoint); secure(config.tokenEndpoint);
+    if (McpOAuth.callback) { throw new Error(t('已有 OAuth 登录正在进行。')); }
+    if (!config.clientId.trim()) { throw new Error('OAuth requires a public client ID'); }
+    const clientId = config.clientId;
     const verifier = base64url((await cryptoFramework.createRandom().generateRandom(32)).data);
     const state = base64url((await cryptoFramework.createRandom().generateRandom(32)).data);
     const hash = cryptoFramework.createMd('SHA256'); await hash.update({ data: new util.TextEncoder().encodeInto(verifier) });
     const challenge = base64url((await hash.digest()).data);
     const params: Record<string, string> = { 'response_type': 'code', 'client_id': clientId, 'redirect_uri': REDIRECT,
-      'code_challenge': challenge, 'code_challenge_method': 'S256', 'state': state, 'resource': server.url };
-    if (resource.scopes_supported?.length) { params['scope'] = resource.scopes_supported.join(' '); }
-    const authorization = metadata.authorization_endpoint + (metadata.authorization_endpoint.includes('?') ? '&' : '?') + encode(params);
+      'code_challenge': challenge, 'code_challenge_method': 'S256', 'state': state };
+    if (config.resource) { params['resource'] = secure(config.resource); }
+    if (config.scopes?.length) { params['scope'] = config.scopes.join(' '); }
+    const authorization = config.authorizationEndpoint + (config.authorizationEndpoint.includes('?') ? '&' : '?') + encode(params);
     cancellation.check();
     const callback = await new Promise<string>((resolve, reject) => {
       let remove = (): void => {};
@@ -104,27 +116,31 @@ export class McpOAuth {
     cancellation.check();
     const code = /[?&]code=([^&]+)/.exec(callback)?.[1];
     if (!code) { throw new Error(t("OAuth 授权被取消或未返回授权码。")); }
-    const tokens = await oauthJson(metadata.token_endpoint, encode({ 'grant_type': 'authorization_code', 'client_id': clientId,
-      'code': decodeURIComponent(code), 'redirect_uri': REDIRECT, 'code_verifier': verifier, 'resource': server.url })) as OAuthTokens;
+    const exchange: Record<string, string> = { 'grant_type': 'authorization_code', 'client_id': clientId,
+      'code': decodeURIComponent(code), 'redirect_uri': REDIRECT, 'code_verifier': verifier };
+    if (config.resource) { exchange['resource'] = config.resource; }
+    const tokens = await oauthJson(config.tokenEndpoint, encode(exchange)) as OAuthTokens;
     if (!tokens.access_token || tokens.token_type?.toLowerCase() !== 'bearer') { throw new Error(t("OAuth 未返回有效 Bearer 凭据。")); }
     cancellation.check();
-    const stored: StoredOAuth = { resource: server.url, clientId: clientId, tokenEndpoint: metadata.token_endpoint,
+    const stored: StoredOAuth = { resource: address, clientId: clientId, tokenEndpoint: config.tokenEndpoint, resourceParameter: config.resource || '',
       accessToken: tokens.access_token, refreshToken: tokens.refresh_token, expiresAt: tokens.expires_in ? Date.now() + tokens.expires_in * 1000 : 0 };
     const alias = 'tinybot-oauth-' + util.generateRandomUUID(); await new CredentialStore().write(alias, JSON.stringify(stored)); return alias;
   }
-  static async bearer(server: McpServer): Promise<string> {
+  static async bearer(server: OAuthResource): Promise<string> {
     if (server.authType !== 'oauth') { return new CredentialStore().read(server.credentialAlias); }
     const pending = McpOAuth.refreshing.get(server.credentialAlias); if (pending) { return pending; }
     const promise = McpOAuth.refresh(server); McpOAuth.refreshing.set(server.credentialAlias, promise);
     try { return await promise; } finally { McpOAuth.refreshing.delete(server.credentialAlias); }
   }
-  private static async refresh(server: McpServer): Promise<string> {
+  private static async refresh(server: OAuthResource): Promise<string> {
     const vault = new CredentialStore(); const stored = JSON.parse(await vault.read(server.credentialAlias)) as StoredOAuth;
     if (stored.resource !== server.url || !stored.accessToken) { throw new Error(t("OAuth 凭据与服务地址不匹配，请重新登录。")); }
     if (!stored.expiresAt || stored.expiresAt > Date.now() + 60000) { return stored.accessToken; }
     if (!stored.refreshToken) { throw new Error(t("OAuth 凭据已到期，请重新登录。")); }
-    const result = await oauthJson(stored.tokenEndpoint, encode({ 'grant_type': 'refresh_token', 'refresh_token': stored.refreshToken,
-      'client_id': stored.clientId, 'resource': stored.resource })) as OAuthTokens;
+    const parameters: Record<string, string> = { 'grant_type': 'refresh_token', 'refresh_token': stored.refreshToken, 'client_id': stored.clientId };
+    const audience = stored.resourceParameter === undefined ? stored.resource : stored.resourceParameter;
+    if (audience) { parameters['resource'] = audience; }
+    const result = await oauthJson(stored.tokenEndpoint, encode(parameters)) as OAuthTokens;
     if (!result.access_token || result.token_type?.toLowerCase() !== 'bearer') { throw new Error(t("OAuth 刷新失败，请重新登录。")); }
     stored.accessToken = result.access_token; stored.refreshToken = result.refresh_token || stored.refreshToken;
     stored.expiresAt = result.expires_in ? Date.now() + result.expires_in * 1000 : 0;

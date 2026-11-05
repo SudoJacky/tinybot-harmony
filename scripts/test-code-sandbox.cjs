@@ -41,6 +41,7 @@ const { NativeCodeExecutor } = load('NativeCodeExecutor');
 const { RuleTools } = load('RuleTools');
 const { ToolSet } = load('ToolSet');
 const call = args => ({ id: 'call', type: 'function', function: { name: 'execute_code', arguments: JSON.stringify(args) } });
+const tick = () => new Promise(setImmediate);
 async function main() {
   const received = [];
   const code = new CodeExecutionTools({ execute: async (...args) => { received.push(args); return '{"status":"ok"}'; } });
@@ -71,6 +72,7 @@ async function main() {
   assert.equal(submissions, 0);
   const running = new Cancellation();
   const pending = executor.execute('while(true){}', 'null', running);
+  await tick();
   const id = active.id;
   let settled = false;
   const observed = pending.then(() => { settled = true; }, () => { settled = true; });
@@ -78,22 +80,33 @@ async function main() {
   assert.deepEqual(cancels, [id]);
   await Promise.resolve();
   assert.equal(settled, false, 'cancellation must await native cleanup');
-  await assert.rejects(executor.execute('return 1;', 'null', new Cancellation()), /busy/);
+  const queuedExecution = new NativeCodeExecutor().execute('return 1;', 'null', new Cancellation());
+  await tick(); assert.equal(active.id, id, 'Other instances queue until native cleanup finishes');
   finish('{"status":"cancelled"}');
   await assert.rejects(pending); await observed;
+  await tick(); assert.notEqual(active.id, id); finish(); await queuedExecution;
   const nextSignal = new Cancellation();
   const next = executor.execute('return 42;', 'null', nextSignal);
+  await tick();
   assert.notEqual(active.id, id);
   finish();
   assert.equal(JSON.parse(await next).result, 42);
   nextSignal.cancel();
   assert.deepEqual(cancels, [id], 'completed execution unsubscribed');
-  console.log('PASS cancellation waits for cleanup, busy rejection, unique IDs, recovery and listener cleanup');
+  console.log('PASS cancellation waits for cleanup, shared execution queue, unique IDs, recovery and listener cleanup');
+
+  const holding = executor.execute('return 1;', 'null', new Cancellation()); await tick();
+  const beforeQueuedCancel = submissions, queuedSignal = new Cancellation();
+  const cancelledQueue = executor.execute('return 2;', 'null', queuedSignal), rejectedQueue = assert.rejects(cancelledQueue);
+  queuedSignal.cancel(); finish(); await holding; await rejectedQueue;
+  assert.equal(submissions, beforeQueuedCancel, 'Cancelled queued work never enters the native engine');
+  console.log('PASS queued cancellation skips native submission and releases the execution lane');
 
   const { Diagnostics } = load('../model/Diagnostics');
   const logs = []; Diagnostics.configureLogSink(record => logs.push(record));
   const failedSignal = new Cancellation();
   const failed = executor.execute('return 42;', 'null', failedSignal);
+  await tick();
   const failure = Object.assign(new Error('Native sandbox execution failed [execution=' + active.id + ', napiStatus=0]: allocator failure'),
     { code: 'NATIVE_EXCEPTION' });
   const failedJob = active; active = undefined; failedJob.reject(failure);

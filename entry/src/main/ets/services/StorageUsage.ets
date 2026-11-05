@@ -7,8 +7,9 @@ import { Attachment } from '../model/Productivity';
 import { toolReceipts } from '../model/Agent';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { t } from '../model/I18n';
+import { WorkspaceRetention, withWorkspaceLifecycle } from './WorkspaceRetention';
 import { DiskFile, StorageCategoryId, StorageCleanResult, StorageEntry, StorageEntryResult, StorageReport,
-  emptyStorageReport, isCacheCleanable, isStaleTemporary, orphanAttachmentPaths, orphanWorkspaceIds } from '../model/StoragePlan';
+  emptyStorageReport, isCacheCleanable, isStaleTemporary, orphanAttachmentPaths } from '../model/StoragePlan';
 
 const MAX_ENTRIES: number = 300;
 const REVIEW_DIR: string = '.tinybot-review';
@@ -193,23 +194,6 @@ export class StorageUsage {
     return owner.length > 0 ? owner + ' / ' + label : label;
   }
 
-  // An empty review folder no longer protects a leftover workspace; unreadable ones still do.
-  private static async reviewHasBackups(path: string, failures: string[]): Promise<boolean> {
-    let operation: string = 'access';
-    try {
-      if (!await fs.access(path)) { return false; }
-      operation = 'stat';
-      const stat = await fs.lstat(path);
-      if (stat.isSymbolicLink() || !stat.isDirectory()) { return true; }
-      operation = 'list';
-      return (await fs.listFile(path)).length > 0;
-    } catch (error) {
-      if (StorageUsage.missing(error as Error)) { return false; }
-      StorageUsage.failed(failures, path, error as Error, operation);
-      return true;
-    }
-  }
-
   private static async safeCandidates(roots: StorageRoots, data: AppData, now: number,
     failures: string[]): Promise<StorageEntry[]> {
     const workspaceRoot = StorageUsage.workspaceRoot(roots);
@@ -217,17 +201,8 @@ export class StorageUsage {
     const cache = await StorageUsage.listFiles(roots.cacheDir, failures);
     const attachments = await StorageUsage.listFiles(roots.appFilesDir + '/attachments', failures);
     const dirs = await StorageUsage.listDirectories(workspaceRoot, failures);
-    const threadIds = data.threads.filter((thread: ThreadData): boolean => !thread.projectId)
-      .map((thread: ThreadData): string => thread.id);
-    const projectIds = (data.projects || []).map((project): string => project.workspaceId);
-    const orphanDirs = orphanWorkspaceIds(dirs, threadIds, projectIds);
-    // A leftover folder that still holds edit baselines is kept: the backups category owns them.
-    const cleanDirs: string[] = [];
-    for (const dir of orphanDirs) {
-      const reviewPath = workspaceRoot + '/' + dir + '/' + REVIEW_DIR;
-      const appsPath = workspaceRoot + '/' + dir + '/mini-apps';
-      if (!await StorageUsage.reviewHasBackups(reviewPath, failures) && !await StorageUsage.reviewHasBackups(appsPath, failures)) { cleanDirs.push(dir); }
-    }
+    const retained = await StorageUsage.retained(roots, data, failures);
+    const cleanDirs = dirs.filter((id: string) => !retained.has(id));
     const result: StorageEntry[] = [];
     for (const dir of cleanDirs) {
       const bytes = await StorageUsage.sizeOf(workspaceRoot + '/' + dir, failures);
@@ -356,13 +331,7 @@ export class StorageUsage {
     failures: string[]): Promise<StorageEntry[]> {
     const names = StorageUsage.workspaceNames(data);
     const files = await StorageUsage.workspaceFiles(roots, failures);
-    const dirs = new Set<string>(await StorageUsage.listDirectories(StorageUsage.workspaceRoot(roots), failures));
-    const orphans = new Set<string>(orphanWorkspaceIds(Array.from(dirs),
-      data.threads.filter((thread: ThreadData): boolean => !thread.projectId).map((thread: ThreadData): string => thread.id),
-      (data.projects || []).map((project): string => project.workspaceId)));
-    for (const id of Array.from(orphans)) {
-      if (await StorageUsage.reviewHasBackups(StorageUsage.workspaceRoot(roots) + '/' + id + '/mini-apps', failures)) { orphans.delete(id); }
-    }
+    const retained = await StorageUsage.retained(roots, data, failures);
     const result: StorageEntry[] = [];
     for (const file of files) {
       if (StorageUsage.isReview(file)) { continue; }
@@ -370,7 +339,7 @@ export class StorageUsage {
       const owner = names.get(parts[0]) || parts[0];
       const rest = parts.slice(1).join('/');
       result.push(fileEntry(file, 'workspace', rest.length > 0 ? owner + ' / ' + rest : owner, file.relative,
-        orphans.has(parts[0])));
+        !retained.has(parts[0])));
     }
     return result;
   }
@@ -491,14 +460,32 @@ export class StorageUsage {
     }
   }
 
-  static async remove(context: common.Context, entries: StorageEntry[]): Promise<StorageCleanResult> {
+  private static async retained(roots: StorageRoots, data: AppData | undefined, failures: string[]): Promise<Set<string>> {
+    const root = StorageUsage.workspaceRoot(roots);
+    try { return WorkspaceRetention.retained(data, await WorkspaceRetention.inventory(root)); }
+    catch (error) {
+      StorageUsage.failed(failures, root, error as Error, 'list');
+      // An incomplete ownership scan cannot authorize workspace deletion.
+      return new Set(await StorageUsage.listDirectories(root, failures));
+    }
+  }
+  static async remove(context: common.Context, entries: StorageEntry[], data?: AppData): Promise<StorageCleanResult> {
     const storage = StorageUsage.roots(context);
     const roots: string[] = [storage.abilityFilesDir, storage.appFilesDir, storage.cacheDir];
     let freedBytes = 0, removed = 0, failed = 0;
     for (const entry of entries) {
       if (!entry.removable || !StorageUsage.allowed(entry.path, roots)) { failed++; continue; }
       try {
-        const outcome = await StorageUsage.deletePath(entry.path);
+        const workspace = StorageUsage.workspaceRoot(storage), relative = entry.path.slice(workspace.length + 1), owner = relative.split('/')[0];
+        const outcome = await withWorkspaceLifecycle(workspace + '/' + owner, async (): Promise<DeleteOutcome> => {
+          if (entry.category === 'workspace' && entry.path.startsWith(workspace + '/') && !isStaleTemporary(baseName(entry.path), 0, Date.now())) {
+            const failures: string[] = [];
+            if ((await StorageUsage.retained(storage, data, failures)).has(owner) || failures.length) {
+              Diagnostics.log('warn', 'storage', 'cleanup_protected', { count: 1 }); return { bytes: 0, complete: false };
+            }
+          }
+          return StorageUsage.deletePath(entry.path);
+        });
         freedBytes += outcome.bytes;
         if (outcome.complete) { removed++; } else { failed++; }
       } catch (error) {
@@ -513,7 +500,7 @@ export class StorageUsage {
     const roots = StorageUsage.roots(context);
     const failures: string[] = [];
     const result = await StorageUsage.remove(context,
-      await StorageUsage.safeCandidates(roots, data, Date.now(), failures));
+      await StorageUsage.safeCandidates(roots, data, Date.now(), failures), data);
     result.incomplete = failures.length > 0;
     result.failedPaths = failures;
     return result;

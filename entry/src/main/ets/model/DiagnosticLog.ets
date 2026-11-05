@@ -35,7 +35,7 @@ const ERROR_CODES: string[] = ['STALE_BROWSER_SNAPSHOT', 'STALE_INTERACTIVE_STAT
   'OUTCOME_UNKNOWN', 'PREVIEW_INVALID', 'PREVIEW_NOT_FOUND', 'PREVIEW_NOT_READY', 'QUOTA_EXHAUSTED', 'RATE_LIMITED',
   'REMOTE_ERROR', 'REMOTE_TOOL_ERROR', 'RESPONSE_BUDGET_EXCEEDED', 'SCHEMA_REQUIRED', 'SEARCH_LAYOUT_CHANGED',
   'SEARCH_PAGE_CHANGED', 'SEARCH_VERIFICATION_REQUIRED', 'STALE_BROWSER_ELEMENT', 'STALE_RESOURCE', 'TOOL_UNAVAILABLE',
-  'UNKNOWN_ERROR', 'UNSUPPORTED_CONTENT', 'UNSUPPORTED_PREVIEW_FORMAT', 'UNSUPPORTED_PROTOCOL', 'USER_DENIED'];
+  'UNKNOWN_ERROR', 'OUTPUT_INVALID', 'MODEL_FAILED', 'DATA_INVALID', 'DATA_UNAVAILABLE', 'UNSUPPORTED_CONTENT', 'UNSUPPORTED_PREVIEW_FORMAT', 'UNSUPPORTED_PROTOCOL', 'USER_DENIED'];
 
 // Names and string values are catalogs, not free text. Unknown keys never reach either output.
 const EVENTS: Record<string, string[]> = {};
@@ -52,6 +52,7 @@ EVENTS.backup = ['started', 'restored', 'restore_prepared', 'key_decrypt_failed'
   'restore_completed', 'restore_failed', 'startup_capture_failed', 'startup_marker_failed', 'startup_lookup_failed',
   'cloud_retry_finished', 'cloud_failed', 'cloud_retry', 'cloud_sync_progress', 'cloud_sync_finished', 'cloud_list_failed', 'cloud_settings_failed'];
 EVENTS['mini-app'] = ['manifest_failed', 'storage_failed', 'action_failed'];
+EVENTS['life-panel'] = ['published', 'refresh_skipped', 'refresh_started', 'refresh_complete', 'refresh_cancelled', 'refresh_failed', 'manifest_failed', 'action_failed', 'expiry_failed', 'connection_failed', 'api_response', 'api_failed', 'transform_started', 'transform_complete', 'transform_failed'];
 EVENTS.background = ['acquired', 'released', 'cancelled', 'suspended', 'release_failed', 'stop_failed', 'transition_failed', 'window_expired'];
 EVENTS.notification = ['authorization_checked', 'authorization_denied', 'authorization_failed', 'disabled', 'published', 'publish_failed'];
 EVENTS.speech = ['preparing', 'listening', 'vad', 'complete', 'finishing', 'recognition_failed', 'cancel_failed', 'playback_requested', 'playback_failed', 'cleanup_failed', 'late_cleanup_failed'];
@@ -65,8 +66,9 @@ EVENTS.preview = ['failed', 'captured', 'thumbnail_failed', 'surface_moved'];
 EVENTS.sandbox = ['execution_failed', 'orchestration_failed'];
 EVENTS.tool = ['failed', 'partial'];
 EVENTS.workspace = ['mutation_failed', 'folder_support_failed', 'folder_picker_support_failed', 'folder_persist_failed', 'folder_activate_failed', 'folder_revoke_failed', 'folder_startup_failed'];
-EVENTS.storage = ['scan_failed', 'metric_failed', 'cleanup_failed'];
+EVENTS.storage = ['scan_failed', 'metric_failed', 'cleanup_failed', 'cleanup_protected'];
 EVENTS.mcp = ['request_failed', 'cancel_notice_failed', 'browser_launch_failed'];
+EVENTS.mail = ['transport_failed', 'cleanup_failed', 'account_saved', 'account_removed', 'query_started', 'query_complete', 'query_failed', 'command_failed', 'settings_failed'];
 EVENTS.export = ['image_failed', 'preview_failed', 'cleanup_failed', 'share_failed', 'save_failed'];
 EVENTS.network = ['request_start', 'request_end', 'context_overflow', 'first_data', 'request_failed'];
 EVENTS.context = ['inspected', 'request_prefix'];
@@ -84,7 +86,8 @@ const BOOLEANS: string[] = ['initialSupported', 'supported', 'available', 'pageS
 const REFERENCES: string[] = ['threadId', 'messageId', 'sessionId', 'providerId', 'previewId', 'surfaceId', 'serverId'];
 const STRINGS: Record<string, string[]> = {};
 STRINGS.operation = ['access', 'read', 'list', 'stat', 'parse', 'unlink', 'rmdir', 'bundle_stats', 'free_size', 'total_size',
-  'getAppPrivacyMgmtInfo', 'getAppPrivacyResult', 'requestAppPrivacyConsent', 'subscribe', 'unsubscribe', 'cloud_directory', 'cloud_sync'];
+  'getAppPrivacyMgmtInfo', 'getAppPrivacyResult', 'requestAppPrivacyConsent', 'subscribe', 'unsubscribe', 'cloud_directory', 'cloud_sync',
+  'connect', 'login', 'examine', 'search', 'fetch', 'identify', 'capability'];
 STRINGS.credentialScope = ['provider', 'search', 'mcp', 'backup'];
 STRINGS.rpcMethod = ['initialize', 'tools/list', 'tools/call', 'notifications/initialized', 'notifications/cancelled'];
 STRINGS.service = ['mcp', 'search', 'web', 'bing-browser'];

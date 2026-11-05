@@ -4,6 +4,8 @@ import { ToolExecution } from '../model/Agent';
 import { t } from '../model/I18n';
 import { stepDisplayContent, stepPreviews, PublishedPreview, PublishedAnswerPart, publishedAnswerParts } from '../model/PublishedPreview';
 import { PublishedPreviewCard } from './PublishedPreviewCard';
+import { PublishedPanel, publishedPanels } from '../model/PublishedPanel';
+import { PublishedPanelCard } from './PublishedPanelCard';
 import { PresentedFile, deliveredFiles } from '../model/Deliverables';
 import { turnFileChanges } from '../model/TurnFileChanges';
 import { TurnChangesCard } from './TurnChangesCard';
@@ -643,6 +645,9 @@ export struct MessageBubble {
       if (this.hasExtra) {
         this.extra()
       }
+      ForEach(publishedPanels(this.message.stepViews), (reference: PublishedPanel) => {
+        PublishedPanelCard({ reference: reference })
+      }, (reference: PublishedPanel) => reference.key)
       ForEach(deliveredFiles(this.message.stepViews), (file: PresentedFile) => {
         Button() {
           Row({ space: 12 }) {

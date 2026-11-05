@@ -51,8 +51,9 @@ function fixture(data = seed()) {
   f.calls = calls; return f;
 }
 async function main() {
-  assert.equal(all.length, 42); assert.equal(new Set(all).size, 42); assert.equal(BASIC_FILE_TOOLS.length, 6);
-  assert.equal(optional.length, 32);
+  assert.equal(all.length, 52); assert.equal(new Set(all).size, 52); assert.equal(BASIC_FILE_TOOLS.length, 6);
+  assert.equal(optional.length, 42);
+  for (const name of ['list_mail_accounts', 'search_mail', 'read_mail']) assert.ok(all.includes(name));
   assert.ok(all.includes('list_mini_apps')); assert.ok(all.includes('publish_mini_app'));
   assert.ok(!all.includes('publish_data_view'));
   assert.ok(!all.includes('generate_image'));
@@ -72,8 +73,8 @@ async function main() {
   assert.deepEqual(Array.from(parseAppData(JSON.stringify(legacyMixed)).threads[0].disabledTools).sort(),
     ['read_attachment', 'read_reference']);
   const covered = Array.from(TOOL_CAPABILITIES.flatMap(capability => capability.tools));
-  assert.equal(TOOL_CAPABILITIES.length, 12);
-  assert.equal(new Set(covered).size, 32); assert.deepEqual(covered.slice().sort(), optional.slice().sort());
+  assert.equal(TOOL_CAPABILITIES.length, 13);
+  assert.equal(new Set(covered).size, 42); assert.deepEqual(covered.slice().sort(), optional.slice().sort());
   const obsolete = {agentMode:'custom', disabledTools:Array.from(MANAGED_TOOL_NAMES).concat(['generate_image', 'read_tool_result'])};
   validateToolSelection(obsolete);
   assert.deepEqual(Array.from(normalizeDisabledTools(obsolete.disabledTools)), []);
@@ -103,7 +104,8 @@ async function main() {
   assert.ok(migrated.threads[0].disabledTools.includes('publish_preview'), 'Retired chart denial preserves the preview capability switch');
   const retiredOnly = seed(); retiredOnly.threads[0].agentMode = 'custom';
   retiredOnly.threads[0].disabledTools = ['publish_data_view'];
-  assert.deepEqual(Array.from(parseAppData(JSON.stringify(retiredOnly)).threads[0].disabledTools), ['publish_preview', 'list_mini_apps', 'publish_mini_app']);
+  assert.deepEqual(Array.from(parseAppData(JSON.stringify(retiredOnly)).threads[0].disabledTools), ['publish_preview', 'list_mini_apps', 'publish_mini_app',
+    'get_life_panel_catalog', 'list_life_panels', 'get_life_panel', 'publish_life_panel', 'list_life_boards', 'manage_life_board', 'manage_life_panel_task']);
   assert.deepEqual(Array.from(migrated.threads[0].disabledTools).sort(),
     Array.from(normalizeDisabledTools(legacyData.threads[0].disabledTools)).sort());
   const legacy = fixture(migrated), legacyApp = new ChatViewModel(); await legacyApp.initialize(legacy.session);
@@ -118,7 +120,7 @@ async function main() {
   }
   assert.equal(legacy.repository.writes.length, legacyWrites, 'Capability toggles keep the existing save-on-send behavior');
   for (const name of MANAGED_TOOL_NAMES) await assert.rejects(legacy.session.setToolEnabled(name,false));
-  console.log('PASS 12 selectable capabilities, legacy memory/Skills overrides removed, individual Skill state retained and atomic group catalog/dispatch');
+  console.log('PASS 13 selectable capabilities including mail, legacy memory/Skills overrides removed, individual Skill state retained and atomic group catalog/dispatch');
   for (const selection of [{ agentMode: 'research' }, { disabledTools: ['write_file'] }, { disabledTools: ['unknown'] },
     { disabledTools: ['read_web', 'read_web'] }, { disabledTools: 'read_web' }, { disabledTools: [null] }]) {
     assert.throws(() => validateToolSelection(selection));
