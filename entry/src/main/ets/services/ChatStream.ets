@@ -1,7 +1,7 @@
 import { t } from '../model/I18n';
 import { MAX_REASONING_CONTENT, MAX_TOOL_CALLS, ModelTurn, ToolCall, validateToolCalls } from '../model/Agent';
 import { ModelStream } from './providers/EventStreams';
-import { ProviderErrorData, ContextOverflowError, isContextOverflow } from './providers/ProviderErrors';
+import { ProviderErrorData, streamProviderError } from './providers/ProviderErrors';
 
 interface StreamToolFunction {
   name?: string;
@@ -43,10 +43,12 @@ export class ChatStream implements ModelStream {
   private calls: Map<number, ToolCall> = new Map<number, ToolCall>();
   private onText: (text: string) => void;
   private onReasoning?: (text: string) => void;
+  private onToken?: () => void;
 
-  constructor(onText: (text: string) => void, onReasoning?: (text: string) => void) {
+  constructor(onText: (text: string) => void, onReasoning?: (text: string) => void, onToken?: () => void) {
     this.onText = onText;
     this.onReasoning = onReasoning;
+    this.onToken = onToken;
   }
 
   push(text: string): void {
@@ -114,8 +116,7 @@ export class ChatStream implements ModelStream {
       throw new Error(t("模型返回了无效的流式 JSON。"));
     }
     if (!chunk || chunk.error) {
-      if (isContextOverflow(chunk?.error)) { throw new ContextOverflowError(); }
-      throw new Error(t("模型服务在生成过程中返回错误。"));
+      throw streamProviderError(chunk?.error);
     }
     if (!Array.isArray(chunk.choices)) {
       throw new Error(t("模型返回的流式数据格式不受支持。"));
@@ -137,6 +138,7 @@ export class ChatStream implements ModelStream {
         }
         // Display model-provided reasoning separately, preserving it for protocol replay.
         this.reasoningContent += reasoning;
+        this.onToken?.();
         this.onReasoning?.(reasoning);
       }
       const content = choice.delta?.content;
@@ -148,6 +150,7 @@ export class ChatStream implements ModelStream {
           throw new Error(t("模型在完成回答后继续返回文本。"));
         }
         this.content += content;
+        this.onToken?.();
         this.onText(content);
       }
       const calls = choice.delta?.tool_calls;
@@ -185,6 +188,7 @@ export class ChatStream implements ModelStream {
     call.type = delta.type || call.type;
     call.function.name += delta.function?.name || '';
     call.function.arguments += delta.function?.arguments || '';
+    if (delta.function?.name || delta.function?.arguments) { this.onToken?.(); }
     if (call.id.length > 128 || call.function.name.length > 64) {
       throw new Error(t("模型返回的工具调用过大。"));
     }

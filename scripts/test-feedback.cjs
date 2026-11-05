@@ -16,6 +16,7 @@ function load(file, imports) {
 const model = load('model/Feedback.ets', { './I18n': { t } });
 const recentModel = load('model/RecentDiagnosticLog.ets', {});
 const { DiagnosticsCollector } = load('model/Diagnostics.ets', { './DiagnosticLog': load('model/DiagnosticLog.ets', {}) });
+const detailedErrors = load('model/DetailedError.ets', { './I18n': { t } });
 const token = 'fi_' + 's'.repeat(43), id = '5c5f0c81-f428-44d5-a5ab-7acd507bd013';
 const time = '2026-10-24T04:01:00.000Z';
 const item = (values = {}) => ({ id, body: '建议', contact: '', createdAt: time, status: 'new', type: 'other', attachments: [], reply: null, ...values });
@@ -91,12 +92,15 @@ async function checkNativeFiles() {
   const encode = text => new TextEncoder().encode(text).buffer;
   const files = new Map([['/picked/debug.log', encode('startup\nAuthorization: Bearer secret\ncontent: private chat')], ['photo://one', new ArrayBuffer(12)]]);
   let photos = ['photo://one'], sequence = 0, pixels = 12000000, releases = 0;
+  let failCleanup = false;
   const recent = new recentModel.RecentDiagnosticLogs(() => Date.parse(time));
   recent.record({ level: 'error', module: 'network', event: 'request_failed', fields: { http: 500, errorKind: 'network' } });
   const { FeedbackFiles } = load('services/FeedbackFiles.ets', {
+    '../model/DetailedError': detailedErrors, '../model/Diagnostics': { Diagnostics: new DiagnosticsCollector() },
     '@kit.CoreFileKit': { fileIo: {
       OpenMode: { READ_ONLY: 1, NOFOLLOW: 2 }, access: async name => files.has(name), mkdir: async name => files.set(name, null),
-      open: async name => { assert.ok(files.has(name)); return { fd: name }; }, close: async () => {}, unlink: async name => files.delete(name)
+      open: async name => { if (name === 'photo://bad') throw Object.assign(Error('Read failed'), { code: 123 }); assert.ok(files.has(name)); return { fd: name }; },
+      close: async () => {}, unlink: async name => { if (failCleanup) throw Object.assign(Error('Cleanup failed'), { code: 456 }); return files.delete(name); }
     }, picker: { DocumentViewPicker: class { constructor() { throw Error('Feedback must not open a log picker'); } } } },
     '@kit.MediaLibraryKit': { photoAccessHelper: { PhotoViewMIMETypes: { IMAGE_TYPE: 'image/*' }, PhotoViewPicker: class {
       async select(options) { assert.ok(options.maxSelectNumber <= 3); return { photoUris: photos }; }
@@ -129,6 +133,13 @@ async function checkNativeFiles() {
   await assert.rejects(() => FeedbackFiles.read({ ...log, path: '/outside/file' }));
   await assert.rejects(() => FeedbackFiles.remove('/private/feedback-files/../file'));
   await FeedbackFiles.remove(log.path); assert.equal(files.has(log.path), false);
+  photos = ['photo://one', 'photo://bad']; pixels = 12000000; failCleanup = true;
+  await assert.rejects(FeedbackFiles.pickImages(2), error => {
+    assert.match(error.message, /123/); assert.match(error.message, /456/);
+    const displayed = detailedErrors.contextualError('添加图片失败', 'attachment', error);
+    assert.match(displayed.message, /123/); assert.match(displayed.message, /456/);
+    return true;
+  });
   console.log('PASS native feedback files: automatic recent log preparation without a file picker, size/pixel bounds, private copies and image cleanup');
 }
 async function checkUi() {
@@ -137,11 +148,14 @@ async function checkUi() {
   const tree = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
   const component = tree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'FeedbackPanel');
   const names = ['aboutToAppear', 'aboutToDisappear', 'start', 'showHistory', 'submit', 'open', 'confirmRetry', 'context', 'cleanPreview',
-    'setLogAttached', 'locked', 'draftLocked'];
+    'setLogAttached', 'locked', 'draftLocked', 'fileFailure', 'pickImages'];
   const exports = {};
   const code = 'class Page {\n' + component.members.filter(node => names.includes(node.name?.getText(tree))).map(node => node.getText(tree)).join('\n') + '\n} exports.Page = Page;';
+  const fileLogs = [], fileDiagnostics = new DiagnosticsCollector(); fileDiagnostics.configureLogSink(log => fileLogs.push(log));
+  const fileApi = { collectLog: () => 'redacted log for review', saveLog: async () => upload('log'), remove: async () => {},
+    pickImages: async () => { throw Object.assign(Error('Internal error'), { code: 777 }); } };
   vm.runInNewContext(ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, { exports, t,
-    FeedbackFiles: { collectLog: () => 'redacted log for review', saveLog: async () => upload('log'), remove: async () => {} } });
+    ...detailedErrors, Diagnostics: fileDiagnostics, FeedbackFiles: fileApi });
   const h = await setup(token), dialogs = [];
   const panel = Object.assign(new exports.Page(), { service: h.service, history: false, visible: true, appearance: {},
     getUIContext: () => ({ getHostContext: () => ({}), getFocusController: () => ({ clearFocus() {} }), showAlertDialog: dialog => dialogs.push(dialog) }) });
@@ -165,6 +179,12 @@ async function checkUi() {
   assert.equal(dialogs.length, 1, 'Checking logs must not add a confirmation or review dialog');
   await panel.setLogAttached(true); assert.equal(h.service.uploads.length, 1, 'Programmatic checked-state synchronization cannot toggle the attachment off');
   await panel.setLogAttached(false); assert.equal(h.service.uploads.length, 0, 'Unchecking removes the prepared attachment');
+  await panel.pickImages(); assert.match(h.service.error, /添加反馈图片失败/); assert.match(h.service.error, /777/);
+  assert.ok(!h.service.error.includes('5 MiB'), 'An OS error must not masquerade as an oversized image');
+  assert.equal(fileLogs.at(-1).fields.errorCode, 777);
+  fileApi.saveLog = async () => { throw Object.assign(Error('Disk full'), { code: 778 }); };
+  await panel.setLogAttached(true); assert.match(h.service.error, /整理诊断日志失败/); assert.match(h.service.error, /778/);
+  assert.equal(fileLogs.at(-1).fields.errorCode, 778);
   assert.ok(!component.members.some(node => ['logReview', 'confirmLog', 'pickLog'].includes(node.name?.getText(tree))), 'No log review or file-picker flow remains');
   console.log('PASS emitted feedback callbacks: direct opt-in recent logs, state synchronization, unchecking cleanup, no review dialog, history and visible reply reads');
 }

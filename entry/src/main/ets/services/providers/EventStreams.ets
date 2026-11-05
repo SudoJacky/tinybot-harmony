@@ -2,7 +2,8 @@ import { t } from '../../model/I18n';
 import { AnthropicContentBlock, validateAnthropicContent } from '../../model/AnthropicContent';
 import { MAX_REASONING_CONTENT, MAX_TOOL_CALLS, ModelTurn, ToolCall, validateToolCalls } from '../../model/Agent';
 import { AnthropicBlock } from './WireProtocols';
-import { ProviderErrorData, ContextOverflowError, isContextOverflow } from './ProviderErrors';
+import { ProviderErrorData, ContextOverflowError, isContextOverflow, streamProviderError } from './ProviderErrors';
+import { DetailedError, providerErrorCode } from '../../model/DetailedError';
 
 export interface ModelStream {
   push(text: string): void;
@@ -57,7 +58,7 @@ interface ResponseData {
   incomplete_details?: ResponseIncomplete;
 }
 interface ResponseEvent {
-  type: string; delta?: string; text?: string; response?: ResponseData; code?: string; error?: ProviderErrorData;
+  type: string; delta?: string; text?: string; response?: ResponseData; code?: string; error?: ProviderErrorData; item?: ResponseItem;
   output_index?: number; summary_index?: number; content_index?: number;
 }
 
@@ -76,8 +77,15 @@ function responsesFailure(event: ResponseEvent): Error {
   }
   // Keep diagnostic identifiers, without copying upstream messages that may echo request data.
   const detail = event.type === 'response.incomplete' ? reason : event.response?.error?.code || event.error?.code || event.code;
-  const identifier = typeof detail === 'string' && /^[a-zA-Z0-9_.-]{1,80}$/.test(detail) ? ': ' + detail : '';
-  return new Error(t('Responses 模型服务返回错误或不完整回答。') + ' [' + event.type + identifier + ']');
+  let message = t('Responses 模型服务返回错误或不完整回答。');
+  if (event.type !== 'response.incomplete' && (event.response?.error || event.error || event.code)) {
+    const remote = streamProviderError(event.response?.error || event.error || { code: event.code });
+    if (remote instanceof DetailedError) { message = remote.reason; }
+  }
+  const code = providerErrorCode(detail);
+  const failure = new DetailedError(message + ' [' + event.type + (code ? ': ' + code : '') + ']', { stage: 'streaming' });
+  failure.providerCode = code;
+  return failure;
 }
 
 export class ResponsesStream implements ModelStream {
@@ -90,9 +98,11 @@ export class ResponsesStream implements ModelStream {
   private lastReasoningPart: string = '';
   private onText: (text: string) => void;
   private onReasoning?: (text: string) => void;
-  constructor(onText: (text: string) => void, onReasoning?: (text: string) => void) {
+  private onToken?: () => void;
+  constructor(onText: (text: string) => void, onReasoning?: (text: string) => void, onToken?: () => void) {
     this.onText = onText;
     this.onReasoning = onReasoning;
+    this.onToken = onToken;
     this.frames = new EventFrames((payload: string) => this.event(payload));
   }
   push(text: string): void { this.frames.push(text); }
@@ -121,6 +131,7 @@ export class ResponsesStream implements ModelStream {
     if (complete) { this.closedReasoningParts.add(key); }
     if (addition) {
       this.reasoning += addition; this.lastReasoningPart = key;
+      this.onToken?.();
       this.onReasoning?.(addition);
     }
   }
@@ -155,7 +166,12 @@ export class ResponsesStream implements ModelStream {
     } else if (event.type === 'response.output_text.delta') {
       if (typeof event.delta !== 'string') { throw new Error(t("Responses 文本片段无效。")); }
       this.content += event.delta;
+      if (event.delta) { this.onToken?.(); }
       this.onText(event.delta);
+    } else if (event.type === 'response.function_call_arguments.delta') {
+      if (event.delta) { this.onToken?.(); }
+    } else if (event.type === 'response.output_item.added') {
+      if (event.item?.type === 'function_call' && event.item.name) { this.onToken?.(); }
     } else if (event.type === 'response.completed') {
       const response = event.response;
       if (!response || response.status !== 'completed' || !Array.isArray(response.output)) {
@@ -192,6 +208,7 @@ export class AnthropicStream implements ModelStream {
   private reasoning: string = '';
   private thinkingSize: number = 0;
   private onReasoning?: (text: string) => void;
+  private onToken?: () => void;
   private frames: EventFrames;
   private onText: (text: string) => void;
   private content: string = '';
@@ -202,9 +219,10 @@ export class AnthropicStream implements ModelStream {
   private closed: Set<number> = new Set<number>();
   private fragments: Set<number> = new Set<number>();
   private calls: Map<number, ToolCall> = new Map<number, ToolCall>();
-  constructor(onText: (text: string) => void, onReasoning?: (text: string) => void) {
+  constructor(onText: (text: string) => void, onReasoning?: (text: string) => void, onToken?: () => void) {
     this.onText = onText;
     this.onReasoning = onReasoning;
+    this.onToken = onToken;
     this.frames = new EventFrames((payload: string) => this.event(payload));
   }
   push(text: string): void { this.frames.push(text); }
@@ -226,20 +244,19 @@ export class AnthropicStream implements ModelStream {
     validateAnthropicContent(preserved);
     return { content: this.content, toolCalls: calls, reasoningContent: this.reasoning || undefined, anthropicContent: preserved };
   }
-  private append(text: string): void { this.content += text; this.onText(text); }
+  private append(text: string): void { this.content += text; if (text) { this.onToken?.(); } this.onText(text); }
   private appendThinking(text: string): void {
     this.thinkingSize += text.length;
     if (this.thinkingSize > 1024 * 1024) throw new Error(t('Anthropic 思考记录无效或过大。'));
     this.reasoning += text;
-    if (text) this.onReasoning?.(text);
+    if (text) { this.onToken?.(); this.onReasoning?.(text); }
   }
   private event(payload: string): void {
     if (this.done) { throw new Error(t("Anthropic 在结束后继续返回数据。")); }
     const event = parseEvent(payload) as AnthropicEvent;
     if (!event || typeof event.type !== 'string') { throw new Error(t("Anthropic 流式事件无效。")); }
     if (event.type === 'error') {
-      if (isContextOverflow(event.error)) { throw new ContextOverflowError(); }
-      throw new Error(t("Anthropic 模型服务在生成过程中返回错误。"));
+      throw streamProviderError(event.error);
     }
     if (event.type === 'ping') { return; }
     if (event.type === 'message_start') {
@@ -278,6 +295,7 @@ export class AnthropicStream implements ModelStream {
         this.appendThinking(block.thinking);
       } else if (block.type === 'redacted_thinking') {
         if (typeof block.data !== 'string' || !block.data) throw new Error(t('Anthropic 思考记录无效或过大。'));
+        this.onToken?.();
         this.thinkingSize += block.data.length;
         if (this.thinkingSize > 1024 * 1024) throw new Error(t('Anthropic 思考记录无效或过大。'));
       } else {
@@ -285,6 +303,7 @@ export class AnthropicStream implements ModelStream {
           throw new Error(t("Anthropic 工具输入无效。"));
         }
         this.calls.set(index, { id: block.id || '', type: 'function', function: { name: block.name || '', arguments: JSON.stringify(block.input) } });
+        if (block.name) { this.onToken?.(); }
       }
     } else {
       if (!this.blocks.has(index) || this.closed.has(index)) { throw new Error(t("Anthropic 内容块尚未开始或已经结束。")); }
@@ -310,6 +329,7 @@ export class AnthropicStream implements ModelStream {
           call.function.arguments = ''; this.fragments.add(index);
         }
         call.function.arguments += delta.partial_json;
+        if (delta.partial_json) { this.onToken?.(); }
       } else { throw new Error(t("Anthropic 内容片段无效或不支持。")); }
     }
   }
