@@ -3,6 +3,11 @@ import { ProviderEffects } from './providers/Provider';
 import { PresentTools } from './PresentTools';
 import { PreviewTools } from './PreviewTools';
 import { MiniApps } from './MiniApps';
+import { LifePanels } from './LifePanels';
+import { LifeBoards } from './LifeBoards';
+import { LifePanelTools } from './LifePanelTools';
+import { MailTools } from './MailTools';
+import { installNativePanelAgent } from './NativePanelAgent';
 import { MiniAppTools } from './MiniAppTools';
 import { PreviewCapture } from './PreviewCapture';
 import { savePreviewRepair } from './PreviewRecovery';
@@ -81,6 +86,8 @@ export class NativeSessionResources implements SessionResources {
   }
   private workspaces: WorkspaceStore;
   private miniApps: MiniApps;
+  private lifePanels: LifePanels;
+  private lifeBoards: LifeBoards;
   private providers: ProviderRegistry;
   private approval: ToolApproval;
   private browser?: BrowserSession;
@@ -89,6 +96,8 @@ export class NativeSessionResources implements SessionResources {
   constructor(workspaceFilesDir: string, providers: ProviderRegistry, approval: ToolApproval, context?: common.UIAbilityContext, browser?: BrowserSession) {
     this.browser = browser;
     this.miniApps = new MiniApps(workspaceFilesDir);
+    this.lifePanels = new LifePanels(workspaceFilesDir);
+    this.lifeBoards = new LifeBoards(workspaceFilesDir);
     this.context = context;
     this.workspaces = new WorkspaceStore(workspaceFilesDir); this.providers = providers; this.approval = approval;
   }
@@ -113,6 +122,8 @@ export class NativeSessionResources implements SessionResources {
     const groups: AgentTools[] = [new WorkspaceTools(files, nativeWorkspaceDiffs), new AttachmentTools(attachments),
       new SkillTools(extensions.skills, selected, live ? () => live.skills() : undefined), new InteractionTools(this.approval)];
     groups.push(new CodeExecutionTools(new NativeCodeExecutor()));
+    groups.push(new LifePanelTools(this.lifePanels, workspaceId || id, id, files, this.lifeBoards));
+    groups.push(new MailTools());
     groups.push(new MiniAppTools(this.miniApps, workspaceId || id, id, files,
       (page, storage, cancellation) => WebUiPreflight.validateMiniApp(page, storage, cancellation), productivity?.options?.miniAppsEnabled === true));
     groups.push(new PresentTools((path: string) => files.checkedPath(path)));
@@ -161,6 +172,7 @@ export function createNativeSessionService(filesDir: string, workspaceFilesDir: 
   const session = new SessionService(new ConversationStore(filesDir), new AgentRuntime(providers, credentials, new NativeUsageRecorder(),
     (content, cancellation) => WebUiPreflight.validate(content, cancellation), new NativeOrchestrationExecutor(), browser), credentials,
     new NativeSessionResources(workspaceFilesDir, providers, approval, context, browser));
+  installNativePanelAgent(workspaceFilesDir, providers, credentials, () => session.snapshot());
   if (context) { backgroundGeneration.attach(session, context); completionNotifications.attach(session, context); }
   if (browser) {
     browser.configure((policy) => session.setBrowserPolicy(policy), (event, fields, error) => Diagnostics.log(error === undefined ? 'info' : 'error', 'browser', event, fields, error));

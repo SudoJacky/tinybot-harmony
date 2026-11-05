@@ -38,6 +38,7 @@ const fileIo = {
   }
 };
 const kits = {
+  '@kit.NetworkKit': { socket: {} },
   '@kit.AssetStoreKit': { asset: {} },
   '@kit.CoreFileKit': { fileIo }, '@kit.ImageKit': { image: {} }, '@kit.ArkGraphics2D': { drawing: {} },
   '@kit.ArkTS': { util: {
@@ -65,6 +66,35 @@ mock('model/I18n', { t }); mock('model/Diagnostics', { Diagnostics: { acceptsLog
 mock('common/ApiLevel', { ApiLevel: { pdfTextContent: true } });
 mock('services/ProjectFolderAccess', { ProjectFolderAccess: { activate: async () => {} } });
 mock('services/NativeActions', { exportFile: async () => {} });
+let panelResponse = '{}';
+let panelScriptHandler;
+const panelScriptCalls=[];
+// Execute sample function bodies in a test VM; native QuickJS limits/queue have separate adapter tests.
+mock('services/NativeCodeExecutor',{NativeCodeExecutor:class {
+  async execute(code,inputJson,cancellation) {
+    cancellation.check();panelScriptCalls.push({code,inputJson});
+    if(panelScriptHandler)return panelScriptHandler(code,inputJson,cancellation);
+    try {
+      const result=vm.runInNewContext('(function(input){'+code+'})(JSON.parse(inputJson))',{inputJson},{timeout:100});
+      if(result&&typeof result.then==='function')return JSON.stringify({status:'unsupported_async',error:'Promises are unsupported'});
+      return JSON.stringify({status:'ok',result});
+    }catch(error){return JSON.stringify({status:'error',error:error.message});}
+  }
+}});
+const panelSecrets=new Map();let apiRequest, apiResponse={status:200,header:{},text:'',bytes:new ArrayBuffer(0)}, apiStop=false;
+let apiHandler=async()=>apiResponse;
+mock('services/NetworkTransfers',{NetworkTransfers:{begin:async()=>async()=>{}}});
+mock('services/CompatHttp',{CompatHttp:{request:async(spec,register)=>{apiRequest=spec;apiStop=false;if(register)register(()=>apiStop=true);return apiHandler(spec);}}});
+mock('services/CredentialStore',{CredentialStore:class {
+  async readOptional(alias){return panelSecrets.get(alias);}
+  async read(alias){if(!panelSecrets.has(alias))throw Error('Missing credentials');return panelSecrets.get(alias);}
+  async write(alias,value){assert.ok(!panelSecrets.has(alias));panelSecrets.set(alias,value);}
+  async update(alias,value){assert.ok(panelSecrets.has(alias));panelSecrets.set(alias,value);}
+  async remove(alias){panelSecrets.delete(alias);}
+}});
+mock('services/NativeWebTransport', { NativeWebTransport: class {
+  async get(url, cancellation, maxBytes) { cancellation.check(); assert.equal(maxBytes, 256 * 1024); return { body: panelResponse }; }
+} });
 function compile(text) { return ts.transpileModule(text, { compilerOptions: { target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS, experimentalDecorators: true } }).outputText; }
 function load(name) {
   const file = path.resolve(source, name.endsWith('.ets') ? name : name + '.ets');
@@ -337,4 +367,352 @@ async function browserTest(repo,id) {
     console.log('PASS real Chromium host: save/reopen, stale write rejection, preflight blocks writes, unavailable storage fails visibly');
   } finally {await browser.close();}
 }
-main().catch(error=>{console.error(error);process.exitCode=1;});
+async function lifePanelTest() {
+  const { LifePanels, PanelRepository, NativePanelSourceReader } = load('services/LifePanels');
+  const { LifePanelTools } = load('services/LifePanelTools');
+  const { parsePanelSpec, panelValue, panelCells, panelDue } = load('model/LifePanel');
+  const dir='/sandbox/panels', ws=new WorkspaceStore(dir), panels=new LifePanels(dir);
+  fs.mkdirSync(disk(dir),{recursive:true}); await ws.ensureThread('panel-chat');
+  const scoped=new NativeWorkspaceFiles(ws.pathFor('panel-chat')), repo=panels.repository('panel-chat');
+  const spec={version:1,title:'Today',size:'L',data:{count:3,tasks:[{id:'walk',label:'Walk',done:false}],points:[1,3,2]},
+    source:{type:'workspace-json',path:'data.json'},refreshMinutes:5,nodes:[
+      {id:'row',kind:'Row'}, {id:'count',kind:'Metric',parent:'row',value:{path:'/data/count'},private:true},
+      {id:'progress',kind:'Progress',value:{path:'/data/count'},max:{value:10}},
+      {id:'tasks',kind:'Checklist',items:{path:'/data/tasks'}}, {id:'trend',kind:'Sparkline',value:{path:'/data/points'}}]};
+  assert.equal(parsePanelSpec(JSON.stringify(spec)).size,'L');
+  for(const change of [s=>s.version=2,s=>s.size='XL',s=>s.nodes[1].value.path='/data/missing',
+    s=>s.nodes[1].parent='count',s=>s.data.count=Infinity,s=>s.nodes[1].value={path:'/data/count',value:1},
+    s=>s.nodes[0].kind='Web',s=>s.nodes[1].decimals=5,s=>s.refreshMinutes=0,s=>s.data.tasks.push({...s.data.tasks[0]}),
+    s=>s.source={type:'json-url',url:'https://user:password@example.com/data'}]) {
+    const bad=plain(spec);change(bad);assert.throws(()=>parsePanelSpec(JSON.stringify(bad)));
+  }
+  assert.equal(panelValue({path:'/data/a~1b/~0x/0'},{'a/b':{'~x':[7]}},{}),7);
+  assert.throws(()=>panelValue({path:'/data/__proto__'},{},{}),/Unsafe/);
+  const cells=plain(panelCells(['S','L','M','S'],3));
+  const occupied=new Set(); for(const cell of cells) for(let y=0;y<cell.rows;y++) for(let x=0;x<cell.columns;x++) {
+    const key=`${cell.row+y}:${cell.column+x}`;assert.ok(!occupied.has(key));occupied.add(key);
+  }
+  assert.deepEqual(cells.map(c=>[c.columns,c.rows]),[[1,1],[2,2],[2,1],[1,1]]);
+  await scoped.write('today.panel.json',JSON.stringify(spec),signal);
+  await scoped.write('data.json',JSON.stringify(spec.data),signal);
+  const tools=new LifePanelTools(panels,'panel-chat','deleted-thread',scoped);
+  assert.equal((await invoke(tools,'get_life_panel_catalog',{})).version,1);
+  const receipt=await invoke(tools,'publish_life_panel',{path:'today.panel.json'}), id=receipt.panelId;
+  assert.equal(receipt.openFrom,'Life Panel');
+  const readonly=new RuleTools(tools,true);
+  assert.ok(!readonly.definitions().some(t=>t.function.name==='publish_life_panel'));
+  assert.ok(readonly.definitions().some(t=>t.function.name==='list_life_panels'));
+  await assert.rejects(invoke(readonly,'publish_life_panel',{path:'today.panel.json'}));
+  await assert.rejects(scoped.write('life-panels/'+id+'/panel.json','{}',signal),/app-owned/);
+  let record=await repo.get(id);assert.ok(panelDue(record,Date.now()));
+  record=await repo.toggle(id,record.configRevision,'tasks','walk',true);
+  await scoped.write('data.json',JSON.stringify({...spec.data,count:6}),signal);
+  record=await repo.refresh(id,signal);assert.equal(record.data.count,6);assert.equal(record.user['tasks:walk'],true);
+  assert.equal(panelDue(record,record.refreshedAt+299999),false);
+  const goodTime=record.refreshedAt;
+  await scoped.write('data.json','{"count":"bad"}',signal);
+  await assert.rejects(repo.refresh(id,signal));record=await repo.get(id);
+  assert.equal(record.data.count,6);assert.equal(record.refreshedAt,goodTime);assert.ok(record.error);
+  assert.equal(panelDue(record,record.attemptedAt+299999),false,'Failed source retries wait for expiry');
+  // Slow fetches coexist with checklist edits and coalesce across repository instances.
+  let release, calls=0;const reader={read:async()=>{calls++;return await new Promise(r=>release=r);}};
+  const managed={read:(...args)=>scoped.read(...args),write:(...args)=>scoped.writeLifePanel(...args)};
+  const slow=new PanelRepository(managed,'slow-key',reader), second=new PanelRepository(managed,'slow-key',reader);
+  const fetch=slow.refresh(id,new Cancellation());
+  while(!release) await new Promise(r=>setTimeout(r,0));
+  const duplicate=second.refresh(id,new Cancellation());assert.equal(fetch,duplicate);assert.equal(calls,1);
+  await slow.toggle(id,record.configRevision,'tasks','walk',false);
+  release({...spec.data,count:7});await fetch;
+  assert.equal((await repo.get(id)).user['tasks:walk'],false);
+  release=undefined;const obsolete=slow.refresh(id,new Cancellation());while(!release) await new Promise(r=>setTimeout(r,0));
+  await repo.publish(id,{...spec,title:'New definition'},'today.panel.json','new-thread',true,signal);
+  release({...spec.data,count:9});await assert.rejects(obsolete,/changed during refresh/);
+  assert.equal((await repo.get(id)).definition.title,'New definition');assert.equal((await repo.get(id)).data.count,3);assert.equal((await repo.get(id)).error,'');
+  release=undefined;const cancelled=new Cancellation(), work=slow.refresh(id,cancelled);
+  while(!release) await new Promise(r=>setTimeout(r,0));cancelled.cancel();release({...spec.data,count:8});await assert.rejects(work);
+  assert.equal((await repo.get(id)).data.count,3,'Background cancellation cannot commit late results');
+  await repo.resize(id,'S');assert.equal((await repo.get(id)).definition.size,'S');
+  await repo.archive(id,true);assert.equal(panelDue(await repo.get(id),Date.now()),false);await repo.archive(id,false);
+  panelResponse=JSON.stringify({payload:spec.data});
+  const httpSpec={...spec,source:{type:'json-url',url:'https://example.com/data',pointer:'/payload'}};
+  assert.deepEqual(plain(await new NativePanelSourceReader(scoped).read(httpSpec,signal)),spec.data);
+  panelResponse='<html>Sign in</html>';await assert.rejects(new NativePanelSourceReader(scoped).read(httpSpec,signal));
+  // Mail snapshots use the same production reader, transforms, persistence and failure history.
+  // Protocol and secure-account behavior are covered separately by test-mail.cjs.
+  const {MailService}=load('services/MailService'), originalQuery=MailService.prototype.query;
+  let mailFailure=false;
+  MailService.prototype.query=async function(query,cancellation){cancellation.check();assert.equal(query.accountId,'mail-connection');if(mailFailure)throw Error('Mailbox access is disabled in Settings');return {unread:4,messages:[{id:'42:9',subject:'Delivery'}]};};
+  try {
+    const mailSpec={version:1,title:'Mail',size:'S',refreshMinutes:5,source:{type:'mail',mail:{accountId:'mail-connection',folder:'INBOX',limit:5},
+      transform:{op:'object',fields:{count:{path:'/response/unread'}}}},data:{count:0},nodes:[{id:'count',kind:'Metric',value:{path:'/data/count'}}]};
+    await repo.publish('mail-card',mailSpec,'mail.panel.json','deleted-chat',false,signal);
+    const fresh=await repo.refresh('mail-card',signal);assert.equal(fresh.data.count,4);assert.equal(fresh.runs[0].status,'complete');
+    mailFailure=true;await assert.rejects(repo.refresh('mail-card',signal),/disabled/);
+    const retained=await repo.get('mail-card');assert.equal(retained.data.count,4);assert.equal(retained.refreshedAt,fresh.refreshedAt);assert.equal(retained.runs[0].status,'failed');
+    await repo.archive('mail-card',true);
+  } finally {MailService.prototype.query=originalQuery;}
+  // No chat remains. Backup must retain panel-only workspaces and app-owned user edits.
+  const context={filesDir:dir,cacheDir:dir+'/cache',getApplicationContext(){return this;}};
+  fs.mkdirSync(disk(context.cacheDir));const {createBackupFile,readBackupFile}=load('services/Backup');
+  const backup=await createBackupFile(context,emptyData());
+  const restoreDir='/sandbox/panels-restored';fs.mkdirSync(disk(restoreDir));
+  const target={filesDir:restoreDir,cacheDir:restoreDir,getApplicationContext(){return this;}};
+  await readBackupFile(target,backup,emptyData());
+  const restored=new LifePanels(restoreDir);assert.equal((await restored.list()).length,2);
+  assert.equal((await restored.repository('panel-chat').get('mail-card')).definition.source.mail.accountId,'mail-connection');
+  assert.deepEqual(plain(await restored.repository('panel-chat').get(id)),plain(await repo.get(id)));
+  await restored.repository('panel-chat').toggle(id,(await repo.get(id)).configRevision,'tasks','walk',true);
+  await readBackupFile(target,backup,emptyData());assert.equal((await restored.repository('panel-chat').get(id)).user['tasks:walk'],true);
+  console.log('PASS Life Panel protocol, bindings, native sizing, tools/permissions, atomic user state, refresh deduplication, stale/cancelled results and orphan backup/restore');
+}
+async function lifePanelApiTest() {
+  const {validatePanelSource}=load('model/PanelSource'), {validatePanelTransform,transformPanelData}=load('model/PanelTransform');
+  const {PanelCredentials}=load('services/PanelCredentials'), {PanelApiTransport}=load('services/PanelApiTransport');
+  const {LifePanels}=load('services/LifePanels');
+  const expr={op:'object',fields:{
+    total:{op:'sum',args:[{op:'map',args:[{path:'/response/rows'},{op:'number',args:[{path:'/item/amount'}]}]}]},
+    average:{op:'round',args:[{op:'average',args:[{op:'map',args:[{path:'/response/rows'},{op:'number',args:[{path:'/item/amount'}]}]}]},{value:1}]},
+    items:{op:'map',args:[{op:'slice',args:[{op:'filter',args:[{path:'/response/rows'},{op:'gt',args:[{op:'number',args:[{path:'/item/amount'}]},{value:0}]}]},{value:0},{value:5}]},
+      {op:'object',fields:{id:{op:'string',args:[{path:'/item/id'}]},label:{op:'concat',args:[{path:'/item/name'},{value:' #'},{path:'/index'}]},value:{op:'string',args:[{path:'/item/amount'}]}}}]}
+  }};
+  validatePanelTransform(expr);
+  const payload={rows:[{id:1,name:'One',amount:'12.5'},{id:2,name:'Two',amount:'0'},{id:3,name:'Three',amount:'7.5'}]};
+  assert.deepEqual(plain(transformPanelData(payload,expr)),{total:20,average:6.7,items:[{id:'1',label:'One #0',value:'12.5'},{id:'3',label:'Three #1',value:'7.5'}]});
+  for(const expression of [{op:'eval',args:[]},{path:'/response/__proto__'},{op:'add',args:[{value:1}]},
+    {op:'map',args:[{path:'/response/rows'},{path:'/unavailable'}]}]) assert.throws(()=>validatePanelTransform(expression));
+  for(const expression of [{op:'divide',args:[{value:1},{value:0}]},{op:'number',args:[{value:''}]},
+    {op:'average',args:[{value:[]}]},{op:'filter',args:[{value:[1]},{value:1}]}]) assert.throws(()=>transformPanelData({},expression));
+  let deep={value:1};for(let i=0;i<12;i++)deep={op:'string',args:[deep]};assert.throws(()=>validatePanelTransform(deep),/nesting/);
+  assert.throws(()=>transformPanelData({text:'x'.repeat(150000),rows:[1,2,3]}, {op:'map',args:[{path:'/response/rows'},{path:'/response/text'}]}),/256 KiB/);
+  const source={type:'api',url:'https://api.example.test/query',method:'POST',headers:{'X-Client':'Tinybot'},body:{period:'week'},
+    auth:{type:'api-key',in:'header',name:'X-API-Key'},transform:expr};
+  validatePanelSource(source);
+  const catalog=JSON.parse(load('model/LifePanel').LIFE_PANEL_CATALOG);
+  validatePanelSource({...source,transform:catalog.javascriptExample});
+  for(const patch of [{method:'DELETE'},{method:'GET'},{url:'http://api.example.test/query'},{headers:{Host:'evil.test'}},
+    {headers:{Authorization:'secret'}},{headers:{'X-Client':'bad\r\nheader'}},{headers:{a:'one',A:'two'}},
+    {auth:{type:'oauth',oauth:{clientId:'x',authorizationEndpoint:'https://id.test/auth',tokenEndpoint:'http://id.test/token'}}}]) {
+    assert.throws(()=>validatePanelSource({...source,...patch}));
+  }
+  const credentials=new PanelCredentials('private-namespace'), transport=new PanelApiTransport(credentials), id='api-panel';
+  await assert.rejects(transport.read(id,source,new Cancellation()),/not connected/);
+  await credentials.save(id,source,'fixture-api-secret');assert.equal(await credentials.connected(id,source),true);
+  assert.equal(await credentials.connected(id,{...source,auth:{name:'x-api-key',in:'header',type:'api-key'}}),true,'Equivalent field ordering/header casing does not require reconnecting');
+  assert.equal(await new PanelCredentials('other-workspace').connected(id,source),false);
+  const changed={...source,url:'https://other.example.test/query'};
+  assert.equal(await credentials.connected(id,changed),false);await assert.rejects(transport.read(id,changed,new Cancellation()),/not connected/);
+  const bytes=value=>new TextEncoder().encode(JSON.stringify(value)).buffer;
+  apiResponse={status:200,header:{},text:'',bytes:bytes(payload)};
+  assert.deepEqual(JSON.parse(await transport.read(id,source,new Cancellation())),payload);
+  assert.equal(apiRequest.method,'POST');assert.equal(apiRequest.redirect,'return');assert.equal(apiRequest.headers['X-API-Key'],'fixture-api-secret');
+  assert.equal(apiRequest.headers['X-Client'],'Tinybot');assert.equal(apiRequest.headers['Content-Type'],'application/json');assert.deepEqual(JSON.parse(apiRequest.body),{period:'week'});
+  const query={...source,method:'GET',body:undefined,auth:{type:'api-key',in:'query',name:'key'}};
+  await credentials.save(id,query,'a+b/c=');await transport.read(id,query,new Cancellation());assert.ok(apiRequest.url.endsWith('?key=a%2Bb%2Fc%3D'));
+  const bearer={...source,auth:{type:'bearer'}};await credentials.save(id,bearer,'bearer-secret');await transport.read(id,bearer,new Cancellation());
+  assert.equal(apiRequest.headers.Authorization,'Bearer bearer-secret');
+  for(const status of [302,401,403,500]) {apiResponse={...apiResponse,status};await assert.rejects(transport.read(id,bearer,new Cancellation()),/redirect|authentication|HTTP/);}
+  apiHandler=async()=>{throw Error('request included fixture-api-secret bearer-secret a+b/c=');};
+  await assert.rejects(transport.read(id,bearer,new Cancellation()),error=>!error.message.includes('secret')&&error.message.includes('transport failed'));
+  let release;apiHandler=async()=>await new Promise(r=>release=r);const cancelled=new Cancellation(),pending=transport.read(id,bearer,cancelled);
+  while(!release)await new Promise(r=>setTimeout(r,0));cancelled.cancel();await assert.rejects(pending);assert.equal(apiStop,true);release(apiResponse);
+  apiHandler=async()=>apiResponse;apiResponse={status:200,header:{},text:'',bytes:bytes(payload)};
+  const dir='/sandbox/api-panels',ws=new WorkspaceStore(dir);fs.mkdirSync(disk(dir),{recursive:true});await ws.ensureThread('api-workspace');
+  const panels=new LifePanels(dir),repo=panels.repository('api-workspace'), vault=panels.credentials('api-workspace');
+  const spec={version:1,title:'API data',size:'L',data:{total:0,average:0,items:[]},source,nodes:[
+    {id:'total',kind:'Metric',value:{path:'/data/total'}},{id:'items',kind:'ItemList',items:{path:'/data/items'}}]};
+  await repo.publish(id,spec,'api.panel.json','deleted-chat',false,new Cancellation());await vault.save(id,source,'device-only-secret');
+  let result=await repo.refresh(id,new Cancellation());assert.equal(result.data.total,20);assert.equal(result.data.items[0].id,'1');
+  apiResponse={...apiResponse,bytes:bytes({rows:[{amount:'invalid'}]})};await assert.rejects(repo.refresh(id,new Cancellation()));
+  result=await repo.get(id);assert.equal(result.data.total,20);assert.ok(result.error);
+  assert.ok(!JSON.stringify((await panels.list())).includes('device-only-secret'));
+  const context={filesDir:dir,cacheDir:dir+'/cache',getApplicationContext(){return this;}};fs.mkdirSync(disk(context.cacheDir));
+  const backup=await load('services/Backup').createBackupFile(context,emptyData());
+  const archive=legacyBackupFixture(fs.readFileSync(disk(backup)));assert.ok(!JSON.stringify(archive).includes('device-only-secret'));
+  await vault.disconnect(id);assert.equal(await vault.connected(id,source),false);await credentials.disconnect(id);
+  console.log('PASS authenticated GET/POST, API key headers/query, bearer, scoped secure credentials, redirect/error redaction, cancellation, transforms and credential-free backup');
+}
+async function lifePanelScriptTest() {
+  const {validatePanelSource}=load('model/PanelSource');
+  const {LifePanels,NativePanelSourceReader}=load('services/LifePanels');
+  const {PanelDataTransform}=load('services/PanelDataTransform');
+  const {NativeCodeExecutor}=load('services/NativeCodeExecutor');
+  const transform={type:'javascript',code:'return { total: input.orders.reduce((sum, order) => sum + Number(order.amount), 0), items: input.orders.map(order => ({id:String(order.id), label:order.name})) };'};
+  const source={type:'workspace-json',path:'orders.json',pointer:'/payload',transform};
+  validatePanelSource(source);
+  for(const invalid of [{type:'javascript',code:''},{type:'javascript',code:5},{type:'typescript',code:'return {};'},
+    {type:'javascript',code:'return {};',op:'object'},{type:'javascript',code:'return {};',path:'transform.js'},
+    {type:'javascript',code:' '.repeat(64*1024)+'return {};'},null]) assert.throws(()=>validatePanelSource({...source,transform:invalid}));
+  const dir='/sandbox/script-panels',ws=new WorkspaceStore(dir);fs.mkdirSync(disk(dir),{recursive:true});await ws.ensureThread('script-chat');
+  const scoped=new NativeWorkspaceFiles(ws.pathFor('script-chat')),panels=new LifePanels(dir),repo=panels.repository('script-chat');
+  const input={orders:[{id:1,name:'First',amount:'12.5'},{id:2,name:'Second',amount:'7.5'}]};
+  await scoped.write('orders.json',JSON.stringify({payload:input,authorization:'not-exposed'}),signal);
+  const spec={version:1,title:'Script data',size:'L',source:plain(source),data:{total:0,items:[{id:'1',label:'First'}]},
+    nodes:[{id:'total',kind:'Metric',value:{path:'/data/total'}},{id:'tasks',kind:'Checklist',items:{path:'/data/items'}}]};
+  await repo.publish('script',spec,'script.panel.json','removed-chat',false,signal);
+  spec.source.transform.code='throw Error("mutated source");';
+  let record=await repo.refresh('script',signal);assert.equal(record.data.total,20);assert.equal(record.data.items[0].id,'1');
+  assert.equal(record.definition.source.transform.code,transform.code,'Publication freezes the script without a live workspace dependency');
+  assert.deepEqual(JSON.parse(panelScriptCalls.at(-1).inputJson),input,'Only pointer-selected response data reaches the script');
+  await repo.toggle('script',record.configRevision,'tasks','1',true);await repo.refresh('script',signal);
+  record=await repo.get('script');assert.equal(record.user['tasks:1'],true);
+  const previous=plain(record.data),updatedAt=record.refreshedAt;
+  for(const output of [{status:'timeout',error:'Execution exceeded 2 seconds'}, {status:'memory_limit',error:'32 MiB limit exceeded'},
+    {status:'unsupported_async',error:'Promise result'}, {status:'error',error:'ReferenceError: missing is not defined'},
+    {status:'ok',result:{total:9,items:[]},resultTruncated:true},{status:'ok'}, {status:'ok',result:42},
+    {status:'ok',result:null},{status:'ok',result:{text:'x'.repeat(256*1024)}},{status:'ok',result:{text:'x'.repeat(600*1024)}},{status:'ok',result:{total:'bad',items:[]}}]) {
+    panelScriptHandler=async()=>JSON.stringify(output);
+    await assert.rejects(repo.refresh('script',signal));record=await repo.get('script');
+    assert.deepEqual(plain(record.data),previous);assert.equal(record.refreshedAt,updatedAt);assert.equal(record.user['tasks:1'],true);assert.ok(record.error);
+  }
+  const runner=new PanelDataTransform(new NativeCodeExecutor());panelScriptHandler=undefined;
+  await assert.rejects(runner.run(input,{type:'javascript',code:'return ('},signal,'syntax'),/JavaScript transform failed/);
+  await assert.rejects(runner.run(input,{type:'javascript',code:'return Promise.resolve({total:1});'},signal,'async'),/unsupported_async/);
+  await assert.rejects(runner.run(input,{type:'javascript',code:'throw Error("bad response field");'},signal,'throws'),/bad response field/);
+  for(let i=0;i<2;i++)assert.equal((await runner.run(input,{type:'javascript',code:'globalThis.count=(globalThis.count||0)+1; return {count};'},signal,'fresh')).count,1);
+  // Late script results cannot commit after background cancellation or definition replacement.
+  let release;panelScriptHandler=async()=>await new Promise(r=>release=r);
+  const stop=new Cancellation(),cancelled=repo.refresh('script',stop);
+  while(!release)await new Promise(r=>setTimeout(r,0));stop.cancel();release(JSON.stringify({status:'ok',result:{total:999,items:[]}}));await assert.rejects(cancelled);
+  assert.deepEqual(plain((await repo.get('script')).data),previous);
+  release=undefined;const obsolete=repo.refresh('script',new Cancellation());while(!release)await new Promise(r=>setTimeout(r,0));
+  const next={...spec,source:{...source,transform:{type:'javascript',code:'return {total:42,items:[]};'}}};
+  await repo.publish('script',next,'script.panel.json','new-chat',true,signal);
+  release(JSON.stringify({status:'ok',result:{total:999,items:[]}}));await assert.rejects(obsolete,/changed during refresh/);
+  assert.equal((await repo.get('script')).definition.source.transform.code,next.source.transform.code);
+  panelScriptHandler=undefined;record=await repo.refresh('script',signal);assert.equal(record.data.total,42);
+  const fresh=await new NativePanelSourceReader(scoped).read(next,signal,'reopened');assert.equal(fresh.total,42);
+  const context={filesDir:dir,cacheDir:dir+'/cache',getApplicationContext(){return this;}};fs.mkdirSync(disk(context.cacheDir));
+  const {createBackupFile,readBackupFile}=load('services/Backup'), backup=await createBackupFile(context,emptyData());
+  const targetDir='/sandbox/script-restored';fs.mkdirSync(disk(targetDir));const target={filesDir:targetDir,cacheDir:targetDir,getApplicationContext(){return this;}};
+  await readBackupFile(target,backup,emptyData());const restored=new LifePanels(targetDir).repository('script-chat');
+  assert.equal((await restored.get('script')).definition.source.transform.code,next.source.transform.code);
+  assert.equal((await restored.refresh('script',signal)).data.total,42,'Backup restores executable transforms after source chat deletion');
+  console.log('PASS JavaScript transform contract, response-only input, publication snapshot, validation/errors/limits, user state, cancellation, obsolete results and backup execution');
+}
+async function lifeBoardsTest() {
+  const {LifePanels}=load('services/LifePanels'),{LifeBoards}=load('services/LifeBoards'),{LifePanelTools}=load('services/LifePanelTools');
+  const {publishedPanels}=load('model/PublishedPanel'),{parsePanelTarget}=load('model/LifeBoard'),{panelDue}=load('model/LifePanel');
+  const dir='/sandbox/boards',ws=new WorkspaceStore(dir),panels=new LifePanels(dir),boards=new LifeBoards(dir);
+  fs.mkdirSync(disk(dir),{recursive:true});for(const id of ['owner','another-chat','empty-board'])await ws.ensureThread(id);
+  const spec={version:1,title:'Shared tasks',size:'L',data:{tasks:[{id:'one',label:'One'}]},nodes:[{id:'tasks',kind:'Checklist',items:{path:'/data/tasks'}}]};
+  const repo=panels.repository('owner');await repo.publish('shared',spec,'shared.panel.json','deleted-chat',false,signal);
+  await repo.publish('other',spec,'other.panel.json','deleted-chat',false,signal);
+  const first=await boards.save('owner','','Work','Shared project'),second=await boards.save('another-chat','','Life','');
+  const empty=await boards.save('empty-board','','Empty','Retain after chat deletion');
+  const reference={workspaceId:'owner',panelId:'shared'};
+  await Promise.all([boards.pin('owner',first.id,reference,true),boards.pin('owner',first.id,{workspaceId:'owner',panelId:'other'},true)]);
+  await boards.pin('another-chat',second.id,reference,true);
+  assert.equal((await boards.get('owner',first.id)).items.length,2,'Concurrent pins do not lose references');
+  await boards.arrange('owner',first.id,{workspaceId:'owner',panelId:'other'},'owner/shared','S');
+  const ordered=await new LifeBoards(dir).get('owner',first.id);assert.equal(ordered.items[0].panelId,'other');assert.equal(ordered.items[0].size,'S');
+  assert.equal((await boards.get('another-chat',second.id)).items[0].size,'L','Sizes belong to each board');
+  await repo.toggle('shared',1,'tasks','one',true);assert.equal((await panels.repository('owner').get((await boards.get('another-chat',second.id)).items[0].panelId)).user['tasks:one'],true);
+  await boards.pin('owner',first.id,reference,false);assert.ok((await repo.get('shared')).user['tasks:one'],'Unpin never deletes data or shared card');
+  await assert.rejects(boards.save('owner',first.id,'Work','',[{workspaceId:'owner',panelId:'shared',size:'XL'}]));
+  await assert.rejects(boards.save('owner',first.id,'Work','',[{...reference,size:'S'},{...reference,size:'M'}]));
+  const files=new NativeWorkspaceFiles(ws.pathFor('another-chat'));
+  const tools=new LifePanelTools(panels,'another-chat','new-chat',files,boards);
+  await files.write('update.panel.json',JSON.stringify({...spec,title:'Edited from another chat'}),signal);
+  const receipt=await invoke(tools,'publish_life_panel',{path:'update.panel.json',panelId:'shared',workspaceId:'owner',boardId:second.id,boardWorkspaceId:'another-chat'});
+  assert.equal(receipt.workspaceId,'owner');assert.equal((await repo.get('shared')).definition.title,'Edited from another chat');
+  assert.equal((await repo.get('shared')).user['tasks:one'],true);assert.equal((await boards.get('another-chat',second.id)).items.length,1);
+  const links=plain(publishedPanels([{content:'',tools:[{status:'complete',call:{id:'pub',function:{name:'publish_life_panel'}},output:JSON.stringify(receipt)}]}]));
+  assert.equal(links[0].target.panelId,'shared');assert.equal(parsePanelTarget(JSON.stringify(links[0].target)).workspaceId,'owner');
+  const readonly=new RuleTools(tools,true);
+  for(const name of ['manage_life_board','manage_life_panel_task','publish_life_panel'])assert.ok(!readonly.definitions().some(tool=>tool.function.name===name));
+  assert.equal((await invoke(tools,'list_life_boards',{})).length,3);
+  await invoke(tools,'manage_life_board',{action:'save',boardId:second.id,workspaceId:'another-chat',title:'Renamed'});
+  assert.equal((await boards.get('another-chat',second.id)).items.length,1);
+  await invoke(tools,'manage_life_board',{action:'archive',boardId:second.id,workspaceId:'another-chat'});assert.equal((await boards.get('another-chat',second.id)).archived,true);
+  await invoke(tools,'manage_life_board',{action:'restore',boardId:second.id,workspaceId:'another-chat'});
+  // Independent Agent runs survive source chat deletion and keep data/user state separate.
+  let agentCalls=0,release,slow=false;
+  panels.installAgent(async(workspaceId,id,definition,data,cancellation)=>{
+    assert.equal(workspaceId,'owner');assert.equal(id,'agent');assert.equal(definition.source.type,'agent');agentCalls++;
+    if(slow)await new Promise(r=>release=r);cancellation.check();return {count:agentCalls};
+  });
+  const agentSpec={version:1,title:'Agent summary',size:'S',source:{type:'agent',prompt:'Read the project data and count current items.'},refreshMinutes:15,
+    data:{count:0},nodes:[{id:'count',kind:'Metric',value:{path:'/data/count'}}]};
+  await repo.publish('agent',agentSpec,'agent.panel.json','deleted-thread',false,signal);
+  await repo.refresh('agent',signal);let record=await repo.get('agent');assert.equal(record.data.count,1);assert.equal(record.runs[0].status,'complete');
+  await invoke(tools,'manage_life_panel_task',{workspaceId:'owner',panelId:'agent',action:'pause'});
+  assert.equal(panelDue(await repo.get('agent'),Date.now()+999999999),false);
+  await invoke(tools,'manage_life_panel_task',{workspaceId:'owner',panelId:'agent',action:'refresh'});assert.equal((await repo.get('agent')).data.count,2,'Manual refresh still works while paused');
+  await invoke(tools,'manage_life_panel_task',{workspaceId:'owner',panelId:'agent',action:'resume'});
+  slow=true;const running=repo.refresh('agent',signal);while(!release)await new Promise(r=>setTimeout(r,0));
+  await repo.pause('agent',true);release();await running;assert.equal((await repo.get('agent')).runs[0].status,'complete','Pause only stops automatic work; an explicit manual refresh completes');
+  slow=false;await repo.pause('agent',false);for(let i=0;i<11;i++)await repo.refresh('agent',signal);
+  assert.equal((await repo.get('agent')).runs.length,10);
+  const context={filesDir:dir,cacheDir:dir+'/cache',getApplicationContext(){return this;}};fs.mkdirSync(disk(context.cacheDir));
+  const {createBackupFile,readBackupFile}=load('services/Backup'),backup=await createBackupFile(context,emptyData());
+  const dest='/sandbox/boards-restored';fs.mkdirSync(disk(dest));const target={filesDir:dest,cacheDir:dest,getApplicationContext(){return this;}};
+  await readBackupFile(target,backup,emptyData());const restored=new LifeBoards(dest);
+  assert.equal((await restored.list()).length,3);assert.equal((await restored.get('empty-board',empty.id)).items.length,0);
+  assert.deepEqual(plain(await restored.get('owner',first.id)),plain(await boards.get('owner',first.id)));
+  assert.equal((await new LifePanels(dest).repository('owner').get('agent')).runs.length,10);
+  await restored.pin('another-chat',second.id,reference,false);await readBackupFile(target,backup,emptyData());
+  assert.equal((await restored.get('another-chat',second.id)).items.length,0,'Repeated restore preserves local layout');
+  const projectData=emptyData();projectData.threads=[];projectData.projects=[{id:'p',name:'Project',workspaceId:'owner',instructions:'',createdAt:1,updatedAt:1}];
+  const projectBackup=await createBackupFile(context,projectData),projectDir='/sandbox/boards-project-restored';fs.mkdirSync(disk(projectDir));
+  const projectTarget={filesDir:projectDir,cacheDir:projectDir,getApplicationContext(){return this;}};
+  const projectRestored=await readBackupFile(projectTarget,projectBackup,emptyData());
+  const migrated=await new LifeBoards(projectDir).get('another-chat',second.id);
+  assert.equal(migrated.items[0].workspaceId,projectRestored.projects[0].workspaceId,'Cross-board references follow restored project workspace remapping');
+  assert.equal((await new LifePanels(projectDir).repository(migrated.items[0].workspaceId).get('shared')).user['tasks:one'],true);
+  console.log('PASS multi-board references, per-board layout, concurrent pins, cross-chat editing, chat receipts, task pause/history/Agent runner and orphan board backup');
+}
+async function lifePanelRecoveryTest() {
+  const {LifePanels,PanelRepository}=load('services/LifePanels'),{LifePanelTools}=load('services/LifePanelTools');
+  const dir='/sandbox/panel-recovery',ws=new WorkspaceStore(dir),panels=new LifePanels(dir);fs.mkdirSync(disk(dir),{recursive:true});
+  for(const id of ['owner','editor'])await ws.ensureThread(id);
+  const ownerFiles=new NativeWorkspaceFiles(ws.pathFor('owner')),editorFiles=new NativeWorkspaceFiles(ws.pathFor('editor'));
+  const spec={version:1,title:'Local count',size:'S',source:{type:'workspace-json',path:'data.json'},refreshMinutes:1,data:{count:1},nodes:[{id:'count',kind:'Metric',value:{path:'/data/count'}}]};
+  await ownerFiles.write('data.json','{"count":1}',signal);await editorFiles.write('data.json','{"count":99}',signal);
+  const repo=panels.repository('owner');await repo.publish('counter',spec,'count.panel.json','owner',false,signal);
+  const tools=new LifePanelTools(panels,'editor','editor',editorFiles);
+  await editorFiles.write('new.panel.json',JSON.stringify({...spec,data:{count:99}}),signal);
+  await assert.rejects(invoke(tools,'publish_life_panel',{path:'new.panel.json',panelId:'counter',workspaceId:'owner'}),/source.*workspaceId|source workspace/i,
+    'Cross-chat publication must reject ambiguous local source paths before changing the card');
+  assert.equal((await repo.get('counter')).data.count,1);
+  await editorFiles.write('new.panel.json',JSON.stringify({...spec,source:{...spec.source,workspaceId:'editor'},data:{count:99}}),signal);
+  await invoke(tools,'publish_life_panel',{path:'new.panel.json',panelId:'counter',workspaceId:'owner'});
+  assert.equal((await repo.refresh('counter',signal)).data.count,99,'Refresh uses the explicitly bound source workspace');
+  let reads=0;const testRepo=new PanelRepository(repo.files,ws.pathFor('owner'),{read:async()=>{reads++;return {count:7};}});
+  await testRepo.publish('queued',spec,'queued.panel.json','owner',false,signal);await testRepo.pause('queued',true);
+  await testRepo.refresh('queued',signal,'automatic');assert.equal(reads,0,'A paused queued automatic refresh is skipped without running the source');
+  assert.equal((await testRepo.get('queued')).runs.length,0,'A skipped task does not create a failed run');
+  await testRepo.refresh('queued',signal);assert.equal(reads,1,'Manual refresh remains available while automatic work is paused');
+  await testRepo.pause('queued',false);await testRepo.refresh('queued',signal,'automatic');assert.equal(reads,1,'A just-refreshed card is no longer due even if the scheduler snapshot was stale');
+  let release;const blocked=new PanelRepository(repo.files,ws.pathFor('owner'),{read:async()=>await new Promise(resolve=>release=resolve)});
+  await blocked.publish('automatic',spec,'auto.panel.json','owner',false,signal);
+  const automatic=blocked.refresh('automatic',signal,'automatic'),cancelled=assert.rejects(automatic);
+  while(!release)await new Promise(resolve=>setTimeout(resolve,0));await blocked.pause('automatic',true);release({count:8});await cancelled;
+  const stopped=await blocked.get('automatic');assert.equal(stopped.data.count,1);assert.equal(stopped.runs[0].status,'cancelled');assert.equal(stopped.runs[0].trigger,'automatic');
+  const summary=await invoke(tools,'list_life_panels',{limit:1});assert.equal(summary.items.length,1);assert.ok(summary.nextCursor);
+  assert.ok(!('definition' in summary.items[0]));assert.ok(!('data' in summary.items[0]));
+  const detail=await invoke(tools,'get_life_panel',{workspaceId:'owner',panelId:'counter'});assert.equal(detail.panel.data.count,99);
+  const pageTwo=await invoke(tools,'list_life_panels',{limit:1,cursor:summary.nextCursor});assert.equal(pageTwo.items.length,1);assert.notEqual(pageTwo.items[0].panelId,summary.items[0].panelId);
+  await assert.rejects(invoke(tools,'list_life_panels',{archived:true,cursor:summary.nextCursor}),/Cursor/);
+  const {WorkspaceRetention}=load('services/WorkspaceRetention'),ownership=await WorkspaceRetention.inventory(ws.rootDir);
+  assert.ok(WorkspaceRetention.retained(emptyData(),ownership).has('editor'),'A card keeps its external local source workspace alive');
+  const context={filesDir:dir,cacheDir:dir+'/cache',getApplicationContext(){return this;}};fs.mkdirSync(disk(context.cacheDir));
+  const {createBackupFile,readBackupFile}=load('services/Backup'),backup=await createBackupFile(context,emptyData());
+  const dest='/sandbox/panel-recovery-restored';fs.mkdirSync(disk(dest));const target={filesDir:dest,cacheDir:dest,getApplicationContext(){return this;}};
+  await readBackupFile(target,backup,emptyData());assert.equal((await new LifePanels(dest).repository('owner').refresh('counter',signal)).data.count,99,'Backup restores bound source files without either source chat');
+  const projectData=emptyData();projectData.projects=[{id:'source-project',workspaceId:'editor',name:'Source project',instructions:'',createdAt:1,updatedAt:1}];
+  const projectBackup=await createBackupFile(context,projectData),projectDir='/sandbox/panel-recovery-project';fs.mkdirSync(disk(projectDir));
+  const projectTarget={filesDir:projectDir,cacheDir:projectDir,getApplicationContext(){return this;}};
+  const restored=await readBackupFile(projectTarget,projectBackup,emptyData()),restoredRepo=new LifePanels(projectDir).repository('owner');
+  assert.equal((await restoredRepo.get('counter')).definition.source.workspaceId,restored.projects[0].workspaceId);
+  assert.equal((await restoredRepo.refresh('counter',signal)).data.count,99,'Explicit sources follow project workspace remapping');
+  const saved=await repo.get('counter');
+  for(let i=0;i<51;i++) {
+    const id='arch-'+String(i).padStart(2,'0'),folder=disk(ws.pathFor('owner')+'/life-panels/'+id);fs.mkdirSync(folder,{recursive:true});
+    fs.writeFileSync(path.join(folder,'panel.json'),JSON.stringify({...saved,id,archived:true}));
+  }
+  const emptyPage=await panels.page({limit:1});assert.equal(emptyPage.items.length,0);assert.ok(emptyPage.nextCursor,'Bounded scans can return an empty page with a continuation cursor');
+  const continued=await panels.page({limit:1,cursor:emptyPage.nextCursor});assert.equal(continued.items.length,1);
+  console.log('PASS explicit cross-chat sources, fresh automatic admission, manual refresh while paused, and summary/detail tools');
+}
+const run=process.argv.includes('--lifecycle')?lifePanelRecoveryTest():main().then(lifePanelTest).then(lifePanelApiTest).then(lifePanelScriptTest).then(lifeBoardsTest).then(lifePanelRecoveryTest);
+Promise.resolve(run).catch(error=>{console.error(error);process.exitCode=1;});

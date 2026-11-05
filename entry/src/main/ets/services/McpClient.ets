@@ -73,7 +73,7 @@ export class McpClient implements McpConnection {
   }
   private async post(method: string, params: Object | undefined, cancellation: Cancellation, notification: boolean = false): Promise<Object> {
     cancellation.check();
-    const key = await McpOAuth.bearer(this.server); cancellation.check();
+    const key = await McpOAuth.bearer({ url: this.server.url, authType: this.server.authType, credentialAlias: this.server.credentialAlias }); cancellation.check();
     const id = ++this.sequence;
     const body: RpcRequest = { jsonrpc: '2.0', id: notification ? undefined : id, method: method, params: params };
     const headers: Record<string, string> = { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream', 'MCP-Protocol-Version': this.version };

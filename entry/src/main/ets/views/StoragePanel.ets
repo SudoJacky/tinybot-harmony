@@ -253,7 +253,7 @@ export struct StorageCategoryPanel {
     if (this.locked()) { return; }
     this.busy = true; this.error = ''; this.status = '';
     try {
-      const result = await StorageUsage.remove(this.context(), [entry]);
+      const result = await StorageUsage.remove(this.context(), [entry], this.app.exportSnapshot());
       if (result.removed > 0 || result.freedBytes > 0) {
         this.status = result.failed > 0
           ? t('已释放 {0}，有 {1} 项未能删除。', [storageSize(result.freedBytes), result.failed])
