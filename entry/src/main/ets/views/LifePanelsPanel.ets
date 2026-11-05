@@ -1,7 +1,8 @@
+import { PanelRect, panelMasonry, panelSourceLabel, panelRunLabel, panelErrorText } from '../model/PanelPresentation';
 import { common } from '@kit.AbilityKit';
 import { AppearanceStyle } from '../common/AppearanceStyle';
-import { Btn, relativeTime } from '../common/Theme';
-import { Banner } from '../common/Widgets';
+import { Btn, relativeTime, gradientColor } from '../common/Theme';
+import { Banner, IconButton } from '../common/Widgets';
 import { t } from '../model/I18n';
 import { Diagnostics } from '../model/Diagnostics';
 import { PanelEntry, PanelCell, panelCells, panelDue } from '../model/LifePanel';
@@ -14,7 +15,7 @@ import { PanelTaskPanel } from './PanelTaskPanel';
 import { LifeBoards } from '../services/LifeBoards';
 import { PanelChanges } from '../services/PanelChanges';
 import { BoardEntry, PanelTarget, parsePanelTarget, referenceKey } from '../model/LifeBoard';
-import { PanelRecord } from '../model/LifePanel';
+import { PanelRecord, PanelRun } from '../model/LifePanel';
 
 @Component
 export struct LifePanelsPanel {
@@ -26,7 +27,7 @@ export struct LifePanelsPanel {
   onChat: () => void = () => {};
   @State private entries: PanelEntry[] = [];
   @State private boards: BoardEntry[] = [];
-  @State private boardSelection: string = '';
+  @State @Watch('revealBoard') private boardSelection: string = '';
   @State private sheetOpen: boolean = false;
   @State private sheetKind: string = '';
   @State private boardEditorId: string = '';
@@ -42,10 +43,14 @@ export struct LifePanelsPanel {
   @State private now: number = Date.now();
   @State private error: string = '';
   @State private pending: string[] = [];
-  @State private selected: string = '';
+  @State @Watch('detailChanged') private selected: string = '';
   @State private removed: boolean = false;
   @State private creating: boolean = false;
   @State private connectionEntry: PanelEntry | undefined = undefined;
+  @State private refreshing: boolean = false;
+  @State private cardHeights: Record<string, number> = {};
+  @State private connectionStatus: string = '';
+  private boardScroller: Scroller = new Scroller();
   private store?: LifePanels;
   private mounted: boolean = false;
   private timer: number = -1;
@@ -119,11 +124,36 @@ export struct LifePanelsPanel {
     const item = this.currentBoard()?.board.items.find((item) => referenceKey(item) === this.entryKey(entry));
     return item?.size || entry.panel.definition.size;
   }
-  private cells(): PanelCell[] { return panelCells(this.visible().map((entry: PanelEntry) => this.sizeOnBoard(entry)), this.columns()); }
   private columns(): number { return this.boardWidth >= 900 ? 4 : this.boardWidth >= 600 ? 3 : 2; }
-  private unit(): number { return (this.boardWidth - 12 * (this.columns() - 1)) / this.columns(); }
-  private cell(index: number): PanelCell { return this.cells()[index]; }
-  private boardHeight(): number { return this.cells().reduce((height: number, cell: PanelCell) => Math.max(height, (cell.row + cell.rows) * 202 - 12), 0); }
+  private layouts(): PanelRect[] {
+    const entries = this.visible(), columns = this.columns();
+    return panelMasonry(this.boardWidth, columns, entries.map((entry: PanelEntry) => entries.length === 1 ? columns : this.sizeOnBoard(entry) === 'S' ? 1 : this.sizeOnBoard(entry) === 'L' ? columns : 2),
+      entries.map((entry: PanelEntry) => this.cardHeights[this.entryKey(entry)] || 180));
+  }
+  private rect(key: string): PanelRect { return this.layouts()[this.visible().findIndex((entry: PanelEntry) => this.entryKey(entry) === key)]; }
+  private boardHeight(): number { return this.layouts().reduce((height: number, rect: PanelRect) => Math.max(height, rect.y + rect.height), 0); }
+  private measured(key: string, area: Area): void {
+    const height = Number(area.height);
+    if (height > 0 && Math.abs((this.cardHeights[key] || 0) - height) > 1) {
+      const heights: Record<string, number> = {};
+      Object.keys(this.cardHeights).forEach((id: string) => { heights[id] = this.cardHeights[id]; });
+      heights[key] = height; this.cardHeights = heights;
+    }
+  }
+  private revealBoard(): void {
+    const index = this.boards.filter((entry: BoardEntry) => !entry.board.archived).findIndex((entry: BoardEntry) => this.boardKey(entry) === this.boardSelection) + 1;
+    this.boardScroller.scrollToIndex(index, false, ScrollAlign.CENTER);
+  }
+  private async detailChanged(): Promise<void> {
+    this.connectionStatus = '';
+    const key = this.selected, entry = this.entries.find((item: PanelEntry) => this.entryKey(item) === key);
+    if (!entry?.panel.definition.source?.auth) { return; }
+    this.connectionStatus = t('正在检查连接…');
+    try {
+      const connected = await this.panels().credentials(entry.workspaceId).connected(entry.panel.id, entry.panel.definition.source);
+      if (this.selected === key) { this.connectionStatus = connected ? t('已连接') : t('未连接'); }
+    } catch (error) { if (this.selected === key) { this.connectionStatus = panelErrorText((error as Error).message); } }
+  }
   private async refresh(entry: PanelEntry, signal: Cancellation = this.cancellation): Promise<void> {
     if (!entry.panel.definition.source || entry.panel.archived || this.pending.includes(this.entryKey(entry))) { return; }
     this.pending = this.pending.concat(this.entryKey(entry));
@@ -173,12 +203,12 @@ export struct LifePanelsPanel {
   }
   private timestamp(entry: PanelEntry): string {
     return entry.panel.refreshedAt ? t('更新于 {0}', [relativeTime(entry.panel.refreshedAt, this.now)]) :
-      entry.panel.definition.source ? t('等待首次刷新') : t('本地数据');
+      entry.panel.definition.source ? entry.panel.error ? t('尚无成功刷新') : t('等待首次刷新') : t('本地数据');
   }
   // ForEach retains its builder closure for a stable key. Read the current state
   // inside the retained component updates rather than capturing an old record.
   private entryFor(key: string): PanelEntry { return this.entries.find((entry: PanelEntry) => this.entryKey(entry) === key)!; }
-  private openSheet(kind: string): void { this.sheetKind = kind; this.sheetOpen = true; }
+  private openSheet(kind: string): void { this.error = ''; this.sheetKind = kind; this.sheetOpen = true; }
   private sheetTitle(): string {
     if (this.sheetKind === 'connection') { return t('API 连接'); }
     if (this.sheetKind === 'board') { return t('看板管理'); }
@@ -222,11 +252,11 @@ export struct LifePanelsPanel {
   private async dropCard(entry: PanelEntry, index: number, event: GestureEvent): Promise<void> {
     this.dragging = ''; this.dragX = 0; this.dragY = 0;
     const board = this.currentBoard(); if (!board) { return; }
-    const cell = this.cell(index), x = (cell.column + cell.columns / 2) * (this.unit() + 12) + event.offsetX,
-      y = (cell.row + cell.rows / 2) * 202 + event.offsetY;
-    const target = this.cells().findIndex((candidate: PanelCell) => x >= candidate.column * (this.unit() + 12) &&
-      x < (candidate.column + candidate.columns) * (this.unit() + 12) && y >= candidate.row * 202 && y < (candidate.row + candidate.rows) * 202);
-    if (target === index || x < 0 || x > this.boardWidth || y < 0) { return; }
+    const key = this.entryKey(entry), rect = this.rect(key), x = rect.x + rect.width / 2 + event.offsetX,
+      y = rect.y + rect.height / 2 + event.offsetY;
+    const target = this.layouts().findIndex((candidate: PanelRect) => x >= candidate.x && x < candidate.x + candidate.width && y >= candidate.y && y < candidate.y + candidate.height);
+    const current = this.visible().findIndex((item: PanelEntry) => this.entryKey(item) === key);
+    if (target === current || x < 0 || x > this.boardWidth || y < 0) { return; }
     try {
       await this.boardStore().arrange(board.workspaceId, board.board.id, { workspaceId: entry.workspaceId, panelId: entry.panel.id },
         target < 0 ? '' : this.entryKey(this.visible()[target])); await this.reload();
@@ -247,7 +277,7 @@ export struct LifePanelsPanel {
           }.width('100%')
         }, (key: string) => key)
       }.padding(24).width('100%')
-    }.height('100%').width('100%')
+    }.height('100%').width('100%').align(Alignment.TopStart)
   }
   @Builder private pinPicker() {
     Scroll() {
@@ -261,7 +291,7 @@ export struct LifePanelsPanel {
         }, (key: string) => key)
         Button(t('新建看板')).attributeModifier(Btn.tonal).onClick(() => { this.editBoard(); })
       }.padding(24).width('100%')
-    }.height('100%').width('100%')
+    }.height('100%').width('100%').align(Alignment.TopStart)
   }
   @Builder private task() { if (this.taskEntry) { PanelTaskPanel({ entry: this.taskEntry }) } }
   @Builder private sheet() {
@@ -270,62 +300,103 @@ export struct LifePanelsPanel {
     else if (this.sheetKind === 'pin') { this.pinPicker() }
     else if (this.sheetKind === 'task') { this.task() }
   }
+  @Builder private collectionMenu() {
+    Menu() {
+      MenuItem({ content: this.removed ? t('返回') : t('已移除') }).onClick(() => { this.removed = !this.removed; this.selected = ''; })
+    }
+  }
+  private tabTitle(key: string): string { return key ? this.boardFor(key).board.title : t('全部卡片'); }
+  @Builder private boardTab(key: string) {
+    Button(this.tabTitle(key)).type(ButtonType.Normal).height(36).padding({ left: 14, right: 14 }).borderRadius(18)
+      .fontSize(14).labelStyle({ maxLines: 1 }).backgroundColor(this.boardSelection === key ? this.appearance.accent : $r('app.color.surface_variant'))
+      .fontColor(this.boardSelection === key ? this.appearance.onAccent : $r('app.color.text_primary'))
+      .accessibilityText(this.tabTitle(key) + (this.boardSelection === key ? t('，已选中') : ''))
+      .onClick(() => { this.error = ''; this.boardSelection = key; this.selected = ''; this.removed = false; })
+  }
+  @Builder private detail(key: string) {
+    Scroll() {
+      Column({ space: 16 }) {
+        this.card(key, true)
+        Text(t('数据源')).fontSize(16).fontWeight(FontWeight.Medium).width('100%')
+        Text(panelSourceLabel(this.entryFor(key).panel)).fontSize(14).width('100%')
+        if (this.entryFor(key).panel.definition.source?.url || this.entryFor(key).panel.definition.source?.path) {
+          Text(this.entryFor(key).panel.definition.source!.url || this.entryFor(key).panel.definition.source!.path || '').fontSize(12).width('100%').wordBreak(WordBreak.BREAK_ALL)
+        }
+        if (this.entryFor(key).panel.definition.source?.auth) {
+          Text(t('连接状态：{0}', [this.connectionStatus])).fontSize(13).width('100%')
+          Button(t('API 连接')).attributeModifier(Btn.tonal).onClick(() => { this.connectionEntry = this.entryFor(key); this.openSheet('connection'); })
+        }
+        if (this.entryFor(key).panel.definition.source) {
+          Text(t('最近运行')).fontSize(16).fontWeight(FontWeight.Medium).width('100%')
+          ForEach((this.entryFor(key).panel.runs || []).slice(0, 3), (run: PanelRun) => {
+            Text(panelRunLabel(run)).fontSize(12).width('100%')
+          }, (run: PanelRun) => JSON.stringify(run))
+          Button(t('刷新任务与记录')).attributeModifier(Btn.tonal).onClick(() => { this.taskEntry = this.entryFor(key); this.openSheet('task'); })
+        }
+      }.width('100%').padding({ bottom: 20 }).alignItems(HorizontalAlign.Start)
+    }.layoutWeight(1).width('100%').align(Alignment.TopStart)
+  }
   build() {
-    Column({ space: 12 }) {
-      Row({ space: 8 }) {
-        Scroll() {
-          Row({ space: 8 }) {
-            Button(t('全部卡片')).attributeModifier(Btn.tonal).onClick(() => { this.boardSelection = ''; this.selected = ''; })
+    Column({ space: 10 }) {
+      Row({ space: 4 }) {
+        Stack({ alignContent: Alignment.End }) {
+          List({ space: 8, scroller: this.boardScroller }) {
+            ListItem() { this.boardTab('') }
             ForEach(this.boards.filter((entry: BoardEntry) => !entry.board.archived).map((entry: BoardEntry) => this.boardKey(entry)), (key: string) => {
-              Button(this.boardFor(key).board.title).attributeModifier(Btn.tonal).fontWeight(this.boardSelection === key ? FontWeight.Bold : FontWeight.Normal)
-                .onClick(() => { this.boardSelection = key; this.selected = ''; this.removed = false; })
+              ListItem() { this.boardTab(key) }
             }, (key: string) => key)
-          }
-        }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).layoutWeight(1)
-        Button(t('看板管理')).attributeModifier(Btn.tonal).onClick(() => this.editBoard(this.currentBoard()))
-      }.width('100%')
-      Row({ space: 8 }) {
-        Button(t('创建卡片')).attributeModifier(Btn.primary).id('life-panel-create').enabled(this.app.ready && !this.app.busy && !this.creating).onClick(() => { this.createCard(); })
-        Blank()
-        Button(this.removed ? t('返回') : t('已移除')).attributeModifier(Btn.tonal).onClick(() => { this.removed = !this.removed; this.selected = ''; })
-        Button(t('刷新')).attributeModifier(Btn.tonal).id('life-panel-refresh').enabled(!this.pending.length).onClick(() => { this.refreshAll(); })
+          }.listDirection(Axis.Horizontal).height(40).width('100%').scrollBar(BarState.Off).onAreaChange(() => this.revealBoard())
+          Row().width(12).height(40).linearGradient({ angle: 90, colors: [[gradientColor($r('app.color.page_background'), 0), 0], [gradientColor($r('app.color.page_background'), 1), 1]] }).hitTestBehavior(HitTestMode.None)
+        }.layoutWeight(1)
+        IconButton({ icon: $r('sys.symbol.gearshape'), label: t('看板管理'), compId: 'life-board-manage', diameter: 36, iconSize: 18,
+          onTap: () => this.editBoard(this.currentBoard()) })
+        IconButton({ icon: $r('sys.symbol.plus'), label: t('创建卡片'), compId: 'life-panel-create', diameter: 36, iconSize: 18,
+          disabled: !this.app.ready || this.app.busy || this.creating, onTap: () => { this.createCard(); } })
+        Button({ type: ButtonType.Circle }) { Text('⋯').fontSize(24).fontColor($r('app.color.text_primary')) }
+          .width(36).height(36).backgroundColor(Color.Transparent).accessibilityText(t('更多操作')).bindMenu(this.collectionMenu())
       }.width('100%')
       if (this.error) { Banner({ text: this.error }) }
-      if (this.currentBoard() && !this.selected) {
-        Text(this.currentBoard()!.board.description || t('长按卡片拖拽排序；尺寸和位置会保存在当前看板。')).fontSize(12).fontColor($r('app.color.text_secondary'))
+      if (this.removed) { Text(t('已移除')).fontSize(14).width('100%') }
+      if (this.currentBoard() && !this.selected && this.currentBoard()!.board.description) {
+        Text(this.currentBoard()!.board.description).fontSize(12).fontColor($r('app.color.text_secondary')).width('100%').maxLines(2)
       }
       if (this.selected && this.visible().some((entry: PanelEntry) => this.entryKey(entry) === this.selected)) {
-        Button(t('返回卡片列表')).attributeModifier(Btn.tonal).onClick(() => { this.selected = ''; })
+        Button(t('返回卡片列表')).attributeModifier(Btn.textSmall).onClick(() => { this.selected = ''; })
         ForEach(this.visible().filter((entry: PanelEntry) => this.entryKey(entry) === this.selected), (entry: PanelEntry) => {
-          Column() { this.card(this.entryKey(entry), true) }.layoutWeight(1).width('100%')
-        }, (entry: PanelEntry) => this.entryKey(entry) + ':' + entry.panel.configRevision)
-      } else if (!this.visible().length) {
-        Column({ space: 12 }) {
-          Text(t('把关心的事情放在这里')).fontSize(20).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
-          Text(t('让 Tinybot 创建指标、清单或趋势卡片。支持手动刷新，应用在前台时会更新到期数据。'))
-            .fontSize(14).fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
-        }.layoutWeight(1).width('100%').justifyContent(FlexAlign.Center)
+          this.detail(this.entryKey(entry))
+        }, (entry: PanelEntry) => this.entryKey(entry))
       } else {
-        Scroll() {
-          Stack({ alignContent: Alignment.TopStart }) {
-            ForEach(this.visible(), (entry: PanelEntry, index: number) => {
-              Column() { this.card(this.entryKey(entry)) }
-                .width(this.cell(index).columns * (this.unit() + 12) - 12)
-                .height(this.cell(index).rows * 202 - 12)
-                .position({ x: this.cell(index).column * (this.unit() + 12), y: this.cell(index).row * 202 })
-                .translate({ x: this.dragging === this.entryKey(entry) ? this.dragX : 0, y: this.dragging === this.entryKey(entry) ? this.dragY : 0 })
-                .zIndex(this.dragging === this.entryKey(entry) ? 10 : 0)
-                .gesture(GestureGroup(GestureMode.Sequence, LongPressGesture({ repeat: false, duration: 450 }),
-                  PanGesture().onActionStart(() => { if (this.currentBoard()) { this.dragging = this.entryKey(entry); } })
-                    .onActionUpdate((event: GestureEvent) => { if (this.dragging) { this.dragX = event.offsetX; this.dragY = event.offsetY; } })
-                    .onActionEnd((event: GestureEvent) => { if (this.dragging) { this.dropCard(entry, index, event); } })
-                ).onCancel(() => { this.dragging = ''; this.dragX = 0; this.dragY = 0; }))
-            }, (entry: PanelEntry) => this.entryKey(entry) + ':' + entry.panel.configRevision)
-          }.width('100%').height(this.boardHeight())
-        }.layoutWeight(1).width('100%').align(Alignment.TopStart).scrollBar(BarState.Auto)
+        Refresh({ refreshing: $$this.refreshing }) {
+          Scroll() {
+            if (!this.visible().length) {
+              Column({ space: 12 }) {
+                Text(t('把关心的事情放在这里')).fontSize(20).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
+                Text(t('让 Tinybot 创建指标、清单或趋势卡片。支持手动刷新，应用在前台时会更新到期数据。')).fontSize(14).fontColor($r('app.color.text_secondary'))
+              }.width('100%').padding({ top: 40 })
+            } else {
+              Stack({ alignContent: Alignment.TopStart }) {
+                ForEach(this.visible().map((entry: PanelEntry) => this.entryKey(entry)), (key: string) => {
+                  Column() { this.card(key) }
+                    .width(this.rect(key).width).onAreaChange((_old: Area, area: Area) => this.measured(key, area))
+                    .position({ x: this.rect(key).x, y: this.rect(key).y })
+                    .translate({ x: this.dragging === key ? this.dragX : 0, y: this.dragging === key ? this.dragY : 0 })
+                    .zIndex(this.dragging === key ? 10 : 0)
+                    .gesture(GestureGroup(GestureMode.Sequence, LongPressGesture({ repeat: false, duration: 450 }),
+                      PanGesture().onActionStart(() => { if (this.currentBoard()) { this.dragging = key; } })
+                        .onActionUpdate((event: GestureEvent) => { if (this.dragging) { this.dragX = event.offsetX; this.dragY = event.offsetY; } })
+                        .onActionEnd((event: GestureEvent) => { if (this.dragging) { this.dropCard(this.entryFor(key), 0, event); } })
+                    ).onCancel(() => { this.dragging = ''; this.dragX = 0; this.dragY = 0; }))
+                }, (key: string) => key + ':' + this.entryFor(key).panel.configRevision)
+              }.width('100%').height(this.boardHeight())
+            }
+          }.id('life-panel-list').width('100%').height('100%').align(Alignment.TopStart).scrollBar(BarState.Auto)
+            .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
+        }.layoutWeight(1).width('100%').onRefreshing(async () => {
+          try { await this.refreshAll(); } finally { this.refreshing = false; }
+        })
       }
-    }.width('100%').height('100%').padding(16)
-      .bindSheet($$this.sheetOpen, this.sheet(), { title: { title: this.sheetTitle() }, detents: [SheetSize.LARGE] })
+    }.width('100%').height('100%').padding({ left: 16, right: 16, top: 8, bottom: 8 })
+      .bindSheet($$this.sheetOpen, this.sheet(), { title: { title: this.sheetTitle() }, detents: [SheetSize.LARGE], onDisappear: () => this.detailChanged() })
       .onAreaChange((_old: Area, area: Area) => { this.boardWidth = Math.max(160, Number(area.width) - 32); })
   }
 }

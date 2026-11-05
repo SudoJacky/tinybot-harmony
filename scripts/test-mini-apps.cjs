@@ -495,12 +495,12 @@ async function lifePanelApiTest() {
     assert.throws(()=>validatePanelSource({...source,...patch}));
   }
   const credentials=new PanelCredentials('private-namespace'), transport=new PanelApiTransport(credentials), id='api-panel';
-  await assert.rejects(transport.read(id,source,new Cancellation()),/not connected/);
+  await assert.rejects(transport.read(id,source,new Cancellation()),/API 尚未连接/);
   await credentials.save(id,source,'fixture-api-secret');assert.equal(await credentials.connected(id,source),true);
   assert.equal(await credentials.connected(id,{...source,auth:{name:'x-api-key',in:'header',type:'api-key'}}),true,'Equivalent field ordering/header casing does not require reconnecting');
   assert.equal(await new PanelCredentials('other-workspace').connected(id,source),false);
   const changed={...source,url:'https://other.example.test/query'};
-  assert.equal(await credentials.connected(id,changed),false);await assert.rejects(transport.read(id,changed,new Cancellation()),/not connected/);
+  assert.equal(await credentials.connected(id,changed),false);await assert.rejects(transport.read(id,changed,new Cancellation()),/API 尚未连接/);
   const bytes=value=>new TextEncoder().encode(JSON.stringify(value)).buffer;
   apiResponse={status:200,header:{},text:'',bytes:bytes(payload)};
   assert.deepEqual(JSON.parse(await transport.read(id,source,new Cancellation())),payload);

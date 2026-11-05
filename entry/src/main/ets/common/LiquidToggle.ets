@@ -142,7 +142,8 @@ export struct LiquidToggle {
         // not alter the endpoints or introduce a second coordinate system.
         Stack() {
           Circle().width(Liquid.thumbSize).height(Liquid.thumbSize)
-            .fill(this.preview ? this.appearance.onAccent : $r('app.color.text_tertiary'))
+            .fill(this.preview ? this.appearance.onAccent : Color.White)
+            .shadow({ radius: 1, color: '#20000000', offsetY: 1 })
             .scale({ x: this.thumbScale, y: 1 / this.thumbScale })
         }.width(Liquid.thumbSize).height(Liquid.thumbSize)
         .translate({ x: Liquid.pad + this.thumbPosition })

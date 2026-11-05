@@ -44,21 +44,25 @@ export struct PublishedPanelCard {
       this.boardTitle = ''; this.boards = await store.list(); this.error = '';
     } catch (error) { this.error = (error as Error).message; }
   }
+  private board(key: string): BoardEntry { return this.boards.find((entry: BoardEntry) => entry.workspaceId + '/' + entry.board.id === key)!; }
+  private pinned(key: string): boolean {
+    return this.board(key).board.items.some((item) => referenceKey(item) === this.reference.target.workspaceId + '/' + this.reference.target.panelId);
+  }
   @Builder private boardPicker() {
     Scroll() {
       Column({ space: 14 }) {
-        ForEach(this.boards.filter((entry: BoardEntry) => !entry.board.archived), (entry: BoardEntry) => {
+        ForEach(this.boards.filter((entry: BoardEntry) => !entry.board.archived).map((entry: BoardEntry) => entry.workspaceId + '/' + entry.board.id), (key: string) => {
           Row({ space: 12 }) {
-            Checkbox().select(entry.board.items.some((item) => referenceKey(item) === this.reference.target.workspaceId + '/' + this.reference.target.panelId))
-              .onChange((present: boolean) => { if (present !== entry.board.items.some((item) => referenceKey(item) === this.reference.target.workspaceId + '/' + this.reference.target.panelId)) { this.pin(entry, present); } })
-            Text(entry.board.title).fontSize(16).layoutWeight(1)
+            Checkbox().select(this.pinned(key))
+              .onChange((present: boolean) => { if (present !== this.pinned(key)) { this.pin(this.board(key), present); } })
+            Text(this.board(key).board.title).fontSize(16).layoutWeight(1)
           }.width('100%')
-        }, (entry: BoardEntry) => entry.workspaceId + '/' + entry.board.id)
+        }, (key: string) => key)
         TextInput({ text: this.boardTitle, placeholder: t('看板名称') }).maxLength(80).onChange((value: string) => { this.boardTitle = value; })
         Button(t('新建看板')).attributeModifier(Btn.tonal).enabled(!!this.boardTitle.trim()).onClick(() => { this.pin(); })
         if (this.error) { Text(this.error).fontColor($r('app.color.danger')).fontSize(12) }
       }.width('100%').padding(24)
-    }.width('100%').height('100%')
+    }.width('100%').height('100%').align(Alignment.TopStart)
   }
   private open(): void {
     const target: PanelTarget = { workspaceId: this.reference.target.workspaceId, panelId: this.reference.target.panelId, boardId: this.reference.target.boardId, request: Date.now() };
@@ -67,7 +71,7 @@ export struct PublishedPanelCard {
   build() {
     Column({ space: 8 }) {
       if (this.panel) {
-        Column() { LifePanelCard({ panel: this.panel, interactive: false, busy: this.refreshing, timestamp: 'Life Panel', onOpen: () => this.open() }) }.height(220).width('100%')
+        Column() { LifePanelCard({ panel: this.panel, interactive: false, busy: this.refreshing, timestamp: t('生活看板'), onOpen: () => this.open() }) }.width('100%')
       }
       Button(t('打开 Life Panel：{0}', [this.panel?.definition.title || this.title || this.reference.title])).attributeModifier(Btn.tonal).onClick(() => this.open())
       if (this.reference.target.panelId) {

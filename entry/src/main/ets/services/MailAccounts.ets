@@ -1,3 +1,4 @@
+import { t } from '../model/I18n';
 import { util } from '@kit.ArkTS';
 import { MailAccount, mailId, validateMailAccount } from '../model/Mail';
 import { CredentialStore } from './CredentialStore';
@@ -43,12 +44,12 @@ export class MailAccounts {
     await withFileMutation(INDEX, async () => {
       const ids = await this.ids(), exists = ids.includes(account.id), before = exists ? await this.connection(account.id) : undefined;
       const sameServer = before && before.account.host === account.host && before.account.port === account.port && before.account.username === account.username;
-      if (!secret && !sameServer) { throw new Error('Enter an authorization code when adding a mailbox or changing its server/account'); }
+      if (!secret && !sameServer) { throw new Error(t('新增邮箱或更换服务器、账号时，请填写授权码。')); }
       const value: StoredMailAccount = { account: account, secret: secret || before!.secret, revision: util.generateRandomUUID() };
-      if (/[\u0000-\u001f\u007f]/.test(value.secret)) { throw new Error('Authorization code must not contain control characters'); }
+      if (/[\u0000-\u001f\u007f]/.test(value.secret)) { throw new Error(t('授权码不能包含换行或控制字符。')); }
       const text = JSON.stringify(value);
-      if (new util.TextEncoder().encodeInto(text).length > 1024) { throw new Error('Mailbox settings exceed the secure storage limit; shorten the name or folder list'); }
-      if (!exists && ids.length >= 8) { throw new Error('A maximum of eight mailbox connections is supported'); }
+      if (new util.TextEncoder().encodeInto(text).length > 1024) { throw new Error(t('邮箱设置超出安全存储限制，请缩短连接名称或文件夹列表。')); }
+      if (!exists && ids.length >= 8) { throw new Error(t('最多支持 8 个邮箱连接。')); }
       this.revoke(account.id);
       const alias = 'tinybot-mail-' + account.id;
       if (exists) { await this.vault.update(alias, text); }

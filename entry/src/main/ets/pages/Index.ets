@@ -54,7 +54,7 @@ import { SkillsPanel } from '../views/SkillsPanel';
 import { SkillEditorPanel } from '../views/SkillEditorPanel';
 import { SessionService } from '../services/SessionService';
 import { createNativeSessionService } from '../services/NativeSessionService';
-import { Btn, Motion, Radius, Space } from '../common/Theme';
+import { Btn, Motion, Radius, Space, gradientColor } from '../common/Theme';
 import { IconButton } from '../common/Widgets';
 import { LaunchActions } from '../services/LaunchActions';
 import { OnboardingPanel } from '../views/OnboardingPanel';
@@ -1078,7 +1078,7 @@ struct Index {
         MenuItem(() => this.moreMenuContent($r('sys.symbol.rectangle_stack'), t('小程序')))
           .id('open-mini-apps-menu').enabled(this.app.ready).onClick(() => this.openMiniApps())
       }
-      MenuItem(() => this.moreMenuContent($r('sys.symbol.rectangle_stack'), 'Life Panel'))
+      MenuItem(() => this.moreMenuContent($r('sys.symbol.square_grid_2x2'), t('生活看板')))
         .id('open-life-panels-menu').enabled(this.app.ready).onClick(() => this.openLifePanels())
       MenuItem(() => this.moreMenuContent($r('sys.symbol.gearshape'), t('设置')))
         .onClick(() => this.openSettings())
@@ -1106,7 +1106,7 @@ struct Index {
     } else if (name === 'life-panels') {
       NavDestination() {
         LifePanelsPanel({ app: this.app, onChat: () => this.revealChat(), active: this.lifePanelsActive, requestedTarget: this.lifePanelTarget })
-      }.title('Life Panel', { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+      }.title(t('生活看板'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
         .onShown(() => { this.lifePanelsActive = true; }).onHidden(() => { this.lifePanelsActive = false; })
     } else if (name === 'mini-apps') {
       NavDestination() {
@@ -1311,7 +1311,7 @@ struct Index {
     Stack() {
       Column().id('chat-header-backdrop').width('100%').height(CHAT_HEADER_HEIGHT)
         .backgroundEffect({ radius: 12, color: $r('app.color.chat_header_background') })
-        .translate({ y: -CHAT_HEADER_HEIGHT * this.headerProgress }).opacity(1 - this.headerProgress)
+        .linearGradient({ angle: 180, colors: [[gradientColor($r('app.color.chat_header_background'), 1), 0], [gradientColor($r('app.color.chat_header_background'), 0), 1]] })
         .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
     Row({ space: 4 }) {
       if (this.workbench().historyWidth === 0) {

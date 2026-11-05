@@ -1,10 +1,11 @@
+import { panelRunTrigger, panelErrorText } from '../model/PanelPresentation';
 import { common } from '@kit.AbilityKit';
 import { PanelEntry, PanelRecord, PanelRun } from '../model/LifePanel';
 import { LifePanels } from '../services/LifePanels';
 import { PanelChanges } from '../services/PanelChanges';
 import { Cancellation } from '../services/Cancellation';
 import { Btn } from '../common/Theme';
-import { t } from '../model/I18n';
+import { getLocale, t } from '../model/I18n';
 @Component
 export struct PanelTaskPanel {
   @StorageProp('tinybot.foreground') @Watch('activityChanged') private foreground: boolean = true;
@@ -43,7 +44,7 @@ export struct PanelTaskPanel {
         Text(this.record?.definition.title || this.entry.panel.definition.title).fontSize(20).fontWeight(FontWeight.Medium)
         if (this.record) {
           Text(this.record.definition.source?.type === 'agent' ? t('Agent 内容更新') : this.record.definition.source?.type === 'mail' ? t('邮箱数据刷新') : t('API / 文件数据刷新')).fontSize(14)
-          Text(this.record.definition.refreshMinutes ? t('应用前台每 {0} 分钟更新', [this.record.definition.refreshMinutes!]) : t('仅手动刷新')).fontSize(12)
+          Text(this.record.paused ? t('自动更新已暂停，可随时手动刷新') : this.record.definition.refreshMinutes ? t('应用前台每 {0} 分钟更新', [this.record.definition.refreshMinutes!]) : t('仅手动刷新')).fontSize(12)
           if (this.record.definition.source?.prompt) { Text(this.record.definition.source.prompt).fontSize(13) }
           Row({ space: 12 }) {
             Button(this.record.paused ? t('恢复自动更新') : t('暂停自动更新')).attributeModifier(Btn.tonal).onClick(() => { this.action(false); })
@@ -52,15 +53,15 @@ export struct PanelTaskPanel {
           Text(t('最近 10 次运行')).fontSize(16).fontWeight(FontWeight.Medium)
           ForEach((this.record.runs || []).map((run: PanelRun) => run.id), (id: string) => {
             Column({ space: 4 }) {
-              Text(this.status(this.runFor(id)) + ' · ' + new Date(this.runFor(id).startedAt).toLocaleString()).fontSize(13)
+              Text(this.status(this.runFor(id)) + ' · ' + panelRunTrigger(this.runFor(id)) + ' · ' + new Date(this.runFor(id).startedAt).toLocaleString(getLocale())).fontSize(13)
               if (this.runFor(id).finishedAt) { Text(t('耗时 {0} 秒', [Math.round((this.runFor(id).finishedAt! - this.runFor(id).startedAt) / 1000)])).fontSize(12) }
-              if (this.runFor(id).error) { Text(this.runFor(id).error).fontSize(12).fontColor($r('app.color.danger')) }
+              if (this.runFor(id).error) { Text(panelErrorText(this.runFor(id).error)).fontSize(12).fontColor($r('app.color.danger')) }
               if (this.runFor(id).failure) { Text(this.runFor(id).failure!.stage + ' · ' + this.runFor(id).failure!.code).fontSize(12).fontColor($r('app.color.text_secondary')) }
-            }.width('100%').alignItems(HorizontalAlign.Start).padding(10).backgroundColor($r('app.color.surface_variant')).borderRadius(10)
+            }.width('100%').alignItems(HorizontalAlign.Start).padding({ top: 10, bottom: 10 }).border({ width: { bottom: 0.5 }, color: $r('app.color.divider') })
           }, (id: string) => id)
         }
         if (this.error) { Text(this.error).fontColor($r('app.color.danger')).fontSize(12) }
       }.padding(24).width('100%').alignItems(HorizontalAlign.Start)
-    }.height('100%').width('100%')
+    }.height('100%').width('100%').align(Alignment.TopStart)
   }
 }

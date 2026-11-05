@@ -1,9 +1,13 @@
 import { t, getLocale } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
-import { curves, window } from '@kit.ArkUI';
+import { ColorMetrics, curves, window } from '@kit.ArkUI';
 import { SwitchSize } from './SwitchSize';
 import { currentAppearanceStyle } from './AppearanceStyle';
 // Shared phone/tablet tokens. Neutral surfaces live in resources; accents follow appearance preferences.
+export function gradientColor(resource: ResourceColor, opacity: number): string {
+  const color = ColorMetrics.resourceColor(resource);
+  return ColorMetrics.rgba(color.red, color.green, color.blue, opacity).color;
+}
 
 // Motion tokens mirrored from the desktop workbench so both clients move alike. The system
 // "animation scale" setting (including turning animations off) applies to every curve below.

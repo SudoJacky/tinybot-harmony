@@ -23,11 +23,11 @@ const model=loadModel('LifePanel');
 const signal=compile(fs.readFileSync(path.join(root,'entry/src/main/ets/services/Cancellation.ets'),'utf8'),
   {require:()=>({ToolFailure:class extends Error {}})});
 const tree=emitted('views/LifePanelsPanel'), panel=tree.statements.find(n=>ts.isClassDeclaration(n)&&n.name.text==='LifePanelsPanel');
-const names=['stop','activityChanged','scan','reload','report','entryKey','refresh','change','refreshAll','visible','cells','columns','unit','cell','boardHeight','currentBoard','boardKey','sizeOnBoard','targetChanged','dropCard'];
+const names=['stop','activityChanged','scan','reload','report','entryKey','refresh','change','refreshAll','visible','layouts','rect','columns','boardHeight','currentBoard','boardKey','sizeOnBoard','targetChanged','dropCard'];
 const methods=panel.members.filter(n=>ts.isMethodDeclaration(n)&&names.includes(n.name.getText(tree))).map(n=>n.getText(tree)).join('\n');
 assert.equal(panel.members.filter(n=>ts.isMethodDeclaration(n)&&names.includes(n.name.getText(tree))).length,names.length);
 const timers=new Map(), logs=[];let timerId=0;
-const {Probe}=compile('export class Probe {'+methods+'}',{...model,...signal,...loadModel('LifeBoard'),
+const {Probe}=compile('export class Probe {'+methods+'}',{...model,...signal,...loadModel('LifeBoard'),...loadModel('PanelPresentation'),
   setTimeout:(fn,ms)=>{timers.set(++timerId,{fn,ms});return timerId;},clearTimeout:id=>timers.delete(id),
   Diagnostics:{log:(...args)=>logs.push(args)}});
 const turn=()=>new Promise(resolve=>setImmediate(resolve));
@@ -35,7 +35,7 @@ function entry(id,refreshMinutes=1) {return {workspaceId:'chat',panel:{id,config
   definition:{size:'S',source:{type:'workspace-json',path:'data.json'},refreshMinutes},refreshedAt:0,attemptedAt:0}};}
 function view(entries=[],repository={}) {
   const page=new Probe();Object.assign(page,{mounted:true,active:true,foreground:true,timer:-1,cancellation:new signal.Cancellation(),scanning:false,
-    entries:[],pending:[],error:'',selected:'',removed:false,boardWidth:360,boards:[],boardSelection:'',requestedTarget:'',lastTarget:''});
+    cardHeights:{},entries:[],pending:[],error:'',selected:'',removed:false,boardWidth:360,boards:[],boardSelection:'',requestedTarget:'',lastTarget:''});
   page.boardStore=()=>({list:async()=>[]});
   page.panels=()=>({list:async()=>entries,repository:()=>repository});return page;
 }
@@ -65,7 +65,7 @@ async function main() {
   await editable.change(card,'toggle','tasks','walk',true);assert.deepEqual(saved,['due',1,'tasks','walk',true]);assert.equal(editable.pending.length,0);
   editable.foreground=false;await editable.change(card,'toggle','tasks','walk',false);assert.equal(saved[4],true,'Background view cannot mutate user state');
   editable.entries=[entry('one'),entry('two'),entry('three')];editable.entries[1].panel.definition.size='L';
-  assert.equal(editable.columns(),2);assert.equal(editable.cells()[1].rows,2);assert.ok(editable.boardHeight()>0);
+  assert.equal(editable.columns(),2);assert.equal(editable.layouts()[1].width,360);assert.ok(editable.boardHeight()>0);
   console.log('PASS emitted native expiry scheduling, foreground re-entry, cancellation race, visible errors, independent cards and checklist persistence dispatch');
   const {PanelChanges}=compile(fs.readFileSync(path.join(root,'entry/src/main/ets/services/PanelChanges.ets'),'utf8'));
   const {PanelExpiryUpdates}=compile(fs.readFileSync(path.join(root,'entry/src/main/ets/services/PanelExpiryUpdates.ets'),'utf8'),{
@@ -126,7 +126,7 @@ async function main() {
   arranged.boards=[{workspaceId:'owner',board:{id:'board',items:[{workspaceId:'chat',panelId:'b',size:'L'},{workspaceId:'chat',panelId:'a',size:'S'}]}}];
   arranged.boardSelection='owner/board';assert.equal(arranged.visible()[0].panel.id,'b');assert.equal(arranged.sizeOnBoard(arranged.visible()[0]),'L');
   let reorder;arranged.boardStore=()=>({arrange:async(...args)=>reorder=args,list:async()=>arranged.boards});arranged.panels=()=>({list:async()=>arranged.entries});
-  await arranged.dropCard(arranged.visible()[1],1,{offsetX:0,offsetY:-410});assert.ok(reorder,'Dragging invokes persisted board arrangement');
+  await arranged.dropCard(arranged.visible()[1],1,{offsetX:0,offsetY:-192});assert.ok(reorder,'Dragging invokes persisted board arrangement');
   arranged.requestedTarget=JSON.stringify({workspaceId:'chat',panelId:'a'});arranged.targetChanged();assert.equal(arranged.selected,'chat/a');assert.equal(arranged.boardSelection,'');
   arranged.requestedTarget=JSON.stringify({workspaceId:'owner',boardId:'board'});arranged.targetChanged();assert.equal(arranged.boardSelection,'owner/board');assert.equal(arranged.selected,'');
   console.log('PASS emitted shared-board ordering/sizing, drag persistence dispatch and chat card/board navigation');

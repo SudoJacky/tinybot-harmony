@@ -36,6 +36,7 @@ const suites = {
     'test-liquid-toggle.cjs',
     'test-memory.cjs',
     'test-mail.cjs',
+    'test-panel-presentation.cjs',
     'test-mini-apps.cjs',
     'test-model-dependencies.cjs',
     'test-orchestration.cjs',

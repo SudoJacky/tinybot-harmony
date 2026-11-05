@@ -1,7 +1,7 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Btn } from '../common/Theme';
 import { Banner, GroupCard, SectionHeader } from '../common/Widgets';
-import { t } from '../model/I18n';
+import { getLocale, t } from '../model/I18n';
 import { ProviderProfile } from '../model/ProviderProfiles';
 import { BalanceAmount, ProviderBalance, queryProviderBalance, supportsProviderBalance } from '../services/ProviderBalance';
 import { ProviderEditorViewModel } from '../viewmodel/ProviderEditorViewModel';
@@ -71,7 +71,7 @@ export struct ProviderBalanceCard {
               }, (amount: BalanceAmount) => amount.currency)
               Text(this.result.available ? t('账户余额可用于 API 调用') : t('账户余额不足，暂不可调用 API'))
                 .fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
-              Text(t('查询时间：{0}', [new Date(this.result.checkedAt).toLocaleTimeString()]))
+              Text(t('查询时间：{0}', [new Date(this.result.checkedAt).toLocaleTimeString(getLocale())]))
                 .fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.text_tertiary'))
             }
             if (this.error) { Banner({ text: this.error, compId: 'provider-balance-error' }) }

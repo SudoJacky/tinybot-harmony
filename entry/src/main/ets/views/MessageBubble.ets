@@ -1,3 +1,4 @@
+import { PublishedPanelGroup } from './PublishedPanelGroup';
 import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { ToolExecution } from '../model/Agent';
@@ -656,9 +657,13 @@ export struct MessageBubble {
       if (this.hasExtra) {
         this.extra()
       }
-      ForEach(publishedPanels(this.message.stepViews), (reference: PublishedPanel) => {
-        PublishedPanelCard({ reference: reference })
-      }, (reference: PublishedPanel) => reference.key)
+      if (publishedPanels(this.message.stepViews).length > 1) {
+        PublishedPanelGroup({ references: publishedPanels(this.message.stepViews) })
+      } else {
+        ForEach(publishedPanels(this.message.stepViews), (reference: PublishedPanel) => {
+          PublishedPanelCard({ reference: reference })
+        }, (reference: PublishedPanel) => reference.key)
+      }
       ForEach(deliveredFiles(this.message.stepViews), (file: PresentedFile) => {
         Button() {
           Row({ space: 12 }) {

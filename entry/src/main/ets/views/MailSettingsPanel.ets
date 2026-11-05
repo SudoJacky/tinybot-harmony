@@ -69,12 +69,18 @@ export struct MailSettingsPanel {
   @Builder
   editor() {
     Column({ space: Space.md }) {
+      Text(t('连接名称')).fontSize(13).fontColor($r('app.color.text_secondary')).width('100%')
       TextInput({ text: this.name, placeholder: t('连接名称，例如工作邮箱') }).attributeModifier(Styles.input).id('mail-name').onChange((value: string) => { this.name = value; })
+      Text(t('IMAP 服务器')).fontSize(13).fontColor($r('app.color.text_secondary')).width('100%')
       TextInput({ text: this.host, placeholder: t('IMAP 服务器，例如 imap.example.com') }).attributeModifier(Styles.input).id('mail-host').onChange((value: string) => { this.host = value; })
+      Text(t('TLS 端口')).fontSize(13).fontColor($r('app.color.text_secondary')).width('100%')
       TextInput({ text: this.port, placeholder: t('TLS 端口，通常为 993') }).type(InputType.Number).attributeModifier(Styles.input).id('mail-port').onChange((value: string) => { this.port = value; })
+      Text(t('邮箱登录账号')).fontSize(13).fontColor($r('app.color.text_secondary')).width('100%')
       TextInput({ text: this.username, placeholder: t('邮箱登录账号') }).attributeModifier(Styles.input).id('mail-username').onChange((value: string) => { this.username = value; })
+      Text(t('授权码或应用专用密码')).fontSize(13).fontColor($r('app.color.text_secondary')).width('100%')
       TextInput({ text: this.secret, placeholder: this.accountId ? t('授权码，留空保留已保存的授权码') : t('邮箱授权码或应用专用密码') }).type(InputType.Password).showPasswordIcon(true)
         .attributeModifier(Styles.input).id('mail-secret').onChange((value: string) => { this.secret = value; })
+      Text(t('允许访问的文件夹')).fontSize(13).fontColor($r('app.color.text_secondary')).width('100%')
       TextArea({ text: this.folders, placeholder: t('允许访问的文件夹，每行一个，例如 INBOX') }).attributeModifier(Styles.area).height(100).id('mail-folders').onChange((value: string) => { this.folders = value; })
       GroupCard() {
         Column() {
@@ -95,6 +101,9 @@ export struct MailSettingsPanel {
     }.enabled(!this.busy).width('100%')
   }
   build() {
+    Column() {
+      if (this.error) { Banner({ text: this.error, compId: 'mail-error' }).padding({ left: Space.page, right: Space.page, top: Space.sm }) }
+      if (this.notice) { Banner({ text: this.notice, danger: false, compId: 'mail-notice' }).padding({ left: Space.page, right: Space.page, top: Space.sm }) }
     Scroll() {
       Column({ space: Space.md }) {
         Text(t('读取邮箱中的未读数量、最近邮件和指定邮件，为对话和 Life Panel 提供数据。不会发送、删除邮件或改变已读状态。'))
@@ -110,9 +119,8 @@ export struct MailSettingsPanel {
           Button(t('添加邮箱连接')).attributeModifier(Btn.primary).id('mail-add').enabled(!this.busy).onClick(() => this.edit())
         }
         if (this.busy) { LoadingProgress().width(28).height(28) }
-        if (this.error) { Banner({ text: this.error }) }
-        if (this.notice) { Banner({ text: this.notice, danger: false }) }
       }.width('100%').padding(Space.page).alignItems(HorizontalAlign.Start)
+    }.layoutWeight(1).width('100%').align(Alignment.TopStart)
     }.height('100%').width('100%').backgroundColor($r('app.color.page_background'))
   }
 }

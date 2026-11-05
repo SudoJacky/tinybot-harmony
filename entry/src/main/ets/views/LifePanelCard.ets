@@ -1,3 +1,4 @@
+import { panelErrorText } from '../model/PanelPresentation';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Btn, Radius } from '../common/Theme';
 import { t } from '../model/I18n';
@@ -45,6 +46,7 @@ struct PanelComponent {
   @Prop node: PanelNode;
   @Prop interactive: boolean = true;
   @Prop expanded: boolean = false;
+  @Prop compact: boolean = false;
   onToggle: (node: string, item: string, done: boolean) => void = () => {};
   onRefresh: () => void = () => {};
   @State private revealed: boolean = false;
@@ -67,13 +69,13 @@ struct PanelComponent {
     if (this.node.kind === 'Row') {
       Row({ space: 12 }) {
         ForEach(this.children(), (child: PanelNode) => {
-          PanelComponent({ panel: this.panel, node: child, interactive: this.interactive, expanded: this.expanded, onToggle: this.onToggle, onRefresh: this.onRefresh }).layoutWeight(1)
+          PanelComponent({ panel: this.panel, node: child, interactive: this.interactive, expanded: this.expanded, compact: this.compact, onToggle: this.onToggle, onRefresh: this.onRefresh }).layoutWeight(1)
         }, (child: PanelNode) => child.id)
       }.width('100%').alignItems(VerticalAlign.Top)
     } else if (this.node.kind === 'Column') {
       Column({ space: 10 }) {
         ForEach(this.children(), (child: PanelNode) => {
-          PanelComponent({ panel: this.panel, node: child, interactive: this.interactive, expanded: this.expanded, onToggle: this.onToggle, onRefresh: this.onRefresh })
+          PanelComponent({ panel: this.panel, node: child, interactive: this.interactive, expanded: this.expanded, compact: this.compact, onToggle: this.onToggle, onRefresh: this.onRefresh })
         }, (child: PanelNode) => child.id)
       }.width('100%').alignItems(HorizontalAlign.Start)
     } else if (this.node.kind === 'Text') {
@@ -113,7 +115,7 @@ struct PanelComponent {
           Progress({ value: this.completed(), total: Math.max(1, this.items().length), type: ProgressType.Linear })
             .color(toneColor(this.node.tone)).width('100%').style({ strokeWidth: 4 })
         }
-        ForEach(this.items().slice(0, this.expanded ? 100 : (this.node.limit || 5)), (item: PanelItem) => {
+        ForEach(this.items().slice(0, this.compact ? 0 : this.expanded ? 100 : Math.min(this.node.limit || 3, 3)), (item: PanelItem) => {
           Row({ space: 8 }) {
             if (this.node.kind === 'Checklist') {
               Checkbox({ name: item.id, group: this.node.id }).select(this.checked(item)).enabled(this.interactive)
@@ -126,11 +128,11 @@ struct PanelComponent {
             if (item.value !== undefined) { Text(item.value).fontSize(12).fontColor($r('app.color.text_secondary')).maxLines(1) }
           }.width('100%').constraintSize({ minHeight: 32 })
         }, (item: PanelItem) => item.id)
-        if (!this.expanded && this.items().length > (this.node.limit || 5)) {
-          Text(t('还有 {0} 项', [this.items().length - (this.node.limit || 5)])).fontSize(12).fontColor($r('app.color.text_tertiary'))
+        if (!this.expanded && this.items().length > (this.compact ? 0 : Math.min(this.node.limit || 3, 3))) {
+          Text(t('还有 {0} 项', [this.items().length - (this.compact ? 0 : Math.min(this.node.limit || 3, 3))])).fontSize(12).fontColor($r('app.color.text_tertiary'))
         }
       }.width('100%').alignItems(HorizontalAlign.Start)
-    } else if (this.node.kind === 'ActionButton') {
+    } else if (this.node.kind === 'ActionButton' && this.interactive) {
       Button(this.label()).attributeModifier(Btn.tonal).enabled(this.interactive).onClick(this.onRefresh)
     }
   }
@@ -160,39 +162,53 @@ export struct LifePanelCard {
       if (this.onBoard) { MenuItem({ content: t('从此看板移除') }).onClick(this.onUnpin) }
       if (this.panel.definition.source) { MenuItem({ content: t('刷新任务与记录') }).onClick(this.onTask) }
       if (this.panel.definition.source?.auth) { MenuItem({ content: t('API 连接') }).onClick(this.onConnect) }
-      ForEach(['S', 'M', 'L'], (size: string) => { MenuItem({ content: size }).onClick(() => this.onSize(size)) })
+      MenuItemGroup({ header: t('卡片尺寸') }) {
+        ForEach(['S', 'M', 'L'], (size: string) => {
+          MenuItem({ content: size }).selected((this.cardSize || this.panel.definition.size) === size).selectIcon(true).onClick(() => this.onSize(size))
+        })
+      }
       MenuItem({ content: this.panel.archived ? t('恢复') : t('移除') }).onClick(this.onArchive)
     }
   }
   build() {
     Column({ space: 10 }) {
       Row({ space: 6 }) {
-        Button(this.panel.definition.title).type(ButtonType.Normal).backgroundColor(Color.Transparent).padding(0)
-          .fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary')).layoutWeight(1)
+        Button({ type: ButtonType.Normal }) {
+          Text(this.panel.definition.title).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
+            .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%').textAlign(TextAlign.Start)
+        }.backgroundColor(Color.Transparent).padding(0).layoutWeight(1).constraintSize({ minHeight: 40 })
           .onClick(this.onOpen).accessibilityText(t('打开卡片「{0}」', [this.panel.definition.title]))
-        Button(this.cardSize || this.panel.definition.size).type(ButtonType.Normal).fontSize(11).fontColor($r('app.color.text_secondary'))
-          .backgroundColor($r('app.color.surface_variant')).borderRadius(8).width(30).height(30).padding(0)
-          .bindMenu(this.menu()).enabled(this.interactive).accessibilityText(t('卡片选项'))
+        if (this.interactive) {
+          Button({ type: ButtonType.Normal }) { Text('⋯').fontSize(24).fontColor($r('app.color.text_secondary')) }
+            .backgroundColor(Color.Transparent).borderRadius(8).width(36).height(40).padding(0)
+            .bindMenu(this.menu()).accessibilityText(t('卡片选项'))
+        }
       }.width('100%')
-      Scroll() {
-        Column({ space: 10 }) {
-          ForEach(this.panel.definition.nodes.filter((node: PanelNode) => !node.parent), (node: PanelNode) => {
-            PanelComponent({ panel: this.panel, node: node, interactive: this.interactive && !this.busy && !this.panel.archived, expanded: this.detail, onToggle: this.onToggle, onRefresh: this.onRefresh })
-          }, (node: PanelNode) => node.id)
-        }.width('100%').alignItems(HorizontalAlign.Start)
-      }.layoutWeight(1).width('100%').align(Alignment.TopStart).scrollBar(BarState.Auto)
       if (this.panel.error) {
-        Text(this.panel.error).fontSize(11).fontColor($r('app.color.avatar_5_fg')).maxLines(this.detail ? 8 : 2)
-          .width('100%').accessibilityText(t('刷新失败：{0}', [this.panel.error]))
+        Text(panelErrorText(this.panel.error)).fontSize(12).fontColor($r('app.color.danger')).maxLines(this.detail ? 8 : 3)
+          .width('100%').accessibilityText(t('刷新失败：{0}', [panelErrorText(this.panel.error)]))
       }
+      if (this.panel.definition.source && !this.panel.refreshedAt) {
+        Text(t('初始数据 · 尚未从数据源更新')).fontSize(11).fontColor($r('app.color.text_secondary')).width('100%')
+      }
+      if (this.panel.paused && this.panel.definition.source) {
+        Text(t('自动更新已暂停')).fontSize(11).fontColor($r('app.color.text_secondary')).width('100%')
+      }
+      Column({ space: 10 }) {
+        ForEach(this.panel.definition.nodes.filter((node: PanelNode) => !node.parent), (node: PanelNode) => {
+          PanelComponent({ panel: this.panel, node: node, interactive: this.interactive && !this.busy && !this.panel.archived,
+            expanded: this.detail || (this.cardSize || this.panel.definition.size) === 'L', compact: !this.detail && (this.cardSize || this.panel.definition.size) === 'S',
+            onToggle: this.onToggle, onRefresh: this.onRefresh })
+        }, (node: PanelNode) => node.id)
+      }.width('100%').alignItems(HorizontalAlign.Start)
       Row({ space: 4 }) {
         Text(this.timestamp).fontSize(10).fontColor($r('app.color.text_tertiary')).layoutWeight(1).maxLines(1)
-        if (this.panel.definition.source && !this.panel.archived) {
+        if (this.interactive && this.panel.definition.source && !this.panel.archived) {
           Button(this.busy ? t('刷新中') : t('刷新')).type(ButtonType.Normal).fontSize(11).padding({ left: 4, right: 4 })
             .height(28).backgroundColor(Color.Transparent).fontColor($r('app.color.text_secondary')).enabled(this.interactive && !this.busy).onClick(this.onRefresh)
         }
       }.width('100%')
-    }.width('100%').height('100%').padding(14).backgroundColor($r('app.color.surface'))
+    }.width('100%').padding(14).backgroundColor($r('app.color.surface'))
       .borderRadius(Radius.lg).border({ width: 1, color: $r('app.color.divider') })
   }
 }

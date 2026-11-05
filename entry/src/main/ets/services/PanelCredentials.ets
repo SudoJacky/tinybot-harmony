@@ -1,3 +1,4 @@
+import { t } from '../model/I18n';
 import { util } from '@kit.ArkTS';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { common } from '@kit.AbilityKit';
@@ -45,16 +46,16 @@ export class PanelCredentials {
   }
   async secret(id: string, source: PanelSource): Promise<string> {
     const stored = await this.read(id, source);
-    if (!stored) { throw new Error('API authentication is not connected for this request. Open the card connection settings.'); }
+    if (!stored) { throw new Error(t('API 尚未连接，请在卡片选项中打开「API 连接」。')); }
     if (source.auth!.type === 'oauth') {
-      if (!stored.oauthAlias) { throw new Error('OAuth connection is unavailable; reconnect the card'); }
+      if (!stored.oauthAlias) { throw new Error(t('OAuth 连接不可用，请重新连接卡片。')); }
       try { return await McpOAuth.bearer({ url: source.url!, authType: 'oauth', credentialAlias: stored.oauthAlias }); }
-      catch (_) { throw new Error('OAuth token could not be loaded or renewed. Reconnect the card.'); }
+      catch (_) { throw new Error(t('OAuth 凭据无法读取或续期，请重新连接卡片。')); }
     }
-    if (!stored.secret) { throw new Error('API key is unavailable; reconnect the card'); } return stored.secret;
+    if (!stored.secret) { throw new Error(t('API 凭据不可用，请重新连接卡片。')); } return stored.secret;
   }
   async save(id: string, source: PanelSource, secret: string): Promise<void> {
-    if (!['api-key', 'bearer'].includes(source.auth?.type || '') || !secret.trim() || secret.length > 8192 || /[\r\n]/.test(secret)) { throw new Error('Expected a nonempty API key or bearer token without line breaks'); }
+    if (!['api-key', 'bearer'].includes(source.auth?.type || '') || !secret.trim() || secret.length > 8192 || /[\r\n]/.test(secret)) { throw new Error(t('请输入有效的 API Key 或 Bearer Token，不能包含换行。')); }
     await this.store(id, { scope: scope(source), secret: secret.trim() });
   }
   async login(id: string, source: PanelSource, context: common.UIAbilityContext, cancellation: Cancellation): Promise<void> {

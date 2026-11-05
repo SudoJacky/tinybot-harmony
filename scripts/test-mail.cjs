@@ -105,8 +105,8 @@ async function main() {
   await store.save(account, 'app-secret');
   assert.equal((await store.list())[0].username, account.username);
   assert.ok(!JSON.stringify(await store.list()).includes('app-secret'));
-  await assert.rejects(store.save({ ...account, host: 'other.example.com' }, ''), /authorization code/);
-  await assert.rejects(store.save({ ...account, id: 'new-mail' }, ''), /authorization code/);
+  await assert.rejects(store.save({ ...account, host: 'other.example.com' }, ''), /授权码/);
+  await assert.rejects(store.save({ ...account, id: 'new-mail' }, ''), /授权码/);
   await store.save({ ...account, name: 'Renamed' }, '');
   assert.equal((await store.connection(account.id)).secret, 'app-secret');
   const mail = service(), result = await mail.query(query, new Cancellation());

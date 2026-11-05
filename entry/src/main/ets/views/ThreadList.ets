@@ -626,7 +626,12 @@ export struct ThreadList {
         .id('open-settings').width('100%').height(48).padding({ left: Space.md, right: Space.md }).borderRadius(Radius.md)
         .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
         .onClick(() => this.onSettings())
-        Button('Life Panel').fontFamily(this.appearance.fontFamily).attributeModifier(Btn.tonal).width('100%')
+        Button() {
+          Row({ space: 8 }) {
+            SymbolGlyph($r('sys.symbol.square_grid_2x2')).fontSize(18)
+            Text(t('生活看板')).fontFamily(this.appearance.fontFamily).fontSize(14)
+          }
+        }.attributeModifier(Btn.tonal).width('100%')
           .id('open-life-panels').enabled(this.app.ready).onClick(this.onLifePanels)
         if (this.app.productivity.options?.miniAppsEnabled === true) {
           Button(t('小程序')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.tonal).width('100%')

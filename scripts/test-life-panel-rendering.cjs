@@ -15,7 +15,11 @@ function renderer(name) {
   let active = 0, next = 0;
   const observers = new Map(), branches = new Map(), rows = new Map(), children = new Map(), texts = new Map(), sheets = new Map(), buttons = new Map(), checks = new Map();
   const noop = () => {};
+  const renderedItems = new Set();
   const element = kind => new Proxy({}, { get: (_, method) => {
+    if (method === 'create' && kind === 'ListItem') return render => {
+      if (render && !renderedItems.has(active)) { renderedItems.add(active); render(active, true); }
+    };
     if (method === 'create' && kind === 'Text') return value => texts.set(active, value);
     if (method === 'createWithLabel') return value => buttons.set(active, value);
     if (kind === 'Checkbox' && (method === 'select' || method === 'onChange')) return value => {
@@ -27,13 +31,15 @@ function renderer(name) {
     return noop;
   } });
   const globals = { exports: {}, console, Date, Math, Object, Map, Set, Error,
+    ViewStackProcessor: { StartGetAccessRecordingFor: noop, StopGetAccessRecording: noop },
+    gradientColor: () => '#FFFFFF', getLocale: () => 'zh-CN', panelRunTrigger: () => '手动触发', panelErrorText: text => text,
     t: (text, args = []) => text.replace(/\{(\d+)\}/g, (_, i) => args[i]), relativeTime: time => String(time),
-    Btn: {}, ViewPU: { create: noop }, ObservedObject: { GetRawObject: value => value }, referenceKey: item => item.workspaceId + '/' + item.panelId,
+    IconButton: class {}, ButtonType: {}, EdgeEffect: {}, Axis: {}, Color: {}, HitTestMode: {}, ScrollAlign: {}, Btn: {}, ViewPU: { create: noop }, ObservedObject: { GetRawObject: value => value }, referenceKey: item => item.workspaceId + '/' + item.panelId,
     LifePanelCard: class { constructor(parent, params, _storage, id) { children.set(id, { ...params }); } },
     LongPressGesture: element('gesture'), PanGesture: element('gesture'), GestureGroup: element('gesture'),
     GestureMode: {}, ScrollDirection: {}, BarState: {}, FontWeight: {}, FlexAlign: {}, TextAlign: {}, HorizontalAlign: {}, Alignment: {},
     GesturePriority: {}, GestureMask: {}, SheetSize: {}, Gesture: element('gesture') };
-  for (const name of ['Column','Row','Scroll','Stack','Button','Blank','Text','If','ForEach','Checkbox']) globals[name] = element(name);
+  for (const name of ['Column','Row','Scroll','Stack','Button','Blank','Text','TextInput','If','ForEach','Checkbox','List','ListItem','Refresh','SymbolGlyph']) globals[name] = element(name);
   vm.runInNewContext(ts.transpileModule('export class Probe {' + methods + '}', { compilerOptions: {
     target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS
   } }).outputText, globals);
@@ -46,7 +52,7 @@ function renderer(name) {
       if (!rows.has(id)) rows.set(id, new Set());
       for (const [index,item] of items.entries()) { const k = key(item); if (!rows.get(id).has(k)) { rows.get(id).add(k); build(item,index); } }
     },
-    updateStateVarsOfChildByElmtId(id, params) { Object.assign(children.get(id), params); }
+    updateStateVarsOfChildByElmtId(id, params) { if (children.has(id)) Object.assign(children.get(id), params); }
   });
   return { view, children, texts, sheets, buttons, checks, update() {
     for (const [id,callback] of [...observers]) invoke(id,callback,false);
@@ -58,8 +64,8 @@ let running = false;
 const first = { workspaceId:'workspace', panel:{id:'metric',configRevision:1,archived:false,refreshedAt:10,
   data:{total:42},runs:[],definition:{title:'Metric',size:'M',source:{type:'workspace-json'}}} };
 Object.assign(p,{entries:[first],boards:[],boardSelection:'',selected:'',removed:false,error:'',pending:[],now:10,
-  dragging:'',dragX:0,dragY:0,creating:false,app:{ready:true,busy:false},sheetOpen:false,sheetKind:'',
-  cell:()=>({column:0,row:0,columns:1,rows:1}),unit:()=>100,boardHeight:()=>202,
+  boardScroller:{scrollToIndex(){}},appearance:{},boardWidth:360,refreshing:false,cardHeights:{},dragging:'',dragX:0,dragY:0,creating:false,app:{ready:true,busy:false},sheetOpen:false,sheetKind:'',
+  rect:()=>({x:0,y:0,width:360,height:180}),boardHeight:()=>180,
   panels:()=>({repository:()=>({isRefreshing:()=>running})})});
 p.initialRender();
 assert.equal(h.children.size,1);
@@ -77,6 +83,12 @@ h.children.get(childId).onRefresh();
 assert.equal(refreshed.panel.data.total,50,'Retained event handlers must also use current records');
 assert.equal(h.sheets.size,1,'A panel owns one sheet host');
 for (const bindings of h.sheets.values()) assert.equal(bindings.length,2,'One binding per render, never four competing bindings');
+let connectionChecks = 0;
+const originalDetailChanged = p.detailChanged;
+p.detailChanged = () => { connectionChecks++; };
+[...h.sheets.values()][0].at(-1)[2].onDisappear();
+assert.equal(connectionChecks, 1, 'Closing connection settings refreshes the detail connection status');
+p.detailChanged = originalDetailChanged;
 for (const kind of ['connection','board','pin','task']) { p.openSheet(kind); assert.equal(p.sheetKind,kind); assert.equal(p.sheetOpen,true); assert.ok(p.sheetTitle()); p.sheetOpen=false; }
 console.log('PASS retained card renders refreshed data/time/user state without remounting; actions use current state; sheets share one host');
 
@@ -98,6 +110,23 @@ h.checks.get(checkbox).onChange(false);h.update();
 assert.equal(h.checks.get(checkbox).select,false);
 assert.equal(pins,2,'Unpin in the same open sheet must use the updated board items');
 console.log('PASS retained board title and pin/unpin checkbox update without reopening');
+
+const receipt = renderer('PublishedPanelCard'), preview = receipt.view;
+Object.assign(preview, { boards: [{workspaceId:'workspace',board:{id:'board',title:'Before',archived:false,items:[]}}],
+  reference:{target:{workspaceId:'workspace',panelId:'metric'}}, boardTitle:'', error:'' });
+preview.boardPicker();
+const receiptCheck = [...receipt.checks.keys()][0];
+let receiptPins = 0;
+preview.pin = (board, present) => {
+  receiptPins++; preview.boards = [{...board,board:{...board.board,title:'After',items:present?[{workspaceId:'workspace',panelId:'metric'}]:[]}}];
+};
+receipt.checks.get(receiptCheck).onChange(true); receipt.update();
+assert.equal(receipt.checks.get(receiptCheck).select, true);
+assert.ok([...receipt.texts.values()].includes('After'));
+receipt.checks.get(receiptCheck).onChange(false); receipt.update();
+assert.equal(receipt.checks.get(receiptCheck).select, false);
+assert.equal(receiptPins, 2);
+console.log('PASS chat preview pin/unpin and board title update while the sheet stays open');
 
 const tasks = renderer('PanelTaskPanel'), task = tasks.view;
 Object.assign(task,{entry:first,error:'',record:{definition:{title:'Metric',refreshMinutes:1,source:{type:'workspace-json'}},

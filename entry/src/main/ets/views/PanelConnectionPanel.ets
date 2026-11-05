@@ -59,6 +59,6 @@ export struct PanelConnectionPanel {
         if (this.busy) { LoadingProgress().width(28).height(28) }
         if (this.error) { Banner({ text: this.error }) }
       }.width('100%').padding(24).alignItems(HorizontalAlign.Start)
-    }.width('100%').height('100%')
+    }.width('100%').height('100%').align(Alignment.TopStart)
   }
 }
