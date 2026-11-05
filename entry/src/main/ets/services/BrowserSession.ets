@@ -57,6 +57,9 @@ export class BrowserSession implements ExecutionGate {
   private savePolicy?: (policy: BrowserPolicy) => Promise<void>;
   private log: (event: string, fields?: LogFields, error?: Error | string) => void = () => {};
   private lease?: Cancellation;
+  // An idle retained page is user-owned for viewing, but only explicit user
+  // interaction or a requested handoff blocks the next task from acquiring it.
+  private userControlRequested: boolean = false;
   private threadId: string = '';
   private removeCancellation: () => void = () => {};
   private permissionAnswer?: (allowed: boolean) => void;
@@ -136,14 +139,16 @@ export class BrowserSession implements ExecutionGate {
   takeOver(reason: string = ''): void {
     this.invalidateObservation();
     this.clearActionFeedback();
-    if (!this.open || this.owner === 'user') { return; }
+    if (!this.open || (this.owner === 'user' && this.userControlRequested)) { return; }
+    this.userControlRequested = true;
     this.owner = 'user'; this.epoch++; this.handoffReason = reason;
-    this.log('control_user', { generation: this.epoch, enabled: this.hasTask });
+    this.log('control_user', { generation: this.epoch, enabled: this.hasTask, reason: 'user_control' });
   }
   handoff(): void {
     if (!this.open || !this.lease || this.policy !== 'enabled') { return; }
+    this.userControlRequested = false;
     this.owner = 'agent'; this.handoffReason = ''; this.epoch++;
-    this.log('control_agent', { generation: this.epoch }); this.wake();
+    this.log('control_agent', { generation: this.epoch, reason: 'user_handoff' }); this.wake();
   }
   release(cancellation: Cancellation): void {
     if (this.lease !== cancellation) { return; }
@@ -152,12 +157,13 @@ export class BrowserSession implements ExecutionGate {
     this.lease = undefined; this.threadId = ''; this.epoch++;
     if (this.open) { this.owner = 'user'; }
     this.answerPermission(false); this.handoffReason = ''; this.wake();
-    this.log('task_released', { generation: this.epoch });
+    this.log('task_released', { generation: this.epoch, reason: this.userControlRequested ? 'user_control' : 'idle_browser' });
   }
   close(): void {
     this.invalidateObservation();
     this.clearActionFeedback();
     this.epoch++; this.open = false; this.owner = 'none'; this.handoffReason = ''; this.editingAddress = false;
+    this.userControlRequested = false;
     this.driver?.close(); this.wake(); this.log('closed', { generation: this.epoch });
   }
   openForUser(): void {
@@ -169,7 +175,7 @@ export class BrowserSession implements ExecutionGate {
     if (this.open) { return; }
     this.url = ''; this.title = ''; this.error = ''; this.handoffReason = ''; this.editingAddress = false;
     this.canGoBack = false; this.canGoForward = false;
-    this.open = true; this.owner = 'user'; this.epoch++;
+    this.open = true; this.owner = 'user'; this.userControlRequested = true; this.epoch++;
     this.log('opened_by_user', { generation: this.epoch, enabled: this.hasTask });
   }
   async pauseForAnnotation(): Promise<void> {
@@ -231,7 +237,10 @@ export class BrowserSession implements ExecutionGate {
       this.log('acquired', { threadId: this.threadId });
       this.removeCancellation = cancellation.onCancel(() => this.release(cancellation));
     }
-    if (this.open && this.owner === 'user') { await this.wait(cancellation); }
+    if (this.open && this.owner === 'user' && this.userControlRequested) {
+      this.log('control_wait', { threadId: this.threadId, generation: this.epoch, reason: 'user_control' });
+      await this.wait(cancellation);
+    }
     if (this.policy === 'unset') {
       this.permissionPending = true; this.permissionReason = reason; this.permissionUrl = url;
       this.log('permission_wait');
@@ -242,6 +251,7 @@ export class BrowserSession implements ExecutionGate {
     cancellation.check();
     if (this.policy !== 'enabled') { throw new ToolFailure('PERMISSION_DENIED', 'Browser is disabled.', 'respect_user_decision'); }
     this.open = true; this.owner = 'agent'; this.url = url; this.error = ''; this.epoch++;
+    this.log('control_agent', { threadId: this.threadId, generation: this.epoch, reason: 'task_acquired' });
     return this.perform('open', async () => {
       if (preview) {
         const driver = this.requireDriver();
