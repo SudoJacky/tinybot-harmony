@@ -89,6 +89,7 @@ export struct PublishedPreviewCard {
       if ((this.inline || this.expanded) && !this.inspected) {
         Stack({ alignContent: Alignment.TopEnd }) {
         NodeContainer(this.surface.inlineMount).width('100%').height(this.fullscreen ? this.inlineHeight : undefined)
+          .borderRadius(this.inline ? Radius.sm : 0).clip(this.inline)
         IconButton({ icon: $r('sys.symbol.arrow_up_left_and_arrow_down_right'), label: t('全屏预览'),
           fill: $r('app.color.surface'), tint: $r('app.color.text_primary'),
           disabled: this.fullscreenClosing,

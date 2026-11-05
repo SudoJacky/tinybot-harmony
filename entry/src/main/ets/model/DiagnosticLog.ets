@@ -9,7 +9,7 @@ export interface LogFields {
   setting?: string; dataVersion?: number; serverId?: string;
   change?: string; commonMessages?: number; sharedCharacters?: number; systemHash?: number; toolsHash?: number;
   operationId?: number; instanceId?: number; generation?: number; active?: number; count?: number; total?: number;
-  chars?: number; bytes?: number; elapsedMs?: number; durationMs?: number; http?: number; code?: number;
+  chars?: number; bytes?: number; elapsedMs?: number; durationMs?: number; delayMs?: number; http?: number; code?: number;
   messages?: number; tools?: number; nodes?: number; keys?: number; width?: number; height?: number; widthVp?: number;
   request?: number; chunk?: number; eventCode?: number; newChats?: number; skippedChats?: number; level?: number; style?: number;
   tokens?: number; budget?: number; removed?: number; retained?: number; duplicates?: number; characters?: number;
@@ -45,10 +45,12 @@ EVENTS.review = ['task_completed', 'presented', 'present_failed', 'accepted', 'd
 EVENTS.appearance = ['material', 'material_support', 'material_unavailable', 'loaded', 'applied', 'save_failed', 'fonts_loaded', 'fonts_failed', 'insets_failed'];
 EVENTS.language = ['load_failed', 'save_failed'];
 EVENTS.account = ['restore_failed', 'response_invalid', 'state_changed', 'sign_in_cancelled', 'sign_in_failed', 'sign_out_failed', 'state_failed'];
+EVENTS.privacy = ['query_completed', 'query_retry', 'check_failed', 'subscription_ready', 'subscription_cleanup_failed'];
 EVENTS.feedback = ['initialize_failed', 'save_failed', 'credential_failed', 'request_failed', 'submit_failed', 'list_failed',
   'detail_failed', 'upload_failed', 'cleanup_failed', 'reconcile_failed', 'delete_failed'];
 EVENTS.backup = ['started', 'restored', 'restore_prepared', 'key_decrypt_failed', 'cleanup_failed', 'replace_failed', 'rollback_failed', 'archive_written', 'archive_write_failed', 'archive_verified',
-  'restore_completed', 'restore_failed', 'startup_capture_failed', 'startup_marker_failed', 'startup_lookup_failed'];
+  'restore_completed', 'restore_failed', 'startup_capture_failed', 'startup_marker_failed', 'startup_lookup_failed',
+  'cloud_retry_finished', 'cloud_failed', 'cloud_retry', 'cloud_sync_progress', 'cloud_sync_finished', 'cloud_list_failed', 'cloud_settings_failed'];
 EVENTS['mini-app'] = ['manifest_failed', 'storage_failed', 'action_failed'];
 EVENTS.background = ['acquired', 'released', 'cancelled', 'suspended', 'release_failed', 'stop_failed', 'transition_failed', 'window_expired'];
 EVENTS.notification = ['authorization_checked', 'authorization_denied', 'authorization_failed', 'disabled', 'published', 'publish_failed'];
@@ -68,24 +70,26 @@ EVENTS.mcp = ['request_failed', 'cancel_notice_failed', 'browser_launch_failed']
 EVENTS.export = ['image_failed', 'preview_failed', 'cleanup_failed', 'share_failed', 'save_failed'];
 EVENTS.network = ['request_start', 'request_end', 'context_overflow', 'first_data', 'request_failed'];
 EVENTS.context = ['inspected', 'request_prefix'];
-EVENTS.browser = ['permission', 'control_user', 'control_agent', 'task_released', 'closed', 'failed', 'acquired', 'permission_wait', 'operation', 'observation_changed', 'opened_by_user', 'annotation_started', 'annotation_captured', 'annotation_failed', 'search_observed', 'search_failed', 'capture_started', 'frame_captured', 'capture_finished'];
+EVENTS.browser = ['permission', 'control_user', 'control_agent', 'control_wait', 'task_released', 'closed', 'failed', 'acquired', 'permission_wait', 'operation', 'observation_changed', 'opened_by_user', 'annotation_started', 'annotation_captured', 'annotation_failed', 'search_observed', 'search_failed', 'capture_started', 'frame_captured', 'capture_finished'];
 EVENTS.session = ['run_started', 'run_finished', 'run_cancelled', 'mcp_failed', 'tasks_failed', 'run_failed', 'title_failed', 'interactive_failed', 'resource_failed', 'memory_failed', 'memory_review_failed', 'mutation_failed', 'save_failed', 'observer_failed'];
 EVENTS.memory = ['committed', 'review_started', 'review_discarded'];
 EVENTS.resources = ['credential_rollback_failed', 'credential_cleanup_failed', 'team_selected', 'committed', 'preferences_saved'];
 EVENTS.configuration = ['unsupported', 'load_failed', 'save_failed'];
 EVENTS.diagnostics = ['started', 'stopped', 'marker', 'failed', 'level_changed'];
-const NUMBERS: string[] = ['sdk', 'line', 'operationId', 'instanceId', 'generation', 'active', 'count', 'total', 'chars', 'bytes', 'elapsedMs', 'durationMs', 'http', 'code',
+const NUMBERS: string[] = ['sdk', 'line', 'operationId', 'instanceId', 'generation', 'active', 'count', 'total', 'chars', 'bytes', 'elapsedMs', 'durationMs', 'delayMs', 'http', 'code',
   'commonMessages', 'sharedCharacters', 'systemHash', 'toolsHash', 'dataVersion',
   'messages', 'tools', 'nodes', 'keys', 'width', 'height', 'widthVp', 'request', 'chunk', 'eventCode', 'newChats', 'skippedChats', 'level', 'style',
   'tokens', 'budget', 'removed', 'retained', 'duplicates', 'characters', 'added', 'updated', 'round', 'revision', 'threads', 'changedThreads', 'selected'];
 const BOOLEANS: string[] = ['initialSupported', 'supported', 'available', 'pageSceneObserver', 'mounted', 'attached', 'visible', 'foreground', 'enabled', 'failed', 'cancelled', 'uncertain', 'speaking', 'preflight', 'closed', 'streaming', 'ready', 'hasModel', 'retryable'];
 const REFERENCES: string[] = ['threadId', 'messageId', 'sessionId', 'providerId', 'previewId', 'surfaceId', 'serverId'];
 const STRINGS: Record<string, string[]> = {};
-STRINGS.operation = ['access', 'read', 'list', 'stat', 'parse', 'unlink', 'rmdir', 'bundle_stats', 'free_size', 'total_size'];
+STRINGS.operation = ['access', 'read', 'list', 'stat', 'parse', 'unlink', 'rmdir', 'bundle_stats', 'free_size', 'total_size',
+  'getAppPrivacyMgmtInfo', 'getAppPrivacyResult', 'requestAppPrivacyConsent', 'subscribe', 'unsubscribe', 'cloud_directory', 'cloud_sync'];
 STRINGS.credentialScope = ['provider', 'search', 'mcp', 'backup'];
 STRINGS.rpcMethod = ['initialize', 'tools/list', 'tools/call', 'notifications/initialized', 'notifications/cancelled'];
 STRINGS.service = ['mcp', 'search', 'web', 'bing-browser'];
-STRINGS.reason = ['api_level', 'device_unsupported', 'construction_failed', 'capability_changed', 'supported'];
+STRINGS.reason = ['api_level', 'device_unsupported', 'construction_failed', 'capability_changed', 'supported',
+  'user_control', 'idle_browser', 'user_handoff', 'task_acquired'];
 STRINGS.format = ['image', 'markdown'];
 STRINGS.scriptSource = ['generated', 'host', 'frame', 'blank', 'data', 'other', 'unknown'];
 STRINGS.setting = ['search.provider', 'providerProfiles.protocol', 'options.autoRoute', 'extensions.browserPolicy', 'config.reasoning',
@@ -94,7 +98,8 @@ STRINGS.setting = ['search.provider', 'providerProfiles.protocol', 'options.auto
 STRINGS.change = ['cold', 'append', 'tools', 'system', 'history'];
 STRINGS.protocol = ['chat-completions', 'responses', 'anthropic-messages', 'gemini'];
 STRINGS.phase = ['idle', 'preparing', 'listening', 'complete', 'finishing', 'error', 'creating', 'playing', 'stopping', 'connecting', 'streaming', 'capture', 'compose', 'encode',
-  'login', 'state', 'storage', 'credential', 'identity', 'submit', 'query', 'upload'];
+  'login', 'state', 'storage', 'credential', 'identity', 'submit', 'query', 'upload',
+  'page_show', 'privacy_event', 'subscription_ready', 'new_want', 'business', 'manual_retry', 'request_consent', 'initial', 'active'];
 STRINGS.action = ['send', 'cancel', 'edit', 'press', 'none', 'open', 'click', 'type', 'select', 'scroll', 'back', 'forward', 'reload', 'capture', 'wait'];
 STRINGS.policy = ['unset', 'enabled', 'disabled'];
 STRINGS.scheme = ['http', 'https', 'about', 'data', 'file', 'other'];

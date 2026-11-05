@@ -114,6 +114,52 @@ function fixture(policy = 'enabled') {
   console.log('PASS structured sources, serial tool mode, delayed results, explicit empty and layout/navigation errors');
 
   {
+    const f = fixture(); await f.search();
+    const snapshot = await f.browser.snapshot(f.cancellation);
+    f.browser.release(f.cancellation);
+    assert.equal(f.browser.owner, 'user'); assert.equal(f.browser.hasTask, false);
+    f.browser.openForUser(); // Merely viewing the retained page is not an explicit takeover.
+    const next = new Cancellation(); let completed = false;
+    const pending = f.transport.search('next turn', 5, next).then(value => { completed = true; return value; });
+    pending.catch(() => {});
+    try {
+      await settle();
+      assert.equal(completed, true, 'A new turn must acquire an idle browser without manual handoff');
+      assert.equal(f.browser.owner, 'agent'); assert.equal(f.browser.paused, false);
+      assert.equal(f.driver.navigations.length, 2); assert.equal(f.driver.readCount, 2);
+      assert.equal(f.logs.some(log => log.event === 'control_wait'), false);
+      const released = f.logs.find(log => log.event === 'task_released');
+      assert.equal(new LogSanitizer().sanitize(released.fields, undefined, true).reason, 'idle_browser');
+      assert.equal(f.browser.isCurrentSnapshot(snapshot.snapshotId), false, 'Previous-turn snapshots remain invalid');
+      await assert.rejects(f.browser.snapshot(f.cancellation), error => error.code === 'BROWSER_NOT_OWNED');
+    } finally { next.cancel(); await pending.catch(() => {}); }
+    console.log('PASS consecutive search turns reacquire idle browser control without user interaction');
+  }
+  {
+    const f = fixture(); await f.search(); f.browser.release(f.cancellation);
+    f.browser.takeOver(); // Real user input while idle must be distinguishable from automatic release.
+    const next = new Cancellation(); const pending = f.transport.search('after user editing', 5, next);
+    await settle();
+    assert.equal(f.driver.navigations.length, 1); assert.equal(f.browser.paused, true);
+    const waiting = f.logs.find(log => log.event === 'control_wait');
+    assert.ok(knownLogEvent('browser', waiting.event));
+    assert.equal(new LogSanitizer().sanitize(waiting.fields, undefined, true).reason, 'user_control');
+    f.browser.handoff(); await pending; next.cancel();
+    console.log('PASS explicit user input between turns still requires handoff');
+  }
+  {
+    const f = fixture(); await f.search(); f.cancellation.cancel();
+    const next = new Cancellation(); let completed = false;
+    const pending = new BrowserSearchTransport(f.browser, 'other-thread').search('after cancellation', 5, next)
+      .then(value => { completed = true; return value; });
+    pending.catch(() => {});
+    try {
+      await settle(); assert.equal(completed, true, 'Cancellation without manual takeover leaves the browser reusable');
+      assert.equal(f.driver.navigations.length, 2);
+    } finally { next.cancel(); await pending.catch(() => {}); }
+  }
+
+  {
     const f = fixture('disabled'); await assert.rejects(f.search(), error => error.code === 'PERMISSION_DENIED'); assert.equal(f.driver.navigations.length, 0);
   }
   {
