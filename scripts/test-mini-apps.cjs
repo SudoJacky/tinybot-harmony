@@ -62,7 +62,7 @@ const kits = {
 };
 const t = (text, values = []) => text.replace(/\{(\d+)\}/g, (_, i) => String(values[i]));
 function mock(name, value) { cache.set(path.join(source, name + '.ets'), value); }
-mock('model/I18n', { t }); mock('model/Diagnostics', { Diagnostics: { acceptsLog: () => false, log() {}, begin: () => 0, end() {} } });
+mock('model/I18n', { t, getLocale:()=> 'zh-CN' }); mock('model/Diagnostics', { Diagnostics: { acceptsLog: () => false, log() {}, begin: () => 0, end() {} } });
 mock('common/ApiLevel', { ApiLevel: { pdfTextContent: true } });
 mock('services/ProjectFolderAccess', { ProjectFolderAccess: { activate: async () => {} } });
 mock('services/NativeActions', { exportFile: async () => {} });
@@ -396,7 +396,7 @@ async function lifePanelTest() {
   await scoped.write('today.panel.json',JSON.stringify(spec),signal);
   await scoped.write('data.json',JSON.stringify(spec.data),signal);
   const tools=new LifePanelTools(panels,'panel-chat','deleted-thread',scoped);
-  assert.equal((await invoke(tools,'get_life_panel_catalog',{})).version,1);
+  assert.equal((await invoke(tools,'get_life_panel_catalog',{})).version,2);
   const receipt=await invoke(tools,'publish_life_panel',{path:'today.panel.json'}), id=receipt.panelId;
   assert.equal(receipt.openFrom,'Life Panel');
   const readonly=new RuleTools(tools,true);
@@ -714,5 +714,45 @@ async function lifePanelRecoveryTest() {
   const continued=await panels.page({limit:1,cursor:emptyPage.nextCursor});assert.equal(continued.items.length,1);
   console.log('PASS explicit cross-chat sources, fresh automatic admission, manual refresh while paused, and summary/detail tools');
 }
-const run=process.argv.includes('--lifecycle')?lifePanelRecoveryTest():main().then(lifePanelTest).then(lifePanelApiTest).then(lifePanelScriptTest).then(lifeBoardsTest).then(lifePanelRecoveryTest);
+async function htmlPanelTest() {
+  const {LifePanels,PanelRepository}=load('services/LifePanels'),{LifePanelTools}=load('services/LifePanelTools'),{LifeBoards}=load('services/LifeBoards');
+  const {parsePanelSpec}=load('model/LifePanel'),{parseLifeBoard}=load('model/LifeBoard');
+  const dir='/sandbox/html-panels',ws=new WorkspaceStore(dir),panels=new LifePanels(dir),boards=new LifeBoards(dir),signal=new Cancellation();
+  fs.mkdirSync(disk(dir),{recursive:true});await ws.ensureThread('owner');
+  let rejectView=false;
+  const files=new NativeWorkspaceFiles(ws.pathFor('owner')),repo=panels.repository('owner'),tools=new LifePanelTools(panels,'owner','owner',files,boards,async(page,storage,context)=>{
+    assert.equal(context.data.total,5);await assert.rejects(storage.save({},'initial'),/startup/);if(rejectView)throw Error('SyntaxError');
+  });
+  const definition={version:2,title:'Interactive',size:'M',nodes:[],data:{total:5},source:{type:'workspace-json',path:'fresh.json'}};
+  const html='<main><button id="add">Add</button><output>0</output></main><script>document.querySelector("output").textContent=tinybot.panel.context.data.total;</script>';
+  await files.write('interactive.html',html,signal);await files.write('interactive.panel.json',JSON.stringify(definition),signal);await files.write('fresh.json','{"total":9}',signal);
+  const result=await invoke(tools,'publish_life_panel',{path:'interactive.panel.json',htmlPath:'interactive.html'}),id=result.panelId;
+  let record=await repo.get(id);assert.equal(record.definition.view.html,html);assert.equal(record.definition.view.height,320);
+  rejectView=true;await assert.rejects(invoke(tools,'publish_life_panel',{path:'interactive.panel.json',htmlPath:'interactive.html',panelId:id}),/SyntaxError/);
+  assert.equal((await repo.get(id)).configRevision,record.configRevision,'Failed validation must preserve the published card');rejectView=false;
+  const binding=repo.binding(id,record.configRevision),initial=await binding.load();assert.equal(initial.value,null);
+  const saved=await binding.save({count:4,nested:{checked:['a']}},initial.revision);
+  assert.equal((await repo.refresh(id,signal)).data.total,9);assert.equal((await binding.load()).value.count,4);
+  await assert.rejects(binding.save({count:100},initial.revision),/state changed/);
+  await assert.rejects(binding.save({huge:'x'.repeat(256*1024)},saved.revision),/256 KiB/);
+  const edits=await Promise.allSettled([binding.save({count:5},saved.revision),binding.save({count:6},saved.revision)]);
+  assert.equal(edits.filter(r=>r.status==='fulfilled').length,1,'Concurrent views cannot silently overwrite');
+  record=await repo.get(id);await repo.publish(id,{...record.definition,title:'Updated'},'interactive.panel.json','owner',true,signal);
+  await assert.rejects(binding.save({count:8},(await binding.load()).revision),/Card changed/);
+  const revised=await repo.get(id);assert.ok([5,6].includes(revised.viewState.value.count),'Publishing preserves user edits');
+  assert.throws(()=>parsePanelSpec(JSON.stringify({...revised.definition,nodes:[{id:'x',kind:'Text',text:{value:'bad'}}]})),/empty nodes/);
+  assert.throws(()=>parsePanelSpec(JSON.stringify({...revised.definition,version:1})),/native nodes/);
+  const board=await boards.save('owner','','Interactive board','Test context');await boards.pin('owner',board.id,{workspaceId:'owner',panelId:id},true);
+  await boards.arrange('owner',board.id,{workspaceId:'owner',panelId:id},'','S',248);
+  assert.equal((await new LifeBoards(dir).get('owner',board.id)).items[0].height,248);
+  await assert.rejects(boards.arrange('owner',board.id,{workspaceId:'owner',panelId:id},'','S',900),/200/);
+  assert.equal((await boards.get('owner',board.id)).items[0].height,248,'Invalid resize leaves saved layout intact');
+  const context={filesDir:dir,cacheDir:dir+'/cache',getApplicationContext(){return this;}};fs.mkdirSync(disk(context.cacheDir));
+  const {createBackupFile,readBackupFile}=load('services/Backup'),backup=await createBackupFile(context,emptyData());
+  const dest='/sandbox/html-restored';fs.mkdirSync(disk(dest));await readBackupFile({filesDir:dest,cacheDir:dest,getApplicationContext(){return this;}},backup,emptyData());
+  assert.deepEqual(plain(await new LifePanels(dest).repository('owner').get(id)),plain(await repo.get(id)));
+  assert.equal((await new LifeBoards(dest).get('owner',board.id)).items[0].height,248);
+  console.log('PASS HTML file publication, isolated state, source refresh, concurrent/conflicting writes, definition replacement, bounded resize and backup/restore');
+}
+const run=process.argv.includes('--lifecycle')?lifePanelRecoveryTest():main().then(lifePanelTest).then(lifePanelApiTest).then(lifePanelScriptTest).then(lifeBoardsTest).then(lifePanelRecoveryTest).then(htmlPanelTest);
 Promise.resolve(run).catch(error=>{console.error(error);process.exitCode=1;});

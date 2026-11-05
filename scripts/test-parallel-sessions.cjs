@@ -73,6 +73,21 @@ async function start(f, id, prompt = id) {
 }
 async function main() {
   {
+    const f=await fixture(),context='Board context: {"boardId":"board-a","description":"Morning"}';
+    f.app.setDraft('Update the board');f.app.setPanelContext(context);await f.app.flushDraft();
+    assert.equal(thread(f,'a',true).panelContext,context,'Board context persists with the draft');
+    await f.app.selectThread('b');assert.equal(f.app.active.panelContext,undefined);await f.app.selectThread('a');
+    assert.equal(f.app.draft,'Update the board','Technical context stays outside the editable text');
+    const run=f.app.send(()=>{});await until(()=>f.requests.length===1);
+    const request=f.requests[0].request.messages.find(m=>m.role==='user');assert.ok(request.content.includes(context));
+    assert.equal(thread(f,'a').messages[0].content,'Update the board');assert.equal(thread(f,'a').messages[0].panelContext,context);
+    assert.equal(thread(f,'a').panelContext,undefined,'Context is consumed by exactly one submitted message');
+    f.requests[0].finish('Updated');await run;
+    const saved=thread(f,'a',true);assert.equal(saved.messages[0].panelContext,context,'Replay retains the captured board context');
+    f.app.setDraft('Clear me');f.app.setPanelContext(context);f.app.setDraft('');assert.equal(f.session.active.panelContext,undefined);
+    console.log('PASS board context draft persistence, thread isolation, clean composer text, model delivery, replay and explicit draft clearing');
+  }
+  {
     const f = await fixture(); let updatesA = 0, updatesB = 0;
     f.app.setDraft('A'); const a = f.app.send(() => updatesA++); await until(() => f.requests.length === 1);
     assert.equal(await f.app.selectThread('b'), true); assert.equal(f.app.busy, false); assert.equal(f.session.hasActiveRuns, true);

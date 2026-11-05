@@ -48,11 +48,12 @@ export class LifeBoards {
       before.items = items; return before;
     });
   }
-  async arrange(workspaceId: string, id: string, reference: PanelReference, beforeKey: string, size?: string): Promise<LifeBoard> {
+  async arrange(workspaceId: string, id: string, reference: PanelReference, beforeKey: string, size?: string, height?: number): Promise<LifeBoard> {
     return this.change(workspaceId, id, false, async (previous?: LifeBoard): Promise<LifeBoard> => {
       const board = previous!, item = board.items.find((item: BoardItem) => referenceKey(item) === referenceKey(reference));
       if (!item) { throw new Error('Card no longer belongs to this board'); }
       if (size) { item.size = size; }
+      if (height !== undefined) { item.height = height; }
       const items = board.items.filter((entry: BoardItem) => referenceKey(entry) !== referenceKey(reference));
       const target = beforeKey ? items.findIndex((entry: BoardItem) => referenceKey(entry) === beforeKey) : items.length;
       if (target < 0) { throw new Error('Drop target changed; reload the board'); } items.splice(target, 0, item);
@@ -72,6 +73,7 @@ export class LifeBoards {
         entries.push({ workspaceId: workspaceId, board: await this.get(workspaceId, id) });
       }
     }
-    return entries.sort((a: BoardEntry, b: BoardEntry) => b.board.updatedAt - a.board.updatedAt);
+    // Changing a card or a board description must not shuffle the tab strip.
+    return entries.sort((a: BoardEntry, b: BoardEntry) => a.board.createdAt - b.board.createdAt || a.board.id.localeCompare(b.board.id));
   }
 }

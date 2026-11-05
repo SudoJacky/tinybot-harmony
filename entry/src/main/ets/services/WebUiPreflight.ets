@@ -2,8 +2,9 @@ import { UiCompiler, UiValues, uiParts } from '../model/InteractiveUi';
 import { Cancellation, RunCancelledError } from './Cancellation';
 import { UiDiagnosticError } from '../model/UiRepair';
 import { MiniAppStorage } from '../model/MiniApp';
+import { WebUiPanelContext } from '../model/WebUi';
 
-export interface WebUiProbe { id: number; content: string; values: UiValues; storage?: MiniAppStorage; }
+export interface WebUiProbe { id: number; content: string; values: UiValues; storage?: MiniAppStorage; panelContext?: WebUiPanelContext; }
 interface PendingProbe { probe: WebUiProbe; start: () => void; pause: () => void; finish: (error?: Error) => void; }
 
 // One rendered probe at a time, shared by chat and team runtimes. Never persists probe state.
@@ -37,7 +38,7 @@ export class WebUiPreflight {
     if (!WebUiPreflight.foreground) { return; }
     WebUiPreflight.queue.find((item) => item.probe.id === id)?.finish(error ? new Error(error) : undefined);
   }
-  private static check(content: string, values: UiValues, cancellation: Cancellation, storage?: MiniAppStorage): Promise<void> {
+  private static check(content: string, values: UiValues, cancellation: Cancellation, storage?: MiniAppStorage, panelContext?: WebUiPanelContext): Promise<void> {
     cancellation.check();
     if (!WebUiPreflight.listener) { return Promise.reject(new Error('Web UI preflight host is unavailable')); }
     return new Promise<void>((resolve, reject) => {
@@ -55,12 +56,12 @@ export class WebUiPreflight {
         if (error) { reject(error); } else { resolve(); }
       };
       const pending: PendingProbe = {
-        probe: { id: ++WebUiPreflight.sequence, content: content, values: values, storage: storage }, start: start, finish: finish,
+        probe: { id: ++WebUiPreflight.sequence, content: content, values: values, storage: storage, panelContext: panelContext }, start: start, finish: finish,
         pause: (): void => {
           clearTimeout(timer); timer = -1;
           // A foreground host mounts a fresh validation attempt for the same immutable source.
           // Keep the old object/id detached so delayed Web callbacks cannot settle the new attempt.
-          pending.probe = { id: ++WebUiPreflight.sequence, content: content, values: values, storage: storage };
+          pending.probe = { id: ++WebUiPreflight.sequence, content: content, values: values, storage: storage, panelContext: panelContext };
         }
       };
       WebUiPreflight.queue.push(pending);
@@ -70,6 +71,9 @@ export class WebUiPreflight {
   }
   static validateMiniApp(content: string, storage: MiniAppStorage, cancellation: Cancellation): Promise<void> {
     return WebUiPreflight.check(content, {}, cancellation, storage);
+  }
+  static validatePanel(content: string, storage: MiniAppStorage, context: WebUiPanelContext, cancellation: Cancellation): Promise<void> {
+    return WebUiPreflight.check(content, {}, cancellation, storage, context);
   }
   static async validate(content: string, cancellation: Cancellation): Promise<void> {
     for (const part of uiParts(content, false).filter((item) => item.kind === 'ui')) {

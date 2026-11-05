@@ -1,7 +1,7 @@
 import { panelId } from './LifePanel';
 import { threadWorkspacePath } from './Workspace';
 export interface PanelReference { workspaceId: string; panelId: string; }
-export interface BoardItem extends PanelReference { size: string; }
+export interface BoardItem extends PanelReference { size: string; height?: number; }
 export interface LifeBoard {
   version: number; id: string; title: string; description: string; items: BoardItem[];
   archived: boolean; createdAt: number; updatedAt: number;
@@ -22,7 +22,8 @@ export function parseLifeBoard(content: string, id: string): LifeBoard {
   const seen: Set<string> = new Set<string>();
   board.items.forEach((item: BoardItem) => {
     validateReference(item);
-    if (Object.keys(item).some((key: string) => !['workspaceId', 'panelId', 'size'].includes(key))) { throw new Error('Invalid board item fields'); }
+    if (Object.keys(item).some((key: string) => !['workspaceId', 'panelId', 'size', 'height'].includes(key))) { throw new Error('Invalid board item fields'); }
+    if (item.height !== undefined && (!Number.isInteger(item.height) || item.height < 200 || item.height > 800)) { throw new Error('Card height must be 200–800'); }
     if (!['S', 'M', 'L'].includes(item.size) || seen.has(referenceKey(item))) { throw new Error('Invalid or duplicate board card'); } seen.add(referenceKey(item));
   }); return board;
 }

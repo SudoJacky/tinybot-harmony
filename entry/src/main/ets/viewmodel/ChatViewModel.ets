@@ -201,7 +201,7 @@ export class ChatViewModel {
     return name + ' · ' + ref.modelId + (this.configured ? '' : t(' · 不可用'));
   }
   get visibleMessages(): MessageViewModel[] { return this.active.messages.slice(-this.visibleMessageCount); }
-  get contextDraft(): ContextTokenItem[] { return draftBreakdown(this.draft, referenceContext(this.active.references), this.active.attachments); }
+  get contextDraft(): ContextTokenItem[] { return draftBreakdown(this.draft, referenceContext(this.active.references) + (this.active.panelContext || ''), this.active.attachments); }
   get contextDetails(): ContextTokenItem[] { return this.contextItems.concat(this.contextDraft); }
   get contextUsed(): number { return this.contextTokens + this.contextDraft.reduce((sum, item) => sum + item.tokens, 0); }
   get contextWindow(): number { return contextSettings(this.currentConfig).window; }
@@ -257,6 +257,7 @@ export class ChatViewModel {
     clearTimeout(this.draftTimer);
     this.draftTimer = setTimeout(() => { this.draftTimer = -1; this.requireSession().flushDraft(); }, 800);
   }
+  setPanelContext(context: string): void { this.requireSession().setPanelContext(context); }
   async flushDraft(): Promise<void> {
     clearTimeout(this.draftTimer); this.draftTimer = -1;
     if (this.session) { await this.session.flushDraft(); }

@@ -359,7 +359,7 @@ export class SessionService {
       this.active.attachments = JSON.parse(JSON.stringify(message.attachments || [])) as Attachment[];
       this.active.references = (message.references || []).map((item): ThreadReference => ({ threadId: item.threadId, title: item.title,
         content: item.content, capturedAt: item.capturedAt, truncated: item.truncated, fullContent: item.fullContent }));
-      this.setDraft(message.content, this.active.id); await this.persist();
+      this.setDraft(message.content, this.active.id); this.active.panelContext = message.panelContext; await this.persist();
     }, 'snapshot', 'thread');
   }
   async forkThread(messageId: string = ''): Promise<boolean> {
@@ -497,8 +497,14 @@ export class SessionService {
     const thread = this.data.threads.find((item) => item.id === threadId);
     if (!thread || thread.archived) { return; }
     thread.draft = text;
+    if (!text.trim()) { thread.panelContext = undefined; }
     this.draftRevision++; this.dirtyDrafts.add(thread.id);
     this.emit({ kind: 'draft', state: this.state, threadId: thread.id, content: text });
+  }
+  setPanelContext(context: string): void {
+    if (!this.application.ready || context.length > 32768 || this.active.archived) { return; }
+    this.active.panelContext = context;
+    this.draftRevision++; this.dirtyDrafts.add(this.active.id); this.publish('snapshot');
   }
   async flushDraft(): Promise<void> {
     if (!this.application.ready || this.application.phase === 'saving' || this.application.saveError.length > 0) { return; }
@@ -621,7 +627,7 @@ export class SessionService {
     if (!this.canQueueInput || (thread.draft || '').trim().length === 0) { return; }
     status.error = '';
     try {
-      if ((thread.references || []).length > 0) { throw new Error(t('会话引用请在当前任务完成后发送，或先移除引用再排队。')); }
+      if ((thread.references || []).length > 0 || thread.panelContext) { throw new Error(t('会话引用请在当前任务完成后发送，或先移除引用再排队。')); }
       if (/^\/compact(?:\s|$)/i.test((thread.draft || '').trim())) { throw new Error(t('/compact 请在当前任务完成后单独发送。')); }
       if (mode === 'steer' && (!status.acceptingSteering || !this.execution(thread.id).runtime.acceptsSteering)) {
         throw new Error(t("本轮正在结束或已停止，请将指令加入队列。"));
@@ -790,8 +796,8 @@ export class SessionService {
     this.addModeInstructions(sections, thread);
     const instructions = renderPrompt(sections.filter((section) => !section.dynamic));
     const user: MessageData = { id: this.resources.createId(), role: 'user', content: text, skillPrompt: expandSkillCommand(text, this.extensions.skills), status: 'complete', error: '',
-      attachments: attachments, references: queuedId ? [] : thread.references };
-    if (!queuedId) { thread.attachments = []; thread.references = []; }
+      attachments: attachments, references: queuedId ? [] : thread.references, panelContext: queuedId ? undefined : thread.panelContext };
+    if (!queuedId) { thread.attachments = []; thread.references = []; thread.panelContext = undefined; }
     const answer: MessageData = { id: this.resources.createId(), role: 'assistant', content: '', status: 'generating', error: '', modelRef: reference };
     const generateTitle = text.length > 0 && shouldGenerateTitle(thread);
     if (text.length > 0 && thread.messages.length === 0 && !thread.titleEdited) { thread.title = titleCharacters(text.replace(/\s+/g, ' '), 32); }
@@ -1403,7 +1409,7 @@ export class SessionService {
   }
   private publishThread(thread: ThreadData): void {
     const metadata: ThreadData = { id: thread.id, title: thread.title, updatedAt: thread.updatedAt, messages: [],
-      projectId: thread.projectId, pinned: thread.pinned, archived: thread.archived, titleEdited: thread.titleEdited, draft: thread.draft,
+      projectId: thread.projectId, pinned: thread.pinned, archived: thread.archived, titleEdited: thread.titleEdited, draft: thread.draft, panelContext: thread.panelContext,
       attachments: thread.attachments, references: thread.references, parentThreadId: thread.parentThreadId,
       parentMessageId: thread.parentMessageId, disabledMcpIds: thread.disabledMcpIds, modelRef: thread.modelRef,
       pendingInputs: thread.pendingInputs, queuePaused: thread.queuePaused, compaction: thread.compaction,

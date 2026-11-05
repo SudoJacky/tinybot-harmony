@@ -1,7 +1,11 @@
 import { panelErrorText } from '../model/PanelPresentation';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Btn, Radius } from '../common/Theme';
-import { t } from '../model/I18n';
+import { t, getLocale } from '../model/I18n';
+import { MiniAppStorage } from '../model/MiniApp';
+import { WebUiPanelContext } from '../model/WebUi';
+import { WebUiView } from './WebUiView';
+import { IconButton } from '../common/Widgets';
 import { PanelNode, PanelRecord, PanelItem, PanelBinding, panelValue, panelText, panelNumber, panelItems, panelPoints } from '../model/LifePanel';
 
 function toneColor(tone?: string): Resource {
@@ -147,6 +151,19 @@ export struct LifePanelCard {
   @Prop cardSize: string = '';
   @Prop detail: boolean = false;
   @Prop timestamp: string = '';
+  @Prop editing: boolean = false;
+  @Prop viewHeight: number = 320;
+  storage?: MiniAppStorage;
+  onRun: () => Promise<void> = async () => {};
+  onMoveStart: () => void = () => {};
+  onMoveUpdate: (event: GestureEvent) => void = () => {};
+  onMoveEnd: (event: GestureEvent) => void = () => {};
+  onMoveCancel: () => void = () => {};
+  onResize: (event: GestureEvent, finished: boolean) => void = () => {};
+  private context(): WebUiPanelContext {
+    return { data: this.panel.data, title: this.panel.definition.title, status: this.busy ? 'running' : this.panel.error ? 'failed' : 'ready',
+      canRefresh: !!this.panel.definition.source && !this.panel.archived, locale: getLocale() };
+  }
   onOpen: () => void = () => {};
   onRefresh: () => void = () => {};
   onToggle: (node: string, item: string, done: boolean) => void = () => {};
@@ -156,8 +173,10 @@ export struct LifePanelCard {
   onPin: () => void = () => {};
   onUnpin: () => void = () => {};
   onTask: () => void = () => {};
+  onEdit: () => void = () => {};
   @Builder private menu() {
     Menu() {
+      MenuItem({ content: t('用 AI 修改卡片') }).onClick(this.onEdit)
       MenuItem({ content: t('固定到看板') }).onClick(this.onPin)
       if (this.onBoard) { MenuItem({ content: t('从此看板移除') }).onClick(this.onUnpin) }
       if (this.panel.definition.source) { MenuItem({ content: t('刷新任务与记录') }).onClick(this.onTask) }
@@ -173,12 +192,17 @@ export struct LifePanelCard {
   build() {
     Column({ space: 10 }) {
       Row({ space: 6 }) {
+        if (this.editing) {
+          Text('⠿').fontSize(24).fontColor($r('app.color.text_secondary')).width(40).height(44).textAlign(TextAlign.Center)
+            .accessibilityText(t('拖动卡片')).id('panel-drag-' + this.panel.id)
+            .gesture(PanGesture().onActionStart(this.onMoveStart).onActionUpdate(this.onMoveUpdate).onActionEnd(this.onMoveEnd).onActionCancel(this.onMoveCancel))
+        }
         Button({ type: ButtonType.Normal }) {
           Text(this.panel.definition.title).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
             .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%').textAlign(TextAlign.Start)
         }.backgroundColor(Color.Transparent).padding(0).layoutWeight(1).constraintSize({ minHeight: 40 })
-          .onClick(this.onOpen).accessibilityText(t('打开卡片「{0}」', [this.panel.definition.title]))
-        if (this.interactive) {
+          .onClick(() => { if (!this.editing) { this.onOpen(); } }).accessibilityText(t('打开卡片「{0}」', [this.panel.definition.title]))
+        if (this.interactive && !this.editing) {
           Button({ type: ButtonType.Normal }) { Text('⋯').fontSize(24).fontColor($r('app.color.text_secondary')) }
             .backgroundColor(Color.Transparent).borderRadius(8).width(36).height(40).padding(0)
             .bindMenu(this.menu()).accessibilityText(t('卡片选项'))
@@ -194,6 +218,15 @@ export struct LifePanelCard {
       if (this.panel.paused && this.panel.definition.source) {
         Text(t('自动更新已暂停')).fontSize(11).fontColor($r('app.color.text_secondary')).width('100%')
       }
+      if (this.panel.definition.view) {
+        if (this.storage) {
+          WebUiView({ content: JSON.stringify(this.panel.definition.view), storage: this.storage, panelContext: this.context(),
+            interactive: this.interactive && !this.panel.archived && !this.editing, viewportHeight: this.viewHeight, onPanelRefresh: this.onRun })
+            .borderRadius(12).clip(true)
+        } else {
+          Button(t('打开交互卡片')).attributeModifier(Btn.tonal).onClick(this.onOpen)
+        }
+      } else {
       Column({ space: 10 }) {
         ForEach(this.panel.definition.nodes.filter((node: PanelNode) => !node.parent), (node: PanelNode) => {
           PanelComponent({ panel: this.panel, node: node, interactive: this.interactive && !this.busy && !this.panel.archived,
@@ -201,13 +234,26 @@ export struct LifePanelCard {
             onToggle: this.onToggle, onRefresh: this.onRefresh })
         }, (node: PanelNode) => node.id)
       }.width('100%').alignItems(HorizontalAlign.Start)
+      }
       Row({ space: 4 }) {
-        Text(this.timestamp).fontSize(10).fontColor($r('app.color.text_tertiary')).layoutWeight(1).maxLines(1)
+        Text(this.timestamp).fontSize(11).fontColor($r('app.color.text_secondary')).layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        if (this.panel.definition.view && !this.detail && !this.editing && this.interactive) {
+          IconButton({ icon: $r('sys.symbol.arrow_up_left_and_arrow_down_right'), label: t('展开卡片'), diameter: 40, iconSize: 18, onTap: this.onOpen })
+        }
         if (this.interactive && this.panel.definition.source && !this.panel.archived) {
           Button(this.busy ? t('刷新中') : t('刷新')).type(ButtonType.Normal).fontSize(11).padding({ left: 4, right: 4 })
-            .height(28).backgroundColor(Color.Transparent).fontColor($r('app.color.text_secondary')).enabled(this.interactive && !this.busy).onClick(this.onRefresh)
+            .height(40).constraintSize({ minWidth: 40 }).backgroundColor(Color.Transparent).fontColor($r('app.color.text_secondary')).enabled(this.interactive && !this.busy && !this.editing).onClick(this.onRefresh)
         }
       }.width('100%')
+      if (this.editing) {
+        Row() {
+          Text(t('拖动调整尺寸')).fontSize(11).fontColor($r('app.color.text_secondary')).layoutWeight(1)
+          Text('↘').fontSize(24).width(44).height(44).textAlign(TextAlign.Center).id('panel-resize-' + this.panel.id)
+            .accessibilityText(t('调整卡片尺寸')).gesture(PanGesture()
+              .onActionUpdate((event: GestureEvent) => this.onResize(event, false))
+              .onActionEnd((event: GestureEvent) => this.onResize(event, true)).onActionCancel(this.onMoveCancel))
+        }.width('100%')
+      }
     }.width('100%').padding(14).backgroundColor($r('app.color.surface'))
       .borderRadius(Radius.lg).border({ width: 1, color: $r('app.color.divider') })
   }

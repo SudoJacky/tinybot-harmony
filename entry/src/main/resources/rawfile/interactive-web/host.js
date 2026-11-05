@@ -10,6 +10,8 @@
     let state = initial.values, active = initial.active, seq = 0, pending, animate, raf = 0, previous = 0, failed = false;
     const listeners = new Set();
     const storagePending = new Map();
+    let panel = initial.panel || null, refreshPending;
+    const panelListeners = new Set();
     const copy = value => JSON.parse(JSON.stringify(value));
     const send = value => parent.postMessage({ channel: 'tinybot-frame', ...value }, '*');
     const failure = error => {
@@ -39,8 +41,13 @@
       const data = event.data;
       if (data.type === 'state') {
         state = data.values; active = data.active;
+        panel = data.panel || null;
+        for (const listener of panelListeners) listener(copy(panel));
         for (const listener of listeners) listener(copy(state));
         resume();
+      } else if (data.type === 'panelResult' && refreshPending?.id === data.id) {
+        const request = refreshPending; refreshPending = undefined;
+        if (data.error) request.reject(new Error(data.error)); else request.resolve();
       } else if (data.type === 'snapshot' && initial.snapshotMode) {
         requestAnimationFrame(() => requestAnimationFrame(() => { if (!failed) send({ type: 'snapshotReady' }); }));
       } else if (data.type === 'storageResult' && storagePending.has(data.id)) {
@@ -70,6 +77,15 @@
       storage: Object.freeze({
         load() { return storageRequest('storageLoad'); },
         save(value, revision) { return storageRequest('storageSave', value, revision); }
+      }),
+      panel: Object.freeze({
+        get context() { return copy(panel); },
+        onUpdate(listener) { panelListeners.add(listener); return () => panelListeners.delete(listener); },
+        refresh() {
+          if (!active || initial.preflight || initial.snapshotMode || !panel?.canRefresh) return Promise.reject(new Error('Card refresh is unavailable in this view.'));
+          if (refreshPending) return Promise.reject(new Error('A refresh is already in progress.'));
+          return new Promise((resolve, reject) => { refreshPending = { id: ++seq, resolve, reject }; send({ type: 'panelRefresh', id: seq }); });
+        }
       }),
       save(values) {
         if (initial.preflight) return Promise.reject(new Error('Save state only on user interaction, not during initialization/preflight.'));
@@ -108,7 +124,7 @@
     frame.setAttribute('sandbox', 'allow-scripts');
     frame.setAttribute('allow', "camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'");
     frame.title = 'Interactive content';
-    const bootstrap = '(' + childRuntime.toString() + ')(' + JSON.stringify({ values: data.values, active: data.active, preflight: data.preflight === true, autoHeight: data.autoHeight === true, snapshotMode: data.snapshotMode === true }).replace(/</g, '\\u003c') + ');';
+    const bootstrap = '(' + childRuntime.toString() + ')(' + JSON.stringify({ values: data.values, panel: data.panel, active: data.active, preflight: data.preflight === true, autoHeight: data.autoHeight === true, snapshotMode: data.snapshotMode === true }).replace(/</g, '\\u003c') + ');';
     const csp = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
     frame.srcdoc = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
       '<meta http-equiv="Content-Security-Policy" content="' + csp + '">' +
@@ -137,6 +153,7 @@
         send({type:'browserResult',id:data.id,message:data.message});
       }
       else if (data.type === 'storageLoad') send({ type: 'storageLoad', id: data.id });
+      else if (data.type === 'panelRefresh') send({ type: 'panelRefresh', id: data.id });
       else if (data.type === 'storageSave') send({ type: 'storageSave', id: data.id, value: data.value, revision: data.revision });
       else if (data.type === 'save') send({ type: 'save', id: data.id, values: data.values });
       else if (data.type === 'resize') send({ type: 'resize', height: data.height });

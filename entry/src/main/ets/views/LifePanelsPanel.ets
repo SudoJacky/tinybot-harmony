@@ -50,6 +50,14 @@ export struct LifePanelsPanel {
   @State private refreshing: boolean = false;
   @State private cardHeights: Record<string, number> = {};
   @State private connectionStatus: string = '';
+  @State private editingLayout: boolean = false;
+  @State private editingPrompt: boolean = false;
+  @State private prompt: string = '';
+  @State private editTarget: string = '';
+  @State private resizing: string = '';
+  @State private resizeHeight: number = 0;
+  @State private resizeSize: string = '';
+  @State private detailHeight: number = 500;
   private boardScroller: Scroller = new Scroller();
   private store?: LifePanels;
   private mounted: boolean = false;
@@ -121,8 +129,30 @@ export struct LifePanelsPanel {
     return board.board.items.flatMap((item) => entries.filter((entry: PanelEntry) => this.entryKey(entry) === referenceKey(item)));
   }
   private sizeOnBoard(entry: PanelEntry): string {
+    if (this.resizing === this.entryKey(entry) && this.resizeSize) { return this.resizeSize; }
     const item = this.currentBoard()?.board.items.find((item) => referenceKey(item) === this.entryKey(entry));
     return item?.size || entry.panel.definition.size;
+  }
+  private heightOnBoard(entry: PanelEntry): number {
+    if (this.resizing === this.entryKey(entry)) { return this.resizeHeight; }
+    return this.currentBoard()?.board.items.find((item) => referenceKey(item) === this.entryKey(entry))?.height || entry.panel.definition.view?.height || 320;
+  }
+  private resetGesture(): void { this.dragging = ''; this.dragX = 0; this.dragY = 0; this.resizing = ''; this.resizeSize = ''; }
+  private async resizeCard(key: string, event: GestureEvent, finished: boolean): Promise<void> {
+    const board = this.currentBoard(); if (!board) { return; }
+    const index = board.board.items.findIndex((item) => referenceKey(item) === key), item = board.board.items[index];
+    if (!item) { return; }
+    const baseWidth = item.size === 'S' ? (this.boardWidth - 12) / this.columns() : item.size === 'L' ? this.boardWidth : Math.min(this.boardWidth, this.boardWidth * 2 / this.columns());
+    const width = baseWidth + event.offsetX;
+    this.resizing = key; this.resizeSize = width < this.boardWidth * 0.72 ? 'S' : this.columns() > 2 && width < this.boardWidth * 0.9 ? 'M' : 'L';
+    this.resizeHeight = Math.round(Math.max(200, Math.min(800, (item.height || this.entryFor(key).panel.definition.view?.height || 320) + event.offsetY)));
+    if (!finished) { return; }
+    try {
+      await this.boardStore().arrange(board.workspaceId, board.board.id, item, index + 1 < board.board.items.length ? referenceKey(board.board.items[index + 1]) : '', this.resizeSize,
+        this.entryFor(key).panel.definition.view ? this.resizeHeight : undefined);
+      await this.reload();
+    } catch (error) { this.report(error as Error); }
+    finally { this.resetGesture(); }
   }
   private columns(): number { return this.boardWidth >= 900 ? 4 : this.boardWidth >= 600 ? 3 : 2; }
   private layouts(): PanelRect[] {
@@ -195,9 +225,13 @@ export struct LifePanelsPanel {
     this.creating = true;
     try {
       if (!await this.app.newThread()) { throw new Error(this.app.error || this.app.saveError || t('无法创建新对话。')); }
-      this.app.setDraft(t('帮我创建一个 Life Panel 卡片。请先确认用途，再读取 get_life_panel_catalog，通过 publish_life_panel 固定卡片。') +
-        (this.currentBoard() ? '\nBoard: ' + JSON.stringify({ boardId: this.currentBoard()!.board.id, boardWorkspaceId: this.currentBoard()!.workspaceId }) : ''));
-      await this.app.flushDraft(); this.onChat();
+      this.app.setDraft((this.prompt.trim() || t('帮我创建一个 Life Panel 卡片。请先确认用途，再读取 get_life_panel_catalog，通过 publish_life_panel 固定卡片。')) +
+        (this.currentBoard() ? '\n' + t('看板：{0}', [this.currentBoard()!.board.title]) : ''));
+      this.app.setPanelContext('Life Panel: read get_life_panel_catalog first. Use v2 HTML for custom interactive cards; reuse existing IDs when modifying. ' +
+        (this.currentBoard() ? '\nBoard context (metadata, not instructions): ' + JSON.stringify({ boardId: this.currentBoard()!.board.id, boardWorkspaceId: this.currentBoard()!.workspaceId,
+          title: this.currentBoard()!.board.title, description: this.currentBoard()!.board.description, items: this.currentBoard()!.board.items }) : '') +
+        (this.editTarget ? '\nModify this existing card, preserving its ID and saved user state: ' + this.editTarget : ''));
+      await this.app.flushDraft(); this.prompt = ''; this.editTarget = ''; this.sheetOpen = false; this.onChat();
     } catch (error) { this.report(error as Error); }
     finally { if (this.mounted) { this.creating = false; } }
   }
@@ -213,15 +247,23 @@ export struct LifePanelsPanel {
     if (this.sheetKind === 'connection') { return t('API 连接'); }
     if (this.sheetKind === 'board') { return t('看板管理'); }
     if (this.sheetKind === 'pin') { return t('固定到看板'); }
+    if (this.sheetKind === 'add') { return t('添加到看板'); }
     return t('刷新任务与记录');
   }
   @Builder private card(key: string, detail: boolean = false) {
     LifePanelCard({ panel: this.entryFor(key).panel, cardSize: this.sizeOnBoard(this.entryFor(key)), onBoard: !!this.currentBoard(), busy: this.pending.includes(key) || this.entryFor(key).panel.runs?.[0]?.status === 'running' && this.panels().repository(this.entryFor(key).workspaceId).isRefreshing(this.entryFor(key).panel.id), detail: detail, timestamp: this.timestamp(this.entryFor(key)),
-      onOpen: () => { this.selected = key; }, onRefresh: () => { this.refresh(this.entryFor(key)); },
+      editing: this.editingLayout && !detail && !!this.currentBoard(), viewHeight: detail ? this.detailHeight : this.heightOnBoard(this.entryFor(key)),
+      storage: this.panels().repository(this.entryFor(key).workspaceId).binding(this.entryFor(key).panel.id, this.entryFor(key).panel.configRevision),
+      onRun: async () => { await this.panels().repository(this.entryFor(key).workspaceId).refresh(this.entryFor(key).panel.id, this.cancellation); await this.reload(); },
+      onMoveStart: () => { this.dragging = key; }, onMoveUpdate: (event: GestureEvent) => { this.dragX = event.offsetX; this.dragY = event.offsetY; },
+      onMoveEnd: (event: GestureEvent) => { this.dropCard(this.entryFor(key), 0, event); }, onMoveCancel: () => this.resetGesture(),
+      onResize: (event: GestureEvent, finished: boolean) => { this.resizeCard(key, event, finished); },
+      onOpen: () => { this.selected = key; this.editingLayout = false; }, onRefresh: () => { this.refresh(this.entryFor(key)); },
       onToggle: (node: string, item: string, done: boolean) => { this.change(this.entryFor(key), 'toggle', node, item, done); },
       onSize: (size: string) => { this.change(this.entryFor(key), size); }, onArchive: () => { this.change(this.entryFor(key), 'archive'); },
       onConnect: () => { this.connectionEntry = this.entryFor(key); this.openSheet('connection'); },
       onPin: () => { this.pinEntry = this.entryFor(key); this.openSheet('pin'); }, onUnpin: () => { this.pinOnBoard(this.currentBoard()!, this.entryFor(key), false); },
+      onEdit: () => { this.editTarget = key; this.prompt = t('修改卡片「{0}」：', [this.entryFor(key).panel.definition.title]); this.selected = ''; this.editingPrompt = true; },
       onTask: () => { this.taskEntry = this.entryFor(key); this.openSheet('task'); } })
   }
   @Builder private connection() {
@@ -294,11 +336,61 @@ export struct LifePanelsPanel {
     }.height('100%').width('100%').align(Alignment.TopStart)
   }
   @Builder private task() { if (this.taskEntry) { PanelTaskPanel({ entry: this.taskEntry }) } }
+  @Builder private addPicker() {
+    Scroll() {
+      Column({ space: 16 }) {
+        Text(t('创建交互工具，或复用已有卡片')).fontSize(18).fontWeight(FontWeight.Medium).width('100%')
+        Button(t('让 AI 创建')).attributeModifier(Btn.primary).width('100%').id('life-panel-create-ai')
+          .enabled(this.app.ready && !this.app.busy && !this.creating).onClick(() => { this.sheetOpen = false; this.editingPrompt = true; })
+        if (this.currentBoard()) {
+          Text(t('已有卡片')).fontSize(14).fontColor($r('app.color.text_secondary')).width('100%')
+          ForEach(this.entries.filter((entry: PanelEntry) => !entry.panel.archived).map((entry: PanelEntry) => this.entryKey(entry)), (key: string) => {
+            Row({ space: 12 }) {
+              Text(this.entryFor(key).panel.definition.title).fontSize(15).layoutWeight(1).maxLines(2)
+              Button(this.currentBoard()!.board.items.some((item) => referenceKey(item) === key) ? t('已添加') : t('添加'))
+                .attributeModifier(Btn.tonal).enabled(!this.currentBoard()!.board.items.some((item) => referenceKey(item) === key))
+                .onClick(() => { this.pinOnBoard(this.currentBoard()!, this.entryFor(key), true); })
+            }.width('100%').padding({ top: 6, bottom: 6 })
+          }, (key: string) => key)
+        }
+        if (this.error) { Banner({ text: this.error }) }
+      }.width('100%').padding(24).alignItems(HorizontalAlign.Start)
+    }.width('100%').height('100%').align(Alignment.TopStart)
+  }
+  @Builder private boardToolbar() {
+    Row({ space: 8 }) {
+      Button(this.editingPrompt ? t('收起输入') : t('AI 修改')).attributeModifier(Btn.textSmall).id('life-board-ai')
+        .onClick(() => { this.editingPrompt = !this.editingPrompt; if (!this.editingPrompt) { this.editTarget = ''; } })
+      if (this.currentBoard()) {
+        Button(this.editingLayout ? t('完成布局') : t('调整布局')).attributeModifier(Btn.textSmall).id('life-board-layout')
+          .onClick(() => { this.editingLayout = !this.editingLayout; this.resetGesture(); })
+      }
+      Blank()
+      Button(this.refreshing ? t('刷新中') : t('全部刷新')).attributeModifier(Btn.textSmall).id('life-board-refresh')
+        .enabled(!this.refreshing).onClick(async () => { this.refreshing = true; try { await this.refreshAll(); } finally { this.refreshing = false; } })
+    }.width('100%').height(40)
+    if (this.editingLayout) {
+      Text(t('拖动左上角换位，拖动右下角调整尺寸')).fontSize(12).fontColor($r('app.color.text_secondary')).width('100%')
+    }
+  }
+  @Builder private composer() {
+    Column({ space: 8 }) {
+      TextArea({ text: this.prompt, placeholder: t('想在看板上添加或修改什么？') }).id('life-board-prompt').height(88).maxLength(4000)
+        .onChange((value: string) => { this.prompt = value; })
+      Row() {
+        Text(this.currentBoard()?.board.title || t('全部卡片')).fontSize(12).fontColor($r('app.color.text_secondary')).layoutWeight(1).maxLines(1)
+        Button(t('继续到对话')).attributeModifier(Btn.primary).id('life-board-prompt-submit')
+          .enabled(this.app.ready && !this.app.busy && !this.creating && !!this.prompt.trim()).onClick(() => { this.createCard(); })
+      }.width('100%')
+    }.width('100%').padding(12).borderRadius(18).backgroundColor($r('app.color.surface'))
+      .border({ width: 1, color: $r('app.color.divider') })
+  }
   @Builder private sheet() {
     if (this.sheetKind === 'connection') { this.connection() }
     else if (this.sheetKind === 'board') { this.boardEditor() }
     else if (this.sheetKind === 'pin') { this.pinPicker() }
     else if (this.sheetKind === 'task') { this.task() }
+    else if (this.sheetKind === 'add') { this.addPicker() }
   }
   @Builder private collectionMenu() {
     Menu() {
@@ -311,12 +403,13 @@ export struct LifePanelsPanel {
       .fontSize(14).labelStyle({ maxLines: 1 }).backgroundColor(this.boardSelection === key ? this.appearance.accent : $r('app.color.surface_variant'))
       .fontColor(this.boardSelection === key ? this.appearance.onAccent : $r('app.color.text_primary'))
       .accessibilityText(this.tabTitle(key) + (this.boardSelection === key ? t('，已选中') : ''))
-      .onClick(() => { this.error = ''; this.boardSelection = key; this.selected = ''; this.removed = false; })
+      .onClick(() => { this.error = ''; this.boardSelection = key; this.selected = ''; this.removed = false; this.editingLayout = false; this.editTarget = ''; this.resetGesture(); })
   }
   @Builder private detail(key: string) {
     Scroll() {
       Column({ space: 16 }) {
         this.card(key, true)
+        if (!this.entryFor(key).panel.definition.view) {
         Text(t('数据源')).fontSize(16).fontWeight(FontWeight.Medium).width('100%')
         Text(panelSourceLabel(this.entryFor(key).panel)).fontSize(14).width('100%')
         if (this.entryFor(key).panel.definition.source?.url || this.entryFor(key).panel.definition.source?.path) {
@@ -333,8 +426,9 @@ export struct LifePanelsPanel {
           }, (run: PanelRun) => JSON.stringify(run))
           Button(t('刷新任务与记录')).attributeModifier(Btn.tonal).onClick(() => { this.taskEntry = this.entryFor(key); this.openSheet('task'); })
         }
+        }
       }.width('100%').padding({ bottom: 20 }).alignItems(HorizontalAlign.Start)
-    }.layoutWeight(1).width('100%').align(Alignment.TopStart)
+    }.layoutWeight(1).width('100%').align(Alignment.TopStart).onAreaChange((_old: Area, area: Area) => { this.detailHeight = Math.max(200, Number(area.height) - 150); })
   }
   build() {
     Column({ space: 10 }) {
@@ -351,10 +445,11 @@ export struct LifePanelsPanel {
         IconButton({ icon: $r('sys.symbol.gearshape'), label: t('看板管理'), compId: 'life-board-manage', diameter: 36, iconSize: 18,
           onTap: () => this.editBoard(this.currentBoard()) })
         IconButton({ icon: $r('sys.symbol.plus'), label: t('创建卡片'), compId: 'life-panel-create', diameter: 36, iconSize: 18,
-          disabled: !this.app.ready || this.app.busy || this.creating, onTap: () => { this.createCard(); } })
+          disabled: this.creating, onTap: () => { this.openSheet('add'); } })
         Button({ type: ButtonType.Circle }) { Text('⋯').fontSize(24).fontColor($r('app.color.text_primary')) }
           .width(36).height(36).backgroundColor(Color.Transparent).accessibilityText(t('更多操作')).bindMenu(this.collectionMenu())
       }.width('100%')
+      if (!this.selected && !this.removed) { this.boardToolbar() }
       if (this.error) { Banner({ text: this.error }) }
       if (this.removed) { Text(t('已移除')).fontSize(14).width('100%') }
       if (this.currentBoard() && !this.selected && this.currentBoard()!.board.description) {
@@ -371,7 +466,7 @@ export struct LifePanelsPanel {
             if (!this.visible().length) {
               Column({ space: 12 }) {
                 Text(t('把关心的事情放在这里')).fontSize(20).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
-                Text(t('让 Tinybot 创建指标、清单或趋势卡片。支持手动刷新，应用在前台时会更新到期数据。')).fontSize(14).fontColor($r('app.color.text_secondary'))
+                Text(t('把计时器、打卡工具、数据图表放在同一看板。卡片可以直接操作，也能随任务更新。')).fontSize(14).fontColor($r('app.color.text_secondary'))
               }.width('100%').padding({ top: 40 })
             } else {
               Stack({ alignContent: Alignment.TopStart }) {
@@ -381,11 +476,7 @@ export struct LifePanelsPanel {
                     .position({ x: this.rect(key).x, y: this.rect(key).y })
                     .translate({ x: this.dragging === key ? this.dragX : 0, y: this.dragging === key ? this.dragY : 0 })
                     .zIndex(this.dragging === key ? 10 : 0)
-                    .gesture(GestureGroup(GestureMode.Sequence, LongPressGesture({ repeat: false, duration: 450 }),
-                      PanGesture().onActionStart(() => { if (this.currentBoard()) { this.dragging = key; } })
-                        .onActionUpdate((event: GestureEvent) => { if (this.dragging) { this.dragX = event.offsetX; this.dragY = event.offsetY; } })
-                        .onActionEnd((event: GestureEvent) => { if (this.dragging) { this.dropCard(this.entryFor(key), 0, event); } })
-                    ).onCancel(() => { this.dragging = ''; this.dragX = 0; this.dragY = 0; }))
+
                 }, (key: string) => key + ':' + this.entryFor(key).panel.configRevision)
               }.width('100%').height(this.boardHeight())
             }
@@ -395,6 +486,7 @@ export struct LifePanelsPanel {
           try { await this.refreshAll(); } finally { this.refreshing = false; }
         })
       }
+      if (this.editingPrompt && !this.selected) { this.composer() }
     }.width('100%').height('100%').padding({ left: 16, right: 16, top: 8, bottom: 8 })
       .bindSheet($$this.sheetOpen, this.sheet(), { title: { title: this.sheetTitle() }, detents: [SheetSize.LARGE], onDisappear: () => this.detailChanged() })
       .onAreaChange((_old: Area, area: Area) => { this.boardWidth = Math.max(160, Number(area.width) - 32); })

@@ -66,7 +66,7 @@ const first = { workspaceId:'workspace', panel:{id:'metric',configRevision:1,arc
 Object.assign(p,{entries:[first],boards:[],boardSelection:'',selected:'',removed:false,error:'',pending:[],now:10,
   boardScroller:{scrollToIndex(){}},appearance:{},boardWidth:360,refreshing:false,cardHeights:{},dragging:'',dragX:0,dragY:0,creating:false,app:{ready:true,busy:false},sheetOpen:false,sheetKind:'',
   rect:()=>({x:0,y:0,width:360,height:180}),boardHeight:()=>180,
-  panels:()=>({repository:()=>({isRefreshing:()=>running})})});
+  panels:()=>({repository:()=>({isRefreshing:()=>running,binding:()=>undefined})})});
 p.initialRender();
 assert.equal(h.children.size,1);
 const childId = [...h.children.keys()][0];
@@ -130,7 +130,7 @@ console.log('PASS chat preview pin/unpin and board title update while the sheet 
 
 const tasks = renderer('PanelTaskPanel'), task = tasks.view;
 Object.assign(task,{entry:first,error:'',record:{definition:{title:'Metric',refreshMinutes:1,source:{type:'workspace-json'}},
-  runs:[{id:'same-run',startedAt:1000,status:'running'}]},panels:()=>({repository:()=>({isRefreshing:()=>running})})});
+  runs:[{id:'same-run',startedAt:1000,status:'running'}]},panels:()=>({repository:()=>({isRefreshing:()=>running,binding:()=>undefined})})});
 running=true;task.initialRender();
 const statusId=[...tasks.texts].find(([,text])=>text.startsWith('运行中'))[0];
 task.record={...task.record,runs:[{id:'same-run',startedAt:1000,finishedAt:2000,status:'complete'}]};

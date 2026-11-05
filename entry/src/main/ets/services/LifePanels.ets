@@ -22,6 +22,8 @@ import { PanelSource } from '../model/PanelSource';
 import { withWorkspaceLifecycle } from './WorkspaceRetention';
 import { PanelTaskFailure } from './PanelTaskFailure';
 import { PanelListQuery, PanelListPage, PanelSummary } from '../model/LifePanel';
+import { validatePanelViewState } from '../model/LifePanel';
+import { MiniAppStorage, MiniAppSnapshot } from '../model/MiniApp';
 interface PanelCursor { version: number; after: string; workspaceId: string; archived: boolean; }
 
 export interface PanelSourceReader { read(spec: PanelSpec, cancellation: Cancellation, id?: string, data?: Object): Promise<Object>; validate?(spec: PanelSpec, cancellation: Cancellation): Promise<void>; }
@@ -87,6 +89,17 @@ export class PanelRepository {
   constructor(files: WorkspaceFiles, key: string, reader: PanelSourceReader) { this.files = files; this.key = key; this.reader = reader; }
   isRefreshing(id: string): boolean { return refreshing.has(this.key + ':' + panelId(id)); }
   async get(id: string): Promise<PanelRecord> { return parsePanelRecord((await this.files.read(panelPath(id), new Cancellation())).content, id); }
+  binding(id: string, configRevision: number): MiniAppStorage { return new PanelStorage(this, id, configRevision); }
+  async saveViewState(id: string, configRevision: number, value: Object | null, revision: string): Promise<MiniAppSnapshot> {
+    const snapshot: MiniAppSnapshot = { value: value, revision: util.generateRandomUUID() };
+    validatePanelViewState(snapshot);
+    const record = await this.mutate(id, (record: PanelRecord) => {
+      if (record.archived || !record.definition.view || record.configRevision !== configRevision) { throw new Error('Card changed; reopen before editing'); }
+      if ((record.viewState?.revision || 'initial') !== revision) { throw new Error('Card state changed; reload before saving'); }
+      record.viewState = snapshot;
+    });
+    return record.viewState!;
+  }
   async publish(id: string, definition: PanelSpec, sourcePath: string, threadId: string, update: boolean, cancellation: Cancellation): Promise<PanelRecord> {
     parsePanelSpec(JSON.stringify(definition));
     if (definition.source?.type === 'workspace-json') {
@@ -102,7 +115,7 @@ export class PanelRepository {
       const record: PanelRecord = { version: 1, id: id, definition: definition, configRevision: (old?.configRevision || 0) + 1,
         sourcePath: sourcePath, sourceThreadId: threadId, data: definition.data, user: old?.user || {},
         createdAt: old?.createdAt || now, updatedAt: now, refreshedAt: 0, attemptedAt: 0, error: '', archived: false,
-        paused: old?.paused || false, runs: old?.runs || [] };
+        paused: old?.paused || false, runs: old?.runs || [], viewState: old?.viewState };
       validatePanelData(definition, record.data, record.user);
       await this.files.write(path, JSON.stringify(record), cancellation, { version: previous?.version || null });
       PanelChanges.emit();
@@ -249,5 +262,22 @@ export class LifePanels {
       }
     }
     return entries.sort((a: PanelEntry, b: PanelEntry) => b.panel.createdAt - a.panel.createdAt);
+  }
+}
+
+class PanelStorage implements MiniAppStorage {
+  private repository: PanelRepository;
+  private id: string;
+  private configRevision: number;
+  constructor(repository: PanelRepository, id: string, configRevision: number) {
+    this.repository = repository; this.id = id; this.configRevision = configRevision;
+  }
+  async load(): Promise<MiniAppSnapshot> {
+    const record = await this.repository.get(this.id);
+    const initial: MiniAppSnapshot = { value: null, revision: 'initial' };
+    return record.viewState || initial;
+  }
+  save(value: Object | null, revision: string): Promise<MiniAppSnapshot> {
+    return this.repository.saveViewState(this.id, this.configRevision, value, revision);
   }
 }

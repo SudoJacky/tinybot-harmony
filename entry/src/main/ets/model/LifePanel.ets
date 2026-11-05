@@ -1,4 +1,6 @@
-// Life Panel v1 is a native component protocol, independent of the Web UI wire format.
+// v1 keeps native cards; v2 uses the same sandboxed Web UI renderer as previews.
+import { WebUiSpec, parseWebUi } from './WebUi';
+import { MiniAppSnapshot } from './MiniApp';
 import { PanelSource, validatePanelSource } from './PanelSource';
 import { jsonPointer, pointerParts, PanelJavaScriptTransform } from './PanelTransform';
 export { PanelSource } from './PanelSource';
@@ -11,18 +13,24 @@ export interface PanelNode {
 }
 export interface PanelSpec {
   version: number; title: string; size: string; nodes: PanelNode[]; data: Object;
-  source?: PanelSource; refreshMinutes?: number;
+  source?: PanelSource; refreshMinutes?: number; view?: WebUiSpec;
 }
 export interface PanelRecord {
   version: number; id: string; definition: PanelSpec; configRevision: number;
   sourcePath: string; sourceThreadId: string; data: Object; user: Record<string, boolean>;
   createdAt: number; updatedAt: number; refreshedAt: number; attemptedAt: number;
   error: string; archived: boolean;
-  paused?: boolean; runs?: PanelRun[];
+  paused?: boolean; runs?: PanelRun[]; viewState?: MiniAppSnapshot;
 }
 export interface PanelRun { id: string; startedAt: number; finishedAt: number; status: string; error: string; trigger?: string; failure?: PanelFailureInfo; }
 export interface PanelFailureInfo { stage: string; code: string; message: string; tool?: string; nativeCode?: number; }
 export interface PanelEntry { workspaceId: string; panel: PanelRecord; }
+export function validatePanelViewState(snapshot: MiniAppSnapshot): void {
+  if (!snapshot || typeof snapshot.revision !== 'string' || !snapshot.revision || snapshot.value === undefined ||
+    snapshot.value !== null && typeof snapshot.value !== 'object' || JSON.stringify(snapshot).length > 256 * 1024) {
+    throw new Error('Card state must be a JSON object or null, up to 256 KiB, with a revision');
+  }
+}
 export interface PanelListQuery { workspaceId?: string; archived?: boolean; limit?: number; cursor?: string; }
 export interface PanelSummary {
   workspaceId: string; panelId: string; title: string; size: string; sourceType: string; sourceWorkspaceId?: string;
@@ -100,9 +108,13 @@ export function validatePanelData(spec: PanelSpec, data: Object, user: Record<st
 export function parsePanelSpec(content: string): PanelSpec {
   if (content.length > 384 * 1024) { throw new Error('Life Panel definition exceeds 384 KiB'); }
   const spec = JSON.parse(content) as PanelSpec;
-  fields(spec, ['version', 'title', 'size', 'nodes', 'data', 'source', 'refreshMinutes'], 'Life Panel');
-  if (spec.version !== 1 || typeof spec.title !== 'string' || !spec.title.trim() || spec.title.length > 80 ||
-    !['S', 'M', 'L'].includes(spec.size) || !Array.isArray(spec.nodes) || !spec.nodes.length || spec.nodes.length > 32) { throw new Error('Invalid Life Panel version, title, size or nodes'); }
+  fields(spec, ['version', 'title', 'size', 'nodes', 'data', 'source', 'refreshMinutes', 'view'], 'Life Panel');
+  if (![1, 2].includes(spec.version) || typeof spec.title !== 'string' || !spec.title.trim() || spec.title.length > 80 ||
+    !['S', 'M', 'L'].includes(spec.size) || !Array.isArray(spec.nodes) || spec.nodes.length > 32) { throw new Error('Invalid Life Panel version, title, size or nodes'); }
+  if (spec.version === 1 && (!spec.nodes.length || spec.view !== undefined) || spec.version === 2 && (!spec.view || spec.nodes.length)) {
+    throw new Error('Use v1 with native nodes, or v2 with view and empty nodes');
+  }
+  if (spec.view) { parseWebUi(JSON.stringify(spec.view)); }
   if (spec.source) { validatePanelSource(spec.source); }
   if (spec.refreshMinutes !== undefined && (!Number.isInteger(spec.refreshMinutes) || spec.refreshMinutes < 1 || spec.refreshMinutes > 1440 || !spec.source)) { throw new Error('Automatic refresh requires a source and an interval of 1–1440 minutes'); }
   const parents: Map<string, PanelNode> = new Map<string, PanelNode>();
@@ -142,6 +154,7 @@ export function parsePanelRecord(content: string, id: string): PanelRecord {
     !object(record.user) || Object.keys(record.user).some((key: string) => typeof record.user[key] !== 'boolean') ||
     [record.createdAt, record.updatedAt, record.refreshedAt, record.attemptedAt].some((value: number) => !Number.isFinite(value) || value < 0)) { throw new Error('Invalid Life Panel record'); }
   parsePanelSpec(JSON.stringify(record.definition)); validatePanelData(record.definition, record.data, record.user);
+  if (record.viewState !== undefined) { validatePanelViewState(record.viewState); }
   if ((record.paused !== undefined && typeof record.paused !== 'boolean') || (record.runs !== undefined && (!Array.isArray(record.runs) || record.runs.length > 10 ||
     record.runs.some((run: PanelRun) => !run || typeof run.id !== 'string' || !Number.isFinite(run.startedAt) || !Number.isFinite(run.finishedAt) ||
       !['running', 'complete', 'failed', 'cancelled', 'interrupted'].includes(run.status) || typeof run.error !== 'string')))) { throw new Error('Invalid panel task history'); }
@@ -180,14 +193,15 @@ export function panelCells(sizes: string[], columns: number): PanelCell[] {
 }
 
 interface PanelCatalog {
-  protocol: string; version: number; sizes: Record<string, string>; rules: string; components: Record<string, string>;
+  protocol: string; version: number; webCards: string; sizes: Record<string, string>; rules: string; components: Record<string, string>;
   tones: string[]; sources: string; mailSource: string; mailExample: PanelSource; transforms: string; sourceExample: PanelSource; javascriptExample: PanelJavaScriptTransform; publishing: string; example: PanelSpec;
 }
 const EXAMPLE_DATA: Record<string, PanelItem[]> = { 'tasks': [{ id: 'walk', label: 'Go for a walk', done: false }] };
 const QUERY_BODY: Record<string, string> = { 'period': 'today' };
 const CATALOG: PanelCatalog = {
-  protocol: 'tinybot.life-panel', version: 1, sizes: { 'S': '1x1', 'M': '2x1', 'L': '2x2' },
-  rules: 'Native components only. No HTML, CSS, UI scripts or secrets. Synchronous JavaScript is supported only in source.transform. Bindings are {value:literal} or {path:"/data/..."}; JSON Pointer escaping applies. Source snapshot and app-owned checklist state are separate. Parents precede children. Max 32 nodes, depth 4. Keep S very concise; overflow can be opened in detail.',
+  protocol: 'tinybot.life-panel', version: 2,
+  webCards: 'Interactive HTML: write a self-contained .html and a .panel.json {version:2,title,size:"M",nodes:[],data:{...},source?,refreshMinutes?}; publish_life_panel({path,htmlPath,...}) embeds HTML. Or supply view:{version:1,html,css,js,library:"none",height:320,autoHeight:false}. No remote resources, network, files, secrets or imports in HTML. Use responsive CSS, accessible labels and >=40px touch targets. tinybot.panel.context is {data,title,status,canRefresh,locale}; tinybot.panel.onUpdate(render) receives updates without reloading, and tinybot.panel.refresh() runs the SAME source task (Promise, handle errors). Refresh only on explicit user action, never on load/timer/onUpdate. Sources own acquisition; HTML only presents results. Store user edits separately: let s=await tinybot.storage.load(); s=await tinybot.storage.save({count:1},s.revision); handle conflicts by reloading, never silently overwrite. State survives data refresh, resize and reopening. No storage writes at initialization. Native tinybot.save is not supported on cards. Use tinybot.animate for visibility-aware animation; existing preview/small-app HTML can be reused.', sizes: { 'S': '1x1', 'M': '2x1', 'L': '2x2' },
+  rules: 'For native v1 cards: no HTML/CSS/UI scripts or secrets; use v2 for HTML cards. Synchronous JavaScript is supported only in source.transform. Bindings are {value:literal} or {path:"/data/..."}; JSON Pointer escaping applies. Source snapshot and app-owned checklist state are separate. Parents precede children. Max 32 nodes, depth 4. Keep S very concise; overflow can be opened in detail.',
   components: {
     'Row': 'Horizontal children, parent references this node ID. Host controls spacing.', 'Column': 'Vertical children.',
     'Text': 'text binding (string/number/boolean), optional tone.',
