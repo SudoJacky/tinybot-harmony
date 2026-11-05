@@ -49,7 +49,7 @@ const mocks = {
   '../services/LaunchActions': { LaunchActions: { receive: noOp, setForeground: noOp } },
   '../services/DeveloperDiagnostics': { DeveloperDiagnostics: { initialize: noOp, stop: noOp, setForeground: noOp } },
   '../services/HuaweiAccount': { huaweiAccount: { refresh: noOp } },
-  '../services/HostedPrivacy': { hostedPrivacy: { allowed: true, initialize: noOp, refresh: noOp, dispose: noOp } }
+  '../services/HostedPrivacy': { hostedPrivacy: { allowed: true, initialize: noOp, refresh: noOp, onPageHide: noOp, dispose: noOp } }
 };
 function load(file) {
   file = path.resolve(file.endsWith('.ets') ? file : file + '.ets');
