@@ -190,7 +190,7 @@ export struct LifePanelCard {
     }
   }
   build() {
-    Column({ space: 10 }) {
+    Column({ space: this.panel.definition.view ? 0 : 10 }) {
       Row({ space: 6 }) {
         if (this.editing) {
           Text('⠿').fontSize(24).fontColor($r('app.color.text_secondary')).width(40).height(44).textAlign(TextAlign.Center)
@@ -207,24 +207,27 @@ export struct LifePanelCard {
             .backgroundColor(Color.Transparent).borderRadius(8).width(36).height(40).padding(0)
             .bindMenu(this.menu()).accessibilityText(t('卡片选项'))
         }
-      }.width('100%')
+      }.width('100%').padding(this.panel.definition.view ? { left: 12, right: 12, top: 4, bottom: 4 } : 0)
       if (this.panel.error) {
         Text(panelErrorText(this.panel.error)).fontSize(12).fontColor($r('app.color.danger')).maxLines(this.detail ? 8 : 3)
           .width('100%').accessibilityText(t('刷新失败：{0}', [panelErrorText(this.panel.error)]))
+          .padding(this.panel.definition.view ? { left: 12, right: 12, bottom: 8 } : 0)
       }
       if (this.panel.definition.source && !this.panel.refreshedAt) {
         Text(t('初始数据 · 尚未从数据源更新')).fontSize(11).fontColor($r('app.color.text_secondary')).width('100%')
+          .padding(this.panel.definition.view ? { left: 12, right: 12, bottom: 8 } : 0)
       }
       if (this.panel.paused && this.panel.definition.source) {
         Text(t('自动更新已暂停')).fontSize(11).fontColor($r('app.color.text_secondary')).width('100%')
+          .padding(this.panel.definition.view ? { left: 12, right: 12, bottom: 8 } : 0)
       }
       if (this.panel.definition.view) {
         if (this.storage) {
           WebUiView({ content: JSON.stringify(this.panel.definition.view), storage: this.storage, panelContext: this.context(),
             interactive: this.interactive && !this.panel.archived && !this.editing, viewportHeight: this.viewHeight, onPanelRefresh: this.onRun })
-            .borderRadius(12).clip(true)
         } else {
           Button(t('打开交互卡片')).attributeModifier(Btn.tonal).onClick(this.onOpen)
+            .margin({ left: 12, right: 12, top: 8, bottom: 8 })
         }
       } else {
       Column({ space: 10 }) {
@@ -244,7 +247,7 @@ export struct LifePanelCard {
           Button(this.busy ? t('刷新中') : t('刷新')).type(ButtonType.Normal).fontSize(11).padding({ left: 4, right: 4 })
             .height(40).constraintSize({ minWidth: 40 }).backgroundColor(Color.Transparent).fontColor($r('app.color.text_secondary')).enabled(this.interactive && !this.busy && !this.editing).onClick(this.onRefresh)
         }
-      }.width('100%')
+      }.width('100%').padding(this.panel.definition.view ? { left: 12, right: 12, top: 4, bottom: 4 } : 0)
       if (this.editing) {
         Row() {
           Text(t('拖动调整尺寸')).fontSize(11).fontColor($r('app.color.text_secondary')).layoutWeight(1)
@@ -252,9 +255,10 @@ export struct LifePanelCard {
             .accessibilityText(t('调整卡片尺寸')).gesture(PanGesture()
               .onActionUpdate((event: GestureEvent) => this.onResize(event, false))
               .onActionEnd((event: GestureEvent) => this.onResize(event, true)).onActionCancel(this.onMoveCancel))
-        }.width('100%')
+        }.width('100%').padding(this.panel.definition.view ? { left: 12, right: 12 } : 0)
       }
-    }.width('100%').padding(14).backgroundColor($r('app.color.surface'))
+    }.width('100%').padding(this.panel.definition.view ? 0 : 14).backgroundColor($r('app.color.surface'))
       .borderRadius(Radius.lg).border({ width: 1, color: $r('app.color.divider') })
+      .clip(!!this.panel.definition.view)
   }
 }
