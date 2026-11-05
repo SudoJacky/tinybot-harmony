@@ -66,7 +66,7 @@ const uiGlobals = { t: value => value, ViewPU: { create() {} }, ViewStackProcess
   Button: new Proxy({}, {get: (_, key) => key === 'id' ? id => {buttonId = id;} :
     key === 'onClick' ? callback => {tallButtons.set(buttonId, callback);} : () => {}}) };
 for (const name of ['If','Row','Blank','Image','Text','SymbolGlyph','Search','Divider']) uiGlobals[name] = noop;
-for (const name of ['Space','Font','FontWeight','TextAlign','Color','ButtonType','Visibility','FlexAlign',
+for (const name of ['Btn','Space','Font','FontWeight','TextAlign','Color','ButtonType','Visibility','FlexAlign',
   'Radius','SheetSize','SheetKeyboardAvoidMode']) uiGlobals[name] = {};
 const CompactList = probe('views/ThreadList', 'ThreadList',
   ['initialRender','listContent','workbenchNavigation','compactNavigation'], uiGlobals);
