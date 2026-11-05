@@ -7,6 +7,7 @@ import { LifePanels } from './LifePanels';
 import { Cancellation } from './Cancellation';
 import { withFileMutation } from './FileMutationQueue';
 import { PanelChanges } from './PanelChanges';
+import { withWorkspaceLifecycle } from './WorkspaceRetention';
 export class LifeBoards {
   private workspaces: WorkspaceStore;
   private panels: LifePanels;
@@ -21,16 +22,16 @@ export class LifeBoards {
       archived: archive === undefined ? before?.archived || false : archive, createdAt: before?.createdAt || Date.now(), updatedAt: Date.now() }));
   }
   private async change(workspaceId: string, id: string, create: boolean, operation: (board?: LifeBoard) => Promise<LifeBoard>): Promise<LifeBoard> {
-    await this.workspaces.requireWorkspace(workspaceId);
     const root = this.workspaces.pathFor(workspaceId), files = new NativeWorkspaceFiles(root);
-    return withFileMutation(root + ':board:' + id, async (): Promise<LifeBoard> => {
+    return withWorkspaceLifecycle(root, () => withFileMutation(root + ':board:' + id, async (): Promise<LifeBoard> => {
+      await this.workspaces.requireWorkspace(workspaceId);
       const path = boardPath(id), cancellation = new Cancellation();
       const old = create ? undefined : await files.read(path, cancellation), before = old ? parseLifeBoard(old.content, id) : undefined;
       const board = await operation(before); board.updatedAt = Date.now();
       parseLifeBoard(JSON.stringify(board), id);
       for (const item of board.items) { await this.panels.repository(item.workspaceId).get(item.panelId); }
       await files.writeLifeBoard(path, JSON.stringify(board), cancellation, { version: old?.version || null }); PanelChanges.emit(); return board;
-    });
+    }));
   }
   async pin(workspaceId: string, id: string, reference: PanelReference, present: boolean): Promise<LifeBoard> {
     validateReference(reference);

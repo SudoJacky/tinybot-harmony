@@ -3,6 +3,8 @@ import { FileDiff } from './FileDiff';
 
 export function toolTitle(name: string): string {
   const titles: Record<string, string> = {
+    'list_mail_accounts': t('查看邮箱连接'), 'search_mail': t('查询邮件'), 'read_mail': t('读取邮件'),
+    'get_life_panel': t('查看卡片详情'),
     'get_life_panel_catalog': t('查看卡片组件规范'), 'list_life_panels': t('查看 Life Panel'), 'publish_life_panel': t('保存卡片'),
     'list_life_boards': t('查看看板'), 'manage_life_board': t('管理看板'), 'manage_life_panel_task': t('管理卡片任务'),
     'list_mini_apps': t('查看小程序'), 'publish_mini_app': t('保存小程序'),
@@ -27,6 +29,7 @@ export function toolTitle(name: string): string {
 
 export function toolGroupTitle(id: string): string {
   const titles: Record<string, string> = {
+    'mail': t('邮件读取'),
     'workspace-read': t('文件读取与检索'), 'workspace-write': t('文件编辑'), 'context-read': t('附件与历史结果'),
     'web': t('网页读取与搜索'), 'browser': t('浏览器'), 'calculation': t('代码计算'), 'orchestration': t('工具编排'),
     'interaction': t('用户交互与计划'), 'delivery': t('预览与交付'), 'skill-read': t('Skills 读取'),

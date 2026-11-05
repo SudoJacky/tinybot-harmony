@@ -38,6 +38,7 @@ const fileIo = {
   }
 };
 const kits = {
+  '@kit.NetworkKit': { socket: {} },
   '@kit.AssetStoreKit': { asset: {} },
   '@kit.CoreFileKit': { fileIo }, '@kit.ImageKit': { image: {} }, '@kit.ArkGraphics2D': { drawing: {} },
   '@kit.ArkTS': { util: {
@@ -393,6 +394,7 @@ async function lifePanelTest() {
   }
   assert.deepEqual(cells.map(c=>[c.columns,c.rows]),[[1,1],[2,2],[2,1],[1,1]]);
   await scoped.write('today.panel.json',JSON.stringify(spec),signal);
+  await scoped.write('data.json',JSON.stringify(spec.data),signal);
   const tools=new LifePanelTools(panels,'panel-chat','deleted-thread',scoped);
   assert.equal((await invoke(tools,'get_life_panel_catalog',{})).version,1);
   const receipt=await invoke(tools,'publish_life_panel',{path:'today.panel.json'}), id=receipt.panelId;
@@ -435,6 +437,20 @@ async function lifePanelTest() {
   const httpSpec={...spec,source:{type:'json-url',url:'https://example.com/data',pointer:'/payload'}};
   assert.deepEqual(plain(await new NativePanelSourceReader(scoped).read(httpSpec,signal)),spec.data);
   panelResponse='<html>Sign in</html>';await assert.rejects(new NativePanelSourceReader(scoped).read(httpSpec,signal));
+  // Mail snapshots use the same production reader, transforms, persistence and failure history.
+  // Protocol and secure-account behavior are covered separately by test-mail.cjs.
+  const {MailService}=load('services/MailService'), originalQuery=MailService.prototype.query;
+  let mailFailure=false;
+  MailService.prototype.query=async function(query,cancellation){cancellation.check();assert.equal(query.accountId,'mail-connection');if(mailFailure)throw Error('Mailbox access is disabled in Settings');return {unread:4,messages:[{id:'42:9',subject:'Delivery'}]};};
+  try {
+    const mailSpec={version:1,title:'Mail',size:'S',refreshMinutes:5,source:{type:'mail',mail:{accountId:'mail-connection',folder:'INBOX',limit:5},
+      transform:{op:'object',fields:{count:{path:'/response/unread'}}}},data:{count:0},nodes:[{id:'count',kind:'Metric',value:{path:'/data/count'}}]};
+    await repo.publish('mail-card',mailSpec,'mail.panel.json','deleted-chat',false,signal);
+    const fresh=await repo.refresh('mail-card',signal);assert.equal(fresh.data.count,4);assert.equal(fresh.runs[0].status,'complete');
+    mailFailure=true;await assert.rejects(repo.refresh('mail-card',signal),/disabled/);
+    const retained=await repo.get('mail-card');assert.equal(retained.data.count,4);assert.equal(retained.refreshedAt,fresh.refreshedAt);assert.equal(retained.runs[0].status,'failed');
+    await repo.archive('mail-card',true);
+  } finally {MailService.prototype.query=originalQuery;}
   // No chat remains. Backup must retain panel-only workspaces and app-owned user edits.
   const context={filesDir:dir,cacheDir:dir+'/cache',getApplicationContext(){return this;}};
   fs.mkdirSync(disk(context.cacheDir));const {createBackupFile,readBackupFile}=load('services/Backup');
@@ -442,7 +458,8 @@ async function lifePanelTest() {
   const restoreDir='/sandbox/panels-restored';fs.mkdirSync(disk(restoreDir));
   const target={filesDir:restoreDir,cacheDir:restoreDir,getApplicationContext(){return this;}};
   await readBackupFile(target,backup,emptyData());
-  const restored=new LifePanels(restoreDir);assert.equal((await restored.list()).length,1);
+  const restored=new LifePanels(restoreDir);assert.equal((await restored.list()).length,2);
+  assert.equal((await restored.repository('panel-chat').get('mail-card')).definition.source.mail.accountId,'mail-connection');
   assert.deepEqual(plain(await restored.repository('panel-chat').get(id)),plain(await repo.get(id)));
   await restored.repository('panel-chat').toggle(id,(await repo.get(id)).configRevision,'tasks','walk',true);
   await readBackupFile(target,backup,emptyData());assert.equal((await restored.repository('panel-chat').get(id)).user['tasks:walk'],true);
@@ -623,7 +640,7 @@ async function lifeBoardsTest() {
   await invoke(tools,'manage_life_panel_task',{workspaceId:'owner',panelId:'agent',action:'refresh'});assert.equal((await repo.get('agent')).data.count,2,'Manual refresh still works while paused');
   await invoke(tools,'manage_life_panel_task',{workspaceId:'owner',panelId:'agent',action:'resume'});
   slow=true;const running=repo.refresh('agent',signal);while(!release)await new Promise(r=>setTimeout(r,0));
-  await repo.pause('agent',true);release();await assert.rejects(running);assert.equal((await repo.get('agent')).runs[0].status,'cancelled');
+  await repo.pause('agent',true);release();await running;assert.equal((await repo.get('agent')).runs[0].status,'complete','Pause only stops automatic work; an explicit manual refresh completes');
   slow=false;await repo.pause('agent',false);for(let i=0;i<11;i++)await repo.refresh('agent',signal);
   assert.equal((await repo.get('agent')).runs.length,10);
   const context={filesDir:dir,cacheDir:dir+'/cache',getApplicationContext(){return this;}};fs.mkdirSync(disk(context.cacheDir));
@@ -644,4 +661,58 @@ async function lifeBoardsTest() {
   assert.equal((await new LifePanels(projectDir).repository(migrated.items[0].workspaceId).get('shared')).user['tasks:one'],true);
   console.log('PASS multi-board references, per-board layout, concurrent pins, cross-chat editing, chat receipts, task pause/history/Agent runner and orphan board backup');
 }
-main().then(lifePanelTest).then(lifePanelApiTest).then(lifePanelScriptTest).then(lifeBoardsTest).catch(error=>{console.error(error);process.exitCode=1;});
+async function lifePanelRecoveryTest() {
+  const {LifePanels,PanelRepository}=load('services/LifePanels'),{LifePanelTools}=load('services/LifePanelTools');
+  const dir='/sandbox/panel-recovery',ws=new WorkspaceStore(dir),panels=new LifePanels(dir);fs.mkdirSync(disk(dir),{recursive:true});
+  for(const id of ['owner','editor'])await ws.ensureThread(id);
+  const ownerFiles=new NativeWorkspaceFiles(ws.pathFor('owner')),editorFiles=new NativeWorkspaceFiles(ws.pathFor('editor'));
+  const spec={version:1,title:'Local count',size:'S',source:{type:'workspace-json',path:'data.json'},refreshMinutes:1,data:{count:1},nodes:[{id:'count',kind:'Metric',value:{path:'/data/count'}}]};
+  await ownerFiles.write('data.json','{"count":1}',signal);await editorFiles.write('data.json','{"count":99}',signal);
+  const repo=panels.repository('owner');await repo.publish('counter',spec,'count.panel.json','owner',false,signal);
+  const tools=new LifePanelTools(panels,'editor','editor',editorFiles);
+  await editorFiles.write('new.panel.json',JSON.stringify({...spec,data:{count:99}}),signal);
+  await assert.rejects(invoke(tools,'publish_life_panel',{path:'new.panel.json',panelId:'counter',workspaceId:'owner'}),/source.*workspaceId|source workspace/i,
+    'Cross-chat publication must reject ambiguous local source paths before changing the card');
+  assert.equal((await repo.get('counter')).data.count,1);
+  await editorFiles.write('new.panel.json',JSON.stringify({...spec,source:{...spec.source,workspaceId:'editor'},data:{count:99}}),signal);
+  await invoke(tools,'publish_life_panel',{path:'new.panel.json',panelId:'counter',workspaceId:'owner'});
+  assert.equal((await repo.refresh('counter',signal)).data.count,99,'Refresh uses the explicitly bound source workspace');
+  let reads=0;const testRepo=new PanelRepository(repo.files,ws.pathFor('owner'),{read:async()=>{reads++;return {count:7};}});
+  await testRepo.publish('queued',spec,'queued.panel.json','owner',false,signal);await testRepo.pause('queued',true);
+  await testRepo.refresh('queued',signal,'automatic');assert.equal(reads,0,'A paused queued automatic refresh is skipped without running the source');
+  assert.equal((await testRepo.get('queued')).runs.length,0,'A skipped task does not create a failed run');
+  await testRepo.refresh('queued',signal);assert.equal(reads,1,'Manual refresh remains available while automatic work is paused');
+  await testRepo.pause('queued',false);await testRepo.refresh('queued',signal,'automatic');assert.equal(reads,1,'A just-refreshed card is no longer due even if the scheduler snapshot was stale');
+  let release;const blocked=new PanelRepository(repo.files,ws.pathFor('owner'),{read:async()=>await new Promise(resolve=>release=resolve)});
+  await blocked.publish('automatic',spec,'auto.panel.json','owner',false,signal);
+  const automatic=blocked.refresh('automatic',signal,'automatic'),cancelled=assert.rejects(automatic);
+  while(!release)await new Promise(resolve=>setTimeout(resolve,0));await blocked.pause('automatic',true);release({count:8});await cancelled;
+  const stopped=await blocked.get('automatic');assert.equal(stopped.data.count,1);assert.equal(stopped.runs[0].status,'cancelled');assert.equal(stopped.runs[0].trigger,'automatic');
+  const summary=await invoke(tools,'list_life_panels',{limit:1});assert.equal(summary.items.length,1);assert.ok(summary.nextCursor);
+  assert.ok(!('definition' in summary.items[0]));assert.ok(!('data' in summary.items[0]));
+  const detail=await invoke(tools,'get_life_panel',{workspaceId:'owner',panelId:'counter'});assert.equal(detail.panel.data.count,99);
+  const pageTwo=await invoke(tools,'list_life_panels',{limit:1,cursor:summary.nextCursor});assert.equal(pageTwo.items.length,1);assert.notEqual(pageTwo.items[0].panelId,summary.items[0].panelId);
+  await assert.rejects(invoke(tools,'list_life_panels',{archived:true,cursor:summary.nextCursor}),/Cursor/);
+  const {WorkspaceRetention}=load('services/WorkspaceRetention'),ownership=await WorkspaceRetention.inventory(ws.rootDir);
+  assert.ok(WorkspaceRetention.retained(emptyData(),ownership).has('editor'),'A card keeps its external local source workspace alive');
+  const context={filesDir:dir,cacheDir:dir+'/cache',getApplicationContext(){return this;}};fs.mkdirSync(disk(context.cacheDir));
+  const {createBackupFile,readBackupFile}=load('services/Backup'),backup=await createBackupFile(context,emptyData());
+  const dest='/sandbox/panel-recovery-restored';fs.mkdirSync(disk(dest));const target={filesDir:dest,cacheDir:dest,getApplicationContext(){return this;}};
+  await readBackupFile(target,backup,emptyData());assert.equal((await new LifePanels(dest).repository('owner').refresh('counter',signal)).data.count,99,'Backup restores bound source files without either source chat');
+  const projectData=emptyData();projectData.projects=[{id:'source-project',workspaceId:'editor',name:'Source project',instructions:'',createdAt:1,updatedAt:1}];
+  const projectBackup=await createBackupFile(context,projectData),projectDir='/sandbox/panel-recovery-project';fs.mkdirSync(disk(projectDir));
+  const projectTarget={filesDir:projectDir,cacheDir:projectDir,getApplicationContext(){return this;}};
+  const restored=await readBackupFile(projectTarget,projectBackup,emptyData()),restoredRepo=new LifePanels(projectDir).repository('owner');
+  assert.equal((await restoredRepo.get('counter')).definition.source.workspaceId,restored.projects[0].workspaceId);
+  assert.equal((await restoredRepo.refresh('counter',signal)).data.count,99,'Explicit sources follow project workspace remapping');
+  const saved=await repo.get('counter');
+  for(let i=0;i<51;i++) {
+    const id='arch-'+String(i).padStart(2,'0'),folder=disk(ws.pathFor('owner')+'/life-panels/'+id);fs.mkdirSync(folder,{recursive:true});
+    fs.writeFileSync(path.join(folder,'panel.json'),JSON.stringify({...saved,id,archived:true}));
+  }
+  const emptyPage=await panels.page({limit:1});assert.equal(emptyPage.items.length,0);assert.ok(emptyPage.nextCursor,'Bounded scans can return an empty page with a continuation cursor');
+  const continued=await panels.page({limit:1,cursor:emptyPage.nextCursor});assert.equal(continued.items.length,1);
+  console.log('PASS explicit cross-chat sources, fresh automatic admission, manual refresh while paused, and summary/detail tools');
+}
+const run=process.argv.includes('--lifecycle')?lifePanelRecoveryTest():main().then(lifePanelTest).then(lifePanelApiTest).then(lifePanelScriptTest).then(lifeBoardsTest).then(lifePanelRecoveryTest);
+Promise.resolve(run).catch(error=>{console.error(error);process.exitCode=1;});

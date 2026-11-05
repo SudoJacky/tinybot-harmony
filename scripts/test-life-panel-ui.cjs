@@ -72,7 +72,8 @@ async function main() {
     require:id=>id.includes('LifePanel')?model:id.includes('Cancellation')?signal:id.includes('PanelChanges')?{PanelChanges}:{Diagnostics:{log:(...args)=>logs.push(args)}},
     setTimeout:(fn,ms)=>{timers.set(++timerId,{fn,ms});return timerId;},clearTimeout:id=>timers.delete(id)});
   let fetched=0, globalSignal, finish;
-  const global=new PanelExpiryUpdates({list:async()=>[entry('global')],repository:()=>({refresh:async(id,cancel)=>{
+  const global=new PanelExpiryUpdates({list:async()=>[entry('global')],repository:()=>({refresh:async(id,cancel,trigger)=>{
+    assert.equal(trigger,'automatic','Scheduler requests authoritative automatic admission rather than an unrestricted manual refresh');
     fetched++;globalSignal=cancel;await new Promise(r=>finish=r);cancel.check();
   }})});
   global.setActive(true);await turn();assert.equal(fetched,1,'App foreground updates cards without opening the collection');
@@ -100,6 +101,27 @@ async function main() {
   await connection.run('login');assert.equal(connection.connected,true);assert.equal(completed,2);
   connection.secret='unfinished';connection.aboutToDisappear();assert.equal(connection.secret,'');assert.equal(connection.cancellation.cancelled,true);
   console.log('PASS emitted API connection editor: explicit key save, secret clearing, OAuth dispatch, status, disconnect and dismissal cancellation');
+  const mailTree=emitted('views/MailSettingsPanel'),mailClass=mailTree.statements.find(n=>ts.isClassDeclaration(n)&&n.name.text==='MailSettingsPanel');
+  const mailMethods=mailClass.members.filter(n=>ts.isMethodDeclaration(n)&&['edit','save','reload','report','remove','activityChanged','aboutToDisappear'].includes(n.name.getText(mailTree)))
+    .map(n=>n.getText(mailTree)).join('\n');
+  let savedMail,mailChecks=0,mailDeletes=0,mailMode='success',mailSignal;
+  const {MailEditor}=compile('export class MailEditor {'+mailMethods+'}',{...signal,t:(text,values=[])=>text.replace(/\{(\d+)\}/g,(_,i)=>String(values[i])),
+    util:{generateRandomUUID:()=> 'new-mail'},Diagnostics:{log:(...args)=>logs.push(args)},
+    MailService:class {async query(query,cancel){mailChecks++;mailSignal=cancel;assert.equal(query.accountId,'new-mail');if(mailMode==='error')throw Error('IMAP login rejected');
+      if(mailMode==='wait')return new Promise((resolve,reject)=>cancel.onCancel(()=>reject(Error('cancelled'))));return {total:9,unread:3};}}});
+  const mailEditor=new MailEditor();Object.assign(mailEditor,{mounted:true,foreground:true,busy:false,error:'',notice:'',editing:false,secret:'',accounts:[],cancellation:new signal.Cancellation(),
+    store:{save:async(account,secret)=>{savedMail={account,secret};},list:async()=>savedMail?[savedMail.account]:[],remove:async()=>mailDeletes++}});
+  mailEditor.edit();assert.equal(mailEditor.accessEnabled,false);assert.equal(mailEditor.allowBody,false,'Mailbox/body access requires explicit opt-in');
+  Object.assign(mailEditor,{name:'Work',host:'IMAP.EXAMPLE.COM',username:'user@example.com',secret:'device-only-mail-code',accessEnabled:true});
+  await mailEditor.save(true);assert.equal(savedMail.account.host,'imap.example.com');assert.equal(savedMail.secret,'device-only-mail-code');assert.equal(mailChecks,1);
+  assert.equal(mailEditor.secret,'');assert.ok(mailEditor.notice.includes('9'));assert.equal(mailEditor.accountId,'new-mail');
+  mailMode='error';await mailEditor.save(true);assert.equal(mailEditor.error,'IMAP login rejected');assert.equal(mailEditor.busy,false,'Failed connection check leaves the editor usable');
+  mailMode='wait';const mailPending=mailEditor.save(true);await turn();assert.ok(mailSignal);
+  mailEditor.foreground=false;mailEditor.activityChanged();await mailPending;assert.equal(mailSignal.cancelled,true);assert.equal(mailEditor.error,'','Background cancellation is not reported as a connection failure');
+  const checksBefore=mailChecks;await mailEditor.save(true);assert.equal(mailChecks,checksBefore,'Hidden mailbox editor cannot start a check');
+  mailEditor.foreground=true;await mailEditor.remove();assert.equal(mailDeletes,1);assert.equal(mailEditor.editing,false);
+  mailEditor.secret='unfinished-mail-code';mailEditor.aboutToDisappear();assert.equal(mailEditor.secret,'');assert.equal(mailEditor.mounted,false);
+  console.log('PASS emitted mailbox editor: explicit access, secure save, connection check, visible failure, background cancellation, removal and secret clearing');
   const arranged=view();arranged.entries=[entry('a'),entry('b')];
   arranged.boards=[{workspaceId:'owner',board:{id:'board',items:[{workspaceId:'chat',panelId:'b',size:'L'},{workspaceId:'chat',panelId:'a',size:'S'}]}}];
   arranged.boardSelection='owner/board';assert.equal(arranged.visible()[0].panel.id,'b');assert.equal(arranged.sizeOnBoard(arranged.visible()[0]),'L');

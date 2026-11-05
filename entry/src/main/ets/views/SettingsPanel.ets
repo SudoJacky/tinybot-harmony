@@ -34,6 +34,7 @@ export struct SettingsPanel {
   onStorage: () => void = () => {};
   onModels: () => void = () => {};
   onSearch: () => void = () => {};
+  onMail: () => void = () => {};
   onLaboratory: () => void = () => {};
   onBackup: () => void = () => {};
   onAppearance: () => void = () => {};
@@ -217,6 +218,8 @@ export struct SettingsPanel {
             RowDivider()
             NavRow({ title: t('搜索服务'), icon: $r('sys.symbol.magnifyingglass'), subtitle: searchSettingsSummary(this.app.productivity.options?.search), compId: 'open-search-settings',
               disabled: !this.canEdit(), onTap: this.onSearch })
+            RowDivider()
+            NavRow({ title: t('邮箱连接'), icon: $r('sys.symbol.doc_text'), subtitle: t('只读访问邮件，为助手和卡片提供数据'), compId: 'open-mail-settings', onTap: this.onMail })
             RowDivider()
             SwitchRow({ title: t('应用内浏览器'), icon: $r('sys.symbol.link'), compId: 'browser-enabled', isOn: this.browser.policy === 'enabled',
               subtitle: this.browser.policy === 'unset' ? t('尚未设置，首次使用时询问。') : this.browser.policy === 'disabled' ? t('已关闭，助手不会再次请求启用。') : t('允许助手操作网页；你可以随时接管。'),

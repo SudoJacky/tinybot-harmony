@@ -27,8 +27,8 @@ function load(file) {
 const files = new Map(), dirs = new Set(['/', '/app', '/files', '/cache']);
 const now = Date.now();
 let failPath = '', failUnlink = '', failMetric = '';
-function put(file, size, ageMs = 0) {
-  files.set(file, { size, modifiedAt: now - ageMs });
+function put(file, size, ageMs = 0, content) {
+  files.set(file, { size, modifiedAt: now - ageMs, content });
   const parts = file.split('/');
   for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join('/') || '/');
 }
@@ -66,7 +66,7 @@ const fake = {
     return [...files.keys(), ...dirs].filter(item => item !== p && item.startsWith(prefix) &&
       !item.substring(prefix.length).includes('/')).map(item => item.substring(prefix.length));
   },
-  readText: async p => JSON.stringify({ threads: [{ id: 'thread-1', file: 'thread-1.json' }] }),
+  readText: async p => files.get(p)?.content || JSON.stringify({ threads: [{ id: 'thread-1', file: 'thread-1.json' }] }),
   unlink: async p => {
     if (failUnlink && p === failUnlink) throw Object.assign(new Error('EACCES PRIVATE_PATH ' + p), { code: 13900013 });
     if (!files.delete(p)) throw new Error('ENOENT ' + p);
@@ -141,8 +141,8 @@ const data = {
   failPath = '/app/workspace/kept/.tinybot-review';
   const protectedScan = await StorageUsage.scan(context, data);
   assert.equal(protectedScan.incomplete, true);
-  assert.equal(protectedScan.orphanWorkspaces, 1, 'only the folder without baselines remains cleanable');
-  assert.equal(protectedScan.safeBytes, 750, 'an unreadable review folder keeps its workspace out of cleanup');
+  assert.equal(protectedScan.orphanWorkspaces, 0, 'an incomplete ownership inventory cannot authorize deleting unknown dependencies');
+  assert.equal(protectedScan.safeBytes, 550, 'ownership failure leaves workspace data protected while ordinary cache cleanup remains available');
   failPath = '';
   assert.equal(diagnosticLogs.findLast(data => data.event === 'scan_failed').fields.errorCode, 13900013);
   failMetric = 'free'; await StorageUsage.scan(context, data); failMetric = '';
@@ -222,5 +222,17 @@ const data = {
   assert.ok(appEntries.entries.filter(item => item.path.includes('/deleted-chat/')).every(item => !item.removable));
   await StorageUsage.cleanSafe(context, data);
   assert.ok(files.has('/app/workspace/deleted-chat/mini-apps/ledger/data.json'));
+  put('/app/workspace/panel-owner/life-panels/kept/panel.json',120,0,JSON.stringify({definition:{source:{type:'workspace-json',workspaceId:'source-owner',path:'data.json'}}}));
+  put('/app/workspace/source-owner/data.json',30);
+  put('/app/workspace/board-owner/life-boards/empty/board.json',80);
+  const persistentScan=await StorageUsage.scan(context,data);
+  assert.equal(persistentScan.orphanWorkspaces,0,'Persistent cards and empty boards retain their workspaces after chat deletion');
+  const persistentEntries=await StorageUsage.entries(context,data,'workspace');
+  assert.ok(persistentEntries.entries.filter(item=>/\/(panel-owner|board-owner)\//.test(item.path)).every(item=>!item.removable));
+  // A stale scan result must not authorize deletion after a card has been published.
+  const stale={path:'/app/workspace/panel-owner',label:'stale',detail:'',bytes:120,category:'workspace',removable:true,directory:true};
+  const protectedRemoval=await StorageUsage.remove(context,[stale],data);
+  assert.equal(protectedRemoval.removed,0);assert.ok(files.has('/app/workspace/panel-owner/life-panels/kept/panel.json'));
+  await StorageUsage.cleanSafe(context,data);assert.ok(files.has('/app/workspace/board-owner/life-boards/empty/board.json'));
   console.log('PASS storage dual roots, mini-app retention, baseline-safe cleanup, partial deletion and read-error reporting');
 })().catch(error => { console.error(error); process.exitCode = 1; });

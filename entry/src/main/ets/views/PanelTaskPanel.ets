@@ -41,7 +41,7 @@ export struct PanelTaskPanel {
       Column({ space: 14 }) {
         Text(this.record?.definition.title || this.entry.panel.definition.title).fontSize(20).fontWeight(FontWeight.Medium)
         if (this.record) {
-          Text(this.record.definition.source?.type === 'agent' ? t('Agent 内容更新') : t('API / 文件数据刷新')).fontSize(14)
+          Text(this.record.definition.source?.type === 'agent' ? t('Agent 内容更新') : this.record.definition.source?.type === 'mail' ? t('邮箱数据刷新') : t('API / 文件数据刷新')).fontSize(14)
           Text(this.record.definition.refreshMinutes ? t('应用前台每 {0} 分钟更新', [this.record.definition.refreshMinutes!]) : t('仅手动刷新')).fontSize(12)
           if (this.record.definition.source?.prompt) { Text(this.record.definition.source.prompt).fontSize(13) }
           Row({ space: 12 }) {
@@ -54,6 +54,7 @@ export struct PanelTaskPanel {
               Text(this.status(run) + ' · ' + new Date(run.startedAt).toLocaleString()).fontSize(13)
               if (run.finishedAt) { Text(t('耗时 {0} 秒', [Math.round((run.finishedAt - run.startedAt) / 1000)])).fontSize(12) }
               if (run.error) { Text(run.error).fontSize(12).fontColor($r('app.color.danger')) }
+              if (run.failure) { Text(run.failure.stage + ' · ' + run.failure.code).fontSize(12).fontColor($r('app.color.text_secondary')) }
             }.width('100%').alignItems(HorizontalAlign.Start).padding(10).backgroundColor($r('app.color.surface_variant')).borderRadius(10)
           }, (run: PanelRun) => run.id)
         }

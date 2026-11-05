@@ -33,7 +33,7 @@ export class PanelExpiryUpdates {
       for (const entry of entries) {
         cancellation.check();
         if (!panelDue(entry.panel, Date.now())) { continue; }
-        try { await this.panels.repository(entry.workspaceId).refresh(entry.panel.id, cancellation); }
+        try { await this.panels.repository(entry.workspaceId).refresh(entry.panel.id, cancellation, 'automatic'); }
         catch (error) {
           if (cancellation.cancelled) { throw error as Error; }
           if (error instanceof RunCancelledError) { continue; }

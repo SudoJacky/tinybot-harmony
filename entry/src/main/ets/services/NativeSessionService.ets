@@ -6,6 +6,7 @@ import { MiniApps } from './MiniApps';
 import { LifePanels } from './LifePanels';
 import { LifeBoards } from './LifeBoards';
 import { LifePanelTools } from './LifePanelTools';
+import { MailTools } from './MailTools';
 import { installNativePanelAgent } from './NativePanelAgent';
 import { MiniAppTools } from './MiniAppTools';
 import { PreviewCapture } from './PreviewCapture';
@@ -122,6 +123,7 @@ export class NativeSessionResources implements SessionResources {
       new SkillTools(extensions.skills, selected, live ? () => live.skills() : undefined), new InteractionTools(this.approval)];
     groups.push(new CodeExecutionTools(new NativeCodeExecutor()));
     groups.push(new LifePanelTools(this.lifePanels, workspaceId || id, id, files, this.lifeBoards));
+    groups.push(new MailTools());
     groups.push(new MiniAppTools(this.miniApps, workspaceId || id, id, files,
       (page, storage, cancellation) => WebUiPreflight.validateMiniApp(page, storage, cancellation), productivity?.options?.miniAppsEnabled === true));
     groups.push(new PresentTools((path: string) => files.checkedPath(path)));

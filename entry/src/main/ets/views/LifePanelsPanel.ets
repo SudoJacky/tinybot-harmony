@@ -177,7 +177,7 @@ export struct LifePanelsPanel {
       entry.panel.definition.source ? t('等待首次刷新') : t('本地数据');
   }
   @Builder private card(entry: PanelEntry, detail: boolean = false) {
-    LifePanelCard({ panel: entry.panel, cardSize: this.sizeOnBoard(entry), onBoard: !!this.currentBoard(), busy: this.pending.includes(this.entryKey(entry)), detail: detail, timestamp: this.timestamp(entry),
+    LifePanelCard({ panel: entry.panel, cardSize: this.sizeOnBoard(entry), onBoard: !!this.currentBoard(), busy: this.pending.includes(this.entryKey(entry)) || entry.panel.runs?.[0]?.status === 'running' && this.panels().repository(entry.workspaceId).isRefreshing(entry.panel.id), detail: detail, timestamp: this.timestamp(entry),
       onOpen: () => { this.selected = this.entryKey(entry); }, onRefresh: () => { this.refresh(entry); },
       onToggle: (node: string, item: string, done: boolean) => { this.change(entry, 'toggle', node, item, done); },
       onSize: (size: string) => { this.change(entry, size); }, onArchive: () => { this.change(entry, 'archive'); },

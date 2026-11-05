@@ -35,7 +35,7 @@ const fileIo = {
   open: async (p, flags) => {
     if(p.startsWith('file://') && flags & 2 && !fs.existsSync(nativePath(p)))throw Object.assign(Error('URI provider cannot create a missing file'),{code:13900002});
     const mode = flags & 32 ? fs.constants.O_RDWR | (flags & 2 ? fs.constants.O_CREAT : 0) : flags & 4 ? 'w' : 'r';
-    const h = await fs.promises.open(nativePath(p), mode);
+    const h = await fs.promises.open(nativePath(p), mode).catch(error=>{if(error.code==='ENOENT')error.code=13900002;throw error;});
     handles.set(h.fd, h); handlePaths.set(h.fd, nativePath(p)); if(flags & 36)writableHandles.add(h.fd); return { fd: h.fd };
   },
   read: async (fd, bytes) => (await handles.get(fd).read(new Uint8Array(bytes))).bytesRead,
@@ -1187,17 +1187,25 @@ async function test(name, run) {
         requests++;const names=request.tools.map(tool=>tool.function.name);
         for(const forbidden of ['write_file','edit_file','browser_open','mcp_call','request_user_input','publish_life_panel'])assert.ok(!names.includes(forbidden),forbidden);
         assert.ok(names.includes('read_file'));assert.ok(request.messages.some(m=>m.content.includes('Read count.json')));
+        for(const mail of ['list_mail_accounts','search_mail','read_mail'])assert.ok(names.includes(mail),'Independent panel Agent can use enabled read-only mailbox connections');
         if(mode==='cancel')return new Promise((resolve,reject)=>{entered=true;cancellation.onCancel(()=>reject(Error('cancelled')));});
-        if(mode==='bad')return {content:'Unable to obtain a value',toolCalls:[]};
-        if(!request.messages.some(message=>message.role==='tool'))return {content:'',toolCalls:[{id:'read-count',type:'function',function:{name:'read_file',arguments:'{"path":"count.json"}'}}]};
+        if(mode==='bad')return {content:'Unable to obtain a value PRIVATE_MODEL_TEXT',toolCalls:[]};
+        if(mode==='error')return {content:'{"status":"error","code":"AUTH_REQUIRED"}',toolCalls:[]};
+        if(mode==='invalid-data')return {content:'{"status":"success","data":{"count":"bad"}}',toolCalls:[]};
+        if(!request.messages.some(message=>message.role==='tool'))return {content:'',toolCalls:[{id:'read-count',type:'function',function:{name:'read_file',arguments:JSON.stringify({path:mode==='missing'?'missing.json':'count.json'})}}]};
+        if(mode==='missing')return {content:'{"status":"error","code":"NOT_FOUND"}',toolCalls:[]};
         assert.ok(request.messages.some(message=>message.role==='tool'&&message.content.includes('7')));
-        onText('{"count":7}');return {content:'{"count":7}',toolCalls:[]};
+        onText('{"status":"success","data":{"count":7}}');return {content:'{"status":"success","data":{"count":7}}',toolCalls:[]};
       }});
     installNativePanelAgent(root,registry,new CredentialStore(),()=>settings);
     const panels=new LifePanels(root),repo=panels.repository('owner'),spec={version:1,title:'Count',size:'S',source:{type:'agent',prompt:'Read count.json and return its current count'},refreshMinutes:15,data:{count:0},nodes:[{id:'count',kind:'Metric',value:{path:'/data/count'}}]};
     await repo.publish('summary',spec,'summary.panel.json','deleted-chat',false,new Cancellation());
     let record=await repo.refresh('summary',new Cancellation());assert.equal(record.data.count,7);assert.equal(requests,2);assert.equal(record.runs[0].status,'complete');
     mode='bad';await assert.rejects(repo.refresh('summary',new Cancellation()));record=await repo.get('summary');assert.equal(record.data.count,7);assert.equal(record.runs[0].status,'failed');
+    assert.equal(record.runs[0].failure.stage,'output');assert.equal(record.runs[0].failure.code,'OUTPUT_INVALID');assert.ok(!JSON.stringify(record).includes('PRIVATE_MODEL_TEXT'));
+    mode='error';await assert.rejects(repo.refresh('summary',new Cancellation()));record=await repo.get('summary');assert.equal(record.runs[0].failure.code,'AUTH_REQUIRED');assert.equal(record.runs[0].failure.stage,'acquisition');
+    mode='missing';await assert.rejects(repo.refresh('summary',new Cancellation()));record=await repo.get('summary');assert.equal(record.runs[0].failure.stage,'tool');assert.equal(record.runs[0].failure.tool,'read_file');assert.equal(record.runs[0].failure.code,'FILE_NOT_FOUND');
+    mode='invalid-data';await assert.rejects(repo.refresh('summary',new Cancellation()));record=await repo.get('summary');assert.equal(record.runs[0].failure.stage,'validation');assert.equal(record.runs[0].failure.code,'DATA_INVALID');assert.equal(record.data.count,7);
     mode='cancel';const signal=new Cancellation(),pending=repo.refresh('summary',signal);while(!entered)await new Promise(r=>setTimeout(r,0));signal.cancel();await assert.rejects(pending);
     record=await repo.get('summary');assert.equal(record.data.count,7);assert.equal(record.runs[0].status,'cancelled');assert.equal(settings.threads.length,0);
   });

@@ -1,10 +1,13 @@
 import { PanelSourceTransform, pointerParts, validatePanelSourceTransform } from './PanelTransform';
+import { MailQuery, validateMailQuery } from './Mail';
 export interface PanelOAuth { clientId: string; authorizationEndpoint: string; tokenEndpoint: string; scopes?: string[]; resource?: string; }
 export interface PanelAuth { type: string; name?: string; in?: string; prefix?: string; oauth?: PanelOAuth; }
 export interface PanelSource {
   type: string; url?: string; path?: string; pointer?: string; method?: string; headers?: Record<string, string>;
   body?: Object; auth?: PanelAuth; transform?: PanelSourceTransform;
   prompt?: string;
+  mail?: MailQuery;
+  workspaceId?: string;
 }
 function fields(value: Object, allowed: string[]): void {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((key: string) => !allowed.includes(key))) { throw new Error('Invalid source fields'); }
@@ -13,7 +16,15 @@ export function panelHttps(address: string): string {
   if (typeof address !== 'string' || !/^https:\/\/[^\s/?#@\\]+(?:[/?][^\s#\\]*)?$/.test(address)) { throw new Error('API endpoints require HTTPS without credentials or fragments'); } return address;
 }
 export function validatePanelSource(source: PanelSource): void {
-  fields(source, ['type', 'url', 'path', 'pointer', 'method', 'headers', 'body', 'auth', 'transform', 'prompt']);
+  fields(source, ['type', 'url', 'path', 'pointer', 'method', 'headers', 'body', 'auth', 'transform', 'prompt', 'mail', 'workspaceId']);
+  if (source.workspaceId !== undefined && (source.type !== 'workspace-json' || typeof source.workspaceId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(source.workspaceId))) { throw new Error('source.workspaceId requires a valid workspace-json owner'); }
+  if (source.type === 'mail') {
+    if (Object.keys(source).some((key: string) => !['type', 'mail', 'pointer', 'transform'].includes(key))) { throw new Error('Mail source accepts only mail query, pointer and transform'); }
+    validateMailQuery(source.mail!);
+    if (source.pointer !== undefined) { pointerParts(source.pointer); }
+    if (source.transform !== undefined) { validatePanelSourceTransform(source.transform); } return;
+  }
+  if (source.mail !== undefined) { throw new Error('mail requires source type mail'); }
   if (source.type === 'agent') {
     if (typeof source.prompt !== 'string' || !source.prompt.trim() || source.prompt.length > 4000 ||
       Object.keys(source).some((key: string) => !['type', 'prompt'].includes(key))) { throw new Error('Agent source requires only type:agent and a prompt of 1–4000 characters'); }

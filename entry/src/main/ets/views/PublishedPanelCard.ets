@@ -15,6 +15,7 @@ export struct PublishedPanelCard {
   @State private panel: PanelRecord | undefined = undefined;
   @State private title: string = '';
   @State private error: string = '';
+  @State private refreshing: boolean = false;
   @State private pinOpen: boolean = false;
   @State private boards: BoardEntry[] = [];
   @State private boardTitle: string = '';
@@ -26,7 +27,8 @@ export struct PublishedPanelCard {
     try {
       const root = (this.getUIContext().getHostContext() as common.UIAbilityContext).getApplicationContext().filesDir, target = this.reference.target;
       if (target.panelId) {
-        const panel = await new LifePanels(root).repository(target.workspaceId).get(target.panelId); if (this.mounted) { this.panel = panel; }
+        const repository = new LifePanels(root).repository(target.workspaceId), panel = await repository.get(target.panelId);
+        if (this.mounted) { this.panel = panel; this.refreshing = panel.runs?.[0]?.status === 'running' && repository.isRefreshing(target.panelId); }
       } else {
         const board = await new LifeBoards(root).get(target.workspaceId, target.boardId!); if (this.mounted) { this.title = board.title; }
       }
@@ -65,7 +67,7 @@ export struct PublishedPanelCard {
   build() {
     Column({ space: 8 }) {
       if (this.panel) {
-        Column() { LifePanelCard({ panel: this.panel, interactive: false, timestamp: 'Life Panel', onOpen: () => this.open() }) }.height(220).width('100%')
+        Column() { LifePanelCard({ panel: this.panel, interactive: false, busy: this.refreshing, timestamp: 'Life Panel', onOpen: () => this.open() }) }.height(220).width('100%')
       }
       Button(t('打开 Life Panel：{0}', [this.panel?.definition.title || this.title || this.reference.title])).attributeModifier(Btn.tonal).onClick(() => this.open())
       if (this.reference.target.panelId) {

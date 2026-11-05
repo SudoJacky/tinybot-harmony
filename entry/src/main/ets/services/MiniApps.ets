@@ -9,6 +9,7 @@ import { WorkspaceFiles, WorkspaceWrite, WorkspaceWriteGuard } from './Workspace
 import { Cancellation } from './Cancellation';
 import { withFileMutation } from './FileMutationQueue';
 import { Diagnostics } from '../model/Diagnostics';
+import { withWorkspaceLifecycle } from './WorkspaceRetention';
 
 interface StoredData { version: number; value: Object | null; }
 class MiniAppFiles extends NativeWorkspaceFiles {
@@ -25,7 +26,7 @@ export class MiniAppRepository {
   }
   async publish(id: string, title: string, description: string, sourcePath: string, sourceThreadId: string,
     page: WebUiSpec, existing: boolean, cancellation: Cancellation): Promise<MiniAppRecord> {
-    return withFileMutation(this.lockKey + ':' + miniAppId(id), async (): Promise<MiniAppRecord> => {
+    return withWorkspaceLifecycle(this.lockKey, () => withFileMutation(this.lockKey + ':' + miniAppId(id), async (): Promise<MiniAppRecord> => {
       cancellation.check();
       const path = miniAppPath(id, 'app.json');
       const snapshot = existing ? await this.files.read(path, cancellation) : undefined;
@@ -50,7 +51,7 @@ export class MiniAppRepository {
       // Commit only the page/metadata; an update never writes user data.
       await this.files.write(path, JSON.stringify(app), cancellation, { version: snapshot?.version ?? null });
       return app;
-    });
+    }));
   }
   async load(id: string): Promise<MiniAppSnapshot> {
     return withFileMutation(this.lockKey + ':' + miniAppId(id), async (): Promise<MiniAppSnapshot> => {

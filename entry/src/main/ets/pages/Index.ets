@@ -29,6 +29,7 @@ import { parsePanelTarget } from '../model/LifeBoard';
 import { LifePanels } from '../services/LifePanels';
 import { PanelExpiryUpdates } from '../services/PanelExpiryUpdates';
 import { SearchSettingsPanel } from '../views/SearchSettingsPanel';
+import { MailSettingsPanel } from '../views/MailSettingsPanel';
 import { SearchProviderPanel } from '../views/SearchProviderPanel';
 import { SearchEditorDraft, SearchProviderRoute, searchProviderName } from '../model/SearchEditor';
 import { ToolApproval } from '../services/ToolApproval';
@@ -1140,6 +1141,9 @@ struct Index {
           editorOnly: true, onClose: (warning: string) => { this.paths.pop(warning); } })
       }.title(productivityEditorTitle((param as ProductivityEditorRoute).tab, (param as ProductivityEditorRoute).id), { systemMaterial: this.appearance.control })
         .backgroundColor($r('app.color.page_background')).onBackPressed(() => this.app.busy)
+    } else if (name === 'mail-settings') {
+      NavDestination() { MailSettingsPanel() }
+        .title(t('邮箱连接'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'search-settings') {
       NavDestination() {
         SearchSettingsPanel({ app: this.app, onEdit: (request: SearchProviderRoute, onReturn: (draft?: SearchEditorDraft) => void) => {
@@ -1175,6 +1179,7 @@ struct Index {
           onStorage: () => { this.paths.pushPath({ name: 'storage' }); },
           onModels: () => { this.paths.pushPath({ name: 'model-settings' }); },
           onSearch: () => { this.paths.pushPath({ name: 'search-settings' }); },
+          onMail: () => { this.paths.pushPath({ name: 'mail-settings' }); },
           onLaboratory: () => { this.paths.pushPath({ name: 'laboratory' }); },
           onAppearance: () => { this.paths.pushPath({ name: 'appearance' }); },
           onLanguage: () => { this.paths.pushPath({ name: 'language' }); },
