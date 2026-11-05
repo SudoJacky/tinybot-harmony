@@ -3,6 +3,8 @@ import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Btn, Font, Radius, Space } from '../common/Theme';
 import { Banner, GroupCard, IconButton, NavRow, SectionHeader } from '../common/Widgets';
 import { t } from '../model/I18n';
+import { contextualError } from '../model/DetailedError';
+import { Diagnostics } from '../model/Diagnostics';
 import { FeedbackAttachment, FeedbackFilter, FeedbackItem, FeedbackType, FeedbackTypeFilter, FeedbackUpload } from '../model/Feedback';
 import { FeedbackService, feedbackService } from '../services/FeedbackService';
 import { FeedbackFiles } from '../services/FeedbackFiles';
@@ -61,6 +63,11 @@ export struct FeedbackPanel {
   private uploadState(file: FeedbackUpload): string {
     return file.state === 'uploaded' ? t('已上传') : file.state === 'uncertain' ? t('结果待核对') : file.state === 'failed' ? t('上传失败') : t('等待上传');
   }
+  private fileFailure(operation: string, stage: string, error: Error): void {
+    const failure = contextualError(operation, stage, error);
+    Diagnostics.log('error', 'feedback', 'attachment_failed', {}, failure);
+    this.service.error = this.service.error ? this.service.error + '\n' + failure.message : failure.message;
+  }
   private async pickImages(): Promise<void> {
     if (this.draftLocked()) { return; }
     this.fileBusy = true; this.service.error = '';
@@ -68,10 +75,10 @@ export struct FeedbackPanel {
     try {
       files = await FeedbackFiles.pickImages(3 - this.service.uploads.filter((file: FeedbackUpload) => file.kind === 'image').length);
       if (this.visible) { this.service.addUploads(files); files = []; }
-    } catch (_) { this.service.error = t('无法添加图片，请选择不超过 5 MiB、2,400 万像素的图片。'); }
+    } catch (error) { this.fileFailure(t('添加反馈图片失败'), 'attachment', error as Error); }
     finally {
       try { for (const file of files) { await FeedbackFiles.remove(file.path); } }
-      catch (_) { this.service.error = t('无法移除本机附件，请稍后重试。'); }
+      catch (error) { this.fileFailure(t('清理本机反馈附件失败'), 'unlink', error as Error); }
       this.fileBusy = false;
     }
   }
@@ -86,10 +93,10 @@ export struct FeedbackPanel {
     try {
       file = await FeedbackFiles.saveLog(FeedbackFiles.collectLog());
       if (this.visible) { this.service.addUploads([file]); file = undefined; }
-    } catch (_) { this.service.error = t('无法整理最近的诊断日志，请稍后重试。'); }
+    } catch (error) { this.fileFailure(t('整理诊断日志失败'), 'log', error as Error); }
     finally {
       try { if (file) { await FeedbackFiles.remove(file.path); } }
-      catch (_) { this.service.error = t('无法移除本机附件，请稍后重试。'); }
+      catch (error) { this.fileFailure(t('清理本机反馈附件失败'), 'unlink', error as Error); }
       this.fileBusy = false;
     }
   }
@@ -103,21 +110,21 @@ export struct FeedbackPanel {
       this.previewImage = file.kind === 'image'; this.previewName = file.filename;
       this.previewText = file.kind === 'log' ? FeedbackFiles.logText(bytes).slice(0, 80000) : '';
       this.showPreview = true;
-    } catch (error) { this.service.error = (error as Error).message; }
+    } catch (error) { this.fileFailure(t('读取反馈附件失败'), 'read', error as Error); }
     finally { this.fileBusy = false; }
   }
   private async cleanPreview(): Promise<void> {
     const path = this.previewPath; this.previewPath = ''; this.previewText = '';
     if (path) {
       try { await FeedbackFiles.remove(path); }
-      catch (_) { this.service.error = t('无法移除本机附件，请稍后重试。'); }
+      catch (error) { this.fileFailure(t('清理本机反馈附件失败'), 'unlink', error as Error); }
     }
   }
   private async savePreview(): Promise<void> {
     if (this.fileBusy || !this.previewPath) { return; }
     this.fileBusy = true;
     try { await exportFile(this.context(), this.previewPath, this.previewName); }
-    catch (_) { this.service.error = t('无法保存附件副本，请重试。'); }
+    catch (error) { this.fileFailure(t('保存反馈附件副本失败'), 'attachment', error as Error); }
     finally { this.fileBusy = false; }
   }
   private confirmDelete(item: FeedbackItem, file: FeedbackAttachment): void {

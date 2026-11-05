@@ -7,6 +7,7 @@ import { Diagnostics } from '../model/Diagnostics';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { discoverModels } from '../services/ModelDiscovery';
 import { ProviderEditorViewModel } from '../viewmodel/ProviderEditorViewModel';
+import { ProviderBalanceCard } from './ProviderBalanceCard';
 import { Btn, Motion, Radius, Space, Styles, protocolName } from '../common/Theme';
 import { Banner, BottomBar, GroupCard, IconButton, NavRow, RowDivider, SectionHeader, SwitchRow } from '../common/Widgets';
 
@@ -343,6 +344,8 @@ export struct ProviderEditorPanel {
             }
           }
           this.fieldError('models')
+          ProviderBalanceCard({ editor: this.editor, profiles: this.app.providerProfiles, disabled: this.locked(), active: this.active,
+            scope: JSON.stringify([this.editor.id, this.editor.protocol, this.editor.baseUrl, this.editor.apiKey, this.editor.noApiKey]) })
           Column() {
             GroupCard() {
               Column() {

@@ -1,9 +1,12 @@
 import { t } from '../model/I18n';
 import { ProviderDraft } from './ProfileSettings';
 import { ProviderProfile } from '../model/ProviderProfiles';
-import { CredentialStore } from './CredentialStore';
+import { contextualError, parseServiceJson } from '../model/DetailedError';
+import { Diagnostics } from '../model/Diagnostics';
+import { providerDraftKey } from './ProviderAccess';
+import { httpProviderError } from './providers/ProviderErrors';
 import { protocolHeaders } from './providers/WireProtocols';
-import { protocolUrl, sameCredentialScope } from '../model/ProviderEndpoint';
+import { protocolUrl } from '../model/ProviderEndpoint';
 import { CompatHttp } from './CompatHttp';
 interface ListedModel { id: string; }
 interface ModelList { data: ListedModel[]; }
@@ -16,28 +19,30 @@ async function discoverPage(url: string, headers: Record<string, string>): Promi
     url: url, method: 'GET', headers: headers, connectTimeout: 15000, readTimeout: 30000,
     maxBytes: 1024 * 1024, dataType: 'string', redirect: 'refuse'
   });
-  if (response.status !== 200) { throw new Error(t('模型发现 HTTP ') + response.status + t('；可继续手动添加模型 ID。')); }
+  if (response.status !== 200) { throw httpProviderError(response.status, response.text); }
   return response.text;
 }
 
 export async function discoverModels(draft: ProviderDraft, profiles: ProviderProfile[]): Promise<string[]> {
+  try { return await discover(draft, profiles); }
+  catch (error) {
+    const failure = contextualError(t('获取模型列表失败'), 'discover', error as Error);
+    Diagnostics.log('error', 'provider', 'discovery_failed', { protocol: draft.protocol }, failure);
+    throw failure;
+  }
+}
+
+async function discover(draft: ProviderDraft, profiles: ProviderProfile[]): Promise<string[]> {
   const root = protocolUrl(draft.protocol, draft.baseUrl, true);
   const endpoint = draft.protocol === 'gemini' ? root + '/models?pageSize=1000' : root.replace(/\/(chat\/completions|responses|messages)$/, '/models');
-  let key = draft.apiKey.trim();
-  if (!draft.noApiKey && !key) {
-    const existing = profiles.find((item) => item.id === draft.id);
-    if (!existing || !existing.credentialAlias || !sameCredentialScope(existing.protocol, existing.baseUrl, draft.protocol, draft.baseUrl)) {
-      throw new Error(t("请先填写此服务的 API Key。"));
-    }
-    key = await new CredentialStore().read(existing.credentialAlias);
-  }
+  const key = await providerDraftKey(draft, profiles);
   const headers = protocolHeaders(draft.protocol, draft.noApiKey ? '' : key); headers['Accept'] = 'application/json';
   if (draft.protocol === 'gemini') {
     const ids: Set<string> = new Set<string>(); const pages: Set<string> = new Set<string>();
     let pageToken = '';
     do {
       const url = endpoint + (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
-      const parsed = JSON.parse(await discoverPage(url, headers)) as GeminiModelList;
+      const parsed = parseServiceJson(await discoverPage(url, headers)) as GeminiModelList;
       if (!parsed || (parsed.models !== undefined && !Array.isArray(parsed.models)) ||
         (parsed.nextPageToken !== undefined && typeof parsed.nextPageToken !== 'string')) { throw new Error(t('服务未返回兼容的模型列表。')); }
       for (const item of parsed.models || []) {
@@ -53,7 +58,7 @@ export async function discoverModels(draft: ProviderDraft, profiles: ProviderPro
     if (!ids.size) { throw new Error(t('服务返回了空模型列表。')); }
     return Array.from(ids).slice(0, 200);
   }
-  const parsed = JSON.parse(await discoverPage(endpoint, headers)) as ModelList;
+  const parsed = parseServiceJson(await discoverPage(endpoint, headers)) as ModelList;
   if (!parsed || !Array.isArray(parsed.data)) { throw new Error(t("服务未返回兼容的模型列表。")); }
   const ids = Array.from(new Set(parsed.data.filter((item) => item && typeof item.id === 'string' && item.id.trim() && item.id.length <= 200).map((item) => item.id.trim()))).slice(0, 200);
   if (!ids.length) { throw new Error(t("服务返回了空模型列表。")); }

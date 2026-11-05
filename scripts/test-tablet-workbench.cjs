@@ -379,7 +379,7 @@ const cardGlobals = { Column: new Proxy({}, { get: (_, name) => name === 'bindCo
   If: new Proxy({}, { get: (_, name) => name === 'canRetake' ? () => false : () => {} }),
   Button: new Proxy({}, { get: (_, name) => name === 'onClick' ? callback => { clicked = callback; } :
     name === 'createWithLabel' ? value => { label = value; } : () => {} }),
-  Btn: {}, Space: {}, HorizontalAlign: {}, Alignment: { TopEnd: 'top-right' }, ModalTransition: { ALPHA: 0 }, $r: value => value,
+  Btn: {}, Space: {}, Radius: { sm: 10 }, HorizontalAlign: {}, Alignment: { TopEnd: 'top-right' }, ModalTransition: { ALPHA: 0 }, $r: value => value,
   IconButton: class { constructor(_parent, props) { fullscreenButton = props; } },
   t: value => value, ViewPU: { create() {} },
   NodeContainer: new Proxy({}, { get: (_, name) => name === 'create' ? () => { surfaces++; } : () => {} }),
