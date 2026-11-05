@@ -19,6 +19,32 @@ const SNAPSHOT_NAME = /^tinybot-(\d{13})-[0-9a-f-]{36}\.(?:json|tinybot)$/;
 const LATEST_BACKUP = 'tinybot-latest.tinybot';
 function validBackupName(name: string): boolean { return name === LATEST_BACKUP || SNAPSHOT_NAME.test(name); }
 let operating: boolean = false;
+const CLOUD_READY_DELAYS: number[] = [500, 1000, 2000];
+
+class CloudNotReadyError extends Error {
+  code: number = 22400001;
+  constructor() { super(t('华为云空间暂未就绪，请稍后重试；如持续失败，请检查系统云空间登录状态及 Tinybot 同步开关。')); }
+}
+
+// Retry readiness only, before any file mutation or accepted synchronization.
+async function whenCloudReady<T>(operation: string, action: () => Promise<T>): Promise<T> {
+  const started = Date.now();
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const result = await action();
+      if (attempt > 0) { Diagnostics.log('warn', 'backup', 'cloud_retry_finished', { operation: operation, round: attempt + 1, elapsedMs: Date.now() - started }); }
+      return result;
+    } catch (error) {
+      if ((error as BusinessError).code !== 22400001 || attempt >= CLOUD_READY_DELAYS.length) {
+        Diagnostics.log('error', 'backup', 'cloud_failed', { operation: operation, round: attempt + 1, elapsedMs: Date.now() - started }, error as Error);
+        throw error as Error;
+      }
+      const delay = CLOUD_READY_DELAYS[attempt];
+      Diagnostics.log('warn', 'backup', 'cloud_retry', { operation: operation, round: attempt + 1, delayMs: delay, elapsedMs: Date.now() - started }, error as Error);
+      await new Promise<void>((resolve) => { setTimeout(() => resolve(), delay); });
+    }
+  }
+}
 
 // Native sync APIs have limited concurrency. This lock also covers a reopened page.
 async function exclusive<T>(action: () => Promise<T>): Promise<T> {
@@ -28,14 +54,17 @@ async function exclusive<T>(action: () => Promise<T>): Promise<T> {
 }
 
 async function backupDirectory(context: common.UIAbilityContext): Promise<string> {
-  const root = context.cloudFileDir;
-  if (!root || !await fs.access(root)) { throw new Error(t('华为云空间尚不可用，请登录华为账号，并在系统云空间中开启 Tinybot。')); }
-  return root + '/tinybot-backups';
+  return whenCloudReady('cloud_directory', async () => {
+    const root = context.cloudFileDir;
+    if (!root || !await fs.access(root)) { throw new CloudNotReadyError(); }
+    return root + '/tinybot-backups';
+  });
 }
 
 export function cloudBackupError(error: Error): string {
   const code = (error as BusinessError).code;
-  if (code === 22400001 || code === 801) { return t('华为云空间尚不可用，请登录华为账号，并在系统云空间中开启 Tinybot。'); }
+  if (code === 22400001) { return t('华为云空间暂未就绪，请稍后重试；如持续失败，请检查系统云空间登录状态及 Tinybot 同步开关。'); }
+  if (code === 801) { return t('当前系统不支持华为云空间文件同步。'); }
   if (code === 22400002) { return t('网络不可用，请联网后刷新备份。'); }
   if (code === 22400003) { return t('电量过低，请充电后刷新备份。'); }
   if (code === 13900025) { return t('本机存储空间不足，请清理后重试。'); }
@@ -62,23 +91,57 @@ function logCleanup(error: Error): void {
 // start() only acknowledges the request; completion is delivered through progress.
 // A bounded wait leaves upload to the OS and never claims that a local file is backed up.
 async function requestSync(): Promise<boolean> {
+  return whenCloudReady('cloud_sync', () => requestSyncAttempt());
+}
+
+async function requestSyncAttempt(): Promise<boolean> {
   const sync = new cloudSync.FileSync();
+  const startedAt = Date.now();
   let subscribed = false;
   let timer: number = -1;
   let callback: (progress: cloudSync.SyncProgress) => void = () => {};
   try {
     return await new Promise<boolean>((resolve, reject) => {
+      let initial = true;
+      let accepted = false;
+      let terminal: boolean | undefined = undefined;
+      let settled = false;
+      const finish = (completed: boolean): void => {
+        if (settled) { return; }
+        settled = true;
+        Diagnostics.log(completed ? 'info' : 'warn', 'backup', 'cloud_sync_finished', {
+          ready: accepted, enabled: completed, elapsedMs: Date.now() - startedAt
+        });
+        resolve(completed);
+      };
+      const fail = (error: Error): void => { if (!settled) { settled = true; reject(error); } };
       callback = (progress: cloudSync.SyncProgress): void => {
-        if (progress.error !== cloudSync.ErrorType.NO_ERROR) { reject(new Error(syncError(progress.error))); }
-        else if (progress.state === cloudSync.SyncState.COMPLETED) { resolve(true); }
-        else if (progress.state === cloudSync.SyncState.STOPPED) { resolve(false); }
+        if (settled) { return; }
+        Diagnostics.log(!initial && progress.error !== cloudSync.ErrorType.NO_ERROR ? 'warn' : 'info', 'backup', 'cloud_sync_progress', {
+          phase: initial ? 'initial' : 'active', eventCode: progress.state, code: progress.error, ready: accepted,
+          elapsedMs: Date.now() - startedAt
+        });
+        if (initial) {
+          // Registration sends the previous state, including COMPLETED. Consume it BEFORE
+          // starting this run, so a delayed snapshot cannot masquerade as its completion.
+          initial = false;
+          try {
+            sync.start().then(() => {
+              accepted = true;
+              if (terminal !== undefined) { finish(terminal); }
+            }).catch((error: Error) => fail(error));
+          } catch (error) { fail(error as Error); }
+          return;
+        }
+        if (progress.error !== cloudSync.ErrorType.NO_ERROR) { fail(new Error(syncError(progress.error))); }
+        else if (progress.state === cloudSync.SyncState.COMPLETED) { terminal = true; if (accepted) { finish(true); } }
+        else if (progress.state === cloudSync.SyncState.STOPPED) { terminal = false; if (accepted) { finish(false); } }
         else if (progress.state === cloudSync.SyncState.UPLOAD_FAILED || progress.state === cloudSync.SyncState.DOWNLOAD_FAILED) {
-          reject(new Error(syncError(progress.error)));
+          fail(new Error(syncError(progress.error)));
         }
       };
+      timer = setTimeout(() => finish(false), 30000);
       sync.on('progress', callback); subscribed = true;
-      timer = setTimeout(() => resolve(false), 30000);
-      sync.start().catch((error: Error) => reject(error));
     });
   } finally {
     clearTimeout(timer);

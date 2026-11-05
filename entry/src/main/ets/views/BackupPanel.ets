@@ -1,6 +1,8 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { getLocale, t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
+import { BusinessError } from '@kit.BasicServicesKit';
+import { Diagnostics } from '../model/Diagnostics';
 import { exportBackup, readBackup } from '../services/Backup';
 import { CloudBackup, CloudBackupItem, cloudBackupError } from '../services/CloudBackup';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
@@ -11,32 +13,58 @@ import { Banner, GroupCard, IconButton, NavRow, RowDivider, SectionHeader } from
 export struct BackupPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
+  @StorageProp('tinybot.foreground') @Watch('foregroundChanged') private foreground: boolean = true;
   @State private busy: boolean = false;
   @State private error: string = '';
   @State private cloudError: string = '';
+  @State private cloudListError: string = '';
   @State private cloudStatus: string = '';
   @State private cloudItems: CloudBackupItem[] = [];
   @State private cloudLoaded: boolean = false;
   private visible: boolean = false;
+  private cloudErrorCode: number = 0;
+  private cloudListing?: Promise<void>;
 
-  aboutToAppear(): void { this.visible = true; this.loadCloudList(); }
+  aboutToAppear(): void { this.visible = true; this.loadCloudList(true); }
   aboutToDisappear(): void { this.visible = false; }
+
+  private async foregroundChanged(): Promise<void> {
+    if (!this.foreground || !this.visible || this.busy) { return; }
+    await this.cloudListing;
+    if (this.foreground && this.visible && !this.busy) { await this.loadCloudList(true); }
+  }
 
   private context(): common.UIAbilityContext { return this.getUIContext().getHostContext() as common.UIAbilityContext; }
   private locked(): boolean { return this.app.busy || this.busy; }
 
-  private async loadCloudList(): Promise<void> {
+  private loadCloudList(recoverAvailability: boolean = false): Promise<void> {
+    if (!this.cloudListing) {
+      this.cloudListing = this.readCloudList(recoverAvailability).finally(() => { this.cloudListing = undefined; });
+    }
+    return this.cloudListing;
+  }
+
+  private async readCloudList(recoverAvailability: boolean): Promise<void> {
     try {
       const items = await CloudBackup.list(this.context());
-      if (this.visible) { this.cloudItems = items; this.cloudLoaded = true; }
+      if (this.visible) {
+        this.cloudItems = items; this.cloudLoaded = true; this.cloudListError = '';
+        // Availability recovering does not mean a failed upload has succeeded.
+        if (recoverAvailability && this.cloudErrorCode === 22400001) { this.cloudError = ''; this.cloudErrorCode = 0; }
+      }
     } catch (error) {
-      if (this.visible) { this.cloudItems = []; this.cloudLoaded = false; this.cloudError = cloudBackupError(error as Error); }
+      Diagnostics.log('error', 'backup', 'cloud_list_failed', undefined, error as Error);
+      if (this.visible) { this.cloudItems = []; this.cloudLoaded = false; this.cloudListError = cloudBackupError(error as Error); }
     }
   }
 
   private async openCloudSettings(): Promise<void> {
     try { await this.context().startAbility({ action: 'ohos.want.action.viewData', uri: 'hicloud://cloudDrive/getInfo?path=MainActivity' }); }
-    catch (_) { this.cloudError = t('无法打开云空间，请前往系统「设置 → 云空间」，登录华为账号并开启 Tinybot。'); }
+    catch (error) {
+      Diagnostics.log('error', 'backup', 'cloud_settings_failed', undefined, error as Error);
+      this.cloudErrorCode = 0;
+      this.cloudError = t('无法打开云空间，请前往系统「设置 → 云空间」，登录华为账号并开启 Tinybot。');
+    }
   }
 
   private date(item: CloudBackupItem): string { return new Date(item.createdAt).toLocaleString(getLocale()); }
@@ -65,8 +93,10 @@ export struct BackupPanel {
 
   private async cloud(action: string, name: string = ''): Promise<void> {
     if (this.locked()) { return; }
-    this.busy = true; this.cloudError = ''; this.cloudStatus = ''; this.error = '';
+    this.busy = true; this.cloudError = ''; this.cloudListError = ''; this.cloudErrorCode = 0; this.cloudStatus = ''; this.error = '';
     try {
+      // Finish passive discovery before mutating files, then read a fresh list below.
+      await this.cloudListing;
       const context = this.context();
       if (action === 'restore') {
         const data = await CloudBackup.restore(context, name, this.app.exportSnapshot());
@@ -81,8 +111,13 @@ export struct BackupPanel {
         const completed = action === 'create' ? await CloudBackup.create(context, this.app.exportSnapshot()) : await CloudBackup.sync();
         if (this.visible) { this.cloudStatus = completed ? t('已刷新备份列表，请以每份备份的云端状态为准。') : t('同步尚未完成，请稍后刷新。未上传的备份只保存在本机。'); }
       }
-    } catch (error) { if (this.visible) { this.cloudError = cloudBackupError(error as Error); } }
-    finally { await this.loadCloudList(); if (this.visible) { this.busy = false; } }
+    } catch (error) {
+      if (this.visible) {
+        this.cloudError = cloudBackupError(error as Error);
+        this.cloudErrorCode = typeof (error as BusinessError).code === 'number' ? (error as BusinessError).code : 0;
+      }
+    }
+    finally { await this.loadCloudList(); this.busy = false; }
   }
 
   private async backup(restore: boolean): Promise<void> {
@@ -120,7 +155,7 @@ export struct BackupPanel {
             Text(t('正在处理备份…')).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
           }.margin({ top: Space.md })
         }
-        if (this.cloudError) { Banner({ text: this.cloudError, compId: 'cloud-backup-error' }).margin({ top: Space.md }) }
+        if (this.cloudError || this.cloudListError) { Banner({ text: this.cloudError || this.cloudListError, compId: 'cloud-backup-error' }).margin({ top: Space.md }) }
         if (this.cloudStatus) { Banner({ text: this.cloudStatus, danger: false, compId: 'cloud-backup-status' }).margin({ top: Space.md }) }
         if (this.cloudItems.length > 0) {
           SectionHeader({ title: t('可恢复的备份') })
