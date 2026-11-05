@@ -3,16 +3,27 @@ import { common } from '@kit.AbilityKit';
 import { BusinessError, commonEventManager, deviceInfo } from '@kit.BasicServicesKit';
 import { DEBUG, BUILD_MODE_NAME } from 'BuildProfile';
 import { t } from '../model/I18n';
+import { Diagnostics } from '../model/Diagnostics';
+
+const QUERY_RETRY_DELAYS: number[] = [500, 1000, 2000, 4000];
 
 // AppGallery owns production consent. Emulator debug consent is explicit and memory-only.
 @Observed
 export class HostedPrivacy {
   allowed: boolean = false;
   busy: boolean = false;
+  checking: boolean = false;
   error: string = '';
   private debugConsent: boolean = false;
   private context?: common.UIAbilityContext;
   private closing: boolean = false;
+  private pageVisible: boolean = false;
+  private pageShown: boolean = false;
+  private subscribed: boolean = false;
+  private subscribing: boolean = false;
+  private subscriptionGeneration: number = 0;
+  private retryTimer: number = -1;
+  private initializedAt: number = 0;
   private subscriber?: commonEventManager.CommonEventSubscriber;
   private onChange: (allowed: boolean) => void = () => {};
 
@@ -21,69 +32,155 @@ export class HostedPrivacy {
   }
 
   acceptDebugConsent(): void {
-    if (!this.simulatorDebug || !this.context || this.closing) { return; }
+    if (!this.simulatorDebug || !this.context || this.closing || !this.pageVisible) { return; }
     this.debugConsent = true;
     this.refresh();
   }
 
   async initialize(context: common.UIAbilityContext, onChange: (allowed: boolean) => void): Promise<void> {
+    this.cancelQuery();
+    this.resetSubscription();
     this.context = context; this.onChange = onChange;
     this.closing = false; this.busy = false; this.error = ''; this.debugConsent = false;
+    this.pageVisible = false; this.pageShown = false; this.subscribed = false; this.initializedAt = Date.now();
     this.publish(false);
     if (this.simulatorDebug) { return; }
-    try {
-      const subscriber = await commonEventManager.createSubscriber({ events: ['usual.event.PRIVACY_STATE_CHANGED'] });
-      if (this.context !== context) { return; }
-      this.subscriber = subscriber;
-      commonEventManager.subscribe(subscriber, (error) => {
-        if (this.context !== context) { return; }
-        if (error) { this.fail(error); return; }
-        // Do not trust the event payload (including other app clones); query our own current record.
-        this.refresh();
-      });
-      this.refresh();
-    } catch (error) { this.fail(error as BusinessError); }
+    await this.subscribe('subscription_ready');
   }
 
-  refresh(): void {
-    if (!this.context) { return; }
+  private async subscribe(source: string): Promise<void> {
+    if (!this.context || this.closing || this.simulatorDebug || this.subscribed || this.subscribing) { return; }
+    const context = this.context, generation = this.subscriptionGeneration;
+    this.subscribing = true;
+    let subscriber: commonEventManager.CommonEventSubscriber | undefined = undefined;
+    try {
+      subscriber = await commonEventManager.createSubscriber({ events: ['usual.event.PRIVACY_STATE_CHANGED'] });
+      if (this.context !== context || this.subscriptionGeneration !== generation || this.closing) { this.unsubscribe(subscriber); return; }
+      this.subscriber = subscriber;
+      let failed = false;
+      commonEventManager.subscribe(subscriber, (error) => {
+        if (this.context !== context || this.subscriptionGeneration !== generation || this.subscriber !== subscriber || this.closing) { return; }
+        if (error) {
+          failed = true; this.subscriber = undefined; this.subscribed = false;
+          this.unsubscribe(subscriber!); this.fail(error, 'subscribe', 'privacy_event'); return;
+        }
+        // Do not trust the event payload (including other app clones); query our own current record.
+        this.refresh('privacy_event');
+      });
+      if (failed) { return; }
+      this.subscribed = true;
+      Diagnostics.log('info', 'privacy', 'subscription_ready', { operation: 'subscribe', phase: source, elapsedMs: Date.now() - this.initializedAt });
+      // onPageShow may have arrived while the subscriber was being created.
+      if (this.pageVisible) { this.refresh(source); }
+    } catch (error) {
+      if (this.context !== context || this.subscriptionGeneration !== generation || this.closing) { return; }
+      if (subscriber && this.subscriber === subscriber) { this.subscriber = undefined; this.unsubscribe(subscriber); }
+      this.subscribed = false; this.fail(error as BusinessError, 'subscribe', source);
+    } finally { if (this.subscriptionGeneration === generation) { this.subscribing = false; } }
+  }
+
+  private unsubscribe(subscriber: commonEventManager.CommonEventSubscriber): void {
+    const report = (error: BusinessError): void => {
+      Diagnostics.log('error', 'privacy', 'subscription_cleanup_failed', { operation: 'unsubscribe', code: typeof error.code === 'number' ? error.code : 0 });
+    };
+    try { commonEventManager.unsubscribe(subscriber, (error) => { if (error) { report(error); } }); }
+    catch (error) { report(error as BusinessError); }
+  }
+
+  private resetSubscription(): void {
+    this.subscriptionGeneration++; this.subscribing = false; this.subscribed = false;
+    const subscriber = this.subscriber; this.subscriber = undefined;
+    if (subscriber) { this.unsubscribe(subscriber); }
+  }
+
+  onPageShow(): void {
+    this.pageVisible = true; this.pageShown = true;
+    this.refresh('page_show');
+  }
+
+  onPageHide(): void {
+    this.pageVisible = false;
+    this.cancelQuery();
+  }
+
+  refresh(source: string = 'business'): void {
+    // After the first page show, background business and withdrawal events still recheck consent.
+    if (!this.context || this.closing || !this.pageShown || this.checking) { return; }
     if (this.simulatorDebug) {
       this.error = '';
       this.publish(this.debugConsent);
       return;
     }
+    if (!this.subscribed) {
+      // Repair only the missing dependency. Re-running initialize would clear page
+      // visibility and the callback that starts services for this ability instance.
+      if (this.pageVisible) { this.subscribe(source); }
+      return;
+    }
+    this.checking = true; this.error = '';
+    this.query(source, 1);
+  }
+
+  private query(source: string, attempt: number): void {
+    if (!this.context || this.closing || !this.pageShown) { this.cancelQuery(); return; }
+    let operation = 'getAppPrivacyMgmtInfo';
     try {
       const link = this.policy();
+      operation = 'getAppPrivacyResult';
       const records = privacyManager.getAppPrivacyResult();
       const consent = records.find((record) => record.type === privacyManager.AppPrivacyType.PRIVACY_AGREEMENT &&
         record.id === link.id && record.versionCode === link.versionCode);
-      this.error = '';
+      this.checking = false; this.error = '';
+      Diagnostics.log(attempt > 1 ? 'warn' : 'info', 'privacy', 'query_completed', {
+        operation: operation, phase: source, round: attempt, elapsedMs: Date.now() - this.initializedAt,
+        enabled: consent?.result === privacyManager.AppPrivacyResultType.FULL_MODE_AGREED
+      });
       this.publish(consent?.result === privacyManager.AppPrivacyResultType.FULL_MODE_AGREED);
-    } catch (error) { this.fail(error as BusinessError); }
+    } catch (error) {
+      const failure = error as BusinessError;
+      if (failure.code === 1006700003 && this.pageVisible && attempt <= QUERY_RETRY_DELAYS.length) {
+        const delay = QUERY_RETRY_DELAYS[attempt - 1];
+        Diagnostics.log('warn', 'privacy', 'query_retry', {
+          operation: operation, phase: source, round: attempt, code: failure.code,
+          delayMs: delay, elapsedMs: Date.now() - this.initializedAt
+        });
+        this.retryTimer = setTimeout(() => {
+          this.retryTimer = -1;
+          this.query(source, attempt + 1);
+        }, delay);
+        this.publish(false);
+      } else { this.fail(failure, operation, source, attempt); }
+    }
+  }
+
+  private cancelQuery(): void {
+    clearTimeout(this.retryTimer); this.retryTimer = -1;
+    this.checking = false;
   }
 
   requireConsent(): void {
-    this.refresh();
+    // Blocked business must not restart an exhausted query round.
+    if (this.allowed) { this.refresh(); }
     if (!this.allowed) {
       throw new Error(this.error || (this.simulatorDebug ? t('请先确认模拟器调试隐私说明。') : t('请先在系统弹窗中同意隐私政策。')));
     }
   }
 
   async requestConsent(): Promise<void> {
-    if (!this.context || this.busy || this.closing) { return; }
+    if (!this.context || this.busy || this.checking || this.closing || !this.pageVisible) { return; }
     // Retrying a system request must never implicitly accept local debug consent.
     if (this.simulatorDebug) { return; }
-    this.refresh();
-    if (this.allowed) { return; }
+    this.refresh('request_consent');
+    if (this.allowed || this.checking || this.error || !this.subscribed) { return; }
     const context = this.context;
     this.busy = true; this.error = '';
     try {
       await privacyManager.requestAppPrivacyConsent(context);
-      if (this.context === context && !this.closing) {
+      if (this.context === context && !this.closing && this.pageVisible) {
         this.refresh();
-        if (!this.allowed && !this.error) { await this.exit(); }
+        if (!this.allowed && !this.error && !this.checking) { await this.exit(); }
       }
-    } catch (error) { if (this.context === context) { this.fail(error as BusinessError); } }
+    } catch (error) { if (this.context === context) { this.fail(error as BusinessError, 'requestAppPrivacyConsent', 'request_consent'); } }
     finally { if (this.context === context) { this.busy = false; } }
   }
 
@@ -91,6 +188,7 @@ export class HostedPrivacy {
     if (!this.context || this.closing) { return; }
     const context = this.context;
     this.closing = true;
+    this.cancelQuery();
     try { await context.terminateSelf(); }
     catch (error) {
       if (this.context !== context) { return; }
@@ -139,7 +237,12 @@ export class HostedPrivacy {
     return link;
   }
 
-  private fail(error: BusinessError): void {
+  private fail(error: BusinessError, operation: string, source: string, attempt: number = 0): void {
+    this.cancelQuery();
+    Diagnostics.log('error', 'privacy', 'check_failed', {
+      operation: operation, phase: source, round: attempt,
+      code: typeof error.code === 'number' ? error.code : 0, elapsedMs: Date.now() - this.initializedAt
+    });
     this.error = t('无法确认系统隐私授权（{0}），请重试。', [typeof error.code === 'number' ? error.code : 0]);
     this.publish(false);
   }
@@ -154,9 +257,11 @@ export class HostedPrivacy {
   }
 
   dispose(): void {
+    this.onPageHide();
+    this.pageShown = false;
+    this.resetSubscription();
     this.debugConsent = false;
     this.context = undefined; this.onChange = () => {};
-    if (this.subscriber) { commonEventManager.unsubscribe(this.subscriber); this.subscriber = undefined; }
     this.publish(false);
   }
 }

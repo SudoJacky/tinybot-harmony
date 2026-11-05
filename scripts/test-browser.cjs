@@ -303,7 +303,17 @@ async function acquired() {
     f.browser.handoff(); const result = await running;
     assert.equal(result.status, 'complete'); assert.equal(requests, 2); assert.equal(f.browser.hasTask, false);
     assert.equal(f.browser.open, true); assert.equal(f.browser.owner, 'user');
+    let nextCompleted = false;
+    const nextRun = runtime.run({ sessionId: 'thread', config: seed().config, messages: [], tools: f.tools },
+      { checkpoint: async () => {}, prepare: async signal => { await f.browser.acquire('thread', 'https://example.com/next', 'Continue in the next turn', signal); } })
+      .then(value => { nextCompleted = true; return value; });
+    try {
+      await settle(); assert.equal(nextCompleted, true, 'Runtime completion must not strand the next run behind manual handoff');
+      assert.equal((await nextRun).status, 'complete'); assert.equal(requests, 3);
+      assert.equal(f.browser.hasTask, false); assert.equal(f.browser.owner, 'user');
+    } finally { runtime.abort(); await nextRun; }
     console.log('PASS runtime gates preflight summary requests as well as the main model and releases control after completion');
+    console.log('PASS consecutive runtime runs automatically acquire and release the retained browser');
   }
   {
     const f = await acquired(); const readOnly = new BrowserTools(f.browser, 'thread', true);

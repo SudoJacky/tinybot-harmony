@@ -100,7 +100,7 @@ const cloudSync = {
   State: { RUNNING:0, COMPLETED:1, FAILED:2, STOPPED:3 }, DownloadErrorType: { NO_ERROR:0 },
   FileSync: class {
     constructor() { syncInstances.push(this); }
-    on(event,callback) { this.callback=callback; }
+    on(event,callback) { this.callback=callback;queueMicrotask(()=>this.callback?.({state:4,error:0})); }
     off(event,callback) { assert.equal(callback,this.callback);this.callback=undefined; }
     async start() { await cloudStart(this); }
   },
@@ -1444,7 +1444,12 @@ async function test(name, run) {
       assert.equal(timers.size,1);assert.equal([...timers.values()][0].ms,30000);[...timers.values()][0].fn();
       assert.equal(await pending,false);assert.equal(timers.size,0);assert.equal(syncInstances.at(-1).callback,undefined);
       cloudStart=async()=>{throw Object.assign(Error('not ready'),{code:22400001});};
-      await assert.rejects(CloudBackup.sync(),error=>/华为云空间/.test(cloudBackupError(error)));
+      const unavailable=assert.rejects(CloudBackup.sync(),error=>/华为云空间/.test(cloudBackupError(error)));
+      for(const delay of [500,1000,2000]){
+        await new Promise(setImmediate);
+        const retry=[...timers].find(([,timer])=>timer.ms===delay);assert.ok(retry,'bounded readiness retry');timers.delete(retry[0]);retry[1].fn();
+      }
+      await unavailable;
       assert.equal(timers.size,0);assert.equal(syncInstances.at(-1).callback,undefined);
       const context={cloudFileDir:'/sandbox/cloud',getApplicationContext:()=>({filesDir:'/sandbox/backup-app'})};
       const item=(await CloudBackup.list(context))[0];cloudLocations.set('/sandbox/cloud/tinybot-backups/'+item.name,2);cacheStart=async()=>{};

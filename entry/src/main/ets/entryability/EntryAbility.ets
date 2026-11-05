@@ -7,7 +7,6 @@ import { AppearancePreferences } from '../services/AppearancePreferences';
 import { McpOAuth } from '../services/McpOAuth';
 import { LaunchActions } from '../services/LaunchActions';
 import { DeveloperDiagnostics } from '../services/DeveloperDiagnostics';
-import { huaweiAccount } from '../services/HuaweiAccount';
 
 import { hostedPrivacy } from '../services/HostedPrivacy';
 import { backgroundGeneration } from '../services/BackgroundGeneration';
@@ -92,7 +91,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
-    hostedPrivacy.refresh();
+    hostedPrivacy.refresh('new_want');
     if (!hostedPrivacy.allowed) { this.pendingWants.push(want); return; }
     this.receiveWant(want);
   }
@@ -128,6 +127,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onWindowStageDestroy(): void {
+    hostedPrivacy.onPageHide();
     // Main window is destroyed, release UI related resources
     Diagnostics.log('info', 'app', 'window_destroyed');
   }
@@ -135,8 +135,8 @@ export default class EntryAbility extends UIAbility {
   onForeground(): void {
     completionNotifications.setForeground(true);
     backgroundGeneration.setForeground(true);
-    hostedPrivacy.refresh();
-    if (hostedPrivacy.allowed) { huaweiAccount.refresh(); DeveloperDiagnostics.setForeground(true); }
+    // Index.onPageShow checks privacy before refreshing account and business state.
+    if (hostedPrivacy.allowed) { DeveloperDiagnostics.setForeground(true); }
     AppStorage.setOrCreate('tinybot.foreground', true);
     WebUiPreflight.setForeground(true);
     PreviewCapture.setForeground(true);
@@ -147,6 +147,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onBackground(): void {
+    hostedPrivacy.onPageHide();
     completionNotifications.setForeground(false);
     WebUiPreflight.setForeground(false);
     PreviewCapture.setForeground(false);
