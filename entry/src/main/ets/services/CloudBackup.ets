@@ -184,20 +184,29 @@ async function download(path: string): Promise<void> {
 export class CloudBackup {
   // Listing cached metadata does not create or upload any snapshot.
   static async list(context: common.UIAbilityContext): Promise<CloudBackupItem[]> {
-    const directory = await backupDirectory(context);
-    if (!await fs.access(directory)) { return []; }
-    const result: CloudBackupItem[] = [];
-    for (const name of await fs.listFile(directory)) {
-      const match = name.match(SNAPSHOT_NAME);
-      if (!validBackupName(name)) { continue; }
-      const stat = await fs.lstat(directory + '/' + name);
-      if (stat.isFile() && !stat.isSymbolicLink()) {
-        // lstat lacks native FileInfo; reading its location can crash libfs.
-        const info = await fs.stat(directory + '/' + name);
-        result.push({ name: name, createdAt: match ? Number(match[1]) : info.mtime * 1000, size: stat.size, location: info.location });
+    let operation = 'cloud_directory';
+    try {
+      const directory = await backupDirectory(context);
+      operation = 'access';
+      if (!await fs.access(directory)) { return []; }
+      const result: CloudBackupItem[] = [];
+      operation = 'list';
+      for (const name of await fs.listFile(directory)) {
+        const match = name.match(SNAPSHOT_NAME);
+        if (!validBackupName(name)) { continue; }
+        operation = 'stat';
+        const stat = await fs.lstat(directory + '/' + name);
+        if (stat.isFile() && !stat.isSymbolicLink()) {
+          // lstat lacks native FileInfo; reading its location can crash libfs.
+          const info = await fs.stat(directory + '/' + name);
+          result.push({ name: name, createdAt: match ? Number(match[1]) : info.mtime * 1000, size: stat.size, location: info.location });
+        }
       }
+      return result.sort((a: CloudBackupItem, b: CloudBackupItem) => b.createdAt - a.createdAt);
+    } catch (error) {
+      Diagnostics.log('error', 'backup', 'cloud_list_failed', { operation: operation }, error as Error);
+      throw error as Error;
     }
-    return result.sort((a: CloudBackupItem, b: CloudBackupItem) => b.createdAt - a.createdAt);
   }
 
   static sync(): Promise<boolean> { return exclusive(() => requestSync()); }

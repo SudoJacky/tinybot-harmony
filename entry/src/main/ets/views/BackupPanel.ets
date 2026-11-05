@@ -54,7 +54,7 @@ export struct BackupPanel {
       }
     } catch (error) {
       Diagnostics.log('error', 'backup', 'cloud_list_failed', undefined, error as Error);
-      if (this.visible) { this.cloudItems = []; this.cloudLoaded = false; this.cloudListError = cloudBackupError(error as Error); }
+      if (this.visible) { this.cloudItems = []; this.cloudLoaded = false; this.cloudStatus = ''; this.cloudListError = cloudBackupError(error as Error); }
     }
   }
 
@@ -94,6 +94,7 @@ export struct BackupPanel {
   private async cloud(action: string, name: string = ''): Promise<void> {
     if (this.locked()) { return; }
     this.busy = true; this.cloudError = ''; this.cloudListError = ''; this.cloudErrorCode = 0; this.cloudStatus = ''; this.error = '';
+    let status = '';
     try {
       // Finish passive discovery before mutating files, then read a fresh list below.
       await this.cloudListing;
@@ -101,15 +102,13 @@ export struct BackupPanel {
       if (action === 'restore') {
         const data = await CloudBackup.restore(context, name, this.app.exportSnapshot());
         if (!await this.app.importSnapshot(data)) { throw new Error(this.app.error); }
-        if (this.visible) { this.cloudStatus = t('备份已恢复，已跳过已有内容'); }
+        status = t('备份已恢复，已跳过已有内容');
       } else if (action === 'delete') {
         const completed = await CloudBackup.remove(context, name);
-        if (this.visible) {
-          this.cloudStatus = completed ? t('备份已删除，同步已完成。') : t('备份已从本机列表移除，云端删除尚待同步。请稍后刷新。');
-        }
+        status = completed ? t('备份已删除，同步已完成。') : t('备份已从本机列表移除，云端删除尚待同步。请稍后刷新。');
       } else {
         const completed = action === 'create' ? await CloudBackup.create(context, this.app.exportSnapshot()) : await CloudBackup.sync();
-        if (this.visible) { this.cloudStatus = completed ? t('已刷新备份列表，请以每份备份的云端状态为准。') : t('同步尚未完成，请稍后刷新。未上传的备份只保存在本机。'); }
+        status = completed ? t('已刷新备份列表，请以每份备份的云端状态为准。') : t('同步尚未完成，请稍后刷新。未上传的备份只保存在本机。');
       }
     } catch (error) {
       if (this.visible) {
@@ -117,7 +116,11 @@ export struct BackupPanel {
         this.cloudErrorCode = typeof (error as BusinessError).code === 'number' ? (error as BusinessError).code : 0;
       }
     }
-    finally { await this.loadCloudList(); this.busy = false; }
+    finally {
+      await this.loadCloudList();
+      if (this.visible && this.cloudLoaded && !this.cloudError) { this.cloudStatus = status; }
+      this.busy = false;
+    }
   }
 
   private async backup(restore: boolean): Promise<void> {

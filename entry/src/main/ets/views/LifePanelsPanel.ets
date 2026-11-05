@@ -27,14 +27,13 @@ export struct LifePanelsPanel {
   @State private entries: PanelEntry[] = [];
   @State private boards: BoardEntry[] = [];
   @State private boardSelection: string = '';
-  @State private boardEditorOpen: boolean = false;
+  @State private sheetOpen: boolean = false;
+  @State private sheetKind: string = '';
   @State private boardEditorId: string = '';
   @State private boardEditorWorkspace: string = '';
   @State private boardTitle: string = '';
   @State private boardDescription: string = '';
-  @State private pinOpen: boolean = false;
   @State private pinEntry: PanelEntry | undefined = undefined;
-  @State private taskOpen: boolean = false;
   @State private taskEntry: PanelEntry | undefined = undefined;
   @State private dragging: string = '';
   @State private dragX: number = 0;
@@ -46,7 +45,6 @@ export struct LifePanelsPanel {
   @State private selected: string = '';
   @State private removed: boolean = false;
   @State private creating: boolean = false;
-  @State private connectionOpen: boolean = false;
   @State private connectionEntry: PanelEntry | undefined = undefined;
   private store?: LifePanels;
   private mounted: boolean = false;
@@ -57,6 +55,7 @@ export struct LifePanelsPanel {
   private lastTarget: string = '';
   private boardStore(): LifeBoards { return new LifeBoards((this.getUIContext().getHostContext() as common.UIAbilityContext).getApplicationContext().filesDir); }
   private boardKey(entry: BoardEntry): string { return entry.workspaceId + '/' + entry.board.id; }
+  private boardFor(key: string): BoardEntry { return this.boards.find((entry: BoardEntry) => this.boardKey(entry) === key)!; }
   private currentBoard(): BoardEntry | undefined { return this.boards.find((entry: BoardEntry) => this.boardKey(entry) === this.boardSelection); }
   private panels(): LifePanels {
     if (!this.store) { this.store = new LifePanels((this.getUIContext().getHostContext() as common.UIAbilityContext).getApplicationContext().filesDir); }
@@ -176,18 +175,28 @@ export struct LifePanelsPanel {
     return entry.panel.refreshedAt ? t('更新于 {0}', [relativeTime(entry.panel.refreshedAt, this.now)]) :
       entry.panel.definition.source ? t('等待首次刷新') : t('本地数据');
   }
-  @Builder private card(entry: PanelEntry, detail: boolean = false) {
-    LifePanelCard({ panel: entry.panel, cardSize: this.sizeOnBoard(entry), onBoard: !!this.currentBoard(), busy: this.pending.includes(this.entryKey(entry)) || entry.panel.runs?.[0]?.status === 'running' && this.panels().repository(entry.workspaceId).isRefreshing(entry.panel.id), detail: detail, timestamp: this.timestamp(entry),
-      onOpen: () => { this.selected = this.entryKey(entry); }, onRefresh: () => { this.refresh(entry); },
-      onToggle: (node: string, item: string, done: boolean) => { this.change(entry, 'toggle', node, item, done); },
-      onSize: (size: string) => { this.change(entry, size); }, onArchive: () => { this.change(entry, 'archive'); },
-      onConnect: () => { this.connectionEntry = entry; this.connectionOpen = true; },
-      onPin: () => { this.pinEntry = entry; this.pinOpen = true; }, onUnpin: () => { this.pinOnBoard(this.currentBoard()!, entry, false); },
-      onTask: () => { this.taskEntry = entry; this.taskOpen = true; } })
+  // ForEach retains its builder closure for a stable key. Read the current state
+  // inside the retained component updates rather than capturing an old record.
+  private entryFor(key: string): PanelEntry { return this.entries.find((entry: PanelEntry) => this.entryKey(entry) === key)!; }
+  private openSheet(kind: string): void { this.sheetKind = kind; this.sheetOpen = true; }
+  private sheetTitle(): string {
+    if (this.sheetKind === 'connection') { return t('API 连接'); }
+    if (this.sheetKind === 'board') { return t('看板管理'); }
+    if (this.sheetKind === 'pin') { return t('固定到看板'); }
+    return t('刷新任务与记录');
+  }
+  @Builder private card(key: string, detail: boolean = false) {
+    LifePanelCard({ panel: this.entryFor(key).panel, cardSize: this.sizeOnBoard(this.entryFor(key)), onBoard: !!this.currentBoard(), busy: this.pending.includes(key) || this.entryFor(key).panel.runs?.[0]?.status === 'running' && this.panels().repository(this.entryFor(key).workspaceId).isRefreshing(this.entryFor(key).panel.id), detail: detail, timestamp: this.timestamp(this.entryFor(key)),
+      onOpen: () => { this.selected = key; }, onRefresh: () => { this.refresh(this.entryFor(key)); },
+      onToggle: (node: string, item: string, done: boolean) => { this.change(this.entryFor(key), 'toggle', node, item, done); },
+      onSize: (size: string) => { this.change(this.entryFor(key), size); }, onArchive: () => { this.change(this.entryFor(key), 'archive'); },
+      onConnect: () => { this.connectionEntry = this.entryFor(key); this.openSheet('connection'); },
+      onPin: () => { this.pinEntry = this.entryFor(key); this.openSheet('pin'); }, onUnpin: () => { this.pinOnBoard(this.currentBoard()!, this.entryFor(key), false); },
+      onTask: () => { this.taskEntry = this.entryFor(key); this.openSheet('task'); } })
   }
   @Builder private connection() {
     if (this.connectionEntry) {
-      PanelConnectionPanel({ entry: this.connectionEntry, onConnected: () => { this.connectionOpen = false; this.refresh(this.connectionEntry!); } })
+      PanelConnectionPanel({ entry: this.connectionEntry, onConnected: () => { this.sheetOpen = false; this.refresh(this.connectionEntry!); } })
     }
   }
   private async pinOnBoard(board: BoardEntry, entry: PanelEntry, present: boolean): Promise<void> {
@@ -196,12 +205,12 @@ export struct LifePanelsPanel {
   }
   private editBoard(board?: BoardEntry): void {
     this.boardEditorId = board?.board.id || ''; this.boardEditorWorkspace = board?.workspaceId || this.app.activeWorkspaceId;
-    this.boardTitle = board?.board.title || ''; this.boardDescription = board?.board.description || ''; this.boardEditorOpen = true;
+    this.boardTitle = board?.board.title || ''; this.boardDescription = board?.board.description || ''; this.openSheet('board');
   }
   private async saveBoard(): Promise<void> {
     try {
       const board = await this.boardStore().save(this.boardEditorWorkspace, this.boardEditorId, this.boardTitle, this.boardDescription);
-      this.boardSelection = this.boardEditorWorkspace + '/' + board.id; this.selected = ''; this.boardEditorOpen = false; await this.reload();
+      this.boardSelection = this.boardEditorWorkspace + '/' + board.id; this.selected = ''; this.sheetOpen = false; await this.reload();
     } catch (error) { this.report(error as Error); }
   }
   private async archiveBoard(entry: BoardEntry): Promise<void> {
@@ -231,40 +240,46 @@ export struct LifePanelsPanel {
         Button(t('保存看板')).attributeModifier(Btn.primary).enabled(!!this.boardTitle.trim()).onClick(() => { this.saveBoard(); })
         Button(t('新建看板')).attributeModifier(Btn.tonal).onClick(() => this.editBoard())
         if (this.error) { Banner({ text: this.error }) }
-        ForEach(this.boards, (entry: BoardEntry) => {
+        ForEach(this.boards.map((entry: BoardEntry) => this.boardKey(entry)), (key: string) => {
           Row({ space: 8 }) {
-            Button(entry.board.title).attributeModifier(Btn.textSmall).layoutWeight(1).onClick(() => this.editBoard(entry))
-            Button(entry.board.archived ? t('恢复') : t('归档')).attributeModifier(Btn.textSmall).onClick(() => { this.archiveBoard(entry); })
+            Button(this.boardFor(key).board.title).attributeModifier(Btn.textSmall).layoutWeight(1).onClick(() => this.editBoard(this.boardFor(key)))
+            Button(this.boardFor(key).board.archived ? t('恢复') : t('归档')).attributeModifier(Btn.textSmall).onClick(() => { this.archiveBoard(this.boardFor(key)); })
           }.width('100%')
-        }, (entry: BoardEntry) => this.boardKey(entry))
+        }, (key: string) => key)
       }.padding(24).width('100%')
     }.height('100%').width('100%')
   }
   @Builder private pinPicker() {
     Scroll() {
       Column({ space: 14 }) {
-        ForEach(this.boards.filter((entry: BoardEntry) => !entry.board.archived), (entry: BoardEntry) => {
+        ForEach(this.boards.filter((entry: BoardEntry) => !entry.board.archived).map((entry: BoardEntry) => this.boardKey(entry)), (key: string) => {
           Row({ space: 12 }) {
-            Checkbox().select(!!this.pinEntry && entry.board.items.some((item) => referenceKey(item) === this.entryKey(this.pinEntry!)))
-              .onChange((present: boolean) => { if (this.pinEntry && present !== entry.board.items.some((item) => referenceKey(item) === this.entryKey(this.pinEntry!))) { this.pinOnBoard(entry, this.pinEntry, present); } })
-            Text(entry.board.title).fontSize(16).layoutWeight(1)
+            Checkbox().select(!!this.pinEntry && this.boardFor(key).board.items.some((item) => referenceKey(item) === this.entryKey(this.pinEntry!)))
+              .onChange((present: boolean) => { if (this.pinEntry && present !== this.boardFor(key).board.items.some((item) => referenceKey(item) === this.entryKey(this.pinEntry!))) { this.pinOnBoard(this.boardFor(key), this.pinEntry, present); } })
+            Text(this.boardFor(key).board.title).fontSize(16).layoutWeight(1)
           }.width('100%')
-        }, (entry: BoardEntry) => this.boardKey(entry))
-        Button(t('新建看板')).attributeModifier(Btn.tonal).onClick(() => { this.pinOpen = false; this.editBoard(); })
+        }, (key: string) => key)
+        Button(t('新建看板')).attributeModifier(Btn.tonal).onClick(() => { this.editBoard(); })
       }.padding(24).width('100%')
     }.height('100%').width('100%')
   }
   @Builder private task() { if (this.taskEntry) { PanelTaskPanel({ entry: this.taskEntry }) } }
+  @Builder private sheet() {
+    if (this.sheetKind === 'connection') { this.connection() }
+    else if (this.sheetKind === 'board') { this.boardEditor() }
+    else if (this.sheetKind === 'pin') { this.pinPicker() }
+    else if (this.sheetKind === 'task') { this.task() }
+  }
   build() {
     Column({ space: 12 }) {
       Row({ space: 8 }) {
         Scroll() {
           Row({ space: 8 }) {
             Button(t('全部卡片')).attributeModifier(Btn.tonal).onClick(() => { this.boardSelection = ''; this.selected = ''; })
-            ForEach(this.boards.filter((entry: BoardEntry) => !entry.board.archived), (entry: BoardEntry) => {
-              Button(entry.board.title).attributeModifier(Btn.tonal).fontWeight(this.boardSelection === this.boardKey(entry) ? FontWeight.Bold : FontWeight.Normal)
-                .onClick(() => { this.boardSelection = this.boardKey(entry); this.selected = ''; this.removed = false; })
-            }, (entry: BoardEntry) => this.boardKey(entry))
+            ForEach(this.boards.filter((entry: BoardEntry) => !entry.board.archived).map((entry: BoardEntry) => this.boardKey(entry)), (key: string) => {
+              Button(this.boardFor(key).board.title).attributeModifier(Btn.tonal).fontWeight(this.boardSelection === key ? FontWeight.Bold : FontWeight.Normal)
+                .onClick(() => { this.boardSelection = key; this.selected = ''; this.removed = false; })
+            }, (key: string) => key)
           }
         }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).layoutWeight(1)
         Button(t('看板管理')).attributeModifier(Btn.tonal).onClick(() => this.editBoard(this.currentBoard()))
@@ -282,7 +297,7 @@ export struct LifePanelsPanel {
       if (this.selected && this.visible().some((entry: PanelEntry) => this.entryKey(entry) === this.selected)) {
         Button(t('返回卡片列表')).attributeModifier(Btn.tonal).onClick(() => { this.selected = ''; })
         ForEach(this.visible().filter((entry: PanelEntry) => this.entryKey(entry) === this.selected), (entry: PanelEntry) => {
-          Column() { this.card(entry, true) }.layoutWeight(1).width('100%')
+          Column() { this.card(this.entryKey(entry), true) }.layoutWeight(1).width('100%')
         }, (entry: PanelEntry) => this.entryKey(entry) + ':' + entry.panel.configRevision)
       } else if (!this.visible().length) {
         Column({ space: 12 }) {
@@ -294,7 +309,7 @@ export struct LifePanelsPanel {
         Scroll() {
           Stack({ alignContent: Alignment.TopStart }) {
             ForEach(this.visible(), (entry: PanelEntry, index: number) => {
-              Column() { this.card(entry) }
+              Column() { this.card(this.entryKey(entry)) }
                 .width(this.cell(index).columns * (this.unit() + 12) - 12)
                 .height(this.cell(index).rows * 202 - 12)
                 .position({ x: this.cell(index).column * (this.unit() + 12), y: this.cell(index).row * 202 })
@@ -310,10 +325,7 @@ export struct LifePanelsPanel {
         }.layoutWeight(1).width('100%').align(Alignment.TopStart).scrollBar(BarState.Auto)
       }
     }.width('100%').height('100%').padding(16)
-      .bindSheet($$this.connectionOpen, this.connection(), { title: { title: t('API 连接') }, detents: [SheetSize.LARGE] })
-      .bindSheet($$this.boardEditorOpen, this.boardEditor(), { title: { title: t('看板管理') }, detents: [SheetSize.LARGE] })
-      .bindSheet($$this.pinOpen, this.pinPicker(), { title: { title: t('固定到看板') }, detents: [SheetSize.LARGE] })
-      .bindSheet($$this.taskOpen, this.task(), { title: { title: t('刷新任务与记录') }, detents: [SheetSize.LARGE] })
+      .bindSheet($$this.sheetOpen, this.sheet(), { title: { title: this.sheetTitle() }, detents: [SheetSize.LARGE] })
       .onAreaChange((_old: Area, area: Area) => { this.boardWidth = Math.max(160, Number(area.width) - 32); })
   }
 }

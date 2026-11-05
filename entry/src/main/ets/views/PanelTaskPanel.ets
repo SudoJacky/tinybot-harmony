@@ -36,6 +36,7 @@ export struct PanelTaskPanel {
     const names: Record<string, string> = { 'running': t('运行中'), 'complete': t('已完成'), 'failed': t('失败'), 'cancelled': t('已取消'), 'interrupted': t('运行已中断') };
     return names[run.status];
   }
+  private runFor(id: string): PanelRun { return this.record!.runs!.find((run: PanelRun) => run.id === id)!; }
   build() {
     Scroll() {
       Column({ space: 14 }) {
@@ -49,14 +50,14 @@ export struct PanelTaskPanel {
             Button(t('立即刷新')).attributeModifier(Btn.primary).onClick(() => { this.action(true); })
           }
           Text(t('最近 10 次运行')).fontSize(16).fontWeight(FontWeight.Medium)
-          ForEach(this.record.runs || [], (run: PanelRun) => {
+          ForEach((this.record.runs || []).map((run: PanelRun) => run.id), (id: string) => {
             Column({ space: 4 }) {
-              Text(this.status(run) + ' · ' + new Date(run.startedAt).toLocaleString()).fontSize(13)
-              if (run.finishedAt) { Text(t('耗时 {0} 秒', [Math.round((run.finishedAt - run.startedAt) / 1000)])).fontSize(12) }
-              if (run.error) { Text(run.error).fontSize(12).fontColor($r('app.color.danger')) }
-              if (run.failure) { Text(run.failure.stage + ' · ' + run.failure.code).fontSize(12).fontColor($r('app.color.text_secondary')) }
+              Text(this.status(this.runFor(id)) + ' · ' + new Date(this.runFor(id).startedAt).toLocaleString()).fontSize(13)
+              if (this.runFor(id).finishedAt) { Text(t('耗时 {0} 秒', [Math.round((this.runFor(id).finishedAt! - this.runFor(id).startedAt) / 1000)])).fontSize(12) }
+              if (this.runFor(id).error) { Text(this.runFor(id).error).fontSize(12).fontColor($r('app.color.danger')) }
+              if (this.runFor(id).failure) { Text(this.runFor(id).failure!.stage + ' · ' + this.runFor(id).failure!.code).fontSize(12).fontColor($r('app.color.text_secondary')) }
             }.width('100%').alignItems(HorizontalAlign.Start).padding(10).backgroundColor($r('app.color.surface_variant')).borderRadius(10)
-          }, (run: PanelRun) => run.id)
+          }, (id: string) => id)
         }
         if (this.error) { Text(this.error).fontColor($r('app.color.danger')).fontSize(12) }
       }.padding(24).width('100%').alignItems(HorizontalAlign.Start)

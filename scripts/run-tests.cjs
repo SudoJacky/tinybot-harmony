@@ -77,6 +77,7 @@ const suites = {
     'test-history-drawer.cjs',
     'test-mini-apps-panel.cjs',
     'test-life-panel-ui.cjs',
+    'test-life-panel-rendering.cjs',
     'test-i18n-native.cjs',
     'test-interactive-ui-renderer.cjs',
     'test-launch-actions-renderer.cjs',

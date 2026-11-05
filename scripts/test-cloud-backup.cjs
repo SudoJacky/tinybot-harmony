@@ -144,6 +144,32 @@ test('successful listing clears a stale list error but preserves a failed backup
   await p.cloud('create'); assert.equal(p.cloudError, 'upload failed');
 });
 
+test('sync completion cannot claim a successful refresh when directory listing fails', async () => {
+  let denied = true;
+  const p = panel({ sync: async () => true, list: async () => {
+    if (denied) throw Object.assign(Error('Permission denied'), { code: 13900012 });
+    return [];
+  } });
+  await p.cloud('refresh');
+  assert.equal(p.cloudLoaded, false);
+  assert.equal(p.cloudListError, 'Permission denied');
+  assert.equal(p.cloudStatus, '', 'Failed listing must not coexist with a success banner');
+  denied = false; await p.cloud('refresh');
+  assert.equal(p.cloudLoaded, true); assert.equal(p.cloudListError, '');
+  assert.match(p.cloudStatus, /已刷新/);
+});
+
+test('refresh success is withheld until the new directory listing finishes', async () => {
+  let release;
+  const p = panel({ sync: async () => true, list: () => new Promise(resolve => { release = resolve; }) });
+  p.cloudLoaded = true;
+  const pending = p.cloud('refresh'); await tick();
+  assert.equal(p.cloudStatus, '', 'A previous successful listing is not evidence for this refresh');
+  assert.equal(p.busy, true);
+  release([]); await pending;
+  assert.match(p.cloudStatus, /已刷新/); assert.equal(p.busy, false);
+});
+
 test('returning from settings reloads availability and only clears recovered readiness errors', async () => {
   const p = panel({ list: async () => [], create: async () => { throw Object.assign(Error('not ready'), { code: 22400001 }); } });
   await p.cloud('create'); assert.equal(p.cloudError, 'not ready', 'The failed backup must remain visible');
