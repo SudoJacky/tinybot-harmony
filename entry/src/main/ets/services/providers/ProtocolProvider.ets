@@ -1,4 +1,5 @@
 import { Diagnostics } from '../../model/Diagnostics';
+import { contextualError } from '../../model/DetailedError';
 import { t } from '../../model/I18n';
 import { applyReasoningEffort } from './ReasoningRequest';
 import { UsageStream, RequestUsage } from '../../model/Usage';
@@ -46,8 +47,11 @@ export class ProtocolProvider implements ModelProvider {
     cancellation.check();
     const usage = new UsageStream(); let firstToken: number | undefined = undefined;
     const diagnosticId = Diagnostics.nextId(); const networkMark = Diagnostics.begin(diagnosticId); let textChunks = 0; let textChars = 0;
+    const receiveToken = (): void => {
+      if (firstToken === undefined) { firstToken = Date.now(); }
+    };
     const receiveText = (text: string): void => {
-      if (text && firstToken === undefined) { firstToken = Date.now(); if (Diagnostics.recording && networkMark) { Diagnostics.measure('network.firstText', Diagnostics.now() - networkMark.time); Diagnostics.event('network.firstText', {}, diagnosticId); } }
+      if (text && textChars === 0 && Diagnostics.recording && networkMark) { Diagnostics.measure('network.firstText', Diagnostics.now() - networkMark.time); Diagnostics.event('network.firstText', {}, diagnosticId); }
       textChunks++; textChars += text.length; const mark = Diagnostics.begin(diagnosticId); onText(text);
       if (Diagnostics.recording) { Diagnostics.end('network.publishText', mark, { chars: text.length, cumulativeChars: textChars, chunk: textChunks }); }
     };
@@ -56,9 +60,9 @@ export class ProtocolProvider implements ModelProvider {
       if (Diagnostics.recording) { Diagnostics.end('network.publishReasoning', mark, { chars: text.length }); }
     };
     const decoder = new util.TextDecoder('utf-8');
-    const parser: ModelStream = this.info.protocol === 'responses' ? new ResponsesStream(receiveText, receiveReasoning) :
-      this.info.protocol === 'gemini' ? new GeminiStream(receiveText, receiveReasoning) :
-      this.info.protocol === 'anthropic-messages' ? new AnthropicStream(receiveText, receiveReasoning) : new ChatStream(receiveText, receiveReasoning);
+    const parser: ModelStream = this.info.protocol === 'responses' ? new ResponsesStream(receiveText, receiveReasoning, receiveToken) :
+      this.info.protocol === 'gemini' ? new GeminiStream(receiveText, receiveReasoning, receiveToken) :
+      this.info.protocol === 'anthropic-messages' ? new AnthropicStream(receiveText, receiveReasoning, receiveToken) : new ChatStream(receiveText, receiveReasoning, receiveToken);
     const body: Object = this.info.protocol === 'responses' ? responsesRequest(input.model, messages, input.tools, input.maxOutputTokens) :
       this.info.protocol === 'gemini' ? geminiRequest(messages, input.tools, input.maxOutputTokens) :
       this.info.protocol === 'anthropic-messages' ? anthropicRequest(input.model, messages, input.tools, input.maxOutputTokens, this.info.promptCaching === true) :
@@ -96,7 +100,9 @@ export class ProtocolProvider implements ModelProvider {
             startedAt: startedAt, durationMs: Date.now() - startedAt, firstTokenMs: firstToken === undefined ? undefined : firstToken - startedAt,
             status: error ? cancellation.cancelled ? 'cancelled' : 'failed' : 'complete', tokens: usage.result() };
           this.effects.recordUsage(record); if (result) { result.usage = record; }
-          if (Diagnostics.acceptsLog('info')) { Diagnostics.log('info', 'network', 'request_end', { operationId: diagnosticId, elapsedMs: Date.now() - startedAt, bytes: receivedBytes, http: responseCode, failed: error !== undefined, cancelled: cancellation.cancelled }); };
+          if (error && !cancellation.cancelled) { Diagnostics.log('error', 'network', 'request_failed',
+            { operationId: diagnosticId, http: responseCode, elapsedMs: record.durationMs }, error); }
+          if (Diagnostics.acceptsLog('info')) { Diagnostics.log('info', 'network', 'request_end', { operationId: diagnosticId, elapsedMs: record.durationMs, firstTokenMs: record.firstTokenMs, outputTokens: record.tokens?.output, bytes: receivedBytes, http: responseCode, failed: error !== undefined, cancelled: cancellation.cancelled }); };
           if (error instanceof ContextOverflowError) {
             Diagnostics.log('warn', 'network', 'context_overflow', { operationId: diagnosticId, providerId: this.info.id, http: responseCode });
           }
@@ -188,16 +194,16 @@ export class ProtocolProvider implements ModelProvider {
               const retryable = [2300005, 2300006, 2300007, 2300028, 2300052, 2300056].includes(error.code);
               Diagnostics.log('error', 'network', 'request_failed', { operationId: diagnosticId, code: error.code, http: responseCode,
                 elapsedMs: Date.now() - startedAt, bytes: receivedBytes, phase: receivedBytes > 0 ? 'streaming' : 'connecting', retryable: retryable }, error);
-              const message = t("网络请求失败（{0}），请检查连接和服务地址。", [error.code]);
+              const failure = contextualError(t('模型网络请求失败'), receivedBytes > 0 ? 'streaming' : 'connecting', error);
               // The loop retries only an uncommitted model request, with fresh parsers.
-              settle(retryable ? new TransientProviderError(message, 'transport') : new Error(message));
+              settle((retryable ? new TransientProviderError(failure.reason, 'transport', { nativeCode: error.code, stage: failure.stage }) : failure) as Error);
               return;
             }
             responseCode = code;
             finish();
           });
-        } catch (_) {
-          settle(new Error(t("无法创建网络请求，请检查模型配置。")));
+        } catch (error) {
+          settle(contextualError(t('创建模型网络请求失败'), 'connecting', error as Error) as Error);
         }
       });
     } finally { await endTransfer(); }

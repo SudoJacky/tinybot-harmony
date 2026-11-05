@@ -1,5 +1,6 @@
 import { util } from '@kit.ArkTS';
 import { t } from '../../model/I18n';
+import { DetailedError, providerErrorCode } from '../../model/DetailedError';
 import { MAX_REASONING_CONTENT, MAX_TOOL_CALLS, ModelTurn, ToolCall, validateToolCalls } from '../../model/Agent';
 import { GeminiPart, validateGeminiContent } from '../../model/GeminiContent';
 import { EventFrames, ModelStream } from './EventStreams';
@@ -20,9 +21,11 @@ export class GeminiStream implements ModelStream {
   private callPrefix: string = 'gemini_' + util.generateRandomUUID();
   private onText: (text: string) => void;
   private onReasoning?: (text: string) => void;
+  private onToken?: () => void;
 
-  constructor(onText: (text: string) => void, onReasoning?: (text: string) => void) {
+  constructor(onText: (text: string) => void, onReasoning?: (text: string) => void, onToken?: () => void) {
     this.onText = onText; this.onReasoning = onReasoning;
+    this.onToken = onToken;
     this.frames = new EventFrames((payload) => this.event(payload));
   }
   push(text: string): void { this.frames.push(text); }
@@ -38,7 +41,9 @@ export class GeminiStream implements ModelStream {
     try { event = JSON.parse(payload) as GeminiEvent; }
     catch (_) { throw new Error(t('模型返回了无效的流式 JSON。')); }
     if (!event || typeof event !== 'object' || Array.isArray(event)) { throw new Error(t('Gemini 流式事件无效。')); }
-    if (event.error) { throw new Error(t('Gemini 模型服务返回错误。') + ' [' + (Number.isInteger(event.error.code) ? event.error.code : 'unknown') + ']'); }
+    if (event.error) { throw new DetailedError(t('Gemini 模型服务返回错误。'), {
+      code: Number.isInteger(event.error.code) ? event.error.code : undefined,
+      providerCode: providerErrorCode(event.error.status), stage: 'streaming' }); }
     if (event.promptFeedback?.blockReason) { throw new Error(t('Gemini 请求或回答被拦截。')); }
     if (event.candidates === undefined && event.usageMetadata) { return; }
     if (!Array.isArray(event.candidates) || event.candidates.length > 1) { throw new Error(t('Gemini 流式事件无效。')); }
@@ -53,6 +58,7 @@ export class GeminiStream implements ModelStream {
     if (this.parts.length + parts.length > 65536) { throw new Error(t('Gemini 内容记录无效或过大。')); }
     for (const part of parts) {
       this.parts.push(part);
+      if (part.text || part.functionCall) { this.onToken?.(); }
       if (part.functionCall) {
         if (this.calls.length >= MAX_TOOL_CALLS) { throw new Error(t('单步工具调用数量超出限制。')); }
         this.calls.push({ id: this.callPrefix + '_' + this.calls.length, type: 'function',

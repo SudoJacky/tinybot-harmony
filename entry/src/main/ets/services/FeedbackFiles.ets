@@ -6,6 +6,8 @@ import { util } from '@kit.ArkTS';
 import { readBounded, writeBytes } from './Attachments';
 import { FeedbackAttachment, FeedbackUpload, redactFeedbackLog } from '../model/Feedback';
 import { t } from '../model/I18n';
+import { contextualError } from '../model/DetailedError';
+import { Diagnostics } from '../model/Diagnostics';
 import { formatFeedbackLog } from '../model/RecentDiagnosticLog';
 import { recentDiagnosticLogs } from './NativeDiagnosticLog';
 import { readAppInformation } from './AppInformation';
@@ -45,8 +47,17 @@ export class FeedbackFiles {
       }
       return result;
     } catch (error) {
-      for (const file of result) { await FeedbackFiles.remove(file.path); }
-      throw error as Error;
+      const failure = contextualError(t('准备反馈图片失败'), 'attachment', error as Error);
+      for (const file of result) {
+        try { await FeedbackFiles.remove(file.path); }
+        catch (cleanupError) {
+          const cleanup = contextualError(t('清理本机反馈附件失败'), 'unlink', cleanupError as Error);
+          Diagnostics.log('error', 'feedback', 'cleanup_failed', {}, cleanup);
+          failure.message += '\n' + cleanup.message;
+          failure.reason += '\n' + cleanup.message;
+        }
+      }
+      throw failure;
     }
   }
   static collectLog(): string {

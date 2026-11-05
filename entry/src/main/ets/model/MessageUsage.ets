@@ -1,5 +1,12 @@
 import { RequestUsage } from './Usage';
 
+// Output includes reasoning and tool-call tokens; exclude prefill/queueing latency.
+export function outputTokensPerSecond(record: RequestUsage | undefined): number | undefined {
+  if (!record || record.status !== 'complete' || !record.tokens || record.firstTokenMs === undefined ||
+    record.firstTokenMs < 0 || record.durationMs <= record.firstTokenMs) { return undefined; }
+  return record.tokens.output * 1000 / (record.durationMs - record.firstTokenMs);
+}
+
 export class MessageUsageSummary {
   requests: number = 0;
   durationMs: number = 0;

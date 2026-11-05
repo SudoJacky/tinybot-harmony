@@ -9,7 +9,7 @@ export interface LogFields {
   setting?: string; dataVersion?: number; serverId?: string;
   change?: string; commonMessages?: number; sharedCharacters?: number; systemHash?: number; toolsHash?: number;
   operationId?: number; instanceId?: number; generation?: number; active?: number; count?: number; total?: number;
-  chars?: number; bytes?: number; elapsedMs?: number; durationMs?: number; http?: number; code?: number;
+  chars?: number; bytes?: number; elapsedMs?: number; durationMs?: number; firstTokenMs?: number; outputTokens?: number; http?: number; code?: number;
   messages?: number; tools?: number; nodes?: number; keys?: number; width?: number; height?: number; widthVp?: number;
   request?: number; chunk?: number; eventCode?: number; newChats?: number; skippedChats?: number; level?: number; style?: number;
   tokens?: number; budget?: number; removed?: number; retained?: number; duplicates?: number; characters?: number;
@@ -22,7 +22,10 @@ export interface LogFields {
 }
 export interface LogData { level: LogLevel; module: string; event: string; fields: Record<string, LogValue>; }
 interface LogFailureDetails { httpStatus?: number; nativeCode?: number; remoteCode?: number; service?: string; }
-export interface LogError extends Error { code?: number | string; details?: LogFailureDetails; }
+export interface LogError extends Error {
+  code?: number | string; details?: LogFailureDetails;
+  httpStatus?: number; nativeCode?: number; providerCode?: string; stage?: string;
+}
 const ERROR_CODES: string[] = ['STALE_BROWSER_SNAPSHOT', 'STALE_INTERACTIVE_STATE', 'INVALID_ARGUMENTS', 'PERMISSION_DENIED',
   'CANCELLED', 'READ_ONLY', 'FILE_NOT_FOUND', 'TOOL_NOT_FOUND', 'TIMEOUT', 'CONTEXT_OVERFLOW',
   'NATIVE_EXCEPTION', 'NATIVE_EMPTY_RESULT', 'NATIVE_NAPI_FAILED', 'FS_STALE_VERSION', 'FS_NOT_OBSERVED', 'FS_EXTERNAL_IO',
@@ -45,7 +48,7 @@ EVENTS.review = ['task_completed', 'presented', 'present_failed', 'accepted', 'd
 EVENTS.appearance = ['material', 'material_support', 'material_unavailable', 'loaded', 'applied', 'save_failed', 'fonts_loaded', 'fonts_failed', 'insets_failed'];
 EVENTS.language = ['load_failed', 'save_failed'];
 EVENTS.account = ['restore_failed', 'response_invalid', 'state_changed', 'sign_in_cancelled', 'sign_in_failed', 'sign_out_failed', 'state_failed'];
-EVENTS.feedback = ['initialize_failed', 'save_failed', 'credential_failed', 'request_failed', 'submit_failed', 'list_failed',
+EVENTS.feedback = ['attachment_failed', 'log_failed', 'initialize_failed', 'save_failed', 'credential_failed', 'request_failed', 'submit_failed', 'list_failed',
   'detail_failed', 'upload_failed', 'cleanup_failed', 'reconcile_failed', 'delete_failed'];
 EVENTS.backup = ['started', 'restored', 'restore_prepared', 'key_decrypt_failed', 'cleanup_failed', 'replace_failed', 'rollback_failed', 'archive_written', 'archive_write_failed', 'archive_verified',
   'restore_completed', 'restore_failed', 'startup_capture_failed', 'startup_marker_failed', 'startup_lookup_failed'];
@@ -73,15 +76,17 @@ EVENTS.session = ['run_started', 'run_finished', 'run_cancelled', 'mcp_failed', 
 EVENTS.memory = ['committed', 'review_started', 'review_discarded'];
 EVENTS.resources = ['credential_rollback_failed', 'credential_cleanup_failed', 'team_selected', 'committed', 'preferences_saved'];
 EVENTS.configuration = ['unsupported', 'load_failed', 'save_failed'];
+EVENTS.provider = ['discovery_failed', 'balance_failed'];
 EVENTS.diagnostics = ['started', 'stopped', 'marker', 'failed', 'level_changed'];
-const NUMBERS: string[] = ['sdk', 'line', 'operationId', 'instanceId', 'generation', 'active', 'count', 'total', 'chars', 'bytes', 'elapsedMs', 'durationMs', 'http', 'code',
+const NUMBERS: string[] = ['sdk', 'line', 'operationId', 'instanceId', 'generation', 'active', 'count', 'total', 'chars', 'bytes', 'elapsedMs', 'durationMs', 'firstTokenMs', 'outputTokens', 'http', 'code',
   'commonMessages', 'sharedCharacters', 'systemHash', 'toolsHash', 'dataVersion',
   'messages', 'tools', 'nodes', 'keys', 'width', 'height', 'widthVp', 'request', 'chunk', 'eventCode', 'newChats', 'skippedChats', 'level', 'style',
   'tokens', 'budget', 'removed', 'retained', 'duplicates', 'characters', 'added', 'updated', 'round', 'revision', 'threads', 'changedThreads', 'selected'];
 const BOOLEANS: string[] = ['initialSupported', 'supported', 'available', 'pageSceneObserver', 'mounted', 'attached', 'visible', 'foreground', 'enabled', 'failed', 'cancelled', 'uncertain', 'speaking', 'preflight', 'closed', 'streaming', 'ready', 'hasModel', 'retryable'];
 const REFERENCES: string[] = ['threadId', 'messageId', 'sessionId', 'providerId', 'previewId', 'surfaceId', 'serverId'];
 const STRINGS: Record<string, string[]> = {};
-STRINGS.operation = ['access', 'read', 'list', 'stat', 'parse', 'unlink', 'rmdir', 'bundle_stats', 'free_size', 'total_size'];
+STRINGS.operation = ['access', 'read', 'list', 'stat', 'parse', 'unlink', 'rmdir', 'bundle_stats', 'free_size', 'total_size',
+  'discover', 'balance', 'credential_read', 'credential_write', 'credential_remove', 'save_config', 'response', 'streaming', 'connecting', 'attachment', 'log'];
 STRINGS.credentialScope = ['provider', 'search', 'mcp', 'backup'];
 STRINGS.rpcMethod = ['initialize', 'tools/list', 'tools/call', 'notifications/initialized', 'notifications/cancelled'];
 STRINGS.service = ['mcp', 'search', 'web', 'bing-browser'];
@@ -126,6 +131,20 @@ export class LogSanitizer {
       }
     });
     if (error !== undefined) {
+      if (typeof error !== 'string') {
+        const evidence = error as LogError;
+        if (typeof evidence.nativeCode === 'number' && Number.isFinite(evidence.nativeCode)) { result.nativeCode = evidence.nativeCode; }
+        if (typeof evidence.httpStatus === 'number' && Number.isFinite(evidence.httpStatus)) { result.http = evidence.httpStatus; }
+        if (typeof evidence.providerCode === 'string' && /^[a-zA-Z0-9_.-]{1,80}$/.test(evidence.providerCode) && !/^sk-/i.test(evidence.providerCode)) {
+          result.providerCode = evidence.providerCode;
+        }
+        if (evidence.stage && STRINGS.operation.includes(evidence.stage)) {
+          result.operation = evidence.stage;
+          if (typeof evidence.code === 'string' && /^[a-zA-Z0-9_.-]{1,80}$/.test(evidence.code) && !/^sk-/i.test(evidence.code)) {
+            result.errorCode = evidence.code;
+          }
+        }
+      }
       const detail = typeof error === 'string' ? error : error.message;
       const code = typeof error === 'string' ? undefined : (error as LogError).code;
       if (typeof code === 'number' && Number.isFinite(code)) { result.errorCode = code; }

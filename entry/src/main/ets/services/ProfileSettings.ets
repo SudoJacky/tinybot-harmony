@@ -1,5 +1,6 @@
 import { t } from '../model/I18n';
 import { Diagnostics } from '../model/Diagnostics';
+import { contextualError } from '../model/DetailedError';
 import { AppData, copyModelConfig } from '../model/Conversation';
 import { ProviderProfile, modelConfig, modelIds, validateProfile } from '../model/ProviderProfiles';
 import { CredentialReader } from './providers/Provider';
@@ -52,13 +53,21 @@ export class ProfileSettings {
     // An alias can survive a restore/signing change while its secure asset is unavailable.
     // Do not report a successful save when a blank editor would retain a missing key.
     if (!profile.noApiKey && key.length === 0) {
-      await this.credentials.read(profile.credentialAlias);
+      try { await this.credentials.read(profile.credentialAlias); }
+      catch (error) {
+        const failure = contextualError(t('读取已保存的 API Key 失败'), 'credential_read', error as Error);
+        Diagnostics.log('error', 'configuration', 'save_failed', { credentialScope: 'provider' }, failure);
+        throw failure;
+      }
     }
     let createdAlias = '';
+    let stage = 'save_config';
     try {
       if (!profile.noApiKey && key.length > 0) {
         createdAlias = 'tinybot-' + this.createId();
+        stage = 'credential_write';
         await this.credentials.write(createdAlias, key);
+        stage = 'save_config';
         profile.credentialAlias = createdAlias;
       }
       data.providerProfiles = previous ? profiles.map((item: ProviderProfile) => item.id === profile.id ? profile : item) : profiles.concat([profile]);
@@ -74,22 +83,25 @@ export class ProfileSettings {
       if (first && profile.enabled && active && !active.modelRef) { active.modelRef = { providerId: profile.id, modelId: profile.models[0] }; }
       await commit(data);
     } catch (error) {
-      Diagnostics.log('error', 'configuration', 'save_failed', { credentialScope: 'provider' }, error as Error);
-      let message = '保存模型服务失败：' + (error as Error).message;
+      const failure = contextualError(stage === 'credential_write' ? t('写入 API Key 失败') : t('保存模型配置失败'), stage, error as Error);
+      Diagnostics.log('error', 'configuration', 'save_failed', { credentialScope: 'provider' }, failure);
       if (createdAlias.length > 0) {
         try { await this.credentials.remove(createdAlias); }
         catch (cleanupError) {
-          Diagnostics.log('error', 'resources', 'credential_rollback_failed', { credentialScope: 'provider' }, cleanupError as Error);
-          message += '；未生效的密钥清理失败：' + (cleanupError as Error).message;
+          const cleanup = contextualError(t('未生效的密钥清理失败'), 'credential_remove', cleanupError as Error);
+          Diagnostics.log('error', 'resources', 'credential_rollback_failed', { credentialScope: 'provider' }, cleanup);
+          failure.message += '\n' + cleanup.message;
+          failure.reason += '\n' + cleanup.message;
         }
       }
-      throw new Error(message);
+      throw failure;
     }
     if (previous && previous.credentialAlias !== profile.credentialAlias) {
       try { await this.credentials.remove(previous.credentialAlias); }
       catch (error) {
-        Diagnostics.log('warn', 'resources', 'credential_cleanup_failed', { credentialScope: 'provider' }, error as Error);
-        return '模型服务已保存，但旧密钥清理失败：' + (error as Error).message;
+        const failure = contextualError(t('模型服务已保存，但旧密钥清理失败'), 'credential_remove', error as Error);
+        Diagnostics.log('warn', 'resources', 'credential_cleanup_failed', { credentialScope: 'provider' }, failure);
+        return failure.message;
       }
     }
     return '';
@@ -103,8 +115,9 @@ export class ProfileSettings {
     await commit(data);
     try { await this.credentials.remove(profile.credentialAlias); }
     catch (error) {
-      Diagnostics.log('warn', 'resources', 'credential_cleanup_failed', { credentialScope: 'provider' }, error as Error);
-      return '服务已删除，但密钥清理失败：' + (error as Error).message;
+      const failure = contextualError(t('服务已删除，但密钥清理失败'), 'credential_remove', error as Error);
+      Diagnostics.log('warn', 'resources', 'credential_cleanup_failed', { credentialScope: 'provider' }, failure);
+      return failure.message;
     }
     return '';
   }

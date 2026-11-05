@@ -1,4 +1,5 @@
 import { Attachment } from '../model/Productivity';
+import { RequestUsage } from '../model/Usage';
 import { FileDiff } from '../model/FileDiff';
 import { TurnFileChange } from '../model/TurnFileChanges';
 import { MemoryReviewRecord } from '../model/MemoryMaintenance';
@@ -38,6 +39,7 @@ export class ToolExecutionViewModel implements ToolExecution {
 
 @Observed
 export class AgentStepViewModel implements AgentStep {
+  usage?: RequestUsage;
   retries?: RequestRetry[];
   requestError?: string;
   uiValidation?: string;
@@ -47,6 +49,7 @@ export class AgentStepViewModel implements AgentStep {
   tools: ToolExecutionViewModel[] = [];
   constructor(data: AgentStep) { this.update(data); }
   update(data: AgentStep): void {
+    this.usage = data.usage;
     this.retries = data.retries?.map((retry): RequestRetry => ({ attempt: retry.attempt, delayMs: retry.delayMs, code: retry.code, waiting: retry.waiting }));
     this.requestError = data.requestError;
     this.uiValidation = data.uiValidation;
