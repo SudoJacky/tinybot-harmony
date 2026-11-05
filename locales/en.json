@@ -2225,6 +2225,7 @@
   "我已阅读并同意用户协议": "I have read and agree to the User Agreement",
   "无法打开托管隐私政策，请重试。": "Unable to open the hosted Privacy Policy. Please try again.",
   "无法确认系统隐私授权（{0}），请重试。": "Unable to confirm system privacy consent ({0}). Please try again.",
+  "正在确认隐私授权…": "Checking privacy consent…",
   "请先在系统弹窗中同意隐私政策。": "Accept the Privacy Policy in the system dialog first.",
   "请先阅读并同意用户协议。": "Read and accept the User Agreement first.",
   "隐私托管尚未就绪，请稍后重试。": "The hosted Privacy Policy is not ready. Please try again later.",

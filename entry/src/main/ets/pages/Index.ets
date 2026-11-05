@@ -160,6 +160,17 @@ struct Index {
     this.reviewDisposed = false;
     this.paths.disableAnimation(false);
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+    const wasAllowed = this.privacy.allowed;
+    this.privacy.onPageShow();
+    // A newly granted result starts business through privacyChanged().
+    if (wasAllowed && this.privacy.allowed) { this.startBusiness(); }
+  }
+
+  onPageHide(): void {
+    this.privacy.onPageHide();
+  }
+
+  private startBusiness(): void {
     if (!this.privacy.allowed) { return; }
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     announcements.checkOnStartup(context).then(() => this.offerAnnouncement());
@@ -314,7 +325,7 @@ struct Index {
   }
 
   private privacyChanged(): void {
-    if (this.privacyAllowed) { this.onPageShow(); }
+    if (this.privacyAllowed) { this.startBusiness(); }
     else {
       this.closeAnnouncement();
       this.closeReviewInvitation(); this.startupBackupDialog?.close();
@@ -788,6 +799,7 @@ struct Index {
   }
 
   aboutToDisappear(): void {
+    this.privacy.onPageHide();
     this.reviewDisposed = true; this.closeReviewInvitation(); this.startupBackupDialog?.close();
     this.closeAnnouncement();
     this.unsubscribeLaunch?.(); this.unsubscribeLaunch = undefined;
@@ -1377,10 +1389,12 @@ struct Index {
             Button(t('同意并进入调试')).id('accept-debug-privacy').attributeModifier(Btn.primary)
               .onClick(() => this.privacy.acceptDebugConsent())
             Button(t('退出应用')).id('exit-debug-privacy').attributeModifier(Btn.tonal).onClick(() => this.privacy.exit())
+          } else if (this.privacy.checking) {
+            Text(t('正在确认隐私授权…')).id('privacy-status').fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
           } else if (this.privacy.error) {
             Text(this.privacy.error).id('privacy-status').fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
             Button(t('重试')).id('retry-privacy').attributeModifier(Btn.primary)
-              .enabled(!this.privacy.busy).onClick(() => this.privacy.requestConsent())
+              .enabled(!this.privacy.busy).onClick(() => this.privacy.refresh('manual_retry'))
             Button(t('退出应用')).id('exit-privacy').attributeModifier(Btn.tonal).onClick(() => this.privacy.exit())
           }
         }.padding(Space.xl).width('100%').height('100%').justifyContent(FlexAlign.Center)
@@ -1434,7 +1448,7 @@ struct Index {
                 Text(t("正在打开本地会话…")).fontColor($r('app.color.text_secondary'))
               } else {
                 Text(this.app.error).fontColor($r('app.color.danger')).textAlign(TextAlign.Center)
-                Button(t("重试读取")).attributeModifier(Btn.tonal).onClick(() => this.onPageShow())
+                Button(t("重试读取")).attributeModifier(Btn.tonal).onClick(() => this.startBusiness())
               }
             }.padding(Space.xl).layoutWeight(1).width('100%').justifyContent(FlexAlign.Center)
           }
