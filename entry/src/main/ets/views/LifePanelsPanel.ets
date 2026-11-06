@@ -54,7 +54,6 @@ export struct LifePanelsPanel {
   @State private refreshing: boolean = false;
   @State private cardHeights: Record<string, number> = {};
   @State private connectionStatus: string = '';
-  @State private editingLayout: boolean = false;
   @State private editingPrompt: boolean = false;
   @State private prompt: string = '';
   @State private editTarget: string = '';
@@ -226,7 +225,7 @@ export struct LifePanelsPanel {
     const entry = this.entryFor(key); this.layoutSaving = true;
     try {
       await this.boardStore().place(board.workspaceId, board.board.id, { workspaceId: entry.workspaceId, panelId: entry.panel.id }, this.targetRect, this.gestureLayout);
-      await this.reload(); this.feedback = t('布局已保存');
+      await this.reload();
     } catch (error) { this.report(error as Error); }
     finally { this.layoutSaving = false; this.resetGesture(); }
   }
@@ -353,7 +352,7 @@ export struct LifePanelsPanel {
       onMoveStart: (event: GestureEvent) => this.startMove(key, event), onMoveUpdate: (event: GestureEvent) => this.moveCard(event),
       onMoveEnd: (event: GestureEvent) => { this.dropCard(event); }, onMoveCancel: () => this.resetGesture(),
       onResize: (event: GestureEvent, finished: boolean, height: number) => { this.resizeCard(key, event, finished); },
-      onOpen: () => { this.selected = key; this.editingLayout = false; }, onRefresh: () => { this.refresh(this.entryFor(key)); },
+      onOpen: () => { this.selected = key; }, onRefresh: () => { this.refresh(this.entryFor(key)); },
       onToggle: (node: string, item: string, done: boolean) => { this.change(this.entryFor(key), 'toggle', node, item, done); },
       onArchive: () => { this.change(this.entryFor(key), 'archive'); },
       onConnect: () => { this.connectionEntry = this.entryFor(key); this.openSheet('connection'); },
@@ -368,7 +367,7 @@ export struct LifePanelsPanel {
   }
   private async pinOnBoard(board: BoardEntry, entry: PanelEntry, present: boolean): Promise<void> {
     if (this.boardSaving) { return; } this.boardSaving = true; this.error = '';
-    try { await this.boardStore().pin(board.workspaceId, board.board.id, { workspaceId: entry.workspaceId, panelId: entry.panel.id }, present); await this.reload(); this.feedback = present ? t('已添加到看板') : t('已从看板移除'); }
+    try { await this.boardStore().pin(board.workspaceId, board.board.id, { workspaceId: entry.workspaceId, panelId: entry.panel.id }, present); await this.reload(); }
     catch (error) { this.report(error as Error); }
     finally { this.boardSaving = false; }
   }
@@ -380,7 +379,7 @@ export struct LifePanelsPanel {
     if (this.boardSaving) { return; } this.boardSaving = true; this.error = '';
     try {
       const board = await this.boardStore().save(this.boardEditorWorkspace, this.boardEditorId, this.boardTitle, this.boardDescription);
-      this.boardSelection = this.boardEditorWorkspace + '/' + board.id; this.selected = ''; this.sheetOpen = false; await this.reload(); this.feedback = t('看板已保存');
+      this.boardSelection = this.boardEditorWorkspace + '/' + board.id; this.selected = ''; this.sheetOpen = false; await this.reload();
     } catch (error) { this.report(error as Error); }
     finally { this.boardSaving = false; }
   }
@@ -453,24 +452,10 @@ export struct LifePanelsPanel {
       }.width('100%').padding(24).alignItems(HorizontalAlign.Start)
     }.width('100%').height('100%').align(Alignment.TopStart)
   }
-  @Builder private boardToolbar() {
-    Row({ space: 8 }) {
-      Button(this.editingPrompt ? t('收起输入') : t('AI 修改')).attributeModifier(Btn.textSmall).id('life-board-ai')
-        .onClick(() => { this.getUIContext().animateTo({ duration: Motion.medium, curve: Motion.standard }, () => { this.editingPrompt = !this.editingPrompt; }); if (!this.editingPrompt) { this.editTarget = ''; } })
-      if (this.currentBoard()) {
-        Button(this.editingLayout ? t('完成布局') : t('调整布局')).attributeModifier(Btn.textSmall).id('life-board-layout')
-          .enabled(!this.layoutSaving).onClick(() => { this.getUIContext().animateTo({ duration: Motion.medium, curve: Motion.standard }, () => { this.editingLayout = !this.editingLayout; }); this.resetGesture(); })
-      }
-      Blank()
-      Button(this.refreshing ? t('刷新中') : t('全部刷新')).attributeModifier(Btn.textSmall).id('life-board-refresh')
-        .enabled(!this.refreshing).onClick(async () => { this.refreshing = true; try { await this.refreshAll(); } finally { this.refreshing = false; } })
-    }.width('100%').height(40)
-    if (this.editingLayout) {
-      Text(t('长按左上角移动，长按右下角调整；松手按网格落位')).fontSize(12).fontColor($r('app.color.text_secondary')).width('100%')
-    }
-  }
   @Builder private composer() {
     Column({ space: 8 }) {
+      if (this.feedback) { Text(this.feedback).fontSize(12).fontColor($r('app.color.text_secondary')).width('100%').transition(Motion.rise()) }
+
       TextArea({ text: this.prompt, placeholder: t('想在看板上添加或修改什么？') }).id('life-board-prompt').height(88).maxLength(4000)
         .onChange((value: string) => { this.prompt = value; })
       Row() {
@@ -491,6 +476,12 @@ export struct LifePanelsPanel {
   }
   @Builder private collectionMenu() {
     Menu() {
+      if (!this.selected && !this.removed) {
+        MenuItem({ content: this.editingPrompt ? t('收起输入') : t('AI 修改') })
+          .onClick(() => { this.editingPrompt = !this.editingPrompt; if (!this.editingPrompt) { this.editTarget = ''; } })
+        MenuItem({ content: this.refreshing ? t('刷新中') : t('全部刷新') }).enabled(!this.refreshing)
+          .onClick(async () => { this.refreshing = true; try { await this.refreshAll(); } finally { this.refreshing = false; } })
+      }
       MenuItem({ content: this.removed ? t('返回') : t('已移除') }).onClick(() => { this.removed = !this.removed; this.selected = ''; })
     }
   }
@@ -511,7 +502,7 @@ export struct LifePanelsPanel {
       .fontSize(14).labelStyle({ maxLines: 1 }).backgroundColor(this.boardSelection === key ? this.appearance.accent : $r('app.color.surface_variant'))
       .fontColor(this.boardSelection === key ? this.appearance.onAccent : $r('app.color.text_primary'))
       .accessibilityText(this.tabTitle(key) + (this.boardSelection === key ? t('，已选中') : ''))
-      .onClick(() => { this.error = ''; this.boardSelection = key; this.selected = ''; this.removed = false; this.editingLayout = false; this.editTarget = ''; this.resetGesture(); })
+      .onClick(() => { this.error = ''; this.boardSelection = key; this.selected = ''; this.removed = false; this.editTarget = ''; this.resetGesture(); })
   }
   @Builder private detail(key: string) {
     Scroll() {
@@ -550,13 +541,8 @@ export struct LifePanelsPanel {
           }.listDirection(Axis.Horizontal).height(40).width('100%').scrollBar(BarState.Off).onAreaChange(() => this.revealBoard())
           Row().width(12).height(40).linearGradient({ angle: 90, colors: [[gradientColor($r('app.color.page_background'), 0), 0], [gradientColor($r('app.color.page_background'), 1), 1]] }).hitTestBehavior(HitTestMode.None)
         }.width('100%')
-      if (!this.selected && !this.removed) { this.boardToolbar() }
       if (this.error) { Banner({ text: this.error }) }
-      if (this.feedback) { Text(this.feedback).fontSize(12).fontColor($r('app.color.text_secondary')).width('100%').transition(Motion.rise()) }
       if (this.removed) { Text(t('已移除')).fontSize(14).width('100%') }
-      if (this.currentBoard() && !this.selected && this.currentBoard()!.board.description) {
-        Text(this.currentBoard()!.board.description).fontSize(12).fontColor($r('app.color.text_secondary')).width('100%').maxLines(2)
-      }
       if (this.selected && this.visible().some((entry: PanelEntry) => this.entryKey(entry) === this.selected)) {
         Button(t('返回卡片列表')).attributeModifier(Btn.textSmall).onClick(() => { this.selected = ''; })
         ForEach(this.visible().filter((entry: PanelEntry) => this.entryKey(entry) === this.selected), (entry: PanelEntry) => {
@@ -572,7 +558,7 @@ export struct LifePanelsPanel {
               }.width('100%').padding({ top: 40 })
             } else {
               Stack({ alignContent: Alignment.TopStart }) {
-                if (this.currentBoard() && (this.editingLayout || this.dragging || this.resizing)) {
+                if (this.currentBoard() && (this.dragging || this.resizing)) {
                   PanelGridGuide({ step: gridStep(this.boardWidth), scrollY: this.scrollOffset, heightVp: this.viewportHeight,
                     color: gradientColor(this.appearance.accent, 0.15) }).width('100%').height(this.viewportHeight)
                     .position({ x: 0, y: this.scrollOffset }).hitTestBehavior(HitTestMode.None)

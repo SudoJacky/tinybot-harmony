@@ -134,7 +134,7 @@ async function main() {
   assert.equal(arranged.feedback,'Layout saved');assert.equal(arranged.targetRect.x,0);assert.equal(arranged.targetRect.y,12);
   assert.equal(JSON.stringify(arranged.boards),before,'Live preview must not mutate saved geometry');
   assert.deepEqual(JSON.parse(JSON.stringify(arranged.previewRects)),[rects[0],{x:0,y:12,w:6,h:5},rects[2]],'A B / C can become A / C / B');
-  await arranged.finishLayout();assert.equal(placement[2].panelId,'b');assert.equal(placement[3].y,12);assert.equal(arranged.dragging,'');assert.equal(arranged.feedback,'布局已保存');
+  await arranged.finishLayout();assert.equal(placement[2].panelId,'b');assert.equal(placement[3].y,12);assert.equal(arranged.dragging,'');assert.equal(arranged.feedback,'Layout saved','Saving geometry does not produce a page-level status row');
   arranged.startMove('chat/b',point(200,200));arranged.moveCard(point(200-6*step,200));
   assert.equal(arranged.previewRects[0].y,5,'Collision preview pushes A down');assert.equal(arranged.previewRects[2].y,10,'C follows cascade');
   arranged.resetGesture();assert.equal(JSON.stringify(arranged.boards),before,'Cancel restores layout');assert.equal(arranged.previewRects.length,0);
