@@ -157,7 +157,7 @@ export struct LifePanelsPanel {
   }
   private heightOnBoard(entry: PanelEntry): number {
     if (this.resizing === this.entryKey(entry)) { return this.resizeHeight; }
-    return this.currentBoard()?.board.items.find((item) => referenceKey(item) === this.entryKey(entry))?.height || entry.panel.definition.view?.height || 320;
+    return this.currentBoard()?.board.items.find((item) => referenceKey(item) === this.entryKey(entry))?.height || 0;
   }
   private resetGesture(): void {
     this.getUIContext().animateTo({ duration: Motion.medium, curve: Motion.thumb }, () => {
@@ -190,7 +190,7 @@ export struct LifePanelsPanel {
     const target = this.dragBefore === '$end' ? others.length : others.findIndex((entry: PanelEntry) => this.entryKey(entry) === this.dragBefore);
     if (target < 0) { return entries; } others.splice(target, 0, moving); return others;
   }
-  private async resizeCard(key: string, event: GestureEvent, finished: boolean): Promise<void> {
+  private async resizeCard(key: string, event: GestureEvent, finished: boolean, contentHeight: number = 0): Promise<void> {
     const board = this.currentBoard(); if (!board) { return; }
     const index = board.board.items.findIndex((item) => referenceKey(item) === key), item = board.board.items[index];
     if (!item) { return; }
@@ -198,7 +198,9 @@ export struct LifePanelsPanel {
     const finger = event.fingerList.find((point: FingerInfo) => !!point); if (!finger) { return; }
     if (!this.resizing) {
       this.resizeTouchX = finger.globalX - event.offsetX; this.resizeTouchY = finger.globalY - event.offsetY;
-      this.resizeOriginWidth = this.rect(key).width; this.resizeOriginHeight = this.heightOnBoard(this.entryFor(key)); this.resizing = key;
+      this.resizeOriginWidth = this.rect(key).width;
+      this.resizeOriginHeight = this.heightOnBoard(this.entryFor(key)) || contentHeight || this.entryFor(key).panel.definition.view?.height || 320;
+      this.resizing = key;
     }
     this.resizeWidth = Math.max((this.boardWidth - 12 * (this.columns() - 1)) / this.columns(), Math.min(this.boardWidth, this.resizeOriginWidth + finger.globalX - this.resizeTouchX));
     const unit = (this.boardWidth + 12) / this.columns();
@@ -334,7 +336,7 @@ export struct LifePanelsPanel {
       onRuntimeError: (message: string, revision: number) => { const entry = this.entryFor(key); this.panels().repository(entry.workspaceId).recordRuntimeError(entry.panel.id, revision, message).catch((error: Error) => this.report(error)); },
       onMoveStart: (event: GestureEvent) => this.startMove(key, event), onMoveUpdate: (event: GestureEvent) => this.moveCard(event),
       onMoveEnd: (event: GestureEvent) => { this.dropCard(this.entryFor(key), 0, event); }, onMoveCancel: () => this.resetGesture(),
-      onResize: (event: GestureEvent, finished: boolean) => { this.resizeCard(key, event, finished); },
+      onResize: (event: GestureEvent, finished: boolean, height: number) => { this.resizeCard(key, event, finished, height); },
       onOpen: () => { this.selected = key; this.editingLayout = false; }, onRefresh: () => { this.refresh(this.entryFor(key)); },
       onToggle: (node: string, item: string, done: boolean) => { this.change(this.entryFor(key), 'toggle', node, item, done); },
       onSize: (size: string) => { this.change(this.entryFor(key), size); }, onArchive: () => { this.change(this.entryFor(key), 'archive'); },

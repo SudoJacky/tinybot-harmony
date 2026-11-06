@@ -4,7 +4,7 @@ import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Btn, Radius, Motion, gradientColor } from '../common/Theme';
 import { t, getLocale } from '../model/I18n';
 import { MiniAppStorage } from '../model/MiniApp';
-import { WebUiPanelContext } from '../model/WebUi';
+import { WebUiPanelContext, WebUiSpec } from '../model/WebUi';
 import { WebUiView } from './WebUiView';
 import { IconButton } from '../common/Widgets';
 import { PanelNode, PanelRecord, PanelItem, PanelBinding, panelValue, panelText, panelNumber, panelItems, panelPoints } from '../model/LifePanel';
@@ -155,7 +155,9 @@ export struct LifePanelCard {
   @Prop timestamp: string = '';
   @Prop showFooter: boolean = true;
   @Prop editing: boolean = false;
-  @Prop viewHeight: number = 320;
+  @Prop viewHeight: number = 0;
+  @State private menuVisible: boolean = false;
+  private contentHeight: number = 0;
   storage?: MiniAppStorage;
   onRun: (inputs?: PanelInputs) => Promise<void> = async () => {};
   onRuntimeError: (message: string, revision: number) => void = () => {};
@@ -163,7 +165,14 @@ export struct LifePanelCard {
   onMoveUpdate: (event: GestureEvent) => void = () => {};
   onMoveEnd: (event: GestureEvent) => void = () => {};
   onMoveCancel: () => void = () => {};
-  onResize: (event: GestureEvent, finished: boolean) => void = () => {};
+  onResize: (event: GestureEvent, finished: boolean, height: number) => void = () => {};
+  private viewContent(): string {
+    const view = this.panel.definition.view!;
+    // The definition height is a starting viewport; inline cards follow their actual content.
+    const content: WebUiSpec = { version: view.version, html: view.html, css: view.css, js: view.js,
+      library: view.library, height: view.height, autoHeight: true };
+    return JSON.stringify(content);
+  }
   private context(): WebUiPanelContext {
     return { data: this.panel.data, title: this.panel.definition.title, status: this.busy ? 'running' : this.panel.error ? 'failed' : 'ready',
       canRefresh: !!this.panel.definition.source && !this.panel.archived, locale: getLocale(), theme: this.dark ? 'dark' : 'light', inputs: resolvePanelInputs(this.panel.definition.inputs, this.panel.inputs || {}),
@@ -181,6 +190,12 @@ export struct LifePanelCard {
   onEdit: () => void = () => {};
   @Builder private menu() {
     Menu() {
+      MenuItemGroup({ header: this.panel.definition.title, footer: this.timestamp }) {
+        if (!this.detail) { MenuItem({ content: t('展开卡片') }).onClick(this.onOpen) }
+        if (this.panel.definition.source && !this.panel.archived) {
+          MenuItem({ content: this.busy ? t('刷新中') : t('刷新') }).enabled(!this.busy).onClick(this.onRefresh)
+        }
+      }
       MenuItem({ content: t('用 AI 修改卡片') }).onClick(this.onEdit)
       MenuItem({ content: t('固定到看板') }).onClick(this.onPin)
       if (this.onBoard) { MenuItem({ content: t('从此看板移除') }).onClick(this.onUnpin) }
@@ -196,6 +211,7 @@ export struct LifePanelCard {
   }
   build() {
     Column({ space: this.panel.definition.view ? 0 : 10 }) {
+      if (!this.panel.definition.view || this.editing) {
       Row({ space: 6 }) {
         if (this.editing) {
           Text('⠿').fontSize(24).fontColor($r('app.color.text_secondary')).width(40).height(44).textAlign(TextAlign.Center)
@@ -219,6 +235,7 @@ export struct LifePanelCard {
             diameter: 36, iconSize: 14, onTap: this.onOpen })
         }
       }.width('100%').padding(this.panel.definition.view ? { left: 12, right: 12, top: 4, bottom: 4 } : 0)
+      }
       if (this.panel.runtimeError) {
         Text(this.panel.runtimeError).fontSize(12).fontColor($r('app.color.danger')).maxLines(3).padding(12)
         if (this.interactive) { Button(t('让 AI 修复')).attributeModifier(Btn.tonal).onClick(this.onEdit).margin(8) }
@@ -238,8 +255,9 @@ export struct LifePanelCard {
       }
       if (this.panel.definition.view) {
         if (this.storage) {
-          WebUiView({ content: JSON.stringify(this.panel.definition.view), storage: this.storage, panelContext: this.context(),
+          WebUiView({ content: this.viewContent(), storage: this.storage, panelContext: this.context(),
             interactive: this.interactive && !this.panel.archived && !this.editing, preferParentScroll: !this.detail, viewportHeight: this.viewHeight, onPanelRefresh: this.onRun,
+            onHeight: (height: number) => { this.contentHeight = height; },
             onRuntimeError: (message: string) => this.onRuntimeError(message, this.panel.configRevision) })
         } else {
           Button(t('打开交互卡片')).attributeModifier(Btn.tonal).onClick(this.onOpen)
@@ -254,12 +272,9 @@ export struct LifePanelCard {
         }, (node: PanelNode) => node.id)
       }.width('100%').alignItems(HorizontalAlign.Start)
       }
-      if (this.showFooter) {
+      if (this.showFooter && !this.panel.definition.view) {
       Row({ space: 4 }) {
         Text(this.timestamp).fontSize(11).fontColor($r('app.color.text_secondary')).layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-        if (this.panel.definition.view && !this.detail && !this.editing && this.interactive) {
-          IconButton({ icon: $r('sys.symbol.arrow_up_left_and_arrow_down_right'), label: t('展开卡片'), diameter: 40, iconSize: 18, onTap: this.onOpen })
-        }
         if (this.interactive && this.panel.definition.source && !this.panel.archived) {
           Button(this.busy ? t('刷新中') : t('刷新')).type(ButtonType.Normal).fontSize(11).padding({ left: 4, right: 4 })
             .height(40).constraintSize({ minWidth: 40 }).backgroundColor(Color.Transparent).fontColor($r('app.color.text_secondary')).enabled(this.interactive && !this.busy && !this.editing).onClick(this.onRefresh)
@@ -271,13 +286,22 @@ export struct LifePanelCard {
           Text(t('拖动调整尺寸')).fontSize(11).fontColor($r('app.color.text_secondary')).layoutWeight(1)
           Text('↘').fontSize(24).width(44).height(44).textAlign(TextAlign.Center).id('panel-resize-' + this.panel.id)
             .clickEffect(Motion.pressSmall).accessibilityText(t('调整卡片尺寸')).gesture(PanGesture()
-              .onActionStart((event: GestureEvent) => this.onResize(event, false))
-              .onActionUpdate((event: GestureEvent) => this.onResize(event, false))
-              .onActionEnd((event: GestureEvent) => this.onResize(event, true)).onActionCancel(this.onMoveCancel))
+              .onActionStart((event: GestureEvent) => this.onResize(event, false, this.contentHeight))
+              .onActionUpdate((event: GestureEvent) => this.onResize(event, false, this.contentHeight))
+              .onActionEnd((event: GestureEvent) => this.onResize(event, true, this.contentHeight)).onActionCancel(this.onMoveCancel))
         }.width('100%').padding(this.panel.definition.view ? { left: 12, right: 12 } : 0)
       }
-    }.width('100%').padding(this.panel.definition.view ? 0 : 14).backgroundColor($r('app.color.surface'))
-      .borderRadius(Radius.lg).border({ width: 1, color: $r('app.color.divider') })
+    }.width('100%').padding(this.panel.definition.view ? 0 : 14)
+      .backgroundColor(this.panel.definition.view ? Color.Transparent : $r('app.color.surface'))
+      .borderRadius(Radius.lg).border({ width: this.panel.definition.view ? 0 : 1, color: $r('app.color.divider') })
       .clip(!!this.panel.definition.view)
+      .priorityGesture(LongPressGesture({ repeat: false, duration: 350 }).tag('panel-menu').onAction(() => { this.menuVisible = true; }))
+      .onGestureRecognizerJudgeBegin((_event: BaseGestureEvent, recognizer: GestureRecognizer) => {
+        return recognizer.getTag() === 'panel-menu' && (!this.panel.definition.view || !this.interactive || this.editing)
+          ? GestureJudgeResult.REJECT : GestureJudgeResult.CONTINUE;
+      })
+      .bindContextMenu(this.menuVisible, this.menu, { systemMaterial: this.appearance.menu, mask: false,
+        onDisappear: () => { this.menuVisible = false; } })
+      .onClick(() => { if (!this.interactive) { this.onOpen(); } })
   }
 }

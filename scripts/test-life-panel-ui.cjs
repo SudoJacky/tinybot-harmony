@@ -133,6 +133,9 @@ async function main() {
   arranged.entries[0].panel.definition.view={height:320};
   await arranged.resizeCard('chat/a',{offsetX:100,offsetY:80,fingerList:[{globalX:300,globalY:400}]},false);assert.equal(arranged.resizeWidth,274);assert.equal(arranged.resizeHeight,400);assert.equal(arranged.sizeOnBoard(arranged.entries[0]),'M');
   await arranged.resizeCard('chat/a',{offsetX:100,offsetY:80,fingerList:[{globalX:300,globalY:400}]},true);assert.equal(reorder[4],'M');assert.equal(reorder[5],400);assert.equal(arranged.resizing,'');
+  await arranged.resizeCard('chat/a',{offsetX:0,offsetY:20,fingerList:[{globalX:300,globalY:400}]},false,220);
+  assert.equal(arranged.resizeHeight,240,'First manual resize uses measured content height, not the old definition viewport');
+  arranged.resetGesture();
   arranged.requestedTarget=JSON.stringify({workspaceId:'chat',panelId:'a'});arranged.targetChanged();assert.equal(arranged.selected,'chat/a');assert.equal(arranged.boardSelection,'');
   arranged.requestedTarget=JSON.stringify({workspaceId:'owner',boardId:'board'});arranged.targetChanged();assert.equal(arranged.boardSelection,'owner/board');assert.equal(arranged.selected,'');
   const composing=view();let sent=0,createdThreads=0,selectedThread='',editorSaved='',chatOpened=0;

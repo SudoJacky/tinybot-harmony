@@ -14,6 +14,7 @@ function renderer(name) {
   const methods = klass.members.filter(ts.isMethodDeclaration).map(n => n.getText(tree)).join('\n');
   let active = 0, next = 0;
   const observers = new Map(), branches = new Map(), rows = new Map(), children = new Map(), texts = new Map(), sheets = new Map(), buttons = new Map(), checks = new Map();
+  const attributes = new Map();
   const noop = () => {};
   const renderedItems = new Set();
   const listScopes = new Map();
@@ -29,7 +30,7 @@ function renderer(name) {
     if (method === 'bindSheet') return (...args) => {
       const bindings = sheets.get(active) || []; bindings.push(args); sheets.set(active, bindings);
     };
-    return noop;
+    return value => attributes.set(active, { ...attributes.get(active), kind, [method]: value });
   } });
   const globals = { exports: {}, console, Date, Math, Object, Map, Set, Error, Context: { animation: noop },
     ViewStackProcessor: { StartGetAccessRecordingFor: noop, StopGetAccessRecording: noop },
@@ -42,8 +43,8 @@ function renderer(name) {
     Diagnostics: { log: noop }, systemInsets: async () => [0, 24],
     LongPressGesture: element('gesture'), PanGesture: element('gesture'), GestureGroup: element('gesture'),
     GestureMode: {}, ScrollDirection: {}, BarState: {}, FontWeight: {}, FlexAlign: {}, TextAlign: {}, HorizontalAlign: {}, Alignment: {},
-    GesturePriority: {}, GestureMask: {}, SheetSize: {}, Gesture: element('gesture') };
-  for (const name of ['Column','Row','Scroll','Stack','Button','Blank','Text','TextInput','If','ForEach','Checkbox','List','ListItem','Refresh','SymbolGlyph','LoadingProgress']) globals[name] = element(name);
+    GesturePriority: {}, GestureMask: {}, GestureJudgeResult: { REJECT: 0, CONTINUE: 1 }, SheetSize: {}, Gesture: element('gesture') };
+  for (const name of ['Column','Row','Scroll','Stack','Button','Blank','Text','TextInput','If','ForEach','Checkbox','List','ListItem','Refresh','SymbolGlyph','LoadingProgress','Menu','MenuItem','MenuItemGroup']) globals[name] = element(name);
   vm.runInNewContext(ts.transpileModule('export class Probe {' + methods + '}', { compilerOptions: {
     target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS
   } }).outputText, globals);
@@ -52,7 +53,7 @@ function renderer(name) {
   Object.assign(view, {
     observeComponentCreation2(callback) { const id = ++next; observers.set(id, callback); invoke(id, callback, true); },
     ifElseBranchUpdateFunction(branch, build) { if (branches.get(active) !== branch) { branches.set(active, branch); build(); } },
-    forEachUpdateFunction(id, items, build, key) {
+    forEachUpdateFunction(id, items, build, key = item => JSON.stringify(item)) {
       if (!rows.has(id)) rows.set(id, new Set());
       if (!listScopes.has(id)) listScopes.set(id, new Map());
       const nextKeys = new Set(items.map(key)), scopes = listScopes.get(id);
@@ -70,7 +71,7 @@ function renderer(name) {
     },
     updateStateVarsOfChildByElmtId(id, params) { if (children.has(id)) Object.assign(children.get(id), params); }
   });
-  return { view, children, texts, sheets, buttons, checks, globals, update() {
+  return { view, children, texts, sheets, buttons, checks, attributes, globals, update() {
     for (const [id,callback] of [...observers]) if (observers.has(id)) invoke(id,callback,false);
   } };
 }
@@ -116,6 +117,7 @@ for(const selected of ['', 'workspace/metric']) {
     panels:()=>({repository:()=>({isRefreshing:()=>false,binding:(id,revision)=>({id,revision})})})});
   page.initialRender();const id=[...layout.children.keys()][0],storage=layout.children.get(id).storage;
   assert.equal(layout.children.get(id).cardSize,'M','Legacy cards use the definition size before user customization');
+  assert.equal(layout.children.get(id).viewHeight, selected ? 500 : 0, 'Only expanded cards force a viewport height');
   for(const size of ['S','L','M']) {
     page.entries=[{...html,panel:{...html.panel,layout:{size}}}];layout.update();
     assert.equal(layout.children.size,1,'Layout changes retain both list and detail card instances');
@@ -125,6 +127,9 @@ for(const selected of ['', 'workspace/metric']) {
   }
   page.boards=[{workspaceId:'workspace',board:{id:'layout',items:[{workspaceId:'workspace',panelId:'metric',size:'S'}]}}];
   page.boardSelection='workspace/layout';assert.equal(page.sizeOnBoard(page.entries[0]),'S','Board-specific dimensions take precedence');
+  assert.equal(page.heightOnBoard(page.entries[0]),0,'Unresized board cards fit their content');
+  page.boards[0].board.items[0].height=410;
+  assert.equal(page.heightOnBoard(page.entries[0]),410,'Manual board height takes precedence over content height');
 }
 console.log('PASS layout resizing updates retained list/detail cards without replacing their HTML storage binding');
 
@@ -176,7 +181,7 @@ const initialCard = inline.children.get(inlineId);
 assert.equal(storage.id, 'metric'); assert.equal(storage.revision, 1);
 assert.equal(inline.children.get(inlineId).interactive, false);
 assert.equal(inline.children.get(inlineId).showFooter, false);
-assert.equal(inline.children.get(inlineId).viewHeight, 280);
+assert.equal(inline.children.get(inlineId).viewHeight, undefined, 'Chat previews use the card default content height');
 assert.deepEqual([...inline.buttons.values()], ['固定到看板'], 'One pin action below a self-opening preview, with no duplicate open button');
 inlineView.entries = [{ ...htmlEntry, panel: { ...htmlEntry.panel, data: { total: 88 } } }]; inline.update();
 assert.equal(inline.children.size, 1); assert.equal(inline.children.get(inlineId).panel.data.total, 88);
@@ -186,12 +191,39 @@ inlineView.entries = [changed]; inline.update();
 assert.ok([...inline.children.values()].some(child => child.storage.revision === 2), 'A new configuration gets a fresh revision-bound storage capability');
 
 const card = renderer('LifePanelCard');
-Object.assign(card.view, { ...initialCard, appearance: {}, dark: false, editing: false, detail: false, timestamp: '' });
+Object.assign(card.view, { ...initialCard, appearance: {}, dark: false, editing: false, detail: false, timestamp: '', viewHeight: 0 });
 card.view.initialRender();
 assert.equal(card.children.size, 1, 'The real card mounts its Web UI automatically');
 assert.equal([...card.children.values()][0].storage, storage);
 assert.ok(![...card.buttons.values()].includes('打开交互卡片'));
 assert.ok(![...card.texts.values()].includes('生活看板'));
+assert.ok(![...card.texts.values()].includes('Metric'), 'HTML supplies its own title without a native duplicate');
+const web = [...card.children.values()][0];
+assert.equal(JSON.parse(web.content).autoHeight,true,'Existing fixed-height HTML cards also shrink to content');
+assert.equal(web.viewportHeight,0);
+web.onHeight(192); assert.equal(card.view.contentHeight,192,'Resizing starts from the measured HTML content');
+let opened=0; card.view.onOpen=()=>opened++;
+const cardRoot = [...card.attributes.values()].find(a=>'bindContextMenu' in a);
+cardRoot.onClick();
+assert.equal(opened,1,'Noninteractive chat previews open when tapped');
+const menuGesture={getTag:()=> 'panel-menu'};
+assert.equal(cardRoot.onGestureRecognizerJudgeBegin({},menuGesture),0,'Preview taps and parent message gestures remain available');
+card.view.interactive=true;card.view.timestamp='Updated just now';card.view.onRefresh=()=>opened++;
+assert.equal(cardRoot.onGestureRecognizerJudgeBegin({},menuGesture),1,'Interactive HTML gets priority over Web text selection');
+card.view.editing=true;
+assert.equal(cardRoot.onGestureRecognizerJudgeBegin({},menuGesture),0,'Layout editing retains its drag gestures');
+card.view.editing=false;
+card.view.menu();
+const menuItems=[...card.attributes.values()].filter(a=>a.kind==='MenuItem'&&a.create);
+menuItems.find(a=>a.create.content==='展开卡片').onClick();
+menuItems.find(a=>a.create.content==='刷新').onClick();
+assert.equal(opened,3,'The HTML context menu exposes working open and refresh actions');
+assert.ok([...card.attributes.values()].some(a=>a.kind==='MenuItemGroup'&&a.create?.footer==='Updated just now'));
+const failed=renderer('LifePanelCard');
+Object.assign(failed.view,{...initialCard,panel:{...initialCard.panel,runtimeError:'Broken script',error:'Network unavailable'},appearance:{},interactive:true,showFooter:true});
+failed.view.initialRender();
+assert.ok([...failed.texts.values()].includes('Broken script'));
+assert.ok([...failed.texts.values()].includes('Network unavailable'),'Removing the frame must retain visible failure messages');
 console.log('PASS published HTML cards mount real content automatically, retain data updates, replace edited configurations, and expose one pin action');
 
 const tasks = renderer('PanelTaskPanel'), task = tasks.view;
