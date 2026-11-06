@@ -157,6 +157,9 @@ export struct LifePanelCard {
   @Prop editing: boolean = false;
   @Prop viewHeight: number = 0;
   @State private menuVisible: boolean = false;
+  @State private layoutAction: string = '';
+  private cardWidth: number = 0;
+  private cardHeight: number = 0;
   private contentHeight: number = 0;
   storage?: MiniAppStorage;
   onRun: (inputs?: PanelInputs) => Promise<void> = async () => {};
@@ -166,10 +169,35 @@ export struct LifePanelCard {
   onMoveEnd: (event: GestureEvent) => void = () => {};
   onMoveCancel: () => void = () => {};
   onResize: (event: GestureEvent, finished: boolean, height: number) => void = () => {};
+  private cornerAction(event: BaseGestureEvent): string {
+    if (!this.onBoard || !this.interactive || this.detail || this.editing || this.panel.archived) { return ''; }
+    const finger = event.fingerList.find((point: FingerInfo) => !!point);
+    if (!finger || this.cardWidth <= 0 || this.cardHeight <= 0) { return ''; }
+    if (finger.localX >= 0 && finger.localX <= 48 && finger.localY >= 0 && finger.localY <= 48) { return 'move'; }
+    if (finger.localX >= this.cardWidth - 48 && finger.localX <= this.cardWidth &&
+      finger.localY >= this.cardHeight - 48 && finger.localY <= this.cardHeight) { return 'resize'; }
+    return '';
+  }
+  private beginPress(event: GestureEvent): void {
+    this.layoutAction = this.cornerAction(event);
+    if (this.layoutAction === 'move') { this.onMoveStart(event); }
+    else if (!this.layoutAction) { this.menuVisible = true; }
+  }
+  private panLayout(event: GestureEvent, finished: boolean): void {
+    if (this.layoutAction === 'move') {
+      if (finished) { this.onMoveEnd(event); } else { this.onMoveUpdate(event); }
+    } else if (this.layoutAction === 'resize') { this.onResize(event, finished, this.contentHeight); }
+    if (finished) { this.layoutAction = ''; }
+  }
+  private cancelPress(): void {
+    if (this.layoutAction) { this.layoutAction = ''; this.onMoveCancel(); }
+  }
   private viewContent(): string {
     const view = this.panel.definition.view!;
     // The definition height is a starting viewport; inline cards follow their actual content.
-    const content: WebUiSpec = { version: view.version, html: view.html, css: view.css, js: view.js,
+    // Long presses belong to native card actions. Keep text entry selectable.
+    const css = view.css + '\nhtml{user-select:none;-webkit-user-select:none}input,textarea,[contenteditable=true]{user-select:text;-webkit-user-select:text}';
+    const content: WebUiSpec = { version: view.version, html: view.html, css: css, js: view.js,
       library: view.library, height: view.height, autoHeight: true };
     return JSON.stringify(content);
   }
@@ -256,7 +284,7 @@ export struct LifePanelCard {
       if (this.panel.definition.view) {
         if (this.storage) {
           WebUiView({ content: this.viewContent(), storage: this.storage, panelContext: this.context(),
-            interactive: this.interactive && !this.panel.archived && !this.editing, preferParentScroll: !this.detail, viewportHeight: this.viewHeight, onPanelRefresh: this.onRun,
+            interactive: this.interactive && !this.panel.archived && !this.editing && !this.layoutAction, preferParentScroll: !this.detail, viewportHeight: this.viewHeight, onPanelRefresh: this.onRun,
             onHeight: (height: number) => { this.contentHeight = height; },
             onRuntimeError: (message: string) => this.onRuntimeError(message, this.panel.configRevision) })
         } else {
@@ -266,7 +294,7 @@ export struct LifePanelCard {
       } else {
       Column({ space: 10 }) {
         ForEach(this.panel.definition.nodes.filter((node: PanelNode) => !node.parent), (node: PanelNode) => {
-          PanelComponent({ panel: this.panel, node: node, interactive: this.interactive && !this.editing && !this.busy && !this.panel.archived,
+          PanelComponent({ panel: this.panel, node: node, interactive: this.interactive && !this.editing && !this.layoutAction && !this.busy && !this.panel.archived,
             expanded: this.detail || (this.cardSize || this.panel.layout?.size || this.panel.definition.size) === 'L', compact: !this.detail && (this.cardSize || this.panel.layout?.size || this.panel.definition.size) === 'S',
             onToggle: this.onToggle, onRefresh: this.onRefresh })
         }, (node: PanelNode) => node.id)
@@ -295,9 +323,14 @@ export struct LifePanelCard {
       .backgroundColor(this.panel.definition.view ? Color.Transparent : $r('app.color.surface'))
       .borderRadius(Radius.lg).border({ width: this.panel.definition.view ? 0 : 1, color: $r('app.color.divider') })
       .clip(!!this.panel.definition.view)
-      .priorityGesture(LongPressGesture({ repeat: false, duration: 350 }).tag('panel-menu').onAction(() => { this.menuVisible = true; }))
-      .onGestureRecognizerJudgeBegin((_event: BaseGestureEvent, recognizer: GestureRecognizer) => {
-        return recognizer.getTag() === 'panel-menu' && (!this.panel.definition.view || !this.interactive || this.editing)
+      .onAreaChange((_old: Area, area: Area) => { this.cardWidth = Number(area.width); this.cardHeight = Number(area.height); })
+      .priorityGesture(GestureGroup(GestureMode.Sequence,
+        LongPressGesture({ repeat: false, duration: 350 }).tag('panel-press').onAction((event: GestureEvent) => this.beginPress(event)),
+        PanGesture().onActionStart((event: GestureEvent) => this.panLayout(event, false))
+          .onActionUpdate((event: GestureEvent) => this.panLayout(event, false))
+          .onActionEnd((event: GestureEvent) => this.panLayout(event, true))).onCancel(() => this.cancelPress()))
+      .onGestureRecognizerJudgeBegin((event: BaseGestureEvent, recognizer: GestureRecognizer) => {
+        return recognizer.getTag() === 'panel-press' && !this.cornerAction(event) && (!this.panel.definition.view || !this.interactive || this.editing)
           ? GestureJudgeResult.REJECT : GestureJudgeResult.CONTINUE;
       })
       .bindContextMenu(this.menuVisible, this.menu, { systemMaterial: this.appearance.menu, mask: false,

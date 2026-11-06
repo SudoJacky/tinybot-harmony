@@ -1,5 +1,5 @@
 import { PanelInputs } from '../model/PanelContract';
-import { PanelRect, panelMasonry, panelSourceLabel, panelRunLabel, panelErrorText } from '../model/PanelPresentation';
+import { PanelRect, panelMasonry, panelDropTarget, panelSourceLabel, panelRunLabel, panelErrorText } from '../model/PanelPresentation';
 import { common } from '@kit.AbilityKit';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Btn, Motion, relativeTime, gradientColor } from '../common/Theme';
@@ -169,14 +169,14 @@ export struct LifePanelsPanel {
     const finger = event.fingerList.find((point: FingerInfo) => !!point); if (!finger) { return; }
     this.dragTouchX = finger.globalX; this.dragTouchY = finger.globalY;
     this.dragRects = this.layouts(); this.dragKeys = this.visible().map((entry: PanelEntry) => this.entryKey(entry));
-    this.dragOrigin = this.rect(key); this.dragging = key; this.feedback = ''; this.dragBefore = '';
+    this.dragOrigin = this.rect(key); this.dragging = key; this.dragBefore = '';
   }
   private moveCard(event: GestureEvent): void {
     if (!this.dragging || this.layoutSaving) { return; }
     const finger = event.fingerList.find((point: FingerInfo) => !!point); if (!finger) { return; }
     this.dragX = finger.globalX - this.dragTouchX; this.dragY = finger.globalY - this.dragTouchY;
     const x = this.dragOrigin.x + this.dragOrigin.width / 2 + this.dragX, y = this.dragOrigin.y + this.dragOrigin.height / 2 + this.dragY;
-    const target = this.dragRects.findIndex((rect: PanelRect) => x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height);
+    const target = panelDropTarget(this.dragRects, x, y);
     const current = this.dragKeys.indexOf(this.dragging);
     const before = target < 0 || target === current ? '' : target > current ? this.dragKeys[target + 1] || '$end' : this.dragKeys[target];
     if (before !== this.dragBefore) { this.dragBefore = before; }

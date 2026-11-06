@@ -206,7 +206,7 @@ let opened=0; card.view.onOpen=()=>opened++;
 const cardRoot = [...card.attributes.values()].find(a=>'bindContextMenu' in a);
 cardRoot.onClick();
 assert.equal(opened,1,'Noninteractive chat previews open when tapped');
-const menuGesture={getTag:()=> 'panel-menu'};
+const menuGesture={getTag:()=> 'panel-press'};
 assert.equal(cardRoot.onGestureRecognizerJudgeBegin({},menuGesture),0,'Preview taps and parent message gestures remain available');
 card.view.interactive=true;card.view.timestamp='Updated just now';card.view.onRefresh=()=>opened++;
 assert.equal(cardRoot.onGestureRecognizerJudgeBegin({},menuGesture),1,'Interactive HTML gets priority over Web text selection');
@@ -225,6 +225,33 @@ failed.view.initialRender();
 assert.ok([...failed.texts.values()].includes('Broken script'));
 assert.ok([...failed.texts.values()].includes('Network unavailable'),'Removing the frame must retain visible failure messages');
 console.log('PASS published HTML cards mount real content automatically, retain data updates, replace edited configurations, and expose one pin action');
+
+const corner = renderer('LifePanelCard').view, gestureCalls = [];
+Object.assign(corner, { panel: initialCard.panel, onBoard: true, interactive: true, detail: false, editing: false,
+  cardWidth: 340, cardHeight: 220, contentHeight: 220, layoutAction: '', menuVisible: false,
+  onMoveStart: e => gestureCalls.push(['start', e]), onMoveUpdate: e => gestureCalls.push(['move', e]),
+  onMoveEnd: e => gestureCalls.push(['drop', e]), onMoveCancel: () => gestureCalls.push(['cancel']),
+  onResize: (e, finished, height) => gestureCalls.push(['resize', e, finished, height]) });
+const point = (x, y) => ({ fingerList: [{ localX: x, localY: y, globalX: x + 100, globalY: y + 400 }] });
+const topLeft=point(24,24), bottomRight=point(320,200), center=point(170,110);
+corner.beginPress(topLeft); assert.equal(corner.layoutAction,'move'); assert.equal(corner.menuVisible,false);
+corner.panLayout(center,false); corner.panLayout(center,true);
+assert.deepEqual(gestureCalls.map(c=>c[0]),['start','move','drop']); assert.equal(corner.layoutAction,'');
+gestureCalls.length=0;corner.beginPress(bottomRight);
+assert.equal(gestureCalls.length,0,'A resize press alone does not persist or invent pan offsets');
+corner.panLayout(center,false); corner.panLayout(center,true);
+assert.deepEqual(gestureCalls.map(c=>[c[0],c[2],c[3]]),[['resize',false,220],['resize',true,220]]);
+gestureCalls.length=0;corner.beginPress(topLeft);corner.cancelPress();
+assert.deepEqual(gestureCalls.map(c=>c[0]),['start','cancel']);assert.equal(corner.layoutAction,'');
+corner.beginPress(center);assert.equal(corner.menuVisible,true);assert.equal(corner.layoutAction,'');
+for(const [field, value] of [['onBoard',false],['interactive',false],['detail',true],['editing',true]]) {
+  const previous=corner[field];corner[field]=value;
+  assert.equal(corner.cornerAction(topLeft),'');assert.equal(corner.cornerAction(bottomRight),'');corner[field]=previous;
+}
+corner.panel={...initialCard.panel,definition:{...initialCard.panel.definition,view:undefined}};
+assert.equal(corner.cornerAction(topLeft),'move');assert.equal(corner.cornerAction(bottomRight),'resize');
+assert.equal(corner.cornerAction(point(49,49)),'');assert.equal(corner.cornerAction(point(341,221)),'');
+console.log('PASS board corners route HTML/native move and resize, preserve center menus, cancel cleanly and exclude previews/detail/editing');
 
 const tasks = renderer('PanelTaskPanel'), task = tasks.view;
 Object.assign(task,{entry:first,error:'',record:{definition:{title:'Metric',refreshMinutes:1,source:{type:'workspace-json'}},

@@ -25,6 +25,19 @@ export function panelSourceLabel(panel: PanelRecord): string {
   return type === 'api' ? t('API 数据源') : type === 'workspace-json' ? t('工作区文件') : type === 'agent' ? t('Agent 内容更新') : type === 'mail' ? t('邮箱数据刷新') : t('本地数据');
 }
 export interface PanelRect { x: number; y: number; width: number; height: number; }
+// Empty space below the board is an end position; gaps belong to the nearest card.
+export function panelDropTarget(rects: PanelRect[], x: number, y: number): number {
+  if (rects.length === 0) { return -1; }
+  if (y >= Math.max(...rects.map((rect: PanelRect) => rect.y + rect.height))) { return rects.length; }
+  let target = -1, distance = Number.MAX_VALUE;
+  rects.forEach((rect: PanelRect, index: number) => {
+    const dx = Math.max(rect.x - x, 0, x - rect.x - rect.width);
+    const dy = Math.max(rect.y - y, 0, y - rect.y - rect.height);
+    const next = dx * dx + dy * dy;
+    if (next < distance) { target = index; distance = next; }
+  });
+  return target;
+}
 // Measured card heights keep short lists compact and place later cards below all
 // columns they span. Geometry is shared by rendering and drag hit testing.
 export function panelMasonry(width: number, columns: number, spans: number[], heights: number[]): PanelRect[] {
