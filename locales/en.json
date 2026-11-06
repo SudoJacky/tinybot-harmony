@@ -2867,5 +2867,8 @@
   "余额查询未完成，请重新刷新。": "The balance query did not complete. Refresh again.",
   "模型服务余额": "Provider balance",
   "创建 Provider 余额卡片": "Create provider balance card",
-  "请先读取 get_life_panel_catalog 的 balance 部分，为已配置的 Provider 创建 HTML 余额卡片。采用精简 Wallet Card 样式：保留账户切换、隐藏余额和右上角刷新，只显示余额数值，不显示单位、变化量、搜索框和底部按钮。使用 provider-balance 数据源，验证后发布；若没有可查询的服务，请说明需要配置的内容。": "Read the balance section of get_life_panel_catalog, then create an HTML balance card for configured providers. Use a minimal Wallet Card style: account switching, balance privacy and a top-right refresh icon. Display the balance number without units, change indicators, search or bottom buttons. Use the provider-balance data source, validate and publish. If no provider is available, explain the required setup."
+  "请先读取 get_life_panel_catalog 的 balance 部分，为已配置的 Provider 创建 HTML 余额卡片。采用精简 Wallet Card 样式：保留账户切换、隐藏余额和右上角刷新，只显示余额数值，不显示单位、变化量、搜索框和底部按钮。使用 provider-balance 数据源，验证后发布；若没有可查询的服务，请说明需要配置的内容。": "Read the balance section of get_life_panel_catalog, then create an HTML balance card for configured providers. Use a minimal Wallet Card style: account switching, balance privacy and a top-right refresh icon. Display the balance number without units, change indicators, search or bottom buttons. Use the provider-balance data source, validate and publish. If no provider is available, explain the required setup.",
+  "拍照": "Camera",
+  "拍照失败：": "Could not take photo: ",
+  "相机未返回有效照片（{0}）。": "The camera did not return a valid photo ({0})."
 }

@@ -256,10 +256,11 @@ assert.match(addSource, /this\.showPlus = true;/, 'Phones keep the existing add 
 const plusRootAt = chatSource.indexOf('plusRootPane(parent = null)');
 assert.ok(plusRootAt > 0, 'Locate the emitted add root pane');
 const plusRoot = chatSource.slice(plusRootAt, plusRootAt + 12000);
-for (const id of ['plus-menu-photo', 'plus-menu-text', 'plus-menu-drawing', 'plus-menu-workspace',
-  'plus-menu-memory', 'plus-menu-team', 'plus-menu-reference', 'plus-menu-templates']) {
+for (const id of ['plus-menu-photo', 'plus-menu-camera', 'plus-menu-text', 'plus-menu-drawing', 'plus-menu-workspace',
+  'plus-menu-reference', 'plus-menu-templates']) {
   assert.ok(plusRoot.includes("'" + id + "'"), 'The add menu keeps ' + id);
 }
+assert.ok(!plusRoot.includes("'plus-menu-memory'") && !plusRoot.includes("'plus-menu-team'"));
 const plusTemplatesAt = chatSource.indexOf('plusTemplatesPane(parent = null)');
 assert.ok(plusTemplatesAt > 0, 'Locate the emitted template pane');
 const plusTemplates = chatSource.slice(plusTemplatesAt, plusTemplatesAt + 9000);
