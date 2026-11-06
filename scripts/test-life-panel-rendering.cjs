@@ -42,7 +42,7 @@ function renderer(name) {
     WebUiView: class { constructor(parent, params, _storage, id) { children.set(id, { ...params }); } },
     Diagnostics: { log: noop }, systemInsets: async () => [0, 24],
     LongPressGesture: element('gesture'), PanGesture: element('gesture'), GestureGroup: element('gesture'),
-    GestureMode: {}, ScrollDirection: {}, BarState: {}, FontWeight: {}, FlexAlign: {}, TextAlign: {}, HorizontalAlign: {}, Alignment: {},
+    NestedScrollMode: {}, BorderStyle: {}, PanelGridGuide: class {}, GestureMode: {}, ScrollDirection: {Vertical:1,None:0}, BarState: {}, FontWeight: {}, FlexAlign: {}, TextAlign: {}, HorizontalAlign: {}, Alignment: {},
     GesturePriority: {}, GestureMask: {}, GestureJudgeResult: { REJECT: 0, CONTINUE: 1 }, SheetSize: {}, Gesture: element('gesture') };
   for (const name of ['Column','Row','Scroll','Stack','Button','Blank','Text','TextInput','If','ForEach','Checkbox','List','ListItem','Refresh','SymbolGlyph','LoadingProgress','Menu','MenuItem','MenuItemGroup','NavDestination']) globals[name] = element(name);
   vm.runInNewContext(ts.transpileModule('export class Probe {' + methods + '}', { compilerOptions: {
@@ -81,7 +81,7 @@ let running = false;
 const first = { workspaceId:'workspace', panel:{id:'metric',configRevision:1,archived:false,refreshedAt:10,
   data:{total:42},runs:[],definition:{title:'Metric',size:'M',source:{type:'workspace-json'}}} };
 const panelState={entries:[first],boards:[],boardSelection:'',selected:'',removed:false,error:'',pending:[],now:10,
-  boardScroller:{scrollToIndex(){}},appearance:{},boardWidth:360,refreshing:false,cardHeights:{},dragging:'',resizing:'',dragBefore:'',cardQuery:'',dragX:0,dragY:0,creating:false,app:{ready:true,busy:false},sheetOpen:false,sheetKind:'',
+  boardScroller:{scrollToIndex(){}},appearance:{},boardWidth:360,refreshing:false,cardHeights:{},dragging:'',resizing:'',previewRects:[],gestureItems:[],viewportHeight:500,scrollOffset:0,contentScroller:{},cardQuery:'',dragX:0,dragY:0,creating:false,app:{ready:true,busy:false},sheetOpen:false,sheetKind:'',
   rect:()=>({x:0,y:0,width:360,height:180}),boardHeight:()=>180,
   panels:()=>({repository:()=>({isRefreshing:()=>running,binding:()=>undefined})})};
 Object.assign(p,panelState);
@@ -110,6 +110,14 @@ p.detailChanged = originalDetailChanged;
 for (const kind of ['connection','board','pin','task']) { p.openSheet(kind); assert.equal(p.sheetKind,kind); assert.equal(p.sheetOpen,true); assert.ok(p.sheetTitle()); p.sheetOpen=false; }
 console.log('PASS retained card renders refreshed data/time/user state without remounting; actions use current state; sheets share one host');
 
+const draggingView=renderer('LifePanelsPanel');
+Object.assign(draggingView.view,panelState,{dragging:'workspace/metric',dragOrigin:{x:0,y:0,width:360,height:180},targetRect:{w:6,h:4},ghost:()=>({x:0,y:0,width:176,height:115})});
+draggingView.view.initialRender();
+const gridScroll=[...draggingView.attributes.values()].find(a=>a.id==='life-panel-list');
+assert.equal(gridScroll.enableScrollInteraction,false,'The card gesture owns touch scrolling during a drag');
+assert.equal(gridScroll.scrollable,1,'Programmatic vertical edge scrolling stays enabled while dragging');
+assert.ok([...draggingView.texts.values()].includes('6 × 4'),'The snapped preview shows its cell dimensions');
+
 for(const selected of ['', 'workspace/metric']) {
   const layout=renderer('LifePanelsPanel'),page=layout.view;
   const html={...first,panel:{...first.panel,definition:{...first.panel.definition,view:{height:320}}}};
@@ -121,15 +129,16 @@ for(const selected of ['', 'workspace/metric']) {
   for(const size of ['S','L','M']) {
     page.entries=[{...html,panel:{...html.panel,layout:{size}}}];layout.update();
     assert.equal(layout.children.size,1,'Layout changes retain both list and detail card instances');
-    assert.equal(layout.children.get(id).cardSize,size,'Retained cards receive the new layout size');
+    assert.equal(layout.children.get(id).cardSize,'M','Legacy S/M/L no longer changes collection geometry');
     assert.equal(layout.children.get(id).storage,storage,'Resizing retains the valid storage binding and HTML session');
     assert.equal(layout.children.get(id).panel.configRevision,storage.revision);
   }
-  page.boards=[{workspaceId:'workspace',board:{id:'layout',items:[{workspaceId:'workspace',panelId:'metric',size:'S'}]}}];
-  page.boardSelection='workspace/layout';assert.equal(page.sizeOnBoard(page.entries[0]),'S','Board-specific dimensions take precedence');
-  assert.equal(page.heightOnBoard(page.entries[0]),0,'Unresized board cards fit their content');
-  page.boards[0].board.items[0].height=410;
-  assert.equal(page.heightOnBoard(page.entries[0]),410,'Manual board height takes precedence over content height');
+  page.boards=[{workspaceId:'workspace',board:{id:'layout',items:[{workspaceId:'workspace',panelId:'metric',x:0,y:0,w:5,h:6}]}}];
+  page.boardSelection='workspace/layout';page.rect=()=>({x:0,y:0,width:145,height:176});layout.update();
+  assert.equal(layout.children.get(id).viewHeight,selected?500:176);
+  assert.equal(layout.children.get(id).frameHeight,selected?0:176);
+  assert.equal(layout.children.get(id).storage,storage,'Grid resizing preserves the HTML storage session');
+
 }
 console.log('PASS layout resizing updates retained list/detail cards without replacing their HTML storage binding');
 
@@ -191,7 +200,7 @@ inlineView.entries = [changed]; inline.update();
 assert.ok([...inline.children.values()].some(child => child.storage.revision === 2), 'A new configuration gets a fresh revision-bound storage capability');
 
 const card = renderer('LifePanelCard');
-Object.assign(card.view, { ...initialCard, appearance: {}, dark: false, editing: false, detail: false, timestamp: '', viewHeight: 0 });
+Object.assign(card.view, { ...initialCard, appearance: {}, dark: false, editing: false, detail: false, timestamp: '', viewHeight: 0, frameHeight: 0 });
 card.view.initialRender();
 assert.equal(card.children.size, 1, 'The real card mounts its Web UI automatically');
 assert.equal([...card.children.values()][0].storage, storage);
@@ -251,6 +260,9 @@ for(const [field, value] of [['onBoard',false],['interactive',false],['detail',t
 corner.panel={...initialCard.panel,definition:{...initialCard.panel.definition,view:undefined}};
 assert.equal(corner.cornerAction(topLeft),'move');assert.equal(corner.cornerAction(bottomRight),'resize');
 assert.equal(corner.cornerAction(point(49,49)),'');assert.equal(corner.cornerAction(point(341,221)),'');
+corner.cardWidth=50;corner.cardHeight=50;
+assert.equal(corner.cornerAction(point(10,10)),'move');assert.equal(corner.cornerAction(point(40,40)),'resize');
+assert.equal(corner.cornerAction(point(40,10)),'','Minimum-size cards retain a separate menu area');
 console.log('PASS board corners route HTML/native move and resize, preserve center menus, cancel cleanly and exclude previews/detail/editing');
 
 const tasks = renderer('PanelTaskPanel'), task = tasks.view;

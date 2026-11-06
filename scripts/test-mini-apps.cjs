@@ -595,7 +595,7 @@ async function lifePanelScriptTest() {
 }
 async function lifeBoardsTest() {
   const {LifePanels}=load('services/LifePanels'),{LifeBoards}=load('services/LifeBoards'),{LifePanelTools}=load('services/LifePanelTools');
-  const {publishedPanels}=load('model/PublishedPanel'),{parsePanelTarget}=load('model/LifeBoard'),{panelDue}=load('model/LifePanel');
+  const {publishedPanels}=load('model/PublishedPanel'),{parsePanelTarget,boardLayoutKey}=load('model/LifeBoard'),{panelDue}=load('model/LifePanel');
   const dir='/sandbox/boards',ws=new WorkspaceStore(dir),panels=new LifePanels(dir),boards=new LifeBoards(dir);
   fs.mkdirSync(disk(dir),{recursive:true});for(const id of ['owner','another-chat','empty-board'])await ws.ensureThread(id);
   const spec={version:1,title:'Shared tasks',size:'L',data:{tasks:[{id:'one',label:'One'}]},nodes:[{id:'tasks',kind:'Checklist',items:{path:'/data/tasks'}}]};
@@ -607,13 +607,21 @@ async function lifeBoardsTest() {
   await Promise.all([boards.pin('owner',first.id,reference,true),boards.pin('owner',first.id,{workspaceId:'owner',panelId:'other'},true)]);
   await boards.pin('another-chat',second.id,reference,true);
   assert.equal((await boards.get('owner',first.id)).items.length,2,'Concurrent pins do not lose references');
-  await boards.arrange('owner',first.id,{workspaceId:'owner',panelId:'other'},'owner/shared','S');
-  const ordered=await new LifeBoards(dir).get('owner',first.id);assert.equal(ordered.items[0].panelId,'other');assert.equal(ordered.items[0].size,'S');
-  assert.equal((await boards.get('another-chat',second.id)).items[0].size,'L','Sizes belong to each board');
+  const legacyFile=disk(ws.pathFor('owner')+'/life-boards/'+first.id+'/board.json');
+  const legacy=JSON.stringify({...await boards.get('owner',first.id),version:1,items:[reference,{workspaceId:'owner',panelId:'other'}].map(item=>({...item,size:'S',height:200}))});
+  fs.writeFileSync(legacyFile,legacy);
+  const oldLayout=await boards.get('owner',first.id);
+  assert.equal(oldLayout.version,2);assert.equal(fs.readFileSync(legacyFile,'utf8'),legacy,'Opening an old board never rewrites it');
+  await boards.place('owner',first.id,{workspaceId:'owner',panelId:'other'},{x:0,y:0,w:5,h:4},boardLayoutKey(oldLayout.items));
+  const ordered=await new LifeBoards(dir).get('owner',first.id);assert.equal(ordered.items.find(i=>i.panelId==='other').w,5);assert.equal(ordered.items.find(i=>i.panelId==='shared').y,4);
+  assert.equal(JSON.parse(fs.readFileSync(legacyFile,'utf8')).version,2,'First placement persists the migrated grid');
+  await assert.rejects(boards.place('owner',first.id,reference,{x:0,y:20,w:3,h:3},boardLayoutKey(oldLayout.items)),/layout changed/);
+  assert.deepEqual(plain(await boards.get('owner',first.id)),plain(ordered),'A stale gesture cannot overwrite a newer layout');
+  assert.equal((await boards.get('another-chat',second.id)).items[0].w,12,'Sizes belong to each board');
   await repo.toggle('shared',1,'tasks','one',true);assert.equal((await panels.repository('owner').get((await boards.get('another-chat',second.id)).items[0].panelId)).user['tasks:one'],true);
   await boards.pin('owner',first.id,reference,false);assert.ok((await repo.get('shared')).user['tasks:one'],'Unpin never deletes data or shared card');
   await assert.rejects(boards.save('owner',first.id,'Work','',[{workspaceId:'owner',panelId:'shared',size:'XL'}]));
-  await assert.rejects(boards.save('owner',first.id,'Work','',[{...reference,size:'S'},{...reference,size:'M'}]));
+  await assert.rejects(boards.save('owner',first.id,'Work','',[{...reference,x:0,y:0,w:2,h:2},{...reference,x:2,y:0,w:2,h:2}]));
   const files=new NativeWorkspaceFiles(ws.pathFor('another-chat'));
   const tools=new LifePanelTools(panels,'another-chat','new-chat',files,boards);
   await files.write('update.panel.json',JSON.stringify({...spec,title:'Edited from another chat'}),signal);
@@ -764,19 +772,20 @@ async function htmlPanelTest() {
   assert.throws(()=>parsePanelSpec(JSON.stringify({...revised.definition,nodes:[{id:'x',kind:'Text',text:{value:'bad'}}]})),/empty nodes/);
   assert.throws(()=>parsePanelSpec(JSON.stringify({...revised.definition,version:1})),/native nodes/);
   const board=await boards.save('owner','','Interactive board','Test context');await boards.pin('owner',board.id,{workspaceId:'owner',panelId:id},true);
-  assert.equal((await boards.get('owner',board.id)).items[0].size,'S','Pinning starts from the current user layout');
+  assert.equal((await boards.get('owner',board.id)).items[0].w,12,'New pins use the grid default');
   const otherBoard=await boards.save('owner','','Other board','');await boards.pin('owner',otherBoard.id,{workspaceId:'owner',panelId:id},true);
-  await boards.arrange('owner',board.id,{workspaceId:'owner',panelId:id},'','S',248);
+  const layoutKey=()=>boards.get('owner',board.id).then(b=>load('model/LifeBoard').boardLayoutKey(b.items));
+  await boards.place('owner',board.id,{workspaceId:'owner',panelId:id},{x:3,y:15,w:5,h:8},await layoutKey());
   await repo.resize(id,'L');assert.equal((await repo.get(id)).configRevision,revised.configRevision);
-  assert.equal((await boards.get('owner',otherBoard.id)).items[0].size,'S','Existing board layouts stay independent from the all-cards layout');
-  assert.equal((await new LifeBoards(dir).get('owner',board.id)).items[0].height,248);
-  await assert.rejects(boards.arrange('owner',board.id,{workspaceId:'owner',panelId:id},'','S',900),/200/);
-  assert.equal((await boards.get('owner',board.id)).items[0].height,248,'Invalid resize leaves saved layout intact');
+  assert.equal((await boards.get('owner',otherBoard.id)).items[0].w,12,'Existing board layouts stay independent from the all-cards layout');
+  assert.equal((await new LifeBoards(dir).get('owner',board.id)).items[0].h,8);
+  await assert.rejects(boards.place('owner',board.id,{workspaceId:'owner',panelId:id},{x:3,y:15,w:10,h:8},await layoutKey()),/grid rectangle/);
+  assert.equal((await boards.get('owner',board.id)).items[0].h,8,'Invalid resize leaves saved layout intact');
   const context={filesDir:dir,cacheDir:dir+'/cache',getApplicationContext(){return this;}};fs.mkdirSync(disk(context.cacheDir));
   const {createBackupFile,readBackupFile}=load('services/Backup'),backup=await createBackupFile(context,emptyData());
   const dest='/sandbox/html-restored';fs.mkdirSync(disk(dest));await readBackupFile({filesDir:dest,cacheDir:dest,getApplicationContext(){return this;}},backup,emptyData());
   assert.deepEqual(plain(await new LifePanels(dest).repository('owner').get(id)),plain(await repo.get(id)));
-  assert.equal((await new LifeBoards(dest).get('owner',board.id)).items[0].height,248);
+  assert.equal((await new LifeBoards(dest).get('owner',board.id)).items[0].h,8);
   console.log('PASS HTML file publication, isolated state, source refresh, concurrent/conflicting writes, definition replacement, bounded resize and backup/restore');
 }
 

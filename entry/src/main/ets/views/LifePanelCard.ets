@@ -156,6 +156,7 @@ export struct LifePanelCard {
   @Prop showFooter: boolean = true;
   @Prop editing: boolean = false;
   @Prop viewHeight: number = 0;
+  @Prop frameHeight: number = 0;
   @State private menuVisible: boolean = false;
   @State private layoutAction: string = '';
   private cardWidth: number = 0;
@@ -173,9 +174,10 @@ export struct LifePanelCard {
     if (!this.onBoard || !this.interactive || this.detail || this.editing || this.panel.archived) { return ''; }
     const finger = event.fingerList.find((point: FingerInfo) => !!point);
     if (!finger || this.cardWidth <= 0 || this.cardHeight <= 0) { return ''; }
-    if (finger.localX >= 0 && finger.localX <= 48 && finger.localY >= 0 && finger.localY <= 48) { return 'move'; }
-    if (finger.localX >= this.cardWidth - 48 && finger.localX <= this.cardWidth &&
-      finger.localY >= this.cardHeight - 48 && finger.localY <= this.cardHeight) { return 'resize'; }
+    const cornerX = Math.min(48, this.cardWidth / 2), cornerY = Math.min(48, this.cardHeight / 2);
+    if (finger.localX >= 0 && finger.localX < cornerX && finger.localY >= 0 && finger.localY < cornerY) { return 'move'; }
+    if (finger.localX >= this.cardWidth - cornerX && finger.localX <= this.cardWidth &&
+      finger.localY >= this.cardHeight - cornerY && finger.localY <= this.cardHeight) { return 'resize'; }
     return '';
   }
   private beginPress(event: GestureEvent): void {
@@ -209,7 +211,6 @@ export struct LifePanelCard {
   onOpen: () => void = () => {};
   onRefresh: () => void = () => {};
   onToggle: (node: string, item: string, done: boolean) => void = () => {};
-  onSize: (size: string) => void = () => {};
   onArchive: () => void = () => {};
   onConnect: () => void = () => {};
   onPin: () => void = () => {};
@@ -229,15 +230,10 @@ export struct LifePanelCard {
       if (this.onBoard) { MenuItem({ content: t('从此看板移除') }).onClick(this.onUnpin) }
       if (this.panel.definition.source) { MenuItem({ content: t('刷新任务与记录') }).onClick(this.onTask) }
       if (this.panel.definition.source?.auth) { MenuItem({ content: t('API 连接') }).onClick(this.onConnect) }
-      MenuItemGroup({ header: t('卡片尺寸') }) {
-        ForEach(['S', 'M', 'L'], (size: string) => {
-          MenuItem({ content: size }).selected((this.cardSize || this.panel.layout?.size || this.panel.definition.size) === size).selectIcon(true).onClick(() => this.onSize(size))
-        })
-      }
       MenuItem({ content: this.panel.archived ? t('恢复') : t('移除') }).onClick(this.onArchive)
     }
   }
-  build() {
+  @Builder private content() {
     Column({ space: this.panel.definition.view ? 0 : 10 }) {
       if (!this.panel.definition.view || this.editing) {
       Row({ space: 6 }) {
@@ -251,8 +247,6 @@ export struct LifePanelCard {
             .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%').textAlign(TextAlign.Start)
         }.backgroundColor(Color.Transparent).padding(0).layoutWeight(1).constraintSize({ minHeight: 40 })
           .clickEffect(Motion.press).onClick(() => { if (!this.editing) { this.onOpen(); } })
-          .gesture(GestureGroup(GestureMode.Sequence, LongPressGesture({ repeat: false, duration: 350 }).onAction((event: GestureEvent) => { if (this.onBoard && this.interactive) { this.onMoveStart(event); } }),
-            PanGesture().onActionUpdate(this.onMoveUpdate).onActionEnd(this.onMoveEnd)).onCancel(this.onMoveCancel))
           .accessibilityText(t('打开卡片「{0}」', [this.panel.definition.title]))
         if (this.interactive && !this.editing) {
           Button({ type: ButtonType.Normal }) { Text('⋯').fontSize(24).fontColor($r('app.color.text_secondary')) }
@@ -284,7 +278,7 @@ export struct LifePanelCard {
       if (this.panel.definition.view) {
         if (this.storage) {
           WebUiView({ content: this.viewContent(), storage: this.storage, panelContext: this.context(),
-            interactive: this.interactive && !this.panel.archived && !this.editing && !this.layoutAction, preferParentScroll: !this.detail, viewportHeight: this.viewHeight, onPanelRefresh: this.onRun,
+            interactive: this.interactive && !this.panel.archived && !this.editing && !this.layoutAction, preferParentScroll: !this.detail && this.frameHeight === 0, viewportHeight: this.viewHeight, onPanelRefresh: this.onRun,
             onHeight: (height: number) => { this.contentHeight = height; },
             onRuntimeError: (message: string) => this.onRuntimeError(message, this.panel.configRevision) })
         } else {
@@ -320,9 +314,19 @@ export struct LifePanelCard {
         }.width('100%').padding(this.panel.definition.view ? { left: 12, right: 12 } : 0)
       }
     }.width('100%').padding(this.panel.definition.view ? 0 : 14)
+  }
+  build() {
+    Column() {
+      if (this.frameHeight > 0) {
+        Scroll() { this.content() }
+          .width('100%').height(this.frameHeight).align(Alignment.Top)
+          .scrollable(this.panel.definition.view ? ScrollDirection.None : ScrollDirection.Vertical)
+          .scrollBar(BarState.Off).nestedScroll({ scrollForward: NestedScrollMode.SELF_FIRST, scrollBackward: NestedScrollMode.SELF_FIRST })
+      } else { this.content() }
+    }.width('100%').height(this.frameHeight > 0 ? this.frameHeight : undefined)
       .backgroundColor(this.panel.definition.view ? Color.Transparent : $r('app.color.surface'))
       .borderRadius(Radius.lg).border({ width: this.panel.definition.view ? 0 : 1, color: $r('app.color.divider') })
-      .clip(!!this.panel.definition.view)
+      .clip(this.frameHeight > 0 || !!this.panel.definition.view)
       .onAreaChange((_old: Area, area: Area) => { this.cardWidth = Number(area.width); this.cardHeight = Number(area.height); })
       .priorityGesture(GestureGroup(GestureMode.Sequence,
         LongPressGesture({ repeat: false, duration: 350 }).tag('panel-press').onAction((event: GestureEvent) => this.beginPress(event)),

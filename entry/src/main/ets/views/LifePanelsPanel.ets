@@ -1,12 +1,14 @@
 import { PanelInputs } from '../model/PanelContract';
-import { PanelRect, panelMasonry, panelDropTarget, panelSourceLabel, panelRunLabel, panelErrorText } from '../model/PanelPresentation';
+import { PanelRect, panelMasonry, panelSourceLabel, panelRunLabel, panelErrorText } from '../model/PanelPresentation';
+import { GridRect, gridStep, gridPixels, gridSnap, gridPlace } from '../model/PanelGrid';
+import { PanelGridGuide } from './PanelGridGuide';
 import { common } from '@kit.AbilityKit';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Btn, Motion, relativeTime, gradientColor } from '../common/Theme';
 import { Banner, IconButton } from '../common/Widgets';
 import { t } from '../model/I18n';
 import { Diagnostics } from '../model/Diagnostics';
-import { PanelEntry, PanelCell, panelCells, panelDue } from '../model/LifePanel';
+import { PanelEntry } from '../model/LifePanel';
 import { LifePanels } from '../services/LifePanels';
 import { Cancellation, RunCancelledError } from '../services/Cancellation';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
@@ -15,7 +17,7 @@ import { PanelConnectionPanel } from './PanelConnectionPanel';
 import { PanelTaskPanel } from './PanelTaskPanel';
 import { LifeBoards } from '../services/LifeBoards';
 import { PanelChanges } from '../services/PanelChanges';
-import { BoardEntry, PanelTarget, parsePanelTarget, referenceKey } from '../model/LifeBoard';
+import { BoardEntry, BoardItem, boardLayoutKey, PanelTarget, parsePanelTarget, referenceKey } from '../model/LifeBoard';
 import { PanelRecord, PanelRun } from '../model/LifePanel';
 
 interface PanelEditTarget { workspaceId: string; panelId: string; configRevision: number; runtimeError?: string; sourceError: string; }
@@ -58,24 +60,31 @@ export struct LifePanelsPanel {
   @State private editTarget: string = '';
   @State private resizing: string = '';
   @State private resizeHeight: number = 0;
-  @State private resizeSize: string = '';
   @State private detailHeight: number = 500;
   @State private feedback: string = '';
   @State private cardQuery: string = '';
-  @State private dragBefore: string = '';
   @State private resizeWidth: number = 0;
   @State private layoutSaving: boolean = false;
   @State private boardSaving: boolean = false;
   @State private editorThreadId: string = '';
+  @State private previewRects: GridRect[] = [];
+  @State private targetRect: GridRect = { x: 0, y: 0, w: 2, h: 2 };
+  @State private viewportHeight: number = 500;
+  @State private scrollOffset: number = 0;
   private dragOrigin: PanelRect = { x: 0, y: 0, width: 0, height: 0 };
-  private dragRects: PanelRect[] = [];
-  private dragKeys: string[] = [];
+  private gestureRect: GridRect = { x: 0, y: 0, w: 2, h: 2 };
+  private gestureItems: BoardItem[] = [];
+  private gestureLayout: string = '';
+  private gestureBoard: string = '';
+  private gestureScroll: number = 0;
+  private gestureExtent: number = 0;
   private dragTouchX: number = 0;
   private dragTouchY: number = 0;
-  private resizeTouchX: number = 0;
-  private resizeTouchY: number = 0;
-  private resizeOriginWidth: number = 0;
-  private resizeOriginHeight: number = 0;
+  private pointerX: number = 0;
+  private pointerY: number = 0;
+  private viewportTop: number = 0;
+  private edgeTimer: number = -1;
+  private contentScroller: Scroller = new Scroller();
   private boardScroller: Scroller = new Scroller();
   private store?: LifePanels;
   private mounted: boolean = false;
@@ -98,7 +107,7 @@ export struct LifePanelsPanel {
   }
   aboutToAppear(): void { this.mounted = true; this.activityChanged(); this.unsubscribe = PanelChanges.subscribe(() => { if (this.mounted && this.active) { this.reload().catch((error: Error) => this.report(error)); } }); }
   aboutToDisappear(): void { this.mounted = false; this.stop(); this.unsubscribe?.(); }
-  private stop(): void { clearTimeout(this.timer); this.timer = -1; this.cancellation.cancel(); }
+  private stop(): void { this.resetGesture(); clearTimeout(this.timer); this.timer = -1; this.cancellation.cancel(); }
   private activityChanged(): void {
     this.stop();
     if (!this.mounted || !this.foreground || !this.active) { return; }
@@ -150,80 +159,92 @@ export struct LifePanelsPanel {
     if (!board) { return entries; }
     return board.board.items.flatMap((item) => entries.filter((entry: PanelEntry) => this.entryKey(entry) === referenceKey(item)));
   }
-  private sizeOnBoard(entry: PanelEntry): string {
-    if (this.resizing === this.entryKey(entry) && this.resizeSize) { return this.resizeSize; }
-    const item = this.currentBoard()?.board.items.find((item) => referenceKey(item) === this.entryKey(entry));
-    return item?.size || entry.panel.layout?.size || entry.panel.definition.size;
+  private gridRect(key: string): GridRect {
+    const index = this.gestureItems.findIndex((item: BoardItem) => referenceKey(item) === key);
+    if (this.previewRects.length && index >= 0) { return this.previewRects[index]; }
+    return this.currentBoard()!.board.items.find((item: BoardItem) => referenceKey(item) === key)!;
   }
   private heightOnBoard(entry: PanelEntry): number {
-    if (this.resizing === this.entryKey(entry)) { return this.resizeHeight; }
-    return this.currentBoard()?.board.items.find((item) => referenceKey(item) === this.entryKey(entry))?.height || 0;
+    return this.currentBoard() ? (this.resizing === this.entryKey(entry) ? this.resizeHeight : this.rect(this.entryKey(entry)).height) : 0;
   }
   private resetGesture(): void {
-    this.getUIContext().animateTo({ duration: Motion.medium, curve: Motion.thumb }, () => {
-      this.dragging = ''; this.dragX = 0; this.dragY = 0; this.resizing = ''; this.resizeSize = ''; this.dragBefore = ''; this.resizeWidth = 0;
-    });
+    clearTimeout(this.edgeTimer); this.edgeTimer = -1;
+    this.dragging = ''; this.resizing = ''; this.dragX = 0; this.dragY = 0;
+    this.previewRects = []; this.gestureItems = []; this.resizeWidth = 0;
   }
-  private startMove(key: string, event: GestureEvent): void {
-    if (!this.currentBoard() || this.layoutSaving || this.dragging || this.resizing) { return; }
-    const finger = event.fingerList.find((point: FingerInfo) => !!point); if (!finger) { return; }
-    this.dragTouchX = finger.globalX; this.dragTouchY = finger.globalY;
-    this.dragRects = this.layouts(); this.dragKeys = this.visible().map((entry: PanelEntry) => this.entryKey(entry));
-    this.dragOrigin = this.rect(key); this.dragging = key; this.dragBefore = '';
+  private beginLayout(key: string, event: GestureEvent, resize: boolean): void {
+    const board = this.currentBoard(), finger = event.fingerList.find((point: FingerInfo) => !!point);
+    if (!board || !finger || this.layoutSaving || this.dragging || this.resizing) { return; }
+    this.gestureItems = board.board.items;
+    this.gestureLayout = boardLayoutKey(board.board.items); this.gestureBoard = this.boardKey(board);
+    this.gestureRect = this.gridRect(key); this.targetRect = this.gestureRect;
+    this.dragOrigin = gridPixels(this.gestureRect, this.boardWidth);
+    this.gestureExtent = this.boardHeight(); this.gestureScroll = this.contentScroller.currentOffset().yOffset;
+    this.dragTouchX = finger.globalX - (resize ? event.offsetX : 0);
+    this.dragTouchY = finger.globalY - (resize ? event.offsetY : 0);
+    this.pointerX = finger.globalX; this.pointerY = finger.globalY;
+    if (resize) { this.resizing = key; } else { this.dragging = key; }
+    this.updateLayout(); this.followEdge();
   }
+  private startMove(key: string, event: GestureEvent): void { this.beginLayout(key, event, false); }
   private moveCard(event: GestureEvent): void {
-    if (!this.dragging || this.layoutSaving) { return; }
+    if ((!this.dragging && !this.resizing) || this.layoutSaving) { return; }
     const finger = event.fingerList.find((point: FingerInfo) => !!point); if (!finger) { return; }
-    this.dragX = finger.globalX - this.dragTouchX; this.dragY = finger.globalY - this.dragTouchY;
-    const x = this.dragOrigin.x + this.dragOrigin.width / 2 + this.dragX, y = this.dragOrigin.y + this.dragOrigin.height / 2 + this.dragY;
-    const target = panelDropTarget(this.dragRects, x, y);
-    const current = this.dragKeys.indexOf(this.dragging);
-    const before = target < 0 || target === current ? '' : target > current ? this.dragKeys[target + 1] || '$end' : this.dragKeys[target];
-    if (before !== this.dragBefore) { this.dragBefore = before; }
+    this.pointerX = finger.globalX; this.pointerY = finger.globalY; this.updateLayout(); this.followEdge();
   }
-  private layoutEntries(): PanelEntry[] {
-    const entries = this.visible();
-    if (!this.dragging || !this.dragBefore) { return entries; }
-    const moving = entries.find((entry: PanelEntry) => this.entryKey(entry) === this.dragging);
-    if (!moving) { return entries; }
-    const others = entries.filter((entry: PanelEntry) => this.entryKey(entry) !== this.dragging);
-    const target = this.dragBefore === '$end' ? others.length : others.findIndex((entry: PanelEntry) => this.entryKey(entry) === this.dragBefore);
-    if (target < 0) { return entries; } others.splice(target, 0, moving); return others;
+  private updateLayout(): void {
+    if (this.gestureBoard !== this.boardSelection || this.layoutSaving) { return; }
+    this.dragX = this.pointerX - this.dragTouchX;
+    this.dragY = this.pointerY - this.dragTouchY + this.contentScroller.currentOffset().yOffset - this.gestureScroll;
+    const target = gridSnap(this.gestureRect, this.dragX, this.dragY, this.boardWidth, !!this.resizing);
+    const step = gridStep(this.boardWidth);
+    this.resizeWidth = Math.max(2 * step - 8, Math.min((12 - target.x) * step - 8, this.dragOrigin.width + this.dragX));
+    this.resizeHeight = Math.max(2 * step - 8, Math.min(12 * step - 8, this.dragOrigin.height + this.dragY));
+    if (this.previewRects.length && JSON.stringify(target) === JSON.stringify(this.targetRect)) { return; }
+    this.targetRect = target;
+    this.previewRects = gridPlace(this.gestureItems, this.gestureItems.findIndex((item: BoardItem) => referenceKey(item) === (this.dragging || this.resizing)), target);
   }
-  private async resizeCard(key: string, event: GestureEvent, finished: boolean, contentHeight: number = 0): Promise<void> {
-    const board = this.currentBoard(); if (!board) { return; }
-    const index = board.board.items.findIndex((item) => referenceKey(item) === key), item = board.board.items[index];
-    if (!item) { return; }
-    if (this.layoutSaving || this.dragging) { return; }
-    const finger = event.fingerList.find((point: FingerInfo) => !!point); if (!finger) { return; }
-    if (!this.resizing) {
-      this.resizeTouchX = finger.globalX - event.offsetX; this.resizeTouchY = finger.globalY - event.offsetY;
-      this.resizeOriginWidth = this.rect(key).width;
-      this.resizeOriginHeight = this.heightOnBoard(this.entryFor(key)) || contentHeight || this.entryFor(key).panel.definition.view?.height || 320;
-      this.resizing = key;
-    }
-    this.resizeWidth = Math.max((this.boardWidth - 12 * (this.columns() - 1)) / this.columns(), Math.min(this.boardWidth, this.resizeOriginWidth + finger.globalX - this.resizeTouchX));
-    const unit = (this.boardWidth + 12) / this.columns();
-    const span = Math.max(1, Math.min(this.columns(), Math.round((this.resizeWidth + 12) / unit)));
-    this.resizeSize = span === 1 ? 'S' : span === 2 ? 'M' : 'L';
-    this.resizeHeight = Math.round(Math.max(200, Math.min(800, this.resizeOriginHeight + finger.globalY - this.resizeTouchY)));
-    if (!finished) { return; }
-    this.layoutSaving = true;
+  private followEdge(): void {
+    if (this.edgeTimer >= 0 || this.layoutSaving || (!this.dragging && !this.resizing)) { return; }
+    const top = this.pointerY - this.viewportTop, bottom = this.viewportTop + this.viewportHeight - this.pointerY;
+    const delta = top < 48 ? -Math.min(12, Math.max(2, (48 - top) / 4)) : bottom < 48 ? Math.min(12, Math.max(2, (48 - bottom) / 4)) : 0;
+    const offset = Math.max(0, this.contentScroller.currentOffset().yOffset);
+    const next = Math.max(0, offset + delta);
+    if (!delta || next === offset) { return; }
+    this.edgeTimer = setTimeout(() => {
+      this.edgeTimer = -1;
+      if (!this.active || !this.foreground || this.layoutSaving || (!this.dragging && !this.resizing)) { return; }
+      this.contentScroller.scrollTo({ xOffset: 0, yOffset: next, animation: false });
+      this.scrollOffset = this.contentScroller.currentOffset().yOffset;
+      this.updateLayout(); this.followEdge();
+    }, 20);
+  }
+  private async finishLayout(): Promise<void> {
+    clearTimeout(this.edgeTimer); this.edgeTimer = -1;
+    const key = this.dragging || this.resizing, board = this.currentBoard();
+    if (!key || !board || this.layoutSaving || this.gestureBoard !== this.boardKey(board)) { this.resetGesture(); return; }
+    const entry = this.entryFor(key); this.layoutSaving = true;
     try {
-      await this.boardStore().arrange(board.workspaceId, board.board.id, item, index + 1 < board.board.items.length ? referenceKey(board.board.items[index + 1]) : '', this.resizeSize,
-        this.entryFor(key).panel.definition.view ? this.resizeHeight : undefined);
-      await this.reload();
+      await this.boardStore().place(board.workspaceId, board.board.id, { workspaceId: entry.workspaceId, panelId: entry.panel.id }, this.targetRect, this.gestureLayout);
+      await this.reload(); this.feedback = t('布局已保存');
     } catch (error) { this.report(error as Error); }
     finally { this.layoutSaving = false; this.resetGesture(); }
   }
-  private columns(): number { return this.boardWidth >= 900 ? 4 : this.boardWidth >= 600 ? 3 : 2; }
-  private layouts(): PanelRect[] {
-    const entries = this.layoutEntries(), columns = this.columns();
-    return panelMasonry(this.boardWidth, columns, entries.map((entry: PanelEntry) => entries.length === 1 ? columns : this.sizeOnBoard(entry) === 'S' ? 1 : this.sizeOnBoard(entry) === 'L' ? columns : 2),
-      entries.map((entry: PanelEntry) => this.cardHeights[this.entryKey(entry)] || 180));
+  private async resizeCard(key: string, event: GestureEvent, finished: boolean): Promise<void> {
+    if (!this.resizing) { this.beginLayout(key, event, true); }
+    this.moveCard(event); if (finished) { await this.finishLayout(); }
   }
-  private rect(key: string): PanelRect { return this.layouts()[this.layoutEntries().findIndex((entry: PanelEntry) => this.entryKey(entry) === key)]; }
-  private boardHeight(): number { return this.layouts().reduce((height: number, rect: PanelRect) => Math.max(height, rect.y + rect.height), 0); }
+  private layouts(): PanelRect[] {
+    const entries = this.visible();
+    if (this.currentBoard()) { return entries.map((entry: PanelEntry) => gridPixels(this.gridRect(this.entryKey(entry)), this.boardWidth)); }
+    return panelMasonry(this.boardWidth, 1, entries.map(() => 1), entries.map((entry: PanelEntry) => this.cardHeights[this.entryKey(entry)] || 180));
+  }
+  private rect(key: string): PanelRect { return this.layouts()[this.visible().findIndex((entry: PanelEntry) => this.entryKey(entry) === key)]; }
+  private boardHeight(): number {
+    const bottom = this.layouts().reduce((height: number, rect: PanelRect) => Math.max(height, rect.y + rect.height), 0);
+    return this.dragging || this.resizing ? Math.max(bottom, this.gestureExtent, this.scrollOffset + this.viewportHeight + 2 * gridStep(this.boardWidth)) : bottom;
+  }
+  private ghost(): PanelRect { return gridPixels(this.targetRect, this.boardWidth); }
   private measured(key: string, area: Area): void {
     const height = Number(area.height);
     if (height > 0 && Math.abs((this.cardHeights[key] || 0) - height) > 1) {
@@ -265,11 +286,6 @@ export struct LifePanelsPanel {
       const repository = this.panels().repository(entry.workspaceId);
       if (action === 'toggle') { await repository.toggle(entry.panel.id, entry.panel.configRevision, node, item, done); }
       else if (action === 'archive') { await repository.archive(entry.panel.id, !entry.panel.archived); this.selected = ''; }
-      else if (this.currentBoard()) {
-        const board = this.currentBoard()!, index = board.board.items.findIndex((item) => referenceKey(item) === this.entryKey(entry));
-        await this.boardStore().arrange(board.workspaceId, board.board.id, { workspaceId: entry.workspaceId, panelId: entry.panel.id },
-          index + 1 < board.board.items.length ? referenceKey(board.board.items[index + 1]) : '', action);
-      } else { await repository.resize(entry.panel.id, action); }
       await this.reload();
     } catch (error) { this.report(error as Error); }
     finally { if (this.mounted) { this.pending = this.pending.filter((key: string) => key !== this.entryKey(entry)); } }
@@ -329,17 +345,17 @@ export struct LifePanelsPanel {
     return t('刷新任务与记录');
   }
   @Builder private card(key: string, detail: boolean = false) {
-    LifePanelCard({ panel: this.entryFor(key).panel, cardSize: this.sizeOnBoard(this.entryFor(key)), onBoard: !!this.currentBoard(), busy: this.pending.includes(key) || this.entryFor(key).panel.runs?.[0]?.status === 'running' && this.panels().repository(this.entryFor(key).workspaceId).isRefreshing(this.entryFor(key).panel.id), detail: detail, timestamp: this.timestamp(this.entryFor(key)),
-      editing: this.editingLayout && !detail && !!this.currentBoard(), viewHeight: detail ? this.detailHeight : this.heightOnBoard(this.entryFor(key)),
+    LifePanelCard({ panel: this.entryFor(key).panel, cardSize: this.currentBoard() ? 'L' : 'M', onBoard: !!this.currentBoard(), busy: this.pending.includes(key) || this.entryFor(key).panel.runs?.[0]?.status === 'running' && this.panels().repository(this.entryFor(key).workspaceId).isRefreshing(this.entryFor(key).panel.id), detail: detail, timestamp: this.timestamp(this.entryFor(key)),
+      editing: false, frameHeight: !detail ? this.heightOnBoard(this.entryFor(key)) : 0, viewHeight: detail ? this.detailHeight : this.heightOnBoard(this.entryFor(key)),
       storage: this.panels().repository(this.entryFor(key).workspaceId).binding(this.entryFor(key).panel.id, this.entryFor(key).panel.configRevision),
       onRun: async (inputs?: PanelInputs) => { await this.panels().repository(this.entryFor(key).workspaceId).refresh(this.entryFor(key).panel.id, this.cancellation, 'manual', inputs); await this.reload(); },
       onRuntimeError: (message: string, revision: number) => { const entry = this.entryFor(key); this.panels().repository(entry.workspaceId).recordRuntimeError(entry.panel.id, revision, message).catch((error: Error) => this.report(error)); },
       onMoveStart: (event: GestureEvent) => this.startMove(key, event), onMoveUpdate: (event: GestureEvent) => this.moveCard(event),
-      onMoveEnd: (event: GestureEvent) => { this.dropCard(this.entryFor(key), 0, event); }, onMoveCancel: () => this.resetGesture(),
-      onResize: (event: GestureEvent, finished: boolean, height: number) => { this.resizeCard(key, event, finished, height); },
+      onMoveEnd: (event: GestureEvent) => { this.dropCard(event); }, onMoveCancel: () => this.resetGesture(),
+      onResize: (event: GestureEvent, finished: boolean, height: number) => { this.resizeCard(key, event, finished); },
       onOpen: () => { this.selected = key; this.editingLayout = false; }, onRefresh: () => { this.refresh(this.entryFor(key)); },
       onToggle: (node: string, item: string, done: boolean) => { this.change(this.entryFor(key), 'toggle', node, item, done); },
-      onSize: (size: string) => { this.change(this.entryFor(key), size); }, onArchive: () => { this.change(this.entryFor(key), 'archive'); },
+      onArchive: () => { this.change(this.entryFor(key), 'archive'); },
       onConnect: () => { this.connectionEntry = this.entryFor(key); this.openSheet('connection'); },
       onPin: () => { this.pinEntry = this.entryFor(key); this.openSheet('pin'); }, onUnpin: () => { this.pinOnBoard(this.currentBoard()!, this.entryFor(key), false); },
       onEdit: () => { this.editTarget = key; this.prompt = t('修改卡片「{0}」：', [this.entryFor(key).panel.definition.title]) + (this.entryFor(key).panel.runtimeError || this.entryFor(key).panel.error ? t('修复当前错误并验证主要操作。') : ''); this.selected = ''; this.editingPrompt = true; },
@@ -374,15 +390,8 @@ export struct LifePanelsPanel {
       if (this.boardSelection === this.boardKey(entry)) { this.boardSelection = ''; } await this.reload();
     } catch (error) { this.report(error as Error); }
   }
-  private async dropCard(entry: PanelEntry, _index: number, _event: GestureEvent): Promise<void> {
-    const board = this.currentBoard(), before = this.dragBefore;
-    if (!this.dragging || !board || !before || this.layoutSaving) { this.resetGesture(); return; }
-    this.layoutSaving = true;
-    try {
-      await this.boardStore().arrange(board.workspaceId, board.board.id, { workspaceId: entry.workspaceId, panelId: entry.panel.id }, before === '$end' ? '' : before);
-      await this.reload(); this.feedback = t('布局已保存');
-    } catch (error) { this.report(error as Error); }
-    finally { this.layoutSaving = false; this.resetGesture(); }
+  private async dropCard(event: GestureEvent): Promise<void> {
+    this.moveCard(event); await this.finishLayout();
   }
   @Builder private boardEditor() {
     Scroll() {
@@ -457,7 +466,7 @@ export struct LifePanelsPanel {
         .enabled(!this.refreshing).onClick(async () => { this.refreshing = true; try { await this.refreshAll(); } finally { this.refreshing = false; } })
     }.width('100%').height(40)
     if (this.editingLayout) {
-      Text(t('长按标题拖动换位，拖动右下角调整尺寸')).fontSize(12).fontColor($r('app.color.text_secondary')).width('100%')
+      Text(t('长按左上角移动，长按右下角调整；松手按网格落位')).fontSize(12).fontColor($r('app.color.text_secondary')).width('100%')
     }
   }
   @Builder private composer() {
@@ -555,7 +564,7 @@ export struct LifePanelsPanel {
         }, (entry: PanelEntry) => this.entryKey(entry))
       } else {
         Refresh({ refreshing: $$this.refreshing }) {
-          Scroll() {
+          Scroll(this.contentScroller) {
             if (!this.visible().length) {
               Column({ space: 12 }) {
                 Text(t('把关心的事情放在这里')).fontSize(20).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
@@ -563,6 +572,11 @@ export struct LifePanelsPanel {
               }.width('100%').padding({ top: 40 })
             } else {
               Stack({ alignContent: Alignment.TopStart }) {
+                if (this.currentBoard() && (this.editingLayout || this.dragging || this.resizing)) {
+                  PanelGridGuide({ step: gridStep(this.boardWidth), scrollY: this.scrollOffset, heightVp: this.viewportHeight,
+                    color: gradientColor(this.appearance.accent, 0.15) }).width('100%').height(this.viewportHeight)
+                    .position({ x: 0, y: this.scrollOffset }).hitTestBehavior(HitTestMode.None)
+                }
                 ForEach(this.visible().map((entry: PanelEntry) => this.entryKey(entry)), (key: string) => {
                   Column() { this.card(key) }
                     .width(this.resizing === key ? this.resizeWidth : this.rect(key).width).onAreaChange((_old: Area, area: Area) => this.measured(key, area))
@@ -574,13 +588,26 @@ export struct LifePanelsPanel {
                     .shadow({ radius: this.dragging === key || this.resizing === key ? 18 : 0, color: '#26000000', offsetY: this.dragging === key ? 8 : 0 })
                     .animation({ duration: Motion.fast, curve: Motion.thumb })
                     .zIndex(this.dragging === key || this.resizing === key ? 10 : 0)
-                    .border({ width: this.dragBefore === key || this.resizing === key ? 2 : 0, color: this.appearance.accent, radius: 18 })
-
                 }, (key: string) => key + ':' + this.entryFor(key).panel.configRevision)
+                if (this.dragging || this.resizing) {
+                  Column() {
+                    Text(this.targetRect.w + ' × ' + this.targetRect.h).fontSize(12).fontColor(this.appearance.onAccent)
+                      .padding({ left: 8, right: 8, top: 4, bottom: 4 }).backgroundColor(this.appearance.accent).borderRadius(8)
+                  }.alignItems(HorizontalAlign.Start).width(this.ghost().width).height(this.ghost().height)
+                    .backgroundColor(gradientColor(this.appearance.accent, 0.10))
+                    .border({ width: 2, color: this.appearance.accent, radius: 12, style: BorderStyle.Dashed })
+                    .position({ x: this.ghost().x, y: this.ghost().y }).zIndex(20).hitTestBehavior(HitTestMode.None)
+                }
               }.width('100%').height(this.boardHeight())
             }
-          }.scrollable(this.dragging || this.resizing ? ScrollDirection.None : ScrollDirection.Vertical).id('life-panel-list').width('100%').height('100%').align(Alignment.TopStart).scrollBar(BarState.Auto)
-            .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
+          }.scrollable(ScrollDirection.Vertical).enableScrollInteraction(!this.dragging && !this.resizing)
+            .id('life-panel-list').width('100%').height('100%').align(Alignment.TopStart).scrollBar(BarState.Auto)
+            .edgeEffect(this.dragging || this.resizing ? EdgeEffect.None : EdgeEffect.Spring, { alwaysEnabled: true })
+            .onDidScroll(() => {
+              this.scrollOffset = this.contentScroller.currentOffset().yOffset;
+              if (this.dragging || this.resizing) { this.updateLayout(); }
+            })
+            .onAreaChange((_old: Area, area: Area) => { this.viewportTop = Number(area.globalPosition.y); this.viewportHeight = Number(area.height); })
         }.layoutWeight(1).width('100%').onRefreshing(async () => {
           try { await this.refreshAll(); } finally { this.refreshing = false; }
         })

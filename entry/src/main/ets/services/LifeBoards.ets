@@ -1,7 +1,8 @@
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { WorkspaceStore } from '../model/WorkspaceStore';
-import { BoardEntry, LifeBoard, BoardItem, PanelReference, boardPath, parseLifeBoard, referenceKey, validateReference } from '../model/LifeBoard';
+import { BoardEntry, LifeBoard, BoardItem, PanelReference, boardPath, boardLayoutKey, parseLifeBoard, referenceKey, validateReference } from '../model/LifeBoard';
+import { GridRect, gridPlace, gridHeight } from '../model/PanelGrid';
 import { NativeWorkspaceFiles } from './NativeWorkspaceFiles';
 import { LifePanels } from './LifePanels';
 import { Cancellation } from './Cancellation';
@@ -17,7 +18,7 @@ export class LifeBoards {
   }
   async save(workspaceId: string, id: string, title: string, description: string, items?: BoardItem[], archive?: boolean): Promise<LifeBoard> {
     const nextId = id || 'board-' + util.generateRandomUUID();
-    return this.change(workspaceId, nextId, !id, async (before?: LifeBoard): Promise<LifeBoard> => ({ version: 1, id: nextId,
+    return this.change(workspaceId, nextId, !id, async (before?: LifeBoard): Promise<LifeBoard> => ({ version: 2, id: nextId,
       editorThreadId: before?.editorThreadId, title: title.trim(), description: description.trim(), items: items === undefined ? before?.items || [] : items,
       archived: archive === undefined ? before?.archived || false : archive, createdAt: before?.createdAt || Date.now(), updatedAt: Date.now() }));
   }
@@ -46,21 +47,22 @@ export class LifeBoards {
         if (panel.archived) { throw new Error('Restore the card before pinning it'); }
         const existing = before.items.find((item: BoardItem) => referenceKey(item) === referenceKey(reference));
         if (existing) { return before; }
-        items.push({ workspaceId: reference.workspaceId, panelId: reference.panelId, size: panel.layout?.size || panel.definition.size });
+        items.push({ workspaceId: reference.workspaceId, panelId: reference.panelId, x: 0,
+          y: items.reduce((bottom: number, item: BoardItem) => Math.max(bottom, item.y + item.h), 0),
+          w: 12, h: gridHeight(panel.definition.view?.height || 240) });
       }
       before.items = items; return before;
     });
   }
-  async arrange(workspaceId: string, id: string, reference: PanelReference, beforeKey: string, size?: string, height?: number): Promise<LifeBoard> {
+  async place(workspaceId: string, id: string, reference: PanelReference, target: GridRect, expectedLayout: string): Promise<LifeBoard> {
     return this.change(workspaceId, id, false, async (previous?: LifeBoard): Promise<LifeBoard> => {
-      const board = previous!, item = board.items.find((item: BoardItem) => referenceKey(item) === referenceKey(reference));
-      if (!item) { throw new Error('Card no longer belongs to this board'); }
-      if (size) { item.size = size; }
-      if (height !== undefined) { item.height = height; }
-      const items = board.items.filter((entry: BoardItem) => referenceKey(entry) !== referenceKey(reference));
-      const target = beforeKey ? items.findIndex((entry: BoardItem) => referenceKey(entry) === beforeKey) : items.length;
-      if (target < 0) { throw new Error('Drop target changed; reload the board'); } items.splice(target, 0, item);
-      board.items = items; return board;
+      const board = previous!;
+      if (boardLayoutKey(board.items) !== expectedLayout) { throw new Error('Board layout changed; reload before moving the card'); }
+      const index = board.items.findIndex((item: BoardItem) => referenceKey(item) === referenceKey(reference));
+      const rects = gridPlace(board.items, index, target);
+      board.items = board.items.map((item: BoardItem, i: number): BoardItem => ({ workspaceId: item.workspaceId, panelId: item.panelId,
+        x: rects[i].x, y: rects[i].y, w: rects[i].w, h: rects[i].h }));
+      return board;
     });
   }
   async list(): Promise<BoardEntry[]> {
