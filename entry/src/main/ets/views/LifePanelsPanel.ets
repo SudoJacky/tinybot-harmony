@@ -23,7 +23,7 @@ interface PanelEditTarget { workspaceId: string; panelId: string; configRevision
 export struct LifePanelsPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.foreground') @Watch('activityChanged') private foreground: boolean = true;
-  @Prop @Watch('activityChanged') active: boolean = true;
+  @State @Watch('activityChanged') private active: boolean = false;
   @Prop @Watch('targetChanged') requestedTarget: string = '';
   @ObjectLink app: ChatViewModel;
   onChat: () => void = () => {};
@@ -485,6 +485,17 @@ export struct LifePanelsPanel {
       MenuItem({ content: this.removed ? t('返回') : t('已移除') }).onClick(() => { this.removed = !this.removed; this.selected = ''; })
     }
   }
+  @Builder private titleActions() {
+    Row({ space: 4 }) {
+      IconButton({ icon: $r('sys.symbol.gearshape'), label: t('看板管理'), compId: 'life-board-manage', diameter: 40, iconSize: 18,
+        onTap: () => this.editBoard(this.currentBoard()) })
+      IconButton({ icon: $r('sys.symbol.plus'), label: t('创建卡片'), compId: 'life-panel-create', diameter: 40, iconSize: 18,
+        disabled: this.creating, onTap: () => { this.openSheet('add'); } })
+      Button({ type: ButtonType.Circle }) { Text('⋯').fontSize(24).fontColor($r('app.color.text_primary')) }
+        .width(40).height(40).backgroundColor(Color.Transparent).id('life-panel-more')
+        .accessibilityText(t('更多操作')).bindMenu(this.collectionMenu())
+    }.height(56).padding({ right: 16 })
+  }
   private tabTitle(key: string): string { return key ? this.boardFor(key).board.title : t('全部卡片'); }
   @Builder private boardTab(key: string) {
     Button(this.tabTitle(key)).type(ButtonType.Normal).height(36).padding({ left: 14, right: 14 }).borderRadius(18)
@@ -519,8 +530,8 @@ export struct LifePanelsPanel {
     }.layoutWeight(1).width('100%').align(Alignment.TopStart).onAreaChange((_old: Area, area: Area) => { this.detailHeight = Math.max(200, Number(area.height) - 150); })
   }
   build() {
+    NavDestination() {
     Column({ space: 10 }) {
-      Row({ space: 4 }) {
         Stack({ alignContent: Alignment.End }) {
           List({ space: 8, scroller: this.boardScroller }) {
             ListItem() { this.boardTab('') }
@@ -529,14 +540,7 @@ export struct LifePanelsPanel {
             }, (key: string) => key)
           }.listDirection(Axis.Horizontal).height(40).width('100%').scrollBar(BarState.Off).onAreaChange(() => this.revealBoard())
           Row().width(12).height(40).linearGradient({ angle: 90, colors: [[gradientColor($r('app.color.page_background'), 0), 0], [gradientColor($r('app.color.page_background'), 1), 1]] }).hitTestBehavior(HitTestMode.None)
-        }.layoutWeight(1)
-        IconButton({ icon: $r('sys.symbol.gearshape'), label: t('看板管理'), compId: 'life-board-manage', diameter: 36, iconSize: 18,
-          onTap: () => this.editBoard(this.currentBoard()) })
-        IconButton({ icon: $r('sys.symbol.plus'), label: t('创建卡片'), compId: 'life-panel-create', diameter: 36, iconSize: 18,
-          disabled: this.creating, onTap: () => { this.openSheet('add'); } })
-        Button({ type: ButtonType.Circle }) { Text('⋯').fontSize(24).fontColor($r('app.color.text_primary')) }
-          .width(36).height(36).backgroundColor(Color.Transparent).accessibilityText(t('更多操作')).bindMenu(this.collectionMenu())
-      }.width('100%')
+        }.width('100%')
       if (!this.selected && !this.removed) { this.boardToolbar() }
       if (this.error) { Banner({ text: this.error }) }
       if (this.feedback) { Text(this.feedback).fontSize(12).fontColor($r('app.color.text_secondary')).width('100%').transition(Motion.rise()) }
@@ -585,5 +589,8 @@ export struct LifePanelsPanel {
     }.width('100%').height('100%').padding({ left: 16, right: 16, top: 8, bottom: 8 })
       .bindSheet($$this.sheetOpen, this.sheet(), { title: { title: this.sheetTitle() }, detents: [SheetSize.LARGE], onDisappear: () => this.detailChanged() })
       .onAreaChange((_old: Area, area: Area) => { this.boardWidth = Math.max(160, Number(area.width) - 32); })
+    }.title(t('生活看板'), { systemMaterial: this.appearance.control }).menus(this.titleActions)
+      .backgroundColor($r('app.color.page_background'))
+      .onShown(() => { this.active = true; }).onHidden(() => { this.active = false; })
   }
 }

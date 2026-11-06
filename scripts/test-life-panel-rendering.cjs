@@ -19,7 +19,7 @@ function renderer(name) {
   const renderedItems = new Set();
   const listScopes = new Map();
   const element = kind => new Proxy({}, { get: (_, method) => {
-    if (method === 'create' && kind === 'ListItem') return render => {
+    if (method === 'create' && (kind === 'ListItem' || kind === 'NavDestination')) return render => {
       if (render && !renderedItems.has(active)) { renderedItems.add(active); render(active, true); }
     };
     if (method === 'create' && kind === 'Text') return value => texts.set(active, value);
@@ -44,7 +44,7 @@ function renderer(name) {
     LongPressGesture: element('gesture'), PanGesture: element('gesture'), GestureGroup: element('gesture'),
     GestureMode: {}, ScrollDirection: {}, BarState: {}, FontWeight: {}, FlexAlign: {}, TextAlign: {}, HorizontalAlign: {}, Alignment: {},
     GesturePriority: {}, GestureMask: {}, GestureJudgeResult: { REJECT: 0, CONTINUE: 1 }, SheetSize: {}, Gesture: element('gesture') };
-  for (const name of ['Column','Row','Scroll','Stack','Button','Blank','Text','TextInput','If','ForEach','Checkbox','List','ListItem','Refresh','SymbolGlyph','LoadingProgress','Menu','MenuItem','MenuItemGroup']) globals[name] = element(name);
+  for (const name of ['Column','Row','Scroll','Stack','Button','Blank','Text','TextInput','If','ForEach','Checkbox','List','ListItem','Refresh','SymbolGlyph','LoadingProgress','Menu','MenuItem','MenuItemGroup','NavDestination']) globals[name] = element(name);
   vm.runInNewContext(ts.transpileModule('export class Probe {' + methods + '}', { compilerOptions: {
     target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS
   } }).outputText, globals);

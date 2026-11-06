@@ -127,7 +127,6 @@ struct Index {
   @State private historySearchRequest: number = 0;
   @State private miniAppCreateAvailable: boolean = false;
   @State private miniAppCreateRequest: number = 0;
-  @State private lifePanelsActive: boolean = false;
   @StorageProp('tinybot.life-panel.target') @Watch('panelLinkChanged') private panelLink: string = '';
   @State private lifePanelTarget: string = '';
   private lastPanelLink: string = '';
@@ -1105,10 +1104,7 @@ struct Index {
         .onShown(() => { this.onboardingActive = true; })
         .onHidden(() => { this.onboardingActive = false; })
     } else if (name === 'life-panels') {
-      NavDestination() {
-        LifePanelsPanel({ app: this.app, onChat: () => this.revealChat(), active: this.lifePanelsActive, requestedTarget: this.lifePanelTarget })
-      }.title(t('生活看板'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
-        .onShown(() => { this.lifePanelsActive = true; }).onHidden(() => { this.lifePanelsActive = false; })
+      LifePanelsPanel({ app: this.app, onChat: () => this.revealChat(), requestedTarget: this.lifePanelTarget })
     } else if (name === 'mini-apps') {
       NavDestination() {
         if (this.app.productivity.options?.miniAppsEnabled === true) {
