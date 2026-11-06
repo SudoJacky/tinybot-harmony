@@ -60,6 +60,15 @@ export function resolvePanelInputs(definitions: Record<string, PanelInput> = {},
   }
   return result;
 }
+// Definition edits migrate saved preferences; explicit refresh requests remain strict.
+export function reconcilePanelInputs(definitions: Record<string, PanelInput> = {}, saved: PanelInputs = {}): PanelInputs {
+  const result = resolvePanelInputs(definitions);
+  for (const key of Object.keys(result)) {
+    const input = definitions[key], value = saved[key];
+    if (typeof value === input.type && (!input.options || input.options.includes(value))) { result[key] = value; }
+  }
+  return resolvePanelInputs(definitions, result);
+}
 export function validatePanelChecks(checks: PanelCheck[]): void {
   if (!Array.isArray(checks) || checks.length > 12) { contractFailure('/checks', 'Expected up to 12 checks'); }
   checks.forEach((check: PanelCheck, index: number) => {

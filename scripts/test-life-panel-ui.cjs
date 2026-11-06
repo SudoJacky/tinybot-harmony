@@ -23,7 +23,7 @@ const model=loadModel('LifePanel');
 const signal=compile(fs.readFileSync(path.join(root,'entry/src/main/ets/services/Cancellation.ets'),'utf8'),
   {require:()=>({ToolFailure:class extends Error {}})});
 const tree=emitted('views/LifePanelsPanel'), panel=tree.statements.find(n=>ts.isClassDeclaration(n)&&n.name.text==='LifePanelsPanel');
-const names=['stop','activityChanged','scan','reload','report','entryKey','refresh','change','refreshAll','visible','layouts','rect','columns','boardHeight','currentBoard','boardKey','sizeOnBoard','targetChanged','dropCard','layoutEntries','startMove','moveCard','resetGesture','resizeCard','heightOnBoard','entryFor','createCard','showEditor'];
+const names=['stop','activityChanged','scan','reload','report','entryKey','refresh','change','refreshAll','visible','layouts','rect','columns','boardHeight','currentBoard','currentEditorThreadId','boardKey','sizeOnBoard','targetChanged','dropCard','layoutEntries','startMove','moveCard','resetGesture','resizeCard','heightOnBoard','entryFor','createCard','showEditor'];
 const methods=panel.members.filter(n=>ts.isMethodDeclaration(n)&&names.includes(n.name.getText(tree))).map(n=>n.getText(tree)).join('\n');
 assert.equal(panel.members.filter(n=>ts.isMethodDeclaration(n)&&names.includes(n.name.getText(tree))).length,names.length);
 const timers=new Map(), logs=[];let timerId=0;
@@ -145,6 +145,24 @@ async function main() {
   composing.prompt='Improve it';composing.app.threads[0].attachments=[{id:'unsent'}];await composing.createCard();assert.equal(createdThreads,1);assert.equal(editorSaved,'new');assert.equal(sent,2,'Unsent attachments are never submitted with panel prompt');
   composing.boards[0].board.editorThreadId='new';await composing.showEditor();assert.equal(selectedThread,'new');assert.equal(chatOpened,1);
   console.log('PASS board generation sends directly, reuses its editor, preserves unrelated drafts/attachments and routes back to its conversation');
+  const scoped=view();let nextThread=0;const submissions=[],selections=[],associations=[];
+  scoped.boards=['a','b'].map(id=>({workspaceId:'owner',board:{id,title:id,items:[]}}));
+  scoped.onChat=()=>{};scoped.editTarget='';
+  scoped.app={ready:true,busy:false,threads:[],runningThreadIds:[],active:{id:''},
+    selectThread:async id=>{selections.push(id);scoped.app.active=scoped.app.threads.find(thread=>thread.id===id);return !!scoped.app.active},
+    newThread:async()=>{const thread={id:'editor-'+ ++nextThread,draft:'',attachments:[]};scoped.app.threads.push(thread);scoped.app.active=thread;return true},
+    setDraft:()=>{},setPanelContext:()=>{},flushDraft:async()=>{},send:async()=>submissions.push(scoped.app.active.id)};
+  scoped.boardStore=()=>({list:async()=>scoped.boards,setEditor:async(w,b,id)=>{associations.push([w,b,id]);scoped.boards.find(item=>item.board.id===b).board.editorThreadId=id}});
+  scoped.boardSelection='owner/a';scoped.prompt='Create A';await scoped.createCard();assert.equal(scoped.error,'');
+  scoped.boardSelection='owner/b';await scoped.showEditor();assert.deepEqual(selections,[],'A board without an editor must not open another board conversation');
+  scoped.prompt='Create B';await scoped.createCard();assert.equal(scoped.error,'');
+  assert.deepEqual(submissions,['editor-1','editor-2'],'Different boards get independent editing conversations');
+  assert.deepEqual(associations,[['owner','a','editor-1'],['owner','b','editor-2']]);
+  scoped.editorThreadId='';await scoped.showEditor();assert.equal(selections.at(-1),'editor-2','Board association survives clearing component state');
+  scoped.boardSelection='owner/a';scoped.prompt='Improve A';await scoped.createCard();assert.equal(submissions.at(-1),'editor-1');
+  scoped.boardSelection='';scoped.editorThreadId='editor-2';scoped.prompt='All cards';await scoped.createCard();
+  assert.equal(submissions.at(-1),'editor-2','All-cards view retains the component editor fallback');
+  console.log('PASS independent board editors, persisted reopening, board reuse and all-cards fallback');
   console.log('PASS emitted shared-board ordering/sizing, drag persistence dispatch and chat card/board navigation');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

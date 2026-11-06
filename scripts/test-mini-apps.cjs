@@ -792,6 +792,34 @@ async function panelRepairLoopTest() {
  await assert.rejects(invoke(faultTools,'publish_life_panel',{path:'card.panel.json',requestId:'pin-retry',boardId:board.id}),e=>e.code==='PANEL_PIN_FAILED'&&e.details.result.published===true);
  await assert.rejects(invoke(tools,'validate_life_panel',{path:'card.panel.json',requestId:'pin-retry',boardId:board.id}),e=>e.code==='INVALID_ARGUMENTS');assert.equal((await boards.get('owner',board.id)).items.length,0,'Validation cannot enter the publication retry path or pin a card');
  const recovered=await invoke(tools,'publish_life_panel',{path:'card.panel.json',requestId:'pin-retry',boardId:board.id});assert.equal(recovered.reused,true);assert.equal((await boards.get('owner',board.id)).items.length,1);
+ // Definition edits migrate persisted inputs identically in validation and publication.
+ const beforeEdit=plain(await repo.get(created.panelId));let previewInputs;
+ const editTools=new LifePanelTools(panels,'owner','owner',files,boards,async(page,storage,context)=>{previewInputs=plain(context.inputs)});
+ const variants=[
+   [{symbol:{type:'string',default:'A',options:['A','B']},added:{type:'boolean',default:true}},{symbol:'B',added:true}],
+   [{symbol:{type:'string',default:'A',options:['A']}},{symbol:'A'}],
+   [{symbol:{type:'number',default:3}},{symbol:3}],
+   [{renamed:{type:'string',default:'new'}},{renamed:'new'}],
+   [undefined,{}],
+ ];
+ for(const [definitions,expected] of variants) {
+   const before=plain(await repo.get(created.panelId));
+   const candidate={...spec,inputs:definitions};await files.write('edit.panel.json',JSON.stringify(candidate),signal);
+   const args={path:'edit.panel.json',panelId:created.panelId,expectedRevision:before.configRevision};
+   assert.equal((await invoke(editTools,'validate_life_panel',args)).valid,true);assert.deepEqual(previewInputs,expected);
+   assert.deepEqual(plain(await repo.get(created.panelId)),before,'Validation cannot migrate live inputs');
+   await invoke(editTools,'publish_life_panel',args);
+   const updated=plain(await repo.get(created.panelId));assert.deepEqual(updated.inputs,expected);
+   assert.deepEqual(updated.data,beforeEdit.data);assert.deepEqual(updated.viewState,beforeEdit.viewState);
+   assert.equal(updated.id,created.panelId);assert.equal(updated.configRevision,before.configRevision+1);
+ }
+ await assert.rejects(repo.refresh(created.panelId,signal,'manual',{removed:'value'}),/not declared/,'Explicit refresh inputs remain strict');
+ const invalid={...spec,inputs:{symbol:{type:'string',default:'C',options:['A','B']}}};
+ await files.write('edit.panel.json',JSON.stringify(invalid),signal);
+ const revision=(await repo.get(created.panelId)).configRevision;
+ await assert.rejects(invoke(editTools,'publish_life_panel',{path:'edit.panel.json',panelId:created.panelId,expectedRevision:revision}),/Invalid input value/);
+ assert.equal((await repo.get(created.panelId)).configRevision,revision,'Invalid candidate defaults still fail without mutation');
+ console.log('PASS input definition edits preserve compatible values and live state, migrate incompatible values, and keep explicit inputs strict');
  console.log('PASS repair loop: structured diagnostics, dry-run isolation, idempotent publication/pin recovery, schemas, parameters, runtime evidence and editor continuity');
 }
 const run=process.argv.includes('--lifecycle')?lifePanelRecoveryTest():main().then(lifePanelTest).then(lifePanelApiTest).then(lifePanelScriptTest).then(lifeBoardsTest).then(lifePanelRecoveryTest).then(htmlPanelTest).then(panelRepairLoopTest);

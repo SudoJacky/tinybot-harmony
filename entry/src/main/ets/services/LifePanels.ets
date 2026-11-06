@@ -1,4 +1,4 @@
-import { PanelInputs, resolvePanelInputs } from '../model/PanelContract';
+import { PanelInputs, resolvePanelInputs, reconcilePanelInputs } from '../model/PanelContract';
 import { ToolFailure } from '../model/ToolFailure';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
@@ -149,7 +149,7 @@ export class PanelRepository {
       const record: PanelRecord = { version: 1, id: id, definition: definition, configRevision: (old?.configRevision || 0) + 1,
         sourcePath: sourcePath, sourceThreadId: threadId, data: preserve ? old!.data : definition.data, user: old?.user || {},
         createdAt: old?.createdAt || now, updatedAt: now, refreshedAt: preserve ? sameSource ? old!.refreshedAt : 0 : options.sourceVerified ? now : 0, attemptedAt: preserve && sameSource ? old!.attemptedAt : 0, error: preserve && sameSource ? old!.error : '', archived: false,
-        paused: old?.paused || false, runs: old?.runs || [], viewState: old?.viewState, inputs: resolvePanelInputs(definition.inputs, old?.inputs || {}), runtimeError: '', publicationKey: options.publicationKey || old?.publicationKey };
+        paused: old?.paused || false, runs: old?.runs || [], viewState: old?.viewState, inputs: reconcilePanelInputs(definition.inputs, old?.inputs || {}), runtimeError: '', publicationKey: options.publicationKey || old?.publicationKey };
       validatePanelData(definition, record.data, record.user);
       await this.files.write(path, JSON.stringify(record), cancellation, { version: previous?.version || null });
       PanelChanges.emit();

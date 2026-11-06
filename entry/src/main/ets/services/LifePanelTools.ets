@@ -6,7 +6,7 @@ import { LIFE_PANEL_CATALOG, lifePanelCatalog, panelId, parsePanelSpec, PanelLis
 import { miniAppPage } from '../model/MiniApp';
 import { MiniAppStorage, MiniAppSnapshot } from '../model/MiniApp';
 import { PanelValidationStorage } from './PanelValidationStorage';
-import { PanelProbeOptions, PanelInputs, resolvePanelInputs } from '../model/PanelContract';
+import { PanelProbeOptions, PanelInputs, reconcilePanelInputs } from '../model/PanelContract';
 import { PanelTaskFailure } from './PanelTaskFailure';
 import { WebUiPanelContext } from '../model/WebUi';
 import { getLocale } from '../model/I18n';
@@ -152,7 +152,7 @@ export class LifePanelTools implements AgentTools {
         if (owner !== this.workspaceId && spec.source.workspaceId === undefined) { throw new Error('Cross-chat workspace-json updates require explicit source.workspaceId'); }
         if (spec.source.workspaceId === undefined) { spec.source.workspaceId = this.workspaceId; }
       }
-      const inputs = resolvePanelInputs(spec.inputs, previous?.inputs || {});
+      const inputs = reconcilePanelInputs(spec.inputs, previous?.inputs || {});
       const retained = previous && !args.replaceData ? previous.data : spec.data;
       // Validate retained data too: changing a view must not silently replace its live snapshot.
       const candidate = JSON.parse(JSON.stringify(spec)) as PanelSpec; candidate.data = retained;

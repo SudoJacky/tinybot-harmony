@@ -88,6 +88,10 @@ export struct LifePanelsPanel {
   private boardKey(entry: BoardEntry): string { return entry.workspaceId + '/' + entry.board.id; }
   private boardFor(key: string): BoardEntry { return this.boards.find((entry: BoardEntry) => this.boardKey(entry) === key)!; }
   private currentBoard(): BoardEntry | undefined { return this.boards.find((entry: BoardEntry) => this.boardKey(entry) === this.boardSelection); }
+  private currentEditorThreadId(): string {
+    const board = this.currentBoard();
+    return board ? board.board.editorThreadId || '' : this.editorThreadId;
+  }
   private panels(): LifePanels {
     if (!this.store) { this.store = new LifePanels((this.getUIContext().getHostContext() as common.UIAbilityContext).getApplicationContext().filesDir); }
     return this.store;
@@ -281,7 +285,8 @@ export struct LifePanelsPanel {
     this.getUIContext().getFocusController().clearFocus();
     this.creating = true; this.error = ''; this.feedback = t('正在生成并验证卡片…');
     const board = this.currentBoard(), target = this.entries.find((entry: PanelEntry) => this.entryKey(entry) === this.editTarget);
-    const editor = this.app.threads.find((thread) => thread.id === (board?.board.editorThreadId || this.editorThreadId) && !thread.archived && !thread.draft && !thread.attachments?.length && !thread.references?.length && !this.app.runningThreadIds.includes(thread.id));
+    const editorId = this.currentEditorThreadId();
+    const editor = this.app.threads.find((thread) => thread.id === editorId && !thread.archived && !thread.draft && !thread.attachments?.length && !thread.references?.length && !this.app.runningThreadIds.includes(thread.id));
     try {
       if (!(editor ? await this.app.selectThread(editor.id) : await this.app.newThread())) { throw new Error(this.app.error || this.app.saveError || t('无法创建新对话。')); }
       this.editorThreadId = this.app.active.id;
@@ -299,9 +304,10 @@ export struct LifePanelsPanel {
     finally { if (this.mounted) { this.creating = false; } }
   }
   private async showEditor(): Promise<void> {
-    const id = this.currentBoard()?.board.editorThreadId || this.editorThreadId;
+    const id = this.currentEditorThreadId();
+    if (!id) { return; }
     try {
-      if (id && !await this.app.selectThread(id)) { throw new Error(this.app.error || t('无法打开编辑对话')); }
+      if (!await this.app.selectThread(id)) { throw new Error(this.app.error || t('无法打开编辑对话')); }
       this.onChat();
     } catch (error) { this.report(error as Error); }
   }
@@ -456,7 +462,7 @@ export struct LifePanelsPanel {
         Button(this.creating ? t('正在生成…') : t('生成并验证')).attributeModifier(Btn.primary).id('life-board-prompt-submit')
           .enabled(this.app.ready && !this.app.busy && !this.creating && !!this.prompt.trim()).onClick(() => { this.createCard(); })
       }.width('100%')
-      Button(t('查看编辑对话')).attributeModifier(Btn.textSmall).enabled(!!this.currentBoard()?.board.editorThreadId || !!this.editorThreadId).onClick(() => { this.showEditor(); })
+      Button(t('查看编辑对话')).attributeModifier(Btn.textSmall).enabled(!!this.currentEditorThreadId()).onClick(() => { this.showEditor(); })
     }.transition(Motion.rise()).width('100%').padding(12).borderRadius(18).backgroundColor($r('app.color.surface'))
       .border({ width: 1, color: $r('app.color.divider') })
   }
