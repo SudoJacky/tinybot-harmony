@@ -116,7 +116,7 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
   const sidebar = Object.assign(new globals.exports.Sidebar(), { app: observedApp, appearance: { fontFamily: 'system' }, query: '', archived: false, visibleCounts: {}, collapsedProjects: [] });
   sidebar.selecting = false; sidebar.selectedIds = [];
   sidebar.mount(); const groupIds = [...groups];
-  const countId = [...texts].find(([, value]) => value === '3')[0];
+  assert.ok(![...texts.values()].includes('3'), 'Project headers omit conversation counts');
   const rowListId = [...lists].find(([, ids]) => ids.includes('one'))[0];
   const rows = () => Array.from(lists.get(rowListId));
   assert.deepEqual(rows(), ['one','two','three']);
@@ -129,7 +129,6 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
   assert.equal(texts.get(titleId), 'Renamed chat', 'Retained row must display renamed title immediately');
   assert.equal(await app.deleteThread('one'), true); sidebar.flush();
   assert.deepEqual(rows(), ['two','three'], 'Deleting must remove the retained row without switching tabs');
-  assert.equal(texts.get(countId), '2', 'Counts must immediately follow membership changes');
   assert.equal(await app.archiveThread('two'), true); sidebar.flush();
   assert.deepEqual(rows(), ['three'], 'Archiving must immediately remove the row');
   assert.equal(await app.archiveThread('two'), true); sidebar.flush();

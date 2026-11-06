@@ -1667,6 +1667,7 @@
   "全选": "Select all",
   "取消全选": "Deselect all",
   "已选 {0} 项": "{0} selected",
+  "已选中 {0} 个会话": "{0} conversations selected",
   "删除选中的 {0} 段对话？": "Delete {0} selected chats?",
   "删除后无法恢复。会话工作区中的文件会保留。": "This cannot be undone. Files in the chat workspaces will be kept.",
   "应用内浏览器": "In-app browser",
@@ -2806,5 +2807,8 @@
   "无法打开编辑对话": "Could not open the editing conversation",
   "已添加到看板": "Added to board",
   "已从看板移除": "Removed from board",
-  "看板已保存": "Board saved"
+  "看板已保存": "Board saved",
+  "可选择多个看板，勾选后立即保存。": "Select one or more boards. Changes are saved immediately.",
+  "新建看板并固定": "Create board and pin",
+  "此看板暂无卡片。": "This board has no cards yet."
 }

@@ -153,6 +153,7 @@ export struct LifePanelCard {
   @Prop cardSize: string = '';
   @Prop detail: boolean = false;
   @Prop timestamp: string = '';
+  @Prop showFooter: boolean = true;
   @Prop editing: boolean = false;
   @Prop viewHeight: number = 320;
   storage?: MiniAppStorage;
@@ -213,11 +214,14 @@ export struct LifePanelCard {
           Button({ type: ButtonType.Normal }) { Text('⋯').fontSize(24).fontColor($r('app.color.text_secondary')) }
             .backgroundColor(Color.Transparent).borderRadius(8).width(36).height(40).padding(0)
             .clickEffect(Motion.pressSmall).bindMenu(this.menu()).accessibilityText(t('卡片选项'))
+        } else if (!this.interactive) {
+          IconButton({ icon: $r('sys.symbol.chevron_right'), label: t('打开卡片「{0}」', [this.panel.definition.title]),
+            diameter: 36, iconSize: 14, onTap: this.onOpen })
         }
       }.width('100%').padding(this.panel.definition.view ? { left: 12, right: 12, top: 4, bottom: 4 } : 0)
       if (this.panel.runtimeError) {
         Text(this.panel.runtimeError).fontSize(12).fontColor($r('app.color.danger')).maxLines(3).padding(12)
-        Button(t('让 AI 修复')).attributeModifier(Btn.tonal).onClick(this.onEdit).margin(8)
+        if (this.interactive) { Button(t('让 AI 修复')).attributeModifier(Btn.tonal).onClick(this.onEdit).margin(8) }
       }
       if (this.panel.error) {
         Text(panelErrorText(this.panel.error)).fontSize(12).fontColor($r('app.color.danger')).maxLines(this.detail ? 8 : 3)
@@ -250,6 +254,7 @@ export struct LifePanelCard {
         }, (node: PanelNode) => node.id)
       }.width('100%').alignItems(HorizontalAlign.Start)
       }
+      if (this.showFooter) {
       Row({ space: 4 }) {
         Text(this.timestamp).fontSize(11).fontColor($r('app.color.text_secondary')).layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         if (this.panel.definition.view && !this.detail && !this.editing && this.interactive) {
@@ -260,6 +265,7 @@ export struct LifePanelCard {
             .height(40).constraintSize({ minWidth: 40 }).backgroundColor(Color.Transparent).fontColor($r('app.color.text_secondary')).enabled(this.interactive && !this.busy && !this.editing).onClick(this.onRefresh)
         }
       }.width('100%').padding(this.panel.definition.view ? { left: 12, right: 12, top: 4, bottom: 4 } : 0)
+      }
       if (this.editing) {
         Row() {
           Text(t('拖动调整尺寸')).fontSize(11).fontColor($r('app.color.text_secondary')).layoutWeight(1)
