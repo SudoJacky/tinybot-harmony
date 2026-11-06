@@ -34,6 +34,7 @@ export struct WebUiView {
   @Prop @Watch('viewportChanged') viewportHeight: number = 0;
   browserRuntime?: PreviewBrowserRuntime;
   storage?: MiniAppStorage;
+  viewStorage?: MiniAppStorage;
   private browserAttachment: number = -1;
   onHeight: (height: number) => void = () => {};
   @StorageLink('tinybot.foreground') @Watch('foregroundChanged') private foreground: boolean = true;
@@ -206,12 +207,12 @@ export struct WebUiView {
       if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'port_connected', { instanceId: this.instanceId }); };
       // loadData may use an opaque data: origin; transfer only to the verified top-level host.
       this.controller.postMessage('tinybot-web-port', [this.ports[1]], '*');
-      this.ports[0].postMessageEvent(JSON.stringify({ type: 'init', spec: this.spec, autoHeight: webUiAutoHeight(this.spec), values: this.values, panel: this.panelContext, active: this.foreground && (this.preflight || (this.interactive && this.visible)), preflight: this.preflight, panelProbe: this.panelProbe, snapshotMode: this.snapshotMode, automation: !!this.browserRuntime }));
+      this.ports[0].postMessageEvent(JSON.stringify({ type: 'init', spec: this.spec, autoHeight: webUiAutoHeight(this.spec), values: this.values, panel: this.panelContext, placement: !!this.viewStorage, active: this.foreground && (this.preflight || (this.interactive && this.visible)), preflight: this.preflight, panelProbe: this.panelProbe, snapshotMode: this.snapshotMode, automation: !!this.browserRuntime }));
     } catch (error) { this.report(error as Error); }
   }
   private sync(): void {
     if (!this.mounted || !this.ports.length) { return; }
-    try { this.ports[0].postMessageEvent(JSON.stringify({ type: 'state', values: this.values, panel: this.panelContext, active: this.foreground && (this.preflight || (this.interactive && this.visible)) })); }
+    try { this.ports[0].postMessageEvent(JSON.stringify({ type: 'state', values: this.values, panel: this.panelContext, placement: !!this.viewStorage, active: this.foreground && (this.preflight || (this.interactive && this.visible)) })); }
     catch (error) { this.report(error as Error); }
   }
   private async receive(data: webview.WebMessage, generation: number): Promise<void> {
@@ -236,15 +237,16 @@ export struct WebUiView {
       }
       if (message.type === 'storageLoad' || message.type === 'storageSave') {
         try {
-          if (!this.storage) { throw new Error(t('此预览未绑定小程序存储，请从小程序入口打开。')); }
+          const storage = message.scope === 'placement' ? this.viewStorage : this.storage;
+          if (!storage) { throw new Error(message.scope === 'placement' ? 'Placement view state is unavailable outside a board' : t('此预览未绑定小程序存储，请从小程序入口打开。')); }
           let snapshot: MiniAppSnapshot;
-          if (message.type === 'storageLoad') { snapshot = await this.storage.load(); }
+          if (message.type === 'storageLoad') { snapshot = await storage.load(); }
           else {
             if (this.snapshotMode || !this.foreground || this.saving || (!this.panelProbe && (this.preflight || !this.interactive || !this.visible))) {
               throw new Error(t('当前无法保存，请等待任务结束后重试。'));
             }
             this.saving = true;
-            try { snapshot = await this.storage.save(message.value as Object | null, message.revision as string); }
+            try { snapshot = await storage.save(message.value as Object | null, message.revision as string); }
             finally { this.saving = false; this.visibilityChanged(); }
           }
           if (this.mounted && generation === this.generation && this.ports.length) {

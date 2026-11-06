@@ -138,11 +138,23 @@ for(const selected of ['', 'workspace/metric']) {
     assert.equal(layout.children.get(id).storage,storage,'Resizing retains the valid storage binding and HTML session');
     assert.equal(layout.children.get(id).panel.configRevision,storage.revision);
   }
-  page.boards=[{workspaceId:'workspace',board:{id:'layout',items:[{workspaceId:'workspace',panelId:'metric',x:0,y:0,w:5,h:6}]}}];
+  page.boards=[{workspaceId:'workspace',board:{id:'layout',items:[{workspaceId:'workspace',panelId:'metric',mountId:'mount-a',x:0,y:0,w:5,h:6}]}}];
+  page.boardStore=()=>({binding:(workspace,board,mount)=>({workspace,board,mount})});
   page.boardSelection='workspace/layout';page.rect=()=>({x:0,y:0,width:145,height:176});layout.update();
-  assert.equal(layout.children.get(id).viewHeight,selected?500:176);
-  assert.equal(layout.children.get(id).frameHeight,selected?0:176);
-  assert.equal(layout.children.get(id).storage,storage,'Grid resizing preserves the HTML storage session');
+  const placedId=[...layout.children.keys()][0],placed=layout.children.get(placedId);
+  assert.equal(placed.viewHeight,selected?500:176);
+  assert.equal(placed.frameHeight,selected?0:176);
+  assert.deepEqual(placed.storage,storage,'Entering a board retains the shared data identity');
+  if(!selected)assert.equal(placed.viewStorage.mount,'mount-a');
+  if(!selected)assert.notEqual(placedId,id,'Entering a placement creates its own HTML session');
+  page.boards=[{...page.boards[0],board:{...page.boards[0].board,items:page.boards[0].board.items.map(item=>({...item,y:8,h:9}))}}];layout.update();
+  assert.equal([...layout.children.keys()][0],placedId,'Grid movement retains the placement session');
+  if(!selected){
+    page.boards=[{workspaceId:'workspace',board:{id:'second',items:[{workspaceId:'workspace',panelId:'metric',mountId:'mount-b',x:0,y:0,w:6,h:6}]}}];
+    page.boardSelection='workspace/second';layout.update();
+    const next=[...layout.children.keys()][0];assert.notEqual(next,placedId,'Switching boards remounts presentation state');
+    assert.equal(layout.children.get(next).viewStorage.mount,'mount-b');
+  }
 
 }
 console.log('PASS layout resizing updates retained list/detail cards without replacing their HTML storage binding');

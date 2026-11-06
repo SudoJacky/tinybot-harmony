@@ -163,6 +163,7 @@ export struct LifePanelCard {
   private cardHeight: number = 0;
   private contentHeight: number = 0;
   storage?: MiniAppStorage;
+  viewStorage?: MiniAppStorage;
   onRun: (inputs?: PanelInputs) => Promise<void> = async () => {};
   onRuntimeError: (message: string, revision: number) => void = () => {};
   onMoveStart: (event: GestureEvent) => void = () => {};
@@ -206,7 +207,9 @@ export struct LifePanelCard {
   private context(): WebUiPanelContext {
     return { data: this.panel.data, title: this.panel.definition.title, status: this.busy ? 'running' : this.panel.error ? 'failed' : 'ready',
       canRefresh: !!this.panel.definition.source && !this.panel.archived, locale: getLocale(), theme: this.dark ? 'dark' : 'light', inputs: resolvePanelInputs(this.panel.definition.inputs, this.panel.inputs || {}),
-      tokens: { 'text': gradientColor($r('app.color.text_primary'), 1), 'surface': gradientColor($r('app.color.surface'), 1), 'accent': gradientColor(this.appearance.accent, 1) } };
+      tokens: { 'text': gradientColor($r('app.color.text_primary'), 1), 'surface': gradientColor($r('app.color.surface'), 1), 'accent': gradientColor(this.appearance.accent, 1),
+        'on-accent': gradientColor(this.appearance.onAccent, 1), 'text-secondary': gradientColor($r('app.color.text_secondary'), 1),
+        'surface-muted': gradientColor($r('app.color.surface_variant'), 1), 'danger': gradientColor($r('app.color.danger'), 1) } };
   }
   onOpen: () => void = () => {};
   onRefresh: () => void = () => {};
@@ -277,7 +280,7 @@ export struct LifePanelCard {
       }
       if (this.panel.definition.view) {
         if (this.storage) {
-          WebUiView({ content: this.viewContent(), storage: this.storage, panelContext: this.context(),
+          WebUiView({ content: this.viewContent(), storage: this.storage, viewStorage: this.viewStorage, panelContext: this.context(),
             interactive: this.interactive && !this.panel.archived && !this.editing && !this.layoutAction, preferParentScroll: !this.detail && this.frameHeight === 0, viewportHeight: this.viewHeight, onPanelRefresh: this.onRun,
             onHeight: (height: number) => { this.contentHeight = height; },
             onRuntimeError: (message: string) => this.onRuntimeError(message, this.panel.configRevision) })

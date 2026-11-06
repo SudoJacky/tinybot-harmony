@@ -1,8 +1,9 @@
-import { panelId } from './LifePanel';
+import { panelId, validatePanelViewState } from './LifePanel';
+import { MiniAppSnapshot } from './MiniApp';
 import { threadWorkspacePath } from './Workspace';
 import { GridRect, gridHeight, gridOverlap, validateGridRect } from './PanelGrid';
 export interface PanelReference { workspaceId: string; panelId: string; }
-export interface BoardItem extends PanelReference, GridRect {}
+export interface BoardItem extends PanelReference, GridRect { mountId?: string; viewState?: MiniAppSnapshot; }
 interface LegacyBoardItem extends PanelReference { size: string; height?: number; }
 export interface LifeBoard {
   version: number; id: string; title: string; description: string; items: BoardItem[];
@@ -36,9 +37,15 @@ export function parseLifeBoard(content: string, id: string): LifeBoard {
     board.version = 2;
   }
   const seen: Set<string> = new Set<string>();
-  board.items.forEach((item: BoardItem) => {
+  const mounts: Set<string> = new Set<string>();
+  board.items.forEach((item: BoardItem, index: number) => {
     validateReference(item);
-    if (Object.keys(item).some((key: string) => !['workspaceId', 'panelId', 'x', 'y', 'w', 'h'].includes(key))) { throw new Error('Invalid board item fields'); }
+    if (Object.keys(item).some((key: string) => !['workspaceId', 'panelId', 'x', 'y', 'w', 'h', 'mountId', 'viewState'].includes(key))) { throw new Error('Invalid board item fields'); }
+    // Existing boards acquire a stable identity without rewriting files on read.
+    if (item.mountId === undefined) { item.mountId = 'legacy-' + index; }
+    panelId(item.mountId);
+    if (mounts.has(item.mountId)) { throw new Error('Duplicate board placement'); } mounts.add(item.mountId);
+    if (item.viewState !== undefined) { validatePanelViewState(item.viewState); }
     validateGridRect(item);
     if (seen.has(referenceKey(item))) { throw new Error('Duplicate board card'); } seen.add(referenceKey(item));
   });
@@ -50,7 +57,12 @@ export function parseLifeBoard(content: string, id: string): LifeBoard {
   return board;
 }
 export function boardLayoutKey(items: BoardItem[]): string {
-  return JSON.stringify(items.map((item: BoardItem) => referenceKey(item) + ':' + [item.x, item.y, item.w, item.h].join(',')));
+  return JSON.stringify(items.map((item: BoardItem) => referenceKey(item) + ':' + (item.mountId || '') + ':' + [item.x, item.y, item.w, item.h].join(',')));
+}
+// Layout receipts and Agent context do not need potentially large presentation snapshots.
+export function boardLayoutItems(items: BoardItem[]): BoardItem[] {
+  return items.map((item: BoardItem): BoardItem => ({ workspaceId: item.workspaceId, panelId: item.panelId, mountId: item.mountId,
+    x: item.x, y: item.y, w: item.w, h: item.h }));
 }
 export function parsePanelTarget(value: string): PanelTarget {
   const target = JSON.parse(value) as PanelTarget;

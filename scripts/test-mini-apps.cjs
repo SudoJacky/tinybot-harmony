@@ -774,6 +774,21 @@ async function htmlPanelTest() {
   const board=await boards.save('owner','','Interactive board','Test context');await boards.pin('owner',board.id,{workspaceId:'owner',panelId:id},true);
   assert.equal((await boards.get('owner',board.id)).items[0].w,5,'New pins use the grid default');
   const otherBoard=await boards.save('owner','','Other board','');await boards.pin('owner',otherBoard.id,{workspaceId:'owner',panelId:id},true);
+  const mount=(await boards.get('owner',board.id)).items[0].mountId;
+  const otherMount=(await boards.get('owner',otherBoard.id)).items[0].mountId;
+  assert.notEqual(mount,otherMount);
+  const local=boards.binding('owner',board.id,mount),otherLocal=boards.binding('owner',otherBoard.id,otherMount);
+  const sharedBefore=plain((await repo.get(id)).viewState);
+  await local.save({tab:'history'},'initial');await otherLocal.save({tab:'overview'},'initial');
+  assert.equal((await local.load()).value.tab,'history');assert.equal((await otherLocal.load()).value.tab,'overview');
+  await assert.rejects(local.save({tab:'stale'},'initial'),/changed/);
+  assert.deepEqual(plain((await repo.get(id)).viewState),sharedBefore,'Presentation state cannot modify shared edits');
+  const stateBefore=plain(await local.load());
+  const listed=JSON.parse(await tools.execute({id:'boards',type:'function',function:{name:'list_life_boards',arguments:'{}'}},signal));
+  assert.equal(listed.find(entry=>entry.board.id===board.id).board.items[0].viewState,undefined,'Layout reads exclude presentation snapshots');
+  const layout=await boards.get('owner',board.id);
+  await boards.save('owner',board.id,layout.title,layout.description,layout.items.map(({workspaceId,panelId,x,y,w,h})=>({workspaceId,panelId,x,y,w,h})));
+  assert.deepEqual(plain(await local.load()),stateBefore,'Full layout save retains placement identity and state');
   const layoutKey=()=>boards.get('owner',board.id).then(b=>load('model/LifeBoard').boardLayoutKey(b.items));
   await boards.place('owner',board.id,{workspaceId:'owner',panelId:id},{x:3,y:15,w:5,h:8},await layoutKey());
   await repo.resize(id,'L');assert.equal((await repo.get(id)).configRevision,revised.configRevision);
@@ -786,6 +801,16 @@ async function htmlPanelTest() {
   const dest='/sandbox/html-restored';fs.mkdirSync(disk(dest));await readBackupFile({filesDir:dest,cacheDir:dest,getApplicationContext(){return this;}},backup,emptyData());
   assert.deepEqual(plain(await new LifePanels(dest).repository('owner').get(id)),plain(await repo.get(id)));
   assert.equal((await new LifeBoards(dest).get('owner',board.id)).items[0].h,8);
+  assert.deepEqual(plain(await new LifeBoards(dest).binding('owner',board.id,mount).load()),stateBefore,'Backup retains independent presentation state');
+  assert.deepEqual(plain(await local.load()),stateBefore,'Dragging and resizing retain presentation state');
+  await boards.pin('owner',board.id,{workspaceId:'owner',panelId:id},false);
+  await boards.pin('owner',board.id,{workspaceId:'owner',panelId:id},true);
+  const newMount=(await boards.get('owner',board.id)).items[0].mountId;
+  assert.notEqual(newMount,mount);assert.equal((await boards.binding('owner',board.id,newMount).load()).value,null);
+  await assert.rejects(local.save({tab:'late'},stateBefore.revision),/unavailable/);
+  assert.equal((await otherLocal.load()).value.tab,'overview','Removing one placement preserves others');
+  assert.deepEqual(plain((await repo.get(id)).viewState),sharedBefore);
+
   console.log('PASS HTML file publication, isolated state, source refresh, concurrent/conflicting writes, definition replacement, bounded resize and backup/restore');
 }
 
@@ -842,6 +867,15 @@ async function panelRepairLoopTest() {
    await assert.rejects(invoke(tools,'manage_life_board',{...placement,layout}));
  }
  assert.deepEqual(plain(await boards.get('owner',board.id)),plain(placed),'Rejected placement leaves geometry intact');
+ const inspection=await invoke(tools,'get_life_board',{workspaceId:'owner',boardId:board.id,viewportWidth:344});
+ assert.equal(inspection.items[1].mountId,placed.items[1].mountId);
+ assert.equal(inspection.items[1].rendered.width,166);assert.equal(inspection.items[1].rendered.height,340);
+ assert.equal(inspection.evidence.screenshot,'not_provided');assert.equal(inspection.evidence.visualReview,'not_performed');
+ const unknownWidth=await invoke(tools,'get_life_board',{workspaceId:'owner',boardId:board.id});assert.equal(unknownWidth.items[0].rendered,undefined);
+ await assert.rejects(invoke(tools,'get_life_board',{workspaceId:'owner',boardId:board.id,viewportWidth:0}));
+ assert.equal(sized.evidence.webRuntime,'passed');assert.equal(sized.evidence.visualReview,'not_performed');
+ const design=await invoke(tools,'get_life_panel_catalog',{section:'design'});assert.ok(design.sizing.includes('136.3x340'));assert.ok(design.state.includes('viewState'));
+
  // Definition edits migrate persisted inputs identically in validation and publication.
  const beforeEdit=plain(await repo.get(created.panelId));let previewInputs;
  const editTools=new LifePanelTools(panels,'owner','owner',files,boards,async(page,storage,context)=>{previewInputs=plain(context.inputs)});

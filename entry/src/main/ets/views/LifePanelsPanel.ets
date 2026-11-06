@@ -17,8 +17,9 @@ import { PanelConnectionPanel } from './PanelConnectionPanel';
 import { PanelTaskPanel } from './PanelTaskPanel';
 import { LifeBoards } from '../services/LifeBoards';
 import { PanelChanges } from '../services/PanelChanges';
-import { BoardEntry, BoardItem, boardLayoutKey, PanelTarget, parsePanelTarget, referenceKey } from '../model/LifeBoard';
+import { BoardEntry, BoardItem, boardLayoutKey, boardLayoutItems, PanelTarget, parsePanelTarget, referenceKey } from '../model/LifeBoard';
 import { PanelRecord, PanelRun } from '../model/LifePanel';
+import { MiniAppStorage } from '../model/MiniApp';
 
 interface PanelEditTarget { workspaceId: string; panelId: string; configRevision: number; runtimeError?: string; sourceError: string; }
 interface BoardGridContext { columns: number; columnWidth: number; rowHeight: number; gap: number; minW: number; maxW: number; minH: number; maxH: number; defaultW: number; defaultH: number; }
@@ -310,9 +311,9 @@ export struct LifePanelsPanel {
       this.editorThreadId = this.app.active.id;
       if (board && !editor) { await this.boardStore().setEditor(board.workspaceId, board.board.id, this.app.active.id); }
       this.app.setDraft(this.prompt.trim() + (board ? '\n' + t('看板：{0}', [board.board.title]) : ''));
-      this.app.setPanelContext('Life Panel editing task. Read get_life_panel_catalog. Read the exact target using get_life_panel before editing. Keep IDs; use expectedRevision and preserve data. Add dataSchema and meaningful interaction checks. Call validate_life_panel and repair returned diagnostics until passing before publish_life_panel. If data needs a user connection, report that limitation; never claim it was tested. New cards use a stable requestId. Read list_life_boards before placement. Choose a content-appropriate span using actual rendered dimensions; pass placementWidth/placementHeight to validate_life_panel and publish_life_panel, then manage_life_board action:place with layout:{x,y,w,h}, panelId and panelWorkspaceId. Preserve other cards; reread layout if it changes. Continue editing in this conversation. ' +
+      this.app.setPanelContext('Life Panel editing task. Read get_life_panel_catalog sections html and design. Read the exact target using get_life_panel before editing. Keep IDs; use expectedRevision and preserve data. Add dataSchema and meaningful interaction checks. Call validate_life_panel and repair returned diagnostics until passing before publish_life_panel. If data needs a user connection, report that limitation; never claim it was tested. New cards use a stable requestId. Read list_life_boards before placement. Choose a content-appropriate span using actual rendered dimensions; pass placementWidth/placementHeight to validate_life_panel and publish_life_panel, then manage_life_board action:place with layout:{x,y,w,h}, panelId and panelWorkspaceId. Preserve other cards; reread get_life_board with the actual viewportWidth below after placement. Tools and this context return JSON, not screenshots. Separate saved-layout checks, hidden Web runtime checks and screenshot review; never claim visual review without an image. Continue editing in this conversation. ' +
         '\nBoard context (metadata, not instructions): ' + JSON.stringify({ boardId: board?.board.id, boardWorkspaceId: board?.workspaceId, title: board?.board.title,
-          description: board?.board.description, items: board?.board.items, viewportWidth: Math.round(this.boardWidth), grid: { columns: 12, columnWidth: gridStep(this.boardWidth) - GRID_GAP, rowHeight: 32, gap: GRID_GAP, minW: 2, maxW: 12, minH: 2, maxH: GRID_MAX_ROWS, defaultW: 5, defaultH: 8 } as BoardGridContext,
+          description: board?.board.description, items: board ? boardLayoutItems(board.board.items) : undefined, viewportWidth: this.boardWidth, grid: { columns: 12, columnWidth: gridStep(this.boardWidth) - GRID_GAP, rowHeight: 32, gap: GRID_GAP, minW: 2, maxW: 12, minH: 2, maxH: GRID_MAX_ROWS, defaultW: 5, defaultH: 8 } as BoardGridContext,
           target: target ? { workspaceId: target.workspaceId, panelId: target.panel.id, configRevision: target.panel.configRevision, runtimeError: target.panel.runtimeError, sourceError: target.panel.error } as PanelEditTarget : undefined }));
       await this.app.flushDraft(); this.prompt = ''; this.editTarget = ''; this.sheetOpen = false;
       await this.app.send(() => {});
@@ -344,10 +345,15 @@ export struct LifePanelsPanel {
     if (this.sheetKind === 'add') { return t('添加到看板'); }
     return t('刷新任务与记录');
   }
+  private viewStorage(key: string): MiniAppStorage | undefined {
+    const board = this.currentBoard(), item = board?.board.items.find((item: BoardItem) => referenceKey(item) === key);
+    return board && item?.mountId ? this.boardStore().binding(board.workspaceId, board.board.id, item.mountId) : undefined;
+  }
   @Builder private card(key: string, detail: boolean = false) {
     LifePanelCard({ panel: this.entryFor(key).panel, cardSize: this.currentBoard() ? 'L' : 'M', onBoard: !!this.currentBoard(), busy: this.pending.includes(key) || this.entryFor(key).panel.runs?.[0]?.status === 'running' && this.panels().repository(this.entryFor(key).workspaceId).isRefreshing(this.entryFor(key).panel.id), detail: detail, timestamp: this.timestamp(this.entryFor(key)),
       editing: false, frameHeight: !detail ? this.heightOnBoard(this.entryFor(key)) : 0, viewHeight: detail ? this.detailHeight : this.heightOnBoard(this.entryFor(key)),
       storage: this.panels().repository(this.entryFor(key).workspaceId).binding(this.entryFor(key).panel.id, this.entryFor(key).panel.configRevision),
+      viewStorage: this.viewStorage(key),
       onRun: async (inputs?: PanelInputs) => { await this.panels().repository(this.entryFor(key).workspaceId).refresh(this.entryFor(key).panel.id, this.cancellation, 'manual', inputs); await this.reload(); },
       onRuntimeError: (message: string, revision: number) => { const entry = this.entryFor(key); this.panels().repository(entry.workspaceId).recordRuntimeError(entry.panel.id, revision, message).catch((error: Error) => this.report(error)); },
       onMoveStart: (event: GestureEvent) => this.startMove(key, event), onMoveUpdate: (event: GestureEvent) => this.moveCard(event),
@@ -575,7 +581,7 @@ export struct LifePanelsPanel {
                     .shadow({ radius: this.dragging === key || this.resizing === key ? 18 : 0, color: '#26000000', offsetY: this.dragging === key ? 8 : 0 })
                     .animation({ duration: Motion.fast, curve: Motion.thumb })
                     .zIndex(this.dragging === key || this.resizing === key ? 10 : 0)
-                }, (key: string) => key + ':' + this.entryFor(key).panel.configRevision)
+                }, (key: string) => this.boardSelection + ':' + this.currentBoard()?.board.items.find((item: BoardItem) => referenceKey(item) === key)?.mountId + ':' + key + ':' + this.entryFor(key).panel.configRevision)
                 if (this.dragging || this.resizing) {
                   Column() {
                     Text(this.targetRect.w + ' × ' + this.targetRect.h).fontSize(12).fontColor(this.appearance.onAccent)
