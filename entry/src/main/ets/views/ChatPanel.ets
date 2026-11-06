@@ -32,6 +32,7 @@ import { SkillData } from '../model/Skills';
 import { SkillQuery, matchingSkills, skillDisplayName, skillDraft, skillQuery } from '../model/SkillCompletion';
 import { builtinSkillInfo } from '../model/BuiltinSkills';
 import { selectAttachments } from '../services/NativeActions';
+import { captureAttachment } from '../services/CameraCapture';
 import { ToolApproval } from '../services/ToolApproval';
 import { BrowserSession } from '../services/BrowserSession';
 import { BrowserStatusCard } from './BrowserPanel';
@@ -561,14 +562,19 @@ export struct ChatPanel {
     finally { this.importing = false; }
   }
 
-  private async attach(photo: boolean): Promise<void> {
-    if (this.importing || this.app.busy) { return; }
+  private async attach(source: 'photo' | 'file' | 'camera'): Promise<void> {
+    if (!this.canAttach() || this.thread.attachments.length >= MAX_MESSAGE_ATTACHMENTS) { return; }
     this.importing = true; const id = this.thread.id;
     try {
-      const items = await selectAttachments(this.getUIContext().getHostContext() as common.UIAbilityContext, photo, MAX_MESSAGE_ATTACHMENTS - this.thread.attachments.length);
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const items = source === 'camera' ? await captureAttachment(context) :
+        await selectAttachments(context, source === 'photo', MAX_MESSAGE_ATTACHMENTS - this.thread.attachments.length);
+      if (!items.length) { return; }
       if (id !== this.app.active.id) { throw new Error(t("对话已切换，请在当前对话重新添加附件。")); }
-      await this.app.setAttachments(this.thread.attachments.concat(items));
-    } catch (error) { this.app.error = (error as Error).message; }
+      if (!await this.app.setAttachments(this.thread.attachments.concat(items))) {
+        throw new Error(this.app.saveError || this.app.error || t('添加附件失败，请重试。'));
+      }
+    } catch (error) { this.app.error = (source === 'camera' ? t('拍照失败：') : '') + (error as Error).message; }
     finally { this.importing = false; }
   }
   private remember(messageId: string): void {
@@ -947,6 +953,7 @@ export struct ChatPanel {
       }.width(56).height(56).borderRadius(Radius.lg).justifyContent(FlexAlign.Center)
       .backgroundColor($r('app.color.surface'))
       Text(label).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+        .maxLines(2).textAlign(TextAlign.Center)
     }
     .id(compId).layoutWeight(1).opacity(enabled ? 1 : 0.4).enabled(enabled)
     .clickEffect(enabled ? Motion.press : null)
@@ -978,21 +985,19 @@ export struct ChatPanel {
     Column({ space: 2 }) {
       this.plusMenuRow($r('sys.symbol.picture'), t('图片'), 'plus-menu-photo',
         this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, false, '',
-        () => this.dismissPlusMenu(() => this.attach(true)))
+        () => this.dismissPlusMenu(() => this.attach('photo')))
+      this.plusMenuRow($r('sys.symbol.camera'), t('拍照'), 'plus-menu-camera',
+        this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, false, '',
+        () => this.dismissPlusMenu(() => this.attach('camera')))
       this.plusMenuRow($r('sys.symbol.doc_text'), t('文本文件'), 'plus-menu-text',
         this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, false, '',
-        () => this.dismissPlusMenu(() => this.attach(false)))
+        () => this.dismissPlusMenu(() => this.attach('file')))
       this.plusMenuRow($r('sys.symbol.square_and_pencil'), t('画板'), 'plus-menu-drawing',
         this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, false, '',
         () => this.dismissPlusMenu(() => this.openDrawing()))
       Divider().strokeWidth(0.5).color($r('app.color.divider')).margin({ left: 10, right: 10, top: 4, bottom: 4 })
       this.plusMenuRow($r('sys.symbol.folder'), t('工作区'), 'plus-menu-workspace', !this.app.busy, true, '',
         () => { this.showPlusMenu = false; this.onFiles(); })
-      this.plusMenuRow($r('sys.symbol.lightbulb'), t('记忆'), 'plus-menu-memory', !this.app.busy, true, '',
-        () => { this.showPlusMenu = false; this.onTools('memory'); })
-      this.plusMenuRow($r('sys.symbol.person_2'), this.thread.teamEnabled ? t('关闭团队') : t('Agent 团队'),
-        'plus-menu-team', !this.app.busy && !this.thread.archived && this.app.saveError.length === 0, false, '',
-        () => { this.showPlusMenu = false; this.toggleTeam(!this.thread.teamEnabled); })
       Divider().strokeWidth(0.5).color($r('app.color.divider')).margin({ left: 10, right: 10, top: 4, bottom: 4 })
       this.plusMenuRow($r('sys.symbol.link'), t('引用其他会话'), 'plus-menu-reference',
         this.canAttach() && this.thread.references.length < 4, false, '', () => this.dismissPlusMenu(() => this.addThreadReference()))
@@ -1064,20 +1069,15 @@ export struct ChatPanel {
       Column({ space: Space.lg }) {
         Row() {
           this.plusTile($r('sys.symbol.picture'), t("图片"), 'attach-photo',
-            this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, () => this.fromSheet(() => this.attach(true)))
+            this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, () => this.fromSheet(() => this.attach('photo')))
+          this.plusTile($r('sys.symbol.camera'), t('拍照'), 'attach-camera',
+            this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, () => this.fromSheet(() => this.attach('camera')))
           this.plusTile($r('sys.symbol.doc_text'), t("文本文件"), 'attach-text',
-            this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, () => this.fromSheet(() => this.attach(false)))
+            this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, () => this.fromSheet(() => this.attach('file')))
           this.plusTile($r('sys.symbol.square_and_pencil'), t('画板'), 'attach-drawing',
             this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, () => this.fromSheet(() => this.openDrawing()))
-        }.width('100%').alignItems(VerticalAlign.Top)
-        Row() {
           this.plusTile($r('sys.symbol.folder'), t("工作区"), 'open-workspace', !this.app.busy,
             () => { this.showPlus = false; this.onFiles(); })
-          this.plusTile($r('sys.symbol.lightbulb'), t("记忆"), 'open-memory', !this.app.busy,
-            () => { this.showPlus = false; this.onTools('memory'); })
-          this.plusTile($r('sys.symbol.person_2'), this.thread.teamEnabled ? t("关闭团队") : t("Agent 团队"), 'toggle-team',
-            !this.app.busy && !this.thread.archived && this.app.saveError.length === 0,
-            () => { this.showPlus = false; this.toggleTeam(!this.thread.teamEnabled); })
         }.width('100%').alignItems(VerticalAlign.Top)
         Text(this.thread.attachments.length >= MAX_MESSAGE_ATTACHMENTS ? t('已达到每条消息 {0} 个附件的上限', [MAX_MESSAGE_ATTACHMENTS]) : t('每条消息最多 {0} 个附件 · 图片需模型支持视觉输入', [MAX_MESSAGE_ATTACHMENTS])).fontFamily(this.appearance.fontFamily)
           .fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).width('100%').textAlign(TextAlign.Center)

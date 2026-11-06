@@ -2806,5 +2806,8 @@
   "无法打开编辑对话": "Could not open the editing conversation",
   "已添加到看板": "Added to board",
   "已从看板移除": "Removed from board",
-  "看板已保存": "Board saved"
+  "看板已保存": "Board saved",
+  "拍照": "Camera",
+  "拍照失败：": "Could not take photo: ",
+  "相机未返回有效照片（{0}）。": "The camera did not return a valid photo ({0})."
 }

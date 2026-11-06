@@ -12,6 +12,7 @@ const disk = value => value.startsWith('file://') ? disk(value.slice(7)) : value
 const handles = new Map(), cache = new Map();
 let copyFailure = false, pdfReads = 0, pdfPages = [], jsReads = 0;
 let selectedUris = [], sharedRecords = [], pickerMaximum;
+let cameraOutcome = 'photo', cameraPath;
 const fileIo = {
   rmdir: async p => {
     const target = path.resolve(disk(p));
@@ -44,9 +45,22 @@ const kits = {
       (parent === 'general.image' && ['general.jpeg', 'general.png', 'general.heic'].includes(type)) }) },
     unifiedDataChannel: { ProgressIndicator: { NONE: 0 }, ListenerStatus: { FINISHED: 0, PROCESSING: 1, CANCELED: 2 } }
   },
-  '@kit.CoreFileKit': { fileIo, picker: { DocumentViewPicker: class {
+  '@kit.CoreFileKit': { fileIo, fileUri: { getUriFromPath: p => 'file://' + p }, picker: { DocumentViewPicker: class {
     async select(options) { pickerMaximum = options.maxSelectNumber; return selectedUris; }
   } } },
+  '@kit.CameraKit': { camera: { CameraPosition: { CAMERA_POSITION_BACK: 1 } }, cameraPicker: {
+    PickerMediaType: { PHOTO: 'photo' }, pick: async (context, mediaTypes, profile) => {
+      assert.equal(mediaTypes.length, 1); assert.equal(mediaTypes[0], 'photo');
+      assert.equal(profile.cameraPosition, 1);
+      cameraPath = disk(profile.saveUri); assert.ok(fs.existsSync(cameraPath));
+      if (cameraOutcome === 'error') throw Error('injected camera failure');
+      if (cameraOutcome === 'cancel') return { resultCode: -1, resultUri: '', mediaType: 'photo' };
+      if (cameraOutcome === 'invalid') return { resultCode: 0, resultUri: '', mediaType: 'photo' };
+      if (cameraOutcome === 'unreadable') return { resultCode: 0, resultUri: profile.saveUri + '.missing', mediaType: 'photo' };
+      fs.writeFileSync(cameraPath, Buffer.from([255, 216, 255]));
+      return { resultCode: 0, resultUri: profile.saveUri, mediaType: 'photo' };
+    }
+  } },
   '@kit.MediaLibraryKit': { photoAccessHelper: { PhotoViewMIMETypes: { IMAGE_TYPE: 1 }, PhotoViewPicker: class {
     async select(options) { pickerMaximum = options.maxSelectNumber; return { photoUris: selectedUris }; }
   } } },
@@ -280,6 +294,20 @@ async function main() {
   const { selectAttachments, ShareInbox } = load('services/NativeActions');
   const { MAX_MESSAGE_ATTACHMENTS } = load('model/Productivity');
   Attachments.configure(root);
+  const { captureAttachment } = load('services/CameraCapture');
+  const captured = await captureAttachment({ cacheDir: root });
+  assert.equal(captured.length, 1); validateAttachments(captured);
+  assert.equal(captured[0].mime, 'image/jpeg'); assert.ok(!fs.existsSync(cameraPath));
+  assert.equal(await reopened.setAttachments(captured), true);
+  assert.equal((await Attachments.hydrate([{ role: 'user', content: '', attachments: captured }]))[0].images.length, 1);
+  cameraOutcome = 'cancel';
+  assert.equal((await captureAttachment({ cacheDir: root })).length, 0); assert.ok(!fs.existsSync(cameraPath));
+  for (const outcome of ['error', 'invalid', 'unreadable']) {
+    cameraOutcome = outcome;
+    await assert.rejects(captureAttachment({ cacheDir: root }), outcome === 'error' ? /injected camera failure/ : outcome === 'invalid' ? /相机未返回有效照片/ : /ENOENT/);
+    assert.ok(!fs.existsSync(cameraPath));
+  }
+  console.log('PASS captured photo persists and hydrates; cancellation, invalid results and camera/import failures clean temporary files');
   selectedUris = Array.from({ length: 10 }, (_, index) => {
     const uri = root + '/selected-' + index + '.jpg'; fs.writeFileSync(disk(uri), Buffer.from([255, 216, 255])); return uri;
   });
