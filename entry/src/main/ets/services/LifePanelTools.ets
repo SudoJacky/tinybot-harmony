@@ -15,10 +15,11 @@ import { WorkspaceFiles } from './WorkspaceFiles';
 import { workspaceRelativePath } from './WorkspaceTools';
 import { Cancellation } from './Cancellation';
 import { LifeBoards } from './LifeBoards';
-import { BoardItem } from '../model/LifeBoard';
+import { BoardItem, boardLayoutKey } from '../model/LifeBoard';
+import { GridRect, validateGridRect } from '../model/PanelGrid';
 interface PanelRevisionResult { configRevision: number; }
 interface PanelPinResult { panelId: string; workspaceId: string; published: boolean; pinned: boolean; boardId?: string; }
-interface PublishPanelArguments { path?: string; htmlPath?: string; panelId?: string; workspaceId?: string; boardId?: string; boardWorkspaceId?: string; action?: string; title?: string; description?: string; items?: BoardItem[]; section?: string; requestId?: string; expectedRevision?: number; replaceData?: boolean; checkSource?: boolean; viewportWidth?: number; inputs?: PanelInputs; }
+interface PublishPanelArguments { path?: string; htmlPath?: string; panelId?: string; workspaceId?: string; boardId?: string; boardWorkspaceId?: string; action?: string; title?: string; description?: string; items?: BoardItem[]; layout?: GridRect; panelWorkspaceId?: string; section?: string; requestId?: string; expectedRevision?: number; replaceData?: boolean; checkSource?: boolean; viewportWidth?: number; placementWidth?: number; placementHeight?: number; inputs?: PanelInputs; }
 export class LifePanelTools implements AgentTools {
   private panels: LifePanels;
   private workspaceId: string;
@@ -45,8 +46,13 @@ export class LifePanelTools implements AgentTools {
       }, required: ['workspaceId', 'panelId'], additionalProperties: false } } },
       this.publicationTool(false), this.publicationTool(true),
       { type: 'function', function: { name: 'list_life_boards', description: 'List all persistent Life Panel boards and card references. Same card ID can occur in multiple boards, sharing data and user state.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false } } },
-      { type: 'function', executionMode: 'sequential', function: { name: 'manage_life_board', description: 'Create or update a named board. action: save, archive or restore. Omit boardId to create. items optionally replaces layout using existing {workspaceId,panelId,x,y,w,h} card references on a 12-column grid; integer x/y >=0, w/h 2..12, x+w<=12, no overlaps; y may extend below the viewport. Omitting items preserves layout. Removing a reference does not delete the card. Returns a clickable board receipt in chat.', parameters: { type: 'object', properties: {
-        'action': { type: 'string', enum: ['save', 'archive', 'restore'], description: 'Board operation' }, 'boardId': { type: 'string', description: 'Existing board ID' }, 'workspaceId': { type: 'string', description: 'Board owner; defaults to current' }, 'title': { type: 'string', description: 'Required name for a new board' }, 'description': { type: 'string', description: 'Optional description' }, 'items': { type: 'array', description: 'Optional complete grid layout', items: { type: 'object', description: 'Card reference', properties: { 'workspaceId': { type: 'string', description: 'Card owner' }, 'panelId': { type: 'string', description: 'Shared card ID' }, 'x': { type: 'integer', minimum: 0, maximum: 10, description: 'Left column' }, 'y': { type: 'integer', minimum: 0, description: 'Top row' }, 'w': { type: 'integer', minimum: 2, maximum: 12, description: 'Width in cells' }, 'h': { type: 'integer', minimum: 2, maximum: 12, description: 'Height in cells' } }, required: ['workspaceId', 'panelId', 'x', 'y', 'w', 'h'], additionalProperties: false } }
+      { type: 'function', executionMode: 'sequential', function: { name: 'manage_life_board', description: 'Create or update a named board. action: save, place, archive or restore. place requires an existing boardId, panelId, panelWorkspaceId and layout:{x,y,w,h}; it mounts or moves only that card, pushing collisions down. Read list_life_boards first and choose free space. Omit boardId to create. items optionally replaces layout using existing {workspaceId,panelId,x,y,w,h} card references on a 12-column grid; integer x/y >=0, w 2..12, h 2..33, x+w<=12, no overlaps; y may extend below the viewport. Omitting items preserves layout. Removing a reference does not delete the card. Returns a clickable board receipt in chat.', parameters: { type: 'object', properties: {
+        'action': { type: 'string', enum: ['save', 'place', 'archive', 'restore'], description: 'Board operation' }, 'boardId': { type: 'string', description: 'Existing board ID' }, 'workspaceId': { type: 'string', description: 'Board owner; defaults to current' }, 'title': { type: 'string', description: 'Required name for a new board' }, 'description': { type: 'string', description: 'Optional description' }, 'items': { type: 'array', description: 'Optional complete grid layout', items: { type: 'object', description: 'Card reference', properties: { 'workspaceId': { type: 'string', description: 'Card owner' }, 'panelId': { type: 'string', description: 'Shared card ID' }, 'x': { type: 'integer', minimum: 0, maximum: 10, description: 'Left column' }, 'y': { type: 'integer', minimum: 0, description: 'Top row' }, 'w': { type: 'integer', minimum: 2, maximum: 12, description: 'Width in cells' }, 'h': { type: 'integer', minimum: 2, maximum: 33, description: 'Height in cells (32vp rows, 12vp gaps)' } }, required: ['workspaceId', 'panelId', 'x', 'y', 'w', 'h'], additionalProperties: false } },
+         'panelId': { type: 'string', description: 'Card ID for place' }, 'panelWorkspaceId': { type: 'string', description: 'Card owner for place' },
+        'layout': { type: 'object', description: 'Placement for one card; other cards are retained', properties: {
+          'x': { type: 'integer', minimum: 0, maximum: 10, description: 'Left column' }, 'y': { type: 'integer', minimum: 0, description: 'Top row' },
+          'w': { type: 'integer', minimum: 2, maximum: 12, description: 'Width in columns' }, 'h': { type: 'integer', minimum: 2, maximum: 33, description: 'Height in rows' }
+        }, required: ['x', 'y', 'w', 'h'], additionalProperties: false }
       }, required: ['action'], additionalProperties: false } } },
       { type: 'function', executionMode: 'sequential', function: { name: 'manage_life_panel_task', description: 'Pause/resume automatic updates or manually refresh one existing card. Includes API data refresh and bounded read-only Agent content updates. Inspect list_life_panels for recent runs/errors. Does not require the source chat.', parameters: { type: 'object', properties: { 'panelId': { type: 'string', description: 'Card ID' }, 'workspaceId': { type: 'string', description: 'Card owner' }, 'action': { type: 'string', enum: ['pause', 'resume', 'refresh'], description: 'Task operation' }, 'inputs': { type: 'object', description: 'Optional declared input values for a manual refresh, merged with current inputs', additionalProperties: true } }, required: ['panelId', 'workspaceId', 'action'], additionalProperties: false } } }
     ];
@@ -60,6 +66,8 @@ export class LifePanelTools implements AgentTools {
       'expectedRevision': { type: 'integer', description: 'Required for updates: configRevision from get_life_panel. Rejects stale edits.', minimum: 1 },
       'replaceData': { type: 'boolean', description: 'False by default: preserve current live data on updates. True explicitly replaces it with the tested source/initial snapshot.' },
       'checkSource': { type: 'boolean', description: 'Default true: run configured source without persisting. False explicitly defers connection/source setup and is reported as not_checked.' },
+      'placementWidth': { type: 'number', minimum: 32, maximum: 1200, description: 'Chosen placement width in vp; pair with placementHeight to validate just this viewport' },
+      'placementHeight': { type: 'number', minimum: 76, maximum: 1440, description: 'Chosen placement height in vp; pair with placementWidth' },
       'viewportWidth': { type: 'integer', description: 'Full-card width in vp from board context, 160–1200; checks run here and half width.', minimum: 160, maximum: 1200 }
     };
     if (!validateOnly) {
@@ -70,7 +78,7 @@ export class LifePanelTools implements AgentTools {
     return { type: 'function', executionMode: 'sequential',
       promptGuidelines: ['Create/edit loop: read catalog and current card, write candidate files with dataSchema and checks, call validate_life_panel, repair every returned diagnostic and repeat. Publish only after passing. If source requires credentials, explicitly defer its check and explain the pending connection. Never claim declared checks prove all possible interactions. Use the original ID and expectedRevision on updates.'],
       function: { name: validateOnly ? 'validate_life_panel' : 'publish_life_panel',
-        description: validateOnly ? 'Test a candidate without changing the card: schema, source query, HTML startup at two widths, declared interaction/storage assertions, horizontal overflow and control labels. Returns structured stage/path/check diagnostics to repair and retry. State is detached; checks cannot execute live refresh tasks.' :
+        description: validateOnly ? 'Test a candidate without changing the card: schema, source query, HTML startup at the chosen placement size (or two default widths), declared interaction/storage assertions, horizontal overflow and control labels. Returns structured stage/path/check diagnostics to repair and retry. State is detached; checks cannot execute live refresh tasks.' :
           'Validate then publish native/HTML card. size is a legacy definition field; board geometry uses x/y/w/h; updates preserve user layout, live data and user state by default; no version restore. requestId makes new-card retries idempotent. Structured pin failures retain published ID for recovery. Explicit source failures block publication; checkSource:false is reserved for pending connection/setup, never hides a tested failure.',
         parameters: { type: 'object', properties: properties, required: ['path'], additionalProperties: false } } };
   }
@@ -108,12 +116,21 @@ export class LifePanelTools implements AgentTools {
     }
     if (call.function.name === 'manage_life_board') {
       if (!this.boards) { throw new Error('Board store is unavailable'); }
-      if (Object.keys(args).some((key) => !['action', 'boardId', 'workspaceId', 'title', 'description', 'items'].includes(key)) || !['save', 'archive', 'restore'].includes(args.action || '') ||
+      if (Object.keys(args).some((key) => !['action', 'boardId', 'workspaceId', 'title', 'description', 'items', 'panelId', 'panelWorkspaceId', 'layout'].includes(key)) || !['save', 'place', 'archive', 'restore'].includes(args.action || '') ||
         (args.workspaceId !== undefined && typeof args.workspaceId !== 'string') || (args.boardId !== undefined && typeof args.boardId !== 'string') || (args.title !== undefined && typeof args.title !== 'string') || (args.description !== undefined && typeof args.description !== 'string')) { throw new Error('Invalid board operation'); }
       const owner = args.workspaceId || this.workspaceId;
       if (!args.boardId && owner !== this.workspaceId) { throw new Error('Create boards in the current workspace'); }
       const before = args.boardId ? await this.boards.get(owner, args.boardId) : undefined;
       if (args.action !== 'save' && !before) { throw new Error('Select an existing board'); }
+      if (args.action === 'place') {
+        if (!before || typeof args.panelId !== 'string' || typeof args.panelWorkspaceId !== 'string' || !args.layout ||
+          args.items !== undefined || args.title !== undefined || args.description !== undefined ||
+          Object.keys(args.layout).some((key: string) => !['x', 'y', 'w', 'h'].includes(key))) { throw new Error('Place requires a card reference and one grid rectangle'); }
+        validateGridRect(args.layout);
+        const placed = await this.boards.place(owner, before.id, { workspaceId: args.panelWorkspaceId, panelId: args.panelId }, args.layout, boardLayoutKey(before.items));
+        return JSON.stringify({ boardId: placed.id, workspaceId: owner, title: placed.title, items: placed.items, openFrom: 'Life Panel' });
+      }
+      if (args.layout !== undefined || args.panelId !== undefined || args.panelWorkspaceId !== undefined) { throw new Error('Placement fields require action:place'); }
       const board = await this.boards.save(owner, args.boardId || '', args.title === undefined ? before?.title || '' : args.title,
         args.description === undefined ? before?.description || '' : args.description, args.items, args.action === 'save' ? undefined : args.action === 'archive');
       return JSON.stringify({ boardId: board.id, workspaceId: owner, title: board.title, openFrom: 'Life Panel' });
@@ -123,11 +140,16 @@ export class LifePanelTools implements AgentTools {
     if (validating && [args.requestId, args.boardId, args.boardWorkspaceId].some((value: string | undefined) => value !== undefined)) {
       throw new ToolFailure('INVALID_ARGUMENTS', 'Validation does not accept publication or pinning arguments', 'remove_publication_arguments');
     }
-    if (Object.keys(args).some((key: string) => !['path', 'htmlPath', 'panelId', 'workspaceId', 'boardId', 'boardWorkspaceId', 'requestId', 'expectedRevision', 'replaceData', 'checkSource', 'viewportWidth'].includes(key)) || typeof args.path !== 'string' || !args.path.endsWith('.panel.json') ||
+    if (Object.keys(args).some((key: string) => !['path', 'htmlPath', 'panelId', 'workspaceId', 'boardId', 'boardWorkspaceId', 'requestId', 'expectedRevision', 'replaceData', 'checkSource', 'viewportWidth', 'placementWidth', 'placementHeight'].includes(key)) || typeof args.path !== 'string' || !args.path.endsWith('.panel.json') ||
       [args.panelId, args.workspaceId, args.boardId, args.boardWorkspaceId].some((value: string | undefined) => value !== undefined && typeof value !== 'string') ||
       [args.replaceData, args.checkSource].some((value: boolean | undefined) => value !== undefined && typeof value !== 'boolean') ||
       args.requestId !== undefined && (typeof args.requestId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(args.requestId)) ||
       args.viewportWidth !== undefined && (!Number.isInteger(args.viewportWidth) || args.viewportWidth < 160 || args.viewportWidth > 1200)) { throw new ToolFailure('INVALID_ARGUMENTS', 'Invalid card validation/publication arguments', 'fix_arguments'); }
+    if ((args.placementWidth === undefined) !== (args.placementHeight === undefined) ||
+      args.placementWidth !== undefined && (!Number.isFinite(args.placementWidth) || args.placementWidth < 32 || args.placementWidth > 1200 ||
+        !Number.isFinite(args.placementHeight) || args.placementHeight! < 76 || args.placementHeight! > 1440)) {
+      throw new ToolFailure('INVALID_ARGUMENTS', 'Provide both placementWidth (32–1200vp) and placementHeight (76–1440vp)', 'fix_placement_size');
+    }
     const path = workspaceRelativePath(args.path, false), owner = args.workspaceId || this.workspaceId;
     if (!args.panelId && owner !== this.workspaceId) { throw new Error('Create cards in the current workspace'); }
     const id = args.panelId ? panelId(args.panelId) : args.requestId ? 'panel-' + args.requestId : this.panels.createId();
@@ -160,7 +182,7 @@ export class LifePanelTools implements AgentTools {
       parsePanelSpec(JSON.stringify(candidate));
       stage = 'source';
       const testedData = args.checkSource === false ? retained : await repository.probe(spec, id, retained, inputs, cancellation);
-      const widths: number[] = spec.view ? [Math.max(160, Math.round(((args.viewportWidth || 360) - 12) / 2)), args.viewportWidth || 360] : [];
+      const widths: number[] = spec.view ? args.placementWidth !== undefined ? [args.placementWidth] : [Math.max(160, Math.round(((args.viewportWidth || 360) - 12) / 2)), args.viewportWidth || 360] : [];
       stage = 'render';
       if (spec.view) {
         if (!this.validate) { throw new Error('Interactive card validation is unavailable'); }
@@ -168,14 +190,14 @@ export class LifePanelTools implements AgentTools {
         for (const width of widths) {
           const storage = new PanelValidationStorage(previous?.viewState || { value: null, revision: 'initial' });
           try {
-            await this.validate(JSON.stringify(spec.view), storage, context, cancellation, { width: width, checks: spec.checks || [] });
+            await this.validate(JSON.stringify(spec.view), storage, context, cancellation, { width: width, height: args.placementHeight, checks: spec.checks || [] });
             // Reopen with the state produced by the interaction checks, without replaying them.
-            if (spec.checks?.length) { await this.validate(JSON.stringify(spec.view), storage, context, cancellation, { width: width, checks: [] }); }
+            if (spec.checks?.length) { await this.validate(JSON.stringify(spec.view), storage, context, cancellation, { width: width, height: args.placementHeight, checks: [] }); }
           } catch (error) { throw new Error('width=' + width + ': ' + (error as Error).message); }
         }
         if (previous && !args.replaceData && JSON.stringify(testedData) !== JSON.stringify(retained)) {
           await this.validate(JSON.stringify(spec.view), new PanelValidationStorage(previous.viewState || { value: null, revision: 'initial' }),
-            { data: retained, inputs: inputs, title: spec.title, status: 'ready', canRefresh: !!spec.source, locale: getLocale() }, cancellation, { width: args.viewportWidth || 360, checks: [] });
+            { data: retained, inputs: inputs, title: spec.title, status: 'ready', canRefresh: !!spec.source, locale: getLocale() }, cancellation, { width: args.placementWidth || args.viewportWidth || 360, height: args.placementHeight, checks: [] });
         }
       }
       const warnings: string[] = [];
@@ -183,7 +205,7 @@ export class LifePanelTools implements AgentTools {
       if (spec.view && !spec.checks?.length) { warnings.push('No interaction checks declared: only startup/layout/labels checked.'); }
       if (args.checkSource === false && spec.source) { warnings.push('Source was explicitly not checked; connection/setup remains pending.'); }
       const sourceStatus = spec.source ? args.checkSource === false ? 'not_checked' : 'passed' : 'not_applicable';
-      if (validating) { return JSON.stringify({ valid: true, widths: widths, checks: spec.checks?.length || 0, sourceStatus: sourceStatus, warnings: warnings, published: false }); }
+      if (validating) { return JSON.stringify({ valid: true, widths: widths, height: args.placementHeight, checks: spec.checks?.length || 0, sourceStatus: sourceStatus, warnings: warnings, published: false }); }
       if (args.boardId && (!this.boards || (await this.boards.get(args.boardWorkspaceId || this.workspaceId, args.boardId)).archived)) { throw new Error('Select an available board'); }
       stage = 'publish';
       if (!previous || args.replaceData) { spec.data = testedData; }

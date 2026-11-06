@@ -4,16 +4,16 @@ const ts=require(path.join(studio,'sdk/default/openharmony/ets/build-tools/ets-l
 const cache=new Map();
 function load(name){if(cache.has(name))return cache.get(name);const exports={};cache.set(name,exports);
  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname,'../entry/src/main/ets/model',name+'.ets'),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2021,module:ts.ModuleKind.CommonJS}}).outputText,{exports,require:id=>load(path.basename(id))});return exports;}
-const {gridStep,gridPixels,gridSnap,gridPlace,gridOverlap,validateGridRect}=load('PanelGrid');
+const {gridStep,gridPixels,gridSnap,gridPlace,gridOverlap,gridVacancy,GRID_ROW_STEP,validateGridRect}=load('PanelGrid');
 const {parseLifeBoard}=load('LifeBoard');const plain=value=>JSON.parse(JSON.stringify(value));
 const origin={x:0,y:0,w:6,h:6};
-for(const width of [280,360,700])for(let w=2;w<=12;w++)for(let h=2;h<=12;h++){
- const target=gridSnap(origin,(w-6)*gridStep(width),(h-6)*gridStep(width),width,true);
+for(const width of [280,360,700])for(let w=2;w<=12;w++)for(let h=2;h<=33;h++){
+ const target=gridSnap(origin,(w-6)*gridStep(width),(h-6)*GRID_ROW_STEP,width,true);
  assert.deepEqual(plain(target),{x:0,y:0,w,h});validateGridRect(target);
- assert.ok(Math.abs(gridPixels(target,width).width-(w*gridStep(width)-8))<0.001);
+ assert.ok(Math.abs(gridPixels(target,width).width-(w*gridStep(width)-12))<0.001);
 }
 assert.deepEqual(plain(gridSnap(origin,-10000,-10000,360,true)),{x:0,y:0,w:2,h:2});
-assert.deepEqual(plain(gridSnap(origin,10000,10000,360,true)),{x:0,y:0,w:12,h:12});
+assert.deepEqual(plain(gridSnap(origin,10000,10000,360,true)),{x:0,y:0,w:12,h:33});
 assert.equal(gridSnap({x:8,y:2,w:4,h:3},1000,0,360,true).w,4);
 const abc=[{x:0,y:0,w:6,h:5},{x:6,y:0,w:6,h:5},{x:0,y:5,w:12,h:7}];
 assert.deepEqual(plain(gridPlace(abc,1,{x:0,y:12,w:6,h:5})),[abc[0],{x:0,y:12,w:6,h:5},abc[2]]);
@@ -22,7 +22,7 @@ assert.deepEqual(plain(gridPlace(abc,1,{x:0,y:0,w:6,h:5})),[{...abc[0],y:5},{x:0
 const crowded=Array.from({length:30},(_,i)=>({x:i%3*4,y:Math.floor(i/3)*5,w:4,h:3}));
 const untouched=JSON.stringify(crowded);
 for(let active=0;active<crowded.length;active++)for(let w=2;w<=12;w++){
- const target={x:12-w,y:active,w,h:2+active%11},placed=gridPlace(crowded,active,target);
+ const target={x:12-w,y:active,w,h:2+active%32},placed=gridPlace(crowded,active,target);
  assert.deepEqual(plain(placed[active]),target);
  placed.forEach((rect,i)=>{validateGridRect(rect);if(i!==active){assert.equal(rect.x,crowded[i].x);assert.ok(rect.y>=crowded[i].y)}
   for(let j=0;j<i;j++)assert.equal(gridOverlap(rect,placed[j]),false);});
@@ -31,10 +31,18 @@ for(let active=0;active<crowded.length;active++)for(let w=2;w<=12;w++){
 assert.equal(JSON.stringify(crowded),untouched);
 const legacy={version:1,id:'board',title:'Old',description:'',items:['S','S','L'].map((size,i)=>({workspaceId:'owner',panelId:'panel-'+i,size,height:i===2?600:undefined})),archived:false,createdAt:1,updatedAt:2,editorThreadId:'editor'};
 const migrated=parseLifeBoard(JSON.stringify(legacy),'board');assert.equal(migrated.version,2);
-assert.deepEqual(plain(migrated.items.map(({x,y,w,h})=>({x,y,w,h}))),[{x:0,y:0,w:6,h:9},{x:6,y:0,w:6,h:9},{x:0,y:9,w:12,h:12}]);
+assert.deepEqual(plain(migrated.items.map(({x,y,w,h})=>({x,y,w,h}))),[{x:0,y:0,w:6,h:6},{x:6,y:0,w:6,h:6},{x:0,y:6,w:12,h:14}]);
 assert.equal(migrated.editorThreadId,'editor');assert.equal(migrated.updatedAt,2);assert.equal(legacy.version,1);
 assert.deepEqual(plain(parseLifeBoard(JSON.stringify(migrated),'board')),plain(migrated));
-for(const bad of [{x:1.5,y:0,w:2,h:2},{x:11,y:0,w:2,h:2},{x:0,y:-1,w:2,h:2},{x:0,y:0,w:1,h:2},{x:0,y:0,w:2,h:13}])assert.throws(()=>validateGridRect(bad));
+for(const bad of [{x:1.5,y:0,w:2,h:2},{x:11,y:0,w:2,h:2},{x:0,y:-1,w:2,h:2},{x:0,y:0,w:1,h:2},{x:0,y:0,w:2,h:34}])assert.throws(()=>validateGridRect(bad));
 assert.throws(()=>parseLifeBoard(JSON.stringify({...migrated,items:migrated.items.map(i=>({...i,x:0,y:0}))}),'board'),/overlap/);
 assert.throws(()=>parseLifeBoard(JSON.stringify({...migrated,items:[{...migrated.items[0],size:'S'}]}),'board'),/fields/);
-console.log('PASS 12-column geometry at multiple widths, 363 cell sizes, clamps, 330 collision cases, holes, legacy migration and strict validation');
+for(const [w,h,width,height] of [[2,2,172,76],[5,8,448,340],[12,33,1092,1440]]) {
+ const px=gridPixels({x:0,y:0,w,h},1092);assert.equal(px.width,width);assert.equal(px.height,height);
+ assert.equal(gridPixels({x:0,y:0,w,h},344).height,height,'Fixed rows do not change with phone width');
+}
+assert.deepEqual(plain(gridVacancy([])),{x:0,y:0,w:5,h:8});
+assert.deepEqual(plain(gridVacancy([{x:0,y:0,w:5,h:8}])),{x:5,y:0,w:5,h:8});
+assert.deepEqual(plain(gridVacancy([{x:0,y:0,w:12,h:33}])),{x:0,y:33,w:5,h:8});
+assert.deepEqual(plain(gridVacancy([{x:0,y:8,w:12,h:33}])),{x:0,y:0,w:5,h:8});
+console.log('PASS 12-column geometry at multiple widths, 1056 cell sizes, clamps, 330 collision cases, holes, legacy migration and strict validation');

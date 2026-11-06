@@ -44,7 +44,7 @@ function renderer(name) {
     LongPressGesture: element('gesture'), PanGesture: element('gesture'), GestureGroup: element('gesture'),
     NestedScrollMode: {}, BorderStyle: {}, PanelGridGuide: class {}, GestureMode: {}, ScrollDirection: {Vertical:1,None:0}, BarState: {}, FontWeight: {}, FlexAlign: {}, TextAlign: {}, HorizontalAlign: {}, Alignment: {},
     GesturePriority: {}, GestureMask: {}, GestureJudgeResult: { REJECT: 0, CONTINUE: 1 }, SheetSize: {}, Gesture: element('gesture') };
-  for (const name of ['Column','Row','Scroll','Stack','Button','Blank','Text','TextInput','If','ForEach','Checkbox','List','ListItem','Refresh','SymbolGlyph','LoadingProgress','Menu','MenuItem','MenuItemGroup','NavDestination']) globals[name] = element(name);
+  for (const name of ['__Common__','Column','Row','Scroll','Stack','Button','Blank','Text','TextInput','If','ForEach','Checkbox','List','ListItem','Refresh','SymbolGlyph','LoadingProgress','Menu','MenuItem','MenuItemGroup','NavDestination']) globals[name] = element(name);
   vm.runInNewContext(ts.transpileModule('export class Probe {' + methods + '}', { compilerOptions: {
     target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS
   } }).outputText, globals);
@@ -77,6 +77,11 @@ function renderer(name) {
 }
 
 const h = renderer('LifePanelsPanel'), p = h.view;
+const preflight=renderer('WebUiPreflightHost');
+preflight.view.probes=[{id:1,content:'{}',values:{},options:{width:136.5,height:340,checks:[]}}];
+preflight.view.initialRender();
+assert.equal([...preflight.children.values()][0].viewportHeight,340,'Selected height reaches the actual preflight Web viewport');
+assert.ok([...preflight.attributes.values()].some(a=>a.width===136.5),'Selected fractional width reaches the preflight host');
 let running = false;
 const first = { workspaceId:'workspace', panel:{id:'metric',configRevision:1,archived:false,refreshedAt:10,
   data:{total:42},runs:[],definition:{title:'Metric',size:'M',source:{type:'workspace-json'}}} };

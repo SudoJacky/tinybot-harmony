@@ -128,9 +128,9 @@ async function main() {
   arranged.boards=[{workspaceId:'owner',board:{id:'board',items:arranged.entries.map((e,i)=>({workspaceId:'chat',panelId:e.panel.id,...rects[i]}))}}];
   arranged.boardSelection='owner/board';const before=JSON.stringify(arranged.boards);
   let placement;arranged.boardStore=()=>({place:async(...args)=>placement=args,list:async()=>arranged.boards});arranged.panels=()=>({list:async()=>arranged.entries});
-  const step=loadModel('PanelGrid').gridStep(360), point=(x,y)=>({fingerList:[{globalX:x,globalY:y}]});
+  const step=loadModel('PanelGrid').gridStep(360), rowStep=loadModel('PanelGrid').GRID_ROW_STEP, point=(x,y)=>({fingerList:[{globalX:x,globalY:y}]});
   arranged.feedback='Layout saved';arranged.startMove('chat/b',point(200,200));
-  arranged.moveCard(point(200-6*step,200+12*step));
+  arranged.moveCard(point(200-6*step,200+12*rowStep));
   assert.equal(arranged.feedback,'Layout saved');assert.equal(arranged.targetRect.x,0);assert.equal(arranged.targetRect.y,12);
   assert.equal(JSON.stringify(arranged.boards),before,'Live preview must not mutate saved geometry');
   assert.deepEqual(JSON.parse(JSON.stringify(arranged.previewRects)),[rects[0],{x:0,y:12,w:6,h:5},rects[2]],'A B / C can become A / C / B');
@@ -138,9 +138,9 @@ async function main() {
   arranged.startMove('chat/b',point(200,200));arranged.moveCard(point(200-6*step,200));
   assert.equal(arranged.previewRects[0].y,5,'Collision preview pushes A down');assert.equal(arranged.previewRects[2].y,10,'C follows cascade');
   arranged.resetGesture();assert.equal(JSON.stringify(arranged.boards),before,'Cancel restores layout');assert.equal(arranged.previewRects.length,0);
-  await arranged.resizeCard('chat/a',{offsetX:-step,offsetY:step,...point(200,400)},false);
+  await arranged.resizeCard('chat/a',{offsetX:-step,offsetY:rowStep,...point(200,400)},false);
   assert.equal(arranged.targetRect.w,5);assert.equal(arranged.targetRect.h,6);assert.ok(arranged.resizeWidth>0);
-  await arranged.resizeCard('chat/a',{offsetX:-step,offsetY:step,...point(200,400)},true);
+  await arranged.resizeCard('chat/a',{offsetX:-step,offsetY:rowStep,...point(200,400)},true);
   assert.equal(placement[3].w,5);assert.equal(placement[3].h,6);assert.equal(arranged.resizing,'');
   let offset=0;arranged.contentScroller={currentOffset:()=>({yOffset:offset}),scrollTo:({yOffset})=>offset=yOffset};
   arranged.viewportHeight=500;arranged.startMove('chat/a',point(20,10));assert.equal(arranged.edgeTimer,-1,'At the top, holding a corner cannot scroll into negative overscroll');arranged.resetGesture();

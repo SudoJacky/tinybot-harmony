@@ -8,7 +8,7 @@ export interface PanelSchema {
 export interface PanelInput { type: string; default: string | number | boolean; options?: Object[]; }
 export type PanelInputs = Record<string, string | number | boolean>;
 export interface PanelCheck { action: string; selector?: string; value?: string; path?: string; expected?: Object | null; }
-export interface PanelProbeOptions { width: number; checks: PanelCheck[]; }
+export interface PanelProbeOptions { width: number; height?: number; checks: PanelCheck[]; }
 export function contractFailure(path: string, message: string): never {
   throw new ToolFailure('PANEL_CONTRACT_FAILED', path + ': ' + message, 'fix_card_and_validate_again', { path: path });
 }

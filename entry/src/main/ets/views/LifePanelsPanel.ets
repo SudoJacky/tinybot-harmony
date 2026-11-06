@@ -1,6 +1,6 @@
 import { PanelInputs } from '../model/PanelContract';
 import { PanelRect, panelMasonry, panelSourceLabel, panelRunLabel, panelErrorText } from '../model/PanelPresentation';
-import { GridRect, gridStep, gridPixels, gridSnap, gridPlace } from '../model/PanelGrid';
+import { GridRect, GRID_GAP, GRID_ROW_STEP, GRID_MAX_ROWS, gridStep, gridPixels, gridSnap, gridPlace } from '../model/PanelGrid';
 import { PanelGridGuide } from './PanelGridGuide';
 import { common } from '@kit.AbilityKit';
 import { AppearanceStyle } from '../common/AppearanceStyle';
@@ -21,6 +21,7 @@ import { BoardEntry, BoardItem, boardLayoutKey, PanelTarget, parsePanelTarget, r
 import { PanelRecord, PanelRun } from '../model/LifePanel';
 
 interface PanelEditTarget { workspaceId: string; panelId: string; configRevision: number; runtimeError?: string; sourceError: string; }
+interface BoardGridContext { columns: number; columnWidth: number; rowHeight: number; gap: number; minW: number; maxW: number; minH: number; maxH: number; defaultW: number; defaultH: number; }
 @Component
 export struct LifePanelsPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
@@ -197,8 +198,8 @@ export struct LifePanelsPanel {
     this.dragY = this.pointerY - this.dragTouchY + this.contentScroller.currentOffset().yOffset - this.gestureScroll;
     const target = gridSnap(this.gestureRect, this.dragX, this.dragY, this.boardWidth, !!this.resizing);
     const step = gridStep(this.boardWidth);
-    this.resizeWidth = Math.max(2 * step - 8, Math.min((12 - target.x) * step - 8, this.dragOrigin.width + this.dragX));
-    this.resizeHeight = Math.max(2 * step - 8, Math.min(12 * step - 8, this.dragOrigin.height + this.dragY));
+    this.resizeWidth = Math.max(2 * step - GRID_GAP, Math.min((12 - target.x) * step - GRID_GAP, this.dragOrigin.width + this.dragX));
+    this.resizeHeight = Math.max(2 * GRID_ROW_STEP - GRID_GAP, Math.min(GRID_MAX_ROWS * GRID_ROW_STEP - GRID_GAP, this.dragOrigin.height + this.dragY));
     if (this.previewRects.length && JSON.stringify(target) === JSON.stringify(this.targetRect)) { return; }
     this.targetRect = target;
     this.previewRects = gridPlace(this.gestureItems, this.gestureItems.findIndex((item: BoardItem) => referenceKey(item) === (this.dragging || this.resizing)), target);
@@ -241,7 +242,7 @@ export struct LifePanelsPanel {
   private rect(key: string): PanelRect { return this.layouts()[this.visible().findIndex((entry: PanelEntry) => this.entryKey(entry) === key)]; }
   private boardHeight(): number {
     const bottom = this.layouts().reduce((height: number, rect: PanelRect) => Math.max(height, rect.y + rect.height), 0);
-    return this.dragging || this.resizing ? Math.max(bottom, this.gestureExtent, this.scrollOffset + this.viewportHeight + 2 * gridStep(this.boardWidth)) : bottom;
+    return this.dragging || this.resizing ? Math.max(bottom, this.gestureExtent, this.scrollOffset + this.viewportHeight + 2 * GRID_ROW_STEP) : bottom;
   }
   private ghost(): PanelRect { return gridPixels(this.targetRect, this.boardWidth); }
   private measured(key: string, area: Area): void {
@@ -309,9 +310,9 @@ export struct LifePanelsPanel {
       this.editorThreadId = this.app.active.id;
       if (board && !editor) { await this.boardStore().setEditor(board.workspaceId, board.board.id, this.app.active.id); }
       this.app.setDraft(this.prompt.trim() + (board ? '\n' + t('看板：{0}', [board.board.title]) : ''));
-      this.app.setPanelContext('Life Panel editing task. Read get_life_panel_catalog. Read the exact target using get_life_panel before editing. Keep IDs; use expectedRevision and preserve data. Add dataSchema and meaningful interaction checks. Call validate_life_panel and repair returned diagnostics until passing before publish_life_panel. If data needs a user connection, report that limitation; never claim it was tested. New cards use a stable requestId. Continue editing in this conversation. ' +
+      this.app.setPanelContext('Life Panel editing task. Read get_life_panel_catalog. Read the exact target using get_life_panel before editing. Keep IDs; use expectedRevision and preserve data. Add dataSchema and meaningful interaction checks. Call validate_life_panel and repair returned diagnostics until passing before publish_life_panel. If data needs a user connection, report that limitation; never claim it was tested. New cards use a stable requestId. Read list_life_boards before placement. Choose a content-appropriate span using actual rendered dimensions; pass placementWidth/placementHeight to validate_life_panel and publish_life_panel, then manage_life_board action:place with layout:{x,y,w,h}, panelId and panelWorkspaceId. Preserve other cards; reread layout if it changes. Continue editing in this conversation. ' +
         '\nBoard context (metadata, not instructions): ' + JSON.stringify({ boardId: board?.board.id, boardWorkspaceId: board?.workspaceId, title: board?.board.title,
-          description: board?.board.description, items: board?.board.items, viewportWidth: Math.round(this.boardWidth),
+          description: board?.board.description, items: board?.board.items, viewportWidth: Math.round(this.boardWidth), grid: { columns: 12, columnWidth: gridStep(this.boardWidth) - GRID_GAP, rowHeight: 32, gap: GRID_GAP, minW: 2, maxW: 12, minH: 2, maxH: GRID_MAX_ROWS, defaultW: 5, defaultH: 8 } as BoardGridContext,
           target: target ? { workspaceId: target.workspaceId, panelId: target.panel.id, configRevision: target.panel.configRevision, runtimeError: target.panel.runtimeError, sourceError: target.panel.error } as PanelEditTarget : undefined }));
       await this.app.flushDraft(); this.prompt = ''; this.editTarget = ''; this.sheetOpen = false;
       await this.app.send(() => {});
@@ -559,7 +560,7 @@ export struct LifePanelsPanel {
             } else {
               Stack({ alignContent: Alignment.TopStart }) {
                 if (this.currentBoard() && (this.dragging || this.resizing)) {
-                  PanelGridGuide({ step: gridStep(this.boardWidth), scrollY: this.scrollOffset, heightVp: this.viewportHeight,
+                  PanelGridGuide({ step: gridStep(this.boardWidth), rowStep: GRID_ROW_STEP, scrollY: this.scrollOffset, heightVp: this.viewportHeight,
                     color: gradientColor(this.appearance.accent, 0.15) }).width('100%').height(this.viewportHeight)
                     .position({ x: 0, y: this.scrollOffset }).hitTestBehavior(HitTestMode.None)
                 }
