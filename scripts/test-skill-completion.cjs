@@ -54,7 +54,7 @@ const scope = { exports: {}, skillQuery, skillDraft, matchingSkills, skillDispla
 for (const kind of ['Column', 'Row', 'Text', 'SymbolGlyph', 'Scroll', 'If', 'ForEach']) scope[kind] = new Proxy({}, {
   get: (_, name) => value => { if (['id', 'onClick'].includes(name)) active[name] = value; }
 });
-const helper = tree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'ComposerKeyboardFrame');
+const helper = tree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'ChatLayoutFrame');
 vm.runInNewContext(compile(`${helper.getText(tree)}; class Model { ${use} } exports.Model = Model;
 class Panel { ${['speechActive','currentSkillQuery','skillSuggested','skillMatches','selectSkill','skillSuggestions'].map(method).join('\n')} } exports.Panel = Panel;`), scope);
 const app = new scope.exports.Model(); let mutable = true;

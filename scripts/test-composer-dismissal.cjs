@@ -24,7 +24,7 @@ const sheet = find(cls, n => ts.isCallExpression(n) && n.expression.getText(tree
 function fixture() {
   const timers = [], frames = [], focus = [], logs = [], exports = {};
   let dismissed = false;
-  const helpers = tree.statements.filter(n => ts.isClassDeclaration(n) && n.name.text === 'ComposerKeyboardFrame');
+  const helpers = tree.statements.filter(n => ts.isClassDeclaration(n) && n.name.text === 'ChatLayoutFrame');
   vm.runInNewContext(ts.transpileModule(helpers.map(n => n.getText(tree)).join('\n') +
     `class Panel { ${methods.map(n => n.getText(tree)).join('\n')} }
      exports.Panel = Panel; exports.click = function() { return (${click.getText(tree)})(); };

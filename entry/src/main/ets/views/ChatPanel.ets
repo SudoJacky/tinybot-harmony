@@ -51,8 +51,8 @@ import { WindowViewport } from '../viewmodel/WindowViewport';
 import { MessageListSource } from '../viewmodel/MessageListSource';
 import { SendFrame, SendOrigin } from '../common/SendBubbleMotion';
 
-// onFrame runs before dirty properties are applied. Focus needs the editor's rendered visibility and focusability.
-class ComposerKeyboardFrame extends FrameCallback {
+// onFrame precedes dirty-property updates; focus and list positioning need the completed layout.
+class ChatLayoutFrame extends FrameCallback {
   private action: () => void;
   constructor(action: () => void) { super(); this.action = action; }
   onIdle(): void { this.action(); }
@@ -67,10 +67,26 @@ export struct ChatPanel {
   @ObjectLink @Watch('syncMessages') thread: ThreadViewModel;
   private messageSource: MessageListSource = new MessageListSource();
   private messageSyncRevision: number = 0;
+  private positionedThreadId: string = '';
   private syncMessages(): void {
     const revision = ++this.messageSyncRevision;
     this.afterRender(() => {
-      if (revision === this.messageSyncRevision) { this.messageSource.update(this.thread.id, this.app.visibleMessages); }
+      if (revision !== this.messageSyncRevision) { return; }
+      this.messageSource.update(this.thread.id, this.app.visibleMessages);
+      if (this.positionedThreadId === this.thread.id) { return; }
+      this.positionedThreadId = this.thread.id;
+      this.inspectingOutput = false;
+      this.followOutput = !this.app.searchMessageId;
+      if (this.app.visibleMessages.length === 0 || this.app.searchMessageId) { return; }
+      const threadId = this.thread.id;
+      const lifecycle = this.lifecycle;
+      // LazyForEach has not mounted the tail yet, so its area callback cannot initiate this jump.
+      this.getUIContext().postFrameCallback(new ChatLayoutFrame(() => {
+        if (!this.composerMounted || this.lifecycle !== lifecycle || this.thread.id !== threadId ||
+          !this.followOutput || this.app.searchMessageId) { return; }
+        if (Diagnostics.recording) { Diagnostics.event('scroll.open', { rows: this.app.visibleMessages.length }); }
+        this.scrollToLatest(false);
+      }));
     });
   }
   @Prop topInset: number = 0;
@@ -297,7 +313,7 @@ export struct ChatPanel {
     this.voiceMode = false;
     const threadId = this.thread.id;
     const request = ++this.keyboardFocusRequest;
-    this.getUIContext().postFrameCallback(new ComposerKeyboardFrame(() => {
+    this.getUIContext().postFrameCallback(new ChatLayoutFrame(() => {
       if (request !== this.keyboardFocusRequest || this.thread.id !== threadId || this.app.active.id !== threadId ||
         !this.speechEnabled || !this.foreground || this.showPlus || this.showPlusMenu || this.showDrawing || this.previewing ||
         this.showContext || this.showQueue || this.showSummary || this.showMemoryDraft || this.showReasoning || this.showModelMenu ||
@@ -412,15 +428,15 @@ export struct ChatPanel {
     }
   }
 
-  private scrollToLatest(): void {
+  private scrollToLatest(smooth: boolean = true): void {
     this.inspectingOutput = false;
     // Resume following at onReachEnd so streaming updates cannot interrupt the native spring's soft landing.
-    this.followOutput = false;
+    this.followOutput = !smooth;
     clearTimeout(this.scrollTimer); this.scrollTimer = -1;
     const earlier = this.app.visibleMessageCount < this.thread.messages.length ? 1 : 0;
     const team = this.app.teams.some((run) => !run.ownerMessageId) ? 1 : 0;
     const lastIndex = earlier + this.app.visibleMessages.length + team - 1;
-    this.scroller.scrollToIndex(lastIndex, true, ScrollAlign.END);
+    this.scroller.scrollToIndex(lastIndex, smooth, ScrollAlign.END);
   }
   private updateScrollState(reachedEnd: boolean = false): void {
     const threadId = this.thread.id;
@@ -638,7 +654,7 @@ export struct ChatPanel {
       if (editing) {
         const branchId = this.app.active.id;
         // The model switches before ArkUI applies the new thread prop and its Watch callback.
-        this.getUIContext().postFrameCallback(new ComposerKeyboardFrame(() => {
+        this.getUIContext().postFrameCallback(new ChatLayoutFrame(() => {
           if (owner === this.focusOwner && this.speechEnabled && this.foreground &&
             this.thread.id === branchId && this.app.active.id === branchId) { this.showSpeechKeyboard(); }
         }));
@@ -1201,7 +1217,7 @@ export struct ChatPanel {
     this.composerSelectionStart = next.caret; this.composerSelectionEnd = next.caret;
     const threadId = this.thread.id;
     const request = ++this.keyboardFocusRequest;
-    this.getUIContext().postFrameCallback(new ComposerKeyboardFrame(() => {
+    this.getUIContext().postFrameCallback(new ChatLayoutFrame(() => {
       if (request !== this.keyboardFocusRequest || this.thread.id !== threadId || this.app.active.id !== threadId ||
         !this.speechEnabled || !this.foreground || this.showPlus || this.showPlusMenu || this.showDrawing || this.previewing ||
         this.showContext || this.showQueue || this.showSummary || this.showMemoryDraft || this.showReasoning || this.showModelMenu ||

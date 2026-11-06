@@ -25,9 +25,10 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
     if (key === 'onChange' || key === 'onTextSelectionChange') editorEvents.at(-1)[key] = args[0];
   } });
   const Panel = compile(methods('views/ChatPanel', ['composerChanged', 'composerSelectionChanged', 'speechActive', 'composerEditor', 'updateScrollState', 'publishHeaderProgress',
-    'afterRender', 'speechThreadChanged', 'receiveVoiceShortcut', 'syncMessages']), {
+    'afterRender', 'speechThreadChanged', 'receiveVoiceShortcut', 'syncMessages', 'scrollToLatest']), {
     TextArea: editor, Context: { animation() {} }, Motion: {}, Font: {}, Color: {}, Alignment: {}, Visibility: {},
-    ATTACHMENT_DROP_TYPES: [], t: s => s
+    ATTACHMENT_DROP_TYPES: [], t: s => s, clearTimeout, ScrollAlign: { END: 'end' }, Diagnostics: { recording: false },
+    ChatLayoutFrame: class { constructor(action) { this.action = action; } onIdle() { this.action(); } }
   });
   let building = false, changes = 0, selectionWrites = 0;
   const panel = Object.assign(new Panel(), { composerMounted: true, composerEditRevision: 0, composerSelectionRevision: 0,
@@ -88,6 +89,40 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
   building = false; await drain(); assert.equal(panel.composerSelectionStart, -1);
   let late = 0; panel.afterRender(() => late++); panel.lifecycle++; await drain(); assert.equal(late, 0);
   console.log('PASS emitted composer: render-safe edits, no-op notifications, latest input, stale thread, external draft change, disposal and dictation');
+
+  const frames = [], jumps = [];
+  let sourceReady = false, layoutReady = false;
+  Object.assign(panel, { positionedThreadId: '', followOutput: true,
+    getUIContext: () => ({ postFrameCallback: frame => frames.push(frame) }),
+    messageSource: { update() { assert.equal(building, false); sourceReady = true; } },
+    scroller: { scrollToIndex(...args) {
+      assert.ok(sourceReady && layoutReady, 'Position only after data reload and native layout'); jumps.push(args);
+    } } });
+  const render = () => { layoutReady = true; frames.splice(0).forEach(frame => frame.onIdle()); };
+  panel.thread.messages = Array.from({ length: 120 }, (_, id) => ({ id }));
+  Object.assign(panel.app, { visibleMessages: panel.thread.messages.slice(-60), visibleMessageCount: 60, teams: [], searchMessageId: '' });
+  building = true; panel.syncMessages(); panel.syncMessages(); building = false;
+  await drain(); assert.equal(jumps.length, 0); assert.equal(frames.length, 1);
+  render(); assert.deepEqual(jumps.pop(), [60, false, 'end'], 'Cold start targets the unmounted tail, accounting for the earlier-messages row');
+  assert.equal(panel.followOutput, true);
+  panel.followOutput = false; panel.app.visibleMessageCount = 120; panel.app.visibleMessages = panel.thread.messages;
+  panel.syncMessages(); await drain(); render(); assert.equal(jumps.length, 0, 'Loading history preserves the reading position');
+  const open = async id => { panel.thread.id = panel.app.active.id = id; panel.syncMessages(); await drain(); };
+  panel.app.teams = [{ ownerMessageId: '' }];
+  await open('with-team'); render(); assert.deepEqual(jumps.pop(), [120, false, 'end'], 'Include a trailing team card');
+  await open('touched'); panel.followOutput = false; render(); assert.equal(jumps.length, 0, 'Touch cancels pending initial positioning');
+  panel.app.searchMessageId = 'match'; await open('search'); render(); assert.equal(jumps.length, 0, 'Search owns its initial position');
+  panel.app.searchMessageId = ''; await open('late-search'); panel.app.searchMessageId = 'match';
+  render(); assert.equal(jumps.length, 0);
+  panel.app.searchMessageId = ''; await open('stale'); panel.thread.id = 'different'; render(); assert.equal(jumps.length, 0);
+  await open('disposed'); panel.lifecycle++; render(); assert.equal(jumps.length, 0, 'Disposal cancels pending positioning');
+  panel.app.visibleMessages = []; panel.thread.messages = []; panel.app.teams = [];
+  await open('empty'); assert.equal(frames.length, 0);
+  panel.thread.messages = panel.app.visibleMessages = [{ id: 'first' }];
+  panel.syncMessages(); await drain(); assert.equal(frames.length, 0, 'First send remains owned by send motion');
+  await open('short'); render(); assert.deepEqual(jumps.pop(), [0, false, 'end']);
+  panel.scrollToLatest(); assert.deepEqual(jumps.pop(), [0, true, 'end']); assert.equal(panel.followOutput, false);
+  console.log('PASS emitted chat positioning: cold start, lazy tail, history, team card, touch, search, stale callbacks, empty chat and manual jump');
 
   const nodes = new Map(); let current, requests = 0, exits = 0;
   const widget = new Proxy({}, { get: (_target, key) => (...args) => {
