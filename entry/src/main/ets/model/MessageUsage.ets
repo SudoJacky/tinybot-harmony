@@ -10,6 +10,7 @@ export function outputTokensPerSecond(record: RequestUsage | undefined): number 
 export class MessageUsageSummary {
   requests: number = 0;
   durationMs: number = 0;
+  latestOutputTokensPerSecond?: number;
   reported: number = 0;
   input: number = 0;
   output: number = 0;
@@ -34,6 +35,8 @@ export function summarizeUsage(records: (RequestUsage | undefined)[]): MessageUs
     if (!record) { continue; }
     result.requests++;
     result.durationMs += record.durationMs;
+    // Refresh for each reported request; do not average different model responses.
+    result.latestOutputTokensPerSecond = outputTokensPerSecond(record);
     const tokens = record.tokens;
     if (!tokens) { continue; }
     result.reported++;
