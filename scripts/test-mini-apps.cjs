@@ -847,5 +847,40 @@ async function panelRepairLoopTest() {
  console.log('PASS input definition edits preserve compatible values and live state, migrate incompatible values, and keep explicit inputs strict');
  console.log('PASS repair loop: structured diagnostics, dry-run isolation, idempotent publication/pin recovery, schemas, parameters, runtime evidence and editor continuity');
 }
-const run=process.argv.includes('--lifecycle')?lifePanelRecoveryTest():main().then(lifePanelTest).then(lifePanelApiTest).then(lifePanelScriptTest).then(lifeBoardsTest).then(lifePanelRecoveryTest).then(htmlPanelTest).then(panelRepairLoopTest);
+async function providerBalancePanelTest() {
+  const {LifePanels}=load('services/LifePanels'),{LifePanelTools}=load('services/LifePanelTools');
+  const {ProviderBalanceSource}=load('services/ProviderBalanceSource');
+  const {providerBalanceCache}=load('services/ProviderBalanceCache');
+  const dir='/sandbox/provider-wallet',ws=new WorkspaceStore(dir);fs.mkdirSync(disk(dir),{recursive:true});await ws.ensureThread('wallet');
+  const files=new NativeWorkspaceFiles(ws.pathFor('wallet')),panels=new LifePanels(dir),repo=panels.repository('wallet');
+  const a={id:'wallet-a',name:'Wallet A',protocol:'chat-completions',baseUrl:'https://api.deepseek.com/v1',credentialAlias:'balance-a',enabled:true,noApiKey:false,models:['model']};
+  const b={...a,id:'wallet-b',name:'Wallet B',credentialAlias:'balance-b'};
+  panelSecrets.set('balance-a','PRIVATE-KEY-A');panelSecrets.set('balance-b','PRIVATE-KEY-B');ProviderBalanceSource.configure([a,b]);
+  const originalHandler=apiHandler;let failed=false,queries=0;
+  apiHandler=async request=>{queries++;assert.equal(request.url,'https://api.deepseek.com/user/balance');
+    return {status:failed?503:200,header:{},bytes:new ArrayBuffer(0),text:JSON.stringify(failed?{}:{is_available:true,balance_infos:[{
+      currency:'CNY',total_balance:request.headers.Authorization==='Bearer PRIVATE-KEY-B'?'22.50':'11.25',granted_balance:'0',topped_up_balance:'11.25'}]})};};
+  let renders=0;
+  const tools=new LifePanelTools(panels,'wallet','wallet',files,undefined,async(_page,_storage,context)=>{
+    renders++;assert.equal(context.data.providerId,'wallet-a');assert.equal(context.data.amounts[0].total,'11.25');
+    assert.ok(!JSON.stringify(context).includes('PRIVATE-KEY'));assert.ok(!JSON.stringify(context).includes('balance-a'));
+  });
+  const catalog=await invoke(tools,'get_life_panel_catalog',{section:'balance'});assert.equal(catalog.accounts.length,2);
+  await files.write('wallet.html',catalog.html,signal);await files.write('wallet.panel.json',JSON.stringify(catalog.definition),signal);
+  const checked=await invoke(tools,'validate_life_panel',{path:'wallet.panel.json',htmlPath:'wallet.html'});assert.equal(checked.sourceStatus,'passed');
+  const created=await invoke(tools,'publish_life_panel',{path:'wallet.panel.json',htmlPath:'wallet.html',requestId:'provider-wallet'});
+  assert.equal(created.published,true);assert.ok(renders>=4);
+  let record=await repo.get(created.panelId);assert.equal(record.definition.version,2);assert.ok(record.definition.view.html.includes('tinybot.panel.refresh'));
+  assert.equal(record.data.amounts[0].total,'11.25');assert.ok(!JSON.stringify(record).includes('PRIVATE-KEY'));
+  await repo.refresh(record.id,signal,'manual',{providerId:'wallet-b'});record=await repo.get(record.id);
+  assert.equal(record.inputs.providerId,'wallet-b');assert.equal(record.data.providerId,'wallet-b');assert.equal(record.data.amounts[0].total,'22.50');
+  const before=queries;await assert.rejects(repo.refresh(record.id,signal,'manual',{providerId:'not-allowed'}));assert.equal(queries,before);
+  failed=true;await assert.rejects(repo.refresh(record.id,signal,'manual',{providerId:'wallet-a'}),/503/);
+  record=await repo.get(record.id);assert.equal(record.inputs.providerId,'wallet-a');assert.equal(record.data.providerId,'wallet-b');assert.match(record.error,/503/);
+  assert.equal(record.runs[0].status,'failed','Failed switches preserve an explicitly stale snapshot and visible task error');
+  apiHandler=originalHandler;ProviderBalanceSource.configure([]);providerBalanceCache.invalidate(a.id);providerBalanceCache.invalidate(b.id);
+  panelSecrets.delete('balance-a');panelSecrets.delete('balance-b');
+  console.log('PASS provider-balance catalog -> HTML validation/publication -> account switching -> failed snapshot/history, without exposing keys');
+}
+const run=process.argv.includes('--lifecycle')?lifePanelRecoveryTest():main().then(lifePanelTest).then(lifePanelApiTest).then(lifePanelScriptTest).then(lifeBoardsTest).then(lifePanelRecoveryTest).then(htmlPanelTest).then(panelRepairLoopTest).then(providerBalancePanelTest);
 Promise.resolve(run).catch(error=>{console.error(error);process.exitCode=1;});

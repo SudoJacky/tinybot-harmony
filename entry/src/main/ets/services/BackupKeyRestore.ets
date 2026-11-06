@@ -6,7 +6,7 @@ import { t } from '../model/I18n';
 import { CredentialVault } from './ProfileSettings';
 import { SessionImportCandidate } from './SessionCandidates';
 
-export interface ProviderKey { profile: ProviderProfile; apiKey: string; }
+export interface ProviderKey { profile: ProviderProfile; apiKey: string; balanceApiKey?: string; }
 export interface BackupKeyPayload { providers: ProviderKey[]; selected?: ModelReference; }
 // Secrets travel from the reader to the committing service in memory only, never in AppData.
 const restoredKeys = new WeakMap<AppData, BackupKeyPayload>();
@@ -25,10 +25,14 @@ export async function commitBackupKeys(local: AppData, imported: AppData, candid
       const index = (candidate.data.providerProfiles || []).findIndex((entry) => entry.id === id);
       if (index < 0) { throw new Error(t('备份密钥与模型服务配置不一致。')); }
       const profile = JSON.parse(JSON.stringify(item.profile)) as ProviderProfile;
-      profile.id = id; profile.credentialAlias = '';
+      profile.id = id; profile.credentialAlias = ''; profile.balanceCredentialAlias = undefined;
       if (!profile.noApiKey) {
         profile.credentialAlias = 'tinybot-' + createId(); created.push(profile.credentialAlias);
         await vault.write(profile.credentialAlias, item.apiKey);
+      }
+      if (item.balanceApiKey) {
+        profile.balanceCredentialAlias = 'tinybot-balance-' + createId(); created.push(profile.balanceCredentialAlias);
+        await vault.write(profile.balanceCredentialAlias, item.balanceApiKey);
       }
       (candidate.data.providerProfiles as ProviderProfile[])[index] = profile;
     }

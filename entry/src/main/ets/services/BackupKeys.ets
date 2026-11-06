@@ -6,6 +6,7 @@ import { ModelReference, ProviderProfile, validateProfile } from '../model/Provi
 import { t } from '../model/I18n';
 import { CredentialVault } from './ProfileSettings';
 import { BackupKeyPayload, ProviderKey } from './BackupKeyRestore';
+import { usesBalanceCredential } from '../model/BalanceSettings';
 
 export interface EncryptedBackupKeys { version: number; salt: string; iv: string; ciphertext: string; }
 const ITERATIONS = 600000;
@@ -26,7 +27,10 @@ export async function encryptBackupKeys(data: AppData, openID: string, vault: Cr
     const secret = source.noApiKey ? '' : await vault.read(source.credentialAlias);
     if (!source.noApiKey && !secret) { throw new Error(t('无法读取模型服务的 API Key，备份未创建。')); }
     profile.credentialAlias = '';
-    providers.push({ profile: profile, apiKey: secret });
+    const balanceSecret = source.balanceCredentialAlias ? await vault.read(source.balanceCredentialAlias) : undefined;
+    if (source.balanceCredentialAlias && !balanceSecret) { throw new Error(t('读取余额查询凭据失败')); }
+    profile.balanceCredentialAlias = undefined;
+    providers.push({ profile: profile, apiKey: secret, balanceApiKey: balanceSecret });
   }
   const selected: ModelReference | undefined = data.config.configured ? { providerId: data.config.providerId, modelId: data.config.model } : undefined;
   const payload: BackupKeyPayload = { providers: providers, selected: selected };
@@ -75,6 +79,10 @@ export async function decryptBackupKeys(value: EncryptedBackupKeys, credential: 
   for (const item of payload.providers) {
     if (!item || !item.profile || typeof item.apiKey !== 'string') { throw new Error(t('备份密钥格式无效。')); }
     const profile = item.profile;
+    if (item.balanceApiKey !== undefined && (typeof item.balanceApiKey !== 'string' || !item.balanceApiKey || !usesBalanceCredential(profile.balance))) {
+      throw new Error(t('备份密钥格式无效。'));
+    }
+    profile.balanceCredentialAlias = item.balanceApiKey ? 'pending-backup-balance-key' : undefined;
     profile.credentialAlias = profile.noApiKey ? '' : 'pending-backup-key';
     validateProfile(profile, true);
     const visible = data.providerProfiles?.find((entry) => entry.id === profile.id);

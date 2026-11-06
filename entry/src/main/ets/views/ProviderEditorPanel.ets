@@ -45,7 +45,7 @@ export struct ProviderEditorPanel {
   private protocolLogos: Resource[] = [$r('app.media.logo_openai'), $r('app.media.logo_openai'), $r('app.media.logo_anthropic'), $r('app.media.logo_google')];
 
   aboutToAppear(): void { this.alive = true; this.modelError = this.initialModelError; }
-  aboutToDisappear(): void { this.alive = false; this.focusRequest++; if (this.page === 'service') { this.editor.apiKey = ''; } }
+  aboutToDisappear(): void { this.alive = false; this.focusRequest++; if (this.page === 'service') { this.editor.apiKey = ''; this.editor.balanceApiKey = ''; } }
   private focusAvailabilityChanged(): void { if (!this.active || !this.foreground) { this.focusRequest++; } }
   private advancedChanged(): void { if (!this.advanced) { this.focusRequest++; } }
   private focusField(field: string): void {
@@ -345,7 +345,7 @@ export struct ProviderEditorPanel {
           }
           this.fieldError('models')
           ProviderBalanceCard({ editor: this.editor, profiles: this.app.providerProfiles, disabled: this.locked(), active: this.active,
-            scope: JSON.stringify([this.editor.id, this.editor.protocol, this.editor.baseUrl, this.editor.apiKey, this.editor.noApiKey]) })
+            scope: JSON.stringify([this.editor.id, this.editor.protocol, this.editor.baseUrl, this.editor.apiKey, this.editor.noApiKey, this.editor.balanceScope]) })
           Column() {
             GroupCard() {
               Column() {

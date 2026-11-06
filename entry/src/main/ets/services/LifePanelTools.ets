@@ -2,6 +2,7 @@ import { ToolCall, ToolDefinition, ToolProperty } from '../model/Agent';
 import { AgentTools } from './AgentLoop';
 import { ToolFailure, ToolFailureDetails, parseToolArguments } from '../model/ToolFailure';
 import { LifePanels } from './LifePanels';
+import { providerBalanceCatalog } from './ProviderBalanceCatalog';
 import { LIFE_PANEL_CATALOG, lifePanelCatalog, panelId, parsePanelSpec, PanelListQuery, PanelSpec } from '../model/LifePanel';
 import { miniAppPage } from '../model/MiniApp';
 import { MiniAppStorage, MiniAppSnapshot } from '../model/MiniApp';
@@ -33,7 +34,7 @@ export class LifePanelTools implements AgentTools {
   }
   definitions(): ToolDefinition[] {
     return [
-      { type: 'function', function: { name: 'get_life_panel_catalog', description: 'Read Life Panel authoring guidance. Use section:html for the interactive starter and validation contract, native for native components, sources for acquisition options, all for complete reference.', parameters: { type: 'object', properties: { 'section': { type: 'string', enum: ['all', 'html', 'native', 'sources'], description: 'Requested protocol section' } }, required: [], additionalProperties: false } } },
+      { type: 'function', function: { name: 'get_life_panel_catalog', description: 'Read Life Panel authoring guidance. Use section:html for the interactive starter and validation contract, native for native components, sources for acquisition options, balance for configured provider accounts and a wallet-style HTML reference, all for complete reference.', parameters: { type: 'object', properties: { 'section': { type: 'string', enum: ['all', 'html', 'native', 'sources', 'balance'], description: 'Requested protocol section' } }, required: [], additionalProperties: false } } },
       { type: 'function', function: { name: 'list_life_panels', description: 'Page through compact card summaries across the app, without data snapshots, definitions, scripts or history. Optional workspace/archived filters. Follow nextCursor even for an empty page. Reuse workspaceId/panelId with get_life_panel for selected details.', parameters: { type: 'object', properties: {
         'workspaceId': { type: 'string', description: 'Optional owner workspace filter' }, 'archived': { type: 'boolean', description: 'False by default; true lists archived cards' },
         'limit': { type: 'integer', description: '1–20 summaries, default 10; at most 50 manifests are read per page' }, 'cursor': { type: 'string', description: 'nextCursor from the same filters' }
@@ -96,7 +97,7 @@ export class LifePanelTools implements AgentTools {
     }
     if (['get_life_panel_catalog', 'list_life_boards'].includes(call.function.name)) {
       if (Object.keys(args).some((key: string) => call.function.name !== 'get_life_panel_catalog' || key !== 'section')) { throw new ToolFailure('INVALID_ARGUMENTS', 'Unexpected catalog/list arguments', 'fix_arguments'); }
-      if (call.function.name === 'get_life_panel_catalog') { return lifePanelCatalog(args.section); }
+      if (call.function.name === 'get_life_panel_catalog') { return args.section === 'balance' ? providerBalanceCatalog() : lifePanelCatalog(args.section); }
       if (call.function.name === 'list_life_boards') { if (!this.boards) { throw new Error('Board store is unavailable'); } return JSON.stringify(await this.boards.list()); }
     }
     if (call.function.name === 'manage_life_panel_task') {

@@ -21,6 +21,7 @@ export function panelRunLabel(run: PanelRun): string {
 }
 export function panelSourceLabel(panel: PanelRecord): string {
   const type = panel.definition.source?.type;
+  if (type === 'provider-balance') { return t('模型服务余额'); }
   return type === 'api' ? t('API 数据源') : type === 'workspace-json' ? t('工作区文件') : type === 'agent' ? t('Agent 内容更新') : type === 'mail' ? t('邮箱数据刷新') : t('本地数据');
 }
 export interface PanelRect { x: number; y: number; width: number; height: number; }

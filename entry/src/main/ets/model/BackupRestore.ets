@@ -14,7 +14,7 @@ export function prepareBackupServices(local: AppData, restored: AppData, createI
     if (existing) { providers.set(profile.id, existing.id); }
     else {
       const id = 'provider-' + createId(); providers.set(profile.id, id); profile.id = id;
-      profile.credentialAlias = ''; profile.noApiKey = true; profile.enabled = false;
+      profile.credentialAlias = ''; profile.balanceCredentialAlias = undefined; profile.noApiKey = true; profile.enabled = false;
       profile.name = t('{0}（恢复后请配置密钥）', [profile.name]); additions.push(profile);
     }
   }

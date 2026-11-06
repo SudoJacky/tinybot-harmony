@@ -4,6 +4,7 @@ import { builtinProviderInfos } from './Provider';
 import { contextSettings } from './ContextSettings';
 import { isSupportedProtocol, protocolUrl } from './ProviderEndpoint';
 import { isConfigurationName } from './ConfigurationValue';
+import { BalanceSettings, validateBalanceSettings } from './BalanceSettings';
 
 export interface ModelReference {
   providerId: string;
@@ -22,6 +23,8 @@ export interface ProviderProfile {
   enabled: boolean;
   models: string[];
   contextWindow?: number;
+  balance?: BalanceSettings;
+  balanceCredentialAlias?: string;
 }
 
 export interface ModelChoice extends ModelReference {
@@ -41,6 +44,7 @@ export function validateProfile(profile: ProviderProfile, stored: boolean = fals
     typeof profile.name !== 'string' || profile.name.trim().length === 0 || profile.name.length > 80 ||
     !isConfigurationName(profile.protocol) || (!stored && !isSupportedProtocol(profile.protocol)) || typeof profile.baseUrl !== 'string' ||
     typeof profile.credentialAlias !== 'string' || typeof profile.noApiKey !== 'boolean' ||
+    (profile.balanceCredentialAlias !== undefined && typeof profile.balanceCredentialAlias !== 'string') ||
     typeof profile.enabled !== 'boolean' || !Array.isArray(profile.models) ||
     profile.models.some((id: string) => typeof id !== 'string' || id.trim() !== id || id.length === 0) ||
     (profile.noApiKey ? profile.credentialAlias.length > 0 : profile.credentialAlias.length === 0) ||
@@ -49,6 +53,7 @@ export function validateProfile(profile: ProviderProfile, stored: boolean = fals
   }
   if (isSupportedProtocol(profile.protocol)) { protocolUrl(profile.protocol, profile.baseUrl, true); }
   modelIds(profile.models.join('\n'));
+  validateBalanceSettings(profile.balance);
   contextSettings({ configured: false, providerId: profile.id, baseUrl: '', model: '', systemPrompt: '',
     credentialAlias: '', contextWindow: profile.contextWindow });
 }

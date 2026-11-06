@@ -9,6 +9,7 @@ export interface PanelSource {
   prompt?: string; query?: Record<string, string>;
   mail?: MailQuery;
   workspaceId?: string;
+  providerIds?: string[];
 }
 function fields(value: Object, allowed: string[]): void {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((key: string) => !allowed.includes(key))) { throw new Error('Invalid source fields'); }
@@ -17,7 +18,16 @@ export function panelHttps(address: string): string {
   if (typeof address !== 'string' || !/^https:\/\/[^\s/?#@\\]+(?:[/?][^\s#\\]*)?$/.test(address)) { throw new Error('API endpoints require HTTPS without credentials or fragments'); } return address;
 }
 export function validatePanelSource(source: PanelSource): void {
-  fields(source, ['type', 'url', 'path', 'pointer', 'method', 'headers', 'body', 'auth', 'transform', 'prompt', 'mail', 'workspaceId', 'query']);
+  fields(source, ['type', 'url', 'path', 'pointer', 'method', 'headers', 'body', 'auth', 'transform', 'prompt', 'mail', 'workspaceId', 'query', 'providerIds']);
+  if (source.type === 'provider-balance') {
+    if (Object.keys(source).some((key) => !['type', 'providerIds'].includes(key)) || !Array.isArray(source.providerIds) ||
+      !source.providerIds.length || source.providerIds.length > 100 || new Set(source.providerIds).size !== source.providerIds.length ||
+      source.providerIds.some((id: string) => typeof id !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id))) {
+      throw new Error('Provider balance source requires only type and 1–100 unique configured providerIds');
+    }
+    return;
+  }
+  if (source.providerIds !== undefined) { throw new Error('providerIds requires source type provider-balance'); }
   if (source.query !== undefined && (!['api', 'json-url'].includes(source.type) || !source.query || typeof source.query !== 'object' || Array.isArray(source.query) || Object.keys(source.query).length > 16 || Object.keys(source.query).some((key: string) => !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key) || typeof source.query![key] !== 'string'))) { throw new Error('query maps up to 16 URL query names to declared input names'); }
   if (source.workspaceId !== undefined && (source.type !== 'workspace-json' || typeof source.workspaceId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(source.workspaceId))) { throw new Error('source.workspaceId requires a valid workspace-json owner'); }
   if (source.type === 'mail') {
