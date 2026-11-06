@@ -11,14 +11,13 @@ export class MailService {
   private createTransport: () => ImapTransport;
   constructor(accounts: MailAccounts = new MailAccounts(), createTransport: () => ImapTransport = () => new NativeImapTransport()) { this.accounts = accounts; this.createTransport = createTransport; }
   async available(): Promise<MailAccount[]> { return (await this.accounts.list()).filter((account: MailAccount) => account.enabled); }
-  private async run<T>(id: string, folder: string, body: boolean, cancellation: Cancellation, operation: (client: ImapClient) => Promise<T>): Promise<T> {
+  private async run<T>(id: string, body: boolean, cancellation: Cancellation, operation: (client: ImapClient) => Promise<T>): Promise<T> {
     cancellation.check(); const signal = new Cancellation(), unlink = cancellation.onCancel(() => signal.cancel()), unwatch = this.accounts.watch(id, signal);
     let client: ImapClient | undefined; let end: () => Promise<void> = async (): Promise<void> => {};
     const started = Date.now();
     try {
       const connection = await this.accounts.connection(id); signal.check();
       if (!connection.account.enabled) { throw new Error('Mailbox access is disabled in Settings'); }
-      if (!connection.account.folders.includes(folder)) { throw new Error('This mail folder is not allowed in Settings'); }
       if (body && !connection.account.allowBody) { throw new Error('Email body access is disabled in Settings'); }
       end = await NetworkTransfers.begin(signal); signal.check();
       client = new ImapClient(this.createTransport(), signal);
@@ -33,10 +32,10 @@ export class MailService {
     } finally { try { await client?.close(); } finally { unlink(); unwatch(); await end(); } }
   }
   async query(query: MailQuery, cancellation: Cancellation): Promise<MailSnapshot> {
-    validateMailQuery(query); return this.run(query.accountId, query.folder, false, cancellation, (client: ImapClient) => client.query(query));
+    validateMailQuery(query); return this.run(query.accountId, false, cancellation, (client: ImapClient) => client.query(query));
   }
   async read(id: string, folder: string, uidValidity: number, uid: number, cancellation: Cancellation): Promise<MailBody> {
     validateMailQuery({ accountId: id, folder: folder }); imapNumber(uidValidity); imapNumber(uid);
-    return this.run(id, folder, true, cancellation, (client: ImapClient) => client.read(folder, uidValidity, uid));
+    return this.run(id, true, cancellation, (client: ImapClient) => client.read(folder, uidValidity, uid));
   }
 }

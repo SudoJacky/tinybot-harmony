@@ -19,7 +19,6 @@ export struct MailSettingsPanel {
   @State private host: string = '';
   @State private port: string = '993';
   @State private username: string = '';
-  @State private folders: string = 'INBOX';
   @State private secret: string = '';
   @State private accessEnabled: boolean = false;
   @State private allowBody: boolean = false;
@@ -42,7 +41,7 @@ export struct MailSettingsPanel {
   }
   private edit(account?: MailAccount): void {
     this.accountId = account?.id || ''; this.name = account?.name || ''; this.host = account?.host || '';
-    this.port = String(account?.port || 993); this.username = account?.username || ''; this.folders = (account?.folders || ['INBOX']).join('\n');
+    this.port = String(account?.port || 993); this.username = account?.username || '';
     this.accessEnabled = account?.enabled === true; this.allowBody = account?.allowBody === true;
     this.secret = ''; this.error = ''; this.notice = ''; this.editing = true;
   }
@@ -51,12 +50,12 @@ export struct MailSettingsPanel {
     const cancellation = this.cancellation;
     try {
       const account: MailAccount = { id: this.accountId || util.generateRandomUUID(), name: this.name.trim(), host: this.host.trim().toLowerCase(), port: Number(this.port),
-        username: this.username.trim(), folders: this.folders.split('\n').map((folder: string) => folder.trim()).filter((folder: string) => !!folder), enabled: this.accessEnabled, allowBody: this.allowBody };
+        username: this.username.trim(), enabled: this.accessEnabled, allowBody: this.allowBody };
       await this.store.save(account, this.secret); this.secret = ''; this.accountId = account.id;
       await this.reload(); cancellation.check(); this.notice = t('邮箱连接已保存');
       if (check) {
-        const snapshot = await new MailService(this.store).query({ accountId: account.id, folder: account.folders[0], limit: 1 }, cancellation);
-        cancellation.check(); this.notice = t('连接成功：{0} 封邮件，{1} 封未读', [snapshot.total, snapshot.unread]);
+        const snapshot = await new MailService(this.store).query({ accountId: account.id, folder: 'INBOX', limit: 1 }, cancellation);
+        cancellation.check(); this.notice = t('连接成功：收件箱 {0} 封邮件，{1} 封未读', [snapshot.total, snapshot.unread]);
       }
     } catch (error) { if (!cancellation.cancelled) { this.report(error as Error); } }
     finally { this.secret = ''; this.busy = false; }
@@ -80,11 +79,9 @@ export struct MailSettingsPanel {
       Text(t('授权码或应用专用密码')).fontSize(13).fontColor($r('app.color.text_secondary')).width('100%')
       TextInput({ text: this.secret, placeholder: this.accountId ? t('授权码，留空保留已保存的授权码') : t('邮箱授权码或应用专用密码') }).type(InputType.Password).showPasswordIcon(true)
         .attributeModifier(Styles.input).id('mail-secret').onChange((value: string) => { this.secret = value; })
-      Text(t('允许访问的文件夹')).fontSize(13).fontColor($r('app.color.text_secondary')).width('100%')
-      TextArea({ text: this.folders, placeholder: t('允许访问的文件夹，每行一个，例如 INBOX') }).attributeModifier(Styles.area).height(100).id('mail-folders').onChange((value: string) => { this.folders = value; })
       GroupCard() {
         Column() {
-          SwitchRow({ title: t('允许助手和卡片读取邮件'), subtitle: t('限于上方文件夹；邮件标题和发件人可发送给当前模型。'), icon: $r('sys.symbol.doc_text'), isOn: this.accessEnabled,
+          SwitchRow({ title: t('允许助手和卡片读取邮件'), subtitle: t('邮件标题和发件人可发送给当前模型。'), icon: $r('sys.symbol.doc_text'), isOn: this.accessEnabled,
             onChange: (value: boolean) => { this.accessEnabled = value; } })
           SwitchRow({ title: t('允许读取邮件正文'), subtitle: t('开启后，助手可按任务需要读取正文并发送给当前模型。'), icon: $r('sys.symbol.doc_plaintext'), isOn: this.allowBody,
             onChange: (value: boolean) => { this.allowBody = value; } })

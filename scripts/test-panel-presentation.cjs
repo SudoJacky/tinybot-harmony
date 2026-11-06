@@ -11,8 +11,9 @@ function load(name) {
 const { panelMasonry, panelRunLabel, panelErrorText } = load('PanelPresentation');
 const { setLocale } = load('I18n');
 const { validateMailAccount } = load('Mail');
-const account = { id:'test',name:'Work',host:'imap.example.com',port:993,username:'me@example.com',folders:['INBOX'],enabled:false,allowBody:false };
-for (const [field,value,expected] of [['name','',/连接名称/],['host','https://invalid',/IMAP/],['port',0,/端口/],['username','',/登录账号/],['folders',[],/文件夹/]]) {
+const account = { id:'test',name:'Work',host:'imap.example.com',port:993,username:'me@example.com',enabled:false,allowBody:false };
+validateMailAccount(account);
+for (const [field,value,expected] of [['name','',/连接名称/],['host','https://invalid',/IMAP/],['port',0,/端口/],['username','',/登录账号/]]) {
   assert.throws(() => validateMailAccount({...account,[field]:value}),expected,field+' must have a specific error');
 }
 setLocale('en');assert.throws(() => validateMailAccount({...account,name:''}),/connection name/);setLocale('zh-CN');

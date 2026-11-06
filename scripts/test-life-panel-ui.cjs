@@ -107,13 +107,14 @@ async function main() {
   let savedMail,mailChecks=0,mailDeletes=0,mailMode='success',mailSignal;
   const {MailEditor}=compile('export class MailEditor {'+mailMethods+'}',{...signal,t:(text,values=[])=>text.replace(/\{(\d+)\}/g,(_,i)=>String(values[i])),
     util:{generateRandomUUID:()=> 'new-mail'},Diagnostics:{log:(...args)=>logs.push(args)},
-    MailService:class {async query(query,cancel){mailChecks++;mailSignal=cancel;assert.equal(query.accountId,'new-mail');if(mailMode==='error')throw Error('IMAP login rejected');
+    MailService:class {async query(query,cancel){mailChecks++;mailSignal=cancel;assert.equal(query.accountId,'new-mail');assert.equal(query.folder,'INBOX');if(mailMode==='error')throw Error('IMAP login rejected');
       if(mailMode==='wait')return new Promise((resolve,reject)=>cancel.onCancel(()=>reject(Error('cancelled'))));return {total:9,unread:3};}}});
   const mailEditor=new MailEditor();Object.assign(mailEditor,{mounted:true,foreground:true,busy:false,error:'',notice:'',editing:false,secret:'',accounts:[],cancellation:new signal.Cancellation(),
     store:{save:async(account,secret)=>{savedMail={account,secret};},list:async()=>savedMail?[savedMail.account]:[],remove:async()=>mailDeletes++}});
   mailEditor.edit();assert.equal(mailEditor.accessEnabled,false);assert.equal(mailEditor.allowBody,false,'Mailbox/body access requires explicit opt-in');
   Object.assign(mailEditor,{name:'Work',host:'IMAP.EXAMPLE.COM',username:'user@example.com',secret:'device-only-mail-code',accessEnabled:true});
   await mailEditor.save(true);assert.equal(savedMail.account.host,'imap.example.com');assert.equal(savedMail.secret,'device-only-mail-code');assert.equal(mailChecks,1);
+  assert.equal('folders' in savedMail.account,false,'Settings no longer save a folder allowlist');
   assert.equal(mailEditor.secret,'');assert.ok(mailEditor.notice.includes('9'));assert.equal(mailEditor.accountId,'new-mail');
   mailMode='error';await mailEditor.save(true);assert.equal(mailEditor.error,'IMAP login rejected');assert.equal(mailEditor.busy,false,'Failed connection check leaves the editor usable');
   mailMode='wait';const mailPending=mailEditor.save(true);await turn();assert.ok(mailSignal);

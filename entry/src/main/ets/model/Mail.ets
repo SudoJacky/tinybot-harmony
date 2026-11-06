@@ -1,7 +1,7 @@
 import { t } from './I18n';
 export interface MailAccount {
   id: string; name: string; host: string; port: number; username: string;
-  folders: string[]; enabled: boolean; allowBody: boolean;
+  enabled: boolean; allowBody: boolean;
 }
 export interface MailQuery {
   accountId: string; folder: string; limit?: number; unreadOnly?: boolean; from?: string; subject?: string;
@@ -27,8 +27,6 @@ export function validateMailAccount(account: MailAccount): void {
   if (typeof account.host !== 'string' || account.host.length > 253 || !/^[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?$/.test(account.host)) { throw new Error(t('请填写有效的 IMAP 服务器域名，例如 imap.example.com。')); }
   if (!Number.isInteger(account.port) || account.port < 1 || account.port > 65535) { throw new Error(t('TLS 端口必须是 1–65535 之间的整数。')); }
   if (typeof account.username !== 'string' || !account.username.trim() || account.username.length > 254 || /[\u0000-\u001f\u007f]/.test(account.username)) { throw new Error(t('请填写邮箱登录账号，最多 254 个字符，不能包含换行。')); }
-  if (!Array.isArray(account.folders) || !account.folders.length || account.folders.length > 16 || new Set(account.folders).size !== account.folders.length) { throw new Error(t('请填写 1–16 个不重复的邮箱文件夹，每行一个。')); }
-  if (account.folders.some((folder: string) => typeof folder !== 'string' || !folder.trim() || folder.length > 200 || /[\u0000-\u001f\u007f]/.test(folder))) { throw new Error(t('邮箱文件夹名称不能为空，最多 200 个字符，不能包含控制字符。')); }
   if (typeof account.enabled !== 'boolean' || typeof account.allowBody !== 'boolean') { throw new Error('Expected mail access settings'); }
 }
 export function validateMailQuery(query: MailQuery): void {

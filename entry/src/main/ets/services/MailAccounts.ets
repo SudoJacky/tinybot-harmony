@@ -8,6 +8,12 @@ import { Diagnostics } from '../model/Diagnostics';
 interface StoredMailAccount { account: MailAccount; secret: string; revision: string; }
 const INDEX: string = 'tinybot-mail-index-v1';
 const active: Map<string, Set<Cancellation>> = new Map<string, Set<Cancellation>>();
+function accountSettings(account: MailAccount): MailAccount {
+  validateMailAccount(account);
+  // Project stored records onto the current schema, dropping legacy folder allowlists.
+  return { id: account.id, name: account.name, host: account.host, port: account.port, username: account.username,
+    enabled: account.enabled, allowBody: account.allowBody };
+}
 // The account index, settings and authorization codes are all device-local secure assets.
 // No mailbox credentials or connection metadata are written into chat/workspace backups.
 export class MailAccounts {
@@ -25,7 +31,7 @@ export class MailAccounts {
   async connection(id: string): Promise<StoredMailAccount> {
     mailId(id); if (!(await this.ids()).includes(id)) { throw new Error('Mailbox connection no longer exists'); }
     const raw = await this.vault.readOptional('tinybot-mail-' + id); if (!raw) { throw new Error('Mailbox connection is unavailable; reconnect in Settings'); }
-    const stored = JSON.parse(raw) as StoredMailAccount; validateMailAccount(stored.account);
+    const stored = JSON.parse(raw) as StoredMailAccount; stored.account = accountSettings(stored.account);
     if (stored.account.id !== id || typeof stored.secret !== 'string' || !stored.secret || typeof stored.revision !== 'string') { throw new Error('Invalid saved mailbox connection'); }
     return stored;
   }
@@ -40,15 +46,15 @@ export class MailAccounts {
     return () => { signals!.delete(signal); if (!signals!.size) { active.delete(id); } };
   }
   async save(account: MailAccount, secret: string): Promise<void> {
-    validateMailAccount(account);
+    const settings = accountSettings(account);
     await withFileMutation(INDEX, async () => {
       const ids = await this.ids(), exists = ids.includes(account.id), before = exists ? await this.connection(account.id) : undefined;
       const sameServer = before && before.account.host === account.host && before.account.port === account.port && before.account.username === account.username;
       if (!secret && !sameServer) { throw new Error(t('新增邮箱或更换服务器、账号时，请填写授权码。')); }
-      const value: StoredMailAccount = { account: account, secret: secret || before!.secret, revision: util.generateRandomUUID() };
+      const value: StoredMailAccount = { account: settings, secret: secret || before!.secret, revision: util.generateRandomUUID() };
       if (/[\u0000-\u001f\u007f]/.test(value.secret)) { throw new Error(t('授权码不能包含换行或控制字符。')); }
       const text = JSON.stringify(value);
-      if (new util.TextEncoder().encodeInto(text).length > 1024) { throw new Error(t('邮箱设置超出安全存储限制，请缩短连接名称或文件夹列表。')); }
+      if (new util.TextEncoder().encodeInto(text).length > 1024) { throw new Error(t('邮箱设置超出安全存储限制，请检查连接信息。')); }
       if (!exists && ids.length >= 8) { throw new Error(t('最多支持 8 个邮箱连接。')); }
       this.revoke(account.id);
       const alias = 'tinybot-mail-' + account.id;

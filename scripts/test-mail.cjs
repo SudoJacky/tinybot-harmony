@@ -56,7 +56,10 @@ class FakeImap {
     if (text === 'CAPABILITY') this.reply('* CAPABILITY IMAP4rev1 ID\r\n');
     else if (text.startsWith('LOGIN ')) { if (this.options.authFailure) { this.reply(tag + ' NO PRIVATE_PASSWORD_AND_EMAIL\r\n'); return; } }
     else if (text.startsWith('ID ')) {}
-    else if (text.startsWith('EXAMINE ')) this.reply('* 3 EXISTS\r\n* OK [UIDVALIDITY ' + (this.options.validity || 42) + '] epoch\r\n');
+    else if (text.startsWith('EXAMINE ')) {
+      if(this.options.missingFolder){this.reply(tag+' NO Folder does not exist\r\n');return;}
+      this.reply('* 3 EXISTS\r\n* OK [UIDVALIDITY ' + (this.options.validity || 42) + '] epoch\r\n');
+    }
     else if (text === 'UID SEARCH ALL') this.reply('* SEARCH 1 5 9\r\n');
     else if (text === 'UID SEARCH UNSEEN') this.reply('* SEARCH 5 9\r\n');
     else if (text.startsWith('UID SEARCH CHARSET UTF-8 ')) this.reply('* SEARCH 5\r\n');
@@ -73,7 +76,7 @@ class FakeImap {
   }
   async close() { this.closed = true; }
 }
-const account = { id: 'test-mail', name: 'Work', host: 'imap.example.com', port: 993, username: 'user@example.com', folders: ['INBOX', '工作'], enabled: true, allowBody: false };
+const account = { id: 'test-mail', name: 'Work', host: 'imap.example.com', port: 993, username: 'user@example.com', enabled: true, allowBody: false };
 const store = new MailAccounts(), created = [];
 function service(options = {}) { return new MailService(store, () => { const transport = new FakeImap(options); created.push(transport); return transport; }); }
 const query = { accountId: account.id, folder: 'INBOX', limit: 2 };
@@ -103,11 +106,15 @@ async function main() {
   console.log('PASS byte framing across every split, literal injection, MIME text and folder encoding');
 
   await store.save(account, 'app-secret');
+  const legacy=JSON.parse(assets.get('tinybot-mail-test-mail'));legacy.account.folders=['INBOX'];
+  assets.set('tinybot-mail-test-mail',JSON.stringify(legacy));
+  assert.equal('folders' in (await store.connection(account.id)).account,false,'Legacy folder lists are no longer active settings');
   assert.equal((await store.list())[0].username, account.username);
   assert.ok(!JSON.stringify(await store.list()).includes('app-secret'));
   await assert.rejects(store.save({ ...account, host: 'other.example.com' }, ''), /授权码/);
   await assert.rejects(store.save({ ...account, id: 'new-mail' }, ''), /授权码/);
   await store.save({ ...account, name: 'Renamed' }, '');
+  assert.equal('folders' in JSON.parse(assets.get('tinybot-mail-test-mail')).account,false,'Saving removes the obsolete field without replacing credentials');
   assert.equal((await store.connection(account.id)).secret, 'app-secret');
   const mail = service(), result = await mail.query(query, new Cancellation());
   assert.equal(result.total, 3); assert.equal(result.unread, 2); assert.equal(result.matched, 3); assert.equal(result.limited, true);
@@ -132,6 +139,7 @@ async function main() {
   assert.ok(nativeClosed && nativeSent, 'Production TLS adapter verifies certificates and releases its socket');
   const tools = new MailTools(mail), listed = await invoke(tools, 'list_mail_accounts', {});
   assert.equal(listed.accounts[0].accountId, account.id); assert.ok(!JSON.stringify(listed).includes(account.username));
+  assert.equal('folders' in listed.accounts[0],false,'Tools do not advertise a folder allowlist');
   assert.equal((await invoke(tools, 'search_mail', query)).messages.length, 2);
   assert.equal(new RuleTools(tools, true).definitions().length, 3);
   const denied = new SelectedTools(tools, { agentMode: 'custom', disabledTools: ['search_mail'] });
@@ -141,9 +149,15 @@ async function main() {
   assert.throws(() => validatePanelSource({ type: 'mail', mail: { ...query, password: 'secret' } }), /Invalid mail query/);
   assert.throws(() => validatePanelSource({ type: 'api', url: 'https://example.com', mail: query }), /requires/);
   await assert.rejects(mail.query({ ...query, limit: 100 }, new Cancellation()), /1–20/);
-  await assert.rejects(mail.query({ ...query, folder: 'Forbidden' }, new Cancellation()), /not allowed/);
+  const archive=await mail.query({ ...query, folder: 'Archive' }, new Cancellation());assert.equal(archive.folder,'Archive');
+  assert.ok(created.at(-1).commands.some(command=>command.includes('EXAMINE "Archive"')));
+  await mail.query({...query,folder:'工作'},new Cancellation());assert.ok(created.at(-1).commands.some(command=>command.includes('EXAMINE "&XeVPXA-"')));
+  await assert.rejects(service({missingFolder:true}).query({...query,folder:'Missing'},new Cancellation()),/examine command was rejected/);
+  await assert.rejects(mail.query({...query,folder:'INBOX\r\nDELETE x'},new Cancellation()),/Invalid mail/);
+  await assert.rejects(mail.read(account.id, 'Archive', 42, 9, new Cancellation()), /body access/);
   await assert.rejects(mail.read(account.id, 'INBOX', 42, 9, new Cancellation()), /body access/);
   await store.save({ ...account, allowBody: true }, '');
+  assert.equal((await mail.read(account.id,'Archive',42,9,new Cancellation())).message.folder,'Archive');
   assert.equal((await mail.read(account.id, 'INBOX', 42, 9, new Cancellation())).text, '包裹明天送达');
   assert.ok(created.at(-1).commands.some(command => command.includes('BODY.PEEK[]')));
   await assert.rejects(service({ validity: 43 }).read(account.id, 'INBOX', 42, 9, new Cancellation()), /UIDVALIDITY changed/);
