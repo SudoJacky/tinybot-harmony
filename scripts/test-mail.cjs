@@ -127,9 +127,10 @@ async function main() {
   let nativeClosed = false, nativeSent = false;
   kits['@kit.NetworkKit'].socket.constructTLSSocketInstance = () => {
     const fake = new FakeImap(), events = new Map(); fake.listen(bytes => events.get('message')({ message: bytes.buffer }), error => events.get('error')(error));
+    let bound = false;
     return {
-      on: (name, callback) => events.set(name, callback),
-      async bind(address) { assert.equal(address.address, '0.0.0.0'); },
+      on: (name, callback) => { assert.ok(bound, 'Native TLS listeners require a bound socket'); events.set(name, callback); },
+      async bind(address) { assert.equal(address.address, '0.0.0.0'); bound = true; },
       async connect(options) { assert.equal(options.skipRemoteValidation, false); assert.ok(!options.secureOptions.ca); await fake.connect(options.address.address, options.address.port); },
       async send(text) { assert.equal(typeof text, 'string', 'TLSSocket.send accepts raw string, not a TCP send-options object'); nativeSent = true; await fake.send(text); },
       async close() { nativeClosed = true; await fake.close(); }
@@ -182,7 +183,13 @@ async function main() {
   const timed = service({ hangConnect: true }).query(query, new Cancellation()); const timeout = assert.rejects(timed, /timed out/);
   await until(() => created.length > before && created.at(-1).started);
   // Trigger the real session deadline callback without sleeping for a minute.
-  [...timers.values()][0](); await timeout; assert.equal(transfers, 0); detach();
+  [...timers.values()][0](); await timeout; assert.equal(transfers, 0);
+  const searchTimed = service({ hold: 'UID SEARCH' }).query(query, new Cancellation());
+  const searchTimeout = assert.rejects(searchTimed, /IMAP search command timed out/);
+  await until(() => created.at(-1).holding);
+  [...timers.values()].at(-1)(); await searchTimeout;
+  assert.ok(diagnostics.some(entry => entry[2] === 'command_failed' && entry[3].operation === 'search' && entry[3].elapsedMs === 15000));
+  assert.ok(created.at(-1).closed); assert.equal(transfers, 0); detach();
   await store.remove(account.id); assert.equal((await store.list()).length, 0); assert.ok(!assets.has('tinybot-mail-test-mail'));
   assert.ok(!JSON.stringify(diagnostics).includes('app-secret')); assert.ok(!JSON.stringify(diagnostics).includes('PRIVATE_PASSWORD'));
   assert.equal(timers.size, 0); console.log('PASS cancellation, revoke-in-flight, deadlines, cleanup and credential-free diagnostics');
