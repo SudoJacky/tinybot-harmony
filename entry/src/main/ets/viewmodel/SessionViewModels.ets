@@ -150,6 +150,7 @@ export class MessageViewModel {
 
 @Observed
 export class ThreadViewModel {
+  panelContext?: string;
   latestPreviewIds: string[] = [];
   refreshPreviews(): void {
     const ids = latestPreviewIds(this.messages);
@@ -185,6 +186,7 @@ export class ThreadViewModel {
   queuePaused: boolean = false;
   constructor(data: ThreadData) { this.update(data); }
   updateMetadata(data: ThreadData): void {
+    this.panelContext = data.panelContext;
     this.agentMode = data.agentMode || 'full'; this.disabledTools = data.disabledTools || [];
     this.projectId = data.projectId;
     this.memoryReview = data.memoryReview;

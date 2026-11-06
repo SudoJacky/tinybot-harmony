@@ -1,5 +1,6 @@
+import { PanelInputs } from '../model/PanelContract';
 import { util } from '@kit.ArkTS';
-import { PanelSource, validatePanelSource } from '../model/PanelSource';
+import { PanelSource, validatePanelSource, panelQueryAddress } from '../model/PanelSource';
 import { CompatHttp, CompatResponse } from './CompatHttp';
 import { Cancellation, RunCancelledError } from './Cancellation';
 import { NetworkTransfers } from './NetworkTransfers';
@@ -10,10 +11,10 @@ import { BusinessError } from '@kit.BasicServicesKit';
 export class PanelApiTransport {
   private credentials: PanelCredentials;
   constructor(credentials: PanelCredentials) { this.credentials = credentials; }
-  async read(id: string, source: PanelSource, cancellation: Cancellation): Promise<string> {
+  async read(id: string, source: PanelSource, cancellation: Cancellation, inputs: PanelInputs = {}): Promise<string> {
     validatePanelSource(source); cancellation.check();
     const started = Date.now();
-    let address = source.url!;
+    let address = panelQueryAddress(source, inputs);
     const headers: Record<string, string> = {};
     const customHeaders: Record<string, string> = source.headers || {};
     for (const key of Object.keys(customHeaders)) { headers[key] = customHeaders[key]; }

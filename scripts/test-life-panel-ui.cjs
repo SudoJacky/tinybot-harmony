@@ -23,19 +23,19 @@ const model=loadModel('LifePanel');
 const signal=compile(fs.readFileSync(path.join(root,'entry/src/main/ets/services/Cancellation.ets'),'utf8'),
   {require:()=>({ToolFailure:class extends Error {}})});
 const tree=emitted('views/LifePanelsPanel'), panel=tree.statements.find(n=>ts.isClassDeclaration(n)&&n.name.text==='LifePanelsPanel');
-const names=['stop','activityChanged','scan','reload','report','entryKey','refresh','change','refreshAll','visible','layouts','rect','columns','boardHeight','currentBoard','boardKey','sizeOnBoard','targetChanged','dropCard'];
+const names=['stop','activityChanged','scan','reload','report','entryKey','refresh','change','refreshAll','visible','layouts','rect','columns','boardHeight','currentBoard','currentEditorThreadId','boardKey','sizeOnBoard','targetChanged','dropCard','layoutEntries','startMove','moveCard','resetGesture','resizeCard','heightOnBoard','entryFor','createCard','showEditor'];
 const methods=panel.members.filter(n=>ts.isMethodDeclaration(n)&&names.includes(n.name.getText(tree))).map(n=>n.getText(tree)).join('\n');
 assert.equal(panel.members.filter(n=>ts.isMethodDeclaration(n)&&names.includes(n.name.getText(tree))).length,names.length);
 const timers=new Map(), logs=[];let timerId=0;
-const {Probe}=compile('export class Probe {'+methods+'}',{...model,...signal,...loadModel('LifeBoard'),...loadModel('PanelPresentation'),
+const {Probe}=compile('export class Probe {'+methods+'}',{...loadModel('I18n'),...model,...signal,...loadModel('LifeBoard'),...loadModel('PanelPresentation'),
   setTimeout:(fn,ms)=>{timers.set(++timerId,{fn,ms});return timerId;},clearTimeout:id=>timers.delete(id),
-  Diagnostics:{log:(...args)=>logs.push(args)}});
+  Motion:{medium:180,thumb:'spring'},Diagnostics:{log:(...args)=>logs.push(args)}});
 const turn=()=>new Promise(resolve=>setImmediate(resolve));
 function entry(id,refreshMinutes=1) {return {workspaceId:'chat',panel:{id,configRevision:1,archived:false,createdAt:1,
   definition:{size:'S',source:{type:'workspace-json',path:'data.json'},refreshMinutes},refreshedAt:0,attemptedAt:0}};}
 function view(entries=[],repository={}) {
   const page=new Probe();Object.assign(page,{mounted:true,active:true,foreground:true,timer:-1,cancellation:new signal.Cancellation(),scanning:false,
-    cardHeights:{},entries:[],pending:[],error:'',selected:'',removed:false,boardWidth:360,boards:[],boardSelection:'',requestedTarget:'',lastTarget:''});
+    getUIContext:()=>({getFocusController:()=>({clearFocus(){}}),animateTo:(_options,action)=>action()}),layoutSaving:false,dragging:'',resizing:'',dragBefore:'',resizeSize:'',cardHeights:{},entries:[],pending:[],error:'',selected:'',removed:false,boardWidth:360,boards:[],boardSelection:'',requestedTarget:'',lastTarget:''});
   page.boardStore=()=>({list:async()=>[]});
   page.panels=()=>({list:async()=>entries,repository:()=>repository});return page;
 }
@@ -126,9 +126,43 @@ async function main() {
   arranged.boards=[{workspaceId:'owner',board:{id:'board',items:[{workspaceId:'chat',panelId:'b',size:'L'},{workspaceId:'chat',panelId:'a',size:'S'}]}}];
   arranged.boardSelection='owner/board';assert.equal(arranged.visible()[0].panel.id,'b');assert.equal(arranged.sizeOnBoard(arranged.visible()[0]),'L');
   let reorder;arranged.boardStore=()=>({arrange:async(...args)=>reorder=args,list:async()=>arranged.boards});arranged.panels=()=>({list:async()=>arranged.entries});
-  await arranged.dropCard(arranged.visible()[1],1,{offsetX:0,offsetY:-192});assert.ok(reorder,'Dragging invokes persisted board arrangement');
+  arranged.startMove('chat/a',{fingerList:[{globalX:100,globalY:300}]});arranged.moveCard({offsetX:999,offsetY:999,fingerList:[{globalX:100,globalY:108}]});assert.equal(arranged.dragY,-192);assert.equal(arranged.dragX,0,'Window coordinates keep the card under the finger despite changing local coordinates');assert.equal(arranged.layoutEntries()[0].panel.id,'a');await arranged.dropCard(arranged.visible()[1],1,{offsetX:0,offsetY:-192});assert.ok(reorder,'Dragging invokes persisted board arrangement');
+  assert.equal(arranged.dragging,'');
+  arranged.startMove('chat/a',{fingerList:[{globalX:100,globalY:300}]});arranged.moveCard({offsetX:999,offsetY:999,fingerList:[{globalX:100,globalY:108}]});arranged.resetGesture();assert.equal(arranged.visible()[0].panel.id,'b','Cancel leaves saved ordering alone');
+  arranged.entries[0].panel.definition.view={height:320};
+  await arranged.resizeCard('chat/a',{offsetX:100,offsetY:80,fingerList:[{globalX:300,globalY:400}]},false);assert.equal(arranged.resizeWidth,274);assert.equal(arranged.resizeHeight,400);assert.equal(arranged.sizeOnBoard(arranged.entries[0]),'M');
+  await arranged.resizeCard('chat/a',{offsetX:100,offsetY:80,fingerList:[{globalX:300,globalY:400}]},true);assert.equal(reorder[4],'M');assert.equal(reorder[5],400);assert.equal(arranged.resizing,'');
   arranged.requestedTarget=JSON.stringify({workspaceId:'chat',panelId:'a'});arranged.targetChanged();assert.equal(arranged.selected,'chat/a');assert.equal(arranged.boardSelection,'');
   arranged.requestedTarget=JSON.stringify({workspaceId:'owner',boardId:'board'});arranged.targetChanged();assert.equal(arranged.boardSelection,'owner/board');assert.equal(arranged.selected,'');
+  const composing=view();let sent=0,createdThreads=0,selectedThread='',editorSaved='',chatOpened=0;
+  composing.boards=[{workspaceId:'owner',board:{id:'board',title:'Daily',items:[],editorThreadId:'editor'}}];composing.boardSelection='owner/board';
+  composing.prompt='Create a counter';composing.editTarget='';composing.onChat=()=>chatOpened++;
+  composing.app={ready:true,busy:false,threads:[{id:'editor',draft:'',attachments:[]}],runningThreadIds:[],active:{id:'editor'},
+    selectThread:async id=>{selectedThread=id;return true},newThread:async()=>{createdThreads++;composing.app.active={id:'new'};return true},
+    setDraft:draft=>{composing.app.draft=draft},setPanelContext:context=>{composing.app.context=context},flushDraft:async()=>{},send:async()=>{sent++}};
+  composing.boardStore=()=>({list:async()=>composing.boards,setEditor:async(w,b,id)=>editorSaved=id});
+  await composing.createCard();assert.equal(sent,1);assert.equal(createdThreads,0);assert.equal(selectedThread,'editor');assert.equal(chatOpened,0);assert.match(composing.app.context,/validate_life_panel/);
+  composing.prompt='Improve it';composing.app.threads[0].attachments=[{id:'unsent'}];await composing.createCard();assert.equal(createdThreads,1);assert.equal(editorSaved,'new');assert.equal(sent,2,'Unsent attachments are never submitted with panel prompt');
+  composing.boards[0].board.editorThreadId='new';await composing.showEditor();assert.equal(selectedThread,'new');assert.equal(chatOpened,1);
+  console.log('PASS board generation sends directly, reuses its editor, preserves unrelated drafts/attachments and routes back to its conversation');
+  const scoped=view();let nextThread=0;const submissions=[],selections=[],associations=[];
+  scoped.boards=['a','b'].map(id=>({workspaceId:'owner',board:{id,title:id,items:[]}}));
+  scoped.onChat=()=>{};scoped.editTarget='';
+  scoped.app={ready:true,busy:false,threads:[],runningThreadIds:[],active:{id:''},
+    selectThread:async id=>{selections.push(id);scoped.app.active=scoped.app.threads.find(thread=>thread.id===id);return !!scoped.app.active},
+    newThread:async()=>{const thread={id:'editor-'+ ++nextThread,draft:'',attachments:[]};scoped.app.threads.push(thread);scoped.app.active=thread;return true},
+    setDraft:()=>{},setPanelContext:()=>{},flushDraft:async()=>{},send:async()=>submissions.push(scoped.app.active.id)};
+  scoped.boardStore=()=>({list:async()=>scoped.boards,setEditor:async(w,b,id)=>{associations.push([w,b,id]);scoped.boards.find(item=>item.board.id===b).board.editorThreadId=id}});
+  scoped.boardSelection='owner/a';scoped.prompt='Create A';await scoped.createCard();assert.equal(scoped.error,'');
+  scoped.boardSelection='owner/b';await scoped.showEditor();assert.deepEqual(selections,[],'A board without an editor must not open another board conversation');
+  scoped.prompt='Create B';await scoped.createCard();assert.equal(scoped.error,'');
+  assert.deepEqual(submissions,['editor-1','editor-2'],'Different boards get independent editing conversations');
+  assert.deepEqual(associations,[['owner','a','editor-1'],['owner','b','editor-2']]);
+  scoped.editorThreadId='';await scoped.showEditor();assert.equal(selections.at(-1),'editor-2','Board association survives clearing component state');
+  scoped.boardSelection='owner/a';scoped.prompt='Improve A';await scoped.createCard();assert.equal(submissions.at(-1),'editor-1');
+  scoped.boardSelection='';scoped.editorThreadId='editor-2';scoped.prompt='All cards';await scoped.createCard();
+  assert.equal(submissions.at(-1),'editor-2','All-cards view retains the component editor fallback');
+  console.log('PASS independent board editors, persisted reopening, board reuse and all-cards fallback');
   console.log('PASS emitted shared-board ordering/sizing, drag persistence dispatch and chat card/board navigation');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

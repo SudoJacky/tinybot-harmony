@@ -18,7 +18,7 @@ export class LifeBoards {
   async save(workspaceId: string, id: string, title: string, description: string, items?: BoardItem[], archive?: boolean): Promise<LifeBoard> {
     const nextId = id || 'board-' + util.generateRandomUUID();
     return this.change(workspaceId, nextId, !id, async (before?: LifeBoard): Promise<LifeBoard> => ({ version: 1, id: nextId,
-      title: title.trim(), description: description.trim(), items: items === undefined ? before?.items || [] : items,
+      editorThreadId: before?.editorThreadId, title: title.trim(), description: description.trim(), items: items === undefined ? before?.items || [] : items,
       archived: archive === undefined ? before?.archived || false : archive, createdAt: before?.createdAt || Date.now(), updatedAt: Date.now() }));
   }
   private async change(workspaceId: string, id: string, create: boolean, operation: (board?: LifeBoard) => Promise<LifeBoard>): Promise<LifeBoard> {
@@ -33,6 +33,9 @@ export class LifeBoards {
       await files.writeLifeBoard(path, JSON.stringify(board), cancellation, { version: old?.version || null }); PanelChanges.emit(); return board;
     }));
   }
+  async setEditor(workspaceId: string, id: string, threadId: string): Promise<void> {
+    await this.change(workspaceId, id, false, async (previous?: LifeBoard): Promise<LifeBoard> => { previous!.editorThreadId = threadId; return previous!; });
+  }
   async pin(workspaceId: string, id: string, reference: PanelReference, present: boolean): Promise<LifeBoard> {
     validateReference(reference);
     return this.change(workspaceId, id, false, async (previous?: LifeBoard): Promise<LifeBoard> => {
@@ -43,16 +46,17 @@ export class LifeBoards {
         if (panel.archived) { throw new Error('Restore the card before pinning it'); }
         const existing = before.items.find((item: BoardItem) => referenceKey(item) === referenceKey(reference));
         if (existing) { return before; }
-        items.push({ workspaceId: reference.workspaceId, panelId: reference.panelId, size: panel.definition.size });
+        items.push({ workspaceId: reference.workspaceId, panelId: reference.panelId, size: panel.layout?.size || panel.definition.size });
       }
       before.items = items; return before;
     });
   }
-  async arrange(workspaceId: string, id: string, reference: PanelReference, beforeKey: string, size?: string): Promise<LifeBoard> {
+  async arrange(workspaceId: string, id: string, reference: PanelReference, beforeKey: string, size?: string, height?: number): Promise<LifeBoard> {
     return this.change(workspaceId, id, false, async (previous?: LifeBoard): Promise<LifeBoard> => {
       const board = previous!, item = board.items.find((item: BoardItem) => referenceKey(item) === referenceKey(reference));
       if (!item) { throw new Error('Card no longer belongs to this board'); }
       if (size) { item.size = size; }
+      if (height !== undefined) { item.height = height; }
       const items = board.items.filter((entry: BoardItem) => referenceKey(entry) !== referenceKey(reference));
       const target = beforeKey ? items.findIndex((entry: BoardItem) => referenceKey(entry) === beforeKey) : items.length;
       if (target < 0) { throw new Error('Drop target changed; reload the board'); } items.splice(target, 0, item);
@@ -72,6 +76,7 @@ export class LifeBoards {
         entries.push({ workspaceId: workspaceId, board: await this.get(workspaceId, id) });
       }
     }
-    return entries.sort((a: BoardEntry, b: BoardEntry) => b.board.updatedAt - a.board.updatedAt);
+    // Changing a card or a board description must not shuffle the tab strip.
+    return entries.sort((a: BoardEntry, b: BoardEntry) => a.board.createdAt - b.board.createdAt || a.board.id.localeCompare(b.board.id));
   }
 }

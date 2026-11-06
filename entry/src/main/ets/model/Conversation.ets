@@ -36,6 +36,8 @@ export interface ModelConfig {
 }
 
 export interface MessageData {
+  // App-captured board context; kept separate from the editable/user-visible text.
+  panelContext?: string;
   // Model-visible explicit Skill expansion, captured once; content stays user-visible.
   skillPrompt?: string;
   uiStates?: UiSavedState[];
@@ -68,6 +70,7 @@ export function copyModelConfig(config: ModelConfig, configured: boolean = confi
 export interface ContextState { compaction?: CompactionData; }
 
 export interface ThreadData extends ContextState, ToolSelection {
+  panelContext?: string;
   projectId?: string;
   memorySnapshot?: string;
   memoryReviewedMessageId?: string;
@@ -143,7 +146,7 @@ export function requestHistory(messages: MessageData[], systemPrompt: string): M
     }
     const answer = messages[index + 1];
     if (!answer) {
-      result.push({ role: 'user', content: (message.skillPrompt ?? message.content) + referenceContext(message.references, message.id), attachments: message.attachments });
+      result.push({ role: 'user', content: (message.skillPrompt ?? message.content) + (message.panelContext ? '\n\n' + message.panelContext : '') + referenceContext(message.references, message.id), attachments: message.attachments });
     } else if (answer.role === 'assistant') {
       const steps = answer.steps || [];
       const hasTools = steps.some((step: AgentStep) => step.tools.length > 0);
@@ -152,7 +155,7 @@ export function requestHistory(messages: MessageData[], systemPrompt: string): M
       if (answer.status !== 'complete' && !hasTools && !hasSteering && !hasContext) {
         continue;
       }
-      result.push({ role: 'user', content: (message.skillPrompt ?? message.content) + referenceContext(message.references, message.id), attachments: message.attachments });
+      result.push({ role: 'user', content: (message.skillPrompt ?? message.content) + (message.panelContext ? '\n\n' + message.panelContext : '') + referenceContext(message.references, message.id), attachments: message.attachments });
       if (steps.length === 0) {
         result.push({ role: 'assistant', content: answer.content });
       } else {
@@ -243,6 +246,7 @@ export function parseAppData(text: string): AppData {
     if (thread.teams !== undefined) { recoverTeams(thread.teams); }
     if (thread.attachments) { validateAttachments(thread.attachments); }
     if (thread.pendingInputs !== undefined) { validatePendingInputs(thread.pendingInputs); }
+    if (thread.panelContext !== undefined && (typeof thread.panelContext !== 'string' || thread.panelContext.length > 32768)) { throw new Error('Invalid board context'); }
     if (thread.references !== undefined) { validateThreadReferences(thread.references); }
     if (thread.queuePaused !== undefined && typeof thread.queuePaused !== 'boolean') { throw new Error(t("本地队列状态损坏。")); }
     // Loading never authorizes autonomous execution after a process exit.
@@ -265,6 +269,7 @@ export function parseAppData(text: string): AppData {
         throw new Error(t("本地消息数据损坏，原文件已保留。"));
       }
       messageIds.add(message.id);
+      if (message.panelContext !== undefined && (message.role !== 'user' || typeof message.panelContext !== 'string' || message.panelContext.length > 32768)) { throw new Error('Invalid board message context'); }
       if (message.skillPrompt !== undefined && (message.role !== 'user' || typeof message.skillPrompt !== 'string' ||
         !message.skillPrompt.trim() || message.skillPrompt.length > 64000)) {
         throw new Error('Invalid saved Skill expansion; original transcript preserved.');

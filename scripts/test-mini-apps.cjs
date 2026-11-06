@@ -62,7 +62,7 @@ const kits = {
 };
 const t = (text, values = []) => text.replace(/\{(\d+)\}/g, (_, i) => String(values[i]));
 function mock(name, value) { cache.set(path.join(source, name + '.ets'), value); }
-mock('model/I18n', { t }); mock('model/Diagnostics', { Diagnostics: { acceptsLog: () => false, log() {}, begin: () => 0, end() {} } });
+mock('model/I18n', { t, getLocale:()=> 'zh-CN' }); mock('model/Diagnostics', { Diagnostics: { acceptsLog: () => false, log() {}, begin: () => 0, end() {} } });
 mock('common/ApiLevel', { ApiLevel: { pdfTextContent: true } });
 mock('services/ProjectFolderAccess', { ProjectFolderAccess: { activate: async () => {} } });
 mock('services/NativeActions', { exportFile: async () => {} });
@@ -396,7 +396,7 @@ async function lifePanelTest() {
   await scoped.write('today.panel.json',JSON.stringify(spec),signal);
   await scoped.write('data.json',JSON.stringify(spec.data),signal);
   const tools=new LifePanelTools(panels,'panel-chat','deleted-thread',scoped);
-  assert.equal((await invoke(tools,'get_life_panel_catalog',{})).version,1);
+  assert.equal((await invoke(tools,'get_life_panel_catalog',{})).version,2);
   const receipt=await invoke(tools,'publish_life_panel',{path:'today.panel.json'}), id=receipt.panelId;
   assert.equal(receipt.openFrom,'Life Panel');
   const readonly=new RuleTools(tools,true);
@@ -404,7 +404,7 @@ async function lifePanelTest() {
   assert.ok(readonly.definitions().some(t=>t.function.name==='list_life_panels'));
   await assert.rejects(invoke(readonly,'publish_life_panel',{path:'today.panel.json'}));
   await assert.rejects(scoped.write('life-panels/'+id+'/panel.json','{}',signal),/app-owned/);
-  let record=await repo.get(id);assert.ok(panelDue(record,Date.now()));
+  let record=await repo.get(id);assert.equal(panelDue(record,Date.now()),false,"Publication has already checked and loaded the source");
   record=await repo.toggle(id,record.configRevision,'tasks','walk',true);
   await scoped.write('data.json',JSON.stringify({...spec.data,count:6}),signal);
   record=await repo.refresh(id,signal);assert.equal(record.data.count,6);assert.equal(record.user['tasks:walk'],true);
@@ -421,17 +421,21 @@ async function lifePanelTest() {
   const fetch=slow.refresh(id,new Cancellation());
   while(!release) await new Promise(r=>setTimeout(r,0));
   const duplicate=second.refresh(id,new Cancellation());assert.equal(fetch,duplicate);assert.equal(calls,1);
+  const beforeResize=plain(await repo.get(id));await repo.resize(id,'S');
+  assert.equal((await repo.get(id)).configRevision,beforeResize.configRevision,'Resizing must not invalidate an in-flight content refresh');
+  assert.deepEqual(plain((await repo.get(id)).definition),beforeResize.definition,'Layout changes leave the content definition untouched');
   await slow.toggle(id,record.configRevision,'tasks','walk',false);
   release({...spec.data,count:7});await fetch;
   assert.equal((await repo.get(id)).user['tasks:walk'],false);
   release=undefined;const obsolete=slow.refresh(id,new Cancellation());while(!release) await new Promise(r=>setTimeout(r,0));
   await repo.publish(id,{...spec,title:'New definition'},'today.panel.json','new-thread',true,signal);
   release({...spec.data,count:9});await assert.rejects(obsolete,/changed during refresh/);
-  assert.equal((await repo.get(id)).definition.title,'New definition');assert.equal((await repo.get(id)).data.count,3);assert.equal((await repo.get(id)).error,'');
+  assert.equal((await repo.get(id)).definition.title,'New definition');assert.equal((await repo.get(id)).data.count,7);assert.equal((await repo.get(id)).error,'');
   release=undefined;const cancelled=new Cancellation(), work=slow.refresh(id,cancelled);
   while(!release) await new Promise(r=>setTimeout(r,0));cancelled.cancel();release({...spec.data,count:8});await assert.rejects(work);
-  assert.equal((await repo.get(id)).data.count,3,'Background cancellation cannot commit late results');
-  await repo.resize(id,'S');assert.equal((await repo.get(id)).definition.size,'S');
+  assert.equal((await repo.get(id)).data.count,7,'Background cancellation cannot commit late results');
+  await repo.resize(id,'S');assert.equal((await repo.get(id)).layout.size,'S');
+  assert.equal((await panels.page({workspaceId:'panel-chat'})).items.find(item=>item.panelId===id).size,'S','Card summaries report the user layout');
   await repo.archive(id,true);assert.equal(panelDue(await repo.get(id),Date.now()),false);await repo.archive(id,false);
   panelResponse=JSON.stringify({payload:spec.data});
   const httpSpec={...spec,source:{type:'json-url',url:'https://example.com/data',pointer:'/payload'}};
@@ -613,7 +617,7 @@ async function lifeBoardsTest() {
   const files=new NativeWorkspaceFiles(ws.pathFor('another-chat'));
   const tools=new LifePanelTools(panels,'another-chat','new-chat',files,boards);
   await files.write('update.panel.json',JSON.stringify({...spec,title:'Edited from another chat'}),signal);
-  const receipt=await invoke(tools,'publish_life_panel',{path:'update.panel.json',panelId:'shared',workspaceId:'owner',boardId:second.id,boardWorkspaceId:'another-chat'});
+  const receipt=await invoke(tools,'publish_life_panel',{path:'update.panel.json',panelId:'shared',workspaceId:'owner',expectedRevision:(await panels.repository('owner').get('shared')).configRevision,boardId:second.id,boardWorkspaceId:'another-chat'});
   assert.equal(receipt.workspaceId,'owner');assert.equal((await repo.get('shared')).definition.title,'Edited from another chat');
   assert.equal((await repo.get('shared')).user['tasks:one'],true);assert.equal((await boards.get('another-chat',second.id)).items.length,1);
   const links=plain(publishedPanels([{content:'',tools:[{status:'complete',call:{id:'pub',function:{name:'publish_life_panel'}},output:JSON.stringify(receipt)}]}]));
@@ -671,11 +675,11 @@ async function lifePanelRecoveryTest() {
   const repo=panels.repository('owner');await repo.publish('counter',spec,'count.panel.json','owner',false,signal);
   const tools=new LifePanelTools(panels,'editor','editor',editorFiles);
   await editorFiles.write('new.panel.json',JSON.stringify({...spec,data:{count:99}}),signal);
-  await assert.rejects(invoke(tools,'publish_life_panel',{path:'new.panel.json',panelId:'counter',workspaceId:'owner'}),/source.*workspaceId|source workspace/i,
+  await assert.rejects(invoke(tools,'publish_life_panel',{path:'new.panel.json',panelId:'counter',workspaceId:'owner',expectedRevision:(await panels.repository('owner').get('counter')).configRevision}),/source.*workspaceId|source workspace/i,
     'Cross-chat publication must reject ambiguous local source paths before changing the card');
   assert.equal((await repo.get('counter')).data.count,1);
   await editorFiles.write('new.panel.json',JSON.stringify({...spec,source:{...spec.source,workspaceId:'editor'},data:{count:99}}),signal);
-  await invoke(tools,'publish_life_panel',{path:'new.panel.json',panelId:'counter',workspaceId:'owner'});
+  await invoke(tools,'publish_life_panel',{path:'new.panel.json',panelId:'counter',workspaceId:'owner',expectedRevision:(await panels.repository('owner').get('counter')).configRevision});
   assert.equal((await repo.refresh('counter',signal)).data.count,99,'Refresh uses the explicitly bound source workspace');
   let reads=0;const testRepo=new PanelRepository(repo.files,ws.pathFor('owner'),{read:async()=>{reads++;return {count:7};}});
   await testRepo.publish('queued',spec,'queued.panel.json','owner',false,signal);await testRepo.pause('queued',true);
@@ -714,5 +718,134 @@ async function lifePanelRecoveryTest() {
   const continued=await panels.page({limit:1,cursor:emptyPage.nextCursor});assert.equal(continued.items.length,1);
   console.log('PASS explicit cross-chat sources, fresh automatic admission, manual refresh while paused, and summary/detail tools');
 }
-const run=process.argv.includes('--lifecycle')?lifePanelRecoveryTest():main().then(lifePanelTest).then(lifePanelApiTest).then(lifePanelScriptTest).then(lifeBoardsTest).then(lifePanelRecoveryTest);
+async function htmlPanelTest() {
+  const {LifePanels,PanelRepository}=load('services/LifePanels'),{LifePanelTools}=load('services/LifePanelTools'),{LifeBoards}=load('services/LifeBoards');
+  const {parsePanelSpec,parsePanelRecord}=load('model/LifePanel'),{parseLifeBoard}=load('model/LifeBoard');
+  const dir='/sandbox/html-panels',ws=new WorkspaceStore(dir),panels=new LifePanels(dir),boards=new LifeBoards(dir),signal=new Cancellation();
+  fs.mkdirSync(disk(dir),{recursive:true});await ws.ensureThread('owner');
+  let rejectView=false;
+  const files=new NativeWorkspaceFiles(ws.pathFor('owner')),repo=panels.repository('owner'),tools=new LifePanelTools(panels,'owner','owner',files,boards,async(page,storage,context)=>{
+    assert.equal(context.data.total,9);const before=await storage.load();await storage.save({testOnly:true},before.revision);if(rejectView)throw Error('SyntaxError');
+  });
+  const definition={version:2,title:'Interactive',size:'M',nodes:[],data:{total:5},dataSchema:{type:'object',properties:{total:{type:'number'}},required:['total']},checks:[],source:{type:'workspace-json',path:'fresh.json'}};
+  const html='<main><button id="add">Add</button><output>0</output></main><script>document.querySelector("output").textContent=tinybot.panel.context.data.total;</script>';
+  await files.write('interactive.html',html,signal);await files.write('interactive.panel.json',JSON.stringify(definition),signal);await files.write('fresh.json','{"total":9}',signal);
+  const result=await invoke(tools,'publish_life_panel',{path:'interactive.panel.json',htmlPath:'interactive.html'}),id=result.panelId;
+  let record=await repo.get(id);assert.equal(record.definition.view.html,html);assert.equal(record.definition.view.height,320);
+  rejectView=true;await assert.rejects(invoke(tools,'publish_life_panel',{path:'interactive.panel.json',htmlPath:'interactive.html',panelId:id,expectedRevision:record.configRevision}),/SyntaxError/);
+  assert.equal((await repo.get(id)).configRevision,record.configRevision,'Failed validation must preserve the published card');rejectView=false;
+  const binding=repo.binding(id,record.configRevision),initial=await binding.load();assert.equal(initial.value,null);
+  const definitionBeforeResize=plain(record.definition),revisionBeforeResize=record.configRevision;
+  for(const size of ['S','L','M','S']) {
+    record=await repo.resize(id,size);assert.equal(record.configRevision,revisionBeforeResize);
+    assert.deepEqual(plain(record.definition),definitionBeforeResize);assert.equal(record.layout.size,size);
+  }
+  await assert.rejects(repo.resize(id,'XL'),/Invalid card size/);
+  assert.equal((await repo.get(id)).layout.size,'S');
+  const saved=await binding.save({count:4,nested:{checked:['a']}},initial.revision);
+  assert.equal((await repo.refresh(id,signal)).data.total,9);assert.equal((await binding.load()).value.count,4);
+  await assert.rejects(binding.save({count:100},initial.revision),/state changed/);
+  await assert.rejects(binding.save({huge:'x'.repeat(256*1024)},saved.revision),/256 KiB/);
+  const edits=await Promise.allSettled([binding.save({count:5},saved.revision),binding.save({count:6},saved.revision)]);
+  assert.equal(edits.filter(r=>r.status==='fulfilled').length,1,'Concurrent views cannot silently overwrite');
+  record=await repo.get(id);await repo.publish(id,{...record.definition,title:'Updated',size:'L'},'interactive.panel.json','owner',true,signal,{expectedRevision:revisionBeforeResize});
+  await assert.rejects(binding.save({count:8},(await binding.load()).revision),/Card changed/);
+  const revised=await repo.get(id);assert.ok([5,6].includes(revised.viewState.value.count),'Publishing preserves user edits');
+  assert.equal(revised.configRevision,revisionBeforeResize+1,'Content publication still invalidates old writers');
+  assert.equal(revised.layout.size,'S','Agent content publication preserves the user layout');
+  for(const layout of [null,[],{}, {size:'XL'}, {size:'S',unknown:1}]) {
+    assert.throws(()=>parsePanelRecord(JSON.stringify({...revised,layout}),id),/layout/i);
+  }
+  const legacy={...plain(revised)};delete legacy.layout;
+  const restoredLegacy=parsePanelRecord(JSON.stringify(legacy),id);assert.equal(restoredLegacy.definition.size,'L');
+  const legacyId='legacy-layout';await files.writeLifePanel('life-panels/'+legacyId+'/panel.json',JSON.stringify({...legacy,id:legacyId}),signal);
+  await repo.publish(legacyId,{...legacy.definition,title:'Legacy edit',size:'M'},'interactive.panel.json','owner',true,signal);
+  assert.equal((await repo.get(legacyId)).layout.size,'L','Editing an older card preserves its existing size');
+  assert.throws(()=>parsePanelSpec(JSON.stringify({...revised.definition,nodes:[{id:'x',kind:'Text',text:{value:'bad'}}]})),/empty nodes/);
+  assert.throws(()=>parsePanelSpec(JSON.stringify({...revised.definition,version:1})),/native nodes/);
+  const board=await boards.save('owner','','Interactive board','Test context');await boards.pin('owner',board.id,{workspaceId:'owner',panelId:id},true);
+  assert.equal((await boards.get('owner',board.id)).items[0].size,'S','Pinning starts from the current user layout');
+  const otherBoard=await boards.save('owner','','Other board','');await boards.pin('owner',otherBoard.id,{workspaceId:'owner',panelId:id},true);
+  await boards.arrange('owner',board.id,{workspaceId:'owner',panelId:id},'','S',248);
+  await repo.resize(id,'L');assert.equal((await repo.get(id)).configRevision,revised.configRevision);
+  assert.equal((await boards.get('owner',otherBoard.id)).items[0].size,'S','Existing board layouts stay independent from the all-cards layout');
+  assert.equal((await new LifeBoards(dir).get('owner',board.id)).items[0].height,248);
+  await assert.rejects(boards.arrange('owner',board.id,{workspaceId:'owner',panelId:id},'','S',900),/200/);
+  assert.equal((await boards.get('owner',board.id)).items[0].height,248,'Invalid resize leaves saved layout intact');
+  const context={filesDir:dir,cacheDir:dir+'/cache',getApplicationContext(){return this;}};fs.mkdirSync(disk(context.cacheDir));
+  const {createBackupFile,readBackupFile}=load('services/Backup'),backup=await createBackupFile(context,emptyData());
+  const dest='/sandbox/html-restored';fs.mkdirSync(disk(dest));await readBackupFile({filesDir:dest,cacheDir:dest,getApplicationContext(){return this;}},backup,emptyData());
+  assert.deepEqual(plain(await new LifePanels(dest).repository('owner').get(id)),plain(await repo.get(id)));
+  assert.equal((await new LifeBoards(dest).get('owner',board.id)).items[0].height,248);
+  console.log('PASS HTML file publication, isolated state, source refresh, concurrent/conflicting writes, definition replacement, bounded resize and backup/restore');
+}
+
+async function panelRepairLoopTest() {
+ const {LifePanels,PanelRepository}=load('services/LifePanels'),{LifePanelTools}=load('services/LifePanelTools'),{LifeBoards}=load('services/LifeBoards');
+ const {resolvePanelInputs,validatePanelSchema,checkPanelValue}=load('model/PanelContract'),{panelQueryAddress}=load('model/PanelSource');
+ const dir='/sandbox/panel-repair',ws=new WorkspaceStore(dir);fs.mkdirSync(disk(dir),{recursive:true});await ws.ensureThread('owner');
+ const panels=new LifePanels(dir),boards=new LifeBoards(dir),files=new NativeWorkspaceFiles(ws.pathFor('owner')),repo=panels.repository('owner'),signal=new Cancellation();
+ const schema={type:'object',properties:{total:{type:'number'}},required:['total'],additionalProperties:false};validatePanelSchema(schema);
+ assert.throws(()=>checkPanelValue(schema,{total:'wrong'}),e=>e.code==='PANEL_CONTRACT_FAILED'&&e.details.path==='/data/total');
+ assert.throws(()=>checkPanelValue(schema,{}),/Required/);assert.throws(()=>validatePanelSchema({type:'array'}),/items/);
+ const inputs={symbol:{type:'string',default:'A',options:['A','B']}};
+ assert.deepEqual(plain(resolvePanelInputs(inputs,{symbol:'B'})),{symbol:'B'});assert.throws(()=>resolvePanelInputs(inputs,{url:'bad'}),/not declared/);
+ assert.equal(panelQueryAddress({type:'api',url:'https://example.com/data',query:{ticker:'symbol'}},{symbol:'A & B'}),'https://example.com/data?ticker=A%20%26%20B');
+ assert.throws(()=>panelQueryAddress({url:'https://example.com/?ticker=A',query:{ticker:'symbol'}},{symbol:'B'}),/conflicts/);
+ const spec={version:2,title:'Repair test',size:'M',nodes:[],data:{total:1},dataSchema:schema,inputs,checks:[],source:{type:'workspace-json',path:'data.json'},view:{version:1,html:'<button>OK</button>',css:'',js:'',library:'none',height:320}};
+ await files.write('card.panel.json',JSON.stringify(spec),signal);await files.write('data.json','{"total":7}',signal);
+ let failRender=false,widths=[];
+ const tools=new LifePanelTools(panels,'owner','owner',files,boards,async(page,storage,context,signal,options)=>{widths.push(options.width);assert.equal(context.data.total,7);if(failRender)throw Error('check[0] click #missing: not found');const state=await storage.load();await storage.save({testOnly:true},state.revision);});
+ const valid=await invoke(tools,'validate_life_panel',{path:'card.panel.json'});assert.equal(valid.valid,true);assert.deepEqual(widths,[174,360]);assert.equal((await panels.list()).length,0,'Validation never publishes');
+ failRender=true;await assert.rejects(invoke(tools,'publish_life_panel',{path:'card.panel.json',requestId:'repair-1'}),e=>e.code==='PANEL_RENDER_FAILED'&&e.message.includes('width=174')&&e.message.includes('check[0]'));assert.equal((await panels.list()).length,0);
+ failRender=false;const created=await invoke(tools,'publish_life_panel',{path:'card.panel.json',requestId:'repair-1'});let record=await repo.get(created.panelId);assert.equal(record.data.total,7);assert.equal(record.viewState,undefined,'Validation writes never reach live state');
+ const again=await invoke(tools,'publish_life_panel',{path:'card.panel.json',requestId:'repair-1'});assert.equal(again.panelId,created.panelId);assert.equal(again.reused,true);assert.equal((await repo.get(created.panelId)).configRevision,1);
+ await files.write('data.json','{"total":"bad"}',signal);await assert.rejects(invoke(tools,'validate_life_panel',{path:'card.panel.json',panelId:created.panelId,expectedRevision:1}),e=>e.code==='PANEL_CONTRACT_FAILED'&&e.details.path==='/data/total');assert.equal((await repo.get(created.panelId)).configRevision,1);
+ await files.write('data.json','{"total":7}',signal);
+ await assert.rejects(invoke(tools,'publish_life_panel',{path:'card.panel.json',panelId:created.panelId,expectedRevision:42}),e=>e.code==='PANEL_REVISION_CONFLICT');
+ const initialRefreshedAt=record.refreshedAt;assert.ok(initialRefreshedAt>0);
+ const saved=await repo.binding(created.panelId,1).save({count:9},'initial');
+ await invoke(tools,'publish_life_panel',{path:'card.panel.json',panelId:created.panelId,expectedRevision:1});record=await repo.get(created.panelId);assert.equal(record.data.total,7);assert.equal(record.viewState.value.count,9);assert.equal(record.refreshedAt,initialRefreshedAt);
+ await repo.recordRuntimeError(created.panelId,1,'obsolete');assert.equal((await repo.get(created.panelId)).runtimeError,'');await repo.recordRuntimeError(created.panelId,2,'Button failed');assert.equal((await invoke(tools,'get_life_panel',{panelId:created.panelId,workspaceId:'owner',section:'task'})).runtimeError,'Button failed');
+ let seenInputs;const managed={read:(...a)=>files.read(...a),write:(...a)=>files.writeLifePanel(...a)};
+ const custom=new PanelRepository(managed,'parameter-test',{read:async(s,c,id,data,input)=>{seenInputs=input;return {total:input.symbol==='B'?12:7}}});
+ await custom.refresh(created.panelId,signal,'manual',{symbol:'B'});assert.equal(seenInputs.symbol,'B');assert.equal((await repo.get(created.panelId)).data.total,12);
+ await assert.rejects(custom.refresh(created.panelId,signal,'manual',{symbol:'C'}),/Invalid input value/);assert.equal((await repo.get(created.panelId)).data.total,12);
+ const board=await boards.save('owner','','Board','');await boards.setEditor('owner',board.id,'editor-thread');await boards.save('owner',board.id,'Renamed','');assert.equal((await boards.get('owner',board.id)).editorThreadId,'editor-thread');
+ const faultBoards={get:(...a)=>boards.get(...a),pin:async()=>{throw Error('injected pin failure')}};
+ const faultTools=new LifePanelTools(panels,'owner','owner',files,faultBoards,async()=>{});
+ await assert.rejects(invoke(faultTools,'publish_life_panel',{path:'card.panel.json',requestId:'pin-retry',boardId:board.id}),e=>e.code==='PANEL_PIN_FAILED'&&e.details.result.published===true);
+ await assert.rejects(invoke(tools,'validate_life_panel',{path:'card.panel.json',requestId:'pin-retry',boardId:board.id}),e=>e.code==='INVALID_ARGUMENTS');assert.equal((await boards.get('owner',board.id)).items.length,0,'Validation cannot enter the publication retry path or pin a card');
+ const recovered=await invoke(tools,'publish_life_panel',{path:'card.panel.json',requestId:'pin-retry',boardId:board.id});assert.equal(recovered.reused,true);assert.equal((await boards.get('owner',board.id)).items.length,1);
+ // Definition edits migrate persisted inputs identically in validation and publication.
+ const beforeEdit=plain(await repo.get(created.panelId));let previewInputs;
+ const editTools=new LifePanelTools(panels,'owner','owner',files,boards,async(page,storage,context)=>{previewInputs=plain(context.inputs)});
+ const variants=[
+   [{symbol:{type:'string',default:'A',options:['A','B']},added:{type:'boolean',default:true}},{symbol:'B',added:true}],
+   [{symbol:{type:'string',default:'A',options:['A']}},{symbol:'A'}],
+   [{symbol:{type:'number',default:3}},{symbol:3}],
+   [{renamed:{type:'string',default:'new'}},{renamed:'new'}],
+   [undefined,{}],
+ ];
+ for(const [definitions,expected] of variants) {
+   const before=plain(await repo.get(created.panelId));
+   const candidate={...spec,inputs:definitions};await files.write('edit.panel.json',JSON.stringify(candidate),signal);
+   const args={path:'edit.panel.json',panelId:created.panelId,expectedRevision:before.configRevision};
+   assert.equal((await invoke(editTools,'validate_life_panel',args)).valid,true);assert.deepEqual(previewInputs,expected);
+   assert.deepEqual(plain(await repo.get(created.panelId)),before,'Validation cannot migrate live inputs');
+   await invoke(editTools,'publish_life_panel',args);
+   const updated=plain(await repo.get(created.panelId));assert.deepEqual(updated.inputs,expected);
+   assert.deepEqual(updated.data,beforeEdit.data);assert.deepEqual(updated.viewState,beforeEdit.viewState);
+   assert.equal(updated.id,created.panelId);assert.equal(updated.configRevision,before.configRevision+1);
+ }
+ await assert.rejects(repo.refresh(created.panelId,signal,'manual',{removed:'value'}),/not declared/,'Explicit refresh inputs remain strict');
+ const invalid={...spec,inputs:{symbol:{type:'string',default:'C',options:['A','B']}}};
+ await files.write('edit.panel.json',JSON.stringify(invalid),signal);
+ const revision=(await repo.get(created.panelId)).configRevision;
+ await assert.rejects(invoke(editTools,'publish_life_panel',{path:'edit.panel.json',panelId:created.panelId,expectedRevision:revision}),/Invalid input value/);
+ assert.equal((await repo.get(created.panelId)).configRevision,revision,'Invalid candidate defaults still fail without mutation');
+ console.log('PASS input definition edits preserve compatible values and live state, migrate incompatible values, and keep explicit inputs strict');
+ console.log('PASS repair loop: structured diagnostics, dry-run isolation, idempotent publication/pin recovery, schemas, parameters, runtime evidence and editor continuity');
+}
+const run=process.argv.includes('--lifecycle')?lifePanelRecoveryTest():main().then(lifePanelTest).then(lifePanelApiTest).then(lifePanelScriptTest).then(lifeBoardsTest).then(lifePanelRecoveryTest).then(htmlPanelTest).then(panelRepairLoopTest);
 Promise.resolve(run).catch(error=>{console.error(error);process.exitCode=1;});

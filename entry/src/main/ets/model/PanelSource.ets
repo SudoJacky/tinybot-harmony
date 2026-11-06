@@ -1,3 +1,4 @@
+import { PanelInputs } from './PanelContract';
 import { PanelSourceTransform, pointerParts, validatePanelSourceTransform } from './PanelTransform';
 import { MailQuery, validateMailQuery } from './Mail';
 export interface PanelOAuth { clientId: string; authorizationEndpoint: string; tokenEndpoint: string; scopes?: string[]; resource?: string; }
@@ -5,7 +6,7 @@ export interface PanelAuth { type: string; name?: string; in?: string; prefix?: 
 export interface PanelSource {
   type: string; url?: string; path?: string; pointer?: string; method?: string; headers?: Record<string, string>;
   body?: Object; auth?: PanelAuth; transform?: PanelSourceTransform;
-  prompt?: string;
+  prompt?: string; query?: Record<string, string>;
   mail?: MailQuery;
   workspaceId?: string;
 }
@@ -16,7 +17,8 @@ export function panelHttps(address: string): string {
   if (typeof address !== 'string' || !/^https:\/\/[^\s/?#@\\]+(?:[/?][^\s#\\]*)?$/.test(address)) { throw new Error('API endpoints require HTTPS without credentials or fragments'); } return address;
 }
 export function validatePanelSource(source: PanelSource): void {
-  fields(source, ['type', 'url', 'path', 'pointer', 'method', 'headers', 'body', 'auth', 'transform', 'prompt', 'mail', 'workspaceId']);
+  fields(source, ['type', 'url', 'path', 'pointer', 'method', 'headers', 'body', 'auth', 'transform', 'prompt', 'mail', 'workspaceId', 'query']);
+  if (source.query !== undefined && (!['api', 'json-url'].includes(source.type) || !source.query || typeof source.query !== 'object' || Array.isArray(source.query) || Object.keys(source.query).length > 16 || Object.keys(source.query).some((key: string) => !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key) || typeof source.query![key] !== 'string'))) { throw new Error('query maps up to 16 URL query names to declared input names'); }
   if (source.workspaceId !== undefined && (source.type !== 'workspace-json' || typeof source.workspaceId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(source.workspaceId))) { throw new Error('source.workspaceId requires a valid workspace-json owner'); }
   if (source.type === 'mail') {
     if (Object.keys(source).some((key: string) => !['type', 'mail', 'pointer', 'transform'].includes(key))) { throw new Error('Mail source accepts only mail query, pointer and transform'); }
@@ -73,4 +75,15 @@ export function validatePanelSource(source: PanelSource): void {
   }
   if (source.pointer !== undefined) { pointerParts(source.pointer); }
   if (source.transform !== undefined) { validatePanelSourceTransform(source.transform); }
+}
+
+export function panelQueryAddress(source: PanelSource, inputs: PanelInputs = {}): string {
+  let address = source.url!;
+  for (const key of Object.keys(source.query || ({} as Record<string, string>))) {
+    const value = inputs[source.query![key]];
+    if (value === undefined) { throw new Error('Missing query input: ' + source.query![key]); }
+    if ((address.split('?')[1] || '').split('&').some((part: string) => decodeURIComponent(part.split('=')[0]) === key) || source.auth?.in === 'query' && source.auth.name === key) { throw new Error('Query input conflicts with configured URL or authentication: ' + key); }
+    address += (address.includes('?') ? '&' : '?') + encodeURIComponent(key) + '=' + encodeURIComponent(String(value));
+  }
+  return address;
 }
