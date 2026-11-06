@@ -19,6 +19,7 @@ import { withFileMutation } from './FileMutationQueue';
 import { PanelAgentRefresh, PanelAgentRunner } from './PanelAgentRefresh';
 import { PanelChanges } from './PanelChanges';
 import { MailService } from './MailService';
+import { ProviderBalanceSource } from './ProviderBalanceSource';
 import { threadWorkspacePath } from '../model/Workspace';
 import { PanelSource, panelQueryAddress } from '../model/PanelSource';
 import { withWorkspaceLifecycle } from './WorkspaceRetention';
@@ -61,6 +62,7 @@ export class NativePanelSourceReader implements PanelSourceReader {
   async read(spec: PanelSpec, cancellation: Cancellation, id: string = '', data?: Object, inputs?: PanelInputs): Promise<Object> {
     const source = spec.source;
     if (!source) { throw new Error('This panel has no refreshable source'); }
+    if (source.type === 'provider-balance') { return ProviderBalanceSource.read(source.providerIds!, inputs || {}, cancellation); }
     if (source.type === 'agent') { return PanelAgentRefresh.run(this.namespace, id, spec, data || spec.data, cancellation, inputs); }
     if (source.type === 'mail') {
       const snapshot = await new MailService().query(source.mail!, cancellation); cancellation.check();

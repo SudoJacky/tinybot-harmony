@@ -72,7 +72,7 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
   cancellation?.check();
   const userDocument = data.config.userDocument || '';
   data.config = defaultConfig(); data.config.userDocument = userDocument;
-  for (const profile of data.providerProfiles || []) { profile.credentialAlias = ''; profile.noApiKey = true; profile.enabled = false; }
+  for (const profile of data.providerProfiles || []) { profile.credentialAlias = ''; profile.balanceCredentialAlias = undefined; profile.noApiKey = true; profile.enabled = false; }
   for (const server of data.productivity?.servers || []) { server.credentialAlias = ''; server.authType = undefined; server.enabled = false; }
   if (data.productivity?.options?.search) {
     const search = data.productivity.options.search; search.enabled = false;
@@ -336,7 +336,7 @@ async function restoreEnvelope(context: common.UIAbilityContext, local: AppData,
     if (source?.type === 'workspace-json' && source.workspaceId !== undefined) { source.workspaceId = boardWorkspaceMap.get(source.workspaceId) || source.workspaceId; }
     if (JSON.stringify(panel) !== file.content) { await files.writeLifePanel(item.path, JSON.stringify(panel), signal, { version: file.version }); }
   }
-  for (const profile of data.providerProfiles || []) { profile.enabled = false; profile.noApiKey = true; profile.credentialAlias = ''; }
+  for (const profile of data.providerProfiles || []) { profile.enabled = false; profile.noApiKey = true; profile.credentialAlias = ''; profile.balanceCredentialAlias = undefined; }
   for (const thread of data.threads) {
     thread.pendingInputs = []; thread.queuePaused = true;
     for (const item of threadAttachments(thread)) {

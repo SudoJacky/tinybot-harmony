@@ -504,14 +504,17 @@ async function encryptedBackupTest() {
   const app='/sandbox/encrypted-backup';fs.mkdirSync(disk(app+'/cache'),{recursive:true});
   const context={cacheDir:app+'/cache',getApplicationContext:()=>({filesDir:app})};
   const data=emptyData();data.providerProfiles=[{id:'api',name:'My API',protocol:'chat-completions',baseUrl:'https://api.example.com/v1',
-    credentialAlias:'original-alias',noApiKey:false,enabled:true,models:['model-a']}];
+    credentialAlias:'original-alias',noApiKey:false,enabled:true,models:['model-a'],
+    balance:{mode:'newapi-account',userId:'7'},balanceCredentialAlias:'original-balance-alias'}];
   data.config={...data.config,configured:true,providerId:'api',model:'model-a',baseUrl:'https://api.example.com/v1',credentialAlias:'original-alias'};
   const secret='sk-PRIVATE-DO-NOT-WRITE-PLAINTEXT',openID='fixture-openid-A';
-  const stored=new Map([['original-alias',secret]]);
+  const balanceSecret='PRIVATE-BALANCE-ACCESS-TOKEN';
+  const stored=new Map([['original-alias',secret],['original-balance-alias',balanceSecret]]);
   const vault={read:async id=>stored.get(id)||'',write:async(id,value)=>{assert.ok(!stored.has(id));stored.set(id,value);},remove:async id=>stored.delete(id)};
   const before=JSON.stringify(data);
   const backup=await createBackupFile(context,data,vault);
   const bytes=fs.readFileSync(disk(backup));assert.ok(!bytes.includes(Buffer.from(secret)));assert.ok(!bytes.includes(Buffer.from(openID)));
+  assert.ok(!bytes.includes(Buffer.from(balanceSecret)));assert.ok(!bytes.includes(Buffer.from('original-balance-alias')));
   assert.ok(bytes.includes(Buffer.from('https://api.example.com/v1')),'public API configuration stays readable');
   assert.equal(JSON.stringify(data),before);
   const again=await createBackupFile(context,data,vault);
@@ -527,11 +530,11 @@ async function encryptedBackupTest() {
   bad.data.providerProfiles[0].baseUrl='https://api.example.com/v1';
   const ciphertext=Buffer.from(bad.protectedKeys.ciphertext,'base64');ciphertext[0]^=1;bad.protectedKeys.ciphertext=ciphertext.toString('base64');
   fs.writeFileSync(disk(modified),JSON.stringify(bad));await assert.rejects(readBackupFile(context,modified,emptyData()),/账号与备份不匹配/);
-  assert.equal(stored.size,1,'read/validation alone never writes credentials');
+  assert.equal(stored.size,2,'read/validation alone never writes credentials');
   let saved=emptyData(),failSave=false;
   const repository={load:async()=>JSON.parse(JSON.stringify(saved)),save:async value=>{
     if(failSave)throw Error('injected backup settings failure');
-    assert.ok(!JSON.stringify(value).includes(secret));saved=JSON.parse(JSON.stringify(value));
+    assert.ok(!JSON.stringify(value).includes(secret));assert.ok(!JSON.stringify(value).includes(balanceSecret));saved=JSON.parse(JSON.stringify(value));
   }};
   const {ProviderRegistry}=load('services/providers/ProviderRegistry');
   const registry=new ProviderRegistry();let sent;
@@ -544,11 +547,13 @@ async function encryptedBackupTest() {
   const session=new SessionService(repository,{fork(){return this;}},vault,resources);session.refreshContext=()=>{};await session.initialize();
   const imported=await readBackupFile(context,backup,session.snapshot());
   assert.ok(!JSON.stringify(imported).includes(secret),'AppData never contains raw keys');
-  failSave=true;assert.equal(await session.importSnapshot(imported),false);assert.equal(stored.size,1,'failed commit removes new aliases');
+  failSave=true;assert.equal(await session.importSnapshot(imported),false);assert.equal(stored.size,2,'failed commit removes new aliases');
   assert.equal(saved.providerProfiles.length,0);
   assert.equal(registry.list().length,0,'a failed restore must not expose uncommitted services');
   failSave=false;assert.equal(await session.importSnapshot(imported),true,session.state.error);
   const profile=saved.providerProfiles[0];assert.notEqual(profile.credentialAlias,'original-alias');assert.equal(stored.get(profile.credentialAlias),secret);
+  assert.notEqual(profile.balanceCredentialAlias,'original-balance-alias');
+  assert.equal(stored.get(profile.balanceCredentialAlias),balanceSecret);
   assert.equal(profile.enabled,true);assert.equal(profile.noApiKey,false);assert.equal(profile.name,'My API');
   assert.equal(saved.config.configured,true);assert.equal(saved.config.model,'model-a');
   assert.equal(saved.threads.find(t=>t.id===saved.activeThreadId).modelRef.providerId,profile.id);
@@ -557,10 +562,11 @@ async function encryptedBackupTest() {
   assert.equal(answer.content,'restored service works','the restored model is usable before restarting or editing settings');
   assert.equal(sent.model,'model-a');assert.equal(sent.baseUrl,'https://api.example.com/v1');assert.equal(sent.apiKey,secret);
   const existingCount=stored.size,existingAlias=profile.credentialAlias;
-  stored.set(existingAlias,'LOCAL-KEY');
+  stored.set(existingAlias,'LOCAL-KEY');stored.set(profile.balanceCredentialAlias,'LOCAL-BALANCE-KEY');
   const repeated=await readBackupFile(context,backup,session.snapshot());
   assert.equal(await session.importSnapshot(repeated),true,session.state.error);assert.equal(stored.size,existingCount);
   assert.equal(stored.get(existingAlias),'LOCAL-KEY','matching local services and credentials always win');
+  assert.equal(stored.get(profile.balanceCredentialAlias),'LOCAL-BALANCE-KEY');
   backupAccount.openID='';await assert.rejects(createBackupFile(context,data,vault),/请登录/);backupAccount.openID=openID;
   const noKey=JSON.parse(JSON.stringify(data));noKey.providerProfiles[0].noApiKey=true;noKey.providerProfiles[0].credentialAlias='';
   const noKeyPath=await createBackupFile(context,noKey,vault);assert.equal(legacyBackupFixture(fs.readFileSync(disk(noKeyPath))).protectedKeys.version,2);

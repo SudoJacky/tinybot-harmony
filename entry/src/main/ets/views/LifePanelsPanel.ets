@@ -420,6 +420,11 @@ export struct LifePanelsPanel {
         Text(t('创建交互工具，或复用已有卡片')).fontSize(18).fontWeight(FontWeight.Medium).width('100%')
         Button(t('让 AI 创建')).attributeModifier(Btn.primary).width('100%').id('life-panel-create-ai')
           .enabled(this.app.ready && !this.app.busy && !this.creating).onClick(() => { this.sheetOpen = false; this.editingPrompt = true; })
+        Button(t('创建 Provider 余额卡片')).attributeModifier(Btn.tonal).width('100%').id('life-panel-create-balance')
+          .enabled(this.app.ready && !this.app.busy && !this.creating).onClick(() => {
+            this.prompt = t('请先读取 get_life_panel_catalog 的 balance 部分，为已配置的 Provider 创建 HTML 余额卡片。采用精简 Wallet Card 样式：保留账户切换、隐藏余额和右上角刷新，只显示余额数值，不显示单位、变化量、搜索框和底部按钮。使用 provider-balance 数据源，验证后发布；若没有可查询的服务，请说明需要配置的内容。');
+            this.editTarget = ''; this.createCard();
+          })
         if (this.currentBoard()) {
           TextInput({ text: this.cardQuery, placeholder: t('搜索已有卡片') }).onChange((value: string) => { this.cardQuery = value; })
           Text(t('添加的是共享卡片，修改会同步到其他看板')).fontSize(12).fontColor($r('app.color.text_secondary'))

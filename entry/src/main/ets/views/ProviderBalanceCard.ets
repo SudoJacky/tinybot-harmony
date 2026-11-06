@@ -1,85 +1,40 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Btn } from '../common/Theme';
-import { Banner, GroupCard, SectionHeader } from '../common/Widgets';
-import { getLocale, t } from '../model/I18n';
+import { GroupCard, SectionHeader } from '../common/Widgets';
+import { t } from '../model/I18n';
 import { ProviderProfile } from '../model/ProviderProfiles';
-import { BalanceAmount, ProviderBalance, queryProviderBalance, supportsProviderBalance } from '../services/ProviderBalance';
+import { supportsProviderBalance } from '../services/ProviderBalance';
 import { ProviderEditorViewModel } from '../viewmodel/ProviderEditorViewModel';
+import { BalanceQuerySettings } from './BalanceQuerySettings';
+import { ProviderBalanceResult } from './ProviderBalanceResult';
 
 @Component
 export struct ProviderBalanceCard {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink editor: ProviderEditorViewModel;
   @Prop profiles: ProviderProfile[] = [];
-  @Prop @Watch('queryOnEntry') disabled: boolean = false;
-  @Prop @Watch('visibilityChanged') active: boolean = true;
-  @Prop @Watch('reset') scope: string = '';
-  @State private result?: ProviderBalance = undefined;
-  @State private error: string = '';
-  @State private loading: boolean = false;
-  private generation: number = 0;
-  private alive: boolean = false;
-  private queriedOnEntry: boolean = false;
+  @Prop disabled: boolean = false;
+  @Prop active: boolean = false;
+  @Prop scope: string = '';
+  @State private configuring: boolean = false;
 
-  aboutToAppear(): void { this.alive = true; this.queryOnEntry(); }
-  aboutToDisappear(): void { this.alive = false; this.queriedOnEntry = false; this.reset(); }
-  private visibilityChanged(): void {
-    if (!this.active) { this.queriedOnEntry = false; this.reset(); return; }
-    this.queryOnEntry();
-  }
-  private queryOnEntry(): void {
-    if (!this.alive || !this.active || this.disabled || this.queriedOnEntry) { return; }
-    this.queriedOnEntry = true;
-    // Editing credentials must not send a request on every keystroke.
-    if (this.supported() && !this.editor.noApiKey && (this.editor.apiKey.trim() || this.editor.canKeepKey)) {
-      this.refresh();
-    }
-  }
-  private reset(): void { this.generation++; this.result = undefined; this.error = ''; this.loading = false; }
-  private supported(): boolean { return supportsProviderBalance(this.editor.protocol, this.editor.baseUrl); }
-  private async refresh(): Promise<void> {
-    if (!this.alive || !this.active || this.loading || this.disabled) { return; }
-    const generation = ++this.generation;
-    this.loading = true; this.result = undefined; this.error = '';
-    try {
-      const result = await queryProviderBalance(this.editor.snapshot(), this.profiles);
-      if (this.alive && generation === this.generation) { this.result = result; }
-    } catch (error) {
-      if (this.alive && generation === this.generation) { this.error = (error as Error).message; }
-    } finally { if (this.alive && generation === this.generation) { this.loading = false; } }
-  }
+  private supported(): boolean { return supportsProviderBalance(this.editor.protocol, this.editor.baseUrl, this.editor.balanceSettings()); }
 
   build() {
     Column() {
-      SectionHeader({ title: t('账户余额') })
+      SectionHeader({ title: t('余额与额度') })
       GroupCard() {
         Column({ space: 10 }) {
+          Button(this.configuring ? t('收起查询设置') : t('余额查询设置')).fontFamily(this.appearance.fontFamily)
+            .attributeModifier(Btn.text).id('balance-configure').onClick(() => { this.configuring = !this.configuring; })
+          if (this.configuring) { BalanceQuerySettings({ editor: this.editor, disabled: this.disabled }) }
           if (this.supported()) {
-            Text(t('查询此 API Key 所属账户的余额，不代表单个模型或本次对话的费用。'))
+            Text(t('账户余额、Key 限额和订阅额度分别显示，不代表本次对话的费用。'))
               .fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary')).width('100%')
-            if (this.result) {
-              if (this.result.amounts.length === 0) {
-                Text(t('服务未返回余额明细。')).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
-              }
-              ForEach(this.result.amounts, (amount: BalanceAmount) => {
-                Column({ space: 4 }) {
-                  Text(amount.currency + ' ' + amount.total).fontFamily(this.appearance.fontFamily).fontSize(20)
-                    .fontColor($r('app.color.text_primary')).id('balance-' + amount.currency)
-                  Text(t('赠送余额 {0} · 充值余额 {1}', [amount.granted, amount.toppedUp]))
-                    .fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
-                }.width('100%').alignItems(HorizontalAlign.Start)
-              }, (amount: BalanceAmount) => amount.currency)
-              Text(this.result.available ? t('账户余额可用于 API 调用') : t('账户余额不足，暂不可调用 API'))
-                .fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
-              Text(t('查询时间：{0}', [new Date(this.result.checkedAt).toLocaleTimeString(getLocale())]))
-                .fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.text_tertiary'))
-            }
-            if (this.error) { Banner({ text: this.error, compId: 'provider-balance-error' }) }
-            Button(this.loading ? t('正在查询余额…') : t('查询 / 刷新余额')).fontFamily(this.appearance.fontFamily)
-              .id('query-provider-balance').attributeModifier(Btn.tonal).enabled(!this.loading && !this.disabled)
-              .onClick(() => this.refresh())
-          } else {
-            Text(t('当前服务尚未接入余额查询，请到服务商控制台查看。'))
+            ProviderBalanceResult({ draft: this.editor.snapshot(), profiles: this.profiles, active: this.active,
+              disabled: this.disabled, scope: this.scope, canQuery: this.editor.canQueryBalance })
+          } else if (this.editor.balanceMode !== 'off') {
+            Text(t('此地址未匹配余额接口。可选择中转站类型或配置自定义查询，也可到服务商控制台查看。'))
               .fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary')).width('100%')
           }
         }.padding(12).width('100%').alignItems(HorizontalAlign.Start)

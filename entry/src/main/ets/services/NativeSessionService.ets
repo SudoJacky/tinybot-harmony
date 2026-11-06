@@ -4,6 +4,7 @@ import { PresentTools } from './PresentTools';
 import { PreviewTools } from './PreviewTools';
 import { MiniApps } from './MiniApps';
 import { LifePanels } from './LifePanels';
+import { ProviderBalanceSource } from './ProviderBalanceSource';
 import { LifeBoards } from './LifeBoards';
 import { LifePanelTools } from './LifePanelTools';
 import { MailTools } from './MailTools';
@@ -148,6 +149,7 @@ export class NativeSessionResources implements SessionResources {
   }
   configureProviders(profiles: ProviderProfile[]): void {
     this.profiles = JSON.parse(JSON.stringify(profiles)) as ProviderProfile[];
+    ProviderBalanceSource.configure(this.profiles);
     for (const info of this.providers.list()) { this.providers.unregister(info.id); }
     for (const profile of profiles) {
       if (isSupportedProtocol(profile.protocol)) { this.providers.register(profileProvider(profile, new NativeProviderEffects())); }

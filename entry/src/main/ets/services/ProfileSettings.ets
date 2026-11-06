@@ -6,6 +6,7 @@ import { ProviderProfile, modelConfig, modelIds, validateProfile } from '../mode
 import { CredentialReader } from './providers/Provider';
 import { sameCredentialScope } from '../model/ProviderEndpoint';
 import { mergeSavedConfiguration } from '../model/SavedConfiguration';
+import { BalanceSettings, canKeepBalanceCredential, usesBalanceCredential } from '../model/BalanceSettings';
 
 export interface CredentialVault extends CredentialReader {
   write(alias: string, secret: string): Promise<void>;
@@ -23,6 +24,8 @@ export interface ProviderDraft {
   enabled: boolean;
   models: string;
   contextWindow: string;
+  balance?: BalanceSettings;
+  balanceApiKey?: string;
 }
 
 // Configuration commits and key lifecycle belong together, outside the editor and runtime.
@@ -39,6 +42,11 @@ export class ProfileSettings {
     const previous = profiles.find((item: ProviderProfile) => item.id === draft.id);
     if (draft.id.length > 0 && !previous) { throw new Error(t("模型服务不存在。")); }
     const key = draft.apiKey.trim();
+    const balanceKey = draft.balanceApiKey?.trim() || '';
+    const separateBalance = usesBalanceCredential(draft.balance);
+    if (separateBalance && !balanceKey && (!previous || !canKeepBalanceCredential(previous, draft.protocol, draft.baseUrl, draft.balance))) {
+      throw new Error(t('请填写余额查询专用凭据。'));
+    }
     const sameScope = previous !== undefined && sameCredentialScope(previous.protocol, previous.baseUrl, draft.protocol, draft.baseUrl);
     if (!draft.noApiKey && key.length === 0 && (!previous?.credentialAlias || !sameScope)) {
       throw new Error(t("请填写 API Key；更换服务基础地址时需要重新填写，其他服务的密钥不会被复用。"));
@@ -47,7 +55,9 @@ export class ProfileSettings {
       presetId: draft.presetId, protocol: draft.protocol, baseUrl: draft.baseUrl.trim().replace(/\/+$/, ''),
       credentialAlias: draft.noApiKey ? '' : key.length > 0 ? 'pending-key' : previous?.credentialAlias || '',
       noApiKey: draft.noApiKey, enabled: draft.enabled, models: modelIds(draft.models),
-      contextWindow: draft.contextWindow.trim() ? Number(draft.contextWindow) : undefined };
+      contextWindow: draft.contextWindow.trim() ? Number(draft.contextWindow) : undefined,
+      balance: draft.balance,
+      balanceCredentialAlias: separateBalance ? (balanceKey ? 'pending-balance-key' : previous?.balanceCredentialAlias) : undefined };
     const profile = mergeSavedConfiguration(previous, edited);
     validateProfile(profile);
     // An alias can survive a restore/signing change while its secure asset is unavailable.
@@ -60,15 +70,32 @@ export class ProfileSettings {
         throw failure;
       }
     }
-    let createdAlias = '';
+    if (separateBalance && !balanceKey) {
+      try { await this.credentials.read(profile.balanceCredentialAlias!); }
+      catch (error) {
+        const failure = contextualError(t('读取余额查询凭据失败'), 'credential_read', error as Error);
+        Diagnostics.log('error', 'configuration', 'save_failed', { credentialScope: 'provider' }, failure);
+        throw failure;
+      }
+    }
+    const createdAliases: string[] = [];
     let stage = 'save_config';
     try {
       if (!profile.noApiKey && key.length > 0) {
-        createdAlias = 'tinybot-' + this.createId();
+        const createdAlias = 'tinybot-' + this.createId();
+        createdAliases.push(createdAlias);
         stage = 'credential_write';
         await this.credentials.write(createdAlias, key);
         stage = 'save_config';
         profile.credentialAlias = createdAlias;
+      }
+      if (separateBalance && balanceKey) {
+        const alias = 'tinybot-balance-' + this.createId();
+        createdAliases.push(alias);
+        stage = 'credential_write';
+        await this.credentials.write(alias, balanceKey);
+        profile.balanceCredentialAlias = alias;
+        stage = 'save_config';
       }
       data.providerProfiles = previous ? profiles.map((item: ProviderProfile) => item.id === profile.id ? profile : item) : profiles.concat([profile]);
       const first = profiles.length === 0;
@@ -85,7 +112,7 @@ export class ProfileSettings {
     } catch (error) {
       const failure = contextualError(stage === 'credential_write' ? t('写入 API Key 失败') : t('保存模型配置失败'), stage, error as Error);
       Diagnostics.log('error', 'configuration', 'save_failed', { credentialScope: 'provider' }, failure);
-      if (createdAlias.length > 0) {
+      for (const createdAlias of createdAliases) {
         try { await this.credentials.remove(createdAlias); }
         catch (cleanupError) {
           const cleanup = contextualError(t('未生效的密钥清理失败'), 'credential_remove', cleanupError as Error);
@@ -96,15 +123,18 @@ export class ProfileSettings {
       }
       throw failure;
     }
-    if (previous && previous.credentialAlias !== profile.credentialAlias) {
-      try { await this.credentials.remove(previous.credentialAlias); }
+    const obsolete = previous ? [previous.credentialAlias, previous.balanceCredentialAlias || ''].filter((alias) =>
+      !!alias && alias !== profile.credentialAlias && alias !== profile.balanceCredentialAlias) : [];
+    const warnings: string[] = [];
+    for (const alias of obsolete) {
+      try { await this.credentials.remove(alias); }
       catch (error) {
         const failure = contextualError(t('模型服务已保存，但旧密钥清理失败'), 'credential_remove', error as Error);
         Diagnostics.log('warn', 'resources', 'credential_cleanup_failed', { credentialScope: 'provider' }, failure);
-        return failure.message;
+        warnings.push(failure.message);
       }
     }
-    return '';
+    return warnings.join('\n');
   }
 
   async remove(data: AppData, id: string, commit: (data: AppData) => Promise<void>): Promise<string> {
@@ -113,12 +143,15 @@ export class ProfileSettings {
     data.providerProfiles = (data.providerProfiles || []).filter((item: ProviderProfile) => item.id !== id);
     if (data.config.providerId === id) { data.config = copyModelConfig(data.config, false); data.config.credentialAlias = ''; }
     await commit(data);
-    try { await this.credentials.remove(profile.credentialAlias); }
-    catch (error) {
-      const failure = contextualError(t('服务已删除，但密钥清理失败'), 'credential_remove', error as Error);
-      Diagnostics.log('warn', 'resources', 'credential_cleanup_failed', { credentialScope: 'provider' }, failure);
-      return failure.message;
+    const warnings: string[] = [];
+    for (const alias of [profile.credentialAlias, profile.balanceCredentialAlias || ''].filter((value) => !!value)) {
+      try { await this.credentials.remove(alias); }
+      catch (error) {
+        const failure = contextualError(t('服务已删除，但密钥清理失败'), 'credential_remove', error as Error);
+        Diagnostics.log('warn', 'resources', 'credential_cleanup_failed', { credentialScope: 'provider' }, failure);
+        warnings.push(failure.message);
+      }
     }
-    return '';
+    return warnings.join('\n');
   }
 }

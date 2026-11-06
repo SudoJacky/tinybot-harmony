@@ -306,7 +306,7 @@ export class ChatViewModel {
   async saveProvider(): Promise<boolean> {
     const saved = await this.requireSession().saveProvider(this.providerEditor.snapshot());
     this.providerEditor.error = saved ? '' : this.error;
-    if (saved) { this.providerEditor.apiKey = ''; }
+    if (saved) { this.providerEditor.apiKey = ''; this.providerEditor.balanceApiKey = ''; }
     return saved;
   }
   beginSkill(name: string = ''): void {

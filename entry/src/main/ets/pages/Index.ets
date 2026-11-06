@@ -164,6 +164,7 @@ struct Index {
   private onboardingFinishing: boolean = false;
   @State private onboardingActive: boolean = false;
   @State private providerEditorActive: boolean = false;
+  @State private settingsActive: boolean = false;
   @State private toolsTab: string = 'memory';
   @State private toolsTabRequest: number = 0;
 
@@ -1192,7 +1193,7 @@ struct Index {
       }.title(t('实验室'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'settings') {
       NavDestination() {
-        SettingsPanel({ app: this.app, settings: this.app.settings, account: this.account,
+        SettingsPanel({ app: this.app, settings: this.app.settings, account: this.account, active: this.settingsActive && this.foreground,
           onAccount: () => { this.paths.pushPath({ name: 'account' }); },
           browser: this.browser,
           onAddProvider: () => { this.paths.pushPath({ name: 'provider-presets' }); },
@@ -1213,6 +1214,7 @@ struct Index {
             if (this.app.beginProvider(preset, id)) { this.paths.pushPath({ name: 'provider' }); }
           } })
       }.title(t("设置"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+        .onShown(() => { this.settingsActive = true; }).onHidden(() => { this.settingsActive = false; })
     } else if (name === 'provider-presets') {
       NavDestination() {
         SettingsPanel({ app: this.app, settings: this.app.settings, account: this.account, browser: this.browser, presetsOnly: true,
@@ -1244,7 +1246,7 @@ struct Index {
       }.title(this.app.skillEditor.originalName.length > 0 ? t("编辑 Skill") : t("添加 Skill"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'provider') {
       NavDestination() {
-        ProviderEditorPanel({ app: this.app, editor: this.app.providerEditor, active: this.providerEditorActive, onSaved: () => { this.paths.pop(); },
+        ProviderEditorPanel({ app: this.app, editor: this.app.providerEditor, active: this.providerEditorActive && this.foreground, onSaved: () => { this.paths.pop(); },
           onModels: (error: string) => { this.paths.pushPath({ name: 'provider-models', param: error }); },
           onDiscovered: (models: string[]) => { this.paths.pushPath({ name: 'provider-discovery', param: models }); } })
       }.title(this.app.providerEditor.id.length > 0 ? t("编辑服务") : t("添加服务"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))

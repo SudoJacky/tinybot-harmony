@@ -17,7 +17,7 @@ export interface LogFields {
   round?: number; revision?: number; threads?: number; changedThreads?: number; selected?: number;
   enabled?: boolean; failed?: boolean; cancelled?: boolean; uncertain?: boolean; speaking?: boolean; preflight?: boolean; closed?: boolean;
   streaming?: boolean; ready?: boolean; hasModel?: boolean; retryable?: boolean;
-  protocol?: string; phase?: string; action?: string; policy?: string; scheme?: string; library?: string; status?: string;
+  protocol?: string; phase?: string; action?: string; policy?: string; scheme?: string; library?: string; status?: string; balanceAdapter?: string;
   threadId?: string; messageId?: string; sessionId?: string; providerId?: string; previewId?: string; surfaceId?: string;
 }
 export interface LogData { level: LogLevel; module: string; event: string; fields: Record<string, LogValue>; }
@@ -81,7 +81,7 @@ EVENTS.session = ['run_started', 'run_finished', 'run_cancelled', 'mcp_failed', 
 EVENTS.memory = ['committed', 'review_started', 'review_discarded'];
 EVENTS.resources = ['credential_rollback_failed', 'credential_cleanup_failed', 'team_selected', 'committed', 'preferences_saved'];
 EVENTS.configuration = ['unsupported', 'load_failed', 'save_failed'];
-EVENTS.provider = ['discovery_failed', 'balance_failed'];
+EVENTS.provider = ['discovery_failed', 'balance_failed', 'balance_completed'];
 EVENTS.diagnostics = ['started', 'stopped', 'marker', 'failed', 'level_changed'];
 const NUMBERS: string[] = ['sdk', 'line', 'operationId', 'instanceId', 'generation', 'active', 'count', 'total', 'chars', 'bytes', 'elapsedMs', 'durationMs', 'delayMs', 'firstTokenMs', 'outputTokens', 'http', 'code',
   'commonMessages', 'sharedCharacters', 'systemHash', 'toolsHash', 'dataVersion',
@@ -90,6 +90,7 @@ const NUMBERS: string[] = ['sdk', 'line', 'operationId', 'instanceId', 'generati
 const BOOLEANS: string[] = ['initialSupported', 'supported', 'available', 'pageSceneObserver', 'mounted', 'attached', 'visible', 'foreground', 'enabled', 'failed', 'cancelled', 'uncertain', 'speaking', 'preflight', 'closed', 'streaming', 'ready', 'hasModel', 'retryable'];
 const REFERENCES: string[] = ['threadId', 'messageId', 'sessionId', 'providerId', 'previewId', 'surfaceId', 'serverId'];
 const STRINGS: Record<string, string[]> = {};
+STRINGS.balanceAdapter = ['deepseek', 'sub2api', 'newapi', 'newapi-account', 'zhipu', 'custom'];
 STRINGS.operation = ['access', 'read', 'list', 'stat', 'parse', 'unlink', 'rmdir', 'bundle_stats', 'free_size', 'total_size',
   'getAppPrivacyMgmtInfo', 'getAppPrivacyResult', 'requestAppPrivacyConsent', 'subscribe', 'unsubscribe', 'cloud_directory', 'cloud_sync',
   'connect', 'login', 'examine', 'search', 'fetch', 'identify', 'capability',

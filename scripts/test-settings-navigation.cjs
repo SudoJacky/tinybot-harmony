@@ -81,7 +81,7 @@ function form(app, tab, entryId = '') {
   const Provider = controller('ProviderEditorPanel', ['aboutToAppear', 'aboutToDisappear', 'locked', 'discover'],
     { discoverModels: async () => ['discovered-model'] });
   const editor = new ProviderEditorViewModel(); editor.reset();
-  editor.baseUrl = 'https://example.com/v1'; editor.apiKey = 'test-only-key';
+  editor.baseUrl = 'https://example.com/v1'; editor.apiKey = 'test-only-key'; editor.balanceApiKey = 'test-balance-key';
   let discoveries = 0;
   const provider = Object.assign(new Provider(), { app: { busy: false, providerProfiles: [] }, editor,
     page: 'service', initialModelError: '', discovering: false, getUIContext: () => ui,
@@ -92,9 +92,10 @@ function form(app, tab, entryId = '') {
     const child = Object.assign(new Provider(), { editor, page, initialModelError: '' });
     child.aboutToAppear(); editor.addModels('manual-model'); child.aboutToDisappear();
     assert.equal(editor.apiKey, 'test-only-key', 'Returning from model pages must retain the service draft key');
+    assert.equal(editor.balanceApiKey, 'test-balance-key');
   }
   assert.ok(editor.modelList.includes('manual-model'));
-  provider.aboutToDisappear(); assert.equal(editor.apiKey, '');
+  provider.aboutToDisappear(); assert.equal(editor.apiKey, ''); assert.equal(editor.balanceApiKey, '');
   console.log('PASS model subpages share the draft and clear its raw key only when leaving the service');
 
   let writes = 0, pops = 0, reject = true;

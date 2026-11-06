@@ -8,6 +8,10 @@ import { ChatViewModel, SettingsViewModel } from '../viewmodel/ChatViewModel';
 import { SettingsToggle } from '../services/SessionContracts';
 import { ProviderInfo } from '../model/Provider';
 import { ProviderProfile } from '../model/ProviderProfiles';
+import { usesBalanceCredential } from '../model/BalanceSettings';
+import { supportsProviderBalance } from '../services/ProviderBalance';
+import { balanceProfileDraft } from '../services/ProviderBalanceCache';
+import { ProviderBalanceResult } from './ProviderBalanceResult';
 import { AssistantOptions, defaultAssistantOptions } from '../model/AssistantOptions';
 import { Btn, Font, Space, Styles, protocolName } from '../common/Theme';
 import { monochromeProviderLogo, providerLogo } from '../common/ProviderBrand';
@@ -20,6 +24,7 @@ export struct SettingsPanel {
   @StorageProp('tinybot.language') private language: string = 'system';
   @Prop presetsOnly: boolean = false;
   @Prop laboratoryOnly: boolean = false;
+  @Prop active: boolean = false;
   @State private assistantDraft: AssistantOptions = defaultAssistantOptions();
   @ObjectLink app: ChatViewModel;
   @ObjectLink settings: SettingsViewModel;
@@ -166,6 +171,14 @@ export struct SettingsPanel {
                 subtitle: t("{0} · {1} 个模型", [protocolName(profile.protocol), profile.models.length]),
                 value: profile.enabled ? '' : t("已停用"), muted: !profile.enabled, disabled: !this.canEdit(),
                 onTap: () => this.onEditProvider(profile.id, '') })
+              if (profile.enabled && supportsProviderBalance(profile.protocol, profile.baseUrl, profile.balance)) {
+                Column() {
+                  ProviderBalanceResult({ draft: balanceProfileDraft(profile), profiles: this.app.providerProfiles,
+                    active: this.active, disabled: !this.canEdit(), compact: true, scope: JSON.stringify(profile),
+                    canQuery: profile.balance?.mode === 'custom' && profile.balance.auth === 'none' ||
+                      (usesBalanceCredential(profile.balance) ? !!profile.balanceCredentialAlias : !profile.noApiKey && !!profile.credentialAlias) })
+                }.padding({ left: 12, right: 12, bottom: 8 }).width('100%')
+              }
               RowDivider()
             }, (profile: ProviderProfile) => JSON.stringify(profile))
             NavRow({ title: t('添加模型服务'), compId: 'add-provider', icon: $r('sys.symbol.plus'), accent: true,
