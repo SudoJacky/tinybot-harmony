@@ -124,12 +124,23 @@ const cases = [
   message.update(data);
   assert.equal(message.stepViews[0], firstStep);
   assert.equal(outputTokensPerSecond(firstStep.usage), 20, 'Visible as soon as model ends, while turn/tools continue');
+  const summary = () => summarizeUsage(message.steps.map(step => step.usage));
+  assert.equal(summary().latestOutputTokensPerSecond, 20);
+  data.steps.push({ content: '', tools: [] }); message.update(data);
+  assert.equal(summary().latestOutputTokensPerSecond, 20, 'Keep the last measured speed until the next request reports');
+  data.steps.pop();
   data.steps.push({ content: 'Next', tools: [], usage: { ...record, id: 'r2', tokens: { input: 20, output: 120 } } });
   message.update(data);
   assert.equal(outputTokensPerSecond(message.stepViews[1].usage), 40);
   assert.equal(outputTokensPerSecond(firstStep.usage), 20, 'Later steps do not change earlier speed');
+  assert.equal(summary().latestOutputTokensPerSecond, 40, 'Footer refreshes to the latest request, not the average');
   const restored = new MessageViewModel(JSON.parse(JSON.stringify(data)));
   assert.equal(outputTokensPerSecond(restored.stepViews[0].usage), 20);
   assert.equal(summarizeUsage(restored.steps.map(step => step.usage)).output, 180, 'Turn usage remains cumulative');
+  assert.equal(summarizeUsage(restored.steps.map(step => step.usage)).latestOutputTokensPerSecond, 40);
+  for (const usage of [{ ...record, status: 'failed' }, { ...record, tokens: undefined }, { ...record, firstTokenMs: undefined }]) {
+    assert.equal(summarizeUsage([record, usage]).latestOutputTokensPerSecond, undefined, 'Do not label older speed as the latest result');
+  }
+  assert.equal(summarizeUsage([{ ...record, tokens: { input: 10, output: 0 } }]).latestOutputTokensPerSecond, 0);
   console.log('PASS per-step speed, live completion/reload, unknown usage, and first-token timing for reasoning/tool-only output across all four protocols');
 })().catch(error => { console.error(error); process.exitCode = 1; });

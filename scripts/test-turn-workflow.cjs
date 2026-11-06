@@ -132,7 +132,7 @@ console.log('PASS turn workflow: actual phases, parallel tools, retry/stop/failu
 
 // Opening the turn reveals sibling thought/tool rows, without another group toggle.
 const processComponent = tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'ProcessGroup');
-const processMethods = ['items', 'toolAt', 'richTools', 'thinkingNow', 'usageAfter', 'initialRender'];
+const processMethods = ['items', 'toolAt', 'richTools', 'thinkingNow', 'initialRender'];
 let serial = 0, activeView, activeElement;
 class RenderView {
   constructor() { this.effects = new Map(); this.branches = new Map(); this.lists = new Map(); this.texts = new Map(); this.rows = new Map(); this.children = new Map(); }
@@ -156,12 +156,11 @@ class Child {
 class ToolRow extends Child {}
 class RichToolResult extends Child {}
 class ThinkingDisclosure extends Child {}
-class StepUsage extends Child {}
 const noUi = new Proxy({}, { get: () => () => {} });
 const textUi = new Proxy({}, { get: (_target, name) => value => {
   const node = activeView.texts.get(activeElement) || {}; node[name] = value; activeView.texts.set(activeElement, node);
 } });
-Object.assign(context, { RenderView, ViewPU: RenderView, ToolRow, RichToolResult, ThinkingDisclosure, StepUsage, Column: noUi, ForEach: noUi, If: noUi,
+Object.assign(context, { RenderView, ViewPU: RenderView, ToolRow, RichToolResult, ThinkingDisclosure, Column: noUi, ForEach: noUi, If: noUi,
   Text: textUi, HorizontalAlign: {}, CopyOptions: {}, Space: {}, t: text => text });
 vm.runInNewContext(ts.transpileModule(`class ProcessProbe extends RenderView {
   ${processComponent.members.filter(n => processMethods.includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')}
@@ -181,8 +180,7 @@ assert.equal(processView.texts.size, 0, 'No intermediate process group heading')
 const firstTool = [...processView.children.values()].find(child => child instanceof ToolRow);
 assert.equal(firstTool.execution.call.id, 'one', 'Tool row is visible without a group click');
 assert.equal(firstTool.disclosure.open, false);
-assert.equal([...processView.children.values()].filter(child => child instanceof StepUsage).length, 1,
-  'A tool-only step gets one speed footer, not one per thought/tool');
+assert.ok(!fs.readFileSync(emitted, 'utf8').includes('StepUsage'), 'Speed appears only in the turn footer');
 firstThought.disclosure.open = true; firstThought.disclosure.limit = 8000;
 processData.steps[0] = step('', [{ ...tool('one', 'complete'), output: 'latest' }, tool('two', 'failed')], '最新思考');
 processData.steps.push(step('', [], '下一步思考')); processMessage.update(processData);
@@ -192,8 +190,6 @@ assert.equal(firstThought.disclosure.open, true, 'Live updates preserve an expli
 assert.equal([...processView.children.values()].find(child => child instanceof ToolRow && child.execution.call.id === 'one'), firstTool);
 assert.equal(firstTool.execution.output, 'latest');
 assert.equal([...processView.children.values()].filter(child => child instanceof ToolRow).length, 2);
-assert.equal([...processView.children.values()].find(child => child instanceof StepUsage && child.identity === 'turn-0').step,
-  processMessage.stepViews[0], 'Retained footer observes the completed request');
 const nextThought = [...processView.children.values()].find(child => child instanceof ThinkingDisclosure && child.identity === 'turn-1');
 assert.equal(nextThought.step.reasoningContent, '下一步思考'); assert.equal(nextThought.disclosure.open, false);
 assert.equal(nextThought.streaming, true); assert.equal(firstThought.streaming, false);
@@ -203,7 +199,6 @@ const foldedView = mountProcess(true);
 assert.equal(foldedView.texts.size, 0, 'Folding hides all ordinary process text');
 assert.equal([...foldedView.children.values()].filter(child => child instanceof ToolRow).length, 0);
 assert.equal([...foldedView.children.values()].filter(child => child instanceof ThinkingDisclosure).length, 0);
-assert.equal([...foldedView.children.values()].filter(child => child instanceof StepUsage).length, 0);
 assert.equal([...foldedView.children.values()].filter(child => child instanceof RichToolResult).length, 1,
   'Published content remains available while the process is folded');
 const nestedChart = tool('nested-chart', 'complete'); nestedChart.call.function.name = 'publish_data_view';
@@ -258,26 +253,48 @@ thoughtToggle.onClick(); assert.equal(thoughtDisclosure.limit, 8000, 'Reopening 
 assert.ok([...mountThought().texts.values()].some(node => node.id === 'thinking-content-thought'), 'Remount preserves explicit expansion');
 console.log('PASS process rows: sibling collapsed thought/tools, compact thought toggle/continuation, retained live rows, later steps and persistent results');
 
-// Render the emitted speed component at model completion, before the turn finishes.
-const speedEmitted = emitted.replace(/MessageBubble\.ts$/, 'StepUsage.ts');
-const speedTree = ts.createSourceFile(speedEmitted, fs.readFileSync(speedEmitted, 'utf8'), ts.ScriptTarget.Latest, true);
-const speedComponent = speedTree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'StepUsage');
-Object.assign(context, load(path.join(root, 'model/MessageUsage')));
-vm.runInNewContext(ts.transpileModule(`class SpeedProbe extends RenderView {
-  ${speedComponent.members.filter(n => ['speed', 'initialRender'].includes(n.name?.getText(speedTree))).map(n => n.getText(speedTree)).join('\n')}
-} exports.SpeedProbe = SpeedProbe;`, { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, context);
-const speedStep = { content: 'Answer', tools: [] };
-const speedView = Object.assign(new context.exports.SpeedProbe(), { step: speedStep, identity: 'speed-0', appearance: {} });
-speedView.initialRender(); assert.equal(speedView.texts.size, 0, 'Streaming output has no guessed TPS');
-speedStep.usage = { status: 'complete', firstTokenMs: 1000, durationMs: 4000, tokens: { input: 10, output: 60 } };
-speedView.flush();
-const speedLabel = [...speedView.texts.values()].find(node => node.id === 'step-usage-speed-0');
-assert.equal(speedLabel.create, '输出速度 20.0 tok/s');
-assert.equal(speedLabel.fontSize, 11);
-assert.equal(processView.usageAfter({ step: 0, tool: 0 }), true);
-processMessage.timeline.push({ kind: 'text', key: 'text-0', step: 0, items: [] });
-assert.equal(processView.usageAfter({ step: 0, tool: 0 }), false, 'Narrated steps show their footer below the answer only');
-console.log('PASS emitted per-message speed: hidden while streaming, shown on completion, and deduplicated between narration and process');
+// Render the shared footer as model requests complete during a turn.
+const usageEmitted = emitted.replace(/MessageBubble\.ts$/, 'MessageUsage.ts');
+const usageSource = path.join(root, 'views/MessageUsage.ets');
+assert.ok(fs.statSync(usageEmitted).mtimeMs >= fs.statSync(usageSource).mtimeMs, 'Rebuild usage footer');
+const usageTree = ts.createSourceFile(usageEmitted, fs.readFileSync(usageEmitted, 'utf8'), ts.ScriptTarget.Latest, true);
+const usageComponent = usageTree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'MessageUsage');
+Object.assign(context, load(path.join(root, 'model/MessageUsage')), {
+  Flex: noUi, Button: noUi, FlexWrap: {}, ItemAlign: {}, ButtonType: {}, Color: {}, TextAlign: {}, VerticalAlign: {},
+  LengthMetrics: { vp: value => value }, Radius: {}, Motion: {}, compactNumber: String,
+  t: (text, args = []) => text.replace(/\{(\d+)\}/g, (_match, index) => String(args[index]))
+});
+const usageMethods = ['usage', 'rate', 'summary', 'tokens', 'speed', 'metric', 'detail', 'initialRender'];
+vm.runInNewContext(ts.transpileModule('class UsageProbe extends RenderView { ' +
+  usageComponent.members.filter(n => usageMethods.includes(n.name?.getText(usageTree))).map(n => n.getText(usageTree)).join('\n') +
+  ' } exports.UsageProbe = UsageProbe;', { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, context);
+const usageData = { id: 'speed', role: 'assistant', status: 'generating', content: '', error: '', steps: [step('Answer')] };
+const usageMessage = new MessageViewModel(usageData);
+const usageView = Object.assign(new context.exports.UsageProbe(), { message: usageMessage, appearance: {} });
+usageView.initialRender(); assert.equal(usageView.texts.size, 0, 'No invented speed during the first request');
+const record = { status: 'complete', firstTokenMs: 1000, durationMs: 4000, tokens: { input: 10, output: 60 } };
+usageData.steps[0].usage = record; usageMessage.update(usageData); usageView.flush();
+assert.ok([...usageView.texts.values()].some(node => node.create === '20.0 tok/s'));
+assert.match(usageView.summary(), /输出速度 20.0 tok\/s/);
+usageData.steps.push(step('Next')); usageMessage.update(usageData); usageView.flush();
+assert.equal(usageView.speed(), '20.0 tok/s');
+usageData.steps[1].usage = { ...record, tokens: { input: 20, output: 120 } };
+usageMessage.update(usageData); usageView.flush();
+assert.equal(usageView.speed(), '40.0 tok/s');
+assert.ok([...usageView.texts.values()].some(node => node.create === '40.0 tok/s'));
+for (const value of ['8.0s', '30', '180']) {
+  assert.ok([...usageView.texts.values()].some(node => node.create === value), 'Rendered cumulative metric refreshes: ' + value);
+}
+assert.match(usageView.summary(), /模型用时 8.0s.*输出速度 40.0 tok\/s.*输入 30.*输出 180/);
+assert.ok(![...usageView.texts.values()].some(node => String(node.create).includes('模型用时')), 'Compact metrics use icons; accessible summary retains labels');
+usageMessage.usageOpen = true; usageView.flush();
+assert.ok([...usageView.texts.values()].some(node => node.create === '输出速度'), 'Expanded details retain full labels');
+usageData.steps.push({ ...step('Final'), usage: { ...record, tokens: { input: 5, output: 30 } } });
+usageMessage.update(usageData); usageView.flush();
+assert.equal([...usageView.texts.values()].filter(node => node.create === '10.0 tok/s').length, 2,
+  'Both the retained footer and already-open details refresh on the next response');
+assert.ok(![...usageView.texts.values()].some(node => node.create === '40.0 tok/s'));
+console.log('PASS shared usage footer: latest per-request speed refreshes while cumulative time/tokens and accessible details remain available');
 
 // Tool rows actually connect their execution state to the shared motion component.
 const toolComponent = tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'ToolRow');

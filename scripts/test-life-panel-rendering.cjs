@@ -16,6 +16,7 @@ function renderer(name) {
   const observers = new Map(), branches = new Map(), rows = new Map(), children = new Map(), texts = new Map(), sheets = new Map(), buttons = new Map(), checks = new Map();
   const noop = () => {};
   const renderedItems = new Set();
+  const listScopes = new Map();
   const element = kind => new Proxy({}, { get: (_, method) => {
     if (method === 'create' && kind === 'ListItem') return render => {
       if (render && !renderedItems.has(active)) { renderedItems.add(active); render(active, true); }
@@ -32,14 +33,17 @@ function renderer(name) {
   } });
   const globals = { exports: {}, console, Date, Math, Object, Map, Set, Error, Context: { animation: noop },
     ViewStackProcessor: { StartGetAccessRecordingFor: noop, StopGetAccessRecording: noop },
-    gradientColor: () => '#FFFFFF', getLocale: () => 'zh-CN', panelRunTrigger: () => '手动触发', panelErrorText: text => text,
+    gradientColor: () => '#FFFFFF', getLocale: () => 'zh-CN', resolvePanelInputs: (_definition, inputs) => inputs,
+    panelRunTrigger: () => '手动触发', panelErrorText: text => text,
     t: (text, args = []) => text.replace(/\{(\d+)\}/g, (_, i) => args[i]), relativeTime: time => String(time),
-    Motion:{rise:()=>({}),medium:180,fast:100,thumb:'spring',standard:'ease'},IconButton: class {}, ButtonType: {}, EdgeEffect: {}, Axis: {}, Color: {}, HitTestMode: {}, ScrollAlign: {}, Btn: {}, ViewPU: { create: noop }, ObservedObject: { GetRawObject: value => value }, referenceKey: item => item.workspaceId + '/' + item.panelId,
+    Motion:{rise:()=>({}),medium:180,fast:100,thumb:'spring',standard:'ease'},IconButton: class {}, ButtonType: {}, EdgeEffect: {}, Axis: {}, Color: {}, HitTestMode: {}, ScrollAlign: {}, Btn: {}, Radius: {}, TextOverflow: {}, VerticalAlign: {}, ViewPU: { create: noop }, ObservedObject: { GetRawObject: value => value }, referenceKey: item => item.workspaceId + '/' + item.panelId,
     LifePanelCard: class { constructor(parent, params, _storage, id) { children.set(id, { ...params }); } },
+    WebUiView: class { constructor(parent, params, _storage, id) { children.set(id, { ...params }); } },
+    Diagnostics: { log: noop }, systemInsets: async () => [0, 24],
     LongPressGesture: element('gesture'), PanGesture: element('gesture'), GestureGroup: element('gesture'),
     GestureMode: {}, ScrollDirection: {}, BarState: {}, FontWeight: {}, FlexAlign: {}, TextAlign: {}, HorizontalAlign: {}, Alignment: {},
     GesturePriority: {}, GestureMask: {}, SheetSize: {}, Gesture: element('gesture') };
-  for (const name of ['Column','Row','Scroll','Stack','Button','Blank','Text','TextInput','If','ForEach','Checkbox','List','ListItem','Refresh','SymbolGlyph']) globals[name] = element(name);
+  for (const name of ['Column','Row','Scroll','Stack','Button','Blank','Text','TextInput','If','ForEach','Checkbox','List','ListItem','Refresh','SymbolGlyph','LoadingProgress']) globals[name] = element(name);
   vm.runInNewContext(ts.transpileModule('export class Probe {' + methods + '}', { compilerOptions: {
     target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS
   } }).outputText, globals);
@@ -50,12 +54,24 @@ function renderer(name) {
     ifElseBranchUpdateFunction(branch, build) { if (branches.get(active) !== branch) { branches.set(active, branch); build(); } },
     forEachUpdateFunction(id, items, build, key) {
       if (!rows.has(id)) rows.set(id, new Set());
-      for (const [index,item] of items.entries()) { const k = key(item); if (!rows.get(id).has(k)) { rows.get(id).add(k); build(item,index); } }
+      if (!listScopes.has(id)) listScopes.set(id, new Map());
+      const nextKeys = new Set(items.map(key)), scopes = listScopes.get(id);
+      for (const previous of rows.get(id)) {
+        if (nextKeys.has(previous)) continue;
+        for (const child of scopes.get(previous) || []) {
+          for (const map of [observers, branches, rows, children, texts, sheets, buttons, checks]) map.delete(child);
+        }
+        scopes.delete(previous); rows.get(id).delete(previous);
+      }
+      for (const [index,item] of items.entries()) { const k = key(item); if (!rows.get(id).has(k)) {
+        rows.get(id).add(k); const start = next; build(item,index);
+        scopes.set(k, Array.from({ length: next - start }, (_, offset) => start + offset + 1));
+      } }
     },
     updateStateVarsOfChildByElmtId(id, params) { if (children.has(id)) Object.assign(children.get(id), params); }
   });
-  return { view, children, texts, sheets, buttons, checks, update() {
-    for (const [id,callback] of [...observers]) invoke(id,callback,false);
+  return { view, children, texts, sheets, buttons, checks, globals, update() {
+    for (const [id,callback] of [...observers]) if (observers.has(id)) invoke(id,callback,false);
   } };
 }
 
@@ -134,6 +150,7 @@ console.log('PASS retained board title and pin/unpin checkbox update without reo
 const receipt = renderer('PublishedPanelCard'), preview = receipt.view;
 Object.assign(preview, { boards: [{workspaceId:'workspace',board:{id:'board',title:'Before',archived:false,items:[]}}],
   reference:{target:{workspaceId:'workspace',panelId:'metric'}}, boardTitle:'', error:'' });
+preview.pinTarget = { workspaceId: 'workspace', panelId: 'metric' };
 preview.boardPicker();
 const receiptCheck = [...receipt.checks.keys()][0];
 let receiptPins = 0;
@@ -147,6 +164,35 @@ receipt.checks.get(receiptCheck).onChange(false); receipt.update();
 assert.equal(receipt.checks.get(receiptCheck).select, false);
 assert.equal(receiptPins, 2);
 console.log('PASS chat preview pin/unpin and board title update while the sheet stays open');
+
+const inline = renderer('PublishedPanelCard'), inlineView = inline.view;
+const htmlEntry = { ...first, panel: { ...first.panel, definition: { ...first.panel.definition, view: { height: 280 } } } };
+Object.assign(inlineView, { entries: [htmlEntry], reference: { target: { workspaceId: 'workspace', panelId: 'metric' } },
+  appearance: {}, error: '', loading: false, pinOpen: false,
+  panels: () => ({ repository: () => ({ binding: (id, revision) => ({ id, revision }), isRefreshing: () => false }) }) });
+inlineView.initialRender();
+const inlineId = [...inline.children.keys()][0], storage = inline.children.get(inlineId).storage;
+const initialCard = inline.children.get(inlineId);
+assert.equal(storage.id, 'metric'); assert.equal(storage.revision, 1);
+assert.equal(inline.children.get(inlineId).interactive, false);
+assert.equal(inline.children.get(inlineId).showFooter, false);
+assert.equal(inline.children.get(inlineId).viewHeight, 280);
+assert.deepEqual([...inline.buttons.values()], ['固定到看板'], 'One pin action below a self-opening preview, with no duplicate open button');
+inlineView.entries = [{ ...htmlEntry, panel: { ...htmlEntry.panel, data: { total: 88 } } }]; inline.update();
+assert.equal(inline.children.size, 1); assert.equal(inline.children.get(inlineId).panel.data.total, 88);
+assert.equal(inline.children.get(inlineId).storage, storage, 'Data updates retain the existing HTML session');
+const changed = { ...htmlEntry, panel: { ...htmlEntry.panel, configRevision: 2 } };
+inlineView.entries = [changed]; inline.update();
+assert.ok([...inline.children.values()].some(child => child.storage.revision === 2), 'A new configuration gets a fresh revision-bound storage capability');
+
+const card = renderer('LifePanelCard');
+Object.assign(card.view, { ...initialCard, appearance: {}, dark: false, editing: false, detail: false, timestamp: '' });
+card.view.initialRender();
+assert.equal(card.children.size, 1, 'The real card mounts its Web UI automatically');
+assert.equal([...card.children.values()][0].storage, storage);
+assert.ok(![...card.buttons.values()].includes('打开交互卡片'));
+assert.ok(![...card.texts.values()].includes('生活看板'));
+console.log('PASS published HTML cards mount real content automatically, retain data updates, replace edited configurations, and expose one pin action');
 
 const tasks = renderer('PanelTaskPanel'), task = tasks.view;
 Object.assign(task,{entry:first,error:'',record:{definition:{title:'Metric',refreshMinutes:1,source:{type:'workspace-json'}},
@@ -163,3 +209,64 @@ assert.match(tasks.texts.get(statusId),/^失败/);
 assert.ok([...tasks.texts.values()].includes('Source failed'));
 assert.ok([...tasks.texts.values()].includes('read · DATA_UNAVAILABLE'));
 console.log('PASS retained task row updates running → complete/failed, duration and detailed error without reopening');
+
+(async () => {
+  const controller = renderer('PublishedPanelCard'), view = controller.view;
+  const target = { workspaceId: 'workspace', panelId: 'metric' };
+  let records = [
+    { workspaceId: 'workspace', board: { id: 'one', title: 'One', archived: false, items: [target] } },
+    { workspaceId: 'other', board: { id: 'two', title: 'Two', archived: false, items: [] } }
+  ];
+  let failPin = false, writes = 0;
+  const store = {
+    list: async () => JSON.parse(JSON.stringify(records)),
+    get: async (workspaceId, id) => records.find(entry => entry.workspaceId === workspaceId && entry.board.id === id).board,
+    save: async (workspaceId, _id, title) => {
+      const board = { id: 'new', title, archived: false, items: [] }; records.push({ workspaceId, board }); return board;
+    },
+    pin: async (workspaceId, id, reference, present) => {
+      writes++;
+      if (failPin) throw Error('Injected pin write failure');
+      const entry = records.find(entry => entry.workspaceId === workspaceId && entry.board.id === id);
+      entry.board.items = entry.board.items.filter(item => item.workspaceId !== reference.workspaceId || item.panelId !== reference.panelId);
+      if (present) entry.board.items.push(reference);
+    }
+  };
+  controller.globals.LifeBoards = class { constructor() { return store; } };
+  const loaded = [];
+  Object.assign(view, { entries: [], mounted: true, generation: 0, loading: true, pinSaving: false, pinLoading: false,
+    reference: { target }, root: () => '/app', getUIContext: () => ({}),
+    panels: () => ({ repository: workspaceId => ({ get: async id => {
+      loaded.push(workspaceId + '/' + id); return { ...htmlEntry.panel, id };
+    } }) })
+  });
+  await view.reload(); assert.equal(view.entries.length, 1); assert.equal(view.loading, false);
+  await view.openPicker(view.entries[0]);
+  assert.equal(view.pinOpen, true); assert.equal(view.pinned('workspace/one'), true); assert.equal(view.pinned('other/two'), false);
+  await view.pin(view.board('other/two'), true);
+  assert.equal(view.pinned('workspace/one'), true); assert.equal(view.pinned('other/two'), true);
+  await view.pin(view.board('workspace/one'), false);
+  assert.equal(view.pinned('workspace/one'), false); assert.equal(view.pinned('other/two'), true);
+  view.boardTitle = 'New'; await view.pin(); assert.equal(view.pinned('workspace/new'), true);
+  failPin = true; await view.pin(view.board('other/two'), false);
+  assert.match(view.pinError, /Injected pin write failure/); assert.equal(view.pinned('other/two'), true);
+  assert.equal(view.pinSaving, false); failPin = false;
+  view.pinSaving = true; const before = writes; await view.pin(view.board('other/two'), false); assert.equal(writes, before); view.pinSaving = false;
+  // Board-only edits preview every current card, including cross-workspace references.
+  records[0].board.items = [{ workspaceId: 'workspace', panelId: 'metric' }, { workspaceId: 'other', panelId: 'second' }];
+  view.reference = { target: { workspaceId: 'workspace', boardId: 'one' } };
+  await view.reload(); assert.equal(view.title, 'One'); assert.equal(view.entries.length, 2);
+  assert.equal(view.entries[1].workspaceId, 'other'); assert.equal(view.entries[1].panel.id, 'second');
+  await view.openPicker(view.entries[1]); assert.equal(view.pinTarget.panelId, 'second');
+  records[0].board.items = []; await view.reload(); assert.equal(view.entries.length, 0);
+  // An older asynchronous refresh must not replace a newer card snapshot.
+  let finishOld;
+  view.reference = { target };
+  view.panels = () => ({ repository: () => ({ get: () => new Promise(resolve => { finishOld = resolve; }) }) });
+  const oldReload = view.reload();
+  view.panels = () => ({ repository: () => ({ get: async () => ({ ...htmlEntry.panel, data: { total: 99 } }) }) });
+  await view.reload(); finishOld({ ...htmlEntry.panel, data: { total: 1 } }); await oldReload;
+  assert.equal(view.entries[0].panel.data.total, 99);
+  assert.ok(loaded.includes('other/second'));
+  console.log('PASS preview loading, cross-workspace board contents, stale refresh rejection, multi-board pin/unpin, creation and visible failure recovery');
+})().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1,4 +1,3 @@
-import { PublishedPanelGroup } from './PublishedPanelGroup';
 import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { ToolExecution } from '../model/Agent';
@@ -22,7 +21,6 @@ import { Attachments } from '../services/Attachments';
 import { MessageViewModel, ToolExecutionViewModel } from '../viewmodel/ChatViewModel';
 import { Btn, Font, Motion, Radius, Space, fileSize } from '../common/Theme';
 import { MessageUsage } from './MessageUsage';
-import { StepUsage } from './StepUsage';
 import { ThinkingDisclosure } from './ThinkingDisclosure';
 import { ThreadReferenceCard } from './ThreadReferenceCard';
 import { ThreadReference } from '../model/ThreadReferences';
@@ -214,12 +212,6 @@ struct ProcessGroup {
       value.tools.length === 0 && value.content.trim().length === 0;
   }
 
-  private usageAfter(item: ProcessItem): boolean {
-    if (this.message.timeline.some((entry) => entry.kind === 'text' && entry.step === item.step)) { return false; }
-    const step = this.message.stepViews[item.step];
-    return item.tool === (step.tools.length > 0 ? 0 : -1);
-  }
-
   build() {
     Column({ space: Space.sm }) {
       if (!this.richOnly) {
@@ -232,9 +224,6 @@ struct ProcessGroup {
             ToolRow({ execution: this.toolAt(item) as ToolExecutionViewModel, webEnabled: this.webEnabled,
               disclosure: this.message.disclosures.get('tool-' + (this.toolAt(item) as ToolExecutionViewModel).call.id),
               onInspect: () => { this.message.processOpen = true; this.onInspect(); } })
-          }
-          if (this.usageAfter(item)) {
-            StepUsage({ step: this.message.stepViews[item.step], identity: this.message.id + '-' + item.step })
           }
         }, (item: ProcessItem) => item.step + '-' + item.tool)
       }
@@ -636,7 +625,6 @@ export struct MessageBubble {
                       onInspect: () => this.onInspectPreview(this.message.id, preview.id),
                       saved: this.message.uiStates, presentation: this.message.uiPresentation, available: this.uiAvailable, onInteract: this.onUi })
                   }, (preview: PublishedPreview) => preview.id)
-                StepUsage({ step: this.message.stepViews[entry.step], identity: this.message.id + '-' + entry.step })
               } else {
                 ProcessGroup({ message: this.message, webEnabled: this.webEnabled, groupKey: entry.key, richOnly: this.folded(),
                   onResume: this.onResume, onInspect: this.onInspect })
@@ -657,13 +645,9 @@ export struct MessageBubble {
       if (this.hasExtra) {
         this.extra()
       }
-      if (publishedPanels(this.message.stepViews).length > 1) {
-        PublishedPanelGroup({ references: publishedPanels(this.message.stepViews) })
-      } else {
-        ForEach(publishedPanels(this.message.stepViews), (reference: PublishedPanel) => {
-          PublishedPanelCard({ reference: reference })
-        }, (reference: PublishedPanel) => reference.key)
-      }
+      ForEach(publishedPanels(this.message.stepViews), (reference: PublishedPanel) => {
+        PublishedPanelCard({ reference: reference })
+      }, (reference: PublishedPanel) => reference.key)
       ForEach(deliveredFiles(this.message.stepViews), (file: PresentedFile) => {
         Button() {
           Row({ space: 12 }) {

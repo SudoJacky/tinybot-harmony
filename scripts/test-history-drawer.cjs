@@ -60,16 +60,20 @@ console.log('PASS inactive history skips its content while preserving search and
 // resize must keep all actions available without retaining the tall button stack.
 let areaChanged, buttonId;
 const compactButtons = new Map(), tallButtons = new Map();
-const uiGlobals = { t: value => value, ViewPU: { create() {} }, ViewStackProcessor: noop,
+let filterProps;
+const renderedText = [];
+const uiGlobals = { t: (value, args = []) => value.replace(/\{(\d+)\}/g, (_, index) => args[index]), ViewPU: { create() {} }, ViewStackProcessor: noop,
+  Segmented: class { constructor(_parent, props) { filterProps = props; } },
   IconButton: class { constructor(_parent, props) { compactButtons.set(props.compId, props); } },
   Column: new Proxy({}, {get: (_, key) => key === 'onAreaChange' ? callback => { areaChanged = callback; } : () => {}}),
   Button: new Proxy({}, {get: (_, key) => key === 'id' ? id => {buttonId = id;} :
     key === 'onClick' ? callback => {tallButtons.set(buttonId, callback);} : () => {}}) };
-for (const name of ['If','Row','Blank','Image','Text','SymbolGlyph','Search','Divider']) uiGlobals[name] = noop;
+for (const name of ['If','Row','Blank','Image','Text','SymbolGlyph','Search','Divider','__Common__']) uiGlobals[name] = noop;
+uiGlobals.Text = new Proxy({}, {get: (_, key) => key === 'create' ? value => renderedText.push(value) : () => {}});
 for (const name of ['Btn','Space','Font','FontWeight','TextAlign','Color','ButtonType','Visibility','FlexAlign',
-  'Radius','SheetSize','SheetKeyboardAvoidMode']) uiGlobals[name] = {};
+  'Radius','SheetSize','SheetKeyboardAvoidMode','TextOverflow']) uiGlobals[name] = {};
 const CompactList = probe('views/ThreadList', 'ThreadList',
-  ['initialRender','listContent','workbenchNavigation','compactNavigation'], uiGlobals);
+  ['initialRender','listContent','workbenchNavigation','compactNavigation','endSelection','selectThread','allSelected','selectAll'], uiGlobals);
 const compactActions = [];
 const compact = Object.assign(new CompactList(), {
   active: true, workbench: true, panelHeight: 0, collapseHistory: true, searchOpen: true, query: '你好',
@@ -98,6 +102,31 @@ assert.equal(compactButtons.has('workbench-new-chat'), false);
 compact.workbench = false; compact.panelHeight = 352;
 assert.equal(compact.compactNavigation(), false, 'Phone navigation keeps its existing composition');
 console.log('PASS keyboard resize switches the actual sidebar controls and restores them without losing search');
+
+compact.selecting = false; compact.selectedIds = []; compact.archived = false;
+compact.filtered = () => [{id: 'one'}, {id: 'two'}];
+function renderSelection() {
+  compactButtons.clear(); tallButtons.clear(); renderedText.length = 0; filterProps = undefined;
+  compact.initialRender();
+}
+renderSelection();
+assert.ok(filterProps, 'Unselected sidebar displays its conversation filters');
+assert.equal(compactButtons.get('thread-selection-mode').label, '多选');
+compactButtons.get('thread-selection-mode').onTap();
+assert.equal(compact.selecting, true);
+renderSelection(); assert.ok(filterProps, 'Entering selection keeps filters until a conversation is selected');
+compact.selectThread('one', true); renderSelection();
+assert.equal(filterProps, undefined, 'Selected count replaces filters');
+assert.ok(renderedText.includes('已选中 1 个会话'));
+tallButtons.get('thread-select-all')(); renderSelection();
+assert.ok(renderedText.includes('已选中 2 个会话'));
+tallButtons.get('thread-select-all')(); renderSelection();
+assert.ok(filterProps, 'Clearing selection restores filters while keeping selection mode');
+assert.equal(compact.selecting, true);
+compact.selectThread('two', true); renderSelection();
+compactButtons.get('thread-selection-mode').onTap(); renderSelection();
+assert.equal(compact.selecting, false); assert.equal(compact.selectedIds.length, 0); assert.ok(filterProps);
+console.log('PASS inline selection control, count replacement, select-all, deselection and cancellation');
 
 // Exercise both initial and retained sidebar props emitted by ArkUI.
 const compiledPage = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/pages/Index.ts');
