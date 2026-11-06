@@ -54,7 +54,10 @@ export class ImapClient {
     if (this.waiter) { return Promise.reject(new Error('Concurrent commands on one IMAP session are prohibited')); }
     return new Promise<ImapFrame[]>((resolve, reject) => {
       this.waiter = { tag: tag, operation: operation, frames: [], resolve: resolve, reject: reject,
-        timer: setTimeout(() => this.fail(new Error('IMAP command timed out')), 15000) };
+        timer: setTimeout(() => {
+          Diagnostics.log('error', 'mail', 'command_failed', { operation: operation, elapsedMs: 15000 });
+          this.fail(new Error('IMAP ' + operation + ' command timed out'));
+        }, 15000) };
       send().catch((error: Error) => this.fail(error));
     });
   }

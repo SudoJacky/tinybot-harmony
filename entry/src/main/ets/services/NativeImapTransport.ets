@@ -5,18 +5,23 @@ import { Diagnostics } from '../model/Diagnostics';
 export class NativeImapTransport implements ImapTransport {
   private tls: socket.TLSSocket = socket.constructTLSSocketInstance();
   private closed: boolean = false;
+  private attachListeners?: () => void;
   listen(data: (bytes: Uint8Array) => void, failed: (error: Error) => void): void {
-    this.tls.on('message', (event: socket.SocketMessageInfo) => data(new Uint8Array(event.message)));
-    this.tls.on('error', (error: BusinessError) => {
-      Diagnostics.log('error', 'mail', 'transport_failed', { code: error.code });
-      failed(new Error('IMAP TLS connection failed; check the server, network and certificate'));
-    });
-    this.tls.on('close', () => { if (!this.closed) { failed(new Error('IMAP connection closed unexpectedly')); } });
+    // bind creates the native TLS socket; listeners registered before it are discarded.
+    this.attachListeners = () => {
+      this.tls.on('message', (event: socket.SocketMessageInfo) => data(new Uint8Array(event.message)));
+      this.tls.on('error', (error: BusinessError) => {
+        Diagnostics.log('error', 'mail', 'transport_failed', { code: error.code });
+        failed(new Error('IMAP TLS connection failed; check the server, network and certificate'));
+      });
+      this.tls.on('close', () => { if (!this.closed) { failed(new Error('IMAP connection closed unexpectedly')); } });
+    };
   }
   async connect(host: string, port: number): Promise<void> {
     try {
       await this.tls.bind({ address: '0.0.0.0', port: 0, family: 1 });
       if (this.closed) { throw new Error('IMAP transport is closed'); }
+      this.attachListeners!();
       await this.tls.connect({ address: { address: host, port: port, family: 1 }, secureOptions: {}, skipRemoteValidation: false });
     } catch (error) {
       Diagnostics.log('error', 'mail', 'transport_failed', { code: (error as BusinessError).code });
