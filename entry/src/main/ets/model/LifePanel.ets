@@ -22,8 +22,10 @@ export interface PanelRecord {
   sourcePath: string; sourceThreadId: string; data: Object; user: Record<string, boolean>;
   createdAt: number; updatedAt: number; refreshedAt: number; attemptedAt: number;
   error: string; archived: boolean;
+  layout?: PanelLayout;
   paused?: boolean; runs?: PanelRun[]; viewState?: MiniAppSnapshot; inputs?: PanelInputs; runtimeError?: string; publicationKey?: string;
 }
+export interface PanelLayout { size: string; }
 export interface PanelRun { id: string; startedAt: number; finishedAt: number; status: string; error: string; trigger?: string; failure?: PanelFailureInfo; }
 export interface PanelFailureInfo { stage: string; code: string; message: string; tool?: string; nativeCode?: number; }
 export interface PanelEntry { workspaceId: string; panel: PanelRecord; }
@@ -162,6 +164,8 @@ export function parsePanelRecord(content: string, id: string): PanelRecord {
     !object(record.user) || Object.keys(record.user).some((key: string) => typeof record.user[key] !== 'boolean') ||
     [record.createdAt, record.updatedAt, record.refreshedAt, record.attemptedAt].some((value: number) => !Number.isFinite(value) || value < 0)) { throw new Error('Invalid Life Panel record'); }
   parsePanelSpec(JSON.stringify(record.definition)); validatePanelData(record.definition, record.data, record.user);
+  if (record.layout !== undefined && (!object(record.layout) || !['S', 'M', 'L'].includes(record.layout.size) ||
+    Object.keys(record.layout).some((key: string) => key !== 'size'))) { throw new Error('Invalid card layout'); }
   if (record.inputs !== undefined) { resolvePanelInputs(record.definition.inputs, record.inputs); }
   if (record.runtimeError !== undefined && (typeof record.runtimeError !== 'string' || record.runtimeError.length > 4000)) { throw new Error('Invalid card runtime error'); }
   if (record.publicationKey !== undefined && typeof record.publicationKey !== 'string') { throw new Error('Invalid publication key'); }

@@ -70,7 +70,7 @@ export class LifePanelTools implements AgentTools {
       promptGuidelines: ['Create/edit loop: read catalog and current card, write candidate files with dataSchema and checks, call validate_life_panel, repair every returned diagnostic and repeat. Publish only after passing. If source requires credentials, explicitly defer its check and explain the pending connection. Never claim declared checks prove all possible interactions. Use the original ID and expectedRevision on updates.'],
       function: { name: validateOnly ? 'validate_life_panel' : 'publish_life_panel',
         description: validateOnly ? 'Test a candidate without changing the card: schema, source query, HTML startup at two widths, declared interaction/storage assertions, horizontal overflow and control labels. Returns structured stage/path/check diagnostics to repair and retry. State is detached; checks cannot execute live refresh tasks.' :
-          'Validate then publish native/HTML card. Updates preserve live data and user state by default; no version restore. requestId makes new-card retries idempotent. Structured pin failures retain published ID for recovery. Explicit source failures block publication; checkSource:false is reserved for pending connection/setup, never hides a tested failure.',
+          'Validate then publish native/HTML card. size supplies the initial layout; updates preserve user layout, live data and user state by default; no version restore. requestId makes new-card retries idempotent. Structured pin failures retain published ID for recovery. Explicit source failures block publication; checkSource:false is reserved for pending connection/setup, never hides a tested failure.',
         parameters: { type: 'object', properties: properties, required: ['path'], additionalProperties: false } } };
   }
   async execute(call: ToolCall, cancellation: Cancellation): Promise<string> {
@@ -90,7 +90,7 @@ export class LifePanelTools implements AgentTools {
       if (Object.keys(args).some((key: string) => !['workspaceId', 'panelId', 'section'].includes(key)) || typeof args.workspaceId !== 'string' || typeof args.panelId !== 'string' || !['all', 'definition', 'data', 'task'].includes(args.section || 'all')) { throw new Error('Invalid card detail request'); }
       const panel = await this.panels.repository(args.workspaceId).get(args.panelId);
       if (!args.section || args.section === 'all') { return JSON.stringify({ workspaceId: args.workspaceId, panel: panel }); }
-      if (args.section === 'definition') { return JSON.stringify({ workspaceId: args.workspaceId, panelId: panel.id, definition: panel.definition, configRevision: panel.configRevision }); }
+      if (args.section === 'definition') { return JSON.stringify({ workspaceId: args.workspaceId, panelId: panel.id, definition: panel.definition, layout: panel.layout, configRevision: panel.configRevision }); }
       if (args.section === 'data') { return JSON.stringify({ workspaceId: args.workspaceId, panelId: panel.id, data: panel.data, user: panel.user, viewState: panel.viewState, inputs: panel.inputs, refreshedAt: panel.refreshedAt }); }
       return JSON.stringify({ workspaceId: args.workspaceId, panelId: panel.id, paused: panel.paused, runs: panel.runs || [], error: panel.error, runtimeError: panel.runtimeError, running: this.panels.repository(args.workspaceId).isRefreshing(panel.id) });
     }
@@ -189,7 +189,7 @@ export class LifePanelTools implements AgentTools {
       const record = await repository.publish(id, spec, path, this.threadId, !!previous, cancellation,
         { expectedRevision: previous?.configRevision, replaceData: args.replaceData, publicationKey: args.requestId, sourceVerified: sourceStatus === 'passed' });
       if (args.boardId) { await this.pinPublished(owner, id, args); }
-      return JSON.stringify({ panelId: id, workspaceId: owner, title: record.definition.title, size: record.definition.size, configRevision: record.configRevision, published: true,
+      return JSON.stringify({ panelId: id, workspaceId: owner, title: record.definition.title, size: record.layout?.size || record.definition.size, configRevision: record.configRevision, published: true,
         openFrom: 'Life Panel', sourceStatus: sourceStatus, widths: widths, checks: spec.checks?.length || 0, warnings: warnings });
     } catch (error) {
       cancellation.check();

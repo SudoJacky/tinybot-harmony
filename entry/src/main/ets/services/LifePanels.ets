@@ -147,6 +147,7 @@ export class PanelRepository {
       const sameSource = !!old && JSON.stringify(old.definition.source) === JSON.stringify(definition.source);
       // View edits preserve live data. Replacing source data must be explicit and validated.
       const record: PanelRecord = { version: 1, id: id, definition: definition, configRevision: (old?.configRevision || 0) + 1,
+        layout: old?.layout || { size: old?.definition.size || definition.size },
         sourcePath: sourcePath, sourceThreadId: threadId, data: preserve ? old!.data : definition.data, user: old?.user || {},
         createdAt: old?.createdAt || now, updatedAt: now, refreshedAt: preserve ? sameSource ? old!.refreshedAt : 0 : options.sourceVerified ? now : 0, attemptedAt: preserve && sameSource ? old!.attemptedAt : 0, error: preserve && sameSource ? old!.error : '', archived: false,
         paused: old?.paused || false, runs: old?.runs || [], viewState: old?.viewState, inputs: reconcilePanelInputs(definition.inputs, old?.inputs || {}), runtimeError: '', publicationKey: options.publicationKey || old?.publicationKey };
@@ -183,7 +184,8 @@ export class PanelRepository {
   }
   async resize(id: string, size: string): Promise<PanelRecord> {
     if (!['S', 'M', 'L'].includes(size)) { throw new Error('Invalid card size'); }
-    return this.mutate(id, (record: PanelRecord) => { record.definition.size = size; record.configRevision++; record.updatedAt = Date.now(); });
+    // Layout never invalidates content-bound storage, edits or in-flight refreshes.
+    return this.mutate(id, (record: PanelRecord) => { record.layout = { size: size }; record.updatedAt = Date.now(); });
   }
   // All repository instances share one request per persistent ID. No duplicate manual/expiry fetches.
   refresh(id: string, cancellation: Cancellation, trigger: string = 'manual', inputs?: PanelInputs): Promise<PanelRecord> {
@@ -274,7 +276,7 @@ export class LifePanels {
       const key = remaining[scanned++], split = key.indexOf('/'), workspaceId = key.slice(0, split), id = key.slice(split + 1);
       const repository = this.repository(workspaceId), record = await repository.get(id); if (record.archived !== archived) { continue; }
       const status = record.runs?.[0]?.status || 'idle';
-      items.push({ workspaceId: workspaceId, panelId: id, title: record.definition.title, size: record.definition.size, sourceType: record.definition.source?.type || 'static',
+      items.push({ workspaceId: workspaceId, panelId: id, title: record.definition.title, size: record.layout?.size || record.definition.size, sourceType: record.definition.source?.type || 'static',
         sourceWorkspaceId: record.definition.source?.type === 'workspace-json' ? record.definition.source.workspaceId || workspaceId : undefined,
         archived: record.archived, paused: record.paused === true, updatedAt: record.updatedAt, refreshedAt: record.refreshedAt,
         taskStatus: status === 'running' && !repository.isRefreshing(id) ? 'interrupted' : status, error: record.error.slice(0, 300) });

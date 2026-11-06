@@ -187,7 +187,7 @@ export struct LifePanelCard {
       if (this.panel.definition.source?.auth) { MenuItem({ content: t('API 连接') }).onClick(this.onConnect) }
       MenuItemGroup({ header: t('卡片尺寸') }) {
         ForEach(['S', 'M', 'L'], (size: string) => {
-          MenuItem({ content: size }).selected((this.cardSize || this.panel.definition.size) === size).selectIcon(true).onClick(() => this.onSize(size))
+          MenuItem({ content: size }).selected((this.cardSize || this.panel.layout?.size || this.panel.definition.size) === size).selectIcon(true).onClick(() => this.onSize(size))
         })
       }
       MenuItem({ content: this.panel.archived ? t('恢复') : t('移除') }).onClick(this.onArchive)
@@ -245,7 +245,7 @@ export struct LifePanelCard {
       Column({ space: 10 }) {
         ForEach(this.panel.definition.nodes.filter((node: PanelNode) => !node.parent), (node: PanelNode) => {
           PanelComponent({ panel: this.panel, node: node, interactive: this.interactive && !this.editing && !this.busy && !this.panel.archived,
-            expanded: this.detail || (this.cardSize || this.panel.definition.size) === 'L', compact: !this.detail && (this.cardSize || this.panel.definition.size) === 'S',
+            expanded: this.detail || (this.cardSize || this.panel.layout?.size || this.panel.definition.size) === 'L', compact: !this.detail && (this.cardSize || this.panel.layout?.size || this.panel.definition.size) === 'S',
             onToggle: this.onToggle, onRefresh: this.onRefresh })
         }, (node: PanelNode) => node.id)
       }.width('100%').alignItems(HorizontalAlign.Start)

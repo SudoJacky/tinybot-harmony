@@ -63,10 +63,11 @@ const h = renderer('LifePanelsPanel'), p = h.view;
 let running = false;
 const first = { workspaceId:'workspace', panel:{id:'metric',configRevision:1,archived:false,refreshedAt:10,
   data:{total:42},runs:[],definition:{title:'Metric',size:'M',source:{type:'workspace-json'}}} };
-Object.assign(p,{entries:[first],boards:[],boardSelection:'',selected:'',removed:false,error:'',pending:[],now:10,
+const panelState={entries:[first],boards:[],boardSelection:'',selected:'',removed:false,error:'',pending:[],now:10,
   boardScroller:{scrollToIndex(){}},appearance:{},boardWidth:360,refreshing:false,cardHeights:{},dragging:'',resizing:'',dragBefore:'',cardQuery:'',dragX:0,dragY:0,creating:false,app:{ready:true,busy:false},sheetOpen:false,sheetKind:'',
   rect:()=>({x:0,y:0,width:360,height:180}),boardHeight:()=>180,
-  panels:()=>({repository:()=>({isRefreshing:()=>running,binding:()=>undefined})})});
+  panels:()=>({repository:()=>({isRefreshing:()=>running,binding:()=>undefined})})};
+Object.assign(p,panelState);
 p.initialRender();
 assert.equal(h.children.size,1);
 const childId = [...h.children.keys()][0];
@@ -91,6 +92,25 @@ assert.equal(connectionChecks, 1, 'Closing connection settings refreshes the det
 p.detailChanged = originalDetailChanged;
 for (const kind of ['connection','board','pin','task']) { p.openSheet(kind); assert.equal(p.sheetKind,kind); assert.equal(p.sheetOpen,true); assert.ok(p.sheetTitle()); p.sheetOpen=false; }
 console.log('PASS retained card renders refreshed data/time/user state without remounting; actions use current state; sheets share one host');
+
+for(const selected of ['', 'workspace/metric']) {
+  const layout=renderer('LifePanelsPanel'),page=layout.view;
+  const html={...first,panel:{...first.panel,definition:{...first.panel.definition,view:{height:320}}}};
+  Object.assign(page,panelState,{selected,entries:[html],detailHeight:500,
+    panels:()=>({repository:()=>({isRefreshing:()=>false,binding:(id,revision)=>({id,revision})})})});
+  page.initialRender();const id=[...layout.children.keys()][0],storage=layout.children.get(id).storage;
+  assert.equal(layout.children.get(id).cardSize,'M','Legacy cards use the definition size before user customization');
+  for(const size of ['S','L','M']) {
+    page.entries=[{...html,panel:{...html.panel,layout:{size}}}];layout.update();
+    assert.equal(layout.children.size,1,'Layout changes retain both list and detail card instances');
+    assert.equal(layout.children.get(id).cardSize,size,'Retained cards receive the new layout size');
+    assert.equal(layout.children.get(id).storage,storage,'Resizing retains the valid storage binding and HTML session');
+    assert.equal(layout.children.get(id).panel.configRevision,storage.revision);
+  }
+  page.boards=[{workspaceId:'workspace',board:{id:'layout',items:[{workspaceId:'workspace',panelId:'metric',size:'S'}]}}];
+  page.boardSelection='workspace/layout';assert.equal(page.sizeOnBoard(page.entries[0]),'S','Board-specific dimensions take precedence');
+}
+console.log('PASS layout resizing updates retained list/detail cards without replacing their HTML storage binding');
 
 p.boards=[{workspaceId:'workspace',board:{id:'board',title:'Before',archived:false,items:[]}}];
 h.update();

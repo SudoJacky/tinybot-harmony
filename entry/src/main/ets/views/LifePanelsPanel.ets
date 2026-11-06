@@ -153,7 +153,7 @@ export struct LifePanelsPanel {
   private sizeOnBoard(entry: PanelEntry): string {
     if (this.resizing === this.entryKey(entry) && this.resizeSize) { return this.resizeSize; }
     const item = this.currentBoard()?.board.items.find((item) => referenceKey(item) === this.entryKey(entry));
-    return item?.size || entry.panel.definition.size;
+    return item?.size || entry.panel.layout?.size || entry.panel.definition.size;
   }
   private heightOnBoard(entry: PanelEntry): number {
     if (this.resizing === this.entryKey(entry)) { return this.resizeHeight; }

@@ -421,6 +421,9 @@ async function lifePanelTest() {
   const fetch=slow.refresh(id,new Cancellation());
   while(!release) await new Promise(r=>setTimeout(r,0));
   const duplicate=second.refresh(id,new Cancellation());assert.equal(fetch,duplicate);assert.equal(calls,1);
+  const beforeResize=plain(await repo.get(id));await repo.resize(id,'S');
+  assert.equal((await repo.get(id)).configRevision,beforeResize.configRevision,'Resizing must not invalidate an in-flight content refresh');
+  assert.deepEqual(plain((await repo.get(id)).definition),beforeResize.definition,'Layout changes leave the content definition untouched');
   await slow.toggle(id,record.configRevision,'tasks','walk',false);
   release({...spec.data,count:7});await fetch;
   assert.equal((await repo.get(id)).user['tasks:walk'],false);
@@ -431,7 +434,8 @@ async function lifePanelTest() {
   release=undefined;const cancelled=new Cancellation(), work=slow.refresh(id,cancelled);
   while(!release) await new Promise(r=>setTimeout(r,0));cancelled.cancel();release({...spec.data,count:8});await assert.rejects(work);
   assert.equal((await repo.get(id)).data.count,7,'Background cancellation cannot commit late results');
-  await repo.resize(id,'S');assert.equal((await repo.get(id)).definition.size,'S');
+  await repo.resize(id,'S');assert.equal((await repo.get(id)).layout.size,'S');
+  assert.equal((await panels.page({workspaceId:'panel-chat'})).items.find(item=>item.panelId===id).size,'S','Card summaries report the user layout');
   await repo.archive(id,true);assert.equal(panelDue(await repo.get(id),Date.now()),false);await repo.archive(id,false);
   panelResponse=JSON.stringify({payload:spec.data});
   const httpSpec={...spec,source:{type:'json-url',url:'https://example.com/data',pointer:'/payload'}};
@@ -716,7 +720,7 @@ async function lifePanelRecoveryTest() {
 }
 async function htmlPanelTest() {
   const {LifePanels,PanelRepository}=load('services/LifePanels'),{LifePanelTools}=load('services/LifePanelTools'),{LifeBoards}=load('services/LifeBoards');
-  const {parsePanelSpec}=load('model/LifePanel'),{parseLifeBoard}=load('model/LifeBoard');
+  const {parsePanelSpec,parsePanelRecord}=load('model/LifePanel'),{parseLifeBoard}=load('model/LifeBoard');
   const dir='/sandbox/html-panels',ws=new WorkspaceStore(dir),panels=new LifePanels(dir),boards=new LifeBoards(dir),signal=new Cancellation();
   fs.mkdirSync(disk(dir),{recursive:true});await ws.ensureThread('owner');
   let rejectView=false;
@@ -731,19 +735,40 @@ async function htmlPanelTest() {
   rejectView=true;await assert.rejects(invoke(tools,'publish_life_panel',{path:'interactive.panel.json',htmlPath:'interactive.html',panelId:id,expectedRevision:record.configRevision}),/SyntaxError/);
   assert.equal((await repo.get(id)).configRevision,record.configRevision,'Failed validation must preserve the published card');rejectView=false;
   const binding=repo.binding(id,record.configRevision),initial=await binding.load();assert.equal(initial.value,null);
+  const definitionBeforeResize=plain(record.definition),revisionBeforeResize=record.configRevision;
+  for(const size of ['S','L','M','S']) {
+    record=await repo.resize(id,size);assert.equal(record.configRevision,revisionBeforeResize);
+    assert.deepEqual(plain(record.definition),definitionBeforeResize);assert.equal(record.layout.size,size);
+  }
+  await assert.rejects(repo.resize(id,'XL'),/Invalid card size/);
+  assert.equal((await repo.get(id)).layout.size,'S');
   const saved=await binding.save({count:4,nested:{checked:['a']}},initial.revision);
   assert.equal((await repo.refresh(id,signal)).data.total,9);assert.equal((await binding.load()).value.count,4);
   await assert.rejects(binding.save({count:100},initial.revision),/state changed/);
   await assert.rejects(binding.save({huge:'x'.repeat(256*1024)},saved.revision),/256 KiB/);
   const edits=await Promise.allSettled([binding.save({count:5},saved.revision),binding.save({count:6},saved.revision)]);
   assert.equal(edits.filter(r=>r.status==='fulfilled').length,1,'Concurrent views cannot silently overwrite');
-  record=await repo.get(id);await repo.publish(id,{...record.definition,title:'Updated'},'interactive.panel.json','owner',true,signal);
+  record=await repo.get(id);await repo.publish(id,{...record.definition,title:'Updated',size:'L'},'interactive.panel.json','owner',true,signal,{expectedRevision:revisionBeforeResize});
   await assert.rejects(binding.save({count:8},(await binding.load()).revision),/Card changed/);
   const revised=await repo.get(id);assert.ok([5,6].includes(revised.viewState.value.count),'Publishing preserves user edits');
+  assert.equal(revised.configRevision,revisionBeforeResize+1,'Content publication still invalidates old writers');
+  assert.equal(revised.layout.size,'S','Agent content publication preserves the user layout');
+  for(const layout of [null,[],{}, {size:'XL'}, {size:'S',unknown:1}]) {
+    assert.throws(()=>parsePanelRecord(JSON.stringify({...revised,layout}),id),/layout/i);
+  }
+  const legacy={...plain(revised)};delete legacy.layout;
+  const restoredLegacy=parsePanelRecord(JSON.stringify(legacy),id);assert.equal(restoredLegacy.definition.size,'L');
+  const legacyId='legacy-layout';await files.writeLifePanel('life-panels/'+legacyId+'/panel.json',JSON.stringify({...legacy,id:legacyId}),signal);
+  await repo.publish(legacyId,{...legacy.definition,title:'Legacy edit',size:'M'},'interactive.panel.json','owner',true,signal);
+  assert.equal((await repo.get(legacyId)).layout.size,'L','Editing an older card preserves its existing size');
   assert.throws(()=>parsePanelSpec(JSON.stringify({...revised.definition,nodes:[{id:'x',kind:'Text',text:{value:'bad'}}]})),/empty nodes/);
   assert.throws(()=>parsePanelSpec(JSON.stringify({...revised.definition,version:1})),/native nodes/);
   const board=await boards.save('owner','','Interactive board','Test context');await boards.pin('owner',board.id,{workspaceId:'owner',panelId:id},true);
+  assert.equal((await boards.get('owner',board.id)).items[0].size,'S','Pinning starts from the current user layout');
+  const otherBoard=await boards.save('owner','','Other board','');await boards.pin('owner',otherBoard.id,{workspaceId:'owner',panelId:id},true);
   await boards.arrange('owner',board.id,{workspaceId:'owner',panelId:id},'','S',248);
+  await repo.resize(id,'L');assert.equal((await repo.get(id)).configRevision,revised.configRevision);
+  assert.equal((await boards.get('owner',otherBoard.id)).items[0].size,'S','Existing board layouts stay independent from the all-cards layout');
   assert.equal((await new LifeBoards(dir).get('owner',board.id)).items[0].height,248);
   await assert.rejects(boards.arrange('owner',board.id,{workspaceId:'owner',panelId:id},'','S',900),/200/);
   assert.equal((await boards.get('owner',board.id)).items[0].height,248,'Invalid resize leaves saved layout intact');

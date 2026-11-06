@@ -46,7 +46,7 @@ export class LifeBoards {
         if (panel.archived) { throw new Error('Restore the card before pinning it'); }
         const existing = before.items.find((item: BoardItem) => referenceKey(item) === referenceKey(reference));
         if (existing) { return before; }
-        items.push({ workspaceId: reference.workspaceId, panelId: reference.panelId, size: panel.definition.size });
+        items.push({ workspaceId: reference.workspaceId, panelId: reference.panelId, size: panel.layout?.size || panel.definition.size });
       }
       before.items = items; return before;
     });
