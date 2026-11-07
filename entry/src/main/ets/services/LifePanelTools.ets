@@ -3,7 +3,8 @@ import { AgentTools } from './AgentLoop';
 import { ToolFailure, ToolFailureDetails, parseToolArguments } from '../model/ToolFailure';
 import { LifePanels } from './LifePanels';
 import { providerBalanceCatalog } from './ProviderBalanceCatalog';
-import { LIFE_PANEL_CATALOG, lifePanelCatalog, panelId, parsePanelSpec, PanelListQuery, PanelSpec } from '../model/LifePanel';
+import { panelId, parsePanelSpec, PanelListQuery, PanelSpec } from '../model/LifePanel';
+import { panelSkillCatalog } from '../model/PanelSkillCatalog';
 import { miniAppPage } from '../model/MiniApp';
 import { MiniAppStorage, MiniAppSnapshot } from '../model/MiniApp';
 import { PanelValidationStorage } from './PanelValidationStorage';
@@ -38,22 +39,22 @@ export class LifePanelTools implements AgentTools {
   }
   definitions(): ToolDefinition[] {
     return [
-      { type: 'function', function: { name: 'get_life_panel_catalog', description: 'Read Life Panel authoring guidance. Read section:design for visual rules, actual-size selection, state ownership and evidence limits before HTML/CSS. Use section:html for the interactive starter and validation contract, native for native components, sources for acquisition options, balance for configured provider accounts and a wallet-style HTML reference, all for complete reference.', parameters: { type: 'object', properties: { 'section': { type: 'string', enum: ['all', 'html', 'native', 'sources', 'balance', 'design'], description: 'Requested protocol section' } }, required: [], additionalProperties: false } } },
-      { type: 'function', function: { name: 'list_life_panels', description: 'Page through compact card summaries across the app, without data snapshots, definitions, scripts or history. Optional workspace/archived filters. Follow nextCursor even for an empty page. Reuse workspaceId/panelId with get_life_panel for selected details.', parameters: { type: 'object', properties: {
+      { type: 'function', function: { name: 'get_life_panel_catalog', description: 'Return Skill resource names/paths for read_skill; section:balance returns configured provider accounts and a matching card definition.', parameters: { type: 'object', properties: { 'section': { type: 'string', enum: ['all', 'html', 'native', 'sources', 'balance', 'design'], description: 'Requested resource section; defaults to all' } }, required: [], additionalProperties: false } } },
+      { type: 'function', function: { name: 'list_life_panels', description: 'Return compact card summaries and nextCursor. Optional workspace/archived filters; get_life_panel reads full details.', parameters: { type: 'object', properties: {
         'workspaceId': { type: 'string', description: 'Optional owner workspace filter' }, 'archived': { type: 'boolean', description: 'False by default; true lists archived cards' },
         'limit': { type: 'integer', description: '1–20 summaries, default 10; at most 50 manifests are read per page' }, 'cursor': { type: 'string', description: 'nextCursor from the same filters' }
       }, required: [], additionalProperties: false } } },
-      { type: 'function', function: { name: 'get_life_panel', description: 'Read one selected card by owner workspaceId and panelId. section defaults to all; choose definition, data or task to avoid unrelated large snapshots. Contains full detail only when explicitly requested.', parameters: { type: 'object', properties: {
+      { type: 'function', function: { name: 'get_life_panel', description: 'Read a card by owner workspaceId/panelId; section selects definition, data, task or all.', parameters: { type: 'object', properties: {
         'workspaceId': { type: 'string', description: 'Owner workspace ID' }, 'panelId': { type: 'string', description: 'Card ID' },
         'section': { type: 'string', enum: ['all', 'definition', 'data', 'task'], description: 'Requested detail section' }
       }, required: ['workspaceId', 'panelId'], additionalProperties: false } } },
       this.publicationTool(false), this.publicationTool(true),
-      { type: 'function', function: { name: 'list_life_boards', description: 'List all persistent Life Panel boards and card references. Same card ID can occur in multiple boards, sharing data and user state.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false } } },
-      { type: 'function', function: { name: 'get_life_board', description: 'Read one board as structured JSON: stable mountId, card references and saved grid layout. Supply actual viewportWidth from board context to compute rendered rectangles in vp. No screenshot or visual-quality verification; chat receipts only navigate.', parameters: { type: 'object', properties: {
+      { type: 'function', function: { name: 'list_life_boards', description: 'List boards and their saved card references.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false } } },
+      { type: 'function', function: { name: 'get_life_board', description: 'Read board references, mountIds and grid layout as JSON. Optional viewportWidth computes rendered rectangles in vp; no screenshot is returned.', parameters: { type: 'object', properties: {
         'workspaceId': { type: 'string', description: 'Board owner workspace' }, 'boardId': { type: 'string', description: 'Board ID' },
         'viewportWidth': { type: 'number', minimum: 160, maximum: 1200, description: 'Actual board content width in vp; omit if unknown, do not assume desktop width' }
       }, required: ['workspaceId', 'boardId'], additionalProperties: false } } },
-      { type: 'function', executionMode: 'sequential', function: { name: 'manage_life_board', description: 'Create or update a named board. action: save, place, archive or restore. place requires an existing boardId, panelId, panelWorkspaceId and layout:{x,y,w,h}; it mounts or moves only that card, pushing collisions down. Read list_life_boards first and choose free space. Omit boardId to create. items optionally replaces layout using existing {workspaceId,panelId,x,y,w,h} card references on a 12-column grid; integer x/y >=0, w 2..12, h 2..33, x+w<=12, no overlaps; y may extend below the viewport. Omitting items preserves layout. Removing a reference does not delete the card. Returns a clickable board receipt in chat.', parameters: { type: 'object', properties: {
+      { type: 'function', executionMode: 'sequential', function: { name: 'manage_life_board', description: 'save creates/updates a board; supplied items replaces its layout. place mounts/moves one existing card using panelId, panelWorkspaceId and layout, pushing collisions down. archive/restore changes board availability.', parameters: { type: 'object', properties: {
         'action': { type: 'string', enum: ['save', 'place', 'archive', 'restore'], description: 'Board operation' }, 'boardId': { type: 'string', description: 'Existing board ID' }, 'workspaceId': { type: 'string', description: 'Board owner; defaults to current' }, 'title': { type: 'string', description: 'Required name for a new board' }, 'description': { type: 'string', description: 'Optional description' }, 'items': { type: 'array', description: 'Optional complete grid layout', items: { type: 'object', description: 'Card reference', properties: { 'workspaceId': { type: 'string', description: 'Card owner' }, 'panelId': { type: 'string', description: 'Shared card ID' }, 'x': { type: 'integer', minimum: 0, maximum: 10, description: 'Left column' }, 'y': { type: 'integer', minimum: 0, description: 'Top row' }, 'w': { type: 'integer', minimum: 2, maximum: 12, description: 'Width in cells' }, 'h': { type: 'integer', minimum: 2, maximum: 33, description: 'Height in cells (32vp rows, 12vp gaps)' } }, required: ['workspaceId', 'panelId', 'x', 'y', 'w', 'h'], additionalProperties: false } },
          'panelId': { type: 'string', description: 'Card ID for place' }, 'panelWorkspaceId': { type: 'string', description: 'Card owner for place' },
         'layout': { type: 'object', description: 'Placement for one card; other cards are retained', properties: {
@@ -61,12 +62,12 @@ export class LifePanelTools implements AgentTools {
           'w': { type: 'integer', minimum: 2, maximum: 12, description: 'Width in columns' }, 'h': { type: 'integer', minimum: 2, maximum: 33, description: 'Height in rows' }
         }, required: ['x', 'y', 'w', 'h'], additionalProperties: false }
       }, required: ['action'], additionalProperties: false } } },
-      { type: 'function', executionMode: 'sequential', function: { name: 'manage_life_panel_task', description: 'Pause/resume automatic updates or manually refresh one existing card. Includes API data refresh and bounded read-only Agent content updates. Inspect list_life_panels for recent runs/errors. Does not require the source chat.', parameters: { type: 'object', properties: { 'panelId': { type: 'string', description: 'Card ID' }, 'workspaceId': { type: 'string', description: 'Card owner' }, 'action': { type: 'string', enum: ['pause', 'resume', 'refresh'], description: 'Task operation' }, 'inputs': { type: 'object', description: 'Optional declared input values for a manual refresh, merged with current inputs', additionalProperties: true } }, required: ['panelId', 'workspaceId', 'action'], additionalProperties: false } } }
+      { type: 'function', executionMode: 'sequential', function: { name: 'manage_life_panel_task', description: 'Pause/resume automatic updates or manually refresh an existing card by owner workspaceId/panelId.', parameters: { type: 'object', properties: { 'panelId': { type: 'string', description: 'Card ID' }, 'workspaceId': { type: 'string', description: 'Card owner' }, 'action': { type: 'string', enum: ['pause', 'resume', 'refresh'], description: 'Task operation' }, 'inputs': { type: 'object', description: 'Optional declared input values for a manual refresh, merged with current inputs', additionalProperties: true } }, required: ['panelId', 'workspaceId', 'action'], additionalProperties: false } } }
     ];
   }
   private publicationTool(validateOnly: boolean): ToolDefinition {
     const properties: Record<string, ToolProperty> = {
-      'path': { type: 'string', description: 'Current workspace .panel.json path. Read catalog for template and checks.' },
+      'path': { type: 'string', description: 'Current workspace .panel.json path' },
       'htmlPath': { type: 'string', description: 'Self-contained HTML; optional when view is embedded. Uses definition view height if supplied, otherwise 320.' },
       'panelId': { type: 'string', description: 'Existing card ID for update/validation against saved user state.' },
       'workspaceId': { type: 'string', description: 'Existing card owner, defaults to current workspace.' },
@@ -83,10 +84,9 @@ export class LifePanelTools implements AgentTools {
       properties['boardWorkspaceId'] = { type: 'string', description: 'Board owner workspace' };
     }
     return { type: 'function', executionMode: 'sequential',
-      promptGuidelines: ['Create/edit loop: read catalog and current card, write candidate files with dataSchema and checks, call validate_life_panel, repair every returned diagnostic and repeat. Publish only after passing. If source requires credentials, explicitly defer its check and explain the pending connection. Never claim declared checks prove all possible interactions. Use the original ID and expectedRevision on updates. Tools return JSON, not screenshots; report saved layout, runtime checks and visual review as separate evidence. Reread get_life_board after placement.'],
       function: { name: validateOnly ? 'validate_life_panel' : 'publish_life_panel',
-        description: validateOnly ? 'Test a candidate without changing the card: schema, source query, HTML startup at the chosen placement size (or two default widths), declared interaction/storage assertions, horizontal overflow and control labels. Returns structured stage/path/check diagnostics to repair and retry. State is detached; checks cannot execute live refresh tasks.' :
-          'Validate then publish native/HTML card. size is a legacy definition field; board geometry uses x/y/w/h; updates preserve user layout, live data and user state by default; no version restore. requestId makes new-card retries idempotent. Structured pin failures retain published ID for recovery. Explicit source failures block publication; checkSource:false is reserved for pending connection/setup, never hides a tested failure.',
+        description: validateOnly ? 'Validate a candidate without saving: definition, source and HTML checks at supplied placement dimensions (otherwise half/full viewportWidth). Returns JSON diagnostics; uses detached state.' :
+          'Validate and save a card, optionally pinning it to boardId. Updates require panelId and expectedRevision; new-card requestId deduplicates retries. Live data is preserved unless replaceData:true.',
         parameters: { type: 'object', properties: properties, required: ['path'], additionalProperties: false } } };
   }
   async execute(call: ToolCall, cancellation: Cancellation): Promise<string> {
@@ -122,7 +122,7 @@ export class LifePanelTools implements AgentTools {
     }
     if (['get_life_panel_catalog', 'list_life_boards'].includes(call.function.name)) {
       if (Object.keys(args).some((key: string) => call.function.name !== 'get_life_panel_catalog' || key !== 'section')) { throw new ToolFailure('INVALID_ARGUMENTS', 'Unexpected catalog/list arguments', 'fix_arguments'); }
-      if (call.function.name === 'get_life_panel_catalog') { return args.section === 'balance' ? providerBalanceCatalog() : lifePanelCatalog(args.section); }
+      if (call.function.name === 'get_life_panel_catalog') { return args.section === 'balance' ? providerBalanceCatalog() : panelSkillCatalog(args.section); }
       if (call.function.name === 'list_life_boards') { if (!this.boards) { throw new Error('Board store is unavailable'); } return JSON.stringify((await this.boards.list()).map((entry: BoardEntry): BoardEntry => { entry.board.items = boardLayoutItems(entry.board.items); return entry; })); }
     }
     if (call.function.name === 'manage_life_panel_task') {
@@ -188,7 +188,7 @@ export class LifePanelTools implements AgentTools {
         definition.view = miniAppPage(args.htmlPath, (await this.files.read(workspaceRelativePath(args.htmlPath, false), cancellation)).content); definition.view.height = height;
       }
       const spec = parsePanelSpec(JSON.stringify(definition));
-      if (spec.view && (!spec.dataSchema || !spec.checks)) { throw new ToolFailure('PANEL_CONTRACT_REQUIRED', 'HTML authoring requires dataSchema and checks (use [] for display-only cards); read catalog section html', 'add_schema_and_interaction_checks', { path: path }); }
+      if (spec.view && (!spec.dataSchema || !spec.checks)) { throw new ToolFailure('PANEL_CONTRACT_REQUIRED', 'HTML authoring requires dataSchema and checks (use [] for display-only cards); read_skill widget references/validation.md', 'add_schema_and_interaction_checks', { path: path }); }
       if (spec.source?.type === 'workspace-json') {
         if (owner !== this.workspaceId && spec.source.workspaceId === undefined) { throw new Error('Cross-chat workspace-json updates require explicit source.workspaceId'); }
         if (spec.source.workspaceId === undefined) { spec.source.workspaceId = this.workspaceId; }

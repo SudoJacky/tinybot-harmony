@@ -1,6 +1,6 @@
 import { AgentStep, toolReceipts } from './Agent';
 import { PanelTarget, parsePanelTarget } from './LifeBoard';
-export interface PublishedPanel { key: string; title: string; target: PanelTarget; }
+export interface PublishedPanel { key: string; title: string; target: PanelTarget; excludedPanelKeys?: string[]; }
 interface Receipt { workspaceId?: string; panelId?: string; boardId?: string; title?: string; }
 export function publishedPanels(steps: AgentStep[]): PublishedPanel[] {
   const links: Map<string, PublishedPanel> = new Map<string, PublishedPanel>();
@@ -15,5 +15,11 @@ export function publishedPanels(steps: AgentStep[]): PublishedPanel[] {
       links.set(key, { key: key, title: receipt.title || 'Life Panel', target: target });
     }
   }
-  return Array.from(links.values());
+  const published = Array.from(links.values());
+  const panelKeys = published.filter((item: PublishedPanel) => !!item.target.panelId).map((item: PublishedPanel) => item.key);
+  // A board receipt retains its navigation and other cards, without repeating standalone previews from this answer.
+  for (const item of published) {
+    if (item.target.boardId) { item.excludedPanelKeys = panelKeys; }
+  }
+  return published;
 }

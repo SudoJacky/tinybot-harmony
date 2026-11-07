@@ -1,0 +1,26 @@
+{
+  "version": 2,
+  "title": "Counter",
+  "size": "M",
+  "data": {},
+  "nodes": [],
+  "dataSchema": {
+    "type": "object"
+  },
+  "checks": [
+    {
+      "action": "click",
+      "selector": "#reset"
+    },
+    {
+      "action": "text",
+      "selector": "#count",
+      "value": "0"
+    },
+    {
+      "action": "stored",
+      "path": "/count",
+      "expected": 0
+    }
+  ]
+}
