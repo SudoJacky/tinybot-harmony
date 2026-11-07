@@ -50,6 +50,8 @@
     { "name": "avatar_4_bg", "value": "#EADFF4" },
     { "name": "avatar_4_fg", "value": "#5E3B83" },
     { "name": "avatar_5_bg", "value": "#F6DDE3" },
-    { "name": "avatar_5_fg", "value": "#8C2F48" }
+    { "name": "avatar_5_fg", "value": "#8C2F48" },
+    { "name": "switch_track", "value": "#D8DDE3" },
+    { "name": "switch_outline", "value": "#AAB2BD" }
   ]
 }

@@ -23,11 +23,14 @@ const model=loadModel('LifePanel');
 const signal=compile(fs.readFileSync(path.join(root,'entry/src/main/ets/services/Cancellation.ets'),'utf8'),
   {require:()=>({ToolFailure:class extends Error {}})});
 const tree=emitted('views/LifePanelsPanel'), panel=tree.statements.find(n=>ts.isClassDeclaration(n)&&n.name.text==='LifePanelsPanel');
-const names=['stop','activityChanged','scan','reload','report','entryKey','refresh','change','refreshAll','visible','layouts','rect','boardHeight','currentBoard','currentEditorThreadId','boardKey','targetChanged','dropCard','gridRect','beginLayout','updateLayout','finishLayout','followEdge','startMove','moveCard','resetGesture','resizeCard','heightOnBoard','entryFor','createCard','showEditor'];
+const names=['stop','activityChanged','scan','reload','report','entryKey','refresh','change','refreshAll','visible','layouts','rect','boardHeight','currentBoard','currentEditorThreadId','boardKey','targetChanged','dropCard','gridRect','beginLayout','updateLayout','finishLayout','followEdge','startMove','moveCard','resetGesture','resizeCard','heightOnBoard','entryFor','createCard','showEditor','addBuiltin','aboutToAppear'];
 const methods=panel.members.filter(n=>ts.isMethodDeclaration(n)&&names.includes(n.name.getText(tree))).map(n=>n.getText(tree)).join('\n');
 assert.equal(panel.members.filter(n=>ts.isMethodDeclaration(n)&&names.includes(n.name.getText(tree))).length,names.length);
 const timers=new Map(), logs=[];let timerId=0;
+let installBuiltin,panelChange;
 const {Probe}=compile('export class Probe {'+methods+'}',{...loadModel('I18n'),...model,...signal,...loadModel('LifeBoard'),...loadModel('PanelPresentation'),...loadModel('PanelGrid'),
+  builtinWidget:loadModel('BuiltinWidgets').builtinWidget,BuiltinWidgets:class{async add(...args){return installBuiltin(...args);}},
+  PanelChanges:{subscribe:listener=>{panelChange=listener;return()=>{};}},
   setTimeout:(fn,ms)=>{timers.set(++timerId,{fn,ms});return timerId;},clearTimeout:id=>timers.delete(id),
   Motion:{medium:180,thumb:'spring'},Diagnostics:{log:(...args)=>logs.push(args)}});
 const turn=()=>new Promise(resolve=>setImmediate(resolve));
@@ -37,9 +40,32 @@ function view(entries=[],repository={}) {
   const page=new Probe();Object.assign(page,{mounted:true,active:true,foreground:true,timer:-1,cancellation:new signal.Cancellation(),scanning:false,
     getUIContext:()=>({getFocusController:()=>({clearFocus(){}}),animateTo:(_options,action)=>action()}),layoutSaving:false,dragging:'',resizing:'',edgeTimer:-1,previewRects:[],gestureItems:[],viewportTop:0,viewportHeight:1000,scrollOffset:0,contentScroller:{currentOffset:()=>({yOffset:0}),scrollBy(){}},cardHeights:{},entries:[],pending:[],error:'',selected:'',removed:false,boardWidth:360,boards:[],boardSelection:'',requestedTarget:'',lastTarget:''});
   page.boardStore=()=>({list:async()=>[]});
+  page.prepareGuides=async()=>{};
   page.panels=()=>({list:async()=>entries,repository:()=>repository});return page;
 }
 async function main() {
+  {
+    const initial=view();let reloads=0;initial.guidesPrepared=false;initial.activityChanged=()=>{};initial.reload=async()=>{reloads++;};
+    initial.aboutToAppear();panelChange();assert.equal(reloads,0,'Partial default publication must not race the completed board snapshot');
+    initial.guidesPrepared=true;panelChange();await turn();assert.equal(reloads,1,'Changes after initialization still refresh the collection');
+    console.log('PASS initial guide publications are coalesced until the default board is complete');
+  }
+  {
+  const packaged={workspaceId:'workspace',panel:{id:'packaged',archived:false,definition:{title:'Clock'}}};
+  const builtin=view();Object.assign(builtin,{app:{ready:true,busy:true,activeWorkspaceId:'workspace'},addingBuiltin:'',creating:false,sheetOpen:true});
+  builtin.getUIContext=()=>({getHostContext:()=>({})});builtin.reload=async()=>{};
+  let finishInstall,installCount=0;
+  installBuiltin=async(id,workspace,signal,width)=>{installCount++;assert.equal(id,'clock');assert.equal(workspace,'workspace');assert.equal(width,360);return new Promise(resolve=>finishInstall=resolve);};
+  const installing=builtin.addBuiltin('clock');await turn();await builtin.addBuiltin('clock');assert.equal(installCount,1,'Repeated taps do not create duplicate instances');
+  finishInstall(packaged);await installing;assert.equal(builtin.selected,'workspace/packaged');assert.equal(builtin.sheetOpen,false);assert.equal(builtin.addingBuiltin,'');
+  const board={id:'board',title:'Board',items:[{workspaceId:'workspace',panelId:'old',x:0,y:0,w:6,h:7,mountId:'keep-me'}]};
+  builtin.boards=[{workspaceId:'workspace',board}];builtin.boardSelection='workspace/board';builtin.selected='';let placement;
+  builtin.boardStore=()=>({get:async()=>board,place:async(...args)=>{placement=args;}});
+  installBuiltin=async(id,workspace,signal,width)=>{assert.equal(width,174,'Validate at the actual half-width placement');return packaged;};
+  await builtin.addBuiltin('clock');assert.equal(placement[3].w,6);assert.equal(placement[3].x,6);assert.equal(placement[4],loadModel('LifeBoard').boardLayoutKey(board.items));
+  installBuiltin=async()=>{throw Error('Packaged card failed validation');};await builtin.addBuiltin('clock');assert.match(builtin.error,/failed validation/);assert.equal(builtin.addingBuiltin,'');
+  console.log('PASS built-in add uses no model request, gates duplicate taps, opens independent instances, places in free cells and reports failures');
+  }
   let count=0;const card=entry('due');const page=view([card],{refresh:async(id,cancel)=>{cancel.check();count++;card.panel.refreshedAt=Date.now();}});
   page.activityChanged();await turn();await turn();assert.equal(count,0);assert.equal(page.pending.length,0);
   assert.equal(timers.get(page.timer).ms,30000,'One expiry scan timer follows completion');

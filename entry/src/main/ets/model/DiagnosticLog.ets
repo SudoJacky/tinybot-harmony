@@ -46,7 +46,7 @@ EVENTS.app = ['bar_failed', 'created', 'destroyed', 'window_created', 'window_fa
 EVENTS.privacy = ['subscribe_failed', 'info_failed', 'result_failed', 'state_failed', 'request_failed'];
 EVENTS.announcements = ['disabled', 'fetch_started', 'fetch_completed', 'fetch_failed', 'presented', 'present_failed', 'acknowledged', 'save_failed'];
 EVENTS.review = ['task_completed', 'presented', 'present_failed', 'accepted', 'deferred', 'disabled', 'request_completed', 'request_failed', 'save_failed'];
-EVENTS.appearance = ['material', 'material_support', 'material_unavailable', 'loaded', 'applied', 'save_failed', 'fonts_loaded', 'fonts_failed', 'insets_failed'];
+EVENTS.appearance = ['material', 'material_support', 'material_unavailable', 'loaded', 'applied', 'save_failed', 'fonts_loaded', 'fonts_failed', 'insets_failed', 'keyboard_geometry'];
 EVENTS.language = ['load_failed', 'save_failed'];
 EVENTS.camera = ['dismissed', 'imported', 'capture_failed'];
 EVENTS.account = ['restore_failed', 'response_invalid', 'state_changed', 'sign_in_cancelled', 'sign_in_failed', 'sign_out_failed', 'state_failed'];
@@ -67,6 +67,7 @@ EVENTS.focus = ['search_requested', 'provider_requested', 'onboarding_requested'
 EVENTS.navigation = ['tools_opened', 'tools_repeated', 'settings_opened', 'settings_repeated', 'mini_apps_opened', 'mini_apps_repeated',
   'new_chat_blocked', 'new_chat_failed', 'new_chat_revealed'];
 EVENTS.web = ['engine_start', 'engine_ready', 'release', 'activate', 'failed', 'console_error', 'load_start', 'load_returned', 'host_ready', 'port_connected', 'ready', 'state_saved', 'attached', 'page_end', 'navigation_blocked', 'resource_failed'];
+EVENTS.math = ['load_failed', 'render_failed', 'startup_timeout', 'process_exited', 'page_failed'];
 EVENTS.preview = ['failed', 'captured', 'thumbnail_failed', 'surface_moved'];
 EVENTS.sandbox = ['execution_failed', 'orchestration_failed'];
 EVENTS.tool = ['failed', 'partial'];

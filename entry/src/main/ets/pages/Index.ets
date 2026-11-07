@@ -43,6 +43,7 @@ import { materialMenuContent, materialMenuHeader } from '../common/MaterialMenu'
 import { ShareInbox } from '../services/NativeActions';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { ChatPanel } from '../views/ChatPanel';
+import { SettingsNavigation, SettingsOverview, settingsCategoryTitle } from '../views/SettingsNavigation';
 import { SettingsPanel, UserDocumentPanel } from '../views/SettingsPanel';
 import { AppearancePanel, appearanceChoiceTitle } from '../views/AppearancePanel';
 import { LanguagePanel } from '../views/LanguagePanel';
@@ -164,13 +165,17 @@ struct Index {
   @State private onboardingActive: boolean = false;
   @State private providerEditorActive: boolean = false;
   @State private settingsActive: boolean = false;
+  @State private rootSection: string = '';
+  private toolsOrigin: string = 'productivity';
+  @State private expandDraftRequest: number = 0;
+  @State private settingsSection: string = 'models';
   @State private toolsTab: string = 'memory';
   @State private toolsTabRequest: number = 0;
 
   onPageShow(): void {
     this.reviewDisposed = false;
     this.paths.disableAnimation(false);
-    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE_WITH_CARET);
     const wasAllowed = this.privacy.allowed;
     this.privacy.onPageShow();
     // A newly granted result starts business through privacyChanged().
@@ -355,7 +360,7 @@ struct Index {
       this.closeAnnouncement();
       this.closeReviewInvitation(); this.startupBackupDialog?.close();
       this.app.stop(); this.browser.close(); this.browserExpanded = false; this.showToolScope = false;
-      this.voiceRequest = ''; this.paths.clear(); this.setDrawer(false);
+      this.voiceRequest = ''; this.paths.clear(); this.rootSection = ''; this.setDrawer(false);
       this.workspaceOpen = false; this.previewVisible = false; this.previewId = '';
       this.detailAnim++; this.detailPaneOpen = false; this.detailReveal = 0; this.detailClosing = false;
       this.detailClosingLauncher = false; this.detailTabs = []; this.activeDetailTab = '';
@@ -449,7 +454,7 @@ struct Index {
       }
       this.onboardingPreferences().complete();
       if (action === 'skip') { this.paths.pop(); }
-      else { this.paths.clear(); this.setDrawer(false); if (action === 'connect') { this.openSettings(); } }
+      else { this.paths.clear(); this.rootSection = ''; this.setDrawer(false); if (action === 'connect') { this.openSettings(); } }
     } finally { this.onboardingFinishing = false; }
   }
 
@@ -552,7 +557,7 @@ struct Index {
   }
 
   private revealChat(): void {
-    this.paths.clear(); this.setDrawer(false);
+    this.paths.clear(); this.rootSection = ''; this.setDrawer(false);
     // Collapse the phone overlay without disposing retained editors or their drafts.
     if (!this.workbench().docked) { this.setDetailPane(false); }
   }
@@ -562,6 +567,7 @@ struct Index {
   // empty launcher visible while it slides away, and the presence flags are
   // raised until AnimatedPage reports that an outgoing body is gone.
   private detailOpen(): boolean {
+    if (this.rootSection) { return false; }
     return !!(this.detailPaneOpen || this.detailClosing || this.workspacePresent ||
       this.previewPresent || this.browserPresent);
   }
@@ -703,7 +709,7 @@ struct Index {
     this.removeDetailTab('browser');
   }
   private workbench(): WorkbenchLayout {
-    return new WorkbenchLayout(this.windowWidth, this.detailOpen(), !this.historyCollapsed,
+    return new WorkbenchLayout(this.onboardingActive ? 0 : this.windowWidth, this.detailOpen(), !this.historyCollapsed,
       this.historyPreferredWidth, this.detailPreferredWidth);
   }
 
@@ -820,7 +826,7 @@ struct Index {
     if (!this.app.canQueueInput || this.app.active.attachments.length >= MAX_MESSAGE_ATTACHMENTS) { throw new Error(t('当前无法添加附件，请稍后重试。')); }
     const item = await Attachments.saveBrowserAnnotation(pixel);
     await this.app.appendDraftAttachment(threadId, item, browserAnnotationText(page, note));
-    this.paths.clear(); this.setDrawer(false); this.setBrowserExpanded(false);
+    this.paths.clear(); this.rootSection = ''; this.setDrawer(false); this.setBrowserExpanded(false);
   }
 
   aboutToDisappear(): void {
@@ -896,8 +902,22 @@ struct Index {
     return this.confirmProviderDiscard(onDiscard);
   }
 
+  private returnFromSettings(confirmed: boolean = false): void {
+    if (this.paths.getAllPathName().includes('provider') && !confirmed &&
+      this.confirmProviderDiscard(() => this.returnFromSettings(true))) { return; }
+    if (this.app.busy) { return; }
+    this.revealChat();
+  }
+
+  private selectSettingsSection(section: string, confirmed: boolean = false): void {
+    if (this.confirmRootNavigation('settings', confirmed, () => this.selectSettingsSection(section, true))) { return; }
+    this.settingsSection = section;
+    this.openSettings(true);
+  }
+
   private openSettings(discardConfirmed: boolean = false): void {
     if (this.confirmRootNavigation('settings', discardConfirmed, () => this.openSettings(true))) { return; }
+    this.rootSection = 'settings';
     const names = this.paths.getAllPathName();
     if (names[names.length - 1] === 'settings') {
       Diagnostics.log('debug', 'navigation', 'settings_repeated', { count: names.length });
@@ -910,14 +930,7 @@ struct Index {
   }
 
   private async openSupport(page: string): Promise<void> {
-    if (page === 'privacy') {
-      this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t('隐私政策'),
-        message: t('您可以查看隐私政策，或拒绝隐私授权。'),
-        primaryButton: { value: t('查看'), action: () => { this.openSupport('view-privacy'); } },
-        secondaryButton: { value: t('拒绝'), fontColor: $r('app.color.danger'),
-          action: () => { this.openSupport('revoke-privacy'); } } });
-      return;
-    }
+    if (page === 'privacy') { await this.openSupport('view-privacy'); return; }
     if (page === 'revoke-privacy') {
       this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t('拒绝隐私政策？'),
         message: t('拒绝后将撤回隐私授权，停止当前对话并退出应用。下次打开时，需重新同意才能继续使用。已有会话、文件和设置会保留。'),
@@ -979,6 +992,7 @@ struct Index {
 
   private openMiniApps(discardConfirmed: boolean = false): void {
     if (this.confirmRootNavigation('mini-apps', discardConfirmed, () => this.openMiniApps(true))) { return; }
+    this.rootSection = 'mini-apps';
     const names = this.paths.getAllPathName();
     if (names[names.length - 1] === 'mini-apps') {
       Diagnostics.log('debug', 'navigation', 'mini_apps_repeated', { count: names.length });
@@ -996,6 +1010,7 @@ struct Index {
   }
   private openLifePanels(discardConfirmed: boolean = false, target: string = ''): void {
     if (this.confirmRootNavigation('life-panels', discardConfirmed, () => this.openLifePanels(true, target))) { return; }
+    this.rootSection = 'life-panels';
     this.lifePanelTarget = target;
     this.getUIContext().getFocusController().clearFocus();
     this.paths.pushPath({ name: 'life-panels' }, { launchMode: LaunchMode.POP_TO_SINGLETON });
@@ -1003,6 +1018,8 @@ struct Index {
 
   private openTools(tab: string, discardConfirmed: boolean = false): void {
     if (this.confirmRootNavigation('productivity', discardConfirmed, () => this.openTools(tab, true))) { return; }
+    this.toolsOrigin = this.rootSection === 'settings' ? 'settings' : 'productivity';
+    this.rootSection = this.toolsOrigin;
     this.toolsTab = tab;
     this.toolsTabRequest++;
     const names = this.paths.getAllPathName();
@@ -1086,6 +1103,30 @@ struct Index {
   }
 
   @Builder
+  settingsContent(section: string) {
+    SettingsPanel({ app: this.app, section: section, settings: this.app.settings, account: this.account, active: this.settingsActive && this.foreground,
+      onAccount: () => { this.paths.pushPath({ name: 'account' }); },
+      browser: this.browser,
+      onAddProvider: () => { this.paths.pushPath({ name: 'provider-presets' }); },
+      onUsage: () => { this.paths.pushPath({ name: 'usage' }); },
+      onStorage: () => { this.paths.pushPath({ name: 'storage' }); },
+      onModels: () => { this.paths.pushPath({ name: 'model-settings' }); },
+      onSearch: () => { this.paths.pushPath({ name: 'search-settings' }); },
+      onMail: () => { this.paths.pushPath({ name: 'mail-settings' }); },
+      onLaboratory: () => { this.paths.pushPath({ name: 'laboratory' }); },
+      onAppearance: () => { this.paths.pushPath({ name: 'appearance' }); },
+      onLanguage: () => { this.paths.pushPath({ name: 'language' }); },
+      onBackup: () => { this.paths.pushPath({ name: 'backup' }); },
+      onSupport: (page: string) => this.openSupport(page),
+      onTools: (tab: string) => this.openTools(tab),
+      onSkills: () => { this.paths.pushPath({ name: 'skills' }); },
+      onUserDocument: () => { this.paths.pushPath({ name: 'user-document' }); },
+      onEditProvider: (id: string, preset: string) => {
+        if (this.app.beginProvider(preset, id)) { this.paths.pushPath({ name: 'provider' }); }
+      } })
+  }
+
+  @Builder
   destination(name: string, param: Object) {
     if (name === 'onboarding') {
       NavDestination() {
@@ -1104,7 +1145,7 @@ struct Index {
         .onShown(() => { this.onboardingActive = true; })
         .onHidden(() => { this.onboardingActive = false; })
     } else if (name === 'life-panels') {
-      LifePanelsPanel({ app: this.app, onChat: () => this.revealChat(), requestedTarget: this.lifePanelTarget })
+      LifePanelsPanel({ app: this.app, onShown: () => { this.rootSection = 'life-panels'; }, onChat: () => this.revealChat(), requestedTarget: this.lifePanelTarget })
     } else if (name === 'mini-apps') {
       NavDestination() {
         if (this.app.productivity.options?.miniAppsEnabled === true) {
@@ -1113,36 +1154,37 @@ struct Index {
             onCreateAvailable: (available: boolean) => { this.miniAppCreateAvailable = available; } })
         } else { Text(t('请先在设置的实验室中开启小程序。')) }
       }
-        .title(t('小程序'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+        .title(t('小程序'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
+        .onShown(() => { this.rootSection = 'mini-apps'; })
         .menus(this.miniAppCreateAvailable ? [{ value: t('创建'), symbolIcon: new SymbolGlyphModifier($r('sys.symbol.plus')),
           isEnabled: this.app.ready && !this.app.busy, action: () => { this.miniAppCreateRequest++; } }] : [])
     } else if (name === 'branches') {
-      NavDestination() { BranchesPanel({ app: this.app, onSelected: () => this.paths.clear() }) }.title(t("会话分支"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+      NavDestination() { BranchesPanel({ app: this.app, onSelected: () => this.paths.clear() }) }.title(t("会话分支"), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'appearance') {
       NavDestination() { AppearancePanel({ onChoice: (choice: string) => { this.paths.pushPath({ name: 'appearance-choice', param: choice }); } }) }
-        .title(t('界面与外观'), { systemMaterial: this.appearance.control })
+        .title(t('界面与外观'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
         .backgroundColor($r('app.color.page_background'))
     } else if (name === 'appearance-choice') {
       NavDestination() { AppearancePanel({ choice: param as string, onDone: () => { this.paths.pop(); } }) }
-        .title(appearanceChoiceTitle(param as string), { systemMaterial: this.appearance.control })
+        .title(appearanceChoiceTitle(param as string), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
         .backgroundColor($r('app.color.page_background'))
     } else if (name === 'language') {
-      NavDestination() { LanguagePanel({ app: this.app }) }.title(t('语言'), { systemMaterial: this.appearance.control })
+      NavDestination() { LanguagePanel({ app: this.app }) }.title(t('语言'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
         .backgroundColor($r('app.color.page_background'))
     } else if (name === 'model-settings') {
-      NavDestination() { ModelSettingsPanel({ app: this.app }) }.title(t('模型分工与能力'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+      NavDestination() { ModelSettingsPanel({ app: this.app }) }.title(t('模型分工与能力'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'backup') {
-      NavDestination() { BackupPanel({ app: this.app }) }.title(t('备份与恢复'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+      NavDestination() { BackupPanel({ app: this.app }) }.title(t('备份与恢复'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'usage') {
-      NavDestination() { UsagePanel({ app: this.app }) }.title(t('Token 用量'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+      NavDestination() { UsagePanel({ app: this.app }) }.title(t('Token 用量'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'storage') {
       NavDestination() {
         StoragePanel({ app: this.app, onCategory: (id: string) => { this.paths.pushPath({ name: 'storage-category', param: id }); } })
-      }.title(t('存储空间'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+      }.title(t('存储空间'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'storage-category') {
       NavDestination() {
         StorageCategoryPanel({ app: this.app, category: param as string })
-      }.title(t(storageCategoryKey(param as string)), { systemMaterial: this.appearance.control })
+      }.title(t(storageCategoryKey(param as string)), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
         .backgroundColor($r('app.color.page_background'))
     } else if (name === 'productivity') {
       NavDestination() { ProductivityPanel({ app: this.app, tab: (param as string) || 'memory',
@@ -1152,28 +1194,29 @@ struct Index {
           this.paths.pushPath({ name: 'productivity-editor', param: request,
             onPop: (info: PopInfo) => { onReturn(typeof info.result === 'string' ? info.result : ''); } });
         } }) }
-        .title(t("记忆与工具"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+        .onShown(() => { this.rootSection = this.toolsOrigin; })
+        .title(t("记忆与工具"), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'productivity-editor') {
       NavDestination() {
         ProductivityPanel({ app: this.app, tab: (param as ProductivityEditorRoute).tab, entryId: (param as ProductivityEditorRoute).id,
           editorOnly: true, onClose: (warning: string) => { this.paths.pop(warning); } })
-      }.title(productivityEditorTitle((param as ProductivityEditorRoute).tab, (param as ProductivityEditorRoute).id), { systemMaterial: this.appearance.control })
+      }.title(productivityEditorTitle((param as ProductivityEditorRoute).tab, (param as ProductivityEditorRoute).id), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
         .backgroundColor($r('app.color.page_background')).onBackPressed(() => this.app.busy)
     } else if (name === 'mail-settings') {
       NavDestination() { MailSettingsPanel() }
-        .title(t('邮箱连接'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+        .title(t('邮箱连接'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'search-settings') {
       NavDestination() {
         SearchSettingsPanel({ app: this.app, onEdit: (request: SearchProviderRoute, onReturn: (draft?: SearchEditorDraft) => void) => {
           this.paths.pushPath({ name: 'search-provider', param: request,
             onPop: (info: PopInfo) => { onReturn(info.result as SearchEditorDraft | undefined); } });
         } })
-      }.title(t('搜索服务'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+      }.title(t('搜索服务'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'search-provider') {
       NavDestination() {
         SearchProviderPanel({ app: this.app, request: param as SearchProviderRoute,
           onDone: (draft?: SearchEditorDraft) => { this.paths.pop(draft); } })
-      }.title(searchProviderName((param as SearchProviderRoute).provider), { systemMaterial: this.appearance.control })
+      }.title(searchProviderName((param as SearchProviderRoute).provider), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
         .backgroundColor($r('app.color.page_background'))
     } else if (name === 'share-conversation') {
       ConversationSharePanel({ data: param as ConversationShareData })
@@ -1182,52 +1225,45 @@ struct Index {
     } else if (name === 'account') {
       NavDestination() {
         HuaweiAccountPanel({ account: this.account, taskBusy: this.app.sharedBusy, onSupport: (page: string) => this.openSupport(page) })
-      }.title(t('华为账号'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+      }.title(t('华为账号'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'laboratory') {
       NavDestination() {
-        SettingsPanel({ app: this.app, settings: this.app.settings, account: this.account, browser: this.browser, laboratoryOnly: true })
-      }.title(t('实验室'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+        SettingsPanel({ app: this.app, section: this.windowWidth >= 840 ? this.settingsSection : '', settings: this.app.settings, account: this.account, browser: this.browser, laboratoryOnly: true })
+      }.title(t('实验室'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'settings') {
       NavDestination() {
-        SettingsPanel({ app: this.app, settings: this.app.settings, account: this.account, active: this.settingsActive && this.foreground,
-          onAccount: () => { this.paths.pushPath({ name: 'account' }); },
-          browser: this.browser,
-          onAddProvider: () => { this.paths.pushPath({ name: 'provider-presets' }); },
-          onUsage: () => { this.paths.pushPath({ name: 'usage' }); },
-          onStorage: () => { this.paths.pushPath({ name: 'storage' }); },
-          onModels: () => { this.paths.pushPath({ name: 'model-settings' }); },
-          onSearch: () => { this.paths.pushPath({ name: 'search-settings' }); },
-          onMail: () => { this.paths.pushPath({ name: 'mail-settings' }); },
-          onLaboratory: () => { this.paths.pushPath({ name: 'laboratory' }); },
-          onAppearance: () => { this.paths.pushPath({ name: 'appearance' }); },
-          onLanguage: () => { this.paths.pushPath({ name: 'language' }); },
-          onBackup: () => { this.paths.pushPath({ name: 'backup' }); },
-          onSupport: (page: string) => this.openSupport(page),
-          onTools: (tab: string) => this.openTools(tab),
-          onSkills: () => { this.paths.pushPath({ name: 'skills' }); },
-          onUserDocument: () => { this.paths.pushPath({ name: 'user-document' }); },
-          onEditProvider: (id: string, preset: string) => {
-            if (this.app.beginProvider(preset, id)) { this.paths.pushPath({ name: 'provider' }); }
+        if (this.windowWidth >= 840) {
+          this.settingsContent(this.settingsSection)
+        } else {
+          SettingsOverview({ onSelect: (section: string) => {
+            this.settingsSection = section;
+            this.paths.pushPath({ name: 'settings-section', param: section });
           } })
-      }.title(t("设置"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
-        .onShown(() => { this.settingsActive = true; }).onHidden(() => { this.settingsActive = false; })
+        }
+      }.title(this.windowWidth >= 840 ? settingsCategoryTitle(this.settingsSection) : t("设置"), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
+        .onShown(() => { this.settingsActive = true; this.rootSection = 'settings'; }).onHidden(() => { this.settingsActive = false; })
+    } else if (name === 'settings-section') {
+      NavDestination() { this.settingsContent(param as string) }
+        .title(settingsCategoryTitle(param as string), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
+        .backgroundColor($r('app.color.page_background'))
+        .onShown(() => { this.settingsActive = true; this.rootSection = 'settings'; }).onHidden(() => { this.settingsActive = false; })
     } else if (name === 'provider-presets') {
       NavDestination() {
-        SettingsPanel({ app: this.app, settings: this.app.settings, account: this.account, browser: this.browser, presetsOnly: true,
+        SettingsPanel({ app: this.app, section: this.windowWidth >= 840 ? this.settingsSection : '', settings: this.app.settings, account: this.account, browser: this.browser, presetsOnly: true,
           onEditProvider: (_id: string, preset: string) => {
             if (this.app.beginProvider(preset, '')) { this.paths.replacePath({ name: 'provider' }); }
           } })
-      }.title(t('添加模型服务'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+      }.title(t('添加模型服务'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'support') {
       NavDestination() {
         SupportPanel({ page: param as string,
           onOpen: (page: string) => this.openSupport(page), onClose: () => { this.paths.pop(); } })
-      }.title(supportTitle(param as string), { systemMaterial: this.appearance.control })
+      }.title(supportTitle(param as string), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
         .hideTitleBar((param as string) === 'feedback').backgroundColor($r('app.color.page_background'))
     } else if (name === 'user-document') {
       NavDestination() {
         UserDocumentPanel({ app: this.app, settings: this.app.settings, onSaved: () => { this.paths.pop(); } })
-      }.title(t('称呼与回答偏好'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+      }.title(t('称呼与回答偏好'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
         .onHidden(() => { this.app.settings.userDocument = this.app.config.userDocument || ''; })
     } else if (name === 'skills') {
       NavDestination() {
@@ -1235,17 +1271,17 @@ struct Index {
           this.app.beginSkill(skill);
           this.paths.pushPath({ name: 'skill-editor' });
         }, onUse: () => { this.paths.clear(); } })
-      }.title('Skills', { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+      }.title('Skills', { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'skill-editor') {
       NavDestination() {
         SkillEditorPanel({ app: this.app, editor: this.app.skillEditor, onSaved: () => { this.paths.pop(); } })
-      }.title(this.app.skillEditor.originalName.length > 0 ? t("编辑 Skill") : t("添加 Skill"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+      }.title(this.app.skillEditor.originalName.length > 0 ? t("编辑 Skill") : t("添加 Skill"), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'provider') {
       NavDestination() {
         ProviderEditorPanel({ app: this.app, editor: this.app.providerEditor, active: this.providerEditorActive && this.foreground, onSaved: () => { this.paths.pop(); },
           onModels: (error: string) => { this.paths.pushPath({ name: 'provider-models', param: error }); },
           onDiscovered: (models: string[]) => { this.paths.pushPath({ name: 'provider-discovery', param: models }); } })
-      }.title(this.app.providerEditor.id.length > 0 ? t("编辑服务") : t("添加服务"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+      }.title(this.app.providerEditor.id.length > 0 ? t("编辑服务") : t("添加服务"), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
         .onWillShow(() => { this.providerEditorActive = true; })
         .onWillHide(() => { this.providerEditorActive = false; })
         .onBackPressed(() => this.confirmProviderDiscard(() => { this.paths.pop(); }))
@@ -1253,16 +1289,16 @@ struct Index {
       NavDestination() {
         ProviderEditorPanel({ app: this.app, editor: this.app.providerEditor, page: 'models', initialModelError: (param as string) || '',
           onSaved: () => { this.paths.pop(); } })
-      }.title(t('管理模型'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+      }.title(t('管理模型'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'provider-discovery') {
       NavDestination() {
         ProviderEditorPanel({ app: this.app, editor: this.app.providerEditor, page: 'discovery', foundModels: param as string[],
           onSaved: () => { this.paths.pop(); } })
-      }.title(t('选择要添加的模型'), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+      }.title(t('选择要添加的模型'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'models') {
       NavDestination() {
         ModelPickerPanel({ app: this.app, onSelected: () => { this.paths.pop(); }, onSettings: () => this.openSettings() })
-      }.title(t("选择模型"), { systemMaterial: this.appearance.control }).backgroundColor($r('app.color.page_background'))
+      }.title(t("选择模型"), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     }
   }
 
@@ -1289,6 +1325,9 @@ struct Index {
         }
         Text(this.app.active.messages.length > 0 ? this.app.active.displayTitle : '').fontSize(15).fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.text_secondary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+        IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('展开输入'), compId: 'workbench-expand-draft',
+          fill: $r('app.color.surface_variant'), disabled: !this.app.ready || this.app.active.archived,
+          onTap: () => { this.expandDraftRequest++; } })
         Button({ type: ButtonType.Circle, stateEffect: true }) {
           SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(19).fontColor([$r('app.color.text_secondary')])
         }.id('workbench-chat-more').width(44).height(44).borderRadius(22)
@@ -1362,7 +1401,7 @@ struct Index {
       Button({ type: ButtonType.Circle, stateEffect: true }) {
         SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(20).fontColor([$r('sys.color.font_primary')])
       }.id('chat-more').width(44).height(44).borderRadius(22).backgroundColor(this.appearance.controlBackground)
-      .border({ width: this.appearance.materialAvailable ? 0 : 0.5, color: $r('app.color.divider') })
+      .border({ width: this.appearance.materialEnabled ? 0 : 0.5, color: $r('app.color.divider') })
       .attributeModifier(systemMaterialAttribute<ButtonAttribute>(this.appearance.control)).accessibilityText(t("更多操作"))
       .enabled(this.app.ready).bindMenu(this.moreMenu, {
         systemMaterial: this.appearance.menu, mask: false })
@@ -1389,7 +1428,11 @@ struct Index {
         Column().width('100%').height('100%').backgroundColor($r('app.color.page_background'))
           .borderRadius({ topRight: this.workbench().expanded ? 0 : 20, bottomRight: this.workbench().expanded ? 0 : 20 })
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-        ThreadList({ app: this.app, workbench: this.windowWidth >= 840,
+        if (this.rootSection === 'settings' && this.workbench().expanded) {
+          SettingsNavigation({ selected: this.settingsSection, onSelect: (key: string) => this.selectSettingsSection(key),
+            onChat: () => this.returnFromSettings() })
+        } else {
+        ThreadList({ app: this.app, selectedSection: this.rootSection, workbench: this.windowWidth >= 840,
           onMiniApps: () => { this.setDrawer(false); this.openMiniApps(); },
           onLifePanels: () => { this.setDrawer(false); this.openLifePanels(); },
           collapseHistory: this.workbench().expanded, searchRequest: this.historySearchRequest,
@@ -1400,6 +1443,7 @@ struct Index {
           this.setDrawer(false);
           this.openSettings();
         } })
+        }
       }
       .width(this.workbench().expanded ? this.workbench().historyWidth : '84%').constraintSize({ maxWidth: DRAWER_MAX_WIDTH }).height('100%')
       .id('history-drawer')
@@ -1420,6 +1464,8 @@ struct Index {
 
   build() {
     Stack() {
+      Column().width('100%').height('100%').backgroundColor($r('app.color.page_background'))
+        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM]).hitTestBehavior(HitTestMode.None)
       if (!this.privacyAllowed) {
         Column({ space: Space.lg }) {
           Text('Tinybot').fontSize(28).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
@@ -1473,7 +1519,7 @@ struct Index {
           .expandSafeArea([SafeAreaType.SYSTEM], this.windowWidth >= 840 ? [] : [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         Column() {
           if (this.app.ready) {
-            ChatPanel({ app: this.app, thread: this.app.active, workbench: this.windowWidth >= 840,
+            ChatPanel({ app: this.app, thread: this.app.active, workbench: this.windowWidth >= 840, expandDraftRequest: this.expandDraftRequest,
                 onToolScope: () => { this.showToolScope = true; }, approval: this.approval, browser: this.browser, account: this.account,
                 onAccount: () => { this.paths.pushPath({ name: 'account' }); },
                 onBrowser: () => { this.setBrowserExpanded(true); this.openDetailTab('browser'); },
@@ -1517,7 +1563,7 @@ struct Index {
       backgroundEffect: { radius: 0, color: Color.Transparent }
     })
     .hideBackButton(true).titleMode(NavigationTitleMode.Mini).hideToolBar(true).mode(NavigationMode.Stack)
-    .onNavBarStateChange((visible: boolean) => { this.chatVisible = visible; if (visible) { this.offerAnnouncement(); } })
+    .onNavBarStateChange((visible: boolean) => { this.chatVisible = visible; if (visible) { this.rootSection = ''; this.offerAnnouncement(); } })
     .navDestination(this.destination).layoutWeight(1).height(this.windowWidth >= 840 ? 'calc(100% - 12vp)' : '100%')
     .margin({ top: this.windowWidth >= 840 ? 6 : 0, bottom: this.windowWidth >= 840 ? 6 : 0,
       right: this.windowWidth >= 840 && !this.workbench().docked ? 6 : 0 })
@@ -1525,7 +1571,7 @@ struct Index {
     Column().width(this.workbench().docked ? this.detailGeometry().detailWidth * this.detailReveal : 0).height('100%')
     }.width('100%').height('100%')
     // Cover both the navigation title bar and content, keeping the measured drawer mounted.
-    if (this.app.ready) {
+    if (this.app.ready && !this.onboardingActive) {
       this.drawer()
     }
     // Draggable seams sit above the drawer layer: the persistent column and the
@@ -1556,7 +1602,7 @@ struct Index {
       Stack({ alignContent: Alignment.TopStart }) {
         Column() {
           if (this.workbench().docked && this.detailOpen() && this.detailTabsAvailable().length > 0) {
-            DetailTabs({ tabs: this.detailTabItems(), active: this.currentDetailTab(),
+            DetailTabs({ tabs: this.detailTabItems(), active: this.currentDetailTab(), showCollapse: false,
               onSelect: (id: string) => { this.activeDetailTab = id; },
               onClose: (id: string) => this.closeDetailTab(id),
               onAddFiles: () => this.addFilesTab(),

@@ -1,7 +1,8 @@
+import { PageStyles } from '../common/PageStyles';
 import { util } from '@kit.ArkTS';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Btn, Space, Styles } from '../common/Theme';
-import { Banner, GroupCard, NavRow, SectionHeader, SwitchRow } from '../common/Widgets';
+import { Banner, GroupCard, NavRow, SectionHeader, SwitchRow, BottomBar, EmptyState } from '../common/Widgets';
 import { MailAccount } from '../model/Mail';
 import { t } from '../model/I18n';
 import { Diagnostics } from '../model/Diagnostics';
@@ -89,10 +90,7 @@ export struct MailSettingsPanel {
       }
       Text(t('请先在邮箱服务商处开启 IMAP，并获取授权码。仅支持 TLS 加密连接；账号和授权码只保存在当前设备，不参与备份。'))
         .fontSize(12).fontColor($r('app.color.text_secondary'))
-      Row({ space: Space.md }) {
-        Button(t('保存')).attributeModifier(Btn.primary).id('mail-save').onClick(() => { this.save(false); })
-        Button(t('保存并检查连接')).attributeModifier(Btn.tonal).id('mail-test').enabled(this.accessEnabled).onClick(() => { this.save(true); })
-      }
+
       if (this.accountId) { Button(t('移除邮箱连接')).attributeModifier(Btn.textSmall).fontColor($r('app.color.danger')).id('mail-remove').onClick(() => { this.remove(); }) }
       Button(t('返回邮箱列表')).attributeModifier(Btn.textSmall).onClick(() => { this.secret = ''; this.editing = false; this.error = ''; this.notice = ''; })
     }.enabled(!this.busy).width('100%')
@@ -103,11 +101,14 @@ export struct MailSettingsPanel {
       if (this.notice) { Banner({ text: this.notice, danger: false, compId: 'mail-notice' }).padding({ left: Space.page, right: Space.page, top: Space.sm }) }
     Scroll() {
       Column({ space: Space.md }) {
-        Text(t('读取邮箱中的未读数量、最近邮件和指定邮件，为对话和 Life Panel 提供数据。不会发送、删除邮件或改变已读状态。'))
+        Text(t('读取邮箱中的未读数量、最近邮件和指定邮件，为对话和生活看板提供数据。不会发送、删除邮件或改变已读状态。'))
           .fontSize(13).fontColor($r('app.color.text_secondary'))
         if (this.editing) { this.editor() }
         else {
           SectionHeader({ title: t('邮箱连接') })
+          if (this.accounts.length === 0) {
+            EmptyState({ icon: $r('sys.symbol.doc_text'), title: t('还没有邮箱连接'), caption: t('连接邮箱后，可让助手读取未读数量和邮件。') })
+          }
           ForEach(this.accounts, (account: MailAccount) => {
             GroupCard() {
               NavRow({ title: account.name, subtitle: account.username, value: account.enabled ? t('已启用') : t('已停用'), icon: $r('sys.symbol.doc_text'), onTap: () => this.edit(account) })
@@ -117,7 +118,13 @@ export struct MailSettingsPanel {
         }
         if (this.busy) { LoadingProgress().width(28).height(28) }
       }.width('100%').padding(Space.page).alignItems(HorizontalAlign.Start)
-    }.layoutWeight(1).width('100%').align(Alignment.TopStart)
-    }.height('100%').width('100%').backgroundColor($r('app.color.page_background'))
+    }.layoutWeight(1).width('100%').align(Alignment.Top)
+    if (this.editing) { BottomBar() {
+      Row({ space: Space.md }) {
+        Button(t('保存')).attributeModifier(Btn.primary).id('mail-save').onClick(() => { this.save(false); })
+        Button(t('保存并检查连接')).attributeModifier(Btn.tonal).id('mail-test').enabled(this.accessEnabled).onClick(() => { this.save(true); })
+      }.width('100%').enabled(!this.busy)
+    } }
+    }.height('100%').width('100%').attributeModifier(PageStyles.form).backgroundColor($r('app.color.page_background'))
   }
 }

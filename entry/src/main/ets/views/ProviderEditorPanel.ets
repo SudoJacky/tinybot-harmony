@@ -1,3 +1,4 @@
+import { PageStyles } from '../common/PageStyles';
 import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
@@ -203,7 +204,7 @@ export struct ProviderEditorPanel {
             this.getUIContext().getFocusController().clearFocus(); this.onSaved();
           })
       }
-    }.height('100%').width('100%').padding({ top: 8, bottom: 24 })
+    }.height('100%').width('100%').padding({ top: 8, bottom: 24 }).attributeModifier(PageStyles.form)
   }
   @Builder
   discoveryPage() {
@@ -238,7 +239,7 @@ export struct ProviderEditorPanel {
             })
         }
       }
-    }.height('100%').width('100%').padding({ top: 8, bottom: 24 })
+    }.height('100%').width('100%').padding({ top: 8, bottom: 24 }).attributeModifier(PageStyles.form)
   }
 
   @Builder
@@ -287,8 +288,8 @@ export struct ProviderEditorPanel {
           SectionHeader({ title: 'API Key' })
           GroupCard() {
             Column() {
-              SwitchRow({ title: t('无需 API Key'), subtitle: t('适用于本地模型或内网代理'), compId: 'provider-no-key',
-                isOn: this.editor.noApiKey, onChange: (value: boolean) => { this.editor.noApiKey = value; } })
+              SwitchRow({ title: t('使用 API Key'), subtitle: t('本地模型或内网代理可关闭'), compId: 'provider-no-key',
+                isOn: !this.editor.noApiKey, onChange: (value: boolean) => { this.editor.noApiKey = !value; } })
               if (!this.editor.noApiKey) {
                 RowDivider()
                 if (this.editor.canKeepKey && !this.replacingKey) {
@@ -381,7 +382,7 @@ export struct ProviderEditorPanel {
             .attributeModifier(Btn.primary).width('100%').enabled(!this.locked()).onClick(() => this.save())
         }
       }
-    }.width('100%').height('100%')
+    }.width('100%').height('100%').attributeModifier(PageStyles.form)
   }
   build() {
     if (this.page === 'models') { this.modelsPage() }

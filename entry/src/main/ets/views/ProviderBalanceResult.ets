@@ -84,7 +84,10 @@ export struct ProviderBalanceResult {
     Column({ space: 8 }) {
       if (this.compact) {
         Row({ space: 8 }) {
-          Button(this.summary()).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.text).layoutWeight(1)
+          Button() {
+            Text(this.summary()).fontFamily(this.appearance.fontFamily).fontColor(this.appearance.accent)
+              .fontSize(14).width('100%').textAlign(TextAlign.Start).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          }.fontFamily(this.appearance.fontFamily).attributeModifier(Btn.text).layoutWeight(1)
             .id('balance-summary-' + this.draft.id).onClick(() => { this.expanded = !this.expanded; })
           Button(this.loading ? t('查询中') : t('刷新')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.text)
             .id('balance-refresh-' + this.draft.id).enabled(!this.loading && !this.disabled && this.active).onClick(() => this.refresh())
@@ -124,11 +127,11 @@ export struct ProviderBalanceResult {
               if (this.result.notice) {
                 Text(this.result.notice).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
               }
-              Text(t('查询时间：{0}', [new Date(this.result.checkedAt).toLocaleString(getLocale())]))
+              Text(t('查询时间：{0}', [new Date(this.result.checkedAt).toLocaleString(getLocale(), { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })]))
                 .fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.text_tertiary'))
       }
       if (this.result && this.compact && !this.expanded) {
-        Text(t('查询时间：{0}', [new Date(this.result.checkedAt).toLocaleString(getLocale())]))
+        Text(t('查询时间：{0}', [new Date(this.result.checkedAt).toLocaleString(getLocale(), { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })]))
           .fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.text_tertiary'))
       }
       if (this.error) { Banner({ text: this.error, compId: 'provider-balance-error-' + this.draft.id }) }

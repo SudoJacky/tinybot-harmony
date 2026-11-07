@@ -181,7 +181,7 @@ const drawerAttributes = {};
 const ui = new Proxy({}, { get: (_, name) => value => { drawerAttributes[name] = value; } });
 const gesture = new Proxy({}, { get: () => () => {} });
 const Drawer = probe('pages/Index', 'Index', ['drawer'], { Stack: ui, Column: gesture,
-  Gesture: gesture, PanGesture: gesture, GesturePriority: {}, PanDirection: {}, HitTestMode: {}, Alignment: {} });
+  If: gesture, Gesture: gesture, PanGesture: gesture, GesturePriority: {}, PanDirection: {}, HitTestMode: {}, Alignment: {} });
 let first = true;
 Object.assign(new Drawer(), { workbench: () => new WorkbenchLayout(1440, true),
   observeComponentCreation2(callback) { if (first) { first = false; callback(1, true); } } }).drawer();

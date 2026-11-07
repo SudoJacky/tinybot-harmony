@@ -132,7 +132,8 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
     if (key === 'canRetake') return false;
   } });
   const Gate = compile(methods('pages/Index', ['initialRender']), { Stack: widget, Column: widget, Text: widget, Button: widget, If: widget,
-    t: s => s, Space: {}, Radius: {}, FontWeight: {}, TextAlign: {}, FlexAlign: {}, Btn: {}, SheetSize: {}, SheetType: {} });
+    t: s => s, Space: {}, Radius: {}, FontWeight: {}, TextAlign: {}, FlexAlign: {}, Btn: {}, SheetSize: {}, SheetType: {},
+    SafeAreaType: { SYSTEM: 0 }, SafeAreaEdge: { TOP: 0, BOTTOM: 1 }, HitTestMode: { None: 0 } });
   const gate = Object.assign(new Gate(), { privacyAllowed: false, appearance: {}, app: { active: {} },
     privacy: { simulatorDebug: false, error: '', busy: false, requestConsent() { requests++; }, exit() { exits++; } },
     observeComponentCreation2: callback => callback(1, true), ifElseBranchUpdateFunction: (_id, callback) => callback() });

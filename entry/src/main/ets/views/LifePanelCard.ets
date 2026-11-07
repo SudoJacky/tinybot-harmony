@@ -158,10 +158,24 @@ export struct LifePanelCard {
   @Prop viewHeight: number = 0;
   @Prop frameHeight: number = 0;
   @State private menuVisible: boolean = false;
+  @State private menuAnchor: Position = { x: 0, y: 0 };
   @State private layoutAction: string = '';
   private cardWidth: number = 0;
   private cardHeight: number = 0;
   private contentHeight: number = 0;
+  pageScroller?: Scroller;
+  private pageScrollY: number = 0;
+  private scrollPage(event: GestureEvent): void {
+    if (!this.pageScroller || this.detail || this.layoutAction) { return; }
+    const delta = event.offsetY - this.pageScrollY;
+    this.pageScrollY = event.offsetY;
+    this.pageScroller.scrollBy(0, -delta);
+  }
+  private finishPageScroll(event: GestureEvent): void {
+    if (!this.pageScroller || this.detail || this.layoutAction) { return; }
+    this.scrollPage(event);
+    if (event.velocityY !== 0) { this.pageScroller.fling(event.velocityY); }
+  }
   storage?: MiniAppStorage;
   viewStorage?: MiniAppStorage;
   onRun: (inputs?: PanelInputs) => Promise<void> = async () => {};
@@ -184,7 +198,12 @@ export struct LifePanelCard {
   private beginPress(event: GestureEvent): void {
     this.layoutAction = this.cornerAction(event);
     if (this.layoutAction === 'move') { this.onMoveStart(event); }
-    else if (!this.layoutAction) { this.menuVisible = true; }
+    else if (!this.layoutAction) {
+      const finger = event.fingerList.find((point: FingerInfo) => !!point);
+      if (!finger) { return; }
+      this.menuAnchor = { x: finger.localX, y: finger.localY };
+      this.menuVisible = true;
+    }
   }
   private panLayout(event: GestureEvent, finished: boolean): void {
     if (this.layoutAction === 'move') {
@@ -199,7 +218,10 @@ export struct LifePanelCard {
     const view = this.panel.definition.view!;
     // The definition height is a starting viewport; inline cards follow their actual content.
     // Long presses belong to native card actions. Keep text entry selectable.
-    const css = view.css + '\nhtml{user-select:none;-webkit-user-select:none}input,textarea,[contenteditable=true]{user-select:text;-webkit-user-select:text}';
+    // Content-measured lists must not feed their viewport height back into the card.
+    // A board/detail supplies an explicit viewport, so viewport-filling layouts are safe there.
+    const height = this.viewHeight > 0 ? '100vh' : 'auto';
+    const css = view.css + '\nhtml{--tinybot-card-height:' + height + ';user-select:none;-webkit-user-select:none}input,textarea,[contenteditable=true]{user-select:text;-webkit-user-select:text}';
     const content: WebUiSpec = { version: view.version, html: view.html, css: css, js: view.js,
       library: view.library, height: view.height, autoHeight: true };
     return JSON.stringify(content);
@@ -281,7 +303,7 @@ export struct LifePanelCard {
       if (this.panel.definition.view) {
         if (this.storage) {
           WebUiView({ content: this.viewContent(), storage: this.storage, viewStorage: this.viewStorage, panelContext: this.context(),
-            interactive: this.interactive && !this.panel.archived && !this.editing && !this.layoutAction, preferParentScroll: !this.detail && this.frameHeight === 0, viewportHeight: this.viewHeight, onPanelRefresh: this.onRun,
+            interactive: this.interactive && !this.panel.archived && !this.editing && !this.layoutAction, preferParentScroll: !this.detail, viewportHeight: this.viewHeight, onPanelRefresh: this.onRun,
             onHeight: (height: number) => { this.contentHeight = height; },
             onRuntimeError: (message: string) => this.onRuntimeError(message, this.panel.configRevision) })
         } else {
@@ -324,23 +346,37 @@ export struct LifePanelCard {
         Scroll() { this.content() }
           .width('100%').height(this.frameHeight).align(Alignment.Top)
           .scrollable(this.panel.definition.view ? ScrollDirection.None : ScrollDirection.Vertical)
-          .scrollBar(BarState.Off).nestedScroll({ scrollForward: NestedScrollMode.SELF_FIRST, scrollBackward: NestedScrollMode.SELF_FIRST })
+          // Relay Web gestures through this frame too, so fixed-size cards cannot trap board scrolling.
+          .scrollBar(BarState.Off).nestedScroll({ scrollForward: this.detail ? NestedScrollMode.SELF_FIRST : NestedScrollMode.PARENT_FIRST,
+            scrollBackward: this.detail ? NestedScrollMode.SELF_FIRST : NestedScrollMode.PARENT_FIRST })
       } else { this.content() }
     }.width('100%').height(this.frameHeight > 0 ? this.frameHeight : undefined)
       .backgroundColor(this.panel.definition.view ? Color.Transparent : $r('app.color.surface'))
       .borderRadius(Radius.lg).border({ width: this.panel.definition.view ? 0 : 1, color: $r('app.color.divider') })
       .clip(this.frameHeight > 0 || !!this.panel.definition.view)
       .onAreaChange((_old: Area, area: Area) => { this.cardWidth = Number(area.width); this.cardHeight = Number(area.height); })
-      .priorityGesture(GestureGroup(GestureMode.Sequence,
+      // DOM overflow areas inside an iframe consume touch before Web.nestedScroll.
+      // Own only vertical pans here; taps/horizontal gestures stay with the card,
+      // and holding a corner still selects the existing move/resize sequence.
+      .priorityGesture(GestureGroup(GestureMode.Exclusive,
+        GestureGroup(GestureMode.Sequence,
         LongPressGesture({ repeat: false, duration: 350 }).tag('panel-press').onAction((event: GestureEvent) => this.beginPress(event)),
         PanGesture().onActionStart((event: GestureEvent) => this.panLayout(event, false))
           .onActionUpdate((event: GestureEvent) => this.panLayout(event, false))
-          .onActionEnd((event: GestureEvent) => this.panLayout(event, true))).onCancel(() => this.cancelPress()))
+          .onActionEnd((event: GestureEvent) => this.panLayout(event, true))).onCancel(() => this.cancelPress()),
+        PanGesture({ direction: PanDirection.Vertical }).tag('panel-scroll')
+          .onActionStart((event: GestureEvent) => { this.pageScrollY = 0; this.scrollPage(event); })
+          .onActionUpdate((event: GestureEvent) => this.scrollPage(event))
+          .onActionEnd((event: GestureEvent) => this.finishPageScroll(event))))
       .onGestureRecognizerJudgeBegin((event: BaseGestureEvent, recognizer: GestureRecognizer) => {
+        if (recognizer.getTag() === 'panel-scroll') {
+          return this.pageScroller && !this.detail && !this.editing && !this.layoutAction ? GestureJudgeResult.CONTINUE : GestureJudgeResult.REJECT;
+        }
         return recognizer.getTag() === 'panel-press' && !this.cornerAction(event) && (!this.panel.definition.view || !this.interactive || this.editing)
           ? GestureJudgeResult.REJECT : GestureJudgeResult.CONTINUE;
       })
       .bindContextMenu(this.menuVisible, this.menu, { systemMaterial: this.appearance.menu, mask: false,
+        anchorPosition: this.menuAnchor,
         onDisappear: () => { this.menuVisible = false; } })
       .onClick(() => { if (!this.interactive) { this.onOpen(); } })
   }

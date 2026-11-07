@@ -1,0 +1,24 @@
+<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>/*BUILTIN_STYLE*/
+.widget{--tone:#92775a}.time{display:flex;align-items:baseline;gap:8px;margin:18px 0 6px}.digits{font-size:clamp(36px,18cqi,76px);font-weight:550;line-height:1.1}.seconds{font-size:16px;color:var(--tone)}.date{color:var(--muted);font-size:13px}.week{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-top:22px}.day{text-align:center;padding:7px 0;font-size:11px;color:var(--muted);border-radius:12px}.day strong{display:block;font-size:13px;margin-top:3px;font-weight:550}.day.today{color:var(--surface);background:var(--tone)}#format{font-size:11px;min-width:44px;padding:4px 8px;color:var(--tone)}
+</style></head><body><article class="widget" aria-label="Clock"><header class="head"><span class="eyebrow"><i class="dot"></i><span data-zh="此刻 · 此地" data-en="HERE & NOW"></span></span><button id="format" aria-label="Switch time format">24H</button></header><div class="time"><time id="time" class="digits numeric"></time><span id="seconds" class="seconds numeric"></span></div><p id="date" class="date"></p><div id="week" class="week"></div><p id="status" class="status" role="status"></p></article><script>/*BUILTIN_RUNTIME*/
+let lastSecond = -1;
+function render() {
+  const now = new Date(), hour12 = snapshot.value?.hour12 === true;
+  $('time').textContent = new Intl.DateTimeFormat(context.locale, { hour: '2-digit', minute: '2-digit', ...(hour12 ? {hour12:true} : {hourCycle:'h23'}) }).format(now);
+  $('time').style.fontSize = 'clamp(22px,calc(110cqi / ' + Math.max(5, $('time').textContent.length) + '),68px)';
+  $('time').dateTime = now.toISOString(); $('seconds').textContent = String(now.getSeconds()).padStart(2, '0');
+  $('format').textContent = hour12 ? '12H' : '24H'; $('format').setAttribute('aria-label', tr('切换时间制式', 'Switch time format'));
+  $('date').textContent = new Intl.DateTimeFormat(context.locale, { month: 'long', day: 'numeric', weekday: 'long' }).format(now);
+  const monday = new Date(now); monday.setDate(now.getDate() - (now.getDay() + 6) % 7);
+  $('week').replaceChildren();
+  for (let i = 0; i < 7; i++) {
+    const day = new Date(monday); day.setDate(monday.getDate() + i);
+    const cell = document.createElement('div'); cell.className = 'day' + (day.toDateString() === now.toDateString() ? ' today' : '');
+    cell.append(new Intl.DateTimeFormat(context.locale, {weekday:'narrow'}).format(day));
+    const number = document.createElement('strong'); number.textContent = day.getDate(); cell.append(number); $('week').append(cell);
+  }
+}
+$('format').onclick = () => commit({ hour12: snapshot.value?.hour12 !== true });
+initialize(render, value => { if (value !== null && (!value || typeof value.hour12 !== 'boolean')) invalidState(); });
+tinybot.animate(() => { const second = Math.floor(Date.now() / 1000); if (second !== lastSecond) { lastSecond = second; render(); } });
+</script></body></html>

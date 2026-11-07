@@ -638,7 +638,8 @@ export struct OnboardingPanel {
         .id('onboarding-skip').height(44).padding({ left: 14, right: 14 })
         .backgroundColor(Color.Transparent).fontFamily(this.appearance.fontFamily).fontSize(13)
         .fontColor(this.muted()).enabled(!this.saving)
-        .accessibilityText(t('跳过第一次使用引导')).onClick(() => this.finish('skip'))
+        .visibility(this.step === 0 || this.step === 3 ? Visibility.Hidden : Visibility.Visible)
+          .accessibilityText(t('跳过第一次使用引导')).onClick(() => this.finish('skip'))
     }
     .width('100%').height(52)
   }
@@ -676,7 +677,7 @@ export struct OnboardingPanel {
               .onClick(() => this.onLegal('terms'))
           }.id('onboarding-account-agreement').fontFamily(this.appearance.fontFamily)
             .fontSize(13).lineHeight(19).fontColor(this.ink()).layoutWeight(1).enabled(!this.account.busy)
-        }.width('100%').padding({ left: 2, right: 2 })
+        }.width('100%').constraintSize({ maxWidth: 400 }).padding({ left: 2, right: 2 })
       }
     }.width('100%').constraintSize({ minHeight: this.bodyHeight }).justifyContent(FlexAlign.Center)
       .padding({ top: 12, bottom: 12 })
@@ -838,7 +839,7 @@ export struct OnboardingPanel {
           Text(this.primaryLabel()).fontFamily(this.appearance.fontFamily).fontSize(15).fontWeight(FontWeight.Medium)
             .fontColor(this.primaryAvailable() ? this.appearance.onAccent : this.muted())
         }
-          .id('onboarding-next').borderRadius(24).padding(0)
+          .constraintSize({ maxWidth: 400 }).id('onboarding-next').borderRadius(24).padding(0)
           .height(48).width('100%').clickEffect(this.appearance.effectStrength > 0 ? null : Motion.press)
           .backgroundColor(this.primaryAvailable() ? this.appearance.accent : this.disabledFill())
           .selectedColor(this.primaryAvailable() ? this.appearance.accent : this.disabledFill())
@@ -896,7 +897,7 @@ export struct OnboardingPanel {
       .onAreaChange((_old: Area, area: Area) => this.stageChanged(area))
       this.footer()
     }
-    .id('onboarding-panel').width('100%').height('100%')
+    .id('onboarding-panel').width('100%').constraintSize({ maxWidth: 720 }).height('100%')
     .padding({ left: 24, right: 24, top: 8, bottom: 4 })
     .backgroundColor(this.page())
   }

@@ -4,6 +4,9 @@ const { spawnSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const suites = {
   source: [
+    'test-builtin-board.cjs',
+    'test-builtin-widgets.cjs',
+    'test-markdown-math.cjs',
     'test-sidebar-navigation.cjs',
     'test-parallel-sessions.cjs',
     'test-answer-speech-native.cjs',
@@ -37,6 +40,7 @@ const suites = {
     'test-memory.cjs',
     'test-mail.cjs',
     'test-panel-presentation.cjs',
+    'test-panel-grid.cjs',
     'test-mini-apps.cjs',
     'test-model-dependencies.cjs',
     'test-orchestration.cjs',

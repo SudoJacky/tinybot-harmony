@@ -1,6 +1,6 @@
 import { PanelInputs } from '../model/PanelContract';
 import { PanelRect, panelMasonry, panelSourceLabel, panelRunLabel, panelErrorText } from '../model/PanelPresentation';
-import { GridRect, GRID_GAP, GRID_ROW_STEP, GRID_MAX_ROWS, gridStep, gridPixels, gridSnap, gridPlace } from '../model/PanelGrid';
+import { GridRect, GRID_GAP, GRID_ROW_STEP, GRID_MAX_ROWS, gridStep, gridPixels, gridSnap, gridPlace, gridVacancy } from '../model/PanelGrid';
 import { PanelGridGuide } from './PanelGridGuide';
 import { common } from '@kit.AbilityKit';
 import { AppearanceStyle } from '../common/AppearanceStyle';
@@ -20,6 +20,11 @@ import { PanelChanges } from '../services/PanelChanges';
 import { BoardEntry, BoardItem, boardLayoutKey, boardLayoutItems, PanelTarget, parsePanelTarget, referenceKey } from '../model/LifeBoard';
 import { PanelRecord, PanelRun } from '../model/LifePanel';
 import { MiniAppStorage } from '../model/MiniApp';
+import { builtinWidget } from '../model/BuiltinWidgets';
+import { BuiltinWidgets } from '../services/BuiltinWidgets';
+import { ProviderBalanceSource } from '../services/ProviderBalanceSource';
+import { BuiltinWidgetGallery } from './BuiltinWidgetGallery';
+import { BuiltinBoard } from '../services/BuiltinBoard';
 
 interface PanelEditTarget { workspaceId: string; panelId: string; configRevision: number; runtimeError?: string; sourceError: string; }
 interface BoardGridContext { columns: number; columnWidth: number; rowHeight: number; gap: number; minW: number; maxW: number; minH: number; maxH: number; defaultW: number; defaultH: number; }
@@ -31,6 +36,7 @@ export struct LifePanelsPanel {
   @Prop @Watch('targetChanged') requestedTarget: string = '';
   @ObjectLink app: ChatViewModel;
   onChat: () => void = () => {};
+  onShown: () => void = () => {};
   @State private entries: PanelEntry[] = [];
   @State private boards: BoardEntry[] = [];
   @State @Watch('revealBoard') private boardSelection: string = '';
@@ -52,6 +58,7 @@ export struct LifePanelsPanel {
   @State @Watch('detailChanged') private selected: string = '';
   @State private removed: boolean = false;
   @State private creating: boolean = false;
+  @State private addingBuiltin: string = '';
   @State private connectionEntry: PanelEntry | undefined = undefined;
   @State private refreshing: boolean = false;
   @State private cardHeights: Record<string, number> = {};
@@ -94,6 +101,7 @@ export struct LifePanelsPanel {
   private scanning: boolean = false;
   private unsubscribe?: () => void;
   private lastTarget: string = '';
+  private guidesPrepared: boolean = false;
   private boardStore(): LifeBoards { return new LifeBoards((this.getUIContext().getHostContext() as common.UIAbilityContext).getApplicationContext().filesDir); }
   private boardKey(entry: BoardEntry): string { return entry.workspaceId + '/' + entry.board.id; }
   private boardFor(key: string): BoardEntry { return this.boards.find((entry: BoardEntry) => this.boardKey(entry) === key)!; }
@@ -106,7 +114,11 @@ export struct LifePanelsPanel {
     if (!this.store) { this.store = new LifePanels((this.getUIContext().getHostContext() as common.UIAbilityContext).getApplicationContext().filesDir); }
     return this.store;
   }
-  aboutToAppear(): void { this.mounted = true; this.activityChanged(); this.unsubscribe = PanelChanges.subscribe(() => { if (this.mounted && this.active) { this.reload().catch((error: Error) => this.report(error)); } }); }
+  aboutToAppear(): void { this.mounted = true; this.activityChanged(); this.unsubscribe = PanelChanges.subscribe(() => {
+    // Initial publication emits changes before the guide board exists. The first scan reloads
+    // the completed installation; a partial snapshot must not clear its default selection.
+    if (this.mounted && this.active && this.guidesPrepared) { this.reload().catch((error: Error) => this.report(error)); }
+  }); }
   aboutToDisappear(): void { this.mounted = false; this.stop(); this.unsubscribe?.(); }
   private stop(): void { this.resetGesture(); clearTimeout(this.timer); this.timer = -1; this.cancellation.cancel(); }
   private activityChanged(): void {
@@ -149,10 +161,16 @@ export struct LifePanelsPanel {
     this.scanning = true;
     const signal = this.cancellation;
     // The app-level scheduler owns automatic work so navigating away cannot cancel it.
-    this.reload().catch((error: Error) => { if (!signal.cancelled) { this.report(error); } }).finally(() => {
+    this.prepareGuides(signal).then(() => this.reload()).catch((error: Error) => { if (!signal.cancelled) { this.report(error); } }).finally(() => {
       this.scanning = false;
       if (this.mounted && this.foreground && this.active && !signal.cancelled) { this.timer = setTimeout(() => this.scan(), 30000); }
     });
+  }
+  private async prepareGuides(signal: Cancellation): Promise<void> {
+    if (this.guidesPrepared) { return; }
+    const target = await new BuiltinBoard(this.getUIContext().getHostContext() as common.UIAbilityContext).prepare(signal);
+    signal.check(); this.guidesPrepared = true;
+    if (target && !this.boardSelection && !this.requestedTarget) { this.boardSelection = target.workspaceId + '/' + target.boardId; this.selected = ''; }
   }
   private entryKey(entry: PanelEntry): string { return entry.workspaceId + '/' + entry.panel.id; }
   private visible(): PanelEntry[] {
@@ -238,7 +256,7 @@ export struct LifePanelsPanel {
   private layouts(): PanelRect[] {
     const entries = this.visible();
     if (this.currentBoard()) { return entries.map((entry: PanelEntry) => gridPixels(this.gridRect(this.entryKey(entry)), this.boardWidth)); }
-    return panelMasonry(this.boardWidth, 1, entries.map(() => 1), entries.map((entry: PanelEntry) => this.cardHeights[this.entryKey(entry)] || 180));
+    return panelMasonry(this.boardWidth, this.boardWidth >= 720 ? 2 : 1, entries.map(() => 1), entries.map((entry: PanelEntry) => this.cardHeights[this.entryKey(entry)] || 180));
   }
   private rect(key: string): PanelRect { return this.layouts()[this.visible().findIndex((entry: PanelEntry) => this.entryKey(entry) === key)]; }
   private boardHeight(): number {
@@ -300,7 +318,7 @@ export struct LifePanelsPanel {
     } catch (error) { if (!signal.cancelled) { this.report(error as Error); } }
   }
   private async createCard(): Promise<void> {
-    if (this.creating || this.app.busy || !this.app.ready || !this.prompt.trim()) { return; }
+    if (this.creating || this.addingBuiltin || this.app.busy || !this.app.ready || !this.prompt.trim()) { return; }
     this.getUIContext().getFocusController().clearFocus();
     this.creating = true; this.error = ''; this.feedback = t('正在生成并验证卡片…');
     const board = this.currentBoard(), target = this.entries.find((entry: PanelEntry) => this.entryKey(entry) === this.editTarget);
@@ -321,6 +339,25 @@ export struct LifePanelsPanel {
       this.feedback = t('本轮已结束，可查看对话继续调整'); await this.reload();
     } catch (error) { this.feedback = ''; this.report(error as Error); }
     finally { if (this.mounted) { this.creating = false; } }
+  }
+  private async addBuiltin(id: string): Promise<void> {
+    if (this.addingBuiltin || this.creating || !this.app.ready) { return; }
+    this.addingBuiltin = id; this.error = '';
+    const board = this.currentBoard(), workspaceId = board?.workspaceId || this.app.activeWorkspaceId;
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext, widget = builtinWidget(id);
+      const width = board ? (this.boardWidth + GRID_GAP) * widget.width / 12 - GRID_GAP : this.boardWidth;
+      const entry = await new BuiltinWidgets(context).add(id, workspaceId, this.cancellation, width);
+      if (board) {
+        const current = await this.boardStore().get(board.workspaceId, board.board.id);
+        await this.boardStore().place(board.workspaceId, board.board.id, { workspaceId: entry.workspaceId, panelId: entry.panel.id },
+          gridVacancy(current.items, widget.width, widget.height), boardLayoutKey(current.items));
+      }
+      if (!this.mounted) { return; }
+      await this.reload(); this.sheetOpen = false; this.removed = false;
+      if (!board) { this.selected = this.entryKey(entry); }
+    } catch (error) { if (!(error instanceof RunCancelledError)) { this.report(error as Error); } }
+    finally { this.addingBuiltin = ''; }
   }
   private async showEditor(): Promise<void> {
     const id = this.currentEditorThreadId();
@@ -351,7 +388,8 @@ export struct LifePanelsPanel {
   }
   @Builder private card(key: string, detail: boolean = false) {
     LifePanelCard({ panel: this.entryFor(key).panel, cardSize: this.currentBoard() ? 'L' : 'M', onBoard: !!this.currentBoard(), busy: this.pending.includes(key) || this.entryFor(key).panel.runs?.[0]?.status === 'running' && this.panels().repository(this.entryFor(key).workspaceId).isRefreshing(this.entryFor(key).panel.id), detail: detail, timestamp: this.timestamp(this.entryFor(key)),
-      editing: false, frameHeight: !detail ? this.heightOnBoard(this.entryFor(key)) : 0, viewHeight: detail ? this.detailHeight : this.heightOnBoard(this.entryFor(key)),
+      editing: false, pageScroller: detail ? undefined : this.contentScroller,
+      frameHeight: !detail ? this.heightOnBoard(this.entryFor(key)) : 0, viewHeight: detail ? this.detailHeight : this.heightOnBoard(this.entryFor(key)),
       storage: this.panels().repository(this.entryFor(key).workspaceId).binding(this.entryFor(key).panel.id, this.entryFor(key).panel.configRevision),
       viewStorage: this.viewStorage(key),
       onRun: async (inputs?: PanelInputs) => { await this.panels().repository(this.entryFor(key).workspaceId).refresh(this.entryFor(key).panel.id, this.cancellation, 'manual', inputs); await this.reload(); },
@@ -431,17 +469,18 @@ export struct LifePanelsPanel {
     }.height('100%').width('100%').align(Alignment.TopStart)
   }
   @Builder private task() { if (this.taskEntry) { PanelTaskPanel({ entry: this.taskEntry }) } }
+  @Builder private builtinGallery() {
+    BuiltinWidgetGallery({ adding: this.addingBuiltin, available: this.app.ready && !this.creating,
+      balanceAvailable: ProviderBalanceSource.accounts().length > 0, onAdd: (id: string) => { this.addBuiltin(id); } })
+  }
   @Builder private addPicker() {
     Scroll() {
       Column({ space: 16 }) {
-        Text(t('创建交互工具，或复用已有卡片')).fontSize(18).fontWeight(FontWeight.Medium).width('100%')
+        this.builtinGallery()
+        Divider().color($r('app.color.divider')).margin({ top: 4, bottom: 4 })
+        Text(t('想要不一样的？')).fontSize(16).fontWeight(FontWeight.Medium).width('100%')
         Button(t('让 AI 创建')).attributeModifier(Btn.primary).width('100%').id('life-panel-create-ai')
-          .enabled(this.app.ready && !this.app.busy && !this.creating).onClick(() => { this.sheetOpen = false; this.editingPrompt = true; })
-        Button(t('创建 Provider 余额卡片')).attributeModifier(Btn.tonal).width('100%').id('life-panel-create-balance')
-          .enabled(this.app.ready && !this.app.busy && !this.creating).onClick(() => {
-            this.prompt = t('请先读取 get_life_panel_catalog 的 balance 部分，为已配置的 Provider 创建 HTML 余额卡片。采用精简 Wallet Card 样式：保留账户切换、隐藏余额和右上角刷新，只显示余额数值，不显示单位、变化量、搜索框和底部按钮。使用 provider-balance 数据源，验证后发布；若没有可查询的服务，请说明需要配置的内容。');
-            this.editTarget = ''; this.createCard();
-          })
+          .enabled(this.app.ready && !this.app.busy && !this.creating && !this.addingBuiltin).onClick(() => { this.sheetOpen = false; this.editingPrompt = true; })
         if (this.currentBoard()) {
           TextInput({ text: this.cardQuery, placeholder: t('搜索已有卡片') }).onChange((value: string) => { this.cardQuery = value; })
           Text(t('添加的是共享卡片，修改会同步到其他看板')).fontSize(12).fontColor($r('app.color.text_secondary'))
@@ -560,9 +599,12 @@ export struct LifePanelsPanel {
           Scroll(this.contentScroller) {
             if (!this.visible().length) {
               Column({ space: 12 }) {
-                Text(t('把关心的事情放在这里')).fontSize(20).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
-                Text(t('把计时器、打卡工具、数据图表放在同一看板。卡片可以直接操作，也能随任务更新。')).fontSize(14).fontColor($r('app.color.text_secondary'))
-              }.width('100%').padding({ top: 40 })
+                if (this.removed) {
+                  Text(t('没有已移除的卡片')).fontSize(16).fontColor($r('app.color.text_secondary'))
+                } else {
+                  this.builtinGallery()
+                }
+              }.width('100%').padding({ top: 16, bottom: 16 })
             } else {
               Stack({ alignContent: Alignment.TopStart }) {
                 if (this.currentBoard() && (this.dragging || this.resizing)) {
@@ -594,23 +636,31 @@ export struct LifePanelsPanel {
               }.width('100%').height(this.boardHeight())
             }
           }.scrollable(ScrollDirection.Vertical).enableScrollInteraction(!this.dragging && !this.resizing)
-            .id('life-panel-list').width('100%').height('100%').align(Alignment.TopStart).scrollBar(BarState.Auto)
+            // Web nested scrolling can bypass enableScrollInteraction(false).
+            // Block its touch/fling frames during layout; edge scrollTo calls remain available.
+            .onScrollFrameBegin((offset: number) => ({ offsetRemain: this.dragging || this.resizing ? 0 : offset }))
+            .id('life-panel-list').width('100%').height('100%').align(Alignment.TopStart).scrollBar(BarState.Off)
             .edgeEffect(this.dragging || this.resizing ? EdgeEffect.None : EdgeEffect.Spring, { alwaysEnabled: true })
             .onDidScroll(() => {
               this.scrollOffset = this.contentScroller.currentOffset().yOffset;
               if (this.dragging || this.resizing) { this.updateLayout(); }
             })
             .onAreaChange((_old: Area, area: Area) => { this.viewportTop = Number(area.globalPosition.y); this.viewportHeight = Number(area.height); })
-        }.layoutWeight(1).width('100%').onRefreshing(async () => {
+        }.layoutWeight(1).width('100%')
+          // Refresh has its own gesture: block both its trigger and pull-follow during layout.
+          .pullToRefresh(!this.dragging && !this.resizing)
+          .pullDownRatio(this.dragging || this.resizing ? 0 : undefined)
+          .onRefreshing(async () => {
           try { await this.refreshAll(); } finally { this.refreshing = false; }
         })
       }
       if (this.editingPrompt && !this.selected) { this.composer() }
     }.width('100%').height('100%').padding({ left: 16, right: 16, top: 8, bottom: 8 })
-      .bindSheet($$this.sheetOpen, this.sheet(), { title: { title: this.sheetTitle() }, detents: [SheetSize.LARGE], onDisappear: () => this.detailChanged() })
+      .bindSheet($$this.sheetOpen, this.sheet(), { preferType: this.boardWidth >= 600 ? SheetType.CENTER : SheetType.BOTTOM,
+        width: this.boardWidth >= 600 ? (this.sheetKind === 'add' && this.boardWidth >= 720 ? 720 : 560) : undefined, maskColor: '#52000000', backgroundColor: $r('app.color.page_background'), title: { title: this.sheetTitle() }, detents: [SheetSize.LARGE], onDisappear: () => this.detailChanged() })
       .onAreaChange((_old: Area, area: Area) => { this.boardWidth = Math.max(160, Number(area.width) - 32); })
-    }.title(t('生活看板'), { systemMaterial: this.appearance.control }).menus(this.titleActions)
+    }.title(t('生活看板'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).menus(this.titleActions)
       .backgroundColor($r('app.color.page_background'))
-      .onShown(() => { this.active = true; }).onHidden(() => { this.active = false; })
+      .onShown(() => { this.active = true; this.onShown(); }).onHidden(() => { this.active = false; })
   }
 }

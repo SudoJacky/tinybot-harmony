@@ -1,3 +1,4 @@
+import { PageStyles } from '../common/PageStyles';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { systemMaterialAttribute } from '../common/MaterialAttributes';
 import { t } from '../model/I18n';
@@ -36,8 +37,10 @@ export struct SkillsPanel {
             Text(t('内置') + ' · ' + skill.name).fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
               .fontColor($r('app.color.text_tertiary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           }
+          if (skill.files.length > 0 || skill.manualOnly) {
           Text(t("{0} 个参考文件{1}", [skill.files.length, skill.manualOnly ? t(' · 仅手动调用') : ''])).fontFamily(this.appearance.fontFamily)
             .fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
+          }
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
         Toggle({ type: ToggleType.Switch, isOn: skill.enabled }).id('toggle-skill-' + skill.name)
           .attributeModifier(Styles.toggle)
@@ -55,10 +58,12 @@ export struct SkillsPanel {
           .onClick(() => { if (this.app.useSkill(skill.name)) { this.onUse(); } })
         Button(t("编辑")).id('edit-skill-' + skill.name).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.plainSmall).enabled(!this.locked()).onClick(() => this.onEdit(skill.name))
         Blank()
+        if (!builtinSkillInfo(skill)) {
         Button({ type: ButtonType.Circle }) {
           SymbolGlyph($r('sys.symbol.trash')).fontSize(18).fontColor([$r('app.color.danger')])
         }.fontFamily(this.appearance.fontFamily).width(36).height(36).backgroundColor(Color.Transparent).accessibilityText(t("删除"))
         .enabled(!this.locked()).onClick(() => this.confirmDelete(skill))
+        }
       }.width('100%')
     }.padding(Space.lg).borderRadius(Radius.lg).width('100%').backgroundColor($r('app.color.surface'))
     .opacity(skill.enabled ? 1 : 0.75)
@@ -88,6 +93,6 @@ export struct SkillsPanel {
         Button(t("添加 Skill")).fontFamily(this.appearance.fontFamily).id('add-skill').attributeModifier(Btn.primary).width('100%')
           .enabled(!this.locked()).onClick(() => this.onEdit(''))
       }
-    }.width('100%').height('100%')
+    }.width('100%').height('100%').attributeModifier(PageStyles.form)
   }
 }

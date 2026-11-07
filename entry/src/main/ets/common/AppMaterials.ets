@@ -12,9 +12,6 @@ export class AppMaterials {
   private static selectedStyle?: uiMaterial.ImmersiveStyle;
   private static controlMaterial?: uiMaterial.Material;
   private static accentControlMaterial?: uiMaterial.Material;
-  private static surfaceMaterial?: uiMaterial.Material;
-  private static menuMaterial?: uiMaterial.Material;
-  private static readingSurfaceMaterial?: uiMaterial.Material;
   private static effect: LightEffect = 'auto';
   private static accent: ResourceColor = $r('app.color.accent_material');
   // API availability does not imply device support. Unsupported API-26 devices
@@ -48,6 +45,8 @@ export class AppMaterials {
   }
 
   // Explicitly opt out of native immersive effects while keeping older systems supported.
+  static get enabled(): boolean { return AppMaterials.available && AppMaterials.effect !== 'off'; }
+
   static get empty(): uiMaterial.Material | undefined {
     return AppMaterials.available ? uiMaterial.Material.empty : undefined;
   }
@@ -58,9 +57,6 @@ export class AppMaterials {
     AppMaterials.accent = accent;
     AppMaterials.controlMaterial = undefined;
     AppMaterials.accentControlMaterial = undefined;
-    AppMaterials.surfaceMaterial = undefined;
-    AppMaterials.menuMaterial = undefined;
-    AppMaterials.readingSurfaceMaterial = undefined;
   }
 
   private static get style(): uiMaterial.ImmersiveStyle | undefined {
@@ -95,9 +91,6 @@ export class AppMaterials {
       AppMaterials.unavailable = true;
       AppMaterials.controlMaterial = undefined;
       AppMaterials.accentControlMaterial = undefined;
-      AppMaterials.surfaceMaterial = undefined;
-      AppMaterials.menuMaterial = undefined;
-      AppMaterials.readingSurfaceMaterial = undefined;
       Diagnostics.log('error', 'appearance', 'material_unavailable', { code: ApiLevel.sdk }, error as Error);
       return undefined;
     }
@@ -129,42 +122,20 @@ export class AppMaterials {
     return AppMaterials.accentControlMaterial;
   }
 
-  // General overlays use the next gentler app tier; adaptive menus use the separate menu material.
+  // Overlay text must stay legible: native immersive material exposes sharp backdrop text on MatePad.
+  // Use the native empty material with the component's opaque themed background in every effect mode.
   static get surface(): uiMaterial.Material | undefined {
-    if (!AppMaterials.available) { return undefined; }
-    if (AppMaterials.effect === 'off') { return uiMaterial.Material.empty; }
-    if (!AppMaterials.surfaceMaterial) {
-      const selected = AppMaterials.style;
-      AppMaterials.surfaceMaterial = AppMaterials.build(() => new uiMaterial.ImmersiveMaterial({
-        style: selected === uiMaterial.ImmersiveStyle.ULTRA_THIN ? uiMaterial.ImmersiveStyle.THIN : uiMaterial.ImmersiveStyle.THICK,
-        colorInvert: true
-      }));
-    }
-    return AppMaterials.surfaceMaterial;
+    return AppMaterials.empty;
   }
 
-  // Backdrop-driven foreground inversion only works with THIN or ULTRA_THIN material.
+  // Native menus and Select popups use the same solid surface as custom pickers.
   static get menu(): uiMaterial.Material | undefined {
-    if (!AppMaterials.available) { return undefined; }
-    if (AppMaterials.effect === 'off') { return uiMaterial.Material.empty; }
-    if (!AppMaterials.menuMaterial) {
-      AppMaterials.menuMaterial = AppMaterials.build(() => new uiMaterial.ImmersiveMaterial({
-        style: uiMaterial.ImmersiveStyle.THIN, colorInvert: true
-      }));
-    }
-    return AppMaterials.menuMaterial;
+    return AppMaterials.empty;
   }
 
-  // Long sheets need a denser, tinted backing so underlying text cannot compete with their content.
+  // Reading sheets share the solid overlay policy.
   static get readingSurface(): uiMaterial.Material | undefined {
-    if (!AppMaterials.available) { return undefined; }
-    if (AppMaterials.effect === 'off') { return uiMaterial.Material.empty; }
-    if (!AppMaterials.readingSurfaceMaterial) {
-      AppMaterials.readingSurfaceMaterial = AppMaterials.build(() => new uiMaterial.ImmersiveMaterial({
-        style: uiMaterial.ImmersiveStyle.THICK, materialColor: $r('app.color.reading_surface_tint'), colorInvert: false
-      }));
-    }
-    return AppMaterials.readingSurfaceMaterial;
+    return AppMaterials.empty;
   }
 
   private static lightEffect(): uiMaterial.LightEffectOptions {

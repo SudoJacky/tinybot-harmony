@@ -42,8 +42,8 @@ function renderer(name) {
     WebUiView: class { constructor(parent, params, _storage, id) { children.set(id, { ...params }); } },
     Diagnostics: { log: noop }, systemInsets: async () => [0, 24],
     LongPressGesture: element('gesture'), PanGesture: element('gesture'), GestureGroup: element('gesture'),
-    NestedScrollMode: {}, BorderStyle: {}, PanelGridGuide: class {}, GestureMode: {}, ScrollDirection: {Vertical:1,None:0}, BarState: {}, FontWeight: {}, FlexAlign: {}, TextAlign: {}, HorizontalAlign: {}, Alignment: {},
-    GesturePriority: {}, GestureMask: {}, GestureJudgeResult: { REJECT: 0, CONTINUE: 1 }, SheetSize: {}, Gesture: element('gesture') };
+    NestedScrollMode: { PARENT_FIRST: 'parent', SELF_FIRST: 'self' }, BorderStyle: {}, PanelGridGuide: class {}, GestureMode: {}, PanDirection: { Vertical: 'vertical' }, ScrollDirection: {Vertical:1,None:0}, BarState: {}, FontWeight: {}, FlexAlign: {}, TextAlign: {}, HorizontalAlign: {}, Alignment: {},
+    GesturePriority: {}, GestureMask: {}, GestureJudgeResult: { REJECT: 0, CONTINUE: 1 }, BarStyle: {}, SheetType: {}, SheetSize: {}, Gesture: element('gesture') };
   for (const name of ['__Common__','Column','Row','Scroll','Stack','Button','Blank','Text','TextInput','If','ForEach','Checkbox','List','ListItem','Refresh','SymbolGlyph','LoadingProgress','Menu','MenuItem','MenuItemGroup','NavDestination']) globals[name] = element(name);
   vm.runInNewContext(ts.transpileModule('export class Probe {' + methods + '}', { compilerOptions: {
     target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS
@@ -119,8 +119,29 @@ const draggingView=renderer('LifePanelsPanel');
 Object.assign(draggingView.view,panelState,{dragging:'workspace/metric',dragOrigin:{x:0,y:0,width:360,height:180},targetRect:{w:6,h:4},ghost:()=>({x:0,y:0,width:176,height:115})});
 draggingView.view.initialRender();
 const gridScroll=[...draggingView.attributes.values()].find(a=>a.id==='life-panel-list');
+const refreshId=[...draggingView.attributes].find(([,a])=>a.onRefreshing)[0];
+assert.equal(draggingView.attributes.get(refreshId).pullToRefresh,false,'Moving a card must not trigger pull-to-refresh');
+assert.equal(draggingView.attributes.get(refreshId).pullDownRatio,0,'Moving a card must not pull down the refresh indicator');
 assert.equal(gridScroll.enableScrollInteraction,false,'The card gesture owns touch scrolling during a drag');
 assert.equal(gridScroll.scrollable,1,'Programmatic vertical edge scrolling stays enabled while dragging');
+for (const offset of [-40,40]) {
+  assert.equal(gridScroll.onScrollFrameBegin(offset).offsetRemain,0,'Nested Web touch/inertia cannot scroll the page during a move');
+}
+draggingView.view.dragging='';draggingView.view.resizing='workspace/metric';
+draggingView.update();
+assert.equal(draggingView.attributes.get(refreshId).pullToRefresh,false,'Resizing must not trigger pull-to-refresh');
+assert.equal(draggingView.attributes.get(refreshId).pullDownRatio,0,'Resizing must not pull down the refresh indicator');
+for (const offset of [-40,40]) {
+  assert.equal(gridScroll.onScrollFrameBegin(offset).offsetRemain,0,'Nested Web touch/inertia cannot cancel vertical resizing');
+}
+draggingView.view.resizing='';
+draggingView.update();
+assert.equal(draggingView.attributes.get(refreshId).pullToRefresh,true,'Pull-to-refresh resumes when layout ends');
+assert.equal(draggingView.attributes.get(refreshId).pullDownRatio,undefined,'Browsing restores the native pull-down response');
+for (const offset of [-40,40]) {
+  assert.equal(gridScroll.onScrollFrameBegin(offset).offsetRemain,offset,'Normal board scrolling resumes when layout ends');
+}
+console.log('PASS native scroll frames are blocked during move/resize without disabling programmed edge scrolling');
 assert.ok([...draggingView.texts.values()].includes('6 × 4'),'The snapped preview shows its cell dimensions');
 
 for(const selected of ['', 'workspace/metric']) {
@@ -128,6 +149,7 @@ for(const selected of ['', 'workspace/metric']) {
   const html={...first,panel:{...first.panel,definition:{...first.panel.definition,view:{height:320}}}};
   Object.assign(page,panelState,{selected,entries:[html],detailHeight:500,
     panels:()=>({repository:()=>({isRefreshing:()=>false,binding:(id,revision)=>({id,revision})})})});
+  page.contentScroller={marker:'vertical-page'};
   page.initialRender();const id=[...layout.children.keys()][0],storage=layout.children.get(id).storage;
   assert.equal(layout.children.get(id).cardSize,'M','Legacy cards use the definition size before user customization');
   assert.equal(layout.children.get(id).viewHeight, selected ? 500 : 0, 'Only expanded cards force a viewport height');
@@ -144,6 +166,7 @@ for(const selected of ['', 'workspace/metric']) {
   const placedId=[...layout.children.keys()][0],placed=layout.children.get(placedId);
   assert.equal(placed.viewHeight,selected?500:176);
   assert.equal(placed.frameHeight,selected?0:176);
+  assert.equal(placed.pageScroller,selected?undefined:page.contentScroller,'Only collection cards receive the vertical page scroller');
   assert.deepEqual(placed.storage,storage,'Entering a board retains the shared data identity');
   if(!selected)assert.equal(placed.viewStorage.mount,'mount-a');
   if(!selected)assert.notEqual(placedId,id,'Entering a placement creates its own HTML session');
@@ -225,11 +248,54 @@ assert.ok(![...card.buttons.values()].includes('打开交互卡片'));
 assert.ok(![...card.texts.values()].includes('生活看板'));
 assert.ok(![...card.texts.values()].includes('Metric'), 'HTML supplies its own title without a native duplicate');
 const web = [...card.children.values()][0];
+assert.equal(web.preferParentScroll,true,'Inline previews yield vertical gestures to their parent');
 assert.equal(JSON.parse(web.content).autoHeight,true,'Existing fixed-height HTML cards also shrink to content');
 assert.equal(web.viewportHeight,0);
+assert.match(JSON.parse(web.content).css,/--tinybot-card-height:auto/,'Content-measured cards cannot fill their own viewport');
+card.view.viewHeight=428;
+const boardContent=card.view.viewContent();
+assert.match(JSON.parse(boardContent).css,/--tinybot-card-height:100vh/,'Boards fill their explicitly sized viewport');
+card.view.viewHeight=472;
+assert.equal(card.view.viewContent(),boardContent,'Board resize must retain the existing HTML session');
+for (const html of [true,false]) {
+  const fixed = renderer('LifePanelCard');
+  Object.assign(fixed.view, { ...initialCard, appearance: {}, dark: false, editing: false, detail: false,
+    onBoard: true, interactive: true, timestamp: '', viewHeight: 176, frameHeight: 176,
+    panel: { ...initialCard.panel, definition: { ...initialCard.panel.definition, view: html ? initialCard.panel.definition.view : undefined, nodes: [] } } });
+  fixed.view.initialRender();
+  const frame = [...fixed.attributes.values()].find(a => a.nestedScroll);
+  assert.equal(frame.nestedScroll.scrollForward,'parent','Fixed card frames relay upward swipes to the board');
+  assert.equal(frame.nestedScroll.scrollBackward,'parent','Fixed card frames relay downward swipes to the board');
+  if (html) {
+    assert.equal([...fixed.children.values()][0].preferParentScroll,true,'Fixed-height Web cards yield to the board as well');
+    fixed.view.detail = true; fixed.update();
+    assert.equal([...fixed.children.values()][0].preferParentScroll,false,'Detail Web cards retain their own scrolling');
+  }
+}
+console.log('PASS fixed HTML/native cards prioritize board scrolling in both directions while detail cards remain interactive');
+const scrollingCard=renderer('LifePanelCard').view, scrollCalls=[], flings=[];
+Object.assign(scrollingCard,{detail:false,layoutAction:'',pageScrollY:0,
+  pageScroller:{scrollBy:(x,y)=>scrollCalls.push([x,y]),fling:velocity=>flings.push(velocity)}});
+scrollingCard.scrollPage({offsetY:-12});scrollingCard.scrollPage({offsetY:-60});scrollingCard.scrollPage({offsetY:-25});
+scrollingCard.finishPageScroll({offsetY:-25,velocityY:600});
+assert.deepEqual(scrollCalls.slice(0,3),[[0,12],[0,48],[0,-35]],'Vertical drags scroll only their incremental displacement, including reversals');
+assert.ok(scrollCalls[3][0]===0 && scrollCalls[3][1]===0,'Release at the same position adds no displacement');
+assert.deepEqual(flings,[600],'Release hands finger velocity to native inertia (positive moves towards the top)');
+scrollingCard.detail=true;scrollingCard.scrollPage({offsetY:100});scrollingCard.finishPageScroll({offsetY:100,velocityY:900});
+scrollingCard.detail=false;scrollingCard.layoutAction='resize';scrollingCard.scrollPage({offsetY:100});
+assert.equal(scrollCalls.length,4);assert.equal(flings.length,1,'Detail and resize gestures cannot move the board');
+const scrollGesture={getTag:()=> 'panel-scroll'};
+card.view.viewHeight=0;
 web.onHeight(192); assert.equal(card.view.contentHeight,192,'Resizing starts from the measured HTML content');
 let opened=0; card.view.onOpen=()=>opened++;
 const cardRoot = [...card.attributes.values()].find(a=>'bindContextMenu' in a);
+assert.equal(cardRoot.onGestureRecognizerJudgeBegin({},scrollGesture),0,'Chat previews do not capture page pans');
+card.view.pageScroller=scrollingCard.pageScroller;
+assert.equal(cardRoot.onGestureRecognizerJudgeBegin({},scrollGesture),1,'Collection cards capture vertical pans before DOM scrollers');
+card.view.detail=true;
+assert.equal(cardRoot.onGestureRecognizerJudgeBegin({},scrollGesture),0,'Opening a card restores internal scroll gestures');
+card.view.detail=false;
+console.log('PASS page pan displacement/reversal, native fling and gesture ownership exclude previews, detail and resize');
 cardRoot.onClick();
 assert.equal(opened,1,'Noninteractive chat previews open when tapped');
 const menuGesture={getTag:()=> 'panel-press'};

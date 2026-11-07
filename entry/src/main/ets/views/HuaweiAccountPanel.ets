@@ -1,3 +1,4 @@
+import { PageStyles } from '../common/PageStyles';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { systemMaterialAttribute } from '../common/MaterialAttributes';
 import { Banner, GroupCard, NavRow, RowDivider } from '../common/Widgets';
@@ -22,7 +23,7 @@ export struct HuaweiAccountPanel {
         SymbolGlyph($r('sys.symbol.person')).fontSize(56).fontColor([$r('app.color.accent')])
           .margin({ top: Space.xl })
         Text(this.account.signedIn ? t('已登录华为账号') : t('登录华为账号'))
-          .fontFamily(this.appearance.fontFamily).fontSize(Font.headline).fontWeight(FontWeight.Bold)
+          .fontFamily(this.appearance.fontFamily).fontSize(Font.title).fontWeight(FontWeight.Bold)
           .fontColor($r('app.color.text_primary')).id('huawei-account-status')
         Text(t('登录后使用 AI 生成功能，模型服务仍使用你配置的 Key。'))
           .fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontColor($r('app.color.text_secondary'))
@@ -43,7 +44,7 @@ export struct HuaweiAccountPanel {
             NavRow({ title: t('隐私政策'), icon: $r('sys.symbol.lock'), compId: 'account-privacy-policy', onTap: () => this.onSupport('privacy') })
           }
         }
-      }.width('100%').padding(Space.page)
+      }.width('100%').padding(Space.page).attributeModifier(PageStyles.form)
     }.width('100%').height('100%').align(Alignment.Top)
   }
 
@@ -113,7 +114,7 @@ export struct HuaweiAccountPanel {
             .accessibilityText(this.account.busy ? t('正在登录…') : t('华为账号登录'))
             .onClick(() => this.signIn())
         }.width('100%').padding({ top: 60, bottom: 8 })
-      }.width('100%').height('100%').padding({ left: 24, right: 24, top: 8, bottom: 4 })
+      }.width('100%').height('100%').padding({ left: 24, right: 24, top: 8, bottom: 4 }).attributeModifier(PageStyles.form)
     }
   }
 

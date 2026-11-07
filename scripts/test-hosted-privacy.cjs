@@ -221,7 +221,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   const beforeStartupReads = privacyReads;
   const beforeStartupRequests = requests;
   const stage = { loadContent(_page, callback) { loads++; callback({ code: 0 }); },
-    getMainWindowSync: () => ({ setWindowSystemBarProperties: () => Promise.resolve() }) };
+    getMainWindowSync: () => ({ setWindowBackgroundColor: () => {}, setWindowSystemBarProperties: () => Promise.resolve() }) };
   const ability = new EntryAbility(); ability.context = context;
   ability.onCreate({ uri: 'initial' }, {}); await tick();
   assert.deepEqual(bootOrder, ['logging', 'language', 'appearance'], 'Early settings failures already have a native diagnostic sink');
@@ -260,7 +260,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   assert.equal(initialized, 2); accepted.onDestroy();
   console.log('PASS actual EntryAbility avoids duplicate AppGallery startup dialog, blocks unsigned launches, restores accepted launch and cleans up');
 
-  // Run the real Index action handler; the two dialogs must not revoke before final confirmation.
+  // Run the real Index action handler; viewing must be direct and revocation must require confirmation.
   const indexSource = fs.readFileSync(path.join(root, 'pages/Index.ets'), 'utf8');
   const handler = indexSource.slice(indexSource.indexOf('  private async openSupport('), indexSource.indexOf('  private openFiles('));
   const uiExports = {}, dialogs = [], toasts = [];
@@ -272,21 +272,21 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
     getUIContext: () => ({ showAlertDialog: dialog => dialogs.push(dialog), getHostContext: () => context,
       getPromptAction: () => ({ showToast: toast => toasts.push(toast.message) }) }) });
   const beforeDialogsExits = exits, beforeViews = opened.length;
-  await probe.openSupport('privacy'); let dialog = dialogs.at(-1);
-  assert.equal(dialog.primaryButton.value, '查看'); assert.equal(dialog.secondaryButton.value, '拒绝');
-  dialog.primaryButton.action(); await tick(); assert.equal(opened.length, beforeViews + 1);
+  await probe.openSupport('privacy');
+  assert.equal(dialogs.length,0,'Viewing the policy opens it directly');
+  assert.equal(opened.length, beforeViews + 1);
   assert.equal(opened.at(-1).uri, link.url); assert.equal(uiPrivacy.allowed, true);
-  await probe.openSupport('privacy'); dialogs.at(-1).secondaryButton.action();
-  dialog = dialogs.at(-1); assert.match(dialog.message, /退出应用/);
+  await probe.openSupport('revoke-privacy');
+  let dialog = dialogs.at(-1); assert.match(dialog.message, /退出应用/);
   assert.equal(dialog.secondaryButton.value, '拒绝并退出'); assert.equal(exits, beforeDialogsExits);
   dialog.primaryButton.action(); assert.equal(uiPrivacy.allowed, true); assert.equal(exits, beforeDialogsExits);
   revokeFailure = { code: 1006700002 };
-  await probe.openSupport('privacy'); dialogs.at(-1).secondaryButton.action(); dialogs.at(-1).secondaryButton.action();
+  await probe.openSupport('revoke-privacy'); dialogs.at(-1).secondaryButton.action();
   assert.match(toasts.at(-1), /1006700002/); assert.equal(uiPrivacy.allowed, true); assert.equal(exits, beforeDialogsExits);
   revokeFailure = undefined;
-  await probe.openSupport('privacy'); dialogs.at(-1).secondaryButton.action(); dialogs.at(-1).secondaryButton.action();
+  await probe.openSupport('revoke-privacy'); dialogs.at(-1).secondaryButton.action();
   assert.equal(uiPrivacy.allowed, false); assert.equal(exits, beforeDialogsExits + 1); uiPrivacy.dispose();
-  console.log('PASS actual privacy menu: view link, two-step rejection, cancel preserves consent, failure stays open, confirm revokes and exits');
+  console.log('PASS actual privacy menu: direct policy link, explicit withdrawal confirmation, cancel preserves consent, failure stays open, confirm revokes and exits');
 
   // An AppGallery error is never permission to bypass consent on hardware or release builds.
   for (const [debug, mode, model] of [

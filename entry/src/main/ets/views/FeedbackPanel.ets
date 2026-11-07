@@ -1,3 +1,4 @@
+import { PageStyles } from '../common/PageStyles';
 import { common } from '@kit.AbilityKit';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Btn, Font, Radius, Space } from '../common/Theme';
@@ -219,7 +220,7 @@ export struct FeedbackPanel {
         Text(t('预览最多显示 80,000 字符；保存副本可查看完整文件。')).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
       }
       Button(t('保存副本')).id('feedback-save-attachment').attributeModifier(Btn.tonal).enabled(!this.fileBusy).onClick(() => this.savePreview())
-    }.width('100%').height('100%').padding(Space.page)
+    }.width('100%').height('100%').attributeModifier(PageStyles.form).padding(Space.page)
   }
   @Builder
   filterButton(label: string, filter: FeedbackFilter) {
@@ -353,7 +354,7 @@ export struct FeedbackPanel {
             .width('100%').enabled(this.service.ready && !this.draftLocked() && this.service.body.trim().length > 0).onClick(() => this.submit())
         }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.md })
       }
-    }.width('100%').height('100%')
+    }.width('100%').height('100%').attributeModifier(PageStyles.form)
       .bindSheet($$this.showPreview, this.attachmentPreview(), { radius: Radius.sheet, title: { title: this.previewName }, height: SheetSize.LARGE, dragBar: true,
         systemMaterial: this.appearance.surface, onDisappear: () => this.cleanPreview() })
   }

@@ -29,6 +29,7 @@ struct ThreadRow {
   @Prop workbench: boolean = false;
   @Prop lastBranch: boolean = false;
   @Prop activePath: boolean = false;
+  @Prop conversationActive: boolean = true;
   @Prop selecting: boolean = false;
   @Prop selected: boolean = false;
   @State private rowHeight: number = 44;
@@ -44,7 +45,7 @@ struct ThreadRow {
   }
 
   private active(): boolean {
-    return this.app.active.id === this.thread.id;
+    return this.conversationActive && this.app.active.id === this.thread.id;
   }
   private matchId(): string { return this.thread.messages.find((item) => item.content.toLocaleLowerCase().includes(this.query.trim().toLocaleLowerCase()))?.id || ''; }
 
@@ -167,6 +168,7 @@ class ThreadSearchFrame extends FrameCallback {
 
 @Component
 export struct ThreadList {
+  @Prop selectedSection: string = '';
   @Prop @Watch('searchAvailabilityChanged') active: boolean = true;
   @StorageProp('tinybot.foreground') @Watch('searchAvailabilityChanged') private foreground: boolean = true;
   @Prop workbench: boolean = false;
@@ -417,7 +419,7 @@ export struct ThreadList {
         Blank().layoutWeight(1)
       }.width('100%')
     }.id('workbench-new-chat').width('100%').height(44).padding({ left: 14, right: 14 }).borderRadius(12)
-      .backgroundColor($r('app.color.page_background')).border({ width: 0.5, color: $r('app.color.divider'), radius: 12 })
+      .backgroundColor(this.appearance.accentContainer).border({ width: 0.5, color: $r('app.color.divider'), radius: 12 })
       .enabled(!this.locked()).onClick(this.onNewChat)
     Column({ space: 2 }) {
       Button() {
@@ -433,7 +435,7 @@ export struct ThreadList {
           Text(t('记忆与工具')).fontSize(15).fontColor($r('app.color.text_primary')).layoutWeight(1).textAlign(TextAlign.Start)
         }.width('100%')
       }.id('workbench-sidebar-tools').width('100%').height(44).padding({ left: 12, right: 12 })
-        .borderRadius(10).backgroundColor(Color.Transparent).onClick(this.onTools)
+        .borderRadius(10).backgroundColor(this.selectedSection === 'productivity' ? this.appearance.accentContainer : Color.Transparent).onClick(this.onTools)
     }.width('100%').padding({ top: 8, bottom: 12 })
     }
     Row({ space: 0 }) {
@@ -519,11 +521,11 @@ export struct ThreadList {
         }
       }.width('100%').height(this.compactNavigation() ? 40 : 48).padding({ left: 4 })
       Row({ space: Space.sm }) {
-        Button(t('生活看板')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.tonal).layoutWeight(1)
+        Button(t('生活看板')).fontFamily(this.appearance.fontFamily).attributeModifier(this.selectedSection === 'life-panels' ? Btn.primary : Btn.tonal).layoutWeight(1)
           .height(40).padding({ left: 8, right: 8 }).fontSize(14)
           .id('open-life-panels').enabled(this.app.ready).onClick(this.onLifePanels)
         if (this.app.productivity.options?.miniAppsEnabled === true) {
-          Button(t('小程序')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.tonal).layoutWeight(1)
+          Button(t('小程序')).fontFamily(this.appearance.fontFamily).attributeModifier(this.selectedSection === 'mini-apps' ? Btn.primary : Btn.tonal).layoutWeight(1)
             .height(40).padding({ left: 8, right: 8 }).fontSize(14)
             .id('open-mini-apps').enabled(this.app.ready).onClick(this.onMiniApps)
         }
@@ -582,7 +584,7 @@ export struct ThreadList {
               ListItemGroup({ header: this.sectionHeader(id), space: 0 }) {
                 if (this.groupOpen(id)) {
                   ForEach(this.sectionThreads(id).slice(0, this.visibleCount(id)), (thread: ThreadViewModel) => {
-                    ListItem() { ThreadRow({ thread: thread, app: this.app, workbench: this.workbench, query: this.query, onSelected: this.onSelected,
+                    ListItem() { ThreadRow({ thread: thread, app: this.app, conversationActive: this.selectedSection === '', workbench: this.workbench, query: this.query, onSelected: this.onSelected,
                       selecting: this.selecting, selected: this.selectedIds.includes(thread.id),
                       onSelectionChanged: (selected: boolean) => this.selectThread(thread.id, selected),
                       lastBranch: this.lastBranch(id, thread.id),
@@ -626,7 +628,7 @@ export struct ThreadList {
         Row({ space: Space.md }) {
           SymbolGlyph($r('sys.symbol.gearshape')).fontSize(20).fontColor([$r('app.color.text_secondary')])
           Text(t("设置")).fontFamily(this.appearance.fontFamily).fontSize(15).layoutWeight(1).fontColor($r('app.color.text_primary'))
-          Text(t("{0} 个服务", [this.app.providerProfiles.length])).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
+          Text(t("已配置 {0} 个模型服务", [this.app.providerProfiles.length])).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
           SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(14).fontColor([$r('app.color.text_tertiary')])
         }
         .id('open-settings').width('100%').height(48).padding({ left: Space.md, right: Space.md }).borderRadius(Radius.md)

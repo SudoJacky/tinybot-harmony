@@ -1,0 +1,55 @@
+Tinybot · FILE_ACCESS_PERSIST 权限申请与问题确认材料
+准备日期：2026-10-21
+
+一、应用信息
+应用名称：Tinybot
+包名：com.sudojacky.tinybot
+版本：1.0.3 / 1000003
+目标设备：HarmonyOS API 26 手机
+申请权限：ohos.permission.FILE_ACCESS_PERSIST
+APP ID：[从开发者中心当前应用基本信息复制；不要用工程中的 client_id 代替]
+开发者账号 / Developer ID：[从当前开发者账号复制]
+联系人与联系方式：[填写提交人的联系方式]
+
+二、可粘贴的申请理由
+Tinybot 是原生 HarmonyOS AI 助手，提供项目共享文件夹功能。用户在新建或编辑项目时，主动通过系统文件选择器选择一个或多个文件夹，并保存项目。项目内会话随后可按用户的任务要求读取、创建或修改这些文件夹中的资料，避免在应用沙箱和外部文件夹之间反复复制文件。
+
+申请 FILE_ACCESS_PERSIST 的用途是保存用户选定目录的 URI 读写授权，并在应用进程重启后重新激活授权，使用户继续处理同一项目文件。代码调用 fileShare.persistPermission、activatePermission 和 revokePermission；不申请浏览或访问任意系统目录，不在未选择文件夹时创建持久授权。
+
+每个项目最多关联 8 个共享文件夹。应用校验目录边界，拒绝路径穿越与符号链接；移除文件夹时只解除项目关联，不删除原始文件，没有其他项目引用时撤销对应授权。文件写入前保存原始内容备份，失败会显示错误。该能力用于用户触发的项目任务，不用于后台扫描全盘。
+
+模型读取的文件内容会发送至用户配置的模型服务，用于用户请求的资料处理；不能将此场景表述为“文件内容绝不离开设备”。模型凭据不包含在本申请材料中。
+
+当前鸿蒙生态准入检测报告：软件包存在 ohos.permission.FILE_ACCESS_PERSIST，Profile 内不存在，ACL 权限声明一致性未通过。请确认此权限对本应用的 API 26 手机场景是否开放，以及正确的发布 Profile 授权方式；若支持，请协助开通并签发包含对应授权的发布 Profile。若当前平台不支持此类场景，请明确设备范围及可用替代方案。
+
+三、审核操作路径与待执行验收
+以下是验证步骤，不代表现有 Profile 已通过功能验证。
+1. 准备一个仅含测试资料的文件夹，例如 Tinybot-ACL-Test，放入 notes.txt。
+2. 打开 Tinybot 的会话侧栏，选择“新建项目”；填写名称后，在共享文件夹区域添加上述目录并保存。
+3. 从项目菜单进入“项目文件”，检查 shared/<文件夹名>/ 下的文件；在项目会话中请求读取或修改测试文件。模型任务需要已登录华为账号及可用的测试模型配置。
+4. 关闭应用进程后重新启动，再进入同一项目，确认授权能够恢复、文件仍可访问。
+5. 编辑项目并移除共享文件夹；在没有其他项目引用它时确认授权撤销，原始文件仍保留。
+6. 验证选择器取消、权限失效、不支持的设备能力以及读写失败时有明确提示；应用不越界访问其他目录。
+
+四、建议附上的材料
+• 当前平台 ACL 检测失败详情截图。
+• 项目编辑、系统文件夹选择、项目文件访问、重启后访问和移除目录的录屏或截图；待获授权后实测补充，不使用静态示例冒充验证。
+• 平台 APP ID、设备型号、系统版本、SDK/API 版本及实际上传包名称。
+• 如平台要求提供测试包，使用其指定的签名与提交渠道；不得附带私钥、签名密码、个人 API Key 或真实私人文件。
+
+五、授权后操作
+1. 在开发者中心按当前页面要求申请/开通该权限。若权限列表中不可选，提交上述问题说明，先确认手机场景开放范围。
+2. 授权生效后重新生成或下载与 com.sudojacky.tinybot 对应的发布 Profile，并配置对应发布证书。不要手工修改已签名的 .p7b 文件。
+3. 重新签名打包，对最终签名 HAP 运行 check-release-package.ps1 -RequireReleaseProfile；该检查读取包内 Profile，不使用旁边另放的一份 Profile 作为证明。
+4. 完成第三节真机功能与升级验证后，再上传平台复检。现有构建通过或启动通过不等于 ACL 功能通过。
+
+六、代码与规则证据
+• entry/src/main/module.json5：权限声明。
+• entry/src/main/ets/views/ThreadList.ets：用户选择共享文件夹入口。
+• entry/src/main/ets/services/ProjectFolderAccess.ets：授权保存、激活与撤销。
+• entry/src/main/ets/services/NativeSessionService.ets：项目保存接入。
+• 本机 API 26 SDK PermissionDefinitions.json：FILE_ACCESS_PERSIST 的 provisionEnable=true；此标志本身不能单独判断是否需要 ACL（INTERNET 等权限也有该标志）。本次需补齐该权限的直接依据是平台检测详情。
+• 平台报告与最终签名包的实际检测结果优先，不用其他 SDK 版本或第三方文章替代。
+官方 ACL 配置文档入口：https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/declare-permissions-in-acl
+
+本材料尚未向平台提交；权限是否获批以平台反馈为准。

@@ -25,8 +25,9 @@ export class AppearanceStyle {
   get readingSurface(): uiMaterial.Material | undefined { return AppMaterials.readingSurface; }
   // Whether the light-sense material is really applied, so settings can show its true state.
   get materialAvailable(): boolean { return AppMaterials.available; }
+  get materialEnabled(): boolean { return AppMaterials.enabled; }
   get controlBackground(): ResourceColor {
-    return this.materialAvailable ? Color.Transparent : $r('app.color.surface_variant');
+    return this.materialEnabled ? Color.Transparent : $r('app.color.surface_variant');
   }
 }
 

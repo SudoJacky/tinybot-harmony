@@ -9,14 +9,20 @@ assert.ok(fs.statSync(built).mtimeMs >= fs.statSync(source).mtimeMs, 'Rebuild Ch
 const tree = ts.createSourceFile(built, fs.readFileSync(built, 'utf8'), ts.ScriptTarget.Latest, true);
 const cls = tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'ChatPanel');
 const names = ['fromSheet', 'dismissPlusMenu', 'finishPlusAction', 'cancelPlusAction', 'canAttach', 'endSpeech',
-  'addThreadReference', 'showSpeechKeyboard', 'speechActive', 'aboutToDisappear', 'speechAvailabilityChanged', 'speechThreadChanged', 'afterRender', 'publishHeaderProgress'];
+  'addThreadReference', 'expandDraft', 'showSpeechKeyboard', 'speechActive', 'aboutToDisappear', 'speechAvailabilityChanged', 'speechThreadChanged', 'afterRender', 'publishHeaderProgress'];
 const methods = cls.members.filter(n => names.includes(n.name?.getText(tree)));
 function find(node, predicate) {
   if (predicate(node)) return node;
   return ts.forEachChild(node, child => find(child, predicate));
 }
-const referenceBlock = find(cls, n => ts.isBlock(n) && n.statements.some(s => s.getText(tree).includes("Button.id('add-thread-reference')")));
-const click = find(referenceBlock, n => ts.isCallExpression(n) && n.expression.getText(tree) === 'Button.onClick').arguments[0];
+function buttonClick(id) {
+  const block = find(cls, n => ts.isBlock(n) && n.statements.some(s => ts.isExpressionStatement(s) &&
+    ts.isCallExpression(s.expression) && s.expression.expression.getText(tree) === 'Button.id' &&
+    s.expression.arguments[0]?.text === id));
+  assert.ok(block, 'Missing emitted button ' + id);
+  return find(block, n => ts.isCallExpression(n) && n.expression.getText(tree) === 'Button.onClick').arguments[0];
+}
+const click = buttonClick('add-thread-reference'), expandClick = buttonClick('phone-expand-draft');
 const menuClick = find(cls, n => ts.isCallExpression(n) && n.expression.getText(tree) === 'this.plusMenuRow.bind(this)' &&
   n.arguments[2]?.getText(tree) === "'plus-menu-reference'").arguments[6];
 const sheet = find(cls, n => ts.isCallExpression(n) && n.expression.getText(tree).endsWith('.bindSheet') &&
@@ -29,6 +35,7 @@ function fixture() {
     `class Panel { ${methods.map(n => n.getText(tree)).join('\n')} }
      exports.Panel = Panel; exports.click = function() { return (${click.getText(tree)})(); };
      exports.menuClick = function() { return (${menuClick.getText(tree)})(); };
+     exports.expandClick = function() { return (${expandClick.getText(tree)})(); };
      exports.options = function() { return (${sheet.getText(tree)}); };`,
     { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText,
     { exports, FrameCallback: class {}, setTimeout: fn => timers.push(fn), clearTimeout() {},
@@ -38,11 +45,12 @@ function fixture() {
     composerMounted: true, lifecycle: 0, composerSelectionStart: -1, composerSelectionEnd: -1,
     thread: { id: 'chat', archived: false }, activeThreadId: 'chat', speechThreadId: 'chat', speech: { phase: 'idle', cancel() {} },
     app: { active: { id: 'chat' }, draft: '', busy: false, saveError: '', setDraft(text) { this.draft = text; } },
-    showPlus: true, showPlusMenu: false, voiceMode: false, importing: false,
+    showPlus: true, showPlusMenu: false, voiceMode: false, importing: false, writingExpanded: false,
     composerController: { caretPosition() {} },
     cancelAttachmentDrop() {}, setScrollActivity() {}, viewport: { dispose() {} },
     reading: { stop() {} }, onHeaderProgress() {}, receiveVoiceShortcut() {},
     getUIContext: () => ({ postFrameCallback: frame => frames.push(frame), getFocusController: () => ({
+      clearFocus() {},
       requestFocus(id) {
         assert.ok(dismissed, '150003: composer unavailable while the native overlay is dismissing');
         assert.ok(!panel.voiceMode && !panel.speechActive() && !panel.thread.archived, '150003: composer hidden or disabled');
@@ -50,12 +58,21 @@ function fixture() {
       }
     }) }) });
   const options = exports.options.call(panel);
-  return { panel, focus, logs, frames, click: () => exports.click.call(panel), menuClick: () => exports.menuClick.call(panel),
+  return { panel, focus, logs, frames, click: () => exports.click.call(panel), menuClick: () => exports.menuClick.call(panel), expandClick: () => exports.expandClick.call(panel),
     advanceTime() { timers.splice(0).forEach(fn => fn()); },
     dismiss() { dismissed = true; options.onDisappear?.(); },
     render() { frames.splice(0).forEach(frame => frame.onIdle()); } };
 }
 {
+  const expanded = fixture(); expanded.panel.app.draft = 'An unsent long message';
+  expanded.expandClick(); expanded.advanceTime();
+  assert.equal(expanded.panel.writingExpanded, false, 'Do not open a cover over a dismissing sheet');
+  expanded.dismiss();
+  assert.equal(expanded.panel.writingExpanded, true);
+  assert.equal(expanded.panel.app.draft, 'An unsent long message', 'Expanding retains the same conversation draft');
+  const staleExpanded = fixture(); staleExpanded.expandClick(); staleExpanded.panel.app.active.id = 'other'; staleExpanded.dismiss();
+  assert.equal(staleExpanded.panel.writingExpanded, false, 'Never open an editor for a conversation left during dismissal');
+  console.log('PASS phone expanded editor waits for native sheet dismissal and retains its draft owner');
   const f = fixture(); f.click(); f.advanceTime();
   assert.deepEqual(f.focus, [], 'Elapsed time does not imply native dismissal');
   assert.equal(f.panel.app.draft, '', 'Do not mutate a draft before dismissal');

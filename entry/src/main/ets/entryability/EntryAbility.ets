@@ -47,7 +47,10 @@ export default class EntryAbility extends UIAbility {
       return;
     }
     const dark = AppStorage.get<boolean>('tinybot.appearance.dark') === true;
-    this.mainWindow.setWindowSystemBarProperties({ statusBarContentColor: dark ? '#FFFFFF' : '#000000' })
+    try { this.mainWindow.setWindowBackgroundColor(dark ? '#151719' : '#F7F8FA'); }
+    catch (error) { Diagnostics.log('error', 'app', 'bar_failed', undefined, error as Error); }
+    this.mainWindow.setWindowSystemBarProperties({ statusBarColor: dark ? '#151719' : '#F7F8FA',
+      navigationBarColor: dark ? '#151719' : '#F7F8FA', statusBarContentColor: dark ? '#FFFFFF' : '#000000' })
       .catch((err: Error) => Diagnostics.log('error', 'app', 'bar_failed', undefined, err));
   }
 

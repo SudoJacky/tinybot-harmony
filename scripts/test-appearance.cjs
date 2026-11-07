@@ -77,13 +77,10 @@ assert.equal(currentAppearanceStyle().accent, '#216451');
 assert.equal(currentAppearanceStyle().controlBackground, 'transparent', 'API 26 keeps its material backing');
 const defaultMaterial = currentAppearanceStyle().control;
 const menuMaterial = currentAppearanceStyle().menu;
-assert.equal(menuMaterial.options.style, uiMaterial.ImmersiveStyle.THIN);
-assert.equal(menuMaterial.options.colorInvert, true);
+assert.equal(menuMaterial, Material.empty, 'Menus stay opaque in automatic effect mode');
 assert.equal(currentAppearanceStyle().noMaterial, Material.empty);
 const readingMaterial = currentAppearanceStyle().readingSurface;
-assert.equal(readingMaterial.options.style, uiMaterial.ImmersiveStyle.THICK);
-assert.equal(readingMaterial.options.materialColor, 'app.color.reading_surface_tint');
-assert.equal(readingMaterial.options.colorInvert, false);
+assert.equal(readingMaterial, Material.empty, 'Reading sheets keep a solid background');
 preferences.refresh(); assert.equal(currentAppearanceStyle().control, defaultMaterial, 'Do not recreate unchanged materials');
 assert.equal(currentAppearanceStyle().readingSurface, readingMaterial, 'Reuse the long-sheet material');
 assert.equal(currentAppearanceStyle().menu, menuMaterial, 'Reuse unchanged adaptive menu material');
@@ -96,6 +93,9 @@ assert.equal(currentAppearanceStyle().surface, Material.empty);
 assert.equal(currentAppearanceStyle().menu, Material.empty);
 assert.equal(currentAppearanceStyle().readingSurface, Material.empty);
 assert.equal(currentAppearanceStyle().accentControl, Material.empty);
+assert.equal(currentAppearanceStyle().materialAvailable, true, 'Turning effects off does not remove device capability');
+assert.equal(currentAppearanceStyle().materialEnabled, false);
+assert.equal(currentAppearanceStyle().controlBackground, 'app.color.surface_variant', 'An empty material must not erase the control backing');
 const { systemMaterialAttribute, menuMaterialAttribute } = load(root + '/common/MaterialAttributes.ets');
 const optionColors = [];
 const colorMethods = {
@@ -139,7 +139,7 @@ assert.equal(currentAppearanceStyle().control.options.lightEffect.color, '#40FFF
 preferences.select({ ...model.defaultAppearance(), lightEffect: 'vivid' });
 assert.equal(currentAppearanceStyle().control.options.style, uiMaterial.ImmersiveStyle.ULTRA_THIN);
 assert.equal(currentAppearanceStyle().control.options.interactive, true);
-assert.equal(currentAppearanceStyle().readingSurface.options.style, uiMaterial.ImmersiveStyle.THICK, 'Long-sheet legibility also holds in vivid mode');
+assert.equal(currentAppearanceStyle().readingSurface, Material.empty, 'Vivid effects cannot remove the reading background');
 preferences.select(model.defaultAppearance());
 assert.equal(currentAppearanceStyle().accent, '#216451');
 assert.equal(currentAppearanceStyle().effectStrength, 1);
@@ -154,7 +154,7 @@ for (const [level, controlStyle, surfaceStyle] of [
   AppMaterials.configure('auto', '#216451');
   assert.equal(AppMaterials.control.options.style, controlStyle, 'Controls retain the device tier');
   assert.equal(AppMaterials.accentControl.options.style, controlStyle, 'Accent buttons retain the device tier');
-  assert.equal(AppMaterials.surface.options.style, surfaceStyle, 'Expanded surfaces use a gentler tier with a floor');
+  assert.equal(AppMaterials.surface, Material.empty, 'Overlays stay solid at every device material level');
   assert.equal(AppMaterials.surface, AppMaterials.surface, 'Reuse the expanded-surface material');
   assert.equal(levelReads, before + 1, 'All roles share one device capability query');
   for (const [effect, control, surface] of [
@@ -165,9 +165,9 @@ for (const [level, controlStyle, surfaceStyle] of [
     const previous = AppMaterials.surface;
     AppMaterials.configure(effect, '#216451');
     assert.equal(AppMaterials.control.options.style, control);
-    assert.equal(AppMaterials.surface.options.style, surface);
-    assert.notEqual(AppMaterials.surface, previous, 'Changed settings replace cached surfaces');
-    assert.equal(AppMaterials.readingSurface.options.style, uiMaterial.ImmersiveStyle.THICK);
+    assert.equal(AppMaterials.surface, Material.empty);
+    assert.equal(AppMaterials.surface, previous, 'Overlay backing is independent of light effects');
+    assert.equal(AppMaterials.readingSurface, Material.empty);
   }
   AppMaterials.configure('off', '#216451');
   for (const role of ['control', 'accentControl', 'surface', 'menu', 'empty', 'readingSurface']) assert.equal(AppMaterials[role], Material.empty);

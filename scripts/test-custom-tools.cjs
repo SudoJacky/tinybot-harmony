@@ -51,8 +51,8 @@ function fixture(data = seed()) {
   f.calls = calls; return f;
 }
 async function main() {
-  assert.equal(all.length, 53); assert.equal(new Set(all).size, 53); assert.equal(BASIC_FILE_TOOLS.length, 6);
-  assert.equal(optional.length, 43);
+  assert.equal(all.length, 54); assert.equal(new Set(all).size, 54); assert.equal(BASIC_FILE_TOOLS.length, 6);
+  assert.equal(optional.length, 44);
   for (const name of ['list_mail_accounts', 'search_mail', 'read_mail']) assert.ok(all.includes(name));
   assert.ok(all.includes('list_mini_apps')); assert.ok(all.includes('publish_mini_app'));
   assert.ok(!all.includes('publish_data_view'));
@@ -74,7 +74,7 @@ async function main() {
     ['read_attachment', 'read_reference']);
   const covered = Array.from(TOOL_CAPABILITIES.flatMap(capability => capability.tools));
   assert.equal(TOOL_CAPABILITIES.length, 13);
-  assert.equal(new Set(covered).size, 43); assert.deepEqual(covered.slice().sort(), optional.slice().sort());
+  assert.equal(new Set(covered).size, 44); assert.deepEqual(covered.slice().sort(), optional.slice().sort());
   const obsolete = {agentMode:'custom', disabledTools:Array.from(MANAGED_TOOL_NAMES).concat(['generate_image', 'read_tool_result'])};
   validateToolSelection(obsolete);
   assert.deepEqual(Array.from(normalizeDisabledTools(obsolete.disabledTools)), []);
@@ -105,7 +105,7 @@ async function main() {
   const retiredOnly = seed(); retiredOnly.threads[0].agentMode = 'custom';
   retiredOnly.threads[0].disabledTools = ['publish_data_view'];
   assert.deepEqual(Array.from(parseAppData(JSON.stringify(retiredOnly)).threads[0].disabledTools), ['publish_preview', 'list_mini_apps', 'publish_mini_app',
-    'get_life_panel_catalog', 'list_life_panels', 'get_life_panel', 'publish_life_panel', 'validate_life_panel', 'list_life_boards', 'manage_life_board', 'manage_life_panel_task']);
+    'get_life_panel_catalog', 'list_life_panels', 'get_life_panel', 'publish_life_panel', 'validate_life_panel', 'list_life_boards', 'get_life_board', 'manage_life_board', 'manage_life_panel_task']);
   assert.deepEqual(Array.from(migrated.threads[0].disabledTools).sort(),
     Array.from(normalizeDisabledTools(legacyData.threads[0].disabledTools)).sort());
   const legacy = fixture(migrated), legacyApp = new ChatViewModel(); await legacyApp.initialize(legacy.session);

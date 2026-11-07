@@ -1,3 +1,4 @@
+import { PageStyles } from '../common/PageStyles';
 import { Space } from '../common/Theme';
 import { AppLanguage, t } from '../model/I18n';
 import { LanguagePreferences } from '../services/LanguagePreferences';
@@ -42,6 +43,6 @@ export struct LanguagePanel {
         }
       }
       if (this.error || this.app.saveError) { Banner({ text: this.error || this.app.saveError }) }
-    }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.xl })
+    }.width('100%').attributeModifier(PageStyles.choices).padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.xl })
   }
 }

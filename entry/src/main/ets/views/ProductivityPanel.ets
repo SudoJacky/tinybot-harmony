@@ -1,3 +1,4 @@
+import { PageStyles } from '../common/PageStyles';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { systemMaterialAttribute } from '../common/MaterialAttributes';
 import { t } from '../model/I18n';
@@ -242,7 +243,7 @@ export struct ProductivityPanel {
           }
         }
       }, (item: MemoryEntry) => item.id + item.updatedAt)
-    }.width('100%').height('100%').padding({ left: Space.page, right: Space.page }).scrollBar(BarState.Off)
+    }.width('100%').height('100%').attributeModifier(PageStyles.form).padding({ left: Space.page, right: Space.page }).scrollBar(BarState.Off)
     .contentEndOffset(Space.lg).edgeEffect(EdgeEffect.Spring)
   }
 
@@ -275,7 +276,7 @@ export struct ProductivityPanel {
           }
         }
       }, (item: PromptTemplate) => JSON.stringify(item))
-    }.width('100%').height('100%').padding({ left: Space.page, right: Space.page }).scrollBar(BarState.Off)
+    }.width('100%').height('100%').attributeModifier(PageStyles.form).padding({ left: Space.page, right: Space.page }).scrollBar(BarState.Off)
     .contentEndOffset(Space.lg).edgeEffect(EdgeEffect.Spring)
   }
 
@@ -373,7 +374,7 @@ export struct ProductivityPanel {
           }.width('100%').padding(Space.lg).borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
         }
       }
-    }.width('100%').height('100%').padding({ left: Space.page, right: Space.page }).scrollBar(BarState.Off)
+    }.width('100%').height('100%').attributeModifier(PageStyles.form).padding({ left: Space.page, right: Space.page }).scrollBar(BarState.Off)
     .contentEndOffset(Space.lg).edgeEffect(EdgeEffect.Spring)
   }
 
@@ -409,14 +410,14 @@ export struct ProductivityPanel {
               .onChange((value) => { this.url = value; })
             Row({ space: Space.md }) {
               Column({ space: 2 }) {
-                Text(t("无需鉴权")).fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontColor($r('app.color.text_primary'))
-                Text(t("关闭后填写 Bearer Token，Token 保存在系统安全存储中。")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
+                Text(t("使用访问令牌")).fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontColor($r('app.color.text_primary'))
+                Text(t("开启后填写 Bearer Token，Token 保存在系统安全存储中。")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
                   .fontColor($r('app.color.text_secondary'))
               }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-              Toggle({ type: ToggleType.Switch, isOn: this.noAuth }).id('mcp-no-auth').selectedColor(this.appearance.accent)
+              Toggle({ type: ToggleType.Switch, isOn: !this.noAuth }).id('mcp-no-auth').selectedColor(this.appearance.accent)
                 .attributeModifier(Styles.toggle)
                 .attributeModifier(systemMaterialAttribute<ToggleAttribute>(this.appearance.control))
-                .onChange((value) => { this.noAuth = value; })
+                .onChange((value) => { this.noAuth = !value; })
             }.width('100%').padding({ left: Space.lg, right: Space.md, top: 10, bottom: 10 }).margin({ top: Space.sm })
             .borderRadius(Radius.sm).backgroundColor($r('app.color.surface'))
             if (!this.noAuth) {
@@ -458,7 +459,7 @@ export struct ProductivityPanel {
             .enabled(this.canSave()).onClick(() => this.save())
         }.width('100%')
       }
-    }.width('100%').height('100%')
+    }.width('100%').height('100%').attributeModifier(PageStyles.form)
   }
 
   @Builder
@@ -482,7 +483,7 @@ export struct ProductivityPanel {
           .enabled(!this.locked() && (this.tab !== 'mcp' || this.app.productivity.servers.length < 10))
           .onClick(() => this.createEntry())
       }
-    }.width('100%').height('100%')
+    }.width('100%').height('100%').attributeModifier(PageStyles.form)
   }
   build() {
     if (this.editorOnly) { this.editorPage() }

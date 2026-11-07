@@ -1,0 +1,21 @@
+<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>/*BUILTIN_STYLE*/
+.widget{--tone:#b36a51}.modes{display:flex;gap:2px;margin-top:12px}.modes button{flex:1;min-width:0;padding:6px 4px;font-size:12px;color:var(--muted)}.modes button[aria-pressed=true]{background:color-mix(in srgb,var(--tone) 12%,transparent);color:var(--tone)}.dial{position:relative;display:grid;place-items:center;width:152px;height:152px;margin:14px auto}.dial svg{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg)}.dial circle{fill:none;stroke:color-mix(in srgb,var(--tone) 14%,transparent);stroke-width:3}.dial #arc{stroke:var(--tone);stroke-linecap:round;stroke-dasharray:440;stroke-dashoffset:0}.dial-copy{text-align:center}.digits{display:block;font-size:36px;font-weight:550}.caption{font-size:11px;color:var(--muted)}
+</style></head><body><article class="widget" aria-label="Focus timer"><header class="head"><span class="eyebrow"><i class="dot"></i><span data-zh="专注片刻" data-en="A MOMENT OF FOCUS"></span></span></header><nav class="modes" aria-label="Timer mode"><button id="mode-focus" data-mode="focus" data-zh="专注" data-en="Focus"></button><button id="mode-short" data-mode="short" data-zh="短休" data-en="Short"></button><button id="mode-long" data-mode="long" data-zh="长休" data-en="Long"></button></nav><div class="dial"><svg viewBox="0 0 152 152" aria-hidden="true"><circle cx="76" cy="76" r="70"/><circle id="arc" cx="76" cy="76" r="70"/></svg><div class="dial-copy"><output id="remaining" class="digits numeric" aria-label="Time remaining">25:00</output><span id="caption" class="caption"></span></div></div><div class="actions"><button id="toggle" class="primary"></button><button id="reset" class="soft" data-zh="重置" data-en="Reset"></button></div><p id="status" class="status" role="status"></p></article><script>/*BUILTIN_RUNTIME*/
+const durations = {focus:1500,short:300,long:900}; let lastSecond = -1;
+function state() { return snapshot.value || {mode:'focus',remaining:1500,deadline:0,running:false}; }
+function remaining(value) { return value.running ? Math.max(0,Math.ceil((value.deadline-Date.now())/1000)) : value.remaining; }
+function render() {
+  const value=state(), left=remaining(value), running=value.running&&left>0;
+  $('remaining').textContent=String(Math.floor(left/60)).padStart(2,'0')+':'+String(left%60).padStart(2,'0');
+  $('remaining').setAttribute('aria-label',tr('剩余 '+left+' 秒',left+' seconds remaining'));
+  $('toggle').textContent=running?tr('暂停','Pause'):left===0?tr('再来一轮','Start again'):tr('开始','Start');
+  $('caption').textContent=left===0?tr('这一刻，做得很好','A moment well spent'):value.mode==='focus'?tr('一次只做一件事','One thing at a time'):tr('让思绪呼吸一下','Let your mind breathe');
+  $('arc').style.strokeDashoffset=String(440*(1-left/durations[value.mode]));
+  document.querySelectorAll('[data-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.mode===value.mode)));
+}
+$('toggle').onclick=()=>{const value=state(),left=remaining(value),running=!(value.running&&left>0);return commit({...value,remaining:left||durations[value.mode],deadline:running?Date.now()+(left||durations[value.mode])*1000:0,running});};
+$('reset').onclick=()=>commit({mode:state().mode,remaining:durations[state().mode],deadline:0,running:false});
+document.querySelectorAll('[data-mode]').forEach(button=>button.onclick=()=>commit({mode:button.dataset.mode,remaining:durations[button.dataset.mode],deadline:0,running:false}));
+initialize(render,value=>{if(value!==null&&(!value||!Object.hasOwn(durations,value.mode)||!Number.isInteger(value.remaining)||value.remaining<0||value.remaining>durations[value.mode]||!Number.isFinite(value.deadline)||typeof value.running!=='boolean'))invalidState();});
+tinybot.animate(()=>{const second=Math.floor(Date.now()/1000);if(second!==lastSecond){lastSecond=second;render();}});
+</script></body></html>

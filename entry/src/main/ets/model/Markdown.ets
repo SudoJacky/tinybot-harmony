@@ -27,6 +27,18 @@ function parseMarkdown(source: string): MarkdownParse {
       if (index < lines.length) { index++; }
       blocks.push({ kind: 'code', text: content.join('\n'), level: 0, rows: [[fence[2].trim()]] }); continue;
     }
+    const math = line.match(/^\s*(\$\$|\\\[)(.*)$/);
+    if (math) {
+      const close = math[1] === '$$' ? '$$' : '\\]';
+      const body: string[] = [math[2]]; const raw: string[] = [line]; index++;
+      while (!body[body.length - 1].trimEnd().endsWith(close) && index < lines.length) {
+        const next = lines[index++]; body.push(next); raw.push(next);
+      }
+      const complete = body[body.length - 1].trimEnd().endsWith(close);
+      if (complete) { body[body.length - 1] = body[body.length - 1].trimEnd().slice(0, -close.length); }
+      // Retain an open display as one block, so incremental updates can revisit its opener.
+      blocks.push({ kind: complete ? 'math' : 'math-pending', text: complete ? body.join('\n').trim() : raw.join('\n'), level: 0, rows: [] }); continue;
+    }
     if (index + 1 < lines.length && line.includes('|') && /^\s*\|?\s*:?-{3,}/.test(lines[index + 1])) {
       const rows: string[][] = [tableCells(line)]; index += 2;
       while (index < lines.length && lines[index].includes('|') && lines[index].trim()) { rows.push(tableCells(lines[index++])); }
@@ -85,6 +97,55 @@ function tableCells(line: string): string[] { return line.trim().replace(/^\|/, 
 const SPAN_PATTERN: RegExp = new RegExp('!?\\[([^\\]]*)\\]\\((https?://[^\\s)]+)\\)|\\*\\*([^*]+)\\*\\*|__([^_]+)__|`([^`]+)`|\\*([^*]+)\\*|~~([^~]+)~~|' +
   '(https?://[^\\s<>()\\[\\]\\u3000-\\u303f\\uff01-\\uff1f]*[^\\s<>()\\[\\].,;:!?\'"\\u3000-\\u303f\\uff01-\\uff1f])', 'g');
 export function markdownSpans(text: string): MarkdownSpan[] {
+  if (!text.includes('$') && !text.includes('\\(')) { return plainSpans(text); }
+  const spans: MarkdownSpan[] = [];
+  // Consume the earliest token, so code protects delimiters and math protects TeX asterisks.
+  const protectedToken = /(`+)[\s\S]*?\1|!?\[[^\]]*\]\(https?:\/\/[^\s)]+\)|\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|~~[^~]+~~/g;
+  let start = 0; let index = 0; let match = protectedToken.exec(text);
+  while (index < text.length) {
+    if (match && index === match.index) {
+      spans.push(...plainSpans(text.slice(start, index)));
+      if (match[1]) { spans.push({ kind: 'code', text: match[0].slice(match[1].length, -match[1].length), url: '' }); }
+      else {
+        for (const span of plainSpans(match[0])) {
+          if (span.kind === 'link') { spans.push(span); }
+          else {
+            spans.push(...markdownSpans(span.text).map((part: MarkdownSpan): MarkdownSpan => {
+              return { text: part.text, kind: part.kind === 'math' ? 'math' : span.kind, url: part.url };
+            }));
+          }
+        }
+      }
+      index += match[0].length; start = index; match = protectedToken.exec(text); continue;
+    }
+    const paren = text.slice(index, index + 2) === '\\(';
+    const dollar = text[index] === '$' && text[index + 1] !== '$' && text[index - 1] !== '$';
+    if ((!paren && !dollar) || escaped(text, index) || (dollar && /\s/.test(text[index + 1] || ' '))) { index++; continue; }
+    const size = paren ? 2 : 1; const close = paren ? '\\)' : '$'; let end = index + size;
+    while (end < text.length && text[end] !== '\n') {
+      // An unmatched currency marker must not consume a later code span or link.
+      if (dollar && match && end === match.index && (match[1] || /^!?\[/.test(match[0]))) { end = text.length; break; }
+      if (text.slice(end, end + size) === close && !escaped(text, end)) {
+        if (paren || (!/\s/.test(text[end - 1]) && !/[\d$]/.test(text[end + 1] || ''))) { break; }
+        end = text.length; break;
+      }
+      end++;
+    }
+    if (end === text.length || text[end] === '\n') { index += size; continue; }
+    spans.push(...plainSpans(text.slice(start, index)));
+    spans.push({ kind: 'math', text: text.slice(index + size, end), url: '' });
+    index = end + size; start = index;
+    protectedToken.lastIndex = index; match = protectedToken.exec(text);
+  }
+  spans.push(...plainSpans(text.slice(start)));
+  return spans;
+}
+function escaped(text: string, index: number): boolean {
+  let slashes = 0;
+  while (index > 0 && text[--index] === '\\') { slashes++; }
+  return slashes % 2 === 1;
+}
+function plainSpans(text: string): MarkdownSpan[] {
   const spans: MarkdownSpan[] = []; const pattern = new RegExp(SPAN_PATTERN.source, 'g');
   let start = 0; let match = pattern.exec(text);
   while (match) {

@@ -1,3 +1,4 @@
+import { PageStyles } from '../common/PageStyles';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
@@ -70,7 +71,7 @@ export struct ThirdPartyLicensesPanel {
         ForEach(THIRD_PARTY_LICENSES, (item: ThirdPartyLicense) => {
           LicenseCard({ item: item })
         }, (item: ThirdPartyLicense) => item.id)
-      }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.md, bottom: Space.xl })
+      }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.md, bottom: Space.xl }).attributeModifier(PageStyles.reading)
     }.id('third-party-licenses').height('100%').width('100%').align(Alignment.Top)
       .scrollBar(BarState.Auto).edgeEffect(EdgeEffect.Spring)
   }

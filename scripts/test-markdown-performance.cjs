@@ -58,6 +58,7 @@ function methods(file, name, names) {
 }
 let parseCalls = 0, highlightChars = 0, clock = 1000, timers = new Map(), nextTimer = 0;
 const sandbox = { Diagnostics: load('model/Diagnostics').Diagnostics, exports: {}, StreamReveal, MarkdownDocument, MarkdownChunkModel, MARKDOWN_CHUNK_BLOCKS,
+  hasMath: load('model/MathContent').hasMath,
   markdownSpans: text => { parseCalls++; return load('model/Markdown').markdownSpans(text); },
   highlightCode: (text, language) => { highlightChars += text.length; return highlightCode(text, language); },
   NBSP: '\u00a0', CODE_PREVIEW_LINES: 18, Date: { now: () => clock },

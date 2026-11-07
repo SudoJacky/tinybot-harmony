@@ -18,6 +18,12 @@ export class LifeBoards {
   async get(workspaceId: string, id: string): Promise<LifeBoard> {
     return parseLifeBoard((await new NativeWorkspaceFiles(this.workspaces.pathFor(workspaceId)).read(boardPath(id), new Cancellation())).content, id);
   }
+  async create(workspaceId: string, id: string, title: string, description: string, items: BoardItem[]): Promise<LifeBoard> {
+    return this.change(workspaceId, id, true, async (): Promise<LifeBoard> => ({ version: 2, id: id, title: title, description: description,
+      items: items.map((item: BoardItem): BoardItem => ({ workspaceId: item.workspaceId, panelId: item.panelId,
+        x: item.x, y: item.y, w: item.w, h: item.h, mountId: 'mount-' + util.generateRandomUUID() })),
+      archived: false, createdAt: Date.now(), updatedAt: Date.now() }));
+  }
   async save(workspaceId: string, id: string, title: string, description: string, items?: BoardItem[], archive?: boolean): Promise<LifeBoard> {
     if (items !== undefined) {
       if (!Array.isArray(items) || items.length > 100) { throw new Error('Invalid board items'); }
