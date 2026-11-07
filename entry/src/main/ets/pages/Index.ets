@@ -1103,8 +1103,9 @@ struct Index {
   }
 
   @Builder
-  settingsContent(section: string) {
-    SettingsPanel({ app: this.app, section: section, settings: this.app.settings, account: this.account, active: this.settingsActive && this.foreground,
+  settingsContent(routeSection?: string) {
+    // Read the active tablet category inside the child update callback, rather than capturing a builder argument.
+    SettingsPanel({ app: this.app, section: routeSection ?? this.settingsSection, settings: this.app.settings, account: this.account, active: this.settingsActive && this.foreground,
       onAccount: () => { this.paths.pushPath({ name: 'account' }); },
       browser: this.browser,
       onAddProvider: () => { this.paths.pushPath({ name: 'provider-presets' }); },
@@ -1233,7 +1234,7 @@ struct Index {
     } else if (name === 'settings') {
       NavDestination() {
         if (this.windowWidth >= 840) {
-          this.settingsContent(this.settingsSection)
+          this.settingsContent()
         } else {
           SettingsOverview({ onSelect: (section: string) => {
             this.settingsSection = section;
