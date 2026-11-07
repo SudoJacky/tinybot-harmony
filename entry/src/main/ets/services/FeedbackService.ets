@@ -25,7 +25,7 @@ class FeedbackHttpError extends Error {
   }
 }
 
-// Installation-local identity and view state. No credentials, drafts or replies enter backups or logs.
+// Identity is account-encrypted in backups. Pending submissions and uploads stay on this installation.
 @Observed
 export class FeedbackService {
   ready: boolean = false;
@@ -100,6 +100,7 @@ export class FeedbackService {
   }
 
   private async identity(): Promise<void> {
+    await this.readRestoredIdentity();
     if (this.token) { return; }
     // Retain a freshly issued token in memory if secure storage failed; retry saving it before any POST.
     if (!this.unsavedToken) { this.unsavedToken = parseFeedbackIdentity(await this.request('/identity', 'identity', '', '{"schemaVersion":1}', 201)).token; }
@@ -109,6 +110,12 @@ export class FeedbackService {
       throw new Error(t('无法安全保存反馈凭证，尚未提交反馈。请解锁设备后重试。'));
     }
     this.token = this.unsavedToken; this.unsavedToken = '';
+  }
+  private async readRestoredIdentity(): Promise<void> {
+    if (this.token) { return; }
+    const token = await this.vault.readOptional(ALIAS);
+    if (token !== undefined && !validFeedbackToken(token)) { throw new Error(t('本机反馈凭证无法读取，已保留原凭证。')); }
+    this.token = token || '';
   }
 
   private async exchange(path: string, bucket: string, token: string, method: string, body?: string | ArrayBuffer,
@@ -196,6 +203,7 @@ export class FeedbackService {
     if (!this.ready || this.busy || more && !this.nextCursor) { return; }
     this.busy = true; this.error = '';
     try {
+      await this.readRestoredIdentity();
       if (!this.token) { this.items = []; this.nextCursor = null; this.filter = filter; this.typeFilter = type; return; }
       const cursor = more ? this.nextCursor : null;
       const page = parseFeedbackPage(await this.request('/mine?status=' + filter + '&type=' + type +

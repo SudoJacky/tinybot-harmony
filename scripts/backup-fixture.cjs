@@ -5,7 +5,7 @@ function legacyBackupFixture(bytes) {
   if (bytes.subarray(0, 8).toString() !== 'TINYBOT3') return JSON.parse(bytes.toString());
   assert.deepEqual(crypto.createHash('sha256').update(bytes.subarray(0, -32)).digest(), bytes.subarray(-32));
   const length = bytes.readUInt32LE(8), index = JSON.parse(bytes.subarray(12, 12 + length).toString());
-  const envelope = JSON.parse(index.metadata); assert.equal(envelope.format, 'tinybot-harmony.backup.v3');
+  const envelope = JSON.parse(index.metadata); assert.ok(['tinybot-harmony.backup.v3','tinybot-harmony.backup.v4'].includes(envelope.format));
   let position = 12 + length;
   const blobs = index.sizes.map(size => { const value = bytes.subarray(position, position + size); position += size; return value; });
   assert.equal(position, bytes.length - 32);

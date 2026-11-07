@@ -1,6 +1,7 @@
 import { t } from '../model/I18n';
 import { AppData, MessageData, ThreadData } from '../model/Conversation';
 import { prepareBackupServices } from '../model/BackupRestore';
+import { mergeBackupConfig, mergeBackupOptions, mergeBackupSkills } from '../model/BackupSettings';
 import { ToolSelection } from '../model/AgentMode';
 import { Attachment, defaultProductivity, validateProductivity } from '../model/Productivity';
 import { defaultExtensions, validateExtensions } from '../model/Skills';
@@ -8,7 +9,7 @@ import { ProjectData, projectName, validateProjects } from '../model/Project';
 import { SharedFolder, validateSharedFolders } from '../model/SharedFolders';
 import { ThreadReference } from '../model/ThreadReferences';
 
-export interface SessionImportCandidate { data: AppData; threads: ThreadData[]; providerIds: Map<string, string>; }
+export interface SessionImportCandidate { data: AppData; threads: ThreadData[]; providerIds: Map<string, string>; serverIds: Map<string, string>; }
 
 // Build detached candidates only. SessionService owns admission, platform effects and commits.
 export function importedSessionCandidate(local: AppData, imported: AppData, createId: () => string): SessionImportCandidate {
@@ -16,32 +17,35 @@ export function importedSessionCandidate(local: AppData, imported: AppData, crea
   const restored = JSON.parse(JSON.stringify(imported)) as AppData;
   const known = new Set(candidate.threads.map((item) => item.id));
   restored.threads = restored.threads.filter((item) => !known.has(item.id));
-  const providerIds = prepareBackupServices(local, restored, createId);
+  const serverIds = new Map<string, string>();
+  const providerIds = prepareBackupServices(local, restored, createId, serverIds);
   candidate.projects = (candidate.projects || []).concat((restored.projects || []).filter((project) =>
     !(candidate.projects || []).some((item) => item.id === project.id)));
   candidate.threads = candidate.threads.concat(restored.threads);
   validateProjects(candidate);
   // Restore preferences on a fresh install without overwriting an existing personal document.
   if (!(candidate.config.userDocument || '').trim()) { candidate.config.userDocument = restored.config.userDocument || ''; }
+  candidate.config = mergeBackupConfig(candidate.config, restored.config);
   candidate.providerProfiles = (candidate.providerProfiles || []).concat(restored.providerProfiles || []);
   const extensions = candidate.extensions || defaultExtensions();
-  for (const skill of restored.extensions?.skills || []) {
-    if (!extensions.skills.some((item) => item.name === skill.name)) { extensions.skills.push(skill); }
-  }
-  candidate.extensions = extensions; validateExtensions(extensions);
+  candidate.extensions = extensions; mergeBackupSkills(candidate, restored); validateExtensions(extensions);
   const extras = candidate.productivity || defaultProductivity();
   const source = restored.productivity || defaultProductivity();
+  extras.options = mergeBackupOptions(extras.options, source.options);
   for (const memory of source.memories) {
     if (!extras.memories.some((item) => item.id === memory.id)) { extras.memories.push(memory); }
   }
   for (const template of source.templates) {
+    const index = extras.templates.findIndex((item) => item.id === template.id);
+    const builtin = defaultProductivity().templates.find((item) => item.id === template.id);
+    if (index >= 0 && builtin && JSON.stringify(extras.templates[index]) === JSON.stringify(builtin)) { extras.templates[index] = template; continue; }
     // Older restores regenerated template IDs, including the built-in templates.
     if (!extras.templates.some((item) => item.id === template.id ||
       (item.name === template.name && item.content === template.content))) { extras.templates.push(template); }
   }
   extras.servers = extras.servers.concat(source.servers);
   candidate.productivity = extras; validateProductivity(extras);
-  return { data: candidate, threads: restored.threads, providerIds: providerIds };
+  return { data: candidate, threads: restored.threads, providerIds: providerIds, serverIds: serverIds };
 }
 
 export interface ProjectCandidate {

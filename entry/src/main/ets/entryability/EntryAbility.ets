@@ -3,6 +3,7 @@ import { configureNativeDiagnosticLog } from '../services/NativeDiagnosticLog';
 import { ShareInbox } from '../services/NativeActions';
 import { LanguagePreferences } from '../services/LanguagePreferences';
 import { AppearancePreferences } from '../services/AppearancePreferences';
+import { configureBackupPreferenceRefresh } from '../services/BackupDeviceState';
 import { McpOAuth } from '../services/McpOAuth';
 import { LaunchActions } from '../services/LaunchActions';
 import { DeveloperDiagnostics } from '../services/DeveloperDiagnostics';
@@ -66,6 +67,10 @@ export default class EntryAbility extends UIAbility {
     globalThis._brushEngineContext = this.context;
     LanguagePreferences.initialize(this.context);
     AppearancePreferences.initialize(this.context);
+    configureBackupPreferenceRefresh(() => {
+      AppearancePreferences.initialize(this.context); AppearancePreferences.activate();
+      LanguagePreferences.initialize(this.context);
+    });
     this.pendingWants.push(want);
     // AppGallery presents startup consent automatically. A second request would stack two system dialogs.
     hostedPrivacy.initialize(this.context, (allowed: boolean) => {

@@ -19,8 +19,10 @@ const t = (key, args = []) => key.replace(/\{(\d+)\}/g, (_, i) => args[i]);
 function setup() {
   const timers = new Map(), instances = [], logs = [], state = new Map([['startupBackupState', 'pending']]);
   let timerId = 0;
-  const control = { ready: true, accesses: 0, starts: 0, snapshot: { state: 4, error: 0 }, start: async () => {} };
-  const fileIo = { access: async () => { control.accesses++; return control.ready; }, listFile: async () => [], accessSync: () => false };
+  const control = { ready: true, accesses: 0, starts: 0, snapshot: { state: 4, error: 0 }, start: async () => {}, files: new Map(), restores: [] };
+  const fileIo = { access: async () => { control.accesses++; return control.ready; }, listFile: async () => [...control.files.keys()], accessSync: () => false,
+    lstat: async file => ({ ...control.files.get(path.basename(file)), isFile: () => true, isSymbolicLink: () => false }),
+    stat: async file => control.files.get(path.basename(file)) };
   const cloudSync = {
     SyncState: { UPLOADING: 0, UPLOAD_FAILED: 1, DOWNLOADING: 2, DOWNLOAD_FAILED: 3, COMPLETED: 4, STOPPED: 5 },
     ErrorType: { NO_ERROR: 0, NETWORK_UNAVAILABLE: 1, WIFI_UNAVAILABLE: 2, BATTERY_LEVEL_LOW: 3,
@@ -36,7 +38,7 @@ function setup() {
   const imports = {
     '../model/Diagnostics': { Diagnostics: { log: (...args) => logs.push(args) } },
     '@kit.CoreFileKit': { cloudSync, fileIo }, '@kit.ArkTS': {},
-    '../model/I18n': { t }, './Backup': {}, './FileBytes': {}
+    '../model/I18n': { t }, './Backup': { readBackupFile: async (_context, file, local) => { control.restores.push(file); return { ...local, restored: true }; } }, './FileBytes': {}
   };
   vm.runInNewContext(serviceCode, { exports, require: id => {
     assert.ok(id in imports, 'Unexpected import: ' + id); return imports[id];
@@ -65,9 +67,10 @@ function setup() {
 function panel(cloud) {
   const exports = {};
   vm.runInNewContext(panelCode, { exports, CloudBackup: cloud, cloudBackupError: error => error.message,
+    latestCloudBackup: items => items.find(item => item.location === 2 || item.location === 3), getLocale: () => 'en-US',
     Diagnostics: { log() {} }, t });
   return Object.assign(new exports.Probe(), { visible: true, foreground: true, busy: false,
-    cloudError: '', cloudListError: '', cloudErrorCode: 0, cloudStatus: '', cloudLoaded: false,
+    error: '', status: '', statusError: false, backupDate: '',
     app: { busy: false, exportSnapshot: () => ({}) }, automatic: { confirmUploaded() {} }, context: () => ({}) });
 }
 
@@ -135,64 +138,52 @@ test('a missing completion times out and keeps first-run discovery pending', asy
   assert.equal(h.timers.size, 0); assert.equal(h.instances.at(-1).callback, undefined);
 });
 
-test('successful listing clears a stale list error but preserves a failed backup action', async () => {
+test('successful status lookup clears availability errors while retaining action failures', async () => {
   let unavailable = true;
-  const p = panel({ list: async () => { if (unavailable) throw Error('not ready'); return []; },
-    create: async () => { throw Error('upload failed'); } });
-  await p.loadCloudList(); unavailable = false; await p.loadCloudList();
-  assert.equal(p.cloudError || p.cloudListError, ''); assert.equal(p.cloudLoaded, true);
-  await p.cloud('create'); assert.equal(p.cloudError, 'upload failed');
+  const p = panel({ list: async () => { if (unavailable) throw Error('not ready'); return []; }, create: async () => { throw Error('upload failed'); } });
+  await p.refreshStatus(); assert.equal(p.error, 'not ready'); unavailable = false; await p.refreshStatus(); assert.equal(p.error, '');
+  await p.cloud(false); assert.equal(p.error, 'upload failed'); await p.refreshStatus(); assert.equal(p.error, 'upload failed');
 });
-
-test('sync completion cannot claim a successful refresh when directory listing fails', async () => {
-  let denied = true;
-  const p = panel({ sync: async () => true, list: async () => {
-    if (denied) throw Object.assign(Error('Permission denied'), { code: 13900012 });
-    return [];
-  } });
-  await p.cloud('refresh');
-  assert.equal(p.cloudLoaded, false);
-  assert.equal(p.cloudListError, 'Permission denied');
-  assert.equal(p.cloudStatus, '', 'Failed listing must not coexist with a success banner');
-  denied = false; await p.cloud('refresh');
-  assert.equal(p.cloudLoaded, true); assert.equal(p.cloudListError, '');
-  assert.match(p.cloudStatus, /已刷新/);
+test('restore downloads the latest cloud backup and imports it without a file picker or list selection', async () => {
+  const restored = { source: 'cloud' }; let imports = 0, restores = 0;
+  const p = panel({ list: async () => [], restoreLatest: async () => { restores++; return restored; } });
+  p.app.importSnapshot = async data => { assert.equal(data, restored); imports++; return true; };
+  await p.cloud(true); assert.equal(restores, 1); assert.equal(imports, 1); assert.match(p.status, /已恢复/); assert.equal(p.error, '');
+  p.app.importSnapshot = async () => false; p.app.error = 'merge failed'; await p.cloud(true); assert.equal(p.error, 'merge failed'); assert.equal(p.status, '');
 });
-
-test('refresh success is withheld until the new directory listing finishes', async () => {
-  let release;
-  const p = panel({ sync: async () => true, list: () => new Promise(resolve => { release = resolve; }) });
-  p.cloudLoaded = true;
-  const pending = p.cloud('refresh'); await tick();
-  assert.equal(p.cloudStatus, '', 'A previous successful listing is not evidence for this refresh');
-  assert.equal(p.busy, true);
-  release([]); await pending;
-  assert.match(p.cloudStatus, /已刷新/); assert.equal(p.busy, false);
+test('backup reports uploaded only after the cloud service confirms its location', async () => {
+  let uploaded = false;
+  const p = panel({ list: async () => [], create: async () => uploaded });
+  await p.cloud(false); assert.match(p.status, /等待上传/); uploaded = true; await p.cloud(false); assert.match(p.status, /已上传到云端/);
 });
-
-test('returning from settings reloads availability and only clears recovered readiness errors', async () => {
-  const p = panel({ list: async () => [], create: async () => { throw Object.assign(Error('not ready'), { code: 22400001 }); } });
-  await p.cloud('create'); assert.equal(p.cloudError, 'not ready', 'The failed backup must remain visible');
-  p.foregroundChanged(); await tick(); assert.equal(p.cloudError, '');
-  p.cloudError = 'upload failed'; p.cloudErrorCode = 0;
-  p.foregroundChanged(); await tick(); assert.equal(p.cloudError, 'upload failed');
-  p.visible = false; p.cloudLoaded = false; p.foregroundChanged(); await tick(); assert.equal(p.cloudLoaded, false);
+test('restore failures do not import data and busy or running sessions cannot start another action', async () => {
+  let calls = 0, imports = 0;
+  const p = panel({ list: async () => [], restoreLatest: async () => { calls++; throw Error('download failed'); } });
+  p.app.importSnapshot = async () => { imports++; return true; };
+  await p.cloud(true); assert.equal(imports, 0); assert.equal(p.error, 'download failed');
+  p.busy = true; await p.cloud(true); p.busy = false; p.app.busy = true; await p.cloud(true); assert.equal(calls, 1);
 });
-
-test('foreground recovery waits for an older read, then queries fresh settings without overlapping readers', async () => {
-  let release, reads = 0, active = 0, maxActive = 0;
-  const p = panel({ list: async () => {
-    reads++; active++; maxActive = Math.max(maxActive, active);
-    try {
-      if (reads === 1) return await new Promise(resolve => { release = resolve; });
-      return [{ name: 'remote-backup' }];
-    } finally { active--; }
-  } });
-  p.cloudError = 'not ready'; p.cloudErrorCode = 22400001;
-  const older = p.loadCloudList();
-  const firstResume = p.foregroundChanged(), secondResume = p.foregroundChanged();
-  await tick(); assert.equal(reads, 1); release([]);
-  await Promise.all([older, firstResume, secondResume]);
-  assert.equal(reads, 2); assert.equal(maxActive, 1);
-  assert.equal(p.cloudItems[0].name, 'remote-backup'); assert.equal(p.cloudError, '');
+test('foreground recovery waits for earlier reads and refreshes metadata without overlapping', async () => {
+  let release, reads = 0, active = 0, maximum = 0;
+  const p = panel({ list: async () => { reads++; active++; maximum = Math.max(maximum, active); try { if (reads === 1) return await new Promise(resolve => release = resolve); return [{ createdAt: 1000, location: 3 }]; } finally { active--; } } });
+  const older = p.refreshStatus(), first = p.foregroundChanged(), second = p.foregroundChanged(); await tick(); assert.equal(reads, 1);
+  release([]); await Promise.all([older, first, second]); assert.equal(reads, 2); assert.equal(maximum, 1); assert.ok(p.backupDate);
+});
+test('latest selection ignores pending local snapshots and reads both historical and automatic backups', async () => {
+  const h = setup();
+  assert.equal(h.latestCloudBackup([{ name: 'pending', createdAt: 9999, location: 1 }, { name: 'old-auto', createdAt: 20, location: 3 }, { name: 'old-json', createdAt: 10, location: 2 }]).name, 'old-auto');
+  assert.equal(h.latestCloudBackup([{ name: 'pending', createdAt: 9999, location: 1 }]), undefined);
+});
+test('restoreLatest synchronizes before choosing a remote file and never restores stale cached metadata', async () => {
+  const h = setup(); const name = 'tinybot-auto-11111111-1111-4111-8111-111111111111.tinybot';
+  const pending = h.CloudBackup.restoreLatest({ cloudFileDir: '/cloud' }, { kept: true }); await tick();
+  assert.equal(h.control.accesses, 0); assert.equal(h.control.restores.length, 0);
+  h.control.files.set(name, { mtime: 1000, size: 100, location: 3 }); h.emit(4);
+  const value = await pending; assert.equal(value.kept, true); assert.equal(value.restored, true); assert.equal(h.control.restores[0], '/cloud/tinybot-backups/' + name);
+});
+test('restoreLatest stops on incomplete sync and explains a genuinely empty cloud', async () => {
+  const h = setup(); let pending = h.CloudBackup.restoreLatest({ cloudFileDir: '/cloud' }, {}); const rejected = assert.rejects(pending, /同步尚未完成/);
+  await tick(); await h.timer(30000); await rejected; assert.equal(h.control.restores.length, 0);
+  h.control.start = async sync => sync.callback({ state: 4, error: 0 });
+  await assert.rejects(h.CloudBackup.restoreLatest({ cloudFileDir: '/cloud' }, {}), /暂无可恢复/);
 });

@@ -1,4 +1,6 @@
 import { commitBackupKeys } from './BackupKeyRestore';
+import { prepareBackupImport, finishBackupImport, discardBackupImport, rollbackBackupFailure } from '../model/BackupImport';
+import { SessionImportCandidate } from './SessionCandidates';
 import { resolveBrowserPreview } from '../model/BrowserPreview';
 import { Diagnostics } from '../model/Diagnostics';
 import { configurationIssues } from '../model/ConfigurationCompatibility';
@@ -210,11 +212,19 @@ export class SessionService {
   }
   async importSnapshot(imported: AppData): Promise<boolean> {
     return this.mutate(t("导入失败："), async () => {
-      const importedCandidate = importedSessionCandidate(this.data, imported, () => this.resources.createId());
-      for (const thread of importedCandidate.threads) { await this.ensureThreadWorkspace(thread, importedCandidate.data); }
-      await commitBackupKeys(this.data, imported, importedCandidate, this.credentials, () => this.resources.createId(),
-        (data) => this.commitSettings(data));
+      let importedCandidate: SessionImportCandidate;
+      try {
+        importedCandidate = importedSessionCandidate(this.data, imported, () => this.resources.createId());
+        for (const thread of importedCandidate.threads) { await this.ensureThreadWorkspace(thread, importedCandidate.data); }
+      } catch (error) { await rollbackBackupFailure(error as Error, () => discardBackupImport(imported)); throw error as Error; }
+      const rollback = await prepareBackupImport(imported, importedCandidate);
+      try {
+        await commitBackupKeys(this.data, imported, importedCandidate, this.credentials, () => this.resources.createId(),
+          (data) => this.commitSettings(data));
+      } catch (error) { await rollbackBackupFailure(error as Error, rollback); }
       this.resources.configureProviders(this.providerProfiles);
+      try { await finishBackupImport(imported); }
+      catch (error) { throw new Error(t('主要数据已导入，附加数据恢复未完成，请重试：{0}', [(error as Error).message])); }
     });
   }
   private get active(): ThreadData { return this.requireThread(this.data.activeThreadId); }

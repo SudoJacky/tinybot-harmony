@@ -439,7 +439,7 @@ export default function sessionServiceTests(): void {
         const saved = f.session.snapshot(); const all = saved.providerProfiles as ProviderProfile[];
         expect(all.length).assertEqual(3); expect(JSON.stringify(all.slice(0, 2))).assertEqual(before);
         expect(all[2].enabled).assertFalse(); expect(all[2].credentialAlias).assertEqual('');
-        expect(all[2].id === profile.id).assertFalse();
+        expect(all[2].id === profile.id).assertEqual(!changedEndpoint);
         expect(saved.threads[1].modelRef?.providerId).assertEqual(all[2].id);
       }
     });
