@@ -86,7 +86,7 @@ console.log('PASS obfuscated release keeps annotation model properties and callb
 // Run the emitted ability startup: ambient global declarations must still resolve
 // to the platform global object after top-level name obfuscation.
 const initialized = [];
-let privacyChanged;
+let privacyChanged, refreshRestoredPreferences;
 const startupScope = { exports: {}, Date, AppStorage: { setOrCreate() {} }, require: id => {
   if (id === '@ohos:app.ability.UIAbility') return { default: class {} };
   if (id === '@ohos:web.webview') return { default: { WebviewController: {
@@ -99,6 +99,10 @@ const startupScope = { exports: {}, Date, AppStorage: { setOrCreate() {} }, requ
   const moduleName = path.basename(dependency[0], '.ets');
   if (moduleName === 'NativeDiagnosticLog') {
     return { [names.PropertyCache.configureNativeDiagnosticLog || 'configureNativeDiagnosticLog']: () => {} };
+  }
+  if (moduleName === 'BackupDeviceState') {
+    return { [names.PropertyCache.configureBackupPreferenceRefresh || 'configureBackupPreferenceRefresh']:
+      callback => { refreshRestoredPreferences = callback; } };
   }
   const symbol = { NativeActions: 'ShareInbox', HostedPrivacy: 'hostedPrivacy', HuaweiAccount: 'huaweiAccount', AutoCloudBackup: 'autoCloudBackup' }[moduleName] || moduleName;
   if (symbol === 'hostedPrivacy') {
@@ -119,6 +123,7 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync(abilityFile, 'utf8'), {
 const ability = new startupScope.exports.default();
 ability.context = { getApplicationContext: () => ({ filesDir: '/test/files' }) };
 ability.onCreate({}, {});
+assert.equal(typeof refreshRestoredPreferences, 'function', 'Restore preference refresh is registered through the emitted function export');
 assert.equal(startupScope._brushEngineContext, ability.context, 'Pen Kit receives the real global context');
 assert.deepEqual(initialized, ['LanguagePreferences', 'AppearancePreferences']);
 privacyChanged(true);
