@@ -23,6 +23,7 @@ export struct DetailTabs {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop tabs: DetailTabItem[] = [];
   @Prop active: string = '';
+  @Prop showCollapse: boolean = true;
   onSelect: (id: string) => void = () => {};
   onClose: (id: string) => void = () => {};
   onAddFiles: () => void = () => {};
@@ -51,7 +52,7 @@ export struct DetailTabs {
         Button({ type: ButtonType.Circle }) {
           SymbolGlyph($r('sys.symbol.xmark')).fontSize(12).fontColor([$r('app.color.text_secondary')])
         }.id('detail-tab-close-' + tab.id).width(20).height(20).padding(0).backgroundColor(Color.Transparent)
-          .accessibilityText(t('关闭侧栏') + ' · ' + tab.label)
+          .accessibilityText(t('关闭') + ' · ' + tab.label)
           .onClick(() => this.onClose(tab.id))
       }
     }
@@ -76,8 +77,8 @@ export struct DetailTabs {
         }.id('detail-add-tab').width(32).height(32).padding(0).backgroundColor(Color.Transparent)
           .clickEffect(Motion.pressSmall).accessibilityText(t('添加侧栏面板'))
           .bindMenu(this.addMenu, { systemMaterial: this.appearance.menu, mask: false })
-        IconButton({ icon: $r('sys.symbol.close_sidebar'), label: t('关闭侧栏'), compId: 'detail-collapse',
-          diameter: 32, iconSize: 17, onTap: this.onCollapse })
+        if (this.showCollapse) { IconButton({ icon: $r('sys.symbol.close_sidebar'), label: t('关闭侧栏'), compId: 'detail-collapse',
+          diameter: 32, iconSize: 17, onTap: this.onCollapse }) }
       }.width('100%').height(48).padding({ right: 4 })
       Divider().strokeWidth(0.5).color($r('app.color.divider'))
     }.width('100%').backgroundColor($r('app.color.page_background'))

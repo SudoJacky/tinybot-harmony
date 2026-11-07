@@ -17,7 +17,7 @@ function checkCompiledPanel(f) {
   class Child { constructor(_parent, props) { if (props.compId) nodes.set(props.compId, props); props.content?.(); } }
   vm.runInNewContext(ts.transpileModule('class Probe {' + methods.map(name => component.members.find(n => n.name?.getText(tree) === name).getText(tree)).join('\n') + '} exports.Probe=Probe;', {
     compilerOptions: { target: ts.ScriptTarget.ES2021 }
-  }).outputText, { exports, t: (s, args = []) => s.replace(/\{(\d+)\}/g, (_, i) => args[i]), getLocale: () => 'en-US',
+  }).outputText, { PageStyles: {form:{}}, exports, t: (s, args = []) => s.replace(/\{(\d+)\}/g, (_, i) => args[i]), getLocale: () => 'en-US',
     Scroll: widget, Column: widget, Text: widget, Row: widget, If: widget, ForEach: widget, SymbolGlyph: widget, LoadingProgress: widget, __Common__: widget,
     SectionHeader: Child, GroupCard: Child, SwitchRow: Child, NavRow: Child, RowDivider: Child, Banner: Child, IconButton: Child,
     ViewPU: { create() {} }, Space: {}, Radius: {}, BarState: { Off: 0 }, Alignment: { Top: 0 }, VerticalAlign: { Top: 0 } });

@@ -1,3 +1,4 @@
+import { PageStyles } from '../common/PageStyles';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
@@ -106,6 +107,6 @@ export struct SearchSettingsPanel {
             .id('save-search-settings').onClick(() => this.save())
         }.width('100%')
       }
-    }.width('100%').height('100%').backgroundColor($r('app.color.page_background'))
+    }.width('100%').height('100%').attributeModifier(PageStyles.form).backgroundColor($r('app.color.page_background'))
   }
 }

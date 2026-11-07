@@ -1,3 +1,4 @@
+import { PageStyles } from '../common/PageStyles';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
@@ -113,6 +114,6 @@ export struct SkillEditorPanel {
             .onClick(async () => { if (await this.app.saveSkill()) { this.onSaved(); } })
         }
       }
-    }.width('100%').height('100%')
+    }.width('100%').height('100%').attributeModifier(PageStyles.form)
   }
 }

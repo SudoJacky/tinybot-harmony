@@ -1,3 +1,4 @@
+import { PageStyles } from '../common/PageStyles';
 import { Diagnostics } from '../model/Diagnostics';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { AppMaterials } from '../common/AppMaterials';
@@ -143,7 +144,7 @@ export struct AppearancePanel {
         .stroke(Color.White).strokeWidth(3).shadow({ radius: 3, color: '#66000000' })
         .position({ x: this.paletteWidth * this.saturation - 12, y: 160 * (1 - this.colorValue) - 12 })
         .hitTestBehavior(HitTestMode.None)
-    }.id('appearance-color-palette').width('100%').height(160).accessibilityLevel('no-hide-descendants')
+    }.id('appearance-color-palette').width('100%').height(240).accessibilityLevel('no-hide-descendants')
     .onAreaChange((_old: Area, area: Area) => { this.paletteWidth = Number(area.width); })
     .priorityGesture(GestureGroup(GestureMode.Exclusive,
       PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.All, distance: 0 })
@@ -196,7 +197,7 @@ export struct AppearancePanel {
             ForEach(this.fonts, (family: string, index: number) => {
               if (index > 0) { RowDivider() }
               NavRow({ title: this.fontName(family), active: this.options.fontFamily === family, trailing: 'select',
-                compId: 'appearance-font-' + index, onTap: () => this.selectFont(family) })
+                titleFont: family, compId: 'appearance-font-' + index, onTap: () => this.selectFont(family) })
             }, (family: string) => family)
           } else {
             if (!this.materialAvailable()) {
@@ -214,7 +215,7 @@ export struct AppearancePanel {
         }
       } }
       if (this.error) { Banner({ text: this.error, compId: 'appearance-sheet-error' }) }
-    }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.xl })
+    }.width('100%').attributeModifier(PageStyles.choices).padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.xl })
   }
 
   @Builder
@@ -312,7 +313,7 @@ export struct AppearancePanel {
         if (this.error) { Banner({ text: this.error, compId: 'appearance-error' }) }
         Button(t('恢复默认外观')).fontFamily(this.appearance.fontFamily).id('appearance-reset').attributeModifier(Btn.text)
           .onClick(() => this.save(defaultAppearance())).margin({ top: Space.sm })
-      }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.xl })
+      }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.xl }).attributeModifier(PageStyles.form)
     }.width('100%').height('100%').scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring).align(Alignment.Top)
   }
   build() {

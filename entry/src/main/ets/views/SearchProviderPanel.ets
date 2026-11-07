@@ -1,3 +1,4 @@
+import { PageStyles } from '../common/PageStyles';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { menuMaterialAttribute, systemMaterialAttribute } from '../common/MaterialAttributes';
 import { Btn, Space } from '../common/Theme';
@@ -127,6 +128,6 @@ export struct SearchProviderPanel {
         Button(t('完成')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.primary).width('100%')
           .id('search-provider-done').enabled(!this.locked()).onClick(() => this.done())
       }
-    }.width('100%').height('100%').backgroundColor($r('app.color.page_background'))
+    }.width('100%').height('100%').attributeModifier(PageStyles.form).backgroundColor($r('app.color.page_background'))
   }
 }

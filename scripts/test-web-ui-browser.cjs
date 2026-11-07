@@ -22,17 +22,18 @@ assert.throws(()=>parseWebUiMessage('{"type":"resize","height":"200"}'));
   const page=await browser.newPage({viewport:{width:400,height:600}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
   const consoleErrors=[];page.on('console',message=>{if(message.type()==='error')consoleErrors.push(message.text());});
   const requests=[];await page.route('**/*',route=>{requests.push(route.request().url());route.abort();});
-  async function mount(values,specOverride=spec,expectedError='',preflight=false,snapshotMode=false,automation=false,panelProbe){
+  async function mount(values,specOverride=spec,expectedError='',preflight=false,snapshotMode=false,automation=false,panelProbe,panel,placement=!!panel){
    // setContent retains the previous window and message listeners; a remount needs a fresh host.
    await page.goto('about:blank');
    await page.setContent(html);
-   await page.evaluate(({spec,values,preflight,autoHeight,snapshotMode,automation,panelProbe})=>{
-    window.messages=[];window.saved=values;window.failSave=false;window.probeState={value:{count:9},revision:'initial'};
+   await page.evaluate(({spec,values,preflight,autoHeight,snapshotMode,automation,panelProbe,panel,placement})=>{
+    window.messages=[];window.saved=values;window.failSave=false;window.probeState={value:{count:9},revision:'initial'};window.placementState={value:null,revision:'initial'};
     const channel=new MessageChannel();window.nativePort=channel.port1;
     channel.port1.onmessage=event=>{const data=JSON.parse(event.data);window.messages.push(data);
     if(data.type==='storageLoad'||data.type==='storageSave'){
-      if(data.type==='storageSave')window.probeState={value:data.value,revision:String(Number(window.probeState.revision)||0)+':next'};
-      channel.port1.postMessage(JSON.stringify({type:'storageResult',id:data.id,snapshot:window.probeState}));
+      const key=data.scope==='placement'?'placementState':'probeState';
+      if(data.type==='storageSave')window[key]={value:data.value,revision:String(Number(window[key].revision)||0)+':next'};
+      channel.port1.postMessage(JSON.stringify({type:'storageResult',id:data.id,snapshot:window[key]}));
     }
     if(data.type==='resize'&&autoHeight){
       document.documentElement.style.height=Math.max(48,Math.min(800,data.height))+'px';
@@ -41,8 +42,8 @@ assert.throws(()=>parseWebUiMessage('{"type":"resize","height":"200"}'));
       else {window.saved=data.values;channel.port1.postMessage(JSON.stringify({type:'ack',id:data.id,values:data.values}));}
     }};
     window.postMessage('tinybot-web-port','*',[channel.port2]);
-    channel.port1.postMessage(JSON.stringify({type:'init',spec,values,active:true,preflight,autoHeight,snapshotMode,automation,panelProbe}));
-   },{spec:specOverride,values,preflight,autoHeight:webUiAutoHeight(specOverride),snapshotMode,automation,panelProbe});
+    channel.port1.postMessage(JSON.stringify({type:'init',spec,values,active:true,preflight,autoHeight,snapshotMode,automation,panelProbe,panel,placement}));
+   },{spec:specOverride,values,preflight,autoHeight:webUiAutoHeight(specOverride),snapshotMode,automation,panelProbe,panel,placement});
    try { await page.waitForFunction(()=>window.messages.some(m=>m.type==='ready'||m.type==='error')); }
    catch(error){console.error({errors,consoleErrors,frames:page.frames().map(f=>f.url()),host:await page.evaluate(()=>({ready:window.__tinybotHostReady,messages:window.messages}))});throw error;}
    const messages=await page.evaluate(()=>window.messages);
@@ -69,6 +70,25 @@ assert.throws(()=>parseWebUiMessage('{"type":"resize","height":"200"}'));
   await page.setViewportSize({width:400,height:600});
   errors.length=0; // The negative probes above deliberately raise runtime errors.
   console.log('PASS real-browser panel probes: two widths, delayed click/text/storage assertions, actionable selector/result/overflow/label errors and startup-write rejection');
+  const themed={data:{},title:'Local tabs',locale:'zh-CN',theme:'light',status:'ready',canRefresh:false,
+    tokens:{text:'#18261f',surface:'#ffffff',accent:'#246959','on-accent':'#ffffff','text-secondary':'#52615a'}};
+  const localSpec={...cardProbe,html:'<main class="tb-card tb-stack"><h2 class="tb-title">Local tabs</h2><output class="tb-number" id="tab">overview</output><button class="tb-button tb-primary" id="history">History</button><p class="tb-error" id="error"></p></main>',js:`
+    const local=tinybot.panel.viewState;let snapshot=local.available?await local.load():null;
+    document.querySelector('#history').onclick=async()=>{try{snapshot=await local.save({tab:'history'},snapshot.revision);document.querySelector('#tab').textContent=snapshot.value.tab;}catch(e){document.querySelector('#error').textContent=e.message;}};`};
+  let localFrame=await mount({},localSpec,'',false,false,false,undefined,themed);
+  await localFrame.locator('#history').click();await localFrame.waitForFunction(()=>document.querySelector('#tab').textContent==='history');
+  assert.deepEqual(await page.evaluate(()=>placementState.value),{tab:'history'});assert.equal(await page.evaluate(()=>probeState.value.count),9);
+  assert.ok((await page.evaluate(()=>messages)).some(m=>m.type==='storageSave'&&m.scope==='placement'));
+  assert.equal(await localFrame.locator('#history').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(36, 105, 89)');
+  await page.evaluate(themed=>nativePort.postMessage(JSON.stringify({type:'state',values:{},panel:{...themed,theme:'dark',tokens:{...themed.tokens,accent:'#80cbb4',text:'#eeeeee',surface:'#121212'}},active:true})),themed);
+  await localFrame.waitForFunction(()=>getComputedStyle(document.querySelector('#history')).backgroundColor==='rgb(128, 203, 180)');
+  assert.equal(await localFrame.locator('#tab').textContent(),'history','Theme changes preserve current presentation state');
+  localFrame=await mount({},localSpec,'',false,false,false,undefined,themed,false);
+  assert.equal(await localFrame.evaluate(()=>tinybot.panel.viewState.available),false,'All-cards mode exposes capability absence');
+  await assert.rejects(localFrame.evaluate(()=>tinybot.panel.viewState.load()),/requires a board/);
+  await mount({},{...localSpec,js:'tinybot.panel.viewState.save({tab:"history"},"initial")'},'active user interaction',true,false,false,{width:360,checks:[]},themed);
+  errors.length=0;
+  console.log('PASS placement storage bridge isolation, unavailable capability, startup-write rejection and live theme components');
   const {PreviewTools}=model('../services/PreviewTools'),{Cancellation}=model('../services/Cancellation');
   const {parseUiSurface}=model('InteractiveUi');
   const previewSource='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text x="5" y="30">Pelican</text></svg>';

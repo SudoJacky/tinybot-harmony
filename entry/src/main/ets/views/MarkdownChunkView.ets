@@ -10,6 +10,8 @@ import { Radius, Space } from '../common/Theme';
 import { RevealSpan, StreamReveal } from '../model/StreamReveal';
 import { MarkdownChunkModel } from '../viewmodel/MarkdownChunkModel';
 import { ImageViewer } from './ImageViewer';
+import { hasMath } from '../model/MathContent';
+import { MathView } from './MathView';
 
 // Long code blocks start collapsed so one answer does not push the conversation off screen.
 const CODE_PREVIEW_LINES: number = 18;
@@ -210,6 +212,9 @@ export struct MarkdownChunkView {
   // Keyed builders retain their original arguments; read changing text from the model.
   @Builder
   prose(text: string, size: number, bold: boolean, color: ResourceColor, key: string) {
+    if (hasMath(this.proseText(key))) {
+      MathView({ content: this.proseText(key), fontSize: size, bold: bold, color: color, selectable: this.selectable })
+    } else {
     Text() {
       ForEach(this.reveal.spans(key, this.inlineSpans(this.proseText(key)), this.revealTime), (span: RevealSpan) => {
         if (span.kind === 'code') {
@@ -226,6 +231,7 @@ export struct MarkdownChunkView {
         }
       })
     }.fontFamily(this.appearance.fontFamily).fontSize(size).lineHeight(Math.round(size * 1.62)).fontColor(color).copyOption(this.selectable ? CopyOptions.LocalDevice : CopyOptions.None).width('100%')
+    }
   }
 
   @Builder
@@ -333,6 +339,11 @@ export struct MarkdownChunkView {
           ForEach(this.model.blocks, (block: MarkdownBlock, index: number) => {
             if (this.model.blocks[index].kind === 'code') {
               this.codeBlock(this.model.blocks[index], index)
+            } else if (this.model.blocks[index].kind === 'math') {
+              MathView({ content: this.model.blocks[index].text, display: true, fontSize: this.fontSize, selectable: this.selectable })
+            } else if (this.model.blocks[index].kind === 'math-pending') {
+              Text(this.model.blocks[index].text).fontSize(this.fontSize).fontColor($r('app.color.text_primary'))
+                .copyOption(this.selectable ? CopyOptions.LocalDevice : CopyOptions.None)
             } else if (this.model.blocks[index].kind === 'table') {
               this.table(this.model.blocks[index], index)
             } else if (this.model.blocks[index].kind === 'image') {

@@ -23,11 +23,14 @@ const model=loadModel('LifePanel');
 const signal=compile(fs.readFileSync(path.join(root,'entry/src/main/ets/services/Cancellation.ets'),'utf8'),
   {require:()=>({ToolFailure:class extends Error {}})});
 const tree=emitted('views/LifePanelsPanel'), panel=tree.statements.find(n=>ts.isClassDeclaration(n)&&n.name.text==='LifePanelsPanel');
-const names=['stop','activityChanged','scan','reload','report','entryKey','refresh','change','refreshAll','visible','layouts','rect','columns','boardHeight','currentBoard','currentEditorThreadId','boardKey','sizeOnBoard','targetChanged','dropCard','layoutEntries','startMove','moveCard','resetGesture','resizeCard','heightOnBoard','entryFor','createCard','showEditor'];
+const names=['stop','activityChanged','scan','reload','report','entryKey','refresh','change','refreshAll','visible','layouts','rect','boardHeight','currentBoard','currentEditorThreadId','boardKey','targetChanged','dropCard','gridRect','beginLayout','updateLayout','finishLayout','followEdge','startMove','moveCard','resetGesture','resizeCard','heightOnBoard','entryFor','createCard','showEditor','addBuiltin','aboutToAppear'];
 const methods=panel.members.filter(n=>ts.isMethodDeclaration(n)&&names.includes(n.name.getText(tree))).map(n=>n.getText(tree)).join('\n');
 assert.equal(panel.members.filter(n=>ts.isMethodDeclaration(n)&&names.includes(n.name.getText(tree))).length,names.length);
 const timers=new Map(), logs=[];let timerId=0;
-const {Probe}=compile('export class Probe {'+methods+'}',{...loadModel('I18n'),...model,...signal,...loadModel('LifeBoard'),...loadModel('PanelPresentation'),
+let installBuiltin,panelChange;
+const {Probe}=compile('export class Probe {'+methods+'}',{...loadModel('I18n'),...model,...signal,...loadModel('LifeBoard'),...loadModel('PanelPresentation'),...loadModel('PanelGrid'),
+  builtinWidget:loadModel('BuiltinWidgets').builtinWidget,BuiltinWidgets:class{async add(...args){return installBuiltin(...args);}},
+  PanelChanges:{subscribe:listener=>{panelChange=listener;return()=>{};}},
   setTimeout:(fn,ms)=>{timers.set(++timerId,{fn,ms});return timerId;},clearTimeout:id=>timers.delete(id),
   Motion:{medium:180,thumb:'spring'},Diagnostics:{log:(...args)=>logs.push(args)}});
 const turn=()=>new Promise(resolve=>setImmediate(resolve));
@@ -35,11 +38,34 @@ function entry(id,refreshMinutes=1) {return {workspaceId:'chat',panel:{id,config
   definition:{size:'S',source:{type:'workspace-json',path:'data.json'},refreshMinutes},refreshedAt:0,attemptedAt:0}};}
 function view(entries=[],repository={}) {
   const page=new Probe();Object.assign(page,{mounted:true,active:true,foreground:true,timer:-1,cancellation:new signal.Cancellation(),scanning:false,
-    getUIContext:()=>({getFocusController:()=>({clearFocus(){}}),animateTo:(_options,action)=>action()}),layoutSaving:false,dragging:'',resizing:'',dragBefore:'',resizeSize:'',cardHeights:{},entries:[],pending:[],error:'',selected:'',removed:false,boardWidth:360,boards:[],boardSelection:'',requestedTarget:'',lastTarget:''});
+    getUIContext:()=>({getFocusController:()=>({clearFocus(){}}),animateTo:(_options,action)=>action()}),layoutSaving:false,dragging:'',resizing:'',edgeTimer:-1,previewRects:[],gestureItems:[],viewportTop:0,viewportHeight:1000,scrollOffset:0,contentScroller:{currentOffset:()=>({yOffset:0}),scrollBy(){}},cardHeights:{},entries:[],pending:[],error:'',selected:'',removed:false,boardWidth:360,boards:[],boardSelection:'',requestedTarget:'',lastTarget:''});
   page.boardStore=()=>({list:async()=>[]});
+  page.prepareGuides=async()=>{};
   page.panels=()=>({list:async()=>entries,repository:()=>repository});return page;
 }
 async function main() {
+  {
+    const initial=view();let reloads=0;initial.guidesPrepared=false;initial.activityChanged=()=>{};initial.reload=async()=>{reloads++;};
+    initial.aboutToAppear();panelChange();assert.equal(reloads,0,'Partial default publication must not race the completed board snapshot');
+    initial.guidesPrepared=true;panelChange();await turn();assert.equal(reloads,1,'Changes after initialization still refresh the collection');
+    console.log('PASS initial guide publications are coalesced until the default board is complete');
+  }
+  {
+  const packaged={workspaceId:'workspace',panel:{id:'packaged',archived:false,definition:{title:'Clock'}}};
+  const builtin=view();Object.assign(builtin,{app:{ready:true,busy:true,activeWorkspaceId:'workspace'},addingBuiltin:'',creating:false,sheetOpen:true});
+  builtin.getUIContext=()=>({getHostContext:()=>({})});builtin.reload=async()=>{};
+  let finishInstall,installCount=0;
+  installBuiltin=async(id,workspace,signal,width)=>{installCount++;assert.equal(id,'clock');assert.equal(workspace,'workspace');assert.equal(width,360);return new Promise(resolve=>finishInstall=resolve);};
+  const installing=builtin.addBuiltin('clock');await turn();await builtin.addBuiltin('clock');assert.equal(installCount,1,'Repeated taps do not create duplicate instances');
+  finishInstall(packaged);await installing;assert.equal(builtin.selected,'workspace/packaged');assert.equal(builtin.sheetOpen,false);assert.equal(builtin.addingBuiltin,'');
+  const board={id:'board',title:'Board',items:[{workspaceId:'workspace',panelId:'old',x:0,y:0,w:6,h:7,mountId:'keep-me'}]};
+  builtin.boards=[{workspaceId:'workspace',board}];builtin.boardSelection='workspace/board';builtin.selected='';let placement;
+  builtin.boardStore=()=>({get:async()=>board,place:async(...args)=>{placement=args;}});
+  installBuiltin=async(id,workspace,signal,width)=>{assert.equal(width,174,'Validate at the actual half-width placement');return packaged;};
+  await builtin.addBuiltin('clock');assert.equal(placement[3].w,6);assert.equal(placement[3].x,6);assert.equal(placement[4],loadModel('LifeBoard').boardLayoutKey(board.items));
+  installBuiltin=async()=>{throw Error('Packaged card failed validation');};await builtin.addBuiltin('clock');assert.match(builtin.error,/failed validation/);assert.equal(builtin.addingBuiltin,'');
+  console.log('PASS built-in add uses no model request, gates duplicate taps, opens independent instances, places in free cells and reports failures');
+  }
   let count=0;const card=entry('due');const page=view([card],{refresh:async(id,cancel)=>{cancel.check();count++;card.panel.refreshedAt=Date.now();}});
   page.activityChanged();await turn();await turn();assert.equal(count,0);assert.equal(page.pending.length,0);
   assert.equal(timers.get(page.timer).ms,30000,'One expiry scan timer follows completion');
@@ -65,7 +91,7 @@ async function main() {
   await editable.change(card,'toggle','tasks','walk',true);assert.deepEqual(saved,['due',1,'tasks','walk',true]);assert.equal(editable.pending.length,0);
   editable.foreground=false;await editable.change(card,'toggle','tasks','walk',false);assert.equal(saved[4],true,'Background view cannot mutate user state');
   editable.entries=[entry('one'),entry('two'),entry('three')];editable.entries[1].panel.definition.size='L';
-  assert.equal(editable.columns(),2);assert.equal(editable.layouts()[1].width,360);assert.ok(editable.boardHeight()>0);
+  assert.equal(editable.layouts()[1].width,360);assert.ok(editable.boardHeight()>0);
   console.log('PASS emitted native expiry scheduling, foreground re-entry, cancellation race, visible errors, independent cards and checklist persistence dispatch');
   const {PanelChanges}=compile(fs.readFileSync(path.join(root,'entry/src/main/ets/services/PanelChanges.ets'),'utf8'));
   const {PanelExpiryUpdates}=compile(fs.readFileSync(path.join(root,'entry/src/main/ets/services/PanelExpiryUpdates.ets'),'utf8'),{
@@ -123,16 +149,32 @@ async function main() {
   mailEditor.foreground=true;await mailEditor.remove();assert.equal(mailDeletes,1);assert.equal(mailEditor.editing,false);
   mailEditor.secret='unfinished-mail-code';mailEditor.aboutToDisappear();assert.equal(mailEditor.secret,'');assert.equal(mailEditor.mounted,false);
   console.log('PASS emitted mailbox editor: explicit access, secure save, connection check, visible failure, background cancellation, removal and secret clearing');
-  const arranged=view();arranged.entries=[entry('a'),entry('b')];
-  arranged.boards=[{workspaceId:'owner',board:{id:'board',items:[{workspaceId:'chat',panelId:'b',size:'L'},{workspaceId:'chat',panelId:'a',size:'S'}]}}];
-  arranged.boardSelection='owner/board';assert.equal(arranged.visible()[0].panel.id,'b');assert.equal(arranged.sizeOnBoard(arranged.visible()[0]),'L');
-  let reorder;arranged.boardStore=()=>({arrange:async(...args)=>reorder=args,list:async()=>arranged.boards});arranged.panels=()=>({list:async()=>arranged.entries});
-  arranged.startMove('chat/a',{fingerList:[{globalX:100,globalY:300}]});arranged.moveCard({offsetX:999,offsetY:999,fingerList:[{globalX:100,globalY:108}]});assert.equal(arranged.dragY,-192);assert.equal(arranged.dragX,0,'Window coordinates keep the card under the finger despite changing local coordinates');assert.equal(arranged.layoutEntries()[0].panel.id,'a');await arranged.dropCard(arranged.visible()[1],1,{offsetX:0,offsetY:-192});assert.ok(reorder,'Dragging invokes persisted board arrangement');
-  assert.equal(arranged.dragging,'');
-  arranged.startMove('chat/a',{fingerList:[{globalX:100,globalY:300}]});arranged.moveCard({offsetX:999,offsetY:999,fingerList:[{globalX:100,globalY:108}]});arranged.resetGesture();assert.equal(arranged.visible()[0].panel.id,'b','Cancel leaves saved ordering alone');
-  arranged.entries[0].panel.definition.view={height:320};
-  await arranged.resizeCard('chat/a',{offsetX:100,offsetY:80,fingerList:[{globalX:300,globalY:400}]},false);assert.equal(arranged.resizeWidth,274);assert.equal(arranged.resizeHeight,400);assert.equal(arranged.sizeOnBoard(arranged.entries[0]),'M');
-  await arranged.resizeCard('chat/a',{offsetX:100,offsetY:80,fingerList:[{globalX:300,globalY:400}]},true);assert.equal(reorder[4],'M');assert.equal(reorder[5],400);assert.equal(arranged.resizing,'');
+  const arranged=view();arranged.entries=[entry('a'),entry('b'),entry('c')];
+  const rects=[{x:0,y:0,w:6,h:5},{x:6,y:0,w:6,h:5},{x:0,y:5,w:12,h:7}];
+  arranged.boards=[{workspaceId:'owner',board:{id:'board',items:arranged.entries.map((e,i)=>({workspaceId:'chat',panelId:e.panel.id,...rects[i]}))}}];
+  arranged.boardSelection='owner/board';const before=JSON.stringify(arranged.boards);
+  let placement;arranged.boardStore=()=>({place:async(...args)=>placement=args,list:async()=>arranged.boards});arranged.panels=()=>({list:async()=>arranged.entries});
+  const step=loadModel('PanelGrid').gridStep(360), rowStep=loadModel('PanelGrid').GRID_ROW_STEP, point=(x,y)=>({fingerList:[{globalX:x,globalY:y}]});
+  arranged.feedback='Layout saved';arranged.startMove('chat/b',point(200,200));
+  arranged.moveCard(point(200-6*step,200+12*rowStep));
+  assert.equal(arranged.feedback,'Layout saved');assert.equal(arranged.targetRect.x,0);assert.equal(arranged.targetRect.y,12);
+  assert.equal(JSON.stringify(arranged.boards),before,'Live preview must not mutate saved geometry');
+  assert.deepEqual(JSON.parse(JSON.stringify(arranged.previewRects)),[rects[0],{x:0,y:12,w:6,h:5},rects[2]],'A B / C can become A / C / B');
+  await arranged.finishLayout();assert.equal(placement[2].panelId,'b');assert.equal(placement[3].y,12);assert.equal(arranged.dragging,'');assert.equal(arranged.feedback,'Layout saved','Saving geometry does not produce a page-level status row');
+  arranged.startMove('chat/b',point(200,200));arranged.moveCard(point(200-6*step,200));
+  assert.equal(arranged.previewRects[0].y,5,'Collision preview pushes A down');assert.equal(arranged.previewRects[2].y,10,'C follows cascade');
+  arranged.resetGesture();assert.equal(JSON.stringify(arranged.boards),before,'Cancel restores layout');assert.equal(arranged.previewRects.length,0);
+  await arranged.resizeCard('chat/a',{offsetX:-step,offsetY:rowStep,...point(200,400)},false);
+  assert.equal(arranged.targetRect.w,5);assert.equal(arranged.targetRect.h,6);assert.ok(arranged.resizeWidth>0);
+  await arranged.resizeCard('chat/a',{offsetX:-step,offsetY:rowStep,...point(200,400)},true);
+  assert.equal(placement[3].w,5);assert.equal(placement[3].h,6);assert.equal(arranged.resizing,'');
+  let offset=0;arranged.contentScroller={currentOffset:()=>({yOffset:offset}),scrollTo:({yOffset})=>offset=yOffset};
+  arranged.viewportHeight=500;arranged.startMove('chat/a',point(20,10));assert.equal(arranged.edgeTimer,-1,'At the top, holding a corner cannot scroll into negative overscroll');arranged.resetGesture();
+  arranged.viewportHeight=500;arranged.startMove('chat/a',point(20,300));arranged.moveCard(point(20,490));
+  const timer=timers.get(arranged.edgeTimer);assert.ok(timer);timers.delete(arranged.edgeTimer);timer.fn();
+  assert.ok(offset>0);assert.equal(arranged.dragY,190+offset,'Auto-scroll displacement is included in the grid target');
+  arranged.stop();assert.equal(arranged.edgeTimer,-1);assert.equal(arranged.previewRects.length,0);timers.clear();
+  console.log('PASS grid preview/collision cascade, bottom placement, cell resize, cancellation and edge scroll');
   arranged.requestedTarget=JSON.stringify({workspaceId:'chat',panelId:'a'});arranged.targetChanged();assert.equal(arranged.selected,'chat/a');assert.equal(arranged.boardSelection,'');
   arranged.requestedTarget=JSON.stringify({workspaceId:'owner',boardId:'board'});arranged.targetChanged();assert.equal(arranged.boardSelection,'owner/board');assert.equal(arranged.selected,'');
   const composing=view();let sent=0,createdThreads=0,selectedThread='',editorSaved='',chatOpened=0;

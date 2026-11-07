@@ -67,14 +67,14 @@
         else { state = data.values; saved.resolve(copy(state)); }
       }
     });
-    function storageRequest(type, value, revision) {
+    function storageRequest(type, value, revision, scope) {
       if (type === 'storageSave' && ((initial.preflight && !checking) || initial.snapshotMode || !active)) {
         return Promise.reject(new Error('Save mini app data only during an active user interaction.'));
       }
       if (type === 'storageSave' && (value === undefined || typeof revision !== 'string' || !revision)) {
         return Promise.reject(new Error('Use the revision returned by tinybot.storage.load() or save().'));
       }
-      const request = JSON.parse(JSON.stringify({ type, id: ++seq, value, revision }));
+      const request = JSON.parse(JSON.stringify({ type, id: ++seq, value, revision, scope }));
       return new Promise((resolve, reject) => { storagePending.set(request.id, { resolve, reject }); send(request); });
     }
     Object.defineProperty(window, 'tinybot', { value: Object.freeze({
@@ -87,6 +87,11 @@
       }),
       panel: Object.freeze({
         get context() { return copy(panel); },
+        viewState: Object.freeze({
+          get available() { return initial.placement === true; },
+          load() { return initial.placement ? storageRequest('storageLoad', undefined, undefined, 'placement') : Promise.reject(new Error('View state requires a board placement')); },
+          save(value, revision) { return initial.placement ? storageRequest('storageSave', value, revision, 'placement') : Promise.reject(new Error('View state requires a board placement')); }
+        }),
         onUpdate(listener) { panelListeners.add(listener); return () => panelListeners.delete(listener); },
         refresh(inputs) {
           if (!active || initial.preflight || initial.snapshotMode || !panel?.canRefresh) return Promise.reject(new Error('Card refresh is unavailable in this view.'));
@@ -172,6 +177,7 @@
     };
     window.__tinybotError = failure;
   }
+  const panelStyle = 'html{--tinybot-font:system-ui,sans-serif;--tinybot-text-secondary:color-mix(in srgb,var(--tinybot-text,#17251f) 65%,transparent);--tinybot-surface-muted:color-mix(in srgb,var(--tinybot-text,#17251f) 6%,var(--tinybot-surface,white));--tinybot-border:color-mix(in srgb,var(--tinybot-text,#17251f) 18%,transparent);--tinybot-on-accent:#fff;--tinybot-danger:#b3261e;--tinybot-space-1:4px;--tinybot-space-2:8px;--tinybot-space-3:12px;--tinybot-space-4:16px;--tinybot-space-5:24px;--tinybot-space-6:32px;--tinybot-radius:16px;--tinybot-control-radius:10px}.tb-card{padding:var(--tinybot-space-4);font-family:var(--tinybot-font);color:var(--tinybot-text,#17251f);background:var(--tinybot-surface,white);border-radius:var(--tinybot-radius);overflow-wrap:anywhere;width:100%}.tb-stack{display:flex;flex-direction:column;gap:var(--tinybot-space-3);min-width:0}.tb-row{display:flex;flex-wrap:wrap;align-items:center;gap:var(--tinybot-space-2)}.tb-title{font-size:18px;font-weight:500;line-height:1.4;margin:0}.tb-meta{font-size:12px;line-height:1.5;color:var(--tinybot-text-secondary);margin:0}.tb-number{font-size:32px;line-height:1.2;font-weight:500;font-variant-numeric:tabular-nums}.tb-button{font:inherit;min-height:40px;padding:8px 16px;border:1px solid var(--tinybot-border);border-radius:var(--tinybot-control-radius);background:var(--tinybot-surface,white);color:var(--tinybot-text,#17251f);max-width:100%;white-space:normal;cursor:pointer}.tb-primary{background:var(--tinybot-accent,#246959);color:var(--tinybot-on-accent);border-color:transparent}.tb-button:disabled{opacity:.5;cursor:default}.tb-field{display:flex;flex-direction:column;gap:8px;min-width:0}.tb-input{font:inherit;min-height:40px;width:100%;max-width:100%;padding:8px 12px;border:1px solid var(--tinybot-border);border-radius:var(--tinybot-control-radius);background:var(--tinybot-surface,white);color:var(--tinybot-text,#17251f)}.tb-error{font-size:12px;color:var(--tinybot-danger);overflow-wrap:anywhere}';
   function mount(data) {
     if (initialized) throw new Error('Web UI already initialized');
     initialized = true;
@@ -180,11 +186,12 @@
     frame.setAttribute('sandbox', 'allow-scripts');
     frame.setAttribute('allow', "camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'");
     frame.title = 'Interactive content';
-    const bootstrap = '(' + childRuntime.toString() + ')(' + JSON.stringify({ values: data.values, panel: data.panel, panelProbe: data.panelProbe, active: data.active, preflight: data.preflight === true, autoHeight: data.autoHeight === true, snapshotMode: data.snapshotMode === true }).replace(/</g, '\\u003c') + ');';
+    const bootstrap = '(' + childRuntime.toString() + ')(' + JSON.stringify({ values: data.values, panel: data.panel, placement: data.placement, panelProbe: data.panelProbe, active: data.active, preflight: data.preflight === true, autoHeight: data.autoHeight === true, snapshotMode: data.snapshotMode === true }).replace(/</g, '\\u003c') + ');';
     const csp = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
     frame.srcdoc = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
       '<meta http-equiv="Content-Security-Policy" content="' + csp + '">' +
-      '<style>html{color-scheme:light}body{margin:0;font:15px system-ui;color:var(--tinybot-text,#17251f);background:var(--tinybot-surface,white)}*{box-sizing:border-box}canvas{display:block;max-width:100%;touch-action:none}button,input,select{font:inherit}button{min-height:40px}button,input,select,textarea{transition:background-color 160ms,box-shadow 160ms,transform 120ms}button:active{transform:scale(.97)}:focus-visible{outline:2px solid var(--tinybot-accent,#246959);outline-offset:2px}@media(prefers-reduced-motion:reduce){button,input,select,textarea{transition:none}}</style>' +
+      '<style>html{color-scheme:light;-webkit-tap-highlight-color:transparent}body{margin:0;font:15px system-ui;color:var(--tinybot-text,#17251f);background:var(--tinybot-surface,white)}*{box-sizing:border-box}canvas{display:block;max-width:100%;touch-action:none}button,input,select{font:inherit}button{min-height:40px}button,input,select,textarea{transition:background-color 160ms,box-shadow 160ms,transform 120ms}button:active{transform:scale(.97)}:focus-visible{outline:2px solid var(--tinybot-accent,#246959);outline-offset:2px}@media(prefers-reduced-motion:reduce){button,input,select,textarea{transition:none}}</style>' +
+      (data.panel ? '<style>' + panelStyle + '</style>' : '') +
       '<style>' + spec.css.replace(/<\/style/gi, '<\\/style') + '</style>' +
       (data.autoHeight ? '<style>html,body{min-height:0!important;overflow:auto}</style>' : '') + script(bootstrap) +
       (data.automation && config.browserScript ? script(config.browserScript) : '') +
@@ -208,9 +215,9 @@
       if (data.type === 'browserResult' && typeof data.message === 'string') {
         send({type:'browserResult',id:data.id,message:data.message});
       }
-      else if (data.type === 'storageLoad') send({ type: 'storageLoad', id: data.id });
+      else if (data.type === 'storageLoad') send({ type: 'storageLoad', id: data.id, scope: data.scope });
       else if (data.type === 'panelRefresh') send({ type: 'panelRefresh', id: data.id, inputs: data.inputs });
-      else if (data.type === 'storageSave') send({ type: 'storageSave', id: data.id, value: data.value, revision: data.revision });
+      else if (data.type === 'storageSave') send({ type: 'storageSave', id: data.id, value: data.value, revision: data.revision, scope: data.scope });
       else if (data.type === 'save') send({ type: 'save', id: data.id, values: data.values });
       else if (data.type === 'resize') send({ type: 'resize', height: data.height });
       else if (data.type === 'ready') send({ type: 'ready' });

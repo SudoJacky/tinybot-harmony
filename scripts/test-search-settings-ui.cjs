@@ -32,7 +32,7 @@ function custom(kind) {
 const globals = { ...editor, ...search, t: from('model/I18n').t, exports: {},
   ViewPU: { create: component => component.render() },
   Alignment: { Top: 0 }, HorizontalAlign: { Start: 0 }, InputType: { Password: 0 },
-  Space: {}, Btn: {}, systemMaterialAttribute() {}, menuMaterialAttribute() {},
+  PageStyles: { form: {} }, Space: {}, Btn: {}, systemMaterialAttribute() {}, menuMaterialAttribute() {},
   ...Object.fromEntries(['Column','Row','Scroll','Text','Button','Select','TextInput','If','ForEach','__Common__'].map(k => [k, native(k)])),
   ...Object.fromEntries(['GroupCard','BottomBar','SectionHeader','NavRow','RowDivider','Banner','SwitchRow'].map(k => [k, custom(k)]))
 };

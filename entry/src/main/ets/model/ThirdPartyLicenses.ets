@@ -9,6 +9,14 @@ export interface ThirdPartyLicense {
 // Keep notices verbatim from the distributed components; development-only tools are not shipped.
 export const THIRD_PARTY_LICENSES: ThirdPartyLicense[] = [
   {
+    id: 'reactbits', name: 'ReactBits · Shiny Text / Spotlight Card / Animated Content', license: 'MIT + Commons Clause',
+    copyright: 'Copyright (c) 2026 David Haz', resource: 'licenses/reactbits.txt'
+  },
+  {
+    id: 'katex', name: 'KaTeX · 0.19.0', license: 'MIT',
+    copyright: 'Copyright (c) 2013-2020 Khan Academy and other contributors', resource: 'math/LICENSE.txt'
+  },
+  {
     id: 'quickjs', name: 'QuickJS · 2026-06-04', license: 'MIT',
     copyright: 'Copyright (c) 2017-2021 Fabrice Bellard\nCopyright (c) 2017-2021 Charlie Gordon',
     resource: 'licenses/quickjs.txt'

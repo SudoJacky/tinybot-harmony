@@ -1,3 +1,5 @@
+const MENU_WIDTH: number = 288;
+
 export interface MaterialMenuContentOptions {
   label: string;
   icon?: Resource;
@@ -27,7 +29,7 @@ export function materialMenuContent(options: MaterialMenuContentOptions) {
       SymbolGlyph($r('sys.symbol.checkmark')).fontSize(20).fontColor([$r('sys.color.icon_primary')])
         .visibility(options.selected ? Visibility.Visible : Visibility.Hidden).accessibilityLevel('no')
     }
-  }.width('100%').constraintSize({ minHeight: 40 }).padding({ left: 12, right: 12, top: 8, bottom: 8 })
+  }.width(MENU_WIDTH - 16).constraintSize({ minHeight: 40 }).padding({ left: 12, right: 12, top: 8, bottom: 8 })
     .accessibilityGroup(true).accessibilityText(options.label)
 }
 

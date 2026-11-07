@@ -1,3 +1,4 @@
+import { PageStyles } from '../common/PageStyles';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { HuaweiAccount } from '../services/HuaweiAccount';
 import { t } from '../model/I18n';
@@ -25,6 +26,7 @@ export struct SettingsPanel {
   @Prop presetsOnly: boolean = false;
   @Prop laboratoryOnly: boolean = false;
   @Prop active: boolean = false;
+  @Prop section: string = '';
   @State private assistantDraft: AssistantOptions = defaultAssistantOptions();
   @ObjectLink app: ChatViewModel;
   @ObjectLink settings: SettingsViewModel;
@@ -106,9 +108,9 @@ export struct SettingsPanel {
       Column() {
         GroupCard() {
           Column() {
-            ForEach(this.app.providerPresets, (preset: ProviderInfo, index: number) => {
+            ForEach(this.app.providerPresets.filter((preset: ProviderInfo) => preset.id !== 'openai-compatible'), (preset: ProviderInfo, index: number) => {
               if (index > 0) { RowDivider() }
-              NavRow({ title: preset.name, subtitle: protocolName(preset.protocol), compId: 'preset-' + preset.id,
+              NavRow({ title: preset.name, subtitle: preset.name === protocolName(preset.protocol) ? '' : protocolName(preset.protocol), compId: 'preset-' + preset.id,
                 image: providerLogo(preset.id), tintImage: monochromeProviderLogo(preset.id), icon: $r('sys.symbol.cloud'),
                 disabled: !this.canEdit(), onTap: () => this.choosePreset(preset.id) })
             }, (preset: ProviderInfo) => preset.id)
@@ -118,7 +120,7 @@ export struct SettingsPanel {
           }
         }
       }.width('100%').padding(Space.page)
-    }.width('100%').height('100%').align(Alignment.Top).scrollBar(BarState.Auto)
+    }.width('100%').height('100%').attributeModifier(PageStyles.form).align(Alignment.Top).scrollBar(BarState.Auto)
   }
 
   @Builder
@@ -149,7 +151,7 @@ export struct SettingsPanel {
             onChange: (value: boolean) => this.saveToggle('miniAppsEnabled', value) })
         }
       }.width('100%').padding(Space.page)
-    }.width('100%').height('100%').align(Alignment.Top).scrollBar(BarState.Auto)
+    }.width('100%').height('100%').attributeModifier(PageStyles.form).align(Alignment.Top).scrollBar(BarState.Auto)
   }
 
   @Builder
@@ -157,11 +159,14 @@ export struct SettingsPanel {
     Scroll() {
       Column() {
         this.statusBanners()
+        if (!this.section || this.section === 'account') {
         SectionHeader({ title: t('账号') })
         GroupCard() {
           NavRow({ title: t('华为账号'), value: this.account.signedIn ? t('已登录') : t('未登录'),
             icon: $r('sys.symbol.person'), compId: 'open-huawei-account', onTap: this.onAccount })
         }
+        }
+        if (!this.section || this.section === 'models') {
         SectionHeader({ title: t('模型与服务') })
         GroupCard() {
           Column() {
@@ -185,9 +190,11 @@ export struct SettingsPanel {
               disabled: !this.canEdit(), onTap: this.onAddProvider })
             RowDivider()
             NavRow({ title: t('模型分工与能力'), compId: 'open-model-settings',
-              icon: $r('sys.symbol.gearshape'), disabled: !this.canEdit(), onTap: () => this.onModels() })
+              icon: $r('sys.symbol.person_2'), disabled: !this.canEdit(), onTap: () => this.onModels() })
           }
         }
+        }
+        if (!this.section || this.section === 'assistant') {
         SectionHeader({ title: t('助手偏好') })
         GroupCard() {
           Column() {
@@ -202,6 +209,8 @@ export struct SettingsPanel {
               onChange: (value: boolean) => this.saveToggle('saveSummary', value) })
           }
         }
+        }
+        if (!this.section || this.section === 'assistant') {
         SectionHeader({ title: t('记忆与上下文') })
         GroupCard() {
           Column() {
@@ -218,6 +227,8 @@ export struct SettingsPanel {
               onChange: (value: boolean) => this.saveToggle('autoCompact', value) })
           }
         }
+        }
+        if (!this.section || this.section === 'tools') {
         SectionHeader({ title: t('工具与权限') })
         GroupCard() {
           Column() {
@@ -253,21 +264,27 @@ export struct SettingsPanel {
               disabled: !this.canEdit(), onTap: () => this.onTools('mcp') })
           }
         }
+        }
+        if (!this.section || this.section === 'tools') {
         SectionHeader({ title: t('实验室') })
         GroupCard() {
           NavRow({ title: t('实验室'), subtitle: t('选择要体验的实验功能'), icon: $r('sys.symbol.wand_and_stars'),
             compId: 'open-laboratory', onTap: this.onLaboratory })
         }
+        }
+        if (!this.section || this.section === 'appearance') {
         SectionHeader({ title: t('界面与语言') })
         GroupCard() {
           Column() {
             NavRow({ title: t('界面与外观'), icon: $r('sys.symbol.picture'),
               compId: 'open-appearance', onTap: () => this.onAppearance() })
             RowDivider()
-            NavRow({ title: t('语言'), icon: $r('sys.symbol.textformat'), value: languageName(this.language),
+            NavRow({ title: t('语言'), icon: $r('sys.symbol.translate'), value: languageName(this.language),
               compId: 'open-language', disabled: !this.canEdit(), onTap: this.onLanguage })
           }
         }
+        }
+        if (!this.section || this.section === 'data') {
         SectionHeader({ title: t('数据与用量') })
         GroupCard() {
           Column() {
@@ -281,6 +298,8 @@ export struct SettingsPanel {
               disabled: !this.canEdit(), onTap: () => this.onBackup() })
           }
         }
+        }
+        if (!this.section || this.section === 'help') {
         SectionHeader({ title: t('帮助与关于') })
         GroupCard() {
           Column() {
@@ -295,7 +314,8 @@ export struct SettingsPanel {
             }
           }
         }
-      }.padding({ left: Space.page, right: Space.page, bottom: Space.xl }).width('100%')
+        }
+      }.padding({ left: Space.page, right: Space.page, bottom: Space.xl }).width('100%').attributeModifier(PageStyles.form)
     }.height('100%').width('100%').scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring).align(Alignment.Top)
   }
   build() {
@@ -329,6 +349,6 @@ export struct UserDocumentPanel {
           .enabled(!this.app.sharedBusy && this.app.saveError.length === 0)
           .onClick(async () => { if (await this.app.saveSettings()) { this.onSaved(); } })
       }
-    }.width('100%').height('100%')
+    }.width('100%').height('100%').attributeModifier(PageStyles.form)
   }
 }

@@ -144,7 +144,7 @@ const node = id => [...nodes.values()].find(value => value.id === id);
   const overlayScope = { exports: {}, Radius: { sheet: {} }, Stack: overlayUi, Column: overlayUi, ModalTransition: {}, SheetSize: {}, SheetKeyboardAvoidMode: {},
     ATTACHMENT_DROP_TYPES: [], t: value => value };
   vm.runInNewContext(compile(`exports.bind = function() { ${bindings} };`), overlayScope);
-  const overlay = { showDrawing: true, previewing: false, showMemoryDraft: false, closeDrawing() { this.closed = true; },
+  const overlay = { showDrawing: true, previewing: false, writingExpanded: false, showMemoryDraft: false, closeDrawing() { this.closed = true; },
     observeComponentCreation2(callback) { callback(++owner, false); } };
   const renderOverlay = () => { owner = 0; overlayScope.exports.bind.call(overlay); };
   renderOverlay(); assert.ok(modal, 'Closed memory sheet must not remove the drawing cover');

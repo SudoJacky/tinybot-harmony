@@ -4,7 +4,7 @@ import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Btn, Radius, Motion, gradientColor } from '../common/Theme';
 import { t, getLocale } from '../model/I18n';
 import { MiniAppStorage } from '../model/MiniApp';
-import { WebUiPanelContext } from '../model/WebUi';
+import { WebUiPanelContext, WebUiSpec } from '../model/WebUi';
 import { WebUiView } from './WebUiView';
 import { IconButton } from '../common/Widgets';
 import { PanelNode, PanelRecord, PanelItem, PanelBinding, panelValue, panelText, panelNumber, panelItems, panelPoints } from '../model/LifePanel';
@@ -155,24 +155,87 @@ export struct LifePanelCard {
   @Prop timestamp: string = '';
   @Prop showFooter: boolean = true;
   @Prop editing: boolean = false;
-  @Prop viewHeight: number = 320;
+  @Prop viewHeight: number = 0;
+  @Prop frameHeight: number = 0;
+  @State private menuVisible: boolean = false;
+  @State private menuAnchor: Position = { x: 0, y: 0 };
+  @State private layoutAction: string = '';
+  private cardWidth: number = 0;
+  private cardHeight: number = 0;
+  private contentHeight: number = 0;
+  pageScroller?: Scroller;
+  private pageScrollY: number = 0;
+  private scrollPage(event: GestureEvent): void {
+    if (!this.pageScroller || this.detail || this.layoutAction) { return; }
+    const delta = event.offsetY - this.pageScrollY;
+    this.pageScrollY = event.offsetY;
+    this.pageScroller.scrollBy(0, -delta);
+  }
+  private finishPageScroll(event: GestureEvent): void {
+    if (!this.pageScroller || this.detail || this.layoutAction) { return; }
+    this.scrollPage(event);
+    if (event.velocityY !== 0) { this.pageScroller.fling(event.velocityY); }
+  }
   storage?: MiniAppStorage;
+  viewStorage?: MiniAppStorage;
   onRun: (inputs?: PanelInputs) => Promise<void> = async () => {};
   onRuntimeError: (message: string, revision: number) => void = () => {};
   onMoveStart: (event: GestureEvent) => void = () => {};
   onMoveUpdate: (event: GestureEvent) => void = () => {};
   onMoveEnd: (event: GestureEvent) => void = () => {};
   onMoveCancel: () => void = () => {};
-  onResize: (event: GestureEvent, finished: boolean) => void = () => {};
+  onResize: (event: GestureEvent, finished: boolean, height: number) => void = () => {};
+  private cornerAction(event: BaseGestureEvent): string {
+    if (!this.onBoard || !this.interactive || this.detail || this.editing || this.panel.archived) { return ''; }
+    const finger = event.fingerList.find((point: FingerInfo) => !!point);
+    if (!finger || this.cardWidth <= 0 || this.cardHeight <= 0) { return ''; }
+    const cornerX = Math.min(48, this.cardWidth / 2), cornerY = Math.min(48, this.cardHeight / 2);
+    if (finger.localX >= 0 && finger.localX < cornerX && finger.localY >= 0 && finger.localY < cornerY) { return 'move'; }
+    if (finger.localX >= this.cardWidth - cornerX && finger.localX <= this.cardWidth &&
+      finger.localY >= this.cardHeight - cornerY && finger.localY <= this.cardHeight) { return 'resize'; }
+    return '';
+  }
+  private beginPress(event: GestureEvent): void {
+    this.layoutAction = this.cornerAction(event);
+    if (this.layoutAction === 'move') { this.onMoveStart(event); }
+    else if (!this.layoutAction) {
+      const finger = event.fingerList.find((point: FingerInfo) => !!point);
+      if (!finger) { return; }
+      this.menuAnchor = { x: finger.localX, y: finger.localY };
+      this.menuVisible = true;
+    }
+  }
+  private panLayout(event: GestureEvent, finished: boolean): void {
+    if (this.layoutAction === 'move') {
+      if (finished) { this.onMoveEnd(event); } else { this.onMoveUpdate(event); }
+    } else if (this.layoutAction === 'resize') { this.onResize(event, finished, this.contentHeight); }
+    if (finished) { this.layoutAction = ''; }
+  }
+  private cancelPress(): void {
+    if (this.layoutAction) { this.layoutAction = ''; this.onMoveCancel(); }
+  }
+  private viewContent(): string {
+    const view = this.panel.definition.view!;
+    // The definition height is a starting viewport; inline cards follow their actual content.
+    // Long presses belong to native card actions. Keep text entry selectable.
+    // Content-measured lists must not feed their viewport height back into the card.
+    // A board/detail supplies an explicit viewport, so viewport-filling layouts are safe there.
+    const height = this.viewHeight > 0 ? '100vh' : 'auto';
+    const css = view.css + '\nhtml{--tinybot-card-height:' + height + ';user-select:none;-webkit-user-select:none}input,textarea,[contenteditable=true]{user-select:text;-webkit-user-select:text}';
+    const content: WebUiSpec = { version: view.version, html: view.html, css: css, js: view.js,
+      library: view.library, height: view.height, autoHeight: true };
+    return JSON.stringify(content);
+  }
   private context(): WebUiPanelContext {
     return { data: this.panel.data, title: this.panel.definition.title, status: this.busy ? 'running' : this.panel.error ? 'failed' : 'ready',
       canRefresh: !!this.panel.definition.source && !this.panel.archived, locale: getLocale(), theme: this.dark ? 'dark' : 'light', inputs: resolvePanelInputs(this.panel.definition.inputs, this.panel.inputs || {}),
-      tokens: { 'text': gradientColor($r('app.color.text_primary'), 1), 'surface': gradientColor($r('app.color.surface'), 1), 'accent': gradientColor(this.appearance.accent, 1) } };
+      tokens: { 'text': gradientColor($r('app.color.text_primary'), 1), 'surface': gradientColor($r('app.color.surface'), 1), 'accent': gradientColor(this.appearance.accent, 1),
+        'on-accent': gradientColor(this.appearance.onAccent, 1), 'text-secondary': gradientColor($r('app.color.text_secondary'), 1),
+        'surface-muted': gradientColor($r('app.color.surface_variant'), 1), 'danger': gradientColor($r('app.color.danger'), 1) } };
   }
   onOpen: () => void = () => {};
   onRefresh: () => void = () => {};
   onToggle: (node: string, item: string, done: boolean) => void = () => {};
-  onSize: (size: string) => void = () => {};
   onArchive: () => void = () => {};
   onConnect: () => void = () => {};
   onPin: () => void = () => {};
@@ -181,21 +244,23 @@ export struct LifePanelCard {
   onEdit: () => void = () => {};
   @Builder private menu() {
     Menu() {
+      MenuItemGroup({ header: this.panel.definition.title, footer: this.timestamp }) {
+        if (!this.detail) { MenuItem({ content: t('展开卡片') }).onClick(this.onOpen) }
+        if (this.panel.definition.source && !this.panel.archived) {
+          MenuItem({ content: this.busy ? t('刷新中') : t('刷新') }).enabled(!this.busy).onClick(this.onRefresh)
+        }
+      }
       MenuItem({ content: t('用 AI 修改卡片') }).onClick(this.onEdit)
       MenuItem({ content: t('固定到看板') }).onClick(this.onPin)
       if (this.onBoard) { MenuItem({ content: t('从此看板移除') }).onClick(this.onUnpin) }
       if (this.panel.definition.source) { MenuItem({ content: t('刷新任务与记录') }).onClick(this.onTask) }
       if (this.panel.definition.source?.auth) { MenuItem({ content: t('API 连接') }).onClick(this.onConnect) }
-      MenuItemGroup({ header: t('卡片尺寸') }) {
-        ForEach(['S', 'M', 'L'], (size: string) => {
-          MenuItem({ content: size }).selected((this.cardSize || this.panel.layout?.size || this.panel.definition.size) === size).selectIcon(true).onClick(() => this.onSize(size))
-        })
-      }
       MenuItem({ content: this.panel.archived ? t('恢复') : t('移除') }).onClick(this.onArchive)
     }
   }
-  build() {
+  @Builder private content() {
     Column({ space: this.panel.definition.view ? 0 : 10 }) {
+      if (!this.panel.definition.view || this.editing) {
       Row({ space: 6 }) {
         if (this.editing) {
           Text('⠿').fontSize(24).fontColor($r('app.color.text_secondary')).width(40).height(44).textAlign(TextAlign.Center)
@@ -207,8 +272,6 @@ export struct LifePanelCard {
             .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%').textAlign(TextAlign.Start)
         }.backgroundColor(Color.Transparent).padding(0).layoutWeight(1).constraintSize({ minHeight: 40 })
           .clickEffect(Motion.press).onClick(() => { if (!this.editing) { this.onOpen(); } })
-          .gesture(GestureGroup(GestureMode.Sequence, LongPressGesture({ repeat: false, duration: 350 }).onAction((event: GestureEvent) => { if (this.onBoard && this.interactive) { this.onMoveStart(event); } }),
-            PanGesture().onActionUpdate(this.onMoveUpdate).onActionEnd(this.onMoveEnd)).onCancel(this.onMoveCancel))
           .accessibilityText(t('打开卡片「{0}」', [this.panel.definition.title]))
         if (this.interactive && !this.editing) {
           Button({ type: ButtonType.Normal }) { Text('⋯').fontSize(24).fontColor($r('app.color.text_secondary')) }
@@ -219,6 +282,7 @@ export struct LifePanelCard {
             diameter: 36, iconSize: 14, onTap: this.onOpen })
         }
       }.width('100%').padding(this.panel.definition.view ? { left: 12, right: 12, top: 4, bottom: 4 } : 0)
+      }
       if (this.panel.runtimeError) {
         Text(this.panel.runtimeError).fontSize(12).fontColor($r('app.color.danger')).maxLines(3).padding(12)
         if (this.interactive) { Button(t('让 AI 修复')).attributeModifier(Btn.tonal).onClick(this.onEdit).margin(8) }
@@ -238,8 +302,9 @@ export struct LifePanelCard {
       }
       if (this.panel.definition.view) {
         if (this.storage) {
-          WebUiView({ content: JSON.stringify(this.panel.definition.view), storage: this.storage, panelContext: this.context(),
-            interactive: this.interactive && !this.panel.archived && !this.editing, preferParentScroll: !this.detail, viewportHeight: this.viewHeight, onPanelRefresh: this.onRun,
+          WebUiView({ content: this.viewContent(), storage: this.storage, viewStorage: this.viewStorage, panelContext: this.context(),
+            interactive: this.interactive && !this.panel.archived && !this.editing && !this.layoutAction, preferParentScroll: !this.detail, viewportHeight: this.viewHeight, onPanelRefresh: this.onRun,
+            onHeight: (height: number) => { this.contentHeight = height; },
             onRuntimeError: (message: string) => this.onRuntimeError(message, this.panel.configRevision) })
         } else {
           Button(t('打开交互卡片')).attributeModifier(Btn.tonal).onClick(this.onOpen)
@@ -248,18 +313,15 @@ export struct LifePanelCard {
       } else {
       Column({ space: 10 }) {
         ForEach(this.panel.definition.nodes.filter((node: PanelNode) => !node.parent), (node: PanelNode) => {
-          PanelComponent({ panel: this.panel, node: node, interactive: this.interactive && !this.editing && !this.busy && !this.panel.archived,
+          PanelComponent({ panel: this.panel, node: node, interactive: this.interactive && !this.editing && !this.layoutAction && !this.busy && !this.panel.archived,
             expanded: this.detail || (this.cardSize || this.panel.layout?.size || this.panel.definition.size) === 'L', compact: !this.detail && (this.cardSize || this.panel.layout?.size || this.panel.definition.size) === 'S',
             onToggle: this.onToggle, onRefresh: this.onRefresh })
         }, (node: PanelNode) => node.id)
       }.width('100%').alignItems(HorizontalAlign.Start)
       }
-      if (this.showFooter) {
+      if (this.showFooter && !this.panel.definition.view) {
       Row({ space: 4 }) {
         Text(this.timestamp).fontSize(11).fontColor($r('app.color.text_secondary')).layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-        if (this.panel.definition.view && !this.detail && !this.editing && this.interactive) {
-          IconButton({ icon: $r('sys.symbol.arrow_up_left_and_arrow_down_right'), label: t('展开卡片'), diameter: 40, iconSize: 18, onTap: this.onOpen })
-        }
         if (this.interactive && this.panel.definition.source && !this.panel.archived) {
           Button(this.busy ? t('刷新中') : t('刷新')).type(ButtonType.Normal).fontSize(11).padding({ left: 4, right: 4 })
             .height(40).constraintSize({ minWidth: 40 }).backgroundColor(Color.Transparent).fontColor($r('app.color.text_secondary')).enabled(this.interactive && !this.busy && !this.editing).onClick(this.onRefresh)
@@ -271,13 +333,51 @@ export struct LifePanelCard {
           Text(t('拖动调整尺寸')).fontSize(11).fontColor($r('app.color.text_secondary')).layoutWeight(1)
           Text('↘').fontSize(24).width(44).height(44).textAlign(TextAlign.Center).id('panel-resize-' + this.panel.id)
             .clickEffect(Motion.pressSmall).accessibilityText(t('调整卡片尺寸')).gesture(PanGesture()
-              .onActionStart((event: GestureEvent) => this.onResize(event, false))
-              .onActionUpdate((event: GestureEvent) => this.onResize(event, false))
-              .onActionEnd((event: GestureEvent) => this.onResize(event, true)).onActionCancel(this.onMoveCancel))
+              .onActionStart((event: GestureEvent) => this.onResize(event, false, this.contentHeight))
+              .onActionUpdate((event: GestureEvent) => this.onResize(event, false, this.contentHeight))
+              .onActionEnd((event: GestureEvent) => this.onResize(event, true, this.contentHeight)).onActionCancel(this.onMoveCancel))
         }.width('100%').padding(this.panel.definition.view ? { left: 12, right: 12 } : 0)
       }
-    }.width('100%').padding(this.panel.definition.view ? 0 : 14).backgroundColor($r('app.color.surface'))
-      .borderRadius(Radius.lg).border({ width: 1, color: $r('app.color.divider') })
-      .clip(!!this.panel.definition.view)
+    }.width('100%').padding(this.panel.definition.view ? 0 : 14)
+  }
+  build() {
+    Column() {
+      if (this.frameHeight > 0) {
+        Scroll() { this.content() }
+          .width('100%').height(this.frameHeight).align(Alignment.Top)
+          .scrollable(this.panel.definition.view ? ScrollDirection.None : ScrollDirection.Vertical)
+          // Relay Web gestures through this frame too, so fixed-size cards cannot trap board scrolling.
+          .scrollBar(BarState.Off).nestedScroll({ scrollForward: this.detail ? NestedScrollMode.SELF_FIRST : NestedScrollMode.PARENT_FIRST,
+            scrollBackward: this.detail ? NestedScrollMode.SELF_FIRST : NestedScrollMode.PARENT_FIRST })
+      } else { this.content() }
+    }.width('100%').height(this.frameHeight > 0 ? this.frameHeight : undefined)
+      .backgroundColor(this.panel.definition.view ? Color.Transparent : $r('app.color.surface'))
+      .borderRadius(Radius.lg).border({ width: this.panel.definition.view ? 0 : 1, color: $r('app.color.divider') })
+      .clip(this.frameHeight > 0 || !!this.panel.definition.view)
+      .onAreaChange((_old: Area, area: Area) => { this.cardWidth = Number(area.width); this.cardHeight = Number(area.height); })
+      // DOM overflow areas inside an iframe consume touch before Web.nestedScroll.
+      // Own only vertical pans here; taps/horizontal gestures stay with the card,
+      // and holding a corner still selects the existing move/resize sequence.
+      .priorityGesture(GestureGroup(GestureMode.Exclusive,
+        GestureGroup(GestureMode.Sequence,
+        LongPressGesture({ repeat: false, duration: 350 }).tag('panel-press').onAction((event: GestureEvent) => this.beginPress(event)),
+        PanGesture().onActionStart((event: GestureEvent) => this.panLayout(event, false))
+          .onActionUpdate((event: GestureEvent) => this.panLayout(event, false))
+          .onActionEnd((event: GestureEvent) => this.panLayout(event, true))).onCancel(() => this.cancelPress()),
+        PanGesture({ direction: PanDirection.Vertical }).tag('panel-scroll')
+          .onActionStart((event: GestureEvent) => { this.pageScrollY = 0; this.scrollPage(event); })
+          .onActionUpdate((event: GestureEvent) => this.scrollPage(event))
+          .onActionEnd((event: GestureEvent) => this.finishPageScroll(event))))
+      .onGestureRecognizerJudgeBegin((event: BaseGestureEvent, recognizer: GestureRecognizer) => {
+        if (recognizer.getTag() === 'panel-scroll') {
+          return this.pageScroller && !this.detail && !this.editing && !this.layoutAction ? GestureJudgeResult.CONTINUE : GestureJudgeResult.REJECT;
+        }
+        return recognizer.getTag() === 'panel-press' && !this.cornerAction(event) && (!this.panel.definition.view || !this.interactive || this.editing)
+          ? GestureJudgeResult.REJECT : GestureJudgeResult.CONTINUE;
+      })
+      .bindContextMenu(this.menuVisible, this.menu, { systemMaterial: this.appearance.menu, mask: false,
+        anchorPosition: this.menuAnchor,
+        onDisappear: () => { this.menuVisible = false; } })
+      .onClick(() => { if (!this.interactive) { this.onOpen(); } })
   }
 }

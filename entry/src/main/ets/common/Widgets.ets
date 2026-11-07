@@ -28,11 +28,11 @@ export struct IconButton {
     }.fontFamily(this.appearance.fontFamily)
     .id(this.compId).width(this.diameter).height(this.diameter)
     .backgroundColor(this.fill === Color.Transparent ? this.appearance.controlBackground : this.fill)
-    .border({ width: !this.appearance.materialAvailable && this.fill === Color.Transparent ? 0.5 : 0,
+    .border({ width: !this.appearance.materialEnabled && this.fill === Color.Transparent ? 0.5 : 0,
       color: $r('app.color.divider') })
     // API 20 resets the native button color during repaint. Apply plain fills immediately so
     // draft/message updates cannot interpolate through the system's green accent color.
-    .animation(this.appearance.materialAvailable ? { duration: Motion.fast, curve: Motion.standard } : null)
+    .animation(this.appearance.materialEnabled ? { duration: Motion.fast, curve: Motion.standard } : null)
     .clickEffect(this.disabled || this.material ? null : Motion.pressSmall)
     .enabled(!this.disabled).accessibilityText(this.label).onClick(() => this.onTap())
     .borderRadius(this.diameter / 2)
@@ -83,6 +83,7 @@ export type RowTrailing = 'chevron' | 'select' | 'expand';
 export struct NavRow {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop title: string = '';
+  @Prop titleFont: string = '';
   @Prop subtitle: string = '';
   @Prop value: string = '';
   @Prop disabled: boolean = false;
@@ -119,7 +120,7 @@ export struct NavRow {
           }.width(28).height(28).accessibilityLevel('no-hide-descendants')
       }
       Column({ space: 3 }) {
-        Text(this.title).fontFamily(this.appearance.fontFamily).fontSize(Font.body).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(this.title).fontFamily(this.titleFont || this.appearance.fontFamily).fontSize(Font.body).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           .fontColor(this.accent ? this.appearance.accent : this.muted ? $r('app.color.text_secondary') : $r('app.color.text_primary'))
           .fontWeight(this.accent ? FontWeight.Medium : FontWeight.Normal)
         if (this.subtitle.length > 0) {
@@ -158,6 +159,7 @@ export struct NavRow {
 export struct SwitchRow {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop title: string = '';
+  @Prop titleFont: string = '';
   @Prop subtitle: string = '';
   @Prop isOn: boolean = false;
   @Prop disabled: boolean = false;
@@ -173,7 +175,7 @@ export struct SwitchRow {
         }.width(28).height(28).accessibilityLevel('no-hide-descendants')
       }
       Column({ space: 3 }) {
-        Text(this.title).fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontColor($r('app.color.text_primary'))
+        Text(this.title).fontFamily(this.titleFont || this.appearance.fontFamily).fontSize(Font.body).fontColor($r('app.color.text_primary'))
         if (this.subtitle.length > 0) {
           Text(this.subtitle).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).lineHeight(17).fontColor($r('app.color.text_secondary'))
         }
@@ -229,8 +231,9 @@ export struct BottomBar {
 
   build() {
     Column() {
-      this.content()
+      Row() { this.content() }.width('100%').constraintSize({ maxWidth: 320 })
     }
+    .alignItems(HorizontalAlign.Center)
     .width('100%').padding({ left: Space.page, right: Space.page, top: 10,
       bottom: 12 + (this.sheet && this.viewport.keyboardHeight === 0 ? this.viewport.bottom : 0) })
     .backgroundColor($r('app.color.page_background'))

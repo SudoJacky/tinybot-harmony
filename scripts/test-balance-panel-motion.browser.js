@@ -7,7 +7,7 @@ async () => {
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   const check = (condition, message) => { if (!condition) throw new Error(message); };
   check(!matchMedia('(prefers-reduced-motion:reduce)').matches, 'Enable motion for this regression test');
-  check(document.getElementById('privacy').getAttribute('aria-pressed') === 'false', 'Show balances before testing');
+  check(!document.getElementById('privacy'), 'Balance cards have no hide control');
   document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
   let release;
   let pending;

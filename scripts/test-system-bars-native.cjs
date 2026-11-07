@@ -23,7 +23,8 @@ const compiled = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOpt
 } }).outputText;
 vm.runInNewContext(compiled, { AppStorage: { get: () => dark }, exports: exportsObject, require: id => kits[id] }, { filename: file });
 const ability = new exportsObject.default();
-const nativeWindow = { setWindowSystemBarProperties: properties => {
+const backgrounds = [];
+const nativeWindow = { setWindowBackgroundColor: color => backgrounds.push(color), setWindowSystemBarProperties: properties => {
   colors.push(properties.statusBarContentColor);
   return Promise.resolve();
 } };
@@ -39,5 +40,6 @@ ability.onConfigurationUpdate({ colorMode: 1 });
 assert.equal(colors.at(-1), '#000000', 'Light event must override the still-dark context');
 ability.onWindowStageCreate(stage);
 assert.equal(colors.at(-1), '#FFFFFF', 'Dark startup must use light status text');
+assert.deepEqual(backgrounds,['#F7F8FA','#151719','#F7F8FA','#151719']);
 assert.equal(failures.length, 0);
 console.log('PASS light/dark startup and both theme transitions while context.config is stale');

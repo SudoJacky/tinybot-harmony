@@ -1,3 +1,4 @@
+import { PageStyles } from '../common/PageStyles';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
@@ -101,9 +102,11 @@ export struct StoragePanel {
           }
         }.width('100%')
         if (this.deviceKnown()) {
-          Progress({ value: this.deviceUsed(), total: this.report.deviceBytes, type: ProgressType.Linear })
+          Progress({ value: this.report.totalBytes, total: this.report.deviceBytes, type: ProgressType.Linear })
             .width('100%').color(this.appearance.accent).backgroundColor($r('app.color.surface_variant'))
-          Text(t('设备已用 {0}%', [this.devicePercent()])).fontFamily(this.appearance.fontFamily)
+          Text(t('Tinybot 占设备空间 {0}% · 设备整体已用 {1}%',
+            [this.report.totalBytes > 0 && this.report.totalBytes / this.report.deviceBytes < 0.0001 ? '<0.01' :
+              (this.report.totalBytes / this.report.deviceBytes * 100).toFixed(2), this.devicePercent()])).fontFamily(this.appearance.fontFamily)
             .fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
         }
         Text(t('统计只包含 Tinybot 私有目录，不含共享文件夹中的文件。')).fontFamily(this.appearance.fontFamily)
@@ -189,7 +192,7 @@ export struct StoragePanel {
         .backgroundColor($r('app.color.surface_variant'))
         Button(t('重新统计')).fontFamily(this.appearance.fontFamily).id('refresh-storage').attributeModifier(Btn.tonalSmall)
           .enabled(!this.locked() && !this.loading).onClick(() => this.scan())
-      }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.xl })
+      }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.xl }).attributeModifier(PageStyles.form)
     }.width('100%').height('100%').scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring).align(Alignment.Top)
   }
 }
@@ -238,6 +241,16 @@ export struct StorageCategoryPanel {
     } catch (error) {
       if (this.mounted && revision === this.revision) { this.error = (error as Error).message; this.loading = false; }
     }
+  }
+
+  private entryDetail(entry: StorageEntry): string {
+    const parts = entry.label.split(' / ');
+    if (parts.length < 2) { return entry.detail; }
+    const folders = parts.slice(1).join(' / ').split('/');
+    const folder = folders.length > 1 ? folders[folders.length - 2] : '';
+    const context = folder.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/ig,
+      (id: string): string => id.slice(0, 8));
+    return parts[0] + (context ? ' · ' + context : '');
   }
 
   private confirmDelete(entry: StorageEntry): void {
@@ -301,9 +314,9 @@ export struct StorageCategoryPanel {
                 if (index > 0) { RowDivider() }
                 Row({ space: Space.sm }) {
                   Column({ space: 3 }) {
-                    Text(entry.label).fontFamily(this.appearance.fontFamily).fontSize(Font.small).maxLines(1)
+                    Text((entry.label.split(' / ').pop() || entry.label).split('/').pop() || entry.label).fontFamily(this.appearance.fontFamily).fontSize(Font.small).maxLines(1)
                       .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
-                    Text(entry.detail).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).maxLines(1)
+                    Text(this.entryDetail(entry)).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).maxLines(1)
                       .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_secondary'))
                   }.layoutWeight(1).alignItems(HorizontalAlign.Start)
                   Text(storageSize(entry.bytes)).fontFamily(this.appearance.fontFamily).fontSize(13)
@@ -323,7 +336,7 @@ export struct StorageCategoryPanel {
               .fontColor($r('app.color.text_tertiary')).width('100%')
           }
         }
-      }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.xl })
+      }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.xl }).attributeModifier(PageStyles.form)
     }.width('100%').height('100%').scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring).align(Alignment.Top)
   }
 }

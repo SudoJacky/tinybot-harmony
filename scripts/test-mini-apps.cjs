@@ -595,7 +595,7 @@ async function lifePanelScriptTest() {
 }
 async function lifeBoardsTest() {
   const {LifePanels}=load('services/LifePanels'),{LifeBoards}=load('services/LifeBoards'),{LifePanelTools}=load('services/LifePanelTools');
-  const {publishedPanels}=load('model/PublishedPanel'),{parsePanelTarget}=load('model/LifeBoard'),{panelDue}=load('model/LifePanel');
+  const {publishedPanels}=load('model/PublishedPanel'),{parsePanelTarget,boardLayoutKey}=load('model/LifeBoard'),{panelDue}=load('model/LifePanel');
   const dir='/sandbox/boards',ws=new WorkspaceStore(dir),panels=new LifePanels(dir),boards=new LifeBoards(dir);
   fs.mkdirSync(disk(dir),{recursive:true});for(const id of ['owner','another-chat','empty-board'])await ws.ensureThread(id);
   const spec={version:1,title:'Shared tasks',size:'L',data:{tasks:[{id:'one',label:'One'}]},nodes:[{id:'tasks',kind:'Checklist',items:{path:'/data/tasks'}}]};
@@ -607,13 +607,21 @@ async function lifeBoardsTest() {
   await Promise.all([boards.pin('owner',first.id,reference,true),boards.pin('owner',first.id,{workspaceId:'owner',panelId:'other'},true)]);
   await boards.pin('another-chat',second.id,reference,true);
   assert.equal((await boards.get('owner',first.id)).items.length,2,'Concurrent pins do not lose references');
-  await boards.arrange('owner',first.id,{workspaceId:'owner',panelId:'other'},'owner/shared','S');
-  const ordered=await new LifeBoards(dir).get('owner',first.id);assert.equal(ordered.items[0].panelId,'other');assert.equal(ordered.items[0].size,'S');
-  assert.equal((await boards.get('another-chat',second.id)).items[0].size,'L','Sizes belong to each board');
+  const legacyFile=disk(ws.pathFor('owner')+'/life-boards/'+first.id+'/board.json');
+  const legacy=JSON.stringify({...await boards.get('owner',first.id),version:1,items:[reference,{workspaceId:'owner',panelId:'other'}].map(item=>({...item,size:'S',height:200}))});
+  fs.writeFileSync(legacyFile,legacy);
+  const oldLayout=await boards.get('owner',first.id);
+  assert.equal(oldLayout.version,2);assert.equal(fs.readFileSync(legacyFile,'utf8'),legacy,'Opening an old board never rewrites it');
+  await boards.place('owner',first.id,{workspaceId:'owner',panelId:'other'},{x:0,y:0,w:5,h:4},boardLayoutKey(oldLayout.items));
+  const ordered=await new LifeBoards(dir).get('owner',first.id);assert.equal(ordered.items.find(i=>i.panelId==='other').w,5);assert.equal(ordered.items.find(i=>i.panelId==='shared').y,4);
+  assert.equal(JSON.parse(fs.readFileSync(legacyFile,'utf8')).version,2,'First placement persists the migrated grid');
+  await assert.rejects(boards.place('owner',first.id,reference,{x:0,y:20,w:3,h:3},boardLayoutKey(oldLayout.items)),/layout changed/);
+  assert.deepEqual(plain(await boards.get('owner',first.id)),plain(ordered),'A stale gesture cannot overwrite a newer layout');
+  assert.equal((await boards.get('another-chat',second.id)).items[0].w,5,'Sizes belong to each board');
   await repo.toggle('shared',1,'tasks','one',true);assert.equal((await panels.repository('owner').get((await boards.get('another-chat',second.id)).items[0].panelId)).user['tasks:one'],true);
   await boards.pin('owner',first.id,reference,false);assert.ok((await repo.get('shared')).user['tasks:one'],'Unpin never deletes data or shared card');
   await assert.rejects(boards.save('owner',first.id,'Work','',[{workspaceId:'owner',panelId:'shared',size:'XL'}]));
-  await assert.rejects(boards.save('owner',first.id,'Work','',[{...reference,size:'S'},{...reference,size:'M'}]));
+  await assert.rejects(boards.save('owner',first.id,'Work','',[{...reference,x:0,y:0,w:2,h:2},{...reference,x:2,y:0,w:2,h:2}]));
   const files=new NativeWorkspaceFiles(ws.pathFor('another-chat'));
   const tools=new LifePanelTools(panels,'another-chat','new-chat',files,boards);
   await files.write('update.panel.json',JSON.stringify({...spec,title:'Edited from another chat'}),signal);
@@ -764,19 +772,45 @@ async function htmlPanelTest() {
   assert.throws(()=>parsePanelSpec(JSON.stringify({...revised.definition,nodes:[{id:'x',kind:'Text',text:{value:'bad'}}]})),/empty nodes/);
   assert.throws(()=>parsePanelSpec(JSON.stringify({...revised.definition,version:1})),/native nodes/);
   const board=await boards.save('owner','','Interactive board','Test context');await boards.pin('owner',board.id,{workspaceId:'owner',panelId:id},true);
-  assert.equal((await boards.get('owner',board.id)).items[0].size,'S','Pinning starts from the current user layout');
+  assert.equal((await boards.get('owner',board.id)).items[0].w,5,'New pins use the grid default');
   const otherBoard=await boards.save('owner','','Other board','');await boards.pin('owner',otherBoard.id,{workspaceId:'owner',panelId:id},true);
-  await boards.arrange('owner',board.id,{workspaceId:'owner',panelId:id},'','S',248);
+  const mount=(await boards.get('owner',board.id)).items[0].mountId;
+  const otherMount=(await boards.get('owner',otherBoard.id)).items[0].mountId;
+  assert.notEqual(mount,otherMount);
+  const local=boards.binding('owner',board.id,mount),otherLocal=boards.binding('owner',otherBoard.id,otherMount);
+  const sharedBefore=plain((await repo.get(id)).viewState);
+  await local.save({tab:'history'},'initial');await otherLocal.save({tab:'overview'},'initial');
+  assert.equal((await local.load()).value.tab,'history');assert.equal((await otherLocal.load()).value.tab,'overview');
+  await assert.rejects(local.save({tab:'stale'},'initial'),/changed/);
+  assert.deepEqual(plain((await repo.get(id)).viewState),sharedBefore,'Presentation state cannot modify shared edits');
+  const stateBefore=plain(await local.load());
+  const listed=JSON.parse(await tools.execute({id:'boards',type:'function',function:{name:'list_life_boards',arguments:'{}'}},signal));
+  assert.equal(listed.find(entry=>entry.board.id===board.id).board.items[0].viewState,undefined,'Layout reads exclude presentation snapshots');
+  const layout=await boards.get('owner',board.id);
+  await boards.save('owner',board.id,layout.title,layout.description,layout.items.map(({workspaceId,panelId,x,y,w,h})=>({workspaceId,panelId,x,y,w,h})));
+  assert.deepEqual(plain(await local.load()),stateBefore,'Full layout save retains placement identity and state');
+  const layoutKey=()=>boards.get('owner',board.id).then(b=>load('model/LifeBoard').boardLayoutKey(b.items));
+  await boards.place('owner',board.id,{workspaceId:'owner',panelId:id},{x:3,y:15,w:5,h:8},await layoutKey());
   await repo.resize(id,'L');assert.equal((await repo.get(id)).configRevision,revised.configRevision);
-  assert.equal((await boards.get('owner',otherBoard.id)).items[0].size,'S','Existing board layouts stay independent from the all-cards layout');
-  assert.equal((await new LifeBoards(dir).get('owner',board.id)).items[0].height,248);
-  await assert.rejects(boards.arrange('owner',board.id,{workspaceId:'owner',panelId:id},'','S',900),/200/);
-  assert.equal((await boards.get('owner',board.id)).items[0].height,248,'Invalid resize leaves saved layout intact');
+  assert.equal((await boards.get('owner',otherBoard.id)).items[0].w,5,'Existing board layouts stay independent from the all-cards layout');
+  assert.equal((await new LifeBoards(dir).get('owner',board.id)).items[0].h,8);
+  await assert.rejects(boards.place('owner',board.id,{workspaceId:'owner',panelId:id},{x:3,y:15,w:10,h:8},await layoutKey()),/grid rectangle/);
+  assert.equal((await boards.get('owner',board.id)).items[0].h,8,'Invalid resize leaves saved layout intact');
   const context={filesDir:dir,cacheDir:dir+'/cache',getApplicationContext(){return this;}};fs.mkdirSync(disk(context.cacheDir));
   const {createBackupFile,readBackupFile}=load('services/Backup'),backup=await createBackupFile(context,emptyData());
   const dest='/sandbox/html-restored';fs.mkdirSync(disk(dest));await readBackupFile({filesDir:dest,cacheDir:dest,getApplicationContext(){return this;}},backup,emptyData());
   assert.deepEqual(plain(await new LifePanels(dest).repository('owner').get(id)),plain(await repo.get(id)));
-  assert.equal((await new LifeBoards(dest).get('owner',board.id)).items[0].height,248);
+  assert.equal((await new LifeBoards(dest).get('owner',board.id)).items[0].h,8);
+  assert.deepEqual(plain(await new LifeBoards(dest).binding('owner',board.id,mount).load()),stateBefore,'Backup retains independent presentation state');
+  assert.deepEqual(plain(await local.load()),stateBefore,'Dragging and resizing retain presentation state');
+  await boards.pin('owner',board.id,{workspaceId:'owner',panelId:id},false);
+  await boards.pin('owner',board.id,{workspaceId:'owner',panelId:id},true);
+  const newMount=(await boards.get('owner',board.id)).items[0].mountId;
+  assert.notEqual(newMount,mount);assert.equal((await boards.binding('owner',board.id,newMount).load()).value,null);
+  await assert.rejects(local.save({tab:'late'},stateBefore.revision),/unavailable/);
+  assert.equal((await otherLocal.load()).value.tab,'overview','Removing one placement preserves others');
+  assert.deepEqual(plain((await repo.get(id)).viewState),sharedBefore);
+
   console.log('PASS HTML file publication, isolated state, source refresh, concurrent/conflicting writes, definition replacement, bounded resize and backup/restore');
 }
 
@@ -794,9 +828,15 @@ async function panelRepairLoopTest() {
  assert.throws(()=>panelQueryAddress({url:'https://example.com/?ticker=A',query:{ticker:'symbol'}},{symbol:'B'}),/conflicts/);
  const spec={version:2,title:'Repair test',size:'M',nodes:[],data:{total:1},dataSchema:schema,inputs,checks:[],source:{type:'workspace-json',path:'data.json'},view:{version:1,html:'<button>OK</button>',css:'',js:'',library:'none',height:320}};
  await files.write('card.panel.json',JSON.stringify(spec),signal);await files.write('data.json','{"total":7}',signal);
- let failRender=false,widths=[];
- const tools=new LifePanelTools(panels,'owner','owner',files,boards,async(page,storage,context,signal,options)=>{widths.push(options.width);assert.equal(context.data.total,7);if(failRender)throw Error('check[0] click #missing: not found');const state=await storage.load();await storage.save({testOnly:true},state.revision);});
+ let failRender=false,widths=[],heights=[];
+ const tools=new LifePanelTools(panels,'owner','owner',files,boards,async(page,storage,context,signal,options)=>{widths.push(options.width);heights.push(options.height);assert.equal(context.data.total,7);if(failRender)throw Error('check[0] click #missing: not found');const state=await storage.load();await storage.save({testOnly:true},state.revision);});
  const valid=await invoke(tools,'validate_life_panel',{path:'card.panel.json'});assert.equal(valid.valid,true);assert.deepEqual(widths,[174,360]);assert.equal((await panels.list()).length,0,'Validation never publishes');
+ widths=[];heights=[];
+ const sized=await invoke(tools,'validate_life_panel',{path:'card.panel.json',placementWidth:136.5,placementHeight:340});
+ assert.deepEqual(widths,[136.5]);assert.deepEqual(heights,[340]);assert.equal(sized.height,340);
+ for(const size of [{placementWidth:136},{placementHeight:340},{placementWidth:136,placementHeight:1441},{placementWidth:31,placementHeight:340}]) {
+   await assert.rejects(invoke(tools,'validate_life_panel',{path:'card.panel.json',...size}),e=>e.code==='INVALID_ARGUMENTS');
+ }
  failRender=true;await assert.rejects(invoke(tools,'publish_life_panel',{path:'card.panel.json',requestId:'repair-1'}),e=>e.code==='PANEL_RENDER_FAILED'&&e.message.includes('width=174')&&e.message.includes('check[0]'));assert.equal((await panels.list()).length,0);
  failRender=false;const created=await invoke(tools,'publish_life_panel',{path:'card.panel.json',requestId:'repair-1'});let record=await repo.get(created.panelId);assert.equal(record.data.total,7);assert.equal(record.viewState,undefined,'Validation writes never reach live state');
  const again=await invoke(tools,'publish_life_panel',{path:'card.panel.json',requestId:'repair-1'});assert.equal(again.panelId,created.panelId);assert.equal(again.reused,true);assert.equal((await repo.get(created.panelId)).configRevision,1);
@@ -817,6 +857,25 @@ async function panelRepairLoopTest() {
  await assert.rejects(invoke(faultTools,'publish_life_panel',{path:'card.panel.json',requestId:'pin-retry',boardId:board.id}),e=>e.code==='PANEL_PIN_FAILED'&&e.details.result.published===true);
  await assert.rejects(invoke(tools,'validate_life_panel',{path:'card.panel.json',requestId:'pin-retry',boardId:board.id}),e=>e.code==='INVALID_ARGUMENTS');assert.equal((await boards.get('owner',board.id)).items.length,0,'Validation cannot enter the publication retry path or pin a card');
  const recovered=await invoke(tools,'publish_life_panel',{path:'card.panel.json',requestId:'pin-retry',boardId:board.id});assert.equal(recovered.reused,true);assert.equal((await boards.get('owner',board.id)).items.length,1);
+ const existing=plain((await boards.get('owner',board.id)).items[0]);assert.deepEqual([existing.w,existing.h],[5,8]);
+ const placement={action:'place',boardId:board.id,workspaceId:'owner',panelId:created.panelId,panelWorkspaceId:'owner',layout:{x:6,y:0,w:6,h:33}};
+ await invoke(tools,'manage_life_board',placement);
+ let placed=await boards.get('owner',board.id);assert.equal(placed.items.length,2);assert.deepEqual(plain(placed.items[0]),existing);assert.equal(placed.items[1].h,33);
+ await invoke(tools,'manage_life_board',{...placement,layout:{x:5,y:2,w:6,h:8}});
+ placed=await boards.get('owner',board.id);assert.equal(placed.items.length,2,'Repeated placement reuses the same shared reference');assert.deepEqual(plain(placed.items[0]),existing);
+ for(const layout of [{x:0,y:0,w:12,h:34},{x:8,y:0,w:6,h:8},{x:0,y:0,w:6,h:8,extra:1}]) {
+   await assert.rejects(invoke(tools,'manage_life_board',{...placement,layout}));
+ }
+ assert.deepEqual(plain(await boards.get('owner',board.id)),plain(placed),'Rejected placement leaves geometry intact');
+ const inspection=await invoke(tools,'get_life_board',{workspaceId:'owner',boardId:board.id,viewportWidth:344});
+ assert.equal(inspection.items[1].mountId,placed.items[1].mountId);
+ assert.equal(inspection.items[1].rendered.width,166);assert.equal(inspection.items[1].rendered.height,340);
+ assert.equal(inspection.evidence.screenshot,'not_provided');assert.equal(inspection.evidence.visualReview,'not_performed');
+ const unknownWidth=await invoke(tools,'get_life_board',{workspaceId:'owner',boardId:board.id});assert.equal(unknownWidth.items[0].rendered,undefined);
+ await assert.rejects(invoke(tools,'get_life_board',{workspaceId:'owner',boardId:board.id,viewportWidth:0}));
+ assert.equal(sized.evidence.webRuntime,'passed');assert.equal(sized.evidence.visualReview,'not_performed');
+ const design=await invoke(tools,'get_life_panel_catalog',{section:'design'});assert.ok(design.sizing.includes('136.3x340'));assert.ok(design.state.includes('viewState'));
+
  // Definition edits migrate persisted inputs identically in validation and publication.
  const beforeEdit=plain(await repo.get(created.panelId));let previewInputs;
  const editTools=new LifePanelTools(panels,'owner','owner',files,boards,async(page,storage,context)=>{previewInputs=plain(context.inputs)});

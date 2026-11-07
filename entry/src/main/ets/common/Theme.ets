@@ -77,13 +77,19 @@ export class AppButton implements AttributeModifier<ButtonAttribute> {
     this.size = size;
   }
 
+  applyDisabledAttribute(instance: ButtonAttribute): void {
+    instance.backgroundColor($r('app.color.surface_variant')).fontColor($r('app.color.text_secondary')).opacity(1);
+  }
+
   applyNormalAttribute(instance: ButtonAttribute): void {
+    instance.opacity(1);
     const appearance = currentAppearanceStyle();
     const large = this.size >= 44;
     instance.type(ButtonType.Normal).borderRadius(large ? 12 : Radius.sm).height(this.size).fontFamily(appearance.fontFamily)
       .fontSize(large ? 15 : 13).fontWeight(FontWeight.Medium)
       .padding({ left: large ? 20 : 14, right: large ? 20 : 14 });
     if (this.kind === 'primary') {
+      if (large) { instance.constraintSize({ maxWidth: 320 }); }
       instance.backgroundColor(appearance.accent).fontColor(appearance.onAccent);
     } else if (this.kind === 'tonal') {
       instance.backgroundColor($r('app.color.surface_variant')).fontColor($r('app.color.text_primary'));

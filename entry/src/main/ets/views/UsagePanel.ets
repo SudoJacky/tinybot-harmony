@@ -1,3 +1,4 @@
+import { PageStyles } from '../common/PageStyles';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t, getLocale } from '../model/I18n';
 import { RequestUsage, UsageOrigin, UsageToolActivity } from '../model/Usage';
@@ -439,6 +440,9 @@ export struct UsagePanel {
         Circle().width(4).height(4).fill($r('app.color.text_secondary'))
         Text(t('含未报告')).fontFamily(this.appearance.fontFamily).fontSize(10).fontColor($r('app.color.text_tertiary'))
       }.width('100%')
+      if (this.range === 3) {
+        Text(t('横向滑动可查看全年记录')).fontSize(11).fontColor($r('app.color.text_tertiary')).width('100%')
+      }
       Text(t('{0} 天活跃 · 最长连续 {1} 天', [this.contributions.activeDays, this.contributions.longestStreak]))
         .fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary')).width('100%')
       Column({ space: 4 }) {
@@ -634,7 +638,7 @@ export struct UsagePanel {
             onSelect: (index: number) => { this.tab = index; this.loadDetails(); } }).margin({ top: Space.md })
           if (this.loading || this.pageLoading) { LoadingProgress().width(24).height(24).margin({ top: Space.sm }) }
           if (this.error) { Banner({ text: this.error }).margin({ top: Space.md }) }
-          if (this.tab === 0) {
+          if (this.tab === 0 && (this.loading || this.stats.totals.calls > 0)) {
             this.overview()
           }
           if (this.stats.totals.calls > 0 && this.tab === 0) {
@@ -658,7 +662,8 @@ export struct UsagePanel {
               }
             }
           } else if (!this.loading && this.stats.totals.calls === 0 && this.tab !== 2) {
-            EmptyState({ icon: $r('sys.symbol.clock'), title: t('没有匹配的用量记录') })
+            EmptyState({ icon: $r('sys.symbol.clock'), title: t('没有匹配的用量记录'),
+              caption: t('发送消息后会在这里显示用量。已有记录时，可调整上方筛选条件。') })
           }
           if (this.tab === 1) { this.sessions() }
           if (this.tab === 2) { this.activities() }
@@ -677,7 +682,7 @@ export struct UsagePanel {
         ListItem() { this.pager(this.requestPage, this.requestHasNext, () => this.moveRequests(false, false), () => this.moveRequests(true, false)) }
       }
     }.width('100%').height('100%').padding({ left: Space.page, right: Space.page }).scrollBar(BarState.Off)
-      .edgeEffect(EdgeEffect.Spring).contentEndOffset(Space.xl)
+      .edgeEffect(EdgeEffect.Spring).contentEndOffset(Space.xl).attributeModifier(PageStyles.form)
       // A closing sheet must not write false into a newer request through a two-way binding.
       .bindSheet(this.showFilter, this.filterSheet(), { radius: Radius.sheet, title: { title: this.filterTitle() },
         height: SheetSize.FIT_CONTENT, dragBar: true, systemMaterial: this.appearance.surface,

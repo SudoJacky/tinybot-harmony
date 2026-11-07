@@ -1,3 +1,4 @@
+import { PageStyles } from '../common/PageStyles';
 import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
@@ -162,7 +163,7 @@ export struct ModelSettingsPanel {
         Button(this.app.busy ? t("请等待当前任务完成") : t("保存")).fontFamily(this.appearance.fontFamily).id('save-assistant-options').attributeModifier(Btn.primary).width('100%')
           .enabled(!this.app.busy && !this.app.saveError).onClick(() => this.save())
       }
-    }.width('100%').height('100%')
+    }.width('100%').height('100%').attributeModifier(PageStyles.form)
   }
 
   build() { this.settingsTab() }

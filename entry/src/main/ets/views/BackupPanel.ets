@@ -1,3 +1,4 @@
+import { PageStyles } from '../common/PageStyles';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { getLocale, t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
@@ -149,7 +150,7 @@ export struct BackupPanel {
         SectionHeader({ title: t('华为云空间') })
         GroupCard() {
           Column() {
-            SwitchRow({ title: t('自动云备份'), subtitle: t('离开应用时，有变更才申请短时任务备份；强制关闭可能中断。自动备份独立保存。'),
+            SwitchRow({ title: t('自动云备份'), subtitle: t('自动备份独立于手动备份保存；强制关闭应用可能中断上传。'),
               compId: 'auto-cloud-backup', isOn: this.automatic.enabled, onChange: (value: boolean) => this.toggleAutomatic(value) })
             Text(this.automatic.status).id('auto-cloud-backup-status').fontSize(13)
               .fontColor($r('app.color.text_secondary')).width('100%').padding({ left: Space.lg, right: Space.lg, bottom: Space.md })
@@ -179,7 +180,7 @@ export struct BackupPanel {
                 if (index > 0) { RowDivider() }
                 Row() {
                   NavRow({ title: item.name.startsWith('tinybot-auto-') ? t('自动备份 · {0}', [this.date(item)]) :
-                    item.name === 'tinybot-latest.tinybot' ? t('最新备份 · {0}', [this.date(item)]) : this.date(item), icon: $r('sys.symbol.archivebox'), subtitle: this.detail(item), compId: 'cloud-backup-' + item.name,
+                    item.name === 'tinybot-latest.tinybot' ? t('手动备份 · {0}', [this.date(item)]) : this.date(item), icon: $r('sys.symbol.archivebox'), subtitle: this.detail(item), compId: 'cloud-backup-' + item.name,
                     disabled: this.locked(), onTap: () => this.confirmRestore(item) }).layoutWeight(1)
                   IconButton({ icon: $r('sys.symbol.trash'), tint: $r('app.color.danger'), label: t('删除备份'),
                     compId: 'delete-cloud-backup-' + item.name, disabled: this.locked(), onTap: () => this.confirmDelete(item) })
@@ -208,7 +209,7 @@ export struct BackupPanel {
         }.width('100%').alignItems(VerticalAlign.Top).padding(Space.md).margin({ top: Space.md })
         .borderRadius(Radius.md).backgroundColor($r('app.color.surface_variant'))
         if (this.error) { Banner({ text: this.error }).margin({ top: Space.md }) }
-      }.width('100%').padding({ left: Space.page, right: Space.page, bottom: Space.xl })
+      }.width('100%').padding({ left: Space.page, right: Space.page, bottom: Space.xl }).attributeModifier(PageStyles.form)
     }.width('100%').height('100%').scrollBar(BarState.Off).align(Alignment.Top)
   }
 

@@ -25,7 +25,8 @@ function reader(kind, read) {
 for (const [kind, file] of [['terms', 'user-agreement.md']]) {
   const bytes = fs.readFileSync(path.join(root, 'entry/src/main/resources/rawfile', file));
   const view = reader(kind, resource => { assert.equal(resource, file); return bytes; });
-  view.aboutToAppear(); assert.equal(view.error, ''); assert.equal(view.content, bytes.toString('utf8'));
+  view.aboutToAppear(); assert.equal(view.error, ''); assert.ok(view.sections.length > 1);
+  assert.equal(view.sections.map(section => section.content).join(''), bytes.toString('utf8'), 'The section index retains every clause'); assert.equal(view.content, bytes.toString('utf8'));
   const blocks = markdown.markdownBlocks(view.content);
   const rendered = blocks.map(block => markdown.markdownSpans(block.text).map(span => span.text).join('')).join('');
   const plain = view.content.replace(/^#{1,6} /gm, '').replace(/\*\*/g, '');

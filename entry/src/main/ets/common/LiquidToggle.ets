@@ -149,7 +149,8 @@ export struct LiquidToggle {
         .translate({ x: Liquid.pad + this.thumbPosition })
       }
       .width(Liquid.railWidth).height(Liquid.railHeight).borderRadius(Liquid.railHeight / 2)
-      .backgroundColor(this.preview ? this.appearance.accent : $r('app.color.surface_variant'))
+      .backgroundColor(this.preview ? this.appearance.accent : $r('app.color.switch_track'))
+      .border({ width: this.preview ? 0 : 0.5, color: $r('app.color.switch_outline') })
       .animation({ duration: Motion.fast, curve: Motion.standard })
       .accessibilityLevel('no-hide-descendants').hitTestBehavior(HitTestMode.None)
     }.fontFamily(this.appearance.fontFamily)

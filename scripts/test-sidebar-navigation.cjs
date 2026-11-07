@@ -13,7 +13,7 @@ const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
 const cls = tree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'Index');
 const methods = ['openTools', 'openSettings', 'openMiniApps', 'createChat', 'revealChat',
   'openFiles', 'openDetailTab', 'openHistorySearch', 'toggleHistory', 'setHistoryCollapsed',
-  'confirmProviderDiscard', 'confirmRootNavigation'];
+  'confirmProviderDiscard', 'confirmRootNavigation', 'returnFromSettings', 'selectSettingsSection'];
 const body = methods.map(name => cls.members.find(node => node.name?.getText(tree) === name).getText(tree)).join('\n');
 const globals = { exports: {}, t: text => text, $r: value => value, LaunchMode: { POP_TO_SINGLETON: 2 }, Diagnostics: { log() {} }, Motion: {} };
 vm.runInNewContext(ts.transpileModule(`class Page { ${body} } exports.Page = Page;`, {
@@ -227,4 +227,19 @@ test('opening a new root above the provider retains its draft without a discard 
   page.openTools('mcp');
   assert.deepEqual(routes.map(route => route.name), ['settings', 'provider', 'productivity']);
   assert.equal(dialogs.length, 0);
+});
+
+
+test('tablet settings categories and return-to-chat protect unsaved provider configuration', () => {
+  const {page,routes,dialogs}=fixture();page.openSettings();routes.push({name:'provider'});
+  page.app.providerEditor.hasChanges=true;
+  page.selectSettingsSection('appearance');assert.equal(dialogs.length,1);assert.equal(routes.length,2);
+  dialogs[0].secondaryButton.action();assert.equal(page.settingsSection,'appearance');assert.equal(routes.length,1);
+  routes.push({name:'provider'});page.returnFromSettings();assert.equal(dialogs.length,2);assert.equal(routes.length,2);
+  dialogs[1].secondaryButton.action();assert.equal(routes.length,0);assert.equal(page.rootSection,'');
+});
+
+test('tools opened from settings retain the settings navigation; sidebar tools keep their own selection', () => {
+ const {page}=fixture();page.openSettings();page.openTools('mcp');assert.equal(page.rootSection,'settings');
+ page.rootSection='';page.openTools('memory');assert.equal(page.rootSection,'productivity');
 });

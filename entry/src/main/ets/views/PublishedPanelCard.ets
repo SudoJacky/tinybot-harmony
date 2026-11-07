@@ -119,7 +119,6 @@ export struct PublishedPanelCard {
     Column({ space: 8 }) {
       LifePanelCard({ panel: this.entry(key).panel, interactive: false, showFooter: false, cardSize: 'M',
         busy: this.entry(key).panel.runs?.[0]?.status === 'running' && this.panels().repository(this.entry(key).workspaceId).isRefreshing(this.entry(key).panel.id),
-        viewHeight: this.entry(key).panel.definition.view?.height || 320,
         storage: this.panels().repository(this.entry(key).workspaceId).binding(this.entry(key).panel.id, this.entry(key).panel.configRevision),
         onRuntimeError: (message: string, revision: number) => this.runtimeError(key, message, revision),
         onOpen: () => this.open({ workspaceId: this.entry(key).workspaceId, panelId: this.entry(key).panel.id }) })

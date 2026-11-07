@@ -8,7 +8,7 @@ function load(name) {
   const code = ts.transpileModule(fs.readFileSync(path.join(root, name + '.ets'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 } }).outputText;
   vm.runInNewContext(code, { exports, Date, require: id => load(path.basename(id)) }); return exports;
 }
-const { panelMasonry, panelRunLabel, panelErrorText } = load('PanelPresentation');
+const { panelMasonry, panelDropTarget, panelRunLabel, panelErrorText } = load('PanelPresentation');
 const { setLocale } = load('I18n');
 const { validateMailAccount } = load('Mail');
 const account = { id:'test',name:'Work',host:'imap.example.com',port:993,username:'me@example.com',enabled:false,allowBody:false };
@@ -36,4 +36,12 @@ for (let i=0;i<layout.length;i++) for(let j=i+1;j<layout.length;j++) {
   assert.ok(a.x+a.width<=b.x || b.x+b.width<=a.x || a.y+a.height<=b.y || b.y+b.height<=a.y,'Measured cards must never overlap');
 }
 assert.equal(panelMasonry(360,2,[2],[90])[0].height,90,'Short cards retain their measured height');
+const abc = panelMasonry(360,2,[1,1,2],[150,150,200]);
+assert.equal(panelDropTarget(abc,270,100),1,'B remains in place while over its own slot');
+assert.equal(panelDropTarget(abc,270,280),2,'B can move after the full-width C');
+assert.equal(panelDropTarget(abc,270,390),3,'The blank area below C is an explicit end position');
+assert.equal(panelDropTarget(abc,180,158),2,'The gap above C is a drop target, not a dead zone');
+const acb = panelMasonry(360,2,[1,2,1],[150,200,150]);
+assert.ok(acb[2].y >= acb[1].y + acb[1].height,'After reordering A,C,B, B renders below C without changing its width');
+assert.equal(acb[2].width,abc[1].width);
 console.log('PASS localized field errors, historical API errors, locale-aware run dates/triggers, adaptive masonry packing and reflow');

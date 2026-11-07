@@ -1,3 +1,4 @@
+import { PageStyles } from '../common/PageStyles';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
@@ -156,7 +157,7 @@ export struct SupportPanel {
         NavRow({ title: t('GitHub 仓库'), icon: $r('sys.symbol.link'), subtitle: 'SudoJacky/tinybot-harmony', compId: 'about-github',
           onTap: () => this.openWebsite('https://github.com/SudoJacky/tinybot-harmony') })
         RowDivider()
-        NavRow({ title: t('反馈与建议'), icon: $r('sys.symbol.exclamationmark_circle'), compId: 'about-feedback',
+        NavRow({ title: t('反馈与建议'), icon: $r('sys.symbol.ellipsis_message'), compId: 'about-feedback',
           onTap: () => this.onOpen('feedback') })
         RowDivider()
         NavRow({ title: t('QQ 交流群'), icon: $r('sys.symbol.person_2'), subtitle: t('{0} · 点击加群', [QQ_GROUP_NUMBER]),
@@ -177,7 +178,7 @@ export struct SupportPanel {
         RowDivider()
         NavRow({ title: t('评分和评论'), icon: $r('sys.symbol.star'), compId: 'open-about-rating', onTap: () => this.onOpen('rating') })
         RowDivider()
-        NavRow({ title: t('首次使用指引'), icon: $r('sys.symbol.wand_and_stars'), compId: 'open-startup-guide', onTap: () => this.onOpen('guide') })
+        NavRow({ title: t('首次使用指引'), image: $r('app.media.tinybot'), compId: 'open-startup-guide', onTap: () => this.onOpen('guide') })
       }
     }
     SectionHeader({ title: t('协议与政策') })
@@ -188,10 +189,13 @@ export struct SupportPanel {
         NavRow({ title: t('隐私政策'), icon: $r('sys.symbol.lock'), compId: 'privacy-policy',
           onTap: () => this.onOpen('privacy') })
         RowDivider()
+        NavRow({ title: t('撤回隐私授权'), icon: $r('sys.symbol.lock'), compId: 'revoke-privacy-consent',
+          onTap: () => this.onOpen('revoke-privacy') })
+        RowDivider()
         NavRow({ title: 'Apache License 2.0', icon: $r('sys.symbol.doc'), compId: 'about-project-license',
           onTap: () => this.openWebsite('https://github.com/SudoJacky/tinybot-harmony/blob/main/LICENSE') })
         RowDivider()
-        NavRow({ title: t('第三方开源许可协议'), icon: $r('sys.symbol.rectangle_stack'), compId: 'open-third-party-licenses',
+        NavRow({ title: t('第三方开源许可协议'), icon: $r('sys.symbol.doc_text'), compId: 'open-third-party-licenses',
           onTap: () => this.onOpen('licenses') })
       }
     }
@@ -283,7 +287,7 @@ export struct SupportPanel {
           } else {
             this.about()
           }
-        }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.md, bottom: Space.xl })
+        }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.md, bottom: Space.xl }).attributeModifier(PageStyles.reading)
       }.height('100%').width('100%').align(Alignment.Top).scrollBar(BarState.Auto).edgeEffect(EdgeEffect.Spring)
     }
   }

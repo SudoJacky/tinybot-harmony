@@ -32,16 +32,16 @@ export struct DetailLauncher {
   build() {
     Column() {
       Row() {
-        Text(t('侧栏')).fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium)
+        Text(t('文件与浏览器')).fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium)
           .layoutWeight(1).fontColor($r('app.color.text_primary'))
-        IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭侧栏'), compId: 'detail-launcher-close',
-          diameter: 36, iconSize: 18, onTap: this.onClose })
       }.width('100%').height(56).padding({ left: Space.page, right: 6 })
         .border({ width: { bottom: 0.5 }, color: $r('app.color.divider') })
       Column({ space: 10 }) {
         this.option($r('sys.symbol.folder'), t('工作区文件'), 'detail-launcher-files', this.onFiles)
         this.option($r('sys.symbol.connection'), t('应用内浏览器'), 'detail-launcher-browser', this.onBrowser)
       }.width('100%').padding(Space.page).alignItems(HorizontalAlign.Start)
+      Text(t('打开文件或网页，可与对话并排查看。')).fontSize(13).fontColor($r('app.color.text_secondary'))
+        .padding(Space.lg).width('100%')
       Blank()
     }.width('100%').height('100%').backgroundColor($r('app.color.surface'))
   }

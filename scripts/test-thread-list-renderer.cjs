@@ -182,7 +182,7 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
   const widgets = { ...globals, exports: {}, Color: { Transparent: 'transparent' },
     Context: { animation: value => { buttonAnimation = value; } },
     systemMaterialAttribute: materialAttributes.exports.systemMaterialAttribute,
-    AppearanceStyle: class { controlBackground = 'transparent'; materialAvailable = true; },
+    AppearanceStyle: class { controlBackground = 'transparent'; materialAvailable = true; materialEnabled = true; },
     ViewPU: class extends ViewPU { createStorageProp(_key, value) { return new Property(value); } },
     SynchedPropertySimpleOneWayPU: Property, SynchedPropertyObjectOneWayPU: Property, ObservedObject: { GetRawObject: v => v },
     Button: new Proxy({}, { get: (_, key) => key === 'accessibilityText' ? value => { accessibilityLabel = value; } :
@@ -196,7 +196,7 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
   assert.equal(buttonBackground, 'transparent', 'Supported devices retain the material background');
   assert.ok(backgroundAnimation, 'Material-capable devices retain their existing color animation');
   assert.equal(buttonBorder.width, 0);
-  button.appearance = { controlBackground: 'plain-control', materialAvailable: false }; button.flush();
+  button.appearance = { controlBackground: 'plain-control', materialAvailable: false, materialEnabled: false }; button.flush();
   assert.equal(buttonBackground, 'plain-control', 'API 20 circular buttons have an opaque background');
   assert.equal(backgroundAnimation, null, 'API 20 repaint applies explicit fills without interpolating native theme defaults');
   assert.equal(buttonBorder.width, 0.5, 'A thin outline preserves the circle on similar page colors');
