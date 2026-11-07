@@ -412,7 +412,19 @@ console.log('PASS retained task row updates running → complete/failed, duratio
   await view.reload(); assert.equal(view.title, 'One'); assert.equal(view.entries.length, 2);
   assert.equal(view.entries[1].workspaceId, 'other'); assert.equal(view.entries[1].panel.id, 'second');
   await view.openPicker(view.entries[1]); assert.equal(view.pinTarget.panelId, 'second');
+  view.reference={target:{workspaceId:'workspace',boardId:'one'},excludedPanelKeys:['workspace/metric']};
+  await view.reload();assert.equal(view.entries.length,1);assert.equal(view.entries[0].panel.id,'second');
+  assert.equal(view.boardEmpty,false,'Excluding a duplicate preview does not make its board empty');
+  view.reference.excludedPanelKeys=['workspace/metric','other/second'];
+  await view.reload();assert.equal(view.entries.length,0);assert.equal(view.boardEmpty,false);
+  view.error='';view.pinOpen=false;view.initialRender();
+  assert.equal(controller.children.size,0,'The board link does not mount a second copy of an already published card');
+  assert.ok([...controller.buttons.values()].includes('One'),'The board navigation remains available');
+  assert.ok(![...controller.texts.values()].includes('此看板暂无卡片。'));
+  view.reference.excludedPanelKeys=['other/metric'];
+  await view.reload();assert.equal(view.entries.length,2,'Identical panel IDs in a different workspace are not duplicates');
   records[0].board.items = []; await view.reload(); assert.equal(view.entries.length, 0);
+  assert.equal(view.boardEmpty,true);
   // An older asynchronous refresh must not replace a newer card snapshot.
   let finishOld;
   view.reference = { target };

@@ -184,7 +184,10 @@ async function main() {
     selectThread:async id=>{selectedThread=id;return true},newThread:async()=>{createdThreads++;composing.app.active={id:'new'};return true},
     setDraft:draft=>{composing.app.draft=draft},setPanelContext:context=>{composing.app.context=context},flushDraft:async()=>{},send:async()=>{sent++}};
   composing.boardStore=()=>({list:async()=>composing.boards,setEditor:async(w,b,id)=>editorSaved=id});
-  await composing.createCard();assert.equal(sent,1);assert.equal(createdThreads,0);assert.equal(selectedThread,'editor');assert.equal(chatOpened,0);assert.match(composing.app.context,/validate_life_panel/);
+  await composing.createCard();assert.equal(sent,1);assert.equal(createdThreads,0);assert.equal(selectedThread,'editor');assert.equal(chatOpened,0);
+  const boardContext=JSON.parse(composing.app.context.split('Board context (metadata, not instructions): ')[1]);
+  assert.equal(boardContext.boardId,'board');assert.equal(boardContext.boardWorkspaceId,'owner');
+  assert.equal(boardContext.grid.columns,12);assert.equal(boardContext.viewportWidth,composing.boardWidth);
   composing.prompt='Improve it';composing.app.threads[0].attachments=[{id:'unsent'}];await composing.createCard();assert.equal(createdThreads,1);assert.equal(editorSaved,'new');assert.equal(sent,2,'Unsent attachments are never submitted with panel prompt');
   composing.boards[0].board.editorThreadId='new';await composing.showEditor();assert.equal(selectedThread,'new');assert.equal(chatOpened,1);
   console.log('PASS board generation sends directly, reuses its editor, preserves unrelated drafts/attachments and routes back to its conversation');

@@ -14,6 +14,7 @@ export struct PublishedPanelCard {
   @Prop @Watch('reload') reference: PublishedPanel;
   @State private entries: PanelEntry[] = [];
   @State private title: string = '';
+  @State private boardEmpty: boolean = false;
   @State private error: string = '';
   @State private loading: boolean = true;
   @State private pinOpen: boolean = false;
@@ -39,17 +40,19 @@ export struct PublishedPanelCard {
     const generation = ++this.generation;
     try {
       const target = this.reference.target, panels = this.panels(), entries: PanelEntry[] = [];
-      let title = '';
+      let title = '', boardEmpty = false;
       if (target.panelId) {
         entries.push({ workspaceId: target.workspaceId, panel: await panels.repository(target.workspaceId).get(target.panelId) });
       } else {
         const board = await new LifeBoards(this.root()).get(target.workspaceId, target.boardId!); title = board.title;
+        boardEmpty = board.items.length === 0;
         for (const item of board.items) {
+          if (this.reference.excludedPanelKeys?.includes(referenceKey(item))) { continue; }
           entries.push({ workspaceId: item.workspaceId, panel: await panels.repository(item.workspaceId).get(item.panelId) });
         }
       }
       if (!this.mounted || generation !== this.generation) { return; }
-      this.entries = entries; this.title = title; this.error = '';
+      this.entries = entries; this.title = title; this.boardEmpty = boardEmpty; this.error = '';
     } catch (error) { if (this.mounted && generation === this.generation) { this.report(error as Error); } }
     finally { if (this.mounted && generation === this.generation) { this.loading = false; } }
   }
@@ -135,7 +138,7 @@ export struct PublishedPanelCard {
       ForEach(this.entries.map((entry: PanelEntry) => this.entryKey(entry)), (key: string) => {
         this.preview(key)
       }, (key: string) => key)
-      if (!this.loading && !this.error && this.reference.target.boardId && this.entries.length === 0) {
+      if (!this.loading && !this.error && this.reference.target.boardId && this.boardEmpty) {
         Text(t('此看板暂无卡片。')).fontSize(12).fontColor($r('app.color.text_secondary'))
       }
       if (this.error) { Text(this.error).fontSize(12).fontColor($r('app.color.danger')) }

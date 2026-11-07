@@ -298,7 +298,8 @@ async function checkLifePanelSource() {
       fs.readFileSync(path.join(root,`../resources/base/media/logo_${brand}.svg`),'utf8').trim(), 'HTML and native logos share the same asset');
   }
   assert.ok(!JSON.stringify(catalog).includes('wallet-secret-alias'));assert.ok(!JSON.stringify(catalog).includes('api.deepseek.com'));
-  const definition={...catalog.definition,view:{version:1,html:catalog.html,css:'',js:'',library:'none',height:420,autoHeight:true}};
+  assert.equal(catalog.html,undefined);assert.equal(catalog.guidance,undefined);
+  const definition={...catalog.definition,view:{version:1,html:load('model/BalancePanelTemplate').BALANCE_PANEL_HTML,css:'',js:'',library:'none',height:420,autoHeight:true}};
   parsePanelSpec(JSON.stringify(definition));
   for(const patch of [{url:'https://evil.invalid'}, {auth:{type:'bearer'}}, {providerIds:['invalid id']}, {providerIds:[profile.id,profile.id]}, {providerIds:[]}])
     assert.throws(()=>parsePanelSpec(JSON.stringify({...definition,source:{...definition.source,...patch}})));

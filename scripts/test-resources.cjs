@@ -109,6 +109,52 @@ async function main() {
   await assert.rejects(() => invoke(new SkillTools(restored), 'read_skill', { name: 'web-research' }));
   console.log('PASS bundled Skills install durably, enter the catalog/read path and explicit turns, and respect edit/rename/disable/delete after restart');
 
+  const widgetNames = ['widget', 'widget-design', 'canvas'];
+  const oldEntries = BUILTIN_SKILL_DOCUMENTS.filter(entry => !widgetNames.includes(entry.name));
+  const upgradeData = seed();
+  upgradeData.extensions = { webEnabled: true, skills: oldEntries.map(entry => ({ ...parseSkill(entry.document), files: entry.files })),
+    seededBuiltinSkills: oldEntries.map(entry => entry.name) };
+  upgradeData.extensions.skills[0].enabled = false;
+  const upgraded = await fixture(upgradeData), installed = upgraded.session.snapshot().extensions.skills;
+  assert.equal(installed.length, BUILTIN_SKILL_DOCUMENTS.length);
+  assert.equal(installed[0].enabled, false, 'Installing new Skills preserves existing preferences');
+  const widgetTools = new SkillTools(installed), discovery = skillCatalog(installed);
+  for (const name of widgetNames) {
+    const skill = installed.find(item => item.name === name);
+    assert.equal(skill.enabled, true);assert.equal(skill.manualOnly, false);
+    assert.ok(discovery.includes(name));
+    const main = JSON.parse(await invoke(widgetTools, 'read_skill', { name }));
+    assert.equal(main.content, skill.document);assert.equal(main.kind, 'skill_instructions');
+    for (const file of skill.files) {
+      const read = JSON.parse(await invoke(widgetTools, 'read_skill', { name, path: file.path }));
+      assert.equal(read.content, file.content);assert.equal(read.kind, 'reference_data');
+    }
+    for (const file of [{path:'SKILL.md',content:skill.document},...skill.files].filter(file=>file.path.endsWith('.md'))) {
+      for (const match of file.content.matchAll(/\]\(([^)#]+)(?:#[^)]*)?\)/g)) {
+        if (/^https?:/.test(match[1])) continue;
+        const target = path.posix.normalize(path.posix.join(path.posix.dirname(file.path),match[1]));
+        const linked = JSON.parse(await invoke(widgetTools,'read_skill',{name,path:target}));
+        assert.ok(linked.content.length,'Linked references must be readable: '+name+'/'+target);
+      }
+    }
+  }
+  const { panelSkillCatalog } = from('model/PanelSkillCatalog');
+  for (const section of ['all','html','native','sources','design']) {
+    const index = JSON.parse(panelSkillCatalog(section));
+    for (const resource of index.resources) {
+      const read = JSON.parse(await invoke(widgetTools,'read_skill',resource));
+      assert.ok(read.content.length,'Old catalog routes resolve through read_skill');
+    }
+  }
+  assert.ok(!discovery.includes('tinybot.storage.save'),'Skill discovery exposes metadata without loading reference bodies');
+  const counter=JSON.parse(await invoke(widgetTools,'read_skill',{name:'widget',path:'assets/counter.panel.json'}));
+  const counterHtml=JSON.parse(await invoke(widgetTools,'read_skill',{name:'widget',path:'assets/counter.html'}));
+  from('model/LifePanel').parsePanelSpec(JSON.stringify({...JSON.parse(counter.content),
+    view:from('model/MiniApp').miniAppPage('counter.html',counterHtml.content)}));
+  const wallet=JSON.parse(await invoke(widgetTools,'read_skill',{name:'widget',path:'assets/balance.html'}));
+  assert.equal(wallet.content,from('model/BalancePanelTemplate').BALANCE_PANEL_HTML,'Runtime wallet and Skill reference share one source');
+  console.log('PASS upgrade installs authoring Skills, preserves preferences and progressively reads all linked references, templates and catalog routes');
+
   const collision = parseSkill(document('web-research', 'User instructions')); collision.enabled = false;
   const legacy = { webEnabled: false, browserPolicy: 'disabled', skills: [collision] };
   assert.equal(seedBuiltinSkills(legacy), true); validateExtensions(legacy);

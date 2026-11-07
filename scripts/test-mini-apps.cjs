@@ -396,7 +396,10 @@ async function lifePanelTest() {
   await scoped.write('today.panel.json',JSON.stringify(spec),signal);
   await scoped.write('data.json',JSON.stringify(spec.data),signal);
   const tools=new LifePanelTools(panels,'panel-chat','deleted-thread',scoped);
-  assert.equal((await invoke(tools,'get_life_panel_catalog',{})).version,2);
+  const index=await invoke(tools,'get_life_panel_catalog',{});
+  assert.equal(index.version,2);assert.deepEqual(Array.from(index.resources,item=>item.name),['widget','widget-design','canvas']);
+  assert.equal(index.authoring,undefined,'Authoring documents are read through Skills, not catalog results');
+  assert.ok(tools.definitions().every(tool=>!tool.promptGuidelines?.length),'Life Panel tools do not inject authoring workflows');
   const receipt=await invoke(tools,'publish_life_panel',{path:'today.panel.json'}), id=receipt.panelId;
   assert.equal(receipt.openFrom,'Life Panel');
   const readonly=new RuleTools(tools,true);
@@ -491,8 +494,8 @@ async function lifePanelApiTest() {
   const source={type:'api',url:'https://api.example.test/query',method:'POST',headers:{'X-Client':'Tinybot'},body:{period:'week'},
     auth:{type:'api-key',in:'header',name:'X-API-Key'},transform:expr};
   validatePanelSource(source);
-  const catalog=JSON.parse(load('model/LifePanel').LIFE_PANEL_CATALOG);
-  validatePanelSource({...source,transform:catalog.javascriptExample});
+  const transform=JSON.parse(fs.readFileSync(path.resolve(__dirname,'../skills/widget/assets/transform.json'),'utf8'));
+  validatePanelSource({...source,transform});
   for(const patch of [{method:'DELETE'},{method:'GET'},{url:'http://api.example.test/query'},{headers:{Host:'evil.test'}},
     {headers:{Authorization:'secret'}},{headers:{'X-Client':'bad\r\nheader'}},{headers:{a:'one',A:'two'}},
     {auth:{type:'oauth',oauth:{clientId:'x',authorizationEndpoint:'https://id.test/auth',tokenEndpoint:'http://id.test/token'}}}]) {
@@ -630,6 +633,16 @@ async function lifeBoardsTest() {
   assert.equal((await repo.get('shared')).user['tasks:one'],true);assert.equal((await boards.get('another-chat',second.id)).items.length,1);
   const links=plain(publishedPanels([{content:'',tools:[{status:'complete',call:{id:'pub',function:{name:'publish_life_panel'}},output:JSON.stringify(receipt)}]}]));
   assert.equal(links[0].target.panelId,'shared');assert.equal(parsePanelTarget(JSON.stringify(links[0].target)).workspaceId,'owner');
+  const boardReceipt={workspaceId:'another-chat',boardId:second.id,title:'Second'};
+  const mixed=plain(publishedPanels([{content:'',tools:[
+    {status:'complete',call:{id:'board',function:{name:'manage_life_board'}},output:JSON.stringify(boardReceipt)},
+    {status:'complete',call:{id:'pub',function:{name:'publish_life_panel'}},output:JSON.stringify(receipt)},
+    {status:'complete',call:{id:'pub-again',function:{name:'publish_life_panel'}},output:JSON.stringify(receipt)}]}]));
+  assert.equal(mixed.length,2,'Repeated publication keeps one card preview and one board link');
+  assert.deepEqual(mixed.find(item=>item.target.boardId).excludedPanelKeys,['owner/shared'],
+    'A board preview excludes cards already published in this same answer, even when the board receipt came first');
+  const boardOnly=plain(publishedPanels([{content:'',tools:[{status:'complete',call:{id:'board',function:{name:'manage_life_board'}},output:JSON.stringify(boardReceipt)}]}]));
+  assert.deepEqual(boardOnly[0].excludedPanelKeys,[],'A board-only result retains all of its card previews');
   const readonly=new RuleTools(tools,true);
   for(const name of ['manage_life_board','manage_life_panel_task','publish_life_panel'])assert.ok(!readonly.definitions().some(tool=>tool.function.name===name));
   assert.equal((await invoke(tools,'list_life_boards',{})).length,3);
@@ -874,7 +887,8 @@ async function panelRepairLoopTest() {
  const unknownWidth=await invoke(tools,'get_life_board',{workspaceId:'owner',boardId:board.id});assert.equal(unknownWidth.items[0].rendered,undefined);
  await assert.rejects(invoke(tools,'get_life_board',{workspaceId:'owner',boardId:board.id,viewportWidth:0}));
  assert.equal(sized.evidence.webRuntime,'passed');assert.equal(sized.evidence.visualReview,'not_performed');
- const design=await invoke(tools,'get_life_panel_catalog',{section:'design'});assert.ok(design.sizing.includes('136.3x340'));assert.ok(design.state.includes('viewState'));
+ const design=await invoke(tools,'get_life_panel_catalog',{section:'design'});
+ assert.equal(design.resources[0].name,'widget-design');assert.equal(design.sizing,undefined);
 
  // Definition edits migrate persisted inputs identically in validation and publication.
  const beforeEdit=plain(await repo.get(created.panelId));let previewInputs;
@@ -925,7 +939,8 @@ async function providerBalancePanelTest() {
     assert.ok(!JSON.stringify(context).includes('PRIVATE-KEY'));assert.ok(!JSON.stringify(context).includes('balance-a'));
   });
   const catalog=await invoke(tools,'get_life_panel_catalog',{section:'balance'});assert.equal(catalog.accounts.length,2);
-  await files.write('wallet.html',catalog.html,signal);await files.write('wallet.panel.json',JSON.stringify(catalog.definition),signal);
+  assert.equal(catalog.html,undefined);assert.equal(catalog.guidance,undefined);
+  await files.write('wallet.html',load('model/BalancePanelTemplate').BALANCE_PANEL_HTML,signal);await files.write('wallet.panel.json',JSON.stringify(catalog.definition),signal);
   const checked=await invoke(tools,'validate_life_panel',{path:'wallet.panel.json',htmlPath:'wallet.html'});assert.equal(checked.sourceStatus,'passed');
   const created=await invoke(tools,'publish_life_panel',{path:'wallet.panel.json',htmlPath:'wallet.html',requestId:'provider-wallet'});
   assert.equal(created.published,true);assert.ok(renders>=4);

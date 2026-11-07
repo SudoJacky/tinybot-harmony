@@ -1,0 +1,4 @@
+{
+  "type": "javascript",
+  "code": "return { total: input.orders.reduce((sum, order) => sum + Number(order.amount), 0), items: input.orders.slice(0, 20).map(order => ({ id: String(order.id), label: order.name, value: String(order.amount) })) };"
+}

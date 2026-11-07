@@ -1,9 +1,8 @@
 import { PanelSpec } from '../model/LifePanel';
 import { PanelSchema } from '../model/PanelContract';
-import { BALANCE_PANEL_HTML } from '../model/BalancePanelTemplate';
 import { BalancePanelAccount, BalancePanelData, ProviderBalanceSource } from './ProviderBalanceSource';
 
-interface BalanceCatalog { guidance: string; accounts: BalancePanelAccount[]; html: string; definition?: PanelSpec; }
+interface BalanceCatalog { accounts: BalancePanelAccount[]; definition?: PanelSpec; }
 export function providerBalanceDefinition(): PanelSpec | undefined {
   const accounts = ProviderBalanceSource.accounts();
   const schema: PanelSchema = { type: 'object', required: ['accounts', 'providerId', 'providerName', 'amounts', 'checkedAt'],
@@ -26,21 +25,6 @@ export function providerBalanceDefinition(): PanelSpec | undefined {
 }
 export function providerBalanceCatalog(): string {
   const accounts = ProviderBalanceSource.accounts(), definition = providerBalanceDefinition();
-  const catalog: BalanceCatalog = { accounts: accounts, definition: definition, html: BALANCE_PANEL_HTML,
-    guidance: 'Create a v2 HTML Life Panel using the supplied definition and self-contained HTML reference, adapted to the user request. ' +
-      'Write an .html and .panel.json, then validate_life_panel and publish_life_panel. Read-only provider-balance is a native data source, not an agent source. ' +
-      'Only enabled providers with a supported/configured balance adapter are listed. Empty accounts means setup is required in Settings > provider > balance query settings; never invent a balance. ' +
-      'source accepts only type and providerIds. Use inputs.providerId with default/options from that allowlist. ' +
-      'Switch via tinybot.panel.refresh({providerId:id}); manual refresh via tinybot.panel.refresh(). Never query during page startup. ' +
-      'During manual or background queries, replace the amount with a subtle pulsing skeleton in the same space. Fade the skeleton out and stagger the result digits in when finished, including unchanged balances. Do not show visible loading text; use aria-busy and an accessible label. Keep failures visible. ' +
-      'Never request/copy model keys or balance tokens into HTML, chat, definitions or API connections. The host resolves saved credentials and deduplicates queries with Settings. ' +
-      'data.amounts[].total is REMAINING, used is spent, limit is total allowance; preserve decimal strings and separate currency/kind/label. Unlimited is not zero. ' +
-      'Do not add account balances, key limits or subscription allowances together. ' +
-      'A failed refresh retains the last snapshot: use context.status to label it stale, and never show data from a different data.providerId than context.inputs.providerId. ' +
-      'Follow the minimal Wallet Card reference: 32px rounded surface, 16px gap above the balance, compact header, centered tabular amount and a top-right refresh icon. Prefix CNY amounts with ￥ and USD amounts with $; show other returned units after the amount. Do not add currency symbols to unlimited or missing values. Always show the amount; do not add a hide-balance control. Omit change indicators, account search, balance/category dropdowns, detail expansion and bottom action buttons. Show the first account balance, or the first returned quota when no account balance is provided. ' +
-      'Use accounts[].presetId to select the bundled provider logo on a pale circular background in both the header and account list. Unknown/custom presets use the generic service icon; never infer a brand from account names or API protocol. Keep logo assets inline and offline. ' +
-      'The account button expands into an account panel anchored to its origin; rows enter with a short stagger. Amount digits exit upward and enter from below with staggered opacity/transform transitions under 300ms. ' +
-      'Keep transitions interruptible, restore focus on picker dismissal, and disable motion for keyboard interaction and prefers-reduced-motion. Keep HTML sandboxed, themed and responsive at half width. ' +
-      'The supplied checks exercise account panel opening/closing; source queries are verified separately. Add meaningful checks for any new behavior. Do not add fake Send/Swap/Buy actions.' };
+  const catalog: BalanceCatalog = { accounts: accounts, definition: definition };
   return JSON.stringify(catalog);
 }
