@@ -3,11 +3,11 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 const root = path.resolve(__dirname, '..');
 const ts = require(path.join(process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio'),
   'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
-function methods(relative, names) {
+function methods(relative, names, className = path.basename(relative)) {
   const file = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets', relative + '.ts');
   assert.ok(fs.statSync(file).mtimeMs >= fs.statSync(path.join(root, 'entry/src/main/ets', relative + '.ets')).mtimeMs, 'Rebuild ' + relative);
   const tree = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
-  const cls = tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === path.basename(relative));
+  const cls = tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === className);
   return names.map(name => { const method = cls.members.find(n => n.name?.getText(tree) === name); assert.ok(method, name); return method.getText(tree); }).join('\n');
 }
 function compile(source, globals = {}) {
@@ -123,6 +123,63 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
   await open('short'); render(); assert.deepEqual(jumps.pop(), [0, false, 'end']);
   panel.scrollToLatest(); assert.deepEqual(jumps.pop(), [0, true, 'end']); assert.equal(panel.followOutput, false);
   console.log('PASS emitted chat positioning: cold start, lazy tail, history, team card, touch, search, stale callbacks, empty chat and manual jump');
+
+  const ResponsiveIcon = compile(methods('common/Widgets', ['updateStateVars'], 'IconButton'));
+  let diameter = 44;
+  const icon = Object.assign(new ResponsiveIcon(), { __diameter: { reset(value) { diameter = value; } } });
+  for (const key of ['icon', 'tint', 'fill', 'disabled', 'label']) { icon['__' + key] = { reset() {} }; }
+  for (const next of [36, 44, 36, 36]) {
+    icon.updateStateVars({ diameter: next });
+    assert.equal(diameter, next, 'A retained icon button must follow phone/tablet sizing updates');
+  }
+  console.log('PASS emitted icon button: retained instances accept responsive diameter updates');
+
+  let addButton, updateAddButton;
+  const AddButton = compile(methods('views/ChatPanel', ['composerAddButton']), {
+    IconButton: class extends ResponsiveIcon {
+      constructor(_parent, params) {
+        super(); addButton = this; this.diameter = params.diameter;
+        this.__diameter = { reset: value => { this.diameter = value; } };
+        for (const key of ['icon', 'tint', 'fill', 'disabled', 'label']) { this['__' + key] = { reset() {} }; }
+      }
+    },
+    __Common__: { create() {}, bindPopup() {}, pop() {} }, ViewPU: { create() {} },
+    Placement: { TopLeft: 0 }, BlurStyle: { NONE: 0 }, t: value => value
+  });
+  const composer = Object.assign(new AddButton(), { workbench: false, thread: {}, app: { saveError: '' },
+    speechActive: () => false, plusMenu() {},
+    observeComponentCreation2(callback, component) {
+      if (component.name === 'IconButton') { updateAddButton = () => callback(1, false); }
+      callback(1, true);
+    },
+    updateStateVarsOfChildByElmtId(_id, params) { addButton.updateStateVars(params); }
+  });
+  composer.composerAddButton(); assert.equal(addButton.diameter, 44);
+  for (const workbench of [true, false, true, true]) {
+    composer.workbench = workbench; updateAddButton();
+    assert.equal(addButton.diameter, workbench ? 36 : 44, 'The emitted composer must forward sizing to its existing button');
+  }
+  console.log('PASS emitted composer button: layout changes propagate through parent and retained child');
+
+  let settingsParams, settingsUpdate;
+  const Settings = compile(methods('pages/Index', ['settingsContent']), {
+    SettingsPanel: class { constructor(_parent, params) { settingsParams = params; } }, ViewPU: { create() {} }
+  });
+  const settings = Object.assign(new Settings(), { app: { settings: {} }, settingsSection: 'models', settingsActive: true, foreground: true,
+    observeComponentCreation2(callback) { settingsUpdate = () => callback(1, false); callback(1, true); },
+    updateStateVarsOfChildByElmtId(_id, params) { settingsParams = { ...settingsParams, ...params }; }
+  });
+  settings.settingsContent();
+  assert.equal(settingsParams.section, 'models');
+  for (const section of ['account', 'assistant', 'tools', 'appearance', 'data', 'help', 'models']) {
+    settings.settingsSection = section; settingsUpdate();
+    assert.equal(settingsParams.section, section, 'An existing tablet panel must receive the current category');
+  }
+  settings.foreground = false; settingsUpdate(); assert.equal(settingsParams.active, false);
+  settings.settingsContent('tools');
+  settings.settingsSection = 'appearance'; settingsUpdate();
+  assert.equal(settingsParams.section, 'tools', 'A phone destination keeps its own route category');
+  console.log('PASS emitted settings: tablet categories update without rebuilding the panel; phone routes keep their category');
 
   const nodes = new Map(); let current, requests = 0, exits = 0;
   const widget = new Proxy({}, { get: (_target, key) => (...args) => {

@@ -16,7 +16,7 @@ export struct IconButton {
   @Prop disabled: boolean = false;
   @Prop label: string = '';
   compId: string = '';
-  diameter: number = 44;
+  @Prop diameter: number = 44;
   iconSize: number = 22;
   // Native material is supported when the button lives in a navigation title bar.
   material?: uiMaterial.Material;
