@@ -7,6 +7,7 @@ import { t } from '../model/I18n';
 import { CredentialVault } from './ProfileSettings';
 import { BackupKeyPayload, ProviderKey } from './BackupKeyRestore';
 import { usesBalanceCredential } from '../model/BalanceSettings';
+import { BackupConnections, validateBackupConnections, backupSearchConfig } from '../model/BackupConnections';
 
 export interface EncryptedBackupKeys { version: number; salt: string; iv: string; ciphertext: string; }
 const ITERATIONS = 600000;
@@ -19,7 +20,7 @@ async function derive(accountInput: string, salt: Uint8Array): Promise<cryptoFra
   try { return await cryptoFramework.createSymKeyGenerator('AES256').convertKey(material); }
   finally { material.data.fill(0); }
 }
-export async function encryptBackupKeys(data: AppData, openID: string, vault: CredentialVault): Promise<EncryptedBackupKeys> {
+export async function encryptBackupKeys(data: AppData, openID: string, vault: CredentialVault, connections?: BackupConnections): Promise<EncryptedBackupKeys> {
   if (!openID) { throw new Error(t('请登录创建备份时使用的华为账号。')); }
   const providers: ProviderKey[] = [];
   for (const source of data.providerProfiles || []) {
@@ -33,7 +34,8 @@ export async function encryptBackupKeys(data: AppData, openID: string, vault: Cr
     providers.push({ profile: profile, apiKey: secret, balanceApiKey: balanceSecret });
   }
   const selected: ModelReference | undefined = data.config.configured ? { providerId: data.config.providerId, modelId: data.config.model } : undefined;
-  const payload: BackupKeyPayload = { providers: providers, selected: selected };
+  if (connections) { validateBackupConnections(connections); }
+  const payload: BackupKeyPayload = { providers: providers, selected: selected, connections: connections };
   const random = cryptoFramework.createRandom();
   const salt = (await random.generateRandom(16)).data; const iv = (await random.generateRandom(12)).data;
   const key = await derive('tinybot-backup-openid-v2:' + openID, salt);
@@ -93,6 +95,16 @@ export async function decryptBackupKeys(value: EncryptedBackupKeys, credential: 
   }
   if (payload.selected && (!ids.has(payload.selected.providerId) || typeof payload.selected.modelId !== 'string')) {
     throw new Error(t('备份密钥格式无效。'));
+  }
+  if (payload.connections) {
+    validateBackupConnections(payload.connections);
+    for (const item of payload.connections.mcp || []) {
+      const visible = data.productivity?.servers.find((server) => server.id === item.server.id);
+      if (!visible || visible.url !== item.server.url) { throw new Error(t('备份密钥与模型服务配置不一致。')); }
+    }
+    const visibleSearch = data.productivity?.options?.search;
+    if (payload.connections.search && (!visibleSearch || JSON.stringify(backupSearchConfig(payload.connections.search.config)) !==
+      JSON.stringify(backupSearchConfig(visibleSearch)))) { throw new Error(t('备份连接与服务配置不一致。')); }
   }
   return payload;
 }

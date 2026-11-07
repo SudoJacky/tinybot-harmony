@@ -45,6 +45,8 @@ const mocks = {
   '../services/NativeDiagnosticLog': { configureNativeDiagnosticLog: noOp },
   '../services/LanguagePreferences': { LanguagePreferences: { initialize: noOp, refresh: noOp } },
   '../services/AppearancePreferences': { AppearancePreferences: { initialize: noOp, refresh: noOp } },
+  '../services/BackupDeviceState': { configureBackupPreferenceRefresh: noOp },
+  '@kit.ArkData': { preferences: { getPreferencesSync: () => ({ getSync: (_key, fallback) => fallback }) } },
   '../services/McpOAuth': { McpOAuth: { receive: noOp } },
   '../services/LaunchActions': { LaunchActions: { receive: noOp, setForeground: noOp } },
   '../services/DeveloperDiagnostics': { DeveloperDiagnostics: { initialize: noOp, stop: noOp, setForeground: noOp } },

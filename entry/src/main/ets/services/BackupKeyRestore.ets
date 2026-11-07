@@ -5,9 +5,10 @@ import { isOnboardingCandidate } from '../model/Onboarding';
 import { t } from '../model/I18n';
 import { CredentialVault } from './ProfileSettings';
 import { SessionImportCandidate } from './SessionCandidates';
+import { BackupConnections } from '../model/BackupConnections';
 
 export interface ProviderKey { profile: ProviderProfile; apiKey: string; balanceApiKey?: string; }
-export interface BackupKeyPayload { providers: ProviderKey[]; selected?: ModelReference; }
+export interface BackupKeyPayload { providers: ProviderKey[]; selected?: ModelReference; connections?: BackupConnections; }
 // Secrets travel from the reader to the committing service in memory only, never in AppData.
 const restoredKeys = new WeakMap<AppData, BackupKeyPayload>();
 export function attachBackupKeys(data: AppData, payload: BackupKeyPayload): void { restoredKeys.set(data, payload); }
@@ -41,7 +42,11 @@ export async function commitBackupKeys(local: AppData, imported: AppData, candid
       const profile = candidate.data.providerProfiles?.find((entry) => entry.id === id && entry.enabled && entry.models.includes(payload.selected?.modelId || ''));
       if (profile) {
         const reference: ModelReference = { providerId: profile.id, modelId: payload.selected.modelId };
+        const settings = candidate.data.config;
         candidate.data.config = modelConfig(candidate.data.providerProfiles || [], reference, candidate.data.config);
+        candidate.data.config.contextWindow = settings.contextWindow ?? candidate.data.config.contextWindow;
+        candidate.data.config.reasoning = settings.reasoning; candidate.data.config.images = settings.images;
+        candidate.data.config.requestUsage = settings.requestUsage;
         const active = candidate.data.threads.find((thread) => thread.id === candidate.data.activeThreadId);
         if (active && !active.modelRef) { active.modelRef = reference; }
       }

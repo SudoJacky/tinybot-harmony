@@ -5,7 +5,7 @@ import { CredentialStore } from './CredentialStore';
 import { withFileMutation } from './FileMutationQueue';
 import { Cancellation } from './Cancellation';
 import { Diagnostics } from '../model/Diagnostics';
-interface StoredMailAccount { account: MailAccount; secret: string; revision: string; }
+export interface StoredMailAccount { account: MailAccount; secret: string; revision: string; }
 const INDEX: string = 'tinybot-mail-index-v1';
 const active: Map<string, Set<Cancellation>> = new Map<string, Set<Cancellation>>();
 function accountSettings(account: MailAccount): MailAccount {
@@ -15,7 +15,7 @@ function accountSettings(account: MailAccount): MailAccount {
     enabled: account.enabled, allowBody: account.allowBody };
 }
 // The account index, settings and authorization codes are all device-local secure assets.
-// No mailbox credentials or connection metadata are written into chat/workspace backups.
+// Backups export these connections only into the account-encrypted credential section.
 export class MailAccounts {
   private vault: CredentialStore = new CredentialStore();
   private async ids(): Promise<string[]> {
@@ -38,6 +38,11 @@ export class MailAccounts {
   async list(): Promise<MailAccount[]> {
     const result: MailAccount[] = [];
     for (const id of await this.ids()) { result.push((await this.connection(id)).account); } return result;
+  }
+  async backup(): Promise<StoredMailAccount[]> {
+    const result: StoredMailAccount[] = [];
+    for (const id of await this.ids()) { result.push(await this.connection(id)); }
+    return result;
   }
   private revoke(id: string): void { active.get(id)?.forEach((signal: Cancellation) => signal.cancel()); }
   watch(id: string, signal: Cancellation): () => void {
@@ -73,7 +78,9 @@ export class MailAccounts {
   async remove(id: string): Promise<void> {
     mailId(id); await withFileMutation(INDEX, async () => {
       const ids = await this.ids(); this.revoke(id);
-      await this.index(ids.filter((value: string) => value !== id));
+      const remaining = ids.filter((value: string) => value !== id);
+      if (remaining.length) { await this.index(remaining); }
+      else { await this.vault.remove(INDEX); }
       await this.vault.remove('tinybot-mail-' + id);
       Diagnostics.log('info', 'mail', 'account_removed', { serverId: id });
     });

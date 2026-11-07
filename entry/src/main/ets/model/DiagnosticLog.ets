@@ -53,7 +53,7 @@ EVENTS.account = ['restore_failed', 'response_invalid', 'state_changed', 'sign_i
 EVENTS.privacy = ['query_completed', 'query_retry', 'check_failed', 'subscription_ready', 'subscription_cleanup_failed'];
 EVENTS.feedback = ['attachment_failed', 'log_failed', 'initialize_failed', 'save_failed', 'credential_failed', 'request_failed', 'submit_failed', 'list_failed',
   'detail_failed', 'upload_failed', 'cleanup_failed', 'reconcile_failed', 'delete_failed'];
-EVENTS.backup = ['started', 'restored', 'restore_prepared', 'key_decrypt_failed', 'cleanup_failed', 'replace_failed', 'rollback_failed', 'archive_written', 'archive_write_failed', 'archive_verified',
+EVENTS.backup = ['started', 'restored', 'restore_prepared', 'key_decrypt_failed', 'cleanup_failed', 'replace_failed', 'retire_failed', 'rollback_failed', 'archive_written', 'archive_write_failed', 'archive_verified',
   'restore_completed', 'restore_failed', 'startup_capture_failed', 'startup_marker_failed', 'startup_lookup_failed',
   'cloud_retry_finished', 'cloud_failed', 'cloud_retry', 'cloud_sync_progress', 'cloud_sync_finished', 'cloud_list_failed', 'cloud_settings_failed', 'auto_failed', 'auto_settings_failed', 'auto_task_failed', 'auto_expired', 'auto_release_failed'];
 EVENTS['mini-app'] = ['manifest_failed', 'storage_failed', 'action_failed'];

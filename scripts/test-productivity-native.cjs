@@ -81,6 +81,7 @@ const fileIo = {
     if (failCloudRename && a.endsWith('.partial') && b.endsWith('tinybot-latest.tinybot')) throw Error('injected cloud rename failure');
     if (failCloudRollback && a.endsWith('.tinybot') && b.endsWith('tinybot-latest.tinybot')) throw Error('injected cloud rollback failure');
     await fs.promises.rename(nativePath(a),nativePath(b));
+    if (cloudLocations.has(a)) { cloudLocations.set(b, cloudLocations.get(a)); cloudLocations.delete(a); }
     if (b.endsWith('tinybot-latest.tinybot')) cloudLocations.set(b,1);
   }
 };
@@ -122,7 +123,15 @@ const http = { RequestMethod: { POST: 'POST', GET: 'GET' }, HttpDataType: { STRI
       httpScript({ url, options, callback, emit: (name, value) => { if (!closed) handlers[name]?.(value); } });
     } };
 } };
+const backupPreferenceStores = new Map();
 const kits = {
+  '@kit.ArkData': { preferences: { getPreferencesSync(context, options) {
+    const key = context.getApplicationContext().filesDir + '/' + options.name;
+    if (!backupPreferenceStores.has(key)) backupPreferenceStores.set(key, new Map());
+    const values = backupPreferenceStores.get(key);
+    return { getSync: (key, fallback) => values.has(key) ? values.get(key) : fallback,
+      putSync: (key, value) => values.set(key, value), deleteSync: key => values.delete(key), flushSync() {} };
+  } } },
   '@kit.PerformanceAnalysisKit': { hilog: { info() {}, error() {}, warn() {} } },
   '@kit.CoreFileKit': { fileIo, cloudSync,
     fileShare: { OperationMode: { READ_MODE: 1, WRITE_MODE: 2 },
@@ -174,6 +183,7 @@ diagnostics.configureLogSink(data => { diagnosticLogs.push(data); if (data.event
 const { NativeWorkspaceFiles } = load(path.join(source,'services/NativeWorkspaceFiles'));
 const secrets = new Map();
 CredentialStore.prototype.read = async alias => secrets.get(alias) || (alias ? 'fixture-secret' : '');
+CredentialStore.prototype.readOptional = async alias => secrets.get(alias);
 CredentialStore.prototype.write = async (alias, secret) => { if (secrets.has(alias)) throw Error('duplicate secret'); secrets.set(alias,secret); };
 CredentialStore.prototype.update = async (alias, secret) => { assert.ok(secrets.has(alias)); secrets.set(alias,secret); };
 CredentialStore.prototype.remove = async alias => { secrets.delete(alias); };
@@ -1267,7 +1277,9 @@ async function test(name, run) {
     // No conversations are necessary to preserve a project's files.
     data.threads=[];data.activeThreadId='';
     const emptyBackup=await createBackupFile(context,data);
-    assert.equal(legacyBackupFixture(fs.readFileSync(nativePath(emptyBackup))).files.length,1);
+    const emptyEnvelope = legacyBackupFixture(fs.readFileSync(nativePath(emptyBackup)));
+    assert.equal(emptyEnvelope.files.filter(file => file.workspaceId === 'shared').length,1);
+    assert.ok(emptyEnvelope.files.some(file => file.workspaceId === restored.projects[0].workspaceId), 'Unreferenced workspaces are retained too');
     // An actual v1 envelope has no project metadata and uses thread IDs for file ownership.
     const legacy=model.emptyData();legacy.version=1;delete legacy.projects;
     legacy.threads=[{id:'old-chat',title:'Old',updatedAt:1,messages:[]}];legacy.activeThreadId='old-chat';
@@ -1387,7 +1399,7 @@ async function test(name, run) {
     data.providerProfiles[0].credentialAlias='SECRET-CLOUD';data.providerProfiles[0].enabled=true;
     const before=JSON.stringify(data);
     cloudStart=async sync=>{sync.callback({state:cloudSync.SyncState.COMPLETED,error:0});};
-    assert.equal(await CloudBackup.create(context,data),true);
+    assert.equal(await CloudBackup.create(context,data),false,'Sync completion alone cannot confirm upload');
     let items=await CloudBackup.list(context);assert.equal(items.length,1);assert.equal(items[0].location,1,'sync completion alone is not proof of upload');
     assert.equal(JSON.stringify(data),before,'export never mutates live configuration');
     const firstPath=context.cloudFileDir+'/tinybot-backups/'+items[0].name;
@@ -1413,42 +1425,58 @@ async function test(name, run) {
       return rename(a,b);
     };
     try { await CloudBackup.create(context,data); } finally { fileIo.rename=rename; }
-    items=await CloudBackup.list(context);assert.equal(items.length,2,'one latest plus untouched historical backup');
+    items=await CloudBackup.list(context);assert.equal(items.length,3,'Keep the previous uploaded copy and legacy backup while replacement is pending');
     assert.equal(fs.readFileSync(nativePath(context.cloudFileDir+'/tinybot-backups/'+historical),'utf8'),'historical backup');
     assert.equal(legacyBackupFixture(fs.readFileSync(nativePath(firstPath))).data.threads[0].title,'Updated backup');
     assert.equal(items.find(i=>i.name==='tinybot-latest.tinybot').location,1,'replacement needs uploading again');
-    await CloudBackup.create(context,data);assert.equal((await CloudBackup.list(context)).length,2);
+    await CloudBackup.create(context,data);assert.equal((await CloudBackup.list(context)).length,4,'Pending replacements remain recoverable until one is confirmed uploaded');
     fs.unlinkSync(nativePath(context.cloudFileDir+'/tinybot-backups/'+historical));
     assert.ok(syncInstances.every(s=>!s.callback),'native listeners are removed');
   });
-  await test('automatic cloud archive restores records independently and preserves the manual snapshot',async()=>{
+  await test('automatic and manual backups share one file and retire old copies only after upload',async()=>{
     const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
     const context={cloudFileDir:'/sandbox/cloud',cacheDir:'/sandbox/backup-app/cache',getApplicationContext:()=>({filesDir:'/sandbox/backup-app'})};
     const directory=context.cloudFileDir+'/tinybot-backups',manual=directory+'/tinybot-latest.tinybot';
     const before=fs.readFileSync(nativePath(manual));
     const snapshot=legacyBackupFixture(before).data;
-    const name='tinybot-auto-'+crypto.randomUUID()+'.tinybot',automatic=directory+'/'+name;
-    cloudStart=async sync=>{sync.callback({state:cloudSync.SyncState.COMPLETED,error:0});};
-    assert.equal(await CloudBackup.create(context,snapshot,{name,interactive:false}),true);
+    const name='tinybot-latest.tinybot',automatic=manual;
+    snapshot.threads[0].title='Shared automatic backup';
+    cloudStart=async sync=>{cloudLocations.set(manual,3);sync.callback({state:cloudSync.SyncState.COMPLETED,error:0});};
+    assert.equal(await CloudBackup.create(context,snapshot,{interactive:false}),true);
     assert.equal(backupAccount.interactive,false,'Automatic account lookup is non-interactive through the real archive path');
-    assert.deepEqual(fs.readFileSync(nativePath(manual)),before);
-    assert.ok((await CloudBackup.list(context)).some(item=>item.name===name));
+    assert.notDeepEqual(fs.readFileSync(nativePath(manual)),before);
+    assert.deepEqual(Array.from(await CloudBackup.list(context),item=>item.name),[name],'Only the shared backup remains after confirmed upload');
     const restored=await CloudBackup.restore(context,name,model.emptyData());
     assert.equal(restored.threads.length,snapshot.threads.length);
     assert.equal(restored.threads[0].title,snapshot.threads[0].title);
     const complete=fs.readFileSync(nativePath(automatic));failCloudCopy=true;
-    try{await assert.rejects(CloudBackup.create(context,snapshot,{name,interactive:false}),/injected cloud write/);}
+    try{await assert.rejects(CloudBackup.create(context,snapshot,{interactive:false}),/injected cloud write/);}
     finally{failCloudCopy=false;}
-    assert.deepEqual(fs.readFileSync(nativePath(automatic)),complete,'Failed replacement preserves the last automatic restore point');
+    assert.deepEqual(fs.readFileSync(nativePath(automatic)),complete,'Failed replacement preserves the shared restore point');
     const cancellation=new Cancellation(),copy=fileIo.copyFile;
     fileIo.copyFile=async(a,b)=>{await copy(a,b);cancellation.cancel();};
-    try{await assert.rejects(CloudBackup.create(context,snapshot,{name,interactive:false,cancellation}),error=>error.code==='CANCELLED');}
+    try{await assert.rejects(CloudBackup.create(context,snapshot,{interactive:false,cancellation}),error=>error.code==='CANCELLED');}
     finally{fileIo.copyFile=copy;}
     assert.deepEqual(fs.readFileSync(nativePath(automatic)),complete,'Expiry before promotion preserves the complete snapshot');
     assert.ok(fs.readdirSync(nativePath(directory)).every(file=>!file.endsWith('.partial')));
-    await assert.rejects(CloudBackup.create(context,snapshot,{name:'../escape.tinybot',interactive:false}),/备份文件无效/);
-    assert.deepEqual(fs.readFileSync(nativePath(manual)),before);
-    fs.unlinkSync(nativePath(automatic));
+    const legacyName='tinybot-auto-'+crypto.randomUUID()+'.tinybot',legacy=directory+'/'+legacyName;
+    fs.writeFileSync(nativePath(legacy),complete);cloudLocations.set(legacy,3);
+    fs.utimesSync(nativePath(manual),new Date(1000),new Date(1000));
+    assert.equal((await CloudBackup.restoreLatest(context,model.emptyData())).threads[0].title,snapshot.threads[0].title,'Legacy automatic backups remain discoverable by one-step restore');
+    await assert.rejects(CloudBackup.retryUpload(context),/存在更新的备份/,'An older shared backup cannot delete a newer legacy snapshot');
+    assert.equal(fs.existsSync(nativePath(legacy)),true);
+    assert.equal(await CloudBackup.create(context,snapshot,{interactive:false}),true);
+    assert.deepEqual(Array.from(await CloudBackup.list(context),item=>item.name),[name]);
+    const obsolete=directory+'/tinybot-1700000000000-'+crypto.randomUUID()+'.tinybot';
+    fs.writeFileSync(nativePath(obsolete),complete);
+    const savedShared=fs.readFileSync(nativePath(manual)),unlink=fileIo.unlink;
+    fileIo.unlink=async value=>{if(value===obsolete)throw Error('injected retirement failure');return unlink(value);};
+    try{await assert.rejects(CloudBackup.retryUpload(context),/备份已上传.*清理未完成.*injected retirement failure/);}
+    finally{fileIo.unlink=unlink;}
+    assert.deepEqual(fs.readFileSync(nativePath(manual)),savedShared,'Cleanup failure cannot remove the newly uploaded backup');
+    assert.equal(fs.existsSync(nativePath(obsolete)),true);
+    assert.equal(await CloudBackup.retryUpload(context),true);
+    assert.deepEqual(Array.from(await CloudBackup.list(context),item=>item.name),[name]);
   });
   await test('cloud metadata lookup excludes directories and symbolic links before querying location',async()=>{
     const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
@@ -1499,12 +1527,12 @@ async function test(name, run) {
     snapshot.threads[0].title='Pending backup';
     cloudStart=async sync=>{sync.callback({state:cloudSync.SyncState.UPLOAD_FAILED,error:cloudSync.ErrorType.CLOUD_STORAGE_FULL});};
     await assert.rejects(CloudBackup.create(context,snapshot),/云空间已满/);
-    assert.equal((await CloudBackup.list(context)).length,before,'failed upload retains the replacement for retry');
+    assert.equal((await CloudBackup.list(context)).length,before+1,'Failed upload retains both the replacement and last uploaded backup');
     assert.equal(legacyBackupFixture(fs.readFileSync(nativePath(latest))).data.threads[0].title,'Pending backup');
     const retained=fs.readFileSync(nativePath(latest));
     failCloudCopy=true;
     try { await assert.rejects(CloudBackup.create(context,snapshot),/injected cloud write/); } finally { failCloudCopy=false; }
-    assert.equal((await CloudBackup.list(context)).length,before);
+    assert.equal((await CloudBackup.list(context)).length,before+1);
     assert.ok(fs.readdirSync(nativePath(context.cloudFileDir+'/tinybot-backups')).every(n=>!n.endsWith('.partial')));
     assert.equal(fs.readdirSync(nativePath(context.cacheDir)).length,0);
     assert.deepEqual(fs.readFileSync(nativePath(latest)),retained);
@@ -1517,8 +1545,11 @@ async function test(name, run) {
     }
     cloudCopyError=Object.assign(Error('Permission denied'),{code:13900012});
     try { await assert.rejects(CloudBackup.create(context,snapshot),/13900012.*Tinybot/); } finally {cloudCopyError=undefined;}
-    assert.equal((await CloudBackup.list(context)).length,before);
+    assert.equal((await CloudBackup.list(context)).length,before+1);
     assert.equal(fs.readdirSync(nativePath(context.cacheDir)).length,0);
+    cloudStart=async sync=>{cloudLocations.set(latest,3);sync.callback({state:cloudSync.SyncState.COMPLETED,error:0});};
+    assert.equal(await CloudBackup.retryUpload(context),true);
+    assert.equal((await CloudBackup.list(context)).length,1,'Previous restore copy retires after retry uploads the replacement');
   });
   await test('failed cloud replacement and rollback retain a discoverable complete backup',async()=>{
     const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
@@ -1908,6 +1939,10 @@ async function test(name, run) {
       assert.ok(tracked.every(item=>item.origin.threadId==='trace-thread'&&item.origin.turnId==='trace-turn'&&item.origin.step===2),'all outcomes keep their origin');
       assert.equal(scopeStarts,5);assert.equal(scopeEnds,5);assert.equal(networkScopes,0,'Idle, cancelled and startup failure all release scope ownership');
     } finally {fakeTimers=undefined;unobserve();}
+  });
+  await test('complete portable backup encrypts connections, merges device data and rolls back failed imports', async () => {
+    await require('./complete-backup-fixture.cjs')({ load: name => load(path.join(source, name)), fs, nativePath, secrets,
+      model, crypto, ConversationStore, idleRuntime, Attachments, backupAccount, preferences: kits['@kit.ArkData'].preferences });
   });
   await test('usage ledger preserves new requests while restoring persisted records',async()=>{
     const {UsageLedger}=load(path.join(source,'services/UsageLedger'));const root='/sandbox/ledger';fs.mkdirSync(nativePath(root),{recursive:true});

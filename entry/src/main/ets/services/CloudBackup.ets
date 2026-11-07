@@ -17,10 +17,15 @@ export interface CloudBackupItem {
 }
 
 const SNAPSHOT_NAME = /^tinybot-(\d{13})-[0-9a-f-]{36}\.(?:json|tinybot)$/;
-const LATEST_BACKUP = 'tinybot-latest.tinybot';
+export const CLOUD_BACKUP_NAME: string = 'tinybot-latest.tinybot';
+const LATEST_BACKUP = CLOUD_BACKUP_NAME;
 const AUTO_BACKUP = /^tinybot-auto-[0-9a-f-]{36}\.tinybot$/;
 function validBackupName(name: string): boolean { return name === LATEST_BACKUP || SNAPSHOT_NAME.test(name) || AUTO_BACKUP.test(name); }
-export interface CloudBackupOptions { name: string; interactive: boolean; cancellation?: Cancellation; }
+export interface CloudBackupOptions { interactive: boolean; cancellation?: Cancellation; }
+export function latestCloudBackup(items: CloudBackupItem[]): CloudBackupItem | undefined {
+  return items.filter((item) => item.location === 2 || item.location === 3)
+    .sort((a, b) => b.createdAt - a.createdAt || (a.name === LATEST_BACKUP ? -1 : b.name === LATEST_BACKUP ? 1 : 0))[0];
+}
 let operating: boolean = false;
 const CLOUD_READY_DELAYS: number[] = [500, 1000, 2000];
 
@@ -188,6 +193,34 @@ async function download(path: string): Promise<void> {
   }
 }
 
+async function restoreCloudFile(context: common.UIAbilityContext, name: string, local: AppData): Promise<AppData> {
+  if (!validBackupName(name)) { throw new Error(t('备份文件无效。')); }
+  const path = await backupDirectory(context) + '/' + name;
+  const stat = await fs.lstat(path);
+  if (!stat.isFile() || stat.isSymbolicLink()) { throw new Error(t('备份文件无效。')); }
+  if ((await fs.stat(path)).location === 2) { await download(path); }
+  return readBackupFile(context, path, local);
+}
+
+// Retire old snapshots only after the replacement has actually reached the cloud.
+async function finishUpload(context: common.UIAbilityContext, cancellation?: Cancellation): Promise<boolean> {
+  const directory = await backupDirectory(context), target = directory + '/' + LATEST_BACKUP;
+  if (!await fs.access(target)) { return false; }
+  const info = await fs.stat(target);
+  if (info.location !== 2 && info.location !== 3) { return false; }
+  const obsolete = (await CloudBackup.list(context)).filter((item) => item.name !== LATEST_BACKUP);
+  if (!obsolete.length) { return true; }
+  try {
+    if (obsolete.some((item) => item.createdAt > info.mtime * 1000)) { throw new Error(t('云端存在更新的备份，请先恢复备份，再重新备份。')); }
+    for (const item of obsolete) { cancellation?.check(); await fs.unlink(directory + '/' + item.name); }
+    if (!await requestSync(cancellation)) { throw new Error(t('旧备份删除尚未同步。')); }
+  } catch (error) {
+    Diagnostics.log('error', 'backup', 'retire_failed', undefined, error as Error);
+    throw new Error(t('备份已上传，但旧备份清理未完成：{0}', [cloudBackupError(error as Error)]));
+  }
+  return true;
+}
+
 export class CloudBackup {
   static get busy(): boolean { return operating; }
   static async available(context: common.UIAbilityContext): Promise<boolean> {
@@ -221,6 +254,9 @@ export class CloudBackup {
   }
 
   static sync(cancellation?: Cancellation): Promise<boolean> { return exclusive(() => requestSync(cancellation)); }
+  static retryUpload(context: common.UIAbilityContext, cancellation?: Cancellation): Promise<boolean> {
+    return exclusive(async () => { await requestSync(cancellation); return finishUpload(context, cancellation); });
+  }
 
   static remove(context: common.UIAbilityContext, name: string): Promise<boolean> {
     return exclusive(async () => {
@@ -240,8 +276,7 @@ export class CloudBackup {
     return exclusive(async () => {
       const cancellation = options?.cancellation;
       cancellation?.check();
-      const name = options?.name || LATEST_BACKUP;
-      if (name !== LATEST_BACKUP && !AUTO_BACKUP.test(name)) { throw new Error(t('备份文件无效。')); }
+      const name = LATEST_BACKUP;
       const directory = await backupDirectory(context);
       const source = await createBackupFile(context, data, undefined, options?.interactive !== false, cancellation);
       const target = directory + '/' + name;
@@ -272,7 +307,6 @@ export class CloudBackup {
           }
           throw error as Error;
         }
-        if (previous) { try { await fs.unlink(previous); } catch (error) { logCleanup(error as Error); } }
       } catch (error) {
         if ((error as BusinessError).code === 13900012) {
           throw new Error(t('无法写入华为云空间（13900012）。请在系统云空间中开启 Tinybot 后重试。'));
@@ -282,18 +316,20 @@ export class CloudBackup {
         await fs.unlink(source);
         if (await fs.access(temporary)) { await fs.unlink(temporary); }
       }
-      return requestSync(cancellation);
+      await requestSync(cancellation);
+      return finishUpload(context, cancellation);
     });
   }
 
   static restore(context: common.UIAbilityContext, name: string, local: AppData): Promise<AppData> {
+    return exclusive(() => restoreCloudFile(context, name, local));
+  }
+  static restoreLatest(context: common.UIAbilityContext, local: AppData): Promise<AppData> {
     return exclusive(async () => {
-      if (!validBackupName(name)) { throw new Error(t('备份文件无效。')); }
-      const path = await backupDirectory(context) + '/' + name;
-      const stat = await fs.lstat(path);
-      if (!stat.isFile() || stat.isSymbolicLink()) { throw new Error(t('备份文件无效。')); }
-      if ((await fs.stat(path)).location === 2) { await download(path); }
-      return readBackupFile(context, path, local);
+      if (!await requestSync()) { throw new Error(t('云端同步尚未完成，请稍后重试恢复备份。')); }
+      const latest = latestCloudBackup(await CloudBackup.list(context));
+      if (!latest) { throw new Error(t('云端暂无可恢复的备份，请先在原设备完成备份。')); }
+      return restoreCloudFile(context, latest.name, local);
     });
   }
 }

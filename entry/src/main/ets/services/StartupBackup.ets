@@ -3,7 +3,7 @@ import { preferences } from '@kit.ArkData';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { AppData } from '../model/Conversation';
 import { isOnboardingCandidate } from '../model/Onboarding';
-import { CloudBackup, CloudBackupItem } from './CloudBackup';
+import { CloudBackup, CloudBackupItem, latestCloudBackup } from './CloudBackup';
 
 // Installation-local marker. Capture BEFORE ConversationStore creates an empty manifest.
 // Missing marker alone never means new install: old builds did not write this marker.
@@ -35,8 +35,9 @@ export class StartupBackup {
     if (!this.untouched(data)) { this.finish(); return undefined; }
     // Pull remote metadata before listing; a new device may not have a cached directory yet.
     const synced = await CloudBackup.sync();
+    if (!synced) { return undefined; }
     const items = await CloudBackup.list(this.context);
-    const latest = items[0];
+    const latest = latestCloudBackup(items);
     if (!latest && synced) { this.finish(); }
     return latest;
   }

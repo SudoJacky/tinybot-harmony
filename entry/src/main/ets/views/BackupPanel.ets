@@ -2,14 +2,12 @@ import { PageStyles } from '../common/PageStyles';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { getLocale, t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
-import { BusinessError } from '@kit.BasicServicesKit';
 import { Diagnostics } from '../model/Diagnostics';
-import { exportBackup, readBackup } from '../services/Backup';
-import { CloudBackup, CloudBackupItem, cloudBackupError } from '../services/CloudBackup';
+import { CloudBackup, cloudBackupError, latestCloudBackup } from '../services/CloudBackup';
 import { AutoCloudBackup, autoCloudBackup } from '../services/AutoCloudBackup';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { Space, Radius } from '../common/Theme';
-import { Banner, GroupCard, IconButton, NavRow, RowDivider, SectionHeader, SwitchRow } from '../common/Widgets';
+import { Banner, GroupCard, NavRow, RowDivider } from '../common/Widgets';
 
 @Component
 export struct BackupPanel {
@@ -19,200 +17,96 @@ export struct BackupPanel {
   @State private automatic: AutoCloudBackup = autoCloudBackup;
   @State private busy: boolean = false;
   @State private error: string = '';
-  @State private cloudError: string = '';
-  @State private cloudListError: string = '';
-  @State private cloudStatus: string = '';
-  @State private cloudItems: CloudBackupItem[] = [];
-  @State private cloudLoaded: boolean = false;
+  @State private status: string = '';
+  @State private backupDate: string = '';
   private visible: boolean = false;
-  private cloudErrorCode: number = 0;
-  private cloudListing?: Promise<void>;
+  private reading?: Promise<void>;
+  private statusError: boolean = false;
 
-  aboutToAppear(): void { this.visible = true; this.loadCloudList(true); }
+  aboutToAppear(): void { this.visible = true; this.refreshStatus(); }
   aboutToDisappear(): void { this.visible = false; }
-
   private async foregroundChanged(): Promise<void> {
     if (!this.foreground || !this.visible || this.busy) { return; }
-    await this.cloudListing;
-    if (this.foreground && this.visible && !this.busy) { await this.loadCloudList(true); }
+    await this.reading;
+    if (this.foreground && this.visible && !this.busy) { await this.refreshStatus(); }
   }
-
   private context(): common.UIAbilityContext { return this.getUIContext().getHostContext() as common.UIAbilityContext; }
   private locked(): boolean { return this.app.busy || this.busy; }
-  private toggleAutomatic(value: boolean): void {
-    try { this.automatic.setEnabled(value); }
-    catch (error) { this.cloudError = t('无法保存自动备份设置：{0}', [(error as Error).message]); }
+  private refreshStatus(): Promise<void> {
+    if (!this.reading) { this.reading = this.readStatus().finally(() => { this.reading = undefined; }); }
+    return this.reading;
   }
-
-  private loadCloudList(recoverAvailability: boolean = false): Promise<void> {
-    if (!this.cloudListing) {
-      this.cloudListing = this.readCloudList(recoverAvailability).finally(() => { this.cloudListing = undefined; });
-    }
-    return this.cloudListing;
-  }
-
-  private async readCloudList(recoverAvailability: boolean): Promise<void> {
+  private async readStatus(): Promise<void> {
     try {
       const items = await CloudBackup.list(this.context());
-      if (this.visible) {
-        this.automatic.confirmUploaded(items); this.cloudItems = items; this.cloudLoaded = true; this.cloudListError = '';
-        // Availability recovering does not mean a failed upload has succeeded.
-        if (recoverAvailability && this.cloudErrorCode === 22400001) { this.cloudError = ''; this.cloudErrorCode = 0; }
-      }
+      if (!this.visible) { return; }
+      this.automatic.confirmUploaded(items);
+      if (this.statusError) { this.error = ''; this.statusError = false; }
+      const latest = latestCloudBackup(items);
+      this.backupDate = latest ? new Date(latest.createdAt).toLocaleString(getLocale()) : '';
     } catch (error) {
-      Diagnostics.log('error', 'backup', 'cloud_list_failed', undefined, error as Error);
-      if (this.visible) { this.cloudItems = []; this.cloudLoaded = false; this.cloudStatus = ''; this.cloudListError = cloudBackupError(error as Error); }
+      Diagnostics.log('warn', 'backup', 'cloud_list_failed', undefined, error as Error);
+      if (this.visible && (!this.error || this.statusError)) { this.error = cloudBackupError(error as Error); this.statusError = true; }
     }
   }
-
-  private async openCloudSettings(): Promise<void> {
-    try { await this.context().startAbility({ action: 'ohos.want.action.viewData', uri: 'hicloud://cloudDrive/getInfo?path=MainActivity' }); }
-    catch (error) {
-      Diagnostics.log('error', 'backup', 'cloud_settings_failed', undefined, error as Error);
-      this.cloudErrorCode = 0;
-      this.cloudError = t('无法打开云空间，请前往系统「设置 → 云空间」，登录华为账号并开启 Tinybot。');
-    }
-  }
-
-  private date(item: CloudBackupItem): string { return new Date(item.createdAt).toLocaleString(getLocale()); }
-  private detail(item: CloudBackupItem): string {
-    const size = (item.size / (1024 * 1024)).toFixed(2) + ' MB';
-    if (item.location === 2 || item.location === 3) { return t('已上传云端 · {0} · 点按恢复', [size]); }
-    if (item.location === 1) { return t('仅保存在本机，等待上传 · {0}', [size]); }
-    return t('云端状态未知，请刷新确认 · {0}', [size]);
-  }
-
-  private confirmRestore(item: CloudBackupItem): void {
+  private async cloud(restore: boolean): Promise<void> {
     if (this.locked()) { return; }
-    this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t('恢复这份备份？'),
-      message: t('恢复 {0} 的备份，跳过已有会话和模板，保留本机版本、密钥和服务设置。', [this.date(item)]),
-      primaryButton: { value: t('取消'), action: () => {} },
-      secondaryButton: { value: t('恢复'), action: () => this.cloud('restore', item.name) } });
-  }
-
-  private confirmDelete(item: CloudBackupItem): void {
-    if (this.locked()) { return; }
-    this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t('删除这份备份？'),
-      message: t('删除 {0} 的备份，删除会同步到云端及其他设备，不影响当前对话和设置。此操作无法在 Tinybot 内撤销。', [this.date(item)]),
-      primaryButton: { value: t('取消'), action: () => {} },
-      secondaryButton: { value: t('删除'), fontColor: $r('app.color.danger'), action: () => this.cloud('delete', item.name) } });
-  }
-
-  private async cloud(action: string, name: string = ''): Promise<void> {
-    if (this.locked()) { return; }
-    this.busy = true; this.cloudError = ''; this.cloudListError = ''; this.cloudErrorCode = 0; this.cloudStatus = ''; this.error = '';
-    let status = '';
+    this.busy = true; this.error = ''; this.statusError = false; this.status = restore ? t('正在从云端下载并恢复备份…') : t('正在备份到云端…');
     try {
-      // Finish passive discovery before mutating files, then read a fresh list below.
-      await this.cloudListing;
+      await this.reading;
+      this.error = ''; this.statusError = false;
       const context = this.context();
-      if (action === 'restore') {
-        const data = await CloudBackup.restore(context, name, this.app.exportSnapshot());
+      if (restore) {
+        const data = await CloudBackup.restoreLatest(context, this.app.exportSnapshot());
         if (!await this.app.importSnapshot(data)) { throw new Error(this.app.error); }
-        status = t('备份已恢复，已跳过已有内容');
-      } else if (action === 'delete') {
-        const completed = await CloudBackup.remove(context, name);
-        status = completed ? t('备份已删除，同步已完成。') : t('备份已从本机列表移除，云端删除尚待同步。请稍后刷新。');
+        if (this.visible) { this.status = t('备份已恢复，已保留本机已有数据。'); }
       } else {
-        const completed = action === 'create' ? await CloudBackup.create(context, this.app.exportSnapshot()) : await CloudBackup.sync();
-        status = completed ? t('已刷新备份列表，请以每份备份的云端状态为准。') : t('同步尚未完成，请稍后刷新。未上传的备份只保存在本机。');
+        const completed = await CloudBackup.create(context, this.app.exportSnapshot());
+        if (this.visible) { this.status = completed ? t('备份已上传到云端。') : t('备份已保存在本机，等待上传。请联网后再次备份。'); }
       }
     } catch (error) {
-      if (this.visible) {
-        this.cloudError = cloudBackupError(error as Error);
-        this.cloudErrorCode = typeof (error as BusinessError).code === 'number' ? (error as BusinessError).code : 0;
-      }
-    }
-    finally {
-      await this.loadCloudList();
-      if (this.visible && this.cloudLoaded && !this.cloudError) { this.cloudStatus = status; }
+      if (this.visible) { this.error = cloudBackupError(error as Error); this.status = ''; }
+    } finally {
+      await this.refreshStatus();
       this.busy = false;
     }
-  }
-
-  private async backup(restore: boolean): Promise<void> {
-    if (this.locked()) { return; }
-    this.busy = true; this.error = '';
-    try {
-      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      if (restore) { const data = await readBackup(context, this.app.exportSnapshot()); if (data) { if (!await this.app.importSnapshot(data)) { throw new Error(this.app.error); } this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t("备份已恢复，已跳过已有内容") }); } }
-      else { await exportBackup(context, this.app.exportSnapshot()); }
-    } catch (error) { this.error = (error as Error).message; }
-    finally { this.busy = false; }
   }
 
   @Builder
   backupTab() {
     Scroll() {
-      Column() {
-        Text(t('模型 API Key 随当前华为账号加密备份，换设备登录同一账号即可恢复，无需设置备份密码。对话和文件不加密。'))
-          .fontSize(13).fontColor($r('app.color.text_secondary')).width('100%').padding(Space.md)
-        SectionHeader({ title: t('华为云空间') })
+      Column({ space: Space.md }) {
+        Text(t('云端只维护一份备份，自动备份和手动备份更新同一份内容。恢复时自动下载云端备份并合并导入，保留本机已有数据和密钥。'))
+          .fontSize(13).lineHeight(20).fontColor($r('app.color.text_secondary')).width('100%').padding({ top: Space.md })
         GroupCard() {
           Column() {
-            SwitchRow({ title: t('自动云备份'), subtitle: t('自动备份独立于手动备份保存；强制关闭应用可能中断上传。'),
-              compId: 'auto-cloud-backup', isOn: this.automatic.enabled, onChange: (value: boolean) => this.toggleAutomatic(value) })
-            Text(this.automatic.status).id('auto-cloud-backup-status').fontSize(13)
-              .fontColor($r('app.color.text_secondary')).width('100%').padding({ left: Space.lg, right: Space.lg, bottom: Space.md })
+            NavRow({ title: t('备份'), subtitle: t('将当前数据保存到云端，替换上一份备份'),
+              compId: 'create-cloud-backup', icon: $r('sys.symbol.cloud'), disabled: this.locked(), onTap: () => this.cloud(false) })
             RowDivider()
-            NavRow({ title: t('备份到华为云空间'), subtitle: t('备份全部内容，再次备份将覆盖上一份云备份'),
-              compId: 'create-cloud-backup', icon: $r('sys.symbol.cloud'), disabled: this.locked(), onTap: () => this.cloud('create') })
-            RowDivider()
-            NavRow({ title: t('刷新备份列表'), subtitle: t('获取其他设备的备份，并重试待上传的备份'),
-              compId: 'refresh-cloud-backups', icon: $r('sys.symbol.arrow_clockwise'), disabled: this.locked(), onTap: () => this.cloud('refresh') })
-            RowDivider()
-            NavRow({ title: t('打开华为云空间'), icon: $r('sys.symbol.gearshape'), compId: 'open-cloud-settings', disabled: this.busy, onTap: () => this.openCloudSettings() })
+            NavRow({ title: t('恢复备份'), subtitle: t('自动从云端获取最新备份并合并恢复'),
+              compId: 'restore-cloud-backup', icon: $r('sys.symbol.arrow_clockwise'), disabled: this.locked(), onTap: () => this.cloud(true) })
           }
         }
+        if (this.backupDate) {
+          Text(t('云端备份 · {0}', [this.backupDate])).id('cloud-backup-date').fontSize(13)
+            .fontColor($r('app.color.text_secondary')).width('100%')
+        }
+        Text(this.automatic.status).id('auto-cloud-backup-status').fontSize(13)
+          .fontColor($r('app.color.text_secondary')).width('100%')
         if (this.busy) {
           Row({ space: Space.sm }) {
             LoadingProgress().width(20).height(20).color(this.appearance.accent)
-            Text(t('正在处理备份…')).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
-          }.margin({ top: Space.md })
+            Text(this.status).fontSize(13).fontColor($r('app.color.text_secondary'))
+          }.width('100%')
+        } else if (this.status) {
+          Banner({ text: this.status, danger: false, compId: 'cloud-backup-status' })
         }
-        if (this.cloudError || this.cloudListError) { Banner({ text: this.cloudError || this.cloudListError, compId: 'cloud-backup-error' }).margin({ top: Space.md }) }
-        if (this.cloudStatus) { Banner({ text: this.cloudStatus, danger: false, compId: 'cloud-backup-status' }).margin({ top: Space.md }) }
-        if (this.cloudItems.length > 0) {
-          SectionHeader({ title: t('可恢复的备份') })
-          GroupCard() {
-            Column() {
-              ForEach(this.cloudItems, (item: CloudBackupItem, index: number) => {
-                if (index > 0) { RowDivider() }
-                Row() {
-                  NavRow({ title: item.name.startsWith('tinybot-auto-') ? t('自动备份 · {0}', [this.date(item)]) :
-                    item.name === 'tinybot-latest.tinybot' ? t('手动备份 · {0}', [this.date(item)]) : this.date(item), icon: $r('sys.symbol.archivebox'), subtitle: this.detail(item), compId: 'cloud-backup-' + item.name,
-                    disabled: this.locked(), onTap: () => this.confirmRestore(item) }).layoutWeight(1)
-                  IconButton({ icon: $r('sys.symbol.trash'), tint: $r('app.color.danger'), label: t('删除备份'),
-                    compId: 'delete-cloud-backup-' + item.name, disabled: this.locked(), onTap: () => this.confirmDelete(item) })
-                }.width('100%').padding({ right: Space.sm })
-              }, (item: CloudBackupItem) => item.name + ':' + item.createdAt + ':' + item.location + ':' + item.size)
-            }
-          }
-        } else if (this.cloudLoaded) {
-          Text(t('暂无备份。已在其他设备备份？请开启云空间后刷新列表。')).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(19)
-            .fontColor($r('app.color.text_secondary')).width('100%').margin({ top: Space.md })
-        }
-        SectionHeader({ title: t('本地备份') })
-        GroupCard() {
-          Column() {
-            NavRow({ title: t("导出备份"), subtitle: t("存到本机，或分享到其他设备"), compId: 'export-backup',
-              icon: $r('sys.symbol.square_and_arrow_down'), disabled: this.app.busy || this.busy, onTap: () => this.backup(false) })
-            RowDivider()
-            NavRow({ title: t("从备份导入"), subtitle: t("只恢复缺少的内容，保留本机已有对话"), compId: 'import-backup',
-              icon: $r('sys.symbol.folder_badge_plus'), disabled: this.app.busy || this.busy, onTap: () => this.backup(true) })
-          }
-        }
-        Row({ space: Space.sm }) {
-          SymbolGlyph($r('sys.symbol.lock')).fontSize(16).fontColor([$r('app.color.text_secondary')])
-          Text(t('模型服务 API Key 使用账号信息加密备份；其他 Token 不导出。恢复保留本机已有密钥，新服务的密钥写入系统安全存储。')).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(19).layoutWeight(1)
-            .fontColor($r('app.color.text_secondary'))
-        }.width('100%').alignItems(VerticalAlign.Top).padding(Space.md).margin({ top: Space.md })
-        .borderRadius(Radius.md).backgroundColor($r('app.color.surface_variant'))
-        if (this.error) { Banner({ text: this.error }).margin({ top: Space.md }) }
+        if (this.error) { Banner({ text: this.error, compId: 'cloud-backup-error' }) }
+        Text(t('包含对话、文件、生活看板、小程序、Skills、设置和用量记录。API Key 等连接凭据使用当前华为账号加密；对话和文件不加密。隐私授权、系统权限和华为账号登录需在新设备重新完成。'))
+          .fontSize(13).lineHeight(19).fontColor($r('app.color.text_secondary')).width('100%')
+          .padding(Space.md).borderRadius(Radius.md).backgroundColor($r('app.color.surface_variant'))
       }.width('100%').padding({ left: Space.page, right: Space.page, bottom: Space.xl }).attributeModifier(PageStyles.form)
     }.width('100%').height('100%').scrollBar(BarState.Off).align(Alignment.Top)
   }
-
-
   build() { this.backupTab() }
 }

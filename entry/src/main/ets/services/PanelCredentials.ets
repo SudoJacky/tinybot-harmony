@@ -8,6 +8,7 @@ import { McpOAuth, OAuthConfiguration } from './McpOAuth';
 import { Cancellation } from './Cancellation';
 import { withFileMutation } from './FileMutationQueue';
 interface PanelCredential { scope: string; secret?: string; oauthAlias?: string; }
+export interface PanelConnectionSecret { secret?: string; oauth?: string; }
 interface CredentialScope {
   url: string; method: string; type: string; name: string; location: string; prefix: string;
   clientId: string; authorizationEndpoint: string; tokenEndpoint: string; scopes: string[]; resource: string;
@@ -22,7 +23,7 @@ function scope(source: PanelSource): string {
     scopes: (oauth?.scopes || []).slice().sort(), resource: oauth?.resource || '' };
   return JSON.stringify(value);
 }
-// Device-local vault only: neither workspace files, tool receipts nor backups contain credentials.
+// Plaintext credentials stay in the vault; portable backups carry them only inside account encryption.
 export class PanelCredentials {
   private namespace: string;
   private vault: CredentialStore = new CredentialStore();
@@ -43,6 +44,26 @@ export class PanelCredentials {
     const stored = await this.read(id, source);
     if (!stored) { return false; }
     return source.auth!.type === 'oauth' ? !!stored.oauthAlias && (await this.vault.readOptional(stored.oauthAlias)) !== undefined : !!stored.secret;
+  }
+  async backup(id: string, source: PanelSource): Promise<PanelConnectionSecret | undefined> {
+    const stored = await this.read(id, source);
+    if (!stored) { return undefined; }
+    if (stored.oauthAlias) { return { oauth: await this.vault.read(stored.oauthAlias) }; }
+    return stored.secret ? { secret: stored.secret } : undefined;
+  }
+  async restore(id: string, source: PanelSource, value: PanelConnectionSecret): Promise<boolean> {
+    if (await this.vault.readOptional(await this.alias(id)) !== undefined) { return false; }
+    if (source.auth?.type === 'oauth') {
+      if (!value.oauth) { throw new Error('Missing backed-up OAuth connection'); }
+      const saved = JSON.parse(value.oauth) as OAuthBackupResource;
+      if (saved.resource !== source.url || saved.tokenEndpoint !== source.auth.oauth?.tokenEndpoint || saved.clientId !== source.auth.oauth?.clientId ||
+        typeof saved.accessToken !== 'string' || !saved.accessToken || !Number.isFinite(saved.expiresAt)) { throw new Error('OAuth backup scope mismatch'); }
+      const alias = 'tinybot-oauth-' + util.generateRandomUUID();
+      await this.vault.write(alias, value.oauth);
+      try { await this.store(id, { scope: scope(source), oauthAlias: alias }); }
+      catch (error) { await this.vault.remove(alias); throw error as Error; }
+    } else { await this.save(id, source, value.secret || ''); }
+    return true;
   }
   async secret(id: string, source: PanelSource): Promise<string> {
     const stored = await this.read(id, source);
@@ -86,3 +107,4 @@ export class PanelCredentials {
     });
   }
 }
+interface OAuthBackupResource { resource: string; tokenEndpoint: string; clientId: string; accessToken: string; expiresAt: number; }

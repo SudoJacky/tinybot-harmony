@@ -15,7 +15,7 @@ function load(name) {
     if(id==='@kit.AbilityKit')return{bundleManager:{BundleFlag:{GET_BUNDLE_INFO_DEFAULT:0},getBundleInfoForSelfSync:()=>info}};
     if(id==='@kit.ArkData')return{preferences:{getPreferencesSync:()=>store}};
     if(id==='@kit.CoreFileKit')return{fileIo:{accessSync:p=>files.has(p)}};
-    if(id==='./CloudBackup')return{CloudBackup:cloud};
+    if(id==='./CloudBackup')return{CloudBackup:cloud,latestCloudBackup:items=>items.find(item=>item.location===2||item.location===3)};
     if(id.startsWith('.'))return load(path.resolve(path.dirname(file),id));
     throw Error(id);
   }});return exports;
@@ -91,21 +91,19 @@ async function accountBackupUiTest(){
   assert.ok(fs.statSync(emitted).mtimeMs>=fs.statSync(source).mtimeMs,'Rebuild BackupPanel');
   const tree=ts.createSourceFile('BackupPanel.ts',fs.readFileSync(emitted,'utf8'),ts.ScriptTarget.Latest,true);
   const component=tree.statements.find(n=>ts.isClassDeclaration(n)&&n.name?.text==='BackupPanel');
-  const methods=['locked','backup','cloud','aboutToDisappear'];
+  const methods=['locked','cloud','aboutToDisappear'];
   const exports={},calls=[];const data={};let imports=0;
   vm.runInNewContext(compile('class Probe {'+methods.map(name=>component.members.find(n=>n.name?.getText(tree)===name).getText(tree)).join('\n')+'} exports.Probe=Probe;'),{
     exports,t:s=>s,cloudBackupError:e=>e.message,
-    exportBackup:async(_context,_data,password)=>calls.push(['export',password]),
-    readBackup:async(_context,_data,password)=>{calls.push(['read',password]);return data;},
     CloudBackup:{create:async(_context,_data,password)=>{calls.push(['create',password]);return true;},
-      restore:async(_context,_name,_data,password)=>{calls.push(['restore',password]);return data;}}
+      restoreLatest:async(_context,_data)=>{calls.push(['restoreLatest']);return data;}}
   });
   const panel=Object.assign(new exports.Probe(),{visible:true,busy:false,appearance:{surface:{}},
     app:{busy:false,providerProfiles:[{noApiKey:false}],exportSnapshot:()=>data,importSnapshot:async()=>{imports++;return true;}},
-    context:()=>context,loadCloudList:async()=>{},getUIContext:()=>({getHostContext:()=>context,getPromptAction:()=>({showToast(){}})})});
-  await panel.backup(false);await panel.cloud('create');await panel.backup(true);await panel.cloud('restore','backup');
-  assert.deepEqual(calls,[['export',undefined],['create',undefined],['read',undefined],['restore',undefined]]);assert.equal(imports,2);
+    context:()=>context,refreshStatus:async()=>{},getUIContext:()=>({getHostContext:()=>context,getPromptAction:()=>({showToast(){}})})});
+  await panel.cloud(false);await panel.cloud(true);
+  assert.deepEqual(calls,[['create',undefined],['restoreLatest']]);assert.equal(imports,1);
   panel.aboutToDisappear();assert.equal(panel.visible,false);
-  console.log('PASS compiled password-free local/cloud backup and restore actions');
+  console.log('PASS compiled password-free single cloud backup and automatic restore actions');
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

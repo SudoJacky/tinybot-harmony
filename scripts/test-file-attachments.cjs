@@ -39,8 +39,12 @@ const fileIo = {
   }
 };
 const kits = {
-  '@kit.AssetStoreKit': { asset: {} },
+  '@kit.NetworkKit': {},
+  '@kit.RemoteCommunicationKit': {},
+  '@kit.AssetStoreKit': { asset: { Tag: { ALIAS: 1, RETURN_TYPE: 2 }, ReturnType: { ALL: 1 }, ErrorCode: { NOT_FOUND: 404 },
+    query: async () => { throw Object.assign(Error('No optional connection'), { code: 404 }); } } },
   '@kit.ArkData': {
+    preferences: { getPreferencesSync: () => ({ getSync: (_key, fallback) => fallback }) },
     uniformTypeDescriptor: { getTypeDescriptor: type => ({ belongsTo: parent => type === parent ||
       (parent === 'general.image' && ['general.jpeg', 'general.png', 'general.heic'].includes(type)) }) },
     unifiedDataChannel: { ProgressIndicator: { NONE: 0 }, ListenerStatus: { FINISHED: 0, PROCESSING: 1, CANCELED: 2 } }

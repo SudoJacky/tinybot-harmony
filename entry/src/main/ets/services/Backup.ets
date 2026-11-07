@@ -9,7 +9,7 @@ import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
 import { fileIo as fs, picker } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
-import { AppData, ThreadData, parseAppData, defaultConfig } from '../model/Conversation';
+import { AppData, ThreadData, parseAppData } from '../model/Conversation';
 import { Attachment } from '../model/Productivity';
 import { toolReceipts } from '../model/Agent';
 import { WorkspaceStore } from '../model/WorkspaceStore';
@@ -24,9 +24,46 @@ import { Cancellation } from './Cancellation';
 import { WorkspaceRetention } from './WorkspaceRetention';
 import { parsePanelRecord } from '../model/LifePanel';
 import { parseMiniApp } from '../model/MiniApp';
+import { BackupDeviceState, captureBackupDeviceState, validateBackupDeviceState, mergeBackupDeviceState } from './BackupDeviceState';
+import { captureBackupConnections, prepareBackupConnections, RestoredPanelFile } from './BackupConnectionsIO';
+import { attachBackupImport, BackupImportActions, rollbackBackupActions, rollbackBackupFailure } from '../model/BackupImport';
+import { SessionImportCandidate } from './SessionCandidates';
+import { BackupConnections, backupSearchConfig } from '../model/BackupConnections';
 interface BackupFile { threadId?: string; workspaceId?: string; path: string; bytes: string; }
 interface BackupAttachment { id: string; bytes: string; }
-interface BackupEnvelope { protectedKeys?: EncryptedBackupKeys; format: string; data: AppData; attachments: BackupAttachment[]; files: BackupFile[]; miniAppWorkspaceIds?: string[]; lifePanelWorkspaceIds?: string[]; lifeBoardWorkspaceIds?: string[]; lifePanelSourceWorkspaceIds?: string[]; }
+interface BackupEnvelope { protectedKeys?: EncryptedBackupKeys; deviceState?: BackupDeviceState; orphanWorkspaceIds?: string[]; format: string; data: AppData; attachments: BackupAttachment[]; files: BackupFile[]; miniAppWorkspaceIds?: string[]; lifePanelWorkspaceIds?: string[]; lifeBoardWorkspaceIds?: string[]; lifePanelSourceWorkspaceIds?: string[]; }
+interface PreparedFile { files: NativeWorkspaceFiles; path: string; version?: string; }
+async function rollbackPreparedFiles(files: PreparedFile[]): Promise<void> {
+  const failures: string[] = [];
+  for (const item of files.slice().reverse()) {
+    try { await item.files.remove(item.path, item.version!); }
+    catch (error) { failures.push((error as Error).message); }
+  }
+  if (failures.length) { throw new Error('Backup file rollback failed: ' + failures.join('; ')); }
+}
+class NativeBackupImport implements BackupImportActions {
+  private context: common.UIAbilityContext;
+  private local: AppData;
+  private connections?: BackupConnections;
+  private panels: RestoredPanelFile[];
+  private workspaces: Map<string, string>;
+  private deviceState?: BackupDeviceState;
+  private files: PreparedFile[];
+  constructor(context: common.UIAbilityContext, local: AppData, connections: BackupConnections | undefined,
+    panels: RestoredPanelFile[], workspaces: Map<string, string>, deviceState: BackupDeviceState | undefined, files: PreparedFile[]) {
+    this.context = context; this.local = local; this.connections = connections;
+    this.panels = panels; this.workspaces = workspaces; this.deviceState = deviceState;
+    this.files = files;
+  }
+  async prepare(candidate: SessionImportCandidate): Promise<() => Promise<void>> {
+    let rollback: () => Promise<void>;
+    try { rollback = await prepareBackupConnections(this.context.getApplicationContext().filesDir, this.local, candidate, this.connections, this.panels, this.workspaces); }
+    catch (error) { await rollbackBackupFailure(error as Error, () => rollbackPreparedFiles(this.files)); throw error as Error; }
+    return () => rollbackBackupActions([rollback, () => rollbackPreparedFiles(this.files)]);
+  }
+  finish(): Promise<void> { return mergeBackupDeviceState(this.context, this.deviceState); }
+  discard(): Promise<void> { return rollbackPreparedFiles(this.files); }
+}
 // v3 bytes fields are canonical decimal blob indices; v1/v2 fields contain Base64.
 function blobIndex(value: string, archive: OpenBackupArchive): number {
   const index = Number(value);
@@ -64,20 +101,14 @@ function allAttachments(data: AppData): Attachment[] {
 export async function createBackupFile(context: common.UIAbilityContext, snapshot: AppData, vault: CredentialVault = new CredentialStore(), interactive: boolean = true, cancellation?: Cancellation): Promise<string> {
   cancellation?.check();
   const data = JSON.parse(JSON.stringify(snapshot)) as AppData;
-  const envelope: BackupEnvelope = { format: 'tinybot-harmony.backup.v3', data: data, attachments: [], files: [] };
+  const envelope: BackupEnvelope = { format: 'tinybot-harmony.backup.v4', data: data, attachments: [], files: [], deviceState: await captureBackupDeviceState(context) };
   validateProjects(data);
-  if ((snapshot.providerProfiles || []).length) {
-    envelope.protectedKeys = await encryptBackupKeys(snapshot, await huaweiAccount.backupOpenID(context, interactive), vault);
-  }
   cancellation?.check();
-  const userDocument = data.config.userDocument || '';
-  data.config = defaultConfig(); data.config.userDocument = userDocument;
+  data.config.credentialAlias = ''; data.config.configured = false;
   for (const profile of data.providerProfiles || []) { profile.credentialAlias = ''; profile.balanceCredentialAlias = undefined; profile.noApiKey = true; profile.enabled = false; }
-  for (const server of data.productivity?.servers || []) { server.credentialAlias = ''; server.authType = undefined; server.enabled = false; }
+  for (const server of data.productivity?.servers || []) { server.enabled = server.enabled && !server.credentialAlias && !server.authType; server.credentialAlias = ''; server.authType = undefined; }
   if (data.productivity?.options?.search) {
-    const search = data.productivity.options.search; search.enabled = false;
-    if (search.tavily) { search.tavily.credentialAlias = ''; }
-    if (search.provider === 'tavily') { search.credentialAlias = ''; } else { search.modelProviderId = undefined; }
+    data.productivity.options.search = backupSearchConfig(data.productivity.options.search);
   }
   const sources: string[] = [];
   const originals = new Set<string>();
@@ -109,6 +140,8 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
   envelope.lifePanelSourceWorkspaceIds = Array.from(new Set(ownership.flatMap((item) => item.sources).filter((id: string) => !artifactRoots.includes(id))));
   for (const id of envelope.lifePanelSourceWorkspaceIds) { await workspaces.requireWorkspace(id); }
   const roots = Array.from(new Set(artifactRoots.concat(envelope.lifePanelSourceWorkspaceIds)));
+  envelope.orphanWorkspaceIds = ownership.filter((item) => !roots.includes(item.id)).map((item) => item.id);
+  roots.push(...envelope.orphanWorkspaceIds);
   for (const workspaceId of roots) {
     const root = workspaces.pathFor(workspaceId); const pending = [''];
     if (!projectRoots.has(workspaceId) && !await fs.access(root)) { continue; }
@@ -135,6 +168,11 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
         }
       }
     }
+  }
+  const connections = await captureBackupConnections(snapshot, context.getApplicationContext().filesDir, ownership);
+  if ((snapshot.providerProfiles || []).length || (connections.mcp || []).length || (connections.mail || []).length ||
+    (connections.panels || []).length || connections.search?.key || connections.search?.tavilyKey || connections.feedbackIdentity) {
+    envelope.protectedKeys = await encryptBackupKeys(snapshot, await huaweiAccount.backupOpenID(context, interactive), vault, connections);
   }
   const path = context.cacheDir + '/backup-' + util.generateRandomUUID() + '.tinybot';
   await writeBackupArchive(path, JSON.stringify(envelope), sources, cancellation);
@@ -185,11 +223,15 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
       finally { await fs.close(file); }
     }
     const envelope = JSON.parse(text) as BackupEnvelope;
-    const formats = archive ? ['tinybot-harmony.backup.v3'] : ['tinybot-harmony.backup.v1', 'tinybot-harmony.backup.v2'];
+    const formats = archive ? ['tinybot-harmony.backup.v3', 'tinybot-harmony.backup.v4'] : ['tinybot-harmony.backup.v1', 'tinybot-harmony.backup.v2'];
     if (!envelope || !formats.includes(envelope.format) || !Array.isArray(envelope.attachments) || !Array.isArray(envelope.files)) { throw new Error(t('备份格式无效。')); }
     if (!archive) { await unlock(envelope); }
-    const result = await restoreEnvelope(context, local, envelope, archive);
+    if (envelope.deviceState !== undefined) { validateBackupDeviceState(envelope.deviceState); }
+    const importedPanels: RestoredPanelFile[] = [], importedWorkspaces = new Map<string, string>(), preparedFiles: PreparedFile[] = [];
+    const result = await restoreEnvelope(context, local, envelope, archive, importedPanels, importedWorkspaces, preparedFiles);
+    for (const file of preparedFiles) { file.version = await file.files.removalVersion(file.path); }
     if (keys) { attachBackupKeys(result, keys); }
+    attachBackupImport(result, new NativeBackupImport(context, local, keys?.connections, importedPanels, importedWorkspaces, envelope.deviceState, preparedFiles));
     Diagnostics.log('info', 'backup', 'restore_completed', { durationMs: Date.now() - started, newChats: result.threads.length });
     return result;
   } catch (error) {
@@ -198,7 +240,7 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
   } finally { if (archive) { await cleanupBackupArchive(archive.directory); } }
 }
 async function restoreEnvelope(context: common.UIAbilityContext, local: AppData, envelope: BackupEnvelope,
-  archive?: OpenBackupArchive): Promise<AppData> {
+  archive?: OpenBackupArchive, importedPanels: RestoredPanelFile[] = [], importedWorkspaces: Map<string, string> = new Map<string, string>(), preparedFiles: PreparedFile[] = []): Promise<AppData> {
   const data = parseAppData(JSON.stringify(envelope.data));
   // Keep record identities across devices and repeated restores. Local records win.
   const legacy = envelope.format === 'tinybot-harmony.backup.v1';
@@ -239,6 +281,9 @@ async function restoreEnvelope(context: common.UIAbilityContext, local: AppData,
     }
   }
   if (sourceRoots.some((id: string) => !referencedSources.has(id))) { throw new Error(t('备份文件无效。')); }
+  const orphanRoots = envelope.orphanWorkspaceIds || [];
+  if (!Array.isArray(orphanRoots) || orphanRoots.some((id) => typeof id !== 'string' || workspaceIds.has(id)) || new Set(orphanRoots).size !== orphanRoots.length || legacy && orphanRoots.length) { throw new Error(t('备份文件无效。')); }
+  orphanRoots.forEach((id: string) => workspaceIds.add(id));
   const workspace = new WorkspaceStore(context.getApplicationContext().filesDir);
   for (const id of Array.from(workspaceIds)) { workspace.pathFor(id); }
   const attachmentIds = new Map<string, string>(); const binaries = new Map<string, string>(); const paths = new Set<string>();
@@ -268,10 +313,7 @@ async function restoreEnvelope(context: common.UIAbilityContext, local: AppData,
   // New projects are restored into fresh roots; existing projects keep their local root and bytes.
   // Until the session manifest commits, prepared files are unreferenced and cannot replace local projects.
   const destinations = new Map<string, string>();
-  for (const id of retainedRoots.concat(panelRoots, boardRoots, sourceRoots)) {
-    if (!await fs.access(workspace.pathFor(id))) { destinations.set(id, id); }
-    else { await workspace.requireWorkspace(id); }
-  }
+  for (const id of Array.from(workspaceIds)) { destinations.set(id, id); }
   for (const thread of data.threads) { if (!thread.projectId) { destinations.set(thread.id, thread.id); } }
   data.projects = (data.projects || []).map((project): ProjectData => {
     const existing = (local.projects || []).find((item) => item.id === project.id);
@@ -284,8 +326,9 @@ async function restoreEnvelope(context: common.UIAbilityContext, local: AppData,
   const boardWorkspaceMap = new Map<string, string>();
   for (const id of Array.from(workspaceIds)) { boardWorkspaceMap.set(id, destinations.get(id) || id); }
   for (const project of envelope.data.projects || []) {
-    const restored = (data.projects || []).find((item) => item.id === project.id); if (restored) { boardWorkspaceMap.set(project.workspaceId, restored.workspaceId); }
+    const restored = (data.projects || []).find((item) => item.id === project.id); if (restored) { boardWorkspaceMap.set(project.workspaceId, restored.workspaceId); destinations.set(project.workspaceId, restored.workspaceId); }
   }
+  boardWorkspaceMap.forEach((target: string, source: string) => { importedWorkspaces.set(source, target); });
   const merged: AppData = { version: 2, config: local.config, activeThreadId: local.activeThreadId,
     threads: local.threads.concat(data.threads), projects: (local.projects || []).concat((data.projects || [])
       .filter((project) => !(local.projects || []).some((item) => item.id === project.id))) };
@@ -294,8 +337,9 @@ async function restoreEnvelope(context: common.UIAbilityContext, local: AppData,
     if ((local.projects || []).some((item) => item.id === project.id)) { await workspace.requireWorkspace(project.workspaceId); }
   }
   const attachmentRoot = context.getApplicationContext().filesDir + '/attachments'; if (!await fs.access(attachmentRoot)) { await fs.mkdir(attachmentRoot); }
-  for (const item of allAttachments(data).filter((item) => !item.original)) { const id = attachmentIds.get(item.id) as string; const path = id + (item.mime === 'image/jpeg' ? '.jpg' : '.txt'); await writePayload(binaries.get(item.id) as string, attachmentRoot + '/' + path, archive); }
+  for (const item of allAttachments(data).filter((item) => !item.original)) { const id = attachmentIds.get(item.id) as string; const path = id + (item.mime === 'image/jpeg' ? '.jpg' : '.txt'); await writePayload(binaries.get(item.id) as string, attachmentRoot + '/' + path, archive); preparedFiles.push({ files: new NativeWorkspaceFiles(attachmentRoot), path: path }); }
   for (const id of Array.from(destinations.values())) { await workspace.ensureThread(id); }
+  const importedPaths = new Set<string>();
   for (let index = 0; index < envelope.files.length; index++) {
     const item = envelope.files[index];
     const target = destinations.get((legacy ? item.threadId : item.workspaceId) as string);
@@ -310,7 +354,10 @@ async function restoreEnvelope(context: common.UIAbilityContext, local: AppData,
     if (await fs.access(root + '/' + item.path)) {
       const stat = await fs.lstat(root + '/' + item.path);
       if (!stat.isFile() || stat.isSymbolicLink()) { throw new Error(t('备份文件无效。')); }
+      continue;
     }
+    importedPaths.add(target + '/' + item.path);
+    preparedFiles.push({ files: new NativeWorkspaceFiles(root), path: item.path });
     if (archive) {
       await new NativeWorkspaceFiles(root).importFile(archive.files[blobIndex(item.bytes, archive)], item.path, true);
     } else {
@@ -324,6 +371,7 @@ async function restoreEnvelope(context: common.UIAbilityContext, local: AppData,
   // Keep service IDs until SessionService can match them against this device's settings.
   for (const item of envelope.files.filter((item) => /^life-boards\/[^/]+\/board\.json$/.test(item.path))) {
     const destination = destinations.get(item.workspaceId || ''); if (!destination) { continue; }
+    if (!importedPaths.has(destination + '/' + item.path)) { continue; }
     const files = new NativeWorkspaceFiles(workspace.pathFor(destination)), signal = new Cancellation(), file = await files.read(item.path, signal);
     const board = parseLifeBoard(file.content, item.path.split('/')[1]);
     board.items.forEach((reference) => { reference.workspaceId = boardWorkspaceMap.get(reference.workspaceId) || reference.workspaceId; });
@@ -331,20 +379,24 @@ async function restoreEnvelope(context: common.UIAbilityContext, local: AppData,
   }
   for (const item of envelope.files.filter((item) => /^life-panels\/[^/]+\/panel\.json$/.test(item.path))) {
     const destination = destinations.get(item.workspaceId || ''); if (!destination) { continue; }
+    if (!importedPaths.has(destination + '/' + item.path)) { continue; }
     const files = new NativeWorkspaceFiles(workspace.pathFor(destination)), signal = new Cancellation(), file = await files.read(item.path, signal);
     const panel = parsePanelRecord(file.content, item.path.split('/')[1]), source = panel.definition.source;
     if (source?.type === 'workspace-json' && source.workspaceId !== undefined) { source.workspaceId = boardWorkspaceMap.get(source.workspaceId) || source.workspaceId; }
     if (JSON.stringify(panel) !== file.content) { await files.writeLifePanel(item.path, JSON.stringify(panel), signal, { version: file.version }); }
+    importedPanels.push({ workspaceId: destination, path: item.path });
   }
   for (const profile of data.providerProfiles || []) { profile.enabled = false; profile.noApiKey = true; profile.credentialAlias = ''; profile.balanceCredentialAlias = undefined; }
   for (const thread of data.threads) {
-    thread.pendingInputs = []; thread.queuePaused = true;
+    // Preserve unsent instructions and their attachments without replaying them on a new device.
+    thread.queuePaused = true;
     for (const item of threadAttachments(thread)) {
       if (item.original) {
         const workspaceId = workspaceIdFor(data, thread);
         await workspace.ensureThread(workspaceId);
         const value = binaries.get(item.id) as string;
         const files = new NativeWorkspaceFiles(workspace.pathFor(workspaceId));
+        if (!await fs.access(workspace.pathFor(workspaceId) + '/' + item.path)) { preparedFiles.push({ files: files, path: item.path }); }
         if (archive) { await files.importFile(archive.files[blobIndex(value, archive)], item.path, true); }
         else {
           const temporary = attachmentRoot + '/restore-' + util.generateRandomUUID() + '.bin';
@@ -359,14 +411,10 @@ async function restoreEnvelope(context: common.UIAbilityContext, local: AppData,
       const id = attachmentIds.get(item.id); if (id) { item.id = id; item.path = id + (item.mime === 'image/jpeg' ? '.jpg' : '.txt'); }
     }
   }
-  for (const server of data.productivity?.servers || []) { server.enabled = false; server.credentialAlias = ''; server.authType = undefined; }
+  for (const server of data.productivity?.servers || []) { server.enabled = server.enabled && !server.credentialAlias && !server.authType; server.credentialAlias = ''; server.authType = undefined; }
   if (data.productivity?.options?.search) {
-    const search = data.productivity.options.search; search.enabled = false;
-    if (search.tavily) { search.tavily.credentialAlias = ''; }
-    if (search.provider === 'tavily') { search.credentialAlias = ''; } else { search.modelProviderId = undefined; }
+    data.productivity.options.search = backupSearchConfig(data.productivity.options.search);
   }
-  const userDocument = data.config.userDocument || '';
-  data.config = defaultConfig();
-  data.config.userDocument = userDocument;
+  data.config.credentialAlias = ''; data.config.configured = false;
   return data;
 }

@@ -4,7 +4,7 @@ import { preferences } from '@kit.ArkData';
 import { i18n } from '@kit.LocalizationKit';
 import { AppLanguage, languagePreference, resolveLocale, setLocale } from '../model/I18n';
 
-// Device UI preference: deliberately separate from chat content, model configuration and backups.
+// UI preferences have their own store and merge into portable backups separately from chat content.
 export class LanguagePreferences {
   private static store?: preferences.Preferences;
   private static preference: AppLanguage = 'system';

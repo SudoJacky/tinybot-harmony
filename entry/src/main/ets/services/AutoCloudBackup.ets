@@ -1,12 +1,12 @@
 import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
-import { util } from '@kit.ArkTS';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { AppData } from '../model/Conversation';
+import { BackupChanges } from '../model/BackupChanges';
 import { Diagnostics } from '../model/Diagnostics';
 import { getLocale, t } from '../model/I18n';
 import { isOnboardingCandidate } from '../model/Onboarding';
-import { CloudBackup, CloudBackupItem, cloudBackupError } from './CloudBackup';
+import { CloudBackup, CloudBackupItem, cloudBackupError, CLOUD_BACKUP_NAME } from './CloudBackup';
 import { Cancellation } from './Cancellation';
 import { NativeWorkspaceFiles } from './NativeWorkspaceFiles';
 import { hostedPrivacy } from './HostedPrivacy';
@@ -30,6 +30,7 @@ export class AutoCloudBackup {
   private revision: number = 0;
   private savedRevision: number = -1;
   private savedFiles: number = -1;
+  private savedChanges: string = '';
   private name: string = '';
   private task?: BackupTask;
 
@@ -37,9 +38,9 @@ export class AutoCloudBackup {
     if (this.context === context) { return; }
     this.dispose();
     const store = preferences.getPreferencesSync(context, { name: 'tinybot-ui' });
-    this.enabled = store.getSync('autoCloudBackupEnabled', true) === true;
+    this.enabled = true;
     this.context = context; this.store = store; this.snapshot = snapshot; this.ready = ready;
-    this.revision = 0; this.savedRevision = -1; this.savedFiles = -1; this.name = ''; this.error = ''; this.lastUploadedAt = 0;
+    this.revision = 0; this.savedRevision = -1; this.savedFiles = -1; this.savedChanges = ''; this.name = CLOUD_BACKUP_NAME; this.error = ''; this.lastUploadedAt = 0;
     this.state = this.enabled ? 'waiting' : 'disabled';
   }
 
@@ -58,6 +59,11 @@ export class AutoCloudBackup {
   }
 
   changed(): void { this.revision++; }
+  private changes(context: common.UIAbilityContext): string {
+    const feedback = preferences.getPreferencesSync(context, { name: 'tinybot-feedback' });
+    return JSON.stringify([BackupChanges.revision, this.store?.getSync('appearance', ''), this.store?.getSync('language', ''),
+      this.store?.getSync('reviewInvitation', ''), this.store?.getSync('seenAnnouncementIds', []), feedback.getSync('seenReplies', '{}')]);
+  }
 
   confirmUploaded(items: CloudBackupItem[]): void {
     if (!this.context || !this.enabled || this.state !== 'pending' || !this.name) { return; }
@@ -81,7 +87,8 @@ export class AutoCloudBackup {
       const startupComplete = this.store?.getSync('startupBackupState', '') === 'done' ||
         this.store?.getSync('onboardingComplete', false) === true;
       if (!this.ready() || !startupComplete || CloudBackup.busy) { return; }
-      if (this.revision === this.savedRevision && NativeWorkspaceFiles.contentRevision === this.savedFiles && this.state === 'uploaded') { return; }
+      if (this.revision === this.savedRevision && NativeWorkspaceFiles.contentRevision === this.savedFiles &&
+        this.changes(context) === this.savedChanges && this.state === 'uploaded') { return; }
       const task: BackupTask = { requestId: -1, generation: this.generation, cancellation: new Cancellation(), running: true };
       // Must remain synchronous: a page watcher can run too late to request this lease.
       const info = backgroundTaskManager.requestSuspendDelay(t('自动云备份'), () => this.expire(task));
@@ -117,24 +124,18 @@ export class AutoCloudBackup {
       if (!await CloudBackup.available(context)) { if (task.generation === this.generation) { this.state = 'waiting'; } return; }
       task.cancellation.check();
       if (task.generation !== this.generation || !this.enabled || !hostedPrivacy.allowed || !this.ready()) { return; }
-      if (this.revision !== this.savedRevision || NativeWorkspaceFiles.contentRevision !== this.savedFiles) {
+      const changes = this.changes(context);
+      if (this.revision !== this.savedRevision || NativeWorkspaceFiles.contentRevision !== this.savedFiles || changes !== this.savedChanges) {
         const data = this.snapshot();
         if (isOnboardingCandidate(data) && !(data.config.userDocument || '').trim() &&
           !(data.productivity?.memories || []).length) { this.state = 'waiting'; return; }
-        if (!this.name) {
-          let id = this.store?.getSync('autoCloudBackupId', '') as string;
-          if (!/^[0-9a-f-]{36}$/.test(id)) {
-            id = util.generateRandomUUID(); this.store?.putSync('autoCloudBackupId', id); this.store?.flushSync();
-          }
-          this.name = 'tinybot-auto-' + id + '.tinybot';
-        }
         const revision = this.revision;
         const files = NativeWorkspaceFiles.contentRevision;
         this.state = 'creating'; this.error = '';
-        await CloudBackup.create(context, data, { name: this.name, interactive: false, cancellation: task.cancellation });
+        await CloudBackup.create(context, data, { interactive: false, cancellation: task.cancellation });
         if (task.generation !== this.generation) { return; }
-        this.savedRevision = revision; this.savedFiles = files;
-      } else { await CloudBackup.sync(task.cancellation); }
+        this.savedRevision = revision; this.savedFiles = files; this.savedChanges = changes;
+      } else { await CloudBackup.retryUpload(context, task.cancellation); }
       task.cancellation.check();
       const items = await CloudBackup.list(context);
       if (task.generation !== this.generation || !this.enabled || !hostedPrivacy.allowed) { return; }

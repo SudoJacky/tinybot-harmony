@@ -3,6 +3,7 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import { RequestUsage, UsageToolActivity } from '../model/Usage';
 import { writeBytes } from './Attachments';
 import { util } from '@kit.ArkTS';
+import { BackupChanges } from '../model/BackupChanges';
 
 interface UsageManifest { version: number; pages: number; }
 const PAGE_SIZE = 256;
@@ -101,6 +102,28 @@ export class UsageLedger {
   }
   // A shallow snapshot is held by the query service, never by an observed view.
   static list(): RequestUsage[] { return UsageLedger.records.slice(); }
+  static async backup(root: string): Promise<RequestUsage[]> {
+    if (UsageLedger.path === root + '/usage-records') {
+      await UsageLedger.queue; await UsageLedger.flush();
+      return JSON.parse(JSON.stringify(UsageLedger.records)) as RequestUsage[];
+    }
+    const items: RequestUsage[] = [], path = root + '/usage-records/index.json';
+    if (await fs.access(path)) {
+      const manifest = JSON.parse(await fs.readText(path)) as UsageManifest;
+      if (manifest.version !== 1 || !Number.isSafeInteger(manifest.pages) || manifest.pages < 0) { throw new Error(t('用量记录格式损坏。')); }
+      for (let page = 0; page < manifest.pages; page++) { items.push(...JSON.parse(await fs.readText(root + '/usage-records/' + page + '.json')) as RequestUsage[]); }
+    } else if (await fs.access(root + '/usage-ledger.json')) { items.push(...JSON.parse(await fs.readText(root + '/usage-ledger.json')) as RequestUsage[]); }
+    return items;
+  }
+  static async restoreBackup(root: string, records: RequestUsage[]): Promise<void> {
+    if (!records.length) { return; }
+    if (UsageLedger.path !== root + '/usage-records' || !UsageLedger.ready) { throw new Error('Usage storage is not ready for restore'); }
+    await UsageLedger.queue;
+    for (const item of records) { if (!UsageLedger.positions.has(item.id)) { UsageLedger.record(item); } }
+    await UsageLedger.queue;
+    await UsageLedger.flush();
+    if (UsageLedger.error) { UsageLedger.error = ''; UsageLedger.notify(); }
+  }
   static recordTool(requestId: string, activity: UsageToolActivity): void {
     const position = UsageLedger.positions.get(requestId); if (position === undefined) { return; }
     const updated = JSON.parse(JSON.stringify(UsageLedger.records[position])) as RequestUsage;
@@ -112,7 +135,7 @@ export class UsageLedger {
     let index = UsageLedger.positions.get(item.id);
     if (index === undefined) { index = UsageLedger.records.length; UsageLedger.positions.set(item.id, index); UsageLedger.records.push(item); }
     else { UsageLedger.records[index] = item; }
-    UsageLedger.dirty.add(Math.floor(index / PAGE_SIZE)); UsageLedger.revision++; UsageLedger.notify();
+    UsageLedger.dirty.add(Math.floor(index / PAGE_SIZE)); UsageLedger.revision++; BackupChanges.revision++; UsageLedger.notify();
     if (!UsageLedger.path || UsageLedger.scheduled) { return; }
     UsageLedger.scheduled = true;
     UsageLedger.queue = UsageLedger.queue.catch(() => {}).then(async () => {

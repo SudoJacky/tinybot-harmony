@@ -10,6 +10,7 @@ const fixture = path.resolve(__dirname, '../.hvigor/mini-apps-' + crypto.randomU
 fs.mkdirSync(fixture, { recursive: true });
 const disk = value => value.startsWith('/sandbox/') ? path.join(fixture, value.slice(9)) : value;
 const handles = new Map(), cache = new Map();
+const backupPreferenceStores = new Map();
 let copyFailure = false, pdfReads = 0, pdfPages = [], jsReads = 0;
 const fileIo = {
   readText: p => fs.promises.readFile(disk(p),'utf8'),
@@ -38,6 +39,13 @@ const fileIo = {
   }
 };
 const kits = {
+  '@kit.ArkData': { preferences: { getPreferencesSync(context, options) {
+    const key = context.getApplicationContext().filesDir + '/' + options.name;
+    if (!backupPreferenceStores.has(key)) backupPreferenceStores.set(key,new Map());
+    const values=backupPreferenceStores.get(key);
+    return { getSync:(name,fallback)=>values.has(name)?values.get(name):fallback,
+      putSync:(name,value)=>values.set(name,value),deleteSync:name=>values.delete(name),flushSync(){} };
+  } } },
   '@kit.NetworkKit': { socket: {} },
   '@kit.AssetStoreKit': { asset: {} },
   '@kit.CoreFileKit': { fileIo }, '@kit.ImageKit': { image: {} }, '@kit.ArkGraphics2D': { drawing: {} },
@@ -536,7 +544,7 @@ async function lifePanelApiTest() {
   const backup=await load('services/Backup').createBackupFile(context,emptyData());
   const archive=legacyBackupFixture(fs.readFileSync(disk(backup)));assert.ok(!JSON.stringify(archive).includes('device-only-secret'));
   await vault.disconnect(id);assert.equal(await vault.connected(id,source),false);await credentials.disconnect(id);
-  console.log('PASS authenticated GET/POST, API key headers/query, bearer, scoped secure credentials, redirect/error redaction, cancellation, transforms and credential-free backup');
+  console.log('PASS authenticated GET/POST, API key headers/query, bearer, scoped secure credentials, redirect/error redaction, cancellation, transforms and backup without plaintext credentials');
 }
 async function lifePanelScriptTest() {
   const {validatePanelSource}=load('model/PanelSource');

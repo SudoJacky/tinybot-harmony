@@ -207,6 +207,8 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
     '../services/NativeDiagnosticLog': { configureNativeDiagnosticLog: () => bootOrder.push('logging') },
     '../services/LanguagePreferences': { LanguagePreferences: { initialize: () => bootOrder.push('language'), refresh: noOp } },
     '../services/AppearancePreferences': { AppearancePreferences: { initialize: () => bootOrder.push('appearance'), refresh: noOp, activate: noOp } },
+    '../services/BackupDeviceState': { configureBackupPreferenceRefresh: noOp },
+    '@kit.ArkData': { preferences: { getPreferencesSync: () => ({ getSync: (_key, fallback) => fallback }) } },
     '../services/McpOAuth': { McpOAuth: { receive: noOp } },
     '../services/LaunchActions': { LaunchActions: { receive: noOp, setForeground: noOp } },
     '../services/BackgroundGeneration': { backgroundGeneration: { setForeground: noOp, dispose: noOp } },
