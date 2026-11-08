@@ -10,7 +10,7 @@
     let state = initial.values, active = initial.active, seq = 0, pending, animate, raf = 0, previous = 0, failed = false;
     const listeners = new Set();
     const storagePending = new Map();
-    let panel = initial.panel || null, refreshPending, checking = false;
+    let panel = initial.panel || null, refreshPending, mailPending, checking = false;
     const panelListeners = new Set();
     function theme() {
       if (!panel) return;
@@ -48,6 +48,10 @@
       const data = event.data;
       if (data.type === 'state') {
         state = data.values; active = data.active;
+        if (!active && mailPending) {
+          const request = mailPending; mailPending = undefined;
+          request.reject(new Error('Mail reading is unavailable in this view.'));
+        }
         panel = data.panel || null; theme();
         for (const listener of panelListeners) listener(copy(panel));
         for (const listener of listeners) listener(copy(state));
@@ -55,6 +59,9 @@
       } else if (data.type === 'panelResult' && refreshPending?.id === data.id) {
         const request = refreshPending; refreshPending = undefined;
         if (data.error) request.reject(new Error(data.error)); else request.resolve();
+      } else if (data.type === 'panelMailResult' && mailPending?.id === data.id) {
+        const request = mailPending; mailPending = undefined;
+        if (data.error) request.reject(new Error(data.error)); else request.resolve(copy(data.mail));
       } else if (data.type === 'snapshot' && initial.snapshotMode) {
         requestAnimationFrame(() => requestAnimationFrame(() => { if (!failed) send({ type: 'snapshotReady' }); }));
       } else if (data.type === 'storageResult' && storagePending.has(data.id)) {
@@ -93,6 +100,19 @@
           save(value, revision) { return initial.placement ? storageRequest('storageSave', value, revision, 'placement') : Promise.reject(new Error('View state requires a board placement')); }
         }),
         onUpdate(listener) { panelListeners.add(listener); return () => panelListeners.delete(listener); },
+        readMail(request) {
+          if (!active || initial.preflight || initial.snapshotMode || !panel?.canReadMail) return Promise.reject(new Error('Mail reading is unavailable in this view.'));
+          if (!request || typeof request !== 'object' || Array.isArray(request) ||
+            Object.keys(request).some(key => !['uidValidity', 'uid'].includes(key)) ||
+            ![request.uidValidity, request.uid].every(value => Number.isInteger(value) && value >= 1 && value <= 4294967295)) {
+            return Promise.reject(new Error('Use the uidValidity and uid from the mail source message.'));
+          }
+          if (mailPending) return Promise.reject(new Error('A mail read is already in progress.'));
+          return new Promise((resolve, reject) => {
+            mailPending = { id: ++seq, resolve, reject };
+            send({ type: 'panelMailRead', id: seq, mail: { uidValidity: request.uidValidity, uid: request.uid } });
+          });
+        },
         refresh(inputs) {
           if (!active || initial.preflight || initial.snapshotMode || !panel?.canRefresh) return Promise.reject(new Error('Card refresh is unavailable in this view.'));
           if (refreshPending) return Promise.reject(new Error('A refresh is already in progress.'));
@@ -217,6 +237,7 @@
       }
       else if (data.type === 'storageLoad') send({ type: 'storageLoad', id: data.id, scope: data.scope });
       else if (data.type === 'panelRefresh') send({ type: 'panelRefresh', id: data.id, inputs: data.inputs });
+      else if (data.type === 'panelMailRead') send({ type: 'panelMailRead', id: data.id, mail: data.mail });
       else if (data.type === 'storageSave') send({ type: 'storageSave', id: data.id, value: data.value, revision: data.revision, scope: data.scope });
       else if (data.type === 'save') send({ type: 'save', id: data.id, values: data.values });
       else if (data.type === 'resize') send({ type: 'resize', height: data.height });

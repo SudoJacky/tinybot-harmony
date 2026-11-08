@@ -19,6 +19,8 @@ import { withFileMutation } from './FileMutationQueue';
 import { PanelAgentRefresh, PanelAgentRunner } from './PanelAgentRefresh';
 import { PanelChanges } from './PanelChanges';
 import { MailService } from './MailService';
+import { MailBody, MailReadRequest } from '../model/Mail';
+import { imapNumber } from '../model/ImapWire';
 import { ProviderBalanceSource } from './ProviderBalanceSource';
 import { threadWorkspacePath } from '../model/Workspace';
 import { PanelSource, panelQueryAddress } from '../model/PanelSource';
@@ -94,6 +96,18 @@ export class PanelRepository {
   constructor(files: WorkspaceFiles, key: string, reader: PanelSourceReader) { this.files = files; this.key = key; this.reader = reader; }
   isRefreshing(id: string): boolean { return refreshing.has(this.key + ':' + panelId(id)); }
   async get(id: string): Promise<PanelRecord> { return parsePanelRecord((await this.files.read(panelPath(id), new Cancellation())).content, id); }
+  async readMail(id: string, configRevision: number, request: MailReadRequest, cancellation: Cancellation): Promise<MailBody> {
+    cancellation.check(); imapNumber(request.uidValidity); imapNumber(request.uid);
+    const before = await this.get(id), source = before.definition.source;
+    if (before.archived || before.configRevision !== configRevision || source?.type !== 'mail' || !source.mail) {
+      throw new Error('Card has no active mail source or has changed; reopen it before reading mail');
+    }
+    const body = await new MailService().read(source.mail.accountId, source.mail.folder, request.uidValidity, request.uid, cancellation);
+    cancellation.check();
+    const current = await this.get(id); cancellation.check();
+    if (current.archived || current.configRevision !== configRevision) { throw new Error('Card changed while reading mail; reopen it'); }
+    return body;
+  }
   async lookup(id: string): Promise<PanelRecord | undefined> {
     const cancellation = new Cancellation(); panelId(id);
     let offset = 0, hasDirectory = false;

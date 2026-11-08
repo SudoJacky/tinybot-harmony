@@ -77,6 +77,7 @@ console.log('PASS lazy row identity, retained disclosure/height state, thread sw
 
 let now = 0, sequence = 0, controllers = 0; const timers = new Map();
 const logs = [], context = { Diagnostics: from('model/Diagnostics').Diagnostics,
+  Cancellation: from('services/Cancellation').Cancellation,
   activeWebViews: 0,
   ...from('model/WebUi'), hilog: { info: (...args) => logs.push(args), error: (...args) => logs.push(args) }, t: x => x,
   webview: { WebviewController: class { constructor() { controllers++; this.activations = 0; this.pauses = 0; }
@@ -216,6 +217,30 @@ assert.equal(timers.size, 0);
 console.log('PASS emitted List callbacks wait for 200ms of rest, cancel on a new gesture and clear pending work when leaving chat');
 
 (async () => {
+  const mailMessages=[],mailPort={close(){},postMessageEvent(value){mailMessages.push(JSON.parse(value));}};
+  let reads=0;
+  const mailView=make({mounted:true,visible:true,interactive:true,ports:[mailPort],panelContext:{canReadMail:true},
+    onPanelReadMail:async(request,signal)=>{signal.check();reads++;return {message:{uid:request.uid,uidValidity:request.uidValidity},text:'Native mail body'};}});
+  const readMessage=JSON.stringify({type:'panelMailRead',id:1,mail:{uidValidity:42,uid:9}});
+  await mailView.receive(readMessage,0);assert.equal(reads,1);assert.equal(mailMessages.at(-1).mail.text,'Native mail body');
+  for(const restriction of [{preflight:true},{snapshotMode:true},{foreground:false},{visible:false},{interactive:false},{panelContext:{canReadMail:false}},{onPanelReadMail:undefined}]){
+    const restricted=make({mounted:true,visible:true,interactive:true,ports:[mailPort],panelContext:{canReadMail:true},onPanelReadMail:mailView.onPanelReadMail,...restriction});
+    await restricted.receive(readMessage,0);assert.ok(mailMessages.at(-1).error.includes('unavailable'));assert.equal(mailMessages.at(-1).mail,undefined);
+  }
+  assert.equal(reads,1,'Native receive rejects restricted views even when generated JS bypasses the public API');
+  for(const action of ['sync','closePorts']){
+    let finish;
+    mailView.onPanelReadMail=async(_request,signal)=>{reads++;await new Promise(resolve=>finish=resolve);signal.check();return {text:'Must not escape'};};
+    mailView.ports=[mailPort];mailView.interactive=true;mailView.visible=true;
+    const pending=mailView.receive(readMessage,0);const requestSignal=mailView.mailRequest;
+    await mailView.receive(JSON.stringify({type:'panelMailRead',id:2,mail:{uidValidity:42,uid:9}}),0);
+    assert.ok(mailMessages.at(-1).error.includes('already in progress'));
+    if(action==='sync'){mailView.visible=false;mailView.sync();}else{mailView.generation++;mailView.closePorts();}
+    assert.equal(requestSignal.cancelled,true);finish();await pending;
+    assert.ok(!mailMessages.some(message=>message.mail?.text==='Must not escape'));
+    mailView.generation=0;
+  }
+  console.log('PASS emitted native mail bridge: body handoff, direct-message restrictions, concurrent request rejection, hidden/disposed cancellation and no stale body delivery');
   // Execute the emitted Web callbacks: attachment starts the host load without a
   // throwaway document; page-end notifications must never initiate another load.
   const webFile = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/views/WebUiView.ts');

@@ -40,6 +40,32 @@ async (page, host, definitions, outputDirectory) => {
     await page.setViewportSize({width,height:600});
     for(const [id,spec]of Object.entries(definitions))if(id!=='guide-welcome'||width===344)await mount(spec,{probe:true,width});
   }
+  if(definitions.ascii){
+    let ascii=await mount(definitions.ascii,{width:344});
+    check(await ascii.locator('#mode').textContent()==='TINYBOT','ASCII starts with the Tinybot mascot');
+    check(!(await ascii.locator('header').textContent()).includes('ASCII / 001'),'Remove the ASCII sequence label');
+    const first=await ascii.locator('#ascii').textContent();await page.waitForTimeout(600);
+    check(first!==(await ascii.locator('#ascii').textContent()),'ASCII field must animate, not display a static placeholder');
+    check((await ascii.locator('#ascii').textContent()).replace(/\s/g,'').length>80,'ASCII field must contain real generated geometry');
+    check(Math.abs((await ascii.locator('article').boundingBox()).height-208)<1,'Banner fills the 12x5 viewport');
+    check(!(await ascii.evaluate(()=>document.documentElement.scrollWidth>innerWidth||document.documentElement.scrollHeight>innerHeight)),'ASCII banner fits without scrolling');
+    await ascii.locator('article').screenshot({path:outputDirectory+'/ascii-mascot.png'});
+    await ascii.locator('#warp').click();await ascii.locator('#mode').filter({hasText:'ORBITAL'}).waitFor();
+    const orbital=await ascii.locator('#ascii').textContent();await page.waitForTimeout(250);
+    check(orbital!==await ascii.locator('#ascii').textContent(),'Existing orbital scene still animates');
+    await ascii.locator('article').screenshot({path:outputDirectory+'/ascii-orbital.png'});
+    await ascii.locator('#warp').click();await ascii.locator('#mode').filter({hasText:'HYPERDRIVE'}).waitFor();
+    await ascii.locator('article').screenshot({path:outputDirectory+'/ascii-hyperdrive.png'});
+    await ascii.locator('#warp').click();await ascii.locator('#mode').filter({hasText:'TINYBOT'}).waitFor();
+    check((await page.evaluate(()=>messages)).every(message=>!['storageLoad','storageSave','panelRefresh','panelMailRead'].includes(message.type)),'Animation runs locally without storage, source or model requests');
+    await page.evaluate(()=>nativePort.postMessage(JSON.stringify({type:'state',values:{},active:false,panel:probePanel})));
+    await ascii.waitForFunction(()=>!tinybot.active);await page.waitForTimeout(100);
+    const paused=await ascii.locator('#ascii').textContent();await page.waitForTimeout(350);check(paused===await ascii.locator('#ascii').textContent(),'Inactive ASCII animation pauses');
+    await page.emulateMedia({reducedMotion:'reduce'});ascii=await mount(definitions.ascii,{width:344});
+    await page.waitForTimeout(100);const still=await ascii.locator('#ascii').textContent();await page.waitForTimeout(350);
+    check(still===await ascii.locator('#ascii').textContent(),'Reduced motion shows a static ASCII scene');
+    await page.emulateMedia({reducedMotion:'no-preference'});
+  }
   await page.setViewportSize({width:344,height:480});
   let frame=await mount(definitions.todo);
   await frame.locator('#new-task').fill('<b>A real task</b>');await frame.locator('#add-task').click();

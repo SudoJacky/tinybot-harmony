@@ -13,6 +13,8 @@ import { PreviewBrowserRuntime } from '../services/PreviewBrowserRuntime';
 import { browserAutomationScript } from '../model/BrowserScripts';
 import { MiniAppStorage, MiniAppSnapshot } from '../model/MiniApp';
 import { WebUiPanelContext } from '../model/WebUi';
+import { MailBody, MailReadRequest } from '../model/Mail';
+import { Cancellation } from '../services/Cancellation';
 
 let activeWebViews: number = 0;
 let webViewSequence: number = 0;
@@ -26,6 +28,8 @@ export struct WebUiView {
   @Prop @Watch('sync') interactive: boolean = false;
   @Prop @Watch('sync') panelContext: WebUiPanelContext | undefined = undefined;
   onPanelRefresh?: (inputs?: PanelInputs) => Promise<void>;
+  onPanelReadMail?: (request: MailReadRequest, cancellation: Cancellation) => Promise<MailBody>;
+  private mailRequest?: Cancellation;
   panelProbe?: PanelProbeOptions;
   onRuntimeError: (message: string) => void = () => {};
   @Prop preflight: boolean = false;
@@ -130,6 +134,7 @@ export struct WebUiView {
     } catch (error) { this.report(error as Error); }
   }
   private closePorts(): void {
+    this.mailRequest?.cancel();
     this.browserRuntime?.detach(this.browserAttachment); this.browserAttachment = -1;
     clearTimeout(this.timer);
     for (const port of this.ports) { port.close(); }
@@ -211,6 +216,7 @@ export struct WebUiView {
     } catch (error) { this.report(error as Error); }
   }
   private sync(): void {
+    if (!this.foreground || !this.visible || !this.interactive) { this.mailRequest?.cancel(); }
     if (!this.mounted || !this.ports.length) { return; }
     try { this.ports[0].postMessageEvent(JSON.stringify({ type: 'state', values: this.values, panel: this.panelContext, placement: !!this.viewStorage, active: this.foreground && (this.preflight || (this.interactive && this.visible)) })); }
     catch (error) { this.report(error as Error); }
@@ -222,6 +228,23 @@ export struct WebUiView {
     try {
       if (typeof data !== 'string') { throw new Error('Web UI: expected a text message'); }
       const message = parseWebUiMessage(data); id = message.id || 0;
+      if (message.type === 'panelMailRead') {
+        let failure = '', mail: MailBody | undefined = undefined;
+        const signal = new Cancellation();
+        try {
+          if (this.preflight || this.snapshotMode || !this.foreground || !this.visible || !this.interactive ||
+            !this.panelContext?.canReadMail || !this.onPanelReadMail) { throw new Error('Mail reading is unavailable in this view'); }
+          if (this.mailRequest) { throw new Error('A mail read is already in progress'); }
+          this.mailRequest = signal;
+          mail = await this.onPanelReadMail(message.mail!, signal);
+          signal.check();
+        } catch (error) { failure = (error as Error).message; }
+        finally { if (this.mailRequest === signal) { this.mailRequest = undefined; } }
+        if (this.mounted && generation === this.generation && this.ports.length) {
+          this.ports[0].postMessageEvent(JSON.stringify({ type: 'panelMailResult', id: id, mail: failure ? undefined : mail, error: failure }));
+        }
+        return;
+      }
       if (message.type === 'panelRefresh') {
         let failure = '';
         try {

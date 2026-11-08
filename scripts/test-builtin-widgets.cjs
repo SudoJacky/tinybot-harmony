@@ -20,10 +20,10 @@ const {BuiltinWidgets}=load('services/BuiltinWidgets'),{builtinWidgets}=load('mo
 const {Cancellation}=load('services/Cancellation');
 const context={resourceManager:{getRawFileContent:async name=>new Uint8Array(fs.readFileSync(path.join(root,'entry/src/main/resources/rawfile',name)))},getApplicationContext:()=>({filesDir:'/files'})};
 (async()=>{
- const service=new BuiltinWidgets(context);assert.equal(builtinWidgets().length,5);
+ const service=new BuiltinWidgets(context);assert.equal(builtinWidgets().length,6);
  await assert.rejects(service.definition('unknown'),/Unknown/);
  await assert.rejects(service.definition('balance'),/余额查询/);
- for(const id of ['clock','focus','todo','countdown']){
+ for(const id of ['ascii','clock','focus','todo','countdown']){
   const spec=await service.definition(id);assert.equal(spec.version,2);assert.equal(spec.source,undefined);assert.equal(spec.view.library,'none');
   assert.ok(spec.checks.length);assert.doesNotMatch(spec.view.html,/BUILTIN_(?:STYLE|RUNTIME)/);assert.doesNotMatch(spec.view.html,/<script[^>]+src=/);
   const entry=await service.add(id,'workspace',new Cancellation());assert.equal(entry.workspaceId,'workspace');assert.equal(entry.panel.viewState,undefined,'probe state must never seed a real card');
@@ -38,5 +38,7 @@ const context={resourceManager:{getRawFileContent:async name=>new Uint8Array(fs.
  assert.doesNotMatch(balance.view.html,/id="privacy"|privateMode|balanceHidden|tinybot\.storage/);
  await service.add('balance','workspace',new Cancellation());
  assert.equal(probes.at(-1).context.canRefresh,true);assert.equal(probes[0].context.canRefresh,false);
- console.log('PASS five built-ins: offline definitions, real balance allowlist, detached probes, failed/cancelled installs, independent instances and no fabricated balances');
+ const ascii=await service.definition('ascii');assert.equal(ascii.view.height,208);assert.equal(builtinWidgets().find(widget=>widget.id==='ascii').width,12);
+ assert.match(ascii.view.html,/tinybot\.animate/);assert.match(ascii.view.html,/prefers-reduced-motion/);
+ console.log('PASS six built-ins: 12x5 ASCII animation, offline definitions, real balance allowlist, detached probes, failed/cancelled installs, independent instances and no fabricated balances');
 })().catch(error=>{console.error(error);process.exitCode=1;});

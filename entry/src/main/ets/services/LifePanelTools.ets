@@ -19,6 +19,7 @@ import { LifeBoards } from './LifeBoards';
 import { BoardItem, BoardEntry, boardLayoutKey, boardLayoutItems } from '../model/LifeBoard';
 import { GridRect, validateGridRect, gridPixels } from '../model/PanelGrid';
 import { PanelRect } from '../model/PanelPresentation';
+import { panelReference } from '../model/PublishedPanel';
 interface PanelEvidence { schema?: string; webRuntime?: string; layout?: string; screenshot: string; visualReview: string; }
 interface BoardInspectionItem { mountId?: string; workspaceId: string; panelId: string; x: number; y: number; w: number; h: number; rendered?: PanelRect; }
 interface PanelRevisionResult { configRevision: number; }
@@ -39,22 +40,22 @@ export class LifePanelTools implements AgentTools {
   }
   definitions(): ToolDefinition[] {
     return [
-      { type: 'function', function: { name: 'get_life_panel_catalog', description: 'Return Skill resource names/paths for read_skill; section:balance returns configured provider accounts and a matching card definition.', parameters: { type: 'object', properties: { 'section': { type: 'string', enum: ['all', 'html', 'native', 'sources', 'balance', 'design'], description: 'Requested resource section; defaults to all' } }, required: [], additionalProperties: false } } },
+      { type: 'function', function: { name: 'get_life_panel_catalog', description: 'Return Skill resource names/paths for read_skill; section:balance returns configured provider accounts and a matching card definition. Native mail HTML supports await tinybot.panel.readMail({uidValidity,uid}) -> {message,text}, using the saved source.mail account/folder and mailbox body permission. Retain UID fields, render textContent, and call on a user action in a foreground card; preview/preflight cannot read mail. This API supersedes older Skill text saying only headers are available. Agent sources are for model summaries/extraction, not direct body display.', parameters: { type: 'object', properties: { 'section': { type: 'string', enum: ['all', 'html', 'native', 'sources', 'balance', 'design'], description: 'Requested resource section; defaults to all' } }, required: [], additionalProperties: false } } },
       { type: 'function', function: { name: 'list_life_panels', description: 'Return compact card summaries and nextCursor. Optional workspace/archived filters; get_life_panel reads full details.', parameters: { type: 'object', properties: {
         'workspaceId': { type: 'string', description: 'Optional owner workspace filter' }, 'archived': { type: 'boolean', description: 'False by default; true lists archived cards' },
         'limit': { type: 'integer', description: '1–20 summaries, default 10; at most 50 manifests are read per page' }, 'cursor': { type: 'string', description: 'nextCursor from the same filters' }
       }, required: [], additionalProperties: false } } },
-      { type: 'function', function: { name: 'get_life_panel', description: 'Read a card by owner workspaceId/panelId; section selects definition, data, task or all.', parameters: { type: 'object', properties: {
+      { type: 'function', function: { name: 'get_life_panel', description: 'Read a card by owner workspaceId/panelId; section selects definition, data, task or all. Returns reference: optionally copy it on its own line in the final answer to show this card there; otherwise no chat card is shown.', parameters: { type: 'object', properties: {
         'workspaceId': { type: 'string', description: 'Owner workspace ID' }, 'panelId': { type: 'string', description: 'Card ID' },
         'section': { type: 'string', enum: ['all', 'definition', 'data', 'task'], description: 'Requested detail section' }
       }, required: ['workspaceId', 'panelId'], additionalProperties: false } } },
       this.publicationTool(false), this.publicationTool(true),
       { type: 'function', function: { name: 'list_life_boards', description: 'List boards and their saved card references.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false } } },
-      { type: 'function', function: { name: 'get_life_board', description: 'Read board references, mountIds and grid layout as JSON. Optional viewportWidth computes rendered rectangles in vp; no screenshot is returned.', parameters: { type: 'object', properties: {
+      { type: 'function', function: { name: 'get_life_board', description: 'Read board references, mountIds and grid layout as JSON. Optional viewportWidth computes rendered rectangles in vp; no screenshot is returned. Optionally copy the returned reference on its own line in the final answer to show the board.', parameters: { type: 'object', properties: {
         'workspaceId': { type: 'string', description: 'Board owner workspace' }, 'boardId': { type: 'string', description: 'Board ID' },
         'viewportWidth': { type: 'number', minimum: 160, maximum: 1200, description: 'Actual board content width in vp; omit if unknown, do not assume desktop width' }
       }, required: ['workspaceId', 'boardId'], additionalProperties: false } } },
-      { type: 'function', executionMode: 'sequential', function: { name: 'manage_life_board', description: 'save creates/updates a board; supplied items replaces its layout. place mounts/moves one existing card using panelId, panelWorkspaceId and layout, pushing collisions down. archive/restore changes board availability.', parameters: { type: 'object', properties: {
+      { type: 'function', executionMode: 'sequential', function: { name: 'manage_life_board', description: 'save creates/updates a board; supplied items replaces its layout. place mounts/moves one existing card using panelId, panelWorkspaceId and layout, pushing collisions down. Board layouts automatically compact upward, retaining horizontal positions and sizes; requested y may settle higher. archive/restore changes board availability. No automatic chat display; optionally copy the returned reference on its own line in the final answer to show the board.', parameters: { type: 'object', properties: {
         'action': { type: 'string', enum: ['save', 'place', 'archive', 'restore'], description: 'Board operation' }, 'boardId': { type: 'string', description: 'Existing board ID' }, 'workspaceId': { type: 'string', description: 'Board owner; defaults to current' }, 'title': { type: 'string', description: 'Required name for a new board' }, 'description': { type: 'string', description: 'Optional description' }, 'items': { type: 'array', description: 'Optional complete grid layout', items: { type: 'object', description: 'Card reference', properties: { 'workspaceId': { type: 'string', description: 'Card owner' }, 'panelId': { type: 'string', description: 'Shared card ID' }, 'x': { type: 'integer', minimum: 0, maximum: 10, description: 'Left column' }, 'y': { type: 'integer', minimum: 0, description: 'Top row' }, 'w': { type: 'integer', minimum: 2, maximum: 12, description: 'Width in cells' }, 'h': { type: 'integer', minimum: 2, maximum: 33, description: 'Height in cells (32vp rows, 12vp gaps)' } }, required: ['workspaceId', 'panelId', 'x', 'y', 'w', 'h'], additionalProperties: false } },
          'panelId': { type: 'string', description: 'Card ID for place' }, 'panelWorkspaceId': { type: 'string', description: 'Card owner for place' },
         'layout': { type: 'object', description: 'Placement for one card; other cards are retained', properties: {
@@ -86,7 +87,7 @@ export class LifePanelTools implements AgentTools {
     return { type: 'function', executionMode: 'sequential',
       function: { name: validateOnly ? 'validate_life_panel' : 'publish_life_panel',
         description: validateOnly ? 'Validate a candidate without saving: definition, source and HTML checks at supplied placement dimensions (otherwise half/full viewportWidth). Returns JSON diagnostics; uses detached state.' :
-          'Validate and save a card, optionally pinning it to boardId. Updates require panelId and expectedRevision; new-card requestId deduplicates retries. Live data is preserved unless replaceData:true.',
+          'Validate and save a card, optionally pinning it to boardId. Updates require panelId and expectedRevision; new-card requestId deduplicates retries. Live data is preserved unless replaceData:true. No automatic chat display; optionally copy the returned reference verbatim on its own line outside code fences in the final answer to show the card there.',
         parameters: { type: 'object', properties: properties, required: ['path'], additionalProperties: false } } };
   }
   async execute(call: ToolCall, cancellation: Cancellation): Promise<string> {
@@ -105,17 +106,18 @@ export class LifePanelTools implements AgentTools {
     if (call.function.name === 'get_life_panel') {
       if (Object.keys(args).some((key: string) => !['workspaceId', 'panelId', 'section'].includes(key)) || typeof args.workspaceId !== 'string' || typeof args.panelId !== 'string' || !['all', 'definition', 'data', 'task'].includes(args.section || 'all')) { throw new Error('Invalid card detail request'); }
       const panel = await this.panels.repository(args.workspaceId).get(args.panelId);
-      if (!args.section || args.section === 'all') { return JSON.stringify({ workspaceId: args.workspaceId, panel: panel }); }
-      if (args.section === 'definition') { return JSON.stringify({ workspaceId: args.workspaceId, panelId: panel.id, definition: panel.definition, layout: panel.layout, configRevision: panel.configRevision }); }
-      if (args.section === 'data') { return JSON.stringify({ workspaceId: args.workspaceId, panelId: panel.id, data: panel.data, user: panel.user, viewState: panel.viewState, inputs: panel.inputs, refreshedAt: panel.refreshedAt }); }
-      return JSON.stringify({ workspaceId: args.workspaceId, panelId: panel.id, paused: panel.paused, runs: panel.runs || [], error: panel.error, runtimeError: panel.runtimeError, running: this.panels.repository(args.workspaceId).isRefreshing(panel.id) });
+      const reference = panelReference({ workspaceId: args.workspaceId, panelId: panel.id });
+      if (!args.section || args.section === 'all') { return JSON.stringify({ workspaceId: args.workspaceId, panelId: panel.id, title: panel.definition.title, reference: reference, panel: panel }); }
+      if (args.section === 'definition') { return JSON.stringify({ workspaceId: args.workspaceId, panelId: panel.id, title: panel.definition.title, reference: reference, definition: panel.definition, layout: panel.layout, configRevision: panel.configRevision }); }
+      if (args.section === 'data') { return JSON.stringify({ workspaceId: args.workspaceId, panelId: panel.id, title: panel.definition.title, reference: reference, data: panel.data, user: panel.user, viewState: panel.viewState, inputs: panel.inputs, refreshedAt: panel.refreshedAt }); }
+      return JSON.stringify({ workspaceId: args.workspaceId, panelId: panel.id, title: panel.definition.title, reference: reference, paused: panel.paused, runs: panel.runs || [], error: panel.error, runtimeError: panel.runtimeError, running: this.panels.repository(args.workspaceId).isRefreshing(panel.id) });
     }
     if (call.function.name === 'get_life_board') {
       if (!this.boards || Object.keys(args).some((key: string) => !['workspaceId', 'boardId', 'viewportWidth'].includes(key)) ||
         typeof args.workspaceId !== 'string' || typeof args.boardId !== 'string' || args.viewportWidth !== undefined &&
         (!Number.isFinite(args.viewportWidth) || args.viewportWidth < 160 || args.viewportWidth > 1200)) { throw new Error('Provide a board reference and optional actual viewportWidth (160–1200vp)'); }
       const board = await this.boards.get(args.workspaceId, args.boardId);
-      return JSON.stringify({ workspaceId: args.workspaceId, boardId: board.id, title: board.title, archived: board.archived,
+      return JSON.stringify({ workspaceId: args.workspaceId, boardId: board.id, title: board.title, reference: panelReference({ workspaceId: args.workspaceId, boardId: board.id }), archived: board.archived,
         viewportWidth: args.viewportWidth, evidence: { layout: 'saved_rectangles', screenshot: 'not_provided', visualReview: 'not_performed' } as PanelEvidence,
         items: board.items.map((item: BoardItem): BoardInspectionItem => ({ mountId: item.mountId, workspaceId: item.workspaceId, panelId: item.panelId,
           x: item.x, y: item.y, w: item.w, h: item.h, rendered: args.viewportWidth === undefined ? undefined : gridPixels(item, args.viewportWidth) })) });
@@ -146,12 +148,12 @@ export class LifePanelTools implements AgentTools {
           Object.keys(args.layout).some((key: string) => !['x', 'y', 'w', 'h'].includes(key))) { throw new Error('Place requires a card reference and one grid rectangle'); }
         validateGridRect(args.layout);
         const placed = await this.boards.place(owner, before.id, { workspaceId: args.panelWorkspaceId, panelId: args.panelId }, args.layout, boardLayoutKey(before.items));
-        return JSON.stringify({ boardId: placed.id, workspaceId: owner, title: placed.title, items: boardLayoutItems(placed.items), openFrom: 'Life Panel' });
+        return JSON.stringify({ boardId: placed.id, workspaceId: owner, title: placed.title, reference: panelReference({ workspaceId: owner, boardId: placed.id }), items: boardLayoutItems(placed.items), openFrom: 'Life Panel' });
       }
       if (args.layout !== undefined || args.panelId !== undefined || args.panelWorkspaceId !== undefined) { throw new Error('Placement fields require action:place'); }
       const board = await this.boards.save(owner, args.boardId || '', args.title === undefined ? before?.title || '' : args.title,
         args.description === undefined ? before?.description || '' : args.description, args.items, args.action === 'save' ? undefined : args.action === 'archive');
-      return JSON.stringify({ boardId: board.id, workspaceId: owner, title: board.title, openFrom: 'Life Panel' });
+      return JSON.stringify({ boardId: board.id, workspaceId: owner, title: board.title, reference: panelReference({ workspaceId: owner, boardId: board.id }), openFrom: 'Life Panel' });
     }
     if (!['publish_life_panel', 'validate_life_panel'].includes(call.function.name)) { throw new ToolFailure('TOOL_UNAVAILABLE', 'Unknown Life Panel tool', 'check_available_tools'); }
     const validating = call.function.name === 'validate_life_panel';
@@ -231,7 +233,7 @@ export class LifePanelTools implements AgentTools {
       const record = await repository.publish(id, spec, path, this.threadId, !!previous, cancellation,
         { expectedRevision: previous?.configRevision, replaceData: args.replaceData, publicationKey: args.requestId, sourceVerified: sourceStatus === 'passed' });
       if (args.boardId) { await this.pinPublished(owner, id, args); }
-      return JSON.stringify({ panelId: id, workspaceId: owner, title: record.definition.title, size: record.layout?.size || record.definition.size, configRevision: record.configRevision, published: true,
+      return JSON.stringify({ panelId: id, workspaceId: owner, title: record.definition.title, reference: panelReference({ workspaceId: owner, panelId: id }), size: record.layout?.size || record.definition.size, configRevision: record.configRevision, published: true,
         openFrom: 'Life Panel', evidence: evidence, sourceStatus: sourceStatus, height: args.placementHeight, widths: widths, checks: spec.checks?.length || 0, warnings: warnings });
     } catch (error) {
       cancellation.check();

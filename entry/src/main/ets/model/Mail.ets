@@ -15,6 +15,7 @@ export interface MailSnapshot {
   matched: number; limited: boolean; checkedAt: number; messages: MailMessage[];
 }
 export interface MailBody { message: MailMessage; text: string; }
+export interface MailReadRequest { uidValidity: number; uid: number; }
 export function mailId(id: string): string {
   if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,80}$/.test(id)) { throw new Error('Invalid mail account ID'); } return id;
 }

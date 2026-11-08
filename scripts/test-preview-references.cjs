@@ -14,6 +14,7 @@ const {PreviewTools}=from('services/PreviewTools'),{runAgentLoop}=from('services
 const {validateSteps}=from('model/Agent'),{parseAppData,emptyData}=from('model/Conversation');
 const {buildTimeline}=from('model/ProcessPresentation'),{conversationSections}=from('model/ConversationExport');
 const {selectedConversation,conversationMarkdown}=from('model/ConversationShare');
+const {panelReference}=from('model/PublishedPanel');
 const image={id:'shot',name:'preview.jpg',path:'shot.jpg',mime:'image/jpeg',size:20};
 const call=(id,name,args)=>({id,type:'function',function:{name,arguments:JSON.stringify(args)}});
 function fixture(){const turn={content:'',steps:[]},effects={reads:0,probes:0,captures:0};
@@ -23,7 +24,79 @@ function fixture(){const turn={content:'',steps:[]},effects={reads:0,probes:0,ca
 async function execute(f,respond,limit=6,signal=new Cancellation(),observer={}){let round=0;await runAgentLoop({
   turn:f.turn,tools:f.tools,maxSteps:limit,messages:[],model:{stream:async messages=>respond(round++,messages)}},signal,
   {event(){},checkpoint:async()=>validateSteps(f.turn.steps),...observer});return round;}
+function panelReferences(){
+  const card={workspaceId:'owner',panelId:'mail'},board={workspaceId:'owner',boardId:'board'};
+  const ref=panelReference(card),boardRef=panelReference(board);
+  const receipt=(name,target,status='complete')=>({status,call:call(name,name,{}),output:JSON.stringify({...target,title:name})});
+  const publish={content:'',tools:[receipt('publish_life_panel',card),receipt('manage_life_board',board),
+    receipt('publish_life_panel',{workspaceId:'owner',panelId:'debug-probe'})]};
+  const steps=[publish,{content:'Before\n'+boardRef+'\nMiddle\n'+ref+'\nAfter\n'+ref,tools:[]}];
+  const display=(content,status='complete')=>publishedAnswerParts('panels',[publish,{content,tools:[]}],1,status,[]);
+  assert.equal(display('Done').filter(p=>p.kind==='panel').length,0,'No reference means no automatic card/board display');
+  const parts=publishedAnswerParts('panels',steps,1,'complete',[]);
+  assert.deepEqual(Array.from(parts,p=>p.kind),['text','panel','text','panel','text','pending']);
+  assert.deepEqual(Array.from(parts[1].panel.excludedPanelKeys),['owner/mail']);
+  assert.equal(parts[3].panel.target.panelId,'mail','Only the requested card is shown, never a debug publication');
+  assert.deepEqual(Array.from(display(boardRef)[0].panel.excludedPanelKeys),[],'Unreferenced publications do not hide cards inside the board');
+  assert.equal(previewReferenceError([publish], 'Done'),'','Omitting a widget reference never triggers an answer-repair request');
+  for(const status of ['generating','failed','stopped'])assert.equal(display(ref,status).filter(p=>p.kind==='panel').length,0);
+  for(const content of ['```text\n'+ref+'\n```','~~~~\n'+ref+'\n~~~~','\\'+ref,'> '+ref,'    '+ref,'See '+ref]){
+    assert.ok(display(content).every(p=>p.kind==='text'),'Examples, code, quotes and inline text never mount cards');
+  }
+  for(let i=2;i<ref.length;i++)assert.ok(display('Before\n'+ref.slice(0,i),'generating').every(p=>p.kind==='text'||p.kind==='pending'));
+  assert.equal(display('[[tinybot-panel:owner/unknown]]')[0].kind,'error');
+  assert.equal(display('[[tinybot-panel:../mail]]')[0].kind,'error');
+  for(const name of ['get_life_panel','get_life_board']){
+    const target=name==='get_life_panel'?card:board,reference=panelReference(target);
+    const read=[{content:'',tools:[receipt(name,target)]},{content:reference,tools:[]}];
+    assert.equal(publishedAnswerParts('read',read,1,'complete',[])[0].kind,'panel','Existing cards/boards can be referenced without publishing again');
+  }
+  const child={content:'',tools:[{status:'failed',call:call('batch','orchestrate',{}),output:'',children:[receipt('publish_life_panel',card)]}]};
+  assert.equal(publishedAnswerParts('child',[child,{content:ref,tools:[]}],1,'complete',[])[0].kind,'panel');
+  const failed={content:'',tools:[receipt('publish_life_panel',card,'failed')]};
+  assert.equal(publishedAnswerParts('failed',[failed,{content:ref,tools:[]}],1,'complete',[])[0].kind,'error');
+  const sections=conversationSections({title:'Widgets',messages:[{id:'panels',role:'assistant',content:steps[1].content,status:'complete',error:'',steps}]});
+  assert.ok(!JSON.stringify(sections).includes('[[tinybot-'),'Export replaces references with readable titles');
+  const shared=selectedConversation({title:'Widgets',messages:[{id:'panels',role:'assistant',content:steps[1].content,status:'complete',error:'',steps}]},['panels']);
+  const markdown=conversationMarkdown(shared);
+  assert.ok(markdown.includes('[publish_life_panel]')&&markdown.includes('[manage_life_board]'));
+  assert.ok(!markdown.includes('[[tinybot-')&&!markdown.includes('Preview unavailable'));
+  assert.ok(!JSON.stringify(shared).includes('debug-probe'),'Sharing excludes unrelated card data and receipts');
+  console.log('PASS optional card/board references: inline placement, omitted/debug suppression, duplicate and board deduplication, read-only lookup, streaming/status gates and export');
+
+  // Exercise the actual emitted answer builder, including its surrounding tail.
+  const source=path.join(root,'views/MessageBubble.ets');
+  const emitted=path.resolve(__dirname,'../entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/views/MessageBubble.ts');
+  assert.ok(fs.statSync(emitted).mtimeMs>=fs.statSync(source).mtimeMs,'Build before native answer rendering checks');
+  const tree=ts.createSourceFile(emitted,fs.readFileSync(emitted,'utf8'),ts.ScriptTarget.Latest,true);
+  const component=tree.statements.find(n=>ts.isClassDeclaration(n)&&n.name.text==='MessageBubble');
+  const method=component.members.find(n=>n.name?.getText(tree)==='assistantMessage').getText(tree);
+  function mount(content,status='complete'){
+    const rendered=[],noUi=new Proxy({},{get:()=>()=>{}}),effect={combine(){return this},animation(){return this}};
+    const child=kind=>class{constructor(_parent,params){rendered.push({kind,...params});}};
+    const globals={exports:{},Column:noUi,Row:noUi,ForEach:noUi,Text:noUi,Image:noUi,Blank:noUi,If:noUi,Space:{},HorizontalAlign:{},VerticalAlign:{},FontWeight:{},Motion:{},Alignment:{},
+      TransitionEffect:{OPACITY:effect,translate:()=>effect},ViewPU:{create(){}},ViewStackProcessor:{StartGetAccessRecordingFor(){},StopGetAccessRecording(){}},
+      InteractiveAnswer:child('text'),PublishedPanelCard:child('panel'),PublishedPreviewCard:child('preview'),ProcessGroup:child('process'),MessageUsage:child('usage'),
+      stepPreviews,deliveredFiles:()=>[],turnFileChanges:()=>[], $r:x=>x};
+    vm.runInNewContext(ts.transpileModule('class Probe{'+method+'}exports.Probe=Probe;',{
+      compilerOptions:{target:ts.ScriptTarget.ES2021}}).outputText,globals);
+    const current=[publish,{content,tools:[]}];let next=0;
+    const view=Object.assign(new globals.exports.Probe(),{message:{id:'native',content,status,error:'',stepViews:current,steps:current},appearance:{},latestPreviewIds:[],
+      images:()=>[],workflowVisible:()=>false,timeline:()=>buildTimeline(current),entryVisible:()=>true,traceEntry:()=>false,folded:()=>true,workflowRail:()=>undefined,
+      answerParts:index=>publishedAnswerParts('native',current,index,status,[]),retryStatus:()=>'',messageActions(){},
+      observeComponentCreation2:fn=>fn(++next,true),ifElseBranchUpdateFunction:(_id,render)=>render(),forEachUpdateFunction:(_id,items,render)=>items.forEach(render)});
+    view.assistantMessage();return rendered.filter(p=>['text','panel','preview'].includes(p.kind));
+  }
+  assert.deepEqual(mount('Done').map(p=>p.kind),['text'],'The actual answer tail never appends published widgets');
+  const native=mount(steps[1].content);
+  assert.deepEqual(native.map(p=>p.kind),['text','panel','text','panel','text']);
+  assert.equal(native[3].reference.target.panelId,'mail');
+  assert.equal(mount(ref+'\n'+ref).length,1,'Native output mounts repeated references once');
+  assert.equal(mount(ref,'generating').length,0,'No widget mounts during generation');
+  console.log('PASS emitted MessageBubble: optional inline widget placement, no appended cards, repeated reference mounts once and generation mounts none');
+}
 async function main(){
+  panelReferences();
   const f=fixture();let reference;
   const rounds=await execute(f,(round,messages)=>{
     if(round===0)return {content:'Preparing',toolCalls:[call('prepare','publish_preview',{path:'scene.html'})]};

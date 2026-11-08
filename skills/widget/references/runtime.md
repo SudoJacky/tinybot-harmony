@@ -19,6 +19,21 @@ document.querySelector('#refresh').onclick = async () => {
 
 Context includes `data`, `inputs`, `title`, `status` (`ready`, `running`, `failed`), `canRefresh`, `locale`, `theme` and theme `tokens`. Updates arrive without reloading HTML. Use the context locale for user-facing formatting. `refresh({symbol:"B"})` passes declared/validated inputs to the same source; it does not add a new action. Query only on an explicit user action, never on startup, a timer or `onUpdate`. Hidden validation cannot run live refresh tasks. `refresh` is rejected without a source or when the view is not an interactive foreground card.
 
+Mail-source cards can read a selected email directly, without a model call:
+
+```js
+row.onclick = async () => {
+  try {
+    const mail = await tinybot.panel.readMail({uidValidity: message.uidValidity, uid: message.uid});
+    body.textContent = mail.text;
+  } catch (error) { status.textContent = error.message; }
+};
+```
+
+`context.canReadMail` indicates that the card has a native mail source and read handler; mailbox/body permissions are checked on every request. Use the `uidValidity` and `uid` from a source message and keep them when transforming list data. The account/folder are taken from the saved card source; HTML cannot override them. The result is `{message,text}`: metadata and decoded plain text, not a generated summary or executable HTML. Use `textContent` and `white-space:pre-wrap` for the body. No attachments or remote images are opened, and messages remain unread. Keep bodies in memory unless the user explicitly needs persistent copies; never fetch on startup, timers or `onUpdate`.
+
+Only one body read may run per card view. Preview, hidden/background, snapshot and validation hosts cannot read mail. Hiding/closing the card cancels the request; account changes and card-definition changes reject stale results. Show permission/size/missing-message failures in the card. Hidden interaction checks should cover list/expand/error handling without requiring a live body; verify successful acquisition on the actual foreground card.
+
 There are three distinct kinds of state:
 
 | State | Owner and API |

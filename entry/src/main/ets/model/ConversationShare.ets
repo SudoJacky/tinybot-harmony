@@ -2,7 +2,9 @@ import { ThreadData, MessageData } from './Conversation';
 import { ProviderProfile } from './ProviderProfiles';
 import { t } from './I18n';
 import { AgentStep } from './Agent';
-import { previewReferenceParts, previewReferenceTargets } from './PreviewReferences';
+import { previewReference, previewReferenceParts, previewReferenceTargets } from './PreviewReferences';
+import { answerReferenceParts } from './AnswerReferences';
+import { publishedPanels } from './PublishedPanel';
 
 export interface ConversationShareData {
   thread: ThreadData;
@@ -18,6 +20,20 @@ export function sharingMessages(messages: MessageData[]): MessageData[] {
       const steps = message.steps.filter((step) => !step.requestError && !step.uiValidation);
       const last = steps[steps.length - 1];
       body = last && !last.tools.length ? last.content : '';
+    }
+    const parts = answerReferenceParts(body);
+    if (message.role === 'assistant' && parts.some((part) => ['panel', 'board', 'invalid-panel'].includes(part.kind))) {
+      const panels = publishedPanels(message.steps || []);
+      // Shared transcripts retain readable titles, not live cards or their private data/tool outputs.
+      body = parts.map((part) => {
+        if (part.kind === 'text') { return part.content; }
+        if (part.kind === 'preview') { return previewReference(part.previewId) + '\n'; }
+        if (part.kind === 'panel' || part.kind === 'board') {
+          const target = panels.find((item) => item.key === part.panelKey && (part.kind === 'panel' ? !!item.target.panelId : !!item.target.boardId));
+          return '[' + (target?.title || 'Life Panel unavailable') + ']\n';
+        }
+        return part.content + '\n';
+      }).join('');
     }
     const referenced = previewReferenceParts(body).filter((part) => part.kind === 'preview').map((part) => part.previewId);
     const previews = previewReferenceTargets(message.steps || []).filter((target) => referenced.includes(target.previewId));

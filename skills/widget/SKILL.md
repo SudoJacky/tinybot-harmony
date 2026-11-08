@@ -17,10 +17,12 @@ Life Panel is a persistent card, separate from temporary previews and Mini apps.
 
 Choose only the additional references needed:
 
-- Read [data sources](references/sources.md) for local JSON, public/API queries or mail; [transforms](references/transforms.md) for response calculations.
+- Read [data sources](references/sources.md) for local JSON, public/API queries or mail; [transforms](references/transforms.md) for response calculations. Mail cards can display full plain-text bodies with native `tinybot.panel.readMail({uidValidity,uid})` on a user click; use an Agent source only for model-based summaries/extraction.
 - Read [refresh tasks](references/tasks.md) for Agent-backed acquisition, periodic updates, pause/resume or run failures. Tinybot has no separate Automation/Binding objects: `source`, `inputs`, `dataSchema` and `refreshMinutes` on the card define that connection.
 - Read [provider balances](references/provider-balance.md) for balance/quota widgets. Use `get_life_panel_catalog({section:"balance"})` for current allowed accounts and a matching definition; read `assets/balance.html` only when using that reference design.
 
 ## Delivery evidence
+
+Publishing or reading a card does not automatically show it in chat. To show a useful result, optionally copy the tool receipt's `reference` verbatim on its own line in the final answer, outside code fences, at the intended position. Omit it for intermediate/debug cards or when a text answer suffices. Do not invent IDs or republish just to obtain a reference: use `get_life_panel` for an existing card. Repeated references display the card once.
 
 Distinguish saved layout, runtime validation, successful data acquisition and visual review. Tools return JSON, not automatic screenshots. Do not claim screenshot review without an actual image. Missing credentials can be explicitly deferred with `checkSource:false`; report setup as pending, not tested. A tested failure must be repaired rather than hidden by deferring the check.

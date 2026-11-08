@@ -1,7 +1,9 @@
 import { PanelInputs } from '../model/PanelContract';
+import { MailReadRequest } from '../model/Mail';
 import { PanelRect, panelMasonry, panelSourceLabel, panelRunLabel, panelErrorText } from '../model/PanelPresentation';
 import { GridRect, GRID_GAP, GRID_ROW_STEP, GRID_MAX_ROWS, gridStep, gridPixels, gridSnap, gridPlace, gridVacancy } from '../model/PanelGrid';
 import { PanelGridGuide } from './PanelGridGuide';
+import { SendFrame } from '../common/SendBubbleMotion';
 import { common } from '@kit.AbilityKit';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Btn, Motion, relativeTime, gradientColor } from '../common/Theme';
@@ -101,7 +103,7 @@ export struct LifePanelsPanel {
   private scanning: boolean = false;
   private unsubscribe?: () => void;
   private lastTarget: string = '';
-  private guidesPrepared: boolean = false;
+  private builtinsPrepared: boolean = false;
   private boardStore(): LifeBoards { return new LifeBoards((this.getUIContext().getHostContext() as common.UIAbilityContext).getApplicationContext().filesDir); }
   private boardKey(entry: BoardEntry): string { return entry.workspaceId + '/' + entry.board.id; }
   private boardFor(key: string): BoardEntry { return this.boards.find((entry: BoardEntry) => this.boardKey(entry) === key)!; }
@@ -115,9 +117,9 @@ export struct LifePanelsPanel {
     return this.store;
   }
   aboutToAppear(): void { this.mounted = true; this.activityChanged(); this.unsubscribe = PanelChanges.subscribe(() => {
-    // Initial publication emits changes before the guide board exists. The first scan reloads
+    // Initial publication emits changes before the built-in boards exist. The first scan reloads
     // the completed installation; a partial snapshot must not clear its default selection.
-    if (this.mounted && this.active && this.guidesPrepared) { this.reload().catch((error: Error) => this.report(error)); }
+    if (this.mounted && this.active && this.builtinsPrepared) { this.reload().catch((error: Error) => this.report(error)); }
   }); }
   aboutToDisappear(): void { this.mounted = false; this.stop(); this.unsubscribe?.(); }
   private stop(): void { this.resetGesture(); clearTimeout(this.timer); this.timer = -1; this.cancellation.cancel(); }
@@ -131,9 +133,12 @@ export struct LifePanelsPanel {
     const boards = await this.boardStore().list();
     for (const item of boards.flatMap((entry: BoardEntry) => entry.board.items)) { if (!entries.some((entry: PanelEntry) => this.entryKey(entry) === referenceKey(item))) { throw new Error('A board references a missing card: ' + item.panelId); } }
     if (this.mounted) {
+      const tabsChanged = this.boards.filter((entry: BoardEntry) => !entry.board.archived).map((entry: BoardEntry) => this.boardKey(entry)).join(',') !==
+        boards.filter((entry: BoardEntry) => !entry.board.archived).map((entry: BoardEntry) => this.boardKey(entry)).join(',');
       this.entries = entries; this.boards = boards;
       if (this.boardSelection && !boards.some((entry: BoardEntry) => this.boardKey(entry) === this.boardSelection && !entry.board.archived)) { this.boardSelection = ''; this.selected = ''; }
       this.now = Date.now(); this.targetChanged();
+      if (tabsChanged) { this.revealBoard(); }
     }
   }
   private targetChanged(): void {
@@ -161,15 +166,15 @@ export struct LifePanelsPanel {
     this.scanning = true;
     const signal = this.cancellation;
     // The app-level scheduler owns automatic work so navigating away cannot cancel it.
-    this.prepareGuides(signal).then(() => this.reload()).catch((error: Error) => { if (!signal.cancelled) { this.report(error); } }).finally(() => {
+    this.prepareBuiltins(signal).then(() => this.reload()).catch((error: Error) => { if (!signal.cancelled) { this.report(error); } }).finally(() => {
       this.scanning = false;
       if (this.mounted && this.foreground && this.active && !signal.cancelled) { this.timer = setTimeout(() => this.scan(), 30000); }
     });
   }
-  private async prepareGuides(signal: Cancellation): Promise<void> {
-    if (this.guidesPrepared) { return; }
+  private async prepareBuiltins(signal: Cancellation): Promise<void> {
+    if (this.builtinsPrepared) { return; }
     const target = await new BuiltinBoard(this.getUIContext().getHostContext() as common.UIAbilityContext).prepare(signal);
-    signal.check(); this.guidesPrepared = true;
+    signal.check(); this.builtinsPrepared = true;
     if (target && !this.boardSelection && !this.requestedTarget) { this.boardSelection = target.workspaceId + '/' + target.boardId; this.selected = ''; }
   }
   private entryKey(entry: PanelEntry): string { return entry.workspaceId + '/' + entry.panel.id; }
@@ -263,7 +268,7 @@ export struct LifePanelsPanel {
     const bottom = this.layouts().reduce((height: number, rect: PanelRect) => Math.max(height, rect.y + rect.height), 0);
     return this.dragging || this.resizing ? Math.max(bottom, this.gestureExtent, this.scrollOffset + this.viewportHeight + 2 * GRID_ROW_STEP) : bottom;
   }
-  private ghost(): PanelRect { return gridPixels(this.targetRect, this.boardWidth); }
+  private ghost(): PanelRect { return gridPixels(this.gridRect(this.dragging || this.resizing), this.boardWidth); }
   private measured(key: string, area: Area): void {
     const height = Number(area.height);
     if (height > 0 && Math.abs((this.cardHeights[key] || 0) - height) > 1) {
@@ -273,8 +278,12 @@ export struct LifePanelsPanel {
     }
   }
   private revealBoard(): void {
-    const index = this.boards.filter((entry: BoardEntry) => !entry.board.archived).findIndex((entry: BoardEntry) => this.boardKey(entry) === this.boardSelection) + 1;
-    this.boardScroller.scrollToIndex(index, false, ScrollAlign.CENTER);
+    const selection = this.boardSelection;
+    this.getUIContext().postFrameCallback(new SendFrame(() => {
+      if (!this.mounted || this.boardSelection !== selection) { return; }
+      const index = this.boards.filter((entry: BoardEntry) => !entry.board.archived).findIndex((entry: BoardEntry) => this.boardKey(entry) === selection) + 1;
+      this.boardScroller.scrollToIndex(index, false, ScrollAlign.CENTER);
+    }));
   }
   private async detailChanged(): Promise<void> {
     this.connectionStatus = '';
@@ -393,6 +402,10 @@ export struct LifePanelsPanel {
       storage: this.panels().repository(this.entryFor(key).workspaceId).binding(this.entryFor(key).panel.id, this.entryFor(key).panel.configRevision),
       viewStorage: this.viewStorage(key),
       onRun: async (inputs?: PanelInputs) => { await this.panels().repository(this.entryFor(key).workspaceId).refresh(this.entryFor(key).panel.id, this.cancellation, 'manual', inputs); await this.reload(); },
+      onReadMail: (request: MailReadRequest, cancellation: Cancellation) => {
+        const entry = this.entryFor(key);
+        return this.panels().repository(entry.workspaceId).readMail(entry.panel.id, entry.panel.configRevision, request, cancellation);
+      },
       onRuntimeError: (message: string, revision: number) => { const entry = this.entryFor(key); this.panels().repository(entry.workspaceId).recordRuntimeError(entry.panel.id, revision, message).catch((error: Error) => this.report(error)); },
       onMoveStart: (event: GestureEvent) => this.startMove(key, event), onMoveUpdate: (event: GestureEvent) => this.moveCard(event),
       onMoveEnd: (event: GestureEvent) => { this.dropCard(event); }, onMoveCancel: () => this.resetGesture(),

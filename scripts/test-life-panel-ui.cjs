@@ -23,7 +23,7 @@ const model=loadModel('LifePanel');
 const signal=compile(fs.readFileSync(path.join(root,'entry/src/main/ets/services/Cancellation.ets'),'utf8'),
   {require:()=>({ToolFailure:class extends Error {}})});
 const tree=emitted('views/LifePanelsPanel'), panel=tree.statements.find(n=>ts.isClassDeclaration(n)&&n.name.text==='LifePanelsPanel');
-const names=['stop','activityChanged','scan','reload','report','entryKey','refresh','change','refreshAll','visible','layouts','rect','boardHeight','currentBoard','currentEditorThreadId','boardKey','targetChanged','dropCard','gridRect','beginLayout','updateLayout','finishLayout','followEdge','startMove','moveCard','resetGesture','resizeCard','heightOnBoard','entryFor','createCard','showEditor','addBuiltin','aboutToAppear'];
+const names=['stop','activityChanged','scan','reload','report','entryKey','refresh','change','refreshAll','visible','layouts','rect','boardHeight','ghost','currentBoard','currentEditorThreadId','boardKey','targetChanged','dropCard','gridRect','beginLayout','updateLayout','finishLayout','followEdge','startMove','moveCard','resetGesture','resizeCard','heightOnBoard','entryFor','createCard','showEditor','addBuiltin','aboutToAppear','revealBoard'];
 const methods=panel.members.filter(n=>ts.isMethodDeclaration(n)&&names.includes(n.name.getText(tree))).map(n=>n.getText(tree)).join('\n');
 assert.equal(panel.members.filter(n=>ts.isMethodDeclaration(n)&&names.includes(n.name.getText(tree))).length,names.length);
 const timers=new Map(), logs=[];let timerId=0;
@@ -31,23 +31,39 @@ let installBuiltin,panelChange;
 const {Probe}=compile('export class Probe {'+methods+'}',{...loadModel('I18n'),...model,...signal,...loadModel('LifeBoard'),...loadModel('PanelPresentation'),...loadModel('PanelGrid'),
   builtinWidget:loadModel('BuiltinWidgets').builtinWidget,BuiltinWidgets:class{async add(...args){return installBuiltin(...args);}},
   PanelChanges:{subscribe:listener=>{panelChange=listener;return()=>{};}},
+  SendFrame:class{constructor(action){this.onIdle=action;}},ScrollAlign:{CENTER:'center'},
   setTimeout:(fn,ms)=>{timers.set(++timerId,{fn,ms});return timerId;},clearTimeout:id=>timers.delete(id),
   Motion:{medium:180,thumb:'spring'},Diagnostics:{log:(...args)=>logs.push(args)}});
 const turn=()=>new Promise(resolve=>setImmediate(resolve));
 function entry(id,refreshMinutes=1) {return {workspaceId:'chat',panel:{id,configRevision:1,archived:false,createdAt:1,
   definition:{size:'S',source:{type:'workspace-json',path:'data.json'},refreshMinutes},refreshedAt:0,attemptedAt:0}};}
 function view(entries=[],repository={}) {
+  const frames=[];
   const page=new Probe();Object.assign(page,{mounted:true,active:true,foreground:true,timer:-1,cancellation:new signal.Cancellation(),scanning:false,
-    getUIContext:()=>({getFocusController:()=>({clearFocus(){}}),animateTo:(_options,action)=>action()}),layoutSaving:false,dragging:'',resizing:'',edgeTimer:-1,previewRects:[],gestureItems:[],viewportTop:0,viewportHeight:1000,scrollOffset:0,contentScroller:{currentOffset:()=>({yOffset:0}),scrollBy(){}},cardHeights:{},entries:[],pending:[],error:'',selected:'',removed:false,boardWidth:360,boards:[],boardSelection:'',requestedTarget:'',lastTarget:''});
+    getUIContext:()=>({getFocusController:()=>({clearFocus(){}}),animateTo:(_options,action)=>action(),postFrameCallback:frame=>frames.push(frame)}),renderBoardFrames:()=>frames.splice(0).forEach(frame=>frame.onIdle()),layoutSaving:false,dragging:'',resizing:'',edgeTimer:-1,previewRects:[],gestureItems:[],viewportTop:0,viewportHeight:1000,scrollOffset:0,contentScroller:{currentOffset:()=>({yOffset:0}),scrollBy(){}},cardHeights:{},entries:[],pending:[],error:'',selected:'',removed:false,boardWidth:360,boards:[],boardSelection:'',requestedTarget:'',lastTarget:''});
   page.boardStore=()=>({list:async()=>[]});
-  page.prepareGuides=async()=>{};
+  page.prepareBuiltins=async()=>{};
   page.panels=()=>({list:async()=>entries,repository:()=>repository});return page;
 }
 async function main() {
   {
-    const initial=view();let reloads=0;initial.guidesPrepared=false;initial.activityChanged=()=>{};initial.reload=async()=>{reloads++;};
+    const initial=view(),positions=[];
+    initial.boardScroller={scrollToIndex:(...args)=>positions.push(args)};
+    initial.boardSelection='tinybot-builtins/board-daily';
+    const tabs=[{workspaceId:'user',board:{id:'custom',items:[],archived:false}},{workspaceId:'tinybot-builtins',board:{id:'board-daily',items:[],archived:false}}];
+    initial.boardStore=()=>({list:async()=>tabs});
+    initial.revealBoard();initial.renderBoardFrames();positions.length=0;
+    await initial.reload();assert.equal(positions.length,0,'Do not scroll to a tab before native layout creates it');
+    initial.renderBoardFrames();assert.deepEqual(positions,[[2,false,'center']],'Reveal the actual default tab after its rows render');
+    await initial.reload();initial.renderBoardFrames();assert.equal(positions.length,1,'Periodic data reload must not reset manual tab scrolling');
+    initial.revealBoard();initial.boardSelection='user/custom';initial.renderBoardFrames();assert.equal(positions.length,1,'Ignore stale selection callbacks');
+    initial.revealBoard();initial.mounted=false;initial.renderBoardFrames();assert.equal(positions.length,1,'Ignore callbacks after leaving the page');
+    console.log('PASS initial default tab waits for native layout, updates after asynchronous board loading and preserves manual scrolling on data reload');
+  }
+  {
+    const initial=view();let reloads=0;initial.builtinsPrepared=false;initial.activityChanged=()=>{};initial.reload=async()=>{reloads++;};
     initial.aboutToAppear();panelChange();assert.equal(reloads,0,'Partial default publication must not race the completed board snapshot');
-    initial.guidesPrepared=true;panelChange();await turn();assert.equal(reloads,1,'Changes after initialization still refresh the collection');
+    initial.builtinsPrepared=true;panelChange();await turn();assert.equal(reloads,1,'Changes after initialization still refresh the collection');
     console.log('PASS initial guide publications are coalesced until the default board is complete');
   }
   {
@@ -160,6 +176,10 @@ async function main() {
   assert.equal(arranged.feedback,'Layout saved');assert.equal(arranged.targetRect.x,0);assert.equal(arranged.targetRect.y,12);
   assert.equal(JSON.stringify(arranged.boards),before,'Live preview must not mutate saved geometry');
   assert.deepEqual(JSON.parse(JSON.stringify(arranged.previewRects)),[rects[0],{x:0,y:12,w:6,h:5},rects[2]],'A B / C can become A / C / B');
+  arranged.moveCard(point(200-6*step,200+20*rowStep));
+  assert.equal(arranged.targetRect.y,20);assert.equal(arranged.previewRects[1].y,12,'Dragging into empty rows previews the compact result');
+  assert.equal(arranged.ghost().y,12*rowStep,'Drop indicator shows the eventual compact position');
+  arranged.moveCard(point(200-6*step,200+12*rowStep));
   await arranged.finishLayout();assert.equal(placement[2].panelId,'b');assert.equal(placement[3].y,12);assert.equal(arranged.dragging,'');assert.equal(arranged.feedback,'Layout saved','Saving geometry does not produce a page-level status row');
   arranged.startMove('chat/b',point(200,200));arranged.moveCard(point(200-6*step,200));
   assert.equal(arranged.previewRects[0].y,5,'Collision preview pushes A down');assert.equal(arranged.previewRects[2].y,10,'C follows cascade');

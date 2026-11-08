@@ -4,7 +4,7 @@ import { ToolExecution } from '../model/Agent';
 import { t } from '../model/I18n';
 import { stepDisplayContent, stepPreviews, PublishedPreview, PublishedAnswerPart, publishedAnswerParts } from '../model/PublishedPreview';
 import { PublishedPreviewCard } from './PublishedPreviewCard';
-import { PublishedPanel, publishedPanels } from '../model/PublishedPanel';
+import { PublishedPanel } from '../model/PublishedPanel';
 import { PublishedPanelCard } from './PublishedPanelCard';
 import { PresentedFile, deliveredFiles } from '../model/Deliverables';
 import { turnFileChanges } from '../model/TurnFileChanges';
@@ -614,6 +614,8 @@ export struct MessageBubble {
                     inspectable: this.previewInspectable, inspected: this.inspectedPreviewId === this.answerParts(entry.step)[partIndex].preview?.id,
                     onInspect: () => this.onInspectPreview(this.message.id, (this.answerParts(entry.step)[partIndex].preview as PublishedPreview).id),
                     saved: this.message.uiStates, presentation: this.message.uiPresentation, available: this.uiAvailable, onInteract: this.onUi })
+                } else if (this.answerParts(entry.step)[partIndex].kind === 'panel') {
+                  PublishedPanelCard({ reference: this.answerParts(entry.step)[partIndex].panel as PublishedPanel })
                 } else if (this.answerParts(entry.step)[partIndex].kind === 'error') {
                   Text(this.answerParts(entry.step)[partIndex].content).fontSize(13).fontColor($r('app.color.danger'))
                 }
@@ -645,9 +647,6 @@ export struct MessageBubble {
       if (this.hasExtra) {
         this.extra()
       }
-      ForEach(publishedPanels(this.message.stepViews), (reference: PublishedPanel) => {
-        PublishedPanelCard({ reference: reference })
-      }, (reference: PublishedPanel) => reference.key)
       ForEach(deliveredFiles(this.message.stepViews), (file: PresentedFile) => {
         Button() {
           Row({ space: 12 }) {
