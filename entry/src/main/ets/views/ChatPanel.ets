@@ -1547,19 +1547,19 @@ export struct ChatPanel {
       if (this.voiceMode) {
         Row({ space: 4 }) {
           this.composerAddButton()
-          VoiceHoldButton({ phase: this.speech.phase, action: this.speechTarget, disabled: !this.canRecordSpeech(),
+          VoiceHoldButton({ phase: this.speech.phase, action: this.speechTarget, disabled: !this.canRecordSpeech(), controlHeight: this.workbench ? 44 : 52,
             onHold: (): boolean => this.startSpeech(), onMove: (x: number, y: number): void => this.moveSpeech(x, y),
             onRelease: (): void => this.releaseSpeech(), onCancel: (): void => this.cancelSpeechHold() }).layoutWeight(1)
-          IconButton({ icon: $r('sys.symbol.keyboard'), label: t('切换到键盘输入'), compId: 'voice-keyboard', diameter: 36,
+          IconButton({ icon: $r('sys.symbol.keyboard'), label: t('切换到键盘输入'), compId: 'voice-keyboard', diameter: this.workbench ? 36 : 44,
             iconSize: 20, fill: $r('app.color.surface_variant'), disabled: this.speechActive() || this.speechHolding,
             onTap: () => this.showSpeechKeyboard() })
           if (this.app.generating) {
-            IconButton({ icon: $r('sys.symbol.square_fill'), label: t("停止"), compId: 'stop-generation', diameter: 36,
+            IconButton({ icon: $r('sys.symbol.square_fill'), label: t("停止"), compId: 'stop-generation', diameter: this.workbench ? 36 : 44,
               iconSize: 14, fill: $r('app.color.text_primary'), tint: $r('app.color.page_background'),
               onTap: () => { this.app.stop(); } })
               .transition(Motion.pop())
           }
-        }.width('100%').height(56).padding({ left: 8, right: 8 })
+        }.width('100%').height(this.workbench ? 56 : 64).padding({ left: 8, right: 8, top: 6, bottom: 6 })
       } else {
       Row() {
         if (this.speechActive()) {

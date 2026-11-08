@@ -37,14 +37,14 @@ function renderer(name) {
     gradientColor: () => '#FFFFFF', getLocale: () => 'zh-CN', resolvePanelInputs: (_definition, inputs) => inputs,
     panelRunTrigger: () => '手动触发', panelErrorText: text => text,
     t: (text, args = []) => text.replace(/\{(\d+)\}/g, (_, i) => args[i]), relativeTime: time => String(time),
-    Motion:{rise:()=>({}),medium:180,fast:100,thumb:'spring',standard:'ease'},IconButton: class {}, ButtonType: {}, EdgeEffect: {}, Axis: {}, Color: {}, HitTestMode: {}, ScrollAlign: {}, Btn: {}, Radius: {}, TextOverflow: {}, VerticalAlign: {}, ViewPU: { create: noop }, ObservedObject: { GetRawObject: value => value }, referenceKey: item => item.workspaceId + '/' + item.panelId,
+    Motion:{rise:()=>({}),medium:180,fast:100,thumb:'spring',standard:'ease'},IconButton: class {}, ButtonType: {}, EdgeEffect: {}, Axis: {}, Color: {}, HitTestMode: {None:'none'},LineCapStyle:{Round:'round'},LineJoinStyle:{Round:'round'}, ScrollAlign: {}, Btn: {}, Radius: {}, TextOverflow: {}, VerticalAlign: {}, ViewPU: { create: noop }, ObservedObject: { GetRawObject: value => value }, referenceKey: item => item.workspaceId + '/' + item.panelId,
     LifePanelCard: class { constructor(parent, params, _storage, id) { children.set(id, { ...params }); } },
     WebUiView: class { constructor(parent, params, _storage, id) { children.set(id, { ...params }); } },
     Diagnostics: { log: noop }, systemInsets: async () => [0, 24],
     LongPressGesture: element('gesture'), PanGesture: element('gesture'), GestureGroup: element('gesture'),
-    NestedScrollMode: { PARENT_FIRST: 'parent', SELF_FIRST: 'self' }, BorderStyle: {}, PanelGridGuide: class {}, GestureMode: {}, PanDirection: { Vertical: 'vertical' }, ScrollDirection: {Vertical:1,None:0}, BarState: {}, FontWeight: {}, FlexAlign: {}, TextAlign: {}, HorizontalAlign: {}, Alignment: {},
+    NestedScrollMode: { PARENT_FIRST: 'parent', SELF_FIRST: 'self' }, BorderStyle: {}, PanelGridGuide: class {}, GestureMode: {}, PanDirection: { Vertical: 'vertical' }, ScrollDirection: {Vertical:1,None:0}, BarState: {}, FontWeight: {}, FlexAlign: {}, TextAlign: {}, HorizontalAlign: {}, Alignment: {TopStart:'top-start',BottomEnd:'bottom-end'},
     GesturePriority: {}, GestureMask: {}, GestureJudgeResult: { REJECT: 0, CONTINUE: 1 }, BarStyle: {}, SheetType: {}, SheetSize: {}, Gesture: element('gesture') };
-  for (const name of ['__Common__','Column','Row','Scroll','Stack','Button','Blank','Text','TextInput','If','ForEach','Checkbox','List','ListItem','Refresh','SymbolGlyph','LoadingProgress','Menu','MenuItem','MenuItemGroup','NavDestination']) globals[name] = element(name);
+  for (const name of ['__Common__','Column','Row','Scroll','Stack','Shape','Path','Button','Blank','Text','TextInput','If','ForEach','Checkbox','List','ListItem','Refresh','SymbolGlyph','LoadingProgress','Menu','MenuItem','MenuItemGroup','NavDestination']) globals[name] = element(name);
   vm.runInNewContext(ts.transpileModule('export class Probe {' + methods + '}', { compilerOptions: {
     target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS
   } }).outputText, globals);
@@ -263,6 +263,18 @@ for (const html of [true,false]) {
     onBoard: true, interactive: true, timestamp: '', viewHeight: 176, frameHeight: 176,
     panel: { ...initialCard.panel, definition: { ...initialCard.panel.definition, view: html ? initialCard.panel.definition.view : undefined, nodes: [] } } });
   fixed.view.initialRender();
+  const hints=[...fixed.attributes.values()].find(a=>a.id==='panel-layout-hints-'+initialCard.panel.id);
+  assert.ok(hints,'HTML and native board cards expose their actual layout bounds');
+  assert.equal(hints.width,'100%');assert.equal(hints.height,'100%');assert.equal(hints.hitTestBehavior,'none','Hints never intercept card taps, scrolling or existing corner gestures');
+  const moveHint=[...fixed.attributes.values()].find(a=>a.id==='panel-move-hint-'+initialCard.panel.id);
+  const resizeHint=[...fixed.attributes.values()].find(a=>a.id==='panel-resize-hint-'+initialCard.panel.id);
+  assert.equal(hints.create.alignContent,'top-start');assert.equal(moveHint,undefined,'Move corners remain functional without a visual marker');assert.ok(resizeHint);
+  assert.equal(resizeHint.opacity,0.22,'Idle resize hints stay subtle');
+  assert.equal(resizeHint.hitTestBehavior,'none','The visual shape also skips hit testing');
+  const resizeAnchor=[...fixed.attributes.values()].find(a=>a.id==='panel-resize-anchor-'+initialCard.panel.id);
+  assert.equal(resizeAnchor.create.alignContent,'bottom-end');assert.equal(resizeAnchor.width,'100%');assert.equal(resizeAnchor.height,'100%');
+  assert.equal(resizeAnchor.hitTestBehavior,'none','HitTestMode.None on a parent does not disable hit testing of children');
+  assert.ok([...fixed.attributes.values()].filter(a=>a.kind==='Path').every(a=>a.hitTestBehavior==='none'),'Decorative path descendants must also be transparent to clicks');
   const frame = [...fixed.attributes.values()].find(a => a.nestedScroll);
   assert.equal(frame.nestedScroll.scrollForward,'parent','Fixed card frames relay upward swipes to the board');
   assert.equal(frame.nestedScroll.scrollBackward,'parent','Fixed card frames relay downward swipes to the board');
@@ -271,6 +283,12 @@ for (const html of [true,false]) {
     fixed.view.detail = true; fixed.update();
     assert.equal([...fixed.children.values()][0].preferParentScroll,false,'Detail Web cards retain their own scrolling');
   }
+}
+for(const restriction of [{onBoard:false},{interactive:false},{detail:true},{editing:true},{panel:{...initialCard.panel,archived:true}}]){
+  const hidden=renderer('LifePanelCard');
+  Object.assign(hidden.view,{...initialCard,onBoard:true,interactive:true,detail:false,editing:false,appearance:{},frameHeight:176,viewHeight:176,...restriction});
+  hidden.view.initialRender();
+  assert.ok(![...hidden.attributes.values()].some(a=>a.id==='panel-layout-hints-'+initialCard.panel.id),'Hide layout hints whenever moving/resizing is unavailable');
 }
 console.log('PASS fixed HTML/native cards prioritize board scrolling in both directions while detail cards remain interactive');
 const scrollingCard=renderer('LifePanelCard').view, scrollCalls=[], flings=[];

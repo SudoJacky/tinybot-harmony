@@ -454,18 +454,40 @@ async function lifePanelTest() {
   panelResponse='<html>Sign in</html>';await assert.rejects(new NativePanelSourceReader(scoped).read(httpSpec,signal));
   // Mail snapshots use the same production reader, transforms, persistence and failure history.
   // Protocol and secure-account behavior are covered separately by test-mail.cjs.
-  const {MailService}=load('services/MailService'), originalQuery=MailService.prototype.query;
-  let mailFailure=false;
+  const {MailService}=load('services/MailService'), originalQuery=MailService.prototype.query, originalRead=MailService.prototype.read;
+  let mailFailure=false, finishMailRead, mailReadCalls=0;
   MailService.prototype.query=async function(query,cancellation){cancellation.check();assert.equal(query.accountId,'mail-connection');if(mailFailure)throw Error('Mailbox access is disabled in Settings');return {unread:4,messages:[{id:'42:9',subject:'Delivery'}]};};
+  MailService.prototype.read=async function(accountId,folder,uidValidity,uid,cancellation){
+    cancellation.check();mailReadCalls++;assert.equal(accountId,'mail-connection');assert.equal(folder,'INBOX');assert.equal(uidValidity,42);assert.equal(uid,9);
+    if(mailFailure)throw Error('Email body access is disabled in Settings');
+    if(finishMailRead===null)await new Promise(resolve=>{finishMailRead=resolve;});
+    cancellation.check();return {message:{uid,uidValidity,subject:'Delivery'},text:'Original message body, not a model summary'};
+  };
   try {
     const mailSpec={version:1,title:'Mail',size:'S',refreshMinutes:5,source:{type:'mail',mail:{accountId:'mail-connection',folder:'INBOX',limit:5},
       transform:{op:'object',fields:{count:{path:'/response/unread'}}}},data:{count:0},nodes:[{id:'count',kind:'Metric',value:{path:'/data/count'}}]};
     await repo.publish('mail-card',mailSpec,'mail.panel.json','deleted-chat',false,signal);
     const fresh=await repo.refresh('mail-card',signal);assert.equal(fresh.data.count,4);assert.equal(fresh.runs[0].status,'complete');
+      const message={uidValidity:42,uid:9},revision=fresh.configRevision;
+      const body=await repo.readMail('mail-card',revision,message,new Cancellation());
+      assert.equal(body.text,'Original message body, not a model summary');
+      assert.deepEqual(plain(await repo.get('mail-card')),plain(fresh),'Body reads never persist content, change source data or create refresh/Agent tasks');
+      await assert.rejects(repo.readMail('mail-card',revision,{uidValidity:42,uid:0},signal),/UID/);
+      await assert.rejects(repo.readMail('mail-card',revision+1,message,signal),/changed/);
+      assert.equal(mailReadCalls,1,'Invalid/stale requests never reach IMAP');
+      mailFailure=true;await assert.rejects(repo.readMail('mail-card',revision,message,signal),/body access/);mailFailure=false;
+      finishMailRead=null;const obsoleteBody=repo.readMail('mail-card',revision,message,signal);
+      while(!finishMailRead)await new Promise(resolve=>setTimeout(resolve,0));
+      await repo.publish('mail-card',mailSpec,'mail.panel.json','deleted-chat',true,signal,{expectedRevision:revision});
+      finishMailRead();await assert.rejects(obsoleteBody,/changed while reading/);finishMailRead=undefined;
+      const currentRevision=(await repo.get('mail-card')).configRevision;
+      const cancelled=new Cancellation();cancelled.cancel();await assert.rejects(repo.readMail('mail-card',currentRevision,message,cancelled),/已停止/);
     mailFailure=true;await assert.rejects(repo.refresh('mail-card',signal),/disabled/);
     const retained=await repo.get('mail-card');assert.equal(retained.data.count,4);assert.equal(retained.refreshedAt,fresh.refreshedAt);assert.equal(retained.runs[0].status,'failed');
     await repo.archive('mail-card',true);
-  } finally {MailService.prototype.query=originalQuery;}
+      await assert.rejects(repo.readMail('mail-card',(await repo.get('mail-card')).configRevision,message,signal),/active mail source/);
+      console.log('PASS native widget mail bodies: bound account/folder, permission failures, no persisted body/model tasks, cancellation and stale-definition rejection');
+  } finally {MailService.prototype.query=originalQuery;MailService.prototype.read=originalRead;}
   // No chat remains. Backup must retain panel-only workspaces and app-owned user edits.
   const context={filesDir:dir,cacheDir:dir+'/cache',getApplicationContext(){return this;}};
   fs.mkdirSync(disk(context.cacheDir));const {createBackupFile,readBackupFile}=load('services/Backup');
@@ -647,10 +669,25 @@ async function lifeBoardsTest() {
     {status:'complete',call:{id:'pub',function:{name:'publish_life_panel'}},output:JSON.stringify(receipt)},
     {status:'complete',call:{id:'pub-again',function:{name:'publish_life_panel'}},output:JSON.stringify(receipt)}]}]));
   assert.equal(mixed.length,2,'Repeated publication keeps one card preview and one board link');
-  assert.deepEqual(mixed.find(item=>item.target.boardId).excludedPanelKeys,['owner/shared'],
-    'A board preview excludes cards already published in this same answer, even when the board receipt came first');
+  assert.equal(mixed.find(item=>item.target.boardId).excludedPanelKeys,undefined,
+    'Available receipts alone do not decide which cards are shown');
   const boardOnly=plain(publishedPanels([{content:'',tools:[{status:'complete',call:{id:'board',function:{name:'manage_life_board'}},output:JSON.stringify(boardReceipt)}]}]));
-  assert.deepEqual(boardOnly[0].excludedPanelKeys,[],'A board-only result retains all of its card previews');
+  assert.equal(boardOnly[0].excludedPanelKeys,undefined,'Only explicit final-answer references exclude separately displayed cards');
+  const {publishedAnswerParts}=load('model/PublishedPreview');
+  const operations={content:'',tools:[
+    {status:'complete',call:{id:'pub',function:{name:'publish_life_panel'}},output:JSON.stringify(receipt)},
+    {status:'complete',call:{id:'board',function:{name:'manage_life_board'}},output:JSON.stringify(boardReceipt)}]};
+  const display=content=>plain(publishedAnswerParts('answer',[operations,{content,tools:[]}],1,'complete',[]));
+  assert.ok(receipt.reference.startsWith('[[tinybot-panel:owner/shared'));
+  assert.equal(display('Updated the card.').filter(part=>part.kind==='panel').length,0,'Saving a card/board never appends chat content');
+  const read=await invoke(tools,'get_life_panel',{workspaceId:'owner',panelId:'shared'});
+  assert.equal(read.reference,receipt.reference,'Reading an existing card obtains the same reference without republishing');
+  const readBoard=await invoke(tools,'get_life_board',{workspaceId:'another-chat',boardId:second.id});
+  assert.ok(readBoard.reference.startsWith('[[tinybot-board:another-chat/'));
+  const placed=display('Before\n'+readBoard.reference+'\nMiddle\n'+receipt.reference+'\nAfter\n'+receipt.reference);
+  assert.deepEqual(placed.filter(part=>part.kind!=='pending').map(part=>part.kind),['text','panel','text','panel','text']);
+  assert.deepEqual(placed[1].panel.excludedPanelKeys,['owner/shared']);
+  assert.deepEqual(display(readBoard.reference)[0].panel.excludedPanelKeys,[],'Unreferenced published cards remain visible inside a referenced board');
   const readonly=new RuleTools(tools,true);
   for(const name of ['manage_life_board','manage_life_panel_task','publish_life_panel'])assert.ok(!readonly.definitions().some(tool=>tool.function.name===name));
   assert.equal((await invoke(tools,'list_life_boards',{})).length,3);
@@ -693,6 +730,25 @@ async function lifeBoardsTest() {
   assert.equal(migrated.items[0].workspaceId,projectRestored.projects[0].workspaceId,'Cross-board references follow restored project workspace remapping');
   assert.equal((await new LifePanels(projectDir).repository(migrated.items[0].workspaceId).get('shared')).user['tasks:one'],true);
   console.log('PASS multi-board references, per-board layout, concurrent pins, cross-chat editing, chat receipts, task pause/history/Agent runner and orphan board backup');
+  const upgrade=await boards.create('owner','builtin-upgrade','Upgrade','',[{workspaceId:'owner',panelId:'shared',x:0,y:4,w:6,h:5}]);
+  const placement=upgrade.items[0];await boards.saveViewState('owner',upgrade.id,placement.mountId,{tab:'saved'},'initial');
+  const beforeUpgrade=await boards.get('owner',upgrade.id);
+  await Promise.all([boards.prependBuiltin('owner',upgrade.id,{workspaceId:'owner',panelId:'other'},5,1),boards.prependBuiltin('owner',upgrade.id,{workspaceId:'owner',panelId:'other'},5,1)]);
+  const upgraded=await boards.get('owner',upgrade.id);assert.equal(upgraded.items.length,2);assert.equal(upgraded.builtinRevision,1);
+  assert.deepEqual(plain(upgraded.items[1]),{...plain(beforeUpgrade.items[0]),y:5},'Banner migration retains x/size/mountId and local view state');
+  await boards.pin('owner',upgrade.id,{workspaceId:'owner',panelId:'other'},false);
+  const removed=await boards.get('owner',upgrade.id);await boards.prependBuiltin('owner',upgrade.id,{workspaceId:'owner',panelId:'other'},5,1);
+  assert.deepEqual(plain((await boards.get('owner',upgrade.id)).items),plain(removed.items),'Migration never re-adds a removed banner');
+  const renamed=await boards.save('owner',upgrade.id,'Renamed','',removed.items);assert.equal(renamed.builtinRevision,1,'Normal board edits retain the migration record');
+  assert.equal(removed.items[0].y,0,'Removing the banner closes the vacated rows');
+  const compactFile=disk(ws.pathFor('owner')+'/life-boards/'+upgrade.id+'/board.json');
+  const sparse={...renamed,items:renamed.items.map(item=>({...item,y:14}))},sparseText=JSON.stringify(sparse);
+  fs.writeFileSync(compactFile,sparseText);
+  const readCompact=await boards.get('owner',upgrade.id);assert.equal(readCompact.items[0].y,0);
+  assert.equal(fs.readFileSync(compactFile,'utf8'),sparseText,'Read compaction does not rewrite files');
+  await boards.save('owner',upgrade.id,'Compact persisted','');
+  assert.deepEqual(JSON.parse(fs.readFileSync(compactFile,'utf8')).items,plain(readCompact.items),'Next board mutation persists canonical layout without losing view state');
+  console.log('PASS atomic built-in banner migration, concurrent/repeated updates, preserved placements/view state, and removal/version persistence');
 }
 async function lifePanelRecoveryTest() {
   const {LifePanels,PanelRepository}=load('services/LifePanels'),{LifePanelTools}=load('services/LifePanelTools');

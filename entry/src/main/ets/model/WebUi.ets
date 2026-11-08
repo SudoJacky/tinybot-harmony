@@ -1,10 +1,12 @@
 import { PanelInputs } from './PanelContract';
 import { parseUiJson } from './UiJson';
 import { UiDiagnosticError } from './UiRepair';
+import { MailReadRequest } from './Mail';
+import { imapNumber } from './ImapWire';
 // Versioned Web content embedded in a completed native UI surface.
 export interface WebUiSpec { version: number; html: string; css: string; js: string; library: string; height: number; autoHeight?: boolean; }
-export interface WebUiPanelContext { data: Object; title: string; status: string; canRefresh: boolean; locale: string; inputs?: PanelInputs; theme?: string; tokens?: Record<string, string>; }
-export interface WebUiMessage { type: string; id?: number; values?: Record<string, string | number | boolean>; message?: string; height?: number; value?: Object | null; revision?: string; inputs?: PanelInputs; scope?: string; }
+export interface WebUiPanelContext { data: Object; title: string; status: string; canRefresh: boolean; canReadMail?: boolean; locale: string; inputs?: PanelInputs; theme?: string; tokens?: Record<string, string>; }
+export interface WebUiMessage { type: string; id?: number; values?: Record<string, string | number | boolean>; message?: string; height?: number; value?: Object | null; revision?: string; inputs?: PanelInputs; scope?: string; mail?: MailReadRequest; }
 export function webUiAutoHeight(spec: WebUiSpec): boolean {
   // Previously published SVG/HTML snapshots used this exact wrapper. Keep those compact too.
   return spec.autoHeight ?? (spec.library === 'none' && spec.js === '' &&
@@ -30,8 +32,13 @@ export function parseWebUi(source: string): WebUiSpec {
 }
 export function parseWebUiMessage(source: string): WebUiMessage {
   const message = JSON.parse(source) as WebUiMessage;
-  if (!message || typeof message !== 'object' || Array.isArray(message) || !['ready', 'error', 'save', 'resize', 'snapshotReady', 'browserResult', 'storageLoad', 'storageSave', 'panelRefresh'].includes(message.type) ||
-    Object.keys(message).some((key) => !['type', 'id', 'values', 'message', 'height', 'value', 'revision', 'inputs', 'scope'].includes(key))) { throw new Error('Web UI: invalid bridge message'); }
+  if (!message || typeof message !== 'object' || Array.isArray(message) || !['ready', 'error', 'save', 'resize', 'snapshotReady', 'browserResult', 'storageLoad', 'storageSave', 'panelRefresh', 'panelMailRead'].includes(message.type) ||
+    Object.keys(message).some((key) => !['type', 'id', 'values', 'message', 'height', 'value', 'revision', 'inputs', 'scope', 'mail'].includes(key))) { throw new Error('Web UI: invalid bridge message'); }
+  if (message.type === 'panelMailRead') {
+    if (!Number.isSafeInteger(message.id) || (message.id || 0) < 1 || !message.mail || typeof message.mail !== 'object' ||
+      Array.isArray(message.mail) || Object.keys(message.mail).some((key) => !['uidValidity', 'uid'].includes(key))) { throw new Error('Web UI: invalid mail read request'); }
+    imapNumber(message.mail.uidValidity); imapNumber(message.mail.uid);
+  } else if (message.mail !== undefined) { throw new Error('Web UI: mail is only allowed in a mail read request'); }
   if (message.scope !== undefined && (message.scope !== 'placement' || !['storageLoad', 'storageSave'].includes(message.type))) { throw new Error('Web UI: invalid storage scope'); }
   if (message.type === 'storageLoad' || message.type === 'storageSave') {
     if (!Number.isSafeInteger(message.id) || (message.id || 0) < 1 || (message.type === 'storageSave' &&

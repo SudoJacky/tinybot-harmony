@@ -88,6 +88,7 @@ function addMessage(sections: ConversationSection[], message: MessageData, profi
       if (!step.requestError && !step.uiValidation) {
         for (const part of publishedAnswerParts(message.id, message.steps, index, message.status, latest)) {
           if (part.kind === 'text') { addText(sections, part.content, false); }
+          if (part.kind === 'panel' && part.panel) { addText(sections, part.panel.title, false); }
           const screenshot = part.preview?.screenshot;
           if (part.kind === 'preview' && screenshot) {
             sections.push({ kind: 'attachment-image', text: screenshot.image.name, user: false,

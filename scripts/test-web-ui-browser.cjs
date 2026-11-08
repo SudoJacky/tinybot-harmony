@@ -284,6 +284,39 @@ assert.throws(()=>parseWebUiMessage('{"type":"resize","height":"200"}'));
   assert.throws(()=>parseWebUiMessage('{"type":"panelRefresh","id":0}'));
   frame=await mount({},panelSpec,'',true);await assert.rejects(frame.evaluate(()=>tinybot.panel.refresh()),/unavailable/);
   console.log('PASS HTML card task bridge: live data updates retain DOM, refresh acknowledgment, inactive/preflight restrictions and malformed request rejection');
+  const mailContext={data:{messages:[{uidValidity:42,uid:9,subject:'Delivery'}]},title:'Inbox',status:'ready',canRefresh:true,canReadMail:true,locale:'zh-CN'};
+  const mailSpec={version:1,library:'none',height:320,css:'',html:'<button id="read">Read email</button><pre id="body"></pre><p id="status"></p>',js:`
+    document.querySelector('#read').onclick=async()=>{try{const message=tinybot.panel.context.data.messages[0];const mail=await tinybot.panel.readMail({uidValidity:message.uidValidity,uid:message.uid});document.querySelector('#body').textContent=mail.text;document.querySelector('#status').textContent='done';}catch(e){document.querySelector('#status').textContent=e.message;}};`};
+  frame=await mount({},mailSpec,'',false,false,false,undefined,mailContext);
+  await frame.locator('#read').click();await page.waitForFunction(()=>messages.some(m=>m.type==='panelMailRead'));
+  const mailMessage=await page.evaluate(()=>messages.find(m=>m.type==='panelMailRead'));
+  assert.equal(parseWebUiMessage(JSON.stringify(mailMessage)).mail.uid,9);assert.deepEqual(mailMessage.mail,{uidValidity:42,uid:9});
+  await assert.rejects(frame.evaluate(()=>tinybot.panel.readMail({uidValidity:42,uid:9})),/already in progress/);
+  const text='Original body\n<b>inert markup</b>';
+  await page.evaluate(({id,text})=>nativePort.postMessage(JSON.stringify({type:'panelMailResult',id,mail:{message:{uid:9,uidValidity:42},text}})),{id:mailMessage.id,text});
+  await frame.locator('#status').filter({hasText:'done'}).waitFor();assert.equal(await frame.locator('#body').textContent(),text);assert.equal(await frame.locator('#body b').count(),0);
+  assert.equal(await frame.evaluate(()=>Object.hasOwn(tinybot.panel.context.data,'text')),false,'Body results do not become source snapshots');
+  await assert.rejects(frame.evaluate(()=>tinybot.panel.readMail({uidValidity:42,uid:9,accountId:'other'})),/uidValidity/);
+  for(const mail of [{uidValidity:0,uid:9},{uidValidity:42,uid:4294967296},{uidValidity:42,uid:'9'}]){
+    assert.throws(()=>parseWebUiMessage(JSON.stringify({type:'panelMailRead',id:1,mail})));
+  }
+  assert.throws(()=>parseWebUiMessage(JSON.stringify({type:'panelMailRead',id:1,mail:{uidValidity:42,uid:9,folder:'Other'}})));
+  await frame.locator('#read').click();await page.waitForFunction(()=>messages.filter(m=>m.type==='panelMailRead').length===2);
+  const deniedMessage=await page.evaluate(()=>messages.filter(m=>m.type==='panelMailRead').at(-1));
+  await page.evaluate(id=>nativePort.postMessage(JSON.stringify({type:'panelMailResult',id,error:'Email body access is disabled in Settings'})),deniedMessage.id);
+  await frame.locator('#status').filter({hasText:'body access is disabled'}).waitFor();
+  await frame.locator('#read').click();await page.waitForFunction(()=>messages.filter(m=>m.type==='panelMailRead').length===3);
+  const backgroundMessage=await page.evaluate(()=>messages.filter(m=>m.type==='panelMailRead').at(-1));
+  await page.evaluate(panel=>nativePort.postMessage(JSON.stringify({type:'state',values:{},active:false,panel})),mailContext);
+  await frame.locator('#status').filter({hasText:'unavailable'}).waitFor();
+  await page.evaluate(id=>nativePort.postMessage(JSON.stringify({type:'panelMailResult',id,mail:{text:'Late private body'}})),backgroundMessage.id);
+  assert.equal(await frame.locator('#body').textContent(),text,'A late body cannot replace content after the card becomes inactive');
+  for(const [preflight,snapshot,context] of [[true,false,mailContext],[false,true,mailContext],[false,false,{...mailContext,canReadMail:false}],[false,false,undefined]]){
+    frame=await mount({},mailSpec,'',preflight,snapshot,false,undefined,context);
+    await assert.rejects(frame.evaluate(()=>tinybot.panel.readMail({uidValidity:42,uid:9})),/unavailable/);
+    assert.equal(await page.evaluate(()=>messages.filter(m=>m.type==='panelMailRead').length),0);
+  }
+  console.log('PASS native-mail browser bridge: click-to-read plain text, scoped UID-only messages, concurrency, permissions, inactive cancellation, stale replies and preview/preflight/snapshot restrictions');
   await mount(begin.state,spec,'',true);
   console.log('PASS actual Three.js scene passes startup preflight');
   const bad={version:1,html:'',css:'',js:'new THREE.OrbitControls();',library:'three',height:360};

@@ -4,7 +4,7 @@ const ts=require(path.join(studio,'sdk/default/openharmony/ets/build-tools/ets-l
 const cache=new Map();
 function load(name){if(cache.has(name))return cache.get(name);const exports={};cache.set(name,exports);
  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname,'../entry/src/main/ets/model',name+'.ets'),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2021,module:ts.ModuleKind.CommonJS}}).outputText,{exports,require:id=>load(path.basename(id))});return exports;}
-const {gridStep,gridPixels,gridSnap,gridPlace,gridOverlap,gridVacancy,GRID_ROW_STEP,validateGridRect}=load('PanelGrid');
+const {gridStep,gridPixels,gridSnap,gridPlace,gridCompact,gridOverlap,gridVacancy,GRID_ROW_STEP,validateGridRect}=load('PanelGrid');
 const {parseLifeBoard}=load('LifeBoard');const plain=value=>JSON.parse(JSON.stringify(value));
 const origin={x:0,y:0,w:6,h:6};
 for(const width of [280,360,700])for(let w=2;w<=12;w++)for(let h=2;h<=33;h++){
@@ -18,13 +18,23 @@ assert.equal(gridSnap({x:8,y:2,w:4,h:3},1000,0,360,true).w,4);
 const abc=[{x:0,y:0,w:6,h:5},{x:6,y:0,w:6,h:5},{x:0,y:5,w:12,h:7}];
 assert.deepEqual(plain(gridPlace(abc,1,{x:0,y:12,w:6,h:5})),[abc[0],{x:0,y:12,w:6,h:5},abc[2]]);
 assert.deepEqual(plain(gridPlace(abc,1,{x:0,y:0,w:6,h:5})),[{...abc[0],y:5},{x:0,y:0,w:6,h:5},{...abc[2],y:10}]);
-// Exercise all legal widths/positions and multiple overlapping rows, retaining holes.
+const gaps=[{x:0,y:3,w:6,h:4},{x:6,y:8,w:6,h:6},{x:0,y:19,w:12,h:3},{x:0,y:30,w:6,h:2}];
+const gapInput=JSON.stringify(gaps),compacted=gridCompact(gaps);
+assert.deepEqual(plain(compacted),[{x:0,y:0,w:6,h:4},{x:6,y:0,w:6,h:6},{x:0,y:6,w:12,h:3},{x:0,y:9,w:6,h:2}]);
+assert.equal(JSON.stringify(gaps),gapInput);assert.deepEqual(plain(gridCompact(compacted)),plain(compacted));
+assert.deepEqual(plain(gridCompact([gaps[3],gaps[1],gaps[0],gaps[2]])),plain([compacted[3],compacted[1],compacted[0],compacted[2]]),'Array order does not change spatial placement');
+// Removing a tall neighbor or shrinking it lets the following full-width row rise.
+assert.equal(gridCompact([{x:0,y:0,w:6,h:3},{x:0,y:10,w:12,h:2}])[1].y,3);
+assert.equal(gridPlace([{x:0,y:0,w:12,h:10},{x:0,y:10,w:12,h:2}],0,{x:0,y:0,w:12,h:3})[1].y,3);
+// Exercise all legal widths/positions and multiple overlapping rows, closing holes.
 const crowded=Array.from({length:30},(_,i)=>({x:i%3*4,y:Math.floor(i/3)*5,w:4,h:3}));
 const untouched=JSON.stringify(crowded);
 for(let active=0;active<crowded.length;active++)for(let w=2;w<=12;w++){
  const target={x:12-w,y:active,w,h:2+active%32},placed=gridPlace(crowded,active,target);
- assert.deepEqual(plain(placed[active]),target);
- placed.forEach((rect,i)=>{validateGridRect(rect);if(i!==active){assert.equal(rect.x,crowded[i].x);assert.ok(rect.y>=crowded[i].y)}
+ assert.deepEqual(plain({...placed[active],y:target.y}),target);assert.ok(placed[active].y<=target.y);
+ assert.deepEqual(plain(gridCompact(placed)),plain(placed),'Placement is already compact');
+ placed.forEach((rect,i)=>{validateGridRect(rect);if(i!==active){assert.equal(rect.x,crowded[i].x);assert.equal(rect.w,crowded[i].w);assert.equal(rect.h,crowded[i].h)}
+  if(rect.y>0)assert.ok(placed.some((other,j)=>j!==i&&gridOverlap({...rect,y:rect.y-1},other)),'No card can move up another row');
   for(let j=0;j<i;j++)assert.equal(gridOverlap(rect,placed[j]),false);});
  assert.equal(JSON.stringify(placed),JSON.stringify(gridPlace(crowded,active,target)));
 }
@@ -34,6 +44,9 @@ const migrated=parseLifeBoard(JSON.stringify(legacy),'board');assert.equal(migra
 assert.deepEqual(plain(migrated.items.map(({x,y,w,h})=>({x,y,w,h}))),[{x:0,y:0,w:6,h:6},{x:6,y:0,w:6,h:6},{x:0,y:6,w:12,h:14}]);
 assert.equal(migrated.editorThreadId,'editor');assert.equal(migrated.updatedAt,2);assert.equal(legacy.version,1);
 assert.deepEqual(plain(parseLifeBoard(JSON.stringify(migrated),'board')),plain(migrated));
+const savedGap={...migrated,items:migrated.items.map((item,i)=>({...item,y:item.y+4,mountId:'mount-'+i,viewState:{revision:'state-'+i,value:{text:'retained'}}}))};
+const normalized=parseLifeBoard(JSON.stringify(savedGap),'board');
+assert.deepEqual(plain(normalized.items),plain(savedGap.items.map(item=>({...item,y:item.y-4}))),'Existing boards compact on read, retaining placement identities and state');
 for(const bad of [{x:1.5,y:0,w:2,h:2},{x:11,y:0,w:2,h:2},{x:0,y:-1,w:2,h:2},{x:0,y:0,w:1,h:2},{x:0,y:0,w:2,h:34}])assert.throws(()=>validateGridRect(bad));
 assert.throws(()=>parseLifeBoard(JSON.stringify({...migrated,items:migrated.items.map(i=>({...i,x:0,y:0}))}),'board'),/overlap/);
 assert.throws(()=>parseLifeBoard(JSON.stringify({...migrated,items:[{...migrated.items[0],size:'S'}]}),'board'),/fields/);
@@ -45,4 +58,4 @@ assert.deepEqual(plain(gridVacancy([])),{x:0,y:0,w:5,h:8});
 assert.deepEqual(plain(gridVacancy([{x:0,y:0,w:5,h:8}])),{x:5,y:0,w:5,h:8});
 assert.deepEqual(plain(gridVacancy([{x:0,y:0,w:12,h:33}])),{x:0,y:33,w:5,h:8});
 assert.deepEqual(plain(gridVacancy([{x:0,y:8,w:12,h:33}])),{x:0,y:0,w:5,h:8});
-console.log('PASS 12-column geometry at multiple widths, 1056 cell sizes, clamps, 330 collision cases, holes, legacy migration and strict validation');
+console.log('PASS 12-column geometry, 1056 cell sizes, 330 compact collision cases, gaps/shrink/removal, stable identities/state, legacy migration and strict validation');

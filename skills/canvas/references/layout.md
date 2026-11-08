@@ -1,6 +1,6 @@
 # Placement geometry
 
-The board uses 12 responsive columns, 32vp rows and 12vp gaps. Positions/sizes are integer grid cells: `x,y >= 0`, `w=2..12`, `h=2..33`, `x+w <= 12`. Saved explicit item layouts cannot overlap; rows may extend below the screen. This is not a stackable infinite canvas; there is no layer/z-index tool.
+The board uses 12 responsive columns, 32vp rows and 12vp gaps. Positions/sizes are integer grid cells: `x,y >= 0`, `w=2..12`, `h=2..33`, `x+w <= 12`. Saved explicit item layouts cannot overlap; rows may extend below the screen. Layouts automatically compact upward on read and save, retaining horizontal positions, sizes and vertical order. Requested `y` may settle higher; read the returned layout instead of relying on empty rows. This is not a stackable infinite canvas; there is no layer/z-index tool.
 
 For actual board content width `W` in vp:
 

@@ -16,7 +16,10 @@ export struct BuiltinWidgetGallery {
         Circle().width(5).height(5).fill(widget.color)
         Text(widget.label).fontSize(10).fontColor(widget.color).maxLines(1)
       }.width('100%')
-      if (widget.id === 'balance') {
+      if (widget.id === 'ascii') {
+        Text('    .:-=+***+=-:.\n .:+*  .:@@:.  *+:.\n :=#  :@  @:  #=:\n  .:+*=-::-=*+:.').fontFamily('monospace').fontSize(12).lineHeight(17)
+          .fontColor(widget.color).textAlign(TextAlign.Center).margin({ top: 10 })
+      } else if (widget.id === 'balance') {
         Text('—').fontSize(30).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
           .height(50).margin({ top: 5 })
         Text(t('余额与额度')).fontSize(10).fontColor($r('app.color.text_secondary'))

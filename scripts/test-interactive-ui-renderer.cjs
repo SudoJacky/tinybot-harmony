@@ -72,6 +72,7 @@ const globals = { exports: {}, ViewPU, SynchedPropertySimpleOneWayPU: Property, 
     if (id.includes('DataViewCard&')) return {};
     if (id.includes('UiSceneView&')) return {};
     if (id.includes('WebUiView&')) return {};
+    if (id.includes('Cancellation&')) return model(path.join(root, 'services/Cancellation'));
     if (id.includes('Widgets&')) return { Segmented: MarkdownView };
     if (id === '@ohos:arkui.node') return { LengthMetrics: {vp:value=>value} };
     if (id === '@ohos:pasteboard') return {default:{MIMETYPE_TEXT_PLAIN:'text/plain',createData:(_type,value)=>value,getSystemPasteboard:()=>({setData:async value=>{if(clipboard.failure)throw Error('Clipboard denied');clipboard.values.push(value);}})}};

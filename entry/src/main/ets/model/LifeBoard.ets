@@ -1,13 +1,13 @@
 import { panelId, validatePanelViewState } from './LifePanel';
 import { MiniAppSnapshot } from './MiniApp';
 import { threadWorkspacePath } from './Workspace';
-import { GridRect, gridHeight, gridOverlap, validateGridRect } from './PanelGrid';
+import { GridRect, gridCompact, gridHeight, gridOverlap, validateGridRect } from './PanelGrid';
 export interface PanelReference { workspaceId: string; panelId: string; }
 export interface BoardItem extends PanelReference, GridRect { mountId?: string; viewState?: MiniAppSnapshot; }
 interface LegacyBoardItem extends PanelReference { size: string; height?: number; }
 export interface LifeBoard {
   version: number; id: string; title: string; description: string; items: BoardItem[];
-  editorThreadId?: string; archived: boolean; createdAt: number; updatedAt: number;
+  editorThreadId?: string; builtinRevision?: number; archived: boolean; createdAt: number; updatedAt: number;
 }
 export interface BoardEntry { workspaceId: string; board: LifeBoard; }
 export interface PanelTarget { workspaceId: string; panelId?: string; boardId?: string; request?: number; }
@@ -19,10 +19,11 @@ export function validateReference(reference: PanelReference): void {
 export function boardPath(id: string): string { return 'life-boards/' + panelId(id) + '/board.json'; }
 export function parseLifeBoard(content: string, id: string): LifeBoard {
   const board = JSON.parse(content) as LifeBoard;
-  if (!board || Object.keys(board).some((key: string) => !['version', 'id', 'title', 'description', 'items', 'archived', 'createdAt', 'updatedAt', 'editorThreadId'].includes(key)) || ![1, 2].includes(board.version) || board.id !== panelId(id) || typeof board.title !== 'string' || !board.title.trim() || board.title.length > 80 ||
+  if (!board || Object.keys(board).some((key: string) => !['version', 'id', 'title', 'description', 'items', 'archived', 'createdAt', 'updatedAt', 'editorThreadId', 'builtinRevision'].includes(key)) || ![1, 2].includes(board.version) || board.id !== panelId(id) || typeof board.title !== 'string' || !board.title.trim() || board.title.length > 80 ||
     typeof board.description !== 'string' || board.description.length > 500 || !Array.isArray(board.items) || board.items.length > 100 ||
     typeof board.archived !== 'boolean' || !Number.isFinite(board.createdAt) || !Number.isFinite(board.updatedAt) || board.createdAt < 0 || board.updatedAt < 0) { throw new Error('Invalid Life Panel board'); }
   if (board.editorThreadId !== undefined && (typeof board.editorThreadId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(board.editorThreadId))) { throw new Error('Invalid board editor thread'); }
+  if (board.builtinRevision !== undefined && (!Number.isSafeInteger(board.builtinRevision) || board.builtinRevision < 1)) { throw new Error('Invalid built-in board revision'); }
   if (board.version === 1) {
     const bottoms: number[] = [0, 0];
     board.items = (board.items as Object as LegacyBoardItem[]).map((item: LegacyBoardItem): BoardItem => {
@@ -54,6 +55,8 @@ export function parseLifeBoard(content: string, id: string): LifeBoard {
       if (gridOverlap(board.items[i], board.items[j])) { throw new Error('Board cards overlap'); }
     }
   }
+  const compacted = gridCompact(board.items);
+  board.items.forEach((item: BoardItem, index: number) => { item.y = compacted[index].y; });
   return board;
 }
 export function boardLayoutKey(items: BoardItem[]): string {

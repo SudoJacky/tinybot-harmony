@@ -27,8 +27,22 @@ export function gridSnap(origin: GridRect, dx: number, dy: number, width: number
     { x: Math.max(0, Math.min(12 - origin.w, Math.round(origin.x + dx / step))),
       y: Math.max(0, Math.round(origin.y + dy / GRID_ROW_STEP)), w: origin.w, h: origin.h };
 }
-// Pin the user's rectangle. Push collisions down in their original spatial order,
-// retaining all other x coordinates and intentional empty space.
+// Keep horizontal positions and vertical order; let each card settle on the cards above it.
+// Work in spatial order but return the original array order for stable card identities.
+export function gridCompact(rects: GridRect[]): GridRect[] {
+  const result = rects.map((rect: GridRect): GridRect => ({ x: rect.x, y: rect.y, w: rect.w, h: rect.h }));
+  const order = result.map((_rect: GridRect, index: number) => index)
+    .sort((a: number, b: number) => result[a].y - result[b].y || result[a].x - result[b].x || a - b);
+  const placed: GridRect[] = [];
+  order.forEach((index: number) => {
+    const rect = result[index];
+    rect.y = placed.filter((other: GridRect) => rect.x < other.x + other.w && rect.x + rect.w > other.x)
+      .reduce((bottom: number, other: GridRect) => Math.max(bottom, other.y + other.h), 0);
+    placed.push(rect);
+  });
+  return result;
+}
+// Resolve the requested placement first, then close vertical gaps across the board.
 export function gridPlace(rects: GridRect[], active: number, target: GridRect): GridRect[] {
   validateGridRect(target);
   if (active < 0 || active >= rects.length) { throw new Error('Card no longer belongs to this board'); }
@@ -46,7 +60,7 @@ export function gridPlace(rects: GridRect[], active: number, target: GridRect): 
     }
     placed.push(rect);
   });
-  return result;
+  return gridCompact(result);
 }
 export function gridHeight(vp: number): number { return Math.max(2, Math.min(GRID_MAX_ROWS, Math.ceil((vp + GRID_GAP) / GRID_ROW_STEP))); }
 export function gridVacancy(rects: GridRect[], w: number = 5, h: number = 8): GridRect {

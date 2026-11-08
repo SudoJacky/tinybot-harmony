@@ -1,4 +1,6 @@
 import { PanelInputs, resolvePanelInputs } from '../model/PanelContract';
+import { MailBody, MailReadRequest } from '../model/Mail';
+import { Cancellation } from '../services/Cancellation';
 import { panelErrorText } from '../model/PanelPresentation';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Btn, Radius, Motion, gradientColor } from '../common/Theme';
@@ -179,6 +181,7 @@ export struct LifePanelCard {
   storage?: MiniAppStorage;
   viewStorage?: MiniAppStorage;
   onRun: (inputs?: PanelInputs) => Promise<void> = async () => {};
+  onReadMail?: (request: MailReadRequest, cancellation: Cancellation) => Promise<MailBody>;
   onRuntimeError: (message: string, revision: number) => void = () => {};
   onMoveStart: (event: GestureEvent) => void = () => {};
   onMoveUpdate: (event: GestureEvent) => void = () => {};
@@ -214,6 +217,21 @@ export struct LifePanelCard {
   private cancelPress(): void {
     if (this.layoutAction) { this.layoutAction = ''; this.onMoveCancel(); }
   }
+  @Builder private layoutHints() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Stack({ alignContent: Alignment.BottomEnd }) {
+      Shape() {
+        Path().commands('M16 44 H28 Q44 44 44 28 V16').hitTestBehavior(HitTestMode.None)
+      }.viewPort({ x: 0, y: 0, width: '48px', height: '48px' })
+        .width(48).height(48).constraintSize({ maxWidth: '50%', maxHeight: '50%' }).fill(Color.Transparent).stroke(this.appearance.accent)
+        .strokeWidth('4px').strokeLineCap(LineCapStyle.Round).strokeLineJoin(LineJoinStyle.Round)
+        .opacity(this.layoutAction === 'resize' ? 0.65 : 0.22)
+        .hitTestBehavior(HitTestMode.None)
+        .id('panel-resize-hint-' + this.panel.id)
+      }.width('100%').height('100%').hitTestBehavior(HitTestMode.None).id('panel-resize-anchor-' + this.panel.id)
+    }.width('100%').height('100%').hitTestBehavior(HitTestMode.None)
+      .accessibilityLevel('no-hide-descendants').id('panel-layout-hints-' + this.panel.id)
+  }
   private viewContent(): string {
     const view = this.panel.definition.view!;
     // The definition height is a starting viewport; inline cards follow their actual content.
@@ -228,7 +246,9 @@ export struct LifePanelCard {
   }
   private context(): WebUiPanelContext {
     return { data: this.panel.data, title: this.panel.definition.title, status: this.busy ? 'running' : this.panel.error ? 'failed' : 'ready',
-      canRefresh: !!this.panel.definition.source && !this.panel.archived, locale: getLocale(), theme: this.dark ? 'dark' : 'light', inputs: resolvePanelInputs(this.panel.definition.inputs, this.panel.inputs || {}),
+      canRefresh: !!this.panel.definition.source && !this.panel.archived,
+      canReadMail: this.panel.definition.source?.type === 'mail' && !this.panel.archived && !!this.onReadMail,
+      locale: getLocale(), theme: this.dark ? 'dark' : 'light', inputs: resolvePanelInputs(this.panel.definition.inputs, this.panel.inputs || {}),
       tokens: { 'text': gradientColor($r('app.color.text_primary'), 1), 'surface': gradientColor($r('app.color.surface'), 1), 'accent': gradientColor(this.appearance.accent, 1),
         'on-accent': gradientColor(this.appearance.onAccent, 1), 'text-secondary': gradientColor($r('app.color.text_secondary'), 1),
         'surface-muted': gradientColor($r('app.color.surface_variant'), 1), 'danger': gradientColor($r('app.color.danger'), 1) } };
@@ -303,7 +323,7 @@ export struct LifePanelCard {
       if (this.panel.definition.view) {
         if (this.storage) {
           WebUiView({ content: this.viewContent(), storage: this.storage, viewStorage: this.viewStorage, panelContext: this.context(),
-            interactive: this.interactive && !this.panel.archived && !this.editing && !this.layoutAction, preferParentScroll: !this.detail, viewportHeight: this.viewHeight, onPanelRefresh: this.onRun,
+            interactive: this.interactive && !this.panel.archived && !this.editing && !this.layoutAction, preferParentScroll: !this.detail, viewportHeight: this.viewHeight, onPanelRefresh: this.onRun, onPanelReadMail: this.onReadMail,
             onHeight: (height: number) => { this.contentHeight = height; },
             onRuntimeError: (message: string) => this.onRuntimeError(message, this.panel.configRevision) })
         } else {
@@ -341,6 +361,7 @@ export struct LifePanelCard {
     }.width('100%').padding(this.panel.definition.view ? 0 : 14)
   }
   build() {
+    Stack({ alignContent: Alignment.TopStart }) {
     Column() {
       if (this.frameHeight > 0) {
         Scroll() { this.content() }
@@ -350,6 +371,10 @@ export struct LifePanelCard {
           .scrollBar(BarState.Off).nestedScroll({ scrollForward: this.detail ? NestedScrollMode.SELF_FIRST : NestedScrollMode.PARENT_FIRST,
             scrollBackward: this.detail ? NestedScrollMode.SELF_FIRST : NestedScrollMode.PARENT_FIRST })
       } else { this.content() }
+    }.width('100%').height(this.frameHeight > 0 ? this.frameHeight : undefined)
+      if (this.onBoard && this.interactive && !this.detail && !this.editing && !this.panel.archived) {
+        this.layoutHints()
+      }
     }.width('100%').height(this.frameHeight > 0 ? this.frameHeight : undefined)
       .backgroundColor(this.panel.definition.view ? Color.Transparent : $r('app.color.surface'))
       .borderRadius(Radius.lg).border({ width: this.panel.definition.view ? 0 : 1, color: $r('app.color.divider') })

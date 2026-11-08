@@ -1,6 +1,8 @@
 import { AgentStep, PreviewScreenshot, toolReceipts } from './Agent';
 import { uiParts } from './InteractiveUi';
-import { referencePreviewId, previewReferenceParts, previewReferenceTargets } from './PreviewReferences';
+import { referencePreviewId, previewReferenceTargets } from './PreviewReferences';
+import { answerReferenceParts } from './AnswerReferences';
+import { PublishedPanel, publishedPanels } from './PublishedPanel';
 
 interface PreviewReceipt { path: string; title: string; }
 function previewReceipt(output: string): PreviewReceipt {
@@ -21,15 +23,30 @@ export interface PublishedPreview {
   superseded: boolean;
   screenshot?: PreviewScreenshot;
 }
-export interface PublishedAnswerPart { kind: string; content: string; key: string; preview?: PublishedPreview; }
+export interface PublishedAnswerPart { kind: string; content: string; key: string; preview?: PublishedPreview; panel?: PublishedPanel; }
 
 export function publishedAnswerParts(messageId: string, steps: AgentStep[], index: number, status: string, latest: string[]): PublishedAnswerPart[] {
   const step = steps[index];
   const final = status === 'complete' && index === steps.length - 1 && !step.tools.length && !step.uiValidation && !step.continuation;
-  return previewReferenceParts(step.content, status === 'generating').map((part, position): PublishedAnswerPart => {
+  const parts = answerReferenceParts(step.content, status === 'generating');
+  const panels = final && parts.some((part) => part.kind === 'panel' || part.kind === 'board') ? publishedPanels(steps) : [];
+  const referencedPanels = Array.from(new Set<string>(parts.filter((part) => part.kind === 'panel' &&
+    panels.some((item) => item.key === part.panelKey && !!item.target.panelId)).map((part) => part.panelKey as string)));
+  const shown = new Set<string>();
+  return parts.map((part, position): PublishedAnswerPart => {
     const key = index + ':' + position + ':' + part.kind;
     if (part.kind === 'text') { return { kind: 'text', content: part.content, key: key }; }
     if (!final) { return { kind: 'pending', content: '', key: key }; }
+    if (part.kind === 'panel' || part.kind === 'board') {
+      const target = panels.find((item) => item.key === part.panelKey && (part.kind === 'panel' ? !!item.target.panelId : !!item.target.boardId));
+      if (!target) { return { kind: 'error', content: 'Life Panel reference is unavailable: ' + part.panelKey, key: key }; }
+      const identity = part.kind + ':' + target.key;
+      if (shown.has(identity)) { return { kind: 'pending', content: '', key: key }; }
+      shown.add(identity);
+      return { kind: 'panel', content: '', key: key, panel: { key: target.key, title: target.title, target: target.target,
+        excludedPanelKeys: target.target.boardId ? referencedPanels : undefined } };
+    }
+    if (part.kind === 'invalid-panel' || part.kind === 'invalid') { return { kind: 'error', content: part.content, key: key }; }
     const target = previewReferenceTargets(steps).find((item) => item.previewId === part.previewId);
     if (!target) { return { kind: 'error', content: 'Preview reference is unavailable: ' + part.previewId, key: key }; }
     const previews = stepPreviews(messageId, steps[target.step], target.step, latest, true);

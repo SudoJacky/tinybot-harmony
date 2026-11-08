@@ -18,11 +18,25 @@ export class LifeBoards {
   async get(workspaceId: string, id: string): Promise<LifeBoard> {
     return parseLifeBoard((await new NativeWorkspaceFiles(this.workspaces.pathFor(workspaceId)).read(boardPath(id), new Cancellation())).content, id);
   }
-  async create(workspaceId: string, id: string, title: string, description: string, items: BoardItem[]): Promise<LifeBoard> {
+  async create(workspaceId: string, id: string, title: string, description: string, items: BoardItem[], builtinRevision?: number): Promise<LifeBoard> {
     return this.change(workspaceId, id, true, async (): Promise<LifeBoard> => ({ version: 2, id: id, title: title, description: description,
       items: items.map((item: BoardItem): BoardItem => ({ workspaceId: item.workspaceId, panelId: item.panelId,
         x: item.x, y: item.y, w: item.w, h: item.h, mountId: 'mount-' + util.generateRandomUUID() })),
-      archived: false, createdAt: Date.now(), updatedAt: Date.now() }));
+      builtinRevision: builtinRevision, archived: false, createdAt: Date.now(), updatedAt: Date.now() }));
+  }
+  async prependBuiltin(workspaceId: string, id: string, reference: PanelReference, height: number, revision: number): Promise<LifeBoard> {
+    validateReference(reference); validateGridRect({ x: 0, y: 0, w: 12, h: height });
+    if (!Number.isSafeInteger(revision) || revision < 1) { throw new Error('Invalid built-in board revision'); }
+    return this.change(workspaceId, id, false, async (previous?: LifeBoard): Promise<LifeBoard> => {
+      const board = previous!;
+      if (board.archived || (board.builtinRevision || 0) >= revision) { return board; }
+      if (!board.items.some((item: BoardItem) => referenceKey(item) === referenceKey(reference))) {
+        const shifted = board.items.map((item: BoardItem): BoardItem => ({ workspaceId: item.workspaceId, panelId: item.panelId, mountId: item.mountId,
+          viewState: item.viewState, x: item.x, y: item.y + height, w: item.w, h: item.h }));
+        board.items = [{ workspaceId: reference.workspaceId, panelId: reference.panelId, mountId: 'mount-' + util.generateRandomUUID(), x: 0, y: 0, w: 12, h: height } as BoardItem].concat(shifted);
+      }
+      board.builtinRevision = revision; return board;
+    });
   }
   async save(workspaceId: string, id: string, title: string, description: string, items?: BoardItem[], archive?: boolean): Promise<LifeBoard> {
     if (items !== undefined) {
@@ -34,7 +48,7 @@ export class LifeBoards {
     }
     const nextId = id || 'board-' + util.generateRandomUUID();
     return this.change(workspaceId, nextId, !id, async (before?: LifeBoard): Promise<LifeBoard> => ({ version: 2, id: nextId,
-      editorThreadId: before?.editorThreadId, title: title.trim(), description: description.trim(), items: items === undefined ? before?.items || [] : items.map((item: BoardItem): BoardItem => {
+      editorThreadId: before?.editorThreadId, builtinRevision: before?.builtinRevision, title: title.trim(), description: description.trim(), items: items === undefined ? before?.items || [] : items.map((item: BoardItem): BoardItem => {
         const saved = before?.items.find((old: BoardItem) => referenceKey(old) === referenceKey(item));
         return { workspaceId: item.workspaceId, panelId: item.panelId, x: item.x, y: item.y, w: item.w, h: item.h,
           mountId: saved?.mountId || 'mount-' + util.generateRandomUUID(), viewState: saved?.viewState };
@@ -48,7 +62,7 @@ export class LifeBoards {
       const path = boardPath(id), cancellation = new Cancellation();
       const old = create ? undefined : await files.read(path, cancellation), before = old ? parseLifeBoard(old.content, id) : undefined;
       const board = await operation(before); board.updatedAt = Date.now();
-      parseLifeBoard(JSON.stringify(board), id);
+      board.items = parseLifeBoard(JSON.stringify(board), id).items;
       for (const item of board.items) { await this.panels.repository(item.workspaceId).get(item.panelId); }
       await files.writeLifeBoard(path, JSON.stringify(board), cancellation, { version: old?.version || null }); PanelChanges.emit(); return board;
     }));

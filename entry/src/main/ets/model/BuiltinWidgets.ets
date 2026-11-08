@@ -10,6 +10,9 @@ export interface BuiltinWidget {
 // A catalog of finished cards. Adding one creates an independent, editable instance.
 export function builtinWidgets(): BuiltinWidget[] {
   return [
+    { id: 'ascii', title: t('引力之间'), description: t('字符星环缓缓流转，轻触进入跃迁'), label: t('ASCII 宇宙'), color: '#56BDA6', width: 12, height: 5,
+      checks: [{ action: 'click', selector: '#warp' }, { action: 'text', selector: '#mode', value: 'ORBITAL' },
+        { action: 'click', selector: '#warp' }, { action: 'text', selector: '#mode', value: 'HYPERDRIVE' }] },
     { id: 'balance', title: t('余额与额度'), description: t('模型服务账户，一眼掌握'), label: t('已连接的模型服务'), color: '#547C70', width: 6, height: 6, checks: [] },
     { id: 'clock', title: t('此刻'), description: t('时间、日期与一周节奏'), label: t('本地时钟'), color: '#8E755A', width: 6, height: 7,
       checks: [{ action: 'click', selector: '#format' }, { action: 'stored', path: '/hour12', expected: true }] },

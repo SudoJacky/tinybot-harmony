@@ -10,6 +10,7 @@ export struct VoiceHoldButton {
   @Prop @Watch('availabilityChanged') disabled: boolean = false;
   @Prop @Watch('phaseChanged') phase: SpeechPhase = 'idle';
   @Prop action: VoiceAction = 'send';
+  @Prop controlHeight: number = 52;
   onHold: () => boolean = () => false;
   onMove: (x: number, y: number) => void = () => {};
   onRelease: () => void = () => {};
@@ -67,7 +68,7 @@ export struct VoiceHoldButton {
       Text(this.label()).fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium)
         .fontColor(this.action === 'cancel' && this.pressed ? $r('app.color.danger') : $r('app.color.text_primary'))
         .textAlign(TextAlign.Center).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
-    }.id('hold-to-talk').width('100%').height(44).padding({ left: 8, right: 8 }).borderRadius(20)
+    }.id('hold-to-talk').width('100%').height(this.controlHeight).padding({ left: 8, right: 8 }).borderRadius(20)
       .backgroundColor(this.pressed ? this.action === 'cancel' ? $r('app.color.danger_container') :
         this.appearance.accentContainer : Color.Transparent)
       .opacity(this.disabled ? 0.4 : 1)
