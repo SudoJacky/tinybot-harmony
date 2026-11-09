@@ -1,4 +1,4 @@
-export interface MarkdownBlock { kind: string; text: string; level: number; rows: string[][]; }
+export interface MarkdownBlock { kind: string; text: string; level: number; rows: string[][]; fenceClosed?: boolean; }
 export interface MarkdownSpan { text: string; kind: string; url: string; }
 interface MarkdownParse { blocks: MarkdownBlock[]; starts: number[]; }
 // Only a whole line turns into an image block; an image written inside prose stays a link.
@@ -6,6 +6,9 @@ interface MarkdownParse { blocks: MarkdownBlock[]; starts: number[]; }
 const IMAGE_LINE: RegExp = /^\s*!\[([^\]]*)\]\((https:\/\/[^\s)]+)(?:\s+"[^"]*")?\)\s*$/;
 export function markdownBlocks(source: string): MarkdownBlock[] {
   return parseMarkdown(source.replace(/\r\n/g, '\n')).blocks;
+}
+export function isMermaidBlock(block: MarkdownBlock): boolean {
+  return block.kind === 'code' && block.fenceClosed === true && /^mermaid(?:\s|$)/i.test(block.rows[0][0]);
 }
 function parseMarkdown(source: string): MarkdownParse {
   const lines = source.split('\n'); const blocks: MarkdownBlock[] = [];
@@ -22,10 +25,12 @@ function parseMarkdown(source: string): MarkdownParse {
     starts.push(offsets[index]);
     const fence = line.match(/^\s*(```+|~~~+)(.*)$/);
     if (fence) {
+      const closeFence = new RegExp('^' + fence[1] + fence[1][0] + '*$');
       const content: string[] = []; index++;
-      while (index < lines.length && !lines[index].trim().startsWith(fence[1])) { content.push(lines[index++]); }
-      if (index < lines.length) { index++; }
-      blocks.push({ kind: 'code', text: content.join('\n'), level: 0, rows: [[fence[2].trim()]] }); continue;
+      while (index < lines.length && !closeFence.test(lines[index].trim())) { content.push(lines[index++]); }
+      const closed = index < lines.length;
+      if (closed) { index++; }
+      blocks.push({ kind: 'code', text: content.join('\n'), level: 0, rows: [[fence[2].trim()]], fenceClosed: closed }); continue;
     }
     const math = line.match(/^\s*(\$\$|\\\[)(.*)$/);
     if (math) {

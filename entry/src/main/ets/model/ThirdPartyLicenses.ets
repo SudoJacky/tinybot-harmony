@@ -17,6 +17,10 @@ export const THIRD_PARTY_LICENSES: ThirdPartyLicense[] = [
     copyright: 'Copyright (c) 2013-2020 Khan Academy and other contributors', resource: 'math/LICENSE.txt'
   },
   {
+    id: 'mermaid', name: 'Mermaid · 12.3.0', license: 'MIT',
+    copyright: 'Copyright (c) 2014 - 2022 Knut Sveidqvist', resource: 'licenses/mermaid.txt'
+  },
+  {
     id: 'quickjs', name: 'QuickJS · 2026-06-04', license: 'MIT',
     copyright: 'Copyright (c) 2017-2021 Fabrice Bellard\nCopyright (c) 2017-2021 Charlie Gordon',
     resource: 'licenses/quickjs.txt'
