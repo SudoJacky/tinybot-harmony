@@ -41,7 +41,7 @@ export class OrchestrationTools implements AgentTools {
         'return their receipts including reference, then copy references as standalone lines in the final answer to insert previews. ' +
         'No live preview is displayed during tool execution. Use present_files when source delivery is needed. Prepared child previews and screenshots are preserved even if later work fails. ' +
         'Tool failures reject; report partial failures explicitly. ' +
-        'No direct network, filesystem, modules, timers or nested orchestration. Permissions and MCP approvals still apply. ' +
+        'No direct network, filesystem, modules, timers or nested orchestration. Permissions and tool approvals still apply. ' +
         'Limits: 32 calls, 4 active host tools, 2 seconds script computation, 120 seconds elapsed, 32 MiB JS memory. No separate code, argument or result size caps. ' +
         'Return a compact summary and artifact paths; full child receipts remain in the conversation. ' +
         'Use direct calls for simple one-step work and Team/user-interaction tools. Available nested tools: ' +

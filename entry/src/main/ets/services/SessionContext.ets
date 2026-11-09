@@ -4,11 +4,13 @@ import { ExtensionSettings, skillCatalog } from '../model/Skills';
 import { Cancellation } from './Cancellation';
 import { ModelSession } from './providers/Provider';
 import { DEFAULT_SYSTEM_PROMPT, runtimeInstructions, userDocumentContext } from '../model/SystemPrompt';
+import { CONTENT_GUARD_PROMPT } from '../model/ContentGuard';
 import { PromptSection, threadEntries } from '../model/ContextProjection';
 import { ContextSource, RequestContext } from './RequestContext';
 
 export function sessionPromptSections(config: ModelConfig, extensions: ExtensionSettings, selected: string = ''): PromptSection[] {
   return [{ name: 'identity', content: DEFAULT_SYSTEM_PROMPT },
+    { name: 'guard', content: CONTENT_GUARD_PROMPT },
     { name: 'runtime', content: runtimeInstructions(MAX_AGENT_STEPS) },
     { name: 'user_preferences', content: userDocumentContext(config.userDocument || '') },
     { name: 'skills', content: skillCatalog(extensions.skills, selected), dynamic: true }];

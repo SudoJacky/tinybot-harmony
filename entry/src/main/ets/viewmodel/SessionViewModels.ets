@@ -8,6 +8,7 @@ import { AgentStep, ToolCall, ToolExecution, RequestRetry, PreviewScreenshot } f
 import { CompactionData, MessageData, ThreadData } from '../model/Conversation';
 import { ModelReference } from '../model/ProviderProfiles';
 import { PendingInput } from '../model/PendingInput';
+import { ToolApprovalMode, toolApprovalMode } from '../model/ToolApprovalMode';
 import { t } from '../model/I18n';
 import { UiSavedState } from '../model/InteractiveUi';
 import { UiPresentation } from '../model/UiPresentation';
@@ -159,6 +160,7 @@ export class ThreadViewModel {
     }
   }
   agentMode: string = 'full';
+  toolApprovalMode: ToolApprovalMode = 'ask';
   disabledTools: string[] = [];
   projectId?: string;
   memoryReview?: MemoryReviewRecord;
@@ -188,6 +190,7 @@ export class ThreadViewModel {
   updateMetadata(data: ThreadData): void {
     this.panelContext = data.panelContext;
     this.agentMode = data.agentMode || 'full'; this.disabledTools = data.disabledTools || [];
+    this.toolApprovalMode = toolApprovalMode(data.toolApprovalMode);
     this.projectId = data.projectId;
     this.memoryReview = data.memoryReview;
     this.reasoningEffort = data.reasoningEffort || 'default';

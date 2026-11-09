@@ -31,7 +31,7 @@ async function until(check) {
   for (let i = 0; i < 100; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 1)); }
   assert.ok(check(), 'Expected asynchronous operation did not reach its barrier');
 }
-async function fixture(configure = () => {}) {
+async function fixture(configure = () => {}, approval) {
   const data = emptyData();
   const profile = { id: 'test', name: 'Test', protocol: 'chat-completions', baseUrl: 'https://example.com/v1',
     credentialAlias: '', noApiKey: true, enabled: true, models: ['model-a', 'model-b'], contextWindow: 32768 };
@@ -61,7 +61,7 @@ async function fixture(configure = () => {}) {
   const resources = { createId: () => 'id-' + ++sequence, ensureWorkspace: async () => {},
     configureProviders: () => {}, reportError: (event, error) => errors.push({ event, error }),
     tools: () => ({ definitions: () => [], execute: async () => 'ok' }) };
-  const session = new SessionService(repository, new AgentRuntime(providers, credentials), credentials, resources);
+  const session = new SessionService(repository, new AgentRuntime(providers, credentials), credentials, resources, approval);
   const app = new ChatViewModel(); await app.initialize(session);
   return { session, app, repository, requests, resources, errors };
 }
@@ -72,6 +72,65 @@ async function start(f, id, prompt = id) {
   return { done: f.session.send() };
 }
 async function main() {
+  {
+    const approval = new ToolApproval();
+    const f = await fixture(undefined, approval);
+    const writes = [];
+    f.resources.tools = () => ({
+      definitions: () => [{ type: 'function', function: { name: 'write_file', description: 'Write a file' } }],
+      execute: async call => { writes.push(call.function.arguments); return '{"ok":true}'; }
+    });
+    const write = { id: 'write', type: 'function', function: {
+      name: 'write_file', arguments: JSON.stringify({ path: 'note.txt', content: 'hello' })
+    } };
+    assert.equal(f.app.active.toolApprovalMode, 'ask');
+    assert.equal(await f.app.setToolApprovalMode('full'), true);
+    assert.equal(thread(f, 'a', true).toolApprovalMode, 'full');
+    assert.equal(JSON.parse(f.repository.saved).lastToolApprovalMode, undefined);
+
+    const ask = await start(f, 'b');
+    await until(() => f.requests.length === 1);
+    f.requests[0].finish('', [write]);
+    await until(() => approval.title.includes('write_file'));
+    assert.equal(writes.length, 0);
+    approval.respond(false);
+    await until(() => f.requests.length === 2);
+    f.requests[1].finish('No write');
+    await ask.done;
+    assert.equal(JSON.parse(thread(f, 'b', true).messages.at(-1).steps[0].tools[0].output).code, 'USER_DENIED');
+    assert.equal(JSON.parse(f.repository.saved).lastToolApprovalMode, 'ask');
+
+    const full = await start(f, 'a');
+    await until(() => f.requests.length === 3);
+    f.requests[2].finish('', [write]);
+    await until(() => f.requests.length === 4);
+    assert.equal(approval.title, '');
+    assert.equal(writes.length, 1);
+    assert.equal(JSON.parse(f.repository.saved).lastToolApprovalMode, 'full');
+    assert.equal(await f.session.newThread(), true);
+    assert.equal(f.app.active.toolApprovalMode, 'full');
+    assert.equal(await f.app.setToolApprovalMode('ask'), true);
+    assert.equal(JSON.parse(f.repository.saved).lastToolApprovalMode, 'full');
+    await f.app.selectThread('b');
+    assert.equal(f.app.active.toolApprovalMode, 'ask');
+    f.requests[3].finish('Wrote the file');
+    await full.done;
+
+    assert.equal(await f.session.setTeamEnabled(true), true);
+    f.session.setDraft('Write with team mode enabled');
+    const team = f.session.send();
+    await until(() => f.requests.length === 5);
+    f.requests[4].finish('', [write]);
+    await until(() => approval.title.includes('write_file'));
+    approval.respond(true);
+    await until(() => f.requests.length === 6);
+    assert.equal(writes.length, 2, 'Team mode still asks only once for the main agent');
+    f.requests[5].finish('Wrote with approval');
+    await team;
+    assert.equal(await f.session.newThread(), true);
+    assert.equal(f.app.active.toolApprovalMode, 'ask');
+    console.log('PASS per-chat approval persistence, refusal, direct execution and new-chat inheritance from the last submitted request');
+  }
   {
     const f=await fixture(),context='Board context: {"boardId":"board-a","description":"Morning"}';
     f.app.setDraft('Update the board');f.app.setPanelContext(context);await f.app.flushDraft();

@@ -4,6 +4,7 @@ import { defaultExtensions, parseSkill } from '../main/ets/model/Skills';
 import { DEFAULT_SYSTEM_PROMPT, teamWorkerInstructions } from '../main/ets/model/SystemPrompt';
 import { sessionPromptSections } from '../main/ets/services/SessionContext';
 import { renderPrompt } from '../main/ets/model/ContextProjection';
+import { CONTENT_GUARD_PROMPT } from '../main/ets/model/ContentGuard';
 
 export default function systemPromptTests(): void {
   describe('SystemPrompt', () => {
@@ -49,8 +50,11 @@ export default function systemPromptTests(): void {
       config.userDocument = '# Preferences\nUse short answers.';
       const extensions = defaultExtensions();
       extensions.skills = [parseSkill('---\nname: report\ndescription: Summarize reports\ndisable-model-invocation: true\n---\nRead the source.')];
-      const base = renderPrompt(sessionPromptSections(config, extensions));
+      const sections = sessionPromptSections(config, extensions);
+      const base = renderPrompt(sections.filter((section) => !section.dynamic));
       expect(base.startsWith('<identity>\n' + DEFAULT_SYSTEM_PROMPT + '\n</identity>')).assertTrue();
+      expect(base.includes('<guard>\n' + CONTENT_GUARD_PROMPT + '\n</guard>')).assertTrue();
+      expect(base.indexOf('<guard>') < base.indexOf('<user_preferences>')).assertTrue();
       expect(base.includes('<runtime>')).assertTrue();
       expect(base.includes('My custom assistant')).assertFalse();
       expect(base.includes('# USER.md')).assertTrue();
