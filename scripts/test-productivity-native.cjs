@@ -1,4 +1,8 @@
-const backupAccount = { openID: 'fixture-openid-A', error: undefined, interactive: undefined, async backupOpenID(_context, interactive = true) { this.interactive = interactive; if (this.error) throw this.error; if (!this.openID) throw Error('请登录创建备份时使用的华为账号。'); return this.openID; } };
+const backupAccount = { openID: 'fixture-openid-A', checks: 0, async backupOpenID() {
+  this.checks++;
+  if (!this.openID) throw Error('请先登录华为账号，再备份或恢复。');
+  return this.openID;
+} };
 const { legacyBackupFixture, backupCrypto } = require('./backup-fixture.cjs');
 // Platform-adapter integration tests with real temporary files and a scripted HTTP transport.
 // Run: node scripts/test-productivity-native.cjs
@@ -94,6 +98,8 @@ let fakeTimers;
 const scheduleTimer = (fn, ms) => fakeTimers ? fakeTimers.set(fn, ms) : setTimeout(fn, ms);
 const cancelTimer = id => fakeTimers ? fakeTimers.clear(id) : clearTimeout(id);
 let selectedFile = '/sandbox/backup-export.json';
+let pickerCalls = 0;
+let webDavSession;
 let cloudStart = () => {}, cacheStart = () => {};
 const syncInstances = [], cacheInstances = [];
 const cloudSync = {
@@ -140,9 +146,14 @@ const kits = {
       activatePermission: async () => { folderFailures.activations = (folderFailures.activations || 0) + 1; if (folderFailures.activate) throw folderFailures.activate; },
       revokePermission: async () => { if (folderFailures.revoke) throw folderFailures.revoke; } },
     fileUri: {getUriFromPath:p=>'file://'+p, FileUri: class { constructor(uri) { this.path = decodeURIComponent(new URL(uri).pathname); } }},
-    picker: { DocumentViewPicker: class { async save() {return [selectedFile];} async select() {return [selectedFile];} } } }, '@kit.ImageKit': { image: {} }, '@kit.NetworkKit': { http },
+    picker: { DocumentViewPicker: class { async save() {pickerCalls++;return [selectedFile];} async select() {pickerCalls++;return [selectedFile];} } } }, '@kit.ImageKit': { image: {} }, '@kit.NetworkKit': { http },
+  '@kit.RemoteCommunicationKit': { rcp: {
+    createSession: config => webDavSession(config),
+    Request: class { constructor(url, method, headers, content) { Object.assign(this, { url, method, headers, content }); } },
+    UploadFromFile: class { constructor(path) { this.path = path; } }
+  } },
   '@kit.MediaLibraryKit': {}, '@kit.ShareKit': {}, '@kit.ArkGraphics2D': { drawing: {} },
-  '@kit.ArkTS': { taskpool: { execute: async (work, ...args) => {
+  '@kit.ArkTS': { url: { URL: { parseURL: value => new URL(value) } }, taskpool: { execute: async (work, ...args) => {
     if (failConversationWorker) throw Error('conversation worker unavailable');
     return work(...args);
   } }, util: { generateRandomUUID: () => crypto.randomUUID(), TextEncoder: Encoder, TextDecoder: Decoder,
@@ -1316,6 +1327,102 @@ async function test(name, run) {
     await assert.rejects(readBackupFile(context,root+'/cache/bad-project.json',session.snapshot()),/项目/);
     assert.equal(fs.readFileSync(restoredFile,'utf8'),'local edit');
   });
+  await test('WebDAV stages a real archive, preserves the last snapshot on failure and gates all transfer I/O', async () => {
+    const { WebDavBackup } = load(path.join(source, 'services/WebDavBackup'));
+    const { exportBackup, readBackup, createBackupFile, readBackupFile } = load(path.join(source, 'services/Backup'));
+    const root = '/sandbox/webdav-app', context = { cacheDir: root + '/cache', getApplicationContext: () => ({ filesDir: root }) };
+    fs.mkdirSync(nativePath(context.cacheDir), { recursive: true });
+    const directory = 'https://backup.example/dav/tinybot/', final = directory + 'tinybot-latest.tinybot';
+    const openID = backupAccount.openID, data = model.emptyData(), previous = Buffer.from('last valid backup');
+    const remote = new Map([[final, previous]]), methods = [];
+    let failPut = false, failMove = false, downloadStatus = 200, sessions = 0, closed = 0;
+    const result = statusCode => ({ statusCode });
+    webDavSession = config => {
+      sessions++;
+      assert.equal(config.requestConfiguration.security.remoteValidation, 'system');
+      assert.equal(config.requestConfiguration.transfer.autoRedirect, false);
+      assert.equal(config.headers.authorization, 'Basic ' + Buffer.from('alice:app-password').toString('base64'));
+      return {
+        async fetch(request) {
+          methods.push(request.method);
+          assert.match(request.url, /^https:\/\/backup\.example\/dav\/tinybot\/tinybot-[a-f0-9-]+\.partial$/);
+          if (request.method === 'PUT') {
+            assert.equal(request.headers['content-type'], 'application/octet-stream');
+            remote.set(request.url, fs.readFileSync(nativePath(request.content.path)));
+            if (failPut) throw Object.assign(Error('redacted server URL'), { code: 1007900056 });
+            return result(201);
+          }
+          if (request.method === 'MOVE') {
+            assert.equal(request.headers.Destination, final);
+            assert.equal(request.headers.Overwrite, 'T');
+            if (failMove) return result(207);
+            remote.set(final, remote.get(request.url)); remote.delete(request.url);
+            return result(204);
+          }
+          assert.equal(request.method, 'DELETE');
+          remote.delete(request.url);
+          return result(204);
+        },
+        async downloadToFile(address, target) {
+          methods.push('GET');
+          assert.equal(address, final); assert.equal(target.kind, 'file');
+          if (downloadStatus === 200) fs.writeFileSync(nativePath(target.file), remote.get(final));
+          return result(downloadStatus);
+        },
+        close() { closed++; }
+      };
+    };
+    try {
+      await assert.rejects(WebDavBackup.save('http://backup.example/dav/', 'alice', 'app-password'), /HTTPS/);
+      await assert.rejects(WebDavBackup.save('https://alice:password@backup.example/dav/', 'alice', 'app-password'), /HTTPS/);
+      await WebDavBackup.save(directory.slice(0, -1), 'alice', 'app-password');
+      const saved = await WebDavBackup.settings();
+      assert.equal(saved.directory, directory); assert.equal(saved.username, 'alice'); assert.equal(saved.password, undefined);
+      await assert.rejects(WebDavBackup.save(directory + 'other/', 'alice', ''), /填写 WebDAV 密码/);
+      await WebDavBackup.save(directory, 'alice', '');
+
+      backupAccount.openID = '';
+      const beforePicker = pickerCalls;
+      await assert.rejects(exportBackup(context, data), /请先登录/);
+      await assert.rejects(readBackup(context, data), /请先登录/);
+      await assert.rejects(createBackupFile(context, data), /请先登录/);
+      await assert.rejects(readBackupFile(context, context.cacheDir + '/absent', data), /请先登录/);
+      await assert.rejects(WebDavBackup.create(context, data), /请先登录/);
+      await assert.rejects(WebDavBackup.restore(context, data), /请先登录/);
+      assert.equal(pickerCalls, beforePicker); assert.equal(sessions, 0);
+      assert.deepEqual(fs.readdirSync(nativePath(context.cacheDir)), []);
+      backupAccount.openID = openID;
+
+      failPut = true;
+      await assert.rejects(WebDavBackup.create(context, data), /PUT.*1007900056/);
+      assert.deepEqual(methods.splice(0), ['PUT', 'DELETE']);
+      assert.deepEqual([...remote], [[final, previous]]);
+      failPut = false; failMove = true;
+      await assert.rejects(WebDavBackup.create(context, data), /MOVE.*207/);
+      assert.deepEqual(methods.splice(0), ['PUT', 'MOVE', 'DELETE']);
+      assert.deepEqual([...remote], [[final, previous]]);
+      failMove = false;
+      data.config.userDocument = 'Restored from WebDAV';
+      await WebDavBackup.create(context, data);
+      assert.deepEqual(methods.splice(0), ['PUT', 'MOVE']);
+      const restored = await WebDavBackup.restore(context, model.emptyData());
+      assert.equal(restored.config.userDocument, data.config.userDocument);
+      assert.deepEqual(methods.splice(0), ['GET']);
+      assert.doesNotMatch(remote.get(final).toString('utf8'), /app-password/);
+      downloadStatus = 404;
+      await assert.rejects(WebDavBackup.restore(context, model.emptyData()), /没有可恢复的备份/);
+      downloadStatus = 302;
+      await assert.rejects(WebDavBackup.restore(context, model.emptyData()), /最终 HTTPS 目录地址/);
+      assert.equal(closed, sessions);
+      assert.deepEqual(fs.readdirSync(nativePath(context.cacheDir)), []);
+      await WebDavBackup.clear();
+      assert.equal(await WebDavBackup.settings(), undefined);
+      assert.equal(remote.size, 1, 'Removing device settings leaves the server backup in place');
+    } finally {
+      backupAccount.openID = openID;
+      webDavSession = undefined;
+    }
+  });
   await test('backup preserves conversation identities, attachments, files and scoped memory without secrets',async()=>{
     const {exportBackup,readBackup}=load(path.join(source,'services/Backup'));
     const root='/sandbox/backup-app';fs.mkdirSync(nativePath(root+'/workspace/thread'),{recursive:true});fs.mkdirSync(nativePath(root+'/cache'));fs.mkdirSync(nativePath(root+'/attachments'));
@@ -1325,7 +1432,7 @@ async function test(name, run) {
     data.threads=[{id:'thread',title:'source',updatedAt:1,messages:[{id:'u',role:'user',content:'hello',status:'complete',error:'',attachments:[attachment]},{id:'a',role:'assistant',content:'answer',status:'complete',error:''}],modelRef:{providerId:'provider',modelId:'model'}}];
     data.providerProfiles=[{id:'provider',name:'Provider',protocol:'chat-completions',baseUrl:'https://api.invalid/v1',credentialAlias:'SECRET-ALIAS',noApiKey:false,enabled:true,models:['model'],contextWindow:32768}];
     data.productivity={memories:[{id:'m',content:'fact',threadId:'thread',updatedAt:1,sourceThreadId:'thread',sourceMessageId:'u'}],templates:[],servers:[]};
-    data.productivity.options={autoMemory:false,saveSummary:false,readOnly:false,autoRoute:false,capabilities:[],
+    data.productivity.options={autoMemory:false,saveSummary:false,readOnly:false,capabilities:[],
       search:{provider:'bing-browser',enabled:true,tavily:{baseUrl:'https://api.tavily.com',credentialAlias:'SECRET-INACTIVE-TAVILY'}}};
     const context={cacheDir:root+'/cache',getApplicationContext:()=>({filesDir:root})};await exportBackup(context,JSON.parse(JSON.stringify(data)));
     const exported=JSON.stringify(legacyBackupFixture(fs.readFileSync(nativePath(selectedFile))));assert.ok(!exported.includes('SECRET-ALIAS'));
@@ -1467,20 +1574,21 @@ async function test(name, run) {
     const name='tinybot-latest.tinybot',automatic=manual;
     snapshot.threads[0].title='Shared automatic backup';
     cloudStart=async sync=>{cloudLocations.set(manual,3);sync.callback({state:cloudSync.SyncState.COMPLETED,error:0});};
-    assert.equal(await CloudBackup.create(context,snapshot,{interactive:false}),true);
-    assert.equal(backupAccount.interactive,false,'Automatic account lookup is non-interactive through the real archive path');
+    const checks = backupAccount.checks;
+    assert.equal(await CloudBackup.create(context,snapshot,{openID:await backupAccount.backupOpenID()}),true);
+    assert.equal(backupAccount.checks,checks+1,'Packing reuses the account verified before the automatic backup');
     assert.notDeepEqual(fs.readFileSync(nativePath(manual)),before);
     assert.deepEqual(Array.from(await CloudBackup.list(context),item=>item.name),[name],'Only the shared backup remains after confirmed upload');
     const restored=await CloudBackup.restore(context,name,model.emptyData());
     assert.equal(restored.threads.length,snapshot.threads.length);
     assert.equal(restored.threads[0].title,snapshot.threads[0].title);
     const complete=fs.readFileSync(nativePath(automatic));failCloudCopy=true;
-    try{await assert.rejects(CloudBackup.create(context,snapshot,{interactive:false}),/injected cloud write/);}
+    try{await assert.rejects(CloudBackup.create(context,snapshot),/injected cloud write/);}
     finally{failCloudCopy=false;}
     assert.deepEqual(fs.readFileSync(nativePath(automatic)),complete,'Failed replacement preserves the shared restore point');
     const cancellation=new Cancellation(),copy=fileIo.copyFile;
     fileIo.copyFile=async(a,b)=>{await copy(a,b);cancellation.cancel();};
-    try{await assert.rejects(CloudBackup.create(context,snapshot,{interactive:false,cancellation}),error=>error.code==='CANCELLED');}
+    try{await assert.rejects(CloudBackup.create(context,snapshot,{cancellation}),error=>error.code==='CANCELLED');}
     finally{fileIo.copyFile=copy;}
     assert.deepEqual(fs.readFileSync(nativePath(automatic)),complete,'Expiry before promotion preserves the complete snapshot');
     assert.ok(fs.readdirSync(nativePath(directory)).every(file=>!file.endsWith('.partial')));
@@ -1490,7 +1598,7 @@ async function test(name, run) {
     assert.equal((await CloudBackup.restoreLatest(context,model.emptyData())).threads[0].title,snapshot.threads[0].title,'Legacy automatic backups remain discoverable by one-step restore');
     await assert.rejects(CloudBackup.retryUpload(context),/存在更新的备份/,'An older shared backup cannot delete a newer legacy snapshot');
     assert.equal(fs.existsSync(nativePath(legacy)),true);
-    assert.equal(await CloudBackup.create(context,snapshot,{interactive:false}),true);
+    assert.equal(await CloudBackup.create(context,snapshot),true);
     assert.deepEqual(Array.from(await CloudBackup.list(context),item=>item.name),[name]);
     const obsolete=directory+'/tinybot-1700000000000-'+crypto.randomUUID()+'.tinybot';
     fs.writeFileSync(nativePath(obsolete),complete);
@@ -1825,7 +1933,7 @@ async function test(name, run) {
       console.log('  '+scenario+': '+bytes.byteLength+' wire bytes, '+Buffer.byteLength(thought)+' reasoning bytes, saved and reloaded');
     }
   });
-  await test('Responses reasoning reaches the live process, survives completion and reload, and stays out of answer text', async () => {
+  await test('Responses reasoning reaches the live process after the answer rules out a refusal and survives reload', async () => {
     const {ProtocolProvider}=load(path.join(source,'services/providers/ProtocolProvider'));
     const {ProviderRegistry}=load(path.join(source,'services/providers/ProviderRegistry'));
     const {runAgentLoop}=load(path.join(source,'services/AgentLoop'));
@@ -1852,10 +1960,11 @@ async function test(name, run) {
         emit({type:type+'.delta',...coordinates,delta:'先检查输入，'});
         emit({type:type+'.delta',...coordinates,delta:'再核对结果。'});
         assert.equal(thread.messages[1].content,'','answer is still empty while thinking streams');
-        assert.equal(thread.messages[1].stepViews[0].reasoningContent,'先检查输入，再核对结果。');
-        const thinking=buildTimeline(thread.messages[1].stepViews)[0];assert.equal(thinking.kind,'process');assert.equal(thinking.items[0].tool,-1);
+        assert.equal(thread.messages[1].stepViews[0].reasoningContent,'','reasoning is held while a refusal remains possible');
         emit({type:type+'.done',...coordinates,text:'先检查输入，再核对结果。'});
         emit({type:'response.output_text.delta',delta:'最终回答。'});
+        assert.equal(thread.messages[1].stepViews[0].reasoningContent,'先检查输入，再核对结果。');
+        const thinking=buildTimeline(thread.messages[1].stepViews)[0];assert.equal(thinking.kind,'process');assert.equal(thinking.items[0].tool,-1);
         const item={type:'reasoning',summary:[],encrypted_content:'must-not-display'};
         item[style]=[{type:style==='summary'?'summary_text':'reasoning_text',text:'先检查输入，再核对结果。'}];
         emit({type:'response.completed',response:{status:'completed',output:[item,{type:'message',content:[{type:'output_text',text:'最终回答。'}]}]}});

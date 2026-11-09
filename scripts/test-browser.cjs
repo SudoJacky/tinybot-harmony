@@ -57,6 +57,7 @@ assert.equal(reportProbe.error, 'PRIVATE_BROWSER_PATH');
 assert.equal(diagnosticLogs.at(-1).fields.errorCode, 17100001);
 assert.ok(!JSON.stringify(diagnosticLogs).includes('PRIVATE_BROWSER_PATH'));
 const { BrowserTools } = load(path.join(root, 'main/ets/services/BrowserTools'));
+const { ToolApproval } = load(path.join(root, 'main/ets/services/ToolApproval'));
 const { Cancellation } = load(path.join(root, 'main/ets/services/Cancellation'));
 const { executeToolBatch } = load(path.join(root, 'main/ets/services/ToolExecution'));
 const { runAgentLoop } = load(path.join(root, 'main/ets/services/AgentLoop'));
@@ -328,8 +329,16 @@ async function acquired() {
     console.log('PASS consecutive runtime runs automatically acquire and release the retained browser');
   }
   {
-    const f = await acquired(); const readOnly = new BrowserTools(f.browser, 'thread', true);
-    await assert.rejects(readOnly.execute(call('browser_action', { action: 'click', snapshotId: f.receipt.page.snapshotId, elementId: 1 }), f.cancellation), error => error.code === 'PERMISSION_DENIED');
+    const f = await acquired(); const approval = new ToolApproval();
+    const click = call('browser_action', { action: 'click', snapshotId: f.receipt.page.snapshotId, elementId: 1 });
+    const readOnly = new BrowserTools(f.browser, 'thread', true, undefined, approval);
+    await assert.rejects(readOnly.execute(click, f.cancellation), { code: 'PERMISSION_DENIED' });
+    assert.equal(approval.title, '');
+    const gated = new BrowserTools(f.browser, 'thread', false, undefined, approval);
+    const pending = gated.execute(click, f.cancellation);
+    assert.match(approval.title, /click/);
+    approval.respond(false);
+    await assert.rejects(pending, { code: 'USER_DENIED' });
     await assert.rejects(f.browser.act({ action: 'reload' }, new Cancellation()), error => error.code === 'BROWSER_NOT_OWNED');
     await assert.rejects(f.tools.execute(call('browser_open', { url: 'https://user:password@example.com', reason: 'Login' }), f.cancellation), error => error.code === 'INVALID_ARGUMENTS');
     await assert.rejects(f.tools.execute(call('browser_action', { action: 'eval', text: 'alert(1)' }), f.cancellation), error => error.code === 'INVALID_ARGUMENTS');

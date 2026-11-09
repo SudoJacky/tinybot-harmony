@@ -60,7 +60,7 @@ function load(file) {
   } }, { filename: file });
   return exports;
 }
-const { HuaweiAccount } = load(path.join(root, 'main/ets/services/HuaweiAccount'));
+const { BackupLoginRequired, HuaweiAccount } = load(path.join(root, 'main/ets/services/HuaweiAccount'));
 const accountLogs = [];
 load(path.join(root, 'main/ets/model/Diagnostics')).Diagnostics.configureLogSink(data => accountLogs.push(data));
 const { CredentialStore } = load(path.join(root, 'main/ets/services/CredentialStore'));
@@ -76,13 +76,14 @@ const deferred = () => { let resolve; const promise = new Promise(done => { reso
   await account.signIn(); assert.equal(account.signedIn, true); assert.equal(secrets.get(alias), 'user-A');
   assert.equal(await account.backupOpenID({}), 'user-A');
   const otherDevice = new HuaweiAccount(); await account.signOut();
-  const automaticLogins = system.logins;
-  await assert.rejects(otherDevice.backupOpenID({}, false), /登录/);
-  assert.equal(system.logins, automaticLogins, 'Automatic backup must never trigger a login dialog');
-  assert.equal(await otherDevice.backupOpenID({}), 'user-A', 'explicit backup action obtains the same account ID after a fresh login');
-  await otherDevice.signOut(); system.loginError = { code: authentication.AuthenticationErrorCode.USER_CANCELED };
-  await assert.rejects(otherDevice.backupOpenID({}), /取消/);
-  system.loginError = undefined; await account.signIn();
+  const backupLogins = system.logins;
+  await assert.rejects(otherDevice.backupOpenID({}), BackupLoginRequired);
+  assert.equal(system.logins, backupLogins, 'Backup authorization does not open the login dialog');
+  await otherDevice.signIn();
+  const backupChecks = system.checks;
+  assert.equal(await otherDevice.backupOpenID({}), 'user-A');
+  assert.equal(system.checks, backupChecks + 1, 'Backup authorization verifies the current account once');
+  await otherDevice.signOut(); await account.signIn();
   privacyAgreed = false;
   await assert.rejects(account.requireLogin(), /System privacy/);
   await assert.rejects(account.backupOpenID({}), /System privacy/);
@@ -96,6 +97,7 @@ const deferred = () => { let resolve; const promise = new Promise(done => { reso
   await account.signOut(); await account.signIn(); assert.equal(secrets.get(alias), 'user-B');
   system.checkError = Error('Private identifier must not leak');
   await assert.rejects(account.requireLogin(), /无法检查/); assert.doesNotMatch(account.error, /Private/);
+  await assert.rejects(account.backupOpenID({}), error => !(error instanceof BackupLoginRequired) && /无法检查/.test(error.message));
   system.checkError = undefined; await account.requireLogin();
   const gate = deferred(); system.beforeCheck = () => gate.promise;
   const checkCount = system.checks, first = account.requireLogin(), second = account.requireLogin();

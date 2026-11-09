@@ -26,16 +26,20 @@ function checkCompiledPanel(f) {
     observeComponentCreation2: callback => callback(1, true), ifElseBranchUpdateFunction: (_branch, callback) => callback(),
     forEachUpdateFunction: (_element, items, callback) => items.forEach(callback) });
   panel.backupTab();
-  assert.deepEqual([...nodes.keys()].sort(), ['create-cloud-backup', 'restore-cloud-backup']); assert.ok(texts.includes(f.service.status));
+  assert.deepEqual([...nodes.keys()].sort(), ['create-cloud-backup', 'restore-cloud-backup', 'webdav-backup-settings']); assert.ok(texts.includes(f.service.status));
   assert.equal(nodes.get('create-cloud-backup').title, '备份'); assert.equal(nodes.get('restore-cloud-backup').title, '恢复备份');
   nodes.get('create-cloud-backup').onTap(); nodes.get('restore-cloud-backup').onTap(); assert.deepEqual(actions, [false, true]);
   panel.busy = true; panel.backupTab(); assert.equal(nodes.get('create-cloud-backup').disabled, true); assert.equal(nodes.get('restore-cloud-backup').disabled, true);
-  console.log('PASS compiled backup page has exactly two actions, one-step cloud restore, automatic status and busy guards');
+  console.log('PASS compiled backup page shows WebDAV, one-step cloud restore, automatic status and busy guards');
 }
 function fixture() {
   let usable = true, ready = true, location = 1, failure, pending, writes = 0, uploads = 0, snapshots = 0, failFlush = false, leaseError, releaseError;
   const saved = new Map([['startupBackupState', 'done']]), prefs = new Map(saved), logs = [], calls = [], leases = [], released = [];
-  const privacy = { allowed: true }, account = { signedIn: true }, workspace = { contentRevision: 0 };
+  class BackupLoginRequired extends Error {}
+  const privacy = { allowed: true }, account = { signedIn: true, revoked: false, async backupOpenID() {
+    if (this.revoked) throw new BackupLoginRequired();
+    return 'fixture-openid';
+  } }, workspace = { contentRevision: 0 };
   const changes = { revision: 0 };
   let data = { config: {}, threads: [{ messages: [{ content: 'record' }] }], providerProfiles: [], productivity: {} };
   const store = { getSync: (k, d) => prefs.has(k) ? prefs.get(k) : d, putSync: (k, v) => prefs.set(k, v),
@@ -43,7 +47,7 @@ function fixture() {
   const cloud = { busy: false, available: async () => usable,
     async create(context, snapshot, options) { writes++; calls.push({ context, snapshot, options }); if (failure) throw failure; if (pending) await pending; options.cancellation.check(); return location === 3; },
     async list() { return writes ? [{ name: 'tinybot-latest.tinybot', createdAt: 1000000, location }] : []; },
-    async retryUpload(_context, cancellation) { return cloud.sync(cancellation); },
+    async retryUpload(_context, options) { return cloud.sync(options.cancellation); },
     async sync(cancellation) { uploads++; if (failure) throw failure; cancellation.check(); return location === 3; } };
   const cancelExports = {};
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(path.dirname(file), 'Cancellation.ets'), 'utf8'), { compilerOptions: {
@@ -60,7 +64,7 @@ function fixture() {
     '../model/I18n': { getLocale: () => 'en-US', t: (s, args = []) => s.replace(/\{(\d+)\}/g, (_, i) => args[i]) },
     '../model/Onboarding': { isOnboardingCandidate: d => !d.threads.some(t => t.messages.length) && !d.providerProfiles.length },
     './CloudBackup': { CloudBackup: cloud, CLOUD_BACKUP_NAME: 'tinybot-latest.tinybot', cloudBackupError: e => e.message }, './HostedPrivacy': { hostedPrivacy: privacy },
-    './HuaweiAccount': { huaweiAccount: account }, './NativeWorkspaceFiles': { NativeWorkspaceFiles: workspace }, './Cancellation': cancelExports
+    './HuaweiAccount': { BackupLoginRequired, huaweiAccount: account }, './NativeWorkspaceFiles': { NativeWorkspaceFiles: workspace }, './Cancellation': cancelExports
   };
   const exports = {};
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: {
@@ -79,21 +83,24 @@ function fixture() {
     async leave() { service.onBackground(); await tick(); } };
 }
 (async () => {
-  for (const blocked of ['login', 'privacy', 'cloud', 'restoration', 'busy', 'empty']) {
+  for (const blocked of ['login', 'revoked', 'privacy', 'cloud', 'restoration', 'busy', 'empty']) {
     const f = fixture();
     if (blocked === 'login') f.account.signedIn = false;
+    if (blocked === 'revoked') f.account.revoked = true;
     if (blocked === 'privacy') f.privacy.allowed = false;
     if (blocked === 'cloud') f.usable = false;
     if (blocked === 'restoration') f.prefs.set('startupBackupState', 'pending');
     if (blocked === 'busy') f.ready = false;
     if (blocked === 'empty') f.data = { config: {}, threads: [], providerProfiles: [], productivity: {} };
-    await f.leave(); assert.equal(f.writes, 0, blocked); assert.equal(f.leases.length, f.released.length, blocked + ' releases any acquired task'); f.service.dispose();
+    await f.leave(); assert.equal(f.writes, 0, blocked); assert.equal(f.leases.length, f.released.length, blocked + ' releases any acquired task');
+    if (blocked === 'login' || blocked === 'revoked') { assert.equal(f.snapshots, 0); assert.equal(f.service.state, 'waiting_login'); }
+    f.service.dispose();
   }
   let f = fixture(); assert.equal(f.service.enabled, true); f.service.changed(); await tick();
   assert.equal(f.writes, 0); assert.equal(f.leases.length, 0, 'Startup, foreground and edits do not start a backup');
   f.service.onBackground(); assert.equal(f.leases.length, 1, 'Lease is acquired synchronously before any async preparation'); await tick();
   assert.equal(f.writes, 1); assert.equal(f.service.state, 'pending'); assert.deepEqual(f.released, [1]);
-  assert.equal(f.calls[0].options.interactive, false); assert.equal(f.calls[0].options.name, undefined, 'Automatic saves use the shared default cloud file');
+  assert.equal(f.calls[0].options.openID, 'fixture-openid'); assert.equal(f.calls[0].options.name, undefined, 'Automatic saves use the shared default cloud file');
   f.location = 3; await f.leave(); assert.equal(f.uploads, 1); assert.equal(f.writes, 1, 'Pending upload retries do not reserialize unchanged data');
   assert.equal(f.service.state, 'uploaded'); const leases = f.leases.length; await f.leave(); assert.equal(f.leases.length, leases, 'Unchanged uploaded data needs no task');
   f.workspace.contentRevision++; await f.leave(); assert.equal(f.writes, 2, 'Mini app/workspace writes also invalidate the snapshot');

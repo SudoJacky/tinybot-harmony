@@ -4,7 +4,6 @@ import { isSupportedProtocol } from './ProviderEndpoint';
 import { isSupportedSearchProvider } from './WebSearch';
 import { REASONING_EFFORTS } from './ReasoningEffort';
 import { supportedMcpAuth } from './Productivity';
-import { supportsAutoRoute } from './AssistantOptions';
 import { t } from './I18n';
 
 export interface ConfigurationIssue { setting: string; message: string; threadId?: string; providerId?: string; serverId?: string; }
@@ -21,10 +20,6 @@ export function configurationIssues(data: AppData, selections?: Map<string, Tool
       issues.push({ setting: 'providerProfiles.protocol', providerId: profile.id,
         message: t('当前版本不支持部分模型协议，对应模型暂不可用；原配置已保留。') });
     }
-  }
-  const options = data.productivity?.options;
-  if (options?.autoRoute && !supportsAutoRoute(options, data.providerProfiles || [])) {
-    issues.push({ setting: 'options.autoRoute', message: t('自动路由使用了当前版本不支持的模型协议，自动路由已停用；仍使用所选模型，原配置已保留。') });
   }
   const policy = data.extensions?.browserPolicy;
   if (policy !== undefined && !['unset', 'enabled', 'disabled'].includes(policy)) {

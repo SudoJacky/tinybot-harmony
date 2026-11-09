@@ -43,8 +43,10 @@ module.exports = async function completeBackup({ load, fs, nativePath, secrets, 
   data.productivity.templates[0].content = 'Customized factory template {{input}}';
   data.productivity.servers = [{ id: 'mcp-old', name: 'Private MCP', url: 'https://mcp.invalid/api', enabled: true, authType: 'bearer', credentialAlias: 'source-mcp' },
     { id: 'mcp-public', name: 'Public MCP', url: 'https://public.invalid/mcp', enabled: true, credentialAlias: '' }];
-  Object.assign(data.productivity.options, { miniAppsEnabled: true, autoMemory: false, saveSummary: true, readOnly: true, autoRoute: true,
-    fast: { providerId: profile.id, modelId: 'model' }, capabilities: [{ providerId: profile.id, modelId: 'model', reasoning: 'high', images: true, requestUsage: true, contextWindow: 65536 }],
+  Object.assign(data.productivity.options, { miniAppsEnabled: true, autoMemory: false, saveSummary: true, readOnly: true,
+    autoRoute: true, fast: { providerId: profile.id, modelId: 'model' },
+    title: { providerId: profile.id, modelId: 'model' }, teamWorker: { providerId: profile.id, modelId: 'model' },
+    memory: { providerId: profile.id, modelId: 'model' }, capabilities: [{ providerId: profile.id, modelId: 'model', reasoning: 'high', images: true, requestUsage: true, contextWindow: 65536 }],
     search: { provider: 'tavily', enabled: true, baseUrl: 'https://api.tavily.com', credentialAlias: 'source-search', tavily: { baseUrl: 'https://api.tavily.com', credentialAlias: 'source-search' } } });
   data.extensions = defaultExtensions(); seedBuiltinSkills(data.extensions);
   data.extensions.webEnabled = false; data.extensions.browserPolicy = 'disabled';
@@ -110,7 +112,10 @@ module.exports = async function completeBackup({ load, fs, nativePath, secrets, 
   assert.equal(result.threads.find(item => item.id === 'owner').queuePaused, true, 'Restored pending instructions remain paused');
   assert.equal(await vault.read(result.config.credentialAlias), rawSecrets[0]); assert.equal(result.config.configured, true);
   assert.equal(result.config.userDocument, 'Call me Lin'); assert.equal(result.config.contextWindow, 65536);
-  assert.equal(result.productivity.options.fast.providerId, profile.id); assert.equal(result.productivity.options.miniAppsEnabled, true);
+  assert.equal(result.productivity.options.memory.providerId, profile.id); assert.equal(result.productivity.options.miniAppsEnabled, true);
+  assert.equal(result.productivity.options.title.providerId, profile.id);
+  assert.equal(result.productivity.options.teamWorker.providerId, profile.id);
+  assert.equal(result.productivity.options.autoRoute, undefined, 'Import does not restore retired automatic routing');
   assert.equal(result.productivity.templates[0].content, data.productivity.templates[0].content);
   assert.equal(result.extensions.skills[0].document, data.extensions.skills[0].document); assert.equal(result.extensions.skills[0].enabled, false);
   assert.equal(result.extensions.webEnabled, false); assert.equal(result.extensions.browserPolicy, 'disabled');
@@ -158,7 +163,9 @@ module.exports = async function completeBackup({ load, fs, nativePath, secrets, 
   const wallet = read(mergeTarget.filesDir, panelPath('wallet'));
   assert.deepEqual(wallet.definition.source.providerIds, ['provider-local']); assert.equal(wallet.data.providerId, 'provider-local'); assert.equal(wallet.data.accounts[0].id, 'provider-local');
   assert.equal(read(mergeTarget.filesDir, panelPath('mail')).definition.source.mail.accountId, 'mail-local');
-  assert.equal(mergeSession.snapshot().productivity.options.fast.providerId, 'provider-local');
+  assert.equal(mergeSession.snapshot().productivity.options.memory.providerId, 'provider-local');
+  assert.equal(mergeSession.snapshot().productivity.options.title.providerId, 'provider-local');
+  assert.equal(mergeSession.snapshot().productivity.options.teamWorker.providerId, 'provider-local');
   assert.equal(await vault.read('local-key'), 'LOCAL_KEEP'); assert.equal(await vault.read('local-mcp'), 'LOCAL_MCP_KEEP');
   assert.equal((await new MailAccounts().connection('mail-local')).secret, 'LOCAL_MAIL_KEEP');
   // Settings commit failure rolls back every new secret and supports a fresh retry.

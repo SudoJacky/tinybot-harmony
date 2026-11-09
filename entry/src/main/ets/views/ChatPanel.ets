@@ -7,6 +7,7 @@ import { AppearanceStyle } from '../common/AppearanceStyle';
 import { systemMaterialAttribute } from '../common/MaterialAttributes';
 import { t } from '../model/I18n';
 import { agentModeName } from '../model/AgentMode';
+import { ToolApprovalMode, toolApprovalModeName } from '../model/ToolApprovalMode';
 import { ProjectData } from '../model/Project';
 import { AnswerSpeech } from '../services/AnswerSpeech';
 import { LaunchActions } from '../services/LaunchActions';
@@ -188,6 +189,7 @@ export struct ChatPanel {
   @State private sendOrigin: SendOrigin | undefined = undefined;
   @State private viewport: WindowViewport = new WindowViewport();
   @State private showReasoning: boolean = false;
+  @State private showToolApprovalMode: boolean = false;
   @State private reasoningPreview: string = '';
   @State private reasoningPreviewKey: string = '';
   private reasoningSaving: boolean = false;
@@ -536,7 +538,7 @@ export struct ChatPanel {
     if (this.voiceMode) { return false; }
     return this.workbench || this.composerFocused || this.app.draft.length > 0 || this.hasDraft() || this.importing || this.speechActive() ||
       this.app.generating || this.thread.pendingInputs.length > 0 || this.showPlus || this.showPlusMenu || this.showContext ||
-      this.showReasoning || this.showModelMenu || this.showQueue;
+      this.showReasoning || this.showToolApprovalMode || this.showModelMenu || this.showQueue;
   }
 
   private canSend(): boolean {
@@ -1445,6 +1447,62 @@ export struct ChatPanel {
   }
 
   @Builder
+  toolApprovalOption(mode: ToolApprovalMode, description: string) {
+    Button({ type: ButtonType.Normal }) {
+      Row({ space: 12 }) {
+        Column({ space: 4 }) {
+          Text(toolApprovalModeName(mode)).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('sys.color.font_primary'))
+          Text(description).fontSize(12).fontColor($r('sys.color.font_secondary'))
+        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+        if (this.thread.toolApprovalMode === mode) {
+          SymbolGlyph($r('sys.symbol.checkmark')).fontSize(16).fontColor([$r('sys.color.icon_primary')]).accessibilityLevel('no')
+        }
+      }.width('100%')
+    }.id('tool-approval-' + mode).width('100%').constraintSize({ minHeight: 48 }).padding(10)
+      .backgroundColor(Color.Transparent)
+      .accessibilityText(toolApprovalModeName(mode) + '。' + description)
+      .accessibilitySelected(this.thread.toolApprovalMode === mode)
+      .onClick(async () => {
+        this.showToolApprovalMode = false;
+        if (mode !== this.thread.toolApprovalMode && !await this.app.setToolApprovalMode(mode) && this.app.error) {
+          this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: this.app.error });
+        }
+      })
+  }
+
+  @Builder
+  toolApprovalMenu() {
+    Column() {
+      materialMenuHeader(t('工具审批'))
+      this.toolApprovalOption('ask', t('调用 MCP 或执行会产生变更的操作前询问。'))
+      this.toolApprovalOption('full', t('直接执行此会话已获授权的工具。'))
+    }.width(272).padding(8).alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  toolApprovalButton() {
+    Button({ type: ButtonType.Capsule }) {
+      Row({ space: 5 }) {
+        SymbolGlyph($r('sys.symbol.lock')).fontSize(14).fontColor([$r('app.color.text_secondary')])
+        Text(toolApprovalModeName(this.thread.toolApprovalMode)).fontFamily(this.appearance.fontFamily)
+          .fontSize(12).maxLines(1).fontColor($r('app.color.text_secondary'))
+        SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(9).fontColor([$r('app.color.text_secondary')])
+      }
+    }.id('composer-tool-approval').height(this.workbench ? 32 : 44).padding({ left: 8, right: 8 })
+      .backgroundColor(Color.Transparent)
+      .enabled(this.app.ready && !this.app.busy && !this.thread.archived && this.app.saveError.length === 0)
+      .accessibilityText(t('工具审批') + '：' + toolApprovalModeName(this.thread.toolApprovalMode))
+      .onClick(() => {
+        this.showToolApprovalMode = !this.showToolApprovalMode;
+        this.getUIContext().getFocusController().clearFocus();
+      })
+      .bindPopup(this.showToolApprovalMode, { builder: this.toolApprovalMenu, placement: Placement.Top,
+        systemMaterial: this.appearance.menu, popupColor: $r('app.color.surface'), radius: 20,
+        enableArrow: false, autoCancel: true, mask: false,
+        onStateChange: (event) => { this.showToolApprovalMode = event.isVisible; } })
+  }
+
+  @Builder
   composerAddButton() {
     IconButton({ icon: $r('sys.symbol.plus'), label: t('添加图片、画板、文件或模板'), compId: 'add-attachment', diameter: this.workbench ? 36 : 44,
       iconSize: 18, fill: $r('app.color.surface_variant'),
@@ -1568,6 +1626,7 @@ export struct ChatPanel {
         this.composerAddButton()
         Scroll() {
         Row({ space: 4 }) {
+        this.toolApprovalButton()
         if (this.workbench && !AdaptiveUi.compactComposer(this.panelWidth)) {
           Button() {
             Row({ space: 5 }) {
@@ -1718,14 +1777,13 @@ export struct ChatPanel {
     })
   }
 
-  // Remote MCP calls pause the agent until the user decides; keep the card compact but impossible to miss.
   @Builder
   approvalCard() {
     Column({ space: 10 }) {
       Row({ space: Space.sm }) {
         SymbolGlyph($r('sys.symbol.connection')).fontSize(20).fontColor([this.appearance.accent])
         Column({ space: 2 }) {
-          Text(t("允许调用远程工具？")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+          Text(t('允许调用工具？')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
           Text(this.approval.title).fontFamily(this.appearance.fontFamily).id('approval-title').fontSize(15).fontWeight(FontWeight.Medium).maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)

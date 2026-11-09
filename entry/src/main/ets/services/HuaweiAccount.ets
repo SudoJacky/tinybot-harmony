@@ -9,6 +9,10 @@ import { hostedPrivacy } from './HostedPrivacy';
 
 const ACCOUNT_ALIAS: string = 'tinybot.huawei.account.v1';
 
+export class BackupLoginRequired extends Error {
+  constructor() { super(t('请先登录华为账号，再备份或恢复。')); }
+}
+
 // Native Account Kit responses are obtained directly through the system API, not from a web page or JWT payload.
 // Keep only OpenID in device-only AssetStore; authorization codes, ID tokens and UnionID are neither used nor saved.
 @Observed
@@ -108,17 +112,14 @@ export class HuaweiAccount {
     hostedPrivacy.requireConsent();
   }
 
-  // Automatic backup may check an existing login, but must never open login UI.
-  async backupOpenID(context: common.UIAbilityContext, interactive: boolean = true): Promise<string> {
+  async backupOpenID(context: common.UIAbilityContext): Promise<string> {
+    hostedPrivacy.requireConsent();
     await this.initialize(context);
-    await this.refresh();
-    if (interactive && !this.signedIn && !this.busy) { await this.signIn(); }
-    if (!this.signedIn || this.busy) { throw new Error(this.error || t('请登录创建备份时使用的华为账号。')); }
     const revision = this.revision;
-    await this.requireLogin();
-    if (revision !== this.revision || !this.signedIn || !this.openID) {
-      throw new Error(t('华为账号已退出或发生变化，请重新登录。'));
-    }
+    await this.refresh();
+    hostedPrivacy.requireConsent();
+    if (revision !== this.revision || this.busy || !this.openID) { throw new BackupLoginRequired(); }
+    if (!this.signedIn) { throw new Error(this.error || t('无法检查华为账号状态，请重试或重新登录。')); }
     return this.openID;
   }
 

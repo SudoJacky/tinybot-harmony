@@ -18,6 +18,7 @@ import { ToolScopePanel } from '../views/ToolScopePanel';
 import { ProductivityPanel, ProductivityEditorRoute, productivityEditorTitle } from '../views/ProductivityPanel';
 import { ModelSettingsPanel } from '../views/AssistantPanel';
 import { BackupPanel } from '../views/BackupPanel';
+import { WebDavBackupPanel } from '../views/WebDavBackupPanel';
 import { UsagePanel } from '../views/UsagePanel';
 import { StorageCategoryPanel, StoragePanel } from '../views/StoragePanel';
 import { storageCategoryKey } from '../model/StoragePlan';
@@ -63,7 +64,7 @@ import { OnboardingPreferences } from '../services/OnboardingPreferences';
 import { StartupBackup } from '../services/StartupBackup';
 import { CloudBackup, CloudBackupItem, cloudBackupError } from '../services/CloudBackup';
 import { StartupBackupDialog } from '../views/StartupBackupDialog';
-import { HuaweiAccount, huaweiAccount } from '../services/HuaweiAccount';
+import { BackupLoginRequired, HuaweiAccount, huaweiAccount } from '../services/HuaweiAccount';
 import { HuaweiAccountPanel } from '../views/HuaweiAccountPanel';
 import { HostedPrivacy, hostedPrivacy } from '../services/HostedPrivacy';
 import { autoCloudBackup } from '../services/AutoCloudBackup';
@@ -395,7 +396,13 @@ struct Index {
       const width = WorkbenchLayout.dialogWidth(this.windowWidth);
       this.startupBackupDialog = new CustomDialogController({
         builder: StartupBackupDialog({ date: new Date(item.createdAt).toLocaleString(getLocale()),
-          onRestore: () => this.restoreStartupBackup(item) }),
+          onRestore: () => this.restoreStartupBackup(item),
+          onLogin: async () => {
+            await this.account.signIn();
+            if (!this.account.signedIn) {
+              throw new Error(this.account.error || t('请先登录华为账号，再备份或恢复。'));
+            }
+          } }),
         systemMaterial: this.appearance.surface, autoCancel: false, alignment: DialogAlignment.Center,
         width: width > 0 ? width : undefined,
         onDidAppear: () => {
@@ -432,7 +439,10 @@ struct Index {
       this.onboardingPreferences().complete();
       this.paths.clear(); this.onboardingActive = false;
       this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t('备份已恢复，已跳过已有内容') });
-    } catch (error) { throw new Error(cloudBackupError(error as Error)); }
+    } catch (error) {
+      if (error instanceof BackupLoginRequired) { throw error; }
+      throw new Error(cloudBackupError(error as Error));
+    }
     finally { this.startupBackupRestoring = false; }
   }
 
@@ -1175,7 +1185,14 @@ struct Index {
     } else if (name === 'model-settings') {
       NavDestination() { ModelSettingsPanel({ app: this.app }) }.title(t('模型分工与能力'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'backup') {
-      NavDestination() { BackupPanel({ app: this.app }) }.title(t('备份与恢复'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
+      NavDestination() {
+        BackupPanel({ app: this.app, onWebDav: () => this.paths.pushPath({ name: 'webdav-backup' }),
+          onLogin: () => this.paths.pushPath({ name: 'account' }) })
+      }.title(t('备份与恢复'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'webdav-backup') {
+      NavDestination() {
+        WebDavBackupPanel({ app: this.app, onLogin: () => this.paths.pushPath({ name: 'account' }) })
+      }.title(t('WebDAV'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'usage') {
       NavDestination() { UsagePanel({ app: this.app }) }.title(t('Token 用量'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'storage') {

@@ -14,6 +14,9 @@ import { t } from '../model/I18n';
 import { AgentMode, toolEnabled, ToolSelection, validateAgentMode, validateToolSelection, normalizeDisabledTools } from '../model/AgentMode';
 import { RuleTools } from './RuleTools';
 import { SelectedTools } from './SelectedTools';
+import { ApprovalTools } from './ApprovalTools';
+import { ToolApproval } from './ToolApproval';
+import { ToolApprovalMode, toolApprovalMode } from '../model/ToolApprovalMode';
 import { OPTIONAL_TOOL_NAMES, TOOL_CAPABILITIES } from '../model/ToolGroups';
 import { stepDisplayContent } from '../model/PublishedPreview';
 import { UiValues, UiSavedState, parseUiSurface, validateUiState, validateUiStates, copyUiValues } from '../model/InteractiveUi';
@@ -28,7 +31,7 @@ import { SearchDraft } from '../model/WebSearch';
 import { TeamRun, teamCommand } from '../model/Team';
 import { ChatTeamTools, CHAT_TEAM_INSTRUCTIONS, coordinatorDefinitions } from './ChatTeamTools';
 import { Attachment, MemoryEntry, McpServer, ProductivityData, defaultProductivity, validateAttachments, validateProductivity, memoryContext, supportedMcpAuth } from '../model/Productivity';
-import { defaultAssistantOptions, routeModel } from '../model/AssistantOptions';
+import { defaultAssistantOptions } from '../model/AssistantOptions';
 import { validateMemorySuggestions } from '../model/MemorySuggestions';
 import { MEMORY_CHAR_LIMIT, MEMORY_REVIEW_INTERVAL, MemoryOperation, MemoryChange,
   applyMemoryOperations, memoryCharacters, memoryReviewTurns } from '../model/MemoryMaintenance';
@@ -46,10 +49,11 @@ import { BrowserPolicy, ExtensionSettings, SkillData, SkillFile, defaultExtensio
 import { seedBuiltinSkills } from '../model/BuiltinSkills';
 import { threadTitle } from '../model/SessionManagement';
 import { CONVERSATION_TITLE_PROMPT, sanitizeConversationTitle, shouldGenerateTitle, titleCharacters } from '../model/ConversationTitle';
+import { CONTENT_GUARD_REFUSAL } from '../model/ContentGuard';
 import { AgentEvent, AgentRuntime } from './AgentRuntime';
 import { AgentTools } from './AgentLoop';
 import { CredentialVault, ProfileSettings, ProviderDraft } from './ProfileSettings';
-import { SessionEvent, SessionPreferences, SessionRepository, SessionResources, SessionState, SettingsToggle } from './SessionContracts';
+import { MessageCheckpoint, SessionEvent, SessionPreferences, SessionRepository, SessionResources, SessionState, SettingsToggle } from './SessionContracts';
 import { prepareSessionContext, sessionPromptSections, sessionContextSource } from './SessionContext';
 import { PromptSection, renderPrompt } from '../model/ContextProjection';
 interface UiComputeReceipt { status: string; result: UiValues; error: string; resultTruncated: boolean; }
@@ -79,20 +83,22 @@ export class SessionService {
   private credentials: CredentialVault;
   private mcpSettings: McpSettings;
   private profiles: ProfileSettings;
+  private approval?: ToolApproval;
   private draftRevision: number = 0;
   private dirtyDrafts: Set<string> = new Set<string>();
-  // Composer choices stay outside persisted data until a user message is submitted.
+  // Team and tool scope choices are committed with the next user message.
   private pendingTeamModes: Map<string, boolean> = new Map<string, boolean>();
   private pendingToolSelections: Map<string, ToolSelection> = new Map<string, ToolSelection>();
   private listeners: Set<(event: SessionEvent) => void> = new Set<(event: SessionEvent) => void>();
   private compatibilityIssues: Set<string> = new Set<string>();
 
-  constructor(repository: SessionRepository, runtime: AgentRuntime, credentials: CredentialVault, resources: SessionResources) {
+  constructor(repository: SessionRepository, runtime: AgentRuntime, credentials: CredentialVault, resources: SessionResources, approval?: ToolApproval) {
     this.repository = repository;
     this.runtime = runtime;
     this.credentials = credentials;
     this.mcpSettings = new McpSettings(credentials, () => resources.createId(), (message) => resources.reportError('mcp_failed', message));
     this.resources = resources;
+    this.approval = approval;
     this.profiles = new ProfileSettings(credentials, () => resources.createId());
   }
 
@@ -196,7 +202,7 @@ export class SessionService {
       if (capability.contextWindow !== undefined) { config.contextWindow = capability.contextWindow; }
     }
     const protocol = this.providerProfiles.find((item) => item.id === reference.providerId)?.protocol || '';
-    // An automatically routed model (or a worker using another model) retains its own defaults.
+    // A dedicated model or worker retains its own defaults when it uses a different model.
     if (supportsReasoningEffort(protocol, reference.modelId) && thread?.modelRef?.providerId === reference.providerId &&
       thread.modelRef.modelId === reference.modelId && thread.reasoningEffort && thread.reasoningEffort !== 'default') {
       config.reasoning = thread.reasoningEffort;
@@ -564,6 +570,18 @@ export class SessionService {
     }, 'snapshot', 'thread');
   }
 
+  async setToolApprovalMode(mode: ToolApprovalMode): Promise<boolean> {
+    if (!this.canMutate || this.active.archived) { return false; }
+    return this.mutate(t('保存工具审批设置失败：'), async () => {
+      const thread = this.active;
+      const candidate = copyAppMetadata(this.data);
+      const updated = JSON.parse(JSON.stringify(thread)) as ThreadData;
+      updated.toolApprovalMode = mode;
+      candidate.threads = this.data.threads.map((item) => item.id === thread.id ? updated : item);
+      await this.commitCandidate(candidate, () => { thread.toolApprovalMode = mode; }, [thread.id]);
+    }, 'snapshot', 'thread');
+  }
+
   async saveProvider(draft: ProviderDraft): Promise<boolean> {
     return this.mutate('', async () => {
       this.status.error = await this.profiles.save(this.snapshot(), draft, (candidate) => this.commitSettings(candidate));
@@ -649,7 +667,9 @@ export class SessionService {
       const pending = (thread.pendingInputs || []).concat([input]);
       validatePendingInputs(pending); thread.pendingInputs = pending;
       if (status.phase !== 'running') { thread.queuePaused = true; }
-      thread.draft = ''; thread.attachments = []; this.publish('snapshot'); await this.persist();
+      const approvalMode = toolApprovalMode(thread.toolApprovalMode);
+      thread.draft = ''; thread.attachments = []; this.publish('snapshot');
+      await this.exclusive(() => this.persist(undefined, undefined, approvalMode));
     } catch (error) {
       status.error = t("指令未能提交：") + (error as Error).message;
       if (this.application.saveError.length > 0) { thread.queuePaused = true; this.execution(thread.id).runtime.abort(); }
@@ -786,9 +806,7 @@ export class SessionService {
     const command = teamCommand(text);
     if (command !== undefined) { text = command; }
     const options = this.data.productivity?.options || defaultAssistantOptions();
-    const reference = thread.modelRef ? routeModel(options, text, attachments.concat(...thread.messages.map((item) =>
-      (item.role === 'user' ? item.attachments || [] : []).concat(...(item.steps || []).map((step) => step.steering?.attachments || [])))).some((item) => item.mime.startsWith('image/')), thread.modelRef, this.providerProfiles) : undefined;
-    const config = reference ? this.configFor(reference, thread) : this.threadConfig(thread); const selected = explicitSkill(text);
+    const config = this.threadConfig(thread); const selected = explicitSkill(text);
     if (!config.configured) { status.error = t("当前对话没有可用模型，请选择模型，或添加、启用模型服务。"); thread.queuePaused = true; return false; }
     if (selected.length > 0 && !this.extensions.skills.some((skill: SkillData) => skill.enabled && skill.name === selected)) {
       status.error = t("指定的 Skill 不存在或已停用，请到设置中的 Skills 管理检查。"); thread.queuePaused = true; return false;
@@ -808,7 +826,7 @@ export class SessionService {
     const user: MessageData = { id: this.resources.createId(), role: 'user', content: text, skillPrompt: expandSkillCommand(text, this.extensions.skills), status: 'complete', error: '',
       attachments: attachments, references: queuedId ? [] : thread.references, panelContext: queuedId ? undefined : thread.panelContext };
     if (!queuedId) { thread.attachments = []; thread.references = []; thread.panelContext = undefined; }
-    const answer: MessageData = { id: this.resources.createId(), role: 'assistant', content: '', status: 'generating', error: '', modelRef: reference };
+    const answer: MessageData = { id: this.resources.createId(), role: 'assistant', content: '', status: 'generating', error: '', modelRef: thread.modelRef };
     const generateTitle = text.length > 0 && shouldGenerateTitle(thread);
     if (text.length > 0 && thread.messages.length === 0 && !thread.titleEdited) { thread.title = titleCharacters(text.replace(/\s+/g, ' '), 32); }
     const fallbackTitle = thread.title;
@@ -816,12 +834,14 @@ export class SessionService {
     thread.messages = thread.messages.concat([user, answer]);
     let chatTeams: ChatTeamTools | undefined = undefined;
     if (thread.teamEnabled) {
-      const workerConfig = copyModelConfig(config); workerConfig.systemPrompt = instructions;
-      chatTeams = new ChatTeamTools({ thread: thread, messageId: answer.id, config: workerConfig,
+      chatTeams = new ChatTeamTools({ thread: thread, messageId: answer.id,
+        workerModel: options.teamWorker || { providerId: config.providerId, modelId: config.model },
         toolSelection: selection,
         usageOrigin: { threadId: thread.id, threadTitle: thread.title, turnId: user.id, turnLabel: text.slice(0, 80), skill: selected || undefined },
-        configFor: (model) => { const saved = this.configFor(model, thread); saved.systemPrompt = workerConfig.systemPrompt; return saved; },
-        base: () => this.tools(thread, selected), runtime: () => execution.runtime.fork(), createId: () => this.resources.createId(),
+        configFor: (model) => { const saved = this.configFor(model, thread); saved.systemPrompt = instructions; return saved; },
+        base: () => this.tools(thread, selected),
+        workerBase: () => this.withToolApproval(thread, this.tools(thread, selected)),
+        runtime: () => execution.runtime.fork(), createId: () => this.resources.createId(),
         contextSections: sections.filter((section) => section.dynamic),
         checkpoint: () => this.persist(thread.id), changed: () => this.publishTeams(thread) });
       execution.teams = chatTeams; tools = this.chatTools(thread, selected, chatTeams);
@@ -834,6 +854,7 @@ export class SessionService {
     thread.updatedAt = Date.now();
     this.data.threads = [thread].concat(this.data.threads.filter((item) => item.id !== thread.id));
     status.error = ''; status.contextStatus = ''; this.refreshContext(thread.id); this.publish('snapshot');
+    let refused = false;
     const unsubscribe = execution.runtime.subscribe((event: AgentEvent) => {
       if (event.run.sessionId !== thread.id) { return; }
       answer.content = event.run.turn.content; answer.steps = event.run.turn.steps;
@@ -843,7 +864,10 @@ export class SessionService {
       }
       answer.status = event.run.status === 'running' ? 'generating' : event.run.status; answer.error = event.run.error;
       status.acceptingSteering = execution.runtime.acceptsSteering && !thread.queuePaused;
-      if (event.type === 'run_finishing' && event.run.status !== 'complete') { thread.queuePaused = true; }
+      if (event.type === 'run_finishing') {
+        refused = answer.steps[answer.steps.length - 1]?.content === CONTENT_GUARD_REFUSAL;
+        if (refused || event.run.status !== 'complete') { thread.queuePaused = true; }
+      }
       if (event.type === 'tool_start' || event.type === 'tool_end') {
         const step = answer.steps[event.step || 0];
         const parent = event.parentToolCallId ? toolReceipts(step.tools).find((tool) => tool.call.id === event.parentToolCallId) : undefined;
@@ -862,6 +886,8 @@ export class SessionService {
           message: JSON.parse(JSON.stringify(answer)) as MessageData });
       }
     });
+    // Queue admission already recorded the approval mode when the user submitted the input.
+    let recordApprovalMode = queuedId === undefined;
     try {
       await execution.runtime.run({ sessionId: thread.id, config: config, messages: [], tools: tools, toolSelection: selection,
         usageOrigin: { threadId: thread.id, threadTitle: thread.title, turnId: user.id, turnLabel: text.slice(0, 80), purpose: 'conversation', skill: selected || undefined } }, {
@@ -872,7 +898,7 @@ export class SessionService {
           await this.resources.prepareGeneration?.(); cancellation.check(); await this.ensureThreadWorkspace(thread);
           cancellation.check();
           // The runtime's initial checkpoint has durably saved the first user message.
-          if (generateTitle) { this.generateTitle(thread.id, user.id, text, fallbackTitle, copyModelConfig(config)); }
+          if (generateTitle) { this.generateTitle(thread.id, user.id, text, fallbackTitle, config, options.title); }
         },
         context: sessionContextSource(thread, () => sections, () => this.persist(thread.id), (status) => this.contextProgress(thread.id, status)),
         contextChanged: (prepared) => {
@@ -880,7 +906,15 @@ export class SessionService {
           status.contextBreakdown = prepared.breakdown;
           status.contextSource = prepared.context.source;
         },
-        checkpoint: () => { this.publishThread(thread); return this.persist(thread.id, answer.id); },
+        checkpoint: async () => {
+          this.publishThread(thread);
+          if (recordApprovalMode) {
+            await this.exclusive(() => this.persist(thread.id, answer.id, toolApprovalMode(thread.toolApprovalMode)));
+            recordApprovalMode = false;
+          } else {
+            await this.persist(thread.id, answer.id);
+          }
+        },
         steering: {
           peek: () => nextPendingInput(thread.pendingInputs || [], thread.queuePaused === true, true),
           consume: (id: string) => { thread.pendingInputs = (thread.pendingInputs || []).filter((item: PendingInput) => item.id !== id); }
@@ -896,6 +930,7 @@ export class SessionService {
       if (answer.status === 'failed') { this.resources.reportError('run_failed', answer.error, { threadId: thread.id, messageId: answer.id }); }
       if (status.contextStatus.startsWith(t("正在压缩"))) { status.contextStatus = ''; }
     }
+    if (refused) { return false; }
     if (answer.status === 'complete' && !this.application.saveError) {
       if (options.saveSummary && !readOnly) {
         try { await this.resources.afterTask?.(thread.id, answer.id, answer.content, projectFor(this.data, thread)?.workspaceId); }
@@ -908,11 +943,13 @@ export class SessionService {
     }
     return answer.status === 'complete' && this.application.saveError.length === 0;
   }
-  private async generateTitle(threadId: string, sourceId: string, input: string, fallback: string, config: ModelConfig): Promise<void> {
+  private async generateTitle(threadId: string, sourceId: string, input: string, fallback: string, config: ModelConfig,
+    reference?: ModelReference): Promise<void> {
     try {
+      const titleConfig = reference ? this.configFor(reference, this.requireThread(threadId)) : copyModelConfig(config);
       const runtime = this.runtime.fork();
       let content = '';
-      const result = await runtime.run({ sessionId: threadId, config: config, messages: [], contextOnly: true, tools: new ToolSet([]),
+      const result = await runtime.run({ sessionId: threadId, config: titleConfig, messages: [], contextOnly: true, tools: new ToolSet([]),
         usageOrigin: { threadId: threadId, threadTitle: fallback, turnId: sourceId, turnLabel: input.slice(0, 80), purpose: 'title' } }, {
         prepare: async () => {}, checkpoint: async () => {},
         prepareContext: async (model, _messages, cancellation) => {
@@ -952,7 +989,7 @@ export class SessionService {
       } finally { this.application.phase = 'idle'; this.publish('state'); }
     } catch (error) {
       // Auxiliary requests never change chat status or abort the foreground runtime.
-      this.resources.reportError('title_failed', error as Error);
+      this.resources.reportError('title_failed', error as Error, { threadId: threadId, messageId: sourceId, providerId: reference?.providerId || config.providerId });
     }
   }
 
@@ -1077,8 +1114,8 @@ export class SessionService {
       tools = new SelectedTools(new ToolSet([tools, new ResourceTools((request, cancellation) => this.manageSkill(thread, request, cancellation),
         (request, cancellation) => this.manageMcp(thread, request, cancellation))]), this.selectedToolSelection(thread));
     }
-    if (!options.autoMemory || this.readOnly(thread)) { return tools; }
-    return new SelectedTools(new ToolSet([tools, new MemoryTools(async (operations, cancellation) => this.exclusive(async () => {
+    if (!options.autoMemory || this.readOnly(thread)) { return this.withToolApproval(thread, tools); }
+    tools = new SelectedTools(new ToolSet([tools, new MemoryTools(async (operations, cancellation) => this.exclusive(async () => {
       const user = thread.messages.slice().reverse().find((message) => message.role === 'user');
       if (!user) { throw new Error(t('记忆变更缺少有效的用户消息来源。')); }
       // The host supplies provenance; the model cannot impersonate another conversation's source.
@@ -1091,6 +1128,12 @@ export class SessionService {
       return JSON.stringify({ success: true, receipt: change.receipt, limit: MEMORY_CHAR_LIMIT,
         memories: change.memories.filter((item) => !item.threadId || item.threadId === thread.id) });
     }))]), this.selectedToolSelection(thread));
+    return this.withToolApproval(thread, tools);
+  }
+
+  private withToolApproval(thread: ThreadData, tools: AgentTools): AgentTools {
+    return this.approval && toolApprovalMode(thread.toolApprovalMode) === 'ask' ?
+      new ApprovalTools(tools, this.approval, thread.title) : tools;
   }
 
   private checkResourceMutation(thread: ThreadData, cancellation: Cancellation): void {
@@ -1268,7 +1311,7 @@ export class SessionService {
     if (extras.options.search && !isSupportedSearchProvider(extras.options.search.provider)) { extras.options.search.enabled = false; }
     extras.options.readOnly = this.readOnly(thread);
     extras.servers = extras.servers.filter((item) => !(thread.disabledMcpIds || []).includes(item.id));
-    const live: LiveResources = { skills: () => this.extensions.skills,
+    const live: LiveResources = { askForToolApproval: toolApprovalMode(thread.toolApprovalMode) === 'ask', skills: () => this.extensions.skills,
       servers: () => (this.data.productivity?.servers || []).filter((item) => !(thread.disabledMcpIds || []).includes(item.id)) };
     return new SelectedTools(new RuleTools(new ToolSet([this.resources.tools(thread.id, this.extensions, selected, extras,
       (thread.attachments || []).concat(...thread.messages.map((item) => (item.attachments || [])
@@ -1306,6 +1349,7 @@ export class SessionService {
   private freshThread(): ThreadData {
     return { id: this.resources.createId(), title: '新对话', updatedAt: Date.now(), messages: [], draft: '', pendingInputs: [], queuePaused: false,
       reasoningEffort: this.data.config.reasoning,
+      toolApprovalMode: toolApprovalMode(this.data.lastToolApprovalMode),
       modelRef: this.data.config.configured ? { providerId: this.data.config.providerId, modelId: this.data.config.model } : undefined };
   }
   // Until the first message, every empty chat shares the new-chat preferences.
@@ -1362,9 +1406,9 @@ export class SessionService {
       }
     }
   }
-  private async commitCandidate(candidate: AppData, publish: () => void, changedThreadIds?: string[]): Promise<void> {
+  private async commitCandidate(candidate: AppData, publish: () => void, changedThreadIds?: string[], message?: MessageCheckpoint): Promise<void> {
     if (this.pendingCommit) { throw new Error('A session commit is already in progress.'); }
-    const committed = this.repository.save(candidate, changedThreadIds).then(publish);
+    const committed = this.repository.save(candidate, changedThreadIds, message).then(publish);
     this.pendingCommit = committed;
     try { await committed; } finally { this.pendingCommit = undefined; }
   }
@@ -1401,13 +1445,21 @@ export class SessionService {
   private async persistDraftChanges(revision: number): Promise<void> {
     while (revision !== this.draftRevision) { revision = this.draftRevision; await this.persist(); }
   }
-  private async persist(threadId?: string, messageId?: string): Promise<void> {
+  private async persist(threadId?: string, messageId?: string, submittedApprovalMode?: ToolApprovalMode): Promise<void> {
     // Draft autosaves and team checkpoints must capture resources after the transaction publishes them.
     if (this.pendingCommit) { await this.pendingCommit; }
     const preferences = this.syncEmptyThreadPreferences(this.data); const draftRevision = this.draftRevision;
     try {
-      await this.repository.save(this.data, threadId === undefined ? undefined : preferences.concat([threadId], Array.from(this.dirtyDrafts)),
-        threadId !== undefined && messageId !== undefined ? { threadId: threadId, messageId: messageId } : undefined);
+      const changed = threadId === undefined ? undefined : preferences.concat([threadId], Array.from(this.dirtyDrafts));
+      const message: MessageCheckpoint | undefined = threadId !== undefined && messageId !== undefined ?
+        { threadId: threadId, messageId: messageId } : undefined;
+      if (submittedApprovalMode !== undefined && this.data.lastToolApprovalMode !== submittedApprovalMode) {
+        const candidate = copyAppMetadata(this.data);
+        candidate.lastToolApprovalMode = submittedApprovalMode;
+        await this.commitCandidate(candidate, () => { this.data.lastToolApprovalMode = submittedApprovalMode; }, changed, message);
+      } else {
+        await this.repository.save(this.data, changed, message);
+      }
       if (draftRevision === this.draftRevision) { this.dirtyDrafts.clear(); }
     }
     catch (error) {
@@ -1424,6 +1476,7 @@ export class SessionService {
       parentMessageId: thread.parentMessageId, disabledMcpIds: thread.disabledMcpIds, modelRef: thread.modelRef,
       pendingInputs: thread.pendingInputs, queuePaused: thread.queuePaused, compaction: thread.compaction,
       memoryReview: thread.memoryReview, reasoningEffort: thread.reasoningEffort, teamEnabled: this.selectedTeamMode(thread),
+      toolApprovalMode: thread.toolApprovalMode,
       agentMode: this.selectedToolSelection(thread).agentMode, disabledTools: this.selectedToolSelection(thread).disabledTools };
     this.emit({ kind: 'thread', state: this.state, threadId: thread.id,
       thread: JSON.parse(JSON.stringify(metadata)) as ThreadData });

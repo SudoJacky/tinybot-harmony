@@ -20,6 +20,7 @@ export interface McpRequest {
   clientId?: string;
 }
 export interface LiveResources {
+  askForToolApproval?: boolean;
   skills: () => SkillData[];
   servers: () => McpServer[];
 }

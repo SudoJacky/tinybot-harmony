@@ -17,6 +17,10 @@ export const THIRD_PARTY_LICENSES: ThirdPartyLicense[] = [
     copyright: 'Copyright (c) 2013-2020 Khan Academy and other contributors', resource: 'math/LICENSE.txt'
   },
   {
+    id: 'mermaid', name: 'Mermaid · 12.3.0', license: 'MIT',
+    copyright: 'Copyright (c) 2014 - 2022 Knut Sveidqvist', resource: 'licenses/mermaid.txt'
+  },
+  {
     id: 'quickjs', name: 'QuickJS · 2026-06-04', license: 'MIT',
     copyright: 'Copyright (c) 2017-2021 Fabrice Bellard\nCopyright (c) 2017-2021 Charlie Gordon',
     resource: 'licenses/quickjs.txt'
@@ -32,6 +36,10 @@ export const THIRD_PARTY_LICENSES: ThirdPartyLicense[] = [
   {
     id: 'office-bundle', name: 'fflate / xmldom / PptxGenJS slide template', license: 'MIT',
     copyright: 'Arjun Barrett, xmldom contributors, and Brent Ely', resource: 'licenses/office-bundle.txt'
+  },
+  {
+    id: 'sensitive-lexicon', name: 'Sensitive-lexicon', license: 'MIT (upstream repository)',
+    copyright: 'Copyright (c) 2024~2099 Konsheng', resource: 'moderation/SENSITIVE-LEXICON-LICENSE.txt'
   },
   {
     id: 'huawei-samples', name: 'Huawei Ability samples', license: 'Apache-2.0',

@@ -65,6 +65,7 @@ import { SkillTools } from './SkillTools';
 import { ToolSet } from './ToolSet';
 import { profileProvider } from './providers/DefaultProviders';
 import { ProviderRegistry } from './providers/ProviderRegistry';
+import { OUTPUT_WORD_LIST, OutputWordMatcher } from './OutputWordGuard';
 import { huaweiAccount } from './HuaweiAccount';
 import { backgroundGeneration } from './BackgroundGeneration';
 import { completionNotifications } from './CompletionNotifications';
@@ -143,7 +144,10 @@ export class NativeSessionResources implements SessionResources {
     groups.push(new PreviewTools(files, (content, cancellation) => WebUiPreflight.validate(content, cancellation),
       (content, cancellation) => PreviewCapture.capture(content, cancellation)));
     if (extensions.webEnabled) { groups.push(new WebTools(new NativeWebTransport())); }
-    if (this.browser) { groups.push(new BrowserTools(this.browser, id, productivity?.options?.readOnly === true, resolvePreview)); }
+    if (this.browser) {
+      groups.push(new BrowserTools(this.browser, id, productivity?.options?.readOnly === true, resolvePreview,
+        live?.askForToolApproval === false ? undefined : this.approval));
+    }
     const search = productivity?.options?.search;
     if (extensions.webEnabled && search?.enabled && isSupportedSearchProvider(search.provider)) {
       if (search.provider === 'bing-browser') {
@@ -152,7 +156,10 @@ export class NativeSessionResources implements SessionResources {
         groups.push(new WebSearchTools(new NativeSearchTransport(search, new CredentialStore(), id, (record) => UsageLedger.record(record), () => this.profiles)));
       }
     }
-    if (productivity) { groups.push(new McpTools(productivity.servers, this.approval, (server) => new McpClient(server), live ? () => live.servers() : undefined)); }
+    if (productivity) {
+      groups.push(new McpTools(productivity.servers, this.approval, (server) => new McpClient(server),
+        live ? () => live.servers() : undefined, live?.askForToolApproval !== false));
+    }
     return new RuleTools(new ToolSet(groups), productivity?.options?.readOnly === true);
   }
   async afterTask(threadId: string, messageId: string, content: string, workspaceId?: string): Promise<void> {
@@ -182,10 +189,18 @@ export class NativeSessionResources implements SessionResources {
 export function createNativeSessionService(filesDir: string, workspaceFilesDir: string, approval: ToolApproval = new ToolApproval(), context?: common.UIAbilityContext, browser?: BrowserSession): SessionService {
   Attachments.configure(workspaceFilesDir);
   UsageLedger.configure(filesDir).catch((error: Error) => { UsageLedger.error = error.message; });
-  const providers = new ProviderRegistry(() => huaweiAccount.requireLogin()); const credentials = new CredentialStore();
+  // Packaged snapshot: konsheng/Sensitive-lexicon@68a595fb24d31bd9f882c081b4252443a69ac57b.
+  let outputWords: Promise<OutputWordMatcher> | undefined;
+  const loadOutputWords = async (): Promise<OutputWordMatcher> => {
+    if (!context) { throw new Error('An ability context is required to load the output word list.'); }
+    const data = await context.resourceManager.getRawFileContent(OUTPUT_WORD_LIST);
+    return new OutputWordMatcher(util.TextDecoder.create('utf-8').decodeToString(data));
+  };
+  const providers = new ProviderRegistry(() => huaweiAccount.requireLogin(), () => outputWords ?? (outputWords = loadOutputWords()));
+  const credentials = new CredentialStore();
   const session = new SessionService(new ConversationStore(filesDir), new AgentRuntime(providers, credentials, new NativeUsageRecorder(),
     (content, cancellation) => WebUiPreflight.validate(content, cancellation), new NativeOrchestrationExecutor(), browser), credentials,
-    new NativeSessionResources(workspaceFilesDir, providers, approval, context, browser));
+    new NativeSessionResources(workspaceFilesDir, providers, approval, context, browser), approval);
   installNativePanelAgent(workspaceFilesDir, providers, credentials, () => session.snapshot());
   if (context) { backgroundGeneration.attach(session, context); completionNotifications.attach(session, context); }
   if (browser) {

@@ -1,8 +1,11 @@
 import { t } from '../../model/I18n';
 import { ModelMessage, ModelTurn, ToolDefinition } from '../../model/Agent';
+import { CONTENT_GUARD_REFUSAL } from '../../model/ContentGuard';
 import { ModelConfig } from '../../model/Conversation';
 import { copyProviderInfo, ProviderInfo } from '../../model/Provider';
 import { Cancellation } from '../Cancellation';
+import { ContentGuardStream } from '../ContentGuardStream';
+import { OutputWordGuard, OutputWordMatcher } from '../OutputWordGuard';
 import { UsageOrigin } from '../../model/Usage';
 import { CredentialReader, ModelProvider, ModelRequestOptions, ModelSession } from './Provider';
 
@@ -17,12 +20,14 @@ class BoundModel implements ModelSession {
   private images?: boolean;
   private origin?: UsageOrigin;
   private authorize?: () => Promise<void>;
+  private outputWords?: () => Promise<OutputWordMatcher>;
 
   constructor(provider: ModelProvider, config: ModelConfig, credentials: CredentialReader, origin?: UsageOrigin,
-    authorize?: () => Promise<void>) {
+    authorize?: () => Promise<void>, outputWords?: () => Promise<OutputWordMatcher>) {
     this.provider = provider;
     this.credentials = credentials;
     this.authorize = authorize;
+    this.outputWords = outputWords;
     this.origin = origin ? JSON.parse(JSON.stringify(origin)) as UsageOrigin : undefined;
     this.baseUrl = config.baseUrl;
     this.model = config.model;
@@ -44,22 +49,44 @@ class BoundModel implements ModelSession {
     // Resolve on every request, allowing later credential rotation without caching secrets.
     const key = await this.credentials.read(this.alias);
     await this.authorize?.();
+    const matcher = await this.outputWords?.();
     cancellation.check();
     const origin: UsageOrigin = this.origin ? JSON.parse(JSON.stringify(this.origin)) as UsageOrigin : {};
     if (options?.usagePurpose) { origin.purpose = options.usagePurpose; }
     if (options?.usageStep !== undefined) { origin.step = options.usageStep; }
-    return this.provider.stream({ baseUrl: this.baseUrl, model: this.model, apiKey: key,
+    const answer = matcher ? new OutputWordGuard(matcher, 'answer', onText) : undefined;
+    const onReasoning = options?.onReasoning;
+    const reasoning = matcher && onReasoning ? new OutputWordGuard(matcher, 'reasoning', onReasoning) : undefined;
+    const guard = new ContentGuardStream(answer ? (text) => answer.push(text) : onText,
+      reasoning ? (text) => reasoning.push(text) : onReasoning);
+    const response = await this.provider.stream({ baseUrl: this.baseUrl, model: this.model, apiKey: key,
       usageOrigin: origin,
       messages: messages, tools: tools, maxOutputTokens: options?.maxOutputTokens,
-      reasoning: this.reasoning, requestUsage: this.requestUsage }, cancellation, onText, options?.onReasoning);
+      reasoning: this.reasoning, requestUsage: this.requestUsage }, cancellation,
+      (text) => guard.pushText(text), (text) => guard.pushReasoning(text));
+    cancellation.check();
+    if (guard.finish(response.content)) {
+      if (origin.purpose === 'title' || origin.purpose === 'compaction') {
+        throw new Error(t('本次回复未通过内容审核，请调整问题后重试。'));
+      }
+      onText(CONTENT_GUARD_REFUSAL);
+      return { content: CONTENT_GUARD_REFUSAL, toolCalls: [], usage: response.usage };
+    }
+    answer?.finish(response.content);
+    reasoning?.finish(response.reasoningContent || '');
+    return response;
   }
 }
 
 export class ProviderRegistry {
   private providers: Map<string, ModelProvider> = new Map<string, ModelProvider>();
   private authorize?: () => Promise<void>;
+  private outputWords?: () => Promise<OutputWordMatcher>;
 
-  constructor(authorize?: () => Promise<void>) { this.authorize = authorize; }
+  constructor(authorize?: () => Promise<void>, outputWords?: () => Promise<OutputWordMatcher>) {
+    this.authorize = authorize;
+    this.outputWords = outputWords;
+  }
 
   register(provider: ModelProvider): void {
     const info = provider.info;
@@ -105,6 +132,6 @@ export class ProviderRegistry {
       throw new Error(t("请填写模型名称。"));
     }
     // Registry edits affect future runs only; the active run keeps this provider instance.
-    return new BoundModel(provider, config, credentials, origin, this.authorize);
+    return new BoundModel(provider, config, credentials, origin, this.authorize, this.outputWords);
   }
 }

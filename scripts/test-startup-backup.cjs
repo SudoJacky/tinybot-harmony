@@ -65,7 +65,7 @@ async function uiTest(){
   vm.runInNewContext(compile('class Probe {'+methods.map(name=>component.members.find(n=>n.name?.getText(tree)===name).getText(tree)).join('\n')+'} exports.Probe=Probe;'),{
     exports,t:(s,values=[])=>s.replace(/\{(\d+)\}/g,(_,i)=>values[i]),getLocale:()=> 'zh-CN',
     ShareInbox:{peek:()=>undefined},WorkbenchLayout:{dialogWidth:()=>0},DialogAlignment:{Center:0},Diagnostics:{log(){}},
-    cloudBackupError:e=>e.message,CloudBackup:{restore:()=>restore()},StartupBackupDialog:class{},
+    cloudBackupError:e=>e.message,CloudBackup:{restore:()=>restore()},StartupBackupDialog:class{},BackupLoginRequired:class extends Error {},
     CustomDialogController:class{constructor(options){this.options=options;dialogs.push(this);}open(){this.options.onDidAppear();}close(){this.options.onDidDisappear();}}
   });
   function page(){let finished=0,commits=0;const entries=['onboarding'];const data=fresh();
@@ -94,7 +94,7 @@ async function accountBackupUiTest(){
   const methods=['locked','cloud','aboutToDisappear'];
   const exports={},calls=[];const data={};let imports=0;
   vm.runInNewContext(compile('class Probe {'+methods.map(name=>component.members.find(n=>n.name?.getText(tree)===name).getText(tree)).join('\n')+'} exports.Probe=Probe;'),{
-    exports,t:s=>s,cloudBackupError:e=>e.message,
+    exports,t:s=>s,cloudBackupError:e=>e.message,BackupLoginRequired:class extends Error {},
     CloudBackup:{create:async(_context,_data,password)=>{calls.push(['create',password]);return true;},
       restoreLatest:async(_context,_data)=>{calls.push(['restoreLatest']);return data;}}
   });

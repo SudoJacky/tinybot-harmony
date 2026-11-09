@@ -53,11 +53,12 @@ function fixture() {
   data.futureRoot = { list: [1, false, { text: 'future' }] }; data.config.futureConfig = { retained: true };
   data.config.reasoning = 'future-effort';
   data.providerProfiles = [profile('known'), profile('future', 'future-protocol')];
+  data.providerProfiles[0].models.push('legacy-route');
   data.providerProfiles[1].baseUrl = 'future-scheme://endpoint';
   data.providerProfiles[0].presetId = 'future-preset';
   data.productivity = defaultProductivity(); data.productivity.futureProductivity = { retained: true };
   data.productivity.options = defaultAssistantOptions(); data.productivity.options.futureOptions = { retained: true };
-  data.productivity.options.autoRoute = true; data.productivity.options.fast = { providerId: 'future', modelId: 'model' };
+  data.productivity.options.autoRoute = true; data.productivity.options.fast = { providerId: 'known', modelId: 'legacy-route' };
   data.productivity.options.capabilities = [{ providerId: 'known', modelId: 'model', images: true,
     requestUsage: true, reasoning: 'future-effort', futureCapability: { retained: true } }];
   data.productivity.servers = [{ id: 'future-mcp', name: 'Future MCP', url: 'https://example.com/mcp',
@@ -155,7 +156,8 @@ async function main() {
     Diagnostics.start(); await session.initialize();
     assert.equal(session.state.ready, true, session.state.error);
     assert.equal(session.currentConfig.configured, false, 'Only the unsupported model is unavailable');
-    assert.deepEqual(plain(availableModels(session.snapshot().providerProfiles)).map(item => item.providerId), ['known']);
+    assert.deepEqual(plain(availableModels(session.snapshot().providerProfiles)).map(item => [item.providerId, item.modelId]),
+      [['known', 'model'], ['known', 'legacy-route']]);
     assert.throws(() => modelConfig(future.providerProfiles, { providerId: 'future', modelId: 'model' }, future.config));
     assert.ok(seenTools.length); assert.equal(seenTools.at(-1).options.search.enabled, false);
     assert.equal(session.snapshot().productivity.options.search.enabled, true, 'Runtime disable must not overwrite saved intent');
@@ -185,22 +187,23 @@ async function main() {
     console.log('PASS newer snapshot -> current startup -> unrelated preference save -> cold reload retains unknown data');
 
     assert.equal(await session.saveProvider({ id: 'known', name: 'Renamed', presetId: 'future-preset', protocol: 'chat-completions',
-      baseUrl: 'https://example.com/v1', apiKey: '', noApiKey: true, enabled: true, models: 'model', contextWindow: '' }), true, session.state.error);
+      baseUrl: 'https://example.com/v1', apiKey: '', noApiKey: true, enabled: true, models: 'model\nlegacy-route', contextWindow: '' }), true, session.state.error);
     assert.deepEqual(plain(session.snapshot().providerProfiles[0].futureProfile), { retained: true });
     assert.equal(await session.selectModel('known', 'model'), true, session.state.error);
     assert.equal(session.currentConfig.configured, true);
     assert.equal(session.currentConfig.reasoning, 'default');
     session.setDraft('Continue after downgrade'); await session.send();
     assert.equal(session.state.error, ''); assert.equal(requests.length, 1);
+    assert.equal(requests[0].model, 'model', 'Legacy automatic routing must not override the selected model');
     assert.equal(requests[0].tools.length, 0, 'Unknown tool mode allows text chat while withholding every tool');
     assert.equal(requests[0].reasoning, 'default');
     const afterSend = await new ConversationStore(directory).load();
     assert.equal(afterSend.threads[0].messages.at(-1).content, 'Still works');
+    assert.equal(afterSend.threads[0].messages.at(-1).modelRef.modelId, 'model');
     assert.equal(afterSend.threads[0].agentMode, 'future-mode');
     assert.equal(afterSend.productivity.options.capabilities[0].reasoning, 'future-effort');
     assert.deepEqual(plain(afterSend.futureRoot), future.futureRoot);
-    assert.equal(afterSend.productivity.options.autoRoute, true, 'Only runtime routing is disabled');
-    assert.ok(session.state.compatibilityWarnings.some(message => message.includes('自动路由')));
+    assert.equal(afterSend.productivity.options.autoRoute, true, 'Opening older data does not rewrite its retired preferences');
     console.log('PASS editing a known provider and continuing text chat preserve future data and never authorize tools');
     assert.equal(await session.setAgentMode('full'), true);
     assert.ok(!session.state.compatibilityWarnings.some(message => message.includes('工具模式')));

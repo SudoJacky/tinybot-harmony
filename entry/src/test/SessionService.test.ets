@@ -497,6 +497,22 @@ export default function sessionServiceTests(): void {
       const restored = new Fixture(await f.repository.load()); await restored.session.initialize();
       expect(active(restored.session.snapshot()).title).assertEqual('登录故障排查');
     });
+    it('usesDedicatedTitleModelWithoutChangingTheConversationModel', 0, async () => {
+      const data = titleSeed();
+      data.providerProfiles![0].models.push('title-model');
+      const f = new Fixture(data); await f.session.initialize();
+      const productivity = f.session.snapshot().productivity!;
+      productivity.options!.title = { providerId: 'test', modelId: 'title-model' };
+      expect(await f.session.saveProductivity(productivity)).assertTrue();
+      f.provider.respond = async (index) => reply(isTitleRequest(f.provider.requests[index]) ? 'Generated title' : 'Main answer');
+      f.session.setDraft('First input'); await f.session.send(); await settleTitles();
+      expect(f.provider.requests.find((item) => isTitleRequest(item))?.model).assertEqual('title-model');
+      expect(f.provider.requests.find((item) => !isTitleRequest(item))?.model).assertEqual('model');
+      const saved = await f.repository.load();
+      expect(active(saved).title).assertEqual('Generated title');
+      expect(active(saved).messages[1].modelRef?.modelId).assertEqual('model');
+      expect(saved.productivity?.options?.title?.modelId).assertEqual('title-model');
+    });
     it('keepsForegroundModelRunningWhenTitleGenerationFails', 0, async () => {
       const f = new Fixture(titleSeed()); await f.session.initialize();
       const release = new Gate(); const entered = new Gate();
@@ -777,18 +793,6 @@ export default function sessionServiceTests(): void {
       let rejected = false; try { parseAppData(JSON.stringify(corrupt)); } catch (_) { rejected = true; }
       expect(rejected).assertTrue();
     });
-    it('reasoningOverrideDoesNotLeakToAutomaticallyRoutedModels', 0, async () => {
-      const data = seed(); (data.providerProfiles || [])[0].models.push('another');
-      data.productivity = defaultProductivity();
-      const options = defaultAssistantOptions(); options.autoRoute = true;
-      options.fast = { providerId: 'test', modelId: 'another' };
-      options.capabilities = [{ providerId: 'test', modelId: 'another', reasoning: 'low', images: true, requestUsage: false, contextWindow: 32768 }];
-      data.productivity.options = options;
-      const f = new Fixture(data); await f.session.initialize();
-      await f.session.setReasoningEffort('high'); f.session.setDraft('hello'); await f.session.send();
-      expect(f.provider.requests[0].model).assertEqual('another');
-      expect(f.provider.requests[0].reasoning).assertEqual('low');
-    });
     it('compactSlashCommandSummarizesWithoutCreatingAMessage', 0, async () => {
       const f = new Fixture(historySeed()); await f.session.initialize();
       f.provider.respond = async () => reply('short summary');
@@ -843,7 +847,10 @@ export default function sessionServiceTests(): void {
       expect(f.provider.requests[1].tools.some((tool) => tool.function.name === 'team_recruit')).assertFalse();
     });
     it('chatCoordinatorRecruitsAndIntegratesWithoutManualPlanOrSecondTurn', 0, async () => {
-      const f = new Fixture(); await f.session.initialize(); let parentRequests = 0;
+      const data = seed();
+      data.providerProfiles![0].models.push('worker-model');
+      data.productivity!.options!.teamWorker = { providerId: 'test', modelId: 'worker-model' };
+      const f = new Fixture(data); await f.session.initialize(); let parentRequests = 0;
       const teams: SessionEvent[] = []; const metadata: SessionEvent[] = [];
       f.session.subscribe((event: SessionEvent) => {
         if (event.kind === 'teams') { teams.push(event); }
@@ -852,10 +859,13 @@ export default function sessionServiceTests(): void {
       f.provider.respond = async (index) => {
         const request = f.provider.requests[index];
         if (request.tools.some((tool) => tool.function.name === 'team_complete_task')) {
+          expect(request.model).assertEqual('worker-model');
+          expect(request.usageOrigin?.purpose).assertEqual('team_task');
           expect(request.tools.some((tool) => tool.function.name === 'team_recruit')).assertFalse();
           if (request.messages.some((message) => message.role === 'tool')) { return reply('内部草稿'); }
           return { content: '', toolCalls: [{ id: 'handoff', type: 'function', function: { name: 'team_complete_task', arguments: '{"summary":"研究证据已整理","unresolved":[],"artifacts":[]}' } }] };
         }
+        expect(request.model).assertEqual('model');
         parentRequests++;
         if (parentRequests === 1) { return { content: '我来招募研究员。', toolCalls: [{ id: 'recruit', type: 'function', function: { name: 'team_recruit', arguments: '{"goal":"研究","members":[{"id":"researcher","displayName":"研究员","instructions":"查证"}],"tasks":[{"id":"facts","title":"整理证据","memberId":"researcher","instructions":"整理后交接","dependencies":[]}]}' } }] }; }
         // The finish guard must turn a premature answer into integration inside this same turn.
@@ -867,7 +877,9 @@ export default function sessionServiceTests(): void {
       expect(thread.messages.length).assertEqual(2); expect(thread.messages[0].content).assertEqual('请招募员工研究');
       expect(thread.messages[1].status).assertEqual('complete'); expect(thread.messages[1].content.includes('最终结论')).assertTrue();
       expect(thread.teams![0].status).assertEqual('completed'); expect(thread.teams![0].ownerMessageId).assertEqual(thread.messages[1].id);
-      expect(active(await f.repository.load()).teams![0].tasks[0].attempts[0].handoff?.summary).assertEqual('研究证据已整理');
+      const savedTeam = active(await f.repository.load()).teams![0];
+      expect(savedTeam.tasks[0].attempts[0].handoff?.summary).assertEqual('研究证据已整理');
+      expect(savedTeam.model.modelId).assertEqual('worker-model');
       expect(teams.length > 0).assertTrue(); expect(metadata.length > 0).assertTrue();
       expect(teams.every((event) => event.data === undefined && event.thread === undefined)).assertTrue();
       expect(metadata.every((event) => event.data === undefined && event.thread?.messages.length === 0 && event.thread.teams === undefined)).assertTrue();
@@ -957,13 +969,6 @@ export default function sessionServiceTests(): void {
       const data = seed(); data.productivity = defaultProductivity(); data.productivity.options = defaultAssistantOptions(); data.productivity.options.autoMemory = true;
       const f = new Fixture(data); await f.session.initialize(); f.provider.respond = async () => { throw new Error('offline'); };
       f.session.setDraft('fact'); await f.session.send(); expect(f.provider.requests.length).assertEqual(1); expect(f.session.snapshot().productivity?.memories.length).assertEqual(0);
-    });
-    it('routingRecordsPhysicalModelWithoutChangingConversationChoice', 0, async () => {
-      const data = seed(); data.productivity = defaultProductivity(); data.productivity.options = defaultAssistantOptions(); data.productivity.options.autoRoute = true;
-      data.productivity.options.deep = { providerId: 'test', modelId: 'deep' }; data.providerProfiles?.[0].models.push('deep');
-      const f = new Fixture(data); await f.session.initialize(); f.session.setDraft('详细分析这个问题'); await f.session.send();
-      expect(f.provider.requests[0].model).assertEqual('deep'); expect(active(f.session.snapshot()).modelRef?.modelId).assertEqual('model');
-      expect(active(f.session.snapshot()).messages[1].modelRef?.modelId).assertEqual('deep');
     });
     it('sendsAttachmentsWithoutTextAndRetainsThemForHistory', 0, async () => {
       for (const draft of ['', '/team', '@team']) {

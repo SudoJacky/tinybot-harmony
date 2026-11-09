@@ -1,1 +1,2 @@
 *.ets linguist-language=ArkTS
+entry/src/main/resources/rawfile/mermaid/mermaid.min.js binary linguist-vendored

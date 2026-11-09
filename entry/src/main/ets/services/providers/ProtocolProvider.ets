@@ -9,6 +9,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { ModelTurn } from '../../model/Agent';
 import { copyProviderInfo, ProviderInfo } from '../../model/Provider';
 import { Cancellation, RunCancelledError } from '../Cancellation';
+import { OutputWordGuardStop } from '../OutputWordGuard';
 import { NetworkTransfers } from '../NetworkTransfers';
 import { ChatStream } from '../ChatStream';
 import { ModelStream, ResponsesStream, AnthropicStream } from './EventStreams';
@@ -172,6 +173,7 @@ export class ProtocolProvider implements ModelProvider {
               responsePrefix += text.slice(0, Math.max(0, 16384 - responsePrefix.length));
               if (!parseError && (responseCode === 0 || responseCode === 200)) { usage.push(text); parser.push(text); }
             } catch (error) {
+              if (error instanceof OutputWordGuardStop) { settle(error as Error); return; }
               parseError = error as Error;
               finish();
             } finally { if (Diagnostics.recording) { Diagnostics.end('network.decodeParse', parseMark, { bytes: data.byteLength }); } }

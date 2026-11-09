@@ -17,6 +17,8 @@ import { RepeatToolReminder } from './RepeatToolReminder';
 import { UiDiagnosticError, uiFailureReport } from '../model/UiRepair';
 import { requestWithRetry } from './RequestRetry';
 import { previewReferenceError } from '../model/PreviewReferences';
+import { OutputWordGuardStop } from './OutputWordGuard';
+import { CONTENT_GUARD_REFUSAL } from '../model/ContentGuard';
 
 export interface SteeringInput {
   peek: () => PendingInput | undefined;
@@ -145,6 +147,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
       } catch (error) {
         await observer.waitForExecution?.(cancellation);
         cancellation.check();
+        if (error instanceof OutputWordGuardStop) { step.uiValidation = ''; throw error; }
         if (!(error instanceof ContextOverflowError)) { throw error as Error; }
         step.requestError = 'context_overflow';
         turn.content = turn.steps.filter((item) => !item.requestError && !item.uiValidation).map((item) => item.content).filter((content) => content.length > 0).join('\n\n');
@@ -166,6 +169,12 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
       step.geminiContent = response.geminiContent;
       step.usage = response.usage;
       turn.content = turn.steps.filter((item) => !item.requestError).map((item: AgentStep) => item.content).filter((content: string) => content.length > 0).join('\n\n');
+      if (response.content === CONTENT_GUARD_REFUSAL) {
+        step.uiValidation = '';
+        observer.event({ type: 'model_end', step: round });
+        observer.event({ type: 'step_end', step: round });
+        return;
+      }
       validateToolCalls(response.toolCalls);
       for (const call of response.toolCalls) {
         if (seen.has(call.id)) {

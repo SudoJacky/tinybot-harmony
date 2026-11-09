@@ -2,14 +2,12 @@ import { WorkspaceFiles, WorkspaceListing, WorkspaceText, WorkspaceWrite } from 
 import { describe, expect, it } from '@ohos/hypium';
 import { parsePlan, parseForm, formResult, parseDataView, dataCsv, parseDelimited } from '../main/ets/model/RichArtifacts';
 import { UsageStream } from '../main/ets/model/Usage';
-import { defaultAssistantOptions, routeModel } from '../main/ets/model/AssistantOptions';
 import { WorkspaceTools } from '../main/ets/services/WorkspaceTools';
 import { applyTextEdits } from '../main/ets/model/WorkspaceEdit';
 import { Cancellation } from '../main/ets/services/Cancellation';
 import { ToolApproval } from '../main/ets/services/ToolApproval';
 import { InteractionTools } from '../main/ets/services/InteractionTools';
 import { ToolCall } from '../main/ets/model/Agent';
-import { ModelReference } from '../main/ets/model/ProviderProfiles';
 function rejects(action: () => void): void { let rejected = false; try { action(); } catch (_) { rejected = true; } expect(rejected).assertTrue(); }
 function call(name: string, data: string): ToolCall { return { id: 'test', type: 'function', function: { name: name, arguments: data } }; }
 class SearchFiles implements WorkspaceFiles {
@@ -70,13 +68,6 @@ export default function advancedTests(): void {
       const stream = new UsageStream(); stream.push('data: {"type":"message_start","message":{"usage":{"input_tokens":10,"output_tokens":0,"cache_read_input_tokens":90,"cache_creation_input_tokens":20}}}\n\n');
       stream.push('data: {"type":"message_delta","usage":{"output_tokens":30}}\n\n');
       expect(stream.result()?.input).assertEqual(120); expect(stream.result()?.output).assertEqual(30);
-    });
-    it('routingUsesExplicitChoicesAndFallsBackToCurrent', 0, () => {
-      const options = defaultAssistantOptions(); const current: ModelReference = { providerId: 'p', modelId: 'current' };
-      options.fast = { providerId: 'p', modelId: 'fast' }; options.deep = { providerId: 'p', modelId: 'deep' };
-      expect(routeModel(options, 'hi', false, current).modelId).assertEqual('current'); options.autoRoute = true;
-      expect(routeModel(options, 'hi', false, current).modelId).assertEqual('fast'); expect(routeModel(options, '详细分析', false, current).modelId).assertEqual('deep');
-      expect(routeModel(options, '图片', true, current).modelId).assertEqual('current');
     });
   });
 }
