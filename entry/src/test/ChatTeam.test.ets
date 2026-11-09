@@ -73,7 +73,8 @@ class Fixture {
     const registry = new ProviderRegistry(); registry.register(this.provider); const keys = new Keys();
     const config = defaultConfig(); config.configured = true; config.providerId = 'test'; config.model = 'model';
     let id = 0; let tail: Promise<void> = Promise.resolve();
-    this.host = new ChatTeamTools({ thread: this.thread, messageId: 'parent-message', config: config, base: () => this.base,
+    this.host = new ChatTeamTools({ thread: this.thread, messageId: 'parent-message', base: () => this.base,
+      workerModel: { providerId: config.providerId, modelId: config.model }, configFor: () => config,
       runtime: () => new AgentRuntime(registry, keys), createId: () => 'id-' + ++id, changed: () => {}, checkpoint: () => {
         const text = JSON.stringify(this.thread);
         const save = tail.then(async () => { await this.beforeSave(JSON.parse(text) as ThreadData); this.saved = text; this.writes++; });

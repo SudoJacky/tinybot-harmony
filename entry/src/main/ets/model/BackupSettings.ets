@@ -21,11 +21,9 @@ export function mergeBackupOptions(local: AssistantOptions | undefined, incoming
   if (local.autoMemory === base.autoMemory) { merged.autoMemory = incoming.autoMemory; }
   if (local.saveSummary === base.saveSummary) { merged.saveSummary = incoming.saveSummary; }
   if (local.readOnly === base.readOnly) { merged.readOnly = incoming.readOnly; }
-  if (local.autoRoute === base.autoRoute) { merged.autoRoute = incoming.autoRoute; }
-  if (!local.fast) { merged.fast = incoming.fast; }
-  if (!local.deep) { merged.deep = incoming.deep; }
-  if (!local.vision) { merged.vision = incoming.vision; }
   if (!local.memory) { merged.memory = incoming.memory; }
+  if (!local.title) { merged.title = incoming.title; }
+  if (!local.teamWorker) { merged.teamWorker = incoming.teamWorker; }
   for (const capability of incoming.capabilities) {
     if (!merged.capabilities.some((item) => item.providerId === capability.providerId && item.modelId === capability.modelId)) { merged.capabilities.push(capability); }
   }

@@ -104,7 +104,7 @@ STRINGS.reason = ['api_level', 'device_unsupported', 'construction_failed', 'cap
   'user_control', 'idle_browser', 'user_handoff', 'task_acquired'];
 STRINGS.format = ['image', 'markdown'];
 STRINGS.scriptSource = ['generated', 'host', 'frame', 'blank', 'data', 'other', 'unknown'];
-STRINGS.setting = ['search.provider', 'providerProfiles.protocol', 'options.autoRoute', 'extensions.browserPolicy', 'config.reasoning',
+STRINGS.setting = ['search.provider', 'providerProfiles.protocol', 'extensions.browserPolicy', 'config.reasoning',
   'capabilities.reasoning', 'threads.agentMode', 'threads.disabledTools', 'threads.reasoningEffort', 'servers.authType',
   'feedback.seenReplies', 'feedback.pendingSubmission', 'feedback.uploadQueue'];
 STRINGS.change = ['cold', 'append', 'tools', 'system', 'history'];

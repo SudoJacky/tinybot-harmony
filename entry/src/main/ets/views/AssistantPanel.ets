@@ -12,6 +12,8 @@ import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { Btn, Font, Space } from '../common/Theme';
 import { Banner, BottomBar, EmptyState, GroupCard, RowDivider, SectionHeader, SwitchRow } from '../common/Widgets';
 
+type DedicatedModel = 'memory' | 'title' | 'teamWorker';
+
 @Component
 export struct ModelSettingsPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
@@ -32,7 +34,11 @@ export struct ModelSettingsPanel {
     return reasoningEfforts(protocol, reference?.modelId || '');
   }
   private supportsReasoning(): boolean { return this.efforts().length > 1; }
-  private chosen(reference?: ModelReference): number { return reference ? this.app.modelChoices.findIndex((item) => item.providerId === reference.providerId && item.modelId === reference.modelId) + 1 : 0; }
+  private chosen(reference?: ModelReference): number {
+    if (!reference) { return 0; }
+    const index = this.app.modelChoices.findIndex((item) => item.providerId === reference.providerId && item.modelId === reference.modelId);
+    return index < 0 ? -1 : index + 1;
+  }
   private loadCapability(): void {
     const reference = this.reference(this.capabilityIndex + 1);
     const item = this.options.capabilities.find((item) => item.providerId === reference?.providerId && item.modelId === reference?.modelId);
@@ -59,11 +65,12 @@ export struct ModelSettingsPanel {
     if (!await this.app.saveProductivity(extras)) { this.error = this.app.error; }
     else { this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t("模型设置已保存") }); }
   }
-  private setRoute(kind: string, index: number): void {
-    const chosen = this.reference(index);
+  private setDedicatedModel(kind: DedicatedModel, index: number): void {
     const options = JSON.parse(JSON.stringify(this.options)) as AssistantOptions;
-    if (kind === 'fast') { options.fast = chosen; } else if (kind === 'deep') { options.deep = chosen; }
-    else if (kind === 'vision') { options.vision = chosen; } else if (kind === 'memory') { options.memory = chosen; }
+    const reference = this.reference(index);
+    if (kind === 'memory') { options.memory = reference; }
+    else if (kind === 'title') { options.title = reference; }
+    else { options.teamWorker = reference; }
     this.options = options;
   }
 
@@ -72,27 +79,18 @@ export struct ModelSettingsPanel {
     Column() {
       Scroll() {
         Column() {
-          SectionHeader({ title: t("按任务选择模型") })
-          GroupCard() {
-            Column() {
-              SwitchRow({ title: t("自动选择模型"), compId: 'auto-route', isOn: this.options.autoRoute,
-                onChange: (value) => { this.options.autoRoute = value; } })
-              RowDivider()
-              ModelChoiceRow({ title: t("快速任务"), options: this.choices(), selected: this.chosen(this.options.fast),
-                selectable: this.options.autoRoute, onSelect: (index: number) => this.setRoute('fast', index) })
-              RowDivider()
-              ModelChoiceRow({ title: t("深度任务"), options: this.choices(), selected: this.chosen(this.options.deep),
-                selectable: this.options.autoRoute, onSelect: (index: number) => this.setRoute('deep', index) })
-              RowDivider()
-              ModelChoiceRow({ title: t("图片理解"), options: this.choices(), selected: this.chosen(this.options.vision),
-                selectable: this.options.autoRoute, onSelect: (index: number) => this.setRoute('vision', index) })
-            }
-          }
           SectionHeader({ title: t("专用模型") })
           GroupCard() {
             Column() {
               ModelChoiceRow({ title: t("记忆整理"), options: this.choices(), selected: this.chosen(this.options.memory),
-                onSelect: (index: number) => this.setRoute('memory', index) })
+                onSelect: (index: number) => this.setDedicatedModel('memory', index) })
+              RowDivider()
+              ModelChoiceRow({ title: t('会话起名'), options: this.choices(), selected: this.chosen(this.options.title),
+                onSelect: (index: number) => this.setDedicatedModel('title', index) })
+              RowDivider()
+              ModelChoiceRow({ title: t('团队执行'), subtitle: t('用于执行团队任务的子 Agent。'),
+                options: this.choices(), selected: this.chosen(this.options.teamWorker),
+                onSelect: (index: number) => this.setDedicatedModel('teamWorker', index) })
             }
           }
           SectionHeader({ title: t("模型能力") })
@@ -168,9 +166,10 @@ struct ModelChoiceRow {
           Text(this.subtitle).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).lineHeight(17).fontColor($r('app.color.text_secondary'))
         }
       }.alignItems(HorizontalAlign.Start).flexShrink(0).constraintSize({ maxWidth: '55%' })
-      Text(this.options[this.selected] || this.options[0] || '').fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(2).textAlign(TextAlign.End).layoutWeight(1)
+      Text(this.selected < 0 ? t('所选模型不可用') : this.options[this.selected] || this.options[0] || '')
+        .fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(2).textAlign(TextAlign.End).layoutWeight(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .fontColor(this.selected > 0 ? this.appearance.accent : $r('app.color.text_tertiary'))
+        .fontColor(this.selected < 0 ? $r('app.color.danger') : this.selected > 0 ? this.appearance.accent : $r('app.color.text_tertiary'))
       SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(14).fontColor([$r('app.color.text_tertiary')])
     }
     .width('100%').constraintSize({ minHeight: 56 }).padding({ left: Space.lg, right: Space.lg, top: 10, bottom: 10 })

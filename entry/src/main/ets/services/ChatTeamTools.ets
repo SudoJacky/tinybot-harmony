@@ -34,8 +34,8 @@ export interface ChatTeamContext {
   contextSections?: PromptSection[];
   toolSelection?: ToolSelection;
   usageOrigin?: UsageOrigin;
-  configFor?: (reference: ModelReference) => ModelConfig;
-  thread: ThreadData; messageId: string; config: ModelConfig; base: () => AgentTools;
+  configFor: (reference: ModelReference) => ModelConfig;
+  thread: ThreadData; messageId: string; workerModel: ModelReference; base: () => AgentTools;
   runtime: () => AgentRuntime; createId: () => string; checkpoint: () => Promise<void>; changed: () => void;
 }
 function stringProperty(description: string): ToolProperty { return { type: 'string', description: description }; }
@@ -172,7 +172,7 @@ export class ChatTeamTools implements AgentTools {
     catch (error) { this.stop(); throw error as Error; }
     this.committed.set(run.id, snapshot); this.notify(); this.context.changed();
   }
-  private start(run: TeamRun): void {
+  private start(run: TeamRun, config?: ModelConfig): void {
     if (this.halted) { throw new ToolFailure('INVALID_STATE', t("本轮团队调度已停止。"), 'inspect_state'); }
     if (this.active.has(run.id)) { return; }
     const coordinator = new TeamCoordinator(); const employeeTools = new Map<string, EmployeeTools>();
@@ -180,7 +180,7 @@ export class ChatTeamTools implements AgentTools {
       contextSections: this.context.contextSections,
       toolSelection: this.context.toolSelection,
       usageOrigin: this.context.usageOrigin,
-      runtime: this.context.runtime, config: this.context.configFor ? this.context.configFor(run.model) : this.context.config, createId: this.context.createId, lane: this.lane,
+      runtime: this.context.runtime, config: config ?? this.context.configFor(run.model), createId: this.context.createId, lane: this.lane,
       tools: (record, attempt) => {
         const profile = run.members.find((member) => member.id === record.task.memberId)?.toolProfile || 'execution';
         const tools = new EmployeeTools(this.context.base(), profile, this, run, attempt); employeeTools.set(attempt.id, tools); return tools;
@@ -233,7 +233,7 @@ export class ChatTeamTools implements AgentTools {
       reserved.push(name);
       return { id: member.id, name: name, instructions: member.instructions, toolProfile: member.toolProfile || 'execution' };
     });
-    let run: TeamRun; let release = (): void => {};
+    let run: TeamRun; let config: ModelConfig | undefined; let release = (): void => {};
     if (args.runId !== undefined) {
       run = this.require(args.runId);
       if (args.goal !== undefined || args.maxConcurrency !== undefined) { throw new ToolFailure('INVALID_ARGUMENTS', t("追加招募不能改变目标或并行上限。"), 'fix_arguments'); }
@@ -252,15 +252,17 @@ export class ChatTeamTools implements AgentTools {
       const concurrency = args.maxConcurrency === undefined ? 2 : args.maxConcurrency;
       if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) { throw new ToolFailure('INVALID_ARGUMENTS', t("并行上限为1至4。"), 'fix_arguments'); }
       validateTeamPlan({ tasks: args.tasks, finalTaskId: '' }, members, true);
+      const model = this.context.workerModel;
+      config = this.context.configFor(model);
       run = { id: this.context.createId(), ownerMessageId: this.context.messageId, goal: args.goal.trim(), members: members,
-        concurrency: concurrency, model: { providerId: this.context.config.providerId, modelId: this.context.config.model },
+        concurrency: concurrency, model: { providerId: model.providerId, modelId: model.modelId },
         revision: 0, sequence: 0, status: 'planned', error: '', createdAt: Date.now(), finalTaskId: '',
         tasks: args.tasks.map((task): TeamTaskRecord => { return { task: task, status: 'pending', attempts: [] }; }), planning: { content: '', steps: [] } };
       this.context.thread.teams = (this.context.thread.teams || []).concat([run]);
     }
     try { run.revision++; await this.save(run); cancellation.check(); }
     finally { release(); }
-    if (run.status !== 'paused') { this.start(run); }
+    if (run.status !== 'paused') { this.start(run, config); }
     return JSON.stringify({ runId: run.id, status: run.status, memberIds: members.map((member) => member.id),
       members: members.map((member): MemberIdentity => ({ id: member.id, displayName: member.name })), tasks: args.tasks.map((task) => task.id) });
   }
