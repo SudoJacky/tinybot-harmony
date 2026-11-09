@@ -2,6 +2,8 @@ import { describe, expect, it } from '@ohos/hypium';
 import { ModelMessage, ModelTurn, ToolCall, ToolDefinition, validateSteps } from '../main/ets/model/Agent';
 import { defaultConfig, emptyData, ModelConfig, parseAppData } from '../main/ets/model/Conversation';
 import { ProviderInfo } from '../main/ets/model/Provider';
+import { CONTENT_GUARD_REFUSAL } from '../main/ets/model/ContentGuard';
+import { OutputWordGuard, OutputWordGuardStop, OutputWordMatcher } from '../main/ets/services/OutputWordGuard';
 import { AgentTools } from '../main/ets/services/AgentLoop';
 import { AgentEvent, AgentRunHooks, AgentRunRequest, AgentRuntime } from '../main/ets/services/AgentRuntime';
 import { Cancellation, RunCancelledError } from '../main/ets/services/Cancellation';
@@ -43,6 +45,7 @@ class TestProvider implements ModelProvider {
   signals: Cancellation[] = [];
   callbacks: ((text: string) => void)[] = [];
   onStream?: (cancellation: Cancellation) => Promise<void>;
+  afterDeltas?: () => void;
   emitText: boolean = true;
   private responses: ModelTurn[];
 
@@ -53,7 +56,8 @@ class TestProvider implements ModelProvider {
 
   endpoint(baseUrl: string): string { return completionUrl(baseUrl); }
 
-  async stream(request: ProviderRequest, cancellation: Cancellation, onText: (text: string) => void): Promise<ModelTurn> {
+  async stream(request: ProviderRequest, cancellation: Cancellation, onText: (text: string) => void,
+    onReasoning?: (text: string) => void): Promise<ModelTurn> {
     const index = this.inputs.length;
     this.inputs.push(request);
     this.signals.push(cancellation);
@@ -62,13 +66,20 @@ class TestProvider implements ModelProvider {
     cancellation.check();
     const response = this.responses[index];
     if (!response) { throw new Error('Provider fixture exhausted'); }
-    if (this.emitText && response.content.length > 0) { onText(response.content); }
+    if (response.reasoningContent) { onReasoning?.(response.reasoningContent); }
+    if (this.emitText && response.content.length > 0) {
+      const middle = Math.ceil(response.content.length / 2);
+      onText(response.content.slice(0, middle));
+      if (middle < response.content.length) { onText(response.content.slice(middle)); }
+    }
+    this.afterDeltas?.();
     return response;
   }
 }
 
 class TestTools implements AgentTools {
   calls: ToolCall[] = [];
+  beforeFinish?: () => Promise<string | undefined>;
   definitions(): ToolDefinition[] { return []; }
   async execute(call: ToolCall, cancellation: Cancellation): Promise<string> {
     cancellation.check();
@@ -94,8 +105,8 @@ function request(tools: TestTools = new TestTools()): AgentRunRequest {
   return { sessionId: 'test-session', config: config(), messages: [{ role: 'user', content: 'test prompt' }], tools: tools };
 }
 function hooks(): AgentRunHooks { return { prepare: async () => {}, checkpoint: async () => {} }; }
-function registry(provider: TestProvider): ProviderRegistry {
-  const result = new ProviderRegistry();
+function registry(provider: TestProvider, matcher?: OutputWordMatcher): ProviderRegistry {
+  const result = new ProviderRegistry(undefined, matcher ? async () => matcher : undefined);
   result.register(provider);
   return result;
 }
@@ -183,6 +194,75 @@ export default function runtimeTests(): void {
   });
 
   describe('AgentRuntime', () => {
+    it('stopsAtTheSecondIndependentOutputMatchWithoutExposingItOrDispatchingTools', 0, async () => {
+      const flagged = toolAnswer(); flagged.content = '前文甲乙。丙丁继续更多';
+      const provider = new TestProvider('test', [flagged, flagged]);
+      const agent = new AgentRuntime(registry(provider, new OutputWordMatcher('甲乙\n丙丁')), new TestCredentials());
+      const tools = new TestTools();
+      const run = request(tools); run.messages[0].content = '甲乙。丙丁';
+      const visible: string[] = [];
+      agent.subscribe((event: AgentEvent) => { if (event.type === 'text_delta' && event.delta) { visible.push(event.delta); } });
+      for (const emit of [true, false]) {
+        provider.emitText = emit; visible.length = 0;
+        const result = await agent.run(run, hooks());
+        expect(result.status).assertEqual('failed');
+        expect(result.error.includes('内容审核')).assertTrue();
+        expect(visible.join('')).assertEqual('前文甲乙。');
+        expect(result.turn.content).assertEqual('前文甲乙。');
+        expect(result.turn.steps[0].uiValidation).assertEqual('');
+      }
+      expect(provider.inputs.length).assertEqual(2);
+      expect(provider.inputs[0].messages[0].content).assertEqual('甲乙。丙丁');
+      expect(tools.calls.length).assertEqual(0);
+    });
+    it('keepsTheSameOutputDecisionAcrossEverySplitAndLetsOrdinaryTextStream', 0, () => {
+      const matcher = new OutputWordMatcher('# fixture\n甲乙\n甲乙事件\n丙丁\nPROJECT-X');
+      const prefix = '前文甲乙事件。'; const blocked = prefix + '丙丁继续';
+      for (let split = 0; split <= blocked.length; split++) {
+        let visible = ''; let stopped = false;
+        const guard = new OutputWordGuard(matcher, 'answer', (text) => { visible += text; });
+        try { guard.push(blocked.slice(0, split)); guard.push(blocked.slice(split)); guard.finish(blocked); }
+        catch (error) { if (!(error instanceof OutputWordGuardStop)) { throw error as Error; } stopped = true; }
+        expect(stopped).assertTrue(); expect(visible).assertEqual(prefix);
+      }
+      for (const content of ['甲乙事件。', '甲乙、甲乙。', '甲乙' + '。'.repeat(61) + '丙丁。', 'Ｐｒｏｊｅｃｔ－ｘ。']) {
+        let visible = '';
+        const guard = new OutputWordGuard(matcher, 'answer', (text) => { visible += text; });
+        guard.push(content);
+        expect(visible).assertEqual(content);
+        guard.finish(content);
+        expect(visible).assertEqual(content);
+      }
+    });
+    it('showsOnlyTheGuardRefusalAndEndsTheTurnWithoutToolsOrContinuation', 0, async () => {
+      const guardStop = toolAnswer(); guardStop.content = ' ' + CONTENT_GUARD_REFUSAL + '\n'; guardStop.reasoningContent = '未公开的思考内容';
+      const provider = new TestProvider('test', [guardStop]);
+      const agent = new AgentRuntime(registry(provider), new TestCredentials());
+      const tools = new TestTools();
+      tools.beforeFinish = async () => 'unexpected continuation';
+      const visible: string[] = [];
+      agent.subscribe((event: AgentEvent) => { if (event.delta) { visible.push(event.delta); } });
+      const result = await agent.run(request(tools), hooks());
+      expect(result.status).assertEqual('complete');
+      expect(result.turn.content).assertEqual(CONTENT_GUARD_REFUSAL);
+      expect(result.turn.steps[0].content).assertEqual(CONTENT_GUARD_REFUSAL);
+      expect(result.turn.steps[0].reasoningContent === undefined).assertTrue();
+      expect(visible.join('')).assertEqual(CONTENT_GUARD_REFUSAL);
+      expect(tools.calls.length).assertEqual(0);
+      expect(provider.inputs.length).assertEqual(1);
+    });
+    it('publishesOrdinaryAnswerDeltasBeforeTheProviderFinishes', 0, async () => {
+      const content = '六四开比较公平';
+      const provider = new TestProvider('test', [answer(content)]);
+      const agent = new AgentRuntime(registry(provider), new TestCredentials());
+      const visible: string[] = [];
+      let visibleBeforeFinish = '';
+      agent.subscribe((event: AgentEvent) => { if (event.type === 'text_delta' && event.delta) { visible.push(event.delta); } });
+      provider.afterDeltas = () => { visibleBeforeFinish = visible.join(''); };
+      expect((await agent.run(request(), hooks())).turn.content).assertEqual(content);
+      expect(visibleBeforeFinish).assertEqual(content);
+      expect(visible.length).assertEqual(2);
+    });
     it('keepsTurnOriginAcrossCallsAndSeparatesPreparationPurpose', 0, async () => {
       const provider = new TestProvider('test', [answer('summary'), toolAnswer(), answer()]);
       const runtime = new AgentRuntime(registry(provider), new TestCredentials());

@@ -63,7 +63,7 @@ export class ToolApproval {
         this.answer = (value: boolean) => { remove(); this.answer = undefined; this.title = ''; this.details = ''; resolve(value); };
         remove = cancellation.onCancel(() => this.respond(false));
       });
-      cancellation.check(); if (!allowed) { throw new ToolFailure('USER_DENIED', t("用户拒绝此次远程工具调用。"), 'respect_user_decision'); }
+      cancellation.check(); if (!allowed) { throw new ToolFailure('USER_DENIED', t('用户拒绝此次工具调用。'), 'respect_user_decision'); }
     } finally { this.release(); }
   }
   respond(allowed: boolean): void { if (this.answer) { this.answer(allowed); } }

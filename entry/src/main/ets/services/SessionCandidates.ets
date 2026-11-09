@@ -95,6 +95,7 @@ export function forkedThreadCandidate(source: ThreadData, createThread: () => Th
   branch.title = source.title.slice(0, 26) + t(' · 分支'); branch.titleEdited = true;
   branch.parentThreadId = source.id; branch.parentMessageId = index >= 0 ? source.messages[index].id : undefined;
   branch.modelRef = source.modelRef; branch.projectId = source.projectId; branch.reasoningEffort = source.reasoningEffort;
+  branch.toolApprovalMode = source.toolApprovalMode;
   branch.teamEnabled = source.teamEnabled; branch.agentMode = selection.agentMode; branch.disabledTools = selection.disabledTools;
   branch.disabledMcpIds = source.disabledMcpIds?.slice();
   branch.messages = JSON.parse(JSON.stringify(source.messages.slice(0, end))) as MessageData[];

@@ -46,9 +46,10 @@ async function main() {
     codeInputs.push(JSON.parse(input)); return JSON.stringify({ status: 'ok', result: JSON.parse(input) });
   } });
   const remoteCalls = [];
-  const mcp = new McpTools([{ id: 'remote', name: 'Remote', enabled: true, url: 'https://example.com/mcp' }], approval,
-    () => ({ list: async () => [{ name: 'echo', inputSchema: { type: 'object' } }],
-      call: async (name, args) => { remoteCalls.push({ name, args: plain(args) }); return { content: [] }; } }));
+  const servers = [{ id: 'remote', name: 'Remote', enabled: true, url: 'https://example.com/mcp' }];
+  const connect = () => ({ list: async () => [{ name: 'echo', inputSchema: { type: 'object' } }],
+    call: async (name, args) => { remoteCalls.push({ name, args: plain(args) }); return { content: [] }; } });
+  const mcp = new McpTools(servers, approval, connect);
   const workspace = new WorkspaceTools({});
   const definitions = [interaction, memory, resources, code, mcp, workspace].flatMap(group => group.definitions());
   const schemas = new Map(definitions.map(tool => [tool.function.name, tool.function.parameters]));
@@ -138,6 +139,11 @@ async function main() {
   assert.deepEqual(remoteCalls[0].args, nativeArgs.get('mcp_call').arguments);
   const denied = invoke(mcp, 'mcp_call', nativeArgs.get('mcp_call'));
   approval.respond(false); await assert.rejects(denied); assert.equal(remoteCalls.length, 1);
+  const directMcp = new McpTools(servers, approval, connect, undefined, false);
+  await assert.rejects(invoke(directMcp, 'mcp_call', nativeArgs.get('mcp_call')), { code: 'SCHEMA_REQUIRED' });
+  await invoke(directMcp, 'mcp_list_tools', { server: 'remote' });
+  await invoke(directMcp, 'mcp_call', nativeArgs.get('mcp_call'));
+  assert.equal(remoteCalls.length, 2); assert.equal(approval.title, '');
   console.log('PASS native tool execution, artifact validation, form submit/cancel/history, sandbox JSON values and MCP approval/denial');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
