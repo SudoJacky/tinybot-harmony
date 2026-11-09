@@ -36,6 +36,7 @@ export interface ChatTeamContext {
   usageOrigin?: UsageOrigin;
   configFor: (reference: ModelReference) => ModelConfig;
   thread: ThreadData; messageId: string; workerModel: ModelReference; base: () => AgentTools;
+  workerBase?: () => AgentTools;
   runtime: () => AgentRuntime; createId: () => string; checkpoint: () => Promise<void>; changed: () => void;
 }
 function stringProperty(description: string): ToolProperty { return { type: 'string', description: description }; }
@@ -183,7 +184,8 @@ export class ChatTeamTools implements AgentTools {
       runtime: this.context.runtime, config: config ?? this.context.configFor(run.model), createId: this.context.createId, lane: this.lane,
       tools: (record, attempt) => {
         const profile = run.members.find((member) => member.id === record.task.memberId)?.toolProfile || 'execution';
-        const tools = new EmployeeTools(this.context.base(), profile, this, run, attempt); employeeTools.set(attempt.id, tools); return tools;
+        const base = this.context.workerBase ? this.context.workerBase() : this.context.base();
+        const tools = new EmployeeTools(base, profile, this, run, attempt); employeeTools.set(attempt.id, tools); return tools;
       },
       complete: (_record, attempt) => {
         const handoff = employeeTools.get(attempt.id)?.candidate;

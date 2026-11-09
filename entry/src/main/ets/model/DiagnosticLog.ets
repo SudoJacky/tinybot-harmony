@@ -19,6 +19,7 @@ export interface LogFields {
   streaming?: boolean; ready?: boolean; hasModel?: boolean; retryable?: boolean;
   protocol?: string; phase?: string; action?: string; policy?: string; scheme?: string; library?: string; status?: string; balanceAdapter?: string;
   threadId?: string; messageId?: string; sessionId?: string; providerId?: string; previewId?: string; surfaceId?: string;
+  channel?: string;
 }
 export interface LogData { level: LogLevel; module: string; event: string; fields: Record<string, LogValue>; }
 interface LogFailureDetails { httpStatus?: number; nativeCode?: number; remoteCode?: number; service?: string; }
@@ -77,6 +78,7 @@ EVENTS.mcp = ['request_failed', 'cancel_notice_failed', 'browser_launch_failed']
 EVENTS.mail = ['transport_failed', 'cleanup_failed', 'account_saved', 'account_removed', 'query_started', 'query_complete', 'query_failed', 'command_failed', 'settings_failed'];
 EVENTS.export = ['image_failed', 'preview_failed', 'cleanup_failed', 'share_failed', 'save_failed'];
 EVENTS.network = ['request_start', 'request_end', 'context_overflow', 'first_data', 'request_failed'];
+EVENTS.moderation = ['guard_stopped', 'output_words_stopped'];
 EVENTS.context = ['inspected', 'request_prefix'];
 EVENTS.browser = ['permission', 'control_user', 'control_agent', 'control_wait', 'task_released', 'closed', 'failed', 'acquired', 'permission_wait', 'operation', 'observation_changed', 'opened_by_user', 'annotation_started', 'annotation_captured', 'annotation_failed', 'search_observed', 'search_failed', 'capture_started', 'frame_captured', 'capture_finished'];
 EVENTS.session = ['run_started', 'run_finished', 'run_cancelled', 'mcp_failed', 'tasks_failed', 'run_failed', 'title_failed', 'interactive_failed', 'resource_failed', 'memory_failed', 'memory_review_failed', 'mutation_failed', 'save_failed', 'observer_failed'];
@@ -92,6 +94,7 @@ const NUMBERS: string[] = ['sdk', 'line', 'operationId', 'instanceId', 'generati
 const BOOLEANS: string[] = ['initialSupported', 'supported', 'available', 'pageSceneObserver', 'mounted', 'attached', 'visible', 'foreground', 'enabled', 'failed', 'cancelled', 'uncertain', 'speaking', 'preflight', 'closed', 'streaming', 'ready', 'hasModel', 'retryable'];
 const REFERENCES: string[] = ['threadId', 'messageId', 'sessionId', 'providerId', 'previewId', 'surfaceId', 'serverId'];
 const STRINGS: Record<string, string[]> = {};
+STRINGS.channel = ['answer', 'reasoning'];
 STRINGS.balanceAdapter = ['deepseek', 'sub2api', 'newapi', 'newapi-account', 'zhipu', 'custom'];
 STRINGS.operation = ['access', 'read', 'list', 'stat', 'parse', 'unlink', 'rmdir', 'bundle_stats', 'free_size', 'total_size',
   'getAppPrivacyMgmtInfo', 'getAppPrivacyResult', 'requestAppPrivacyConsent', 'subscribe', 'unsubscribe', 'cloud_directory', 'cloud_sync',

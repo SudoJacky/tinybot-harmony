@@ -4,6 +4,7 @@ import { AgentTools, ToolInvocationContext } from './AgentLoop';
 import { BrowserAction, BrowserSession, BrowserCaptureOptions, BrowserWaitCondition } from './BrowserSession';
 import { BrowserPreview } from '../model/BrowserPreview';
 import { Cancellation } from './Cancellation';
+import { ToolApproval } from './ToolApproval';
 import { validateWebAddress } from './WebTools';
 import { READ_ONLY_BROWSER_ACTIONS } from '../model/ToolGroups';
 
@@ -22,9 +23,11 @@ export class BrowserTools implements AgentTools {
   private browser: BrowserSession;
   private threadId: string;
   private readOnly: boolean;
+  private approval?: ToolApproval;
   private resolvePreview?: (previewId: string) => BrowserPreview;
-  constructor(browser: BrowserSession, threadId: string, readOnly: boolean, resolvePreview?: (previewId: string) => BrowserPreview) {
+  constructor(browser: BrowserSession, threadId: string, readOnly: boolean, resolvePreview?: (previewId: string) => BrowserPreview, approval?: ToolApproval) {
     this.browser = browser; this.threadId = threadId; this.readOnly = readOnly;
+    this.approval = approval;
     this.resolvePreview = resolvePreview;
   }
   definitions(): ToolDefinition[] {
@@ -113,6 +116,9 @@ export class BrowserTools implements AgentTools {
     }
     if (['type', 'select'].includes(args.action) && typeof args.text !== 'string') { throw new ToolFailure('INVALID_ARGUMENTS', 'Input text must be a string.', 'fix_arguments'); }
     if (args.action === 'scroll' && (typeof args.deltaY !== 'number' || !Number.isFinite(args.deltaY) || Math.abs(args.deltaY) > 10000)) { throw new ToolFailure('INVALID_ARGUMENTS', 'Scroll deltaY must be within 10000 pixels.', 'fix_arguments'); }
+    if (this.approval && ['click', 'type', 'select'].includes(args.action)) {
+      await this.approval.request('browser_action · ' + args.action, this.browser.url + '\n\n' + call.function.arguments, cancellation);
+    }
     if (args.capture !== undefined) {
       captureOptions(args.capture);
       if (!context) { throw new Error('Browser capture requires a durable tool invocation context'); }

@@ -70,6 +70,7 @@ export function copyModelConfig(config: ModelConfig, configured: boolean = confi
 export interface ContextState { compaction?: CompactionData; }
 
 export interface ThreadData extends ContextState, ToolSelection {
+  toolApprovalMode?: string;
   panelContext?: string;
   projectId?: string;
   memorySnapshot?: string;
@@ -98,6 +99,7 @@ export interface ThreadData extends ContextState, ToolSelection {
 }
 
 export interface AppData {
+  lastToolApprovalMode?: string;
   projects?: ProjectData[];
   // Storage shape, not app release. Additive settings and enum values keep this version.
   version: number;

@@ -2,6 +2,7 @@ import { Diagnostics } from '../model/Diagnostics';
 import { ProjectData } from '../model/Project';
 import { SharedFolder } from '../model/SharedFolders';
 import { AgentMode } from '../model/AgentMode';
+import { ToolApprovalMode } from '../model/ToolApprovalMode';
 import { McpSettingsCommand, McpSettingsResult } from '../services/McpSettings';
 import { Cancellation } from '../services/Cancellation';
 import { t } from '../model/I18n';
@@ -243,6 +244,7 @@ export class ChatViewModel {
   archiveThreads(ids: string[], archived: boolean): Promise<boolean> { return this.requireSession().archiveThreads(ids, archived); }
   selectModel(providerId: string, modelId: string): Promise<boolean> { return this.requireSession().selectModel(providerId, modelId); }
   setReasoningEffort(value: string): Promise<boolean> { return this.requireSession().setReasoningEffort(value); }
+  setToolApprovalMode(mode: ToolApprovalMode): Promise<boolean> { return this.requireSession().setToolApprovalMode(mode); }
   deleteProvider(id: string): Promise<boolean> { return this.requireSession().deleteProvider(id); }
   changeSkill(name: string, remove: boolean = false): Promise<boolean> { return this.requireSession().changeSkill(name, remove); }
   enqueueInput(mode: InputMode): Promise<void> { return this.requireSession().enqueueInput(mode); }
