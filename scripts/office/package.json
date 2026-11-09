@@ -1,0 +1,16 @@
+{
+  "name": "tinybot-office-bundle",
+  "private": true,
+  "scripts": {
+    "build": "node build.cjs",
+    "check": "node build.cjs --check"
+  },
+  "dependencies": {
+    "@xmldom/xmldom": "0.9.12",
+    "fflate": "0.8.3"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "pptxgenjs": "4.0.1"
+  }
+}

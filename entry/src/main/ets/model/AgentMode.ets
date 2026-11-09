@@ -5,7 +5,7 @@ import { isConfigurationName } from './ConfigurationValue';
 export type AgentMode = 'full' | 'custom';
 export const AGENT_MODES: AgentMode[] = ['full', 'custom'];
 // Tools that no longer exist but may still appear in saved selections.
-export const REMOVED_TOOL_NAMES: string[] = ['generate_image', 'read_tool_result', 'publish_data_view'];
+export const REMOVED_TOOL_NAMES: string[] = ['generate_image', 'read_tool_result', 'publish_data_view', 'run_job'];
 export interface ToolSelection { agentMode?: string; disabledTools?: string[]; }
 
 export function validateAgentMode(mode: string): void {
@@ -40,7 +40,8 @@ export function toolEnabled(name: string, selection: ToolSelection): boolean {
 // Preserve denials within selectable capabilities; discard obsolete memory/Skills overrides.
 export function normalizeDisabledTools(names: string[]): string[] {
   // The retired chart tool shared the preview switch; retain that denial on upgrade.
-  const migrated = names.includes('publish_data_view') ? names.concat(['publish_preview']) : names;
+  const migrated = names.concat(names.includes('publish_data_view') ? ['publish_preview'] : [],
+    names.includes('run_job') ? ['execute_code'] : []);
   return names.filter((name) => !knownDisabledTool(name)).concat(TOOL_CAPABILITIES.filter((capability) => capability.tools.some((name) => migrated.includes(name)))
     .flatMap((capability) => capability.tools));
 }

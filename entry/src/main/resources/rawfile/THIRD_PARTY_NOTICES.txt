@@ -105,3 +105,10 @@ Huawei application and backup Ability sample code
 Copyright (c) 2026 Huawei Device Co., Ltd.
 Source files: EntryAbility.ets, EntryBackupAbility.ets
 License: Apache-2.0
+
+-----------------------------------------------------------------------
+Office file job bundle
+fflate: https://github.com/101arrowz/fflate
+xmldom: https://github.com/xmldom/xmldom
+Slide template generated with PptxGenJS: https://github.com/gitbrent/PptxGenJS
+License texts: licenses/office-bundle.txt

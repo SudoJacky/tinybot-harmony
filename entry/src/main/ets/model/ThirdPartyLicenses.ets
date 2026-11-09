@@ -30,6 +30,10 @@ export const THIRD_PARTY_LICENSES: ThirdPartyLicense[] = [
     copyright: 'Copyright © 2010-2026 three.js authors', resource: 'interactive-web/THREE-LICENSE.txt'
   },
   {
+    id: 'office-bundle', name: 'fflate / xmldom / PptxGenJS slide template', license: 'MIT',
+    copyright: 'Arjun Barrett, xmldom contributors, and Brent Ely', resource: 'licenses/office-bundle.txt'
+  },
+  {
     id: 'huawei-samples', name: 'Huawei Ability samples', license: 'Apache-2.0',
     copyright: 'Copyright (c) 2026 Huawei Device Co., Ltd.', resource: 'licenses/huawei-samples.txt'
   }

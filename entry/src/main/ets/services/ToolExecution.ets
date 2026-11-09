@@ -71,7 +71,8 @@ export async function executeToolBatch(step: AgentStep, round: number, tools: Ag
             await executeToolBatch(nestedStep, round, nestedTools, nestedTools.definitions(), signal, {
               checkpoint: checkpoint, toolActivity: observer.toolActivity, waitForExecution: observer.waitForExecution,
               refreshToolResult: observer.refreshToolResult,
-              event: (event) => observer.event({ type: event.type, step: round, toolCallId: event.toolCallId, parentToolCallId: tool.call.id })
+              event: (event) => observer.event({ type: event.type, step: round, toolCallId: event.toolCallId,
+                parentToolCallId: event.parentToolCallId || tool.call.id })
             });
           } catch (error) {
             if (error instanceof RunCancelledError) { throw error; }

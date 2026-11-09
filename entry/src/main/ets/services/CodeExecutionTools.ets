@@ -1,10 +1,15 @@
 import { ToolFailure, ToolResultError, parseToolArguments } from '../model/ToolFailure';
 import { ToolCall, ToolDefinition } from '../model/Agent';
-import { AgentTools } from './AgentLoop';
+import { AgentTools, ToolInvocationContext } from './AgentLoop';
 import { Cancellation } from './Cancellation';
 
 export interface CodeExecutor {
   execute(source: string, inputJson: string, cancellation: Cancellation): Promise<string>;
+}
+
+export interface WorkspaceCodeExecutor {
+  guide(): string;
+  execute(code: string, inputJson: string, context: ToolInvocationContext, cancellation: Cancellation): Promise<string>;
 }
 
 interface CodeStatus { status: string; }
@@ -12,17 +17,19 @@ interface CodeArguments { code: string; input?: Object | null; }
 
 export class CodeExecutionTools implements AgentTools {
   private executor: CodeExecutor;
-  constructor(executor: CodeExecutor) { this.executor = executor; }
+  private workspace?: WorkspaceCodeExecutor;
+  constructor(executor: CodeExecutor, workspace?: WorkspaceCodeExecutor) { this.executor = executor; this.workspace = workspace; }
 
   definitions(): ToolDefinition[] {
     // The native adapter admits one job until its runtime has finished cleanup.
+    const limits = this.workspace ? this.workspace.guide() :
+      'Promises/async work are unsupported. Use read_file before execution and write_file afterwards for files. ' +
+      'Runtime limits: 2 seconds, 32 MiB runtime allocations and 32 KiB combined logs. No separate code/input/result size caps.';
     return [{ type: 'function', executionMode: 'sequential', function: {
       name: 'execute_code',
-      description: 'Run synchronous JavaScript for calculation, parsing and data transformation in a fresh isolated QuickJS runtime. ' +
+      description: 'Run ' + (this.workspace ? '' : 'synchronous ') + 'JavaScript in a fresh isolated QuickJS runtime. ' +
         'code is a function body: read the input variable and use return for a JSON-serializable result. ' +
-        'console.log/info and console.warn/error capture logs. No filesystem, network, timers, Node.js, npm, module imports or host tools. ' +
-        'Promises/async work are unsupported. Use read_file before execution and write_file afterwards for files. ' +
-        'Runtime limits: 2 seconds, 32 MiB runtime allocations and 32 KiB combined logs. No separate code/input/result size caps. ' +
+        'console.log/info and console.warn/error capture bounded logs. No direct filesystem, network, timers, Node.js, npm, or module imports. ' + limits + ' ' +
         'Returns status, stdout, stderr, result, error, logsTruncated, resultTruncated and durationMs. Pure computation is available in read-only mode.',
       parameters: { type: 'object', properties: {
         'code': { type: 'string', description: 'JavaScript function body, e.g. return input.values.reduce((a, b) => a + b, 0);' },
@@ -31,7 +38,7 @@ export class CodeExecutionTools implements AgentTools {
     } }];
   }
 
-  async execute(call: ToolCall, cancellation: Cancellation): Promise<string> {
+  async execute(call: ToolCall, cancellation: Cancellation, context?: ToolInvocationContext): Promise<string> {
     cancellation.check();
     if (call.function.name !== 'execute_code') { throw new ToolFailure('TOOL_UNAVAILABLE', 'Unsupported code execution tool', 'check_available_tools'); }
     let args: CodeArguments;
@@ -41,7 +48,8 @@ export class CodeExecutionTools implements AgentTools {
       Object.keys(args).some((key: string) => key !== 'code' && key !== 'input')) { throw new ToolFailure('INVALID_ARGUMENTS', 'Expected code and an optional native JSON input value', 'fix_arguments'); }
     const input = JSON.stringify(args.input === undefined ? null : args.input);
     // Native parsing keeps JSON depth, allocation and parse work inside the runtime budget.
-    const output = await this.executor.execute(args.code, input, cancellation);
+    const output = this.workspace && context ? await this.workspace.execute(args.code, input, context, cancellation) :
+      await this.executor.execute(args.code, input, cancellation);
     cancellation.check();
     const result = JSON.parse(output) as CodeStatus;
     if (result.status !== 'ok') {

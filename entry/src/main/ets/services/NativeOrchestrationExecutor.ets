@@ -6,7 +6,24 @@ import { Diagnostics } from '../model/Diagnostics';
 import { toolError } from '../model/Agent';
 
 export class NativeOrchestrationExecutor implements OrchestrationExecutor {
+  private static workspaceTail: Promise<void> = Promise.resolve();
+  private workspaceCode: boolean;
+
+  constructor(workspaceCode: boolean = false) { this.workspaceCode = workspaceCode; }
+
   async execute(source: string, catalog: string, invoke: (name: string, argumentsJson: string) => Promise<string>,
+    cancellation: Cancellation): Promise<string> {
+    if (!this.workspaceCode) { return this.run(source, catalog, invoke, cancellation); }
+    // At most one higher-memory workspace script runs across chat and Team sessions.
+    cancellation.check();
+    const previous = NativeOrchestrationExecutor.workspaceTail;
+    let release: () => void = () => {};
+    NativeOrchestrationExecutor.workspaceTail = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try { return await this.run(source, catalog, invoke, cancellation); } finally { release(); }
+  }
+
+  private async run(source: string, catalog: string, invoke: (name: string, argumentsJson: string) => Promise<string>,
     cancellation: Cancellation): Promise<string> {
     cancellation.check();
     const id = util.generateRandomUUID();
@@ -26,7 +43,7 @@ export class NativeOrchestrationExecutor implements OrchestrationExecutor {
         } catch (error) { settle(callId, toolError(error as Error), true); }
       };
       pending.push(work());
-    });
+    }, this.workspaceCode);
     const unsubscribe = cancellation.onCancel(() => sandbox.cancelOrchestration(id));
     try {
       const output = await result;

@@ -128,13 +128,13 @@ export interface BrowserObservation {
   previewId?: string; version?: string; instanceId: string; frames: BrowserFrame[]; errors: string[];
 }
 
-// Orchestration children share this conversation's workspace. Team workers remain separate.
-// Keep committed child results even when their outer orchestration fails or is interrupted.
+// Script children share this conversation's workspace. Team workers remain separate.
+// Keep committed child results even when their parent fails or is interrupted.
 export function toolReceipts(tools: ToolExecution[]): ToolExecution[] {
   const result: ToolExecution[] = [];
   for (const tool of tools) {
     result.push(tool);
-    if (tool.call.function.name === 'orchestrate') { result.push(...(tool.children || [])); }
+    if (tool.children) { result.push(...toolReceipts(tool.children)); }
   }
   return result;
 }
@@ -294,28 +294,29 @@ export function validateSteps(steps: AgentStep[]): void {
       inputIds.add(step.steering.id);
     }
     validateToolCalls(step.tools.map((tool: ToolExecution) => tool?.call));
-    for (const tool of step.tools) {
-      if (ids.has(tool.call.id) || typeof tool.output !== 'string' ||
-        ['pending', 'running', 'complete', 'failed', 'cancelled', 'interrupted'].indexOf(tool.status) < 0) {
-        throw new Error(t("本地工具记录损坏，原文件已保留。"));
-      }
-      ids.add(tool.call.id);
-      validatePreviewReceipt(tool);
-      if (tool.children !== undefined) {
-        if (tool.call.function.name !== 'orchestrate' || !Array.isArray(tool.children) || tool.children.length > 32) {
-          throw new Error('Invalid orchestration receipts');
-        }
-        for (const child of tool.children) {
-          validateToolCalls([child?.call]);
-          if (child.children !== undefined || ids.has(child.call.id) || typeof child.output !== 'string' ||
-            !['pending', 'running', 'complete', 'failed', 'cancelled', 'interrupted'].includes(child.status)) {
-            throw new Error('Invalid orchestration child receipt');
-          }
-          ids.add(child.call.id);
-          validatePreviewReceipt(child);
-        }
-      }
+    for (const tool of step.tools) { validateToolReceipt(tool, ids, 0); }
+  }
+}
+
+function validateToolReceipt(tool: ToolExecution, ids: Set<string>, depth: number): void {
+  if (ids.has(tool.call.id) || typeof tool.output !== 'string' ||
+    !['pending', 'running', 'complete', 'failed', 'cancelled', 'interrupted'].includes(tool.status)) {
+    throw new Error(t("本地工具记录损坏，原文件已保留。"));
+  }
+  ids.add(tool.call.id);
+  validatePreviewReceipt(tool);
+  if (tool.children === undefined) { return; }
+  const name = tool.call.function.name;
+  if (!Array.isArray(tool.children) || tool.children.length > 32 ||
+    !((name === 'orchestrate' && depth === 0) || (name === 'execute_code' && depth <= 1))) {
+    throw new Error('Invalid script receipts');
+  }
+  for (const child of tool.children) {
+    validateToolCalls([child?.call]);
+    if (name === 'execute_code' && !['read_file', 'write_file'].includes(child.call.function.name)) {
+      throw new Error('Invalid workspace script receipt');
     }
+    validateToolReceipt(child, ids, depth + 1);
   }
 }
 

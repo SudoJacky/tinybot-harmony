@@ -13,8 +13,16 @@ constexpr int TIMEOUT_MS = 2000;
 struct Budget {
     std::atomic_bool cancelled{false};
     std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+    size_t memoryBytes = MEMORY_BYTES;
+    int timeoutMs = TIMEOUT_MS;
+    bool singleHostCall = false;
     bool memoryExceeded = false;
     bool timedOut = false;
+    void UseWorkspaceCodeLimits() {
+        memoryBytes = 192 * 1024 * 1024;
+        timeoutMs = 10000;
+        singleHostCall = true;
+    }
 };
 
 struct ToolReply { int id; std::string value; bool error = false; };

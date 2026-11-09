@@ -9,6 +9,7 @@ function load(file) {
   const exports = {}; cache.set(file, exports);
   let source = fs.readFileSync(file, 'utf8');
   if (file.endsWith('SessionService.test.ets')) source += '\nexport { Fixture, seed };';
+  if (file.endsWith('ChatTeamTools.ets')) source += '\nexport { EmployeeTools };';
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021, experimentalDecorators: true } }).outputText,
     { exports, Observed: cls => cls, setTimeout, clearTimeout, console, require: id => {
       if (id === '@ohos/hypium') return {};
@@ -26,6 +27,7 @@ const { SelectedTools } = load(root + '/main/ets/services/SelectedTools');
 const { RuleTools } = load(root + '/main/ets/services/RuleTools');
 const { Cancellation } = load(root + '/main/ets/services/Cancellation');
 const { AgentRuntime } = load(root + '/main/ets/services/AgentRuntime');
+const { EmployeeTools } = load(root + '/main/ets/services/ChatTeamTools');
 const { ProviderRegistry } = load(root + '/main/ets/services/providers/ProviderRegistry');
 const { parseAppData } = load(root + '/main/ets/model/Conversation');
 const clean = value => JSON.parse(JSON.stringify(value));
@@ -188,6 +190,38 @@ async function main() {
     ['list_files','find_files','read_file','search_file_content','write_file','edit_file','list_skills','read_skill','skill_manage'].sort());
   for (const name of ['list_files', 'find_files', 'search_file_content']) assert.ok(basic.some(tool => tool.function.name === name));
   console.log('PASS SDK children respect custom selection and disabling orchestration retains direct file tools');
+
+  const scripted = fixture(), scriptedApp = new ChatViewModel();
+  await scriptedApp.initialize(scripted.session);
+  const liveReceipts = [];
+  scripted.session.subscribe((event) => { if (event.kind === 'tool') liveReceipts.push(event); });
+  scripted.resources.agentTools.execute = async (incoming, signal, context) => {
+    assert.equal(incoming.function.name, 'execute_code');
+    const child = { call: call('write_file', { path: 'scripted.txt' }), status: 'pending', output: '' };
+    context.execution.children = [child];
+    await context.executeChild(child, { definitions: () => [], execute: async () => '{"path":"scripted.txt","bytes":5,"written":true}' }, signal);
+    return '{"status":"ok","result":"written"}';
+  };
+  scripted.provider.respond = async (index) => index === 0 ?
+    reply(call('orchestrate', { code: 'return await tools.execute_code({code:"return 1"});' })) : reply();
+  scripted.session.setDraft('nested workspace receipts'); await scripted.session.send();
+  const liveWrite = liveReceipts.find((event) => event.tool.call.function.name === 'write_file' && event.tool.status === 'complete');
+  assert.equal(liveWrite.parentToolCallId, scripted.session.active.messages.at(-1).steps[0].tools[0].children[0].call.id);
+  assert.equal(scriptedApp.active.messages.at(-1).stepViews[0].tools[0].children[0].children[0].status, 'complete');
+  const persisted = parseAppData(JSON.stringify(await scripted.repository.load()));
+  assert.equal(persisted.threads[0].messages.at(-1).steps[0].tools[0].children[0].children[0].status, 'complete');
+  console.log('PASS nested workspace receipts reach the live chat and survive persistence');
+
+  const base = { definitions: () => [def('execute_code')], execute: async (_call, _signal, context) => context.workspaceWrite };
+  for (const [role, expected] of [['execution', undefined], ['research', 'text'], ['review', 'none']]) {
+    const worker = new EmployeeTools(base, role, null, null, null);
+    const scope = { execution: {}, executeChild: async () => {} };
+    assert.equal(await worker.execute(call('execute_code'), new Cancellation(), scope), expected);
+    assert.equal(await worker.execute(call('execute_code'), new Cancellation(), { ...scope, workspaceWrite: 'none' }), 'none');
+    const gated = new EmployeeTools(new RuleTools(base, true), role, null, null, null);
+    assert.equal(await gated.execute(call('execute_code'), new Cancellation(), scope), 'none');
+  }
+  console.log('PASS workspace script access is narrowed by both Team role and global read-only mode');
 
   const frozen = fixture(); await frozen.session.initialize(); await frozen.session.setToolEnabled('read_web', false);
   let enter, release; const entered = new Promise(resolve => { enter = resolve; }); const held = new Promise(resolve => { release = resolve; });

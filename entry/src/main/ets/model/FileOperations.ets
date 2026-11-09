@@ -2,6 +2,7 @@ import { ToolExecution } from './Agent';
 
 export interface FileOperations { readFiles: string[]; modifiedFiles: string[]; }
 interface FileArguments { path: string; }
+interface FileJobArguments { inputs?: string[]; output: string; }
 
 // Only successful workspace receipts establish completed reads/writes. Failed or
 // interrupted calls remain in the transcript/summary; their effects are not inferred.
@@ -10,7 +11,18 @@ export function collectFileOperations(results: ToolExecution[], previous?: FileO
   const modified = new Set<string>(previous?.modifiedFiles || []);
   for (const result of results) {
     const name = result.call.function.name;
-    if (result.status !== 'complete' || !['read_file', 'read_file_lines', 'write_file', 'edit_file'].includes(name)) { continue; }
+    if (result.status !== 'complete') { continue; }
+    if (name === 'run_job') {
+      const job = JSON.parse(result.call.function.arguments) as FileJobArguments;
+      if (!job || typeof job.output !== 'string' || !job.output ||
+        (job.inputs !== undefined && (!Array.isArray(job.inputs) || job.inputs.some((path) => typeof path !== 'string' || !path)))) {
+        throw new Error('Successful file job receipt has invalid input or output paths.');
+      }
+      for (const path of job.inputs || []) { read.add(path); }
+      modified.add(job.output);
+      continue;
+    }
+    if (!['read_file', 'read_file_lines', 'write_file', 'edit_file'].includes(name)) { continue; }
     const args = JSON.parse(result.call.function.arguments) as FileArguments;
     if (!args || typeof args.path !== 'string' || !args.path) { throw new Error('Successful file receipt has no valid path.'); }
     if (name === 'write_file' || name === 'edit_file') { modified.add(args.path); }

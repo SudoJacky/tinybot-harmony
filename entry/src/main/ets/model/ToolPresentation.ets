@@ -19,7 +19,7 @@ export function toolTitle(name: string): string {
     'find_files': t('查找文件'), 'read_file_lines': t('读取文件片段'), 'read_attachment': t('读取附件'), 'search_file_content': t('搜索文件内容'),
     'write_file': t('写入文件'), 'edit_file': t('编辑文件'), 'generate_image': t('生成图片'),
     'tool_search': t('查找可用工具'), 'mcp_call': t('调用远程工具'), 'mcp_list_tools': t('查看远程工具'), 'mcp_search_tools': t('搜索远程工具'),
-    'execute_code': t('执行代码'), 'orchestrate': t('编排工具'), 'publish_data_view': t('生成图表'),
+    'execute_code': t('执行代码'), 'run_job': t('执行代码'), 'orchestrate': t('编排工具'), 'publish_data_view': t('生成图表'),
     'update_plan': t('更新计划'), 'request_user_input': t('请你补充信息'),
     'list_skills': t('查看 Skills'), 'skill_manage': t('管理 Skills'), 'mcp_manage': t('管理 MCP 服务'),
     'memory': t('维护长期记忆')
@@ -98,6 +98,7 @@ export function toolPreview(name: string, argumentsText: string, output: string,
   if (name === 'edit_file' && typeof args.oldText === 'string' && typeof args.newText === 'string') {
     preview.changed = true; preview.before = args.oldText; preview.after = args.newText;
   } else if (name === 'write_file' && typeof args.content === 'string') { preview.content = args.content; }
+  else if (name === 'run_job' && typeof result.path === 'string') { preview.path = result.path; }
   else if (['read_file', 'read_file_lines', 'read_attachment', 'read_skill', 'read_web'].includes(name)) {
     if (typeof result.content === 'string') { preview.content = result.content; }
     else if (typeof result.text === 'string') { preview.content = result.text; }

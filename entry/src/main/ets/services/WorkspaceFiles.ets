@@ -14,10 +14,15 @@ export interface WorkspaceWrite {
 }
 export interface FileBaseline { path: string; existed: boolean; content: string; sourceUri?: string; }
 
+export interface FileJobWorkspace {
+  readJobInput(path: string, maximum: number, cancellation: Cancellation): Promise<Uint8Array>;
+  createJobOutput(path: string, bytes: Uint8Array, cancellation: Cancellation): Promise<void>;
+}
+
 // Native storage and in-memory adapters share typed results. Tool dispatch owns JSON encoding.
 export interface WorkspaceFiles {
   list(path: string, cancellation: Cancellation, offset?: number): Promise<WorkspaceListing>;
-  read(path: string, cancellation: Cancellation): Promise<WorkspaceText>;
+  read(path: string, cancellation: Cancellation, maximumTextBytes?: number): Promise<WorkspaceText>;
   write(path: string, content: string, cancellation: Cancellation, guard?: WorkspaceWriteGuard): Promise<WorkspaceWrite>;
   edit(path: string, edits: TextEdit[], version: string, cancellation: Cancellation): Promise<WorkspaceWrite>;
 }

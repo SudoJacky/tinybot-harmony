@@ -26,6 +26,7 @@ import { McpClient } from './McpClient';
 import { SkillInstaller } from './SkillInstaller';
 import { CodeExecutionTools } from './CodeExecutionTools';
 import { NativeCodeExecutor } from './NativeCodeExecutor';
+import { WorkspaceCode } from './WorkspaceCode';
 import { NativeOrchestrationExecutor } from './NativeOrchestrationExecutor';
 import { WebUiPreflight } from './WebUiPreflight';
 import { InteractionTools } from './InteractionTools';
@@ -94,6 +95,7 @@ export class NativeSessionResources implements SessionResources {
   private browser?: BrowserSession;
   private profiles: ProviderProfile[] = [];
   private context?: common.UIAbilityContext;
+  private officeLibrary?: string;
   constructor(workspaceFilesDir: string, providers: ProviderRegistry, approval: ToolApproval, context?: common.UIAbilityContext, browser?: BrowserSession) {
     this.browser = browser;
     this.miniApps = new MiniApps(workspaceFilesDir);
@@ -120,9 +122,18 @@ export class NativeSessionResources implements SessionResources {
   tools(id: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments: Attachment[] = [], live?: LiveResources, workspaceId?: string, project?: ProjectData, resolvePreview?: (previewId: string) => BrowserPreview): AgentTools {
     const root = this.workspaces.pathFor(workspaceId || id);
     const files = new NativeWorkspaceFiles(root, project?.sharedFolders || []);
-    const groups: AgentTools[] = [new WorkspaceTools(files, nativeWorkspaceDiffs), new AttachmentTools(attachments),
+    const workspaceTools = new WorkspaceTools(files, nativeWorkspaceDiffs);
+    const groups: AgentTools[] = [workspaceTools, new AttachmentTools(attachments),
       new SkillTools(extensions.skills, selected, live ? () => live.skills() : undefined), new InteractionTools(this.approval)];
-    groups.push(new CodeExecutionTools(new NativeCodeExecutor()));
+    const context = this.context;
+    const workspaceCode = context ? new WorkspaceCode(files, workspaceTools, new NativeOrchestrationExecutor(true), async () => {
+      if (this.officeLibrary === undefined) {
+        const bytes = await context.resourceManager.getRawFileContent('office/office.bundle.js');
+        this.officeLibrary = new util.TextDecoder('utf-8', { fatal: true }).decodeToString(bytes);
+      }
+      return this.officeLibrary;
+    }) : undefined;
+    groups.push(new CodeExecutionTools(new NativeCodeExecutor(), workspaceCode));
     groups.push(new LifePanelTools(this.lifePanels, workspaceId || id, id, files, this.lifeBoards,
       (page, storage, context, cancellation, options) => WebUiPreflight.validatePanel(page, storage, context, cancellation, options)));
     groups.push(new MailTools());

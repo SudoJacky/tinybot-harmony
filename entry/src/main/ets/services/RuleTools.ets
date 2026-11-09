@@ -14,6 +14,9 @@ export class RuleTools implements AgentTools {
   }
   async execute(call: ToolCall, cancellation: Cancellation, context?: ToolInvocationContext): Promise<string> {
     if (!this.allowed(call.function.name)) { throw new ToolFailure('PERMISSION_DENIED', t("只读规则已阻止此次操作。"), 'check_permissions'); }
+    if (this.readOnly && context && call.function.name === 'execute_code') {
+      return this.inner.execute(call, cancellation, { execution: context.execution, executeChild: context.executeChild, workspaceWrite: 'none' });
+    }
     return this.inner.execute(call, cancellation, context);
   }
 }
