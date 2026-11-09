@@ -552,6 +552,31 @@ async function test(name, run) {
     await files.write('empty.md','# note',signal);assert.equal((await files.read('empty.md',signal)).content,'# note');
     await assert.rejects(files.checkedPath('../escape'));
   });
+  await test('binary file jobs preserve original bytes and commit only a new private workspace file', async () => {
+    const root = '/sandbox/workspace/file-jobs';
+    fs.mkdirSync(nativePath(root), { recursive: true });
+    const files = new NativeWorkspaceFiles(root);
+    const original = Uint8Array.from([80, 75, 3, 4, 0, 255]);
+    const other = Uint8Array.from([80, 75, 3, 4, 1, 254]);
+    const signal = new Cancellation();
+    const first = files.createJobOutput('job.xlsx', original, signal);
+    const second = new NativeWorkspaceFiles(root).createJobOutput('job.xlsx', other, signal);
+    await first;
+    await assert.rejects(second, (error) => error.code === 'FS_NOT_OBSERVED');
+    assert.deepEqual(Buffer.from(await files.readJobInput('job.xlsx', 6, signal)), Buffer.from(original));
+    await assert.rejects(files.readJobInput('job.xlsx', 5, signal), (error) => error.code === 'LIMIT_EXCEEDED');
+    await assert.rejects(files.createJobOutput('attachments/job.xlsx', other, signal), (error) => error.code === 'FS_INVALID_PATH');
+    const mounted = new NativeWorkspaceFiles(root, [{ id: 'test-mount', name: 'Vault', uri: 'file:///sandbox/external', addedAt: 1 }]);
+    await assert.rejects(mounted.createJobOutput('shared/Vault/job.xlsx', other, signal), (error) => error.code === 'FS_INVALID_PATH');
+
+    const stop = new Cancellation();
+    const fsync = fileIo.fsync;
+    fileIo.fsync = async (fd) => { await fsync(fd); stop.cancel(); };
+    try {
+      await assert.rejects(files.createJobOutput('cancelled.xlsx', other, stop), (error) => error.code === 'CANCELLED');
+    } finally { fileIo.fsync = fsync; }
+    assert.deepEqual(fs.readdirSync(nativePath(root)), ['job.xlsx']);
+  });
   await test('MCP initializes, negotiates session headers, reads JSON/SSE and paginates',async()=>{
     calls.length=0;httpScript=req=>{ const body=JSON.parse(req.options.extraData);
       assert.equal(req.options.maxRedirects,0);assert.equal(req.options.header.Authorization,'Bearer fixture-secret');

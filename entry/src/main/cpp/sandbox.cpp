@@ -15,7 +15,7 @@ struct alignas(std::max_align_t) Allocation { size_t size; };
 void *Allocate(JSMallocState *state, size_t size)
 {
     auto &budget = *static_cast<Budget *>(state->opaque);
-    const size_t limit = std::min(state->malloc_limit, MEMORY_BYTES);
+    const size_t limit = std::min(state->malloc_limit, budget.memoryBytes);
     if (size > limit || sizeof(Allocation) > limit - size ||
         state->malloc_size > limit - size - sizeof(Allocation)) {
         budget.memoryExceeded = true;
@@ -46,13 +46,14 @@ void *Reallocate(JSMallocState *state, void *ptr, size_t size)
     if (!size) { Free(state, ptr); return nullptr; }
     auto *block = static_cast<Allocation *>(ptr) - 1;
     const size_t oldSize = block->size;
-    const size_t limit = std::min(state->malloc_limit, MEMORY_BYTES);
+    auto &budget = *static_cast<Budget *>(state->opaque);
+    const size_t limit = std::min(state->malloc_limit, budget.memoryBytes);
     if (size > limit || state->malloc_size - oldSize > limit - size) {
-        static_cast<Budget *>(state->opaque)->memoryExceeded = true;
+        budget.memoryExceeded = true;
         return nullptr;
     }
     block = static_cast<Allocation *>(std::realloc(block, sizeof(Allocation) + size));
-    if (!block) { static_cast<Budget *>(state->opaque)->memoryExceeded = true; return nullptr; }
+    if (!block) { budget.memoryExceeded = true; return nullptr; }
     block->size = size;
     state->malloc_size = state->malloc_size - oldSize + size;
     return block + 1;
@@ -60,7 +61,7 @@ void *Reallocate(JSMallocState *state, void *ptr, size_t size)
 int Interrupt(JSRuntime *, void *opaque)
 {
     auto &budget = *static_cast<Budget *>(opaque);
-    if (std::chrono::steady_clock::now() - budget.started >= std::chrono::milliseconds(TIMEOUT_MS)) {
+    if (std::chrono::steady_clock::now() - budget.started >= std::chrono::milliseconds(budget.timeoutMs)) {
         budget.timedOut = true;
     }
     return budget.cancelled.load(std::memory_order_relaxed) || budget.timedOut || budget.memoryExceeded;
@@ -170,6 +171,7 @@ struct AsyncState {
     std::vector<JSValue> rejected;
     int calls = 0;
     bool accepting = true;
+    bool singleHostCall = false;
 };
 void TrackRejection(JSContext *ctx, JSValueConst promise, JSValueConst, JS_BOOL handled, void *opaque)
 {
@@ -184,6 +186,9 @@ JSValue InvokeTool(JSContext *ctx, JSValueConst, int argc, JSValueConst *argv, i
 {
     auto &state = *static_cast<AsyncState *>(JS_GetRuntimeOpaque(JS_GetRuntime(ctx)));
     if (!state.accepting || state.calls >= 32) { return JS_ThrowInternalError(ctx, "Tool dispatch closed or 32-call budget exceeded"); }
+    if (state.singleHostCall && !state.pending.empty()) {
+        return JS_ThrowInternalError(ctx, "Await the pending workspace operation");
+    }
     if (argc != 1 || !JS_IsObject(argv[0]) || JS_IsArray(ctx, argv[0])) {
         return JS_ThrowTypeError(ctx, "Pass one tool arguments object");
     }
@@ -209,7 +214,7 @@ JSValue InvokeTool(JSContext *ctx, JSValueConst, int argc, JSValueConst *argv, i
 void RunAsync(JSContext *ctx, const std::string &source, const std::string &catalogJson,
     Budget &budget, ToolHost &host, ExecutionResult &result)
 {
-    AsyncState state{host, {}, {}, {}, 0, true};
+    AsyncState state{host, {}, {}, {}, 0, true, budget.singleHostCall};
     JSRuntime *runtime = JS_GetRuntime(ctx);
     JS_SetRuntimeOpaque(runtime, &state);
     JS_SetHostPromiseRejectionTracker(runtime, TrackRejection, &state);
@@ -336,7 +341,7 @@ ExecutionResult Execute(const std::string &source, const std::string &inputJson,
         const JSMallocFunctions allocator = {Allocate, Free, Reallocate, UsableSize};
         JSRuntime *runtime = JS_NewRuntime2(&allocator, &budget);
         if (runtime) {
-            JS_SetMemoryLimit(runtime, MEMORY_BYTES);
+            JS_SetMemoryLimit(runtime, budget.memoryBytes);
             JS_SetMaxStackSize(runtime, 512 * 1024);
             JS_SetCanBlock(runtime, false); // Atomics.wait must never block the worker.
             JS_SetInterruptHandler(runtime, Interrupt, &budget);
@@ -353,7 +358,7 @@ ExecutionResult Execute(const std::string &source, const std::string &inputJson,
     }
     Interrupt(nullptr, &budget);
     if (budget.cancelled.load(std::memory_order_relaxed)) { result.status = "cancelled"; result.error = "Execution cancelled"; }
-    else if (budget.timedOut) { result.status = "timeout"; result.error = "Execution exceeded 2000 ms"; }
+    else if (budget.timedOut) { result.status = "timeout"; result.error = "Execution exceeded " + std::to_string(budget.timeoutMs) + " ms"; }
     else if (budget.memoryExceeded) { result.status = "memory_limit"; result.error = "Runtime allocation limit exceeded"; }
     if (result.status != "ok") { result.resultJson = "null"; }
     result.durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - wallStart).count();

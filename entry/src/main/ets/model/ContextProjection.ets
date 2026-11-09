@@ -1,5 +1,5 @@
 import { contextBoundary } from './ContextCheckpoint';
-import { AgentStep, AgentTurn, ModelMessage, ToolExecution, stepMessages, stepInputs } from './Agent';
+import { AgentStep, AgentTurn, ModelMessage, ToolExecution, stepMessages, stepInputs, toolReceipts } from './Agent';
 import { CompactionData, ThreadData, requestHistory } from './Conversation';
 import { fileOperationsContext } from './FileOperations';
 import { referenceContext } from './ThreadReferences';
@@ -20,8 +20,7 @@ export function renderPrompt(sections: PromptSection[]): string {
 }
 
 export function stepEntry(messageId: string, answerId: string, step: AgentStep, index: number): ContextEntry {
-  const receipts: ToolExecution[] = [];
-  for (const tool of step.tools) { receipts.push(tool, ...(tool.children || [])); }
+  const receipts = toolReceipts(step.tools);
   return { messageId: messageId, answerId: answerId, step: index, messages: stepMessages(step), results: receipts };
 }
 

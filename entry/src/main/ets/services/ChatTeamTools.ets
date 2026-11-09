@@ -84,8 +84,10 @@ class EmployeeTools implements AgentTools {
   private catalog: ToolDefinition[]; private allowed: Set<string>; private base: AgentTools;
   private host: ChatTeamTools; private run: TeamRun; private attempt: TeamAttempt;
   candidate?: TeamHandoff;
+  private profile: string;
   constructor(base: AgentTools, profile: string, host: ChatTeamTools, run: TeamRun, attempt: TeamAttempt) {
     this.base = base; this.host = host; this.run = run; this.attempt = attempt;
+    this.profile = profile;
     const reads = ['find_files', 'list_files', 'read_file', 'read_file_lines', 'read_attachment', 'search_file_content', 'read_skill', 'update_plan', 'execute_code'];
     const research = reads.concat(['read_web', 'search_web', 'read_reference', 'write_file', 'edit_file']);
     this.catalog = base.definitions().filter((item) => !item.function.name.startsWith('team_') &&
@@ -107,6 +109,10 @@ class EmployeeTools implements AgentTools {
     if (name === 'team_read_message') { const args = parseToolArguments(call.function.arguments) as TeamArgs; args.runId = this.run.id; return this.host.readResult(args, cancellation); }
     if (name !== 'team_complete_task') {
       if (!this.allowed.has(name)) { throw new ToolFailure('PERMISSION_DENIED', t("员工没有此工具权限：") + name, 'check_permissions'); }
+      if (context && name === 'execute_code' && this.profile !== 'execution') {
+        return this.base.execute(call, cancellation, { execution: context.execution, executeChild: context.executeChild,
+          workspaceWrite: this.profile === 'research' && context.workspaceWrite !== 'none' ? 'text' : 'none' });
+      }
       return this.base.execute(call, cancellation, context);
     }
     const args = parseToolArguments(call.function.arguments) as HandoffArgs;

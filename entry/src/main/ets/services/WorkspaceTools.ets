@@ -171,6 +171,12 @@ export class WorkspaceTools implements AgentTools {
     return output;
   }
 
+  async readTextForCode(path: string, maximum: number, cancellation: Cancellation): Promise<string> {
+    const result = await this.files.read(path, cancellation, maximum);
+    this.observed.set(path, result.version);
+    return result.content;
+  }
+
   private readPage(path: string, content: string, offset?: number, limit?: number, column?: number, maxBytes?: number): string {
     // BOM belongs to the encoding, not the text the model should copy into oldText.
     const page = textPage(content.startsWith('\uFEFF') ? content.slice(1) : content, offset, limit, column, maxBytes);

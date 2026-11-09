@@ -40,6 +40,17 @@ int main() {
     result = Run(std::string(150000, ' ') + "const r = await tools.read({code:'x'.repeat(1200000)}); return r.code;", large);
     Check(result.status == "ok" && result.resultJson.size() == 1200002 && large.count == 1,
         "large source, child arguments, child reply and final result have no content ceiling");
+    Host workspace;
+    Budget workspaceBudget;
+    workspaceBudget.UseWorkspaceCodeLimits();
+    result = Orchestrate(R"(
+        const request = tools.read({data:new Uint8Array(20*1024*1024).toBase64()});
+        try { tools.read({}); throw Error('overlap permitted'); }
+        catch (error) { if (!String(error).includes('Await the pending')) throw error; }
+        return Uint8Array.fromBase64((await request).data).byteLength;
+    )", R"([{"name":"read"}])", workspaceBudget, workspace);
+    Check(result.status == "ok" && result.resultJson == "20971520" && workspace.count == 1,
+        "workspace execution supports 20 MiB and refuses overlapping host calls");
     Host detailed;
     result = Run("throw new Error('diagnostic:' + 'x'.repeat(10000));", detailed);
     Check(result.status == "error" && result.error.size() > 10000, "complete error message survives native execution");

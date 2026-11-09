@@ -40,6 +40,7 @@ export interface ExecutionGate {
 export interface ToolInvocationContext {
   execution: ToolExecution;
   executeChild: (child: ToolExecution, tools: AgentTools, cancellation: Cancellation) => Promise<void>;
+  workspaceWrite?: 'none' | 'text';
 }
 
 export type LoopEventType = 'step_start' | 'text_delta' | 'reasoning_delta' | 'model_end' | 'tool_start' | 'tool_end' | 'step_end' | 'request_retry';

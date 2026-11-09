@@ -97,13 +97,16 @@ void Complete(napi_env env, napi_status status, void *data) {
     napi_delete_async_work(env, job->work);
 }
 napi_value Start(napi_env env, napi_callback_info info) {
-    napi_value args[5]; size_t argc = 5;
+    napi_value args[6]; size_t argc = 6;
     auto job = std::make_unique<Job>(); napi_valuetype callbackType;
-    if (napi_get_cb_info(env, info, &argc, args, nullptr, nullptr) != napi_ok || argc != 4 ||
+    bool workspaceCode = false;
+    if (napi_get_cb_info(env, info, &argc, args, nullptr, nullptr) != napi_ok || (argc != 4 && argc != 5) ||
+        (argc == 5 && napi_get_value_bool(env, args[4], &workspaceCode) != napi_ok) ||
         !Read(env, args[0], 128, job->id) || job->id.empty() || !Read(env, args[1], std::numeric_limits<size_t>::max() - 1, job->source) || job->source.empty() ||
         !Read(env, args[2], std::numeric_limits<size_t>::max() - 1, job->catalog) || napi_typeof(env, args[3], &callbackType) != napi_ok || callbackType != napi_function) {
         napi_throw_type_error(env, nullptr, "Expected execution id, code, catalog and callback"); return nullptr;
     }
+    if (workspaceCode) { job->budget.UseWorkspaceCodeLimits(); }
     { std::lock_guard<std::mutex> lock(jobsMutex);
       if (jobs.size() >= 4 || jobs.count(job->id)) { napi_throw_error(env, nullptr, "Orchestrator busy (maximum 4 executions)"); return nullptr; }
       jobs[job->id] = job.get(); }

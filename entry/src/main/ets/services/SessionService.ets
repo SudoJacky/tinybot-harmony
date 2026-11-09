@@ -5,7 +5,7 @@ import { resolveBrowserPreview } from '../model/BrowserPreview';
 import { Diagnostics } from '../model/Diagnostics';
 import { configurationIssues } from '../model/ConfigurationCompatibility';
 import { isSupportedProtocol } from '../model/ProviderEndpoint';
-import { ToolExecution } from '../model/Agent';
+import { ToolExecution, toolReceipts } from '../model/Agent';
 import { projectFor, workspaceIdFor, validateProjects, projectContext } from '../model/Project';
 import { SharedFolder } from '../model/SharedFolders';
 import { proposeSessionMemory, reviewSessionMemory, addMemoryDraft } from './SessionMemory';
@@ -870,7 +870,7 @@ export class SessionService {
       }
       if (event.type === 'tool_start' || event.type === 'tool_end') {
         const step = answer.steps[event.step || 0];
-        const parent = event.parentToolCallId ? step.tools.find((tool) => tool.call.id === event.parentToolCallId) : undefined;
+        const parent = event.parentToolCallId ? toolReceipts(step.tools).find((tool) => tool.call.id === event.parentToolCallId) : undefined;
         const tool = (parent ? parent.children || [] : step.tools).find((item) => item.call.id === event.toolCallId);
         if (!tool) { throw new Error('Tool event has no matching execution: ' + event.toolCallId); }
         this.emit({ kind: 'tool', state: this.state, threadId: thread.id, messageId: answer.id,

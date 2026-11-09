@@ -22,6 +22,7 @@ const suites = {
     'test-cloud-backup.cjs',
     'test-code-highlight.cjs',
     'test-code-sandbox.cjs',
+    'test-office-jobs.cjs',
     'test-config-compatibility.cjs',
     'test-context-alignment.cjs',
     'test-message-speed.cjs',

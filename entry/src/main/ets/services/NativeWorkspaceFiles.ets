@@ -6,7 +6,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { Cancellation } from './Cancellation';
 import { workspaceRelativePath } from './WorkspaceTools';
 import { readUtf8File } from './TextFiles';
-import { copyFileBytes } from './FileBytes';
+import { copyFileBytes, readBounded } from './FileBytes';
 import { isDocumentPath, readDocumentFile } from './DocumentFiles';
 import { TextEdit, applyTextEdits, validateEdits } from '../model/WorkspaceEdit';
 import { withFileMutation } from './FileMutationQueue';
@@ -14,7 +14,7 @@ import { ToolFailure } from '../model/ToolFailure';
 import { SHARED_FOLDER_ROOT, SharedFolder } from '../model/SharedFolders';
 import { ProjectFolderAccess } from './ProjectFolderAccess';
 
-import { WorkspaceFiles, WorkspaceEntry, WorkspaceListing, WorkspaceText, WorkspaceWrite, WorkspaceWriteGuard, FileBaseline } from './WorkspaceFiles';
+import { WorkspaceFiles, WorkspaceEntry, WorkspaceListing, WorkspaceText, WorkspaceWrite, WorkspaceWriteGuard, FileBaseline, FileJobWorkspace } from './WorkspaceFiles';
 
 async function contentVersion(content: string): Promise<string> {
   const hash = cryptoFramework.createMd('SHA256');
@@ -25,7 +25,7 @@ async function contentVersion(content: string): Promise<string> {
 
 interface MountPath { folder: SharedFolder; relative: string; }
 
-export class NativeWorkspaceFiles implements WorkspaceFiles {
+export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
   static contentRevision: number = 0;
   private root: string;
   private mounts: SharedFolder[];
@@ -60,6 +60,41 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
       }
       return new util.Base64Helper().encodeToStringSync((await hash.digest()).data);
     } finally { await fs.close(file); }
+  }
+
+  async readJobInput(path: string, maximum: number, cancellation: Cancellation): Promise<Uint8Array> {
+    if (this.isShared(path)) {
+      throw new ToolFailure('PERMISSION_DENIED', 'Copy the input into the private workspace first.', 'choose_another_path', { path: path });
+    }
+    return withFileMutation(await this.fileKey(path), async () => {
+      const absolute = await this.resolve(path, false, cancellation);
+      const file = await fs.open(absolute, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
+      try {
+        const stat = await fs.stat(file.fd);
+        if (!stat.isFile()) { throw new ToolFailure('FS_INVALID_PATH', 'File job inputs must be regular files.', 'fix_path', { path: path }); }
+        if (stat.size > maximum) {
+          throw new ToolFailure('LIMIT_EXCEEDED', 'File job input exceeds the remaining byte budget (' + maximum + ' bytes).',
+            'choose_another_path', { path: path });
+        }
+        const bytes = await readBounded(file.fd, stat.size);
+        cancellation.check();
+        return new Uint8Array(bytes);
+      } finally { await fs.close(file); }
+    });
+  }
+
+  async createJobOutput(path: string, bytes: Uint8Array, cancellation: Cancellation): Promise<void> {
+    workspaceRelativePath(path, false);
+    if (this.isShared(path) || /^(attachments|mini-apps|life-panels|life-boards)(\/|$)/.test(path)) {
+      throw new ToolFailure('FS_INVALID_PATH', 'File jobs write only to new files in the private workspace.', 'fix_path', { path: path });
+    }
+    await withFileMutation(this.root + '/' + path, async () => {
+      const absolute = await this.resolve(path, true, cancellation);
+      if (await this.optionalStat(absolute)) {
+        throw new ToolFailure('FS_NOT_OBSERVED', 'The output already exists. Choose a new path.', 'choose_another_path', { path: path });
+      }
+      await this.replaceBytes(absolute, bytes, cancellation);
+    });
   }
 
   private assertTextWritable(path: string): void {
@@ -119,10 +154,10 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
       nextOffset: names.length > offset + 200 ? offset + 200 : undefined };
   }
 
-  async read(path: string, cancellation: Cancellation): Promise<WorkspaceText> {
+  async read(path: string, cancellation: Cancellation, maximumTextBytes?: number): Promise<WorkspaceText> {
     // Public shared-folder writes happen in place. Readers must wait for the whole
     // mutation, otherwise a partial write could become an observed file version.
-    return withFileMutation(await this.fileKey(path), () => this.readUnlocked(path, cancellation));
+    return withFileMutation(await this.fileKey(path), () => this.readUnlocked(path, cancellation, maximumTextBytes));
   }
 
   private async fileKey(path: string): Promise<string> {
@@ -134,14 +169,18 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     return this.root + '/' + path;
   }
 
-  private async readUnlocked(path: string, cancellation: Cancellation): Promise<WorkspaceText> {
+  private async readUnlocked(path: string, cancellation: Cancellation, maximumTextBytes?: number): Promise<WorkspaceText> {
+    if (maximumTextBytes !== undefined && isDocumentPath(path)) {
+      throw new ToolFailure('INVALID_ARGUMENTS', 'Use workspace.read for Office or PDF bytes, or read_file for extracted text.', 'fix_arguments', { path: path });
+    }
     if (this.isShared(path)) {
       const mount = await this.requireMount(path);
       if (!mount.relative) { throw new Error(t("请选择共享文件夹中的文件。")); }
       cancellation.check();
       const file = await this.openExternal(mount.folder, mount.relative, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
       try {
-        const content = await readDocumentFile(file.fd, path, this.root, cancellation);
+        const content = maximumTextBytes === undefined ? await readDocumentFile(file.fd, path, this.root, cancellation) :
+          await readUtf8File(file.fd, cancellation, maximumTextBytes);
         return { path: path, content: content, version: await contentVersion(content) };
       } finally {
         await fs.close(file);
@@ -151,7 +190,8 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     cancellation.check();
     const file = await fs.open(absolute, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
     try {
-      const content = await readDocumentFile(file.fd, path, this.root, cancellation);
+      const content = maximumTextBytes === undefined ? await readDocumentFile(file.fd, path, this.root, cancellation) :
+        await readUtf8File(file.fd, cancellation, maximumTextBytes);
       return { path: path, content: content, version: await contentVersion(content) };
     } finally {
       await fs.close(file);
@@ -259,11 +299,15 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
     }
     const version = await contentVersion(content);
     if (capture) { await this.capture(path, existing !== undefined, cancellation, before); }
+    await this.replaceBytes(absolute, bytes, cancellation);
+    return { path: path, bytes: bytes.byteLength, written: true, before: before, after: content, created: !existing, version: version };
+  }
+
+  private async replaceBytes(absolute: string, bytes: Uint8Array, cancellation: Cancellation): Promise<void> {
     cancellation.check();
     const parent = absolute.slice(0, absolute.lastIndexOf('/'));
     const temporary = parent + '/.tinybot-' + util.generateRandomUUID() + '.tmp';
     const file = await fs.open(temporary, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.NOFOLLOW);
-    let committed = false;
     try {
       try {
         await this.writeFd(file.fd, bytes, cancellation);
@@ -273,19 +317,15 @@ export class NativeWorkspaceFiles implements WorkspaceFiles {
       }
       cancellation.check();
       await fs.rename(temporary, absolute);
-      committed = true;
-      NativeWorkspaceFiles.contentRevision++;
-      return { path: path, bytes: bytes.byteLength, written: true, before: before, after: content, created: !existing, version: version };
     } catch (error) {
-      if (!committed) {
-        try {
-          await fs.unlink(temporary);
-        } catch (cleanupError) {
-          throw new Error((error as Error).message + t("；临时文件清理也失败：") + (cleanupError as Error).message);
-        }
+      try {
+        await fs.unlink(temporary);
+      } catch (cleanupError) {
+        throw new Error((error as Error).message + t("；临时文件清理也失败：") + (cleanupError as Error).message);
       }
       throw error as Error;
     }
+    NativeWorkspaceFiles.contentRevision++;
   }
 
   private async mutateExternal(mount: MountPath, path: string, content: string, edits: TextEdit[],

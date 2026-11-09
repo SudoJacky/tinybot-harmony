@@ -4,7 +4,7 @@ import { FileDiff } from '../model/FileDiff';
 import { TurnFileChange } from '../model/TurnFileChanges';
 import { MemoryReviewRecord } from '../model/MemoryMaintenance';
 import { ThreadReference } from '../model/ThreadReferences';
-import { AgentStep, ToolCall, ToolExecution, RequestRetry, PreviewScreenshot } from '../model/Agent';
+import { AgentStep, ToolCall, ToolExecution, RequestRetry, PreviewScreenshot, toolReceipts } from '../model/Agent';
 import { CompactionData, MessageData, ThreadData } from '../model/Conversation';
 import { ModelReference } from '../model/ProviderProfiles';
 import { PendingInput } from '../model/PendingInput';
@@ -111,15 +111,18 @@ export class MessageViewModel {
     const step = this.steps[index]; const view = this.stepViews[index];
     if (!step || !view) { throw new Error('Tool update has no matching step: ' + index); }
     const id = parentId || tool.call.id;
-    const position = step.tools.findIndex((item) => item.call.id === id);
+    const position = step.tools.findIndex((item) => item.call.id === id ||
+      (parentId !== undefined && toolReceipts(item.children || []).some((child) => child.call.id === parentId)));
     const execution = view.tools[position];
     if (position < 0 || !execution) { throw new Error('Tool update has no matching parent: ' + id); }
     if (parentId) {
-      const parent = step.tools[position];
+      const root = step.tools[position];
+      const parent = toolReceipts([root]).find((item) => item.call.id === parentId);
+      if (!parent) { throw new Error('Tool update has no matching parent: ' + parentId); }
       const children = (parent.children || []).slice();
       const child = children.findIndex((item) => item.call.id === tool.call.id);
       if (child < 0) { children.push(tool); } else { children[child] = tool; }
-      parent.children = children; execution.children = children;
+      parent.children = children; execution.children = root.children?.slice() || [];
     } else {
       step.tools[position] = tool; execution.update(tool);
     }

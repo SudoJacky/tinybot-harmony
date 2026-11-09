@@ -34,6 +34,10 @@ export const THIRD_PARTY_LICENSES: ThirdPartyLicense[] = [
     copyright: 'Copyright © 2010-2026 three.js authors', resource: 'interactive-web/THREE-LICENSE.txt'
   },
   {
+    id: 'office-bundle', name: 'fflate / xmldom / PptxGenJS slide template', license: 'MIT',
+    copyright: 'Arjun Barrett, xmldom contributors, and Brent Ely', resource: 'licenses/office-bundle.txt'
+  },
+  {
     id: 'sensitive-lexicon', name: 'Sensitive-lexicon', license: 'MIT (upstream repository)',
     copyright: 'Copyright (c) 2024~2099 Konsheng', resource: 'moderation/SENSITIVE-LEXICON-LICENSE.txt'
   },
