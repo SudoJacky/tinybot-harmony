@@ -61,40 +61,10 @@ export struct ModelSettingsPanel {
   }
   private setRoute(kind: string, index: number): void {
     const chosen = this.reference(index);
-    if (kind === 'fast') { this.options.fast = chosen; } else if (kind === 'deep') { this.options.deep = chosen; }
-    else if (kind === 'vision') { this.options.vision = chosen; } else if (kind === 'memory') { this.options.memory = chosen; }
-  }
-
-  @Builder
-  choiceMenu(options: string[], selected: number, onSelect: (index: number) => void) {
-    Menu() {
-      ForEach(options, (label: string, index: number) => {
-        MenuItem(() => materialMenuContent.bind(this)({ label: label, selected: index === selected }))
-          .selected(index === selected).onClick(() => onSelect(index))
-      }, (label: string, index: number) => index + label)
-    }
-  }
-
-  // Tappable row showing the current choice; the full list opens as a menu.
-  @Builder
-  choiceRow(title: string, subtitle: string, options: string[], selected: number, enabled: boolean, onSelect: (index: number) => void) {
-    Row({ space: Space.md }) {
-      Column({ space: 3 }) {
-        Text(title).fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontColor($r('app.color.text_primary'))
-        if (subtitle.length > 0) {
-          Text(subtitle).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).lineHeight(17).fontColor($r('app.color.text_secondary'))
-        }
-      }.alignItems(HorizontalAlign.Start).flexShrink(0).constraintSize({ maxWidth: '55%' })
-      Text(options[selected] || options[0] || '').fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(2).textAlign(TextAlign.End).layoutWeight(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .fontColor(selected > 0 ? this.appearance.accent : $r('app.color.text_tertiary'))
-      SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(14).fontColor([$r('app.color.text_tertiary')])
-    }
-    .width('100%').constraintSize({ minHeight: 56 }).padding({ left: Space.lg, right: Space.lg, top: 10, bottom: 10 })
-    .opacity(enabled ? 1 : 0.4).enabled(enabled)
-    .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
-    .bindMenu(this.choiceMenu(options, selected, onSelect), {
-      systemMaterial: this.appearance.menu, mask: false })
+    const options = JSON.parse(JSON.stringify(this.options)) as AssistantOptions;
+    if (kind === 'fast') { options.fast = chosen; } else if (kind === 'deep') { options.deep = chosen; }
+    else if (kind === 'vision') { options.vision = chosen; } else if (kind === 'memory') { options.memory = chosen; }
+    this.options = options;
   }
 
   @Builder
@@ -108,38 +78,39 @@ export struct ModelSettingsPanel {
               SwitchRow({ title: t("自动选择模型"), compId: 'auto-route', isOn: this.options.autoRoute,
                 onChange: (value) => { this.options.autoRoute = value; } })
               RowDivider()
-              this.choiceRow(t("快速任务"), '', this.choices(), this.chosen(this.options.fast), this.options.autoRoute,
-                (index: number) => this.setRoute('fast', index))
+              ModelChoiceRow({ title: t("快速任务"), options: this.choices(), selected: this.chosen(this.options.fast),
+                selectable: this.options.autoRoute, onSelect: (index: number) => this.setRoute('fast', index) })
               RowDivider()
-              this.choiceRow(t("深度任务"), '', this.choices(), this.chosen(this.options.deep), this.options.autoRoute,
-                (index: number) => this.setRoute('deep', index))
+              ModelChoiceRow({ title: t("深度任务"), options: this.choices(), selected: this.chosen(this.options.deep),
+                selectable: this.options.autoRoute, onSelect: (index: number) => this.setRoute('deep', index) })
               RowDivider()
-              this.choiceRow(t("图片理解"), '', this.choices(), this.chosen(this.options.vision), this.options.autoRoute,
-                (index: number) => this.setRoute('vision', index))
+              ModelChoiceRow({ title: t("图片理解"), options: this.choices(), selected: this.chosen(this.options.vision),
+                selectable: this.options.autoRoute, onSelect: (index: number) => this.setRoute('vision', index) })
             }
           }
           SectionHeader({ title: t("专用模型") })
           GroupCard() {
             Column() {
-              this.choiceRow(t("记忆整理"), '', this.choices(), this.chosen(this.options.memory), true,
-                (index: number) => this.setRoute('memory', index))
+              ModelChoiceRow({ title: t("记忆整理"), options: this.choices(), selected: this.chosen(this.options.memory),
+                onSelect: (index: number) => this.setRoute('memory', index) })
             }
           }
           SectionHeader({ title: t("模型能力") })
           if (this.app.modelChoices.length) {
             GroupCard() {
               Column() {
-                this.choiceRow(t("模型"), '', this.choices().slice(1), this.capabilityIndex, true,
-                  (index: number) => { this.capabilityIndex = index; this.loadCapability(); })
+                ModelChoiceRow({ title: t("模型"), options: this.choices().slice(1), selected: this.capabilityIndex,
+                  onSelect: (index: number) => { this.capabilityIndex = index; this.loadCapability(); } })
                 RowDivider()
                 SwitchRow({ title: t("支持图片输入"), compId: 'capability-images', isOn: this.images, onChange: (value) => { this.images = value; } })
                 RowDivider()
                 SwitchRow({ title: t("请求流式用量"), subtitle: t("适用于支持 stream_options 的 Chat Completions 服务。"), compId: 'capability-usage',
                   isOn: this.usage, onChange: (value) => { this.usage = value; } })
                 RowDivider()
-                this.choiceRow(t("推理强度"), this.supportsReasoning() ? '' : t('当前模型使用服务默认设置'), this.efforts().map((value) => reasoningEffortName(value)),
-                  Math.max(0, this.efforts().indexOf(this.reasoning)), this.supportsReasoning(),
-                  (index: number) => { this.reasoning = this.efforts()[index]; })
+                ModelChoiceRow({ title: t("推理强度"), subtitle: this.supportsReasoning() ? '' : t('当前模型使用服务默认设置'),
+                  options: this.efforts().map((value) => reasoningEffortName(value)),
+                  selected: Math.max(0, this.efforts().indexOf(this.reasoning)), selectable: this.supportsReasoning(),
+                  onSelect: (index: number) => { this.reasoning = this.efforts()[index]; } })
                 RowDivider()
                 Row({ space: Space.md }) {
                   Text(t("上下文窗口")).fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontColor($r('app.color.text_primary'))
@@ -167,4 +138,44 @@ export struct ModelSettingsPanel {
   }
 
   build() { this.settingsTab() }
+}
+
+@Component
+struct ModelChoiceRow {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
+  @Prop title: string = '';
+  @Prop subtitle: string = '';
+  @Prop options: string[] = [];
+  @Prop selected: number = 0;
+  @Prop selectable: boolean = true;
+  onSelect: (index: number) => void = () => {};
+
+  @Builder
+  choiceMenu() {
+    Menu() {
+      ForEach(this.options, (label: string, index: number) => {
+        MenuItem(() => materialMenuContent.bind(this)({ label: label, selected: index === this.selected }))
+          .selected(index === this.selected).onClick(() => this.onSelect(index))
+      }, (label: string, index: number) => index + label)
+    }
+  }
+
+  build() {
+    Row({ space: Space.md }) {
+      Column({ space: 3 }) {
+        Text(this.title).fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontColor($r('app.color.text_primary'))
+        if (this.subtitle.length > 0) {
+          Text(this.subtitle).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).lineHeight(17).fontColor($r('app.color.text_secondary'))
+        }
+      }.alignItems(HorizontalAlign.Start).flexShrink(0).constraintSize({ maxWidth: '55%' })
+      Text(this.options[this.selected] || this.options[0] || '').fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(2).textAlign(TextAlign.End).layoutWeight(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .fontColor(this.selected > 0 ? this.appearance.accent : $r('app.color.text_tertiary'))
+      SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(14).fontColor([$r('app.color.text_tertiary')])
+    }
+    .width('100%').constraintSize({ minHeight: 56 }).padding({ left: Space.lg, right: Space.lg, top: 10, bottom: 10 })
+    .opacity(this.selectable ? 1 : 0.4).enabled(this.selectable)
+    .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
+    .bindMenu(this.choiceMenu(), { systemMaterial: this.appearance.menu, mask: false })
+  }
 }
