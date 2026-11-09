@@ -32,7 +32,7 @@ function fixture(name, names, state) {
 }
 const checks = [];
 function check(name, action) { checks.push({ name, action }); }
-const searchMethods = ['searchRequested', 'searchAvailabilityChanged', 'searchVisibilityChanged', 'aboutToAppear', 'aboutToDisappear', 'locked'];
+const searchMethods = ['searchRequested', 'searchAvailabilityChanged', 'searchVisibilityChanged', 'aboutToAppear', 'aboutToDisappear', 'closeCloudPicker', 'locked'];
 function search() { return fixture('ThreadList', searchMethods, { mounted: true, foreground: true, active: true,
   searchOpen: false, focusRequest: 0, searchRequest: 0, app: { canNavigate: true } }); }
 check('search waits for render instead of a timer and does not swallow failures', () => {

@@ -13,6 +13,7 @@ import { withFileMutation } from './FileMutationQueue';
 import { ToolFailure } from '../model/ToolFailure';
 import { SHARED_FOLDER_ROOT, SharedFolder } from '../model/SharedFolders';
 import { ProjectFolderAccess } from './ProjectFolderAccess';
+import { WebDavMount as MountPath, WebDavWorkspaceFiles } from './WebDavWorkspaceFiles';
 
 import { WorkspaceFiles, WorkspaceEntry, WorkspaceListing, WorkspaceText, WorkspaceWrite, WorkspaceWriteGuard, FileBaseline, FileJobWorkspace } from './WorkspaceFiles';
 
@@ -23,17 +24,26 @@ async function contentVersion(content: string): Promise<string> {
   return new util.Base64Helper().encodeToStringSync((await hash.digest()).data);
 }
 
-interface MountPath { folder: SharedFolder; relative: string; }
-
 export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
   static contentRevision: number = 0;
   private root: string;
-  private mounts: SharedFolder[];
+  private initialMounts: SharedFolder[];
+  private currentMounts?: () => SharedFolder[];
+  private cloud: WebDavWorkspaceFiles;
+  private approveCloudWrite?: (path: string, cancellation: Cancellation) => Promise<void>;
 
-  constructor(workspaceDir: string, sharedFolders: SharedFolder[] = []) {
+  constructor(workspaceDir: string, sharedFolders: SharedFolder[] = [], currentMounts?: () => SharedFolder[],
+    approveCloudWrite?: (path: string, cancellation: Cancellation) => Promise<void>) {
     this.root = workspaceDir;
-    this.mounts = sharedFolders.slice();
+    this.initialMounts = sharedFolders.slice();
+    this.currentMounts = currentMounts;
+    this.approveCloudWrite = approveCloudWrite;
+    this.cloud = new WebDavWorkspaceFiles(workspaceDir);
   }
+
+  private get mounts(): SharedFolder[] { return this.currentMounts ? this.currentMounts() : this.initialMounts; }
+
+  isCloudPath(path: string): boolean { return this.cloudMount(path) !== undefined; }
 
   async importFile(source: string, path: string, reuse: boolean = false): Promise<void> {
     if (this.isShared(path)) { throw new Error('Import files into the private workspace.'); }
@@ -121,6 +131,8 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
 
   async list(path: string, cancellation: Cancellation, offset: number = 0): Promise<WorkspaceListing> {
     if (!Number.isSafeInteger(offset) || offset < 0) { throw new ToolFailure('FS_INVALID_ARGUMENTS', 'Invalid directory offset.', 'fix_arguments', { path: path }); }
+    const cloud = this.cloudMount(path);
+    if (cloud) { workspaceRelativePath(path, false); return this.cloud.list(cloud, path, cancellation, offset); }
     if (this.isShared(path)) {
       await this.activate();
       if (path === SHARED_FOLDER_ROOT) {
@@ -155,6 +167,8 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
   }
 
   async read(path: string, cancellation: Cancellation, maximumTextBytes?: number): Promise<WorkspaceText> {
+    const cloud = this.cloudMount(path);
+    if (cloud) { workspaceRelativePath(path, false); return this.cloud.read(cloud, path, cancellation, maximumTextBytes); }
     // Public shared-folder writes happen in place. Readers must wait for the whole
     // mutation, otherwise a partial write could become an observed file version.
     return withFileMutation(await this.fileKey(path), () => this.readUnlocked(path, cancellation, maximumTextBytes));
@@ -201,6 +215,10 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
   async write(path: string, content: string, cancellation: Cancellation, guard?: WorkspaceWriteGuard): Promise<WorkspaceWrite> {
     this.assertTextWritable(path);
     workspaceRelativePath(path, false);
+    const cloud = this.cloudMount(path);
+    if (cloud) {
+      return this.writeCloud(cloud, path, content, [], guard?.version, cancellation);
+    }
     if (this.isShared(path)) {
       const mount = await this.requireMount(path, true);
       return withFileMutation(this.externalUri(mount.folder, mount.relative),
@@ -213,6 +231,10 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
     this.assertTextWritable(path);
     workspaceRelativePath(path, false);
     validateEdits(edits);
+    const cloud = this.cloudMount(path);
+    if (cloud) {
+      return this.writeCloud(cloud, path, '', edits, version, cancellation);
+    }
     if (this.isShared(path)) {
       const mount = await this.requireMount(path, true);
       return withFileMutation(this.externalUri(mount.folder, mount.relative),
@@ -415,6 +437,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
   }
 
   async baseline(path: string): Promise<FileBaseline | undefined> {
+    if (this.isCloudPath(path)) { return undefined; }
     workspaceRelativePath(path, false);
     const location = await this.baselinePath(path);
     if (!await fs.access(location)) { return undefined; }
@@ -481,7 +504,8 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
   }
 
   private isShared(path: string): boolean {
-    return this.mounts.length > 0 && (path === SHARED_FOLDER_ROOT || path.startsWith(SHARED_FOLDER_ROOT + '/'));
+    return (this.initialMounts.length > 0 || this.mounts.length > 0) &&
+      (path === SHARED_FOLDER_ROOT || path.startsWith(SHARED_FOLDER_ROOT + '/'));
   }
 
   private mountPath(path: string): MountPath | undefined {
@@ -494,11 +518,34 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
     return { folder: folder, relative: slash < 0 ? '' : rest.slice(slash + 1) };
   }
 
+  private cloudMount(path: string): MountPath | undefined {
+    const mount = this.mountPath(path);
+    return mount?.folder.webDavConnectionId !== undefined ? mount : undefined;
+  }
+
+  private async writeCloud(mount: MountPath, path: string, content: string, edits: TextEdit[],
+    version: string | null | undefined, cancellation: Cancellation): Promise<WorkspaceWrite> {
+    this.requireCloudWrite(path, mount.folder);
+    await this.approveCloudWrite?.(path, cancellation);
+    return this.cloud.write(mount, path, content, edits, version, cancellation,
+      () => this.requireCloudWrite(path, mount.folder));
+  }
+
+  private requireCloudWrite(path: string, initial: SharedFolder): void {
+    const current = this.cloudMount(path)?.folder;
+    if (!current || current.id !== initial.id || current.uri !== initial.uri || current.webDavConnectionId !== initial.webDavConnectionId) {
+      throw new ToolFailure('SHARED_FOLDER_AUTH_REQUIRED', t('共享文件夹不存在，可能已在项目设置中移除。'), 'reselect_shared_folder');
+    }
+  }
+
   private async requireMount(path: string, createParents: boolean = false): Promise<MountPath> {
     workspaceRelativePath(path, false);
     await this.activate();
     const mount = this.mountPath(path);
     if (!mount) { throw new Error(t('共享文件夹不存在，可能已在项目设置中移除。')); }
+    if (mount.folder.webDavConnectionId !== undefined) {
+      throw new ToolFailure('TOOL_UNAVAILABLE', t('此操作仅支持本地文件。'), 'choose_another_path');
+    }
     const parts = mount.relative.length > 0 ? mount.relative.split('/') : [];
     let relative = '';
     for (let index = -1; index < parts.length; index++) {

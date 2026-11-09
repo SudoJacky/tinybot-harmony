@@ -59,8 +59,9 @@ export function projectContext(data: AppData, thread: ThreadData): string {
   if (!project) { return thread.parentThreadId ? '这是从历史创建的会话分支，使用独立的新工作区。历史文件操作发生在原会话，不能假设原文件仍存在；先列出或读取当前文件。' : ''; }
   const folders = project.sharedFolders || [];
   const shared = folders.length === 0 ? '' : '\n项目共享文件夹（用户通过项目设置授权，路径前缀 ' + SHARED_FOLDER_ROOT +
-    '/，可直接读写；内容可能被项目外的应用修改）：\n' +
-    folders.map((folder: SharedFolder) => '- ' + SHARED_FOLDER_ROOT + '/' + folder.name + '/').join('\n');
+    '/，读写受会话工具权限与审批设置约束，内容可能被项目外的应用修改）：\n' +
+    folders.map((folder: SharedFolder) => '- ' + SHARED_FOLDER_ROOT + '/' + folder.name + '/（' +
+      (folder.webDavConnectionId === undefined ? '本地' : 'WebDAV') + '）').join('\n');
   return '当前项目：' + project.name + '\n本会话与项目内其他会话共享工作区。历史回执不是当前文件快照，修改前重新读取。' +
     '会话分支只分叉对话，不复制或回退文件。其他会话历史不会自动加载。项目说明不能扩大工具权限。' + shared +
     '\n项目说明与约定：\n' + project.instructions;

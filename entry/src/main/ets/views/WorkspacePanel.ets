@@ -60,6 +60,7 @@ export struct WorkspacePanel {
   @State private editing: boolean = false;
   @State private busy: boolean = false;
   @State private refreshing: boolean = false;
+  @State private listingPending: boolean = false;
   @State private error: string = '';
   @State private baseline: FileBaseline | undefined = undefined;
   @State private csv: string[][] = [];
@@ -69,6 +70,7 @@ export struct WorkspacePanel {
   @State private insetTop: number = 0;
   @State private insetBottom: number = 0;
   private files?: NativeWorkspaceFiles;
+  private listingRequest?: Cancellation;
   aboutToAppear(): void {
     this.bindWorkspace();
     systemInsets(this.getUIContext()).then((insets: number[]) => { this.insetTop = insets[0]; this.insetBottom = insets[1]; });
@@ -79,9 +81,11 @@ export struct WorkspacePanel {
     this.ownerWorkspaceId = this.app.activeWorkspaceId;
     this.ownerProject = !!this.app.activeProject;
     this.workspaceTitle = this.app.activeProject ? t('项目文件') + ' · ' + this.app.activeProject.name : t('工作区文件');
-    this.files = new NativeWorkspaceFiles(new WorkspaceStore(context.getApplicationContext().filesDir).pathFor(this.ownerWorkspaceId),
-      this.app.activeProject?.sharedFolders || []);
+    const owner = this.ownerWorkspaceId;
+    this.files = new NativeWorkspaceFiles(new WorkspaceStore(context.getApplicationContext().filesDir).pathFor(owner),
+      this.app.activeProject?.sharedFolders || [], () => this.app.projects.find((project) => project.workspaceId === owner)?.sharedFolders || []);
     this.directory = ''; this.previewing = false; this.editing = false; this.error = '';
+    this.entries = []; this.truncated = false;
     if (this.initialPath) {
       const slash = this.initialPath.lastIndexOf('/');
       this.directory = slash < 0 ? '' : this.initialPath.slice(0, slash);
@@ -122,17 +126,29 @@ export struct WorkspacePanel {
 
   private async refresh(): Promise<void> {
     if (!this.files) { return; }
+    this.listingRequest?.cancel();
+    const request = new Cancellation();
+    const files = this.files; const directory = this.directory;
+    this.listingRequest = request;
+    this.listingPending = true;
     try {
-      const files = this.files; const directory = this.directory;
-      const list = await files.list(directory || '.', new Cancellation());
-      if (files !== this.files || directory !== this.directory) { return; }
+      const list = await files.list(directory || '.', request);
+      if (this.listingRequest !== request) { return; }
       // Folders first, then files, each alphabetical.
       this.entries = list.entries.sort((a, b) => (a.kind === 'directory' ? 0 : 1) - (b.kind === 'directory' ? 0 : 1) || a.name.localeCompare(b.name));
       this.truncated = list.truncated;
-    } catch (error) { this.error = (error as Error).message; }
-    finally { this.refreshing = false; }
+    } catch (error) {
+      if (this.listingRequest === request) { this.error = (error as Error).message; }
+    } finally {
+      if (this.listingRequest === request) { this.listingPending = false; this.refreshing = false; }
+    }
   }
-  private go(directory: string): void { if (this.busy) { return; } this.directory = directory; this.error = ''; this.refresh(); }
+  private go(directory: string): void {
+    if (this.busy || this.directory === directory) { return; }
+    this.directory = directory;
+    this.entries = []; this.truncated = false; this.error = '';
+    this.refresh();
+  }
 
   private async open(entry: WorkspaceEntry): Promise<void> {
     if (!this.files || this.busy || entry.kind === 'symlink') { return; }
@@ -302,14 +318,18 @@ export struct WorkspacePanel {
   }
 
   private icon(entry: WorkspaceEntry): Resource {
-    if (entry.kind === 'directory') { return $r('sys.symbol.folder_fill'); }
+    if (entry.kind === 'directory') {
+      return this.files?.isCloudPath(this.join(entry.name)) ? $r('sys.symbol.cloud') : $r('sys.symbol.folder_fill');
+    }
     if (IMAGE_FILE.test(entry.name)) { return $r('sys.symbol.picture'); }
     if (entry.kind === 'symlink') { return $r('sys.symbol.link'); }
     return MARKDOWN_FILE.test(entry.name) ? $r('sys.symbol.doc_plaintext') : $r('sys.symbol.doc_text');
   }
 
   private kindLabel(entry: WorkspaceEntry): string {
-    if (entry.kind === 'directory') { return t("文件夹"); }
+    if (entry.kind === 'directory') {
+      return this.files?.isCloudPath(this.join(entry.name)) ? t('云端文件夹') : t('文件夹');
+    }
     if (entry.kind === 'symlink') { return t("链接 · 不支持打开"); }
     const dot = entry.name.lastIndexOf('.');
     return dot > 0 ? entry.name.slice(dot + 1).toUpperCase() + t(" 文件") : t("文件");
@@ -389,13 +409,16 @@ export struct WorkspacePanel {
         Column({ space: 1 }) {
           Text(this.fileName(this.selected)).fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium).maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
-          Text(this.editing ? (this.dirty() ? t("编辑中 · 未保存") : t("编辑中")) : this.embedded ? this.workspaceTitle : this.directory || t("工作区")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).maxLines(1)
+          Text(this.editing ? (this.dirty() ? t("编辑中 · 未保存") : t("编辑中")) :
+            this.files?.isCloudPath(this.selected) ? t('WebDAV · {0}', [this.directory]) :
+            this.embedded ? this.workspaceTitle : this.directory || t("工作区")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).maxLines(1)
             .fontColor(this.dirty() ? this.appearance.accent : $r('app.color.text_tertiary'))
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
         if (this.editing) {
           Button(this.busy ? t("保存中…") : t("保存")).fontFamily(this.appearance.fontFamily).id('workspace-edit-save').attributeModifier(Btn.primarySmall)
             .enabled(!this.locked()).onClick(() => this.save())
-        } else if (this.imagePath.length === 0 && this.previewError.length === 0 && !isDocumentPath(this.selected) && !this.selected.startsWith('attachments/')) {
+        } else if (this.imagePath.length === 0 && this.previewError.length === 0 && !isDocumentPath(this.selected) && !this.selected.startsWith('attachments/') &&
+          (!this.files?.isCloudPath(this.selected) || this.version.length > 0)) {
           Button(t("编辑")).fontFamily(this.appearance.fontFamily).id('workspace-edit-save').attributeModifier(Btn.tonalSmall).enabled(!this.locked())
             .onClick(() => { this.editing = true; })
         }
@@ -413,6 +436,9 @@ export struct WorkspacePanel {
       }.width('100%').height(56).padding({ left: 4, right: Space.page })
       if (this.previewError.length > 0) {
         Banner({ text: this.previewError }).padding({ left: Space.page, right: Space.page })
+      } else if (!this.editing && this.files?.isCloudPath(this.selected) && !isDocumentPath(this.selected) && this.version.length === 0) {
+        Banner({ text: t('服务器未提供文件版本，此文件仅供预览。'), danger: false, icon: $r('sys.symbol.lock') })
+          .padding({ left: Space.page, right: Space.page })
       }
       if (this.editing) {
         TextArea({ text: this.content, placeholder: t("开始输入…") }).fontFamily(this.appearance.fontFamily).id('workspace-content')
@@ -426,7 +452,8 @@ export struct WorkspacePanel {
         Scroll() {
           Column() {
             if (this.previewError.length === 0 && this.content.length === 0) {
-              EmptyState({ icon: $r('sys.symbol.doc_text'), title: t("空文件"), caption: t("点右上角“编辑”开始写内容。") })
+              EmptyState({ icon: $r('sys.symbol.doc_text'), title: t("空文件"),
+                caption: this.files?.isCloudPath(this.selected) && this.version.length === 0 ? '' : t("点右上角“编辑”开始写内容。") })
             } else if (this.csv.length > 0) {
               DataTable({ header: this.csv[0], rows: this.csv.slice(1), maxHeight: 4000 })
             } else if (MARKDOWN_FILE.test(this.selected)) {
@@ -444,10 +471,12 @@ export struct WorkspacePanel {
           if (!this.imagePath && !this.previewError) {
             this.toolbarButton($r('sys.symbol.quote'), t("引用"), 'workspace-reference', false, () => this.reference())
           }
-          this.toolbarButton($r('sys.symbol.share'), t("分享"), 'workspace-share', false, () => this.fileAction('share', this.selected))
-          this.toolbarButton($r('sys.symbol.square_and_arrow_down'), t("导出"), 'workspace-export', false,
-            () => this.fileAction('export', this.selected))
-          this.toolbarButton($r('sys.symbol.trash'), t("删除"), 'workspace-delete', true, () => this.confirmDelete(this.selected))
+          if (!this.files?.isCloudPath(this.selected)) {
+            this.toolbarButton($r('sys.symbol.share'), t("分享"), 'workspace-share', false, () => this.fileAction('share', this.selected))
+            this.toolbarButton($r('sys.symbol.square_and_arrow_down'), t("导出"), 'workspace-export', false,
+              () => this.fileAction('export', this.selected))
+            this.toolbarButton($r('sys.symbol.trash'), t("删除"), 'workspace-delete', true, () => this.confirmDelete(this.selected))
+          }
         }.width('100%').padding({ left: Space.page, right: Space.page })
         .border({ width: { top: 0.5 }, color: $r('app.color.divider') })
       }
@@ -467,15 +496,24 @@ export struct WorkspacePanel {
         }
         Refresh({ refreshing: $$this.refreshing }) {
           List() {
-            if (this.entries.length === 0) {
+            if (this.entries.length === 0 && this.listingPending) {
+              ListItem() {
+                Row({ space: Space.sm }) {
+                  LoadingProgress().width(20).height(20).color(this.appearance.accent)
+                  Text(this.files?.isCloudPath(this.directory) ? t('正在读取云端目录…') : t('正在读取目录…'))
+                    .fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+                }.id('workspace-list-loading').width('100%').justifyContent(FlexAlign.Center).padding(Space.xl)
+              }
+            } else if (this.entries.length === 0 && !this.error) {
               ListItem() {
                 EmptyState({ icon: $r('sys.symbol.folder'), title: this.directory ? t("文件夹是空的") : t("这里还没有文件"),
-                  caption: t("导入资料或新建笔记；助手在对话中写入的文件也会出现在这里。") })
+                  caption: this.files?.isCloudPath(this.directory) ? t('在此新建的笔记会保存到 WebDAV。') :
+                    t("导入资料或新建笔记；助手在对话中写入的文件也会出现在这里。") })
               }
             }
             ForEach(this.entries, (entry: WorkspaceEntry) => {
               ListItem() {
-                if (entry.kind === 'file') {
+                if (entry.kind === 'file' && !this.files?.isCloudPath(this.join(entry.name))) {
                   SwipeRow({ rowKey: this.join(entry.name), label: entry.name, radius: 0,
                     activeRow: this.swipeRow, disabled: this.locked(), onOpen: (key: string) => { this.swipeRow = key; },
                     onShare: () => this.fileAction('share', this.join(entry.name)),
@@ -497,13 +535,16 @@ export struct WorkspacePanel {
           }.width('100%').height('100%')
           .divider({ strokeWidth: 0.5, color: $r('app.color.divider'), startMargin: 68, endMargin: 0 })
           .scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring).contentEndOffset(Space.lg)
-        }.layoutWeight(1).onRefreshing(() => { this.refresh(); })
+        }.layoutWeight(1).onRefreshing(() => { this.error = ''; this.refresh(); })
         BottomBar() {
           Row({ space: Space.md }) {
-            Button(this.busy ? t("处理中…") : t("导入文件")).fontFamily(this.appearance.fontFamily).id('workspace-import').attributeModifier(Btn.tonal).height(48).layoutWeight(1)
-              .enabled(!this.locked()).onClick(() => this.importFiles())
+            if (!this.files?.isCloudPath(this.directory)) {
+              Button(this.busy ? t("处理中…") : t("导入文件")).fontFamily(this.appearance.fontFamily).id('workspace-import')
+                .attributeModifier(Btn.tonal).height(48).layoutWeight(1)
+                .enabled(!this.locked() && !this.listingPending).onClick(() => this.importFiles())
+            }
             Button(t("新建笔记")).fontFamily(this.appearance.fontFamily).id('workspace-new').attributeModifier(Btn.primary).layoutWeight(1)
-              .enabled(!this.locked()).onClick(() => this.newNote())
+              .enabled(!this.locked() && !this.listingPending).onClick(() => this.newNote())
           }.width('100%')
         }
       }.width('100%').height('100%')

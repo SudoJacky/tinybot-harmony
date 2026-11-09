@@ -36,11 +36,32 @@ export class CredentialStore implements CredentialVault {
     return new util.TextDecoder('utf-8').decodeToString(result[0].get(asset.Tag.SECRET) as Uint8Array);
   }
 
-  async write(alias: string, secret: string): Promise<void> {
+  async listAliases(group: string): Promise<string[]> {
+    const query: asset.AssetMap = new Map();
+    query.set(asset.Tag.DATA_LABEL_NORMAL_1, new util.TextEncoder().encodeInto(group));
+    query.set(asset.Tag.RETURN_TYPE, asset.ReturnType.ATTRIBUTES);
+    query.set(asset.Tag.RETURN_LIMIT, 10);
+    const aliases: string[] = [];
+    const decoder = new util.TextDecoder('utf-8');
+    while (true) {
+      query.set(asset.Tag.RETURN_OFFSET, aliases.length);
+      let rows: asset.AssetMap[];
+      try { rows = await asset.query(query); }
+      catch (error) {
+        if ((error as BusinessError).code === asset.ErrorCode.NOT_FOUND) { return aliases; }
+        throw error as Error;
+      }
+      for (const row of rows) { aliases.push(decoder.decodeToString(row.get(asset.Tag.ALIAS) as Uint8Array)); }
+      if (rows.length < 10) { return aliases; }
+    }
+  }
+
+  async write(alias: string, secret: string, group: string = ''): Promise<void> {
     const attributes: asset.AssetMap = new Map();
     const encoder = new util.TextEncoder();
     attributes.set(asset.Tag.ALIAS, encoder.encodeInto(alias));
     attributes.set(asset.Tag.SECRET, encoder.encodeInto(secret));
+    if (group) { attributes.set(asset.Tag.DATA_LABEL_NORMAL_1, encoder.encodeInto(group)); }
     attributes.set(asset.Tag.ACCESSIBILITY, asset.Accessibility.DEVICE_UNLOCKED);
     attributes.set(asset.Tag.SYNC_TYPE, asset.SyncType.NEVER);
     await asset.add(attributes);

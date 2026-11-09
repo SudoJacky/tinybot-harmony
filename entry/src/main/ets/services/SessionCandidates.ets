@@ -15,6 +15,9 @@ export interface SessionImportCandidate { data: AppData; threads: ThreadData[]; 
 export function importedSessionCandidate(local: AppData, imported: AppData, createId: () => string): SessionImportCandidate {
   const candidate = JSON.parse(JSON.stringify(local)) as AppData;
   const restored = JSON.parse(JSON.stringify(imported)) as AppData;
+  for (const project of restored.projects || []) {
+    if (project.sharedFolders) { project.sharedFolders = project.sharedFolders.filter((folder) => folder.webDavConnectionId === undefined); }
+  }
   const known = new Set(candidate.threads.map((item) => item.id));
   restored.threads = restored.threads.filter((item) => !known.has(item.id));
   const serverIds = new Map<string, string>();
@@ -81,8 +84,8 @@ export function savedProjectCandidate(local: AppData, name: string, instructions
   const previousUris = new Set<string>(previousFolders.map((folder) => folder.uri));
   const nextUris = new Set<string>(nextFolders.map((folder) => folder.uri));
   return { data: candidate, project: project,
-    addedFolders: nextFolders.filter((folder) => !previousUris.has(folder.uri)),
-    removedFolders: previousFolders.filter((folder) => !nextUris.has(folder.uri) &&
+    addedFolders: nextFolders.filter((folder) => folder.webDavConnectionId === undefined && !previousUris.has(folder.uri)),
+    removedFolders: previousFolders.filter((folder) => folder.webDavConnectionId === undefined && !nextUris.has(folder.uri) &&
       !projects.some((item) => (item.sharedFolders || []).some((shared) => shared.uri === folder.uri))) };
 }
 

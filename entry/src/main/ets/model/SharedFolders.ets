@@ -3,12 +3,18 @@ import { t } from './I18n';
 export const SHARED_FOLDER_ROOT: string = 'shared';
 export const MAX_PROJECT_SHARED_FOLDERS: number = 8;
 
-// A folder chosen from the system picker and remembered by the project.
 export interface SharedFolder {
   id: string;
   name: string;
   uri: string;
   addedAt: number;
+  webDavConnectionId?: string;
+}
+
+export function cloudSharedFolder(folders: SharedFolder[] | undefined, path: string): SharedFolder | undefined {
+  if (!path.startsWith(SHARED_FOLDER_ROOT + '/')) { return undefined; }
+  const name = path.slice(SHARED_FOLDER_ROOT.length + 1).split('/')[0];
+  return folders?.find((folder) => folder.name === name && folder.webDavConnectionId !== undefined);
 }
 
 export function sharedFolderName(value: string): string {
@@ -48,13 +54,16 @@ export function validateSharedFolders(folders: SharedFolder[] | undefined): void
   for (const folder of folders) {
     if (!folder || typeof folder.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(folder.id) ||
       typeof folder.name !== 'string' || sharedFolderName(folder.name) !== folder.name ||
-      typeof folder.uri !== 'string' || !folder.uri.startsWith('file://') || folder.uri.length > 4096 ||
+      typeof folder.uri !== 'string' || folder.uri.length > 4096 ||
+      (folder.webDavConnectionId === undefined ? !folder.uri.startsWith('file://') :
+        typeof folder.webDavConnectionId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(folder.webDavConnectionId) ||
+        !/^https:\/\/[^/?#@]+\/[^?#\\\u0000-\u001f\u007f]*$/.test(folder.uri) || !folder.uri.endsWith('/')) ||
       !Number.isFinite(folder.addedAt) || ids.has(folder.id) || names.has(folder.name.toLocaleLowerCase()) ||
-      uris.has(folder.uri)) {
+      uris.has((folder.webDavConnectionId || '') + ' ' + folder.uri)) {
       throw new Error(t('共享文件夹数据无效。'));
     }
     ids.add(folder.id);
     names.add(folder.name.toLocaleLowerCase());
-    uris.add(folder.uri);
+    uris.add((folder.webDavConnectionId || '') + ' ' + folder.uri);
   }
 }

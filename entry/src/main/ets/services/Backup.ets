@@ -114,6 +114,9 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
   const data = JSON.parse(JSON.stringify(snapshot)) as AppData;
   const envelope: BackupEnvelope = { format: 'tinybot-harmony.backup.v4', data: data, attachments: [], files: [], deviceState: await captureBackupDeviceState(context) };
   validateProjects(data);
+  for (const project of data.projects || []) {
+    if (project.sharedFolders) { project.sharedFolders = project.sharedFolders.filter((folder) => folder.webDavConnectionId === undefined); }
+  }
   cancellation?.check();
   data.config.credentialAlias = ''; data.config.configured = false;
   for (const profile of data.providerProfiles || []) { profile.credentialAlias = ''; profile.balanceCredentialAlias = undefined; profile.noApiKey = true; profile.enabled = false; }

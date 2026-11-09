@@ -84,6 +84,7 @@ export struct BackupPanel {
   backupTab() {
     Scroll() {
       Column({ space: Space.md }) {
+        SectionHeader({ title: t('第三方备份位置') })
         GroupCard() {
           NavRow({ title: t('WebDAV'), subtitle: t('使用自己的 WebDAV 服务器手动备份和恢复'),
             compId: 'webdav-backup-settings', icon: $r('sys.symbol.cloud'), disabled: this.locked(), onTap: () => this.onWebDav() })
