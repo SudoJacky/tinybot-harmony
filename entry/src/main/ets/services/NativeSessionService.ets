@@ -54,6 +54,7 @@ import { CredentialStore } from './CredentialStore';
 import { SessionResources } from './SessionContracts';
 import { ProjectData } from '../model/Project';
 import { SharedFolder } from '../model/SharedFolders';
+import { t } from '../model/I18n';
 import { ProjectFolderAccess } from './ProjectFolderAccess';
 import { SessionService } from './SessionService';
 import { NativeWorkspaceFiles } from './NativeWorkspaceFiles';
@@ -122,7 +123,9 @@ export class NativeSessionResources implements SessionResources {
   activateProjectFolders(projects: ProjectData[]): Promise<void> { return ProjectFolderAccess.activateAll(projects); }
   tools(id: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments: Attachment[] = [], live?: LiveResources, workspaceId?: string, project?: ProjectData, resolvePreview?: (previewId: string) => BrowserPreview): AgentTools {
     const root = this.workspaces.pathFor(workspaceId || id);
-    const files = new NativeWorkspaceFiles(root, project?.sharedFolders || []);
+    const files = new NativeWorkspaceFiles(root, project?.sharedFolders || [], undefined,
+      live?.askForToolApproval === false ? undefined :
+        (path, cancellation) => this.approval.request(t('允许写入云端共享文件夹？'), path, cancellation));
     const workspaceTools = new WorkspaceTools(files, nativeWorkspaceDiffs);
     const groups: AgentTools[] = [workspaceTools, new AttachmentTools(attachments),
       new SkillTools(extensions.skills, selected, live ? () => live.skills() : undefined), new InteractionTools(this.approval)];

@@ -9,17 +9,19 @@ import { ToolApproval } from './ToolApproval';
 const APPROVAL_TOOLS = new Set(TOOL_GROUPS.filter((group) => !group.readOnly).flatMap((group) => group.tools)
   .filter((name) => name !== 'mcp_call' && name !== 'validate_life_panel'));
 
-interface ApprovalArguments { action?: string; }
+interface ApprovalArguments { action?: string; path?: string; }
 
 export class ApprovalTools implements AgentTools {
   private inner: AgentTools;
   private approval: ToolApproval;
   private threadTitle: string;
+  private handlesFileApproval?: (path: string) => boolean;
 
-  constructor(inner: AgentTools, approval: ToolApproval, threadTitle: string) {
+  constructor(inner: AgentTools, approval: ToolApproval, threadTitle: string, handlesFileApproval?: (path: string) => boolean) {
     this.inner = inner;
     this.approval = approval;
     this.threadTitle = threadTitle;
+    this.handlesFileApproval = handlesFileApproval;
   }
 
   definitions(): ToolDefinition[] { return this.inner.definitions(); }
@@ -33,7 +35,9 @@ export class ApprovalTools implements AgentTools {
     const name = call.function.name;
     if (APPROVAL_TOOLS.has(name) && this.definitions().some((definition) => definition.function.name === name)) {
       const args = parseToolArguments(call.function.arguments) as ApprovalArguments;
-      if (name !== 'mcp_manage' || (args?.action !== 'list' && args?.action !== 'test')) {
+      const folderApproval = (name === 'write_file' || name === 'edit_file') && typeof args?.path === 'string' &&
+        this.handlesFileApproval?.(args.path);
+      if (!folderApproval && (name !== 'mcp_manage' || (args?.action !== 'list' && args?.action !== 'test'))) {
         await this.approval.request(this.threadTitle + ' · ' + name, call.function.arguments, cancellation);
       }
     }

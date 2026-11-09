@@ -21,7 +21,7 @@ const globals = { exports: {}, ViewPU, ArrayBuffer, $r: key => key,
   require: id => {
     if (id.includes('AppearanceStyle&')) return { AppearanceStyle: class {} };
     if (id.includes('I18n&')) return { t: s => s };
-    if (id.includes('Cancellation&')) return { Cancellation: class {} };
+    if (id.includes('Cancellation&')) return { Cancellation: class { cancel() { this.cancelled = true; } } };
     if (id.includes('ToolFailure&')) return { ToolFailure };
     if (id.includes('Diagnostics&')) return { Diagnostics: { log: (...args) => logs.push(args) } };
     if (id.includes('TextFiles&')) return { importTextFile: async () => 'imported text' };
@@ -117,4 +117,27 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync(emitted, 'utf8'), { compil
   await panel.confirmDelete('note.md');panel.files={...files};await dialogs[2].secondaryButton.action();
   assert.equal(deletions,1,'An old dialog cannot delete a file in a newly bound workspace');
   console.log('PASS delete confirmation preserves its file version and workspace identity');
+
+  let completeOld, oldSignal;
+  panel.directory = 'shared/Old';
+  panel.entries = [{ name: 'old.txt', kind: 'file' }];
+  panel.files = {
+    list: (directory, signal) => {
+      if (directory === 'shared/New') { return Promise.resolve({ entries: [{ name: 'new.txt', kind: 'file' }], truncated: false }); }
+      oldSignal = signal;
+      return new Promise(resolve => { completeOld = resolve; });
+    }
+  };
+  const stale = panel.refresh();
+  panel.go('shared/New');
+  assert.equal(panel.entries.length, 0, 'Folder navigation clears the previous entries immediately');
+  assert.equal(panel.listingPending, true);
+  assert.equal(oldSignal.cancelled, true);
+  await Promise.resolve();
+  completeOld({ entries: [{ name: 'stale.txt', kind: 'file' }], truncated: true });
+  await stale;
+  assert.equal(panel.entries[0].name, 'new.txt');
+  assert.equal(panel.listingPending, false);
+  assert.equal(panel.truncated, false);
+  console.log('PASS folder navigation cancels old reads and keeps only the current directory result');
 })().catch(error => { console.error(error); process.exitCode = 1; });

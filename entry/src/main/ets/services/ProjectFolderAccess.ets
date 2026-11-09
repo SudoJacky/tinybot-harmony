@@ -41,7 +41,8 @@ export class ProjectFolderAccess {
 
   static activate(folders: SharedFolder[]): Promise<void> {
     const run = async (): Promise<void> => {
-      const pending = folders.filter((folder: SharedFolder) => folder.uri.length > 0 && !activated.has(folder.uri));
+      const pending = folders.filter((folder: SharedFolder) => folder.webDavConnectionId === undefined &&
+        folder.uri.length > 0 && !activated.has(folder.uri));
       if (pending.length === 0) { return; }
       ProjectFolderAccess.requireSupport();
       const policies: fileShare.PolicyInfo[] = pending.map((folder: SharedFolder): fileShare.PolicyInfo => {

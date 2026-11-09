@@ -153,7 +153,32 @@ const kits = {
     UploadFromFile: class { constructor(path) { this.path = path; } }
   } },
   '@kit.MediaLibraryKit': {}, '@kit.ShareKit': {}, '@kit.ArkGraphics2D': { drawing: {} },
-  '@kit.ArkTS': { url: { URL: { parseURL: value => new URL(value) } }, taskpool: { execute: async (work, ...args) => {
+  '@kit.ArkTS': { url: { URL: { parseURL: (value, base) => new URL(value, base) } }, xml: {
+    EventType: { START_TAG: 2, END_TAG: 3, TEXT: 4, CDSECT: 5 },
+    XmlPullParser: class {
+      constructor(body) { this.body = Buffer.from(body); }
+      parseXml({ tokenValueCallbackFunction: emit }) {
+        const tag = (event, name, depth, value = '') => emit(event, {
+          getName: () => name, getNamespace: () => 'DAV:', getDepth: () => depth, getText: () => value
+        });
+        if (this.body.length > 1) {
+          tag(2, 'multistatus', 1);
+          for (const row of JSON.parse(this.body.toString('utf8'))) {
+            tag(2, 'response', 2); tag(2, 'href', 3); tag(4, '', 3, row.href); tag(3, 'href', 3);
+            tag(2, 'propstat', 3); tag(2, 'resourcetype', 5);
+            if (row.directory) { tag(2, 'collection', 6); tag(3, 'collection', 6); }
+            tag(3, 'resourcetype', 5); tag(2, 'status', 4); tag(4, '', 4, 'HTTP/1.1 ' + (row.status || '200 OK'));
+            tag(3, 'status', 4); tag(3, 'propstat', 3); tag(3, 'response', 2);
+          }
+          tag(3, 'multistatus', 1);
+          return;
+        }
+        tag(2, 'resourcetype', 5);
+        if (this.body[0] === 1) { tag(2, 'collection', 6); tag(3, 'collection', 6); }
+        tag(3, 'resourcetype', 5);
+      }
+    }
+  }, taskpool: { execute: async (work, ...args) => {
     if (failConversationWorker) throw Error('conversation worker unavailable');
     return work(...args);
   } }, util: { generateRandomUUID: () => crypto.randomUUID(), TextEncoder: Encoder, TextDecoder: Decoder,
@@ -193,11 +218,17 @@ let noticeLogged = () => {};
 diagnostics.configureLogSink(data => { diagnosticLogs.push(data); if (data.event === 'cancel_notice_failed') noticeLogged(); });
 const { NativeWorkspaceFiles } = load(path.join(source,'services/NativeWorkspaceFiles'));
 const secrets = new Map();
+const secretGroups = new Map();
 CredentialStore.prototype.read = async alias => secrets.get(alias) || (alias ? 'fixture-secret' : '');
 CredentialStore.prototype.readOptional = async alias => secrets.get(alias);
-CredentialStore.prototype.write = async (alias, secret) => { if (secrets.has(alias)) throw Error('duplicate secret'); secrets.set(alias,secret); };
+CredentialStore.prototype.listAliases = async group => [...secretGroups.keys()].filter(alias => secretGroups.get(alias) === group);
+CredentialStore.prototype.write = async (alias, secret, group) => {
+  if (secrets.has(alias)) throw Error('duplicate secret');
+  secrets.set(alias, secret);
+  if (group) secretGroups.set(alias, group);
+};
 CredentialStore.prototype.update = async (alias, secret) => { assert.ok(secrets.has(alias)); secrets.set(alias,secret); };
-CredentialStore.prototype.remove = async alias => { secrets.delete(alias); };
+CredentialStore.prototype.remove = async alias => { secrets.delete(alias); secretGroups.delete(alias); };
 const server = { id:'s',name:'Fixture',url:'https://fixture.invalid/mcp',enabled:true,credentialAlias:'fixture-key' };
 function approvalRequested(approval) {
   const request = approval.request.bind(approval);
@@ -1329,6 +1360,7 @@ async function test(name, run) {
   });
   await test('WebDAV stages a real archive, preserves the last snapshot on failure and gates all transfer I/O', async () => {
     const { WebDavBackup } = load(path.join(source, 'services/WebDavBackup'));
+    const { saveWebDavConnection, webDavSettings, clearWebDavConnection } = load(path.join(source, 'services/WebDavConnection'));
     const { exportBackup, readBackup, createBackupFile, readBackupFile } = load(path.join(source, 'services/Backup'));
     const root = '/sandbox/webdav-app', context = { cacheDir: root + '/cache', getApplicationContext: () => ({ filesDir: root }) };
     fs.mkdirSync(nativePath(context.cacheDir), { recursive: true });
@@ -1336,6 +1368,7 @@ async function test(name, run) {
     const openID = backupAccount.openID, data = model.emptyData(), previous = Buffer.from('last valid backup');
     const remote = new Map([[final, previous]]), methods = [];
     let failPut = false, failMove = false, downloadStatus = 200, sessions = 0, closed = 0;
+    let otherId = '';
     const result = statusCode => ({ statusCode });
     webDavSession = config => {
       sessions++;
@@ -1373,13 +1406,14 @@ async function test(name, run) {
       };
     };
     try {
-      await assert.rejects(WebDavBackup.save('http://backup.example/dav/', 'alice', 'app-password'), /HTTPS/);
-      await assert.rejects(WebDavBackup.save('https://alice:password@backup.example/dav/', 'alice', 'app-password'), /HTTPS/);
-      await WebDavBackup.save(directory.slice(0, -1), 'alice', 'app-password');
-      const saved = await WebDavBackup.settings();
+      await assert.rejects(saveWebDavConnection('', 'Backup', 'http://backup.example/dav/', 'alice', 'app-password'), /HTTPS/);
+      await assert.rejects(saveWebDavConnection('', 'Backup', 'https://alice:password@backup.example/dav/', 'alice', 'app-password'), /HTTPS/);
+      otherId = (await saveWebDavConnection('', 'Other backup', 'https://other.example/dav/', 'bob', 'other-password')).id;
+      const { id } = await saveWebDavConnection('', 'Backup', directory.slice(0, -1), 'alice', 'app-password');
+      const saved = (await webDavSettings()).find(item => item.id === id);
       assert.equal(saved.directory, directory); assert.equal(saved.username, 'alice'); assert.equal(saved.password, undefined);
-      await assert.rejects(WebDavBackup.save(directory + 'other/', 'alice', ''), /填写 WebDAV 密码/);
-      await WebDavBackup.save(directory, 'alice', '');
+      await assert.rejects(saveWebDavConnection(id, 'Backup', directory + 'other/', 'alice', ''), /填写 WebDAV 密码/);
+      await saveWebDavConnection(id, 'Backup', directory, 'alice', '');
 
       backupAccount.openID = '';
       const beforePicker = pickerCalls;
@@ -1387,41 +1421,267 @@ async function test(name, run) {
       await assert.rejects(readBackup(context, data), /请先登录/);
       await assert.rejects(createBackupFile(context, data), /请先登录/);
       await assert.rejects(readBackupFile(context, context.cacheDir + '/absent', data), /请先登录/);
-      await assert.rejects(WebDavBackup.create(context, data), /请先登录/);
-      await assert.rejects(WebDavBackup.restore(context, data), /请先登录/);
+      await assert.rejects(WebDavBackup.create(context, data, id), /请先登录/);
+      await assert.rejects(WebDavBackup.restore(context, data, id), /请先登录/);
       assert.equal(pickerCalls, beforePicker); assert.equal(sessions, 0);
       assert.deepEqual(fs.readdirSync(nativePath(context.cacheDir)), []);
       backupAccount.openID = openID;
 
       failPut = true;
-      await assert.rejects(WebDavBackup.create(context, data), /PUT.*1007900056/);
+      await assert.rejects(WebDavBackup.create(context, data, id), /PUT.*1007900056/);
       assert.deepEqual(methods.splice(0), ['PUT', 'DELETE']);
       assert.deepEqual([...remote], [[final, previous]]);
       failPut = false; failMove = true;
-      await assert.rejects(WebDavBackup.create(context, data), /MOVE.*207/);
+      await assert.rejects(WebDavBackup.create(context, data, id), /MOVE.*207/);
       assert.deepEqual(methods.splice(0), ['PUT', 'MOVE', 'DELETE']);
       assert.deepEqual([...remote], [[final, previous]]);
       failMove = false;
       data.config.userDocument = 'Restored from WebDAV';
-      await WebDavBackup.create(context, data);
+      await WebDavBackup.create(context, data, id);
       assert.deepEqual(methods.splice(0), ['PUT', 'MOVE']);
-      const restored = await WebDavBackup.restore(context, model.emptyData());
+      const restored = await WebDavBackup.restore(context, model.emptyData(), id);
       assert.equal(restored.config.userDocument, data.config.userDocument);
       assert.deepEqual(methods.splice(0), ['GET']);
       assert.doesNotMatch(remote.get(final).toString('utf8'), /app-password/);
       downloadStatus = 404;
-      await assert.rejects(WebDavBackup.restore(context, model.emptyData()), /没有可恢复的备份/);
+      await assert.rejects(WebDavBackup.restore(context, model.emptyData(), id), /没有可恢复的备份/);
       downloadStatus = 302;
-      await assert.rejects(WebDavBackup.restore(context, model.emptyData()), /最终 HTTPS 目录地址/);
+      await assert.rejects(WebDavBackup.restore(context, model.emptyData(), id), /最终 HTTPS 目录地址/);
       assert.equal(closed, sessions);
       assert.deepEqual(fs.readdirSync(nativePath(context.cacheDir)), []);
-      await WebDavBackup.clear();
-      assert.equal(await WebDavBackup.settings(), undefined);
+      await clearWebDavConnection(id);
+      assert.deepEqual(Array.from(await webDavSettings(), item => item.id), [otherId]);
       assert.equal(remote.size, 1, 'Removing device settings leaves the server backup in place');
     } finally {
+      if (otherId) await clearWebDavConnection(otherId);
       backupAccount.openID = openID;
       webDavSession = undefined;
     }
+  });
+  await test('Nutstore root reuses or creates the backup folder and restores without creating it', async () => {
+    const { WebDavBackup } = load(path.join(source, 'services/WebDavBackup'));
+    const { saveWebDavConnection, webDavSettings, clearWebDavConnection } = load(path.join(source, 'services/WebDavConnection'));
+    const root = '/sandbox/nutstore-app', context = { cacheDir: root + '/cache', getApplicationContext: () => ({ filesDir: root }) };
+    fs.mkdirSync(nativePath(context.cacheDir), { recursive: true });
+    const davRoot = 'https://dav.jianguoyun.com/dav/', folder = davRoot + 'Tinybot/', lower = davRoot + 'tinybot/';
+    const files = new Map(), folders = new Map(), requests = [];
+    let createStatus = 201, id = '';
+    webDavSession = () => ({
+      async fetch(request) {
+        const { method, url, headers } = request;
+        requests.push(method);
+        if (method === 'PROPFIND') {
+          assert.ok(url === folder || url === lower);
+          assert.equal(headers.Depth, '0'); assert.match(request.content, /resourcetype/);
+          return folders.has(url) ? { statusCode: 207, body: Uint8Array.of(folders.get(url) ? 1 : 0).buffer } : { statusCode: 404 };
+        }
+        if (method === 'MKCOL') {
+          assert.equal(url, folder);
+          if (createStatus === 201 || createStatus === 405) folders.set(url, true);
+          return { statusCode: createStatus };
+        }
+        const directory = url.slice(0, url.lastIndexOf('/') + 1);
+        assert.equal(folders.get(directory), true);
+        if (method === 'PUT') {
+          files.set(url, fs.readFileSync(nativePath(request.content.path)));
+          return { statusCode: 201 };
+        }
+        assert.equal(method, 'MOVE');
+        assert.equal(headers.Destination, directory + 'tinybot-latest.tinybot');
+        assert.equal(headers.Overwrite, 'T');
+        files.set(headers.Destination, files.get(url)); files.delete(url);
+        return { statusCode: 204 };
+      },
+      async downloadToFile(url, target) {
+        requests.push('GET');
+        if (!files.has(url)) return { statusCode: 404 };
+        fs.writeFileSync(nativePath(target.file), files.get(url));
+        return { statusCode: 200 };
+      },
+      close() {}
+    });
+    try {
+      const data = model.emptyData();
+      id = (await saveWebDavConnection('', 'Nutstore', davRoot.slice(0, -1), 'alice', 'app-password')).id;
+      assert.equal((await webDavSettings()).find(item => item.id === id).directory, davRoot);
+      await assert.rejects(WebDavBackup.restore(context, data, id), /没有可恢复的备份/);
+      assert.deepEqual(requests.splice(0), ['PROPFIND', 'PROPFIND']);
+      createStatus = 403;
+      await assert.rejects(WebDavBackup.create(context, data, id), /无法创建 WebDAV.*403/);
+      assert.deepEqual(requests.splice(0), ['PROPFIND', 'PROPFIND', 'MKCOL']);
+      assert.equal(files.size, 0);
+      createStatus = 201;
+      await WebDavBackup.create(context, data, id);
+      assert.deepEqual(requests.splice(0), ['PROPFIND', 'PROPFIND', 'MKCOL', 'PUT', 'MOVE']);
+      data.config.userDocument = 'Second snapshot';
+      await WebDavBackup.create(context, data, id);
+      assert.deepEqual(requests.splice(0), ['PROPFIND', 'PUT', 'MOVE']);
+      assert.deepEqual([...files.keys()], [folder + 'tinybot-latest.tinybot']);
+      assert.equal((await WebDavBackup.restore(context, model.emptyData(), id)).config.userDocument, 'Second snapshot');
+      assert.deepEqual(requests.splice(0), ['PROPFIND', 'GET']);
+
+      folders.delete(folder); folders.set(lower, true);
+      await WebDavBackup.create(context, data, id);
+      assert.deepEqual(requests.splice(0), ['PROPFIND', 'PROPFIND', 'PUT', 'MOVE']);
+      assert.ok(files.has(lower + 'tinybot-latest.tinybot'));
+      folders.set(folder, false);
+      await assert.rejects(WebDavBackup.create(context, data, id), /目标不是文件夹/);
+      assert.deepEqual(requests.splice(0), ['PROPFIND']);
+
+      folders.clear(); createStatus = 405;
+      await WebDavBackup.create(context, data, id);
+      assert.deepEqual(requests, ['PROPFIND', 'PROPFIND', 'MKCOL', 'PROPFIND', 'PUT', 'MOVE']);
+      assert.deepEqual(fs.readdirSync(nativePath(context.cacheDir)), []);
+    } finally {
+      await clearWebDavConnection(id);
+      webDavSession = undefined;
+    }
+  });
+  await test('named WebDAV connections preserve legacy grants and isolate accounts at the same URL', async () => {
+    const { webDavSettings, saveWebDavConnection, clearWebDavConnection, webDavShareRoot, withWebDavShare } =
+      load(path.join(source, 'services/WebDavConnection'));
+    const { validateSharedFolders } = load(path.join(source, 'model/SharedFolders'));
+    const directory = 'https://example.com/dav/';
+    const oldGrant = crypto.randomUUID();
+    const alias = 'tinybot.webdav.backup.v1';
+    secrets.set(alias, JSON.stringify({ directory, username: 'legacy-user', password: 'old-password', id: oldGrant }));
+    let id = '';
+    webDavSession = config => ({ auth: config.headers.authorization, close() {} });
+    const authFor = grant => withWebDavShare(grant, directory, async (session, verify) => { await verify(); return session.auth; });
+    const basic = value => 'Basic ' + Buffer.from(value).toString('base64');
+    try {
+      const [legacy] = await webDavSettings();
+      assert.equal(legacy.name, '默认 WebDAV');
+      assert.equal(legacy.grantId, oldGrant);
+      const team = await saveWebDavConnection('', 'Team', directory, 'team-user', 'team-password');
+      id = team.id;
+      assert.deepEqual(Array.from(await webDavSettings(), item => item.name), ['默认 WebDAV', 'Team']);
+      const teamGrant = (await webDavShareRoot(id)).id;
+      validateSharedFolders([
+        { id: 'personal', name: 'Personal', uri: directory, addedAt: 1, webDavConnectionId: oldGrant },
+        { id: 'team', name: 'Team', uri: directory, addedAt: 2, webDavConnectionId: teamGrant }
+      ]);
+      assert.equal(await authFor(oldGrant), basic('legacy-user:old-password'));
+      assert.equal(await authFor(teamGrant), basic('team-user:team-password'));
+      const renamed = await saveWebDavConnection(legacy.id, 'Personal', directory, 'legacy-user', '');
+      assert.equal(renamed.grantId, oldGrant);
+      assert.equal((await webDavSettings())[0].name, 'Personal');
+      assert.equal(await authFor(oldGrant), basic('legacy-user:old-password'));
+
+      const rotated = await saveWebDavConnection(id, 'Team', directory, 'team-user', 'new-password');
+      assert.equal(rotated.grantId, teamGrant);
+      assert.equal(await authFor(teamGrant), basic('team-user:new-password'));
+      await clearWebDavConnection(id);
+      await assert.rejects(authFor(teamGrant), error => error.code === 'SHARED_FOLDER_AUTH_REQUIRED');
+      assert.equal(await authFor(oldGrant), basic('legacy-user:old-password'));
+      assert.deepEqual(Array.from(await webDavSettings(), item => item.name), ['Personal']);
+    } finally {
+      if (id) await clearWebDavConnection(id);
+      await clearWebDavConnection('legacy');
+      webDavSession = undefined;
+    }
+  });
+  await test('cloud folder selection and workspace tools enforce the project grant, connection scope and conditional writes', async () => {
+    const { saveWebDavConnection, clearWebDavConnection, webDavShareRoot } = load(path.join(source, 'services/WebDavConnection'));
+    const { listWebDavDirectory } = load(path.join(source, 'services/WebDavWorkspaceFiles'));
+    const { savedProjectCandidate, importedSessionCandidate } = load(path.join(source, 'services/SessionCandidates'));
+    const { WorkspaceTools } = load(path.join(source, 'services/WorkspaceTools'));
+    const { RuleTools } = load(path.join(source, 'services/RuleTools'));
+    const root = '/sandbox/webdav-shared', base = 'https://backup.example/dav/', directory = base + 'Docs/';
+    fs.mkdirSync(nativePath(root), { recursive: true });
+    const sent = [];
+    let id = '';
+    let etag = '"one"', text = 'first', concurrent = false;
+    const signal = new Cancellation();
+    webDavSession = (config) => {
+      assert.equal(config.requestConfiguration.transfer.autoRedirect, false);
+      return {
+        async fetch(request) {
+          sent.push(request);
+          if (request.method === 'PROPFIND') {
+            const entries = request.url === base ? [
+              { href: '/dav/', directory: true }, { href: '/dav/Docs/', directory: true },
+              { href: '/dav/Other/', directory: true, status: '403 Forbidden' },
+              { href: 'https://other.example/dav/Bad/', directory: true },
+              { href: '/dav/escape%2Fchild/', directory: true }, { href: '/elsewhere/', directory: true }
+            ] : [{ href: '/dav/Docs/', directory: true }, { href: '/dav/Docs/note.txt', directory: false }];
+            assert.equal(request.headers.Depth, '1');
+            return { statusCode: 207, body: Uint8Array.from(Buffer.from(JSON.stringify(entries))).buffer };
+          }
+          assert.equal(request.method, 'PUT'); assert.equal(request.url, directory + 'note.txt');
+          if (concurrent) { etag = '"external"'; text = 'changed outside the app'; }
+          if (request.headers['If-Match'] !== etag) { return { statusCode: 412, headers: {} }; }
+          text = request.content; etag = '"two"';
+          return { statusCode: 204, headers: { ETag: [etag] } };
+        },
+        async downloadToFile(address, target) {
+          sent.push({ method: 'GET', url: address });
+          assert.equal(address, directory + 'note.txt');
+          fs.writeFileSync(nativePath(target.file), text);
+          return { statusCode: 200, headers: { etag: [etag] } };
+        },
+        close() {}, cancel() {}
+      };
+    };
+    try {
+      id = (await saveWebDavConnection('', 'Workspace', base, 'alice', 'app-password')).id;
+      const connection = await webDavShareRoot(id);
+      const listed = await listWebDavDirectory(connection.id, connection.directory, signal);
+      assert.deepEqual(Array.from(listed, row => row.uri), [directory]);
+      const folder = { id: 'mount', name: 'Cloud', uri: directory, addedAt: 1, webDavConnectionId: connection.id };
+      const candidate = savedProjectCandidate(model.emptyData(), 'Cloud project', '',
+        () => ({ id: 'thread', messages: [], title: '', updatedAt: 1 }), () => 'project', undefined, [folder]);
+      assert.equal(candidate.addedFolders.length, 0, 'Cloud grants do not request native file access');
+      const imported = importedSessionCandidate(model.emptyData(), candidate.data, () => 'generated');
+      assert.equal(imported.data.projects[0].sharedFolders.length, 0);
+      const mounts = [folder];
+      let allowed = false, cloudApprovals = 0, sessionApprovals = 0;
+      const { ToolFailure } = load(path.join(source, 'model/ToolFailure'));
+      const { ApprovalTools } = load(path.join(source, 'services/ApprovalTools'));
+      const files = new NativeWorkspaceFiles(root, mounts, () => mounts, async target => {
+        assert.equal(target, 'shared/Cloud/note.txt'); cloudApprovals++;
+        if (!allowed) throw new ToolFailure('USER_DENIED', 'Fixture denied the write', 'respect_user_decision');
+      });
+      const tools = new WorkspaceTools(files);
+      const ask = new ApprovalTools(tools, { request: async () => { sessionApprovals++; } }, 'Fixture',
+        path => path.startsWith('shared/Cloud/'));
+      const remotePath = 'shared/Cloud/note.txt';
+      const call = (name, args) => ({ id: name, type: 'function', function: { name, arguments: JSON.stringify(args) } });
+      assert.equal((await files.list('shared/Cloud', signal)).entries[0].name, 'note.txt');
+      assert.equal(await tools.readTextForCode(remotePath, 20, signal), 'first');
+      const before = sent.length;
+      const write = call('write_file', { path: remotePath, content: 'next' });
+      await assert.rejects(files.readJobInput(remotePath, 20, signal), error => error.code === 'PERMISSION_DENIED');
+      await assert.rejects(files.createJobOutput(remotePath, Uint8Array.of(1), signal), error => error.code === 'FS_INVALID_PATH');
+      await assert.rejects(files.read('shared/Cloud/%2f', signal), error => error.code === 'FS_INVALID_PATH');
+      assert.equal(sent.length, before);
+
+      await assert.rejects(new RuleTools(tools, true).execute(write, signal), error => error.code === 'PERMISSION_DENIED');
+      await assert.rejects(ask.execute(write, signal), error => error.code === 'USER_DENIED');
+      assert.equal(cloudApprovals, 1);
+      assert.equal(sent.length, before);
+      allowed = true;
+      await ask.execute(write, signal);
+      assert.equal(cloudApprovals, 2); assert.equal(sessionApprovals, 0);
+      assert.equal(text, 'next');
+      assert.equal(sent.at(-1).headers['If-Match'], '"one"');
+
+      const full = new WorkspaceTools(new NativeWorkspaceFiles(root, mounts));
+      await assert.rejects(new RuleTools(full, true).execute(write, signal), error => error.code === 'PERMISSION_DENIED');
+      await full.readTextForCode(remotePath, 20, signal);
+      const edit = call('edit_file', { path: remotePath, oldText: 'next', newText: 'full' });
+      await full.execute(edit, signal);
+      assert.equal(text, 'full');
+      assert.equal(cloudApprovals, 2); assert.equal(sessionApprovals, 0);
+      concurrent = true;
+      await assert.rejects(full.execute(write, signal), error => error.code === 'FS_STALE_VERSION');
+      assert.equal(text, 'changed outside the app');
+      await saveWebDavConnection(id, 'Workspace', base, 'bob', 'other-password');
+      const switched = sent.length;
+      await assert.rejects(files.read(remotePath, signal), error => error.code === 'SHARED_FOLDER_AUTH_REQUIRED');
+      assert.equal(sent.length, switched);
+      assert.deepEqual(fs.readdirSync(nativePath(root)), []);
+    } finally { await clearWebDavConnection(id); webDavSession = undefined; }
   });
   await test('backup preserves conversation identities, attachments, files and scoped memory without secrets',async()=>{
     const {exportBackup,readBackup}=load(path.join(source,'services/Backup'));

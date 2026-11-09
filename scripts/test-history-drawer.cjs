@@ -77,6 +77,7 @@ const CompactList = probe('views/ThreadList', 'ThreadList',
 const compactActions = [];
 const compact = Object.assign(new CompactList(), {
   active: true, workbench: true, panelHeight: 0, collapseHistory: true, searchOpen: true, query: '你好',
+  cloudPath: [], choosingCloudConnection: false,
   appearance: {}, app: {saveError:'',error:'',providerProfiles:[],productivity:{}},
   locked: () => false, filtered: () => [], sections: () => [], workbenchMenu() {},
   onNewChat: () => compactActions.push('new'), onFiles: () => compactActions.push('files'),

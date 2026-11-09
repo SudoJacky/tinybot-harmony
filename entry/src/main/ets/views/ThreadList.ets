@@ -9,8 +9,11 @@ import { util } from '@kit.ArkTS';
 import { ChatViewModel, ThreadViewModel } from '../viewmodel/ChatViewModel';
 import { MAX_PROJECT_SHARED_FOLDERS, SharedFolder, sharedFolderNameFromUri, uniqueSharedFolderName } from '../model/SharedFolders';
 import { ProjectFolderAccess } from '../services/ProjectFolderAccess';
-import { Btn, Font, Motion, Radius, Space } from '../common/Theme';
-import { Banner, IconButton, Segmented } from '../common/Widgets';
+import { Cancellation } from '../services/Cancellation';
+import { webDavSettings, webDavShareRoot, WebDavSettings } from '../services/WebDavConnection';
+import { listWebDavDirectory, WebDavDirectoryEntry } from '../services/WebDavWorkspaceFiles';
+import { Btn, Font, Motion, Radius, Space, Styles } from '../common/Theme';
+import { Banner, BottomBar, EmptyState, GroupCard, IconButton, NavRow, RowDivider, SectionHeader, Segmented } from '../common/Widgets';
 
 class ThreadSection {
   id: string;
@@ -196,18 +199,27 @@ export struct ThreadList {
   @State private selectedIds: string[] = [];
   @State private visibleCounts: Record<string, number> = {};
   @State private collapsedProjects: string[] = [];
-  @State private projectEditing: boolean = false;
+  @State @Watch('projectEditorChanged') private projectEditing: boolean = false;
   @State private projectId: string = '';
   @State private projectName: string = '';
   @State private projectInstructions: string = '';
   @State private projectFolders: SharedFolder[] = [];
   @State private projectFolderError: string = '';
+  @State private webDavConnections: WebDavSettings[] = [];
+  @State private choosingCloudConnection: boolean = false;
+  @State private cloudPath: WebDavDirectoryEntry[] = [];
+  @State private cloudEntries: WebDavDirectoryEntry[] = [];
+  @State private cloudLoading: boolean = false;
+  @State private cloudListed: boolean = false;
+  private cloudConnectionId: string = '';
+  private cloudRequest?: Cancellation;
+  private projectConnectionLoad: number = 0;
 
   aboutToAppear(): void {
     this.mounted = true;
     if (this.searchRequest > 0) { this.searchRequested(); }
   }
-  aboutToDisappear(): void { this.mounted = false; this.focusRequest++; }
+  aboutToDisappear(): void { this.mounted = false; this.focusRequest++; this.closeCloudPicker(); }
   private searchAvailabilityChanged(): void { if (!this.active || !this.foreground) { this.focusRequest++; } }
   private searchVisibilityChanged(): void { if (!this.searchOpen) { this.focusRequest++; } }
 
@@ -289,8 +301,105 @@ export struct ThreadList {
     const project = this.app.projects.find((item) => item.id === id);
     this.projectId = id; this.projectName = project?.name || ''; this.projectInstructions = project?.instructions || '';
     this.projectFolders = (project?.sharedFolders || []).slice(); this.projectFolderError = '';
+    this.closeCloudPicker();
+    this.webDavConnections = [];
     this.projectEditing = true;
+    const load = ++this.projectConnectionLoad;
+    webDavSettings().then((settings) => {
+      if (this.projectEditing && this.projectConnectionLoad === load) { this.webDavConnections = settings; }
+    }).catch((error: Error) => {
+      if (this.projectEditing && this.projectConnectionLoad === load) { this.projectFolderError = error.message; }
+    });
   }
+
+  private openCloudPicker(): void {
+    if (this.locked() || this.cloudLoading) { return; }
+    if (this.webDavConnections.length === 1) { this.openCloudConnection(this.webDavConnections[0]); }
+    else { this.choosingCloudConnection = true; }
+  }
+
+  private async openCloudConnection(connection: WebDavSettings): Promise<void> {
+    if (this.locked() || this.cloudLoading) { return; }
+    const pending = new Cancellation();
+    this.cloudRequest = pending;
+    this.cloudLoading = true;
+    this.projectFolderError = '';
+    try {
+      const root = await webDavShareRoot(connection.id);
+      if (!this.projectEditing || this.cloudRequest !== pending) { return; }
+      this.cloudConnectionId = root.id;
+      connection.grantId = root.id;
+      this.choosingCloudConnection = false;
+      await this.browseCloud([{ name: connection.name, uri: root.directory, kind: 'directory' }]);
+    } catch (error) {
+      if (this.cloudRequest === pending) { this.projectFolderError = (error as Error).message; }
+    } finally {
+      if (this.cloudRequest === pending) { this.cloudLoading = false; }
+    }
+  }
+
+  private async browseCloud(path: WebDavDirectoryEntry[]): Promise<void> {
+    this.cloudRequest?.cancel();
+    const request = new Cancellation();
+    this.cloudRequest = request;
+    this.cloudPath = path;
+    this.cloudEntries = [];
+    this.cloudListed = false;
+    this.cloudLoading = true;
+    this.projectFolderError = '';
+    try {
+      const entries = await listWebDavDirectory(this.cloudConnectionId, path[path.length - 1].uri, request);
+      if (this.cloudRequest !== request) { return; }
+      this.cloudEntries = entries.filter((entry) => entry.kind === 'directory');
+      this.cloudListed = true;
+    } catch (error) {
+      if (this.cloudRequest === request) { this.projectFolderError = (error as Error).message; }
+    } finally {
+      if (this.cloudRequest === request) { this.cloudLoading = false; }
+    }
+  }
+
+  private closeCloudPicker(): void {
+    const request = this.cloudRequest;
+    this.cloudRequest = undefined;
+    request?.cancel();
+    this.cloudPath = []; this.cloudEntries = []; this.cloudListed = false; this.cloudLoading = false;
+    this.choosingCloudConnection = false;
+    this.projectFolderError = '';
+  }
+
+  private projectEditorChanged(): void { if (!this.projectEditing) { this.closeCloudPicker(); } }
+
+  private cloudFolderAdded(): boolean {
+    const current = this.cloudPath[this.cloudPath.length - 1];
+    return current !== undefined && this.projectFolders.some((folder) =>
+      folder.uri === current.uri && folder.webDavConnectionId === this.cloudConnectionId);
+  }
+
+  private cloudBack(): void {
+    if (this.cloudPath.length > 1) { this.browseCloud(this.cloudPath.slice(0, -1)); return; }
+    this.closeCloudPicker();
+    this.choosingCloudConnection = this.webDavConnections.length > 1;
+  }
+
+  private projectFolderSource(folder: SharedFolder): string {
+    if (folder.webDavConnectionId === undefined) { return t('本地文件夹'); }
+    return this.webDavConnections.find((connection) => connection.grantId === folder.webDavConnectionId)?.name || t('WebDAV');
+  }
+
+  private selectCloudFolder(): void {
+    if (!this.cloudListed || !this.cloudPath.length || this.locked()) { return; }
+    const chosen = this.cloudPath[this.cloudPath.length - 1];
+    if (this.cloudFolderAdded()) { return; }
+    if (this.projectFolders.length >= MAX_PROJECT_SHARED_FOLDERS) { return; }
+    const name = this.cloudPath.length === 1 ? t('WebDAV 根目录') : chosen.name;
+    this.projectFolders = this.projectFolders.concat({
+      id: util.generateRandomUUID(), name: uniqueSharedFolderName(name, this.projectFolders),
+      uri: chosen.uri, addedAt: Date.now(), webDavConnectionId: this.cloudConnectionId
+    });
+    this.closeCloudPicker();
+  }
+
   private async addProjectFolders(): Promise<void> {
     if (this.locked()) { return; }
     if (this.projectFolders.length >= MAX_PROJECT_SHARED_FOLDERS) {
@@ -323,57 +432,172 @@ export struct ThreadList {
 
   @Builder
   projectFolderRow(folder: SharedFolder) {
-    Row({ space: Space.sm }) {
-      SymbolGlyph($r('sys.symbol.folder')).fontSize(18).fontColor([this.appearance.accent])
+    Row({ space: Space.md }) {
+      SymbolGlyph(folder.webDavConnectionId === undefined ? $r('sys.symbol.folder') : $r('sys.symbol.cloud'))
+        .fontSize(20).fontColor([this.appearance.accent]).width(28).accessibilityLevel('no')
       Column({ space: 2 }) {
-        Text(folder.name).fontFamily(this.appearance.fontFamily).fontSize(14).maxLines(1)
+        Text(folder.name).fontFamily(this.appearance.fontFamily).fontSize(Font.body).maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
-        Text(t('项目内可读写')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
+        Text(this.projectFolderSource(folder)).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          .fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
       Button(t('移除')).fontFamily(this.appearance.fontFamily).id('project-remove-folder-' + folder.id)
-        .attributeModifier(Btn.textSmall).enabled(!this.locked()).onClick(() => this.removeProjectFolder(folder.id))
-    }.width('100%').padding({ left: Space.sm, right: Space.sm, top: 8, bottom: 8 })
-    .backgroundColor($r('app.color.surface_variant')).borderRadius(Radius.sm)
+        .attributeModifier(Btn.textSmall).constraintSize({ minHeight: 44 }).accessibilityText(t('移除') + ' ' + folder.name)
+        .enabled(!this.locked()).onClick(() => this.removeProjectFolder(folder.id))
+    }.width('100%').constraintSize({ minHeight: 60 }).padding({ left: Space.lg, right: Space.md, top: 6, bottom: 6 })
+  }
+
+  @Builder
+  cloudConnectionPicker() {
+    Column() {
+      Row({ space: Space.md }) {
+        IconButton({ icon: $r('sys.symbol.chevron_left'), label: t('返回项目'), compId: 'project-cloud-connection-back',
+          onTap: () => this.closeCloudPicker() })
+      }.width('100%').padding({ left: Space.md, right: Space.lg, bottom: Space.sm })
+      Scroll() {
+        Column({ space: Space.md }) {
+          GroupCard() {
+            Column() {
+              ForEach(this.webDavConnections, (connection: WebDavSettings, index: number) => {
+                if (index > 0) { RowDivider() }
+                NavRow({ title: connection.name, subtitle: connection.username + ' · ' + connection.directory,
+                  icon: $r('sys.symbol.cloud'), compId: 'project-cloud-connection-' + index,
+                  disabled: this.cloudLoading, onTap: () => this.openCloudConnection(connection) })
+              }, (connection: WebDavSettings) => connection.id)
+            }
+          }
+          if (this.projectFolderError) { Banner({ text: this.projectFolderError }) }
+        }.width('100%').padding({ left: Space.lg, right: Space.lg, bottom: Space.lg })
+      }.width('100%').layoutWeight(1).align(Alignment.Top)
+    }.width('100%').height('100%')
+  }
+
+  @Builder
+  cloudFolderPicker() {
+    Column() {
+      Row({ space: Space.md }) {
+        IconButton({ icon: $r('sys.symbol.chevron_left'), compId: 'project-cloud-back',
+          label: this.cloudPath.length > 1 ? t('上一级') : this.webDavConnections.length > 1 ? t('返回连接列表') : t('返回项目'),
+          onTap: () => this.cloudBack() })
+        Column({ space: 3 }) {
+          Text(this.cloudPath[this.cloudPath.length - 1]?.name || t('WebDAV 根目录'))
+            .fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_primary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          if (this.cloudPath.length > 1) {
+            Text(this.cloudPath.slice(0, -1).map((entry: WebDavDirectoryEntry) => entry.name).join(' / '))
+              .fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+        Button(t('取消')).attributeModifier(Btn.textSmall).constraintSize({ minHeight: 44 }).onClick(() => this.closeCloudPicker())
+      }.width('100%').padding({ left: Space.md, right: Space.lg, bottom: Space.sm })
+      Scroll() {
+        Column({ space: Space.md }) {
+          if (this.cloudLoading) {
+            Row({ space: Space.sm }) {
+              LoadingProgress().width(20).height(20).color(this.appearance.accent)
+              Text(t('正在读取云端目录…')).fontFamily(this.appearance.fontFamily).fontSize(Font.small)
+                .fontColor($r('app.color.text_secondary'))
+            }.width('100%').justifyContent(FlexAlign.Center).padding(Space.xl)
+          } else if (this.projectFolderError) {
+            Banner({ text: this.projectFolderError, actionLabel: t('重试'), actionId: 'project-cloud-retry',
+              onAction: () => this.browseCloud(this.cloudPath.slice()) })
+          } else if (this.cloudEntries.length === 0) {
+            EmptyState({ icon: $r('sys.symbol.folder'), title: t('没有子文件夹'), caption: t('可以将当前文件夹添加到项目。') })
+          } else {
+            GroupCard() {
+              Column() {
+                ForEach(this.cloudEntries, (entry: WebDavDirectoryEntry, index: number) => {
+                  if (index > 0) { RowDivider() }
+                  NavRow({ title: entry.name, icon: $r('sys.symbol.folder'), compId: 'project-cloud-folder-' + index,
+                    onTap: () => this.browseCloud(this.cloudPath.concat(entry)) })
+                }, (entry: WebDavDirectoryEntry) => entry.uri)
+              }
+            }
+          }
+        }.width('100%').padding({ left: Space.lg, right: Space.lg, top: Space.sm, bottom: Space.lg })
+      }.width('100%').layoutWeight(1).align(Alignment.Top)
+      BottomBar({ sheet: true }) {
+        Button(this.cloudFolderAdded() ? t('已添加到项目') : t('添加当前文件夹')).id('project-cloud-select')
+          .attributeModifier(Btn.primary).width('100%')
+          .enabled(this.cloudListed && !this.cloudFolderAdded() && !this.app.sharedBusy).onClick(() => this.selectCloudFolder())
+      }
+    }.width('100%').height('100%')
   }
 
   @Builder
   projectEditor() {
-    Scroll() {
-      Column({ space: Space.md }) {
-        TextInput({ text: this.projectName, placeholder: t('项目名称') }).fontFamily(this.appearance.fontFamily).id('project-name').maxLength(80)
-          .onChange((value: string) => { this.projectName = value; })
-        TextArea({ text: this.projectInstructions, placeholder: t('项目说明与约定（可选）') }).fontFamily(this.appearance.fontFamily).id('project-instructions')
-          .height(220).maxLength(16000).onChange((value: string) => { this.projectInstructions = value; })
-        Row({ space: Space.sm }) {
-          Text(t('共享文件夹')).fontFamily(this.appearance.fontFamily).fontSize(Font.small).fontWeight(FontWeight.Medium)
-            .layoutWeight(1).fontColor($r('app.color.text_primary'))
-          Button(t('添加文件夹')).fontFamily(this.appearance.fontFamily).id('project-add-folder')
-            .attributeModifier(Btn.textSmall).enabled(!this.locked() && this.projectFolders.length < MAX_PROJECT_SHARED_FOLDERS)
-            .onClick(() => this.addProjectFolders())
-        }.width('100%')
-        ForEach(this.projectFolders, (folder: SharedFolder) => { this.projectFolderRow(folder) },
-          (folder: SharedFolder) => folder.id)
-        Text(t('项目内的会话可以读写这些文件夹。')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
-        Text(t('重装应用或撤销目录授权后，请移除并重新添加共享文件夹。')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
-        if (this.projectFolderError.length > 0) { Banner({ text: this.projectFolderError }) }
-        Text(t('项目内的会话共享文件和项目说明，各自保留对话历史。')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
-        if (this.app.error) { Banner({ text: this.app.error }) }
-        Button(t('保存')).fontFamily(this.appearance.fontFamily).id('project-save').attributeModifier(Btn.primary).width('100%')
-          .enabled(!this.app.sharedBusy && !this.app.saveError && this.projectName.trim().length > 0)
-          .onClick(async () => {
-            const creating = !this.projectId;
-            if (await this.app.saveProject(this.projectName, this.projectInstructions, this.projectId || undefined, this.projectFolders)) {
-              const id = this.projectId || this.app.active.projectId || '';
-              // A newly created project must be visible even when launched from search or archives.
-              if (creating) { this.query = ''; this.archived = false; this.visibleCounts = {}; }
-              this.collapsedProjects = this.collapsedProjects.filter((item) => item !== id);
-              this.projectEditing = false;
+    if (this.cloudPath.length > 0) {
+      this.cloudFolderPicker()
+    } else if (this.choosingCloudConnection) {
+      this.cloudConnectionPicker()
+    } else {
+      Column() {
+        Scroll() {
+          Column() {
+            SectionHeader({ title: t('项目信息') })
+            GroupCard() {
+              Column({ space: Space.sm }) {
+                Text(t('项目名称')).fontFamily(this.appearance.fontFamily).fontSize(Font.small)
+                  .fontColor($r('app.color.text_secondary')).width('100%')
+                TextInput({ text: this.projectName, placeholder: t('项目名称') }).id('project-name').maxLength(80)
+                  .attributeModifier(Styles.input).accessibilityText(t('项目名称'))
+                  .onChange((value: string) => { this.projectName = value; })
+                Text(t('项目说明与约定（可选）')).fontFamily(this.appearance.fontFamily).fontSize(Font.small)
+                  .fontColor($r('app.color.text_secondary')).width('100%').margin({ top: Space.xs })
+                TextArea({ text: this.projectInstructions }).fontFamily(this.appearance.fontFamily).id('project-instructions')
+                  .fontSize(Font.body).height(92).maxLength(16000).borderRadius(Radius.sm)
+                  .backgroundColor($r('app.color.surface_variant')).fontColor($r('app.color.text_primary'))
+                  .accessibilityText(t('项目说明与约定（可选）'))
+                  .onChange((value: string) => { this.projectInstructions = value; })
+              }.width('100%').padding(Space.md)
             }
-          })
-      }.width('100%').padding(Space.lg)
-    }.width('100%').height('100%').align(Alignment.TopStart)
+            SectionHeader({ title: t('共享文件夹'),
+              caption: this.webDavConnections.length > 0 || this.projectFolders.some((folder) => folder.webDavConnectionId !== undefined) ?
+                t('云端文件夹仅对本项目开放，写入遵循会话的工具审批设置。') : t('项目内的会话可以读写这些文件夹。') })
+            GroupCard() {
+              Column() {
+                ForEach(this.projectFolders, (folder: SharedFolder) => {
+                  this.projectFolderRow(folder)
+                  RowDivider()
+                }, (folder: SharedFolder) => folder.id)
+                NavRow({ title: t('添加本地文件夹'), icon: $r('sys.symbol.folder_badge_plus'), compId: 'project-add-folder',
+                  disabled: this.locked() || this.projectFolders.length >= MAX_PROJECT_SHARED_FOLDERS, onTap: () => this.addProjectFolders() })
+                if (this.webDavConnections.length > 0) {
+                  RowDivider()
+                  NavRow({ title: this.cloudLoading ? t('正在读取云端目录…') : t('添加 WebDAV'),
+                    icon: $r('sys.symbol.cloud'), compId: 'project-add-cloud-folder',
+                    disabled: this.app.sharedBusy || this.cloudLoading || this.projectFolders.length >= MAX_PROJECT_SHARED_FOLDERS,
+                    onTap: () => this.openCloudPicker() })
+                }
+              }
+            }
+            if (this.projectFolders.length >= MAX_PROJECT_SHARED_FOLDERS) {
+              Text(t('每个项目最多添加 {0} 个共享文件夹。', [MAX_PROJECT_SHARED_FOLDERS]))
+                .fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+                .width('100%').margin({ top: Space.sm })
+            }
+            if (this.projectFolderError.length > 0) { Banner({ text: this.projectFolderError }).margin({ top: Space.sm }) }
+            if (this.app.error) { Banner({ text: this.app.error }).margin({ top: Space.sm }) }
+          }.width('100%').padding({ left: Space.lg, right: Space.lg, bottom: Space.lg })
+        }.width('100%').layoutWeight(1).align(Alignment.Top)
+        BottomBar({ sheet: true }) {
+          Button(t('保存')).fontFamily(this.appearance.fontFamily).id('project-save').attributeModifier(Btn.primary).width('100%')
+            .enabled(!this.app.sharedBusy && !this.app.saveError && this.projectName.trim().length > 0)
+            .onClick(async () => {
+              const creating = !this.projectId;
+              if (await this.app.saveProject(this.projectName, this.projectInstructions, this.projectId || undefined, this.projectFolders)) {
+                const id = this.projectId || this.app.active.projectId || '';
+                // A newly created project must be visible even when launched from search or archives.
+                if (creating) { this.query = ''; this.archived = false; this.visibleCounts = {}; }
+                this.collapsedProjects = this.collapsedProjects.filter((item) => item !== id);
+                this.projectEditing = false;
+              }
+            })
+        }
+      }.width('100%').height('100%')
+    }
   }
-
 
   private sections(threads: ThreadViewModel[]): ThreadSection[] {
     const result = this.app.projects.map((project) => new ThreadSection(project.id, project.name));
@@ -638,7 +862,9 @@ export struct ThreadList {
     }
     .padding({ left: Space.md, right: Space.md, top: Space.sm, bottom: Space.sm })
     .height('100%').width('100%').backgroundColor($r('app.color.page_background'))
-    .bindSheet($$this.projectEditing, this.projectEditor(), { radius: Radius.sheet, title: { title: this.projectId ? t('编辑项目') : t('新建项目') },
+    .bindSheet($$this.projectEditing, this.projectEditor(), { radius: Radius.sheet, title: {
+      title: this.cloudPath.length > 0 ? t('选择云端文件夹') : this.choosingCloudConnection ? t('选择 WebDAV 连接') :
+        this.projectId ? t('编辑项目') : t('新建项目') },
       detents: [SheetSize.LARGE], dragBar: true, keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY })
   }
 }

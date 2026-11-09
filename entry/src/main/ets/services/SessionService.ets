@@ -7,7 +7,7 @@ import { configurationIssues } from '../model/ConfigurationCompatibility';
 import { isSupportedProtocol } from '../model/ProviderEndpoint';
 import { ToolExecution, toolReceipts } from '../model/Agent';
 import { projectFor, workspaceIdFor, validateProjects, projectContext } from '../model/Project';
-import { SharedFolder } from '../model/SharedFolders';
+import { cloudSharedFolder, SharedFolder } from '../model/SharedFolders';
 import { proposeSessionMemory, reviewSessionMemory, addMemoryDraft } from './SessionMemory';
 import { McpSettings, McpSettingsCommand, McpSettingsResult, McpSettingsHost } from './McpSettings';
 import { t } from '../model/I18n';
@@ -1133,7 +1133,8 @@ export class SessionService {
 
   private withToolApproval(thread: ThreadData, tools: AgentTools): AgentTools {
     return this.approval && toolApprovalMode(thread.toolApprovalMode) === 'ask' ?
-      new ApprovalTools(tools, this.approval, thread.title) : tools;
+      new ApprovalTools(tools, this.approval, thread.title,
+        (path) => cloudSharedFolder(projectFor(this.data, thread)?.sharedFolders, path) !== undefined) : tools;
   }
 
   private checkResourceMutation(thread: ThreadData, cancellation: Cancellation): void {

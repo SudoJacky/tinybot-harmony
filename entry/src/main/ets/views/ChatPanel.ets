@@ -1446,44 +1446,63 @@ export struct ChatPanel {
       this.thread.modelRef?.modelId || '', this.displayedEffort());
   }
 
+  private async applyToolApprovalMode(mode: ToolApprovalMode, threadId: string): Promise<void> {
+    if (this.app.active.id !== threadId || mode === this.thread.toolApprovalMode) { return; }
+    if (!await this.app.setToolApprovalMode(mode) && this.app.error) {
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: this.app.error });
+    }
+  }
+
+  private selectToolApprovalMode(mode: ToolApprovalMode): void {
+    this.showToolApprovalMode = false;
+    if (mode === this.thread.toolApprovalMode) { return; }
+    const threadId = this.thread.id;
+    if (mode === 'ask') { this.applyToolApprovalMode(mode, threadId); return; }
+    this.getUIContext().showAlertDialog({
+      systemMaterial: this.appearance.surface, title: t('开启完全访问？'),
+      message: t('此会话会直接执行已授权的操作，包括写入项目共享目录。只读模式和禁用的工具仍然生效。'),
+      primaryButton: { value: t('取消'), action: () => {} },
+      secondaryButton: { value: t('开启完全访问'), action: () => this.applyToolApprovalMode(mode, threadId) }
+    });
+  }
+
   @Builder
   toolApprovalOption(mode: ToolApprovalMode, description: string) {
     Button({ type: ButtonType.Normal }) {
       Row({ space: 12 }) {
+        SymbolGlyph(mode === 'ask' ? $r('sys.symbol.lock') : $r('sys.symbol.bolt')).fontSize(18).width(20)
+          .fontColor([$r('sys.color.icon_primary')]).accessibilityLevel('no')
         Column({ space: 4 }) {
-          Text(toolApprovalModeName(mode)).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('sys.color.font_primary'))
-          Text(description).fontSize(12).fontColor($r('sys.color.font_secondary'))
+          Text(toolApprovalModeName(mode)).fontFamily(this.appearance.fontFamily).fontSize(14)
+            .fontWeight(FontWeight.Medium).fontColor($r('sys.color.font_primary'))
+          Text(description).fontFamily(this.appearance.fontFamily).fontSize(12).lineHeight(17)
+            .fontColor($r('sys.color.font_secondary'))
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-        if (this.thread.toolApprovalMode === mode) {
-          SymbolGlyph($r('sys.symbol.checkmark')).fontSize(16).fontColor([$r('sys.color.icon_primary')]).accessibilityLevel('no')
-        }
+        SymbolGlyph($r('sys.symbol.checkmark')).fontSize(16).width(18).fontColor([$r('sys.color.icon_primary')])
+          .visibility(this.thread.toolApprovalMode === mode ? Visibility.Visible : Visibility.Hidden).accessibilityLevel('no')
       }.width('100%')
-    }.id('tool-approval-' + mode).width('100%').constraintSize({ minHeight: 48 }).padding(10)
+    }.id('tool-approval-' + mode).width('100%').constraintSize({ minHeight: 52 }).padding({ left: 12, right: 12, top: 10, bottom: 10 })
       .backgroundColor(Color.Transparent)
       .accessibilityText(toolApprovalModeName(mode) + '。' + description)
       .accessibilitySelected(this.thread.toolApprovalMode === mode)
-      .onClick(async () => {
-        this.showToolApprovalMode = false;
-        if (mode !== this.thread.toolApprovalMode && !await this.app.setToolApprovalMode(mode) && this.app.error) {
-          this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: this.app.error });
-        }
-      })
+      .onClick(() => this.selectToolApprovalMode(mode))
   }
 
   @Builder
   toolApprovalMenu() {
     Column() {
       materialMenuHeader(t('工具审批'))
-      this.toolApprovalOption('ask', t('调用 MCP 或执行会产生变更的操作前询问。'))
-      this.toolApprovalOption('full', t('直接执行此会话已获授权的工具。'))
-    }.width(272).padding(8).alignItems(HorizontalAlign.Start)
+      this.toolApprovalOption('ask', t('写入共享目录或调用需审批的工具前询问。'))
+      this.toolApprovalOption('full', t('直接执行已授权的操作，包括写入共享目录。'))
+    }.width(280).padding(8).alignItems(HorizontalAlign.Start)
   }
 
   @Builder
   toolApprovalButton() {
     Button({ type: ButtonType.Capsule }) {
       Row({ space: 5 }) {
-        SymbolGlyph($r('sys.symbol.lock')).fontSize(14).fontColor([$r('app.color.text_secondary')])
+        SymbolGlyph(this.thread.toolApprovalMode === 'full' ? $r('sys.symbol.bolt') : $r('sys.symbol.lock'))
+          .fontSize(14).fontColor([this.thread.toolApprovalMode === 'full' ? this.appearance.accent : $r('app.color.text_secondary')])
         Text(toolApprovalModeName(this.thread.toolApprovalMode)).fontFamily(this.appearance.fontFamily)
           .fontSize(12).maxLines(1).fontColor($r('app.color.text_secondary'))
         SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(9).fontColor([$r('app.color.text_secondary')])
