@@ -34,7 +34,7 @@ export struct MarkdownView {
     const next = update.blocks.map((block: MarkdownBlock, offset: number): MarkdownBlock => {
       const previous = this.blocks[update.start + offset];
       return previous && previous.kind === block.kind && previous.text === block.text && previous.level === block.level &&
-        JSON.stringify(previous.rows) === JSON.stringify(block.rows) ? previous : block;
+        previous.fenceClosed === block.fenceClosed && JSON.stringify(previous.rows) === JSON.stringify(block.rows) ? previous : block;
     });
     this.blocks.splice(update.start, this.blocks.length - update.start, ...next);
     this.syncChunks(Math.floor(update.start / MARKDOWN_CHUNK_BLOCKS));

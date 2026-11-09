@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' resource:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+  <style>
+    html, body { margin: 0; background: transparent; }
+    #diagram { padding: 12px; font: 13px system-ui, sans-serif; }
+    #diagram > svg { display: block; max-width: 100%; height: auto; margin-inline: auto; }
+    #diagram p { margin: 0; color: #a32222; }
+    #diagram.dark p { color: #ffa7a7; }
+    #diagram pre { margin: 4px 0 0; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+    #diagram.dark pre { color: #eee; }
+    #diagram.unselectable { user-select: none; }
+  </style>
+</head>
+<body>
+  <div id="diagram"></div>
+  <script src="mermaid.min.js"></script>
+  <script src="host.js"></script>
+</body>
+</html>

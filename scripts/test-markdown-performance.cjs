@@ -11,7 +11,7 @@ function load(file) {
 }
 (async () => {
 const flush = async () => { await Promise.resolve(); };
-const { MarkdownDocument, markdownBlocks } = load('model/Markdown');
+const { isMermaidBlock, MarkdownDocument, markdownBlocks } = load('model/Markdown');
 const { MarkdownChunkModel, MARKDOWN_CHUNK_BLOCKS } = load('viewmodel/MarkdownChunkModel');
 const { StreamReveal } = load('model/StreamReveal');
 const { highlightCode } = load('model/CodeHighlight');
@@ -21,6 +21,7 @@ const documents = [
   '# 标题\r\n\r\n普通 **粗体** 和 `代码`🙂\n\n> 引用\n> 后续\n\n- [x] 完成\n  2. 嵌套\n---\n',
   '前文\n\n| Name | Value |\n| :--- | ---: |\n| A | 中文🙂 |\n\n尾部',
   '开头\n```ts\nconst x = 1;\n// 注释\n```\n尾部\n~~~py\nprint("你好")\n~~~',
+  '前文\n```mermaid\nflowchart LR\n  A --> B\n```\n后文',
   'A|B\n---|---\nx|y\n\n>quote\n\ntext\n\n',
   'A|B\n:---|---\nx|y\n',
   '前文\n\n![架构图](https://example.com/a.png)\n\n尾部 **粗体**\n'
@@ -58,6 +59,7 @@ function methods(file, name, names) {
 }
 let parseCalls = 0, highlightChars = 0, clock = 1000, timers = new Map(), nextTimer = 0;
 const sandbox = { Diagnostics: load('model/Diagnostics').Diagnostics, exports: {}, StreamReveal, MarkdownDocument, MarkdownChunkModel, MARKDOWN_CHUNK_BLOCKS,
+  isMermaidBlock,
   hasMath: load('model/MathContent').hasMath,
   markdownSpans: text => { parseCalls++; return load('model/Markdown').markdownSpans(text); },
   highlightCode: (text, language) => { highlightChars += text.length; return highlightCode(text, language); },
@@ -124,6 +126,15 @@ documentView.content += ' grows\n\nfourth'; documentView.refresh();
 assert.equal(documentView.chunks[0], first); assert.equal(first.blocks[0], firstBlock, 'stable prefix must retain its block identity');
 assert.equal(documentView.blocks.length, 4);
 documentView.content = ''; documentView.refresh(); assert.equal(documentView.chunks.length, 0);
+documentView.content = '~~~Mermaid\nflowchart LR\nA --> B\n'; documentView.refresh();
+const pendingDiagram = documentView.chunks[0].blocks[0];
+assert.equal(isMermaidBlock(pendingDiagram), false);
+documentView.content += '~~~'; documentView.refresh();
+const closedDiagram = documentView.chunks[0].blocks[0];
+assert.equal(isMermaidBlock(closedDiagram), true);
+assert.notEqual(closedDiagram, pendingDiagram, 'Closing a fence updates the chunk even when the source does not change');
+assert.equal(isMermaidBlock(markdownBlocks('```mermaid\nflowchart LR\nA --> B\n```extra')[0]), false);
+assert.equal(isMermaidBlock(markdownBlocks('```js\nflowchart LR\nA --> B\n```')[0]), false);
 // Stream through several group boundaries using the actual document view.
 const longSource = (paragraph + '\n\n').repeat(100);
 for (let end = 128; end < longSource.length + 128; end += 128) {

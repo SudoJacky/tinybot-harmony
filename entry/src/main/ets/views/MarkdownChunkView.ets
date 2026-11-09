@@ -4,7 +4,7 @@ import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
 import { ColorMetrics } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
-import { MarkdownBlock, MarkdownSpan, markdownSpans } from '../model/Markdown';
+import { isMermaidBlock, MarkdownBlock, MarkdownSpan, markdownSpans } from '../model/Markdown';
 import { highlightCode } from '../model/CodeHighlight';
 import { Radius, Space } from '../common/Theme';
 import { RevealSpan, StreamReveal } from '../model/StreamReveal';
@@ -12,6 +12,7 @@ import { MarkdownChunkModel } from '../viewmodel/MarkdownChunkModel';
 import { ImageViewer } from './ImageViewer';
 import { hasMath } from '../model/MathContent';
 import { MathView } from './MathView';
+import { MermaidView } from './MermaidView';
 
 // Long code blocks start collapsed so one answer does not push the conversation off screen.
 const CODE_PREVIEW_LINES: number = 18;
@@ -86,7 +87,7 @@ export struct MarkdownChunkView {
             this.reveal.update(key, this.inlineSpans(cell).map((span: MarkdownSpan) => span.text).join(''), now, animate);
           });
         });
-      } else if (block.kind !== 'image') {
+      } else if (block.kind !== 'image' && !isMermaidBlock(block)) {
         const key = `${index}`; keys.push(key);
         const text = block.kind === 'code' ? block.text : this.inlineSpans(block.text).map((span: MarkdownSpan) => span.text).join('');
         this.reveal.update(key, text, now, animate);
@@ -107,7 +108,7 @@ export struct MarkdownChunkView {
       if (index >= this.model.blocks.length) { this.highlighted.delete(index); }
     });
     this.codeTokens = this.model.blocks.map((block: MarkdownBlock, index: number): MarkdownSpan[] => {
-      if (block.kind !== 'code') { this.highlighted.delete(index); return []; }
+      if (block.kind !== 'code' || isMermaidBlock(block)) { this.highlighted.delete(index); return []; }
       const text = this.codeShown(block, index); const key = block.rows[0][0] + ':' + text;
       if (this.highlighted.get(index) === key) { return this.codeTokens[index]; }
       this.highlighted.set(index, key);
@@ -235,8 +236,7 @@ export struct MarkdownChunkView {
   }
 
   @Builder
-  codeBlock(block: MarkdownBlock, index: number) {
-    Column() {
+  codeHeader(index: number) {
       Row({ space: Space.xs }) {
         Text(this.model.blocks[index].rows[0][0] || 'code').fontSize(12).fontFamily('monospace').layoutWeight(1).maxLines(1)
           .fontColor($r('app.color.text_secondary'))
@@ -250,6 +250,20 @@ export struct MarkdownChunkView {
         .accessibilityText(t("复制代码")).onClick(() => this.copy(this.model.blocks[index].text, index))
       }.width('100%').padding({ left: Space.md, right: 4 }).height(38)
       Divider().strokeWidth(0.5).color($r('app.color.divider'))
+  }
+
+  @Builder
+  mermaidBlock(index: number) {
+    Column() {
+      this.codeHeader(index)
+      MermaidView({ content: this.model.blocks[index].text, selectable: this.selectable })
+    }.borderRadius(Radius.md).clip(true).backgroundColor($r('app.color.surface_variant')).width('100%')
+  }
+
+  @Builder
+  codeBlock(block: MarkdownBlock, index: number) {
+    Column() {
+      this.codeHeader(index)
       Scroll() {
         Text() {
           ForEach(this.reveal.spans(`${index}`, this.codeTokens[index], this.revealTime), (span: RevealSpan) => {
@@ -337,7 +351,9 @@ export struct MarkdownChunkView {
       if (this.visible || this.measuredHeight === 0) {
         Column({ space: 10 }) {
           ForEach(this.model.blocks, (block: MarkdownBlock, index: number) => {
-            if (this.model.blocks[index].kind === 'code') {
+            if (isMermaidBlock(this.model.blocks[index])) {
+              this.mermaidBlock(index)
+            } else if (this.model.blocks[index].kind === 'code') {
               this.codeBlock(this.model.blocks[index], index)
             } else if (this.model.blocks[index].kind === 'math') {
               MathView({ content: this.model.blocks[index].text, display: true, fontSize: this.fontSize, selectable: this.selectable })
