@@ -97,8 +97,19 @@ function allAttachments(data: AppData): Attachment[] {
   for (const thread of data.threads) { for (const item of threadAttachments(thread)) { result.set(item.id, item); } }
   return Array.from(result.values());
 }
-// Local export and Huawei Cloud share one archive; API keys only appear in the encrypted section.
-export async function createBackupFile(context: common.UIAbilityContext, snapshot: AppData, vault: CredentialVault = new CredentialStore(), interactive: boolean = true, cancellation?: Cancellation): Promise<string> {
+// Serialize backup operations across storage destinations, including after a page is reopened.
+let operating: boolean = false;
+export function backupBusy(): boolean { return operating; }
+export async function withBackupOperation<T>(action: () => Promise<T>): Promise<T> {
+  if (operating) { throw new Error(t('另一项备份操作正在进行，请稍后再试。')); }
+  operating = true;
+  try { return await action(); } finally { operating = false; }
+}
+
+// All destinations share one archive; API keys only appear in the encrypted section.
+export async function createBackupFile(context: common.UIAbilityContext, snapshot: AppData, vault: CredentialVault = new CredentialStore(), authorizedOpenID?: string, cancellation?: Cancellation): Promise<string> {
+  cancellation?.check();
+  const openID = authorizedOpenID ?? await huaweiAccount.backupOpenID(context);
   cancellation?.check();
   const data = JSON.parse(JSON.stringify(snapshot)) as AppData;
   const envelope: BackupEnvelope = { format: 'tinybot-harmony.backup.v4', data: data, attachments: [], files: [], deviceState: await captureBackupDeviceState(context) };
@@ -172,7 +183,7 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
   const connections = await captureBackupConnections(snapshot, context.getApplicationContext().filesDir, ownership);
   if ((snapshot.providerProfiles || []).length || (connections.mcp || []).length || (connections.mail || []).length ||
     (connections.panels || []).length || connections.search?.key || connections.search?.tavilyKey || connections.feedbackIdentity) {
-    envelope.protectedKeys = await encryptBackupKeys(snapshot, await huaweiAccount.backupOpenID(context, interactive), vault, connections);
+    envelope.protectedKeys = await encryptBackupKeys(snapshot, openID, vault, connections);
   }
   const path = context.cacheDir + '/backup-' + util.generateRandomUUID() + '.tinybot';
   await writeBackupArchive(path, JSON.stringify(envelope), sources, cancellation);
@@ -196,11 +207,13 @@ export async function exportBackup(context: common.UIAbilityContext, data: AppDa
   finally { await fs.unlink(path); }
 }
 export async function readBackup(context: common.UIAbilityContext, local: AppData): Promise<AppData | undefined> {
+  const openID = await huaweiAccount.backupOpenID(context);
   const uris = await new picker.DocumentViewPicker(context).select({ maxSelectNumber: 1, fileSuffixFilters: ['Tinybot 备份|.tinybot,.json'] });
   if (!uris.length) { return undefined; }
-  return readBackupFile(context, uris[0], local);
+  return readBackupFile(context, uris[0], local, openID);
 }
-export async function readBackupFile(context: common.UIAbilityContext, path: string, local: AppData): Promise<AppData> {
+export async function readBackupFile(context: common.UIAbilityContext, path: string, local: AppData, authorizedOpenID?: string): Promise<AppData> {
+  const openID = authorizedOpenID ?? await huaweiAccount.backupOpenID(context);
   const started = Date.now();
   let archive: OpenBackupArchive | undefined;
   try {
@@ -208,8 +221,7 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
     const unlock = async (envelope: BackupEnvelope): Promise<void> => {
       if (envelope?.protectedKeys !== undefined) {
         if (!envelope.protectedKeys || envelope.protectedKeys.version !== 2) { throw new Error(t('备份密钥格式无效。')); }
-        const credential = await huaweiAccount.backupOpenID(context);
-        keys = await decryptBackupKeys(envelope.protectedKeys, credential, envelope.data);
+        keys = await decryptBackupKeys(envelope.protectedKeys, openID, envelope.data);
       }
     };
     archive = await openBackupArchive(path, context.cacheDir, async (metadata: string) => {

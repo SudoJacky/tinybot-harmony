@@ -56,7 +56,8 @@ EVENTS.feedback = ['attachment_failed', 'log_failed', 'initialize_failed', 'save
   'detail_failed', 'upload_failed', 'cleanup_failed', 'reconcile_failed', 'delete_failed'];
 EVENTS.backup = ['started', 'restored', 'restore_prepared', 'key_decrypt_failed', 'cleanup_failed', 'replace_failed', 'retire_failed', 'rollback_failed', 'archive_written', 'archive_write_failed', 'archive_verified',
   'restore_completed', 'restore_failed', 'startup_capture_failed', 'startup_marker_failed', 'startup_lookup_failed',
-  'cloud_retry_finished', 'cloud_failed', 'cloud_retry', 'cloud_sync_progress', 'cloud_sync_finished', 'cloud_list_failed', 'cloud_settings_failed', 'auto_failed', 'auto_settings_failed', 'auto_task_failed', 'auto_expired', 'auto_release_failed'];
+  'cloud_retry_finished', 'cloud_failed', 'cloud_retry', 'cloud_sync_progress', 'cloud_sync_finished', 'cloud_list_failed', 'cloud_settings_failed', 'auto_failed', 'auto_settings_failed', 'auto_task_failed', 'auto_expired', 'auto_release_failed',
+  'webdav_failed', 'webdav_cleanup_failed', 'webdav_uploaded', 'webdav_settings_failed'];
 EVENTS['mini-app'] = ['manifest_failed', 'storage_failed', 'action_failed'];
 EVENTS['life-panel'] = ['published', 'refresh_skipped', 'refresh_started', 'refresh_complete', 'refresh_cancelled', 'refresh_failed', 'manifest_failed', 'action_failed', 'expiry_failed', 'connection_failed', 'api_response', 'api_failed', 'transform_started', 'transform_complete', 'transform_failed'];
 EVENTS.background = ['acquired', 'released', 'cancelled', 'suspended', 'release_failed', 'stop_failed', 'transition_failed', 'window_expired'];
@@ -100,7 +101,8 @@ STRINGS.balanceAdapter = ['deepseek', 'sub2api', 'newapi', 'newapi-account', 'zh
 STRINGS.operation = ['access', 'read', 'list', 'stat', 'parse', 'unlink', 'rmdir', 'bundle_stats', 'free_size', 'total_size',
   'getAppPrivacyMgmtInfo', 'getAppPrivacyResult', 'requestAppPrivacyConsent', 'subscribe', 'unsubscribe', 'cloud_directory', 'cloud_sync',
   'connect', 'login', 'examine', 'search', 'fetch', 'identify', 'capability',
-  'discover', 'balance', 'credential_read', 'credential_write', 'credential_remove', 'save_config', 'response', 'streaming', 'connecting', 'attachment', 'log'];
+  'discover', 'balance', 'credential_read', 'credential_write', 'credential_remove', 'save_config', 'response', 'streaming', 'connecting', 'attachment', 'log',
+  'PUT', 'MOVE', 'DELETE', 'GET', 'local', 'remote'];
 STRINGS.credentialScope = ['provider', 'search', 'mcp', 'backup'];
 STRINGS.rpcMethod = ['initialize', 'tools/list', 'tools/call', 'notifications/initialized', 'notifications/cancelled'];
 STRINGS.service = ['mcp', 'search', 'web', 'bing-browser'];
