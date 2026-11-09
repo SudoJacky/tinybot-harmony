@@ -1,4 +1,5 @@
 import { Diagnostics } from '../model/Diagnostics';
+import { nativeDeviceCollaboration } from '../services/NativeDeviceCollaboration';
 import { configureNativeDiagnosticLog } from '../services/NativeDiagnosticLog';
 import { ShareInbox } from '../services/NativeActions';
 import { LanguagePreferences } from '../services/LanguagePreferences';
@@ -106,7 +107,13 @@ export default class EntryAbility extends UIAbility {
     LaunchActions.receive(want);
   }
 
+  onCollaborate(wantParam: Record<string, Object>): AbilityConstant.CollaborateResult {
+    if (!hostedPrivacy.allowed) { return AbilityConstant.CollaborateResult.REJECT; }
+    return nativeDeviceCollaboration.accept(this.context, wantParam);
+  }
+
   onDestroy(): void {
+    nativeDeviceCollaboration.dispose();
     autoCloudBackup.dispose();
     completionNotifications.dispose();
     backgroundGeneration.dispose();

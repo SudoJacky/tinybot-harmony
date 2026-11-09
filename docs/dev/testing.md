@@ -41,6 +41,9 @@ hdc rport tcp:18770 tcp:18770
 | 脚本 | 覆盖内容 | 需构建 |
 | --- | --- | --- |
 | `build-locales.cjs --check` | 词条键一致性、占位符、代码中的 `t()` 引用 | 否 |
+| `test-device-collaboration.cjs` | 原生协同适配、UTF-8 分片、增量输出、双向执行、排队、去重、断线和草稿隔离 | 否 |
+| `test-lan-collaboration.cjs` | 局域网配对、加密与防重放、拆包、交替建链、连续重连、错误连接码与取消监听清理 | 否 |
+| `test-device-collaboration-renderer.cjs` | 编译后的消息卡从空内容到连续输出、完成及用户停止状态 | 是 |
 | `build-builtin-skills.cjs --check` | 内置 Skill 打包是否为最新 | 否 |
 | `test-conversation-export.cjs` | 所选消息顺序与隔离、Markdown/HTML 标识、PNG 元数据 CRC 与像素载荷、长会话完整拼接、失败清理 | 否 |
 | `test-conversation-share.cjs` | 消息勾选、预览后保存/分享、Markdown 选择范围、重复点击、失败与离开页面的临时文件清理 | 是（Debug 构建） |

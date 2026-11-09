@@ -9,6 +9,8 @@ const suites = {
     'test-markdown-math.cjs',
     'test-sidebar-navigation.cjs',
     'test-parallel-sessions.cjs',
+    'test-device-collaboration.cjs',
+    'test-lan-collaboration.cjs',
     'test-answer-speech-native.cjs',
     'test-api20-compat.cjs',
     'test-app-information.cjs',
@@ -70,6 +72,7 @@ const suites = {
     'test-window-viewport.cjs',
   ],
   debug: [
+    'test-device-collaboration-renderer.cjs',
     'test-composer-dismissal.cjs',
     'test-focus-lifecycle.cjs',
     'test-announcements.cjs',

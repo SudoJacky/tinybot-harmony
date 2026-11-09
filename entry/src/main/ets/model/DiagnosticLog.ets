@@ -42,6 +42,7 @@ const ERROR_CODES: string[] = ['STALE_BROWSER_SNAPSHOT', 'STALE_INTERACTIVE_STAT
 
 // Names and string values are catalogs, not free text. Unknown keys never reach either output.
 const EVENTS: Record<string, string[]> = {};
+EVENTS.collaboration = ['devices_refreshed', 'discovery_failed', 'enable_failed', 'connect_failed', 'accept_failed', 'accept_rejected', 'reject_failed', 'connected', 'disconnected', 'protocol_failed', 'cleanup_failed', 'destroy_failed', 'lan_failed'];
 EVENTS.app = ['bar_failed', 'created', 'destroyed', 'window_created', 'window_failed', 'window_loaded', 'window_destroyed', 'foreground', 'background'];
 EVENTS.privacy = ['subscribe_failed', 'info_failed', 'result_failed', 'state_failed', 'request_failed'];
 EVENTS.announcements = ['disabled', 'fetch_started', 'fetch_completed', 'fetch_failed', 'presented', 'present_failed', 'acknowledged', 'save_failed'];

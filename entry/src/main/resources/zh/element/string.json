@@ -1,5 +1,6 @@
 {
   "string": [
+    { "name": "collaboration_reason", "value": "连接您的设备，同步查看会话并选择任务执行设备" },
     { "name": "widget_name", "value": "Tiny 快捷卡片" },
     { "name": "widget_description", "value": "新建对话、打开语音输入，或继续上次对话。" },
     { "name": "widget_greeting", "value": "今天想做点什么？" },

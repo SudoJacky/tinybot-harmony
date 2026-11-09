@@ -1,4 +1,8 @@
 import { ConversationShareData, sharingMessages } from '../model/ConversationShare';
+import { DeviceCollaborationPanel } from '../views/DeviceCollaborationPanel';
+import { NativeDeviceCollaboration, nativeDeviceCollaboration } from '../services/NativeDeviceCollaboration';
+import { DeviceCollaboration } from '../services/DeviceCollaboration';
+import { LanDeviceCollaboration } from '../services/LanDeviceCollaboration';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { ConversationSharePanel } from '../views/ConversationSharePanel';
 import { AppearanceStyle } from '../common/AppearanceStyle';
@@ -90,6 +94,9 @@ struct Index {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
   @State private app: ChatViewModel = new ChatViewModel();
+  @State private collaboration: DeviceCollaboration = nativeDeviceCollaboration.model;
+  @State private deviceConnection: NativeDeviceCollaboration = nativeDeviceCollaboration;
+  @State private lanConnection: LanDeviceCollaboration = nativeDeviceCollaboration.lan;
   @State private account: HuaweiAccount = huaweiAccount;
   @State private windowWidth: number = 0;
   @State private workspaceOpen: boolean = false;
@@ -203,6 +210,8 @@ struct Index {
     }
     this.app.initialize(this.session).then(() => {
       if (!this.privacy.allowed) { return; }
+      nativeDeviceCollaboration.initialize(context);
+      nativeDeviceCollaboration.model.attach(this.session!);
       if (!this.panelUpdates) { this.panelUpdates = new PanelExpiryUpdates(new LifePanels(context.getApplicationContext().filesDir)); }
       this.updateLifePanelActivity();
       this.panelLinkChanged();
@@ -355,6 +364,7 @@ struct Index {
   private privacyChanged(): void {
     if (this.privacyAllowed) { this.startBusiness(); }
     else {
+      nativeDeviceCollaboration.setEnabled(false);
       this.panelUpdates?.setActive(false);
       autoCloudBackup.dispose();
       this.closeAnnouncement();
@@ -1099,6 +1109,9 @@ struct Index {
         .id('open-life-panels-menu').enabled(this.app.ready).onClick(() => this.openLifePanels())
       MenuItem(() => this.moreMenuContent($r('sys.symbol.gearshape'), t('设置')))
         .onClick(() => this.openSettings())
+      MenuItem(() => this.moreMenuContent($r('sys.symbol.connection'), t('多设备协同（实验）')))
+        .id('open-collaboration-menu').enabled(this.app.ready)
+        .onClick(() => { this.paths.pushPath({ name: 'device-collaboration' }); })
     }
   }
 
@@ -1129,7 +1142,11 @@ struct Index {
 
   @Builder
   destination(name: string, param: Object) {
-    if (name === 'onboarding') {
+    if (name === 'device-collaboration') {
+      NavDestination() { DeviceCollaborationPanel({ model: this.collaboration, connection: this.deviceConnection, lan: this.lanConnection }) }
+        .title(t('多设备协同（实验）'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD,
+          backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'onboarding') {
       NavDestination() {
         OnboardingPanel({ app: this.app, active: this.onboardingActive, configured: this.app.configured,
           connectedPreset: this.currentProviderPreset(), busy: this.app.busy, account: this.account,

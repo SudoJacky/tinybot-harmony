@@ -1,5 +1,6 @@
 {
   "string": [
+    { "name": "collaboration_reason", "value": "Connect your devices to view conversations and choose where tasks run" },
     { "name": "widget_name", "value": "Tiny quick actions" },
     { "name": "widget_description", "value": "Start a chat, open voice input, or return to your last chat." },
     { "name": "widget_greeting", "value": "What's on your mind?" },

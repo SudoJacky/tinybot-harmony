@@ -1,4 +1,5 @@
 import { commitBackupKeys } from './BackupKeyRestore';
+import { CollaborationThread, CollaborationOutput, CollaborationMessage, CollaborationTool } from '../model/DeviceCollaboration';
 import { prepareBackupImport, finishBackupImport, discardBackupImport, rollbackBackupFailure } from '../model/BackupImport';
 import { SessionImportCandidate } from './SessionCandidates';
 import { resolveBrowserPreview } from '../model/BrowserPreview';
@@ -97,6 +98,68 @@ export class SessionService {
   }
 
   snapshot(): AppData { return JSON.parse(JSON.stringify(this.data)) as AppData; }
+  // A separate projection: never share provider credentials, preferences or unsent local drafts.
+  collaborationThreads(): CollaborationThread[] {
+    return this.data.threads.filter((thread) => !thread.archived).map((thread): CollaborationThread => ({
+      id: thread.id, title: thread.title, updatedAt: thread.updatedAt,
+      phase: this.executions.get(thread.id)?.state.phase || 'idle',
+      status: thread.messages[thread.messages.length - 1]?.status,
+      error: this.application.saveError || this.executions.get(thread.id)?.state.error || thread.messages[thread.messages.length - 1]?.error || '',
+      queued: (thread.pendingInputs || []).length, model: thread.modelRef?.modelId || ''
+    }));
+  }
+  collaborationOutput(id: string): CollaborationOutput {
+    const thread = this.requireThread(id);
+    const summary = this.collaborationThreads().find((item) => item.id === id);
+    if (!summary) { throw new Error(t('请先恢复对话。')); }
+    const messages = thread.messages.map((message): CollaborationMessage => {
+      const tools: CollaborationTool[] = [];
+      for (const step of message.steps || []) {
+        for (const tool of step.tools) {
+          tools.push({ id: tool.call.id, name: tool.call.function.name, status: tool.status });
+          for (const child of tool.children || []) { tools.push({ id: child.call.id, name: child.call.function.name, status: child.status }); }
+        }
+      }
+      return { id: message.id, role: message.role, content: message.content, status: message.status, error: message.error,
+        thinking: (message.steps || []).some((step) => !!step.reasoningContent), tools: tools };
+    });
+    return { thread: summary, messages: messages };
+  }
+  async createCollaborationThread(): Promise<string> {
+    const thread = this.freshThread();
+    const created = await this.mutate(t('新建对话失败：'), async () => {
+      await this.ensureThreadWorkspace(thread);
+      this.data.threads.unshift(thread); await this.persist(thread.id);
+    }, 'snapshot', 'navigation');
+    if (!created) { throw new Error(this.state.error || this.state.saveError || t('当前无法创建协同会话。')); }
+    return thread.id;
+  }
+  async submitCollaborationInput(id: string, text: string, admission?: Cancellation): Promise<void> {
+    text = text.trim();
+    if (!text || text.length > MAX_INPUT_TEXT) { throw new Error(t('协同消息需要包含 1 至 24000 个字符。')); }
+    if (/^\/compact(?:\s|$)/i.test(text)) { throw new Error(t('请在执行设备的对话页面使用 /compact。')); }
+    admission?.check(); await this.resources.authorizeGeneration?.(); admission?.check();
+    await this.exclusive(async () => {
+      admission?.check();
+      const thread = this.requireThread(id); const state = this.execution(id).state;
+      if (!this.canNavigate || thread.archived || !['idle', 'running'].includes(state.phase)) {
+        throw new Error(this.application.saveError || t('当前会话无法接收指令，请稍后重试。'));
+      }
+      if (!this.threadConfig(thread).configured) { throw new Error(t('请先在执行设备配置可用模型。')); }
+      if (state.phase === 'idle' && thread.queuePaused && (thread.pendingInputs || []).length > 0) {
+        throw new Error(t('执行端有暂停的指令队列，请先处理后再发送。'));
+      }
+      const pending = (thread.pendingInputs || []).concat([{ id: this.resources.createId(), mode: 'followUp', text: text } as PendingInput]);
+      validatePendingInputs(pending); thread.pendingInputs = pending;
+      // A stopped run's queue remains paused until a deliberate resume on its execution device.
+      if (state.phase === 'idle') { thread.queuePaused = false; }
+      await this.persist(id); this.publish('snapshot');
+    });
+    const thread = this.requireThread(id);
+    if (this.execution(id).state.phase === 'idle' && !thread.queuePaused && (thread.pendingInputs || []).length > 0) {
+      this.runTasks(undefined, thread).catch((error: Error) => this.resources.reportError('tasks_failed', error, { threadId: id }));
+    }
+  }
   get workspaceId(): string { return workspaceIdFor(this.data, this.active); }
   attributeUsage(records: RequestUsage[]): RequestUsage[] { return attributeLegacyUsage(records, this.data.threads); }
   async setTeamEnabled(enabled: boolean): Promise<boolean> {
@@ -756,9 +819,8 @@ export class SessionService {
     }
   }
 
-  private async runTasks(initial?: string): Promise<void> {
-    const execution = this.execution(); const status = execution.state;
-    const thread = this.active;
+  private async runTasks(initial?: string, thread: ThreadData = this.active): Promise<void> {
+    const execution = this.execution(thread.id); const status = execution.state;
     if (initial !== undefined && (thread.pendingInputs || []).length === 0) { thread.queuePaused = false; }
     status.phase = 'running'; this.publish('state');
     Diagnostics.log('info', 'session', 'run_started', { threadId: thread.id, count: this.runningThreadIds.length });
