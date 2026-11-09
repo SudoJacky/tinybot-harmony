@@ -31,7 +31,7 @@ import { SearchDraft } from '../model/WebSearch';
 import { TeamRun, teamCommand } from '../model/Team';
 import { ChatTeamTools, CHAT_TEAM_INSTRUCTIONS, coordinatorDefinitions } from './ChatTeamTools';
 import { Attachment, MemoryEntry, McpServer, ProductivityData, defaultProductivity, validateAttachments, validateProductivity, memoryContext, supportedMcpAuth } from '../model/Productivity';
-import { defaultAssistantOptions, routeModel } from '../model/AssistantOptions';
+import { defaultAssistantOptions } from '../model/AssistantOptions';
 import { validateMemorySuggestions } from '../model/MemorySuggestions';
 import { MEMORY_CHAR_LIMIT, MEMORY_REVIEW_INTERVAL, MemoryOperation, MemoryChange,
   applyMemoryOperations, memoryCharacters, memoryReviewTurns } from '../model/MemoryMaintenance';
@@ -202,7 +202,7 @@ export class SessionService {
       if (capability.contextWindow !== undefined) { config.contextWindow = capability.contextWindow; }
     }
     const protocol = this.providerProfiles.find((item) => item.id === reference.providerId)?.protocol || '';
-    // An automatically routed model (or a worker using another model) retains its own defaults.
+    // A dedicated model or worker retains its own defaults when it uses a different model.
     if (supportsReasoningEffort(protocol, reference.modelId) && thread?.modelRef?.providerId === reference.providerId &&
       thread.modelRef.modelId === reference.modelId && thread.reasoningEffort && thread.reasoningEffort !== 'default') {
       config.reasoning = thread.reasoningEffort;
@@ -806,9 +806,7 @@ export class SessionService {
     const command = teamCommand(text);
     if (command !== undefined) { text = command; }
     const options = this.data.productivity?.options || defaultAssistantOptions();
-    const reference = thread.modelRef ? routeModel(options, text, attachments.concat(...thread.messages.map((item) =>
-      (item.role === 'user' ? item.attachments || [] : []).concat(...(item.steps || []).map((step) => step.steering?.attachments || [])))).some((item) => item.mime.startsWith('image/')), thread.modelRef, this.providerProfiles) : undefined;
-    const config = reference ? this.configFor(reference, thread) : this.threadConfig(thread); const selected = explicitSkill(text);
+    const config = this.threadConfig(thread); const selected = explicitSkill(text);
     if (!config.configured) { status.error = t("当前对话没有可用模型，请选择模型，或添加、启用模型服务。"); thread.queuePaused = true; return false; }
     if (selected.length > 0 && !this.extensions.skills.some((skill: SkillData) => skill.enabled && skill.name === selected)) {
       status.error = t("指定的 Skill 不存在或已停用，请到设置中的 Skills 管理检查。"); thread.queuePaused = true; return false;
@@ -828,7 +826,7 @@ export class SessionService {
     const user: MessageData = { id: this.resources.createId(), role: 'user', content: text, skillPrompt: expandSkillCommand(text, this.extensions.skills), status: 'complete', error: '',
       attachments: attachments, references: queuedId ? [] : thread.references, panelContext: queuedId ? undefined : thread.panelContext };
     if (!queuedId) { thread.attachments = []; thread.references = []; thread.panelContext = undefined; }
-    const answer: MessageData = { id: this.resources.createId(), role: 'assistant', content: '', status: 'generating', error: '', modelRef: reference };
+    const answer: MessageData = { id: this.resources.createId(), role: 'assistant', content: '', status: 'generating', error: '', modelRef: thread.modelRef };
     const generateTitle = text.length > 0 && shouldGenerateTitle(thread);
     if (text.length > 0 && thread.messages.length === 0 && !thread.titleEdited) { thread.title = titleCharacters(text.replace(/\s+/g, ' '), 32); }
     const fallbackTitle = thread.title;
@@ -836,11 +834,11 @@ export class SessionService {
     thread.messages = thread.messages.concat([user, answer]);
     let chatTeams: ChatTeamTools | undefined = undefined;
     if (thread.teamEnabled) {
-      const workerConfig = copyModelConfig(config); workerConfig.systemPrompt = instructions;
-      chatTeams = new ChatTeamTools({ thread: thread, messageId: answer.id, config: workerConfig,
+      chatTeams = new ChatTeamTools({ thread: thread, messageId: answer.id,
+        workerModel: options.teamWorker || { providerId: config.providerId, modelId: config.model },
         toolSelection: selection,
         usageOrigin: { threadId: thread.id, threadTitle: thread.title, turnId: user.id, turnLabel: text.slice(0, 80), skill: selected || undefined },
-        configFor: (model) => { const saved = this.configFor(model, thread); saved.systemPrompt = workerConfig.systemPrompt; return saved; },
+        configFor: (model) => { const saved = this.configFor(model, thread); saved.systemPrompt = instructions; return saved; },
         base: () => this.tools(thread, selected),
         workerBase: () => this.withToolApproval(thread, this.tools(thread, selected)),
         runtime: () => execution.runtime.fork(), createId: () => this.resources.createId(),
@@ -900,7 +898,7 @@ export class SessionService {
           await this.resources.prepareGeneration?.(); cancellation.check(); await this.ensureThreadWorkspace(thread);
           cancellation.check();
           // The runtime's initial checkpoint has durably saved the first user message.
-          if (generateTitle) { this.generateTitle(thread.id, user.id, text, fallbackTitle, copyModelConfig(config)); }
+          if (generateTitle) { this.generateTitle(thread.id, user.id, text, fallbackTitle, config, options.title); }
         },
         context: sessionContextSource(thread, () => sections, () => this.persist(thread.id), (status) => this.contextProgress(thread.id, status)),
         contextChanged: (prepared) => {
@@ -945,11 +943,13 @@ export class SessionService {
     }
     return answer.status === 'complete' && this.application.saveError.length === 0;
   }
-  private async generateTitle(threadId: string, sourceId: string, input: string, fallback: string, config: ModelConfig): Promise<void> {
+  private async generateTitle(threadId: string, sourceId: string, input: string, fallback: string, config: ModelConfig,
+    reference?: ModelReference): Promise<void> {
     try {
+      const titleConfig = reference ? this.configFor(reference, this.requireThread(threadId)) : copyModelConfig(config);
       const runtime = this.runtime.fork();
       let content = '';
-      const result = await runtime.run({ sessionId: threadId, config: config, messages: [], contextOnly: true, tools: new ToolSet([]),
+      const result = await runtime.run({ sessionId: threadId, config: titleConfig, messages: [], contextOnly: true, tools: new ToolSet([]),
         usageOrigin: { threadId: threadId, threadTitle: fallback, turnId: sourceId, turnLabel: input.slice(0, 80), purpose: 'title' } }, {
         prepare: async () => {}, checkpoint: async () => {},
         prepareContext: async (model, _messages, cancellation) => {
@@ -989,7 +989,7 @@ export class SessionService {
       } finally { this.application.phase = 'idle'; this.publish('state'); }
     } catch (error) {
       // Auxiliary requests never change chat status or abort the foreground runtime.
-      this.resources.reportError('title_failed', error as Error);
+      this.resources.reportError('title_failed', error as Error, { threadId: threadId, messageId: sourceId, providerId: reference?.providerId || config.providerId });
     }
   }
 

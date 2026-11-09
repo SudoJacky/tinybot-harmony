@@ -1300,7 +1300,7 @@ async function test(name, run) {
     data.threads=[{id:'thread',title:'source',updatedAt:1,messages:[{id:'u',role:'user',content:'hello',status:'complete',error:'',attachments:[attachment]},{id:'a',role:'assistant',content:'answer',status:'complete',error:''}],modelRef:{providerId:'provider',modelId:'model'}}];
     data.providerProfiles=[{id:'provider',name:'Provider',protocol:'chat-completions',baseUrl:'https://api.invalid/v1',credentialAlias:'SECRET-ALIAS',noApiKey:false,enabled:true,models:['model'],contextWindow:32768}];
     data.productivity={memories:[{id:'m',content:'fact',threadId:'thread',updatedAt:1,sourceThreadId:'thread',sourceMessageId:'u'}],templates:[],servers:[]};
-    data.productivity.options={autoMemory:false,saveSummary:false,readOnly:false,autoRoute:false,capabilities:[],
+    data.productivity.options={autoMemory:false,saveSummary:false,readOnly:false,capabilities:[],
       search:{provider:'bing-browser',enabled:true,tavily:{baseUrl:'https://api.tavily.com',credentialAlias:'SECRET-INACTIVE-TAVILY'}}};
     const context={cacheDir:root+'/cache',getApplicationContext:()=>({filesDir:root})};await exportBackup(context,JSON.parse(JSON.stringify(data)));
     const exported=JSON.stringify(legacyBackupFixture(fs.readFileSync(nativePath(selectedFile))));assert.ok(!exported.includes('SECRET-ALIAS'));

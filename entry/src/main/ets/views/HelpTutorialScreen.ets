@@ -244,7 +244,7 @@ export struct HelpTutorialScreen {
       this.line(196)
       this.controlRow('add-provider', this.text('添加模型服务'), $r('sys.symbol.plus'), '', true)
       this.line(252)
-      this.rowAt(this.text('模型分工与能力'), $r('sys.symbol.gearshape'), 252, this.text('自动选择模型、专用模型与能力配置'))
+      this.rowAt(this.text('模型分工与能力'), $r('sys.symbol.gearshape'), 252, this.text('专用模型与能力配置'))
       this.heading(this.text('助手偏好'), 332)
       this.card(16, 372, 328, 184)
       this.rowAt(this.text('称呼与回答偏好'), $r('sys.symbol.square_and_pencil'), 372, this.text('填写称呼、背景和回答偏好'))
