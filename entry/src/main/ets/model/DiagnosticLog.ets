@@ -69,6 +69,7 @@ EVENTS.navigation = ['tools_opened', 'tools_repeated', 'settings_opened', 'setti
   'new_chat_blocked', 'new_chat_failed', 'new_chat_revealed'];
 EVENTS.web = ['engine_start', 'engine_ready', 'release', 'activate', 'failed', 'console_error', 'load_start', 'load_returned', 'host_ready', 'port_connected', 'ready', 'state_saved', 'attached', 'page_end', 'navigation_blocked', 'resource_failed'];
 EVENTS.math = ['load_failed', 'render_failed', 'startup_timeout', 'process_exited', 'page_failed'];
+EVENTS.mermaid = ['startup_timeout', 'render_timeout', 'script_failed', 'diagram_failed', 'page_failed', 'process_exited'];
 EVENTS.preview = ['failed', 'captured', 'thumbnail_failed', 'surface_moved'];
 EVENTS.sandbox = ['execution_failed', 'orchestration_failed'];
 EVENTS.tool = ['failed', 'partial'];

@@ -1800,7 +1800,7 @@ async function test(name, run) {
       console.log('  '+scenario+': '+bytes.byteLength+' wire bytes, '+Buffer.byteLength(thought)+' reasoning bytes, saved and reloaded');
     }
   });
-  await test('Responses reasoning reaches the live process, survives completion and reload, and stays out of answer text', async () => {
+  await test('Responses reasoning reaches the live process after the answer rules out a refusal and survives reload', async () => {
     const {ProtocolProvider}=load(path.join(source,'services/providers/ProtocolProvider'));
     const {ProviderRegistry}=load(path.join(source,'services/providers/ProviderRegistry'));
     const {runAgentLoop}=load(path.join(source,'services/AgentLoop'));
@@ -1827,10 +1827,11 @@ async function test(name, run) {
         emit({type:type+'.delta',...coordinates,delta:'先检查输入，'});
         emit({type:type+'.delta',...coordinates,delta:'再核对结果。'});
         assert.equal(thread.messages[1].content,'','answer is still empty while thinking streams');
-        assert.equal(thread.messages[1].stepViews[0].reasoningContent,'先检查输入，再核对结果。');
-        const thinking=buildTimeline(thread.messages[1].stepViews)[0];assert.equal(thinking.kind,'process');assert.equal(thinking.items[0].tool,-1);
+        assert.equal(thread.messages[1].stepViews[0].reasoningContent,'','reasoning is held while a refusal remains possible');
         emit({type:type+'.done',...coordinates,text:'先检查输入，再核对结果。'});
         emit({type:'response.output_text.delta',delta:'最终回答。'});
+        assert.equal(thread.messages[1].stepViews[0].reasoningContent,'先检查输入，再核对结果。');
+        const thinking=buildTimeline(thread.messages[1].stepViews)[0];assert.equal(thinking.kind,'process');assert.equal(thinking.items[0].tool,-1);
         const item={type:'reasoning',summary:[],encrypted_content:'must-not-display'};
         item[style]=[{type:style==='summary'?'summary_text':'reasoning_text',text:'先检查输入，再核对结果。'}];
         emit({type:'response.completed',response:{status:'completed',output:[item,{type:'message',content:[{type:'output_text',text:'最终回答。'}]}]}});
