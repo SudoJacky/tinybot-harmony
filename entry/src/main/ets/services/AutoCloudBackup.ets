@@ -10,7 +10,7 @@ import { CloudBackup, CloudBackupItem, cloudBackupError, CLOUD_BACKUP_NAME } fro
 import { Cancellation } from './Cancellation';
 import { NativeWorkspaceFiles } from './NativeWorkspaceFiles';
 import { hostedPrivacy } from './HostedPrivacy';
-import { huaweiAccount } from './HuaweiAccount';
+import { BackupLoginRequired, huaweiAccount } from './HuaweiAccount';
 
 interface BackupTask { requestId: number; generation: number; cancellation: Cancellation; running: boolean; }
 
@@ -78,7 +78,8 @@ export class AutoCloudBackup {
 
   onBackground(): void {
     const context = this.context;
-    if (!context || !this.enabled || !hostedPrivacy.allowed || !huaweiAccount.signedIn) { return; }
+    if (!context || !this.enabled || !hostedPrivacy.allowed) { return; }
+    if (!huaweiAccount.signedIn) { this.state = 'waiting_login'; return; }
     if (this.task) {
       if (this.task.running || !this.release(this.task)) { return; }
       this.task = undefined;
@@ -121,6 +122,8 @@ export class AutoCloudBackup {
 
   private async run(context: common.UIAbilityContext, task: BackupTask): Promise<void> {
     try {
+      const openID = await huaweiAccount.backupOpenID(context);
+      task.cancellation.check();
       if (!await CloudBackup.available(context)) { if (task.generation === this.generation) { this.state = 'waiting'; } return; }
       task.cancellation.check();
       if (task.generation !== this.generation || !this.enabled || !hostedPrivacy.allowed || !this.ready()) { return; }
@@ -132,10 +135,10 @@ export class AutoCloudBackup {
         const revision = this.revision;
         const files = NativeWorkspaceFiles.contentRevision;
         this.state = 'creating'; this.error = '';
-        await CloudBackup.create(context, data, { interactive: false, cancellation: task.cancellation });
+        await CloudBackup.create(context, data, { openID: openID, cancellation: task.cancellation });
         if (task.generation !== this.generation) { return; }
         this.savedRevision = revision; this.savedFiles = files; this.savedChanges = changes;
-      } else { await CloudBackup.retryUpload(context, task.cancellation); }
+      } else { await CloudBackup.retryUpload(context, { openID: openID, cancellation: task.cancellation }); }
       task.cancellation.check();
       const items = await CloudBackup.list(context);
       if (task.generation !== this.generation || !this.enabled || !hostedPrivacy.allowed) { return; }
@@ -145,6 +148,9 @@ export class AutoCloudBackup {
       if (uploaded && item) { this.lastUploadedAt = item.createdAt; }
     } catch (error) {
       if (task.generation === this.generation && this.enabled) {
+        if (error instanceof BackupLoginRequired && !task.cancellation.cancelled) {
+          this.state = 'waiting_login'; this.error = ''; return;
+        }
         this.state = 'failed';
         this.error = task.cancellation.cancelled ? t('后台备份时间已结束，请稍后重试。') : cloudBackupError(error as Error);
         Diagnostics.log('warn', 'backup', 'auto_failed', undefined, error as Error);
@@ -157,6 +163,7 @@ export class AutoCloudBackup {
 
   get status(): string {
     if (!this.enabled) { return t('自动云备份已关闭'); }
+    if (this.state === 'waiting_login') { return t('自动备份等待华为账号登录。'); }
     if (this.state === 'creating') { return t('正在自动备份…'); }
     if (this.state === 'failed') { return this.error; }
     if (this.state === 'uploaded') { return t('自动备份已上传 · {0}', [new Date(this.lastUploadedAt).toLocaleString(getLocale())]); }

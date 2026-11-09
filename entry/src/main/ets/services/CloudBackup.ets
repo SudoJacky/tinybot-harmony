@@ -5,9 +5,10 @@ import { cloudSync, fileIo as fs, fileUri } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { AppData } from '../model/Conversation';
 import { t } from '../model/I18n';
-import { createBackupFile, readBackupFile } from './Backup';
+import { backupBusy, createBackupFile, readBackupFile, withBackupOperation } from './Backup';
 import { copyFileBytes } from './FileBytes';
 import { Cancellation } from './Cancellation';
+import { huaweiAccount } from './HuaweiAccount';
 
 export interface CloudBackupItem {
   name: string;
@@ -21,12 +22,11 @@ export const CLOUD_BACKUP_NAME: string = 'tinybot-latest.tinybot';
 const LATEST_BACKUP = CLOUD_BACKUP_NAME;
 const AUTO_BACKUP = /^tinybot-auto-[0-9a-f-]{36}\.tinybot$/;
 function validBackupName(name: string): boolean { return name === LATEST_BACKUP || SNAPSHOT_NAME.test(name) || AUTO_BACKUP.test(name); }
-export interface CloudBackupOptions { interactive: boolean; cancellation?: Cancellation; }
+export interface CloudBackupOptions { openID?: string; cancellation?: Cancellation; }
 export function latestCloudBackup(items: CloudBackupItem[]): CloudBackupItem | undefined {
   return items.filter((item) => item.location === 2 || item.location === 3)
     .sort((a, b) => b.createdAt - a.createdAt || (a.name === LATEST_BACKUP ? -1 : b.name === LATEST_BACKUP ? 1 : 0))[0];
 }
-let operating: boolean = false;
 const CLOUD_READY_DELAYS: number[] = [500, 1000, 2000];
 
 class CloudNotReadyError extends Error {
@@ -52,13 +52,6 @@ async function whenCloudReady<T>(operation: string, action: () => Promise<T>): P
       await new Promise<void>((resolve) => { setTimeout(() => resolve(), delay); });
     }
   }
-}
-
-// Native sync APIs have limited concurrency. This lock also covers a reopened page.
-async function exclusive<T>(action: () => Promise<T>): Promise<T> {
-  if (operating) { throw new Error(t('另一项云备份操作正在进行，请稍后再试。')); }
-  operating = true;
-  try { return await action(); } finally { operating = false; }
 }
 
 async function backupDirectory(context: common.UIAbilityContext): Promise<string> {
@@ -193,13 +186,13 @@ async function download(path: string): Promise<void> {
   }
 }
 
-async function restoreCloudFile(context: common.UIAbilityContext, name: string, local: AppData): Promise<AppData> {
+async function restoreCloudFile(context: common.UIAbilityContext, name: string, local: AppData, openID: string): Promise<AppData> {
   if (!validBackupName(name)) { throw new Error(t('备份文件无效。')); }
   const path = await backupDirectory(context) + '/' + name;
   const stat = await fs.lstat(path);
   if (!stat.isFile() || stat.isSymbolicLink()) { throw new Error(t('备份文件无效。')); }
   if ((await fs.stat(path)).location === 2) { await download(path); }
-  return readBackupFile(context, path, local);
+  return readBackupFile(context, path, local, openID);
 }
 
 // Retire old snapshots only after the replacement has actually reached the cloud.
@@ -222,7 +215,7 @@ async function finishUpload(context: common.UIAbilityContext, cancellation?: Can
 }
 
 export class CloudBackup {
-  static get busy(): boolean { return operating; }
+  static get busy(): boolean { return backupBusy(); }
   static async available(context: common.UIAbilityContext): Promise<boolean> {
     return !!context.cloudFileDir && await fs.access(context.cloudFileDir);
   }
@@ -253,13 +246,17 @@ export class CloudBackup {
     }
   }
 
-  static sync(cancellation?: Cancellation): Promise<boolean> { return exclusive(() => requestSync(cancellation)); }
-  static retryUpload(context: common.UIAbilityContext, cancellation?: Cancellation): Promise<boolean> {
-    return exclusive(async () => { await requestSync(cancellation); return finishUpload(context, cancellation); });
+  static sync(cancellation?: Cancellation): Promise<boolean> { return withBackupOperation(() => requestSync(cancellation)); }
+  static retryUpload(context: common.UIAbilityContext, options?: CloudBackupOptions): Promise<boolean> {
+    return withBackupOperation(async () => {
+      if (!options?.openID) { await huaweiAccount.backupOpenID(context); }
+      await requestSync(options?.cancellation);
+      return finishUpload(context, options?.cancellation);
+    });
   }
 
   static remove(context: common.UIAbilityContext, name: string): Promise<boolean> {
-    return exclusive(async () => {
+    return withBackupOperation(async () => {
       if (!validBackupName(name)) { throw new Error(t('备份文件无效。')); }
       const path = await backupDirectory(context) + '/' + name;
       const stat = await fs.lstat(path);
@@ -273,12 +270,14 @@ export class CloudBackup {
   }
 
   static create(context: common.UIAbilityContext, data: AppData, options?: CloudBackupOptions): Promise<boolean> {
-    return exclusive(async () => {
+    return withBackupOperation(async () => {
       const cancellation = options?.cancellation;
+      cancellation?.check();
+      const openID = options?.openID ?? await huaweiAccount.backupOpenID(context);
       cancellation?.check();
       const name = LATEST_BACKUP;
       const directory = await backupDirectory(context);
-      const source = await createBackupFile(context, data, undefined, options?.interactive !== false, cancellation);
+      const source = await createBackupFile(context, data, undefined, openID, cancellation);
       const target = directory + '/' + name;
       const temporary = directory + '/tinybot-' + util.generateRandomUUID() + '.partial';
       try {
@@ -322,14 +321,18 @@ export class CloudBackup {
   }
 
   static restore(context: common.UIAbilityContext, name: string, local: AppData): Promise<AppData> {
-    return exclusive(() => restoreCloudFile(context, name, local));
+    return withBackupOperation(async () => {
+      const openID = await huaweiAccount.backupOpenID(context);
+      return restoreCloudFile(context, name, local, openID);
+    });
   }
   static restoreLatest(context: common.UIAbilityContext, local: AppData): Promise<AppData> {
-    return exclusive(async () => {
+    return withBackupOperation(async () => {
+      const openID = await huaweiAccount.backupOpenID(context);
       if (!await requestSync()) { throw new Error(t('云端同步尚未完成，请稍后重试恢复备份。')); }
       const latest = latestCloudBackup(await CloudBackup.list(context));
       if (!latest) { throw new Error(t('云端暂无可恢复的备份，请先在原设备完成备份。')); }
-      return restoreCloudFile(context, latest.name, local);
+      return restoreCloudFile(context, latest.name, local, openID);
     });
   }
 }

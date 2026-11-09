@@ -15,6 +15,7 @@ const panelCode = compile('export class Probe {\n' + panelSource.slice(
   panelSource.indexOf('  aboutToAppear()'), panelSource.indexOf('  @Builder')) + '\n}');
 const tick = () => new Promise(setImmediate);
 const t = (key, args = []) => key.replace(/\{(\d+)\}/g, (_, i) => args[i]);
+class BackupLoginRequired extends Error {}
 
 function setup() {
   const timers = new Map(), instances = [], logs = [], state = new Map([['startupBackupState', 'pending']]);
@@ -35,10 +36,23 @@ function setup() {
     }
   };
   const exports = {};
+  let operating = false;
   const imports = {
     '../model/Diagnostics': { Diagnostics: { log: (...args) => logs.push(args) } },
     '@kit.CoreFileKit': { cloudSync, fileIo }, '@kit.ArkTS': {},
-    '../model/I18n': { t }, './Backup': { readBackupFile: async (_context, file, local) => { control.restores.push(file); return { ...local, restored: true }; } }, './FileBytes': {}
+    '../model/I18n': { t }, './Backup': {
+      backupBusy: () => operating,
+      async withBackupOperation(action) {
+        if (operating) throw Error('另一项备份操作正在进行');
+        operating = true;
+        try { return await action(); } finally { operating = false; }
+      },
+      readBackupFile: async (_context, file, local) => { control.restores.push(file); return { ...local, restored: true }; }
+    }, './FileBytes': {},
+    './HuaweiAccount': { huaweiAccount: { async backupOpenID() {
+      if (control.signedOut) throw new BackupLoginRequired('请先登录华为账号');
+      return 'fixture-openid';
+    } } }
   };
   vm.runInNewContext(serviceCode, { exports, require: id => {
     assert.ok(id in imports, 'Unexpected import: ' + id); return imports[id];
@@ -68,7 +82,7 @@ function panel(cloud) {
   const exports = {};
   vm.runInNewContext(panelCode, { exports, CloudBackup: cloud, cloudBackupError: error => error.message,
     latestCloudBackup: items => items.find(item => item.location === 2 || item.location === 3), getLocale: () => 'en-US',
-    Diagnostics: { log() {} }, t });
+    Diagnostics: { log() {} }, BackupLoginRequired, t });
   return Object.assign(new exports.Probe(), { visible: true, foreground: true, busy: false,
     error: '', status: '', statusError: false, backupDate: '',
     app: { busy: false, exportSnapshot: () => ({}) }, automatic: { confirmUploaded() {} }, context: () => ({}) });
@@ -78,11 +92,23 @@ test('registration completion cannot hide a failed start or release the cloud lo
   const h = setup(); h.control.start = async () => { throw Object.assign(Error('not ready'), { code: 22400001 }); };
   const pending = h.CloudBackup.sync(); pending.catch(() => {});
   await tick();
-  await assert.rejects(h.CloudBackup.sync(), /另一项云备份/);
+  await assert.rejects(h.CloudBackup.sync(), /另一项备份/);
   for (const ms of [500, 1000, 2000]) await h.timer(ms);
   await assert.rejects(pending, error => error.code === 22400001);
   assert.equal(h.control.starts, 4); assert.equal(h.timers.size, 0);
   assert.ok(h.instances.every(instance => instance.callback === undefined));
+});
+
+test('cloud backup, restore and upload retry require an account before cloud I/O', async () => {
+  const h = setup(); h.control.signedOut = true;
+  const context = { cloudFileDir: '/cloud' };
+  await assert.rejects(h.CloudBackup.create(context, {}), BackupLoginRequired);
+  await assert.rejects(h.CloudBackup.restore(context, 'tinybot-latest.tinybot', {}), BackupLoginRequired);
+  await assert.rejects(h.CloudBackup.restoreLatest(context, {}), BackupLoginRequired);
+  await assert.rejects(h.CloudBackup.retryUpload(context), BackupLoginRequired);
+  assert.equal(h.control.accesses, 0);
+  assert.equal(h.control.starts, 0);
+  assert.equal(h.CloudBackup.busy, false);
 });
 
 test('completion waits for this start acknowledgement and rejects its late failure', async () => {
