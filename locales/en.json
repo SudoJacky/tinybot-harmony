@@ -2885,6 +2885,7 @@
   "此看板暂无卡片。": "This board has no cards yet.",
   "长按左上角移动，长按右下角调整；松手按网格落位": "Hold the top-left to move or bottom-right to resize; release to snap to the grid",
   "公式渲染失败": "Formula rendering failed",
+  "Mermaid 图表渲染失败": "Mermaid diagram rendering failed",
   "模型服务账户，一眼掌握": "Your provider accounts at a glance",
   "已连接的模型服务": "Connected providers",
   "此刻": "Here & now",
