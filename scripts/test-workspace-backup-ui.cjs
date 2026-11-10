@@ -140,4 +140,15 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync(emitted, 'utf8'), { compil
   assert.equal(panel.listingPending, false);
   assert.equal(panel.truncated, false);
   console.log('PASS folder navigation cancels old reads and keeps only the current directory result');
+
+  panel.error = 'import failed';
+  panel.files.list = async () => { throw Error('directory unavailable'); };
+  await panel.refresh();
+  assert.equal(panel.listingError, 'directory unavailable');
+  assert.equal(panel.error, 'import failed');
+  panel.files.list = async () => ({ entries: [], truncated: false });
+  await panel.refresh();
+  assert.equal(panel.listingError, '');
+  assert.equal(panel.error, 'import failed');
+  console.log('PASS successful listing retries clear only the directory error');
 })().catch(error => { console.error(error); process.exitCode = 1; });

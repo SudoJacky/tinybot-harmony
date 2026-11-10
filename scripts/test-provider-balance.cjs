@@ -292,14 +292,18 @@ async function checkLifePanelSource() {
   ProviderBalanceSource.configure([profile,{...profile,id:'disabled',enabled:false},{...profile,id:'unsupported',baseUrl:'https://elsewhere.invalid'}]);
   const catalog=JSON.parse(providerBalanceCatalog());assert.equal(catalog.accounts.length,1);assert.equal(catalog.accounts[0].id,profile.id);
   assert.equal(catalog.accounts[0].presetId,'deepseek');
-  const {PROVIDER_LOGOS}=load('model/ProviderLogoCatalog');
-  for(const [brand,uri] of Object.entries(PROVIDER_LOGOS)) {
+  const { BALANCE_PANEL_HTML } = load('model/BalancePanelTemplate');
+  const logos = JSON.parse(/^const logos=(.+);$/m.exec(BALANCE_PANEL_HTML)[1]);
+  const brands = fs.readdirSync(path.join(root, '../resources/base/media'))
+    .filter(name => /^logo_.+\.svg$/.test(name)).map(name => name.slice(5, -4)).sort();
+  assert.deepEqual(Object.keys(logos).sort(), brands);
+  for(const [brand,uri] of Object.entries(logos)) {
     assert.equal(decodeURIComponent(uri.slice('data:image/svg+xml,'.length)),
       fs.readFileSync(path.join(root,`../resources/base/media/logo_${brand}.svg`),'utf8').trim(), 'HTML and native logos share the same asset');
   }
   assert.ok(!JSON.stringify(catalog).includes('wallet-secret-alias'));assert.ok(!JSON.stringify(catalog).includes('api.deepseek.com'));
   assert.equal(catalog.html,undefined);assert.equal(catalog.guidance,undefined);
-  const definition={...catalog.definition,view:{version:1,html:load('model/BalancePanelTemplate').BALANCE_PANEL_HTML,css:'',js:'',library:'none',height:420,autoHeight:true}};
+  const definition={...catalog.definition,view:{version:1,html:BALANCE_PANEL_HTML,css:'',js:'',library:'none',height:420,autoHeight:true}};
   parsePanelSpec(JSON.stringify(definition));
   for(const patch of [{url:'https://evil.invalid'}, {auth:{type:'bearer'}}, {providerIds:['invalid id']}, {providerIds:[profile.id,profile.id]}, {providerIds:[]}])
     assert.throws(()=>parsePanelSpec(JSON.stringify({...definition,source:{...definition.source,...patch}})));
