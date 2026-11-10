@@ -49,15 +49,15 @@ function form(app, tab, entryId = '') {
   app.productivity.servers.push({ id: 'server', name: 'MCP', url: 'https://example.com/mcp', credentialAlias: 'saved-alias', enabled: true });
   let fail = true;
   app.saveProductivity = async data => { if (fail) return false; app.productivity = data; return true; };
-  const template = form(app, 'templates', 'summarize');
-  template.value.content = 'edited draft';
-  assert.notEqual(app.productivity.templates[0].content, 'edited draft', 'Opening and typing cannot mutate the saved record');
-  await template.value.save();
-  assert.equal(template.value.error, app.error); assert.equal(template.closed.length, 0);
-  fail = false; await template.value.save();
-  assert.equal(app.productivity.templates[0].content, 'edited draft'); assert.equal(template.closed.length, 1);
-  const memory = form(app, 'memory'); memory.value.content = 'local preference'; memory.value.scoped = true;
-  await memory.value.save(); assert.equal(app.productivity.memories[0].threadId, 'chat');
+  app.productivity.memories.push({ id: 'existing-memory', content: 'previous preference', threadId: '', updatedAt: 1 });
+  const memory = form(app, 'memory', 'existing-memory');
+  memory.value.content = 'local preference'; memory.value.scoped = true;
+  assert.equal(app.productivity.memories[0].content, 'previous preference', 'Opening and typing cannot mutate the saved record');
+  await memory.value.save();
+  assert.equal(memory.value.error, app.error); assert.equal(memory.closed.length, 0);
+  fail = false; await memory.value.save();
+  assert.equal(app.productivity.memories[0].content, 'local preference'); assert.equal(memory.closed.length, 1);
+  assert.equal(app.productivity.memories[0].threadId, 'chat');
   console.log('PASS editor drafts, failed save/retry, successful return and memory scope');
 
   let returned, route;

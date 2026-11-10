@@ -24,7 +24,8 @@ function buttonClick(id) {
 }
 const click = buttonClick('add-thread-reference'), expandClick = buttonClick('phone-expand-draft');
 const menuClick = find(cls, n => ts.isCallExpression(n) && n.expression.getText(tree) === 'this.plusMenuRow.bind(this)' &&
-  n.arguments[2]?.getText(tree) === "'plus-menu-reference'").arguments[6];
+  n.arguments[2]?.getText(tree) === "'plus-menu-reference'").arguments.at(-1);
+assert.ok(menuClick && ts.isArrowFunction(menuClick), 'Locate the emitted reference menu action');
 const sheet = find(cls, n => ts.isCallExpression(n) && n.expression.getText(tree).endsWith('.bindSheet') &&
   n.arguments[0]?.getText(tree).includes('this.showPlus')).arguments[2];
 function fixture() {

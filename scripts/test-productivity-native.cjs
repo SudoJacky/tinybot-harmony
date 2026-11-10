@@ -1718,7 +1718,7 @@ async function test(name, run) {
     assert.equal(merged.threads.length,1,'restoring an existing conversation must not duplicate it');assert.equal(merged.threads[0].modelRef.providerId,'provider');
     model.parseAppData(JSON.stringify(restored));const bad=JSON.parse(exported);bad.files[0].path='../escape';fs.writeFileSync(nativePath(selectedFile),JSON.stringify(bad));await assert.rejects(readBackup(context,model.emptyData()),/路径/);
   });
-  await test('repeated restore merges three chats and templates without overwriting local files or edits',async()=>{
+  await test('repeated restore merges chats and legacy templates without overwriting local files or edits',async()=>{
     const {createBackupFile,readBackupFile}=load(path.join(source,'services/Backup'));
     const {SessionService}=load(path.join(source,'services/SessionService'));
     const {defaultProductivity}=load(path.join(source,'model/Productivity'));
@@ -1732,32 +1732,40 @@ async function test(name, run) {
       {id:'answer-'+i,role:'assistant',content:'same answer',status:'complete',error:''}]}));
     data.threads[1].parentThreadId='chat-0';data.threads[1].parentMessageId='answer-0';
     data.threads[1].references=[{threadId:'chat-0',title:'same title',content:'snapshot',capturedAt:1,truncated:false}];
-    data.productivity.templates.push({id:'custom',name:'Custom',content:'original {{input}}'});
+    assert.equal(data.productivity.templates.length,0,'New installs do not seed prompt templates');
+    const factoryTemplate={id:'summarize',name:'总结材料',content:'请总结以下材料，提炼要点、待办事项及仍需确认的问题：\n\n{{input}}'};
+    const customizedTemplate={...factoryTemplate,content:'Customized summary'};
+    data.productivity.templates.push(customizedTemplate,{id:'custom',name:'Custom',content:'original {{input}}'});
     data.productivity.memories=[{id:'memory',content:'fact',threadId:'chat-1',sourceThreadId:'chat-0',sourceMessageId:'question-0',updatedAt:1}];
     for(const thread of data.threads){fs.mkdirSync(nativePath(root+'/workspace/'+thread.id),{recursive:true});fs.writeFileSync(nativePath(root+'/workspace/'+thread.id+'/note.txt'),'backup');}
     const context={cacheDir:root+'/cache',getApplicationContext:()=>({filesDir:root})};
     const backup=await createBackupFile(context,data);const original=legacyBackupFixture(fs.readFileSync(nativePath(backup)));
+    original.data.productivity.templates=data.productivity.templates;
+    const legacyBackup=root+'/cache/legacy-templates.json';
+    fs.writeFileSync(nativePath(legacyBackup),JSON.stringify(original));
     const vault={read:async()=>'',write:async()=>{},remove:async()=>{}};
     const resources={createId:()=>crypto.randomUUID(),ensureWorkspace:async()=>{},configureProviders:()=>{},reportError:()=>{},tools:()=>({definitions:()=>[]})};
     const repository=new ConversationStore(nativePath(root));
     const local=JSON.parse(JSON.stringify(data));local.threads=local.threads.slice(0,1);local.threads[0].title='edited locally';
+    local.productivity.templates[0]=factoryTemplate;
     local.productivity.templates.find(t=>t.id==='custom').content='edited locally';local.productivity.memories=[];
     await repository.save(local);const session=new SessionService(repository,idleRuntime(vault),vault,resources);await session.initialize();
     fs.writeFileSync(nativePath(root+'/workspace/chat-0/note.txt'),'local file');
     fs.writeFileSync(nativePath(root+'/attachments/'+attachment.path),'edited');
-    const prepared=await readBackupFile(context,backup,session.snapshot());
+    const prepared=await readBackupFile(context,legacyBackup,session.snapshot());
     assert.equal(prepared.threads.length,2);assert.equal(prepared.threads[0].parentThreadId,'chat-0');
     assert.equal(prepared.threads[0].parentMessageId,'answer-0');assert.equal(prepared.threads[0].references[0].threadId,'chat-0');
     assert.equal(prepared.threads[0].messages[0].id,'question-1');
     assert.equal(await session.importSnapshot(prepared),true,session.state.error);
     const merged=session.snapshot();assert.equal(merged.threads.length,3);assert.equal(merged.threads[0].title,'edited locally');
-    assert.equal(merged.productivity.templates.length,3);assert.equal(merged.productivity.templates.find(t=>t.id==='custom').content,'edited locally');
+    assert.equal(merged.productivity.templates.length,2);assert.equal(merged.productivity.templates.find(t=>t.id==='custom').content,'edited locally');
+    assert.equal(merged.productivity.templates.find(t=>t.id==='summarize').content,customizedTemplate.content);
     assert.equal(merged.productivity.memories.length,1);assert.equal(merged.productivity.memories[0].sourceMessageId,'question-0');
     assert.equal(fs.readFileSync(nativePath(root+'/workspace/chat-0/note.txt'),'utf8'),'local file');
     assert.equal(fs.readFileSync(nativePath(root+'/attachments/'+attachment.path),'utf8'),'edited');
     const files=fs.readdirSync(nativePath(root+'/attachments')).sort();
     for(let i=0;i<2;i++){
-      const restored=await readBackupFile(context,backup,session.snapshot());assert.equal(restored.threads.length,0);
+      const restored=await readBackupFile(context,legacyBackup,session.snapshot());assert.equal(restored.threads.length,0);
       assert.equal(await session.importSnapshot(restored),true,session.state.error);
       assert.equal(JSON.stringify(session.snapshot()),JSON.stringify(merged));
       assert.deepEqual(fs.readdirSync(nativePath(root+'/attachments')).sort(),files);
@@ -1769,15 +1777,15 @@ async function test(name, run) {
     assert.equal(restarted.snapshot().threads.length,3);
     // An old regenerated ID must not duplicate an identical template. Same name alone is insufficient.
     const legacy=model.emptyData();legacy.productivity=defaultProductivity();
-    legacy.productivity.templates=legacy.productivity.templates.map(t=>({...t,id:crypto.randomUUID()}));
+    legacy.productivity.templates.push({...customizedTemplate,id:crypto.randomUUID()});
     legacy.productivity.templates.push({id:'another',name:'Custom',content:'different content'});
     assert.equal(await restarted.importSnapshot(legacy),true,restarted.state.error);
-    assert.equal(restarted.snapshot().productivity.templates.length,4);
+    assert.equal(restarted.snapshot().productivity.templates.length,3);
     // Even skipped chats must still undergo backup validation before filesystem writes.
-    original.files[0].path='../escape';fs.writeFileSync(nativePath(backup),JSON.stringify(original));
-    await assert.rejects(readBackupFile(context,backup,restarted.snapshot()),/路径/);
+    original.files[0].path='../escape';fs.writeFileSync(nativePath(legacyBackup),JSON.stringify(original));
+    await assert.rejects(readBackupFile(context,legacyBackup,restarted.snapshot()),/路径/);
     original.files[0].path='note.txt';original.data.threads[0].id='../escape';
-    fs.writeFileSync(nativePath(backup),JSON.stringify(original));await assert.rejects(readBackupFile(context,backup,restarted.snapshot()));
+    fs.writeFileSync(nativePath(legacyBackup),JSON.stringify(original));await assert.rejects(readBackupFile(context,legacyBackup,restarted.snapshot()));
     Attachments.configure('/sandbox/backup-app');
   });
   await test('cloud backups replace the latest snapshot, preserve history and stay pending until native upload',async()=>{

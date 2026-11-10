@@ -3,13 +3,19 @@ import { AppData, MessageData, ThreadData } from '../model/Conversation';
 import { prepareBackupServices } from '../model/BackupRestore';
 import { mergeBackupConfig, mergeBackupOptions, mergeBackupSkills } from '../model/BackupSettings';
 import { ToolSelection } from '../model/AgentMode';
-import { Attachment, defaultProductivity, validateProductivity } from '../model/Productivity';
+import { Attachment, PromptTemplate, defaultProductivity, validateProductivity } from '../model/Productivity';
 import { defaultExtensions, validateExtensions } from '../model/Skills';
 import { ProjectData, projectName, validateProjects } from '../model/Project';
 import { SharedFolder, validateSharedFolders } from '../model/SharedFolders';
 import { ThreadReference } from '../model/ThreadReferences';
 
 export interface SessionImportCandidate { data: AppData; threads: ThreadData[]; providerIds: Map<string, string>; serverIds: Map<string, string>; }
+
+// A customized template from an old backup still replaces an untouched factory template.
+const LEGACY_BUILTIN_TEMPLATES: PromptTemplate[] = [
+  { id: 'summarize', name: '总结材料', content: '请总结以下材料，提炼要点、待办事项及仍需确认的问题：\n\n{{input}}' },
+  { id: 'polish', name: '润色文字', content: '请润色以下文字，保留原意，使表达清晰自然：\n\n{{input}}' }
+];
 
 // Build detached candidates only. SessionService owns admission, platform effects and commits.
 export function importedSessionCandidate(local: AppData, imported: AppData, createId: () => string): SessionImportCandidate {
@@ -40,7 +46,7 @@ export function importedSessionCandidate(local: AppData, imported: AppData, crea
   }
   for (const template of source.templates) {
     const index = extras.templates.findIndex((item) => item.id === template.id);
-    const builtin = defaultProductivity().templates.find((item) => item.id === template.id);
+    const builtin = LEGACY_BUILTIN_TEMPLATES.find((item) => item.id === template.id);
     if (index >= 0 && builtin && JSON.stringify(extras.templates[index]) === JSON.stringify(builtin)) { extras.templates[index] = template; continue; }
     // Older restores regenerated template IDs, including the built-in templates.
     if (!extras.templates.some((item) => item.id === template.id ||

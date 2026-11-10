@@ -25,7 +25,7 @@ import { ThreadReference, referenceQuery } from '../model/ThreadReferences';
 import { ThreadReferenceCard } from './ThreadReferenceCard';
 import { curves, FrameCallback } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
-import { Attachment, MAX_MESSAGE_ATTACHMENTS, PromptTemplate } from '../model/Productivity';
+import { Attachment, MAX_MESSAGE_ATTACHMENTS } from '../model/Productivity';
 import { Attachments } from '../services/Attachments';
 import { AttachmentDrop, ATTACHMENT_DROP_TYPES, importDroppedAttachments } from '../services/AttachmentDrop';
 import { image } from '@kit.ImageKit';
@@ -131,7 +131,6 @@ export struct ChatPanel {
   @Prop previewInspectable: boolean = false;
   @Prop inspectedPreviewId: string = '';
   onInspectPreview: (messageId: string, previewId: string) => void = () => {};
-  onTools: (tab: string) => void = () => {};
   @ObjectLink approval: ToolApproval;
   @ObjectLink browser: BrowserSession;
   onBrowser: () => void = () => {};
@@ -145,7 +144,6 @@ export struct ChatPanel {
   private plusMenuTimer: number = -1;
   // Tablets open the add actions as a menu above the plus; phones keep the sheet.
   @State private showPlusMenu: boolean = false;
-  @State private plusPane: string = 'root';
   @State private showModelMenu: boolean = false;
   @State private showDrawing: boolean = false;
   @State private drawingDraft: DrawingDraft = new DrawingDraft();
@@ -1002,15 +1000,12 @@ export struct ChatPanel {
 
   @Builder
   plusMenuRow(icon: Resource, label: string, compId: string, enabled: boolean, withChevron: boolean,
-              trailing: string, action: () => void) {
+              action: () => void) {
     Row({ space: 10 }) {
       SymbolGlyph(icon).fontSize(18).fontColor([enabled ? this.appearance.accent : $r('app.color.text_tertiary')])
       Text(label).fontFamily(this.appearance.fontFamily).fontSize(14).maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
         .fontColor(enabled ? $r('app.color.text_primary') : $r('app.color.text_tertiary'))
-      if (trailing.length > 0) {
-        Text(trailing).fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.text_tertiary'))
-      }
       if (withChevron) {
         SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(12).fontColor([$r('app.color.text_tertiary')])
       }
@@ -1024,29 +1019,27 @@ export struct ChatPanel {
   plusRootPane() {
     Column({ space: 2 }) {
       if (AdaptiveUi.compactComposer(this.panelWidth)) {
-        this.plusMenuRow($r('sys.symbol.wrench_and_screwdriver'), t('工具范围'), 'plus-menu-tools', !this.app.busy, true, '',
+        this.plusMenuRow($r('sys.symbol.wrench_and_screwdriver'), t('工具范围'), 'plus-menu-tools', !this.app.busy, true,
           () => this.dismissPlusMenu(this.onToolScope))
       }
       this.plusMenuRow($r('sys.symbol.picture'), t('图片'), 'plus-menu-photo',
-        this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, false, '',
+        this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, false,
         () => this.dismissPlusMenu(() => this.attach('photo')))
       this.plusMenuRow($r('sys.symbol.camera'), t('拍照'), 'plus-menu-camera',
-        this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, false, '',
+        this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, false,
         () => this.dismissPlusMenu(() => this.attach('camera')))
       this.plusMenuRow($r('sys.symbol.doc_text'), t('文本文件'), 'plus-menu-text',
-        this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, false, '',
+        this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, false,
         () => this.dismissPlusMenu(() => this.attach('file')))
       this.plusMenuRow($r('sys.symbol.square_and_pencil'), t('画板'), 'plus-menu-drawing',
-        this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, false, '',
+        this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, false,
         () => this.dismissPlusMenu(() => this.openDrawing()))
       Divider().strokeWidth(0.5).color($r('app.color.divider')).margin({ left: 10, right: 10, top: 4, bottom: 4 })
-      this.plusMenuRow($r('sys.symbol.folder'), t('工作区'), 'plus-menu-workspace', !this.app.busy, true, '',
+      this.plusMenuRow($r('sys.symbol.folder'), t('工作区'), 'plus-menu-workspace', !this.app.busy, true,
         () => { this.showPlusMenu = false; this.onFiles(); })
       Divider().strokeWidth(0.5).color($r('app.color.divider')).margin({ left: 10, right: 10, top: 4, bottom: 4 })
       this.plusMenuRow($r('sys.symbol.link'), t('引用其他会话'), 'plus-menu-reference',
-        this.canAttach() && this.thread.references.length < 4, false, '', () => this.dismissPlusMenu(() => this.addThreadReference()))
-      this.plusMenuRow($r('sys.symbol.doc_plaintext'), t('提示词模板'), 'plus-menu-templates', !this.app.busy, true,
-        String(this.app.productivity.templates.length), () => { this.plusPane = 'templates'; })
+        this.canAttach() && this.thread.references.length < 4, false, () => this.dismissPlusMenu(() => this.addThreadReference()))
       Text(this.thread.attachments.length >= MAX_MESSAGE_ATTACHMENTS ? t('已达到每条消息 {0} 个附件的上限', [MAX_MESSAGE_ATTACHMENTS]) : t('每条消息最多 {0} 个附件 · 图片需模型支持视觉输入', [MAX_MESSAGE_ATTACHMENTS]))
         .fontFamily(this.appearance.fontFamily).fontSize(11).lineHeight(16).fontColor($r('app.color.text_tertiary'))
         .width('100%').padding({ left: 10, right: 10, top: 6, bottom: 8 })
@@ -1054,56 +1047,9 @@ export struct ChatPanel {
   }
 
   @Builder
-  plusTemplateRow(item: PromptTemplate) {
-    Column({ space: 2 }) {
-      Text(item.name).fontFamily(this.appearance.fontFamily).fontSize(14).maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
-      Text(item.content.replace(/\s+/g, ' ')).fontFamily(this.appearance.fontFamily).fontSize(11).maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_tertiary'))
-    }.width('100%').alignItems(HorizontalAlign.Start).padding({ left: 10, right: 10, top: 7, bottom: 7 })
-    .id('plus-template-' + item.id).width('100%').height(52).borderRadius(10)
-    .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
-    .enabled(!this.thread.archived)
-    .onClick(() => {
-      this.showPlusMenu = false;
-      this.app.useTemplate(item.id);
-      this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t('已套用模板，可继续编辑后发送') });
-    })
-  }
-
-  @Builder
-  plusTemplatesPane() {
-    Column({ space: 2 }) {
-      Row({ space: 2 }) {
-        IconButton({ icon: $r('sys.symbol.chevron_left'), label: t('返回'), compId: 'plus-menu-back',
-          diameter: 32, iconSize: 16, onTap: () => { this.plusPane = 'root'; } })
-        Text(t('提示词模板')).fontFamily(this.appearance.fontFamily).fontSize(14).fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.text_primary')).layoutWeight(1)
-        Text(String(this.app.productivity.templates.length)).fontFamily(this.appearance.fontFamily).fontSize(11)
-          .fontColor($r('app.color.text_tertiary'))
-      }.width('100%').height(44).padding({ left: 2, right: 10 })
-      if (this.app.productivity.templates.length === 0) {
-        Text(t('还没有模板')).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_tertiary'))
-          .width('100%').padding({ left: 10, right: 10, top: 12, bottom: 12 })
-      } else {
-        List({ space: 2 }) {
-          ForEach(this.app.productivity.templates, (item: PromptTemplate) => {
-            ListItem() { this.plusTemplateRow(item) }
-          }, (item: PromptTemplate) => item.id)
-        }.width('100%').height(Math.min(260, this.app.productivity.templates.length * 52))
-          .scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring)
-      }
-      Divider().strokeWidth(0.5).color($r('app.color.divider')).margin({ left: 10, right: 10, top: 4, bottom: 4 })
-      this.plusMenuRow($r('sys.symbol.gearshape'), t('管理'), 'plus-menu-manage', !this.app.busy, true, '',
-        () => { this.showPlusMenu = false; this.onTools('templates'); })
-    }.width('100%')
-  }
-
-  @Builder
   plusMenu() {
     Column() {
-      if (this.plusPane === 'templates') { this.plusTemplatesPane() }
-      else { this.plusRootPane() }
+      this.plusRootPane()
     }.width(320).constraintSize({ maxHeight: 480 }).padding(4).borderRadius(20).clip(true)
   }
 
@@ -1131,40 +1077,6 @@ export struct ChatPanel {
         Button(t('引用其他会话')).fontFamily(this.appearance.fontFamily).id('add-thread-reference').attributeModifier(Btn.tonal).width('100%')
           .enabled(this.canAttach() && this.thread.references.length < 4)
           .onClick(() => this.fromSheet(() => this.addThreadReference()))
-        Column() {
-          Row() {
-            Text(t("提示词模板")).fontFamily(this.appearance.fontFamily).fontSize(13).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_secondary'))
-              .layoutWeight(1)
-            Button(t("管理")).fontFamily(this.appearance.fontFamily).id('manage-templates').attributeModifier(Btn.textSmall).enabled(!this.app.busy)
-              .onClick(() => { this.showPlus = false; this.onTools('templates'); })
-          }.width('100%').padding({ left: 4 })
-          if (this.app.productivity.templates.length === 0) {
-            Text(t("还没有模板")).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_tertiary'))
-              .padding(Space.lg).width('100%').textAlign(TextAlign.Center)
-          }
-          Column() {
-            ForEach(this.app.productivity.templates, (item: PromptTemplate, index: number) => {
-              if (index > 0) { Divider().strokeWidth(0.5).color($r('app.color.divider')).margin({ left: 52 }) }
-              Row({ space: Space.md }) {
-                SymbolGlyph($r('sys.symbol.doc_plaintext')).fontSize(20).fontColor([this.appearance.accent])
-                Column({ space: 2 }) {
-                  Text(item.name).fontFamily(this.appearance.fontFamily).fontSize(15).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                    .fontColor($r('app.color.text_primary'))
-                  Text(item.content.replace(/\s+/g, ' ')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).maxLines(1)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_tertiary'))
-                }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-              }
-              .id('use-template-' + item.id).width('100%').constraintSize({ minHeight: 56 })
-              .padding({ left: Space.lg, right: Space.lg, top: 8, bottom: 8 })
-              .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
-              .enabled(!this.thread.archived)
-              .onClick(() => {
-                this.showPlus = false; this.app.useTemplate(item.id);
-                this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t("已套用模板，可继续编辑后发送") });
-              })
-            }, (item: PromptTemplate) => item.id)
-          }.width('100%').borderRadius(Radius.lg).clip(true).backgroundColor($r('app.color.surface'))
-        }.width('100%')
       }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.xl })
     }.width('100%').scrollBar(BarState.Off).align(Alignment.Top)
   }
@@ -1523,13 +1435,12 @@ export struct ChatPanel {
 
   @Builder
   composerAddButton() {
-    IconButton({ icon: $r('sys.symbol.plus'), label: t('添加图片、画板、文件或模板'), compId: 'add-attachment', diameter: this.workbench ? 36 : 44,
+    IconButton({ icon: $r('sys.symbol.plus'), label: t('添加图片、画板或文件'), compId: 'add-attachment', diameter: this.workbench ? 36 : 44,
       iconSize: 18, fill: $r('app.color.surface_variant'),
       disabled: this.thread.archived || this.app.saveError.length > 0 || this.speechActive() || this.speechHolding,
       onTap: () => {
         this.getUIContext().getFocusController().clearFocus();
         if (this.workbench) {
-          this.plusPane = 'root';
           this.showPlusMenu = !this.showPlusMenu;
         } else { this.showPlus = true; }
       } })

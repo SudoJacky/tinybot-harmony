@@ -40,7 +40,7 @@ module.exports = async function completeBackup({ load, fs, nativePath, secrets, 
     modelRef: { providerId: profile.id, modelId: 'model' } }]; data.activeThreadId = 'owner';
   data.productivity = defaultProductivity();
   data.productivity.options = defaultAssistantOptions();
-  data.productivity.templates[0].content = 'Customized factory template {{input}}';
+  data.productivity.templates = [{ id: 'summarize', name: 'Summarize', content: 'Customized factory template {{input}}' }];
   data.productivity.servers = [{ id: 'mcp-old', name: 'Private MCP', url: 'https://mcp.invalid/api', enabled: true, authType: 'bearer', credentialAlias: 'source-mcp' },
     { id: 'mcp-public', name: 'Public MCP', url: 'https://public.invalid/mcp', enabled: true, credentialAlias: '' }];
   Object.assign(data.productivity.options, { miniAppsEnabled: true, autoMemory: false, saveSummary: true, readOnly: true,
@@ -88,6 +88,7 @@ module.exports = async function completeBackup({ load, fs, nativePath, secrets, 
   const envelope = legacyBackupFixture(bytes), publicText = JSON.stringify(envelope);
   for (const key of [...rawSecrets, feedbackIdentity, 'OAUTH_PRIVATE_COMPLETE', 'REFRESH_PRIVATE_COMPLETE', 'NEVER_MIGRATE']) assert.ok(!publicText.includes(key), 'No credential or system authorization in public backup metadata');
   assert.equal(envelope.data.config.systemPrompt, data.config.systemPrompt);
+  assert.deepEqual(envelope.data.productivity.templates, [], 'New archives exclude legacy prompt templates');
   assert.equal(envelope.data.productivity.options.search.enabled, false, 'Public Tavily metadata has no live alias');
   secrets.clear(); await configureUsage(destination.filesDir); Attachments.configure(destination.filesDir);
   assert.equal(UsageLedger.list().length, 0, 'Destination starts with a cold empty ledger');
@@ -116,7 +117,7 @@ module.exports = async function completeBackup({ load, fs, nativePath, secrets, 
   assert.equal(result.productivity.options.title.providerId, profile.id);
   assert.equal(result.productivity.options.teamWorker.providerId, profile.id);
   assert.equal(result.productivity.options.autoRoute, undefined, 'Import does not restore retired automatic routing');
-  assert.equal(result.productivity.templates[0].content, data.productivity.templates[0].content);
+  assert.equal(result.productivity.templates.length, 0);
   assert.equal(result.extensions.skills[0].document, data.extensions.skills[0].document); assert.equal(result.extensions.skills[0].enabled, false);
   assert.equal(result.extensions.webEnabled, false); assert.equal(result.extensions.browserPolicy, 'disabled');
   assert.equal(await vault.read(result.productivity.servers[0].credentialAlias), rawSecrets[1]); assert.equal(result.productivity.servers[0].enabled, true);

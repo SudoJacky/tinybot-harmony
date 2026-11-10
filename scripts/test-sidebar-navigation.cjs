@@ -164,7 +164,7 @@ const panelSource = fs.readFileSync(panelFile, 'utf8').replace('struct Productiv
 const panelTree = ts.createSourceFile(panelFile, panelSource, ts.ScriptTarget.Latest, true);
 const panelClass = panelTree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'ProductivityPanel');
 const panelBody = ['applyRequestedTab', 'selectTab'].map(name => panelClass.members.find(node => node.name?.getText(panelTree) === name).getText(panelTree)).join('\n');
-const panelGlobals = { exports: {}, TABS: ['memory', 'templates', 'mcp'] };
+const panelGlobals = { exports: {}, TABS: ['memory', 'mcp'] };
 vm.runInNewContext(ts.transpileModule(`class Panel { ${panelBody} } exports.Panel = Panel;`, {
   compilerOptions: { target: ts.ScriptTarget.ES2021 }
 }).outputText, panelGlobals);
@@ -187,14 +187,14 @@ test('settings shortcuts synchronize the retained tools panel and repeated reque
     if (panel.tabRequest !== request) { panel.tabRequest = request; panel.applyRequestedTab(); }
   };
   page.openTools('memory'); update();
-  for (const [tab, index] of [['mcp', 2], ['templates', 1]]) {
+  for (const [tab, index] of [['mcp', 1], ['memory', 0]]) {
     page.openSettings(); page.openTools(tab); update();
     assert.equal(panel.tab, tab); assert.equal(indexes.at(-1), index);
     assert.deepEqual(routes.map(route => route.name), ['productivity']);
   }
-  panel.selectTab(2);
-  page.openTools('templates'); update();
-  assert.equal(panel.tab, 'templates', 'Repeat request must override manual tab selection');
+  panel.selectTab(1);
+  page.openTools('memory'); update();
+  assert.equal(panel.tab, 'memory', 'Repeat request must override manual tab selection');
 });
 
 for (const destination of ['settings', 'productivity', 'mini-apps']) {

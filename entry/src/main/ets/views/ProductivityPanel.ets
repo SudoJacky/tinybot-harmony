@@ -6,19 +6,18 @@ import { SwipeRow } from '../common/SwipeRow';
 import { util } from '@kit.ArkTS';
 import { McpOAuth } from '../services/McpOAuth';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
-import { ProductivityData, MemoryEntry, PromptTemplate, McpServer, validateProductivity } from '../model/Productivity';
+import { ProductivityData, MemoryEntry, McpServer, validateProductivity } from '../model/Productivity';
 import { MEMORY_CHAR_LIMIT, memoryCharacters } from '../model/MemoryMaintenance';
 import { Cancellation } from '../services/Cancellation';
 import { Btn, Font, Radius, Space, Styles, shortTime } from '../common/Theme';
 import { Banner, BottomBar, EmptyState, IconBadge, Segmented, Tag } from '../common/Widgets';
 
-const TABS: string[] = ['memory', 'templates', 'mcp'];
+const TABS: string[] = ['memory', 'mcp'];
 
 export interface ProductivityEditorRoute { tab: string; id: string; }
 export function productivityEditorTitle(tab: string, id: string): string {
   return tab === 'memory' ? (id ? t('编辑记忆') : t('添加记忆')) :
-    tab === 'templates' ? (id ? t('编辑模板') : t('新建模板')) :
-      (id ? t('编辑 MCP 服务') : t('添加 MCP 服务'));
+    (id ? t('编辑 MCP 服务') : t('添加 MCP 服务'));
 }
 
 @Component
@@ -68,9 +67,6 @@ export struct ProductivityPanel {
     if (this.tab === 'memory') {
       const item = this.app.productivity.memories.find((item) => item.id === this.entryId);
       this.content = item?.content || ''; this.scoped = !!item?.threadId;
-    } else if (this.tab === 'templates') {
-      const item = this.app.productivity.templates.find((item) => item.id === this.entryId);
-      this.name = item?.name || ''; this.content = item?.content || '';
     } else {
       const item = this.app.productivity.servers.find((item) => item.id === this.entryId);
       this.name = item?.name || ''; this.url = item?.url || ''; this.noAuth = !item?.credentialAlias;
@@ -98,9 +94,6 @@ export struct ProductivityPanel {
   private editMemory(item: MemoryEntry): void {
     this.openEditor(item.id);
   }
-  private editTemplate(item: PromptTemplate): void {
-    this.openEditor(item.id);
-  }
   private editServer(item: McpServer): void {
     this.openEditor(item.id);
   }
@@ -112,7 +105,6 @@ export struct ProductivityPanel {
   private canSave(): boolean {
     if (this.locked()) { return false; }
     if (this.tab === 'memory') { return this.content.trim().length > 0; }
-    if (this.tab === 'templates') { return this.name.trim().length > 0 && this.content.trim().length > 0; }
     return this.name.trim().length > 0 && this.url.trim().length > 0;
   }
   private snapshot(): ProductivityData { return JSON.parse(JSON.stringify(this.app.productivity)) as ProductivityData; }
@@ -131,14 +123,8 @@ export struct ProductivityPanel {
         this.onClose(result.warning);
         return;
       }
-      if (this.tab === 'memory') {
-        const memory: MemoryEntry = { id: id, content: this.content.trim(), threadId: this.scoped ? this.app.active.id : '', updatedAt: Date.now() };
-        data.memories = data.memories.filter((item) => item.id !== id).concat([memory]);
-      } else {
-        const template: PromptTemplate = { id: id, name: this.name.trim(), content: this.content };
-        const index = data.templates.findIndex((item) => item.id === id);
-        if (index >= 0) { data.templates[index] = template; } else { data.templates.push(template); }
-      }
+      const memory: MemoryEntry = { id: id, content: this.content.trim(), threadId: this.scoped ? this.app.active.id : '', updatedAt: Date.now() };
+      data.memories = data.memories.filter((item) => item.id !== id).concat([memory]);
       validateProductivity(data);
       if (!await this.app.saveProductivity(data)) { throw new Error(this.app.error); }
       this.toast(t("已保存")); this.onClose('');
@@ -159,8 +145,7 @@ export struct ProductivityPanel {
         warning = (await this.app.changeMcp({ action: 'remove', id: id }, this.cancellation)).warning;
       } else {
         const data = this.snapshot();
-        if (this.tab === 'memory') { data.memories = data.memories.filter((item) => item.id !== id); }
-        else { data.templates = data.templates.filter((item) => item.id !== id); }
+        data.memories = data.memories.filter((item) => item.id !== id);
         if (!await this.app.saveProductivity(data)) { throw new Error(this.app.error); }
       }
       if (this.editorOnly && this.editingId === id) { this.token = ''; this.onClose(warning); }
@@ -243,39 +228,6 @@ export struct ProductivityPanel {
           }
         }
       }, (item: MemoryEntry) => item.id + item.updatedAt)
-    }.width('100%').height('100%').attributeModifier(PageStyles.form).padding({ left: Space.page, right: Space.page }).scrollBar(BarState.Off)
-    .contentEndOffset(Space.lg).edgeEffect(EdgeEffect.Spring)
-  }
-
-  @Builder
-  templateTab() {
-    List({ space: Space.md }) {
-      ListItem() { this.caption(t("正文中的 {{input}} 会替换为输入框中的草稿。")) }
-      if (this.app.productivity.templates.length === 0) {
-        ListItem() { EmptyState({ icon: $r('sys.symbol.doc_plaintext'), title: t("还没有模板"), caption: t("把常用的提问方式保存下来，一键套用。") }) }
-      }
-      ForEach(this.app.productivity.templates, (item: PromptTemplate) => {
-        ListItem() {
-          SwipeRow({ rowKey: 'template-' + item.id, label: item.name, activeRow: this.swipeRow,
-            disabled: this.locked(), onOpen: (key: string) => { this.swipeRow = key; },
-            onDelete: () => this.remove(item.id, t('这个模板')) }) {
-          Row({ space: Space.md }) {
-            IconBadge({ icon: $r('sys.symbol.doc_plaintext') })
-            Column({ space: 4 }) {
-              Text(item.name).fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontWeight(FontWeight.Medium).maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
-              Text(item.content.replace(/\s+/g, ' ')).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(19).maxLines(2)
-                .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_secondary'))
-            }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-            Button(t("套用")).fontFamily(this.appearance.fontFamily).id('use-template-' + item.id).attributeModifier(Btn.tonalSmall)
-              .enabled(!this.app.busy && !this.app.active.archived)
-              .onClick(() => { this.app.useTemplate(item.id); this.onUse(); })
-          }.padding(Space.lg).width('100%').backgroundColor($r('app.color.surface')).borderRadius(Radius.lg)
-          .stateStyles({ pressed: { .opacity(0.7) }, normal: { .opacity(1) } })
-          .onClick(() => { if (!this.locked()) { this.editTemplate(item); } })
-          }
-        }
-      }, (item: PromptTemplate) => JSON.stringify(item))
     }.width('100%').height('100%').attributeModifier(PageStyles.form).padding({ left: Space.page, right: Space.page }).scrollBar(BarState.Off)
     .contentEndOffset(Space.lg).edgeEffect(EdgeEffect.Spring)
   }
@@ -397,13 +349,11 @@ export struct ProductivityPanel {
     Column() {
       Scroll() {
         Column({ space: Space.sm }) {
-          if (this.tab !== 'memory') {
-            this.fieldLabel(this.tab === 'mcp' ? t("服务名称") : t("模板名称"), 0)
-            TextInput({ text: this.name, placeholder: this.tab === 'mcp' ? t("例如：公司知识库") : t("例如：会议纪要") }).fontFamily(this.appearance.fontFamily)
+          if (this.tab === 'mcp') {
+            this.fieldLabel(t("服务名称"), 0)
+            TextInput({ text: this.name, placeholder: t("例如：公司知识库") }).fontFamily(this.appearance.fontFamily)
               .id('productivity-name').attributeModifier(Styles.input).backgroundColor($r('app.color.surface'))
               .maxLength(40).onChange((value) => { this.name = value; })
-          }
-          if (this.tab === 'mcp') {
             this.fieldLabel(t("服务地址"), Space.sm)
             TextInput({ text: this.url, placeholder: 'https://example.com/mcp' }).fontFamily(this.appearance.fontFamily).id('mcp-url').type(InputType.URL)
               .attributeModifier(Styles.input).backgroundColor($r('app.color.surface'))
@@ -426,23 +376,15 @@ export struct ProductivityPanel {
                 .onChange((value) => { this.token = value; })
             }
           } else {
-            if (this.tab === 'templates') { this.fieldLabel(t("模板正文"), Space.sm) }
-            TextArea({ text: this.content,
-              placeholder: this.tab === 'memory' ? t("例如：回答优先使用中文，代码示例使用 ArkTS。") : t("例如：请把以下内容整理成会议纪要：\n\n{{input}}") }).fontFamily(this.appearance.fontFamily)
+            TextArea({ text: this.content, placeholder: t("例如：回答优先使用中文，代码示例使用 ArkTS。") }).fontFamily(this.appearance.fontFamily)
               .id('productivity-content').attributeModifier(Styles.area).backgroundColor($r('app.color.surface'))
-              .height(this.tab === 'memory' ? 160 : 220).fontSize(15).showCounter(true)
-              .maxLength(this.tab === 'memory' ? 2000 : 12000).onChange((value) => { this.content = value; })
-            if (this.tab === 'templates') {
-              Button(t("插入 {{input}} 占位")).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.textSmall).enabled(!this.content.includes('{{input}}'))
-                .onClick(() => { this.content = this.content + (this.content.length > 0 ? '\n\n' : '') + '{{input}}'; })
-            }
-            if (this.tab === 'memory') {
-              this.fieldLabel(t("生效范围"), Space.sm)
-              Row({ space: Space.sm }) {
-                this.scopeChip(t("所有对话"), false)
-                this.scopeChip(t("仅本对话"), true)
-              }.width('100%').id('memory-scope')
-            }
+              .height(160).fontSize(15).showCounter(true)
+              .maxLength(2000).onChange((value) => { this.content = value; })
+            this.fieldLabel(t("生效范围"), Space.sm)
+            Row({ space: Space.sm }) {
+              this.scopeChip(t("所有对话"), false)
+              this.scopeChip(t("仅本对话"), true)
+            }.width('100%').id('memory-scope')
           }
           if (this.error.length > 0) {
             Banner({ text: this.error, compId: 'productivity-error' }).margin({ top: Space.sm })
@@ -453,7 +395,7 @@ export struct ProductivityPanel {
         Row({ space: Space.md }) {
           if (this.editingId.length > 0) {
             Button(t("删除")).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.danger).enabled(!this.locked())
-              .onClick(() => this.remove(this.editingId, this.tab === 'memory' ? t("这条记忆") : this.tab === 'templates' ? t("这个模板") : t("这个 MCP 服务")))
+              .onClick(() => this.remove(this.editingId, this.tab === 'memory' ? t("这条记忆") : t("这个 MCP 服务")))
           }
           Button(this.busy ? t("正在保存…") : t("保存")).fontFamily(this.appearance.fontFamily).id('save-productivity').attributeModifier(Btn.primary).layoutWeight(1)
             .enabled(this.canSave()).onClick(() => this.save())
@@ -465,12 +407,11 @@ export struct ProductivityPanel {
   @Builder
   listPage() {
     Column() {
-      Segmented({ options: [t("记忆"), t("模板"), 'MCP'], selected: this.currentIndex(), compIdPrefix: 'tab',
+      Segmented({ options: [t("记忆"), 'MCP'], selected: this.currentIndex(), compIdPrefix: 'tab',
         onSelect: (index: number) => this.selectTab(index) })
         .padding({ left: Space.page, right: Space.page, top: Space.xs, bottom: Space.xs })
       Tabs({ index: this.currentIndex(), controller: this.tabs }) {
         TabContent() { this.memoryTab() }
-        TabContent() { this.templateTab() }
         TabContent() { this.serverTab() }
       }.barHeight(0).layoutWeight(1).animationDuration(250).scrollable(false)
       .onChange((index: number) => { this.swipeRow = ''; this.tab = TABS[index]; })
@@ -478,7 +419,7 @@ export struct ProductivityPanel {
         Banner({ text: this.error }).padding({ left: Space.page, right: Space.page })
       }
       BottomBar() {
-        Button(this.tab === 'memory' ? t("添加记忆") : this.tab === 'templates' ? t("新建模板") : t("添加 MCP 服务")).fontFamily(this.appearance.fontFamily)
+        Button(this.tab === 'memory' ? t("添加记忆") : t("添加 MCP 服务")).fontFamily(this.appearance.fontFamily)
           .id('add-productivity').attributeModifier(Btn.primary).width('100%')
           .enabled(!this.locked() && (this.tab !== 'mcp' || this.app.productivity.servers.length < 10))
           .onClick(() => this.createEntry())

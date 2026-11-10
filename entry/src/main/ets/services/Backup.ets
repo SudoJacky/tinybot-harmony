@@ -112,6 +112,8 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
   const openID = authorizedOpenID ?? await huaweiAccount.backupOpenID(context);
   cancellation?.check();
   const data = JSON.parse(JSON.stringify(snapshot)) as AppData;
+  // Keep the field for older readers, without exporting retired prompt templates.
+  if (data.productivity) { data.productivity.templates = []; }
   const envelope: BackupEnvelope = { format: 'tinybot-harmony.backup.v4', data: data, attachments: [], files: [], deviceState: await captureBackupDeviceState(context) };
   validateProjects(data);
   for (const project of data.projects || []) {

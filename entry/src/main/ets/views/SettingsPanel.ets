@@ -201,9 +201,6 @@ export struct SettingsPanel {
             NavRow({ title: t('称呼与回答偏好'), subtitle: this.userDocumentPreview(), compId: 'open-user-document',
               icon: $r('sys.symbol.square_and_pencil'), disabled: !this.canEdit(), onTap: () => this.onUserDocument() })
             RowDivider()
-            NavRow({ title: t('提示词模板'), compId: 'open-templates', icon: $r('sys.symbol.doc_plaintext'),
-              disabled: !this.canEdit(), onTap: () => this.onTools('templates') })
-            RowDivider()
             SwitchRow({ title: t('自动保存任务结果'), icon: $r('sys.symbol.archivebox'), subtitle: t('把成功的回答归档到工作区的“任务结果”目录。'), compId: 'save-summary',
               isOn: this.assistantDraft.saveSummary, disabled: !this.canEdit(),
               onChange: (value: boolean) => this.saveToggle('saveSummary', value) })

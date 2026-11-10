@@ -244,8 +244,7 @@ assert.match(chatSource.slice(menuAt, menuAt + 1600), /this\.modelMenuHeight\(\)
 assert.match(chatSource, /modelMenuHeight\(\): number \{/, 'The catalog-sized height is computed once');
 console.log('PASS emitted composer model seat opens one compact, catalog-sized model menu');
 
-// The tablet plus opens the add menu in place: attachments and places in the
-// root pane, with prompt templates drilling into a second pane instead of a sheet.
+// The tablet plus opens the add menu in place, while the phone opens a sheet.
 const addAt = chatSource.indexOf("'add-attachment'");
 assert.ok(addAt > 0, 'Locate the emitted composer add trigger');
 const addSource = chatSource.slice(addAt - 1200, addAt + 2200);
@@ -257,19 +256,14 @@ const plusRootAt = chatSource.indexOf('plusRootPane(parent = null)');
 assert.ok(plusRootAt > 0, 'Locate the emitted add root pane');
 const plusRoot = chatSource.slice(plusRootAt, plusRootAt + 12000);
 for (const id of ['plus-menu-photo', 'plus-menu-camera', 'plus-menu-text', 'plus-menu-drawing', 'plus-menu-workspace',
-  'plus-menu-reference', 'plus-menu-templates']) {
+  'plus-menu-reference']) {
   assert.ok(plusRoot.includes("'" + id + "'"), 'The add menu keeps ' + id);
 }
 assert.ok(!plusRoot.includes("'plus-menu-memory'") && !plusRoot.includes("'plus-menu-team'"));
-const plusTemplatesAt = chatSource.indexOf('plusTemplatesPane(parent = null)');
-assert.ok(plusTemplatesAt > 0, 'Locate the emitted template pane');
-const plusTemplates = chatSource.slice(plusTemplatesAt, plusTemplatesAt + 9000);
-assert.ok(plusTemplates.includes("'plus-menu-back'"), 'The template pane can return to the root');
-assert.ok(plusTemplates.includes("'plus-menu-manage'"), 'The template pane links to management');
-assert.ok(plusTemplates.includes('plusTemplateRow'), 'The template pane lists selectable templates');
-assert.ok(chatSource.includes("'plus-template-' + item.id"), 'Template rows apply in place');
+assert.doesNotMatch(chatSource, /plus-menu-templates|manage-templates|use-template-/,
+  'Neither composer menu exposes retired prompt templates');
 assert.ok(chatSource.includes('plusMenuRow(icon: Resource'), 'Rows share one compact geometry');
-console.log('PASS emitted composer plus opens the tablet add menu with a template drill-down');
+console.log('PASS emitted composer plus opens the tablet add menu or phone sheet');
 
 // The docked column exposes files and the browser as tabs: the header toggle
 // opens the launcher, the strip adds/closes/activates chips, and the closed host
