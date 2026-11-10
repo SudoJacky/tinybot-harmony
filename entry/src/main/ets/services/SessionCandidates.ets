@@ -109,6 +109,7 @@ export function forkedThreadCandidate(source: ThreadData, createThread: () => Th
   branch.disabledMcpIds = source.disabledMcpIds?.slice();
   branch.messages = JSON.parse(JSON.stringify(source.messages.slice(0, end))) as MessageData[];
   branch.draft = index >= 0 && index % 2 === 0 ? source.messages[index].content : '';
+  branch.annotations = index >= 0 && index % 2 === 0 ? source.messages[index].annotations?.slice() : undefined;
   branch.attachments = index >= 0 && index % 2 === 0 ? JSON.parse(JSON.stringify(source.messages[index].attachments || [])) as Attachment[] : [];
   branch.references = index >= 0 && index % 2 === 0 ? (source.messages[index].references || []).map((item): ThreadReference => ({
     threadId: item.threadId, title: item.title, content: item.content, capturedAt: item.capturedAt,

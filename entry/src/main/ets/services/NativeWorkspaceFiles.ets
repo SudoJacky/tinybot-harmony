@@ -93,6 +93,10 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
     });
   }
 
+  async binaryVersion(path: string): Promise<string> {
+    return withFileMutation(await this.fileKey(path), async () => this.fileDigest(await this.checkedPath(path)));
+  }
+
   async createJobOutput(path: string, bytes: Uint8Array, cancellation: Cancellation): Promise<void> {
     workspaceRelativePath(path, false);
     if (this.isShared(path) || /^(attachments|mini-apps|life-panels|life-boards)(\/|$)/.test(path)) {
@@ -503,7 +507,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
     await this.acceptUnlocked(path);
   }
 
-  private isShared(path: string): boolean {
+  isShared(path: string): boolean {
     return (this.initialMounts.length > 0 || this.mounts.length > 0) &&
       (path === SHARED_FOLDER_ROOT || path.startsWith(SHARED_FOLDER_ROOT + '/'));
   }

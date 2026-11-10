@@ -1,5 +1,6 @@
 import { t } from './I18n';
 import { Attachment, validateAttachments } from './Productivity';
+import { FileAnnotation, validateFileAnnotations } from './FileAnnotation';
 export type InputMode = 'steer' | 'followUp';
 export const MAX_PENDING_INPUTS: number = 20;
 export const MAX_INPUT_TEXT: number = 24000;
@@ -9,15 +10,17 @@ export interface PendingInput {
   mode: InputMode;
   text: string;
   attachments?: Attachment[];
+  annotations?: FileAnnotation[];
 }
 
 export function validatePendingInput(input: PendingInput): void {
   if (!input || typeof input.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(input.id) ||
     (input.mode !== 'steer' && input.mode !== 'followUp') || typeof input.text !== 'string' ||
-    input.text.trim().length === 0 || input.text.length > MAX_INPUT_TEXT) {
+    (!input.text.trim() && !input.annotations?.length) || input.text.length > MAX_INPUT_TEXT) {
     throw new Error(t("待发送指令无效，正文需要 1 至 24000 字符。"));
   }
   if (input.attachments !== undefined) { validateAttachments(input.attachments); }
+  if (input.annotations !== undefined) { validateFileAnnotations(input.annotations); }
 }
 
 export function validatePendingInputs(inputs: PendingInput[]): void {

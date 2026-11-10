@@ -31,7 +31,7 @@ function load(name) {
   return exports;
 }
 
-function parts(bytes) {
+function parts(bytes, binary = false) {
   const output = new Map();
   const end = bytes.length - 22;
   assert.equal(bytes.readUInt32LE(end), 0x06054b50);
@@ -45,7 +45,8 @@ function parts(bytes) {
     assert.equal(bytes.readUInt32LE(local), 0x04034b50);
     const start = local + 30 + bytes.readUInt16LE(local + 26) + bytes.readUInt16LE(local + 28);
     const entry = bytes.subarray(start, start + bytes.readUInt32LE(offset + 20));
-    output.set(name, (bytes.readUInt16LE(offset + 10) === 8 ? inflateRawSync(entry) : entry).toString('utf8'));
+    const unpacked = bytes.readUInt16LE(offset + 10) === 8 ? inflateRawSync(entry) : entry;
+    output.set(name, binary ? unpacked : unpacked.toString('utf8'));
     offset += 46 + length + bytes.readUInt16LE(offset + 30) + bytes.readUInt16LE(offset + 32);
   }
   return output;
@@ -191,6 +192,64 @@ async function main() {
   assert.match(get('deck.pptx', 'ppt/slides/slide2.xml'), /报告 &amp; 原始数据/);
   assert.match(get('deck-edited.pptx', 'ppt/slides/slide2.xml'), /修订版/);
   assert.equal(get('deck.pptx', 'ppt/slides/slide1.xml'), get('deck-edited.pptx', 'ppt/slides/slide1.xml'));
+
+  files.set('dot.png', Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZioAAAAASUVORK5CYII=', 'base64'));
+  success(await write('styled.pptx', `office.pptx({
+    theme:{name:"Coastal",fontFace:"Arial",background:"112233",text:"F8F2E4",accent:"50C8AD"},
+    slides:[{elements:[
+      {id:"badge",type:"shape",shape:"star5",x:1,y:1,w:2,h:2,fill:"accent",rotate:15},
+      {id:"heading",type:"text",text:"Quarterly review",x:3,y:1,w:5,h:1,fontSize:36,bold:true},
+      {id:"illustration",type:"image",x:8,y:1,w:3,h:3,alt:"Company illustration",data:await workspace.read("dot.png")}
+    ]},{elements:[]}]})`));
+  const originalSlide = get('styled.pptx', 'ppt/slides/slide1.xml');
+  const theme = get('styled.pptx', 'ppt/theme/theme1.xml');
+  assert.match(theme, /<a:accent1><a:srgbClr val="50C8AD"/);
+  assert.match(originalSlide, /name="badge".*prst="star5".*val="accent1"/);
+  assert.match(originalSlide, /<p:pic>.*name="illustration".*r:embed="rIdTinybotImage1"/);
+  assert.match(get('styled.pptx', 'ppt/slides/_rels/slide1.xml.rels'), /\.\.\/media\/slide1-4-1\.png/);
+  const inspected = success(await run('return office.inspectPptx(await workspace.read("styled.pptx"),1);', {})).result;
+  assert.deepEqual(inspected.elements.map(item => item.id), ['badge', 'heading', 'illustration']);
+  assert.equal(inspected.elements[0].rotate, 15);
+  success(await write('styled-edited.pptx', `office.editPptx(await workspace.read("styled.pptx"),[
+    {slide:1,element:"badge",changes:{x:2,shape:"diamond",fill:"accent2"}},
+    {slide:1,element:"heading",changes:{text:"Updated & ready",color:"text"}},
+    {slide:1,element:"illustration",changes:{x:9,data:await workspace.read("dot.png")}}
+  ],{theme:{accent2:"DA784F"}})`));
+  const revised = get('styled-edited.pptx', 'ppt/slides/slide1.xml');
+  assert.match(revised, /name="badge".*x="1828800".*prst="diamond".*val="accent2"/);
+  assert.match(revised, /Updated &amp; ready/);
+  assert.match(revised, /name="illustration".*r:embed="rIdTinybotImage2"/);
+  assert.match(get('styled-edited.pptx', 'ppt/theme/theme1.xml'), /<a:accent2><a:srgbClr val="DA784F"/);
+  assert.equal(get('styled-edited.pptx', 'ppt/slides/slide2.xml'), get('styled.pptx', 'ppt/slides/slide2.xml'));
+  assert.equal(get('styled.pptx', 'ppt/slides/slide1.xml'), originalSlide);
+  failure(await write('missing-object.pptx', 'office.editPptx(await workspace.read("styled.pptx"),[{slide:1,element:"missing",changes:{x:2}}])'), /Expected one slide element/);
+  console.log('PASS editable PPT theme, vector shape, image relationships, element inspection and targeted copy edits');
+  success(await write('charts.pptx', `office.pptx({theme:{accent:"219875",accent2:"C16A59"},slides:[{elements:[
+    {id:"revenue",type:"chart",chart:"bar",x:1,y:1,w:5,h:3,title:"Revenue",categories:["Q1","Q2"],
+      series:[{name:"East",values:[8,13]},{name:"West",values:[-3,10]}]},
+    {id:"trend",type:"chart",chart:"line",x:6,y:1,w:5,h:3,categories:["Q1","Q2"],series:[{name:"Sales",values:[5,9]}]},
+    {id:"mix",type:"chart",chart:"doughnut",x:3,y:4,w:5,h:3,categories:["East","West"],series:[{name:"Mix",values:[5,8]}]}
+  ]}]})`));
+  const chartParts = parts(files.get('charts.pptx'));
+  const slideChart = (number) => 'ppt/charts/tinybot-slide1-' + number + '.xml';
+  assert.match(chartParts.get('ppt/slides/slide1.xml'), /<p:graphicFrame>.*name="revenue".*<c:chart/s);
+  assert.match(chartParts.get(slideChart(2)), /<c:barChart>.*Sheet1!\$C\$2:\$C\$3/s);
+  assert.match(chartParts.get(slideChart(3)), /<c:lineChart>/);
+  assert.match(chartParts.get(slideChart(4)), /<c:doughnutChart>.*<c:dPt>/s);
+  const workbookBytes = parts(files.get('charts.pptx'), true).get('ppt/embeddings/tinybot-slide1-2.xlsx');
+  assert.match(parts(workbookBytes).get('xl/worksheets/sheet1.xml'), /<c r="C2" t="n"><v>-3<\/v>/);
+  const charts = success(await run('return office.inspectPptx(await workspace.read("charts.pptx"),1);', {})).result.elements;
+  assert.deepEqual(charts.map((item) => [item.id, item.chart]), [['revenue','bar'],['trend','line'],['mix','doughnut']]);
+  assert.deepEqual(charts[0].series[1].values, [-3,10]);
+  success(await write('chart-revised.pptx', `office.editPptx(await workspace.read("charts.pptx"),[
+    {slide:1,element:"revenue",changes:{x:2,title:"Revised",colors:["4472C4"],
+      series:[{name:"East",values:[10,15]}]}}])`));
+  assert.match(get('chart-revised.pptx', slideChart(2)), /Revised.*4472C4/s);
+  assert.equal(get('chart-revised.pptx', slideChart(3)), chartParts.get(slideChart(3)));
+  const updatedCharts = success(await run('return office.inspectPptx(await workspace.read("chart-revised.pptx"),1);', {})).result.elements;
+  assert.equal(updatedCharts[0].x, 2);
+  assert.deepEqual(updatedCharts[0].series[0].values, [10,15]);
+  console.log('PASS native PowerPoint charts, embedded data workbook, inspection and targeted chart revision');
 
   failure(await write('report.docx', officeDoc), /Output exists/);
   failure(await write('../bad.docx', officeDoc), /路径|path/);

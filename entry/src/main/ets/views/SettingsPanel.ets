@@ -212,7 +212,7 @@ export struct SettingsPanel {
         GroupCard() {
           Column() {
             SwitchRow({ title: t('自动提取长期记忆'), icon: $r('sys.symbol.wand_and_stars'), compId: 'auto-memory',
-              subtitle: t('每 10 轮后台整理，会额外调用模型。'),
+              subtitle: t('助手可在聊天中主动维护记忆，每 10 轮还会额外调用模型做后台整理。'),
               isOn: this.assistantDraft.autoMemory, disabled: !this.canEdit(),
               onChange: (value: boolean) => this.saveToggle('autoMemory', value) })
             RowDivider()

@@ -31,6 +31,7 @@ export const MEMORY_REVIEW_PROMPT: string = '审阅近期对话和已有记忆�
   '全局事实使用 scope:"global"，只适用于当前项目或任务的稳定约定使用 scope:"thread"。' +
   '查看已有记忆，重复则不新增，用户明确修正旧事实时按 id 更新 automatic:true 的条目。不得修改手动记忆，冲突时不另存矛盾条目。' +
   '后台复盘只允许 add/update，不删除记忆，不改变已有条目的作用域。不确定是否值得保存则跳过。' +
+  '若用户在较新的消息中明确表示某事实已失效或要求忘记，不要根据较早的消息重新保存。' +
   '输出 JSON 操作数组，最多5项，每条 content 为1–500字符；无变化输出[]。' +
   '格式：[{"action":"add","scope":"global","content":"事实","sourceMessageId":"用户消息ID"},' +
   '{"action":"update","id":"已有记忆ID","content":"完整的新事实","sourceMessageId":"用户消息ID"}]。' +

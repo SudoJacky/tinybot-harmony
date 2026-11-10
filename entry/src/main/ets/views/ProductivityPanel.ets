@@ -178,7 +178,7 @@ export struct ProductivityPanel {
   @Builder
   memoryTab() {
     List({ space: Space.md }) {
-      ListItem() { this.caption(t('自动保存的记忆在新对话中加载，当前对话保留原快照；手动编辑或删除立即生效。')) }
+      ListItem() { this.caption(t('自动保存的记忆会在新对话中加载。手动编辑或删除记忆后，受影响的对话会加载最新记忆。')) }
       ListItem() {
         Button(t('将最新记忆用于本对话')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.textSmall).enabled(!this.locked()).id('refresh-memory-context')
           .onClick(async () => {
@@ -359,11 +359,8 @@ export struct ProductivityPanel {
               .attributeModifier(Styles.input).backgroundColor($r('app.color.surface'))
               .onChange((value) => { this.url = value; })
             Row({ space: Space.md }) {
-              Column({ space: 2 }) {
-                Text(t("使用访问令牌")).fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontColor($r('app.color.text_primary'))
-                Text(t("开启后填写 Bearer Token，Token 保存在系统安全存储中。")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
-                  .fontColor($r('app.color.text_secondary'))
-              }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+              Text(t("使用访问令牌")).fontFamily(this.appearance.fontFamily).fontSize(Font.body)
+                .fontColor($r('app.color.text_primary')).layoutWeight(1)
               Toggle({ type: ToggleType.Switch, isOn: !this.noAuth }).id('mcp-no-auth').selectedColor(this.appearance.accent)
                 .attributeModifier(Styles.toggle)
                 .attributeModifier(systemMaterialAttribute<ToggleAttribute>(this.appearance.control))

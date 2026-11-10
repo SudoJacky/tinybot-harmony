@@ -2,6 +2,7 @@ import { ToolExecution } from './Agent';
 
 export interface FileOperations { readFiles: string[]; modifiedFiles: string[]; }
 interface FileArguments { path: string; }
+interface PreviewFileReceipt { imagePath?: string; }
 interface FileJobArguments { inputs?: string[]; output: string; }
 
 // Only successful workspace receipts establish completed reads/writes. Failed or
@@ -12,6 +13,11 @@ export function collectFileOperations(results: ToolExecution[], previous?: FileO
   for (const result of results) {
     const name = result.call.function.name;
     if (result.status !== 'complete') { continue; }
+    if (name === 'publish_preview') {
+      const args = JSON.parse(result.call.function.arguments) as PreviewFileReceipt;
+      if (args?.imagePath && (JSON.parse(result.output) as PreviewFileReceipt)?.imagePath === args.imagePath) modified.add(args.imagePath);
+      continue;
+    }
     if (name === 'run_job') {
       const job = JSON.parse(result.call.function.arguments) as FileJobArguments;
       if (!job || typeof job.output !== 'string' || !job.output ||

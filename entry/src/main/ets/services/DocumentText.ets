@@ -54,21 +54,31 @@ export async function officeText(bytes: ArrayBuffer, cancellation: Cancellation 
   const shared: string[] = []; const strings = entries.find((item) => item.name === 'xl/sharedStrings.xml');
   if (strings) { const xml = await unzipEntry(bytes, strings); for (const match of xml.match(/<si[\s>][\s\S]*?<\/si>/g) || []) { shared.push(xmlText(match)); } }
   const sections: string[] = [];
+  let hasText = false;
   for (const entry of entries.filter((item) => item.name !== 'xl/sharedStrings.xml')) {
     cancellation.check();
     const xml = await unzipEntry(bytes, entry); let text = '';
     if (entry.name.startsWith('xl/')) {
-      for (const cell of xml.match(/<c\b[^>]*>[\s\S]*?<\/c>/g) || []) {
-        const address = /\br="([^"]+)"/.exec(cell)?.[1] || '?'; const value = /<v>([\s\S]*?)<\/v>/.exec(cell)?.[1] || '';
-        const content = /\bt="s"/.test(cell) ? shared[Number(value)] || '' : /\bt="inlineStr"/.test(cell) ? xmlText(cell) : xmlText(value);
+      const cells = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
+      for (let cell = cells.exec(xml); cell; cell = cells.exec(xml)) {
+        const attributes = cell[1];
+        const body = cell[2];
+        if (body === undefined) { continue; }
+        const address = /\br="([^"]+)"/.exec(attributes)?.[1] || '?';
+        const value = /<v>([\s\S]*?)<\/v>/.exec(body)?.[1] || '';
+        const content = /\bt="s"/.test(attributes) ? (value.trim() ? shared[Number(value)] || '' : '') :
+          /\bt="inlineStr"/.test(attributes) ? xmlText(body) : xmlText(value);
+        if (content.trim()) { hasText = true; }
         text += address + ': ' + content + '\n';
       }
-    } else { text = xmlText(xml); }
+    } else {
+      text = xmlText(xml);
+      if (text.trim()) { hasText = true; }
+    }
     sections.push('[' + entry.name + ']\n' + text);
   }
-  const text = sections.join('\n\n');
-  if (!text.trim()) { throw new Error(t("文档没有可提取的文字。")); }
-  return text;
+  if (!hasText) { throw new Error(t("文档没有可提取的文字。")); }
+  return sections.join('\n\n');
 }
 // PDFKit is a separate system module. On HarmonyOS 6.0.0(20) it is not installed at all, so the
 // pdfService namespace itself is undefined and no page API can be reached. Probing the namespace

@@ -11,6 +11,7 @@ import { UiValues } from '../model/InteractiveUi';
 import { RequestUsage } from '../model/Usage';
 import { ContextTokenItem, draftBreakdown } from '../model/ContextBreakdown';
 import { referenceContext } from '../model/ThreadReferences';
+import { FileAnnotationTarget, fileAnnotationContext } from '../model/FileAnnotation';
 import { TeamRun } from '../model/Team';
 import { Attachment, ProductivityData, defaultProductivity } from '../model/Productivity';
 import { AppData, ModelConfig, defaultConfig, copyModelConfig } from '../model/Conversation';
@@ -202,7 +203,8 @@ export class ChatViewModel {
     return name + ' · ' + ref.modelId + (this.configured ? '' : t(' · 不可用'));
   }
   get visibleMessages(): MessageViewModel[] { return this.active.messages.slice(-this.visibleMessageCount); }
-  get contextDraft(): ContextTokenItem[] { return draftBreakdown(this.draft, referenceContext(this.active.references) + (this.active.panelContext || ''), this.active.attachments); }
+  get contextDraft(): ContextTokenItem[] { return draftBreakdown(this.draft,
+    referenceContext(this.active.references) + (this.active.panelContext || '') + fileAnnotationContext(this.active.annotations), this.active.attachments); }
   get contextDetails(): ContextTokenItem[] { return this.contextItems.concat(this.contextDraft); }
   get contextUsed(): number { return this.contextTokens + this.contextDraft.reduce((sum, item) => sum + item.tokens, 0); }
   get contextWindow(): number { return contextSettings(this.currentConfig).window; }
@@ -225,6 +227,12 @@ export class ChatViewModel {
   setThreadMcp(id: string, enabled: boolean): Promise<boolean> { return this.requireSession().setThreadMcp(id, enabled); }
   setAttachments(items: Attachment[]): Promise<boolean> { return this.requireSession().setAttachments(items); }
   appendDraftAttachment(threadId: string, item: Attachment, text: string): Promise<void> { return this.requireSession().appendDraftAttachment(threadId, item, text); }
+  editFileAnnotation(threadId: string, id: string, comment?: string): Promise<void> {
+    return this.requireSession().editFileAnnotation(threadId, id, comment);
+  }
+  addFileAnnotation(threadId: string, path: string, version: string, target: FileAnnotationTarget, comment: string): Promise<void> {
+    return this.requireSession().addFileAnnotation(threadId, path, version, target, comment);
+  }
   referenceThread(id: string): Promise<boolean> { return this.requireSession().referenceThread(id); }
   removeThreadReference(id: string): Promise<boolean> { return this.requireSession().removeThreadReference(id); }
   forkThread(messageId: string = ''): Promise<boolean> { return this.requireSession().forkThread(messageId); }

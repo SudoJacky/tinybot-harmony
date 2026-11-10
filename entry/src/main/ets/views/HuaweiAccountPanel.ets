@@ -25,11 +25,6 @@ export struct HuaweiAccountPanel {
         Text(this.account.signedIn ? t('已登录华为账号') : t('登录华为账号'))
           .fontFamily(this.appearance.fontFamily).fontSize(Font.title).fontWeight(FontWeight.Bold)
           .fontColor($r('app.color.text_primary')).id('huawei-account-status')
-        Text(t('登录后使用 AI 生成功能，模型服务仍使用你配置的 Key。'))
-          .fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontColor($r('app.color.text_secondary'))
-          .textAlign(TextAlign.Center)
-        Text(t('仅在本机安全保存华为账号标识，不获取姓名、手机号或身份证号。退出登录不会删除本地会话和文件。'))
-          .fontFamily(this.appearance.fontFamily).fontSize(Font.small).fontColor($r('app.color.text_secondary'))
         if (this.account.error) { Banner({ text: this.account.error, compId: 'huawei-account-error' }) }
         if (this.account.signedIn) {
           Button(t('退出登录')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.tonal)
@@ -65,7 +60,7 @@ export struct HuaweiAccountPanel {
       Text(t('登录华为账号')).id('huawei-account-status').fontFamily(this.appearance.fontFamily)
         .fontSize(21).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary')).textAlign(TextAlign.Center)
       Text(!this.account.ready ? t('正在确认登录状态，请稍候。') :
-        t('根据监管需要，须登录以使用AI生成功能。\n我们承诺不会收集任何隐私信息至Tinybot服务器。'))
+        t('登录后即可使用 AI 生成功能。'))
         .fontFamily(this.appearance.fontFamily).fontSize(14).lineHeight(21).fontColor($r('app.color.text_secondary'))
         .textAlign(TextAlign.Center).width('100%').padding({ left: 8, right: 8 })
       if (this.account.error) { Banner({ text: this.account.error, compId: 'huawei-account-error' }) }

@@ -386,8 +386,8 @@ const card = Object.assign(new Card(), { inspectable: true, inspected: false, ex
   preview: { id: 'preview', path: 'demo.html', content: 'demo', superseded: false },
   onInspect() { this.inspected = true; },
   observeComponentCreation2(callback) { callback(1, true); }, ifElseBranchUpdateFunction(_branch, render) { render(); } });
-card.initialRender(); assert.equal(surfaces, 1); assert.equal(label, '在侧区打开');
-clicked.call(card); surfaces = 0; card.initialRender(); assert.equal(surfaces, 0); assert.equal(label, '在侧区查看');
+card.initialRender(); assert.equal(surfaces, 1); assert.equal(label, '打开预览');
+clicked.call(card); surfaces = 0; card.initialRender(); assert.equal(surfaces, 0); assert.equal(label, '查看预览');
 card.inspected = false; card.initialRender(); assert.equal(surfaces, 1);
 console.log('PASS emitted preview card detaches the inline surface while inspected and restores it on close');
 

@@ -247,11 +247,6 @@ export struct WebDavBackupPanel {
           }
         }
         if (this.transferFeedback) { this.feedback() }
-        SectionHeader({ title: t('存储说明'),
-          caption: t('WebDAV 账号和密码保存在本机。备份使用华为账号加密连接凭据，对话和文件以明文保存在服务器上。') })
-        Text(t('使用坚果云根地址时，备份会自动查找或创建 Tinybot 文件夹。'))
-          .fontFamily(this.appearance.fontFamily).fontSize(Font.caption).lineHeight(18)
-          .fontColor($r('app.color.text_tertiary')).width('100%').padding({ left: 4, right: 4 })
       }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.md, bottom: Space.xl })
         .attributeModifier(PageStyles.form)
     }.width('100%').height('100%').scrollBar(BarState.Off).align(Alignment.Top)

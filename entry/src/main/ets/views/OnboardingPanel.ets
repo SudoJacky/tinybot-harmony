@@ -654,17 +654,13 @@ export struct OnboardingPanel {
         .id('onboarding-account-status').fontFamily(this.appearance.fontFamily).fontSize(21)
         .fontWeight(FontWeight.Bold).fontColor(this.ink()).textAlign(TextAlign.Center)
       Text(!this.account.ready ? t('正在确认登录状态，请稍候。') : this.account.signedIn ?
-        t('登录状态已确认，可以继续。') : t('根据监管需要，须登录以使用AI生成功能。\n我们承诺不会收集任何隐私信息至Tinybot服务器。'))
+        t('登录状态已确认，可以继续。') : t('登录后即可使用 AI 生成功能。'))
         .fontFamily(this.appearance.fontFamily).fontSize(14).lineHeight(21).fontColor(this.muted())
         .textAlign(TextAlign.Center).width('100%').padding({ left: 8, right: 8 })
       if (this.account.error.length > 0) {
         Banner({ text: this.account.error, compId: 'onboarding-account-error' })
       }
-      if (this.account.signedIn) {
-        Text(t('仅在本机安全保存华为账号标识，不获取姓名、手机号或身份证号。退出登录不会删除本地会话和文件。'))
-          .fontFamily(this.appearance.fontFamily).fontSize(12).lineHeight(18).fontColor(this.muted())
-          .textAlign(TextAlign.Center).width('100%').padding({ left: 8, right: 8 })
-      } else {
+      if (!this.account.signedIn) {
         Row({ space: 10 }) {
           Checkbox().id('onboarding-account-consent').select(this.agreed)
             .selectedColor(this.brand()).enabled(!this.account.busy)

@@ -4,6 +4,8 @@ import { PublishedPreview, stepPreviews } from '../model/PublishedPreview';
 import { ChatViewModel, MessageViewModel } from '../viewmodel/ChatViewModel';
 import { InteractiveAnswer } from './InteractiveAnswer';
 import { IconButton } from '../common/Widgets';
+import { parseUiSurface, uiParts, UiValues } from '../model/InteractiveUi';
+import { HtmlFilePreview } from './HtmlFilePreview';
 
 @Component
 export struct PreviewPanel {
@@ -20,6 +22,15 @@ export struct PreviewPanel {
     return message ? message.stepViews.flatMap((step, index) => stepPreviews(message.id, step, index, this.app.active.latestPreviewIds, true))
       .filter((preview) => preview.id === this.previewId) : [];
   }
+  private webContent(preview: PublishedPreview): string {
+    const key = uiParts(preview.content, false).find((part) => part.kind === 'ui')?.key;
+    if (!key) { return ''; }
+    return parseUiSurface(preview.content, key).nodes.find((node) => node.kind === 'web')?.data || '';
+  }
+  private surfaceKey(preview: PublishedPreview): string { return preview.step + ':' + preview.surfaceOffset; }
+  private savedValues(preview: PublishedPreview): UiValues {
+    return this.message()?.uiStates.find((state) => state.key === this.surfaceKey(preview))?.values || {};
+  }
   build() {
     Column() {
       if (!this.tabbed) {
@@ -30,6 +41,15 @@ export struct PreviewPanel {
         }.height(56).width('100%').padding({ left: 16, right: 6 })
           .border({ width: { bottom: 0.5 }, color: $r('app.color.divider') })
       }
+      if (this.previews().length && /\.(html|js|svg)$/i.test(this.previews()[0].path)) {
+        ForEach(this.previews(), (preview: PublishedPreview) => {
+          Column() {
+            HtmlFilePreview({ app: this.app, content: this.webContent(preview), threadId: this.threadId,
+              path: preview.path, version: preview.version || '', values: this.savedValues(preview),
+              onSave: (values) => this.app.interactUi(this.threadId, this.messageId, this.surfaceKey(preview), values, '') })
+          }.width('100%').layoutWeight(1)
+        }, (preview: PublishedPreview) => preview.id)
+      } else {
       Scroll() {
         Column() {
           ForEach(this.previews(), (preview: PublishedPreview) => {
@@ -40,6 +60,7 @@ export struct PreviewPanel {
           }, (preview: PublishedPreview) => preview.id)
         }.width('100%').padding(16).alignItems(HorizontalAlign.Start)
       }.layoutWeight(1).width('100%').align(Alignment.Top).scrollBar(BarState.Auto)
+      }
     }.id('workbench-preview').width('100%').height('100%').backgroundColor($r('app.color.surface'))
   }
 }
