@@ -115,12 +115,12 @@ const deadline = setTimeout(() => { console.error('Annotation test stalled'); pr
 
   const files = new Fixture();
   await files.session.initialize();
-  const target = { kind: 'cells', location: 'Budget!A5:B6', excerpt: '12' };
+  const target = { kind: 'slide', slide: 2, elementId: 'metric-badge', location: 'Slide 2 / metric-badge #4', excerpt: '12' };
   const first = 'Check this total';
   const second = 'Is the currency USD?';
   files.session.setDraft('Context from the user');
-  await files.session.addFileAnnotation('thread-1', 'budget.xlsx', 'v1', target, first);
-  await files.session.addFileAnnotation('thread-1', 'budget.xlsx', 'v1', target, second);
+  await files.session.addFileAnnotation('thread-1', 'budget.pptx', 'v1', target, first);
+  await files.session.addFileAnnotation('thread-1', 'budget.pptx', 'v1', target, second);
   assert.equal(active(files.session).draft, 'Context from the user');
   assert.equal(files.provider.requests.length, 0);
   const staged = active(files.session).annotations;
@@ -138,6 +138,8 @@ const deadline = setTimeout(() => { console.error('Annotation test stalled'); pr
   const savedFileTurn = (await files.repository.load()).threads[0].messages[0];
   assert.equal(savedFileTurn.content, '');
   assert.equal(savedFileTurn.annotations[0].location, target.location);
+  assert.equal(savedFileTurn.annotations[0].slide, target.slide);
+  assert.equal(savedFileTurn.annotations[0].elementId, target.elementId);
   assert.equal(savedFileTurn.annotations[0].comment, 'Which currency is this?');
   const input = files.provider.requests[0].messages.find(message => message.role === 'user');
   assert.equal(input.content, '');
@@ -153,7 +155,10 @@ const deadline = setTimeout(() => { console.error('Annotation test stalled'); pr
   ]) {
     assert.equal(blocks.length, 2);
     assert.equal(blocks[0].text, user.content);
-    assert.equal(JSON.parse(blocks[1].text).annotations[0].comment, savedFileTurn.annotations[0].comment);
+    const annotation = JSON.parse(blocks[1].text).annotations[0];
+    assert.equal(annotation.comment, savedFileTurn.annotations[0].comment);
+    assert.equal(annotation.slide, target.slide);
+    assert.equal(annotation.elementId, target.elementId);
   }
   assert.equal(active(files.session).annotations, undefined);
   console.log('PASS file annotation drafts, stale-version rejection, annotation-only turns, and separate provider blocks');

@@ -38,6 +38,22 @@ export const THIRD_PARTY_LICENSES: ThirdPartyLicense[] = [
     copyright: 'Arjun Barrett, xmldom contributors, and Brent Ely', resource: 'licenses/office-bundle.txt'
   },
   {
+    id: 'lieflat-charts', name: 'Lieflat Charts', license: 'PolyForm Noncommercial License 1.0.0',
+    copyright: 'lieflat (@larashero3-dotcom)', resource: 'licenses/lieflat-charts.txt'
+  },
+  {
+    id: 'chartjs', name: 'Chart.js · 4.5.1', license: 'MIT',
+    copyright: 'Chart.js contributors and Jukka Kurkela', resource: 'licenses/chartjs.txt'
+  },
+  {
+    id: 'echarts', name: 'Apache ECharts · 6.0.0', license: 'Apache-2.0 and bundled dependency notices',
+    copyright: 'Copyright 2017-2025 The Apache Software Foundation', resource: 'licenses/echarts.txt'
+  },
+  {
+    id: 'inter', name: 'Inter · Latin variable font', license: 'SIL Open Font License 1.1',
+    copyright: 'The Inter Project Authors', resource: 'licenses/inter.txt'
+  },
+  {
     id: 'sensitive-lexicon', name: 'Sensitive-lexicon', license: 'MIT (upstream repository)',
     copyright: 'Copyright (c) 2024~2099 Konsheng', resource: 'moderation/SENSITIVE-LEXICON-LICENSE.txt'
   },

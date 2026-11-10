@@ -19,7 +19,7 @@ import { MarkdownView } from './MarkdownView';
 import { DataTable } from './DataTable';
 import { OfficePreview, OfficePreviewSource } from './OfficePreview';
 import { HtmlFilePreview } from './HtmlFilePreview';
-import { WebUiSpec } from '../model/WebUi';
+import { WebUiSpec, htmlPreviewLibrary } from '../model/WebUi';
 import { parseDelimited } from '../model/RichArtifacts';
 import { FileBaseline, WorkspaceEntry } from '../services/WorkspaceFiles';
 import { ToolFailure } from '../model/ToolFailure';
@@ -192,7 +192,7 @@ export struct WorkspacePanel {
   }
 
   private htmlPreviewContent(): string {
-    const spec: WebUiSpec = { version: 1, html: this.content, js: '', css: '', library: 'none', height: 400 };
+    const spec: WebUiSpec = { version: 1, html: this.content, js: '', css: '', library: htmlPreviewLibrary(this.content), height: 400 };
     return JSON.stringify(spec);
   }
 

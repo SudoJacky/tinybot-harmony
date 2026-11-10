@@ -1,4 +1,6 @@
 import { children, elements, OFFICE_REL, openPackage, related, relPath, root, xml } from './package.mjs';
+import { deckTheme } from './slide-elements.mjs';
+import { slideChart } from './slide-charts.mjs';
 
 const WORD = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const SHEET = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
@@ -109,42 +111,58 @@ function presentation(bytes) {
   const width = Number(size?.getAttribute('cx'));
   const height = Number(size?.getAttribute('cy'));
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) throw new Error('Invalid slide dimensions.');
+  const theme = Object.hasOwn(entries, 'ppt/theme/theme1.xml') ? deckTheme(entries) : undefined;
+  function paint(parent) {
+    const solid = first(parent, DRAW, 'solidFill');
+    const direct = rgb(first(solid, DRAW, 'srgbClr'));
+    if (direct) return direct;
+    const slot = first(solid, DRAW, 'schemeClr')?.getAttribute('val');
+    const names = { lt1: 'background', bg1: 'background', dk1: 'text', tx1: 'text', dk2: 'muted', tx2: 'muted', accent1: 'accent', accent2: 'accent2' };
+    return slot && theme?.[names[slot]] ? '#' + theme[names[slot]] : undefined;
+  }
   const slides = children(first(deck, SLIDE, 'sldIdLst'), SLIDE, 'sldId').map((item) => {
     const path = related(entries, main, 'slide', value(item, OFFICE_REL, 'id'));
     const slide = root(xml(entries, path), SLIDE, 'sld');
     const contents = first(slide, SLIDE, 'cSld');
-    const background = rgb(first(first(first(contents, SLIDE, 'bg'), SLIDE, 'bgPr'), DRAW, 'solidFill')?.firstChild);
+    const background = paint(first(first(contents, SLIDE, 'bg'), SLIDE, 'bgPr'));
     const shapes = children(first(contents, SLIDE, 'spTree'), SLIDE).flatMap((shape) => {
-      if (shape.localName !== 'sp' && shape.localName !== 'pic') return [];
+      if (!['sp', 'pic', 'graphicFrame'].includes(shape.localName)) return [];
+      const chart = shape.localName === 'graphicFrame' ? slideChart(entries, path, shape) : undefined;
+      if (shape.localName === 'graphicFrame' && !chart) return [];
       const properties = first(shape, SLIDE, 'spPr');
-      const transform = first(properties, DRAW, 'xfrm');
+      const transform = chart ? first(shape, SLIDE, 'xfrm') : first(properties, DRAW, 'xfrm');
       const offset = first(transform, DRAW, 'off');
       const extent = first(transform, DRAW, 'ext');
       if (!offset || !extent) return [];
       const coordinates = {
         x: Number(offset.getAttribute('x')) / width, y: Number(offset.getAttribute('y')) / height,
-        w: Number(extent.getAttribute('cx')) / width, h: Number(extent.getAttribute('cy')) / height
+        w: Number(extent.getAttribute('cx')) / width, h: Number(extent.getAttribute('cy')) / height,
+        rotation: Number(transform.getAttribute('rot')) / 60000
       };
       const textBody = first(shape, SLIDE, 'txBody');
       const paragraphs = textBody ? children(textBody, DRAW, 'p').map((paragraph) => {
         const properties = first(paragraph, DRAW, 'pPr');
         const runs = children(paragraph, DRAW, 'r').map((run) => {
           const format = first(run, DRAW, 'rPr');
+          const font = first(format, DRAW, 'latin')?.getAttribute('typeface');
           return { text: first(run, DRAW, 't')?.textContent || '', size: Number(format?.getAttribute('sz')) / 100 || 18,
-            color: rgb(first(first(format, DRAW, 'solidFill'), DRAW, 'srgbClr')),
+            color: paint(format), font: font?.startsWith('+') ? theme?.fontFace : font,
             bold: format?.getAttribute('b') === '1', italic: format?.getAttribute('i') === '1' };
         });
         return { runs, bullet: !!first(properties, DRAW, 'buChar'), align: properties?.getAttribute('algn') };
       }) : [];
       const blip = first(first(shape, SLIDE, 'blipFill'), DRAW, 'blip');
       const identity = elements(shape, SLIDE, 'cNvPr')[0];
-      return [{ ...coordinates, paragraphs, image: image(entries, path, value(blip, OFFICE_REL, 'embed')),
+      const stroke = first(properties, DRAW, 'ln');
+      return [{ ...coordinates, paragraphs, chart, image: image(entries, path, value(blip, OFFICE_REL, 'embed')),
         label: identity?.getAttribute('name'), id: identity?.getAttribute('id'),
-        background: rgb(first(first(properties, DRAW, 'solidFill'), DRAW, 'srgbClr')) }];
+        alt: identity?.getAttribute('descr'), preset: first(properties, DRAW, 'prstGeom')?.getAttribute('prst'),
+        verticalAlign: first(textBody, DRAW, 'bodyPr')?.getAttribute('anchor'),
+        background: paint(properties), stroke: paint(stroke), strokeWidth: Number(stroke?.getAttribute('w') || 12700) }];
     });
     return { shapes, background };
   });
-  return { width, height, slides };
+  return { width, height, slides, theme };
 }
 
 export function readOfficePreview(bytes, format) {

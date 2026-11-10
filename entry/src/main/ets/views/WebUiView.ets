@@ -7,7 +7,7 @@ import { common } from '@kit.AbilityKit';
 import { t } from '../model/I18n';
 import { UiValues } from '../model/InteractiveUi';
 import { WebUiSpec, parseWebUi, parseWebUiMessage, webUiHost, webUiAutoHeight, WEB_UI_ORIGIN } from '../model/WebUi';
-import { webUiAssets } from '../services/WebUiAssets';
+import { WebChartAssets, webChartAssets, webUiAssets } from '../services/WebUiAssets';
 import { Btn } from '../common/Theme';
 import { PreviewBrowserRuntime } from '../services/PreviewBrowserRuntime';
 import { browserAutomationScript } from '../model/BrowserScripts';
@@ -59,6 +59,7 @@ export struct WebUiView {
   private controller: webview.WebviewController = new webview.WebviewController();
   private ports: webview.WebMessagePort[] = [];
   private spec?: WebUiSpec;
+  private chartAssets?: WebChartAssets;
   private mounted: boolean = false;
   private attached: boolean = false;
   private nativeActive: boolean | undefined = undefined;
@@ -185,9 +186,12 @@ export struct WebUiView {
       this.spec = parseWebUi(this.content);
       if (!webUiAutoHeight(this.spec)) { this.heightValue = this.spec.height; }
       this.viewportChanged();
-      const assets = await webUiAssets(this.getUIContext().getHostContext() as common.UIAbilityContext, this.spec.library === 'three');
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const assets = await webUiAssets(context, this.spec.library === 'three');
+      const charts = this.spec.library === 'charts' ? await webChartAssets(context) : undefined;
       if (!this.mounted || generation !== this.generation) { return; }
       if (!this.foreground || (!this.preflight && (this.scrolling || !this.visible))) { this.reloadPending = true; return; }
+      this.chartAssets = charts;
       const host = webUiHost(assets[0], assets[1], (this.browserRuntime ? browserAutomationScript() : '') +
         (this.onAnnotationTarget ? webAnnotationScript() : ''));
       if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'load_start', { instanceId: this.instanceId, chars: host.length }); };
@@ -219,7 +223,15 @@ export struct WebUiView {
       if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'port_connected', { instanceId: this.instanceId }); };
       // loadData may use an opaque data: origin; transfer only to the verified top-level host.
       this.controller.postMessage('tinybot-web-port', [this.ports[1]], '*');
-      this.ports[0].postMessageEvent(JSON.stringify({ type: 'init', spec: this.spec, autoHeight: webUiAutoHeight(this.spec), values: this.values, panel: this.panelContext, placement: !!this.viewStorage, active: this.foreground && (this.preflight || (this.interactive && this.visible)), preflight: this.preflight, panelProbe: this.panelProbe, snapshotMode: this.snapshotMode, automation: !!this.browserRuntime, annotations: !!this.onAnnotationTarget }));
+      const chartScript = this.chartAssets?.script || '';
+      const chunkSize = 128 * 1024;
+      for (let offset = 0; offset < chartScript.length; offset += chunkSize) {
+        this.ports[0].postMessageEvent(JSON.stringify({ type: 'chartAssetChunk', chunk: chartScript.slice(offset, offset + chunkSize) }));
+      }
+      this.ports[0].postMessageEvent(JSON.stringify({ type: 'init', spec: this.spec, chartFont: this.chartAssets?.font,
+        autoHeight: webUiAutoHeight(this.spec), values: this.values, panel: this.panelContext, placement: !!this.viewStorage,
+        active: this.foreground && (this.preflight || (this.interactive && this.visible)), preflight: this.preflight,
+        panelProbe: this.panelProbe, snapshotMode: this.snapshotMode, automation: !!this.browserRuntime, annotations: !!this.onAnnotationTarget }));
     } catch (error) { this.report(error as Error); }
   }
   private sync(): void {

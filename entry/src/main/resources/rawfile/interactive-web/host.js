@@ -4,6 +4,7 @@
   const config = JSON.parse(document.getElementById('vendor').textContent);
   const library = config.library;
   let port, frame, initialized = false;
+  const chartChunks = [];
   const send = data => port.postMessage(JSON.stringify(data));
   const script = text => '<script>' + text.replace(/<\/script/gi, '<\\/script') + '</script>';
   function childRuntime(initial) {
@@ -202,20 +203,26 @@
     if (initialized) throw new Error('Web UI already initialized');
     initialized = true;
     const spec = data.spec;
+    const chartScript = spec.library === 'charts' ? chartChunks.join('') : '';
+    chartChunks.length = 0;
+    if (spec.library === 'charts' && (!chartScript || !/^[A-Za-z0-9+/=]+$/.test(data.chartFont))) throw new Error('Chart preview assets are missing');
     frame = document.createElement('iframe');
     frame.setAttribute('sandbox', 'allow-scripts');
     frame.setAttribute('allow', "camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'");
     frame.title = 'Interactive content';
     const bootstrap = '(' + childRuntime.toString() + ')(' + JSON.stringify({ values: data.values, panel: data.panel, placement: data.placement, panelProbe: data.panelProbe, active: data.active, preflight: data.preflight === true, autoHeight: data.autoHeight === true, snapshotMode: data.snapshotMode === true }).replace(/</g, '\\u003c') + ');';
-    const csp = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+    const csp = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" +
+      (chartScript ? '; font-src data:' : '');
     frame.srcdoc = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
       '<meta http-equiv="Content-Security-Policy" content="' + csp + '">' +
       '<style>html{color-scheme:light;-webkit-tap-highlight-color:transparent}body{margin:0;font:15px system-ui;color:var(--tinybot-text,#17251f);background:var(--tinybot-surface,white)}*{box-sizing:border-box}canvas{display:block;max-width:100%;touch-action:none}button,input,select{font:inherit}button{min-height:40px}button,input,select,textarea{transition:background-color 160ms,box-shadow 160ms,transform 120ms}button:active{transform:scale(.97)}:focus-visible{outline:2px solid var(--tinybot-accent,#246959);outline-offset:2px}@media(prefers-reduced-motion:reduce){button,input,select,textarea{transition:none}}</style>' +
+      (chartScript ? '<style>@font-face{font-family:Inter;src:url(data:font/woff2;base64,' + data.chartFont +
+        ') format("woff2");font-weight:100 900;font-style:normal;font-display:swap}body{font-family:Inter,system-ui,sans-serif;font-size-adjust:from-font}</style>' : '') +
       (data.panel ? '<style>' + panelStyle + '</style>' : '') +
       '<style>' + spec.css.replace(/<\/style/gi, '<\\/style') + '</style>' +
       (data.autoHeight ? '<style>html,body{min-height:0!important;overflow:auto}</style>' : '') + script(bootstrap) +
       ((data.automation || data.annotations) && config.browserScript ? script(config.browserScript) : '') +
-      (spec.library === 'three' ? script(library) : '') + '</head><body>' + spec.html +
+      (spec.library === 'three' ? script(library) : '') + (chartScript ? script(chartScript) : '') + '</head><body>' + spec.html +
       script('Promise.resolve((async()=>{\n' + spec.js + '\n})()).then(__tinybotReady).catch(__tinybotError);\n//# sourceURL=tinybot-generated.js') + '</body></html>';
     document.body.append(frame);
   }
@@ -225,7 +232,10 @@
       port.onmessage = event => {
         try {
           const data = JSON.parse(event.data);
-          if (data.type === 'init') mount(data);
+          if (data.type === 'chartAssetChunk' && !initialized) {
+            if (typeof data.chunk !== 'string' || data.chunk.length > 131072 || chartChunks.length >= 24) throw new Error('Invalid chart preview asset chunk');
+            chartChunks.push(data.chunk);
+          } else if (data.type === 'init') mount(data);
           else if (frame) frame.contentWindow.postMessage({ channel: 'tinybot-host', ...data }, '*');
         } catch (error) { send({ type: 'error', message: String(error.stack || error.message) }); }
       };

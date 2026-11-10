@@ -87,6 +87,23 @@ async function main() {
   assert.equal(JSON.parse(await skillTools.execute(call('read_skill',{name:'enabled'}),new Cancellation())).content,'Enabled instructions');
   await assert.rejects(skillTools.execute(call('read_skill',{name:'disabled'}),new Cancellation()), error => error.code==='TOOL_UNAVAILABLE');
   assert.equal(JSON.parse(await skillTools.execute(call('list_skills'),new Cancellation())).find(skill => skill.name==='disabled').enabled,false);
+  const { seedBuiltinSkills } = load(root + '/main/ets/model/BuiltinSkills');
+  const bundled = seed().extensions;
+  seedBuiltinSkills(bundled);
+  const nativeResources = path.resolve(root, 'main/resources/rawfile/skills');
+  const assetReader = (name, file) => fs.promises.readFile(path.join(nativeResources, name, file), 'utf8');
+  const builtins = new SkillTools(bundled.skills, '', undefined, assetReader);
+  const skillName = 'lieflat-charts';
+  const readSkill = args => builtins.execute(call('read_skill', {name:skillName,...args}), new Cancellation()).then(JSON.parse);
+  assert.match((await readSkill({})).content, /upstream\/SKILL\.md/);
+  assert.ok((await readSkill({})).files.includes('templates/lupi-gallery.html'));
+  const filePath = 'templates/lupi-gallery.html';
+  const start = await readSkill({path:filePath,limit:1000});
+  const next = await readSkill({path:filePath,offset:start.nextOffset,limit:1000});
+  assert.equal(start.nextOffset,1000);
+  assert.equal(next.nextOffset,2000);
+  assert.equal(start.content + next.content,(await assetReader(skillName,filePath)).slice(0,2000));
+  await assert.rejects(readSkill({path:'../LICENSE'}));
   for (const capability of TOOL_CAPABILITIES) {
     for (const member of capability.tools) {
       const selection = { agentMode:'custom', disabledTools:[member] };

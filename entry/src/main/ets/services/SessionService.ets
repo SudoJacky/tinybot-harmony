@@ -362,7 +362,7 @@ export class SessionService {
     const items = this.requireThread(threadId).annotations || [];
     if (items.length >= MAX_FILE_ANNOTATIONS) { throw new Error(t('每条消息最多 {0} 条批注。', [MAX_FILE_ANNOTATIONS])); }
     const item: FileAnnotation = { id: this.resources.createId(), path: path, version: version,
-      kind: target.kind, location: target.location, excerpt: target.excerpt, comment: comment };
+      kind: target.kind, location: target.location, excerpt: target.excerpt, slide: target.slide, elementId: target.elementId, comment: comment };
     await this.setFileAnnotations(threadId, items.concat([item]));
   }
   async editFileAnnotation(threadId: string, id: string, comment?: string): Promise<void> {
@@ -374,7 +374,7 @@ export class SessionService {
     if (comment === undefined) { next.splice(index, 1); }
     else {
       next[index] = { id: item.id, path: item.path, version: item.version, kind: item.kind, location: item.location,
-        excerpt: item.excerpt, comment: comment };
+        excerpt: item.excerpt, slide: item.slide, elementId: item.elementId, comment: comment };
     }
     await this.setFileAnnotations(threadId, next);
   }

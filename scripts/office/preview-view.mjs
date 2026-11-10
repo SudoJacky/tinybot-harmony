@@ -1,4 +1,5 @@
 import { readOfficePreview } from './preview.mjs';
+import { drawSlideChart } from './slide-chart-view.mjs';
 
 const toolbar = document.getElementById('toolbar');
 const viewport = document.getElementById('viewport');
@@ -87,6 +88,7 @@ modeButton.onclick = () => {
   clearTarget();
   modeButton.setAttribute('aria-pressed', String(mode));
   viewport.classList.toggle('annotating', mode);
+  for (const node of viewport.querySelectorAll('[data-element]')) node.tabIndex = mode ? 0 : -1;
 };
 
 function markers() {
@@ -103,6 +105,7 @@ function styleRun(node, run) {
   node.style.fontWeight = run.bold ? '700' : '';
   node.style.fontStyle = run.italic ? 'italic' : '';
   node.style.color = run.color || '';
+  if (run.font) node.style.fontFamily = run.font + ', sans-serif';
 }
 
 function renderWord() {
@@ -177,6 +180,15 @@ function renderSlides() {
   rail.querySelector('[aria-current=true]').scrollIntoView({ block: 'nearest', inline: 'nearest' });
   const canvas = element('div', undefined, stage, 'slide');
   drawSlide(canvas, slide, active + 1, true);
+  canvas.onkeydown = (event) => {
+    if (!mode || (event.key !== 'Enter' && event.key !== ' ')) return;
+    const anchor = event.target.closest('[data-element]');
+    if (!anchor) return;
+    event.preventDefault();
+    const bounds = anchor.getBoundingClientRect();
+    openComment({ kind: 'slide', slide: active + 1, elementId: anchor.dataset.element, location: anchor.dataset.location,
+      excerpt: (anchor.dataset.excerpt || anchor.textContent).slice(0, 1000) }, bounds.right, bounds.bottom);
+  };
   let drag;
   canvas.onpointerdown = (event) => {
     if (!mode || submitting || event.button !== 0) return;
@@ -210,9 +222,40 @@ function renderSlides() {
       const box = node.getBoundingClientRect();
       return box.right >= bounds.left + Number(left) * bounds.width && box.left <= bounds.left + Number(right) * bounds.width &&
         box.bottom >= bounds.top + Number(top) * bounds.height && box.top <= bounds.top + Number(bottom) * bounds.height;
-    }).map((node) => node.textContent).join('\n') : anchor === canvas ? '' : anchor.textContent;
-    openComment({ kind: 'slide', location, excerpt: excerpt.slice(0, 1000) }, event.clientX + 8, event.clientY + 8);
+    }).map((node) => node.dataset.excerpt || node.textContent).join('\n') : anchor === canvas ? '' : anchor.dataset.excerpt || anchor.textContent;
+    openComment({ kind: 'slide', slide: active + 1, elementId: region ? undefined : anchor.dataset.element,
+      location, excerpt: excerpt.slice(0, 1000) }, event.clientX + 8, event.clientY + 8);
   };
+}
+
+const VECTOR_GEOMETRY = {
+  rect: ['rect', { width: 100, height: 100 }],
+  roundRect: ['rect', { width: 100, height: 100, rx: 14 }],
+  ellipse: ['ellipse', { cx: 50, cy: 50, rx: 50, ry: 50 }],
+  triangle: ['polygon', { points: '50,0 100,100 0,100' }],
+  diamond: ['polygon', { points: '50,0 100,50 50,100 0,50' }],
+  hexagon: ['polygon', { points: '25,0 75,0 100,50 75,100 25,100 0,50' }],
+  chevron: ['polygon', { points: '0,0 65,0 100,50 65,100 0,100 35,50' }],
+  rightArrow: ['polygon', { points: '0,25 55,25 55,0 100,50 55,100 55,75 0,75' }],
+  star5: ['polygon', { points: '50,0 62,35 100,38 70,62 81,100 50,78 19,100 30,62 0,38 38,35' }],
+  line: ['line', { x1: 0, y1: 0, x2: 100, y2: 100 }]
+};
+
+function drawVector(box, shape) {
+  const ns = 'http://www.w3.org/2000/svg';
+  const [tag, attributes] = VECTOR_GEOMETRY[shape.preset] || VECTOR_GEOMETRY.rect;
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 100 100');
+  svg.setAttribute('preserveAspectRatio', 'none');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS(ns, tag);
+  for (const [key, value] of Object.entries(attributes)) path.setAttribute(key, value);
+  path.setAttribute('fill', shape.background || 'none');
+  path.setAttribute('stroke', shape.stroke || 'none');
+  path.setAttribute('vector-effect', 'non-scaling-stroke');
+  path.style.strokeWidth = shape.strokeWidth / data.width * 100 + 'cqw';
+  svg.append(path);
+  box.append(svg);
 }
 
 function drawSlide(canvas, slide, number, annotate) {
@@ -221,13 +264,35 @@ function drawSlide(canvas, slide, number, annotate) {
   if (annotate) canvas.dataset.location = 'Slide ' + number;
   for (const shape of slide.shapes) {
     const box = element('div', undefined, canvas, 'shape');
-    if (annotate) box.dataset.location = canvas.dataset.location + ' / ' + (shape.label || 'Shape') + ' #' + shape.id;
+    if (annotate) {
+      box.dataset.location = canvas.dataset.location + ' / ' + (shape.label || 'Shape') + ' #' + shape.id;
+      if (shape.label) box.dataset.element = shape.label;
+      box.dataset.excerpt = shape.alt || shape.chart?.title || shape.chart?.series.map((item) => item.name).join(', ') || '';
+      box.setAttribute('aria-label', shape.alt || shape.label || box.dataset.location);
+      box.tabIndex = mode ? 0 : -1;
+    }
     box.style.left = shape.x * 100 + '%';
     box.style.top = shape.y * 100 + '%';
     box.style.width = shape.w * 100 + '%';
     box.style.height = shape.h * 100 + '%';
-    box.style.backgroundColor = shape.background || '';
-    if (shape.image) element('img', undefined, box).src = shape.image;
+    if (shape.rotation) box.style.transform = 'rotate(' + shape.rotation + 'deg)';
+    if (shape.chart) {
+      drawSlideChart(box, shape.chart, data.theme);
+    } else if (shape.image) {
+      const image = element('img', undefined, box);
+      image.src = shape.image;
+      image.alt = shape.alt || '';
+    } else if (!shape.paragraphs.length) {
+      drawVector(box, shape);
+    } else {
+      box.style.backgroundColor = shape.background || '';
+      if (shape.stroke) box.style.border = shape.strokeWidth / data.width * 100 + 'cqw solid ' + shape.stroke;
+      if (shape.verticalAlign === 'ctr' || shape.verticalAlign === 'b') {
+        box.style.display = 'flex';
+        box.style.flexDirection = 'column';
+        box.style.justifyContent = shape.verticalAlign === 'ctr' ? 'center' : 'flex-end';
+      }
+    }
     for (const paragraph of shape.paragraphs) {
       const p = element('p', paragraph.bullet ? '• ' : '', box);
       p.style.textAlign = { ctr: 'center', r: 'right', just: 'justify' }[paragraph.align] || 'left';

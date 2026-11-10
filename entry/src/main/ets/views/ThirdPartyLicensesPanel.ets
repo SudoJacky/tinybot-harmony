@@ -66,7 +66,7 @@ export struct ThirdPartyLicensesPanel {
   build() {
     Scroll() {
       Column({ space: Space.md }) {
-        Text(t('感谢开源社区。本应用使用或参考了以下开源组件与设计，版权归各自权利人所有。展开可离线查看随应用附带的原文；各组件适用其自身许可证。')).fontFamily(this.appearance.fontFamily)
+        Text(t('以下第三方组件与设计各自适用其许可证。展开条目可离线查看许可原文。')).fontFamily(this.appearance.fontFamily)
           .fontSize(Font.small).lineHeight(22).fontColor($r('app.color.text_secondary')).width('100%')
         ForEach(THIRD_PARTY_LICENSES, (item: ThirdPartyLicense) => {
           LicenseCard({ item: item })

@@ -4,6 +4,8 @@ export interface FileAnnotationTarget {
   kind: FileAnnotationKind;
   location: string;
   excerpt?: string;
+  slide?: number;
+  elementId?: string;
 }
 
 export interface FileAnnotation extends FileAnnotationTarget {
@@ -26,6 +28,8 @@ export function validateFileAnnotations(items: FileAnnotation[]): void {
       !['element', 'slide', 'cells', 'text'].includes(item.kind) ||
       typeof item.location !== 'string' || !item.location || item.location.length > 1000 ||
       (item.excerpt !== undefined && (typeof item.excerpt !== 'string' || item.excerpt.length > 1000)) ||
+      (item.slide !== undefined && (item.kind !== 'slide' || !Number.isSafeInteger(item.slide) || item.slide < 1)) ||
+      (item.elementId !== undefined && (item.slide === undefined || typeof item.elementId !== 'string' || !item.elementId || item.elementId.length > 256)) ||
       typeof item.comment !== 'string' || !item.comment.trim() || item.comment.length > MAX_ANNOTATION_COMMENT) {
       throw new Error('Invalid file annotation');
     }
@@ -37,7 +41,7 @@ export function fileAnnotationContext(items?: FileAnnotation[]): string {
   if (!items?.length) { return ''; }
   return JSON.stringify({ type: 'file_annotations', annotations: items.map((item): FileAnnotationContext => {
     return { path: item.path, version: item.version, kind: item.kind, location: item.location,
-      excerpt: item.excerpt, comment: item.comment };
+      excerpt: item.excerpt, slide: item.slide, elementId: item.elementId, comment: item.comment };
   }) });
 }
 

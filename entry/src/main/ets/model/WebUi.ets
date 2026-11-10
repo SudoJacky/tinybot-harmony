@@ -6,6 +6,9 @@ import { imapNumber } from './ImapWire';
 import { WebAnnotationTarget } from './WebAnnotation';
 // Versioned Web content embedded in a completed native UI surface.
 export interface WebUiSpec { version: number; html: string; css: string; js: string; library: string; height: number; autoHeight?: boolean; }
+export function htmlPreviewLibrary(html: string): string {
+  return /<meta\s+name=["']tinybot-library["']\s+content=["']charts["']\s*\/?>/i.test(html) ? 'charts' : 'none';
+}
 export interface WebUiPanelContext { data: Object; title: string; status: string; canRefresh: boolean; canReadMail?: boolean; locale: string; inputs?: PanelInputs; theme?: string; tokens?: Record<string, string>; }
 export interface WebUiMessage { type: string; id?: number; values?: Record<string, string | number | boolean>; message?: string; height?: number; value?: Object | null; revision?: string; inputs?: PanelInputs; scope?: string; mail?: MailReadRequest; target?: WebAnnotationTarget; }
 export function webUiAutoHeight(spec: WebUiSpec): boolean {
@@ -26,7 +29,7 @@ export function parseWebUi(source: string): WebUiSpec {
   if (typeof spec.html !== 'string') { invalidWebField('html', 'a string'); }
   if (typeof spec.css !== 'string') { invalidWebField('css', 'a string'); }
   if (typeof spec.js !== 'string') { invalidWebField('js', 'a string'); }
-  if (!['none', 'three'].includes(spec.library)) { invalidWebField('library', 'none or three'); }
+  if (!['none', 'three', 'charts'].includes(spec.library)) { invalidWebField('library', 'none, three or charts'); }
   if (!Number.isFinite(spec.height) || spec.height < 200 || spec.height > 800) { invalidWebField('height', 'a number in 200..800'); }
   if (spec.autoHeight !== undefined && typeof spec.autoHeight !== 'boolean') { invalidWebField('autoHeight', 'a boolean'); }
   return spec;
