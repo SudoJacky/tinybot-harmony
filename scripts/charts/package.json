@@ -1,0 +1,13 @@
+{
+  "name": "tinybot-chart-preview-assets",
+  "private": true,
+  "scripts": {
+    "build": "node build.cjs",
+    "check": "node build.cjs --check"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "5.2.8",
+    "chart.js": "4.5.1",
+    "echarts": "6.0.0"
+  }
+}

@@ -3,6 +3,7 @@ import { attachmentContext } from './AttachmentContext';
 import { ContextEntry, PromptSection, renderPrompt } from './ContextProjection';
 import { estimateTextTokens } from './ConversationContext';
 import { Attachment } from './Productivity';
+import { fileAnnotationContext } from './FileAnnotation';
 
 // Content-free attribution of the actual retained request. Never persisted per step.
 export interface ContextTokenItem {
@@ -73,6 +74,10 @@ export function contextBreakdown(messages: ModelMessage[], tools: ToolDefinition
       rows.push({ id: id + '-attachment-' + attachmentIndex, kind: 'attachments', name: attachment.name,
         tokens: attachmentTokens(attachment), messageId: source?.messageId, step: source?.step });
     });
+    if (message.annotations?.length) {
+      rows.push({ id: id + '-annotations', kind: 'attachments', name: 'file_annotations',
+        tokens: estimateTextTokens(fileAnnotationContext(message.annotations)), messageId: source?.messageId, step: source?.step });
+    }
   });
   rows.push({ id: 'framing', kind: 'overhead', tokens: framing });
   return rows.filter((row) => row.tokens > 0);

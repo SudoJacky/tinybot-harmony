@@ -112,4 +112,54 @@ const deadline = setTimeout(() => { console.error('Annotation test stalled'); pr
   assert.match(edit.session.state.saveError, /annotation disk failed/);
   assert.equal(active(edit.session).attachments.at(-1).id, 'retained', 'Failed saves retain an explicit unsaved draft');
   console.log('PASS queue edit preserves attachment drafts, validates limits before mutation and exposes persistence failures');
+
+  const files = new Fixture();
+  await files.session.initialize();
+  const target = { kind: 'slide', slide: 2, elementId: 'metric-badge', location: 'Slide 2 / metric-badge #4', excerpt: '12' };
+  const first = 'Check this total';
+  const second = 'Is the currency USD?';
+  files.session.setDraft('Context from the user');
+  await files.session.addFileAnnotation('thread-1', 'budget.pptx', 'v1', target, first);
+  await files.session.addFileAnnotation('thread-1', 'budget.pptx', 'v1', target, second);
+  assert.equal(active(files.session).draft, 'Context from the user');
+  assert.equal(files.provider.requests.length, 0);
+  const staged = active(files.session).annotations;
+  await files.session.editFileAnnotation('thread-1', staged[0].id);
+  await files.session.editFileAnnotation('thread-1', staged[1].id, 'Which currency is this?');
+  assert.equal((await files.repository.load()).threads[0].annotations.length, 1);
+  files.session.setDraft('');
+  files.resources.verifyFileAnnotations = async () => { throw Error('Stale file'); };
+  await files.session.send();
+  assert.match(files.session.state.error, /Stale file/);
+  assert.equal(active(files.session).annotations.length, 1);
+  assert.equal(files.provider.requests.length, 0);
+  files.resources.verifyFileAnnotations = async () => {};
+  await files.session.send();
+  const savedFileTurn = (await files.repository.load()).threads[0].messages[0];
+  assert.equal(savedFileTurn.content, '');
+  assert.equal(savedFileTurn.annotations[0].location, target.location);
+  assert.equal(savedFileTurn.annotations[0].slide, target.slide);
+  assert.equal(savedFileTurn.annotations[0].elementId, target.elementId);
+  assert.equal(savedFileTurn.annotations[0].comment, 'Which currency is this?');
+  const input = files.provider.requests[0].messages.find(message => message.role === 'user');
+  assert.equal(input.content, '');
+  const { chatRequest } = from('services/providers/ChatCompletionsProtocol');
+  const { responsesRequest, anthropicRequest } = from('services/providers/WireProtocols');
+  const { geminiRequest } = from('services/providers/GeminiProtocol');
+  const user = { ...input, content: 'Exactly what the user typed' };
+  for (const blocks of [
+    chatRequest('model', [user], []).messages[0].content,
+    responsesRequest('model', [user], []).input[0].content,
+    anthropicRequest('model', [user], []).messages[0].content,
+    geminiRequest([user], []).contents[0].parts
+  ]) {
+    assert.equal(blocks.length, 2);
+    assert.equal(blocks[0].text, user.content);
+    const annotation = JSON.parse(blocks[1].text).annotations[0];
+    assert.equal(annotation.comment, savedFileTurn.annotations[0].comment);
+    assert.equal(annotation.slide, target.slide);
+    assert.equal(annotation.elementId, target.elementId);
+  }
+  assert.equal(active(files.session).annotations, undefined);
+  console.log('PASS file annotation drafts, stale-version rejection, annotation-only turns, and separate provider blocks');
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => clearTimeout(deadline));

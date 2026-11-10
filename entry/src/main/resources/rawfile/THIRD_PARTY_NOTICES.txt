@@ -106,8 +106,24 @@ Source files: EntryAbility.ets, EntryBackupAbility.ets
 License: Apache-2.0
 
 -----------------------------------------------------------------------
-Office file job bundle
+Office file job and preview bundles
 fflate: https://github.com/101arrowz/fflate
 xmldom: https://github.com/xmldom/xmldom
 Slide template generated with PptxGenJS: https://github.com/gitbrent/PptxGenJS
 License texts: licenses/office-bundle.txt
+
+-----------------------------------------------------------------------
+Lieflat Charts
+Author: lieflat (@larashero3-dotcom)
+Source: https://github.com/larashero3-dotcom/lieflat-charts/tree/75c697872e622a34471bec875874c038b37da89f
+License: PolyForm Noncommercial License 1.0.0
+License text: licenses/lieflat-charts.txt
+Upstream dependency notices: skills/lieflat-charts/THIRD_PARTY_NOTICES.md
+
+-----------------------------------------------------------------------
+Chart.js 4.5.1 / @kurkle/color
+License: MIT. License texts: licenses/chartjs.txt
+Apache ECharts 6.0.0 / bundled dependencies
+License and notices: licenses/echarts.txt
+Inter Latin variable font (Fontsource 5.2.8)
+License: SIL Open Font License 1.1. License text: licenses/inter.txt

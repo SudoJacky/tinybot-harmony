@@ -154,10 +154,14 @@ async function main() {
   // Steering is checked during preparation, consumed only on successful admission, and sent once.
   const steerThread = fixture(), steerTurn = { content: '', steps: [] };
   steerThread.messages[1].steps = steerTurn.steps;
-  let pending = { id: 's1', mode: 'steer', text: 'New instruction' }, consumed = 0;
+  const annotation = { id: 'note1', path: 'report.xlsx', version: 'v1', kind: 'cells', location: 'B2', comment: 'Fix the total' };
+  let pending = { id: 's1', mode: 'steer', text: 'New instruction', annotations: [annotation] }, consumed = 0;
   const steerManager = new RequestContext(source(steerThread), config());
   const steeringModel = { stream: async messages => {
-    assert.equal(messages.filter(m => m.content === 'New instruction').length, 1); return reply('done');
+    const inputs = messages.filter(m => m.role === 'user' && m.content === 'New instruction');
+    assert.equal(inputs.length, 1);
+    assert.deepEqual(inputs[0].annotations, [annotation]);
+    return reply('done');
   } };
   await runAgentLoop({ model: steeringModel, tools: { definitions: () => [], execute: async () => '' }, messages: [], turn: steerTurn, maxSteps: 2,
     prepareRequest: (defs, extra, signal) => steerManager.prepare(steeringModel, defs, signal, extra) }, new Cancellation(), {
@@ -165,13 +169,27 @@ async function main() {
     steering: { peek: () => pending, consume: () => { pending = undefined; consumed++; } }
   });
   assert.equal(consumed, 1); assert.equal(steerTurn.steps[0].steering.text, 'New instruction');
+  let annotationOnly = { id: 's3', mode: 'steer', text: '', annotations: [annotation] };
+  await runAgentLoop({
+    model: { stream: async messages => {
+      assert.equal(messages.length, 1);
+      assert.equal(messages[0].content, '');
+      assert.deepEqual(messages[0].annotations, [annotation]);
+      return reply('done');
+    } },
+    tools: { definitions: () => [], execute: async () => '' },
+    messages: [], turn: { content: '', steps: [] }, maxSteps: 2
+  }, new Cancellation(), {
+    event: () => {}, checkpoint: async () => {},
+    steering: { peek: () => annotationOnly, consume: () => { annotationOnly = undefined; } }
+  });
   let kept = { id: 's2', mode: 'steer', text: 'keep me' };
   await assert.rejects(runAgentLoop({ model: steeringModel, tools: { definitions: () => [], execute: async () => '' }, messages: [], turn: { content: '', steps: [] }, maxSteps: 2,
     prepareRequest: async () => { throw Error('preparation failed'); } }, new Cancellation(), {
     event: () => {}, checkpoint: async () => {}, steering: { peek: () => kept, consume: () => { kept = undefined; } }
   }), /preparation failed/);
   assert.equal(kept.text, 'keep me');
-  console.log('PASS steering appears exactly once and failed preparation leaves it queued');
+  console.log('PASS steering preserves annotations, appears exactly once and stays queued on failed preparation');
 
   // No usage estimate from before compaction leaks into subsequent requests.
   const resetThread = fixture(), resetManager = new RequestContext(source(resetThread), config());

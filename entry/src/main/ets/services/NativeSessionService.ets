@@ -55,6 +55,7 @@ import { SessionResources } from './SessionContracts';
 import { ProjectData } from '../model/Project';
 import { SharedFolder } from '../model/SharedFolders';
 import { t } from '../model/I18n';
+import { FileAnnotation } from '../model/FileAnnotation';
 import { ProjectFolderAccess } from './ProjectFolderAccess';
 import { SessionService } from './SessionService';
 import { NativeWorkspaceFiles } from './NativeWorkspaceFiles';
@@ -118,6 +119,18 @@ export class NativeSessionResources implements SessionResources {
     await this.ensureWorkspace(threadId, workspaceId);
     return Attachments.inWorkspace(items, workspaceId || threadId);
   }
+  async verifyFileAnnotations(threadId: string, items: FileAnnotation[], project?: ProjectData): Promise<void> {
+    const files = new NativeWorkspaceFiles(this.workspaces.pathFor(project?.workspaceId || threadId), project?.sharedFolders || []);
+    const versions = new Map<string, string>();
+    for (const item of items) {
+      let version = versions.get(item.path);
+      if (version === undefined) {
+        version = item.kind === 'element' ? (await files.read(item.path, new Cancellation())).version : await files.binaryVersion(item.path);
+        versions.set(item.path, version);
+      }
+      if (item.version !== version) { throw new Error(item.path + ' · ' + t('文件已变化，请重新打开并检查。')); }
+    }
+  }
   persistProjectFolders(folders: SharedFolder[]): Promise<void> { return ProjectFolderAccess.persist(folders); }
   revokeProjectFolders(folders: SharedFolder[]): Promise<void> { return ProjectFolderAccess.revoke(folders); }
   activateProjectFolders(projects: ProjectData[]): Promise<void> { return ProjectFolderAccess.activateAll(projects); }
@@ -127,9 +140,12 @@ export class NativeSessionResources implements SessionResources {
       live?.askForToolApproval === false ? undefined :
         (path, cancellation) => this.approval.request(t('允许写入云端共享文件夹？'), path, cancellation));
     const workspaceTools = new WorkspaceTools(files, nativeWorkspaceDiffs);
-    const groups: AgentTools[] = [workspaceTools, new AttachmentTools(attachments),
-      new SkillTools(extensions.skills, selected, live ? () => live.skills() : undefined), new InteractionTools(this.approval)];
     const context = this.context;
+    const groups: AgentTools[] = [workspaceTools, new AttachmentTools(attachments),
+      new SkillTools(extensions.skills, selected, live ? () => live.skills() : undefined, context ? async (name: string, path: string) => {
+        const bytes = await context.resourceManager.getRawFileContent('skills/' + name + '/' + path);
+        return new util.TextDecoder('utf-8', { fatal: true }).decodeToString(bytes);
+      } : undefined), new InteractionTools(this.approval)];
     const workspaceCode = context ? new WorkspaceCode(files, workspaceTools, new NativeOrchestrationExecutor(true), async () => {
       if (this.officeLibrary === undefined) {
         const bytes = await context.resourceManager.getRawFileContent('office/office.bundle.js');
@@ -145,7 +161,8 @@ export class NativeSessionResources implements SessionResources {
       (page, storage, cancellation) => WebUiPreflight.validateMiniApp(page, storage, cancellation), productivity?.options?.miniAppsEnabled === true));
     groups.push(new PresentTools((path: string) => files.checkedPath(path)));
     groups.push(new PreviewTools(files, (content, cancellation) => WebUiPreflight.validate(content, cancellation),
-      (content, cancellation) => PreviewCapture.capture(content, cancellation)));
+      (content, cancellation, png) => PreviewCapture.capture(content, cancellation, png),
+      (path, bytes, cancellation) => files.createJobOutput(path, bytes, cancellation)));
     if (extensions.webEnabled) { groups.push(new WebTools(new NativeWebTransport())); }
     if (this.browser) {
       groups.push(new BrowserTools(this.browser, id, productivity?.options?.readOnly === true, resolvePreview,

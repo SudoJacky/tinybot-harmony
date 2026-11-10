@@ -121,7 +121,7 @@ STRINGS.phase = ['idle', 'preparing', 'listening', 'complete', 'finishing', 'err
 STRINGS.action = ['send', 'cancel', 'edit', 'press', 'none', 'open', 'click', 'type', 'select', 'scroll', 'back', 'forward', 'reload', 'capture', 'wait'];
 STRINGS.policy = ['unset', 'enabled', 'disabled'];
 STRINGS.scheme = ['http', 'https', 'about', 'data', 'file', 'other'];
-STRINGS.library = ['three', 'echarts', 'none'];
+STRINGS.library = ['three', 'echarts', 'charts', 'none'];
 STRINGS.status = ['running', 'complete', 'failed', 'cancelled', 'pending', 'running_or_unknown', 'results', 'empty', 'verification', 'unexpected_page', 'invalid_results'];
 
 export function knownLogEvent(module: string, event: string): boolean { return Object.keys(EVENTS).includes(module) && EVENTS[module].includes(event); }
