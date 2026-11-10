@@ -88,7 +88,7 @@ export struct MailSettingsPanel {
             onChange: (value: boolean) => { this.allowBody = value; } })
         }
       }
-      Text(t('请先在邮箱服务商处开启 IMAP，并获取授权码。仅支持 TLS 加密连接；账号和授权码只保存在当前设备，不参与备份。'))
+      Text(t('请在邮箱服务商处开启 IMAP，获取授权码，并使用 TLS 端口。'))
         .fontSize(12).fontColor($r('app.color.text_secondary'))
 
       if (this.accountId) { Button(t('移除邮箱连接')).attributeModifier(Btn.textSmall).fontColor($r('app.color.danger')).id('mail-remove').onClick(() => { this.remove(); }) }
@@ -101,8 +101,6 @@ export struct MailSettingsPanel {
       if (this.notice) { Banner({ text: this.notice, danger: false, compId: 'mail-notice' }).padding({ left: Space.page, right: Space.page, top: Space.sm }) }
     Scroll() {
       Column({ space: Space.md }) {
-        Text(t('读取邮箱中的未读数量、最近邮件和指定邮件，为对话和生活看板提供数据。不会发送、删除邮件或改变已读状态。'))
-          .fontSize(13).fontColor($r('app.color.text_secondary'))
         if (this.editing) { this.editor() }
         else {
           SectionHeader({ title: t('邮箱连接') })

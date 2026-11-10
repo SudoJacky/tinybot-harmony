@@ -6,7 +6,7 @@ import { Diagnostics } from '../model/Diagnostics';
 import { CloudBackup, cloudBackupError, latestCloudBackup } from '../services/CloudBackup';
 import { AutoCloudBackup, autoCloudBackup } from '../services/AutoCloudBackup';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
-import { Btn, Space, Radius } from '../common/Theme';
+import { Btn, Space } from '../common/Theme';
 import { Banner, GroupCard, NavRow, RowDivider, SectionHeader } from '../common/Widgets';
 import { BackupLoginRequired } from '../services/HuaweiAccount';
 
@@ -90,8 +90,6 @@ export struct BackupPanel {
             compId: 'webdav-backup-settings', icon: $r('sys.symbol.cloud'), disabled: this.locked(), onTap: () => this.onWebDav() })
         }
         SectionHeader({ title: t('华为云空间') })
-        Text(t('云端只维护一份备份，自动备份和手动备份更新同一份内容。恢复时自动下载云端备份并合并导入，保留本机已有数据和密钥。'))
-          .fontSize(13).lineHeight(20).fontColor($r('app.color.text_secondary')).width('100%')
         GroupCard() {
           Column() {
             NavRow({ title: t('备份'), subtitle: t('将当前数据保存到云端，替换上一份备份'),
@@ -119,9 +117,6 @@ export struct BackupPanel {
         if (this.needsLogin) {
           Button(t('登录华为账号')).attributeModifier(Btn.tonal).id('cloud-backup-login').onClick(() => this.onLogin())
         }
-        Text(t('包含对话、文件、生活看板、小程序、Skills、设置和用量记录。API Key 等连接凭据使用当前华为账号加密；对话和文件不加密。隐私授权、系统权限和华为账号登录需在新设备重新完成。'))
-          .fontSize(13).lineHeight(19).fontColor($r('app.color.text_secondary')).width('100%')
-          .padding(Space.md).borderRadius(Radius.md).backgroundColor($r('app.color.surface_variant'))
       }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.md, bottom: Space.xl }).attributeModifier(PageStyles.form)
     }.width('100%').height('100%').scrollBar(BarState.Off).align(Alignment.Top)
   }
