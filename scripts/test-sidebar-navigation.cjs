@@ -19,28 +19,20 @@ const globals = { exports: {}, t: text => text, $r: value => value, LaunchMode: 
 vm.runInNewContext(ts.transpileModule(`class Page { ${body} } exports.Page = Page;`, {
   compilerOptions: { target: ts.ScriptTarget.ES2021 }
 }).outputText, globals);
-// Follow the actual sidebar binding so an inline push cannot bypass the controller guard.
+// Follow the laboratory binding so opening the collection still uses the navigation guard.
 const miniAppsCallbacks = [];
-const miniAppsMenuCallbacks = [];
-let miniAppsMenu = false;
 function visit(node) {
   ts.forEachChild(node, visit);
-  if (ts.isPropertyAssignment(node) && node.name.getText(tree) === 'onMiniApps') {
+  if (ts.isPropertyAssignment(node) && node.name.getText(tree) === 'onMiniApps' &&
+      ts.isObjectLiteralExpression(node.parent) &&
+      node.parent.properties.some(prop => prop.name?.getText(tree) === 'laboratoryOnly')) {
     miniAppsCallbacks.push(node.initializer.getText(tree));
-  }
-  if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
-    if (node.expression.name.text === 'id' && node.arguments[0]?.text === 'open-mini-apps-menu') miniAppsMenu = true;
-    if (miniAppsMenu && node.expression.name.text === 'onClick') {
-      miniAppsMenuCallbacks.push(node.arguments[0].getText(tree));
-      miniAppsMenu = false;
-    }
   }
 }
 visit(tree);
-assert.ok(miniAppsCallbacks.length > 0, 'Find the sidebar mini-app entry');
+assert.ok(miniAppsCallbacks.length > 0, 'Find the laboratory mini-app entry');
+assert.doesNotMatch(source, /['"]open-mini-apps-menu['"]/);
 const miniAppsCallback = vm.runInNewContext(`(function() { return (${miniAppsCallbacks[0]}); })`);
-assert.equal(miniAppsMenuCallbacks.length, 1, 'Find the mini-app entry in the more menu');
-const miniAppsMenuCallback = vm.runInNewContext(`(function() { return (${miniAppsMenuCallbacks[0]}); })`);
 function fixture() {
   const routes = [], toasts = [], dialogs = [];
   let resets = 0;
@@ -66,14 +58,13 @@ function fixture() {
   });
   return { page, routes, toasts, dialogs, resets: () => resets };
 }
-test('repeated taps on the actual sidebar mini-app entry keep one page', () => {
+test('repeated taps on the laboratory mini-app entry keep one page', () => {
   const { page, routes } = fixture();
   const click = miniAppsCallback.call(page);
   for (let i = 0; i < 20; i++) click();
   assert.deepEqual(routes.map(route => route.name), ['mini-apps']);
-  assert.equal(page.drawerOpen, false);
 });
-test('alternating all sidebar page entries cannot accumulate duplicate pages', () => {
+test('alternating laboratory and sidebar destinations cannot accumulate duplicate pages', () => {
   const { page, routes } = fixture();
   const click = miniAppsCallback.call(page);
   for (let i = 0; i < 20; i++) {
@@ -82,12 +73,6 @@ test('alternating all sidebar page entries cannot accumulate duplicate pages', (
     assert.equal(new Set(routes.map(route => route.name)).size, 3);
   }
   click();
-  assert.deepEqual(routes.map(route => route.name), ['mini-apps']);
-});
-test('sidebar and more-menu mini-app callbacks reuse the same page', () => {
-  const { page, routes } = fixture();
-  const sidebar = miniAppsCallback.call(page), menu = miniAppsMenuCallback.call(page);
-  for (let i = 0; i < 20; i++) { sidebar(); menu(); }
   assert.deepEqual(routes.map(route => route.name), ['mini-apps']);
 });
 test('files, search and sidebar expansion never add navigation pages', () => {

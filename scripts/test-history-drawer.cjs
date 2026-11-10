@@ -56,78 +56,96 @@ list.active = false; list.initialRender(); assert.equal(renders, 1);
 assert.equal(list.query, 'retained query'); assert.equal(list.visibleCounts.ordinary, 40);
 console.log('PASS inactive history skips its content while preserving search and pagination state');
 
-// Run the emitted height callback and both navigation compositions. A keyboard
-// resize must keep all actions available without retaining the tall button stack.
-let areaChanged, buttonId;
-const compactButtons = new Map(), tallButtons = new Map();
-let filterProps;
-const renderedText = [];
-const uiGlobals = { t: (value, args = []) => value.replace(/\{(\d+)\}/g, (_, index) => args[index]), ViewPU: { create() {} }, ViewStackProcessor: noop,
-  Segmented: class { constructor(_parent, props) { filterProps = props; } },
-  IconButton: class { constructor(_parent, props) { compactButtons.set(props.compId, props); } },
-  Column: new Proxy({}, {get: (_, key) => key === 'onAreaChange' ? callback => { areaChanged = callback; } : () => {}}),
-  Button: new Proxy({}, {get: (_, key) => key === 'id' ? id => {buttonId = id;} :
-    key === 'onClick' ? callback => {tallButtons.set(buttonId, callback);} : () => {}}) };
-for (const name of ['If','Row','Blank','Image','Text','SymbolGlyph','Search','Divider','__Common__']) uiGlobals[name] = noop;
-uiGlobals.Text = new Proxy({}, {get: (_, key) => key === 'create' ? value => renderedText.push(value) : () => {}});
-for (const name of ['Btn','Space','Font','FontWeight','TextAlign','Color','ButtonType','Visibility','FlexAlign',
-  'Radius','SheetSize','SheetKeyboardAvoidMode','TextOverflow']) uiGlobals[name] = {};
-const CompactList = probe('views/ThreadList', 'ThreadList',
-  ['initialRender','listContent','workbenchNavigation','compactNavigation','endSelection','selectThread','allSelected','selectAll'], uiGlobals);
-const compactActions = [];
-const compact = Object.assign(new CompactList(), {
-  active: true, workbench: true, panelHeight: 0, collapseHistory: true, searchOpen: true, query: '你好',
-  cloudPath: [], choosingCloudConnection: false,
-  appearance: {}, app: {saveError:'',error:'',providerProfiles:[],productivity:{}},
-  locked: () => false, filtered: () => [], sections: () => [], workbenchMenu() {},
-  onNewChat: () => compactActions.push('new'), onFiles: () => compactActions.push('files'),
-  onTools: () => compactActions.push('tools'), onCollapseHistory: () => compactActions.push('collapse'),
-  observeComponentCreation2(callback) {callback(1, true);},
-  ifElseBranchUpdateFunction(_branch, render) {render();}
+// Run the emitted toolbar through its collapsed, expanded and multiselect states.
+const icons = new Map(), buttonActions = new Map(), widths = new Map(), labels = [], menuChoices = [];
+let buttonId, rowId, inputChanged, requestFrame;
+const uiGlobals = {
+  t: (value, args = []) => value.replace(/\{(\d+)\}/g, (_, index) => args[index]),
+  ViewPU: { create() {} }, Context: noop, SEARCH_HEIGHT: 44, Diagnostics: { log() {} },
+  ThreadSearchFrame: class { constructor(action) { this.action = action; } },
+  IconButton: class { constructor(_parent, props) { icons.set(props.compId, props); } },
+  Row: new Proxy({}, { get: (_, key) => key === 'create' ? () => { rowId = undefined; } :
+    key === 'id' ? id => { rowId = id; } :
+    key === 'width' ? width => { if (rowId) widths.set(rowId, width); } : () => {} }),
+  Button: new Proxy({}, { get: (_, key) => key === 'id' ? id => { buttonId = id; } :
+    key === 'onClick' ? action => { buttonActions.set(buttonId, action); } : () => {} }),
+  TextInput: new Proxy({}, { get: (_, key) => key === 'onChange' ? handler => { inputChanged = handler; } : () => {} }),
+  Text: new Proxy({}, { get: (_, key) => key === 'create' ? value => labels.push(value) : () => {} }),
+  MenuItem: new Proxy({}, { get: (_, key) => key === 'create' ? item => { if (typeof item === 'function') item(); } : () => {} }),
+  materialMenuContent(options) {
+    assert.equal(typeof this.observeComponentCreation2, 'function', 'Custom menu content must bind the ArkUI component');
+    menuChoices.push(options);
+  },
+  SymbolGlyphModifier: class {}
+};
+for (const name of ['If','Stack','Blank','SymbolGlyph','__Common__','ViewStackProcessor','Menu','MenuItemGroup','ForEach']) uiGlobals[name] = noop;
+for (const name of ['Alignment','Space','Font','FontWeight','TextOverflow','Color','ButtonType','Visibility','Motion']) {
+  uiGlobals[name] = {};
+}
+const Toolbar = probe('views/ThreadList', 'ThreadList', ['historyToolbar','scopeMenu','searchControl','searchRequested','closeSearch',
+  'updateQuery','filtered','threadProject','setScope','endSelection','selectThread','selectAll','allSelected'], uiGlobals);
+const focus = [], newChats = [];
+let boardOpens = 0;
+const toolbar = Object.assign(new Toolbar(), {
+  active: true, mounted: true, foreground: true, collapseHistory: true, searchOpen: false, toolbarWidth: 280,
+  query: '', visibleCounts: {}, focusRequest: 0, selecting: false, selectedIds: [], archived: false, projectFilter: null,
+  appearance: {}, app: { ready: true, projects: [{ id: 'project', name: 'Project' }], filteredThreads: () => [
+    { id: 'one', projectId: 'project' }, { id: 'two' }, { id: 'old', projectId: 'deleted' }
+  ] },
+  locked: () => false, onNewChat: projectId => newChats.push(projectId), onLifePanels: () => boardOpens++,
+  getUIContext: () => ({
+    postFrameCallback(frame) { requestFrame = frame.action; },
+    getFocusController: () => ({ requestFocus: id => focus.push(id), clearFocus: () => focus.push(null) })
+  }),
+  forEachUpdateFunction(_id, items, render) { items.forEach(render); },
+  observeComponentCreation2(callback) { callback(1, true); },
+  ifElseBranchUpdateFunction(_branch, render) { render(); }
 });
-compact.initialRender();
-assert.ok(tallButtons.has('workbench-new-chat'));
-areaChanged({}, {height: '352'});
-compactButtons.clear(); tallButtons.clear(); compact.initialRender();
-assert.equal(tallButtons.has('workbench-new-chat'), false, 'Do not keep the tall navigation under the keyboard');
-for (const id of ['workbench-new-chat','workbench-sidebar-files','workbench-sidebar-tools','workbench-collapse-history']) {
-  assert.equal(compactButtons.get(id).diameter, 36);
-  compactButtons.get(id).onTap();
+function renderToolbar() {
+  icons.clear(); buttonActions.clear(); widths.clear(); labels.length = 0;
+  toolbar.historyToolbar();
 }
-assert.deepEqual(compactActions, ['new','files','tools','collapse']);
-assert.equal(compact.query, '你好', 'Layout adaptation preserves the query');
-areaChanged({}, {height: 660});
-compactButtons.clear(); tallButtons.clear(); compact.initialRender();
-assert.ok(tallButtons.has('workbench-new-chat'), 'Dismissal restores the full navigation');
-assert.equal(compactButtons.has('workbench-new-chat'), false);
-compact.workbench = false; compact.panelHeight = 352;
-assert.equal(compact.compactNavigation(), false, 'Phone navigation keeps its existing composition');
-console.log('PASS keyboard resize switches the actual sidebar controls and restores them without losing search');
+renderToolbar();
+assert.equal(widths.get('thread-search-pill'), 44);
+assert.ok(icons.has('workbench-new-chat') && icons.has('workbench-collapse-history'));
+assert.equal(labels.includes('对话'), false);
+icons.get('open-life-panels').onTap();
+assert.equal(boardOpens, 1);
+buttonActions.get('thread-search-toggle')();
+renderToolbar();
+assert.equal(widths.get('thread-search-pill'), 280);
+assert.equal(buttonActions.has('thread-search-toggle'), false);
+requestFrame();
+assert.deepEqual(focus, ['search-threads']);
+inputChanged('test');
+assert.equal(toolbar.query, 'test');
+icons.get('close-thread-search').onTap();
+assert.equal(toolbar.searchOpen, false);
+assert.equal(toolbar.query, '');
+assert.equal(focus.at(-1), null);
+inputChanged('late IME update');
+assert.equal(toolbar.query, '', 'A closed field must ignore late text updates');
 
-compact.selecting = false; compact.selectedIds = []; compact.archived = false;
-compact.filtered = () => [{id: 'one'}, {id: 'two'}];
-function renderSelection() {
-  compactButtons.clear(); tallButtons.clear(); renderedText.length = 0; filterProps = undefined;
-  compact.initialRender();
-}
-renderSelection();
-assert.ok(filterProps, 'Unselected sidebar displays its conversation filters');
-assert.equal(compactButtons.get('thread-selection-mode').label, '多选');
-compactButtons.get('thread-selection-mode').onTap();
-assert.equal(compact.selecting, true);
-renderSelection(); assert.ok(filterProps, 'Entering selection keeps filters until a conversation is selected');
-compact.selectThread('one', true); renderSelection();
-assert.equal(filterProps, undefined, 'Selected count replaces filters');
-assert.ok(renderedText.includes('已选中 1 个会话'));
-tallButtons.get('thread-select-all')(); renderSelection();
-assert.ok(renderedText.includes('已选中 2 个会话'));
-tallButtons.get('thread-select-all')(); renderSelection();
-assert.ok(filterProps, 'Clearing selection restores filters while keeping selection mode');
-assert.equal(compact.selecting, true);
-compact.selectThread('two', true); renderSelection();
-compactButtons.get('thread-selection-mode').onTap(); renderSelection();
-assert.equal(compact.selecting, false); assert.equal(compact.selectedIds.length, 0); assert.ok(filterProps);
-console.log('PASS inline selection control, count replacement, select-all, deselection and cancellation');
+toolbar.setScope(false, 'project');
+assert.deepEqual(toolbar.filtered().map(thread => thread.id), ['one']);
+toolbar.scopeMenu();
+assert.deepEqual(menuChoices.filter(item => item.selected).map(item => item.label), ['对话','Project']);
+renderToolbar();
+icons.get('workbench-new-chat').onTap();
+assert.deepEqual(newChats, ['project']);
+toolbar.setScope(true, '');
+assert.deepEqual(toolbar.filtered().map(thread => thread.id), ['two','old']);
+toolbar.selecting = true;
+toolbar.selectThread('two', true);
+renderToolbar();
+assert.ok(labels.includes('已选中 1 个会话'));
+toolbar.selectAll();
+assert.deepEqual(Array.from(toolbar.selectedIds), ['two','old']);
+toolbar.selectAll();
+assert.equal(toolbar.selectedIds.length, 0);
+icons.get('thread-selection-cancel').onTap();
+assert.equal(toolbar.selecting, false);
+console.log('PASS search morph, focus and close, project scope, scoped new chat and multiselect');
 
 // Exercise both initial and retained sidebar props emitted by ArkUI.
 const compiledPage = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/pages/Index.ts');
@@ -146,7 +164,10 @@ function visit(node) {
   ts.forEachChild(node, visit);
 }
 visit(pageTree); assert.ok(initialProps && updatedProps);
-const sidebarProps = vm.runInNewContext(`(function(initial) { return initial ? (${initialProps}) : (${updatedProps}); })`);
+const sidebarProps = vm.runInNewContext(ts.transpileModule(
+  `(function(initial) { return initial ? (${initialProps}) : (${updatedProps}); })`,
+  { compilerOptions: { target: ts.ScriptTarget.ES2021 } }
+).outputText);
 for (const initial of [true, false]) {
   const state = { app: {}, workbench: () => ({expanded: true}), onboardingActive: false, chatVisible: false, drawerContentActive: false };
   assert.equal(sidebarProps.call(state, initial).active, true, 'Settings must retain the expanded sidebar');

@@ -1,9 +1,11 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
-import { ChatViewModel } from '../viewmodel/ChatViewModel';
+import { ChatViewModel, ThreadViewModel } from '../viewmodel/ChatViewModel';
 import { ModelChoice } from '../model/ProviderProfiles';
+import { reasoningEffortName, reasoningEfforts, supportsReasoningEffort } from '../model/ReasoningEffort';
 import { Btn, Font, Radius, Space } from '../common/Theme';
-import { Banner } from '../common/Widgets';
+import { Banner, NavRow } from '../common/Widgets';
+import { ReasoningEffortPicker } from './ReasoningEffortPicker';
 
 class ProviderGroup {
   providerId: string;
@@ -20,11 +22,13 @@ class ProviderGroup {
 export struct ModelPickerPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
+  @ObjectLink thread: ThreadViewModel;
   // The workbench composer opens this list in a popup card instead of the full page.
   @Prop compact: boolean = false;
   onSelected: () => void = () => {};
   onSettings: () => void = () => {};
   @State private query: string = '';
+  @State private showReasoning: boolean = false;
 
   private groups(): ProviderGroup[] {
     const needle = this.query.trim().toLocaleLowerCase();
@@ -42,11 +46,26 @@ export struct ModelPickerPanel {
   }
 
   private isCurrent(choice: ModelChoice): boolean {
-    return this.app.active.modelRef?.providerId === choice.providerId && this.app.active.modelRef?.modelId === choice.modelId;
+    return this.thread.modelRef?.providerId === choice.providerId && this.thread.modelRef?.modelId === choice.modelId;
   }
 
   private isDefault(choice: ModelChoice): boolean {
     return this.app.config.configured && this.app.config.providerId === choice.providerId && this.app.config.model === choice.modelId;
+  }
+
+  private protocol(): string {
+    return this.app.providerProfiles.find((provider) => provider.id === this.thread.modelRef?.providerId)?.protocol || '';
+  }
+
+  @Builder
+  reasoningSettings() {
+    Button(t('返回模型列表')).id('reasoning-back-to-models').fontFamily(this.appearance.fontFamily)
+      .attributeModifier(Btn.textSmall).onClick(() => { this.showReasoning = false; })
+    ReasoningEffortPicker({ value: this.thread.reasoningEffort, modelName: this.thread.modelRef?.modelId || '',
+      selectionKey: JSON.stringify([this.thread.id, this.thread.modelRef?.providerId, this.thread.modelRef?.modelId, this.protocol()]),
+      efforts: reasoningEfforts(this.protocol(), this.thread.modelRef?.modelId || ''),
+      disabled: this.app.busy || this.thread.archived || this.app.saveError.length > 0,
+      onSelect: (value: string): Promise<boolean> => this.app.setReasoningEffort(value) })
   }
 
   @Builder
@@ -83,10 +102,18 @@ export struct ModelPickerPanel {
 
   build() {
     Column({ space: Space.sm }) {
+      if (this.showReasoning) {
+        this.reasoningSettings()
+      } else {
       Search({ value: this.query, placeholder: t("搜索服务或模型") }).textFont({ family: this.appearance.fontFamily })
         .placeholderFont({ family: this.appearance.fontFamily }).id('model-search').height(this.compact ? 36 : 40)
         .backgroundColor($r('app.color.surface_variant')).placeholderColor($r('app.color.text_tertiary'))
         .onChange((value: string) => { this.query = value; })
+      if (this.app.configured && supportsReasoningEffort(this.protocol(), this.thread.modelRef?.modelId || '')) {
+        NavRow({ title: t('推理强度'), value: reasoningEffortName(this.thread.reasoningEffort), compId: 'open-reasoning-effort',
+          icon: $r('sys.symbol.lightbulb'), disabled: this.app.busy || this.thread.archived || this.app.saveError.length > 0,
+          onTap: () => { this.getUIContext().getFocusController().clearFocus(); this.showReasoning = true; } })
+      }
       if (this.app.modelChoices.length === 0) {
         Column({ space: Space.md }) {
           SymbolGlyph($r('sys.symbol.cloud')).fontSize(36).fontColor([$r('app.color.text_tertiary')])
@@ -110,6 +137,7 @@ export struct ModelPickerPanel {
             }
           }
         }.layoutWeight(1).width('100%').scrollBar(BarState.Off).sticky(StickyStyle.None).edgeEffect(EdgeEffect.Spring)
+      }
       }
       if (this.app.error.length > 0) { Banner({ text: this.app.error, compId: 'model-picker-error' }) }
     }.padding({ left: this.compact ? 8 : Space.page, right: this.compact ? 8 : Space.page, top: this.compact ? 2 : Space.sm })

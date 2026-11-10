@@ -2,18 +2,24 @@ import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { FrameCallback, SymbolGlyphModifier } from '@kit.ArkUI';
+import { KeyCode } from '@kit.InputKit';
 import { Diagnostics } from '../model/Diagnostics';
 import { common } from '@kit.AbilityKit';
 import { picker } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { ChatViewModel, ThreadViewModel } from '../viewmodel/ChatViewModel';
+import { ProjectData } from '../model/Project';
 import { MAX_PROJECT_SHARED_FOLDERS, SharedFolder, sharedFolderNameFromUri, uniqueSharedFolderName } from '../model/SharedFolders';
 import { ProjectFolderAccess } from '../services/ProjectFolderAccess';
 import { Cancellation } from '../services/Cancellation';
 import { webDavSettings, webDavShareRoot, WebDavSettings } from '../services/WebDavConnection';
 import { listWebDavDirectory, WebDavDirectoryEntry } from '../services/WebDavWorkspaceFiles';
 import { Btn, Font, Motion, Radius, Space, Styles } from '../common/Theme';
-import { Banner, BottomBar, EmptyState, GroupCard, IconButton, NavRow, RowDivider, SectionHeader, Segmented } from '../common/Widgets';
+import { Banner, BottomBar, EmptyState, GroupCard, IconButton, NavRow, RowDivider, SectionHeader } from '../common/Widgets';
+
+const SEARCH_HEIGHT: number = 44;
+const ROW_MENU_SIZE: number = 32;
+const ROW_MENU_RIGHT_INSET: number = 4;
 
 class ThreadSection {
   id: string;
@@ -125,13 +131,14 @@ struct ThreadRow {
           if (!this.selecting) {
             Button({ type: ButtonType.Circle }) {
               SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
-            }.fontFamily(this.appearance.fontFamily).width(32).height(32).margin({ left: Space.sm })
+            }.id('thread-actions-' + this.thread.id).fontFamily(this.appearance.fontFamily)
+            .width(ROW_MENU_SIZE).height(ROW_MENU_SIZE).margin({ left: Space.sm })
             .backgroundColor(Color.Transparent).accessibilityText(t("对话管理"))
             .enabled(!this.locked()).bindMenu(this.actions, {
               systemMaterial: this.appearance.menu, mask: false })
           }
         }
-        .width('100%').padding({ left: this.workbench && !this.thread.parentThreadId ? 28 : Space.md, right: 4,
+        .width('100%').padding({ left: this.workbench && !this.thread.parentThreadId ? 28 : Space.md, right: ROW_MENU_RIGHT_INSET,
           top: 6, bottom: 6 }).constraintSize({ minHeight: 44 })
         .onClick(async () => {
           if (this.locked()) { return; }
@@ -180,22 +187,22 @@ export struct ThreadList {
   @Prop collapseHistory: boolean = false;
   @Prop @Watch('searchRequested') searchRequest: number = 0;
   @State @Watch('searchVisibilityChanged') private searchOpen: boolean = false;
-  @State private panelHeight: number = 0;
+  @State private toolbarWidth: number = SEARCH_HEIGHT;
   private mounted: boolean = false;
   private focusRequest: number = 0;
   onCollapseHistory: () => void = () => {};
-  onNewChat: () => void = () => {};
+  onNewChat: (projectId?: string) => void = () => {};
   onTools: () => void = () => {};
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   onSelected: () => void = () => {};
   onSettings: () => void = () => {};
-  onMiniApps: () => void = () => {};
   onLifePanels: () => void = () => {};
   onFiles: () => void = () => {};
   onProjectSheetVisibility: (visible: boolean) => void = () => {};
   @State private query: string = '';
   @State private archived: boolean = false;
+  @State private projectFilter: string | null = null;
   @State private selecting: boolean = false;
   @State private selectedIds: string[] = [];
   @State private visibleCounts: Record<string, number> = {};
@@ -226,6 +233,8 @@ export struct ThreadList {
 
   // The rail can mount the search field and request its focus in the same frame.
   private searchRequested(): void {
+    if (this.locked()) { return; }
+    if (this.selecting) { this.endSelection(); }
     this.searchOpen = true;
     const request = ++this.focusRequest;
     this.getUIContext().postFrameCallback(new ThreadSearchFrame(() => {
@@ -235,8 +244,39 @@ export struct ThreadList {
     }));
   }
 
+  private closeSearch(): void {
+    if (!this.searchOpen) { return; }
+    this.searchOpen = false;
+    this.getUIContext().getFocusController().clearFocus();
+    this.updateQuery('');
+  }
+
+  private updateQuery(query: string): void {
+    if (this.query === query) { return; }
+    this.query = query;
+    this.visibleCounts = {};
+    this.selectedIds = [];
+  }
+
+  private setScope(archived: boolean, project: string | null): void {
+    if (this.archived === archived && this.projectFilter === project) { return; }
+    this.archived = archived;
+    this.projectFilter = project;
+    this.visibleCounts = {};
+    this.selectedIds = [];
+  }
+
   private filtered(): ThreadViewModel[] {
-    return this.app.filteredThreads(this.query, this.archived);
+    const threads = this.app.filteredThreads(this.query, this.archived);
+    const project = this.projectFilter;
+    if (project === null) { return threads; }
+    const projectIds = new Set(this.app.projects.map((item) => item.id));
+    return threads.filter((thread) => this.threadProject(thread, projectIds) === project);
+  }
+
+  private threadProject(thread: ThreadViewModel, projects: Set<string>): string {
+    const project = thread.projectId || '';
+    return projects.has(project) ? project : '';
   }
   private locked(): boolean { return !this.app.canNavigate; }
   private endSelection(): void { this.selecting = false; this.selectedIds = []; }
@@ -282,7 +322,7 @@ export struct ThreadList {
   }
   private sectionThreads(id: string): ThreadViewModel[] {
     const projectIds = new Set(this.app.projects.map((project) => project.id));
-    return this.filtered().filter((thread) => (projectIds.has(thread.projectId || '') ? thread.projectId : '') === id);
+    return this.filtered().filter((thread) => this.threadProject(thread, projectIds) === id);
   }
   private sectionTitle(id: string): string {
     return this.app.projects.find((project) => project.id === id)?.name || t('普通聊天');
@@ -590,7 +630,7 @@ export struct ThreadList {
               if (await this.app.saveProject(this.projectName, this.projectInstructions, this.projectId || undefined, this.projectFolders)) {
                 const id = this.projectId || this.app.active.projectId || '';
                 // A newly created project must be visible even when launched from search or archives.
-                if (creating) { this.query = ''; this.archived = false; this.visibleCounts = {}; }
+                if (creating) { this.updateQuery(''); this.setScope(false, null); }
                 this.collapsedProjects = this.collapsedProjects.filter((item) => item !== id);
                 this.projectEditing = false;
               }
@@ -608,7 +648,8 @@ export struct ThreadList {
       const section = result.find((item: ThreadSection) => item.id === (thread.projectId || '')) || ordinary;
       section.threads.push(thread);
     }
-    return this.query.trim() || this.archived ? result.filter((section) => section.threads.length > 0) : result;
+    return result.filter((section) => (this.projectFilter === null || section.id === this.projectFilter) &&
+      (!(this.query.trim() || this.archived) || section.threads.length > 0));
   }
 
   @Builder
@@ -622,58 +663,110 @@ export struct ThreadList {
   }
 
   @Builder
-  workbenchMenu() {
+  scopeMenu() {
     Menu() {
-      MenuItem({ content: this.archived ? t('对话') : t('已归档'),
-        symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.archivebox')) }).id('workbench-archive-toggle')
-        .onClick(() => { this.archived = !this.archived; this.visibleCounts = {}; this.selectedIds = []; })
-      MenuItem({ content: this.selecting ? t('取消') : t('多选'),
-        symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.checkmark_circle')) }).id('workbench-selection-toggle')
-        .onClick(() => { if (this.selecting) { this.endSelection(); } else { this.selecting = true; } })
+      MenuItem(() => materialMenuContent.bind(this)({ label: t('对话'), selected: !this.archived }))
+        .id('active-threads').onClick(() => this.setScope(false, this.projectFilter))
+      MenuItem(() => materialMenuContent.bind(this)({ label: t('已归档'), selected: this.archived }))
+        .id('archived-threads').onClick(() => this.setScope(true, this.projectFilter))
+      MenuItemGroup() {
+        MenuItem(() => materialMenuContent.bind(this)({ label: t('全部项目'), selected: this.projectFilter === null }))
+          .id('threads-all-projects').onClick(() => this.setScope(this.archived, null))
+        MenuItem(() => materialMenuContent.bind(this)({ label: t('普通聊天'), selected: this.projectFilter === '' }))
+          .id('threads-ordinary').onClick(() => this.setScope(this.archived, ''))
+        ForEach(this.app.projects, (project: ProjectData) => {
+          MenuItem(() => materialMenuContent.bind(this)({ label: project.name, selected: this.projectFilter === project.id }))
+            .id('threads-project-' + project.id).onClick(() => this.setScope(this.archived, project.id))
+        }, (project: ProjectData) => project.id)
+      }
+      MenuItemGroup() {
+        MenuItem({ content: t('多选'), symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.checkmark_circle')) })
+          .id('thread-selection-mode').enabled(this.filtered().length > 0)
+          .onClick(() => { this.selecting = true; })
+        MenuItem({ content: t('新建项目'), symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.folder_badge_plus')) })
+          .id('project-create').enabled(!this.app.sharedBusy && !this.app.saveError)
+          .onClick(() => this.editProject())
+      }
     }
   }
 
   @Builder
-  workbenchNavigation() {
-    if (!this.compactNavigation()) {
-    Button({ type: ButtonType.Normal }) {
-      Row({ space: 10 }) {
-        Blank().layoutWeight(1)
-        SymbolGlyph($r('sys.symbol.square_and_pencil')).fontSize(19).fontColor([$r('app.color.text_primary')])
-        Text(t('新建对话')).fontSize(15).fontColor($r('app.color.text_primary'))
-        Blank().layoutWeight(1)
-      }.width('100%')
-    }.id('workbench-new-chat').width('100%').height(44).padding({ left: 14, right: 14 }).borderRadius(12)
-      .backgroundColor(this.appearance.accentContainer).border({ width: 0.5, color: $r('app.color.divider'), radius: 12 })
-      .enabled(!this.locked()).onClick(this.onNewChat)
-    Column({ space: 2 }) {
-      Button() {
-        Row({ space: 12 }) {
-          SymbolGlyph($r('sys.symbol.folder')).fontSize(19).fontColor([$r('app.color.text_secondary')])
-          Text(t('工作区文件')).fontSize(15).fontColor($r('app.color.text_primary')).layoutWeight(1).textAlign(TextAlign.Start)
-        }.width('100%')
-      }.id('workbench-sidebar-files').width('100%').height(44).padding({ left: 12, right: 12 })
-        .borderRadius(10).backgroundColor(Color.Transparent).onClick(this.onFiles)
-      Button() {
-        Row({ space: 12 }) {
-          SymbolGlyph($r('sys.symbol.wrench_and_screwdriver')).fontSize(19).fontColor([$r('app.color.text_secondary')])
-          Text(t('记忆与工具')).fontSize(15).fontColor($r('app.color.text_primary')).layoutWeight(1).textAlign(TextAlign.Start)
-        }.width('100%')
-      }.id('workbench-sidebar-tools').width('100%').height(44).padding({ left: 12, right: 12 })
-        .borderRadius(10).backgroundColor(this.selectedSection === 'productivity' ? this.appearance.accentContainer : Color.Transparent).onClick(this.onTools)
-    }.width('100%').padding({ top: 8, bottom: 12 })
+  workspaceMenu() {
+    Menu() {
+      MenuItem({ content: t('工作区文件'), symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.folder')) })
+        .id('workbench-sidebar-files').onClick(this.onFiles)
+      MenuItem({ content: t('记忆与工具'), symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.wrench_and_screwdriver')) })
+        .id('workbench-sidebar-tools').onClick(this.onTools)
     }
-    Row({ space: 0 }) {
-      Text(this.archived ? t('已归档') : t('工作区')).fontSize(13).fontColor($r('app.color.text_tertiary')).layoutWeight(1)
-      IconButton({ icon: $r('sys.symbol.magnifyingglass'), label: t('搜索对话'), compId: 'workbench-search',
-        diameter: 36, iconSize: 17, onTap: () => { this.searchOpen = !this.searchOpen; } })
-      Button({ type: ButtonType.Circle }) {
-        SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(17).fontColor([$r('app.color.text_secondary')])
-      }.id('workbench-history-options').width(36).height(36).backgroundColor(Color.Transparent)
-        .accessibilityText(t('对话管理')).enabled(!this.locked()).bindMenu(this.workbenchMenu)
-      IconButton({ icon: $r('sys.symbol.folder_badge_plus'), label: t('新建项目'), compId: 'workbench-project-create',
-        diameter: 36, iconSize: 18, disabled: this.locked(), onTap: () => this.editProject() })
-    }.width('100%').height(36).padding({ left: 4 })
+  }
+
+  @Builder
+  searchControl() {
+    Row() {
+      Stack() {
+        SymbolGlyph($r('sys.symbol.magnifyingglass')).fontSize(19)
+          .fontColor([$r('app.color.text_secondary')]).accessibilityLevel('no')
+        if (!this.searchOpen) {
+          Button({ type: ButtonType.Circle }).id('thread-search-toggle').width(SEARCH_HEIGHT).height(SEARCH_HEIGHT)
+            .backgroundColor(Color.Transparent).accessibilityText(t('搜索对话')).enabled(!this.locked())
+            .onClick(() => this.searchRequested())
+        }
+      }.width(SEARCH_HEIGHT).height(SEARCH_HEIGHT).flexShrink(0)
+      TextInput({ text: this.query, placeholder: t('搜索对话') })
+        .id('search-threads').layoutWeight(1).height(SEARCH_HEIGHT).padding(0)
+        .fontFamily(this.appearance.fontFamily).fontSize(15).placeholderColor($r('app.color.text_tertiary'))
+        .backgroundColor(Color.Transparent).enabled(this.searchOpen && !this.locked()).focusable(this.searchOpen)
+        .visibility(this.searchOpen ? Visibility.Visible : Visibility.None).accessibilityText(t('搜索对话'))
+        .onChange((value: string) => { if (this.searchOpen) { this.updateQuery(value); } })
+        .onKeyEvent((event: KeyEvent) => {
+          if (event.type === KeyType.Down && event.keyCode === KeyCode.KEYCODE_ESCAPE) {
+            this.closeSearch();
+            event.stopPropagation();
+          }
+        })
+      if (this.searchOpen) {
+        IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭搜索'), compId: 'close-thread-search',
+          diameter: SEARCH_HEIGHT, iconSize: 15, onTap: () => this.closeSearch() })
+      }
+    }.id('thread-search-pill').width(this.searchOpen ? this.toolbarWidth : SEARCH_HEIGHT).height(SEARCH_HEIGHT)
+      .borderRadius(SEARCH_HEIGHT / 2).clip(true).backgroundColor($r('app.color.surface_variant'))
+      .animation({ duration: Motion.fast, curve: Motion.standard })
+  }
+
+  @Builder
+  historyToolbar() {
+    if (this.selecting) {
+      Row({ space: Space.sm }) {
+        Text(t('已选中 {0} 个会话', [this.selectedIds.length])).fontFamily(this.appearance.fontFamily).id('thread-selection-count')
+          .fontSize(Font.small).fontColor($r('app.color.text_secondary')).layoutWeight(1)
+        IconButton({ icon: $r('sys.symbol.xmark'), label: t('取消'), compId: 'thread-selection-cancel', diameter: 44,
+          iconSize: 17, onTap: () => this.endSelection() })
+      }.width('100%').height(SEARCH_HEIGHT)
+    } else {
+      Stack({ alignContent: Alignment.Start }) {
+        Row() {
+          Blank().layoutWeight(1)
+          IconButton({ icon: $r('sys.symbol.square_grid_2x2'), label: t('生活看板'), compId: 'open-life-panels',
+            diameter: 44, iconSize: 19, disabled: !this.app.ready, onTap: this.onLifePanels })
+          Button({ type: ButtonType.Circle }) {
+            SymbolGlyph($r('sys.symbol.list_bullet')).fontSize(18)
+              .fontColor([this.archived || this.projectFilter !== null ? this.appearance.accent : $r('app.color.text_secondary')])
+          }.id('thread-scope-menu').width(44).height(44)
+            .backgroundColor(this.archived || this.projectFilter !== null ? this.appearance.accentContainer : Color.Transparent)
+            .accessibilityText(t('筛选对话')).enabled(!this.locked())
+            .bindMenu(this.scopeMenu, { systemMaterial: this.appearance.menu, mask: false })
+          IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('新建对话'), compId: 'workbench-new-chat',
+            diameter: 44, iconSize: 19, disabled: this.locked(), onTap: () => this.onNewChat(this.projectFilter || undefined) })
+          if (this.collapseHistory) {
+            IconButton({ icon: $r('sys.symbol.close_sidebar'), label: t('收起会话栏'), compId: 'workbench-collapse-history',
+              diameter: 44, iconSize: 18, onTap: this.onCollapseHistory })
+          }
+        }.width('100%').height(SEARCH_HEIGHT).enabled(!this.searchOpen)
+          .accessibilityLevel(this.searchOpen ? 'no-hide-descendants' : 'auto')
+        this.searchControl()
+      }.width('100%').height(SEARCH_HEIGHT)
+        .onAreaChange((_oldArea: Area, area: Area) => { this.toolbarWidth = Math.max(SEARCH_HEIGHT, Number(area.width)); })
+    }
   }
 
   @Builder
@@ -698,101 +791,35 @@ export struct ThreadList {
         if (id) {
           Button({ type: ButtonType.Circle }) {
             SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
-          }.fontFamily(this.appearance.fontFamily).id('project-actions-' + id).width(32).height(32).backgroundColor(Color.Transparent)
+          }.fontFamily(this.appearance.fontFamily).id('project-actions-' + id)
+            .width(ROW_MENU_SIZE).height(ROW_MENU_SIZE).backgroundColor(Color.Transparent)
             .accessibilityText(t('编辑项目') + ' · ' + this.sectionTitle(id)).enabled(!this.app.sharedBusy && !this.app.saveError)
             .bindMenu(this.projectActions(id), { systemMaterial: this.appearance.menu, mask: false })
         }
       }
-    }.width('100%').padding({ top: 4 }).backgroundColor($r('app.color.page_background'))
-  }
-
-  private compactNavigation(): boolean {
-    // Measure the available panel, including keyboard and floating-window resize.
-    return this.workbench && this.panelHeight > 0 && this.panelHeight < 520;
+    }.width('100%').padding({ top: 4, right: ROW_MENU_RIGHT_INSET }).backgroundColor($r('app.color.page_background'))
   }
 
   build() {
     Column() {
       if (this.active) { this.listContent() }
     }.width('100%').height('100%')
-      .onAreaChange((_oldArea: Area, area: Area) => { this.panelHeight = Number(area.height); })
   }
 
   @Builder
   listContent() {
-    Column({ space: this.compactNavigation() ? Space.sm : Space.md }) {
-      Row({ space: Space.sm }) {
-        Image($r('app.media.tinybot')).width(28).height(28)
-        if (this.compactNavigation()) {
-          Blank().layoutWeight(1)
-          IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('新建对话'), compId: 'workbench-new-chat',
-            diameter: 36, iconSize: 19, disabled: this.locked(), onTap: this.onNewChat })
-          IconButton({ icon: $r('sys.symbol.folder'), label: t('工作区文件'), compId: 'workbench-sidebar-files',
-            diameter: 36, iconSize: 19, onTap: this.onFiles })
-          IconButton({ icon: $r('sys.symbol.wrench_and_screwdriver'), label: t('记忆与工具'), compId: 'workbench-sidebar-tools',
-            diameter: 36, iconSize: 19, onTap: this.onTools })
-        } else {
-        Text('Tinybot').fontFamily(this.appearance.fontFamily).fontSize(20).fontWeight(FontWeight.Bold).layoutWeight(1).fontColor($r('app.color.text_primary'))
-        }
-        if (!this.workbench) {
-        if (!this.selecting) {
-          IconButton({ icon: $r('sys.symbol.folder_badge_plus'), label: t('新建项目'), compId: 'project-create',
-            disabled: this.app.sharedBusy || !!this.app.saveError, onTap: () => this.editProject() })
-        }
-        } else if (this.collapseHistory) {
-          // Desktop parity: the panel toggle lives in the sidebar's logo row.
-          IconButton({ icon: $r('sys.symbol.line_3_horizontal'), label: t('收起会话栏'), compId: 'workbench-collapse-history',
-            diameter: 36, iconSize: 18, onTap: this.onCollapseHistory })
-        }
-      }.width('100%').height(this.compactNavigation() ? 40 : 48).padding({ left: 4 })
-      Row({ space: Space.sm }) {
-        Button(t('生活看板')).fontFamily(this.appearance.fontFamily).attributeModifier(this.selectedSection === 'life-panels' ? Btn.primary : Btn.tonal).layoutWeight(1)
-          .height(40).padding({ left: 8, right: 8 }).fontSize(14)
-          .id('open-life-panels').enabled(this.app.ready).onClick(this.onLifePanels)
-        if (this.app.productivity.options?.miniAppsEnabled === true) {
-          Button(t('小程序')).fontFamily(this.appearance.fontFamily).attributeModifier(this.selectedSection === 'mini-apps' ? Btn.primary : Btn.tonal).layoutWeight(1)
-            .height(40).padding({ left: 8, right: 8 }).fontSize(14)
-            .id('open-mini-apps').enabled(this.app.ready).onClick(this.onMiniApps)
-        }
-      }.width('100%')
-      if (this.workbench) { this.workbenchNavigation() }
-      Column({ space: Space.sm }) {
-        Search({ value: this.query, placeholder: t("搜索对话") }).textFont({ family: this.appearance.fontFamily })
-          .placeholderFont({ family: this.appearance.fontFamily }).id('search-threads').height(40)
-          .backgroundColor($r('app.color.surface_variant')).placeholderColor($r('app.color.text_tertiary'))
-          .enabled(!this.locked())
-          .onChange((value: string) => { this.query = value; this.visibleCounts = {}; this.selectedIds = []; })
-        if (!this.workbench) {
-          Row({ space: Space.sm }) {
-            if (this.selectedIds.length > 0) {
-              Text(t('已选中 {0} 个会话', [this.selectedIds.length])).fontFamily(this.appearance.fontFamily)
-                .id('thread-selection-count').fontSize(Font.small).fontColor($r('app.color.text_secondary'))
-                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
-            } else {
-              Segmented({ options: [t("对话"), t("已归档")], selected: this.archived ? 1 : 0,
-                optionIds: ['active-threads', 'archived-threads'], controlHeight: 38, labelSize: 13,
-                trackRadius: 19, thumbRadius: 16, gap: 2, thumbShadow: false,
-                onSelect: (index: number) => {
-                  if (this.locked()) { return; }
-                  this.archived = index === 1; this.visibleCounts = {}; this.selectedIds = [];
-                } }).layoutWeight(1)
-            }
-            IconButton({ icon: this.selecting ? $r('sys.symbol.xmark') : $r('sys.symbol.checkmark_circle'),
-              label: this.selecting ? t('取消') : t('多选'), compId: 'thread-selection-mode', diameter: 38, iconSize: 19,
-              tint: this.selecting ? this.appearance.accent : $r('app.color.text_secondary'),
-              disabled: this.locked() || (!this.selecting && this.filtered().length === 0),
-              onTap: () => { if (this.selecting) { this.endSelection(); } else { this.selecting = true; } } })
-          }.width('100%').height(38)
-        }
-      }.width('100%')
-        .visibility(!this.workbench || this.searchOpen || this.query.length > 0 ? Visibility.Visible : Visibility.None)
-      if (this.workbench && this.selecting) {
+    Column({ space: Space.sm }) {
+      this.historyToolbar()
+      if (this.archived || this.projectFilter !== null) {
         Row({ space: Space.sm }) {
-          Text(t('已选中 {0} 个会话', [this.selectedIds.length])).fontFamily(this.appearance.fontFamily).id('thread-selection-count')
-            .fontSize(Font.small).fontColor($r('app.color.text_secondary')).layoutWeight(1)
-          IconButton({ icon: $r('sys.symbol.xmark'), label: t('取消'), diameter: 38, iconSize: 19,
-            disabled: this.locked(), onTap: () => this.endSelection() })
-        }.width('100%')
+          if (this.archived) {
+            Text(t('已归档')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+          }
+          if (this.projectFilter !== null) {
+            Text(this.sectionTitle(this.projectFilter)).fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
+              .fontColor($r('app.color.text_secondary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+        }.width('100%').padding({ left: Space.sm, right: Space.sm })
       }
       if (this.sections(this.filtered()).length === 0) {
         Column({ space: Space.sm }) {
@@ -809,7 +836,7 @@ export struct ThreadList {
               ListItemGroup({ header: this.sectionHeader(id), space: 0 }) {
                 if (this.groupOpen(id)) {
                   ForEach(this.sectionThreads(id).slice(0, this.visibleCount(id)), (thread: ThreadViewModel) => {
-                    ListItem() { ThreadRow({ thread: thread, app: this.app, conversationActive: this.selectedSection === '', workbench: this.workbench, query: this.query, onSelected: this.onSelected,
+                    ListItem() { ThreadRow({ thread: thread, app: this.app, conversationActive: this.selectedSection === '', workbench: this.workbench, query: this.query, onSelected: () => { this.closeSearch(); this.onSelected(); },
                       selecting: this.selecting, selected: this.selectedIds.includes(thread.id),
                       onSelectionChanged: (selected: boolean) => this.selectThread(thread.id, selected),
                       lastBranch: this.lastBranch(id, thread.id),
@@ -850,15 +877,24 @@ export struct ThreadList {
             .enabled(!this.locked() && this.selectedIds.length > 0).onClick(() => this.confirmDeleteSelected())
         }.width('100%')
       } else {
-        Row({ space: Space.md }) {
-          SymbolGlyph($r('sys.symbol.gearshape')).fontSize(20).fontColor([$r('app.color.text_secondary')])
-          Text(t("设置")).fontFamily(this.appearance.fontFamily).fontSize(15).layoutWeight(1).fontColor($r('app.color.text_primary'))
-          Text(t("已配置 {0} 个模型服务", [this.app.providerProfiles.length])).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
-          SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(14).fontColor([$r('app.color.text_tertiary')])
-        }
-        .id('open-settings').width('100%').height(48).padding({ left: Space.md, right: Space.md }).borderRadius(Radius.md)
-        .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
-        .onClick(() => this.onSettings())
+        Row({ space: Space.xs }) {
+          if (this.workbench) {
+            Button({ type: ButtonType.Circle }) {
+              SymbolGlyph($r('sys.symbol.folder')).fontSize(20).fontColor([$r('app.color.text_secondary')])
+            }.id('sidebar-workspace-menu').width(44).height(44).backgroundColor(Color.Transparent)
+              .accessibilityText(t('工作区')).bindMenu(this.workspaceMenu, { systemMaterial: this.appearance.menu, mask: false })
+          }
+          Row({ space: Space.sm }) {
+            SymbolGlyph($r('sys.symbol.gearshape')).fontSize(20).fontColor([$r('app.color.text_secondary')])
+            Text(t('设置')).fontFamily(this.appearance.fontFamily).fontSize(15).layoutWeight(1)
+              .fontColor($r('app.color.text_primary')).maxLines(1)
+            Text(t('已配置 {0} 个模型服务', [this.app.providerProfiles.length])).fontFamily(this.appearance.fontFamily)
+              .fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(14).fontColor([$r('app.color.text_tertiary')])
+          }.id('open-settings').layoutWeight(1).height(48).padding({ left: Space.sm, right: Space.sm }).borderRadius(Radius.md)
+            .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
+            .onClick(this.onSettings)
+        }.width('100%')
       }
     }
     .padding({ left: Space.md, right: Space.md, top: Space.sm, bottom: Space.sm })
