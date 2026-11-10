@@ -1460,14 +1460,14 @@ async function test(name, run) {
       webDavSession = undefined;
     }
   });
-  await test('Nutstore root reuses or creates the backup folder and restores without creating it', async () => {
+  await test('Nutstore root reuses or creates the backup folder and replaces backups without MOVE', async () => {
     const { WebDavBackup } = load(path.join(source, 'services/WebDavBackup'));
     const { saveWebDavConnection, webDavSettings, clearWebDavConnection } = load(path.join(source, 'services/WebDavConnection'));
     const root = '/sandbox/nutstore-app', context = { cacheDir: root + '/cache', getApplicationContext: () => ({ filesDir: root }) };
     fs.mkdirSync(nativePath(context.cacheDir), { recursive: true });
     const davRoot = 'https://dav.jianguoyun.com/dav/', folder = davRoot + 'Tinybot/', lower = davRoot + 'tinybot/';
     const files = new Map(), folders = new Map(), requests = [];
-    let createStatus = 201, id = '';
+    let createStatus = 201, uploadStatus = 201, id = '';
     webDavSession = () => ({
       async fetch(request) {
         const { method, url, headers } = request;
@@ -1485,12 +1485,13 @@ async function test(name, run) {
         const directory = url.slice(0, url.lastIndexOf('/') + 1);
         assert.equal(folders.get(directory), true);
         if (method === 'PUT') {
-          files.set(url, fs.readFileSync(nativePath(request.content.path)));
-          return { statusCode: 201 };
+          if (uploadStatus === 201) files.set(url, fs.readFileSync(nativePath(request.content.path)));
+          return { statusCode: uploadStatus };
         }
         assert.equal(method, 'MOVE');
         assert.equal(headers.Destination, directory + 'tinybot-latest.tinybot');
         assert.equal(headers.Overwrite, 'T');
+        if (files.has(headers.Destination)) return { statusCode: 409 };
         files.set(headers.Destination, files.get(url)); files.delete(url);
         return { statusCode: 204 };
       },
@@ -1514,17 +1515,24 @@ async function test(name, run) {
       assert.equal(files.size, 0);
       createStatus = 201;
       await WebDavBackup.create(context, data, id);
-      assert.deepEqual(requests.splice(0), ['PROPFIND', 'PROPFIND', 'MKCOL', 'PUT', 'MOVE']);
+      assert.deepEqual(requests.splice(0), ['PROPFIND', 'PROPFIND', 'MKCOL', 'PUT']);
       data.config.userDocument = 'Second snapshot';
       await WebDavBackup.create(context, data, id);
-      assert.deepEqual(requests.splice(0), ['PROPFIND', 'PUT', 'MOVE']);
+      assert.deepEqual(requests.splice(0), ['PROPFIND', 'PUT']);
       assert.deepEqual([...files.keys()], [folder + 'tinybot-latest.tinybot']);
       assert.equal((await WebDavBackup.restore(context, model.emptyData(), id)).config.userDocument, 'Second snapshot');
       assert.deepEqual(requests.splice(0), ['PROPFIND', 'GET']);
 
+      const previous = files.get(folder + 'tinybot-latest.tinybot');
+      uploadStatus = 507;
+      await assert.rejects(WebDavBackup.create(context, data, id), /PUT.*507/);
+      assert.deepEqual(requests.splice(0), ['PROPFIND', 'PUT']);
+      assert.deepEqual([...files.values()], [previous]);
+      uploadStatus = 201;
+
       folders.delete(folder); folders.set(lower, true);
       await WebDavBackup.create(context, data, id);
-      assert.deepEqual(requests.splice(0), ['PROPFIND', 'PROPFIND', 'PUT', 'MOVE']);
+      assert.deepEqual(requests.splice(0), ['PROPFIND', 'PROPFIND', 'PUT']);
       assert.ok(files.has(lower + 'tinybot-latest.tinybot'));
       folders.set(folder, false);
       await assert.rejects(WebDavBackup.create(context, data, id), /目标不是文件夹/);
@@ -1532,7 +1540,11 @@ async function test(name, run) {
 
       folders.clear(); createStatus = 405;
       await WebDavBackup.create(context, data, id);
-      assert.deepEqual(requests, ['PROPFIND', 'PROPFIND', 'MKCOL', 'PROPFIND', 'PUT', 'MOVE']);
+      assert.deepEqual(requests.splice(0), ['PROPFIND', 'PROPFIND', 'MKCOL', 'PROPFIND', 'PUT']);
+
+      await saveWebDavConnection(id, 'Nutstore folder', folder, 'alice', 'app-password');
+      await WebDavBackup.create(context, data, id);
+      assert.deepEqual(requests, ['PUT']);
       assert.deepEqual(fs.readdirSync(nativePath(context.cacheDir)), []);
     } finally {
       await clearWebDavConnection(id);

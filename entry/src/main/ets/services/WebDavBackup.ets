@@ -87,6 +87,11 @@ async function cleanLocal(path: string): Promise<void> {
   catch (error) { Diagnostics.log('warn', 'backup', 'webdav_cleanup_failed', { operation: 'local' }, error as Error); }
 }
 
+async function uploadBackupFile(session: rcp.Session, address: string, source: string): Promise<void> {
+  await send('PUT', () => session.fetch(new rcp.Request(address, 'PUT',
+    { 'content-type': 'application/octet-stream' }, new rcp.UploadFromFile(source))), [200, 201, 204]);
+}
+
 export class WebDavBackup {
   static create(context: common.UIAbilityContext, data: AppData, connectionId: string): Promise<void> {
     return withBackupOperation(async () => {
@@ -98,11 +103,16 @@ export class WebDavBackup {
         let temporary = '';
         try {
           const directory = await backupDirectory(session, saved.directory, true);
-          temporary = directory + 'tinybot-' + util.generateRandomUUID() + '.partial';
-          await send('PUT', () => session.fetch(new rcp.Request(temporary, 'PUT',
-            { 'content-type': 'application/octet-stream' }, new rcp.UploadFromFile(source))), [200, 201, 204]);
-          await send('MOVE', () => session.fetch(new rcp.Request(temporary, 'MOVE',
-            { Destination: directory + SNAPSHOT_NAME, Overwrite: 'T' })), [201, 204]);
+          const destination = directory + SNAPSHOT_NAME;
+          if (directory.startsWith(NUTSTORE_ROOT)) {
+            // Nutstore accepts PUT over an existing file but returns 409 for MOVE with Overwrite: T.
+            await uploadBackupFile(session, destination, source);
+          } else {
+            temporary = directory + 'tinybot-' + util.generateRandomUUID() + '.partial';
+            await uploadBackupFile(session, temporary, source);
+            await send('MOVE', () => session.fetch(new rcp.Request(temporary, 'MOVE',
+              { Destination: destination, Overwrite: 'T' })), [201, 204]);
+          }
         } catch (error) {
           if (temporary) {
             try { await send('DELETE', () => session.fetch(new rcp.Request(temporary, 'DELETE')), [200, 204, 404]); }
