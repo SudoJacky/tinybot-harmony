@@ -69,6 +69,7 @@ export struct WorkspacePanel {
   @State private busy: boolean = false;
   @State private refreshing: boolean = false;
   @State private listingPending: boolean = false;
+  @State private listingError: string = '';
   @State private error: string = '';
   @State private baseline: FileBaseline | undefined = undefined;
   @State private csv: string[][] = [];
@@ -139,6 +140,7 @@ export struct WorkspacePanel {
     const files = this.files; const directory = this.directory;
     this.listingRequest = request;
     this.listingPending = true;
+    this.listingError = '';
     try {
       const list = await files.list(directory || '.', request);
       if (this.listingRequest !== request) { return; }
@@ -146,7 +148,7 @@ export struct WorkspacePanel {
       this.entries = list.entries.sort((a, b) => (a.kind === 'directory' ? 0 : 1) - (b.kind === 'directory' ? 0 : 1) || a.name.localeCompare(b.name));
       this.truncated = list.truncated;
     } catch (error) {
-      if (this.listingRequest === request) { this.error = (error as Error).message; }
+      if (this.listingRequest === request) { this.listingError = (error as Error).message; }
     } finally {
       if (this.listingRequest === request) { this.listingPending = false; this.refreshing = false; }
     }
@@ -532,8 +534,9 @@ export struct WorkspacePanel {
         if (this.directory) {
           this.breadcrumbs()
         }
-        if (this.error.length > 0) {
-          Banner({ text: this.error, actionLabel: t("关闭"), onAction: () => { this.error = ''; } })
+        if (this.error || this.listingError) {
+          Banner({ text: this.error || this.listingError, actionLabel: t("关闭"),
+            onAction: () => { if (this.error) { this.error = ''; } else { this.listingError = ''; } } })
             .padding({ left: Space.page, right: Space.page, bottom: Space.sm })
         }
         Refresh({ refreshing: $$this.refreshing }) {
@@ -546,7 +549,7 @@ export struct WorkspacePanel {
                     .fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
                 }.id('workspace-list-loading').width('100%').justifyContent(FlexAlign.Center).padding(Space.xl)
               }
-            } else if (this.entries.length === 0 && !this.error) {
+            } else if (this.entries.length === 0 && !this.error && !this.listingError) {
               ListItem() {
                 EmptyState({ icon: $r('sys.symbol.folder'), title: this.directory ? t("文件夹是空的") : t("这里还没有文件"),
                   caption: this.files?.isCloudPath(this.directory) ? t('在此新建的笔记会保存到 WebDAV。') :

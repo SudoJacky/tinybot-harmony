@@ -4,6 +4,8 @@ import { RequestUsage, UsageToolActivity } from '../model/Usage';
 import { writeBytes } from './Attachments';
 import { util } from '@kit.ArkTS';
 import { BackupChanges } from '../model/BackupChanges';
+import { Diagnostics } from '../model/Diagnostics';
+import { withFileMutation } from './FileMutationQueue';
 
 interface UsageManifest { version: number; pages: number; }
 const PAGE_SIZE = 256;
@@ -83,28 +85,33 @@ export class UsageLedger {
     await writeBytes(path + '.tmp', new util.TextEncoder().encodeInto(value).buffer as ArrayBuffer);
     await fs.rename(path + '.tmp', path);
   }
-  private static async flush(): Promise<void> {
-    if (!UsageLedger.ready) { return; }
-    do {
-    while (UsageLedger.dirty.size > 0) {
-      const page = UsageLedger.dirty.values().next().value as number;
-      UsageLedger.dirty.delete(page);
-      try {
-        await UsageLedger.write(UsageLedger.pagePath(page), JSON.stringify(UsageLedger.records.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)));
-      } catch (error) { UsageLedger.dirty.add(page); throw new Error((error as Error).message); }
-    }
-    const pages = Math.ceil(UsageLedger.records.length / PAGE_SIZE);
-    if (pages !== UsageLedger.persistedPages || !await fs.access(UsageLedger.path + '/index.json')) {
-      const manifest: UsageManifest = { version: 1, pages: pages };
-      await UsageLedger.write(UsageLedger.path + '/index.json', JSON.stringify(manifest)); UsageLedger.persistedPages = pages;
-    }
-    } while (UsageLedger.dirty.size > 0);
+  private static flush(): Promise<void> {
+    // Backups can flush directly while request accounting schedules its own flush.
+    return withFileMutation(UsageLedger.path, async () => {
+      if (!UsageLedger.ready) { return; }
+      do {
+        while (UsageLedger.dirty.size > 0) {
+          const page = UsageLedger.dirty.values().next().value as number;
+          UsageLedger.dirty.delete(page);
+          try {
+            await UsageLedger.write(UsageLedger.pagePath(page), JSON.stringify(UsageLedger.records.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)));
+          } catch (error) { UsageLedger.dirty.add(page); throw error as Error; }
+        }
+        const pages = Math.ceil(UsageLedger.records.length / PAGE_SIZE);
+        if (pages !== UsageLedger.persistedPages || !await fs.access(UsageLedger.path + '/index.json')) {
+          const manifest: UsageManifest = { version: 1, pages: pages };
+          await UsageLedger.write(UsageLedger.path + '/index.json', JSON.stringify(manifest)); UsageLedger.persistedPages = pages;
+        }
+      } while (UsageLedger.dirty.size > 0);
+    });
   }
   // A shallow snapshot is held by the query service, never by an observed view.
   static list(): RequestUsage[] { return UsageLedger.records.slice(); }
   static async backup(root: string): Promise<RequestUsage[]> {
     if (UsageLedger.path === root + '/usage-records') {
-      await UsageLedger.queue; await UsageLedger.flush();
+      await UsageLedger.queue;
+      if (!UsageLedger.ready) { throw new Error(UsageLedger.error || 'Usage storage is not ready for backup'); }
+      await UsageLedger.flush();
       return JSON.parse(JSON.stringify(UsageLedger.records)) as RequestUsage[];
     }
     const items: RequestUsage[] = [], path = root + '/usage-records/index.json';
@@ -142,7 +149,10 @@ export class UsageLedger {
       UsageLedger.scheduled = false;
       const previousError = UsageLedger.error;
       try { await UsageLedger.flush(); if (UsageLedger.ready) { UsageLedger.error = ''; } }
-      catch (error) { UsageLedger.error = '用量保存失败：' + (error as Error).message; }
+      catch (error) {
+        Diagnostics.log('error', 'storage', 'usage_save_failed', undefined, error as Error);
+        UsageLedger.error = '用量保存失败：' + (error as Error).message;
+      }
       if (UsageLedger.error !== previousError) { UsageLedger.notify(); }
     });
   }
