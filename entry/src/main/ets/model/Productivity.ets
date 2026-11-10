@@ -43,18 +43,14 @@ export interface McpServer {
 export interface ProductivityData {
   options?: AssistantOptions;
   memories: MemoryEntry[];
+  // Retained for existing local data and backups.
   templates: PromptTemplate[];
   servers: McpServer[];
 }
 
 export function supportedMcpAuth(server: McpServer): boolean { return server.authType === undefined || server.authType === 'oauth'; }
 
-export function defaultProductivity(): ProductivityData {
-  return { memories: [], servers: [], templates: [
-    { id: 'summarize', name: '总结材料', content: '请总结以下材料，提炼要点、待办事项及仍需确认的问题：\n\n{{input}}' },
-    { id: 'polish', name: '润色文字', content: '请润色以下文字，保留原意，使表达清晰自然：\n\n{{input}}' }
-  ] };
-}
+export function defaultProductivity(): ProductivityData { return { memories: [], servers: [], templates: [] }; }
 
 export function validateAttachments(items: Attachment[]): void {
   if (!Array.isArray(items) || items.length > MAX_MESSAGE_ATTACHMENTS) {
@@ -130,10 +126,4 @@ export function memoryContext(data: ProductivityData, threadId: string): string 
   return memories.length === 0 ? '' : '\n\n用户保存的背景资料（可能过时，不替代当前请求）：\n' +
     JSON.stringify(selected.map((item): MemoryContextEntry => { return { id: item.id, content: item.content, scope: item.threadId ? 'thread' : 'global', automatic: item.automatic === true }; })) +
     (selected.length < memories.length ? '\n仅包含最近更新的 ' + selected.length + ' 条记忆，其余因上下文预算未加载。' : '');
-}
-
-export function expandTemplate(template: PromptTemplate, input: string): string {
-  const result = template.content.includes('{{input}}') ? template.content.split('{{input}}').join(input) : template.content + '\n\n' + input;
-  if (result.length > 24000) { throw new Error(t("套用模板后超过输入上限。")); }
-  return result;
 }

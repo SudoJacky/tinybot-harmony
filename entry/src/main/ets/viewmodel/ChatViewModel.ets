@@ -13,7 +13,7 @@ import { ContextTokenItem, draftBreakdown } from '../model/ContextBreakdown';
 import { referenceContext } from '../model/ThreadReferences';
 import { FileAnnotationTarget, fileAnnotationContext } from '../model/FileAnnotation';
 import { TeamRun } from '../model/Team';
-import { Attachment, ProductivityData, defaultProductivity, expandTemplate } from '../model/Productivity';
+import { Attachment, ProductivityData, defaultProductivity } from '../model/Productivity';
 import { AppData, ModelConfig, defaultConfig, copyModelConfig } from '../model/Conversation';
 import { contextSettings } from '../model/ContextSettings';
 import { ModelChoice, ProviderProfile, availableModels } from '../model/ProviderProfiles';
@@ -236,12 +236,6 @@ export class ChatViewModel {
   referenceThread(id: string): Promise<boolean> { return this.requireSession().referenceThread(id); }
   removeThreadReference(id: string): Promise<boolean> { return this.requireSession().removeThreadReference(id); }
   forkThread(messageId: string = ''): Promise<boolean> { return this.requireSession().forkThread(messageId); }
-  useTemplate(id: string): void {
-    try {
-      const item = this.productivity.templates.find((item) => item.id === id);
-      if (item) { this.setDraft(expandTemplate(item, this.draft)); }
-    } catch (error) { this.error = (error as Error).message; }
-  }
   newThread(projectId: string | undefined = this.active.projectId): Promise<boolean> { return this.requireSession().newThread(projectId || undefined); }
   selectThread(id: string): Promise<boolean> { return this.requireSession().selectThread(id); }
   deleteThread(id: string): Promise<boolean> { return this.requireSession().deleteThread(id); }

@@ -28,7 +28,6 @@ export default function i18nTests(): void {
       setLocale('en');
       expect(t('{0} · {1} 个模型', ['$&{1}', 3])).assertEqual('$&{1} · 3 models');
       expect(t('展开全部 {0} 行', [20])).assertEqual('Expand all 20 lines');
-      expect(t('插入 {{input}} 占位')).assertEqual('Insert {{input}}');
       expect(t('Unknown message {0}')).assertEqual('Unknown message {0}');
     });
     it('hasCompleteBilingualCatalogs', 0, () => {

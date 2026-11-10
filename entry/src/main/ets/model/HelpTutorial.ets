@@ -56,7 +56,7 @@ export function tutorialRect(control: TutorialControl): TutorialRect {
     case 'photo': return { x: 24, y: 438, width: 56, height: 80 };
     case 'team': return { x: 280, y: 438, width: 56, height: 80 };
     case 'user-document': return { x: 16, y: 132, width: 328, height: 64 };
-    case 'memory': return { x: 16, y: 452, width: 328, height: 64 };
+    case 'memory': return { x: 16, y: 388, width: 328, height: 64 };
     case 'document-input': return { x: 16, y: 148, width: 328, height: 472 };
     case 'backup': return { x: 16, y: 372, width: 328, height: 56 };
     case 'cloud-backup': return { x: 16, y: 132, width: 328, height: 80 };

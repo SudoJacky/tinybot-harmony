@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@ohos/hypium';
-import { Attachment, PromptTemplate, defaultProductivity, expandTemplate, memoryContext, validateAttachments, validateProductivity } from '../main/ets/model/Productivity';
+import { Attachment, defaultProductivity, memoryContext, validateAttachments, validateProductivity } from '../main/ets/model/Productivity';
 import { markdownBlocks, markdownSpans } from '../main/ets/model/Markdown';
 import { chatRequest } from '../main/ets/services/providers/ChatCompletionsProtocol';
 import { responsesRequest, anthropicRequest } from '../main/ets/services/providers/WireProtocols';
@@ -20,11 +20,6 @@ export default function productivityTests(): void {
       expect(memoryContext(data, 'b').includes('private')).assertFalse();
       expect(memoryContext(data, 'a').includes('private')).assertTrue();
       data.memories[1].content = 'x'.repeat(2001); rejects(() => validateProductivity(data));
-    });
-    it('expandsTemplatesWithoutTreatingInputAsReplacementSyntax', 0, () => {
-      const template: PromptTemplate = { id: 't', name: 't', content: '{{input}} / {{input}}' };
-      expect(expandTemplate(template, '$&')).assertEqual('$& / $&');
-      rejects(() => expandTemplate(template, 'a'.repeat(13000)));
     });
     it('rejectsEscapingAttachmentPathsAndUnboundedCounts', 0, () => {
       const item: Attachment = { id: 'a1', name: 'photo', mime: 'image/jpeg', path: 'a1.jpg', size: 100 };
