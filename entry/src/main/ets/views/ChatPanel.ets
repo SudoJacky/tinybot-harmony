@@ -1,5 +1,6 @@
 import { MessageDraftEditor } from './MessageDraftEditor';
 import { FileAnnotationList } from './FileAnnotationList';
+import { ChatShortcut, ChatShortcutAction, NavigationShortcut, chatShortcuts, handleDraftEnter } from '../common/KeyboardShortcuts';
 import { AdaptiveUi } from '../model/AdaptiveUi';
 import { materialMenuContent, materialMenuHeader } from '../common/MaterialMenu';
 import { Diagnostics } from '../model/Diagnostics';
@@ -96,6 +97,8 @@ export struct ChatPanel {
   }
   @Prop topInset: number = 0;
   @Prop workbench: boolean = false;
+  @Prop shortcutsEnabled: boolean = false;
+  onNavigationShortcut: (action: NavigationShortcut) => void = () => {};
   @Prop @Watch('expandDraft') expandDraftRequest: number = 0;
   @State private writingExpanded: boolean = false;
   private expandDraft(): void {
@@ -161,6 +164,7 @@ export struct ChatPanel {
   private cancelVoiceRect?: VoiceTargetRect;
   private editVoiceRect?: VoiceTargetRect;
   private composerController: TextAreaController = new TextAreaController();
+  private composerHasPreview: boolean = false;
   private keyboardFocusRequest: number = 0;
   @State private reading: AnswerSpeech = new AnswerSpeech();
   @State private unwrittenSpeech: string = '';
@@ -293,6 +297,7 @@ export struct ChatPanel {
   private speechThreadChanged(): void {
     this.composerEditRevision++; this.composerSelectionRevision++;
     this.focusOwner++;
+    this.composerHasPreview = false;
     const threadId = this.activeThreadId;
     this.afterRender(() => {
       if (this.activeThreadId !== threadId) { return; }
@@ -544,6 +549,44 @@ export struct ChatPanel {
 
   private canSend(): boolean {
     return !this.speechActive() && this.app.ready && !this.app.busy && !this.importing && !this.thread.archived && this.hasDraft() && this.app.saveError.length === 0;
+  }
+
+  private chatShortcutsAvailable(): boolean {
+    return this.shortcutsEnabled && this.foreground && !this.writingExpanded && !this.showDrawing && !this.previewing &&
+      !this.showPlus && !this.showPlusMenu && !this.showContext && !this.showQueue && !this.showMemoryDraft &&
+      !this.showReasoning && !this.showModelMenu && !this.showToolApprovalMode && !this.voiceOverlayVisible();
+  }
+
+  private runChatShortcut(action: ChatShortcutAction): void {
+    if (!this.chatShortcutsAvailable()) { return; }
+    switch (action) {
+      case 'focus':
+        if (this.speechEnabled && !this.composerFocused && !this.thread.archived) { this.showSpeechKeyboard(); }
+        break;
+      case 'attach':
+        if (this.speechEnabled) { this.attach('file'); }
+        break;
+      case 'expand':
+        if (this.speechEnabled) { this.expandDraft(); }
+        break;
+      case 'latest':
+        if (this.speechEnabled && !this.atBottom) { this.scrollToLatest(); }
+        break;
+      case 'stop':
+        if (this.app.generating) { this.app.stop(); }
+        break;
+      default:
+        this.onNavigationShortcut(action);
+    }
+  }
+
+  @Builder
+  shortcutBindings() {
+    // ArkUI also dispatches to retained nodes, so disable the bindings while another surface owns the chat.
+    ForEach(chatShortcuts(), (shortcut: ChatShortcut) => {
+      Column().width(0).height(0).accessibilityLevel('no').enabled(this.chatShortcutsAvailable())
+        .keyboardShortcut(shortcut.key, shortcut.modifiers, () => this.runChatShortcut(shortcut.action))
+    }, (shortcut: ChatShortcut) => shortcut.action)
   }
 
   private cancelAttachmentDrop(): void {
@@ -1584,10 +1627,19 @@ export struct ChatPanel {
         .visibility(this.voiceMode ? Visibility.Hidden : Visibility.Visible)
         .enabled(!this.thread.archived).focusable(!this.voiceMode && !this.speechActive()).enableKeyboardOnFocus(!this.voiceMode && !this.speechActive())
         .onWillChange((value: EditableTextChangeValue) => !this.speechActive() || value.content === this.app.draft)
-        .onChange((value: string) => this.composerChanged(threadId, value))
+        .onKeyPreIme((event: KeyEvent) => {
+          if (!this.chatShortcutsAvailable() || !this.speechEnabled || this.voiceMode || this.app.active.id !== threadId) { return false; }
+          return handleDraftEnter(event, this.composerController, this.composerHasPreview, () => {
+            if (!this.app.generating && this.canSend()) { this.send(); }
+          });
+        })
+        .onChange((value: string, preview?: PreviewText) => {
+          if (this.app.active.id === threadId) { this.composerHasPreview = !!preview?.value; }
+          this.composerChanged(threadId, value);
+        })
         .onTextSelectionChange((start: number, end: number) => this.composerSelectionChanged(threadId, start, end))
         .onFocus(() => { this.composerFocused = true; this.updateKeyboardGeometry(); this.inspectingOutput = false; this.followOutput = true; this.follow(); })
-        .onBlur(() => { this.composerFocused = false; this.updateKeyboardGeometry(); })
+        .onBlur(() => { this.composerHasPreview = false; this.composerFocused = false; this.updateKeyboardGeometry(); })
         .onEditChange((editing: boolean) => { this.composerFocused = editing; })
   }
 
@@ -1952,6 +2004,7 @@ export struct ChatPanel {
     }.height('100%').width('100%').padding({ bottom: this.keyboardInset })
       .bindSheet($$this.showMemoryDraft, this.memoryDraftSheet(), { radius: Radius.sheet, title: { title: t("提炼并确认记忆") }, detents: [SheetSize.LARGE], dragBar: true, keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY,
         backgroundColor: $r('app.color.page_background') })
+      this.shortcutBindings()
       if (this.dropHover) {
         Column() {
           Text(t('松开以添加到当前会话')).fontFamily(this.appearance.fontFamily).fontSize(Font.body)

@@ -193,6 +193,7 @@ export struct ThreadList {
   onMiniApps: () => void = () => {};
   onLifePanels: () => void = () => {};
   onFiles: () => void = () => {};
+  onProjectSheetVisibility: (visible: boolean) => void = () => {};
   @State private query: string = '';
   @State private archived: boolean = false;
   @State private selecting: boolean = false;
@@ -865,6 +866,7 @@ export struct ThreadList {
     .bindSheet($$this.projectEditing, this.projectEditor(), { radius: Radius.sheet, title: {
       title: this.cloudPath.length > 0 ? t('选择云端文件夹') : this.choosingCloudConnection ? t('选择 WebDAV 连接') :
         this.projectId ? t('编辑项目') : t('新建项目') },
-      detents: [SheetSize.LARGE], dragBar: true, keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY })
+      detents: [SheetSize.LARGE], dragBar: true, keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY,
+      onWillAppear: () => this.onProjectSheetVisibility(true), onDisappear: () => this.onProjectSheetVisibility(false) })
   }
 }

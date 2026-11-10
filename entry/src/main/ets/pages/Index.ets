@@ -2,6 +2,7 @@ import { ConversationShareData, sharingMessages } from '../model/ConversationSha
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { ConversationSharePanel } from '../views/ConversationSharePanel';
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { NavigationShortcut, chatShortcuts } from '../common/KeyboardShortcuts';
 import { systemMaterialAttribute } from '../common/MaterialAttributes';
 import { monochromeProviderLogo, providerLogo } from '../common/ProviderBrand';
 import { WebUiPreflightHost } from '../views/WebUiPreflightHost';
@@ -145,6 +146,8 @@ struct Index {
   @State private browser: BrowserSession = new BrowserSession();
   @State @Watch('offerAnnouncement') private browserExpanded: boolean = false;
   @State @Watch('offerAnnouncement') private showToolScope: boolean = false;
+  @State private keyboardShortcutsOpen: boolean = false;
+  @State private historyProjectSheetOpen: boolean = false;
   private announcementDialog?: CustomDialogController;
   private receiving: boolean = false;
   private ratingOpen: boolean = false;
@@ -738,10 +741,51 @@ struct Index {
     });
   }
 
-  // One tap from the rail opens the overlay drawer with the search field focused.
+  // Focus search in the sidebar when present, otherwise reveal the overlay drawer.
   private openHistorySearch(): void {
-    this.setDrawer(true);
+    if (!this.workbench().expanded) { this.setDrawer(true); }
     this.historySearchRequest++;
+  }
+
+  private runNavigationShortcut(action: NavigationShortcut): void {
+    if (!this.foreground || !this.app.ready || this.paths.size() > 0 || this.onboardingActive ||
+      this.showToolScope || this.keyboardShortcutsOpen || this.historyProjectSheetOpen || this.startupBackupDialog || this.startupBackupRestoring ||
+      this.announcementDialog || this.reviewDialog || this.ratingOpen || this.drawerDragging) { return; }
+    switch (action) {
+      case 'new-chat':
+        this.createChat();
+        break;
+      case 'search':
+        if (this.app.canNavigate) { this.openHistorySearch(); }
+        break;
+      case 'history':
+        if (this.drawerOpen) { this.setDrawer(false); } else { this.toggleHistory(); }
+        break;
+      case 'settings':
+        if (this.drawerOpen) { this.setDrawer(false); }
+        this.openSettings();
+        break;
+      case 'workspace':
+        if (!this.app.busy) {
+          if (this.drawerOpen) { this.setDrawer(false); }
+          this.addFilesTab();
+        }
+        break;
+      case 'help':
+        this.showKeyboardShortcuts();
+        break;
+    }
+  }
+
+  private showKeyboardShortcuts(): void {
+    if (this.keyboardShortcutsOpen) { return; }
+    this.keyboardShortcutsOpen = true;
+    const shortcuts = chatShortcuts().map(item => item.chord + '   ' + item.label);
+    shortcuts.push('Ctrl+Enter   ' + t('在消息输入框中换行'), 'Alt+Enter   ' + t('发送'));
+    this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface,
+      title: t('键盘快捷键'), message: shortcuts.join('\n'),
+      confirm: { value: t('知道了'), action: () => { this.keyboardShortcutsOpen = false; } },
+      onWillDismiss: (action: DismissDialogAction) => { action.dismiss(); this.keyboardShortcutsOpen = false; } });
   }
 
   private beginResize(detail: boolean): void {
@@ -1109,6 +1153,8 @@ struct Index {
         .id('open-life-panels-menu').enabled(this.app.ready).onClick(() => this.openLifePanels())
       MenuItem(() => this.moreMenuContent($r('sys.symbol.gearshape'), t('设置')))
         .onClick(() => this.openSettings())
+      MenuItem(() => this.moreMenuContent($r('sys.symbol.keyboard'), t('键盘快捷键')))
+        .id('open-keyboard-shortcuts').onClick(() => this.showKeyboardShortcuts())
     }
   }
 
@@ -1454,6 +1500,7 @@ struct Index {
           onMiniApps: () => { this.setDrawer(false); this.openMiniApps(); },
           onLifePanels: () => { this.setDrawer(false); this.openLifePanels(); },
           collapseHistory: this.workbench().expanded, searchRequest: this.historySearchRequest,
+          onProjectSheetVisibility: (visible) => { this.historyProjectSheetOpen = visible; },
           onCollapseHistory: () => this.setHistoryCollapsed(true),
           onNewChat: () => { this.createChat(); this.setDrawer(false); }, onTools: () => { this.setDrawer(false); this.openTools('memory'); },
           active: !this.onboardingActive && (this.workbench().expanded || this.drawerContentActive),
@@ -1538,6 +1585,9 @@ struct Index {
         Column() {
           if (this.app.ready) {
             ChatPanel({ app: this.app, thread: this.app.active, workbench: this.windowWidth >= 840, expandDraftRequest: this.expandDraftRequest,
+                shortcutsEnabled: this.chatVisible && !this.rootSection && !this.onboardingActive && !this.showToolScope &&
+                  !this.keyboardShortcutsOpen && !this.historyProjectSheetOpen && (!this.detailOpen() || this.workbench().docked),
+                onNavigationShortcut: (action: NavigationShortcut) => this.runNavigationShortcut(action),
                 onToolScope: () => { this.showToolScope = true; }, approval: this.approval, browser: this.browser, account: this.account,
                 onAccount: () => { this.paths.pushPath({ name: 'account' }); },
                 onBrowser: () => { this.setBrowserExpanded(true); this.openDetailTab('browser'); },
