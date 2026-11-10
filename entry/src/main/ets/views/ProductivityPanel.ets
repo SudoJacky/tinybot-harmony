@@ -193,7 +193,7 @@ export struct ProductivityPanel {
   @Builder
   memoryTab() {
     List({ space: Space.md }) {
-      ListItem() { this.caption(t('自动保存的记忆在新对话中加载，当前对话保留原快照；手动编辑或删除立即生效。')) }
+      ListItem() { this.caption(t('自动保存的记忆会在新对话中加载。手动编辑或删除记忆后，受影响的对话会加载最新记忆。')) }
       ListItem() {
         Button(t('将最新记忆用于本对话')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.textSmall).enabled(!this.locked()).id('refresh-memory-context')
           .onClick(async () => {
