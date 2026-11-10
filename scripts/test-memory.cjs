@@ -21,7 +21,7 @@ const { ProviderRegistry } = from('services/providers/ProviderRegistry');
 const { AgentRuntime } = from('services/AgentRuntime');
 const { SessionService } = from('services/SessionService');
 const reply = (content = 'done', toolCalls = []) => ({ content, toolCalls });
-const memoryCall = operations => ({ id: 'memory-call', type: 'function', function: { name: 'memory', arguments: JSON.stringify({ operations }) } });
+const memoryCall = operations => ({ id: 'memory-call-' + ++ids, type: 'function', function: { name: 'memory', arguments: JSON.stringify({ operations }) } });
 const entry = (id, content, threadId = '', automatic = true) => ({ id, content, threadId, automatic, updatedAt: 1 });
 const op = (action, fields = {}) => ({ action, sourceMessageId: 'user', ...fields });
 let ids = 0;
@@ -34,7 +34,7 @@ function seed() {
   data.threads = [{ id: 'chat', title: 'Test', titleEdited: true, updatedAt: 1, messages: [], draft: '', modelRef: { providerId: 'test', modelId: 'model' } }];
   data.activeThreadId = 'chat'; return data;
 }
-async function fixture(data = seed()) {
+async function fixture(data = seed(), approval) {
   const requests = [], errors = [], logs = [], writes = [];
   const repository = { saved: JSON.stringify(data), beforeSave: async () => {}, load: async () => parseAppData(repository.saved),
     save: async data => { const text = JSON.stringify(data); await repository.beforeSave(data); repository.saved = text; writes.push(text); } };
@@ -45,7 +45,7 @@ async function fixture(data = seed()) {
   const keys = { read: async () => '', write: async () => {}, remove: async () => {} };
   const resources = { createId: () => 'id-' + ++ids, ensureWorkspace: async () => {}, configureProviders: () => {},
     tools: () => ({ definitions: () => [], execute: async () => { throw Error('Unexpected tool'); } }), reportError: (_event, error) => errors.push(typeof error === 'string' ? error : error.message), reportMemory: s => logs.push(s) };
-  const session = new SessionService(repository, new AgentRuntime(registry, keys), keys, resources); await session.initialize();
+  const session = new SessionService(repository, new AgentRuntime(registry, keys), keys, resources, approval); await session.initialize();
   return { session, provider, repository, requests, errors, logs, writes, send: async text => { session.setDraft(text); await session.send(); } };
 }
 async function settle() { for (let i = 0; i < 300; i++) await Promise.resolve(); }
@@ -76,7 +76,9 @@ async function main() {
 
   const f = await fixture(); let calls = 0;
   f.provider.respond = async () => ++calls === 1 ? reply('', [memoryCall([{ action: 'add', scope: 'global', content: '用户喜欢简短回答' }])]) : reply('saved');
-  await f.send('请记住我喜欢简短回答');
+  await f.send('我平时喜欢简短回答。');
+  assert.ok(f.requests[0].tools.some(tool => tool.function.name === 'memory'));
+  assert.ok(f.requests[0].messages.some(message => message.runtimeContext && message.content.includes('根据本轮用户消息主动判断')));
   assert.equal(f.requests.length, 2); assert.equal(f.session.snapshot().productivity.memories.length, 1);
   const sourceId = f.session.snapshot().threads[0].messages[0].id;
   assert.equal(f.session.snapshot().productivity.memories[0].sourceMessageId, sourceId);
@@ -93,6 +95,28 @@ async function main() {
   assert.equal(await f.session.saveProductivity(edited), true); await f.send('再继续');
   assert.ok(f.requests.at(-1).messages.filter(message => message.runtimeContext).at(-1).content.includes('手动更新'));
   console.log('PASS real memory tool receipts, immediate durable writes, frozen snapshots across restart and manual invalidation');
+
+  const removalData = seed(), obsolete = 'The legacy test environment is active.';
+  removalData.productivity.memories = [entry('obsolete', obsolete, 'chat'), entry('manual', 'Keep this preference', '', false)];
+  removalData.threads.push({ ...removalData.threads[0], id: 'other', memorySnapshot: 'Other chat snapshot' });
+  const approvals = [];
+  const removal = await fixture(removalData, { request: async (_title, details) => approvals.push(JSON.parse(details)) });
+  const removeObsolete = { action: 'remove', id: 'obsolete' };
+  removal.provider.respond = async () => {
+    if (removal.requests.length === 1) return reply('', [memoryCall([])]);
+    if (removal.requests.length === 2) return reply('', [memoryCall([removeObsolete])]);
+    return reply();
+  };
+  await removal.send('这个项目已经不再使用旧版测试环境。');
+  assert.deepEqual(approvals, [{ operations: [removeObsolete] }]);
+  assert.ok(removal.requests[0].messages.filter(message => message.runtimeContext).at(-1).content.includes(obsolete));
+  const latest = removal.requests[2].messages.filter(message => message.runtimeContext).at(-1).content;
+  assert.ok(!latest.includes(obsolete) && latest.includes('Keep this preference'));
+  const afterRemoval = await removal.repository.load();
+  assert.deepEqual(Array.from(afterRemoval.productivity.memories, item => item.id), ['manual']);
+  assert.ok(!afterRemoval.threads.find(thread => thread.id === 'chat').memorySnapshot.includes(obsolete));
+  assert.equal(afterRemoval.threads.find(thread => thread.id === 'other').memorySnapshot, 'Other chat snapshot');
+  console.log('PASS proactive scoped removal refreshes the live snapshot and only the write requires approval');
 
   const failed = await fixture(); let attempts = 0;
   failed.provider.respond = async () => ++attempts === 1 ? reply('', [memoryCall([{ action: 'add', scope: 'global', content: 'must not land' }])]) : reply('could not save');

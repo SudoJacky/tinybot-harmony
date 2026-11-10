@@ -819,7 +819,8 @@ export class SessionService {
     this.pendingToolSelections.delete(thread.id);
     let tools = this.chatTools(thread, selected);
     const sections = sessionPromptSections(config, this.extensions, selected);
-    sections.push({ name: 'memory', content: this.memoryPrompt(thread, true), dynamic: true });
+    const memory: PromptSection = { name: 'memory', content: this.memoryPrompt(thread, true), dynamic: true };
+    sections.push(memory);
     sections.push({ name: 'workspace', content: projectContext(this.data, thread), dynamic: true });
     this.addModeInstructions(sections, thread);
     const instructions = renderPrompt(sections.filter((section) => !section.dynamic));
@@ -900,7 +901,10 @@ export class SessionService {
           // The runtime's initial checkpoint has durably saved the first user message.
           if (generateTitle) { this.generateTitle(thread.id, user.id, text, fallbackTitle, config, options.title); }
         },
-        context: sessionContextSource(thread, () => sections, () => this.persist(thread.id), (status) => this.contextProgress(thread.id, status)),
+        context: sessionContextSource(thread, () => {
+          memory.content = this.memoryPrompt(thread, true);
+          return sections;
+        }, () => this.persist(thread.id), (status) => this.contextProgress(thread.id, status)),
         contextChanged: (prepared) => {
           status.contextTokens = prepared.context.tokens;
           status.contextBreakdown = prepared.breakdown;
@@ -1246,6 +1250,17 @@ export class SessionService {
     validateProductivity(extras); candidate.productivity = extras;
     const target = candidate.threads.find((item) => item.id === thread.id);
     if (!target) { throw new Error(t('对话不存在：') + thread.id); }
+    const invalidated = new Set<string>();
+    if (change.receipt.removed > 0) {
+      // Deleted memories must stop appearing in the current context even when it was frozen earlier.
+      const remaining = new Set(change.memories.map((item) => item.id));
+      const scopes = new Set((this.data.productivity?.memories || []).filter((item) => !remaining.has(item.id)).map((item) => item.threadId));
+      for (const item of candidate.threads) {
+        if (scopes.has('') || scopes.has(item.id)) {
+          item.memorySnapshot = undefined; invalidated.add(item.id);
+        }
+      }
+    }
     target.memoryReview = { added: change.receipt.added, updated: change.receipt.updated, removed: change.receipt.removed,
       duplicates: change.receipt.duplicates, characters: change.receipt.characters, updatedAt: Date.now(), error: '' };
     if (reviewedId) { target.memoryReviewedMessageId = reviewedId; }
@@ -1253,6 +1268,9 @@ export class SessionService {
       await this.commitCandidate(candidate, () => {
         this.data.productivity = extras; thread.memoryReview = target.memoryReview;
         thread.memoryReviewedMessageId = target.memoryReviewedMessageId;
+        for (const item of this.data.threads) {
+          if (invalidated.has(item.id)) { item.memorySnapshot = undefined; }
+        }
       });
     } catch (error) { this.resources.reportError('memory_failed', error as Error, { threadId: thread.id }); throw error as Error; }
     this.resources.reportMemory?.('committed', { threadId: thread.id, messageId: reviewedId || '', added: change.receipt.added, updated: change.receipt.updated, removed: change.receipt.removed, duplicates: change.receipt.duplicates, characters: change.receipt.characters });
