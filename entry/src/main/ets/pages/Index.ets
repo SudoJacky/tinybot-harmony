@@ -45,7 +45,7 @@ import { materialMenuContent, materialMenuHeader } from '../common/MaterialMenu'
 import { ShareInbox } from '../services/NativeActions';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { ChatPanel } from '../views/ChatPanel';
-import { SettingsNavigation, SettingsOverview, settingsCategoryTitle } from '../views/SettingsNavigation';
+import { SettingsCategoryBar, SettingsNavigation, settingsCategoryTitle } from '../views/SettingsNavigation';
 import { SettingsPanel, UserDocumentPanel } from '../views/SettingsPanel';
 import { AppearancePanel, appearanceChoiceTitle } from '../views/AppearancePanel';
 import { LanguagePanel } from '../views/LanguagePanel';
@@ -480,7 +480,7 @@ struct Index {
     this.paths.pushPath({ name: 'provider' });
   }
 
-  private async createChat(): Promise<void> {
+  private async createChat(projectId?: string): Promise<void> {
     if (!this.app.canNavigate) {
       Diagnostics.log('warn', 'navigation', 'new_chat_blocked', { count: this.paths.size() });
       this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface,
@@ -489,7 +489,7 @@ struct Index {
     }
     const previousId = this.app.active.id;
     // SessionService decides whether the current chat is untouched and reusable.
-    if (!await this.app.newThread()) {
+    if (!await this.app.newThread(projectId)) {
       Diagnostics.log('error', 'navigation', 'new_chat_failed', { count: this.paths.size() }, this.app.saveError || this.app.error);
       this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface,
         message: this.app.saveError || this.app.error || t('无法创建新对话。') });
@@ -1145,10 +1145,6 @@ struct Index {
           .id('share-conversation').enabled(this.app.ready && !this.app.busy && this.app.active.messages.length > 0)
           .onClick(() => this.openConversationShare())
       }
-      if (this.app.productivity.options?.miniAppsEnabled === true) {
-        MenuItem(() => this.moreMenuContent($r('sys.symbol.rectangle_stack'), t('小程序')))
-          .id('open-mini-apps-menu').enabled(this.app.ready).onClick(() => this.openMiniApps())
-      }
       MenuItem(() => this.moreMenuContent($r('sys.symbol.square_grid_2x2'), t('生活看板')))
         .id('open-life-panels-menu').enabled(this.app.ready).onClick(() => this.openLifePanels())
       MenuItem(() => this.moreMenuContent($r('sys.symbol.gearshape'), t('设置')))
@@ -1159,9 +1155,8 @@ struct Index {
   }
 
   @Builder
-  settingsContent(routeSection?: string) {
-    // Read the active tablet category inside the child update callback, rather than capturing a builder argument.
-    SettingsPanel({ app: this.app, section: routeSection ?? this.settingsSection, settings: this.app.settings, account: this.account, active: this.settingsActive && this.foreground,
+  settingsContent() {
+    SettingsPanel({ app: this.app, section: this.settingsSection, settings: this.app.settings, account: this.account, active: this.settingsActive && this.foreground,
       onAccount: () => { this.paths.pushPath({ name: 'account' }); },
       browser: this.browser,
       onAddProvider: () => { this.paths.pushPath({ name: 'provider-presets' }); },
@@ -1180,7 +1175,7 @@ struct Index {
       onUserDocument: () => { this.paths.pushPath({ name: 'user-document' }); },
       onEditProvider: (id: string, preset: string) => {
         if (this.app.beginProvider(preset, id)) { this.paths.pushPath({ name: 'provider' }); }
-      } })
+      } }).layoutWeight(1)
   }
 
   @Builder
@@ -1292,23 +1287,20 @@ struct Index {
       }.title(t('华为账号'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'laboratory') {
       NavDestination() {
-        SettingsPanel({ app: this.app, section: this.windowWidth >= 840 ? this.settingsSection : '', settings: this.app.settings, account: this.account, browser: this.browser, laboratoryOnly: true })
+        SettingsPanel({ app: this.app, settings: this.app.settings, account: this.account, browser: this.browser,
+          laboratoryOnly: true, onMiniApps: () => this.openMiniApps() })
       }.title(t('实验室'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'settings') {
       NavDestination() {
-        if (this.windowWidth >= 840) {
+        Column() {
+          if (!this.workbench().expanded) {
+            SettingsCategoryBar({ selected: this.settingsSection,
+              onSelect: (section: string) => { this.settingsSection = section; } })
+          }
           this.settingsContent()
-        } else {
-          SettingsOverview({ onSelect: (section: string) => {
-            this.settingsSection = section;
-            this.paths.pushPath({ name: 'settings-section', param: section });
-          } })
-        }
-      }.title(this.windowWidth >= 840 ? settingsCategoryTitle(this.settingsSection) : t("设置"), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
-        .onShown(() => { this.settingsActive = true; this.rootSection = 'settings'; }).onHidden(() => { this.settingsActive = false; })
-    } else if (name === 'settings-section') {
-      NavDestination() { this.settingsContent(param as string) }
-        .title(settingsCategoryTitle(param as string), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
+        }.width('100%').height('100%')
+      }.title(this.workbench().expanded ? settingsCategoryTitle(this.settingsSection) : t('设置'),
+        { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
         .backgroundColor($r('app.color.page_background'))
         .onShown(() => { this.settingsActive = true; this.rootSection = 'settings'; }).onHidden(() => { this.settingsActive = false; })
     } else if (name === 'provider-presets') {
@@ -1361,7 +1353,8 @@ struct Index {
       }.title(t('选择要添加的模型'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'models') {
       NavDestination() {
-        ModelPickerPanel({ app: this.app, onSelected: () => { this.paths.pop(); }, onSettings: () => this.openSettings() })
+        ModelPickerPanel({ app: this.app, thread: this.app.active,
+          onSelected: () => { this.paths.pop(); }, onSettings: () => this.openSettings() })
       }.title(t("选择模型"), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     }
   }
@@ -1497,12 +1490,12 @@ struct Index {
             onChat: () => this.returnFromSettings() })
         } else {
         ThreadList({ app: this.app, selectedSection: this.rootSection, workbench: this.windowWidth >= 840,
-          onMiniApps: () => { this.setDrawer(false); this.openMiniApps(); },
           onLifePanels: () => { this.setDrawer(false); this.openLifePanels(); },
           collapseHistory: this.workbench().expanded, searchRequest: this.historySearchRequest,
           onProjectSheetVisibility: (visible) => { this.historyProjectSheetOpen = visible; },
           onCollapseHistory: () => this.setHistoryCollapsed(true),
-          onNewChat: () => { this.createChat(); this.setDrawer(false); }, onTools: () => { this.setDrawer(false); this.openTools('memory'); },
+          onNewChat: (projectId?: string) => { this.createChat(projectId); },
+          onTools: () => { this.setDrawer(false); this.openTools('memory'); },
           active: !this.onboardingActive && (this.workbench().expanded || this.drawerContentActive),
           onSelected: () => this.revealChat(), onFiles: () => { this.setDrawer(false); this.openFiles(); }, onSettings: () => {
           this.setDrawer(false);

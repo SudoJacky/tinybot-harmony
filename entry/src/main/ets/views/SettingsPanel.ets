@@ -26,7 +26,7 @@ export struct SettingsPanel {
   @Prop presetsOnly: boolean = false;
   @Prop laboratoryOnly: boolean = false;
   @Prop active: boolean = false;
-  @Prop section: string = '';
+  @Prop @Watch('resetScroll') section: string = '';
   @State private assistantDraft: AssistantOptions = defaultAssistantOptions();
   @ObjectLink app: ChatViewModel;
   @ObjectLink settings: SettingsViewModel;
@@ -43,6 +43,7 @@ export struct SettingsPanel {
   onSearch: () => void = () => {};
   onMail: () => void = () => {};
   onLaboratory: () => void = () => {};
+  onMiniApps: () => void = () => {};
   onBackup: () => void = () => {};
   onAppearance: () => void = () => {};
   onLanguage: () => void = () => {};
@@ -50,6 +51,11 @@ export struct SettingsPanel {
   onTools: (tab: string) => void = () => {};
   private pendingSave: Promise<void> = Promise.resolve();
   private toggleRevisions: Map<SettingsToggle, number> = new Map<SettingsToggle, number>();
+  private scroller: Scroller = new Scroller();
+
+  private resetScroll(): void {
+    this.scroller.scrollTo({ xOffset: 0, yOffset: 0 });
+  }
 
   // A brief save leaves the page untouched; a reply, compaction or team run locks it with a notice.
   private blocked(): boolean { return this.app.sharedBusy && !this.app.saving; }
@@ -145,10 +151,17 @@ export struct SettingsPanel {
         this.statusBanners()
         SectionHeader({ title: t('实验功能') })
         GroupCard() {
-          SwitchRow({ title: t('小程序'), icon: $r('sys.symbol.rectangle_stack'), compId: 'mini-apps-enabled',
-            subtitle: t('创建和使用可保存数据的小程序。关闭后保留已有小程序和数据。'),
-            isOn: this.assistantDraft.miniAppsEnabled === true, disabled: !this.canEdit(),
-            onChange: (value: boolean) => this.saveToggle('miniAppsEnabled', value) })
+          Column() {
+            SwitchRow({ title: t('小程序'), icon: $r('sys.symbol.rectangle_stack'), compId: 'mini-apps-enabled',
+              subtitle: t('创建和使用可保存数据的小程序。关闭后保留已有小程序和数据。'),
+              isOn: this.assistantDraft.miniAppsEnabled === true, disabled: !this.canEdit(),
+              onChange: (value: boolean) => this.saveToggle('miniAppsEnabled', value) })
+            if (this.app.productivity.options?.miniAppsEnabled === true) {
+              RowDivider()
+              NavRow({ title: t('管理小程序'), icon: $r('sys.symbol.rectangle_stack'), compId: 'lab-mini-apps',
+                disabled: !this.canEdit(), onTap: this.onMiniApps })
+            }
+          }
         }
       }.width('100%').padding(Space.page)
     }.width('100%').height('100%').attributeModifier(PageStyles.form).align(Alignment.Top).scrollBar(BarState.Auto)
@@ -156,7 +169,7 @@ export struct SettingsPanel {
 
   @Builder
   settingsPage() {
-    Scroll() {
+    Scroll(this.scroller) {
       Column() {
         this.statusBanners()
         if (!this.section || this.section === 'account') {

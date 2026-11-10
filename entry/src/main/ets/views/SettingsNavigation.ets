@@ -1,10 +1,9 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Btn, Space } from '../common/Theme';
 import { t } from '../model/I18n';
-import { PageStyles } from '../common/PageStyles';
-import { GroupCard, NavRow, RowDivider } from '../common/Widgets';
 
 interface SettingsCategory { key: string; title: string; icon: Resource; }
+const CATEGORY_TRACK_RADIUS: number = 25;
 const CATEGORIES: SettingsCategory[] = [
   { key: 'account', title: '账号', icon: $r('sys.symbol.person') },
   { key: 'models', title: '模型与服务', icon: $r('sys.symbol.cloud') },
@@ -19,24 +18,52 @@ export function settingsCategoryTitle(key: string): string {
   return t(CATEGORIES.find((item: SettingsCategory) => item.key === key)?.title || '设置');
 }
 
-// Phones drill into one category at a time; wide windows retain the persistent sidebar.
 @Component
-export struct SettingsOverview {
+export struct SettingsCategoryBar {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
+  @Prop @Watch('revealSelection') selected: string = 'models';
   onSelect: (key: string) => void = () => {};
+  private scroller: Scroller = new Scroller();
+
+  private revealSelection(): void {
+    const index = CATEGORIES.findIndex((item: SettingsCategory) => item.key === this.selected);
+    this.scroller.scrollToIndex(index, false, ScrollAlign.AUTO);
+  }
+
   build() {
-    Scroll() {
+    Column() {
       Column() {
-        GroupCard() {
-          Column() {
-            ForEach(CATEGORIES, (item: SettingsCategory, index: number) => {
-              if (index > 0) { RowDivider() }
-              NavRow({ title: t(item.title), icon: item.icon, compId: 'settings-open-' + item.key,
-                onTap: () => this.onSelect(item.key) })
-            }, (item: SettingsCategory) => item.key)
-          }
-        }
-      }.width('100%').padding(Space.page)
-    }.width('100%').height('100%').attributeModifier(PageStyles.form).align(Alignment.Top).scrollBar(BarState.Auto)
+        List({ scroller: this.scroller }) {
+          ForEach(CATEGORIES, (item: SettingsCategory, index: number) => {
+            ListItem() {
+              Button({ type: ButtonType.Normal }) {
+                Row({ space: Space.sm }) {
+                  SymbolGlyph(item.icon).fontSize(18)
+                    .fontColor([this.selected === item.key ? $r('app.color.text_primary') : $r('app.color.text_secondary')])
+                    .accessibilityLevel('no')
+                  Text(t(item.title)).fontSize(14).fontFamily(this.appearance.fontFamily).maxLines(1)
+                    .fontWeight(this.selected === item.key ? FontWeight.Medium : FontWeight.Regular)
+                    .fontColor(this.selected === item.key ? $r('app.color.text_primary') : $r('app.color.text_secondary'))
+                }
+              }.height(44).padding({ left: Space.md, right: Space.md }).borderRadius(22)
+                .backgroundColor(this.selected === item.key ? $r('app.color.surface') : Color.Transparent)
+                .accessibilityText(t(item.title)).accessibilitySelected(this.selected === item.key)
+                .id('settings-open-' + item.key).onClick(() => this.onSelect(item.key))
+            }.padding({ top: 3, bottom: 3, left: index === 0 ? 3 : 1, right: index === CATEGORIES.length - 1 ? 3 : 1 })
+              .backgroundColor($r('app.color.surface_variant'))
+              .borderRadius({
+                topLeft: index === 0 ? CATEGORY_TRACK_RADIUS : 0,
+                bottomLeft: index === 0 ? CATEGORY_TRACK_RADIUS : 0,
+                topRight: index === CATEGORIES.length - 1 ? CATEGORY_TRACK_RADIUS : 0,
+                bottomRight: index === CATEGORIES.length - 1 ? CATEGORY_TRACK_RADIUS : 0
+              })
+          }, (item: SettingsCategory) => item.key)
+        }.listDirection(Axis.Horizontal).width('100%').height(50).scrollBar(BarState.Off)
+          .borderRadius(CATEGORY_TRACK_RADIUS).clip(true)
+          .id('settings-category-bar').onAreaChange(() => this.revealSelection())
+      }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.xs, bottom: Space.sm })
+      Divider().strokeWidth(0.5).color($r('app.color.divider'))
+    }.width('100%')
   }
 }
 
