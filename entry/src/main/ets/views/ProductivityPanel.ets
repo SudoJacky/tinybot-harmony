@@ -409,11 +409,8 @@ export struct ProductivityPanel {
               .attributeModifier(Styles.input).backgroundColor($r('app.color.surface'))
               .onChange((value) => { this.url = value; })
             Row({ space: Space.md }) {
-              Column({ space: 2 }) {
-                Text(t("使用访问令牌")).fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontColor($r('app.color.text_primary'))
-                Text(t("开启后填写 Bearer Token，Token 保存在系统安全存储中。")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
-                  .fontColor($r('app.color.text_secondary'))
-              }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+              Text(t("使用访问令牌")).fontFamily(this.appearance.fontFamily).fontSize(Font.body)
+                .fontColor($r('app.color.text_primary')).layoutWeight(1)
               Toggle({ type: ToggleType.Switch, isOn: !this.noAuth }).id('mcp-no-auth').selectedColor(this.appearance.accent)
                 .attributeModifier(Styles.toggle)
                 .attributeModifier(systemMaterialAttribute<ToggleAttribute>(this.appearance.control))
