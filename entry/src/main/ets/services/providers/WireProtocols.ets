@@ -1,5 +1,6 @@
 import { t } from '../../model/I18n';
 import { AnthropicContentBlock, validateAnthropicContent } from '../../model/AnthropicContent';
+import { fileAnnotationContext } from '../../model/FileAnnotation';
 import { ModelMessage, ToolDefinition, ToolParameters } from '../../model/Agent';
 import { supportsReasoningEffort } from '../../model/ReasoningEffort';
 
@@ -55,9 +56,11 @@ export function responsesRequest(model: string, messages: ModelMessage[], tools:
       input.push({ type: 'function_call_output', call_id: message.toolCallId, output: message.content });
     } else {
       if (message.role !== 'user' && message.role !== 'assistant') { throw new Error(t("不支持的消息角色。")); }
-      if ((message.images || []).length > 0) {
+      const annotations = fileAnnotationContext(message.annotations);
+      if (annotations || message.images?.length) {
         const content: ResponsesContent[] = [];
         if (message.content.length > 0) { content.push({ type: 'input_text', text: message.content }); }
+        if (annotations) { content.push({ type: 'input_text', text: annotations }); }
         for (const url of message.images || []) { content.push({ type: 'input_image', image_url: url }); }
         input.push({ role: message.role, content: content });
       } else if (message.content.length > 0) { input.push({ role: message.role, content: message.content }); }
@@ -138,6 +141,8 @@ export function anthropicRequest(model: string, messages: ModelMessage[], tools:
       blocks.push({ type: 'tool_result', tool_use_id: message.toolCallId, content: message.content });
     } else {
       if (message.content.length > 0) { blocks.push({ type: 'text', text: message.content }); }
+      const annotations = fileAnnotationContext(message.annotations);
+      if (annotations) { blocks.push({ type: 'text', text: annotations }); }
       for (const url of message.images || []) { blocks.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: url.slice(url.indexOf(',') + 1) } }); }
       for (const call of message.toolCalls || []) {
         const input = JSON.parse(call.function.arguments) as Object;

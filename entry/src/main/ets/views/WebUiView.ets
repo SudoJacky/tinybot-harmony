@@ -15,6 +15,7 @@ import { MiniAppStorage, MiniAppSnapshot } from '../model/MiniApp';
 import { WebUiPanelContext } from '../model/WebUi';
 import { MailBody, MailReadRequest } from '../model/Mail';
 import { Cancellation } from '../services/Cancellation';
+import { WebAnnotationMark, WebAnnotationTarget, webAnnotationScript } from '../model/WebAnnotation';
 
 let activeWebViews: number = 0;
 let webViewSequence: number = 0;
@@ -37,9 +38,14 @@ export struct WebUiView {
   @Prop retainedHeight: number = 0;
   @Prop @Watch('viewportChanged') viewportHeight: number = 0;
   browserRuntime?: PreviewBrowserRuntime;
+  @Prop @Watch('syncAnnotations') annotationMode: boolean = false;
+  @Prop @Watch('syncAnnotations') annotationMarks: WebAnnotationMark[] = [];
+  @Prop @Watch('syncAnnotations') annotationRevision: number = 0;
+  onAnnotationTarget?: (target: WebAnnotationTarget) => void;
   storage?: MiniAppStorage;
   viewStorage?: MiniAppStorage;
   private browserAttachment: number = -1;
+  private sentAnnotationRevision: number = -1;
   onHeight: (height: number) => void = () => {};
   @StorageLink('tinybot.foreground') @Watch('foregroundChanged') private foreground: boolean = true;
   @StorageProp('tinybot.chat.scrolling') @Watch('visibilityChanged') private scrolling: boolean = false;
@@ -182,7 +188,8 @@ export struct WebUiView {
       const assets = await webUiAssets(this.getUIContext().getHostContext() as common.UIAbilityContext, this.spec.library === 'three');
       if (!this.mounted || generation !== this.generation) { return; }
       if (!this.foreground || (!this.preflight && (this.scrolling || !this.visible))) { this.reloadPending = true; return; }
-      const host = webUiHost(assets[0], assets[1], this.browserRuntime ? browserAutomationScript() : '');
+      const host = webUiHost(assets[0], assets[1], (this.browserRuntime ? browserAutomationScript() : '') +
+        (this.onAnnotationTarget ? webAnnotationScript() : ''));
       if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'load_start', { instanceId: this.instanceId, chars: host.length }); };
       this.hostNavigationPending = true;
       const mark = Diagnostics.begin(this.instanceId);
@@ -212,7 +219,7 @@ export struct WebUiView {
       if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'web', 'port_connected', { instanceId: this.instanceId }); };
       // loadData may use an opaque data: origin; transfer only to the verified top-level host.
       this.controller.postMessage('tinybot-web-port', [this.ports[1]], '*');
-      this.ports[0].postMessageEvent(JSON.stringify({ type: 'init', spec: this.spec, autoHeight: webUiAutoHeight(this.spec), values: this.values, panel: this.panelContext, placement: !!this.viewStorage, active: this.foreground && (this.preflight || (this.interactive && this.visible)), preflight: this.preflight, panelProbe: this.panelProbe, snapshotMode: this.snapshotMode, automation: !!this.browserRuntime }));
+      this.ports[0].postMessageEvent(JSON.stringify({ type: 'init', spec: this.spec, autoHeight: webUiAutoHeight(this.spec), values: this.values, panel: this.panelContext, placement: !!this.viewStorage, active: this.foreground && (this.preflight || (this.interactive && this.visible)), preflight: this.preflight, panelProbe: this.panelProbe, snapshotMode: this.snapshotMode, automation: !!this.browserRuntime, annotations: !!this.onAnnotationTarget }));
     } catch (error) { this.report(error as Error); }
   }
   private sync(): void {
@@ -221,6 +228,15 @@ export struct WebUiView {
     try { this.ports[0].postMessageEvent(JSON.stringify({ type: 'state', values: this.values, panel: this.panelContext, placement: !!this.viewStorage, active: this.foreground && (this.preflight || (this.interactive && this.visible)) })); }
     catch (error) { this.report(error as Error); }
   }
+  private syncAnnotations(): void {
+    if (!this.onAnnotationTarget || !this.ready || !this.ports.length) { return; }
+    try {
+      const clear = this.sentAnnotationRevision !== this.annotationRevision;
+      this.ports[0].postMessageEvent(JSON.stringify({ type: 'annotationState', enabled: this.annotationMode,
+        marks: this.annotationMarks, clear: clear }));
+      this.sentAnnotationRevision = this.annotationRevision;
+    } catch (error) { this.report(error as Error); }
+  }
   private async receive(data: webview.WebMessage, generation: number): Promise<void> {
     if (!this.mounted || generation !== this.generation) { return; }
     if (!this.foreground && (this.preflight || this.snapshotMode)) { return; }
@@ -228,6 +244,10 @@ export struct WebUiView {
     try {
       if (typeof data !== 'string') { throw new Error('Web UI: expected a text message'); }
       const message = parseWebUiMessage(data); id = message.id || 0;
+      if (message.type === 'annotationTarget') {
+        if (this.ready && this.foreground && this.visible && this.annotationMode) { this.onAnnotationTarget?.(message.target!); }
+        return;
+      }
       if (message.type === 'panelMailRead') {
         let failure = '', mail: MailBody | undefined = undefined;
         const signal = new Cancellation();
@@ -299,6 +319,7 @@ export struct WebUiView {
       if (message.type === 'ready') {
         if (this.error) { return; } // A late ready must not erase a startup failure.
         clearTimeout(this.timer); this.ready = true;
+        this.syncAnnotations();
         this.browserRuntime?.ready();
         if (Diagnostics.recording) { Diagnostics.event('web.ready', { generation: this.generation }, this.instanceId); }
         if (Diagnostics.acceptsLog('info')) { Diagnostics.log('info', 'web', 'ready', { instanceId: this.instanceId, library: this.spec?.library || 'none', preflight: this.preflight }); };

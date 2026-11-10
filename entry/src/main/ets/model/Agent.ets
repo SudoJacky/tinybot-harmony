@@ -7,6 +7,7 @@ import { GeminiPart, validateGeminiContent } from './GeminiContent';
 import { Attachment, validateAttachments } from './Productivity';
 import { RequestUsage } from './Usage';
 import { PendingInput, validatePendingInput } from './PendingInput';
+import { FileAnnotation } from './FileAnnotation';
 import { ContextState } from './Conversation';
 import { RequestPrefixDiagnostics } from './RequestPrefix';
 import { toolOutcome } from './ToolOutcome';
@@ -86,6 +87,7 @@ export function toolSchemas(tools: ToolDefinition[]): ToolDefinition[] {
 }
 
 export interface ModelMessage {
+  annotations?: FileAnnotation[];
   geminiContent?: GeminiPart[];
   runtimeContext?: boolean;
   previewScreenshot?: boolean;
@@ -245,7 +247,9 @@ export function stepMessages(step: AgentStep, includeSteering: boolean = true): 
 export function stepInputs(step: AgentStep, includeSteering: boolean = true): ModelMessage[] {
   const messages: ModelMessage[] = step.runtimeContext === undefined ? [] :
     [{ role: 'user', content: step.runtimeContext, runtimeContext: true }];
-  if (includeSteering && step.steering) { messages.push({ role: 'user', content: step.steering.text, attachments: step.steering.attachments }); }
+  if (includeSteering && step.steering) {
+    messages.push({ role: 'user', content: step.steering.text, attachments: step.steering.attachments, annotations: step.steering.annotations });
+  }
   return messages;
 }
 

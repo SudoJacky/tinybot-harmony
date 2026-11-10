@@ -48,6 +48,9 @@ export struct InputQueuePanel {
               }.width('100%')
               Text(input.text).fontFamily(this.appearance.fontFamily).fontSize(Font.small).lineHeight(21).maxLines(4)
                 .textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%').fontColor($r('app.color.text_primary'))
+              if (input.annotations?.length) {
+                Text(t('{0} 条批注', [input.annotations.length])).fontSize(12).fontColor($r('app.color.text_secondary'))
+              }
               ForEach(input.attachments || [], (item: Attachment) => {
                 Text(item.name).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
               }, (item: Attachment) => item.id)

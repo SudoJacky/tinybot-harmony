@@ -214,7 +214,7 @@
       (data.panel ? '<style>' + panelStyle + '</style>' : '') +
       '<style>' + spec.css.replace(/<\/style/gi, '<\\/style') + '</style>' +
       (data.autoHeight ? '<style>html,body{min-height:0!important;overflow:auto}</style>' : '') + script(bootstrap) +
-      (data.automation && config.browserScript ? script(config.browserScript) : '') +
+      ((data.automation || data.annotations) && config.browserScript ? script(config.browserScript) : '') +
       (spec.library === 'three' ? script(library) : '') + '</head><body>' + spec.html +
       script('Promise.resolve((async()=>{\n' + spec.js + '\n})()).then(__tinybotReady).catch(__tinybotError);\n//# sourceURL=tinybot-generated.js') + '</body></html>';
     document.body.append(frame);
@@ -235,6 +235,7 @@
       if (data.type === 'browserResult' && typeof data.message === 'string') {
         send({type:'browserResult',id:data.id,message:data.message});
       }
+      else if (data.type === 'annotationTarget') send({ type: 'annotationTarget', target: data.target });
       else if (data.type === 'storageLoad') send({ type: 'storageLoad', id: data.id, scope: data.scope });
       else if (data.type === 'panelRefresh') send({ type: 'panelRefresh', id: data.id, inputs: data.inputs });
       else if (data.type === 'panelMailRead') send({ type: 'panelMailRead', id: data.id, mail: data.mail });

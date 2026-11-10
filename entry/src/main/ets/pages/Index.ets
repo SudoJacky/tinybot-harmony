@@ -1551,7 +1551,7 @@ struct Index {
                 onHistoryDragEnd: (event: GestureEvent) => this.endDrawerDrag(event),
                 onHistoryDragCancel: () => this.cancelDrawerDrag(),
                 onFiles: () => this.openFiles(), onOpenFile: (path: string) => this.openFiles(path),
-                previewInspectable: this.windowWidth >= 840, inspectedPreviewId: this.hasPreview() ? this.previewId : '',
+                previewInspectable: true, inspectedPreviewId: this.hasPreview() ? this.previewId : '',
                 onInspectPreview: (messageId: string, previewId: string) => this.openPreview(messageId, previewId),
                 onTools: (tab: string) => this.openTools(tab) })
               .width('100%').constraintSize({ maxWidth: 800 }).layoutWeight(1)

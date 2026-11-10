@@ -55,6 +55,7 @@ import { SessionResources } from './SessionContracts';
 import { ProjectData } from '../model/Project';
 import { SharedFolder } from '../model/SharedFolders';
 import { t } from '../model/I18n';
+import { FileAnnotation } from '../model/FileAnnotation';
 import { ProjectFolderAccess } from './ProjectFolderAccess';
 import { SessionService } from './SessionService';
 import { NativeWorkspaceFiles } from './NativeWorkspaceFiles';
@@ -117,6 +118,18 @@ export class NativeSessionResources implements SessionResources {
   async prepareAttachments(items: Attachment[], threadId: string, workspaceId?: string): Promise<Attachment[]> {
     await this.ensureWorkspace(threadId, workspaceId);
     return Attachments.inWorkspace(items, workspaceId || threadId);
+  }
+  async verifyFileAnnotations(threadId: string, items: FileAnnotation[], project?: ProjectData): Promise<void> {
+    const files = new NativeWorkspaceFiles(this.workspaces.pathFor(project?.workspaceId || threadId), project?.sharedFolders || []);
+    const versions = new Map<string, string>();
+    for (const item of items) {
+      let version = versions.get(item.path);
+      if (version === undefined) {
+        version = item.kind === 'element' ? (await files.read(item.path, new Cancellation())).version : await files.binaryVersion(item.path);
+        versions.set(item.path, version);
+      }
+      if (item.version !== version) { throw new Error(item.path + ' · ' + t('文件已变化，请重新打开并检查。')); }
+    }
   }
   persistProjectFolders(folders: SharedFolder[]): Promise<void> { return ProjectFolderAccess.persist(folders); }
   revokeProjectFolders(folders: SharedFolder[]): Promise<void> { return ProjectFolderAccess.revoke(folders); }

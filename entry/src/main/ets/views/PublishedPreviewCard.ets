@@ -64,7 +64,7 @@ export struct PublishedPreviewCard {
   build() {
     Column({ space: Space.sm }) {
       if (this.inspectable || this.inspected) {
-        Button(this.inspected ? t('在侧区查看') : t('在侧区打开')).attributeModifier(Btn.textSmall)
+        Button(this.inspected ? t('查看预览') : t('打开预览')).attributeModifier(Btn.textSmall)
           .id('inspect-preview-' + this.preview.id).onClick(this.onInspect)
       }
       if (!this.inline && (this.preview.superseded || !this.expanded)) {

@@ -1,0 +1,67 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' resource:; style-src 'unsafe-inline'; img-src blob:; base-uri 'none'; form-action 'none'">
+  <style>
+    :root { color-scheme: light; font: 14px system-ui, sans-serif; color: #243346; background: #f1f3f6; }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; height: 100dvh; display: flex; flex-direction: column; }
+    button, textarea { font: inherit; }
+    button { cursor: pointer; color: inherit; border: 1px solid #d9dfe8; border-radius: 8px; background: #fff; min-height: 36px; padding: 0 10px; }
+    button:disabled { opacity: .35; }
+    button[aria-current=true], button[aria-pressed=true] { border-color: #3767da; color: #1749b4; background: #eaf0ff; }
+    #toolbar { flex: none; display: flex; gap: 6px; padding: 0 8px; overflow: auto; background: #f1f3f6; }
+    #toolbar button { margin: 6px 0; white-space: nowrap; }
+    #viewport { flex: 1; min-height: 0; overflow: auto; }
+    .word { background: #fff; box-shadow: 0 2px 12px #14233c18; width: min(100%, 816px); margin: 0 auto 20px; padding: clamp(16px, 6vw, 82px); min-height: 100%; font: 11pt/1.5 Georgia, serif; color: #172236; }
+    .word p, .word h1, .word h2, .word h3 { white-space: pre-wrap; overflow-wrap: anywhere; position: relative; }
+    .word h1, .word h2, .word h3 { font-family: system-ui, sans-serif; color: #24374a; }
+    .word img { max-width: 100%; }
+    table { border-collapse: separate; border-spacing: 0; }
+    .word table { width: 100%; }
+    .word td { border: 1px solid #ccd4df; padding: 0 8px; }
+    .deck { display: flex; height: 100%; gap: 10px; padding: 8px; }
+    .slides { display: flex; flex: 0 0 clamp(64px, 18%, 142px); flex-direction: column; gap: 8px; overflow: auto; }
+    .slides button { padding: 3px; min-height: auto; font-size: 11px; }
+    .thumbnail { display: block; margin: 2px 0 0; box-shadow: none !important; }
+    .stage { display: grid; place-items: center; flex: 1; min-width: 0; }
+    .slide { position: relative; width: 100%; max-width: 1400px; overflow: hidden; container-type: inline-size; box-shadow: 0 1px 10px #14233c29; color: #263c51; }
+    .shape { position: absolute; line-height: 1.16; }
+    .shape img { width: 100%; height: 100%; object-fit: fill; }
+    .shape p { margin: 0 0 .9cqw; font-size: 2cqw; }
+    .annotating .stage .slide { cursor: crosshair; touch-action: none; user-select: none; }
+    .annotating .shape:hover { outline: 2px dashed #3770e4; }
+    .slide-selection { position: absolute; border: 2px dashed #3770e4; background: #3770e420; pointer-events: none; }
+    .grid { height: 100%; display: flex; flex-direction: column; }
+    .grid-controls { display: flex; align-items: center; gap: 5px; padding: 5px 8px; }
+    .grid-scroll { overflow: auto; flex: 1; background: white; }
+    .grid-scroll th, .grid-scroll td { border: solid #e3e7ee; border-width: 0 1px 1px 0; height: 29px; padding: 3px 8px; white-space: nowrap; }
+    .grid-scroll th { background: #edf0f4; font-weight: 500; }
+    .grid-scroll thead th { position: sticky; top: 0; z-index: 2; }
+    .grid-scroll tr > th:first-child { position: sticky; left: 0; z-index: 1; }
+    .grid-scroll thead th:first-child { z-index: 3; }
+    .grid-scroll td { position: relative; min-width: 84px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+    .annotating td { cursor: crosshair; touch-action: none; user-select: none; }
+    .grid-scroll td.selected { box-shadow: inset 0 0 0 2px #3770e4; }
+    .pin { position: absolute; top: 1px; right: 1px; z-index: 1; min-width: 19px; padding: 2px; border: 1px solid white; border-radius: 100px; color: white; background: #2769d9; font: 600 11px/15px system-ui, sans-serif; text-align: center; user-select: none; }
+    #comment, #text-action { position: fixed; z-index: 5; box-shadow: 0 8px 32px #14233c35; }
+    #comment { display: grid; gap: 8px; background: white; padding: 12px; width: min(310px, calc(100vw - 16px)); border: 1px solid #d9dfe8; border-radius: 16px; }
+    #comment textarea { width: 100%; min-height: 68px; resize: vertical; padding: 4px; border: 0; border-radius: 4px; }
+    #comment textarea:focus-visible { outline: 2px solid #b9ceff; }
+    #comment footer { display: flex; justify-content: flex-end; gap: 6px; }
+  </style>
+</head>
+<body>
+  <nav id="toolbar"><button type="button" id="annotate" aria-pressed="false" hidden></button></nav>
+  <main id="viewport"></main>
+  <button type="button" id="text-action" hidden></button>
+  <form id="comment" hidden>
+    <textarea maxlength="2000" required></textarea>
+    <footer><button type="button"></button><button type="submit"></button></footer>
+  </form>
+  <script src="preview.bundle.js"></script>
+</body>
+</html>

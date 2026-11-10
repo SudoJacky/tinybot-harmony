@@ -16,6 +16,7 @@ import { ExtensionSettings, validateExtensions } from './Skills';
 import { PendingInput, validatePendingInputs } from './PendingInput';
 import { FileOperations } from './FileOperations';
 import { MemoryReviewRecord } from './MemoryMaintenance';
+import { FileAnnotation, validateFileAnnotations } from './FileAnnotation';
 
 import { DEFAULT_SYSTEM_PROMPT, migrateUserDocument } from './SystemPrompt';
 
@@ -36,6 +37,7 @@ export interface ModelConfig {
 }
 
 export interface MessageData {
+  annotations?: FileAnnotation[];
   // App-captured board context; kept separate from the editable/user-visible text.
   panelContext?: string;
   // Model-visible explicit Skill expansion, captured once; content stays user-visible.
@@ -70,6 +72,7 @@ export function copyModelConfig(config: ModelConfig, configured: boolean = confi
 export interface ContextState { compaction?: CompactionData; }
 
 export interface ThreadData extends ContextState, ToolSelection {
+  annotations?: FileAnnotation[];
   toolApprovalMode?: string;
   panelContext?: string;
   projectId?: string;
@@ -148,7 +151,7 @@ export function requestHistory(messages: MessageData[], systemPrompt: string): M
     }
     const answer = messages[index + 1];
     if (!answer) {
-      result.push({ role: 'user', content: (message.skillPrompt ?? message.content) + (message.panelContext ? '\n\n' + message.panelContext : '') + referenceContext(message.references, message.id), attachments: message.attachments });
+      result.push({ role: 'user', content: (message.skillPrompt ?? message.content) + (message.panelContext ? '\n\n' + message.panelContext : '') + referenceContext(message.references, message.id), attachments: message.attachments, annotations: message.annotations });
     } else if (answer.role === 'assistant') {
       const steps = answer.steps || [];
       const hasTools = steps.some((step: AgentStep) => step.tools.length > 0);
@@ -157,7 +160,7 @@ export function requestHistory(messages: MessageData[], systemPrompt: string): M
       if (answer.status !== 'complete' && !hasTools && !hasSteering && !hasContext) {
         continue;
       }
-      result.push({ role: 'user', content: (message.skillPrompt ?? message.content) + (message.panelContext ? '\n\n' + message.panelContext : '') + referenceContext(message.references, message.id), attachments: message.attachments });
+      result.push({ role: 'user', content: (message.skillPrompt ?? message.content) + (message.panelContext ? '\n\n' + message.panelContext : '') + referenceContext(message.references, message.id), attachments: message.attachments, annotations: message.annotations });
       if (steps.length === 0) {
         result.push({ role: 'assistant', content: answer.content });
       } else {
@@ -247,6 +250,7 @@ export function parseAppData(text: string): AppData {
     if (thread.teamEnabled !== undefined && typeof thread.teamEnabled !== 'boolean') { throw new Error(t("团队模式设置损坏。")); }
     if (thread.teams !== undefined) { recoverTeams(thread.teams); }
     if (thread.attachments) { validateAttachments(thread.attachments); }
+    if (thread.annotations !== undefined) { validateFileAnnotations(thread.annotations); }
     if (thread.pendingInputs !== undefined) { validatePendingInputs(thread.pendingInputs); }
     if (thread.panelContext !== undefined && (typeof thread.panelContext !== 'string' || thread.panelContext.length > 32768)) { throw new Error('Invalid board context'); }
     if (thread.references !== undefined) { validateThreadReferences(thread.references); }
@@ -278,6 +282,7 @@ export function parseAppData(text: string): AppData {
       }
       if (message.uiStates !== undefined) { validateUiStates(message.uiStates); }
       if (message.attachments) { validateAttachments(message.attachments); }
+      if (message.annotations !== undefined) { validateFileAnnotations(message.annotations); }
       if (message.references !== undefined) { validateThreadReferences(message.references); }
       if (message.modelRef !== undefined) { validateReference(message.modelRef); }
       if (message.steps !== undefined) {

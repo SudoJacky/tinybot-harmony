@@ -3,10 +3,11 @@ import { parseUiJson } from './UiJson';
 import { UiDiagnosticError } from './UiRepair';
 import { MailReadRequest } from './Mail';
 import { imapNumber } from './ImapWire';
+import { WebAnnotationTarget } from './WebAnnotation';
 // Versioned Web content embedded in a completed native UI surface.
 export interface WebUiSpec { version: number; html: string; css: string; js: string; library: string; height: number; autoHeight?: boolean; }
 export interface WebUiPanelContext { data: Object; title: string; status: string; canRefresh: boolean; canReadMail?: boolean; locale: string; inputs?: PanelInputs; theme?: string; tokens?: Record<string, string>; }
-export interface WebUiMessage { type: string; id?: number; values?: Record<string, string | number | boolean>; message?: string; height?: number; value?: Object | null; revision?: string; inputs?: PanelInputs; scope?: string; mail?: MailReadRequest; }
+export interface WebUiMessage { type: string; id?: number; values?: Record<string, string | number | boolean>; message?: string; height?: number; value?: Object | null; revision?: string; inputs?: PanelInputs; scope?: string; mail?: MailReadRequest; target?: WebAnnotationTarget; }
 export function webUiAutoHeight(spec: WebUiSpec): boolean {
   // Previously published SVG/HTML snapshots used this exact wrapper. Keep those compact too.
   return spec.autoHeight ?? (spec.library === 'none' && spec.js === '' &&
@@ -32,8 +33,16 @@ export function parseWebUi(source: string): WebUiSpec {
 }
 export function parseWebUiMessage(source: string): WebUiMessage {
   const message = JSON.parse(source) as WebUiMessage;
-  if (!message || typeof message !== 'object' || Array.isArray(message) || !['ready', 'error', 'save', 'resize', 'snapshotReady', 'browserResult', 'storageLoad', 'storageSave', 'panelRefresh', 'panelMailRead'].includes(message.type) ||
-    Object.keys(message).some((key) => !['type', 'id', 'values', 'message', 'height', 'value', 'revision', 'inputs', 'scope', 'mail'].includes(key))) { throw new Error('Web UI: invalid bridge message'); }
+  if (!message || typeof message !== 'object' || Array.isArray(message) || !['ready', 'error', 'save', 'resize', 'snapshotReady', 'browserResult', 'storageLoad', 'storageSave', 'panelRefresh', 'panelMailRead', 'annotationTarget'].includes(message.type) ||
+    Object.keys(message).some((key) => !['type', 'id', 'values', 'message', 'height', 'value', 'revision', 'inputs', 'scope', 'mail', 'target'].includes(key))) { throw new Error('Web UI: invalid bridge message'); }
+  if (message.type === 'annotationTarget') {
+    const target = message.target;
+    if (!target || target.kind !== 'element' || typeof target.location !== 'string' || !target.location || target.location.length > 1000 ||
+      typeof target.excerpt !== 'string' || target.excerpt.length > 1000 ||
+      !Number.isFinite(target.x) || target.x < 0 || target.x > 1 || !Number.isFinite(target.y) || target.y < 0 || target.y > 1) {
+      throw new Error('Web UI: invalid annotation target');
+    }
+  } else if (message.target !== undefined) { throw new Error('Web UI: unexpected annotation target'); }
   if (message.type === 'panelMailRead') {
     if (!Number.isSafeInteger(message.id) || (message.id || 0) < 1 || !message.mail || typeof message.mail !== 'object' ||
       Array.isArray(message.mail) || Object.keys(message.mail).some((key) => !['uidValidity', 'uid'].includes(key))) { throw new Error('Web UI: invalid mail read request'); }

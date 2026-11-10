@@ -1,4 +1,5 @@
 import { MessageDraftEditor } from './MessageDraftEditor';
+import { FileAnnotationList } from './FileAnnotationList';
 import { AdaptiveUi } from '../model/AdaptiveUi';
 import { materialMenuContent, materialMenuHeader } from '../common/MaterialMenu';
 import { Diagnostics } from '../model/Diagnostics';
@@ -531,7 +532,7 @@ export struct ChatPanel {
 
   // Use methods: ordinary accessors in a V1 @Component are omitted by the ArkUI compiler.
   private hasDraft(): boolean {
-    return this.app.draft.trim().length > 0 || this.thread.attachments.length > 0 || this.thread.references.length > 0;
+    return this.app.draft.trim().length > 0 || this.thread.attachments.length > 0 || this.thread.references.length > 0 || this.thread.annotations.length > 0;
   }
 
   private composerExpanded(): boolean {
@@ -1599,6 +1600,14 @@ export struct ChatPanel {
       }
     // Keep the editor and toolbar mounted. Animate reserved space, never switch layout modes.
     Column() {
+      if (this.thread.annotations.length > 0) {
+        ForEach([this.thread.id], (threadId: string) => {
+          Row() {
+            FileAnnotationList({ items: this.thread.annotations, editable: true, disabled: !this.app.canQueueInput,
+              onChange: (id, comment) => this.app.editFileAnnotation(threadId, id, comment) })
+          }.width('100%')
+        }, (threadId: string) => threadId)
+      }
       if (this.thread.references.length > 0) {
         Scroll() {
           Column({ space: 4 }) {

@@ -3,6 +3,7 @@ import { prepareBackupImport, finishBackupImport, discardBackupImport, rollbackB
 import { SessionImportCandidate } from './SessionCandidates';
 import { resolveBrowserPreview } from '../model/BrowserPreview';
 import { Diagnostics } from '../model/Diagnostics';
+import { FileAnnotation, FileAnnotationTarget, MAX_FILE_ANNOTATIONS, validateFileAnnotations } from '../model/FileAnnotation';
 import { configurationIssues } from '../model/ConfigurationCompatibility';
 import { isSupportedProtocol } from '../model/ProviderEndpoint';
 import { ToolExecution, toolReceipts } from '../model/Agent';
@@ -347,6 +348,36 @@ export class SessionService {
     // Like typing, staging is allowed while the runtime is paused and uses its ordered save lane.
     await this.persist(threadId); this.refreshContext(); this.publish('snapshot');
   }
+  private async setFileAnnotations(threadId: string, items: FileAnnotation[]): Promise<void> {
+    if (this.active.id !== threadId || !this.canQueueInput) { throw new Error(t('当前无法保存批注。')); }
+    validateFileAnnotations(items);
+    this.active.annotations = items.slice();
+    this.draftRevision++;
+    this.dirtyDrafts.add(threadId);
+    this.publish('snapshot');
+    await this.persist(threadId);
+    this.refreshContext(threadId);
+  }
+  async addFileAnnotation(threadId: string, path: string, version: string, target: FileAnnotationTarget, comment: string): Promise<void> {
+    const items = this.requireThread(threadId).annotations || [];
+    if (items.length >= MAX_FILE_ANNOTATIONS) { throw new Error(t('每条消息最多 {0} 条批注。', [MAX_FILE_ANNOTATIONS])); }
+    const item: FileAnnotation = { id: this.resources.createId(), path: path, version: version,
+      kind: target.kind, location: target.location, excerpt: target.excerpt, comment: comment };
+    await this.setFileAnnotations(threadId, items.concat([item]));
+  }
+  async editFileAnnotation(threadId: string, id: string, comment?: string): Promise<void> {
+    const items = this.requireThread(threadId).annotations || [];
+    const index = items.findIndex((item) => item.id === id);
+    if (index < 0) { throw new Error(t('当前无法保存批注。')); }
+    const next = items.slice();
+    const item = items[index];
+    if (comment === undefined) { next.splice(index, 1); }
+    else {
+      next[index] = { id: item.id, path: item.path, version: item.version, kind: item.kind, location: item.location,
+        excerpt: item.excerpt, comment: comment };
+    }
+    await this.setFileAnnotations(threadId, next);
+  }
   async referenceThread(id: string): Promise<boolean> {
     return this.mutate(t('添加会话引用失败：'), async () => {
       if (this.active.archived) { throw new Error(t('请先恢复对话。')); }
@@ -375,6 +406,7 @@ export class SessionService {
       this.active.attachments = JSON.parse(JSON.stringify(message.attachments || [])) as Attachment[];
       this.active.references = (message.references || []).map((item): ThreadReference => ({ threadId: item.threadId, title: item.title,
         content: item.content, capturedAt: item.capturedAt, truncated: item.truncated, fullContent: item.fullContent }));
+      this.active.annotations = message.annotations?.slice();
       this.setDraft(message.content, this.active.id); this.active.panelContext = message.panelContext; await this.persist();
     }, 'snapshot', 'thread');
   }
@@ -430,7 +462,7 @@ export class SessionService {
     // Keep its workspace and local model/team choices; never discard prepared input.
     if (current.projectId === projectId && !current.archived && !current.titleEdited && !current.pinned &&
       !current.parentThreadId && current.messages.length === 0 && (current.draft || '').length === 0 &&
-      (current.attachments || []).length === 0 && (current.references || []).length === 0 &&
+      (current.attachments || []).length === 0 && (current.references || []).length === 0 && !current.annotations?.length &&
       (current.pendingInputs || []).length === 0) { return true; }
     return this.mutate(t("新建对话失败："), async () => {
       const thread = this.freshThread(); thread.projectId = projectId; await this.ensureThreadWorkspace(thread);
@@ -652,7 +684,7 @@ export class SessionService {
 
   async enqueueInput(mode: InputMode): Promise<void> {
     const thread = this.active; const status = this.status;
-    if (!this.canQueueInput || (thread.draft || '').trim().length === 0) { return; }
+    if (!this.canQueueInput || (!(thread.draft || '').trim() && !thread.annotations?.length)) { return; }
     status.error = '';
     try {
       if ((thread.references || []).length > 0 || thread.panelContext) { throw new Error(t('会话引用请在当前任务完成后发送，或先移除引用再排队。')); }
@@ -662,13 +694,20 @@ export class SessionService {
       }
       const text = (thread.draft || '').trim();
       if (mode === 'steer' && explicitSkill(text).length > 0) { throw new Error(t("运行中保持当前工具与 Skills；显式调用 /skill: 请使用“加入队列”。")); }
+      const annotations = thread.annotations;
+      if (mode === 'steer' && annotations?.length && this.resources.verifyFileAnnotations) {
+        const revision = this.draftRevision;
+        await this.resources.verifyFileAnnotations(thread.id, annotations, projectFor(this.data, thread));
+        if (this.active.id !== thread.id || this.draftRevision !== revision || !status.acceptingSteering) { return; }
+      }
       const input: PendingInput = { id: this.resources.createId(), mode: mode, text: text };
       if ((thread.attachments || []).length) { input.attachments = thread.attachments; }
+      if (thread.annotations?.length) { input.annotations = thread.annotations; }
       const pending = (thread.pendingInputs || []).concat([input]);
       validatePendingInputs(pending); thread.pendingInputs = pending;
       if (status.phase !== 'running') { thread.queuePaused = true; }
       const approvalMode = toolApprovalMode(thread.toolApprovalMode);
-      thread.draft = ''; thread.attachments = []; this.publish('snapshot');
+      thread.draft = ''; thread.attachments = []; thread.annotations = undefined; this.publish('snapshot');
       await this.exclusive(() => this.persist(undefined, undefined, approvalMode));
     } catch (error) {
       status.error = t("指令未能提交：") + (error as Error).message;
@@ -681,9 +720,9 @@ export class SessionService {
     if (!this.canQueueInput) { return; }
     const input = (thread.pendingInputs || []).find((item: PendingInput) => item.id === id);
     if (!input) { status.error = t("这条指令已经开始执行，不能再撤回。"); this.publish('state'); return; }
-    if (edit && ((thread.draft || '').trim().length > 0 || (thread.attachments || []).length > 0)) { status.error = t("请先发送或清空当前草稿，再撤回编辑。"); this.publish('state'); return; }
+    if (edit && ((thread.draft || '').trim().length > 0 || (thread.attachments || []).length > 0 || thread.annotations?.length)) { status.error = t("请先发送或清空当前草稿，再撤回编辑。"); this.publish('state'); return; }
     thread.pendingInputs = (thread.pendingInputs || []).filter((item: PendingInput) => item.id !== id);
-    if (edit) { thread.draft = input.text; thread.attachments = input.attachments || []; }
+    if (edit) { thread.draft = input.text; thread.attachments = input.attachments || []; thread.annotations = input.annotations; }
     status.error = ''; this.publish('snapshot');
     try { await this.persist(); }
     catch (_) { thread.queuePaused = true; this.execution(thread.id).runtime.abort(); this.publish('snapshot'); }
@@ -696,10 +735,10 @@ export class SessionService {
       if (!isCompactCommand(text)) { this.status.error = t('/compact 不接受参数，请单独发送。'); this.publish('state'); return; }
       await this.compactHistory(true); return;
     }
-    if (teamCommand(text) === '' && !(this.active.attachments || []).length) {
+    if (teamCommand(text) === '' && !(this.active.attachments || []).length && !this.active.annotations?.length) {
       this.setDraft(''); await this.setTeamEnabled(true); return;
     }
-    if (text.length === 0 && (this.active.attachments || []).length === 0 && !(this.active.references || []).length) { return; }
+    if (!text && !this.active.attachments?.length && !this.active.references?.length && !this.active.annotations?.length) { return; }
     const threadId = this.active.id;
     if ((this.resources.authorizeGeneration && !await this.authorizeGeneration()) || !this.canMutate || this.active.id !== threadId || (this.active.draft || '').trim() !== text) { return; }
     await this.runTasks(text);
@@ -802,7 +841,10 @@ export class SessionService {
 
   private async runTask(thread: ThreadData, text: string, queuedId?: string): Promise<boolean> {
     const execution = this.execution(thread.id); const status = execution.state;
-    const attachments = queuedId ? thread.pendingInputs?.find((item) => item.id === queuedId)?.attachments || [] : thread.attachments || [];
+    const queued = queuedId ? thread.pendingInputs?.find((item) => item.id === queuedId) : undefined;
+    const draft = thread.draft;
+    const attachments = (queuedId ? queued?.attachments : thread.attachments) || [];
+    const annotations = queuedId ? queued?.annotations : thread.annotations;
     const command = teamCommand(text);
     if (command !== undefined) { text = command; }
     const options = this.data.productivity?.options || defaultAssistantOptions();
@@ -810,6 +852,10 @@ export class SessionService {
     if (!config.configured) { status.error = t("当前对话没有可用模型，请选择模型，或添加、启用模型服务。"); thread.queuePaused = true; return false; }
     if (selected.length > 0 && !this.extensions.skills.some((skill: SkillData) => skill.enabled && skill.name === selected)) {
       status.error = t("指定的 Skill 不存在或已停用，请到设置中的 Skills 管理检查。"); thread.queuePaused = true; return false;
+    }
+    if (annotations?.length && this.resources.verifyFileAnnotations) {
+      await this.resources.verifyFileAnnotations(thread.id, annotations, projectFor(this.data, thread));
+      if (queued ? !thread.pendingInputs?.includes(queued) : thread.draft !== draft || thread.annotations !== annotations) { return false; }
     }
     // Commit the choice with the message through the runtime's initial checkpoint, before requesting the model.
     thread.teamEnabled = command !== undefined || this.selectedTeamMode(thread);
@@ -824,8 +870,8 @@ export class SessionService {
     this.addModeInstructions(sections, thread);
     const instructions = renderPrompt(sections.filter((section) => !section.dynamic));
     const user: MessageData = { id: this.resources.createId(), role: 'user', content: text, skillPrompt: expandSkillCommand(text, this.extensions.skills), status: 'complete', error: '',
-      attachments: attachments, references: queuedId ? [] : thread.references, panelContext: queuedId ? undefined : thread.panelContext };
-    if (!queuedId) { thread.attachments = []; thread.references = []; thread.panelContext = undefined; }
+      attachments: attachments, annotations: annotations, references: queuedId ? [] : thread.references, panelContext: queuedId ? undefined : thread.panelContext };
+    if (!queuedId) { thread.attachments = []; thread.references = []; thread.annotations = undefined; thread.panelContext = undefined; }
     const answer: MessageData = { id: this.resources.createId(), role: 'assistant', content: '', status: 'generating', error: '', modelRef: thread.modelRef };
     const generateTitle = text.length > 0 && shouldGenerateTitle(thread);
     if (text.length > 0 && thread.messages.length === 0 && !thread.titleEdited) { thread.title = titleCharacters(text.replace(/\s+/g, ' '), 32); }
@@ -1473,7 +1519,7 @@ export class SessionService {
   private publishThread(thread: ThreadData): void {
     const metadata: ThreadData = { id: thread.id, title: thread.title, updatedAt: thread.updatedAt, messages: [],
       projectId: thread.projectId, pinned: thread.pinned, archived: thread.archived, titleEdited: thread.titleEdited, draft: thread.draft, panelContext: thread.panelContext,
-      attachments: thread.attachments, references: thread.references, parentThreadId: thread.parentThreadId,
+      attachments: thread.attachments, annotations: thread.annotations, references: thread.references, parentThreadId: thread.parentThreadId,
       parentMessageId: thread.parentMessageId, disabledMcpIds: thread.disabledMcpIds, modelRef: thread.modelRef,
       pendingInputs: thread.pendingInputs, queuePaused: thread.queuePaused, compaction: thread.compaction,
       memoryReview: thread.memoryReview, reasoningEffort: thread.reasoningEffort, teamEnabled: this.selectedTeamMode(thread),

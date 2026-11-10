@@ -99,7 +99,8 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
         validatePendingInput(pending);
         if (pending.mode !== 'steer') { throw new Error(t("本轮只能接收追加指令。")); }
       }
-      const input: PendingInput | undefined = pending ? { id: pending.id, mode: pending.mode, text: pending.text, attachments: pending.attachments } : undefined;
+      const input: PendingInput | undefined = pending ? { id: pending.id, mode: pending.mode, text: pending.text,
+        attachments: pending.attachments, annotations: pending.annotations } : undefined;
       const definitions = context.tools.definitions();
       const prepared = context.prepareRequest ? await context.prepareRequest(definitions, input ? [{ role: 'user', content: input.text, attachments: input.attachments }] : [], cancellation, recoveryPending) : undefined;
       recoveryPending = false;
