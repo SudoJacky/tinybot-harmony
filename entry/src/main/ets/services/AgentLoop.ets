@@ -101,12 +101,14 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
       }
       const input: PendingInput | undefined = pending ? { id: pending.id, mode: pending.mode, text: pending.text,
         attachments: pending.attachments, annotations: pending.annotations } : undefined;
+      const steeringMessages: ModelMessage[] = input ? [{ role: 'user', content: input.text,
+        attachments: input.attachments, annotations: input.annotations }] : [];
       const definitions = context.tools.definitions();
-      const prepared = context.prepareRequest ? await context.prepareRequest(definitions, input ? [{ role: 'user', content: input.text, attachments: input.attachments }] : [], cancellation, recoveryPending) : undefined;
+      const prepared = context.prepareRequest ? await context.prepareRequest(definitions, steeringMessages, cancellation, recoveryPending) : undefined;
       recoveryPending = false;
       cancellation.check();
       if (prepared) { messages = prepared.messages; }
-      const requestMessages: ModelMessage[] = input ? messages.concat([{ role: 'user', content: input.text, attachments: input.attachments }]) : messages;
+      const requestMessages = input && !prepared ? messages.concat(steeringMessages) : messages;
       if (!prepared && context.contextWindow !== undefined && estimateContextTokens(requestMessages, definitions) > contextInputBudget(context.contextWindow)) {
         throw new Error(t("本轮内容超过上下文预算，执行已停止。已完成的工具结果已保留；请压缩历史、缩小任务或提高窗口设置。"));
       }
@@ -118,7 +120,7 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
         repeatReminder.reset();
         // Record input in the transcript and remove it from the outbox in one checkpoint.
         observer.steering?.consume(input.id);
-        if (!prepared) { messages.push({ role: 'user', content: input.text, attachments: input.attachments }); }
+        if (!prepared) { messages = requestMessages; }
       }
       // Model-visible additions and queued steering share the same durable admission boundary.
       if (input || step.runtimeContext !== undefined) { await observer.checkpoint(); cancellation.check(); }
