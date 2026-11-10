@@ -1,4 +1,5 @@
 import { ModelMessage, ToolCall, ToolDefinition, toolSchemas } from '../../model/Agent';
+import { fileAnnotationContext } from '../../model/FileAnnotation';
 
 interface ChatImageUrl { url: string; }
 interface ChatContent { type: string; text?: string; image_url?: ChatImageUrl; }
@@ -35,8 +36,10 @@ export function chatRequest(model: string, messages: ModelMessage[], tools: Tool
     messages: messages.map((message: ModelMessage): ChatWireMessage => {
       const content: ChatContent[] = [];
       if (message.content.length > 0) { content.push({ type: 'text', text: message.content }); }
+      const annotations = fileAnnotationContext(message.annotations);
+      if (annotations) { content.push({ type: 'text', text: annotations }); }
       for (const url of message.images || []) { content.push({ type: 'image_url', image_url: { url: url } }); }
-      return { role: message.role, content: (message.images || []).length > 0 ? content : message.content,
+      return { role: message.role, content: annotations || message.images?.length ? content : message.content,
         tool_calls: message.toolCalls, tool_call_id: message.toolCallId,
         reasoning_content: options.replayReasoning && message.role === 'assistant' ? message.reasoningContent : undefined };
     }) };

@@ -1,4 +1,5 @@
 import { t } from '../../model/I18n';
+import { fileAnnotationContext } from '../../model/FileAnnotation';
 import { ModelMessage, ToolDefinition, ToolParameters, validateToolCalls } from '../../model/Agent';
 import { GeminiPart, GeminiFunctionCall, validateGeminiContent } from '../../model/GeminiContent';
 
@@ -39,6 +40,8 @@ export function geminiRequest(messages: ModelMessage[], tools: ToolDefinition[],
         parts = JSON.parse(JSON.stringify(message.geminiContent)) as GeminiPart[];
       } else {
         if (message.content) { parts.push({ text: message.content }); }
+        const annotations = fileAnnotationContext(message.annotations);
+        if (annotations) { parts.push({ text: annotations }); }
         for (const image of message.images || []) {
           const data = /^data:(image\/[A-Za-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/.exec(image);
           if (!data) { throw new Error(t('Gemini 图片必须是 base64 图片数据。')); }

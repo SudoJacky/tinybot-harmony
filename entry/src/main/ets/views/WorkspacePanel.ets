@@ -6,6 +6,7 @@ import { SwipeRow } from '../common/SwipeRow';
 import { common } from '@kit.AbilityKit';
 import { fileIo as fs, picker } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
+import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { NativeWorkspaceFiles } from '../services/NativeWorkspaceFiles';
@@ -16,6 +17,9 @@ import { exportFile, shareFile } from '../services/NativeActions';
 import { aiAssistedFile } from '../model/ConversationExport';
 import { MarkdownView } from './MarkdownView';
 import { DataTable } from './DataTable';
+import { OfficePreview, OfficePreviewSource } from './OfficePreview';
+import { HtmlFilePreview } from './HtmlFilePreview';
+import { WebUiSpec, htmlPreviewLibrary } from '../model/WebUi';
 import { parseDelimited } from '../model/RichArtifacts';
 import { FileBaseline, WorkspaceEntry } from '../services/WorkspaceFiles';
 import { ToolFailure } from '../model/ToolFailure';
@@ -25,6 +29,8 @@ import { Banner, BottomBar, EmptyState, IconButton } from '../common/Widgets';
 
 const IMAGE_FILE: RegExp = /\.(png|jpe?g|webp|gif|bmp)$/i;
 const MARKDOWN_FILE: RegExp = /\.(md|markdown)$/i;
+const OFFICE_FILE: RegExp = /\.(docx|xlsx|pptx)$/i;
+const HTML_FILE: RegExp = /\.html?$/i;
 
 function pad(value: number): string { return value < 10 ? '0' + value : value.toString(); }
 
@@ -53,7 +59,9 @@ export struct WorkspacePanel {
   @State private content: string = '';
   @State private original: string = '';
   private version: string = '';
+  private fileThreadId: string = '';
   @State private imagePath: string = '';
+  @State private officeSource: OfficePreviewSource | undefined = undefined;
   @State private previewError: string = '';
   @State private previewing: boolean = false;
   @State private previewPresent: boolean = false;
@@ -61,6 +69,7 @@ export struct WorkspacePanel {
   @State private busy: boolean = false;
   @State private refreshing: boolean = false;
   @State private listingPending: boolean = false;
+  @State private listingError: string = '';
   @State private error: string = '';
   @State private baseline: FileBaseline | undefined = undefined;
   @State private csv: string[][] = [];
@@ -131,6 +140,7 @@ export struct WorkspacePanel {
     const files = this.files; const directory = this.directory;
     this.listingRequest = request;
     this.listingPending = true;
+    this.listingError = '';
     try {
       const list = await files.list(directory || '.', request);
       if (this.listingRequest !== request) { return; }
@@ -138,7 +148,7 @@ export struct WorkspacePanel {
       this.entries = list.entries.sort((a, b) => (a.kind === 'directory' ? 0 : 1) - (b.kind === 'directory' ? 0 : 1) || a.name.localeCompare(b.name));
       this.truncated = list.truncated;
     } catch (error) {
-      if (this.listingRequest === request) { this.error = (error as Error).message; }
+      if (this.listingRequest === request) { this.listingError = (error as Error).message; }
     } finally {
       if (this.listingRequest === request) { this.listingPending = false; this.refreshing = false; }
     }
@@ -154,20 +164,40 @@ export struct WorkspacePanel {
     if (!this.files || this.busy || entry.kind === 'symlink') { return; }
     const path = this.join(entry.name);
     if (entry.kind === 'directory') { this.go(path); return; }
+    const office = OFFICE_FILE.test(path) && !this.files.isShared(path);
+    const threadId = office || HTML_FILE.test(path) ? this.app.active.id : '';
     this.busy = true;
+    this.fileThreadId = threadId;
     this.selected = path; this.editing = false; this.content = ''; this.original = ''; this.version = ''; this.imagePath = ''; this.previewError = '';
-    this.baseline = undefined; this.csv = []; this.selection = '';
+    this.baseline = undefined; this.csv = []; this.selection = ''; this.officeSource = undefined;
     try {
       this.baseline = await this.files.baseline(path);
       if (IMAGE_FILE.test(entry.name)) { this.imagePath = await this.files.checkedPath(path); }
+      else if (office) {
+        const bytes = await this.files.readJobInput(path, 20 * 1024 * 1024, new Cancellation());
+        const hash = cryptoFramework.createMd('SHA256');
+        await hash.update({ data: bytes });
+        const base64 = new util.Base64Helper();
+        this.officeSource = { path: path, threadId: threadId, format: path.slice(-4).toLowerCase(), encoded: base64.encodeToStringSync(bytes),
+          version: base64.encodeToStringSync((await hash.digest()).data) };
+      }
       else {
         const read = await this.files.read(path, new Cancellation());
         this.content = read.content; this.original = read.content; this.version = read.version;
       }
       if (/\.(csv|tsv)$/i.test(path)) { this.csv = parseDelimited(this.content, /\.tsv$/i.test(path) ? '\t' : ','); }
-    } catch (error) { this.previewError = t("无法预览：") + (error as Error).message; }
+    } catch (error) {
+      Diagnostics.log('warn', 'workspace', 'preview_failed', undefined, error as Error);
+      this.previewError = t("无法预览：") + (error as Error).message;
+    }
     this.previewing = true; this.busy = false;
   }
+
+  private htmlPreviewContent(): string {
+    const spec: WebUiSpec = { version: 1, html: this.content, js: '', css: '', library: htmlPreviewLibrary(this.content), height: 400 };
+    return JSON.stringify(spec);
+  }
+
 
   private uniqueName(name: string): string {
     const taken = new Set<string>(this.entries.map((entry) => entry.name));
@@ -448,6 +478,20 @@ export struct WorkspacePanel {
           .onChange((value) => { this.content = value; })
       } else if (this.imagePath.length > 0) {
         Image('file://' + this.imagePath).width('100%').layoutWeight(1).objectFit(ImageFit.Contain)
+      } else if (this.officeSource) {
+        ForEach([this.officeSource], (source: OfficePreviewSource) => {
+          Column() {
+            OfficePreview({ source: source, annotations: this.app.active.annotations,
+              onAnnotation: (target, comment) => this.app.addFileAnnotation(source.threadId, source.path, source.version, target, comment) })
+          }.width('100%').layoutWeight(1)
+        }, (source: OfficePreviewSource) => this.selected + ':' + source.version)
+      } else if (HTML_FILE.test(this.selected) && !this.previewError) {
+        ForEach([this.selected], (path: string) => {
+          Column() {
+            HtmlFilePreview({ app: this.app, content: this.htmlPreviewContent(), threadId: this.fileThreadId,
+              path: path, version: this.version })
+          }.width('100%').layoutWeight(1)
+        }, (path: string) => path + ':' + this.version)
       } else {
         Scroll() {
           Column() {
@@ -468,7 +512,7 @@ export struct WorkspacePanel {
       }
       if (!this.editing) {
         Row() {
-          if (!this.imagePath && !this.previewError) {
+          if (!this.imagePath && !this.officeSource && !HTML_FILE.test(this.selected) && !this.previewError) {
             this.toolbarButton($r('sys.symbol.quote'), t("引用"), 'workspace-reference', false, () => this.reference())
           }
           if (!this.files?.isCloudPath(this.selected)) {
@@ -490,8 +534,9 @@ export struct WorkspacePanel {
         if (this.directory) {
           this.breadcrumbs()
         }
-        if (this.error.length > 0) {
-          Banner({ text: this.error, actionLabel: t("关闭"), onAction: () => { this.error = ''; } })
+        if (this.error || this.listingError) {
+          Banner({ text: this.error || this.listingError, actionLabel: t("关闭"),
+            onAction: () => { if (this.error) { this.error = ''; } else { this.listingError = ''; } } })
             .padding({ left: Space.page, right: Space.page, bottom: Space.sm })
         }
         Refresh({ refreshing: $$this.refreshing }) {
@@ -504,7 +549,7 @@ export struct WorkspacePanel {
                     .fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
                 }.id('workspace-list-loading').width('100%').justifyContent(FlexAlign.Center).padding(Space.xl)
               }
-            } else if (this.entries.length === 0 && !this.error) {
+            } else if (this.entries.length === 0 && !this.error && !this.listingError) {
               ListItem() {
                 EmptyState({ icon: $r('sys.symbol.folder'), title: this.directory ? t("文件夹是空的") : t("这里还没有文件"),
                   caption: this.files?.isCloudPath(this.directory) ? t('在此新建的笔记会保存到 WebDAV。') :

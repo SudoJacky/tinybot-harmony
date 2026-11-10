@@ -24,7 +24,15 @@ const GUIDE = 'Use await workspace.read(path) for private-workspace bytes or awa
   'The bundled office library supports office.text(bytes), office.xlsx([{name:"Sheet1",rows:[["Item",12],[null,{formula:"B1+1"}]]}]), ' +
   'office.docx([{heading:"Title",level:1},{text:"Paragraph"},{table:[["Item","Value"]]}]), office.pptx([{title:"Overview",body:["Point"]}]), ' +
   'office.editXlsx(bytes,[{sheet:"Sheet1",cell:"B2",value:15}]), office.editDocx(bytes,[{find:"old",replace:"new"}]), and ' +
-  'office.editPptx(bytes,[{slide:1,find:"old",replace:"new"}]). Word/PPT edits require unique text within one paragraph. ' +
+  'office.editPptx(bytes,[{slide:1,find:"old",replace:"new"}]). Text replacement requires unique text within one paragraph. ' +
+  'For editable PowerPoint design use office.pptx({theme:{name,fontFace,background,text,muted,accent,accent2},slides:[{background,elements}]}). ' +
+  'Each element needs a unique id per slide and x,y,w,h in inches on a 13⅓ × 7.5 slide. Array order is back to front. Optional rotate is in degrees. ' +
+  'Types: text (text,fontSize in points,fontFace,color,bold,italic,align,verticalAlign); image (data: await workspace.read(path) for PNG/JPEG,alt); ' +
+  'shape (shape: rect,roundRect,ellipse,triangle,diamond,hexagon,chevron,rightArrow,star5,line). Text and shapes accept fill,stroke,strokeWidth in points. ' +
+  'type:"chart" adds an editable chart with an embedded workbook. Use chart:"bar"|"line"|"doughnut", categories:["Q1","Q2"], series:[{name:"Revenue",values:[12,18]}], optional title, legend and colors. Doughnut uses one nonnegative series. ' +
+  'Colors accept six-digit hex or the theme keys background,text,muted,accent,accent2; use none for transparent fill or stroke. ' +
+  'To revise a PPT annotation, inspect its slide with office.inspectPptx(bytes,slide), then use office.editPptx(bytes,[{slide,element:elementId,changes:{x,y,fill}}]). ' +
+  'Changes may update geometry, text formatting, shape preset, image data or chart data, title, legend and colors; pass {theme} as the third argument for theme changes. ' +
   'Example: const bytes = await workspace.read(input.source); return await workspace.write(input.output, office.editXlsx(bytes,input.edits)); ' +
   'Call present_files for delivery. Await each operation before starting the next; committed writes are kept if later code fails. ' +
   'Limits: 20 MiB total read and 20 MiB total written, 32 operations, 10 seconds of script computation, 120 seconds elapsed, ' +

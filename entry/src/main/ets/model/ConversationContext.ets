@@ -1,4 +1,5 @@
 import { attachmentContext } from './AttachmentContext';
+import { fileAnnotationContext } from './FileAnnotation';
 import { ModelMessage, ToolDefinition, toolSchemas } from './Agent';
 import { FileOperations, collectFileOperations } from './FileOperations';
 import { CompactionData } from './Conversation';
@@ -29,6 +30,7 @@ export function estimateContextTokens(messages: ModelMessage[], tools: ToolDefin
   for (const message of messages) {
     tokens += 8 + estimateTextTokens(message.content) + estimateTextTokens(message.reasoningContent || '');
     for (const attachment of message.attachments || []) { tokens += attachment.mime === 'image/jpeg' ? 1800 : estimateTextTokens(attachmentContext(attachment)); }
+    if (message.annotations?.length) { tokens += estimateTextTokens(fileAnnotationContext(message.annotations)); }
     if (message.toolCalls) { tokens += estimateTextTokens(JSON.stringify(message.toolCalls)); }
     if (message.toolCallId) { tokens += estimateTextTokens(message.toolCallId); }
   }

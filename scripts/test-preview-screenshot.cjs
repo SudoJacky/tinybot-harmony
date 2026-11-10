@@ -57,6 +57,24 @@ const tools=new PreviewTools(files,async()=>{},(content,signal)=>PreviewCapture.
  const broken=JSON.parse(JSON.stringify(restored));broken.tools[0].previewScreenshot.image.path='../escape.jpg';assert.throws(()=>validateSteps([broken]));
  console.log('PASS capture failures never publish a fake screenshot and persisted image paths are validated');
 
+ const written=[];
+ const pngCall={...call,function:{...call.function,arguments:JSON.stringify({path:'chart.html',imagePath:'chart.png'})}};
+ const pngTool=new PreviewTools({read:async()=>({content:'<meta name="tinybot-library" content="charts"><canvas></canvas>',version:'chart-v1'})},
+  async content=>assert.match(content,/charts/),async (_content,_signal,png)=>{
+   assert.equal(png,true);return {...snapshot,png:new Uint8Array([137,80,78,71])};
+  },async (path,bytes)=>written.push({path,bytes:[...bytes]}));
+ const pngExecution={call:pngCall,status:'running',output:''};
+ await assert.rejects(pngTool.execute(pngCall,new Cancellation(),{execution:pngExecution,workspaceWrite:'text'}),e=>e.code==='PERMISSION_DENIED');
+ assert.equal(written.length,0);
+ pngExecution.output=await pngTool.execute(pngCall,new Cancellation(),{execution:pngExecution});
+ pngExecution.status='complete';
+ assert.equal(JSON.parse(pngExecution.output).imagePath,'chart.png');
+ assert.equal(pngExecution.previewScreenshot.png,undefined);
+ assert.deepEqual(written,[{path:'chart.png',bytes:[137,80,78,71]}]);
+ const {collectFileOperations}=from('model/FileOperations');
+ assert.deepEqual([...collectFileOperations([pngExecution]).modifiedFiles],['chart.png']);
+ console.log('PASS chart preview infers its bundled library, saves one PNG and respects binary-write permissions');
+
  // Exercise the whole publication path across foreground loss in both native render stages.
  let now=0,sequence=0;const timers=new Map();
  clock={set(fn,ms){const id=++sequence;timers.set(id,{fn,at:now+ms});return id;},clear(id){timers.delete(id);}};

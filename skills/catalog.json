@@ -3,6 +3,7 @@
   { "name": "web-research", "title": "联网调研" },
   { "name": "notes-to-actions", "title": "随手记整理" },
   { "name": "data-analysis", "title": "数据分析" },
+  { "name": "lieflat-charts", "title": "Lieflat Charts", "resources": true },
   { "name": "sketch-to-prototype", "title": "草图变原型" },
   { "name": "widget", "title": "看板小组件" },
   { "name": "widget-design", "title": "小组件设计" },

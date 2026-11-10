@@ -20,6 +20,7 @@ fs.mkdirSync(fixture, { recursive: true });
 const handles = new Map(), handlePaths = new Map(), writableHandles = new Set(); let failManifest = false; let failSharedRename = false;
 let failConversationWorker = false;
 let sharedWriteFailure = ''; let cancelSharedWrite; let failBackupRename = false; const usageWrites = [];
+let beforeUsageOpen;
 const folderFailures = {};
 let pdfKitLoads = 0;
 const cloudLocations = new Map(); let failCloudCopy = false, failCloudRename = false, failCloudRollback = false, failCloudFsync = false; let cloudCopyError;
@@ -38,6 +39,7 @@ const fileIo = {
   access: async p => fs.existsSync(nativePath(p)), mkdir: (p, recursive = false) => fs.promises.mkdir(nativePath(p), { recursive }), readText: p => fs.promises.readFile(nativePath(p), 'utf8'),
   listFile: async p => fs.promises.readdir(nativePath(p)),
   open: async (p, flags) => {
+    if (beforeUsageOpen && p.includes('/usage-records/') && p.endsWith('.tmp')) await beforeUsageOpen(p);
     if(p.startsWith('file://') && flags & 2 && !fs.existsSync(nativePath(p)))throw Object.assign(Error('URI provider cannot create a missing file'),{code:13900002});
     const mode = flags & 32 ? fs.constants.O_RDWR | (flags & 2 ? fs.constants.O_CREAT : 0) : flags & 4 ? 'w' : 'r';
     const h = await fs.promises.open(nativePath(p), mode).catch(error=>{if(error.code==='ENOENT')error.code=13900002;throw error;});
@@ -2386,6 +2388,42 @@ async function test(name, run) {
     cache.delete(ledgerFile);const {UsageLedger:Broken}=load(ledgerFile);await assert.rejects(Broken.configure(root));
     Broken.record({...legacy[0],id:'after-failure'});await Broken.queue;
     assert.equal(fs.readFileSync(nativePath(root+'/usage-records/1.json'),'utf8'),'broken');
+    await assert.rejects(Broken.backup(root), 'a failed load cannot be exported as a partial ledger');
+  });
+  await test('usage backup flush cannot overlap a request flush on the same shard', async () => {
+    const ledgerFile = path.join(source, 'services/UsageLedger.ets');
+    cache.delete(ledgerFile);
+    const { UsageLedger: Ledger } = load(ledgerFile);
+    const root = '/sandbox/usage-backup-race';
+    fs.mkdirSync(nativePath(root), { recursive: true });
+    await Ledger.configure(root);
+    const usage = { id: 'request', model: 'model', status: 'running_or_unknown' };
+    beforeUsageOpen = () => { throw Error('injected usage write failure'); };
+    Ledger.record(usage);
+    await Ledger.queue;
+    assert.match(Ledger.error, /injected usage write failure/);
+    assert.ok(diagnosticLogs.some(log => log.module === 'storage' && log.event === 'usage_save_failed'));
+
+    let entered, release, attempts = 0;
+    const firstWrite = new Promise(resolve => { entered = resolve; });
+    const held = new Promise(resolve => { release = resolve; });
+    beforeUsageOpen = async () => {
+      if (++attempts === 1) { entered(); await held; }
+    };
+    const backup = Ledger.backup(root);
+    try {
+      await firstWrite;
+      Ledger.record({ ...usage, status: 'complete' });
+      await new Promise(setImmediate);
+      assert.equal(attempts, 1, 'a new request must wait for the backup writer');
+    } finally {
+      release();
+      await Promise.allSettled([backup, Ledger.queue]);
+      beforeUsageOpen = undefined;
+    }
+    assert.equal((await backup)[0].status, 'complete');
+    assert.equal(readSavedUsage(root)[0].status, 'complete');
+    assert.equal(Ledger.error, '');
   });
   suiteCompleted = true;
   console.log(completedTests+' native adapter integration checks passed. Fixtures: '+fixture);

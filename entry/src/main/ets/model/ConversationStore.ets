@@ -76,11 +76,17 @@ export class ConversationStore implements SessionRepository {
     await fs.rename(this.root + '/index.json.tmp', this.root + '/index.json');
     this.manifest = manifest;
     const old = Array.from(this.files.values());
+    const retained = new Set<string>();
     this.files.clear(); this.serialized = next;
-    for (const entry of entries) { this.files.set(entry.id, entry.file); }
+    for (const entry of entries) {
+      this.files.set(entry.id, entry.file);
+      retained.add(entry.file);
+    }
     for (const file of old) {
-      if (!entries.some((entry) => entry.file === file)) {
-        try { await fs.unlink(this.root + '/' + file); } catch (_) { /* Harmless orphan, never referenced. */ }
+      if (!retained.has(file)) {
+        // The manifest already committed. Cleanup failure must remain visible without rolling it back.
+        try { await fs.unlink(this.root + '/' + file); }
+        catch (error) { Diagnostics.log('warn', 'storage', 'cleanup_failed', undefined, error as Error); }
       }
     }
   }

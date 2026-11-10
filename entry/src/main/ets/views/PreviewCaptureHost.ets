@@ -37,6 +37,12 @@ struct PreviewCaptureView {
       this.timer = setTimeout(() => { this.capture(); }, 200);
     }
   }
+  private async png(pixel: image.PixelMap): Promise<Uint8Array | undefined> {
+    if (!this.request.png) { return undefined; }
+    const packer = image.createImagePacker();
+    try { return new Uint8Array(await packer.packToData(pixel, { format: 'image/png', quality: 100 })); }
+    finally { await packer.release(); }
+  }
   private async capture(): Promise<void> {
     if (!this.mounted || !PreviewCapture.isCurrent(this.request.id)) { return; }
     this.capturing = true;
@@ -45,11 +51,13 @@ struct PreviewCaptureView {
       pixel = await this.getUIContext().getComponentSnapshot().get('preview-capture-' + this.request.id,
         { waitUntilRenderFinished: true });
       if (!this.mounted || !PreviewCapture.isCurrent(this.request.id)) { return; }
+      const png = await this.png(pixel);
+      if (!this.mounted || !PreviewCapture.isCurrent(this.request.id)) { return; }
       const attachment = await Attachments.savePreview(pixel);
       const info = await pixel.getImageInfo();
       if (!this.mounted || !PreviewCapture.isCurrent(this.request.id)) { return; }
       if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'preview', 'captured', { operationId: this.request.id, width: info.size.width, height: info.size.height, widthVp: this.cardWidth }); };
-      PreviewCapture.complete(this.request.id, { image: attachment, width: info.size.width, height: info.size.height, viewportWidth: this.cardWidth });
+      PreviewCapture.complete(this.request.id, { image: attachment, width: info.size.width, height: info.size.height, viewportWidth: this.cardWidth, png: png });
     } catch (error) {
       if (this.mounted && PreviewCapture.isCurrent(this.request.id)) { PreviewCapture.complete(this.request.id, undefined, error as Error); }
     } finally { await pixel?.release(); }

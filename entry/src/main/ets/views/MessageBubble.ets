@@ -15,6 +15,7 @@ import { ImageViewer } from './ImageViewer';
 import { InteractiveAnswer } from './InteractiveAnswer';
 import { UiValues } from '../model/InteractiveUi';
 import { DocumentPreview } from './DocumentPreview';
+import { FileAnnotationList } from './FileAnnotationList';
 import { DataViewCard } from './DataViewCard';
 import { Attachment } from '../model/Productivity';
 import { Attachments } from '../services/Attachments';
@@ -489,6 +490,9 @@ export struct MessageBubble {
           this.selectingText = false; this.documentName = item.name; this.documentText = item.text || ''; this.documentOpen = true;
         })
       }, (item: Attachment) => item.id)
+      if (this.message.annotations.length > 0) {
+        FileAnnotationList({ items: this.message.annotations })
+      }
       if (this.message.content.length > 0) {
         Text(this.message.content).fontFamily(this.appearance.fontFamily).fontSize(Font.body).lineHeight(24)
           .fontColor($r('app.color.text_primary')).copyOption(CopyOptions.None)
@@ -515,8 +519,13 @@ export struct MessageBubble {
             .borderRadius(Radius.md).accessibilityText(item.name).onClick(() => this.preview(item))
         } else { Text(item.name).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary')) }
       }, (item: Attachment) => item.id)
-      Text(this.message.stepViews[index]?.steering?.text || '').fontFamily(this.appearance.fontFamily).fontSize(15).lineHeight(22)
-        .copyOption(CopyOptions.LocalDevice).fontColor($r('app.color.text_primary'))
+      if (this.message.stepViews[index]?.steering?.annotations?.length) {
+        FileAnnotationList({ items: this.message.stepViews[index]?.steering?.annotations || [] })
+      }
+      if (this.message.stepViews[index]?.steering?.text) {
+        Text(this.message.stepViews[index]?.steering?.text || '').fontFamily(this.appearance.fontFamily).fontSize(15).lineHeight(22)
+          .copyOption(CopyOptions.LocalDevice).fontColor($r('app.color.text_primary'))
+      }
     }
     .alignItems(HorizontalAlign.Start).padding({ left: 14, right: 14, top: 8, bottom: 10 })
     .constraintSize({ maxWidth: '85%' }).borderRadius(Radius.md).backgroundColor(this.appearance.userBubble)

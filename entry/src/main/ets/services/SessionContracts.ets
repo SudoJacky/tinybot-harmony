@@ -12,6 +12,7 @@ import { ContextTokenItem } from '../model/ContextBreakdown';
 import { ProjectData } from '../model/Project';
 import { SharedFolder } from '../model/SharedFolders';
 import { ToolExecution } from '../model/Agent';
+import { FileAnnotation } from '../model/FileAnnotation';
 
 export interface MessageCheckpoint { threadId: string; messageId: string; }
 
@@ -30,6 +31,7 @@ export interface SessionResources {
   createId(): string;
   ensureWorkspace(threadId: string, workspaceId?: string): Promise<void>;
   prepareAttachments?(items: Attachment[], threadId: string, workspaceId?: string): Promise<Attachment[]>;
+  verifyFileAnnotations?(threadId: string, items: FileAnnotation[], project?: ProjectData): Promise<void>;
   tools(threadId: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments?: Attachment[], live?: LiveResources, workspaceId?: string, project?: ProjectData, resolvePreview?: (previewId: string) => BrowserPreview): AgentTools;
   persistProjectFolders?(folders: SharedFolder[]): Promise<void>;
   revokeProjectFolders?(folders: SharedFolder[]): Promise<void>;

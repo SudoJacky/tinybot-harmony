@@ -47,6 +47,7 @@ const kits = {
       putSync:(name,value)=>values.set(name,value),deleteSync:name=>values.delete(name),flushSync(){} };
   } } },
   '@kit.NetworkKit': { socket: {} },
+  '@kit.RemoteCommunicationKit': { rcp: { createSession() { throw Error('Mini app fixtures do not use WebDAV'); } } },
   '@kit.AssetStoreKit': { asset: {} },
   '@kit.CoreFileKit': { fileIo }, '@kit.ImageKit': { image: {} }, '@kit.ArkGraphics2D': { drawing: {} },
   '@kit.ArkTS': { util: {

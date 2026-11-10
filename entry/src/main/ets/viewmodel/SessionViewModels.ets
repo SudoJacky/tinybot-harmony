@@ -1,4 +1,5 @@
 import { Attachment } from '../model/Productivity';
+import { FileAnnotation } from '../model/FileAnnotation';
 import { RequestUsage } from '../model/Usage';
 import { FileDiff } from '../model/FileDiff';
 import { TurnFileChange } from '../model/TurnFileChanges';
@@ -82,6 +83,7 @@ export class MessageViewModel {
     return this.stepViews.filter((step) => !step.requestError).map((step) => step.reasoningContent).filter((text) => text.length > 0).join('\n\n');
   }
   attachments: Attachment[] = [];
+  annotations: FileAnnotation[] = [];
   id: string = '';
   role: string = '';
   content: string = '';
@@ -141,6 +143,7 @@ export class MessageViewModel {
     this.references = data.references || [];
     this.id = data.id; this.role = data.role; this.content = data.content; this.status = data.status; this.error = data.error;
     this.attachments = data.attachments || [];
+    this.annotations = data.annotations || [];
     this.modelRef = data.modelRef; this.steps = data.steps || [];
     this.plan.update(this.steps, data.status);
     this.stepViews = this.steps.map((step: AgentStep, index: number) => {
@@ -177,6 +180,7 @@ export class ThreadViewModel {
   parentMessageId?: string;
   disabledMcpIds: string[] = [];
   attachments: Attachment[] = [];
+  annotations: FileAnnotation[] = [];
   id: string = '';
   title: string = '';
   updatedAt: number = 0;
@@ -203,6 +207,7 @@ export class ThreadViewModel {
     this.id = data.id; this.title = data.title; this.updatedAt = data.updatedAt;
     this.pinned = data.pinned === true; this.archived = data.archived === true; this.titleEdited = data.titleEdited === true;
     this.attachments = data.attachments || [];
+    this.annotations = data.annotations || [];
     this.draft = data.draft || ''; this.compaction = data.compaction; this.modelRef = data.modelRef;
     this.pendingInputs = data.pendingInputs || []; this.queuePaused = data.queuePaused === true;
   }

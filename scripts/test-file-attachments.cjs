@@ -164,7 +164,7 @@ async function main() {
   const documents = [
     ['report.docx', { 'word/document.xml': '<w:document><w:p><w:t>' + 'x'.repeat(40000) + 'END_DOC</w:t></w:p></w:document>' }, 'END_DOC'],
     ['slides.pptx', { 'ppt/slides/slide1.xml': '<a:p><a:t>Slide one</a:t></a:p>', 'ppt/slides/slide2.xml': '<a:p><a:t>Slide two</a:t></a:p>' }, 'Slide two'],
-    ['table.xlsx', { 'xl/sharedStrings.xml': '<sst><si><t>Revenue</t></si></sst>', 'xl/worksheets/sheet1.xml': '<worksheet><row><c r="A1" t="s"><v>0</v></c><c r="B1"><v>42</v></c></row></worksheet>' }, 'B1: 42']
+    ['table.xlsx', { 'xl/sharedStrings.xml': '<sst><si><t>Revenue</t></si></sst>', 'xl/worksheets/sheet1.xml': '<worksheet><row><c r="A1" t="s"><v>0</v></c><c r="B1" s="1"/><c r="C1"><v>42</v></c></row></worksheet>' }, 'A1: Revenue\nC1: 42']
   ];
   for (const [name, parts, expected] of documents) {
     const bytes = zip(parts), doc = await attach(name, bytes); let offset = 1, column = 1, joined = '';
@@ -181,6 +181,15 @@ async function main() {
   assert.ok(pdfText.includes('page-105')); assert.ok(pdfText.length > 31000); assert.equal(pdfReads, 1);
   assert.ok(!fs.readdirSync(disk(workspace.pathFor('chat'))).some(name => name.startsWith('.tinybot-pdf-')));
   pdfPages = ['']; await assert.rejects(invoke(tools('chat'), 'read_file', { path: pdf.path }), /没有可提取的文字/);
+  const emptyOffice = [
+    ['empty.docx', { 'word/document.xml': '<w:document><w:body><w:p/></w:body></w:document>' }],
+    ['empty.pptx', { 'ppt/slides/slide1.xml': '<a:p><a:t> </a:t></a:p>' }],
+    ['empty.xlsx', { 'xl/worksheets/sheet1.xml': '<worksheet><row><c r="A1" t="inlineStr"><is><t> </t></is></c></row></worksheet>' }]
+  ];
+  for (const [name, parts] of emptyOffice) {
+    const document = await attach(name, zip(parts));
+    await assert.rejects(invoke(tools('chat'), 'read_file', { path: document.path }), /没有可提取的文字/);
+  }
   const broken = await attach('broken.docx', 'not a zip'); await assert.rejects(invoke(tools('chat'), 'read_file', { path: broken.path }));
   const binary = await attach('binary.dat', Buffer.from([0xff, 0, 0xfe])); await assert.rejects(invoke(tools('chat'), 'read_file', { path: binary.path }));
   copyFailure = true; await assert.rejects(attach('failure.bin', 'partial'), /injected copy failure/); copyFailure = false;

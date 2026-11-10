@@ -1,6 +1,6 @@
 import { ToolCall, ToolDefinition, PreviewScreenshot } from '../model/Agent';
 import { UiRecord, UiCompiler, validateUiAnswer } from '../model/InteractiveUi';
-import { WebUiSpec } from '../model/WebUi';
+import { WebUiSpec, htmlPreviewLibrary } from '../model/WebUi';
 import { ToolFailure, parseToolArguments } from '../model/ToolFailure';
 import { AgentTools, ToolInvocationContext } from './AgentLoop';
 import { Cancellation } from './Cancellation';
@@ -9,48 +9,57 @@ import { workspaceRelativePath } from './WorkspaceTools';
 import { UiDiagnosticError, repairGuidance } from '../model/UiRepair';
 import { INTERACTIVE_UI_INSTRUCTIONS } from '../model/InteractiveUiInstructions';
 import { previewReference } from '../model/PreviewReferences';
+import { PreviewCaptureResult } from './PreviewCapture';
 
-interface PreviewArguments { path: string; title?: string; library?: string; height?: number; }
+interface PreviewArguments { path: string; title?: string; library?: string; height?: number; imagePath?: string; }
 interface PreviewImageInfo { width: number; height: number; viewportWidth: number; }
 interface PreviewVerification { startup: string; screenshot: string; interaction: string; }
 interface PreviewReceipt {
   previewId: string; reference: string;
   published: boolean; path: string; title: string; nodes: number; version: string;
-  verification: PreviewVerification; screenshot?: PreviewImageInfo;
+  verification: PreviewVerification; screenshot?: PreviewImageInfo; imagePath?: string;
 }
 
 // Resolve/read once, validate that exact snapshot, then attach it to the durable receipt.
 export class PreviewTools implements AgentTools {
   private files: WorkspaceFiles;
   private preflight: (content: string, cancellation: Cancellation) => Promise<void>;
-  private capture?: (content: string, cancellation: Cancellation) => Promise<PreviewScreenshot>;
+  private capture?: (content: string, cancellation: Cancellation, png?: boolean) => Promise<PreviewCaptureResult>;
+  private saveImage?: (path: string, bytes: Uint8Array, cancellation: Cancellation) => Promise<void>;
   constructor(files: WorkspaceFiles, preflight: (content: string, cancellation: Cancellation) => Promise<void>,
-    capture?: (content: string, cancellation: Cancellation) => Promise<PreviewScreenshot>) {
-    this.files = files; this.preflight = preflight; this.capture = capture;
+    capture?: (content: string, cancellation: Cancellation, png?: boolean) => Promise<PreviewCaptureResult>,
+    saveImage?: (path: string, bytes: Uint8Array, cancellation: Cancellation) => Promise<void>) {
+    this.files = files; this.preflight = preflight; this.capture = capture; this.saveImage = saveImage;
   }
   definitions(): ToolDefinition[] {
     return [{ type: 'function', executionMode: 'sequential', promptSnippet: '发布文件预览',
       promptGuidelines: [INTERACTIVE_UI_INSTRUCTIONS],
-      function: { name: 'publish_preview', description: '准备工作区 .js、.html 或 .svg 的隔离 Web 预览。启动检查和截图通过后保存不可变快照，返回 previewId 与 reference；工具阶段不展示。必须在最终回复的插入位置独占一行复制 reference，不放代码块，turn 成功结束后显示。JS 支持 DOM 和 await；library="three" 提供 THREE 和独立 OrbitControls。无 imports、网络、文件或存储权限。JSONL 不支持。',
+      function: { name: 'publish_preview', description: '准备工作区 .js、.html 或 .svg 的隔离 Web 预览。启动检查和截图通过后保存不可变快照，返回 previewId 与 reference；工具阶段不展示。必须在最终回复的插入位置独占一行复制 reference，不放代码块，turn 成功结束后显示。JS 支持 DOM 和 await；library="three" 提供 THREE 和独立 OrbitControls，library="charts" 提供 Chart.js、ECharts 和 Inter。无 imports、网络、文件或存储权限。JSONL 不支持。',
         parameters: { type: 'object', properties: {
           'path': { type: 'string', description: '现有工作区文件相对路径，.js/.html/.svg' },
           'title': { type: 'string', description: '预览标题，最多 160 字符，默认文件名' },
-          'library': { type: 'string', enum: ['none', 'three'], description: '预加载的内置库，默认 none；three 提供 THREE 和 OrbitControls' },
-          'height': { type: 'number', description: '固定卡片内容高度，200–800vp。JS 默认 400；HTML/SVG 默认自适应' }
+          'library': { type: 'string', enum: ['none', 'three', 'charts'], description: '预加载库。three 提供 THREE 和 OrbitControls；charts 提供 Chart、echarts 和 Inter。HTML 可通过 tinybot-library 元数据选用 charts。' },
+          'height': { type: 'number', description: '固定卡片内容高度，200–800vp。JS 默认 400；HTML/SVG 默认自适应' },
+          'imagePath': { type: 'string', description: '可选。把同一预览画面另存为私有工作区中的新 .png 文件，可用于 PowerPoint 图片。' }
         }, required: ['path'], additionalProperties: false } } }];
   }
   async execute(call: ToolCall, cancellation: Cancellation, context?: ToolInvocationContext): Promise<string> {
     cancellation.check();
     const args = parseToolArguments(call.function.arguments) as PreviewArguments;
     if (call.function.name !== 'publish_preview' || !args || Array.isArray(args) || typeof args.path !== 'string' ||
-      Object.keys(args).some((key) => !['path', 'title', 'library', 'height'].includes(key)) ||
+      Object.keys(args).some((key) => !['path', 'title', 'library', 'height', 'imagePath'].includes(key)) ||
+      (args.imagePath !== undefined && (typeof args.imagePath !== 'string' || !/\.png$/i.test(args.imagePath))) ||
       (args.title !== undefined && (typeof args.title !== 'string' || !args.title.trim() || args.title.length > 160)) ||
-      (args.library !== undefined && !['none', 'three'].includes(args.library)) ||
+      (args.library !== undefined && !['none', 'three', 'charts'].includes(args.library)) ||
       (args.height !== undefined && (typeof args.height !== 'number' || !Number.isFinite(args.height) || args.height < 200 || args.height > 800))) {
-      throw new ToolFailure('INVALID_ARGUMENTS', 'Expected path, optional title (1–160 characters), library (none or three), and height (200–800).', 'fix_arguments');
+      throw new ToolFailure('INVALID_ARGUMENTS', 'Expected path, optional title, library (none, three or charts), height (200–800), and a .png imagePath.', 'fix_arguments');
     }
     if (!context) { throw new Error('Preview publication requires a durable tool invocation context'); }
     const path = workspaceRelativePath(args.path, false);
+    const imagePath = args.imagePath === undefined ? undefined : workspaceRelativePath(args.imagePath, false);
+    if (imagePath && (context.workspaceWrite !== undefined || !this.capture || !this.saveImage)) {
+      throw new ToolFailure('PERMISSION_DENIED', 'Saving a preview PNG requires binary workspace write access.', 'check_available_tools');
+    }
     if (/\.jsonl$/i.test(path)) {
       throw new ToolFailure('UNSUPPORTED_PREVIEW_FORMAT', 'JSONL previews are no longer supported. Write ordinary JavaScript to a .js file or use self-contained HTML/SVG, then call publish_preview. For Three.js set library="three".', 'write_preview_file');
     }
@@ -66,7 +75,8 @@ export class PreviewTools implements AgentTools {
       const spec: WebUiSpec = { version: 1, html: script ? '' : source,
         css: 'html,body{margin:0;width:100%;' + (autoHeight ? 'min-height:100%;' : 'height:100%;') +
           '}svg{display:block;max-width:100%;height:auto;margin:auto;}',
-        js: script ? source : '', library: args.library || 'none', height: args.height ?? 400, autoHeight: autoHeight };
+        js: script ? source : '', library: args.library ?? (/\.html$/i.test(path) ? htmlPreviewLibrary(source) : 'none'),
+        height: args.height ?? 400, autoHeight: autoHeight };
       const records: UiRecord[] = [{ op: 'begin', version: 1, title: title, state: {} },
         { op: 'node', node: { id: 'preview', kind: 'web', data: JSON.stringify(spec) } }, { op: 'end' }];
       // Internal serialization only: callers author source files, never this renderer protocol.
@@ -78,14 +88,20 @@ export class PreviewTools implements AgentTools {
       await this.preflight(content, cancellation);
       cancellation.check();
       phase = 'SCREENSHOT_FAILED';
-      const screenshot = this.capture ? await this.capture(content, cancellation) : undefined;
+      const captured = this.capture ? await this.capture(content, cancellation, imagePath !== undefined) : undefined;
       cancellation.check();
+      const screenshot: PreviewScreenshot | undefined = captured?.png ? { image: captured.image, width: captured.width,
+        height: captured.height, viewportWidth: captured.viewportWidth } : captured;
+      if (imagePath) {
+        if (!captured?.png?.length) { throw new Error('Preview capture returned no PNG.'); }
+        await this.saveImage!(imagePath, captured.png, cancellation);
+      }
       context.execution.previewContent = content;
       context.execution.previewScreenshot = screenshot;
       const previewId = 'pv_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 14);
       const receipt: PreviewReceipt = { published: true, previewId: previewId, reference: previewReference(previewId),
         path: path, title: document.title, nodes: document.nodes.length,
-        version: snapshot.version,
+        version: snapshot.version, imagePath: imagePath,
         verification: { startup: 'passed', screenshot: screenshot ? 'captured' : 'not_requested', interaction: 'not_checked' },
         screenshot: screenshot ? { width: screenshot.width, height: screenshot.height, viewportWidth: screenshot.viewportWidth } : undefined };
       return JSON.stringify(receipt);

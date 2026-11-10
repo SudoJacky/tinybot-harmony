@@ -4,7 +4,7 @@ import { referencePreviewId, previewReferenceTargets } from './PreviewReferences
 import { answerReferenceParts } from './AnswerReferences';
 import { PublishedPanel, publishedPanels } from './PublishedPanel';
 
-interface PreviewReceipt { path: string; title: string; }
+interface PreviewReceipt { path: string; title: string; version?: string; }
 function previewReceipt(output: string): PreviewReceipt {
   const receipt = JSON.parse(output) as PreviewReceipt;
   if (!receipt || typeof receipt.path !== 'string' || !receipt.path || typeof receipt.title !== 'string') {
@@ -16,6 +16,7 @@ export interface PreviewMessage { id: string; steps: AgentStep[]; }
 export interface PublishedPreview {
   id: string;
   path: string;
+  version?: string;
   title: string;
   content: string;
   step: number;
@@ -78,7 +79,7 @@ export function stepPreviews(messageId: string, step: AgentStep, index: number, 
     const receipt = previewReceipt(tool.output);
     const referenced = referencePreviewId(tool) !== undefined;
     const id = messageId + ':' + tool.call.id;
-    if (!referenced || includeReferenced) { result.push({ id: id, path: receipt.path, title: receipt.title, content: tool.previewContent, step: index,
+    if (!referenced || includeReferenced) { result.push({ id: id, path: receipt.path, version: receipt.version, title: receipt.title, content: tool.previewContent, step: index,
       surfaceOffset: offset, superseded: !latest.includes(id), screenshot: tool.previewScreenshot });
     }
     // Preserve the original keys in stepDisplayContent, including multi-surface JSONL files.
