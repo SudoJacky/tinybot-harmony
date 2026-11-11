@@ -86,7 +86,7 @@ export struct ReasoningEffortPicker {
           }.width('100%')
         }.id('reasoning-choose-model').layoutWeight(1).constraintSize({ minHeight: 54 })
           .padding({ left: 12, right: 12, top: 6, bottom: 6 }).borderRadius(12)
-          .backgroundColor(Color.Transparent).border({ width: 0.5, color: $r('app.color.divider') })
+          .backgroundColor(Color.Transparent)
           .focusOnTouch(false).enabled(!this.disabled && !this.saving)
           .accessibilityText(t('选择模型') + '：' + this.modelName + ' · ' + reasoningEffortName(this.efforts[this.previewIndex]))
           .onClick(this.onChooseModel)

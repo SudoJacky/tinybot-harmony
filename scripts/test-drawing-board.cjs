@@ -128,10 +128,12 @@ const node = id => [...nodes.values()].find(value => value.id === id);
   // Replay the compiled overlay bindings with the device's same-node dismissal behavior.
   // A closed sheet bound to the cover's node immediately removes that cover on API 26.
   const initialRender = component.members.find(value => value.name?.getText(tree) === 'initialRender');
-  const bindings = initialRender.body.statements.filter(value => {
+  const chatBody = component.members.find(value => value.name?.getText(tree) === 'chatBody');
+  const bindings = [...chatBody.body.statements, ...initialRender.body.statements].filter(value => {
     const text = value.getText(tree);
     return text.includes('bindContentCover') || (text.includes('bindSheet') && text.includes('showMemoryDraft'));
   }).map(value => value.getText(tree)).join('\n');
+  assert.match(bindings, /showMemoryDraft/, 'Include the closed memory sheet in the binding replay');
   let owner = 0, modal;
   const overlayUi = new Proxy({}, { get: (_, name) => (...args) => {
     if (name === 'bindContentCover') {
@@ -144,7 +146,8 @@ const node = id => [...nodes.values()].find(value => value.id === id);
   const overlayScope = { exports: {}, Radius: { sheet: {} }, Stack: overlayUi, Column: overlayUi, ModalTransition: {}, SheetSize: {}, SheetKeyboardAvoidMode: {},
     ATTACHMENT_DROP_TYPES: [], t: value => value };
   vm.runInNewContext(compile(`exports.bind = function() { ${bindings} };`), overlayScope);
-  const overlay = { showDrawing: true, previewing: false, writingExpanded: false, showMemoryDraft: false, closeDrawing() { this.closed = true; },
+  const overlay = { showDrawing: true, previewing: false, writingExpanded: false, showMemoryDraft: false,
+    centeredWelcome: () => false, closeDrawing() { this.closed = true; },
     observeComponentCreation2(callback) { callback(++owner, false); } };
   const renderOverlay = () => { owner = 0; overlayScope.exports.bind.call(overlay); };
   renderOverlay(); assert.ok(modal, 'Closed memory sheet must not remove the drawing cover');

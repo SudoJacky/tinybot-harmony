@@ -1,16 +1,13 @@
 import { Diagnostics } from '../model/Diagnostics';
 import { common } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
-import { UiRect } from '../model/AdaptiveUi';
 
 // Window-owned keyboard/gesture insets, observed by chat and sheet footers.
 @Observed
 export class WindowViewport {
   keyboardHeight: number = 0;
   bottom: number = 0;
-  keyboard: UiRect = { x: 0, y: 0, width: 0, height: 0 };
   onKeyboard: (shown: boolean) => void = () => {};
-  onGeometry: () => void = () => {};
   private host?: window.Window;
   private ui?: UIContext;
   private active: boolean = false;
@@ -33,10 +30,9 @@ export class WindowViewport {
     const rect = [area.bottomRect, area.topRect, area.leftRect, area.rightRect]
       .filter((item: window.Rect) => !!item && item.width > 0 && item.height > 0)
       .sort((a: window.Rect, b: window.Rect) => b.width * b.height - a.width * a.height)[0];
-    this.keyboard = rect ? { x: this.ui.px2vp(rect.left), y: this.ui.px2vp(rect.top),
-      width: this.ui.px2vp(rect.width), height: this.ui.px2vp(rect.height) } : { x: 0, y: 0, width: 0, height: 0 };
-    Diagnostics.log('info', 'appearance', 'keyboard_geometry', { width: this.keyboard.width, height: this.keyboard.height });
-    this.onGeometry();
+    Diagnostics.log('info', 'appearance', 'keyboard_geometry', {
+      width: rect ? this.ui.px2vp(rect.width) : 0, height: rect ? this.ui.px2vp(rect.height) : 0
+    });
   }
   async observe(ui: UIContext): Promise<void> {
     this.active = true; this.ui = ui;
