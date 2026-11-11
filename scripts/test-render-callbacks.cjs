@@ -24,7 +24,7 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
     if (key === 'create') editorEvents.push({ text: args[0].text });
     if (key === 'onChange' || key === 'onTextSelectionChange') editorEvents.at(-1)[key] = args[0];
   } });
-  const Panel = compile(methods('views/ChatPanel', ['composerChanged', 'composerSelectionChanged', 'speechActive', 'composerEditor', 'updateScrollState', 'publishHeaderProgress',
+  const Panel = compile(methods('views/ChatPanel', ['composerChanged', 'composerSelectionChanged', 'speechActive', 'composerEditor', 'updateScrollState',
     'afterRender', 'speechThreadChanged', 'receiveVoiceShortcut', 'syncMessages', 'scrollToLatest']), {
     TextArea: editor, Context: { animation() {} }, Motion: {}, Font: {}, Color: {}, Alignment: {}, Visibility: {},
     ATTACHMENT_DROP_TYPES: [], t: s => s, clearTimeout, ScrollAlign: { END: 'end' }, Diagnostics: { recording: false },
@@ -65,19 +65,15 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
   panel.thread.id = panel.app.active.id = 'c'; panel.app.draft = ''; panel.composerEditor('c');
   editorEvents.at(-1).onChange('new chat draft'); oldEditor.onChange('old chat native event');
   await drain(); assert.equal(panel.app.draft, 'new chat draft', 'A stale editor must not even cancel the current editor update');
-  let atEnd = false, bottom = true, follow = false, headerUpdates = 0;
+  let atEnd = false, bottom = true, follow = false;
   Object.defineProperty(panel, 'atBottom', { get: () => bottom, set(value) { assert.equal(building, false); bottom = value; } });
   Object.defineProperty(panel, 'followOutput', { get: () => follow, set(value) { assert.equal(building, false); follow = value; } });
-  panel.scroller = { isAtEnd: () => atEnd }; panel.updateHeaderProgress = () => { assert.equal(building, false); headerUpdates++; };
+  panel.scroller = { isAtEnd: () => atEnd };
   building = true; panel.updateScrollState(); assert.equal(bottom, true);
   building = false; await drain(); assert.equal(bottom, false);
   atEnd = true; building = true; panel.updateScrollState(true); assert.equal(follow, false);
   building = false; await drain(); assert.equal(bottom, true); assert.equal(follow, true);
-  panel.updateScrollState(); panel.thread.id = 'different'; await drain(); assert.equal(headerUpdates, 2);
-  let published = 0; panel.onHeaderProgress = () => { assert.equal(building, false); published++; };
-  panel.thread.id = panel.app.active.id = 'c'; building = true; panel.publishHeaderProgress(0);
-  assert.equal(published, 0); building = false; await drain(); assert.equal(published, 1);
-  panel.publishHeaderProgress(1); panel.composerMounted = false; await drain(); assert.equal(published, 1);
+  atEnd = false; panel.updateScrollState(); panel.thread.id = 'different'; await drain(); assert.equal(bottom, true);
   Object.assign(panel, { composerMounted: true, lifecycle: 0, activeThreadId: 'c', speechThreadId: 'c', voiceRequest: '',
     focusOwner: 0, messageSyncRevision: 0, sendingMessageId: '',
     cancelPlusAction() { assert.equal(building, false); }, cancelAttachmentDrop() { assert.equal(building, false); },
@@ -163,10 +159,14 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
 
   let settingsParams, settingsUpdate;
   const Settings = compile(methods('pages/Index', ['settingsContent']), {
-    SettingsPanel: class { constructor(_parent, params) { settingsParams = params; } }, ViewPU: { create() {} }
+    SettingsPanel: class { constructor(_parent, params) { settingsParams = params; } }, ViewPU: { create() {} },
+    __Common__: { create() {}, layoutWeight() {}, pop() {} }
   });
   const settings = Object.assign(new Settings(), { app: { settings: {} }, settingsSection: 'models', settingsActive: true, foreground: true,
-    observeComponentCreation2(callback) { settingsUpdate = () => callback(1, false); callback(1, true); },
+    observeComponentCreation2(callback, component) {
+      if (component.name === 'SettingsPanel') { settingsUpdate = () => callback(1, false); }
+      callback(1, true);
+    },
     updateStateVarsOfChildByElmtId(_id, params) { settingsParams = { ...settingsParams, ...params }; }
   });
   settings.settingsContent();
@@ -176,10 +176,7 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
     assert.equal(settingsParams.section, section, 'An existing tablet panel must receive the current category');
   }
   settings.foreground = false; settingsUpdate(); assert.equal(settingsParams.active, false);
-  settings.settingsContent('tools');
-  settings.settingsSection = 'appearance'; settingsUpdate();
-  assert.equal(settingsParams.section, 'tools', 'A phone destination keeps its own route category');
-  console.log('PASS emitted settings: tablet categories update without rebuilding the panel; phone routes keep their category');
+  console.log('PASS emitted settings: categories update without rebuilding the panel');
 
   const nodes = new Map(); let current, requests = 0, exits = 0;
   const widget = new Proxy({}, { get: (_target, key) => (...args) => {

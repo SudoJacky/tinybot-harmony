@@ -224,25 +224,71 @@ assert.equal(railProps[3].active, true, 'The open files pane marks its rail cont
 assert.equal(railProps[0].label, '展开会话列表');
 console.log('PASS emitted rail keeps six desktop actions in order and forwards each tap');
 
-// The workbench model seat opens a compact card above the composer instead of
-// navigating away from the conversation, and sizes that card to the catalog.
+// Exercise the footer trigger and both pages of the same native popup.
 const chatSourcePath = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/views/ChatPanel.ts');
 assert.ok(fs.statSync(chatSourcePath).mtimeMs >= fs.statSync(path.join(root, 'entry/src/main/ets/views/ChatPanel.ets')).mtimeMs,
   'Build before testing ChatPanel');
 const chatSource = fs.readFileSync(chatSourcePath, 'utf8');
-const triggerAt = chatSource.indexOf("Button.id('workbench-model-picker')");
-assert.ok(triggerAt > 0, 'Locate the emitted composer model trigger');
-const triggerSource = chatSource.slice(triggerAt, triggerAt + 2400);
-assert.match(triggerSource, /this\.showModelMenu = !this\.showModelMenu;/, 'The model trigger toggles the menu');
-assert.match(triggerSource, /Button\.bindPopup\(this\.showModelMenu, \{ builder: \{ builder: this\.modelMenu\.bind\(this\) \}/,
-  'The model trigger owns the menu popup');
-const menuAt = chatSource.indexOf('modelMenu(parent = null)');
-assert.ok(menuAt > 0, 'Locate the emitted model menu builder');
-assert.match(chatSource.slice(menuAt, menuAt + 1600), /ModelPickerPanel\(this, \{ app: this\.app, compact: true/,
-  'The popup reuses the searchable model list in compact mode');
-assert.match(chatSource.slice(menuAt, menuAt + 1600), /this\.modelMenuHeight\(\)/, 'The card height follows the catalog');
-assert.match(chatSource, /modelMenuHeight\(\): number \{/, 'The catalog-sized height is computed once');
-console.log('PASS emitted composer model seat opens one compact, catalog-sized model menu');
+const modelButtonAttributes = {};
+const modelButton = new Proxy({}, { get: (_, name) => (...values) => { modelButtonAttributes[name] = values; } });
+const modelControls = [];
+class EffortStub { constructor(_, params) { modelControls.push({ type: 'effort', ...params }); } }
+class ModelListStub { constructor(_, params) { modelControls.push({ type: 'models', ...params }); } }
+const { reasoningEfforts } = sourceModule('entry/src/main/ets/model/ReasoningEffort.ets');
+const Picker = probe('views/ChatPanel', 'ChatPanel', ['modelButton', 'toggleModelMenu', 'modelMenu', 'modelMenuHeight', 'selectedProvider'], {
+  Button: modelButton, Row: gesture, Text: gesture, SymbolGlyph: gesture, Column: gesture, If: gesture, __Common__: gesture,
+  ViewPU: { create() {} }, Context: { animation() {} }, Motion: {}, ButtonType: {}, TextOverflow: {}, Color: {}, BlurStyle: {},
+  Placement: { TopRight: 'top-right' }, $r: value => value, t: value => value, reasoningEfforts,
+  ReasoningEffortPicker: EffortStub, ModelPickerPanel: ModelListStub
+});
+const picker = Object.assign(new Picker(), { showModelMenu: false, appearance: {}, panelWidth: 360, modelButtonTop: 420,
+  thread: { id: 'chat', modelRef: { providerId: 'openai', modelId: 'gpt-5.4' }, reasoningEffort: 'high' },
+  app: { ready: true, configured: true, error: '', saveError: '', modelChoices: [], providerProfiles: [
+    { id: 'openai', protocol: 'responses', presetId: 'openai' },
+    { id: 'anthropic', protocol: 'anthropic-messages', presetId: 'anthropic' }
+  ] },
+  observeComponentCreation2(callback) { callback(1, true); }, ifElseBranchUpdateFunction(_, builder) { builder(); }
+});
+picker.modelButton();
+const [showPopup, popup] = modelButtonAttributes.bindPopup;
+assert.equal(showPopup, false);
+assert.deepEqual(modelButtonAttributes.focusOnTouch, [false]);
+assert.equal(popup.focusable, false);
+assert.equal(popup.placement, 'top-right'); assert.equal(popup.targetSpace, 4);
+modelButtonAttributes.onClick[0]();
+assert.equal(picker.showModelMenu, true);
+const renderPicker = () => { popup.builder.builder(); return modelControls.at(-1); };
+const effort = renderPicker();
+assert.equal(effort.type, 'effort'); assert.equal(effort.modelName, 'gpt-5.4'); assert.equal(effort.providerPreset, 'openai');
+effort.onChooseModel();
+const list = renderPicker(); assert.equal(list.type, 'models');
+picker.thread.modelRef = { providerId: 'anthropic', modelId: 'claude-sonnet-4-6' };
+picker.thread.reasoningEffort = 'default';
+list.onSelected();
+assert.equal(picker.showModelMenu, true, 'Selection returns within the existing popup');
+const nextEffort = renderPicker();
+assert.equal(nextEffort.modelName, 'claude-sonnet-4-6'); assert.equal(nextEffort.providerPreset, 'anthropic');
+assert.equal(nextEffort.value, 'default'); assert.ok(nextEffort.efforts.includes('max'));
+popup.onStateChange({ isVisible: false }); picker.app.configured = false;
+modelButtonAttributes.onClick[0](); assert.equal(renderPicker().type, 'models', 'Without a configured model the popup goes straight to the catalog');
+console.log('PASS model footer popup keeps focus, anchors above the trigger, and returns to the new model’s effort controls');
+
+const headerControls = [];
+class HeaderIcon { constructor(_, params) { headerControls.push(params.compId); } }
+const Header = probe('pages/Index', 'Index', ['phoneHeader'], {
+  Row: gesture, If: gesture, Blank: gesture, SymbolGlyph: gesture,
+  Button: new Proxy({}, { get: (_, name) => name === 'id' ? id => headerControls.push(id) : () => {} }),
+  IconButton: HeaderIcon, ViewPU: { create() {} }, CHAT_HEADER_HEIGHT: 56, HitTestMode: {}, ButtonType: {},
+  systemMaterialAttribute() {}, t: value => value
+});
+const header = Object.assign(new Header(), { appearance: {}, moreMenu() {}, drawerReveal: 0,
+  app: { ready: true, active: { messages: [] } },
+  observeComponentCreation2(callback) { callback(1, true); }, ifElseBranchUpdateFunction(_, builder) { builder(); }
+});
+header.phoneHeader(); assert.deepEqual(headerControls.splice(0), ['open-history']);
+header.app.active.messages.push({ role: 'user' });
+header.phoneHeader(); assert.deepEqual(headerControls, ['open-history', 'chat-more', 'new-chat']);
+console.log('PASS phone header renders history only until the first message');
 
 // The tablet plus opens the add menu in place, while the phone opens a sheet.
 const addAt = chatSource.indexOf("'add-attachment'");
@@ -488,14 +534,26 @@ function load(file) {
   console.log('PASS emitted side panel resolves final-answer snapshots while excluding unrelated previews');
   const fixture = new Fixture(), app = new ChatViewModel();
   await app.initialize(fixture.session);
-  const Chat = probe('views/ChatPanel', 'ChatPanel', ['centeredWelcome', 'composerExpanded']);
+  const Chat = probe('views/ChatPanel', 'ChatPanel', ['emptyConversation', 'centeredWelcome', 'composerExpanded']);
   const chat = Object.assign(new Chat(), { app, thread: app.active, workbench: true, panelHeight: 800,
     viewport: { keyboardHeight: 0 }, voiceMode: false, composerFocused: false, importing: false,
     showPlus: false, showContext: false, showReasoning: false, showQueue: false,
     hasDraft: () => app.draft.length > 0, speechActive: () => false, voiceOverlayVisible: () => false });
   assert.equal(chat.centeredWelcome(), true); assert.equal(chat.composerExpanded(), true);
   chat.workbench = false;
-  assert.equal(chat.centeredWelcome(), false); assert.equal(chat.composerExpanded(), false, 'Phone retains its compact idle composer');
+  assert.equal(chat.centeredWelcome(), true, 'Phone centers the welcome and composer when there is room');
+  assert.equal(chat.composerExpanded(), false, 'Phone retains its compact idle composer');
+  chat.showToolApprovalMode = true;
+  assert.equal(chat.composerExpanded(), false, 'Opening approval below the composer does not expand the editor');
+  chat.showToolApprovalMode = false;
+  chat.showModelMenu = true;
+  assert.equal(chat.composerExpanded(), false, 'Opening the model popup leaves the composer collapsed');
+  app.busy = true;
+  assert.equal(chat.centeredWelcome(), true, 'Saving a picker choice keeps the welcome layout centered');
+  app.busy = false; chat.showModelMenu = false;
+  chat.viewport.keyboardHeight = 300;
+  assert.equal(chat.centeredWelcome(), false, 'The phone composer docks above the keyboard');
+  chat.viewport.keyboardHeight = 0;
   chat.workbench = true; app.setDraft('typed without moving the editor');
   assert.equal(chat.centeredWelcome(), true, 'Typing alone must not move the tablet editor');
   chat.viewport.keyboardHeight = 600; assert.equal(chat.centeredWelcome(), false, 'Dock above the soft keyboard');

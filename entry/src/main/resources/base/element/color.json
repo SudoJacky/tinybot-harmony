@@ -17,7 +17,6 @@
     { "name": "diff_removed_background", "value": "#FBE8E5" },
     { "name": "start_window_background", "value": "#F7F8FA" },
     { "name": "page_background", "value": "#F7F8FA" },
-    { "name": "chat_header_background", "value": "#99F7F8FA" },
     { "name": "surface", "value": "#FFFFFF" },
     { "name": "surface_variant", "value": "#EEF0F3" },
     { "name": "divider", "value": "#E2E5E9" },

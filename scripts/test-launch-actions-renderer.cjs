@@ -124,11 +124,11 @@ function card(wide) {
   }
   console.log('PASS shared files reveal the phone chat, preserve editor drafts and retain docked tablet panes while other chats run');
 
-  const panel = controller('views/ChatPanel', 'ChatPanel', ['receiveVoiceShortcut', 'speechAvailabilityChanged', 'speechThreadChanged', 'afterRender', 'publishHeaderProgress']);
+  const panel = controller('views/ChatPanel', 'ChatPanel', ['receiveVoiceShortcut', 'speechAvailabilityChanged', 'speechThreadChanged', 'afterRender']);
   panel.composerMounted = true; panel.lifecycle = 0;
   const renderCallbacks = () => new Promise(setImmediate);
   let starts = 0, stops = 0, consumed = 0;
-  panel.reading = { stop: () => stops++ }; panel.endSpeech = () => {}; panel.onHeaderProgress = () => {};
+  panel.reading = { stop: () => stops++ }; panel.endSpeech = () => {};
   panel.cancelAttachmentDrop = () => {};
   panel.cancelPlusAction = () => {}; panel.focusOwner = 0;
   panel.enterVoiceMode = () => starts++; panel.onVoiceShortcutConsumed = () => consumed++;
