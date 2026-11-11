@@ -6,7 +6,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { Cancellation } from './Cancellation';
 import { workspaceRelativePath } from './WorkspaceTools';
 import { readUtf8File } from './TextFiles';
-import { copyFileBytes, readBounded } from './FileBytes';
+import { copyFileBytes, copyOpenFileBytes, readBounded } from './FileBytes';
 import { isDocumentPath, readDocumentFile } from './DocumentFiles';
 import { TextEdit, applyTextEdits, validateEdits } from '../model/WorkspaceEdit';
 import { withFileMutation } from './FileMutationQueue';
@@ -110,6 +110,45 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
   async binaryVersion(path: string): Promise<string> {
     if (this.managed(path)) { return (await this.read(path, new Cancellation())).version; }
     return withFileMutation(await this.fileKey(path), async () => this.fileDigest(await this.checkedPath(path)));
+  }
+
+  async applyNearbyFile(path: string, source: number | undefined, digest: string, base: string,
+    preserveConflict: boolean): Promise<string> {
+    workspaceRelativePath(path, false);
+    if (this.isShared(path) || this.cloudMount(path) || isManagedWorkspaceRecord(path)) { throw new Error('Invalid nearby file path'); }
+    return withFileMutation(this.root + '/' + path, async (): Promise<string> => {
+      const target = await this.resolve(path, true, new Cancellation());
+      const stat = await this.optionalStat(target);
+      if (stat && (!stat.isFile() || stat.isSymbolicLink())) { throw new Error('Nearby file destination is invalid'); }
+      const current = stat ? await this.fileDigest(target) : '';
+      if (source === undefined) {
+        if (stat && current === base) { await fs.unlink(target); NativeWorkspaceFiles.contentRevision++; }
+        return current === base ? '' : current;
+      }
+      if (current === digest) { return current; }
+      let destination = target;
+      if (current && current !== base) {
+        if (!preserveConflict) { throw new Error('Synchronized attachment conflicts with an existing attachment'); }
+        const split = target.lastIndexOf('/');
+        const name = target.slice(split + 1);
+        destination = target.slice(0, split + 1) + 'nearby-conflict-' + digest.replace(/[^A-Za-z0-9]/g, '').slice(0, 16) + '-' + name.slice(0, 120);
+        const conflict = await this.optionalStat(destination);
+        if (conflict) {
+          if (!conflict.isFile() || conflict.isSymbolicLink() || await this.fileDigest(destination) !== digest) {
+            throw new Error('Nearby file conflict destination already contains different data');
+          }
+          return current;
+        }
+      }
+      const temporary = target.slice(0, target.lastIndexOf('/') + 1) + '.tinybot-nearby-' + util.generateRandomUUID() + '.tmp';
+      try {
+        await copyOpenFileBytes(source, temporary);
+        if (await this.fileDigest(temporary) !== digest) { throw new Error('Nearby file failed content verification'); }
+        await fs.rename(temporary, destination);
+      } finally { if (await fs.access(temporary)) { await fs.unlink(temporary); } }
+      NativeWorkspaceFiles.contentRevision++;
+      return destination === target ? digest : current;
+    });
   }
 
   async createJobOutput(path: string, bytes: Uint8Array, cancellation: Cancellation): Promise<void> {

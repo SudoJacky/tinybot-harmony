@@ -23,6 +23,9 @@ export struct SettingsPanel {
   @StorageProp('tinybot.developer.enabled') private developerEnabled: boolean = false;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.language') private language: string = 'system';
+  @StorageProp('tinybot.nearby.enabled') private nearbyEnabled: boolean = false;
+  @StorageProp('tinybot.nearby.status') private nearbyStatus: string = '';
+  @State private nearbyChanging: boolean = false;
   @Prop presetsOnly: boolean = false;
   @Prop active: boolean = false;
   @Prop @Watch('resetScroll') section: string = '';
@@ -42,6 +45,7 @@ export struct SettingsPanel {
   onSearch: () => void = () => {};
   onMail: () => void = () => {};
   onBackup: () => void = () => {};
+  onNearbySync: (enabled: boolean) => Promise<void> = async () => {};
   onAppearance: () => void = () => {};
   onLanguage: () => void = () => {};
   onSupport: (page: string) => void = () => {};
@@ -271,6 +275,16 @@ export struct SettingsPanel {
             RowDivider()
             NavRow({ title: t('备份与恢复'), compId: 'open-backup', icon: $r('sys.symbol.folder_badge_plus'),
               disabled: !this.canEdit(), onTap: () => this.onBackup() })
+            RowDivider()
+            SwitchRow({ title: t('附近设备同步'), compId: 'nearby-sync', icon: $r('sys.symbol.connection'),
+              subtitle: this.nearbyStatus || t('在两台设备上开启。同步会话和进度，密钥通过备份恢复。'),
+              isOn: this.nearbyEnabled, disabled: !this.app.ready || this.nearbyChanging,
+              onChange: async (value: boolean) => {
+                this.nearbyChanging = true;
+                try { await this.onNearbySync(value); }
+                catch (error) { this.getUIContext().getPromptAction().showToast({ message: (error as Error).message }); }
+                finally { this.nearbyChanging = false; }
+              } })
           }
         }
         }

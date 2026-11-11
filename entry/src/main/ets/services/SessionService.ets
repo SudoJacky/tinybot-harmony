@@ -7,7 +7,8 @@ import { FileAnnotation, FileAnnotationTarget, MAX_FILE_ANNOTATIONS, validateFil
 import { configurationIssues } from '../model/ConfigurationCompatibility';
 import { isSupportedProtocol } from '../model/ProviderEndpoint';
 import { ToolExecution, toolReceipts } from '../model/Agent';
-import { projectFor, workspaceIdFor, validateProjects, projectContext } from '../model/Project';
+import { ProjectData, projectFor, workspaceIdFor, validateProjects, projectContext } from '../model/Project';
+import { PeerSettingsDelta, PeerThreadUpdate, peerThreadText } from '../model/PeerSyncData';
 import { cloudSharedFolder, SharedFolder } from '../model/SharedFolders';
 import { proposeSessionMemory, reviewSessionMemory, addMemoryDraft } from './SessionMemory';
 import { McpSettings, McpSettingsCommand, McpSettingsResult, McpSettingsHost } from './McpSettings';
@@ -32,7 +33,7 @@ import { SearchDraft } from '../model/WebSearch';
 import { TeamRun, teamCommand } from '../model/Team';
 import { ChatTeamTools, CHAT_TEAM_INSTRUCTIONS, coordinatorDefinitions } from './ChatTeamTools';
 import { Attachment, MemoryEntry, McpServer, ProductivityData, defaultProductivity, validateAttachments, validateProductivity, memoryContext, supportedMcpAuth } from '../model/Productivity';
-import { defaultAssistantOptions } from '../model/AssistantOptions';
+import { AssistantOptions, defaultAssistantOptions } from '../model/AssistantOptions';
 import { validateMemorySuggestions } from '../model/MemorySuggestions';
 import { MEMORY_CHAR_LIMIT, MEMORY_REVIEW_INTERVAL, MemoryOperation, MemoryChange,
   applyMemoryOperations, memoryCharacters, memoryReviewTurns } from '../model/MemoryMaintenance';
@@ -93,6 +94,7 @@ export class SessionService {
   private pendingToolSelections: Map<string, ToolSelection> = new Map<string, ToolSelection>();
   private listeners: Set<(event: SessionEvent) => void> = new Set<(event: SessionEvent) => void>();
   private compatibilityIssues: Set<string> = new Set<string>();
+  private peerMessages: Map<string, MessageData> = new Map();
 
   constructor(repository: SessionRepository, runtime: AgentRuntime, credentials: CredentialVault, resources: SessionResources, approval?: ToolApproval) {
     this.repository = repository;
@@ -105,6 +107,161 @@ export class SessionService {
   }
 
   snapshot(): AppData { return JSON.parse(JSON.stringify(this.data)) as AppData; }
+  hasProject(id: string): boolean { return (this.data.projects || []).some((project) => project.id === id); }
+  liveAnswer(threadId: string): MessageData | undefined {
+    const thread = this.data.threads.find((item) => item.id === threadId && !item.peerOwner);
+    const answer = thread?.messages[thread.messages.length - 1];
+    return answer?.role === 'assistant' && answer.status === 'generating' ? answer : undefined;
+  }
+
+  receivePeerAnswer(origin: string, id: string, answer: MessageData): boolean {
+    const thread = this.data.threads.find((item) => item.peerOwner === origin && item.peerThreadId === id);
+    const last = thread?.messages[thread.messages.length - 1];
+    if (!thread || !last || last.id !== answer.id) { return false; }
+    if (last.status !== 'generating') { return true; }
+    this.peerMessages.set(thread.id, answer);
+    this.emit({ kind: 'message', state: this.state, threadId: thread.id, message: answer });
+    return true;
+  }
+
+  clearPeerProgress(origin?: string, id?: string): void {
+    let changed = false;
+    for (const thread of this.data.threads) {
+      if ((!origin || thread.peerOwner === origin && thread.peerThreadId === id) && this.peerMessages.delete(thread.id)) { changed = true; }
+    }
+    if (changed) { this.publish('snapshot'); }
+  }
+
+  async receivePeerChanges(projects: ProjectData[], updates: PeerThreadUpdate[], settings: PeerSettingsDelta[] = [],
+    localOrigin: string = ''): Promise<void> {
+    if (!this.application.ready) { return; }
+    await this.exclusive(async () => {
+      if (this.pendingCommit) { await this.pendingCommit; }
+      const candidate = copyAppMetadata(this.data);
+      candidate.projects = (this.data.projects || []).slice();
+      const changed: string[] = [];
+      const settingsChanged = this.mergePeerSettings(candidate, settings);
+      for (const project of projects) {
+        const index = candidate.projects.findIndex((item) => item.id === project.id);
+        const current = candidate.projects[index];
+        if (current && (current.updatedAt >= project.updatedAt || current.workspaceId !== project.workspaceId)) { continue; }
+        if (current) { project.sharedFolders = current.sharedFolders; candidate.projects[index] = project; }
+        else { candidate.projects.push(project); }
+        await this.resources.ensureWorkspace(project.id, project.workspaceId);
+      }
+      candidate.threads = this.data.threads.slice();
+      for (const update of updates) {
+        let index = candidate.threads.findIndex((item) => item.peerOwner === update.origin && item.peerThreadId === update.id);
+        if (index < 0 && update.thread) {
+          const duplicate = candidate.threads.findIndex((item) => !item.peerOwner && item.id === update.id);
+          const existing = candidate.threads[duplicate];
+          if (existing && !this.runningThreadIds.includes(existing.id) && !this.dirtyDrafts.has(existing.id) &&
+            peerThreadText(existing) === peerThreadText(update.thread)) {
+            if (!localOrigin || localOrigin < update.origin) { continue; }
+            index = duplicate;
+          }
+        }
+        const previous = candidate.threads[index];
+        if (!update.thread) {
+          if (previous) { candidate.threads.splice(index, 1); changed.push(previous.id); }
+          continue;
+        }
+        const thread = update.thread;
+        if (thread.projectId && !candidate.projects.some((item) => item.id === thread.projectId)) {
+          throw new Error('Synchronized conversation is waiting for its project');
+        }
+        thread.id = previous?.id || (candidate.threads.some((item) => item.id === update.id) ? update.collisionId : update.id);
+        thread.peerOwner = update.origin; thread.peerThreadId = update.id;
+        if (previous && JSON.stringify(previous) === JSON.stringify(thread)) { continue; }
+        if (previous) { candidate.threads[index] = thread; }
+        else { await this.ensureThreadWorkspace(thread, candidate); candidate.threads.push(thread); }
+        changed.push(thread.id);
+      }
+      if (!settingsChanged && changed.length === 0 && JSON.stringify(candidate.projects) === JSON.stringify(this.data.projects || [])) { return; }
+      if (!candidate.threads.some((item) => item.id === candidate.activeThreadId)) {
+        await this.replaceActive(new Set<string>([candidate.activeThreadId]), candidate);
+      }
+      validateProjects(candidate);
+      await this.commitCandidate(candidate, () => {
+        this.data = candidate;
+        if (settingsChanged) { this.resources.configureProviders(this.providerProfiles); this.refreshCompatibility(); }
+        for (const id of changed) {
+          const last = candidate.threads.find((item) => item.id === id)?.messages.slice(-1)[0];
+          if (last?.status !== 'generating' || this.peerMessages.get(id)?.id !== last.id) { this.peerMessages.delete(id); }
+        }
+      }, changed.concat(Array.from(this.dirtyDrafts)));
+      this.publish('snapshot');
+    });
+  }
+
+  private mergePeerSettings(candidate: AppData, settings: PeerSettingsDelta[]): boolean {
+    if (!settings.length) { return false; }
+    const productivity = candidate.productivity || defaultProductivity();
+    const extensions = candidate.extensions || defaultExtensions();
+    const profiles = (candidate.providerProfiles || []).slice(), skills = extensions.skills.slice(), servers = productivity.servers.slice();
+    const options = JSON.parse(JSON.stringify(productivity.options || defaultAssistantOptions())) as AssistantOptions;
+    const memories = new Map<string, MemoryEntry>();
+    for (const memory of productivity.memories) { memories.set(memory.id, memory); }
+    let userDocument = candidate.config.userDocument || '', autoCompact = candidate.config.autoCompact, changed = false;
+    for (const delta of settings) {
+      const item = delta.current, previous = delta.previous;
+      if ((!userDocument || userDocument === previous?.userDocument) && item.userDocument !== userDocument) {
+        userDocument = item.userDocument; changed = true;
+      }
+      if (item.autoCompact !== undefined && item.autoCompact !== autoCompact && autoCompact === previous?.autoCompact) {
+        autoCompact = item.autoCompact; changed = true;
+      }
+      if (item.autoMemory !== undefined && item.autoMemory !== options.autoMemory && options.autoMemory === previous?.autoMemory) {
+        options.autoMemory = item.autoMemory; changed = true;
+      }
+      if (item.saveSummary !== undefined && item.saveSummary !== options.saveSummary && options.saveSummary === previous?.saveSummary) {
+        options.saveSummary = item.saveSummary; changed = true;
+      }
+      for (const old of previous?.memories || []) {
+        const current = memories.get(old.id);
+        if (current && JSON.stringify(current) === JSON.stringify(old) && !item.memories.some((memory) => memory.id === old.id)) {
+          memories.delete(old.id); changed = true;
+        }
+      }
+      for (const memory of item.memories) {
+        const current = memories.get(memory.id);
+        if (!current || memory.updatedAt > current.updatedAt) { memories.set(memory.id, memory); changed = true; }
+      }
+      for (const profile of item.profiles) {
+        if (!profiles.some((entry) => entry.id === profile.id)) { profiles.push(profile); changed = true; }
+      }
+      for (const skill of item.skills) {
+        const index = skills.findIndex((entry) => entry.name === skill.name);
+        if (index < 0) { skills.push(skill); changed = true; }
+        else {
+          const prior = previous?.skills.find((entry) => entry.name === skill.name);
+          if (prior && JSON.stringify(skills[index]) === JSON.stringify(prior) && JSON.stringify(skill) !== JSON.stringify(prior)) {
+            skills[index] = skill; changed = true;
+          }
+        }
+      }
+      for (const old of previous?.skills || []) {
+        const index = skills.findIndex((entry) => entry.name === old.name);
+        if (index >= 0 && JSON.stringify(skills[index]) === JSON.stringify(old) && !item.skills.some((entry) => entry.name === old.name)) {
+          skills.splice(index, 1); changed = true;
+        }
+      }
+      for (const server of item.servers) {
+        if (!servers.some((entry) => entry.id === server.id)) { servers.push(server); changed = true; }
+      }
+    }
+    if (changed) {
+      candidate.config = copyModelConfig(candidate.config, candidate.config.configured);
+      candidate.config.userDocument = userDocument;
+      candidate.config.autoCompact = autoCompact;
+      candidate.productivity = { options: options, memories: Array.from(memories.values()), templates: productivity.templates, servers: servers };
+      candidate.extensions = { browserPolicy: extensions.browserPolicy, webEnabled: extensions.webEnabled, skills: skills,
+        seededBuiltinSkills: extensions.seededBuiltinSkills };
+      candidate.providerProfiles = profiles;
+      validateProductivity(candidate.productivity); validateExtensions(candidate.extensions);
+    }
+    return changed;
+  }
   get workspaceId(): string { return workspaceIdFor(this.data, this.active); }
   attributeUsage(records: RequestUsage[]): RequestUsage[] { return attributeLegacyUsage(records, this.data.threads); }
   async setTeamEnabled(enabled: boolean): Promise<boolean> {
@@ -174,12 +331,14 @@ export class SessionService {
     state.compatibilityWarnings = this.application.compatibilityWarnings?.slice() || [];
     if (this.application.phase !== 'idle') { state.phase = this.application.phase; }
     state.runningThreadIds = this.runningThreadIds; state.canNavigate = this.canNavigate;
+    state.peerThread = this.application.ready && !!this.active.peerOwner;
+    state.peerRunningThreadIds = Array.from(this.peerMessages.keys());
     return state;
   }
-  get canMutate(): boolean { return this.canNavigate && this.status.phase === 'idle'; }
+  get canMutate(): boolean { return this.canNavigate && this.status.phase === 'idle' && !this.active.peerOwner; }
   private get canMutateShared(): boolean { return this.canNavigate && !this.hasActiveRuns; }
   get canQueueInput(): boolean {
-    return this.canNavigate && !this.active.archived &&
+    return this.canNavigate && !this.active.archived && !this.active.peerOwner &&
       (this.status.phase === 'idle' || this.status.phase === 'running');
   }
   get currentConfig(): ModelConfig {
@@ -462,7 +621,7 @@ export class SessionService {
     // Repeated new-chat actions are idempotent while the current composer is untouched.
     // Keep its workspace and local model/team choices; never discard prepared input.
     if (current.projectId === projectId && !current.archived && !current.titleEdited && !current.pinned &&
-      !current.parentThreadId && current.messages.length === 0 && (current.draft || '').length === 0 &&
+      !current.peerOwner && !current.parentThreadId && current.messages.length === 0 && (current.draft || '').length === 0 &&
       (current.attachments || []).length === 0 && (current.references || []).length === 0 && !current.annotations?.length &&
       (current.pendingInputs || []).length === 0) { return true; }
     return this.mutate(t("新建对话失败："), async () => {
@@ -493,7 +652,7 @@ export class SessionService {
     return this.deleteThreads([id]);
   }
   async deleteThreads(ids: string[]): Promise<boolean> {
-    if (ids.some((id) => this.runningThreadIds.includes(id))) { return false; }
+    if (ids.some((id) => this.runningThreadIds.includes(id) || this.data.threads.some((thread) => thread.id === id && !!thread.peerOwner))) { return false; }
     if (ids.length === 0) { return false; }
     return this.mutate(t("删除对话失败："), async () => {
       const running = this.runningThreadIds;
@@ -510,11 +669,13 @@ export class SessionService {
     }, 'snapshot', 'navigation');
   }
   async renameThread(id: string, title: string): Promise<boolean> {
+    if (this.data.threads.some((thread) => thread.id === id && !!thread.peerOwner)) { return false; }
     return this.mutate(t("重命名失败："), async () => {
       const thread = this.requireThread(id); thread.title = threadTitle(title); thread.titleEdited = true; await this.persist();
     }, 'snapshot', 'navigation');
   }
   async pinThread(id: string): Promise<boolean> {
+    if (this.data.threads.some((thread) => thread.id === id && !!thread.peerOwner)) { return false; }
     return this.mutate(t("置顶状态保存失败："), async () => {
       const thread = this.requireThread(id); thread.pinned = !thread.pinned; await this.persist();
     }, 'snapshot', 'navigation');
@@ -524,6 +685,7 @@ export class SessionService {
     return this.archiveThreads([id], !thread?.archived);
   }
   async archiveThreads(ids: string[], archived: boolean): Promise<boolean> {
+    if (this.data.threads.some((thread) => !!thread.peerOwner && ids.includes(thread.id))) { return false; }
     if (ids.some((id) => this.runningThreadIds.includes(id))) { return false; }
     if (ids.length === 0) { return false; }
     return this.mutate(t("归档状态保存失败："), async () => {
@@ -544,14 +706,14 @@ export class SessionService {
   setDraft(text: string, threadId: string = this.data.activeThreadId): void {
     if (!this.application.ready || text.length > MAX_INPUT_TEXT) { return; }
     const thread = this.data.threads.find((item) => item.id === threadId);
-    if (!thread || thread.archived) { return; }
+    if (!thread || thread.archived || thread.peerOwner) { return; }
     thread.draft = text;
     if (!text.trim()) { thread.panelContext = undefined; }
     this.draftRevision++; this.dirtyDrafts.add(thread.id);
     this.emit({ kind: 'draft', state: this.state, threadId: thread.id, content: text });
   }
   setPanelContext(context: string): void {
-    if (!this.application.ready || context.length > 32768 || this.active.archived) { return; }
+    if (!this.application.ready || context.length > 32768 || this.active.archived || this.active.peerOwner) { return; }
     this.active.panelContext = context;
     this.draftRevision++; this.dirtyDrafts.add(this.active.id); this.publish('snapshot');
   }
@@ -1561,6 +1723,7 @@ export class SessionService {
   }
   private publishThread(thread: ThreadData): void {
     const metadata: ThreadData = { id: thread.id, title: thread.title, updatedAt: thread.updatedAt, messages: [],
+      peerOwner: thread.peerOwner,
       projectId: thread.projectId, pinned: thread.pinned, archived: thread.archived, titleEdited: thread.titleEdited, draft: thread.draft, panelContext: thread.panelContext,
       attachments: thread.attachments, annotations: thread.annotations, references: thread.references, parentThreadId: thread.parentThreadId,
       parentMessageId: thread.parentMessageId, disabledMcpIds: thread.disabledMcpIds, modelRef: thread.modelRef,
@@ -1595,6 +1758,10 @@ export class SessionService {
       const data = kind === 'snapshot' ? this.snapshot() : undefined;
       if (data) {
         for (const thread of data.threads) {
+          const peer = this.peerMessages.get(thread.id);
+          const last = thread.messages[thread.messages.length - 1];
+          if (peer && last?.id === peer.id && last.status === 'generating') { thread.messages[thread.messages.length - 1] = peer; }
+          else if (thread.peerOwner && last?.status === 'generating') { last.status = 'stopped'; }
           thread.teamEnabled = this.selectedTeamMode(thread);
           const selection = this.selectedToolSelection(thread);
           thread.agentMode = selection.agentMode; thread.disabledTools = selection.disabledTools;

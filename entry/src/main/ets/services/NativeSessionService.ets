@@ -44,6 +44,7 @@ import { Diagnostics } from '../model/Diagnostics';
 import { LogFields } from '../model/DiagnosticLog';
 import { ArkDataConversationStore } from './ArkDataConversationStore';
 import { NativeData } from './NativeData';
+import { nearbySync } from './NearbySync';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { ProviderProfile } from '../model/ProviderProfiles';
 import { ExtensionSettings } from '../model/Skills';
@@ -217,6 +218,7 @@ export function createNativeSessionService(context: common.UIAbilityContext, app
   const session = new SessionService(new ArkDataConversationStore(() => data.open()), new AgentRuntime(providers, credentials, new NativeUsageRecorder(),
     (content, cancellation) => WebUiPreflight.validate(content, cancellation), new NativeOrchestrationExecutor(), browser), credentials,
     new NativeSessionResources(workspaceFilesDir, providers, approval, context, browser), approval);
+  nearbySync.bind(context, session, () => data.open());
   installNativePanelAgent(workspaceFilesDir, providers, credentials, () => session.snapshot());
   backgroundGeneration.attach(session, context); completionNotifications.attach(session, context);
   if (browser) {

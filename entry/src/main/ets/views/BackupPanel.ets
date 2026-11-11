@@ -9,6 +9,7 @@ import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { Btn, Space } from '../common/Theme';
 import { Banner, GroupCard, NavRow, RowDivider, SectionHeader } from '../common/Widgets';
 import { BackupLoginRequired } from '../services/HuaweiAccount';
+import { NativeData } from '../services/NativeData';
 
 @Component
 export struct BackupPanel {
@@ -23,11 +24,16 @@ export struct BackupPanel {
   @State private status: string = '';
   @State private backupDate: string = '';
   @State private needsLogin: boolean = false;
+  @State private recoveryPending: boolean = false;
   private visible: boolean = false;
   private reading?: Promise<void>;
   private statusError: boolean = false;
 
-  aboutToAppear(): void { this.visible = true; this.refreshStatus(); }
+  aboutToAppear(): void {
+    this.visible = true;
+    this.recoveryPending = NativeData.forFilesDir(this.context().filesDir)?.autoBackupReady() === false;
+    this.refreshStatus();
+  }
   aboutToDisappear(): void { this.visible = false; }
   private async foregroundChanged(): Promise<void> {
     if (!this.foreground || !this.visible || this.busy) { return; }
@@ -64,9 +70,12 @@ export struct BackupPanel {
       if (restore) {
         const data = await CloudBackup.restoreLatest(context, this.app.exportSnapshot());
         if (!await this.app.importSnapshot(data)) { throw new Error(this.app.error); }
+        NativeData.forFilesDir(context.filesDir)?.allowAutoBackup();
+        this.recoveryPending = false;
         if (this.visible) { this.status = t('备份已恢复，已保留本机已有数据。'); }
       } else {
         const completed = await CloudBackup.create(context, this.app.exportSnapshot());
+        if (completed) { NativeData.forFilesDir(context.filesDir)?.allowAutoBackup(); this.recoveryPending = false; }
         if (this.visible) { this.status = completed ? t('备份已上传到云端。') : t('备份已保存在本机，等待上传。请联网后再次备份。'); }
       }
     } catch (error) {
@@ -103,7 +112,8 @@ export struct BackupPanel {
           Text(t('云端备份 · {0}', [this.backupDate])).id('cloud-backup-date').fontSize(13)
             .fontColor($r('app.color.text_secondary')).width('100%')
         }
-        Text(this.automatic.status).id('auto-cloud-backup-status').fontSize(13)
+        Text(this.recoveryPending ? t('数据恢复期间已暂停自动备份。恢复云备份或手动完成新备份后，将继续自动备份。') : this.automatic.status)
+          .id('auto-cloud-backup-status').fontSize(13)
           .fontColor($r('app.color.text_secondary')).width('100%')
         if (this.busy) {
           Row({ space: Space.sm }) {

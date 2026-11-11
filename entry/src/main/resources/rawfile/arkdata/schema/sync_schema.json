@@ -1,0 +1,93 @@
+{
+  "dbSchema": [
+    {
+      "version": 0,
+      "bundleName": "com.sudojacky.tinybot",
+      "dbName": "TinybotNearby",
+      "tables": [
+        {
+          "tableName": "nearby_items",
+          "deviceSyncFields": [
+            "row_id",
+            "origin",
+            "kind",
+            "entity_id",
+            "revision",
+            "part",
+            "parts",
+            "removed",
+            "body"
+          ],
+          "cloudType": [
+            "Local"
+          ],
+          "fields": [
+            {
+              "columnName": "row_id",
+              "type": "Text",
+              "primaryKey": true,
+              "notNull": true,
+              "autoIncrement": false
+            },
+            {
+              "columnName": "origin",
+              "type": "Text",
+              "primaryKey": false,
+              "notNull": true,
+              "autoIncrement": false
+            },
+            {
+              "columnName": "kind",
+              "type": "Text",
+              "primaryKey": false,
+              "notNull": true,
+              "autoIncrement": false
+            },
+            {
+              "columnName": "entity_id",
+              "type": "Text",
+              "primaryKey": false,
+              "notNull": true,
+              "autoIncrement": false
+            },
+            {
+              "columnName": "revision",
+              "type": "Long",
+              "primaryKey": false,
+              "notNull": true,
+              "autoIncrement": false
+            },
+            {
+              "columnName": "part",
+              "type": "Integer",
+              "primaryKey": false,
+              "notNull": true,
+              "autoIncrement": false
+            },
+            {
+              "columnName": "parts",
+              "type": "Integer",
+              "primaryKey": false,
+              "notNull": true,
+              "autoIncrement": false
+            },
+            {
+              "columnName": "removed",
+              "type": "Integer",
+              "primaryKey": false,
+              "notNull": true,
+              "autoIncrement": false
+            },
+            {
+              "columnName": "body",
+              "type": "Text",
+              "primaryKey": false,
+              "notNull": true,
+              "autoIncrement": false
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

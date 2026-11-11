@@ -6,6 +6,8 @@ import { t } from '../model/I18n';
 import { CredentialVault } from './ProfileSettings';
 import { SessionImportCandidate } from './SessionCandidates';
 import { BackupConnections } from '../model/BackupConnections';
+import { sameCredentialScope } from '../model/ProviderEndpoint';
+import { canKeepBalanceCredential } from '../model/BalanceSettings';
 
 export interface ProviderKey { profile: ProviderProfile; apiKey: string; balanceApiKey?: string; }
 export interface BackupKeyPayload { providers: ProviderKey[]; selected?: ModelReference; connections?: BackupConnections; }
@@ -13,27 +15,47 @@ export interface BackupKeyPayload { providers: ProviderKey[]; selected?: ModelRe
 const restoredKeys = new WeakMap<AppData, BackupKeyPayload>();
 export function attachBackupKeys(data: AppData, payload: BackupKeyPayload): void { restoredKeys.set(data, payload); }
 
-// Local matching providers always win. New credentials are rolled back if the snapshot commit fails.
+// Existing settings and readable credentials win. Only repair missing assets for the same provider and credential scope.
 export async function commitBackupKeys(local: AppData, imported: AppData, candidate: SessionImportCandidate,
   vault: CredentialVault, createId: () => string, commit: (data: AppData) => Promise<void>): Promise<void> {
   const payload = restoredKeys.get(imported);
   if (!payload) { await commit(candidate.data); return; }
   const created: string[] = [];
+  const write = async (prefix: string, secret: string): Promise<string> => {
+    const alias = prefix + createId();
+    await vault.write(alias, secret); created.push(alias);
+    return alias;
+  };
   try {
     for (const item of payload.providers) {
       const id = candidate.providerIds.get(item.profile.id);
-      if (!id || (local.providerProfiles || []).some((entry) => entry.id === id)) { continue; }
+      if (!id) { continue; }
       const index = (candidate.data.providerProfiles || []).findIndex((entry) => entry.id === id);
       if (index < 0) { throw new Error(t('备份密钥与模型服务配置不一致。')); }
+      const existing = (local.providerProfiles || []).find((entry) => entry.id === id);
+      if (existing) {
+        if (existing.id !== item.profile.id ||
+          !sameCredentialScope(existing.protocol, existing.baseUrl, item.profile.protocol, item.profile.baseUrl)) { continue; }
+        const profile = (candidate.data.providerProfiles as ProviderProfile[])[index];
+        if (!existing.noApiKey && item.apiKey && await vault.readOptional(existing.credentialAlias) === undefined) {
+          profile.credentialAlias = await write('tinybot-', item.apiKey);
+          if (candidate.data.config.providerId === id && candidate.data.config.credentialAlias === existing.credentialAlias) {
+            candidate.data.config.credentialAlias = profile.credentialAlias;
+          }
+        }
+        if (item.balanceApiKey && canKeepBalanceCredential(existing, item.profile.protocol, item.profile.baseUrl, item.profile.balance) &&
+          await vault.readOptional(existing.balanceCredentialAlias!) === undefined) {
+          profile.balanceCredentialAlias = await write('tinybot-balance-', item.balanceApiKey);
+        }
+        continue;
+      }
       const profile = JSON.parse(JSON.stringify(item.profile)) as ProviderProfile;
       profile.id = id; profile.credentialAlias = ''; profile.balanceCredentialAlias = undefined;
       if (!profile.noApiKey) {
-        profile.credentialAlias = 'tinybot-' + createId(); created.push(profile.credentialAlias);
-        await vault.write(profile.credentialAlias, item.apiKey);
+        profile.credentialAlias = await write('tinybot-', item.apiKey);
       }
       if (item.balanceApiKey) {
-        profile.balanceCredentialAlias = 'tinybot-balance-' + createId(); created.push(profile.balanceCredentialAlias);
-        await vault.write(profile.balanceCredentialAlias, item.balanceApiKey);
+        profile.balanceCredentialAlias = await write('tinybot-balance-', item.balanceApiKey);
       }
       (candidate.data.providerProfiles as ProviderProfile[])[index] = profile;
     }

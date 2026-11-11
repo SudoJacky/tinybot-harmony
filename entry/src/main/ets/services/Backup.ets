@@ -274,6 +274,7 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
 async function restoreEnvelope(context: common.UIAbilityContext, local: AppData, envelope: BackupEnvelope,
   archive?: OpenBackupArchive, importedPanels: RestoredPanelFile[] = [], importedWorkspaces: Map<string, string> = new Map<string, string>(), preparedFiles: PreparedFile[] = []): Promise<AppData> {
   const data = parseAppData(JSON.stringify(envelope.data));
+  for (const thread of data.threads) { thread.peerOwner = undefined; thread.peerThreadId = undefined; }
   // Keep record identities across devices and repeated restores. Local records win.
   const legacy = envelope.format === 'tinybot-harmony.backup.v1';
   if (legacy && ((data.projects || []).length > 0 || data.threads.some((thread) => thread.projectId !== undefined))) { throw new Error(t('备份格式无效。')); }

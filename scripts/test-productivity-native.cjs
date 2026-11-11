@@ -1724,7 +1724,9 @@ async function test(name, run) {
     const restoredAttachment=restored.threads[0].messages[0].attachments[0];assert.notEqual(restoredAttachment.id,id);assert.equal(fs.readFileSync(nativePath(root+'/attachments/'+restoredAttachment.path),'utf8'),'sample');
     const {SessionService}=load(path.join(source,'services/SessionService'));
     const repository=new ConversationStore(nativePath(root));await repository.save(data);
-    const vault={read:async()=>{throw Error('restore must not read credentials');},write:async()=>{throw Error('restore must not write credentials');},remove:async()=>{throw Error('restore must not remove credentials');}};
+    const vault={read:async()=>{throw Error('restore must not use credentials');},
+      readOptional:async alias=>{assert.equal(alias,'SECRET-ALIAS');return 'existing key';},
+      write:async()=>{throw Error('restore must not replace valid credentials');},remove:async()=>{throw Error('restore must not remove credentials');}};
     const resources={createId:()=>crypto.randomUUID(),ensureWorkspace:async()=>{},configureProviders:()=>{},reportError:()=>{},
       tools:()=>({definitions:()=>[],execute:async()=>{throw Error('restore must not execute tools');}})};
     const session=new SessionService(repository,idleRuntime(vault),vault,resources);await session.initialize();
@@ -2464,13 +2466,17 @@ async function test(name, run) {
     const work = app + '/workspace/thread-one';
     for (const dir of [ability, context.cacheDir, target, work]) fs.mkdirSync(nativePath(dir), { recursive: true });
     const databases = new Map();
-    let failImport = true;
+    let failImport = true, unavailableDatabase;
     kits['@kit.ArkData'].relationalStore = {
       SecurityLevel: { S3: 3 },
       async getRdbStore(ctx, config) {
         assert.equal(config.encrypt, true);
-        if (!databases.has(ctx.filesDir)) databases.set(ctx.filesDir, new DatabaseSync(':memory:'));
-        const sql = databases.get(ctx.filesDir);
+        if (ctx.filesDir === unavailableDatabase && config.name === 'tinybot.db') {
+          throw Object.assign(Error('The secret key is corrupted or lost.'), { code: 14800020 });
+        }
+        const key = config.name === 'tinybot.db' ? ctx.filesDir : ctx.filesDir + '/' + config.name;
+        if (!databases.has(key)) databases.set(key, new DatabaseSync(':memory:'));
+        const sql = databases.get(key);
         const querySql = async (text, args) => {
           const statement = sql.prepare(text); statement.setReturnArrays(true);
           const rows = statement.all(...args); let position = -1;
@@ -2543,7 +2549,62 @@ async function test(name, run) {
     await discardBackupImport(imported);
     assert.equal((await new LifeBoards(target).list()).length, 0);
     assert.equal((await new LifePanels(target).list()).length, 0);
+
+    const originalSql = databases.get(ability);
+    const originalRows = originalSql.prepare('SELECT * FROM records ORDER BY scope, record_id, part').all();
+    unavailableDatabase = ability;
+    const locked = new NativeData(context, app);
+    await assert.rejects(locked.open(), error => error.code === 14800020);
+    assert.equal(locked.needsRecovery, true);
+    assert.equal((await locked.legacyRecoverySource()).threads, 1);
+    failImport = true;
+    await assert.rejects(locked.recover(true), /injected ArkData write failure/);
+    await assert.rejects(locked.open(), error => error.code === 14800020);
+    failImport = false;
+    await locked.recover(true);
+    assert.equal(locked.needsRecovery, false);
+    assert.equal(locked.autoBackupReady(), false);
+    const recovered = new NativeData(context, app);
+    assert.equal((await new ArkDataConversationStore(() => recovered.open()).load()).threads[0].title, 'Legacy title');
+    assert.equal(recovered.autoBackupReady(), false);
+    assert.deepEqual(originalSql.prepare('SELECT * FROM records ORDER BY scope, record_id, part').all(), originalRows);
+    recovered.allowAutoBackup();
+    assert.equal(new NativeData(context, app).autoBackupReady(), true);
+
+    unavailableDatabase = target;
+    const cloudRecovery = new NativeData(receiver, target);
+    await assert.rejects(cloudRecovery.open(), error => error.code === 14800020);
+    assert.equal(await cloudRecovery.legacyRecoverySource(), undefined);
+    await cloudRecovery.recover(false);
+    assert.deepEqual((await new ArkDataConversationStore(() => cloudRecovery.open()).load()).threads, []);
+    assert.equal(cloudRecovery.autoBackupReady(), false);
     for (const [file, bytes] of legacy) assert.deepEqual(fs.readFileSync(nativePath(file)), bytes, file);
+  });
+  await test('nearby file updates verify bytes, respect base revisions, and preserve concurrent edits', async () => {
+    const root = '/sandbox/nearby-files', local = root + '/local', staged = root + '/staged';
+    fs.mkdirSync(nativePath(local), { recursive: true });
+    const digest = text => crypto.createHash('sha256').update(text).digest('base64');
+    const files = new NativeWorkspaceFiles(local);
+    const apply = async (digest, base) => {
+      const file = await fileIo.open(staged, fileIo.OpenMode.READ_ONLY);
+      try { return await files.applyNearbyFile('nested/note.md', file.fd, digest, base, true); }
+      finally { await fileIo.close(file); }
+    };
+    fs.writeFileSync(nativePath(staged), 'initial');
+    assert.equal(await apply(digest('initial'), ''), digest('initial'));
+    assert.equal(fs.readFileSync(nativePath(local + '/nested/note.md'), 'utf8'), 'initial');
+    fs.writeFileSync(nativePath(staged), 'replacement');
+    await assert.rejects(apply(digest('wrong'), digest('initial')), /failed content verification/);
+    assert.equal(fs.readFileSync(nativePath(local + '/nested/note.md'), 'utf8'), 'initial');
+    assert.equal(await apply(digest('replacement'), digest('initial')), digest('replacement'));
+    fs.writeFileSync(nativePath(local + '/nested/note.md'), 'local edit');
+    fs.writeFileSync(nativePath(staged), 'peer edit');
+    assert.equal(await apply(digest('peer edit'), digest('replacement')), digest('local edit'));
+    const sibling = fs.readdirSync(nativePath(local + '/nested')).find(name => name.startsWith('nearby-conflict-'));
+    assert.equal(fs.readFileSync(nativePath(local + '/nested/' + sibling), 'utf8'), 'peer edit');
+    assert.equal(await files.applyNearbyFile('nested/note.md', undefined, '', digest('replacement'), true), digest('local edit'));
+    await files.applyNearbyFile('nested/note.md', undefined, '', digest('local edit'), true);
+    assert.equal(fs.existsSync(nativePath(local + '/nested/note.md')), false);
   });
   suiteCompleted = true;
   console.log(completedTests+' native adapter integration checks passed. Fixtures: '+fixture);

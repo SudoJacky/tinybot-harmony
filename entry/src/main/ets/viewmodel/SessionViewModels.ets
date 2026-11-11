@@ -158,6 +158,7 @@ export class MessageViewModel {
 @Observed
 export class ThreadViewModel {
   panelContext?: string;
+  peerOwner?: string;
   latestPreviewIds: string[] = [];
   refreshPreviews(): void {
     const ids = latestPreviewIds(this.messages);
@@ -196,6 +197,7 @@ export class ThreadViewModel {
   constructor(data: ThreadData) { this.update(data); }
   updateMetadata(data: ThreadData): void {
     this.panelContext = data.panelContext;
+    this.peerOwner = data.peerOwner;
     this.agentMode = data.agentMode || 'full'; this.disabledTools = data.disabledTools || [];
     this.toolApprovalMode = toolApprovalMode(data.toolApprovalMode);
     this.projectId = data.projectId;

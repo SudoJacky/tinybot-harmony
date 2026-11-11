@@ -5,6 +5,8 @@ export interface StoredRecord { scope: string; id: string; text?: string; }
 export interface RecordSize { id: string; bytes: number; }
 type WriteRecord = (record: StoredRecord) => Promise<void>;
 const CHUNK_LENGTH = 128 * 1024;
+export const LOCAL_DATABASE = 'tinybot.db';
+export const DATABASE_KEY_UNAVAILABLE = 14800020;
 
 // A record may hold a long transcript. Keep each SQL row below the ResultSet
 // limit, including for UTF-8 text, and never split a UTF-16 surrogate pair.
@@ -22,14 +24,15 @@ function chunks(text: string): string[] {
 }
 
 export class ArkDataRecords {
+  onCommitted?: (records: StoredRecord[]) => void;
   private store: relationalStore.RdbStore;
   private writes: Promise<void> = Promise.resolve();
 
   private constructor(store: relationalStore.RdbStore) { this.store = store; }
 
-  static async open(context: common.UIAbilityContext): Promise<ArkDataRecords> {
+  static async open(context: common.UIAbilityContext, name: string = LOCAL_DATABASE): Promise<ArkDataRecords> {
     const store = await relationalStore.getRdbStore(context, {
-      name: 'tinybot.db', securityLevel: relationalStore.SecurityLevel.S3, encrypt: true
+      name: name, securityLevel: relationalStore.SecurityLevel.S3, encrypt: true
     });
     await store.executeSql('CREATE TABLE IF NOT EXISTS records (scope TEXT NOT NULL, record_id TEXT NOT NULL, part INTEGER NOT NULL, part_count INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY (scope, record_id, part))');
     return new ArkDataRecords(store);
@@ -76,7 +79,7 @@ export class ArkDataRecords {
     if (!records.length) { return Promise.resolve(); }
     const operation = this.writes.then(() => this.transact(async (transaction) => {
       for (const record of records) { await this.replace(transaction, record); }
-    }));
+    })).then(() => { this.onCommitted?.(records); });
     this.writes = operation.catch(() => {});
     return operation;
   }

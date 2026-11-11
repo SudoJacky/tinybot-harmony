@@ -9,6 +9,7 @@ import { mergeSavedConfiguration } from '../model/SavedConfiguration';
 import { BalanceSettings, canKeepBalanceCredential, usesBalanceCredential } from '../model/BalanceSettings';
 
 export interface CredentialVault extends CredentialReader {
+  readOptional(alias: string): Promise<string | undefined>;
   write(alias: string, secret: string): Promise<void>;
   remove(alias: string): Promise<void>;
 }

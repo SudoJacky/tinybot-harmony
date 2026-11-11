@@ -68,6 +68,8 @@ export class ChatViewModel {
   busy: boolean = false;
   canNavigate: boolean = false;
   runningThreadIds: string[] = [];
+  peerRunningThreadIds: string[] = [];
+  peerThread: boolean = false;
   get sharedBusy(): boolean { return this.busy || this.runningThreadIds.length > 0; }
   generating: boolean = false;
   acceptingSteering: boolean = false;
@@ -165,6 +167,9 @@ export class ChatViewModel {
     this.canNavigate = state.canNavigate === true;
     const running = state.runningThreadIds || [];
     if (running.join(',') !== this.runningThreadIds.join(',')) { this.runningThreadIds = running; }
+    const peerRunning = state.peerRunningThreadIds || [];
+    if (peerRunning.join(',') !== this.peerRunningThreadIds.join(',')) { this.peerRunningThreadIds = peerRunning; }
+    this.peerThread = state.peerThread === true;
     this.phase = state.phase;
     this.ready = state.ready; this.loading = state.phase === 'loading'; this.busy = state.phase !== 'idle';
     this.generating = state.phase === 'running' || state.phase === 'compacting';
@@ -219,7 +224,7 @@ export class ChatViewModel {
   get contextWindow(): number { return contextSettings(this.currentConfig).window; }
   get contextLabel(): string { return t('上下文约 {0} / {1} tokens', [this.contextUsed, this.contextWindow]); }
   get canQueueInput(): boolean {
-    return this.canNavigate && !this.active.archived && (this.phase === 'idle' || this.phase === 'running');
+    return this.canNavigate && !this.active.archived && !this.peerThread && (this.phase === 'idle' || this.phase === 'running');
   }
   filteredThreads(query: string, archived: boolean): ThreadViewModel[] { return matchingThreads(this.threads, query, archived) as ThreadViewModel[]; }
 

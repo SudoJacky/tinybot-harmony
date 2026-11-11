@@ -57,6 +57,7 @@ class MemoryRepository implements SessionRepository {
 class Keys implements CredentialVault {
   values: Map<string, string> = new Map<string, string>();
   removed: string[] = [];
+  async readOptional(alias: string): Promise<string | undefined> { return this.values.get(alias); }
   async read(alias: string): Promise<string> {
     if (alias.length === 0) { return ''; }
     const value = this.values.get(alias);

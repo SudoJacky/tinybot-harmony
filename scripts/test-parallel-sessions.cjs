@@ -287,6 +287,79 @@ async function main() {
     browser.handoff(); await waiting; browser.release(owner);
     console.log('PASS browser handoff pauses only the owning conversation');
   }
+  {
+    const { peerThreadText, parsePeerThread, peerLiveMessage, peerSettingsText } = from('model/PeerSyncData');
+    const makeDevice = name => fixture(data => {
+      data.threads = [{ ...data.threads[0], id: name }];
+      data.activeThreadId = name;
+    });
+    const phone = await makeDevice('phone'), tablet = await makeDevice('tablet');
+    const copyCheckpoint = async (source, target, id) => {
+      const stored = thread(source, id, true);
+      await target.session.receivePeerChanges([], [{ origin: id, id, collisionId: 'other-' + id,
+        thread: parsePeerThread(peerThreadText(stored), id) }]);
+    };
+    const copyLive = (source, target, id) => {
+      const answer = peerLiveMessage(JSON.stringify(source.session.liveAnswer(id)));
+      assert.equal(target.session.receivePeerAnswer(id, id, answer), true);
+    };
+    const toolGate = gate();
+    let calls = 0;
+    phone.resources.tools = () => ({
+      definitions: () => [{ type: 'function', function: { name: 'read_file', description: 'Read a file' } }],
+      execute: async () => { calls++; await toolGate.promise; return '{"value":"file read"}'; }
+    });
+    const phoneRun = await start(phone, 'phone', 'Phone request');
+    const tabletRun = await start(tablet, 'tablet', 'Tablet request');
+    await until(() => phone.requests.length === 1 && tablet.requests.length === 1);
+    await copyCheckpoint(phone, tablet, 'phone');
+    await copyCheckpoint(tablet, phone, 'tablet');
+    phone.requests[0].text('Phone partial');
+    tablet.requests[0].text('Tablet partial');
+    copyLive(phone, tablet, 'phone');
+    copyLive(tablet, phone, 'tablet');
+    assert.equal(tablet.app.threads.find(item => item.id === 'phone').messages.at(-1).content, 'Phone partial');
+    assert.equal(phone.app.threads.find(item => item.id === 'tablet').messages.at(-1).content, 'Tablet partial');
+    assert.notEqual(thread(tablet, 'phone', true).messages.at(-1).content, 'Phone partial', 'Live output stays out of the recipient archive');
+    assert.deepEqual(copy(phone.session.runningThreadIds), ['phone']);
+    assert.deepEqual(copy(tablet.session.runningThreadIds), ['tablet']);
+    assert.equal(await tablet.app.selectThread('phone'), true);
+    assert.equal(tablet.app.peerThread, true);
+    assert.equal(tablet.app.canQueueInput, false);
+    await tablet.session.send();
+    assert.equal(tablet.requests.length, 1, 'Viewing a peer never starts another provider request');
+
+    phone.requests[0].finish('', [{ id: 'read', type: 'function',
+      function: { name: 'read_file', arguments: '{"path":"example.txt"}' } }]);
+    await until(() => calls === 1);
+    copyLive(phone, tablet, 'phone');
+    assert.equal(tablet.app.active.messages.at(-1).steps[0].tools[0].status, 'running');
+    toolGate.open();
+    await until(() => phone.requests.length === 2);
+    phone.requests[1].finish('Phone done');
+    tablet.requests[0].finish('Tablet done');
+    await Promise.all([phoneRun.done, tabletRun.done]);
+    await copyCheckpoint(phone, tablet, 'phone');
+    await copyCheckpoint(tablet, phone, 'tablet');
+    assert.equal(tablet.app.active.messages.at(-1).content, 'Phone done');
+    assert.equal(tablet.app.active.messages.at(-1).steps[0].tools[0].status, 'complete');
+    assert.equal(thread(phone, 'tablet', true).messages.at(-1).content, 'Tablet done');
+    assert.deepEqual(copy(phone.app.peerRunningThreadIds), []);
+    assert.deepEqual(copy(tablet.app.peerRunningThreadIds), []);
+    await tablet.session.receivePeerChanges([], [{ origin: 'phone', id: 'phone', collisionId: 'other-phone' }]);
+    assert.equal(thread(tablet, 'phone'), undefined);
+    assert.equal(tablet.app.active.id, 'tablet');
+
+    const config = phone.session.snapshot();
+    config.config.credentialAlias = 'device-key';
+    config.providerProfiles[0].credentialAlias = 'provider-key';
+    config.providerProfiles[0].balanceCredentialAlias = 'balance-key';
+    config.productivity.servers = [{ id: 'server', name: 'Private', url: 'https://example.com/mcp', enabled: true,
+      authType: 'bearer', credentialAlias: 'mcp-key' }];
+    const serialized = peerSettingsText(config);
+    for (const secret of ['device-key', 'provider-key', 'balance-key', 'mcp-key']) assert.ok(!serialized.includes(secret));
+    console.log('PASS two nearby runs exchange live text and tool state, keep local execution ownership, and converge on durable results');
+  }
 }
 const watchdog = setTimeout(() => { throw Error('Parallel session tests did not finish'); }, 30000);
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => clearTimeout(watchdog));

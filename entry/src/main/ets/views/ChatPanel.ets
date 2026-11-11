@@ -1774,11 +1774,11 @@ export struct ChatPanel {
           (this.browser.url !== '' && this.browser.url !== 'about:blank'))) || this.browser.error) {
           BrowserStatusCard({ browser: this.browser, onOpen: this.onBrowser })
         }
-        if (this.approval.form) { InputFormCard({ approval: this.approval }) }
-        if (this.approval.title) {
+        if (!this.app.peerThread && this.approval.form) { InputFormCard({ approval: this.approval }) }
+        if (!this.app.peerThread && this.approval.title) {
           this.approvalCard()
         }
-        if (this.thread.archived) {
+        if (this.thread.archived && !this.app.peerThread) {
           Banner({ text: t("这段对话已归档"), danger: false, actionLabel: t("恢复对话"), actionId: 'restore-thread',
             actionEnabled: !this.app.busy && this.app.saveError.length === 0,
             onAction: () => { this.app.archiveThread(this.thread.id); } })
@@ -1811,7 +1811,7 @@ export struct ChatPanel {
           Banner({ text: this.app.saveError, actionLabel: t("重试保存"), actionId: 'retry-save',
             actionEnabled: !this.app.busy, onAction: () => { this.app.retrySave(); } })
         }
-        if (!this.app.busy && this.thread.messages.length > 0
+        if (!this.app.peerThread && !this.app.busy && this.thread.messages.length > 0
           && this.thread.messages[this.thread.messages.length - 1].status !== 'complete') {
           Button() {
             Row({ space: 6 }) {
@@ -1836,8 +1836,12 @@ export struct ChatPanel {
             actionLabel: t('去登录'), actionId: 'chat-open-account', onAction: this.onAccount })
         }
         if (this.workbench && this.thread.messages.length === 0) { this.workbenchContext() }
-        this.composer()
-        if (!this.voiceMode && !this.speechActive()) {
+        if (this.app.peerThread) {
+          Banner({ text: t('来自附近设备的会话'), danger: false, compId: 'peer-conversation' })
+        } else {
+          this.composer()
+        }
+        if (!this.app.peerThread && !this.voiceMode && !this.speechActive()) {
           Row() {
             this.toolApprovalButton()
             this.modelButton()

@@ -53,13 +53,16 @@ import { SkillsPanel } from '../views/SkillsPanel';
 import { SkillEditorPanel } from '../views/SkillEditorPanel';
 import { SessionService } from '../services/SessionService';
 import { createNativeSessionService } from '../services/NativeSessionService';
+import { LegacyRecoverySource, NativeData } from '../services/NativeData';
+import { UsageLedger } from '../services/UsageLedger';
+import { nearbySync } from '../services/NearbySync';
 import { Btn, Motion, Radius, Space } from '../common/Theme';
 import { IconButton } from '../common/Widgets';
 import { LaunchActions } from '../services/LaunchActions';
 import { OnboardingPanel } from '../views/OnboardingPanel';
 import { OnboardingPreferences } from '../services/OnboardingPreferences';
 import { StartupBackup } from '../services/StartupBackup';
-import { CloudBackup, CloudBackupItem, cloudBackupError } from '../services/CloudBackup';
+import { CloudBackup, CloudBackupItem, cloudBackupError, latestCloudBackup } from '../services/CloudBackup';
 import { StartupBackupDialog } from '../views/StartupBackupDialog';
 import { BackupLoginRequired, HuaweiAccount, huaweiAccount } from '../services/HuaweiAccount';
 import { HuaweiAccountPanel } from '../views/HuaweiAccountPanel';
@@ -135,6 +138,12 @@ struct Index {
   private drawerDragStart: number = 0;
   private paths: NavPathStack = new NavPathStack();
   private session?: SessionService;
+  @State private recoveryNeeded: boolean = false;
+  @State private recoveryBusy: boolean = false;
+  @State private recoveryLegacy: LegacyRecoverySource | undefined = undefined;
+  @State private recoveryCloud: CloudBackupItem | undefined = undefined;
+  @State private recoveryError: string = '';
+  @State private recoveryCloudStatus: string = '';
   @State private approval: ToolApproval = new ToolApproval();
   @State private browser: BrowserSession = new BrowserSession();
   @State @Watch('offerAnnouncement') private browserExpanded: boolean = false;
@@ -200,12 +209,16 @@ struct Index {
     }
     this.app.initialize(this.session).then(() => {
       if (!this.privacy.allowed) { return; }
+      const data = NativeData.forFilesDir(context.filesDir);
+      this.recoveryNeeded = !this.app.ready && data?.needsRecovery === true;
+      if (this.recoveryNeeded && data) { this.findRecoverySources(context, data); }
+      if (this.app.ready) { nearbySync.setAllowed(true); }
       if (!this.panelUpdates) { this.panelUpdates = new PanelExpiryUpdates(new LifePanels(context.getApplicationContext().filesDir)); }
       this.updateLifePanelActivity();
       this.panelLinkChanged();
       try {
         autoCloudBackup.initialize(context, () => this.app.exportSnapshot(), () =>
-          this.app.ready && !this.app.saving && !this.app.saveError && !this.startupBackupChecking &&
+          this.app.ready && (data?.autoBackupReady() ?? true) && !this.app.saving && !this.app.saveError && !this.startupBackupChecking &&
           !this.startupBackupRestoring && !this.startupBackupDialog);
       } catch (error) { Diagnostics.log('warn', 'backup', 'auto_settings_failed', undefined, error as Error); }
       ShareInbox.subscribe(() => this.receiveShare());
@@ -216,6 +229,47 @@ struct Index {
       this.offerStartupBackup();
       this.offerAnnouncement();
     });
+  }
+
+  private findRecoverySources(context: common.UIAbilityContext, data: NativeData): void {
+    data.legacyRecoverySource().then((source) => {
+      if (this.recoveryNeeded) { this.recoveryLegacy = source; }
+    }).catch((error: Error) => { this.recoveryError = error.message; });
+    CloudBackup.list(context).then((items) => {
+      if (this.recoveryNeeded) { this.recoveryCloud = latestCloudBackup(items); }
+    }).catch((error: Error) => { Diagnostics.log('warn', 'backup', 'cloud_list_failed', undefined, error); });
+  }
+
+  private async checkRecoveryCloud(): Promise<void> {
+    if (this.recoveryBusy) { return; }
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    this.recoveryBusy = true; this.recoveryCloudStatus = '';
+    try {
+      if (!await CloudBackup.sync()) { throw new Error(t('云端同步尚未完成，请稍后重试恢复备份。')); }
+      this.recoveryCloud = latestCloudBackup(await CloudBackup.list(context));
+      if (!this.recoveryCloud) { this.recoveryCloudStatus = t('云端暂无可恢复的备份，请先在原设备完成备份。'); }
+    } catch (error) { this.recoveryCloudStatus = cloudBackupError(error as Error); }
+    finally { this.recoveryBusy = false; }
+  }
+
+  private async recoverStorage(useLegacy: boolean): Promise<void> {
+    if (!this.recoveryNeeded || this.recoveryBusy) { return; }
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    const data = NativeData.forFilesDir(context.filesDir);
+    if (!data) { return; }
+    this.recoveryBusy = true; this.recoveryError = '';
+    try {
+      nearbySync.pauseForRecovery();
+      await data.recover(useLegacy);
+      await UsageLedger.configure(context.filesDir, () => data.open());
+      await this.app.initialize(this.session!);
+      if (!this.app.ready) { throw new Error(this.app.error); }
+      this.startBusiness();
+      if (!useLegacy) { this.paths.pushPath({ name: 'backup' }); }
+    } catch (error) {
+      this.recoveryError = (error as Error).message;
+      Diagnostics.log('error', 'configuration', 'load_failed', undefined, error as Error);
+    } finally { this.recoveryBusy = false; }
   }
 
   private offerAnnouncement(): void {
@@ -352,6 +406,7 @@ struct Index {
   private privacyChanged(): void {
     if (this.privacyAllowed) { this.startBusiness(); }
     else {
+      nearbySync.setAllowed(false);
       this.panelUpdates?.setActive(false);
       autoCloudBackup.dispose();
       this.closeAnnouncement();
@@ -1137,6 +1192,7 @@ struct Index {
   @Builder
   settingsContent() {
     SettingsPanel({ app: this.app, section: this.settingsSection, settings: this.app.settings, account: this.account, active: this.settingsActive && this.foreground,
+      onNearbySync: (value: boolean) => nearbySync.setEnabled(value, this.getUIContext().getHostContext() as common.UIAbilityContext),
       onAccount: () => { this.paths.pushPath({ name: 'account' }); },
       browser: this.browser,
       onAddProvider: () => { this.paths.pushPath({ name: 'provider-presets' }); },
@@ -1508,7 +1564,32 @@ struct Index {
                 Text(t("正在打开本地会话…")).fontColor($r('app.color.text_secondary'))
               } else {
                 Text(this.app.error).fontColor($r('app.color.danger')).textAlign(TextAlign.Center)
-                Button(t("重试读取")).attributeModifier(Btn.tonal).onClick(() => this.startBusiness())
+                if (this.recoveryNeeded) {
+                  Text(t('本机数据库密钥无法读取。恢复会使用新的加密数据库，原数据库和文件会保留。'))
+                    .fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
+                  if (this.recoveryCloud) {
+                    Text(t('可用云备份 · {0}', [new Date(this.recoveryCloud.createdAt).toLocaleString(getLocale())]))
+                      .id('storage-recovery-cloud-date').fontColor($r('app.color.text_secondary'))
+                    Button(t('打开云备份恢复')).id('storage-recover-cloud').attributeModifier(Btn.tonal)
+                      .enabled(!this.recoveryBusy).onClick(() => this.recoverStorage(false))
+                  } else {
+                    Button(t('检查云备份')).id('storage-recovery-check-cloud').attributeModifier(Btn.tonal)
+                      .enabled(!this.recoveryBusy).onClick(() => this.checkRecoveryCloud())
+                  }
+                  if (this.recoveryCloudStatus) {
+                    Text(this.recoveryCloudStatus).id('storage-recovery-cloud-status')
+                      .fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
+                  }
+                  if (this.recoveryLegacy) {
+                    Text(t('升级前副本 · {0} 个会话 · {1}', [this.recoveryLegacy.threads,
+                      new Date(this.recoveryLegacy.savedAt).toLocaleString(getLocale())]))
+                      .id('storage-recovery-legacy-date').fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
+                    Button(t('恢复升级前数据')).id('storage-recover-legacy').attributeModifier(Btn.tonal)
+                      .enabled(!this.recoveryBusy).onClick(() => this.recoverStorage(true))
+                  }
+                  if (this.recoveryError) { Text(this.recoveryError).fontColor($r('app.color.danger')).textAlign(TextAlign.Center) }
+                }
+                Button(t("重试读取")).attributeModifier(Btn.tonal).enabled(!this.recoveryBusy).onClick(() => this.startBusiness())
               }
             }.padding(Space.xl).layoutWeight(1).width('100%').justifyContent(FlexAlign.Center)
           }

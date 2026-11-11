@@ -50,6 +50,8 @@ export type SessionPhase = 'idle' | 'loading' | 'saving' | 'running' | 'compacti
 export interface SessionState {
   // phase/context/error describe the selected chat; these fields describe the application.
   runningThreadIds?: string[];
+  peerRunningThreadIds?: string[];
+  peerThread?: boolean;
   canNavigate?: boolean;
   compatibilityWarnings?: string[];
   ready: boolean;
