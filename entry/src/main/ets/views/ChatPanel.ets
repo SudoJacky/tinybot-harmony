@@ -770,11 +770,14 @@ export struct ChatPanel {
   }
 
   private confirmCompact(): void {
+    const threadId = this.thread.id;
     this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface,
       title: t("压缩较早对话？"),
       message: t("将调用当前模型生成摘要，消耗 Token。完整记录保留，之后请求使用摘要和最近消息。"),
       primaryButton: { value: t("取消"), action: () => {} },
-      secondaryButton: { value: t("压缩"), action: () => { this.showContext = false; this.app.compactHistory(); } }
+      secondaryButton: { value: t("压缩"), action: () => {
+        if (this.app.active.id === threadId) { this.app.compactHistory(); }
+      } }
     });
   }
 
@@ -950,7 +953,7 @@ export struct ChatPanel {
   contextSheet() {
     Scroll() {
       Column({ space: Space.lg }) {
-        ContextDetails({ app: this.app })
+        ContextDetails({ app: this.app, onCompact: () => this.confirmCompact() })
         if (this.thread.compaction) {
           Column({ space: 10 }) {
             Row({ space: Space.sm }) {
@@ -970,13 +973,6 @@ export struct ChatPanel {
             }
           }.padding(Space.lg).borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
         }
-        Column({ space: Space.sm }) {
-          Button(t("压缩较早对话")).fontFamily(this.appearance.fontFamily).id('compact-history').attributeModifier(Btn.tonal).width('100%')
-            .enabled(this.app.configured && !this.app.busy && !this.thread.archived && this.app.saveError.length === 0)
-            .onClick(() => this.confirmCompact())
-          Text(t("使用当前模型为较早消息生成摘要，会消耗 Token。")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
-            .fontColor($r('app.color.text_tertiary'))
-        }.width('100%')
       }.width('100%').padding({ left: Space.page, right: Space.page, bottom: Space.xl + this.insetBottom })
     }.width('100%').height('100%').scrollBar(BarState.Off)
   }
