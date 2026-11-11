@@ -42,6 +42,7 @@ import { LiveResources, SkillRequest, McpRequest, McpSummary, saveSkillCandidate
 import { Cancellation } from './Cancellation';
 import { ToolSet } from './ToolSet';
 import { AppData, MessageData, ModelConfig, ThreadData, copyModelConfig, copyAppMetadata, emptyData } from '../model/Conversation';
+import { mergeSavedConfiguration } from '../model/SavedConfiguration';
 import { contextSettings } from '../model/ContextSettings';
 import { ModelReference, ProviderProfile, migrateProfiles, modelConfig } from '../model/ProviderProfiles';
 import { defaultSearchConfig, isSupportedSearchProvider } from '../model/WebSearch';
@@ -54,7 +55,7 @@ import { CONTENT_GUARD_REFUSAL } from '../model/ContentGuard';
 import { AgentEvent, AgentRuntime } from './AgentRuntime';
 import { AgentTools } from './AgentLoop';
 import { CredentialVault, ProfileSettings, ProviderDraft } from './ProfileSettings';
-import { MessageCheckpoint, SessionEvent, SessionPreferences, SessionRepository, SessionResources, SessionState, SettingsToggle } from './SessionContracts';
+import { SessionEvent, SessionPreferences, SessionRepository, SessionResources, SessionState, SettingsToggle, ThreadCheckpoint } from './SessionContracts';
 import { prepareSessionContext, sessionPromptSections, sessionContextSource } from './SessionContext';
 import { PromptSection, renderPrompt } from '../model/ContextProjection';
 interface UiComputeReceipt { status: string; result: UiValues; error: string; resultTruncated: boolean; }
@@ -588,18 +589,42 @@ export class SessionService {
   async setReasoningEffort(value: string): Promise<boolean> {
     if (!this.application.ready || this.active.archived) return false;
     return this.mutate(t('保存推理强度失败：'), async () => {
-      const protocol = this.providerProfiles.find((item) => item.id === this.active.modelRef?.providerId)?.protocol || '';
-      if (!reasoningEfforts(protocol, this.active.modelRef?.modelId || '').includes(value) || !this.currentConfig.configured) {
+      const active = this.active;
+      const protocol = this.providerProfiles.find((item) => item.id === active.modelRef?.providerId)?.protocol || '';
+      if (!reasoningEfforts(protocol, active.modelRef?.modelId || '').includes(value) || !this.currentConfig.configured) {
         throw new Error(t('当前模型或协议不支持此推理强度设置。'));
       }
-      // Commit a copy so a failed disk write leaves the previous selection intact.
-      const candidate = this.snapshot();
-      const thread = candidate.threads.find((item) => item.id === candidate.activeThreadId);
-      if (!thread) throw new Error(t('当前对话不存在。'));
-      thread.reasoningEffort = value === 'default' ? undefined : value;
-      if (thread.messages.length === 0) { candidate.config.reasoning = thread.reasoningEffort; }
-      await this.commitSettings(candidate);
-    }, 'snapshot', 'thread');
+      const effort = value === 'default' ? undefined : value;
+      const sharedDefault = active.messages.length === 0;
+      const affected = sharedDefault ? this.data.threads.filter((thread) => thread.messages.length === 0 &&
+        this.executions.get(thread.id)?.state.phase !== 'running') : [active];
+      const changed = affected.filter((thread) => thread.reasoningEffort !== effort);
+      const updateDefault = sharedDefault && this.data.config.reasoning !== effort;
+      if (!changed.length && !updateDefault) { return; }
+      const threadIds = changed.map((thread) => thread.id);
+      const ids = new Set(threadIds);
+      const candidate = copyAppMetadata(this.data);
+      if (updateDefault) { candidate.config.reasoning = effort; }
+      // Copy the changed metadata so a failed write leaves the live threads intact.
+      // Share the transcript objects so the repository can reuse their encoded messages.
+      candidate.threads = this.data.threads.map((thread): ThreadData => {
+        if (!ids.has(thread.id)) { return thread; }
+        const edited: ThreadData = { id: thread.id, title: thread.title, updatedAt: thread.updatedAt, messages: [], reasoningEffort: effort };
+        const metadata = mergeSavedConfiguration(thread, edited);
+        metadata.messages = thread.messages;
+        return metadata;
+      });
+      const mark = Diagnostics.begin();
+      try {
+        await this.commitCandidate(candidate, () => {
+          if (updateDefault) { this.data.config = candidate.config; }
+          for (const thread of changed) { thread.reasoningEffort = effort; }
+          this.refreshCompatibility();
+          this.emit({ kind: 'reasoning-effort', state: this.state,
+            reasoningSelection: { threadIds: threadIds, value: value, config: updateDefault ? copyModelConfig(candidate.config) : undefined } });
+        }, threadIds.concat(Array.from(this.dirtyDrafts)), { threadId: active.id });
+      } finally { if (Diagnostics.recording) { Diagnostics.end('reasoning.effort.save', mark, { changed: threadIds.length }); } }
+    }, 'state', 'thread');
   }
 
   async setToolApprovalMode(mode: ToolApprovalMode): Promise<boolean> {
@@ -1449,7 +1474,7 @@ export class SessionService {
     await previous;
     try { return await action(); } finally { release(); }
   }
-  private async mutate(prefix: string, action: () => Promise<void>, publication: 'snapshot' | 'preferences' = 'snapshot', scope: 'shared' | 'thread' | 'navigation' = 'shared'): Promise<boolean> {
+  private async mutate(prefix: string, action: () => Promise<void>, publication: 'snapshot' | 'preferences' | 'state' = 'snapshot', scope: 'shared' | 'thread' | 'navigation' = 'shared'): Promise<boolean> {
     if (!(scope === 'shared' ? this.canMutateShared : scope === 'navigation' ? this.canNavigate : this.canMutate)) { return false; }
     const startedAt = Date.now();
     const draftRevision = this.draftRevision;
@@ -1460,7 +1485,8 @@ export class SessionService {
       await this.exclusive(action);
       // A settings commit must not overwrite typing that happened while disk/key IO was pending.
       await this.persistDraftChanges(draftRevision);
-      if (this.status.phase === 'idle') { this.refreshContext(); }
+      // State-only mutations publish their own field changes and leave the retained context intact.
+      if (publication !== 'state' && this.status.phase === 'idle') { this.refreshContext(); }
       return true;
     }
     catch (error) { this.status.error = prefix + (error as Error).message; this.resources.reportError('mutation_failed', error as Error); return false; }
@@ -1471,9 +1497,9 @@ export class SessionService {
       }
     }
   }
-  private async commitCandidate(candidate: AppData, publish: () => void, changedThreadIds?: string[], message?: MessageCheckpoint): Promise<void> {
+  private async commitCandidate(candidate: AppData, publish: () => void, changedThreadIds?: string[], checkpoint?: ThreadCheckpoint): Promise<void> {
     if (this.pendingCommit) { throw new Error('A session commit is already in progress.'); }
-    const committed = this.repository.save(candidate, changedThreadIds, message).then(publish);
+    const committed = this.repository.save(candidate, changedThreadIds, checkpoint).then(publish);
     this.pendingCommit = committed;
     try { await committed; } finally { this.pendingCommit = undefined; }
   }
@@ -1516,7 +1542,7 @@ export class SessionService {
     const preferences = this.syncEmptyThreadPreferences(this.data); const draftRevision = this.draftRevision;
     try {
       const changed = threadId === undefined ? undefined : preferences.concat([threadId], Array.from(this.dirtyDrafts));
-      const message: MessageCheckpoint | undefined = threadId !== undefined && messageId !== undefined ?
+      const message: ThreadCheckpoint | undefined = threadId !== undefined && messageId !== undefined ?
         { threadId: threadId, messageId: messageId } : undefined;
       if (submittedApprovalMode !== undefined && this.data.lastToolApprovalMode !== submittedApprovalMode) {
         const candidate = copyAppMetadata(this.data);

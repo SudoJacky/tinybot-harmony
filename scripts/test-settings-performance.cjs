@@ -28,6 +28,7 @@ const from = file => load(path.join(root, 'entry/src/main/ets', file));
 const { Fixture, seed } = load(path.join(root, 'entry/src/test/SessionService.test'));
 const { ChatViewModel } = from('viewmodel/ChatViewModel');
 const { MessageViewModel } = from('viewmodel/SessionViewModels');
+const { ConversationCapture } = from('model/ConversationCapture');
 const { defaultAssistantOptions } = from('model/AssistantOptions');
 const panelSource = path.join(root, 'entry/src/main/ets/views/SettingsPanel.ets');
 const emitted = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/views/SettingsPanel.ts');
@@ -98,6 +99,56 @@ async function setup() {
   assert.equal(captureIds.length, 1); assert.equal(captureIds[0].length, 0, 'Reuse unchanged transcript files');
   MessageViewModel.prototype.update = update;
   console.log('PASS responsive settings and transcript-independent preference saves');
+
+  const effortFixture = new Fixture(data), effortApp = new ChatViewModel();
+  await effortApp.initialize(effortFixture.session);
+  const effortViews = effortApp.threads, effortMessages = effortApp.active.messages, effortCaptures = [];
+  const capture = new ConversationCapture(); capture.capture(effortFixture.session.data);
+  const effortSnapshot = effortFixture.session.snapshot.bind(effortFixture.session);
+  const effortRefresh = effortFixture.session.refreshContext.bind(effortFixture.session);
+  const effortSave = effortFixture.repository.save.bind(effortFixture.repository);
+  let effortSnapshots = 0, effortUpdates = 0, contextRefreshes = 0;
+  effortFixture.session.snapshot = () => { effortSnapshots++; return effortSnapshot(); };
+  effortFixture.session.refreshContext = () => { contextRefreshes++; return effortRefresh(); };
+  MessageViewModel.prototype.update = function(data) { effortUpdates++; return update.call(this, data); };
+  effortFixture.repository.save = (data, ids, checkpoint) => {
+    capture.capture(data, ids, checkpoint);
+    effortCaptures.push({ ids, checkpoint });
+    return effortSave(data);
+  };
+  try { assert.equal(await effortApp.setReasoningEffort('high'), true); }
+  finally { MessageViewModel.prototype.update = update; }
+  assert.equal(effortSnapshots, 0, 'Changing effort must not clone transcripts');
+  assert.equal(effortUpdates, 0, 'Changing effort must not update historical message views');
+  assert.equal(contextRefreshes, 0, 'Changing effort alone does not change retained context');
+  assert.equal(effortCaptures.length, 1);
+  assert.deepEqual(Array.from(effortCaptures[0].ids), [effortApp.active.id]);
+  assert.equal(effortCaptures[0].checkpoint.threadId, effortApp.active.id);
+  assert.equal(effortCaptures[0].checkpoint.messageId, undefined);
+  assert.equal(effortApp.threads, effortViews); assert.equal(effortApp.active.messages, effortMessages);
+  assert.equal(effortApp.active.reasoningEffort, 'high'); assert.equal(effortApp.currentConfig.reasoning, 'high');
+  assert.equal((await effortFixture.repository.load()).threads[0].reasoningEffort, 'high');
+  console.log('PASS reasoning effort saves do not traverse unrelated transcripts or reproject messages');
+
+  const empty = await setup(); await empty.f.session.newThread();
+  const emptyViews = empty.app.threads;
+  const pendingEffort = gate();
+  empty.f.repository.beforeSave = () => pendingEffort.promise;
+  const effortWrite = empty.app.setReasoningEffort('low'); await settle();
+  assert.ok(emptyViews.every(thread => thread.reasoningEffort === 'default'));
+  empty.f.session.setDraft('typed during effort save'); pendingEffort.open();
+  assert.equal(await effortWrite, true);
+  assert.equal(empty.app.threads, emptyViews);
+  assert.ok(emptyViews.every(thread => thread.reasoningEffort === 'low'));
+  assert.equal(empty.app.config.reasoning, 'low');
+  const savedEffort = await empty.f.repository.load();
+  assert.equal(savedEffort.threads.find(thread => thread.id === empty.app.active.id).draft, 'typed during effort save');
+  empty.f.repository.beforeSave = async () => { throw Error('effort write failed'); };
+  assert.equal(await empty.app.setReasoningEffort('high'), false);
+  assert.ok(emptyViews.every(thread => thread.reasoningEffort === 'low'));
+  assert.equal(empty.app.config.reasoning, 'low');
+  assert.match(empty.app.error, /effort write failed/);
+  console.log('PASS empty chat effort changes publish together after saving, retain concurrent typing and report failed writes');
 
   const rapid = await setup(), first = gate(); let attempts = 0;
   rapid.f.repository.beforeSave = async () => { if (++attempts === 1) await first.promise; };
@@ -183,7 +234,7 @@ async function setup() {
   console.log('PASS title saves capture only the changed thread, retain UI identity and preserve concurrent typing');
 
   load(path.join(root, 'entry/src/test/SessionService.test')).default();
-  const selected = sessionCases.filter(test => /UserDocument|SettingsCommit|[Tt]itle/.test(test.name));
+  const selected = sessionCases.filter(test => /UserDocument|SettingsCommit|[Tt]itle|[Rr]easoning|emptyPreference|usedChatsKeep/.test(test.name));
   assert.ok(selected.length >= 4);
   for (const test of selected) { await test.run(); console.log('PASS ' + test.name); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -68,6 +68,11 @@ async function main() {
   assert.equal(restored.title, 'After'); assert.equal(restored.memorySnapshot, 'memory');
   assert.equal(restored.messages[1].steps[0].tools[0].output, 'committed', 'capture preserves call-time values');
   capture.capture(data, ['t']); assert.equal(oldReads, initialReads + 1, 'ordinary edits recapture all changed messages');
+  data.threads[0].reasoningEffort = 'high';
+  const metadata = JSON.parse(capture.capture(data, ['t'], { threadId: 't' }).threads.get('t'));
+  assert.equal(oldReads, initialReads + 1, 'Metadata-only checkpoints reuse every cached message');
+  assert.equal(metadata.reasoningEffort, 'high');
+  assert.equal(metadata.messages[1].steps[0].tools[0].output, 'later');
   data.threads[0].messages.splice(0, 1);
   assert.equal(JSON.parse(capture.capture(data, ['t'], { threadId: 't', messageId: 'answer' }).threads.get('t')).messages.length, 1);
   capture.clear(); capture.capture(data, ['t'], { threadId: 't', messageId: 'answer' });
