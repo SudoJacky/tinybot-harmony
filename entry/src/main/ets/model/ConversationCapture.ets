@@ -1,5 +1,5 @@
 import { AppData, MessageData, ThreadData } from './Conversation';
-import { MessageCheckpoint } from '../services/SessionContracts';
+import { ThreadCheckpoint } from '../services/SessionContracts';
 
 interface CapturedMessage { source: MessageData; text: string; }
 interface CapturedThread { text: string; messages: Map<string, CapturedMessage>; }
@@ -21,7 +21,7 @@ export class ConversationCapture {
   private captured: Map<string, CapturedThread> = new Map<string, CapturedThread>();
   clear(): void { this.captured.clear(); }
 
-  capture(data: AppData, changedThreadIds?: string[], message?: MessageCheckpoint): CapturedConversation {
+  capture(data: AppData, changedThreadIds?: string[], checkpoint?: ThreadCheckpoint): CapturedConversation {
     const changed = changedThreadIds === undefined ? undefined : new Set(changedThreadIds);
     const next = new Map<string, CapturedThread>(); const threads = new Map<string, string>();
     for (const thread of data.threads) {
@@ -32,9 +32,9 @@ export class ConversationCapture {
       const messages = new Map<string, CapturedMessage>(); const texts: string[] = [];
       for (const item of thread.messages) {
         const cached = previous?.messages.get(item.id);
-        // Only the runtime can promise that other messages have not changed.
-        // Normal edits/settings/imports recapture the whole changed thread.
-        const snapshot: CapturedMessage = message?.threadId === thread.id && message.messageId !== item.id && cached?.source === item ?
+        // A checkpoint explicitly identifies the only changed message, if any.
+        // Other writes recapture the whole changed thread.
+        const snapshot: CapturedMessage = checkpoint?.threadId === thread.id && checkpoint.messageId !== item.id && cached?.source === item ?
           cached : { source: item, text: JSON.stringify(item) };
         messages.set(item.id, snapshot); texts.push(snapshot.text);
       }

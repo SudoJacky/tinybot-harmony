@@ -9,7 +9,7 @@ assert.ok(fs.statSync(built).mtimeMs >= fs.statSync(source).mtimeMs, 'Rebuild Ch
 const tree = ts.createSourceFile(built, fs.readFileSync(built, 'utf8'), ts.ScriptTarget.Latest, true);
 const cls = tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'ChatPanel');
 const names = ['fromSheet', 'dismissPlusMenu', 'finishPlusAction', 'cancelPlusAction', 'canAttach', 'endSpeech',
-  'addThreadReference', 'expandDraft', 'showSpeechKeyboard', 'speechActive', 'aboutToDisappear', 'speechAvailabilityChanged', 'speechThreadChanged', 'afterRender', 'publishHeaderProgress'];
+  'addThreadReference', 'expandDraft', 'showSpeechKeyboard', 'speechActive', 'aboutToDisappear', 'speechAvailabilityChanged', 'speechThreadChanged', 'afterRender'];
 const methods = cls.members.filter(n => names.includes(n.name?.getText(tree)));
 function find(node, predicate) {
   if (predicate(node)) return node;
@@ -49,7 +49,7 @@ function fixture() {
     showPlus: true, showPlusMenu: false, voiceMode: false, importing: false, writingExpanded: false,
     composerController: { caretPosition() {} },
     cancelAttachmentDrop() {}, setScrollActivity() {}, viewport: { dispose() {} },
-    reading: { stop() {} }, onHeaderProgress() {}, receiveVoiceShortcut() {},
+    reading: { stop() {} }, receiveVoiceShortcut() {},
     getUIContext: () => ({ postFrameCallback: frame => frames.push(frame), getFocusController: () => ({
       clearFocus() {},
       requestFocus(id) {

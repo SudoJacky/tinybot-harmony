@@ -1,5 +1,6 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { systemMaterialAttribute } from '../common/MaterialAttributes';
+import { monochromeProviderLogo, providerLogo } from '../common/ProviderBrand';
 import { t } from '../model/I18n';
 import { reasoningEffortName } from '../model/ReasoningEffort';
 import { IconButton } from '../common/Widgets';
@@ -11,7 +12,9 @@ export struct ReasoningEffortPicker {
   @Prop @Watch('syncEfforts') efforts: string[] = ['default'];
   @Prop @Watch('resetPreview') selectionKey: string = '';
   @Prop modelName: string = '';
+  @Prop providerPreset: string = '';
   @Prop disabled: boolean = false;
+  onChooseModel: () => void = () => {};
   onSelect: (value: string) => Promise<boolean> = async () => false;
   onPreview: (value: string | undefined) => void = () => {};
   @State private previewIndex: number = 0;
@@ -59,36 +62,60 @@ export struct ReasoningEffortPicker {
 
   build() {
     Column({ space: 4 }) {
-      Row() {
-        Blank().width(32)
-        Column({ space: 2 }) {
-          Text(reasoningEffortName(this.efforts[this.previewIndex])).fontFamily(this.appearance.fontFamily)
-            .fontSize(16).fontWeight(FontWeight.Medium).fontColor($r('sys.color.font_primary'))
-          Text(this.modelName).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('sys.color.font_secondary'))
-            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-        }.layoutWeight(1)
-        IconButton({ icon: $r('sys.symbol.arrow_counterclockwise'), label: t('恢复 Auto 推理强度'),
-          compId: 'reset-reasoning-effort', diameter: 32, iconSize: 17,
-          tint: $r('sys.color.icon_primary'),
-          disabled: this.disabled || this.saving || this.value === 'default',
-          onTap: () => { this.select(0); } })
+      Row({ space: 8 }) {
+        Button({ type: ButtonType.Normal }) {
+          Row({ space: 8 }) {
+            Column({ space: 2 }) {
+              Text(reasoningEffortName(this.efforts[this.previewIndex])).fontFamily(this.appearance.fontFamily)
+                .fontSize(16).fontWeight(FontWeight.Medium).fontColor($r('sys.color.font_primary'))
+              Row({ space: 4 }) {
+                if (providerLogo(this.providerPreset)) {
+                  Image(providerLogo(this.providerPreset)).width(14).height(14).objectFit(ImageFit.Contain)
+                    .fillColor(monochromeProviderLogo(this.providerPreset) ? $r('sys.color.font_secondary') : undefined)
+                    .flexShrink(0).accessibilityLevel('no')
+                } else {
+                  SymbolGlyph($r('sys.symbol.cloud')).fontSize(14).fontColor([$r('sys.color.font_secondary')])
+                    .flexShrink(0).accessibilityLevel('no')
+                }
+                Text('·').fontSize(12).fontColor($r('sys.color.font_secondary')).flexShrink(0).accessibilityLevel('no')
+                Text(this.modelName).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('sys.color.font_secondary'))
+                  .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).flexShrink(1)
+              }.width('100%')
+            }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+            SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(12).fontColor([$r('sys.color.font_secondary')])
+          }.width('100%')
+        }.id('reasoning-choose-model').layoutWeight(1).constraintSize({ minHeight: 54 })
+          .padding({ left: 12, right: 12, top: 6, bottom: 6 }).borderRadius(12)
+          .backgroundColor(Color.Transparent).border({ width: 0.5, color: $r('app.color.divider') })
+          .focusOnTouch(false).enabled(!this.disabled && !this.saving)
+          .accessibilityText(t('选择模型') + '：' + this.modelName + ' · ' + reasoningEffortName(this.efforts[this.previewIndex]))
+          .onClick(this.onChooseModel)
+        if (this.efforts.length > 1) {
+          IconButton({ icon: $r('sys.symbol.arrow_counterclockwise'), label: t('恢复 Auto 推理强度'),
+            compId: 'reset-reasoning-effort', diameter: 32, iconSize: 17,
+            tint: $r('sys.color.icon_primary'),
+            disabled: this.disabled || this.saving || this.value === 'default',
+            onTap: () => { this.select(0); } })
+        }
       }.width('100%')
-      // Keep the native track/thumb proportions: material adds its own pressed-state enlargement.
-      Slider({ value: this.previewIndex, min: 0, max: this.efforts.length - 1, step: 1, style: SliderStyle.InSet })
-        .id('reasoning-effort-slider').width('100%').height(44)
-        .blockColor($r('app.color.surface'))
-        .selectedColor(this.appearance.accent).trackColor($r('app.color.surface_variant'))
-        .showSteps(true).stepSize(4).stepColor($r('app.color.text_tertiary'))
-        .enabled(!this.disabled && !this.saving)
-        .accessibilityText(t('推理强度') + '：' + reasoningEffortName(this.efforts[this.previewIndex]))
-        .attributeModifier(systemMaterialAttribute<SliderAttribute>(this.appearance.control))
-        .onChange((value: number, mode: SliderChangeMode) => {
-          if (this.disabled || this.saving) return;
-          this.dragging = mode === SliderChangeMode.Begin || mode === SliderChangeMode.Moving;
-          this.preview(value);
-          // Dragging only previews; persist the selected stop once the gesture commits.
-          if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) this.select(this.previewIndex);
-        })
-    }.width(288).padding(12)
+      if (this.efforts.length > 1) {
+        // Keep the native track/thumb proportions: material adds its own pressed-state enlargement.
+        Slider({ value: this.previewIndex, min: 0, max: this.efforts.length - 1, step: 1, style: SliderStyle.InSet })
+          .id('reasoning-effort-slider').width('100%').height(44)
+          .blockColor($r('app.color.surface'))
+          .selectedColor(this.appearance.accent).trackColor($r('app.color.surface_variant'))
+          .showSteps(true).stepSize(4).stepColor($r('app.color.text_tertiary'))
+          .enabled(!this.disabled && !this.saving).focusOnTouch(false)
+          .accessibilityText(t('推理强度') + '：' + reasoningEffortName(this.efforts[this.previewIndex]))
+          .attributeModifier(systemMaterialAttribute<SliderAttribute>(this.appearance.control))
+          .onChange((value: number, mode: SliderChangeMode) => {
+            if (this.disabled || this.saving) return;
+            this.dragging = mode === SliderChangeMode.Begin || mode === SliderChangeMode.Moving;
+            this.preview(value);
+            // Dragging only previews; persist the selected stop once the gesture commits.
+            if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) this.select(this.previewIndex);
+          })
+      }
+    }.width('100%').padding(12)
   }
 }

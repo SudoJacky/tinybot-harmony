@@ -15,18 +15,20 @@ function load(file) {
 }
 const { summarizeUsage } = load(path.join(sourceRoot, 'model/MessageUsage'));
 const { ThreadViewModel } = load(path.join(sourceRoot, 'viewmodel/SessionViewModels'));
-const source = path.join(sourceRoot, 'views/ContextDetails.ets');
-const emitted = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/views/ContextDetails.ts');
-assert.ok(fs.statSync(emitted).mtimeMs >= fs.statSync(source).mtimeMs, 'Rebuild ContextDetails before testing');
-const tree = ts.createSourceFile(emitted, fs.readFileSync(emitted, 'utf8'), ts.ScriptTarget.Latest, true);
-const component = tree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'ContextDetails');
-const methods = ['records', 'usage', 'counted', 'rows', 'tokens', 'total', 'ratio', 'remaining', 'compact', 'percent', 'segmentWidth']
-  .map(name => component.members.find(node => node.name?.getText(tree) === name).getText(tree)).join('\n');
-const context = { exports: {}, summarizeUsage, t: key => key };
-vm.runInNewContext(ts.transpileModule(`class Panel { ${methods} } exports.Panel = Panel;`, {
-  compilerOptions: { target: ts.ScriptTarget.ES2021 }
-}).outputText, context);
-const panel = new context.exports.Panel();
+function probe(name, members) {
+  const source = path.join(sourceRoot, 'views', `${name}.ets`);
+  const emitted = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/views', `${name}.ts`);
+  assert.ok(fs.statSync(emitted).mtimeMs >= fs.statSync(source).mtimeMs, 'Rebuild ' + name + ' before testing');
+  const tree = ts.createSourceFile(emitted, fs.readFileSync(emitted, 'utf8'), ts.ScriptTarget.Latest, true);
+  const component = tree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === name);
+  const methods = members.map(member => component.members.find(node => node.name?.getText(tree) === member).getText(tree)).join('\n');
+  const context = { exports: {}, summarizeUsage, t: key => key };
+  vm.runInNewContext(ts.transpileModule(`class Probe { ${methods} } exports.Probe = Probe;`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2021 }
+  }).outputText, context);
+  return new context.exports.Probe();
+}
+const panel = probe('ContextDetails', ['records', 'usage', 'counted', 'rows', 'tokens', 'bands', 'title', 'remaining', 'percent', 'selectKind']);
 const record = (id, tokens, status = 'complete') => ({ id, provider: 'test', model: 'model', startedAt: 1, durationMs: 100, status, tokens });
 const step = usage => ({ content: '', tools: [], usage });
 const message = (id, role, steps = []) => ({ id, role, content: '', status: 'complete', error: '', steps });
@@ -76,22 +78,37 @@ console.log('PASS live updates, failed/cancelled/missing reports, partial marker
 // must track the real occupied fraction without rewriting category estimates.
 app.contextWindow = 1000;
 app.contextDetails = [{ id: 'sys', kind: 'system', tokens: 300 }, { id: 'tool', kind: 'definitions', tokens: 100 }];
+Object.assign(panel, { kinds: ['system', 'definitions', 'user'], colors: ['rose', 'violet', 'blue'], selected: '' });
+const meter = probe('ContextMeter', ['aboutToAppear', 'band', 'activeBand', 'figure', 'updateFigure', 'point', 'compact',
+  'occupied', 'estimateTotal', 'segmentWeight', 'visibleKinds']);
+Object.assign(meter, { bands: panel.bands(), capacity: app.contextWindow, used: 0, pointed: '', selected: '' });
+meter.aboutToAppear();
+assert.deepEqual(Array.from(meter.visibleKinds()), ['system', 'definitions']);
 for (const used of [0, 200, 600, 1200]) {
-  app.contextUsed = used;
-  assert.ok(Math.abs(panel.segmentWidth('system') + panel.segmentWidth('definitions') - Math.min(used / 10, 100)) < 1e-9);
-  assert.equal(panel.segmentWidth('user'), 0);
+  meter.used = app.contextUsed = used;
+  assert.ok(Math.abs(meter.segmentWeight('system') + meter.segmentWeight('definitions') - Math.min(used / 1000, 1)) < 1e-9);
+  assert.equal(meter.segmentWeight('user'), 0);
   assert.equal(panel.tokens('system'), 300, 'Calibration must not fabricate per-category token counts');
   assert.equal(panel.remaining(), Math.max(0, 1000 - used));
 }
-assert.equal(panel.percent(panel.ratio()), '120%', 'Do not conceal over-limit usage behind a clamped bar');
+assert.equal(panel.percent(app.contextUsed / app.contextWindow), '120%', 'Do not conceal over-limit usage behind a clamped bar');
 app.contextDetails.push({ id: 'draft', kind: 'user', tokens: 100 });
-app.contextUsed = 500;
-assert.equal(panel.segmentWidth('user'), 10, 'Draft updates participate in the live segment distribution');
+meter.bands = panel.bands(); meter.used = app.contextUsed = 500; meter.updateFigure();
+assert.equal(meter.segmentWeight('user'), 0.1, 'Draft updates participate in the live segment distribution');
+meter.point('definitions', true); assert.equal(meter.figure(), 100); assert.equal(meter.rising, false);
+meter.point('definitions', false); assert.equal(meter.figure(), 500); assert.equal(meter.rising, true);
+panel.selectKind('user'); meter.selected = panel.selected; meter.updateFigure();
+assert.equal(meter.figure(), 100); assert.equal(panel.rows(panel.selected)[0].id, 'draft');
+panel.shown = 32; panel.selectKind('user'); meter.selected = panel.selected; meter.updateFigure();
+assert.equal(meter.figure(), 500); assert.equal(panel.shown, 12);
+app.contextDetails[0].tokens = 50; meter.bands = panel.bands(); meter.used = 250;
+assert.deepEqual(Array.from(meter.visibleKinds()), ['system', 'definitions', 'user'], 'Compaction changes width while retaining band order');
 app.contextDetails = []; app.contextUsed = 0;
-assert.equal(panel.segmentWidth('system'), 0);
-app.contextWindow = 0;
-assert.equal(panel.ratio(), 0); assert.equal(panel.segmentWidth('system'), 0);
+meter.bands = panel.bands(); meter.used = 400;
+assert.equal(meter.segmentWeight('system'), 0); assert.equal(meter.occupied(), 0.4);
+meter.capacity = 0;
+assert.equal(meter.occupied(), 0); assert.equal(meter.segmentWeight('system'), 0);
 assert.equal(panel.percent(0), '0%'); assert.equal(panel.percent(0.00001), '<0.1%');
-assert.equal(panel.compact(5391), '5.4k'); assert.equal(panel.compact(1000000), '1M');
-assert.equal(panel.compact(1200000), '1.2M'); assert.equal(panel.compact(0), '0');
-console.log('PASS calibrated segments, draft updates, empty/zero-window data, overflow and compact number formatting');
+assert.equal(meter.compact(5391), '5.4K'); assert.equal(meter.compact(1000000), '1M');
+assert.equal(meter.compact(1200000), '1.2M'); assert.equal(meter.compact(0), '0');
+console.log('PASS calibrated bands, live draft and compaction updates, category preview and selection, unknown/zero capacity and overflow');

@@ -14,13 +14,13 @@ import { SharedFolder } from '../model/SharedFolders';
 import { ToolExecution } from '../model/Agent';
 import { FileAnnotation } from '../model/FileAnnotation';
 
-export interface MessageCheckpoint { threadId: string; messageId: string; }
+export interface ThreadCheckpoint { threadId: string; messageId?: string; }
 
 export interface SessionRepository {
   load(): Promise<AppData>;
   // Capture call-time values synchronously. Omitted IDs mean a full save; otherwise unchanged threads are reused.
-  // Runtime checkpoints change one message plus thread metadata. Other saves recapture changed threads in full.
-  save(data: AppData, changedThreadIds?: string[], message?: MessageCheckpoint): Promise<void>;
+  // A checkpoint can change only metadata, or one message in addition to metadata.
+  save(data: AppData, changedThreadIds?: string[], checkpoint?: ThreadCheckpoint): Promise<void>;
 }
 
 export interface SessionResources {
@@ -71,11 +71,18 @@ export interface SessionPreferences {
   productivity: ProductivityData;
 }
 
+export interface ReasoningSelection {
+  threadIds: string[];
+  value: string;
+  config?: ModelConfig;
+}
+
 // Structural changes carry detached snapshots; preference changes omit transcripts.
 export interface SessionEvent {
-  kind: 'snapshot' | 'preferences' | 'message' | 'tool' | 'text' | 'reasoning' | 'draft' | 'state' | 'thread' | 'teams' | 'task-complete';
+  kind: 'snapshot' | 'preferences' | 'reasoning-effort' | 'message' | 'tool' | 'text' | 'reasoning' | 'draft' | 'state' | 'thread' | 'teams' | 'task-complete';
   state: SessionState;
   preferences?: SessionPreferences;
+  reasoningSelection?: ReasoningSelection;
   data?: AppData;
   thread?: ThreadData;
   teams?: TeamRun[];

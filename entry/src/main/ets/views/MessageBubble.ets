@@ -20,7 +20,7 @@ import { DataViewCard } from './DataViewCard';
 import { Attachment } from '../model/Productivity';
 import { Attachments } from '../services/Attachments';
 import { MessageViewModel, ToolExecutionViewModel } from '../viewmodel/ChatViewModel';
-import { Btn, Font, Motion, Radius, Space, fileSize } from '../common/Theme';
+import { Btn, Font, Motion, PROCESS_ROW_HEIGHT, Radius, Space, fileSize } from '../common/Theme';
 import { MessageUsage } from './MessageUsage';
 import { ThinkingDisclosure } from './ThinkingDisclosure';
 import { ThreadReferenceCard } from './ThreadReferenceCard';
@@ -159,9 +159,10 @@ struct ToolRow {
               .fontColor(this.execution.status === 'failed' ? $r('app.color.danger') : $r('app.color.text_tertiary'))
           }
         }.translate({ y: this.glyphShift }).opacity(this.glyphOpacity)
-        SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(11).fontColor([$r('app.color.text_tertiary')])
-          .rotate({ angle: this.disclosure.open ? 180 : 0 })
-      }.id('tool-' + this.execution.call.id).width('100%').height(44)
+        Stack({ alignContent: Alignment.Center }) {
+          SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(11).fontColor([$r('app.color.text_tertiary')])
+        }.width(16).height(16).rotate({ angle: this.disclosure.open ? 180 : 0 })
+      }.id('tool-' + this.execution.call.id).width('100%').height(PROCESS_ROW_HEIGHT)
       .accessibilityText((this.disclosure.open ? t('收起') : t('展开')) + ' ' + toolTitle(this.name()) + ' ' + toolStatusLabel(this.execution.status))
       .onClick(() => {
         this.onInspect();
@@ -214,7 +215,7 @@ struct ProcessGroup {
   }
 
   build() {
-    Column({ space: Space.sm }) {
+    Column({ space: Space.xs }) {
       if (!this.richOnly) {
         ForEach(this.items(), (item: ProcessItem) => {
           if (item.tool < 0) {
@@ -598,7 +599,7 @@ export struct MessageBubble {
           if (this.entryVisible(entry, index, this.timeline().length)) {
             Row({ space: 10 }) {
               if (this.traceEntry(entry) && !this.folded()) {
-                Column({ space: 5 }) {
+                Column() {
                   if (this.traceState(entry) === 'active') {
                     LoadingProgress().width(14).height(14).color(this.appearance.accent)
                   } else {
@@ -606,7 +607,8 @@ export struct MessageBubble {
                       this.traceState(entry) === 'stopped' ? $r('sys.symbol.stop_circle') : $r('sys.symbol.checkmark'))
                       .fontSize(12).fontColor([this.traceState(entry) === 'failed' ? $r('app.color.danger') : $r('app.color.text_tertiary')])
                   }
-                }.width(16).padding({ top: entry.kind === 'process' ? 9 : 5 })
+                }.width(16).height(entry.kind === 'process' ? PROCESS_ROW_HEIGHT : 'auto')
+                  .padding({ top: entry.kind === 'process' ? 0 : 5 }).justifyContent(FlexAlign.Center)
               }
               Column() {
               if (entry.kind === 'steering') {

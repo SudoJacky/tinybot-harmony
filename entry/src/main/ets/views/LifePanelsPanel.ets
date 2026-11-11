@@ -6,8 +6,8 @@ import { PanelGridGuide } from './PanelGridGuide';
 import { SendFrame } from '../common/SendBubbleMotion';
 import { common } from '@kit.AbilityKit';
 import { AppearanceStyle } from '../common/AppearanceStyle';
-import { Btn, Motion, relativeTime, gradientColor } from '../common/Theme';
-import { Banner, IconButton } from '../common/Widgets';
+import { Btn, Motion, Radius, Styles, relativeTime, gradientColor } from '../common/Theme';
+import { Banner, GroupCard, IconButton } from '../common/Widgets';
 import { t } from '../model/I18n';
 import { Diagnostics } from '../model/Diagnostics';
 import { PanelEntry } from '../model/LifePanel';
@@ -96,6 +96,7 @@ export struct LifePanelsPanel {
   private edgeTimer: number = -1;
   private contentScroller: Scroller = new Scroller();
   private boardScroller: Scroller = new Scroller();
+  private boardEditorScroller: Scroller = new Scroller();
   private store?: LifePanels;
   private mounted: boolean = false;
   private timer: number = -1;
@@ -430,8 +431,21 @@ export struct LifePanelsPanel {
     finally { this.boardSaving = false; }
   }
   private editBoard(board?: BoardEntry): void {
-    this.boardEditorId = board?.board.id || ''; this.boardEditorWorkspace = board?.workspaceId || this.app.activeWorkspaceId;
-    this.boardTitle = board?.board.title || ''; this.boardDescription = board?.board.description || ''; this.openSheet('board');
+    if (this.boardSaving) { return; }
+    const alreadyOpen = this.sheetOpen && this.sheetKind === 'board';
+    const id = board?.board.id || '';
+    const workspace = board?.workspaceId || this.app.activeWorkspaceId;
+    if (!alreadyOpen || this.boardEditorId !== id || this.boardEditorWorkspace !== workspace) {
+      this.boardEditorId = id;
+      this.boardEditorWorkspace = workspace;
+      this.boardTitle = board?.board.title || '';
+      this.boardDescription = board?.board.description || '';
+      this.openSheet('board');
+    }
+    if (alreadyOpen) {
+      this.getUIContext().getFocusController().clearFocus();
+      this.boardEditorScroller.scrollEdge(Edge.Top);
+    }
   }
   private async saveBoard(): Promise<void> {
     if (this.boardSaving) { return; } this.boardSaving = true; this.error = '';
@@ -442,29 +456,108 @@ export struct LifePanelsPanel {
     finally { this.boardSaving = false; }
   }
   private async archiveBoard(entry: BoardEntry): Promise<void> {
+    if (this.boardSaving) { return; }
+    this.boardSaving = true;
+    this.error = '';
     try {
       await this.boardStore().save(entry.workspaceId, entry.board.id, entry.board.title, entry.board.description, undefined, !entry.board.archived);
       if (this.boardSelection === this.boardKey(entry)) { this.boardSelection = ''; } await this.reload();
     } catch (error) { this.report(error as Error); }
+    finally { this.boardSaving = false; }
   }
   private async dropCard(event: GestureEvent): Promise<void> {
     this.moveCard(event); await this.finishLayout();
   }
+  private isEditingBoard(key: string): boolean {
+    return !!this.boardEditorId && key === this.boardEditorWorkspace + '/' + this.boardEditorId;
+  }
+  @Builder private boardEditorForm() {
+    Column({ space: 8 }) {
+      Text(this.boardEditorId ? t('编辑看板') : t('新建看板'))
+        .fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.text_secondary')).padding({ left: 4 })
+      GroupCard() {
+        Column({ space: 12 }) {
+          Column({ space: 6 }) {
+            Text(t('看板名称')).fontFamily(this.appearance.fontFamily).fontSize(14).fontColor($r('app.color.text_secondary'))
+            TextInput({ text: this.boardTitle, placeholder: t('看板名称') })
+              .id('life-board-name').width('100%').attributeModifier(Styles.input).fontFamily(this.appearance.fontFamily)
+              .maxLength(80).enabled(!this.boardSaving).onChange((value: string) => { this.boardTitle = value; })
+          }.width('100%').alignItems(HorizontalAlign.Start)
+          Divider().strokeWidth(0.5).color($r('app.color.divider'))
+          Column({ space: 6 }) {
+            Text(t('看板描述')).fontFamily(this.appearance.fontFamily).fontSize(14).fontColor($r('app.color.text_secondary'))
+            TextArea({ text: this.boardDescription, placeholder: t('看板描述') })
+              .id('life-board-description').width('100%').attributeModifier(Styles.area).fontFamily(this.appearance.fontFamily)
+              .height(76).maxLength(500).enabled(!this.boardSaving).onChange((value: string) => { this.boardDescription = value; })
+          }.width('100%').alignItems(HorizontalAlign.Start)
+          Row() {
+            Button(t('保存看板')).id('life-board-save').attributeModifier(Btn.primary)
+              .enabled(!!this.boardTitle.trim() && !this.boardSaving).onClick(() => { this.saveBoard(); })
+          }.width('100%').justifyContent(FlexAlign.End)
+        }.width('100%').padding(12)
+      }
+    }.width('100%').alignItems(HorizontalAlign.Start)
+  }
+  @Builder private boardEditorRow(key: string) {
+    Row() {
+      Button({ type: ButtonType.Normal }) {
+        Row({ space: 12 }) {
+          SymbolGlyph($r('sys.symbol.square_grid_2x2')).fontSize(20).fontColor([$r('app.color.text_secondary')])
+          Column({ space: 2 }) {
+            Text(this.boardFor(key).board.title).fontFamily(this.appearance.fontFamily).fontSize(16)
+              .fontWeight(this.isEditingBoard(key) ? FontWeight.Medium : FontWeight.Regular)
+              .fontColor($r('app.color.text_primary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            if (this.boardFor(key).board.archived) {
+              Text(t('已归档')).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
+            }
+          }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+        }.width('100%')
+      }.id('life-board-edit-' + key).layoutWeight(1).constraintSize({ minHeight: 52 }).padding({ left: 12, right: 4, top: 8, bottom: 8 })
+        .backgroundColor(Color.Transparent).borderRadius(Radius.md).enabled(!this.boardSaving)
+        .accessibilityText(this.boardFor(key).board.title).accessibilitySelected(this.isEditingBoard(key))
+        .accessibilityDescription(this.boardFor(key).board.archived ? t('已归档') : '')
+        .onClick(() => this.editBoard(this.boardFor(key)))
+      Button(this.boardFor(key).board.archived ? t('恢复') : t('归档'))
+        .id('life-board-archive-' + key).type(ButtonType.Normal).height(44).padding({ left: 12, right: 12 })
+        .backgroundColor(Color.Transparent).borderRadius(Radius.sm).fontFamily(this.appearance.fontFamily).fontSize(14)
+        .fontColor(this.boardFor(key).board.archived ? this.appearance.accent : $r('app.color.text_secondary'))
+        .enabled(!this.boardSaving).onClick(() => { this.archiveBoard(this.boardFor(key)); })
+    }.width('100%').borderRadius(Radius.md)
+      .backgroundColor(this.isEditingBoard(key) ? this.appearance.accentTint : Color.Transparent)
+  }
   @Builder private boardEditor() {
-    Scroll() {
-      Column({ space: 12 }) {
-        TextInput({ text: this.boardTitle, placeholder: t('看板名称') }).maxLength(80).onChange((value: string) => { this.boardTitle = value; })
-        TextArea({ text: this.boardDescription, placeholder: t('看板描述') }).height(90).maxLength(500).onChange((value: string) => { this.boardDescription = value; })
-        Button(this.boardSaving ? t('保存中…') : t('保存看板')).attributeModifier(Btn.primary).enabled(!!this.boardTitle.trim() && !this.boardSaving).onClick(() => { this.saveBoard(); })
-        Button(t('新建看板')).attributeModifier(Btn.tonal).onClick(() => this.editBoard())
+    Scroll(this.boardEditorScroller) {
+      Column({ space: 16 }) {
         if (this.error) { Banner({ text: this.error }) }
-        ForEach(this.boards.map((entry: BoardEntry) => this.boardKey(entry)), (key: string) => {
-          Row({ space: 8 }) {
-            Button(this.boardFor(key).board.title).attributeModifier(Btn.textSmall).layoutWeight(1).onClick(() => this.editBoard(this.boardFor(key)))
-            Button(this.boardFor(key).board.archived ? t('恢复') : t('归档')).attributeModifier(Btn.textSmall).onClick(() => { this.archiveBoard(this.boardFor(key)); })
-          }.width('100%')
-        }, (key: string) => key)
-      }.padding(24).width('100%')
+        this.boardEditorForm()
+        Column({ space: 4 }) {
+          Row() {
+            Text(t('我的看板')).fontFamily(this.appearance.fontFamily).fontSize(17).fontWeight(FontWeight.Medium)
+              .fontColor($r('app.color.text_primary')).layoutWeight(1)
+            Button({ type: ButtonType.Normal }) {
+              Row({ space: 6 }) {
+                SymbolGlyph($r('sys.symbol.plus')).fontSize(16).fontColor([this.appearance.accent])
+                Text(t('新建看板')).fontFamily(this.appearance.fontFamily).fontSize(14).fontWeight(FontWeight.Medium).fontColor(this.appearance.accent)
+              }
+            }.id('life-board-new').height(44).padding({ left: 8, right: 4 }).borderRadius(Radius.sm)
+              .backgroundColor(Color.Transparent).accessibilityText(t('新建看板')).enabled(!this.boardSaving)
+              .onClick(() => this.editBoard())
+          }.width('100%').padding({ left: 4 })
+          if (this.boards.length > 0) {
+            GroupCard() {
+              Column() {
+                ForEach(this.boards.map((entry: BoardEntry) => this.boardKey(entry)), (key: string, index: number) => {
+                  if (index > 0) {
+                    Divider().strokeWidth(0.5).color($r('app.color.divider')).margin({ left: 12, right: 12 })
+                  }
+                  this.boardEditorRow(key)
+                }, (key: string) => key)
+              }.width('100%').padding(3)
+            }
+          }
+        }.width('100%')
+      }.width('100%').padding({ left: 16, right: 16, top: 12, bottom: 24 })
     }.height('100%').width('100%').align(Alignment.TopStart)
   }
   @Builder private pinPicker() {

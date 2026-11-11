@@ -161,7 +161,7 @@ const textUi = new Proxy({}, { get: (_target, name) => value => {
   const node = activeView.texts.get(activeElement) || {}; node[name] = value; activeView.texts.set(activeElement, node);
 } });
 Object.assign(context, { RenderView, ViewPU: RenderView, ToolRow, RichToolResult, ThinkingDisclosure, Column: noUi, ForEach: noUi, If: noUi,
-  Text: textUi, HorizontalAlign: {}, CopyOptions: {}, Space: {}, t: text => text });
+  Text: textUi, HorizontalAlign: {}, CopyOptions: {}, Space: { xs: 4, sm: 8 }, t: text => text });
 vm.runInNewContext(ts.transpileModule(`class ProcessProbe extends RenderView {
   ${processComponent.members.filter(n => processMethods.includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')}
 } exports.ProcessProbe = ProcessProbe;`, { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, context);
@@ -224,8 +224,11 @@ const rowUi = new Proxy({}, { get: (_target, name) => value => {
   const node = activeView.rows.get(activeElement) || {}; node[name] = value; activeView.rows.set(activeElement, node);
 } });
 const transition = { combine() { return this; }, animation() { return this; } };
+const themeSource = fs.readFileSync(path.join(root, 'common/Theme.ets'), 'utf8');
+const processRowHeight = Number(themeSource.match(/export const PROCESS_ROW_HEIGHT: number = (\d+);/)[1]);
 Object.assign(context, { Row: rowUi, Blank: noUi, Stack: noUi, SymbolGlyph: noUi, TextOverflow: {}, Alignment: {},
-  Context: noUi, ThinkingLine: class extends Child {}, TransitionEffect: { OPACITY: transition, translate() {} } });
+  Context: noUi, ThinkingLine: class extends Child {}, TransitionEffect: { OPACITY: transition, translate() {} },
+  PROCESS_ROW_HEIGHT: processRowHeight });
 const thoughtMethods = ['initialRender', 'lineText', 'scrollLineEnd'].map(name =>
   thoughtComponent.members.find(n => n.name?.getText(thoughtTree) === name).getText(thoughtTree)).join('\n');
 vm.runInNewContext(ts.transpileModule(`class ThoughtProbe extends RenderView {
@@ -241,7 +244,7 @@ function mountThought() {
 const thoughtView = mountThought();
 const thoughtBody = () => [...thoughtView.texts.values()].find(node => node.id === 'thinking-content-thought');
 const thoughtToggle = [...thoughtView.rows.values()].find(node => node.id === 'thinking-toggle-thought');
-assert.equal(thoughtToggle.height, 32); assert.equal(thoughtBody(), undefined);
+assert.equal(thoughtToggle.height, 38); assert.equal(thoughtBody(), undefined);
 thoughtToggle.onClick(); thoughtView.flush();
 assert.equal(thoughtDisclosure.open, true); assert.equal(thoughtBody().create.length, 4000);
 [...thoughtView.texts.values()].find(node => node.id === 'thinking-more-thought').onClick(); thoughtView.flush();
@@ -310,6 +313,8 @@ const toolView = Object.assign(new context.exports.ToolProbe(), { execution: too
   disclosure: new DisclosureStore().get('tool'), glyphShift: 0, glyphOpacity: 1,
   getUIContext: () => ({ animateTo: (_options, update) => update() }) });
 toolView.aboutToAppear(); toolView.initialRender();
+const toolToggle = [...toolView.rows.values()].find(node => node.id === 'tool-animated');
+assert.equal(toolToggle.height, thoughtToggle.height, 'Thoughts and tool calls share a row height');
 const toolLine = [...toolView.children.values()].find(child => child instanceof MotionLine);
 assert.equal(toolLine.working, true); assert.equal(toolLine.label, '正在read_file');
 toolView.execution.status = 'complete'; toolView.statusChanged(); toolView.flush();

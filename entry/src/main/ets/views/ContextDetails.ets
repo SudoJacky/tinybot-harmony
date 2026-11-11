@@ -5,16 +5,20 @@ import { MessageUsageSummary, summarizeUsage } from '../model/MessageUsage';
 import { RequestUsage } from '../model/Usage';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { Btn, Motion, Radius, Space } from '../common/Theme';
+import { Banner } from '../common/Widgets';
+import { ContextMeter, ContextMeterBand } from './ContextMeter';
 
 @Component
 export struct ContextDetails {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
-  @State private expanded: string[] = [];
+  onCompact: () => void = () => {};
+  @State private selected: string = '';
   @State private shown: number = 12;
-  @State private showBreakdown: boolean = true;
+  @State private showBreakdown: boolean = false;
   private kinds: string[] = ['system', 'definitions', 'user', 'assistant', 'results', 'summary', 'attachments', 'overhead'];
-  private colors: string[] = ['#3989F9', '#A879E8', '#D865AB', '#E3A62E', '#28AE8A', '#36A9C7', '#7685CA', '#899696'];
+  // Keep the cool rose-to-green palette while giving each actual request category its own swatch.
+  private colors: string[] = ['#EC4F8C', '#9A5CF6', '#1DB4CC', '#168D9E', '#665FE0', '#2CCB7E', '#3D7EF5', '#899696'];
 
   private title(kind: string): string {
     switch (kind) {
@@ -31,21 +35,22 @@ export struct ContextDetails {
   private rows(kind: string): ContextTokenItem[] { return this.app.contextDetails.filter((item) => item.kind === kind); }
   private tokens(kind: string): number { return this.rows(kind).reduce((sum, item) => sum + item.tokens, 0); }
   private total(): number { return this.app.contextDetails.reduce((sum, item) => sum + item.tokens, 0); }
-  private ratio(): number { return this.app.contextWindow > 0 ? this.app.contextUsed / this.app.contextWindow : 0; }
   private remaining(): number { return Math.max(0, this.app.contextWindow - this.app.contextUsed); }
-  private compact(value: number): string {
-    if (value >= 1000000) { return (value / 1000000).toFixed(2).replace(/\.?0+$/, '') + 'M'; }
-    if (value >= 1000) { return (value / 1000).toFixed(1).replace(/\.0$/, '') + 'k'; }
-    return value.toString();
-  }
   private percent(value: number): string {
     return value > 0 && value < 0.001 ? '<0.1%' : (value * 100).toFixed(1).replace(/\.0$/, '') + '%';
   }
-  private color(kind: string): string { return this.colors[this.kinds.indexOf(kind)]; }
-  // Calibration describes the whole request, not each category. Preserve its occupied
-  // width and use local estimates only to divide that width between categories.
-  private segmentWidth(kind: string): number {
-    return this.total() > 0 ? this.tokens(kind) / this.total() * Math.min(1, Math.max(0, this.ratio())) * 100 : 0;
+
+  private bands(): ContextMeterBand[] {
+    const totals = new Map<string, number>();
+    for (const item of this.app.contextDetails) { totals.set(item.kind, (totals.get(item.kind) || 0) + item.tokens); }
+    return this.kinds.map((kind, index): ContextMeterBand => ({
+      kind: kind, label: this.title(kind), tokens: totals.get(kind) || 0, color: this.colors[index]
+    }));
+  }
+
+  private selectKind(kind: string): void {
+    this.selected = this.selected === kind ? '' : kind;
+    this.shown = 12;
   }
   private label(item: ContextTokenItem): string {
     if (item.name === 'draft') { return t('输入框草稿'); }
@@ -86,66 +91,43 @@ export struct ContextDetails {
   build() {
     Column({ space: Space.lg }) {
       Column({ space: 12 }) {
-        Button({ type: ButtonType.Normal }) {
-          Row({ space: 8 }) {
-            Text(t('上下文窗口')).fontFamily(this.appearance.fontFamily).fontSize(14).fontWeight(FontWeight.Medium)
-              .fontColor($r('app.color.text_primary')).layoutWeight(1).textAlign(TextAlign.Start)
-            Text(this.compact(this.app.contextUsed) + ' / ' + this.compact(this.app.contextWindow) + ' (' + this.percent(this.ratio()) + ')')
-              .fontFamily(this.appearance.fontFamily).fontSize(12)
-              .fontColor(this.ratio() >= 0.85 ? $r('app.color.danger') : $r('app.color.text_secondary'))
-            SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(11).fontColor([$r('app.color.text_tertiary')])
-              .rotate({ angle: this.showBreakdown ? 180 : 0 })
-          }.width('100%').constraintSize({ minHeight: 32 })
-        }.id('context-toggle').width('100%').padding(0).backgroundColor(Color.Transparent)
-          .accessibilityText(t('上下文窗口') + ' ' + (this.showBreakdown ? t('收起') : t('展开')))
-          .onClick(() => { this.getUIContext().animateTo({ duration: Motion.fast, curve: Motion.standard }, () => { this.showBreakdown = !this.showBreakdown; }); })
-        Row() {
-          ForEach(this.kinds, (kind: string) => {
-            Row().width(this.segmentWidth(kind) + '%').height('100%').backgroundColor(this.color(kind))
-          }, (kind: string) => kind)
-          if (this.total() === 0) {
-            Row().width(Math.min(1, Math.max(0, this.ratio())) * 100 + '%').height('100%').backgroundColor(this.appearance.accent)
-          }
-        }.id('context-segment-bar').width('100%').height(6).borderRadius(3).clip(true)
-          .backgroundColor($r('app.color.surface_variant')).accessibilityText(t('约 {0} / {1} tokens', [this.app.contextUsed, this.app.contextWindow]))
+        ContextMeter({ bands: this.bands(), used: this.app.contextUsed, capacity: this.app.contextWindow, selected: this.selected,
+          canCompact: this.app.configured && !this.app.busy && !this.app.active.archived && this.app.saveError.length === 0,
+          onCompact: this.onCompact, onSelect: (kind: string) => this.selectKind(kind) })
+        if (this.selected && this.rows(this.selected).length > 0) {
+          Column({ space: 12 }) {
+            this.metric(this.title(this.selected), '~' + this.tokens(this.selected))
+            ForEach(this.rows(this.selected).slice(0, this.shown), (item: ContextTokenItem) => {
+              this.metric(this.label(item), '~' + item.tokens)
+            }, (item: ContextTokenItem) => item.id)
+            if (this.rows(this.selected).length > this.shown) {
+              Button(t('显示更多明细')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.textSmall)
+                .onClick(() => { this.shown += 20; })
+            }
+          }.id('context-items-' + this.selected).width('100%').padding(Space.md).borderRadius(Radius.sm)
+            .backgroundColor($r('app.color.surface_variant'))
+        }
         if (this.app.contextStatus.length > 0) {
           Text(this.app.contextStatus).fontFamily(this.appearance.fontFamily).id('context-status').fontSize(12).lineHeight(18).width('100%')
             .fontColor($r('app.color.text_secondary'))
         }
+        if (this.app.error.length > 0) { Banner({ text: this.app.error, compId: 'context-error' }) }
+        Divider().color($r('app.color.divider'))
+        Button({ type: ButtonType.Normal }) {
+          Row({ space: 8 }) {
+            Text(t('上下文构成（估算）')).fontFamily(this.appearance.fontFamily).fontSize(13).fontWeight(FontWeight.Medium)
+              .fontColor($r('app.color.text_primary')).layoutWeight(1).textAlign(TextAlign.Start)
+            Text(this.percent(this.app.contextWindow > 0 ? this.app.contextUsed / this.app.contextWindow : 0))
+              .fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
+            SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(11).fontColor([$r('app.color.text_tertiary')])
+              .rotate({ angle: this.showBreakdown ? 180 : 0 })
+          }.width('100%').constraintSize({ minHeight: 32 })
+        }.id('context-toggle').width('100%').padding(0).backgroundColor(Color.Transparent)
+          .accessibilityText(t('上下文构成（估算）') + ' ' + (this.showBreakdown ? t('收起') : t('展开')))
+          .onClick(() => { this.getUIContext().animateTo({ duration: Motion.fast, curve: Motion.standard }, () => { this.showBreakdown = !this.showBreakdown; }); })
         if (this.showBreakdown) {
-          Divider().color($r('app.color.divider'))
           Text(t('约 {0} / {1} tokens', [this.app.contextUsed, this.app.contextWindow])).id('context-label')
             .fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
-          Text(t('上下文构成（估算）')).fontFamily(this.appearance.fontFamily).fontSize(13).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
-          Column({ space: 2 }) {
-            ForEach(this.kinds, (kind: string) => {
-              Column({ space: 8 }) {
-                Button({ type: ButtonType.Normal }) {
-                  Row({ space: 8 }) {
-                    Row().width(8).height(8).borderRadius(2).backgroundColor(this.color(kind))
-                    Text(this.title(kind)).fontFamily(this.appearance.fontFamily).fontSize(13).layoutWeight(1).textAlign(TextAlign.Start).fontColor($r('app.color.text_primary'))
-                    Text('~' + this.tokens(kind)).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
-                    SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(10).fontColor([$r('app.color.text_tertiary')])
-                      .rotate({ angle: this.expanded.includes(kind) ? 180 : 0 }).opacity(this.rows(kind).length > 0 ? 1 : 0)
-                  }.width('100%').constraintSize({ minHeight: 36 })
-                }.fontFamily(this.appearance.fontFamily).id('context-category-' + kind).width('100%').padding(0).backgroundColor(Color.Transparent)
-                  .enabled(this.rows(kind).length > 0)
-                  .onClick(() => { this.expanded = this.expanded.includes(kind) ? this.expanded.filter((item) => item !== kind) : this.expanded.concat([kind]); })
-                if (this.expanded.includes(kind)) {
-                  Column({ space: 12 }) {
-                    ForEach(this.rows(kind).slice(0, this.shown), (item: ContextTokenItem) => {
-                      this.metric(this.label(item), '~' + item.tokens)
-                    }, (item: ContextTokenItem) => item.id)
-                    if (this.rows(kind).length > this.shown) {
-                      Button(t('显示更多明细')).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.textSmall).onClick(() => { this.shown += 20; })
-                    }
-                  }.width('100%').padding(12).borderRadius(Radius.sm).backgroundColor($r('app.color.surface_variant'))
-                    .id('context-items-' + kind)
-                }
-              }.width('100%')
-            }, (kind: string) => kind)
-          }.width('100%')
-          Divider().color($r('app.color.divider'))
           Row({ space: 8 }) {
             Row().width(8).height(8).borderRadius(2).backgroundColor($r('app.color.surface_variant'))
               .border({ width: 1, color: $r('app.color.divider') })

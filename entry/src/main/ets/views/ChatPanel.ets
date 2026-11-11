@@ -12,9 +12,11 @@ import { ToolApprovalMode, toolApprovalModeName } from '../model/ToolApprovalMod
 import { ProjectData } from '../model/Project';
 import { AnswerSpeech } from '../services/AnswerSpeech';
 import { LaunchActions } from '../services/LaunchActions';
-import { isHighestReasoningEffort } from '../model/ReasoningEffort';
+import { isHighestReasoningEffort, reasoningEfforts } from '../model/ReasoningEffort';
+import { ProviderProfile } from '../model/ProviderProfiles';
 import { ComposerGlow } from '../common/ComposerGlow';
 import { ModelPickerPanel } from './ModelPickerPanel';
+import { ReasoningEffortPicker } from './ReasoningEffortPicker';
 import { SpeechInput } from '../services/SpeechInput';
 import { DictationDraft } from '../model/DictationDraft';
 import { VoiceHoldButton } from '../common/VoiceHoldButton';
@@ -114,8 +116,6 @@ export struct ChatPanel {
       width: this.panelWidth, height: this.panelHeight }, this.viewport.keyboard) : 0;
   }
   onToolScope: () => void = () => {};
-  onHeaderProgress: (progress: number) => void = () => {};
-  private lastHeaderProgress: number = -1;
   @Prop @Watch('speechAvailabilityChanged') speechEnabled: boolean = true;
   @StorageProp('tinybot.foreground') @Watch('focusForegroundChanged') private foreground: boolean = true;
   private focusOwner: number = 0;
@@ -147,6 +147,8 @@ export struct ChatPanel {
   // Tablets open the add actions as a menu above the plus; phones keep the sheet.
   @State private showPlusMenu: boolean = false;
   @State private showModelMenu: boolean = false;
+  @State private showModelList: boolean = false;
+  @State private modelButtonTop: number = 0;
   @State private showDrawing: boolean = false;
   @State private drawingDraft: DrawingDraft = new DrawingDraft();
   private drawingThreadId: string = '';
@@ -296,7 +298,7 @@ export struct ChatPanel {
       this.cancelPlusAction(); this.cancelAttachmentDrop();
       if (this.composerSelectionStart !== -1) { this.composerSelectionStart = -1; }
       if (this.composerSelectionEnd !== -1) { this.composerSelectionEnd = -1; }
-      this.lastHeaderProgress = -1; this.publishHeaderProgress(0);
+      if (this.showModelMenu) { this.showModelMenu = false; }
       if (this.sendingMessageId) { this.sendingMessageId = ''; }
       if (this.sendOrigin) { this.sendOrigin = undefined; }
       if (this.speechThreadId !== this.activeThreadId) { this.endSpeech(); }
@@ -465,29 +467,8 @@ export struct ChatPanel {
       const atEnd = this.scroller.isAtEnd();
       if (this.atBottom !== atEnd) { this.atBottom = atEnd; }
       if (reachedEnd && atEnd && !this.inspectingOutput && !this.followOutput) { this.followOutput = true; }
-      this.updateHeaderProgress();
     });
   }
-  private publishHeaderProgress(progress: number): void {
-    const threadId = this.thread.id;
-    // Prop watchers/onAppear may run while the parent is rendering this panel.
-    Promise.resolve().then(() => {
-      if (this.composerMounted && this.thread.id === threadId && this.app.active.id === threadId) { this.onHeaderProgress(progress); }
-    });
-  }
-
-  private updateHeaderProgress(): void {
-    // Item coordinates already include contentStartOffset; no accumulated gesture deltas or offset baselines.
-    const first = this.scroller.getItemRect(0);
-    const distance = this.topInset + Space.sm - first.y;
-    const fraction = first.height > 0 ? Math.max(0, Math.min(1, distance / 96)) : 1;
-    const progress = fraction * fraction * (3 - 2 * fraction);
-    if (progress !== this.lastHeaderProgress) {
-      this.lastHeaderProgress = progress;
-      this.publishHeaderProgress(progress);
-    }
-  }
-
   private uiHandler(threadId: string, messageId: string): (key: string, values: UiValues, action: string) => Promise<UiValues> {
     return (key: string, values: UiValues, action: string) => this.app.interactUi(threadId, messageId, key, values, action);
   }
@@ -500,7 +481,8 @@ export struct ChatPanel {
     const viewport = context.getComponentUtils().getRectangleById('chat-swipe-area');
     const origin: SendOrigin = { x: context.px2vp(composer.windowOffset.x + composer.size.width / 2),
       y: context.px2vp(composer.windowOffset.y + composer.size.height / 2),
-      height: context.px2vp(composer.size.height), viewportHeight: context.px2vp(viewport.size.height) };
+      height: context.px2vp(composer.size.height),
+      viewportHeight: this.centeredWelcome() ? this.panelHeight : context.px2vp(viewport.size.height) };
     const threadId = this.thread.id;
     const previous = new Set(this.thread.messages.map((message: MessageViewModel) => message.id));
     let accepted = false;
@@ -536,7 +518,7 @@ export struct ChatPanel {
     if (this.voiceMode) { return false; }
     return this.workbench || this.composerFocused || this.app.draft.length > 0 || this.hasDraft() || this.importing || this.speechActive() ||
       this.app.generating || this.thread.pendingInputs.length > 0 || this.showPlus || this.showPlusMenu || this.showContext ||
-      this.showToolApprovalMode || this.showModelMenu || this.showQueue;
+      this.showQueue;
   }
 
   private canSend(): boolean {
@@ -788,17 +770,24 @@ export struct ChatPanel {
   }
 
   private confirmCompact(): void {
+    const threadId = this.thread.id;
     this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface,
       title: t("压缩较早对话？"),
       message: t("将调用当前模型生成摘要，消耗 Token。完整记录保留，之后请求使用摘要和最近消息。"),
       primaryButton: { value: t("取消"), action: () => {} },
-      secondaryButton: { value: t("压缩"), action: () => { this.showContext = false; this.app.compactHistory(); } }
+      secondaryButton: { value: t("压缩"), action: () => {
+        if (this.app.active.id === threadId) { this.app.compactHistory(); }
+      } }
     });
   }
 
+  private emptyConversation(): boolean {
+    return this.thread.messages.length === 0 && this.app.teams.length === 0;
+  }
+
   private centeredWelcome(): boolean {
-    return this.workbench && this.thread.messages.length === 0 && this.app.teams.length === 0 &&
-      this.panelHeight >= 540 && this.viewport.keyboardHeight === 0 && !this.voiceMode && !this.voiceOverlayVisible() && !this.app.busy;
+    return this.emptyConversation() &&
+      this.panelHeight >= 540 && this.viewport.keyboardHeight === 0 && !this.voiceMode && !this.voiceOverlayVisible() && !this.app.generating;
   }
 
   @Builder
@@ -863,13 +852,12 @@ export struct ChatPanel {
         if (!this.app.configured) {
           Button(t('连接你的模型')).id('setup-workbench-model').attributeModifier(Btn.textSmall).onClick(this.onSettings)
         }
-      }.id('workbench-welcome').width('100%').height('100%').justifyContent(FlexAlign.Center)
-        .padding({ left: 20, right: 20 })
-        .onAppear(() => { this.lastHeaderProgress = 0; this.publishHeaderProgress(0); })
+      }.id('workbench-welcome').width('100%').layoutWeight(this.centeredWelcome() ? 0 : 1).justifyContent(FlexAlign.Center)
+        .padding({ left: 20, right: 20, bottom: this.centeredWelcome() ? Space.lg : 0 })
     } else {
     Scroll() {
       Column({ space: Space.md }) {
-        Blank().layoutWeight(1)
+        if (!this.centeredWelcome()) { Blank().layoutWeight(1) }
         Image($r('app.media.tinybot')).width(56).height(56)
           .transition(TransitionEffect.OPACITY.combine(TransitionEffect.scale({ x: 0.6, y: 0.6 }))
             .animation({ curve: curves.springMotion(0.5, 0.7) }))
@@ -887,11 +875,10 @@ export struct ChatPanel {
           }.width('100%').padding(Space.lg).borderRadius(Radius.lg).backgroundColor(this.appearance.accentContainer)
           .transition(Motion.rise(3))
         }
-        Blank().layoutWeight(1)
-      }.width('100%').constraintSize({ minHeight: '100%' })
-      .padding({ left: 20, right: 20, top: this.topInset + Space.lg, bottom: Space.md })
-    }.layoutWeight(1).width('100%').scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring)
-      .onAppear(() => { this.lastHeaderProgress = 0; this.publishHeaderProgress(0); })
+        if (!this.centeredWelcome()) { Blank().layoutWeight(1) }
+      }.width('100%').constraintSize({ minHeight: this.centeredWelcome() ? 0 : '100%' })
+      .padding({ left: 20, right: 20, top: this.centeredWelcome() ? 0 : this.topInset + Space.lg, bottom: Space.md })
+    }.layoutWeight(this.centeredWelcome() ? 0 : 1).width('100%').scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring)
     }
   }
 
@@ -966,7 +953,7 @@ export struct ChatPanel {
   contextSheet() {
     Scroll() {
       Column({ space: Space.lg }) {
-        ContextDetails({ app: this.app })
+        ContextDetails({ app: this.app, onCompact: () => this.confirmCompact() })
         if (this.thread.compaction) {
           Column({ space: 10 }) {
             Row({ space: Space.sm }) {
@@ -986,13 +973,6 @@ export struct ChatPanel {
             }
           }.padding(Space.lg).borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
         }
-        Column({ space: Space.sm }) {
-          Button(t("压缩较早对话")).fontFamily(this.appearance.fontFamily).id('compact-history').attributeModifier(Btn.tonal).width('100%')
-            .enabled(this.app.configured && !this.app.busy && !this.thread.archived && this.app.saveError.length === 0)
-            .onClick(() => this.confirmCompact())
-          Text(t("使用当前模型为较早消息生成摘要，会消耗 Token。")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
-            .fontColor($r('app.color.text_tertiary'))
-        }.width('100%')
       }.width('100%').padding({ left: Space.page, right: Space.page, bottom: Space.xl + this.insetBottom })
     }.width('100%').height('100%').scrollBar(BarState.Off)
   }
@@ -1324,36 +1304,71 @@ export struct ChatPanel {
     .onClick(async () => { if (await this.app.setTeamEnabled(true)) { this.app.setDraft(''); } })
   }
 
-  // Desktop parity: the model seat opens a card above the composer instead of
-  // leaving the conversation. Compact keeps the same grouped, searchable list in
-  // a bounded popup with clear rows for touch.
+  private selectedProvider(): ProviderProfile | undefined {
+    return this.app.providerProfiles.find((item) => item.id === this.thread.modelRef?.providerId);
+  }
+
+  private toggleModelMenu(): void {
+    if (!this.showModelMenu) { this.showModelList = !this.app.configured; }
+    this.showModelMenu = !this.showModelMenu;
+  }
+
   @Builder
   modelMenu() {
     Column() {
-      ModelPickerPanel({ app: this.app, thread: this.thread, compact: true,
-        onSelected: () => { this.showModelMenu = false; },
-        onSettings: () => { this.showModelMenu = false; this.onSettings(); } })
-    }.width(340).height(this.modelMenuHeight()).borderRadius(20).clip(true)
+      if (this.showModelList) {
+        ModelPickerPanel({ app: this.app, thread: this.thread,
+          onSelected: () => { if (this.showModelMenu) { this.showModelList = false; } },
+          onSettings: () => { this.showModelMenu = false; this.onSettings(); } }).height(this.modelMenuHeight())
+      } else {
+        ReasoningEffortPicker({ value: this.thread.reasoningEffort, modelName: this.thread.modelRef?.modelId || '',
+          providerPreset: this.selectedProvider()?.presetId || '',
+          selectionKey: JSON.stringify([this.thread.id, this.thread.modelRef?.providerId, this.thread.modelRef?.modelId]),
+          efforts: reasoningEfforts(this.selectedProvider()?.protocol || '', this.thread.modelRef?.modelId || ''),
+          disabled: this.app.busy || this.thread.archived || this.app.saveError.length > 0,
+          onChooseModel: () => { this.showModelList = true; },
+          onSelect: (value: string): Promise<boolean> => this.app.setReasoningEffort(value) })
+      }
+    }.width(Math.min(320, Math.max(240, this.panelWidth - 24))).borderRadius(20).clip(true)
   }
 
   // Size the card to the catalog instead of reserving a full menu's height: two
   // models must not leave a blank half-screen, and a long catalog still scrolls.
   private modelMenuHeight(): number {
     const choices = this.app.modelChoices;
-    if (choices.length === 0) { return 260; }
-    const providers: string[] = [];
-    for (const choice of choices) {
-      if (!providers.includes(choice.providerId)) { providers.push(choice.providerId); }
-    }
-    const rows = Math.min(choices.length, 8);
-    const base = 114 + providers.length * 26 + rows * 46 + (this.app.error.length > 0 ? 56 : 0);
-    return Math.min(380, Math.max(180, base));
+    const providerCount = new Set(choices.map((choice) => choice.providerId)).size;
+    const height = choices.length === 0 ? 240 : 60 + providerCount * 26 + choices.length * 46;
+    const available = this.modelButtonTop > 0 ? Math.max(120, this.modelButtonTop - 16) : 380;
+    return Math.min(380, available, height + (this.app.error.length > 0 ? 56 : 0));
   }
 
   private highestEffort(): boolean {
     return this.app.configured && !this.thread.archived && isHighestReasoningEffort(
-      this.app.providerProfiles.find((item) => item.id === this.thread.modelRef?.providerId)?.protocol || '',
+      this.selectedProvider()?.protocol || '',
       this.thread.modelRef?.modelId || '', this.thread.reasoningEffort);
+  }
+
+  @Builder
+  modelButton() {
+    Button({ type: ButtonType.Capsule }) {
+      Row({ space: 6 }) {
+        Text(this.thread.modelRef?.modelId || t('选择模型')).fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(1)
+          .fontColor($r('app.color.text_primary')).textOverflow({ overflow: TextOverflow.Ellipsis }).flexShrink(1)
+        SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(10).fontColor([$r('app.color.text_secondary')]).flexShrink(0)
+          .rotate({ angle: this.showModelMenu ? 180 : 0 }).animation({ duration: Motion.fast, curve: Motion.standard })
+      }
+    }.id('composer-model-picker').height(this.workbench ? 36 : 44)
+      .constraintSize({ minWidth: 64, maxWidth: Math.max(64, Math.min(220, this.panelWidth / 2)) })
+      .padding({ left: 12, right: 12 }).backgroundColor(Color.Transparent)
+      .border({ width: 0.5, color: $r('app.color.divider') }).focusOnTouch(false)
+      .enabled(this.app.ready && !this.app.busy && !this.thread.archived && !this.app.saveError)
+      .accessibilityText(this.thread.modelRef ? t('选择模型') + '：' + this.app.currentModelLabel : t('选择模型'))
+      .onAreaChange((_previous: Area, current: Area) => { this.modelButtonTop = Number(current.globalPosition.y); })
+      .onClick(() => this.toggleModelMenu())
+      .bindPopup(this.showModelMenu, { builder: this.modelMenu, placement: Placement.TopRight, targetSpace: 4,
+        popupColor: $r('app.color.surface'), backgroundBlurStyle: BlurStyle.NONE,
+        radius: 20, enableArrow: false, autoCancel: true, mask: false, focusable: false, followTransformOfTarget: true,
+        onStateChange: (event) => { if (!event.isVisible) { this.showModelMenu = false; } } })
   }
 
   private async applyToolApprovalMode(mode: ToolApprovalMode, threadId: string): Promise<void> {
@@ -1413,20 +1428,15 @@ export struct ChatPanel {
       Row({ space: 5 }) {
         SymbolGlyph(this.thread.toolApprovalMode === 'full' ? $r('sys.symbol.bolt') : $r('sys.symbol.lock'))
           .fontSize(14).fontColor([this.thread.toolApprovalMode === 'full' ? this.appearance.accent : $r('app.color.text_secondary')])
-        if (this.thread.toolApprovalMode === 'full') {
-          Text(toolApprovalModeName(this.thread.toolApprovalMode)).fontFamily(this.appearance.fontFamily)
-            .fontSize(12).maxLines(1).fontColor($r('app.color.text_primary'))
-        }
+        Text(toolApprovalModeName(this.thread.toolApprovalMode)).fontFamily(this.appearance.fontFamily)
+          .fontSize(12).maxLines(1).fontColor($r('app.color.text_primary')).textOverflow({ overflow: TextOverflow.Ellipsis })
       }
     }.id('composer-tool-approval').height(this.workbench ? 36 : 44).constraintSize({ minWidth: this.workbench ? 36 : 44 })
-      .padding({ left: 8, right: 8 })
+      .padding({ left: 8, right: 8 }).focusOnTouch(false)
       .backgroundColor(Color.Transparent)
       .enabled(this.app.ready && !this.app.busy && !this.thread.archived && this.app.saveError.length === 0)
       .accessibilityText(t('工具审批') + '：' + toolApprovalModeName(this.thread.toolApprovalMode))
-      .onClick(() => {
-        this.showToolApprovalMode = !this.showToolApprovalMode;
-        this.getUIContext().getFocusController().clearFocus();
-      })
+      .onClick(() => { this.showToolApprovalMode = !this.showToolApprovalMode; })
       .bindPopup(this.showToolApprovalMode, { builder: this.toolApprovalMenu, placement: Placement.Top,
         systemMaterial: this.appearance.menu, popupColor: $r('app.color.surface'), radius: 20,
         enableArrow: false, autoCancel: true, mask: false,
@@ -1604,7 +1614,6 @@ export struct ChatPanel {
         this.composerAddButton()
         Scroll() {
         Row({ space: 4 }) {
-        this.toolApprovalButton()
         this.composerOptionsButton()
         if (this.contextRatio() >= 0.85) {
           Button(Math.round(this.contextRatio() * 100) + '%').fontFamily(this.appearance.fontFamily)
@@ -1634,30 +1643,6 @@ export struct ChatPanel {
           .enabled(this.composerExpanded())
           .accessibilityLevel(this.composerExpanded() ? 'auto' : 'no-hide-descendants')
           .hitTestBehavior(this.composerExpanded() ? HitTestMode.Default : HitTestMode.None)
-        }
-        if (this.workbench) {
-          Button() {
-            Row({ space: 4 }) {
-              Text(this.thread.modelRef?.modelId || t('选择模型')).fontSize(13).maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis }).constraintSize({ maxWidth: AdaptiveUi.compactComposer(this.panelWidth) ? 90 : 170 })
-              SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(9).fontColor([$r('app.color.text_secondary')])
-                .rotate({ angle: this.showModelMenu ? 180 : 0 })
-                .animation({ duration: Motion.fast, curve: Motion.standard })
-            }.padding({ left: 8, right: 8 })
-          }.id('workbench-model-picker').height(36).borderRadius(18)
-            .constraintSize({ minWidth: 64, maxWidth: AdaptiveUi.compactComposer(this.panelWidth) ? 116 : 220 })
-            .backgroundColor(Color.Transparent).fontColor($r('app.color.text_secondary'))
-            .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
-            .enabled(!this.app.busy && !this.thread.archived && !this.app.saveError)
-            .accessibilityText(t('选择模型') + '：' + (this.thread.modelRef?.modelId || t('选择模型')))
-            .onClick(() => {
-              this.getUIContext().getFocusController().clearFocus();
-              this.showModelMenu = !this.showModelMenu;
-            })
-            .bindPopup(this.showModelMenu, { builder: this.modelMenu, placement: Placement.Top,
-              popupColor: $r('app.color.page_background'), backgroundBlurStyle: BlurStyle.NONE,
-              radius: 20, enableArrow: false, autoCancel: true, mask: false, targetSpace: 8,
-              onStateChange: (event) => { this.showModelMenu = event.isVisible; } })
         }
         IconButton({ icon: $r('sys.symbol.mic'), label: t('切换到语音输入'), compId: 'start-speech', diameter: this.workbench ? 36 : 44,
           iconSize: 19, fill: $r('app.color.surface_variant'), disabled: !this.canRecordSpeech(),
@@ -1752,15 +1737,20 @@ export struct ChatPanel {
     // Keep the cover on its own node: a false bindSheet on the same node removes an active cover on device.
     Stack() {
     Column() {
-      Blank().height(0).layoutWeight(this.centeredWelcome() ? 1 : 0)
+      Blank().height(0).layoutWeight(this.centeredWelcome() ? 1 : 0).width('100%')
+        .gesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Right, distance: 8 })
+          .onActionStart((event: GestureEvent) => this.onHistoryDragStart(event))
+          .onActionUpdate((event: GestureEvent) => this.onHistoryDragUpdate(event))
+          .onActionEnd((event: GestureEvent) => this.onHistoryDragEnd(event))
+          .onActionCancel(() => this.onHistoryDragCancel()))
       Stack({ alignContent: Alignment.BottomStart }) {
         Column() {
-          if (this.thread.messages.length === 0 && this.app.teams.length === 0) {
+          if (this.emptyConversation()) {
             this.welcome()
           } else {
             this.messageList()
           }
-        }.width('100%').height('100%').zIndex(this.sendingMessageId ? 1 : 0)
+        }.width('100%').height(this.centeredWelcome() ? 'auto' : '100%').zIndex(this.sendingMessageId ? 1 : 0)
         if (this.thread.teamEnabled && this.viewport.keyboardHeight > 0 && !this.voiceMode && !this.voiceOverlayVisible()) { this.teamToggle() }
         if (this.voiceOverlayVisible()) {
           VoiceRecordingOverlay({ phase: this.speech.phase === 'complete' ? 'finishing' : this.speech.phase,
@@ -1770,7 +1760,7 @@ export struct ChatPanel {
             }, onCancel: (): void => this.releaseSpeech('cancel'), onEdit: (): void => this.releaseSpeech('edit') })
             .align(Alignment.Bottom).zIndex(5).transition(Motion.rise(0, 52))
         }
-      }.id('chat-swipe-area').height(this.centeredWelcome() ? 112 : 0).layoutWeight(this.centeredWelcome() ? 0 : 1).width('100%').zIndex(this.sendingMessageId ? 1 : 0)
+      }.id('chat-swipe-area').layoutWeight(this.centeredWelcome() ? 0 : 1).width('100%').zIndex(this.sendingMessageId ? 1 : 0)
       // Normal priority lets nested horizontal scrollers keep their gestures. The composer
       // stays outside this region so selecting or moving through draft text does not open history.
       .gesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Right, distance: 8 })
@@ -1847,20 +1837,27 @@ export struct ChatPanel {
         }
         if (this.workbench && this.thread.messages.length === 0) { this.workbenchContext() }
         this.composer()
+        if (!this.voiceMode && !this.speechActive()) {
+          Row() {
+            this.toolApprovalButton()
+            this.modelButton()
+          }.id('composer-footer').width('100%').justifyContent(FlexAlign.SpaceBetween)
+        }
         if (this.workbench && this.account.ready && !this.account.signedIn) {
           Row({ space: 8 }) {
             Text(t('登录华为账号后即可使用 AI 生成功能。')).fontSize(12).fontColor($r('app.color.text_secondary')).layoutWeight(1)
             Button(t('去登录')).id('workbench-open-account').attributeModifier(Btn.textSmall).onClick(this.onAccount)
           }.width('100%').padding({ left: 8, right: 8 })
         }
-        if (this.viewport.keyboardHeight === 0) {
-          Text(t('AI生成内容可能有误，请仔细鉴别。')).fontFamily(this.appearance.fontFamily).id('ai-disclaimer')
-            .fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
-            .textAlign(TextAlign.Center).width('100%').padding({ left: Space.sm, right: Space.sm })
-        }
       }.width('100%').padding({ left: this.workbench ? 24 : 10, right: this.workbench ? 24 : 10, bottom: Space.sm })
       Blank().height(0).layoutWeight(this.centeredWelcome() ? 1 : 0)
-    }.height('100%').width('100%').padding({ bottom: this.keyboardInset })
+      if (this.viewport.keyboardHeight === 0) {
+        Text(t('AI生成内容可能有误，请仔细鉴别。')).fontFamily(this.appearance.fontFamily).id('ai-disclaimer')
+          .fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+          .textAlign(TextAlign.Center).width('100%')
+          .padding({ left: Space.sm + (this.workbench ? 24 : 10), right: Space.sm + (this.workbench ? 24 : 10), bottom: Space.sm })
+      }
+    }.height('100%').width('100%').padding({ top: this.centeredWelcome() ? this.topInset : 0, bottom: this.keyboardInset })
       .bindSheet($$this.showMemoryDraft, this.memoryDraftSheet(), { radius: Radius.sheet, title: { title: t("提炼并确认记忆") }, detents: [SheetSize.LARGE], dragBar: true, keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY,
         backgroundColor: $r('app.color.page_background') })
       this.shortcutBindings()

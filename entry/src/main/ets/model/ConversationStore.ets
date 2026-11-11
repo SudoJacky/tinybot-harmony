@@ -3,7 +3,7 @@ import { t } from './I18n';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { taskpool, util } from '@kit.ArkTS';
 import { AppData, ThreadData, emptyData, parseAppData } from './Conversation';
-import { MessageCheckpoint, SessionRepository } from '../services/SessionContracts';
+import { SessionRepository, ThreadCheckpoint } from '../services/SessionContracts';
 import { ConversationCapture } from './ConversationCapture';
 import { writeConversationFile } from '../services/ConversationWriter';
 import { mergeSavedConfiguration } from './SavedConfiguration';
@@ -46,12 +46,12 @@ export class ConversationStore implements SessionRepository {
     this.captureFailed = false;
     return data;
   }
-  save(data: AppData, changedThreadIds?: string[], message?: MessageCheckpoint): Promise<void> {
+  save(data: AppData, changedThreadIds?: string[], checkpoint?: ThreadCheckpoint): Promise<void> {
     // Capture synchronously, before any queued IO. Immutable strings can be shared across saves.
     // Failed candidates may have been rolled back by the caller. Re-capture its authoritative state.
     const mark = Diagnostics.begin();
     if (this.captureFailed) { this.capture.clear(); }
-    const snapshot = this.capture.capture(data, this.captureFailed ? undefined : changedThreadIds, message);
+    const snapshot = this.capture.capture(data, this.captureFailed ? undefined : changedThreadIds, checkpoint);
     const header = snapshot.header; const next = snapshot.threads;
     this.captureFailed = false;
     if (Diagnostics.recording) { Diagnostics.end('storage.capture', mark, { threads: data.threads.length, changed: changedThreadIds ? changedThreadIds.length : data.threads.length, metadataChars: header.length }); }

@@ -116,6 +116,15 @@ export class ChatViewModel {
         this.config = event.preferences.config; this.extensions = event.preferences.extensions;
         this.productivity = event.preferences.productivity; this.selectedConfig = this.requireSession().currentConfig;
       }
+      if (event.reasoningSelection) {
+        const selection = event.reasoningSelection;
+        const ids = new Set(selection.threadIds);
+        for (const thread of this.threads) {
+          if (ids.has(thread.id)) { thread.reasoningEffort = selection.value; }
+        }
+        if (selection.config) { this.config = selection.config; }
+        this.selectedConfig = this.requireSession().currentConfig;
+      }
       if (event.kind === 'teams' && event.threadId === this.active.id) { this.teams = event.teams || []; }
       if (event.kind === 'thread' && event.thread) {
         this.threads.find((thread) => thread.id === event.threadId)?.updateMetadata(event.thread);

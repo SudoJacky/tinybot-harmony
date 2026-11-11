@@ -49,6 +49,8 @@ export class Space {
   static readonly page: number = 16;
 }
 
+export const PROCESS_ROW_HEIGHT: number = 38;
+
 export class Radius {
   // Give bindSheet a typed radius; API 26 logs an error for an omitted value.
   static readonly sheet: BorderRadiuses = { topLeft: 24, topRight: 24, bottomLeft: 24, bottomRight: 24 };
