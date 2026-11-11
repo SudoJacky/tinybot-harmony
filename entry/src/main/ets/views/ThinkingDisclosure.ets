@@ -1,7 +1,7 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { thoughtTail } from '../model/ProcessPresentation';
-import { Motion } from '../common/Theme';
+import { Motion, PROCESS_ROW_HEIGHT } from '../common/Theme';
 import { DisclosureState } from '../viewmodel/DisclosureState';
 import { ThinkingLine } from '../common/Widgets';
 import { AgentStepViewModel } from '../viewmodel/SessionViewModels';
@@ -56,7 +56,7 @@ export struct ThinkingDisclosure {
           SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(11).fontColor([$r('app.color.text_tertiary')])
         }.width(16).height(16).rotate({ angle: this.disclosure.open ? 180 : 0 })
           .animation({ duration: Motion.medium, curve: Motion.standard })
-      }.id('thinking-toggle-' + this.identity).width('100%').height(32)
+      }.id('thinking-toggle-' + this.identity).width('100%').height(PROCESS_ROW_HEIGHT)
       .accessibilityText((this.disclosure.open ? t('收起') : t('展开')) + ' ' + (this.streaming ? t('正在思考') : t('已思考')))
       .onClick(() => {
         this.onInspect();
