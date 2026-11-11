@@ -3,6 +3,7 @@ import { AppData } from '../model/Conversation';
 import { PanelSource, validatePanelSource } from '../model/PanelSource';
 import { threadWorkspacePath } from '../model/Workspace';
 import { withFileMutation } from './FileMutationQueue';
+import { ArkDataWorkspace } from './ArkDataWorkspace';
 export interface WorkspaceOwnership {
   id: string; miniApps: boolean; lifePanels: boolean; lifeBoards: boolean; review: boolean; sources: string[]; manifests: string[];
 }
@@ -22,7 +23,22 @@ export class WorkspaceRetention {
       if (stat.isSymbolicLink()) { throw new Error('Workspace ownership cannot follow symbolic links'); }
       if (!stat.isDirectory()) { continue; }
       const item: WorkspaceOwnership = { id: id, miniApps: false, lifePanels: false, lifeBoards: false, review: false, sources: [], manifests: [] };
+      const ark = ArkDataWorkspace.forRoot(path);
+      if (ark) {
+        for (const record of await ark.paths()) {
+          const kind = record.split('/')[0];
+          if (!item.manifests.includes(kind)) { item.manifests.push(kind); }
+          if (kind === 'life-boards') { item.lifeBoards = true; }
+          else {
+            item.lifePanels = true;
+            const text = await ark.read(record);
+            if (text === undefined) { throw new Error('Managed workspace record disappeared during inventory'); }
+            WorkspaceRetention.addSource(item, text);
+          }
+        }
+      }
       for (const kind of ['mini-apps', 'life-panels', 'life-boards', '.tinybot-review']) {
+        if (ark && (kind === 'life-panels' || kind === 'life-boards')) { continue; }
         const directory = path + '/' + kind; if (!await fs.access(directory)) { continue; }
         const info = await fs.lstat(directory);
         if (info.isSymbolicLink() || !info.isDirectory()) { throw new Error('Invalid persistent workspace directory'); }
@@ -39,15 +55,18 @@ export class WorkspaceRetention {
           const file = await fs.lstat(manifest); if (!file.isFile() || file.isSymbolicLink()) { throw new Error('Invalid persistent card manifest'); }
           if (!item.manifests.includes(kind)) { item.manifests.push(kind); }
           if (kind !== 'life-panels') { continue; }
-          const saved = JSON.parse(await fs.readText(manifest)) as SourceOwner, source = saved.definition?.source;
-          if (source?.type === 'workspace-json' && source.workspaceId !== undefined) {
-            validatePanelSource(source); item.sources.push(source.workspaceId);
-          }
+          WorkspaceRetention.addSource(item, await fs.readText(manifest));
         }
       }
       result.push(item);
     }
     return result;
+  }
+  private static addSource(item: WorkspaceOwnership, text: string): void {
+    const saved = JSON.parse(text) as SourceOwner, source = saved.definition?.source;
+    if (source?.type === 'workspace-json' && source.workspaceId !== undefined) {
+      validatePanelSource(source); item.sources.push(source.workspaceId);
+    }
   }
   static retained(data: AppData | undefined, inventory: WorkspaceOwnership[], review: boolean = true): Set<string> {
     const ids = new Set<string>((data?.threads || []).filter((thread) => !thread.projectId).map((thread) => thread.id)

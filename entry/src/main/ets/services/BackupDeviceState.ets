@@ -34,7 +34,7 @@ let refreshPreferences: () => void = () => {};
 export function configureBackupPreferenceRefresh(refresh: () => void): void { refreshPreferences = refresh; }
 export async function captureBackupDeviceState(context: common.UIAbilityContext): Promise<BackupDeviceState> {
   const store = preferences.getPreferencesSync(context, { name: 'tinybot-ui' });
-  const state: BackupDeviceState = { usage: await UsageLedger.backup(context.getApplicationContext().filesDir) };
+  const state: BackupDeviceState = { usage: await UsageLedger.backup(context.filesDir) };
   const appearance = store.getSync('appearance', '') as string, language = store.getSync('language', '') as string;
   if (appearance) { state.appearance = JSON.parse(appearance) as AppearanceOptions; }
   if (language) { state.language = languagePreference(language); }
@@ -47,7 +47,7 @@ export async function captureBackupDeviceState(context: common.UIAbilityContext)
 export async function mergeBackupDeviceState(context: common.UIAbilityContext, state: BackupDeviceState | undefined): Promise<void> {
   if (!state) { return; }
   validateBackupDeviceState(state);
-  await UsageLedger.restoreBackup(context.getApplicationContext().filesDir, state.usage);
+  await UsageLedger.restoreBackup(context.filesDir, state.usage);
   const store = preferences.getPreferencesSync(context, { name: 'tinybot-ui' });
   const changes: PreferenceChange[] = [];
   const add = (key: string, value: string | boolean | string[] | undefined): void => {

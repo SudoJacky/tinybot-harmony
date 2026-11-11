@@ -11,6 +11,7 @@ import { validatePanelViewState } from '../model/LifePanel';
 import { withFileMutation } from './FileMutationQueue';
 import { PanelChanges } from './PanelChanges';
 import { withWorkspaceLifecycle } from './WorkspaceRetention';
+import { managedWorkspaceRecords } from './ArkDataWorkspace';
 export class LifeBoards {
   private workspaces: WorkspaceStore;
   private panels: LifePanels;
@@ -126,12 +127,8 @@ export class LifeBoards {
     if (!await fs.access(this.workspaces.rootDir)) { return entries; }
     for (const workspaceId of await fs.listFile(this.workspaces.rootDir)) {
       await this.workspaces.requireWorkspace(workspaceId);
-      const directory = this.workspaces.pathFor(workspaceId) + '/life-boards';
-      if (!await fs.access(directory)) { continue; }
-      const stat = await fs.lstat(directory); if (!stat.isDirectory() || stat.isSymbolicLink()) { throw new Error('Invalid Life Panel board directory'); }
-      for (const id of await fs.listFile(directory)) {
-        if (!await fs.access(directory + '/' + id + '/board.json')) { continue; }
-        entries.push({ workspaceId: workspaceId, board: await this.get(workspaceId, id) });
+      for (const path of await managedWorkspaceRecords(this.workspaces.pathFor(workspaceId), 'life-boards')) {
+        entries.push({ workspaceId: workspaceId, board: await this.get(workspaceId, path.split('/')[1]) });
       }
     }
     // Changing a card or a board description must not shuffle the tab strip.

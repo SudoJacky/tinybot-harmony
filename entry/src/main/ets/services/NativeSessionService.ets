@@ -42,7 +42,8 @@ import { AttachmentTools } from './AttachmentTools';
 import { util } from '@kit.ArkTS';
 import { Diagnostics } from '../model/Diagnostics';
 import { LogFields } from '../model/DiagnosticLog';
-import { ConversationStore } from '../model/ConversationStore';
+import { ArkDataConversationStore } from './ArkDataConversationStore';
+import { NativeData } from './NativeData';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { ProviderProfile } from '../model/ProviderProfiles';
 import { ExtensionSettings } from '../model/Skills';
@@ -200,23 +201,24 @@ export class NativeSessionResources implements SessionResources {
 }
 
 // Native composition root. The session service can also run with an in-memory repository/model.
-export function createNativeSessionService(filesDir: string, workspaceFilesDir: string, approval: ToolApproval = new ToolApproval(), context?: common.UIAbilityContext, browser?: BrowserSession): SessionService {
+export function createNativeSessionService(context: common.UIAbilityContext, approval: ToolApproval, browser?: BrowserSession): SessionService {
+  const workspaceFilesDir = context.getApplicationContext().filesDir;
+  const data = NativeData.forFilesDir(context.filesDir) ?? new NativeData(context, workspaceFilesDir);
   Attachments.configure(workspaceFilesDir);
-  UsageLedger.configure(filesDir).catch((error: Error) => { UsageLedger.error = error.message; });
+  UsageLedger.configure(context.filesDir, () => data.open()).catch((error: Error) => { UsageLedger.error = error.message; });
   // Packaged snapshot: konsheng/Sensitive-lexicon@68a595fb24d31bd9f882c081b4252443a69ac57b.
   let outputWords: Promise<OutputWordMatcher> | undefined;
   const loadOutputWords = async (): Promise<OutputWordMatcher> => {
-    if (!context) { throw new Error('An ability context is required to load the output word list.'); }
     const data = await context.resourceManager.getRawFileContent(OUTPUT_WORD_LIST);
     return new OutputWordMatcher(util.TextDecoder.create('utf-8').decodeToString(data));
   };
   const providers = new ProviderRegistry(() => huaweiAccount.requireLogin(), () => outputWords ?? (outputWords = loadOutputWords()));
   const credentials = new CredentialStore();
-  const session = new SessionService(new ConversationStore(filesDir), new AgentRuntime(providers, credentials, new NativeUsageRecorder(),
+  const session = new SessionService(new ArkDataConversationStore(() => data.open()), new AgentRuntime(providers, credentials, new NativeUsageRecorder(),
     (content, cancellation) => WebUiPreflight.validate(content, cancellation), new NativeOrchestrationExecutor(), browser), credentials,
     new NativeSessionResources(workspaceFilesDir, providers, approval, context, browser), approval);
   installNativePanelAgent(workspaceFilesDir, providers, credentials, () => session.snapshot());
-  if (context) { backgroundGeneration.attach(session, context); completionNotifications.attach(session, context); }
+  backgroundGeneration.attach(session, context); completionNotifications.attach(session, context);
   if (browser) {
     browser.configure((policy) => session.setBrowserPolicy(policy), (event, fields, error) => Diagnostics.log(error === undefined ? 'info' : 'error', 'browser', event, fields, error));
     session.subscribe((event) => { if (event.data) { browser.updatePolicy(event.data.extensions?.browserPolicy || 'unset'); } });

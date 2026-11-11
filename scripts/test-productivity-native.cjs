@@ -209,6 +209,7 @@ function load(file) {
 }
 const model = load(path.join(source, 'model/Conversation'));
 const { ConversationStore } = load(path.join(source,'model/ConversationStore'));
+const { UsageLedger: NativeUsageLedger } = load(path.join(source,'services/UsageLedger'));
 const { Attachments } = load(path.join(source,'services/Attachments'));
 const { Cancellation } = load(path.join(source,'services/Cancellation'));
 const { McpClient } = load(path.join(source,'services/McpClient'));
@@ -2444,6 +2445,105 @@ async function test(name, run) {
     assert.equal((await backup)[0].status, 'complete');
     assert.equal(readSavedUsage(root)[0].status, 'complete');
     assert.equal(Ledger.error, '');
+  });
+  await test('ArkData upgrade verifies every record, rolls back failures, and keeps legacy bytes unchanged', async () => {
+    const { DatabaseSync } = require('node:sqlite');
+    const loadSource = name => load(path.join(source, name));
+    const { NativeData } = loadSource('services/NativeData');
+    const { ArkDataConversationStore } = loadSource('services/ArkDataConversationStore');
+    const { LifeBoards } = loadSource('services/LifeBoards');
+    const { LifePanels } = loadSource('services/LifePanels');
+    const { createBackupFile, readBackupFile } = loadSource('services/Backup');
+    const { discardBackupImport } = loadSource('model/BackupImport');
+    const Ledger = NativeUsageLedger;
+    await Ledger.queue;
+    Ledger.records = []; Ledger.positions = new Map(); Ledger.dirty.clear();
+    const root = '/sandbox/arkdata-upgrade', app = root + '/app', ability = root + '/entry', target = root + '/target';
+    const context = { filesDir: ability, cacheDir: root + '/cache', getApplicationContext: () => ({ filesDir: app }) };
+    const receiver = { filesDir: target, cacheDir: root + '/cache', getApplicationContext: () => ({ filesDir: target }) };
+    const work = app + '/workspace/thread-one';
+    for (const dir of [ability, context.cacheDir, target, work]) fs.mkdirSync(nativePath(dir), { recursive: true });
+    const databases = new Map();
+    let failImport = true;
+    kits['@kit.ArkData'].relationalStore = {
+      SecurityLevel: { S3: 3 },
+      async getRdbStore(ctx, config) {
+        assert.equal(config.encrypt, true);
+        if (!databases.has(ctx.filesDir)) databases.set(ctx.filesDir, new DatabaseSync(':memory:'));
+        const sql = databases.get(ctx.filesDir);
+        const querySql = async (text, args) => {
+          const statement = sql.prepare(text); statement.setReturnArrays(true);
+          const rows = statement.all(...args); let position = -1;
+          return { goToNextRow: () => ++position < rows.length, getLong: column => rows[position][column],
+            getString: column => rows[position][column], close() {} };
+        };
+        return { querySql, async executeSql(text) { sql.exec(text); }, async createTransaction() {
+          sql.exec('BEGIN');
+          return { querySql, async execute(text, args) {
+            if (failImport && text.startsWith('INSERT') && args[1].endsWith('/board.json')) throw Error('injected ArkData write failure');
+            sql.prepare(text).run(...args);
+          }, async commit() { sql.exec('COMMIT'); }, async rollback() { sql.exec('ROLLBACK'); } };
+        } };
+      }
+    };
+    const large = ('你'.repeat(131071) + '🙂').repeat(6);
+    const old = model.emptyData();
+    old.config.userDocument = 'Migrated user document';
+    old.threads = [{ id: 'thread-one', title: 'Legacy title', updatedAt: 1, messages: [
+      { id: 'question', role: 'user', content: 'Question', status: 'complete', error: '' },
+      { id: 'answer', role: 'assistant', content: large, status: 'complete', error: '' }
+    ] }];
+    old.activeThreadId = old.threads[0].id;
+    await new ConversationStore(ability).save(old);
+    const panelPath = 'life-panels/count/panel.json', boardPath = 'life-boards/dashboard/board.json';
+    const panel = { version: 1, id: 'count', definition: { version: 1, title: 'Count', size: 'M', data: { count: 1 },
+      nodes: [{ id: 'count', kind: 'Metric', value: { path: '/data/count' } }] }, configRevision: 1, sourcePath: '', sourceThreadId: 'thread-one',
+      data: { count: 1 }, user: {}, createdAt: 1, updatedAt: 1, refreshedAt: 1, attemptedAt: 1, error: '', archived: false };
+    const board = { version: 2, id: 'dashboard', title: 'Legacy board', description: '', archived: false, createdAt: 1, updatedAt: 1,
+      items: [{ workspaceId: 'thread-one', panelId: 'count', mountId: 'mount-one', x: 0, y: 0, w: 6, h: 8 }] };
+    const request = { id: 'legacy-usage', provider: 'Provider', model: 'model', startedAt: 1, durationMs: 10, status: 'complete' };
+    const written = new Map([[work + '/' + panelPath, panel], [work + '/' + boardPath, board],
+      [ability + '/usage-records/index.json', { version: 1, pages: 1 }], [ability + '/usage-records/0.json', [request]]]);
+    for (const [file, value] of written) {
+      fs.mkdirSync(path.dirname(nativePath(file)), { recursive: true }); fs.writeFileSync(nativePath(file), JSON.stringify(value));
+    }
+    const legacy = new Map([...written.keys(), ...fs.readdirSync(nativePath(ability + '/sessions-v2')).map(name => ability + '/sessions-v2/' + name)]
+      .map(file => [file, fs.readFileSync(nativePath(file))]));
+    const native = new NativeData(context, app), open = () => native.open();
+    await assert.rejects(open(), /injected ArkData write failure/);
+    assert.equal(databases.get(ability).prepare('SELECT COUNT(*) AS total FROM records').get().total, 0);
+    failImport = false;
+    await open();
+    const repository = new ArkDataConversationStore(open), loaded = await repository.load();
+    assert.equal(loaded.config.userDocument, old.config.userDocument);
+    assert.equal(loaded.threads[0].messages[1].content, large);
+    loaded.threads[0].title = 'ArkData title'; await repository.save(loaded, ['thread-one']);
+    const boards = new LifeBoards(app), panels = new LifePanels(app);
+    await boards.save('thread-one', 'dashboard', 'ArkData board', '');
+    await panels.repository('thread-one').resize('count', 'L');
+    assert.equal((await boards.list())[0].board.title, 'ArkData board');
+    assert.equal((await panels.list())[0].panel.layout.size, 'L');
+    for (const [file, bytes] of legacy) assert.deepEqual(fs.readFileSync(nativePath(file)), bytes, file);
+    const restarted = new NativeData(context, app);
+    assert.equal((await new ArkDataConversationStore(() => restarted.open()).load()).threads[0].title, 'ArkData title');
+    assert.equal(await (await restarted.open()).read('migration', 'version'), '1');
+
+    await Ledger.configure(ability, () => restarted.open());
+    Ledger.record({ ...request, durationMs: 20 }); await Ledger.queue;
+    assert.equal((await Ledger.backup(ability)).find(item => item.id === request.id).durationMs, 20);
+    const archive = await createBackupFile(context, loaded);
+    const envelope = legacyBackupFixture(fs.readFileSync(nativePath(archive)));
+    assert.equal(envelope.deviceState.usage.find(item => item.id === request.id).durationMs, 20);
+    const restoredStorage = new NativeData(receiver, target); await restoredStorage.open();
+    const imported = await readBackupFile(receiver, archive, model.emptyData());
+    assert.equal(imported.threads[0].title, 'ArkData title');
+    assert.equal((await new LifeBoards(target).list())[0].board.title, 'ArkData board');
+    assert.equal((await new LifePanels(target).list())[0].panel.layout.size, 'L');
+    assert.equal(fs.existsSync(nativePath(target + '/workspace/thread-one/' + panelPath)), false);
+    await discardBackupImport(imported);
+    assert.equal((await new LifeBoards(target).list()).length, 0);
+    assert.equal((await new LifePanels(target).list()).length, 0);
+    for (const [file, bytes] of legacy) assert.deepEqual(fs.readFileSync(nativePath(file)), bytes, file);
   });
   suiteCompleted = true;
   console.log(completedTests+' native adapter integration checks passed. Fixtures: '+fixture);

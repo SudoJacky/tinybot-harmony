@@ -191,7 +191,7 @@ struct Index {
     if (!this.session) {
       try { this.startupBackup = new StartupBackup(context); }
       catch (error) { Diagnostics.log('warn', 'backup', 'startup_capture_failed', undefined, error as Error); }
-      this.session = createNativeSessionService(context.filesDir, context.getApplicationContext().filesDir, this.approval, context, this.browser);
+      this.session = createNativeSessionService(context, this.approval, this.browser);
       this.session.subscribe((event) => {
         if (event.kind !== 'state') { autoCloudBackup.changed(); }
         if (event.state.canNavigate && ShareInbox.peek()) { this.receiveShare(); }
