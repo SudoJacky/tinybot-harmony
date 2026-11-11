@@ -103,7 +103,7 @@ function fixture() {
   assert.equal(f.calls[0].options.openID, 'fixture-openid'); assert.equal(f.calls[0].options.name, undefined, 'Automatic saves use the shared default cloud file');
   f.location = 3; await f.leave(); assert.equal(f.uploads, 1); assert.equal(f.writes, 1, 'Pending upload retries do not reserialize unchanged data');
   assert.equal(f.service.state, 'uploaded'); const leases = f.leases.length; await f.leave(); assert.equal(f.leases.length, leases, 'Unchanged uploaded data needs no task');
-  f.workspace.contentRevision++; await f.leave(); assert.equal(f.writes, 2, 'Mini app/workspace writes also invalidate the snapshot');
+  f.workspace.contentRevision++; await f.leave(); assert.equal(f.writes, 2, 'Workspace writes also invalidate the snapshot');
   f.service.changed(); await tick(); assert.equal(f.writes, 2); await f.leave(); assert.equal(f.writes, 3);
   f.service.setEnabled(false); assert.equal(f.saved.get('autoCloudBackupEnabled'), false); await f.leave(); assert.equal(f.writes, 3);
   f.service.dispose(); f.initialize(); assert.equal(f.service.enabled, true, 'Single-backup mode keeps automatic backup enabled, including legacy opt-outs');

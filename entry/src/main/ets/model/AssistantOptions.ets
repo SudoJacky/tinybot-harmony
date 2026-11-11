@@ -4,7 +4,6 @@ import { ModelReference, validateReference } from './ProviderProfiles';
 import { isConfigurationName } from './ConfigurationValue';
 export interface ModelCapability extends ModelReference { images: boolean; reasoning: string; contextWindow?: number; requestUsage: boolean; }
 export interface AssistantOptions {
-  miniAppsEnabled?: boolean;
   search?: SearchConfig;
   autoMemory: boolean; saveSummary: boolean; readOnly: boolean;
   memory?: ModelReference;
@@ -13,10 +12,9 @@ export interface AssistantOptions {
   capabilities: ModelCapability[];
 }
 export function defaultAssistantOptions(): AssistantOptions {
-  return { miniAppsEnabled: false, search: defaultSearchConfig(), autoMemory: true, saveSummary: false, readOnly: false, capabilities: [] };
+  return { search: defaultSearchConfig(), autoMemory: true, saveSummary: false, readOnly: false, capabilities: [] };
 }
 export function validateAssistantOptions(value: AssistantOptions): void {
-  if (value?.miniAppsEnabled !== undefined && typeof value.miniAppsEnabled !== 'boolean') { throw new Error(t('助手选项无效。')); }
   if (value?.search !== undefined) { validateSearchConfig(value.search, true); }
   if (!value || [value.autoMemory, value.saveSummary, value.readOnly].some((item) => typeof item !== 'boolean') ||
     !Array.isArray(value.capabilities) || value.capabilities.length > 200) { throw new Error(t("助手选项无效。")); }

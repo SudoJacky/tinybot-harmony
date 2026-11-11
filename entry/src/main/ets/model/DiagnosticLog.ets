@@ -57,7 +57,6 @@ EVENTS.backup = ['started', 'restored', 'restore_prepared', 'key_decrypt_failed'
   'restore_completed', 'restore_failed', 'startup_capture_failed', 'startup_marker_failed', 'startup_lookup_failed',
   'cloud_retry_finished', 'cloud_failed', 'cloud_retry', 'cloud_sync_progress', 'cloud_sync_finished', 'cloud_list_failed', 'cloud_settings_failed', 'auto_failed', 'auto_settings_failed', 'auto_task_failed', 'auto_expired', 'auto_release_failed',
   'webdav_failed', 'webdav_cleanup_failed', 'webdav_uploaded', 'webdav_settings_failed'];
-EVENTS['mini-app'] = ['manifest_failed', 'storage_failed', 'action_failed'];
 EVENTS['life-panel'] = ['published', 'refresh_skipped', 'refresh_started', 'refresh_complete', 'refresh_cancelled', 'refresh_failed', 'manifest_failed', 'action_failed', 'expiry_failed', 'connection_failed', 'api_response', 'api_failed', 'transform_started', 'transform_complete', 'transform_failed'];
 EVENTS.background = ['acquired', 'released', 'cancelled', 'suspended', 'release_failed', 'stop_failed', 'transition_failed', 'window_expired'];
 EVENTS.notification = ['authorization_checked', 'authorization_denied', 'authorization_failed', 'disabled', 'published', 'publish_failed'];
@@ -65,15 +64,16 @@ EVENTS.speech = ['preparing', 'listening', 'vad', 'complete', 'finishing', 'reco
 EVENTS.voice = ['focus_requested', 'released', 'draft_failed'];
 EVENTS.composer = ['sheet_action_queued', 'sheet_action_dispatched', 'sheet_action_cancelled'];
 EVENTS.focus = ['search_requested', 'provider_requested', 'onboarding_requested'];
-EVENTS.navigation = ['tools_opened', 'tools_repeated', 'settings_opened', 'settings_repeated', 'mini_apps_opened', 'mini_apps_repeated',
+EVENTS.navigation = ['tools_opened', 'tools_repeated', 'settings_opened', 'settings_repeated',
   'new_chat_blocked', 'new_chat_failed', 'new_chat_revealed'];
-EVENTS.web = ['engine_start', 'engine_ready', 'release', 'activate', 'failed', 'console_error', 'load_start', 'load_returned', 'host_ready', 'port_connected', 'ready', 'state_saved', 'attached', 'page_end', 'navigation_blocked', 'resource_failed'];
+EVENTS.web = ['storage_failed', 'engine_start', 'engine_ready', 'release', 'activate', 'failed', 'console_error', 'load_start', 'load_returned', 'host_ready', 'port_connected', 'ready', 'state_saved', 'attached', 'page_end', 'navigation_blocked', 'resource_failed'];
+EVENTS.office_preview = ['load_failed', 'update_annotations_failed', 'render_failed', 'annotation_failed', 'page_failed'];
 EVENTS.math = ['load_failed', 'render_failed', 'startup_timeout', 'process_exited', 'page_failed'];
 EVENTS.mermaid = ['startup_timeout', 'render_timeout', 'script_failed', 'diagram_failed', 'page_failed', 'process_exited'];
 EVENTS.preview = ['failed', 'captured', 'thumbnail_failed', 'surface_moved'];
 EVENTS.sandbox = ['execution_failed', 'orchestration_failed'];
 EVENTS.tool = ['failed', 'partial'];
-EVENTS.workspace = ['mutation_failed', 'folder_support_failed', 'folder_picker_support_failed', 'folder_persist_failed', 'folder_activate_failed', 'folder_revoke_failed', 'folder_startup_failed'];
+EVENTS.workspace = ['mutation_failed', 'preview_failed', 'folder_support_failed', 'folder_picker_support_failed', 'folder_persist_failed', 'folder_activate_failed', 'folder_revoke_failed', 'folder_startup_failed'];
 EVENTS.storage = ['scan_failed', 'metric_failed', 'cleanup_failed', 'cleanup_protected', 'usage_save_failed'];
 EVENTS.mcp = ['request_failed', 'cancel_notice_failed', 'browser_launch_failed'];
 EVENTS.mail = ['transport_failed', 'cleanup_failed', 'account_saved', 'account_removed', 'query_started', 'query_complete', 'query_failed', 'command_failed', 'settings_failed'];
@@ -107,7 +107,7 @@ STRINGS.rpcMethod = ['initialize', 'tools/list', 'tools/call', 'notifications/in
 STRINGS.service = ['mcp', 'search', 'web', 'bing-browser'];
 STRINGS.reason = ['api_level', 'device_unsupported', 'construction_failed', 'capability_changed', 'supported',
   'user_control', 'idle_browser', 'user_handoff', 'task_acquired'];
-STRINGS.format = ['image', 'markdown'];
+STRINGS.format = ['image', 'markdown', 'docx', 'xlsx', 'pptx'];
 STRINGS.scriptSource = ['generated', 'host', 'frame', 'blank', 'data', 'other', 'unknown'];
 STRINGS.setting = ['search.provider', 'providerProfiles.protocol', 'extensions.browserPolicy', 'config.reasoning',
   'capabilities.reasoning', 'threads.agentMode', 'threads.disabledTools', 'threads.reasoningEffort', 'servers.authType',

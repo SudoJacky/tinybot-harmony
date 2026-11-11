@@ -28,7 +28,7 @@ import { withWorkspaceLifecycle } from './WorkspaceRetention';
 import { PanelTaskFailure } from './PanelTaskFailure';
 import { PanelListQuery, PanelListPage, PanelSummary } from '../model/LifePanel';
 import { validatePanelViewState } from '../model/LifePanel';
-import { MiniAppStorage, MiniAppSnapshot } from '../model/MiniApp';
+import { WebUiStorage, WebUiSnapshot } from '../model/WebUi';
 export interface PanelPublishOptions { replaceData?: boolean; expectedRevision?: number; publicationKey?: string; sourceVerified?: boolean; }
 interface PanelCursor { version: number; after: string; workspaceId: string; archived: boolean; }
 
@@ -125,9 +125,9 @@ export class PanelRepository {
     } while (true);
   }
 
-  binding(id: string, configRevision: number): MiniAppStorage { return new PanelStorage(this, id, configRevision); }
-  async saveViewState(id: string, configRevision: number, value: Object | null, revision: string): Promise<MiniAppSnapshot> {
-    const snapshot: MiniAppSnapshot = { value: value, revision: util.generateRandomUUID() };
+  binding(id: string, configRevision: number): WebUiStorage { return new PanelStorage(this, id, configRevision); }
+  async saveViewState(id: string, configRevision: number, value: Object | null, revision: string): Promise<WebUiSnapshot> {
+    const snapshot: WebUiSnapshot = { value: value, revision: util.generateRandomUUID() };
     validatePanelViewState(snapshot);
     const record = await this.mutate(id, (record: PanelRecord) => {
       if (record.archived || !record.definition.view || record.configRevision !== configRevision) { throw new Error('Card changed; reopen before editing'); }
@@ -321,19 +321,19 @@ export class LifePanels {
   }
 }
 
-class PanelStorage implements MiniAppStorage {
+class PanelStorage implements WebUiStorage {
   private repository: PanelRepository;
   private id: string;
   private configRevision: number;
   constructor(repository: PanelRepository, id: string, configRevision: number) {
     this.repository = repository; this.id = id; this.configRevision = configRevision;
   }
-  async load(): Promise<MiniAppSnapshot> {
+  async load(): Promise<WebUiSnapshot> {
     const record = await this.repository.get(this.id);
-    const initial: MiniAppSnapshot = { value: null, revision: 'initial' };
+    const initial: WebUiSnapshot = { value: null, revision: 'initial' };
     return record.viewState || initial;
   }
-  save(value: Object | null, revision: string): Promise<MiniAppSnapshot> {
+  save(value: Object | null, revision: string): Promise<WebUiSnapshot> {
     return this.repository.saveViewState(this.id, this.configRevision, value, revision);
   }
 }

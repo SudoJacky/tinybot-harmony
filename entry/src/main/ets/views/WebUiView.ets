@@ -6,13 +6,11 @@ import { image } from '@kit.ImageKit';
 import { common } from '@kit.AbilityKit';
 import { t } from '../model/I18n';
 import { UiValues } from '../model/InteractiveUi';
-import { WebUiSpec, parseWebUi, parseWebUiMessage, webUiHost, webUiAutoHeight, WEB_UI_ORIGIN } from '../model/WebUi';
+import { WebUiSpec, parseWebUi, parseWebUiMessage, webUiHost, webUiAutoHeight, WEB_UI_ORIGIN, WebUiStorage, WebUiSnapshot, WebUiPanelContext } from '../model/WebUi';
 import { WebChartAssets, webChartAssets, webUiAssets } from '../services/WebUiAssets';
 import { Btn } from '../common/Theme';
 import { PreviewBrowserRuntime } from '../services/PreviewBrowserRuntime';
 import { browserAutomationScript } from '../model/BrowserScripts';
-import { MiniAppStorage, MiniAppSnapshot } from '../model/MiniApp';
-import { WebUiPanelContext } from '../model/WebUi';
 import { MailBody, MailReadRequest } from '../model/Mail';
 import { Cancellation } from '../services/Cancellation';
 import { WebAnnotationMark, WebAnnotationTarget, webAnnotationScript } from '../model/WebAnnotation';
@@ -42,8 +40,8 @@ export struct WebUiView {
   @Prop @Watch('syncAnnotations') annotationMarks: WebAnnotationMark[] = [];
   @Prop @Watch('syncAnnotations') annotationRevision: number = 0;
   onAnnotationTarget?: (target: WebAnnotationTarget) => void;
-  storage?: MiniAppStorage;
-  viewStorage?: MiniAppStorage;
+  storage?: WebUiStorage;
+  viewStorage?: WebUiStorage;
   private browserAttachment: number = -1;
   private sentAnnotationRevision: number = -1;
   onHeight: (height: number) => void = () => {};
@@ -293,8 +291,8 @@ export struct WebUiView {
       if (message.type === 'storageLoad' || message.type === 'storageSave') {
         try {
           const storage = message.scope === 'placement' ? this.viewStorage : this.storage;
-          if (!storage) { throw new Error(message.scope === 'placement' ? 'Placement view state is unavailable outside a board' : t('此预览未绑定小程序存储，请从小程序入口打开。')); }
-          let snapshot: MiniAppSnapshot;
+          if (!storage) { throw new Error(message.scope === 'placement' ? 'Placement view state is unavailable outside a board' : t('此预览未绑定持久化存储。')); }
+          let snapshot: WebUiSnapshot;
           if (message.type === 'storageLoad') { snapshot = await storage.load(); }
           else {
             if (this.snapshotMode || !this.foreground || this.saving || (!this.panelProbe && (this.preflight || !this.interactive || !this.visible))) {
@@ -308,7 +306,7 @@ export struct WebUiView {
             this.ports[0].postMessageEvent(JSON.stringify({ type: 'storageResult', id: id, snapshot: snapshot }));
           }
         } catch (error) {
-          Diagnostics.log('error', 'mini-app', 'storage_failed', { operationId: id }, error as Error);
+          Diagnostics.log('error', 'web', 'storage_failed', { operationId: id }, error as Error);
           if (this.mounted && generation === this.generation && this.ports.length) {
             this.ports[0].postMessageEvent(JSON.stringify({ type: 'storageResult', id: id, error: (error as Error).message }));
           }

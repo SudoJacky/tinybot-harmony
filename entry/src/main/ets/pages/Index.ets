@@ -1,5 +1,4 @@
 import { ConversationShareData, sharingMessages } from '../model/ConversationShare';
-import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { ConversationSharePanel } from '../views/ConversationSharePanel';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { NavigationShortcut, chatShortcuts } from '../common/KeyboardShortcuts';
@@ -25,7 +24,6 @@ import { StorageCategoryPanel, StoragePanel } from '../views/StoragePanel';
 import { storageCategoryKey } from '../model/StoragePlan';
 import { BranchesPanel } from '../views/BranchesPanel';
 import { WorkspacePanel } from '../views/WorkspacePanel';
-import { MiniAppsPanel } from '../views/MiniAppsPanel';
 import { LifePanelsPanel } from '../views/LifePanelsPanel';
 import { parsePanelTarget } from '../model/LifeBoard';
 import { LifePanels } from '../services/LifePanels';
@@ -128,8 +126,6 @@ struct Index {
   @State private historyPreferredWidth: number = 0;
   @State private detailPreferredWidth: number = 0;
   @State private historySearchRequest: number = 0;
-  @State private miniAppCreateAvailable: boolean = false;
-  @State private miniAppCreateRequest: number = 0;
   @StorageProp('tinybot.life-panel.target') @Watch('panelLinkChanged') private panelLink: string = '';
   @State private lifePanelTarget: string = '';
   private lastPanelLink: string = '';
@@ -1044,19 +1040,6 @@ struct Index {
     this.openDetailTab('files');
   }
 
-  private openMiniApps(discardConfirmed: boolean = false): void {
-    if (this.confirmRootNavigation('mini-apps', discardConfirmed, () => this.openMiniApps(true))) { return; }
-    this.rootSection = 'mini-apps';
-    const names = this.paths.getAllPathName();
-    if (names[names.length - 1] === 'mini-apps') {
-      Diagnostics.log('debug', 'navigation', 'mini_apps_repeated', { count: names.length });
-      return;
-    }
-    this.getUIContext().getFocusController().clearFocus();
-    this.paths.pushPath({ name: 'mini-apps' }, { launchMode: LaunchMode.POP_TO_SINGLETON });
-    Diagnostics.log('info', 'navigation', 'mini_apps_opened', { count: names.length, total: this.paths.size() });
-  }
-
   private panelLinkChanged(): void {
     if (!this.panelLink || this.panelLink === this.lastPanelLink || !this.app.ready || !this.privacy.allowed) { return; }
     try { parsePanelTarget(this.panelLink); this.lastPanelLink = this.panelLink; this.openLifePanels(false, this.panelLink); }
@@ -1165,7 +1148,6 @@ struct Index {
       onModels: () => { this.paths.pushPath({ name: 'model-settings' }); },
       onSearch: () => { this.paths.pushPath({ name: 'search-settings' }); },
       onMail: () => { this.paths.pushPath({ name: 'mail-settings' }); },
-      onLaboratory: () => { this.paths.pushPath({ name: 'laboratory' }); },
       onAppearance: () => { this.paths.pushPath({ name: 'appearance' }); },
       onLanguage: () => { this.paths.pushPath({ name: 'language' }); },
       onBackup: () => { this.paths.pushPath({ name: 'backup' }); },
@@ -1198,18 +1180,6 @@ struct Index {
         .onHidden(() => { this.onboardingActive = false; })
     } else if (name === 'life-panels') {
       LifePanelsPanel({ app: this.app, onShown: () => { this.rootSection = 'life-panels'; }, onChat: () => this.revealChat(), requestedTarget: this.lifePanelTarget })
-    } else if (name === 'mini-apps') {
-      NavDestination() {
-        if (this.app.productivity.options?.miniAppsEnabled === true) {
-          MiniAppsPanel({ app: this.app, onChat: () => this.revealChat(), createRequest: this.miniAppCreateRequest,
-            previewRevision: this.app.active.id + ':' + this.app.active.latestPreviewIds.join(','),
-            onCreateAvailable: (available: boolean) => { this.miniAppCreateAvailable = available; } })
-        } else { Text(t('请先在设置的实验室中开启小程序。')) }
-      }
-        .title(t('小程序'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
-        .onShown(() => { this.rootSection = 'mini-apps'; })
-        .menus(this.miniAppCreateAvailable ? [{ value: t('创建'), symbolIcon: new SymbolGlyphModifier($r('sys.symbol.plus')),
-          isEnabled: this.app.ready && !this.app.busy, action: () => { this.miniAppCreateRequest++; } }] : [])
     } else if (name === 'branches') {
       NavDestination() { BranchesPanel({ app: this.app, onSelected: () => this.paths.clear() }) }.title(t("会话分支"), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'appearance') {
@@ -1285,11 +1255,6 @@ struct Index {
       NavDestination() {
         HuaweiAccountPanel({ account: this.account, taskBusy: this.app.sharedBusy, onSupport: (page: string) => this.openSupport(page) })
       }.title(t('华为账号'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
-    } else if (name === 'laboratory') {
-      NavDestination() {
-        SettingsPanel({ app: this.app, settings: this.app.settings, account: this.account, browser: this.browser,
-          laboratoryOnly: true, onMiniApps: () => this.openMiniApps() })
-      }.title(t('实验室'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'settings') {
       NavDestination() {
         Column() {

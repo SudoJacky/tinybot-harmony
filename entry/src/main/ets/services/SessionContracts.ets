@@ -63,7 +63,7 @@ export interface SessionState {
   acceptingSteering: boolean;
 }
 
-export type SettingsToggle = 'autoMemory' | 'readOnly' | 'saveSummary' | 'autoCompact' | 'webEnabled' | 'miniAppsEnabled';
+export type SettingsToggle = 'autoMemory' | 'readOnly' | 'saveSummary' | 'autoCompact' | 'webEnabled';
 
 export interface SessionPreferences {
   config: ModelConfig;

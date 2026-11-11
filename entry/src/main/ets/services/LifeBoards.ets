@@ -6,7 +6,7 @@ import { GridRect, gridPlace, gridVacancy, validateGridRect } from '../model/Pan
 import { NativeWorkspaceFiles } from './NativeWorkspaceFiles';
 import { LifePanels } from './LifePanels';
 import { Cancellation } from './Cancellation';
-import { MiniAppStorage, MiniAppSnapshot } from '../model/MiniApp';
+import { WebUiStorage, WebUiSnapshot } from '../model/WebUi';
 import { validatePanelViewState } from '../model/LifePanel';
 import { withFileMutation } from './FileMutationQueue';
 import { PanelChanges } from './PanelChanges';
@@ -105,11 +105,11 @@ export class LifeBoards {
       return board;
     });
   }
-  binding(workspaceId: string, id: string, mountId: string): MiniAppStorage {
+  binding(workspaceId: string, id: string, mountId: string): WebUiStorage {
     return new BoardViewStorage(this, workspaceId, id, mountId);
   }
-  async saveViewState(workspaceId: string, id: string, mountId: string, value: Object | null, revision: string): Promise<MiniAppSnapshot> {
-    const snapshot: MiniAppSnapshot = { value: value, revision: util.generateRandomUUID() };
+  async saveViewState(workspaceId: string, id: string, mountId: string, value: Object | null, revision: string): Promise<WebUiSnapshot> {
+    const snapshot: WebUiSnapshot = { value: value, revision: util.generateRandomUUID() };
     validatePanelViewState(snapshot);
     await this.change(workspaceId, id, false, async (previous?: LifeBoard): Promise<LifeBoard> => {
       const item = previous!.items.find((item: BoardItem) => item.mountId === mountId);
@@ -139,7 +139,7 @@ export class LifeBoards {
   }
 }
 
-class BoardViewStorage implements MiniAppStorage {
+class BoardViewStorage implements WebUiStorage {
   private boards: LifeBoards;
   private workspaceId: string;
   private id: string;
@@ -147,13 +147,13 @@ class BoardViewStorage implements MiniAppStorage {
   constructor(boards: LifeBoards, workspaceId: string, id: string, mountId: string) {
     this.boards = boards; this.workspaceId = workspaceId; this.id = id; this.mountId = mountId;
   }
-  async load(): Promise<MiniAppSnapshot> {
+  async load(): Promise<WebUiSnapshot> {
     const board = await this.boards.get(this.workspaceId, this.id);
     const item = board.items.find((item: BoardItem) => item.mountId === this.mountId);
     if (!item) { throw new Error('Board placement is unavailable'); }
     return item.viewState || { value: null, revision: 'initial' };
   }
-  save(value: Object | null, revision: string): Promise<MiniAppSnapshot> {
+  save(value: Object | null, revision: string): Promise<WebUiSnapshot> {
     return this.boards.saveViewState(this.workspaceId, this.id, this.mountId, value, revision);
   }
 }

@@ -21,7 +21,7 @@ import { LifeBoards } from '../services/LifeBoards';
 import { PanelChanges } from '../services/PanelChanges';
 import { BoardEntry, BoardItem, boardLayoutKey, boardLayoutItems, PanelTarget, parsePanelTarget, referenceKey } from '../model/LifeBoard';
 import { PanelRecord, PanelRun } from '../model/LifePanel';
-import { MiniAppStorage } from '../model/MiniApp';
+import { WebUiStorage } from '../model/WebUi';
 import { builtinWidget } from '../model/BuiltinWidgets';
 import { BuiltinWidgets } from '../services/BuiltinWidgets';
 import { ProviderBalanceSource } from '../services/ProviderBalanceSource';
@@ -391,7 +391,7 @@ export struct LifePanelsPanel {
     if (this.sheetKind === 'add') { return t('添加到看板'); }
     return t('刷新任务与记录');
   }
-  private viewStorage(key: string): MiniAppStorage | undefined {
+  private viewStorage(key: string): WebUiStorage | undefined {
     const board = this.currentBoard(), item = board?.board.items.find((item: BoardItem) => referenceKey(item) === key);
     return board && item?.mountId ? this.boardStore().binding(board.workspaceId, board.board.id, item.mountId) : undefined;
   }

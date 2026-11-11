@@ -77,7 +77,7 @@
     });
     function storageRequest(type, value, revision, scope) {
       if (type === 'storageSave' && ((initial.preflight && !checking) || initial.snapshotMode || !active)) {
-        return Promise.reject(new Error('Save mini app data only during an active user interaction.'));
+        return Promise.reject(new Error('Save persistent data only during an active user interaction.'));
       }
       if (type === 'storageSave' && (value === undefined || typeof revision !== 'string' || !revision)) {
         return Promise.reject(new Error('Use the revision returned by tinybot.storage.load() or save().'));

@@ -4,7 +4,7 @@ import { BALANCE_PANEL_HTML } from '../model/BalancePanelTemplate';
 import { PanelEntry, PanelSpec } from '../model/LifePanel';
 import { BoardItem, PanelTarget } from '../model/LifeBoard';
 import { WorkspaceStore } from '../model/WorkspaceStore';
-import { miniAppPage } from '../model/MiniApp';
+import { webUiPage } from '../model/WebUi';
 import { t } from '../model/I18n';
 import { BuiltinWidgets } from './BuiltinWidgets';
 import { LifeBoards } from './LifeBoards';
@@ -90,7 +90,7 @@ export class BuiltinBoard {
     if (!balance && !guide && !ascii) { return; }
     cancellation.check();
     const definition = JSON.parse(JSON.stringify(panel.definition)) as PanelSpec;
-    definition.view = balance ? miniAppPage('balance.html', BALANCE_PANEL_HTML) : (await new BuiltinWidgets(this.context).definition(ascii ? 'ascii' : guide!.id)).view;
+    definition.view = balance ? webUiPage('balance.html', BALANCE_PANEL_HTML) : (await new BuiltinWidgets(this.context).definition(ascii ? 'ascii' : guide!.id)).view;
     definition.view!.height = panel.definition.view.height;
     if (JSON.stringify(definition.view) === JSON.stringify(panel.definition.view)) { return; }
     if (balance) { definition.checks = (definition.checks || []).filter((check) => check.selector !== '#privacy'); }

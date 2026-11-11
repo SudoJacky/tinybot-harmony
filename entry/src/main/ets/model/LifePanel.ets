@@ -1,7 +1,6 @@
 // v1 keeps native cards; v2 uses the same sandboxed Web UI renderer as previews.
-import { WebUiSpec, parseWebUi } from './WebUi';
+import { WebUiSpec, parseWebUi, WebUiSnapshot } from './WebUi';
 import { PanelSchema, PanelInput, PanelInputs, PanelCheck, validatePanelSchema, checkPanelValue, resolvePanelInputs, validatePanelChecks } from './PanelContract';
-import { MiniAppSnapshot } from './MiniApp';
 import { PanelSource, validatePanelSource } from './PanelSource';
 import { jsonPointer, pointerParts } from './PanelTransform';
 export { PanelSource } from './PanelSource';
@@ -23,13 +22,13 @@ export interface PanelRecord {
   createdAt: number; updatedAt: number; refreshedAt: number; attemptedAt: number;
   error: string; archived: boolean;
   layout?: PanelLayout;
-  paused?: boolean; runs?: PanelRun[]; viewState?: MiniAppSnapshot; inputs?: PanelInputs; runtimeError?: string; publicationKey?: string;
+  paused?: boolean; runs?: PanelRun[]; viewState?: WebUiSnapshot; inputs?: PanelInputs; runtimeError?: string; publicationKey?: string;
 }
 export interface PanelLayout { size: string; }
 export interface PanelRun { id: string; startedAt: number; finishedAt: number; status: string; error: string; trigger?: string; failure?: PanelFailureInfo; }
 export interface PanelFailureInfo { stage: string; code: string; message: string; tool?: string; nativeCode?: number; }
 export interface PanelEntry { workspaceId: string; panel: PanelRecord; }
-export function validatePanelViewState(snapshot: MiniAppSnapshot): void {
+export function validatePanelViewState(snapshot: WebUiSnapshot): void {
   if (!snapshot || typeof snapshot.revision !== 'string' || !snapshot.revision || snapshot.value === undefined ||
     snapshot.value !== null && typeof snapshot.value !== 'object' || JSON.stringify(snapshot).length > 256 * 1024) {
     throw new Error('Card state must be a JSON object or null, up to 256 KiB, with a revision');

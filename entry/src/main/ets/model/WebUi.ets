@@ -6,6 +6,18 @@ import { imapNumber } from './ImapWire';
 import { WebAnnotationTarget } from './WebAnnotation';
 // Versioned Web content embedded in a completed native UI surface.
 export interface WebUiSpec { version: number; html: string; css: string; js: string; library: string; height: number; autoHeight?: boolean; }
+export interface WebUiSnapshot { value: Object | null; revision: string; }
+// A native-owned capability. Generated pages never choose a workspace or path.
+export interface WebUiStorage {
+  load(): Promise<WebUiSnapshot>;
+  save(value: Object | null, revision: string): Promise<WebUiSnapshot>;
+}
+export function webUiPage(path: string, source: string, library: string = 'none'): WebUiSpec {
+  if (!/\.(js|html|svg)$/i.test(path)) { throw new Error('Web pages require a .js, .html or .svg file'); }
+  const script = /\.js$/i.test(path);
+  return parseWebUi(JSON.stringify({ version: 1, html: script ? '' : source, js: script ? source : '',
+    css: 'html,body{margin:0;width:100%;min-height:100%;}svg{max-width:100%;}', library: library, height: 600, autoHeight: false }));
+}
 export function htmlPreviewLibrary(html: string): string {
   return /<meta\s+name=["']tinybot-library["']\s+content=["']charts["']\s*\/?>/i.test(html) ? 'charts' : 'none';
 }

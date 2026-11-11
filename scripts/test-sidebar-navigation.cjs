@@ -11,7 +11,7 @@ if (file !== original) assert.ok(fs.statSync(file).mtimeMs >= fs.statSync(origin
 const source = fs.readFileSync(file, 'utf8').replace('struct Index {', 'class Index {');
 const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
 const cls = tree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'Index');
-const methods = ['openTools', 'openSettings', 'openMiniApps', 'createChat', 'revealChat',
+const methods = ['openTools', 'openSettings', 'createChat', 'revealChat',
   'openFiles', 'openDetailTab', 'openHistorySearch', 'toggleHistory', 'setHistoryCollapsed',
   'confirmProviderDiscard', 'confirmRootNavigation', 'returnFromSettings', 'selectSettingsSection'];
 const body = methods.map(name => cls.members.find(node => node.name?.getText(tree) === name).getText(tree)).join('\n');
@@ -19,20 +19,6 @@ const globals = { exports: {}, t: text => text, $r: value => value, LaunchMode: 
 vm.runInNewContext(ts.transpileModule(`class Page { ${body} } exports.Page = Page;`, {
   compilerOptions: { target: ts.ScriptTarget.ES2021 }
 }).outputText, globals);
-// Follow the laboratory binding so opening the collection still uses the navigation guard.
-const miniAppsCallbacks = [];
-function visit(node) {
-  ts.forEachChild(node, visit);
-  if (ts.isPropertyAssignment(node) && node.name.getText(tree) === 'onMiniApps' &&
-      ts.isObjectLiteralExpression(node.parent) &&
-      node.parent.properties.some(prop => prop.name?.getText(tree) === 'laboratoryOnly')) {
-    miniAppsCallbacks.push(node.initializer.getText(tree));
-  }
-}
-visit(tree);
-assert.ok(miniAppsCallbacks.length > 0, 'Find the laboratory mini-app entry');
-assert.doesNotMatch(source, /['"]open-mini-apps-menu['"]/);
-const miniAppsCallback = vm.runInNewContext(`(function() { return (${miniAppsCallbacks[0]}); })`);
 function fixture() {
   const routes = [], toasts = [], dialogs = [];
   let resets = 0;
@@ -58,23 +44,6 @@ function fixture() {
   });
   return { page, routes, toasts, dialogs, resets: () => resets };
 }
-test('repeated taps on the laboratory mini-app entry keep one page', () => {
-  const { page, routes } = fixture();
-  const click = miniAppsCallback.call(page);
-  for (let i = 0; i < 20; i++) click();
-  assert.deepEqual(routes.map(route => route.name), ['mini-apps']);
-});
-test('alternating laboratory and sidebar destinations cannot accumulate duplicate pages', () => {
-  const { page, routes } = fixture();
-  const click = miniAppsCallback.call(page);
-  for (let i = 0; i < 20; i++) {
-    click(); page.openTools('memory'); page.openSettings();
-    assert.equal(routes.length, 3);
-    assert.equal(new Set(routes.map(route => route.name)).size, 3);
-  }
-  click();
-  assert.deepEqual(routes.map(route => route.name), ['mini-apps']);
-});
 test('files, search and sidebar expansion never add navigation pages', () => {
   const { page, routes } = fixture();
   page.openSettings();
@@ -182,8 +151,8 @@ test('settings shortcuts synchronize the retained tools panel and repeated reque
   assert.equal(panel.tab, 'memory', 'Repeat request must override manual tab selection');
 });
 
-for (const destination of ['settings', 'productivity', 'mini-apps']) {
-  const navigate = page => destination === 'settings' ? page.openSettings() : destination === 'productivity' ? page.openTools('mcp') : page.openMiniApps();
+for (const destination of ['settings', 'productivity']) {
+  const navigate = page => destination === 'settings' ? page.openSettings() : page.openTools('mcp');
   test(`${destination} singleton reuse confirms before removing a provider draft`, () => {
     const { page, routes, dialogs } = fixture();
     routes.push({ name: destination }, { name: 'provider' }, { name: 'provider-models' });

@@ -2,11 +2,10 @@ import { PanelProbeOptions } from '../model/PanelContract';
 import { UiCompiler, UiValues, uiParts } from '../model/InteractiveUi';
 import { Cancellation, RunCancelledError } from './Cancellation';
 import { UiDiagnosticError } from '../model/UiRepair';
-import { MiniAppStorage } from '../model/MiniApp';
-import { WebUiPanelContext } from '../model/WebUi';
+import { WebUiStorage, WebUiPanelContext } from '../model/WebUi';
 import { PanelValidationStorage } from './PanelValidationStorage';
 
-export interface WebUiProbe { id: number; content: string; values: UiValues; storage?: MiniAppStorage; viewStorage?: MiniAppStorage; panelContext?: WebUiPanelContext; options?: PanelProbeOptions; }
+export interface WebUiProbe { id: number; content: string; values: UiValues; storage?: WebUiStorage; viewStorage?: WebUiStorage; panelContext?: WebUiPanelContext; options?: PanelProbeOptions; }
 interface PendingProbe { probe: WebUiProbe; start: () => void; pause: () => void; finish: (error?: Error) => void; }
 
 // One rendered probe at a time, shared by chat and team runtimes. Never persists probe state.
@@ -40,7 +39,7 @@ export class WebUiPreflight {
     if (!WebUiPreflight.foreground) { return; }
     WebUiPreflight.queue.find((item) => item.probe.id === id)?.finish(error ? new Error(error) : undefined);
   }
-  private static check(content: string, values: UiValues, cancellation: Cancellation, storage?: MiniAppStorage, panelContext?: WebUiPanelContext, options?: PanelProbeOptions): Promise<void> {
+  private static check(content: string, values: UiValues, cancellation: Cancellation, storage?: WebUiStorage, panelContext?: WebUiPanelContext, options?: PanelProbeOptions): Promise<void> {
     cancellation.check();
     if (!WebUiPreflight.listener) { return Promise.reject(new Error('Web UI preflight host is unavailable')); }
     const viewStorage = panelContext ? new PanelValidationStorage({ value: null, revision: 'initial' }) : undefined;
@@ -72,10 +71,7 @@ export class WebUiPreflight {
       WebUiPreflight.publish();
     });
   }
-  static validateMiniApp(content: string, storage: MiniAppStorage, cancellation: Cancellation): Promise<void> {
-    return WebUiPreflight.check(content, {}, cancellation, storage);
-  }
-  static validatePanel(content: string, storage: MiniAppStorage, context: WebUiPanelContext, cancellation: Cancellation, options?: PanelProbeOptions): Promise<void> {
+  static validatePanel(content: string, storage: WebUiStorage, context: WebUiPanelContext, cancellation: Cancellation, options?: PanelProbeOptions): Promise<void> {
     return WebUiPreflight.check(content, {}, cancellation, storage, context, options);
   }
   static async validate(content: string, cancellation: Cancellation): Promise<void> {

@@ -23,7 +23,6 @@ import { parseLifeBoard } from '../model/LifeBoard';
 import { Cancellation } from './Cancellation';
 import { WorkspaceRetention } from './WorkspaceRetention';
 import { parsePanelRecord } from '../model/LifePanel';
-import { parseMiniApp } from '../model/MiniApp';
 import { BackupDeviceState, captureBackupDeviceState, validateBackupDeviceState, mergeBackupDeviceState } from './BackupDeviceState';
 import { captureBackupConnections, prepareBackupConnections, RestoredPanelFile } from './BackupConnectionsIO';
 import { attachBackupImport, BackupImportActions, rollbackBackupActions, rollbackBackupFailure } from '../model/BackupImport';
@@ -172,10 +171,10 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
         if (stat.isSymbolicLink()) { throw new Error(t("备份不支持符号链接：") + path); }
         if (stat.isDirectory()) { pending.push(path); }
         else if (stat.isFile()) {
-          if (/^(mini-apps|life-panels|life-boards)\/[^/]+\/(app|panel|board)\.json$/.test(path)) {
+          // Retired mini-app files are opaque user data; keep their original bytes in backups.
+          if (/^(life-panels|life-boards)\/[^/]+\/(panel|board)\.json$/.test(path)) {
             const text = await fs.readText(absolute), parts = path.split('/');
-            if (parts[0] === 'mini-apps') { parseMiniApp(text, parts[1]); }
-            else if (parts[0] === 'life-panels') { parsePanelRecord(text, parts[1]); }
+            if (parts[0] === 'life-panels') { parsePanelRecord(text, parts[1]); }
             else { parseLifeBoard(text, parts[1]); }
           }
           // Original attachment bytes are already in the attachment section, including shared project copies.

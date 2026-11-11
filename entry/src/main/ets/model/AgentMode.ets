@@ -5,7 +5,7 @@ import { isConfigurationName } from './ConfigurationValue';
 export type AgentMode = 'full' | 'custom';
 export const AGENT_MODES: AgentMode[] = ['full', 'custom'];
 // Tools that no longer exist but may still appear in saved selections.
-export const REMOVED_TOOL_NAMES: string[] = ['generate_image', 'read_tool_result', 'publish_data_view', 'run_job'];
+export const REMOVED_TOOL_NAMES: string[] = ['generate_image', 'read_tool_result', 'publish_data_view', 'run_job', 'list_mini_apps', 'publish_mini_app'];
 export interface ToolSelection { agentMode?: string; disabledTools?: string[]; }
 
 export function validateAgentMode(mode: string): void {
