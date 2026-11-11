@@ -23,7 +23,8 @@ const model=loadModel('LifePanel');
 const signal=compile(fs.readFileSync(path.join(root,'entry/src/main/ets/services/Cancellation.ets'),'utf8'),
   {require:()=>({ToolFailure:class extends Error {}})});
 const tree=emitted('views/LifePanelsPanel'), panel=tree.statements.find(n=>ts.isClassDeclaration(n)&&n.name.text==='LifePanelsPanel');
-const names=['stop','activityChanged','scan','reload','report','entryKey','refresh','change','refreshAll','visible','layouts','rect','boardHeight','ghost','currentBoard','currentEditorThreadId','boardKey','targetChanged','dropCard','gridRect','beginLayout','updateLayout','finishLayout','followEdge','startMove','moveCard','resetGesture','resizeCard','heightOnBoard','entryFor','createCard','showEditor','addBuiltin','aboutToAppear','revealBoard'];
+const names=['stop','activityChanged','scan','reload','report','entryKey','refresh','change','refreshAll','visible','layouts','rect','boardHeight','ghost','currentBoard','currentEditorThreadId','boardKey','targetChanged','dropCard','gridRect','beginLayout','updateLayout','finishLayout','followEdge','startMove','moveCard','resetGesture','resizeCard','heightOnBoard','entryFor','createCard','showEditor','addBuiltin','aboutToAppear','revealBoard',
+  'editBoard','isEditingBoard','saveBoard','archiveBoard','openSheet'];
 const methods=panel.members.filter(n=>ts.isMethodDeclaration(n)&&names.includes(n.name.getText(tree))).map(n=>n.getText(tree)).join('\n');
 assert.equal(panel.members.filter(n=>ts.isMethodDeclaration(n)&&names.includes(n.name.getText(tree))).length,names.length);
 const timers=new Map(), logs=[];let timerId=0;
@@ -31,7 +32,7 @@ let installBuiltin,panelChange;
 const {Probe}=compile('export class Probe {'+methods+'}',{...loadModel('I18n'),...model,...signal,...loadModel('LifeBoard'),...loadModel('PanelPresentation'),...loadModel('PanelGrid'),
   builtinWidget:loadModel('BuiltinWidgets').builtinWidget,BuiltinWidgets:class{async add(...args){return installBuiltin(...args);}},
   PanelChanges:{subscribe:listener=>{panelChange=listener;return()=>{};}},
-  SendFrame:class{constructor(action){this.onIdle=action;}},ScrollAlign:{CENTER:'center'},
+  SendFrame:class{constructor(action){this.onIdle=action;}},ScrollAlign:{CENTER:'center'},Edge:{Top:'top'},
   setTimeout:(fn,ms)=>{timers.set(++timerId,{fn,ms});return timerId;},clearTimeout:id=>timers.delete(id),
   Motion:{medium:180,thumb:'spring'},Diagnostics:{log:(...args)=>logs.push(args)}});
 const turn=()=>new Promise(resolve=>setImmediate(resolve));
@@ -46,6 +47,52 @@ function view(entries=[],repository={}) {
   page.panels=()=>({list:async()=>entries,repository:()=>repository});return page;
 }
 async function main() {
+  {
+    const editor = view();
+    const home = { workspaceId: 'personal', board: { id: 'daily', title: 'Home', description: 'Personal', archived: false } };
+    const work = { workspaceId: 'work', board: { id: 'daily', title: 'Work', description: 'Projects' } };
+    const writes = [], scrolls = [];
+    Object.assign(editor, {
+      app: { activeWorkspaceId: 'personal' },
+      boardEditorScroller: { scrollEdge: edge => scrolls.push(edge) },
+      boardStore: () => ({ save: async (...args) => { writes.push(args); return { id: 'created' }; } }),
+      reload: async () => {}
+    });
+    editor.editBoard(home);
+    assert.equal(editor.sheetKind, 'board');
+    editor.boardTitle = 'Draft';
+    editor.editBoard(home);
+    assert.equal(editor.boardTitle, 'Draft');
+    editor.editBoard(work);
+    assert.equal(editor.isEditingBoard('personal/daily'), false);
+    assert.equal(editor.isEditingBoard('work/daily'), true);
+    assert.equal(editor.boardTitle, 'Work');
+    assert.equal(editor.boardDescription, 'Projects');
+    assert.deepEqual(scrolls, ['top', 'top']);
+
+    editor.boardTitle = 'Work draft';
+    editor.boardSelection = 'personal/daily';
+    await editor.archiveBoard(home);
+    assert.equal(editor.boardSelection, '');
+    home.board.archived = true;
+    await editor.archiveBoard(home);
+    assert.deepEqual(writes, [
+      ['personal', 'daily', 'Home', 'Personal', undefined, true],
+      ['personal', 'daily', 'Home', 'Personal', undefined, false]
+    ]);
+    assert.equal(editor.isEditingBoard('work/daily'), true);
+    assert.equal(editor.boardTitle, 'Work draft');
+    assert.equal(editor.sheetOpen, true);
+
+    editor.editBoard();
+    assert.equal(editor.isEditingBoard('work/daily'), false);
+    assert.equal(editor.boardDescription, '');
+    editor.boardTitle = 'New board';
+    await editor.saveBoard();
+    assert.deepEqual(writes.at(-1), ['personal', '', 'New board', '']);
+    assert.equal(editor.boardSelection, 'personal/created');
+    console.log('PASS board management selects by workspace, archives and restores independently, and creates in the active workspace');
+  }
   {
     const initial=view(),positions=[];
     initial.boardScroller={scrollToIndex:(...args)=>positions.push(args)};
