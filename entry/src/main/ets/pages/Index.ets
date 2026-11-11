@@ -1527,6 +1527,7 @@ struct Index {
       if (!this.privacyAllowed) {
         Column({ space: Space.lg }) {
           Text('Tinybot').fontSize(28).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
+            .focusable(!this.privacy.simulatorDebug).defaultFocus(!this.privacy.simulatorDebug)
           if (this.privacy.simulatorDebug) {
             Text(t('模拟器调试隐私说明')).id('debug-privacy-title')
               .fontSize(20).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
@@ -1553,6 +1554,7 @@ struct Index {
           }
         }.padding(Space.xl).width('100%').height('100%').justifyContent(FlexAlign.Center)
           .backgroundColor($r('app.color.page_background'))
+          .onFocus(() => this.privacy.onGateFocus(true)).onBlur(() => this.privacy.onGateFocus(false))
       } else {
       ForEach([this.locale], (_locale: string) => {
     Stack() {
