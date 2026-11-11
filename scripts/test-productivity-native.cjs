@@ -1928,9 +1928,9 @@ async function test(name, run) {
     const {NativeWorkspaceFiles}=load(path.join(source,'services/NativeWorkspaceFiles'));
     const workspace=root+'/workspace/thread';fs.mkdirSync(nativePath(workspace),{recursive:true});
     const files=new NativeWorkspaceFiles(workspace);const before=NativeWorkspaceFiles.contentRevision;
-    await files.writeMiniApp('mini-apps/probe/data.json','{"version":1,"value":2}',new Cancellation(),{version:null});
-    assert.ok(NativeWorkspaceFiles.contentRevision>before,'Managed mini app data changes invalidate automatic backup');
-    const after=NativeWorkspaceFiles.contentRevision;await files.read('mini-apps/probe/data.json',new Cancellation());
+    await files.writeLifePanel('life-panels/probe/panel.json','{"version":1,"value":2}',new Cancellation(),{version:null});
+    assert.ok(NativeWorkspaceFiles.contentRevision>before,'Managed card data changes invalidate automatic backup');
+    const after=NativeWorkspaceFiles.contentRevision;await files.read('life-panels/probe/panel.json',new Cancellation());
     assert.equal(NativeWorkspaceFiles.contentRevision,after,'Reading does not create a backup change');
   });
   await test('cloud quota failure preserves the pending snapshot; failed writes never become restore points',async()=>{
@@ -2101,7 +2101,7 @@ async function test(name, run) {
       cloudStart=async sync=>{sync.callback({state:4,error:0});};assert.equal(await CloudBackup.sync(),true);
     } finally {fakeTimers=undefined;}
   });
-  await test('mini apps laboratory setting gates native tool catalog and dispatch', async()=>{
+  await test('retired mini apps stay unavailable with legacy settings while previews and cards remain usable', async()=>{
     const {NativeSessionResources}=load(path.join(source,'services/NativeSessionService'));
     const {ProviderRegistry}=load(path.join(source,'services/providers/ProviderRegistry'));
     const {defaultExtensions}=load(path.join(source,'model/Skills'));
@@ -2113,8 +2113,8 @@ async function test(name, run) {
       data.options.miniAppsEnabled=enabled;
       const tools=resources.tools('chat',ext,'',data);
       for(const name of ['list_mini_apps','publish_mini_app']) {
-        assert.equal(tools.definitions().some(tool=>tool.function.name===name),enabled===true);
-        if(enabled!==true) await assert.rejects(tools.execute({id:name,type:'function',function:{name,arguments:'{}'}},new Cancellation()),
+        assert.equal(tools.definitions().some(tool=>tool.function.name===name),false);
+        await assert.rejects(tools.execute({id:name,type:'function',function:{name,arguments:'{}'}},new Cancellation()),
           error=>['TOOL_UNAVAILABLE','PERMISSION_DENIED'].includes(error.code));
       }
       assert.ok(tools.definitions().some(tool=>tool.function.name==='publish_preview'),'Ordinary previews remain available');

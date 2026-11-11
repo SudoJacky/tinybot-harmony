@@ -150,7 +150,7 @@ async function main() {
   const counter=JSON.parse(await invoke(widgetTools,'read_skill',{name:'widget',path:'assets/counter.panel.json'}));
   const counterHtml=JSON.parse(await invoke(widgetTools,'read_skill',{name:'widget',path:'assets/counter.html'}));
   from('model/LifePanel').parsePanelSpec(JSON.stringify({...JSON.parse(counter.content),
-    view:from('model/MiniApp').miniAppPage('counter.html',counterHtml.content)}));
+    view:from('model/WebUi').webUiPage('counter.html',counterHtml.content)}));
   const wallet=JSON.parse(await invoke(widgetTools,'read_skill',{name:'widget',path:'assets/balance.html'}));
   assert.equal(wallet.content,from('model/BalancePanelTemplate').BALANCE_PANEL_HTML,'Runtime wallet and Skill reference share one source');
   console.log('PASS upgrade installs authoring Skills, preserves preferences and progressively reads all linked references, templates and catalog routes');

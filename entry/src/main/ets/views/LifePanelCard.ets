@@ -5,8 +5,7 @@ import { panelErrorText } from '../model/PanelPresentation';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Btn, Radius, Motion, gradientColor } from '../common/Theme';
 import { t, getLocale } from '../model/I18n';
-import { MiniAppStorage } from '../model/MiniApp';
-import { WebUiPanelContext, WebUiSpec } from '../model/WebUi';
+import { WebUiStorage, WebUiPanelContext, WebUiSpec } from '../model/WebUi';
 import { WebUiView } from './WebUiView';
 import { IconButton } from '../common/Widgets';
 import { PanelNode, PanelRecord, PanelItem, PanelBinding, panelValue, panelText, panelNumber, panelItems, panelPoints } from '../model/LifePanel';
@@ -178,8 +177,8 @@ export struct LifePanelCard {
     this.scrollPage(event);
     if (event.velocityY !== 0) { this.pageScroller.fling(event.velocityY); }
   }
-  storage?: MiniAppStorage;
-  viewStorage?: MiniAppStorage;
+  storage?: WebUiStorage;
+  viewStorage?: WebUiStorage;
   onRun: (inputs?: PanelInputs) => Promise<void> = async () => {};
   onReadMail?: (request: MailReadRequest, cancellation: Cancellation) => Promise<MailBody>;
   onRuntimeError: (message: string, revision: number) => void = () => {};

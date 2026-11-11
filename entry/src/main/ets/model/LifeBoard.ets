@@ -1,9 +1,9 @@
 import { panelId, validatePanelViewState } from './LifePanel';
-import { MiniAppSnapshot } from './MiniApp';
+import { WebUiSnapshot } from './WebUi';
 import { threadWorkspacePath } from './Workspace';
 import { GridRect, gridCompact, gridHeight, gridOverlap, validateGridRect } from './PanelGrid';
 export interface PanelReference { workspaceId: string; panelId: string; }
-export interface BoardItem extends PanelReference, GridRect { mountId?: string; viewState?: MiniAppSnapshot; }
+export interface BoardItem extends PanelReference, GridRect { mountId?: string; viewState?: WebUiSnapshot; }
 interface LegacyBoardItem extends PanelReference { size: string; height?: number; }
 export interface LifeBoard {
   version: number; id: string; title: string; description: string; items: BoardItem[];

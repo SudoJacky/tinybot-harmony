@@ -5,7 +5,7 @@ description: 创建、修改或排查 Tinybot 生活看板小组件，包括 HTM
 
 # 看板小组件
 
-Life Panel is a persistent card, separate from temporary previews and Mini apps. Use the existing `publish_life_panel` tools; Skills do not add tools or permissions.
+Life Panel is a persistent card, separate from temporary previews. Use the existing `publish_life_panel` tools; Skills do not add tools or permissions.
 
 ## Create or edit
 

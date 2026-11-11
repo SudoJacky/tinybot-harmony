@@ -2,14 +2,12 @@ import { BrowserPreview } from '../model/BrowserPreview';
 import { ProviderEffects } from './providers/Provider';
 import { PresentTools } from './PresentTools';
 import { PreviewTools } from './PreviewTools';
-import { MiniApps } from './MiniApps';
 import { LifePanels } from './LifePanels';
 import { ProviderBalanceSource } from './ProviderBalanceSource';
 import { LifeBoards } from './LifeBoards';
 import { LifePanelTools } from './LifePanelTools';
 import { MailTools } from './MailTools';
 import { installNativePanelAgent } from './NativePanelAgent';
-import { MiniAppTools } from './MiniAppTools';
 import { PreviewCapture } from './PreviewCapture';
 import { savePreviewRepair } from './PreviewRecovery';
 import { WebSearchTools } from './WebSearchTools';
@@ -90,7 +88,6 @@ export class NativeSessionResources implements SessionResources {
     if (this.context) { await completionNotifications.prepare(); await backgroundGeneration.beginTurn(); }
   }
   private workspaces: WorkspaceStore;
-  private miniApps: MiniApps;
   private lifePanels: LifePanels;
   private lifeBoards: LifeBoards;
   private providers: ProviderRegistry;
@@ -101,7 +98,6 @@ export class NativeSessionResources implements SessionResources {
   private officeLibrary?: string;
   constructor(workspaceFilesDir: string, providers: ProviderRegistry, approval: ToolApproval, context?: common.UIAbilityContext, browser?: BrowserSession) {
     this.browser = browser;
-    this.miniApps = new MiniApps(workspaceFilesDir);
     this.lifePanels = new LifePanels(workspaceFilesDir);
     this.lifeBoards = new LifeBoards(workspaceFilesDir);
     this.context = context;
@@ -157,8 +153,6 @@ export class NativeSessionResources implements SessionResources {
     groups.push(new LifePanelTools(this.lifePanels, workspaceId || id, id, files, this.lifeBoards,
       (page, storage, context, cancellation, options) => WebUiPreflight.validatePanel(page, storage, context, cancellation, options)));
     groups.push(new MailTools());
-    groups.push(new MiniAppTools(this.miniApps, workspaceId || id, id, files,
-      (page, storage, cancellation) => WebUiPreflight.validateMiniApp(page, storage, cancellation), productivity?.options?.miniAppsEnabled === true));
     groups.push(new PresentTools((path: string) => files.checkedPath(path)));
     groups.push(new PreviewTools(files, (content, cancellation) => WebUiPreflight.validate(content, cancellation),
       (content, cancellation, png) => PreviewCapture.capture(content, cancellation, png),

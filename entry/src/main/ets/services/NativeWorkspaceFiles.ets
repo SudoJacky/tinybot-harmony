@@ -248,13 +248,6 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
   }
 
   // App-owned state is atomic and version-checked, but is not an agent edit to review/revert.
-  async writeMiniApp(path: string, content: string, cancellation: Cancellation, guard?: WorkspaceWriteGuard): Promise<WorkspaceWrite> {
-    workspaceRelativePath(path, false);
-    if (!/^mini-apps\/[A-Za-z0-9][A-Za-z0-9_-]{0,127}\/(app|data(?:-[A-Za-z0-9_-]+)?)\.json$/.test(path)) { throw new Error('Invalid managed mini app path'); }
-    return withFileMutation(this.root + '/' + path, () => this.mutate(path, content, [], cancellation, guard, false));
-  }
-
-  // Capture before showing the confirmation, including for binary/image files.
   async writeLifePanel(path: string, content: string, cancellation: Cancellation, guard?: WorkspaceWriteGuard): Promise<WorkspaceWrite> {
     if (!/^life-panels\/[A-Za-z0-9][A-Za-z0-9_-]{0,127}\/panel\.json$/.test(path)) { throw new Error('Invalid managed Life Panel path'); }
     workspaceRelativePath(path, false);
@@ -266,6 +259,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
     return withFileMutation(this.root + '/' + path, () => this.mutate(path, content, [], cancellation, guard, false));
   }
 
+  // Capture before showing the confirmation, including for binary/image files.
   async removalVersion(path: string): Promise<string> {
     return withFileMutation(await this.fileKey(path), () => this.removalVersionUnlocked(path));
   }

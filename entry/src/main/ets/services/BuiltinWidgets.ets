@@ -4,7 +4,7 @@ import { builtinWidget, builtinWidgetSpec } from '../model/BuiltinWidgets';
 import { PanelEntry, PanelSpec, parsePanelSpec } from '../model/LifePanel';
 import { resolvePanelInputs } from '../model/PanelContract';
 import { getLocale, t } from '../model/I18n';
-import { miniAppPage } from '../model/MiniApp';
+import { webUiPage } from '../model/WebUi';
 import { BALANCE_PANEL_HTML } from '../model/BalancePanelTemplate';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { LifePanels } from './LifePanels';
@@ -27,7 +27,7 @@ export class BuiltinWidgets {
     if (id === 'balance') {
       const definition = providerBalanceDefinition();
       if (!definition) { throw new Error(t('请先在模型服务设置中配置余额查询。')); }
-      spec = definition; spec.title = widget.title; spec.view = miniAppPage('balance.html', BALANCE_PANEL_HTML);
+      spec = definition; spec.title = widget.title; spec.view = webUiPage('balance.html', BALANCE_PANEL_HTML);
     } else {
       const parts = await Promise.all([this.resource(id + '.html'), this.resource('base.css'), this.resource('base.js'),
         id.startsWith('guide-') ? this.resource('guide.js') : Promise.resolve(''),

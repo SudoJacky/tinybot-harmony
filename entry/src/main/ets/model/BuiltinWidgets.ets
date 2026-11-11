@@ -1,5 +1,5 @@
 import { PanelSpec } from './LifePanel';
-import { miniAppPage } from './MiniApp';
+import { webUiPage } from './WebUi';
 import { PanelCheck } from './PanelContract';
 import { t } from './I18n';
 
@@ -42,5 +42,5 @@ export function builtinWidgetSpec(id: string, html: string): PanelSpec {
   const widget = builtinWidget(id);
   return { version: 2, title: widget.title, size: 'M', nodes: [], data: {} as Record<string, Object>,
     dataSchema: { type: 'object', additionalProperties: false }, checks: widget.checks,
-    view: miniAppPage(id + '.html', html) };
+    view: webUiPage(id + '.html', html) };
 }

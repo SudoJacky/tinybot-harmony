@@ -71,6 +71,15 @@ module.exports = async function completeBackup({ load, fs, nativePath, secrets, 
   write(source.filesDir, panelPath('mail'), panel('mail', { type: 'mail', mail: { accountId: mail.id, folder: 'INBOX' } }));
   for (const id of ['api', 'oauth', 'wallet', 'mail']) parsePanelRecord(JSON.stringify(read(source.filesDir, panelPath(id))), id);
   write(source.filesDir, 'orphan/note.txt', 'Keep orphan workspace');
+  // The retired runtime must not parse or rewrite historical app bytes, even malformed manifests.
+  const retiredFiles = {
+    'owner/mini-apps/ledger/app.json': '{"version":1,"retired":true}',
+    'owner/mini-apps/ledger/data.json': '{"revision":"old","value":{"count":12}}',
+    'retired-owner/mini-apps/legacy/app.json': 'unparseable legacy manifest\n',
+    'retired-owner/mini-apps/legacy/data.json': '{"value":{"entries":[1,2,3]}}',
+    'retired-owner/mini-apps/legacy/data-v2.json': '{"value":{"entries":[4,5]}}'
+  };
+  for (const [path, bytes] of Object.entries(retiredFiles)) write(source.filesDir, path, bytes);
   const board = { version: 2, id: 'dashboard', title: 'Dashboard', description: '', archived: false, createdAt: 1, updatedAt: 1,
     items: [{ workspaceId: 'owner', panelId: 'api', mountId: 'mounted-api', x: 0, y: 0, w: 6, h: 8, viewState: { revision: 'mount-1', value: { expanded: false } } }] };
   write(source.filesDir, 'boards/life-boards/dashboard/board.json', board);
@@ -113,7 +122,11 @@ module.exports = async function completeBackup({ load, fs, nativePath, secrets, 
   assert.equal(result.threads.find(item => item.id === 'owner').queuePaused, true, 'Restored pending instructions remain paused');
   assert.equal(await vault.read(result.config.credentialAlias), rawSecrets[0]); assert.equal(result.config.configured, true);
   assert.equal(result.config.userDocument, 'Call me Lin'); assert.equal(result.config.contextWindow, 65536);
-  assert.equal(result.productivity.options.memory.providerId, profile.id); assert.equal(result.productivity.options.miniAppsEnabled, true);
+  assert.equal(result.productivity.options.memory.providerId, profile.id);
+  assert.equal(result.productivity.options.miniAppsEnabled, undefined, 'Import does not restore the retired feature toggle');
+  for (const [path, bytes] of Object.entries(retiredFiles)) {
+    assert.equal(fs.readFileSync(nativePath(destination.filesDir + '/workspace/' + path), 'utf8'), bytes, 'Retired app files survive backup and restore byte for byte');
+  }
   assert.equal(result.productivity.options.title.providerId, profile.id);
   assert.equal(result.productivity.options.teamWorker.providerId, profile.id);
   assert.equal(result.productivity.options.autoRoute, undefined, 'Import does not restore retired automatic routing');

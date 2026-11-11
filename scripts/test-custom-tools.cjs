@@ -53,10 +53,15 @@ function fixture(data = seed()) {
   f.calls = calls; return f;
 }
 async function main() {
-  assert.equal(all.length, 54); assert.equal(new Set(all).size, 54); assert.equal(BASIC_FILE_TOOLS.length, 6);
-  assert.equal(optional.length, 44);
+  assert.equal(all.length, 52); assert.equal(new Set(all).size, 52); assert.equal(BASIC_FILE_TOOLS.length, 6);
+  assert.equal(optional.length, 42);
   for (const name of ['list_mail_accounts', 'search_mail', 'read_mail']) assert.ok(all.includes(name));
-  assert.ok(all.includes('list_mini_apps')); assert.ok(all.includes('publish_mini_app'));
+  assert.ok(!all.includes('list_mini_apps')); assert.ok(!all.includes('publish_mini_app'));
+  const retiredApps = seed(); retiredApps.productivity.options.miniAppsEnabled = true;
+  retiredApps.threads[0].agentMode = 'custom'; retiredApps.threads[0].disabledTools = ['list_mini_apps', 'publish_mini_app'];
+  const migratedApps = parseAppData(JSON.stringify(retiredApps));
+  assert.deepEqual(Array.from(migratedApps.threads[0].disabledTools), []);
+  assert.equal(migratedApps.threads[0].messages.length, retiredApps.threads[0].messages.length);
   assert.ok(!all.includes('publish_data_view'));
   assert.ok(!all.includes('generate_image'));
   const removed = seed(); removed.productivity.options.image = {providerId:'old', modelId:'image'};
@@ -76,7 +81,7 @@ async function main() {
     ['read_attachment', 'read_reference']);
   const covered = Array.from(TOOL_CAPABILITIES.flatMap(capability => capability.tools));
   assert.equal(TOOL_CAPABILITIES.length, 13);
-  assert.equal(new Set(covered).size, 44); assert.deepEqual(covered.slice().sort(), optional.slice().sort());
+  assert.equal(new Set(covered).size, 42); assert.deepEqual(covered.slice().sort(), optional.slice().sort());
   const obsolete = {agentMode:'custom', disabledTools:Array.from(MANAGED_TOOL_NAMES).concat(['generate_image', 'read_tool_result'])};
   validateToolSelection(obsolete);
   assert.deepEqual(Array.from(normalizeDisabledTools(obsolete.disabledTools)), []);
@@ -123,7 +128,7 @@ async function main() {
   assert.ok(migrated.threads[0].disabledTools.includes('publish_preview'), 'Retired chart denial preserves the preview capability switch');
   const retiredOnly = seed(); retiredOnly.threads[0].agentMode = 'custom';
   retiredOnly.threads[0].disabledTools = ['publish_data_view'];
-  assert.deepEqual(Array.from(parseAppData(JSON.stringify(retiredOnly)).threads[0].disabledTools), ['publish_preview', 'list_mini_apps', 'publish_mini_app',
+  assert.deepEqual(Array.from(parseAppData(JSON.stringify(retiredOnly)).threads[0].disabledTools), ['publish_preview',
     'get_life_panel_catalog', 'list_life_panels', 'get_life_panel', 'publish_life_panel', 'validate_life_panel', 'list_life_boards', 'get_life_board', 'manage_life_board', 'manage_life_panel_task']);
   assert.deepEqual(Array.from(migrated.threads[0].disabledTools).sort(),
     Array.from(normalizeDisabledTools(legacyData.threads[0].disabledTools)).sort());

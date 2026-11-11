@@ -17,7 +17,6 @@ export function mergeBackupOptions(local: AssistantOptions | undefined, incoming
   if (!incoming) { return local; }
   if (!local) { return JSON.parse(JSON.stringify(incoming)) as AssistantOptions; }
   const merged = JSON.parse(JSON.stringify(local)) as AssistantOptions, base = defaultAssistantOptions();
-  if (local.miniAppsEnabled === undefined || local.miniAppsEnabled === base.miniAppsEnabled) { merged.miniAppsEnabled = incoming.miniAppsEnabled; }
   if (local.autoMemory === base.autoMemory) { merged.autoMemory = incoming.autoMemory; }
   if (local.saveSummary === base.saveSummary) { merged.saveSummary = incoming.saveSummary; }
   if (local.readOnly === base.readOnly) { merged.readOnly = incoming.readOnly; }

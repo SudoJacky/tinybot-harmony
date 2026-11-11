@@ -5,12 +5,10 @@ import { LifePanels } from './LifePanels';
 import { providerBalanceCatalog } from './ProviderBalanceCatalog';
 import { panelId, parsePanelSpec, PanelListQuery, PanelSpec } from '../model/LifePanel';
 import { panelSkillCatalog } from '../model/PanelSkillCatalog';
-import { miniAppPage } from '../model/MiniApp';
-import { MiniAppStorage, MiniAppSnapshot } from '../model/MiniApp';
+import { webUiPage, WebUiStorage, WebUiSnapshot, WebUiPanelContext } from '../model/WebUi';
 import { PanelValidationStorage } from './PanelValidationStorage';
 import { PanelProbeOptions, PanelInputs, reconcilePanelInputs } from '../model/PanelContract';
 import { PanelTaskFailure } from './PanelTaskFailure';
-import { WebUiPanelContext } from '../model/WebUi';
 import { getLocale } from '../model/I18n';
 import { WorkspaceFiles } from './WorkspaceFiles';
 import { workspaceRelativePath } from './WorkspaceTools';
@@ -31,9 +29,9 @@ export class LifePanelTools implements AgentTools {
   private threadId: string;
   private files: WorkspaceFiles;
   private boards?: LifeBoards;
-  private validate?: (page: string, storage: MiniAppStorage, context: WebUiPanelContext, cancellation: Cancellation, options?: PanelProbeOptions) => Promise<void>;
+  private validate?: (page: string, storage: WebUiStorage, context: WebUiPanelContext, cancellation: Cancellation, options?: PanelProbeOptions) => Promise<void>;
   constructor(panels: LifePanels, workspaceId: string, threadId: string, files: WorkspaceFiles, boards?: LifeBoards,
-    validate?: (page: string, storage: MiniAppStorage, context: WebUiPanelContext, cancellation: Cancellation, options?: PanelProbeOptions) => Promise<void>) {
+    validate?: (page: string, storage: WebUiStorage, context: WebUiPanelContext, cancellation: Cancellation, options?: PanelProbeOptions) => Promise<void>) {
     this.panels = panels; this.workspaceId = workspaceId; this.threadId = threadId; this.files = files;
     this.boards = boards;
     this.validate = validate;
@@ -187,7 +185,7 @@ export class LifePanelTools implements AgentTools {
       if (args.htmlPath !== undefined) {
         if (typeof args.htmlPath !== 'string' || !args.htmlPath.endsWith('.html') || definition?.version !== 2) { throw new Error('htmlPath requires v2 and a workspace .html file'); }
         const height = definition.view?.height || 320;
-        definition.view = miniAppPage(args.htmlPath, (await this.files.read(workspaceRelativePath(args.htmlPath, false), cancellation)).content); definition.view.height = height;
+        definition.view = webUiPage(args.htmlPath, (await this.files.read(workspaceRelativePath(args.htmlPath, false), cancellation)).content); definition.view.height = height;
       }
       const spec = parsePanelSpec(JSON.stringify(definition));
       if (spec.view && (!spec.dataSchema || !spec.checks)) { throw new ToolFailure('PANEL_CONTRACT_REQUIRED', 'HTML authoring requires dataSchema and checks (use [] for display-only cards); read_skill widget references/validation.md', 'add_schema_and_interaction_checks', { path: path }); }

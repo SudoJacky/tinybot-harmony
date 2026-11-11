@@ -7,7 +7,6 @@ export function toolTitle(name: string): string {
     'get_life_panel': t('查看卡片详情'),
     'get_life_panel_catalog': t('查看卡片组件规范'), 'list_life_panels': t('查看 Life Panel'), 'publish_life_panel': t('保存卡片'),
     'get_life_board': t('查看看板'), 'list_life_boards': t('查看看板'), 'manage_life_board': t('管理看板'), 'manage_life_panel_task': t('管理卡片任务'),
-    'list_mini_apps': t('查看小程序'), 'publish_mini_app': t('保存小程序'),
     'browser_open': t('打开浏览器'), 'browser_snapshot': t('读取浏览器页面'), 'browser_action': t('操作浏览器'),
     'browser_capture': t('截取浏览器画面'), 'browser_wait': t('等待浏览器状态'),
     'browser_handoff': t('请你接管浏览器'), 'browser_close': t('关闭浏览器'),
