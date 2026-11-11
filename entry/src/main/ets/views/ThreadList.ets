@@ -18,6 +18,8 @@ import { Btn, Font, Motion, Radius, Space, Styles } from '../common/Theme';
 import { Banner, BottomBar, EmptyState, GroupCard, IconButton, NavRow, RowDivider, SectionHeader } from '../common/Widgets';
 
 const SEARCH_HEIGHT: number = 44;
+const THREAD_ROW_HEIGHT: number = 38;
+const RENAME_CONTROL_HEIGHT: number = 36;
 const ROW_MENU_SIZE: number = 32;
 const ROW_MENU_RIGHT_INSET: number = 4;
 
@@ -41,7 +43,7 @@ struct ThreadRow {
   @Prop conversationActive: boolean = true;
   @Prop selecting: boolean = false;
   @Prop selected: boolean = false;
-  @State private rowHeight: number = 44;
+  @State private rowHeight: number = THREAD_ROW_HEIGHT;
   @ObjectLink thread: ThreadViewModel;
   @ObjectLink app: ChatViewModel;
   onSelected: () => void = () => {};
@@ -86,16 +88,17 @@ struct ThreadRow {
   @Builder
   renameEditor() {
     Row({ space: 4 }) {
-      TextInput({ text: this.name, placeholder: t("对话名称") }).fontFamily(this.appearance.fontFamily).maxLength(80).layoutWeight(1).height(40)
+      TextInput({ text: this.name, placeholder: t("对话名称") }).fontFamily(this.appearance.fontFamily).maxLength(80)
+        .layoutWeight(1).height(RENAME_CONTROL_HEIGHT)
         .fontSize(15).backgroundColor($r('app.color.surface')).defaultFocus(true)
         .onChange((value: string) => { this.name = value; })
         .onSubmit(async () => { if (await this.app.renameThread(this.thread.id, this.name)) { this.editing = false; } })
-      IconButton({ icon: $r('sys.symbol.xmark'), label: t("取消"), diameter: 36, iconSize: 18,
+      IconButton({ icon: $r('sys.symbol.xmark'), label: t("取消"), diameter: RENAME_CONTROL_HEIGHT, iconSize: 18,
         tint: $r('app.color.text_secondary'), onTap: () => { this.editing = false; } })
-      IconButton({ icon: $r('sys.symbol.checkmark'), label: t("保存名称"), diameter: 36, iconSize: 18,
+      IconButton({ icon: $r('sys.symbol.checkmark'), label: t("保存名称"), diameter: RENAME_CONTROL_HEIGHT, iconSize: 18,
         tint: this.appearance.accent, disabled: this.locked(),
         onTap: async () => { if (await this.app.renameThread(this.thread.id, this.name)) { this.editing = false; } } })
-    }.width('100%').padding({ left: Space.sm, right: 4, top: 6, bottom: 6 })
+    }.width('100%').padding({ left: Space.sm, right: 4, top: 1, bottom: 1 }).constraintSize({ minHeight: THREAD_ROW_HEIGHT })
   }
 
   build() {
@@ -139,7 +142,7 @@ struct ThreadRow {
           }
         }
         .width('100%').padding({ left: this.workbench && !this.thread.parentThreadId ? 28 : Space.md, right: ROW_MENU_RIGHT_INSET,
-          top: 6, bottom: 6 }).constraintSize({ minHeight: 44 })
+          top: 3, bottom: 3 }).constraintSize({ minHeight: THREAD_ROW_HEIGHT })
         .onClick(async () => {
           if (this.locked()) { return; }
           if (this.selecting) { this.onSelectionChanged(!this.selected); return; }
@@ -784,7 +787,7 @@ export struct ThreadList {
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .fontColor((this.app.active.projectId || '') === id ? this.appearance.accent : $r('app.color.text_secondary'))
         }.width('100%')
-      }.fontFamily(this.appearance.fontFamily).id('project-group-' + (id || 'ordinary')).layoutWeight(1).height(44).padding({ right: 4 })
+      }.fontFamily(this.appearance.fontFamily).id('project-group-' + (id || 'ordinary')).layoutWeight(1).height(38).padding({ right: 4 })
         .backgroundColor(Color.Transparent).borderRadius(10).onClick(() => this.toggleGroup(id))
         .accessibilityText(this.sectionTitle(id) + '，' + (this.groupOpen(id) ? t('收起') : t('展开')))
       if (!this.selecting) {
@@ -797,7 +800,7 @@ export struct ThreadList {
             .bindMenu(this.projectActions(id), { systemMaterial: this.appearance.menu, mask: false })
         }
       }
-    }.width('100%').padding({ top: 4, right: ROW_MENU_RIGHT_INSET }).backgroundColor($r('app.color.page_background'))
+    }.width('100%').padding({ top: 2, right: ROW_MENU_RIGHT_INSET }).backgroundColor($r('app.color.page_background'))
   }
 
   build() {
@@ -829,7 +832,7 @@ export struct ThreadList {
             .fontSize(Font.small).fontColor($r('app.color.text_secondary'))
         }.layoutWeight(1).width('100%').justifyContent(FlexAlign.Center)
       } else {
-        List({ space: 8 }) {
+        List({ space: 6 }) {
           // Retained ForEach nodes may capture IDs, never a derived section/array snapshot.
           ForEach(this.sections(this.filtered()).map((section) => section.id),
             (id: string) => {
