@@ -21,6 +21,16 @@ export interface PeerThreadUpdate {
   id: string;
   collisionId: string;
   thread?: ThreadData;
+  direct?: boolean;
+}
+
+// A request's random prefix correlates device logs without recording the request or conversation identifier.
+export function nearbyTraceId(id?: string): number | undefined {
+  return id && /^remote-[0-9a-f]{8}-/.test(id) ? parseInt(id.slice(7, 15), 16) : undefined;
+}
+
+export function peerHasOutput(message: MessageData): boolean {
+  return !!message.content || !!message.steps?.some((step) => !!step.content || !!step.reasoningContent || step.tools.length > 0);
 }
 
 // A service URL may itself carry authentication in user info or query parameters.
@@ -31,6 +41,7 @@ function shareableEndpoint(value: string): boolean {
 export function peerThreadText(thread: ThreadData): string {
   const copy = JSON.parse(JSON.stringify(thread)) as ThreadData;
   copy.peerOwner = undefined; copy.peerThreadId = undefined;
+  copy.peerDraft = undefined;
   // Queue admission and tool approval are specific to the executing device.
   copy.pendingInputs = undefined; copy.queuePaused = undefined; copy.toolApprovalMode = undefined;
   return JSON.stringify(copy);
@@ -47,6 +58,7 @@ export function parsePeerThread(text: string, id: string): ThreadData {
   const data = emptyData(); data.threads = [raw];
   const checked = parseAppData(JSON.stringify(data)).threads[0];
   checked.projectId = projectId;
+  checked.peerDraft = undefined;
   const last = raw.messages[raw.messages.length - 1];
   if (last?.status === 'generating') { checked.messages[checked.messages.length - 1].status = 'generating'; }
   checked.pendingInputs = undefined; checked.queuePaused = undefined; checked.toolApprovalMode = undefined;

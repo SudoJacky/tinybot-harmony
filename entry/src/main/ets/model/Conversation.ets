@@ -94,6 +94,7 @@ export interface ThreadData extends ContextState, ToolSelection {
   archived?: boolean;
   titleEdited?: boolean;
   draft?: string;
+  peerDraft?: string;
   attachments?: Attachment[];
   parentThreadId?: string;
   parentMessageId?: string;
@@ -263,7 +264,8 @@ export function parseAppData(text: string): AppData {
     if ((thread.pinned !== undefined && typeof thread.pinned !== 'boolean') ||
       (thread.archived !== undefined && typeof thread.archived !== 'boolean') ||
       (thread.titleEdited !== undefined && typeof thread.titleEdited !== 'boolean') ||
-      (thread.draft !== undefined && (typeof thread.draft !== 'string' || thread.draft.length > 24000))) {
+      (thread.draft !== undefined && (typeof thread.draft !== 'string' || thread.draft.length > 24000)) ||
+      (thread.peerDraft !== undefined && (typeof thread.peerDraft !== 'string' || thread.peerDraft.length > 24000))) {
       throw new Error(t("本地会话管理数据损坏，原文件已保留。"));
     }
     const messageIds = new Set<string>();

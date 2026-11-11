@@ -63,8 +63,12 @@ export class NearbySyncStore {
     return opened;
   }
   devices(): string[] {
-    return this.manager.getAvailableDeviceListSync().map((item) => item.networkId || '').filter((id) => id.length > 0).sort();
+    return this.availableDevices().map((item) => item.networkId!).sort();
   }
+  availableDevices(): distributedDeviceManager.DeviceBasicInfo[] {
+    return this.manager.getAvailableDeviceListSync().filter((item) => !!item.networkId);
+  }
+  localNetworkId(): string { return this.manager.getLocalDeviceNetworkId(); }
   async exchange(devices: string[], push: boolean): Promise<void> {
     if (!devices.length) { return; }
     const predicates = new relationalStore.RdbPredicates(TABLE);

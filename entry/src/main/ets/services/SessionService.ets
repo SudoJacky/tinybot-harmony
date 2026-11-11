@@ -8,7 +8,7 @@ import { configurationIssues } from '../model/ConfigurationCompatibility';
 import { isSupportedProtocol } from '../model/ProviderEndpoint';
 import { ToolExecution, toolReceipts } from '../model/Agent';
 import { ProjectData, projectFor, workspaceIdFor, validateProjects, projectContext } from '../model/Project';
-import { PeerSettingsDelta, PeerThreadUpdate, peerThreadText } from '../model/PeerSyncData';
+import { nearbyTraceId, peerHasOutput, PeerSettingsDelta, PeerThreadUpdate, peerThreadText } from '../model/PeerSyncData';
 import { cloudSharedFolder, SharedFolder } from '../model/SharedFolders';
 import { proposeSessionMemory, reviewSessionMemory, addMemoryDraft } from './SessionMemory';
 import { McpSettings, McpSettingsCommand, McpSettingsResult, McpSettingsHost } from './McpSettings';
@@ -95,6 +95,9 @@ export class SessionService {
   private listeners: Set<(event: SessionEvent) => void> = new Set<(event: SessionEvent) => void>();
   private compatibilityIssues: Set<string> = new Set<string>();
   private peerMessages: Map<string, MessageData> = new Map();
+  private directPeerAnswers: Map<string, string> = new Map();
+  private peerExecutionErrors: Map<string, string> = new Map();
+  private peerInputSaving: string = '';
 
   constructor(repository: SessionRepository, runtime: AgentRuntime, credentials: CredentialVault, resources: SessionResources, approval?: ToolApproval) {
     this.repository = repository;
@@ -107,6 +110,20 @@ export class SessionService {
   }
 
   snapshot(): AppData { return JSON.parse(JSON.stringify(this.data)) as AppData; }
+  get activeThreadId(): string { return this.data.activeThreadId; }
+  peerThreadId(origin: string, id: string): string | undefined {
+    return this.data.threads.find((item) => item.peerOwner === origin && item.peerThreadId === id)?.id;
+  }
+  shareableThread(id: string): ThreadData | undefined {
+    return this.data.threads.find((item) => item.id === id && !item.peerOwner);
+  }
+  shareableThreadRunning(id: string): boolean { return this.executions.get(id)?.state.phase === 'running'; }
+  shareableThreadError(id: string): string {
+    const thread = this.shareableThread(id);
+    return this.executions.get(id)?.state.error ||
+      (thread?.queuePaused && thread.pendingInputs?.some((input) => input.id.startsWith('remote-')) ?
+        t('请先在执行端处理当前任务或暂停的指令。') : '');
+  }
   hasProject(id: string): boolean { return (this.data.projects || []).some((project) => project.id === id); }
   liveAnswer(threadId: string): MessageData | undefined {
     const thread = this.data.threads.find((item) => item.id === threadId && !item.peerOwner);
@@ -114,20 +131,44 @@ export class SessionService {
     return answer?.role === 'assistant' && answer.status === 'generating' ? answer : undefined;
   }
 
-  receivePeerAnswer(origin: string, id: string, answer: MessageData): boolean {
+  receivePeerAnswer(origin: string, id: string, answer: MessageData, direct: boolean = false): boolean {
     const thread = this.data.threads.find((item) => item.peerOwner === origin && item.peerThreadId === id);
     const last = thread?.messages[thread.messages.length - 1];
     if (!thread || !last || last.id !== answer.id) { return false; }
     if (last.status !== 'generating') { return true; }
+    if (direct) {
+      if (this.directPeerAnswers.get(thread.id) !== answer.id) {
+        Diagnostics.log('info', 'sync', 'conversation_live_started', { threadId: id, messageId: answer.id });
+      }
+      this.directPeerAnswers.set(thread.id, answer.id);
+      this.peerExecutionErrors.delete(thread.id);
+    }
+    else if (this.directPeerAnswers.get(thread.id) === answer.id) { return true; }
+    const first = !this.peerMessages.has(thread.id);
     this.peerMessages.set(thread.id, answer);
-    this.emit({ kind: 'message', state: this.state, threadId: thread.id, message: answer });
+    if (first) { this.publish('snapshot'); }
+    else { this.emit({ kind: 'message', state: this.state, threadId: thread.id, message: answer }); }
     return true;
   }
 
-  clearPeerProgress(origin?: string, id?: string): void {
+  receivePeerExecutionError(origin: string, id: string, error: string): void {
+    const localId = this.peerThreadId(origin, id);
+    if (!localId || (this.peerExecutionErrors.get(localId) || '') === error) { return; }
+    if (error) { this.peerExecutionErrors.set(localId, error); }
+    else { this.peerExecutionErrors.delete(localId); }
+    if (localId === this.data.activeThreadId) { this.publish('state'); }
+  }
+
+  clearPeerProgress(origin?: string, id?: string, direct: boolean = false): void {
     let changed = false;
     for (const thread of this.data.threads) {
-      if ((!origin || thread.peerOwner === origin && thread.peerThreadId === id) && this.peerMessages.delete(thread.id)) { changed = true; }
+      if (origin && (thread.peerOwner !== origin || id && thread.peerThreadId !== id)) { continue; }
+      if (!direct && this.directPeerAnswers.has(thread.id)) { continue; }
+      if (direct) {
+        this.directPeerAnswers.delete(thread.id);
+        if (this.peerExecutionErrors.delete(thread.id)) { changed = true; }
+      }
+      if (this.peerMessages.delete(thread.id)) { changed = true; }
     }
     if (changed) { this.publish('snapshot'); }
   }
@@ -167,11 +208,13 @@ export class SessionService {
           continue;
         }
         const thread = update.thread;
+        if (previous?.peerOwner && this.isOlderPeerThread(previous, thread, update.direct === true)) { continue; }
         if (thread.projectId && !candidate.projects.some((item) => item.id === thread.projectId)) {
           throw new Error('Synchronized conversation is waiting for its project');
         }
         thread.id = previous?.id || (candidate.threads.some((item) => item.id === update.id) ? update.collisionId : update.id);
         thread.peerOwner = update.origin; thread.peerThreadId = update.id;
+        thread.peerDraft = previous?.peerDraft;
         if (previous && JSON.stringify(previous) === JSON.stringify(thread)) { continue; }
         if (previous) { candidate.threads[index] = thread; }
         else { await this.ensureThreadWorkspace(thread, candidate); candidate.threads.push(thread); }
@@ -183,15 +226,30 @@ export class SessionService {
       }
       validateProjects(candidate);
       await this.commitCandidate(candidate, () => {
+        for (const id of changed) {
+          const mirrored = candidate.threads.find((item) => item.id === id && !!item.peerOwner);
+          if (mirrored) { mirrored.peerDraft = this.data.threads.find((item) => item.id === id)?.peerDraft; }
+        }
         this.data = candidate;
         if (settingsChanged) { this.resources.configureProviders(this.providerProfiles); this.refreshCompatibility(); }
         for (const id of changed) {
           const last = candidate.threads.find((item) => item.id === id)?.messages.slice(-1)[0];
           if (last?.status !== 'generating' || this.peerMessages.get(id)?.id !== last.id) { this.peerMessages.delete(id); }
+          if (last?.status !== 'generating' || this.directPeerAnswers.get(id) !== last.id) { this.directPeerAnswers.delete(id); }
+          if (!last) { this.peerExecutionErrors.delete(id); }
         }
       }, changed.concat(Array.from(this.dirtyDrafts)));
       this.publish('snapshot');
     });
+  }
+
+  private isOlderPeerThread(current: ThreadData, incoming: ThreadData, direct: boolean): boolean {
+    if (incoming.updatedAt < current.updatedAt) { return true; }
+    const old = current.messages[current.messages.length - 1];
+    const next = incoming.messages[incoming.messages.length - 1];
+    if (!old || next?.id !== old.id) { return false; }
+    return next.status === 'generating' && (old.status !== 'generating' ||
+      !direct && this.directPeerAnswers.get(current.id) === old.id);
   }
 
   private mergePeerSettings(candidate: AppData, settings: PeerSettingsDelta[]): boolean {
@@ -332,6 +390,7 @@ export class SessionService {
     if (this.application.phase !== 'idle') { state.phase = this.application.phase; }
     state.runningThreadIds = this.runningThreadIds; state.canNavigate = this.canNavigate;
     state.peerThread = this.application.ready && !!this.active.peerOwner;
+    if (state.peerThread) { state.error = this.peerExecutionErrors.get(this.data.activeThreadId) || state.error; }
     state.peerRunningThreadIds = Array.from(this.peerMessages.keys());
     return state;
   }
@@ -706,11 +765,18 @@ export class SessionService {
   setDraft(text: string, threadId: string = this.data.activeThreadId): void {
     if (!this.application.ready || text.length > MAX_INPUT_TEXT) { return; }
     const thread = this.data.threads.find((item) => item.id === threadId);
-    if (!thread || thread.archived || thread.peerOwner) { return; }
-    thread.draft = text;
-    if (!text.trim()) { thread.panelContext = undefined; }
+    if (!thread || thread.archived) { return; }
+    if (thread.peerOwner) { thread.peerDraft = text || undefined; }
+    else {
+      thread.draft = text;
+      if (!text.trim()) { thread.panelContext = undefined; }
+    }
     this.draftRevision++; this.dirtyDrafts.add(thread.id);
     this.emit({ kind: 'draft', state: this.state, threadId: thread.id, content: text });
+  }
+  clearSubmittedDraft(threadId: string, text: string): void {
+    const thread = this.data.threads.find((item) => item.id === threadId);
+    if (thread && (thread.peerOwner ? thread.peerDraft : thread.draft) === text) { this.setDraft('', threadId); }
   }
   setPanelContext(context: string): void {
     if (!this.application.ready || context.length > 32768 || this.active.archived || this.active.peerOwner) { return; }
@@ -929,6 +995,79 @@ export class SessionService {
     if ((this.resources.authorizeGeneration && !await this.authorizeGeneration()) || !this.canMutate || this.active.id !== threadId || (this.active.draft || '').trim() !== text) { return; }
     await this.runTasks(text);
   }
+
+  async acceptPeerInput(threadId: string, requestId: string, inputText: string, create: boolean,
+    mayAccept: () => boolean): Promise<void> {
+    const input: PendingInput = { id: requestId, mode: 'followUp', text: inputText.trim() };
+    validatePendingInputs([input]);
+    const admitted = (): boolean => {
+      const thread = this.shareableThread(threadId);
+      return !!thread && (thread.messages.some((item) => item.id === requestId) ||
+        (thread.pendingInputs || []).some((item) => item.id === requestId));
+    };
+    if (await this.exclusive(async () => admitted())) { return; }
+    if (/^\/compact(?:\s|$)/i.test(input.text) || teamCommand(input.text) === '') {
+      throw new Error(t('请在执行端使用此会话命令。'));
+    }
+    const operationId = Diagnostics.acceptsLog('info') ? nearbyTraceId(requestId) : undefined;
+    const authStarted = operationId === undefined ? 0 : Diagnostics.now();
+    await this.resources.authorizeGeneration?.();
+    if (operationId !== undefined) {
+      Diagnostics.log('info', 'sync', 'conversation_authorized', { operationId: operationId, durationMs: Diagnostics.now() - authStarted });
+    }
+    const start = await this.exclusive(async () => {
+      if (!mayAccept() || !this.canNavigate) { throw new Error(t('执行端暂时无法接收消息。')); }
+      if (admitted()) { return false; }
+      const existing = this.data.threads.find((item) => item.id === threadId);
+      if (create ? !!existing : !existing || !!existing.peerOwner || !!existing.archived) {
+        throw new Error(t('执行端找不到可继续的会话。'));
+      }
+      const thread = existing || this.freshThread();
+      const execution = this.execution(threadId);
+      const running = execution.state.phase === 'running';
+      if ((!running && execution.state.phase !== 'idle') || (thread.queuePaused && thread.pendingInputs?.length)) {
+        throw new Error(t('请先在执行端处理当前任务或暂停的指令。'));
+      }
+      if (!this.threadConfig(thread).configured) {
+        throw new Error(t('当前对话没有可用模型，请选择模型，或添加、启用模型服务。'));
+      }
+      const skill = explicitSkill(teamCommand(input.text) ?? input.text);
+      if (skill && !this.extensions.skills.some((item) => item.enabled && item.name === skill)) {
+        throw new Error(t('指定的 Skill 不存在或已停用，请到设置中的 Skills 管理检查。'));
+      }
+      if (!existing) { thread.id = threadId; await this.ensureThreadWorkspace(thread); }
+      if (!mayAccept()) { throw new Error(t('执行端暂时无法接收消息。')); }
+      const pending = thread.pendingInputs || [];
+      const paused = thread.queuePaused;
+      const next = pending.concat([input]); validatePendingInputs(next);
+      thread.pendingInputs = next;
+      if (!running) { thread.queuePaused = false; }
+      if (!existing) { this.data.threads.unshift(thread); }
+      this.peerInputSaving = requestId;
+      const saving = operationId === undefined ? 0 : Diagnostics.now();
+      try { await this.persist(threadId); }
+      catch (error) {
+        if (existing) {
+          thread.pendingInputs = (thread.pendingInputs || []).filter((item) => item.id !== requestId);
+          if (!running) { thread.queuePaused = paused; }
+        } else { this.data.threads = this.data.threads.filter((item) => item !== thread); }
+        this.publish('snapshot');
+        throw error as Error;
+      }
+      finally { this.peerInputSaving = ''; }
+      if (operationId !== undefined) {
+        Diagnostics.log('info', 'sync', 'conversation_input_saved', { operationId: operationId, durationMs: Diagnostics.now() - saving });
+      }
+      const shouldStart = execution.state.phase === 'idle' && !thread.queuePaused;
+      if (shouldStart) { execution.state.phase = 'running'; }
+      else { this.publishThread(thread); }
+      return shouldStart;
+    });
+    // The durable admission is complete. Let the caller submit its acknowledgement
+    // before local context preparation and UI projection run on this thread.
+    if (start) { setTimeout(() => { this.runTasks(undefined, threadId); }, 0); }
+  }
+
   private async authorizeGeneration(): Promise<boolean> {
     const status = this.status;
     try { await this.resources.authorizeGeneration?.(); return true; }
@@ -1001,16 +1140,16 @@ export class SessionService {
     }
   }
 
-  private async runTasks(initial?: string): Promise<void> {
-    const execution = this.execution(); const status = execution.state;
-    const thread = this.active;
+  private async runTasks(initial?: string, threadId: string = this.data.activeThreadId): Promise<void> {
+    const execution = this.execution(threadId); const status = execution.state;
+    const thread = this.requireThread(threadId);
     if (initial !== undefined && (thread.pendingInputs || []).length === 0) { thread.queuePaused = false; }
     status.phase = 'running'; this.publish('state');
     Diagnostics.log('info', 'session', 'run_started', { threadId: thread.id, count: this.runningThreadIds.length });
     try {
       if (initial !== undefined && !await this.runTask(thread, initial)) { return; }
       let next = nextPendingInput(thread.pendingInputs || [], thread.queuePaused === true);
-      while (next && this.application.saveError.length === 0) {
+      while (next && next.id !== this.peerInputSaving && this.application.saveError.length === 0) {
         if (!await this.runTask(thread, next.text, next.id)) { return; }
         next = nextPendingInput(thread.pendingInputs || [], thread.queuePaused === true);
       }
@@ -1026,6 +1165,11 @@ export class SessionService {
   }
 
   private async runTask(thread: ThreadData, text: string, queuedId?: string): Promise<boolean> {
+    const operationId = Diagnostics.acceptsLog('info') ? nearbyTraceId(queuedId) : undefined;
+    const started = operationId === undefined ? 0 : Diagnostics.now();
+    if (operationId !== undefined) {
+      Diagnostics.log('info', 'sync', 'conversation_run_started', { operationId: operationId, messageId: queuedId });
+    }
     const execution = this.execution(thread.id); const status = execution.state;
     const queued = queuedId ? thread.pendingInputs?.find((item) => item.id === queuedId) : undefined;
     const draft = thread.draft;
@@ -1056,7 +1200,8 @@ export class SessionService {
     sections.push({ name: 'workspace', content: projectContext(this.data, thread), dynamic: true });
     this.addModeInstructions(sections, thread);
     const instructions = renderPrompt(sections.filter((section) => !section.dynamic));
-    const user: MessageData = { id: this.resources.createId(), role: 'user', content: text, skillPrompt: expandSkillCommand(text, this.extensions.skills), status: 'complete', error: '',
+    const user: MessageData = { id: queued?.id.startsWith('remote-') ? queued.id : this.resources.createId(),
+      role: 'user', content: text, skillPrompt: expandSkillCommand(text, this.extensions.skills), status: 'complete', error: '',
       attachments: attachments, annotations: annotations, references: queuedId ? [] : thread.references, panelContext: queuedId ? undefined : thread.panelContext };
     if (!queuedId) { thread.attachments = []; thread.references = []; thread.annotations = undefined; thread.panelContext = undefined; }
     const answer: MessageData = { id: this.resources.createId(), role: 'assistant', content: '', status: 'generating', error: '', modelRef: thread.modelRef };
@@ -1084,13 +1229,18 @@ export class SessionService {
     }
     if (queuedId) { thread.pendingInputs = (thread.pendingInputs || []).filter((item: PendingInput) => item.id !== queuedId); }
     else { thread.draft = ''; }
-    thread.updatedAt = Date.now();
+    thread.updatedAt = Math.max(Date.now(), thread.updatedAt + 1);
     this.data.threads = [thread].concat(this.data.threads.filter((item) => item.id !== thread.id));
     status.error = ''; status.contextStatus = ''; this.refreshContext(thread.id); this.publish('snapshot');
     let refused = false;
+    let firstOutput = false;
     const unsubscribe = execution.runtime.subscribe((event: AgentEvent) => {
       if (event.run.sessionId !== thread.id) { return; }
       answer.content = event.run.turn.content; answer.steps = event.run.turn.steps;
+      if (operationId !== undefined && !firstOutput && peerHasOutput(answer)) {
+        firstOutput = true;
+        Diagnostics.log('info', 'sync', 'conversation_first_output', { operationId: operationId, durationMs: Diagnostics.now() - started });
+      }
       if (event.type === 'step_start') {
         const context = answer.steps[event.step || 0]?.context;
         if (context) { status.contextTokens = context.tokens; }
@@ -1234,6 +1384,7 @@ export class SessionService {
     let result = copyUiValues(values); let prompt = '';
     const saved = await this.mutate(t('界面操作失败：'), async () => {
       const thread = this.requireThread(threadId);
+      if (thread.peerOwner) { throw new Error(t('请在执行端使用此会话命令。')); }
       if (thread.archived || this.data.activeThreadId !== threadId) { throw new Error(t('请先打开并恢复此对话。')); }
       const message = thread.messages.find((item) => item.id === messageId);
       if (!message || message.role !== 'assistant' || message.status === 'generating' || !/^\d+:\d+$/.test(key)) { throw new Error(t('交互界面已不可用。')); }

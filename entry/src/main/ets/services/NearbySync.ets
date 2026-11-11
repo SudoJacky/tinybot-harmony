@@ -2,10 +2,10 @@ import { abilityAccessCtrl, bundleManager, common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { util } from '@kit.ArkTS';
 import { deviceInfo } from '@kit.BasicServicesKit';
-import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { AppData, ThreadData } from '../model/Conversation';
 import { Diagnostics } from '../model/Diagnostics';
+import { LogFields } from '../model/DiagnosticLog';
 import { t } from '../model/I18n';
 import { parseLifeBoard } from '../model/LifeBoard';
 import { parsePanelRecord } from '../model/LifePanel';
@@ -18,6 +18,7 @@ import { ArkDataRecords, StoredRecord } from './ArkDataRecords';
 import { isManagedWorkspaceRecord } from './ArkDataWorkspace';
 import { NearbyItem, NearbyRecord, NearbySyncStore } from './NearbySyncStore';
 import { NearbyFiles } from './NearbyFiles';
+import { ConversationDevice, nearbyConversations, peerConversationCollisionId } from './NearbyConversations';
 import { PanelChanges } from './PanelChanges';
 import { SessionService } from './SessionService';
 import { USAGE_SCOPE, UsageLedger } from './UsageLedger';
@@ -56,6 +57,9 @@ class NearbySync {
   private timer: number = -1;
   private lifecycle: Promise<void> = Promise.resolve();
   private pending?: Promise<void>;
+  private exchange?: Promise<void>;
+  private lastExchangePush: boolean = false;
+  private exchangeFailed: boolean = false;
   private nextPull: number = 0;
   private nextPush: number = 0;
   private peers: string[] = [];
@@ -93,6 +97,7 @@ class NearbySync {
   setAllowed(allowed: boolean): void {
     if (this.allowed === allowed) { return; }
     this.allowed = allowed;
+    if (!allowed) { nearbyConversations.stop(); }
     this.change(async () => {
       if (!allowed) { await this.stop(); return; }
       if (deviceInfo.sdkApiVersion < VERSION) { return; }
@@ -169,6 +174,8 @@ class NearbySync {
         }
       }
       this.ready = true;
+      nearbyConversations.start(this.context!, this.session!, this.origin, () => transport.localNetworkId(), () =>
+        transport.availableDevices().map((item): ConversationDevice => ({ id: item.networkId!, name: item.deviceName })));
       AppStorage.setOrCreate('tinybot.nearby.status', t('正在查找附近设备…'));
       this.timer = setInterval(() => { this.tick(); }, INTERVAL_MS);
       this.tick();
@@ -178,15 +185,18 @@ class NearbySync {
   }
   private async stop(): Promise<void> {
     this.ready = false;
+    nearbyConversations.stop();
     if (this.timer >= 0) { clearInterval(this.timer); this.timer = -1; }
     if (this.localStore) { this.localStore.onCommitted = undefined; this.localStore = undefined; }
     await this.pending;
+    await this.exchange;
     const files = this.files; this.files = undefined;
     const transport = this.transport; this.transport = undefined;
     this.outgoing.clear(); this.published.clear(); this.seen.clear(); this.localThreads.clear();
     this.liveDirty.clear(); this.localLive.clear(); this.sharedTurns.clear(); this.peers = [];
     this.session?.clearPeerProgress();
     this.nextPull = 0; this.nextPush = 0; this.needsPush = true; this.remoteDirty = true;
+    this.lastExchangePush = false; this.exchangeFailed = false;
     AppStorage.setOrCreate('tinybot.nearby.status', '');
     try { if (files) { await files.close(); } }
     finally { if (transport) { await transport.close(); } }
@@ -205,8 +215,10 @@ class NearbySync {
       }
       return;
     }
-    if (!this.localThreads.has(thread.id) && !thread.messages.length && !thread.draft && !thread.attachments?.length &&
-      !thread.projectId && !thread.titleEdited && !thread.archived && !thread.pinned) { return; }
+    if (!thread.messages.length && !thread.projectId && !thread.titleEdited && !thread.archived && !thread.pinned) {
+      if (this.localThreads.delete(thread.id)) { this.queue({ kind: 'thread', id: thread.id }); }
+      return;
+    }
     this.localThreads.add(thread.id);
     this.liveDirty.add(thread.id);
     const answer = thread.messages[thread.messages.length - 1];
@@ -263,6 +275,8 @@ class NearbySync {
       batch.push(item); size += item.text?.length || 0;
     }
     if (batch.length) {
+      const tracing = Diagnostics.acceptsLog('info'), started = tracing ? Diagnostics.now() : 0;
+      const exchangeActive = this.exchange ? 1 : 0;
       for (const item of batch) { this.writing.add(itemKey(item.kind, item.id)); }
       try { await transport.write(batch); }
       finally { this.writing.clear(); }
@@ -272,11 +286,16 @@ class NearbySync {
         this.published.set(key, item.text);
       }
       this.needsPush = true;
+      if (tracing) { Diagnostics.log('info', 'sync', 'nearby_flush', {
+        count: batch.length, active: exchangeActive, durationMs: Diagnostics.now() - started
+      }); }
     }
     const devices = transport.devices();
     this.files?.tick(devices);
     if (devices.join(',') !== this.peers.join(',')) {
       this.peers = devices; this.nextPull = 0; this.nextPush = 0; this.needsPush = true;
+      this.exchangeFailed = false;
+      nearbyConversations.refreshDevices();
       if (!devices.length) { this.session!.clearPeerProgress(); this.seen.clear(); }
     }
     const now = Date.now();
@@ -285,15 +304,35 @@ class NearbySync {
       try { await this.receive(transport); }
       catch (error) { this.remoteDirty = true; throw error as Error; }
     }
-    if (devices.length && this.needsPush && now >= this.nextPush) {
-      this.nextPush = now + 2500;
-      await transport.exchange(devices, true);
-      this.nextPush = now + INTERVAL_MS; this.needsPush = false;
+    this.scheduleExchange(transport, devices, now);
+    if (!this.exchangeFailed) {
+      AppStorage.setOrCreate('tinybot.nearby.status', devices.length ?
+        t('已发现 {0} 台附近设备', [devices.length]) : t('等待附近设备打开 Tinybot'));
     }
-    if (devices.length && now >= this.nextPull) {
-      this.nextPull = now + RESCAN_MS; await transport.exchange(devices, false); this.remoteDirty = true;
-    }
-    AppStorage.setOrCreate('tinybot.nearby.status', devices.length ? t('已发现 {0} 台附近设备', [devices.length]) : t('等待附近设备打开 Tinybot'));
+  }
+  private scheduleExchange(transport: NearbySyncStore, devices: string[], now: number): void {
+    if (!this.ready || this.exchange || !devices.length) { return; }
+    const pushDue = this.needsPush && now >= this.nextPush;
+    const pullDue = now >= this.nextPull;
+    if (!pushDue && !pullDue) { return; }
+    const push = pushDue && (!pullDue || !this.lastExchangePush);
+    this.lastExchangePush = push;
+    if (push) { this.needsPush = false; this.nextPush = now + INTERVAL_MS; }
+    else { this.nextPull = now + RESCAN_MS; }
+    const tracing = Diagnostics.acceptsLog('info'), started = tracing ? Diagnostics.now() : 0;
+    this.exchange = transport.exchange(devices, push).then(() => {
+      this.exchangeFailed = false;
+      if (!push) { this.remoteDirty = true; }
+      if (tracing) {
+        const fields: LogFields = { count: devices.length, durationMs: Diagnostics.now() - started };
+        if (push) { Diagnostics.log('info', 'sync', 'nearby_push', fields); }
+        else { Diagnostics.log('info', 'sync', 'nearby_pull', fields); }
+      }
+    }).catch((error: Error) => {
+      this.exchangeFailed = true;
+      if (push) { this.needsPush = true; this.nextPush = Date.now() + 2500; }
+      this.report(error);
+    }).finally(() => { this.exchange = undefined; this.tick(); });
   }
   private async receive(transport: NearbySyncStore): Promise<void> {
     const projects: ProjectData[] = [], threads: PeerThreadUpdate[] = [], settings: PeerSettingsDelta[] = [];
@@ -310,10 +349,7 @@ class NearbySync {
       if (record.kind === 'thread') {
         const thread = record.text === undefined ? undefined : parsePeerThread(record.text, record.id);
         if (thread?.projectId && !this.session!.hasProject(thread.projectId) && !projects.some((item) => item.id === thread.projectId)) { continue; }
-        const digest = cryptoFramework.createMd('SHA256');
-        await digest.update({ data: new util.TextEncoder().encodeInto(record.origin + ':' + record.id) });
-        const bytes = (await digest.digest()).data;
-        const id = 'peer-' + Array.from(bytes).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+        const id = await peerConversationCollisionId(record.origin, record.id);
         threads.push({ origin: record.origin, id: record.id, collisionId: id, thread: thread }); applied.push(record);
       } else if (record.kind === 'settings' && record.text !== undefined) {
         const previous = await this.localStore!.read('nearby-settings', record.origin);

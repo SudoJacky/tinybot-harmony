@@ -163,6 +163,102 @@ async function settleTitles(): Promise<void> {
 
 export default function sessionServiceTests(): void {
   describe('SessionService', () => {
+    it('createsAndContinuesTheSamePeerConversationWithDurableRequestIds', 0, async () => {
+      const f = new Fixture(); await f.session.initialize();
+      f.session.setDraft('Keep the local composer draft');
+      const canAccept = (): boolean => true;
+      await f.session.acceptPeerInput('new-peer-thread', 'remote-first', 'First', true, canAccept);
+      const accepted = (await f.repository.load()).threads.find((thread) => thread.id === 'new-peer-thread');
+      expect(accepted?.pendingInputs?.[0].id).assertEqual('remote-first');
+      expect(accepted?.messages.length).assertEqual(0);
+      await f.session.waitForIdle();
+      await f.session.acceptPeerInput('new-peer-thread', 'remote-first', 'First', true, canAccept);
+      await f.session.acceptPeerInput('new-peer-thread', 'remote-second', 'Second', false, canAccept);
+      await f.session.waitForIdle();
+      const data = await f.repository.load();
+      const remote = data.threads.find((thread) => thread.id === 'new-peer-thread');
+      expect(remote?.messages.length).assertEqual(4);
+      expect(remote?.messages[0].id).assertEqual('remote-first');
+      expect(remote?.messages[2].id).assertEqual('remote-second');
+      expect(f.provider.requests.filter((request) => !isTitleRequest(request)).length).assertEqual(2);
+      expect(data.activeThreadId).assertEqual('thread-1');
+      expect(active(data).draft).assertEqual('Keep the local composer draft');
+      const restarted = new Fixture(data); await restarted.session.initialize();
+      await restarted.session.acceptPeerInput('new-peer-thread', 'remote-second', 'Second', false, canAccept);
+      expect(restarted.provider.requests.length).assertEqual(0);
+    });
+
+    it('holdsAConcurrentPeerFollowupUntilItsAdmissionIsSaved', 0, async () => {
+      const data = seed(); data.threads[0].titleEdited = true;
+      const f = new Fixture(data); await f.session.initialize();
+      const started = new Gate(), first = new Gate(), saving = new Gate(), saved = new Gate();
+      f.provider.respond = async (index: number) => {
+        if (index === 0) { started.open(); await first.promise; }
+        return reply();
+      };
+      await f.session.acceptPeerInput('thread-1', 'remote-first', 'First', false, () => true);
+      await started.promise;
+      f.repository.beforeSave = async (snapshot: AppData) => {
+        if (!active(snapshot).pendingInputs?.some((input) => input.id === 'remote-second')) { return; }
+        saving.open(); await saved.promise;
+      };
+      const second = f.session.acceptPeerInput('thread-1', 'remote-second', 'Second', false, () => true);
+      await saving.promise;
+      first.open();
+      expect(f.provider.requests.length).assertEqual(1);
+      saved.open();
+      await second; await f.session.waitForIdle();
+      expect(f.provider.requests.length).assertEqual(2);
+      expect(active(await f.repository.load()).messages[2].id).assertEqual('remote-second');
+    });
+
+    it('keepsDirectProgressAndCompletedTurnsWhenDelayedArkDataRecordsArrive', 0, async () => {
+      const f = new Fixture(); await f.session.initialize();
+      const thread: ThreadData = { id: 'peer-run', title: 'Peer', updatedAt: 20, messages: [
+        { id: 'user', role: 'user', content: 'Question', status: 'complete', error: '' },
+        { id: 'answer', role: 'assistant', content: '', status: 'generating', error: '' }
+      ] };
+      let shown = '';
+      f.session.subscribe((event: SessionEvent) => {
+        if (event.message?.id === 'answer') { shown = event.message.content; }
+        if (event.data) { shown = event.data.threads.find((item) => item.id === 'peer-run')?.messages[1].content || ''; }
+      });
+      await f.session.receivePeerChanges([], [{ origin: 'remote', id: thread.id, collisionId: 'collision', thread: thread, direct: true }]);
+      expect(f.session.receivePeerAnswer('remote', thread.id,
+        { id: 'answer', role: 'assistant', content: 'Direct text', status: 'generating', error: '' }, true)).assertTrue();
+      expect(f.session.receivePeerAnswer('remote', thread.id,
+        { id: 'answer', role: 'assistant', content: 'Delayed', status: 'generating', error: '' })).assertTrue();
+      expect(shown).assertEqual('Direct text');
+      const complete = JSON.parse(JSON.stringify(thread)) as ThreadData;
+      complete.messages[1].status = 'complete'; complete.messages[1].content = 'Final';
+      await f.session.receivePeerChanges([], [{ origin: 'remote', id: thread.id, collisionId: 'collision', thread: complete, direct: true }]);
+      await f.session.receivePeerChanges([], [{ origin: 'remote', id: thread.id, collisionId: 'collision', thread: thread }]);
+      expect(shown).assertEqual('Final');
+      const mirror = f.session.snapshot().threads.find((item) => item.id === 'peer-run');
+      expect(mirror?.peerOwner).assertEqual('remote');
+      expect(mirror?.messages[1].status).assertEqual('complete');
+    });
+
+    it('keepsMirrorComposerDraftsLocalAcrossPeerUpdatesAndClearsOnlyTheSubmittedText', 0, async () => {
+      const f = new Fixture(); await f.session.initialize();
+      const thread: ThreadData = { id: 'peer-draft-thread', title: 'Peer', updatedAt: 1, messages: [], draft: 'Executor draft' };
+      await f.session.receivePeerChanges([], [{ origin: 'peer', id: thread.id, collisionId: 'collision', thread: thread }]);
+      await f.session.selectThread(thread.id);
+      f.session.setDraft('Submitted text');
+      f.session.setDraft('Edited during send');
+      f.session.clearSubmittedDraft(thread.id, 'Submitted text');
+      const incoming: ThreadData = { id: thread.id, title: 'Renamed', updatedAt: 2, messages: [], draft: 'Another executor draft' };
+      await f.session.receivePeerChanges([], [{ origin: 'peer', id: thread.id, collisionId: 'collision', thread: incoming }]);
+      await f.session.flushDraft();
+      const stored = active(await f.repository.load());
+      expect(stored.peerDraft).assertEqual('Edited during send');
+      expect(stored.draft).assertEqual('Another executor draft');
+      const reopened = new Fixture(await f.repository.load()); await reopened.session.initialize();
+      expect(active(reopened.session.snapshot()).peerDraft).assertEqual('Edited during send');
+      reopened.session.clearSubmittedDraft(thread.id, 'Edited during send');
+      expect(active(reopened.session.snapshot()).peerDraft === undefined).assertTrue();
+    });
+
     it('batchArchivesAndRestoresInOneCommitWithASameProjectReplacement', 0, async () => {
       const f = new Fixture(batchSeed()); await f.session.initialize();
       const writes = f.repository.writes.length;

@@ -78,6 +78,7 @@ import { HistoryRail } from '../views/HistoryRail';
 import { PaneDivider } from '../common/PaneDivider';
 import { DetailLauncher } from '../views/DetailLauncher';
 import { DetailTabItem, DetailTabs } from '../views/DetailTabs';
+import { LiveSyncProbePanel } from '../views/LiveSyncProbePanel';
 
 const DRAWER_MAX_WIDTH: number = 340;
 const CHAT_HEADER_HEIGHT: number = 56;
@@ -90,6 +91,7 @@ struct Index {
   @StorageProp('tinybot.foreground') @Watch('foregroundChanged') private foreground: boolean = false;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
+  @StorageProp('tinybot.probe.visible') private liveSyncProbeVisible: boolean = false;
   @State private app: ChatViewModel = new ChatViewModel();
   @State private account: HuaweiAccount = huaweiAccount;
   @State private windowWidth: number = 0;
@@ -1701,6 +1703,7 @@ struct Index {
         .visibility(this.detailOpen() ? Visibility.Visible : Visibility.Hidden)
         .accessibilityLevel(this.detailOpen() ? 'auto' : 'no-hide-descendants')
         .border({ width: { left: this.workbench().docked ? 0.5 : 0 }, color: $r('app.color.divider') })
+      if (this.liveSyncProbeVisible) { LiveSyncProbePanel() }
       }
     }.width('100%').height('100%')
     .backgroundColor($r('app.color.page_background'))

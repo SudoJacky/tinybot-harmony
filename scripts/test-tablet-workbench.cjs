@@ -534,7 +534,7 @@ function load(file) {
   console.log('PASS emitted side panel resolves final-answer snapshots while excluding unrelated previews');
   const fixture = new Fixture(), app = new ChatViewModel();
   await app.initialize(fixture.session);
-  const Chat = probe('views/ChatPanel', 'ChatPanel', ['emptyConversation', 'centeredWelcome', 'composerExpanded']);
+  const Chat = probe('views/ChatPanel', 'ChatPanel', ['emptyConversation', 'centeredWelcome', 'composerExpanded', 'remoteRunning']);
   const chat = Object.assign(new Chat(), { app, thread: app.active, workbench: true, panelHeight: 800,
     viewport: { keyboardHeight: 0 }, voiceMode: false, composerFocused: false, importing: false,
     showPlus: false, showContext: false, showReasoning: false, showQueue: false,

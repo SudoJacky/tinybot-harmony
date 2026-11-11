@@ -8,7 +8,7 @@ const built = path.join(root, 'entry/build/default/cache/default/default@Compile
 assert.ok(fs.statSync(built).mtimeMs >= fs.statSync(source).mtimeMs, 'Rebuild ChatPanel');
 const tree = ts.createSourceFile(built, fs.readFileSync(built, 'utf8'), ts.ScriptTarget.Latest, true);
 const cls = tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'ChatPanel');
-const names = ['fromSheet', 'dismissPlusMenu', 'finishPlusAction', 'cancelPlusAction', 'canAttach', 'endSpeech',
+const names = ['fromSheet', 'dismissPlusMenu', 'finishPlusAction', 'cancelPlusAction', 'canUseDraft', 'remoteMode', 'remoteStart', 'endSpeech',
   'addThreadReference', 'expandDraft', 'showSpeechKeyboard', 'speechActive', 'aboutToDisappear', 'speechAvailabilityChanged', 'speechThreadChanged', 'afterRender'];
 const methods = cls.members.filter(n => names.includes(n.name?.getText(tree)));
 function find(node, predicate) {

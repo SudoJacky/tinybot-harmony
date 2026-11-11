@@ -132,8 +132,11 @@ export class ChatViewModel {
         this.threads.find((thread) => thread.id === event.threadId)?.updateMetadata(event.thread);
         if (event.threadId === this.active.id) { this.draft = event.thread.draft || ''; }
       }
-      if (event.kind === 'draft' && event.threadId === this.active.id) {
-        this.draft = event.content || ''; this.active.draft = this.draft;
+      if (event.kind === 'draft') {
+        const draft = event.content || '';
+        const thread = this.threads.find((item) => item.id === event.threadId);
+        if (thread) { thread.draft = draft; }
+        if (event.threadId === this.active.id) { this.draft = draft; this.active.draft = draft; }
       }
       if (event.kind === 'message' && event.message) {
         const thread = this.threads.find((thread) => thread.id === event.threadId);
@@ -280,9 +283,16 @@ export class ChatViewModel {
     clearTimeout(this.draftTimer); this.draftTimer = -1;
     if (this.session) { await this.session.flushDraft(); }
   }
-  async send(onUpdate: () => void): Promise<void> {
+  async send(onUpdate: () => void, deliver?: (text: string) => Promise<void>): Promise<void> {
     const threadId = this.active.id; this.outputs.set(threadId, onUpdate);
-    try { await this.requireSession().send(); } finally { if (this.outputs.get(threadId) === onUpdate) { this.outputs.delete(threadId); } }
+    try {
+      if (deliver) {
+        const text = this.draft;
+        await deliver(text.trim());
+        this.requireSession().clearSubmittedDraft(threadId, text);
+        await this.flushDraft();
+      } else { await this.requireSession().send(); }
+    } finally { if (this.outputs.get(threadId) === onUpdate) { this.outputs.delete(threadId); } }
   }
   async regenerateReply(id: string, onUpdate: () => void): Promise<boolean> {
     let threadId = '';

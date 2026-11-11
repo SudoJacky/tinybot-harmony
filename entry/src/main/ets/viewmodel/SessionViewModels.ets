@@ -159,6 +159,7 @@ export class MessageViewModel {
 export class ThreadViewModel {
   panelContext?: string;
   peerOwner?: string;
+  peerThreadId?: string;
   latestPreviewIds: string[] = [];
   refreshPreviews(): void {
     const ids = latestPreviewIds(this.messages);
@@ -198,6 +199,7 @@ export class ThreadViewModel {
   updateMetadata(data: ThreadData): void {
     this.panelContext = data.panelContext;
     this.peerOwner = data.peerOwner;
+    this.peerThreadId = data.peerThreadId;
     this.agentMode = data.agentMode || 'full'; this.disabledTools = data.disabledTools || [];
     this.toolApprovalMode = toolApprovalMode(data.toolApprovalMode);
     this.projectId = data.projectId;
@@ -210,7 +212,8 @@ export class ThreadViewModel {
     this.pinned = data.pinned === true; this.archived = data.archived === true; this.titleEdited = data.titleEdited === true;
     this.attachments = data.attachments || [];
     this.annotations = data.annotations || [];
-    this.draft = data.draft || ''; this.compaction = data.compaction; this.modelRef = data.modelRef;
+    this.draft = (data.peerOwner ? data.peerDraft : data.draft) || '';
+    this.compaction = data.compaction; this.modelRef = data.modelRef;
     this.pendingInputs = data.pendingInputs || []; this.queuePaused = data.queuePaused === true;
   }
   update(data: ThreadData): void {

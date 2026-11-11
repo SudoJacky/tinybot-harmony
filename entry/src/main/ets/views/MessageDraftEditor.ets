@@ -13,6 +13,7 @@ export struct MessageDraftEditor {
   @ObjectLink app: ChatViewModel;
   @ObjectLink thread: ThreadViewModel;
   @Prop sendEnabled: boolean = false;
+  @Prop localOptions: boolean = true;
   @State private insetTop: number = 0;
   @State private insetBottom: number = 0;
   private editor: TextAreaController = new TextAreaController();
@@ -34,8 +35,10 @@ export struct MessageDraftEditor {
           .enabled(this.sendEnabled && this.app.active.id === this.thread.id).onClick(this.onSend)
       }.width('100%').padding({ left: Space.md, right: Space.md, top: Space.sm, bottom: Space.sm })
         .border({ width: { bottom: 0.5 }, color: $r('app.color.divider') })
-      Text(t('草稿会自动保留，返回后可继续添加附件或切换模型。')).fontSize(12)
-        .fontColor($r('app.color.text_secondary')).width('100%').padding({ left: Space.page, right: Space.page })
+      if (this.localOptions) {
+        Text(t('草稿会自动保留，返回后可继续添加附件或切换模型。')).fontSize(12)
+          .fontColor($r('app.color.text_secondary')).width('100%').padding({ left: Space.page, right: Space.page })
+      }
       TextArea({ text: this.app.draft, placeholder: t('输入消息…'), controller: this.editor }).id('expanded-draft-input')
         .fontFamily(this.appearance.fontFamily).fontSize(16).fontColor($r('app.color.text_primary'))
         .backgroundColor($r('app.color.surface')).borderRadius(12).width('100%').layoutWeight(1)

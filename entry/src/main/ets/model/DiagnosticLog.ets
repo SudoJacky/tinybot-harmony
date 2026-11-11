@@ -50,7 +50,8 @@ EVENTS.appearance = ['material', 'material_support', 'material_unavailable', 'lo
 EVENTS.language = ['load_failed', 'save_failed'];
 EVENTS.camera = ['dismissed', 'imported', 'capture_failed'];
 EVENTS.account = ['restore_failed', 'response_invalid', 'state_changed', 'sign_in_cancelled', 'sign_in_failed', 'sign_out_failed', 'state_failed'];
-EVENTS.privacy = ['query_completed', 'query_retry', 'check_failed', 'subscription_ready', 'subscription_cleanup_failed'];
+EVENTS.privacy = ['request_started', 'query_completed', 'query_retry', 'using_cached_consent', 'check_failed',
+  'subscription_ready', 'subscription_cleanup_failed'];
 EVENTS.feedback = ['attachment_failed', 'log_failed', 'initialize_failed', 'save_failed', 'credential_failed', 'request_failed', 'submit_failed', 'list_failed',
   'detail_failed', 'upload_failed', 'cleanup_failed', 'reconcile_failed', 'delete_failed'];
 EVENTS.backup = ['started', 'restored', 'restore_prepared', 'key_decrypt_failed', 'cleanup_failed', 'replace_failed', 'retire_failed', 'rollback_failed', 'archive_written', 'archive_write_failed', 'archive_verified',
@@ -62,7 +63,7 @@ EVENTS.background = ['acquired', 'released', 'cancelled', 'suspended', 'release_
 EVENTS.notification = ['authorization_checked', 'authorization_denied', 'authorization_failed', 'disabled', 'published', 'publish_failed'];
 EVENTS.speech = ['preparing', 'listening', 'vad', 'complete', 'finishing', 'recognition_failed', 'cancel_failed', 'playback_requested', 'playback_failed', 'cleanup_failed', 'late_cleanup_failed'];
 EVENTS.voice = ['focus_requested', 'released', 'draft_failed'];
-EVENTS.composer = ['sheet_action_queued', 'sheet_action_dispatched', 'sheet_action_cancelled'];
+EVENTS.composer = ['sheet_action_queued', 'sheet_action_dispatched', 'sheet_action_cancelled', 'send_focus_failed'];
 EVENTS.focus = ['search_requested', 'provider_requested', 'onboarding_requested'];
 EVENTS.navigation = ['tools_opened', 'tools_repeated', 'settings_opened', 'settings_repeated',
   'new_chat_blocked', 'new_chat_failed', 'new_chat_revealed'];
@@ -79,6 +80,13 @@ EVENTS.mcp = ['request_failed', 'cancel_notice_failed', 'browser_launch_failed']
 EVENTS.mail = ['transport_failed', 'cleanup_failed', 'account_saved', 'account_removed', 'query_started', 'query_complete', 'query_failed', 'command_failed', 'settings_failed'];
 EVENTS.export = ['image_failed', 'preview_failed', 'cleanup_failed', 'share_failed', 'save_failed'];
 EVENTS.network = ['request_start', 'request_end', 'context_overflow', 'first_data', 'request_failed'];
+EVENTS.sync = ['nearby_failed', 'conversation_accept_failed', 'conversation_connect_failed', 'conversation_disconnect_failed',
+  'conversation_destroy_failed', 'conversation_receive_failed', 'conversation_progress_failed', 'conversation_admission_failed',
+  'conversation_admitted', 'conversation_acknowledged', 'conversation_frame_invalid', 'conversation_live_started',
+  'conversation_route_ready', 'conversation_connected', 'conversation_authorized', 'conversation_input_saved',
+  'conversation_run_started', 'conversation_first_output', 'conversation_first_output_sent', 'conversation_snapshot_sent', 'conversation_snapshot_applied',
+  'conversation_output_applied', 'conversation_opened', 'nearby_push', 'nearby_pull', 'nearby_flush',
+  'probe_failed', 'probe_declined', 'probe_connected', 'probe_acknowledged', 'probe_received'];
 EVENTS.moderation = ['guard_stopped', 'output_words_stopped'];
 EVENTS.context = ['inspected', 'request_prefix'];
 EVENTS.browser = ['permission', 'control_user', 'control_agent', 'control_wait', 'task_released', 'closed', 'failed', 'acquired', 'permission_wait', 'operation', 'observation_changed', 'opened_by_user', 'annotation_started', 'annotation_captured', 'annotation_failed', 'search_observed', 'search_failed', 'capture_started', 'frame_captured', 'capture_finished'];

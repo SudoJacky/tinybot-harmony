@@ -56,6 +56,7 @@ import { Banner, IconBadge, IconButton } from '../common/Widgets';
 import { WindowViewport } from '../viewmodel/WindowViewport';
 import { MessageListSource } from '../viewmodel/MessageListSource';
 import { SendFrame, SendOrigin } from '../common/SendBubbleMotion';
+import { ConversationDevice, nearbyConversations } from '../services/NearbyConversations';
 
 // onFrame precedes dirty-property updates; focus and list positioning need the completed layout.
 class ChatLayoutFrame extends FrameCallback {
@@ -64,11 +65,24 @@ class ChatLayoutFrame extends FrameCallback {
   onIdle(): void { this.action(); }
 }
 
+interface NearbyDraftReceipt {
+  threadId: string;
+  messageId: string;
+}
+
 @Component
 export struct ChatPanel {
   @ObjectLink account: HuaweiAccount;
   onAccount: () => void = () => {};
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
+  @StorageProp('tinybot.nearby.enabled') private nearbyEnabled: boolean = false;
+  @StorageProp('tinybot.conversation.devices') private conversationDevices: ConversationDevice[] = [];
+  @State private nearbyTarget: string = '';
+  private nearbySourceId: string = '';
+  @State private nearbySendingIds: string[] = [];
+  @State private nearbyReceipts: NearbyDraftReceipt[] = [];
+  @State private nearbyError: string = '';
+  private nearbyErrorThreadId: string = '';
   @ObjectLink @Watch('syncMessages') app: ChatViewModel;
   @ObjectLink @Watch('syncMessages') thread: ThreadViewModel;
   private messageSource: MessageListSource = new MessageListSource();
@@ -79,7 +93,15 @@ export struct ChatPanel {
     this.afterRender(() => {
       if (revision !== this.messageSyncRevision) { return; }
       this.messageSource.update(this.thread.id, this.app.visibleMessages);
-      if (this.positionedThreadId === this.thread.id) { return; }
+      if (this.app.peerThread && this.nearbyReceipts.length > 0) {
+        const pending = this.nearbyReceipts.filter((item) => item.threadId !== this.thread.id ||
+          !this.thread.messages.some((message) => message.id === item.messageId));
+        if (pending.length !== this.nearbyReceipts.length) { this.nearbyReceipts = pending; }
+      }
+      if (this.positionedThreadId === this.thread.id) {
+        if (this.app.peerThread) { this.follow(); }
+        return;
+      }
       this.positionedThreadId = this.thread.id;
       this.inspectingOutput = false;
       this.followOutput = !this.app.searchMessageId;
@@ -305,6 +327,91 @@ export struct ChatPanel {
       this.reading.stop(); this.receiveVoiceShortcut();
     });
   }
+
+  private remoteStart(): boolean {
+    return !!this.nearbyTarget && this.nearbySourceId === this.thread.id &&
+      !this.thread.archived && !this.thread.projectId && this.thread.messages.length === 0;
+  }
+  private remoteMode(): boolean { return this.app.peerThread || this.remoteStart(); }
+  private remoteSending(): boolean { return this.nearbySendingIds.includes(this.thread.id); }
+  private remoteRunning(): boolean { return this.app.peerThread && this.app.peerRunningThreadIds.includes(this.thread.id); }
+  private nearbyQueuedCount(): number {
+    return this.nearbyReceipts.filter((item) => item.threadId === this.thread.id &&
+      !this.thread.messages.some((message) => message.id === item.messageId)).length;
+  }
+  private remoteDraftBlocked(): boolean {
+    return !this.app.peerThread && (this.thread.attachments.length > 0 || this.thread.references.length > 0 ||
+      this.thread.annotations.length > 0 || !!this.thread.panelContext || this.thread.pendingInputs.length > 0);
+  }
+
+  private selectNearbyTarget(id: string): void {
+    if (this.remoteSending()) { return; }
+    if (id && (this.importing || this.remoteDraftBlocked())) {
+      this.getUIContext().getPromptAction().showToast({ message: t('请先处理当前草稿里的附件、引用或待发送消息，再切换执行端。') });
+      return;
+    }
+    this.nearbySourceId = this.thread.id;
+    this.nearbyTarget = id;
+    this.nearbyError = '';
+  }
+
+  private async deliverRemote(deviceId: string, owner: string, remoteId: string, source: string, text: string): Promise<void> {
+    this.nearbySendingIds = this.nearbySendingIds.concat([source]);
+    this.nearbyError = '';
+    try {
+      let messageId = '';
+      await nearbyConversations.submit(deviceId, owner, remoteId, source, text, (id: string) => { messageId = id; });
+      const thread = this.app.threads.find((item) => item.id === source);
+      if (owner && messageId && thread && !thread.messages.some((message) => message.id === messageId)) {
+        this.nearbyReceipts = this.nearbyReceipts.concat([{ threadId: source, messageId: messageId }]);
+      }
+      if (this.composerMounted && this.app.active.id === source && this.app.draft.trim() === text) {
+        this.keyboardFocusRequest++;
+        try { this.getUIContext().getFocusController().clearFocus(); }
+        catch (error) { Diagnostics.log('warn', 'composer', 'send_focus_failed', undefined, error as Error); }
+      }
+    }
+    finally { this.nearbySendingIds = this.nearbySendingIds.filter((id) => id !== source); }
+  }
+
+  private sendError(): string {
+    return this.nearbyError && this.nearbyErrorThreadId === this.thread.id ? this.nearbyError : this.app.error;
+  }
+  private conversationPickerVisible(): boolean {
+    return !this.app.peerThread && !this.thread.archived && !this.thread.projectId && this.thread.messages.length === 0 &&
+      (this.remoteStart() || this.nearbyEnabled && this.conversationDevices.length > 0);
+  }
+  private peerDeviceLabel(): string {
+    const id = nearbyConversations.deviceIdForOrigin(this.thread.peerOwner || '');
+    return this.conversationDevices.find((item) => item.id === id)?.name || t('附近设备');
+  }
+
+  @Builder
+  conversationDeviceMenu() {
+    Menu() {
+      MenuItem(() => materialMenuContent.bind(this)({ label: t('本机') }))
+        .id('nearby-execute-local').onClick(() => this.selectNearbyTarget(''))
+      ForEach(this.conversationDevices, (device: ConversationDevice, index: number) => {
+        MenuItem(() => materialMenuContent.bind(this)({ label: device.name || t('附近设备') }))
+          .id('nearby-execute-device-' + index).onClick(() => this.selectNearbyTarget(device.id))
+      }, (device: ConversationDevice) => device.id)
+    }
+  }
+
+  @Builder
+  conversationDevicePicker() {
+    Button() {
+      Row({ space: 6 }) {
+        Text(t('执行端 · {0}', [this.remoteStart() ?
+          this.conversationDevices.find((device) => device.id === this.nearbyTarget)?.name || t('附近设备') : t('本机')]))
+          .fontSize(Font.caption).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(10).fontColor([$r('app.color.text_secondary')])
+      }
+    }.id('nearby-execution-picker').attributeModifier(Btn.tonalSmall).focusOnTouch(false)
+      .constraintSize({ maxWidth: this.workbench ? 220 : 112 })
+      .enabled(this.app.canNavigate && !this.app.busy && !this.remoteSending())
+      .alignSelf(ItemAlign.Start).bindMenu(this.conversationDeviceMenu, { systemMaterial: this.appearance.menu, mask: false })
+  }
   private receiveVoiceShortcut(): void {
     this.afterRender(() => {
     if (!this.voiceRequest || this.voiceRequest === this.consumedVoiceRequest ||
@@ -484,11 +591,16 @@ export struct ChatPanel {
       height: context.px2vp(composer.size.height),
       viewportHeight: this.centeredWelcome() ? this.panelHeight : context.px2vp(viewport.size.height) };
     const threadId = this.thread.id;
+    const remote = this.remoteMode();
+    const deviceId = this.app.peerThread ? '' : this.nearbyTarget;
+    const owner = this.thread.peerOwner || '';
+    const remoteId = this.thread.peerThreadId || '';
+    if (remote && !this.canSend()) { return; }
     const previous = new Set(this.thread.messages.map((message: MessageViewModel) => message.id));
     let accepted = false;
     this.app.send(() => {
       if (this.thread.id !== threadId) { return; }
-      if (!accepted) {
+      if (!remote && !accepted) {
         const message = this.thread.messages.find((item: MessageViewModel) => item.role === 'user' && !previous.has(item.id));
         if (message) {
           accepted = true; this.sendOrigin = origin; this.sendingMessageId = message.id;
@@ -501,7 +613,13 @@ export struct ChatPanel {
         }
       }
       this.follow();
-    });
+    }, remote ? (text: string) => this.deliverRemote(deviceId, owner, remoteId, threadId, text) : undefined)
+      .catch((error: Error) => {
+        if (this.app.active.id === threadId) {
+          if (remote) { this.nearbyErrorThreadId = threadId; this.nearbyError = error.message; }
+          else { this.app.error = error.message; }
+        }
+      });
   }
 
   private finishSendFlight(id: string): void {
@@ -511,17 +629,20 @@ export struct ChatPanel {
 
   // Use methods: ordinary accessors in a V1 @Component are omitted by the ArkUI compiler.
   private hasDraft(): boolean {
+    if (this.remoteMode()) { return this.app.draft.trim().length > 0; }
     return this.app.draft.trim().length > 0 || this.thread.attachments.length > 0 || this.thread.references.length > 0 || this.thread.annotations.length > 0;
   }
 
   private composerExpanded(): boolean {
     if (this.voiceMode) { return false; }
     return this.workbench || this.composerFocused || this.app.draft.length > 0 || this.hasDraft() || this.importing || this.speechActive() ||
-      this.app.generating || this.thread.pendingInputs.length > 0 || this.showPlus || this.showPlusMenu || this.showContext ||
+      this.app.generating || this.remoteRunning() || this.app.peerThread && this.nearbyQueuedCount() > 0 ||
+      this.thread.pendingInputs.length > 0 || this.showPlus || this.showPlusMenu || this.showContext ||
       this.showQueue;
   }
 
   private canSend(): boolean {
+    if (this.remoteMode() && (!this.nearbyEnabled || !this.app.canNavigate || this.remoteSending() || this.remoteDraftBlocked())) { return false; }
     return !this.speechActive() && this.app.ready && !this.app.busy && !this.importing && !this.thread.archived && this.hasDraft() && this.app.saveError.length === 0;
   }
 
@@ -570,7 +691,7 @@ export struct ChatPanel {
   }
 
   private dropEditable(): boolean {
-    return this.app.ready && !this.app.busy && !this.speechActive() && !this.thread.archived &&
+    return !this.remoteMode() && this.app.ready && !this.app.busy && !this.speechActive() && !this.thread.archived &&
       !this.showDrawing && !this.previewing && this.app.saveError.length === 0;
   }
 
@@ -683,7 +804,7 @@ export struct ChatPanel {
   @Builder
   chatCover() {
     if (this.writingExpanded) {
-      MessageDraftEditor({ app: this.app, thread: this.thread, sendEnabled: this.canSend(),
+      MessageDraftEditor({ app: this.app, thread: this.thread, sendEnabled: this.canSend(), localOptions: !this.remoteMode(),
         onClose: () => { this.writingExpanded = false; },
         onSend: () => { if (this.canSend()) { this.writingExpanded = false; this.send(); } } })
     } else if (this.showDrawing) { this.drawingSheet() }
@@ -715,6 +836,9 @@ export struct ChatPanel {
     await this.app.regenerateReply(id, () => this.follow());
   }
   private canAttach(): boolean {
+    return !this.remoteMode() && this.canUseDraft();
+  }
+  private canUseDraft(): boolean {
     return !this.speechActive() && !this.app.busy && !this.importing && !this.thread.archived && this.app.saveError.length === 0;
   }
   // A fixed delay can expire while the native sheet still owns the focus scope.
@@ -731,7 +855,7 @@ export struct ChatPanel {
     this.pendingPlusAction = undefined; this.plusActionThreadId = '';
     if (!action) { return; }
     if (this.showPlus || !this.speechEnabled || !this.foreground || this.thread.id !== threadId ||
-      this.app.active.id !== threadId || !this.canAttach()) {
+      this.app.active.id !== threadId || !this.canUseDraft()) {
       Diagnostics.log('info', 'composer', 'sheet_action_cancelled');
       return;
     }
@@ -744,6 +868,7 @@ export struct ChatPanel {
     this.pendingPlusAction = undefined; this.plusActionThreadId = '';
   }
   private addThreadReference(): void {
+    if (this.remoteMode()) { return; }
     if (referenceQuery(this.app.draft) === undefined) { this.app.setDraft(this.app.draft + (this.app.draft ? ' @' : '@')); }
     this.showSpeechKeyboard();
   }
@@ -757,7 +882,7 @@ export struct ChatPanel {
     this.plusMenuTimer = setTimeout(() => {
       this.plusMenuTimer = -1;
       if (owner !== this.focusOwner || this.thread.id !== threadId || this.app.active.id !== threadId ||
-        !this.speechEnabled || !this.foreground || this.showPlusMenu || !this.canAttach()) { return; }
+        !this.speechEnabled || !this.foreground || this.showPlusMenu || !this.canUseDraft()) { return; }
       action();
     }, 250);
   }
@@ -849,7 +974,7 @@ export struct ChatPanel {
           Text(t('今天想一起做点什么？')).fontFamily(this.appearance.fontFamily).fontSize(28).fontWeight(FontWeight.Medium)
             .fontColor($r('app.color.text_primary')).maxLines(2).textAlign(TextAlign.Center)
         }.justifyContent(FlexAlign.Center).width('100%')
-        if (!this.app.configured) {
+        if (!this.remoteMode() && !this.app.configured) {
           Button(t('连接你的模型')).id('setup-workbench-model').attributeModifier(Btn.textSmall).onClick(this.onSettings)
         }
       }.id('workbench-welcome').width('100%').layoutWeight(this.centeredWelcome() ? 0 : 1).justifyContent(FlexAlign.Center)
@@ -864,7 +989,7 @@ export struct ChatPanel {
         Text(t("今天想一起做点什么？")).fontFamily(this.appearance.fontFamily).fontSize(Font.headline).fontWeight(FontWeight.Bold)
           .fontColor($r('app.color.text_primary')).textAlign(TextAlign.Center)
           .margin({ bottom: Space.md }).transition(Motion.rise(1))
-        if (!this.app.configured) {
+        if (!this.remoteMode() && !this.app.configured) {
           Column({ space: 10 }) {
             Text(t("先连接一个模型服务")).fontFamily(this.appearance.fontFamily).fontSize(15).fontWeight(FontWeight.Medium)
               .fontColor(this.appearance.onAccentContainer)
@@ -895,11 +1020,12 @@ export struct ChatPanel {
         LazyForEach(this.messageSource, (message: MessageViewModel) => {
           ListItem() {
             MessageBubble({ message: message, latestPreviewIds: this.thread.latestPreviewIds, turnStatus: message.status, webEnabled: this.app.extensions.webEnabled, onOpenFile: this.onOpenFile,
-              previewInspectable: this.previewInspectable, inspectedPreviewId: this.inspectedPreviewId, onInspectPreview: this.onInspectPreview, uiAvailable: !this.app.busy && !this.thread.archived,
+              previewInspectable: this.previewInspectable, inspectedPreviewId: this.inspectedPreviewId, onInspectPreview: this.onInspectPreview,
+              uiAvailable: !this.app.peerThread && !this.app.busy && !this.thread.archived,
               sendOrigin: this.sendingMessageId === message.id ? this.sendOrigin : undefined,
               onSendReady: (): void => { this.scroller.scrollEdge(Edge.Bottom); }, onSendFinish: (): void => { this.finishSendFlight(message.id); },
               readingMessageId: this.reading.messageId, onRead: (id: string) => this.readAnswer(id),
-              actionsEnabled: !this.app.busy && !this.app.saveError, onRegenerate: (id: string) => this.regenerate(id),
+              actionsEnabled: !this.app.peerThread && !this.app.busy && !this.app.saveError, onRegenerate: (id: string) => this.regenerate(id),
               onUi: this.uiHandler(this.thread.id, message.id), onFork: (id: string) => { this.fork(id); }, onRemember: (id: string) => { this.remember(id); },
               onInspect: () => { this.inspectingOutput = true; this.followOutput = false; clearTimeout(this.scrollTimer); this.scrollTimer = -1; },
               onReference: (text: string) => this.app.setDraft(this.app.draft + text), onResume: (id: string) => this.app.resumeForm(message.id, id),
@@ -992,8 +1118,8 @@ export struct ChatPanel {
   sendMenu() {
     Menu() {
       MenuItem(() => materialMenuContent.bind(this)({ label: t("加入队列"), icon: $r('sys.symbol.text_and_plus') }))
-        .enabled(this.app.canQueueInput && this.hasDraft())
-        .onClick(() => this.app.enqueueInput('followUp'))
+        .enabled(this.remoteMode() ? this.remoteRunning() && this.canSend() : this.app.canQueueInput && this.hasDraft())
+        .onClick(() => { if (this.remoteMode()) { this.send(); } else { this.app.enqueueInput('followUp'); } })
     }
   }
 
@@ -1032,6 +1158,10 @@ export struct ChatPanel {
   @Builder
   plusRootPane() {
     Column({ space: 2 }) {
+      if (this.remoteMode()) {
+        this.plusMenuRow($r('sys.symbol.square_and_pencil'), t('展开输入'), 'remote-expand-draft',
+          this.canUseDraft(), false, () => this.dismissPlusMenu(() => this.expandDraft()))
+      } else {
       if (AdaptiveUi.compactComposer(this.panelWidth)) {
         this.plusMenuRow($r('sys.symbol.wrench_and_screwdriver'), t('工具范围'), 'plus-menu-tools', !this.app.busy, true,
           () => this.dismissPlusMenu(this.onToolScope))
@@ -1057,6 +1187,7 @@ export struct ChatPanel {
       Text(this.thread.attachments.length >= MAX_MESSAGE_ATTACHMENTS ? t('已达到每条消息 {0} 个附件的上限', [MAX_MESSAGE_ATTACHMENTS]) : t('每条消息最多 {0} 个附件 · 图片需模型支持视觉输入', [MAX_MESSAGE_ATTACHMENTS]))
         .fontFamily(this.appearance.fontFamily).fontSize(11).lineHeight(16).fontColor($r('app.color.text_tertiary'))
         .width('100%').padding({ left: 10, right: 10, top: 6, bottom: 8 })
+      }
     }.width('100%')
   }
 
@@ -1072,8 +1203,9 @@ export struct ChatPanel {
     Scroll() {
       Column({ space: Space.lg }) {
         Button(t('展开输入')).fontFamily(this.appearance.fontFamily).id('phone-expand-draft')
-          .attributeModifier(Btn.tonal).width('100%').enabled(this.canAttach())
+          .attributeModifier(Btn.tonal).width('100%').enabled(this.canUseDraft())
           .onClick(() => this.fromSheet(() => this.expandDraft()))
+        if (!this.remoteMode()) {
         Row() {
           this.plusTile($r('sys.symbol.picture'), t("图片"), 'attach-photo',
             this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, () => this.fromSheet(() => this.attach('photo')))
@@ -1091,6 +1223,7 @@ export struct ChatPanel {
         Button(t('引用其他会话')).fontFamily(this.appearance.fontFamily).id('add-thread-reference').attributeModifier(Btn.tonal).width('100%')
           .enabled(this.canAttach() && this.thread.references.length < 4)
           .onClick(() => this.fromSheet(() => this.addThreadReference()))
+        }
       }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.xl })
     }.width('100%').scrollBar(BarState.Off).align(Alignment.Top)
   }
@@ -1149,10 +1282,12 @@ export struct ChatPanel {
     return this.commandSuggested('/team') && !this.thread.teamEnabled;
   }
   private commandSuggested(command: string): boolean {
+    if (this.remoteMode()) { return false; }
     const draft = this.app.draft.trim().toLowerCase();
     return !this.speechActive() && !this.app.busy && !this.thread.archived && this.app.saveError.length === 0 && draft.startsWith('/') && command.startsWith(draft);
   }
   private referenceSuggested(): boolean {
+    if (this.remoteMode()) { return false; }
     return this.canAttach() && this.thread.references.length < 4 && !this.skillSuggested() && referenceQuery(this.app.draft) !== undefined;
   }
   private currentSkillQuery(): SkillQuery | undefined {
@@ -1476,7 +1611,8 @@ export struct ChatPanel {
 
   @Builder
   composerAddButton() {
-    IconButton({ icon: $r('sys.symbol.plus'), label: t('添加图片、画板或文件'), compId: 'add-attachment', diameter: this.workbench ? 36 : 44,
+    IconButton({ icon: $r('sys.symbol.plus'), label: this.remoteMode() ? t('输入选项') : t('添加图片、画板或文件'),
+      compId: 'add-attachment', diameter: this.workbench ? 36 : 44,
       iconSize: 18, fill: $r('app.color.surface_variant'),
       disabled: this.thread.archived || this.app.saveError.length > 0 || this.speechActive() || this.speechHolding,
       onTap: () => {
@@ -1521,7 +1657,7 @@ export struct ChatPanel {
   composerEditor(threadId: string) {
       TextArea({ text: this.app.draft, controller: this.composerController,
         placeholder: this.speechActive() ? t('请说出要输入的内容') : this.thread.archived ? t("已归档的对话无法继续") : this.app.generating ? t("补充要求，或排队下一项任务…")
-          : !this.composerExpanded() ? t('输入消息…') : this.thread.teamEnabled ? t("描述目标，主 Agent 会按需组建团队…") : t('输入消息，/ 命令，$ 技能，@ 引用会话') }).fontFamily(this.appearance.fontFamily)
+          : !this.composerExpanded() || this.remoteMode() ? t('输入消息…') : this.thread.teamEnabled ? t("描述目标，主 Agent 会按需组建团队…") : t('输入消息，/ 命令，$ 技能，@ 引用会话') }).fontFamily(this.appearance.fontFamily)
         .id('composer').fontSize(Font.body).fontColor($r('app.color.text_primary'))
         .allowDrop(ATTACHMENT_DROP_TYPES.concat(['general.plain-text', 'general.hyperlink', 'general.html']))
         .onDrop((event: DragEvent) => this.composerDrop(event))
@@ -1534,6 +1670,8 @@ export struct ChatPanel {
         .animation({ duration: Motion.medium, curve: Motion.standard })
         .visibility(this.voiceMode ? Visibility.Hidden : Visibility.Visible)
         .enabled(!this.thread.archived).focusable(!this.voiceMode && !this.speechActive()).enableKeyboardOnFocus(!this.voiceMode && !this.speechActive())
+        .enterKeyType(this.remoteMode() && this.workbench ? EnterKeyType.Send : EnterKeyType.NEW_LINE)
+        .onSubmit((key: EnterKeyType) => { if (key === EnterKeyType.Send && this.remoteMode() && this.canSend()) { this.send(); } })
         .onWillChange((value: EditableTextChangeValue) => !this.speechActive() || value.content === this.app.draft)
         .onKeyPreIme((event: KeyEvent) => {
           if (!this.chatShortcutsAvailable() || !this.speechEnabled || this.voiceMode || this.app.active.id !== threadId) { return false; }
@@ -1554,13 +1692,13 @@ export struct ChatPanel {
   @Builder
   composer() {
     Stack({ alignContent: Alignment.Bottom }) {
-      if (this.highestEffort() && this.composerExpanded()) {
+      if (!this.remoteMode() && this.highestEffort() && this.composerExpanded()) {
         ComposerGlow({ active: true })
           .transition(TransitionEffect.OPACITY.animation({ duration: Motion.medium, curve: Motion.standard }))
       }
     // Keep the editor and toolbar mounted. Animate reserved space, never switch layout modes.
     Column() {
-      if (this.thread.annotations.length > 0) {
+      if (!this.app.peerThread && this.thread.annotations.length > 0) {
         ForEach([this.thread.id], (threadId: string) => {
           Row() {
             FileAnnotationList({ items: this.thread.annotations, editable: true, disabled: !this.app.canQueueInput,
@@ -1568,7 +1706,7 @@ export struct ChatPanel {
           }.width('100%')
         }, (threadId: string) => threadId)
       }
-      if (this.thread.references.length > 0) {
+      if (!this.app.peerThread && this.thread.references.length > 0) {
         Scroll() {
           Column({ space: 4 }) {
             ForEach(this.thread.references, (item: ThreadReference) => {
@@ -1578,7 +1716,7 @@ export struct ChatPanel {
           }.width('100%')
         }.width('100%').constraintSize({ maxHeight: 104 }).scrollBar(BarState.Auto)
       }
-      if (this.thread.attachments.length > 0 || this.importing) {
+      if (!this.app.peerThread && (this.thread.attachments.length > 0 || this.importing)) {
         this.attachmentStrip()
       }
       // A native editor owns one chat. Recreate only it when the chat changes, so
@@ -1614,12 +1752,20 @@ export struct ChatPanel {
         this.composerAddButton()
         Scroll() {
         Row({ space: 4 }) {
-        this.composerOptionsButton()
-        if (this.contextRatio() >= 0.85) {
+        if (!this.remoteMode()) { this.composerOptionsButton() }
+        if (!this.remoteMode() && this.contextRatio() >= 0.85) {
           Button(Math.round(this.contextRatio() * 100) + '%').fontFamily(this.appearance.fontFamily)
             .id('context-usage').height(this.workbench ? 36 : 44).attributeModifier(Btn.textSmall)
             .fontColor($r('app.color.danger')).accessibilityText(this.app.contextLabel)
             .onClick(() => { this.showContext = true; })
+        }
+        if (this.app.peerThread && this.nearbyQueuedCount() > 0) {
+          Row({ space: 4 }) {
+            SymbolGlyph($r('sys.symbol.clock')).fontSize(14).fontColor([this.appearance.onAccentContainer])
+            Text(`${t("待发送")} ${this.nearbyQueuedCount()}`).fontFamily(this.appearance.fontFamily)
+              .fontSize(Font.caption).fontWeight(FontWeight.Medium).fontColor(this.appearance.onAccentContainer)
+          }.id('nearby-input-queue').height(30).padding({ left: 10, right: 12 }).borderRadius(15)
+            .backgroundColor(this.appearance.accentContainer)
         }
         if (this.thread.pendingInputs.length > 0) {
           Row({ space: 4 }) {
@@ -1669,7 +1815,8 @@ export struct ChatPanel {
               .enabled(this.app.canQueueInput).onClick(() => this.app.enqueueInput('followUp'))
           }
           Row() {
-          IconButton({ icon: $r('sys.symbol.arrow_up'), label: t("发送"), compId: 'send-message', diameter: this.workbench ? 36 : 44, iconSize: 18,
+          IconButton({ icon: $r('sys.symbol.arrow_up'), label: this.remoteSending() ? t('等待执行端确认…') : t("发送"),
+            compId: 'send-message', diameter: this.workbench ? 36 : 44, iconSize: 18,
             fill: this.canSend() ? this.appearance.accent : $r('app.color.surface_variant'),
             tint: this.canSend() ? this.appearance.onAccent : $r('app.color.text_tertiary'),
             disabled: !this.canSend(), onTap: () => this.send() })
@@ -1790,9 +1937,9 @@ export struct ChatPanel {
               title: t('配置兼容性'), message: this.app.compatibilityWarnings.join('\n\n'),
               confirm: { value: t('知道了'), action: () => {} } }) })
         }
-        if (this.app.error.length > 0) {
-          Banner({ text: this.app.error, compId: 'chat-error', actionLabel: t("关闭"), actionId: 'dismiss-error',
-            onAction: () => { this.app.error = ''; } })
+        if (this.sendError().length > 0) {
+          Banner({ text: this.sendError(), compId: 'chat-error', actionLabel: t("关闭"), actionId: 'dismiss-error',
+            onAction: () => { this.nearbyError = ''; this.app.error = ''; } })
         }
         if (this.reading.messageId) {
           Banner({ text: this.reading.preparing ? t('正在准备朗读…') : t('正在朗读回答'), danger: false,
@@ -1835,17 +1982,28 @@ export struct ChatPanel {
           Banner({ text: t('登录华为账号后即可使用 AI 生成功能。'), danger: false, compId: 'chat-login-required',
             actionLabel: t('去登录'), actionId: 'chat-open-account', onAction: this.onAccount })
         }
-        if (this.workbench && this.thread.messages.length === 0) { this.workbenchContext() }
-        if (this.app.peerThread) {
-          Banner({ text: t('来自附近设备的会话'), danger: false, compId: 'peer-conversation' })
-        } else {
-          this.composer()
+        if (this.workbench && this.thread.messages.length === 0 && !this.remoteStart()) { this.workbenchContext() }
+        if (this.remoteMode() && !this.nearbyEnabled && !this.thread.archived) {
+          Banner({ text: t('请先在两台设备上开启附近设备同步，并打开 Tinybot。'), danger: false, compId: 'peer-sync-disabled' })
         }
-        if (!this.app.peerThread && !this.voiceMode && !this.speechActive()) {
-          Row() {
-            this.toolApprovalButton()
-            this.modelButton()
-          }.id('composer-footer').width('100%').justifyContent(FlexAlign.SpaceBetween)
+        this.composer()
+        if (!this.voiceMode && !this.speechActive()) {
+          Row({ space: 6 }) {
+            if (!this.remoteMode()) { this.toolApprovalButton() }
+            if (this.app.peerThread) {
+              Text(t('执行端 · {0}', [this.peerDeviceLabel()])).id('peer-conversation')
+                .fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+              if (this.thread.modelRef) {
+                Text(this.thread.modelRef.modelId).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+                  .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).constraintSize({ maxWidth: 160 })
+              }
+            } else {
+              if (this.conversationPickerVisible()) { this.conversationDevicePicker() }
+              Blank().layoutWeight(1)
+              if (!this.remoteMode()) { this.modelButton() }
+            }
+          }.id('composer-footer').width('100%').alignItems(VerticalAlign.Center)
         }
         if (this.workbench && this.account.ready && !this.account.signedIn) {
           Row({ space: 8 }) {
