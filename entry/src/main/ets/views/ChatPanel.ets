@@ -1818,14 +1818,19 @@ export struct ChatPanel {
   }
 
   @Builder
+  historySwipeSpace() {
+    Blank().height(0).layoutWeight(this.centeredWelcome() ? 1 : 0).width('100%')
+      .gesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Right, distance: 8 })
+        .onActionStart((event: GestureEvent) => this.onHistoryDragStart(event))
+        .onActionUpdate((event: GestureEvent) => this.onHistoryDragUpdate(event))
+        .onActionEnd((event: GestureEvent) => this.onHistoryDragEnd(event))
+        .onActionCancel(() => this.onHistoryDragCancel()))
+  }
+
+  @Builder
   chatBody() {
     Column() {
-      Blank().height(0).layoutWeight(this.centeredWelcome() ? 1 : 0).width('100%')
-        .gesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Right, distance: 8 })
-          .onActionStart((event: GestureEvent) => this.onHistoryDragStart(event))
-          .onActionUpdate((event: GestureEvent) => this.onHistoryDragUpdate(event))
-          .onActionEnd((event: GestureEvent) => this.onHistoryDragEnd(event))
-          .onActionCancel(() => this.onHistoryDragCancel()))
+      this.historySwipeSpace()
       Stack({ alignContent: Alignment.BottomStart }) {
         Column() {
           if (this.emptyConversation()) {
@@ -1927,7 +1932,7 @@ export struct ChatPanel {
           }.width('100%').padding({ left: 8, right: 8 })
         }
       }.width('100%').padding({ left: this.workbench ? 24 : 10, right: this.workbench ? 24 : 10, bottom: Space.sm })
-      Blank().height(0).layoutWeight(this.centeredWelcome() ? 1 : 0)
+      this.historySwipeSpace()
       Text(t('AI生成内容可能有误，请仔细鉴别。')).fontFamily(this.appearance.fontFamily).id('ai-disclaimer')
         .fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
         .textAlign(TextAlign.Center).width('100%')
