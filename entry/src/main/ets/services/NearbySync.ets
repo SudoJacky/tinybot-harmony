@@ -16,6 +16,7 @@ import { ArkDataRecords, RecordSource, StoredRecord } from './ArkDataRecords';
 import { ArkDataWorkspace, isManagedWorkspaceRecord, WORKSPACE_DELETIONS, workspaceDeletion } from './ArkDataWorkspace';
 import { NearbyItem, NearbyRecord, NearbySyncStore } from './NearbySyncStore';
 import { NearbyFiles } from './NearbyFiles';
+import { NearbyAttachments } from './NearbyAttachments';
 import { ConversationDevice, nearbyConversations, peerConversationCollisionId } from './NearbyConversations';
 import { PanelChanges } from './PanelChanges';
 import { SessionService } from './SessionService';
@@ -179,7 +180,8 @@ class NearbySync {
       }
       this.ready = true;
       nearbyConversations.start(this.context!, this.session!, this.origin, () => transport.localNetworkId(), () =>
-        transport.availableDevices().map((item): ConversationDevice => ({ id: item.networkId!, name: item.deviceName })));
+        transport.availableDevices().map((item): ConversationDevice => ({ id: item.networkId!, name: item.deviceName })), db,
+        new NearbyAttachments(this.context!, (id: string) => this.files!.connect(id)));
       AppStorage.setOrCreate('tinybot.nearby.status', t('正在查找附近设备…'));
       this.timer = setInterval(() => { this.tick(); }, INTERVAL_MS);
       this.tick();
@@ -360,7 +362,7 @@ class NearbySync {
         threads.push({ origin: record.origin, id: record.id, collisionId: id, thread: thread }); applied.push(record);
       } else if (record.kind === 'settings' && record.text !== undefined) {
         const previous = await this.localStore!.read('nearby-settings', record.origin);
-        settings.push({ current: parsePeerSettings(record.text), previous: previous === undefined ? undefined : parsePeerSettings(previous) });
+        settings.push({ origin: record.origin, current: parsePeerSettings(record.text), previous: previous === undefined ? undefined : parsePeerSettings(previous) });
         settingRecords.push({ scope: 'nearby-settings', id: record.origin, text: record.text });
         applied.push(record);
       }

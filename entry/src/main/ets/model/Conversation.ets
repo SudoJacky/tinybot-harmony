@@ -17,6 +17,7 @@ import { PendingInput, validatePendingInputs } from './PendingInput';
 import { FileOperations } from './FileOperations';
 import { MemoryReviewRecord } from './MemoryMaintenance';
 import { FileAnnotation, validateFileAnnotations } from './FileAnnotation';
+import { PeerSettingsConflict, parsePeerSettings } from './PeerSyncData';
 
 import { DEFAULT_SYSTEM_PROMPT, migrateUserDocument } from './SystemPrompt';
 
@@ -95,6 +96,9 @@ export interface ThreadData extends ContextState, ToolSelection {
   titleEdited?: boolean;
   draft?: string;
   peerDraft?: string;
+  peerAttachments?: Attachment[];
+  peerReferences?: ThreadReference[];
+  peerInputReceipts?: string[];
   attachments?: Attachment[];
   parentThreadId?: string;
   parentMessageId?: string;
@@ -105,6 +109,7 @@ export interface ThreadData extends ContextState, ToolSelection {
 }
 
 export interface AppData {
+  nearbyConflicts?: PeerSettingsConflict[];
   lastToolApprovalMode?: string;
   projects?: ProjectData[];
   // Storage shape, not app release. Additive settings and enum values keep this version.
@@ -195,6 +200,16 @@ export function parseAppData(text: string, recoverExecution: boolean = true): Ap
     throw new Error(t("本地数据格式不受支持，原文件已保留。"));
   }
   if (data.productivity) { validateProductivity(data.productivity); }
+  if (data.nearbyConflicts !== undefined) {
+    if (!Array.isArray(data.nearbyConflicts)) { throw new Error('Invalid nearby setting conflicts'); }
+    for (const conflict of data.nearbyConflicts) {
+      if (!conflict || typeof conflict.origin !== 'string' || !Array.isArray(conflict.keys) ||
+        conflict.keys.some((key) => typeof key !== 'string' || !/^(userDocument|autoCompact|autoMemory|saveSummary|(profile|server|skill|memory):.+)$/.test(key))) {
+        throw new Error('Invalid nearby setting conflict');
+      }
+      parsePeerSettings(JSON.stringify(conflict.current));
+    }
+  }
   const threadIds = new Set<string>();
   if (data.extensions !== undefined) { validateExtensions(data.extensions); }
   contextSettings(data.config);
@@ -259,6 +274,11 @@ export function parseAppData(text: string, recoverExecution: boolean = true): Ap
     if (thread.teamEnabled !== undefined && typeof thread.teamEnabled !== 'boolean') { throw new Error(t("团队模式设置损坏。")); }
     if (thread.teams !== undefined) { recoverTeams(thread.teams, interrupted); }
     if (thread.attachments) { validateAttachments(thread.attachments); }
+    if (thread.peerAttachments !== undefined) { validateAttachments(thread.peerAttachments); }
+    if (thread.peerReferences !== undefined) { validateThreadReferences(thread.peerReferences); }
+    if (thread.peerInputReceipts !== undefined && (!Array.isArray(thread.peerInputReceipts) ||
+      thread.peerInputReceipts.some((id) => typeof id !== 'string' || !/^remote-[A-Za-z0-9_-]{1,121}$/.test(id)) ||
+      new Set(thread.peerInputReceipts).size !== thread.peerInputReceipts.length)) { throw new Error('Invalid nearby admission receipts'); }
     if (thread.annotations !== undefined) { validateFileAnnotations(thread.annotations); }
     if (thread.pendingInputs !== undefined) { validatePendingInputs(thread.pendingInputs); }
     if (thread.panelContext !== undefined && (typeof thread.panelContext !== 'string' || thread.panelContext.length > 32768)) { throw new Error('Invalid board context'); }

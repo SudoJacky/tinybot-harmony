@@ -7,6 +7,12 @@ import { t } from '../model/I18n';
 import { nearbyTraceId, parsePeerThread, peerHasOutput, peerLiveMessage, peerThreadText } from '../model/PeerSyncData';
 import { SessionEvent } from './SessionContracts';
 import { SessionService } from './SessionService';
+import { InputMode } from '../model/PendingInput';
+import { NearbyTaskControl, parseNearbyTask } from '../model/NearbyTask';
+import { ArkDataRecords } from './ArkDataRecords';
+import { NearbyAsset, NearbyInput, validateNearbyInput } from '../model/NearbyInput';
+import { NearbyAttachments } from './NearbyAttachments';
+import { ModelChoice, validateReference } from '../model/ProviderProfiles';
 import { NearbyConnectionFailure, NearbyConversationLink, nearbyConversationInvite, nearbyConversationOptions,
   nearbyConversationPeer } from './NearbyConversationChannel';
 
@@ -25,6 +31,9 @@ interface PeerConversationInput {
   sourceThreadId: string;
   requestId: string;
   text: string;
+  mode?: InputMode;
+  payload?: NearbyInput;
+  assets?: NearbyAsset[];
 }
 interface CommandAttempt {
   input: PeerConversationInput;
@@ -39,6 +48,13 @@ interface Packet {
   create?: boolean;
   text?: string;
   error?: string;
+  mode?: InputMode;
+  task?: string;
+  control?: NearbyTaskControl;
+  threads?: string[];
+  models?: ModelChoice[];
+  payload?: NearbyInput;
+  assets?: NearbyAsset[];
 }
 interface Reply {
   link: NearbyConversationLink;
@@ -60,12 +76,14 @@ interface ConversationWatch {
   outputSent: boolean;
   dirty: boolean;
   timer: number;
+  task: string;
 }
 class ConversationPeer {
   origin: string = '';
   readonly link: NearbyConversationLink;
   readonly watches: Map<string, ConversationWatch> = new Map();
   readonly tracedAnswers: Map<string, string> = new Map();
+  readonly observing: Set<string> = new Set();
   constructor(link: NearbyConversationLink) { this.link = link; }
 }
 
@@ -90,15 +108,24 @@ class NearbyConversations {
   private replies: Map<string, Reply> = new Map();
   private openings: Map<string, Opening> = new Map();
   private attempts: Map<string, CommandAttempt> = new Map();
+  private preparing: Map<string, Promise<CommandAttempt>> = new Map();
+  private database?: ArkDataRecords;
+  private attachments?: NearbyAttachments;
+  private observing: boolean = false;
+  private observeTimer: number = -1;
 
   start(context: common.UIAbilityContext, session: SessionService, origin: string, localNetworkId: () => string,
-    discover: () => ConversationDevice[]): void {
+    discover: () => ConversationDevice[], database?: ArkDataRecords, attachments?: NearbyAttachments): void {
     this.context = context; this.session = session; this.origin = origin; this.localNetworkId = localNetworkId; this.discover = discover;
     this.refreshDevices();
     this.unsubscribe = session.subscribe((event: SessionEvent) => this.scheduleProgress(event));
+    this.database = database;
+    this.attachments = attachments;
+    this.observeTimer = setInterval(() => { this.observeDevices(); }, 3000);
   }
 
   stop(): void {
+    clearInterval(this.observeTimer); this.observeTimer = -1;
     this.discover = undefined; this.localNetworkId = undefined;
     this.unsubscribe?.(); this.unsubscribe = undefined;
     for (const peer of this.peers.values()) { peer.link.close(); }
@@ -106,6 +133,56 @@ class NearbyConversations {
     this.devicesByOrigin.clear();
     for (const opening of this.openings.values()) { opening.complete(new Error(t('附近设备连接已断开。'))); }
     this.refreshDevices();
+  }
+
+  private async observeDevices(): Promise<void> {
+    if (this.observing || !this.canConnect()) { return; }
+    this.observing = true;
+    try {
+      for (const device of this.refreshDevices()) {
+        if (!this.canConnect()) { break; }
+        try {
+          const peer = await this.connect(device.id);
+          const reply = await this.call(peer, { kind: 'catalog' });
+          if (reply.error) { throw new Error(reply.error); }
+          if (!Array.isArray(reply.threads) || reply.threads.some((id) => typeof id !== 'string' || !THREAD.test(id))) {
+            throw new Error('Invalid task catalog');
+          }
+          for (const id of reply.threads) {
+            if (peer.observing.has(id) && this.session!.peerThreadId(peer.origin, id)) { continue; }
+            await this.watch(peer, id);
+          }
+        } catch (error) {
+          this.connected(device.id)?.link.close();
+          Diagnostics.log('warn', 'sync', 'conversation_connect_failed', undefined, error as Error);
+        }
+      }
+    } finally { this.observing = false; }
+  }
+
+  private async watch(peer: ConversationPeer, id: string): Promise<void> {
+    const reply = await this.call(peer, { kind: 'watch', threadId: id });
+    if (reply.error) { throw new Error(reply.error); }
+    peer.observing.add(id);
+  }
+
+  async control(owner: string, threadId: string, control: NearbyTaskControl): Promise<void> {
+    if (!this.canConnect()) { throw new Error(t('请先在两台设备上开启附近设备同步，并打开 Tinybot。')); }
+    const peer = await this.findOwner(owner);
+    const reply = await this.call(peer, { kind: 'control', origin: owner, threadId: threadId, control: control });
+    if (reply.error) { throw new Error(reply.error); }
+  }
+  async models(deviceId: string, owner: string): Promise<ModelChoice[]> {
+    if (!this.canConnect()) { throw new Error(t('请先在两台设备上开启附近设备同步，并打开 Tinybot。')); }
+    const peer = owner ? await this.findOwner(owner) : await this.connect(deviceId);
+    const reply = await this.call(peer, { kind: 'models' });
+    if (reply.error) { throw new Error(reply.error); }
+    if (!Array.isArray(reply.models)) { throw new Error('Invalid execution model catalog'); }
+    for (const model of reply.models) {
+      validateReference(model);
+      if (typeof model.providerName !== 'string') { throw new Error('Invalid execution provider'); }
+    }
+    return reply.models;
   }
 
   refreshDevices(): ConversationDevice[] {
@@ -138,24 +215,45 @@ class NearbyConversations {
   }
 
   async submit(deviceId: string, owner: string, threadId: string, sourceThreadId: string, text: string,
-    onRequest?: (id: string) => void): Promise<void> {
+    onRequest?: (id: string) => void, mode: InputMode = 'followUp', payload: NearbyInput = {}): Promise<void> {
     if (!this.canConnect()) { throw new Error(t('请先在两台设备上开启附近设备同步，并打开 Tinybot。')); }
-    const key = JSON.stringify([deviceId, owner, threadId, sourceThreadId, text]);
+    validateNearbyInput(payload);
+    if (payload.attachments?.length && !this.attachments) { throw new Error('Nearby attachment transfer is unavailable'); }
+    const assets = payload.attachments?.length ? await this.attachments!.stage(this.origin, payload.attachments) : [];
+    const key = await peerConversationCollisionId(this.origin, JSON.stringify([deviceId, owner, threadId, sourceThreadId, text, mode, payload, assets]));
     let attempt = this.attempts.get(key);
     if (!attempt) {
-      attempt = { input: { deviceId: deviceId, owner: owner, threadId: threadId || util.generateRandomUUID(), sourceThreadId: sourceThreadId,
-        requestId: 'remote-' + util.generateRandomUUID(), text: text } };
-      if (this.attempts.size >= 32) {
-        const inactive = Array.from(this.attempts.keys()).find((id) => !this.attempts.get(id)?.sending);
-        if (inactive) { this.attempts.delete(inactive); }
+      let preparation = this.preparing.get(key);
+      if (!preparation) {
+        preparation = this.prepareAttempt(key, deviceId, owner, threadId, sourceThreadId, text, mode, payload, assets)
+          .finally(() => { this.preparing.delete(key); });
+        this.preparing.set(key, preparation);
       }
-      this.attempts.set(key, attempt);
+      attempt = await preparation;
     }
     onRequest?.(attempt.input.requestId);
     if (attempt.sending) { return attempt.sending; }
     const selected = attempt;
     selected.sending = this.sendInput(key, selected.input).finally(() => { selected.sending = undefined; });
     return selected.sending;
+  }
+
+  private async prepareAttempt(key: string, deviceId: string, owner: string, threadId: string, sourceThreadId: string,
+    text: string, mode: InputMode, payload: NearbyInput, assets: NearbyAsset[]): Promise<CommandAttempt> {
+      const saved = await this.database?.read('nearby-command-outbox', key);
+      const input: PeerConversationInput = saved ? JSON.parse(saved) as PeerConversationInput :
+        { deviceId: deviceId, owner: owner, threadId: threadId || util.generateRandomUUID(), sourceThreadId: sourceThreadId,
+          requestId: 'remote-' + util.generateRandomUUID(), text: text, mode: mode, payload: payload, assets: assets };
+      if (input.text !== text || input.owner !== owner || input.sourceThreadId !== sourceThreadId || input.mode !== mode ||
+        !THREAD.test(input.threadId) || !UUID.test(input.requestId.slice(7))) { throw new Error('Invalid saved nearby command'); }
+      if (!saved && this.database) { await this.database.commit([{ scope: 'nearby-command-outbox', id: key, text: JSON.stringify(input) }]); }
+      const attempt: CommandAttempt = { input: input };
+      if (this.attempts.size >= 32) {
+        const inactive = Array.from(this.attempts.keys()).find((id) => !this.attempts.get(id)?.sending);
+        if (inactive) { this.attempts.delete(inactive); }
+      }
+      this.attempts.set(key, attempt);
+      return attempt;
   }
 
   private async sendInput(key: string, input: PeerConversationInput): Promise<void> {
@@ -168,8 +266,8 @@ class NearbyConversations {
     }
     const started = traced ? Diagnostics.now() : 0;
     const reply = await this.call(peer, { kind: 'command', origin: peer.origin, threadId: input.threadId,
-      requestId: input.requestId, create: !input.owner, text: input.text });
-    if (reply.error) { this.attempts.delete(key); throw new Error(reply.error); }
+      requestId: input.requestId, create: !input.owner, text: input.text, mode: input.mode, payload: input.payload, assets: input.assets });
+    if (reply.error) { await this.finishAttempt(key); throw new Error(reply.error); }
     if (traced) {
       Diagnostics.log('info', 'sync', 'conversation_acknowledged', { operationId: operationId, durationMs: Diagnostics.now() - started });
     }
@@ -179,6 +277,10 @@ class NearbyConversations {
         Diagnostics.log('info', 'sync', 'conversation_opened', { operationId: operationId, durationMs: Diagnostics.now() - routing });
       }
     }
+    await this.finishAttempt(key);
+  }
+  private async finishAttempt(key: string): Promise<void> {
+    if (this.database) { await this.database.commit([{ scope: 'nearby-command-outbox', id: key }]); }
     this.attempts.delete(key);
   }
 
@@ -287,6 +389,7 @@ class NearbyConversations {
     }
     if (!peer?.origin || Array.from(this.peers.values()).some((item) => item.origin === peer.origin)) { return; }
     this.session?.clearPeerProgress(peer.origin, undefined, true);
+    this.session?.disconnectPeerTasks(peer.origin);
     for (const opening of this.openings.values()) {
       if (opening.origin === peer.origin) { opening.complete(new Error(t('附近设备连接已断开。'))); }
     }
@@ -301,7 +404,7 @@ class NearbyConversations {
         if (reply) { resolve(reply); }
         else { reject(error); }
       };
-      const timer = setTimeout(() => complete(undefined, new Error(t('等待执行端确认超时，请重试。'))), TIMEOUT);
+      const timer = setTimeout(() => complete(undefined, new Error(t('等待执行端确认超时，请重试。'))), packet.assets?.length ? 60000 : TIMEOUT);
       this.replies.set(id, { link: peer.link, complete: complete });
       this.send(peer, packet).catch((error: Error) => complete(undefined, error));
     });
@@ -326,9 +429,37 @@ class NearbyConversations {
       await this.send(peer, { kind: 'reply', replyTo: packet.replyTo, origin: this.origin });
       return;
     }
+    if (packet.kind === 'catalog' && peer.origin && packet.replyTo && UUID.test(packet.replyTo)) {
+      if (!this.canConnect()) {
+        await this.send(peer, { kind: 'reply', replyTo: packet.replyTo, error: t('请在执行端打开 Tinybot。') }); return;
+      }
+      await this.send(peer, { kind: 'reply', replyTo: packet.replyTo, threads: this.session.shareableThreadIds() });
+      for (const watch of peer.watches.values()) { this.scheduleWatch(peer, watch, false, true); }
+      return;
+    }
+    if (packet.kind === 'models' && peer.origin && packet.replyTo && UUID.test(packet.replyTo)) {
+      await this.send(peer, { kind: 'reply', replyTo: packet.replyTo, models: this.canConnect() ? this.session.executionModels() : undefined,
+        error: this.canConnect() ? undefined : t('请在执行端打开 Tinybot。') }); return;
+    }
     const id = packet.threadId;
     if (!peer.origin || !id || !THREAD.test(id)) { throw new Error('Invalid nearby conversation identity'); }
-    if (packet.kind === 'command') {
+    if (packet.kind === 'watch' || packet.kind === 'control') {
+      if (!packet.replyTo || !UUID.test(packet.replyTo)) { throw new Error('Invalid task request'); }
+      let error = '';
+      try {
+        if (!this.canConnect()) { throw new Error(t('请在执行端打开 Tinybot。')); }
+        if (packet.kind === 'control') {
+          if (packet.origin !== this.origin || !packet.control) { throw new Error('Invalid task control'); }
+          await this.session.controlTask(id, packet.control);
+        }
+        if (!this.session.shareableThread(id)) { throw new Error(t('执行端找不到可继续的会话。')); }
+      } catch (failure) {
+        error = (failure as Error).message;
+        Diagnostics.log('warn', 'sync', 'conversation_admission_failed', { threadId: id }, failure as Error);
+      }
+      await this.send(peer, { kind: 'reply', replyTo: packet.replyTo, error: error || undefined });
+      if (!error) { this.addWatch(peer, id, packet.kind === 'watch'); }
+    } else if (packet.kind === 'command') {
       await this.receiveCommand(peer, id, packet);
     } else if (packet.kind === 'answer' && typeof packet.text === 'string') {
       const answer = peerLiveMessage(packet.text);
@@ -357,7 +488,15 @@ class NearbyConversations {
     try {
       const allowed = (): boolean => this.canConnect() && this.peers.get(peer.link.id) === peer;
       if (!allowed()) { throw new Error(t('请在执行端打开 Tinybot。')); }
-      created = await this.session!.acceptPeerInput(id, requestId, packet.text, packet.create, allowed);
+      const payload = packet.payload || {};
+      validateNearbyInput(payload);
+      if (payload.attachments?.length && !this.session!.hasAcceptedPeerInput(id, requestId)) {
+        if (!this.attachments || !packet.assets || JSON.stringify(packet.assets.map((asset) => asset.attachment)) !== JSON.stringify(payload.attachments)) {
+          throw new Error('Nearby attachment manifest is missing or inconsistent');
+        }
+        payload.attachments = await this.attachments.receive(peer.link.deviceId, peer.origin, packet.assets);
+      }
+      created = await this.session!.acceptPeerInput(id, requestId, packet.text, packet.create, allowed, packet.mode || 'followUp', payload);
       if (operationId !== undefined) {
         Diagnostics.log('info', 'sync', 'conversation_admitted', { operationId: operationId, durationMs: Diagnostics.now() - started });
       }
@@ -366,18 +505,20 @@ class NearbyConversations {
       Diagnostics.log('warn', 'sync', 'conversation_admission_failed', { threadId: id }, failure as Error);
     }
     await this.send(peer, { kind: 'reply', replyTo: packet.replyTo, error: error || undefined });
-    if (!error && this.peers.get(peer.link.id) === peer && !peer.watches.has(id)) {
-      if (peer.watches.size >= 32) { this.removeWatch(peer, peer.watches.keys().next().value); }
-      const watch: ConversationWatch = { id: id, messageId: '', running: false, answer: '', error: '', sending: false,
-        outputSent: false, dirty: false, timer: -1 };
-      peer.watches.set(id, watch);
-      this.scheduleWatch(peer, watch, true);
-    }
+    if (!error) { this.addWatch(peer, id); }
     // Admission is acknowledged before executor navigation. Retries and followups
     // keep the user's current selection; only a newly created task opens itself.
-    if (created && !await this.session!.selectThread(id, true)) {
-      Diagnostics.log('warn', 'sync', 'conversation_executor_open_failed', { threadId: id });
+    if (created) { await this.session!.openAdmittedTask(id); }
+  }
+
+  private addWatch(peer: ConversationPeer, id: string, reset: boolean = false): void {
+    if (this.peers.get(peer.link.id) !== peer) { return; }
+    if (reset) { this.removeWatch(peer, id); }
+    if (!peer.watches.has(id)) {
+      peer.watches.set(id, { id: id, messageId: '', running: false, answer: '', error: '', sending: false,
+        outputSent: false, dirty: false, timer: -1, task: '' });
     }
+    this.scheduleWatch(peer, peer.watches.get(id)!, true);
   }
 
   private async openWhenReceived(peer: ConversationPeer, input: PeerConversationInput): Promise<void> {
@@ -423,6 +564,7 @@ class NearbyConversations {
     }
     const error = typeof packet.error === 'string' ? packet.error : '';
     this.session!.receivePeerExecutionError(peer.origin, id, error);
+    if (packet.task !== undefined) { this.session!.receivePeerTask(peer.origin, id, parseNearbyTask(packet.task)); }
     const opening = this.openings.get(peer.origin + ':' + id);
     if (!opening) { return; }
     const localId = this.session!.peerThreadId(peer.origin, id);
@@ -438,7 +580,7 @@ class NearbyConversations {
 
   private scheduleProgress(event: SessionEvent): void {
     if (event.kind !== 'snapshot' && event.kind !== 'thread' && event.kind !== 'message' &&
-      event.kind !== 'text' && event.kind !== 'reasoning' && event.kind !== 'tool') { return; }
+      event.kind !== 'text' && event.kind !== 'reasoning' && event.kind !== 'tool' && event.kind !== 'state') { return; }
     for (const peer of this.peers.values()) {
       if (event.threadId) {
         const watch = peer.watches.get(event.threadId);
@@ -449,7 +591,7 @@ class NearbyConversations {
     }
   }
 
-  private scheduleWatch(peer: ConversationPeer, watch: ConversationWatch, changed: boolean): void {
+  private scheduleWatch(peer: ConversationPeer, watch: ConversationWatch, changed: boolean, heartbeat: boolean = false): void {
     const thread = this.session?.shareableThread(watch.id);
     if (!thread) { this.removeWatch(peer, watch.id); return; }
     const last = thread.messages[thread.messages.length - 1];
@@ -457,19 +599,20 @@ class NearbyConversations {
     if (running && last && last.status !== 'generating') { return; }
     const error = !running ? this.session!.shareableThreadError(watch.id) : '';
     const structural = !!last && (last.id !== watch.messageId || watch.running !== running);
-    const immediate = structural || error !== watch.error ||
+    const task = JSON.stringify(this.session!.taskState(watch.id));
+    const immediate = heartbeat || task !== watch.task || structural || error !== watch.error ||
       !!last && last.status === 'generating' && !watch.outputSent && peerHasOutput(last);
     if (!immediate && (!changed || last?.status !== 'generating')) { return; }
     if (watch.sending) { watch.dirty = true; return; }
     if (immediate) {
       if (watch.timer >= 0) { clearTimeout(watch.timer); watch.timer = -1; }
-      this.flushWatch(peer, watch);
+      this.flushWatch(peer, watch, heartbeat);
     } else if (watch.timer < 0) {
       watch.timer = setTimeout(() => { watch.timer = -1; this.flushWatch(peer, watch); }, STREAM_INTERVAL_MS);
     }
   }
 
-  private async flushWatch(peer: ConversationPeer, watch: ConversationWatch): Promise<void> {
+  private async flushWatch(peer: ConversationPeer, watch: ConversationWatch, heartbeat: boolean = false): Promise<void> {
     if (watch.sending || !this.session || peer.watches.get(watch.id) !== watch) { return; }
     const thread = this.session.shareableThread(watch.id);
     if (!thread) { this.removeWatch(peer, watch.id); return; }
@@ -482,14 +625,15 @@ class NearbyConversations {
     const structural = !!last && (last.id !== watch.messageId || watch.running !== running);
     const answer = last?.status === 'generating' ? JSON.stringify(last) : '';
     const hasOutput = !!last && !!answer && peerHasOutput(last);
-    if (!structural && answer === watch.answer && error === watch.error) { return; }
+    const task = JSON.stringify(this.session.taskState(watch.id));
+    if (!heartbeat && task === watch.task && !structural && answer === watch.answer && error === watch.error) { return; }
     watch.sending = true;
     try {
-      if (structural || error !== watch.error) {
+      if (heartbeat || task !== watch.task || structural || error !== watch.error) {
         const tracing = Diagnostics.acceptsLog('info');
         const started = tracing ? Diagnostics.now() : 0;
-        const text = last ? peerThreadText(thread) : undefined;
-        await this.send(peer, { kind: 'state', threadId: watch.id, requestId: requestId, text: text, error: error || undefined });
+        const text = last && (structural || !watch.messageId) ? peerThreadText(thread) : undefined;
+        await this.send(peer, { kind: 'state', threadId: watch.id, requestId: requestId, text: text, task: task, error: error || undefined });
         if (tracing) {
           Diagnostics.log('info', 'sync', 'conversation_snapshot_sent', {
             operationId: nearbyTraceId(requestId), durationMs: Diagnostics.now() - started, chars: text?.length,
@@ -508,9 +652,10 @@ class NearbyConversations {
         }
       }
       watch.messageId = last?.id || ''; watch.running = running; watch.answer = answer; watch.error = error; watch.outputSent = hasOutput;
+      watch.task = task;
     } catch (failure) {
       Diagnostics.log('warn', 'sync', 'conversation_progress_failed', { threadId: watch.id }, failure as Error);
-      this.removeWatch(peer, watch.id);
+      peer.link.close();
     } finally {
       watch.sending = false;
       if (watch.dirty && peer.watches.get(watch.id) === watch) {

@@ -11,6 +11,7 @@ import { Cancellation } from './Cancellation';
 import { NativeWorkspaceFiles } from './NativeWorkspaceFiles';
 import { hostedPrivacy } from './HostedPrivacy';
 import { BackupLoginRequired, huaweiAccount } from './HuaweiAccount';
+import { newBackupSnapshot } from './BackupSnapshotNames';
 
 interface BackupTask { requestId: number; generation: number; cancellation: Cancellation; running: boolean; }
 
@@ -38,7 +39,7 @@ export class AutoCloudBackup {
     if (this.context === context) { return; }
     this.dispose();
     const store = preferences.getPreferencesSync(context, { name: 'tinybot-ui' });
-    this.enabled = true;
+    this.enabled = store.getSync('autoCloudBackupEnabled', true) as boolean;
     this.context = context; this.store = store; this.snapshot = snapshot; this.ready = ready;
     this.revision = 0; this.savedRevision = -1; this.savedFiles = -1; this.savedChanges = ''; this.name = CLOUD_BACKUP_NAME; this.error = ''; this.lastUploadedAt = 0;
     this.state = this.enabled ? 'waiting' : 'disabled';
@@ -135,10 +136,15 @@ export class AutoCloudBackup {
         const revision = this.revision;
         const files = NativeWorkspaceFiles.contentRevision;
         this.state = 'creating'; this.error = '';
-        await CloudBackup.create(context, data, { openID: openID, cancellation: task.cancellation });
+        this.name = newBackupSnapshot(context);
+        await CloudBackup.create(context, data, { openID: openID, cancellation: task.cancellation, name: this.name,
+          onStaged: () => {
+            if (task.generation !== this.generation) { return; }
+            this.savedRevision = revision; this.savedFiles = files; this.savedChanges = changes;
+          } });
         if (task.generation !== this.generation) { return; }
         this.savedRevision = revision; this.savedFiles = files; this.savedChanges = changes;
-      } else { await CloudBackup.retryUpload(context, { openID: openID, cancellation: task.cancellation }); }
+      } else { await CloudBackup.retryUpload(context, { openID: openID, cancellation: task.cancellation, name: this.name }); }
       task.cancellation.check();
       const items = await CloudBackup.list(context);
       if (task.generation !== this.generation || !this.enabled || !hostedPrivacy.allowed) { return; }

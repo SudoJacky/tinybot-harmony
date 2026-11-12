@@ -6,7 +6,7 @@ import { Diagnostics } from '../model/Diagnostics';
 const BUNDLE = 'com.sudojacky.tinybot';
 const SERVICE = 'TinybotConversation';
 const PROTOCOL = 'tinybotConversation';
-const VERSION = '1';
+const VERSION = '2';
 const HEADER = 8;
 const PART = 4088;
 const MAX_BYTES = 8 * 1024 * 1024;

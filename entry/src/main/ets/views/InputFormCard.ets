@@ -1,7 +1,6 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
-import { FormField } from '../model/RichArtifacts';
-import { ToolApproval } from '../services/ToolApproval';
+import { FormField, InputForm } from '../model/RichArtifacts';
 import { Btn, Font, Radius, Space, Styles } from '../common/Theme';
 import { IconBadge } from '../common/Widgets';
 
@@ -9,7 +8,11 @@ import { IconBadge } from '../common/Widgets';
 @Component
 export struct InputFormCard {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
-  @ObjectLink approval: ToolApproval;
+  @Prop form: InputForm | undefined = undefined;
+  @Prop error: string = '';
+  @Prop disabled: boolean = false;
+  onSubmit: (values: string[]) => void = () => {};
+  onCancel: () => void = () => {};
   @State private values: string[] = [];
   private set(index: number, value: string): void { const next = this.values.slice(); next[index] = value; this.values = next; }
   private chosen(index: number): string[] { return (this.values[index] || '').split('\n').filter((item) => item.length > 0); }
@@ -39,13 +42,13 @@ export struct InputFormCard {
         IconBadge({ icon: $r('sys.symbol.questionmark_circle'), diameter: 32 })
         Column({ space: 2 }) {
           Text(t("助手需要你补充信息")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
-          Text(this.approval.form?.title || '').fontFamily(this.appearance.fontFamily).fontSize(15).fontWeight(FontWeight.Medium).maxLines(2)
+          Text(this.form?.title || '').fontFamily(this.appearance.fontFamily).fontSize(15).fontWeight(FontWeight.Medium).maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
       }.width('100%')
       Scroll() {
         Column({ space: 14 }) {
-          ForEach(this.approval.form?.fields || [], (field: FormField, index: number) => {
+          ForEach(this.form?.fields || [], (field: FormField, index: number) => {
             Column({ space: 6 }) {
               Text() {
                 Span(field.label)
@@ -66,17 +69,17 @@ export struct InputFormCard {
           })
         }.width('100%')
       }.constraintSize({ maxHeight: 280 }).width('100%').scrollBar(BarState.Off).align(Alignment.TopStart)
-      if (this.approval.formError) {
+      if (this.error) {
         Row({ space: 6 }) {
           SymbolGlyph($r('sys.symbol.exclamationmark_circle')).fontSize(14).fontColor([$r('app.color.danger')])
-          Text(this.approval.formError).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).layoutWeight(1).fontColor($r('app.color.danger'))
+          Text(this.error).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).layoutWeight(1).fontColor($r('app.color.danger'))
         }.width('100%')
       }
       Row({ space: Space.sm }) {
         Button(t("不回答")).fontFamily(this.appearance.fontFamily).id('cancel-form').attributeModifier(Btn.plainSmall).height(40).layoutWeight(1)
-          .onClick(() => { this.values = []; this.approval.cancelForm(); })
+          .enabled(!this.disabled).onClick(() => this.onCancel())
         Button(t("提交并继续")).fontFamily(this.appearance.fontFamily).id('submit-form').attributeModifier(Btn.primarySmall).height(40).layoutWeight(1)
-          .onClick(() => { this.approval.submit(this.values); if (!this.approval.form) { this.values = []; } })
+          .enabled(!this.disabled).onClick(() => this.onSubmit(this.values.slice()))
       }.width('100%')
     }.width('100%').padding(Space.md).backgroundColor($r('app.color.surface')).borderRadius(Radius.lg)
     .border({ width: 1, color: this.appearance.accentContainer })

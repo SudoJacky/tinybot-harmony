@@ -10,10 +10,11 @@ import { systemMaterialAttribute } from '../common/MaterialAttributes';
 import { t } from '../model/I18n';
 import { ToolApprovalMode, toolApprovalModeName } from '../model/ToolApprovalMode';
 import { ProjectData } from '../model/Project';
+import { NearbyInput } from '../model/NearbyInput';
 import { AnswerSpeech } from '../services/AnswerSpeech';
 import { LaunchActions } from '../services/LaunchActions';
 import { isHighestReasoningEffort, reasoningEfforts } from '../model/ReasoningEffort';
-import { ProviderProfile } from '../model/ProviderProfiles';
+import { ProviderProfile, ModelChoice, ModelReference } from '../model/ProviderProfiles';
 import { ComposerGlow } from '../common/ComposerGlow';
 import { ModelPickerPanel } from './ModelPickerPanel';
 import { ReasoningEffortPicker } from './ReasoningEffortPicker';
@@ -57,6 +58,9 @@ import { WindowViewport } from '../viewmodel/WindowViewport';
 import { MessageListSource } from '../viewmodel/MessageListSource';
 import { SendFrame, SendOrigin } from '../common/SendBubbleMotion';
 import { ConversationDevice, nearbyConversations } from '../services/NearbyConversations';
+import { NearbyTaskControl } from '../model/NearbyTask';
+import { InputMode } from '../model/PendingInput';
+import { NearbyTaskPanel } from './NearbyTaskPanel';
 
 // onFrame precedes dirty-property updates; focus and list positioning need the completed layout.
 class ChatLayoutFrame extends FrameCallback {
@@ -103,6 +107,9 @@ export struct ChatPanel {
   @StorageProp('tinybot.nearby.enabled') private nearbyEnabled: boolean = false;
   @StorageProp('tinybot.conversation.devices') private conversationDevices: ConversationDevice[] = [];
   @State private nearbyTarget: string = '';
+  @State private nearbyModels: ModelChoice[] = [];
+  @State private nearbyModel: ModelReference | undefined = undefined;
+  @State private showNearbyModels: boolean = false;
   private nearbySourceId: string = '';
   @State private nearbySendingIds: string[] = [];
   @State private nearbyReceipts: NearbyDraftReceipt[] = [];
@@ -384,37 +391,41 @@ export struct ChatPanel {
 
   private remoteStart(): boolean {
     return !!this.nearbyTarget && this.nearbySourceId === this.thread.id &&
-      !this.thread.archived && !this.thread.projectId && this.thread.messages.length === 0;
+      !this.thread.archived && this.thread.messages.length === 0;
   }
   private remoteMode(): boolean { return this.app.peerThread || this.remoteStart(); }
   private remoteSending(): boolean { return this.nearbySendingIds.includes(this.thread.id); }
-  private remoteRunning(): boolean { return this.app.peerThread && this.app.peerRunningThreadIds.includes(this.thread.id); }
+  private remoteRunning(): boolean { return this.app.peerThread && (this.app.peerTask?.task?.running === true || this.app.peerRunningThreadIds.includes(this.thread.id)); }
   private nearbyQueuedCount(): number {
     return this.nearbyReceipts.filter((item) => item.threadId === this.thread.id &&
       !this.thread.messages.some((message) => message.id === item.messageId)).length;
   }
   private remoteDraftBlocked(): boolean {
-    return !this.app.peerThread && (this.thread.attachments.length > 0 || this.thread.references.length > 0 ||
-      this.thread.annotations.length > 0 || !!this.thread.panelContext || this.thread.pendingInputs.length > 0);
+    return !this.app.peerThread && (this.thread.annotations.length > 0 || !!this.thread.panelContext || this.thread.pendingInputs.length > 0);
   }
 
   private selectNearbyTarget(id: string): void {
     if (this.remoteSending()) { return; }
     if (id && (this.importing || this.remoteDraftBlocked())) {
-      this.getUIContext().getPromptAction().showToast({ message: t('请先处理当前草稿里的附件、引用或待发送消息，再切换执行端。') });
+      this.getUIContext().getPromptAction().showToast({ message: t('请先处理文件批注、面板上下文或待发送消息，再切换执行端。') });
       return;
     }
     this.nearbySourceId = this.thread.id;
     this.nearbyTarget = id;
+    this.nearbyModel = undefined;
     this.nearbyError = '';
   }
 
-  private async deliverRemote(deviceId: string, owner: string, remoteId: string, source: string, text: string): Promise<void> {
+  private async deliverRemote(deviceId: string, owner: string, remoteId: string, source: string, text: string, mode: InputMode = 'followUp'): Promise<void> {
     this.nearbySendingIds = this.nearbySendingIds.concat([source]);
     this.nearbyError = '';
     try {
       let messageId = '';
-      await nearbyConversations.submit(deviceId, owner, remoteId, source, text, (id: string) => { messageId = id; });
+      const draft = this.app.threads.find((item) => item.id === source);
+      if (!draft) { throw new Error(t('对话不存在：') + source); }
+      const payload: NearbyInput = JSON.parse(JSON.stringify({ attachments: draft.attachments, references: draft.references,
+        projectId: owner ? undefined : draft.projectId, modelRef: owner ? undefined : this.nearbyModel })) as NearbyInput;
+      await nearbyConversations.submit(deviceId, owner, remoteId, source, text, (id: string) => { messageId = id; }, mode, payload);
       const thread = this.app.threads.find((item) => item.id === source);
       if (owner && messageId && thread && !thread.messages.some((message) => message.id === messageId)) {
         this.nearbyReceipts = this.nearbyReceipts.concat([{ threadId: source, messageId: messageId }]);
@@ -428,11 +439,54 @@ export struct ChatPanel {
     finally { this.nearbySendingIds = this.nearbySendingIds.filter((id) => id !== source); }
   }
 
+  private async controlRemote(control: NearbyTaskControl): Promise<void> {
+    const source = this.thread.id;
+    if (this.remoteSending()) { return; }
+    this.nearbySendingIds = this.nearbySendingIds.concat([source]); this.nearbyError = '';
+    try { await nearbyConversations.control(this.thread.peerOwner || '', this.thread.peerThreadId || '', control); }
+    catch (error) { this.nearbyErrorThreadId = source; this.nearbyError = (error as Error).message; }
+    finally { this.nearbySendingIds = this.nearbySendingIds.filter((id) => id !== source); }
+  }
+
   private sendError(): string {
     return this.nearbyError && this.nearbyErrorThreadId === this.thread.id ? this.nearbyError : this.app.error;
   }
+  private async loadNearbyModels(): Promise<void> {
+    const source = this.thread.id;
+    try {
+      const models = await nearbyConversations.models(this.remoteStart() ? this.nearbyTarget : '', this.thread.peerOwner || '');
+      if (source !== this.thread.id) { return; }
+      this.nearbyModels = models; this.showNearbyModels = true;
+    } catch (error) { this.nearbyErrorThreadId = source; this.nearbyError = (error as Error).message; }
+  }
+  private async selectNearbyModel(choice: ModelChoice): Promise<void> {
+    this.showNearbyModels = false;
+    const model: ModelReference = { providerId: choice.providerId, modelId: choice.modelId };
+    if (this.app.peerThread) { await this.controlRemote({ action: 'model', runId: this.app.peerTask?.task?.runId || '', modelRef: model }); }
+    else { this.nearbyModel = model; }
+  }
+  @Builder
+  nearbyModelSheet() {
+    Scroll() {
+      Column({ space: Space.sm }) {
+        Text(t('执行端模型')).fontSize(18).fontWeight(FontWeight.Medium)
+        if (!this.nearbyModels.length) { Text(t('执行端没有已启用的模型，请先在该设备上配置。')) }
+        ForEach(this.nearbyModels, (choice: ModelChoice) => {
+          Button(choice.providerName + ' · ' + choice.modelId).attributeModifier(Btn.tonal).width('100%')
+            .onClick(() => this.selectNearbyModel(choice))
+        }, (choice: ModelChoice) => choice.providerId + ':' + choice.modelId)
+      }.width('100%').padding(Space.page)
+    }.width('100%')
+  }
+  @Builder
+  nearbyModelButton() {
+    Button(this.app.peerThread ? this.app.peerTask?.task?.modelRef?.modelId || this.thread.modelRef?.modelId || t('执行端模型') :
+      this.nearbyModel?.modelId || t('执行端默认模型')).attributeModifier(Btn.plainSmall)
+      .constraintSize({ maxWidth: 160 }).enabled(!this.remoteSending() && !this.remoteRunning())
+      .onClick(() => this.loadNearbyModels()).bindSheet($$this.showNearbyModels, this.nearbyModelSheet(), { height: SheetSize.MEDIUM })
+  }
   private conversationPickerVisible(): boolean {
-    return !this.app.peerThread && !this.thread.archived && !this.thread.projectId && this.thread.messages.length === 0 &&
+    return !this.app.peerThread && !this.thread.archived && this.thread.messages.length === 0 &&
       (this.remoteStart() || this.nearbyEnabled && this.conversationDevices.length > 0);
   }
   private peerDeviceLabel(): string {
@@ -642,7 +696,7 @@ export struct ChatPanel {
   private uiHandler(threadId: string, messageId: string): (key: string, values: UiValues, action: string) => Promise<UiValues> {
     return (key: string, values: UiValues, action: string) => this.app.interactUi(threadId, messageId, key, values, action);
   }
-  private send(): void {
+  private send(mode: InputMode = 'followUp'): void {
     if (this.speechActive()) { return; }
     if (!this.account.signedIn) { this.onAccount(); return; }
     this.inspectingOutput = false; this.followOutput = true;
@@ -676,7 +730,7 @@ export struct ChatPanel {
         }
       }
       this.follow();
-    }, remote ? (text: string) => this.deliverRemote(deviceId, owner, remoteId, threadId, text) : undefined)
+    }, remote ? (text: string) => this.deliverRemote(deviceId, owner, remoteId, threadId, text, mode) : undefined)
       .catch((error: Error) => {
         if (this.app.active.id === threadId) {
           if (remote) { this.nearbyErrorThreadId = threadId; this.nearbyError = error.message; }
@@ -692,7 +746,6 @@ export struct ChatPanel {
 
   // Use methods: ordinary accessors in a V1 @Component are omitted by the ArkUI compiler.
   private hasDraft(): boolean {
-    if (this.remoteMode()) { return this.app.draft.trim().length > 0; }
     return this.app.draft.trim().length > 0 || this.thread.attachments.length > 0 || this.thread.references.length > 0 || this.thread.annotations.length > 0;
   }
 
@@ -898,7 +951,7 @@ export struct ChatPanel {
     await this.app.regenerateReply(id, () => this.follow());
   }
   private canAttach(): boolean {
-    return !this.remoteMode() && this.canUseDraft();
+    return !this.remoteSending() && this.canUseDraft();
   }
   private canUseDraft(): boolean {
     return !this.speechActive() && !this.app.busy && !this.importing && !this.thread.archived && this.app.saveError.length === 0;
@@ -1223,8 +1276,8 @@ export struct ChatPanel {
       if (this.remoteMode()) {
         this.plusMenuRow($r('sys.symbol.square_and_pencil'), t('展开输入'), 'remote-expand-draft',
           this.canUseDraft(), false, () => this.dismissPlusMenu(() => this.expandDraft()))
-      } else {
-      if (AdaptiveUi.compactComposer(this.panelWidth)) {
+      }
+      if (!this.remoteMode() && AdaptiveUi.compactComposer(this.panelWidth)) {
         this.plusMenuRow($r('sys.symbol.wrench_and_screwdriver'), t('工具范围'), 'plus-menu-tools', !this.app.busy, true,
           () => this.dismissPlusMenu(this.onToolScope))
       }
@@ -1249,7 +1302,6 @@ export struct ChatPanel {
       Text(this.thread.attachments.length >= MAX_MESSAGE_ATTACHMENTS ? t('已达到每条消息 {0} 个附件的上限', [MAX_MESSAGE_ATTACHMENTS]) : t('每条消息最多 {0} 个附件 · 图片需模型支持视觉输入', [MAX_MESSAGE_ATTACHMENTS]))
         .fontFamily(this.appearance.fontFamily).fontSize(11).lineHeight(16).fontColor($r('app.color.text_tertiary'))
         .width('100%').padding({ left: 10, right: 10, top: 6, bottom: 8 })
-      }
     }.width('100%')
   }
 
@@ -1267,7 +1319,6 @@ export struct ChatPanel {
         Button(t('展开输入')).fontFamily(this.appearance.fontFamily).id('phone-expand-draft')
           .attributeModifier(Btn.tonal).width('100%').enabled(this.canUseDraft())
           .onClick(() => this.fromSheet(() => this.expandDraft()))
-        if (!this.remoteMode()) {
         Row() {
           this.plusTile($r('sys.symbol.picture'), t("图片"), 'attach-photo',
             this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, () => this.fromSheet(() => this.attach('photo')))
@@ -1285,7 +1336,6 @@ export struct ChatPanel {
         Button(t('引用其他会话')).fontFamily(this.appearance.fontFamily).id('add-thread-reference').attributeModifier(Btn.tonal).width('100%')
           .enabled(this.canAttach() && this.thread.references.length < 4)
           .onClick(() => this.fromSheet(() => this.addThreadReference()))
-        }
       }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.xl })
     }.width('100%').scrollBar(BarState.Off).align(Alignment.Top)
   }
@@ -1778,7 +1828,7 @@ export struct ChatPanel {
           }.width('100%')
         }, (threadId: string) => threadId)
       }
-      if (!this.app.peerThread && this.thread.references.length > 0) {
+      if (this.thread.references.length > 0) {
         Scroll() {
           Column({ space: 4 }) {
             ForEach(this.thread.references, (item: ThreadReference) => {
@@ -1788,7 +1838,7 @@ export struct ChatPanel {
           }.width('100%')
         }.width('100%').constraintSize({ maxHeight: 104 }).scrollBar(BarState.Auto)
       }
-      if (!this.app.peerThread && (this.thread.attachments.length > 0 || this.importing)) {
+      if (this.thread.attachments.length > 0 || this.importing) {
         this.attachmentStrip()
       }
       Stack() {
@@ -1992,7 +2042,14 @@ export struct ChatPanel {
           (this.browser.url !== '' && this.browser.url !== 'about:blank'))) || this.browser.error) {
           BrowserStatusCard({ browser: this.browser, onOpen: this.onBrowser })
         }
-        if (!this.app.peerThread && this.approval.form) { InputFormCard({ approval: this.approval }) }
+        if (!this.app.peerThread && this.approval.form) {
+          InputFormCard({ form: this.approval.form, error: this.approval.formError,
+            onSubmit: (values: string[]) => this.approval.submit(values), onCancel: () => this.approval.cancelForm() })
+        }
+        if (this.app.peerThread) {
+          NearbyTaskPanel({ status: this.app.peerTask, busy: this.remoteSending(), hasDraft: this.hasDraft(),
+            onControl: (control: NearbyTaskControl) => { this.controlRemote(control); }, onSteer: () => this.send('steer') })
+        }
         if (!this.app.peerThread && this.approval.title) {
           this.approvalCard()
         }
@@ -2064,14 +2121,12 @@ export struct ChatPanel {
             Text(t('执行端 · {0}', [this.peerDeviceLabel()])).id('peer-conversation')
               .fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
-            if (this.thread.modelRef) {
-              Text(this.thread.modelRef.modelId).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
-                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).constraintSize({ maxWidth: 160 })
-            }
+            this.nearbyModelButton()
           } else {
             if (this.conversationPickerVisible()) { this.conversationDevicePicker() }
             Blank().layoutWeight(1)
             if (!this.remoteMode()) { this.modelButton() }
+            else { this.nearbyModelButton() }
           }
         }.id('composer-footer').width('100%').alignItems(VerticalAlign.Center)
           .enabled(!this.voiceOverlayVisible())

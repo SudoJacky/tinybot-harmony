@@ -9,6 +9,9 @@ import { isSupportedProtocol } from '../model/ProviderEndpoint';
 import { ToolExecution, toolReceipts } from '../model/Agent';
 import { ProjectData, projectFor, workspaceIdFor, validateProjects, projectContext } from '../model/Project';
 import { nearbyTraceId, peerHasOutput, PeerSettingsDelta, PeerThreadUpdate, peerThreadText } from '../model/PeerSyncData';
+import { NearbyInput, validateNearbyInput } from '../model/NearbyInput';
+import { mergePeerSettings } from '../model/PeerSettingsMerge';
+import { NearbyTaskState, NearbyTaskStatus, NearbyTaskControl } from '../model/NearbyTask';
 import { cloudSharedFolder, SharedFolder } from '../model/SharedFolders';
 import { proposeSessionMemory, reviewSessionMemory, addMemoryDraft } from './SessionMemory';
 import { McpSettings, McpSettingsCommand, McpSettingsResult, McpSettingsHost } from './McpSettings';
@@ -45,7 +48,7 @@ import { ToolSet } from './ToolSet';
 import { AppData, MessageData, ModelConfig, ThreadData, copyModelConfig, copyAppMetadata, emptyData } from '../model/Conversation';
 import { mergeSavedConfiguration } from '../model/SavedConfiguration';
 import { contextSettings } from '../model/ContextSettings';
-import { ModelReference, ProviderProfile, migrateProfiles, modelConfig } from '../model/ProviderProfiles';
+import { ModelChoice, ModelReference, ProviderProfile, migrateProfiles, modelConfig, validateReference } from '../model/ProviderProfiles';
 import { defaultSearchConfig, isSupportedSearchProvider } from '../model/WebSearch';
 import { InputMode, MAX_INPUT_TEXT, PendingInput, nextPendingInput, validatePendingInputs } from '../model/PendingInput';
 import { BrowserPolicy, ExtensionSettings, SkillData, SkillFile, defaultExtensions, explicitSkill, expandSkillCommand, parseSkill, validateExtensions } from '../model/Skills';
@@ -98,6 +101,7 @@ export class SessionService {
   private directPeerAnswers: Map<string, string> = new Map();
   private peerExecutionErrors: Map<string, string> = new Map();
   private peerInputSaving: string = '';
+  private peerTasks: Map<string, NearbyTaskStatus> = new Map();
 
   constructor(repository: SessionRepository, runtime: AgentRuntime, credentials: CredentialVault, resources: SessionResources, approval?: ToolApproval) {
     this.repository = repository;
@@ -106,6 +110,7 @@ export class SessionService {
     this.mcpSettings = new McpSettings(credentials, () => resources.createId(), (message) => resources.reportError('mcp_failed', message));
     this.resources = resources;
     this.approval = approval;
+    approval?.subscribe(() => this.publish('state'));
     this.profiles = new ProfileSettings(credentials, () => resources.createId());
   }
 
@@ -118,6 +123,87 @@ export class SessionService {
     return this.data.threads.find((item) => item.id === id && !item.peerOwner);
   }
   shareableThreadRunning(id: string): boolean { return this.executions.get(id)?.state.phase === 'running'; }
+  observedPeerThreads(): ThreadData[] { return this.data.threads.filter((thread) => !!thread.peerOwner); }
+  shareableThreadIds(): string[] { return this.data.threads.filter((thread) => !thread.peerOwner && thread.messages.length > 0).map((thread) => thread.id); }
+  executionModels(): ModelChoice[] {
+    return this.providerProfiles.filter((profile) => profile.enabled && isSupportedProtocol(profile.protocol)).flatMap((profile) =>
+      profile.models.map((id): ModelChoice => ({ providerId: profile.id, providerName: profile.name, modelId: id })));
+  }
+  taskState(id: string): NearbyTaskState {
+    const thread = this.shareableThread(id);
+    if (!thread) { throw new Error(t('执行端找不到可继续的会话。')); }
+    const execution = this.executions.get(id);
+    const last = thread.messages.filter((message) => message.role === 'assistant').slice(-1)[0];
+    return { runId: last?.id || '', running: execution?.state.phase === 'running', modelRef: thread.modelRef,
+      acceptingSteering: execution?.state.acceptingSteering === true, queuePaused: thread.queuePaused === true,
+      pendingInputs: JSON.parse(JSON.stringify(thread.pendingInputs || [])) as PendingInput[],
+      approval: this.approval?.snapshot(id), error: this.shareableThreadError(id) };
+  }
+  receivePeerTask(origin: string, id: string, task: NearbyTaskState): void {
+    const local = this.peerThreadId(origin, id);
+    if (!local) { return; }
+    this.peerTasks.set(local, { threadId: local, connected: true, updatedAt: Date.now(), task: task });
+    this.publish('state');
+  }
+  disconnectPeerTasks(origin: string): void {
+    for (const thread of this.observedPeerThreads().filter((item) => item.peerOwner === origin)) {
+      const previous = this.peerTasks.get(thread.id);
+      this.peerTasks.set(thread.id, { threadId: thread.id, connected: false, updatedAt: previous?.updatedAt || 0, task: previous?.task });
+    }
+    this.publish('state');
+  }
+  async controlTask(id: string, control: NearbyTaskControl): Promise<void> {
+    if (control.action === 'resume') { await this.resources.authorizeGeneration?.(); }
+    let resume = false;
+    await this.exclusive(async () => {
+      const thread = this.shareableThread(id);
+      if (!thread || thread.archived || !this.canNavigate) { throw new Error(t('执行端暂时无法接收消息。')); }
+      const task = this.taskState(id);
+      if (task.runId !== control.runId) { throw new Error(t('任务已进入下一轮，请刷新后重试。')); }
+      if (control.action === 'stop') {
+        this.cancelThread(id); this.publish('snapshot'); await this.persist(id);
+      } else if (control.action === 'resume') {
+        if (task.running) { return; }
+        if (!thread.pendingInputs?.length || thread.pendingInputs[0].id !== control.inputId) {
+          throw new Error(t('待发送队列已变化，请刷新后重试。'));
+        }
+        const paused = thread.queuePaused;
+        thread.queuePaused = false;
+        try { await this.persist(id); } catch (error) { thread.queuePaused = paused; throw error as Error; }
+        this.execution(id).state.phase = 'running'; resume = true;
+      } else if (control.action === 'remove-input') {
+        if (!thread.pendingInputs?.some((input) => input.id === control.inputId)) {
+          throw new Error(t('这条指令已经开始执行，不能再撤回。'));
+        }
+        const previous = thread.pendingInputs;
+        thread.pendingInputs = previous.filter((input) => input.id !== control.inputId);
+        try { await this.persist(id); } catch (error) { thread.pendingInputs = previous; throw error as Error; }
+        this.publish('snapshot');
+      } else if (control.action === 'model') {
+        if (task.running || thread.pendingInputs?.length || !control.modelRef) { throw new Error(t('请等待当前任务和待发送队列结束后切换模型。')); }
+        validateReference(control.modelRef);
+        const config = modelConfig(this.providerProfiles, control.modelRef, this.data.config);
+        await this.credentials.read(config.credentialAlias);
+        const previous = thread.modelRef, reasoning = thread.reasoningEffort;
+        thread.modelRef = control.modelRef; thread.reasoningEffort = undefined;
+        try { await this.persist(id); } catch (error) { thread.modelRef = previous; thread.reasoningEffort = reasoning; throw error as Error; }
+        this.publishThread(thread);
+      } else if (control.action === 'approve' || control.action === 'form') {
+        if (!this.approval || !control.approvalId ||
+          (control.action === 'form') !== !!task.approval?.form) { throw new Error('Invalid task approval'); }
+        this.approval.resolveRemote(id, control.approvalId, control.allowed, control.values);
+      } else { throw new Error('Unsupported task control'); }
+    });
+    if (resume) { setTimeout(() => { this.runTasks(undefined, id); }, 0); }
+  }
+  async openAdmittedTask(id: string): Promise<void> {
+    const current = this.active;
+    if (current.messages.length || current.draft || current.attachments?.length || current.references?.length ||
+      current.annotations?.length || current.pendingInputs?.length || current.projectId || this.hasActiveRuns && this.runningThreadIds.some((running) => running !== id)) {
+      this.publish('snapshot'); return;
+    }
+    if (!await this.selectThread(id, true)) { Diagnostics.log('warn', 'sync', 'conversation_executor_open_failed', { threadId: id }); }
+  }
   shareableThreadError(id: string): string {
     const thread = this.shareableThread(id);
     return this.executions.get(id)?.state.error ||
@@ -215,6 +301,7 @@ export class SessionService {
         thread.id = previous?.id || (candidate.threads.some((item) => item.id === update.id) ? update.collisionId : update.id);
         thread.peerOwner = update.origin; thread.peerThreadId = update.id;
         thread.peerDraft = previous?.peerDraft;
+        thread.peerAttachments = previous?.peerAttachments; thread.peerReferences = previous?.peerReferences;
         if (previous && JSON.stringify(previous) === JSON.stringify(thread)) { continue; }
         if (previous) { candidate.threads[index] = thread; }
         else { await this.ensureThreadWorkspace(thread, candidate); candidate.threads.push(thread); }
@@ -228,7 +315,11 @@ export class SessionService {
       await this.commitCandidate(candidate, () => {
         for (const id of changed) {
           const mirrored = candidate.threads.find((item) => item.id === id && !!item.peerOwner);
-          if (mirrored) { mirrored.peerDraft = this.data.threads.find((item) => item.id === id)?.peerDraft; }
+          if (mirrored) {
+            const previous = this.data.threads.find((item) => item.id === id);
+            mirrored.peerDraft = previous?.peerDraft;
+            mirrored.peerAttachments = previous?.peerAttachments; mirrored.peerReferences = previous?.peerReferences;
+          }
         }
         this.data = candidate;
         if (settingsChanged) { this.resources.configureProviders(this.providerProfiles); this.refreshCompatibility(); }
@@ -253,76 +344,20 @@ export class SessionService {
   }
 
   private mergePeerSettings(candidate: AppData, settings: PeerSettingsDelta[]): boolean {
-    if (!settings.length) { return false; }
-    const productivity = candidate.productivity || defaultProductivity();
-    const extensions = candidate.extensions || defaultExtensions();
-    const profiles = (candidate.providerProfiles || []).slice(), skills = extensions.skills.slice(), servers = productivity.servers.slice();
-    const options = JSON.parse(JSON.stringify(productivity.options || defaultAssistantOptions())) as AssistantOptions;
-    const memories = new Map<string, MemoryEntry>();
-    for (const memory of productivity.memories) { memories.set(memory.id, memory); }
-    let userDocument = candidate.config.userDocument || '', autoCompact = candidate.config.autoCompact, changed = false;
-    for (const delta of settings) {
-      const item = delta.current, previous = delta.previous;
-      if ((!userDocument || userDocument === previous?.userDocument) && item.userDocument !== userDocument) {
-        userDocument = item.userDocument; changed = true;
-      }
-      if (item.autoCompact !== undefined && item.autoCompact !== autoCompact && autoCompact === previous?.autoCompact) {
-        autoCompact = item.autoCompact; changed = true;
-      }
-      if (item.autoMemory !== undefined && item.autoMemory !== options.autoMemory && options.autoMemory === previous?.autoMemory) {
-        options.autoMemory = item.autoMemory; changed = true;
-      }
-      if (item.saveSummary !== undefined && item.saveSummary !== options.saveSummary && options.saveSummary === previous?.saveSummary) {
-        options.saveSummary = item.saveSummary; changed = true;
-      }
-      for (const old of previous?.memories || []) {
-        const current = memories.get(old.id);
-        if (current && JSON.stringify(current) === JSON.stringify(old) && !item.memories.some((memory) => memory.id === old.id)) {
-          memories.delete(old.id); changed = true;
-        }
-      }
-      for (const memory of item.memories) {
-        const current = memories.get(memory.id);
-        if (!current || memory.updatedAt > current.updatedAt) { memories.set(memory.id, memory); changed = true; }
-      }
-      for (const profile of item.profiles) {
-        if (!profiles.some((entry) => entry.id === profile.id)) {
-          const imported = JSON.parse(JSON.stringify(profile)) as ProviderProfile;
-          imported.pendingSetup = true;
-          profiles.push(imported); changed = true;
-        }
-      }
-      for (const skill of item.skills) {
-        const index = skills.findIndex((entry) => entry.name === skill.name);
-        if (index < 0) { skills.push(skill); changed = true; }
-        else {
-          const prior = previous?.skills.find((entry) => entry.name === skill.name);
-          if (prior && JSON.stringify(skills[index]) === JSON.stringify(prior) && JSON.stringify(skill) !== JSON.stringify(prior)) {
-            skills[index] = skill; changed = true;
-          }
-        }
-      }
-      for (const old of previous?.skills || []) {
-        const index = skills.findIndex((entry) => entry.name === old.name);
-        if (index >= 0 && JSON.stringify(skills[index]) === JSON.stringify(old) && !item.skills.some((entry) => entry.name === old.name)) {
-          skills.splice(index, 1); changed = true;
-        }
-      }
-      for (const server of item.servers) {
-        if (!servers.some((entry) => entry.id === server.id)) { servers.push(server); changed = true; }
-      }
-    }
-    if (changed) {
-      candidate.config = copyModelConfig(candidate.config, candidate.config.configured);
-      candidate.config.userDocument = userDocument;
-      candidate.config.autoCompact = autoCompact;
-      candidate.productivity = { options: options, memories: Array.from(memories.values()), templates: productivity.templates, servers: servers };
-      candidate.extensions = { browserPolicy: extensions.browserPolicy, webEnabled: extensions.webEnabled, skills: skills,
-        seededBuiltinSkills: extensions.seededBuiltinSkills };
-      candidate.providerProfiles = profiles;
-      validateProductivity(candidate.productivity); validateExtensions(candidate.extensions);
-    }
-    return changed;
+    return mergePeerSettings(candidate, settings);
+  }
+  async resolveSyncConflict(origin: string, expected: string, remote: boolean): Promise<boolean> {
+    return this.mutate(t('处理同步冲突失败：'), async () => {
+      const candidate = this.snapshot();
+      const conflict = candidate.nearbyConflicts?.find((item) => item.origin === origin);
+      if (!conflict || JSON.stringify(conflict) !== expected) { throw new Error(t('同步冲突已变化，请重新查看。')); }
+      if (remote) { mergePeerSettings(candidate, [{ origin: origin, current: conflict.current, previous: conflict.current, force: conflict.keys }]); }
+      candidate.nearbyConflicts = candidate.nearbyConflicts?.filter((item) => item.origin !== origin);
+      if (!candidate.nearbyConflicts?.length) { candidate.nearbyConflicts = undefined; }
+      await this.commitSettings(candidate);
+      this.resources.configureProviders(this.providerProfiles);
+      Diagnostics.log('info', 'sync', 'nearby_conflict_resolved', { count: conflict.keys.length, action: remote ? 'remote' : 'local' });
+    });
   }
   get workspaceId(): string { return workspaceIdFor(this.data, this.active); }
   attributeUsage(records: RequestUsage[]): RequestUsage[] { return attributeLegacyUsage(records, this.data.threads); }
@@ -394,6 +429,7 @@ export class SessionService {
     if (this.application.phase !== 'idle') { state.phase = this.application.phase; }
     state.runningThreadIds = this.runningThreadIds; state.canNavigate = this.canNavigate;
     state.peerThread = this.application.ready && !!this.active.peerOwner;
+    state.peerTasks = Array.from(this.peerTasks.values());
     if (state.peerThread) { state.error = this.peerExecutionErrors.get(this.data.activeThreadId) || state.error; }
     state.peerRunningThreadIds = Array.from(this.peerMessages.keys());
     return state;
@@ -441,6 +477,7 @@ export class SessionService {
     }, 'snapshot', 'thread');
   }
   async importSnapshot(imported: AppData): Promise<boolean> {
+    if (!this.canMutateShared) { await discardBackupImport(imported); return false; }
     return this.mutate(t("导入失败："), async () => {
       let importedCandidate: SessionImportCandidate;
       try {
@@ -537,6 +574,14 @@ export class SessionService {
   }
   async setAttachments(items: Attachment[]): Promise<boolean> {
     const thread = this.active; const status = this.status;
+    if (thread.peerOwner) {
+      return this.mutate(t('保存附件失败：'), async () => {
+        if (thread.archived) { throw new Error(t('请先恢复对话。')); }
+        validateAttachments(items);
+        thread.peerAttachments = await this.prepareAttachments(items, thread);
+        this.dirtyDrafts.add(thread.id); await this.persist(thread.id);
+      }, 'snapshot', 'navigation');
+    }
     if (status.phase === 'running') {
       if (!this.canQueueInput) { return false; }
       try {
@@ -605,21 +650,23 @@ export class SessionService {
     return this.mutate(t('添加会话引用失败：'), async () => {
       if (this.active.archived) { throw new Error(t('请先恢复对话。')); }
       if (id === this.active.id) { throw new Error(t('请选择其他会话。')); }
-      const items = this.active.references || [];
+      const items = (this.active.peerOwner ? this.active.peerReferences : this.active.references) || [];
       if (items.some((item) => item.threadId === id)) { throw new Error(t('已引用该会话。')); }
       const references = items.concat([captureThreadReference(this.requireThread(id))]);
       validateThreadReferences(references);
-      this.active.references = references;
-      this.setDraft(removeReferenceQuery(this.active.draft || ''), this.active.id);
+      if (this.active.peerOwner) { this.active.peerReferences = references; }
+      else { this.active.references = references; }
+      this.setDraft(removeReferenceQuery((this.active.peerOwner ? this.active.peerDraft : this.active.draft) || ''), this.active.id);
       await this.persist();
-    }, 'snapshot', 'thread');
+    }, 'snapshot', this.active.peerOwner ? 'navigation' : 'thread');
   }
   async removeThreadReference(id: string): Promise<boolean> {
     return this.mutate(t('更新会话引用失败：'), async () => {
       if (this.active.archived) { throw new Error(t('请先恢复对话。')); }
-      this.active.references = (this.active.references || []).filter((item) => item.threadId !== id);
+      if (this.active.peerOwner) { this.active.peerReferences = (this.active.peerReferences || []).filter((item) => item.threadId !== id); }
+      else { this.active.references = (this.active.references || []).filter((item) => item.threadId !== id); }
       await this.persist();
-    }, 'snapshot', 'thread');
+    }, 'snapshot', this.active.peerOwner ? 'navigation' : 'thread');
   }
   async restoreMessageDraft(id: string): Promise<boolean> {
     return this.mutate(t('恢复草稿失败：'), async () => {
@@ -780,9 +827,17 @@ export class SessionService {
     this.draftRevision++; this.dirtyDrafts.add(thread.id);
     this.emit({ kind: 'draft', state: this.state, threadId: thread.id, content: text });
   }
-  clearSubmittedDraft(threadId: string, text: string): void {
+  clearSubmittedDraft(threadId: string, text: string, attachments: Attachment[] = [], references: ThreadReference[] = []): void {
     const thread = this.data.threads.find((item) => item.id === threadId);
     if (thread && (thread.peerOwner ? thread.peerDraft : thread.draft) === text) { this.setDraft('', threadId); }
+    if (!thread) { return; }
+    const retainedAttachments = ((thread.peerOwner ? thread.peerAttachments : thread.attachments) || [])
+      .filter((item) => !attachments.some((submitted) => JSON.stringify(submitted) === JSON.stringify(item)));
+    const retainedReferences = ((thread.peerOwner ? thread.peerReferences : thread.references) || [])
+      .filter((item) => !references.some((submitted) => JSON.stringify(submitted) === JSON.stringify(item)));
+    if (thread.peerOwner) { thread.peerAttachments = retainedAttachments; thread.peerReferences = retainedReferences; }
+    else { thread.attachments = retainedAttachments; thread.references = retainedReferences; }
+    this.dirtyDrafts.add(thread.id); this.publish('snapshot');
   }
   setPanelContext(context: string): void {
     if (!this.application.ready || context.length > 32768 || this.active.archived || this.active.peerOwner) { return; }
@@ -1002,15 +1057,19 @@ export class SessionService {
     await this.runTasks(text);
   }
 
+  hasAcceptedPeerInput(threadId: string, requestId: string): boolean {
+    const thread = this.shareableThread(threadId);
+    return !!thread && (thread.peerInputReceipts?.includes(requestId) === true ||
+      thread.messages.some((item) => item.id === requestId || item.steps?.some((step) => step.steering?.id === requestId)) ||
+      (thread.pendingInputs || []).some((item) => item.id === requestId));
+  }
   async acceptPeerInput(threadId: string, requestId: string, inputText: string, create: boolean,
-    mayAccept: () => boolean): Promise<boolean> {
-    const input: PendingInput = { id: requestId, mode: 'followUp', text: inputText.trim() };
+    mayAccept: () => boolean, mode: InputMode = 'followUp', payload: NearbyInput = {}): Promise<boolean> {
+    if (!/^remote-[A-Za-z0-9_-]{1,121}$/.test(requestId)) { throw new Error('Invalid nearby request identity'); }
+    validateNearbyInput(payload);
+    const input: PendingInput = { id: requestId, mode: mode, text: inputText.trim(), attachments: payload.attachments, references: payload.references };
     validatePendingInputs([input]);
-    const admitted = (): boolean => {
-      const thread = this.shareableThread(threadId);
-      return !!thread && (thread.messages.some((item) => item.id === requestId) ||
-        (thread.pendingInputs || []).some((item) => item.id === requestId));
-    };
+    const admitted = (): boolean => this.hasAcceptedPeerInput(threadId, requestId);
     if (await this.exclusive(async () => admitted())) { return false; }
     if (/^\/compact(?:\s|$)/i.test(input.text) || teamCommand(input.text) === '') {
       throw new Error(t('请在执行端使用此会话命令。'));
@@ -1030,8 +1089,17 @@ export class SessionService {
         throw new Error(t('执行端找不到可继续的会话。'));
       }
       const thread = existing || this.freshThread();
+      if (!existing) {
+        if (payload.projectId && !this.hasProject(payload.projectId)) { throw new Error(t('项目尚未同步到执行端，请稍后重试。')); }
+        thread.projectId = payload.projectId;
+        if (payload.modelRef) { thread.modelRef = payload.modelRef; }
+      }
       const execution = this.execution(threadId);
       const running = execution.state.phase === 'running';
+      if (mode === 'steer' && (!running || !execution.state.acceptingSteering || !execution.runtime.acceptsSteering || explicitSkill(input.text))) {
+        throw new Error(t('本轮正在结束或已停止，请将指令加入队列。'));
+      }
+      if (mode === 'steer' && input.references?.length) { throw new Error(t('会话引用请作为下一轮消息发送。')); }
       if ((!running && execution.state.phase !== 'idle') || (thread.queuePaused && thread.pendingInputs?.length)) {
         throw new Error(t('请先在执行端处理当前任务或暂停的指令。'));
       }
@@ -1043,11 +1111,14 @@ export class SessionService {
         throw new Error(t('指定的 Skill 不存在或已停用，请到设置中的 Skills 管理检查。'));
       }
       if (!existing) { thread.id = threadId; await this.ensureThreadWorkspace(thread); }
+      input.attachments = await this.prepareAttachments(input.attachments || [], thread);
       if (!mayAccept()) { throw new Error(t('执行端暂时无法接收消息。')); }
       const pending = thread.pendingInputs || [];
+      const receipts = thread.peerInputReceipts;
       const paused = thread.queuePaused;
       const next = pending.concat([input]); validatePendingInputs(next);
       thread.pendingInputs = next;
+      thread.peerInputReceipts = (receipts || []).concat([requestId]);
       if (!running) { thread.queuePaused = false; }
       if (!existing) { this.data.threads.unshift(thread); }
       this.peerInputSaving = requestId;
@@ -1055,6 +1126,7 @@ export class SessionService {
       try { await this.persist(threadId); }
       catch (error) {
         if (existing) {
+          thread.peerInputReceipts = receipts;
           thread.pendingInputs = (thread.pendingInputs || []).filter((item) => item.id !== requestId);
           if (!running) { thread.queuePaused = paused; }
         } else { this.data.threads = this.data.threads.filter((item) => item !== thread); }
@@ -1211,7 +1283,7 @@ export class SessionService {
     const instructions = renderPrompt(sections.filter((section) => !section.dynamic));
     const user: MessageData = { id: queued?.id.startsWith('remote-') ? queued.id : this.resources.createId(),
       role: 'user', content: text, skillPrompt: expandSkillCommand(text, this.extensions.skills), status: 'complete', error: '',
-      attachments: attachments, annotations: annotations, references: queuedId ? [] : thread.references, panelContext: queuedId ? undefined : thread.panelContext };
+      attachments: attachments, annotations: annotations, references: queuedId ? queued?.references : thread.references, panelContext: queuedId ? undefined : thread.panelContext };
     if (!queuedId) { thread.attachments = []; thread.references = []; thread.annotations = undefined; thread.panelContext = undefined; }
     const answer: MessageData = { id: this.resources.createId(), role: 'assistant', content: '', status: 'generating', error: '', modelRef: thread.modelRef };
     const generateTitle = text.length > 0 && shouldGenerateTitle(thread);
@@ -1529,7 +1601,7 @@ export class SessionService {
 
   private withToolApproval(thread: ThreadData, tools: AgentTools): AgentTools {
     return this.approval && toolApprovalMode(thread.toolApprovalMode) === 'ask' ?
-      new ApprovalTools(tools, this.approval, thread.title,
+      new ApprovalTools(tools, this.approval.scoped(thread.id), thread.title,
         (path) => cloudSharedFolder(projectFor(this.data, thread)?.sharedFolders, path) !== undefined) : tools;
   }
 
@@ -1590,7 +1662,7 @@ export class SessionService {
       check: () => { if (thread) { this.checkResourceMutation(thread, cancellation); } else { cancellation.check(); } },
       prepare: (server, request, signal) => {
         if (!this.resources.prepareMcp) { throw new Error('Native MCP setup is unavailable.'); }
-        return this.resources.prepareMcp(server, request, signal, thread !== undefined);
+        return this.resources.prepareMcp(server, request, signal, thread !== undefined, thread?.id);
       },
       test: (server, signal) => {
         if (!this.resources.testMcp) { throw new Error('MCP connection testing is unavailable.'); }
@@ -1770,7 +1842,7 @@ export class SessionService {
     const reference: ModelReference | undefined = data.config.configured ?
       { providerId: data.config.providerId, modelId: data.config.model } : undefined;
     for (const thread of data.threads) {
-      if (thread.messages.length > 0 || this.executions.get(thread.id)?.state.phase === 'running') { continue; }
+      if (thread.peerOwner || thread.messages.length > 0 || thread.pendingInputs?.length || this.executions.get(thread.id)?.state.phase === 'running') { continue; }
       if (thread.modelRef?.providerId === reference?.providerId && thread.modelRef?.modelId === reference?.modelId &&
         thread.reasoningEffort === data.config.reasoning) { continue; }
       thread.modelRef = reference ? { providerId: reference.providerId, modelId: reference.modelId } : undefined;

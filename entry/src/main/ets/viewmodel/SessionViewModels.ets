@@ -205,13 +205,13 @@ export class ThreadViewModel {
     this.projectId = data.projectId;
     this.memoryReview = data.memoryReview;
     this.reasoningEffort = data.reasoningEffort || 'default';
-    this.references = data.references || [];
+    this.references = (data.peerOwner ? data.peerReferences : data.references) || [];
     this.teamEnabled = data.teamEnabled === true;
     this.parentThreadId = data.parentThreadId; this.parentMessageId = data.parentMessageId; this.disabledMcpIds = data.disabledMcpIds || [];
     this.id = data.id; this.title = data.title; this.updatedAt = data.updatedAt;
     this.pinned = data.pinned === true; this.archived = data.archived === true; this.titleEdited = data.titleEdited === true;
-    this.attachments = data.attachments || [];
-    this.annotations = data.annotations || [];
+    this.attachments = (data.peerOwner ? data.peerAttachments : data.attachments) || [];
+    this.annotations = data.peerOwner ? [] : data.annotations || [];
     this.draft = (data.peerOwner ? data.peerDraft : data.draft) || '';
     this.compaction = data.compaction; this.modelRef = data.modelRef;
     this.pendingInputs = data.pendingInputs || []; this.queuePaused = data.queuePaused === true;

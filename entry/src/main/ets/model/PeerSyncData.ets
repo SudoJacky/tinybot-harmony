@@ -15,7 +15,8 @@ export interface PeerSettings {
   profiles: ProviderProfile[];
   servers: McpServer[];
 }
-export interface PeerSettingsDelta { current: PeerSettings; previous?: PeerSettings; }
+export interface PeerSettingsDelta { current: PeerSettings; previous?: PeerSettings; origin?: string; force?: string[]; }
+export interface PeerSettingsConflict { origin: string; keys: string[]; current: PeerSettings; }
 export interface PeerThreadUpdate {
   origin: string;
   id: string;
@@ -38,10 +39,20 @@ function shareableEndpoint(value: string): boolean {
   return /^https?:\/\/[^/?#@\\\s]+(?:\/[^?#\\\s]*)?$/i.test(value);
 }
 
+export function peerProfile(profile: ProviderProfile): ProviderProfile {
+  return { id: profile.id, name: profile.name, presetId: profile.presetId, protocol: profile.protocol, baseUrl: profile.baseUrl,
+    models: profile.models, contextWindow: profile.contextWindow, credentialAlias: '', enabled: false, noApiKey: true };
+}
+export function peerServer(server: McpServer): McpServer {
+  return { id: server.id, name: server.name, url: server.url, enabled: false, credentialAlias: '' };
+}
+
 export function peerThreadText(thread: ThreadData): string {
   const copy = JSON.parse(JSON.stringify(thread)) as ThreadData;
   copy.peerOwner = undefined; copy.peerThreadId = undefined;
   copy.peerDraft = undefined;
+  copy.peerAttachments = undefined; copy.peerReferences = undefined;
+  copy.peerInputReceipts = undefined;
   // Queue admission and tool approval are specific to the executing device.
   copy.pendingInputs = undefined; copy.queuePaused = undefined; copy.toolApprovalMode = undefined;
   return JSON.stringify(copy);
@@ -59,6 +70,8 @@ export function parsePeerThread(text: string, id: string): ThreadData {
   const checked = parseAppData(JSON.stringify(data), false).threads[0];
   checked.projectId = projectId;
   checked.peerDraft = undefined;
+  checked.peerAttachments = undefined; checked.peerReferences = undefined;
+  checked.peerInputReceipts = undefined;
   checked.pendingInputs = undefined; checked.queuePaused = undefined; checked.toolApprovalMode = undefined;
   return checked;
 }
@@ -84,13 +97,8 @@ export function peerSettingsText(data: AppData): string {
     saveSummary: data.productivity?.options?.saveSummary,
     memories: data.productivity?.memories || [],
     skills: data.extensions?.skills || [],
-    profiles: (data.providerProfiles || []).filter((profile) => shareableEndpoint(profile.baseUrl)).map((profile): ProviderProfile => ({
-      id: profile.id, name: profile.name, presetId: profile.presetId, protocol: profile.protocol, baseUrl: profile.baseUrl,
-      models: profile.models, contextWindow: profile.contextWindow, credentialAlias: '', enabled: false, noApiKey: true
-    })),
-    servers: (data.productivity?.servers || []).filter((server) => shareableEndpoint(server.url)).map((server): McpServer => ({
-      id: server.id, name: server.name, url: server.url, enabled: false, credentialAlias: ''
-    }))
+    profiles: (data.providerProfiles || []).filter((profile) => shareableEndpoint(profile.baseUrl)).map(peerProfile),
+    servers: (data.productivity?.servers || []).filter((server) => shareableEndpoint(server.url)).map(peerServer)
   };
   return JSON.stringify(settings);
 }

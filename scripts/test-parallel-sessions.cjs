@@ -18,7 +18,7 @@ function load(name) {
   const exports = {}; cache.set(file, exports);
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021, experimentalDecorators: true,
-  } }).outputText, { exports, console, setTimeout, clearTimeout, Observed: x => x,
+  } }).outputText, { exports, console, setTimeout, clearTimeout, setInterval, clearInterval, Observed: x => x,
     AppStorage: { get: key => key === 'tinybot.foreground', setOrCreate() {} },
     require: id => id.startsWith('@kit.') ? kits[id] || {} : load(path.resolve(path.dirname(file), id)) }, { filename: file });
   return exports;
@@ -108,7 +108,6 @@ async function main() {
     tablet.session.subscribe(event => { if (event.data?.activeThreadId !== 'a' && event.data) events.push('opened'); });
     phone.session.subscribe(event => { if (event.kind === 'thread-opened') phoneOpened.push(event.threadId); });
     tablet.session.subscribe(event => { if (event.kind === 'thread-opened') tabletOpened.push(event.threadId); });
-    tablet.session.setDraft('Keep the tablet draft');
     try {
       await phoneSync.submit('tablet', '', '', 'a', 'Run this on the tablet');
       const id = commands[0].threadId;
@@ -122,7 +121,7 @@ async function main() {
       assert.deepEqual(phoneOpened, [phone.app.active.id]);
       assert.deepEqual(tabletOpened, [id]);
       assert.equal(phone.requests.length, 0, 'Only the tablet executes the model request');
-      assert.equal(thread(tablet, 'a', true).draft, 'Keep the tablet draft');
+      assert.equal(thread(tablet, 'a', true).draft, '');
       tablet.requests[0].text('First output');
       await until(() => phone.app.active.messages.at(-1)?.content === 'First output');
       assert.equal(tablet.app.active.messages.at(-1).content, 'First output');
@@ -131,6 +130,7 @@ async function main() {
       assert.equal(tablet.app.active.messages.at(-1).content, 'First output and more');
       // A user may navigate away; duplicate delivery and followups must not reopen it.
       await tablet.app.selectThread('a');
+      tablet.session.setDraft('Keep the tablet draft');
       await phoneSync.call(phonePeer, { ...commands[0] });
       assert.equal(tablet.app.active.id, 'a');
       assert.equal(tablet.requests.length, 1);
@@ -451,5 +451,8 @@ async function main() {
     console.log('PASS two nearby runs exchange live text and tool state, keep local execution ownership, and converge on durable results');
   }
 }
-const watchdog = setTimeout(() => { throw Error('Parallel session tests did not finish'); }, 30000);
-main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => clearTimeout(watchdog));
+module.exports = { fixture, from, until, thread, start };
+if (require.main === module) {
+  const watchdog = setTimeout(() => { throw Error('Parallel session tests did not finish'); }, 30000);
+  main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => clearTimeout(watchdog));
+}

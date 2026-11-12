@@ -29,6 +29,10 @@ import { captureBackupConnections, prepareBackupConnections, RestoredPanelFile }
 import { attachBackupImport, BackupImportActions, rollbackBackupActions, rollbackBackupFailure } from '../model/BackupImport';
 import { SessionImportCandidate } from './SessionCandidates';
 import { BackupConnections, backupSearchConfig } from '../model/BackupConnections';
+import { BackupRestoreReport, attachBackupRestoreReport } from '../model/BackupRestoreReport';
+import { peerThreadText } from '../model/PeerSyncData';
+import { contentVersion } from './TextDigest';
+export type BackupConflictMode = 'skip' | 'copy';
 interface BackupFile { threadId?: string; workspaceId?: string; path: string; bytes: string; }
 interface BackupAttachment { id: string; bytes: string; }
 interface BackupEnvelope { protectedKeys?: EncryptedBackupKeys; deviceState?: BackupDeviceState; orphanWorkspaceIds?: string[]; format: string; data: AppData; attachments: BackupAttachment[]; files: BackupFile[]; miniAppWorkspaceIds?: string[]; lifePanelWorkspaceIds?: string[]; lifeBoardWorkspaceIds?: string[]; lifePanelSourceWorkspaceIds?: string[]; }
@@ -81,7 +85,7 @@ async function writePayload(value: string, path: string, archive?: OpenBackupArc
   else { await writeBytes(path, new util.Base64Helper().decodeSync(value).buffer as ArrayBuffer); }
 }
 function threadAttachments(thread: ThreadData): Attachment[] {
-  const result = (thread.attachments || []).concat(...thread.messages.map((message) => message.attachments || []));
+  const result = (thread.attachments || []).concat(thread.peerAttachments || [], ...thread.messages.map((message) => message.attachments || []));
   result.push(...(thread.pendingInputs || []).flatMap((input) => input.attachments || []));
   for (const message of thread.messages) {
     for (const step of message.steps || []) {
@@ -230,7 +234,8 @@ export async function readBackup(context: common.UIAbilityContext, local: AppDat
   if (!uris.length) { return undefined; }
   return readBackupFile(context, uris[0], local, openID);
 }
-export async function readBackupFile(context: common.UIAbilityContext, path: string, local: AppData, authorizedOpenID?: string): Promise<AppData> {
+export async function readBackupFile(context: common.UIAbilityContext, path: string, local: AppData, authorizedOpenID?: string,
+  conflicts: BackupConflictMode = 'skip'): Promise<AppData> {
   const openID = authorizedOpenID ?? await huaweiAccount.backupOpenID(context);
   const started = Date.now();
   let archive: OpenBackupArchive | undefined;
@@ -259,7 +264,9 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
     if (!archive) { await unlock(envelope); }
     if (envelope.deviceState !== undefined) { validateBackupDeviceState(envelope.deviceState); }
     const importedPanels: RestoredPanelFile[] = [], importedWorkspaces = new Map<string, string>();
-    const result = await restoreEnvelope(context, local, envelope, archive, importedPanels, importedWorkspaces, preparedFiles);
+    const report: BackupRestoreReport = { added: 0, skipped: 0, copied: 0, remote: 0 };
+    const result = await restoreEnvelope(context, local, envelope, archive, importedPanels, importedWorkspaces, preparedFiles, conflicts, report);
+    attachBackupRestoreReport(result, report);
     for (const file of preparedFiles) { file.version = await file.files.removalVersion(file.path); }
     if (keys) { attachBackupKeys(result, keys); }
     attachBackupImport(result, new NativeBackupImport(context, local, keys?.connections, importedPanels, importedWorkspaces, envelope.deviceState, preparedFiles));
@@ -272,9 +279,9 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
   } finally { if (archive) { await cleanupBackupArchive(archive.directory); } }
 }
 async function restoreEnvelope(context: common.UIAbilityContext, local: AppData, envelope: BackupEnvelope,
-  archive?: OpenBackupArchive, importedPanels: RestoredPanelFile[] = [], importedWorkspaces: Map<string, string> = new Map<string, string>(), preparedFiles: PreparedFile[] = []): Promise<AppData> {
+  archive?: OpenBackupArchive, importedPanels: RestoredPanelFile[] = [], importedWorkspaces: Map<string, string> = new Map<string, string>(),
+  preparedFiles: PreparedFile[] = [], conflicts: BackupConflictMode = 'skip', report?: BackupRestoreReport): Promise<AppData> {
   const restored = JSON.parse(JSON.stringify(envelope.data)) as AppData;
-  for (const thread of restored.threads || []) { thread.peerOwner = undefined; thread.peerThreadId = undefined; }
   const data = parseAppData(JSON.stringify(restored));
   // Keep record identities across devices and repeated restores. Local records win.
   const legacy = envelope.format === 'tinybot-harmony.backup.v1';
@@ -340,7 +347,54 @@ async function restoreEnvelope(context: common.UIAbilityContext, local: AppData,
     if (references.length !== archive.files.length || new Set(references).size !== references.length) { throw new Error(t('备份文件无效。')); }
   }
   const totalThreads = data.threads.length;
+  const copiedThreads = new Map<string, string>(), copiedProjects = new Map<string, string>();
+  if (conflicts === 'copy') {
+    for (const thread of data.threads) {
+      const current = local.threads.find((item) => item.id === thread.id);
+      if (!current || peerThreadText(current) === peerThreadText(thread)) { continue; }
+      const previous = thread.id;
+      const digest = (await contentVersion(peerThreadText(thread))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+      thread.id = 'restore-' + digest;
+      copiedThreads.set(previous, thread.id);
+      thread.title = t('{0}（备份副本）', [thread.title]);
+      thread.peerOwner = undefined; thread.peerThreadId = undefined;
+      if (thread.projectId && !copiedProjects.has(thread.projectId)) {
+        const project = data.projects?.find((item) => item.id === thread.projectId);
+        if (project) {
+          const projectDigest = (await contentVersion(JSON.stringify(project))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+          copiedProjects.set(project.id, 'restore-' + projectDigest);
+        }
+      }
+    }
+    for (const project of data.projects || []) {
+      const copied = copiedProjects.get(project.id);
+      if (copied) { project.id = copied; project.name = t('{0}（备份副本）', [project.name]); }
+    }
+    for (const thread of data.threads) {
+      if (thread.projectId) { thread.projectId = copiedProjects.get(thread.projectId) || thread.projectId; }
+      if (thread.parentThreadId) { thread.parentThreadId = copiedThreads.get(thread.parentThreadId) || thread.parentThreadId; }
+      const references = (thread.references || []).concat(thread.peerReferences || [],
+        ...(thread.messages || []).map((message) => message.references || []),
+        ...(thread.pendingInputs || []).map((input) => input.references || []));
+      for (const reference of references) { reference.threadId = copiedThreads.get(reference.threadId) || reference.threadId; }
+    }
+    for (const memory of data.productivity?.memories || []) {
+      const scope = memory.threadId ? copiedThreads.get(memory.threadId) : undefined;
+      const source = memory.sourceThreadId ? copiedThreads.get(memory.sourceThreadId) : undefined;
+      if (scope || source) {
+        memory.id = 'restore-' + (await contentVersion(JSON.stringify(memory))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+        memory.threadId = scope || memory.threadId; memory.sourceThreadId = source || memory.sourceThreadId;
+      }
+    }
+    data.activeThreadId = copiedThreads.get(data.activeThreadId) || data.activeThreadId;
+    data.threads = parseAppData(JSON.stringify(data)).threads;
+  }
   data.threads = data.threads.filter((thread) => !known.has(thread.id));
+  if (report) {
+    report.copied = data.threads.filter((thread) => Array.from(copiedThreads.values()).includes(thread.id)).length;
+    report.added = data.threads.length - report.copied; report.skipped = totalThreads - data.threads.length;
+    report.remote = data.threads.filter((thread) => !!thread.peerOwner).length;
+  }
   const additions = new Set(data.threads.map((thread) => thread.id));
   if (!additions.has(data.activeThreadId)) { data.activeThreadId = ''; }
   if (Diagnostics.acceptsLog('info')) { Diagnostics.log('info', 'backup', 'restore_prepared', { newChats: data.threads.length, skippedChats: totalThreads - data.threads.length }); };
@@ -349,6 +403,7 @@ async function restoreEnvelope(context: common.UIAbilityContext, local: AppData,
   const destinations = new Map<string, string>();
   for (const id of Array.from(workspaceIds)) { destinations.set(id, id); }
   for (const thread of data.threads) { if (!thread.projectId) { destinations.set(thread.id, thread.id); } }
+  copiedThreads.forEach((target: string, source: string) => { if (workspaceIds.has(source)) { destinations.set(source, target); } });
   data.projects = (data.projects || []).map((project): ProjectData => {
     const existing = (local.projects || []).find((item) => item.id === project.id);
     if (existing) { return JSON.parse(JSON.stringify(existing)) as ProjectData; }
@@ -360,7 +415,7 @@ async function restoreEnvelope(context: common.UIAbilityContext, local: AppData,
   const boardWorkspaceMap = new Map<string, string>();
   for (const id of Array.from(workspaceIds)) { boardWorkspaceMap.set(id, destinations.get(id) || id); }
   for (const project of envelope.data.projects || []) {
-    const restored = (data.projects || []).find((item) => item.id === project.id); if (restored) { boardWorkspaceMap.set(project.workspaceId, restored.workspaceId); destinations.set(project.workspaceId, restored.workspaceId); }
+    const restored = (data.projects || []).find((item) => item.id === (copiedProjects.get(project.id) || project.id)); if (restored) { boardWorkspaceMap.set(project.workspaceId, restored.workspaceId); destinations.set(project.workspaceId, restored.workspaceId); }
   }
   boardWorkspaceMap.forEach((target: string, source: string) => { importedWorkspaces.set(source, target); });
   const merged: AppData = { version: 2, config: local.config, activeThreadId: local.activeThreadId,

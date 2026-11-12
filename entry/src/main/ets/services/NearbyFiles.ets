@@ -35,6 +35,7 @@ export class NearbyFiles {
   private pending: Map<string, NearbyRecord> = new Map();
   private versions: Map<string, LocalVersion> = new Map();
   private connections: Set<string> = new Set();
+  private connecting: Map<string, Promise<void>> = new Map();
   private nextScan: number = 0;
   private nextReceive: number = 0;
   private filesystemRevision: number = -1;
@@ -62,6 +63,19 @@ export class NearbyFiles {
     this.pending.set(record.origin + ':' + record.id, record);
     this.nextReceive = 0;
   }
+  async connect(id: string): Promise<void> {
+    if (this.closed) { throw new Error('Nearby file synchronization is closed'); }
+    if (this.connections.has(id)) { return; }
+    let opening = this.connecting.get(id);
+    if (!opening) {
+      opening = fs.connectDfs(id, this.watchers).then(async () => {
+        if (this.closed) { await fs.disconnectDfs(id); throw new Error('Nearby file synchronization is closed'); }
+        this.connections.add(id);
+      }).finally(() => { this.connecting.delete(id); });
+      this.connecting.set(id, opening);
+    }
+    await opening;
+  }
   tick(devices: string[]): void {
     if (this.closed || this.working) { return; }
     const now = Date.now(), revision = NativeWorkspaceFiles.contentRevision;
@@ -75,7 +89,7 @@ export class NearbyFiles {
       this.nextReceive = Date.now() + 2500;
       for (const id of devices) {
         if (!this.connections.has(id)) {
-          try { await fs.connectDfs(id, this.watchers); this.connections.add(id); }
+          try { await this.connect(id); }
           catch (error) { this.report(error as Error); }
         }
       }

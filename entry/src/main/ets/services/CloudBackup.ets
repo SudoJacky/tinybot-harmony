@@ -5,24 +5,27 @@ import { cloudSync, fileIo as fs, fileUri } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { AppData } from '../model/Conversation';
 import { t } from '../model/I18n';
-import { backupBusy, createBackupFile, readBackupFile, withBackupOperation } from './Backup';
+import { BackupConflictMode, backupBusy, createBackupFile, readBackupFile, withBackupOperation } from './Backup';
 import { copyFileBytes } from './FileBytes';
 import { Cancellation } from './Cancellation';
 import { huaweiAccount } from './HuaweiAccount';
+import { backupSnapshot, expiredBackupSnapshots } from '../model/BackupSnapshots';
+import { backupDeviceId, newBackupSnapshot } from './BackupSnapshotNames';
 
 export interface CloudBackupItem {
   name: string;
   createdAt: number;
   size: number;
   location: number;
+  deviceId?: string;
 }
 
 const SNAPSHOT_NAME = /^tinybot-(\d{13})-[0-9a-f-]{36}\.(?:json|tinybot)$/;
 export const CLOUD_BACKUP_NAME: string = 'tinybot-latest.tinybot';
 const LATEST_BACKUP = CLOUD_BACKUP_NAME;
 const AUTO_BACKUP = /^tinybot-auto-[0-9a-f-]{36}\.tinybot$/;
-function validBackupName(name: string): boolean { return name === LATEST_BACKUP || SNAPSHOT_NAME.test(name) || AUTO_BACKUP.test(name); }
-export interface CloudBackupOptions { openID?: string; cancellation?: Cancellation; }
+function validBackupName(name: string): boolean { return !!backupSnapshot(name) || name === LATEST_BACKUP || SNAPSHOT_NAME.test(name) || AUTO_BACKUP.test(name); }
+export interface CloudBackupOptions { openID?: string; cancellation?: Cancellation; name?: string; onStaged?: () => void; }
 export function latestCloudBackup(items: CloudBackupItem[]): CloudBackupItem | undefined {
   return items.filter((item) => item.location === 2 || item.location === 3)
     .sort((a, b) => b.createdAt - a.createdAt || (a.name === LATEST_BACKUP ? -1 : b.name === LATEST_BACKUP ? 1 : 0))[0];
@@ -186,26 +189,28 @@ async function download(path: string): Promise<void> {
   }
 }
 
-async function restoreCloudFile(context: common.UIAbilityContext, name: string, local: AppData, openID: string): Promise<AppData> {
+async function restoreCloudFile(context: common.UIAbilityContext, name: string, local: AppData, openID: string, conflicts: BackupConflictMode = 'skip'): Promise<AppData> {
   if (!validBackupName(name)) { throw new Error(t('备份文件无效。')); }
   const path = await backupDirectory(context) + '/' + name;
   const stat = await fs.lstat(path);
   if (!stat.isFile() || stat.isSymbolicLink()) { throw new Error(t('备份文件无效。')); }
   if ((await fs.stat(path)).location === 2) { await download(path); }
-  return readBackupFile(context, path, local, openID);
+  return readBackupFile(context, path, local, openID, conflicts);
 }
 
 // Retire old snapshots only after the replacement has actually reached the cloud.
-async function finishUpload(context: common.UIAbilityContext, cancellation?: Cancellation): Promise<boolean> {
-  const directory = await backupDirectory(context), target = directory + '/' + LATEST_BACKUP;
+async function finishUpload(context: common.UIAbilityContext, name: string, cancellation?: Cancellation): Promise<boolean> {
+  const directory = await backupDirectory(context), target = directory + '/' + name;
   if (!await fs.access(target)) { return false; }
   const info = await fs.stat(target);
   if (info.location !== 2 && info.location !== 3) { return false; }
-  const obsolete = (await CloudBackup.list(context)).filter((item) => item.name !== LATEST_BACKUP);
+  const identity = backupSnapshot(name);
+  if (!identity || identity.deviceId !== backupDeviceId(context)) { return true; }
+  const obsolete = expiredBackupSnapshots((await CloudBackup.list(context))
+    .filter((item) => item.location === 2 || item.location === 3).map((item) => item.name), identity.deviceId);
   if (!obsolete.length) { return true; }
   try {
-    if (obsolete.some((item) => item.createdAt > info.mtime * 1000)) { throw new Error(t('云端存在更新的备份，请先恢复备份，再重新备份。')); }
-    for (const item of obsolete) { cancellation?.check(); await fs.unlink(directory + '/' + item.name); }
+    for (const item of obsolete) { cancellation?.check(); await fs.unlink(directory + '/' + item); }
     if (!await requestSync(cancellation)) { throw new Error(t('旧备份删除尚未同步。')); }
   } catch (error) {
     Diagnostics.log('error', 'backup', 'retire_failed', undefined, error as Error);
@@ -236,7 +241,9 @@ export class CloudBackup {
         if (stat.isFile() && !stat.isSymbolicLink()) {
           // lstat lacks native FileInfo; reading its location can crash libfs.
           const info = await fs.stat(directory + '/' + name);
-          result.push({ name: name, createdAt: match ? Number(match[1]) : info.mtime * 1000, size: stat.size, location: info.location });
+          const snapshot = backupSnapshot(name);
+          result.push({ name: name, createdAt: snapshot?.createdAt || (match ? Number(match[1]) : info.mtime * 1000),
+            deviceId: snapshot?.deviceId, size: stat.size, location: info.location });
         }
       }
       return result.sort((a: CloudBackupItem, b: CloudBackupItem) => b.createdAt - a.createdAt);
@@ -251,7 +258,8 @@ export class CloudBackup {
     return withBackupOperation(async () => {
       if (!options?.openID) { await huaweiAccount.backupOpenID(context); }
       await requestSync(options?.cancellation);
-      return finishUpload(context, options?.cancellation);
+      const name = options?.name || (await CloudBackup.list(context)).find((item) => item.deviceId === backupDeviceId(context))?.name;
+      return name ? finishUpload(context, name, options?.cancellation) : false;
     });
   }
 
@@ -275,7 +283,8 @@ export class CloudBackup {
       cancellation?.check();
       const openID = options?.openID ?? await huaweiAccount.backupOpenID(context);
       cancellation?.check();
-      const name = LATEST_BACKUP;
+      const name = options?.name || newBackupSnapshot(context);
+      if (backupSnapshot(name)?.deviceId !== backupDeviceId(context)) { throw new Error('Invalid backup snapshot owner'); }
       const directory = await backupDirectory(context);
       const source = await createBackupFile(context, data, undefined, openID, cancellation);
       const target = directory + '/' + name;
@@ -284,28 +293,12 @@ export class CloudBackup {
         cancellation?.check();
         if (!await fs.access(directory)) { await fs.mkdir(directory); }
         if (await fs.access(target)) {
-          const stat = await fs.lstat(target);
-          if (!stat.isFile() || stat.isSymbolicLink()) { throw new Error(t('备份文件无效。')); }
+          throw new Error(t('备份版本已存在，请创建新的备份。'));
         }
         await copyFileBytes(source, temporary);
         cancellation?.check();
-        // Cloud directories reject rename over an existing destination. Keep the old
-        // snapshot discoverable even if the process stops before promotion completes.
-        let previous = '';
-        if (await fs.access(target)) {
-          const info = await fs.stat(target);
-          previous = directory + '/tinybot-' + Math.trunc(info.mtime * 1000) + '-' + util.generateRandomUUID() + '.tinybot';
-          await fs.rename(target, previous);
-        }
-        try { await fs.rename(temporary, target); }
-        catch (error) {
-          Diagnostics.log('error', 'backup', 'replace_failed', undefined, error as Error);
-          if (previous) {
-            try { await fs.rename(previous, target); }
-            catch (rollbackError) { Diagnostics.log('error', 'backup', 'rollback_failed', undefined, rollbackError as Error); }
-          }
-          throw error as Error;
-        }
+        await fs.rename(temporary, target);
+        options?.onStaged?.();
       } catch (error) {
         if ((error as BusinessError).code === 13900012) {
           throw new Error(t('无法写入华为云空间（13900012）。请在系统云空间中开启 Tinybot 后重试。'));
@@ -316,14 +309,14 @@ export class CloudBackup {
         if (await fs.access(temporary)) { await fs.unlink(temporary); }
       }
       await requestSync(cancellation);
-      return finishUpload(context, cancellation);
+      return finishUpload(context, name, cancellation);
     });
   }
 
-  static restore(context: common.UIAbilityContext, name: string, local: AppData): Promise<AppData> {
+  static restore(context: common.UIAbilityContext, name: string, local: AppData, conflicts: BackupConflictMode = 'skip'): Promise<AppData> {
     return withBackupOperation(async () => {
       const openID = await huaweiAccount.backupOpenID(context);
-      return restoreCloudFile(context, name, local, openID);
+      return restoreCloudFile(context, name, local, openID, conflicts);
     });
   }
   static restoreLatest(context: common.UIAbilityContext, local: AppData): Promise<AppData> {

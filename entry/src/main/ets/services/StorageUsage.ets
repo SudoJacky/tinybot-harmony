@@ -158,6 +158,7 @@ export class StorageUsage {
     const add = (item: Attachment): void => { if (item && item.path && !item.workspaceId) { result.set(item.path, item.name); } };
     for (const thread of data.threads) {
       for (const item of thread.attachments || []) { add(item); }
+      for (const item of thread.peerAttachments || []) { add(item); }
       for (const input of thread.pendingInputs || []) {
         for (const item of input.attachments || []) { add(item); }
       }

@@ -4,8 +4,10 @@ import { PageStyles } from '../common/PageStyles';
 import { Btn, Font, Radius, Space, Styles } from '../common/Theme';
 import { Banner, GroupCard, NavRow, RowDivider, SectionHeader } from '../common/Widgets';
 import { Diagnostics } from '../model/Diagnostics';
-import { t } from '../model/I18n';
-import { BackupLoginRequired } from '../services/HuaweiAccount';
+import { getLocale, t } from '../model/I18n';
+import { BackupSnapshot } from '../model/BackupSnapshots';
+import { reviewBackupRestore } from './BackupRestoreReview';
+import { BackupLoginRequired, huaweiAccount } from '../services/HuaweiAccount';
 import { WebDavBackup } from '../services/WebDavBackup';
 import { clearWebDavConnection, saveWebDavConnection, webDavSettings, WebDavSettings } from '../services/WebDavConnection';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
@@ -27,6 +29,7 @@ export struct WebDavBackupPanel {
   @State private error: string = '';
   @State private status: string = '';
   @State private transferFeedback: boolean = false;
+  @State private versions: BackupSnapshot[] = [];
 
   async aboutToAppear(): Promise<void> {
     try {
@@ -48,6 +51,7 @@ export struct WebDavBackupPanel {
     this.status = '';
     this.needsLogin = false;
     this.transferFeedback = false;
+    this.versions = [];
   }
 
   private choose(saved?: WebDavSettings): void {
@@ -102,7 +106,7 @@ export struct WebDavBackupPanel {
   }
 
   private locked(): boolean {
-    return this.busy || this.app.busy || !this.saved || this.dirty;
+    return this.busy || this.app.sharedBusy || !this.saved || this.dirty;
   }
 
   private confirmClear(): void {
@@ -115,7 +119,17 @@ export struct WebDavBackupPanel {
     });
   }
 
-  private async transfer(restore: boolean): Promise<void> {
+  private async chooseRestore(): Promise<void> {
+    if (this.locked() || !this.saved) { return; }
+    this.busy = true; this.error = ''; this.transferFeedback = true; this.versions = []; this.needsLogin = false;
+    try {
+      await huaweiAccount.backupOpenID(this.getUIContext().getHostContext() as common.UIAbilityContext);
+      this.versions = await WebDavBackup.list(this.saved.id);
+      if (!this.versions.length) { this.error = t('WebDAV 目录中没有可恢复的备份（HTTP 404）。'); }
+    } catch (error) { this.error = (error as Error).message; this.needsLogin = error instanceof BackupLoginRequired; }
+    finally { this.busy = false; }
+  }
+  private async transfer(restore: boolean, name?: string): Promise<void> {
     const saved = this.saved;
     if (!saved || this.locked()) { return; }
     this.busy = true;
@@ -126,7 +140,8 @@ export struct WebDavBackupPanel {
     try {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       if (restore) {
-        const restored = await WebDavBackup.restore(context, this.app.exportSnapshot(), saved.id);
+        const restored = await WebDavBackup.restore(context, this.app.exportSnapshot(), saved.id, name, 'copy');
+        if (!await reviewBackupRestore(this.getUIContext(), restored)) { this.status = ''; return; }
         if (!await this.app.importSnapshot(restored)) { throw new Error(this.app.error || this.app.saveError); }
         this.status = t('备份已恢复，已保留本机已有数据。');
       } else {
@@ -239,13 +254,18 @@ export struct WebDavBackupPanel {
             t('使用连接「{0}」。', [this.saved.name]) })
         GroupCard() {
           Column() {
-            NavRow({ title: t('备份'), subtitle: t('上传快照并替换 WebDAV 目录中的上一份备份'),
+            NavRow({ title: t('备份'), subtitle: t('每台设备独立保存最近 3 个备份版本'),
               compId: 'create-webdav-backup', icon: $r('sys.symbol.cloud'), disabled: this.locked(), onTap: () => this.transfer(false) })
             RowDivider()
             NavRow({ title: t('恢复备份'), subtitle: t('下载 WebDAV 备份并合并到本机'),
-              compId: 'restore-webdav-backup', icon: $r('sys.symbol.arrow_clockwise'), disabled: this.locked(), onTap: () => this.transfer(true) })
+              compId: 'restore-webdav-backup', icon: $r('sys.symbol.arrow_clockwise'), disabled: this.locked(), onTap: () => this.chooseRestore() })
           }
         }
+        ForEach(this.versions, (item: BackupSnapshot) => {
+          NavRow({ title: item.createdAt ? new Date(item.createdAt).toLocaleString(getLocale()) : t('旧版备份'),
+            subtitle: item.deviceId ? t('设备 {0}', [item.deviceId.slice(0, 8)]) : t('旧版备份'), icon: $r('sys.symbol.clock'),
+            disabled: this.locked(), onTap: () => this.transfer(true, item.name) })
+        }, (item: BackupSnapshot) => item.name)
         if (this.transferFeedback) { this.feedback() }
       }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.md, bottom: Space.xl })
         .attributeModifier(PageStyles.form)

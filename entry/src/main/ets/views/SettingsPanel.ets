@@ -13,6 +13,7 @@ import { usesBalanceCredential } from '../model/BalanceSettings';
 import { supportsProviderBalance } from '../services/ProviderBalance';
 import { balanceProfileDraft } from '../services/ProviderBalanceCache';
 import { ProviderBalanceResult } from './ProviderBalanceResult';
+import { NearbyConflictsPanel } from './NearbyConflictsPanel';
 import { AssistantOptions, defaultAssistantOptions } from '../model/AssistantOptions';
 import { Btn, Font, Space, Styles, protocolName } from '../common/Theme';
 import { monochromeProviderLogo, providerLogo } from '../common/ProviderBrand';
@@ -277,7 +278,8 @@ export struct SettingsPanel {
               disabled: !this.canEdit(), onTap: () => this.onBackup() })
             RowDivider()
             SwitchRow({ title: t('附近设备同步'), compId: 'nearby-sync', icon: $r('sys.symbol.connection'),
-              subtitle: this.nearbyStatus || t('在两台设备上开启。同步会话和进度，密钥通过备份恢复。'),
+              subtitle: this.app.nearbyConflicts.length ? t('有 {0} 台设备的设置冲突需要处理', [this.app.nearbyConflicts.length]) :
+                this.nearbyStatus || t('在两台设备上开启。同步会话和进度，密钥通过备份恢复。'),
               isOn: this.nearbyEnabled, disabled: !this.app.ready || this.nearbyChanging,
               onChange: async (value: boolean) => {
                 this.nearbyChanging = true;
@@ -285,6 +287,7 @@ export struct SettingsPanel {
                 catch (error) { this.getUIContext().getPromptAction().showToast({ message: (error as Error).message }); }
                 finally { this.nearbyChanging = false; }
               } })
+            if (this.app.nearbyConflicts.length) { NearbyConflictsPanel({ app: this.app }) }
           }
         }
         }

@@ -1,6 +1,7 @@
 import { t } from './I18n';
 import { Attachment, validateAttachments } from './Productivity';
 import { FileAnnotation, validateFileAnnotations } from './FileAnnotation';
+import { ThreadReference, validateThreadReferences } from './ThreadReferences';
 export type InputMode = 'steer' | 'followUp';
 export const MAX_PENDING_INPUTS: number = 20;
 export const MAX_INPUT_TEXT: number = 24000;
@@ -11,16 +12,18 @@ export interface PendingInput {
   text: string;
   attachments?: Attachment[];
   annotations?: FileAnnotation[];
+  references?: ThreadReference[];
 }
 
 export function validatePendingInput(input: PendingInput): void {
   if (!input || typeof input.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(input.id) ||
     (input.mode !== 'steer' && input.mode !== 'followUp') || typeof input.text !== 'string' ||
-    (!input.text.trim() && !input.annotations?.length) || input.text.length > MAX_INPUT_TEXT) {
+    (!input.text.trim() && !input.annotations?.length && !input.attachments?.length && !input.references?.length) || input.text.length > MAX_INPUT_TEXT) {
     throw new Error(t("待发送指令无效，正文需要 1 至 24000 字符。"));
   }
   if (input.attachments !== undefined) { validateAttachments(input.attachments); }
   if (input.annotations !== undefined) { validateFileAnnotations(input.annotations); }
+  if (input.references !== undefined) { validateThreadReferences(input.references); }
 }
 
 export function validatePendingInputs(inputs: PendingInput[]): void {

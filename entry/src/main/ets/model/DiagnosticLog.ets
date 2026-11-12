@@ -81,7 +81,7 @@ EVENTS.mcp = ['request_failed', 'cancel_notice_failed', 'browser_launch_failed']
 EVENTS.mail = ['transport_failed', 'cleanup_failed', 'account_saved', 'account_removed', 'query_started', 'query_complete', 'query_failed', 'command_failed', 'settings_failed'];
 EVENTS.export = ['image_failed', 'preview_failed', 'cleanup_failed', 'share_failed', 'save_failed'];
 EVENTS.network = ['request_start', 'request_end', 'context_overflow', 'first_data', 'request_failed'];
-EVENTS.sync = ['nearby_failed', 'nearby_device_failed', 'workspace_delete_conflict', 'workspace_delete_unversioned', 'conversation_accept_failed', 'conversation_connect_failed', 'conversation_disconnect_failed',
+EVENTS.sync = ['nearby_attachments_received', 'nearby_conflict_resolved', 'nearby_failed', 'nearby_device_failed', 'workspace_delete_conflict', 'workspace_delete_unversioned', 'conversation_accept_failed', 'conversation_connect_failed', 'conversation_disconnect_failed',
   'conversation_destroy_failed', 'conversation_receive_failed', 'conversation_progress_failed', 'conversation_admission_failed',
   'conversation_admitted', 'conversation_acknowledged', 'conversation_executor_open_failed', 'conversation_frame_invalid', 'conversation_live_started',
   'conversation_route_ready', 'conversation_connected', 'conversation_authorized', 'conversation_input_saved',
@@ -126,7 +126,7 @@ STRINGS.protocol = ['chat-completions', 'responses', 'anthropic-messages', 'gemi
 STRINGS.phase = ['idle', 'preparing', 'listening', 'complete', 'finishing', 'error', 'creating', 'playing', 'stopping', 'connecting', 'streaming', 'capture', 'compose', 'encode',
   'login', 'state', 'storage', 'credential', 'identity', 'submit', 'query', 'upload',
   'page_show', 'privacy_event', 'subscription_ready', 'new_want', 'business', 'manual_retry', 'request_consent', 'initial', 'active'];
-STRINGS.action = ['send', 'cancel', 'edit', 'press', 'none', 'open', 'click', 'type', 'select', 'scroll', 'back', 'forward', 'reload', 'capture', 'wait'];
+STRINGS.action = ['local', 'remote', 'send', 'cancel', 'edit', 'press', 'none', 'open', 'click', 'type', 'select', 'scroll', 'back', 'forward', 'reload', 'capture', 'wait'];
 STRINGS.policy = ['unset', 'enabled', 'disabled'];
 STRINGS.scheme = ['http', 'https', 'about', 'data', 'file', 'other'];
 STRINGS.library = ['three', 'echarts', 'charts', 'none'];
