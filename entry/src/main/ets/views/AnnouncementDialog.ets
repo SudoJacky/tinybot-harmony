@@ -1,4 +1,5 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { AnimatedIcon } from '../common/AnimatedIcon';
 import { Btn, Font, Space } from '../common/Theme';
 import { Banner } from '../common/Widgets';
 import { Announcement } from '../model/Announcement';
@@ -26,8 +27,8 @@ export struct AnnouncementDialog {
     Column() {
       Row({ space: Space.sm }) {
         Row({ space: 4 }) {
-          Image($r('app.media.announcement')).width(20).height(20).fillColor(this.appearance.accent)
-            .id('announcement-icon').accessibilityLevel('no')
+          AnimatedIcon({ iconName: 'announcement', iconSize: 20, tint: this.appearance.accent, playOnAppear: true })
+            .id('announcement-icon')
           Text(t('公告')).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor(this.appearance.accent)
             .id('announcement-label').layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }.width(64)

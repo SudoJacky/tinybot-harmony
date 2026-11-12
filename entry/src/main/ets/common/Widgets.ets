@@ -6,6 +6,8 @@ import { LiquidToggle } from './LiquidToggle';
 import { AnimatorResult, ColorMetrics, uiMaterial } from '@kit.ArkUI';
 import { SegmentFrame, SegmentedMotion } from './SegmentedMotion';
 import { WindowViewport } from '../viewmodel/WindowViewport';
+import { AnimatedIcon } from './AnimatedIcon';
+import { AnimatedIconName } from './IconArtwork';
 
 @Component
 export struct IconButton {
@@ -17,14 +19,22 @@ export struct IconButton {
   @Prop label: string = '';
   compId: string = '';
   @Prop diameter: number = 44;
+  @Prop animatedSelected: boolean = false;
+  @State private iconInteracting: boolean = false;
   iconSize: number = 22;
+  animatedIcon?: AnimatedIconName;
   // Native material is supported when the button lives in a navigation title bar.
   material?: uiMaterial.Material;
   onTap: () => void = () => {};
 
   build() {
     Button({ type: ButtonType.Circle, stateEffect: true }) {
-      SymbolGlyph(this.icon).fontSize(this.iconSize).fontColor([this.tint])
+      if (this.animatedIcon) {
+        AnimatedIcon({ iconName: this.animatedIcon, iconSize: this.iconSize, tint: this.tint,
+          interacting: this.iconInteracting && !this.disabled, selected: this.animatedSelected === true })
+      } else {
+        SymbolGlyph(this.icon).fontSize(this.iconSize).fontColor([this.tint])
+      }
     }.fontFamily(this.appearance.fontFamily)
     .id(this.compId).width(this.diameter).height(this.diameter)
     .backgroundColor(this.fill === Color.Transparent ? this.appearance.controlBackground : this.fill)
@@ -34,6 +44,12 @@ export struct IconButton {
     // draft/message updates cannot interpolate through the system's green accent color.
     .animation(this.appearance.materialEnabled ? { duration: Motion.fast, curve: Motion.standard } : null)
     .clickEffect(this.disabled || this.material ? null : Motion.pressSmall)
+    .onHover((hovered: boolean) => { if (this.animatedIcon) { this.iconInteracting = hovered; } })
+    .onTouch((event: TouchEvent) => {
+      if (!this.animatedIcon) { return; }
+      if (event.type === TouchType.Down) { this.iconInteracting = true; }
+      else if (event.type === TouchType.Up || event.type === TouchType.Cancel) { this.iconInteracting = false; }
+    })
     .enabled(!this.disabled).accessibilityText(this.label).onClick(() => this.onTap())
     .borderRadius(this.diameter / 2)
     .attributeModifier(systemMaterialAttribute<ButtonAttribute>(this.material))

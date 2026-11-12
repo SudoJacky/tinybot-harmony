@@ -43,7 +43,8 @@ import { materialMenuContent, materialMenuHeader } from '../common/MaterialMenu'
 import { ShareInbox } from '../services/NativeActions';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { ChatPanel } from '../views/ChatPanel';
-import { SettingsCategoryBar, SettingsNavigation, settingsCategoryTitle } from '../views/SettingsNavigation';
+import { SETTINGS_CATEGORY_SWIPE_DISTANCE, SettingsCategoryBar, SettingsNavigation,
+  settingsCategoryForSwipe, settingsCategoryTitle } from '../views/SettingsNavigation';
 import { SettingsPanel, UserDocumentPanel } from '../views/SettingsPanel';
 import { AppearancePanel, appearanceChoiceTitle } from '../views/AppearancePanel';
 import { LanguagePanel } from '../views/LanguagePanel';
@@ -627,13 +628,13 @@ struct Index {
     const items: DetailTabItem[] = [];
     for (const tab of this.detailTabsAvailable()) {
       if (tab === 'files') {
-        items.push(new DetailTabItem('files', t('工作区文件'), $r('sys.symbol.folder')));
+        items.push(new DetailTabItem('files', t('工作区文件'), 'folder'));
       } else if (tab === 'preview') {
-        items.push(new DetailTabItem('preview', t('预览'), $r('sys.symbol.doc_text')));
+        items.push(new DetailTabItem('preview', t('预览'), 'document'));
       } else if (tab === 'browser') {
         const title = this.browser.title.trim();
         items.push(new DetailTabItem('browser', title.length > 0 && title !== 'about:blank' ? title : t('应用内浏览器'),
-          $r('sys.symbol.connection')));
+          'browser'));
       }
     }
     return items;
@@ -976,6 +977,12 @@ struct Index {
     this.openSettings(true);
   }
 
+  private swipeSettingsSection(event: GestureEvent): void {
+    if (!this.settingsActive || !this.foreground) { return; }
+    const section = settingsCategoryForSwipe(this.settingsSection, event.offsetX, event.offsetY);
+    if (section !== undefined) { this.settingsSection = section; }
+  }
+
   private openSettings(discardConfirmed: boolean = false): void {
     if (this.confirmRootNavigation('settings', discardConfirmed, () => this.openSettings(true))) { return; }
     this.rootSection = 'settings';
@@ -1169,6 +1176,8 @@ struct Index {
       onEditProvider: (id: string, preset: string) => {
         if (this.app.beginProvider(preset, id)) { this.paths.pushPath({ name: 'provider' }); }
       } }).layoutWeight(1)
+      .gesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Horizontal,
+        distance: SETTINGS_CATEGORY_SWIPE_DISTANCE }).onActionEnd((event: GestureEvent) => this.swipeSettingsSection(event)))
   }
 
   @Builder
@@ -1342,13 +1351,13 @@ struct Index {
       Row({ space: 4 }) {
         if (this.workbench().historyWidth === 0) {
           IconButton({ icon: $r('sys.symbol.line_3_horizontal'), label: t('对话列表'), compId: 'open-history',
-            fill: $r('app.color.surface_variant'),
+            animatedIcon: 'history', fill: $r('app.color.surface_variant'),
             disabled: !this.app.ready, onTap: () => this.setDrawer(true) })
         }
         Blank().layoutWeight(1)
         if (this.app.active.messages.length > 0) {
           IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('展开输入'), compId: 'workbench-expand-draft',
-            fill: $r('app.color.surface_variant'), disabled: !this.app.ready || this.app.active.archived,
+            animatedIcon: 'compose', fill: $r('app.color.surface_variant'), disabled: !this.app.ready || this.app.active.archived,
             onTap: () => { this.expandDraftRequest++; } })
           Button({ type: ButtonType.Circle, stateEffect: true }) {
             SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(19).fontColor([$r('app.color.text_secondary')])
@@ -1370,7 +1379,7 @@ struct Index {
   phoneHeader() {
     Row({ space: 4 }) {
       IconButton({ icon: $r('sys.symbol.line_3_horizontal'), label: t("对话列表"), compId: 'open-history',
-        material: this.appearance.control, tint: $r('sys.color.font_primary'),
+        animatedIcon: 'history', material: this.appearance.control, tint: $r('sys.color.font_primary'),
         disabled: !this.app.ready, onTap: () => this.setDrawer(true) })
       if (this.app.active.messages.length > 0) {
         Blank().layoutWeight(1)
@@ -1380,7 +1389,7 @@ struct Index {
           .border({ width: this.appearance.materialEnabled ? 0 : 0.5, color: $r('app.color.divider') })
           .attributeModifier(systemMaterialAttribute<ButtonAttribute>(this.appearance.control)).accessibilityText(t("更多操作"))
           .enabled(this.app.ready).bindMenu(this.moreMenu, { systemMaterial: this.appearance.menu, mask: false })
-        IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t("新建对话"), compId: 'new-chat',
+        IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t("新建对话"), compId: 'new-chat', animatedIcon: 'compose',
           material: this.appearance.control, tint: $r('sys.color.font_primary'),
           disabled: !this.app.canNavigate, onTap: () => { this.createChat(); } })
       }
