@@ -53,8 +53,8 @@ function fixture(data = seed()) {
   f.calls = calls; return f;
 }
 async function main() {
-  assert.equal(all.length, 52); assert.equal(new Set(all).size, 52); assert.equal(BASIC_FILE_TOOLS.length, 6);
-  assert.equal(optional.length, 42);
+  assert.equal(all.length, 53); assert.equal(new Set(all).size, 53); assert.equal(BASIC_FILE_TOOLS.length, 6);
+  assert.equal(optional.length, 43);
   for (const name of ['list_mail_accounts', 'search_mail', 'read_mail']) assert.ok(all.includes(name));
   assert.ok(!all.includes('list_mini_apps')); assert.ok(!all.includes('publish_mini_app'));
   const retiredApps = seed(); retiredApps.productivity.options.miniAppsEnabled = true;
@@ -80,8 +80,11 @@ async function main() {
   assert.deepEqual(Array.from(parseAppData(JSON.stringify(legacyMixed)).threads[0].disabledTools).sort(),
     ['read_attachment', 'read_reference']);
   const covered = Array.from(TOOL_CAPABILITIES.flatMap(capability => capability.tools));
-  assert.equal(TOOL_CAPABILITIES.length, 13);
-  assert.equal(new Set(covered).size, 42); assert.deepEqual(covered.slice().sort(), optional.slice().sort());
+  assert.equal(TOOL_CAPABILITIES.length, 14);
+  assert.equal(new Set(covered).size, 43); assert.deepEqual(covered.slice().sort(), optional.slice().sort());
+  const local = new RuleTools({ definitions: () => [def('run_local_command')], execute: async () => 'unexpected' }, true);
+  assert.equal(local.definitions().length, 0);
+  await assert.rejects(local.execute(call('run_local_command'), new Cancellation()), error => error.code === 'PERMISSION_DENIED');
   const obsolete = {agentMode:'custom', disabledTools:Array.from(MANAGED_TOOL_NAMES).concat(['generate_image', 'read_tool_result'])};
   validateToolSelection(obsolete);
   assert.deepEqual(Array.from(normalizeDisabledTools(obsolete.disabledTools)), []);
@@ -144,7 +147,7 @@ async function main() {
   }
   assert.equal(legacy.repository.writes.length, legacyWrites, 'Capability toggles keep the existing save-on-send behavior');
   for (const name of MANAGED_TOOL_NAMES) await assert.rejects(legacy.session.setToolEnabled(name,false));
-  console.log('PASS 13 selectable capabilities including mail, legacy memory/Skills overrides removed, individual Skill state retained and atomic group catalog/dispatch');
+  console.log('PASS selectable capabilities, local command blocked in read-only mode, legacy overrides and atomic group catalog/dispatch');
   for (const selection of [{ agentMode: 'research' }, { disabledTools: ['write_file'] }, { disabledTools: ['unknown'] },
     { disabledTools: ['read_web', 'read_web'] }, { disabledTools: 'read_web' }, { disabledTools: [null] }]) {
     assert.throws(() => validateToolSelection(selection));

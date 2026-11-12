@@ -6,11 +6,13 @@
     "mainElement": "EntryAbility",
     "deviceTypes": [
       "phone",
-      "tablet"
+      "tablet",
+      "2in1"
     ],
     "deliveryWithInstall": true,
     "installationFree": false,
     "compressNativeLibs": true,
+    "extractNativeLibs": true,
     "pages": "$profile:main_pages",
     "metadata": [
       { "name": "appgallery_privacy_hosted", "value": "1" },

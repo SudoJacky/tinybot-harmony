@@ -24,6 +24,7 @@ import { McpClient } from './McpClient';
 import { SkillInstaller } from './SkillInstaller';
 import { CodeExecutionTools } from './CodeExecutionTools';
 import { NativeCodeExecutor } from './NativeCodeExecutor';
+import { LocalProcessTools, localProcessDirectory } from './LocalProcessTools';
 import { WorkspaceCode } from './WorkspaceCode';
 import { NativeOrchestrationExecutor } from './NativeOrchestrationExecutor';
 import { WebUiPreflight } from './WebUiPreflight';
@@ -150,6 +151,8 @@ export class NativeSessionResources implements SessionResources {
       return this.officeLibrary;
     }) : undefined;
     groups.push(new CodeExecutionTools(new NativeCodeExecutor(), workspaceCode));
+    const localDirectory = localProcessDirectory(context);
+    if (localDirectory) { groups.push(new LocalProcessTools(localDirectory)); }
     groups.push(new LifePanelTools(this.lifePanels, workspaceId || id, id, files, this.lifeBoards,
       (page, storage, context, cancellation, options) => WebUiPreflight.validatePanel(page, storage, context, cancellation, options)));
     groups.push(new MailTools());

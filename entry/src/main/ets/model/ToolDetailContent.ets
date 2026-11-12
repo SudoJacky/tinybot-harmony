@@ -73,9 +73,12 @@ export function toolDetailContent(name: string, argumentsText: string, output: s
   if (status === 'cancelled' || status === 'interrupted') {
     content.notices.push(status === 'cancelled' ? t('已取消') : t('已中断'));
   }
-  if (name === 'execute_code' || name === 'orchestrate') {
+  if (name === 'execute_code' || name === 'orchestrate' || name === 'run_local_command') {
     content.path = '';
     if (numeric(result.durationMs) > 0) { content.summary = numeric(result.durationMs) + ' ms'; }
+    if (name === 'run_local_command' && typeof result.exitCode === 'number') {
+      content.summary += (content.summary ? ' · ' : '') + t('退出码 {0}', [numeric(result.exitCode)]);
+    }
     if (result.error !== undefined && result.error !== null && result.error !== '') {
       content.sections.push(section(t('错误'), show(result.error), 'error'));
     }
@@ -88,9 +91,10 @@ export function toolDetailContent(name: string, argumentsText: string, output: s
     }
     if (str(result.stdout)) { content.logs.push(section('stdout', str(result.stdout), 'code')); }
     if (str(result.stderr)) { content.logs.push(section('stderr', str(result.stderr), 'code')); }
-    if (result.logsTruncated === true) { content.notices.push(t('执行日志已被工具截断')); }
+    if (result.logsTruncated === true || result.outputTruncated === true) { content.notices.push(t('执行日志已被工具截断')); }
     if (result.resultTruncated === true) { content.notices.push(t('返回值已被工具截断')); }
     if (str(args.code)) { content.inputs = [section(t('代码'), str(args.code), 'code')]; }
+    if (str(args.runtime)) { content.inputs.unshift(section(t('运行时'), str(args.runtime))); }
     if (args.input !== undefined) { content.inputs.push(section(t('输入'), prettyToolText(show(args.input)), 'code')); }
     if (!content.sections.length && content.logs.length) { content.sections.push(section(t('结果'), t('执行输出见日志'))); }
   } else if (status === 'complete' && name === 'generate_image') {
