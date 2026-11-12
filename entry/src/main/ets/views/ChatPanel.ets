@@ -391,7 +391,7 @@ export struct ChatPanel {
     this.getUIContext().postFrameCallback(new ChatLayoutFrame(() => {
       if (request !== this.keyboardFocusRequest || this.thread.id !== threadId || this.app.active.id !== threadId ||
         !this.speechEnabled || !this.foreground || this.showPlus || this.showPlusMenu || this.showDrawing || this.previewing ||
-        this.showContext || this.showQueue || this.showSummary || this.showMemoryDraft || this.showModelMenu ||
+        this.showContext || this.showQueue || this.showSummary || this.showMemoryDraft || this.showModelMenu || this.showToolApprovalMode ||
         this.thread.archived || this.voiceMode || this.speechActive()) { return; }
       if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'voice', 'focus_requested', { request: request }); };
       this.getUIContext().getFocusController().requestFocus('composer');
@@ -1124,9 +1124,10 @@ export struct ChatPanel {
 
   @Builder
   plusMenu() {
-    Column() {
+    Scroll() {
       this.plusRootPane()
-    }.width(320).constraintSize({ maxHeight: 480 }).padding(4).borderRadius(20).clip(true)
+    }.width(320).constraintSize({ maxHeight: this.popupHeightLimit(this.composerWindowTop, 480) })
+      .scrollBar(BarState.Auto).align(Alignment.Top).padding(4).borderRadius(20).clip(true)
   }
 
   @Builder
@@ -1239,7 +1240,7 @@ export struct ChatPanel {
     this.getUIContext().postFrameCallback(new ChatLayoutFrame(() => {
       if (request !== this.keyboardFocusRequest || this.thread.id !== threadId || this.app.active.id !== threadId ||
         !this.speechEnabled || !this.foreground || this.showPlus || this.showPlusMenu || this.showDrawing || this.previewing ||
-        this.showContext || this.showQueue || this.showSummary || this.showMemoryDraft || this.showModelMenu ||
+        this.showContext || this.showQueue || this.showSummary || this.showMemoryDraft || this.showModelMenu || this.showToolApprovalMode ||
         this.app.draft !== next.text || this.thread.archived || this.voiceMode || this.speechActive()) { return; }
       this.getUIContext().getFocusController().requestFocus('composer');
       this.composerController.caretPosition(next.caret);
@@ -1400,8 +1401,12 @@ export struct ChatPanel {
     const choices = this.app.modelChoices;
     const providerCount = new Set(choices.map((choice) => choice.providerId)).size;
     const height = choices.length === 0 ? 240 : 60 + providerCount * 26 + choices.length * 46;
-    const available = this.modelButtonTop > 0 ? Math.max(120, this.modelButtonTop - 16) : 380;
-    return Math.min(380, available, height + (this.app.error.length > 0 ? 56 : 0));
+    return Math.min(this.popupHeightLimit(this.modelButtonTop, 380), height + (this.app.error.length > 0 ? 56 : 0));
+  }
+
+  private popupHeightLimit(anchorTop: number, maxHeight: number): number {
+    // Global positions can include the area above the drawable content, such as a window title bar.
+    return anchorTop > this.panelTop ? Math.min(maxHeight, Math.max(120, anchorTop - this.panelTop - 16)) : maxHeight;
   }
 
   private highestEffort(): boolean {

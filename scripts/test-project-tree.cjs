@@ -25,7 +25,7 @@ const emitted = path.join(root, 'entry/build/default/cache/default/default@Compi
 assert.ok(fs.statSync(emitted).mtimeMs >= fs.statSync(source).mtimeMs, 'Build before testing');
 const tree = ts.createSourceFile(emitted, fs.readFileSync(emitted, 'utf8'), ts.ScriptTarget.Latest, true);
 const cls = name => tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === name);
-const methods = ['filtered', 'sections', 'sectionThreads', 'sectionTitle', 'groupOpen', 'visibleCount', 'loadMore', 'toggleGroup', 'onActivePath', 'lastBranch'];
+const methods = ['filtered', 'threadProject', 'sections', 'sectionThreads', 'sectionTitle', 'groupOpen', 'visibleCount', 'loadMore', 'toggleGroup', 'onActivePath', 'lastBranch'];
 const globals = { exports: {}, t: key => key, Motion: { medium: 220, standard: 'ease' }, Diagnostics: { log() {} } };
 vm.runInNewContext(ts.transpileModule(`${cls('ThreadSection').getText(tree)}
 class Sidebar { ${cls('ThreadList').members.filter(n => methods.includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')} }
@@ -55,7 +55,7 @@ vm.runInNewContext(ts.transpileModule(`class Header { ${createChat} ${revealChat
   ];
   data.activeThreadId = 'a1';
   const f = new Fixture(data), app = new ChatViewModel(); await app.initialize(f.session);
-  const sidebar = Object.assign(new globals.exports.Sidebar(), { app, query: '', archived: false, visibleCounts: {}, collapsedProjects: [],
+  const sidebar = Object.assign(new globals.exports.Sidebar(), { app, query: '', archived: false, projectFilter: null, visibleCounts: {}, collapsedProjects: [],
     getUIContext: () => ({ animateTo: (_, apply) => apply() }) });
   const groups = () => Array.from(sidebar.sections(sidebar.filtered()));
   const ids = group => Array.from(group.threads, item => item.id);
