@@ -1,7 +1,8 @@
 import { ConversationShareData, sharingMessages } from '../model/ConversationShare';
 import { ConversationSharePanel } from '../views/ConversationSharePanel';
 import { AppearanceStyle } from '../common/AppearanceStyle';
-import { NavigationShortcut, chatShortcuts } from '../common/KeyboardShortcuts';
+import { NavigationShortcut } from '../common/KeyboardShortcuts';
+import { KeyboardShortcutsDialog } from '../views/KeyboardShortcutsDialog';
 import { systemMaterialAttribute } from '../common/MaterialAttributes';
 import { WebUiPreflightHost } from '../views/WebUiPreflightHost';
 import { PreviewCaptureHost } from '../views/PreviewCaptureHost';
@@ -140,6 +141,7 @@ struct Index {
   @State @Watch('offerAnnouncement') private browserExpanded: boolean = false;
   @State @Watch('offerAnnouncement') private showToolScope: boolean = false;
   @State private keyboardShortcutsOpen: boolean = false;
+  private keyboardShortcutsDialog?: CustomDialogController;
   @State private historyProjectSheetOpen: boolean = false;
   private announcementDialog?: CustomDialogController;
   private receiving: boolean = false;
@@ -355,6 +357,7 @@ struct Index {
       this.panelUpdates?.setActive(false);
       autoCloudBackup.dispose();
       this.closeAnnouncement();
+      this.keyboardShortcutsDialog?.close();
       this.closeReviewInvitation(); this.startupBackupDialog?.close();
       this.app.stop(); this.browser.close(); this.browserExpanded = false; this.showToolScope = false;
       this.voiceRequest = ''; this.paths.clear(); this.rootSection = ''; this.setDrawer(false);
@@ -772,13 +775,23 @@ struct Index {
 
   private showKeyboardShortcuts(): void {
     if (this.keyboardShortcutsOpen) { return; }
+    const width = Math.min(600, WorkbenchLayout.dialogWidth(this.windowWidth));
     this.keyboardShortcutsOpen = true;
-    const shortcuts = chatShortcuts().map(item => item.chord + '   ' + item.label);
-    shortcuts.push('Ctrl+Enter   ' + t('在消息输入框中换行'), 'Alt+Enter   ' + t('发送'));
-    this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface,
-      title: t('键盘快捷键'), message: shortcuts.join('\n'),
-      confirm: { value: t('知道了'), action: () => { this.keyboardShortcutsOpen = false; } },
-      onWillDismiss: (action: DismissDialogAction) => { action.dismiss(); this.keyboardShortcutsOpen = false; } });
+    try {
+      this.keyboardShortcutsDialog = new CustomDialogController({
+        builder: KeyboardShortcutsDialog(),
+        autoCancel: true, alignment: DialogAlignment.Center, width: width > 0 ? width : undefined,
+        cornerRadius: Radius.xl, backgroundColor: $r('app.color.page_background'),
+        systemMaterial: this.appearance.noMaterial,
+        onDidDisappear: () => { this.keyboardShortcutsDialog = undefined; this.keyboardShortcutsOpen = false; }
+      });
+      this.keyboardShortcutsDialog.open();
+    } catch (error) {
+      this.keyboardShortcutsDialog = undefined; this.keyboardShortcutsOpen = false;
+      Diagnostics.log('error', 'navigation', 'keyboard_shortcuts_open_failed', undefined, error as Error);
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface,
+        message: t('界面操作失败：') + (error as Error).message });
+    }
   }
 
   private beginResize(detail: boolean): void {
@@ -882,6 +895,7 @@ struct Index {
     autoCloudBackup.dispose();
     this.reviewDisposed = true; this.closeReviewInvitation(); this.startupBackupDialog?.close();
     this.closeAnnouncement();
+    this.keyboardShortcutsDialog?.close();
     this.unsubscribeLaunch?.(); this.unsubscribeLaunch = undefined;
     this.app.stop();
     this.app.flushDraft();

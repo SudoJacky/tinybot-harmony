@@ -852,18 +852,25 @@ export struct ChatPanel {
       this.panelHeight >= 540 && !this.keyboardVisibleInLayout() && !this.app.generating;
   }
 
+  private async switchWorkspace(projectId?: string): Promise<void> {
+    if (!await this.app.switchThreadWorkspace(this.thread.id, projectId)) {
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface,
+        message: this.app.saveError || this.app.error || t('切换工作区失败。') });
+    }
+  }
+
   @Builder
   projectMenuHeader() {
-    materialMenuHeader(t('在项目中新建对话'))
+    materialMenuHeader(t('工作区'))
   }
 
   @Builder
   projectMenu() {
     Menu() {
       MenuItemGroup({ header: this.projectMenuHeader }) {
-        MenuItem(() => materialMenuContent.bind(this)({ label: t('普通聊天') })).onClick(() => { this.app.newThread(''); })
+        MenuItem(() => materialMenuContent.bind(this)({ label: t('普通聊天') })).onClick(() => { this.switchWorkspace(); })
         ForEach(this.app.projects, (project: ProjectData) => {
-          MenuItem(() => materialMenuContent.bind(this)({ label: project.name })).onClick(() => { this.app.newThread(project.id); })
+          MenuItem(() => materialMenuContent.bind(this)({ label: project.name })).onClick(() => { this.switchWorkspace(project.id); })
         }, (project: ProjectData) => project.id)
       }
     }

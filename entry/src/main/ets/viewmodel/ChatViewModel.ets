@@ -246,6 +246,9 @@ export class ChatViewModel {
   removeThreadReference(id: string): Promise<boolean> { return this.requireSession().removeThreadReference(id); }
   forkThread(messageId: string = ''): Promise<boolean> { return this.requireSession().forkThread(messageId); }
   newThread(projectId: string | undefined = this.active.projectId): Promise<boolean> { return this.requireSession().newThread(projectId || undefined); }
+  switchThreadWorkspace(threadId: string, projectId?: string): Promise<boolean> {
+    return this.requireSession().switchThreadWorkspace(threadId, projectId);
+  }
   selectThread(id: string): Promise<boolean> { return this.requireSession().selectThread(id); }
   deleteThread(id: string): Promise<boolean> { return this.requireSession().deleteThread(id); }
   deleteThreads(ids: string[]): Promise<boolean> { return this.requireSession().deleteThreads(ids); }

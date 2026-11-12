@@ -456,20 +456,39 @@ export class SessionService {
     });
   }
 
+  private isUntouchedThread(thread: ThreadData): boolean {
+    return !thread.archived && !thread.titleEdited && !thread.pinned && !thread.parentThreadId &&
+      thread.messages.length === 0 && !thread.draft?.length && !thread.attachments?.length &&
+      !thread.references?.length && !thread.annotations?.length && !thread.pendingInputs?.length;
+  }
+
   async newThread(projectId?: string): Promise<boolean> {
     if (!this.canNavigate) { return false; }
-    const current = this.active;
-    // Repeated new-chat actions are idempotent while the current composer is untouched.
-    // Keep its workspace and local model/team choices; never discard prepared input.
-    if (current.projectId === projectId && !current.archived && !current.titleEdited && !current.pinned &&
-      !current.parentThreadId && current.messages.length === 0 && (current.draft || '').length === 0 &&
-      (current.attachments || []).length === 0 && (current.references || []).length === 0 && !current.annotations?.length &&
-      (current.pendingInputs || []).length === 0) { return true; }
+    // Repeated new-chat actions reuse the untouched composer in the same workspace.
+    if (this.active.projectId === projectId && this.isUntouchedThread(this.active)) { return true; }
     return this.mutate(t("新建对话失败："), async () => {
       const thread = this.freshThread(); thread.projectId = projectId; await this.ensureThreadWorkspace(thread);
       this.data.threads.unshift(thread); this.data.activeThreadId = thread.id;
       await this.persist();
     }, 'snapshot', 'navigation');
+  }
+
+  async switchThreadWorkspace(threadId: string, projectId?: string): Promise<boolean> {
+    if (!this.canMutate || this.active.id !== threadId) { return false; }
+    const thread = this.active;
+    if (thread.projectId === projectId) { return true; }
+    return this.mutate('', async () => {
+      if (!this.isUntouchedThread(thread) || thread.panelContext || thread.teams?.length) {
+        throw new Error(t('只有未编辑的空白对话可以切换工作区。'));
+      }
+      const updated = JSON.parse(JSON.stringify(thread)) as ThreadData;
+      updated.projectId = projectId;
+      const candidate = copyAppMetadata(this.data);
+      candidate.threads = this.data.threads.map((item) => item.id === thread.id ? updated : item);
+      validateProjects(candidate);
+      await this.ensureThreadWorkspace(updated, candidate);
+      await this.commitCandidate(candidate, () => { thread.projectId = projectId; }, [thread.id]);
+    }, 'snapshot', 'thread');
   }
 
   // A regenerated answer is a new branch; existing answers and later turns stay intact.
