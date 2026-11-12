@@ -3,7 +3,6 @@ import { FileAnnotationList } from './FileAnnotationList';
 import { ChatShortcut, ChatShortcutAction, NavigationShortcut, chatShortcuts, handleDraftEnter } from '../common/KeyboardShortcuts';
 import { AdaptiveUi } from '../model/AdaptiveUi';
 import { materialMenuContent, materialMenuHeader } from '../common/MaterialMenu';
-import { AnimatedIcon } from '../common/AnimatedIcon';
 import { Diagnostics } from '../model/Diagnostics';
 import { HuaweiAccount } from '../services/HuaweiAccount';
 import { AppearanceStyle } from '../common/AppearanceStyle';
@@ -26,7 +25,7 @@ import { VoiceAction, VoiceTargetRect, voiceActionAtPoint } from '../model/Voice
 import { pasteboard } from '@kit.BasicServicesKit';
 import { ThreadReference, referenceQuery } from '../model/ThreadReferences';
 import { ThreadReferenceCard } from './ThreadReferenceCard';
-import { FrameCallback, SymbolGlyphModifier } from '@kit.ArkUI';
+import { curves, FrameCallback, SymbolGlyphModifier } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { Attachment, MAX_MESSAGE_ATTACHMENTS } from '../model/Productivity';
 import { Attachments } from '../services/Attachments';
@@ -915,7 +914,7 @@ export struct ChatPanel {
     if (this.workbench) {
       Column({ space: 12 }) {
         Row({ space: 12 }) {
-          AnimatedIcon({ iconName: 'tinybot', iconSize: 38, playOnAppear: true })
+          Image($r('app.media.tinybot')).width(38).height(38)
           Text(t('今天想一起做点什么？')).fontFamily(this.appearance.fontFamily).fontSize(28).fontWeight(FontWeight.Medium)
             .fontColor($r('app.color.text_primary')).maxLines(2).textAlign(TextAlign.Center)
         }.justifyContent(FlexAlign.Center).width('100%')
@@ -928,7 +927,9 @@ export struct ChatPanel {
     Scroll() {
       Column({ space: Space.md }) {
         if (!this.centeredWelcome()) { Blank().layoutWeight(1) }
-        AnimatedIcon({ iconName: 'tinybot', iconSize: 56, playOnAppear: true })
+        Image($r('app.media.tinybot')).width(56).height(56)
+          .transition(TransitionEffect.OPACITY.combine(TransitionEffect.scale({ x: 0.6, y: 0.6 }))
+            .animation({ curve: curves.springMotion(0.5, 0.7) }))
         Text(t("今天想一起做点什么？")).fontFamily(this.appearance.fontFamily).fontSize(Font.headline).fontWeight(FontWeight.Bold)
           .fontColor($r('app.color.text_primary')).textAlign(TextAlign.Center)
           .margin({ bottom: Space.md }).transition(Motion.rise(1))

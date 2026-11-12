@@ -1,6 +1,6 @@
 import { AnimatorResult } from '@kit.ArkUI';
 import { AppearanceStyle } from './AppearanceStyle';
-import { AnimatedIconName, iconPath, tinybotSpark } from './IconArtwork';
+import { AnimatedIconName, iconPath } from './IconArtwork';
 
 @Component
 export struct AnimatedIcon {
@@ -51,20 +51,11 @@ export struct AnimatedIcon {
   build() {
     Stack() {
       // The viewport transform applies to direct Shape children.
-      if (this.iconName === 'tinybot') {
-        Shape() {
-          Path().commands('M2.7 12.75 a8.7 8.7 0 1 0 17.4 0 a8.7 8.7 0 1 0 -17.4 0 Z').fill('#FAF9F5')
-          Path().commands('M3.65 12.75 a7.75 7.75 0 1 0 15.5 0 a7.75 7.75 0 1 0 -15.5 0 Z').fill('#141413')
-          Path().commands(iconPath('tinybot', this.progress, this.appearance.effectStrength)).fill('#FAF9F5')
-          Path().commands(tinybotSpark(this.progress, this.appearance.effectStrength)).fill('#CC785C')
-        }.viewPort({ x: 0, y: 0, width: '24px', height: '24px' }).width('100%').height('100%')
-      } else {
-        Shape() {
-          Path().commands(iconPath(this.iconName, this.progress, this.appearance.effectStrength))
-            .fill(Color.Transparent).stroke(this.tint).strokeWidth('1.65px')
-            .strokeLineCap(LineCapStyle.Round).strokeLineJoin(LineJoinStyle.Round)
-        }.viewPort({ x: 0, y: 0, width: '24px', height: '24px' }).width('100%').height('100%')
-      }
+      Shape() {
+        Path().commands(iconPath(this.iconName, this.progress, this.appearance.effectStrength))
+          .fill(Color.Transparent).stroke(this.tint).strokeWidth('1.65px')
+          .strokeLineCap(LineCapStyle.Round).strokeLineJoin(LineJoinStyle.Round)
+      }.viewPort({ x: 0, y: 0, width: '24px', height: '24px' }).width('100%').height('100%')
     }.width(this.iconSize).height(this.iconSize).hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
       .onAppear(() => { if (this.playOnAppear) { this.play(); } })
   }
