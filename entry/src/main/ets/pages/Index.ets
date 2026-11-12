@@ -207,6 +207,7 @@ struct Index {
         if (event.kind !== 'state') { autoCloudBackup.changed(); }
         if (event.state.canNavigate && ShareInbox.peek()) { this.receiveShare(); }
         if (event.kind === 'task-complete' && event.threadId) { this.taskCompleted(event.threadId); }
+        if (event.kind === 'thread-opened') { this.revealChat(); }
       });
     }
     this.app.initialize(this.session).then(() => {

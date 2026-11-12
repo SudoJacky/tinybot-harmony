@@ -83,7 +83,7 @@ EVENTS.export = ['image_failed', 'preview_failed', 'cleanup_failed', 'share_fail
 EVENTS.network = ['request_start', 'request_end', 'context_overflow', 'first_data', 'request_failed'];
 EVENTS.sync = ['nearby_failed', 'nearby_device_failed', 'workspace_delete_conflict', 'workspace_delete_unversioned', 'conversation_accept_failed', 'conversation_connect_failed', 'conversation_disconnect_failed',
   'conversation_destroy_failed', 'conversation_receive_failed', 'conversation_progress_failed', 'conversation_admission_failed',
-  'conversation_admitted', 'conversation_acknowledged', 'conversation_frame_invalid', 'conversation_live_started',
+  'conversation_admitted', 'conversation_acknowledged', 'conversation_executor_open_failed', 'conversation_frame_invalid', 'conversation_live_started',
   'conversation_route_ready', 'conversation_connected', 'conversation_authorized', 'conversation_input_saved',
   'conversation_run_started', 'conversation_first_output', 'conversation_first_output_sent', 'conversation_snapshot_sent', 'conversation_snapshot_applied',
   'conversation_output_applied', 'conversation_opened', 'nearby_push', 'nearby_pull', 'nearby_flush',

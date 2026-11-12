@@ -351,13 +351,13 @@ class NearbyConversations {
     if (packet.origin !== this.origin || !packet.replyTo || !UUID.test(packet.replyTo) || !requestId ||
       !requestId.startsWith('remote-') || !UUID.test(requestId.slice(7)) || typeof packet.create !== 'boolean' ||
       packet.create && !UUID.test(id) || typeof packet.text !== 'string') { throw new Error('Invalid nearby conversation command'); }
-    let error = '';
+    let error = '', created = false;
     const operationId = Diagnostics.acceptsLog('info') ? nearbyTraceId(requestId) : undefined;
     const started = operationId === undefined ? 0 : Diagnostics.now();
     try {
       const allowed = (): boolean => this.canConnect() && this.peers.get(peer.link.id) === peer;
       if (!allowed()) { throw new Error(t('请在执行端打开 Tinybot。')); }
-      await this.session!.acceptPeerInput(id, requestId, packet.text, packet.create, allowed);
+      created = await this.session!.acceptPeerInput(id, requestId, packet.text, packet.create, allowed);
       if (operationId !== undefined) {
         Diagnostics.log('info', 'sync', 'conversation_admitted', { operationId: operationId, durationMs: Diagnostics.now() - started });
       }
@@ -372,6 +372,11 @@ class NearbyConversations {
         outputSent: false, dirty: false, timer: -1 };
       peer.watches.set(id, watch);
       this.scheduleWatch(peer, watch, true);
+    }
+    // Admission is acknowledged before executor navigation. Retries and followups
+    // keep the user's current selection; only a newly created task opens itself.
+    if (created && !await this.session!.selectThread(id, true)) {
+      Diagnostics.log('warn', 'sync', 'conversation_executor_open_failed', { threadId: id });
     }
   }
 
@@ -390,7 +395,7 @@ class NearbyConversations {
   }
 
   private async selectIfCurrent(source: string, target: string): Promise<void> {
-    if (this.session!.activeThreadId === source) { await this.session!.selectThread(target); }
+    if (this.session!.activeThreadId === source) { await this.session!.selectThread(target, true); }
   }
 
   private async receiveState(peer: ConversationPeer, id: string, packet: Packet): Promise<void> {

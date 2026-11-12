@@ -705,11 +705,13 @@ export class SessionService {
     started?.(this.active.id);
     await this.send(); return true;
   }
-  async selectThread(id: string): Promise<boolean> {
-    return this.mutate(t("打开对话失败："), async () => {
+  async selectThread(id: string, reveal: boolean = false): Promise<boolean> {
+    const selected = await this.mutate(t("打开对话失败："), async () => {
       const thread = this.requireThread(id); await this.ensureThreadWorkspace(thread);
       this.data.activeThreadId = id; await this.persist();
     }, 'snapshot', 'navigation');
+    if (selected && reveal) { this.emit({ kind: 'thread-opened', state: this.state, threadId: id }); }
+    return selected;
   }
   async deleteThread(id: string): Promise<boolean> {
     return this.deleteThreads([id]);
@@ -1001,7 +1003,7 @@ export class SessionService {
   }
 
   async acceptPeerInput(threadId: string, requestId: string, inputText: string, create: boolean,
-    mayAccept: () => boolean): Promise<void> {
+    mayAccept: () => boolean): Promise<boolean> {
     const input: PendingInput = { id: requestId, mode: 'followUp', text: inputText.trim() };
     validatePendingInputs([input]);
     const admitted = (): boolean => {
@@ -1009,7 +1011,7 @@ export class SessionService {
       return !!thread && (thread.messages.some((item) => item.id === requestId) ||
         (thread.pendingInputs || []).some((item) => item.id === requestId));
     };
-    if (await this.exclusive(async () => admitted())) { return; }
+    if (await this.exclusive(async () => admitted())) { return false; }
     if (/^\/compact(?:\s|$)/i.test(input.text) || teamCommand(input.text) === '') {
       throw new Error(t('请在执行端使用此会话命令。'));
     }
@@ -1019,6 +1021,7 @@ export class SessionService {
     if (operationId !== undefined) {
       Diagnostics.log('info', 'sync', 'conversation_authorized', { operationId: operationId, durationMs: Diagnostics.now() - authStarted });
     }
+    let created = false;
     const start = await this.exclusive(async () => {
       if (!mayAccept() || !this.canNavigate) { throw new Error(t('执行端暂时无法接收消息。')); }
       if (admitted()) { return false; }
@@ -1059,6 +1062,7 @@ export class SessionService {
         throw error as Error;
       }
       finally { this.peerInputSaving = ''; }
+      created = !existing;
       if (operationId !== undefined) {
         Diagnostics.log('info', 'sync', 'conversation_input_saved', { operationId: operationId, durationMs: Diagnostics.now() - saving });
       }
@@ -1070,6 +1074,7 @@ export class SessionService {
     // The durable admission is complete. Let the caller submit its acknowledgement
     // before local context preparation and UI projection run on this thread.
     if (start) { setTimeout(() => { this.runTasks(undefined, threadId); }, 0); }
+    return created;
   }
 
   private async authorizeGeneration(): Promise<boolean> {

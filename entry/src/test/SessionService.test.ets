@@ -169,13 +169,13 @@ export default function sessionServiceTests(): void {
       const f = new Fixture(); await f.session.initialize();
       f.session.setDraft('Keep the local composer draft');
       const canAccept = (): boolean => true;
-      await f.session.acceptPeerInput('new-peer-thread', 'remote-first', 'First', true, canAccept);
+      expect(await f.session.acceptPeerInput('new-peer-thread', 'remote-first', 'First', true, canAccept)).assertTrue();
       const accepted = (await f.repository.load()).threads.find((thread) => thread.id === 'new-peer-thread');
       expect(accepted?.pendingInputs?.[0].id).assertEqual('remote-first');
       expect(accepted?.messages.length).assertEqual(0);
       await f.session.waitForIdle();
-      await f.session.acceptPeerInput('new-peer-thread', 'remote-first', 'First', true, canAccept);
-      await f.session.acceptPeerInput('new-peer-thread', 'remote-second', 'Second', false, canAccept);
+      expect(await f.session.acceptPeerInput('new-peer-thread', 'remote-first', 'First', true, canAccept)).assertFalse();
+      expect(await f.session.acceptPeerInput('new-peer-thread', 'remote-second', 'Second', false, canAccept)).assertFalse();
       await f.session.waitForIdle();
       const data = await f.repository.load();
       const remote = data.threads.find((thread) => thread.id === 'new-peer-thread');
