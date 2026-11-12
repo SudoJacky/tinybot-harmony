@@ -1,5 +1,6 @@
 import { common } from '@kit.AbilityKit';
 import { relationalStore } from '@kit.ArkData';
+import { deviceInfo } from '@kit.BasicServicesKit';
 import { distributedDeviceManager } from '@kit.DistributedServiceKit';
 import { Diagnostics } from '../model/Diagnostics';
 
@@ -72,19 +73,47 @@ export class NearbySyncStore {
   localNetworkId(): string { return this.manager.getLocalDeviceNetworkId(); }
   async exchange(devices: string[], push: boolean): Promise<void> {
     if (!devices.length) { return; }
-    const predicates = new relationalStore.RdbPredicates(TABLE);
-    predicates.inDevices(devices);
-    const results = await this.store.sync(push ? relationalStore.SyncMode.SYNC_MODE_PUSH : relationalStore.SyncMode.SYNC_MODE_PULL, predicates);
+    const mode = push ? relationalStore.SyncMode.SYNC_MODE_PUSH : relationalStore.SyncMode.SYNC_MODE_PULL;
+    const results = await this.exchangeResults(devices, mode);
+    const failures: number[] = [];
+    let missing = 0;
     for (const device of devices) {
-      const result = results.find((item) => item[0] === device);
-      if (!result || result[1] !== 0) {
-        Diagnostics.log('warn', 'sync', 'nearby_device_failed', { deviceId: device, code: result?.[1], uncertain: !result });
+      const code = results.get(device);
+      if (code !== 0) {
+        if (code === undefined) { missing++; }
+        else { failures.push(code); }
+        Diagnostics.log('warn', 'sync', 'nearby_device_failed', { deviceId: device, code: code, uncertain: code === undefined });
       }
     }
-    if (devices.some((device) => !results.some((item) => item[0] === device && item[1] === 0)) ||
-      results.some((item) => item[1] !== 0)) {
-      throw new Error('Nearby ArkData sync status ' + results.map((item) => item[1].toString()).join(','));
+    if (missing || failures.length) {
+      const details: string[] = [];
+      if (missing) { details.push('missing device results: ' + missing); }
+      if (failures.length) { details.push('failure codes: ' + failures.join(',')); }
+      throw new Error('Nearby ArkData sync incomplete (' + details.join('; ') + ')');
     }
+  }
+
+  private async exchangeResults(devices: string[], mode: relationalStore.SyncMode): Promise<Map<string, number>> {
+    const results = new Map<string, number>();
+    if (deviceInfo.sdkApiVersion >= 26) {
+      const predicates = new relationalStore.RdbPredicates(TABLE);
+      predicates.inDevices(devices);
+      for (const result of await this.store.syncEx(mode, predicates)) {
+        if (!devices.includes(result.device) || results.has(result.device)) {
+          throw new Error('Nearby ArkData returned unexpected device results');
+        }
+        results.set(result.device, result.code);
+      }
+      return results;
+    }
+    // Legacy sync() reports UUIDs. Scope each request to one network ID to attribute its result.
+    for (const device of devices) {
+      const predicates = new relationalStore.RdbPredicates(TABLE);
+      predicates.inDevices([device]);
+      const reply = await this.store.sync(mode, predicates);
+      if (reply.length === 1 && reply[0][0]) { results.set(device, reply[0][1]); }
+    }
+    return results;
   }
   async write(items: NearbyItem[]): Promise<void> {
     if (!items.length) { return; }

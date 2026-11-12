@@ -10,7 +10,7 @@ const boardPath = 'life-boards/dashboard/board.json';
 const board = (updatedAt, title = 'board') => JSON.stringify({ version: 2, id: 'dashboard', title, description: '',
   archived: false, createdAt: 1, updatedAt, items: [] });
 const copy = value => JSON.parse(JSON.stringify(value));
-function device() {
+function device(sdkApiVersion = 26) {
   const cache = new Map(), logs = [], appStorage = new Map(), sql = new DatabaseSync(':memory:');
   const context = { filesDir: '/ability', getApplicationContext: () => ({ filesDir: '/app' }) };
   const transport = { localItems: async () => [], remoteItems: async () => [], mark() {},
@@ -30,7 +30,7 @@ function device() {
   } };
   const kits = {
     '@kit.ArkData': { relationalStore: { getRdbStore: async () => store, SecurityLevel: { S3: 3 },
-      RdbPredicates: class { inDevices() {} }, SyncMode: { SYNC_MODE_PUSH: 1, SYNC_MODE_PULL: 2 } } },
+      RdbPredicates: class { inDevices(devices) { this.devices = Array.from(devices); } }, SyncMode: { SYNC_MODE_PUSH: 1, SYNC_MODE_PULL: 2 } } },
     '@kit.CoreFileKit': { fileShare: { OperationMode: { READ_MODE: 1, WRITE_MODE: 2 } },
       fileIo: { access: async () => true, listFile: async p => p === '/app/workspace' ? ['w'] : [],
       mkdir: async () => {}, lstat: async () => ({ isDirectory: () => true, isSymbolicLink: () => false }) } },
@@ -41,7 +41,7 @@ function device() {
       const hash = crypto.createHash('sha256');
       return { update: async blob => hash.update(blob.data), digest: async () => ({ data: hash.digest() }) };
     } } },
-    '@kit.BasicServicesKit': { deviceInfo: { sdkApiVersion: 26 } }
+    '@kit.BasicServicesKit': { deviceInfo: { sdkApiVersion } }
   };
   function load(name) {
     const file = path.resolve(root, name.endsWith('.ets') ? name : name + '.ets');
@@ -83,13 +83,55 @@ async function main() {
     const d = device(); await d.opened;
     try {
       const { NearbySyncStore } = d.load('services/NearbySyncStore');
-      const transport = new NearbySyncStore({ sync: async () => [['B', 0], ['C', 14800014]] }, {}, A, () => {});
+      const transport = new NearbySyncStore({
+        syncEx: async () => [{ device: 'B', code: 0 }, { device: 'C', code: 14800014 }]
+      }, {}, A, () => {});
       await assert.rejects(transport.exchange(['B', 'C'], true), /14800014/);
       assert.ok(d.logs.some(log => log[2] === 'nearby_device_failed' && log[3].deviceId === 'C' && log[3].code === 14800014));
       d.sync.ready = true; d.sync.nextPull = Infinity;
       d.sync.scheduleExchange(transport, ['B', 'C'], Date.now()); await d.sync.exchange;
       assert.equal(d.sync.needsPush, true); assert.equal(d.sync.exchangeFailed, true);
       assert.ok(d.logs.some(log => log[2] === 'nearby_failed'));
+    } finally { d.close(); }
+  });
+  await test('modern sync matches network IDs and rejects missing, unexpected or repeated receipts', async () => {
+    const d = device(); await d.opened;
+    try {
+      const { NearbySyncStore } = d.load('services/NearbySyncStore');
+      let reply = [{ device: 'C', code: 0 }, { device: 'B', code: 0 }];
+      const transport = new NearbySyncStore({ syncEx: async (mode, predicates) => {
+        assert.equal(mode, 2);
+        assert.deepEqual(predicates.devices, ['B', 'C']);
+        return reply;
+      } }, {}, A, () => {});
+      await transport.exchange(['B', 'C'], false);
+      reply = [{ device: 'B', code: 0 }];
+      await assert.rejects(transport.exchange(['B', 'C'], false), /missing device results: 1/);
+      reply.push({ device: 'unrequested', code: 0 });
+      await assert.rejects(transport.exchange(['B', 'C'], false), /unexpected device results/);
+      reply = [{ device: 'B', code: 0 }, { device: 'B', code: 0 }];
+      await assert.rejects(transport.exchange(['B', 'C'], false), /unexpected device results/);
+    } finally { d.close(); }
+  });
+  await test('legacy sync scopes each UUID receipt to its single requested network ID', async () => {
+    const d = device(25); await d.opened;
+    try {
+      const { NearbySyncStore } = d.load('services/NearbySyncStore');
+      let replyForC = [['uuid-C', 0]];
+      const requests = [];
+      const transport = new NearbySyncStore({ sync: async (mode, predicates) => {
+        assert.equal(mode, 1);
+        assert.equal(predicates.devices.length, 1);
+        const requested = predicates.devices[0];
+        requests.push(requested);
+        return requested === 'B' ? [['uuid-B', 0]] : replyForC;
+      } }, {}, A, () => {});
+      await transport.exchange(['B', 'C'], true);
+      assert.deepEqual(requests, ['B', 'C']);
+      replyForC = [];
+      await assert.rejects(transport.exchange(['B', 'C'], true), /missing device results: 1/);
+      replyForC = [['uuid-C', 0], ['uuid-unexpected', 0]];
+      await assert.rejects(transport.exchange(['B', 'C'], true), /missing device results: 1/);
     } finally { d.close(); }
   });
   await test('deletion survives disabled sync and restart without reviving stale content', async () => {
