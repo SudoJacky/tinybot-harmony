@@ -4,30 +4,61 @@ import { t } from '../model/I18n';
 export type NavigationShortcut = 'new-chat' | 'search' | 'history' | 'settings' | 'workspace' | 'help';
 export type ChatShortcutAction = NavigationShortcut | 'focus' | 'attach' | 'expand' | 'latest' | 'stop';
 
-export interface ChatShortcut {
+type ShortcutCategory = 'chat' | 'navigation' | 'input';
+
+export interface ShortcutHint {
+  chord: string;
+  label: string;
+}
+
+export interface ChatShortcut extends ShortcutHint {
   action: ChatShortcutAction;
   key: string | FunctionKey;
   modifiers: ModifierKey[];
-  chord: string;
+  category: ShortcutCategory;
+}
+
+export interface ShortcutGroup {
+  category: ShortcutCategory;
   label: string;
+  shortcuts: ShortcutHint[];
 }
 
 export function chatShortcuts(): ChatShortcut[] {
   const ctrl = [ModifierKey.CTRL];
   const ctrlShift = [ModifierKey.CTRL, ModifierKey.SHIFT];
   return [
-    { action: 'new-chat', key: 'n', modifiers: ctrl, chord: 'Ctrl+N', label: t('新建对话') },
-    { action: 'search', key: 'k', modifiers: ctrl, chord: 'Ctrl+K', label: t('搜索对话') },
-    { action: 'history', key: 'b', modifiers: ctrl, chord: 'Ctrl+B', label: t('展开或收起对话列表') },
-    { action: 'settings', key: ',', modifiers: ctrl, chord: 'Ctrl+,', label: t('设置') },
-    { action: 'workspace', key: 'f', modifiers: ctrlShift, chord: 'Ctrl+Shift+F', label: t('工作区文件') },
-    { action: 'focus', key: 'l', modifiers: ctrlShift, chord: 'Ctrl+Shift+L', label: t('聚焦消息输入框') },
-    { action: 'attach', key: 'o', modifiers: ctrl, chord: 'Ctrl+O', label: t('添加文件附件') },
-    { action: 'expand', key: 'e', modifiers: ctrlShift, chord: 'Ctrl+Shift+E', label: t('展开输入') },
-    { action: 'latest', key: 'j', modifiers: ctrlShift, chord: 'Ctrl+Shift+J', label: t('查看最新消息') },
-    { action: 'stop', key: 's', modifiers: ctrlShift, chord: 'Ctrl+Shift+S', label: t('停止生成') },
-    { action: 'help', key: FunctionKey.F1, modifiers: [], chord: 'F1', label: t('键盘快捷键') }
+    { action: 'new-chat', key: 'n', modifiers: ctrl, chord: 'Ctrl+N', category: 'chat', label: t('新建对话') },
+    { action: 'search', key: 'k', modifiers: ctrl, chord: 'Ctrl+K', category: 'navigation', label: t('搜索对话') },
+    { action: 'history', key: 'b', modifiers: ctrl, chord: 'Ctrl+B', category: 'navigation', label: t('展开或收起对话列表') },
+    { action: 'settings', key: ',', modifiers: ctrl, chord: 'Ctrl+,', category: 'navigation', label: t('设置') },
+    { action: 'workspace', key: 'f', modifiers: ctrlShift, chord: 'Ctrl+Shift+F', category: 'navigation', label: t('工作区文件') },
+    { action: 'focus', key: 'l', modifiers: ctrlShift, chord: 'Ctrl+Shift+L', category: 'input', label: t('聚焦消息输入框') },
+    { action: 'attach', key: 'o', modifiers: ctrl, chord: 'Ctrl+O', category: 'input', label: t('添加文件附件') },
+    { action: 'expand', key: 'e', modifiers: ctrlShift, chord: 'Ctrl+Shift+E', category: 'input', label: t('展开输入') },
+    { action: 'latest', key: 'j', modifiers: ctrlShift, chord: 'Ctrl+Shift+J', category: 'chat', label: t('查看最新消息') },
+    { action: 'stop', key: 's', modifiers: ctrlShift, chord: 'Ctrl+Shift+S', category: 'chat', label: t('停止生成') },
+    { action: 'help', key: FunctionKey.F1, modifiers: [], chord: 'F1', category: 'navigation', label: t('键盘快捷键') }
   ];
+}
+
+export function shortcutGroups(query: string): ShortcutGroup[] {
+  const shortcuts = chatShortcuts();
+  const input: ShortcutHint[] = shortcuts.filter((item) => item.category === 'input');
+  input.push({ chord: 'Ctrl+Enter', label: t('在消息输入框中换行') }, { chord: 'Alt+Enter', label: t('发送') });
+  const groups: ShortcutGroup[] = [
+    { category: 'chat', label: t('对话'), shortcuts: shortcuts.filter((item) => item.category === 'chat') },
+    { category: 'navigation', label: t('导航'), shortcuts: shortcuts.filter((item) => item.category === 'navigation') },
+    { category: 'input', label: t('输入'), shortcuts: input }
+  ];
+  const terms = query.trim().toLowerCase().replace(/\s*\+\s*/g, '+').split(/\s+/);
+  for (const group of groups) {
+    group.shortcuts = group.shortcuts.filter((item) => {
+      const searchable = (item.label + ' ' + item.chord + ' ' + group.label).toLowerCase();
+      return terms.every((term) => searchable.includes(term));
+    });
+  }
+  return groups.filter((group) => group.shortcuts.length > 0);
 }
 
 export function handleDraftEnter(event: KeyEvent, editor: TextAreaController, composing: boolean, send: () => void): boolean {

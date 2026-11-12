@@ -25,7 +25,8 @@ const emitted = path.join(root, 'entry/build/default/cache/default/default@Compi
 assert.ok(fs.statSync(emitted).mtimeMs >= fs.statSync(source).mtimeMs, 'Build before testing');
 const tree = ts.createSourceFile(emitted, fs.readFileSync(emitted, 'utf8'), ts.ScriptTarget.Latest, true);
 const cls = name => tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === name);
-const methods = ['filtered', 'sections', 'sectionThreads', 'sectionTitle', 'groupOpen', 'visibleCount', 'loadMore', 'toggleGroup', 'onActivePath', 'lastBranch'];
+const methods = ['filtered', 'threadProject', 'sections', 'sectionThreads', 'sectionTitle', 'groupOpen', 'visibleCount', 'loadMore',
+  'toggleGroup', 'onActivePath', 'lastBranch'];
 const globals = { exports: {}, t: key => key, Motion: { medium: 220, standard: 'ease' }, Diagnostics: { log() {} } };
 vm.runInNewContext(ts.transpileModule(`${cls('ThreadSection').getText(tree)}
 class Sidebar { ${cls('ThreadList').members.filter(n => methods.includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')} }
@@ -42,7 +43,68 @@ const revealChat = indexClass.members.find(n => n.name?.getText(indexTree) === '
 vm.runInNewContext(ts.transpileModule(`class Header { ${createChat} ${revealChat} } exports.Header = Header;`, {
   compilerOptions: { target: ts.ScriptTarget.ES2021 }
 }).outputText, globals);
+
+async function testWorkspacePicker() {
+  const chatSource = path.join(root, 'entry/src/main/ets/views/ChatPanel.ets');
+  const chatEmitted = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/views/ChatPanel.ts');
+  assert.ok(fs.statSync(chatEmitted).mtimeMs >= fs.statSync(chatSource).mtimeMs, 'Build ChatPanel before testing');
+  const chatTree = ts.createSourceFile(chatEmitted, fs.readFileSync(chatEmitted, 'utf8'), ts.ScriptTarget.Latest, true);
+  const chatClass = chatTree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'ChatPanel');
+  const methods = chatClass.members.filter(n => ['projectMenu', 'switchWorkspace'].includes(n.name?.getText(chatTree)));
+  const clicks = [], toasts = [];
+  const menu = { create() {}, pop() {} };
+  const renderer = { ...globals, Menu: menu, MenuItemGroup: menu, ForEach: menu,
+    MenuItem: { ...menu, onClick(handler) { clicks.push(handler); } } };
+  vm.runInNewContext(ts.transpileModule(`class Picker { ${methods.map(n => n.getText(chatTree)).join('\n')} } exports.Picker = Picker;`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2021 }
+  }).outputText, renderer);
+
+  const data = seed();
+  data.projects = ['alpha', 'beta'].map(id => ({ id, name: id, instructions: '', workspaceId: 'project-' + id, createdAt: 1, updatedAt: 1 }));
+  const f = new Fixture(data), app = new ChatViewModel(); await app.initialize(f.session);
+  await app.setTeamEnabled(true);
+  const picker = Object.assign(new renderer.exports.Picker(), { app, thread: app.active, appearance: { surface: {} },
+    projectMenuHeader() {}, observeComponentCreation2(render) { render(0, true); },
+    forEachUpdateFunction(_, items, render) { items.forEach(render); },
+    getUIContext: () => ({ getPromptAction: () => ({ showToast: value => toasts.push(value.message) }) }) });
+  picker.projectMenu();
+  const click = async item => {
+    clicks[item]();
+    await new Promise(setImmediate);
+    assert.equal(app.canNavigate, true, 'Workspace selection should finish with the fixture repository');
+  };
+  for (const item of [1, 2, 0, 1, 2, 0, 2]) {
+    await click(item);
+    const project = data.projects[item - 1];
+    assert.equal(app.active.projectId, project?.id);
+    assert.equal(app.activeWorkspaceId, project?.workspaceId || data.activeThreadId);
+  }
+  assert.equal(app.threads.length, 1, 'Repeated workspace selections must keep a single blank conversation');
+  assert.equal(app.active.id, data.activeThreadId);
+  assert.equal(app.active.teamEnabled, true, 'Switching workspaces preserves conversation settings');
+  assert.equal(JSON.parse(f.repository.saved).threads[0].projectId, 'beta');
+  const writes = f.repository.writes.length;
+  await click(2);
+  assert.equal(f.repository.writes.length, writes, 'Selecting the current workspace does not write');
+  assert.deepEqual(toasts, []);
+
+  f.repository.beforeSave = async () => { throw Error('Disk unavailable'); };
+  await click(1);
+  assert.match(toasts.at(-1), /Disk unavailable/);
+  assert.equal(app.active.projectId, 'beta', 'A failed write keeps the original workspace selected');
+  assert.equal(JSON.parse(f.repository.saved).threads[0].projectId, 'beta');
+  f.repository.beforeSave = async () => {};
+  app.setDraft('Keep this draft');
+  await click(1);
+  assert.match(toasts.at(-1), /空白对话/);
+  assert.equal(app.active.projectId, 'beta');
+  assert.equal(app.draft, 'Keep this draft');
+  assert.equal(app.threads.length, 1);
+  console.log('PASS tablet workspace picker keeps one empty chat, persists its workspace and protects prepared input');
+}
+
 (async () => {
+  await testWorkspacePicker();
   const data = seed();
   data.projects = ['alpha', 'beta', 'empty'].map(id => ({ id, name: 'Same name', instructions: '', workspaceId: 'project-' + id, createdAt: 1, updatedAt: 1 }));
   const original = data.threads[0];
@@ -55,7 +117,8 @@ vm.runInNewContext(ts.transpileModule(`class Header { ${createChat} ${revealChat
   ];
   data.activeThreadId = 'a1';
   const f = new Fixture(data), app = new ChatViewModel(); await app.initialize(f.session);
-  const sidebar = Object.assign(new globals.exports.Sidebar(), { app, query: '', archived: false, visibleCounts: {}, collapsedProjects: [],
+  const sidebar = Object.assign(new globals.exports.Sidebar(), { app, query: '', archived: false, projectFilter: null,
+    visibleCounts: {}, collapsedProjects: [],
     getUIContext: () => ({ animateTo: (_, apply) => apply() }) });
   const groups = () => Array.from(sidebar.sections(sidebar.filtered()));
   const ids = group => Array.from(group.threads, item => item.id);

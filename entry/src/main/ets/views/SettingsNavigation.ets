@@ -3,21 +3,31 @@ import { AppearanceStyle } from '../common/AppearanceStyle';
 import { SegmentFrame, SegmentedMotion } from '../common/SegmentedMotion';
 import { Btn, Space } from '../common/Theme';
 import { t } from '../model/I18n';
+import { AnimatedIcon } from '../common/AnimatedIcon';
+import { AnimatedIconName } from '../common/IconArtwork';
 
-interface SettingsCategory { key: string; title: string; icon: Resource; }
+interface SettingsCategory { key: string; title: string; icon: AnimatedIconName; }
 const CATEGORY_TRACK_RADIUS: number = 25;
+export const SETTINGS_CATEGORY_SWIPE_DISTANCE: number = 44;
 const CATEGORIES: SettingsCategory[] = [
-  { key: 'account', title: '账号', icon: $r('sys.symbol.person') },
-  { key: 'models', title: '模型与服务', icon: $r('sys.symbol.cloud') },
-  { key: 'assistant', title: '助手偏好', icon: $r('sys.symbol.square_and_pencil') },
-  { key: 'tools', title: '工具与权限', icon: $r('sys.symbol.wrench_and_screwdriver') },
-  { key: 'appearance', title: '界面与语言', icon: $r('sys.symbol.picture') },
-  { key: 'data', title: '数据与用量', icon: $r('sys.symbol.rectangle_stack') },
-  { key: 'help', title: '帮助与关于', icon: $r('sys.symbol.questionmark_circle') }
+  { key: 'account', title: '账号', icon: 'account' },
+  { key: 'models', title: '模型与服务', icon: 'cloud' },
+  { key: 'assistant', title: '助手偏好', icon: 'compose' },
+  { key: 'tools', title: '工具与权限', icon: 'tools' },
+  { key: 'appearance', title: '界面与语言', icon: 'mountain' },
+  { key: 'data', title: '数据与用量', icon: 'data' },
+  { key: 'help', title: '帮助与关于', icon: 'help' }
 ];
 
 export function settingsCategoryTitle(key: string): string {
   return t(CATEGORIES.find((item: SettingsCategory) => item.key === key)?.title || '设置');
+}
+
+export function settingsCategoryForSwipe(key: string, offsetX: number, offsetY: number): string | undefined {
+  const distance = Math.abs(offsetX);
+  if (distance < SETTINGS_CATEGORY_SWIPE_DISTANCE || distance <= Math.abs(offsetY) * 1.5) { return undefined; }
+  const index = CATEGORIES.findIndex((item: SettingsCategory) => item.key === key);
+  return index < 0 ? undefined : CATEGORIES[index + (offsetX < 0 ? 1 : -1)]?.key;
 }
 
 @Component
@@ -25,6 +35,7 @@ export struct SettingsCategoryBar {
   @StorageProp('tinybot.appearance.style') @Watch('motionChanged') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop @Watch('selectionChanged') selected: string = 'models';
   @State private thumb: SegmentFrame = { left: 0, right: 0 };
+  @State private hoveredCategory: string = '';
   onSelect: (key: string) => void = () => {};
   private scroller: Scroller = new Scroller();
   private segments: Map<string, SegmentFrame> = new Map();
@@ -123,9 +134,9 @@ export struct SettingsCategoryBar {
               ForEach(CATEGORIES, (item: SettingsCategory) => {
                 Button({ type: ButtonType.Normal }) {
                   Row({ space: Space.sm }) {
-                    SymbolGlyph(item.icon).fontSize(18)
-                      .fontColor([this.selected === item.key ? $r('app.color.text_primary') : $r('app.color.text_secondary')])
-                      .accessibilityLevel('no')
+                    AnimatedIcon({ iconName: item.icon, selected: this.selected === item.key,
+                      interacting: this.hoveredCategory === item.key,
+                      tint: this.selected === item.key ? $r('app.color.text_primary') : $r('app.color.text_secondary') })
                     Text(t(item.title)).fontSize(14).fontFamily(this.appearance.fontFamily).maxLines(1)
                       .fontWeight(this.selected === item.key ? FontWeight.Medium : FontWeight.Regular)
                       .fontColor(this.selected === item.key ? $r('app.color.text_primary') : $r('app.color.text_secondary'))
@@ -134,6 +145,10 @@ export struct SettingsCategoryBar {
                   .backgroundColor(Color.Transparent)
                   .accessibilityText(t(item.title)).accessibilitySelected(this.selected === item.key)
                   .id('settings-open-' + item.key).onClick(() => this.onSelect(item.key))
+                  .onHover((hovered: boolean) => {
+                    if (hovered) { this.hoveredCategory = item.key; }
+                    else if (this.hoveredCategory === item.key) { this.hoveredCategory = ''; }
+                  })
                   .onAreaChange((_previous: Area, current: Area) => this.segmentChanged(item.key, current))
               }, (item: SettingsCategory) => item.key)
             }.height(50).padding({ left: 3, right: 3 })
@@ -151,6 +166,7 @@ export struct SettingsCategoryBar {
 export struct SettingsNavigation {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop selected: string = 'models';
+  @State private hoveredCategory: string = '';
   onSelect: (key: string) => void = () => {};
   onChat: () => void = () => {};
   build() {
@@ -161,7 +177,9 @@ export struct SettingsNavigation {
       ForEach(CATEGORIES, (item: SettingsCategory) => {
         Button() {
           Row({ space: 12 }) {
-            SymbolGlyph(item.icon).fontSize(20).fontColor([this.selected === item.key ? this.appearance.accent : $r('app.color.text_secondary')])
+            AnimatedIcon({ iconName: item.icon, iconSize: 20, selected: this.selected === item.key,
+              interacting: this.hoveredCategory === item.key,
+              tint: this.selected === item.key ? this.appearance.accent : $r('app.color.text_secondary') })
             Text(t(item.title)).fontSize(15).layoutWeight(1).textAlign(TextAlign.Start)
               .fontColor(this.selected === item.key ? this.appearance.onAccentContainer : $r('app.color.text_primary'))
           }.width('100%')
@@ -169,6 +187,10 @@ export struct SettingsNavigation {
           .width('100%').height(48).padding({ left: 12, right: 12 }).borderRadius(12)
           .backgroundColor(this.selected === item.key ? this.appearance.accentContainer : Color.Transparent)
           .accessibilitySelected(this.selected === item.key).onClick(() => this.onSelect(item.key))
+          .onHover((hovered: boolean) => {
+            if (hovered) { this.hoveredCategory = item.key; }
+            else if (this.hoveredCategory === item.key) { this.hoveredCategory = ''; }
+          })
       }, (item: SettingsCategory) => item.key)
       Blank()
     }.width('100%').height('100%').padding(16).alignItems(HorizontalAlign.Start)

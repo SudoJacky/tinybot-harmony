@@ -3,6 +3,7 @@ import { FileAnnotationList } from './FileAnnotationList';
 import { ChatShortcut, ChatShortcutAction, NavigationShortcut, chatShortcuts, handleDraftEnter } from '../common/KeyboardShortcuts';
 import { AdaptiveUi } from '../model/AdaptiveUi';
 import { materialMenuContent, materialMenuHeader } from '../common/MaterialMenu';
+import { AnimatedIcon } from '../common/AnimatedIcon';
 import { Diagnostics } from '../model/Diagnostics';
 import { HuaweiAccount } from '../services/HuaweiAccount';
 import { AppearanceStyle } from '../common/AppearanceStyle';
@@ -25,7 +26,7 @@ import { VoiceAction, VoiceTargetRect, voiceActionAtPoint } from '../model/Voice
 import { pasteboard } from '@kit.BasicServicesKit';
 import { ThreadReference, referenceQuery } from '../model/ThreadReferences';
 import { ThreadReferenceCard } from './ThreadReferenceCard';
-import { curves, FrameCallback, SymbolGlyphModifier } from '@kit.ArkUI';
+import { FrameCallback, SymbolGlyphModifier } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { Attachment, MAX_MESSAGE_ATTACHMENTS } from '../model/Productivity';
 import { Attachments } from '../services/Attachments';
@@ -852,18 +853,25 @@ export struct ChatPanel {
       this.panelHeight >= 540 && !this.keyboardVisibleInLayout() && !this.app.generating;
   }
 
+  private async switchWorkspace(projectId?: string): Promise<void> {
+    if (!await this.app.switchThreadWorkspace(this.thread.id, projectId)) {
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface,
+        message: this.app.saveError || this.app.error || t('切换工作区失败。') });
+    }
+  }
+
   @Builder
   projectMenuHeader() {
-    materialMenuHeader(t('在项目中新建对话'))
+    materialMenuHeader(t('工作区'))
   }
 
   @Builder
   projectMenu() {
     Menu() {
       MenuItemGroup({ header: this.projectMenuHeader }) {
-        MenuItem(() => materialMenuContent.bind(this)({ label: t('普通聊天') })).onClick(() => { this.app.newThread(''); })
+        MenuItem(() => materialMenuContent.bind(this)({ label: t('普通聊天') })).onClick(() => { this.switchWorkspace(); })
         ForEach(this.app.projects, (project: ProjectData) => {
-          MenuItem(() => materialMenuContent.bind(this)({ label: project.name })).onClick(() => { this.app.newThread(project.id); })
+          MenuItem(() => materialMenuContent.bind(this)({ label: project.name })).onClick(() => { this.switchWorkspace(project.id); })
         }, (project: ProjectData) => project.id)
       }
     }
@@ -907,7 +915,7 @@ export struct ChatPanel {
     if (this.workbench) {
       Column({ space: 12 }) {
         Row({ space: 12 }) {
-          Image($r('app.media.tinybot')).width(38).height(38)
+          AnimatedIcon({ iconName: 'tinybot', iconSize: 38, playOnAppear: true })
           Text(t('今天想一起做点什么？')).fontFamily(this.appearance.fontFamily).fontSize(28).fontWeight(FontWeight.Medium)
             .fontColor($r('app.color.text_primary')).maxLines(2).textAlign(TextAlign.Center)
         }.justifyContent(FlexAlign.Center).width('100%')
@@ -920,9 +928,7 @@ export struct ChatPanel {
     Scroll() {
       Column({ space: Space.md }) {
         if (!this.centeredWelcome()) { Blank().layoutWeight(1) }
-        Image($r('app.media.tinybot')).width(56).height(56)
-          .transition(TransitionEffect.OPACITY.combine(TransitionEffect.scale({ x: 0.6, y: 0.6 }))
-            .animation({ curve: curves.springMotion(0.5, 0.7) }))
+        AnimatedIcon({ iconName: 'tinybot', iconSize: 56, playOnAppear: true })
         Text(t("今天想一起做点什么？")).fontFamily(this.appearance.fontFamily).fontSize(Font.headline).fontWeight(FontWeight.Bold)
           .fontColor($r('app.color.text_primary')).textAlign(TextAlign.Center)
           .margin({ bottom: Space.md }).transition(Motion.rise(1))
@@ -1549,7 +1555,7 @@ export struct ChatPanel {
   @Builder
   composerAddButton() {
     IconButton({ icon: $r('sys.symbol.plus'), label: t('添加图片、画板或文件'), compId: 'add-attachment', diameter: this.workbench ? 36 : 44,
-      iconSize: 18, fill: '#00000000',
+      iconSize: 18, fill: '#00000000', animatedIcon: 'plus', animatedSelected: this.showPlus || this.showPlusMenu,
       disabled: this.thread.archived || this.app.saveError.length > 0 || this.speechActive() || this.speechHolding,
       onTap: () => {
         this.getUIContext().getFocusController().clearFocus();

@@ -1,6 +1,8 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { Motion } from '../common/Theme';
+import { AnimatedIcon } from '../common/AnimatedIcon';
+import { AnimatedIconName } from '../common/IconArtwork';
 
 // Desktop-parity history rail: the collapsed sidebar keeps one 36 vp control per
 // action, stacked with the desktop's 12 vp rhythm. Expanding from here restores
@@ -9,17 +11,20 @@ import { Motion } from '../common/Theme';
 @Component
 struct RailButton {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
-  @Prop icon: Resource = $r('sys.symbol.plus');
+  icon: AnimatedIconName = 'plus';
   @Prop label: string = '';
   @Prop active: boolean = false;
   @Prop disabled: boolean = false;
+  @State private hovered: boolean = false;
+  @State private pressed: boolean = false;
   compId: string = '';
   onTap: () => void = () => {};
 
   build() {
     Button({ type: ButtonType.Normal, stateEffect: true }) {
-      SymbolGlyph(this.icon).fontSize(20)
-        .fontColor([this.active ? this.appearance.accent : $r('app.color.text_secondary')])
+      AnimatedIcon({ iconName: this.icon, iconSize: 20, selected: this.active && !this.disabled,
+        interacting: !this.disabled && (this.hovered || this.pressed),
+        tint: this.active ? this.appearance.accent : $r('app.color.text_secondary') })
     }
     .id(this.compId).width(36).height(36).borderRadius(12).padding(0)
     .backgroundColor(this.active ? this.appearance.accentContainer : Color.Transparent)
@@ -28,6 +33,11 @@ struct RailButton {
       normal: { .backgroundColor(this.active ? this.appearance.accentContainer : Color.Transparent) }
     })
     .clickEffect(Motion.pressSmall).enabled(!this.disabled)
+    .onHover((hovered: boolean) => { this.hovered = hovered; })
+    .onTouch((event: TouchEvent) => {
+      if (event.type === TouchType.Down) { this.pressed = true; }
+      else if (event.type === TouchType.Up || event.type === TouchType.Cancel) { this.pressed = false; }
+    })
     .accessibilityText(this.label).onClick(() => this.onTap())
   }
 }
@@ -51,20 +61,20 @@ export struct HistoryRail {
         .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
       Column() {
         Column({ space: 12 }) {
-          RailButton({ icon: $r('sys.symbol.line_3_horizontal'), label: t('展开会话列表'),
+          RailButton({ icon: 'history', label: t('展开会话列表'),
             compId: 'workbench-rail-expand', disabled: !this.active, onTap: this.onExpand })
-          RailButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('新建对话'),
+          RailButton({ icon: 'compose', label: t('新建对话'),
             compId: 'workbench-rail-new-chat', disabled: !this.active, onTap: this.onNewChat })
-          RailButton({ icon: $r('sys.symbol.magnifyingglass'), label: t('搜索对话'),
+          RailButton({ icon: 'search', label: t('搜索对话'),
             compId: 'workbench-rail-search', disabled: !this.active, onTap: this.onSearch })
         }.width('100%').alignItems(HorizontalAlign.Center)
         Blank().layoutWeight(1)
         Column({ space: 12 }) {
-          RailButton({ icon: $r('sys.symbol.folder'), label: t('工作区文件'), compId: 'workbench-rail-files',
+          RailButton({ icon: 'folder', label: t('工作区文件'), compId: 'workbench-rail-files',
             active: this.filesActive, disabled: !this.active, onTap: this.onFiles })
-          RailButton({ icon: $r('sys.symbol.wrench_and_screwdriver'), label: t('记忆与工具'),
+          RailButton({ icon: 'tools', label: t('记忆与工具'),
             compId: 'workbench-rail-tools', disabled: !this.active, onTap: this.onTools })
-          RailButton({ icon: $r('sys.symbol.gearshape'), label: t('设置'), compId: 'workbench-rail-settings',
+          RailButton({ icon: 'settings', label: t('设置'), compId: 'workbench-rail-settings',
             disabled: !this.active, onTap: this.onSettings })
         }.width('100%').alignItems(HorizontalAlign.Center)
       }.width('100%').height('100%').padding({ left: 10, right: 10, top: 12, bottom: 12 })

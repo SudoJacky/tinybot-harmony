@@ -123,7 +123,7 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
   const ResponsiveIcon = compile(methods('common/Widgets', ['updateStateVars'], 'IconButton'));
   let diameter = 44;
   const icon = Object.assign(new ResponsiveIcon(), { __diameter: { reset(value) { diameter = value; } } });
-  for (const key of ['icon', 'tint', 'fill', 'disabled', 'label']) { icon['__' + key] = { reset() {} }; }
+  for (const key of ['icon', 'tint', 'fill', 'disabled', 'label', 'animatedSelected']) { icon['__' + key] = { reset() {} }; }
   for (const next of [36, 44, 36, 36]) {
     icon.updateStateVars({ diameter: next });
     assert.equal(diameter, next, 'A retained icon button must follow phone/tablet sizing updates');
@@ -135,14 +135,16 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
     IconButton: class extends ResponsiveIcon {
       constructor(_parent, params) {
         super(); addButton = this; this.diameter = params.diameter;
+        this.animatedIcon = params.animatedIcon; this.animatedSelected = params.animatedSelected;
         this.__diameter = { reset: value => { this.diameter = value; } };
+        this.__animatedSelected = { reset: value => { this.animatedSelected = value; } };
         for (const key of ['icon', 'tint', 'fill', 'disabled', 'label']) { this['__' + key] = { reset() {} }; }
       }
     },
     __Common__: { create() {}, bindPopup() {}, pop() {} }, ViewPU: { create() {} },
     Placement: { TopLeft: 0 }, BlurStyle: { NONE: 0 }, t: value => value
   });
-  const composer = Object.assign(new AddButton(), { workbench: false, thread: {}, app: { saveError: '' },
+  const composer = Object.assign(new AddButton(), { workbench: false, showPlus: false, showPlusMenu: false, thread: {}, app: { saveError: '' },
     speechActive: () => false, plusMenu() {},
     observeComponentCreation2(callback, component) {
       if (component.name === 'IconButton') { updateAddButton = () => callback(1, false); }
@@ -155,14 +157,23 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
     composer.workbench = workbench; updateAddButton();
     assert.equal(addButton.diameter, workbench ? 36 : 44, 'The emitted composer must forward sizing to its existing button');
   }
-  console.log('PASS emitted composer button: layout changes propagate through parent and retained child');
+  assert.equal(addButton.animatedIcon, 'plus');
+  for (const state of ['showPlusMenu', 'showPlus']) {
+    composer[state] = true; updateAddButton(); assert.equal(addButton.animatedSelected, true);
+    composer[state] = false; updateAddButton(); assert.equal(addButton.animatedSelected, false);
+  }
+  console.log('PASS emitted composer button: layout and attachment menu update the retained icon');
 
-  let settingsParams, settingsUpdate;
+  let settingsParams, settingsUpdate, settingsSwipe;
   const Settings = compile(methods('pages/Index', ['settingsContent']), {
     SettingsPanel: class { constructor(_parent, params) { settingsParams = params; } }, ViewPU: { create() {} },
-    __Common__: { create() {}, layoutWeight() {}, pop() {} }
+    __Common__: { create() {}, layoutWeight() {}, pop() {} },
+    Gesture: { create() {}, pop() {} }, GesturePriority: { Low: 0 }, PanDirection: { Horizontal: 0 }, SETTINGS_CATEGORY_SWIPE_DISTANCE: 44,
+    PanGesture: { create() {}, onActionEnd(callback) { settingsSwipe = callback; }, pop() {} }
   });
+  const settingsSwipes = [];
   const settings = Object.assign(new Settings(), { app: { settings: {} }, settingsSection: 'models', settingsActive: true, foreground: true,
+    swipeSettingsSection(event) { settingsSwipes.push(event); },
     observeComponentCreation2(callback, component) {
       if (component.name === 'SettingsPanel') { settingsUpdate = () => callback(1, false); }
       callback(1, true);
@@ -171,6 +182,8 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
   });
   settings.settingsContent();
   assert.equal(settingsParams.section, 'models');
+  settingsSwipe({ offsetX: -80, offsetY: 0 });
+  assert.deepEqual(settingsSwipes, [{ offsetX: -80, offsetY: 0 }]);
   for (const section of ['account', 'assistant', 'tools', 'appearance', 'data', 'help', 'models']) {
     settings.settingsSection = section; settingsUpdate();
     assert.equal(settingsParams.section, section, 'An existing tablet panel must receive the current category');

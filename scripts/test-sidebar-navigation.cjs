@@ -13,9 +13,17 @@ const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
 const cls = tree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'Index');
 const methods = ['openTools', 'openSettings', 'createChat', 'revealChat',
   'openFiles', 'openDetailTab', 'openHistorySearch', 'toggleHistory', 'setHistoryCollapsed',
-  'confirmProviderDiscard', 'confirmRootNavigation', 'returnFromSettings', 'selectSettingsSection'];
+  'confirmProviderDiscard', 'confirmRootNavigation', 'returnFromSettings', 'selectSettingsSection', 'swipeSettingsSection'];
 const body = methods.map(name => cls.members.find(node => node.name?.getText(tree) === name).getText(tree)).join('\n');
 const globals = { exports: {}, t: text => text, $r: value => value, LaunchMode: { POP_TO_SINGLETON: 2 }, Diagnostics: { log() {} }, Motion: {} };
+const categoryFile = path.join(__dirname, '../entry/src/main/ets/views/SettingsNavigation.ets');
+const categoryTree = ts.createSourceFile(categoryFile, fs.readFileSync(categoryFile, 'utf8'), ts.ScriptTarget.Latest, true);
+const categorySource = categoryTree.statements.filter(node => ts.isVariableStatement(node) ||
+  (ts.isFunctionDeclaration(node) && node.name?.text === 'settingsCategoryForSwipe')).map(node => node.getText(categoryTree)).join('\n');
+vm.runInNewContext(ts.transpileModule(categorySource, {
+  compilerOptions: { target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS }
+}).outputText, globals);
+globals.settingsCategoryForSwipe = globals.exports.settingsCategoryForSwipe;
 vm.runInNewContext(ts.transpileModule(`class Page { ${body} } exports.Page = Page;`, {
   compilerOptions: { target: ts.ScriptTarget.ES2021 }
 }).outputText, globals);
@@ -67,6 +75,27 @@ test('repeated settings taps preserve the current settings draft', () => {
   for (let i = 0; i < 20; i++) page.openSettings();
   assert.equal(routes.length, 1);
   assert.equal(resets(), 1);
+});
+test('settings swipes move one category, stop at the ends and keep the settings route', () => {
+  const { page, routes, resets } = fixture();
+  page.openSettings();
+  Object.assign(page, { settingsSection: 'models', settingsActive: true, foreground: true });
+  const swipe = (offsetX, offsetY = 0) => page.swipeSettingsSection({ offsetX, offsetY });
+  for (const [x, y] of [[-30, 0], [-50, 40], [15, 120]]) swipe(x, y);
+  assert.equal(page.settingsSection, 'models', 'Short, diagonal and vertical gestures leave the selection in place');
+  for (const section of ['assistant', 'tools', 'appearance', 'data', 'help', 'help']) {
+    swipe(-80); assert.equal(page.settingsSection, section);
+  }
+  for (const section of ['data', 'appearance', 'tools', 'assistant', 'models', 'account', 'account']) {
+    swipe(80); assert.equal(page.settingsSection, section);
+  }
+  assert.deepEqual(routes.map(route => route.name), ['settings']);
+  assert.equal(resets(), 1);
+  page.settingsActive = false;
+  routes.push({ name: 'provider' });
+  swipe(-80);
+  assert.equal(page.settingsSection, 'account', 'Settings subpages do not react to the swipe');
+  assert.equal(routes.at(-1).name, 'provider');
 });
 test('switching sidebar destinations reuses existing roots', () => {
   const { page, routes } = fixture();

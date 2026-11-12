@@ -1,5 +1,6 @@
 import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { AnimatedIcon } from '../common/AnimatedIcon';
 import { ToolExecution } from '../model/Agent';
 import { t } from '../model/I18n';
 import { stepDisplayContent, stepPreviews, PublishedPreview, PublishedAnswerPart, publishedAnswerParts } from '../model/PublishedPreview';
@@ -273,6 +274,7 @@ export struct MessageBubble {
   @State private selectingText: boolean = false;
   @State private previewPath: string = '';
   @State private previewing: boolean = false;
+  @State private branchInteracting: boolean = false;
 
   private timeline(): TimelineEntry[] { return this.message.timeline; }
   aboutToAppear(): void { this.settled = this.turnStatus === 'complete'; }
@@ -402,16 +404,22 @@ export struct MessageBubble {
 
   @Builder
   actionButton(icon: Resource, label: string, compId: string, action: () => void,
-    enabled: () => boolean = () => true, iconKind: 'symbol' | 'image' | 'reading' = 'symbol') {
+    enabled: () => boolean = () => true, iconKind: 'symbol' | 'branch' | 'reading' = 'symbol') {
     Button({ type: ButtonType.Normal, stateEffect: true }) {
-      if (iconKind === 'image') {
-        Image(icon).width(18).height(18).objectFit(ImageFit.Contain).fillColor($r('app.color.text_secondary'))
+      if (iconKind === 'branch') {
+        AnimatedIcon({ iconName: 'branch', interacting: this.branchInteracting && enabled() })
       } else {
         SymbolGlyph(iconKind === 'reading' && this.readingMessageId === this.message.id ? $r('sys.symbol.stop_circle_fill') : icon)
           .fontSize(18).fontColor([$r('app.color.text_secondary')])
       }
     }.fontFamily(this.appearance.fontFamily).id(compId).width(36).height(44).padding(0).borderRadius(8).enabled(enabled())
       .backgroundColor(Color.Transparent).clickEffect(Motion.pressSmall)
+      .onHover((hovered: boolean) => { if (iconKind === 'branch') { this.branchInteracting = hovered; } })
+      .onTouch((event: TouchEvent) => {
+        if (iconKind !== 'branch') { return; }
+        if (event.type === TouchType.Down) { this.branchInteracting = true; }
+        else if (event.type === TouchType.Up || event.type === TouchType.Cancel) { this.branchInteracting = false; }
+      })
       .accessibilityText(iconKind === 'reading' && this.readingMessageId === this.message.id ? t('停止朗读') : label).onClick(action)
   }
 
@@ -441,7 +449,7 @@ export struct MessageBubble {
           this.actionButton($r('sys.symbol.arrow_clockwise'), t('重新生成（保留原回答）'), 'regenerate-' + this.message.id,
             () => this.onRegenerate(this.message.id), () => this.actionsEnabled)
           this.actionButton($r('app.media.message_branch'), t('分支'), 'fork-' + this.message.id,
-            () => this.onFork(this.message.id), () => this.actionsEnabled, 'image')
+            () => this.onFork(this.message.id), () => this.actionsEnabled, 'branch')
         }
         if (this.message.role === 'assistant' && this.message.content.length > 0) {
           this.actionButton($r('sys.symbol.lightbulb'), t('提炼为记忆…'), 'remember-' + this.message.id,

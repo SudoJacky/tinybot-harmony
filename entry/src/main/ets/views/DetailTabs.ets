@@ -3,13 +3,15 @@ import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { Motion, Radius, Space } from '../common/Theme';
 import { IconButton } from '../common/Widgets';
+import { AnimatedIcon } from '../common/AnimatedIcon';
+import { AnimatedIconName } from '../common/IconArtwork';
 
 export class DetailTabItem {
   id: string;
   label: string;
-  icon: Resource;
+  icon: AnimatedIconName;
 
-  constructor(id: string, label: string, icon: Resource) {
+  constructor(id: string, label: string, icon: AnimatedIconName) {
     this.id = id;
     this.label = label;
     this.icon = icon;
@@ -24,6 +26,7 @@ export struct DetailTabs {
   @Prop tabs: DetailTabItem[] = [];
   @Prop active: string = '';
   @Prop showCollapse: boolean = true;
+  @State private hoveredTab: string = '';
   onSelect: (id: string) => void = () => {};
   onClose: (id: string) => void = () => {};
   onAddFiles: () => void = () => {};
@@ -43,8 +46,9 @@ export struct DetailTabs {
   @Builder
   chip(tab: DetailTabItem) {
     Row({ space: 6 }) {
-      SymbolGlyph(tab.icon).fontSize(15)
-        .fontColor([this.active === tab.id ? this.appearance.accent : $r('app.color.text_secondary')])
+      AnimatedIcon({ iconName: tab.icon, iconSize: 15, selected: this.active === tab.id,
+        interacting: this.hoveredTab === tab.id,
+        tint: this.active === tab.id ? this.appearance.accent : $r('app.color.text_secondary') })
       Text(tab.label).fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis }).constraintSize({ maxWidth: 150 })
         .fontColor(this.active === tab.id ? $r('app.color.text_primary') : $r('app.color.text_secondary'))
@@ -61,6 +65,10 @@ export struct DetailTabs {
     .border({ width: this.active === tab.id ? 0.5 : 0, color: $r('app.color.divider') })
     .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) },
       normal: { .backgroundColor(this.active === tab.id ? $r('app.color.surface') : Color.Transparent) } })
+    .onHover((hovered: boolean) => {
+      if (hovered) { this.hoveredTab = tab.id; }
+      else if (this.hoveredTab === tab.id) { this.hoveredTab = ''; }
+    })
     .onClick(() => this.onSelect(tab.id))
   }
 
