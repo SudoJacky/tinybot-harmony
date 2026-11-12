@@ -1,8 +1,8 @@
 import { common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
-import { deviceInfo } from '@kit.BasicServicesKit';
 import sandbox, { LocalProcessReceipt } from 'libtinybot_sandbox.so';
 import { ApiLevel } from '../common/ApiLevel';
+import { IS_PC } from '../common/DeviceForm';
 import { ToolCall, ToolDefinition } from '../model/Agent';
 import { Diagnostics } from '../model/Diagnostics';
 import { parseToolArguments, ToolFailure, ToolResultError } from '../model/ToolFailure';
@@ -17,7 +17,7 @@ interface LocalProcessArguments {
 }
 
 export function localProcessDirectory(context?: common.Context): string | undefined {
-  if (ApiLevel.sdk < 26 || deviceInfo.deviceType !== deviceInfo.DeviceTypes.TYPE_2IN1 || !context) { return undefined; }
+  if (ApiLevel.sdk < 26 || !IS_PC || !context) { return undefined; }
   const path = context.applicationInfo.nativeLibraryPath;
   if (!path) { return undefined; }
   const directory = path.startsWith('/') ? path : context.bundleCodeDir + '/' + path;
