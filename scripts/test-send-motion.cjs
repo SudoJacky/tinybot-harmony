@@ -52,7 +52,7 @@ function panel(messages = [], signedIn = true) {
   const value = Object.assign(new globals.exports.Panel(), { thread: { id: 'thread', messages }, sendingMessageId: '',
     account: { signedIn }, accountRequests: 0, onAccount() { this.accountRequests++; },
     keyboardFocusRequest: 0, composerFocused: true, clearedFocus: 0,
-    speechActive: () => false, scroller: { scrollEdge() {} }, follow() {},
+    speechActive: () => false, centeredWelcome: () => false, scroller: { scrollEdge() {} }, follow() {},
     getUIContext: () => ({ px2vp: x => x, postFrameCallback() {},
       getFocusController: () => ({ clearFocus() { value.clearedFocus++; } }), getComponentUtils: () => ({
       getRectangleById: () => ({ windowOffset: { x: 0, y: 500 }, size: { width: 320, height: 44 } }) }) }),
