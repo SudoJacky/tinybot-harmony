@@ -378,7 +378,8 @@ async function main() {
     console.log('PASS browser handoff pauses only the owning conversation');
   }
   {
-    const { peerThreadText, parsePeerThread, peerLiveMessage, peerSettingsText } = from('model/PeerSyncData');
+    const { peerThreadText, parsePeerThread, peerLiveMessage } = from('model/PeerSyncData');
+    const { peerSettingsText } = from('model/PeerSettings');
     const makeDevice = name => fixture(data => {
       data.threads = [{ ...data.threads[0], id: name }];
       data.activeThreadId = name;

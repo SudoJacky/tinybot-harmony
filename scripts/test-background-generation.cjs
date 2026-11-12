@@ -50,6 +50,9 @@ const mocks = {
   '../services/McpOAuth': { McpOAuth: { receive: noOp } },
   '../services/LaunchActions': { LaunchActions: { receive: noOp, setForeground: noOp } },
   '../services/DeveloperDiagnostics': { DeveloperDiagnostics: { initialize: noOp, stop: noOp, setForeground: noOp } },
+  '../services/LiveSyncProbe': { liveSyncProbe: { exit: noOp } },
+  '../services/NearbyConversations': { nearbyConversations: { stop: noOp } },
+  'BuildProfile': { DEBUG: false },
   '../services/HuaweiAccount': { huaweiAccount: { refresh: noOp } },
   '../services/AutoCloudBackup': { autoCloudBackup: { setForeground: noOp, onBackground: noOp, dispose: noOp } },
   '../services/HostedPrivacy': { hostedPrivacy: { allowed: true, initialize: noOp, refresh: noOp, onPageHide: noOp, dispose: noOp } }

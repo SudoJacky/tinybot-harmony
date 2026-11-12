@@ -11,13 +11,13 @@ import { AgentStep, ModelMessage, interruptTools, migrateWebIcons, stepMessages,
 import { builtinProviderInfos, DEFAULT_PROVIDER_ID, LEGACY_PROVIDER_ID } from './Provider';
 import { contextSettings } from './ContextSettings';
 import { validateCompaction } from './ContextCheckpoint';
-import { ModelReference, ProviderProfile, validateProfile, validateReference } from './ProviderProfiles';
+import { ModelReference, ProviderProfile, validateProviderProfiles, validateReference } from './ProviderProfiles';
 import { ExtensionSettings, validateExtensions } from './Skills';
 import { PendingInput, validatePendingInputs } from './PendingInput';
 import { FileOperations } from './FileOperations';
 import { MemoryReviewRecord } from './MemoryMaintenance';
 import { FileAnnotation, validateFileAnnotations } from './FileAnnotation';
-import { PeerSettingsConflict, parsePeerSettings } from './PeerSyncData';
+import { PeerSettingsConflict, validatePeerSettings } from './PeerSettings';
 
 import { DEFAULT_SYSTEM_PROMPT, migrateUserDocument } from './SystemPrompt';
 
@@ -207,7 +207,7 @@ export function parseAppData(text: string, recoverExecution: boolean = true): Ap
         conflict.keys.some((key) => typeof key !== 'string' || !/^(userDocument|autoCompact|autoMemory|saveSummary|(profile|server|skill|memory):.+)$/.test(key))) {
         throw new Error('Invalid nearby setting conflict');
       }
-      parsePeerSettings(JSON.stringify(conflict.current));
+      validatePeerSettings(conflict.current);
     }
   }
   const threadIds = new Set<string>();
@@ -216,19 +216,7 @@ export function parseAppData(text: string, recoverExecution: boolean = true): Ap
   if (data.config.reasoning !== undefined && !isConfigurationName(data.config.reasoning)) {
     throw new Error(t('推理强度设置无效。'));
   }
-  if (data.providerProfiles !== undefined) {
-    if (!Array.isArray(data.providerProfiles)) { throw new Error(t("模型服务列表损坏。")); }
-    const ids = new Set<string>();
-    const aliases = new Set<string>();
-    for (const profile of data.providerProfiles) {
-      validateProfile(profile, true);
-      if (ids.has(profile.id) || (profile.credentialAlias.length > 0 && aliases.has(profile.credentialAlias))) {
-        throw new Error(t("模型服务 ID 或密钥别名重复。"));
-      }
-      ids.add(profile.id);
-      if (profile.credentialAlias.length > 0) { aliases.add(profile.credentialAlias); }
-    }
-  }
+  if (data.providerProfiles !== undefined) { validateProviderProfiles(data.providerProfiles); }
   if (data.config.providerId === undefined) {
     // Every existing endpoint used this protocol. Preserve arbitrary user endpoints and keys.
     data.config.providerId = LEGACY_PROVIDER_ID;

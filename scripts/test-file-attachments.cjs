@@ -423,7 +423,8 @@ async function main() {
       { exports, t, Error, Object, MAX_MESSAGE_ATTACHMENTS, DragResult, DragBehavior: { COPY: 1 }, importDroppedAttachments });
     const ui = new exports.Panel(); let commits = 0;
     Object.assign(ui, { attachmentDrop: new AttachmentDrop(), dropGeneration: 0, importing: false,
-      speechActive: () => false, getUIContext: () => ({ getDragController: () => ({ cancelDataLoading() {} }) }),
+      speechActive: () => false, remoteMode: () => false,
+      getUIContext: () => ({ getDragController: () => ({ cancelDataLoading() {} }) }),
       thread: { id: 'drop-chat', archived: false, attachments: [] },
       app: { ready: true, busy: false, saveError: '', error: '', active: { id: 'drop-chat' },
         setAttachments: async items => { commits++; ui.thread.attachments = items; return true; } } });
@@ -551,7 +552,8 @@ async function encryptedBackupTest() {
   const secret='sk-PRIVATE-DO-NOT-WRITE-PLAINTEXT',openID='fixture-openid-A';
   const balanceSecret='PRIVATE-BALANCE-ACCESS-TOKEN';
   const stored=new Map([['original-alias',secret],['original-balance-alias',balanceSecret]]);
-  const vault={read:async id=>stored.get(id)||'',write:async(id,value)=>{assert.ok(!stored.has(id));stored.set(id,value);},remove:async id=>stored.delete(id)};
+  const vault={read:async id=>stored.get(id)||'',readOptional:async id=>stored.get(id),
+    write:async(id,value)=>{assert.ok(!stored.has(id));stored.set(id,value);},remove:async id=>stored.delete(id)};
   const before=JSON.stringify(data);
   const backup=await createBackupFile(context,data,vault);
   const bytes=fs.readFileSync(disk(backup));assert.ok(!bytes.includes(Buffer.from(secret)));assert.ok(!bytes.includes(Buffer.from(openID)));

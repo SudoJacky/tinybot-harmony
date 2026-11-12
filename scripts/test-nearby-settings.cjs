@@ -4,7 +4,7 @@ const { emptyData } = from('model/Conversation');
 const { defaultProductivity } = from('model/Productivity');
 const { defaultExtensions } = from('model/Skills');
 const { mergePeerSettings } = from('model/PeerSettingsMerge');
-const { peerSettingsText, parsePeerSettings } = from('model/PeerSyncData');
+const { peerSettingsText, parsePeerSettings } = from('model/PeerSettings');
 const copy = value => JSON.parse(JSON.stringify(value));
 const snapshot = data => parsePeerSettings(peerSettingsText(data));
 const local = emptyData();

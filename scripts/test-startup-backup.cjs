@@ -92,18 +92,23 @@ async function accountBackupUiTest(){
   const tree=ts.createSourceFile('BackupPanel.ts',fs.readFileSync(emitted,'utf8'),ts.ScriptTarget.Latest,true);
   const component=tree.statements.find(n=>ts.isClassDeclaration(n)&&n.name?.text==='BackupPanel');
   const methods=['locked','cloud','aboutToDisappear'];
-  const exports={},calls=[];const data={};let imports=0;
+  const exports={},calls=[];const data={};let imports=0,confirmRestore=false;
   vm.runInNewContext(compile('class Probe {'+methods.map(name=>component.members.find(n=>n.name?.getText(tree)===name).getText(tree)).join('\n')+'} exports.Probe=Probe;'),{
     exports,t:s=>s,cloudBackupError:e=>e.message,BackupLoginRequired:class extends Error {},
-    CloudBackup:{create:async(_context,_data,password)=>{calls.push(['create',password]);return true;},
-      restoreLatest:async(_context,_data)=>{calls.push(['restoreLatest']);return data;}}
+    NativeData:{forFilesDir:()=>undefined},
+    reviewBackupRestore:async(_context,restored)=>{assert.equal(restored,data);calls.push(['review']);return confirmRestore;},
+    CloudBackup:{create:async(_context,_data)=>{calls.push(['create']);return true;},
+      restoreLatest:async(_context,_data)=>{calls.push(['restoreLatest']);return data;},
+      restore:async(_context,name,_data,mode)=>{calls.push(['restore',name,mode]);return data;}}
   });
   const panel=Object.assign(new exports.Probe(),{visible:true,busy:false,appearance:{surface:{}},
     app:{busy:false,providerProfiles:[{noApiKey:false}],exportSnapshot:()=>data,importSnapshot:async()=>{imports++;return true;}},
     context:()=>context,refreshStatus:async()=>{},getUIContext:()=>({getHostContext:()=>context,getPromptAction:()=>({showToast(){}})})});
   await panel.cloud(false);await panel.cloud(true);
-  assert.deepEqual(calls,[['create',undefined],['restoreLatest']]);assert.equal(imports,1);
+  assert.deepEqual(calls,[['create'],['restoreLatest'],['review']]);assert.equal(imports,0);
+  confirmRestore=true;await panel.cloud(true,'selected-version');
+  assert.deepEqual(calls.slice(3),[['restore','selected-version','copy'],['review']]);assert.equal(imports,1);
   panel.aboutToDisappear();assert.equal(panel.visible,false);
-  console.log('PASS compiled password-free single cloud backup and automatic restore actions');
+  console.log('PASS compiled cloud backup and review before restoring the selected version');
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

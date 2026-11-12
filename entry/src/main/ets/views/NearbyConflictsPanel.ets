@@ -1,5 +1,5 @@
 import { t } from '../model/I18n';
-import { PeerSettings, PeerSettingsConflict, peerSettingsText } from '../model/PeerSyncData';
+import { PeerSettings, PeerSettingsConflict, peerSettingsText } from '../model/PeerSettings';
 import { emptyData } from '../model/Conversation';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { Btn, Font, Space } from '../common/Theme';

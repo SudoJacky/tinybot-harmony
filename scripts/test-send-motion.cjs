@@ -83,6 +83,6 @@ switched.value.thread.messages.push({ id: 'elsewhere', role: 'user' }); switched
 assert.equal(switched.value.sendingMessageId, '', 'A different thread cannot inherit a pending send');
 assert.equal(switched.value.clearedFocus, 0, 'Late updates from another thread do not change keyboard focus');
 const remote = panel([], true, true);
-assert.deepEqual(remote.delivery(), ['tablet', '', '', 'thread', 'same composer draft']);
+assert.deepEqual(remote.delivery(), ['tablet', '', '', 'thread', 'same composer draft', 'followUp']);
 assert.equal(remote.value.clearedFocus, 0, 'Remote send retains focus until acceptance');
 console.log('PASS send origin, landing, one-shot lifecycle, history, navigation, tall content, accepted-send keyboard dismissal, rejected send and queued output');

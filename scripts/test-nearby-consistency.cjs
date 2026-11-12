@@ -202,7 +202,7 @@ async function main() {
     const d = device(); await d.opened;
     try {
       const { emptyData } = d.load('model/Conversation');
-      const { peerSettingsText, parsePeerSettings } = d.load('model/PeerSyncData');
+      const { peerSettingsText, parsePeerSettings } = d.load('model/PeerSettings');
       const { SessionService } = d.load('services/SessionService');
       const { importedSessionCandidate } = d.load('services/SessionCandidates');
       const { attachBackupKeys, commitBackupKeys } = d.load('services/BackupKeyRestore');
