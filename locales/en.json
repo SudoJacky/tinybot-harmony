@@ -35,6 +35,8 @@
   "附近设备同步需要支持分布式数据库的设备。": "Nearby sync requires support for distributed databases.",
   "请允许连接附近设备后再开启同步。": "Allow nearby device access to enable sync.",
   "附近设备同步失败：{0}": "Nearby sync failed: {0}",
+  "收到旧版删除记录，无法核实删除前版本，已保留本机内容。请核对相关看板和卡片。": "A deletion from an older version could not be verified. Local content has been kept. Please check the affected boards and cards.",
+  "看板或卡片的删除与编辑发生冲突，已保留编辑内容。": "A board or card was edited while another device deleted it. The edits have been kept.",
   "正在查找附近设备…": "Looking for nearby devices…",
   "已发现 {0} 台附近设备": "Found {0} nearby devices",
   "等待附近设备打开 Tinybot": "Waiting for Tinybot on nearby devices",

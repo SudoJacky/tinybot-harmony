@@ -6,7 +6,7 @@ export interface LogFields {
   sdk?: number; initialSupported?: boolean; supported?: boolean; available?: boolean; reason?: string; format?: string;
   scriptSource?: string; line?: number; pageSceneObserver?: boolean;
   mounted?: boolean; attached?: boolean; visible?: boolean; foreground?: boolean;
-  setting?: string; dataVersion?: number; serverId?: string;
+  setting?: string; dataVersion?: number; serverId?: string; deviceId?: string;
   change?: string; commonMessages?: number; sharedCharacters?: number; systemHash?: number; toolsHash?: number;
   operationId?: number; instanceId?: number; generation?: number; active?: number; count?: number; total?: number;
   chars?: number; bytes?: number; elapsedMs?: number; durationMs?: number; delayMs?: number; firstTokenMs?: number; outputTokens?: number; http?: number; code?: number;
@@ -15,6 +15,7 @@ export interface LogFields {
   tokens?: number; budget?: number; removed?: number; retained?: number; duplicates?: number; characters?: number;
   added?: number; updated?: number;
   round?: number; revision?: number; threads?: number; changedThreads?: number; selected?: number;
+  requests?: number; panels?: number; boards?: number;
   enabled?: boolean; failed?: boolean; cancelled?: boolean; uncertain?: boolean; speaking?: boolean; preflight?: boolean; closed?: boolean;
   streaming?: boolean; ready?: boolean; hasModel?: boolean; retryable?: boolean;
   protocol?: string; phase?: string; action?: string; policy?: string; scheme?: string; library?: string; status?: string; balanceAdapter?: string;
@@ -75,12 +76,12 @@ EVENTS.preview = ['failed', 'captured', 'thumbnail_failed', 'surface_moved'];
 EVENTS.sandbox = ['execution_failed', 'orchestration_failed'];
 EVENTS.tool = ['failed', 'partial'];
 EVENTS.workspace = ['mutation_failed', 'preview_failed', 'folder_support_failed', 'folder_picker_support_failed', 'folder_persist_failed', 'folder_activate_failed', 'folder_revoke_failed', 'folder_startup_failed'];
-EVENTS.storage = ['scan_failed', 'metric_failed', 'cleanup_failed', 'cleanup_protected', 'usage_save_failed'];
+EVENTS.storage = ['scan_failed', 'metric_failed', 'cleanup_failed', 'cleanup_protected', 'usage_save_failed', 'migration_committed'];
 EVENTS.mcp = ['request_failed', 'cancel_notice_failed', 'browser_launch_failed'];
 EVENTS.mail = ['transport_failed', 'cleanup_failed', 'account_saved', 'account_removed', 'query_started', 'query_complete', 'query_failed', 'command_failed', 'settings_failed'];
 EVENTS.export = ['image_failed', 'preview_failed', 'cleanup_failed', 'share_failed', 'save_failed'];
 EVENTS.network = ['request_start', 'request_end', 'context_overflow', 'first_data', 'request_failed'];
-EVENTS.sync = ['nearby_failed', 'conversation_accept_failed', 'conversation_connect_failed', 'conversation_disconnect_failed',
+EVENTS.sync = ['nearby_failed', 'nearby_device_failed', 'workspace_delete_conflict', 'workspace_delete_unversioned', 'conversation_accept_failed', 'conversation_connect_failed', 'conversation_disconnect_failed',
   'conversation_destroy_failed', 'conversation_receive_failed', 'conversation_progress_failed', 'conversation_admission_failed',
   'conversation_admitted', 'conversation_acknowledged', 'conversation_frame_invalid', 'conversation_live_started',
   'conversation_route_ready', 'conversation_connected', 'conversation_authorized', 'conversation_input_saved',
@@ -99,9 +100,9 @@ EVENTS.diagnostics = ['started', 'stopped', 'marker', 'failed', 'level_changed']
 const NUMBERS: string[] = ['sdk', 'line', 'operationId', 'instanceId', 'generation', 'active', 'count', 'total', 'chars', 'bytes', 'elapsedMs', 'durationMs', 'delayMs', 'firstTokenMs', 'outputTokens', 'http', 'code',
   'commonMessages', 'sharedCharacters', 'systemHash', 'toolsHash', 'dataVersion',
   'messages', 'tools', 'nodes', 'keys', 'width', 'height', 'widthVp', 'request', 'chunk', 'eventCode', 'newChats', 'skippedChats', 'level', 'style',
-  'tokens', 'budget', 'removed', 'retained', 'duplicates', 'characters', 'added', 'updated', 'round', 'revision', 'threads', 'changedThreads', 'selected'];
+  'tokens', 'budget', 'removed', 'retained', 'duplicates', 'characters', 'added', 'updated', 'round', 'revision', 'threads', 'changedThreads', 'selected', 'requests', 'panels', 'boards'];
 const BOOLEANS: string[] = ['initialSupported', 'supported', 'available', 'pageSceneObserver', 'mounted', 'attached', 'visible', 'foreground', 'enabled', 'failed', 'cancelled', 'uncertain', 'speaking', 'preflight', 'closed', 'streaming', 'ready', 'hasModel', 'retryable'];
-const REFERENCES: string[] = ['threadId', 'messageId', 'sessionId', 'providerId', 'previewId', 'surfaceId', 'serverId'];
+const REFERENCES: string[] = ['threadId', 'messageId', 'sessionId', 'providerId', 'previewId', 'surfaceId', 'serverId', 'deviceId'];
 const STRINGS: Record<string, string[]> = {};
 STRINGS.channel = ['answer', 'reasoning'];
 STRINGS.balanceAdapter = ['deepseek', 'sub2api', 'newapi', 'newapi-account', 'zhipu', 'custom'];

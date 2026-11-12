@@ -3,7 +3,7 @@ import { preferences } from '@kit.ArkData';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { util } from '@kit.ArkTS';
 import { fileIo as fs } from '@kit.CoreFileKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
+import { Diagnostics } from '../model/Diagnostics';
 import { ConversationStore } from '../model/ConversationStore';
 import { ConversationCapture } from '../model/ConversationCapture';
 import { emptyData } from '../model/Conversation';
@@ -130,8 +130,7 @@ export class NativeData {
       }
     });
     if (migrated) {
-      hilog.info(0x0000, 'TinybotStorage', 'ArkData migration committed threads=%{public}d usage=%{public}d panels=%{public}d boards=%{public}d',
-        threads, requests, panels, boards);
+      Diagnostics.log('info', 'storage', 'migration_committed', { threads: threads, requests: requests, panels: panels, boards: boards });
     }
     return db;
   }

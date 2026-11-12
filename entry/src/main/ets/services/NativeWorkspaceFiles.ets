@@ -15,15 +15,9 @@ import { SHARED_FOLDER_ROOT, SharedFolder } from '../model/SharedFolders';
 import { ProjectFolderAccess } from './ProjectFolderAccess';
 import { WebDavMount as MountPath, WebDavWorkspaceFiles } from './WebDavWorkspaceFiles';
 import { ArkDataWorkspace, isManagedWorkspaceRecord } from './ArkDataWorkspace';
+import { contentVersion } from './TextDigest';
 
 import { WorkspaceFiles, WorkspaceEntry, WorkspaceListing, WorkspaceText, WorkspaceWrite, WorkspaceWriteGuard, FileBaseline, FileJobWorkspace } from './WorkspaceFiles';
-
-async function contentVersion(content: string): Promise<string> {
-  const hash = cryptoFramework.createMd('SHA256');
-  // The device encoder returns undefined for an empty string.
-  if (content.length > 0) { await hash.update({ data: new util.TextEncoder().encodeInto(content) }); }
-  return new util.Base64Helper().encodeToStringSync((await hash.digest()).data);
-}
 
 export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
   static contentRevision: number = 0;
@@ -368,8 +362,9 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
         throw new ToolFailure('FS_STALE_VERSION', t('文件自上次读取后已变化，请重新读取再修改。'), 'read_file', { path: path });
       }
       cancellation.check();
-      await store.write(path, content); NativeWorkspaceFiles.contentRevision++;
-      return { path: path, bytes: bytes, written: true, before: before || '', after: content, created: before === undefined, version: version };
+      const saved = (await store.write(path, content))!; NativeWorkspaceFiles.contentRevision++;
+      return { path: path, bytes: new util.TextEncoder().encodeInto(saved).byteLength, written: true, before: before || '',
+        after: saved, created: before === undefined, version: await contentVersion(saved) };
     });
   }
 

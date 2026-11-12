@@ -1,6 +1,7 @@
 import { common } from '@kit.AbilityKit';
 import { relationalStore } from '@kit.ArkData';
 import { distributedDeviceManager } from '@kit.DistributedServiceKit';
+import { Diagnostics } from '../model/Diagnostics';
 
 const DB_NAME = 'TinybotNearby.db';
 const TABLE = 'nearby_items';
@@ -74,7 +75,14 @@ export class NearbySyncStore {
     const predicates = new relationalStore.RdbPredicates(TABLE);
     predicates.inDevices(devices);
     const results = await this.store.sync(push ? relationalStore.SyncMode.SYNC_MODE_PUSH : relationalStore.SyncMode.SYNC_MODE_PULL, predicates);
-    if (!results.some((item) => item[1] === 0)) {
+    for (const device of devices) {
+      const result = results.find((item) => item[0] === device);
+      if (!result || result[1] !== 0) {
+        Diagnostics.log('warn', 'sync', 'nearby_device_failed', { deviceId: device, code: result?.[1], uncertain: !result });
+      }
+    }
+    if (devices.some((device) => !results.some((item) => item[0] === device && item[1] === 0)) ||
+      results.some((item) => item[1] !== 0)) {
       throw new Error('Nearby ArkData sync status ' + results.map((item) => item[1].toString()).join(','));
     }
   }

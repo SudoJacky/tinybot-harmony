@@ -56,11 +56,9 @@ export function parsePeerThread(text: string, id: string): ThreadData {
   const projectId = raw.projectId;
   raw.projectId = undefined;
   const data = emptyData(); data.threads = [raw];
-  const checked = parseAppData(JSON.stringify(data)).threads[0];
+  const checked = parseAppData(JSON.stringify(data), false).threads[0];
   checked.projectId = projectId;
   checked.peerDraft = undefined;
-  const last = raw.messages[raw.messages.length - 1];
-  if (last?.status === 'generating') { checked.messages[checked.messages.length - 1].status = 'generating'; }
   checked.pendingInputs = undefined; checked.queuePaused = undefined; checked.toolApprovalMode = undefined;
   return checked;
 }

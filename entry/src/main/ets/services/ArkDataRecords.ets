@@ -3,6 +3,7 @@ import { relationalStore } from '@kit.ArkData';
 
 export interface StoredRecord { scope: string; id: string; text?: string; }
 export interface RecordSize { id: string; bytes: number; }
+export type RecordSource = 'local' | 'peer';
 type WriteRecord = (record: StoredRecord) => Promise<void>;
 const CHUNK_LENGTH = 128 * 1024;
 export const LOCAL_DATABASE = 'tinybot.db';
@@ -24,7 +25,7 @@ function chunks(text: string): string[] {
 }
 
 export class ArkDataRecords {
-  onCommitted?: (records: StoredRecord[]) => void;
+  onCommitted?: (records: StoredRecord[], source: RecordSource) => void;
   private store: relationalStore.RdbStore;
   private writes: Promise<void> = Promise.resolve();
 
@@ -75,11 +76,11 @@ export class ArkDataRecords {
     } finally { rows.close(); }
   }
 
-  commit(records: StoredRecord[]): Promise<void> {
+  commit(records: StoredRecord[], source: RecordSource = 'local'): Promise<void> {
     if (!records.length) { return Promise.resolve(); }
     const operation = this.writes.then(() => this.transact(async (transaction) => {
       for (const record of records) { await this.replace(transaction, record); }
-    })).then(() => { this.onCommitted?.(records); });
+    })).then(() => { this.onCommitted?.(records, source); });
     this.writes = operation.catch(() => {});
     return operation;
   }

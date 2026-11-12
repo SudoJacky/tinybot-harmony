@@ -33,9 +33,9 @@ export async function commitBackupKeys(local: AppData, imported: AppData, candid
       const index = (candidate.data.providerProfiles || []).findIndex((entry) => entry.id === id);
       if (index < 0) { throw new Error(t('备份密钥与模型服务配置不一致。')); }
       const existing = (local.providerProfiles || []).find((entry) => entry.id === id);
-      if (existing) {
-        if (existing.id !== item.profile.id ||
-          !sameCredentialScope(existing.protocol, existing.baseUrl, item.profile.protocol, item.profile.baseUrl)) { continue; }
+      if (existing && (existing.id !== item.profile.id ||
+        !sameCredentialScope(existing.protocol, existing.baseUrl, item.profile.protocol, item.profile.baseUrl))) { continue; }
+      if (existing && !existing.pendingSetup) {
         const profile = (candidate.data.providerProfiles as ProviderProfile[])[index];
         if (!existing.noApiKey && item.apiKey && await vault.readOptional(existing.credentialAlias) === undefined) {
           profile.credentialAlias = await write('tinybot-', item.apiKey);
@@ -50,6 +50,7 @@ export async function commitBackupKeys(local: AppData, imported: AppData, candid
         continue;
       }
       const profile = JSON.parse(JSON.stringify(item.profile)) as ProviderProfile;
+      profile.pendingSetup = undefined;
       profile.id = id; profile.credentialAlias = ''; profile.balanceCredentialAlias = undefined;
       if (!profile.noApiKey) {
         profile.credentialAlias = await write('tinybot-', item.apiKey);

@@ -7,21 +7,19 @@ import { AppData, ThreadData } from '../model/Conversation';
 import { Diagnostics } from '../model/Diagnostics';
 import { LogFields } from '../model/DiagnosticLog';
 import { t } from '../model/I18n';
-import { parseLifeBoard } from '../model/LifeBoard';
-import { parsePanelRecord } from '../model/LifePanel';
 import { ProjectData } from '../model/Project';
 import { PeerSettingsDelta, PeerThreadUpdate, parsePeerProject, parsePeerSettings, parsePeerThread, peerLiveMessage,
   peerProjectText, peerSettingsText, peerThreadText } from '../model/PeerSyncData';
 import { RequestUsage } from '../model/Usage';
 import { WorkspaceStore } from '../model/WorkspaceStore';
-import { ArkDataRecords, StoredRecord } from './ArkDataRecords';
-import { isManagedWorkspaceRecord } from './ArkDataWorkspace';
+import { ArkDataRecords, RecordSource, StoredRecord } from './ArkDataRecords';
+import { ArkDataWorkspace, isManagedWorkspaceRecord, WORKSPACE_DELETIONS, workspaceDeletion } from './ArkDataWorkspace';
 import { NearbyItem, NearbyRecord, NearbySyncStore } from './NearbySyncStore';
 import { NearbyFiles } from './NearbyFiles';
 import { ConversationDevice, nearbyConversations, peerConversationCollisionId } from './NearbyConversations';
 import { PanelChanges } from './PanelChanges';
 import { SessionService } from './SessionService';
-import { USAGE_SCOPE, UsageLedger } from './UsageLedger';
+import { PeerUsageUpdate, USAGE_SCOPE, UsageLedger } from './UsageLedger';
 
 const INTERVAL_MS = 750;
 const RESCAN_MS = 12000;
@@ -73,7 +71,7 @@ class NearbySync {
   private liveDirty: Set<string> = new Set();
   private localLive: Set<string> = new Set();
   private sharedTurns: Map<string, string> = new Map();
-  private applyingWorkspace: Set<string> = new Set();
+  private workspaceConflict: boolean = false;
 
   bind(context: common.UIAbilityContext, session: SessionService, database: () => Promise<ArkDataRecords>): void {
     if (this.session) { return; }
@@ -150,7 +148,8 @@ class NearbySync {
       this.localStore = db;
       this.files = new NearbyFiles(this.context!, this.origin, db, (item: NearbyItem) => this.queue(item), (error: Error) => this.report(error));
       await this.files.open();
-      db.onCommitted = (records: StoredRecord[]) => {
+      db.onCommitted = (records: StoredRecord[], source: RecordSource) => {
+        if (source === 'peer') { return; }
         try { this.capture(records); } catch (error) { this.report(error as Error); }
       };
       const snapshot = this.session!.snapshot();
@@ -172,6 +171,11 @@ class NearbySync {
             if (text !== undefined) { this.queue({ kind: 'workspace', id: id + '/' + path, text: text }); }
           }
         }
+      }
+      for (const id of await db.ids(WORKSPACE_DELETIONS)) {
+        const text = await db.read(WORKSPACE_DELETIONS, id);
+        if (text === undefined || !workspaceDeletion(text)) { throw new Error('Workspace deletion is missing its base revision'); }
+        this.queue({ kind: 'workspace', id: id, text: text });
       }
       this.ready = true;
       nearbyConversations.start(this.context!, this.session!, this.origin, () => transport.localNetworkId(), () =>
@@ -197,6 +201,7 @@ class NearbySync {
     this.session?.clearPeerProgress();
     this.nextPull = 0; this.nextPush = 0; this.needsPush = true; this.remoteDirty = true;
     this.lastExchangePush = false; this.exchangeFailed = false;
+    this.workspaceConflict = false;
     AppStorage.setOrCreate('tinybot.nearby.status', '');
     try { if (files) { await files.close(); } }
     finally { if (transport) { await transport.close(); } }
@@ -229,7 +234,7 @@ class NearbySync {
     this.queue({ kind: 'thread', id: thread.id, text: peerThreadText(thread) });
   }
   private usage(item: RequestUsage): void {
-    if (item.status !== 'running_or_unknown') { this.queue({ kind: 'usage', id: item.id, text: JSON.stringify(item) }); }
+    if (!UsageLedger.isPeer(item.id) && item.status !== 'running_or_unknown') { this.queue({ kind: 'usage', id: item.id, text: JSON.stringify(item) }); }
   }
   private settings(data: AppData): void {
     for (const project of data.projects || []) { this.queue({ kind: 'project', id: project.id, text: peerProjectText(project) }); }
@@ -247,9 +252,11 @@ class NearbySync {
         this.settings(JSON.parse(index.metadata) as AppData);
       } else if (record.scope === USAGE_SCOPE && record.text) {
         this.usage(usageItem(record.text));
-      } else if (record.scope.startsWith('workspace:') && isManagedWorkspaceRecord(record.id)) {
+      } else if (record.scope === WORKSPACE_DELETIONS && record.text !== undefined) {
+        this.queue({ kind: 'workspace', id: record.id, text: record.text });
+      } else if (record.scope.startsWith('workspace:') && isManagedWorkspaceRecord(record.id) && record.text !== undefined) {
         const id = record.scope.slice(10) + '/' + record.id;
-        if (!this.applyingWorkspace.has(id)) { this.queue({ kind: 'workspace', id: id, text: record.text }); }
+        this.queue({ kind: 'workspace', id: id, text: record.text });
       }
     }
   }
@@ -305,7 +312,7 @@ class NearbySync {
       catch (error) { this.remoteDirty = true; throw error as Error; }
     }
     this.scheduleExchange(transport, devices, now);
-    if (!this.exchangeFailed) {
+    if (!this.exchangeFailed && !this.workspaceConflict) {
       AppStorage.setOrCreate('tinybot.nearby.status', devices.length ?
         t('已发现 {0} 台附近设备', [devices.length]) : t('等待附近设备打开 Tinybot'));
     }
@@ -362,9 +369,13 @@ class NearbySync {
       await this.session!.receivePeerChanges(projects, threads, settings, this.origin);
     }
     if (settingRecords.length) { await this.localStore!.commit(settingRecords); }
-    const usage: RequestUsage[] = [];
+    const usage: PeerUsageUpdate[] = [];
     for (const record of records) {
-      if (record.kind === 'usage' && record.text !== undefined) { usage.push(usageItem(record.text)); applied.push(record); }
+      if (record.kind === 'usage' && record.text !== undefined) {
+        const item = usageItem(record.text);
+        if (item.id !== record.id) { throw new Error('Synchronized usage does not match its identifier'); }
+        usage.push({ origin: record.origin, revision: record.revision, item: item }); applied.push(record);
+      }
       else if (record.kind === 'file') { this.files?.receive(record); applied.push(record); }
       else if (record.kind === 'workspace') { await this.receiveWorkspace(record); applied.push(record); }
       else if (record.kind === 'live') {
@@ -372,26 +383,29 @@ class NearbySync {
         else if (this.session!.receivePeerAnswer(record.origin, record.id, peerLiveMessage(record.text))) { applied.push(record); }
       }
     }
-    if (usage.length) { await UsageLedger.restoreBackup(this.context!.filesDir, usage); }
+    if (usage.length) { await UsageLedger.receivePeer(this.context!.filesDir, usage); }
     for (const record of applied) { transport.mark(this.seen, record); }
   }
   private async receiveWorkspace(record: NearbyRecord): Promise<void> {
     const index = record.id.indexOf('/'), id = record.id.slice(0, index), path = record.id.slice(index + 1);
     if (index <= 0 || !isManagedWorkspaceRecord(path) || !this.localStore) { throw new Error('Invalid synchronized workspace record'); }
-    const scope = 'workspace:' + id;
-    const store = this.localStore;
-    const current = await store.read(scope, path);
-    if (current === record.text) { return; }
-    if (record.text !== undefined) {
-      const parts = path.split('/');
-      const time = parts[0] === 'life-panels' ? parsePanelRecord(record.text, parts[1]).updatedAt : parseLifeBoard(record.text, parts[1]).updatedAt;
-      const existing = !current ? 0 : parts[0] === 'life-panels' ? parsePanelRecord(current, parts[1]).updatedAt : parseLifeBoard(current, parts[1]).updatedAt;
-      if (existing > time) { return; }
-      await new WorkspaceStore(this.context!.getApplicationContext().filesDir).ensureThread(id);
+    const workspaces = new WorkspaceStore(this.context!.getApplicationContext().filesDir);
+    const workspace = ArkDataWorkspace.forRoot(workspaces.pathFor(id));
+    if (!workspace) { throw new Error('Workspace database is not registered'); }
+    if (record.text === undefined) {
+      // Old transports have no base to verify. Surface the unapplied deletion
+      // without repeatedly blocking unrelated records in the same sync batch.
+      this.workspaceConflict = true;
+      AppStorage.setOrCreate('tinybot.nearby.status', t('收到旧版删除记录，无法核实删除前版本，已保留本机内容。请核对相关看板和卡片。'));
+      Diagnostics.log('warn', 'sync', 'workspace_delete_unversioned', { sessionId: id });
+      return;
     }
-    this.applyingWorkspace.add(record.id);
-    try { await store.commit([{ scope: scope, id: path, text: record.text }]); }
-    finally { this.applyingWorkspace.delete(record.id); }
+    if (!workspaceDeletion(record.text)) { await workspaces.ensureThread(id); }
+    if (await workspace.receive(path, record.text)) {
+      this.workspaceConflict = true;
+      AppStorage.setOrCreate('tinybot.nearby.status', t('看板或卡片的删除与编辑发生冲突，已保留编辑内容。'));
+      Diagnostics.log('warn', 'sync', 'workspace_delete_conflict', { sessionId: id });
+    }
     PanelChanges.emit();
   }
 }

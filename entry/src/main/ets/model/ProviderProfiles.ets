@@ -25,6 +25,7 @@ export interface ProviderProfile {
   contextWindow?: number;
   balance?: BalanceSettings;
   balanceCredentialAlias?: string;
+  pendingSetup?: boolean;
 }
 
 export interface ModelChoice extends ModelReference {
@@ -44,6 +45,7 @@ export function validateProfile(profile: ProviderProfile, stored: boolean = fals
     typeof profile.name !== 'string' || profile.name.trim().length === 0 || profile.name.length > 80 ||
     !isConfigurationName(profile.protocol) || (!stored && !isSupportedProtocol(profile.protocol)) || typeof profile.baseUrl !== 'string' ||
     typeof profile.credentialAlias !== 'string' || typeof profile.noApiKey !== 'boolean' ||
+    (profile.pendingSetup !== undefined && (profile.pendingSetup !== true || profile.enabled || !profile.noApiKey)) ||
     (profile.balanceCredentialAlias !== undefined && typeof profile.balanceCredentialAlias !== 'string') ||
     typeof profile.enabled !== 'boolean' || !Array.isArray(profile.models) ||
     profile.models.some((id: string) => typeof id !== 'string' || id.trim() !== id || id.length === 0) ||

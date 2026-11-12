@@ -286,7 +286,11 @@ export class SessionService {
         if (!current || memory.updatedAt > current.updatedAt) { memories.set(memory.id, memory); changed = true; }
       }
       for (const profile of item.profiles) {
-        if (!profiles.some((entry) => entry.id === profile.id)) { profiles.push(profile); changed = true; }
+        if (!profiles.some((entry) => entry.id === profile.id)) {
+          const imported = JSON.parse(JSON.stringify(profile)) as ProviderProfile;
+          imported.pendingSetup = true;
+          profiles.push(imported); changed = true;
+        }
       }
       for (const skill of item.skills) {
         const index = skills.findIndex((entry) => entry.name === skill.name);

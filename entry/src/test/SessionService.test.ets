@@ -24,6 +24,8 @@ import { ToolApproval } from '../main/ets/services/ToolApproval';
 import { InputForm } from '../main/ets/model/RichArtifacts';
 import { MemoryOperation } from '../main/ets/model/MemoryMaintenance';
 
+const PEER_ORIGIN = '11111111-1111-1111-1111-111111111111';
+
 function runtimeContext(request: ProviderRequest): string {
   const snapshots = request.messages.filter((message) => message.runtimeContext);
   return snapshots.length ? snapshots[snapshots.length - 1].content : '';
@@ -223,32 +225,32 @@ export default function sessionServiceTests(): void {
         if (event.message?.id === 'answer') { shown = event.message.content; }
         if (event.data) { shown = event.data.threads.find((item) => item.id === 'peer-run')?.messages[1].content || ''; }
       });
-      await f.session.receivePeerChanges([], [{ origin: 'remote', id: thread.id, collisionId: 'collision', thread: thread, direct: true }]);
-      expect(f.session.receivePeerAnswer('remote', thread.id,
+      await f.session.receivePeerChanges([], [{ origin: PEER_ORIGIN, id: thread.id, collisionId: 'collision', thread: thread, direct: true }]);
+      expect(f.session.receivePeerAnswer(PEER_ORIGIN, thread.id,
         { id: 'answer', role: 'assistant', content: 'Direct text', status: 'generating', error: '' }, true)).assertTrue();
-      expect(f.session.receivePeerAnswer('remote', thread.id,
+      expect(f.session.receivePeerAnswer(PEER_ORIGIN, thread.id,
         { id: 'answer', role: 'assistant', content: 'Delayed', status: 'generating', error: '' })).assertTrue();
       expect(shown).assertEqual('Direct text');
       const complete = JSON.parse(JSON.stringify(thread)) as ThreadData;
       complete.messages[1].status = 'complete'; complete.messages[1].content = 'Final';
-      await f.session.receivePeerChanges([], [{ origin: 'remote', id: thread.id, collisionId: 'collision', thread: complete, direct: true }]);
-      await f.session.receivePeerChanges([], [{ origin: 'remote', id: thread.id, collisionId: 'collision', thread: thread }]);
+      await f.session.receivePeerChanges([], [{ origin: PEER_ORIGIN, id: thread.id, collisionId: 'collision', thread: complete, direct: true }]);
+      await f.session.receivePeerChanges([], [{ origin: PEER_ORIGIN, id: thread.id, collisionId: 'collision', thread: thread }]);
       expect(shown).assertEqual('Final');
       const mirror = f.session.snapshot().threads.find((item) => item.id === 'peer-run');
-      expect(mirror?.peerOwner).assertEqual('remote');
+      expect(mirror?.peerOwner).assertEqual(PEER_ORIGIN);
       expect(mirror?.messages[1].status).assertEqual('complete');
     });
 
     it('keepsMirrorComposerDraftsLocalAcrossPeerUpdatesAndClearsOnlyTheSubmittedText', 0, async () => {
       const f = new Fixture(); await f.session.initialize();
       const thread: ThreadData = { id: 'peer-draft-thread', title: 'Peer', updatedAt: 1, messages: [], draft: 'Executor draft' };
-      await f.session.receivePeerChanges([], [{ origin: 'peer', id: thread.id, collisionId: 'collision', thread: thread }]);
+      await f.session.receivePeerChanges([], [{ origin: PEER_ORIGIN, id: thread.id, collisionId: 'collision', thread: thread }]);
       await f.session.selectThread(thread.id);
       f.session.setDraft('Submitted text');
       f.session.setDraft('Edited during send');
       f.session.clearSubmittedDraft(thread.id, 'Submitted text');
       const incoming: ThreadData = { id: thread.id, title: 'Renamed', updatedAt: 2, messages: [], draft: 'Another executor draft' };
-      await f.session.receivePeerChanges([], [{ origin: 'peer', id: thread.id, collisionId: 'collision', thread: incoming }]);
+      await f.session.receivePeerChanges([], [{ origin: PEER_ORIGIN, id: thread.id, collisionId: 'collision', thread: incoming }]);
       await f.session.flushDraft();
       const stored = active(await f.repository.load());
       expect(stored.peerDraft).assertEqual('Edited during send');
@@ -257,6 +259,30 @@ export default function sessionServiceTests(): void {
       expect(active(reopened.session.snapshot()).peerDraft).assertEqual('Edited during send');
       reopened.session.clearSubmittedDraft(thread.id, 'Edited during send');
       expect(active(reopened.session.snapshot()).peerDraft === undefined).assertTrue();
+    });
+
+    it('resumesMirrorProgressAfterReloadWithoutReopeningCompletedAnswers', 0, async () => {
+      const f = new Fixture(); await f.session.initialize();
+      const thread: ThreadData = { id: 'peer-restart', title: 'Peer', updatedAt: 20, messages: [
+        { id: 'user', role: 'user', content: 'Question', status: 'complete', error: '' },
+        { id: 'answer', role: 'assistant', content: 'Before restart', status: 'generating', error: '' }
+      ] };
+      await f.session.receivePeerChanges([], [{ origin: PEER_ORIGIN, id: thread.id, collisionId: 'collision', thread: thread }]);
+      const reopened = new Fixture(await f.repository.load()); await reopened.session.initialize();
+      let shown = '';
+      reopened.session.subscribe((event: SessionEvent) => {
+        if (event.data) { shown = event.data.threads.find((item) => item.id === thread.id)?.messages[1].content || ''; }
+        if (event.message?.id === 'answer') { shown = event.message.content; }
+      });
+      expect(reopened.session.receivePeerAnswer(PEER_ORIGIN, thread.id,
+        { id: 'answer', role: 'assistant', content: 'After restart', status: 'generating', error: '' }, true)).assertTrue();
+      expect(shown).assertEqual('After restart');
+      const complete = JSON.parse(JSON.stringify(thread)) as ThreadData;
+      complete.messages[1].status = 'complete'; complete.messages[1].content = 'Final';
+      await reopened.session.receivePeerChanges([], [{ origin: PEER_ORIGIN, id: thread.id, collisionId: 'collision', thread: complete, direct: true }]);
+      reopened.session.receivePeerAnswer(PEER_ORIGIN, thread.id,
+        { id: 'answer', role: 'assistant', content: 'Late progress', status: 'generating', error: '' }, true);
+      expect(shown).assertEqual('Final');
     });
 
     it('batchArchivesAndRestoresInOneCommitWithASameProjectReplacement', 0, async () => {
