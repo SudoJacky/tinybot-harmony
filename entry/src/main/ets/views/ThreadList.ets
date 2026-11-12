@@ -1,5 +1,6 @@
 import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { IS_PC } from '../common/DeviceForm';
 import { t } from '../model/I18n';
 import { FrameCallback, SymbolGlyphModifier } from '@kit.ArkUI';
 import { KeyCode } from '@kit.InputKit';
@@ -63,7 +64,7 @@ struct ThreadRow {
   @Builder
   actions() {
     Menu() {
-      if (!this.selecting && !this.thread.peerOwner) {
+      if (!this.selecting && !this.thread.peerOwner && !this.locked()) {
         MenuItem(() => materialMenuContent.bind(this)({ label: t("重命名"), icon: $r('sys.symbol.square_and_pencil') }))
           .onClick(() => { this.name = this.thread.title; this.editing = true; })
         MenuItem(() => materialMenuContent.bind(this)({ label: this.thread.pinned ? t("取消置顶") : t("置顶"), icon: $r('sys.symbol.pin') }))
@@ -143,12 +144,13 @@ struct ThreadRow {
         }
         .width('100%').padding({ left: this.workbench && !this.thread.parentThreadId ? 28 : Space.md, right: ROW_MENU_RIGHT_INSET,
           top: 3, bottom: 3 }).constraintSize({ minHeight: THREAD_ROW_HEIGHT })
+        .focusable(!this.locked())
         .onClick(async () => {
           if (this.locked()) { return; }
           if (this.selecting) { if (!this.thread.peerOwner) { this.onSelectionChanged(!this.selected); } return; }
           if (this.query.trim() ? await this.app.openMessage(this.thread.id, this.matchId(), this.query.trim()) : await this.app.selectThread(this.thread.id)) { this.onSelected(); }
         })
-        .bindContextMenu(this.actions, ResponseType.LongPress, {
+        .bindContextMenu(this.actions, IS_PC ? ResponseType.RightClick : ResponseType.LongPress, {
           systemMaterial: this.appearance.menu, mask: false })
       }
     }

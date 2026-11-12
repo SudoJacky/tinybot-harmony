@@ -260,13 +260,13 @@ const modelControls = [];
 class EffortStub { constructor(_, params) { modelControls.push({ type: 'effort', ...params }); } }
 class ModelListStub { constructor(_, params) { modelControls.push({ type: 'models', ...params }); } }
 const { reasoningEfforts } = sourceModule('entry/src/main/ets/model/ReasoningEffort.ets');
-const Picker = probe('views/ChatPanel', 'ChatPanel', ['modelButton', 'toggleModelMenu', 'modelMenu', 'modelMenuHeight', 'selectedProvider'], {
+const Picker = probe('views/ChatPanel', 'ChatPanel', ['modelButton', 'toggleModelMenu', 'modelMenu', 'modelMenuHeight', 'popupHeightLimit', 'selectedProvider'], {
   Button: modelButton, Row: gesture, Text: gesture, SymbolGlyph: gesture, Column: gesture, If: gesture, __Common__: gesture,
   ViewPU: { create() {} }, Context: { animation() {} }, Motion: {}, ButtonType: {}, TextOverflow: {}, Color: {}, BlurStyle: {},
   Placement: { TopRight: 'top-right' }, $r: value => value, t: value => value, reasoningEfforts,
   ReasoningEffortPicker: EffortStub, ModelPickerPanel: ModelListStub
 });
-const picker = Object.assign(new Picker(), { showModelMenu: false, appearance: {}, panelWidth: 360, modelButtonTop: 420,
+const picker = Object.assign(new Picker(), { showModelMenu: false, appearance: {}, panelWidth: 360, panelTop: 0, modelButtonTop: 420,
   thread: { id: 'chat', modelRef: { providerId: 'openai', modelId: 'gpt-5.4' }, reasoningEffort: 'high' },
   app: { ready: true, configured: true, error: '', saveError: '', modelChoices: [], providerProfiles: [
     { id: 'openai', protocol: 'responses', presetId: 'openai' },

@@ -1,4 +1,5 @@
 import { materialMenuContent } from '../common/MaterialMenu';
+import { IS_PC } from '../common/DeviceForm';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { AnimatedIcon } from '../common/AnimatedIcon';
 import { ToolExecution } from '../model/Agent';
@@ -445,6 +446,13 @@ export struct MessageBubble {
         if (this.message.role === 'user') {
           this.actionButton($r('sys.symbol.square_and_pencil'), t('改写'), 'edit-' + this.message.id,
             () => this.onFork(this.message.id), () => this.actionsEnabled)
+          if (IS_PC && this.message.content.length > 0) {
+            Button({ type: ButtonType.Normal }) {
+              SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(18).fontColor([$r('app.color.text_secondary')])
+            }.id('message-actions-' + this.message.id).width(36).height(44).padding(0).borderRadius(8)
+              .backgroundColor(Color.Transparent).accessibilityText(t('更多操作'))
+              .bindMenu(this.actions, { systemMaterial: this.appearance.menu, mask: false })
+          }
         } else {
           this.actionButton($r('sys.symbol.arrow_clockwise'), t('重新生成（保留原回答）'), 'regenerate-' + this.message.id,
             () => this.onRegenerate(this.message.id), () => this.actionsEnabled)
@@ -707,7 +715,7 @@ export struct MessageBubble {
         } else {
           this.assistantMessage()
         }
-      }.width('100%').bindContextMenu(this.actions, ResponseType.LongPress, {
+      }.width('100%').bindContextMenu(this.actions, IS_PC ? ResponseType.RightClick : ResponseType.LongPress, {
         systemMaterial: this.appearance.menu, mask: false })
       .bindSheet($$this.documentOpen, this.documentViewer(), { radius: Radius.sheet, height: '90%', showClose: false, dragBar: true,
         backgroundColor: $r('app.color.page_background') })

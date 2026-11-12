@@ -91,6 +91,7 @@ struct Index {
   @State private privacy: HostedPrivacy = hostedPrivacy;
   @StorageProp('tinybot.privacy.allowed') @Watch('privacyChanged') private privacyAllowed: boolean = false;
   @StorageProp('tinybot.foreground') @Watch('foregroundChanged') private foreground: boolean = false;
+  @StorageProp('tinybot.pcWindowVisible') @Watch('pcWindowVisibilityChanged') private pcWindowVisible: boolean = true;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
   @StorageProp('tinybot.probe.visible') private liveSyncProbeVisible: boolean = false;
@@ -403,6 +404,11 @@ struct Index {
     this.offerAnnouncement();
   }
 
+  private pcWindowVisibilityChanged(): void {
+    if (this.pcWindowVisible) { return; }
+    this.app.flushDraft().catch((error: Error) => Diagnostics.log('error', 'app', 'pc_draft_flush_failed', undefined, error));
+  }
+
   private updateLifePanelActivity(): void { this.panelUpdates?.setActive(this.foreground && this.privacy.allowed && this.app.ready && !this.reviewDisposed); }
 
   private onboardingPreferences(): OnboardingPreferences {
@@ -686,13 +692,13 @@ struct Index {
     const items: DetailTabItem[] = [];
     for (const tab of this.detailTabsAvailable()) {
       if (tab === 'files') {
-        items.push(new DetailTabItem('files', t('工作区文件'), 'folder'));
+        items.push(new DetailTabItem('files', t('工作区文件'), 'folder', $r('sys.symbol.folder')));
       } else if (tab === 'preview') {
-        items.push(new DetailTabItem('preview', t('预览'), 'document'));
+        items.push(new DetailTabItem('preview', t('预览'), 'document', $r('sys.symbol.doc_text')));
       } else if (tab === 'browser') {
         const title = this.browser.title.trim();
         items.push(new DetailTabItem('browser', title.length > 0 && title !== 'about:blank' ? title : t('应用内浏览器'),
-          'browser'));
+          'browser', $r('sys.symbol.connection')));
       }
     }
     return items;
@@ -1672,8 +1678,10 @@ struct Index {
       // the Web host keep their state; only the tab strip decides which is shown.
       Stack({ alignContent: Alignment.TopStart }) {
         Column() {
-          if (this.workbench().docked && this.detailOpen() && this.detailTabsAvailable().length > 0) {
+          if (this.detailOpen() && (this.workbench().docked ? this.detailTabsAvailable().length > 0 :
+            this.detailPaneOpen && this.detailTabsAvailable().length > 1)) {
             DetailTabs({ tabs: this.detailTabItems(), active: this.currentDetailTab(), showCollapse: false,
+              compact: !this.workbench().docked,
               onSelect: (id: string) => { this.activeDetailTab = id; },
               onClose: (id: string) => this.closeDetailTab(id),
               onAddFiles: () => this.addFilesTab(),
@@ -1706,10 +1714,11 @@ struct Index {
                 onSettings: () => { this.hideBrowserTab(); this.openSettings(); },
                 onClose: () => this.closeBrowser(), onDismiss: () => this.hideBrowserTab() })
             }
-            AnimatedPage({ visible: this.workbench().docked &&
+            AnimatedPage({ visible: this.detailOpen() &&
               ((this.detailPaneOpen && this.detailTabsAvailable().length === 0) ||
                 (this.detailClosing && this.detailClosingLauncher)) }) {
               DetailLauncher({ onFiles: () => this.openFiles(), onBrowser: () => this.openBrowser(),
+                compact: !this.workbench().docked,
                 onClose: () => { this.setDetailPane(false, true); } })
             }
           }.width('100%').layoutWeight(1)

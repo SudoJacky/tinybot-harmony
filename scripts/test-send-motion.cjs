@@ -18,7 +18,7 @@ class SendFrame { constructor(action) { this.action = action; } onFrame() { this
 const globals = { exports: {}, SendFrame, Set, clearTimeout, Edge: { Bottom: 'bottom' }, curves: { springMotion: (...args) => args } };
 vm.runInNewContext(ts.transpileModule(`
 class Bubble { ${methods('common/SendBubbleMotion', 'SendBubbleMotion', ['aboutToAppear', 'aboutToDisappear', 'launch'])} }
-class Panel { ${methods('views/ChatPanel', 'ChatPanel', ['send', 'finishSendFlight'])} }
+class Panel { ${methods('views/ChatPanel', 'ChatPanel', ['send', 'finishSendFlight', 'centeredWelcome', 'emptyConversation', 'keyboardVisibleInLayout'])} }
 exports.Bubble = Bubble; exports.Panel = Panel;`, { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, globals);
 function bubble(origin) {
   const frames = [], animations = [];
@@ -52,12 +52,13 @@ function panel(messages = [], signedIn = true, remote = false) {
   const value = Object.assign(new globals.exports.Panel(), { thread: { id: 'thread', messages }, sendingMessageId: '',
     account: { signedIn }, accountRequests: 0, onAccount() { this.accountRequests++; },
     keyboardFocusRequest: 0, composerFocused: true, clearedFocus: 0,
-    speechActive: () => false, centeredWelcome: () => false, remoteMode: () => remote, canSend: () => true,
+    panelHeight: 560, viewport: { keyboardHeight: 0 }, speechActive: () => false,
+    remoteMode: () => remote, canSend: () => true,
     deliverRemote: (...args) => { delivery = args; }, scroller: { scrollEdge() {} }, follow() {},
     getUIContext: () => ({ px2vp: x => x, postFrameCallback() {},
       getFocusController: () => ({ clearFocus() { value.clearedFocus++; } }), getComponentUtils: () => ({
       getRectangleById: () => ({ windowOffset: { x: 0, y: 500 }, size: { width: 320, height: 44 } }) }) }),
-    app: { send: async (cb, deliver) => { update = cb; await deliver?.('same composer draft'); } } });
+    app: { teams: [], send: async (cb, deliver) => { update = cb; await deliver?.('same composer draft'); } } });
   if (remote) { value.nearbyTarget = 'tablet'; }
   value.send(); return { value, update: () => update(), delivery: () => delivery };
 }

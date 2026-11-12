@@ -4,6 +4,7 @@ import { AnimatorResult } from '@kit.ArkUI';
 import { t } from '../model/I18n';
 import { Motion, Radius } from './Theme';
 import { SwipeRowMotion as Swipe } from './SwipeRowMotion';
+import { IS_PC } from './DeviceForm';
 
 // Native implementation of a shared reveal drawer; no web component/runtime is used.
 // A full swipe requests the same confirmation as the delete button, never deletes early.
@@ -130,7 +131,17 @@ export struct SwipeRow {
       .enabled(!this.disabled && this.reveal >= 32).opacity(this.reveal > 0 ? 1 : 0)
       .accessibilityLevel(this.reveal >= 32 ? 'auto' : 'no-hide-descendants')
       .accessibilityText(t('删除') + ' ' + this.label).onClick(() => this.requestDelete())
-      Column() { this.content() }
+      Row() {
+        Column() { this.content() }.layoutWeight(1)
+        if (IS_PC) {
+          Button({ type: ButtonType.Circle }) {
+            SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_secondary')])
+          }.id('swipe-row-actions-' + this.rowKey).width(36).height(36).padding(0)
+            .margin({ right: 4 }).backgroundColor(Color.Transparent).enabled(!this.disabled)
+            .accessibilityText(t('更多操作') + ' · ' + this.label)
+            .bindMenu(this.actionsMenu, { systemMaterial: this.appearance.menu, mask: false })
+        }
+      }
         .width('100%').translate({ x: -this.reveal })
         .onAreaChange((_old: Area, area: Area) => { this.rowHeight = Number(area.height); })
       // Add a tap-to-close cover only after release. Changing the content's hit test
@@ -147,7 +158,7 @@ export struct SwipeRow {
       this.rowWidth = width;
     })
     .onVisibleAreaChange([0], (visible: boolean) => { if (!visible) { this.stop(); this.reveal = 0; this.dragging = false; } })
-    .bindContextMenu(this.actionsMenu, ResponseType.LongPress, {
+    .bindContextMenu(this.actionsMenu, IS_PC ? ResponseType.RightClick : ResponseType.LongPress, {
       systemMaterial: this.appearance.menu, mask: false })
     .priorityGesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Horizontal, distance: 12 })
       .onActionStart((event: GestureEvent) => this.start(event))

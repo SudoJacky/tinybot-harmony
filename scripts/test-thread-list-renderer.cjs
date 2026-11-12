@@ -76,9 +76,13 @@ vm.runInNewContext(ts.transpileModule(menuSource, { compilerOptions: {
   target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS
 } }).outputText, globals);
 globals.materialMenuContent = globals.exports.materialMenuContent;
-const names = ['filtered','sections','sectionThreads','sectionTitle','groupOpen','visibleCount','onActivePath','lastBranch','loadMore','toggleGroup','sectionHeader','projectActions',
+const names = ['filtered','threadProject','sections','sectionThreads','sectionTitle','groupOpen','visibleCount','onActivePath','lastBranch','loadMore','toggleGroup','sectionHeader','projectActions',
+  'updateQuery','setScope',
   'locked','endSelection','selectThread','allSelected','selectAll','archiveSelected','confirmDeleteSelected'];
-vm.runInNewContext(ts.transpileModule(`${cls('ThreadSection').getText(tree)}
+const menuGeometry = tree.statements.filter(node => ts.isVariableStatement(node) &&
+  node.declarationList.declarations.some(decl => ['ROW_MENU_SIZE', 'ROW_MENU_RIGHT_INSET'].includes(decl.name.getText(tree))));
+vm.runInNewContext(ts.transpileModule(`${menuGeometry.map(node => node.getText(tree)).join('\n')}
+${cls('ThreadSection').getText(tree)}
 class Sidebar extends ViewPU { ${cls('ThreadList').members.filter(n => names.includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')}
 mount() { ${mount}; } saveFromEditor() { return (${saveProject})(); } }
 class RowProbe extends ViewPU {
@@ -113,7 +117,8 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
     if (current !== undefined && ['threads','projects','active'].includes(key)) readers.add(current);
     return Reflect.get(target, key, receiver);
   } });
-  const sidebar = Object.assign(new globals.exports.Sidebar(), { app: observedApp, appearance: { fontFamily: 'system' }, query: '', archived: false, visibleCounts: {}, collapsedProjects: [] });
+  const sidebar = Object.assign(new globals.exports.Sidebar(), { app: observedApp, appearance: { fontFamily: 'system' }, query: '', archived: false,
+    projectFilter: null, visibleCounts: {}, collapsedProjects: [] });
   sidebar.selecting = false; sidebar.selectedIds = [];
   sidebar.mount(); const groupIds = [...groups];
   assert.ok(![...texts.values()].includes('3'), 'Project headers omit conversation counts');
@@ -211,7 +216,7 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
   batchData.threads = Array.from({ length: 25 }, (_, i) => ({ ...batchData.threads[0], id: 'batch-' + i, title: i < 2 ? 'Match' : 'Other', draft: '' }));
   batchData.activeThreadId = 'batch-0';
   const batch = new Fixture(batchData), batchApp = new ChatViewModel(); await batchApp.initialize(batch.session);
-  const selection = Object.assign(new globals.exports.Sidebar(), { app: batchApp, appearance: { fontFamily: 'system' }, query: '', archived: false,
+  const selection = Object.assign(new globals.exports.Sidebar(), { app: batchApp, appearance: { fontFamily: 'system' }, query: '', archived: false, projectFilter: null,
     selecting: true, selectedIds: [], visibleCounts: {}, collapsedProjects: [''] });
   selection.selectAll();
   assert.equal(selection.selectedIds.length, 25, 'Select all includes collapsed groups and unloaded rows');
