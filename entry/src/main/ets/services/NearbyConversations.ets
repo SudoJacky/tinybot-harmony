@@ -13,7 +13,7 @@ import { ArkDataRecords } from './ArkDataRecords';
 import { NearbyAsset, NearbyInput, validateNearbyInput } from '../model/NearbyInput';
 import { NearbyAttachments } from './NearbyAttachments';
 import { ModelChoice, validateReference } from '../model/ProviderProfiles';
-import { NearbyConnectionFailure, NearbyConversationLink, nearbyConversationInvite, nearbyConversationOptions,
+import { NearbyConversationLink, nearbyConversationInvite, nearbyConversationOptions,
   nearbyConversationPeer } from './NearbyConversationChannel';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -121,7 +121,7 @@ class NearbyConversations {
     this.unsubscribe = session.subscribe((event: SessionEvent) => this.scheduleProgress(event));
     this.database = database;
     this.attachments = attachments;
-    this.observeTimer = setInterval(() => { this.observeDevices(); }, 3000);
+    this.observeTimer = setInterval(() => { this.observeConnectedPeers(); }, 3000);
   }
 
   stop(): void {
@@ -135,14 +135,15 @@ class NearbyConversations {
     this.refreshDevices();
   }
 
-  private async observeDevices(): Promise<void> {
+  private async observeConnectedPeers(): Promise<void> {
     if (this.observing || !this.canConnect()) { return; }
     this.observing = true;
     try {
-      for (const device of this.refreshDevices()) {
+      // connect() may launch the peer UIAbility. Passive observation only uses established links.
+      for (const peer of Array.from(this.peers.values())) {
         if (!this.canConnect()) { break; }
+        if (!peer.origin || this.peers.get(peer.link.id) !== peer) { continue; }
         try {
-          const peer = await this.connect(device.id);
           const reply = await this.call(peer, { kind: 'catalog' });
           if (reply.error) { throw new Error(reply.error); }
           if (!Array.isArray(reply.threads) || reply.threads.some((id) => typeof id !== 'string' || !THREAD.test(id))) {
@@ -153,8 +154,8 @@ class NearbyConversations {
             await this.watch(peer, id);
           }
         } catch (error) {
-          this.connected(device.id)?.link.close();
-          Diagnostics.log('warn', 'sync', 'conversation_connect_failed', undefined, error as Error);
+          peer.link.close();
+          Diagnostics.log('warn', 'sync', 'conversation_progress_failed', undefined, error as Error);
         }
       }
     } finally { this.observing = false; }
@@ -166,15 +167,27 @@ class NearbyConversations {
     peer.observing.add(id);
   }
 
+  async reconnect(deviceId: string, owner: string, threadId: string): Promise<void> {
+    if (!this.canConnect()) { throw new Error(t('请先在两台设备上开启附近设备同步，并打开 Tinybot。')); }
+    if (!UUID.test(owner) || !THREAD.test(threadId)) { throw new Error(t('执行端找不到可继续的会话。')); }
+    const existing = this.connected(deviceId);
+    const peer = existing || await this.connect(deviceId);
+    if (peer.origin !== owner) {
+      if (!existing) { peer.link.close(); }
+      throw new Error(t('所选设备不是此会话的执行端。'));
+    }
+    await this.watch(peer, threadId);
+  }
+
   async control(owner: string, threadId: string, control: NearbyTaskControl): Promise<void> {
     if (!this.canConnect()) { throw new Error(t('请先在两台设备上开启附近设备同步，并打开 Tinybot。')); }
-    const peer = await this.findOwner(owner);
+    const peer = this.connectedOwner(owner);
     const reply = await this.call(peer, { kind: 'control', origin: owner, threadId: threadId, control: control });
     if (reply.error) { throw new Error(reply.error); }
   }
   async models(deviceId: string, owner: string): Promise<ModelChoice[]> {
     if (!this.canConnect()) { throw new Error(t('请先在两台设备上开启附近设备同步，并打开 Tinybot。')); }
-    const peer = owner ? await this.findOwner(owner) : await this.connect(deviceId);
+    const peer = owner ? this.connectedOwner(owner) : await this.connect(deviceId);
     const reply = await this.call(peer, { kind: 'models' });
     if (reply.error) { throw new Error(reply.error); }
     if (!Array.isArray(reply.models)) { throw new Error('Invalid execution model catalog'); }
@@ -217,6 +230,7 @@ class NearbyConversations {
   async submit(deviceId: string, owner: string, threadId: string, sourceThreadId: string, text: string,
     onRequest?: (id: string) => void, mode: InputMode = 'followUp', payload: NearbyInput = {}): Promise<void> {
     if (!this.canConnect()) { throw new Error(t('请先在两台设备上开启附近设备同步，并打开 Tinybot。')); }
+    if (owner) { this.connectedOwner(owner); }
     validateNearbyInput(payload);
     if (payload.attachments?.length && !this.attachments) { throw new Error('Nearby attachment transfer is unavailable'); }
     const assets = payload.attachments?.length ? await this.attachments!.stage(this.origin, payload.attachments) : [];
@@ -260,7 +274,7 @@ class NearbyConversations {
     const traced = Diagnostics.acceptsLog('info');
     const operationId = traced ? nearbyTraceId(input.requestId) : undefined;
     const routing = traced ? Diagnostics.now() : 0;
-    const peer = input.owner ? await this.findOwner(input.owner) : await this.connect(input.deviceId);
+    const peer = input.owner ? this.connectedOwner(input.owner) : await this.connect(input.deviceId);
     if (traced) {
       Diagnostics.log('info', 'sync', 'conversation_route_ready', { operationId: operationId, durationMs: Diagnostics.now() - routing });
     }
@@ -284,18 +298,10 @@ class NearbyConversations {
     this.attempts.delete(key);
   }
 
-  private async findOwner(origin: string): Promise<ConversationPeer> {
-    for (const peer of this.peers.values()) { if (peer.origin === origin) { return peer; } }
-    const devices = this.refreshDevices();
-    const previous = this.devicesByOrigin.get(origin);
-    const ordered = devices.filter((device) => device.id === previous).concat(devices.filter((device) => device.id !== previous));
-    for (const device of ordered) {
-      try {
-        const peer = await this.connect(device.id);
-        if (peer.origin === origin) { return peer; }
-      } catch (error) { Diagnostics.log('warn', 'sync', 'conversation_connect_failed', undefined, error as Error); }
-    }
-    throw new Error(t('会话执行端不在线。请在该设备上打开 Tinybot 并开启附近设备同步。'));
+  private connectedOwner(origin: string): ConversationPeer {
+    const peer = origin ? Array.from(this.peers.values()).find((item) => item.origin === origin) : undefined;
+    if (!peer) { throw new Error(t('请先在执行端打开 Tinybot，再手动连接。')); }
+    return peer;
   }
 
   private connect(deviceId: string): Promise<ConversationPeer> {
@@ -328,7 +334,7 @@ class NearbyConversations {
     return this.connected(deviceId);
   }
 
-  private async open(deviceId: string, retried: boolean = false): Promise<ConversationPeer> {
+  private async open(deviceId: string): Promise<ConversationPeer> {
     if (!this.context || !this.canConnect() || !this.refreshDevices().some((item) => item.id === deviceId)) {
       throw new Error(t('执行端已离线，请检查设备连接。'));
     }
@@ -358,9 +364,6 @@ class NearbyConversations {
       peer?.link.close();
       const concurrent = await this.concurrentConnection(deviceId);
       if (concurrent) { return concurrent; }
-      if (!retried && this.canConnect() && error instanceof NearbyConnectionFailure && error.retryable) {
-        return this.open(deviceId, true);
-      }
       Diagnostics.log('warn', 'sync', 'conversation_connect_failed', { code: (error as BusinessError).code }, error as Error);
       throw new Error(t('无法连接执行端，请在两台设备上打开 Tinybot 并开启附近设备同步。'));
     }

@@ -90,16 +90,28 @@ async function main() {
 
     link.close();
     assert.equal(phone.app.peerTask.connected, false);
-    const reconnected = pair(phone, tablet);
-    phone.sync.discover = () => [{ id: 'tablet', name: 'tablet' }];
-    await phone.sync.observeDevices();
+    const dialed = [], open = phone.sync.open;
+    phone.sync.open = async deviceId => {
+      dialed.push(deviceId);
+      return pair(phone, devices.find(device => device.name === deviceId)).peer;
+    };
+    await phone.sync.observeConnectedPeers();
+    await assert.rejects(phone.sync.models('', tablet.origin), /手动连接/);
+    await assert.rejects(phone.sync.submit('', tablet.origin, id, phone.app.active.id, 'Offline'), /手动连接/);
+    assert.deepEqual(dialed, [], 'Passive polling and disconnected task operations cannot launch another device');
+    await assert.rejects(phone.sync.reconnect('observer', tablet.origin, id), /不是此会话的执行端/);
+    assert.equal(phone.sync.connected('observer'), undefined, 'Close a newly opened link to the wrong executor');
+    await phone.sync.reconnect('tablet', tablet.origin, id);
+    assert.deepEqual(dialed, ['observer', 'tablet'], 'Only explicitly selected devices are dialed');
+    phone.sync.open = open;
+    await phone.sync.observeConnectedPeers();
     tablet.requests[1].text('After reconnect');
     await until(() => phone.app.peerTask?.connected && phone.app.active.messages.at(-1)?.content === 'After reconnect', 500);
     tablet.requests[1].finish('Finished');
     await tablet.session.waitForIdle();
     await until(() => observer.app.active.messages.at(-1)?.status === 'complete');
     assert.equal(tablet.requests.length, 2);
-    console.log('PASS disconnects become visible and re-subscription restores state without replaying execution');
+    console.log('PASS passive checks never dial, and an explicitly selected executor resumes observation without replaying work');
 
     // Lose acknowledgement after durable admission. Recreate only the sender transport.
     const originalCall = phone.sync.call.bind(phone.sync);

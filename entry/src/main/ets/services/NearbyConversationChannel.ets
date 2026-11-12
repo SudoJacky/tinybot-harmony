@@ -12,15 +12,6 @@ const PART = 4088;
 const MAX_BYTES = 8 * 1024 * 1024;
 const CONNECT_TIMEOUT = 12000;
 
-export class NearbyConnectionFailure extends Error {
-  readonly retryable: boolean;
-  constructor(code?: connection.ConnectErrorCode) {
-    super('Collaboration status ' + String(code));
-    this.retryable = code === connection.ConnectErrorCode.CONNECTED_SESSION_EXISTS ||
-      code === connection.ConnectErrorCode.SYSTEM_INTERNAL_ERROR;
-  }
-}
-
 export class NearbyConversationLink {
   readonly id: number;
   readonly deviceId: string;
@@ -58,7 +49,7 @@ export class NearbyConversationLink {
       const opening = token !== undefined ? connection.acceptConnect(this.id, token) : connection.connect(this.id).then((result) => {
         if (!result.isConnected) {
           Diagnostics.log('warn', 'sync', 'conversation_connect_failed', { code: result.errorCode });
-          throw new NearbyConnectionFailure(result.errorCode);
+          throw new Error('Collaboration status ' + String(result.errorCode));
         }
       });
       const timeout = new Promise<void>((_resolve, reject) => {

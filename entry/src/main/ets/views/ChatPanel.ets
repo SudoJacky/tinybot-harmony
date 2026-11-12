@@ -449,6 +449,15 @@ export struct ChatPanel {
     finally { this.nearbySendingIds = this.nearbySendingIds.filter((id) => id !== source); }
   }
 
+  private async reconnectRemote(deviceId: string): Promise<void> {
+    const source = this.thread.id;
+    if (this.remoteSending()) { return; }
+    this.nearbySendingIds = this.nearbySendingIds.concat([source]); this.nearbyError = '';
+    try { await nearbyConversations.reconnect(deviceId, this.thread.peerOwner || '', this.thread.peerThreadId || ''); }
+    catch (error) { this.nearbyErrorThreadId = source; this.nearbyError = (error as Error).message; }
+    finally { this.nearbySendingIds = this.nearbySendingIds.filter((id) => id !== source); }
+  }
+
   private sendError(): string {
     return this.nearbyError && this.nearbyErrorThreadId === this.thread.id ? this.nearbyError : this.app.error;
   }
@@ -498,11 +507,16 @@ export struct ChatPanel {
   @Builder
   conversationDeviceMenu() {
     Menu() {
-      MenuItem(() => materialMenuContent.bind(this)({ label: t('本机') }))
-        .id('nearby-execute-local').onClick(() => this.selectNearbyTarget(''))
+      if (!this.app.peerThread) {
+        MenuItem(() => materialMenuContent.bind(this)({ label: t('本机') }))
+          .id('nearby-execute-local').onClick(() => this.selectNearbyTarget(''))
+      }
       ForEach(this.conversationDevices, (device: ConversationDevice, index: number) => {
         MenuItem(() => materialMenuContent.bind(this)({ label: device.name || t('附近设备') }))
-          .id('nearby-execute-device-' + index).onClick(() => this.selectNearbyTarget(device.id))
+          .id('nearby-execute-device-' + index).onClick(() => {
+            if (this.app.peerThread) { this.reconnectRemote(device.id); }
+            else { this.selectNearbyTarget(device.id); }
+          })
       }, (device: ConversationDevice) => device.id)
     }
   }
@@ -2129,7 +2143,13 @@ export struct ChatPanel {
             Text(t('执行端 · {0}', [this.peerDeviceLabel()])).id('peer-conversation')
               .fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
-            this.nearbyModelButton()
+            if (this.app.peerTask?.connected) {
+              this.nearbyModelButton()
+            } else if (this.nearbyEnabled && this.conversationDevices.length > 0 && !this.thread.archived) {
+              Button(t('连接执行端')).id('nearby-reconnect').attributeModifier(Btn.tonalSmall)
+                .enabled(!this.remoteSending() && this.app.canNavigate)
+                .bindMenu(this.conversationDeviceMenu, { systemMaterial: this.appearance.menu, mask: false })
+            }
           } else {
             if (this.conversationPickerVisible()) { this.conversationDevicePicker() }
             Blank().layoutWeight(1)

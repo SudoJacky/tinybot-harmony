@@ -13,7 +13,7 @@ export struct NearbyTaskPanel {
   onSteer: () => void = () => {};
 
   private label(): string {
-    if (!this.status?.connected) { return t('执行端连接已断开，正在重连…'); }
+    if (!this.status?.connected) { return t('执行端未连接'); }
     const task = this.status.task;
     if (task?.approval) { return task.approval.form ? t('等待填写表单') : t('等待工具审批'); }
     if (task?.queuePaused && task.pendingInputs.length) { return t('待发送队列已暂停'); }
