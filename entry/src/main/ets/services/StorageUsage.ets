@@ -8,6 +8,8 @@ import { toolReceipts } from '../model/Agent';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { t } from '../model/I18n';
 import { WorkspaceRetention, withWorkspaceLifecycle } from './WorkspaceRetention';
+import { workspaceDatabase } from './ArkDataWorkspace';
+import { RecordSize } from './ArkDataRecords';
 import { DiskFile, StorageCategoryId, StorageCleanResult, StorageEntry, StorageEntryResult, StorageReport,
   emptyStorageReport, isCacheCleanable, isStaleTemporary, orphanAttachmentPaths } from '../model/StoragePlan';
 
@@ -74,6 +76,13 @@ export class StorageUsage {
       failures.push(path);
       Diagnostics.log('warn', 'storage', 'scan_failed', { operation: operation, count: failures.length }, error);
     }
+  }
+
+  private static async arkDataSizes(roots: StorageRoots, scope: string, failures: string[]): Promise<RecordSize[] | undefined> {
+    const database = workspaceDatabase(StorageUsage.workspaceRoot(roots));
+    if (!database) { return undefined; }
+    try { return await (await database()).sizes(scope); }
+    catch (error) { StorageUsage.failed(failures, 'ArkData/' + scope, error as Error, 'read'); return []; }
   }
 
   private static async listFiles(root: string, failures: string[]): Promise<DiskFile[]> {
@@ -149,6 +158,7 @@ export class StorageUsage {
     const add = (item: Attachment): void => { if (item && item.path && !item.workspaceId) { result.set(item.path, item.name); } };
     for (const thread of data.threads) {
       for (const item of thread.attachments || []) { add(item); }
+      for (const item of thread.peerAttachments || []) { add(item); }
       for (const input of thread.pendingInputs || []) {
         for (const item of input.attachments || []) { add(item); }
       }
@@ -236,8 +246,9 @@ export class StorageUsage {
     const failures: string[] = [];
     const report = emptyStorageReport();
     const now = Date.now();
+    const threadSizes = await StorageUsage.arkDataSizes(roots, 'thread', failures);
     const sessions = await StorageUsage.listFiles(roots.abilityFilesDir + '/sessions-v2', failures);
-    addCategory(report, 'sessions', sumFiles(sessions), sessions.length);
+    addCategory(report, 'sessions', sumFiles(sessions) + (threadSizes || []).reduce((total, item) => total + item.bytes, 0), sessions.length + (threadSizes?.length || 0));
     const workspace = await StorageUsage.workspaceFiles(roots, failures);
     let workspaceBytes = 0, workspaceCount = 0, backupBytes = 0, backupCount = 0;
     for (const file of workspace) {
@@ -248,8 +259,9 @@ export class StorageUsage {
     addCategory(report, 'backups', backupBytes, backupCount);
     const attachments = await StorageUsage.listFiles(roots.appFilesDir + '/attachments', failures);
     addCategory(report, 'attachments', sumFiles(attachments), attachments.length);
+    const requestSizes = await StorageUsage.arkDataSizes(roots, 'usage', failures);
     const usage = await StorageUsage.listFiles(roots.abilityFilesDir + '/usage-records', failures);
-    addCategory(report, 'usage', sumFiles(usage), usage.length);
+    addCategory(report, 'usage', sumFiles(usage) + (requestSizes || []).reduce((total, item) => total + item.bytes, 0), usage.length + (requestSizes?.length || 0));
     let diagnosticsBytes = 0, diagnosticsFiles = 0;
     const diagnosticPaths: string[] = [roots.abilityFilesDir + '/performance-current.jsonl',
       roots.abilityFilesDir + '/performance-previous.jsonl', roots.appFilesDir + '/tinybot-cpu.json'];
@@ -302,6 +314,16 @@ export class StorageUsage {
     const threads = new Map<string, ThreadData>();
     for (const thread of data.threads) { threads.set(thread.id, thread); }
     const result: StorageEntry[] = [];
+    const current = await StorageUsage.arkDataSizes(roots, 'thread', failures);
+    if (current) {
+      for (const item of current) {
+        const thread = threads.get(item.id);
+        result.push({ path: 'ArkData/thread/' + item.id, label: thread?.title || item.id,
+          detail: t('{0} 条消息', [thread?.messages.length || 0]), bytes: item.bytes,
+          category: 'sessions', removable: false, directory: false });
+      }
+      return result;
+    }
     let text = '';
     try { text = await fs.readText(root + '/index.json'); }
     catch (error) {
@@ -381,8 +403,14 @@ export class StorageUsage {
     else if (category === 'backups') { result = await StorageUsage.backupEntries(roots, data, failures); }
     else if (category === 'attachments') { result = await StorageUsage.attachmentEntries(roots, data, failures); }
     else if (category === 'usage') {
-      for (const file of await StorageUsage.listFiles(roots.abilityFilesDir + '/usage-records', failures)) {
-        result.push(fileEntry(file, 'usage', file.relative, t('用量账本'), false));
+      const current = await StorageUsage.arkDataSizes(roots, 'usage', failures);
+      if (current) {
+        result.push({ path: 'ArkData/usage', label: t('用量账本'), detail: 'ArkData',
+          bytes: current.reduce((total, item) => total + item.bytes, 0), category: 'usage', removable: false, directory: false });
+      } else {
+        for (const file of await StorageUsage.listFiles(roots.abilityFilesDir + '/usage-records', failures)) {
+          result.push(fileEntry(file, 'usage', file.relative, t('用量账本'), false));
+        }
       }
     } else if (category === 'diagnostics') {
       const paths: string[] = [roots.abilityFilesDir + '/performance-current.jsonl',

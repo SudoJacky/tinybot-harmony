@@ -7,6 +7,7 @@ import { Diagnostics } from '../model/Diagnostics';
 import { PanelSpec, PanelRecord, PanelEntry, PanelRun, panelId, panelPath, panelPointer, panelValue, panelItems, parsePanelSpec, parsePanelRecord, validatePanelData, panelDue } from '../model/LifePanel';
 import { WorkspaceFiles, WorkspaceWrite, WorkspaceWriteGuard } from './WorkspaceFiles';
 import { NativeWorkspaceFiles } from './NativeWorkspaceFiles';
+import { managedWorkspaceRecords } from './ArkDataWorkspace';
 import { workspaceRelativePath } from './WorkspaceTools';
 import { NativeWebTransport } from './NativeWebTransport';
 import { PanelApiTransport } from './PanelApiTransport';
@@ -281,9 +282,9 @@ export class LifePanels {
     if (await fs.access(this.workspaces.rootDir)) {
       for (const workspaceId of query.workspaceId ? [query.workspaceId] : await fs.listFile(this.workspaces.rootDir)) {
         await this.workspaces.requireWorkspace(workspaceId);
-        const directory = this.workspaces.pathFor(workspaceId) + '/life-panels'; if (!await fs.access(directory)) { continue; }
-        const stat = await fs.lstat(directory); if (!stat.isDirectory() || stat.isSymbolicLink()) { throw new Error('Invalid Life Panel directory'); }
-        for (const id of await fs.listFile(directory)) { panelId(id); if (await fs.access(directory + '/' + id + '/panel.json')) { refs.push(workspaceId + '/' + id); } }
+        for (const path of await managedWorkspaceRecords(this.workspaces.pathFor(workspaceId), 'life-panels')) {
+          refs.push(workspaceId + '/' + path.split('/')[1]);
+        }
       }
     }
     const remaining = refs.sort().filter((key: string) => key > after), items: PanelSummary[] = [];
@@ -305,14 +306,8 @@ export class LifePanels {
     if (!await fs.access(this.workspaces.rootDir)) { return entries; }
     for (const id of workspaceId ? [workspaceId] : await fs.listFile(this.workspaces.rootDir)) {
       await this.workspaces.requireWorkspace(id);
-      const directory = this.workspaces.pathFor(id) + '/life-panels';
-      if (!await fs.access(directory)) { continue; }
-      const stat = await fs.lstat(directory);
-      if (!stat.isDirectory() || stat.isSymbolicLink()) { throw new Error('Invalid Life Panel directory'); }
-      for (const name of await fs.listFile(directory)) {
-        const manifest = directory + '/' + panelId(name) + '/panel.json';
-        // Empty directories can remain after an interrupted first publication.
-        if (!await fs.access(manifest)) { continue; }
+      for (const path of await managedWorkspaceRecords(this.workspaces.pathFor(id), 'life-panels')) {
+        const name = path.split('/')[1];
         try { entries.push({ workspaceId: id, panel: await this.repository(id).get(name) }); }
         catch (error) { Diagnostics.log('error', 'life-panel', 'manifest_failed', { sessionId: id, previewId: name }, error as Error); throw error as Error; }
       }

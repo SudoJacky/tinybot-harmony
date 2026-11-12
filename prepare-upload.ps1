@@ -61,6 +61,11 @@ foreach ($relative in @($appRelative, $symbolRelative)) {
 $appPath = Join-Path $DistributionDirectory $appRelative
 $archive = [IO.Compression.ZipFile]::OpenRead($appPath)
 try {
+    $expectedEntries = @('entry-default.hap', 'pack.info', 'pac.json')
+    $actualEntries = @($archive.Entries | ForEach-Object FullName)
+    if ($actualEntries.Count -ne $expectedEntries.Count -or (Compare-Object $expectedEntries $actualEntries -CaseSensitive)) {
+        throw 'Expected an APP with only the entry module, pack.info, and pac.json.'
+    }
     $metadata = @{}
     foreach ($name in @('pack.info', 'pac.json')) {
         $entry = $archive.GetEntry($name)
@@ -82,7 +87,11 @@ try {
         $moduleEntry = $hapArchive.GetEntry('module.json')
         if ($null -eq $moduleEntry) { throw 'Missing HAP manifest.' }
         $reader = [IO.StreamReader]::new($moduleEntry.Open())
-        try { $app = ($reader.ReadToEnd() | ConvertFrom-Json).app } finally { $reader.Dispose() }
+        try { $manifest = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
+        $app = $manifest.app
+        if ($manifest.module.name -ne 'entry' -or $manifest.module.type -ne 'entry') {
+            throw 'Embedded HAP is not the entry module.'
+        }
         if ($app.bundleName -ne $expected.bundleName -or $app.versionName -ne $expected.versionName -or
             $app.versionCode -ne $expected.versionCode -or $app.buildMode -ne 'release' -or $app.debug -ne $false) {
             throw 'Embedded HAP must match the main checkout and be a non-debug Release build.'

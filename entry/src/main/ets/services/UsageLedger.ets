@@ -6,16 +6,45 @@ import { util } from '@kit.ArkTS';
 import { BackupChanges } from '../model/BackupChanges';
 import { Diagnostics } from '../model/Diagnostics';
 import { withFileMutation } from './FileMutationQueue';
+import { ArkDataRecords, StoredRecord } from './ArkDataRecords';
 
 interface UsageManifest { version: number; pages: number; }
 const PAGE_SIZE = 256;
+export const USAGE_SCOPE = 'usage';
+const PEER_USAGE_SCOPE = 'nearby-usage';
+interface PeerUsageVersion { device: string; revision: number; }
+export interface PeerUsageUpdate { origin: string; revision: number; item: RequestUsage; }
+export function usageRecordId(position: number): string { return position.toString().padStart(16, '0'); }
+
+export async function readLegacyUsage(root: string): Promise<RequestUsage[]> {
+  const byId = new Map<string, RequestUsage>();
+  const append = (text: string): void => {
+    const items = JSON.parse(text) as RequestUsage[];
+    if (!Array.isArray(items)) { throw new Error(t('用量记录格式损坏。')); }
+    for (const item of items) {
+      if (!item || typeof item.id !== 'string' || !item.id) { throw new Error(t('用量记录格式损坏。')); }
+      byId.set(item.id, item);
+    }
+  };
+  const directory = root + '/usage-records';
+  if (await fs.access(directory + '/index.json')) {
+    const manifest = JSON.parse(await fs.readText(directory + '/index.json')) as UsageManifest;
+    if (manifest.version !== 1 || !Number.isSafeInteger(manifest.pages) || manifest.pages < 0) { throw new Error(t('用量记录格式损坏。')); }
+    for (let page = 0; page < manifest.pages; page++) {
+      append(await fs.readText(directory + '/' + page + '.json'));
+    }
+  } else if (await fs.access(root + '/usage-ledger.json')) { append(await fs.readText(root + '/usage-ledger.json')); }
+  return Array.from(byId.values());
+}
 
 export class UsageLedger {
   private static path: string = '';
   private static records: RequestUsage[] = [];
   private static positions: Map<string, number> = new Map();
+  private static peers: Map<string, PeerUsageVersion> = new Map();
   private static dirty: Set<number> = new Set();
   private static persistedPages: number = 0;
+  private static database?: () => Promise<ArkDataRecords>;
   private static ready: boolean = false;
   private static scheduled: boolean = false;
   private static queue: Promise<void> = Promise.resolve();
@@ -32,8 +61,9 @@ export class UsageLedger {
       try { listener(); } catch (_) { /* Views cannot interrupt accounting. */ }
     }
   }
-  static configure(root: string): Promise<void> {
+  static configure(root: string, database?: () => Promise<ArkDataRecords>): Promise<void> {
     UsageLedger.path = root + '/usage-records'; UsageLedger.ready = false;
+    UsageLedger.database = database;
     UsageLedger.queue = UsageLedger.queue.catch(() => {}).then(async () => {
       try {
         await UsageLedger.load(root); UsageLedger.ready = true;
@@ -44,6 +74,37 @@ export class UsageLedger {
     return UsageLedger.queue;
   }
   private static async load(root: string): Promise<void> {
+    if (UsageLedger.database) {
+      const db = await UsageLedger.database();
+      const loaded: RequestUsage[] = [];
+      const peers = new Map<string, PeerUsageVersion>();
+      for (const id of await db.ids(USAGE_SCOPE)) {
+        const text = await db.read(USAGE_SCOPE, id);
+        if (id !== usageRecordId(loaded.length) || text === undefined) { throw new Error(t('用量记录格式损坏。')); }
+        loaded.push(JSON.parse(text) as RequestUsage);
+      }
+      const index = new Map<string, number>();
+      for (let i = 0; i < loaded.length; i++) {
+        const id = loaded[i]?.id;
+        if (typeof id !== 'string' || !id || index.has(id)) { throw new Error(t('用量记录格式损坏。')); }
+        index.set(id, i);
+      }
+      for (const id of await db.ids(PEER_USAGE_SCOPE)) {
+        const metadata = await db.read(PEER_USAGE_SCOPE, id);
+        if (metadata === undefined || !index.has(id)) { throw new Error('Synchronized usage owner is missing its record'); }
+        const peer = JSON.parse(metadata) as PeerUsageVersion;
+        UsageLedger.validatePeer(peer); peers.set(id, peer);
+      }
+      UsageLedger.dirty.clear();
+      for (const current of UsageLedger.records) {
+        const position = index.get(current.id) ?? loaded.length;
+        loaded[position] = current; index.set(current.id, position); UsageLedger.dirty.add(position);
+        const peer = UsageLedger.peers.get(current.id);
+        if (peer) { peers.set(current.id, peer); } else { peers.delete(current.id); }
+      }
+      UsageLedger.records = loaded; UsageLedger.positions = index; UsageLedger.peers = peers;
+      return;
+    }
     const loaded: RequestUsage[] = []; const index = new Map<string, number>();
     const append = (items: RequestUsage[]): void => {
       if (!Array.isArray(items)) { throw new Error(t('用量记录格式损坏。')); }
@@ -89,6 +150,22 @@ export class UsageLedger {
     // Backups can flush directly while request accounting schedules its own flush.
     return withFileMutation(UsageLedger.path, async () => {
       if (!UsageLedger.ready) { return; }
+      if (UsageLedger.database) {
+        const db = await UsageLedger.database();
+        while (UsageLedger.dirty.size > 0) {
+          const positions = Array.from(UsageLedger.dirty).slice(0, PAGE_SIZE);
+          const records = positions.map((position: number): StoredRecord => ({ scope: USAGE_SCOPE,
+            id: usageRecordId(position), text: JSON.stringify(UsageLedger.records[position]) }));
+          for (const position of positions) {
+            const id = UsageLedger.records[position].id;
+            records.push({ scope: PEER_USAGE_SCOPE, id: id, text: JSON.stringify(UsageLedger.peers.get(id)) });
+          }
+          positions.forEach((position) => { UsageLedger.dirty.delete(position); });
+          try { await db.commit(records); }
+          catch (error) { positions.forEach((position) => { UsageLedger.dirty.add(position); }); throw error as Error; }
+        }
+        return;
+      }
       do {
         while (UsageLedger.dirty.size > 0) {
           const page = UsageLedger.dirty.values().next().value as number;
@@ -114,13 +191,7 @@ export class UsageLedger {
       await UsageLedger.flush();
       return JSON.parse(JSON.stringify(UsageLedger.records)) as RequestUsage[];
     }
-    const items: RequestUsage[] = [], path = root + '/usage-records/index.json';
-    if (await fs.access(path)) {
-      const manifest = JSON.parse(await fs.readText(path)) as UsageManifest;
-      if (manifest.version !== 1 || !Number.isSafeInteger(manifest.pages) || manifest.pages < 0) { throw new Error(t('用量记录格式损坏。')); }
-      for (let page = 0; page < manifest.pages; page++) { items.push(...JSON.parse(await fs.readText(root + '/usage-records/' + page + '.json')) as RequestUsage[]); }
-    } else if (await fs.access(root + '/usage-ledger.json')) { items.push(...JSON.parse(await fs.readText(root + '/usage-ledger.json')) as RequestUsage[]); }
-    return items;
+    return readLegacyUsage(root);
   }
   static async restoreBackup(root: string, records: RequestUsage[]): Promise<void> {
     if (!records.length) { return; }
@@ -128,6 +199,30 @@ export class UsageLedger {
     await UsageLedger.queue;
     for (const item of records) { if (!UsageLedger.positions.has(item.id)) { UsageLedger.record(item); } }
     await UsageLedger.queue;
+    await UsageLedger.flush();
+    if (UsageLedger.error) { UsageLedger.error = ''; UsageLedger.notify(); }
+  }
+  static isPeer(id: string): boolean { return UsageLedger.peers.has(id); }
+  private static validatePeer(peer: PeerUsageVersion): void {
+    if (!peer || typeof peer.device !== 'string' || !/^[0-9a-f-]{36}$/.test(peer.device) ||
+      !Number.isSafeInteger(peer.revision) || peer.revision <= 0) { throw new Error('Invalid synchronized usage owner or revision'); }
+  }
+  static async receivePeer(root: string, updates: PeerUsageUpdate[]): Promise<void> {
+    if (UsageLedger.path !== root + '/usage-records' || !UsageLedger.ready || !UsageLedger.database) {
+      throw new Error('Usage storage is not ready for synchronization');
+    }
+    await UsageLedger.queue;
+    for (const update of updates) {
+      const peer: PeerUsageVersion = { device: update.origin, revision: update.revision };
+      UsageLedger.validatePeer(peer);
+      const current = UsageLedger.peers.get(update.item.id);
+      // Backup imports and locally executed requests retain local ownership.
+      if (UsageLedger.positions.has(update.item.id) && (!current || current.device !== peer.device || current.revision >= peer.revision)) { continue; }
+      UsageLedger.storeRecord(update.item, peer);
+    }
+    await UsageLedger.queue;
+    // A failed scheduled flush retains dirty records. Retry here, and propagate
+    // failure before the transport marks any received revision as applied.
     await UsageLedger.flush();
     if (UsageLedger.error) { UsageLedger.error = ''; UsageLedger.notify(); }
   }
@@ -139,10 +234,16 @@ export class UsageLedger {
     UsageLedger.record(updated);
   }
   static record(item: RequestUsage): void {
+    UsageLedger.storeRecord(item);
+  }
+  private static storeRecord(item: RequestUsage, peer?: PeerUsageVersion): void {
+    if (peer) { UsageLedger.peers.set(item.id, peer); }
+    else { UsageLedger.peers.delete(item.id); }
     let index = UsageLedger.positions.get(item.id);
     if (index === undefined) { index = UsageLedger.records.length; UsageLedger.positions.set(item.id, index); UsageLedger.records.push(item); }
     else { UsageLedger.records[index] = item; }
-    UsageLedger.dirty.add(Math.floor(index / PAGE_SIZE)); UsageLedger.revision++; BackupChanges.revision++; UsageLedger.notify();
+    UsageLedger.dirty.add(UsageLedger.database ? index : Math.floor(index / PAGE_SIZE));
+    UsageLedger.revision++; BackupChanges.revision++; UsageLedger.notify();
     if (!UsageLedger.path || UsageLedger.scheduled) { return; }
     UsageLedger.scheduled = true;
     UsageLedger.queue = UsageLedger.queue.catch(() => {}).then(async () => {

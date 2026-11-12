@@ -6,7 +6,7 @@ export interface LogFields {
   sdk?: number; initialSupported?: boolean; supported?: boolean; available?: boolean; reason?: string; format?: string;
   scriptSource?: string; line?: number; pageSceneObserver?: boolean;
   mounted?: boolean; attached?: boolean; visible?: boolean; foreground?: boolean;
-  setting?: string; dataVersion?: number; serverId?: string;
+  setting?: string; dataVersion?: number; serverId?: string; deviceId?: string;
   change?: string; commonMessages?: number; sharedCharacters?: number; systemHash?: number; toolsHash?: number;
   operationId?: number; instanceId?: number; generation?: number; active?: number; count?: number; total?: number;
   chars?: number; bytes?: number; elapsedMs?: number; durationMs?: number; delayMs?: number; firstTokenMs?: number; outputTokens?: number; http?: number; code?: number;
@@ -15,6 +15,7 @@ export interface LogFields {
   tokens?: number; budget?: number; removed?: number; retained?: number; duplicates?: number; characters?: number;
   added?: number; updated?: number;
   round?: number; revision?: number; threads?: number; changedThreads?: number; selected?: number;
+  requests?: number; panels?: number; boards?: number;
   enabled?: boolean; failed?: boolean; cancelled?: boolean; uncertain?: boolean; speaking?: boolean; preflight?: boolean; closed?: boolean;
   streaming?: boolean; ready?: boolean; hasModel?: boolean; retryable?: boolean;
   protocol?: string; phase?: string; action?: string; policy?: string; scheme?: string; library?: string; status?: string; balanceAdapter?: string;
@@ -50,7 +51,8 @@ EVENTS.appearance = ['material', 'material_support', 'material_unavailable', 'lo
 EVENTS.language = ['load_failed', 'save_failed'];
 EVENTS.camera = ['dismissed', 'imported', 'capture_failed'];
 EVENTS.account = ['restore_failed', 'response_invalid', 'state_changed', 'sign_in_cancelled', 'sign_in_failed', 'sign_out_failed', 'state_failed'];
-EVENTS.privacy = ['query_completed', 'query_retry', 'check_failed', 'subscription_ready', 'subscription_cleanup_failed'];
+EVENTS.privacy = ['request_started', 'query_completed', 'query_retry', 'using_cached_consent', 'check_failed',
+  'subscription_ready', 'subscription_cleanup_failed'];
 EVENTS.feedback = ['attachment_failed', 'log_failed', 'initialize_failed', 'save_failed', 'credential_failed', 'request_failed', 'submit_failed', 'list_failed',
   'detail_failed', 'upload_failed', 'cleanup_failed', 'reconcile_failed', 'delete_failed'];
 EVENTS.backup = ['started', 'restored', 'restore_prepared', 'key_decrypt_failed', 'cleanup_failed', 'replace_failed', 'retire_failed', 'rollback_failed', 'archive_written', 'archive_write_failed', 'archive_verified',
@@ -62,7 +64,7 @@ EVENTS.background = ['acquired', 'released', 'cancelled', 'suspended', 'release_
 EVENTS.notification = ['authorization_checked', 'authorization_denied', 'authorization_failed', 'disabled', 'published', 'publish_failed'];
 EVENTS.speech = ['preparing', 'listening', 'vad', 'complete', 'finishing', 'recognition_failed', 'cancel_failed', 'playback_requested', 'playback_failed', 'cleanup_failed', 'late_cleanup_failed'];
 EVENTS.voice = ['focus_requested', 'released', 'draft_failed'];
-EVENTS.composer = ['sheet_action_queued', 'sheet_action_dispatched', 'sheet_action_cancelled'];
+EVENTS.composer = ['sheet_action_queued', 'sheet_action_dispatched', 'sheet_action_cancelled', 'send_focus_failed'];
 EVENTS.focus = ['search_requested', 'provider_requested', 'onboarding_requested'];
 EVENTS.navigation = ['tools_opened', 'tools_repeated', 'settings_opened', 'settings_repeated',
   'new_chat_blocked', 'new_chat_failed', 'new_chat_revealed'];
@@ -74,11 +76,18 @@ EVENTS.preview = ['failed', 'captured', 'thumbnail_failed', 'surface_moved'];
 EVENTS.sandbox = ['execution_failed', 'orchestration_failed'];
 EVENTS.tool = ['failed', 'partial'];
 EVENTS.workspace = ['mutation_failed', 'preview_failed', 'folder_support_failed', 'folder_picker_support_failed', 'folder_persist_failed', 'folder_activate_failed', 'folder_revoke_failed', 'folder_startup_failed'];
-EVENTS.storage = ['scan_failed', 'metric_failed', 'cleanup_failed', 'cleanup_protected', 'usage_save_failed'];
+EVENTS.storage = ['scan_failed', 'metric_failed', 'cleanup_failed', 'cleanup_protected', 'usage_save_failed', 'migration_committed'];
 EVENTS.mcp = ['request_failed', 'cancel_notice_failed', 'browser_launch_failed'];
 EVENTS.mail = ['transport_failed', 'cleanup_failed', 'account_saved', 'account_removed', 'query_started', 'query_complete', 'query_failed', 'command_failed', 'settings_failed'];
 EVENTS.export = ['image_failed', 'preview_failed', 'cleanup_failed', 'share_failed', 'save_failed'];
 EVENTS.network = ['request_start', 'request_end', 'context_overflow', 'first_data', 'request_failed'];
+EVENTS.sync = ['nearby_attachments_received', 'nearby_conflict_resolved', 'nearby_failed', 'nearby_device_failed', 'workspace_delete_conflict', 'workspace_delete_unversioned', 'conversation_accept_failed', 'conversation_connect_failed', 'conversation_disconnect_failed',
+  'conversation_destroy_failed', 'conversation_receive_failed', 'conversation_progress_failed', 'conversation_admission_failed',
+  'conversation_admitted', 'conversation_acknowledged', 'conversation_executor_open_failed', 'conversation_frame_invalid', 'conversation_live_started',
+  'conversation_route_ready', 'conversation_connected', 'conversation_authorized', 'conversation_input_saved',
+  'conversation_run_started', 'conversation_first_output', 'conversation_first_output_sent', 'conversation_snapshot_sent', 'conversation_snapshot_applied',
+  'conversation_output_applied', 'conversation_opened', 'nearby_push', 'nearby_pull', 'nearby_flush',
+  'probe_failed', 'probe_declined', 'probe_connected', 'probe_acknowledged', 'probe_received'];
 EVENTS.moderation = ['guard_stopped', 'output_words_stopped'];
 EVENTS.context = ['inspected', 'request_prefix'];
 EVENTS.browser = ['permission', 'control_user', 'control_agent', 'control_wait', 'task_released', 'closed', 'failed', 'acquired', 'permission_wait', 'operation', 'observation_changed', 'opened_by_user', 'annotation_started', 'annotation_captured', 'annotation_failed', 'search_observed', 'search_failed', 'capture_started', 'frame_captured', 'capture_finished'];
@@ -91,9 +100,9 @@ EVENTS.diagnostics = ['started', 'stopped', 'marker', 'failed', 'level_changed']
 const NUMBERS: string[] = ['sdk', 'line', 'operationId', 'instanceId', 'generation', 'active', 'count', 'total', 'chars', 'bytes', 'elapsedMs', 'durationMs', 'delayMs', 'firstTokenMs', 'outputTokens', 'http', 'code',
   'commonMessages', 'sharedCharacters', 'systemHash', 'toolsHash', 'dataVersion',
   'messages', 'tools', 'nodes', 'keys', 'width', 'height', 'widthVp', 'request', 'chunk', 'eventCode', 'newChats', 'skippedChats', 'level', 'style',
-  'tokens', 'budget', 'removed', 'retained', 'duplicates', 'characters', 'added', 'updated', 'round', 'revision', 'threads', 'changedThreads', 'selected'];
+  'tokens', 'budget', 'removed', 'retained', 'duplicates', 'characters', 'added', 'updated', 'round', 'revision', 'threads', 'changedThreads', 'selected', 'requests', 'panels', 'boards'];
 const BOOLEANS: string[] = ['initialSupported', 'supported', 'available', 'pageSceneObserver', 'mounted', 'attached', 'visible', 'foreground', 'enabled', 'failed', 'cancelled', 'uncertain', 'speaking', 'preflight', 'closed', 'streaming', 'ready', 'hasModel', 'retryable'];
-const REFERENCES: string[] = ['threadId', 'messageId', 'sessionId', 'providerId', 'previewId', 'surfaceId', 'serverId'];
+const REFERENCES: string[] = ['threadId', 'messageId', 'sessionId', 'providerId', 'previewId', 'surfaceId', 'serverId', 'deviceId'];
 const STRINGS: Record<string, string[]> = {};
 STRINGS.channel = ['answer', 'reasoning'];
 STRINGS.balanceAdapter = ['deepseek', 'sub2api', 'newapi', 'newapi-account', 'zhipu', 'custom'];
@@ -117,7 +126,7 @@ STRINGS.protocol = ['chat-completions', 'responses', 'anthropic-messages', 'gemi
 STRINGS.phase = ['idle', 'preparing', 'listening', 'complete', 'finishing', 'error', 'creating', 'playing', 'stopping', 'connecting', 'streaming', 'capture', 'compose', 'encode',
   'login', 'state', 'storage', 'credential', 'identity', 'submit', 'query', 'upload',
   'page_show', 'privacy_event', 'subscription_ready', 'new_want', 'business', 'manual_retry', 'request_consent', 'initial', 'active'];
-STRINGS.action = ['send', 'cancel', 'edit', 'press', 'none', 'open', 'click', 'type', 'select', 'scroll', 'back', 'forward', 'reload', 'capture', 'wait'];
+STRINGS.action = ['local', 'remote', 'send', 'cancel', 'edit', 'press', 'none', 'open', 'click', 'type', 'select', 'scroll', 'back', 'forward', 'reload', 'capture', 'wait'];
 STRINGS.policy = ['unset', 'enabled', 'disabled'];
 STRINGS.scheme = ['http', 'https', 'about', 'data', 'file', 'other'];
 STRINGS.library = ['three', 'echarts', 'charts', 'none'];

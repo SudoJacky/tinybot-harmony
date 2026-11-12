@@ -560,7 +560,8 @@ function load(file) {
   const fixture = new Fixture(), app = new ChatViewModel();
   await app.initialize(fixture.session);
   const Chat = probe('views/ChatPanel', 'ChatPanel', ['emptyConversation', 'centeredWelcome', 'composerExpanded',
-    'keyboardVisibleInLayout', 'composerActiveInLayout', 'keyboardVisibilityChanged', 'updatePanelArea']);
+    'keyboardVisibleInLayout', 'composerActiveInLayout', 'keyboardVisibilityChanged', 'updatePanelArea',
+    'remoteRunning', 'nearbyQueuedCount']);
   const chat = Object.assign(new Chat(), { app, thread: app.active, workbench: true, panelHeight: 800,
     viewport: { keyboardHeight: 0 }, voiceMode: false, composerFocused: false, importing: false,
     showPlus: false, showContext: false, showReasoning: false, showQueue: false,
@@ -569,6 +570,16 @@ function load(file) {
   chat.workbench = false;
   assert.equal(chat.centeredWelcome(), true, 'Phone centers the welcome and composer when there is room');
   assert.equal(chat.composerExpanded(), false, 'Phone retains its compact idle composer');
+  app.peerThread = true;
+  app.peerRunningThreadIds = [chat.thread.id];
+  chat.nearbyReceipts = [];
+  assert.equal(chat.composerExpanded(), true, 'The phone composer expands while the nearby device is running');
+  app.peerRunningThreadIds = [];
+  chat.nearbyReceipts = [{ threadId: chat.thread.id, messageId: 'queued' }];
+  assert.equal(chat.composerExpanded(), true, 'The phone composer stays expanded while a nearby message is queued');
+  chat.nearbyReceipts = [];
+  assert.equal(chat.composerExpanded(), false, 'The nearby composer returns to its compact idle state');
+  app.peerThread = false;
   chat.showToolApprovalMode = true;
   assert.equal(chat.composerExpanded(), false, 'Opening approval below the composer does not expand the editor');
   chat.showToolApprovalMode = false;

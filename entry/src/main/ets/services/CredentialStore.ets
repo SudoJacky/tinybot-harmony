@@ -4,8 +4,8 @@ import { BusinessError } from '@kit.BasicServicesKit';
 
 import { CredentialVault } from './ProfileSettings';
 import { BackupChanges } from '../model/BackupChanges';
-
-const MISSING_API_KEY: string = '无法读取已保存的 API Key，请进入设置，编辑对应模型服务，重新填写 API Key 并保存。';
+import { DetailedError } from '../model/DetailedError';
+import { t } from '../model/I18n';
 
 export class CredentialStore implements CredentialVault {
   async read(alias: string): Promise<string> {
@@ -13,7 +13,10 @@ export class CredentialStore implements CredentialVault {
       return '';
     }
     const secret = await this.readOptional(alias);
-    if (secret === undefined) { throw new Error(MISSING_API_KEY); }
+    if (secret === undefined) {
+      throw new DetailedError(t('无法读取已保存的 API Key，请进入设置，编辑对应模型服务，重新填写 API Key 并保存。'),
+        { code: asset.ErrorCode.NOT_FOUND, stage: 'credential_read' });
+    }
     return secret;
   }
 
@@ -30,9 +33,8 @@ export class CredentialStore implements CredentialVault {
       }
       throw error as Error;
     }
-    if (result.length !== 1) {
-      throw new Error(MISSING_API_KEY);
-    }
+    if (!result.length) { return undefined; }
+    if (result.length !== 1) { throw new Error(t('安全存储返回了重复的凭据记录。')); }
     return new util.TextDecoder('utf-8').decodeToString(result[0].get(asset.Tag.SECRET) as Uint8Array);
   }
 

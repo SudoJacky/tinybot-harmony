@@ -77,7 +77,7 @@ export class ProtocolProvider implements ModelProvider {
       const usageId = util.generateRandomUUID();
       this.effects.recordUsage({ id: usageId, provider: this.info.id, model: input.model, startedAt: startedAt, durationMs: 0,
         status: 'running_or_unknown', origin: input.usageOrigin });
-      if (Diagnostics.acceptsLog('info')) { Diagnostics.log('info', 'network', 'request_start', { operationId: diagnosticId, providerId: this.info.id, protocol: this.info.protocol, hasModel: input.model.length > 0, messages: input.messages.length, tools: input.tools.length }); };
+      if (Diagnostics.acceptsLog('info')) { Diagnostics.log('info', 'network', 'request_start', { operationId: diagnosticId, messageId: input.usageOrigin?.turnId, providerId: this.info.id, protocol: this.info.protocol, hasModel: input.model.length > 0, messages: input.messages.length, tools: input.tools.length }); };
       return await new Promise<ModelTurn>((resolve, reject) => {
         let settled = false;
         let ended = false;

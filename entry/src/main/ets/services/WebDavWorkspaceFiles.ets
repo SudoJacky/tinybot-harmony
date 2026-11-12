@@ -120,11 +120,16 @@ export async function listWebDavDirectory(id: string, directory: string, cancell
   return withWebDavShare(id, directory, async (session) => {
     const response = await request(session, () => session.fetch(new rcp.Request(directory, 'PROPFIND',
       { Depth: '1', 'content-type': 'application/xml; charset=utf-8' }, DIRECTORY_QUERY)), cancellation, [207]);
+    return parseWebDavDirectory(response.body, directory, cancellation);
+  });
+}
+
+export function parseWebDavDirectory(body: ArrayBuffer | undefined, directory: string, cancellation: Cancellation): WebDavDirectoryEntry[] {
     const parent = url.URL.parseURL(directory);
     const parentPath = decodeURIComponent(parent.pathname);
     let listed = false;
     const entries = new Map<string, WebDavDirectoryEntry>();
-    for (const item of resources(response.body)) {
+    for (const item of resources(body)) {
       cancellation.check();
       if (item.directory === undefined) { continue; }
       const path = resourcePath(parent, item.href);
@@ -138,7 +143,6 @@ export async function listWebDavDirectory(id: string, directory: string, cancell
     }
     if (!listed) { throw new Error(t('无法读取 WebDAV 文件夹信息。请检查目录地址。')); }
     return Array.from(entries.values()).sort((a, b) => a.name.localeCompare(b.name));
-  });
 }
 
 function strongEtag(headers: rcp.ResponseHeaders): string {

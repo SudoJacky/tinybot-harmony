@@ -9,6 +9,7 @@ import { mergeSavedConfiguration } from '../model/SavedConfiguration';
 import { BalanceSettings, canKeepBalanceCredential, usesBalanceCredential } from '../model/BalanceSettings';
 
 export interface CredentialVault extends CredentialReader {
+  readOptional(alias: string): Promise<string | undefined>;
   write(alias: string, secret: string): Promise<void>;
   remove(alias: string): Promise<void>;
 }
@@ -54,7 +55,7 @@ export class ProfileSettings {
     const edited: ProviderProfile = { id: previous?.id || 'provider-' + this.createId(), name: draft.name.trim(),
       presetId: draft.presetId, protocol: draft.protocol, baseUrl: draft.baseUrl.trim().replace(/\/+$/, ''),
       credentialAlias: draft.noApiKey ? '' : key.length > 0 ? 'pending-key' : previous?.credentialAlias || '',
-      noApiKey: draft.noApiKey, enabled: draft.enabled, models: modelIds(draft.models),
+      noApiKey: draft.noApiKey, enabled: draft.enabled, models: modelIds(draft.models), pendingSetup: undefined,
       contextWindow: draft.contextWindow.trim() ? Number(draft.contextWindow) : undefined,
       balance: draft.balance,
       balanceCredentialAlias: separateBalance ? (balanceKey ? 'pending-balance-key' : previous?.balanceCredentialAlias) : undefined };

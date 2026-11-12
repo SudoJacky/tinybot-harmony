@@ -1,20 +1,31 @@
 // Source-only behavioral regressions: real session/runtime/viewmodel, deterministic network and ordered storage.
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio');
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 const root = path.resolve(__dirname, '../entry/src/main/ets'), cache = new Map();
+const kits = {
+  '@kit.ArkTS': { util: { generateRandomUUID: () => crypto.randomUUID(),
+    TextEncoder: class { encodeInto(text) { return new TextEncoder().encode(text); } } } },
+  '@kit.CryptoArchitectureKit': { cryptoFramework: { createMd: () => {
+    const hash = crypto.createHash('sha256');
+    return { update: async blob => hash.update(blob.data), digest: async () => ({ data: hash.digest() }) };
+  } } }
+};
 function load(name) {
   const file = path.resolve(name.endsWith('.ets') ? name : name + '.ets');
   if (cache.has(file)) return cache.get(file);
   const exports = {}; cache.set(file, exports);
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021, experimentalDecorators: true,
-  } }).outputText, { exports, console, setTimeout, clearTimeout, Observed: x => x,
-    require: id => id.startsWith('@kit.') ? {} : load(path.resolve(path.dirname(file), id)) }, { filename: file });
+  } }).outputText, { exports, console, setTimeout, clearTimeout, setInterval, clearInterval, Observed: x => x,
+    AppStorage: { get: key => key === 'tinybot.foreground', setOrCreate() {} },
+    require: id => id.startsWith('@kit.') ? kits[id] || {} : load(path.resolve(path.dirname(file), id)) }, { filename: file });
   return exports;
 }
 const from = name => load(path.join(root, name));
 const { emptyData, parseAppData } = from('model/Conversation');
+const { CONVERSATION_TITLE_PROMPT } = from('model/ConversationTitle');
 const { defaultProductivity } = from('model/Productivity');
 const { defaultAssistantOptions } = from('model/AssistantOptions');
 const { modelConfig } = from('model/ProviderProfiles');
@@ -27,8 +38,8 @@ const { ToolApproval } = from('services/ToolApproval');
 const { BrowserSession } = from('services/BrowserSession');
 const copy = value => JSON.parse(JSON.stringify(value));
 const gate = () => { let open; const promise = new Promise(resolve => { open = resolve; }); return { promise, open }; };
-async function until(check) {
-  for (let i = 0; i < 100; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 1)); }
+async function until(check, attempts = 100) {
+  for (let i = 0; i < attempts; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 1)); }
   assert.ok(check(), 'Expected asynchronous operation did not reach its barrier');
 }
 async function fixture(configure = () => {}, approval) {
@@ -51,6 +62,9 @@ async function fixture(configure = () => {}, approval) {
   const provider = { info: { id: 'test', name: 'Test', protocol: 'test', defaultBaseUrl: '', defaultModel: 'model-a' },
     endpoint: () => 'https://example.com',
     stream(request, cancellation, onText) {
+      if (request.messages[0]?.content === CONVERSATION_TITLE_PROMPT) {
+        return Promise.resolve({ content: 'Remote task', toolCalls: [] });
+      }
       return new Promise((resolve, reject) => {
         const remove = cancellation.onCancel(() => reject(new RunCancelledError()));
         requests.push({ request, cancellation, text: onText, finish(content, toolCalls = []) { remove(); resolve({ content, toolCalls }); } });
@@ -72,6 +86,82 @@ async function start(f, id, prompt = id) {
   return { done: f.session.send() };
 }
 async function main() {
+  {
+    const phone = await fixture(), tablet = await fixture();
+    const NearbyConversations = from('services/NearbyConversations').nearbyConversations.constructor;
+    const phoneSync = new NearbyConversations(), tabletSync = new NearbyConversations();
+    const phoneOrigin = crypto.randomUUID(), tabletOrigin = crypto.randomUUID();
+    phoneSync.start({}, phone.session, phoneOrigin, () => 'phone', () => [{ id: 'tablet', name: 'Tablet' }]);
+    tabletSync.start({}, tablet.session, tabletOrigin, () => 'tablet', () => [{ id: 'phone', name: 'Phone' }]);
+    const commands = [], events = [], phoneOpened = [], tabletOpened = [];
+    let phoneTail = Promise.resolve(), tabletTail = Promise.resolve();
+    const phoneLink = { id: 1, deviceId: 'tablet', close() {}, send(text) {
+      const packet = JSON.parse(text); if (packet.kind === 'command') commands.push(packet);
+      return phoneTail = phoneTail.then(() => tabletSync.receive(tabletLink, text));
+    } };
+    const tabletLink = { id: 2, deviceId: 'phone', close() {}, send(text) {
+      const packet = JSON.parse(text); if (packet.kind === 'reply') events.push('ack');
+      return tabletTail = tabletTail.then(() => phoneSync.receive(phoneLink, text));
+    } };
+    const phonePeer = phoneSync.attach(phoneLink), tabletPeer = tabletSync.attach(tabletLink);
+    phoneSync.identify(phonePeer, tabletOrigin); tabletSync.identify(tabletPeer, phoneOrigin);
+    tablet.session.subscribe(event => { if (event.data?.activeThreadId !== 'a' && event.data) events.push('opened'); });
+    phone.session.subscribe(event => { if (event.kind === 'thread-opened') phoneOpened.push(event.threadId); });
+    tablet.session.subscribe(event => { if (event.kind === 'thread-opened') tabletOpened.push(event.threadId); });
+    try {
+      await phoneSync.submit('tablet', '', '', 'a', 'Run this on the tablet');
+      const id = commands[0].threadId;
+      await until(() => tablet.requests.length === 1);
+      await phoneTail;
+      assert.equal(tablet.app.active.id, id, 'The executor must open the newly admitted remote task');
+      assert.ok(events.indexOf('ack') >= 0 && events.indexOf('opened') > events.indexOf('ack'));
+      assert.equal(phone.app.active.peerThreadId, id);
+      assert.equal(phone.app.peerThread, true);
+      assert.equal(tablet.app.peerThread, false);
+      assert.deepEqual(phoneOpened, [phone.app.active.id]);
+      assert.deepEqual(tabletOpened, [id]);
+      assert.equal(phone.requests.length, 0, 'Only the tablet executes the model request');
+      assert.equal(thread(tablet, 'a', true).draft, '');
+      tablet.requests[0].text('First output');
+      await until(() => phone.app.active.messages.at(-1)?.content === 'First output');
+      assert.equal(tablet.app.active.messages.at(-1).content, 'First output');
+      tablet.requests[0].text(' and more');
+      await until(() => phone.app.active.messages.at(-1)?.content === 'First output and more', 500);
+      assert.equal(tablet.app.active.messages.at(-1).content, 'First output and more');
+      // A user may navigate away; duplicate delivery and followups must not reopen it.
+      await tablet.app.selectThread('a');
+      tablet.session.setDraft('Keep the tablet draft');
+      await phoneSync.call(phonePeer, { ...commands[0] });
+      assert.equal(tablet.app.active.id, 'a');
+      assert.equal(tablet.requests.length, 1);
+      await phoneSync.submit('', tabletOrigin, id, phone.app.active.id, 'Continue');
+      assert.equal(tablet.app.active.id, 'a');
+      tablet.requests[0].finish('First done');
+      await until(() => tablet.requests.length === 2);
+      tablet.requests[1].finish('All done');
+      await tablet.session.waitForIdle();
+      await until(() => phone.app.active.messages.at(-1)?.content === 'All done' &&
+        phone.app.active.messages.at(-1)?.status === 'complete');
+      assert.equal(thread(tablet, id, true).messages.at(-1).content, 'All done');
+      assert.equal(JSON.parse(tablet.repository.saved).activeThreadId, 'a');
+      assert.equal(tablet.app.draft, 'Keep the tablet draft');
+      assert.equal(phone.requests.length, 0);
+      tablet.repository.beforeSave = async data => {
+        if (data.threads.some(item => item.pendingInputs?.some(input => input.text === 'Cannot save'))) {
+          throw Error('injected remote admission failure');
+        }
+      };
+      await assert.rejects(phoneSync.submit('tablet', '', '', phone.app.active.id, 'Cannot save'), /injected remote admission failure/);
+      assert.equal(tablet.app.active.id, 'a');
+      assert.equal(tablet.requests.length, 2);
+      assert.deepEqual(tabletOpened, [id], 'Retries, followups, and rejected tasks must not trigger navigation');
+      console.log('PASS a remote task opens on both devices, streams live output, and preserves navigation on retries and followups');
+    } finally {
+      phoneSync.stop(); tabletSync.stop();
+      for (const id of tablet.session.runningThreadIds) await tablet.session.stop(undefined, id);
+      await tablet.session.waitForIdle();
+    }
+  }
   {
     const approval = new ToolApproval();
     const f = await fixture(undefined, approval);
@@ -287,6 +377,82 @@ async function main() {
     browser.handoff(); await waiting; browser.release(owner);
     console.log('PASS browser handoff pauses only the owning conversation');
   }
+  {
+    const { peerThreadText, parsePeerThread, peerLiveMessage, peerSettingsText } = from('model/PeerSyncData');
+    const makeDevice = name => fixture(data => {
+      data.threads = [{ ...data.threads[0], id: name }];
+      data.activeThreadId = name;
+    });
+    const phone = await makeDevice('phone'), tablet = await makeDevice('tablet');
+    const copyCheckpoint = async (source, target, id) => {
+      const stored = thread(source, id, true);
+      await target.session.receivePeerChanges([], [{ origin: id, id, collisionId: 'other-' + id,
+        thread: parsePeerThread(peerThreadText(stored), id) }]);
+    };
+    const copyLive = (source, target, id) => {
+      const answer = peerLiveMessage(JSON.stringify(source.session.liveAnswer(id)));
+      assert.equal(target.session.receivePeerAnswer(id, id, answer), true);
+    };
+    const toolGate = gate();
+    let calls = 0;
+    phone.resources.tools = () => ({
+      definitions: () => [{ type: 'function', function: { name: 'read_file', description: 'Read a file' } }],
+      execute: async () => { calls++; await toolGate.promise; return '{"value":"file read"}'; }
+    });
+    const phoneRun = await start(phone, 'phone', 'Phone request');
+    const tabletRun = await start(tablet, 'tablet', 'Tablet request');
+    await until(() => phone.requests.length === 1 && tablet.requests.length === 1);
+    await copyCheckpoint(phone, tablet, 'phone');
+    await copyCheckpoint(tablet, phone, 'tablet');
+    phone.requests[0].text('Phone partial');
+    tablet.requests[0].text('Tablet partial');
+    copyLive(phone, tablet, 'phone');
+    copyLive(tablet, phone, 'tablet');
+    assert.equal(tablet.app.threads.find(item => item.id === 'phone').messages.at(-1).content, 'Phone partial');
+    assert.equal(phone.app.threads.find(item => item.id === 'tablet').messages.at(-1).content, 'Tablet partial');
+    assert.notEqual(thread(tablet, 'phone', true).messages.at(-1).content, 'Phone partial', 'Live output stays out of the recipient archive');
+    assert.deepEqual(copy(phone.session.runningThreadIds), ['phone']);
+    assert.deepEqual(copy(tablet.session.runningThreadIds), ['tablet']);
+    assert.equal(await tablet.app.selectThread('phone'), true);
+    assert.equal(tablet.app.peerThread, true);
+    assert.equal(tablet.app.canQueueInput, false);
+    await tablet.session.send();
+    assert.equal(tablet.requests.length, 1, 'Viewing a peer never starts another provider request');
+
+    phone.requests[0].finish('', [{ id: 'read', type: 'function',
+      function: { name: 'read_file', arguments: '{"path":"example.txt"}' } }]);
+    await until(() => calls === 1);
+    copyLive(phone, tablet, 'phone');
+    assert.equal(tablet.app.active.messages.at(-1).steps[0].tools[0].status, 'running');
+    toolGate.open();
+    await until(() => phone.requests.length === 2);
+    phone.requests[1].finish('Phone done');
+    tablet.requests[0].finish('Tablet done');
+    await Promise.all([phoneRun.done, tabletRun.done]);
+    await copyCheckpoint(phone, tablet, 'phone');
+    await copyCheckpoint(tablet, phone, 'tablet');
+    assert.equal(tablet.app.active.messages.at(-1).content, 'Phone done');
+    assert.equal(tablet.app.active.messages.at(-1).steps[0].tools[0].status, 'complete');
+    assert.equal(thread(phone, 'tablet', true).messages.at(-1).content, 'Tablet done');
+    assert.deepEqual(copy(phone.app.peerRunningThreadIds), []);
+    assert.deepEqual(copy(tablet.app.peerRunningThreadIds), []);
+    await tablet.session.receivePeerChanges([], [{ origin: 'phone', id: 'phone', collisionId: 'other-phone' }]);
+    assert.equal(thread(tablet, 'phone'), undefined);
+    assert.equal(tablet.app.active.id, 'tablet');
+
+    const config = phone.session.snapshot();
+    config.config.credentialAlias = 'device-key';
+    config.providerProfiles[0].credentialAlias = 'provider-key';
+    config.providerProfiles[0].balanceCredentialAlias = 'balance-key';
+    config.productivity.servers = [{ id: 'server', name: 'Private', url: 'https://example.com/mcp', enabled: true,
+      authType: 'bearer', credentialAlias: 'mcp-key' }];
+    const serialized = peerSettingsText(config);
+    for (const secret of ['device-key', 'provider-key', 'balance-key', 'mcp-key']) assert.ok(!serialized.includes(secret));
+    console.log('PASS two nearby runs exchange live text and tool state, keep local execution ownership, and converge on durable results');
+  }
 }
-const watchdog = setTimeout(() => { throw Error('Parallel session tests did not finish'); }, 30000);
-main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => clearTimeout(watchdog));
+module.exports = { fixture, from, until, thread, start };
+if (require.main === module) {
+  const watchdog = setTimeout(() => { throw Error('Parallel session tests did not finish'); }, 30000);
+  main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => clearTimeout(watchdog));
+}

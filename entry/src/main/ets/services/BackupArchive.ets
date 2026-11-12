@@ -11,6 +11,7 @@ const MAGIC = 'TINYBOT3';
 const CHUNK = 256 * 1024;
 interface ArchiveIndex { metadata: string; sizes: number[]; }
 export interface OpenBackupArchive { metadata: string; files: string[]; sizes: number[]; directory: string; }
+export type BackupBlob = string | Uint8Array;
 
 async function readExactly(fd: number, length: number): Promise<Uint8Array> {
   const result = new Uint8Array(length);
@@ -40,11 +41,12 @@ export async function cleanupBackupArchive(directory: string): Promise<void> {
   catch (error) { Diagnostics.log('warn', 'backup', 'cleanup_failed', undefined, error as Error); }
 }
 
-export async function writeBackupArchive(path: string, metadata: string, sources: string[], cancellation?: Cancellation): Promise<void> {
+export async function writeBackupArchive(path: string, metadata: string, sources: BackupBlob[], cancellation?: Cancellation): Promise<void> {
   cancellation?.check();
   const sizes: number[] = [];
   for (const source of sources) {
     cancellation?.check();
+    if (typeof source !== 'string') { sizes.push(source.byteLength); continue; }
     const stat = await fs.lstat(source);
     if (!stat.isFile() || stat.isSymbolicLink() || !Number.isSafeInteger(stat.size) || stat.size < 0) { throw new Error(t('备份文件无效。')); }
     sizes.push(stat.size);
@@ -63,7 +65,12 @@ export async function writeBackupArchive(path: string, metadata: string, sources
     position = await writeAll(output.fd, bytes, position, cancellation); await hash.update({ data: bytes });
     for (let index = 0; index < sources.length; index++) {
       cancellation?.check();
-      const input = await fs.open(sources[index], fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
+      const source = sources[index];
+      if (typeof source !== 'string') {
+        position = await writeAll(output.fd, source, position, cancellation);
+        await hash.update({ data: source }); continue;
+      }
+      const input = await fs.open(source, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
       try {
         const stat = await fs.stat(input.fd);
         if (!stat.isFile() || stat.size !== sizes[index]) { throw new Error(t('备份期间文件发生变化，请重试。')); }

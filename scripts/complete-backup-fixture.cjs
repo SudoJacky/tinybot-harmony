@@ -31,7 +31,8 @@ module.exports = async function completeBackup({ load, fs, nativePath, secrets, 
     createdAt: 1, updatedAt: 1, refreshedAt: 1, attemptedAt: 1, error: '', archived: false,
     viewState: { revision: 'view-1', value: { expanded: true } } });
   const profile = { id: 'provider-old', name: 'Model', protocol: 'chat-completions', baseUrl: 'https://model.invalid/v1',
-    credentialAlias: 'source-model', enabled: true, noApiKey: false, models: ['model'], contextWindow: 32768 };
+    credentialAlias: 'source-model', enabled: true, noApiKey: false, models: ['model'], contextWindow: 32768,
+    balance: { mode: 'newapi-account', userId: '123' }, balanceCredentialAlias: 'source-balance' };
   const data = model.emptyData(); data.providerProfiles = [profile];
   data.config = { ...data.config, configured: true, providerId: profile.id, model: 'model', baseUrl: profile.baseUrl,
     credentialAlias: profile.credentialAlias, userDocument: 'Call me Lin', systemPrompt: 'Personal instructions', autoCompact: false, contextWindow: 65536, reasoning: 'high', images: true, requestUsage: true };
@@ -53,6 +54,7 @@ module.exports = async function completeBackup({ load, fs, nativePath, secrets, 
   data.extensions.skills[0].document += '\nUser changes'; data.extensions.skills[0].enabled = false;
   const rawSecrets = ['MODEL_PRIVATE_COMPLETE', 'MCP_PRIVATE_COMPLETE', 'SEARCH_PRIVATE_COMPLETE', 'MAIL_PRIVATE_COMPLETE', 'PANEL_PRIVATE_COMPLETE'];
   secrets.clear(); ['source-model', 'source-mcp', 'source-search'].forEach((key, index) => secrets.set(key, rawSecrets[index]));
+  const balanceKey = 'BALANCE_PRIVATE_COMPLETE'; secrets.set('source-balance', balanceKey);
   const feedbackIdentity = 'fi_' + 'x'.repeat(43); secrets.set('tinybot.feedback.identity.v1', feedbackIdentity);
   const mail = { id: 'mail-old', name: 'Inbox', host: 'imap.mail.invalid', port: 993, username: 'lin@mail.invalid', enabled: true, allowBody: true };
   await new MailAccounts().save(mail, rawSecrets[3]);
@@ -95,7 +97,7 @@ module.exports = async function completeBackup({ load, fs, nativePath, secrets, 
   const original = JSON.stringify(data), archive = await createBackupFile(source, data), bytes = fs.readFileSync(nativePath(archive));
   assert.equal(JSON.stringify(data), original, 'Export never mutates live settings');
   const envelope = legacyBackupFixture(bytes), publicText = JSON.stringify(envelope);
-  for (const key of [...rawSecrets, feedbackIdentity, 'OAUTH_PRIVATE_COMPLETE', 'REFRESH_PRIVATE_COMPLETE', 'NEVER_MIGRATE']) assert.ok(!publicText.includes(key), 'No credential or system authorization in public backup metadata');
+  for (const key of [...rawSecrets, balanceKey, feedbackIdentity, 'OAUTH_PRIVATE_COMPLETE', 'REFRESH_PRIVATE_COMPLETE', 'NEVER_MIGRATE']) assert.ok(!publicText.includes(key), 'No credential or system authorization in public backup metadata');
   assert.equal(envelope.data.config.systemPrompt, data.config.systemPrompt);
   assert.deepEqual(envelope.data.productivity.templates, [], 'New archives exclude legacy prompt templates');
   assert.equal(envelope.data.productivity.options.search.enabled, false, 'Public Tavily metadata has no live alias');
@@ -165,6 +167,30 @@ module.exports = async function completeBackup({ load, fs, nativePath, secrets, 
   assert.equal(await new PanelCredentials(destination.filesDir + '/workspace/owner').secret('api', apiSource), 'LOCAL_PANEL_PRIVATE');
   assert.equal(restoredSettings.getSync('language', ''), 'zh-CN');
   assert.equal(UsageLedger.list().find(item => item.id === 'request-old').durationMs, 999);
+
+  const beforeRepair = session.snapshot();
+  const originalProfile = beforeRepair.providerProfiles.find(item => item.id === profile.id);
+  await vault.remove(originalProfile.credentialAlias);
+  await vault.remove(originalProfile.balanceCredentialAlias);
+  const beforeRepairAliases = [...secrets.keys()].sort();
+  const persist = repository.save.bind(repository);
+  try {
+    repository.save = async () => { throw Error('Injected credential repair commit failure'); };
+    assert.equal(await session.importSnapshot(await readBackupFile(destination, archive, beforeRepair)), false);
+    assert.match(session.state.error, /Injected credential repair commit failure/);
+    assert.deepEqual([...secrets.keys()].sort(), beforeRepairAliases, 'Failed repair rolls back replacement assets');
+    assert.equal(session.snapshot().providerProfiles[0].credentialAlias, originalProfile.credentialAlias);
+  } finally { repository.save = persist; }
+  assert.equal(await session.importSnapshot(await readBackupFile(destination, archive, session.snapshot())), true, session.state.error);
+  const repaired = await repository.load();
+  const repairedProfile = repaired.providerProfiles.find(item => item.id === profile.id);
+  assert.equal(await vault.read(repairedProfile.credentialAlias), rawSecrets[0]);
+  assert.equal(await vault.read(repairedProfile.balanceCredentialAlias), balanceKey);
+  assert.equal(repaired.config.credentialAlias, repairedProfile.credentialAlias);
+  assert.equal(repaired.threads.find(thread => thread.id === 'owner').modelRef.providerId, originalProfile.id);
+  assert.deepEqual({ ...repairedProfile, credentialAlias: originalProfile.credentialAlias,
+    balanceCredentialAlias: originalProfile.balanceCredentialAlias }, { ...originalProfile }, 'Repair changes only aliases');
+
   // Existing endpoints under different IDs must bind imported cards to local services and mailboxes.
   const mergeTarget = context('/sandbox/complete-merge'); secrets.clear();
   const local = model.emptyData(); local.providerProfiles = [{ ...profile, id: 'provider-local', credentialAlias: 'local-key' }]; secrets.set('local-key', 'LOCAL_KEEP');
@@ -182,6 +208,10 @@ module.exports = async function completeBackup({ load, fs, nativePath, secrets, 
   assert.equal(mergeSession.snapshot().productivity.options.teamWorker.providerId, 'provider-local');
   assert.equal(await vault.read('local-key'), 'LOCAL_KEEP'); assert.equal(await vault.read('local-mcp'), 'LOCAL_MCP_KEEP');
   assert.equal((await new MailAccounts().connection('mail-local')).secret, 'LOCAL_MAIL_KEEP');
+  await vault.remove('local-key');
+  assert.equal(await mergeSession.importSnapshot(await readBackupFile(mergeTarget, archive, mergeSession.snapshot())), true, mergeSession.state.error);
+  assert.equal(mergeSession.snapshot().providerProfiles[0].credentialAlias, 'local-key');
+  assert.equal(await vault.readOptional('local-key'), undefined, 'A matching endpoint with another provider ID cannot repair an account');
   // Settings commit failure rolls back every new secret and supports a fresh retry.
   const failingTarget = context('/sandbox/complete-failure'); secrets.clear();
   const failRepo = new ConversationStore(failingTarget.filesDir), failSession = new SessionService(failRepo, idleRuntime(vault), vault, resources); await failSession.initialize();

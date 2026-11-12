@@ -22,10 +22,11 @@ export class ConversationStore implements SessionRepository {
   private files: Map<string, string> = new Map<string, string>();
   private manifest?: Manifest;
   constructor(filesDir: string) { this.root = filesDir + '/sessions-v2'; this.legacy = filesDir + '/tinybot-v1.json'; }
-  async load(): Promise<AppData> {
+  async load(initializeLegacy: boolean = true): Promise<AppData> {
     if (!await fs.access(this.root + '/index.json')) {
       const data = await fs.access(this.legacy) ? parseAppData(await fs.readText(this.legacy)) : emptyData();
-      await this.save(data); return data;
+      if (initializeLegacy) { await this.save(data); }
+      return data;
     }
     const manifest = JSON.parse(await fs.readText(this.root + '/index.json')) as Manifest;
     if (!manifest || manifest.version !== 2 || !manifest.data || !Array.isArray(manifest.threads)) { throw new Error(t("会话索引损坏，原文件已保留。")); }
@@ -35,10 +36,12 @@ export class ConversationStore implements SessionRepository {
       const text = await fs.readText(this.root + '/' + entry.file);
       const thread = JSON.parse(text) as ThreadData;
       if (thread.id !== entry.id) { throw new Error(t("会话索引与内容不一致。")); }
-      threads.push(thread); this.files.set(entry.id, entry.file); this.serialized.set(entry.id, text);
+      threads.push(thread);
+      if (initializeLegacy) { this.files.set(entry.id, entry.file); this.serialized.set(entry.id, text); }
     }
     manifest.data.threads = threads;
     const data = parseAppData(JSON.stringify(manifest.data));
+    if (!initializeLegacy) { return data; }
     manifest.data.threads = [];
     this.manifest = manifest;
     // Recovery/normalization belongs to the loaded state, even for an inactive thread.

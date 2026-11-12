@@ -1,5 +1,7 @@
 import { Diagnostics } from '../model/Diagnostics';
+import { NearbyTaskStatus } from '../model/NearbyTask';
 import { ProjectData } from '../model/Project';
+import { PeerSettingsConflict } from '../model/PeerSyncData';
 import { SharedFolder } from '../model/SharedFolders';
 import { AgentMode } from '../model/AgentMode';
 import { ToolApprovalMode } from '../model/ToolApprovalMode';
@@ -46,6 +48,7 @@ export class SettingsViewModel {
 @Observed
 export class ChatViewModel {
   projects: ProjectData[] = [];
+  nearbyConflicts: PeerSettingsConflict[] = [];
   get activeProject(): ProjectData | undefined { return this.projects.find((item) => item.id === this.active.projectId); }
   get activeWorkspaceId(): string { return this.requireSession().workspaceId; }
   saveProject(name: string, instructions: string, id?: string, folders?: SharedFolder[]): Promise<boolean> {
@@ -68,6 +71,10 @@ export class ChatViewModel {
   busy: boolean = false;
   canNavigate: boolean = false;
   runningThreadIds: string[] = [];
+  peerRunningThreadIds: string[] = [];
+  peerThread: boolean = false;
+  peerTasks: NearbyTaskStatus[] = [];
+  get peerTask(): NearbyTaskStatus | undefined { return this.peerTasks.find((item) => item.threadId === this.active.id); }
   get sharedBusy(): boolean { return this.busy || this.runningThreadIds.length > 0; }
   generating: boolean = false;
   acceptingSteering: boolean = false;
@@ -130,8 +137,11 @@ export class ChatViewModel {
         this.threads.find((thread) => thread.id === event.threadId)?.updateMetadata(event.thread);
         if (event.threadId === this.active.id) { this.draft = event.thread.draft || ''; }
       }
-      if (event.kind === 'draft' && event.threadId === this.active.id) {
-        this.draft = event.content || ''; this.active.draft = this.draft;
+      if (event.kind === 'draft') {
+        const draft = event.content || '';
+        const thread = this.threads.find((item) => item.id === event.threadId);
+        if (thread) { thread.draft = draft; }
+        if (event.threadId === this.active.id) { this.draft = draft; this.active.draft = draft; }
       }
       if (event.kind === 'message' && event.message) {
         const thread = this.threads.find((thread) => thread.id === event.threadId);
@@ -165,6 +175,10 @@ export class ChatViewModel {
     this.canNavigate = state.canNavigate === true;
     const running = state.runningThreadIds || [];
     if (running.join(',') !== this.runningThreadIds.join(',')) { this.runningThreadIds = running; }
+    const peerRunning = state.peerRunningThreadIds || [];
+    if (peerRunning.join(',') !== this.peerRunningThreadIds.join(',')) { this.peerRunningThreadIds = peerRunning; }
+    this.peerThread = state.peerThread === true;
+    this.peerTasks = state.peerTasks || [];
     this.phase = state.phase;
     this.ready = state.ready; this.loading = state.phase === 'loading'; this.busy = state.phase !== 'idle';
     this.generating = state.phase === 'running' || state.phase === 'compacting';
@@ -184,6 +198,7 @@ export class ChatViewModel {
   }
   private projectData(data: AppData): void {
     this.projects = data.projects || [];
+    this.nearbyConflicts = data.nearbyConflicts || [];
     this.teams = data.threads.find((thread) => thread.id === data.activeThreadId)?.teams || [];
     this.productivity = data.productivity || defaultProductivity();
     this.config = data.config; this.extensions = data.extensions || defaultExtensions(); this.providerProfiles = data.providerProfiles || [];
@@ -219,7 +234,7 @@ export class ChatViewModel {
   get contextWindow(): number { return contextSettings(this.currentConfig).window; }
   get contextLabel(): string { return t('上下文约 {0} / {1} tokens', [this.contextUsed, this.contextWindow]); }
   get canQueueInput(): boolean {
-    return this.canNavigate && !this.active.archived && (this.phase === 'idle' || this.phase === 'running');
+    return this.canNavigate && !this.active.archived && !this.peerThread && (this.phase === 'idle' || this.phase === 'running');
   }
   filteredThreads(query: string, archived: boolean): ThreadViewModel[] { return matchingThreads(this.threads, query, archived) as ThreadViewModel[]; }
 
@@ -257,6 +272,7 @@ export class ChatViewModel {
   archiveThread(id: string): Promise<boolean> { return this.requireSession().archiveThread(id); }
   archiveThreads(ids: string[], archived: boolean): Promise<boolean> { return this.requireSession().archiveThreads(ids, archived); }
   selectModel(providerId: string, modelId: string): Promise<boolean> { return this.requireSession().selectModel(providerId, modelId); }
+  resolveSyncConflict(origin: string, expected: string, remote: boolean): Promise<boolean> { return this.requireSession().resolveSyncConflict(origin, expected, remote); }
   setReasoningEffort(value: string): Promise<boolean> { return this.requireSession().setReasoningEffort(value); }
   setToolApprovalMode(mode: ToolApprovalMode): Promise<boolean> { return this.requireSession().setToolApprovalMode(mode); }
   deleteProvider(id: string): Promise<boolean> { return this.requireSession().deleteProvider(id); }
@@ -278,9 +294,17 @@ export class ChatViewModel {
     clearTimeout(this.draftTimer); this.draftTimer = -1;
     if (this.session) { await this.session.flushDraft(); }
   }
-  async send(onUpdate: () => void): Promise<void> {
+  async send(onUpdate: () => void, deliver?: (text: string) => Promise<void>): Promise<void> {
     const threadId = this.active.id; this.outputs.set(threadId, onUpdate);
-    try { await this.requireSession().send(); } finally { if (this.outputs.get(threadId) === onUpdate) { this.outputs.delete(threadId); } }
+    try {
+      if (deliver) {
+        const text = this.draft;
+        const attachments = this.active.attachments.slice(), references = this.active.references.slice();
+        await deliver(text.trim());
+        this.requireSession().clearSubmittedDraft(threadId, text, attachments, references);
+        await this.flushDraft();
+      } else { await this.requireSession().send(); }
+    } finally { if (this.outputs.get(threadId) === onUpdate) { this.outputs.delete(threadId); } }
   }
   async regenerateReply(id: string, onUpdate: () => void): Promise<boolean> {
     let threadId = '';

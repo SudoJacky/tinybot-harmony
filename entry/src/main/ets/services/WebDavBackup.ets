@@ -6,9 +6,13 @@ import { rcp } from '@kit.RemoteCommunicationKit';
 import { AppData } from '../model/Conversation';
 import { Diagnostics } from '../model/Diagnostics';
 import { t } from '../model/I18n';
-import { createBackupFile, readBackupFile, withBackupOperation } from './Backup';
+import { BackupConflictMode, createBackupFile, readBackupFile, withBackupOperation } from './Backup';
 import { requireWebDavConnection, webDavSession } from './WebDavConnection';
 import { huaweiAccount } from './HuaweiAccount';
+import { BackupSnapshot, backupSnapshot, expiredBackupSnapshots } from '../model/BackupSnapshots';
+import { backupDeviceId, newBackupSnapshot } from './BackupSnapshotNames';
+import { parseWebDavDirectory } from './WebDavWorkspaceFiles';
+import { Cancellation } from './Cancellation';
 
 const SNAPSHOT_NAME = 'tinybot-latest.tinybot';
 const NUTSTORE_ROOT = 'https://dav.jianguoyun.com/dav/';
@@ -89,10 +93,28 @@ async function cleanLocal(path: string): Promise<void> {
 
 async function uploadBackupFile(session: rcp.Session, address: string, source: string): Promise<void> {
   await send('PUT', () => session.fetch(new rcp.Request(address, 'PUT',
-    { 'content-type': 'application/octet-stream' }, new rcp.UploadFromFile(source))), [200, 201, 204]);
+    { 'content-type': 'application/octet-stream', 'If-None-Match': '*' }, new rcp.UploadFromFile(source))), [200, 201, 204]);
+}
+
+async function snapshots(session: rcp.Session, directory: string): Promise<BackupSnapshot[]> {
+  const response = await send('PROPFIND', () => session.fetch(new rcp.Request(directory, 'PROPFIND',
+    { Depth: '1', 'content-type': 'application/xml; charset=utf-8' }, FOLDER_QUERY)), [207]);
+  const result: BackupSnapshot[] = [];
+  for (const file of parseWebDavDirectory(response.body, directory, new Cancellation())) {
+    if (file.kind !== 'file') { continue; }
+    const snapshot = backupSnapshot(file.name);
+    if (snapshot) { result.push(snapshot); }
+    else if (file.name === SNAPSHOT_NAME) { result.push({ name: file.name, deviceId: '', createdAt: 0 }); }
+  }
+  return result.sort((a, b) => b.createdAt - a.createdAt || b.name.localeCompare(a.name));
 }
 
 export class WebDavBackup {
+  static async list(connectionId: string): Promise<BackupSnapshot[]> {
+    const saved = await requireWebDavConnection(connectionId), session = webDavSession(saved);
+    try { return await snapshots(session, await backupDirectory(session, saved.directory, false)); }
+    finally { session.close(); }
+  }
   static create(context: common.UIAbilityContext, data: AppData, connectionId: string): Promise<void> {
     return withBackupOperation(async () => {
       const openID = await huaweiAccount.backupOpenID(context);
@@ -103,15 +125,19 @@ export class WebDavBackup {
         let temporary = '';
         try {
           const directory = await backupDirectory(session, saved.directory, true);
-          const destination = directory + SNAPSHOT_NAME;
+          const name = newBackupSnapshot(context), destination = directory + name;
           if (directory.startsWith(NUTSTORE_ROOT)) {
-            // Nutstore accepts PUT over an existing file but returns 409 for MOVE with Overwrite: T.
+            // Nutstore publishes the unique snapshot directly; it does not need MOVE.
             await uploadBackupFile(session, destination, source);
           } else {
             temporary = directory + 'tinybot-' + util.generateRandomUUID() + '.partial';
             await uploadBackupFile(session, temporary, source);
             await send('MOVE', () => session.fetch(new rcp.Request(temporary, 'MOVE',
-              { Destination: destination, Overwrite: 'T' })), [201, 204]);
+              { Destination: destination, Overwrite: 'F' })), [201, 204]);
+          }
+          const expired = expiredBackupSnapshots((await snapshots(session, directory)).map((item) => item.name), backupDeviceId(context));
+          for (const old of expired) {
+            await send('DELETE', () => session.fetch(new rcp.Request(directory + old, 'DELETE')), [200, 204, 404]);
           }
         } catch (error) {
           if (temporary) {
@@ -125,7 +151,7 @@ export class WebDavBackup {
     });
   }
 
-  static restore(context: common.UIAbilityContext, local: AppData, connectionId: string): Promise<AppData> {
+  static restore(context: common.UIAbilityContext, local: AppData, connectionId: string, name?: string, conflicts: BackupConflictMode = 'skip'): Promise<AppData> {
     return withBackupOperation(async () => {
       const openID = await huaweiAccount.backupOpenID(context);
       const saved = await requireWebDavConnection(connectionId);
@@ -134,10 +160,13 @@ export class WebDavBackup {
         const session = webDavSession(saved);
         try {
           const directory = await backupDirectory(session, saved.directory, false);
-          await send('GET', () => session.downloadToFile(directory + SNAPSHOT_NAME,
+          const selected = name || (await snapshots(session, directory))[0]?.name;
+          if (!selected) { throw new Error(t('WebDAV 目录中没有可恢复的备份（HTTP 404）。')); }
+          if (selected !== SNAPSHOT_NAME && !backupSnapshot(selected)) { throw new Error(t('备份文件无效。')); }
+          await send('GET', () => session.downloadToFile(directory + selected,
             { kind: 'file', file: temporary }), [200]);
         } finally { session.close(); }
-        return await readBackupFile(context, temporary, local, openID);
+        return await readBackupFile(context, temporary, local, openID, conflicts);
       } finally { await cleanLocal(temporary); }
     });
   }

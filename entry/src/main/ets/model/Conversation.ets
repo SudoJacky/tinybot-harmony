@@ -17,6 +17,7 @@ import { PendingInput, validatePendingInputs } from './PendingInput';
 import { FileOperations } from './FileOperations';
 import { MemoryReviewRecord } from './MemoryMaintenance';
 import { FileAnnotation, validateFileAnnotations } from './FileAnnotation';
+import { PeerSettingsConflict, parsePeerSettings } from './PeerSyncData';
 
 import { DEFAULT_SYSTEM_PROMPT, migrateUserDocument } from './SystemPrompt';
 
@@ -72,6 +73,8 @@ export function copyModelConfig(config: ModelConfig, configured: boolean = confi
 export interface ContextState { compaction?: CompactionData; }
 
 export interface ThreadData extends ContextState, ToolSelection {
+  peerOwner?: string;
+  peerThreadId?: string;
   annotations?: FileAnnotation[];
   toolApprovalMode?: string;
   panelContext?: string;
@@ -92,6 +95,10 @@ export interface ThreadData extends ContextState, ToolSelection {
   archived?: boolean;
   titleEdited?: boolean;
   draft?: string;
+  peerDraft?: string;
+  peerAttachments?: Attachment[];
+  peerReferences?: ThreadReference[];
+  peerInputReceipts?: string[];
   attachments?: Attachment[];
   parentThreadId?: string;
   parentMessageId?: string;
@@ -102,6 +109,7 @@ export interface ThreadData extends ContextState, ToolSelection {
 }
 
 export interface AppData {
+  nearbyConflicts?: PeerSettingsConflict[];
   lastToolApprovalMode?: string;
   projects?: ProjectData[];
   // Storage shape, not app release. Additive settings and enum values keep this version.
@@ -183,7 +191,7 @@ export function requestHistory(messages: MessageData[], systemPrompt: string): M
   return result;
 }
 
-export function parseAppData(text: string): AppData {
+export function parseAppData(text: string, recoverExecution: boolean = true): AppData {
   const data = JSON.parse(text) as AppData;
   if (!data || ![1, 2].includes(data.version) || !data.config || !Array.isArray(data.threads) ||
     typeof data.activeThreadId !== 'string' || typeof data.config.configured !== 'boolean' || typeof data.config.baseUrl !== 'string' ||
@@ -192,6 +200,16 @@ export function parseAppData(text: string): AppData {
     throw new Error(t("本地数据格式不受支持，原文件已保留。"));
   }
   if (data.productivity) { validateProductivity(data.productivity); }
+  if (data.nearbyConflicts !== undefined) {
+    if (!Array.isArray(data.nearbyConflicts)) { throw new Error('Invalid nearby setting conflicts'); }
+    for (const conflict of data.nearbyConflicts) {
+      if (!conflict || typeof conflict.origin !== 'string' || !Array.isArray(conflict.keys) ||
+        conflict.keys.some((key) => typeof key !== 'string' || !/^(userDocument|autoCompact|autoMemory|saveSummary|(profile|server|skill|memory):.+)$/.test(key))) {
+        throw new Error('Invalid nearby setting conflict');
+      }
+      parsePeerSettings(JSON.stringify(conflict.current));
+    }
+  }
   const threadIds = new Set<string>();
   if (data.extensions !== undefined) { validateExtensions(data.extensions); }
   contextSettings(data.config);
@@ -231,6 +249,12 @@ export function parseAppData(text: string): AppData {
       throw new Error(t("本地会话数据损坏，原文件已保留。"));
     }
     threadIds.add(thread.id);
+    if ((thread.peerOwner !== undefined || thread.peerThreadId !== undefined) &&
+      (typeof thread.peerOwner !== 'string' || !/^[0-9a-f-]{36}$/.test(thread.peerOwner) ||
+        typeof thread.peerThreadId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(thread.peerThreadId))) {
+      throw new Error('Invalid synchronized conversation ownership');
+    }
+    const interrupted = recoverExecution && !thread.peerOwner;
     if ((thread.memorySnapshot !== undefined && (typeof thread.memorySnapshot !== 'string' || thread.memorySnapshot.length > 64000)) ||
       (thread.memoryReviewedMessageId !== undefined && typeof thread.memoryReviewedMessageId !== 'string')) {
       throw new Error(t('本地记忆状态损坏，原文件已保留。'));
@@ -248,8 +272,13 @@ export function parseAppData(text: string): AppData {
     validateToolSelection(thread, true);
     if (thread.disabledTools !== undefined) { thread.disabledTools = normalizeDisabledTools(thread.disabledTools); }
     if (thread.teamEnabled !== undefined && typeof thread.teamEnabled !== 'boolean') { throw new Error(t("团队模式设置损坏。")); }
-    if (thread.teams !== undefined) { recoverTeams(thread.teams); }
+    if (thread.teams !== undefined) { recoverTeams(thread.teams, interrupted); }
     if (thread.attachments) { validateAttachments(thread.attachments); }
+    if (thread.peerAttachments !== undefined) { validateAttachments(thread.peerAttachments); }
+    if (thread.peerReferences !== undefined) { validateThreadReferences(thread.peerReferences); }
+    if (thread.peerInputReceipts !== undefined && (!Array.isArray(thread.peerInputReceipts) ||
+      thread.peerInputReceipts.some((id) => typeof id !== 'string' || !/^remote-[A-Za-z0-9_-]{1,121}$/.test(id)) ||
+      new Set(thread.peerInputReceipts).size !== thread.peerInputReceipts.length)) { throw new Error('Invalid nearby admission receipts'); }
     if (thread.annotations !== undefined) { validateFileAnnotations(thread.annotations); }
     if (thread.pendingInputs !== undefined) { validatePendingInputs(thread.pendingInputs); }
     if (thread.panelContext !== undefined && (typeof thread.panelContext !== 'string' || thread.panelContext.length > 32768)) { throw new Error('Invalid board context'); }
@@ -261,7 +290,8 @@ export function parseAppData(text: string): AppData {
     if ((thread.pinned !== undefined && typeof thread.pinned !== 'boolean') ||
       (thread.archived !== undefined && typeof thread.archived !== 'boolean') ||
       (thread.titleEdited !== undefined && typeof thread.titleEdited !== 'boolean') ||
-      (thread.draft !== undefined && (typeof thread.draft !== 'string' || thread.draft.length > 24000))) {
+      (thread.draft !== undefined && (typeof thread.draft !== 'string' || thread.draft.length > 24000)) ||
+      (thread.peerDraft !== undefined && (typeof thread.peerDraft !== 'string' || thread.peerDraft.length > 24000))) {
       throw new Error(t("本地会话管理数据损坏，原文件已保留。"));
     }
     const messageIds = new Set<string>();
@@ -291,14 +321,14 @@ export function parseAppData(text: string): AppData {
         if (message.role !== 'assistant' && message.steps.length > 0) {
           throw new Error(t("本地工具记录损坏，原文件已保留。"));
         }
-        interruptTools(message.steps);
+        if (interrupted) { interruptTools(message.steps); }
         for (const step of message.steps) {
           if (step.steering && (thread.pendingInputs || []).some((input: PendingInput) => input.id === step.steering?.id)) {
             throw new Error(t("追加指令同时出现在历史和待发送队列中。"));
           }
         }
       }
-      if (message.status === 'generating') {
+      if (interrupted && message.status === 'generating') {
         message.status = 'stopped';
         message.error = '应用退出时执行尚未完成。已完成的文件操作会保留；可继续发送指令。';
       }

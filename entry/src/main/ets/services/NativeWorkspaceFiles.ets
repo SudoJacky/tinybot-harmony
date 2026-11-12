@@ -6,7 +6,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { Cancellation } from './Cancellation';
 import { workspaceRelativePath } from './WorkspaceTools';
 import { readUtf8File } from './TextFiles';
-import { copyFileBytes, readBounded } from './FileBytes';
+import { copyFileBytes, copyOpenFileBytes, readBounded } from './FileBytes';
 import { isDocumentPath, readDocumentFile } from './DocumentFiles';
 import { TextEdit, applyTextEdits, validateEdits } from '../model/WorkspaceEdit';
 import { withFileMutation } from './FileMutationQueue';
@@ -14,15 +14,10 @@ import { ToolFailure } from '../model/ToolFailure';
 import { SHARED_FOLDER_ROOT, SharedFolder } from '../model/SharedFolders';
 import { ProjectFolderAccess } from './ProjectFolderAccess';
 import { WebDavMount as MountPath, WebDavWorkspaceFiles } from './WebDavWorkspaceFiles';
+import { ArkDataWorkspace, isManagedWorkspaceRecord } from './ArkDataWorkspace';
+import { contentVersion } from './TextDigest';
 
 import { WorkspaceFiles, WorkspaceEntry, WorkspaceListing, WorkspaceText, WorkspaceWrite, WorkspaceWriteGuard, FileBaseline, FileJobWorkspace } from './WorkspaceFiles';
-
-async function contentVersion(content: string): Promise<string> {
-  const hash = cryptoFramework.createMd('SHA256');
-  // The device encoder returns undefined for an empty string.
-  if (content.length > 0) { await hash.update({ data: new util.TextEncoder().encodeInto(content) }); }
-  return new util.Base64Helper().encodeToStringSync((await hash.digest()).data);
-}
 
 export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
   static contentRevision: number = 0;
@@ -45,8 +40,20 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
 
   isCloudPath(path: string): boolean { return this.cloudMount(path) !== undefined; }
 
+  private managed(path: string): ArkDataWorkspace | undefined {
+    return isManagedWorkspaceRecord(path) ? ArkDataWorkspace.forRoot(this.root) : undefined;
+  }
+
   async importFile(source: string, path: string, reuse: boolean = false): Promise<void> {
     if (this.isShared(path)) { throw new Error('Import files into the private workspace.'); }
+    const managed = this.managed(path);
+    if (managed) {
+      const file = await fs.open(source, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
+      let content = '';
+      try { content = await readUtf8File(file.fd); } finally { await fs.close(file); }
+      await this.writeManaged(managed, path, content, new Cancellation(), { version: null }, reuse);
+      return;
+    }
     await withFileMutation(this.root + '/' + path, async () => {
       const destination = await this.resolve(path, true, new Cancellation());
       if (await this.optionalStat(destination)) {
@@ -76,6 +83,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
     if (this.isShared(path)) {
       throw new ToolFailure('PERMISSION_DENIED', 'Copy the input into the private workspace first.', 'choose_another_path', { path: path });
     }
+    if (this.managed(path)) { return new util.TextEncoder().encodeInto((await this.read(path, cancellation, maximum)).content); }
     return withFileMutation(await this.fileKey(path), async () => {
       const absolute = await this.resolve(path, false, cancellation);
       const file = await fs.open(absolute, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
@@ -94,7 +102,47 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
   }
 
   async binaryVersion(path: string): Promise<string> {
+    if (this.managed(path)) { return (await this.read(path, new Cancellation())).version; }
     return withFileMutation(await this.fileKey(path), async () => this.fileDigest(await this.checkedPath(path)));
+  }
+
+  async applyNearbyFile(path: string, source: number | undefined, digest: string, base: string,
+    preserveConflict: boolean): Promise<string> {
+    workspaceRelativePath(path, false);
+    if (this.isShared(path) || this.cloudMount(path) || isManagedWorkspaceRecord(path)) { throw new Error('Invalid nearby file path'); }
+    return withFileMutation(this.root + '/' + path, async (): Promise<string> => {
+      const target = await this.resolve(path, true, new Cancellation());
+      const stat = await this.optionalStat(target);
+      if (stat && (!stat.isFile() || stat.isSymbolicLink())) { throw new Error('Nearby file destination is invalid'); }
+      const current = stat ? await this.fileDigest(target) : '';
+      if (source === undefined) {
+        if (stat && current === base) { await fs.unlink(target); NativeWorkspaceFiles.contentRevision++; }
+        return current === base ? '' : current;
+      }
+      if (current === digest) { return current; }
+      let destination = target;
+      if (current && current !== base) {
+        if (!preserveConflict) { throw new Error('Synchronized attachment conflicts with an existing attachment'); }
+        const split = target.lastIndexOf('/');
+        const name = target.slice(split + 1);
+        destination = target.slice(0, split + 1) + 'nearby-conflict-' + digest.replace(/[^A-Za-z0-9]/g, '').slice(0, 16) + '-' + name.slice(0, 120);
+        const conflict = await this.optionalStat(destination);
+        if (conflict) {
+          if (!conflict.isFile() || conflict.isSymbolicLink() || await this.fileDigest(destination) !== digest) {
+            throw new Error('Nearby file conflict destination already contains different data');
+          }
+          return current;
+        }
+      }
+      const temporary = target.slice(0, target.lastIndexOf('/') + 1) + '.tinybot-nearby-' + util.generateRandomUUID() + '.tmp';
+      try {
+        await copyOpenFileBytes(source, temporary);
+        if (await this.fileDigest(temporary) !== digest) { throw new Error('Nearby file failed content verification'); }
+        await fs.rename(temporary, destination);
+      } finally { if (await fs.access(temporary)) { await fs.unlink(temporary); } }
+      NativeWorkspaceFiles.contentRevision++;
+      return destination === target ? digest : current;
+    });
   }
 
   async createJobOutput(path: string, bytes: Uint8Array, cancellation: Cancellation): Promise<void> {
@@ -121,6 +169,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
   }
 
   async checkedPath(path: string): Promise<string> {
+    if (this.managed(path)) { throw new Error(t('请选择普通文件。')); }
     if (this.isShared(path)) {
       const mount = await this.requireMount(path);
       const stat = await this.externalStat(mount.folder, mount.relative);
@@ -150,10 +199,32 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
       const mount = await this.requireMount(path);
       return this.externalList(mount, path, cancellation, offset);
     }
-    const absolute = await this.resolve(path, false, cancellation);
-    await this.requireDirectory(absolute);
+    const ark = ArkDataWorkspace.forRoot(this.root);
+    const relative = workspaceRelativePath(path || '.', true);
+    const prefix = relative ? relative + '/' : '';
+    const virtual = new Map<string, WorkspaceEntry>();
+    if (ark && (!relative || /^(life-panels|life-boards)(\/[^/]+)?$/.test(relative))) {
+      for (const record of await ark.paths()) {
+        if (!record.startsWith(prefix)) { continue; }
+        const suffix = record.slice(prefix.length), name = suffix.split('/')[0];
+        virtual.set(name, { name: name, kind: suffix.includes('/') ? 'directory' : 'file' });
+      }
+    }
+    const absolute = virtual.size ? this.root + (relative ? '/' + relative : '') : await this.resolve(path, false, cancellation);
+    if (virtual.size) {
+      await this.resolve('', false, cancellation);
+      let directory = this.root;
+      for (const segment of relative ? relative.split('/') : []) {
+        directory += '/' + segment;
+        const stat = await this.optionalStat(directory);
+        if (!stat) { break; }
+        if (!stat.isDirectory() || stat.isSymbolicLink()) { throw new Error(t('请选择普通文件。')); }
+      }
+    } else { await this.requireDirectory(absolute); }
     cancellation.check();
-    const names = (await fs.listFile(absolute, { recursion: false })).filter((name: string) => !name.startsWith('.tinybot-'));
+    const disk = await this.optionalStat(absolute) ? await fs.listFile(absolute, { recursion: false }) : [];
+    const names = Array.from(new Set(disk.filter((name: string) => !name.startsWith('.tinybot-') && !(ark && isManagedWorkspaceRecord(prefix + name)))
+      .concat(Array.from(virtual.keys()))));
     if (this.mounts.length > 0 && (path === '' || path === '.') && !names.includes(SHARED_FOLDER_ROOT)) { names.push(SHARED_FOLDER_ROOT); }
     names.sort();
     const entries: WorkspaceEntry[] = [];
@@ -163,6 +234,8 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
         entries.push({ name: name, kind: 'directory' });
         continue;
       }
+      const entry = virtual.get(name);
+      if (entry) { entries.push(entry); continue; }
       const stat = await fs.lstat(absolute + '/' + name);
       entries.push({ name: name, kind: stat.isSymbolicLink() ? 'symlink' : stat.isDirectory() ? 'directory' : 'file' });
     }
@@ -188,6 +261,17 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
   }
 
   private async readUnlocked(path: string, cancellation: Cancellation, maximumTextBytes?: number): Promise<WorkspaceText> {
+    const managed = this.managed(path);
+    if (managed) {
+      await this.resolve('', false, cancellation);
+      const content = await managed.read(path);
+      if (content === undefined) { throw new ToolFailure('FS_NOT_FOUND', 'Managed workspace record does not exist', 'list_files', { path: path }); }
+      if (maximumTextBytes !== undefined && new util.TextEncoder().encodeInto(content).byteLength > maximumTextBytes) {
+        throw new ToolFailure('LIMIT_EXCEEDED', 'Text exceeds the remaining workspace script byte budget.', 'reduce_input');
+      }
+      cancellation.check();
+      return { path: path, content: content, version: await contentVersion(content) };
+    }
     if (maximumTextBytes !== undefined && isDocumentPath(path)) {
       throw new ToolFailure('INVALID_ARGUMENTS', 'Use workspace.read for Office or PDF bytes, or read_file for extracted text.', 'fix_arguments', { path: path });
     }
@@ -251,12 +335,37 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
   async writeLifePanel(path: string, content: string, cancellation: Cancellation, guard?: WorkspaceWriteGuard): Promise<WorkspaceWrite> {
     if (!/^life-panels\/[A-Za-z0-9][A-Za-z0-9_-]{0,127}\/panel\.json$/.test(path)) { throw new Error('Invalid managed Life Panel path'); }
     workspaceRelativePath(path, false);
+    const managed = this.managed(path);
+    if (managed) { return this.writeManaged(managed, path, content, cancellation, guard); }
     return withFileMutation(this.root + '/' + path, () => this.mutate(path, content, [], cancellation, guard, false));
   }
   async writeLifeBoard(path: string, content: string, cancellation: Cancellation, guard?: WorkspaceWriteGuard): Promise<WorkspaceWrite> {
     if (!/^life-boards\/[A-Za-z0-9][A-Za-z0-9_-]{0,127}\/board\.json$/.test(path)) { throw new Error('Invalid managed board path'); }
     workspaceRelativePath(path, false);
+    const managed = this.managed(path);
+    if (managed) { return this.writeManaged(managed, path, content, cancellation, guard); }
     return withFileMutation(this.root + '/' + path, () => this.mutate(path, content, [], cancellation, guard, false));
+  }
+
+  private async writeManaged(store: ArkDataWorkspace, path: string, content: string, cancellation: Cancellation,
+    guard?: WorkspaceWriteGuard, reuse: boolean = false): Promise<WorkspaceWrite> {
+    return withFileMutation(this.root + '/' + path, async (): Promise<WorkspaceWrite> => {
+      await this.resolve('', false, cancellation);
+      const before = await store.read(path);
+      const version = await contentVersion(content);
+      const bytes = new util.TextEncoder().encodeInto(content).byteLength;
+      if (reuse && before === content) { return { path: path, bytes: bytes, written: false, version: version }; }
+      if (guard?.version === null && before !== undefined) {
+        throw new ToolFailure('FS_NOT_OBSERVED', t('覆盖已有文件前，请先用 read_file 读取。'), 'read_file', { path: path });
+      }
+      if (guard && guard.version !== null && (before === undefined || await contentVersion(before) !== guard.version)) {
+        throw new ToolFailure('FS_STALE_VERSION', t('文件自上次读取后已变化，请重新读取再修改。'), 'read_file', { path: path });
+      }
+      cancellation.check();
+      const saved = (await store.write(path, content))!; NativeWorkspaceFiles.contentRevision++;
+      return { path: path, bytes: new util.TextEncoder().encodeInto(saved).byteLength, written: true, before: before || '',
+        after: saved, created: before === undefined, version: await contentVersion(saved) };
+    });
   }
 
   // Capture before showing the confirmation, including for binary/image files.
@@ -265,6 +374,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
   }
 
   private async removalVersionUnlocked(path: string): Promise<string> {
+    if (this.managed(path)) { return (await this.readUnlocked(path, new Cancellation())).version; }
     const mount = this.isShared(path) ? await this.requireMount(path) : undefined;
     const absolute = mount ? '' : await this.resolve(path, false, new Cancellation());
     const stat = mount ? await this.externalStat(mount.folder, mount.relative) : await this.optionalStat(absolute);
@@ -289,7 +399,9 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
       if (await this.removalVersionUnlocked(path) !== version) {
         throw new ToolFailure('FS_STALE_VERSION', t('文件已变化，请重新打开并检查。'), 'read_file', { path: path });
       }
-      if (this.isShared(path)) {
+      const managed = this.managed(path);
+      if (managed) { await managed.write(path); }
+      else if (this.isShared(path)) {
         const mount = await this.requireMount(path);
         await this.unlinkExternal(mount.folder, mount.relative);
       } else { await fs.unlink(await this.resolve(path, false, new Cancellation())); }

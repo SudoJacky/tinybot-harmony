@@ -9,6 +9,8 @@ const compile = source => ts.transpileModule(source, { compilerOptions: {
   module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021
 } }).outputText;
 const serviceCode = compile(fs.readFileSync(path.join(root, 'services/CloudBackup.ets'), 'utf8'));
+const snapshots = {};
+vm.runInNewContext(compile(fs.readFileSync(path.join(root, 'model/BackupSnapshots.ets'), 'utf8')), { exports: snapshots });
 const startupCode = compile(fs.readFileSync(path.join(root, 'services/StartupBackup.ets'), 'utf8'));
 const panelSource = fs.readFileSync(path.join(root, 'views/BackupPanel.ets'), 'utf8');
 const panelCode = compile('export class Probe {\n' + panelSource.slice(
@@ -38,6 +40,8 @@ function setup() {
   const exports = {};
   let operating = false;
   const imports = {
+    '../model/BackupSnapshots': snapshots,
+    './BackupSnapshotNames': { backupDeviceId: () => '11111111-1111-4111-8111-111111111111', newBackupSnapshot: () => 'unused' },
     '../model/Diagnostics': { Diagnostics: { log: (...args) => logs.push(args) } },
     '@kit.CoreFileKit': { cloudSync, fileIo }, '@kit.ArkTS': {},
     '../model/I18n': { t }, './Backup': {
@@ -80,13 +84,28 @@ function setup() {
 
 function panel(cloud) {
   const exports = {};
+  const account = { backupOpenID: async () => 'account' };
   vm.runInNewContext(panelCode, { exports, CloudBackup: cloud, cloudBackupError: error => error.message,
     latestCloudBackup: items => items.find(item => item.location === 2 || item.location === 3), getLocale: () => 'en-US',
-    Diagnostics: { log() {} }, BackupLoginRequired, t });
+    Diagnostics: { log() {} }, BackupLoginRequired, t, reviewBackupRestore: async () => true,
+    huaweiAccount: account, NativeData: { forFilesDir: () => ({ allowAutoBackup() {} }) } });
   return Object.assign(new exports.Probe(), { visible: true, foreground: true, busy: false,
-    error: '', status: '', statusError: false, backupDate: '',
-    app: { busy: false, exportSnapshot: () => ({}) }, automatic: { confirmUploaded() {} }, context: () => ({}) });
+    error: '', status: '', statusError: false, backupDate: '', account,
+    app: { busy: false, get sharedBusy(){return this.busy;}, exportSnapshot: () => ({}) }, automatic: { confirmUploaded() {} }, context: () => ({}), getUIContext: () => ({}) });
 }
+
+test('version selection requires login, excludes pending snapshots, and never reuses a stale listing',async()=>{
+  let reads=0,selection;
+  const cloud={sync:async()=>true,list:async()=>{reads++;return [{name:'pending',location:1},{name:'chosen',location:3}];},
+    restore:async(_context,name,_local,mode)=>{selection={name,mode};return{};}};
+  const p=panel(cloud);p.account.backupOpenID=async()=>{throw new BackupLoginRequired('login required');};
+  await p.chooseRestore();assert.equal(reads,0);assert.equal(p.needsLogin,true);
+  p.account.backupOpenID=async()=>'account';await p.chooseRestore();
+  assert.equal(p.showVersions,true);assert.deepEqual(Array.from(p.versions,item=>item.name),['chosen']);
+  p.app.importSnapshot=async()=>true;await p.cloud(true,'chosen');assert.deepEqual(selection,{name:'chosen',mode:'copy'});
+  cloud.list=async()=>{throw Error('Listing failed');};await p.chooseRestore();
+  assert.equal(p.versions.length,0);assert.equal(p.showVersions,false);assert.equal(p.error,'Listing failed');
+});
 
 test('registration completion cannot hide a failed start or release the cloud lock', async () => {
   const h = setup(); h.control.start = async () => { throw Object.assign(Error('not ready'), { code: 22400001 }); };

@@ -1,4 +1,3 @@
-import { fileIo as fs } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { AppData } from '../model/Conversation';
 import { BackupConnections } from '../model/BackupConnections';
@@ -11,6 +10,7 @@ import { CredentialStore } from './CredentialStore';
 import { MailAccounts } from './MailAccounts';
 import { PanelCredentials } from './PanelCredentials';
 import { NativeWorkspaceFiles } from './NativeWorkspaceFiles';
+import { managedWorkspaceRecords } from './ArkDataWorkspace';
 import { Cancellation } from './Cancellation';
 import { SessionImportCandidate } from './SessionCandidates';
 import { rollbackBackupActions, rollbackBackupFailure } from '../model/BackupImport';
@@ -32,10 +32,9 @@ export async function captureBackupConnections(data: AppData, root: string, inve
   for (const stored of await new MailAccounts().backup()) { result.mail!.push({ account: stored.account, secret: stored.secret }); }
   const workspaces = new WorkspaceStore(root);
   for (const owner of inventory.filter((item) => item.manifests.includes('life-panels'))) {
-    const directory = workspaces.pathFor(owner.id) + '/life-panels';
-    for (const id of await fs.listFile(directory)) {
-      const path = directory + '/' + id + '/panel.json'; if (!await fs.access(path)) { continue; }
-      const panel = parsePanelRecord(await fs.readText(path), id), source = panel.definition.source;
+    const root = workspaces.pathFor(owner.id), files = new NativeWorkspaceFiles(root), signal = new Cancellation();
+    for (const path of await managedWorkspaceRecords(root, 'life-panels')) {
+      const id = path.split('/')[1], panel = parsePanelRecord((await files.read(path, signal)).content, id), source = panel.definition.source;
       if (source?.type !== 'api' || !source.auth) { continue; }
       const secret = await new PanelCredentials(workspaces.pathFor(owner.id)).backup(id, source);
       if (secret) { result.panels!.push({ workspaceId: owner.id, panelId: id, source: source, secret: secret.secret, oauth: secret.oauth }); }

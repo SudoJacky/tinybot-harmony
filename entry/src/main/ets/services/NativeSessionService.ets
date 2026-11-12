@@ -42,7 +42,9 @@ import { AttachmentTools } from './AttachmentTools';
 import { util } from '@kit.ArkTS';
 import { Diagnostics } from '../model/Diagnostics';
 import { LogFields } from '../model/DiagnosticLog';
-import { ConversationStore } from '../model/ConversationStore';
+import { ArkDataConversationStore } from './ArkDataConversationStore';
+import { NativeData } from './NativeData';
+import { nearbySync } from './NearbySync';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { ProviderProfile } from '../model/ProviderProfiles';
 import { ExtensionSettings } from '../model/Skills';
@@ -132,16 +134,17 @@ export class NativeSessionResources implements SessionResources {
   activateProjectFolders(projects: ProjectData[]): Promise<void> { return ProjectFolderAccess.activateAll(projects); }
   tools(id: string, extensions: ExtensionSettings, selected: string, productivity?: ProductivityData, attachments: Attachment[] = [], live?: LiveResources, workspaceId?: string, project?: ProjectData, resolvePreview?: (previewId: string) => BrowserPreview): AgentTools {
     const root = this.workspaces.pathFor(workspaceId || id);
+    const approval = this.approval.scoped(id);
     const files = new NativeWorkspaceFiles(root, project?.sharedFolders || [], undefined,
       live?.askForToolApproval === false ? undefined :
-        (path, cancellation) => this.approval.request(t('允许写入云端共享文件夹？'), path, cancellation));
+        (path, cancellation) => approval.request(t('允许写入云端共享文件夹？'), path, cancellation));
     const workspaceTools = new WorkspaceTools(files, nativeWorkspaceDiffs);
     const context = this.context;
     const groups: AgentTools[] = [workspaceTools, new AttachmentTools(attachments),
       new SkillTools(extensions.skills, selected, live ? () => live.skills() : undefined, context ? async (name: string, path: string) => {
         const bytes = await context.resourceManager.getRawFileContent('skills/' + name + '/' + path);
         return new util.TextDecoder('utf-8', { fatal: true }).decodeToString(bytes);
-      } : undefined), new InteractionTools(this.approval)];
+      } : undefined), new InteractionTools(approval)];
     const workspaceCode = context ? new WorkspaceCode(files, workspaceTools, new NativeOrchestrationExecutor(true), async () => {
       if (this.officeLibrary === undefined) {
         const bytes = await context.resourceManager.getRawFileContent('office/office.bundle.js');
@@ -160,7 +163,7 @@ export class NativeSessionResources implements SessionResources {
     if (extensions.webEnabled) { groups.push(new WebTools(new NativeWebTransport())); }
     if (this.browser) {
       groups.push(new BrowserTools(this.browser, id, productivity?.options?.readOnly === true, resolvePreview,
-        live?.askForToolApproval === false ? undefined : this.approval));
+        live?.askForToolApproval === false ? undefined : approval));
     }
     const search = productivity?.options?.search;
     if (extensions.webEnabled && search?.enabled && isSupportedSearchProvider(search.provider)) {
@@ -171,7 +174,7 @@ export class NativeSessionResources implements SessionResources {
       }
     }
     if (productivity) {
-      groups.push(new McpTools(productivity.servers, this.approval, (server) => new McpClient(server),
+      groups.push(new McpTools(productivity.servers, approval, (server) => new McpClient(server),
         live ? () => live.servers() : undefined, live?.askForToolApproval !== false));
     }
     return new RuleTools(new ToolSet(groups), productivity?.options?.readOnly === true);
@@ -193,30 +196,32 @@ export class NativeSessionResources implements SessionResources {
   installSkill(source: string, paths: string[], cancellation: Cancellation): Promise<SkillData> {
     return new SkillInstaller(new NativeWebTransport()).install(source, paths, cancellation);
   }
-  prepareMcp(server: McpServer, request: McpRequest, cancellation: Cancellation, confirm: boolean = true): Promise<McpServer> {
-    return prepareNativeMcp(server, request, this.approval, this.context, cancellation, confirm);
+  prepareMcp(server: McpServer, request: McpRequest, cancellation: Cancellation, confirm: boolean = true, threadId?: string): Promise<McpServer> {
+    return prepareNativeMcp(server, request, threadId ? this.approval.scoped(threadId) : this.approval, this.context, cancellation, confirm);
   }
   async testMcp(server: McpServer, cancellation: Cancellation): Promise<number> { return (await new McpClient(server).list(cancellation)).length; }
 }
 
 // Native composition root. The session service can also run with an in-memory repository/model.
-export function createNativeSessionService(filesDir: string, workspaceFilesDir: string, approval: ToolApproval = new ToolApproval(), context?: common.UIAbilityContext, browser?: BrowserSession): SessionService {
+export function createNativeSessionService(context: common.UIAbilityContext, approval: ToolApproval, browser?: BrowserSession): SessionService {
+  const workspaceFilesDir = context.getApplicationContext().filesDir;
+  const data = NativeData.forFilesDir(context.filesDir) ?? new NativeData(context, workspaceFilesDir);
   Attachments.configure(workspaceFilesDir);
-  UsageLedger.configure(filesDir).catch((error: Error) => { UsageLedger.error = error.message; });
+  UsageLedger.configure(context.filesDir, () => data.open()).catch((error: Error) => { UsageLedger.error = error.message; });
   // Packaged snapshot: konsheng/Sensitive-lexicon@68a595fb24d31bd9f882c081b4252443a69ac57b.
   let outputWords: Promise<OutputWordMatcher> | undefined;
   const loadOutputWords = async (): Promise<OutputWordMatcher> => {
-    if (!context) { throw new Error('An ability context is required to load the output word list.'); }
     const data = await context.resourceManager.getRawFileContent(OUTPUT_WORD_LIST);
     return new OutputWordMatcher(util.TextDecoder.create('utf-8').decodeToString(data));
   };
   const providers = new ProviderRegistry(() => huaweiAccount.requireLogin(), () => outputWords ?? (outputWords = loadOutputWords()));
   const credentials = new CredentialStore();
-  const session = new SessionService(new ConversationStore(filesDir), new AgentRuntime(providers, credentials, new NativeUsageRecorder(),
+  const session = new SessionService(new ArkDataConversationStore(() => data.open()), new AgentRuntime(providers, credentials, new NativeUsageRecorder(),
     (content, cancellation) => WebUiPreflight.validate(content, cancellation), new NativeOrchestrationExecutor(), browser), credentials,
     new NativeSessionResources(workspaceFilesDir, providers, approval, context, browser), approval);
+  nearbySync.bind(context, session, () => data.open());
   installNativePanelAgent(workspaceFilesDir, providers, credentials, () => session.snapshot());
-  if (context) { backgroundGeneration.attach(session, context); completionNotifications.attach(session, context); }
+  backgroundGeneration.attach(session, context); completionNotifications.attach(session, context);
   if (browser) {
     browser.configure((policy) => session.setBrowserPolicy(policy), (event, fields, error) => Diagnostics.log(error === undefined ? 'info' : 'error', 'browser', event, fields, error));
     session.subscribe((event) => { if (event.data) { browser.updatePolicy(event.data.extensions?.browserPolicy || 'unset'); } });
