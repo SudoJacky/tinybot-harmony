@@ -65,6 +65,31 @@ class ChatLayoutFrame extends FrameCallback {
 }
 
 @Component
+struct ChatViewportLayout {
+  @Prop centeredHeight: number = 0;
+  @Prop dockedHeight: number = 0;
+  @BuilderParam content: () => void;
+
+  onMeasureSize(_geometry: GeometryInfo, children: Measurable[], constraint: ConstraintSizeOptions): SizeResult {
+    const width = Number(constraint.maxWidth);
+    const height = Number(constraint.maxHeight);
+    // Keep the old layout during a native resize until its state catches up.
+    // The docked layout can shrink on entry but must wait before growing on dismissal.
+    const contentHeight = this.centeredHeight || Math.min(height, this.dockedHeight || height);
+    children[0].measure({ minWidth: width, maxWidth: width, minHeight: contentHeight, maxHeight: contentHeight });
+    return { width: width, height: height };
+  }
+
+  onPlaceChildren(_geometry: GeometryInfo, children: Layoutable[]): void {
+    children[0].layout({ x: 0, y: 0 });
+  }
+
+  build() {
+    this.content()
+  }
+}
+
+@Component
 export struct ChatPanel {
   @ObjectLink account: HuaweiAccount;
   onAccount: () => void = () => {};
@@ -108,13 +133,42 @@ export struct ChatPanel {
   }
   @State private panelHeight: number = 0;
   @State private panelWidth: number = 0;
-  private panelLeft: number = 0;
-  private panelTop: number = 0;
-  @State private keyboardInset: number = 0;
-  private updateKeyboardGeometry(): void {
-    this.keyboardInset = this.composerFocused ? AdaptiveUi.keyboardInset({ x: this.panelLeft, y: this.panelTop,
-      width: this.panelWidth, height: this.panelHeight }, this.viewport.keyboard) : 0;
+  @State private panelTop: number = 0;
+  @State private composerWindowTop: number = 0;
+  @State private keyboardClosing: boolean = false;
+  @State private composerKeyboardActive: boolean = false;
+  private keyboardRestingHeight: number = 0;
+
+  private keyboardVisibleInLayout(): boolean {
+    return this.viewport.keyboardHeight > 0 || this.keyboardClosing;
   }
+
+  private composerActiveInLayout(): boolean {
+    return this.composerFocused || (this.composerKeyboardActive && this.keyboardVisibleInLayout());
+  }
+
+  private keyboardVisibilityChanged(shown: boolean): void {
+    if (shown) {
+      this.composerKeyboardActive = this.composerFocused;
+      this.keyboardClosing = false;
+    } else {
+      // The IME can report zero height before ArkUI returns the space to the chat.
+      this.keyboardClosing = this.composerKeyboardActive && this.panelHeight < this.keyboardRestingHeight;
+    }
+  }
+
+  private updatePanelArea(area: Area): void {
+    const height = Number(area.height);
+    const width = Number(area.width);
+    if (this.keyboardClosing && (height > this.panelHeight || width !== this.panelWidth)) {
+      this.keyboardClosing = false;
+    }
+    this.panelHeight = height;
+    this.panelWidth = width;
+    this.panelTop = Number(area.globalPosition.y);
+    if (!this.keyboardVisibleInLayout() && !this.composerFocused) { this.keyboardRestingHeight = height; }
+  }
+
   onToolScope: () => void = () => {};
   @Prop @Watch('speechAvailabilityChanged') speechEnabled: boolean = true;
   @StorageProp('tinybot.foreground') @Watch('focusForegroundChanged') private foreground: boolean = true;
@@ -159,8 +213,6 @@ export struct ChatPanel {
   @State private speechHolding: boolean = false;
   @State private speechTarget: VoiceAction = 'send';
   private speechOutcome?: VoiceAction;
-  private cancelVoiceRect?: VoiceTargetRect;
-  private editVoiceRect?: VoiceTargetRect;
   private composerController: TextAreaController = new TextAreaController();
   private composerHasPreview: boolean = false;
   private keyboardFocusRequest: number = 0;
@@ -222,10 +274,12 @@ export struct ChatPanel {
     this.composerMounted = true;
     this.syncMessages();
     systemInsets(this.getUIContext()).then((insets: number[]) => { this.insetBottom = insets[1]; });
-    this.viewport.onKeyboard = (shown: boolean): void => this.afterRender(() => {
-      if (shown && this.composerFocused) { this.inspectingOutput = false; this.followOutput = true; this.follow(); }
-    });
-    this.viewport.onGeometry = (): void => { this.updateKeyboardGeometry(); };
+    this.viewport.onKeyboard = (shown: boolean): void => {
+      this.keyboardVisibilityChanged(shown);
+      this.afterRender(() => {
+        if (shown && this.composerFocused) { this.inspectingOutput = false; this.followOutput = true; this.follow(); }
+      });
+    };
     this.viewport.observe(this.getUIContext());
     this.speech.onResult = (text: string): void => {
       if (!this.dictationDraft || this.speechThreadId !== this.app.active.id || !this.speechEnabled) {
@@ -353,15 +407,25 @@ export struct ChatPanel {
     this.reading.stop();
     this.getUIContext().getFocusController().clearFocus();
     this.voiceMode = true; this.speechHolding = true; this.speechTarget = 'send'; this.speechOutcome = undefined;
-    this.cancelVoiceRect = undefined; this.editVoiceRect = undefined;
     this.speechThreadId = this.app.active.id;
     this.dictationDraft = new DictationDraft(this.app.draft);
     this.unwrittenSpeech = '';
     this.speech.start(this.getUIContext().getHostContext() as common.UIAbilityContext);
     return true;
   }
+  private voiceTargetRect(action: VoiceAction): VoiceTargetRect | undefined {
+    const context = this.getUIContext();
+    const node = context.getAttachedFrameNodeById('voice-target-' + action);
+    if (!node) { return undefined; }
+    // The overlay is positioned outside normal layout. Read the drawn position in the touch event's window coordinates.
+    const position = node.getPositionToWindowWithTransform();
+    const size = node.getMeasuredSize();
+    return { x: position.x, y: position.y, width: context.px2vp(size.width), height: context.px2vp(size.height) };
+  }
   private moveSpeech(x: number, y: number): void {
-    if (this.speechHolding) { this.speechTarget = voiceActionAtPoint(x, y, this.cancelVoiceRect, this.editVoiceRect); }
+    if (this.speechHolding) {
+      this.speechTarget = voiceActionAtPoint(x, y, this.voiceTargetRect('cancel'), this.voiceTargetRect('edit'));
+    }
   }
   private cancelSpeechHold(): void { if (this.speechHolding) { this.endSpeech(); } }
   private releaseSpeech(action: VoiceAction = this.speechTarget): void {
@@ -408,7 +472,6 @@ export struct ChatPanel {
   private endSpeech(): void {
     this.keyboardFocusRequest++;
     this.dictationDraft = undefined; this.speechOutcome = undefined; this.speechHolding = false; this.speechTarget = 'send';
-    this.cancelVoiceRect = undefined; this.editVoiceRect = undefined;
     this.speech.cancel();
   }
   private async speechErrorAction(): Promise<void> {
@@ -515,8 +578,7 @@ export struct ChatPanel {
   }
 
   private composerExpanded(): boolean {
-    if (this.voiceMode) { return false; }
-    return this.workbench || this.composerFocused || this.app.draft.length > 0 || this.hasDraft() || this.importing || this.speechActive() ||
+    return this.workbench || this.composerActiveInLayout() || this.app.draft.length > 0 || this.hasDraft() || this.importing ||
       this.app.generating || this.thread.pendingInputs.length > 0 || this.showPlus || this.showPlusMenu || this.showContext ||
       this.showQueue;
   }
@@ -787,7 +849,7 @@ export struct ChatPanel {
 
   private centeredWelcome(): boolean {
     return this.emptyConversation() &&
-      this.panelHeight >= 540 && this.viewport.keyboardHeight === 0 && !this.voiceMode && !this.voiceOverlayVisible() && !this.app.generating;
+      this.panelHeight >= 540 && !this.keyboardVisibleInLayout() && !this.app.generating;
   }
 
   @Builder
@@ -1450,9 +1512,6 @@ export struct ChatPanel {
         symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.person_2')) }).id('composer-team-option')
         .enabled(this.app.ready && !this.app.busy && !this.thread.archived && this.app.saveError.length === 0)
         .onClick(() => this.toggleTeam(!this.thread.teamEnabled))
-      MenuItem({ content: t('上下文') + ' · ' + Math.round(this.contextRatio() * 100) + '%',
-        symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.rectangle_stack')) }).id('composer-context-option')
-        .onClick(() => { this.showContext = true; })
       MenuItem({ content: t('工具范围'),
         symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.wrench_and_screwdriver')) }).id('composer-tool-scope-option')
         .enabled(this.app.ready && !this.app.busy && !this.thread.archived && this.app.saveError.length === 0)
@@ -1467,6 +1526,19 @@ export struct ChatPanel {
     }.id('composer-options').width(this.workbench ? 36 : 44).height(this.workbench ? 36 : 44)
       .backgroundColor(Color.Transparent).accessibilityText(t('输入选项'))
       .bindMenu(this.composerOptions, { systemMaterial: this.appearance.menu, mask: false })
+  }
+
+  @Builder
+  contextUsageButton() {
+    Button({ type: ButtonType.Circle }) {
+      Progress({ value: this.contextRatio() * 100, total: 100, type: ProgressType.Ring })
+        .width(24).height(24).style({ strokeWidth: 3 })
+        .color(this.contextRatio() >= 0.85 ? $r('app.color.danger') : this.appearance.accent)
+        .backgroundColor($r('app.color.divider')).accessibilityLevel('no')
+    }.id('context-usage').width(this.workbench ? 36 : 44).height(this.workbench ? 36 : 44)
+      .padding(0).backgroundColor(Color.Transparent)
+      .focusOnTouch(false).accessibilityText(this.app.contextLabel)
+      .onClick(() => { this.showContext = true; })
       .bindSheet($$this.showContext, this.contextSheet(), { radius: Radius.sheet,
         title: { title: t('上下文') }, detents: [SheetSize.LARGE, SheetSize.MEDIUM],
         detentSelection: SheetSize.LARGE, preferType: this.workbench ? SheetType.CENTER : SheetType.BOTTOM,
@@ -1477,7 +1549,7 @@ export struct ChatPanel {
   @Builder
   composerAddButton() {
     IconButton({ icon: $r('sys.symbol.plus'), label: t('添加图片、画板或文件'), compId: 'add-attachment', diameter: this.workbench ? 36 : 44,
-      iconSize: 18, fill: $r('app.color.surface_variant'),
+      iconSize: 18, fill: '#00000000',
       disabled: this.thread.archived || this.app.saveError.length > 0 || this.speechActive() || this.speechHolding,
       onTap: () => {
         this.getUIContext().getFocusController().clearFocus();
@@ -1546,8 +1618,8 @@ export struct ChatPanel {
           this.composerChanged(threadId, value);
         })
         .onTextSelectionChange((start: number, end: number) => this.composerSelectionChanged(threadId, start, end))
-        .onFocus(() => { this.composerFocused = true; this.updateKeyboardGeometry(); this.inspectingOutput = false; this.followOutput = true; this.follow(); })
-        .onBlur(() => { this.composerHasPreview = false; this.composerFocused = false; this.updateKeyboardGeometry(); })
+        .onFocus(() => { this.composerFocused = true; this.inspectingOutput = false; this.followOutput = true; this.follow(); })
+        .onBlur(() => { this.composerHasPreview = false; this.composerFocused = false; })
         .onEditChange((editing: boolean) => { this.composerFocused = editing; })
   }
 
@@ -1581,32 +1653,21 @@ export struct ChatPanel {
       if (this.thread.attachments.length > 0 || this.importing) {
         this.attachmentStrip()
       }
-      // A native editor owns one chat. Recreate only it when the chat changes, so
-      // retained callbacks cannot keep the previous builder argument or edit another draft.
-      ForEach([this.thread.id], (threadId: string) => {
-        this.composerEditor(threadId)
-      }, (threadId: string) => threadId)
-    }
-    .width('100%').padding({ left: 8, right: 8, top: this.composerExpanded() ? 4 : 6,
-      bottom: this.composerExpanded() ? (this.speechActive() ? 52 : this.workbench ? 48 : 56) : 6 })
-    .animation({ duration: Motion.medium, curve: Motion.standard })
-      if (this.voiceMode) {
-        Row({ space: 4 }) {
-          this.composerAddButton()
-          VoiceHoldButton({ phase: this.speech.phase, action: this.speechTarget, disabled: !this.canRecordSpeech(), controlHeight: this.workbench ? 44 : 52,
-            onHold: (): boolean => this.startSpeech(), onMove: (x: number, y: number): void => this.moveSpeech(x, y),
-            onRelease: (): void => this.releaseSpeech(), onCancel: (): void => this.cancelSpeechHold() }).layoutWeight(1)
-          IconButton({ icon: $r('sys.symbol.keyboard'), label: t('切换到键盘输入'), compId: 'voice-keyboard', diameter: this.workbench ? 36 : 44,
-            iconSize: 20, fill: $r('app.color.surface_variant'), disabled: this.speechActive() || this.speechHolding,
-            onTap: () => this.showSpeechKeyboard() })
-          if (this.app.generating) {
-            IconButton({ icon: $r('sys.symbol.square_fill'), label: t("停止"), compId: 'stop-generation', diameter: this.workbench ? 36 : 44,
-              iconSize: 14, fill: $r('app.color.text_primary'), tint: $r('app.color.page_background'),
-              onTap: () => { this.app.stop(); } })
-              .transition(Motion.pop())
-          }
-        }.width('100%').height(this.workbench ? 56 : 64).padding({ left: 8, right: 8, top: 6, bottom: 6 })
-      } else {
+      Stack() {
+        // The hidden editor still sizes the input when voice controls cover it.
+        Column() {
+          ForEach([this.thread.id], (threadId: string) => {
+            this.composerEditor(threadId)
+          }, (threadId: string) => threadId)
+        }.width('100%').padding({ bottom: this.composerExpanded() ? this.workbench ? 48 : 56 : 6 })
+          .animation({ duration: Motion.medium, curve: Motion.standard })
+        if (this.voiceMode) {
+          this.voiceControls()
+        }
+      }.width('100%')
+    }.width('100%').padding({ left: 8, right: 8, top: this.composerExpanded() ? 4 : 6 })
+      .animation({ duration: Motion.medium, curve: Motion.standard })
+      if (!this.voiceMode) {
       Row() {
         if (this.speechActive()) {
           Blank()
@@ -1614,13 +1675,8 @@ export struct ChatPanel {
         this.composerAddButton()
         Scroll() {
         Row({ space: 4 }) {
+        this.contextUsageButton()
         this.composerOptionsButton()
-        if (this.contextRatio() >= 0.85) {
-          Button(Math.round(this.contextRatio() * 100) + '%').fontFamily(this.appearance.fontFamily)
-            .id('context-usage').height(this.workbench ? 36 : 44).attributeModifier(Btn.textSmall)
-            .fontColor($r('app.color.danger')).accessibilityText(this.app.contextLabel)
-            .onClick(() => { this.showContext = true; })
-        }
         if (this.thread.pendingInputs.length > 0) {
           Row({ space: 4 }) {
             SymbolGlyph($r('sys.symbol.clock')).fontSize(14).fontColor([this.appearance.onAccentContainer])
@@ -1688,10 +1744,11 @@ export struct ChatPanel {
         .hitTestBehavior(this.composerExpanded() ? HitTestMode.Default : HitTestMode.Transparent)
       }
     }.id('composer-shell').width('100%').borderRadius(this.composerExpanded() ? Radius.xl : 28).clip(true)
+    .onAreaChange((_previous: Area, current: Area) => { this.composerWindowTop = Number(current.globalPosition.y); })
     .backgroundColor($r('app.color.surface'))
-    .border({ width: this.composerFocused ? 1 : 0.5,
-      color: this.composerFocused ? this.appearance.accentOutline : $r('app.color.divider') })
-    .shadow(this.composerFocused ? { radius: 28, color: this.appearance.accentGlow, offsetY: 4 }
+    .border({ width: this.composerActiveInLayout() ? 1 : 0.5,
+      color: this.composerActiveInLayout() ? this.appearance.accentOutline : $r('app.color.divider') })
+    .shadow(this.composerActiveInLayout() ? { radius: 28, color: this.appearance.accentGlow, offsetY: 4 }
       : { radius: 12, color: '#0A000000', offsetY: 2 })
     .animation({ duration: Motion.medium, curve: Motion.standard })
     // Anchor the sheet to the stable shell, not an add button that moves when the composer expands.
@@ -1699,6 +1756,26 @@ export struct ChatPanel {
       detents: [SheetSize.MEDIUM, SheetSize.LARGE], dragBar: true, showClose: false,
       backgroundColor: $r('app.color.page_background'), onDisappear: () => this.finishPlusAction()
     })
+  }
+
+  @Builder
+  voiceControls() {
+    Row({ space: 4 }) {
+      this.composerAddButton()
+      VoiceHoldButton({ phase: this.speech.phase, action: this.speechTarget, disabled: !this.canRecordSpeech(),
+        controlHeight: this.workbench ? 44 : 52, onHold: (): boolean => this.startSpeech(),
+        onMove: (x: number, y: number): void => this.moveSpeech(x, y),
+        onRelease: (): void => this.releaseSpeech(), onCancel: (): void => this.cancelSpeechHold() }).layoutWeight(1)
+      IconButton({ icon: $r('sys.symbol.keyboard'), label: t('切换到键盘输入'), compId: 'voice-keyboard', diameter: this.workbench ? 36 : 44,
+        iconSize: 20, fill: $r('app.color.surface_variant'), disabled: this.voiceOverlayVisible(),
+        onTap: () => this.showSpeechKeyboard() })
+      if (this.app.generating) {
+        IconButton({ icon: $r('sys.symbol.square_fill'), label: t("停止"), compId: 'stop-generation', diameter: this.workbench ? 36 : 44,
+          iconSize: 14, fill: $r('app.color.text_primary'), tint: $r('app.color.page_background'),
+          onTap: () => { this.app.stop(); } })
+          .transition(Motion.pop())
+      }
+    }.position({ top: 0, bottom: 0, left: 0, right: 0 }).padding({ bottom: 6 })
   }
 
   @Builder
@@ -1733,9 +1810,8 @@ export struct ChatPanel {
     .transition(Motion.rise(0, 24))
   }
 
-  build() {
-    // Keep the cover on its own node: a false bindSheet on the same node removes an active cover on device.
-    Stack() {
+  @Builder
+  chatBody() {
     Column() {
       Blank().height(0).layoutWeight(this.centeredWelcome() ? 1 : 0).width('100%')
         .gesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Right, distance: 8 })
@@ -1751,15 +1827,8 @@ export struct ChatPanel {
             this.messageList()
           }
         }.width('100%').height(this.centeredWelcome() ? 'auto' : '100%').zIndex(this.sendingMessageId ? 1 : 0)
-        if (this.thread.teamEnabled && this.viewport.keyboardHeight > 0 && !this.voiceMode && !this.voiceOverlayVisible()) { this.teamToggle() }
-        if (this.voiceOverlayVisible()) {
-          VoiceRecordingOverlay({ phase: this.speech.phase === 'complete' ? 'finishing' : this.speech.phase,
-            text: this.speech.text, speaking: this.speech.speaking, action: this.speechTarget,
-            onTargetArea: (action: VoiceAction, rect: VoiceTargetRect): void => {
-              if (action === 'cancel') { this.cancelVoiceRect = rect; } else { this.editVoiceRect = rect; }
-            }, onCancel: (): void => this.releaseSpeech('cancel'), onEdit: (): void => this.releaseSpeech('edit') })
-            .align(Alignment.Bottom).zIndex(5).transition(Motion.rise(0, 52))
-        }
+          .visibility(this.emptyConversation() && this.voiceOverlayVisible() ? Visibility.Hidden : Visibility.Visible)
+        if (this.thread.teamEnabled && this.keyboardVisibleInLayout() && !this.voiceMode && !this.voiceOverlayVisible()) { this.teamToggle() }
       }.id('chat-swipe-area').layoutWeight(this.centeredWelcome() ? 0 : 1).width('100%').zIndex(this.sendingMessageId ? 1 : 0)
       // Normal priority lets nested horizontal scrollers keep their gestures. The composer
       // stays outside this region so selecting or moving through draft text does not open history.
@@ -1837,12 +1906,13 @@ export struct ChatPanel {
         }
         if (this.workbench && this.thread.messages.length === 0) { this.workbenchContext() }
         this.composer()
-        if (!this.voiceMode && !this.speechActive()) {
-          Row() {
-            this.toolApprovalButton()
-            this.modelButton()
-          }.id('composer-footer').width('100%').justifyContent(FlexAlign.SpaceBetween)
-        }
+        Row() {
+          this.toolApprovalButton()
+          this.modelButton()
+        }.id('composer-footer').width('100%').justifyContent(FlexAlign.SpaceBetween)
+          .enabled(!this.voiceOverlayVisible())
+          .hitTestBehavior(this.voiceOverlayVisible() ? HitTestMode.None : HitTestMode.Default)
+          .accessibilityLevel(this.voiceOverlayVisible() ? 'no-hide-descendants' : 'auto')
         if (this.workbench && this.account.ready && !this.account.signedIn) {
           Row({ space: 8 }) {
             Text(t('登录华为账号后即可使用 AI 生成功能。')).fontSize(12).fontColor($r('app.color.text_secondary')).layoutWeight(1)
@@ -1851,16 +1921,32 @@ export struct ChatPanel {
         }
       }.width('100%').padding({ left: this.workbench ? 24 : 10, right: this.workbench ? 24 : 10, bottom: Space.sm })
       Blank().height(0).layoutWeight(this.centeredWelcome() ? 1 : 0)
-      if (this.viewport.keyboardHeight === 0) {
-        Text(t('AI生成内容可能有误，请仔细鉴别。')).fontFamily(this.appearance.fontFamily).id('ai-disclaimer')
-          .fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
-          .textAlign(TextAlign.Center).width('100%')
-          .padding({ left: Space.sm + (this.workbench ? 24 : 10), right: Space.sm + (this.workbench ? 24 : 10), bottom: Space.sm })
-      }
-    }.height('100%').width('100%').padding({ top: this.centeredWelcome() ? this.topInset : 0, bottom: this.keyboardInset })
+      Text(t('AI生成内容可能有误，请仔细鉴别。')).fontFamily(this.appearance.fontFamily).id('ai-disclaimer')
+        .fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+        .textAlign(TextAlign.Center).width('100%')
+        .padding({ left: Space.sm + (this.workbench ? 24 : 10), right: Space.sm + (this.workbench ? 24 : 10), bottom: Space.sm })
+        .visibility(this.keyboardVisibleInLayout() ? Visibility.None : Visibility.Visible)
+    }.height('100%').width('100%').padding({ top: this.centeredWelcome() ? this.topInset : 0 })
       .bindSheet($$this.showMemoryDraft, this.memoryDraftSheet(), { radius: Radius.sheet, title: { title: t("提炼并确认记忆") }, detents: [SheetSize.LARGE], dragBar: true, keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY,
         backgroundColor: $r('app.color.page_background') })
+  }
+
+  build() {
+    // Keep the cover on its own node: a false bindSheet on the same node removes an active cover on device.
+    Stack() {
+      ChatViewportLayout({ centeredHeight: this.centeredWelcome() ? this.panelHeight : 0,
+        dockedHeight: this.keyboardVisibleInLayout() ? this.panelHeight : 0,
+        content: () => { this.chatBody() } }).width('100%').height('100%')
       this.shortcutBindings()
+      if (this.voiceOverlayVisible()) {
+        Column() {
+          VoiceRecordingOverlay({ phase: this.speech.phase === 'complete' ? 'finishing' : this.speech.phase,
+            text: this.speech.text, speaking: this.speech.speaking, action: this.speechTarget,
+            onCancel: (): void => this.releaseSpeech('cancel'), onEdit: (): void => this.releaseSpeech('edit') })
+        }.width(this.workbench ? 'calc(100% - 48vp)' : 'calc(100% - 20vp)')
+          .position({ left: this.workbench ? 24 : 10, bottom: this.panelTop + this.panelHeight - this.composerWindowTop })
+          .zIndex(5).transition(TransitionEffect.OPACITY.animation({ duration: Motion.fast, curve: Motion.standard }))
+      }
       if (this.dropHover) {
         Column() {
           Text(t('松开以添加到当前会话')).fontFamily(this.appearance.fontFamily).fontSize(Font.body)
@@ -1874,8 +1960,7 @@ export struct ChatPanel {
       .onDragMove((event: DragEvent) => this.dragAttachment(event))
       .onDragLeave(() => { this.dropHover = false; })
       .onDrop((event: DragEvent) => { this.receiveAttachmentDrop(event); }, { disableDataPrefetch: true })
-      .onAreaChange((_old: Area, area: Area) => { this.panelHeight = Number(area.height); this.panelWidth = Number(area.width);
-        this.panelLeft = Number(area.globalPosition.x); this.panelTop = Number(area.globalPosition.y); this.updateKeyboardGeometry(); })
+      .onAreaChange((_old: Area, area: Area) => this.updatePanelArea(area))
       .bindContentCover(this.showDrawing || this.previewing || this.writingExpanded, this.chatCover(), { modalTransition: ModalTransition.ALPHA,
         backgroundColor: $r('app.color.page_background'), onWillDismiss: () => {
           if (this.writingExpanded) { this.writingExpanded = false; }

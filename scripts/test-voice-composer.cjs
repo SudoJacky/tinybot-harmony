@@ -25,20 +25,20 @@ const emitted = path.join(root, 'entry/build/default/cache/default/default@Compi
 assert.ok(fs.statSync(emitted).mtimeMs >= fs.statSync(source).mtimeMs, 'Rebuild ChatPanel');
 const tree = ts.createSourceFile(emitted, fs.readFileSync(emitted, 'utf8'), ts.ScriptTarget.Latest, true);
 const component = tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'ChatPanel');
-for (const helper of tree.statements.filter(n => ts.isClassDeclaration(n) && n.name.text !== 'ChatPanel')) {
-  vm.runInNewContext(ts.transpileModule(`${helper.getText(tree)}; exports.${helper.name.text} = ${helper.name.text};`, {
-    compilerOptions: { target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS }
-  }).outputText, scope);
-  scope[helper.name.text] = scope.exports[helper.name.text];
-}
+const layoutFrame = tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'ChatLayoutFrame');
+vm.runInNewContext(ts.transpileModule(`${layoutFrame.getText(tree)}; exports.ChatLayoutFrame = ChatLayoutFrame;`, {
+  compilerOptions: { target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS }
+}).outputText, scope);
+scope.ChatLayoutFrame = scope.exports.ChatLayoutFrame;
 const names = ['aboutToAppear', 'afterRender', 'speechActive', 'voiceOverlayVisible', 'canRecordSpeech', 'enterVoiceMode',
-  'showSpeechKeyboard', 'startSpeech', 'moveSpeech', 'cancelSpeechHold', 'releaseSpeech', 'applySpeechDraft', 'completeSpeech', 'endSpeech'];
+  'showSpeechKeyboard', 'startSpeech', 'voiceTargetRect', 'moveSpeech', 'cancelSpeechHold', 'releaseSpeech', 'applySpeechDraft', 'completeSpeech', 'endSpeech'];
 const methods = names.map(name => component.members.find(n => n.name?.getText(tree) === name).getText(tree)).join('\n');
 vm.runInNewContext(ts.transpileModule(`class Panel { ${methods} } exports.Panel = Panel;`, {
   compilerOptions: { target: ts.ScriptTarget.ES2021 }
 }).outputText, scope);
 function panel() {
   const events = [], frames = [];
+  const targets = new Map();
   let nativeReady = true;
   const value = new scope.exports.Panel();
   Object.assign(value, { speechEnabled: true, importing: false, speechHolding: false, voiceMode: false, speechTarget: 'send',
@@ -56,6 +56,7 @@ function panel() {
     canSend() { return !this.app.busy && !this.app.generating; },
     send() { events.push(['send', this.app.draft]); this.app.draft = ''; } });
   value.getUIContext = () => ({ getHostContext: () => ({}), postFrameCallback: frame => frames.push(frame),
+    getAttachedFrameNodeById: id => targets.get(id) ?? null, px2vp: px => px / 3.5,
     getFocusController: () => ({ clearFocus() {}, requestFocus: id => {
       assert.ok(nativeReady, '150003: composer is still hidden or disabled before the render flush');
       events.push(['focus', id]);
@@ -71,7 +72,7 @@ function panel() {
     // ArkUI calls onFrame before applying dirty component properties and onIdle after rendering.
     posted.forEach(frame => frame.onFrame()); render(); posted.forEach(frame => frame.onIdle());
   };
-  return { value, events, frames, result, complete, hold, render, renderFrame };
+  return { value, events, frames, result, complete, hold, render, renderFrame, targets };
 }
 let p = panel(); p.value.enterVoiceMode();
 assert.equal(p.value.voiceMode, true); assert.equal(p.value.speech.phase, 'idle', 'Switching mode never opens microphone');
@@ -95,11 +96,18 @@ assert.deepEqual(p.events, ['finish', ['send', '原草稿\n完整的最后一句
 assert.equal(p.value.voiceOverlayVisible(), false);
 
 p = panel(); p.hold(); p.result('取消的内容');
-p.value.cancelVoiceRect = { x: 10, y: 500, width: 80, height: 60 };
-p.value.editVoiceRect = { x: 250, y: 500, width: 80, height: 60 };
-p.value.moveSpeech(40, 520); assert.equal(p.value.speechTarget, 'cancel');
+let drawnY = 350;
+for (const [id, x] of [['voice-target-cancel', 10], ['voice-target-edit', 250]]) {
+  p.targets.set(id, { getPositionToWindowWithTransform: () => ({ x, y: drawnY }),
+    getMeasuredSize: () => ({ width: 280, height: 210 }) });
+}
+p.value.moveSpeech(40, 350); assert.equal(p.value.speechTarget, 'cancel', 'Hit the visible upper edge');
+p.value.moveSpeech(280, 350); assert.equal(p.value.speechTarget, 'edit', 'Hit the visible edit target');
+p.value.moveSpeech(40, 411); assert.equal(p.value.speechTarget, 'send', 'Exclude blank space below the label');
+drawnY = 320;
+p.value.moveSpeech(40, 325); assert.equal(p.value.speechTarget, 'cancel', 'Track the current drawn position');
 p.value.moveSpeech(160, 700); assert.equal(p.value.speechTarget, 'send', 'Sliding back restores send');
-p.value.moveSpeech(40, 520); p.value.releaseSpeech(); p.complete();
+p.value.moveSpeech(40, 325); p.value.releaseSpeech(); p.complete();
 assert.equal(p.value.app.draft, '原草稿'); assert.deepEqual(p.events, []);
 
 p = panel(); p.hold(); p.result('待编辑'); p.value.releaseSpeech('edit'); p.result('待编辑的最终文字'); p.complete();
