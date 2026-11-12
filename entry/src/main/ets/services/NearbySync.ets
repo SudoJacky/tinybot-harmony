@@ -8,8 +8,9 @@ import { Diagnostics } from '../model/Diagnostics';
 import { LogFields } from '../model/DiagnosticLog';
 import { t } from '../model/I18n';
 import { ProjectData } from '../model/Project';
-import { PeerSettingsDelta, PeerThreadUpdate, parsePeerProject, parsePeerSettings, parsePeerThread, peerLiveMessage,
-  peerProjectText, peerSettingsText, peerThreadText } from '../model/PeerSyncData';
+import { PeerSettingsDelta, parsePeerSettings, peerSettingsText } from '../model/PeerSettings';
+import { PeerThreadUpdate, parsePeerProject, parsePeerThread, peerLiveMessage,
+  peerProjectText, peerThreadText } from '../model/PeerSyncData';
 import { RequestUsage } from '../model/Usage';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { ArkDataRecords, RecordSource, StoredRecord } from './ArkDataRecords';

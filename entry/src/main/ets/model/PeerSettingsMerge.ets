@@ -1,5 +1,5 @@
 import { AppData, copyModelConfig } from './Conversation';
-import { PeerSettingsDelta, peerProfile, peerServer } from './PeerSyncData';
+import { PeerSettingsDelta, peerProfile, peerServer } from './PeerSettings';
 import { ProviderProfile } from './ProviderProfiles';
 import { McpServer, MemoryEntry, defaultProductivity, validateProductivity } from './Productivity';
 import { SkillData, defaultExtensions, validateExtensions } from './Skills';

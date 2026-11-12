@@ -156,7 +156,7 @@ const node = id => [...nodes.values()].find(value => value.id === id);
   overlay.showDrawing = false; overlay.previewing = true; renderOverlay(); assert.ok(modal, 'Image preview owns the independent cover too');
   modal.options.onWillDismiss(); assert.equal(overlay.previewing, false); renderOverlay(); assert.equal(modal, undefined);
   console.log('PASS compiled drawing and preview overlays survive closed-sheet bindings and preserve controlled dismissal');
-  const names = ['canAttach', 'canUseDraft', 'remoteMode', 'remoteStart', 'openDrawing', 'closeDrawing', 'addDrawing'];
+  const names = ['canAttach', 'canUseDraft', 'remoteSending', 'openDrawing', 'closeDrawing', 'addDrawing'];
   const methods = names.map(name => component.members.find(value => value.name?.getText(tree) === name).getText(tree)).join('\n');
   let boardLoads = 0;
   const scope = { exports: {}, DrawingDraft, MAX_MESSAGE_ATTACHMENTS: 10, Attachments: {}, canIUse: () => supported, deviceInfo: { productModel: 'phone' },
@@ -165,7 +165,7 @@ const node = id => [...nodes.values()].find(value => value.id === id);
   const composer = new scope.exports.Composer();
   let additions = 0, writes = 0, finishWrite;
   const image = { id: 'drawing', mime: 'image/jpeg', path: 'drawing.jpg', size: 100, name: 'Sketch.jpg' };
-  Object.assign(composer, { thread: { id: 'chat', attachments: [], archived: false }, appearance: {}, importing: false,
+  Object.assign(composer, { thread: { id: 'chat', attachments: [], archived: false }, appearance: {}, importing: false, nearbySendingIds: [],
     speechActive: () => false, getUIContext: () => ({ getFocusController: () => ({ clearFocus() {} }), showAlertDialog: value => { dialog = value; } }),
     app: { active: { id: 'chat' }, peerThread: false, busy: false, saveError: '', error: '', setAttachments: async items => { additions++; composer.thread.attachments = items; return true; } } });
   scope.Attachments.saveDrawing = async () => { writes++; return image; };
@@ -176,9 +176,11 @@ const node = id => [...nodes.values()].find(value => value.id === id);
   scope.deviceInfo.productModel = 'phone';
   supported = true; composer.app.error = '';
   composer.app.peerThread = true;
-  await composer.openDrawing(); assert.equal(boardLoads, 0, 'Nearby conversations cannot add a local drawing');
-  composer.app.peerThread = false;
+  composer.nearbySendingIds = ['chat'];
+  await composer.openDrawing(); assert.equal(boardLoads, 0, 'An in-flight nearby send locks the draft attachments');
+  composer.nearbySendingIds = [];
   await composer.openDrawing(); assert.equal(composer.showDrawing, true); composer.closeDrawing(); assert.equal(composer.showDrawing, false);
+  composer.app.peerThread = false;
   await composer.openDrawing(); composer.drawingDraft.hasContent = () => true;
   composer.closeDrawing(); dialog.primaryButton.action(); assert.equal(composer.showDrawing, true);
   composer.drawingDraft.saving = true; composer.closeDrawing(); assert.equal(composer.showDrawing, true); composer.drawingDraft.saving = false;

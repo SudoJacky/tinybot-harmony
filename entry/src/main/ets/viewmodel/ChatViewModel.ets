@@ -1,7 +1,7 @@
 import { Diagnostics } from '../model/Diagnostics';
 import { NearbyTaskStatus } from '../model/NearbyTask';
 import { ProjectData } from '../model/Project';
-import { PeerSettingsConflict } from '../model/PeerSyncData';
+import { PeerSettingsConflict } from '../model/PeerSettings';
 import { SharedFolder } from '../model/SharedFolders';
 import { AgentMode } from '../model/AgentMode';
 import { ToolApprovalMode } from '../model/ToolApprovalMode';

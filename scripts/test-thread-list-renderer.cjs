@@ -189,7 +189,8 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
     systemMaterialAttribute: materialAttributes.exports.systemMaterialAttribute,
     AppearanceStyle: class { controlBackground = 'transparent'; materialAvailable = true; materialEnabled = true; },
     ViewPU: class extends ViewPU { createStorageProp(_key, value) { return new Property(value); } },
-    SynchedPropertySimpleOneWayPU: Property, SynchedPropertyObjectOneWayPU: Property, ObservedObject: { GetRawObject: v => v },
+    SynchedPropertySimpleOneWayPU: Property, SynchedPropertyObjectOneWayPU: Property, ObservedPropertySimplePU: Property,
+    ObservedObject: { GetRawObject: v => v },
     Button: new Proxy({}, { get: (_, key) => key === 'accessibilityText' ? value => { accessibilityLabel = value; } :
       key === 'backgroundColor' ? value => { buttonBackground = value; backgroundAnimation = buttonAnimation; } :
       key === 'border' ? value => { buttonBorder = value; } : () => {} }) };

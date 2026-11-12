@@ -553,7 +553,8 @@ export struct ChatPanel {
     this.getUIContext().postFrameCallback(new ChatLayoutFrame(() => {
       if (request !== this.keyboardFocusRequest || this.thread.id !== threadId || this.app.active.id !== threadId ||
         !this.speechEnabled || !this.foreground || this.showPlus || this.showPlusMenu || this.showDrawing || this.previewing ||
-        this.showContext || this.showQueue || this.showSummary || this.showMemoryDraft || this.showModelMenu || this.showToolApprovalMode ||
+        this.showContext || this.showQueue || this.showSummary || this.showMemoryDraft || this.showModelMenu ||
+        this.showToolApprovalMode || this.showNearbyModels ||
         this.thread.archived || this.voiceMode || this.speechActive()) { return; }
       if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'voice', 'focus_requested', { request: request }); };
       this.getUIContext().getFocusController().requestFocus('composer');
@@ -1431,7 +1432,8 @@ export struct ChatPanel {
     this.getUIContext().postFrameCallback(new ChatLayoutFrame(() => {
       if (request !== this.keyboardFocusRequest || this.thread.id !== threadId || this.app.active.id !== threadId ||
         !this.speechEnabled || !this.foreground || this.showPlus || this.showPlusMenu || this.showDrawing || this.previewing ||
-        this.showContext || this.showQueue || this.showSummary || this.showMemoryDraft || this.showModelMenu || this.showToolApprovalMode ||
+        this.showContext || this.showQueue || this.showSummary || this.showMemoryDraft || this.showModelMenu ||
+        this.showToolApprovalMode || this.showNearbyModels ||
         this.app.draft !== next.text || this.thread.archived || this.voiceMode || this.speechActive()) { return; }
       this.getUIContext().getFocusController().requestFocus('composer');
       this.composerController.caretPosition(next.caret);

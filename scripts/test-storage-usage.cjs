@@ -18,6 +18,7 @@ function load(file) {
     if (id === '../model/WorkspaceStore') return { WorkspaceStore: class { constructor(filesDir) { this.rootDir = filesDir + '/workspace'; } pathFor(id) { return this.rootDir + '/' + id; } } };
     if (id === '../model/Agent') return { toolReceipts: tools => tools || [] };
     if (id === '../model/I18n') return { t: value => value };
+    if (id === './ArkDataWorkspace') return { workspaceDatabase: () => undefined, ArkDataWorkspace: { forRoot: () => undefined } };
     if (id.startsWith('.')) return load(path.resolve(path.dirname(file), id));
     throw new Error('Unexpected import: ' + id);
   } }, { filename: file });

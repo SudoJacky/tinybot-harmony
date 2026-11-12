@@ -1,22 +1,7 @@
 import { AppData, MessageData, ThreadData, emptyData, parseAppData } from './Conversation';
 import { ProjectData, validateProjects } from './Project';
 import { threadWorkspacePath } from './Workspace';
-import { MemoryEntry, McpServer } from './Productivity';
-import { SkillData } from './Skills';
-import { ProviderProfile } from './ProviderProfiles';
 
-export interface PeerSettings {
-  userDocument: string;
-  autoCompact?: boolean;
-  autoMemory?: boolean;
-  saveSummary?: boolean;
-  memories: MemoryEntry[];
-  skills: SkillData[];
-  profiles: ProviderProfile[];
-  servers: McpServer[];
-}
-export interface PeerSettingsDelta { current: PeerSettings; previous?: PeerSettings; origin?: string; force?: string[]; }
-export interface PeerSettingsConflict { origin: string; keys: string[]; current: PeerSettings; }
 export interface PeerThreadUpdate {
   origin: string;
   id: string;
@@ -32,19 +17,6 @@ export function nearbyTraceId(id?: string): number | undefined {
 
 export function peerHasOutput(message: MessageData): boolean {
   return !!message.content || !!message.steps?.some((step) => !!step.content || !!step.reasoningContent || step.tools.length > 0);
-}
-
-// A service URL may itself carry authentication in user info or query parameters.
-function shareableEndpoint(value: string): boolean {
-  return /^https?:\/\/[^/?#@\\\s]+(?:\/[^?#\\\s]*)?$/i.test(value);
-}
-
-export function peerProfile(profile: ProviderProfile): ProviderProfile {
-  return { id: profile.id, name: profile.name, presetId: profile.presetId, protocol: profile.protocol, baseUrl: profile.baseUrl,
-    models: profile.models, contextWindow: profile.contextWindow, credentialAlias: '', enabled: false, noApiKey: true };
-}
-export function peerServer(server: McpServer): McpServer {
-  return { id: server.id, name: server.name, url: server.url, enabled: false, credentialAlias: '' };
 }
 
 export function peerThreadText(thread: ThreadData): string {
@@ -87,40 +59,6 @@ export function parsePeerProject(text: string, id: string): ProjectData {
   if (!item || item.id !== id || item.sharedFolders !== undefined) { throw new Error('Invalid synchronized project'); }
   const data: AppData = emptyData(); data.projects = [item]; validateProjects(data);
   return item;
-}
-
-export function peerSettingsText(data: AppData): string {
-  const settings: PeerSettings = {
-    userDocument: data.config.userDocument || '',
-    autoCompact: data.config.autoCompact,
-    autoMemory: data.productivity?.options?.autoMemory,
-    saveSummary: data.productivity?.options?.saveSummary,
-    memories: data.productivity?.memories || [],
-    skills: data.extensions?.skills || [],
-    profiles: (data.providerProfiles || []).filter((profile) => shareableEndpoint(profile.baseUrl)).map(peerProfile),
-    servers: (data.productivity?.servers || []).filter((server) => shareableEndpoint(server.url)).map(peerServer)
-  };
-  return JSON.stringify(settings);
-}
-
-export function parsePeerSettings(text: string): PeerSettings {
-  const settings = JSON.parse(text) as PeerSettings;
-  if (!settings || typeof settings.userDocument !== 'string' || !Array.isArray(settings.memories) ||
-    !Array.isArray(settings.skills) || !Array.isArray(settings.profiles) || !Array.isArray(settings.servers) ||
-    [settings.autoCompact, settings.autoMemory, settings.saveSummary].some((value) => value !== undefined && typeof value !== 'boolean') ||
-    settings.profiles.some((profile) => !profile || profile.credentialAlias !== '' || profile.balanceCredentialAlias !== undefined ||
-      profile.enabled || !profile.noApiKey || !shareableEndpoint(profile.baseUrl)) ||
-    settings.servers.some((server) => !server || server.credentialAlias !== '' || server.authType !== undefined || server.enabled ||
-      !shareableEndpoint(server.url))) {
-    throw new Error('Invalid synchronized settings');
-  }
-  const data = emptyData();
-  data.config.userDocument = settings.userDocument;
-  data.productivity = { memories: settings.memories, servers: settings.servers, templates: [] };
-  data.extensions = { webEnabled: false, skills: settings.skills };
-  data.providerProfiles = settings.profiles;
-  parseAppData(JSON.stringify(data));
-  return settings;
 }
 
 export function peerLiveMessage(text: string): MessageData {

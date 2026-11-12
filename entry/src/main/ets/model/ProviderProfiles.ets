@@ -68,6 +68,20 @@ export function validateReference(reference: ModelReference): void {
   }
 }
 
+export function validateProviderProfiles(profiles: ProviderProfile[]): void {
+  if (!Array.isArray(profiles)) { throw new Error(t("模型服务列表损坏。")); }
+  const ids = new Set<string>();
+  const aliases = new Set<string>();
+  for (const profile of profiles) {
+    validateProfile(profile, true);
+    if (ids.has(profile.id) || (profile.credentialAlias.length > 0 && aliases.has(profile.credentialAlias))) {
+      throw new Error(t("模型服务 ID 或密钥别名重复。"));
+    }
+    ids.add(profile.id);
+    if (profile.credentialAlias.length > 0) { aliases.add(profile.credentialAlias); }
+  }
+}
+
 export function migrateProfiles(config: ModelConfig): ProviderProfile[] {
   if (!config.configured) { return []; }
   const preset = builtinProviderInfos().find((info) => info.id === config.providerId);

@@ -26,7 +26,7 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
   } });
   const Panel = compile(methods('views/ChatPanel', ['composerChanged', 'composerSelectionChanged', 'speechActive', 'composerEditor', 'updateScrollState',
     'afterRender', 'speechThreadChanged', 'receiveVoiceShortcut', 'syncMessages', 'scrollToLatest']), {
-    TextArea: editor, Context: { animation() {} }, Motion: {}, Font: {}, Color: {}, Alignment: {}, Visibility: {},
+    TextArea: editor, Context: { animation() {} }, Motion: {}, Font: {}, Color: {}, Alignment: {}, Visibility: {}, EnterKeyType: {},
     ATTACHMENT_DROP_TYPES: [], t: s => s, clearTimeout, ScrollAlign: { END: 'end' }, Diagnostics: { recording: false },
     ChatLayoutFrame: class { constructor(action) { this.action = action; } onIdle() { this.action(); } }
   });
@@ -59,7 +59,7 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
   await drain(); assert.equal(panel.app.draft, 'programmatic update'); assert.equal(selectionWrites, 2);
   panel.composerMounted = true; panel.speech.phase = 'listening'; panel.composerChanged('b', 'native preview');
   await drain(); assert.equal(panel.app.draft, 'programmatic update');
-  Object.assign(panel, { appearance: {}, composerExpanded: () => true,
+  Object.assign(panel, { appearance: {}, composerExpanded: () => true, remoteMode: () => false,
     observeComponentCreation2: callback => callback(1, true) });
   panel.speech.phase = 'idle'; panel.composerEditor('b'); const oldEditor = editorEvents.at(-1);
   panel.thread.id = panel.app.active.id = 'c'; panel.app.draft = ''; panel.composerEditor('c');
@@ -145,7 +145,7 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
     Placement: { TopLeft: 0 }, BlurStyle: { NONE: 0 }, t: value => value
   });
   const composer = Object.assign(new AddButton(), { workbench: false, showPlus: false, showPlusMenu: false, thread: {}, app: { saveError: '' },
-    speechActive: () => false, plusMenu() {},
+    speechActive: () => false, remoteMode: () => false, plusMenu() {},
     observeComponentCreation2(callback, component) {
       if (component.name === 'IconButton') { updateAddButton = () => callback(1, false); }
       callback(1, true);
