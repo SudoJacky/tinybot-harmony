@@ -1,12 +1,12 @@
-Tinybot v1.3.0 · 发布准备说明
-更新日期：2026-11-08
+Tinybot v1.3.1 · 发布准备说明
+更新日期：2026-11-13
 
 一、版本与产物
 
-本版产物需从 1.3.0 源码重新构建；历史版本产物不作为本版提交。
+本版产物需从 1.3.1 源码重新构建；历史版本产物不作为本版提交。
 
 包名：com.sudojacky.tinybot
-版本：1.3.0，versionCode=1003000
+版本：1.3.1，versionCode=1003001
 设备：phone、tablet，最低 HarmonyOS 6.0.0（API 20），目标 API 26；同一包覆盖两套系统
 发布包：release，app.debug=false，仅 arm64-v8a
 模拟器：使用单独构建的调试包，包含 x86_64；不随正式发布包分发。
@@ -16,11 +16,11 @@ Tinybot v1.3.0 · 发布准备说明
 - PDF 文字提取依赖系统 PDFKit；API 20 未提供该模块，仍可保留 PDF 原件，读取时明确提示不支持文字提取，不生成空白文本。
 - 携带凭据的网络请求在 API 20 上同样不跟随重定向。
 
-1.3.0 升级生活看板的交互 HTML 卡片、12 列网格、拖动与调整大小体验，新增模型服务余额查询与余额看板，内置 Widget、Widget Design 和 Canvas Skills。优化手机和平板布局，修复设置分类切换、输入按钮尺寸和看板重复预览；支持离线数学公式显示及拍照附件。完整备份覆盖设置、用量与加密连接凭据，自动与手动共用一份云端文件，恢复时自动下载并合并，保留本机已有数据。系统授权和华为账号登录仍需在新设备完成。自动备份受系统后台时限约束，卸载前需确认已上传。验证记录和外部待办见 CLOUD-TEST.txt、RELEASE-GAPS.txt。
+1.3.1 将会话、配置、用量和生活看板迁入本机加密数据库，华为云空间和 WebDAV 支持按设备选择历史备份恢复。新增文件预览批注、离线图表和可编辑的 PowerPoint 图表。改善手机输入区、空会话右滑、平板工作区和快捷键，修复图标缩放及隐私授权读取。移除本地小程序和提示词模板入口，保留历史会话和工作区文件。 验证记录和外部待办见 CLOUD-TEST.txt、RELEASE-GAPS.txt。
 
 运行 scripts/prepare-distribution.ps1 后生成独立目录及 ZIP：
-packages/Tinybot-1.3.0-1003000-release-UNSIGNED.app：待云签名的完整发布包。
-packages/Tinybot-1.3.0-1003000-release-UNSIGNED.hap：同一 APP 内的 entry 模块。
+packages/Tinybot-1.3.1-1003001-release-UNSIGNED.app：待云签名的完整发布包。
+packages/Tinybot-1.3.1-1003001-release-UNSIGNED.hap：同一 APP 内的 entry 模块。
 symbols/app-symbol.zip：ArkTS 符号表。
 symbols/native/arm64-v8a/：与发布包 Build ID 一致的未裁剪原生沙箱库。
 assets/tinybot-icon.png：工程使用的图标。
@@ -46,7 +46,7 @@ pwsh -ExecutionPolicy Bypass -File scripts\prepare-distribution.ps1 -StudioRoot 
 
 在 DevEco Studio 的 Build > Upload Product 中选择工程原始产物：
 build\outputs\default\tinybot-harmony-default-unsigned.app
-关联现有包名 com.sudojacky.tinybot，核对 1.3.0 / 1003000，使用对应发布证书或云管理签名，附带本版符号表。最终签名包的哈希会变化，以最终文件重新记录。
+关联现有包名 com.sudojacky.tinybot，核对 1.3.1 / 1003001，使用对应发布证书或云管理签名，附带本版符号表。最终签名包的哈希会变化，以最终文件重新记录。
 
 此步骤需在实际平台完成；本地准备不包含创建应用、申请证书、上传、云测试或审核结果。控制台字段以当前平台为准。如版本号已使用，增加 versionCode 后重新构建。
 

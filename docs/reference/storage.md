@@ -50,7 +50,8 @@ UIAbility 的 `filesDir` 保留旧版会话和用量，并存放诊断日志。�
 
 <cloudFileDir>/
 └─ tinybot-backups/
-   ├─ tinybot-latest.tinybot     当前最新备份
+   ├─ tinybot-device-<设备ID>-<13位时间戳>-<uuid>.tinybot   按设备保存的版本
+   ├─ tinybot-latest.tinybot     旧版共享快照
    ├─ tinybot-<13位时间戳>-<uuid>.tinybot   历史备份
    ├─ tinybot-<13位时间戳>-<uuid>.json      旧版 JSON 备份
    └─ *.partial                  未完成的临时文件
@@ -107,10 +108,10 @@ UIAbility 的 `filesDir` 保留旧版会话和用量，并存放诊断日志。�
 - 云备份格式为 `tinybot-harmony.backup.v4`，沿用 v3 的 `TINYBOT3` 容器，可读 v3 归档和旧 v1/v2 JSON。索引包含 `data`、`attachments`、`files`、可选设备偏好与用量记录；`bytes` 字段在 v3/v4 中是十进制 blob 下标字符串，在 v1/v2 中仍是 Base64。
 - 只保留小程序、原会话已删除的工作区也会进入备份：快照记录这些工作区，并保留 v1/v2 小程序清单、版本历史、正式数据、迁移前数据与试用文件；恢复时按独立工作区重建，已有工作区以本机数据为准。
 - 快照保留非敏感配置，清空公开凭据别名，需要凭据的服务在公开部分停用；加密载荷保留原始配置与密钥。恢复时匹配本机服务、重建安全存储别名并修复卡片引用；本机已有密钥优先。
-- 云目录固定为 `<cloudFileDir>/tinybot-backups`，最新备份固定为 `tinybot-latest.tinybot`，先写唯一的 `.partial` 文件并 `fsync`，再重命名替换最新备份，失败不先删除旧文件。列表同时收录旧的时间戳 `.tinybot` 和 `.json`。最新备份时间取原生 `stat().mtime`（秒转毫秒）。
+- 云目录固定为 `<cloudFileDir>/tinybot-backups`。新备份写入唯一的 `.partial` 文件，落盘后提升为独立版本。列表按版本时间排序，也识别旧共享快照和时间戳备份。
 - 本地导出的临时文件写在 `cacheDir/backup-<uuid>.tinybot`，交给系统文件选择器后删除。
-- 新备份及旧 JSON 导入均不设应用固定容量或文件数量上限。自动和手动备份共用固定文件名，新文件确认上传后清理旧时间戳、旧独立自动备份与临时恢复副本；未上传前保留旧副本。清理不会触碰工作区和会话，也不会删除比当前共享备份更新的旧版快照。
-- 恢复只新增独立副本：已有会话不覆盖，新附件分配新 ID，新项目使用新的物理目录；已有项目保留本地名称、指令与文件。
+- 新备份及旧 JSON 导入均不设应用固定容量或文件数量上限。华为云空间和 WebDAV 按设备保留最近 3 份版本。确认上传成功后再清理该设备的超额版本，其他设备和旧格式备份可继续用于恢复。
+- 恢复会跳过相同会话版本，并将有差异的同 ID 会话另存为副本。新附件分配新 ID，新项目使用新的物理目录，已有项目保留本地名称、指令与文件。
 
 v3 容器依次为：8 字节 ASCII `TINYBOT3`、4 字节小端无符号索引长度、UTF-8 JSON 索引 `{metadata: string, sizes: number[]}`、按序连续保存的原始文件字节、32 字节 SHA-256。`metadata` 是备份 envelope 的 JSON 字符串；摘要覆盖从文件头到最后一个文件的所有字节，不含摘要自身。读取时校验总长度并使用本地产生的数字文件名解包到 `cacheDir/restore-<uuid>/`；通过整包校验与语义校验后再导入。正常退出或错误路径均清理暂存目录。文件没有压缩，对话和文件没有加密。
 
@@ -149,7 +150,7 @@ envelope 的可选 `protectedKeys` 区域为 `{version:2,salt,iv,ciphertext}`，
 | `attachments/*` | 导入附件、截图、批注、手绘 | 无自动回收，随应用数据清除 | 是 |
 | `workspace/<id>/*` | 文件工具写入、文件页编辑 | 删除会话不清理；随应用数据清除 | 是 |
 | `workspace/<id>/attachments` | 附件绑定到消息时复制原件 | 删除会话不清理；随应用数据清除 | 是 |
-| `workspace/<id>/mini-apps` | 发布或更新小程序、保存用户数据 | 移除只归档；归档后永久删除 | 是 |
+| `workspace/<id>/mini-apps` | 旧版小程序页面、版本和用户数据 | 升级保留原件 | 是 |
 | `workspace/<id>/.tinybot-review` | 首次修改文件前 | 恢复原版后删除，或随应用数据清除 | 否 |
 | `tinybot-backups/*.{tinybot,json}` | 手动备份 | 单份删除或系统清理 | — |
 | `performance-*.jsonl` | 开发者模式采集期间 | 清除诊断数据 | 否 |
