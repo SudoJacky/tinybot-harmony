@@ -76,13 +76,9 @@ vm.runInNewContext(ts.transpileModule(menuSource, { compilerOptions: {
   target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS
 } }).outputText, globals);
 globals.materialMenuContent = globals.exports.materialMenuContent;
-const names = ['filtered','threadProject','sections','sectionThreads','sectionTitle','groupOpen','visibleCount','onActivePath','lastBranch','loadMore','toggleGroup','sectionHeader','projectActions',
-  'updateQuery','setScope',
+const names = ['filtered','sections','sectionThreads','sectionTitle','groupOpen','visibleCount','onActivePath','lastBranch','loadMore','toggleGroup','sectionHeader','projectActions',
   'locked','endSelection','selectThread','allSelected','selectAll','archiveSelected','confirmDeleteSelected'];
-const menuGeometry = tree.statements.filter(node => ts.isVariableStatement(node) &&
-  node.declarationList.declarations.some(decl => ['ROW_MENU_SIZE', 'ROW_MENU_RIGHT_INSET'].includes(decl.name.getText(tree))));
-vm.runInNewContext(ts.transpileModule(`${menuGeometry.map(node => node.getText(tree)).join('\n')}
-${cls('ThreadSection').getText(tree)}
+vm.runInNewContext(ts.transpileModule(`${cls('ThreadSection').getText(tree)}
 class Sidebar extends ViewPU { ${cls('ThreadList').members.filter(n => names.includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')}
 mount() { ${mount}; } saveFromEditor() { return (${saveProject})(); } }
 class RowProbe extends ViewPU {
@@ -117,8 +113,7 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
     if (current !== undefined && ['threads','projects','active'].includes(key)) readers.add(current);
     return Reflect.get(target, key, receiver);
   } });
-  const sidebar = Object.assign(new globals.exports.Sidebar(), { app: observedApp, appearance: { fontFamily: 'system' }, query: '', archived: false,
-    projectFilter: null, visibleCounts: {}, collapsedProjects: [] });
+  const sidebar = Object.assign(new globals.exports.Sidebar(), { app: observedApp, appearance: { fontFamily: 'system' }, query: '', archived: false, visibleCounts: {}, collapsedProjects: [] });
   sidebar.selecting = false; sidebar.selectedIds = [];
   sidebar.mount(); const groupIds = [...groups];
   assert.ok(![...texts.values()].includes('3'), 'Project headers omit conversation counts');
@@ -189,8 +184,7 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
     systemMaterialAttribute: materialAttributes.exports.systemMaterialAttribute,
     AppearanceStyle: class { controlBackground = 'transparent'; materialAvailable = true; materialEnabled = true; },
     ViewPU: class extends ViewPU { createStorageProp(_key, value) { return new Property(value); } },
-    SynchedPropertySimpleOneWayPU: Property, SynchedPropertyObjectOneWayPU: Property, ObservedPropertySimplePU: Property,
-    ObservedObject: { GetRawObject: v => v },
+    SynchedPropertySimpleOneWayPU: Property, SynchedPropertyObjectOneWayPU: Property, ObservedObject: { GetRawObject: v => v },
     Button: new Proxy({}, { get: (_, key) => key === 'accessibilityText' ? value => { accessibilityLabel = value; } :
       key === 'backgroundColor' ? value => { buttonBackground = value; backgroundAnimation = buttonAnimation; } :
       key === 'border' ? value => { buttonBorder = value; } : () => {} }) };
@@ -217,7 +211,7 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
   batchData.threads = Array.from({ length: 25 }, (_, i) => ({ ...batchData.threads[0], id: 'batch-' + i, title: i < 2 ? 'Match' : 'Other', draft: '' }));
   batchData.activeThreadId = 'batch-0';
   const batch = new Fixture(batchData), batchApp = new ChatViewModel(); await batchApp.initialize(batch.session);
-  const selection = Object.assign(new globals.exports.Sidebar(), { app: batchApp, appearance: { fontFamily: 'system' }, query: '', archived: false, projectFilter: null,
+  const selection = Object.assign(new globals.exports.Sidebar(), { app: batchApp, appearance: { fontFamily: 'system' }, query: '', archived: false,
     selecting: true, selectedIds: [], visibleCounts: {}, collapsedProjects: [''] });
   selection.selectAll();
   assert.equal(selection.selectedIds.length, 25, 'Select all includes collapsed groups and unloaded rows');

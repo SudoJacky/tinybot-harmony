@@ -14,9 +14,6 @@ import { backgroundGeneration } from '../services/BackgroundGeneration';
 import { completionNotifications } from '../services/CompletionNotifications';
 import { WebUiPreflight } from '../services/WebUiPreflight';
 import { PreviewCapture } from '../services/PreviewCapture';
-import { LIVE_SYNC_PROBE, liveSyncProbe } from '../services/LiveSyncProbe';
-import { nearbyConversations } from '../services/NearbyConversations';
-import { DEBUG } from 'BuildProfile';
 /*
  * Copyright (c) 2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -78,7 +75,7 @@ export default class EntryAbility extends UIAbility {
     // AppGallery presents startup consent automatically. A second request would stack two system dialogs.
     hostedPrivacy.initialize(this.context, (allowed: boolean) => {
       if (allowed) { this.startServices(); }
-      else { DeveloperDiagnostics.stop(); if (DEBUG) { liveSyncProbe.exit(); } }
+      else { DeveloperDiagnostics.stop(); }
     });
     Diagnostics.log('info', 'app', 'created');
   }
@@ -104,21 +101,12 @@ export default class EntryAbility extends UIAbility {
   }
 
   private receiveWant(want: Want): void {
-    if (DEBUG && want.parameters?.[LIVE_SYNC_PROBE] === '1') { AppStorage.setOrCreate('tinybot.probe.visible', true); }
     McpOAuth.receive(want.uri || '');
     ShareInbox.receive(want, this.context.getApplicationContext().filesDir);
     LaunchActions.receive(want);
   }
 
-  onCollaborate(wantParam: Record<string, Object>): AbilityConstant.CollaborateResult {
-    if (hostedPrivacy.allowed && (nearbyConversations.accept(wantParam) ||
-      DEBUG && liveSyncProbe.accept(this.context, wantParam))) { return AbilityConstant.CollaborateResult.ACCEPT; }
-    return AbilityConstant.CollaborateResult.REJECT;
-  }
-
   onDestroy(): void {
-    nearbyConversations.stop();
-    if (DEBUG) { liveSyncProbe.exit(); }
     autoCloudBackup.dispose();
     completionNotifications.dispose();
     backgroundGeneration.dispose();

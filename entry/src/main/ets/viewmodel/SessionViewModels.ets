@@ -158,8 +158,6 @@ export class MessageViewModel {
 @Observed
 export class ThreadViewModel {
   panelContext?: string;
-  peerOwner?: string;
-  peerThreadId?: string;
   latestPreviewIds: string[] = [];
   refreshPreviews(): void {
     const ids = latestPreviewIds(this.messages);
@@ -198,22 +196,19 @@ export class ThreadViewModel {
   constructor(data: ThreadData) { this.update(data); }
   updateMetadata(data: ThreadData): void {
     this.panelContext = data.panelContext;
-    this.peerOwner = data.peerOwner;
-    this.peerThreadId = data.peerThreadId;
     this.agentMode = data.agentMode || 'full'; this.disabledTools = data.disabledTools || [];
     this.toolApprovalMode = toolApprovalMode(data.toolApprovalMode);
     this.projectId = data.projectId;
     this.memoryReview = data.memoryReview;
     this.reasoningEffort = data.reasoningEffort || 'default';
-    this.references = (data.peerOwner ? data.peerReferences : data.references) || [];
+    this.references = data.references || [];
     this.teamEnabled = data.teamEnabled === true;
     this.parentThreadId = data.parentThreadId; this.parentMessageId = data.parentMessageId; this.disabledMcpIds = data.disabledMcpIds || [];
     this.id = data.id; this.title = data.title; this.updatedAt = data.updatedAt;
     this.pinned = data.pinned === true; this.archived = data.archived === true; this.titleEdited = data.titleEdited === true;
-    this.attachments = (data.peerOwner ? data.peerAttachments : data.attachments) || [];
-    this.annotations = data.peerOwner ? [] : data.annotations || [];
-    this.draft = (data.peerOwner ? data.peerDraft : data.draft) || '';
-    this.compaction = data.compaction; this.modelRef = data.modelRef;
+    this.attachments = data.attachments || [];
+    this.annotations = data.annotations || [];
+    this.draft = data.draft || ''; this.compaction = data.compaction; this.modelRef = data.modelRef;
     this.pendingInputs = data.pendingInputs || []; this.queuePaused = data.queuePaused === true;
   }
   update(data: ThreadData): void {

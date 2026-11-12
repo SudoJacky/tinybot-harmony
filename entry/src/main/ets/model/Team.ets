@@ -61,7 +61,7 @@ export function teamStatus(status: string): string {
     'cancelled': t("已停止"), 'interrupted': t("已中断"), 'pending': t("等待执行"), 'succeeded': t("成功") };
   return names[status] || status;
 }
-export function recoverTeams(runs: TeamRun[], interrupted: boolean = true): void {
+export function recoverTeams(runs: TeamRun[]): void {
   if (!Array.isArray(runs)) { throw new Error(t("团队记录格式损坏。")); }
   const ids = new Set<string>();
   for (const run of runs) {
@@ -78,20 +78,19 @@ export function recoverTeams(runs: TeamRun[], interrupted: boolean = true): void
       for (const attempt of record.attempts) {
         if (!attempt || !identifier(attempt.id) || !attempt.turn || typeof attempt.turn.content !== 'string' ||
           !['running', 'succeeded', 'failed', 'cancelled', 'interrupted'].includes(attempt.status)) { throw new Error(t("任务执行记录损坏。")); }
-        validateSteps(attempt.turn.steps); migrateWebIcons(attempt.turn.steps);
-        if (interrupted) { interruptTools(attempt.turn.steps); }
+        validateSteps(attempt.turn.steps); migrateWebIcons(attempt.turn.steps); interruptTools(attempt.turn.steps);
         if (attempt.handoff) {
           const handoff = attempt.handoff;
           if (!bounded(handoff.summary, 12000) || !Array.isArray(handoff.unresolved) || handoff.unresolved.some((item) => !bounded(item, 2000)) ||
             !Array.isArray(handoff.artifacts) || handoff.artifacts.length > 8 || handoff.artifacts.some((item) => !item || !bounded(item.path, 1024) || typeof item.content !== 'string' || item.content.length > 65536) ||
             !Number.isInteger(handoff.sequence) || handoff.sequence < 1 || handoff.sequence > (run.sequence || 0)) { throw new Error(t("员工交接记录损坏。")); }
         }
-        if (interrupted && attempt.status === 'running') { attempt.status = 'interrupted'; attempt.error = '应用退出时执行尚未完成；检查文件后可手动重试。'; }
+        if (attempt.status === 'running') { attempt.status = 'interrupted'; attempt.error = '应用退出时执行尚未完成；检查文件后可手动重试。'; }
       }
-      if (interrupted && record.status === 'running') { record.status = 'interrupted'; }
+      if (record.status === 'running') { record.status = 'interrupted'; }
       if (record.status === 'succeeded' && lastAttempt(record)?.status !== 'succeeded') { throw new Error(t("任务完成状态与记录不一致。")); }
     }
-    if (interrupted && run.status === 'running') { run.status = 'interrupted'; run.error = '应用退出，团队已中断，不会自动重放任务。'; run.revision++; }
+    if (run.status === 'running') { run.status = 'interrupted'; run.error = '应用退出，团队已中断，不会自动重放任务。'; run.revision++; }
     if (run.status === 'completed' && run.tasks.some((record) => record.status !== 'succeeded')) { throw new Error(t("团队完成状态与任务不一致。")); }
   }
 }

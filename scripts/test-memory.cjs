@@ -100,11 +100,7 @@ async function main() {
   removalData.productivity.memories = [entry('obsolete', obsolete, 'chat'), entry('manual', 'Keep this preference', '', false)];
   removalData.threads.push({ ...removalData.threads[0], id: 'other', memorySnapshot: 'Other chat snapshot' });
   const approvals = [];
-  const removal = await fixture(removalData, {
-    subscribe() {},
-    scoped(threadId) { assert.equal(threadId, 'chat'); return this; },
-    async request(_title, details) { approvals.push(JSON.parse(details)); }
-  });
+  const removal = await fixture(removalData, { request: async (_title, details) => approvals.push(JSON.parse(details)) });
   const removeObsolete = { action: 'remove', id: 'obsolete' };
   removal.provider.respond = async () => {
     if (removal.requests.length === 1) return reply('', [memoryCall([])]);

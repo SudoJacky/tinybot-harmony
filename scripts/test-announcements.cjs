@@ -177,8 +177,11 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   class Markdown { constructor(_parent, params) { this.type = 'Markdown'; this.params = params; } }
   class ErrorBanner { constructor(_parent, params) { this.type = 'Banner'; this.params = params; } }
   vm.runInNewContext(compile('export class Renderer {\n' + methods + '\n}'), { exports: rendererExports,
-    ...Object.fromEntries(['Flex', 'Text', 'Scroll', 'Column', 'Row', 'If', 'Button', '__Common__'].map(type => [type, element(type)])),
-    AnimatedIcon: class { constructor(_parent, params) { this.type = 'AnimatedIcon'; this.params = params; } },
+    ...Object.fromEntries(['Flex', 'Text', 'Scroll', 'Column', 'Row', 'If', 'Button'].map(type => [type, element(type)])),
+    Image: new Proxy({}, { get: (_, key) => (...args) => {
+      if (key === 'create') nodes.push({ type: 'Image', value: args[0], parent: stack.at(-1), props: {} });
+      else nodes.at(-1).props[key] = args[0];
+    } }),
     TextAlign: { Center: 'center' }, VerticalAlign: { Center: 'center' },
     FlexDirection: { Column: 'column' }, FontWeight: { Bold: 'bold' }, TextOverflow: { Ellipsis: 'ellipsis' },
     Alignment: { TopStart: 'top-start' }, BarState: { Auto: 'auto' }, EdgeEffect: { None: 'none' },

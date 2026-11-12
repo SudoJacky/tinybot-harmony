@@ -10,8 +10,8 @@ export async function reviewBackupRestore(context: UIContext, data: AppData): Pr
   try {
     accepted = await new Promise<boolean>((resolve) => {
       context.showAlertDialog({ title: t('确认恢复内容'),
-        message: t('新增 {0} 个会话，跳过 {1} 个已有版本，另存 {2} 个冲突副本。\n{3} 个会话继续由原设备执行。备份副本可在本机继续，原有会话和文件会保留。',
-          [report.added, report.skipped, report.copied, report.remote]),
+        message: t('新增 {0} 个会话，跳过 {1} 个已有版本，另存 {2} 个冲突副本。原有会话和文件会保留。',
+          [report.added, report.skipped, report.copied]),
         primaryButton: { value: t('取消'), action: () => resolve(false) },
         secondaryButton: { value: t('恢复备份'), action: () => resolve(true) }, cancel: () => resolve(false) });
     });

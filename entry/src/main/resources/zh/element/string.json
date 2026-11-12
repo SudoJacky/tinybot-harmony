@@ -1,6 +1,5 @@
 {
   "string": [
-    { "name": "nearby_sync_reason", "value": "与受信任的附近 Tinybot 设备同步会话及执行进度。" },
     { "name": "widget_name", "value": "Tiny 快捷卡片" },
     { "name": "widget_description", "value": "新建对话、打开语音输入，或继续上次对话。" },
     { "name": "widget_greeting", "value": "今天想做点什么？" },

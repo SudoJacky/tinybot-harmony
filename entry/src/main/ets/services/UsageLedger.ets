@@ -11,9 +11,6 @@ import { ArkDataRecords, StoredRecord } from './ArkDataRecords';
 interface UsageManifest { version: number; pages: number; }
 const PAGE_SIZE = 256;
 export const USAGE_SCOPE = 'usage';
-const PEER_USAGE_SCOPE = 'nearby-usage';
-interface PeerUsageVersion { device: string; revision: number; }
-export interface PeerUsageUpdate { origin: string; revision: number; item: RequestUsage; }
 export function usageRecordId(position: number): string { return position.toString().padStart(16, '0'); }
 
 export async function readLegacyUsage(root: string): Promise<RequestUsage[]> {
@@ -41,7 +38,6 @@ export class UsageLedger {
   private static path: string = '';
   private static records: RequestUsage[] = [];
   private static positions: Map<string, number> = new Map();
-  private static peers: Map<string, PeerUsageVersion> = new Map();
   private static dirty: Set<number> = new Set();
   private static persistedPages: number = 0;
   private static database?: () => Promise<ArkDataRecords>;
@@ -77,7 +73,6 @@ export class UsageLedger {
     if (UsageLedger.database) {
       const db = await UsageLedger.database();
       const loaded: RequestUsage[] = [];
-      const peers = new Map<string, PeerUsageVersion>();
       for (const id of await db.ids(USAGE_SCOPE)) {
         const text = await db.read(USAGE_SCOPE, id);
         if (id !== usageRecordId(loaded.length) || text === undefined) { throw new Error(t('用量记录格式损坏。')); }
@@ -89,20 +84,12 @@ export class UsageLedger {
         if (typeof id !== 'string' || !id || index.has(id)) { throw new Error(t('用量记录格式损坏。')); }
         index.set(id, i);
       }
-      for (const id of await db.ids(PEER_USAGE_SCOPE)) {
-        const metadata = await db.read(PEER_USAGE_SCOPE, id);
-        if (metadata === undefined || !index.has(id)) { throw new Error('Synchronized usage owner is missing its record'); }
-        const peer = JSON.parse(metadata) as PeerUsageVersion;
-        UsageLedger.validatePeer(peer); peers.set(id, peer);
-      }
       UsageLedger.dirty.clear();
       for (const current of UsageLedger.records) {
         const position = index.get(current.id) ?? loaded.length;
         loaded[position] = current; index.set(current.id, position); UsageLedger.dirty.add(position);
-        const peer = UsageLedger.peers.get(current.id);
-        if (peer) { peers.set(current.id, peer); } else { peers.delete(current.id); }
       }
-      UsageLedger.records = loaded; UsageLedger.positions = index; UsageLedger.peers = peers;
+      UsageLedger.records = loaded; UsageLedger.positions = index;
       return;
     }
     const loaded: RequestUsage[] = []; const index = new Map<string, number>();
@@ -156,10 +143,6 @@ export class UsageLedger {
           const positions = Array.from(UsageLedger.dirty).slice(0, PAGE_SIZE);
           const records = positions.map((position: number): StoredRecord => ({ scope: USAGE_SCOPE,
             id: usageRecordId(position), text: JSON.stringify(UsageLedger.records[position]) }));
-          for (const position of positions) {
-            const id = UsageLedger.records[position].id;
-            records.push({ scope: PEER_USAGE_SCOPE, id: id, text: JSON.stringify(UsageLedger.peers.get(id)) });
-          }
           positions.forEach((position) => { UsageLedger.dirty.delete(position); });
           try { await db.commit(records); }
           catch (error) { positions.forEach((position) => { UsageLedger.dirty.add(position); }); throw error as Error; }
@@ -202,30 +185,6 @@ export class UsageLedger {
     await UsageLedger.flush();
     if (UsageLedger.error) { UsageLedger.error = ''; UsageLedger.notify(); }
   }
-  static isPeer(id: string): boolean { return UsageLedger.peers.has(id); }
-  private static validatePeer(peer: PeerUsageVersion): void {
-    if (!peer || typeof peer.device !== 'string' || !/^[0-9a-f-]{36}$/.test(peer.device) ||
-      !Number.isSafeInteger(peer.revision) || peer.revision <= 0) { throw new Error('Invalid synchronized usage owner or revision'); }
-  }
-  static async receivePeer(root: string, updates: PeerUsageUpdate[]): Promise<void> {
-    if (UsageLedger.path !== root + '/usage-records' || !UsageLedger.ready || !UsageLedger.database) {
-      throw new Error('Usage storage is not ready for synchronization');
-    }
-    await UsageLedger.queue;
-    for (const update of updates) {
-      const peer: PeerUsageVersion = { device: update.origin, revision: update.revision };
-      UsageLedger.validatePeer(peer);
-      const current = UsageLedger.peers.get(update.item.id);
-      // Backup imports and locally executed requests retain local ownership.
-      if (UsageLedger.positions.has(update.item.id) && (!current || current.device !== peer.device || current.revision >= peer.revision)) { continue; }
-      UsageLedger.storeRecord(update.item, peer);
-    }
-    await UsageLedger.queue;
-    // A failed scheduled flush retains dirty records. Retry here, and propagate
-    // failure before the transport marks any received revision as applied.
-    await UsageLedger.flush();
-    if (UsageLedger.error) { UsageLedger.error = ''; UsageLedger.notify(); }
-  }
   static recordTool(requestId: string, activity: UsageToolActivity): void {
     const position = UsageLedger.positions.get(requestId); if (position === undefined) { return; }
     const updated = JSON.parse(JSON.stringify(UsageLedger.records[position])) as RequestUsage;
@@ -234,11 +193,6 @@ export class UsageLedger {
     UsageLedger.record(updated);
   }
   static record(item: RequestUsage): void {
-    UsageLedger.storeRecord(item);
-  }
-  private static storeRecord(item: RequestUsage, peer?: PeerUsageVersion): void {
-    if (peer) { UsageLedger.peers.set(item.id, peer); }
-    else { UsageLedger.peers.delete(item.id); }
     let index = UsageLedger.positions.get(item.id);
     if (index === undefined) { index = UsageLedger.records.length; UsageLedger.positions.set(item.id, index); UsageLedger.records.push(item); }
     else { UsageLedger.records[index] = item; }

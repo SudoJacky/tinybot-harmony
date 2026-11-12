@@ -112,7 +112,7 @@ check('composer and Skill focus reject covered/background/overlay targets', () =
   for (const method of ['showSpeechKeyboard', 'selectSkill']) {
     for (const change of [p => { p.speechEnabled = false; }, p => { p.foreground = false; },
       ...['showPlus', 'showPlusMenu', 'showDrawing', 'previewing', 'showContext', 'showQueue', 'showSummary',
-        'showMemoryDraft', 'showModelMenu', 'showToolApprovalMode', 'showNearbyModels'].map(key => p => { p[key] = true; })]) {
+        'showMemoryDraft', 'showModelMenu', 'showToolApprovalMode'].map(key => p => { p[key] = true; })]) {
       const f = chat(); f.panel[method]('test'); change(f.panel); f.render(); assert.deepEqual(f.focus, []);
     }
   }
