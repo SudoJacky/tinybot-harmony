@@ -423,8 +423,7 @@ async function main() {
       { exports, t, Error, Object, MAX_MESSAGE_ATTACHMENTS, DragResult, DragBehavior: { COPY: 1 }, importDroppedAttachments });
     const ui = new exports.Panel(); let commits = 0;
     Object.assign(ui, { attachmentDrop: new AttachmentDrop(), dropGeneration: 0, importing: false,
-      speechActive: () => false, remoteMode: () => false,
-      getUIContext: () => ({ getDragController: () => ({ cancelDataLoading() {} }) }),
+      speechActive: () => false, getUIContext: () => ({ getDragController: () => ({ cancelDataLoading() {} }) }),
       thread: { id: 'drop-chat', archived: false, attachments: [] },
       app: { ready: true, busy: false, saveError: '', error: '', active: { id: 'drop-chat' },
         setAttachments: async items => { commits++; ui.thread.attachments = items; return true; } } });

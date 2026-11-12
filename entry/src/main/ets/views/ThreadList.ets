@@ -63,7 +63,7 @@ struct ThreadRow {
   @Builder
   actions() {
     Menu() {
-      if (!this.selecting && !this.thread.peerOwner) {
+      if (!this.selecting) {
         MenuItem(() => materialMenuContent.bind(this)({ label: t("重命名"), icon: $r('sys.symbol.square_and_pencil') }))
           .onClick(() => { this.name = this.thread.title; this.editing = true; })
         MenuItem(() => materialMenuContent.bind(this)({ label: this.thread.pinned ? t("取消置顶") : t("置顶"), icon: $r('sys.symbol.pin') }))
@@ -113,14 +113,14 @@ struct ThreadRow {
               .shape(CheckBoxShape.CIRCLE).selectedColor(this.appearance.accent).width(22).height(22)
               .margin(0).opacity(this.selecting ? 1 : 0)
               .animation({ duration: Motion.fast, curve: Motion.standard, delay: this.selecting ? 60 : 0 })
-              .enabled(this.selecting && !this.locked() && !this.thread.peerOwner).accessibilityText(this.thread.displayTitle)
+              .enabled(this.selecting && !this.locked()).accessibilityText(this.thread.displayTitle)
               .accessibilityLevel(this.selecting ? 'auto' : 'no')
               .onChange((value: boolean) => { if (this.selecting && !this.locked()) { this.onSelectionChanged(value); } })
           }.width(this.selecting ? 30 : 0).height(32).clip(true)
             .animation({ duration: Motion.medium, curve: Motion.standard })
             .hitTestBehavior(this.selecting ? HitTestMode.Default : HitTestMode.None)
           Row({ space: 4 }) {
-            if (this.app.runningThreadIds.includes(this.thread.id) || this.app.peerRunningThreadIds.includes(this.thread.id)) {
+            if (this.app.runningThreadIds.includes(this.thread.id)) {
               LoadingProgress().width(14).height(14).color(this.appearance.accent).accessibilityText(t('正在执行'))
             }
             if (this.thread.pinned) {
@@ -131,7 +131,7 @@ struct ThreadRow {
               .fontWeight(this.active() ? FontWeight.Medium : FontWeight.Normal)
               .fontColor(this.workbench ? $r('app.color.text_primary') : this.active() ? this.appearance.onAccentContainer : $r('app.color.text_primary'))
           }.layoutWeight(1)
-          if (!this.selecting && !this.thread.peerOwner) {
+          if (!this.selecting) {
             Button({ type: ButtonType.Circle }) {
               SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
             }.id('thread-actions-' + this.thread.id).fontFamily(this.appearance.fontFamily)
@@ -145,7 +145,7 @@ struct ThreadRow {
           top: 3, bottom: 3 }).constraintSize({ minHeight: THREAD_ROW_HEIGHT })
         .onClick(async () => {
           if (this.locked()) { return; }
-          if (this.selecting) { if (!this.thread.peerOwner) { this.onSelectionChanged(!this.selected); } return; }
+          if (this.selecting) { this.onSelectionChanged(!this.selected); return; }
           if (this.query.trim() ? await this.app.openMessage(this.thread.id, this.matchId(), this.query.trim()) : await this.app.selectThread(this.thread.id)) { this.onSelected(); }
         })
         .bindContextMenu(this.actions, ResponseType.LongPress, {
@@ -289,12 +289,12 @@ export struct ThreadList {
     if (selected) { this.selectedIds = this.selectedIds.concat(id); }
   }
   private allSelected(): boolean {
-    const threads = this.filtered().filter((thread) => !thread.peerOwner);
+    const threads = this.filtered();
     return threads.length > 0 && threads.every((thread) => this.selectedIds.includes(thread.id));
   }
   private selectAll(): void {
     if (this.locked()) { return; }
-    this.selectedIds = this.allSelected() ? [] : this.filtered().filter((thread) => !thread.peerOwner).map((thread) => thread.id);
+    this.selectedIds = this.allSelected() ? [] : this.filtered().map((thread) => thread.id);
   }
   private async archiveSelected(): Promise<void> {
     if (this.locked() || this.selectedIds.length === 0 || this.selectedIds.some((id) => this.app.runningThreadIds.includes(id))) { return; }

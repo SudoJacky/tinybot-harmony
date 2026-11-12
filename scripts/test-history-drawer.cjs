@@ -43,6 +43,14 @@ assert.equal(page.drawerContentActive, true); page.cancelDrawerDrag(); animation
 assert.equal(page.drawerContentActive, false);
 console.log('PASS drawer open, close completion, interruption, drag and cancel lifecycle');
 
+const Chat = probe('views/ChatPanel', 'ChatPanel', ['chatBody']);
+const chatBody = Chat.prototype.chatBody.toString();
+const composer = chatBody.search(/this\.composer\b/);
+const swipeSpaces = Array.from(chatBody.matchAll(/this\.historySwipeSpace/g), match => match.index);
+assert.equal(swipeSpaces.length, 2);
+assert.ok(swipeSpaces[0] < composer && composer < swipeSpaces[1], 'The history gesture covers blank space above and below the composer');
+console.log('PASS blank space above and below the composer mounts the history swipe gesture');
+
 const noop = new Proxy({}, { get: () => () => {} });
 const List = probe('views/ThreadList', 'ThreadList', ['initialRender'], { Column: noop, If: noop });
 let renders = 0;

@@ -47,19 +47,17 @@ assert.equal(gone.animations.length, 0, 'Navigation cancels pending frame work')
 const tall = bubble(origin); tall.value.rect.size.height = 1600; tall.value.launch(); tall.flush();
 assert.deepEqual(tall.animations[0].start, [0, 20, 1, 0.72], 'Oversized content uses a small entrance');
 
-function panel(messages = [], signedIn = true, remote = false) {
-  let update, delivery;
+function panel(messages = [], signedIn = true) {
+  let update;
   const value = Object.assign(new globals.exports.Panel(), { thread: { id: 'thread', messages }, sendingMessageId: '',
     account: { signedIn }, accountRequests: 0, onAccount() { this.accountRequests++; },
     keyboardFocusRequest: 0, composerFocused: true, clearedFocus: 0,
-    speechActive: () => false, centeredWelcome: () => false, remoteMode: () => remote, canSend: () => true,
-    deliverRemote: (...args) => { delivery = args; }, scroller: { scrollEdge() {} }, follow() {},
+    speechActive: () => false, centeredWelcome: () => false, scroller: { scrollEdge() {} }, follow() {},
     getUIContext: () => ({ px2vp: x => x, postFrameCallback() {},
       getFocusController: () => ({ clearFocus() { value.clearedFocus++; } }), getComponentUtils: () => ({
       getRectangleById: () => ({ windowOffset: { x: 0, y: 500 }, size: { width: 320, height: 44 } }) }) }),
-    app: { send: async (cb, deliver) => { update = cb; await deliver?.('same composer draft'); } } });
-  if (remote) { value.nearbyTarget = 'tablet'; }
-  value.send(); return { value, update: () => update(), delivery: () => delivery };
+    app: { send: cb => { update = cb; } } });
+  value.send(); return { value, update: () => update() };
 }
 const first = panel(); first.update(); assert.equal(first.value.sendingMessageId, '', 'Validation failure/commands do not fly');
 const signedOut = panel([], false);
@@ -82,7 +80,4 @@ const switched = panel([{ id: 'old', role: 'user' }]); switched.value.thread.id 
 switched.value.thread.messages.push({ id: 'elsewhere', role: 'user' }); switched.update();
 assert.equal(switched.value.sendingMessageId, '', 'A different thread cannot inherit a pending send');
 assert.equal(switched.value.clearedFocus, 0, 'Late updates from another thread do not change keyboard focus');
-const remote = panel([], true, true);
-assert.deepEqual(remote.delivery(), ['tablet', '', '', 'thread', 'same composer draft', 'followUp']);
-assert.equal(remote.value.clearedFocus, 0, 'Remote send retains focus until acceptance');
 console.log('PASS send origin, landing, one-shot lifecycle, history, navigation, tall content, accepted-send keyboard dismissal, rejected send and queued output');

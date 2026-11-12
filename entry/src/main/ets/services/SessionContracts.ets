@@ -13,7 +13,6 @@ import { ProjectData } from '../model/Project';
 import { SharedFolder } from '../model/SharedFolders';
 import { ToolExecution } from '../model/Agent';
 import { FileAnnotation } from '../model/FileAnnotation';
-import { NearbyTaskStatus } from '../model/NearbyTask';
 
 export interface ThreadCheckpoint { threadId: string; messageId?: string; }
 
@@ -38,7 +37,7 @@ export interface SessionResources {
   revokeProjectFolders?(folders: SharedFolder[]): Promise<void>;
   activateProjectFolders?(projects: ProjectData[]): Promise<void>;
   installSkill?(source: string, paths: string[], cancellation: Cancellation): Promise<SkillData>;
-  prepareMcp?(server: McpServer, request: McpRequest, cancellation: Cancellation, confirm?: boolean, threadId?: string): Promise<McpServer>;
+  prepareMcp?(server: McpServer, request: McpRequest, cancellation: Cancellation, confirm?: boolean): Promise<McpServer>;
   testMcp?(server: McpServer, cancellation: Cancellation): Promise<number>;
   reportResources?(event: string, fields?: LogFields): void;
   configureProviders(profiles: ProviderProfile[]): void;
@@ -51,9 +50,6 @@ export type SessionPhase = 'idle' | 'loading' | 'saving' | 'running' | 'compacti
 export interface SessionState {
   // phase/context/error describe the selected chat; these fields describe the application.
   runningThreadIds?: string[];
-  peerRunningThreadIds?: string[];
-  peerThread?: boolean;
-  peerTasks?: NearbyTaskStatus[];
   canNavigate?: boolean;
   compatibilityWarnings?: string[];
   ready: boolean;
@@ -83,7 +79,7 @@ export interface ReasoningSelection {
 
 // Structural changes carry detached snapshots; preference changes omit transcripts.
 export interface SessionEvent {
-  kind: 'snapshot' | 'preferences' | 'reasoning-effort' | 'message' | 'tool' | 'text' | 'reasoning' | 'draft' | 'state' | 'thread' | 'teams' | 'task-complete' | 'thread-opened';
+  kind: 'snapshot' | 'preferences' | 'reasoning-effort' | 'message' | 'tool' | 'text' | 'reasoning' | 'draft' | 'state' | 'thread' | 'teams' | 'task-complete';
   state: SessionState;
   preferences?: SessionPreferences;
   reasoningSelection?: ReasoningSelection;

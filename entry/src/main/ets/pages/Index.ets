@@ -57,7 +57,6 @@ import { SessionService } from '../services/SessionService';
 import { createNativeSessionService } from '../services/NativeSessionService';
 import { LegacyRecoverySource, NativeData } from '../services/NativeData';
 import { UsageLedger } from '../services/UsageLedger';
-import { nearbySync } from '../services/NearbySync';
 import { Btn, Motion, Radius, Space } from '../common/Theme';
 import { IconButton } from '../common/Widgets';
 import { LaunchActions } from '../services/LaunchActions';
@@ -80,7 +79,6 @@ import { HistoryRail } from '../views/HistoryRail';
 import { PaneDivider } from '../common/PaneDivider';
 import { DetailLauncher } from '../views/DetailLauncher';
 import { DetailTabItem, DetailTabs } from '../views/DetailTabs';
-import { LiveSyncProbePanel } from '../views/LiveSyncProbePanel';
 
 const DRAWER_MAX_WIDTH: number = 340;
 const CHAT_HEADER_HEIGHT: number = 56;
@@ -93,7 +91,6 @@ struct Index {
   @StorageProp('tinybot.foreground') @Watch('foregroundChanged') private foreground: boolean = false;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
-  @StorageProp('tinybot.probe.visible') private liveSyncProbeVisible: boolean = false;
   @State private app: ChatViewModel = new ChatViewModel();
   @State private account: HuaweiAccount = huaweiAccount;
   @State private windowWidth: number = 0;
@@ -210,7 +207,6 @@ struct Index {
         if (event.kind !== 'state') { autoCloudBackup.changed(); }
         if (event.state.canNavigate && ShareInbox.peek()) { this.receiveShare(); }
         if (event.kind === 'task-complete' && event.threadId) { this.taskCompleted(event.threadId); }
-        if (event.kind === 'thread-opened') { this.revealChat(); }
       });
     }
     this.app.initialize(this.session).then(() => {
@@ -218,7 +214,6 @@ struct Index {
       const data = NativeData.forFilesDir(context.filesDir);
       this.recoveryNeeded = !this.app.ready && data?.needsRecovery === true;
       if (this.recoveryNeeded && data) { this.findRecoverySources(context, data); }
-      if (this.app.ready) { nearbySync.setAllowed(true); }
       if (!this.panelUpdates) { this.panelUpdates = new PanelExpiryUpdates(new LifePanels(context.getApplicationContext().filesDir)); }
       this.updateLifePanelActivity();
       this.panelLinkChanged();
@@ -265,7 +260,6 @@ struct Index {
     if (!data) { return; }
     this.recoveryBusy = true; this.recoveryError = '';
     try {
-      nearbySync.pauseForRecovery();
       await data.recover(useLegacy);
       await UsageLedger.configure(context.filesDir, () => data.open());
       await this.app.initialize(this.session!);
@@ -412,7 +406,6 @@ struct Index {
   private privacyChanged(): void {
     if (this.privacyAllowed) { this.startBusiness(); }
     else {
-      nearbySync.setAllowed(false);
       this.panelUpdates?.setActive(false);
       autoCloudBackup.dispose();
       this.closeAnnouncement();
@@ -1216,7 +1209,6 @@ struct Index {
   @Builder
   settingsContent() {
     SettingsPanel({ app: this.app, section: this.settingsSection, settings: this.app.settings, account: this.account, active: this.settingsActive && this.foreground,
-      onNearbySync: (value: boolean) => nearbySync.setEnabled(value, this.getUIContext().getHostContext() as common.UIAbilityContext),
       onAccount: () => { this.paths.pushPath({ name: 'account' }); },
       browser: this.browser,
       onAddProvider: () => { this.paths.pushPath({ name: 'provider-presets' }); },
@@ -1727,7 +1719,6 @@ struct Index {
         .visibility(this.detailOpen() ? Visibility.Visible : Visibility.Hidden)
         .accessibilityLevel(this.detailOpen() ? 'auto' : 'no-hide-descendants')
         .border({ width: { left: this.workbench().docked ? 0.5 : 0 }, color: $r('app.color.divider') })
-      if (this.liveSyncProbeVisible) { LiveSyncProbePanel() }
       }
     }.width('100%').height('100%')
     .backgroundColor($r('app.color.page_background'))

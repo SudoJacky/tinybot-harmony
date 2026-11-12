@@ -1844,38 +1844,6 @@ async function test(name, run) {
     assert.equal(fs.readFileSync(nativePath(root+'/workspace/project-copy-root/report.txt'),'utf8'),'local bytes');
     Attachments.configure('/sandbox/backup-app');
   });
-  await test('nearby attachments verify content and stage originals without overwriting executor files',async()=>{
-    const {NearbyAttachments}=load(path.join(source,'services/NearbyAttachments'));
-    const sender='/sandbox/asset-sender',receiver='/sandbox/asset-receiver',shared='/sandbox/asset-shared/files',origin=crypto.randomUUID();
-    for(const directory of [sender+'/attachments/attachments/file',receiver+'/attachments',shared])fs.mkdirSync(nativePath(directory),{recursive:true});
-    const input={id:'file',name:'document.bin',mime:'application/octet-stream',path:'attachments/file/document.bin',size:7,original:true};
-    fs.writeFileSync(nativePath(sender+'/attachments/'+input.path),'content');
-    const staged=new NearbyAttachments({distributedFilesDir:shared,getApplicationContext:()=>({filesDir:sender})},async()=>{});
-    const assets=await staged.stage(origin,[input]);let connections=0;
-    const transport=new NearbyAttachments({distributedFilesDir:shared,getApplicationContext:()=>({filesDir:receiver})},async()=>{connections++;});
-    const accepted=await transport.receive('phone',origin,assets);
-    assert.equal(connections,1);assert.equal(accepted[0].workspaceId,undefined);
-    assert.equal(fs.readFileSync(nativePath(receiver+'/attachments/'+input.path),'utf8'),'content');
-    await transport.receive('phone',origin,assets);
-    fs.writeFileSync(nativePath(receiver+'/attachments/'+input.path),'changed');
-    await assert.rejects(transport.receive('phone',origin,assets),/conflicts/);
-    assert.equal(fs.readFileSync(nativePath(receiver+'/attachments/'+input.path),'utf8'),'changed');
-    fs.unlinkSync(nativePath(receiver+'/attachments/'+input.path));
-    const stagedPath=fs.readdirSync(nativePath(shared))[0];fs.writeFileSync(nativePath(shared+'/'+stagedPath),'corrupt');
-    await assert.rejects(transport.receive('phone',origin,assets),/content verification/);
-  });
-  await test('task transfers and periodic file sync share one in-flight DFS connection',async()=>{
-    const {NearbyFiles}=load(path.join(source,'services/NearbyFiles'));
-    const connect=fileIo.connectDfs,disconnect=fileIo.disconnectDfs;let calls=0,release;
-    const gate=new Promise(resolve=>{release=resolve;});
-    fileIo.connectDfs=async()=>{calls++;await gate;};fileIo.disconnectDfs=async()=>{};
-    try {
-      const sync=new NearbyFiles({distributedFilesDir:'/sandbox/dfs-sharing/files',getApplicationContext:()=>({filesDir:'/sandbox/dfs-sharing'})},
-        crypto.randomUUID(),{},()=>{},error=>{throw error;});
-      const first=sync.connect('phone'),second=sync.connect('phone');assert.equal(calls,1);
-      release();await Promise.all([first,second]);await sync.connect('phone');assert.equal(calls,1);await sync.close();
-    } finally {fileIo.connectDfs=connect;fileIo.disconnectDfs=disconnect;}
-  });
   await test('cloud backups retain device snapshots and stay pending until native upload',async()=>{
     const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
     const context={cloudFileDir:'/sandbox/cloud',cacheDir:'/sandbox/backup-app/cache',getApplicationContext:()=>({filesDir:'/sandbox/backup-app'})};
@@ -2647,31 +2615,34 @@ async function test(name, run) {
     assert.equal(cloudRecovery.autoBackupReady(), false);
     for (const [file, bytes] of legacy) assert.deepEqual(fs.readFileSync(nativePath(file)), bytes, file);
   });
-  await test('nearby file updates verify bytes, respect base revisions, and preserve concurrent edits', async () => {
-    const root = '/sandbox/nearby-files', local = root + '/local', staged = root + '/staged';
-    fs.mkdirSync(nativePath(local), { recursive: true });
-    const digest = text => crypto.createHash('sha256').update(text).digest('base64');
-    const files = new NativeWorkspaceFiles(local);
-    const apply = async (digest, base) => {
-      const file = await fileIo.open(staged, fileIo.OpenMode.READ_ONLY);
-      try { return await files.applyNearbyFile('nested/note.md', file.fd, digest, base, true); }
-      finally { await fileIo.close(file); }
-    };
-    fs.writeFileSync(nativePath(staged), 'initial');
-    assert.equal(await apply(digest('initial'), ''), digest('initial'));
-    assert.equal(fs.readFileSync(nativePath(local + '/nested/note.md'), 'utf8'), 'initial');
-    fs.writeFileSync(nativePath(staged), 'replacement');
-    await assert.rejects(apply(digest('wrong'), digest('initial')), /failed content verification/);
-    assert.equal(fs.readFileSync(nativePath(local + '/nested/note.md'), 'utf8'), 'initial');
-    assert.equal(await apply(digest('replacement'), digest('initial')), digest('replacement'));
-    fs.writeFileSync(nativePath(local + '/nested/note.md'), 'local edit');
-    fs.writeFileSync(nativePath(staged), 'peer edit');
-    assert.equal(await apply(digest('peer edit'), digest('replacement')), digest('local edit'));
-    const sibling = fs.readdirSync(nativePath(local + '/nested')).find(name => name.startsWith('nearby-conflict-'));
-    assert.equal(fs.readFileSync(nativePath(local + '/nested/' + sibling), 'utf8'), 'peer edit');
-    assert.equal(await files.applyNearbyFile('nested/note.md', undefined, '', digest('replacement'), true), digest('local edit'));
-    await files.applyNearbyFile('nested/note.md', undefined, '', digest('local edit'), true);
-    assert.equal(fs.existsSync(nativePath(local + '/nested/note.md')), false);
+  await test('experimental conversation data keeps history and local drafts without executing remote inputs', async () => {
+    const app = model.emptyData();
+    const pending = id => ({ id, mode: 'followUp', text: 'Test input' });
+    app.nearbyConflicts = [{ origin: 'fixture' }];
+    app.threads = [
+      { id: 'old-remote', title: 'Remote history', updatedAt: 1,
+        peerOwner: '9c80290e-d39f-478e-b5b1-561f6c89c0b2', peerThreadId: 'original',
+        peerDraft: 'Draft on this installation', peerInputReceipts: ['remote-sent'],
+        pendingInputs: [pending('remote-waiting')], queuePaused: false,
+        messages: [
+          { id: 'question', role: 'user', content: 'Question', status: 'complete', error: '' },
+          { id: 'answer', role: 'assistant', content: 'Saved reply', status: 'complete', error: '' }
+        ] },
+      { id: 'old-local', title: 'Local history', updatedAt: 1, messages: [],
+        pendingInputs: [pending('local-waiting'), pending('remote-admitted')], queuePaused: false }
+    ];
+    app.activeThreadId = 'old-remote';
+    const restored = model.parseAppData(JSON.stringify(app));
+    const [remote, local] = restored.threads;
+    assert.equal(remote.messages[1].content, 'Saved reply');
+    assert.equal(remote.draft, 'Draft on this installation');
+    assert.equal(remote.pendingInputs, undefined);
+    assert.equal(remote.peerOwner, undefined);
+    assert.equal(remote.peerInputReceipts, undefined);
+    assert.equal(restored.nearbyConflicts, undefined);
+    assert.deepEqual(Array.from(local.pendingInputs, item => item.id), ['local-waiting']);
+    assert.equal(local.queuePaused, true);
+    assert.equal(JSON.stringify(model.parseAppData(JSON.stringify(restored))), JSON.stringify(restored));
   });
   suiteCompleted = true;
   console.log(completedTests+' native adapter integration checks passed. Fixtures: '+fixture);

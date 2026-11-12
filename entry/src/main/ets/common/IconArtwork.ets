@@ -1,5 +1,5 @@
 export type AnimatedIconName = 'account' | 'cloud' | 'compose' | 'tools' | 'mountain' | 'data' | 'help' |
-  'history' | 'search' | 'folder' | 'settings' | 'browser' | 'document' | 'branch' | 'plus' | 'announcement' | 'tinybot';
+  'history' | 'search' | 'folder' | 'settings' | 'browser' | 'document' | 'branch' | 'plus' | 'announcement';
 
 function pulse(progress: number, from: number, to: number): number {
   if (progress <= from || progress >= to) { return 0; }
@@ -32,11 +32,6 @@ function gear(turn: number): string {
     }
   }
   return path + ' Z ' + ellipse(12, 12, 3);
-}
-
-export function tinybotSpark(progress: number, strength: number): string {
-  const lift = pulse(progress, 0.28, 1) * strength;
-  return ellipse(20.3 + 0.8 * lift, 4 - 1.4 * lift, 1.4 + 0.25 * lift);
 }
 
 export function iconPath(name: AnimatedIconName, progress: number, strength: number): string {
@@ -118,6 +113,5 @@ export function iconPath(name: AnimatedIconName, progress: number, strength: num
         M${18.55 + wave} 8.15 L${20.15 + wave} 6.85 M${19 + wave} 11.45 H${21 + wave}
         M${18.55 + wave} 14.75 L${20.15 + wave} 16.05`;
     }
-    case 'tinybot': return ellipse(8.85, 10.2, 1.85, 1.85 - 1.58 * anticipation);
   }
 }

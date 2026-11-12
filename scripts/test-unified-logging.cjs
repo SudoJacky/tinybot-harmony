@@ -153,10 +153,4 @@ vm.runInNewContext(ts.transpileModule(`class Probe { ${persist.getText(sessionTr
   assert.equal(record.fields.threadId, 'ref-1'); assert.equal(record.fields.messageId, 'ref-2');
   assert.ok(!JSON.stringify(record).includes('PRIVATE_PATH'));
   console.log('PASS persistence failure retains native error code and anonymized operation references');
-  Diagnostics.log('warn', 'sync', 'nearby_device_failed', { deviceId: 'PRIVATE_DEVICE_NETWORK_ID', code: 14800014 });
-  const deviceFailure = recentDiagnosticLogs().records.at(-1).data;
-  assert.equal(deviceFailure.fields.code, 14800014);
-  assert.match(deviceFailure.fields.deviceId, /^ref-/);
-  assert.ok(!JSON.stringify(deviceFailure).includes('PRIVATE_DEVICE_NETWORK_ID'));
-  console.log('PASS sync device failures retain codes while anonymizing network identifiers');
 })().catch(error => { console.error(error); process.exitCode = 1; });
