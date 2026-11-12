@@ -128,10 +128,12 @@ const node = id => [...nodes.values()].find(value => value.id === id);
   // Replay the compiled overlay bindings with the device's same-node dismissal behavior.
   // A closed sheet bound to the cover's node immediately removes that cover on API 26.
   const initialRender = component.members.find(value => value.name?.getText(tree) === 'initialRender');
-  const bindings = initialRender.body.statements.filter(value => {
+  const chatBody = component.members.find(value => value.name?.getText(tree) === 'chatBody');
+  const bindings = [...chatBody.body.statements, ...initialRender.body.statements].filter(value => {
     const text = value.getText(tree);
     return text.includes('bindContentCover') || (text.includes('bindSheet') && text.includes('showMemoryDraft'));
   }).map(value => value.getText(tree)).join('\n');
+  assert.match(bindings, /showMemoryDraft/, 'Include the closed memory sheet in the binding replay');
   let owner = 0, modal;
   const overlayUi = new Proxy({}, { get: (_, name) => (...args) => {
     if (name === 'bindContentCover') {
@@ -144,7 +146,8 @@ const node = id => [...nodes.values()].find(value => value.id === id);
   const overlayScope = { exports: {}, Radius: { sheet: {} }, Stack: overlayUi, Column: overlayUi, ModalTransition: {}, SheetSize: {}, SheetKeyboardAvoidMode: {},
     ATTACHMENT_DROP_TYPES: [], t: value => value };
   vm.runInNewContext(compile(`exports.bind = function() { ${bindings} };`), overlayScope);
-  const overlay = { showDrawing: true, previewing: false, writingExpanded: false, showMemoryDraft: false, closeDrawing() { this.closed = true; },
+  const overlay = { showDrawing: true, previewing: false, writingExpanded: false, showMemoryDraft: false,
+    centeredWelcome: () => false, closeDrawing() { this.closed = true; },
     observeComponentCreation2(callback) { callback(++owner, false); } };
   const renderOverlay = () => { owner = 0; overlayScope.exports.bind.call(overlay); };
   renderOverlay(); assert.ok(modal, 'Closed memory sheet must not remove the drawing cover');
@@ -153,7 +156,7 @@ const node = id => [...nodes.values()].find(value => value.id === id);
   overlay.showDrawing = false; overlay.previewing = true; renderOverlay(); assert.ok(modal, 'Image preview owns the independent cover too');
   modal.options.onWillDismiss(); assert.equal(overlay.previewing, false); renderOverlay(); assert.equal(modal, undefined);
   console.log('PASS compiled drawing and preview overlays survive closed-sheet bindings and preserve controlled dismissal');
-  const names = ['canAttach', 'openDrawing', 'closeDrawing', 'addDrawing'];
+  const names = ['canAttach', 'canUseDraft', 'remoteMode', 'remoteStart', 'openDrawing', 'closeDrawing', 'addDrawing'];
   const methods = names.map(name => component.members.find(value => value.name?.getText(tree) === name).getText(tree)).join('\n');
   let boardLoads = 0;
   const scope = { exports: {}, DrawingDraft, MAX_MESSAGE_ATTACHMENTS: 10, Attachments: {}, canIUse: () => supported, deviceInfo: { productModel: 'phone' },
@@ -164,7 +167,7 @@ const node = id => [...nodes.values()].find(value => value.id === id);
   const image = { id: 'drawing', mime: 'image/jpeg', path: 'drawing.jpg', size: 100, name: 'Sketch.jpg' };
   Object.assign(composer, { thread: { id: 'chat', attachments: [], archived: false }, appearance: {}, importing: false,
     speechActive: () => false, getUIContext: () => ({ getFocusController: () => ({ clearFocus() {} }), showAlertDialog: value => { dialog = value; } }),
-    app: { active: { id: 'chat' }, busy: false, saveError: '', error: '', setAttachments: async items => { additions++; composer.thread.attachments = items; return true; } } });
+    app: { active: { id: 'chat' }, peerThread: false, busy: false, saveError: '', error: '', setAttachments: async items => { additions++; composer.thread.attachments = items; return true; } } });
   scope.Attachments.saveDrawing = async () => { writes++; return image; };
   supported = false; await composer.openDrawing(); assert.equal(boardLoads, 0);
   assert.match(composer.app.error, /此设备不支持系统手写画板/); assert.ok(!composer.showDrawing);
@@ -172,6 +175,9 @@ const node = id => [...nodes.values()].find(value => value.id === id);
   assert.equal(boardLoads, 0, 'Emulators may report the syscap while lacking the system Pen Kit HSP');
   scope.deviceInfo.productModel = 'phone';
   supported = true; composer.app.error = '';
+  composer.app.peerThread = true;
+  await composer.openDrawing(); assert.equal(boardLoads, 0, 'Nearby conversations cannot add a local drawing');
+  composer.app.peerThread = false;
   await composer.openDrawing(); assert.equal(composer.showDrawing, true); composer.closeDrawing(); assert.equal(composer.showDrawing, false);
   await composer.openDrawing(); composer.drawingDraft.hasContent = () => true;
   composer.closeDrawing(); dialog.primaryButton.action(); assert.equal(composer.showDrawing, true);

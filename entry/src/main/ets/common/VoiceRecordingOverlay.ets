@@ -2,7 +2,7 @@ import { AppearanceStyle } from './AppearanceStyle';
 import { Motion, Space } from './Theme';
 import { SpeechOrb } from './SpeechOrb';
 import { t } from '../model/I18n';
-import { VoiceAction, VoiceTargetRect } from '../model/VoiceGesture';
+import { VoiceAction } from '../model/VoiceGesture';
 import { SpeechPhase } from '../services/SpeechInput';
 
 @Component
@@ -12,14 +12,8 @@ export struct VoiceRecordingOverlay {
   @Prop text: string = '';
   @Prop speaking: boolean = false;
   @Prop action: VoiceAction = 'send';
-  onTargetArea: (action: VoiceAction, rect: VoiceTargetRect) => void = () => {};
   onCancel: () => void = () => {};
   onEdit: () => void = () => {};
-
-  private targetArea(action: VoiceAction, area: Area): void {
-    this.onTargetArea(action, { x: Number(area.globalPosition.x), y: Number(area.globalPosition.y),
-      width: Number(area.width), height: Number(area.height) });
-  }
 
   @Builder
   target(kind: VoiceAction, icon: Resource, label: string) {
@@ -35,7 +29,7 @@ export struct VoiceRecordingOverlay {
         .accessibilityText(label).onClick(() => { if (kind === 'cancel') { this.onCancel(); } else { this.onEdit(); } })
       Text(label).fontFamily(this.appearance.fontFamily).fontSize(12)
         .fontColor(this.action === kind && kind === 'cancel' ? $r('app.color.danger') : $r('app.color.text_secondary'))
-    }.width(80).onAreaChange((_previous: Area, current: Area) => this.targetArea(kind, current))
+    }.id('voice-target-' + kind).width(80)
   }
 
   build() {

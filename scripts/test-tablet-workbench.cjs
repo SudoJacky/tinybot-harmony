@@ -28,6 +28,31 @@ function probe(file, name, methods, globals = {}) {
   return exports.Probe;
 }
 const RAIL = WorkbenchLayout.RAIL_WIDTH;
+const ChatViewportLayout = probe('views/ChatPanel', 'ChatViewportLayout', ['onMeasureSize', 'onPlaceChildren']);
+const chatViewport = Object.assign(new ChatViewportLayout(), { centeredHeight: 742 });
+let measuredChatHeight, chatOffsetY;
+const chatChild = {
+  measure({ maxHeight }) { measuredChatHeight = maxHeight; },
+  layout({ y }) { chatOffsetY = y; }
+};
+const resizedChat = { maxWidth: 366, maxHeight: 456 };
+assert.equal(chatViewport.onMeasureSize({}, [chatChild], resizedChat).height, 456);
+assert.equal(measuredChatHeight, 742, 'A native resize can arrive before the centered composer docks');
+chatViewport.onPlaceChildren({}, [chatChild]);
+assert.equal(chatOffsetY, 0, 'Do not re-center the previous layout inside the shorter viewport');
+chatViewport.centeredHeight = 0;
+chatViewport.dockedHeight = 742;
+chatViewport.onMeasureSize({}, [chatChild], resizedChat);
+assert.equal(measuredChatHeight, 456, 'A docked composer can immediately fit the resized keyboard viewport');
+chatViewport.dockedHeight = 456;
+const restoredChat = { maxWidth: 366, maxHeight: 742 };
+assert.equal(chatViewport.onMeasureSize({}, [chatChild], restoredChat).height, 742);
+assert.equal(measuredChatHeight, 456, 'Do not stretch a docked composer when the native viewport restores');
+chatViewport.dockedHeight = 0;
+chatViewport.centeredHeight = 742;
+chatViewport.onMeasureSize({}, [chatChild], restoredChat);
+assert.equal(measuredChatHeight, 742, 'The centered composer uses the restored viewport');
+console.log('PASS the composer holds its geometry through native keyboard resize in both directions');
 for (const width of [320, 600, 839, 840, 960, 979, 980, 1024, 1199, 1200, 1600, 2400]) {
   for (const details of [false, true]) {
     const layout = new WorkbenchLayout(width, details);
@@ -534,15 +559,27 @@ function load(file) {
   console.log('PASS emitted side panel resolves final-answer snapshots while excluding unrelated previews');
   const fixture = new Fixture(), app = new ChatViewModel();
   await app.initialize(fixture.session);
-  const Chat = probe('views/ChatPanel', 'ChatPanel', ['emptyConversation', 'centeredWelcome', 'composerExpanded', 'remoteRunning']);
+  const Chat = probe('views/ChatPanel', 'ChatPanel', ['emptyConversation', 'centeredWelcome', 'composerExpanded',
+    'keyboardVisibleInLayout', 'composerActiveInLayout', 'keyboardVisibilityChanged', 'updatePanelArea',
+    'remoteRunning', 'nearbyQueuedCount']);
   const chat = Object.assign(new Chat(), { app, thread: app.active, workbench: true, panelHeight: 800,
     viewport: { keyboardHeight: 0 }, voiceMode: false, composerFocused: false, importing: false,
     showPlus: false, showContext: false, showReasoning: false, showQueue: false,
-    hasDraft: () => app.draft.length > 0, speechActive: () => false, voiceOverlayVisible: () => false });
+    hasDraft: () => app.draft.length > 0, voiceOverlayVisible: () => false });
   assert.equal(chat.centeredWelcome(), true); assert.equal(chat.composerExpanded(), true);
   chat.workbench = false;
   assert.equal(chat.centeredWelcome(), true, 'Phone centers the welcome and composer when there is room');
   assert.equal(chat.composerExpanded(), false, 'Phone retains its compact idle composer');
+  app.peerThread = true;
+  app.peerRunningThreadIds = [chat.thread.id];
+  chat.nearbyReceipts = [];
+  assert.equal(chat.composerExpanded(), true, 'The phone composer expands while the nearby device is running');
+  app.peerRunningThreadIds = [];
+  chat.nearbyReceipts = [{ threadId: chat.thread.id, messageId: 'queued' }];
+  assert.equal(chat.composerExpanded(), true, 'The phone composer stays expanded while a nearby message is queued');
+  chat.nearbyReceipts = [];
+  assert.equal(chat.composerExpanded(), false, 'The nearby composer returns to its compact idle state');
+  app.peerThread = false;
   chat.showToolApprovalMode = true;
   assert.equal(chat.composerExpanded(), false, 'Opening approval below the composer does not expand the editor');
   chat.showToolApprovalMode = false;
@@ -553,13 +590,36 @@ function load(file) {
   app.busy = false; chat.showModelMenu = false;
   chat.viewport.keyboardHeight = 300;
   assert.equal(chat.centeredWelcome(), false, 'The phone composer docks above the keyboard');
+  chat.composerFocused = true;
+  chat.keyboardRestingHeight = chat.panelHeight;
+  chat.keyboardVisibilityChanged(true);
+  chat.updatePanelArea({ width: 366, height: 456, globalPosition: { y: 39 } });
+  chat.composerFocused = false;
   chat.viewport.keyboardHeight = 0;
+  chat.keyboardVisibilityChanged(false);
+  assert.equal(chat.keyboardVisibleInLayout(), true, 'Keep the docked presentation until ArkUI restores the viewport');
+  assert.equal(chat.composerExpanded(), true, 'Do not collapse while the composer is still docked');
+  chat.updatePanelArea({ width: 366, height: 800, globalPosition: { y: 39 } });
+  assert.equal(chat.centeredWelcome(), true);
+  assert.equal(chat.composerExpanded(), false, 'Return to the compact composer with the restored viewport');
+  chat.voiceMode = true;
+  assert.equal(chat.centeredWelcome(), true, 'Switching to voice keeps the phone composer centered');
+  assert.equal(chat.composerExpanded(), false, 'The idle voice controls keep the compact editor footprint');
+  chat.voiceOverlayVisible = () => true;
+  assert.equal(chat.centeredWelcome(), true, 'Starting a hold keeps the welcome layout centered');
+  assert.equal(chat.composerExpanded(), false, 'Recording keeps the compact editor footprint');
+  app.setDraft('draft while recording');
+  assert.equal(chat.composerExpanded(), true, 'Voice controls preserve the expanded footprint when there is a draft');
+  app.setDraft('');
+  chat.voiceOverlayVisible = () => false; chat.voiceMode = false;
   chat.workbench = true; app.setDraft('typed without moving the editor');
   assert.equal(chat.centeredWelcome(), true, 'Typing alone must not move the tablet editor');
   chat.viewport.keyboardHeight = 600; assert.equal(chat.centeredWelcome(), false, 'Dock above the soft keyboard');
   chat.viewport.keyboardHeight = 0; chat.panelHeight = 400; assert.equal(chat.centeredWelcome(), false, 'Short windows remain usable');
   chat.panelHeight = 800; assert.equal(chat.centeredWelcome(), true);
-  chat.voiceMode = true; assert.equal(chat.centeredWelcome(), false, 'Voice mode docks before hold starts so recording cannot move its target');
+  chat.voiceMode = true;
+  assert.equal(chat.centeredWelcome(), true, 'Voice mode keeps the welcome composer centered in a wide window');
+  assert.equal(chat.composerExpanded(), true, 'Voice mode retains the wide editor footprint');
   chat.voiceMode = false; assert.equal(chat.centeredWelcome(), true);
 
   let started, finish, calls = 0;
