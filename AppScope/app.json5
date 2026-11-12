@@ -3,6 +3,7 @@
     "bundleName": "com.sudojacky.tinybot",
     "vendor": "SudoJacky",
     "cloudFileSyncEnabled": true,
+    "2in1": { "minAPIVersion": 26 },
     "versionCode": 1003000,
     "versionName": "1.3.0",
     "icon": "$media:tinybot_layered_icon",

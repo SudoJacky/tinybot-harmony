@@ -23,6 +23,7 @@ function reductions(result: Record<string, Object>, prefix: string): string[] {
   if (result.previewOnly === true) { notices.push(prefix + 'Only a historical excerpt was retained. The missing original text cannot be recovered from this snapshot.'); }
   if (result.linksTruncated === true) { notices.push(prefix + 'The link list was shortened; it is not a complete inventory of page links.'); }
   if (result.logsTruncated === true) { notices.push(prefix + 'stdout/stderr were shortened to the shared 32 KiB log budget. The operation may have completed; inspect its result before retrying. Return required data instead of logging it.'); }
+  if (result.outputTruncated === true) { notices.push(prefix + 'stdout or stderr exceeded its output limit. Request less output if you need a complete result.'); }
   if (result.resultTruncated === true) { notices.push(prefix + 'The returned value is incomplete; do not treat it as the full result.'); }
   if (Array.isArray(result.skipped) && (result.skipped as Object[]).length) {
     notices.push(prefix + 'Some resources could not be read. See skipped for their paths and reasons; search results are incomplete.');

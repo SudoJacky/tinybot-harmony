@@ -3056,5 +3056,10 @@
   "个人资料": "Personal information",
   "自动压缩上下文": "Automatically compact context",
   "自动更新记忆": "Automatically update memory",
-  "保存会话摘要": "Save conversation summaries"
+  "保存会话摘要": "Save conversation summaries",
+  "运行本地命令": "Run local command",
+  "本地命令": "Local commands",
+  "运行时": "Runtime",
+  "运行 Node.js 脚本与 Shell 命令": "Run Node.js scripts and shell commands",
+  "退出码 {0}": "Exit code {0}"
 }

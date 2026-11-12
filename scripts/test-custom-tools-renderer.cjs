@@ -52,6 +52,7 @@ const globals = { exports: {}, ViewPU, SynchedPropertyNesedObjectPU: Property, O
     if (id.includes('Widgets&')) return { GroupCard, SwitchRow, NavRow, SectionHeader: Child, RowDivider: Child };
     if (id.includes('Theme&')) return { Btn: {}, Font: {}, Space: {} };
     if (id.includes('AppearanceStyle&')) return { AppearanceStyle: class {} };
+    if (id.includes('LocalProcessTools&')) return { localProcessDirectory: () => undefined };
     throw Error('Unexpected import ' + id);
   }
 };

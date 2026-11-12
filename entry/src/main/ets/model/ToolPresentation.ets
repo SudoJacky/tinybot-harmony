@@ -19,6 +19,7 @@ export function toolTitle(name: string): string {
     'write_file': t('写入文件'), 'edit_file': t('编辑文件'), 'generate_image': t('生成图片'),
     'tool_search': t('查找可用工具'), 'mcp_call': t('调用远程工具'), 'mcp_list_tools': t('查看远程工具'), 'mcp_search_tools': t('搜索远程工具'),
     'execute_code': t('执行代码'), 'run_job': t('执行代码'), 'orchestrate': t('编排工具'), 'publish_data_view': t('生成图表'),
+    'run_local_command': t('运行本地命令'),
     'update_plan': t('更新计划'), 'request_user_input': t('请你补充信息'),
     'list_skills': t('查看 Skills'), 'skill_manage': t('管理 Skills'), 'mcp_manage': t('管理 MCP 服务'),
     'memory': t('维护长期记忆')
@@ -31,6 +32,7 @@ export function toolGroupTitle(id: string): string {
     'mail': t('邮件读取'),
     'workspace-read': t('文件读取与检索'), 'workspace-write': t('文件编辑'), 'context-read': t('附件与历史结果'),
     'web': t('网页读取与搜索'), 'browser': t('浏览器'), 'calculation': t('代码计算'), 'orchestration': t('工具编排'),
+    'local-execution': t('本地命令'),
     'interaction': t('用户交互与计划'), 'delivery': t('预览与交付'), 'skill-read': t('Skills 读取'),
     'mcp-discovery': t('MCP 工具发现'), 'mcp-execution': t('MCP 工具调用'), 'extension-management': t('扩展管理'),
     'memory': t('长期记忆'), 'team-coordination': t('团队管理'), 'team-handoff': t('员工交接'),
@@ -45,6 +47,7 @@ export function toolCapabilityDescription(id: string): string {
   const descriptions: Record<string, string> = {
     'context-read': t('读取附件、会话引用和历史工具结果'), 'web': t('搜索互联网并读取网页内容'),
     'browser': t('打开网页、查看页面、操作与接管浏览器'), 'calculation': t('在代码沙箱中计算和处理数据'),
+    'local-execution': t('运行 Node.js 脚本与 Shell 命令'),
     'orchestration': t('通过代码组合调用已授权工具'), 'user-input': t('通过表单向你确认信息'),
     'plan': t('创建和更新任务步骤'), 'team': t('招募、管理团队并完成员工交接'),
     'preview': t('发布交互预览、图表和数据表格'), 'file-delivery': t('展示可预览、分享和导出的文件'),

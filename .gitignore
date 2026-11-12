@@ -38,6 +38,9 @@
 *.key
 *.keystore
 /build-profile.json5
+/entry/libs/arm64-v8a/tinybot-node
+/entry/libs/arm64-v8a/tinybot-sh
+/entry/src/main/resources/rawfile/desktop-runtime-licenses/
 .ui-audit/
 /.dsh/
 /.playwright-cli/
