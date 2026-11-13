@@ -1,6 +1,5 @@
 import { privacyManager } from '@kit.AppGalleryKit';
 import { common } from '@kit.AbilityKit';
-import { preferences } from '@kit.ArkData';
 import { BusinessError, commonEventManager, deviceInfo } from '@kit.BasicServicesKit';
 import { DEBUG, BUILD_MODE_NAME } from 'BuildProfile';
 import { t } from '../model/I18n';
@@ -8,7 +7,6 @@ import { Diagnostics } from '../model/Diagnostics';
 
 const QUERY_RETRY_DELAYS: number[] = [500, 1000, 2000, 4000];
 const STARTUP_PROMPT_DELAY_MS: number = 3000;
-const CONSENT_KEY: string = 'agreedPolicyVersion';
 
 // AppGallery owns production consent. Emulator debug consent is explicit and memory-only.
 @Observed
@@ -26,7 +24,7 @@ export class HostedPrivacy {
   private requestedAtStartup: boolean = false;
   private promptTimer: number = -1;
   private currentPolicy?: privacyManager.AppPrivacyLink;
-  private cacheDirty: boolean = false;
+  private result?: privacyManager.AppPrivacyResultType;
   private subscribed: boolean = false;
   private subscribing: boolean = false;
   private subscriptionGeneration: number = 0;
@@ -53,6 +51,7 @@ export class HostedPrivacy {
     this.closing = false; this.busy = false; this.error = ''; this.debugConsent = false;
     this.pageVisible = false; this.pageShown = false; this.subscribed = false; this.initializedAt = Date.now();
     this.gateFocused = false; this.requestedAtStartup = false; this.currentPolicy = undefined;
+    this.result = undefined;
     this.publish(false);
     if (this.simulatorDebug) { return; }
     await this.subscribe('subscription_ready');
@@ -139,17 +138,18 @@ export class HostedPrivacy {
 
   private query(source: string, attempt: number, retry: boolean): void {
     if (!this.context || this.closing || !this.pageShown) { this.cancelQuery(); return; }
-    this.currentPolicy = undefined;
     let operation = 'getAppPrivacyMgmtInfo';
     let consent: privacyManager.AppPrivacyResult | undefined;
     try {
       const link = this.policy();
       this.currentPolicy = link;
       operation = 'getAppPrivacyResult';
-      consent = this.findConsent(privacyManager.getAppPrivacyResult(), link);
+      const records = privacyManager.getAppPrivacyResult();
+      consent = this.findConsent(records, link) ?? records.find((record) =>
+        record.type === privacyManager.AppPrivacyType.PRIVACY_AGREEMENT && record.id === link.id &&
+        record.result === privacyManager.AppPrivacyResultType.REQUIRE_RESIGNING_VERSION_UPDATE);
     } catch (error) {
       const failure = error as BusinessError;
-      const cached = this.hasCachedConsent();
       if (retry && failure.code === 1006700003 && this.pageVisible && attempt <= QUERY_RETRY_DELAYS.length) {
         const delay = QUERY_RETRY_DELAYS[attempt - 1];
         Diagnostics.log('warn', 'privacy', 'query_retry', {
@@ -160,23 +160,27 @@ export class HostedPrivacy {
           this.retryTimer = -1;
           this.query(source, attempt + 1, retry);
         }, delay);
-        if (!cached) { this.publish(false); }
+        // Let the UI start while AppGallery finishes making the upgrade state available.
+        if (!this.requiresAction()) { this.publish(true); }
         return;
       }
       const code = this.logFailure(failure, operation, source, attempt);
       this.checking = false;
-      this.error = cached ? '' : t('无法确认系统隐私授权（{0}），请重试。', [code]);
-      if (cached) { Diagnostics.log('warn', 'privacy', 'using_cached_consent', { phase: source, code }); }
-      this.publish(cached);
+      if (this.requiresAction()) {
+        this.error = t('无法确认系统隐私授权（{0}），请重试。', [code]);
+      } else {
+        this.publish(true);
+      }
       this.scheduleStartupPrompt();
       return;
     }
     this.checking = false;
     Diagnostics.log(attempt > 1 ? 'warn' : 'info', 'privacy', 'query_completed', {
       operation: operation, phase: source, round: attempt, elapsedMs: Date.now() - this.initializedAt,
+      eventCode: consent?.result,
       enabled: consent?.result === privacyManager.AppPrivacyResultType.FULL_MODE_AGREED
     });
-    this.applyResult(consent);
+    this.applyResult(consent?.result);
     this.scheduleStartupPrompt();
   }
 
@@ -191,7 +195,8 @@ export class HostedPrivacy {
 
   private canRequest(): boolean {
     return !!this.context && this.pageVisible && !this.closing &&
-      !this.allowed && !this.busy && !this.checking && !this.simulatorDebug;
+      this.result === privacyManager.AppPrivacyResultType.REQUIRE_RESIGNING_VERSION_UPDATE &&
+      !this.busy && !this.checking;
   }
 
   private scheduleStartupPrompt(): void {
@@ -204,49 +209,29 @@ export class HostedPrivacy {
   }
 
   private findConsent(records: privacyManager.AppPrivacyResult[],
-    link?: privacyManager.AppPrivacyLink): privacyManager.AppPrivacyResult | undefined {
+    link: privacyManager.AppPrivacyLink): privacyManager.AppPrivacyResult | undefined {
     return records.find((record) => record.type === privacyManager.AppPrivacyType.PRIVACY_AGREEMENT &&
-      (!link || (record.id === link.id && record.versionCode === link.versionCode)));
+      record.id === link.id && record.versionCode === link.versionCode);
   }
 
-  private cacheKey(id: string, versionCode: number): string {
-    return id && Number.isInteger(versionCode) ? `${versionCode}:${id}` : '';
+  private requiresAction(): boolean {
+    return this.result === privacyManager.AppPrivacyResultType.DISAGREED ||
+      this.result === privacyManager.AppPrivacyResultType.REQUIRE_RESIGNING_VERSION_UPDATE;
   }
 
-  private consentStore(): preferences.Preferences {
-    return preferences.getPreferencesSync(this.context!, { name: 'tinybot-privacy' });
-  }
-
-  private hasCachedConsent(): boolean {
-    if (!this.currentPolicy || this.cacheDirty) { return false; }
-    const key = this.cacheKey(this.currentPolicy.id, this.currentPolicy.versionCode);
-    if (!key) { return false; }
-    try { return this.consentStore().getSync(CONSENT_KEY, '') === key; }
-    catch (error) { this.logFailure(error as BusinessError, 'readConsentCache', 'query'); return false; }
-  }
-
-  private writeConsentCache(key: string): void {
-    const wasDirty = this.cacheDirty;
-    this.cacheDirty = true;
-    const store = this.consentStore();
-    if (wasDirty || store.getSync(CONSENT_KEY, '') !== key) {
-      if (key) { store.putSync(CONSENT_KEY, key); }
-      else { store.deleteSync(CONSENT_KEY); }
-      store.flushSync();
+  private applyResult(result: privacyManager.AppPrivacyResultType | undefined): void {
+    if (result === privacyManager.AppPrivacyResultType.DISAGREED ||
+      result === privacyManager.AppPrivacyResultType.REQUIRE_RESIGNING_VERSION_UPDATE ||
+      result === privacyManager.AppPrivacyResultType.FULL_MODE_AGREED) {
+      this.result = result;
     }
-    this.cacheDirty = false;
-  }
-
-  private applyResult(consent: privacyManager.AppPrivacyResult | undefined): void {
-    const agreed = consent?.result === privacyManager.AppPrivacyResultType.FULL_MODE_AGREED;
-    try { this.writeConsentCache(agreed && consent ? this.cacheKey(consent.id, consent.versionCode) : ''); }
-    catch (error) { this.logFailure(error as BusinessError, 'writeConsentCache', 'consent_result'); }
     this.error = '';
-    this.publish(agreed);
+    this.publish(!this.requiresAction());
+    if (this.result === privacyManager.AppPrivacyResultType.DISAGREED) { this.exit(); }
   }
 
   requireConsent(): void {
-    // Blocked business must not restart an exhausted query round.
+    // Recheck on access, including after a launch with an inconclusive result.
     if (this.allowed) { this.refresh(); }
     if (!this.allowed) {
       throw new Error(this.error || (this.simulatorDebug ? t('请先确认模拟器调试隐私说明。') : t('请先在系统弹窗中同意隐私政策。')));
@@ -254,13 +239,16 @@ export class HostedPrivacy {
   }
 
   async requestConsent(source: string = 'request_consent'): Promise<void> {
+    if (this.result === privacyManager.AppPrivacyResultType.DISAGREED) { await this.exit(); return; }
     if (!this.context || !this.canRequest()) { return; }
     const context = this.context, generation = this.subscriptionGeneration;
     this.cancelPrompt();
     this.busy = true;
     try {
       this.check(source, false);
-      if (this.allowed || !this.pageVisible || this.closing || (source === 'startup_prompt' && !this.gateFocused)) { return; }
+      if (!this.pageVisible || this.closing ||
+        this.result !== privacyManager.AppPrivacyResultType.REQUIRE_RESIGNING_VERSION_UPDATE ||
+        (source === 'startup_prompt' && !this.gateFocused)) { return; }
       this.requestedAtStartup = true;
       this.error = '';
       Diagnostics.log('info', 'privacy', 'request_started', { phase: source });
@@ -273,14 +261,14 @@ export class HostedPrivacy {
         return;
       }
       if (this.subscriptionGeneration !== generation || this.closing) { return; }
-      const consent = this.findConsent(response.results, this.currentPolicy);
-      if (!consent && this.findConsent(response.results)) {
-        // The agreement changed between the query and the dialog. Read the current version again.
+      const policy = this.currentPolicy;
+      const consent = policy ? this.findConsent(response.results, policy) : undefined;
+      if (!consent) {
+        // The dialog may have used a newer agreement. Ask the system for its current state.
         this.check('consent_result', false);
         return;
       }
-      this.applyResult(consent);
-      if (!this.allowed && this.pageVisible) { await this.exit(); }
+      this.applyResult(consent.result);
     } finally {
       if (this.subscriptionGeneration === generation) { this.busy = false; }
     }
@@ -320,12 +308,6 @@ export class HostedPrivacy {
       this.exit();
       return;
     }
-    // Persist the cache removal before revoking so a failed local write cannot leave an offline grant.
-    try { this.writeConsentCache(''); }
-    catch (error) {
-      const code = this.logFailure(error as BusinessError, 'clearConsentCache', 'revoke');
-      throw new Error(t('撤回隐私授权失败（{0}），请重试。', [code]));
-    }
     try { privacyManager.disableService(); }
     catch (error) {
       const code = this.logFailure(error as BusinessError, 'disableService', 'revoke');
@@ -333,6 +315,7 @@ export class HostedPrivacy {
     }
     this.error = '';
     // Stop business immediately; do not wait for the system event to arrive.
+    this.result = privacyManager.AppPrivacyResultType.DISAGREED;
     this.publish(false);
     this.exit();
   }
@@ -340,7 +323,8 @@ export class HostedPrivacy {
   private policy(): privacyManager.AppPrivacyLink {
     const info = privacyManager.getAppPrivacyMgmtInfo();
     const link = info.privacyInfo.find((item) => item.type === privacyManager.AppPrivacyLinkType.PRIVACY_STATEMENT_LINK);
-    if (info.type !== privacyManager.AppPrivacyMgmtType.FULL_MODE || !link || !/^https:\/\/[^/\s]+/i.test(link.url)) {
+    if (info.type !== privacyManager.AppPrivacyMgmtType.FULL_MODE || !link || !link.id ||
+      !Number.isInteger(link.versionCode) || !/^https:\/\/[^/\s]+/i.test(link.url)) {
       throw new Error(t('隐私托管尚未就绪，请稍后重试。'));
     }
     return link;
@@ -357,7 +341,7 @@ export class HostedPrivacy {
 
   private publish(allowed: boolean): void {
     if (allowed && this.closing) { return; }
-    if (allowed) { this.cancelPrompt(); }
+    if (allowed) { this.cancelPrompt(); this.requestedAtStartup = false; }
     const changed = this.allowed !== allowed;
     this.allowed = allowed;
     // Activate native services before mounting the business UI.

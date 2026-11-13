@@ -4,17 +4,6 @@ const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFi
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 const root = path.resolve(__dirname, '../entry/src/main/ets');
 const state = new Map();
-const preferencesData = new Map();
-let cacheFlushFailure;
-const preferences = { getPreferencesSync(_context, { name }) {
-  assert.equal(name, 'tinybot-privacy');
-  return {
-    getSync: (key, fallback) => preferencesData.get(key) ?? fallback,
-    putSync: (key, value) => preferencesData.set(key, value),
-    deleteSync: key => preferencesData.delete(key),
-    flushSync() { if (cacheFlushFailure) throw cacheFlushFailure; }
-  };
-} };
 const link = { type: 1, id: 'policy', versionCode: 2, url: 'https://example.com/policy?v=2' };
 let info = { type: 1, privacyInfo: [link] }, records = [], failure, notify, nextRequest, requests = 0, subscriptions = 0;
 let revokeFailure, requestFailure, exitFailure, revocations = 0, exits = 0;
@@ -37,7 +26,8 @@ const buildProfile = { DEBUG: true, BUILD_MODE_NAME: 'debug' };
 const deviceInfo = { productModel: 'Mate 70 Pro+' };
 const privacyManager = {
   AppPrivacyMgmtType: { FULL_MODE: 1 }, AppPrivacyLinkType: { PRIVACY_STATEMENT_LINK: 1 },
-  AppPrivacyType: { PRIVACY_AGREEMENT: 1 }, AppPrivacyResultType: { FULL_MODE_AGREED: 1 },
+  AppPrivacyType: { PRIVACY_AGREEMENT: 1 },
+  AppPrivacyResultType: { DISAGREED: 0, FULL_MODE_AGREED: 1, REQUIRE_RESIGNING_VERSION_UPDATE: 2 },
   getAppPrivacyMgmtInfo() { privacyReads++; if (failure) throw failure; return info; },
   getAppPrivacyResult() { privacyReads++; if (failure || resultFailure) throw failure || resultFailure; return records; },
   disableService() { revocations++; if (revokeFailure) throw revokeFailure; records = []; },
@@ -61,12 +51,13 @@ function load(file, imports) {
 }
 const { HostedPrivacy, hostedPrivacy } = load('services/HostedPrivacy.ets', {
   '@kit.AppGalleryKit': { privacyManager }, '@kit.BasicServicesKit': { commonEventManager, deviceInfo },
-  '@kit.ArkData': { preferences },
   'BuildProfile': buildProfile,
   '../model/Diagnostics': { Diagnostics: { log: (...args) => privacyLogs.push(args) } },
   '../model/I18n': { t: (key, args = []) => key.replace(/\{(\d+)\}/g, (_, i) => args[i]) }
 });
 const agreed = (versionCode = 2) => [{ type: 1, id: 'policy', versionCode, result: 1 }];
+const refused = () => [{ ...agreed()[0], result: 0 }];
+const resign = (versionCode = 2) => [{ ...agreed(versionCode)[0], result: 2 }];
 const tick = () => new Promise(resolve => setImmediate(resolve));
 (async () => {
   let changes = [], opened = [];
@@ -123,92 +114,128 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   assert.equal(privacyReads, 0, 'onCreate initialization must not query privacy');
   notify(null, {}); service.refresh('new_want');
   assert.equal(privacyReads, 0, 'Events and wants before onPageShow cannot start the first query');
+  failure = { code: 1006700003, message: 'PRIVATE DATA' };
   service.onPageShow();
-  assert.equal(service.allowed, false); assert.equal(requests, 0, 'Wait for the ability window before requesting consent');
-  assert.throws(() => service.requireConsent(), /系统弹窗/);
-  records = [{ type: 2, id: 'terms', versionCode: 2, result: 1 }]; notify(null, { data: '{"resultType":1}' });
-  assert.equal(service.allowed, false, 'Terms or an event payload cannot authorize the privacy policy');
-  records = agreed(); notify(null, {}); assert.equal(service.allowed, true); service.requireConsent();
-  await service.openPolicy(context); assert.equal(opened[0].uri, link.url);
-  records = agreed(1); service.refresh(); assert.equal(service.allowed, false, 'Old version cannot authorize current policy');
-  records = [{ ...agreed()[0], result: 2 }]; service.refresh(); assert.equal(service.allowed, false);
-  records = [{ ...agreed()[0], id: 'another-policy' }]; service.refresh(); assert.equal(service.allowed, false);
-  failure = { code: 1006700003, message: 'PRIVATE DATA' }; service.refresh();
-  assert.equal(service.allowed, false); assert.equal(service.checking, true); assert.equal(service.error, '');
+  assert.equal(service.allowed, true, 'The first failed query must not delay entry');
+  assert.equal(service.checking, true); assert.equal(service.error, '');
+  assert.doesNotThrow(() => service.requireConsent());
   const waitingReads = privacyReads;
   service.refresh(); notify(null, {}); service.onPageShow();
   assert.equal(privacyReads, waitingReads, 'Repeated triggers cannot reset or overlap a retry round');
   exhaustRetries();
   assert.equal(privacyReads, waitingReads + 4, 'One initial query plus four delayed retries');
-  assert.equal(service.checking, false);
-  assert.equal(service.allowed, false); assert.match(service.error, /1006700003/); assert.doesNotMatch(service.error, /PRIVATE/);
-  const exhaustedReads = privacyReads;
-  assert.throws(() => service.requireConsent(), /1006700003/);
-  assert.equal(privacyReads, exhaustedReads, 'Blocked business cannot restart exhausted retries');
+  assert.equal(service.checking, false); assert.equal(service.allowed, true); assert.equal(service.error, '');
   assert.equal(privacyLogs.at(-1)[3].operation, 'getAppPrivacyMgmtInfo');
-  failure = undefined; records = agreed(); service.refresh(); assert.equal(service.allowed, true);
-  resultFailure = { code: 1006700003 }; service.refresh();
+  assert.equal(privacyLogs.at(-1)[3].code, 1006700003);
+
+  failure = undefined; resultFailure = { code: 1006700003 }; service.refresh();
+  assert.equal(service.allowed, true);
   assert.equal(privacyLogs.at(-1)[3].operation, 'getAppPrivacyResult');
-  resultFailure = undefined; nextRetry(500);
-  assert.equal(service.allowed, true); assert.equal(service.checking, false); assert.equal(timers.size, 0);
-  failure = { code: 1006700001 }; service.refresh();
-  assert.match(service.error, /1006700001/); assert.equal(timers.size, 0, 'Other errors fail immediately');
+  resultFailure = undefined; records = resign(1); nextRetry(500);
+  assert.equal(service.allowed, false, 'A retry can discover that the prior version requires re-signing');
+  assert.equal(timers.size, 0);
+  service.onGateFocus(true);
+  assert.equal(timers.size, 1);
+  service.onGateFocus(false);
+  assert.equal(timers.size, 0, 'The system modal taking focus cancels the app startup request');
+  records = agreed(); service.onGateFocus(true);
+  nextRetry(3000); await tick();
+  assert.equal(service.allowed, true, 'Recheck for system consent even when the event was missed');
+  assert.equal(requests, 0);
+  await service.openPolicy(context); assert.equal(opened[0].uri, link.url);
+
+  for (const inconclusive of [
+    [],
+    [{ ...refused()[0], type: 2 }],
+    [{ ...refused()[0], versionCode: 1 }],
+    [{ ...resign()[0], id: 'another-policy' }],
+    [{ ...agreed()[0], result: 99 }]
+  ]) {
+    records = inconclusive; notify(null, { data: '{"resultType":0}' });
+    assert.equal(service.allowed, true, 'Unrelated or inconclusive records and event payloads do not block entry');
+  }
+  info = { type: 0, privacyInfo: [] }; service.refresh();
+  assert.equal(service.allowed, true);
+  info = { type: 1, privacyInfo: [link] };
   failure = { code: 1006700003 }; service.refresh(); service.onPageHide();
   assert.equal(timers.size, 0, 'Hiding the page cancels pending retries');
   notify(null, {});
   assert.equal(timers.size, 0, 'Background checks cannot schedule delayed retries');
-  failure = undefined; service.onPageShow(); assert.equal(service.allowed, true);
-  service.onPageHide(); records = []; notify(null, {});
-  assert.equal(service.allowed, false, 'Withdrawal events still close background business after the first page show');
-  records = agreed(); service.onPageShow();
-  records = []; notify(null, {}); assert.equal(service.allowed, false, 'Withdrawal closes access');
+
+  failure = undefined; records = agreed(); service.onPageShow();
+  service.onPageHide(); records = refused(); notify(null, {});
+  assert.equal(service.allowed, false, 'Explicit refusal stops background business');
+  assert.equal(exits, 1);
+  records = agreed(); notify(null, {}); assert.equal(service.allowed, false, 'Late events cannot reopen an exiting app');
+  service.dispose();
+
+  records = resign(); await initializeVisible(service, context, allowed => changes.push(allowed));
+  failure = { code: 1006700001 }; service.refresh();
+  assert.equal(service.allowed, false, 'A query error cannot erase a known re-sign requirement');
+  assert.match(service.error, /1006700001/);
+  failure = undefined;
   let resolve; nextRequest = new Promise(done => resolve = done);
-  const request = service.requestConsent(); await service.requestConsent(); assert.equal(requests, 1, 'No duplicate system popup');
+  const request = service.requestConsent(); await service.requestConsent();
+  assert.equal(requests, 1, 'No duplicate system popup');
   records = agreed(); resolve({ results: records }); await request; nextRequest = undefined;
   assert.equal(service.allowed, true);
-  await service.requestConsent(); assert.equal(requests, 1, 'Current valid consent never repeats the dialog');
+  await service.requestConsent(); assert.equal(requests, 1);
+
   revokeFailure = { code: 1006700002, message: 'PRIVATE DATA' };
   assert.throws(() => service.revokeConsent(), error => /1006700002/.test(error.message) && !/PRIVATE/.test(error.message));
-  assert.equal(service.allowed, true, 'Failed withdrawal is not reported as successful');
-  assert.equal(records.length, 1);
-  revokeFailure = undefined;
-  service.revokeConsent();
-  assert.equal(revocations, 2); assert.equal(records.length, 0);
-  assert.equal(service.allowed, false, 'Successful withdrawal closes access without waiting for a system event');
+  assert.equal(service.allowed, true, 'Failed withdrawal keeps access and reports the error');
+  revokeFailure = undefined; service.revokeConsent();
+  assert.equal(revocations, 2); assert.equal(service.allowed, false); assert.equal(exits, 2);
   assert.equal(state.get('tinybot.privacy.allowed'), false); assert.equal(changes.at(-1), false);
-  assert.equal(exits, 1, 'Withdrawal exits after closing business access');
-  assert.throws(() => service.requireConsent(), /系统弹窗/);
-  records = agreed(); notify(null, {}); assert.equal(service.allowed, false, 'Late events cannot reopen an exiting app');
-  service.dispose(); await initializeVisible(service, context, allowed => changes.push(allowed));
-  await service.requestConsent(); assert.equal(service.allowed, true, 'A new launch can restore system consent');
-  info = { type: 0, privacyInfo: [] }; service.refresh(); assert.equal(service.allowed, false);
-  info = { type: 1, privacyInfo: [link] };
-  service.dispose(); assert.equal(subscriptions, 0); assert.equal(state.get('tinybot.privacy.allowed'), false);
-  records = []; await initializeVisible(service, context, () => {}); await service.requestConsent();
-  assert.equal(exits, 2, 'Refusal exits'); const refusedRequests = requests;
-  await service.requestConsent(); assert.equal(requests, refusedRequests, 'No reopen while terminating');
-  service.dispose(); await initializeVisible(service, context, () => {});
-  requestFailure = { code: 1006700001, message: 'PRIVATE DATA' };
-  await service.requestConsent(); assert.equal(exits, 2); assert.equal(service.allowed, false);
-  assert.match(service.error, /1006700001/); assert.doesNotMatch(service.error, /PRIVATE/);
-  requestFailure = undefined; exitFailure = { code: 16000050, message: 'PRIVATE DATA' };
-  await service.requestConsent(); assert.equal(exits, 3); assert.match(service.error, /16000050/);
-  exitFailure = undefined; await service.exit(); assert.equal(exits, 4);
-  service.dispose(); await initializeVisible(service, context, () => {});
+  service.dispose();
+
+  records = refused(); exitFailure = { code: 16000050 };
+  await initializeVisible(service, context, () => {}); await tick();
+  assert.equal(service.allowed, false); assert.match(service.error, /16000050/);
+  exitFailure = undefined; await service.requestConsent();
+  assert.equal(exits, 4, 'Retry after a failed termination only retries termination');
+  assert.equal(requests, 1);
+  service.dispose();
+
+  records = resign(); await initializeVisible(service, context, () => {});
+  requestFailure = { code: 1006700003, message: 'PRIVATE DATA' };
+  service.onGateFocus(true); nextRetry(3000); await tick();
+  assert.equal(service.allowed, false); assert.equal(exits, 4);
+  assert.match(service.error, /1006700003/); assert.doesNotMatch(service.error, /PRIVATE/);
+  service.onPageHide(); service.onPageShow(); service.onGateFocus(true);
+  assert.equal(timers.size, 0, 'A failed automatic request cannot start a prompt loop');
+  requestFailure = undefined;
+  nextRequest = Promise.resolve({ results: [] });
+  await service.requestConsent();
+  assert.equal(service.allowed, false); assert.equal(exits, 4, 'Empty dialog results do not imply refusal');
+  nextRequest = Promise.resolve({ results: refused() });
+  await service.requestConsent();
+  assert.equal(service.allowed, false); assert.equal(exits, 5, 'An explicit refusal in the system dialog exits');
+  service.dispose();
+
+  records = resign(); await initializeVisible(service, context, () => {});
   nextRequest = new Promise(done => resolve = done); const stale = service.requestConsent(); service.dispose();
   records = agreed(); resolve({ results: records }); await stale; nextRequest = undefined;
-  assert.equal(service.allowed, false); assert.equal(exits, 4, 'Disposed request cannot enable or close another lifecycle');
+  assert.equal(service.allowed, false); assert.equal(exits, 5, 'Disposed requests cannot change access or exit');
   failure = { code: 1006700003 };
   await initializeVisible(service, context, () => {}); service.dispose();
   assert.equal(timers.size, 0, 'Disposal cancels pending privacy retries');
   failure = undefined;
-  const pendingInitialization = service.initialize(context, () => {});
-  service.onPageShow(); const beforeSubscribed = privacyReads;
-  await pendingInitialization;
-  assert.equal(privacyReads, beforeSubscribed, 'An agreed first query does not wait for or repeat on subscription readiness');
-  service.dispose();
-  console.log('PASS policy/version matching, refusal exit, withdrawal exit, retryable failures, serialization and stale completion');
-
+  buildProfile.DEBUG = false; buildProfile.BUILD_MODE_NAME = 'release';
+  for (const queryFailure of [undefined, { code: 1006700001 }]) {
+    const beforeRequests = requests, beforeExits = exits;
+    records = []; resultFailure = queryFailure;
+    await initializeVisible(service, context, () => {});
+    assert.equal(service.allowed, true, 'A release cold start with no definitive result enters immediately');
+    assert.equal(service.error, '');
+    service.onGateFocus(true);
+    await service.requestConsent();
+    assert.equal(timers.size, 0); assert.equal(requests, beforeRequests); assert.equal(exits, beforeExits);
+    service.dispose();
+  }
+  resultFailure = undefined;
+  buildProfile.DEBUG = true; buildProfile.BUILD_MODE_NAME = 'debug';
+  console.log('PASS inconclusive startup, retry recovery, explicit refusal and re-sign, revocation, and stale dialog results');
   let initialized = 0, engines = 0, wants = [], loads = 0, stops = 0;
   const renderLifecycle = [];
   const bootOrder = [];
@@ -252,8 +279,12 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   assert.equal(requests, beforeStartupRequests, 'AppGallery owns the startup dialog; do not stack an explicit request');
   ability.onForeground(); await tick(); assert.equal(requests, beforeStartupRequests, 'Foreground cannot duplicate the automatic dialog');
   assert.equal(privacyReads, beforeStartupReads, 'Ability lifecycle cannot query before root onPageShow');
+  failure = { code: 1006700003 };
   hostedPrivacy.onPageShow();
-  assert.equal(initialized, 0); assert.equal(engines, 0); assert.equal(wants.length, 0);
+  assert.equal(initialized, 1); assert.equal(engines, 0); assert.equal(wants.length, 2);
+  assert.equal(requests, beforeStartupRequests, 'An inconclusive startup leaves the dialog to AppGallery');
+  failure = undefined;
+  records = agreed(); nextRetry(500);
   records = agreed(); notify(null, {});
   await tick();
   assert.equal(initialized, 1); assert.equal(engines, 0); assert.equal(wants.length, 2);
@@ -263,11 +294,11 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   assert.equal(wants.length, 2);
   records = agreed(); notify(null, {}); assert.equal(wants.length, 2); assert.equal(engines, 0);
   ability.onDestroy(); assert.equal(subscriptions, 0);
-  records = []; const beforeRestartRequests = requests, beforeRestartExits = exits;
+  records = refused(); const beforeRestartRequests = requests, beforeRestartExits = exits;
   const restarted = new EntryAbility(); restarted.context = context;
   restarted.onCreate({}, {}); restarted.onWindowStageCreate(stage); await tick();
   hostedPrivacy.onPageShow();
-  assert.equal(requests, beforeRestartRequests); assert.equal(exits, beforeRestartExits);
+  assert.equal(requests, beforeRestartRequests); assert.equal(exits, beforeRestartExits + 1);
   assert.equal(initialized, 1); assert.equal(engines, 0); restarted.onDestroy();
   records = agreed(); const beforeAgreedRequests = requests;
   const accepted = new EntryAbility(); accepted.context = context;
@@ -276,7 +307,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   hostedPrivacy.onPageShow();
   assert.equal(requests, beforeAgreedRequests, 'An accepted cold start enters directly');
   assert.equal(initialized, 2); accepted.onDestroy();
-  console.log('PASS actual EntryAbility avoids duplicate AppGallery startup dialog, blocks unsigned launches, restores accepted launch and cleans up');
+  console.log('PASS actual EntryAbility starts on query failure, exits on explicit refusal, restores accepted launch and cleans up');
 
   // Run the real Index action handler; viewing must be direct and revocation must require confirmation.
   const indexSource = fs.readFileSync(path.join(root, 'pages/Index.ets'), 'utf8');
@@ -306,25 +337,6 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   assert.equal(uiPrivacy.allowed, false); assert.equal(exits, beforeDialogsExits + 1); uiPrivacy.dispose();
   console.log('PASS actual privacy menu: direct policy link, explicit withdrawal confirmation, cancel preserves consent, failure stays open, confirm revokes and exits');
 
-  // An AppGallery error is never permission to bypass consent on hardware or release builds.
-  for (const [debug, mode, model] of [
-    [true, 'debug', 'Mate 70 Pro+'], [false, 'release', 'Mate 70 Pro+'],
-    [false, 'release', 'emulator'], [true, 'release', 'emulator'],
-    [false, 'debug', 'emulator'], [true, 'debug', 'unknown']
-  ]) {
-    buildProfile.DEBUG = debug; buildProfile.BUILD_MODE_NAME = mode; deviceInfo.productModel = model;
-    failure = { code: 1006700003 };
-    const guarded = new HostedPrivacy(); await initializeVisible(guarded, context, () => {});
-    assert.equal(guarded.simulatorDebug, false);
-    guarded.acceptDebugConsent(); assert.equal(guarded.allowed, false);
-    exhaustRetries();
-    assert.match(guarded.error, /1006700003/);
-    assert.throws(() => guarded.requireConsent(), /1006700003/);
-    failure = undefined; records = agreed(); guarded.refresh();
-    assert.equal(guarded.allowed, true, 'Non-emulator paths still require real system consent');
-    guarded.dispose();
-  }
-  console.log('PASS debug hardware, release hardware, release emulator and unknown devices cannot use debug consent');
 
   buildProfile.DEBUG = true; buildProfile.BUILD_MODE_NAME = 'debug'; deviceInfo.productModel = 'emulator';
   failure = { code: 1006700003 };
@@ -367,86 +379,4 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   assert.deepEqual([privacyReads, requests, revocations, subscriptions], counts);
   console.log('PASS emulator explicit consent, policy viewing, foreground, rejection, withdrawal, cold restart and actual ability gating');
 
-  deviceInfo.productModel = 'Mate 70 Pro+';
-  failure = undefined; records = agreed();
-  const seed = new HostedPrivacy(); await initializeVisible(seed, context, () => {}); seed.dispose();
-  const offline = new HostedPrivacy(); const beforeOffline = privacyReads;
-  resultFailure = { code: 1006700003 };
-  await initializeVisible(offline, context, () => {});
-  offline.onGateFocus(true);
-  assert.equal(privacyReads, beforeOffline + 2, 'A cold start with saved consent still queries the platform');
-  assert.equal(offline.allowed, false, 'Do not use the cache while the startup query is retrying');
-  exhaustRetries();
-  assert.equal(offline.allowed, true, 'The verified agreement version can use its saved consent after query failure');
-  assert.equal(timers.size, 0, 'No prompt is scheduled when the cache confirms consent');
-  assert.doesNotThrow(() => offline.requireConsent(), 'A new retry round does not interrupt already verified cached access');
-  exhaustRetries();
-  offline.dispose();
-
-  const wrongVersion = new HostedPrivacy();
-  info = { type: 1, privacyInfo: [{ ...link, versionCode: 3 }] };
-  resultFailure = { code: 1006700001 };
-  await initializeVisible(wrongVersion, context, () => {});
-  assert.equal(wrongVersion.allowed, false, 'Cache cannot authorize a different agreement version');
-  resultFailure = undefined; records = agreed(3); wrongVersion.refresh();
-  assert.equal(wrongVersion.allowed, true);
-  wrongVersion.dispose();
-  info = { type: 1, privacyInfo: [link] };
-  resultFailure = { code: 1006700001 };
-  const overwritten = new HostedPrivacy(); await initializeVisible(overwritten, context, () => {});
-  assert.equal(overwritten.allowed, false, 'A newer signed version overwrites the old cache');
-  info = { type: 1, privacyInfo: [{ ...link, versionCode: 3 }] };
-  overwritten.refresh(); assert.equal(overwritten.allowed, true);
-  failure = { code: 1006700001 };
-  overwritten.refresh(); assert.equal(overwritten.allowed, false, 'A metadata error cannot prove which version is current');
-  overwritten.dispose();
-  failure = resultFailure = undefined; info = { type: 1, privacyInfo: [link] };
-
-  for (const unsigned of [[], [{ ...agreed()[0], result: 0 }], [{ ...agreed()[0], result: 2 }]]) {
-    const signed = new HostedPrivacy(); records = agreed(); await initializeVisible(signed, context, () => {}); signed.dispose();
-    const unsignedLaunch = new HostedPrivacy(); records = unsigned;
-    await initializeVisible(unsignedLaunch, context, () => {});
-    assert.equal(unsignedLaunch.allowed, false, 'A successful unsigned query overrides a previously signed record');
-    resultFailure = { code: 1006700001 }; unsignedLaunch.refresh();
-    assert.equal(unsignedLaunch.allowed, false, 'Unsigned query removed the persisted consent');
-    unsignedLaunch.dispose(); resultFailure = undefined;
-  }
-
-  const systemPrompt = new HostedPrivacy(), beforeSystemPrompt = requests;
-  records = []; await initializeVisible(systemPrompt, context, () => {}); systemPrompt.onGateFocus(true);
-  assert.equal(timers.size, 1);
-  systemPrompt.onGateFocus(false);
-  assert.equal(timers.size, 0, 'The modal taking focus cancels the app startup request');
-  records = agreed(); systemPrompt.onGateFocus(true);
-  nextRetry(3000);
-  assert.equal(systemPrompt.allowed, true, 'Recheck for system consent even when the event was missed');
-  assert.equal(requests, beforeSystemPrompt);
-  systemPrompt.dispose();
-
-  const auto = new HostedPrivacy(), beforeAuto = requests;
-  failure = { code: 1006700001 }; createFailure = { code: 1500007 }; requestFailure = { code: 1006700003 };
-  await initializeVisible(auto, context, () => {}); auto.onGateFocus(true);
-  nextRetry(3000); await tick();
-  assert.equal(requests, beforeAuto + 1, 'Query and subscription failures still allow one automatic attempt');
-  assert.equal(auto.allowed, false); assert.match(auto.error, /1006700003/);
-  auto.onPageHide(); auto.onPageShow(); auto.onGateFocus(true); await tick();
-  assert.equal(timers.size, 0, 'An automatic failure does not start a prompt loop');
-  assert.equal(requests, beforeAuto + 1);
-  requestFailure = undefined; nextRequest = Promise.resolve({ results: agreed() });
-  await auto.requestConsent(); nextRequest = undefined;
-  assert.equal(auto.allowed, true, 'The dialog result admits the user even if the query API remains unavailable');
-  assert.equal(requests, beforeAuto + 2, 'The user can retry the popup explicitly');
-  failure = createFailure = undefined;
-
-  cacheFlushFailure = { code: 15500000 };
-  const beforeRevoke = revocations;
-  assert.throws(() => auto.revokeConsent(), /15500000/);
-  assert.equal(revocations, beforeRevoke, 'Do not revoke platform consent while a persisted grant cannot be removed');
-  assert.equal(auto.allowed, true);
-  cacheFlushFailure = undefined; auto.revokeConsent(); auto.dispose();
-  const afterRevoke = new HostedPrivacy(); resultFailure = { code: 1006700001 };
-  await initializeVisible(afterRevoke, context, () => {});
-  assert.equal(afterRevoke.allowed, false, 'Revoking removes the saved grant across launches');
-  afterRevoke.dispose();
-  console.log('PASS version-bound persistence, fresh result precedence, modal focus, one automatic request, direct dialog consent and cache removal');
 })().catch(error => { console.error(error); process.exitCode = 1; });

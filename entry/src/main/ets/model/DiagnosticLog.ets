@@ -52,7 +52,7 @@ EVENTS.appearance = ['material', 'material_support', 'material_unavailable', 'lo
 EVENTS.language = ['load_failed', 'save_failed'];
 EVENTS.camera = ['dismissed', 'imported', 'capture_failed'];
 EVENTS.account = ['restore_failed', 'response_invalid', 'state_changed', 'sign_in_cancelled', 'sign_in_failed', 'sign_out_failed', 'state_failed'];
-EVENTS.privacy = ['request_started', 'query_completed', 'query_retry', 'using_cached_consent', 'check_failed',
+EVENTS.privacy = ['request_started', 'query_completed', 'query_retry', 'check_failed',
   'subscription_ready', 'subscription_cleanup_failed'];
 EVENTS.feedback = ['attachment_failed', 'log_failed', 'initialize_failed', 'save_failed', 'credential_failed', 'request_failed', 'submit_failed', 'list_failed',
   'detail_failed', 'upload_failed', 'cleanup_failed', 'reconcile_failed', 'delete_failed'];
@@ -104,7 +104,7 @@ STRINGS.channel = ['answer', 'reasoning'];
 STRINGS.unit = ['px', 'vp'];
 STRINGS.balanceAdapter = ['deepseek', 'sub2api', 'newapi', 'newapi-account', 'zhipu', 'custom'];
 STRINGS.operation = ['access', 'read', 'list', 'stat', 'parse', 'unlink', 'rmdir', 'bundle_stats', 'free_size', 'total_size',
-  'getAppPrivacyMgmtInfo', 'getAppPrivacyResult', 'requestAppPrivacyConsent', 'subscribe', 'unsubscribe', 'cloud_directory', 'cloud_sync',
+  'getAppPrivacyMgmtInfo', 'getAppPrivacyResult', 'requestAppPrivacyConsent', 'disableService', 'subscribe', 'unsubscribe', 'cloud_directory', 'cloud_sync',
   'connect', 'login', 'examine', 'search', 'fetch', 'identify', 'capability',
   'discover', 'balance', 'credential_read', 'credential_write', 'credential_remove', 'save_config', 'response', 'streaming', 'connecting', 'attachment', 'log',
   'PUT', 'MOVE', 'DELETE', 'GET', 'PROPFIND', 'MKCOL', 'local', 'remote'];

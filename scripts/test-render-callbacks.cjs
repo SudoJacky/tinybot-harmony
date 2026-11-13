@@ -212,5 +212,5 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
   gate.privacy.error = '无法确认系统隐私授权（1006700003），请重试。'; gate.privacy.busy = true; gate.initialRender();
   assert.equal(nodes.get('retry-privacy').label, '重试'); assert.equal(nodes.get('retry-privacy').enabled, false);
   assert.match(nodes.get('privacy-status').label, /1006700003/);
-  console.log('PASS emitted startup gate: an empty signing record has a system-consent action; failures stay visible and in-flight requests disable the button');
+  console.log('PASS emitted re-signing gate offers system consent, shows failures, and disables duplicate requests');
 })().catch(error => { console.error(error); process.exitCode = 1; });
