@@ -29,11 +29,14 @@ export struct DetailTabs {
   @Prop compact: boolean = false;
   @Prop showMaximize: boolean = false;
   @Prop maximized: boolean = false;
+  @Prop sideChatAvailable: boolean = false;
+  @Prop touch: boolean = false;
   @State private hoveredTab: string = '';
   onSelect: (id: string) => void = () => {};
   onClose: (id: string) => void = () => {};
   onAddFiles: () => void = () => {};
   onAddBrowser: () => void = () => {};
+  onAddSideChat: () => void = () => {};
   onCollapse: () => void = () => {};
   onMaximize: () => void = () => {};
 
@@ -44,6 +47,10 @@ export struct DetailTabs {
         .id('detail-add-files').onClick(() => this.onAddFiles())
       MenuItem(() => materialMenuContent.bind(this)({ label: t('应用内浏览器'), icon: $r('sys.symbol.connection') }))
         .id('detail-add-browser').onClick(() => this.onAddBrowser())
+      if (this.sideChatAvailable) {
+        MenuItem(() => materialMenuContent.bind(this)({ label: t('新建旁聊'), icon: $r('sys.symbol.ellipsis_message') }))
+          .id('detail-add-side-chat').onClick(() => this.onAddSideChat())
+      }
     }
   }
 
@@ -59,12 +66,12 @@ export struct DetailTabs {
       if (this.active === tab.id) {
         Button({ type: ButtonType.Circle }) {
           SymbolGlyph($r('sys.symbol.xmark')).fontSize(12).fontColor([$r('app.color.text_secondary')])
-        }.id('detail-tab-close-' + tab.id).width(20).height(20).padding(0).backgroundColor(Color.Transparent)
+        }.id('detail-tab-close-' + tab.id).width(this.touch ? 40 : 20).height(this.touch ? 40 : 20).padding(0).backgroundColor(Color.Transparent)
           .accessibilityText(t('关闭') + ' · ' + tab.label)
           .onClick(() => this.onClose(tab.id))
       }
     }
-    .id('detail-tab-' + tab.id).height(32).padding({ left: 10, right: this.active === tab.id ? 4 : 10 })
+    .id('detail-tab-' + tab.id).height(this.touch ? 44 : 32).padding({ left: 10, right: this.active === tab.id ? 4 : 10 })
     .borderRadius(Radius.sm).backgroundColor(this.active === tab.id ? $r('app.color.surface') : Color.Transparent)
     .border({ width: this.active === tab.id ? 0.5 : 0, color: $r('app.color.divider') })
     .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) },
@@ -101,7 +108,7 @@ export struct DetailTabs {
         .bindMenu(this.switchMenu, { systemMaterial: this.appearance.menu, mask: false })
       IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭') + ' · ' +
         (this.tabs.find((tab: DetailTabItem) => tab.id === this.active)?.label || t('详情')), compId: 'detail-close-active',
-        diameter: 32, iconSize: 15, onTap: () => this.onClose(this.active) })
+        diameter: this.touch ? 44 : 32, iconSize: 15, onTap: () => this.onClose(this.active) })
       this.trailingControls()
     }.width('100%').height(44).padding({ left: Space.sm, right: Space.sm })
   }
@@ -110,16 +117,16 @@ export struct DetailTabs {
   trailingControls() {
     Button({ type: ButtonType.Circle }) {
       SymbolGlyph($r('sys.symbol.plus')).fontSize(16).fontColor([$r('app.color.text_secondary')])
-    }.id('detail-add-tab').width(32).height(32).padding(0).backgroundColor(Color.Transparent)
+    }.id('detail-add-tab').width(this.touch ? 44 : 32).height(this.touch ? 44 : 32).padding(0).backgroundColor(Color.Transparent)
       .clickEffect(Motion.pressSmall).accessibilityText(t('添加侧栏面板'))
       .bindMenu(this.addMenu, { systemMaterial: this.appearance.menu, mask: false })
     if (this.showMaximize) {
       IconButton({ icon: this.maximized ? $r('sys.symbol.close_sidebar') : $r('sys.symbol.arrow_up_left_and_arrow_down_right'),
         label: this.maximized ? t('恢复并排显示') : t('最大化侧栏'), compId: 'detail-toggle-maximized',
-        diameter: 32, iconSize: 16, onTap: this.onMaximize })
+        diameter: this.touch ? 44 : 32, iconSize: 16, onTap: this.onMaximize })
     }
     if (this.showCollapse) { IconButton({ icon: $r('sys.symbol.close_sidebar'), label: t('关闭侧栏'), compId: 'detail-collapse',
-      diameter: 32, iconSize: 17, onTap: this.onCollapse }) }
+      diameter: this.touch ? 44 : 32, iconSize: 17, onTap: this.onCollapse }) }
   }
 
   @Builder

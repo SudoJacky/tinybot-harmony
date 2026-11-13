@@ -1,5 +1,6 @@
 import { MessageDraftEditor } from './MessageDraftEditor';
 import { FileAnnotationList } from './FileAnnotationList';
+import { KeyCode } from '@kit.InputKit';
 import { ChatShortcut, ChatShortcutAction, NavigationShortcut, chatShortcuts, handleDraftEnter } from '../common/KeyboardShortcuts';
 import { AdaptiveUi } from '../model/AdaptiveUi';
 import { materialMenuContent, materialMenuHeader } from '../common/MaterialMenu';
@@ -124,6 +125,9 @@ export struct ChatPanel {
   @Prop topInset: number = 0;
   @Prop workbench: boolean = false;
   @Prop desktop: boolean = false;
+  @Prop commandSearch: boolean = false;
+  @State private completionIndex: number = 0;
+  @State private completionDismissed: string = '';
   @Prop shortcutsEnabled: boolean = false;
   @Prop shortcutsCovered: boolean = false;
   @Prop @Watch('messageSearchChanged') messageSearchRequest: number = 0;
@@ -637,13 +641,13 @@ export struct ChatPanel {
   }
 
   private shortcutAvailable(action: ChatShortcutAction): boolean {
-    return this.chatShortcutsAvailable() && (!this.shortcutsCovered || (this.desktop && action === 'search'));
+    return this.chatShortcutsAvailable() && (!this.shortcutsCovered || (this.commandSearch && action === 'search'));
   }
 
   @Builder
   shortcutBindings() {
     // ArkUI also dispatches to retained nodes, so disable the bindings while another surface owns the chat.
-    ForEach(chatShortcuts(this.desktop), (shortcut: ChatShortcut) => {
+    ForEach(chatShortcuts(this.commandSearch), (shortcut: ChatShortcut) => {
       Column().width(0).height(0).accessibilityLevel('no').enabled(this.shortcutAvailable(shortcut.action))
         .keyboardShortcut(shortcut.key, shortcut.modifiers, () => this.runChatShortcut(shortcut.action))
     }, (shortcut: ChatShortcut) => shortcut.action)
@@ -1286,10 +1290,36 @@ export struct ChatPanel {
   }
   private referenceMatches(): ThreadViewModel[] {
     const query = (referenceQuery(this.app.draft) || '').trim().toLowerCase();
-    return this.app.threads.filter((item) => item.id !== this.thread.id && item.messages.some((message) => message.role === 'assistant' && message.status === 'complete') &&
+    return this.app.threads.filter((item) => !item.sideChat && item.id !== this.thread.id && item.messages.some((message) => message.role === 'assistant' && message.status === 'complete') &&
       !this.thread.references.some((ref) => ref.threadId === item.id) && item.title.toLowerCase().includes(query))
       .sort((a, b) => Number(!!this.thread.projectId && b.projectId === this.thread.projectId) -
         Number(!!this.thread.projectId && a.projectId === this.thread.projectId) || b.updatedAt - a.updatedAt).slice(0, 6);
+  }
+
+  private completionCount(): number {
+    if (this.skillSuggested()) { return this.skillMatches().length; }
+    if (this.referenceSuggested()) { return this.referenceMatches().length; }
+    return Number(this.teamSuggested()) + Number(this.commandSuggested('/compact'));
+  }
+
+  private completionKey(event: KeyEvent): boolean {
+    if (!this.commandSearch || event.type !== KeyType.Down || this.composerHasPreview ||
+      this.completionDismissed === this.app.draft || event.getModifierKeyState?.(['Alt']) ||
+      event.getModifierKeyState?.(['Ctrl']) || event.getModifierKeyState?.(['Shift']) || event.metaKey) { return false; }
+    const count = this.completionCount();
+    if (!count) { return false; }
+    if (event.keyCode === KeyCode.KEYCODE_ESCAPE) { this.completionDismissed = this.app.draft; return true; }
+    if (event.keyCode === KeyCode.KEYCODE_DPAD_DOWN || event.keyCode === KeyCode.KEYCODE_DPAD_UP) {
+      this.completionIndex = (this.completionIndex + (event.keyCode === KeyCode.KEYCODE_DPAD_DOWN ? 1 : count - 1)) % count;
+      return true;
+    }
+    if (event.keyCode !== KeyCode.KEYCODE_ENTER && event.keyCode !== KeyCode.KEYCODE_NUMPAD_ENTER) { return false; }
+    const index = Math.min(this.completionIndex, count - 1);
+    if (this.skillSuggested()) { this.selectSkill(this.skillMatches()[index].name); }
+    else if (this.referenceSuggested()) { this.app.referenceThread(this.referenceMatches()[index].id); }
+    else if (index === 0 && this.teamSuggested()) { this.app.setTeamEnabled(true).then((ok) => { if (ok) { this.app.setDraft(''); } }); }
+    else { this.app.setDraft('/compact'); this.send(); }
+    return true;
   }
 
   @Builder
@@ -1303,7 +1333,7 @@ export struct ChatPanel {
       }
       Scroll() {
         Column() {
-          ForEach(this.skillMatches(), (skill: SkillData) => {
+          ForEach(this.skillMatches(), (skill: SkillData, index: number) => {
             Row({ space: 8 }) {
               SymbolGlyph($r('sys.symbol.wand_and_stars')).fontSize(16).fontColor([this.appearance.accent])
               Column({ space: 2 }) {
@@ -1313,6 +1343,7 @@ export struct ChatPanel {
                   .fontSize(12).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_secondary'))
               }.layoutWeight(1).alignItems(HorizontalAlign.Start)
             }.id('mention-skill-' + skill.name).height(56).width('100%').padding({ left: 12, right: 12 })
+              .backgroundColor(this.commandSearch && index === this.completionIndex ? $r('app.color.selection') : Color.Transparent)
               .onClick(() => this.selectSkill(skill.name))
           }, (skill: SkillData) => skill.name)
         }.width('100%')
@@ -1331,13 +1362,14 @@ export struct ChatPanel {
       }
       Scroll() {
         Column() {
-          ForEach(this.referenceMatches(), (item: ThreadViewModel) => {
+          ForEach(this.referenceMatches(), (item: ThreadViewModel, index: number) => {
             Row({ space: 8 }) {
               SymbolGlyph($r('sys.symbol.ellipsis_message')).fontSize(16).fontColor([this.appearance.accent])
               Text(item.displayTitle).fontFamily(this.appearance.fontFamily).fontSize(14).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                 .fontColor($r('app.color.text_primary')).layoutWeight(1)
               if (item.archived) { Text(t('已归档')).fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.text_tertiary')) }
             }.id('mention-thread-' + item.id).height(44).width('100%').padding({ left: 12, right: 12 })
+              .backgroundColor(this.commandSearch && index === this.completionIndex ? $r('app.color.selection') : Color.Transparent)
             .onClick(() => { this.app.referenceThread(item.id); })
           }, (item: ThreadViewModel) => item.id)
         }.width('100%')
@@ -1355,7 +1387,8 @@ export struct ChatPanel {
         Text('/compact').fontSize(14).fontWeight(FontWeight.Medium).fontFamily('monospace').fontColor($r('app.color.text_primary'))
         Text(t('压缩较早对话，保留完整记录')).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-    }.id('slash-compact').width('100%').padding(12).borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
+    }.id('slash-compact').width('100%').padding(12).borderRadius(Radius.lg)
+    .backgroundColor(this.commandSearch && this.completionIndex === Number(this.teamSuggested()) ? $r('app.color.selection') : $r('app.color.surface'))
     .border({ width: 0.5, color: $r('app.color.divider') })
     .onClick(() => { this.app.setDraft('/compact'); this.send(); })
   }
@@ -1398,7 +1431,7 @@ export struct ChatPanel {
       SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
     }
     .id('slash-team').width('100%').padding({ left: Space.md, right: Space.md, top: 10, bottom: 10 })
-    .borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
+    .borderRadius(Radius.lg).backgroundColor(this.commandSearch && this.completionIndex === 0 ? $r('app.color.selection') : $r('app.color.surface'))
     .border({ width: 0.5, color: $r('app.color.divider') }).shadow({ radius: 12, color: '#0F000000', offsetY: 2 })
     .clickEffect(Motion.press).accessibilityText(t("开启团队模式"))
     .transition(Motion.rise(0, 12))
@@ -1663,12 +1696,14 @@ export struct ChatPanel {
         .onWillChange((value: EditableTextChangeValue) => !this.speechActive() || value.content === this.app.draft)
         .onKeyPreIme((event: KeyEvent) => {
           if (!this.chatShortcutsAvailable() || this.shortcutsCovered || !this.speechEnabled || this.voiceMode || this.app.active.id !== threadId) { return false; }
+          if (this.completionKey(event)) { return true; }
           return handleDraftEnter(event, this.composerController, this.composerHasPreview, () => {
             if (!this.app.generating && this.canSend()) { this.send(); }
           });
         })
         .onChange((value: string, preview?: PreviewText) => {
           if (this.app.active.id === threadId) { this.composerHasPreview = !!preview?.value; }
+          if (value !== this.app.draft) { this.completionIndex = 0; this.completionDismissed = ''; }
           this.composerChanged(threadId, value);
         })
         .onTextSelectionChange((start: number, end: number) => this.composerSelectionChanged(threadId, start, end))
@@ -1960,12 +1995,12 @@ export struct ChatPanel {
           }.fontFamily(this.appearance.fontFamily).id('retry-message').attributeModifier(Btn.tonalSmall).clickEffect(Motion.press)
           .transition(Motion.rise()).onClick(() => this.app.retryPrompt())
         }
-        if (this.teamSuggested()) {
-          this.commandSuggestion()
+        if (!this.commandSearch || this.completionDismissed !== this.app.draft) {
+          if (this.teamSuggested()) { this.commandSuggestion() }
+          if (this.commandSuggested('/compact')) { this.compactSuggestion() }
+          if (this.skillSuggested()) { this.skillSuggestions() }
+          if (this.referenceSuggested()) { this.referenceSuggestions() }
         }
-        if (this.commandSuggested('/compact')) { this.compactSuggestion() }
-        if (this.skillSuggested()) { this.skillSuggestions() }
-        if (this.referenceSuggested()) { this.referenceSuggestions() }
         // The latest turn's plan stays beside the composer, outside the scrolling transcript.
         ForEach(this.thread.messages.slice(-1).filter((message) => message.role === 'assistant'), (message: MessageViewModel) => {
           ChatPlanPanel({ plan: message.plan })

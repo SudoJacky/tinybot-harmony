@@ -24,13 +24,14 @@ export struct BranchesPanel {
     return depth;
   }
   private ordered(): ThreadViewModel[] {
-    const pending = this.app.threads.filter((item) => !item.parentThreadId || !this.app.threads.some((parent) => parent.id === item.parentThreadId));
+    const threads = this.app.threads.filter((item) => !item.sideChat);
+    const pending = threads.filter((item) => !item.parentThreadId || !threads.some((parent) => parent.id === item.parentThreadId));
     const result: ThreadViewModel[] = []; const seen = new Set<string>();
-    while (pending.length) { const item = pending.shift(); if (!item || seen.has(item.id)) { continue; } seen.add(item.id); result.push(item); pending.unshift(...this.app.threads.filter((child) => child.parentThreadId === item.id)); }
-    return result.concat(this.app.threads.filter((item) => !seen.has(item.id)));
+    while (pending.length) { const item = pending.shift(); if (!item || seen.has(item.id)) { continue; } seen.add(item.id); result.push(item); pending.unshift(...threads.filter((child) => child.parentThreadId === item.id)); }
+    return result.concat(threads.filter((item) => !seen.has(item.id)));
   }
   private branched(): ThreadViewModel[] {
-    return this.ordered().filter((thread) => !!this.parent(thread) || this.app.threads.some((child) => child.parentThreadId === thread.id));
+    return this.ordered().filter((thread) => !!this.parent(thread) || this.app.threads.some((child) => !child.sideChat && child.parentThreadId === thread.id));
   }
   private async open(thread: ThreadViewModel): Promise<void> {
     if (await this.app.selectThread(thread.id)) { this.onSelected(); }

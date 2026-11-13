@@ -177,6 +177,7 @@ export class ThreadViewModel {
   }
   teamEnabled: boolean = false;
   parentThreadId?: string;
+  sideChat: boolean = false;
   parentMessageId?: string;
   disabledMcpIds: string[] = [];
   attachments: Attachment[] = [];
@@ -204,6 +205,7 @@ export class ThreadViewModel {
     this.references = data.references || [];
     this.teamEnabled = data.teamEnabled === true;
     this.parentThreadId = data.parentThreadId; this.parentMessageId = data.parentMessageId; this.disabledMcpIds = data.disabledMcpIds || [];
+    this.sideChat = data.sideChatContext !== undefined;
     this.id = data.id; this.title = data.title; this.updatedAt = data.updatedAt;
     this.pinned = data.pinned === true; this.archived = data.archived === true; this.titleEdited = data.titleEdited === true;
     this.attachments = data.attachments || [];

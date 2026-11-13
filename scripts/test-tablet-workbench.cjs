@@ -154,7 +154,7 @@ restoredPrefs.saveWidth(false, 0);
 assert.equal(new DesktopLayoutPreferences({}).paneWidth(false), 0, 'Reset restores the default geometry on restart');
 
 
-const Page = probe('pages/Index', 'Index', ['hasPreview', 'detailOpen', 'workbench', 'windowChanged', 'openFiles', 'openPreview', 'closePreview', 'previewPresenceChanged', 'onBackPress',
+const Page = probe('pages/Index', 'Index', ['hasPreview', 'detailOpen', 'compactDetailLauncher', 'workbench', 'windowChanged', 'openFiles', 'openPreview', 'closePreview', 'previewPresenceChanged', 'onBackPress',
   'beginResize', 'resizeHistory', 'resizeDetail', 'endResize', 'openDetailTab', 'removeDetailTab', 'closeDetailTab',
   'workspaceClosed', 'toggleDetailPane', 'currentDetailTab', 'detailTabVisible', 'detailTabsAvailable',
   'detailTabPresent', 'hideBrowserTab', 'setDetailPane', 'detailGeometry', 'toggleDetailMaximized', 'saveDesktopPaneWidth'],
@@ -423,11 +423,11 @@ function visitTitle(node) {
 visitTitle(titleTree); assert.ok(titleOptions); assert.ok(chatInsets.length >= 2);
 const titleProbe = vm.runInNewContext(`(function() {return {options: (${titleOptions}), insets: [${chatInsets.join(',')}]};})`,
   {BarStyle: {STANDARD:'standard',STACK:'stack'},Color:{Transparent:'transparent'},CHAT_HEADER_HEIGHT:56});
-for (const desktop of [false, true]) {
+for (const largeScreen of [false, true]) {
   for (const width of [360,600,839,840,1116,1600]) {
-    const actual = titleProbe.call({ desktop, windowWidth: width, appearance: { noMaterial: {} } });
-    assert.equal(actual.options.barStyle, desktop || width >= 840 ? 'standard' : 'stack');
-    assert.ok(actual.insets.every(inset => inset === (desktop || width >= 840 ? 0 : 56)),
+    const actual = titleProbe.call({ largeScreen, windowWidth: width, appearance: { noMaterial: {} } });
+    assert.equal(actual.options.barStyle, largeScreen || width >= 840 ? 'standard' : 'stack');
+    assert.ok(actual.insets.every(inset => inset === (largeScreen || width >= 840 ? 0 : 56)),
       'Initial and updated ChatPanel props must match the native title layout');
   }
 }

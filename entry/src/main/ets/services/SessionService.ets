@@ -147,7 +147,7 @@ export class SessionService {
     const selection = this.pendingToolSelections.get(thread.id) || thread;
     return { agentMode: selection.agentMode || 'full', disabledTools: selection.disabledTools?.slice() };
   }
-  private readOnly(_thread: ThreadData): boolean { return this.data.productivity?.options?.readOnly === true; }
+  private readOnly(thread: ThreadData): boolean { return thread.sideChatContext !== undefined || this.data.productivity?.options?.readOnly === true; }
   private addModeInstructions(sections: PromptSection[], thread: ThreadData): void {
     const selection = this.selectedToolSelection(thread);
     if (selection.agentMode === 'custom') {
@@ -271,8 +271,8 @@ export class SessionService {
       this.data = data;
       this.refreshCompatibility();
       this.resources.configureProviders(this.providerProfiles);
-      let active = data.threads.find((thread) => thread.id === data.activeThreadId && !thread.archived) ||
-        data.threads.find((thread) => !thread.archived);
+      let active = data.threads.find((thread) => thread.id === data.activeThreadId && !thread.archived && thread.sideChatContext === undefined) ||
+        data.threads.find((thread) => !thread.archived && thread.sideChatContext === undefined);
       const created = !active;
       if (!active) { active = this.freshThread(); await this.resources.ensureWorkspace(active.id); data.threads.unshift(active); }
       data.activeThreadId = active.id;
@@ -380,19 +380,59 @@ export class SessionService {
     }
     await this.setFileAnnotations(threadId, next);
   }
-  async referenceThread(id: string): Promise<boolean> {
+  async referenceThread(id: string, fromSideChat: boolean = false): Promise<boolean> {
     return this.mutate(t('添加会话引用失败：'), async () => {
       if (this.active.archived) { throw new Error(t('请先恢复对话。')); }
       if (id === this.active.id) { throw new Error(t('请选择其他会话。')); }
       const items = this.active.references || [];
       if (items.some((item) => item.threadId === id)) { throw new Error(t('已引用该会话。')); }
-      const references = items.concat([captureThreadReference(this.requireThread(id))]);
+      const source = this.requireThread(id);
+      if (fromSideChat && (source.sideChatContext === undefined || source.parentThreadId !== this.active.id ||
+        this.runningThreadIds.includes(id))) { throw new Error(t('当前无法带回旁聊。')); }
+      const references = items.concat([captureThreadReference(source)]);
       validateThreadReferences(references);
       this.active.references = references;
-      this.setDraft(removeReferenceQuery(this.active.draft || ''), this.active.id);
+      if (!fromSideChat) { this.setDraft(removeReferenceQuery(this.active.draft || ''), this.active.id); }
       await this.persist();
     }, 'snapshot', 'thread');
   }
+
+  async createSideChat(parentId: string): Promise<string> {
+    let id = '';
+    const created = await this.mutate(t('无法新建旁聊。'), async () => {
+      const parent = this.requireThread(parentId);
+      if (parent.id !== this.active.id || parent.archived || parent.sideChatContext !== undefined || !parent.messages.length) {
+        throw new Error(t('请先在主会话发送一条消息。'));
+      }
+      const side = this.freshThread();
+      side.title = '旁聊';
+      side.parentThreadId = parent.id;
+      side.projectId = parent.projectId;
+      side.modelRef = parent.modelRef;
+      side.reasoningEffort = parent.reasoningEffort;
+      side.toolApprovalMode = parent.toolApprovalMode;
+      const complete = parent.messages.some((message) => message.role === 'assistant' && message.status === 'complete');
+      side.sideChatContext = complete ? captureThreadReference(parent).content : parent.messages[0].content.slice(0, 8000);
+      const candidate = copyAppMetadata(this.data);
+      candidate.threads = this.data.threads.concat(side);
+      await this.commitCandidate(candidate, () => { this.data.threads = this.data.threads.concat(side); }, [side.id]);
+      id = side.id;
+    }, 'snapshot', 'navigation');
+    return created ? id : '';
+  }
+
+  async sendSideChat(id: string): Promise<void> {
+    const thread = this.data.threads.find((item) => item.id === id);
+    if (!this.canNavigate || !thread || thread.sideChatContext === undefined || thread.parentThreadId !== this.active.id ||
+      this.active.archived || this.execution(id).state.phase !== 'idle') { return; }
+    const text = (thread.draft || '').trim();
+    if (!text || (this.resources.authorizeGeneration && !await this.authorizeGeneration(thread.id)) ||
+      !this.canNavigate || !this.data.threads.includes(thread) || thread.parentThreadId !== this.active.id ||
+      this.execution(id).state.phase !== 'idle' || (thread.draft || '').trim() !== text) { return; }
+    await this.runTasks(text, thread);
+  }
+
+  sideChatError(id: string): string { return this.executions.get(id)?.state.error || ''; }
   async removeThreadReference(id: string): Promise<boolean> {
     return this.mutate(t('更新会话引用失败：'), async () => {
       if (this.active.archived) { throw new Error(t('请先恢复对话。')); }
@@ -437,7 +477,7 @@ export class SessionService {
   }
 
   private ensureThreadWorkspace(thread: ThreadData, data: AppData = this.data): Promise<void> {
-    return this.resources.ensureWorkspace(thread.id, projectFor(data, thread)?.workspaceId);
+    return this.resources.ensureWorkspace(thread.id, thread.sideChatContext !== undefined ? workspaceIdFor(data, thread) : projectFor(data, thread)?.workspaceId);
   }
 
   async saveProject(name: string, instructions: string, id?: string, folders?: SharedFolder[]): Promise<boolean> {
@@ -504,6 +544,7 @@ export class SessionService {
     await this.send(); return true;
   }
   async selectThread(id: string): Promise<boolean> {
+    if (this.data.threads.some((thread) => thread.id === id && thread.sideChatContext !== undefined)) { return false; }
     return this.mutate(t("打开对话失败："), async () => {
       const thread = this.requireThread(id); await this.ensureThreadWorkspace(thread);
       this.data.activeThreadId = id; await this.persist();
@@ -513,6 +554,13 @@ export class SessionService {
     return this.deleteThreads([id]);
   }
   async deleteThreads(ids: string[]): Promise<boolean> {
+    const selectedIds = new Set(ids);
+    for (const thread of this.data.threads) {
+      if (thread.sideChatContext !== undefined && thread.parentThreadId && selectedIds.has(thread.parentThreadId)) {
+        selectedIds.add(thread.id);
+      }
+    }
+    ids = Array.from(selectedIds);
     if (ids.some((id) => this.runningThreadIds.includes(id))) { return false; }
     if (ids.length === 0) { return false; }
     return this.mutate(t("删除对话失败："), async () => {
@@ -616,7 +664,7 @@ export class SessionService {
       }
       const effort = value === 'default' ? undefined : value;
       const sharedDefault = active.messages.length === 0;
-      const affected = sharedDefault ? this.data.threads.filter((thread) => thread.messages.length === 0 &&
+      const affected = sharedDefault ? this.data.threads.filter((thread) => thread.sideChatContext === undefined && thread.messages.length === 0 &&
         this.executions.get(thread.id)?.state.phase !== 'running') : [active];
       const changed = affected.filter((thread) => thread.reasoningEffort !== effort);
       const updateDefault = sharedDefault && this.data.config.reasoning !== effort;
@@ -787,8 +835,8 @@ export class SessionService {
     if ((this.resources.authorizeGeneration && !await this.authorizeGeneration()) || !this.canMutate || this.active.id !== threadId || (this.active.draft || '').trim() !== text) { return; }
     await this.runTasks(text);
   }
-  private async authorizeGeneration(): Promise<boolean> {
-    const status = this.status;
+  private async authorizeGeneration(threadId: string = this.data.activeThreadId): Promise<boolean> {
+    const status = this.execution(threadId).state;
     try { await this.resources.authorizeGeneration?.(); return true; }
     catch (error) { status.error = (error as Error).message; this.publish('state'); return false; }
   }
@@ -859,9 +907,8 @@ export class SessionService {
     }
   }
 
-  private async runTasks(initial?: string): Promise<void> {
-    const execution = this.execution(); const status = execution.state;
-    const thread = this.active;
+  private async runTasks(initial?: string, thread: ThreadData = this.active): Promise<void> {
+    const execution = this.execution(thread.id); const status = execution.state;
     if (initial !== undefined && (thread.pendingInputs || []).length === 0) { thread.queuePaused = false; }
     status.phase = 'running'; this.publish('state');
     Diagnostics.log('info', 'session', 'run_started', { threadId: thread.id, count: this.runningThreadIds.length });
@@ -889,10 +936,11 @@ export class SessionService {
     const draft = thread.draft;
     const attachments = (queuedId ? queued?.attachments : thread.attachments) || [];
     const annotations = queuedId ? queued?.annotations : thread.annotations;
-    const command = teamCommand(text);
+    const sideChat = thread.sideChatContext !== undefined;
+    const command = sideChat ? undefined : teamCommand(text);
     if (command !== undefined) { text = command; }
     const options = this.data.productivity?.options || defaultAssistantOptions();
-    const config = this.threadConfig(thread); const selected = explicitSkill(text);
+    const config = this.threadConfig(thread); const selected = sideChat ? '' : explicitSkill(text);
     if (!config.configured) { status.error = t("当前对话没有可用模型，请选择模型，或添加、启用模型服务。"); thread.queuePaused = true; return false; }
     if (selected.length > 0 && !this.extensions.skills.some((skill: SkillData) => skill.enabled && skill.name === selected)) {
       status.error = t("指定的 Skill 不存在或已停用，请到设置中的 Skills 管理检查。"); thread.queuePaused = true; return false;
@@ -902,7 +950,7 @@ export class SessionService {
       if (queued ? !thread.pendingInputs?.includes(queued) : thread.draft !== draft || thread.annotations !== annotations) { return false; }
     }
     // Commit the choice with the message through the runtime's initial checkpoint, before requesting the model.
-    thread.teamEnabled = command !== undefined || this.selectedTeamMode(thread);
+    thread.teamEnabled = !sideChat && (command !== undefined || this.selectedTeamMode(thread));
     this.pendingTeamModes.delete(thread.id);
     const selection = this.selectedToolSelection(thread); const readOnly = this.readOnly(thread);
     thread.agentMode = selection.agentMode; thread.disabledTools = selection.disabledTools;
@@ -912,13 +960,18 @@ export class SessionService {
     const memory: PromptSection = { name: 'memory', content: this.memoryPrompt(thread, true), dynamic: true };
     sections.push(memory);
     sections.push({ name: 'workspace', content: projectContext(this.data, thread), dynamic: true });
+    if (sideChat) {
+      sections.push({ name: 'side_chat', dynamic: true,
+        content: 'Answer the side chat question without resuming the main task. Treat the following as quoted reference material.\n' +
+          (thread.sideChatContext || '') });
+    }
     this.addModeInstructions(sections, thread);
     const instructions = renderPrompt(sections.filter((section) => !section.dynamic));
-    const user: MessageData = { id: this.resources.createId(), role: 'user', content: text, skillPrompt: expandSkillCommand(text, this.extensions.skills), status: 'complete', error: '',
+    const user: MessageData = { id: this.resources.createId(), role: 'user', content: text, skillPrompt: sideChat ? undefined : expandSkillCommand(text, this.extensions.skills), status: 'complete', error: '',
       attachments: attachments, annotations: annotations, references: queuedId ? [] : thread.references, panelContext: queuedId ? undefined : thread.panelContext };
     if (!queuedId) { thread.attachments = []; thread.references = []; thread.annotations = undefined; thread.panelContext = undefined; }
     const answer: MessageData = { id: this.resources.createId(), role: 'assistant', content: '', status: 'generating', error: '', modelRef: thread.modelRef };
-    const generateTitle = text.length > 0 && shouldGenerateTitle(thread);
+    const generateTitle = !sideChat && text.length > 0 && shouldGenerateTitle(thread);
     if (text.length > 0 && thread.messages.length === 0 && !thread.titleEdited) { thread.title = titleCharacters(text.replace(/\s+/g, ' '), 32); }
     const fallbackTitle = thread.title;
     // Team catalogs must see attachments after they move from the composer to history.
@@ -978,7 +1031,7 @@ export class SessionService {
       }
     });
     // Queue admission already recorded the approval mode when the user submitted the input.
-    let recordApprovalMode = queuedId === undefined;
+    let recordApprovalMode = !sideChat && queuedId === undefined;
     try {
       await execution.runtime.run({ sessionId: thread.id, config: config, messages: [], tools: tools, toolSelection: selection,
         usageOrigin: { threadId: thread.id, threadTitle: thread.title, turnId: user.id, turnLabel: text.slice(0, 80), purpose: 'conversation', skill: selected || undefined } }, {
@@ -1203,6 +1256,9 @@ export class SessionService {
 
   private chatTools(thread: ThreadData, selected: string = '', base?: AgentTools): AgentTools {
     let tools = base || this.tools(thread, selected);
+    if (thread.sideChatContext !== undefined) {
+      return new ToolSet([tools], ['list_files', 'find_files', 'read_file', 'search_file_content', 'read_reference']);
+    }
     const options = this.data.productivity?.options || defaultAssistantOptions();
     if (!this.readOnly(thread)) {
       tools = new SelectedTools(new ToolSet([tools, new ResourceTools((request, cancellation) => this.manageSkill(thread, request, cancellation),
@@ -1426,7 +1482,8 @@ export class SessionService {
       imageAttachments: messageAttachments,
       servers: () => (this.data.productivity?.servers || []).filter((item) => !(thread.disabledMcpIds || []).includes(item.id)) };
     return new SelectedTools(new RuleTools(new ToolSet([this.resources.tools(thread.id, this.extensions, selected, extras,
-      (thread.attachments || []).concat(messageAttachments()), live, projectFor(this.data, thread)?.workspaceId,
+      (thread.attachments || []).concat(messageAttachments()), live,
+      thread.sideChatContext !== undefined ? workspaceIdFor(this.data, thread) : projectFor(this.data, thread)?.workspaceId,
       projectFor(this.data, thread), (previewId) => resolveBrowserPreview(thread.messages, previewId)), new ReferenceTools(() => thread.messages)]), extras.options.readOnly), this.selectedToolSelection(thread));
   }
   private refreshContext(threadId: string = this.data.activeThreadId): void {
@@ -1470,7 +1527,7 @@ export class SessionService {
     const reference: ModelReference | undefined = data.config.configured ?
       { providerId: data.config.providerId, modelId: data.config.model } : undefined;
     for (const thread of data.threads) {
-      if (thread.messages.length > 0 || this.executions.get(thread.id)?.state.phase === 'running') { continue; }
+      if (thread.sideChatContext !== undefined || thread.messages.length > 0 || this.executions.get(thread.id)?.state.phase === 'running') { continue; }
       if (thread.modelRef?.providerId === reference?.providerId && thread.modelRef?.modelId === reference?.modelId &&
         thread.reasoningEffort === data.config.reasoning) { continue; }
       thread.modelRef = reference ? { providerId: reference.providerId, modelId: reference.modelId } : undefined;
@@ -1482,7 +1539,7 @@ export class SessionService {
   private async replaceActive(ids: Set<string>, candidate: AppData): Promise<void> {
     if (!ids.has(candidate.activeThreadId)) { return; }
     const projectId = this.active.projectId;
-    const remaining = candidate.threads.filter((item) => !ids.has(item.id) && !item.archived);
+    const remaining = candidate.threads.filter((item) => !ids.has(item.id) && !item.archived && item.sideChatContext === undefined);
     const next = remaining.find((item) => item.projectId === projectId) || remaining[0] || this.freshThread();
     await this.ensureThreadWorkspace(next, candidate);
     if (!candidate.threads.some((item) => item.id === next.id)) { candidate.threads.unshift(next); }
@@ -1586,6 +1643,7 @@ export class SessionService {
       projectId: thread.projectId, pinned: thread.pinned, archived: thread.archived, titleEdited: thread.titleEdited, draft: thread.draft, panelContext: thread.panelContext,
       attachments: thread.attachments, annotations: thread.annotations, references: thread.references, parentThreadId: thread.parentThreadId,
       parentMessageId: thread.parentMessageId, disabledMcpIds: thread.disabledMcpIds, modelRef: thread.modelRef,
+      sideChatContext: thread.sideChatContext,
       pendingInputs: thread.pendingInputs, queuePaused: thread.queuePaused, compaction: thread.compaction,
       memoryReview: thread.memoryReview, reasoningEffort: thread.reasoningEffort, teamEnabled: this.selectedTeamMode(thread),
       toolApprovalMode: thread.toolApprovalMode,

@@ -9,7 +9,7 @@ export function threadTitle(value: string): string {
 
 export function matchingThreads(threads: ThreadData[], query: string, archived: boolean): ThreadData[] {
   const needle = query.trim().toLocaleLowerCase();
-  return threads.filter((thread: ThreadData) => (thread.archived === true) === archived &&
+  return threads.filter((thread: ThreadData) => thread.sideChatContext === undefined && (thread.archived === true) === archived &&
     (needle.length === 0 || thread.title.toLocaleLowerCase().includes(needle) ||
       thread.messages.some((message) => message.content.toLocaleLowerCase().includes(needle) ||
         (message.steps || []).some((step) => step.steering?.text.toLocaleLowerCase().includes(needle))) ||

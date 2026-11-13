@@ -1,6 +1,6 @@
 import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
-import { IS_PC } from '../common/DeviceForm';
+import { IS_LARGE_SCREEN, IS_PC } from '../common/DeviceForm';
 import { t } from '../model/I18n';
 import { FrameCallback, SymbolGlyphModifier } from '@kit.ArkUI';
 import { KeyCode } from '@kit.InputKit';
@@ -61,6 +61,15 @@ struct ThreadRow {
     return this.conversationActive && this.app.active.id === this.thread.id;
   }
   private matchId(): string { return this.thread.messages.find((item) => item.content.toLocaleLowerCase().includes(this.query.trim().toLocaleLowerCase()))?.id || ''; }
+  private matchExcerpt(): string {
+    const needle = this.query.trim().toLocaleLowerCase();
+    if (!needle) { return ''; }
+    const message = this.thread.messages.find((item) => item.content.toLocaleLowerCase().includes(needle));
+    if (!message) { return ''; }
+    const offset = message.content.toLocaleLowerCase().indexOf(needle);
+    const start = Math.max(0, offset - 18);
+    return (start ? '…' : '') + message.content.slice(start, offset + 60).replace(/\s+/g, ' ').trim();
+  }
 
   @Builder
   actions() {
@@ -128,10 +137,16 @@ struct ThreadRow {
             if (this.thread.pinned) {
               SymbolGlyph($r('sys.symbol.pin_fill')).fontSize(13).fontColor([this.appearance.accent])
             }
-            Text(this.thread.displayTitle).fontFamily(this.appearance.fontFamily).fontSize(IS_PC ? 13 : 15).maxLines(1).layoutWeight(1)
+            Column({ space: 2 }) {
+            Text(this.thread.displayTitle).fontFamily(this.appearance.fontFamily).fontSize(IS_PC ? 13 : 15).maxLines(1).width('100%')
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .fontWeight(this.active() ? FontWeight.Medium : FontWeight.Normal)
               .fontColor(this.workbench ? $r('app.color.text_primary') : this.active() ? this.appearance.onAccentContainer : $r('app.color.text_primary'))
+            if (IS_LARGE_SCREEN && this.matchExcerpt()) {
+              Text(this.matchExcerpt()).fontSize(12).fontColor($r('app.color.text_secondary')).width('100%').maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+            }
+            }.layoutWeight(1).alignItems(HorizontalAlign.Start)
           }.layoutWeight(1)
           if (!this.selecting) {
             Button({ type: ButtonType.Circle }) {
@@ -718,7 +733,7 @@ export struct ThreadList {
       Stack() {
         SymbolGlyph($r('sys.symbol.magnifyingglass')).fontSize(19)
           .fontColor([$r('app.color.text_secondary')]).accessibilityLevel('no')
-        if (!this.searchOpen) {
+        if (!this.searchOpen && !IS_LARGE_SCREEN) {
           Button({ type: ButtonType.Circle }).id('thread-search-toggle').width(SEARCH_HEIGHT).height(SEARCH_HEIGHT)
             .backgroundColor(Color.Transparent).accessibilityText(t('搜索对话')).enabled(!this.locked())
             .onClick(() => this.searchRequested())
@@ -727,9 +742,11 @@ export struct ThreadList {
       TextInput({ text: this.query, placeholder: t('搜索对话') })
         .id('search-threads').layoutWeight(1).height(SEARCH_HEIGHT).padding(0)
         .fontFamily(this.appearance.fontFamily).fontSize(15).placeholderColor($r('app.color.text_tertiary'))
-        .backgroundColor(Color.Transparent).enabled(this.searchOpen && !this.locked()).focusable(this.searchOpen)
-        .visibility(this.searchOpen ? Visibility.Visible : Visibility.None).accessibilityText(t('搜索对话'))
-        .onChange((value: string) => { if (this.searchOpen) { this.updateQuery(value); } })
+        .backgroundColor(Color.Transparent).enabled((this.searchOpen || IS_LARGE_SCREEN) && !this.locked())
+        .focusable(this.searchOpen || IS_LARGE_SCREEN)
+        .visibility(this.searchOpen || IS_LARGE_SCREEN ? Visibility.Visible : Visibility.None).accessibilityText(t('搜索对话'))
+        .onFocus(() => { if (IS_LARGE_SCREEN) { this.searchOpen = true; } })
+        .onChange((value: string) => { if (this.searchOpen || IS_LARGE_SCREEN) { this.updateQuery(value); } })
         .onKeyEvent((event: KeyEvent) => {
           if (event.type === KeyType.Down && event.keyCode === KeyCode.KEYCODE_ESCAPE) {
             this.closeSearch();
@@ -740,7 +757,7 @@ export struct ThreadList {
         IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭搜索'), compId: 'close-thread-search',
           diameter: SEARCH_HEIGHT, iconSize: 15, onTap: () => this.closeSearch() })
       }
-    }.id('thread-search-pill').width(this.searchOpen ? this.toolbarWidth : SEARCH_HEIGHT).height(SEARCH_HEIGHT)
+    }.id('thread-search-pill').width(IS_LARGE_SCREEN ? '100%' : this.searchOpen ? this.toolbarWidth : SEARCH_HEIGHT).height(SEARCH_HEIGHT)
       .borderRadius(SEARCH_HEIGHT / 2).clip(true).backgroundColor($r('app.color.surface_variant'))
       .animation({ duration: Motion.fast, curve: Motion.standard })
   }
@@ -754,6 +771,21 @@ export struct ThreadList {
         IconButton({ icon: $r('sys.symbol.xmark'), label: t('取消'), compId: 'thread-selection-cancel', diameter: SEARCH_HEIGHT,
           iconSize: 17, onTap: () => this.endSelection() })
       }.width('100%').height(SEARCH_HEIGHT)
+    } else if (IS_LARGE_SCREEN) {
+      Column({ space: Space.xs }) {
+        this.searchControl()
+        Row() {
+          Button(t('新建对话')).id('workbench-new-chat').attributeModifier(Btn.textSmall).layoutWeight(1)
+            .enabled(!this.locked()).onClick(() => this.onNewChat(this.projectFilter === null ? this.app.activeProject?.id : this.projectFilter || undefined))
+          IconButton({ icon: $r('sys.symbol.square_grid_2x2'), label: t('生活看板'), compId: 'open-life-panels',
+            diameter: SEARCH_HEIGHT, iconSize: 19, disabled: !this.app.ready, onTap: this.onLifePanels })
+          Button({ type: ButtonType.Circle }) {
+            SymbolGlyph($r('sys.symbol.list_bullet')).fontSize(18)
+          }.id('thread-scope-menu').width(SEARCH_HEIGHT).height(SEARCH_HEIGHT).backgroundColor(Color.Transparent)
+            .accessibilityText(t('筛选对话')).enabled(!this.locked())
+            .bindMenu(this.scopeMenu, { systemMaterial: this.appearance.menu, mask: false })
+        }.width('100%')
+      }.width('100%')
     } else {
       Stack({ alignContent: Alignment.Start }) {
         Row() {
@@ -902,6 +934,11 @@ export struct ThreadList {
             .enabled(!this.locked() && this.selectedIds.length > 0).onClick(() => this.confirmDeleteSelected())
         }.width('100%')
       } else {
+        if (IS_LARGE_SCREEN) {
+          Button(this.archived ? t('返回会话') : t('已归档 · {0}', [this.app.filteredThreads('', true).length]))
+            .id('workbench-archive-toggle').attributeModifier(Btn.textSmall).width('100%')
+            .onClick(() => this.setScope(!this.archived, this.projectFilter))
+        }
         Row({ space: Space.xs }) {
           if (this.workbench) {
             Button({ type: ButtonType.Circle }) {
