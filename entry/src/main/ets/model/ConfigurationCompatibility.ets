@@ -1,6 +1,6 @@
 import { AppData } from './Conversation';
 import { AGENT_MODES, AgentMode, ToolSelection, knownDisabledTool } from './AgentMode';
-import { isSupportedProtocol } from './ProviderEndpoint';
+import { isProviderProtocol } from './ProviderEndpoint';
 import { isSupportedSearchProvider } from './WebSearch';
 import { REASONING_EFFORTS } from './ReasoningEffort';
 import { supportedMcpAuth } from './Productivity';
@@ -16,7 +16,7 @@ export function configurationIssues(data: AppData, selections?: Map<string, Tool
     issues.push({ setting: 'search.provider', message: t('当前版本不支持保存的搜索服务，搜索已停用；原配置已保留。') });
   }
   for (const profile of data.providerProfiles || []) {
-    if (!isSupportedProtocol(profile.protocol)) {
+    if (!isProviderProtocol(profile.protocol)) {
       issues.push({ setting: 'providerProfiles.protocol', providerId: profile.id,
         message: t('当前版本不支持部分模型协议，对应模型暂不可用；原配置已保留。') });
     }

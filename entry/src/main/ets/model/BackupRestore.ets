@@ -42,7 +42,7 @@ export function prepareBackupServices(local: AppData, restored: AppData, createI
   const options = restored.productivity?.options;
   restored.config.providerId = providers.get(restored.config.providerId) || restored.config.providerId;
   if (options) {
-    for (const reference of [options.memory, options.title, options.teamWorker, ...options.capabilities]) { remapModel(reference, providers); }
+    for (const reference of [options.memory, options.title, options.teamWorker, options.imageGeneration, ...options.capabilities]) { remapModel(reference, providers); }
     const search = options.search;
     if (search?.modelProviderId) { search.modelProviderId = providers.get(search.modelProviderId) || search.modelProviderId; }
     if (search?.deepseek?.modelProviderId) { search.deepseek.modelProviderId = providers.get(search.deepseek.modelProviderId) || search.deepseek.modelProviderId; }

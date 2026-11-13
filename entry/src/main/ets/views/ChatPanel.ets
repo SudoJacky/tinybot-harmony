@@ -14,6 +14,7 @@ import { AnswerSpeech } from '../services/AnswerSpeech';
 import { LaunchActions } from '../services/LaunchActions';
 import { isHighestReasoningEffort, reasoningEfforts } from '../model/ReasoningEffort';
 import { ProviderProfile } from '../model/ProviderProfiles';
+import { WorkspaceStore } from '../model/WorkspaceStore';
 import { ComposerGlow } from '../common/ComposerGlow';
 import { ModelPickerPanel } from './ModelPickerPanel';
 import { ReasoningEffortPicker } from './ReasoningEffortPicker';
@@ -974,6 +975,11 @@ export struct ChatPanel {
     }
   }
 
+  private messageWorkspaceRoot(): string {
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    return new WorkspaceStore(context.getApplicationContext().filesDir).pathFor(this.app.activeWorkspaceId);
+  }
+
   @Builder
   messageList() {
     Stack({ alignContent: Alignment.Bottom }) {
@@ -987,6 +993,7 @@ export struct ChatPanel {
         LazyForEach(this.messageSource, (message: MessageViewModel) => {
           ListItem() {
             MessageBubble({ message: message, latestPreviewIds: this.thread.latestPreviewIds, turnStatus: message.status, webEnabled: this.app.extensions.webEnabled, onOpenFile: this.onOpenFile,
+              workspaceRoot: this.messageWorkspaceRoot(),
               previewInspectable: this.previewInspectable, inspectedPreviewId: this.inspectedPreviewId, onInspectPreview: this.onInspectPreview, uiAvailable: !this.app.busy && !this.thread.archived,
               sendOrigin: this.sendingMessageId === message.id ? this.sendOrigin : undefined,
               onSendReady: (): void => { this.scroller.scrollEdge(Edge.Bottom); }, onSendFinish: (): void => { this.finishSendFlight(message.id); },
@@ -1147,7 +1154,7 @@ export struct ChatPanel {
       Divider().strokeWidth(0.5).color($r('app.color.divider')).margin({ left: 10, right: 10, top: 4, bottom: 4 })
       this.plusMenuRow($r('sys.symbol.link'), t('引用其他会话'), 'plus-menu-reference',
         this.canAttach() && this.thread.references.length < 4, false, () => this.dismissPlusMenu(() => this.addThreadReference()))
-      Text(this.thread.attachments.length >= MAX_MESSAGE_ATTACHMENTS ? t('已达到每条消息 {0} 个附件的上限', [MAX_MESSAGE_ATTACHMENTS]) : t('每条消息最多 {0} 个附件 · 图片需模型支持视觉输入', [MAX_MESSAGE_ATTACHMENTS]))
+      Text(this.thread.attachments.length >= MAX_MESSAGE_ATTACHMENTS ? t('已达到每条消息 {0} 个附件的上限', [MAX_MESSAGE_ATTACHMENTS]) : t('每条消息最多 {0} 个附件。', [MAX_MESSAGE_ATTACHMENTS]))
         .fontFamily(this.appearance.fontFamily).fontSize(11).lineHeight(16).fontColor($r('app.color.text_tertiary'))
         .width('100%').padding({ left: 10, right: 10, top: 6, bottom: 8 })
     }.width('100%')
@@ -1180,7 +1187,7 @@ export struct ChatPanel {
           this.plusTile($r('sys.symbol.folder'), t("工作区"), 'open-workspace', !this.app.busy,
             () => { this.showPlus = false; this.onFiles(); })
         }.width('100%').alignItems(VerticalAlign.Top)
-        Text(this.thread.attachments.length >= MAX_MESSAGE_ATTACHMENTS ? t('已达到每条消息 {0} 个附件的上限', [MAX_MESSAGE_ATTACHMENTS]) : t('每条消息最多 {0} 个附件 · 图片需模型支持视觉输入', [MAX_MESSAGE_ATTACHMENTS])).fontFamily(this.appearance.fontFamily)
+        Text(this.thread.attachments.length >= MAX_MESSAGE_ATTACHMENTS ? t('已达到每条消息 {0} 个附件的上限', [MAX_MESSAGE_ATTACHMENTS]) : t('每条消息最多 {0} 个附件。', [MAX_MESSAGE_ATTACHMENTS])).fontFamily(this.appearance.fontFamily)
           .fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).width('100%').textAlign(TextAlign.Center)
         Button(t('引用其他会话')).fontFamily(this.appearance.fontFamily).id('add-thread-reference').attributeModifier(Btn.tonal).width('100%')
           .enabled(this.canAttach() && this.thread.references.length < 4)

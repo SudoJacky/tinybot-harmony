@@ -36,6 +36,18 @@ export class Attachments {
   static async savePreview(pixel: image.PixelMap): Promise<Attachment> {
     return Attachments.saveImage(pixel, 'Preview screenshot.jpg');
   }
+  static async saveInspection(bytes: Uint8Array, name: string): Promise<Attachment> {
+    const source = image.createImageSource(bytes.buffer as ArrayBuffer);
+    try {
+      const info = await source.getImageInfo();
+      if (info.size.width * info.size.height > 80000000) { throw new Error(t("图片像素过大，请先缩小。")); }
+      const scale = Math.min(1, 1600 / Math.max(info.size.width, info.size.height));
+      const pixel = await source.createPixelMap({ desiredSize: {
+        width: Math.max(1, Math.round(info.size.width * scale)), height: Math.max(1, Math.round(info.size.height * scale)) } });
+      try { return await Attachments.saveImage(pixel, name); }
+      finally { await pixel.release(); }
+    } finally { await source.release(); }
+  }
   static saveBrowserAnnotation(pixel: image.PixelMap): Promise<Attachment> {
     return Attachments.saveImage(pixel, t('网页批注.jpg'));
   }

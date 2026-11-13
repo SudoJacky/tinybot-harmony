@@ -2177,6 +2177,7 @@ async function test(name, run) {
     const ext=defaultExtensions(); ext.webEnabled=false;
     const tools=resources.tools('chat',ext,'',data,[{id:'text',name:'note.txt',path:'text.txt',mime:'text/plain',size:4,text:'note'}]);
     assert.ok(!tools.definitions().some(tool=>tool.function.name==='generate_image'));
+    assert.ok(!tools.definitions().some(tool=>tool.function.name==='image_gen'));
     const invoke=(name,args)=>tools.execute({id:name,type:'function',function:{name,arguments:JSON.stringify(args)}},new Cancellation());
     await assert.rejects(invoke('generate_image',{prompt:'a circle'}),error=>error.code==='TOOL_UNAVAILABLE');
     const discovery=new ToolCatalog(tools);
@@ -2184,6 +2185,308 @@ async function test(name, run) {
     assert.ok(!discovery.definitions().some(tool=>tool.function.name==='tool_search'));
     await assert.rejects(discovery.execute({id:'search',type:'function',function:{name:'tool_search',arguments:'{"query":""}'}},new Cancellation()),error=>error.code==='TOOL_UNAVAILABLE');
     assert.ok(tools.definitions().some(tool=>tool.function.name==='read_attachment'));
+  });
+  await test('image_gen adapts four protocols, saves and delivers images, and respects approval and cancellation', async()=>{
+    const {NativeSessionResources}=load(path.join(source,'services/NativeSessionService'));
+    const {ProviderRegistry}=load(path.join(source,'services/providers/ProviderRegistry'));
+    const {defaultExtensions}=load(path.join(source,'model/Skills'));
+    const {defaultProductivity}=load(path.join(source,'model/Productivity'));
+    const {defaultAssistantOptions}=load(path.join(source,'model/AssistantOptions'));
+    const {availableModels,availableImageModels}=load(path.join(source,'model/ProviderProfiles'));
+    const {ProfileSettings}=load(path.join(source,'services/ProfileSettings'));
+    const {deliveredFiles}=load(path.join(source,'model/Deliverables'));
+    const {ApprovalTools}=load(path.join(source,'services/ApprovalTools'));
+    const root='/sandbox/image-gen';
+    await fileIo.mkdir(root,true);
+    const approval=new ToolApproval();
+    const registry=new ProviderRegistry();
+    const resources=new NativeSessionResources(root,registry,approval);
+    await resources.ensureWorkspace('chat');
+    const files=new NativeWorkspaceFiles(root+'/workspace/chat');
+    const png=Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+Wn1sAAAAASUVORK5CYII=','base64'));
+    const base64=Buffer.from(png).toString('base64');
+    await files.createJobOutput('source.png',png,new Cancellation());
+    const data=defaultProductivity(), ext=defaultExtensions();
+    data.options=defaultAssistantOptions();
+    ext.webEnabled=false;
+    const profiles=['openai-images','gemini-images','seedream-images','dashscope-images'].map(protocol=>({
+      id:protocol,name:protocol,protocol,baseUrl:'https://'+protocol+'.invalid/v1',
+      credentialAlias:'fixture-key',noApiKey:false,enabled:true,models:['image-test']
+    }));
+    resources.configureProviders(profiles);
+    assert.equal(availableModels(profiles).length,0);
+    assert.equal(availableImageModels(profiles).length,4);
+    assert.equal(registry.list().length,0);
+    const settings=new ProfileSettings(new CredentialStore(),()=>crypto.randomUUID());
+    const saved=model.emptyData();
+    saved.providerProfiles=[];
+    const draft={id:'',name:'Image service',protocol:'openai-images',baseUrl:profiles[0].baseUrl,
+      apiKey:'',noApiKey:true,enabled:true,models:'image-test',contextWindow:''};
+    await settings.save(saved,draft,async()=>{});
+    assert.equal(saved.config.configured,false);
+    assert.equal(availableImageModels(saved.providerProfiles).length,1);
+    await settings.save(saved,{...draft,name:'Chat service',protocol:'chat-completions',models:'chat-test'},async()=>{});
+    assert.equal(saved.config.configured,true);
+    assert.equal(saved.config.model,'chat-test');
+    const call=args=>({id:'img',type:'function',function:{name:'image_gen',arguments:JSON.stringify(args)}});
+    const currentTools=(ask=false)=>resources.tools('chat',ext,'',data,[],{askForToolApproval:ask});
+    for(const profile of profiles){
+      const protocol=profile.protocol;
+      data.options.imageGeneration={providerId:profile.id,modelId:'image-test'};
+      const tools=currentTools(), def=tools.definitions().find(tool=>tool.function.name==='image_gen');
+      assert.equal(Boolean(def.function.parameters.properties.transparent_background),protocol==='openai-images');
+      let requests=0;
+      jsonScript=(url,options)=>{
+        requests++;
+        assert.equal(options.maxRedirects,0);
+        if(options.method==='GET'){
+          assert.equal(url,'https://cdn.invalid/output.png?token=signed');
+          assert.equal(options.header.Authorization,undefined);
+          assert.equal(options.header['x-goog-api-key'],undefined);
+          return{responseCode:200,result:png.buffer};
+        }
+        if(protocol==='openai-images'){
+          assert.equal(url,profile.baseUrl+'/images/edits');
+          assert.match(options.header['Content-Type'],/^multipart\/form-data; boundary=tinybot-/);
+          const body=Buffer.from(options.extraData);
+          assert.ok(body.includes(Buffer.from(png)));
+          assert.match(body.toString(),/name="image\[\]"; filename="reference-1.png"/);
+          assert.match(body.toString(),/name="background"\r\n\r\ntransparent/);
+          assert.equal(options.header.Authorization,'Bearer fixture-secret');
+          return{responseCode:200,result:JSON.stringify({data:[{b64_json:base64}]})};
+        }
+        const body=JSON.parse(options.extraData);
+        if(protocol==='gemini-images'){
+          assert.equal(url,profile.baseUrl+'/interactions');
+          assert.equal(options.header['x-goog-api-key'],'fixture-secret');
+          assert.equal(body.model,'image-test');
+          assert.equal(body.input[1].data,base64);
+          assert.equal(body.response_format.aspect_ratio,'3:2');
+          assert.equal(body.store,false);
+          return{responseCode:200,result:JSON.stringify({status:'completed',steps:[
+            {type:'thought',summary:[{type:'image',data:'discard'}]},
+            {type:'model_output',content:[{type:'image',mime_type:'image/png',data:base64}]}
+          ]})};
+        }
+        assert.equal(options.header.Authorization,'Bearer fixture-secret');
+        const image='https://cdn.invalid/output.png?token=signed';
+        if(protocol==='seedream-images'){
+          assert.equal(url,profile.baseUrl+'/images/generations');
+          assert.equal(body.image,'data:image/png;base64,'+base64);
+          assert.equal(body.size,'2496x1664');
+          return{responseCode:200,result:JSON.stringify({data:[{url:image}]})};
+        }
+        assert.equal(url,profile.baseUrl+'/services/aigc/multimodal-generation/generation');
+        assert.equal(body.input.messages[0].content[0].image,'data:image/png;base64,'+base64);
+        assert.equal(body.parameters.size,'1536*1024');
+        return{responseCode:200,result:JSON.stringify({output:{choices:[{message:{content:[{image}]}}]}})};
+      };
+      const args={prompt:'Change the background',reference_images:['source.png'],aspect_ratio:'3:2'};
+      if(protocol==='openai-images')args.transparent_background=true;
+      const invocation=call(args), output=await tools.execute(invocation,new Cancellation());
+      assert.equal(requests,protocol==='seedream-images'||protocol==='dashscope-images'?2:1);
+      const receipt=JSON.parse(output);
+      assert.deepEqual(Buffer.from(await files.readJobInput(receipt.path,png.length,new Cancellation())),Buffer.from(png));
+      assert.ok(!output.includes(base64));
+      assert.equal(deliveredFiles([{tools:[{call:invocation,status:'complete',output}]}])[0].generatedImage,true);
+    }
+    data.options.imageGeneration={providerId:profiles[0].id,modelId:'image-test'};
+    jsonScript=(url,options)=>{
+      assert.equal(url,profiles[0].baseUrl+'/images/generations');
+      assert.deepEqual(JSON.parse(options.extraData),{model:'image-test',prompt:'a circle',size:'1024x1024'});
+      return{responseCode:200,result:JSON.stringify({data:[{b64_json:base64}]})};
+    };
+    await currentTools().execute(call({prompt:'a circle',aspect_ratio:'1:1'}),new Cancellation());
+    data.options.imageGeneration={providerId:profiles.at(-1).id,modelId:'image-test'};
+    let requested=0;
+    jsonScript=()=>{requested++;throw Error('Unexpected paid request');};
+    const pendingApproval=approvalRequested(approval);
+    const withApproval=new ApprovalTools(currentTools(true),approval,'Fixture');
+    const denied=withApproval.execute(call({prompt:'a circle'}),new Cancellation());
+    await pendingApproval;
+    assert.ok(approval.details.includes(profiles.at(-1).baseUrl),'Only the image tool prompts, with the actual destination');
+    assert.ok(approval.details.includes('a circle'));
+    approval.respond(false);
+    await assert.rejects(denied,error=>error.code==='USER_DENIED');
+    await assert.rejects(currentTools().execute(call({prompt:'a circle',reference_images:['../other.png']}),new Cancellation()),
+      error=>error.code==='FS_INVALID_PATH');
+    data.options.readOnly=true;
+    assert.ok(!currentTools().definitions().some(tool=>tool.function.name==='image_gen'));
+    await assert.rejects(currentTools().execute(call({prompt:'a circle'}),new Cancellation()),error=>error.code==='PERMISSION_DENIED');
+    assert.equal(requested,0);
+    data.options.readOnly=false;
+    const started=new Promise(resolve=>{jsonScript=()=>{resolve();return new Promise(()=>{});};});
+    const signal=new Cancellation(), before=destroyed;
+    const pending=currentTools().execute(call({prompt:'a circle'}),signal);
+    await started;
+    signal.cancel();
+    await assert.rejects(pending,error=>error.code==='CANCELLED');
+    assert.equal(destroyed,before+1);
+  });
+  await test('image_gen shares a chat service key across routes and follows key rotation',async()=>{
+    const {NativeSessionResources}=load(path.join(source,'services/NativeSessionService'));
+    const {ProviderRegistry}=load(path.join(source,'services/providers/ProviderRegistry'));
+    const {ProviderEditorViewModel}=load(path.join(source,'viewmodel/ProviderEditorViewModel'));
+    const {ProfileSettings}=load(path.join(source,'services/ProfileSettings'));
+    const {availableModels,availableImageModels}=load(path.join(source,'model/ProviderProfiles'));
+    const {defaultExtensions}=load(path.join(source,'model/Skills'));
+    const {defaultProductivity}=load(path.join(source,'model/Productivity'));
+    const {defaultAssistantOptions}=load(path.join(source,'model/AssistantOptions'));
+    const {encryptBackupKeys,decryptBackupKeys}=load(path.join(source,'services/BackupKeys'));
+    const editor=new ProviderEditorViewModel();
+    editor.name='Shared'; editor.baseUrl='https://shared.invalid/v1/chat/completions';
+    editor.models='text-model'; editor.apiKey='first-shared-key';
+    const state=model.emptyData(), vault=new CredentialStore();
+    const settings=new ProfileSettings(vault,()=>crypto.randomUUID());
+    const commit=async()=>{};
+    await settings.save(state,editor.snapshot(),commit);
+    const initial=state.providerProfiles[0];
+    editor.reset(initial);
+    editor.imageEnabled=true; editor.imageModels='image-model';
+    editor.imageBaseUrl='https://other.invalid/images/v1';
+    assert.ok(editor.fieldError('image'));
+    await assert.rejects(settings.save(state,editor.snapshot(),commit),/端口/);
+    editor.imageBaseUrl='';
+    assert.equal(editor.fieldError('image'),'');
+    await settings.save(state,editor.snapshot(),commit);
+    assert.equal(state.providerProfiles[0].credentialAlias,initial.credentialAlias);
+    assert.equal(availableModels(state.providerProfiles)[0].modelId,'text-model');
+    assert.equal(availableImageModels(state.providerProfiles)[0].modelId,'image-model');
+    const encrypted=await encryptBackupKeys(state,'image-test-account',vault);
+    const tampered=JSON.parse(JSON.stringify(state));
+    tampered.providerProfiles[0].imageModels.baseUrl='https://shared.invalid/other';
+    await assert.rejects(decryptBackupKeys(encrypted,'image-test-account',tampered),/不一致/);
+    assert.equal((await decryptBackupKeys(encrypted,'image-test-account',state)).providers[0].apiKey,'first-shared-key');
+    const root='/sandbox/shared-image-service';
+    await fileIo.mkdir(root,true);
+    const resources=new NativeSessionResources(root,new ProviderRegistry(),new ToolApproval());
+    await resources.ensureWorkspace('chat');
+    const productivity=defaultProductivity();
+    productivity.options=defaultAssistantOptions();
+    productivity.options.imageGeneration={providerId:initial.id,modelId:'image-model'};
+    const invoke=async (expectedUrl,expectedKey)=>{
+      resources.configureProviders(state.providerProfiles);
+      const tools=resources.tools('chat',defaultExtensions(),'',productivity,[],{askForToolApproval:false,skills:()=>[],servers:()=>[]});
+      jsonScript=(url,options)=>{
+        assert.equal(url,expectedUrl);
+        assert.equal(options.header.Authorization,'Bearer '+expectedKey);
+        assert.equal(JSON.parse(options.extraData).model,'image-model');
+        return{responseCode:200,result:JSON.stringify({data:[{b64_json:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+Wn1sAAAAASUVORK5CYII='}]})};
+      };
+      await tools.execute({id:'image',type:'function',function:{name:'image_gen',arguments:'{"prompt":"A circle"}'}},new Cancellation());
+    };
+    await invoke('https://shared.invalid/v1/images/generations','first-shared-key');
+    editor.reset(state.providerProfiles[0]);
+    editor.imageBaseUrl='https://shared.invalid/images/v1';
+    editor.apiKey='second-shared-key';
+    await settings.save(state,editor.snapshot(),commit);
+    assert.equal(await vault.readOptional(initial.credentialAlias),undefined);
+    await invoke('https://shared.invalid/images/v1/images/generations','second-shared-key');
+    editor.reset(state.providerProfiles[0]); editor.imageEnabled=false;
+    await settings.save(state,editor.snapshot(),commit);
+    assert.equal(availableImageModels(state.providerProfiles).length,0);
+    assert.equal(availableModels(state.providerProfiles)[0].modelId,'text-model');
+  });
+  await test('image_gen can use newly admitted photos and its results can be inspected before a revision',async()=>{
+    const {NativeSessionResources}=load(path.join(source,'services/NativeSessionService'));
+    const {ProviderRegistry}=load(path.join(source,'services/providers/ProviderRegistry'));
+    const {runAgentLoop}=load(path.join(source,'services/AgentLoop'));
+    const {stepMessages,validateSteps}=load(path.join(source,'model/Agent'));
+    const {defaultExtensions}=load(path.join(source,'model/Skills'));
+    const {defaultProductivity}=load(path.join(source,'model/Productivity'));
+    const {defaultAssistantOptions}=load(path.join(source,'model/AssistantOptions'));
+    const root='/sandbox/image-inspection';
+    await fileIo.mkdir(root,true);
+    Attachments.configure(root);
+    const registry=new ProviderRegistry();
+    const resources=new NativeSessionResources(root,registry,new ToolApproval());
+    await resources.ensureWorkspace('chat');
+    resources.configureProviders([{id:'image-provider',name:'Image',protocol:'openai-images',
+      baseUrl:'https://images.invalid/v1',credentialAlias:'',noApiKey:true,enabled:true,models:['image-test']}]);
+    const productivity=defaultProductivity();
+    productivity.options=defaultAssistantOptions();
+    productivity.options.imageGeneration={providerId:'image-provider',modelId:'image-test'};
+    const photo={id:'chat-photo',name:'Photo.jpg',path:'chat-photo.jpg',mime:'image/jpeg',size:4};
+    const jpg=Uint8Array.from([255,216,255,217]);
+    const png=Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+Wn1sAAAAASUVORK5CYII=','base64'));
+    await fileIo.mkdir(root+'/attachments',true);
+    fs.writeFileSync(nativePath(Attachments.path(photo)),jpg);
+    let admitted=[];
+    const tools=resources.tools('chat',defaultExtensions(),'',productivity,[],{
+      askForToolApproval:false,imageAttachments:()=>admitted,skills:()=>[],servers:()=>[]
+    });
+    const call=(id,name,args)=>({id,type:'function',function:{name,arguments:JSON.stringify(args)}});
+    const edit=call('initial-edit','image_gen',{prompt:'Change the sky',reference_images:[photo.path]});
+    const foreign=call('foreign-photo','image_gen',{prompt:'Change the sky',reference_images:[photo.path]});
+    await assert.rejects(tools.execute(foreign,new Cancellation()));
+    admitted=[photo];
+    let serviceCalls=0;
+    jsonScript=(url,options)=>{
+      assert.equal(url,'https://images.invalid/v1/images/edits');
+      const body=Buffer.from(options.extraData);
+      assert.ok(body.includes(Buffer.from(serviceCalls++===0?jpg:png)));
+      return{responseCode:200,result:JSON.stringify({data:[{b64_json:Buffer.from(png).toString('base64')}]})};
+    };
+    const imageKit=kits['@kit.ImageKit'];
+    const original=imageKit.image;
+    let sourceReleases=0,pixelReleases=0;
+    imageKit.image={
+      createImageSource:bytes=>{
+        assert.deepEqual(Buffer.from(bytes),Buffer.from(png));
+        return{getImageInfo:async()=>({size:{width:2400,height:1200}}),
+          createPixelMap:async options=>{
+            assert.equal(options.desiredSize.width,1600);
+            assert.equal(options.desiredSize.height,800);
+            return{getImageInfo:async()=>({size:options.desiredSize}),release:async()=>{pixelReleases++;}};
+          },release:async()=>{sourceReleases++;}};
+      },
+      createImagePacker:()=>({packing:async()=>jpg.buffer,release:async()=>{}})
+    };
+    try {
+      const turn={content:'',steps:[]}, saved=[];
+      let modelCalls=0, firstPath;
+      const requests=[];
+      registry.register({info:{id:'chat-model',name:'Chat'},endpoint:()=>'https://chat.invalid',stream:async request=>{
+        requests.push(await Attachments.hydrate(request.messages));
+        const respond=toolCall=>({content:'',toolCalls:[toolCall]});
+        if(modelCalls++===0)return respond(edit);
+        if(modelCalls===2){
+          firstPath=JSON.parse(request.messages.at(-1).content).path;
+          return respond(call('inspect','view_image',{path:firstPath}));
+        }
+        if(modelCalls===3){
+          assert.equal(requests.at(-1).at(-1).images[0],'data:image/jpeg;base64,'+Buffer.from(jpg).toString('base64'));
+          return respond(call('revise','image_gen',{prompt:'Keep the framing and soften only the sky',reference_images:[firstPath]}));
+        }
+        return{content:'Done',toolCalls:[]};
+      }});
+      const config={providerId:'chat-model',model:'vision',baseUrl:'https://chat.invalid',credentialAlias:''};
+      await runAgentLoop({turn,tools,maxSteps:4,messages:[],model:registry.bind(config,new CredentialStore())},new Cancellation(),
+        {event(){},checkpoint:async()=>saved.push(JSON.parse(JSON.stringify(turn)))});
+      assert.equal(serviceCalls,2);
+      assert.equal(sourceReleases,1);
+      assert.equal(pixelReleases,1);
+      const restored=saved.at(-1);
+      validateSteps(restored.steps);
+      const inspection=restored.steps[1].tools[0];
+      assert.equal(JSON.parse(inspection.output).path,firstPath);
+      assert.ok(!inspection.output.includes('base64'));
+      assert.notEqual(JSON.parse(restored.steps[2].tools[0].output).path,firstPath);
+      const historical=stepMessages(restored.steps[1]);
+      const hydrated=await Attachments.hydrate(historical);
+      assert.equal(hydrated.at(-1).images.length,1);
+      let textRequest;
+      registry.register({info:{id:'text-model',name:'Text'},endpoint:()=>'',stream:async request=>{
+        textRequest=request.messages;return{content:'Done',toolCalls:[]};
+      }});
+      await registry.bind({...config,providerId:'text-model',images:false},new CredentialStore())
+        .stream(historical,[],new Cancellation(),()=>{});
+      assert.equal(textRequest.at(-1).attachments,undefined);
+      assert.match(textRequest.at(-1).content,/image was not sent/);
+    } finally {
+      imageKit.image=original;
+      Attachments.configure(fixture);
+    }
   });
   await test('model discovery validates credential origin and uses the protocol endpoint',async()=>{
     const {discoverModels}=load(path.join(source,'services/ModelDiscovery'));let requests=0;

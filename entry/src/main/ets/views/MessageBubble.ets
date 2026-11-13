@@ -70,7 +70,7 @@ function toolIcon(name: string): Resource {
   if (name === 'write_file' || name === 'edit_file') { return $r('sys.symbol.square_and_pencil'); }
   if (name === 'read_file' || name === 'read_file_lines' || name === 'read_attachment') { return $r('sys.symbol.doc_text'); }
   if (name === 'find_files' || name === 'search_file_content' || name === 'mcp_search_tools') { return $r('sys.symbol.magnifyingglass'); }
-  if (name === 'generate_image') { return $r('sys.symbol.picture'); }
+  if (name === 'generate_image' || name === 'image_gen' || name === 'view_image') { return $r('sys.symbol.picture'); }
   if (name === 'update_plan') { return $r('sys.symbol.list_bullet'); }
   if (name === 'request_user_input') { return $r('sys.symbol.questionmark_circle'); }
   if (name === 'publish_data_view') { return $r('sys.symbol.text_alignleft'); }
@@ -252,6 +252,7 @@ export struct MessageBubble {
   @Prop readingMessageId: string = '';
   onRead: (id: string) => void = () => {};
   @Prop webEnabled: boolean = false;
+  @Prop workspaceRoot: string = '';
   onOpenFile: (path: string) => void = () => {};
   @Prop previewInspectable: boolean = false;
   @Prop inspectedPreviewId: string = '';
@@ -676,15 +677,22 @@ export struct MessageBubble {
       }
       ForEach(deliveredFiles(this.message.stepViews), (file: PresentedFile) => {
         Button() {
-          Row({ space: 12 }) {
-            SymbolGlyph($r('sys.symbol.doc')).fontSize(24).fontColor([this.appearance.accent])
-            Column({ space: 4 }) {
-              Text(file.path).fontFamily(this.appearance.fontFamily).fontSize(14).fontColor($r('app.color.text_primary')).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-              if (file.description) { Text(file.description).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary')).maxLines(3) }
-              Text(t('打开文件 · 分享与导出')).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_tertiary'))
-            }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-            SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(12).fontColor([$r('app.color.text_secondary')])
-          }.width('100%').padding(14)
+          Column() {
+            if (file.generatedImage && this.workspaceRoot) {
+              Image('file://' + this.workspaceRoot + '/' + file.path).width('100%').constraintSize({ maxHeight: 340 })
+                .objectFit(ImageFit.Contain).accessibilityText(t('生成图片'))
+            }
+            Row({ space: 12 }) {
+              SymbolGlyph(file.generatedImage ? $r('sys.symbol.picture') : $r('sys.symbol.doc')).fontSize(24).fontColor([this.appearance.accent])
+              Column({ space: 4 }) {
+                Text(file.generatedImage ? t('生成图片') : file.path).fontFamily(this.appearance.fontFamily).fontSize(14)
+                  .fontColor($r('app.color.text_primary')).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+                if (file.description) { Text(file.description).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary')).maxLines(3) }
+                Text(t('打开文件 · 分享与导出')).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_tertiary'))
+              }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+              SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(12).fontColor([$r('app.color.text_secondary')])
+            }.width('100%').padding(14)
+          }.width('100%')
         }.fontFamily(this.appearance.fontFamily).width('100%').type(ButtonType.Normal).borderRadius(Radius.md).backgroundColor($r('app.color.surface_variant'))
         .id('deliverable-' + this.message.id + '-' + file.path).onClick(() => this.onOpenFile(file.path))
       }, (file: PresentedFile) => file.path)

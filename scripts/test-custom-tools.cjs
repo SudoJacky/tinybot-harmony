@@ -53,8 +53,8 @@ function fixture(data = seed()) {
   f.calls = calls; return f;
 }
 async function main() {
-  assert.equal(all.length, 52); assert.equal(new Set(all).size, 52); assert.equal(BASIC_FILE_TOOLS.length, 6);
-  assert.equal(optional.length, 42);
+  assert.equal(all.length, 54); assert.equal(new Set(all).size, 54); assert.equal(BASIC_FILE_TOOLS.length, 6);
+  assert.equal(optional.length, 44);
   for (const name of ['list_mail_accounts', 'search_mail', 'read_mail']) assert.ok(all.includes(name));
   assert.ok(!all.includes('list_mini_apps')); assert.ok(!all.includes('publish_mini_app'));
   const retiredApps = seed(); retiredApps.productivity.options.miniAppsEnabled = true;
@@ -78,10 +78,10 @@ async function main() {
   const legacyMixed = seed(); legacyMixed.threads[0].agentMode = 'custom';
   legacyMixed.threads[0].disabledTools = ['read_tool_result', 'read_attachment'];
   assert.deepEqual(Array.from(parseAppData(JSON.stringify(legacyMixed)).threads[0].disabledTools).sort(),
-    ['read_attachment', 'read_reference']);
+    ['read_attachment', 'read_reference', 'view_image']);
   const covered = Array.from(TOOL_CAPABILITIES.flatMap(capability => capability.tools));
-  assert.equal(TOOL_CAPABILITIES.length, 13);
-  assert.equal(new Set(covered).size, 42); assert.deepEqual(covered.slice().sort(), optional.slice().sort());
+  assert.equal(TOOL_CAPABILITIES.length, 14);
+  assert.equal(new Set(covered).size, 44); assert.deepEqual(covered.slice().sort(), optional.slice().sort());
   const obsolete = {agentMode:'custom', disabledTools:Array.from(MANAGED_TOOL_NAMES).concat(['generate_image', 'read_tool_result'])};
   validateToolSelection(obsolete);
   assert.deepEqual(Array.from(normalizeDisabledTools(obsolete.disabledTools)), []);
@@ -144,7 +144,7 @@ async function main() {
   }
   assert.equal(legacy.repository.writes.length, legacyWrites, 'Capability toggles keep the existing save-on-send behavior');
   for (const name of MANAGED_TOOL_NAMES) await assert.rejects(legacy.session.setToolEnabled(name,false));
-  console.log('PASS 13 selectable capabilities including mail, legacy memory/Skills overrides removed, individual Skill state retained and atomic group catalog/dispatch');
+  console.log('PASS selectable capabilities including image generation, legacy memory/Skills overrides removed, individual Skill state retained and atomic group catalog/dispatch');
   for (const selection of [{ agentMode: 'research' }, { disabledTools: ['write_file'] }, { disabledTools: ['unknown'] },
     { disabledTools: ['read_web', 'read_web'] }, { disabledTools: 'read_web' }, { disabledTools: [null] }]) {
     assert.throws(() => validateToolSelection(selection));

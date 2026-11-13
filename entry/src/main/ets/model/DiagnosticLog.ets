@@ -36,7 +36,7 @@ const ERROR_CODES: string[] = ['STALE_BROWSER_SNAPSHOT', 'STALE_INTERACTIVE_STAT
   'CONTENT_UNAVAILABLE', 'EVIDENCE_REQUIRED', 'EXECUTION_FAILED', 'FS_AMBIGUOUS_MATCH', 'FS_INCOMPLETE_LIST',
   'FS_INVALID_ARGUMENTS', 'FS_INVALID_CURSOR', 'FS_INVALID_EDITS', 'FS_INVALID_PATH', 'FS_MATCH_NOT_FOUND',
   'FS_OVERLAPPING_EDITS', 'FS_STALE_SEARCH', 'HANDOFF_REQUIRED', 'HTTP_ERROR', 'INTERNAL_ERROR', 'INVALID_RESPONSE',
-  'INVALID_RESULT', 'INVALID_STATE', 'LIMIT_EXCEEDED', 'NETWORK_ERROR', 'NOT_CONFIGURED', 'NOT_EXECUTED', 'NOT_FOUND',
+  'IMAGE_SERVICE_ERROR', 'INVALID_RESULT', 'INVALID_STATE', 'LIMIT_EXCEEDED', 'NETWORK_ERROR', 'NOT_CONFIGURED', 'NOT_EXECUTED', 'NOT_FOUND',
   'OUTCOME_UNKNOWN', 'PREVIEW_INVALID', 'PREVIEW_NOT_FOUND', 'PREVIEW_NOT_READY', 'QUOTA_EXHAUSTED', 'RATE_LIMITED',
   'REMOTE_ERROR', 'REMOTE_TOOL_ERROR', 'RESPONSE_BUDGET_EXCEEDED', 'SCHEMA_REQUIRED', 'SEARCH_LAYOUT_CHANGED',
   'SEARCH_PAGE_CHANGED', 'SEARCH_VERIFICATION_REQUIRED', 'STALE_BROWSER_ELEMENT', 'STALE_RESOURCE', 'TOOL_UNAVAILABLE',
@@ -83,6 +83,7 @@ EVENTS.mcp = ['request_failed', 'cancel_notice_failed', 'browser_launch_failed']
 EVENTS.mail = ['transport_failed', 'cleanup_failed', 'account_saved', 'account_removed', 'query_started', 'query_complete', 'query_failed', 'command_failed', 'settings_failed'];
 EVENTS.export = ['image_failed', 'preview_failed', 'cleanup_failed', 'share_failed', 'save_failed'];
 EVENTS.network = ['request_start', 'request_end', 'context_overflow', 'first_data', 'request_failed'];
+EVENTS['image-generation'] = ['request_complete', 'request_failed'];
 EVENTS.moderation = ['guard_stopped', 'output_words_stopped'];
 EVENTS.context = ['inspected', 'request_prefix'];
 EVENTS.browser = ['permission', 'control_user', 'control_agent', 'control_wait', 'task_released', 'closed', 'failed', 'acquired', 'permission_wait', 'operation', 'observation_changed', 'opened_by_user', 'annotation_started', 'annotation_captured', 'annotation_failed', 'search_observed', 'search_failed', 'capture_started', 'frame_captured', 'capture_finished'];
@@ -118,9 +119,9 @@ STRINGS.setting = ['search.provider', 'providerProfiles.protocol', 'extensions.b
   'capabilities.reasoning', 'threads.agentMode', 'threads.disabledTools', 'threads.reasoningEffort', 'servers.authType',
   'feedback.seenReplies', 'feedback.pendingSubmission', 'feedback.uploadQueue'];
 STRINGS.change = ['cold', 'append', 'tools', 'system', 'history'];
-STRINGS.protocol = ['chat-completions', 'responses', 'anthropic-messages', 'gemini'];
+STRINGS.protocol = ['chat-completions', 'responses', 'anthropic-messages', 'gemini', 'openai-images', 'gemini-images', 'seedream-images', 'dashscope-images'];
 STRINGS.phase = ['idle', 'preparing', 'listening', 'complete', 'finishing', 'error', 'creating', 'playing', 'stopping', 'connecting', 'streaming', 'capture', 'compose', 'encode',
-  'login', 'state', 'storage', 'credential', 'identity', 'submit', 'query', 'upload',
+  'login', 'state', 'storage', 'credential', 'identity', 'submit', 'query', 'upload', 'generate', 'decode', 'download',
   'page_show', 'privacy_event', 'subscription_ready', 'new_want', 'business', 'manual_retry', 'request_consent', 'initial', 'active'];
 STRINGS.action = ['send', 'cancel', 'edit', 'press', 'none', 'open', 'click', 'type', 'select', 'scroll', 'back', 'forward', 'reload', 'capture', 'wait'];
 STRINGS.policy = ['unset', 'enabled', 'disabled'];
