@@ -3,7 +3,6 @@ import { ProviderEffects } from './providers/Provider';
 import { PresentTools } from './PresentTools';
 import { ImageGenerationTools } from './ImageGenerationTools';
 import { ImageInspectionTools } from './ImageInspectionTools';
-import { imageProfile } from './ImageGenerationProtocol';
 import { NativeImageGenerator } from './NativeImageGenerator';
 import { PreviewTools } from './PreviewTools';
 import { LifePanels } from './LifePanels';
@@ -52,7 +51,7 @@ import { ArkDataConversationStore } from './ArkDataConversationStore';
 import { NativeData } from './NativeData';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { FileJobWorkspace } from './WorkspaceFiles';
-import { ProviderProfile } from '../model/ProviderProfiles';
+import { ProviderProfile, imageService } from '../model/ProviderProfiles';
 import { ExtensionSettings } from '../model/Skills';
 import { AgentRuntime } from './AgentRuntime';
 import { AgentTools } from './AgentLoop';
@@ -188,7 +187,7 @@ export class NativeSessionResources implements SessionResources {
     groups.push(new ImageInspectionTools((path, maximum, cancellation) => imageFiles.readJobInput(path, maximum, cancellation),
       (bytes, name) => Attachments.saveInspection(bytes, name)));
     const imageModel = productivity?.options?.imageGeneration;
-    const generator = imageProfile(this.profiles, imageModel);
+    const generator = imageService(this.profiles, imageModel);
     if (generator && imageModel) {
       groups.push(new ImageGenerationTools(new NativeImageGenerator(generator, imageModel.modelId, new CredentialStore()),
         imageFiles,

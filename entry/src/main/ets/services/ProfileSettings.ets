@@ -2,7 +2,7 @@ import { t } from '../model/I18n';
 import { Diagnostics } from '../model/Diagnostics';
 import { contextualError } from '../model/DetailedError';
 import { AppData, copyModelConfig } from '../model/Conversation';
-import { ProviderProfile, modelConfig, modelIds, validateProfile } from '../model/ProviderProfiles';
+import { ImageModelSettings, ProviderProfile, modelConfig, modelIds, validateProfile } from '../model/ProviderProfiles';
 import { CredentialReader } from './providers/Provider';
 import { isSupportedProtocol, sameCredentialScope } from '../model/ProviderEndpoint';
 import { mergeSavedConfiguration } from '../model/SavedConfiguration';
@@ -25,9 +25,12 @@ export interface ProviderDraft {
   enabled: boolean;
   models: string;
   contextWindow: string;
+  imageModels?: ImageModelDraft | null;
   balance?: BalanceSettings;
   balanceApiKey?: string;
 }
+
+export interface ImageModelDraft { protocol: string; baseUrl: string; models: string; }
 
 // Configuration commits and key lifecycle belong together, outside the editor and runtime.
 export class ProfileSettings {
@@ -52,11 +55,16 @@ export class ProfileSettings {
     if (!draft.noApiKey && key.length === 0 && (!previous?.credentialAlias || !sameScope)) {
       throw new Error(t("请填写 API Key；更换服务基础地址时需要重新填写，其他服务的密钥不会被复用。"));
     }
+    const image = draft.imageModels;
+    const imageModels = image ? mergeSavedConfiguration<ImageModelSettings>(previous?.imageModels,
+      { protocol: image.protocol, baseUrl: image.baseUrl.trim() || undefined, models: modelIds(image.models) }) :
+      image === null ? undefined : previous?.imageModels;
     const edited: ProviderProfile = { id: previous?.id || 'provider-' + this.createId(), name: draft.name.trim(),
       presetId: draft.presetId, protocol: draft.protocol, baseUrl: draft.baseUrl.trim().replace(/\/+$/, ''),
       credentialAlias: draft.noApiKey ? '' : key.length > 0 ? 'pending-key' : previous?.credentialAlias || '',
       noApiKey: draft.noApiKey, enabled: draft.enabled, models: modelIds(draft.models), pendingSetup: undefined,
       contextWindow: draft.contextWindow.trim() ? Number(draft.contextWindow) : undefined,
+      imageModels: imageModels,
       balance: draft.balance,
       balanceCredentialAlias: separateBalance ? (balanceKey ? 'pending-balance-key' : previous?.balanceCredentialAlias) : undefined };
     const profile = mergeSavedConfiguration(previous, edited);

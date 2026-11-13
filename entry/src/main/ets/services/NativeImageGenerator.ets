@@ -1,6 +1,6 @@
 import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { ProviderProfile } from '../model/ProviderProfiles';
+import { ImageServiceAccess } from '../model/ProviderProfiles';
 import { Diagnostics } from '../model/Diagnostics';
 import { ToolFailure, toolHttpFailure } from '../model/ToolFailure';
 import { CredentialReader } from './providers/Provider';
@@ -13,10 +13,10 @@ import { ImageEncoding, imageRequest, imageResponse } from './ImageGenerationPro
 const RESPONSE_LIMIT: number = Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 512 * 1024;
 
 export class NativeImageGenerator implements ImageGenerator {
-  private profile: ProviderProfile;
+  private profile: ImageServiceAccess;
   private model: string;
   private credentials: CredentialReader;
-  constructor(profile: ProviderProfile, model: string, credentials: CredentialReader) {
+  constructor(profile: ImageServiceAccess, model: string, credentials: CredentialReader) {
     this.profile = profile;
     this.model = model;
     this.credentials = credentials;

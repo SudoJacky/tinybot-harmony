@@ -89,11 +89,12 @@ export struct ProviderEditorPanel {
     if (this.locked()) { return; }
     if (this.editor.modelInput.trim()) { this.addManual(); if (this.modelError) { this.onModels(this.modelError); return; } }
     this.attempted = true;
-    const invalid = ['name', 'url', 'key', 'models', 'context'].find((field: string) => this.editor.fieldError(field).length > 0);
+    const invalid = ['name', 'url', 'key', 'models', 'context', 'image'].find((field: string) => this.editor.fieldError(field).length > 0);
     if (invalid) {
       if (invalid === 'context') { this.advanced = true; }
       this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t('请检查标出的设置项。') });
       if (invalid === 'models') { this.onModels(this.editor.fieldError('models')); return; }
+      if (invalid === 'image') { this.scroller.scrollEdge(Edge.Bottom); return; }
       this.focusField(invalid);
       return;
     }
@@ -132,6 +133,41 @@ export struct ProviderEditorPanel {
       case 'seedream-images': return 'https://ark.cn-beijing.volces.com/api/v3';
       case 'dashscope-images': return 'https://dashscope.aliyuncs.com/api/v1';
       default: return 'https://api.example.com/v1';
+    }
+  }
+  @Builder
+  imageSettings() {
+    SectionHeader({ title: t('图片生成') })
+    GroupCard() {
+      Column() {
+        SwitchRow({ title: t('添加图片模型'), subtitle: this.editor.noApiKey ? '' : t('使用此服务的 API Key'), compId: 'provider-image-enabled',
+          isOn: this.editor.imageEnabled, onChange: (value: boolean) => { this.editor.imageEnabled = value; } })
+        if (this.editor.imageEnabled) {
+          RowDivider()
+          Column({ space: 12 }) {
+            Column() {
+              this.label(t('协议'))
+              Select(IMAGE_PROTOCOLS.map((protocol: string): SelectOption => ({ value: protocolName(protocol) })))
+                .id('provider-image-protocol').width('100%').selected(IMAGE_PROTOCOLS.indexOf(this.editor.imageProtocol))
+                .value(protocolName(this.editor.imageProtocol))
+                .onSelect((index: number) => { this.editor.imageProtocol = IMAGE_PROTOCOLS[index]; })
+            }
+            Column() {
+              this.label(t('图片服务地址'))
+              TextInput({ text: this.editor.imageBaseUrl, placeholder: t('留空使用此服务的基础地址') })
+                .fontFamily(this.appearance.fontFamily).id('provider-image-url').attributeModifier(Styles.input)
+                .type(InputType.URL).maxLength(1024).onChange((value: string) => { this.editor.imageBaseUrl = value; })
+            }
+            Column() {
+              this.label(t('图片模型 ID'))
+              TextArea({ text: this.editor.imageModels, placeholder: t('粘贴模型 ID，支持换行或逗号分隔') })
+                .fontFamily(this.appearance.fontFamily).id('provider-image-models').attributeModifier(Styles.area)
+                .maxLength(10000).height(80).onChange((value: string) => { this.editor.imageModels = value; })
+            }
+            this.fieldError('image')
+          }.padding(12).width('100%')
+        }
+      }
     }
   }
   // Two columns keep protocol names readable on phone screens.
@@ -393,6 +429,7 @@ export struct ProviderEditorPanel {
               }
             }
           }.margin({ top: 16 })
+          if (this.editor.showsImageSettings) { this.imageSettings() }
         }.padding({ left: Space.page, right: Space.page, bottom: Space.xl }).width('100%').enabled(!this.locked())
       }.layoutWeight(1).width('100%').scrollBar(BarState.Auto).align(Alignment.Top)
       BottomBar() {

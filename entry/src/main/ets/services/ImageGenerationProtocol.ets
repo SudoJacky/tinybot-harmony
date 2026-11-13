@@ -1,5 +1,5 @@
-import { ModelReference, ProviderProfile } from '../model/ProviderProfiles';
-import { isImageProtocol, protocolUrl, providerEndpointRoot } from '../model/ProviderEndpoint';
+import { ImageServiceAccess } from '../model/ProviderProfiles';
+import { protocolUrl, providerEndpointRoot } from '../model/ProviderEndpoint';
 import { ToolFailure, parseToolResponse } from '../model/ToolFailure';
 import { ImageGenerationInput, ImageReference } from './ImageGenerationTools';
 
@@ -37,11 +37,6 @@ interface ImageResponse {
   output?: DashScopeOutput;
 }
 
-export function imageProfile(profiles: ProviderProfile[], reference?: ModelReference): ProviderProfile | undefined {
-  return reference ? profiles.find((profile) => profile.id === reference.providerId && profile.enabled &&
-    isImageProtocol(profile.protocol) && profile.models.includes(reference.modelId)) : undefined;
-}
-
 function dataUrl(reference: ImageReference, encoding: ImageEncoding): string {
   return 'data:' + reference.mime + ';base64,' + encoding.base64(reference.bytes);
 }
@@ -72,7 +67,7 @@ function multipart(fields: Record<string, string>, references: ImageReference[],
   return result.buffer as ArrayBuffer;
 }
 
-export function imageRequest(profile: ProviderProfile, model: string, key: string, input: ImageGenerationInput,
+export function imageRequest(profile: ImageServiceAccess, model: string, key: string, input: ImageGenerationInput,
   references: ImageReference[], encoding: ImageEncoding): ImageRequest {
   const protocol = profile.protocol;
   const endpoint = protocolUrl(protocol, profile.baseUrl, true);

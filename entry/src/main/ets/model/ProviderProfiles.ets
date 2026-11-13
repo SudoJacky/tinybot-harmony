@@ -2,7 +2,7 @@ import { t } from './I18n';
 import { ModelConfig } from './Conversation';
 import { builtinProviderInfos } from './Provider';
 import { contextSettings } from './ContextSettings';
-import { isImageProtocol, isProviderProtocol, isSupportedProtocol, protocolUrl } from './ProviderEndpoint';
+import { isImageProtocol, isProviderProtocol, isSupportedProtocol, protocolUrl, sharedImageBaseUrl } from './ProviderEndpoint';
 import { isConfigurationName } from './ConfigurationValue';
 import { BalanceSettings, validateBalanceSettings } from './BalanceSettings';
 
@@ -10,6 +10,9 @@ export interface ModelReference {
   providerId: string;
   modelId: string;
 }
+
+export interface ImageModelSettings { protocol: string; baseUrl?: string; models: string[]; }
+export interface ImageServiceAccess { id: string; name: string; protocol: string; baseUrl: string; credentialAlias: string; }
 
 // An instance is distinct from its preset and wire protocol. Keys stay in AssetStore.
 export interface ProviderProfile {
@@ -22,6 +25,7 @@ export interface ProviderProfile {
   noApiKey: boolean;
   enabled: boolean;
   models: string[];
+  imageModels?: ImageModelSettings;
   contextWindow?: number;
   balance?: BalanceSettings;
   balanceCredentialAlias?: string;
@@ -55,6 +59,19 @@ export function validateProfile(profile: ProviderProfile, stored: boolean = fals
   }
   if (isProviderProtocol(profile.protocol)) { protocolUrl(profile.protocol, profile.baseUrl, true); }
   modelIds(profile.models.join('\n'));
+  if (profile.imageModels !== undefined) {
+    const image = profile.imageModels;
+    if (!image || isImageProtocol(profile.protocol) || !isConfigurationName(image.protocol) ||
+      (!stored && (!isSupportedProtocol(profile.protocol) || !isImageProtocol(image.protocol))) ||
+      (image.baseUrl !== undefined && (typeof image.baseUrl !== 'string' || !image.baseUrl.trim() || image.baseUrl.length > 1024)) ||
+      !Array.isArray(image.models) || image.models.some((id) => typeof id !== 'string' || !id || id.trim() !== id)) {
+      throw new Error(t('图片生成服务配置无效。'));
+    }
+    modelIds(image.models.join('\n'));
+    if (isSupportedProtocol(profile.protocol) && isImageProtocol(image.protocol)) {
+      sharedImageBaseUrl(profile.protocol, profile.baseUrl, image.protocol, image.baseUrl);
+    }
+  }
   validateBalanceSettings(profile.balance);
   contextSettings({ configured: false, providerId: profile.id, baseUrl: '', model: '', systemPrompt: '',
     credentialAlias: '', contextWindow: profile.contextWindow });
@@ -95,19 +112,35 @@ export function migrateProfiles(config: ModelConfig): ProviderProfile[] {
 }
 
 export function availableModels(profiles: ProviderProfile[]): ModelChoice[] {
-  return modelChoices(profiles, isSupportedProtocol);
+  return modelChoices(profiles, false);
 }
 
 export function availableImageModels(profiles: ProviderProfile[]): ModelChoice[] {
-  return modelChoices(profiles, isImageProtocol);
+  return modelChoices(profiles, true);
 }
 
-function modelChoices(profiles: ProviderProfile[], supported: (protocol: string) => boolean): ModelChoice[] {
+function imageModelIds(profile: ProviderProfile): string[] {
+  if (isImageProtocol(profile.protocol)) { return profile.models; }
+  const image = profile.imageModels;
+  return image && isSupportedProtocol(profile.protocol) && isImageProtocol(image.protocol) ? image.models : [];
+}
+
+export function imageService(profiles: ProviderProfile[], reference?: ModelReference): ImageServiceAccess | undefined {
+  if (!reference) { return undefined; }
+  const profile = profiles.find((item) => item.id === reference.providerId && item.enabled && imageModelIds(item).includes(reference.modelId));
+  if (!profile) { return undefined; }
+  const image = profile.imageModels;
+  return { id: profile.id, name: profile.name, credentialAlias: profile.credentialAlias,
+    protocol: image?.protocol || profile.protocol,
+    baseUrl: image ? sharedImageBaseUrl(profile.protocol, profile.baseUrl, image.protocol, image.baseUrl) : profile.baseUrl };
+}
+
+function modelChoices(profiles: ProviderProfile[], images: boolean): ModelChoice[] {
   const result: ModelChoice[] = [];
   for (const profile of profiles) {
-    if (profile.enabled && supported(profile.protocol)) {
-      for (const id of profile.models) { result.push({ providerId: profile.id, modelId: id, providerName: profile.name }); }
-    }
+    if (!profile.enabled) { continue; }
+    const ids = images ? imageModelIds(profile) : isSupportedProtocol(profile.protocol) ? profile.models : [];
+    for (const id of ids) { result.push({ providerId: profile.id, modelId: id, providerName: profile.name }); }
   }
   return result;
 }

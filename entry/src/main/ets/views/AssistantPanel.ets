@@ -106,7 +106,7 @@ export struct ModelSettingsPanel {
                 options: this.choices(), selected: this.chosen(this.options.teamWorker),
                 onSelect: (index: number) => this.setDedicatedModel('teamWorker', index) })
               RowDivider()
-              ModelChoiceRow({ title: t('生成图片'), subtitle: this.imageModels().length ? '' : t('请先添加图片生成服务。'),
+              ModelChoiceRow({ title: t('生成图片'), subtitle: this.imageModels().length ? '' : t('请先在模型服务中配置图片模型。'),
                 options: this.imageChoices(), selected: this.chosenImage(),
                 onSelect: (index: number) => this.setImageModel(index) })
             }

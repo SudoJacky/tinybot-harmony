@@ -1,7 +1,7 @@
 import { ProviderProfile, modelIds } from '../model/ProviderProfiles';
 import { ProviderInfo, builtinProviderInfos } from '../model/Provider';
 import { ProviderDraft } from '../services/ProfileSettings';
-import { protocolUrl, providerEndpointRoot, sameCredentialScope } from '../model/ProviderEndpoint';
+import { isImageProtocol, isSupportedProtocol, protocolUrl, providerEndpointRoot, sameCredentialScope, sharedImageBaseUrl } from '../model/ProviderEndpoint';
 import { t } from '../model/I18n';
 import { BalanceSettings, balanceCredentialScope, usesBalanceCredential } from '../model/BalanceSettings';
 
@@ -19,6 +19,10 @@ export class ProviderEditorViewModel {
   models: string = '';
   modelInput: string = '';
   contextWindow: string = '';
+  imageEnabled: boolean = false;
+  imageProtocol: string = 'openai-images';
+  imageBaseUrl: string = '';
+  imageModels: string = '';
   balanceMode: string = 'auto';
   balancePath: string = '/user/balance';
   balanceRemaining: string = 'data.balance';
@@ -43,6 +47,7 @@ export class ProviderEditorViewModel {
   }
 
   get modelList(): string[] { return this.models.split(/[\n,，]/).map((id: string) => id.trim()).filter((id: string) => id.length > 0); }
+  get showsImageSettings(): boolean { return isSupportedProtocol(this.protocol); }
   get hasChanges(): boolean { return this.modelInput.trim().length > 0 || JSON.stringify(this.snapshot()) !== this.initial; }
   get canKeepKey(): boolean {
     return this.hasSavedKey && sameCredentialScope(this.originalProtocol, this.originalUrl, this.protocol, this.baseUrl);
@@ -87,12 +92,21 @@ export class ProviderEditorViewModel {
     if (field === 'context' && this.contextWindow.trim() && (!Number.isInteger(Number(this.contextWindow)) || Number(this.contextWindow) < 8192 || Number(this.contextWindow) > 2000000)) {
       return t('上下文窗口需为 8192–2000000 的整数。');
     }
+    if (field === 'image' && this.imageEnabled && this.showsImageSettings) {
+      if (!isImageProtocol(this.imageProtocol)) { return t('图片生成服务配置无效。'); }
+      try {
+        sharedImageBaseUrl(this.protocol, this.baseUrl, this.imageProtocol, this.imageBaseUrl.trim());
+        modelIds(this.imageModels);
+      } catch (error) { return (error as Error).message; }
+    }
     return '';
   }
 
   snapshot(): ProviderDraft {
     return { id: this.id, name: this.name, presetId: this.presetId, protocol: this.protocol, baseUrl: this.baseUrl,
       apiKey: this.apiKey, noApiKey: this.noApiKey, enabled: this.enabled, models: this.models, contextWindow: this.contextWindow,
+      imageModels: this.showsImageSettings && this.imageEnabled ?
+        { protocol: this.imageProtocol, baseUrl: this.imageBaseUrl, models: this.imageModels } : null,
       balance: this.balanceSettings(), balanceApiKey: this.balanceApiKey };
   }
 
@@ -126,6 +140,10 @@ export class ProviderEditorViewModel {
     this.enabled = profile?.enabled === undefined ? true : profile.enabled;
     this.models = profile ? profile.models.join('\n') : (preset?.models || []).join('\n');
     this.contextWindow = profile?.contextWindow === undefined ? '' : String(profile.contextWindow);
+    this.imageEnabled = profile?.imageModels !== undefined;
+    this.imageProtocol = profile?.imageModels?.protocol || (this.protocol === 'gemini' ? 'gemini-images' : 'openai-images');
+    this.imageBaseUrl = profile?.imageModels?.baseUrl || '';
+    this.imageModels = profile?.imageModels?.models.join('\n') || '';
     this.balanceMode = profile?.balance?.mode || 'auto';
     this.balancePath = profile?.balance?.path || '/user/balance';
     this.balanceRemaining = profile?.balance?.remainingField || 'data.balance';

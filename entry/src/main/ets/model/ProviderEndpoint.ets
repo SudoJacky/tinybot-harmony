@@ -61,3 +61,14 @@ export function sameCredentialScope(oldProtocol: string, oldUrl: string, protoco
     return previous === next;
   } catch (_) { return false; }
 }
+
+export function sharedImageBaseUrl(chatProtocol: string, chatUrl: string, imageProtocol: string, imageUrl?: string): string {
+  const chatRoot = providerEndpointRoot(protocolUrl(chatProtocol, chatUrl, true));
+  const base = imageUrl || chatRoot;
+  const endpoint = protocolUrl(imageProtocol, base, true);
+  const origin = /^https?:\/\/[^/]+/;
+  if (origin.exec(chatRoot)?.[0] !== origin.exec(endpoint)?.[0]) {
+    throw new Error(t('复用 API Key 时，图片服务的协议、主机和端口必须与聊天服务一致。'));
+  }
+  return base;
+}
