@@ -9,11 +9,16 @@ export class WorkbenchLayout {
   static readonly HISTORY_MIN: number = 264;
   static readonly HISTORY_MAX: number = 420;
   static readonly HISTORY_DEFAULT: number = 280;
+  static readonly PC_WORKBENCH_MIN: number = 720;
+  static readonly PC_HISTORY_MIN: number = 224;
+  static readonly PC_HISTORY_MAX: number = 360;
+  static readonly PC_HISTORY_DEFAULT: number = 252;
   // Protected conversation minimum while a detail pane is docked. The desktop
   // frame protects 400; the tablet composer keeps its tool, usage and effort chips
   // readable a little longer.
   static readonly CHAT_MIN: number = 440;
   static readonly DETAIL_MIN: number = 300;
+  static readonly PC_DOCK_MIN: number = WorkbenchLayout.RAIL_WIDTH + WorkbenchLayout.CHAT_MIN + WorkbenchLayout.DETAIL_MIN;
   static readonly DETAIL_MAX_RATIO: number = 0.7;
   static readonly DETAIL_DEFAULT_RATIO: number = 0.4;
   // The platform caps a custom dialog at 400 vp, which reads as a narrow column in the
@@ -39,6 +44,8 @@ export class WorkbenchLayout {
   rail: boolean;
   // Whether the rail may expand in place while keeping the detail pane docked.
   canExpand: boolean;
+  historyMinWidth: number;
+  historyMaxWidth: number;
   historyWidth: number;
   chatWidth: number;
   detailWidth: number;
@@ -46,19 +53,22 @@ export class WorkbenchLayout {
   detailX: number;
 
   constructor(width: number, detailOpen: boolean, historyExpanded: boolean = true,
-              historyWidth: number = 0, detailWidth: number = 0) {
+              historyWidth: number = 0, detailWidth: number = 0, desktop: boolean = false) {
     this.width = width;
-    const workbench = width >= WorkbenchLayout.WORKBENCH_MIN;
-    const wanted = Math.max(WorkbenchLayout.HISTORY_MIN, Math.min(WorkbenchLayout.HISTORY_MAX,
-      historyWidth > 0 ? historyWidth : WorkbenchLayout.HISTORY_DEFAULT));
-    this.docked = workbench && detailOpen;
+    const workbench = width >= (desktop ? WorkbenchLayout.PC_WORKBENCH_MIN : WorkbenchLayout.WORKBENCH_MIN);
+    this.historyMinWidth = desktop ? WorkbenchLayout.PC_HISTORY_MIN : WorkbenchLayout.HISTORY_MIN;
+    const historyMax = desktop ? WorkbenchLayout.PC_HISTORY_MAX : WorkbenchLayout.HISTORY_MAX;
+    const historyDefault = desktop ? WorkbenchLayout.PC_HISTORY_DEFAULT : WorkbenchLayout.HISTORY_DEFAULT;
+    const wanted = Math.max(this.historyMinWidth, Math.min(historyMax, historyWidth > 0 ? historyWidth : historyDefault));
+    this.docked = workbench && detailOpen && (!desktop || width >= WorkbenchLayout.PC_DOCK_MIN);
+    this.historyMaxWidth = Math.min(historyMax, this.docked ? width - WorkbenchLayout.CHAT_MIN - WorkbenchLayout.DETAIL_MIN
+      : desktop ? width - WorkbenchLayout.CHAT_MIN : historyMax);
     // The rail appears exactly when the full column would squeeze the docked pane
     // or the conversation under its minimum; no extra magic breakpoint.
-    this.canExpand = workbench && (!this.docked ||
-      width - wanted - WorkbenchLayout.CHAT_MIN >= WorkbenchLayout.DETAIL_MIN);
+    this.canExpand = workbench && (desktop ? this.historyMinWidth : wanted) <= this.historyMaxWidth;
     this.expanded = workbench && historyExpanded && this.canExpand;
     this.rail = workbench && !this.expanded;
-    this.historyWidth = !workbench ? 0 : this.expanded ? wanted : WorkbenchLayout.RAIL_WIDTH;
+    this.historyWidth = !workbench ? 0 : this.expanded ? Math.min(wanted, this.historyMaxWidth) : WorkbenchLayout.RAIL_WIDTH;
     const available = Math.max(0, width - this.historyWidth - (this.docked ? WorkbenchLayout.CHAT_MIN : 0));
     this.detailMaxWidth = this.docked ? Math.max(WorkbenchLayout.DETAIL_MIN,
       Math.min(width * WorkbenchLayout.DETAIL_MAX_RATIO, available)) : width;

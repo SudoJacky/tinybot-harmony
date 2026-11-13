@@ -60,9 +60,14 @@ export class ChatViewModel {
   ready: boolean = false;
   searchQuery: string = '';
   searchMessageId: string = '';
+  messageSearchRequest: number = 0;
   async openMessage(threadId: string, messageId: string, query: string = ''): Promise<boolean> {
     if (!await this.selectThread(threadId)) { return false; }
-    this.visibleMessageCount = this.active.messages.length; this.searchQuery = query; this.searchMessageId = messageId; return true;
+    this.visibleMessageCount = this.active.messages.length;
+    this.searchQuery = query;
+    this.searchMessageId = messageId;
+    this.messageSearchRequest++;
+    return true;
   }
   loading: boolean = false;
   busy: boolean = false;

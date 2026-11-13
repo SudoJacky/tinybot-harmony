@@ -10,7 +10,7 @@ export interface LogFields {
   change?: string; commonMessages?: number; sharedCharacters?: number; systemHash?: number; toolsHash?: number;
   operationId?: number; instanceId?: number; generation?: number; active?: number; count?: number; total?: number;
   chars?: number; bytes?: number; elapsedMs?: number; durationMs?: number; delayMs?: number; firstTokenMs?: number; outputTokens?: number; http?: number; code?: number;
-  messages?: number; tools?: number; nodes?: number; keys?: number; width?: number; height?: number; widthVp?: number;
+  messages?: number; tools?: number; nodes?: number; keys?: number; width?: number; height?: number; widthVp?: number; unit?: string;
   request?: number; chunk?: number; eventCode?: number; newChats?: number; skippedChats?: number; level?: number; style?: number;
   tokens?: number; budget?: number; removed?: number; retained?: number; duplicates?: number; characters?: number;
   added?: number; updated?: number;
@@ -44,7 +44,8 @@ const ERROR_CODES: string[] = ['STALE_BROWSER_SNAPSHOT', 'STALE_INTERACTIVE_STAT
 
 // Names and string values are catalogs, not free text. Unknown keys never reach either output.
 const EVENTS: Record<string, string[]> = {};
-EVENTS.app = ['bar_failed', 'created', 'destroyed', 'window_created', 'window_failed', 'window_loaded', 'window_destroyed', 'foreground', 'background'];
+EVENTS.app = ['bar_failed', 'created', 'destroyed', 'window_created', 'window_failed', 'window_loaded', 'window_destroyed', 'foreground', 'background',
+  'pc_window_visibility', 'pc_window_limits', 'pc_window_limits_failed', 'pc_window_observe_failed', 'pc_window_unobserve_failed', 'pc_draft_flush_failed'];
 EVENTS.announcements = ['disabled', 'fetch_started', 'fetch_completed', 'fetch_failed', 'presented', 'present_failed', 'acknowledged', 'save_failed'];
 EVENTS.review = ['task_completed', 'presented', 'present_failed', 'accepted', 'deferred', 'disabled', 'request_completed', 'request_failed', 'save_failed'];
 EVENTS.appearance = ['material', 'material_support', 'material_unavailable', 'loaded', 'applied', 'save_failed', 'fonts_loaded', 'fonts_failed', 'insets_failed', 'keyboard_geometry'];
@@ -67,7 +68,8 @@ EVENTS.voice = ['focus_requested', 'released', 'draft_failed'];
 EVENTS.composer = ['sheet_action_queued', 'sheet_action_dispatched', 'sheet_action_cancelled'];
 EVENTS.focus = ['search_requested', 'provider_requested', 'onboarding_requested'];
 EVENTS.navigation = ['tools_opened', 'tools_repeated', 'settings_opened', 'settings_repeated',
-  'new_chat_blocked', 'new_chat_failed', 'new_chat_revealed', 'keyboard_shortcuts_open_failed'];
+  'new_chat_blocked', 'new_chat_failed', 'new_chat_revealed', 'keyboard_shortcuts_open_failed',
+  'desktop_command_failed', 'desktop_layout_load_failed', 'desktop_layout_save_failed'];
 EVENTS.web = ['storage_failed', 'engine_start', 'engine_ready', 'release', 'activate', 'failed', 'console_error', 'load_start', 'load_returned', 'host_ready', 'port_connected', 'ready', 'state_saved', 'attached', 'page_end', 'navigation_blocked', 'resource_failed'];
 EVENTS.office_preview = ['load_failed', 'update_annotations_failed', 'render_failed', 'annotation_failed', 'page_failed'];
 EVENTS.math = ['load_failed', 'render_failed', 'startup_timeout', 'process_exited', 'page_failed'];
@@ -98,6 +100,7 @@ const BOOLEANS: string[] = ['initialSupported', 'supported', 'available', 'pageS
 const REFERENCES: string[] = ['threadId', 'messageId', 'sessionId', 'providerId', 'previewId', 'surfaceId', 'serverId'];
 const STRINGS: Record<string, string[]> = {};
 STRINGS.channel = ['answer', 'reasoning'];
+STRINGS.unit = ['px', 'vp'];
 STRINGS.balanceAdapter = ['deepseek', 'sub2api', 'newapi', 'newapi-account', 'zhipu', 'custom'];
 STRINGS.operation = ['access', 'read', 'list', 'stat', 'parse', 'unlink', 'rmdir', 'bundle_stats', 'free_size', 'total_size',
   'getAppPrivacyMgmtInfo', 'getAppPrivacyResult', 'requestAppPrivacyConsent', 'subscribe', 'unsubscribe', 'cloud_directory', 'cloud_sync',

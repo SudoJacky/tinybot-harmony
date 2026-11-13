@@ -1,4 +1,4 @@
-import { KeyCode } from '@kit.InputKit';
+import { KeyCode, pointer } from '@kit.InputKit';
 import { AppearanceStyle } from './AppearanceStyle';
 import { Motion } from './Theme';
 
@@ -10,16 +10,23 @@ import { Motion } from './Theme';
 export struct PaneDivider {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop label: string = '';
+  @Prop desktop: boolean = false;
   @State private active: boolean = false;
   @State private hover: boolean = false;
   @State private focused: boolean = false;
   onResizeStart: () => void = () => {};
   onResize: (dx: number) => void = () => {};
   onResizeEnd: () => void = () => {};
+  onReset: () => void = () => {};
+
+  aboutToDisappear(): void {
+    if (this.desktop && (this.hover || this.active)) { this.getUIContext().getCursorController().restoreDefault(); }
+  }
 
   private finish(): void {
     if (!this.active) { return; }
     this.active = false;
+    if (this.desktop && !this.hover) { this.getUIContext().getCursorController().restoreDefault(); }
     this.onResizeEnd();
   }
 
@@ -40,20 +47,29 @@ export struct PaneDivider {
         .animation({ duration: Motion.fast, curve: Motion.standard })
     }.width(12).height('100%')
     .backgroundColor(Color.Transparent)
-    .onHover((hover: boolean) => { this.hover = hover; })
+    .onHover((hover: boolean) => {
+      this.hover = hover;
+      if (!this.desktop) { return; }
+      const cursor = this.getUIContext().getCursorController();
+      if (hover) { cursor.setCursor(pointer.PointerStyle.WEST_EAST); }
+      else if (!this.active) { cursor.restoreDefault(); }
+    })
     .focusable(true).focusOnTouch(false)
     .onFocus(() => { this.focused = true; })
     .onBlur(() => { this.focused = false; })
     .onKeyEvent((event: KeyEvent) => {
       if (event.type !== KeyType.Down) { return; }
-      if (event.keyCode === KeyCode.KEYCODE_DPAD_LEFT) { this.step(-16); }
-      else if (event.keyCode === KeyCode.KEYCODE_DPAD_RIGHT) { this.step(16); }
+      if (event.keyCode === KeyCode.KEYCODE_DPAD_LEFT) { this.step(-16); event.stopPropagation(); }
+      else if (event.keyCode === KeyCode.KEYCODE_DPAD_RIGHT) { this.step(16); event.stopPropagation(); }
+      else if (this.desktop && event.keyCode === KeyCode.KEYCODE_ENTER) { this.onReset(); event.stopPropagation(); }
     })
     .accessibilityText(this.label)
-    .gesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Horizontal, distance: 4 })
+    .gesture(GestureGroup(GestureMode.Exclusive,
+      PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Horizontal, distance: 4 })
       .onActionStart(() => { this.active = true; this.onResizeStart(); })
       .onActionUpdate((event: GestureEvent) => { if (this.active) { this.onResize(event.offsetX); } })
       .onActionEnd((event: GestureEvent) => { if (this.active) { this.onResize(event.offsetX); this.finish(); } })
-      .onActionCancel(() => this.finish()))
+      .onActionCancel(() => this.finish()),
+      TapGesture({ count: 2 }).onAction(() => { if (this.desktop) { this.onReset(); } })))
   }
 }

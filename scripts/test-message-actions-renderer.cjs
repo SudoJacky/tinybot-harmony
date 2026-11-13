@@ -53,7 +53,8 @@ const Text = new Proxy({}, { get: (_, method) => value => {
   else if (method === 'letterSpacing') node.spacing = value;
 } });
 const globals = { exports: {}, ViewPU, Button, Flex: noUi, Row: noUi, FlexWrap: {}, FlexAlign: {}, VerticalAlign: { Center: 'Center' }, FontWeight: { Bold: 'Bold' },
-  SymbolGlyph, AnimatedIcon: class {}, Text, Image: noUi, If: noUi, ButtonType: {}, Color: {}, Motion: {}, ImageFit: {}, t: text => text };
+  SymbolGlyph, AnimatedIcon: class {}, Text, Image: noUi, If: noUi, ButtonType: {}, Color: {}, Motion: {}, ImageFit: {}, IS_PC: false,
+  t: text => text };
 const probe = `class Probe extends ViewPU { ${methods.join('\n')} } exports.Probe = Probe;`;
 vm.runInNewContext(ts.transpileModule(probe, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }

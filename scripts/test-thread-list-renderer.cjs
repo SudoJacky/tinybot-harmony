@@ -50,7 +50,7 @@ class ViewPU {
   flush() { for (const id of [...effects.keys()]) if (readers.has(id)) this.run(id, false); }
 }
 const noop = new Proxy({}, { get: () => () => {} });
-const globals = { exports: {}, ViewPU, ObservedObject: { GetRawObject: value => value }, t: key => key, Motion: {}, Space: {}, Btn: {}, AppMaterials: {},
+const globals = { exports: {}, ViewPU, ObservedObject: { GetRawObject: value => value }, t: key => key, Motion: {}, Space: {}, Btn: {}, AppMaterials: {}, IS_PC: false,
   IconButton: class {}, SymbolGlyphModifier: class { fontColor() { return this; } }, Context: noop,
   TransitionEffect: { OPACITY: { animation() { return this; } } },
   ListItemGroup: { create(options) { if (initial) { groups.add(current); options.header(); } }, pop() {} },
@@ -80,7 +80,7 @@ const names = ['filtered','threadProject','sections','sectionThreads','sectionTi
   'updateQuery','setScope',
   'locked','endSelection','selectThread','allSelected','selectAll','archiveSelected','confirmDeleteSelected'];
 const menuGeometry = tree.statements.filter(node => ts.isVariableStatement(node) &&
-  node.declarationList.declarations.some(decl => ['ROW_MENU_SIZE', 'ROW_MENU_RIGHT_INSET'].includes(decl.name.getText(tree))));
+  node.declarationList.declarations.some(decl => ['THREAD_ROW_HEIGHT', 'ROW_MENU_SIZE', 'ROW_MENU_RIGHT_INSET'].includes(decl.name.getText(tree))));
 vm.runInNewContext(ts.transpileModule(`${menuGeometry.map(node => node.getText(tree)).join('\n')}
 ${cls('ThreadSection').getText(tree)}
 class Sidebar extends ViewPU { ${cls('ThreadList').members.filter(n => names.includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')}

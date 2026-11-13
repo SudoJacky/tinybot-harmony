@@ -3,6 +3,8 @@ import { ConversationSharePanel } from '../views/ConversationSharePanel';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { NavigationShortcut } from '../common/KeyboardShortcuts';
 import { KeyboardShortcutsDialog } from '../views/KeyboardShortcutsDialog';
+import { DesktopCommandDialog } from '../views/DesktopCommandDialog';
+import { DesktopCommandItem } from '../model/DesktopCommandPalette';
 import { systemMaterialAttribute } from '../common/MaterialAttributes';
 import { WebUiPreflightHost } from '../views/WebUiPreflightHost';
 import { PreviewCaptureHost } from '../views/PreviewCaptureHost';
@@ -73,15 +75,18 @@ import { announcements } from '../services/Announcements';
 import { AnnouncementDialog } from '../views/AnnouncementDialog';
 import { Diagnostics } from '../model/Diagnostics';
 import { WorkbenchLayout } from '../model/WorkbenchLayout';
+import { DesktopLayoutPreferences } from '../services/DesktopLayoutPreferences';
 import { PreviewPanel } from '../views/PreviewPanel';
 import { AnimatedPage } from '../common/AnimatedPage';
 import { HistoryRail } from '../views/HistoryRail';
 import { PaneDivider } from '../common/PaneDivider';
+import { IS_PC } from '../common/DeviceForm';
 import { DetailLauncher } from '../views/DetailLauncher';
 import { DetailTabItem, DetailTabs } from '../views/DetailTabs';
 
 const DRAWER_MAX_WIDTH: number = 340;
 const CHAT_HEADER_HEIGHT: number = 56;
+const PC_CHAT_HEADER_HEIGHT: number = 48;
 
 @Entry
 @Component
@@ -89,11 +94,13 @@ struct Index {
   @State private privacy: HostedPrivacy = hostedPrivacy;
   @StorageProp('tinybot.privacy.allowed') @Watch('privacyChanged') private privacyAllowed: boolean = false;
   @StorageProp('tinybot.foreground') @Watch('foregroundChanged') private foreground: boolean = false;
+  @StorageProp('tinybot.pcWindowVisible') @Watch('pcWindowVisibilityChanged') private pcWindowVisible: boolean = true;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
   @State private app: ChatViewModel = new ChatViewModel();
   @State private account: HuaweiAccount = huaweiAccount;
   @State private windowWidth: number = 0;
+  private readonly desktop: boolean = IS_PC;
   @State private workspaceOpen: boolean = false;
   @State private workspacePresent: boolean = false;
   @State private previewPresent: boolean = false;
@@ -107,6 +114,7 @@ struct Index {
   // Docked detail panes are tabs. Presence flags above stay the source of truth
   // for each panel; these track order, focus and whether the column is shown.
   @State private detailPaneOpen: boolean = false;
+  @State private detailMaximized: boolean = false;
   // 0 = the column is fully off-screen, 1 = fully docked. The chat width and
   // the column geometry both read this value so they move as one animation.
   @State private detailReveal: number = 0;
@@ -127,6 +135,7 @@ struct Index {
   @State private historyCollapsed: boolean = false;
   @State private historyPreferredWidth: number = 0;
   @State private detailPreferredWidth: number = 0;
+  private desktopLayoutPreferences?: DesktopLayoutPreferences;
   @State private historySearchRequest: number = 0;
   @StorageProp('tinybot.life-panel.target') @Watch('panelLinkChanged') private panelLink: string = '';
   @State private lifePanelTarget: string = '';
@@ -151,6 +160,9 @@ struct Index {
   @State @Watch('offerAnnouncement') private showToolScope: boolean = false;
   @State private keyboardShortcutsOpen: boolean = false;
   private keyboardShortcutsDialog?: CustomDialogController;
+  @State private desktopCommandsOpen: boolean = false;
+  private desktopCommandsDialog?: CustomDialogController;
+  private chosenDesktopCommand?: DesktopCommandItem;
   @State private historyProjectSheetOpen: boolean = false;
   private announcementDialog?: CustomDialogController;
   private receiving: boolean = false;
@@ -176,6 +188,7 @@ struct Index {
   @State private rootSection: string = '';
   private toolsOrigin: string = 'productivity';
   @State private expandDraftRequest: number = 0;
+  @State private focusDraftRequest: number = 0;
   @State private settingsSection: string = 'models';
   @State private toolsTab: string = 'memory';
   @State private toolsTabRequest: number = 0;
@@ -200,6 +213,7 @@ struct Index {
     announcements.checkOnStartup(context).then(() => this.offerAnnouncement());
     this.account.initialize(context).then(() => this.account.refresh());
     if (!this.session) {
+      if (this.desktop) { this.restoreDesktopLayout(context); }
       try { this.startupBackup = new StartupBackup(context); }
       catch (error) { Diagnostics.log('warn', 'backup', 'startup_capture_failed', undefined, error as Error); }
       this.session = createNativeSessionService(context, this.approval, this.browser);
@@ -274,7 +288,8 @@ struct Index {
 
   private offerAnnouncement(): void {
     if (!this.privacy.allowed || !this.foreground || !this.app.ready || !this.onboardingChecked || this.startupBackupChecking || this.startupBackupDialog ||
-      this.paths.size() > 0 || this.browserExpanded || this.showToolScope || this.ratingOpen || this.reviewDialog || this.announcementDialog) { return; }
+      this.paths.size() > 0 || this.browserExpanded || this.showToolScope || this.desktopCommandsOpen || this.ratingOpen ||
+      this.reviewDialog || this.announcementDialog) { return; }
     const item = announcements.pending();
     if (!item) { return; }
     // Tablets and wide windows follow the window width; 0 keeps the platform default.
@@ -339,7 +354,7 @@ struct Index {
       this.app.active.attachments.length === 0 && this.app.active.references.length === 0 &&
       this.app.active.pendingInputs.length === 0 && this.paths.size() === 0 && this.chatVisible &&
       !this.onboardingActive && !this.startupBackupDialog && !this.startupBackupRestoring && !this.receiving && !this.launching && !ShareInbox.peek() &&
-      !this.drawerOpen && !this.drawerDragging && !this.detailPaneOpen && !this.browserExpanded && !this.showToolScope &&
+      !this.drawerOpen && !this.drawerDragging && !this.detailPaneOpen && !this.browserExpanded && !this.showToolScope && !this.desktopCommandsOpen &&
       !this.voiceRequest && !this.approval.title && !this.approval.form && !this.ratingOpen &&
       !this.announcementDialog && !announcements.loading && !announcements.pending();
   }
@@ -392,9 +407,18 @@ struct Index {
 
   private foregroundChanged(): void {
     this.updateLifePanelActivity();
-    if (!this.foreground) { this.closeReviewInvitation(); this.startupBackupDialog?.close(); }
+    if (!this.foreground) {
+      this.chosenDesktopCommand = undefined;
+      this.desktopCommandsDialog?.close();
+      this.closeReviewInvitation(); this.startupBackupDialog?.close();
+    }
     if (this.foreground) { this.offerStartupBackup(); }
     this.offerAnnouncement();
+  }
+
+  private pcWindowVisibilityChanged(): void {
+    if (this.pcWindowVisible) { return; }
+    this.app.flushDraft().catch((error: Error) => Diagnostics.log('error', 'app', 'pc_draft_flush_failed', undefined, error));
   }
 
   private updateLifePanelActivity(): void { this.panelUpdates?.setActive(this.foreground && this.privacy.allowed && this.app.ready && !this.reviewDisposed); }
@@ -410,11 +434,14 @@ struct Index {
       autoCloudBackup.dispose();
       this.closeAnnouncement();
       this.keyboardShortcutsDialog?.close();
+      this.chosenDesktopCommand = undefined;
+      this.desktopCommandsDialog?.close();
       this.closeReviewInvitation(); this.startupBackupDialog?.close();
       this.app.stop(); this.browser.close(); this.browserExpanded = false; this.showToolScope = false;
       this.voiceRequest = ''; this.paths.clear(); this.rootSection = ''; this.setDrawer(false);
       this.workspaceOpen = false; this.previewVisible = false; this.previewId = '';
       this.detailAnim++; this.detailPaneOpen = false; this.detailReveal = 0; this.detailClosing = false;
+      this.detailMaximized = false;
       this.detailClosingLauncher = false; this.detailTabs = []; this.activeDetailTab = '';
       this.workspacePresent = false; this.previewPresent = false; this.browserPresent = false; this.browserClosing = false;
     }
@@ -545,6 +572,7 @@ struct Index {
     }
     Diagnostics.log('info', 'navigation', 'new_chat_revealed', { count: this.paths.size() });
     this.revealChat();
+    if (this.desktop) { this.focusDraftRequest++; }
     if (this.app.active.id === previousId) {
       this.getUIContext().getPromptAction().showToast({
         systemMaterial: this.appearance.surface, message: t('已在新对话中'), duration: 1600
@@ -637,7 +665,7 @@ struct Index {
   // reveal scales this width so the chat gains exactly what the column loses.
   private detailGeometry(): WorkbenchLayout {
     return new WorkbenchLayout(this.windowWidth, true, !this.historyCollapsed,
-      this.historyPreferredWidth, this.detailPreferredWidth);
+      this.historyPreferredWidth, this.detailPreferredWidth, this.desktop);
   }
 
   private setDetailPane(open: boolean, fromLauncher: boolean = false): void {
@@ -650,6 +678,10 @@ struct Index {
       onFinish: () => { if (token === this.detailAnim) { this.detailClosing = false; this.detailClosingLauncher = false; } } }, () => {
         this.detailReveal = target;
       });
+  }
+
+  private toggleDetailMaximized(): void {
+    this.detailMaximized = !this.detailMaximized;
   }
 
   // A tab is available while its panel owns content. A preview whose conversation
@@ -770,8 +802,9 @@ struct Index {
     this.removeDetailTab('browser');
   }
   private workbench(): WorkbenchLayout {
-    return new WorkbenchLayout(this.onboardingActive ? 0 : this.windowWidth, this.detailOpen(), !this.historyCollapsed,
-      this.historyPreferredWidth, this.detailPreferredWidth);
+    return new WorkbenchLayout(this.onboardingActive ? 0 : this.windowWidth,
+      this.detailOpen() && !this.detailMaximized, !this.historyCollapsed,
+      this.historyPreferredWidth, this.detailPreferredWidth, this.desktop);
   }
 
   // The rail expands the column only when it still fits; otherwise it reveals the
@@ -787,6 +820,20 @@ struct Index {
     this.getUIContext().animateTo({ duration: Motion.medium, curve: Motion.standard }, () => {
       this.historyCollapsed = collapsed;
     });
+    if (this.desktop) {
+      try { this.desktopLayoutPreferences?.saveCollapsed(collapsed); }
+      catch (error) { Diagnostics.log('error', 'navigation', 'desktop_layout_save_failed', undefined, error as Error); }
+    }
+  }
+
+  private restoreDesktopLayout(context: common.Context): void {
+    try {
+      const preferences = new DesktopLayoutPreferences(context);
+      this.historyCollapsed = preferences.historyCollapsed();
+      this.historyPreferredWidth = preferences.paneWidth(false);
+      this.detailPreferredWidth = preferences.paneWidth(true);
+      this.desktopLayoutPreferences = preferences;
+    } catch (error) { Diagnostics.log('error', 'navigation', 'desktop_layout_load_failed', undefined, error as Error); }
   }
 
   // Focus search in the sidebar when present, otherwise reveal the overlay drawer.
@@ -801,10 +848,11 @@ struct Index {
       this.announcementDialog || this.reviewDialog || this.ratingOpen || this.drawerDragging) { return; }
     switch (action) {
       case 'new-chat':
-        this.createChat();
+        this.createChat(this.desktop ? this.app.activeProject?.id : undefined);
         break;
       case 'search':
-        if (this.app.canNavigate) { this.openHistorySearch(); }
+        if (this.desktop) { this.showDesktopCommands(); }
+        else if (this.app.canNavigate) { this.openHistorySearch(); }
         break;
       case 'history':
         if (this.drawerOpen) { this.setDrawer(false); } else { this.toggleHistory(); }
@@ -831,7 +879,7 @@ struct Index {
     this.keyboardShortcutsOpen = true;
     try {
       this.keyboardShortcutsDialog = new CustomDialogController({
-        builder: KeyboardShortcutsDialog(),
+        builder: KeyboardShortcutsDialog({ desktop: this.desktop }),
         autoCancel: true, alignment: DialogAlignment.Center, width: width > 0 ? width : undefined,
         cornerRadius: Radius.xl, backgroundColor: $r('app.color.page_background'),
         systemMaterial: this.appearance.noMaterial,
@@ -846,6 +894,94 @@ struct Index {
     }
   }
 
+  private canOpenDesktopCommands(): boolean {
+    return this.desktop && this.foreground && this.app.ready && this.privacyAllowed && this.paths.size() === 0 &&
+      !this.onboardingActive && !this.showToolScope && !this.keyboardShortcutsOpen && !this.historyProjectSheetOpen &&
+      !this.startupBackupDialog && !this.startupBackupRestoring && !this.announcementDialog && !this.reviewDialog &&
+      !this.ratingOpen && !this.drawerDragging && !this.desktopCommandsOpen;
+  }
+
+  private desktopCommands(): DesktopCommandItem[] {
+    const items: DesktopCommandItem[] = [];
+    if (this.app.canNavigate) {
+      const project = this.app.activeProject;
+      items.push(new DesktopCommandItem('new-chat', t('新建对话'), project?.name || t('普通聊天')));
+      if (project) { items.push(new DesktopCommandItem('standalone', t('新建普通对话'))); }
+      items.push(new DesktopCommandItem('history', t('搜索对话')));
+    }
+    if (!this.app.busy) { items.push(new DesktopCommandItem('files', t('工作区文件'))); }
+    if (!this.browser.permissionSaving && !this.app.saveError) { items.push(new DesktopCommandItem('browser', t('应用内浏览器'))); }
+    items.push(new DesktopCommandItem('detail', this.detailPaneOpen ? t('关闭侧栏') : t('打开侧栏')),
+      new DesktopCommandItem('tools', t('记忆与工具')), new DesktopCommandItem('skills', t('技能')),
+      new DesktopCommandItem('life-panels', t('生活看板')), new DesktopCommandItem('settings', t('设置')),
+      new DesktopCommandItem('help', t('键盘快捷键')));
+    return items;
+  }
+
+  private showDesktopCommands(): void {
+    if (!this.canOpenDesktopCommands()) { return; }
+    this.desktopCommandsOpen = true;
+    this.chosenDesktopCommand = undefined;
+    const width = Math.min(560, WorkbenchLayout.dialogWidth(this.windowWidth));
+    try {
+      this.desktopCommandsDialog = new CustomDialogController({
+        builder: DesktopCommandDialog({ app: this.app, commands: this.desktopCommands(),
+          onChoose: (item: DesktopCommandItem) => { this.chosenDesktopCommand = item; } }),
+        autoCancel: true, alignment: DialogAlignment.Center, width: width > 0 ? width : undefined,
+        cornerRadius: Radius.lg, backgroundColor: $r('app.color.page_background'), systemMaterial: this.appearance.noMaterial,
+        onDidDisappear: () => {
+          const command = this.chosenDesktopCommand;
+          this.chosenDesktopCommand = undefined;
+          this.desktopCommandsDialog = undefined;
+          this.desktopCommandsOpen = false;
+          if (command && this.canOpenDesktopCommands()) {
+            this.runDesktopCommand(command).catch((error: Error) => this.desktopCommandFailed(error));
+          } else { this.offerAnnouncement(); }
+        }
+      });
+      this.desktopCommandsDialog.open();
+    } catch (error) {
+      this.desktopCommandsDialog = undefined;
+      this.desktopCommandsOpen = false;
+      this.desktopCommandFailed(error as Error);
+    }
+  }
+
+  private desktopCommandFailed(error: Error): void {
+    Diagnostics.log('error', 'navigation', 'desktop_command_failed', undefined, error);
+    this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface,
+      message: t('界面操作失败：') + error.message });
+  }
+
+  private async runDesktopCommand(item: DesktopCommandItem): Promise<void> {
+    if (item.action !== 'history' && this.drawerOpen) { this.setDrawer(false); }
+    switch (item.action) {
+      case 'thread': {
+        if (!this.app.canNavigate) { return; }
+        const opened = item.messageId ? await this.app.openMessage(item.id, item.messageId, item.query) : await this.app.selectThread(item.id);
+        if (opened) { this.revealChat(); }
+        else { throw new Error(this.app.saveError || this.app.error || t('无法打开对话。')); }
+        break;
+      }
+      case 'new-chat': await this.createChat(this.app.activeProject?.id); break;
+      case 'standalone': await this.createChat(); break;
+      case 'history':
+        if (this.app.canNavigate) {
+          if (this.detailPaneOpen && !this.workbench().docked) { this.setDetailPane(false); }
+          this.openHistorySearch();
+        }
+        break;
+      case 'files': if (!this.app.busy) { this.addFilesTab(); } break;
+      case 'browser': if (!this.browser.permissionSaving && !this.app.saveError) { this.addBrowserTab(); } break;
+      case 'detail': this.toggleDetailPane(); break;
+      case 'tools': this.openTools('memory'); break;
+      case 'skills': this.paths.pushPath({ name: 'skills' }); break;
+      case 'life-panels': this.openLifePanels(); break;
+      case 'settings': this.openSettings(); break;
+      case 'help': this.showKeyboardShortcuts(); break;
+    }
+  }
+
   private beginResize(detail: boolean): void {
     this.resizeBase = detail ? this.workbench().detailWidth : this.workbench().historyWidth;
   }
@@ -855,10 +991,7 @@ struct Index {
     // desktop frame there is no second track to renegotiate, so stop at the width
     // where both remaining panes keep their minima instead of collapsing mid-drag.
     const layout = this.workbench();
-    const limit = layout.docked
-      ? layout.width - WorkbenchLayout.CHAT_MIN - WorkbenchLayout.DETAIL_MIN : WorkbenchLayout.HISTORY_MAX;
-    this.historyPreferredWidth = Math.max(WorkbenchLayout.HISTORY_MIN,
-      Math.min(WorkbenchLayout.HISTORY_MAX, limit, this.resizeBase + dx));
+    this.historyPreferredWidth = Math.max(layout.historyMinWidth, Math.min(layout.historyMaxWidth, this.resizeBase + dx));
   }
 
   private resizeDetail(dx: number): void {
@@ -869,14 +1002,29 @@ struct Index {
 
   // Commit the clamped result so the next window resize does not replay the raw drag.
   private endResize(detail: boolean): void {
-    if (detail) { this.detailPreferredWidth = this.workbench().detailWidth; }
-    else { this.historyPreferredWidth = this.workbench().historyWidth; }
+    const layout = this.workbench();
+    if (detail ? !layout.docked : !layout.expanded) { return; }
+    const width = detail ? layout.detailWidth : layout.historyWidth;
+    if (detail) { this.detailPreferredWidth = width; }
+    else { this.historyPreferredWidth = width; }
+    if (this.desktop) { this.saveDesktopPaneWidth(detail, width); }
+  }
+
+  private saveDesktopPaneWidth(detail: boolean, width: number): void {
+    try { this.desktopLayoutPreferences?.saveWidth(detail, width); }
+    catch (error) { Diagnostics.log('error', 'navigation', 'desktop_layout_save_failed', undefined, error as Error); }
+  }
+
+  private resetDesktopPane(detail: boolean): void {
+    if (detail) { this.detailPreferredWidth = 0; }
+    else { this.historyPreferredWidth = 0; }
+    this.saveDesktopPaneWidth(detail, 0);
   }
 
   private windowChanged(width: number): void {
     if (width <= 0 || width === this.windowWidth) { return; }
     this.windowWidth = width;
-    if (this.workbench().historyWidth > 0) {
+    if (this.desktop ? this.workbench().expanded : this.workbench().historyWidth > 0) {
       // Invalidate any closing animation; the same history host becomes the sidebar.
       this.drawerAnimation++; this.drawerOpen = false; this.drawerDragging = false;
       this.drawerReveal = 0; this.drawerContentActive = false;
@@ -948,6 +1096,8 @@ struct Index {
     this.reviewDisposed = true; this.closeReviewInvitation(); this.startupBackupDialog?.close();
     this.closeAnnouncement();
     this.keyboardShortcutsDialog?.close();
+    this.chosenDesktopCommand = undefined;
+    this.desktopCommandsDialog?.close();
     this.unsubscribeLaunch?.(); this.unsubscribeLaunch = undefined;
     this.app.stop();
     this.app.flushDraft();
@@ -1396,7 +1546,9 @@ struct Index {
 
   @Builder
   header() {
-    if (this.windowWidth >= 840) {
+    if (this.desktop) {
+      this.desktopHeader()
+    } else if (this.windowWidth >= 840) {
       // On the plain tablet title surface, API-26 light-sense material erases
       // the control fill; keep an opaque tint and reserve material for phones.
       Row({ space: 4 }) {
@@ -1424,6 +1576,49 @@ struct Index {
       }.width('100%').height(CHAT_HEADER_HEIGHT).padding({ left: 12, right: 12 })
         .hitTestBehavior(HitTestMode.Transparent)
     } else { this.phoneHeader() }
+  }
+
+  @Builder
+  desktopHeader() {
+    Row({ space: 4 }) {
+      if (this.workbench().historyWidth === 0) {
+        IconButton({ icon: $r('sys.symbol.line_3_horizontal'), label: t('对话列表'), compId: 'open-history',
+          animatedIcon: 'history', diameter: 36, iconSize: 18, fill: $r('app.color.surface'),
+          disabled: !this.app.ready, onTap: () => this.toggleHistory() })
+      }
+      Column({ space: 2 }) {
+        if (this.app.ready && this.app.activeProject) {
+          Text(this.app.activeProject.name).fontFamily(this.appearance.fontFamily).fontSize(11)
+            .fontColor($r('app.color.text_secondary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        Text(this.app.ready ? this.app.active.displayTitle : 'Tinybot').id('pc-chat-title')
+          .fontFamily(this.appearance.fontFamily).fontSize(14).fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_primary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+      }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+      if (this.workbench().historyWidth === 0) {
+        IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('新建对话'), compId: 'new-chat',
+          animatedIcon: 'compose', diameter: 36, iconSize: 18, fill: $r('app.color.surface'),
+          disabled: !this.app.canNavigate, onTap: () => { this.createChat(this.app.activeProject?.id); } })
+      }
+      IconButton({ icon: $r('sys.symbol.magnifyingglass'), label: t('搜索对话或命令') + ' · Ctrl+K', compId: 'pc-open-commands',
+        diameter: 36, iconSize: 17, fill: $r('app.color.surface'), disabled: !this.canOpenDesktopCommands(),
+        onTap: () => this.showDesktopCommands() })
+      if (this.app.active.messages.length > 0) {
+        IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('展开输入'), compId: 'workbench-expand-draft',
+          animatedIcon: 'compose', diameter: 36, iconSize: 18, fill: $r('app.color.surface'),
+          disabled: !this.app.ready || this.app.active.archived, onTap: () => { this.expandDraftRequest++; } })
+      }
+      Button({ type: ButtonType.Normal }) {
+        SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(18).fontColor([$r('app.color.text_secondary')])
+      }.id('pc-chat-more').width(36).height(36).padding(0).borderRadius(Radius.sm)
+        .backgroundColor(Color.Transparent).accessibilityText(t('更多操作')).enabled(this.app.ready)
+        .bindMenu(this.moreMenu, { systemMaterial: this.appearance.menu, mask: false })
+      IconButton({ icon: this.detailPaneOpen ? $r('sys.symbol.close_sidebar') : $r('sys.symbol.open_sidebar'),
+        label: this.detailPaneOpen ? t('关闭侧栏') : t('打开侧栏'), compId: 'workbench-toggle-detail',
+        diameter: 36, iconSize: 18, fill: this.detailPaneOpen ? $r('app.color.surface_variant') : $r('app.color.surface'),
+        disabled: !this.app.ready, onTap: () => this.toggleDetailPane() })
+    }.width('100%').height(PC_CHAT_HEADER_HEIGHT).padding({ left: Space.md, right: Space.sm })
+      .border({ width: { bottom: 0.5 }, color: $r('app.color.divider') })
   }
 
   @Builder
@@ -1466,7 +1661,7 @@ struct Index {
           SettingsNavigation({ selected: this.settingsSection, onSelect: (key: string) => this.selectSettingsSection(key),
             onChat: () => this.returnFromSettings() })
         } else {
-        ThreadList({ app: this.app, selectedSection: this.rootSection, workbench: this.windowWidth >= 840,
+        ThreadList({ app: this.app, selectedSection: this.rootSection, workbench: this.desktop || this.windowWidth >= 840,
           onLifePanels: () => { this.setDrawer(false); this.openLifePanels(); },
           collapseHistory: this.workbench().expanded, searchRequest: this.historySearchRequest,
           onProjectSheetVisibility: (visible) => { this.historyProjectSheetOpen = visible; },
@@ -1480,7 +1675,8 @@ struct Index {
         } })
         }
       }
-      .width(this.workbench().expanded ? this.workbench().historyWidth : '84%').constraintSize({ maxWidth: DRAWER_MAX_WIDTH }).height('100%')
+      .width(this.workbench().expanded ? this.workbench().historyWidth : '84%')
+      .constraintSize({ maxWidth: this.workbench().expanded ? this.workbench().historyWidth : DRAWER_MAX_WIDTH }).height('100%')
       .id('history-drawer')
       .translate({ x: this.workbench().expanded ? 0 : (this.drawerReveal - 1) * this.drawerWidth })
       .onAreaChange((_old: Area, next: Area) => { this.drawerWidth = Math.max(1, next.width as number); })
@@ -1539,7 +1735,7 @@ struct Index {
     if (this.workbench().rail) {
       HistoryRail({ active: this.app.ready, filesActive: this.detailPaneOpen && this.currentDetailTab() === 'files',
         onExpand: () => this.toggleHistory(),
-        onNewChat: () => { this.createChat(); this.setDrawer(false); },
+        onNewChat: () => { this.createChat(this.desktop ? this.app.activeProject?.id : undefined); this.setDrawer(false); },
         onSearch: () => this.openHistorySearch(),
         onFiles: () => this.openFiles(),
         onTools: () => this.openTools('memory'),
@@ -1552,19 +1748,22 @@ struct Index {
       Stack() {
         // Render the capture card at chat width behind the opaque page.
         PreviewCaptureHost()
-        Column().width('100%').height('100%').backgroundColor(this.windowWidth >= 840 ? $r('app.color.surface') : $r('app.color.page_background'))
-          .expandSafeArea([SafeAreaType.SYSTEM], this.windowWidth >= 840 ? [] : [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+        Column().width('100%').height('100%').backgroundColor(this.desktop || this.windowWidth >= 840 ? $r('app.color.surface') : $r('app.color.page_background'))
+          .expandSafeArea([SafeAreaType.SYSTEM], this.desktop || this.windowWidth >= 840 ? [] : [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         Column() {
           if (this.app.ready) {
-            ChatPanel({ app: this.app, thread: this.app.active, workbench: this.windowWidth >= 840, expandDraftRequest: this.expandDraftRequest,
+            ChatPanel({ app: this.app, thread: this.app.active, workbench: this.desktop || this.windowWidth >= 840,
+                desktop: this.desktop, expandDraftRequest: this.expandDraftRequest, focusDraftRequest: this.focusDraftRequest,
                 shortcutsEnabled: this.chatVisible && !this.rootSection && !this.onboardingActive && !this.showToolScope &&
-                  !this.keyboardShortcutsOpen && !this.historyProjectSheetOpen && (!this.detailOpen() || this.workbench().docked),
+                  !this.keyboardShortcutsOpen && !this.desktopCommandsOpen && !this.historyProjectSheetOpen,
+                shortcutsCovered: this.detailOpen() && !this.workbench().docked,
+                messageSearchRequest: this.app.messageSearchRequest,
                 onNavigationShortcut: (action: NavigationShortcut) => this.runNavigationShortcut(action),
                 onToolScope: () => { this.showToolScope = true; }, approval: this.approval, browser: this.browser, account: this.account,
                 onAccount: () => { this.paths.pushPath({ name: 'account' }); },
                 onBrowser: () => { this.setBrowserExpanded(true); this.openDetailTab('browser'); },
                 onSettings: () => this.openSettings(),
-                topInset: this.windowWidth >= 840 ? 0 : CHAT_HEADER_HEIGHT,
+                topInset: this.desktop || this.windowWidth >= 840 ? 0 : CHAT_HEADER_HEIGHT,
                 voiceRequest: this.voiceRequest, onVoiceShortcutConsumed: () => { this.voiceRequest = ''; },
                 activeThreadId: this.app.active.id, speechEnabled: this.chatVisible && !this.drawerOpen && !this.drawerDragging && (!this.detailOpen() || this.workbench().docked),
                 onHistoryDragStart: (event: GestureEvent) => this.startDrawerDrag(event, true),
@@ -1574,7 +1773,7 @@ struct Index {
                 onFiles: () => this.openFiles(), onOpenFile: (path: string) => this.openFiles(path),
                 previewInspectable: true, inspectedPreviewId: this.hasPreview() ? this.previewId : '',
                 onInspectPreview: (messageId: string, previewId: string) => this.openPreview(messageId, previewId) })
-              .width('100%').constraintSize({ maxWidth: 800 }).layoutWeight(1)
+              .width('100%').constraintSize({ maxWidth: this.desktop ? 784 : 800 }).layoutWeight(1)
           } else {
             Column({ space: Space.lg }) {
               if (this.app.loading) {
@@ -1613,24 +1812,24 @@ struct Index {
           }
         }.width('100%').height('100%')
         // The page drifts aside a little under the drawer, giving the layers depth.
-        .translate({ x: this.drawerReveal * 28 })
+        .translate({ x: this.desktop ? 0 : this.drawerReveal * 28 })
         WebUiPreflightHost()
       }.width('100%').height('100%')
     }
-    .backgroundColor(this.windowWidth >= 840 ? $r('app.color.surface') : $r('app.color.page_background'))
+    .backgroundColor(this.desktop || this.windowWidth >= 840 ? $r('app.color.surface') : $r('app.color.page_background'))
     // Native button materials only work inside the actual navigation title bar.
-    .title({ builder: this.header, height: CHAT_HEADER_HEIGHT }, {
-      barStyle: this.windowWidth >= 840 ? BarStyle.STANDARD : BarStyle.STACK,
-      backgroundColor: this.windowWidth >= 840 ? $r('app.color.surface') : Color.Transparent,
+    .title({ builder: this.header, height: this.desktop ? PC_CHAT_HEADER_HEIGHT : CHAT_HEADER_HEIGHT }, {
+      barStyle: this.desktop || this.windowWidth >= 840 ? BarStyle.STANDARD : BarStyle.STACK,
+      backgroundColor: this.desktop || this.windowWidth >= 840 ? $r('app.color.surface') : Color.Transparent,
       systemMaterial: this.appearance.noMaterial,
       backgroundEffect: { radius: 0, color: Color.Transparent }
     })
     .hideBackButton(true).titleMode(NavigationTitleMode.Mini).hideToolBar(true).mode(NavigationMode.Stack)
     .onNavBarStateChange((visible: boolean) => { this.chatVisible = visible; if (visible) { this.rootSection = ''; this.offerAnnouncement(); } })
-    .navDestination(this.destination).layoutWeight(1).height(this.windowWidth >= 840 ? 'calc(100% - 12vp)' : '100%')
-    .margin({ top: this.windowWidth >= 840 ? 6 : 0, bottom: this.windowWidth >= 840 ? 6 : 0,
-      right: this.windowWidth >= 840 && !this.workbench().docked ? 6 : 0 })
-    .borderRadius(this.windowWidth >= 840 ? Radius.xl : 0).clip(this.windowWidth >= 840)
+    .navDestination(this.destination).layoutWeight(1).height(!this.desktop && this.windowWidth >= 840 ? 'calc(100% - 12vp)' : '100%')
+    .margin({ top: !this.desktop && this.windowWidth >= 840 ? 6 : 0, bottom: !this.desktop && this.windowWidth >= 840 ? 6 : 0,
+      right: !this.desktop && this.windowWidth >= 840 && !this.workbench().docked ? 6 : 0 })
+    .borderRadius(!this.desktop && this.windowWidth >= 840 ? Radius.xl : 0).clip(this.desktop || this.windowWidth >= 840)
     Column().width(this.workbench().docked ? this.detailGeometry().detailWidth * this.detailReveal : 0).height('100%')
     }.width('100%').height('100%')
     // Cover both the navigation title bar and content, keeping the measured drawer mounted.
@@ -1641,19 +1840,21 @@ struct Index {
     // overlay drawer never coexist, so a grip here can never steal a list tap.
     if (this.app.ready && this.workbench().expanded) {
       PaneDivider({ label: t('调整会话栏宽度'),
+        desktop: this.desktop, onReset: () => this.resetDesktopPane(false),
         onResizeStart: () => this.beginResize(false),
         onResize: (dx: number) => this.resizeHistory(dx),
         onResizeEnd: () => this.endResize(false) })
-        .width(12).height('calc(100% - 12vp)')
-        .position({ x: this.workbench().historyWidth - 4, y: 6 })
+        .width(12).height(this.desktop ? '100%' : 'calc(100% - 12vp)')
+        .position({ x: this.workbench().historyWidth - (this.desktop ? 6 : 4), y: this.desktop ? 0 : 6 })
     }
     if (this.app.ready && this.workbench().docked && this.detailReveal >= 1 && !this.drawerOpen && !this.drawerDragging && this.drawerReveal <= 0) {
       PaneDivider({ label: t('调整侧区宽度'),
+        desktop: this.desktop, onReset: () => this.resetDesktopPane(true),
         onResizeStart: () => this.beginResize(true),
         onResize: (dx: number) => this.resizeDetail(dx),
         onResizeEnd: () => this.endResize(true) })
-        .width(12).height('calc(100% - 12vp)')
-        .position({ x: this.detailGeometry().detailX - 8, y: 6 })
+        .width(12).height(this.desktop ? '100%' : 'calc(100% - 12vp)')
+        .position({ x: this.detailGeometry().detailX - (this.desktop ? 6 : 8), y: this.desktop ? 0 : 6 })
     }
     }.width('100%').height('100%')
       }, (locale: string) => locale)
@@ -1664,8 +1865,11 @@ struct Index {
       // the Web host keep their state; only the tab strip decides which is shown.
       Stack({ alignContent: Alignment.TopStart }) {
         Column() {
-          if (this.workbench().docked && this.detailOpen() && this.detailTabsAvailable().length > 0) {
-            DetailTabs({ tabs: this.detailTabItems(), active: this.currentDetailTab(), showCollapse: false,
+          if (this.detailOpen() && (this.desktop || this.workbench().docked) && this.detailTabsAvailable().length > 0) {
+            DetailTabs({ tabs: this.detailTabItems(), active: this.currentDetailTab(), showCollapse: this.desktop && !this.workbench().docked,
+              compact: !this.workbench().docked && this.windowWidth < WorkbenchLayout.PC_DOCK_MIN,
+              showMaximize: this.desktop && this.windowWidth >= WorkbenchLayout.PC_DOCK_MIN,
+              maximized: this.detailMaximized, onMaximize: () => this.toggleDetailMaximized(),
               onSelect: (id: string) => { this.activeDetailTab = id; },
               onClose: (id: string) => this.closeDetailTab(id),
               onAddFiles: () => this.addFilesTab(),
@@ -1675,7 +1879,7 @@ struct Index {
           Stack() {
             AnimatedPage({ visible: this.detailTabVisible('files'), retained: this.workspaceOpen,
               onPresenceChanged: (present: boolean) => { this.workspacePresent = present; } }) {
-              WorkspacePanel({ app: this.app, embedded: true, tabbed: this.workbench().docked,
+              WorkspacePanel({ app: this.app, embedded: true, tabbed: this.desktop || this.workbench().docked,
                 initialPath: this.workspacePath, requestId: this.workspaceRequest,
                 closeRequest: this.workspaceCloseRequest, tabCloseRequest: this.workspaceTabCloseRequest,
                 onClose: () => this.workspaceClosed() })
@@ -1684,34 +1888,36 @@ struct Index {
               retained: this.previewVisible && this.hasPreview(),
               onPresenceChanged: (present: boolean) => this.previewPresenceChanged(present) }) {
               PreviewPanel({ app: this.app, threadId: this.previewThreadId, messageId: this.previewMessageId,
-                previewId: this.previewId, tabbed: this.workbench().docked, onClose: () => this.closePreview() })
+                previewId: this.previewId, tabbed: this.desktop || this.workbench().docked, onClose: () => this.closePreview() })
             }
             // The Web host stays mounted even when its tab is closed: the browser
             // session opens against an attached view, and reopening a tab reuses it.
             AnimatedPage({ visible: this.detailTabVisible('browser'), retained: true,
-              vertical: this.windowWidth < 840, onPresenceChanged: (present: boolean) => this.browserPresenceChanged(present) }) {
+              vertical: this.desktop ? !this.workbench().docked : this.windowWidth < 840,
+              onPresenceChanged: (present: boolean) => this.browserPresenceChanged(present) }) {
               BrowserPanel({ browser: this.browser, expanded: this.detailTabVisible('browser'), presented: this.browserPresent,
                 onPresent: () => { this.setBrowserExpanded(true); this.openDetailTab('browser'); },
-                tabbed: this.workbench().docked, threadId: this.app.active.id,
+                tabbed: this.desktop || this.workbench().docked, threadId: this.app.active.id,
                 canAnnotate: this.app.canQueueInput && this.app.active.attachments.length < MAX_MESSAGE_ATTACHMENTS,
                 onAnnotation: (threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string) => this.addBrowserAnnotation(threadId, pixel, page, note),
                 onSettings: () => { this.hideBrowserTab(); this.openSettings(); },
                 onClose: () => this.closeBrowser(), onDismiss: () => this.hideBrowserTab() })
             }
-            AnimatedPage({ visible: this.workbench().docked &&
+            AnimatedPage({ visible: (this.desktop || this.workbench().docked) && this.detailOpen() &&
               ((this.detailPaneOpen && this.detailTabsAvailable().length === 0) ||
                 (this.detailClosing && this.detailClosingLauncher)) }) {
               DetailLauncher({ onFiles: () => this.openFiles(), onBrowser: () => this.openBrowser(),
+                compact: !this.workbench().docked,
                 onClose: () => { this.setDetailPane(false, true); } })
             }
           }.width('100%').layoutWeight(1)
-        }.width(this.workbench().docked ? this.detailGeometry().detailWidth - 6 : '100%').height('100%')
+        }.width(this.workbench().docked ? this.detailGeometry().detailWidth - (this.desktop ? 0 : 6) : '100%').height('100%')
         .backgroundColor(this.detailOpen() ? $r('app.color.surface') : Color.Transparent)
-      }.width(this.workbench().docked ? Math.max(0, this.detailGeometry().detailWidth * this.detailReveal - 6) : '100%')
-        .height(this.windowWidth >= 840 ? 'calc(100% - 12vp)' : '100%')
-        .borderRadius(this.windowWidth >= 840 ? Radius.xl : 0).clip(true)
+      }.width(this.workbench().docked ? Math.max(0, this.detailGeometry().detailWidth * this.detailReveal - (this.desktop ? 0 : 6)) : '100%')
+        .height(!this.desktop && this.windowWidth >= 840 ? 'calc(100% - 12vp)' : '100%')
+        .borderRadius(!this.desktop && this.windowWidth >= 840 ? Radius.xl : 0).clip(true)
         .position({ x: this.workbench().docked ? this.windowWidth - this.detailGeometry().detailWidth * this.detailReveal : 0,
-          y: this.windowWidth >= 840 ? 6 : 0 })
+          y: !this.desktop && this.windowWidth >= 840 ? 6 : 0 })
         .hitTestBehavior(this.detailOpen() ? HitTestMode.Default : HitTestMode.None)
         .enabled(this.detailOpen())
         // A closed host keeps its retained bodies mounted but must not lay a

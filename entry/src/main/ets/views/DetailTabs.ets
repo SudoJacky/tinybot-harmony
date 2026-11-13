@@ -26,12 +26,16 @@ export struct DetailTabs {
   @Prop tabs: DetailTabItem[] = [];
   @Prop active: string = '';
   @Prop showCollapse: boolean = true;
+  @Prop compact: boolean = false;
+  @Prop showMaximize: boolean = false;
+  @Prop maximized: boolean = false;
   @State private hoveredTab: string = '';
   onSelect: (id: string) => void = () => {};
   onClose: (id: string) => void = () => {};
   onAddFiles: () => void = () => {};
   onAddBrowser: () => void = () => {};
   onCollapse: () => void = () => {};
+  onMaximize: () => void = () => {};
 
   @Builder
   addMenu() {
@@ -72,22 +76,68 @@ export struct DetailTabs {
     .onClick(() => this.onSelect(tab.id))
   }
 
+  @Builder
+  switchMenu() {
+    Menu() {
+      ForEach(this.tabs, (tab: DetailTabItem) => {
+        MenuItem(() => materialMenuContent.bind(this)({ label: tab.label, selected: this.active === tab.id }))
+          .id('detail-switch-' + tab.id).onClick(() => this.onSelect(tab.id))
+      }, (tab: DetailTabItem) => tab.id + ':' + tab.label)
+    }
+  }
+
+  @Builder
+  compactBar() {
+    Row({ space: 4 }) {
+      Button({ type: ButtonType.Normal }) {
+        Row({ space: 8 }) {
+          Text(this.tabs.find((tab: DetailTabItem) => tab.id === this.active)?.label || t('详情'))
+            .fontFamily(this.appearance.fontFamily).fontSize(14).maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary')).layoutWeight(1)
+          SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(12).fontColor([$r('app.color.text_secondary')])
+        }.width('100%')
+      }.id('detail-switch-tab').height(40).layoutWeight(1).borderRadius(Radius.sm)
+        .backgroundColor(Color.Transparent).enabled(this.tabs.length > 1)
+        .bindMenu(this.switchMenu, { systemMaterial: this.appearance.menu, mask: false })
+      IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭') + ' · ' +
+        (this.tabs.find((tab: DetailTabItem) => tab.id === this.active)?.label || t('详情')), compId: 'detail-close-active',
+        diameter: 32, iconSize: 15, onTap: () => this.onClose(this.active) })
+      this.trailingControls()
+    }.width('100%').height(44).padding({ left: Space.sm, right: Space.sm })
+  }
+
+  @Builder
+  trailingControls() {
+    Button({ type: ButtonType.Circle }) {
+      SymbolGlyph($r('sys.symbol.plus')).fontSize(16).fontColor([$r('app.color.text_secondary')])
+    }.id('detail-add-tab').width(32).height(32).padding(0).backgroundColor(Color.Transparent)
+      .clickEffect(Motion.pressSmall).accessibilityText(t('添加侧栏面板'))
+      .bindMenu(this.addMenu, { systemMaterial: this.appearance.menu, mask: false })
+    if (this.showMaximize) {
+      IconButton({ icon: this.maximized ? $r('sys.symbol.close_sidebar') : $r('sys.symbol.arrow_up_left_and_arrow_down_right'),
+        label: this.maximized ? t('恢复并排显示') : t('最大化侧栏'), compId: 'detail-toggle-maximized',
+        diameter: 32, iconSize: 16, onTap: this.onMaximize })
+    }
+    if (this.showCollapse) { IconButton({ icon: $r('sys.symbol.close_sidebar'), label: t('关闭侧栏'), compId: 'detail-collapse',
+      diameter: 32, iconSize: 17, onTap: this.onCollapse }) }
+  }
+
+  @Builder
+  dockedBar() {
+    Row({ space: 4 }) {
+      Scroll() {
+        Row({ space: 4 }) {
+          ForEach(this.tabs, (tab: DetailTabItem) => { this.chip(tab) }, (tab: DetailTabItem) => tab.id + ':' + tab.label)
+        }.padding({ left: Space.sm })
+      }.layoutWeight(1).scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).align(Alignment.Start)
+      this.trailingControls()
+    }.width('100%').height(48).padding({ right: 4 })
+  }
+
   build() {
     Column() {
-      Row({ space: 4 }) {
-        Scroll() {
-          Row({ space: 4 }) {
-            ForEach(this.tabs, (tab: DetailTabItem) => { this.chip(tab) }, (tab: DetailTabItem) => tab.id + ':' + tab.label)
-          }.padding({ left: Space.sm })
-        }.layoutWeight(1).scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).align(Alignment.Start)
-        Button({ type: ButtonType.Circle }) {
-          SymbolGlyph($r('sys.symbol.plus')).fontSize(16).fontColor([$r('app.color.text_secondary')])
-        }.id('detail-add-tab').width(32).height(32).padding(0).backgroundColor(Color.Transparent)
-          .clickEffect(Motion.pressSmall).accessibilityText(t('添加侧栏面板'))
-          .bindMenu(this.addMenu, { systemMaterial: this.appearance.menu, mask: false })
-        if (this.showCollapse) { IconButton({ icon: $r('sys.symbol.close_sidebar'), label: t('关闭侧栏'), compId: 'detail-collapse',
-          diameter: 32, iconSize: 17, onTap: this.onCollapse }) }
-      }.width('100%').height(48).padding({ right: 4 })
+      if (this.compact) { this.compactBar() }
+      else { this.dockedBar() }
       Divider().strokeWidth(0.5).color($r('app.color.divider'))
     }.width('100%').backgroundColor($r('app.color.page_background'))
   }

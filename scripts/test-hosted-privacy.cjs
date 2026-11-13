@@ -215,6 +215,9 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   const noOp = () => {};
   const { default: EntryAbility } = load('entryability/EntryAbility.ets', {
     '../model/Diagnostics': { Diagnostics: { log: noOp, acceptsLog: () => false } },
+    '../common/ApiLevel': { ApiLevel: { sdk: 20 } },
+    '../common/DeviceForm': { IS_PC: false },
+    '@kit.ArkUI': {},
     '@kit.ArkWeb': { webview: { WebviewController: { initializeWebEngine() { engines++; } } } },
     '../services/NativeActions': { ShareInbox: { receive: want => wants.push(want) } },
     '../services/NativeDiagnosticLog': { configureNativeDiagnosticLog: () => bootOrder.push('logging') },

@@ -12,7 +12,9 @@ const disk = value => value.startsWith('file://') ? disk(value.slice(7)) : value
 const handles = new Map(), cache = new Map();
 let copyFailure = false, pdfReads = 0, pdfPages = [], jsReads = 0;
 let selectedUris = [], sharedRecords = [], pickerMaximum;
-let cameraOutcome = 'photo', cameraPath;
+let cameraOutcome = 'photo', cameraPath, expectedCameraPosition = 1;
+let cameraDevices = [];
+const cameraDeviceInfo = { deviceType: 'phone' };
 const fileIo = {
   rmdir: async p => {
     const target = path.resolve(disk(p));
@@ -52,10 +54,11 @@ const kits = {
   '@kit.CoreFileKit': { fileIo, fileUri: { getUriFromPath: p => 'file://' + p }, picker: { DocumentViewPicker: class {
     async select(options) { pickerMaximum = options.maxSelectNumber; return selectedUris; }
   } } },
-  '@kit.CameraKit': { camera: { CameraPosition: { CAMERA_POSITION_BACK: 1 } }, cameraPicker: {
+  '@kit.CameraKit': { camera: { CameraPosition: { CAMERA_POSITION_BACK: 1, CAMERA_POSITION_FRONT: 2 },
+    getCameraManager: () => ({ getSupportedCameras: () => cameraDevices }) }, cameraPicker: {
     PickerMediaType: { PHOTO: 'photo' }, pick: async (context, mediaTypes, profile) => {
       assert.equal(mediaTypes.length, 1); assert.equal(mediaTypes[0], 'photo');
-      assert.equal(profile.cameraPosition, 1);
+      assert.equal(profile.cameraPosition, expectedCameraPosition);
       cameraPath = disk(profile.saveUri); assert.ok(fs.existsSync(cameraPath));
       if (cameraOutcome === 'error') throw Error('injected camera failure');
       if (cameraOutcome === 'cancel') return { resultCode: -1, resultUri: '', mediaType: 'photo' };
@@ -83,7 +86,7 @@ const kits = {
   '@kit.CryptoArchitectureKit': { cryptoFramework: { ...backupCrypto, createMd: () => { const hash = crypto.createHash('sha256'); return {
     update: async value => hash.update(value.data), digest: async () => ({ data: Uint8Array.from(hash.digest()) })
   }; } } },
-  '@kit.BasicServicesKit': { zlib: { ReturnStatus: { STREAM_END: 1 }, CompressFlushMode: { FINISH: 4 }, createZipSync: () => {
+  '@kit.BasicServicesKit': { deviceInfo: cameraDeviceInfo, zlib: { ReturnStatus: { STREAM_END: 1 }, CompressFlushMode: { FINISH: 4 }, createZipSync: () => {
     let size = 0; return { inflateInit2: async () => {}, inflateEnd: async () => {}, getZStream: async () => ({ totalOut: size }),
       inflate: async stream => { const bytes = zlib.inflateRawSync(Buffer.from(stream.nextIn), { maxOutputLength: stream.availableOut }); new Uint8Array(stream.nextOut).set(bytes); size = bytes.length; return 1; } };
   } } },
@@ -105,7 +108,7 @@ function load(name) {
   if (cache.has(file)) return cache.get(file);
   const exports = {}; cache.set(file, exports);
   vm.runInNewContext(compile(fs.readFileSync(file, 'utf8')), { exports, ArrayBuffer, Uint8Array, DataView, Error, Map, Set, console,
-    setTimeout, clearTimeout, Observed: cls => cls,
+    setTimeout, clearTimeout, Observed: cls => cls, canIUse: capability => capability === 'SystemCapability.Multimedia.Camera.Core',
     require: id => id === './HuaweiAccount' ? { huaweiAccount: backupAccount } : id.startsWith('.') ? load(path.resolve(path.dirname(file), id)) : assert.ok(id in kits, id) || kits[id]
   }, { filename: file });
   return exports;
@@ -321,6 +324,20 @@ async function main() {
     assert.ok(!fs.existsSync(cameraPath));
   }
   console.log('PASS captured photo persists and hydrates; cancellation, invalid results and camera/import failures clean temporary files');
+
+  cameraDeviceInfo.deviceType = '2in1';
+  cache.delete(path.join(source, 'common/DeviceForm.ets'));
+  cache.delete(path.join(source, 'services/CameraCapture.ets'));
+  const captureOnPc = load('services/CameraCapture').captureAttachment;
+  cameraOutcome = 'photo';
+  cameraDevices = [{ cameraPosition: 2 }];
+  expectedCameraPosition = 2;
+  assert.equal((await captureOnPc({ cacheDir: root })).length, 1);
+  cameraDevices = [];
+  await assert.rejects(captureOnPc({ cacheDir: root }), /当前设备没有可用的摄像头/);
+  assert.equal(fs.readdirSync(disk(root)).some(name => name.startsWith('camera-')), false);
+  cameraDeviceInfo.deviceType = 'phone';
+  console.log('PASS a front-only PC can capture an attachment and a PC with no camera reports the error');
   selectedUris = Array.from({ length: 10 }, (_, index) => {
     const uri = root + '/selected-' + index + '.jpg'; fs.writeFileSync(disk(uri), Buffer.from([255, 216, 255])); return uri;
   });
