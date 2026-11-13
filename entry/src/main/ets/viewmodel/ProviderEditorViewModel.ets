@@ -1,7 +1,7 @@
 import { ProviderProfile, modelIds } from '../model/ProviderProfiles';
 import { ProviderInfo, builtinProviderInfos } from '../model/Provider';
 import { ProviderDraft } from '../services/ProfileSettings';
-import { protocolUrl, sameCredentialScope } from '../model/ProviderEndpoint';
+import { protocolUrl, providerEndpointRoot, sameCredentialScope } from '../model/ProviderEndpoint';
 import { t } from '../model/I18n';
 import { BalanceSettings, balanceCredentialScope, usesBalanceCredential } from '../model/BalanceSettings';
 
@@ -59,10 +59,11 @@ export class ProviderEditorViewModel {
   changeProtocol(protocol: string): void {
     if (protocol === this.protocol) { return; }
     try {
-      const endpoint = protocolUrl(this.protocol, this.baseUrl, true);
       // A full endpoint was entered: carry its service root to the new protocol.
-      if (/\/(chat\/completions|responses|messages)$/.test(this.baseUrl.trim().replace(/\/+$/, ''))) {
-        this.baseUrl = protocolUrl(protocol, endpoint.replace(/\/(chat\/completions|responses|messages)$/, ''), true);
+      const base = this.baseUrl.trim().replace(/\/+$/, '');
+      const root = providerEndpointRoot(base);
+      if (root !== base) {
+        this.baseUrl = protocolUrl(protocol, root, true);
       }
     } catch (_) { /* Keep invalid input visible for the normal URL validation. */ }
     this.protocol = protocol;

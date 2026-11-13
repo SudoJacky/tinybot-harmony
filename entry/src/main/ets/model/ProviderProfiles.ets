@@ -2,7 +2,7 @@ import { t } from './I18n';
 import { ModelConfig } from './Conversation';
 import { builtinProviderInfos } from './Provider';
 import { contextSettings } from './ContextSettings';
-import { isSupportedProtocol, protocolUrl } from './ProviderEndpoint';
+import { isImageProtocol, isProviderProtocol, isSupportedProtocol, protocolUrl } from './ProviderEndpoint';
 import { isConfigurationName } from './ConfigurationValue';
 import { BalanceSettings, validateBalanceSettings } from './BalanceSettings';
 
@@ -43,7 +43,7 @@ export function modelIds(value: string): string[] {
 export function validateProfile(profile: ProviderProfile, stored: boolean = false): void {
   if (!profile || typeof profile.id !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(profile.id) ||
     typeof profile.name !== 'string' || profile.name.trim().length === 0 || profile.name.length > 80 ||
-    !isConfigurationName(profile.protocol) || (!stored && !isSupportedProtocol(profile.protocol)) || typeof profile.baseUrl !== 'string' ||
+    !isConfigurationName(profile.protocol) || (!stored && !isProviderProtocol(profile.protocol)) || typeof profile.baseUrl !== 'string' ||
     typeof profile.credentialAlias !== 'string' || typeof profile.noApiKey !== 'boolean' ||
     (profile.pendingSetup !== undefined && (profile.pendingSetup !== true || profile.enabled || !profile.noApiKey)) ||
     (profile.balanceCredentialAlias !== undefined && typeof profile.balanceCredentialAlias !== 'string') ||
@@ -53,7 +53,7 @@ export function validateProfile(profile: ProviderProfile, stored: boolean = fals
     (profile.presetId !== undefined && !isConfigurationName(profile.presetId))) {
     throw new Error(t("模型服务配置无效，名称、协议、凭据或模型列表需要检查。"));
   }
-  if (isSupportedProtocol(profile.protocol)) { protocolUrl(profile.protocol, profile.baseUrl, true); }
+  if (isProviderProtocol(profile.protocol)) { protocolUrl(profile.protocol, profile.baseUrl, true); }
   modelIds(profile.models.join('\n'));
   validateBalanceSettings(profile.balance);
   contextSettings({ configured: false, providerId: profile.id, baseUrl: '', model: '', systemPrompt: '',
@@ -95,9 +95,17 @@ export function migrateProfiles(config: ModelConfig): ProviderProfile[] {
 }
 
 export function availableModels(profiles: ProviderProfile[]): ModelChoice[] {
+  return modelChoices(profiles, isSupportedProtocol);
+}
+
+export function availableImageModels(profiles: ProviderProfile[]): ModelChoice[] {
+  return modelChoices(profiles, isImageProtocol);
+}
+
+function modelChoices(profiles: ProviderProfile[], supported: (protocol: string) => boolean): ModelChoice[] {
   const result: ModelChoice[] = [];
   for (const profile of profiles) {
-    if (profile.enabled && isSupportedProtocol(profile.protocol)) {
+    if (profile.enabled && supported(profile.protocol)) {
       for (const id of profile.models) { result.push({ providerId: profile.id, modelId: id, providerName: profile.name }); }
     }
   }

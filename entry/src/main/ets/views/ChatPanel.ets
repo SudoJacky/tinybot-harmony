@@ -14,6 +14,7 @@ import { AnswerSpeech } from '../services/AnswerSpeech';
 import { LaunchActions } from '../services/LaunchActions';
 import { isHighestReasoningEffort, reasoningEfforts } from '../model/ReasoningEffort';
 import { ProviderProfile } from '../model/ProviderProfiles';
+import { WorkspaceStore } from '../model/WorkspaceStore';
 import { ComposerGlow } from '../common/ComposerGlow';
 import { ModelPickerPanel } from './ModelPickerPanel';
 import { ReasoningEffortPicker } from './ReasoningEffortPicker';
@@ -951,6 +952,11 @@ export struct ChatPanel {
     }
   }
 
+  private messageWorkspaceRoot(): string {
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    return new WorkspaceStore(context.getApplicationContext().filesDir).pathFor(this.app.activeWorkspaceId);
+  }
+
   @Builder
   messageList() {
     Stack({ alignContent: Alignment.Bottom }) {
@@ -964,6 +970,7 @@ export struct ChatPanel {
         LazyForEach(this.messageSource, (message: MessageViewModel) => {
           ListItem() {
             MessageBubble({ message: message, latestPreviewIds: this.thread.latestPreviewIds, turnStatus: message.status, webEnabled: this.app.extensions.webEnabled, onOpenFile: this.onOpenFile,
+              workspaceRoot: this.messageWorkspaceRoot(),
               previewInspectable: this.previewInspectable, inspectedPreviewId: this.inspectedPreviewId, onInspectPreview: this.onInspectPreview, uiAvailable: !this.app.busy && !this.thread.archived,
               sendOrigin: this.sendingMessageId === message.id ? this.sendOrigin : undefined,
               onSendReady: (): void => { this.scroller.scrollEdge(Edge.Bottom); }, onSendFinish: (): void => { this.finishSendFlight(message.id); },

@@ -7,6 +7,7 @@ import { Cancellation } from '../Cancellation';
 import { ContentGuardStream } from '../ContentGuardStream';
 import { OutputWordGuard, OutputWordMatcher } from '../OutputWordGuard';
 import { UsageOrigin } from '../../model/Usage';
+import { attachmentContext } from '../../model/AttachmentContext';
 import { CredentialReader, ModelProvider, ModelRequestOptions, ModelSession } from './Provider';
 
 class BoundModel implements ModelSession {
@@ -42,6 +43,20 @@ class BoundModel implements ModelSession {
       messages = messages.map((message): ModelMessage => message.previewScreenshot ? {
         role: message.role, content: message.content + '\nThe current model is configured without image support; the screenshot was not sent. Do not claim to have visually inspected it.'
       } : message);
+    }
+    if (tools.some((tool) => tool.function.name === 'image_gen')) {
+      messages = messages.map((message): ModelMessage => {
+        if (message.previewScreenshot) { return message; }
+        const photos = (message.attachments || []).filter((item) => !item.original && item.mime === 'image/jpeg');
+        if (!photos.length) { return message; }
+        const copy = JSON.parse(JSON.stringify(message)) as ModelMessage;
+        copy.content += photos.map(attachmentContext).join('');
+        if (this.images === false) {
+          copy.attachments = message.attachments?.filter((item) => !photos.includes(item));
+          copy.content += '\nThe current chat model cannot see these photos.';
+        }
+        return copy;
+      });
     }
     if (this.images === false && messages.some((message) => (message.attachments || []).some((item) => item.mime.startsWith('image/')))) {
       throw new Error(t("当前模型设置为不支持图片，请选择视觉模型或调整能力设置。"));

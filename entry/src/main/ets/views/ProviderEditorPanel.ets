@@ -10,6 +10,7 @@ import { discoverModels } from '../services/ModelDiscovery';
 import { ProviderEditorViewModel } from '../viewmodel/ProviderEditorViewModel';
 import { ProviderBalanceCard } from './ProviderBalanceCard';
 import { Btn, Motion, Radius, Space, Styles, protocolName } from '../common/Theme';
+import { IMAGE_PROTOCOLS, isImageProtocol } from '../model/ProviderEndpoint';
 import { Banner, BottomBar, GroupCard, IconButton, NavRow, RowDivider, SectionHeader, SwitchRow } from '../common/Widgets';
 
 class ProviderFocusFrame extends FrameCallback {
@@ -41,8 +42,8 @@ export struct ProviderEditorPanel {
   private alive: boolean = true;
   private focusRequest: number = 0;
   private scroller: Scroller = new Scroller();
-  private protocols: string[] = ['chat-completions', 'responses', 'anthropic-messages', 'gemini'];
-  private protocolLabels: string[] = ['Chat Completions', 'Responses', 'Messages', 'Gemini'];
+  private protocols: string[] = ['chat-completions', 'responses', 'anthropic-messages', 'gemini'].concat(IMAGE_PROTOCOLS);
+  private protocolLabels: string[] = ['Chat Completions', 'Responses', 'Messages', 'Gemini', 'OpenAI Images', 'Gemini Image', 'Seedream', 'DashScope'];
   private protocolLogos: Resource[] = [$r('app.media.logo_openai'), $r('app.media.logo_openai'), $r('app.media.logo_anthropic'), $r('app.media.logo_google')];
 
   aboutToAppear(): void { this.alive = true; this.modelError = this.initialModelError; }
@@ -120,10 +121,20 @@ export struct ProviderEditorPanel {
     }
   }
   private protocolHint(protocol: string): string {
+    if (isImageProtocol(protocol)) { return t('用于图片生成和编辑'); }
     return protocol === 'chat-completions' ? t('兼容大多数 OpenAI 格式的服务') :
       protocol === 'responses' ? t('OpenAI 新一代接口') : protocol === 'gemini' ? t('Google Gemini 原生接口') : t('Claude 模型使用的接口');
   }
-  // Two columns keep all four protocol names readable on phone screens.
+  private endpointPlaceholder(): string {
+    switch (this.editor.protocol) {
+      case 'openai-images': return 'https://api.openai.com/v1';
+      case 'gemini-images': return 'https://generativelanguage.googleapis.com/v1';
+      case 'seedream-images': return 'https://ark.cn-beijing.volces.com/api/v3';
+      case 'dashscope-images': return 'https://dashscope.aliyuncs.com/api/v1';
+      default: return 'https://api.example.com/v1';
+    }
+  }
+  // Two columns keep protocol names readable on phone screens.
   @Builder
   protocolPicker() {
     Column({ space: Space.sm }) {
@@ -131,8 +142,13 @@ export struct ProviderEditorPanel {
         ForEach(this.protocols, (protocol: string, index: number) => {
           GridItem() {
             Column({ space: 6 }) {
-              Image(this.protocolLogos[index]).width(24).height(24).objectFit(ImageFit.Contain)
-                .fillColor(this.editor.protocol === protocol ? this.appearance.accent : $r('app.color.text_secondary'))
+              if (isImageProtocol(protocol)) {
+                SymbolGlyph($r('sys.symbol.picture')).fontSize(24)
+                  .fontColor([this.editor.protocol === protocol ? this.appearance.accent : $r('app.color.text_secondary')])
+              } else {
+                Image(this.protocolLogos[index]).width(24).height(24).objectFit(ImageFit.Contain)
+                  .fillColor(this.editor.protocol === protocol ? this.appearance.accent : $r('app.color.text_secondary'))
+              }
               Text(this.protocolLabels[index]).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(17).maxLines(2).textAlign(TextAlign.Center)
                 .fontWeight(this.editor.protocol === protocol ? FontWeight.Medium : FontWeight.Normal)
                 .fontColor(this.editor.protocol === protocol ? $r('app.color.text_primary') : $r('app.color.text_secondary'))
@@ -149,7 +165,7 @@ export struct ProviderEditorPanel {
             .onClick(() => { this.editor.changeProtocol(protocol); })
           }
         }, (protocol: string) => protocol)
-      }.width('100%').height(164).columnsTemplate('1fr 1fr').rowsTemplate('1fr 1fr').columnsGap(Space.sm).rowsGap(Space.sm)
+      }.width('100%').height(344).columnsTemplate('1fr 1fr').rowsTemplate('1fr 1fr 1fr 1fr').columnsGap(Space.sm).rowsGap(Space.sm)
       Text(protocolName(this.editor.protocol) + ' · ' + this.protocolHint(this.editor.protocol)).fontFamily(this.appearance.fontFamily)
         .fontSize(12).lineHeight(18).fontColor($r('app.color.text_secondary')).width('100%')
     }.width('100%')
@@ -274,7 +290,7 @@ export struct ProviderEditorPanel {
               }
               Column() {
                 this.label(t('服务地址'))
-                TextInput({ text: this.editor.baseUrl, placeholder: 'https://api.example.com/v1' }).fontFamily(this.appearance.fontFamily).id('provider-url')
+                TextInput({ text: this.editor.baseUrl, placeholder: this.endpointPlaceholder() }).fontFamily(this.appearance.fontFamily).id('provider-url')
                   .attributeModifier(Styles.input).type(InputType.URL).maxLength(1024)
                   .onChange((value: string) => { this.editor.baseUrl = value; })
                 this.fieldError('url')
@@ -333,11 +349,13 @@ export struct ProviderEditorPanel {
                 RowDivider()
               }
               if (this.editor.modelList.length === 0) {
-                Text(t('添加至少一个模型，即可开始对话。')).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary')).padding(16).width('100%')
+                Text(isImageProtocol(this.editor.protocol) ? t('填写图片模型 ID。') : t('添加至少一个模型，即可开始对话。')).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary')).padding(16).width('100%')
               }
               Row({ space: 8 }) {
-                Button(this.discovering ? t('正在发现模型…') : t('获取模型')).fontFamily(this.appearance.fontFamily).id('discover-models').attributeModifier(Btn.tonal).layoutWeight(1)
-                  .enabled(!this.locked()).onClick(() => this.discover())
+                if (!isImageProtocol(this.editor.protocol)) {
+                  Button(this.discovering ? t('正在发现模型…') : t('获取模型')).fontFamily(this.appearance.fontFamily).id('discover-models').attributeModifier(Btn.tonal).layoutWeight(1)
+                    .enabled(!this.locked()).onClick(() => this.discover())
+                }
                 Button(t('手动添加')).fontFamily(this.appearance.fontFamily).id('manage-provider-models')
                   .attributeModifier(Btn.text).height(44).layoutWeight(1).enabled(!this.locked())
                   .onClick(() => this.onModels(''))
@@ -360,13 +378,15 @@ export struct ProviderEditorPanel {
                       this.label(t('协议'))
                       this.protocolPicker()
                     }
-                    Column() {
-                      this.label(t('上下文窗口（Token）'))
-                      TextInput({ text: this.editor.contextWindow, placeholder: t('留空使用模型默认值') }).fontFamily(this.appearance.fontFamily).id('context-window').attributeModifier(Styles.input)
-                        .type(InputType.Number).maxLength(7).onChange((value: string) => { this.editor.contextWindow = value; })
-                      this.fieldError('context')
-                      Text(t('单模型设置优先于此处。')).fontFamily(this.appearance.fontFamily).fontSize(12).lineHeight(18)
-                        .fontColor($r('app.color.text_secondary')).width('100%').margin({ top: 6 })
+                    if (!isImageProtocol(this.editor.protocol)) {
+                      Column() {
+                        this.label(t('上下文窗口（Token）'))
+                        TextInput({ text: this.editor.contextWindow, placeholder: t('留空使用模型默认值') }).fontFamily(this.appearance.fontFamily).id('context-window').attributeModifier(Styles.input)
+                          .type(InputType.Number).maxLength(7).onChange((value: string) => { this.editor.contextWindow = value; })
+                        this.fieldError('context')
+                        Text(t('单模型设置优先于此处。')).fontFamily(this.appearance.fontFamily).fontSize(12).lineHeight(18)
+                          .fontColor($r('app.color.text_secondary')).width('100%').margin({ top: 6 })
+                      }
                     }
                   }.padding(12)
                 }

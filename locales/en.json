@@ -1,4 +1,11 @@
 {
+  "用配置的图片模型生成或编辑图片": "Generate or edit images with the configured image model",
+  "用于图片生成和编辑": "For image generation and editing",
+  "填写图片模型 ID。": "Enter an image model ID.",
+  "关闭图片生成": "Turn off image generation",
+  "请先添加图片生成服务。": "Add an image generation service first.",
+  "允许调用图片生成服务？": "Allow this image generation request?",
+  "提示词和所选参考图将发送给此服务。": "The prompt and selected reference images will be sent to this service.",
   "批注": "Annotate",
   "结束批注": "Done annotating",
   "点选页面元素": "Select an element on the page",

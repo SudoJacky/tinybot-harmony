@@ -23,6 +23,7 @@ export function mergeBackupOptions(local: AssistantOptions | undefined, incoming
   if (!local.memory) { merged.memory = incoming.memory; }
   if (!local.title) { merged.title = incoming.title; }
   if (!local.teamWorker) { merged.teamWorker = incoming.teamWorker; }
+  if (!local.imageGeneration) { merged.imageGeneration = incoming.imageGeneration; }
   for (const capability of incoming.capabilities) {
     if (!merged.capabilities.some((item) => item.providerId === capability.providerId && item.modelId === capability.modelId)) { merged.capabilities.push(capability); }
   }

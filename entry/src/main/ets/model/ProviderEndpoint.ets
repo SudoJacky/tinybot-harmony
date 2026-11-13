@@ -4,6 +4,21 @@ export function isSupportedProtocol(protocol: string): boolean {
   return ['chat-completions', 'responses', 'anthropic-messages', 'gemini'].includes(protocol);
 }
 
+export const IMAGE_PROTOCOLS: string[] = ['openai-images', 'gemini-images', 'seedream-images', 'dashscope-images'];
+const FIXED_ENDPOINTS: string[] = ['/chat/completions', '/responses', '/messages',
+  '/images/generations', '/images/edits', '/interactions', '/services/aigc/multimodal-generation/generation'];
+
+export function isImageProtocol(protocol: string): boolean { return IMAGE_PROTOCOLS.includes(protocol); }
+
+export function isProviderProtocol(protocol: string): boolean {
+  return isSupportedProtocol(protocol) || isImageProtocol(protocol);
+}
+
+export function providerEndpointRoot(endpoint: string): string {
+  const suffix = FIXED_ENDPOINTS.find((item) => endpoint.endsWith(item));
+  return suffix ? endpoint.slice(0, -suffix.length) : endpoint;
+}
+
 export function completionUrl(baseUrl: string, allowHttp: boolean = false): string {
   const base = baseUrl.trim().replace(/\/+$/, '');
   if (!/^https?:\/\/[^\s/?#@:\\]+(?::\d+)?(?:\/[^\s?#\\]*)?$/.test(base) ||
@@ -17,19 +32,23 @@ export function protocolUrl(protocol: string, baseUrl: string, allowHttp: boolea
   completionUrl(baseUrl, allowHttp);
   const base = baseUrl.trim().replace(/\/+$/, '');
   if (protocol === 'gemini') {
-    if (/\/(chat\/completions|responses|messages)$/.test(base) || /:(streamGenerateContent|generateContent)$/.test(base)) {
+    if (providerEndpointRoot(base) !== base || /:(streamGenerateContent|generateContent)$/.test(base)) {
       throw new Error(t('服务地址的接口路径与所选协议不一致。'));
     }
     return /^https?:\/\/[^/]+$/.test(base) ? base + '/v1beta' : base;
   }
   const suffix = protocol === 'chat-completions' ? '/chat/completions' : protocol === 'responses' ? '/responses' :
-    protocol === 'anthropic-messages' ? '/messages' : '';
+    protocol === 'anthropic-messages' ? '/messages' : protocol === 'dashscope-images' ? '/services/aigc/multimodal-generation/generation' :
+    protocol === 'gemini-images' ? '/interactions' : ['openai-images', 'seedream-images'].includes(protocol) ? '/images/generations' : '';
   if (!suffix) { throw new Error(t("不支持的模型协议：") + protocol); }
-  for (const ending of ['/chat/completions', '/responses', '/messages']) {
+  if (protocol === 'openai-images' && base.endsWith('/images/edits')) {
+    return providerEndpointRoot(base) + suffix;
+  }
+  for (const ending of FIXED_ENDPOINTS) {
     if (base.endsWith(ending) && ending !== suffix) { throw new Error(t("服务地址的接口路径与所选协议不一致。")); }
   }
   if (base.endsWith(suffix)) { return base; }
-  if (protocol === 'anthropic-messages' && /^https?:\/\/[^/]+$/.test(base)) { return base + '/v1/messages'; }
+  if (['anthropic-messages', 'gemini-images'].includes(protocol) && /^https?:\/\/[^/]+$/.test(base)) { return base + '/v1' + suffix; }
   return base + suffix;
 }
 
@@ -37,8 +56,8 @@ export function protocolUrl(protocol: string, baseUrl: string, allowHttp: boolea
 // Keep scheme, host, port and base path scoped; strip only the protocol's endpoint.
 export function sameCredentialScope(oldProtocol: string, oldUrl: string, protocol: string, baseUrl: string): boolean {
   try {
-    const previous = protocolUrl(oldProtocol, oldUrl, true).replace(/\/(chat\/completions|responses|messages)$/, '');
-    const next = protocolUrl(protocol, baseUrl, true).replace(/\/(chat\/completions|responses|messages)$/, '');
+    const previous = providerEndpointRoot(protocolUrl(oldProtocol, oldUrl, true));
+    const next = providerEndpointRoot(protocolUrl(protocol, baseUrl, true));
     return previous === next;
   } catch (_) { return false; }
 }

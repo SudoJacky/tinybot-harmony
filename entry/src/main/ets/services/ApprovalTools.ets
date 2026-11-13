@@ -5,9 +5,9 @@ import { AgentTools, ToolInvocationContext } from './AgentLoop';
 import { Cancellation } from './Cancellation';
 import { ToolApproval } from './ToolApproval';
 
-// MCP calls validate discovery and display the remote endpoint before asking in McpTools.
+// Tools with provider-specific approval show the destination and inputs themselves.
 const APPROVAL_TOOLS = new Set(TOOL_GROUPS.filter((group) => !group.readOnly).flatMap((group) => group.tools)
-  .filter((name) => name !== 'mcp_call' && name !== 'validate_life_panel'));
+  .filter((name) => !['mcp_call', 'validate_life_panel', 'image_gen'].includes(name)));
 
 interface ApprovalArguments { action?: string; path?: string; operations?: Object[]; }
 
