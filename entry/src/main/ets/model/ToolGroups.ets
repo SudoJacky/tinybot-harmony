@@ -4,7 +4,7 @@ export const BASIC_FILE_TOOLS: string[] = ['list_files', 'find_files', 'read_fil
 export const TOOL_GROUPS: ToolGroup[] = [
   { id: 'workspace-read', readOnly: true, tools: ['list_files', 'find_files', 'read_file', 'search_file_content'] },
   { id: 'workspace-write', readOnly: false, tools: ['write_file', 'edit_file'] },
-  { id: 'context-read', readOnly: true, tools: ['read_attachment', 'read_reference'] },
+  { id: 'context-read', readOnly: true, tools: ['read_attachment', 'read_reference', 'view_image'] },
   { id: 'web', readOnly: true, tools: ['read_web', 'search_web'] },
   { id: 'mail', readOnly: true, tools: ['list_mail_accounts', 'search_mail', 'read_mail'] },
   { id: 'browser', readOnly: true, tools: ['browser_open', 'browser_snapshot', 'browser_action', 'browser_capture', 'browser_wait', 'browser_handoff', 'browser_close'] },

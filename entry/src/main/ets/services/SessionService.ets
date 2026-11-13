@@ -1420,11 +1420,13 @@ export class SessionService {
     if (extras.options.search && !isSupportedSearchProvider(extras.options.search.provider)) { extras.options.search.enabled = false; }
     extras.options.readOnly = this.readOnly(thread);
     extras.servers = extras.servers.filter((item) => !(thread.disabledMcpIds || []).includes(item.id));
+    const messageAttachments = (): Attachment[] => thread.messages.flatMap((item) => (item.attachments || [])
+      .concat(...(item.steps || []).map((step) => step.steering?.attachments || [])));
     const live: LiveResources = { askForToolApproval: toolApprovalMode(thread.toolApprovalMode) === 'ask', skills: () => this.extensions.skills,
+      imageAttachments: messageAttachments,
       servers: () => (this.data.productivity?.servers || []).filter((item) => !(thread.disabledMcpIds || []).includes(item.id)) };
     return new SelectedTools(new RuleTools(new ToolSet([this.resources.tools(thread.id, this.extensions, selected, extras,
-      (thread.attachments || []).concat(...thread.messages.map((item) => (item.attachments || [])
-        .concat(...(item.steps || []).map((step) => step.steering?.attachments || [])))), live, projectFor(this.data, thread)?.workspaceId,
+      (thread.attachments || []).concat(messageAttachments()), live, projectFor(this.data, thread)?.workspaceId,
       projectFor(this.data, thread), (previewId) => resolveBrowserPreview(thread.messages, previewId)), new ReferenceTools(() => thread.messages)]), extras.options.readOnly), this.selectedToolSelection(thread));
   }
   private refreshContext(threadId: string = this.data.activeThreadId): void {

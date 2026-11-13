@@ -9,7 +9,7 @@ export function attachmentContext(item: Attachment): string {
   }
   if (item.mime === 'image/jpeg') {
     return '\n\nPhoto attachment: ' + JSON.stringify({ name: item.name, path: item.path }) +
-      '\nUse the exact path in image_gen reference_images if the user asks to edit or use this photo and the tool is available.';
+      '\nUse the exact reference with view_image or in image_gen reference_images when the relevant tool is available.';
   }
   const text = item.text || '';
   if (item.size <= MAX_READ_BYTES && !textPage(text).truncated) {

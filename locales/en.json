@@ -1,4 +1,7 @@
 {
+  "查看图片": "View image",
+  "读取附件、查看图片和读取会话引用": "Read attachments and chat references, and view images",
+  "每条消息最多 {0} 个附件。": "Up to {0} attachments per message.",
   "用配置的图片模型生成或编辑图片": "Generate or edit images with the configured image model",
   "用于图片生成和编辑": "For image generation and editing",
   "填写图片模型 ID。": "Enter an image model ID.",

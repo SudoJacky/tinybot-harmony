@@ -2,6 +2,7 @@ import { BrowserPreview } from '../model/BrowserPreview';
 import { ProviderEffects } from './providers/Provider';
 import { PresentTools } from './PresentTools';
 import { ImageGenerationTools } from './ImageGenerationTools';
+import { ImageInspectionTools } from './ImageInspectionTools';
 import { imageProfile } from './ImageGenerationProtocol';
 import { NativeImageGenerator } from './NativeImageGenerator';
 import { PreviewTools } from './PreviewTools';
@@ -91,13 +92,13 @@ class NativeUsageRecorder implements UsageRecorder {
 
 class NativeImageWorkspace implements FileJobWorkspace {
   private files: NativeWorkspaceFiles;
-  private attachments: Attachment[];
-  constructor(files: NativeWorkspaceFiles, attachments: Attachment[]) {
+  private attachments: () => Attachment[];
+  constructor(files: NativeWorkspaceFiles, attachments: () => Attachment[]) {
     this.files = files;
     this.attachments = attachments;
   }
   async readJobInput(path: string, maximum: number, cancellation: Cancellation): Promise<Uint8Array> {
-    const photo = this.attachments.find((item) => !item.original && item.mime === 'image/jpeg' && item.path === path);
+    const photo = this.attachments().find((item) => !item.original && item.mime === 'image/jpeg' && item.path === path);
     if (!photo) { return this.files.readJobInput(path, maximum, cancellation); }
     const file = await fs.open(Attachments.path(photo), fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
     try {
@@ -183,11 +184,14 @@ export class NativeSessionResources implements SessionResources {
       (page, storage, context, cancellation, options) => WebUiPreflight.validatePanel(page, storage, context, cancellation, options)));
     groups.push(new MailTools());
     groups.push(new PresentTools((path: string) => files.checkedPath(path)));
+    const imageFiles = new NativeImageWorkspace(files, live?.imageAttachments || (() => attachments));
+    groups.push(new ImageInspectionTools((path, maximum, cancellation) => imageFiles.readJobInput(path, maximum, cancellation),
+      (bytes, name) => Attachments.saveInspection(bytes, name)));
     const imageModel = productivity?.options?.imageGeneration;
     const generator = imageProfile(this.profiles, imageModel);
     if (generator && imageModel) {
       groups.push(new ImageGenerationTools(new NativeImageGenerator(generator, imageModel.modelId, new CredentialStore()),
-        new NativeImageWorkspace(files, attachments),
+        imageFiles,
         () => this.createId(), generator.protocol === 'openai-images', live?.askForToolApproval === false ? undefined :
           (input, paths, cancellation) => this.approval.request(t('允许调用图片生成服务？'),
             [generator.name + ' · ' + imageModel.modelId, generator.baseUrl,

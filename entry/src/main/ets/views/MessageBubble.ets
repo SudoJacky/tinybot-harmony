@@ -69,7 +69,7 @@ function toolIcon(name: string): Resource {
   if (name === 'write_file' || name === 'edit_file') { return $r('sys.symbol.square_and_pencil'); }
   if (name === 'read_file' || name === 'read_file_lines' || name === 'read_attachment') { return $r('sys.symbol.doc_text'); }
   if (name === 'find_files' || name === 'search_file_content' || name === 'mcp_search_tools') { return $r('sys.symbol.magnifyingglass'); }
-  if (name === 'generate_image' || name === 'image_gen') { return $r('sys.symbol.picture'); }
+  if (name === 'generate_image' || name === 'image_gen' || name === 'view_image') { return $r('sys.symbol.picture'); }
   if (name === 'update_plan') { return $r('sys.symbol.list_bullet'); }
   if (name === 'request_user_input') { return $r('sys.symbol.questionmark_circle'); }
   if (name === 'publish_data_view') { return $r('sys.symbol.text_alignleft'); }

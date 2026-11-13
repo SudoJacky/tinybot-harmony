@@ -42,11 +42,14 @@ class BoundModel implements ModelSession {
     if (this.images === false) {
       messages = messages.map((message): ModelMessage => message.previewScreenshot ? {
         role: message.role, content: message.content + '\nThe current model is configured without image support; the screenshot was not sent. Do not claim to have visually inspected it.'
+      } : message.imageInspection ? {
+        role: message.role, content: message.content + '\nThe current model is configured without image support; the image was not sent. Do not claim to have visually inspected it.'
       } : message);
     }
-    if (tools.some((tool) => tool.function.name === 'image_gen')) {
+    const canGenerate = tools.some((tool) => tool.function.name === 'image_gen');
+    if (canGenerate || (this.images !== false && tools.some((tool) => tool.function.name === 'view_image'))) {
       messages = messages.map((message): ModelMessage => {
-        if (message.previewScreenshot) { return message; }
+        if (message.previewScreenshot || message.imageInspection) { return message; }
         const photos = (message.attachments || []).filter((item) => !item.original && item.mime === 'image/jpeg');
         if (!photos.length) { return message; }
         const copy = JSON.parse(JSON.stringify(message)) as ModelMessage;

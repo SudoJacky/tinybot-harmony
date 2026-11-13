@@ -17,6 +17,7 @@ export function toolTitle(name: string): string {
     'read_web': t('读取网页'), 'read_skill': t('读取 Skill'), 'list_files': t('列出文件'), 'read_file': t('读取文件'),
     'find_files': t('查找文件'), 'read_file_lines': t('读取文件片段'), 'read_attachment': t('读取附件'), 'search_file_content': t('搜索文件内容'),
     'write_file': t('写入文件'), 'edit_file': t('编辑文件'), 'generate_image': t('生成图片'), 'image_gen': t('生成图片'),
+    'view_image': t('查看图片'),
     'tool_search': t('查找可用工具'), 'mcp_call': t('调用远程工具'), 'mcp_list_tools': t('查看远程工具'), 'mcp_search_tools': t('搜索远程工具'),
     'execute_code': t('执行代码'), 'run_job': t('执行代码'), 'orchestrate': t('编排工具'), 'publish_data_view': t('生成图表'),
     'update_plan': t('更新计划'), 'request_user_input': t('请你补充信息'),
@@ -43,7 +44,7 @@ export function toolGroupTitle(id: string): string {
 
 export function toolCapabilityDescription(id: string): string {
   const descriptions: Record<string, string> = {
-    'context-read': t('读取附件、会话引用和历史工具结果'), 'web': t('搜索互联网并读取网页内容'),
+    'context-read': t('读取附件、查看图片和读取会话引用'), 'web': t('搜索互联网并读取网页内容'),
     'browser': t('打开网页、查看页面、操作与接管浏览器'), 'calculation': t('在代码沙箱中计算和处理数据'),
     'orchestration': t('通过代码组合调用已授权工具'), 'user-input': t('通过表单向你确认信息'),
     'plan': t('创建和更新任务步骤'), 'team': t('招募、管理团队并完成员工交接'),

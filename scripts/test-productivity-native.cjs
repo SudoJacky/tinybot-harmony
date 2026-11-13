@@ -2323,6 +2323,107 @@ async function test(name, run) {
     await assert.rejects(pending,error=>error.code==='CANCELLED');
     assert.equal(destroyed,before+1);
   });
+  await test('image_gen can use newly admitted photos and its results can be inspected before a revision',async()=>{
+    const {NativeSessionResources}=load(path.join(source,'services/NativeSessionService'));
+    const {ProviderRegistry}=load(path.join(source,'services/providers/ProviderRegistry'));
+    const {runAgentLoop}=load(path.join(source,'services/AgentLoop'));
+    const {stepMessages,validateSteps}=load(path.join(source,'model/Agent'));
+    const {defaultExtensions}=load(path.join(source,'model/Skills'));
+    const {defaultProductivity}=load(path.join(source,'model/Productivity'));
+    const {defaultAssistantOptions}=load(path.join(source,'model/AssistantOptions'));
+    const root='/sandbox/image-inspection';
+    await fileIo.mkdir(root,true);
+    Attachments.configure(root);
+    const registry=new ProviderRegistry();
+    const resources=new NativeSessionResources(root,registry,new ToolApproval());
+    await resources.ensureWorkspace('chat');
+    resources.configureProviders([{id:'image-provider',name:'Image',protocol:'openai-images',
+      baseUrl:'https://images.invalid/v1',credentialAlias:'',noApiKey:true,enabled:true,models:['image-test']}]);
+    const productivity=defaultProductivity();
+    productivity.options=defaultAssistantOptions();
+    productivity.options.imageGeneration={providerId:'image-provider',modelId:'image-test'};
+    const photo={id:'chat-photo',name:'Photo.jpg',path:'chat-photo.jpg',mime:'image/jpeg',size:4};
+    const jpg=Uint8Array.from([255,216,255,217]);
+    const png=Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+Wn1sAAAAASUVORK5CYII=','base64'));
+    await fileIo.mkdir(root+'/attachments',true);
+    fs.writeFileSync(nativePath(Attachments.path(photo)),jpg);
+    let admitted=[];
+    const tools=resources.tools('chat',defaultExtensions(),'',productivity,[],{
+      askForToolApproval:false,imageAttachments:()=>admitted,skills:()=>[],servers:()=>[]
+    });
+    const call=(id,name,args)=>({id,type:'function',function:{name,arguments:JSON.stringify(args)}});
+    const edit=call('initial-edit','image_gen',{prompt:'Change the sky',reference_images:[photo.path]});
+    const foreign=call('foreign-photo','image_gen',{prompt:'Change the sky',reference_images:[photo.path]});
+    await assert.rejects(tools.execute(foreign,new Cancellation()));
+    admitted=[photo];
+    let serviceCalls=0;
+    jsonScript=(url,options)=>{
+      assert.equal(url,'https://images.invalid/v1/images/edits');
+      const body=Buffer.from(options.extraData);
+      assert.ok(body.includes(Buffer.from(serviceCalls++===0?jpg:png)));
+      return{responseCode:200,result:JSON.stringify({data:[{b64_json:Buffer.from(png).toString('base64')}]})};
+    };
+    const imageKit=kits['@kit.ImageKit'];
+    const original=imageKit.image;
+    let sourceReleases=0,pixelReleases=0;
+    imageKit.image={
+      createImageSource:bytes=>{
+        assert.deepEqual(Buffer.from(bytes),Buffer.from(png));
+        return{getImageInfo:async()=>({size:{width:2400,height:1200}}),
+          createPixelMap:async options=>{
+            assert.equal(options.desiredSize.width,1600);
+            assert.equal(options.desiredSize.height,800);
+            return{getImageInfo:async()=>({size:options.desiredSize}),release:async()=>{pixelReleases++;}};
+          },release:async()=>{sourceReleases++;}};
+      },
+      createImagePacker:()=>({packing:async()=>jpg.buffer,release:async()=>{}})
+    };
+    try {
+      const turn={content:'',steps:[]}, saved=[];
+      let modelCalls=0, firstPath;
+      const requests=[];
+      registry.register({info:{id:'chat-model',name:'Chat'},endpoint:()=>'https://chat.invalid',stream:async request=>{
+        requests.push(await Attachments.hydrate(request.messages));
+        const respond=toolCall=>({content:'',toolCalls:[toolCall]});
+        if(modelCalls++===0)return respond(edit);
+        if(modelCalls===2){
+          firstPath=JSON.parse(request.messages.at(-1).content).path;
+          return respond(call('inspect','view_image',{path:firstPath}));
+        }
+        if(modelCalls===3){
+          assert.equal(requests.at(-1).at(-1).images[0],'data:image/jpeg;base64,'+Buffer.from(jpg).toString('base64'));
+          return respond(call('revise','image_gen',{prompt:'Keep the framing and soften only the sky',reference_images:[firstPath]}));
+        }
+        return{content:'Done',toolCalls:[]};
+      }});
+      const config={providerId:'chat-model',model:'vision',baseUrl:'https://chat.invalid',credentialAlias:''};
+      await runAgentLoop({turn,tools,maxSteps:4,messages:[],model:registry.bind(config,new CredentialStore())},new Cancellation(),
+        {event(){},checkpoint:async()=>saved.push(JSON.parse(JSON.stringify(turn)))});
+      assert.equal(serviceCalls,2);
+      assert.equal(sourceReleases,1);
+      assert.equal(pixelReleases,1);
+      const restored=saved.at(-1);
+      validateSteps(restored.steps);
+      const inspection=restored.steps[1].tools[0];
+      assert.equal(JSON.parse(inspection.output).path,firstPath);
+      assert.ok(!inspection.output.includes('base64'));
+      assert.notEqual(JSON.parse(restored.steps[2].tools[0].output).path,firstPath);
+      const historical=stepMessages(restored.steps[1]);
+      const hydrated=await Attachments.hydrate(historical);
+      assert.equal(hydrated.at(-1).images.length,1);
+      let textRequest;
+      registry.register({info:{id:'text-model',name:'Text'},endpoint:()=>'',stream:async request=>{
+        textRequest=request.messages;return{content:'Done',toolCalls:[]};
+      }});
+      await registry.bind({...config,providerId:'text-model',images:false},new CredentialStore())
+        .stream(historical,[],new Cancellation(),()=>{});
+      assert.equal(textRequest.at(-1).attachments,undefined);
+      assert.match(textRequest.at(-1).content,/image was not sent/);
+    } finally {
+      imageKit.image=original;
+      Attachments.configure(fixture);
+    }
+  });
   await test('model discovery validates credential origin and uses the protocol endpoint',async()=>{
     const {discoverModels}=load(path.join(source,'services/ModelDiscovery'));let requests=0;
     jsonScript=(url,options)=>{requests++;assert.equal(url,'https://models.invalid/v1/models');assert.equal(options.header.Authorization,'Bearer fixture-secret');return{responseCode:200,result:JSON.stringify({data:[{id:'one'},{id:'one'},{id:'two'}]})};};

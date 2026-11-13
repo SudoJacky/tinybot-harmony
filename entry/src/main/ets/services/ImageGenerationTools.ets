@@ -65,6 +65,8 @@ export class ImageGenerationTools implements AgentTools {
     }
     return [{ type: 'function', executionMode: 'sequential', promptSnippet: 'Generate or edit an image',
       promptGuidelines: ['Use image_gen when the user asks to generate or edit an image. For edits, describe what to change and what to preserve.',
+        'If the image-generation Skill is available, read it before generating or editing unless the user message already includes its instructions.',
+        'Use view_image on the returned path for visual checks when available. Do not infer image quality from the text receipt.',
         'The successful result is displayed in chat and saved in the workspace. Report the result briefly and use its path for future edits.'],
       function: { name: 'image_gen', description: 'Generate one image from a text prompt, with optional reference images. Saves and delivers the result in the current workspace.',
         parameters: { type: 'object', properties: properties, required: ['prompt'], additionalProperties: false } } }];
