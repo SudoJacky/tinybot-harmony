@@ -26,6 +26,8 @@ const backgroundTaskManager = {
   }
 };
 const mocks = {
+  '@kit.ArkUI': {},
+  '@kit.BasicServicesKit': { deviceInfo: { deviceType: 'phone', sdkApiVersion: 20 } },
   '@kit.AbilityKit': { UIAbility: class {}, wantAgent: {
     OperationType: { START_ABILITY: 1 }, WantAgentFlags: { UPDATE_PRESENT_FLAG: 2 },
     async getWantAgent(info) {

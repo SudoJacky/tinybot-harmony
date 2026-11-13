@@ -6,14 +6,17 @@ import { t } from '../model/I18n';
 @CustomDialog
 export struct KeyboardShortcutsDialog {
   controller?: CustomDialogController;
+  desktop: boolean = false;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @State private query: string = '';
-  @State private groups: ShortcutGroup[] = shortcutGroups('');
+  @State private groups: ShortcutGroup[] = [];
   private scroller: Scroller = new Scroller();
+
+  aboutToAppear(): void { this.groups = shortcutGroups('', this.desktop); }
 
   private updateQuery(value: string): void {
     this.query = value;
-    this.groups = shortcutGroups(value);
+    this.groups = shortcutGroups(value, this.desktop);
     this.scroller.scrollEdge(Edge.Top);
   }
 

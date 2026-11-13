@@ -122,9 +122,13 @@ export struct ChatPanel {
   }
   @Prop topInset: number = 0;
   @Prop workbench: boolean = false;
+  @Prop desktop: boolean = false;
   @Prop shortcutsEnabled: boolean = false;
+  @Prop shortcutsCovered: boolean = false;
+  @Prop @Watch('messageSearchChanged') messageSearchRequest: number = 0;
   onNavigationShortcut: (action: NavigationShortcut) => void = () => {};
   @Prop @Watch('expandDraft') expandDraftRequest: number = 0;
+  @Prop @Watch('focusDraftRequested') focusDraftRequest: number = 0;
   @State private writingExpanded: boolean = false;
   private expandDraft(): void {
     if (this.thread.archived || this.showDrawing || this.previewing || this.speechActive()) { return; }
@@ -269,10 +273,20 @@ export struct ChatPanel {
     if (index >= 0) { this.followOutput = false; this.scroller.scrollToIndex(index + (this.thread.messages.length > this.app.visibleMessageCount ? 1 : 0), false, ScrollAlign.CENTER); }
   }
 
+  private messageSearchChanged(): void {
+    if (!this.app.searchMessageId) { return; }
+    const request = this.messageSearchRequest;
+    const threadId = this.app.active.id;
+    this.getUIContext().postFrameCallback(new ChatLayoutFrame(() => {
+      if (this.composerMounted && request === this.messageSearchRequest && this.app.active.id === threadId) { this.locate(); }
+    }));
+  }
+
   aboutToAppear(): void {
     this.lifecycle++;
     this.composerMounted = true;
     this.syncMessages();
+    this.messageSearchChanged();
     systemInsets(this.getUIContext()).then((insets: number[]) => { this.insetBottom = insets[1]; });
     this.viewport.onKeyboard = (shown: boolean): void => {
       this.keyboardVisibilityChanged(shown);
@@ -397,6 +411,11 @@ export struct ChatPanel {
       this.getUIContext().getFocusController().requestFocus('composer');
       this.composerController.caretPosition(this.app.draft.length);
     }));
+  }
+
+  private focusDraftRequested(): void {
+    if (this.thread.archived) { return; }
+    this.showSpeechKeyboard();
   }
   private canRecordSpeech(): boolean {
     return this.app.ready && this.speechEnabled && !this.thread.archived && !this.app.saveError && !this.importing &&
@@ -594,7 +613,7 @@ export struct ChatPanel {
   }
 
   private runChatShortcut(action: ChatShortcutAction): void {
-    if (!this.chatShortcutsAvailable()) { return; }
+    if (!this.shortcutAvailable(action)) { return; }
     switch (action) {
       case 'focus':
         if (this.speechEnabled && !this.composerFocused && !this.thread.archived) { this.showSpeechKeyboard(); }
@@ -616,11 +635,15 @@ export struct ChatPanel {
     }
   }
 
+  private shortcutAvailable(action: ChatShortcutAction): boolean {
+    return this.chatShortcutsAvailable() && (!this.shortcutsCovered || (this.desktop && action === 'search'));
+  }
+
   @Builder
   shortcutBindings() {
     // ArkUI also dispatches to retained nodes, so disable the bindings while another surface owns the chat.
-    ForEach(chatShortcuts(), (shortcut: ChatShortcut) => {
-      Column().width(0).height(0).accessibilityLevel('no').enabled(this.chatShortcutsAvailable())
+    ForEach(chatShortcuts(this.desktop), (shortcut: ChatShortcut) => {
+      Column().width(0).height(0).accessibilityLevel('no').enabled(this.shortcutAvailable(shortcut.action))
         .keyboardShortcut(shortcut.key, shortcut.modifiers, () => this.runChatShortcut(shortcut.action))
     }, (shortcut: ChatShortcut) => shortcut.action)
   }
@@ -987,12 +1010,13 @@ export struct ChatPanel {
         }
       }
       .id('message-list').width('100%').height('100%').clip(!this.sendingMessageId)
-      .padding({ left: Space.page, right: Space.page })
+      .padding({ left: this.desktop ? 24 : Space.page, right: this.desktop ? 24 : Space.page })
       // Scroll the leading space away so messages can pass beneath the floating title bar.
       .contentStartOffset(this.topInset + Space.sm)
       // Only the end of the transcript clears the floating controls; messages scroll behind them.
-      .contentEndOffset(48)
-      .scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring)
+      .contentEndOffset(this.desktop ? 24 : 48)
+      .scrollBar(this.desktop ? BarState.Auto : BarState.Off)
+      .edgeEffect(this.desktop ? EdgeEffect.None : EdgeEffect.Spring)
       .cachedCount(1).maintainVisibleContentPosition(true)
       .onScrollStart(() => this.setScrollActivity(true))
       .onScrollStop(() => this.stopScrollActivity())
@@ -1131,9 +1155,10 @@ export struct ChatPanel {
 
   @Builder
   plusMenu() {
-    Column() {
+    Scroll() {
       this.plusRootPane()
-    }.width(320).constraintSize({ maxHeight: 480 }).padding(4).borderRadius(20).clip(true)
+    }.width(320).constraintSize({ maxHeight: this.popupHeightLimit(this.composerWindowTop, 480) })
+      .scrollBar(BarState.Auto).align(Alignment.Top).padding(4).borderRadius(20).clip(true)
   }
 
   @Builder
@@ -1407,8 +1432,12 @@ export struct ChatPanel {
     const choices = this.app.modelChoices;
     const providerCount = new Set(choices.map((choice) => choice.providerId)).size;
     const height = choices.length === 0 ? 240 : 60 + providerCount * 26 + choices.length * 46;
-    const available = this.modelButtonTop > 0 ? Math.max(120, this.modelButtonTop - 16) : 380;
-    return Math.min(380, available, height + (this.app.error.length > 0 ? 56 : 0));
+    return Math.min(this.popupHeightLimit(this.modelButtonTop, 380), height + (this.app.error.length > 0 ? 56 : 0));
+  }
+
+  private popupHeightLimit(anchorTop: number, maxHeight: number): number {
+    // Global positions can include the area above the drawable content, such as a window title bar.
+    return anchorTop > this.panelTop ? Math.min(maxHeight, Math.max(120, anchorTop - this.panelTop - 16)) : maxHeight;
   }
 
   private highestEffort(): boolean {
@@ -1536,6 +1565,16 @@ export struct ChatPanel {
   }
 
   @Builder
+  pendingInputActions() {
+    Menu() {
+      MenuItem({ content: t('追加') }).id('pc-steer-message').enabled(this.app.acceptingSteering)
+        .onClick(() => this.app.enqueueInput('steer'))
+      MenuItem({ content: t('排队') }).id('pc-queue-message').enabled(this.app.canQueueInput)
+        .onClick(() => this.app.enqueueInput('followUp'))
+    }
+  }
+
+  @Builder
   contextUsageButton() {
     Button({ type: ButtonType.Circle }) {
       Progress({ value: this.contextRatio() * 100, total: 100, type: ProgressType.Ring })
@@ -1601,12 +1640,13 @@ export struct ChatPanel {
       TextArea({ text: this.app.draft, controller: this.composerController,
         placeholder: this.speechActive() ? t('请说出要输入的内容') : this.thread.archived ? t("已归档的对话无法继续") : this.app.generating ? t("补充要求，或排队下一项任务…")
           : !this.composerExpanded() ? t('输入消息…') : this.thread.teamEnabled ? t("描述目标，主 Agent 会按需组建团队…") : t('输入消息，/ 命令，$ 技能，@ 引用会话') }).fontFamily(this.appearance.fontFamily)
-        .id('composer').fontSize(Font.body).fontColor($r('app.color.text_primary'))
+        .id('composer').fontSize(this.desktop ? 15 : Font.body).fontColor($r('app.color.text_primary'))
         .allowDrop(ATTACHMENT_DROP_TYPES.concat(['general.plain-text', 'general.hyperlink', 'general.html']))
         .onDrop((event: DragEvent) => this.composerDrop(event))
         .placeholderColor($r('app.color.text_tertiary')).backgroundColor(Color.Transparent)
         .width('100%')
-        .constraintSize({ minHeight: this.workbench && !this.voiceMode ? 88 : this.workbench ? 44 : 52, maxHeight: this.composerExpanded() ? 160 : this.workbench ? 44 : 52 }).maxLength(24000)
+        .constraintSize({ minHeight: this.workbench && !this.voiceMode ? (this.desktop ? 64 : 88) : this.workbench ? 44 : 52,
+          maxHeight: this.composerExpanded() ? 160 : this.workbench ? 44 : 52 }).maxLength(24000)
         .padding({ left: this.composerExpanded() ? 6 : this.workbench ? 46 : 54, right: this.composerExpanded() ? 6 : this.workbench ? 42 : 50,
           top: 10, bottom: this.composerExpanded() ? 4 : 10 }).borderRadius(0)
         .align(this.composerExpanded() ? Alignment.TopStart : Alignment.Start)
@@ -1615,7 +1655,7 @@ export struct ChatPanel {
         .enabled(!this.thread.archived).focusable(!this.voiceMode && !this.speechActive()).enableKeyboardOnFocus(!this.voiceMode && !this.speechActive())
         .onWillChange((value: EditableTextChangeValue) => !this.speechActive() || value.content === this.app.draft)
         .onKeyPreIme((event: KeyEvent) => {
-          if (!this.chatShortcutsAvailable() || !this.speechEnabled || this.voiceMode || this.app.active.id !== threadId) { return false; }
+          if (!this.chatShortcutsAvailable() || this.shortcutsCovered || !this.speechEnabled || this.voiceMode || this.app.active.id !== threadId) { return false; }
           return handleDraftEnter(event, this.composerController, this.composerHasPreview, () => {
             if (!this.app.generating && this.canSend()) { this.send(); }
           });
@@ -1687,11 +1727,13 @@ export struct ChatPanel {
         if (this.thread.pendingInputs.length > 0) {
           Row({ space: 4 }) {
             SymbolGlyph($r('sys.symbol.clock')).fontSize(14).fontColor([this.appearance.onAccentContainer])
-            Text(`${this.thread.queuePaused ? t("已暂停") : t("待发送")} ${this.thread.pendingInputs.length}`).fontFamily(this.appearance.fontFamily)
+            Text(this.desktop && AdaptiveUi.compactComposer(this.panelWidth) ? String(this.thread.pendingInputs.length) :
+              `${this.thread.queuePaused ? t("已暂停") : t("待发送")} ${this.thread.pendingInputs.length}`).fontFamily(this.appearance.fontFamily)
               .fontSize(Font.caption).fontWeight(FontWeight.Medium).fontColor(this.appearance.onAccentContainer)
           }
           .id('toggle-input-queue').height(30).padding({ left: 10, right: 12 }).borderRadius(15)
           .backgroundColor(this.appearance.accentContainer)
+          .accessibilityText(`${this.thread.queuePaused ? t('已暂停') : t('待发送')} ${this.thread.pendingInputs.length}`)
           .onClick(() => { this.showQueue = true; })
           .bindSheet($$this.showQueue, this.queueSheet(), { radius: Radius.sheet,
             title: { title: t("待发送队列") }, detents: [SheetSize.MEDIUM, SheetSize.LARGE], dragBar: true,
@@ -1713,12 +1755,20 @@ export struct ChatPanel {
           .margin({ left: 4 })
         if (this.app.generating) {
           if (!this.speechActive() && this.hasDraft() && this.app.canQueueInput) {
-            Button(t("追加")).fontFamily(this.appearance.fontFamily).id('steer-message').attributeModifier(Btn.tonalSmall)
-              .margin({ left: 4 })
-              .enabled(this.app.acceptingSteering).onClick(() => this.app.enqueueInput('steer'))
-            Button(t("排队")).fontFamily(this.appearance.fontFamily).id('queue-message').attributeModifier(Btn.plainSmall)
-              .margin({ left: 4 })
-              .onClick(() => this.app.enqueueInput('followUp'))
+            if (this.desktop && AdaptiveUi.compactComposer(this.panelWidth)) {
+              Button({ type: ButtonType.Normal }) {
+                SymbolGlyph($r('sys.symbol.clock')).fontSize(16).fontColor([$r('app.color.text_primary')])
+              }.id('pc-pending-input-actions').width(36).height(36).padding(0).margin({ left: 4 }).borderRadius(Radius.sm)
+                .backgroundColor($r('app.color.surface_variant')).accessibilityText(t('追加') + ' / ' + t('排队'))
+                .bindMenu(this.pendingInputActions, { systemMaterial: this.appearance.menu, mask: false })
+            } else {
+              Button(t("追加")).fontFamily(this.appearance.fontFamily).id('steer-message').attributeModifier(Btn.tonalSmall)
+                .margin({ left: 4 })
+                .enabled(this.app.acceptingSteering).onClick(() => this.app.enqueueInput('steer'))
+              Button(t("排队")).fontFamily(this.appearance.fontFamily).id('queue-message').attributeModifier(Btn.plainSmall)
+                .margin({ left: 4 })
+                .onClick(() => this.app.enqueueInput('followUp'))
+            }
           }
           IconButton({ icon: $r('sys.symbol.square_fill'), label: t("停止"), compId: 'stop-generation', diameter: this.workbench ? 36 : 44,
             iconSize: 14, fill: $r('app.color.text_primary'), tint: $r('app.color.page_background'),
@@ -1750,13 +1800,14 @@ export struct ChatPanel {
         .animation({ duration: Motion.medium, curve: Motion.standard })
         .hitTestBehavior(this.composerExpanded() ? HitTestMode.Default : HitTestMode.Transparent)
       }
-    }.id('composer-shell').width('100%').borderRadius(this.composerExpanded() ? Radius.xl : 28).clip(true)
+    }.id('composer-shell').width('100%').borderRadius(this.desktop ? Radius.lg : this.composerExpanded() ? Radius.xl : 28).clip(true)
     .onAreaChange((_previous: Area, current: Area) => { this.composerWindowTop = Number(current.globalPosition.y); })
     .backgroundColor($r('app.color.surface'))
     .border({ width: this.composerActiveInLayout() ? 1 : 0.5,
       color: this.composerActiveInLayout() ? this.appearance.accentOutline : $r('app.color.divider') })
-    .shadow(this.composerActiveInLayout() ? { radius: 28, color: this.appearance.accentGlow, offsetY: 4 }
-      : { radius: 12, color: '#0A000000', offsetY: 2 })
+    .shadow(this.desktop ? { radius: 8, color: '#0A000000', offsetY: 2 }
+      : this.composerActiveInLayout() ? { radius: 28, color: this.appearance.accentGlow, offsetY: 4 }
+        : { radius: 12, color: '#0A000000', offsetY: 2 })
     .animation({ duration: Motion.medium, curve: Motion.standard })
     // Anchor the sheet to the stable shell, not an add button that moves when the composer expands.
     .bindSheet($$this.showPlus, this.plusSheet(), { radius: Radius.sheet,
@@ -1850,7 +1901,7 @@ export struct ChatPanel {
         .onActionEnd((event: GestureEvent) => this.onHistoryDragEnd(event))
         .onActionCancel(() => this.onHistoryDragCancel()))
       Column({ space: Space.sm }) {
-        if (this.app.searchMessageId) { Banner({ text: this.app.searchQuery ? t("匹配：") + this.app.searchQuery : t("历史节点"), danger: false, actionLabel: t("定位"), onAction: () => this.locate() }).onAppear(() => { setTimeout(() => this.locate(), 100); }) }
+        if (this.app.searchMessageId) { Banner({ text: this.app.searchQuery ? t("匹配：") + this.app.searchQuery : t("历史节点"), danger: false, actionLabel: t("定位"), onAction: () => this.locate() }) }
         if (this.browser.permissionPending || (this.browser.open && (this.browser.owner === 'agent' || this.browser.hasTask ||
           (this.browser.url !== '' && this.browser.url !== 'about:blank'))) || this.browser.error) {
           BrowserStatusCard({ browser: this.browser, onOpen: this.onBrowser })

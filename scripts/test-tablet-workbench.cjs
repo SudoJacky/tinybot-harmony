@@ -3,11 +3,11 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 const root = path.resolve(__dirname, '..');
 const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio');
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
-function sourceModule(file) {
+function sourceModule(file, globals = {}) {
   const exports = {};
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(root, file), 'utf8'), { compilerOptions: {
     target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS
-  } }).outputText, { exports });
+  } }).outputText, { exports, ...globals });
   return exports;
 }
 const { WorkbenchLayout } = sourceModule('entry/src/main/ets/model/WorkbenchLayout.ets');
@@ -110,11 +110,54 @@ for (const width of [600, 700, 840, 900, 1024, 1200, 1440, 2000]) {
 }
 console.log('PASS phone, rail, two-pane and three-pane boundaries, drag clamps, protected minimums and dialog width');
 
+const pcLayout = (width, detailOpen, expanded = true, history = 0, detail = 0) =>
+  new WorkbenchLayout(width, detailOpen, expanded, history, detail, true);
+assert.equal(pcLayout(719, false).historyWidth, 0);
+assert.equal(pcLayout(720, false).historyWidth, 252);
+assert.equal(pcLayout(720, false, true, 100).historyWidth, 224);
+assert.equal(pcLayout(720, false).historyMaxWidth, 280);
+assert.equal(pcLayout(1280, false, true, 900).historyWidth, 360);
+assert.equal(pcLayout(795, true).docked, false);
+assert.equal(pcLayout(796, true).rail, true);
+assert.equal(pcLayout(796, true).chatWidth, 440);
+assert.equal(pcLayout(796, true).detailWidth, 300);
+assert.equal(pcLayout(963, true).rail, true);
+assert.equal(pcLayout(964, true).historyWidth, 224);
+assert.equal(pcLayout(991, true).historyWidth, 251);
+assert.equal(pcLayout(992, true).historyWidth, 252);
+assert.equal(pcLayout(1000, true, true, 360).historyWidth, 260);
+assert.equal(pcLayout(1280, true, true, 360).historyWidth, 360);
+assert.equal(pcLayout(1280, true, false).historyWidth, RAIL);
+for (const width of [796, 840, 992, 1280, 1800, 2400]) {
+  const layout = pcLayout(width, true, true, 360, 2000);
+  assert.ok(layout.chatWidth >= 440 && layout.detailWidth >= 300);
+  assert.equal(layout.historyWidth + layout.chatWidth + layout.detailWidth, width);
+}
+console.log('PASS PC dock/overlay and history rail boundaries preserve pane minimums');
+
+const desktopValues = new Map();
+let desktopFlushes = 0;
+const desktopStore = { getSync: (key, fallback) => desktopValues.get(key) ?? fallback,
+  putSync: (key, value) => desktopValues.set(key, value), flushSync: () => { desktopFlushes++; } };
+const { DesktopLayoutPreferences } = sourceModule('entry/src/main/ets/services/DesktopLayoutPreferences.ets', {
+  require: () => ({ preferences: { getPreferencesSync: () => desktopStore } })
+});
+const desktopPrefs = new DesktopLayoutPreferences({});
+desktopPrefs.saveWidth(false, 344); desktopPrefs.saveWidth(true, 420); desktopPrefs.saveCollapsed(true);
+desktopPrefs.saveWidth(false, 344);
+assert.equal(desktopFlushes, 3, 'An unchanged preference avoids a write');
+const restoredPrefs = new DesktopLayoutPreferences({});
+assert.equal(restoredPrefs.paneWidth(false), 344);
+assert.equal(restoredPrefs.paneWidth(true), 420);
+assert.equal(restoredPrefs.historyCollapsed(), true);
+restoredPrefs.saveWidth(false, 0);
+assert.equal(new DesktopLayoutPreferences({}).paneWidth(false), 0, 'Reset restores the default geometry on restart');
+
 
 const Page = probe('pages/Index', 'Index', ['hasPreview', 'detailOpen', 'workbench', 'windowChanged', 'openFiles', 'openPreview', 'closePreview', 'previewPresenceChanged', 'onBackPress',
   'beginResize', 'resizeHistory', 'resizeDetail', 'endResize', 'openDetailTab', 'removeDetailTab', 'closeDetailTab',
   'workspaceClosed', 'toggleDetailPane', 'currentDetailTab', 'detailTabVisible', 'detailTabsAvailable',
-  'detailTabPresent', 'hideBrowserTab', 'setDetailPane', 'detailGeometry'],
+  'detailTabPresent', 'hideBrowserTab', 'setDetailPane', 'detailGeometry', 'toggleDetailMaximized', 'saveDesktopPaneWidth'],
   { WorkbenchLayout, Motion: { medium: 220, fast: 160 } });
 assert.equal(typeof Page.prototype.detailTabsAvailable, 'function', 'Tab availability is part of the emitted page');
 const draft = { text: 'unsent input', attachments: ['image'] }, active = { id: 'thread', draft, messages: [] };
@@ -173,6 +216,28 @@ assert.equal(page.workbench().detailWidth, 300);
 page.historyCollapsed = true;
 assert.equal(page.workbench().rail, true, 'Collapsing keeps the sheet state intact');
 console.log('PASS rail state, drag clamps and committed widths keep the chat and detail minima');
+
+const desktopPage = Object.assign(new Page(), page, { desktop: true, windowWidth: 840, historyCollapsed: false,
+  historyPreferredWidth: 0, drawerOpen: true, drawerReveal: 1 });
+assert.equal(desktopPage.workbench().rail, true);
+desktopPage.windowChanged(820);
+assert.equal(desktopPage.drawerOpen, true, 'Resizing with a visible history drawer keeps it open beside the rail');
+desktopPage.windowChanged(795);
+assert.equal(desktopPage.workbench().docked, false);
+assert.equal(desktopPage.workbench().expanded, true);
+assert.equal(desktopPage.drawerOpen, false, 'An expanded sidebar takes over from the overlay drawer');
+assert.equal(desktopPage.currentDetailTab(), 'files');
+assert.equal(desktopPage.workspaceRequest, 1, 'Dock/overlay changes retain the current editor');
+assert.equal(desktopPage.app.active.draft, draft);
+desktopPage.windowChanged(1280);
+desktopPage.detailPreferredWidth = 400;
+desktopPage.toggleDetailMaximized();
+assert.equal(desktopPage.workbench().docked, false);
+assert.equal(desktopPage.detailTabVisible('files'), true);
+desktopPage.toggleDetailMaximized();
+assert.equal(desktopPage.workbench().docked, true);
+assert.equal(desktopPage.workbench().detailWidth, 400);
+assert.equal(desktopPage.workspaceRequest, 1, 'Maximizing and restoring keep the editor mounted');
 
 // Docked panes are tabs: opening a second pane keeps the first, the active tab
 // falls back on close, collapsing retains tabs, and the last tab closes the pane.
@@ -260,13 +325,13 @@ const modelControls = [];
 class EffortStub { constructor(_, params) { modelControls.push({ type: 'effort', ...params }); } }
 class ModelListStub { constructor(_, params) { modelControls.push({ type: 'models', ...params }); } }
 const { reasoningEfforts } = sourceModule('entry/src/main/ets/model/ReasoningEffort.ets');
-const Picker = probe('views/ChatPanel', 'ChatPanel', ['modelButton', 'toggleModelMenu', 'modelMenu', 'modelMenuHeight', 'selectedProvider'], {
+const Picker = probe('views/ChatPanel', 'ChatPanel', ['modelButton', 'toggleModelMenu', 'modelMenu', 'modelMenuHeight', 'popupHeightLimit', 'selectedProvider'], {
   Button: modelButton, Row: gesture, Text: gesture, SymbolGlyph: gesture, Column: gesture, If: gesture, __Common__: gesture,
   ViewPU: { create() {} }, Context: { animation() {} }, Motion: {}, ButtonType: {}, TextOverflow: {}, Color: {}, BlurStyle: {},
   Placement: { TopRight: 'top-right' }, $r: value => value, t: value => value, reasoningEfforts,
   ReasoningEffortPicker: EffortStub, ModelPickerPanel: ModelListStub
 });
-const picker = Object.assign(new Picker(), { showModelMenu: false, appearance: {}, panelWidth: 360, modelButtonTop: 420,
+const picker = Object.assign(new Picker(), { showModelMenu: false, appearance: {}, panelWidth: 360, panelTop: 0, modelButtonTop: 420,
   thread: { id: 'chat', modelRef: { providerId: 'openai', modelId: 'gpt-5.4' }, reasoningEffort: 'high' },
   app: { ready: true, configured: true, error: '', saveError: '', modelChoices: [], providerProfiles: [
     { id: 'openai', protocol: 'responses', presetId: 'openai' },
@@ -358,26 +423,29 @@ function visitTitle(node) {
 visitTitle(titleTree); assert.ok(titleOptions); assert.ok(chatInsets.length >= 2);
 const titleProbe = vm.runInNewContext(`(function() {return {options: (${titleOptions}), insets: [${chatInsets.join(',')}]};})`,
   {BarStyle: {STANDARD:'standard',STACK:'stack'},Color:{Transparent:'transparent'},CHAT_HEADER_HEIGHT:56});
-for (const width of [600,839,840,1116,1600]) {
-  const actual = titleProbe.call({windowWidth:width, appearance: {noMaterial: {}}});
-  assert.equal(actual.options.barStyle, width >= 840 ? 'standard' : 'stack');
-  assert.ok(actual.insets.every(inset => inset === (width >= 840 ? 0 : 56)),
-    'Initial and updated ChatPanel props must match the native title layout');
+for (const desktop of [false, true]) {
+  for (const width of [360,600,839,840,1116,1600]) {
+    const actual = titleProbe.call({ desktop, windowWidth: width, appearance: { noMaterial: {} } });
+    assert.equal(actual.options.barStyle, desktop || width >= 840 ? 'standard' : 'stack');
+    assert.ok(actual.insets.every(inset => inset === (desktop || width >= 840 ? 0 : 56)),
+      'Initial and updated ChatPanel props must match the native title layout');
+  }
 }
-console.log('PASS tablet title reserves layout space; phone overlay keeps its matching content inset');
+console.log('PASS PC and tablet titles reserve space; phone overlay keeps its matching content inset');
 assert.ok(indexSource.includes("'workbench-toggle-detail'"), 'The header exposes the side panel toggle');
 assert.match(indexSource, /DetailTabs\(this, \{ tabs: this\.detailTabItems\(\), active: this\.currentDetailTab\(\)/,
   'The strip receives the available tabs and the current one');
-assert.match(indexSource, /new DetailLauncher\(this, \{ onFiles:/, 'The empty column offers the two entry choices');
+assert.match(indexSource, /new DetailLauncher\(this, \{ [^}]*onFiles:/, 'The empty column offers the two entry choices');
 assert.match(indexSource, /Visibility\.Hidden/, 'A closed detail host cannot cover the page');
 const tabsSource = fs.readFileSync(path.join(compiledRoot, 'views/DetailTabs.ts'), 'utf8');
 for (const token of ["'detail-tab-' + tab.id", "'detail-tab-close-' + tab.id", "'detail-add-tab'", "'detail-add-files'",
-  "'detail-add-browser'", "'detail-collapse'"]) {
+  "'detail-add-browser'", "'detail-collapse'", "'detail-switch-tab'", "'detail-close-active'"]) {
   assert.ok(tabsSource.includes(token), 'The strip keeps ' + token);
 }
 const launcherSource = fs.readFileSync(path.join(compiledRoot, 'views/DetailLauncher.ts'), 'utf8');
 assert.ok(launcherSource.includes("'detail-launcher-files'"));
 assert.ok(launcherSource.includes("'detail-launcher-browser'"));
+assert.ok(launcherSource.includes("'detail-launcher-close'"));
 const toolScopeSource = fs.readFileSync(path.join(compiledRoot, 'views/ToolScopePanel.ts'), 'utf8');
 assert.match(toolScopeSource, /systemInsets/, 'The tool sheet reads the navigation inset');
 assert.match(toolScopeSource, /Space\.lg \+ this\.insetBottom/, 'The last capability clears the navigation indicator');
@@ -400,6 +468,58 @@ assert.ok(chatSource.includes('detentSelection: SheetSize.LARGE'));
 assert.ok(chatSource.includes("maskColor: '#33000000'"));
 assert.match(chatSource, /contextSheet\.call\(this\)/);
 console.log('PASS emitted side-panel tabs, launcher entries and modal inset-safe sheets');
+
+const { DesktopCommandItem, desktopCommandResults } = sourceModule('entry/src/main/ets/model/DesktopCommandPalette.ets');
+const commands = [new DesktopCommandItem('files', 'Workspace files'), new DesktopCommandItem('settings', 'Settings')];
+const threads = [
+  { id: 'older', displayTitle: 'Earlier chat', updatedAt: 1, messages: [{ id: 'first', content: 'Workspace notes' }] },
+  { id: 'current', displayTitle: 'Workspace plan', updatedAt: 2, projectId: 'project', messages: [{ id: 'second', content: 'Workspace plan' }] }
+];
+const projects = [{ id: 'project', name: 'Tinybot' }];
+const results = query => desktopCommandResults(commands, query, threads, projects, 'Standalone');
+assert.deepEqual(Array.from(results(''), item => item.id), ['current', 'older', 'files', 'settings']);
+assert.deepEqual(Array.from(results(' >  work'), item => item.id), ['files']);
+const matches = results('Workspace');
+assert.deepEqual(Array.from(matches, item => item.id), ['files', 'current', 'older']);
+assert.equal(matches[1].detail, 'Tinybot');
+assert.equal(matches[1].messageId, '', 'Title matches open the conversation');
+assert.equal(matches[2].messageId, 'first', 'Content matches jump to the message');
+assert.equal(matches[2].query, 'workspace');
+assert.equal(matches[2].excerpt, 'Workspace notes');
+
+const paletteKey = { KEYCODE_ESCAPE: 1, KEYCODE_DPAD_UP: 2, KEYCODE_DPAD_DOWN: 3 };
+const Palette = probe('views/DesktopCommandDialog', 'DesktopCommandDialog', ['handleKey', 'choose'],
+  { KeyCode: paletteKey, KeyType: { Down: 'down' }, ScrollAlign: { AUTO: 'auto' } });
+const chosen = [], scrolled = [];
+let paletteClosed = 0;
+const palette = Object.assign(new Palette(), { results: matches, selected: 0, onChoose: item => chosen.push(item.id),
+  controller: { close() { paletteClosed++; } }, scroller: { scrollToIndex(index) { scrolled.push(index); } } });
+const press = keyCode => palette.handleKey({ type: 'down', keyCode, stopPropagation() {} });
+palette.composing = true;
+assert.equal(press(paletteKey.KEYCODE_DPAD_DOWN), false, 'Arrow keys remain available to the IME during composition');
+palette.composing = false;
+assert.equal(press(paletteKey.KEYCODE_DPAD_DOWN), true);
+assert.equal(press(paletteKey.KEYCODE_DPAD_DOWN), true);
+assert.equal(press(paletteKey.KEYCODE_DPAD_DOWN), true);
+assert.deepEqual(scrolled, [1, 2, 2]);
+palette.choose(palette.results[palette.selected]);
+palette.choose(palette.results[palette.selected]);
+assert.deepEqual(chosen, ['older']);
+assert.equal(paletteClosed, 1, 'Submitting the same result twice closes and dispatches once');
+
+const frames = [];
+const SearchProbe = probe('views/ChatPanel', 'ChatPanel', ['messageSearchChanged'], {
+  ChatLayoutFrame: class { constructor(action) { this.onFrame = action; } }
+});
+const chatSearch = Object.assign(new SearchProbe(), { composerMounted: true, messageSearchRequest: 0,
+  app: { active: { id: 'current' }, searchMessageId: '' },
+  getUIContext: () => ({ postFrameCallback: frame => frames.push(frame) }),
+  locate() { this.located = this.app.searchMessageId; } });
+chatSearch.app.searchMessageId = 'first'; chatSearch.messageSearchRequest++; chatSearch.messageSearchChanged();
+chatSearch.app.searchMessageId = 'second'; chatSearch.messageSearchRequest++; chatSearch.messageSearchChanged();
+frames[0].onFrame(); assert.equal(chatSearch.located, undefined);
+frames[1].onFrame(); assert.equal(chatSearch.located, 'second');
+console.log('PASS desktop command filtering, message targets and same-conversation jumps');
 
 const dialogs = [], toasts = [];
 const Editor = probe('views/WorkspacePanel', 'WorkspacePanel', ['dirty', 'fileName', 'leave', 'requestClose', 'backRequested', 'openRequested', 'reference'], { t: value => value, $r: value => value });
