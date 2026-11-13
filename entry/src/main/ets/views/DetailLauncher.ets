@@ -12,6 +12,7 @@ import { AnimatedIconName } from '../common/IconArtwork';
 export struct DetailLauncher {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop compact: boolean = false;
+  @Prop showCollapse: boolean = false;
   @Prop workbench: boolean = false;
   @Prop project: string = '';
   @Prop sideChatAvailable: boolean = false;
@@ -49,7 +50,7 @@ export struct DetailLauncher {
       Row() {
         Text(this.workbench ? t('会话详情') : t('文件与浏览器')).fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium)
           .layoutWeight(1).fontColor($r('app.color.text_primary'))
-        if (this.compact) {
+        if (this.showCollapse) {
           IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭'), compId: 'detail-launcher-close', onTap: this.onClose })
         }
       }.width('100%').height(56).padding({ left: Space.page, right: 6 })

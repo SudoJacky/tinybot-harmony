@@ -69,7 +69,7 @@ const icons = new Map(), buttonActions = new Map(), widths = new Map(), labels =
 let buttonId, rowId, inputChanged, requestFrame;
 const uiGlobals = {
   t: (value, args = []) => value.replace(/\{(\d+)\}/g, (_, index) => args[index]),
-  ViewPU: { create() {} }, Context: noop, SEARCH_HEIGHT: 44, Diagnostics: { log() {} },
+  ViewPU: { create() {} }, Context: noop, SEARCH_HEIGHT: 44, IS_LARGE_SCREEN: true, Diagnostics: { log() {} },
   ThreadSearchFrame: class { constructor(action) { this.action = action; } },
   IconButton: class { constructor(_parent, props) { icons.set(props.compId, props); } },
   Row: new Proxy({}, { get: (_, key) => key === 'create' ? () => { rowId = undefined; } :
@@ -95,9 +95,9 @@ const Toolbar = probe('views/ThreadList', 'ThreadList', ['historyToolbar','scope
 const focus = [], newChats = [];
 let boardOpens = 0;
 const toolbar = Object.assign(new Toolbar(), {
-  active: true, mounted: true, foreground: true, collapseHistory: true, searchOpen: false, toolbarWidth: 280,
+  active: true, mounted: true, foreground: true, searchOpen: false, toolbarWidth: 280,
   query: '', visibleCounts: {}, focusRequest: 0, selecting: false, selectedIds: [], archived: false, projectFilter: null,
-  appearance: {}, app: { ready: true, projects: [{ id: 'project', name: 'Project' }], filteredThreads: () => [
+  appearance: {}, app: { ready: true, activeProject: { id: 'current' }, projects: [{ id: 'project', name: 'Project' }], filteredThreads: () => [
     { id: 'one', projectId: 'project' }, { id: 'two' }, { id: 'old', projectId: 'deleted' }
   ] },
   locked: () => false, onNewChat: projectId => newChats.push(projectId), onLifePanels: () => boardOpens++,
@@ -115,7 +115,9 @@ function renderToolbar() {
 }
 renderToolbar();
 assert.equal(widths.get('thread-search-pill'), 44);
-assert.ok(icons.has('workbench-new-chat') && icons.has('workbench-collapse-history'));
+assert.deepEqual([...icons.keys()], ['open-life-panels', 'workbench-new-chat']);
+icons.get('workbench-new-chat').onTap();
+assert.deepEqual(newChats, ['current']);
 assert.equal(labels.includes('对话'), false);
 icons.get('open-life-panels').onTap();
 assert.equal(boardOpens, 1);
@@ -138,9 +140,10 @@ toolbar.setScope(false, 'project');
 assert.deepEqual(toolbar.filtered().map(thread => thread.id), ['one']);
 toolbar.scopeMenu();
 assert.deepEqual(menuChoices.filter(item => item.selected).map(item => item.label), ['对话','Project']);
+assert.ok(menuChoices.some(item => item.label === '已归档 · 3'));
 renderToolbar();
 icons.get('workbench-new-chat').onTap();
-assert.deepEqual(newChats, ['project']);
+assert.deepEqual(newChats, ['current', 'project']);
 toolbar.setScope(true, '');
 assert.deepEqual(toolbar.filtered().map(thread => thread.id), ['two','old']);
 toolbar.selecting = true;

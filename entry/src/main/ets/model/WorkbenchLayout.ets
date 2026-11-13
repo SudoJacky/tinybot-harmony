@@ -18,6 +18,7 @@ export class WorkbenchLayout {
   // readable a little longer.
   static readonly CHAT_MIN: number = 440;
   static readonly DETAIL_MIN: number = 300;
+  static readonly RESIZE_COLLAPSE_OVERSHOOT: number = 32;
   static readonly PC_DOCK_MIN: number = WorkbenchLayout.RAIL_WIDTH + WorkbenchLayout.CHAT_MIN + WorkbenchLayout.DETAIL_MIN;
   static readonly DETAIL_MAX_RATIO: number = 0.7;
   static readonly DETAIL_DEFAULT_RATIO: number = 0.4;

@@ -205,17 +205,12 @@ export struct ThreadList {
   @Prop @Watch('searchAvailabilityChanged') active: boolean = true;
   @StorageProp('tinybot.foreground') @Watch('searchAvailabilityChanged') private foreground: boolean = true;
   @Prop workbench: boolean = false;
-  // The persistent workbench column can collapse itself into the rail; the overlay
-  // drawer cannot, so it omits the control.
-  @Prop collapseHistory: boolean = false;
   @Prop @Watch('searchRequested') searchRequest: number = 0;
   @State @Watch('searchVisibilityChanged') private searchOpen: boolean = false;
   @State private toolbarWidth: number = SEARCH_HEIGHT;
   private mounted: boolean = false;
   private focusRequest: number = 0;
-  onCollapseHistory: () => void = () => {};
   onNewChat: (projectId?: string) => void = () => {};
-  onTools: () => void = () => {};
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   onSelected: () => void = () => {};
@@ -694,7 +689,8 @@ export struct ThreadList {
     Menu() {
       MenuItem(() => materialMenuContent.bind(this)({ label: t('对话'), selected: !this.archived }))
         .id('active-threads').onClick(() => this.setScope(false, this.projectFilter))
-      MenuItem(() => materialMenuContent.bind(this)({ label: t('已归档'), selected: this.archived }))
+      MenuItem(() => materialMenuContent.bind(this)({ label: IS_LARGE_SCREEN ?
+        t('已归档 · {0}', [this.app.filteredThreads('', true).length]) : t('已归档'), selected: this.archived }))
         .id('archived-threads').onClick(() => this.setScope(true, this.projectFilter))
       MenuItemGroup() {
         MenuItem(() => materialMenuContent.bind(this)({ label: t('全部项目'), selected: this.projectFilter === null }))
@@ -718,22 +714,12 @@ export struct ThreadList {
   }
 
   @Builder
-  workspaceMenu() {
-    Menu() {
-      MenuItem({ content: t('工作区文件'), symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.folder')) })
-        .id('workbench-sidebar-files').onClick(this.onFiles)
-      MenuItem({ content: t('记忆与工具'), symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.wrench_and_screwdriver')) })
-        .id('workbench-sidebar-tools').onClick(this.onTools)
-    }
-  }
-
-  @Builder
   searchControl() {
     Row() {
       Stack() {
         SymbolGlyph($r('sys.symbol.magnifyingglass')).fontSize(19)
           .fontColor([$r('app.color.text_secondary')]).accessibilityLevel('no')
-        if (!this.searchOpen && !IS_LARGE_SCREEN) {
+        if (!this.searchOpen) {
           Button({ type: ButtonType.Circle }).id('thread-search-toggle').width(SEARCH_HEIGHT).height(SEARCH_HEIGHT)
             .backgroundColor(Color.Transparent).accessibilityText(t('搜索对话')).enabled(!this.locked())
             .onClick(() => this.searchRequested())
@@ -742,11 +728,10 @@ export struct ThreadList {
       TextInput({ text: this.query, placeholder: t('搜索对话') })
         .id('search-threads').layoutWeight(1).height(SEARCH_HEIGHT).padding(0)
         .fontFamily(this.appearance.fontFamily).fontSize(15).placeholderColor($r('app.color.text_tertiary'))
-        .backgroundColor(Color.Transparent).enabled((this.searchOpen || IS_LARGE_SCREEN) && !this.locked())
-        .focusable(this.searchOpen || IS_LARGE_SCREEN)
-        .visibility(this.searchOpen || IS_LARGE_SCREEN ? Visibility.Visible : Visibility.None).accessibilityText(t('搜索对话'))
-        .onFocus(() => { if (IS_LARGE_SCREEN) { this.searchOpen = true; } })
-        .onChange((value: string) => { if (this.searchOpen || IS_LARGE_SCREEN) { this.updateQuery(value); } })
+        .backgroundColor(Color.Transparent).enabled(this.searchOpen && !this.locked())
+        .focusable(this.searchOpen)
+        .visibility(this.searchOpen ? Visibility.Visible : Visibility.None).accessibilityText(t('搜索对话'))
+        .onChange((value: string) => { if (this.searchOpen) { this.updateQuery(value); } })
         .onKeyEvent((event: KeyEvent) => {
           if (event.type === KeyType.Down && event.keyCode === KeyCode.KEYCODE_ESCAPE) {
             this.closeSearch();
@@ -757,7 +742,7 @@ export struct ThreadList {
         IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭搜索'), compId: 'close-thread-search',
           diameter: SEARCH_HEIGHT, iconSize: 15, onTap: () => this.closeSearch() })
       }
-    }.id('thread-search-pill').width(IS_LARGE_SCREEN ? '100%' : this.searchOpen ? this.toolbarWidth : SEARCH_HEIGHT).height(SEARCH_HEIGHT)
+    }.id('thread-search-pill').width(this.searchOpen ? this.toolbarWidth : SEARCH_HEIGHT).height(SEARCH_HEIGHT)
       .borderRadius(SEARCH_HEIGHT / 2).clip(true).backgroundColor($r('app.color.surface_variant'))
       .animation({ duration: Motion.fast, curve: Motion.standard })
   }
@@ -771,21 +756,6 @@ export struct ThreadList {
         IconButton({ icon: $r('sys.symbol.xmark'), label: t('取消'), compId: 'thread-selection-cancel', diameter: SEARCH_HEIGHT,
           iconSize: 17, onTap: () => this.endSelection() })
       }.width('100%').height(SEARCH_HEIGHT)
-    } else if (IS_LARGE_SCREEN) {
-      Column({ space: Space.xs }) {
-        this.searchControl()
-        Row() {
-          Button(t('新建对话')).id('workbench-new-chat').attributeModifier(Btn.textSmall).layoutWeight(1)
-            .enabled(!this.locked()).onClick(() => this.onNewChat(this.projectFilter === null ? this.app.activeProject?.id : this.projectFilter || undefined))
-          IconButton({ icon: $r('sys.symbol.square_grid_2x2'), label: t('生活看板'), compId: 'open-life-panels',
-            diameter: SEARCH_HEIGHT, iconSize: 19, disabled: !this.app.ready, onTap: this.onLifePanels })
-          Button({ type: ButtonType.Circle }) {
-            SymbolGlyph($r('sys.symbol.list_bullet')).fontSize(18)
-          }.id('thread-scope-menu').width(SEARCH_HEIGHT).height(SEARCH_HEIGHT).backgroundColor(Color.Transparent)
-            .accessibilityText(t('筛选对话')).enabled(!this.locked())
-            .bindMenu(this.scopeMenu, { systemMaterial: this.appearance.menu, mask: false })
-        }.width('100%')
-      }.width('100%')
     } else {
       Stack({ alignContent: Alignment.Start }) {
         Row() {
@@ -801,11 +771,7 @@ export struct ThreadList {
             .bindMenu(this.scopeMenu, { systemMaterial: this.appearance.menu, mask: false })
           IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('新建对话'), compId: 'workbench-new-chat',
             diameter: SEARCH_HEIGHT, iconSize: 19, disabled: this.locked(), onTap: () => this.onNewChat(
-              this.projectFilter === null && IS_PC ? this.app.activeProject?.id : this.projectFilter || undefined) })
-          if (this.collapseHistory) {
-            IconButton({ icon: $r('sys.symbol.close_sidebar'), label: t('收起会话栏'), compId: 'workbench-collapse-history',
-              diameter: SEARCH_HEIGHT, iconSize: 18, onTap: this.onCollapseHistory })
-          }
+              this.projectFilter === null && IS_LARGE_SCREEN ? this.app.activeProject?.id : this.projectFilter || undefined) })
         }.width('100%').height(SEARCH_HEIGHT).enabled(!this.searchOpen)
           .accessibilityLevel(this.searchOpen ? 'no-hide-descendants' : 'auto')
         this.searchControl()
@@ -934,31 +900,18 @@ export struct ThreadList {
             .enabled(!this.locked() && this.selectedIds.length > 0).onClick(() => this.confirmDeleteSelected())
         }.width('100%')
       } else {
-        if (IS_LARGE_SCREEN) {
-          Button(this.archived ? t('返回会话') : t('已归档 · {0}', [this.app.filteredThreads('', true).length]))
-            .id('workbench-archive-toggle').attributeModifier(Btn.textSmall).width('100%')
-            .onClick(() => this.setScope(!this.archived, this.projectFilter))
-        }
-        Row({ space: Space.xs }) {
-          if (this.workbench) {
-            Button({ type: ButtonType.Circle }) {
-              SymbolGlyph($r('sys.symbol.folder')).fontSize(20).fontColor([$r('app.color.text_secondary')])
-            }.id('sidebar-workspace-menu').width(SEARCH_HEIGHT).height(SEARCH_HEIGHT).backgroundColor(Color.Transparent)
-              .accessibilityText(t('工作区')).bindMenu(this.workspaceMenu, { systemMaterial: this.appearance.menu, mask: false })
+        Row({ space: Space.sm }) {
+          SymbolGlyph($r('sys.symbol.gearshape')).fontSize(20).fontColor([$r('app.color.text_secondary')])
+          Text(t('设置')).fontFamily(this.appearance.fontFamily).fontSize(15).layoutWeight(1)
+            .fontColor($r('app.color.text_primary')).maxLines(1)
+          if (!IS_LARGE_SCREEN) {
+            Text(t('已配置 {0} 个模型服务', [this.app.providerProfiles.length])).fontFamily(this.appearance.fontFamily)
+              .fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(14).fontColor([$r('app.color.text_tertiary')])
           }
-          Row({ space: Space.sm }) {
-            SymbolGlyph($r('sys.symbol.gearshape')).fontSize(20).fontColor([$r('app.color.text_secondary')])
-            Text(t('设置')).fontFamily(this.appearance.fontFamily).fontSize(15).layoutWeight(1)
-              .fontColor($r('app.color.text_primary')).maxLines(1)
-            if (!IS_PC) {
-              Text(t('已配置 {0} 个模型服务', [this.app.providerProfiles.length])).fontFamily(this.appearance.fontFamily)
-                .fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-              SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(14).fontColor([$r('app.color.text_tertiary')])
-            }
-          }.id('open-settings').layoutWeight(1).height(IS_PC ? 36 : 48).padding({ left: Space.sm, right: Space.sm }).borderRadius(Radius.md)
-            .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
-            .onClick(this.onSettings)
-        }.width('100%')
+        }.id('open-settings').width('100%').height(IS_PC ? 36 : 48).padding({ left: Space.sm, right: Space.sm }).borderRadius(Radius.md)
+          .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
+          .onClick(this.onSettings)
       }
     }
     .padding({ left: Space.md, right: Space.md, top: Space.sm, bottom: Space.sm })

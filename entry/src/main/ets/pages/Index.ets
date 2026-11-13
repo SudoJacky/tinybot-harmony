@@ -147,6 +147,8 @@ struct Index {
   @State private lifePanelTarget: string = '';
   private lastPanelLink: string = '';
   private resizeBase: number = 0;
+  private resizeStartPreference: number = 0;
+  @State private resizeCollapsePane: string = '';
   @State private chatVisible: boolean = true;
   @State private drawerReveal: number = 0;
   @State private drawerDragging: boolean = false;
@@ -875,8 +877,7 @@ struct Index {
       this.historyPreferredWidth, this.detailPreferredWidth, this.desktop);
   }
 
-  // The rail expands the column only when it still fits; otherwise it reveals the
-  // overlay drawer, so history keeps working on a narrow split-screen window.
+  // Narrow windows open the drawer when the history column cannot fit.
   private toggleHistory(): void {
     if (this.drawerOpen) { this.setDrawer(false); return; }
     if (this.workbench().expanded) { this.setHistoryCollapsed(true); }
@@ -1055,24 +1056,36 @@ struct Index {
 
   private beginResize(detail: boolean): void {
     this.resizeBase = detail ? this.workbench().detailWidth : this.workbench().historyWidth;
+    this.resizeStartPreference = detail ? this.detailPreferredWidth : this.historyPreferredWidth;
+    this.resizeCollapsePane = '';
   }
 
   private resizeHistory(dx: number): void {
-    // Growing the column must not make the docked pane impossible: unlike the
-    // desktop frame there is no second track to renegotiate, so stop at the width
-    // where both remaining panes keep their minima instead of collapsing mid-drag.
     const layout = this.workbench();
-    this.historyPreferredWidth = Math.max(layout.historyMinWidth, Math.min(layout.historyMaxWidth, this.resizeBase + dx));
+    const width = this.resizeBase + dx;
+    this.resizeCollapsePane = width <= layout.historyMinWidth - WorkbenchLayout.RESIZE_COLLAPSE_OVERSHOOT ? 'history' : '';
+    this.historyPreferredWidth = Math.max(layout.historyMinWidth, Math.min(layout.historyMaxWidth, width));
   }
 
   private resizeDetail(dx: number): void {
     const layout = this.workbench();
-    this.detailPreferredWidth = Math.max(WorkbenchLayout.DETAIL_MIN,
-      Math.min(layout.detailMaxWidth, this.resizeBase - dx));
+    const width = this.resizeBase - dx;
+    this.resizeCollapsePane = width <= WorkbenchLayout.DETAIL_MIN - WorkbenchLayout.RESIZE_COLLAPSE_OVERSHOOT ? 'detail' : '';
+    this.detailPreferredWidth = Math.max(WorkbenchLayout.DETAIL_MIN, Math.min(layout.detailMaxWidth, width));
   }
 
-  // Commit the clamped result so the next window resize does not replay the raw drag.
-  private endResize(detail: boolean): void {
+  private endResize(detail: boolean, cancelled: boolean): void {
+    const collapse = this.resizeCollapsePane === (detail ? 'detail' : 'history');
+    this.resizeCollapsePane = '';
+    if (cancelled || collapse) {
+      if (detail) { this.detailPreferredWidth = this.resizeStartPreference; }
+      else { this.historyPreferredWidth = this.resizeStartPreference; }
+      if (!cancelled) {
+        if (detail) { this.toggleDetailPane(); }
+        else { this.setHistoryCollapsed(true); }
+      }
+      return;
+    }
     const layout = this.workbench();
     if (detail ? !layout.docked : !layout.expanded) { return; }
     const width = detail ? layout.detailWidth : layout.historyWidth;
@@ -1631,11 +1644,9 @@ struct Index {
       // On the plain tablet title surface, API-26 light-sense material erases
       // the control fill; keep an opaque tint and reserve material for phones.
       Row({ space: 4 }) {
-        if (this.workbench().historyWidth === 0) {
-          IconButton({ icon: $r('sys.symbol.line_3_horizontal'), label: t('对话列表'), compId: 'open-history',
-            animatedIcon: 'history', fill: $r('app.color.surface_variant'),
-            disabled: !this.app.ready, onTap: () => this.setDrawer(true) })
-        }
+        IconButton({ icon: this.workbench().expanded || this.drawerOpen ? $r('sys.symbol.open_sidebar') : $r('sys.symbol.close_sidebar'),
+          label: this.workbench().expanded || this.drawerOpen ? t('收起会话栏') : t('展开会话列表'), compId: 'open-history',
+          fill: $r('app.color.surface_variant'), disabled: !this.app.ready, onTap: () => this.toggleHistory() })
         Blank().layoutWeight(1)
         if (this.app.active.messages.length > 0) {
           IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('展开输入'), compId: 'workbench-expand-draft',
@@ -1660,9 +1671,10 @@ struct Index {
   @Builder
   desktopHeader() {
     Row({ space: 4 }) {
-      IconButton({ icon: this.workbench().expanded || this.drawerOpen ? $r('sys.symbol.close_sidebar') : $r('sys.symbol.line_3_horizontal'),
-        label: t('展开或收起对话列表'), compId: 'open-history',
-        animatedIcon: 'history', diameter: this.desktop ? 36 : 44, iconSize: 18, fill: $r('app.color.surface'),
+      // The system sidebar symbols point towards the right-hand panel by default.
+      IconButton({ icon: this.workbench().expanded || this.drawerOpen ? $r('sys.symbol.open_sidebar') : $r('sys.symbol.close_sidebar'),
+        label: this.workbench().expanded || this.drawerOpen ? t('收起会话栏') : t('展开会话列表'), compId: 'open-history',
+        diameter: this.desktop ? 36 : 44, iconSize: 18, fill: $r('app.color.surface'),
         disabled: !this.app.ready, onTap: () => this.toggleHistory() })
       Row({ space: 6 }) {
         if (this.app.ready && this.windowWidth >= 540) {
@@ -1693,10 +1705,12 @@ struct Index {
       }.id('pc-chat-more').width(this.desktop ? 36 : 44).height(this.desktop ? 36 : 44).padding(0).borderRadius(Radius.sm)
         .backgroundColor(Color.Transparent).accessibilityText(t('更多操作')).enabled(this.app.ready)
         .bindMenu(this.moreMenu, { systemMaterial: this.appearance.menu, mask: false })
-      IconButton({ icon: this.detailPaneOpen ? $r('sys.symbol.close_sidebar') : $r('sys.symbol.open_sidebar'),
-        label: this.detailPaneOpen ? t('关闭侧栏') : t('打开侧栏'), compId: 'workbench-toggle-detail',
-        diameter: this.desktop ? 36 : 44, iconSize: 18, fill: this.detailPaneOpen ? $r('app.color.surface_variant') : $r('app.color.surface'),
-        disabled: !this.app.ready, onTap: () => this.toggleDetailPane() })
+      if (!this.detailCoversChat()) {
+        IconButton({ icon: this.detailPaneOpen ? $r('sys.symbol.close_sidebar') : $r('sys.symbol.open_sidebar'),
+          label: this.detailPaneOpen ? t('关闭侧栏') : t('打开侧栏'), compId: 'workbench-toggle-detail',
+          diameter: this.desktop ? 36 : 44, iconSize: 18, fill: this.detailPaneOpen ? $r('app.color.surface_variant') : $r('app.color.surface'),
+          disabled: !this.app.ready, onTap: () => this.toggleDetailPane() })
+      }
     }.width('100%').height(PC_CHAT_HEADER_HEIGHT).padding({ left: Space.md, right: Space.sm })
       .border({ width: { bottom: 0.5 }, color: $r('app.color.divider') })
   }
@@ -1743,11 +1757,9 @@ struct Index {
         } else {
         ThreadList({ app: this.app, selectedSection: this.rootSection, workbench: this.desktop || this.windowWidth >= 840,
           onLifePanels: () => { this.setDrawer(false); this.openLifePanels(); },
-          collapseHistory: !this.largeScreen && this.workbench().expanded, searchRequest: this.historySearchRequest,
+          searchRequest: this.historySearchRequest,
           onProjectSheetVisibility: (visible) => { this.historyProjectSheetOpen = visible; },
-          onCollapseHistory: () => this.setHistoryCollapsed(true),
           onNewChat: (projectId?: string) => { this.createChat(projectId); },
-          onTools: () => { this.setDrawer(false); this.openTools('memory'); },
           active: !this.onboardingActive && (this.workbench().expanded || this.drawerContentActive),
           onSelected: () => this.revealChat(), onFiles: () => { this.setDrawer(false); this.openFiles(); }, onSettings: () => {
           this.setDrawer(false);
@@ -1813,12 +1825,9 @@ struct Index {
     Stack() {
     Row() {
     if (this.workbench().rail) {
-      HistoryRail({ active: this.app.ready, filesActive: this.detailPaneOpen && this.currentDetailTab() === 'files',
-        onExpand: () => this.toggleHistory(),
+      HistoryRail({ active: this.app.ready,
         onNewChat: () => { this.createChat(this.desktop ? this.app.activeProject?.id : undefined); this.setDrawer(false); },
         onSearch: () => this.openHistorySearch(),
-        onFiles: () => this.openFiles(),
-        onTools: () => this.openTools('memory'),
         onSettings: () => this.openSettings() })
         .width(this.workbench().historyWidth).height('100%')
     } else {
@@ -1919,20 +1928,20 @@ struct Index {
     // Draggable seams sit above the drawer layer: the persistent column and the
     // overlay drawer never coexist, so a grip here can never steal a list tap.
     if (this.app.ready && this.workbench().expanded) {
-      PaneDivider({ label: t('调整会话栏宽度'),
+      PaneDivider({ label: t('调整会话栏宽度'), compId: 'workbench-history-divider', collapseArmed: this.resizeCollapsePane === 'history',
         desktop: this.desktop, onReset: () => this.resetDesktopPane(false),
         onResizeStart: () => this.beginResize(false),
         onResize: (dx: number) => this.resizeHistory(dx),
-        onResizeEnd: () => this.endResize(false) })
+        onResizeEnd: (cancelled: boolean) => this.endResize(false, cancelled) })
         .width(12).height(this.desktop ? '100%' : 'calc(100% - 12vp)')
         .position({ x: this.workbench().historyWidth - (this.desktop ? 6 : 4), y: this.desktop ? 0 : 6 })
     }
     if (this.app.ready && this.workbench().docked && !this.compactDetailLauncher() && this.detailReveal >= 1 && !this.drawerOpen && !this.drawerDragging && this.drawerReveal <= 0) {
-      PaneDivider({ label: t('调整侧区宽度'),
+      PaneDivider({ label: t('调整侧区宽度'), compId: 'workbench-detail-divider', collapseArmed: this.resizeCollapsePane === 'detail',
         desktop: this.desktop, onReset: () => this.resetDesktopPane(true),
         onResizeStart: () => this.beginResize(true),
         onResize: (dx: number) => this.resizeDetail(dx),
-        onResizeEnd: () => this.endResize(true) })
+        onResizeEnd: (cancelled: boolean) => this.endResize(true, cancelled) })
         .width(12).height(this.desktop ? '100%' : 'calc(100% - 12vp)')
         .position({ x: this.detailGeometry().detailX - (this.desktop ? 6 : 8), y: this.desktop ? 0 : 6 })
     }
@@ -1946,7 +1955,7 @@ struct Index {
       Stack({ alignContent: Alignment.TopStart }) {
         Column() {
           if (this.detailOpen() && !this.showDetailContext && (this.largeScreen || this.workbench().docked) && this.detailTabsAvailable().length > 0) {
-            DetailTabs({ tabs: this.detailTabItems(), active: this.currentDetailTab(), showCollapse: this.largeScreen && !this.workbench().docked,
+            DetailTabs({ tabs: this.detailTabItems(), active: this.currentDetailTab(), showCollapse: this.largeScreen && this.detailCoversChat(),
               compact: !this.workbench().docked && this.windowWidth < 840, touch: !this.desktop,
               showMaximize: this.largeScreen && this.windowWidth >= 840,
               sideChatAvailable: this.canCreateSideChat(),
@@ -1997,6 +2006,7 @@ struct Index {
                 workbench: this.largeScreen, project: this.app.activeProject?.name || t('普通聊天'),
                 sideChatAvailable: this.canCreateSideChat(), onSideChat: () => this.createSideChat(),
                 context: () => { this.detailContext() }, compact: !this.workbench().docked || this.compactDetailLauncher(),
+                showCollapse: this.detailCoversChat(),
                 onClose: () => { this.setDetailPane(false, true); } })
             }
           }.width('100%').layoutWeight(1)
