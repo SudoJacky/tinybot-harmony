@@ -8,25 +8,27 @@
 - `SelectedTools` 按会话的 `agentMode`/`disabledTools` 过滤，`RuleTools` 再按只读规则过滤；团队员工的 `EmployeeTools` 另按 `toolProfile` 收窄。三者与“服务是否配置”取交集。
 - 已启用、已配置且通过只读、会话选择和角色过滤的工具，从首次请求起直接提供完整 schema 和使用说明，按名称稳定排序；`tool_search` 默认不提供。附件、引用和员工交接仍按对应资源及角色加入。旧发现回执保留为历史，不影响当前目录。
 - 参数对象默认 `additionalProperties: false`：出现未声明字段按参数错误处理，不是忽略。
-- `generate_image`、`read_tool_result` 与 `publish_data_view` 已从目录移除。历史图表仍能显示、导出 CSV 及参与会话导出；新图表、表格和指标卡统一写入 HTML/JS/SVG，再以 `publish_preview` 发布。
+- 旧版 `generate_image`、`read_tool_result` 与 `publish_data_view` 已从目录移除，历史图表回执仍能显示、导出 CSV 及参与会话导出。`image_gen` 是当前版本的图片工具，与旧 `generate_image` 不是同一个入口，旧禁用记录不会影响它；新图表、表格和指标卡统一写入 HTML/JS/SVG，再以 `publish_preview` 发布。
 
 ## 能力分组
 
-自定义模式把可选入口归入 12 项能力；基础文件工具不受开关影响。`memory`、`read_skill`、`list_skills`、`skill_manage` 由助手设置和 Skills 页面单独控制，不占这 12 项。
+自定义模式把可选入口归入 14 项能力；基础文件工具不受开关影响。`memory`、`read_skill`、`list_skills`、`skill_manage` 由助手设置和 Skills 页面单独控制，不占这 14 项。
 
 | 分组 | 工具 | 数量 | 门控 |
 | --- | --- | --- | --- |
 | 基础文件（固定保留） | `list_files`、`find_files`、`read_file`、`search_file_content`、`write_file`、`edit_file` | 6 | 自定义模式不可关闭 |
-| 附件与历史结果 | `read_attachment`、`read_reference` | 2 | 本对话存在对应资源时才出现 |
+| 附件与历史结果 | `read_attachment`、`read_reference`、`view_image` | 3 | `read_attachment`、`read_reference` 在有对应资源时出现；`view_image` 随会话提供 |
 | 网页读取与搜索 | `read_web`、`search_web` | 2 | `extensions.webEnabled`；`search_web` 还要求搜索服务已启用 |
+| 邮件读取 | `list_mail_accounts`、`search_mail`、`read_mail` | 3 | 始终提供；只返回设置中已启用的连接，`read_mail` 还要求该连接允许读取正文 |
 | 浏览器 | `browser_open`、`browser_snapshot`、`browser_action`、`browser_capture`、`browser_wait`、`browser_handoff`、`browser_close` | 7 | `extensions.browserPolicy` 为 `disabled` 时整组不出现 |
 | 代码计算 | `execute_code` | 1 | 只读模式仍可用 |
 | 工具编排 | `orchestrate` | 1 | 关闭后仍可直接调用已授权文件工具 |
 | 信息确认 | `request_user_input` | 1 | 只读模式仍可用 |
 | 任务计划 | `update_plan` | 1 | 只读模式仍可用 |
 | 团队协作 | `team_recruit`、`team_wait`、`team_inspect`、`team_read_result`、`team_control`、`team_resume`、`team_complete_task`、`team_list_messages`、`team_read_message` | 9 | 会话启用团队后加入；员工三项只在子任务内出现 |
-| 预览与小程序 | `publish_preview`、`list_mini_apps`、`publish_mini_app` | 3 | 只读模式提供前两项；小程序工具还要求实验室开关已开启 |
+| 预览与图表 | `publish_preview`、`get_life_panel_catalog`、`list_life_panels`、`get_life_panel`、`publish_life_panel`、`validate_life_panel`、`list_life_boards`、`get_life_board`、`manage_life_board`、`manage_life_panel_task` | 10 | 只读模式保留读取与 `publish_preview`；发布、校验与调整看板需要非只读 |
 | 文件交付 | `present_files` | 1 | 只读模式仍可用 |
+| 生成图片 | `image_gen` | 1 | 仅在配置并选中图片模型后出现；只读模式不可用 |
 | MCP 远程工具 | `mcp_search_tools`、`mcp_list_tools`、`mcp_call` | 3 | 存在已启用且未被本会话停用的服务 |
 | MCP 服务管理 | `mcp_manage` | 1 | 只读模式不可用 |
 | Skills | `read_skill`、`list_skills`、`skill_manage` | 3 | Skills 页面逐项启用；`skill_manage` 只读模式不可用 |
@@ -73,7 +75,7 @@
 | 工具 | 用途 | 参数 | 约束与回执 |
 | --- | --- | --- | --- |
 | `execute_code` | 在隔离 QuickJS 中跑同步 JavaScript | `code` 必填（函数体）；`input` 可选原生 JSON 值，默认 `null` | 2 秒预算、32 MiB Runtime 分配、日志合计 32 KiB；无文件、网络、定时器、模块导入或宿主工具，Promise 不支持。回执 `{status, stdout, stderr, result, error, logsTruncated, resultTruncated, durationMs}`；`status` 非 `ok` 记为失败 |
-| `orchestrate` | 用异步 JavaScript 组合调用已授权工具 | `code` 必填 | 可嵌套 19 个工具（文件、附件与引用、网页与搜索、Skills 读取、MCP 发现与调用、计算、预览、小程序与文件交付）；上限 32 次调用、4 个并发宿主工具、2 秒脚本计算、120 秒总时长、32 MiB JS 内存、1 MiB 结果；子调用回执保存在父回执里，取消后未开始的子调用标为 `NOT_EXECUTED`；不支持嵌套编排 |
+| `orchestrate` | 用异步 JavaScript 组合调用已授权工具 | `code` 必填 | 可嵌套 17 个工具（文件读写与检索、附件与引用、网页与搜索、Skills 读取、MCP 发现与调用、计算、预览与文件交付）；图片、看板、邮件与团队工具不开放嵌套；上限 32 次调用、4 个并发宿主工具、2 秒脚本计算、120 秒总时长、32 MiB JS 内存、1 MiB 结果；子调用回执保存在父回执里，取消后未开始的子调用标为 `NOT_EXECUTED`；不支持嵌套编排 |
 
 ## 交互与计划
 
@@ -89,16 +91,50 @@
 | `publish_preview` | 准备工作区文件预览，最终回复引用插入 | `path` 必填（`.js`、`.html`、`.svg`）；`title` 可选（≤160，默认文件名）；`library` 可选 `none`/`three`（默认 `none`）；`height` 可选 200–800 | JS 在空白页执行、可操作 `document.body`；`library="three"` 预加载 THREE 与 OrbitControls；无 import、网络、本地文件或存储访问；JSONL 已不支持。发布前做启动预检并截图，成功后保存不可变快照；回执含 `previewId` 和 `reference`，最终回复独占一行复制引用，turn 完成后原位展示；工具阶段不自动展示 |
 | `present_files` | 交付工作区文件 | `files` 必填 1–8 项 `{path, description?}`，说明 ≤300 字符 | 只校验文件真实存在，不创建也不复制内容；重复路径直接拒绝；成功回执在回答末尾生成文件卡片 |
 
-## 小程序
+## 图片生成与检查
 
-小程序在“设置 → 实验室 → 小程序”开启后才提供给模型，默认关闭；关闭后入口和相关工具都隐藏，已有小程序与数据保留。
+`image_gen` 只在配置并选中图片模型时出现，属于“生成图片”能力；`view_image` 属于“附件与历史结果”能力，只读。两者分别使用图片服务与当前聊天模型。
 
 | 工具 | 用途 | 参数 | 约束与回执 |
 | --- | --- | --- | --- |
-| `list_mini_apps` | 列出当前工作区已进入集合的本地小程序 | 无 | 返回 `appId`、标题、描述、归档状态、源文件路径、`dataPath` 与更新时间；尚未采用的试用版不列出；更新前应先查询 |
-| `publish_mini_app` | 创建或更新可持久化的单页小程序 | `path` 必填（`.js`、`.html`、`.svg`）；`title` 1–160；`description` ≤1000；`appId` 更新时必填；`library` 为 `none`/`three` | 页面只允许单页；发布前用只读数据快照做启动校验，启动脚本不能写数据；更新不会覆盖清单指定的数据文件；已归档的小程序必须先恢复才能更新；回执包含 `appId`、`startup` 与 `interaction`（固定 `not_checked`） |
+| `image_gen` | 生成或编辑图片 | `prompt` 必填（1–32000 字符）；`reference_images` 最多 4 个工作区相对路径或本对话照片引用；`aspect_ratio` 为 `1:1`/`3:2`/`2:3`；`transparent_background` 仅在 OpenAI Images 协议下可用 | 参考图须为 PNG/JPEG/WebP，合计不超过 16 MiB，重复路径直接拒绝；每次调用生成一张，写入 `generated-images/<uuid>.<ext>`；回执 `{path, mime, bytes, files:[{path}]}`；调用前单独确认服务、地址、提示词与参考图 |
+| `view_image` | 把本地图片交给视觉模型检查 | `path` 必填，工作区相对路径或本对话照片引用 | 只接受 PNG/JPEG/WebP；另存最长边 1600 px 的 JPEG 副本并作为额外用户消息发送；文字回执 `{path, mime}`；不修改源文件，也不能确认透明通道 |
 
-小程序页面通过 `tinybot.storage.load()` 取得 `{value, revision}`，在用户交互后用 `save(value, revision)` 保存；版本过期时保存失败，页面应重新加载并对齐，不能盲目覆盖。不要为临时视觉或一次性图表使用小程序，这类内容继续使用 `publish_preview`。
+图片请求与响应格式由图片协议决定，失败码与恢复建议见[回执与错误](/reference/receipts)。配置与图片模型选择见[图片生成服务](/guide/models#图片生成服务)。
+
+## 生活看板
+
+看板工具读写工作区或看板自己保存的卡片与布局，不联网抓取页面；数据源由卡片配置决定。
+
+| 工具 | 用途 | 参数 | 约束与回执 |
+| --- | --- | --- | --- |
+| `get_life_panel_catalog` | 读取看板卡片的资源与接口说明 | `section` 可选：`all`、`html`、`native`、`sources`、`balance`、`design` | `balance` 返回已配置的服务账户与对应卡片定义；原生邮件卡片可在用户操作时读取邮件正文 |
+| `list_life_panels` | 列出卡片摘要 | `workspaceId`、`archived`、`limit`（1–20，默认 10）、`cursor` | 每页最多读取 50 个清单；下一页用返回的 `nextCursor` |
+| `get_life_panel` | 读取单张卡片的定义、数据或任务 | `workspaceId`、`panelId` 必填；`section` 为 `all`/`definition`/`data`/`task` | 回执含可选展示用的 `reference`；更新前应取得 `configRevision` |
+| `publish_life_panel` | 校验并保存卡片，可固定到看板 | `path` 必填（`.panel.json`）；`htmlPath`、`panelId`、`workspaceId`、`expectedRevision`（更新必填）、`replaceData`、`checkSource`、`placementWidth`/`placementHeight`、`viewportWidth`、`requestId`、`boardId`、`boardWorkspaceId` | 更新缺少 `expectedRevision` 或版本过期会被拒绝；默认保留现有数据；新卡片用 `requestId` 去重；成功后回执 `reference`，最终回复可独占一行引用以在聊天下方展示 |
+| `validate_life_panel` | 只校验、不保存卡片 | 参数同 `publish_life_panel`，不含 `requestId` 与看板字段 | 使用独立状态检查定义、数据源与 HTML，不影响已保存卡片 |
+| `list_life_boards` | 列出看板与卡片引用 | 无 | 回执含看板 ID、名称与卡片引用 |
+| `get_life_board` | 读取看板引用与 12 列网格 | `workspaceId`、`boardId` 必填；`viewportWidth` 可选（160–1200 vp） | 提供视口宽度时按实际宽度换算矩形；不返回截图 |
+| `manage_life_board` | 保存、摆放、归档或恢复看板 | `action` 必填（`save`/`place`/`archive`/`restore`）；`boardId`、`workspaceId`、`title`、`description`、`items`、`panelId`、`layout` | 卡片位置 `x` 为 0–10 列、`y` 为非负行、宽 2–12、高 2–33；布局自动向上靠齐，请求的 `y` 可能高于实际位置；串行执行 |
+| `manage_life_panel_task` | 暂停、恢复或手动刷新卡片 | `panelId`、`workspaceId`、`action`（`pause`/`resume`/`refresh`）、`inputs` | 串行执行；`inputs` 与卡片已声明的输入合并 |
+
+卡片的创建、数据源与视觉规范由内置的 `widget`、`widget-design` 与 `canvas` Skills 指导，见[网页、搜索与 Skills](/guide/web-and-skills#skills)。
+
+## 邮件
+
+邮件工具只读访问用户已启用的邮箱连接，不能发送、删除或修改邮件；邮件正文与主题属于不可信资料。
+
+| 工具 | 用途 | 参数 | 约束与回执 |
+| --- | --- | --- | --- |
+| `list_mail_accounts` | 列出已启用的邮箱连接 | 无 | 返回 `accountId`、名称与是否允许读取正文 |
+| `search_mail` | 按文件夹查询邮件抬头 | `accountId`、`folder` 必填；`limit` 1–20（默认 10）；`unreadOnly`、`from`、`subject` 可选 | 只读取抬头，不读正文、不标记已读；返回总数、未读数与最多 20 条带 `UIDVALIDITY`+`UID` 的抬头；`limited` 表示只覆盖最近窗口 |
+| `read_mail` | 读取一封邮件的纯文本正文 | `accountId`、`folder`、`uidValidity`、`uid` 必填 | 需要该连接允许读取正文；单封最多 512 KiB；不加载附件与外部图片；不标记已读，身份过期会被拒绝 |
+
+邮箱连接在 **设置 → 工具与权限 → 邮箱连接** 中配置，授权码只写入系统安全存储，不在聊天中索取。
+
+## 已下线的小程序
+
+`list_mini_apps` 与 `publish_mini_app` 已在 v1.3.1 从目录移除，当前版本不再提供实验开关或小程序入口。已有小程序的页面、版本与数据文件保留在工作区 `mini-apps/`，并随完整备份保存；需要长期保留的页面改用生活看板，一次性图表继续使用 `publish_preview`。
 
 ## 长期记忆
 
@@ -156,6 +192,12 @@
 | `entry/src/main/ets/services/InteractionTools.ets` | 表单、计划与图表 |
 | `entry/src/main/ets/services/PreviewTools.ets` | 预览发布、预检与截图 |
 | `entry/src/main/ets/services/PresentTools.ets` | 文件交付 |
+| `entry/src/main/ets/services/ImageGenerationTools.ets` | 图片生成与编辑工具、参考图读取与输出保存 |
+| `entry/src/main/ets/services/ImageInspectionTools.ets` | `view_image` 参数、图片副本与回执 |
+| `entry/src/main/ets/services/NativeImageGenerator.ets` | 图片服务请求、超时、下载与失败映射 |
+| `entry/src/main/ets/services/ImageGenerationProtocol.ets` | 四种图片协议的请求体与响应解析 |
+| `entry/src/main/ets/services/LifePanelTools.ets` | 看板卡片、看板布局与刷新任务工具 |
+| `entry/src/main/ets/services/MailTools.ets` | 邮箱连接、查询与正文读取工具 |
 | `entry/src/main/ets/services/MemoryTools.ets` | 长期记忆操作 |
 | `entry/src/main/ets/services/SkillTools.ets` | 读取 Skill 与目录 |
 | `entry/src/main/ets/services/ResourceTools.ets` | Skills 与 MCP 配置管理 |

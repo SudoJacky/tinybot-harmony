@@ -22,6 +22,7 @@
 | 入口 | 调用 | 界面 | 允许/拒绝后 |
 | --- | --- | --- | --- |
 | 工具调用确认 | `request(title, details, cancellation)` | 输入框上方的确认卡，显示“允许调用工具？” | 允许继续执行；拒绝抛 `USER_DENIED` |
+| 图片生成确认 | `ImageGenerationTools` 自带的 `approve` | 确认卡显示“允许调用图片生成服务？”，详情含服务名称、地址、提示词与参考图路径 | 允许后发出图片请求；拒绝抛 `USER_DENIED`，不产生图片 |
 | 结构化提问 | `ask(form, cancellation)` | 输入框上方的表单卡，1–10 个字段 | 提交返回 JSON 结果；点“不回答”返回 `{"status":"cancelled"}` |
 | MCP 鉴权 | `ask()` + `password` 字段 | 密码输入框，旁注说明令牌只发送到哪个地址 | 令牌写入安全存储后清空 |
 | 浏览器授权 | `BrowserSession` 自己的待确认状态 | 浏览器状态卡 | 允许后取得控制；策略为 `disabled` 时不再询问 |
@@ -30,7 +31,7 @@
 
 等待通过 Promise 挂起；本轮被停止时取消信号会清空界面字段并结束等待，调用按取消处理。点“不回答”只结束表单，不算停止本轮。停止与用户拒绝在回执里分别是 `CANCELLED` 与 `USER_DENIED`。确认发生在执行工具前，拒绝时不会发出 MCP `tools/call` 或执行相应的内置操作。
 
-Composer 的工具审批模式按会话保存。**请求审批**会在调用 MCP、修改文件、发布小程序或生活面板、修改扩展或记忆、点击或填写网页控件前询问。**完全访问**直接执行会话中已获授权的工具。两档都遵守工具范围、只读规则、浏览器控制授权与服务鉴权。新会话继承最近一次成功提交消息时所用的模式，首次使用默认请求审批。只更改会话里的选择会保存到该会话。
+Composer 的工具审批模式按会话保存。**请求审批**会在调用 MCP、修改文件、发布或调整生活看板、生成图片、修改扩展或记忆、点击或填写网页控件前询问。**完全访问**直接执行会话中已获授权的工具。两档都遵守工具范围、只读规则、浏览器控制授权与服务鉴权。新会话继承最近一次成功提交消息时所用的模式，首次使用默认请求审批。只更改会话里的选择会保存到该会话。
 
 `request_user_input` 不能收集密码：表单解析只接受 `text`、`number`、`select`、`multiselect`，`password` 是原生 MCP 鉴权表单专用的字段类型。令牌不进入聊天记录、模型上下文或诊断日志；写入凭据失败会回滚已建的别名。
 
@@ -43,11 +44,11 @@ Composer 的工具审批模式按会话保存。**请求审批**会在调用 MCP
 | 完整版 `full` | 所有已配置且获授权的工具 | 保留自定义配置，切回时恢复 |
 | 自定义 `custom` | 关闭的能力整组移除 | 选择在下一条有效消息生效，执行期间不可修改 |
 
-基础文件工具（`list_files`、`find_files`、`read_file`、`search_file_content`、`write_file`、`edit_file`）在自定义模式中固定保留。记忆与 Skills 的 4 个入口由助手设置和 Skills 页面单独控制，不受这 12 项能力开关影响。小程序的 2 个入口同时受实验室开关和自定义模式的“预览与小程序”能力控制；该能力包含 `publish_preview`、`list_mini_apps` 与 `publish_mini_app`，关闭任一成员会停用整组，目录发现与实际执行均遵守此限制。
+基础文件工具（`list_files`、`find_files`、`read_file`、`search_file_content`、`write_file`、`edit_file`）在自定义模式中固定保留。记忆与 Skills 的 4 个入口由助手设置和 Skills 页面单独控制，不受这 14 项能力开关影响。看板工具归入“预览与图表”能力，包含 `publish_preview` 与 9 个看板入口；关闭该能力会停用整组，目录与实际执行都遵守此限制。
 
 能力开关在界面上的位置与默认值见[设置项](/reference/settings)。除会话选择外，还有两层独立限制：
 
-- **全局只读**：`RuleTools` 在目录与执行两处过滤 `readOnly: false` 的分组（写文件、`publish_mini_app`、`mcp_call`、扩展管理、记忆）。开启后模型看不到这些工具，直接调用返回 `PERMISSION_DENIED`；结果归档与自动记忆整理也不再执行。
+- **全局只读**：`RuleTools` 在目录与执行两处过滤 `readOnly: false` 的分组（写文件与编辑、生成图片、看板写入、`mcp_call`、扩展管理、记忆）。开启后模型看不到这些工具，直接调用返回 `PERMISSION_DENIED`；结果归档与自动记忆整理也不再执行。
 - **员工角色**：团队员工沿用同一份目录，再按任务职责与只读状态取交集；员工不能招募员工，聊天团队员工必须通过 `team_complete_task` 交接。
 
 模型只收到已通过选择、只读与角色过滤的目录，`tool_search` 默认不提供。编排子调用同样经过参数校验、路径校验与会话的审批规则。
@@ -101,7 +102,7 @@ Composer 的工具审批模式按会话保存。**请求审批**会在调用 MCP
 
 源码通过 `input` 读取 JSON 副本，通过 `return` 返回可序列化值。Promise 返回值或待执行 job 会被拒绝，`Atomics.wait` 被禁用。状态为 `ok`、`error`、`timeout`、`cancelled`、`memory_limit`、`unsupported_async`；失败时 `result` 为 `null`，日志截断不影响计算成功。
 
-`orchestrate` 使用异步函数体，通过 `tools.*` 调用已授权工具。外层脚本受 32 次子调用、4 个并发宿主通道、120 秒墙钟、32 MiB Runtime 与 1 MiB 返回值约束；脚本源码与每个子调用参数各最多 96 KiB，结果超过 1 MiB 时以错误回执替代。子调用沿用原工具的参数、路径与审批规则；Team 控制、用户表单、任务计划、浏览器、记忆与资源管理不开放为嵌套工具，预览、小程序与 `execute_code` 可以嵌套调用。
+`orchestrate` 使用异步函数体，通过 `tools.*` 调用已授权工具。外层脚本受 32 次子调用、4 个并发宿主通道、120 秒墙钟、32 MiB Runtime 与 1 MiB 返回值约束；脚本源码与每个子调用参数各最多 96 KiB，结果超过 1 MiB 时以错误回执替代。子调用沿用原工具的参数、路径与审批规则；Team 控制、用户表单、任务计划、浏览器、图片与图片检查、看板、邮件、记忆与资源管理不开放为嵌套工具，预览与 `execute_code` 可以嵌套调用。
 
 两者都是同进程解释器隔离：中断是协作式检查，内建 C 运算与 Runtime 清理不是操作系统抢占，解释器漏洞或崩溃仍可能影响应用进程。需要更强边界时应新增进程或 WASM 后端，而不是给现有工具开放宿主权限。
 
@@ -113,6 +114,8 @@ Composer 的工具审批模式按会话保存。**请求审批**会在调用 MCP
 | --- | --- |
 | 网页读取 | 仅 HTTP/HTTPS；GET；不携带模型密钥、Cookie 或自定义认证头；重定向逐跳重新校验，最多跟随 5 次；整次读取最多 30 秒、响应最多 1 MiB |
 | 联网搜索 | 独立服务与密钥；只接受结构化来源，不把模型自由回答当作来源 |
+| 图片服务 | 由图片协议适配层发起，与联网总开关无关；连接超时 15 秒、生成读取 180 秒、下载 60 秒；参考图与提示词只发送给配置的图片服务，返回的下载地址仅接受 HTTPS 且不跟随重定向 |
+| 邮件 | 只读 IMAP，只能访问设置中已启用的连接；读取正文需要该连接允许；不回信、不修改邮件 |
 | 应用内浏览器 | 独立 `BrowserSession` 与浏览器面板，受启用策略、控制权与用户接管约束；仅 HTTP/HTTPS；可检查已发布的预览快照，截图与等待要求前台可见 |
 | MCP | 配置校验要求 HTTPS 地址且不含账号或片段；支持 Bearer Token 与 OAuth；请求审批模式下每次 `mcp_call` 单独确认；请求 60 秒、响应 1 MiB |
 | 模型请求 | 由 provider 适配层发起，与工具网络权限分开；连接超时 15 秒，首段与流空闲超时 120 秒 |
@@ -136,6 +139,7 @@ Composer 的工具审批模式按会话保存。**请求审批**会在调用 MCP
 | `entry/src/main/ets/views/InputFormCard.ets` | 结构化表单渲染、字段校验与提交 |
 | `entry/src/main/ets/services/NativeResourceSetup.ets` | MCP 鉴权表单、令牌写入与失败回滚 |
 | `entry/src/main/ets/services/McpTools.ets` | 每次远程调用前的确认与拒绝处理 |
+| `entry/src/main/ets/services/ImageGenerationTools.ets` | 图片生成前的服务、提示词与参考图确认 |
 | `entry/src/main/ets/services/BrowserSession.ets` | 浏览器启用策略、控制权、接管与等待点 |
 | `entry/src/main/ets/services/RuleTools.ets` | 全局只读过滤 |
 | `entry/src/main/ets/model/ToolGroups.ets` | 只读分组与可选能力清单 |

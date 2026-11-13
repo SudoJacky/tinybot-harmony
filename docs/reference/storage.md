@@ -35,6 +35,7 @@ UIAbility 的 `filesDir` 保留旧版会话和用量，并存放诊断日志。�
 │  └─ <workspaceId>/
 │     ├─ …                       会话或项目文件
 │     ├─ attachments/<附件ID>/<文件名>   文本与文档原件
+│     ├─ generated-images/<uuid>.png    图片工具生成的结果
 │     ├─ mini-apps/<appId>/
 │     │  ├─ app.json             小程序清单、页面与版本历史
 │     │  └─ data*.json           用户数据；v2 由清单的 dataFile 指定正式文件
@@ -58,6 +59,8 @@ UIAbility 的 `filesDir` 保留旧版会话和用量，并存放诊断日志。�
 ```
 
 ## 旧版会话 v2 索引与独立会话文件
+
+以下格式只用于说明升级前的数据；迁移后由数据库承载，旧文件保留为副本。
 
 迁移时从清单读取全局配置和会话文件映射。
 
@@ -91,6 +94,7 @@ UIAbility 的 `filesDir` 保留旧版会话和用量，并存放诊断日志。�
 - 图片导入时按最长边缩到 1600 px、JPEG 质量 85，压缩后超过 4 MB 直接拒绝；原图上限 20 MB、8000 万像素。图片保存在 `attachments/<id>.jpg`，模型请求前再编码成 data URL。
 - 文本、PDF、DOCX、XLSX、PPTX 不再提前抽取或改写：导入时按原字节复制，绑定到消息时再复制到工作区 `attachments/<附件ID>/<文件名>`。读取时按需解析，扫描件不做 OCR。
 - 预览截图、网页批注、手绘示意都走同一条图片保存路径，写入 `attachments` 并作为附件记录引用。
+- `view_image` 另存一份最长边 1600 px 的 JPEG 副本到 `attachments`，作为工具回执的视觉证据；它不改变源文件，也不进入消息附件列表。
 - 每条消息最多 10 个附件；恢复时要求字节数与记录中的 `size` 一致，缺失或不一致直接拒绝。
 - 代码里没有按会话回收附件的路径：删除会话只移除索引与消息，附件文件与工作区原件仍保留，可在“存储空间”中按分类查看。
 
@@ -99,6 +103,7 @@ UIAbility 的 `filesDir` 保留旧版会话和用量，并存放诊断日志。�
 - 路径为 `workspace/<workspaceId>`：普通会话用会话 ID，项目会话用项目的稳定 `workspaceId`（新建时为 `project-<uuid>`）。目录在首次进入会话或创建项目时建立，已有会话启动时自动补建。
 - 工作区工具只能读写该目录内的相对路径，拒绝符号链接与越界；写入通过 `.tinybot-<uuid>.tmp` 临时文件和重命名完成，列表会过滤这类内部项。
 - `.tinybot-review/` 保存被修改文件的原始基线（`{path, existed, content}`，私有文件名用 URL 编码后的相对路径）。共享文件的备份也在此目录，文件名用 `shared-<URI的SHA-256摘要>.json`，并记录 `sourceUri` 绑定原文件，避免挂载改名或替换后误用。写入无需确认保留；已有文件备份可通过文件页“更多操作”菜单恢复或导出，成功恢复后对应基线删除。这些本地备份元数据不进入普通工作区备份。
+- `generated-images/` 保存 `image_gen` 每次调用生成的图片，文件名是随机 UUID 加扩展名。它们是普通工作区文件，可浏览、分享、导出、被再次修改引用，也会随完整备份保存；重复调用不会覆盖旧版本，删除需要手动进行。
 - `mini-apps/` 保留已下线小程序的页面、版本历史与用户原始文件，仍随完整备份保存。
 - 删除会话不删除工作区；项目在当前版本只有创建与编辑，没有删除入口。卸载应用或清除应用数据才会删除这些文件。
 - 单个工作区及备份的容量、索引和文件数量不设应用固定上限，二进制内容分块读写，实际受设备内存和存储约束。
@@ -135,6 +140,7 @@ envelope 的可选 `protectedKeys` 区域为 `{version:2,salt,iv,ciphertext}`，
 | 单个工作区 | 没有应用级上限 | 只受设备存储限制 |
 | 单条消息附件 | 10 个 | 导入与记录校验共用同一上限 |
 | 单张图片 | 原始 20 MB、8000 万像素；保存后 4 MB | 最长边缩到 1600 px、JPEG 质量 85 |
+| 图片生成 | 输入参考图与输出图片各最多 16 MiB | 参考图最多 4 张；输出只接受 PNG/JPEG/WebP |
 | 单份文档 | 无应用级大小上限 | 按原字节复制；读取预算由文本分页控制 |
 | 会话记录 | 没有应用级条数上限 | 长文本按块存入 ArkData |
 | 用量账本 | 没有条数上限 | 每页 256 条，按需追加 |
@@ -144,12 +150,12 @@ envelope 的可选 `protectedKeys` 区域为 `{version:2,salt,iv,ciphertext}`，
 
 | 路径 | 写入时机 | 清除方式 | 进入备份 |
 | --- | --- | --- | --- |
-| `sessions-v2/index.json` | 任何会话或全局配置提交 | 清除应用数据 | 是 |
-| `sessions-v2/<uuid>.json` | 该会话内容变化 | 清单切换后删除旧文件；删除会话时移除引用 | 是 |
-| `usage-records/*` | 每次请求与工具结束后异步写入 | 无入口，随应用数据清除 | 否 |
+| `tinybot.db` | 任何会话、配置或用量提交 | 清除应用数据；密钥不可用时改用恢复库 | 是 |
+| `sessions-v2/`、`usage-records/` | 旧版版本写入；新版只在迁移时读取 | 升级后原样保留，随应用数据清除 | 否 |
 | `attachments/*` | 导入附件、截图、批注、手绘 | 无自动回收，随应用数据清除 | 是 |
 | `workspace/<id>/*` | 文件工具写入、文件页编辑 | 删除会话不清理；随应用数据清除 | 是 |
 | `workspace/<id>/attachments` | 附件绑定到消息时复制原件 | 删除会话不清理；随应用数据清除 | 是 |
+| `workspace/<id>/generated-images` | `image_gen` 成功后写入 | 无自动回收；随应用数据清除 | 是 |
 | `workspace/<id>/mini-apps` | 旧版小程序页面、版本和用户数据 | 升级保留原件 | 是 |
 | `workspace/<id>/.tinybot-review` | 首次修改文件前 | 恢复原版后删除，或随应用数据清除 | 否 |
 | `tinybot-backups/*.{tinybot,json}` | 手动备份 | 单份删除或系统清理 | — |
@@ -164,12 +170,11 @@ envelope 的可选 `protectedKeys` 区域为 `{version:2,salt,iv,ciphertext}`，
 | `entry/src/main/ets/model/WorkspaceStore.ets` | 工作区根目录、目录创建与校验 |
 | `entry/src/main/ets/model/Workspace.ets` | `workspaceId` 到目录名的推导 |
 | `entry/src/main/ets/services/UsageLedger.ets` | 用量分块、清单与旧账本迁移 |
-| `entry/src/main/ets/services/Attachments.ets` | 附件保存、导入、压缩与读取上限 |
+| `entry/src/main/ets/services/Attachments.ets` | 附件保存、导入、压缩、图片检查副本与读取上限 |
 | `entry/src/main/ets/services/Backup.ets` | 快照打包、脱敏、恢复与本地导出 |
 | `entry/src/main/ets/services/CloudBackup.ets` | 云目录、上传状态、下载与单份删除 |
 | `entry/src/main/ets/services/NativeWorkspaceFiles.ets` | 工作区写入、版本哈希与修改基线 |
 | `entry/src/main/ets/services/DeveloperDiagnostics.ets` | 诊断日志轮转、导出与清除 |
 | `entry/src/main/ets/services/NativeActions.ets` | 分享副本与本地导出临时文件 |
-| `entry/src/main/ets/model/MiniApp.ets` | 小程序清单、ID、路径与版本数据校验 |
-| `entry/src/main/ets/services/MiniApps.ets` | 小程序发布、数据读写、归档、恢复与永久删除 |
-| `entry/src/main/ets/views/MiniAppsPanel.ets` | 小程序收藏、打开、导出与移除界面 |
+| `entry/src/main/ets/services/ImageGenerationTools.ets` | 生成图片写入工作区 `generated-images/` |
+| `entry/src/main/ets/services/DesktopLayoutPreferences.ets` | `tinybot-ui` 中的分栏键读写 |

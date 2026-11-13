@@ -4,7 +4,7 @@
 
 ## 协议与预设
 
-`model/ProviderProfiles.ets` 的 `validateProfile` 只接受四种协议：
+`model/ProviderProfiles.ets` 的 `validateProfile` 接受四种聊天协议与四种图片协议；聊天协议如下，图片协议只在图片编辑页出现，不注册为聊天模型：
 
 | 协议 ID | 用途 |
 | --- | --- |
@@ -12,6 +12,8 @@
 | `responses` | OpenAI Responses |
 | `anthropic-messages` | Anthropic Messages |
 | `gemini` | Google Gemini `generateContent` 系列接口（`x-goog-api-key` 鉴权） |
+
+图片协议为 `openai-images`、`gemini-images`、`seedream-images` 与 `dashscope-images`，请求编码在 `services/ImageGenerationProtocol.ets`，端点与同源校验在 `model/ProviderEndpoint.ets`；新增图片协议时还要同步 `IMAGE_PROTOCOLS`、编辑器协议列表与图片工具测试。
 
 内置预设集中在 `model/Provider.ets` 的 `builtinProviderInfos()`，包含默认地址、默认模型、候选模型、密钥申请地址和说明。新增一个兼容服务的最小改动是往这个数组里加一条：
 
