@@ -229,7 +229,9 @@ export class ChatViewModel {
   get canQueueInput(): boolean {
     return this.canNavigate && !this.active.archived && (this.phase === 'idle' || this.phase === 'running');
   }
-  filteredThreads(query: string, archived: boolean): ThreadViewModel[] { return matchingThreads(this.threads, query, archived) as ThreadViewModel[]; }
+  filteredThreads(query: string, archived: boolean): ThreadViewModel[] {
+    return matchingThreads(this.threads.filter((thread) => !thread.sideChat), query, archived) as ThreadViewModel[];
+  }
 
   changeMcp(request: McpSettingsCommand, cancellation: Cancellation): Promise<McpSettingsResult> { return this.requireSession().changeMcp(request, cancellation); }
   saveProductivity(value: ProductivityData): Promise<boolean> { return this.requireSession().saveProductivity(value); }
@@ -251,6 +253,12 @@ export class ChatViewModel {
     return this.requireSession().addFileAnnotation(threadId, path, version, target, comment);
   }
   referenceThread(id: string): Promise<boolean> { return this.requireSession().referenceThread(id); }
+  sideChats(): ThreadViewModel[] { return this.threads.filter((thread) => thread.sideChat && thread.parentThreadId === this.active.id); }
+  createSideChat(parentId: string): Promise<string> { return this.requireSession().createSideChat(parentId); }
+  sendSideChat(id: string): Promise<void> { return this.requireSession().sendSideChat(id); }
+  stopSideChat(id: string): Promise<void> { return this.requireSession().stop(undefined, id); }
+  bringBackSideChat(id: string): Promise<boolean> { return this.requireSession().referenceThread(id, true); }
+  sideChatError(id: string): string { return this.requireSession().sideChatError(id); }
   removeThreadReference(id: string): Promise<boolean> { return this.requireSession().removeThreadReference(id); }
   forkThread(messageId: string = ''): Promise<boolean> { return this.requireSession().forkThread(messageId); }
   newThread(projectId: string | undefined = this.active.projectId): Promise<boolean> { return this.requireSession().newThread(projectId || undefined); }
@@ -275,9 +283,9 @@ export class ChatViewModel {
   retrySave(): Promise<void> { return this.requireSession().retrySave(); }
   resumeForm(messageId: string, callId: string): Promise<void> { return this.requireSession().resumeForm(messageId, callId); }
 
-  setDraft(text: string): void {
+  setDraft(text: string, threadId: string = this.active.id): void {
     if (!this.ready) { return; }
-    this.requireSession().setDraft(text, this.active.id);
+    this.requireSession().setDraft(text, threadId);
     clearTimeout(this.draftTimer);
     this.draftTimer = setTimeout(() => { this.draftTimer = -1; this.requireSession().flushDraft(); }, 800);
   }

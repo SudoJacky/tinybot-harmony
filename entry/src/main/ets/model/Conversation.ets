@@ -94,6 +94,8 @@ export interface ThreadData extends ContextState, ToolSelection {
   draft?: string;
   attachments?: Attachment[];
   parentThreadId?: string;
+  // Bounded parent transcript captured when creating a side chat.
+  sideChatContext?: string;
   parentMessageId?: string;
   disabledMcpIds?: string[];
   modelRef?: ModelReference;
@@ -279,6 +281,8 @@ export function parseAppData(text: string): AppData {
     if (thread.pendingInputs !== undefined) { validatePendingInputs(thread.pendingInputs); }
     if (thread.panelContext !== undefined && (typeof thread.panelContext !== 'string' || thread.panelContext.length > 32768)) { throw new Error('Invalid board context'); }
     if (thread.references !== undefined) { validateThreadReferences(thread.references); }
+    if (thread.sideChatContext !== undefined && (typeof thread.sideChatContext !== 'string' ||
+      thread.sideChatContext.length > 8000 || !thread.parentThreadId)) { throw new Error('Invalid side chat context'); }
     if (thread.queuePaused !== undefined && typeof thread.queuePaused !== 'boolean') { throw new Error(t("本地队列状态损坏。")); }
     // Loading never authorizes autonomous execution after a process exit.
     if ((thread.pendingInputs || []).length > 0) { thread.queuePaused = true; }

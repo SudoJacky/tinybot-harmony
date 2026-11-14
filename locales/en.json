@@ -3022,5 +3022,23 @@
   "新增 {0} 个会话，跳过 {1} 个已有版本，另存 {2} 个冲突副本。原有会话和文件会保留。": "Add {0} conversations, skip {1} existing versions, and save {2} conflict copies. Existing conversations and files will be kept.",
   "1.3.1 · 2026-11-13": "1.3.1 · 2026-11-13",
   "会话、配置、用量和生活看板迁入本机加密数据库。华为云空间和 WebDAV 支持按设备选择历史备份恢复，冲突会话可另存副本。新增文件预览批注、离线图表和可编辑的 PowerPoint 图表。优化手机输入区、空会话右滑侧栏、平板工作区与快捷键。移除本地小程序和提示词模板入口。": "Conversations, settings, usage, and Life Boards now use a local encrypted database. Restore a selected Huawei Cloud or WebDAV backup version and keep conflict copies of conversations. Add annotations to file previews, render charts offline, and create editable PowerPoint charts. The phone composer, empty-chat sidebar gesture, tablet workspaces, and keyboard shortcuts have been refined. The local mini-app and prompt-template entries have been removed.",
-  "在“设置 → 备份与恢复”创建或恢复备份。华为云空间和 WebDAV 会按设备保留最近 3 个备份版本，恢复时可选择历史版本。备份中的连接凭据使用华为账号信息加密，换设备需登录同一账号。": "Open Settings → Backup & Restore to create or restore a backup. Huawei Cloud and WebDAV retain the three most recent versions per device and let you select a version to restore. Connection credentials in backups are encrypted with Huawei ID information. Sign in with the same account on the new device."
+  "在“设置 → 备份与恢复”创建或恢复备份。华为云空间和 WebDAV 会按设备保留最近 3 个备份版本，恢复时可选择历史版本。备份中的连接凭据使用华为账号信息加密，换设备需登录同一账号。": "Open Settings → Backup & Restore to create or restore a backup. Huawei Cloud and WebDAV retain the three most recent versions per device and let you select a version to restore. Connection credentials in backups are encrypted with Huawei ID information. Sign in with the same account on the new device.",
+  "旁聊": "Side chat",
+  "新建旁聊": "New side chat",
+  "无法新建旁聊。": "Could not create the side chat.",
+  "当前无法带回旁聊。": "This side chat cannot be brought back right now.",
+  "请先在主会话发送一条消息。": "Send a message in the main conversation first.",
+  "删除旁聊": "Delete side chat",
+  "删除旁聊？": "Delete side chat?",
+  "删除后无法恢复这段旁聊。": "This side chat cannot be recovered after deletion.",
+  "工作区只读": "Workspace is read-only",
+  "带回主会话": "Bring back to main conversation",
+  "已带回主会话": "Added to main conversation",
+  "可以在这里追问主会话，旁聊消息会单独保存。": "Ask a follow-up about the main conversation here. This chat is saved separately.",
+  "向旁聊提问…": "Ask a side question…",
+  "会话详情": "Conversation details",
+  "最近产物": "Recent outputs",
+  "返回会话": "Back to conversations",
+  "已归档 · {0}": "Archived · {0}",
+  "旁聊关联的主会话无效。": "The side chat's parent conversation is invalid."
 }

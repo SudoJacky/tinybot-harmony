@@ -2,7 +2,7 @@ import { ProjectData } from './Project';
 import { ThreadViewModel } from '../viewmodel/SessionViewModels';
 
 export type DesktopCommand = 'new-chat' | 'standalone' | 'history' | 'files' | 'browser' | 'detail' |
-  'tools' | 'skills' | 'life-panels' | 'settings' | 'help' | 'thread';
+  'tools' | 'skills' | 'life-panels' | 'settings' | 'help' | 'thread' | 'side-chat';
 
 export class DesktopCommandItem {
   id: string;

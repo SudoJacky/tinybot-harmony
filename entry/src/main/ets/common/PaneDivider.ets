@@ -11,23 +11,25 @@ export struct PaneDivider {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop label: string = '';
   @Prop desktop: boolean = false;
+  @Prop collapseArmed: boolean = false;
+  compId: string = '';
   @State private active: boolean = false;
   @State private hover: boolean = false;
   @State private focused: boolean = false;
   onResizeStart: () => void = () => {};
   onResize: (dx: number) => void = () => {};
-  onResizeEnd: () => void = () => {};
+  onResizeEnd: (cancelled: boolean) => void = () => {};
   onReset: () => void = () => {};
 
   aboutToDisappear(): void {
     if (this.desktop && (this.hover || this.active)) { this.getUIContext().getCursorController().restoreDefault(); }
   }
 
-  private finish(): void {
+  private finish(cancelled: boolean): void {
     if (!this.active) { return; }
     this.active = false;
     if (this.desktop && !this.hover) { this.getUIContext().getCursorController().restoreDefault(); }
-    this.onResizeEnd();
+    this.onResizeEnd(cancelled);
   }
 
   // One arrow press is one committed step, so the next press starts from the
@@ -35,17 +37,17 @@ export struct PaneDivider {
   private step(dx: number): void {
     this.onResizeStart();
     this.onResize(dx);
-    this.onResizeEnd();
+    this.onResizeEnd(false);
   }
 
   build() {
     Stack({ alignContent: Alignment.Center }) {
       // A resting grip stays faintly visible on touch screens, where there is no
       // hover pass to reveal the seam; a pointer, focus or a held finger strengthens it.
-      Column().width(3).height(56).borderRadius(1.5).backgroundColor(this.appearance.accent)
-        .opacity(this.active || this.focused ? 0.9 : this.hover ? 0.5 : 0.16)
+      Column().width(this.collapseArmed ? 5 : 3).height(56).borderRadius(3).backgroundColor(this.appearance.accent)
+        .opacity(this.collapseArmed ? 1 : this.active || this.focused ? 0.9 : this.hover ? 0.5 : 0.16)
         .animation({ duration: Motion.fast, curve: Motion.standard })
-    }.width(12).height('100%')
+    }.id(this.compId).width(12).height('100%')
     .backgroundColor(Color.Transparent)
     .onHover((hover: boolean) => {
       this.hover = hover;
@@ -68,8 +70,8 @@ export struct PaneDivider {
       PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Horizontal, distance: 4 })
       .onActionStart(() => { this.active = true; this.onResizeStart(); })
       .onActionUpdate((event: GestureEvent) => { if (this.active) { this.onResize(event.offsetX); } })
-      .onActionEnd((event: GestureEvent) => { if (this.active) { this.onResize(event.offsetX); this.finish(); } })
-      .onActionCancel(() => this.finish()),
+      .onActionEnd((event: GestureEvent) => { if (this.active) { this.onResize(event.offsetX); this.finish(false); } })
+      .onActionCancel(() => this.finish(true)),
       TapGesture({ count: 2 }).onAction(() => { if (this.desktop) { this.onReset(); } })))
   }
 }

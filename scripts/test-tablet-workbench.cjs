@@ -154,10 +154,10 @@ restoredPrefs.saveWidth(false, 0);
 assert.equal(new DesktopLayoutPreferences({}).paneWidth(false), 0, 'Reset restores the default geometry on restart');
 
 
-const Page = probe('pages/Index', 'Index', ['hasPreview', 'detailOpen', 'workbench', 'windowChanged', 'openFiles', 'openPreview', 'closePreview', 'previewPresenceChanged', 'onBackPress',
+const Page = probe('pages/Index', 'Index', ['hasPreview', 'detailOpen', 'compactDetailLauncher', 'workbench', 'windowChanged', 'openFiles', 'openPreview', 'closePreview', 'previewPresenceChanged', 'onBackPress',
   'beginResize', 'resizeHistory', 'resizeDetail', 'endResize', 'openDetailTab', 'removeDetailTab', 'closeDetailTab',
   'workspaceClosed', 'toggleDetailPane', 'currentDetailTab', 'detailTabVisible', 'detailTabsAvailable',
-  'detailTabPresent', 'hideBrowserTab', 'setDetailPane', 'detailGeometry', 'toggleDetailMaximized', 'saveDesktopPaneWidth'],
+  'detailTabPresent', 'hideBrowserTab', 'setDetailPane', 'detailGeometry', 'toggleDetailMaximized', 'setHistoryCollapsed', 'saveDesktopPaneWidth'],
   { WorkbenchLayout, Motion: { medium: 220, fast: 160 } });
 assert.equal(typeof Page.prototype.detailTabsAvailable, 'function', 'Tab availability is part of the emitted page');
 const draft = { text: 'unsent input', attachments: ['image'] }, active = { id: 'thread', draft, messages: [] };
@@ -197,12 +197,23 @@ page.historyCollapsed = false; assert.equal(page.workbench().expanded, true);
 page.historyPreferredWidth = 0; page.detailPreferredWidth = 0;
 page.beginResize(false); page.resizeHistory(80);
 assert.equal(page.workbench().historyWidth, 360);
-page.endResize(false); assert.equal(page.historyPreferredWidth, 360);
-page.beginResize(false); page.resizeHistory(-2000); page.endResize(false);
+page.endResize(false, false); assert.equal(page.historyPreferredWidth, 360);
+page.beginResize(false); page.resizeHistory(264 - 360 - 31);
+assert.equal(page.resizeCollapsePane, '', 'Small overshoot keeps the column open');
+page.resizeHistory(264 - 360 - 32);
+assert.equal(page.resizeCollapsePane, 'history');
+page.resizeHistory(264 - 360); page.endResize(false, false);
+assert.equal(page.workbench().historyWidth, 264);
+page.beginResize(false); page.resizeHistory(-32); page.endResize(false, true);
+assert.equal(page.historyCollapsed, false, 'Cancelling an armed drag keeps the column open');
+assert.equal(page.historyPreferredWidth, 264);
+page.beginResize(false); page.resizeHistory(-32); page.endResize(false, false);
+assert.equal(page.workbench().rail, true);
+page.setHistoryCollapsed(false);
 assert.equal(page.workbench().historyWidth, 264);
 page.historyPreferredWidth = 0; page.windowWidth = 1020;
-page.beginResize(false); page.resizeHistory(400); page.endResize(false);
-assert.equal(page.workbench().expanded, true, 'A drag stops before it would collapse the column');
+page.beginResize(false); page.resizeHistory(400); page.endResize(false, false);
+assert.equal(page.workbench().expanded, true, 'Growing the history pane keeps the chat and detail pane docked');
 assert.equal(page.workbench().historyWidth, 280);
 assert.equal(page.workbench().detailWidth, 300);
 assert.equal(page.workbench().chatWidth, 440);
@@ -210,12 +221,26 @@ page.windowWidth = 1600;
 page.beginResize(true); page.resizeDetail(-2000);
 assert.equal(page.workbench().detailWidth, page.workbench().detailMaxWidth);
 assert.equal(page.workbench().chatWidth, 440);
-page.endResize(true); assert.equal(page.detailPreferredWidth, page.workbench().detailWidth);
-page.beginResize(true); page.resizeDetail(2000); page.endResize(true);
+page.endResize(true, false);
+const priorDetailWidth = page.detailPreferredWidth;
+assert.equal(priorDetailWidth, page.workbench().detailWidth);
+page.beginResize(true); page.resizeDetail(priorDetailWidth - 300 + 32);
 assert.equal(page.workbench().detailWidth, 300);
+assert.equal(page.resizeCollapsePane, 'detail');
+page.endResize(true, true);
+assert.equal(page.detailPaneOpen, true);
+assert.equal(page.detailPreferredWidth, priorDetailWidth);
+page.beginResize(true); page.resizeDetail(priorDetailWidth - 300 + 32); page.endResize(true, false);
+assert.equal(page.detailPaneOpen, false);
+assert.equal(page.workspaceOpen, true);
+assert.equal(page.workspacePath, 'notes.md');
+assert.equal(active.draft, draft);
+page.toggleDetailPane();
+assert.equal(page.currentDetailTab(), 'files');
+assert.equal(page.workbench().detailWidth, priorDetailWidth);
 page.historyCollapsed = true;
 assert.equal(page.workbench().rail, true, 'Collapsing keeps the sheet state intact');
-console.log('PASS rail state, drag clamps and committed widths keep the chat and detail minima');
+console.log('PASS divider overshoot, drag reversal, cancel and reopen preserve widths, tabs and drafts');
 
 const desktopPage = Object.assign(new Page(), page, { desktop: true, windowWidth: 840, historyCollapsed: false,
   historyPreferredWidth: 0, drawerOpen: true, drawerReveal: 1 });
@@ -300,19 +325,15 @@ const railGlobals = {
 const Rail = probe('views/HistoryRail', 'HistoryRail', ['initialRender'], railGlobals);
 const actions = [];
 const rail = Object.assign(new Rail(), {
-  appearance: { accentContainer: 1, accent: 2 }, active: true, filesActive: true,
-  onExpand: () => actions.push('expand'), onNewChat: () => actions.push('new'), onSearch: () => actions.push('search'),
-  onFiles: () => actions.push('files'), onTools: () => actions.push('tools'), onSettings: () => actions.push('settings'),
+  active: true, onNewChat: () => actions.push('new'), onSearch: () => actions.push('search'),
+  onSettings: () => actions.push('settings'),
   observeComponentCreation2(callback) { callback(1, true); }
 });
 rail.initialRender();
-assert.deepEqual(railProps.map((button) => button.compId), ['workbench-rail-expand', 'workbench-rail-new-chat',
-  'workbench-rail-search', 'workbench-rail-files', 'workbench-rail-tools', 'workbench-rail-settings']);
+assert.deepEqual(railProps.map((button) => button.compId), ['workbench-rail-new-chat', 'workbench-rail-search', 'workbench-rail-settings']);
 for (const button of railProps) { button.onTap(); }
-assert.deepEqual(actions, ['expand', 'new', 'search', 'files', 'tools', 'settings']);
-assert.equal(railProps[3].active, true, 'The open files pane marks its rail control');
-assert.equal(railProps[0].label, '展开会话列表');
-console.log('PASS emitted rail keeps six desktop actions in order and forwards each tap');
+assert.deepEqual(actions, ['new', 'search', 'settings']);
+console.log('PASS the collapsed rail forwards new chat, search and settings');
 
 // Exercise the footer trigger and both pages of the same native popup.
 const chatSourcePath = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/views/ChatPanel.ts');
@@ -423,11 +444,11 @@ function visitTitle(node) {
 visitTitle(titleTree); assert.ok(titleOptions); assert.ok(chatInsets.length >= 2);
 const titleProbe = vm.runInNewContext(`(function() {return {options: (${titleOptions}), insets: [${chatInsets.join(',')}]};})`,
   {BarStyle: {STANDARD:'standard',STACK:'stack'},Color:{Transparent:'transparent'},CHAT_HEADER_HEIGHT:56});
-for (const desktop of [false, true]) {
+for (const largeScreen of [false, true]) {
   for (const width of [360,600,839,840,1116,1600]) {
-    const actual = titleProbe.call({ desktop, windowWidth: width, appearance: { noMaterial: {} } });
-    assert.equal(actual.options.barStyle, desktop || width >= 840 ? 'standard' : 'stack');
-    assert.ok(actual.insets.every(inset => inset === (desktop || width >= 840 ? 0 : 56)),
+    const actual = titleProbe.call({ largeScreen, windowWidth: width, appearance: { noMaterial: {} } });
+    assert.equal(actual.options.barStyle, largeScreen || width >= 840 ? 'standard' : 'stack');
+    assert.ok(actual.insets.every(inset => inset === (largeScreen || width >= 840 ? 0 : 56)),
       'Initial and updated ChatPanel props must match the native title layout');
   }
 }

@@ -73,6 +73,52 @@ async function start(f, id, prompt = id) {
 }
 async function main() {
   {
+    const f = await fixture(data => {
+      data.threads[0].messages = [
+        { id: 'parent-user', role: 'user', content: 'Decide the workspace layout', status: 'complete', error: '' },
+        { id: 'parent-answer', role: 'assistant', content: 'Keep the sidebar compact', status: 'complete', error: '' },
+      ];
+    });
+    const mainRun = await start(f, 'a', 'Continue the main task');
+    await until(() => f.requests.length === 1);
+    let sideWorkspace;
+    f.resources.tools = (_id, _ext, _selected, _extras, _attachments, _live, workspace) => {
+      sideWorkspace = workspace;
+      return { definitions: () => ['read_file', 'write_file', 'mcp_external'].map(name => ({
+        type: 'function', function: { name, description: name },
+      })), execute: async () => 'ok' };
+    };
+    const id = await f.app.createSideChat('a');
+    assert.ok(id);
+    assert.equal(f.app.active.id, 'a');
+    assert.equal(f.app.sideChats()[0].id, id);
+    assert.equal(f.app.filteredThreads('', false).some(item => item.id === id), false);
+    assert.equal(await f.app.selectThread(id), false);
+    f.app.setDraft('Why compact?', id);
+    const sideRun = f.app.sendSideChat(id);
+    await until(() => f.requests.length === 2);
+    assert.equal(sideWorkspace, 'a');
+    assert.ok(f.requests[1].request.messages.some(item => item.content.includes('Keep the sidebar compact')));
+    assert.ok(f.requests[1].request.messages.some(item => item.content.includes('Why compact?')));
+    assert.deepEqual(Array.from(f.requests[1].request.tools, tool => tool.function.name), ['read_file']);
+    assert.equal(f.app.active.id, 'a');
+    assert.equal(await f.app.deleteThread('a'), false);
+    assert.equal(await f.app.bringBackSideChat(id), false, 'Bring back waits for the main conversation to be idle');
+    f.requests[1].finish('It leaves room for the conversation.');
+    await sideRun;
+    f.requests[0].finish('Main task complete');
+    await mainRun.done;
+    f.app.setDraft('Use this @literal');
+    assert.equal(await f.app.bringBackSideChat(id), true);
+    assert.equal(thread(f, 'a', true).draft, 'Use this @literal');
+    assert.equal(thread(f, 'a', true).references[0].threadId, id);
+    assert.equal(thread(f, 'a', true).messages.some(item => item.content.includes('Why compact?')), false);
+    assert.equal(parseAppData(f.repository.saved).threads.find(item => item.id === id).parentThreadId, 'a');
+    assert.equal(await f.app.deleteThread('a'), true);
+    assert.equal(thread(f, id, true), undefined);
+    console.log('PASS side chat shares read access, runs independently, stays hidden, and returns context only on request');
+  }
+  {
     const approval = new ToolApproval();
     const f = await fixture(undefined, approval);
     const writes = [];
