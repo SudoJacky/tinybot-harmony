@@ -83,7 +83,7 @@ EVENTS.mcp = ['request_failed', 'cancel_notice_failed', 'browser_launch_failed']
 EVENTS.mail = ['transport_failed', 'cleanup_failed', 'account_saved', 'account_removed', 'query_started', 'query_complete', 'query_failed', 'command_failed', 'settings_failed'];
 EVENTS.export = ['image_failed', 'preview_failed', 'cleanup_failed', 'share_failed', 'save_failed'];
 EVENTS.network = ['request_start', 'request_end', 'context_overflow', 'first_data', 'request_failed'];
-EVENTS['image-generation'] = ['request_complete', 'request_failed'];
+EVENTS['image-generation'] = ['request_complete', 'request_failed', 'label_failed'];
 EVENTS.moderation = ['guard_stopped', 'output_words_stopped'];
 EVENTS.context = ['inspected', 'request_prefix'];
 EVENTS.browser = ['permission', 'control_user', 'control_agent', 'control_wait', 'task_released', 'closed', 'failed', 'acquired', 'permission_wait', 'operation', 'observation_changed', 'opened_by_user', 'annotation_started', 'annotation_captured', 'annotation_failed', 'search_observed', 'search_failed', 'capture_started', 'frame_captured', 'capture_finished'];
@@ -113,7 +113,7 @@ STRINGS.rpcMethod = ['initialize', 'tools/list', 'tools/call', 'notifications/in
 STRINGS.service = ['mcp', 'search', 'web', 'bing-browser'];
 STRINGS.reason = ['api_level', 'device_unsupported', 'construction_failed', 'capability_changed', 'supported',
   'user_control', 'idle_browser', 'user_handoff', 'task_acquired'];
-STRINGS.format = ['image', 'markdown', 'docx', 'xlsx', 'pptx'];
+STRINGS.format = ['image', 'markdown', 'docx', 'xlsx', 'pptx', 'image/png', 'image/jpeg', 'image/webp'];
 STRINGS.scriptSource = ['generated', 'host', 'frame', 'blank', 'data', 'other', 'unknown'];
 STRINGS.setting = ['search.provider', 'providerProfiles.protocol', 'extensions.browserPolicy', 'config.reasoning',
   'capabilities.reasoning', 'threads.agentMode', 'threads.disabledTools', 'threads.reasoningEffort', 'servers.authType',
@@ -121,7 +121,7 @@ STRINGS.setting = ['search.provider', 'providerProfiles.protocol', 'extensions.b
 STRINGS.change = ['cold', 'append', 'tools', 'system', 'history'];
 STRINGS.protocol = ['chat-completions', 'responses', 'anthropic-messages', 'gemini', 'openai-images', 'gemini-images', 'seedream-images', 'dashscope-images'];
 STRINGS.phase = ['idle', 'preparing', 'listening', 'complete', 'finishing', 'error', 'creating', 'playing', 'stopping', 'connecting', 'streaming', 'capture', 'compose', 'encode',
-  'login', 'state', 'storage', 'credential', 'identity', 'submit', 'query', 'upload', 'generate', 'decode', 'download',
+  'login', 'state', 'storage', 'credential', 'identity', 'submit', 'query', 'upload', 'generate', 'decode', 'download', 'draw', 'metadata',
   'page_show', 'privacy_event', 'subscription_ready', 'new_want', 'business', 'manual_retry', 'request_consent', 'initial', 'active'];
 STRINGS.action = ['send', 'cancel', 'edit', 'press', 'none', 'open', 'click', 'type', 'select', 'scroll', 'back', 'forward', 'reload', 'capture', 'wait'];
 STRINGS.policy = ['unset', 'enabled', 'disabled'];

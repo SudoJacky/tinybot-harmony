@@ -207,6 +207,37 @@ function load(file) {
     Observed: cls => cls, canIUse: () => true, setTimeout: scheduleTimer, clearTimeout: cancelTimer, Uint8Array, ArrayBuffer, DataView, Map, Set, Object, JSON, Error, console }, { filename: file });
   return exports;
 }
+const labelDraws = [];
+const generatedImageGraphics = kits['@kit.ArkGraphics2D'];
+generatedImageGraphics.text = {
+  FontCollection: { getGlobalInstance: () => ({}) }, FontWeight: { W600: 5 },
+  ParagraphBuilder: class {
+    pushStyle(style) { this.style = style; }
+    addText(label) { assert.equal(label, 'AI生成'); }
+    buildLineTypeset() {
+      const { fontSize: size, color } = this.style;
+      return { createLine: () => ({
+        getImageBounds: () => ({ left: 0, top: -size * 0.75, right: size * 3.4, bottom: 0 }),
+        paint: (canvas, x, y) => labelDraws.push({ color, size, x, y })
+      }) };
+    }
+  }
+};
+generatedImageGraphics.drawing = { Canvas: class {} };
+const generatedImageSize = { width: 1536, height: 1024 };
+const generatedImageKit = {
+  PixelMapFormat: { RGBA_8888: 3 },
+  createImageSource: bytes => ({
+    getImageInfo: async () => ({ size: generatedImageSize }), getFrameCount: async () => 1,
+    createPixelMap: async options => {
+      assert.equal(options.editable, true);
+      return { bytes, getImageInfo: async () => ({ size: generatedImageSize }), release: async () => {} };
+    },
+    release: async () => {}
+  }),
+  createImagePacker: () => ({ packToData: async pixel => pixel.bytes, release: async () => {} })
+};
+kits['@kit.ImageKit'].image = generatedImageKit;
 const model = load(path.join(source, 'model/Conversation'));
 const { ConversationStore } = load(path.join(source,'model/ConversationStore'));
 const { UsageLedger: NativeUsageLedger } = load(path.join(source,'services/UsageLedger'));
@@ -2286,7 +2317,21 @@ async function test(name, run) {
       const invocation=call(args), output=await tools.execute(invocation,new Cancellation());
       assert.equal(requests,protocol==='seedream-images'||protocol==='dashscope-images'?2:1);
       const receipt=JSON.parse(output);
-      assert.deepEqual(Buffer.from(await files.readJobInput(receipt.path,png.length,new Cancellation())),Buffer.from(png));
+      const labeled = Buffer.from(await files.readJobInput(receipt.path, receipt.bytes, new Cancellation()));
+      assert.equal(receipt.mime, 'image/png');
+      assert.equal(receipt.bytes, labeled.length);
+      assert.equal(labeled.toString().split('XML:com.adobe.xmp').length, 2);
+      const id = path.posix.basename(receipt.path, '.png');
+      const fields = JSON.parse(labeled.toString().match(/<TC260:AIGC>(.*?)<\/TC260:AIGC>/)[1]);
+      assert.deepEqual(fields, { Label: '1', ContentProducer: 'Tinybot', ProduceID: id, ReservedCode1: '',
+        ContentPropagator: 'Tinybot', PropagateID: id, ReservedCode2: '' });
+      const draw = labelDraws.at(-1);
+      assert.ok(draw.size * 0.75 >= 52);
+      assert.ok(draw.x > generatedImageSize.width / 2 && draw.y - draw.size * 0.75 > generatedImageSize.height / 2);
+      assert.ok(draw.x + draw.size * 3.4 < generatedImageSize.width && draw.y < generatedImageSize.height);
+      assert.equal(draw.color.red, 255);
+      assert.ok(labelDraws.slice(-9, -1).every(outline => outline.color.red === 24 &&
+        Math.abs(Math.hypot(outline.x - draw.x, outline.y - draw.y) - 2) < 0.001));
       assert.ok(!output.includes(base64));
       assert.equal(deliveredFiles([{tools:[{call:invocation,status:'complete',output}]}])[0].generatedImage,true);
     }
@@ -2297,6 +2342,21 @@ async function test(name, run) {
       return{responseCode:200,result:JSON.stringify({data:[{b64_json:base64}]})};
     };
     await currentTools().execute(call({prompt:'a circle',aspect_ratio:'1:1'}),new Cancellation());
+    const generatedDir = nativePath(root + '/workspace/chat/generated-images');
+    const savedFiles = fs.readdirSync(generatedDir);
+    const packer = generatedImageKit.createImagePacker;
+    try {
+      generatedImageKit.createImagePacker = () => ({
+        packToData: async () => { throw Error('Image encoder failed'); },
+        release: async () => {}
+      });
+      await assert.rejects(currentTools().execute(call({prompt:'a circle',aspect_ratio:'1:1'}),new Cancellation()),
+        error => error.code === 'EXECUTION_FAILED');
+      assert.deepEqual(fs.readdirSync(generatedDir), savedFiles);
+      const labelError = diagnosticLogs.findLast(record => record.event === 'label_failed');
+      assert.equal(labelError.fields.phase, 'encode');
+      assert.equal(labelError.fields.format, 'image/png');
+    } finally { generatedImageKit.createImagePacker = packer; }
     data.options.imageGeneration={providerId:profiles.at(-1).id,modelId:'image-test'};
     let requested=0;
     jsonScript=()=>{requested++;throw Error('Unexpected paid request');};
@@ -2421,30 +2481,37 @@ async function test(name, run) {
     await assert.rejects(tools.execute(foreign,new Cancellation()));
     admitted=[photo];
     let serviceCalls=0;
+    let firstPath;
     jsonScript=(url,options)=>{
       assert.equal(url,'https://images.invalid/v1/images/edits');
       const body=Buffer.from(options.extraData);
-      assert.ok(body.includes(Buffer.from(serviceCalls++===0?jpg:png)));
+        const reference = serviceCalls++ === 0 ? Buffer.from(jpg) :
+          fs.readFileSync(nativePath(root+'/workspace/chat/'+firstPath));
+        assert.ok(body.includes(reference));
       return{responseCode:200,result:JSON.stringify({data:[{b64_json:Buffer.from(png).toString('base64')}]})};
     };
     const imageKit=kits['@kit.ImageKit'];
     const original=imageKit.image;
     let sourceReleases=0,pixelReleases=0;
     imageKit.image={
+      ...generatedImageKit,
       createImageSource:bytes=>{
-        assert.deepEqual(Buffer.from(bytes),Buffer.from(png));
-        return{getImageInfo:async()=>({size:{width:2400,height:1200}}),
+        const raster = Buffer.from(bytes);
+        assert.ok(raster.equals(Buffer.from(png)) || raster.includes('XML:com.adobe.xmp'));
+        const source = generatedImageKit.createImageSource(bytes);
+        return{getFrameCount:source.getFrameCount,getImageInfo:async()=>({size:{width:2400,height:1200}}),
           createPixelMap:async options=>{
+            if (options.editable) { return source.createPixelMap(options); }
             assert.equal(options.desiredSize.width,1600);
             assert.equal(options.desiredSize.height,800);
             return{getImageInfo:async()=>({size:options.desiredSize}),release:async()=>{pixelReleases++;}};
           },release:async()=>{sourceReleases++;}};
       },
-      createImagePacker:()=>({packing:async()=>jpg.buffer,release:async()=>{}})
+      createImagePacker:()=>({...generatedImageKit.createImagePacker(),packing:async()=>jpg.buffer})
     };
     try {
       const turn={content:'',steps:[]}, saved=[];
-      let modelCalls=0, firstPath;
+      let modelCalls=0;
       const requests=[];
       registry.register({info:{id:'chat-model',name:'Chat'},endpoint:()=>'https://chat.invalid',stream:async request=>{
         requests.push(await Attachments.hydrate(request.messages));
@@ -2464,7 +2531,7 @@ async function test(name, run) {
       await runAgentLoop({turn,tools,maxSteps:4,messages:[],model:registry.bind(config,new CredentialStore())},new Cancellation(),
         {event(){},checkpoint:async()=>saved.push(JSON.parse(JSON.stringify(turn)))});
       assert.equal(serviceCalls,2);
-      assert.equal(sourceReleases,1);
+      assert.equal(sourceReleases,3);
       assert.equal(pixelReleases,1);
       const restored=saved.at(-1);
       validateSteps(restored.steps);

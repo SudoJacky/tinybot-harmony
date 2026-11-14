@@ -3,6 +3,7 @@ import { PresentedFile } from '../model/Deliverables';
 import { ToolFailure, parseToolArguments } from '../model/ToolFailure';
 import { AgentTools } from './AgentLoop';
 import { Cancellation } from './Cancellation';
+import { labelGeneratedImage } from './GeneratedImageLabel';
 import { FileJobWorkspace } from './WorkspaceFiles';
 import { workspaceRelativePath } from './WorkspaceTools';
 
@@ -104,9 +105,14 @@ export class ImageGenerationTools implements AgentTools {
     if (!mime || bytes.length > MAX_IMAGE_BYTES) {
       throw new ToolFailure('INVALID_RESPONSE', 'Image service returned an invalid or oversized raster image.', 'inspect_service');
     }
-    const path = 'generated-images/' + this.createId() + '.' + (mime === 'image/jpeg' ? 'jpg' : mime.slice(6));
-    await this.files.createJobOutput(path, bytes, cancellation);
+    const id = this.createId();
+    const labeled = await labelGeneratedImage(bytes, mime, id, cancellation);
+    if (labeled.length > MAX_IMAGE_BYTES) {
+      throw new ToolFailure('LIMIT_EXCEEDED', 'The labeled image exceeds the workspace image limit.', 'inspect_result_before_retry');
+    }
+    const path = 'generated-images/' + id + '.' + (mime === 'image/jpeg' ? 'jpg' : mime.slice(6));
+    await this.files.createJobOutput(path, labeled, cancellation);
     const file: PresentedFile = { path: path };
-    return JSON.stringify({ path: path, mime: mime, bytes: bytes.length, files: [file] });
+    return JSON.stringify({ path: path, mime: mime, bytes: labeled.length, files: [file] });
   }
 }

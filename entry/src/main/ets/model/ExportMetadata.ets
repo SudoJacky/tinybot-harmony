@@ -60,6 +60,10 @@ function crc32(bytes: Uint8Array): number {
 }
 // iTXt stores UTF-8 metadata; image payload and all other chunks stay byte-identical.
 export function stampPng(source: Uint8Array, utf8Metadata: Uint8Array): Uint8Array {
+  return insertPngText(source, 'AIGC', utf8Metadata);
+}
+
+export function insertPngText(source: Uint8Array, keyword: string, utf8Text: Uint8Array): Uint8Array {
   const signature = [137, 80, 78, 71, 13, 10, 26, 10];
   if (signature.some((byte: number, index: number) => source[index] !== byte)) { throw new Error('Invalid PNG signature.'); }
   let at = 8;
@@ -71,9 +75,10 @@ export function stampPng(source: Uint8Array, utf8Metadata: Uint8Array): Uint8Arr
     at += size + 12;
   }
   if (at + 12 > source.length) { throw new Error('PNG has no image data.'); }
-  const data = new Uint8Array(9 + utf8Metadata.length);
-  data.set([65, 73, 71, 67, 0, 0, 0, 0, 0]); // keyword, compression flag/method, language, translated keyword
-  data.set(utf8Metadata, 9);
+  const data = new Uint8Array(keyword.length + 5 + utf8Text.length);
+  for (let i = 0; i < keyword.length; i++) { data[i] = keyword.charCodeAt(i); }
+  // The five zero bytes terminate the keyword, compression fields, language, and translated keyword.
+  data.set(utf8Text, keyword.length + 5);
   const chunk = new Uint8Array(data.length + 12);
   const chunkView = new DataView(chunk.buffer);
   chunkView.setUint32(0, data.length); chunk.set([105, 84, 88, 116], 4); chunk.set(data, 8);
