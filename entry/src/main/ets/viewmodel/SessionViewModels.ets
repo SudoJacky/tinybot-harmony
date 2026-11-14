@@ -93,13 +93,20 @@ export class MessageViewModel {
   stepViews: AgentStepViewModel[] = [];
   timeline: TimelineEntry[] = [];
   modelRef?: ModelReference;
+  // A fast tool can finish before ArkUI mounts its loading card.
+  private imageRevealId: string = '';
   constructor(data: MessageData) { this.update(data); }
+  takeImageReveal(id: string): boolean {
+    if (this.imageRevealId !== id) { return false; }
+    this.imageRevealId = '';
+    return true;
+  }
   updateReasoning(index: number, content: string): void {
     const step = this.stepViews[index];
     if (!step) { return; }
     const hadThought = step.reasoningContent.trim().length > 0;
     step.reasoningContent = content;
-    if (hadThought !== (content.trim().length > 0)) { this.timeline = buildTimeline(this.stepViews); }
+    if (hadThought !== (content.trim().length > 0)) { this.refreshStreamPhase(); }
   }
   updateText(content: string, index: number, stepContent: string): void {
     this.content = content;
@@ -107,7 +114,12 @@ export class MessageViewModel {
     if (!step) { return; }
     const hadText = step.content.trim().length > 0;
     step.content = stepContent;
-    if (hadText !== (stepContent.trim().length > 0)) { this.timeline = buildTimeline(this.stepViews); }
+    if (hadText !== (stepContent.trim().length > 0)) { this.refreshStreamPhase(); }
+  }
+  private refreshStreamPhase(): void {
+    // The workflow header reads the outer array. Keep each step observed by its own row.
+    this.stepViews = this.stepViews.slice();
+    this.timeline = buildTimeline(this.stepViews);
   }
   updateTool(index: number, tool: ToolExecution, parentId?: string): void {
     const step = this.steps[index]; const view = this.stepViews[index];
@@ -129,6 +141,9 @@ export class MessageViewModel {
       step.tools[position] = tool; execution.update(tool);
     }
     if (tool.call.function.name === 'update_plan' && tool.status === 'complete') { this.plan.update(this.steps, this.status); }
+    if (tool.call.function.name === 'image_gen' && tool.status === 'complete' && this.status === 'generating') {
+      this.imageRevealId = index + '-' + tool.call.id;
+    }
     // V1 observation needs a shallow invalidation for workflow labels; retain every
     // other step, tool, disclosure and timeline instead of reprojecting the turn.
     this.steps = this.steps.slice();
@@ -142,6 +157,7 @@ export class MessageViewModel {
     this.uiStates = data.uiStates || [];
     this.references = data.references || [];
     this.id = data.id; this.role = data.role; this.content = data.content; this.status = data.status; this.error = data.error;
+    if (data.status !== 'generating') { this.imageRevealId = ''; }
     this.attachments = data.attachments || [];
     this.annotations = data.annotations || [];
     this.modelRef = data.modelRef; this.steps = data.steps || [];

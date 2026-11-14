@@ -154,7 +154,7 @@ restoredPrefs.saveWidth(false, 0);
 assert.equal(new DesktopLayoutPreferences({}).paneWidth(false), 0, 'Reset restores the default geometry on restart');
 
 
-const Page = probe('pages/Index', 'Index', ['hasPreview', 'detailOpen', 'compactDetailLauncher', 'workbench', 'windowChanged', 'openFiles', 'openPreview', 'closePreview', 'previewPresenceChanged', 'onBackPress',
+const Page = probe('pages/Index', 'Index', ['hasPreview', 'detailOpen', 'compactDetailLauncher', 'workbench', 'windowChanged', 'openFiles', 'openImageFile', 'openPreview', 'closePreview', 'previewPresenceChanged', 'onBackPress',
   'beginResize', 'resizeHistory', 'resizeDetail', 'endResize', 'openDetailTab', 'removeDetailTab', 'closeDetailTab',
   'workspaceClosed', 'toggleDetailPane', 'currentDetailTab', 'detailTabVisible', 'detailTabsAvailable',
   'detailTabPresent', 'hideBrowserTab', 'setDetailPane', 'detailGeometry', 'toggleDetailMaximized', 'setHistoryCollapsed', 'saveDesktopPaneWidth'],
@@ -171,6 +171,11 @@ const page = Object.assign(new Page(), { app: { active }, session, browser, wind
   getUIContext: () => ({ getFocusController: () => ({ clearFocus() {} }),
     animateTo(_options, update) { update(); if (_options.onFinish) { _options.onFinish(); } } }),
   setDrawer() {}, setBrowserExpanded(value) { this.browserExpanded = value; } });
+const imageRoutes = [];
+page.paths = { pushPath(route) { imageRoutes.push({ ...route }); } };
+page.openImageFile('generated-images/preview.png');
+assert.deepEqual(imageRoutes, [{ name: 'image-file', param: 'generated-images/preview.png' }]);
+assert.equal(page.workspaceOpen, false, 'Direct image preview does not open the workspace directory');
 page.windowChanged(1200);
 assert.equal(page.drawerOpen, false); assert.equal(page.drawerReveal, 0); assert.equal(page.drawerAnimation, 5);
 page.openFiles('notes.md'); assert.equal(page.workspaceOpen, true); assert.equal(page.workspacePath, 'notes.md');

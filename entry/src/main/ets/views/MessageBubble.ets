@@ -8,7 +8,9 @@ import { stepDisplayContent, stepPreviews, PublishedPreview, PublishedAnswerPart
 import { PublishedPreviewCard } from './PublishedPreviewCard';
 import { PublishedPanel } from '../model/PublishedPanel';
 import { PublishedPanelCard } from './PublishedPanelCard';
-import { PresentedFile, deliveredFiles } from '../model/Deliverables';
+import { ImageDelivery, PresentedFile, deliveredFiles, latestImageDelivery } from '../model/Deliverables';
+import { GeneratedImageCard } from './GeneratedImageCard';
+import { Cancellation } from '../services/Cancellation';
 import { turnFileChanges } from '../model/TurnFileChanges';
 import { TurnChangesCard } from './TurnChangesCard';
 import { pasteboard } from '@kit.BasicServicesKit';
@@ -253,7 +255,10 @@ export struct MessageBubble {
   onRead: (id: string) => void = () => {};
   @Prop webEnabled: boolean = false;
   @Prop workspaceRoot: string = '';
+  readImageReference?: (path: string, signal: Cancellation) => Promise<Uint8Array>;
   onOpenFile: (path: string) => void = () => {};
+  onOpenImage: (path: string) => void = () => {};
+  onOpenImageReference: (path: string) => void = () => {};
   @Prop previewInspectable: boolean = false;
   @Prop inspectedPreviewId: string = '';
   onInspectPreview: (messageId: string, previewId: string) => void = () => {};
@@ -280,6 +285,21 @@ export struct MessageBubble {
 
   private timeline(): TimelineEntry[] { return this.message.timeline; }
   aboutToAppear(): void { this.settled = this.turnStatus === 'complete'; }
+
+  private generatedImages(): ImageDelivery[] {
+    const latest = latestImageDelivery(this.message.stepViews, this.turnStatus === 'generating');
+    return latest ? [latest] : [];
+  }
+
+  private generatedImagePath(delivery: ImageDelivery): string {
+    const latest = latestImageDelivery(this.message.stepViews, this.turnStatus === 'generating');
+    if (latest?.id === delivery.id) { return latest.path; }
+    if (delivery.path) { return delivery.path; }
+    // A card created as a placeholder may be leaving after its path has already been published.
+    const index = Number(delivery.id.slice(0, delivery.id.indexOf('-')));
+    const previous = latestImageDelivery(this.message.stepViews.slice(0, index + 1), false);
+    return previous?.id === delivery.id ? previous.path : '';
+  }
   private syncWorkflow(): void {
     this.getUIContext().animateTo({ duration: 280, curve: Motion.standard }, () => {
       this.settled = this.turnStatus === 'complete';
@@ -675,13 +695,33 @@ export struct MessageBubble {
       if (this.hasExtra) {
         this.extra()
       }
-      ForEach(deliveredFiles(this.message.stepViews), (file: PresentedFile) => {
+      if (this.workspaceRoot) {
+        Stack({ alignContent: Alignment.TopStart }) {
+          ForEach(this.generatedImages(), (delivery: ImageDelivery) => {
+            Stack({ alignContent: Alignment.TopStart }) {
+              GeneratedImageCard({
+                path: this.generatedImagePath(delivery) ? this.workspaceRoot + '/' + this.generatedImagePath(delivery) : '',
+                ratio: delivery.ratio, cardId: 'generated-image-' + this.message.id + '-' + delivery.id,
+                references: delivery.references || [], readReference: this.readImageReference,
+                compareReference: delivery.compareReference || '',
+                takeReveal: () => this.message.takeImageReveal(delivery.id),
+                onOpen: () => {
+                  const path = this.generatedImagePath(delivery);
+                  if (path) { this.onOpenImage(path); }
+                },
+                onOpenReference: () => {
+                  if (delivery.compareReference) { this.onOpenImageReference(delivery.compareReference); }
+                }
+              })
+            }.width('100%').transition(this.appearance.effectStrength > 0 ?
+              TransitionEffect.asymmetric(TransitionEffect.OPACITY.animation({ duration: 180, curve: Motion.standard }),
+                TransitionEffect.OPACITY.animation({ duration: 220, curve: Motion.standard })) : TransitionEffect.IDENTITY)
+          }, (delivery: ImageDelivery) => delivery.id)
+        }.width('100%')
+      }
+      ForEach(deliveredFiles(this.message.stepViews).filter((file) => !file.generatedImage || !this.workspaceRoot), (file: PresentedFile) => {
         Button() {
           Column() {
-            if (file.generatedImage && this.workspaceRoot) {
-              Image('file://' + this.workspaceRoot + '/' + file.path).width('100%').constraintSize({ maxHeight: 340 })
-                .objectFit(ImageFit.Contain).accessibilityText(t('生成图片'))
-            }
             Row({ space: 12 }) {
               SymbolGlyph(file.generatedImage ? $r('sys.symbol.picture') : $r('sys.symbol.doc')).fontSize(24).fontColor([this.appearance.accent])
               Column({ space: 4 }) {

@@ -77,11 +77,24 @@ for (const status of ['stopped', 'failed', 'complete']) assert.equal(turnPhase(s
 // grouping, long later thoughts, whitespace removal and a completed publication.
 const streaming = new MessageViewModel({ id: 'stream', role: 'assistant', content: '', error: '', status: 'generating',
   steps: [step('', [], '')] });
-streaming.updateReasoning(0, 'First thought');
+chat.threads = [{ id: 'thinking-thread', messages: [streaming], refreshPreviews() {} }];
+const thoughtDelta = { kind: 'reasoning', state, threadId: 'thinking-thread', messageId: streaming.id, step: 0, stepContent: 'First thought' };
+chat.project(thoughtDelta);
+assert.equal(turnPhase(streaming.status, streaming.stepViews), 'thinking');
+assert.equal(streaming.reasoningContent, 'First thought');
+const retry = step();
+retry.retries = [{ waiting: true, attempt: 1, delayMs: 1000 }];
+chat.project({ kind: 'message', state, threadId: thoughtDelta.threadId,
+  message: { id: streaming.id, role: 'assistant', content: '', error: '', status: 'generating', steps: [retry] } });
+assert.equal(turnPhase(streaming.status, streaming.stepViews), 'retry');
+chat.project(thoughtDelta);
+assert.equal(turnPhase(streaming.status, streaming.stepViews), 'thinking');
 assert.equal(streaming.timeline[0].items[0].tool, -1);
 const thoughtTimeline = streaming.timeline;
+const liveStepViews = streaming.stepViews;
 for (let i = 0; i < 1000; i++) streaming.updateReasoning(0, 'First thought ' + i);
 assert.equal(streaming.timeline, thoughtTimeline, 'Further thought deltas retain the derived timeline');
+assert.equal(streaming.stepViews, liveStepViews, 'Further thought deltas leave the workflow header dependencies stable');
 assert.equal(streaming.reasoningContent, 'First thought 999');
 streaming.updateText('Narration', 0, 'Narration');
 assert.equal(streaming.timeline.map(e => e.kind).join(','), 'process,text');
@@ -103,9 +116,9 @@ const emitted = path.resolve(__dirname, '../entry/build/default/cache/default/de
 assert.ok(fs.statSync(emitted).mtimeMs >= fs.statSync(source).mtimeMs, 'Build before testing');
 const tree = ts.createSourceFile(emitted, fs.readFileSync(emitted, 'utf8'), ts.ScriptTarget.Latest, true);
 const component = tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'MessageBubble');
-const methods = ['aboutToAppear', 'syncWorkflow', 'timeline', 'foldable', 'folded', 'entryVisible', 'traceState'];
+const methods = ['aboutToAppear', 'syncWorkflow', 'timeline', 'foldable', 'folded', 'entryVisible', 'traceState', 'workflowLabel', 'awaitingModel'];
 const context = { exports: {}, ...load(path.join(root, 'model/ProcessPresentation')),
-  stepDisplayContent: s => s.content, Motion: { standard: 'ease' } };
+  t: text => text, stepDisplayContent: s => s.content, Motion: { standard: 'ease' } };
 vm.runInNewContext(ts.transpileModule(`class Probe { ${component.members.filter(n => methods.includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')} } exports.Probe = Probe;`,
   { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, context);
 const messageData = { id: 'workflow', role: 'assistant', content: '', error: '', status: 'generating', steps: [step('', [tool('read')])] };
@@ -113,6 +126,18 @@ const message = new MessageViewModel(messageData);
 const calls = [];
 const probe = Object.assign(new context.exports.Probe(), { message, turnStatus: 'generating', workflowCollapsed: false,
   getUIContext: () => ({ animateTo: (options, update) => { calls.push(options); update(); } }) });
+const firstStep = new MessageViewModel({ ...messageData, steps: [step()] });
+probe.message = firstStep;
+assert.equal(probe.workflowLabel(), '等待模型响应');
+assert.equal(probe.awaitingModel(), true);
+const initialStepViews = firstStep.stepViews;
+firstStep.updateReasoning(0, 'First thought');
+assert.notEqual(firstStep.stepViews, initialStepViews, 'The first chunk invalidates ArkUI workflow bindings');
+assert.equal(firstStep.stepViews[0], initialStepViews[0], 'The thought row keeps its observed step');
+assert.equal(probe.workflowLabel(), '正在思考');
+assert.equal(probe.awaitingModel(), false);
+assert.equal(firstStep.timeline[0].items[0].tool, -1, 'The first chunk creates the live thinking row');
+probe.message = message;
 probe.aboutToAppear();
 const capturedGroup = probe.timeline()[0];
 messageData.steps[0].tools[0].status = 'complete';

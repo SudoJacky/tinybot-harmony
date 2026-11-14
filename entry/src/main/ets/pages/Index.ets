@@ -1343,6 +1343,11 @@ struct Index {
     this.openDetailTab('files');
   }
 
+  private openImageFile(path: string): void {
+    this.getUIContext().getFocusController().clearFocus();
+    this.paths.pushPath({ name: 'image-file', param: path });
+  }
+
   private panelLinkChanged(): void {
     if (!this.panelLink || this.panelLink === this.lastPanelLink || !this.app.ready || !this.privacy.allowed) { return; }
     try { parsePanelTarget(this.panelLink); this.lastPanelLink = this.panelLink; this.openLifePanels(false, this.panelLink); }
@@ -1564,6 +1569,8 @@ struct Index {
       ConversationSharePanel({ data: param as ConversationShareData })
     } else if (name === 'files') {
       WorkspacePanel({ app: this.app, initialPath: (param as string) || '' })
+    } else if (name === 'image-file') {
+      WorkspacePanel({ app: this.app, initialPath: param as string, directImage: true, onClose: () => { this.paths.pop(); } })
     } else if (name === 'account') {
       NavDestination() {
         HuaweiAccountPanel({ account: this.account, taskBusy: this.app.sharedBusy, onSupport: (page: string) => this.openSupport(page) })
@@ -1860,6 +1867,7 @@ struct Index {
                 onHistoryDragEnd: (event: GestureEvent) => this.endDrawerDrag(event),
                 onHistoryDragCancel: () => this.cancelDrawerDrag(),
                 onFiles: () => this.openFiles(), onOpenFile: (path: string) => this.openFiles(path),
+                onOpenImage: (path: string) => this.openImageFile(path),
                 previewInspectable: true, inspectedPreviewId: this.hasPreview() ? this.previewId : '',
                 onInspectPreview: (messageId: string, previewId: string) => this.openPreview(messageId, previewId) })
               .width('100%').constraintSize({ maxWidth: this.desktop ? 784 : 800 }).layoutWeight(1)

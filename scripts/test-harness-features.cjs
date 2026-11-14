@@ -40,7 +40,7 @@ const { TransientProviderError, httpProviderError } = from('services/providers/P
 const { emptyData, parseAppData, requestHistory } = from('model/Conversation');
 const { validateSteps, stepMessages } = from('model/Agent');
 const { PresentTools } = from('services/PresentTools');
-const { deliveredFiles } = from('model/Deliverables');
+const { deliveredFiles, latestImageDelivery } = from('model/Deliverables');
 const { ReferenceTools } = from('services/ReferenceTools');
 const { captureThreadReference, referenceContext } = from('model/ThreadReferences');
 const { defaultSearchConfig, deepSeekSearchProfiles, searchCredentialAlias, validateSearchConfig } = from('model/WebSearch');
@@ -66,7 +66,7 @@ async function main() {
   const { ToolSet } = from('services/ToolSet');
   const { RuleTools } = from('services/RuleTools');
   const { TeamTools, TeamToolLane } = from('services/TeamCoordinator');
-  const { AgentStepViewModel } = from('viewmodel/SessionViewModels');
+  const { AgentStepViewModel, MessageViewModel } = from('viewmodel/SessionViewModels');
   const web = new WebTools({ resolve: (reference, base) => new URL(reference, base).href,
     get: async () => ({url:'https://example.com/page',contentType:'text/html',body:
       '<head><link rel="icon" href="/site.svg"><title>Title</title></head><main>Body</main>'}) });
@@ -140,6 +140,61 @@ async function main() {
   const saved = emptyData(); const chat = thread(); chat.messages[1].steps = [step]; saved.threads = [chat]; saved.activeThreadId = chat.id;
   assert.equal(deliveredFiles(parseAppData(JSON.stringify(saved)).threads[0].messages[1].steps)[0].path, 'report.md');
   console.log('PASS deliverables: validation, atomic failure, successful receipts and reload');
+
+  const imageTool = { call: call('image_gen', { prompt: 'A mountain', aspect_ratio: '3:2' }),
+    status: 'running', output: '' };
+  const imageSteps = [{ content: '', tools: [imageTool] }];
+  const waitingImage = plain(latestImageDelivery(imageSteps, true));
+  assert.deepEqual(waitingImage, { id: '0-' + imageTool.call.id, path: '', ratio: 1.5 });
+  assert.equal(latestImageDelivery(imageSteps, false), undefined);
+  for (const status of ['pending', 'failed', 'cancelled', 'interrupted']) {
+    imageTool.status = status;
+    assert.equal(latestImageDelivery(imageSteps, true), undefined);
+  }
+  imageTool.status = 'complete';
+  const imagePath = 'generated-images/mountain-1.png';
+  imageTool.output = JSON.stringify({ files: [{ path: '../outside.png' }, { path: imagePath }, { path: imagePath }] });
+  const completeImage = { ...waitingImage, path: imagePath };
+  assert.deepEqual(plain(latestImageDelivery(imageSteps, true)), completeImage);
+  assert.deepEqual(plain(latestImageDelivery(imageSteps, false)), completeImage);
+  assert.equal(deliveredFiles(imageSteps)[0].path, imagePath);
+  assert.equal(latestImageDelivery([{ content: '', tools: [{ ...imageTool, call: call('image_gen', {}) }] }], false).ratio, 1);
+  const withReferences = { ...imageTool, status: 'running', call: call('image_gen',
+    { reference_images: ['photo.jpg', imagePath], aspect_ratio: '2:3' }) };
+  const referenceSteps = [{ content: '', tools: [withReferences] }];
+  assert.deepEqual(plain(latestImageDelivery(referenceSteps, true)).references, ['photo.jpg', imagePath]);
+  assert.equal(latestImageDelivery(referenceSteps, true).compareReference, undefined);
+  assert.equal(latestImageDelivery(referenceSteps, true).ratio, 2 / 3);
+  const revisionSteps = imageSteps.concat(referenceSteps);
+  assert.equal(latestImageDelivery(revisionSteps, true).path, '');
+  withReferences.status = 'failed';
+  assert.equal(latestImageDelivery(revisionSteps, true).path, imagePath);
+  withReferences.status = 'complete';
+  withReferences.output = JSON.stringify({ files: [{ path: 'generated-images/mountain-2.png' }] });
+  assert.equal(latestImageDelivery(revisionSteps, false).references, undefined);
+  assert.equal(latestImageDelivery(revisionSteps, false).path, 'generated-images/mountain-2.png');
+  assert.equal(latestImageDelivery(revisionSteps, false).compareReference, undefined);
+  const singleReference = { ...withReferences, call: call('image_gen', { reference_images: [imagePath] }) };
+  const singleReferenceSteps = imageSteps.concat([{ content: '', tools: [singleReference] }]);
+  assert.equal(latestImageDelivery(singleReferenceSteps, false).compareReference, imagePath);
+  singleReference.status = 'running';
+  assert.equal(latestImageDelivery(singleReferenceSteps, true).compareReference, imagePath);
+  assert.equal(latestImageDelivery(singleReferenceSteps, true).path, '');
+  assert.equal(deliveredFiles(revisionSteps).length, 2);
+  const liveMessage = { id: 'picture-answer', role: 'assistant', content: '', error: '', status: 'generating',
+    steps: [{ content: '', tools: [{ ...imageTool, status: 'running', output: '' }] }] };
+  const liveView = new MessageViewModel(liveMessage);
+  const revealId = latestImageDelivery(liveMessage.steps, true).id;
+  liveView.updateTool(0, imageTool);
+  assert.equal(liveView.takeImageReveal('different-generation'), false);
+  assert.equal(liveView.takeImageReveal(revealId), true);
+  assert.equal(liveView.takeImageReveal(revealId), false);
+  liveView.updateTool(0, imageTool);
+  const finishedMessage = { ...liveMessage, status: 'complete' };
+  liveView.update(finishedMessage);
+  assert.equal(liveView.takeImageReveal(revealId), false);
+  assert.equal(new MessageViewModel(finishedMessage).takeImageReveal(revealId), false);
+  console.log('PASS image placeholders retain their identity; revisions supersede the prior preview and keep both files');
 
   const source = thread(); source.messages[0].content = 'EARLY_MARKER\n' + 'old context\n'.repeat(1200);
   source.messages[1].content = 'LATEST_MARKER';

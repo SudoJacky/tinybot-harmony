@@ -41,8 +41,7 @@ import { ToolApproval } from './ToolApproval';
 import { BrowserSession } from './BrowserSession';
 import { BrowserTools } from './BrowserTools';
 import { Attachments } from './Attachments';
-import { readBounded } from './FileBytes';
-import { fileIo as fs } from '@kit.CoreFileKit';
+import { NativeImageWorkspace } from './NativeImageWorkspace';
 import { AttachmentTools } from './AttachmentTools';
 import { util } from '@kit.ArkTS';
 import { Diagnostics } from '../model/Diagnostics';
@@ -50,7 +49,6 @@ import { LogFields } from '../model/DiagnosticLog';
 import { ArkDataConversationStore } from './ArkDataConversationStore';
 import { NativeData } from './NativeData';
 import { WorkspaceStore } from '../model/WorkspaceStore';
-import { FileJobWorkspace } from './WorkspaceFiles';
 import { ProviderProfile, imageService } from '../model/ProviderProfiles';
 import { ExtensionSettings } from '../model/Skills';
 import { AgentRuntime } from './AgentRuntime';
@@ -86,28 +84,6 @@ class NativeUsageRecorder implements UsageRecorder {
   recordTool(id: string, activity: UsageToolActivity): void { UsageLedger.recordTool(id, activity); }
   recordContext(id: string, diagnostics: ContextDiagnostics): void {
     if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'context', 'inspected', { sessionId: id, tokens: diagnostics.tokens, budget: diagnostics.inputBudget, tools: diagnostics.toolTokens, messages: diagnostics.historyTokens }); }
-  }
-}
-
-class NativeImageWorkspace implements FileJobWorkspace {
-  private files: NativeWorkspaceFiles;
-  private attachments: () => Attachment[];
-  constructor(files: NativeWorkspaceFiles, attachments: () => Attachment[]) {
-    this.files = files;
-    this.attachments = attachments;
-  }
-  async readJobInput(path: string, maximum: number, cancellation: Cancellation): Promise<Uint8Array> {
-    const photo = this.attachments().find((item) => !item.original && item.mime === 'image/jpeg' && item.path === path);
-    if (!photo) { return this.files.readJobInput(path, maximum, cancellation); }
-    const file = await fs.open(Attachments.path(photo), fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
-    try {
-      const bytes = await readBounded(file.fd, Math.min(photo.size, maximum));
-      cancellation.check();
-      return new Uint8Array(bytes);
-    } finally { await fs.close(file); }
-  }
-  createJobOutput(path: string, bytes: Uint8Array, cancellation: Cancellation): Promise<void> {
-    return this.files.createJobOutput(path, bytes, cancellation);
   }
 }
 
