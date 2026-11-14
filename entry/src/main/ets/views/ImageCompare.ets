@@ -10,6 +10,8 @@ export struct ImageCompare {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   before?: image.PixelMap;
   @Prop cardId: string = '';
+  onOpenReference: () => void = () => {};
+  onOpenResult: () => void = () => {};
   @State private frameWidth: number = 0;
   @State private frameHeight: number = 0;
   @State private split: number = 0.5;
@@ -30,13 +32,24 @@ export struct ImageCompare {
     this.getUIContext().animateTo({ duration: Motion.fast, curve: Motion.standard }, () => { this.bend = 0; });
   }
 
+  private referenceEdge(y: number): number {
+    const middle = this.split * this.frameWidth;
+    const end = Math.max(0, Math.min(this.frameWidth, middle - this.bend));
+    const distanceFromCenter = 1 - 2 * Math.max(0, Math.min(1, y / this.frameHeight));
+    return middle + (end - middle) * distanceFromCenter * distanceFromCenter;
+  }
+
+  private openAt(event: ClickEvent): void {
+    if (event.x < this.referenceEdge(event.y)) { this.onOpenReference(); }
+    else { this.onOpenResult(); }
+  }
+
   private seam(): string {
     // Path commands use physical pixels; layout and gesture offsets use vp.
     const ui = this.getUIContext();
-    const width = ui.vp2px(this.frameWidth);
     const height = ui.vp2px(this.frameHeight);
-    const x = this.split * width;
-    const end = Math.max(0, Math.min(width, x - ui.vp2px(this.bend)));
+    const x = ui.vp2px(this.split * this.frameWidth);
+    const end = ui.vp2px(this.referenceEdge(0));
     // The cubic passes through the grip at half height, with the ends slightly behind it.
     const control = end + (x - end) * 4 / 3;
     return 'M ' + end + ' 0 C ' + control + ' ' + height / 3 + ' ' +
@@ -70,6 +83,10 @@ export struct ImageCompare {
           Blank()
           if (this.split < 0.81) { this.tag(t('生成结果')) }
         }.width('100%').padding(9).hitTestBehavior(HitTestMode.None)
+        Button({ type: ButtonType.Normal, stateEffect: false }) {}
+          .id(this.cardId + '-compare-open').width('100%').height('100%').backgroundColor(Color.Transparent)
+          .accessibilityText(t('打开参考图或生成结果'))
+          .onClick((event: ClickEvent) => this.openAt(event), 8)
         Stack() {
           Row({ space: 2 }) {
             SymbolGlyph($r('sys.symbol.chevron_left')).fontSize(11).fontColor([$r('app.color.text_primary')])
@@ -86,6 +103,7 @@ export struct ImageCompare {
           .accessibilityRole(AccessibilityRoleType.SLIDER)
           .accessibilityText(t('对比参考图与生成结果'))
           .accessibilityDescription(t('参考图 {0}%', [Math.round(this.split * 100)]))
+          .hitTestBehavior(HitTestMode.Default)
           .onKeyEvent((event: KeyEvent) => {
             if (event.type !== KeyType.Down) { return; }
             if (event.keyCode === KeyCode.KEYCODE_DPAD_LEFT || event.keyCode === KeyCode.KEYCODE_DPAD_RIGHT) {
@@ -99,7 +117,6 @@ export struct ImageCompare {
             .onActionEnd(() => this.finish()).onActionCancel(() => this.finish()))
       }
     }.id(this.cardId + '-compare').width('100%').height('100%')
-      .hitTestBehavior(HitTestMode.Transparent)
       .onAreaChange((_previous: Area, area: Area) => { this.frameWidth = Number(area.width); this.frameHeight = Number(area.height); })
   }
 }

@@ -6,6 +6,10 @@ import { readBounded } from './FileBytes';
 import { NativeWorkspaceFiles } from './NativeWorkspaceFiles';
 import { FileJobWorkspace } from './WorkspaceFiles';
 
+export function conversationPhoto(items: Attachment[], path: string): Attachment | undefined {
+  return items.find((item) => !item.original && item.mime === 'image/jpeg' && item.path === path);
+}
+
 export class NativeImageWorkspace implements FileJobWorkspace {
   private files: NativeWorkspaceFiles;
   private attachments: () => Attachment[];
@@ -16,7 +20,7 @@ export class NativeImageWorkspace implements FileJobWorkspace {
   }
 
   async readJobInput(path: string, maximum: number, cancellation: Cancellation): Promise<Uint8Array> {
-    const photo = this.attachments().find((item) => !item.original && item.mime === 'image/jpeg' && item.path === path);
+    const photo = conversationPhoto(this.attachments(), path);
     if (!photo) { return this.files.readJobInput(path, maximum, cancellation); }
     const file = await fs.open(Attachments.path(photo), fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
     try {

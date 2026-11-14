@@ -17,7 +17,7 @@ import { isHighestReasoningEffort, reasoningEfforts } from '../model/ReasoningEf
 import { ProviderProfile } from '../model/ProviderProfiles';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { NativeWorkspaceFiles } from '../services/NativeWorkspaceFiles';
-import { NativeImageWorkspace } from '../services/NativeImageWorkspace';
+import { conversationPhoto, NativeImageWorkspace } from '../services/NativeImageWorkspace';
 import { Cancellation } from '../services/Cancellation';
 import { workspaceRelativePath } from '../services/WorkspaceTools';
 import { MAX_IMAGE_BYTES, rasterMime } from '../services/ImageGenerationTools';
@@ -198,6 +198,7 @@ export struct ChatPanel {
   onHistoryDragCancel: () => void = () => {};
   onFiles: () => void = () => {};
   onOpenFile: (path: string) => void = () => {};
+  onOpenImage: (path: string) => void = () => {};
   @Prop previewInspectable: boolean = false;
   @Prop inspectedPreviewId: string = '';
   onInspectPreview: (messageId: string, previewId: string) => void = () => {};
@@ -989,9 +990,21 @@ export struct ChatPanel {
     return new WorkspaceStore(context.getApplicationContext().filesDir).pathFor(this.app.activeWorkspaceId);
   }
 
+  private imageAttachments(): Attachment[] {
+    return this.thread.messages.flatMap((message) =>
+      message.attachments.concat(...message.steps.map((step) => step.steering?.attachments || [])));
+  }
+
+  private openImageReference(path: string): void {
+    const photo = conversationPhoto(this.imageAttachments(), path);
+    if (photo) {
+      this.previewPath = Attachments.path(photo);
+      this.previewing = true;
+    } else { this.onOpenImage(path); }
+  }
+
   private async readImageReference(root: string, path: string, signal: Cancellation): Promise<Uint8Array> {
-    const workspace = new NativeImageWorkspace(new NativeWorkspaceFiles(root), () => this.thread.messages.flatMap((message) =>
-      message.attachments.concat(...message.steps.map((step) => step.steering?.attachments || []))));
+    const workspace = new NativeImageWorkspace(new NativeWorkspaceFiles(root), () => this.imageAttachments());
     const bytes = await workspace.readJobInput(workspaceRelativePath(path, false), MAX_IMAGE_BYTES, signal);
     if (!rasterMime(bytes)) { throw new Error('Invalid image reference.'); }
     return bytes;
@@ -1012,6 +1025,7 @@ export struct ChatPanel {
             MessageBubble({ message: message, latestPreviewIds: this.thread.latestPreviewIds, turnStatus: message.status, webEnabled: this.app.extensions.webEnabled, onOpenFile: this.onOpenFile,
               workspaceRoot: this.messageWorkspaceRoot(),
               readImageReference: (path: string, signal: Cancellation) => this.readImageReference(this.messageWorkspaceRoot(), path, signal),
+              onOpenImage: this.onOpenImage, onOpenImageReference: (path: string) => this.openImageReference(path),
               previewInspectable: this.previewInspectable, inspectedPreviewId: this.inspectedPreviewId, onInspectPreview: this.onInspectPreview, uiAvailable: !this.app.busy && !this.thread.archived,
               sendOrigin: this.sendingMessageId === message.id ? this.sendOrigin : undefined,
               onSendReady: (): void => { this.scroller.scrollEdge(Edge.Bottom); }, onSendFinish: (): void => { this.finishSendFlight(message.id); },

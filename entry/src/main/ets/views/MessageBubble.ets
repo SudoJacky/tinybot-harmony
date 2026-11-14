@@ -257,6 +257,8 @@ export struct MessageBubble {
   @Prop workspaceRoot: string = '';
   readImageReference?: (path: string, signal: Cancellation) => Promise<Uint8Array>;
   onOpenFile: (path: string) => void = () => {};
+  onOpenImage: (path: string) => void = () => {};
+  onOpenImageReference: (path: string) => void = () => {};
   @Prop previewInspectable: boolean = false;
   @Prop inspectedPreviewId: string = '';
   onInspectPreview: (messageId: string, previewId: string) => void = () => {};
@@ -705,7 +707,10 @@ export struct MessageBubble {
                 takeReveal: () => this.message.takeImageReveal(delivery.id),
                 onOpen: () => {
                   const path = this.generatedImagePath(delivery);
-                  if (path) { this.onOpenFile(path); }
+                  if (path) { this.onOpenImage(path); }
+                },
+                onOpenReference: () => {
+                  if (delivery.compareReference) { this.onOpenImageReference(delivery.compareReference); }
                 }
               })
             }.width('100%').transition(this.appearance.effectStrength > 0 ?

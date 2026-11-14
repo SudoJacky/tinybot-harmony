@@ -42,13 +42,13 @@ export struct GeneratedImageCard {
   readReference?: ReferenceReader;
   takeReveal: () => boolean = () => false;
   onOpen: () => void = () => {};
+  onOpenReference: () => void = () => {};
 
   @State private showResult: boolean = false;
   @State private imageLoaded: boolean = false;
   @State private loadFailed: boolean = false;
   @State private showingReference: boolean = false;
-  @State private comparing: boolean = false;
-  @State private compareLoading: boolean = false;
+  @State private compareReady: boolean = false;
   @State private compareFailed: boolean = false;
   private canvas: CanvasRenderingContext2D = new CanvasRenderingContext2D(new RenderingContextSettings(true));
   private animator?: AnimatorResult;
@@ -148,6 +148,7 @@ export struct GeneratedImageCard {
 
   private visibilityChanged(visible: boolean): void {
     this.visible = visible;
+    this.prepareComparison();
     if (!visible && this.path && this.revealPending) {
       this.displayResult();
       return;
@@ -259,33 +260,27 @@ export struct GeneratedImageCard {
     }
   }
 
-  private async toggleCompare(): Promise<void> {
-    if (this.compareImage) {
-      this.comparing = !this.comparing;
-      return;
-    }
+  private async prepareComparison(): Promise<void> {
     const read = this.readReference;
-    if (!read || !this.compareReference || this.compareLoading) { return; }
+    if (!this.mounted || !this.visible || !this.imageLoaded || !read || !this.compareReference ||
+      this.compareReady || this.compareFailed || this.compareRead) { return; }
     const signal = new Cancellation();
     this.compareRead = signal;
-    this.compareLoading = true;
-    this.compareFailed = false;
     let preview: image.PixelMap | undefined;
     try {
       preview = (await this.decodeReference(this.compareReference, read, signal, PREVIEW_EDGE)).pixel;
       if (signal.cancelled) { return; }
       this.compareImage = preview;
       preview = undefined;
-      this.comparing = true;
+      this.compareReady = true;
     } catch (error) {
       if (!signal.cancelled) {
-        Diagnostics.log('warn', 'preview', 'thumbnail_failed', undefined, error as Error);
+        Diagnostics.log('warn', 'preview', 'compare_reference_failed', undefined, error as Error);
         this.compareFailed = true;
       }
     } finally {
       await preview?.release();
       this.compareRead = undefined;
-      if (this.mounted) { this.compareLoading = false; }
     }
   }
 
@@ -388,7 +383,12 @@ export struct GeneratedImageCard {
       if (this.path) {
         Image('file://' + this.path).width('100%').height('100%').objectFit(ImageFit.Contain)
           .opacity(this.showResult ? 1 : 0).accessibilityLevel('no')
-          .onComplete((event) => { if (event?.loadingStatus === 1) { this.imageLoaded = true; } })
+          .onComplete((event) => {
+            if (event?.loadingStatus === 1) {
+              this.imageLoaded = true;
+              this.prepareComparison();
+            }
+          })
           .onError(() => { this.loadFailed = true; })
       }
       if (!this.showResult || (this.ready && !this.imageLoaded && !this.loadFailed)) {
@@ -417,29 +417,19 @@ export struct GeneratedImageCard {
             .borderRadius(14).backgroundColor('#E6F7F7FA')
         }
       }
-      if (this.path) {
+      if (this.showResult && this.compareReady && this.compareImage) {
+        ImageCompare({ before: this.compareImage, cardId: this.cardId,
+          onOpenReference: this.onOpenReference, onOpenResult: this.onOpen })
+      } else if (this.path) {
         Button({ type: ButtonType.Normal, stateEffect: false }) {}
           .id(this.cardId + '-open').width('100%').height('100%').backgroundColor(Color.Transparent)
           .accessibilityText(t('生成图片') + ' · ' + t('打开文件 · 分享与导出'))
           .onClick(() => this.onOpen())
       }
-      if (this.comparing && this.compareImage) {
-        ImageCompare({ before: this.compareImage, cardId: this.cardId })
-      }
-      if (this.showResult && this.imageLoaded && !this.loadFailed && this.compareReference && this.readReference) {
-        Button({ type: ButtonType.Normal }) {
-          if (this.compareLoading) {
-            LoadingProgress().width(16).height(16).color(Color.White).accessibilityLevel('no')
-          } else {
-            Text(this.comparing ? t('结束对比') : this.compareFailed ? t('参考图无法加载，点击重试') : t('前后对比'))
-              .fontSize(12).fontWeight(FontWeight.Medium).fontFamily(this.appearance.fontFamily).fontColor(Color.White)
-          }
-        }.id(this.cardId + '-compare-toggle').height(44).padding({ left: 12, right: 12 })
-          .borderRadius(13).backgroundColor('#BB1E2025').position({ left: 9, bottom: 9 })
-          .enabled(!this.compareLoading).accessibilityText(
-            this.compareLoading ? t('正在加载参考图…') :
-              this.comparing ? t('结束对比') : this.compareFailed ? t('参考图无法加载，点击重试') : t('前后对比'))
-          .onClick(() => { void this.toggleCompare(); })
+      if (this.showResult && this.compareFailed) {
+        Text(t('参考图无法加载')).fontSize(11).fontFamily(this.appearance.fontFamily).fontColor(Color.White)
+          .padding({ left: 9, right: 9, top: 3, bottom: 3 }).borderRadius(12).backgroundColor('#99000000')
+          .position({ left: 9, top: 9 }).hitTestBehavior(HitTestMode.None)
       }
     }.id(this.cardId).width('100%').constraintSize({ maxWidth: 340 * this.ratio }).aspectRatio(this.ratio)
       .borderRadius(Radius.md).clip(true).backgroundColor($r('app.color.surface_variant'))
