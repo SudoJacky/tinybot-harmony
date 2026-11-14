@@ -73,6 +73,8 @@ Diagnostics.log('error', 'network', 'request_failed', { code: error.code }, erro
 
 所有耗时使用系统启动单调时钟，不随校时变化。字符数使用 ArkTS `string.length`（UTF-16 码元），网络字节单独统计。
 
+除耗时与资源指标外，目录还记录少量状态事件：2in1 的窗口可见性与最小尺寸设置（模块 `app` 的 `pc_window_visibility`、`pc_window_limits`、`pc_window_limits_failed`、`pc_window_observe_failed`、`pc_draft_flush_failed`）、桌面命令与布局读写失败（模块 `navigation` 的 `desktop_command_failed`、`desktop_layout_load_failed`、`desktop_layout_save_failed`），以及图片生成的服务与阶段耗时（模块 `image-generation` 的 `request_complete`、`request_failed`，字段含 `protocol`、`providerId`、`phase`、`elapsedMs` 与 `bytes`）。图片标记失败另记 `label_failed`，带 `phase`（`decode`、`draw`、`encode`、`metadata`）与 `format`；缩略图失败记在 `preview` 模块。这些事件同样只保留白名单字段，不记录提示词、图片内容或生成结果路径。
+
 事件环最多 12000 条，覆盖计数显式展示；全程聚合统计独立保留，最多 128 类指标。分位数是固定直方图的上界（0.1、0.5、1、2、4、8、16.7、33.4、50、100、250、500、1000、5000、30000、∞），均值、最大值、次数为实际采集值。关闭“详细事件时间线”后，未标记 `always` 的事件只增加 `omitted`；耗时达到 16.7 ms 的慢操作、资源与系统事件仍会保留。
 
 ## PerformanceProbe 与 taskpool

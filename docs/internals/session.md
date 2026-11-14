@@ -1,6 +1,6 @@
 # 会话与持久化
 
-这一页说明谁拥有会话（Session）数据、哪些命令能改它、待发送队列（queue）如何调度，以及会话如何以 v2 布局原子落盘、在中断后如何恢复。
+这一页说明谁拥有会话（Session）数据、哪些命令能改它、待发送队列（queue）如何调度，以及会话如何写入本机加密数据库、在中断后如何恢复。
 
 ## SessionService 的职责
 
@@ -131,40 +131,57 @@ export interface SessionRepository {
 | `compaction` | 上下文压缩检查点 |
 | `titleEdited`、`pinned`、`archived` | 标题归属与列表状态 |
 | `parentThreadId`、`parentMessageId` | 分支来源 |
+| `sideChatContext` | 旁聊创建时捕获的主会话快照（≤8000 字符），存在即表示这是一条旁聊 |
 | `teamEnabled`、`teams` | 团队开关与运行记录 |
 
-`parseAppData()` 在加载时校验这些字段；任何一项不合法都会拒绝整份数据并保留原文件，而不是丢弃部分会话。
+`parseAppData()` 在加载时校验这些字段；任何一项不合法都会拒绝整份数据并保留原记录，而不是丢弃部分会话。
+
+## 旁聊
+
+旁聊是一条带 `sideChatContext` 的普通会话记录，由 `createSideChat(parentId)` 创建：
+
+- 主会话必须是当前活动会话、未归档且至少有一条消息；新旁聊继承主会话的 `projectId`、模型、推理强度与工具审批模式，标题固定为“旁聊”。
+- `sideChatContext` 取主会话最近的完整轮次（`captureThreadReference()` 的文本，最多 8000 字符）；没有完整回答时取首条用户消息的前 8000 字符。创建后不再随主会话更新。
+- 旁聊与主会话共用 `workspaceId`（项目目录或主会话工作区），`ensureThreadWorkspace()` 使用 `workspaceIdFor()` 而不是新建目录。它被标记为只读，工具目录被 `chatTools()` 收窄为 `list_files`、`find_files`、`read_file`、`search_file_content` 与 `read_reference`。
+- `runTasks()` 支持传入目标会话；旁聊有自己的 `ThreadExecution`，可独立运行与停止。它不处理 `/team` 与 `$` Skill 命令、不生成标题、不记录审批模式，并在指令段加入 `side_chat` 段落，说明引用的主会话文本是资料而不是新任务。
+- 旁聊不出现在 `filteredThreads()`、引用候选与命令面板中，`selectThread()` 拒绝把它设为当前主会话；默认模型与推理强度的全局更新也会跳过旁聊。
+- `bringBackSideChat()` 走 `referenceThread(id, true)`：要求旁聊至少有一条完整回答、主会话空闲，把它的快照作为会话引用加入主会话，不清空主会话草稿，也不删除旁聊。
+- 删除主会话时，`deleteThreads()` 会把它名下的旁聊一起删除；单独删除旁聊不影响主会话。备份按普通会话序列化旁聊，恢复时 `validateProjects()` 要求主会话存在、不是旁聊且属于同一项目。
 
 ## 存储布局与迁移
 
 ```text
-<filesDir>/                    会话仓库根目录
-  sessions-v2/
-    index.json                 清单：version 2 + 非会话元数据 + threads[{id, file}]
-    <uuid>.json                每个会话一个独立文件
-  tinybot-v1.json              旧版单文件会话，迁移后保留
+<databaseDir>/tinybot.db       加密 ArkData 关系库，单表 records
+  scope=app,     id=index      全局元数据 AppData 与会话 ID 清单
+  scope=thread,  id=<会话ID>   每段会话的完整 JSON
+  scope=usage,   id=<请求ID>   用量记录
+  scope=workspace:<工作区ID>   生活看板与卡片文件
 
-<applicationFilesDir>/         应用级工作区根目录
-  workspace/
-    <会话 ID>/                 普通会话工作区
-    project-<项目 ID>/         项目共享工作区
+<filesDir>/                    旧版会话文件，升级后保留为副本
+  sessions-v2/index.json
+  sessions-v2/<uuid>.json
+  tinybot-v1.json
+
+<applicationFilesDir>/workspace/   应用级工作区根目录
+  <会话 ID>/                      普通会话工作区
+  project-<项目 ID>/              项目共享工作区
 ```
 
-- 启动时若 `sessions-v2/index.json` 不存在：读取旧版 `tinybot-v1.json`（不存在则用空数据），随后立即按 v2 保存。
-- `index.json` 的 `version` 必须为 2，`threads` 必须是数组；文件名必须匹配 `^[a-zA-Z0-9-]+\.json$`，且文件内 `thread.id` 必须与索引一致，否则报“会话索引与内容不一致”。
-- 旧版数据格式版本 1 与 2 都可读取，读入后统一升级为 2。缺少 `providerProfiles` 时由当前 `config` 迁移出一份服务配置；迁移发生时会把已配置的模型补写到各会话的 `modelRef`。
-- 旧版 `tinybot-v1.json` 不会被删除，可用于人工回溯。
+- 首次打开新版时，`NativeData` 在同一个事务内把旧版会话索引、用量账本、看板与卡片文件写入数据库，并写入迁移标记；只要事务未提交，数据库保持为空，下次启动可重试。
+- 迁移完成后，旧文件原样留在沙箱中作为升级前副本，不再参与读写。
+- 单条记录超过约 128 KiB 时按 UTF-16 安全边界分块存入多行，读取时校验分片数量与顺序，避免超过 ResultSet 上限。
+- `parseAppData()` 在加载时校验字段；任何一项不合法都会拒绝整份数据，保留原记录与旧文件，而不是丢弃部分会话。
+- 数据库密钥无法解开（`14800020`）时，启动页提供升级前副本与云备份；恢复时创建 `tinybot-recovery-<uuid>.db`，成功后才切换 `database` 偏好，原数据库与工作区继续保留。
 
 ## 原子写入
 
-`ConversationStore` 的提交分两步：内容文件先落盘，索引最后切换。
+`ArkDataConversationStore` 在一个事务里提交索引、会话与删除项：
 
 1. `save()` 在任何排队 IO 之前同步捕获待写内容。省略 `changedThreadIds` 或上次捕获失败时全量序列化，否则未变化的会话复用上次的字符串。
-2. 捕获结果进入 `pendingSave` 队列，写盘串行执行；某次失败只影响该次调用，但会把下一次保存标记为需要全量重写。
-3. 提交时逐个会话比较文本：文件名不存在或内容变化才写入新的 `<uuid>.json`，未变化的会话继续引用旧文件。
-4. 写出 `index.json.tmp`，再用 `fs.rename` 覆盖 `index.json`。重命名是提交点，读者要么看到旧索引，要么看到新索引。
-5. 更新内存中的文件映射，删除不再被引用的旧会话文件；删除失败只留下无引用孤儿，不影响读取。
-6. 每次写文件都循环写满字节、调用 `fsync` 后再关闭；写入不足会直接报错，不会产生“看似成功”的半截文件。
+2. 捕获结果进入 `pendingSave` 队列，写库串行执行；某次失败只影响该次调用，但会把下一次保存标记为需要全量重写。
+3. 提交时逐条比较文本：只有内容变化的会话才重写，未变化的记录不产生写入；被删除的会话在同一事务里移除。
+4. `app/index` 与非会话记录随同一次 `commit()` 写入；事务失败时索引与内容一起回滚，不会出现“索引已换、会话未写”。
+5. 写入失败会把 `saveError` 交给会话服务，界面保留内容并要求重试保存。
 
 `commitCandidate()` 同时只允许一个提交在途，重入会抛错，避免两个设置提交互相覆盖。
 
@@ -204,10 +221,10 @@ export interface SessionRepository {
 
 当前实现是“启动全量加载、内存维护索引”：
 
-- `load()` 会读取并解析 `index.json` 与每个会话文件，把所有消息放进内存；同时保存三张映射：会话到文件名、会话到已序列化文本、以及上次捕获的文本。
-- 保存只重写真正变化的会话文件，但索引始终整体生成并切换；未变化会话不会产生新的磁盘写入。
-- 界面按批展示（默认最近 60 条消息），搜索也在内存中的会话集合上执行；分页限制的是渲染与查询结果，不是磁盘读取范围。
-- 目前没有按磁盘分页加载历史的路径，因此会话很多或单会话历史很长时，启动解析与常驻内存会随数据量增长。
+- `load()` 读取 `app/index` 与每条 `thread` 记录，把所有消息放进内存；同时保存会话到已序列化文本的映射，用于判断哪些记录需要重写。
+- 保存只重写真正变化的记录，但索引记录始终整体生成；未变化会话不会产生数据库写入。
+- 界面按批展示（默认最近 60 条消息），搜索也在内存中的会话集合上执行；分页限制的是渲染与查询结果，不是数据库读取范围。
+- 目前没有按记录分页加载历史的路径，因此会话很多或单会话历史很长时，启动解析与常驻内存会随数据量增长；分块存储只解决单条记录的长度限制。
 
 ## 代码入口
 
@@ -215,10 +232,14 @@ export interface SessionRepository {
 | --- | --- |
 | `entry/src/main/ets/services/SessionService.ets` | 命令准入、队列、检查点、标题与恢复 |
 | `entry/src/main/ets/services/SessionContracts.ets` | 仓库、资源、状态与事件契约 |
-| `entry/src/main/ets/model/ConversationStore.ets` | v2 索引、独立会话文件、原子保存 |
+| `entry/src/main/ets/services/ArkDataConversationStore.ets` | 数据库记录读写、会话差异提交与加载 |
+| `entry/src/main/ets/services/ArkDataRecords.ets` | 加密关系库、分块记录、事务提交与旧版导入 |
+| `entry/src/main/ets/services/NativeData.ets` | 数据库选择、旧版迁移与密钥不可用时的恢复来源 |
+| `entry/src/main/ets/model/ConversationStore.ets` | 旧版 v2 索引与独立会话文件，仅用于迁移与回溯 |
 | `entry/src/main/ets/model/Conversation.ets` | 数据结构、历史回放与加载校验 |
 | `entry/src/main/ets/model/PendingInput.ets` | 待发送指令结构与调度顺序 |
 | `entry/src/main/ets/model/ConversationTitle.ets` | 标题提示词、截断与清洗 |
 | `entry/src/main/ets/model/BackupRestore.ets` | 恢复时的服务与 MCP 重映射 |
 | `entry/src/main/ets/services/Backup.ets` | 备份封装与资源打包 |
-| `entry/src/main/ets/viewmodel/ChatViewModel.ets` | 草稿防抖与命令转发 |
+| `entry/src/main/ets/viewmodel/ChatViewModel.ets` | 草稿防抖与命令转发；旁聊的创建、发送与带回 |
+| `entry/src/main/ets/views/SideChatPanel.ets` | 旁聊消息列表、草稿、发送、停止与删除 |

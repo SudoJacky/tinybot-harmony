@@ -100,17 +100,13 @@ workspaceRelativePath(path)        校验相对路径与扩展名
 
 发布预览不会申请、获取或改变浏览器会话，也不继承其 Cookie、存储、权限或控制权。反过来，关闭浏览器不影响已发布的预览。
 
-## 本地小程序
+## 已下线的小程序
 
-小程序复用同一套 Web UI 运行时，但多了“集合”和“持久数据”两个能力，并受“设置 → 实验室 → 小程序”开关控制，默认关闭。相关工具在自定义模式还受“预览与小程序”能力控制，发布工具同时受只读权限约束。
+小程序复用同一套 Web UI 运行时，曾提供“集合”和“持久数据”两个能力。v1.3.1 已移除小程序入口、实验室开关、`MiniApps` 服务与 `publish_mini_app`/`list_mini_apps` 工具，当前版本不再执行小程序页面，也不再写入其数据文件。
 
-- `publish_mini_app` 只接受单页 `.js`、`.html` 或 `.svg`，标题 1–160 字符；省略 `appId` 新建，传入已有 `appId` 更新同一小程序。更新只改页面与元数据，不写用户数据；已归档的小程序必须先恢复。
-- 发布前用只读数据快照执行启动校验，启动脚本调用 `save()` 会失败；因此“能启动”不等于“交互已验证”，回执固定返回 `interaction: "not_checked"`。
-- 页面通过 `tinybot.storage.load()` 读取 `{value, revision}`，在用户交互后调用 `save(value, revision)`。写入带版本守卫，版本过期会拒绝，页面应重新读取并对齐；初始化阶段不应保存。
-- 页面与元数据保存在工作区 `mini-apps/<appId>/`；v2 清单记录正式数据文件、版本和采用历史，读取时按清单指定的数据文件继续。更新页面不会覆盖用户数据，回滚只在前一版数据结构兼容时提供。
-- 小程序集合跨工作区列出所有条目，按最近打开或更新时间排序；网格区分“使用中 / 已移除”，支持继续修改、重命名、更换图标与颜色、导出、恢复上一版、移除与恢复。图标 `icon` 与颜色 `iconColor` 为可选清单字段，成对保存，页面更新、回滚和备份恢复时保留。继续修改会回到来源会话，并把 `appId` 写进草稿提示。
-- 原会话删除后目录仍保留，完整备份会带走这些保留工作区；尚未采用的试用版不出现在收藏列表，但其文件随备份保存。
-- 小程序页面没有网络、文件系统或 `localStorage`，也不继承浏览器会话；需要一次性图表或临时视觉时继续使用 `publish_preview`。
+- 已有工作区中的 `mini-apps/<appId>/` 原样保留，包含清单、页面版本与用户数据；它们不再出现在界面或工具目录中，但会随完整备份保存。
+- 旧会话里的小程序回执仍按历史记录展示，不回退为普通预览卡片。
+- 需要一次性图表或临时视觉时使用 `publish_preview`；需要长期打开并自动更新时使用生活看板。
 
 ## Three.js 与内置资源
 
@@ -160,9 +156,7 @@ workspaceRelativePath(path)        校验相对路径与扩展名
 | `entry/src/main/ets/model/PublishedPreview.ets` | 最新版本判定、已取代标记与展示内容 |
 | `entry/src/main/ets/views/PublishedPreviewCard.ets` | 卡片展开、侧区入口与全屏切换 |
 | `entry/src/main/ets/views/PreviewFullscreen.ets` | 全屏容器与安全区 |
-| `entry/src/main/ets/services/MiniApps.ets` | 小程序页面、数据版本、归档与删除 |
-| `entry/src/main/ets/services/MiniAppTools.ets` | `list_mini_apps`、`publish_mini_app` 参数与校验 |
-| `entry/src/main/ets/views/MiniAppsPanel.ets` | 小程序集合、打开、导出与移除界面 |
+| `entry/src/main/ets/services/LifePanels.ets` | 生活看板卡片、数据源与刷新任务 |
 | `entry/src/main/ets/model/Agent.ets` | 预览快照与截图的持久化校验 |
 | `entry/src/main/ets/services/AgentLoop.ets` | 拒绝内联 UI 与 JSONL、限制修复次数 |
 | `entry/src/main/ets/services/BrowserSession.ets` | 独立浏览器会话、控制权与接管 |

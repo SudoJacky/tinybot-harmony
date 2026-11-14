@@ -38,7 +38,10 @@
 | 计划 | 校验后的结构化对象（步骤数组） |
 | 预览 | `published`、`path`、`title`、`nodes`、`screenshot` |
 | 文件交付 | `files[{path, description?}]` |
-| 小程序 | `appId`、`published`、`updated`、`startup`、`interaction`、`sourcePath`、`dataPath` |
+| 图片生成 | `path`、`mime`、`bytes`（带“AI生成”标记与元数据后的文件大小）、`files[{path}]` |
+| 图片检查 | `path`、`mime` |
+| 生活看板 | 卡片清单与 `nextCursor`；卡片 `reference`、`configRevision`；看板的卡片引用与网格 |
+| 邮件 | `accounts[{accountId, name, allowBody}]`；查询的 `total`、`unread`、`matched`、`limited` 与抬头；正文的纯文本结果 |
 | 记忆 | `success`、`receipt{added, updated, removed, duplicates, characters}`、`limit`、`memories` |
 | 团队 | `runId`、`status`、`revision`、`members`、`tasks`、`results`、`afterSequence`、`hasMore` |
 | MCP 调用 | 远程服务返回的原始结果对象（含 `content`、`structuredContent`、`isError`） |
@@ -118,6 +121,19 @@
 | `FS_STALE_SEARCH` | 续页时文件变化 | 分页检索期间文件被修改 | `restart_search` |
 | `FS_INCOMPLETE_LIST` | 目录无法继续列出 | 分页信息缺失或偏移没有前进 | `inspect_directory` |
 
+### 图片
+
+| 码 | 含义 | 触发条件 | 建议恢复 |
+| --- | --- | --- | --- |
+| `IMAGE_SERVICE_ERROR` | 图片服务拒绝或生成失败 | 服务返回错误对象、HTTP 错误、Gemini 未完成或返回图片项带 `error` | `inspect_service` |
+| `INVALID_RESPONSE` | 没有可用的图片结果 | 响应缺少图片、Base64 无效、下载地址非 HTTPS、图片超过 16 MiB 或不是 PNG/JPEG/WebP | `inspect_service` |
+| `NOT_CONFIGURED` | 未配置可用的图片协议 | 当前图片服务的协议不在四种图片协议内 | `check_settings` |
+| `UNSUPPORTED_CONTENT` | 检查的图片类型不支持 | `view_image` 的目标不是 PNG/JPEG/WebP | `fix_path` |
+| `LIMIT_EXCEEDED` | 图片超过下载上限 | 生成的 Base64 超过 16 MiB | `inspect_service` |
+| `EXECUTION_FAILED` | 无法写入可见标记或元数据 | 图片解码、绘制“AI生成”或写入 XMP 失败；不会保存半成品文件 | `inspect_result_before_retry` |
+
+图片请求的连接超时 15 秒、生成读取 180 秒、下载 60 秒；服务返回的图片地址不跟随重定向。
+
 ### 网页、搜索与浏览器
 
 | 码 | 含义 | 触发条件 | 建议恢复 |
@@ -166,6 +182,8 @@
 | `output` 字符串 | 原样作为 tool 消息 | 工具行的简短预览；详情面板按“结果/参数/日志/原始记录”分页 |
 | 错误对象 | 原样作为 tool 消息，含 `code` 与 `recovery` | 错误区块显示 `error`，详情保留完整字段 |
 | 预览截图 | 作为额外 user 消息，附 JPEG 图片与尺寸说明 | 聊天内预览卡片与历史本地预览 |
+| 图片检查 | 作为额外 user 消息，附最长边 1600 px 的 JPEG 副本 | 图片工具行与文件卡片 |
+| 图片生成结果 | 只有文本回执进入 tool 消息；图片文件由界面按回执路径显示 | 回答内直接显示图片与文件卡片 |
 | UI 校验失败诊断 | 作为额外 user 消息，声明为不可信诊断数据 | 失败工具详情 |
 | 续跑提示、重复调用提醒 | 作为额外 user 消息 | 不单独成行，属于过程记录 |
 | `fileDiff`、`turnFileChange` | 不发送 | 差异卡片、“本轮修改”汇总 |

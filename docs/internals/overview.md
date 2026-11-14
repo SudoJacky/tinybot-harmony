@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | ArkUI 页面与视图 | `pages/Index.ets`、`views/ChatPanel.ets`、`views/ThreadList.ets` | 声明式界面、导航、弹层与动效、原生能力入口 | 不读写会话数据，不读取凭据或工具 |
 | ViewModel | `viewmodel/ChatViewModel.ets`、`viewmodel/SessionViewModels.ets` | 把 `SessionEvent` 投影为 `@Observed` 状态；持有编辑器草稿与输入防抖 | 不访问文件、凭据、工具或运行时 |
-| 会话服务 | `services/SessionService.ets` | 会话（Session）数据的唯一所有者：命令准入、待发送队列、检查点、压缩、设置提交 | 不导入 ArkUI 或平台 Kit |
+| 会话服务 | `services/SessionService.ets` | 会话（Session）数据的唯一所有者：命令准入、待发送队列、旁聊、检查点、压缩、设置提交 | 不导入 ArkUI 或平台 Kit |
 | 运行内核 | `services/AgentRuntime.ets`、`services/AgentLoop.ets` | 单次运行的生命周期、模型/工具循环、重试、取消与收尾 | `runAgentLoop` 不接触 ViewModel、凭据、注册表或 UI |
 | 模型接入 | `services/providers/*` | 显式注册、配置绑定、协议请求转换、流式解析 | 不持有 UI 状态；凭据仅在每次请求前读取 |
 
@@ -23,7 +23,7 @@ ArkUI 页面 → ChatViewModel → SessionService → AgentRuntime → runAgentL
                               ↓                              ↓
                          SessionRepository              ModelProvider
                               ↓                              ↓
-                         ConversationStore              协议与网络适配
+                         ArkDataConversationStore        协议与网络适配
 
 NativeSessionService：组装原生文件、工作区、凭据、网络和 ProviderRegistry
 ```
@@ -38,10 +38,10 @@ NativeSessionService：组装原生文件、工作区、凭据、网络和 Provi
 
 | 依赖 | 实现 | 注入对象 |
 | --- | --- | --- |
-| 会话仓库 | `ConversationStore(filesDir)` | `SessionService` |
+| 会话仓库 | `ArkDataConversationStore`（加密数据库） | `SessionService` |
 | 运行内核 | `AgentRuntime(providers, credentials, usage, validateAnswer, orchestrator, gate?)` | `SessionService` |
 | 凭据 | `CredentialStore` | `AgentRuntime`、`ProfileSettings`、`McpSettings` |
-| 资源 | `NativeSessionResources` | 工作区、工具集、Skill/MCP 安装、错误上报 |
+| 资源 | `NativeSessionResources` | 工作区、工具集（含图片、看板与邮件工具）、Skill/MCP 安装、错误上报 |
 | 模型服务注册表 | `ProviderRegistry(() => huaweiAccount.requireLogin())` | 注册、绑定与每次请求前的账号预检 |
 | 后台与通知 | `BackgroundGeneration`、`CompletionNotifications` | 订阅会话事件；前台发起时申请通知权限，后台传输持有长时任务 |
 
@@ -97,7 +97,7 @@ NativeSessionService：组装原生文件、工作区、凭据、网络和 Provi
 | --- | --- | --- | --- |
 | 命令流 | 视图 → ViewModel → SessionService | 方法调用（`send`、`enqueueInput`、`stop`、`selectModel` 等） | 由 `canMutate` / `canQueueInput` 准入；失败返回布尔值或写入 `status.error` |
 | 事件流 | SessionService → ViewModel → 视图 | `SessionEvent`（含脱离内部数据的快照） | 同步回调；监听器抛错由 `SessionService.emit()` 捕获并上报，不影响其他监听器 |
-| 持久化流 | SessionService → SessionRepository → 文件 | `save(data, changedThreadIds?)` | 仓库在调用时同步捕获待写内容，写盘按队列串行执行 |
+| 持久化流 | SessionService → SessionRepository → 数据库 | `save(data, changedThreadIds?)` | 仓库在调用时同步捕获待写内容，写库按队列串行执行 |
 
 运行内核另有自己的事件流 `AgentEvent`：`run_start`、循环事件（`step_start`、`text_delta`、`reasoning_delta`、`model_end`、`tool_start`、`tool_end`、`step_end`、`request_retry`）、`run_stopping`、`run_finishing`、`run_end`。`SessionService` 订阅它，把增量投影成 `text` / `reasoning` / `message` 事件，再交给 ViewModel。
 
@@ -117,7 +117,7 @@ NativeSessionService：组装原生文件、工作区、凭据、网络和 Provi
 | 账号未登录或状态变化 | `HuaweiAccount.requireLogin()`（发送前预检与每次模型请求） | 可重试错误，不发起模型请求，不清空草稿 |
 | 模型服务绑定失败 | `ProviderRegistry.bind()` | 运行状态 `failed`，消息记录错误文本 |
 | 网络或流解析失败 | `ProtocolProvider` / 流解析器 | 明确的临时错误可重试，其余直接展示；不伪造原因 |
-| 保存失败 | `ConversationStore` → `SessionService.persist()` | 页面保留内容并显示 `saveError`；暂停队列、中止运行，需手动重试保存 |
+| 保存失败 | `ArkDataConversationStore` → `SessionService.persist()` | 页面保留内容并显示 `saveError`；暂停队列、中止运行，需手动重试保存 |
 | 工具失败 | 工具适配层 → `toolError()` | 作为工具结果回传模型，本轮可继续；不自动重试 |
 
 ## 子系统索引
@@ -125,7 +125,7 @@ NativeSessionService：组装原生文件、工作区、凭据、网络和 Provi
 | 主题 | 页面 | 主要问题 |
 | --- | --- | --- |
 | 代码地图 | [代码地图](/internals/code-map) | 目录职责、代表文件、新功能落点 |
-| 会话与持久化 | [会话与持久化](/internals/session) | 命令准入、队列、v2 存储、原子写入、标题与恢复 |
+| 会话与持久化 | [会话与持久化](/internals/session) | 命令准入、队列、旁聊、加密数据库、标题与恢复 |
 | 轮次、流式与重试 | [轮次、流式与重试](/internals/agent-loop) | 运行生命周期、SSE 分帧、重试与取消 |
 | 模型服务与凭据 | [模型服务与凭据](/internals/providers) | 注册与绑定、协议转换、密钥读取、账号校验 |
 | 系统提示词与上下文 | [系统提示词与上下文](/internals/prompt) | 指令分层、投影、预算与压缩 |
@@ -135,7 +135,7 @@ NativeSessionService：组装原生文件、工作区、凭据、网络和 Provi
 | 交互预览与 Web UI | [交互预览与 Web UI](/internals/preview) | 预览发布、验证与恢复；本地小程序与持久数据 |
 | 运行诊断与性能 | [运行诊断与性能](/internals/diagnostics) | 埋点、脱敏日志、导出 |
 
-面向使用者的说明见[模型服务与上下文](/guide/models)、[项目与共享工作区](/guide/projects)；扩展模型服务见[新增模型服务](/dev/add-provider)。
+面向使用者的说明见[模型服务与上下文](/guide/models)、[项目与共享工作区](/guide/projects)与[大屏工作台](/guide/desktop)；扩展模型服务见[新增模型服务](/dev/add-provider)。
 
 ## 代码入口
 
@@ -153,4 +153,6 @@ NativeSessionService：组装原生文件、工作区、凭据、网络和 Provi
 | `entry/src/main/ets/services/CompletionNotifications.ets` | 完成通知订阅与发布 |
 | `entry/src/main/ets/services/RequestContext.ets` | 每次请求的组装、预算与压缩边界 |
 | `entry/src/main/ets/services/providers/ProviderRegistry.ets` | 显式注册、配置绑定、凭据解析 |
-| `entry/src/main/ets/model/ConversationStore.ets` | v2 索引、独立会话文件、原子保存 |
+| `entry/src/main/ets/services/ArkDataConversationStore.ets` | 会话、配置与索引的数据库读写 |
+| `entry/src/main/ets/services/ArkDataRecords.ets` | 加密关系库、分块记录与事务提交 |
+| `entry/src/main/ets/model/ConversationStore.ets` | 旧版 v2 索引与独立会话文件，仅用于迁移 |
