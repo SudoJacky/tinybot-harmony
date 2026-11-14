@@ -159,6 +159,13 @@ async function main() {
   assert.deepEqual(plain(imageDeliveries(imageSteps, false)), [completeImage]);
   assert.equal(deliveredFiles(imageSteps)[0].path, imagePath);
   assert.equal(imageDeliveries([{ content: '', tools: [{ ...imageTool, call: call('image_gen', {}) }] }], false)[0].ratio, 1);
+  const withReferences = { ...imageTool, status: 'running', call: call('image_gen',
+    { reference_images: ['photo.jpg', imagePath], aspect_ratio: '2:3' }) };
+  const referenceSteps = [{ content: '', tools: [withReferences] }];
+  assert.deepEqual(plain(imageDeliveries(referenceSteps, true))[0].references, ['photo.jpg', imagePath]);
+  assert.equal(imageDeliveries(referenceSteps, true)[0].ratio, 2 / 3);
+  withReferences.status = 'complete';
+  assert.equal(imageDeliveries(referenceSteps, false)[0].references, undefined);
   console.log('PASS image placeholders retain their identity through completion and historical results open directly');
 
   const source = thread(); source.messages[0].content = 'EARLY_MARKER\n' + 'old context\n'.repeat(1200);

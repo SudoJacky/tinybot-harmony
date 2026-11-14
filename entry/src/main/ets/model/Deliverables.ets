@@ -2,8 +2,8 @@ import { AgentStep, ToolExecution, toolReceipts } from './Agent';
 
 export interface PresentedFile { path: string; description?: string; generatedImage?: boolean; }
 interface DeliveryReceipt { files?: PresentedFile[]; }
-interface ImageArguments { aspect_ratio?: string; }
-export interface ImageDelivery { id: string; path: string; ratio: number; }
+interface ImageArguments { aspect_ratio?: string; reference_images?: string[]; }
+export interface ImageDelivery { id: string; path: string; ratio: number; references?: string[]; }
 
 function receiptFiles(tool: ToolExecution, generated: boolean): PresentedFile[] {
   try {
@@ -14,13 +14,14 @@ function receiptFiles(tool: ToolExecution, generated: boolean): PresentedFile[] 
   } catch (_) { return []; }
 }
 
-function requestedImageRatio(tool: ToolExecution): number {
+function imageArguments(tool: ToolExecution): ImageArguments {
   try {
-    const args = JSON.parse(tool.call.function.arguments) as ImageArguments;
-    if (args?.aspect_ratio === '3:2') { return 3 / 2; }
-    if (args?.aspect_ratio === '2:3') { return 2 / 3; }
-  } catch (_) { return 1; }
-  return 1;
+    return (JSON.parse(tool.call.function.arguments) as ImageArguments) || {};
+  } catch (_) { return {}; }
+}
+
+function requestedImageRatio(ratio?: string): number {
+  return ratio === '3:2' ? 3 / 2 : ratio === '2:3' ? 2 / 3 : 1;
 }
 
 export function imageDeliveries(steps: AgentStep[], active: boolean): ImageDelivery[] {
@@ -31,13 +32,19 @@ export function imageDeliveries(steps: AgentStep[], active: boolean): ImageDeliv
       if (tool.call.function.name !== 'image_gen') { continue; }
       const id = index + '-' + tool.call.id;
       if (active && tool.status === 'running') {
-        images.push({ id: id, path: '', ratio: requestedImageRatio(tool) });
+        const args = imageArguments(tool);
+        const refs = args.reference_images;
+        const delivery: ImageDelivery = { id: id, path: '', ratio: requestedImageRatio(args.aspect_ratio) };
+        if (Array.isArray(refs) && refs.length > 0 && refs.length <= 4 &&
+          refs.every((path) => typeof path === 'string' && path.length > 0)) { delivery.references = refs; }
+        images.push(delivery);
       } else if (tool.status === 'complete') {
+        const ratio = requestedImageRatio(imageArguments(tool).aspect_ratio);
         receiptFiles(tool, true).forEach((file, fileIndex) => {
           if (paths.has(file.path)) { return; }
           paths.add(file.path);
           images.push({ id: fileIndex === 0 ? id : id + '-' + fileIndex,
-            path: file.path, ratio: requestedImageRatio(tool) });
+            path: file.path, ratio: ratio });
         });
       }
     }

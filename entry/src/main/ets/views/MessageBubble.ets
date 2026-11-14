@@ -10,6 +10,7 @@ import { PublishedPanel } from '../model/PublishedPanel';
 import { PublishedPanelCard } from './PublishedPanelCard';
 import { ImageDelivery, PresentedFile, deliveredFiles, imageDeliveries } from '../model/Deliverables';
 import { GeneratedImageCard } from './GeneratedImageCard';
+import { Cancellation } from '../services/Cancellation';
 import { turnFileChanges } from '../model/TurnFileChanges';
 import { TurnChangesCard } from './TurnChangesCard';
 import { pasteboard } from '@kit.BasicServicesKit';
@@ -254,6 +255,7 @@ export struct MessageBubble {
   onRead: (id: string) => void = () => {};
   @Prop webEnabled: boolean = false;
   @Prop workspaceRoot: string = '';
+  readImageReference?: (path: string, signal: Cancellation) => Promise<Uint8Array>;
   onOpenFile: (path: string) => void = () => {};
   @Prop previewInspectable: boolean = false;
   @Prop inspectedPreviewId: string = '';
@@ -689,6 +691,7 @@ export struct MessageBubble {
           GeneratedImageCard({
             path: this.generatedImagePath(delivery.id) ? this.workspaceRoot + '/' + this.generatedImagePath(delivery.id) : '',
             ratio: delivery.ratio, cardId: 'generated-image-' + this.message.id + '-' + delivery.id,
+            references: delivery.references || [], readReference: this.readImageReference,
             onOpen: () => this.onOpenFile(this.generatedImagePath(delivery.id))
           })
         }, (delivery: ImageDelivery) => delivery.id)
