@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | ArkUI 页面与视图 | `pages/Index.ets`、`views/ChatPanel.ets`、`views/ThreadList.ets` | 声明式界面、导航、弹层与动效、原生能力入口 | 不读写会话数据，不读取凭据或工具 |
 | ViewModel | `viewmodel/ChatViewModel.ets`、`viewmodel/SessionViewModels.ets` | 把 `SessionEvent` 投影为 `@Observed` 状态；持有编辑器草稿与输入防抖 | 不访问文件、凭据、工具或运行时 |
-| 会话服务 | `services/SessionService.ets` | 会话（Session）数据的唯一所有者：命令准入、待发送队列、检查点、压缩、设置提交 | 不导入 ArkUI 或平台 Kit |
+| 会话服务 | `services/SessionService.ets` | 会话（Session）数据的唯一所有者：命令准入、待发送队列、旁聊、检查点、压缩、设置提交 | 不导入 ArkUI 或平台 Kit |
 | 运行内核 | `services/AgentRuntime.ets`、`services/AgentLoop.ets` | 单次运行的生命周期、模型/工具循环、重试、取消与收尾 | `runAgentLoop` 不接触 ViewModel、凭据、注册表或 UI |
 | 模型接入 | `services/providers/*` | 显式注册、配置绑定、协议请求转换、流式解析 | 不持有 UI 状态；凭据仅在每次请求前读取 |
 
@@ -125,7 +125,7 @@ NativeSessionService：组装原生文件、工作区、凭据、网络和 Provi
 | 主题 | 页面 | 主要问题 |
 | --- | --- | --- |
 | 代码地图 | [代码地图](/internals/code-map) | 目录职责、代表文件、新功能落点 |
-| 会话与持久化 | [会话与持久化](/internals/session) | 命令准入、队列、v2 存储、原子写入、标题与恢复 |
+| 会话与持久化 | [会话与持久化](/internals/session) | 命令准入、队列、旁聊、加密数据库、标题与恢复 |
 | 轮次、流式与重试 | [轮次、流式与重试](/internals/agent-loop) | 运行生命周期、SSE 分帧、重试与取消 |
 | 模型服务与凭据 | [模型服务与凭据](/internals/providers) | 注册与绑定、协议转换、密钥读取、账号校验 |
 | 系统提示词与上下文 | [系统提示词与上下文](/internals/prompt) | 指令分层、投影、预算与压缩 |
@@ -135,7 +135,7 @@ NativeSessionService：组装原生文件、工作区、凭据、网络和 Provi
 | 交互预览与 Web UI | [交互预览与 Web UI](/internals/preview) | 预览发布、验证与恢复；本地小程序与持久数据 |
 | 运行诊断与性能 | [运行诊断与性能](/internals/diagnostics) | 埋点、脱敏日志、导出 |
 
-面向使用者的说明见[模型服务与上下文](/guide/models)、[项目与共享工作区](/guide/projects)与 [PC 与 2in1](/guide/desktop)；扩展模型服务见[新增模型服务](/dev/add-provider)。
+面向使用者的说明见[模型服务与上下文](/guide/models)、[项目与共享工作区](/guide/projects)与[大屏工作台](/guide/desktop)；扩展模型服务见[新增模型服务](/dev/add-provider)。
 
 ## 代码入口
 

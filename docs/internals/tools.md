@@ -101,6 +101,10 @@ SessionResources.tools()
 
 完整版（`full`）在注册与只读过滤之后放行全部工具；自定义（`custom`）按能力整组关闭。`toolEnabled()` 对基础文件工具、记忆/Skills 工具始终返回真，其余名字按所属能力判断：能力内任一工具被禁用，整组都不再执行。保存的禁用列表会被 `normalizeDisabledTools()` 归一化为整组，旧配置只关闭部分成员时加载为整组关闭。同一限制同时作用于直接调用、编排子调用和团队员工。
 
+### 旁聊的目录
+
+旁聊不受会话能力开关影响，而是在 `SessionService.chatTools()` 外层再包一层固定白名单：只放行 `list_files`、`find_files`、`read_file`、`search_file_content` 与 `read_reference`。会话服务同时把旁聊视为只读，`RuleTools` 会过滤掉其余非只读分组；因此模型即使尝试写文件、联网、生成图片或查看看板，也只会得到 `TOOL_UNAVAILABLE` 或 `PERMISSION_DENIED`。旁聊与主会话共用工作区，读取仍受路径与版本校验约束。
+
 旧存档中已移除的 `generate_image`、`read_tool_result` 禁用记录会在加载时清除。`image_gen` 是当前版本的图片工具，不受旧 `generate_image` 记录影响。`publish_data_view` 已移除，其旧禁用项迁移为 `publish_preview`，继续保留原有预览能力开关。旧小程序工具 `list_mini_apps`、`publish_mini_app` 与实验室开关已在 v1.3.1 下线，禁用记录同样不再生效。旧工具发现记录不会恢复已移除入口；历史图表回执仍支持展示、CSV 导出及会话导出。
 
 MCP 已接受的完整工具结果保存在会话回执中，并原样进入模型请求；框架不再生成首尾预览或提供 `read_tool_result` 分页补读。超大结果同时占用上下文、内存与磁盘，仍受网络层和远端服务自身限制。编排子回执保留在工具详情并参与压缩时的文件操作证据汇总。

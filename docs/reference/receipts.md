@@ -38,7 +38,7 @@
 | 计划 | 校验后的结构化对象（步骤数组） |
 | 预览 | `published`、`path`、`title`、`nodes`、`screenshot` |
 | 文件交付 | `files[{path, description?}]` |
-| 图片生成 | `path`、`mime`、`bytes`、`files[{path}]` |
+| 图片生成 | `path`、`mime`、`bytes`（带“AI生成”标记与元数据后的文件大小）、`files[{path}]` |
 | 图片检查 | `path`、`mime` |
 | 生活看板 | 卡片清单与 `nextCursor`；卡片 `reference`、`configRevision`；看板的卡片引用与网格 |
 | 邮件 | `accounts[{accountId, name, allowBody}]`；查询的 `total`、`unread`、`matched`、`limited` 与抬头；正文的纯文本结果 |
@@ -130,6 +130,7 @@
 | `NOT_CONFIGURED` | 未配置可用的图片协议 | 当前图片服务的协议不在四种图片协议内 | `check_settings` |
 | `UNSUPPORTED_CONTENT` | 检查的图片类型不支持 | `view_image` 的目标不是 PNG/JPEG/WebP | `fix_path` |
 | `LIMIT_EXCEEDED` | 图片超过下载上限 | 生成的 Base64 超过 16 MiB | `inspect_service` |
+| `EXECUTION_FAILED` | 无法写入可见标记或元数据 | 图片解码、绘制“AI生成”或写入 XMP 失败；不会保存半成品文件 | `inspect_result_before_retry` |
 
 图片请求的连接超时 15 秒、生成读取 180 秒、下载 60 秒；服务返回的图片地址不跟随重定向。
 

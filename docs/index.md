@@ -34,11 +34,11 @@ features:
     link: /guide/web-and-skills
     linkText: 了解能力边界
   - title: 图片生成与检查
-    details: 为聊天服务配置图片模型后，用参考图生成或修改图片；视觉模型可用 view_image 检查结果，图片保存为工作区文件。
+    details: 为聊天服务配置图片模型后，用参考图生成或修改图片；结果带“AI生成”标记与 AIGC 元数据，可与参考图滑动对比，视觉模型可用 view_image 检查结果。
     link: /guide/chat#生成与编辑图片
     linkText: 了解图片生成
-  - title: 手机、平板与 2in1
-    details: 同一套会话与工具按窗口宽度切换布局；2in1 上提供命令面板、右键菜单、可拖动分栏与布局记忆。
+  - title: 大屏工作台与旁聊
+    details: 平板与 2in1 共用工作表布局，提供命令面板、会话详情、拖动自动收起与布局记忆；旁聊复用主会话工作区做只读追问，并可带回主会话。
     link: /guide/desktop
-    linkText: 了解 2in1
+    linkText: 了解大屏工作台
 ---

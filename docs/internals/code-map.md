@@ -37,14 +37,16 @@ scripts/               构建辅助、自动化测试与冒烟服务
 
 | 文件 | 说明 |
 | --- | --- |
-| `pages/Index.ets` | 唯一的页面入口：创建原生会话服务、持有抽屉与导航栈、把 `ChatPanel`、`ThreadList` 及各类面板组装成应用外壳；2in1 上还负责命令面板、分栏拖动与布局恢复 |
+| `pages/Index.ets` | 唯一的页面入口：创建原生会话服务、持有抽屉与导航栈、把 `ChatPanel`、`ThreadList` 及各类面板组装成应用外壳；大屏上还负责命令面板、会话详情、旁聊、分栏拖动与布局恢复 |
 
 ## views
 
 | 文件 | 说明 |
 | --- | --- |
 | `views/ChatPanel.ets` | 聊天主体：消息列表、输入区、附件与语音入口、上下文与推理强度控件、待发送面板挂载；桌面输入区尺寸与弹出层高度上限 |
-| `views/DesktopCommandDialog.ets` | 2in1 命令面板：会话与命令混合搜索、键盘选择 |
+| `views/DesktopCommandDialog.ets` | 大屏命令面板：会话与命令混合搜索、键盘选择 |
+| `views/GeneratedImageCard.ets` / `ImageCompare.ets` | 生成图片的等待、显现、参考图对比与打开 |
+| `views/SideChatPanel.ets` | 旁聊消息、草稿、发送、停止与删除 |
 | `views/MessageBubble.ets` | 单条消息的正文、执行时间线、工具行与操作栏；生成图片与图片检查的展示 |
 | `views/MarkdownView.ets` | Markdown 渲染入口 |
 | `views/MarkdownChunkView.ets` | 长内容分块挂载与渐显，代码块默认折叠 |
@@ -102,7 +104,9 @@ scripts/               构建辅助、自动化测试与冒烟服务
 | `services/ImageGenerationTools.ets` | `image_gen` 工具、参考图读取、输出保存与单独审批 |
 | `services/ImageInspectionTools.ets` | `view_image` 工具、JPEG 视觉副本与回执 |
 | `services/ImageGenerationProtocol.ets` | 四种图片协议的请求编码与响应解析 |
+| `services/GeneratedImageLabel.ets` | 生成图片的“AI生成”标记绘制与 AIGC 元数据嵌入 |
 | `services/NativeImageGenerator.ets` | 图片服务网络请求、超时、下载与错误映射 |
+| `services/NativeImageWorkspace.ets` | 工作区图片与会话照片的统一读取 |
 | `services/DesktopLayoutPreferences.ets` | 2in1 分栏宽度与收起状态的持久化 |
 | `services/LifePanelTools.ets` | 看板卡片、看板布局与刷新任务工具 |
 | `services/MailTools.ets` | 邮箱连接、查询与正文读取工具 |
@@ -140,6 +144,7 @@ scripts/               构建辅助、自动化测试与冒烟服务
 | `model/ProviderEndpoint.ets` | 聊天与图片协议的端点拼接、凭据作用域与图片同源校验 |
 | `model/ProviderProfiles.ets` | 服务配置实例、模型引用、图片服务解析、校验与迁移 |
 | `model/DesktopCommandPalette.ets` | 命令面板的搜索、排序与结果截断 |
+| `model/GeneratedImageMetadata.ets` | 生成图片的 TC260 AIGC XMP 字段与 PNG/JPEG/WebP 写入 |
 | `model/ConversationContext.ets` | 上下文窗口、输入预算、压缩规划 |
 | `model/ContextProjection.ets` | 完整历史到模型可见投影的切分 |
 | `model/SystemPrompt.ets` | 固定身份提示、运行规则与用户文档 |
@@ -168,7 +173,7 @@ scripts/               构建辅助、自动化测试与冒烟服务
 | `common/SendBubbleMotion.ets` | 发送气泡从输入区落入列表 |
 | `common/SpeechOrb.ets` / `VoiceHoldButton.ets` | 语音输入反馈与按住说话 |
 | `common/ProviderBrand.ets` / `WebsiteIcon.ets` | 服务商品牌与站点图标 |
-| `common/DeviceForm.ets` | 设备形态判断（`2in1`） |
+| `common/DeviceForm.ets` | 设备形态判断（手机、平板、2in1 与大屏组合） |
 | `common/PaneDivider.ets` | 可拖动分隔线、键盘调整、双击复位与桌面光标 |
 | `common/MaterialMenu.ets` | 材质菜单构建与设备能力降级 |
 
@@ -212,6 +217,7 @@ scripts/               构建辅助、自动化测试与冒烟服务
 | 新的模型协议 | `services/providers/`：请求体、请求头、端点后缀、流解析 | `validateProfile` 的协议白名单与 `applyReasoningEffort`，见[新增模型服务](/dev/add-provider) |
 | 新的图片协议 | `services/ImageGenerationProtocol.ets` 的请求编码与响应解析，`model/ProviderEndpoint.ets` 的后缀与同源规则 | 编辑器协议列表、`IMAGE_PROTOCOLS` 与图片工具测试 |
 | 新的桌面窗口行为 | `model/WorkbenchLayout.ets` 的几何与 `pages/Index.ets` 的窗口分支 | `services/DesktopLayoutPreferences.ets`、`test-tablet-workbench.cjs` |
+| 新的旁聊行为 | `services/SessionService.ets` 的创建、发送与带回；`views/SideChatPanel.ets` | `viewmodel/ChatViewModel.ets`、`model/Project.ets` 的校验、旁聊工具白名单 |
 | 新的内置模型服务预设 | `model/Provider.ets` 的 `builtinProviderInfos()` | 密钥入口链接、图标资源 `common/ProviderBrand.ets` |
 | 新的工具 | `services/*Tools.ets` 并注册进 `ToolSet` | 工具分组 `model/ToolGroups.ets`、审批与只读规则，见[新增工具](/dev/add-tool) |
 | 新的界面文案 | `locales/*.json` | 运行 `node scripts/build-locales.cjs`，见[词条维护](/dev/i18n) |

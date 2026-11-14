@@ -103,7 +103,8 @@ UIAbility 的 `filesDir` 保留旧版会话和用量，并存放诊断日志。�
 - 路径为 `workspace/<workspaceId>`：普通会话用会话 ID，项目会话用项目的稳定 `workspaceId`（新建时为 `project-<uuid>`）。目录在首次进入会话或创建项目时建立，已有会话启动时自动补建。
 - 工作区工具只能读写该目录内的相对路径，拒绝符号链接与越界；写入通过 `.tinybot-<uuid>.tmp` 临时文件和重命名完成，列表会过滤这类内部项。
 - `.tinybot-review/` 保存被修改文件的原始基线（`{path, existed, content}`，私有文件名用 URL 编码后的相对路径）。共享文件的备份也在此目录，文件名用 `shared-<URI的SHA-256摘要>.json`，并记录 `sourceUri` 绑定原文件，避免挂载改名或替换后误用。写入无需确认保留；已有文件备份可通过文件页“更多操作”菜单恢复或导出，成功恢复后对应基线删除。这些本地备份元数据不进入普通工作区备份。
-- `generated-images/` 保存 `image_gen` 每次调用生成的图片，文件名是随机 UUID 加扩展名。它们是普通工作区文件，可浏览、分享、导出、被再次修改引用，也会随完整备份保存；重复调用不会覆盖旧版本，删除需要手动进行。
+- `generated-images/` 保存 `image_gen` 每次调用生成的图片，文件名是随机 UUID 加扩展名。写入前会在右下角绘制“AI生成”标记，并在 PNG iTXt、JPEG APP1 或 WebP XMP 中写入 TC260 AIGC 字段（`Label`、`ContentProducer`、`ProduceID`、`ReservedCode1`、`ContentPropagator`、`PropagateID`、`ReservedCode2`）。它们是普通工作区文件，可浏览、分享、导出、被再次修改引用，也会随完整备份保存；重复调用不会覆盖旧版本，删除需要手动进行。
+- 旁聊与主会话使用同一个 `workspaceId`（项目会话用项目目录，普通会话用主会话 ID），因此旁聊只能读取主会话工作区，不产生独立目录。旁聊作为一条带 `sideChatContext` 的会话记录存入数据库，不出现在会话列表中；删除主会话会一并删除它的旁聊。
 - `mini-apps/` 保留已下线小程序的页面、版本历史与用户原始文件，仍随完整备份保存。
 - 删除会话不删除工作区；项目在当前版本只有创建与编辑，没有删除入口。卸载应用或清除应用数据才会删除这些文件。
 - 单个工作区及备份的容量、索引和文件数量不设应用固定上限，二进制内容分块读写，实际受设备内存和存储约束。
@@ -140,7 +141,7 @@ envelope 的可选 `protectedKeys` 区域为 `{version:2,salt,iv,ciphertext}`，
 | 单个工作区 | 没有应用级上限 | 只受设备存储限制 |
 | 单条消息附件 | 10 个 | 导入与记录校验共用同一上限 |
 | 单张图片 | 原始 20 MB、8000 万像素；保存后 4 MB | 最长边缩到 1600 px、JPEG 质量 85 |
-| 图片生成 | 输入参考图与输出图片各最多 16 MiB | 参考图最多 4 张；输出只接受 PNG/JPEG/WebP |
+| 图片生成 | 输入参考图与输出图片各最多 16 MiB | 参考图最多 4 张；输出只接受 PNG/JPEG/WebP，写入前附加“AI生成”标记与 XMP 元数据 |
 | 单份文档 | 无应用级大小上限 | 按原字节复制；读取预算由文本分页控制 |
 | 会话记录 | 没有应用级条数上限 | 长文本按块存入 ArkData |
 | 用量账本 | 没有条数上限 | 每页 256 条，按需追加 |
@@ -177,4 +178,5 @@ envelope 的可选 `protectedKeys` 区域为 `{version:2,salt,iv,ciphertext}`，
 | `entry/src/main/ets/services/DeveloperDiagnostics.ets` | 诊断日志轮转、导出与清除 |
 | `entry/src/main/ets/services/NativeActions.ets` | 分享副本与本地导出临时文件 |
 | `entry/src/main/ets/services/ImageGenerationTools.ets` | 生成图片写入工作区 `generated-images/` |
+| `entry/src/main/ets/services/GeneratedImageLabel.ets`、`model/GeneratedImageMetadata.ets` | “AI生成”标记与 XMP AIGC 元数据写入 |
 | `entry/src/main/ets/services/DesktopLayoutPreferences.ets` | `tinybot-ui` 中的分栏键读写 |

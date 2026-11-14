@@ -12,9 +12,9 @@
 | 发布包架构 | 仅 `arm64-v8a` | `docs/distribution/START-HERE.txt` |
 | 模拟器 | 使用单独构建的调试包（含 `x86_64`），不随正式包分发 | `docs/distribution/START-HERE.txt` |
 
-当前版本为 1.3.1 / 1003001，包名 `com.sudojacky.tinybot`。应用不内置模型额度，也不在设备内运行大模型；模型能力、费用与可用性由你配置的模型服务（Provider）决定。
+当前版本为 1.3.2 / 1003002，包名 `com.sudojacky.tinybot`。应用不内置模型额度，也不在设备内运行大模型；模型能力、费用与可用性由你配置的模型服务（Provider）决定。
 
-在 2in1 设备上，应用以可缩放窗口运行，最小窗口为 360 × 420 vp；窗口宽度达到 720 vp 时进入工作表布局，键盘、鼠标、右键菜单与命令面板的用法见 [PC 与 2in1](/guide/desktop)。
+在 2in1 设备上，应用以可缩放窗口运行，最小窗口为 360 × 420 vp；窗口宽度达到 720 vp 时进入工作表布局。平板使用 840 vp 断点，两者共用命令面板、会话详情与旁聊，见[大屏工作台](/guide/desktop)。
 
 ### HarmonyOS 6 上的能力差异
 
@@ -29,7 +29,7 @@
 | 来源 | 产物 | 前置条件 |
 | --- | --- | --- |
 | 华为应用市场 | 已签名的发布包 | 应用已上架且对该设备可见；上架状态、年龄分级与发布地区以市场页面为准 |
-| 交付目录 | `packages/Tinybot-<版本>-<versionCode>-release-UNSIGNED.app`（当前为 `Tinybot-1.3.1-1003001-release-UNSIGNED.app`） 与同名 `.hap` | 需完成正式签名后才能安装或提交审核 |
+| 交付目录 | `packages/Tinybot-<版本>-<versionCode>-release-UNSIGNED.app`（当前为 `Tinybot-1.3.2-1003002-release-UNSIGNED.app`） 与同名 `.hap` | 需完成正式签名后才能安装或提交审核 |
 | 本地构建 | `entry/build/default/outputs/default/entry-default-unsigned.hap` | 需要 DevEco Studio API 26 SDK 与 DevEco CLI，见[环境、构建与签名](/dev/setup) |
 
 交付目录由准备脚本生成：

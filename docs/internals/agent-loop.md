@@ -91,6 +91,15 @@ finally：interruptTools(turn.steps)
 | 连接超时 | 15 秒 | `ProtocolProvider` |
 | 流空闲超时 | 120 秒，每次非空数据重置 | `STREAM_IDLE_TIMEOUT_MS` |
 
+## 思考与拒答检查
+
+推理增量与正文走不同的检查链：
+
+- `reasoning_delta` 收到就写入 `step.reasoningContent` 并发布给界面，不经过输出词过滤，也不等待正文通过拒答检查；首个推理片段到达时过程区就显示“正在思考”。
+- 正文前缀仍由 `ContentGuardStream` 暂存，直到不可能构成固定拒答句；输出词匹配只作用于正文，不处理思考。
+- 如果最终正文等于固定拒答，本轮以拒答结束，流式到达的思考不会写回步骤，也不会保存；正常回答则保留思考并在重新打开会话后可展开。
+- 这条规则同时适用于 Responses 的思考摘要与 Anthropic 的 `thinking_delta`。
+
 ## SSE 分帧与工具参数组装
 
 `ChatStream` 自己维护缓冲区，因此分块边界可以落在任意字节上，包括 CRLF 中间：

@@ -57,7 +57,7 @@ export default defineConfig({
         {
           text: '其他',
           items: [
-            { text: 'PC 与 2in1', link: '/guide/desktop' },
+            { text: '大屏工作台（平板与 2in1）', link: '/guide/desktop' },
             { text: '设置、外观与用量', link: '/guide/settings' },
             { text: '隐私与用户协议', link: '/guide/privacy' },
             { text: '常见问题', link: '/guide/troubleshooting' }

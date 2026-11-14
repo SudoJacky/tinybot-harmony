@@ -1,6 +1,6 @@
 # 会话与持久化
 
-这一页说明谁拥有会话（Session）数据、哪些命令能改它、待发送队列（queue）如何调度，以及会话如何以 v2 布局原子落盘、在中断后如何恢复。
+这一页说明谁拥有会话（Session）数据、哪些命令能改它、待发送队列（queue）如何调度，以及会话如何写入本机加密数据库、在中断后如何恢复。
 
 ## SessionService 的职责
 
@@ -131,9 +131,22 @@ export interface SessionRepository {
 | `compaction` | 上下文压缩检查点 |
 | `titleEdited`、`pinned`、`archived` | 标题归属与列表状态 |
 | `parentThreadId`、`parentMessageId` | 分支来源 |
+| `sideChatContext` | 旁聊创建时捕获的主会话快照（≤8000 字符），存在即表示这是一条旁聊 |
 | `teamEnabled`、`teams` | 团队开关与运行记录 |
 
 `parseAppData()` 在加载时校验这些字段；任何一项不合法都会拒绝整份数据并保留原记录，而不是丢弃部分会话。
+
+## 旁聊
+
+旁聊是一条带 `sideChatContext` 的普通会话记录，由 `createSideChat(parentId)` 创建：
+
+- 主会话必须是当前活动会话、未归档且至少有一条消息；新旁聊继承主会话的 `projectId`、模型、推理强度与工具审批模式，标题固定为“旁聊”。
+- `sideChatContext` 取主会话最近的完整轮次（`captureThreadReference()` 的文本，最多 8000 字符）；没有完整回答时取首条用户消息的前 8000 字符。创建后不再随主会话更新。
+- 旁聊与主会话共用 `workspaceId`（项目目录或主会话工作区），`ensureThreadWorkspace()` 使用 `workspaceIdFor()` 而不是新建目录。它被标记为只读，工具目录被 `chatTools()` 收窄为 `list_files`、`find_files`、`read_file`、`search_file_content` 与 `read_reference`。
+- `runTasks()` 支持传入目标会话；旁聊有自己的 `ThreadExecution`，可独立运行与停止。它不处理 `/team` 与 `$` Skill 命令、不生成标题、不记录审批模式，并在指令段加入 `side_chat` 段落，说明引用的主会话文本是资料而不是新任务。
+- 旁聊不出现在 `filteredThreads()`、引用候选与命令面板中，`selectThread()` 拒绝把它设为当前主会话；默认模型与推理强度的全局更新也会跳过旁聊。
+- `bringBackSideChat()` 走 `referenceThread(id, true)`：要求旁聊至少有一条完整回答、主会话空闲，把它的快照作为会话引用加入主会话，不清空主会话草稿，也不删除旁聊。
+- 删除主会话时，`deleteThreads()` 会把它名下的旁聊一起删除；单独删除旁聊不影响主会话。备份按普通会话序列化旁聊，恢复时 `validateProjects()` 要求主会话存在、不是旁聊且属于同一项目。
 
 ## 存储布局与迁移
 
@@ -228,4 +241,5 @@ export interface SessionRepository {
 | `entry/src/main/ets/model/ConversationTitle.ets` | 标题提示词、截断与清洗 |
 | `entry/src/main/ets/model/BackupRestore.ets` | 恢复时的服务与 MCP 重映射 |
 | `entry/src/main/ets/services/Backup.ets` | 备份封装与资源打包 |
-| `entry/src/main/ets/viewmodel/ChatViewModel.ets` | 草稿防抖与命令转发 |
+| `entry/src/main/ets/viewmodel/ChatViewModel.ets` | 草稿防抖与命令转发；旁聊的创建、发送与带回 |
+| `entry/src/main/ets/views/SideChatPanel.ets` | 旁聊消息列表、草稿、发送、停止与删除 |

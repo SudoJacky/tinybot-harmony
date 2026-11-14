@@ -8,6 +8,7 @@
 - `SelectedTools` 按会话的 `agentMode`/`disabledTools` 过滤，`RuleTools` 再按只读规则过滤；团队员工的 `EmployeeTools` 另按 `toolProfile` 收窄。三者与“服务是否配置”取交集。
 - 已启用、已配置且通过只读、会话选择和角色过滤的工具，从首次请求起直接提供完整 schema 和使用说明，按名称稳定排序；`tool_search` 默认不提供。附件、引用和员工交接仍按对应资源及角色加入。旧发现回执保留为历史，不影响当前目录。
 - 参数对象默认 `additionalProperties: false`：出现未声明字段按参数错误处理，不是忽略。
+- 旁聊的工具目录被收窄为只读的 `list_files`、`find_files`、`read_file`、`search_file_content` 与 `read_reference`；写文件、网页与浏览器、图片、看板、邮件、Skills、团队与 MCP 工具都不提供。
 - 旧版 `generate_image`、`read_tool_result` 与 `publish_data_view` 已从目录移除，历史图表回执仍能显示、导出 CSV 及参与会话导出。`image_gen` 是当前版本的图片工具，与旧 `generate_image` 不是同一个入口，旧禁用记录不会影响它；新图表、表格和指标卡统一写入 HTML/JS/SVG，再以 `publish_preview` 发布。
 
 ## 能力分组
@@ -97,7 +98,7 @@
 
 | 工具 | 用途 | 参数 | 约束与回执 |
 | --- | --- | --- | --- |
-| `image_gen` | 生成或编辑图片 | `prompt` 必填（1–32000 字符）；`reference_images` 最多 4 个工作区相对路径或本对话照片引用；`aspect_ratio` 为 `1:1`/`3:2`/`2:3`；`transparent_background` 仅在 OpenAI Images 协议下可用 | 参考图须为 PNG/JPEG/WebP，合计不超过 16 MiB，重复路径直接拒绝；每次调用生成一张，写入 `generated-images/<uuid>.<ext>`；回执 `{path, mime, bytes, files:[{path}]}`；调用前单独确认服务、地址、提示词与参考图 |
+| `image_gen` | 生成或编辑图片 | `prompt` 必填（1–32000 字符）；`reference_images` 最多 4 个工作区相对路径或本对话照片引用；`aspect_ratio` 为 `1:1`/`3:2`/`2:3`；`transparent_background` 仅在 OpenAI Images 协议下可用 | 参考图须为 PNG/JPEG/WebP，合计不超过 16 MiB，重复路径直接拒绝；每次调用生成一张，写入 `generated-images/<uuid>.<ext>`；保存前在右下角绘制“AI生成”标记并写入 XMP AIGC 元数据，回执 `{path, mime, bytes, files:[{path}]}` 中的 `bytes` 是标记后的文件大小；标记失败报 `EXECUTION_FAILED`，不保存半成品；调用前单独确认服务、地址、提示词与参考图 |
 | `view_image` | 把本地图片交给视觉模型检查 | `path` 必填，工作区相对路径或本对话照片引用 | 只接受 PNG/JPEG/WebP；另存最长边 1600 px 的 JPEG 副本并作为额外用户消息发送；文字回执 `{path, mime}`；不修改源文件，也不能确认透明通道 |
 
 图片请求与响应格式由图片协议决定，失败码与恢复建议见[回执与错误](/reference/receipts)。配置与图片模型选择见[图片生成服务](/guide/models#图片生成服务)。
