@@ -2623,16 +2623,18 @@ async function test(name, run) {
       console.log('  '+scenario+': '+bytes.byteLength+' wire bytes, '+Buffer.byteLength(thought)+' reasoning bytes, saved and reloaded');
     }
   });
-  await test('Responses reasoning reaches the live process after the answer rules out a refusal and survives reload', async () => {
+  await test('Responses signals thinking before the answer and releases reasoning only after a refusal is ruled out', async () => {
     const {ProtocolProvider}=load(path.join(source,'services/providers/ProtocolProvider'));
     const {ProviderRegistry}=load(path.join(source,'services/providers/ProviderRegistry'));
     const {runAgentLoop}=load(path.join(source,'services/AgentLoop'));
     const {ThreadViewModel}=load(path.join(source,'viewmodel/SessionViewModels'));
     const {buildTimeline}=load(path.join(source,'model/ProcessPresentation'));
+    const {CONTENT_GUARD_REFUSAL}=load(path.join(source,'model/ContentGuard'));
     const registry=new ProviderRegistry();
     registry.register(new ProtocolProvider({id:'responses-thinking',name:'Responses',protocol:'responses',defaultBaseUrl:'https://fixture.invalid/v1',defaultModel:'gpt-5.2'}, providerEffects));
-    for(const style of ['summary','content']) {
+    for(const style of ['summary','content','refusal']) {
       const turn={content:'',steps:[]},deltas=[];
+      let reasoningStarts=0;
       const data=model.emptyData();data.activeThreadId='responses-'+style;
       data.threads=[{id:data.activeThreadId,title:'Responses thinking',updatedAt:1,messages:[{id:'u',role:'user',content:'fixture',status:'complete',error:''},
         {id:'a',role:'assistant',content:'',status:'generating',error:'',steps:turn.steps}]}];
@@ -2645,24 +2647,40 @@ async function test(name, run) {
         assert.equal(JSON.parse(request.options.extraData).reasoning.summary,'auto');assert.equal(JSON.parse(request.options.extraData).reasoning.effort,'high');
         request.callback(null,200);
         const emit=value=>{const bytes=Buffer.from('data: '+JSON.stringify(value)+'\n\n');for(let i=0;i<bytes.length;i+=7)request.emit('dataReceive',Uint8Array.from(bytes.subarray(i,i+7)).buffer);};
-        const type=style==='summary'?'response.reasoning_summary_text':'response.reasoning_text';
-        const coordinates=style==='summary'?{output_index:0,summary_index:0}:{output_index:0,content_index:0};
+        const type=style==='content'?'response.reasoning_text':'response.reasoning_summary_text';
+        const coordinates=style==='content'?{output_index:0,content_index:0}:{output_index:0,summary_index:0};
+        emit({type:'response.created',response:{status:'in_progress'}});
+        assert.equal(reasoningStarts,0);
         emit({type:type+'.delta',...coordinates,delta:'先检查输入，'});
         emit({type:type+'.delta',...coordinates,delta:'再核对结果。'});
         assert.equal(thread.messages[1].content,'','answer is still empty while thinking streams');
+        assert.equal(reasoningStarts,1,'The first reasoning delta signals activity before any answer arrives');
         assert.equal(thread.messages[1].stepViews[0].reasoningContent,'','reasoning is held while a refusal remains possible');
         emit({type:type+'.done',...coordinates,text:'先检查输入，再核对结果。'});
-        emit({type:'response.output_text.delta',delta:'最终回答。'});
-        assert.equal(thread.messages[1].stepViews[0].reasoningContent,'先检查输入，再核对结果。');
-        const thinking=buildTimeline(thread.messages[1].stepViews)[0];assert.equal(thinking.kind,'process');assert.equal(thinking.items[0].tool,-1);
+        const answer=style==='refusal'?CONTENT_GUARD_REFUSAL:'最终回答。';
+        emit({type:'response.output_text.delta',delta:answer});
+        if(style==='refusal') {
+          assert.equal(deltas.length,0);
+        } else {
+          assert.equal(thread.messages[1].stepViews[0].reasoningContent,'先检查输入，再核对结果。');
+          const thinking=buildTimeline(thread.messages[1].stepViews)[0];assert.equal(thinking.kind,'process');assert.equal(thinking.items[0].tool,-1);
+        }
         const item={type:'reasoning',summary:[],encrypted_content:'must-not-display'};
-        item[style]=[{type:style==='summary'?'summary_text':'reasoning_text',text:'先检查输入，再核对结果。'}];
-        emit({type:'response.completed',response:{status:'completed',output:[item,{type:'message',content:[{type:'output_text',text:'最终回答。'}]}]}});
+        item[style==='content'?'content':'summary']=[{type:style==='content'?'reasoning_text':'summary_text',text:'先检查输入，再核对结果。'}];
+        emit({type:'response.completed',response:{status:'completed',output:[item,{type:'message',content:[{type:'output_text',text:answer}]}]}});
         request.emit('dataEnd');
       };
       await runAgentLoop({model:bound,messages:[{role:'user',content:'fixture'}],tools:{definitions:()=>[],execute:async()=>{throw Error('Unexpected tool');}},turn,maxSteps:1},new Cancellation(),{
-        event:event=>{update();if(event.type==='reasoning_delta')deltas.push(event.delta);},checkpoint:async()=>{update();await repository.save(data);}
+        event:event=>{update();if(event.type==='reasoning_start'){assert.equal(event.delta,undefined);reasoningStarts++;}if(event.type==='reasoning_delta')deltas.push(event.delta);},
+        checkpoint:async()=>{update();await repository.save(data);}
       });
+      assert.equal(reasoningStarts,1);
+      if(style==='refusal') {
+        assert.equal(deltas.length,0);
+        assert.equal(turn.content,CONTENT_GUARD_REFUSAL);
+        assert.equal(turn.steps[0].reasoningContent,undefined);
+        continue;
+      }
       assert.equal(deltas.join(''),'先检查输入，再核对结果。','done/completed must not duplicate thought text');
       data.threads[0].messages[1].status='complete';update();await repository.save(data);
       const restored=new ThreadViewModel((await new ConversationStore(root).load()).threads[0]);

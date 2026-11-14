@@ -143,7 +143,8 @@ export class ChatViewModel {
       }
       if (event.kind === 'message' && event.message) {
         const thread = this.threads.find((thread) => thread.id === event.threadId);
-        thread?.messages.find((message) => message.id === event.message?.id)?.update(event.message);
+        const message = thread?.messages.find((item) => item.id === event.message?.id);
+        if (message) { message.reasoningPending = false; message.update(event.message); }
         thread?.refreshPreviews();
       }
       if (event.kind === 'tool' && event.tool) {
@@ -152,9 +153,11 @@ export class ChatViewModel {
         if (event.tool.status === 'complete' && (event.tool.call.function.name === 'publish_preview' ||
           (event.tool.children || []).some((child) => child.call.function.name === 'publish_preview'))) { thread?.refreshPreviews(); }
       }
-      if (event.kind === 'reasoning') {
+      if (event.kind === 'reasoning-start' || event.kind === 'reasoning') {
         const message = this.threads.find((thread) => thread.id === event.threadId)?.messages.find((item) => item.id === event.messageId);
-        if (message) {
+        if (message && event.kind === 'reasoning-start') {
+          message.reasoningPending = message.status === 'generating' && event.step === message.stepViews.length - 1;
+        } else if (message) {
           message.updateReasoning(event.step || 0, event.stepContent || '');
         }
       }
@@ -164,7 +167,7 @@ export class ChatViewModel {
           message.updateText(event.content || '', event.step || 0, event.stepContent || '');
         }
       }
-      if (['text', 'reasoning', 'message', 'tool', 'snapshot', 'thread', 'teams'].includes(event.kind)) {
+      if (['text', 'reasoning-start', 'reasoning', 'message', 'tool', 'snapshot', 'thread', 'teams'].includes(event.kind)) {
         if (!event.threadId || event.threadId === this.active.id) { this.outputs.get(this.active.id)?.(); }
       }
     } finally { if (Diagnostics.recording) { Diagnostics.end('viewmodel.project', diagnosticMark); } }

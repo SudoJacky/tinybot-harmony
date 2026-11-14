@@ -77,6 +77,7 @@ export class MessageViewModel {
   // while newly loaded history starts with compact defaults.
   processOpen: boolean = false;
   usageOpen: boolean = false;
+  reasoningPending: boolean = false;
   disclosures: DisclosureStore = new DisclosureStore();
   // Aggregate only when requested; token updates must not concatenate all prior thoughts.
   get reasoningContent(): string {
@@ -152,7 +153,7 @@ export class MessageViewModel {
     this.uiStates = data.uiStates || [];
     this.references = data.references || [];
     this.id = data.id; this.role = data.role; this.content = data.content; this.status = data.status; this.error = data.error;
-    if (data.status !== 'generating') { this.imageRevealId = ''; }
+    if (data.status !== 'generating') { this.imageRevealId = ''; this.reasoningPending = false; }
     this.attachments = data.attachments || [];
     this.annotations = data.annotations || [];
     this.modelRef = data.modelRef; this.steps = data.steps || [];

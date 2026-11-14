@@ -76,7 +76,7 @@ class BoundModel implements ModelSession {
     const onReasoning = options?.onReasoning;
     const reasoning = matcher && onReasoning ? new OutputWordGuard(matcher, 'reasoning', onReasoning) : undefined;
     const guard = new ContentGuardStream(answer ? (text) => answer.push(text) : onText,
-      reasoning ? (text) => reasoning.push(text) : onReasoning);
+      reasoning ? (text) => reasoning.push(text) : onReasoning, options?.onReasoningStart);
     const response = await this.provider.stream({ baseUrl: this.baseUrl, model: this.model, apiKey: key,
       usageOrigin: origin,
       messages: messages, tools: tools, maxOutputTokens: options?.maxOutputTokens,

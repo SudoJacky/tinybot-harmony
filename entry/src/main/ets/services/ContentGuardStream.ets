@@ -8,10 +8,12 @@ export class ContentGuardStream {
   private open: boolean = false;
   private onText: (text: string) => void;
   private onReasoning?: (text: string) => void;
+  private onReasoningStart?: () => void;
 
-  constructor(onText: (text: string) => void, onReasoning?: (text: string) => void) {
+  constructor(onText: (text: string) => void, onReasoning?: (text: string) => void, onReasoningStart?: () => void) {
     this.onText = onText;
     this.onReasoning = onReasoning;
+    this.onReasoningStart = onReasoningStart;
   }
 
   pushText(text: string): void {
@@ -23,7 +25,14 @@ export class ContentGuardStream {
 
   pushReasoning(text: string): void {
     if (this.open) { this.onReasoning?.(text); }
-    else if (this.onReasoning) { this.reasoning += text; }
+    else {
+      if (this.onReasoningStart && text.trim()) {
+        const started = this.onReasoningStart;
+        this.onReasoningStart = undefined;
+        started();
+      }
+      if (this.onReasoning) { this.reasoning += text; }
+    }
   }
 
   finish(answer: string): boolean {

@@ -77,6 +77,18 @@ for (const status of ['stopped', 'failed', 'complete']) assert.equal(turnPhase(s
 // grouping, long later thoughts, whitespace removal and a completed publication.
 const streaming = new MessageViewModel({ id: 'stream', role: 'assistant', content: '', error: '', status: 'generating',
   steps: [step('', [], '')] });
+chat.threads = [{ id: 'thinking-thread', messages: [streaming], refreshPreviews() {} }];
+const thinkingStart = { kind: 'reasoning-start', state, threadId: 'thinking-thread', messageId: streaming.id, step: 0 };
+chat.project(thinkingStart);
+assert.equal(turnPhase(streaming.status, streaming.stepViews, streaming.reasoningPending), 'thinking');
+assert.equal(streaming.reasoningContent, '');
+const retry = step();
+retry.retries = [{ waiting: true, attempt: 1, delayMs: 1000 }];
+chat.project({ kind: 'message', state, threadId: thinkingStart.threadId,
+  message: { id: streaming.id, role: 'assistant', content: '', error: '', status: 'generating', steps: [retry] } });
+assert.equal(turnPhase(streaming.status, streaming.stepViews, streaming.reasoningPending), 'retry');
+chat.project(thinkingStart);
+assert.equal(turnPhase(streaming.status, streaming.stepViews, streaming.reasoningPending), 'thinking');
 streaming.updateReasoning(0, 'First thought');
 assert.equal(streaming.timeline[0].items[0].tool, -1);
 const thoughtTimeline = streaming.timeline;
@@ -103,9 +115,9 @@ const emitted = path.resolve(__dirname, '../entry/build/default/cache/default/de
 assert.ok(fs.statSync(emitted).mtimeMs >= fs.statSync(source).mtimeMs, 'Build before testing');
 const tree = ts.createSourceFile(emitted, fs.readFileSync(emitted, 'utf8'), ts.ScriptTarget.Latest, true);
 const component = tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'MessageBubble');
-const methods = ['aboutToAppear', 'syncWorkflow', 'timeline', 'foldable', 'folded', 'entryVisible', 'traceState'];
+const methods = ['aboutToAppear', 'syncWorkflow', 'timeline', 'foldable', 'folded', 'entryVisible', 'traceState', 'workflowLabel', 'awaitingModel'];
 const context = { exports: {}, ...load(path.join(root, 'model/ProcessPresentation')),
-  stepDisplayContent: s => s.content, Motion: { standard: 'ease' } };
+  t: text => text, stepDisplayContent: s => s.content, Motion: { standard: 'ease' } };
 vm.runInNewContext(ts.transpileModule(`class Probe { ${component.members.filter(n => methods.includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')} } exports.Probe = Probe;`,
   { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, context);
 const messageData = { id: 'workflow', role: 'assistant', content: '', error: '', status: 'generating', steps: [step('', [tool('read')])] };
@@ -113,6 +125,15 @@ const message = new MessageViewModel(messageData);
 const calls = [];
 const probe = Object.assign(new context.exports.Probe(), { message, turnStatus: 'generating', workflowCollapsed: false,
   getUIContext: () => ({ animateTo: (options, update) => { calls.push(options); update(); } }) });
+const firstStep = new MessageViewModel({ ...messageData, steps: [step()] });
+probe.message = firstStep;
+assert.equal(probe.workflowLabel(), '等待模型响应');
+assert.equal(probe.awaitingModel(), true);
+firstStep.reasoningPending = true;
+assert.equal(probe.workflowLabel(), '正在思考');
+assert.equal(probe.awaitingModel(), false);
+assert.equal(firstStep.timeline.length, 0, 'The waiting-state signal carries no unapproved reasoning');
+probe.message = message;
 probe.aboutToAppear();
 const capturedGroup = probe.timeline()[0];
 messageData.steps[0].tools[0].status = 'complete';

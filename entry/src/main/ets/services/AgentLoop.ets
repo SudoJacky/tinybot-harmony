@@ -43,7 +43,7 @@ export interface ToolInvocationContext {
   workspaceWrite?: 'none' | 'text';
 }
 
-export type LoopEventType = 'step_start' | 'text_delta' | 'reasoning_delta' | 'model_end' | 'tool_start' | 'tool_end' | 'step_end' | 'request_retry';
+export type LoopEventType = 'step_start' | 'text_delta' | 'reasoning_start' | 'reasoning_delta' | 'model_end' | 'tool_start' | 'tool_end' | 'step_end' | 'request_retry';
 
 export interface LoopEvent {
   type: LoopEventType;
@@ -138,6 +138,9 @@ export async function runAgentLoop(context: LoopContext, cancellation: Cancellat
             observer.event({ type: 'text_delta', step: round, delta: text });
           }, {
             usageStep: round + 1,
+            onReasoningStart: () => {
+              if (acceptingText && !cancellation.cancelled) { observer.event({ type: 'reasoning_start', step: round }); }
+            },
             onReasoning: (text: string) => {
               if (!acceptingText || cancellation.cancelled) { return; }
               step.reasoningContent = (step.reasoningContent || '') + text;
