@@ -3,7 +3,7 @@ import { AgentStep, ToolExecution, toolReceipts } from './Agent';
 export interface PresentedFile { path: string; description?: string; generatedImage?: boolean; }
 interface DeliveryReceipt { files?: PresentedFile[]; }
 interface ImageArguments { aspect_ratio?: string; reference_images?: string[]; }
-export interface ImageDelivery { id: string; path: string; ratio: number; references?: string[]; }
+export interface ImageDelivery { id: string; path: string; ratio: number; references?: string[]; compareReference?: string; }
 
 function receiptFiles(tool: ToolExecution, generated: boolean): PresentedFile[] {
   try {
@@ -24,11 +24,11 @@ function requestedImageRatio(ratio?: string): number {
   return ratio === '3:2' ? 3 / 2 : ratio === '2:3' ? 2 / 3 : 1;
 }
 
-export function imageDeliveries(steps: AgentStep[], active: boolean): ImageDelivery[] {
-  const images: ImageDelivery[] = [];
-  const paths = new Set<string>();
-  steps.forEach((step, index) => {
-    for (const tool of toolReceipts(step.tools)) {
+export function latestImageDelivery(steps: AgentStep[], active: boolean): ImageDelivery | undefined {
+  for (let index = steps.length - 1; index >= 0; index--) {
+    const tools = toolReceipts(steps[index].tools);
+    for (let position = tools.length - 1; position >= 0; position--) {
+      const tool = tools[position];
       if (tool.call.function.name !== 'image_gen') { continue; }
       const id = index + '-' + tool.call.id;
       if (active && tool.status === 'running') {
@@ -36,20 +36,26 @@ export function imageDeliveries(steps: AgentStep[], active: boolean): ImageDeliv
         const refs = args.reference_images;
         const delivery: ImageDelivery = { id: id, path: '', ratio: requestedImageRatio(args.aspect_ratio) };
         if (Array.isArray(refs) && refs.length > 0 && refs.length <= 4 &&
-          refs.every((path) => typeof path === 'string' && path.length > 0)) { delivery.references = refs; }
-        images.push(delivery);
+          refs.every((path) => typeof path === 'string' && path.length > 0)) {
+          delivery.references = refs;
+          if (refs.length === 1) { delivery.compareReference = refs[0]; }
+        }
+        return delivery;
       } else if (tool.status === 'complete') {
-        const ratio = requestedImageRatio(imageArguments(tool).aspect_ratio);
-        receiptFiles(tool, true).forEach((file, fileIndex) => {
-          if (paths.has(file.path)) { return; }
-          paths.add(file.path);
-          images.push({ id: fileIndex === 0 ? id : id + '-' + fileIndex,
-            path: file.path, ratio: ratio });
-        });
+        const files = receiptFiles(tool, true);
+        if (files.length) {
+          const args = imageArguments(tool);
+          const refs = args.reference_images;
+          const delivery: ImageDelivery = { id: id, path: files[files.length - 1].path, ratio: requestedImageRatio(args.aspect_ratio) };
+          if (Array.isArray(refs) && refs.length === 1 && typeof refs[0] === 'string' && refs[0]) {
+            delivery.compareReference = refs[0];
+          }
+          return delivery;
+        }
       }
     }
-  });
-  return images;
+  }
+  return undefined;
 }
 
 export function deliveredFiles(steps: AgentStep[]): PresentedFile[] {

@@ -6,12 +6,21 @@ import { Radius } from '../common/Theme';
 import { Diagnostics } from '../model/Diagnostics';
 import { t } from '../model/I18n';
 import { Cancellation } from '../services/Cancellation';
+import { ImageCompare } from './ImageCompare';
 
-const REVEAL_MS = 500;
+const REVEAL_MS = 1020;
+const REVEAL_HOLD = 0.14;
 const PREVIEW_EDGE = 1024;
-const MOSAIC_EDGES: number[] = [20, 32, 52, 86, 144, 240];
+const MOSAIC_EDGES: number[] = [18, 54, 150];
 const REFERENCE_EDGE = 192;
 const MAX_REFERENCE_PIXELS = 24 * 1024 * 1024;
+type ReferenceReader = (path: string, signal: Cancellation) => Promise<Uint8Array>;
+
+interface DecodedReference {
+  pixel: image.PixelMap;
+  aspect: number;
+}
+
 const QUEUED_MOSAIC: string[][] = [
   ['#BDBDCC', '#BCBDCD', '#C5C3D1', '#D2CCD7', '#C9C7D4', '#C0C2D1', '#B9BECE'],
   ['#B9BBCB', '#BDBECD', '#C6C5D2', '#C8C6D3', '#C0C2D0', '#BCBFCE', '#B7BCCC'],
@@ -28,20 +37,25 @@ export struct GeneratedImageCard {
   @Prop @Watch('pathChanged') path: string = '';
   @Prop ratio: number = 1;
   @Prop cardId: string = '';
+  @Prop compareReference: string = '';
   references: string[] = [];
-  readReference?: (path: string, signal: Cancellation) => Promise<Uint8Array>;
+  readReference?: ReferenceReader;
+  takeReveal: () => boolean = () => false;
   onOpen: () => void = () => {};
 
   @State private showResult: boolean = false;
   @State private imageLoaded: boolean = false;
   @State private loadFailed: boolean = false;
   @State private showingReference: boolean = false;
+  @State private comparing: boolean = false;
+  @State private compareLoading: boolean = false;
+  @State private compareFailed: boolean = false;
   private canvas: CanvasRenderingContext2D = new CanvasRenderingContext2D(new RenderingContextSettings(true));
   private animator?: AnimatorResult;
   private ready: boolean = false;
   private visible: boolean = false;
   private mounted: boolean = false;
-  private sawPlaceholder: boolean = false;
+  private revealPending: boolean = false;
   private loading: boolean = false;
   private phase: number = 0;
   private aspect: number = 1;
@@ -51,10 +65,13 @@ export struct GeneratedImageCard {
   private referenceAspect: number = 1;
   private referenceRead?: Cancellation;
   private triedReference: boolean = false;
+  private compareImage?: image.PixelMap;
+  private compareRead?: Cancellation;
 
   aboutToAppear(): void {
     this.mounted = true;
-    this.showResult = this.path.length > 0;
+    this.revealPending = this.path.length > 0 && this.takeReveal() && this.appearance.effectStrength > 0;
+    this.showResult = this.path.length > 0 && !this.revealPending;
   }
 
   aboutToDisappear(): void {
@@ -64,6 +81,9 @@ export struct GeneratedImageCard {
     this.stop();
     this.releaseReference();
     this.releaseFrames();
+    this.compareRead?.cancel();
+    this.compareImage?.release();
+    this.compareImage = undefined;
   }
 
   private stop(): void {
@@ -86,6 +106,7 @@ export struct GeneratedImageCard {
 
   private displayResult(): void {
     this.stop();
+    this.revealPending = false;
     this.showResult = true;
     this.releaseFrames();
   }
@@ -113,6 +134,13 @@ export struct GeneratedImageCard {
         this.stop();
         this.drawWaiting(false);
       }
+    } else if (this.revealPending) {
+      if (this.canAnimate() && !this.loading) {
+        this.revealPending = false;
+        this.prepareReveal(this.path);
+      } else if (!this.foreground || this.appearance.effectStrength === 0) {
+        this.displayResult();
+      }
     } else if (!this.canAnimate()) {
       this.displayResult();
     }
@@ -120,7 +148,10 @@ export struct GeneratedImageCard {
 
   private visibilityChanged(visible: boolean): void {
     this.visible = visible;
-    if (visible && !this.path && this.foreground) { this.sawPlaceholder = true; }
+    if (!visible && this.path && this.revealPending) {
+      this.displayResult();
+      return;
+    }
     this.syncMotion();
   }
 
@@ -128,16 +159,17 @@ export struct GeneratedImageCard {
     if (!this.mounted || !this.path || this.loading || this.showResult) { return; }
     this.stop();
     this.releaseReference();
-    if (!this.sawPlaceholder || !this.canAnimate() || !this.ready) {
+    if (!this.takeReveal() || !this.foreground || this.appearance.effectStrength === 0) {
       this.displayResult();
       return;
     }
-    this.prepareReveal(this.path);
+    this.revealPending = true;
+    this.syncMotion();
   }
 
   private play(duration: number, iterations: number, frame: (phase: number) => void): void {
     const animation = this.getUIContext().createAnimator({ duration: duration, iterations: iterations,
-      easing: iterations === 1 ? 'cubic-bezier(0.25, 0.15, 0.45, 1)' : 'linear',
+      easing: 'linear',
       begin: 0, end: 1, delay: 0, fill: 'none', direction: 'normal' });
     this.animator = animation;
     animation.onFrame = (phase: number) => { if (this.animator === animation) { frame(phase); } };
@@ -160,14 +192,15 @@ export struct GeneratedImageCard {
         try {
           const size = (await source.getImageInfo()).size;
           const clear = await this.decodeAtSize(source, size, PREVIEW_EDGE);
-          frames.push(clear);
-          const decoded = (await clear.getImageInfo()).size;
-          const edge = Math.max(decoded.width, decoded.height);
-          for (const level of MOSAIC_EDGES) {
-            if (level >= edge || !this.canAnimate() || this.showResult) { break; }
-            const scale = level / edge;
-            frames.splice(frames.length - 1, 0, await clear.createScaledPixelMap(scale, scale, image.AntiAliasingLevel.MEDIUM));
-          }
+          try {
+            const decoded = (await clear.getImageInfo()).size;
+            const edge = Math.max(decoded.width, decoded.height);
+            for (const level of MOSAIC_EDGES) {
+              if (level >= edge || !this.canAnimate() || this.showResult) { break; }
+              const scale = level / edge;
+              frames.push(await clear.createScaledPixelMap(scale, scale, image.AntiAliasingLevel.MEDIUM));
+            }
+          } finally { frames.push(clear); }
           this.aspect = size.width / size.height;
         } finally { await source.release(); }
       } finally { await fs.close(file); }
@@ -192,22 +225,28 @@ export struct GeneratedImageCard {
       width: Math.max(1, Math.round(size.width * scale)), height: Math.max(1, Math.round(size.height * scale)) } });
   }
 
-  private async prepareReference(path: string, read: (path: string, signal: Cancellation) => Promise<Uint8Array>): Promise<void> {
+  private async decodeReference(path: string, read: ReferenceReader, signal: Cancellation, edge: number): Promise<DecodedReference> {
+    const bytes = await read(path, signal);
+    signal.check();
+    const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    const source = image.createImageSource(data);
+    try {
+      const size = (await source.getImageInfo()).size;
+      if (size.width * size.height > MAX_REFERENCE_PIXELS) { throw new Error('Image reference exceeds preview pixel limit.'); }
+      signal.check();
+      return { pixel: await this.decodeAtSize(source, size, edge), aspect: size.width / size.height };
+    } finally { await source.release(); }
+  }
+
+  private async prepareReference(path: string, read: ReferenceReader): Promise<void> {
     const signal = new Cancellation();
     this.referenceRead = signal;
     let preview: image.PixelMap | undefined;
     try {
-      const bytes = await read(path, signal);
-      signal.check();
-      const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-      const source = image.createImageSource(data);
-      try {
-        const size = (await source.getImageInfo()).size;
-        if (size.width * size.height > MAX_REFERENCE_PIXELS) { throw new Error('Image reference exceeds preview pixel limit.'); }
-        this.referenceAspect = size.width / size.height;
-        preview = await this.decodeAtSize(source, size, REFERENCE_EDGE);
-      } finally { await source.release(); }
+      const decoded = await this.decodeReference(path, read, signal, REFERENCE_EDGE);
+      preview = decoded.pixel;
       if (!this.mounted || this.path || signal.cancelled) { return; }
+      this.referenceAspect = decoded.aspect;
       this.reference = preview;
       preview = undefined;
       this.showingReference = true;
@@ -217,6 +256,36 @@ export struct GeneratedImageCard {
     } finally {
       await preview?.release();
       this.referenceRead = undefined;
+    }
+  }
+
+  private async toggleCompare(): Promise<void> {
+    if (this.compareImage) {
+      this.comparing = !this.comparing;
+      return;
+    }
+    const read = this.readReference;
+    if (!read || !this.compareReference || this.compareLoading) { return; }
+    const signal = new Cancellation();
+    this.compareRead = signal;
+    this.compareLoading = true;
+    this.compareFailed = false;
+    let preview: image.PixelMap | undefined;
+    try {
+      preview = (await this.decodeReference(this.compareReference, read, signal, PREVIEW_EDGE)).pixel;
+      if (signal.cancelled) { return; }
+      this.compareImage = preview;
+      preview = undefined;
+      this.comparing = true;
+    } catch (error) {
+      if (!signal.cancelled) {
+        Diagnostics.log('warn', 'preview', 'thumbnail_failed', undefined, error as Error);
+        this.compareFailed = true;
+      }
+    } finally {
+      await preview?.release();
+      this.compareRead = undefined;
+      if (this.mounted) { this.compareLoading = false; }
     }
   }
 
@@ -283,8 +352,9 @@ export struct GeneratedImageCard {
     const level = Math.max(0, Math.min(1, this.phase)) * last;
     const lower = Math.min(last, Math.floor(level));
     const higher = Math.min(last, lower + 1);
-    const edge = Math.round(h * this.phase);
-    // Each pass replaces coarse pixels with the next smaller blocks. The last frame uses the clear preview.
+    const sweep = Math.max(0, Math.min(1, (level - lower - REVEAL_HOLD) / (1 - 2 * REVEAL_HOLD)));
+    const edge = Math.round(h * sweep);
+    // Hold each resolution briefly so all three scans read as separate passes.
     this.drawRegion(this.frames[lower], x, y, w, h, y + edge, h - edge, lower === last);
     this.drawRegion(this.frames[higher], x, y, w, h, y, edge, higher === last);
     this.drawScan(x, y, w, h, edge);
@@ -352,6 +422,24 @@ export struct GeneratedImageCard {
           .id(this.cardId + '-open').width('100%').height('100%').backgroundColor(Color.Transparent)
           .accessibilityText(t('生成图片') + ' · ' + t('打开文件 · 分享与导出'))
           .onClick(() => this.onOpen())
+      }
+      if (this.comparing && this.compareImage) {
+        ImageCompare({ before: this.compareImage, cardId: this.cardId })
+      }
+      if (this.showResult && this.imageLoaded && !this.loadFailed && this.compareReference && this.readReference) {
+        Button({ type: ButtonType.Normal }) {
+          if (this.compareLoading) {
+            LoadingProgress().width(16).height(16).color(Color.White).accessibilityLevel('no')
+          } else {
+            Text(this.comparing ? t('结束对比') : this.compareFailed ? t('参考图无法加载，点击重试') : t('前后对比'))
+              .fontSize(12).fontWeight(FontWeight.Medium).fontFamily(this.appearance.fontFamily).fontColor(Color.White)
+          }
+        }.id(this.cardId + '-compare-toggle').height(44).padding({ left: 12, right: 12 })
+          .borderRadius(13).backgroundColor('#BB1E2025').position({ left: 9, bottom: 9 })
+          .enabled(!this.compareLoading).accessibilityText(
+            this.compareLoading ? t('正在加载参考图…') :
+              this.comparing ? t('结束对比') : this.compareFailed ? t('参考图无法加载，点击重试') : t('前后对比'))
+          .onClick(() => { void this.toggleCompare(); })
       }
     }.id(this.cardId).width('100%').constraintSize({ maxWidth: 340 * this.ratio }).aspectRatio(this.ratio)
       .borderRadius(Radius.md).clip(true).backgroundColor($r('app.color.surface_variant'))
