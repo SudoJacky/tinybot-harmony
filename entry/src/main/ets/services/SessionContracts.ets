@@ -79,7 +79,7 @@ export interface ReasoningSelection {
 
 // Structural changes carry detached snapshots; preference changes omit transcripts.
 export interface SessionEvent {
-  kind: 'snapshot' | 'preferences' | 'reasoning-effort' | 'message' | 'tool' | 'text' | 'reasoning-start' | 'reasoning' | 'draft' | 'state' | 'thread' | 'teams' | 'task-complete';
+  kind: 'snapshot' | 'preferences' | 'reasoning-effort' | 'message' | 'tool' | 'text' | 'reasoning' | 'draft' | 'state' | 'thread' | 'teams' | 'task-complete';
   state: SessionState;
   preferences?: SessionPreferences;
   reasoningSelection?: ReasoningSelection;

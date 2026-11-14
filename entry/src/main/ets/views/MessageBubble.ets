@@ -311,7 +311,7 @@ export struct MessageBubble {
   private foldable(): boolean { return this.settled && foldsToAnswer(this.timeline()); }
   private folded(): boolean { return this.workflowCollapsed || (this.foldable() && !this.message.processOpen); }
   private workflowLabel(): string {
-    const phase = turnPhase(this.message.status, this.message.stepViews, this.message.reasoningPending);
+    const phase = turnPhase(this.message.status, this.message.stepViews);
     if (phase === 'tools') {
       for (const step of this.message.stepViews) {
         const tool = step.tools.find(activeTool);
@@ -361,7 +361,7 @@ export struct MessageBubble {
   private awaitingModel(): boolean {
     const steps = this.message.stepViews;
     const last = steps[steps.length - 1];
-    return this.message.status === 'generating' && !this.message.reasoningPending && last !== undefined && last.tools.length === 0 &&
+    return this.message.status === 'generating' && last !== undefined && last.tools.length === 0 &&
       last.content.trim().length === 0 && last.reasoningContent.trim().length === 0;
   }
 

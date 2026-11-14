@@ -1019,8 +1019,6 @@ export class SessionService {
         if (!tool) { throw new Error('Tool event has no matching execution: ' + event.toolCallId); }
         this.emit({ kind: 'tool', state: this.state, threadId: thread.id, messageId: answer.id,
           step: event.step, parentToolCallId: event.parentToolCallId, tool: JSON.parse(JSON.stringify(tool)) as ToolExecution });
-      } else if (event.type === 'reasoning_start') {
-        this.emit({ kind: 'reasoning-start', state: this.state, threadId: thread.id, messageId: answer.id, step: event.step });
       } else if (event.type === 'reasoning_delta') {
         this.emit({ kind: 'reasoning', state: this.state, threadId: thread.id, messageId: answer.id,
           step: event.step, stepContent: event.run.turn.steps[event.step || 0].reasoningContent || '' });

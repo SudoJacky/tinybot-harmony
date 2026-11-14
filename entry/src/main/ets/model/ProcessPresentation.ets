@@ -9,14 +9,14 @@ export interface ProcessItem { step: number; tool: number; }
 export interface TimelineEntry { kind: string; key: string; step: number; items: ProcessItem[]; }
 
 // Derive the turn's current phase from runtime events, never from a simulated step list.
-export function turnPhase(status: string, steps: AgentStep[], reasoningPending: boolean = false): string {
+export function turnPhase(status: string, steps: AgentStep[]): string {
   if (status !== 'generating') { return status; }
   const last = steps[steps.length - 1];
   if (!last) { return 'waiting'; }
   if (steps.some((step) => step.tools.some((tool) => tool.status === 'running' || tool.status === 'pending'))) { return 'tools'; }
   if (last.tools.length) { return 'waiting'; }
   if (last.content.trim()) { return 'answer'; }
-  if (reasoningPending || (last.reasoningContent || '').trim()) { return 'thinking'; }
+  if ((last.reasoningContent || '').trim()) { return 'thinking'; }
   if (last.retries?.length) { return 'retry'; }
   return 'waiting';
 }

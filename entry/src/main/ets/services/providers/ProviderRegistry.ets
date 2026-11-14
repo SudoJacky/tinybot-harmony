@@ -72,16 +72,13 @@ class BoundModel implements ModelSession {
     const origin: UsageOrigin = this.origin ? JSON.parse(JSON.stringify(this.origin)) as UsageOrigin : {};
     if (options?.usagePurpose) { origin.purpose = options.usagePurpose; }
     if (options?.usageStep !== undefined) { origin.step = options.usageStep; }
-    const answer = matcher ? new OutputWordGuard(matcher, 'answer', onText) : undefined;
-    const onReasoning = options?.onReasoning;
-    const reasoning = matcher && onReasoning ? new OutputWordGuard(matcher, 'reasoning', onReasoning) : undefined;
-    const guard = new ContentGuardStream(answer ? (text) => answer.push(text) : onText,
-      reasoning ? (text) => reasoning.push(text) : onReasoning, options?.onReasoningStart);
+    const answer = matcher ? new OutputWordGuard(matcher, onText) : undefined;
+    const guard = new ContentGuardStream(answer ? (text) => answer.push(text) : onText);
     const response = await this.provider.stream({ baseUrl: this.baseUrl, model: this.model, apiKey: key,
       usageOrigin: origin,
       messages: messages, tools: tools, maxOutputTokens: options?.maxOutputTokens,
       reasoning: this.reasoning, requestUsage: this.requestUsage }, cancellation,
-      (text) => guard.pushText(text), (text) => guard.pushReasoning(text));
+      (text) => guard.pushText(text), options?.onReasoning);
     cancellation.check();
     if (guard.finish(response.content)) {
       if (origin.purpose === 'title' || origin.purpose === 'compaction') {
@@ -91,7 +88,6 @@ class BoundModel implements ModelSession {
       return { content: CONTENT_GUARD_REFUSAL, toolCalls: [], usage: response.usage };
     }
     answer?.finish(response.content);
-    reasoning?.finish(response.reasoningContent || '');
     return response;
   }
 }

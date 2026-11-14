@@ -77,7 +77,6 @@ export class MessageViewModel {
   // while newly loaded history starts with compact defaults.
   processOpen: boolean = false;
   usageOpen: boolean = false;
-  reasoningPending: boolean = false;
   disclosures: DisclosureStore = new DisclosureStore();
   // Aggregate only when requested; token updates must not concatenate all prior thoughts.
   get reasoningContent(): string {
@@ -107,7 +106,7 @@ export class MessageViewModel {
     if (!step) { return; }
     const hadThought = step.reasoningContent.trim().length > 0;
     step.reasoningContent = content;
-    if (hadThought !== (content.trim().length > 0)) { this.timeline = buildTimeline(this.stepViews); }
+    if (hadThought !== (content.trim().length > 0)) { this.refreshStreamPhase(); }
   }
   updateText(content: string, index: number, stepContent: string): void {
     this.content = content;
@@ -115,7 +114,12 @@ export class MessageViewModel {
     if (!step) { return; }
     const hadText = step.content.trim().length > 0;
     step.content = stepContent;
-    if (hadText !== (stepContent.trim().length > 0)) { this.timeline = buildTimeline(this.stepViews); }
+    if (hadText !== (stepContent.trim().length > 0)) { this.refreshStreamPhase(); }
+  }
+  private refreshStreamPhase(): void {
+    // The workflow header reads the outer array. Keep each step observed by its own row.
+    this.stepViews = this.stepViews.slice();
+    this.timeline = buildTimeline(this.stepViews);
   }
   updateTool(index: number, tool: ToolExecution, parentId?: string): void {
     const step = this.steps[index]; const view = this.stepViews[index];
@@ -153,7 +157,7 @@ export class MessageViewModel {
     this.uiStates = data.uiStates || [];
     this.references = data.references || [];
     this.id = data.id; this.role = data.role; this.content = data.content; this.status = data.status; this.error = data.error;
-    if (data.status !== 'generating') { this.imageRevealId = ''; this.reasoningPending = false; }
+    if (data.status !== 'generating') { this.imageRevealId = ''; }
     this.attachments = data.attachments || [];
     this.annotations = data.annotations || [];
     this.modelRef = data.modelRef; this.steps = data.steps || [];

@@ -59,10 +59,11 @@ class Keys implements CredentialVault {
   removed: string[] = [];
   async read(alias: string): Promise<string> {
     if (alias.length === 0) { return ''; }
-    const value = this.values.get(alias);
+    const value = await this.readOptional(alias);
     if (value === undefined) { throw new Error('missing key'); }
     return value;
   }
+  async readOptional(alias: string): Promise<string | undefined> { return this.values.get(alias); }
   async write(alias: string, secret: string): Promise<void> { this.values.set(alias, secret); }
   async remove(alias: string): Promise<void> { this.values.delete(alias); this.removed.push(alias); }
 }

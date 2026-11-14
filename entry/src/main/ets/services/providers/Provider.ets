@@ -29,7 +29,6 @@ export interface ModelRequestOptions {
   usageStep?: number;
   maxOutputTokens?: number;
   onReasoning?: (text: string) => void;
-  onReasoningStart?: () => void;
 }
 
 // Providers own endpoint rules and protocol encoding; each request owns its transport.
