@@ -40,7 +40,7 @@ const { TransientProviderError, httpProviderError } = from('services/providers/P
 const { emptyData, parseAppData, requestHistory } = from('model/Conversation');
 const { validateSteps, stepMessages } = from('model/Agent');
 const { PresentTools } = from('services/PresentTools');
-const { deliveredFiles } = from('model/Deliverables');
+const { deliveredFiles, imageDeliveries } = from('model/Deliverables');
 const { ReferenceTools } = from('services/ReferenceTools');
 const { captureThreadReference, referenceContext } = from('model/ThreadReferences');
 const { defaultSearchConfig, deepSeekSearchProfiles, searchCredentialAlias, validateSearchConfig } = from('model/WebSearch');
@@ -140,6 +140,26 @@ async function main() {
   const saved = emptyData(); const chat = thread(); chat.messages[1].steps = [step]; saved.threads = [chat]; saved.activeThreadId = chat.id;
   assert.equal(deliveredFiles(parseAppData(JSON.stringify(saved)).threads[0].messages[1].steps)[0].path, 'report.md');
   console.log('PASS deliverables: validation, atomic failure, successful receipts and reload');
+
+  const imageTool = { call: call('image_gen', { prompt: 'A mountain', aspect_ratio: '3:2' }),
+    status: 'running', output: '' };
+  const imageSteps = [{ content: '', tools: [imageTool] }];
+  const waitingImage = plain(imageDeliveries(imageSteps, true))[0];
+  assert.deepEqual(waitingImage, { id: '0-' + imageTool.call.id, path: '', ratio: 1.5 });
+  assert.equal(imageDeliveries(imageSteps, false).length, 0);
+  for (const status of ['pending', 'failed', 'cancelled', 'interrupted']) {
+    imageTool.status = status;
+    assert.equal(imageDeliveries(imageSteps, true).length, 0);
+  }
+  imageTool.status = 'complete';
+  const imagePath = 'generated-images/mountain-1.png';
+  imageTool.output = JSON.stringify({ files: [{ path: '../outside.png' }, { path: imagePath }, { path: imagePath }] });
+  const completeImage = { ...waitingImage, path: imagePath };
+  assert.deepEqual(plain(imageDeliveries(imageSteps, true)), [completeImage]);
+  assert.deepEqual(plain(imageDeliveries(imageSteps, false)), [completeImage]);
+  assert.equal(deliveredFiles(imageSteps)[0].path, imagePath);
+  assert.equal(imageDeliveries([{ content: '', tools: [{ ...imageTool, call: call('image_gen', {}) }] }], false)[0].ratio, 1);
+  console.log('PASS image placeholders retain their identity through completion and historical results open directly');
 
   const source = thread(); source.messages[0].content = 'EARLY_MARKER\n' + 'old context\n'.repeat(1200);
   source.messages[1].content = 'LATEST_MARKER';
