@@ -47,6 +47,9 @@ export class BrowserSession implements ExecutionGate {
   canGoForward: boolean = false;
   editingAddress: boolean = false;
   error: string = '';
+  loading: boolean = false;
+  progress: number = 0;
+  loadFailed: boolean = false;
   actionFeedback?: BrowserActionFeedback;
   handoffReason: string = '';
   permissionReason: string = '';

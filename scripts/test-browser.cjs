@@ -16,6 +16,7 @@ const nativeWebview = { JsMessageType: { STRING: 3, NONE: 0 }, WebviewController
   backward() { this.effects.push('back'); }
   forward() { this.effects.push('forward'); }
   refresh() { this.effects.push('reload'); }
+  stop() { this.effects.push('stop'); }
   getUrl() { return this.url; }
   clearHistory() { this.effects.push('clearHistory'); this.backAvailable = false; this.forwardAvailable = false; }
   loadUrl(url) { this.url = url; this.effects.push('navigate'); }
@@ -418,6 +419,19 @@ async function acquired() {
     driver.pageEnd('https://example.com/next');
     assert.equal(f.browser.canGoBack, true);
     assert.deepEqual(driver.controller.effects, ['navigate', 'clearHistory', 'navigate']);
+    driver.failed('HTTP 503', 'https://example.com/unavailable');
+    driver.pageBegin('https://example.com/unavailable'); driver.pageEnd('https://example.com/unavailable');
+    assert.equal(f.browser.loadFailed, true, 'A late page-begin/end must not replace an early HTTP error');
+    assert.equal(f.browser.error, 'HTTP 503');
+    driver.userReload(); assert.equal(driver.controller.url, 'https://example.com/unavailable');
+    driver.progress(70); assert.equal(f.browser.progress, 70);
+    driver.userStop(); assert.equal(f.browser.loading, false); assert.equal(driver.controller.effects.at(-1), 'stop');
+    console.log('PASS load progress, early main-document failure, retry address and stop');
+    const { browserAddress } = load(path.join(root, 'main/ets/model/BrowserAddress'));
+    assert.equal(browserAddress('  example.com/reports  '), 'https://example.com/reports');
+    assert.equal(browserAddress('localhost:8080'), 'http://localhost:8080');
+    assert.equal(browserAddress('网页 批注'), 'https://www.bing.com/search?q=' + encodeURIComponent('网页 批注'));
+    assert.throws(() => browserAddress('javascript:alert(1)'));
     console.log('PASS manual navigation removes the internal blank page from history and preserves subsequent pages');
   }
   {

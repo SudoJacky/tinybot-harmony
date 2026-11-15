@@ -15,6 +15,8 @@ import { OfficeReviewHost } from '../views/OfficeReviewHost';
 import { BrowserPanel } from '../views/BrowserPanel';
 import { BrowserSession } from '../services/BrowserSession';
 import { AnnotationPage, browserAnnotationText } from '../model/BrowserAnnotation';
+import { BrowserStartPreview } from '../model/BrowserAddress';
+import { stepPreviews } from '../model/PublishedPreview';
 import { image } from '@kit.ImageKit';
 import { Attachments } from '../services/Attachments';
 import { MAX_MESSAGE_ATTACHMENTS } from '../model/Productivity';
@@ -661,6 +663,14 @@ struct Index {
   }
 
   private hasPreview(): boolean { return this.previewId.length > 0 && this.previewThreadId === this.app.active.id; }
+  private browserStartPreviews(): BrowserStartPreview[] {
+    if (!this.detailTabVisible('browser') || this.browser.url || this.browser.loading) { return []; }
+    const thread = this.app.active;
+    return thread.messages.slice(-12).flatMap((message) => message.stepViews.flatMap((step, index) =>
+      stepPreviews(message.id, step, index, thread.latestPreviewIds, true).filter((preview) => !preview.superseded)
+        .map((preview): BrowserStartPreview => ({ id: preview.id, title: preview.title, messageId: message.id }))))
+      .slice(-3).reverse();
+  }
   // The pane stays laid out through its exit animations: the reveal keeps an
   // empty launcher visible while it slides away, and the presence flags are
   // raised until AnimatedPage reports that an outgoing body is gone.
@@ -1166,12 +1176,12 @@ struct Index {
       this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: (error as Error).message });
     }
   }
-  private async addBrowserAnnotation(threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string): Promise<void> {
+  private async addBrowserAnnotation(threadId: string, pixel: image.PixelMap, page: AnnotationPage | undefined, note: string): Promise<void> {
     if (threadId !== this.app.active.id) { throw new Error(t('对话已切换，请在当前对话重新添加附件。')); }
     if (!this.app.canQueueInput || this.app.active.attachments.length >= MAX_MESSAGE_ATTACHMENTS) { throw new Error(t('当前无法添加附件，请稍后重试。')); }
-    const item = await Attachments.saveBrowserAnnotation(pixel);
-    await this.app.appendDraftAttachment(threadId, item, browserAnnotationText(page, note));
-    this.paths.clear(); this.rootSection = ''; this.setDrawer(false); this.setBrowserExpanded(false);
+    const item = page ? await Attachments.saveBrowserAnnotation(pixel) : await Attachments.saveBrowserScreenshot(pixel);
+    await this.app.appendDraftAttachment(threadId, item, page ? browserAnnotationText(page, note) : '');
+    this.paths.clear(); this.rootSection = ''; this.setDrawer(false); this.hideBrowserTab();
   }
 
   aboutToDisappear(): void {
@@ -1729,8 +1739,8 @@ struct Index {
       IconButton({ icon: $r('sys.symbol.line_3_horizontal'), label: t("对话列表"), compId: 'open-history',
         animatedIcon: 'history', material: this.appearance.control, tint: $r('sys.color.font_primary'),
         disabled: !this.app.ready, onTap: () => this.setDrawer(true) })
+      Blank().layoutWeight(1)
       if (this.app.active.messages.length > 0) {
-        Blank().layoutWeight(1)
         Button({ type: ButtonType.Circle, stateEffect: true }) {
           SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(20).fontColor([$r('sys.color.font_primary')])
         }.id('chat-more').width(44).height(44).borderRadius(22).backgroundColor(this.appearance.controlBackground)
@@ -1740,6 +1750,10 @@ struct Index {
         IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t("新建对话"), compId: 'new-chat', animatedIcon: 'compose',
           material: this.appearance.control, tint: $r('sys.color.font_primary'),
           disabled: !this.app.canNavigate, onTap: () => { this.createChat(); } })
+      } else {
+        IconButton({ icon: $r('sys.symbol.connection'), label: t('应用内浏览器'), compId: 'empty-open-browser',
+          material: this.appearance.control, tint: $r('sys.color.font_primary'),
+          disabled: !this.app.ready || this.browser.permissionSaving, onTap: () => this.openBrowser() })
       }
     }.width('100%').height(CHAT_HEADER_HEIGHT).padding({ left: 6, right: 6 })
       .hitTestBehavior(HitTestMode.Transparent)
@@ -1999,8 +2013,10 @@ struct Index {
               BrowserPanel({ browser: this.browser, expanded: this.detailTabVisible('browser'), presented: this.browserPresent,
                 onPresent: () => { this.setBrowserExpanded(true); this.openDetailTab('browser'); },
                 tabbed: this.largeScreen || this.workbench().docked, threadId: this.app.active.id,
+                startPreviews: this.browserStartPreviews(), onOpenPreview: (messageId, previewId) => this.openPreview(messageId, previewId),
                 canAnnotate: this.app.canQueueInput && this.app.active.attachments.length < MAX_MESSAGE_ATTACHMENTS,
                 onAnnotation: (threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string) => this.addBrowserAnnotation(threadId, pixel, page, note),
+                onScreenshot: (threadId: string, pixel: image.PixelMap) => this.addBrowserAnnotation(threadId, pixel, undefined, ''),
                 onSettings: () => { this.hideBrowserTab(); this.openSettings(); },
                 onClose: () => this.closeBrowser(), onDismiss: () => this.hideBrowserTab() })
             }
