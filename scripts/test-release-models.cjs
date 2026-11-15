@@ -89,6 +89,7 @@ const initialized = [];
 let privacyChanged, refreshRestoredPreferences;
 const startupScope = { exports: {}, Date, AppStorage: { setOrCreate() {} }, require: id => {
   if (id === '@ohos:app.ability.UIAbility') return { default: class {} };
+  if (id === '@ohos:window') return { default: {} };
   if (id === '@ohos:web.webview') return { default: { WebviewController: {
     initializeWebEngine() { initialized.push('web'); }
   } } };
@@ -97,6 +98,7 @@ const startupScope = { exports: {}, Date, AppStorage: { setOrCreate() {} }, requ
   const dependency = Object.entries(names).find(([, mapping]) => mapping?.obfName?.replace(/\.ets$/, '') === normalized[1]);
   assert.ok(dependency, 'Missing ability dependency mapping: ' + id);
   const moduleName = path.basename(dependency[0], '.ets');
+  if (moduleName === 'DeviceForm') return { [names.PropertyCache.IS_PC || 'IS_PC']: false };
   if (moduleName === 'NativeDiagnosticLog') {
     return { [names.PropertyCache.configureNativeDiagnosticLog || 'configureNativeDiagnosticLog']: () => {} };
   }

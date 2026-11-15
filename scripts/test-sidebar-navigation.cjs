@@ -55,14 +55,20 @@ function fixture() {
 test('files, search and sidebar expansion never add navigation pages', () => {
   const { page, routes } = fixture();
   page.openSettings();
+  page.toggleHistory();
+  assert.equal(page.historyCollapsed, true);
   for (let i = 0; i < 20; i++) {
-    page.openFiles(); page.openHistorySearch(); page.toggleHistory();
+    page.openFiles();
+    page.openHistorySearch();
+    assert.equal(page.drawerOpen, true, 'Search opens the drawer when the history column is collapsed');
+    page.toggleHistory();
+    assert.equal(page.drawerOpen, false, 'The history toggle closes the open drawer');
   }
   assert.deepEqual(routes.map(route => route.name), ['settings']);
   assert.deepEqual(Array.from(page.detailTabs), ['files']);
   assert.equal(page.workspaceOpen, true);
   assert.equal(page.detailPaneOpen, true);
-  assert.equal(page.drawerOpen, true);
+  assert.equal(page.historyCollapsed, true);
 });
 test('repeated sidebar tools taps require only one back', () => {
   const { page, routes } = fixture();
