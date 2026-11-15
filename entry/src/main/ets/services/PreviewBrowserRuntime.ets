@@ -63,6 +63,9 @@ export class PreviewBrowserRuntime {
     const result = JSON.parse(await this.request('action', JSON.stringify(action))) as Record<string, string | boolean>;
     if (result.ok !== true) { throw new ToolFailure(result.code as string || 'BROWSER_ACTION_FAILED', result.message as string, 'read_browser_snapshot'); }
   }
+  pick(x: number, y: number): Promise<string> {
+    return this.request('pick', JSON.stringify({ x: x, y: y }));
+  }
   async capture(): Promise<image.PixelMap> {
     if (!this.started || !this.surface) { throw new Error('Preview surface is not ready'); }
     await this.request('paint', '{}');

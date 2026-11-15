@@ -1175,12 +1175,12 @@ struct Index {
       this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: (error as Error).message });
     }
   }
-  private async addBrowserAnnotation(threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string): Promise<void> {
+  private async addBrowserAnnotation(threadId: string, pixel: image.PixelMap, page: AnnotationPage | undefined, note: string): Promise<void> {
     if (threadId !== this.app.active.id) { throw new Error(t('对话已切换，请在当前对话重新添加附件。')); }
     if (!this.app.canQueueInput || this.app.active.attachments.length >= MAX_MESSAGE_ATTACHMENTS) { throw new Error(t('当前无法添加附件，请稍后重试。')); }
-    const item = await Attachments.saveBrowserAnnotation(pixel);
-    await this.app.appendDraftAttachment(threadId, item, browserAnnotationText(page, note));
-    this.paths.clear(); this.rootSection = ''; this.setDrawer(false); this.setBrowserExpanded(false);
+    const item = page ? await Attachments.saveBrowserAnnotation(pixel) : await Attachments.saveBrowserScreenshot(pixel);
+    await this.app.appendDraftAttachment(threadId, item, page ? browserAnnotationText(page, note) : '');
+    this.paths.clear(); this.rootSection = ''; this.setDrawer(false); this.hideBrowserTab();
   }
 
   aboutToDisappear(): void {
@@ -1738,8 +1738,8 @@ struct Index {
       IconButton({ icon: $r('sys.symbol.line_3_horizontal'), label: t("对话列表"), compId: 'open-history',
         animatedIcon: 'history', material: this.appearance.control, tint: $r('sys.color.font_primary'),
         disabled: !this.app.ready, onTap: () => this.setDrawer(true) })
+      Blank().layoutWeight(1)
       if (this.app.active.messages.length > 0) {
-        Blank().layoutWeight(1)
         Button({ type: ButtonType.Circle, stateEffect: true }) {
           SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(20).fontColor([$r('sys.color.font_primary')])
         }.id('chat-more').width(44).height(44).borderRadius(22).backgroundColor(this.appearance.controlBackground)
@@ -1749,6 +1749,10 @@ struct Index {
         IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t("新建对话"), compId: 'new-chat', animatedIcon: 'compose',
           material: this.appearance.control, tint: $r('sys.color.font_primary'),
           disabled: !this.app.canNavigate, onTap: () => { this.createChat(); } })
+      } else {
+        IconButton({ icon: $r('sys.symbol.connection'), label: t('应用内浏览器'), compId: 'empty-open-browser',
+          material: this.appearance.control, tint: $r('sys.color.font_primary'),
+          disabled: !this.app.ready || this.browser.permissionSaving, onTap: () => this.openBrowser() })
       }
     }.width('100%').height(CHAT_HEADER_HEIGHT).padding({ left: 6, right: 6 })
       .hitTestBehavior(HitTestMode.Transparent)
@@ -2010,6 +2014,7 @@ struct Index {
                 startPreviews: this.browserStartPreviews(), onOpenPreview: (messageId, previewId) => this.openPreview(messageId, previewId),
                 canAnnotate: this.app.canQueueInput && this.app.active.attachments.length < MAX_MESSAGE_ATTACHMENTS,
                 onAnnotation: (threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string) => this.addBrowserAnnotation(threadId, pixel, page, note),
+                onScreenshot: (threadId: string, pixel: image.PixelMap) => this.addBrowserAnnotation(threadId, pixel, undefined, ''),
                 onSettings: () => { this.hideBrowserTab(); this.openSettings(); },
                 onClose: () => this.closeBrowser(), onDismiss: () => this.hideBrowserTab() })
             }

@@ -1,8 +1,9 @@
 import { webview } from '@kit.ArkWeb';
 import { image } from '@kit.ImageKit';
-import { AnnotationPage } from '../model/BrowserAnnotation';
+import { AnnotationPage, BrowserElementMark } from '../model/BrowserAnnotation';
+import { t } from '../model/I18n';
 import { ToolFailure } from '../model/ToolFailure';
-import { browserActionScript, browserSnapshotScript } from '../model/BrowserScripts';
+import { browserActionScript, browserElementScript, browserSnapshotScript } from '../model/BrowserScripts';
 import { bingSearchScript, BingSearchPage } from '../model/BingSearch';
 import { BrowserAction, BrowserDriver, BrowserPage, BrowserSession } from './BrowserSession';
 import { BrowserPreview } from '../model/BrowserPreview';
@@ -197,6 +198,31 @@ export class NativeBrowserDriver implements BrowserDriver {
       const info = await pixel.getImageInfo();
       return { pixel: pixel, url: url, title: title, width: info.size.width, height: info.size.height };
     } catch (error) { await pixel.release(); throw error as Error; }
+  }
+  async captureElement(x: number, y: number): Promise<NativeBrowserCapture> {
+    if (!this.browser.open || this.browser.owner !== 'user' || ![x, y].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) {
+      throw new Error(t('未选中可批注的网页元素。'));
+    }
+    if (!this.browser.preview) { await this.ready(); }
+    const instance = this.browser.createObservation().instanceId;
+    const locate = (): Promise<string> => this.browser.preview ? this.previewRuntime.pick(x, y) : this.script(browserElementScript(x, y));
+    const first = await locate();
+    const element = JSON.parse(first) as BrowserElementMark | null;
+    if (!element || typeof element.location !== 'string' || !element.location || element.location.length > 1000 ||
+      typeof element.label !== 'string' || element.label.length > 160 ||
+      ![element.x, element.y, element.width, element.height].every((value) => Number.isFinite(value) && value >= 0 && value <= 1) ||
+      element.width <= 0 || element.height <= 0 || element.x + element.width > 1.00001 || element.y + element.height > 1.00001) {
+      throw new Error(t('未选中可批注的网页元素。'));
+    }
+    const capture = await this.capture();
+    try {
+      const second = await locate();
+      if (instance !== this.browser.createObservation().instanceId || this.browser.owner !== 'user' || first !== second) {
+        throw new Error(t('页面已变化，请重新选择元素。'));
+      }
+      capture.element = element;
+      return capture;
+    } catch (error) { await capture.pixel.release(); throw error as Error; }
   }
   async snapshot(id: string): Promise<BrowserPage> {
     if (this.browser.preview) {

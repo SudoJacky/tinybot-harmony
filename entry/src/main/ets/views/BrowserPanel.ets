@@ -17,6 +17,7 @@ import { WebUiView } from './WebUiView';
 import { UiValues } from '../model/InteractiveUi';
 import { Attachments } from '../services/Attachments';
 import { PreviewBrowserRuntime } from '../services/PreviewBrowserRuntime';
+import { BrowserRecents, BrowserVisit } from '../services/BrowserRecents';
 
 @Component
 struct BrowserPreviewPage {
@@ -44,6 +45,7 @@ export struct BrowserPanel {
   @Prop tabbed: boolean = false;
   @Prop startPreviews: BrowserStartPreview[] = [];
   onAnnotation: (threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string) => Promise<void> = async () => {};
+  onScreenshot: (threadId: string, pixel: image.PixelMap) => Promise<void> = async () => {};
   onOpenPreview: (messageId: string, previewId: string) => void = () => {};
   onDismiss: () => void = () => {};
   onClose: () => void = () => {};
@@ -53,6 +55,8 @@ export struct BrowserPanel {
   @State private addressDirty: boolean = false;
   @State private capturing: boolean = false;
   @State private showAnnotation: boolean = false;
+  @State private pickingElement: boolean = false;
+  @State private recent: BrowserVisit[] = [];
   @State private annotation: BrowserAnnotation = new BrowserAnnotation();
   @State private webWidth: number = 0;
   @State private webHeight: number = 0;
@@ -60,30 +64,55 @@ export struct BrowserPanel {
   private annotationThreadId: string = '';
   private mounted: boolean = false;
   private driver?: NativeBrowserDriver;
+  private recents?: BrowserRecents;
   aboutToAppear(): void {
     this.mounted = true;
     this.driver = new NativeBrowserDriver(this.browser, (pixel) => Attachments.savePreview(pixel), () => Math.min(this.webWidth, this.browser.preview?.viewportWidth || this.webWidth));
     this.browser.attach(this.driver, this.onPresent); this.syncBrowserVisibility();
+    try {
+      this.recents = new BrowserRecents(this.getUIContext().getHostContext() as common.UIAbilityContext);
+      this.recent = this.recents.read();
+    } catch (error) { Diagnostics.log('error', 'browser', 'history_read_failed', undefined, error as Error); }
   }
   aboutToDisappear(): void { this.mounted = false; if (this.driver) { this.browser.detach(this.driver); } }
   private resetClosedAddress(): void {
     if (!this.browser.open && this.addressDirty) { this.addressDirty = false; this.address = ''; }
   }
   private syncBrowserVisibility(): void {
+    if (!this.expanded || !this.foreground) { this.pickingElement = false; }
     this.driver?.setFeedbackVisible(this.expanded); this.browser.setPresentation(this.expanded, this.foreground);
   }
-  private async annotate(): Promise<void> {
+  private async annotate(screenshotOnly: boolean = false, x?: number, y?: number): Promise<void> {
     if (!this.driver || this.capturing || this.showAnnotation || !this.canAnnotate) { return; }
-    this.capturing = true; this.annotationThreadId = this.threadId;
+    this.capturing = true;
+    const threadId = this.threadId;
+    this.annotationThreadId = threadId;
     this.getUIContext().getFocusController().clearFocus();
+    let capture: NativeBrowserCapture | undefined;
     try {
       await this.browser.pauseForAnnotation();
-      const capture = await this.driver.capture();
-      if (!this.mounted) { await capture.pixel.release(); return; }
-      this.annotationCapture = capture; this.annotation = new BrowserAnnotation(); this.showAnnotation = true;
-      Diagnostics.log('info', 'browser', 'annotation_captured', { width: capture.width, height: capture.height });
+      capture = x === undefined || y === undefined ? await this.driver.capture() : await this.driver.captureElement(x, y);
+      if (!this.mounted || this.threadId !== threadId || !this.expanded || !this.foreground) { return; }
+      if (screenshotOnly) {
+        await this.onScreenshot(threadId, capture.pixel);
+      } else {
+        this.annotationCapture = capture; this.annotation = new BrowserAnnotation();
+        if (capture.element) { this.annotation.markElement(capture.element); }
+        this.showAnnotation = true;
+        Diagnostics.log('info', 'browser', 'annotation_captured', { width: capture.width, height: capture.height });
+        capture = undefined; // The annotation board owns the captured pixel from here.
+      }
     } catch (error) { this.browser.report(error as Error); }
-    finally { this.capturing = false; }
+    finally {
+      this.capturing = false;
+      await capture?.pixel.release().catch((error: Error) => Diagnostics.log('error', 'browser', 'annotation_failed', undefined, error));
+    }
+  }
+  private pickAt(event: ClickEvent): void {
+    if (!this.pickingElement || this.webWidth <= 0 || this.webHeight <= 0) { return; }
+    const width = Math.min(this.webWidth, this.browser.preview?.viewportWidth || this.webWidth);
+    this.pickingElement = false;
+    this.annotate(false, event.x / width, event.y / this.webHeight);
   }
   private closeAnnotation(): void {
     if (this.annotation.saving) { return; }
@@ -95,7 +124,9 @@ export struct BrowserPanel {
   @Builder
   annotationSheet() {
     if (this.annotationCapture) {
-      BrowserAnnotationBoard({ pixel: this.annotationCapture.pixel, pageTitle: this.annotationCapture.title || this.annotationCapture.url,
+      BrowserAnnotationBoard({ pixel: this.annotationCapture.pixel, pageTitle: this.annotationCapture.element ?
+        t('选中元素：{0}', [this.annotationCapture.element.label || this.annotationCapture.element.location]) :
+        this.annotationCapture.title || this.annotationCapture.url,
         captureWidth: this.annotationCapture.width, captureHeight: this.annotationCapture.height,
         draft: this.annotation, onClose: () => this.closeAnnotation(),
         onAdd: async (pixel: image.PixelMap, note: string) => {
@@ -116,6 +147,21 @@ export struct BrowserPanel {
     catch (error) { this.browser.report(error as Error); }
   }
   private hasWebAddress(): boolean { return !this.browser.preview && /^https?:\/\//i.test(this.browser.url); }
+  private canCapturePage(): boolean {
+    return this.canAnnotate && !this.browser.loading && !this.browser.loadFailed && !!this.browser.url && !this.capturing;
+  }
+  private loadRecent(visit: BrowserVisit): void {
+    this.address = visit.url; this.addressDirty = true; this.navigate();
+  }
+  private rememberVisit(url: string): void {
+    if (!this.recents || !this.browser.open || this.browser.owner !== 'user' || this.browser.loadFailed || !/^https?:\/\//i.test(url)) { return; }
+    try { this.recent = this.recents.record(this.recent, url, this.browser.title); }
+    catch (error) { this.browser.report(error as Error); }
+  }
+  private clearRecent(): void {
+    try { this.recents?.write([]); this.recent = []; }
+    catch (error) { this.browser.report(error as Error); }
+  }
 
   private async useLink(external: boolean): Promise<void> {
     if (!this.hasWebAddress()) { return; }
@@ -132,11 +178,25 @@ export struct BrowserPanel {
   }
 
   @Builder
+  recentMenu() {
+    ForEach(this.recent, (visit: BrowserVisit) => {
+      MenuItem({ content: visit.title || visit.url }).onClick(() => this.loadRecent(visit))
+    }, (visit: BrowserVisit) => visit.url)
+    MenuItem({ content: t('清除最近访问') }).id('browser-clear-recents').onClick(() => this.clearRecent())
+  }
+
+  @Builder
   browserMenu() {
     Menu() {
       MenuItem({ content: t('下一页') }).enabled(this.browser.canGoForward).onClick(() => this.driver?.userForward())
       MenuItem({ content: t('复制链接') }).enabled(this.hasWebAddress()).onClick(() => this.useLink(false))
       MenuItem({ content: t('在系统浏览器中打开') }).enabled(this.hasWebAddress()).onClick(() => this.useLink(true))
+      MenuItem({ content: t('截图到消息') }).id('browser-screenshot').enabled(this.canCapturePage()).onClick(() => this.annotate(true))
+      MenuItem({ content: t('选择网页元素') }).id('browser-pick-element').enabled(this.canCapturePage()).onClick(() => {
+        this.getUIContext().getFocusController().clearFocus();
+        this.browser.takeOver(); this.pickingElement = true;
+      })
+      if (this.recent.length) { MenuItem({ content: t('最近访问'), builder: this.recentMenu }) }
       MenuItem({ content: t('设置') }).onClick(this.onSettings)
     }
   }
@@ -188,9 +248,9 @@ export struct BrowserPanel {
   addressField() {
     Row() {
       TextInput({ text: this.browser.editingAddress || this.addressDirty ? this.address : this.hasWebAddress() ? this.browser.url : '',
-        placeholder: t('网页地址') }).fontFamily(this.appearance.fontFamily)
+        placeholder: t('搜索或输入网址') }).fontFamily(this.appearance.fontFamily)
         .id('browser-address').layoutWeight(1).height(36).fontSize(Font.small).backgroundColor(Color.Transparent)
-        .padding({ left: 10, right: 4 }).type(InputType.URL).enterKeyType(EnterKeyType.Go)
+        .padding({ left: 10, right: 4 }).enterKeyType(EnterKeyType.Go)
         .onFocus(() => {
           if (!this.addressDirty) { this.address = this.hasWebAddress() ? this.browser.url : ''; }
           this.browser.editingAddress = true;
@@ -227,10 +287,11 @@ export struct BrowserPanel {
           if (this.browser.loading) { this.driver?.userStop(); } else { this.driver?.userReload(); }
         } })
       this.addressField()
-      IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('批注当前页面'), compId: 'browser-annotate',
+      IconButton({ icon: this.pickingElement ? $r('sys.symbol.xmark') : $r('sys.symbol.square_and_pencil'),
+        label: this.pickingElement ? t('取消选择') : t('批注当前页面'), compId: 'browser-annotate',
         diameter: this.tabbed ? 36 : 44, iconSize: 18, fill: '#00000000',
-        disabled: !this.canAnnotate || this.browser.loading || this.browser.loadFailed || !this.browser.url,
-        onTap: () => this.annotate() })
+        disabled: !this.pickingElement && !this.canCapturePage(),
+        onTap: () => { if (this.pickingElement) { this.pickingElement = false; } else { this.annotate(); } } })
       if (this.tabbed) { this.moreButton(36) }
     }.width('100%').height(this.tabbed ? 46 : 48).padding({ left: 4, right: 6 }).enabled(!this.capturing)
   }
@@ -243,7 +304,7 @@ export struct BrowserPanel {
           .backgroundColor(this.appearance.accentTint).borderRadius(Radius.lg).padding(14)
         Text(t('打开网页或预览')).fontFamily(this.appearance.fontFamily).fontSize(20)
           .fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
-        Text(t('在地址栏输入网址，或打开本会话已发布的预览。'))
+        Text(t('搜索网页、输入网址，或打开本会话已发布的预览。'))
           .fontFamily(this.appearance.fontFamily).fontSize(Font.small).textAlign(TextAlign.Center)
           .fontColor($r('app.color.text_secondary'))
         Button(t('输入网址')).id('browser-start-address').attributeModifier(Btn.tonal)
@@ -256,6 +317,25 @@ export struct BrowserPanel {
               .width('100%').id('browser-start-preview-' + preview.id)
               .onClick(() => this.onOpenPreview(preview.messageId, preview.id))
           }, (preview: BrowserStartPreview) => preview.id)
+        }
+        if (this.recent.length) {
+          Row() {
+            Text(t('最近访问')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
+              .fontColor($r('app.color.text_secondary')).layoutWeight(1)
+            Button(t('清除')).attributeModifier(Btn.textSmall).id('browser-start-clear-recents').onClick(() => this.clearRecent())
+          }.width('100%').margin({ top: Space.md })
+          ForEach(this.recent, (visit: BrowserVisit, index: number) => {
+            Button({ type: ButtonType.Normal }) {
+              Column({ space: 2 }) {
+                Text(visit.title || visit.url).fontSize(Font.small).fontColor($r('app.color.text_primary'))
+                  .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                Text(visit.url).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+                  .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+              }.width('100%').alignItems(HorizontalAlign.Start)
+            }.id('browser-recent-' + index).width('100%').height(52).borderRadius(Radius.md)
+              .padding({ left: Space.md, right: Space.md }).backgroundColor($r('app.color.surface_variant'))
+              .onClick(() => this.loadRecent(visit))
+          }, (visit: BrowserVisit) => visit.url)
         }
       }.width('100%').constraintSize({ maxWidth: 460 }).padding({ left: 20, right: 20, top: 52, bottom: 24 })
     }.id('browser-start').width('100%').height('100%').align(Alignment.Top).backgroundColor($r('app.color.surface'))
@@ -315,9 +395,13 @@ export struct BrowserPanel {
           .enabled(!this.capturing)
           .id('agent-browser-web').width('100%').height('100%').javaScriptAccess(true).domStorageAccess(true)
           .fileAccess(false).multiWindowAccess(false).blockNetwork(false)
-          .onPageBegin((event) => this.driver?.pageBegin(event.url))
+          .onPageBegin((event) => { this.pickingElement = false; this.driver?.pageBegin(event.url); })
           .onProgressChange((event) => this.driver?.progress(event.newProgress))
-          .onPageEnd((event) => { this.driver?.pageEnd(event.url); if (!this.browser.editingAddress && !this.browser.loadFailed && event.url !== 'about:blank') { this.addressDirty = false; } })
+          .onPageEnd((event) => {
+            this.driver?.pageEnd(event.url);
+            if (!this.browser.editingAddress && !this.browser.loadFailed && event.url !== 'about:blank') { this.addressDirty = false; }
+            this.rememberVisit(event.url);
+          })
           .onNavigationEntryCommitted(() => this.driver?.historyChanged())
           .onLoadIntercept((event) => {
             const url = event.data.getRequestUrl();
@@ -352,6 +436,16 @@ export struct BrowserPanel {
             this.failurePage()
           } else if (!this.browser.preview && !this.browser.url && !this.browser.loading) {
             this.startPage()
+          }
+          if (this.pickingElement) {
+            Stack({ alignContent: Alignment.Bottom }) {
+              Text(t('点按网页元素进行批注')).fontFamily(this.appearance.fontFamily).fontSize(Font.small)
+                .fontColor(this.appearance.onAccent).backgroundColor(this.appearance.accent)
+                .padding({ left: Space.md, right: Space.md, top: Space.sm, bottom: Space.sm })
+                .borderRadius(Radius.xl).margin({ bottom: Space.lg }).hitTestBehavior(HitTestMode.None)
+            }.id('browser-pick-surface').width(this.browser.preview?.viewportWidth || '100%').constraintSize({ maxWidth: '100%' })
+              .height('100%').backgroundColor('#01000000').hitTestBehavior(HitTestMode.Block)
+              .onClick((event: ClickEvent) => this.pickAt(event))
           }
           ForEach(this.expanded && this.browser.owner === 'agent' && this.browser.actionFeedback ? [this.browser.actionFeedback] : [],
             (feedback: BrowserActionFeedback) => {

@@ -7,7 +7,7 @@ const source = fs.readFileSync(path.resolve(__dirname, '../entry/src/main/ets/mo
 const exported = {};
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 } }).outputText,
   { exports: exported, require: name => { throw Error('Unexpected runtime dependency ' + name); } });
-const { browserSnapshotScript, browserActionScript } = exported;
+const { browserSnapshotScript, browserActionScript, browserElementScript } = exported;
 (async () => {
   const browser = await chromium.launch({ channel: 'msedge', headless: true });
   try {
@@ -61,6 +61,14 @@ const { browserSnapshotScript, browserActionScript } = exported;
     const submit = snapshot.elements.find(item => item.label === 'Submit');
     const clickPreview = await preview({ action: 'click', elementId: submit.id });
     const rect = await page.locator('button').first().boundingBox();
+    const picked = JSON.parse(await page.evaluate(browserElementScript((rect.x + rect.width / 2) / 800, (rect.y + rect.height / 2) / 900)));
+    assert.equal(picked.label, 'Submit');
+    assert.match(picked.location, /button:nth-of-type\(1\)$/);
+    assert.ok(Math.abs(picked.width - rect.width / 800) < 0.001);
+    const passwordBox = await page.locator('input[type=password]').boundingBox();
+    const protectedElement = JSON.parse(await page.evaluate(browserElementScript((passwordBox.x + 4) / 800, (passwordBox.y + 4) / 900)));
+    assert.equal(protectedElement.label, '');
+    assert.equal(JSON.stringify(protectedElement).includes('secret-password'), false);
     assert.ok(Math.abs(clickPreview.target.x - (rect.x + rect.width / 2) / 800) < 0.001);
     assert.ok(Math.abs(clickPreview.target.y - (rect.y + rect.height / 2) / 900) < 0.001);
     assert.equal(await page.evaluate('window.clicks'), undefined, 'Preview must not click or dispatch input events');

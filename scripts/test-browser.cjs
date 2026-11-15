@@ -427,6 +427,11 @@ async function acquired() {
     driver.progress(70); assert.equal(f.browser.progress, 70);
     driver.userStop(); assert.equal(f.browser.loading, false); assert.equal(driver.controller.effects.at(-1), 'stop');
     console.log('PASS load progress, early main-document failure, retry address and stop');
+    const { browserAddress } = load(path.join(root, 'main/ets/model/BrowserAddress'));
+    assert.equal(browserAddress('  example.com/reports  '), 'https://example.com/reports');
+    assert.equal(browserAddress('localhost:8080'), 'http://localhost:8080');
+    assert.equal(browserAddress('网页 批注'), 'https://www.bing.com/search?q=' + encodeURIComponent('网页 批注'));
+    assert.throws(() => browserAddress('javascript:alert(1)'));
     console.log('PASS manual navigation removes the internal blank page from history and preserves subsequent pages');
   }
   {

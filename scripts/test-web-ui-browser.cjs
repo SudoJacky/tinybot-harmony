@@ -249,6 +249,13 @@ assert.throws(()=>parseWebUiMessage('{"type":"resize","height":"200"}'));
   let observation=await command('snapshot',{snapshotId:'test-1'});
   const add=observation.elements.find(element=>element.label==='Add');
   assert.ok(add);assert.equal(observation.embeddedFrames,0);
+  const point=await frame.locator('#add').evaluate(node=>{
+    const box=node.getBoundingClientRect();
+    return {x:(box.left+box.width/2)/innerWidth,y:(box.top+box.height/2)/innerHeight};
+  });
+  const marked=await command('pick',point);
+  assert.equal(marked.location,'#add');assert.equal(marked.label,'Add');assert.ok(marked.width>0);
+  assert.equal(await frame.locator('#count').textContent(),'0','Picking an element must not click it');
   assert.equal((await command('action',{action:'click',snapshotId:'test-1',elementId:add.id})).ok,true);
   await frame.waitForFunction(()=>document.querySelector('#count').textContent==='1');
   assert.equal(await page.evaluate(()=>saved.count),1,'test saves use session state, not preflight rejection');
