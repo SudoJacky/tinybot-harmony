@@ -1,6 +1,9 @@
 import { BrowserPreview } from '../model/BrowserPreview';
 import { ProviderEffects } from './providers/Provider';
 import { PresentTools } from './PresentTools';
+import { ImageGenerationTools } from './ImageGenerationTools';
+import { ImageInspectionTools } from './ImageInspectionTools';
+import { NativeImageGenerator } from './NativeImageGenerator';
 import { PreviewTools } from './PreviewTools';
 import { LifePanels } from './LifePanels';
 import { ProviderBalanceSource } from './ProviderBalanceSource';
@@ -25,6 +28,7 @@ import { SkillInstaller } from './SkillInstaller';
 import { CodeExecutionTools } from './CodeExecutionTools';
 import { NativeCodeExecutor } from './NativeCodeExecutor';
 import { WorkspaceCode } from './WorkspaceCode';
+import { OfficeLayoutReview } from './OfficeLayoutReview';
 import { NativeOrchestrationExecutor } from './NativeOrchestrationExecutor';
 import { WebUiPreflight } from './WebUiPreflight';
 import { InteractionTools } from './InteractionTools';
@@ -38,6 +42,7 @@ import { ToolApproval } from './ToolApproval';
 import { BrowserSession } from './BrowserSession';
 import { BrowserTools } from './BrowserTools';
 import { Attachments } from './Attachments';
+import { NativeImageWorkspace } from './NativeImageWorkspace';
 import { AttachmentTools } from './AttachmentTools';
 import { util } from '@kit.ArkTS';
 import { Diagnostics } from '../model/Diagnostics';
@@ -45,7 +50,7 @@ import { LogFields } from '../model/DiagnosticLog';
 import { ArkDataConversationStore } from './ArkDataConversationStore';
 import { NativeData } from './NativeData';
 import { WorkspaceStore } from '../model/WorkspaceStore';
-import { ProviderProfile } from '../model/ProviderProfiles';
+import { ProviderProfile, imageService } from '../model/ProviderProfiles';
 import { ExtensionSettings } from '../model/Skills';
 import { AgentRuntime } from './AgentRuntime';
 import { AgentTools } from './AgentLoop';
@@ -149,12 +154,25 @@ export class NativeSessionResources implements SessionResources {
         this.officeLibrary = new util.TextDecoder('utf-8', { fatal: true }).decodeToString(bytes);
       }
       return this.officeLibrary;
-    }) : undefined;
+    }, (encoded, cancellation) => OfficeLayoutReview.check(encoded, cancellation)) : undefined;
     groups.push(new CodeExecutionTools(new NativeCodeExecutor(), workspaceCode));
     groups.push(new LifePanelTools(this.lifePanels, workspaceId || id, id, files, this.lifeBoards,
       (page, storage, context, cancellation, options) => WebUiPreflight.validatePanel(page, storage, context, cancellation, options)));
     groups.push(new MailTools());
     groups.push(new PresentTools((path: string) => files.checkedPath(path)));
+    const imageFiles = new NativeImageWorkspace(files, live?.imageAttachments || (() => attachments));
+    groups.push(new ImageInspectionTools((path, maximum, cancellation) => imageFiles.readJobInput(path, maximum, cancellation),
+      (bytes, name) => Attachments.saveInspection(bytes, name)));
+    const imageModel = productivity?.options?.imageGeneration;
+    const generator = imageService(this.profiles, imageModel);
+    if (generator && imageModel) {
+      groups.push(new ImageGenerationTools(new NativeImageGenerator(generator, imageModel.modelId, new CredentialStore()),
+        imageFiles,
+        () => this.createId(), generator.protocol === 'openai-images', live?.askForToolApproval === false ? undefined :
+          (input, paths, cancellation) => this.approval.request(t('允许调用图片生成服务？'),
+            [generator.name + ' · ' + imageModel.modelId, generator.baseUrl,
+              t('提示词和所选参考图将发送给此服务。'), input.prompt].concat(paths).join('\n'), cancellation)));
+    }
     groups.push(new PreviewTools(files, (content, cancellation) => WebUiPreflight.validate(content, cancellation),
       (content, cancellation, png) => PreviewCapture.capture(content, cancellation, png),
       (path, bytes, cancellation) => files.createJobOutput(path, bytes, cancellation)));

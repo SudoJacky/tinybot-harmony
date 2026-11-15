@@ -6,12 +6,12 @@
 
 | 位置 | 载体 | 内容 | 进入备份 |
 | --- | --- | --- | --- |
-| `sessions-v2/index.json` | 会话索引的 `data` 字段 | `config`、`providerProfiles`、`extensions`、`productivity`、`projects`、`activeThreadId` | 是（凭据字段被剥离） |
-| `sessions-v2/<uuid>.json` | 独立会话文件 | 每个会话的模型选择、推理强度、工具选择、团队、停用的 MCP 服务 | 是 |
-| `tinybot-ui` Preferences | 键值 | `appearance`、`language`、`onboardingComplete`、`reviewInvitation`、`startupBackupState` | 否 |
+| `tinybot.db`（ArkData，加密） | 本机数据库 | 会话索引与每段会话、`config`、`providerProfiles`、`extensions`、`productivity`、`projects`、`activeThreadId`、用量、看板与卡片 | 是（凭据字段被剥离） |
+| `sessions-v2/`、`tinybot-v1.json`、`usage-records/` | 旧版文件 | 升级前副本，迁移后只读保留 | 否 |
+| `tinybot-ui` Preferences | 键值 | `appearance`、`language`、`onboardingComplete`、`reviewInvitation`、`startupBackupState`、`pc.historyCollapsed`、`pc.historyWidth`、`pc.detailWidth` | 否 |
 | `tinybot-developer` Preferences | 键值 | `enabled`（开发者模式） | 否 |
 | Asset Store | 凭据别名 | 模型 API Key、MCP Token、搜索 Key | 否；模型 API Key 另以账号加密区随备份导出 |
-| `usage-records` | 分块账本 | 请求与工具用量 | 否 |
+| `usage-records` | 旧版分块账本，升级后保留 | 请求与工具用量 | 否 |
 
 语言偏好与用量账本都不在备份范围内；换机恢复后需要重新选择语言，用量从零开始累计。
 
@@ -31,14 +31,16 @@
 | `providerProfiles[].id` | 服务实例 ID | `provider-<uuid>` 或预设 ID | 保存后重建注册表 |
 | `providerProfiles[].name` | 显示名称 | 预设名称 | 立即 |
 | `providerProfiles[].presetId` | 内置预设来源 | 自定义服务为空 | 仅用于展示与图标 |
-| `providerProfiles[].protocol` | `chat-completions`、`responses`、`anthropic-messages`、`gemini` | 由预设决定 | 下一次请求 |
+| `providerProfiles[].protocol` | 聊天协议 `chat-completions`、`responses`、`anthropic-messages`、`gemini`；图片协议 `openai-images`、`gemini-images`、`seedream-images`、`dashscope-images` | 由预设决定 | 下一次请求 |
 | `providerProfiles[].baseUrl` | 服务地址，保存时去掉末尾斜杠 | 预设地址 | 下一次请求 |
 | `providerProfiles[].credentialAlias` | 密钥别名；无密钥时为空 | 空 | 保存成功后写入 |
 | `providerProfiles[].noApiKey` | 无需密钥（如本地 Ollama） | `false` | 下一次请求 |
 | `providerProfiles[].enabled` | 是否启用 | `true` | 保存后立即过滤可选模型 |
-| `providerProfiles[].models` | 该服务的模型 ID 列表 | 预设列表 | 下一次请求 |
+| `providerProfiles[].models` | 该服务的模型 ID 列表；图片协议下为图片模型 | 预设列表 | 下一次请求 |
+| `providerProfiles[].imageModels` | 聊天服务下附带的图片模型：`protocol`、可选 `baseUrl`、`models` | 未设置 | 保存后重建图片模型列表 |
 | `providerProfiles[].contextWindow` | 该服务的窗口覆盖 | 未设置 | 下一次请求 |
 
+- 图片协议服务没有 `contextWindow`、推理强度与模型发现入口；只有聊天协议下才出现 `imageModels`。复用聊天服务密钥时，图片服务地址必须与聊天服务同协议、同主机、同端口，否则保存失败。
 - 上下文窗口通用默认 200000 tokens；`deepseek-flash`、`deepseek-v4-flash`、`deepseek-v4-flash-vision-exp`、`deepseek-v4-pro`、`glm-5.3`、`glm-5.3-flash` 默认 1000000。显式值范围 8192–2000000，留空恢复自动值。
 - 密钥保存在 Asset Store，别名为 `tinybot-<uuid>`，禁止跨设备同步。同一服务基础地址下改协议、名称、模型或窗口会保留密钥；更换域名、端口、HTTP/HTTPS 或基础路径时要求重新填写。
 - 保存失败会删除本次新建的密钥；更换密钥后会尝试删除旧别名，删除失败只提示“旧密钥清理失败”，不回滚新配置。
@@ -54,7 +56,7 @@
 | `productivity.options.readOnly` | 全局只读模式 | `false` | 下一轮 |
 | `productivity.options.autoRoute` | 按内容自动选择快/深模型 | `false` | 下一次请求 |
 | `productivity.memories[]` | 长期记忆条目 | 空 | 新会话首次组装上下文时固定 |
-| `productivity.templates[]` | 提示词模板 | 两个内置模板（总结材料、润色文字） | 立即 |
+| `productivity.templates[]` | 旧版提示词模板；入口已移除，数据仅为兼容保留 | 空 | 不提供编辑入口 |
 
 - 记忆上限 100 条、合计 16000 字符；注入上下文按更新时间取到预算为止。
 - 每个会话在首次发送时捕获一份背景记忆快照，之后自动记忆的变更不会改写当前会话的固定快照，以 `memory` 工具的最新回执为准。
@@ -74,21 +76,14 @@
 | `threads[].disabledMcpIds[]` | 本会话停用的 MCP 服务 | 空 | 下一轮 |
 | `threads[].teamEnabled` | 是否启用团队工具 | 未设置 | 当前回合 |
 
-- 只读模式会移除写文件、编辑、`publish_mini_app`、`mcp_call`、`memory`、`skill_manage`、`mcp_manage`，并限制浏览器点击与输入；基础文件读取、代码沙箱、计划、预览、`list_mini_apps` 和交付仍可用。
-- 自定义模式只关闭 12 项可选能力，基础文件工具固定保留，记忆与 Skills 由专门设置控制；小程序工具同时要求实验室开关开启且“预览与小程序”能力未关闭。旧配置里只关闭部分子工具时，加载会把整项能力关闭。
+- 只读模式会移除写文件与编辑、`image_gen`、`publish_life_panel`、`mcp_call`、`memory`、`skill_manage`、`mcp_manage`，并限制浏览器点击与输入；基础文件读取、代码沙箱、计划、预览与图片检查、看板读取和交付仍可用。
+- 自定义模式把可选入口归入 14 项能力，关闭某项时整组移除；基础文件工具固定保留，记忆与 Skills 由专门设置控制。当前能力为：附件与历史结果、网页读取与搜索、邮件读取、浏览器、代码计算、工具编排、信息确认、任务计划、团队协作、预览与图表、文件交付、生成图片、MCP 远程工具、MCP 服务管理。旧配置里只关闭部分子工具时，加载会把整项能力关闭。
 - 执行期间页面锁定，保存失败会回滚开关并提示；有保存错误时编辑入口不可用。
 - 从旧版本升级时，未写入的 `browserPolicy` 与 `search` 会补为当前默认值（应用内浏览器开启、必应搜索开启）；已保存的选择保持不变。
 
-## 实验室与小程序
+## 已下线的小程序
 
-| 键 | 含义 | 默认 | 生效时机 |
-| --- | --- | --- | --- |
-| `productivity.options.miniAppsEnabled` | 开启小程序入口与相关工具 | `false` | 下一次创建工具目录；界面入口在保存后刷新 |
-
-- 关闭时隐藏会话列表的“小程序”入口，并从目录移除 `list_mini_apps`、`publish_mini_app`；直接调用报 `PERMISSION_DENIED`。
-- 开启后，自定义模式仍需启用“预览与小程序”能力；只读模式继续禁止 `publish_mini_app`。
-- 关闭不删除已有小程序：`workspace/<workspaceId>/mini-apps/` 下的 `app.json` 与 `data.json` 原样保留，历史记录也不改写。
-- 普通页面预览不受此开关影响；开启小程序不等于允许联网或读取本地文件。
+`productivity.options.miniAppsEnabled`、`list_mini_apps`、`publish_mini_app` 与小程序收藏入口已在 v1.3.1 移除，当前版本不再读写这个键。已有小程序的页面与数据文件仍保留在 `workspace/<workspaceId>/mini-apps/`，作为工作区原件继续进入完整备份；界面与工具目录中没有对应入口。
 
 ## 搜索服务
 
@@ -125,10 +120,11 @@
 | 键 | 含义 | 默认 |
 | --- | --- | --- |
 | `options.fast`、`options.deep`、`options.vision`、`options.memory` | 快速、深入、图片、记忆整理分别使用的模型 | 未设置时沿用当前模型 |
+| `options.imageGeneration` | 图片生成使用的模型，取值为图片服务中的 `providerId` 与 `modelId` | 未设置时不提供 `image_gen` |
 | `options.capabilities[]` | 每个模型的 `images`、`reasoning`、`contextWindow`、`requestUsage` 覆盖 | 空 |
 | `threads[].reasoningEffort` | 本会话推理强度，`default` 表示跟随服务 | 未设置 |
 
-自动路由开启后，带图片的消息走 `vision`，文本超过 1000 字符或包含“深入”“分析”“比较”等关键词时走 `deep`，其余走 `fast`；未配置的目标模型不会启用该分支。推理强度按模型能力给出可选档位，`default` 是本地哨兵，不发送给服务。
+自动路由开启后，带图片的消息走 `vision`，文本超过 1000 字符或包含“深入”“分析”“比较”等关键词时走 `deep`，其余走 `fast`；未配置的目标模型不会启用该分支。推理强度按模型能力给出可选档位，`default` 是本地哨兵，不发送给服务。`imageGeneration` 不参与自动路由，工具目录按它是否指向一个已启用图片服务的模型决定是否提供 `image_gen`。
 
 ## 外观与语言
 
@@ -165,8 +161,9 @@
 | 助手开关（自动记忆、只读、归档、自动压缩、联网） | 写盘成功后立即，下一轮请求读取新值 |
 | 称呼与回答偏好 | 下一轮 |
 | 模型服务的新增、修改、删除 | 保存后立即重建服务注册表；会话已选模型在下一次请求解析 |
+| 图片模型的选择或关闭 | 下一次创建工具目录时决定是否提供 `image_gen` |
+| 2in1 分栏宽度与收起状态 | 有效拖动结束时写入宽度，会话栏收起或展开时写入收起状态；下次启动恢复 |
 | 搜索服务 | 下一轮创建工具时 |
-| 实验室小程序开关 | 保存后刷新入口；下一轮创建工具目录时生效 |
 | MCP 保存、启用、停用 | 保存后全局配置立即更新；会话级停用立即影响下一轮 |
 | 自定义工具选择 | 当前会话立即，随下一条有效消息保存 |
 | 推理强度 | 当前会话下一条消息；空会话跟随默认值 |

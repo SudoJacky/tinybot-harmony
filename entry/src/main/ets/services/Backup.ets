@@ -99,6 +99,7 @@ function threadAttachments(thread: ThreadData): Attachment[] {
     for (const step of message.steps || []) {
       result.push(...step.steering?.attachments || []);
       for (const tool of toolReceipts(step.tools)) { if (tool.previewScreenshot) { result.push(tool.previewScreenshot.image); }
+        if (tool.inspectedImage) { result.push(tool.inspectedImage); }
         for (const frame of tool.browserObservation?.frames || []) { result.push(frame.image); } }
     }
   }

@@ -24,12 +24,13 @@ export interface ShortcutGroup {
   shortcuts: ShortcutHint[];
 }
 
-export function chatShortcuts(): ChatShortcut[] {
+export function chatShortcuts(desktop: boolean = false): ChatShortcut[] {
   const ctrl = [ModifierKey.CTRL];
   const ctrlShift = [ModifierKey.CTRL, ModifierKey.SHIFT];
   return [
     { action: 'new-chat', key: 'n', modifiers: ctrl, chord: 'Ctrl+N', category: 'chat', label: t('新建对话') },
-    { action: 'search', key: 'k', modifiers: ctrl, chord: 'Ctrl+K', category: 'navigation', label: t('搜索对话') },
+    { action: 'search', key: 'k', modifiers: ctrl, chord: 'Ctrl+K', category: 'navigation',
+      label: desktop ? t('搜索对话或命令') : t('搜索对话') },
     { action: 'history', key: 'b', modifiers: ctrl, chord: 'Ctrl+B', category: 'navigation', label: t('展开或收起对话列表') },
     { action: 'settings', key: ',', modifiers: ctrl, chord: 'Ctrl+,', category: 'navigation', label: t('设置') },
     { action: 'workspace', key: 'f', modifiers: ctrlShift, chord: 'Ctrl+Shift+F', category: 'navigation', label: t('工作区文件') },
@@ -42,8 +43,8 @@ export function chatShortcuts(): ChatShortcut[] {
   ];
 }
 
-export function shortcutGroups(query: string): ShortcutGroup[] {
-  const shortcuts = chatShortcuts();
+export function shortcutGroups(query: string, desktop: boolean = false): ShortcutGroup[] {
+  const shortcuts = chatShortcuts(desktop);
   const input: ShortcutHint[] = shortcuts.filter((item) => item.category === 'input');
   input.push({ chord: 'Ctrl+Enter', label: t('在消息输入框中换行') }, { chord: 'Alt+Enter', label: t('发送') });
   const groups: ShortcutGroup[] = [

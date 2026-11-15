@@ -1,6 +1,6 @@
 # 工作区与文件
 
-会话默认读写应用私有目录下的工作区（workspace）；项目还可明确授权系统共享文件夹。这页说明目录如何布局、项目为什么共享同一目录、路径与写入如何校验、修改基线怎样恢复，以及导入导出、附件与小程序各自落在哪里。项目与分支的用户侧行为见[项目与共享工作区](/guide/projects)，日常操作见[文件与工作区](/guide/files)。
+会话默认读写应用私有目录下的工作区（workspace）；项目还可明确授权系统共享文件夹。这页说明目录如何布局、项目为什么共享同一目录、路径与写入如何校验、修改基线怎样恢复，以及导入导出、附件、图片生成与旧版小程序各自落在哪里。项目与分支的用户侧行为见[项目与共享工作区](/guide/projects)，日常操作见[文件与工作区](/guide/files)。
 
 ## 应用级布局
 
@@ -13,7 +13,8 @@
 │  │  ├─ 笔记-1008-1420.md
 │  │  ├─ 任务结果/<消息 ID>.md
 │  │  ├─ attachments/<附件 ID>/<文件名>   文本与文档原件
-│  │  ├─ mini-apps/<appId>/
+│  │  ├─ generated-images/<uuid>.png      图片工具生成的结果
+│  │  ├─ mini-apps/<appId>/               旧版小程序，升级后仅保留
 │  │  │  ├─ app.json                     页面与元数据
 │  │  │  └─ data.json                    用户数据
 │  │  ├─ .tinybot-review/
@@ -128,19 +129,23 @@
 | 文档 | 无应用级大小上限；按原字节复制，读取时按需提取 |
 | 图片落盘 | 最长边缩到 1600 px，JPEG 质量 85，结果不超过 4 MB |
 | 文本与文档 | 保留原文件与文件名；模型按工作区路径读取 |
-| 模型请求 | 图片转 Base64 data URL；文本与文档以附件上下文（路径与说明）拼进消息 |
+| 模型请求 | 图片转 Base64 data URL；文本与文档以附件上下文（路径与说明）拼进消息；照片在图片工具可用时另附准确引用 |
 
 附件只保存副本，不持有外部目录的持续授权。拖入与系统分享进入应用的内容同样经 `Attachments.import()` 落盘，一次最多 10 项，分享文本最多 24000 字符。
 
-## 小程序存储
+## 图片生成
 
-`mini-apps/` 保存本地小程序的页面与用户数据，路径为 `workspace/<workspaceId>/mini-apps/<appId>/app.json` 与由清单指定名称的数据文件（v1 固定为 `data.json`）：
+`image_gen` 成功后在当前工作区写入 `generated-images/<uuid>.png`、`.jpg` 或 `.webp`，与其他工作区文件使用同一套路径校验、列表与备份逻辑，不经过 `.tinybot-review/` 基线。
 
-- 页面与元数据在 `app.json`；v1 记录当前页与上一版页面，v2 记录正式数据文件、版本历史与采用记录。用户数据独立存放，更新或恢复页面不会改写它。
-- 页面只接受单页 `.js`、`.html` 或 `.svg`，发布前用只读数据快照做启动校验；启动脚本不能写入数据。
-- 小程序数据通过 `tinybot.storage.load()` / `save(value, revision)` 读写，带版本守卫；版本过期时保存失败，页面必须重新加载并对齐。
-- 移除只归档；归档后“永久删除”才删除整个 `mini-apps/<appId>`。原会话删除后目录仍保留，备份会带走这些保留工作区。
-- 小程序集合跨会话列出所有工作区的小程序，按最近打开或更新时间排序；工作区来源显示项目名、会话标题或“保留的工作区”。
+- 参考图从工作区读取，也可以是本对话的照片附件；最多 4 张，PNG/JPEG/WebP，合计不超过 16 MiB。
+- 生成结果同样限制 16 MiB；服务返回图片地址时只接受 HTTPS 并禁止重定向。写入前在右下角绘制“AI生成”标记并嵌入 XMP AIGC 元数据，标记失败时不保存文件。
+- `view_image` 另存一份最长边 1600 px 的 JPEG 副本到 `attachments/`，作为工具回执的视觉证据，不修改源文件。
+- 删除会话不清理 `generated-images/`；清理需要手动进行，完整备份会带走这些文件。
+- 旁聊不建立自己的目录：它通过 `workspaceIdFor()` 使用主会话的项目目录或主会话 ID，并且只被授予读取工具，写文件工具在目录与执行两层都被过滤。
+
+## 已下线的小程序
+
+`mini-apps/` 仍保存 v1.3.1 之前创建的本地小程序页面与用户数据，路径为 `workspace/<workspaceId>/mini-apps/<appId>/app.json` 与由清单指定名称的数据文件（v1 固定为 `data.json`）。当前版本没有小程序入口、实验室开关或 `publish_mini_app`/`list_mini_apps` 工具，不再执行页面，也不再写入数据；这些文件只作为工作区原件保留并进入完整备份。
 
 ## 代码入口
 
@@ -157,6 +162,5 @@
 | `entry/src/main/ets/services/WorkspaceTools.ets` | 文件工具定义、参数校验与读取分页 |
 | `entry/src/main/ets/views/WorkspacePanel.ets` | 文件浏览、编辑、基线审阅、导入导出与分享 |
 | `entry/src/main/ets/services/NativeActions.ets` | 系统选择器、导出、分享与分享入口 |
-| `entry/src/main/ets/services/Attachments.ets` | 附件导入、压缩、落盘与请求水合 |
-| `entry/src/main/ets/services/MiniApps.ets` | 小程序发布、数据版本、归档与删除 |
-| `entry/src/main/ets/model/MiniApp.ets` | 小程序清单、ID 与路径校验 |
+| `entry/src/main/ets/services/Attachments.ets` | 附件导入、压缩、落盘、图片检查副本与请求水合 |
+| `entry/src/main/ets/services/ImageGenerationTools.ets` | 生成图片的路径校验、参考图读取与 `generated-images/` 写入 |

@@ -91,11 +91,45 @@ export function browserActionScript(action: BrowserAction, preview: boolean = fa
   return actionScript(JSON.stringify(action), preview);
 }
 
+function elementScript(point: string): string {
+  return `(() => {
+    ${SENSITIVE_INPUT}
+    const {x, y} = ${point};
+    const viewport = window.visualViewport;
+    const left = viewport?.offsetLeft ?? 0, top = viewport?.offsetTop ?? 0;
+    const width = viewport?.width ?? innerWidth, height = viewport?.height ?? innerHeight;
+    const hit = document.elementFromPoint(left + x * width, top + y * height);
+    if (!hit || hit === document.documentElement || hit === document.body || hit.closest('iframe,frame')) return 'null';
+    const node = hit.closest('button,a,h1,h2,h3,h4,h5,h6,img,p,input,textarea,select,[role="button"],[contenteditable]') || hit;
+    const box = node.getBoundingClientRect();
+    const x0 = Math.max(box.left, left), y0 = Math.max(box.top, top);
+    const x1 = Math.min(box.right, left + width), y1 = Math.min(box.bottom, top + height);
+    if (x1 <= x0 || y1 <= y0) return 'null';
+    const path = [];
+    for (let part = node; part?.parentElement && part !== document.body; part = part.parentElement) {
+      if (part.id && !sensitive(part)) {
+        const id = '#' + CSS.escape(part.id);
+        if (document.querySelectorAll(id).length === 1) { path.unshift(id); break; }
+      }
+      const peers = [...part.parentElement.children].filter(peer => peer.localName === part.localName);
+      path.unshift(CSS.escape(part.localName) + ':nth-of-type(' + (peers.indexOf(part) + 1) + ')');
+    }
+    const label = sensitive(node) || node.isContentEditable ? '' :
+      (node.getAttribute('aria-label') || node.getAttribute('alt') ||
+        (node.matches('input,textarea,select') ? '' : node.innerText) || '').trim().slice(0, 160);
+    return JSON.stringify({x:(x0-left)/width,y:(y0-top)/height,width:(x1-x0)/width,height:(y1-y0)/height,
+      label,location:path.join(' > ').slice(0, 1000)});
+  })()`;
+}
+
+export function browserElementScript(x: number, y: number): string { return elementScript(JSON.stringify({ x: x, y: y })); }
+
 // Trusted code installed inside the opaque iframe; no eval or model-supplied scripts/selectors.
 export function browserAutomationScript(): string {
   return `(() => {
     const observe = inputId => ${snapshotScript('inputId')};
     const act = inputAction => ${actionScript('inputAction', false)};
+    const pick = point => ${elementScript('point')};
     addEventListener('message', event => {
       const data = event.data;
       if (event.source !== parent || data?.channel !== 'tinybot-host' || data.type !== 'browserCommand') return;
@@ -106,7 +140,8 @@ export function browserAutomationScript(): string {
             parent.postMessage({channel:'tinybot-frame',type:'browserResult',id:data.id,message:'{}'}, '*');
           }));
         } else {
-          const message = data.operation === 'snapshot' ? observe(args.snapshotId) : act(args);
+          const message = data.operation === 'snapshot' ? observe(args.snapshotId) :
+            data.operation === 'pick' ? pick(args) : act(args);
           parent.postMessage({channel:'tinybot-frame',type:'browserResult',id:data.id,message}, '*');
         }
       } catch (error) {

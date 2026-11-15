@@ -112,14 +112,20 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
     return withFileMutation(await this.fileKey(path), async () => this.fileDigest(await this.checkedPath(path)));
   }
 
-  async createJobOutput(path: string, bytes: Uint8Array, cancellation: Cancellation): Promise<void> {
+  async createJobOutput(path: string, bytes: Uint8Array, cancellation: Cancellation, expectedVersion?: string): Promise<void> {
     workspaceRelativePath(path, false);
     if (this.isShared(path) || /^(attachments|mini-apps|life-panels|life-boards)(\/|$)/.test(path)) {
-      throw new ToolFailure('FS_INVALID_PATH', 'File jobs write only to new files in the private workspace.', 'fix_path', { path: path });
+      throw new ToolFailure('FS_INVALID_PATH', 'File jobs write only to the private workspace.', 'fix_path', { path: path });
     }
     await withFileMutation(this.root + '/' + path, async () => {
       const absolute = await this.resolve(path, true, cancellation);
-      if (await this.optionalStat(absolute)) {
+      const existing = await this.optionalStat(absolute);
+      if (expectedVersion !== undefined) {
+        if (!/\.pptx$/i.test(path) || !existing?.isFile() || existing.isSymbolicLink() ||
+          await this.fileDigest(absolute) !== expectedVersion) {
+          throw new ToolFailure('FS_STALE_VERSION', 'The PowerPoint draft changed. Read it again before revising.', 'read_file', { path: path });
+        }
+      } else if (existing) {
         throw new ToolFailure('FS_NOT_OBSERVED', 'The output already exists. Choose a new path.', 'choose_another_path', { path: path });
       }
       await this.replaceBytes(absolute, bytes, cancellation);

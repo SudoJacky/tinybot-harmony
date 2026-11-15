@@ -90,6 +90,7 @@ export async function decryptBackupKeys(value: EncryptedBackupKeys, credential: 
     const visible = data.providerProfiles?.find((entry) => entry.id === profile.id);
     // Authenticate the destination as well as the key: edits to the public metadata must not redirect secrets.
     if (ids.has(profile.id) || !visible || visible.protocol !== profile.protocol || visible.baseUrl !== profile.baseUrl ||
+      visible.imageModels?.protocol !== profile.imageModels?.protocol || visible.imageModels?.baseUrl !== profile.imageModels?.baseUrl ||
       (profile.noApiKey ? item.apiKey.length !== 0 : item.apiKey.length === 0)) { throw new Error(t('备份密钥与模型服务配置不一致。')); }
     ids.add(profile.id);
   }

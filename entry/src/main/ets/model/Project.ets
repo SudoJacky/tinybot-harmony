@@ -28,7 +28,7 @@ export function projectFor(data: AppData, thread: ThreadData): ProjectData | und
 }
 
 export function workspaceIdFor(data: AppData, thread: ThreadData): string {
-  return projectFor(data, thread)?.workspaceId || thread.id;
+  return projectFor(data, thread)?.workspaceId || (thread.sideChatContext !== undefined ? thread.parentThreadId || thread.id : thread.id);
 }
 
 export function validateProjects(data: AppData): void {
@@ -46,17 +46,25 @@ export function validateProjects(data: AppData): void {
     validateSharedFolders(project.sharedFolders);
     ids.add(project.id); workspaces.add(project.workspaceId);
   }
+  const threads = new Map(data.threads.map((thread) => [thread.id, thread]));
   for (const thread of data.threads) {
     if (thread.projectId !== undefined && (typeof thread.projectId !== 'string' || !ids.has(thread.projectId))) {
       throw new Error(t('会话关联的项目不存在。'));
     }
     if (thread.projectId === undefined && workspaces.has(thread.id)) { throw new Error(t('工作区归属冲突。')); }
+    if (thread.sideChatContext !== undefined) {
+      const parent = threads.get(thread.parentThreadId || '');
+      if (!parent || parent.sideChatContext !== undefined || parent.projectId !== thread.projectId) {
+        throw new Error(t('旁聊关联的主会话无效。'));
+      }
+    }
   }
 }
 
 export function projectContext(data: AppData, thread: ThreadData): string {
   const project = projectFor(data, thread);
-  if (!project) { return thread.parentThreadId ? '这是从历史创建的会话分支，使用独立的新工作区。历史文件操作发生在原会话，不能假设原文件仍存在；先列出或读取当前文件。' : ''; }
+  if (!project) { return thread.sideChatContext !== undefined ? '旁聊与主会话使用同一工作区，只能读取文件。' :
+    thread.parentThreadId ? '这是从历史创建的会话分支，使用独立的新工作区。历史文件操作发生在原会话，不能假设原文件仍存在；先列出或读取当前文件。' : ''; }
   const folders = project.sharedFolders || [];
   const shared = folders.length === 0 ? '' : '\n项目共享文件夹（用户通过项目设置授权，路径前缀 ' + SHARED_FOLDER_ROOT +
     '/，读写受会话工具权限与审批设置约束，内容可能被项目外的应用修改）：\n' +

@@ -14,6 +14,8 @@ import { backgroundGeneration } from '../services/BackgroundGeneration';
 import { completionNotifications } from '../services/CompletionNotifications';
 import { WebUiPreflight } from '../services/WebUiPreflight';
 import { PreviewCapture } from '../services/PreviewCapture';
+import { ApiLevel } from '../common/ApiLevel';
+import { IS_PC } from '../common/DeviceForm';
 /*
  * Copyright (c) 2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -32,6 +34,9 @@ import { PreviewCapture } from '../services/PreviewCapture';
 import { AbilityConstant, common, Configuration, UIAbility, Want } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 
+const PC_MIN_WINDOW_WIDTH: number = 360;
+const PC_MIN_WINDOW_HEIGHT: number = 420;
+
 // Required by Pen Kit's system-provided handwriting component.
 declare namespace globalThis {
   let _brushEngineContext: common.UIAbilityContext;
@@ -41,6 +46,36 @@ export default class EntryAbility extends UIAbility {
   private mainWindow?: window.Window;
   private servicesStarted: boolean = false;
   private pendingWants: Want[] = [];
+  private abilityForeground: boolean = false;
+  private pcWindowVisible: boolean = true;
+
+  private windowLifecycle = (event: window.WindowStageLifecycleEventType): void => {
+    if (event === window.WindowStageLifecycleEventType.SHOWN) { this.pcWindowVisible = true; }
+    else if (event === window.WindowStageLifecycleEventType.HIDDEN) { this.pcWindowVisible = false; }
+    else { return; }
+    // Minimizing hides the window while the ability and its transfers keep running.
+    completionNotifications.setForeground(this.abilityForeground && this.pcWindowVisible);
+    AppStorage.setOrCreate('tinybot.pcWindowVisible', this.pcWindowVisible);
+    Diagnostics.log('info', 'app', 'pc_window_visibility', { visible: this.pcWindowVisible });
+  };
+
+  private async setPcWindowLimits(mainWindow: window.Window): Promise<void> {
+    try {
+      let limits: window.WindowLimits;
+      if (ApiLevel.sdk >= 22) {
+        limits = { minWidth: PC_MIN_WINDOW_WIDTH, minHeight: PC_MIN_WINDOW_HEIGHT, pixelUnit: window.PixelUnit.VP };
+      } else {
+        const ui = mainWindow.getUIContext();
+        limits = { minWidth: Math.ceil(ui.vp2px(PC_MIN_WINDOW_WIDTH)), minHeight: Math.ceil(ui.vp2px(PC_MIN_WINDOW_HEIGHT)) };
+      }
+      const applied = await mainWindow.setWindowLimits(limits);
+      Diagnostics.log('info', 'app', 'pc_window_limits', { width: applied.minWidth, height: applied.minHeight,
+        unit: ApiLevel.sdk >= 22 ? 'vp' : 'px' });
+    } catch (error) {
+      Diagnostics.log('error', 'app', 'pc_window_limits_failed',
+        { width: PC_MIN_WINDOW_WIDTH, height: PC_MIN_WINDOW_HEIGHT, unit: 'vp' }, error as Error);
+    }
+  }
 
   // Pages extend their backgrounds under the system bars, so match the status bar text to the theme.
   private applySystemBars(): void {
@@ -119,6 +154,13 @@ export default class EntryAbility extends UIAbility {
     // Main window is created, set main page for this ability
     Diagnostics.log('info', 'app', 'window_created');
 
+    if (IS_PC) {
+      this.pcWindowVisible = true;
+      AppStorage.setOrCreate('tinybot.pcWindowVisible', true);
+      try { windowStage.on('windowStageLifecycleEvent', this.windowLifecycle); }
+      catch (error) { Diagnostics.log('error', 'app', 'pc_window_observe_failed', undefined, error as Error); }
+    }
+
     windowStage.loadContent('pages/Index', (err) => {
       if (err.code) {
         Diagnostics.log('error', 'app', 'window_failed', undefined, err);
@@ -126,20 +168,30 @@ export default class EntryAbility extends UIAbility {
       }
       Diagnostics.log('info', 'app', 'window_loaded');
       this.mainWindow = windowStage.getMainWindowSync();
+      if (IS_PC) { this.setPcWindowLimits(this.mainWindow); }
       AppearancePreferences.activate();
       this.applySystemBars();
     });
   }
 
+  onWindowStageWillDestroy(windowStage: window.WindowStage): void {
+    if (IS_PC) {
+      try { windowStage.off('windowStageLifecycleEvent', this.windowLifecycle); }
+      catch (error) { Diagnostics.log('error', 'app', 'pc_window_unobserve_failed', undefined, error as Error); }
+    }
+  }
+
   onWindowStageDestroy(): void {
+    this.mainWindow = undefined;
     hostedPrivacy.onPageHide();
     // Main window is destroyed, release UI related resources
     Diagnostics.log('info', 'app', 'window_destroyed');
   }
 
   onForeground(): void {
+    this.abilityForeground = true;
     autoCloudBackup.setForeground(true);
-    completionNotifications.setForeground(true);
+    completionNotifications.setForeground(this.pcWindowVisible);
     backgroundGeneration.setForeground(true);
     // Index.onPageShow checks privacy before refreshing account and business state.
     if (hostedPrivacy.allowed) { DeveloperDiagnostics.setForeground(true); }
@@ -153,6 +205,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onBackground(): void {
+    this.abilityForeground = false;
     hostedPrivacy.onPageHide();
     autoCloudBackup.onBackground();
     completionNotifications.setForeground(false);

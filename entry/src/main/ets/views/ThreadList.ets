@@ -1,5 +1,6 @@
 import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { IS_LARGE_SCREEN, IS_PC } from '../common/DeviceForm';
 import { t } from '../model/I18n';
 import { FrameCallback, SymbolGlyphModifier } from '@kit.ArkUI';
 import { KeyCode } from '@kit.InputKit';
@@ -17,10 +18,10 @@ import { listWebDavDirectory, WebDavDirectoryEntry } from '../services/WebDavWor
 import { Btn, Font, Motion, Radius, Space, Styles } from '../common/Theme';
 import { Banner, BottomBar, EmptyState, GroupCard, IconButton, NavRow, RowDivider, SectionHeader } from '../common/Widgets';
 
-const SEARCH_HEIGHT: number = 44;
-const THREAD_ROW_HEIGHT: number = 38;
+const SEARCH_HEIGHT: number = IS_PC ? 36 : 44;
+const THREAD_ROW_HEIGHT: number = IS_PC ? 34 : 38;
 const RENAME_CONTROL_HEIGHT: number = 36;
-const ROW_MENU_SIZE: number = 32;
+const ROW_MENU_SIZE: number = IS_PC ? 28 : 32;
 const ROW_MENU_RIGHT_INSET: number = 4;
 
 class ThreadSection {
@@ -50,6 +51,7 @@ struct ThreadRow {
   onSelectionChanged: (selected: boolean) => void = () => {};
   @State private editing: boolean = false;
   @State private name: string = '';
+  @State private hovered: boolean = false;
 
   private locked(): boolean {
     return !this.app.canNavigate;
@@ -59,11 +61,20 @@ struct ThreadRow {
     return this.conversationActive && this.app.active.id === this.thread.id;
   }
   private matchId(): string { return this.thread.messages.find((item) => item.content.toLocaleLowerCase().includes(this.query.trim().toLocaleLowerCase()))?.id || ''; }
+  private matchExcerpt(): string {
+    const needle = this.query.trim().toLocaleLowerCase();
+    if (!needle) { return ''; }
+    const message = this.thread.messages.find((item) => item.content.toLocaleLowerCase().includes(needle));
+    if (!message) { return ''; }
+    const offset = message.content.toLocaleLowerCase().indexOf(needle);
+    const start = Math.max(0, offset - 18);
+    return (start ? '…' : '') + message.content.slice(start, offset + 60).replace(/\s+/g, ' ').trim();
+  }
 
   @Builder
   actions() {
     Menu() {
-      if (!this.selecting) {
+      if (!this.selecting && !this.locked()) {
         MenuItem(() => materialMenuContent.bind(this)({ label: t("重命名"), icon: $r('sys.symbol.square_and_pencil') }))
           .onClick(() => { this.name = this.thread.title; this.editing = true; })
         MenuItem(() => materialMenuContent.bind(this)({ label: this.thread.pinned ? t("取消置顶") : t("置顶"), icon: $r('sys.symbol.pin') }))
@@ -126,10 +137,16 @@ struct ThreadRow {
             if (this.thread.pinned) {
               SymbolGlyph($r('sys.symbol.pin_fill')).fontSize(13).fontColor([this.appearance.accent])
             }
-            Text(this.thread.displayTitle).fontFamily(this.appearance.fontFamily).fontSize(15).maxLines(1).layoutWeight(1)
+            Column({ space: 2 }) {
+            Text(this.thread.displayTitle).fontFamily(this.appearance.fontFamily).fontSize(IS_PC ? 13 : 15).maxLines(1).width('100%')
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .fontWeight(this.active() ? FontWeight.Medium : FontWeight.Normal)
               .fontColor(this.workbench ? $r('app.color.text_primary') : this.active() ? this.appearance.onAccentContainer : $r('app.color.text_primary'))
+            if (IS_LARGE_SCREEN && this.matchExcerpt()) {
+              Text(this.matchExcerpt()).fontSize(12).fontColor($r('app.color.text_secondary')).width('100%').maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+            }
+            }.layoutWeight(1).alignItems(HorizontalAlign.Start)
           }.layoutWeight(1)
           if (!this.selecting) {
             Button({ type: ButtonType.Circle }) {
@@ -143,17 +160,20 @@ struct ThreadRow {
         }
         .width('100%').padding({ left: this.workbench && !this.thread.parentThreadId ? 28 : Space.md, right: ROW_MENU_RIGHT_INSET,
           top: 3, bottom: 3 }).constraintSize({ minHeight: THREAD_ROW_HEIGHT })
+        .focusable(!this.locked())
         .onClick(async () => {
           if (this.locked()) { return; }
           if (this.selecting) { this.onSelectionChanged(!this.selected); return; }
           if (this.query.trim() ? await this.app.openMessage(this.thread.id, this.matchId(), this.query.trim()) : await this.app.selectThread(this.thread.id)) { this.onSelected(); }
         })
-        .bindContextMenu(this.actions, ResponseType.LongPress, {
+        .bindContextMenu(this.actions, IS_PC ? ResponseType.RightClick : ResponseType.LongPress, {
           systemMaterial: this.appearance.menu, mask: false })
       }
     }
     .width(this.workbench && !this.thread.parentThreadId ? '100%' : 'calc(100% - 28vp)').borderRadius(this.workbench ? 10 : Radius.md)
-    .backgroundColor((this.selecting ? this.selected : this.active()) ? $r('app.color.selection') : Color.Transparent)
+    .backgroundColor((this.selecting ? this.selected : this.active()) ? $r('app.color.selection')
+      : IS_PC && this.hovered && !this.locked() ? $r('app.color.surface_variant') : Color.Transparent)
+    .onHover((hovered: boolean) => { if (IS_PC) { this.hovered = hovered; } })
     .opacity(this.locked() && !this.active() ? 0.6 : 1)
     .onAreaChange((_old: Area, area: Area) => { this.rowHeight = Number(area.height); })
     Shape() {
@@ -185,17 +205,12 @@ export struct ThreadList {
   @Prop @Watch('searchAvailabilityChanged') active: boolean = true;
   @StorageProp('tinybot.foreground') @Watch('searchAvailabilityChanged') private foreground: boolean = true;
   @Prop workbench: boolean = false;
-  // The persistent workbench column can collapse itself into the rail; the overlay
-  // drawer cannot, so it omits the control.
-  @Prop collapseHistory: boolean = false;
   @Prop @Watch('searchRequested') searchRequest: number = 0;
   @State @Watch('searchVisibilityChanged') private searchOpen: boolean = false;
   @State private toolbarWidth: number = SEARCH_HEIGHT;
   private mounted: boolean = false;
   private focusRequest: number = 0;
-  onCollapseHistory: () => void = () => {};
   onNewChat: (projectId?: string) => void = () => {};
-  onTools: () => void = () => {};
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
   onSelected: () => void = () => {};
@@ -658,6 +673,10 @@ export struct ThreadList {
   @Builder
   projectActions(id: string) {
     Menu() {
+      if (IS_PC && !this.archived) {
+        MenuItem(() => materialMenuContent.bind(this)({ label: t('在此项目中新建对话'), icon: $r('sys.symbol.square_and_pencil') }))
+          .enabled(!this.locked()).onClick(() => this.onNewChat(id))
+      }
       MenuItem(() => materialMenuContent.bind(this)({ label: t('项目文件'), icon: $r('sys.symbol.folder') }))
         .onClick(async () => { if (await this.app.openProject(id)) { this.onFiles(); } })
       MenuItem(() => materialMenuContent.bind(this)({ label: t('编辑项目'), icon: $r('sys.symbol.square_and_pencil') }))
@@ -670,7 +689,8 @@ export struct ThreadList {
     Menu() {
       MenuItem(() => materialMenuContent.bind(this)({ label: t('对话'), selected: !this.archived }))
         .id('active-threads').onClick(() => this.setScope(false, this.projectFilter))
-      MenuItem(() => materialMenuContent.bind(this)({ label: t('已归档'), selected: this.archived }))
+      MenuItem(() => materialMenuContent.bind(this)({ label: IS_LARGE_SCREEN ?
+        t('已归档 · {0}', [this.app.filteredThreads('', true).length]) : t('已归档'), selected: this.archived }))
         .id('archived-threads').onClick(() => this.setScope(true, this.projectFilter))
       MenuItemGroup() {
         MenuItem(() => materialMenuContent.bind(this)({ label: t('全部项目'), selected: this.projectFilter === null }))
@@ -694,16 +714,6 @@ export struct ThreadList {
   }
 
   @Builder
-  workspaceMenu() {
-    Menu() {
-      MenuItem({ content: t('工作区文件'), symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.folder')) })
-        .id('workbench-sidebar-files').onClick(this.onFiles)
-      MenuItem({ content: t('记忆与工具'), symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.wrench_and_screwdriver')) })
-        .id('workbench-sidebar-tools').onClick(this.onTools)
-    }
-  }
-
-  @Builder
   searchControl() {
     Row() {
       Stack() {
@@ -718,7 +728,8 @@ export struct ThreadList {
       TextInput({ text: this.query, placeholder: t('搜索对话') })
         .id('search-threads').layoutWeight(1).height(SEARCH_HEIGHT).padding(0)
         .fontFamily(this.appearance.fontFamily).fontSize(15).placeholderColor($r('app.color.text_tertiary'))
-        .backgroundColor(Color.Transparent).enabled(this.searchOpen && !this.locked()).focusable(this.searchOpen)
+        .backgroundColor(Color.Transparent).enabled(this.searchOpen && !this.locked())
+        .focusable(this.searchOpen)
         .visibility(this.searchOpen ? Visibility.Visible : Visibility.None).accessibilityText(t('搜索对话'))
         .onChange((value: string) => { if (this.searchOpen) { this.updateQuery(value); } })
         .onKeyEvent((event: KeyEvent) => {
@@ -742,7 +753,7 @@ export struct ThreadList {
       Row({ space: Space.sm }) {
         Text(t('已选中 {0} 个会话', [this.selectedIds.length])).fontFamily(this.appearance.fontFamily).id('thread-selection-count')
           .fontSize(Font.small).fontColor($r('app.color.text_secondary')).layoutWeight(1)
-        IconButton({ icon: $r('sys.symbol.xmark'), label: t('取消'), compId: 'thread-selection-cancel', diameter: 44,
+        IconButton({ icon: $r('sys.symbol.xmark'), label: t('取消'), compId: 'thread-selection-cancel', diameter: SEARCH_HEIGHT,
           iconSize: 17, onTap: () => this.endSelection() })
       }.width('100%').height(SEARCH_HEIGHT)
     } else {
@@ -750,20 +761,17 @@ export struct ThreadList {
         Row() {
           Blank().layoutWeight(1)
           IconButton({ icon: $r('sys.symbol.square_grid_2x2'), label: t('生活看板'), compId: 'open-life-panels',
-            diameter: 44, iconSize: 19, disabled: !this.app.ready, onTap: this.onLifePanels })
+            diameter: SEARCH_HEIGHT, iconSize: 19, disabled: !this.app.ready, onTap: this.onLifePanels })
           Button({ type: ButtonType.Circle }) {
             SymbolGlyph($r('sys.symbol.list_bullet')).fontSize(18)
               .fontColor([this.archived || this.projectFilter !== null ? this.appearance.accent : $r('app.color.text_secondary')])
-          }.id('thread-scope-menu').width(44).height(44)
+          }.id('thread-scope-menu').width(SEARCH_HEIGHT).height(SEARCH_HEIGHT)
             .backgroundColor(this.archived || this.projectFilter !== null ? this.appearance.accentContainer : Color.Transparent)
             .accessibilityText(t('筛选对话')).enabled(!this.locked())
             .bindMenu(this.scopeMenu, { systemMaterial: this.appearance.menu, mask: false })
           IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('新建对话'), compId: 'workbench-new-chat',
-            diameter: 44, iconSize: 19, disabled: this.locked(), onTap: () => this.onNewChat(this.projectFilter || undefined) })
-          if (this.collapseHistory) {
-            IconButton({ icon: $r('sys.symbol.close_sidebar'), label: t('收起会话栏'), compId: 'workbench-collapse-history',
-              diameter: 44, iconSize: 18, onTap: this.onCollapseHistory })
-          }
+            diameter: SEARCH_HEIGHT, iconSize: 19, disabled: this.locked(), onTap: () => this.onNewChat(
+              this.projectFilter === null && IS_LARGE_SCREEN ? this.app.activeProject?.id : this.projectFilter || undefined) })
         }.width('100%').height(SEARCH_HEIGHT).enabled(!this.searchOpen)
           .accessibilityLevel(this.searchOpen ? 'no-hide-descendants' : 'auto')
         this.searchControl()
@@ -786,11 +794,23 @@ export struct ThreadList {
           Text(this.sectionTitle(id)).fontFamily(this.appearance.fontFamily).fontSize(14).fontWeight(FontWeight.Medium).maxLines(1).layoutWeight(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .fontColor((this.app.active.projectId || '') === id ? this.appearance.accent : $r('app.color.text_secondary'))
+          if (IS_PC) {
+            SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(10).fontColor([$r('app.color.text_tertiary')])
+              .rotate({ angle: this.groupOpen(id) ? 0 : -90 }).accessibilityLevel('no')
+          }
         }.width('100%')
-      }.fontFamily(this.appearance.fontFamily).id('project-group-' + (id || 'ordinary')).layoutWeight(1).height(38).padding({ right: 4 })
+      }.fontFamily(this.appearance.fontFamily).id('project-group-' + (id || 'ordinary')).layoutWeight(1).height(THREAD_ROW_HEIGHT).padding({ right: 4 })
         .backgroundColor(Color.Transparent).borderRadius(10).onClick(() => this.toggleGroup(id))
         .accessibilityText(this.sectionTitle(id) + '，' + (this.groupOpen(id) ? t('收起') : t('展开')))
       if (!this.selecting) {
+        if (IS_PC && id && !this.archived) {
+          Button({ type: ButtonType.Normal }) {
+            SymbolGlyph($r('sys.symbol.plus')).fontSize(14).fontColor([$r('app.color.text_secondary')])
+          }.id('pc-new-chat-in-' + id).width(ROW_MENU_SIZE).height(ROW_MENU_SIZE).padding(0).borderRadius(8)
+            .backgroundColor(Color.Transparent).enabled(!this.locked())
+            .accessibilityText(t('在此项目中新建对话') + ' · ' + this.sectionTitle(id))
+            .onClick(() => this.onNewChat(id))
+        }
         if (id) {
           Button({ type: ButtonType.Circle }) {
             SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
@@ -859,8 +879,8 @@ export struct ThreadList {
                 }
               }
             }, (id: string) => id || 'ordinary')
-        }.id('project-thread-tree').layoutWeight(1).width('100%').scrollBar(BarState.Off)
-        .edgeEffect(EdgeEffect.Spring)
+        }.id('project-thread-tree').layoutWeight(1).width('100%').scrollBar(IS_PC ? BarState.Auto : BarState.Off)
+        .edgeEffect(IS_PC ? EdgeEffect.None : EdgeEffect.Spring)
       }
       if (this.app.saveError.length > 0) {
         Banner({ text: this.app.saveError, actionLabel: t("重试"), actionEnabled: !this.app.sharedBusy,
@@ -880,24 +900,18 @@ export struct ThreadList {
             .enabled(!this.locked() && this.selectedIds.length > 0).onClick(() => this.confirmDeleteSelected())
         }.width('100%')
       } else {
-        Row({ space: Space.xs }) {
-          if (this.workbench) {
-            Button({ type: ButtonType.Circle }) {
-              SymbolGlyph($r('sys.symbol.folder')).fontSize(20).fontColor([$r('app.color.text_secondary')])
-            }.id('sidebar-workspace-menu').width(44).height(44).backgroundColor(Color.Transparent)
-              .accessibilityText(t('工作区')).bindMenu(this.workspaceMenu, { systemMaterial: this.appearance.menu, mask: false })
-          }
-          Row({ space: Space.sm }) {
-            SymbolGlyph($r('sys.symbol.gearshape')).fontSize(20).fontColor([$r('app.color.text_secondary')])
-            Text(t('设置')).fontFamily(this.appearance.fontFamily).fontSize(15).layoutWeight(1)
-              .fontColor($r('app.color.text_primary')).maxLines(1)
+        Row({ space: Space.sm }) {
+          SymbolGlyph($r('sys.symbol.gearshape')).fontSize(20).fontColor([$r('app.color.text_secondary')])
+          Text(t('设置')).fontFamily(this.appearance.fontFamily).fontSize(15).layoutWeight(1)
+            .fontColor($r('app.color.text_primary')).maxLines(1)
+          if (!IS_LARGE_SCREEN) {
             Text(t('已配置 {0} 个模型服务', [this.app.providerProfiles.length])).fontFamily(this.appearance.fontFamily)
               .fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
             SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(14).fontColor([$r('app.color.text_tertiary')])
-          }.id('open-settings').layoutWeight(1).height(48).padding({ left: Space.sm, right: Space.sm }).borderRadius(Radius.md)
-            .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
-            .onClick(this.onSettings)
-        }.width('100%')
+          }
+        }.id('open-settings').width('100%').height(IS_PC ? 36 : 48).padding({ left: Space.sm, right: Space.sm }).borderRadius(Radius.md)
+          .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
+          .onClick(this.onSettings)
       }
     }
     .padding({ left: Space.md, right: Space.md, top: Space.sm, bottom: Space.sm })

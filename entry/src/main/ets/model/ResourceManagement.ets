@@ -1,6 +1,6 @@
 import { ToolFailure, parseToolArguments } from './ToolFailure';
 import { ExtensionSettings, SkillData, SkillFile, parseSkill, validateExtensions } from './Skills';
-import { McpServer, ProductivityData, validateProductivity } from './Productivity';
+import { Attachment, McpServer, ProductivityData, validateProductivity } from './Productivity';
 import { mergeSavedConfiguration } from './SavedConfiguration';
 
 export interface SkillRequest {
@@ -21,6 +21,7 @@ export interface McpRequest {
 }
 export interface LiveResources {
   askForToolApproval?: boolean;
+  imageAttachments?: () => Attachment[];
   skills: () => SkillData[];
   servers: () => McpServer[];
 }

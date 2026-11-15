@@ -9,6 +9,7 @@ export interface AssistantOptions {
   memory?: ModelReference;
   title?: ModelReference;
   teamWorker?: ModelReference;
+  imageGeneration?: ModelReference;
   capabilities: ModelCapability[];
 }
 export function defaultAssistantOptions(): AssistantOptions {
@@ -19,7 +20,7 @@ export function validateAssistantOptions(value: AssistantOptions): void {
   if (!value || [value.autoMemory, value.saveSummary, value.readOnly].some((item) => typeof item !== 'boolean') ||
     !Array.isArray(value.capabilities) || value.capabilities.length > 200) { throw new Error(t("助手选项无效。")); }
   if (value.memory) { validateReference(value.memory); }
-  for (const reference of [value.title, value.teamWorker]) {
+  for (const reference of [value.title, value.teamWorker, value.imageGeneration]) {
     if (reference !== undefined) { validateReference(reference); }
   }
   for (const item of value.capabilities) {

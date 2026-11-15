@@ -10,7 +10,7 @@ export interface LogFields {
   change?: string; commonMessages?: number; sharedCharacters?: number; systemHash?: number; toolsHash?: number;
   operationId?: number; instanceId?: number; generation?: number; active?: number; count?: number; total?: number;
   chars?: number; bytes?: number; elapsedMs?: number; durationMs?: number; delayMs?: number; firstTokenMs?: number; outputTokens?: number; http?: number; code?: number;
-  messages?: number; tools?: number; nodes?: number; keys?: number; width?: number; height?: number; widthVp?: number;
+  messages?: number; tools?: number; nodes?: number; keys?: number; width?: number; height?: number; widthVp?: number; unit?: string;
   request?: number; chunk?: number; eventCode?: number; newChats?: number; skippedChats?: number; level?: number; style?: number;
   tokens?: number; budget?: number; removed?: number; retained?: number; duplicates?: number; characters?: number;
   added?: number; updated?: number;
@@ -36,7 +36,7 @@ const ERROR_CODES: string[] = ['STALE_BROWSER_SNAPSHOT', 'STALE_INTERACTIVE_STAT
   'CONTENT_UNAVAILABLE', 'EVIDENCE_REQUIRED', 'EXECUTION_FAILED', 'FS_AMBIGUOUS_MATCH', 'FS_INCOMPLETE_LIST',
   'FS_INVALID_ARGUMENTS', 'FS_INVALID_CURSOR', 'FS_INVALID_EDITS', 'FS_INVALID_PATH', 'FS_MATCH_NOT_FOUND',
   'FS_OVERLAPPING_EDITS', 'FS_STALE_SEARCH', 'HANDOFF_REQUIRED', 'HTTP_ERROR', 'INTERNAL_ERROR', 'INVALID_RESPONSE',
-  'INVALID_RESULT', 'INVALID_STATE', 'LIMIT_EXCEEDED', 'NETWORK_ERROR', 'NOT_CONFIGURED', 'NOT_EXECUTED', 'NOT_FOUND',
+  'IMAGE_SERVICE_ERROR', 'INVALID_RESULT', 'INVALID_STATE', 'LIMIT_EXCEEDED', 'NETWORK_ERROR', 'NOT_CONFIGURED', 'NOT_EXECUTED', 'NOT_FOUND',
   'OUTCOME_UNKNOWN', 'PREVIEW_INVALID', 'PREVIEW_NOT_FOUND', 'PREVIEW_NOT_READY', 'QUOTA_EXHAUSTED', 'RATE_LIMITED',
   'REMOTE_ERROR', 'REMOTE_TOOL_ERROR', 'RESPONSE_BUDGET_EXCEEDED', 'SCHEMA_REQUIRED', 'SEARCH_LAYOUT_CHANGED',
   'SEARCH_PAGE_CHANGED', 'SEARCH_VERIFICATION_REQUIRED', 'STALE_BROWSER_ELEMENT', 'STALE_RESOURCE', 'TOOL_UNAVAILABLE',
@@ -44,14 +44,15 @@ const ERROR_CODES: string[] = ['STALE_BROWSER_SNAPSHOT', 'STALE_INTERACTIVE_STAT
 
 // Names and string values are catalogs, not free text. Unknown keys never reach either output.
 const EVENTS: Record<string, string[]> = {};
-EVENTS.app = ['bar_failed', 'created', 'destroyed', 'window_created', 'window_failed', 'window_loaded', 'window_destroyed', 'foreground', 'background'];
+EVENTS.app = ['bar_failed', 'created', 'destroyed', 'window_created', 'window_failed', 'window_loaded', 'window_destroyed', 'foreground', 'background',
+  'pc_window_visibility', 'pc_window_limits', 'pc_window_limits_failed', 'pc_window_observe_failed', 'pc_window_unobserve_failed', 'pc_draft_flush_failed'];
 EVENTS.announcements = ['disabled', 'fetch_started', 'fetch_completed', 'fetch_failed', 'presented', 'present_failed', 'acknowledged', 'save_failed'];
 EVENTS.review = ['task_completed', 'presented', 'present_failed', 'accepted', 'deferred', 'disabled', 'request_completed', 'request_failed', 'save_failed'];
 EVENTS.appearance = ['material', 'material_support', 'material_unavailable', 'loaded', 'applied', 'save_failed', 'fonts_loaded', 'fonts_failed', 'insets_failed', 'keyboard_geometry'];
 EVENTS.language = ['load_failed', 'save_failed'];
 EVENTS.camera = ['dismissed', 'imported', 'capture_failed'];
 EVENTS.account = ['restore_failed', 'response_invalid', 'state_changed', 'sign_in_cancelled', 'sign_in_failed', 'sign_out_failed', 'state_failed'];
-EVENTS.privacy = ['request_started', 'query_completed', 'query_retry', 'using_cached_consent', 'check_failed',
+EVENTS.privacy = ['request_started', 'query_completed', 'query_retry', 'check_failed',
   'subscription_ready', 'subscription_cleanup_failed'];
 EVENTS.feedback = ['attachment_failed', 'log_failed', 'initialize_failed', 'save_failed', 'credential_failed', 'request_failed', 'submit_failed', 'list_failed',
   'detail_failed', 'upload_failed', 'cleanup_failed', 'reconcile_failed', 'delete_failed'];
@@ -67,12 +68,13 @@ EVENTS.voice = ['focus_requested', 'released', 'draft_failed'];
 EVENTS.composer = ['sheet_action_queued', 'sheet_action_dispatched', 'sheet_action_cancelled'];
 EVENTS.focus = ['search_requested', 'provider_requested', 'onboarding_requested'];
 EVENTS.navigation = ['tools_opened', 'tools_repeated', 'settings_opened', 'settings_repeated',
-  'new_chat_blocked', 'new_chat_failed', 'new_chat_revealed', 'keyboard_shortcuts_open_failed'];
+  'new_chat_blocked', 'new_chat_failed', 'new_chat_revealed', 'keyboard_shortcuts_open_failed',
+  'desktop_command_failed', 'desktop_layout_load_failed', 'desktop_layout_save_failed'];
 EVENTS.web = ['storage_failed', 'engine_start', 'engine_ready', 'release', 'activate', 'failed', 'console_error', 'load_start', 'load_returned', 'host_ready', 'port_connected', 'ready', 'state_saved', 'attached', 'page_end', 'navigation_blocked', 'resource_failed'];
 EVENTS.office_preview = ['load_failed', 'update_annotations_failed', 'render_failed', 'annotation_failed', 'page_failed'];
 EVENTS.math = ['load_failed', 'render_failed', 'startup_timeout', 'process_exited', 'page_failed'];
 EVENTS.mermaid = ['startup_timeout', 'render_timeout', 'script_failed', 'diagram_failed', 'page_failed', 'process_exited'];
-EVENTS.preview = ['failed', 'captured', 'thumbnail_failed', 'surface_moved'];
+EVENTS.preview = ['failed', 'captured', 'thumbnail_failed', 'surface_moved', 'compare_reference_failed'];
 EVENTS.sandbox = ['execution_failed', 'orchestration_failed'];
 EVENTS.tool = ['failed', 'partial'];
 EVENTS.workspace = ['mutation_failed', 'preview_failed', 'folder_support_failed', 'folder_picker_support_failed', 'folder_persist_failed', 'folder_activate_failed', 'folder_revoke_failed', 'folder_startup_failed'];
@@ -81,9 +83,10 @@ EVENTS.mcp = ['request_failed', 'cancel_notice_failed', 'browser_launch_failed']
 EVENTS.mail = ['transport_failed', 'cleanup_failed', 'account_saved', 'account_removed', 'query_started', 'query_complete', 'query_failed', 'command_failed', 'settings_failed'];
 EVENTS.export = ['image_failed', 'preview_failed', 'cleanup_failed', 'share_failed', 'save_failed'];
 EVENTS.network = ['request_start', 'request_end', 'context_overflow', 'first_data', 'request_failed'];
+EVENTS['image-generation'] = ['request_complete', 'request_failed', 'label_failed'];
 EVENTS.moderation = ['guard_stopped', 'output_words_stopped'];
 EVENTS.context = ['inspected', 'request_prefix'];
-EVENTS.browser = ['permission', 'control_user', 'control_agent', 'control_wait', 'task_released', 'closed', 'failed', 'acquired', 'permission_wait', 'operation', 'observation_changed', 'opened_by_user', 'annotation_started', 'annotation_captured', 'annotation_failed', 'search_observed', 'search_failed', 'capture_started', 'frame_captured', 'capture_finished'];
+EVENTS.browser = ['permission', 'control_user', 'control_agent', 'control_wait', 'task_released', 'closed', 'failed', 'acquired', 'permission_wait', 'operation', 'observation_changed', 'opened_by_user', 'annotation_started', 'annotation_captured', 'annotation_failed', 'search_observed', 'search_failed', 'capture_started', 'frame_captured', 'capture_finished', 'history_read_failed'];
 EVENTS.session = ['run_started', 'run_finished', 'run_cancelled', 'mcp_failed', 'tasks_failed', 'run_failed', 'title_failed', 'interactive_failed', 'resource_failed', 'memory_failed', 'memory_review_failed', 'mutation_failed', 'save_failed', 'observer_failed'];
 EVENTS.memory = ['committed', 'review_started', 'review_discarded'];
 EVENTS.resources = ['credential_rollback_failed', 'credential_cleanup_failed', 'team_selected', 'committed', 'preferences_saved'];
@@ -98,9 +101,10 @@ const BOOLEANS: string[] = ['initialSupported', 'supported', 'available', 'pageS
 const REFERENCES: string[] = ['threadId', 'messageId', 'sessionId', 'providerId', 'previewId', 'surfaceId', 'serverId'];
 const STRINGS: Record<string, string[]> = {};
 STRINGS.channel = ['answer', 'reasoning'];
+STRINGS.unit = ['px', 'vp'];
 STRINGS.balanceAdapter = ['deepseek', 'sub2api', 'newapi', 'newapi-account', 'zhipu', 'custom'];
 STRINGS.operation = ['access', 'read', 'list', 'stat', 'parse', 'unlink', 'rmdir', 'bundle_stats', 'free_size', 'total_size',
-  'getAppPrivacyMgmtInfo', 'getAppPrivacyResult', 'requestAppPrivacyConsent', 'subscribe', 'unsubscribe', 'cloud_directory', 'cloud_sync',
+  'getAppPrivacyMgmtInfo', 'getAppPrivacyResult', 'requestAppPrivacyConsent', 'disableService', 'subscribe', 'unsubscribe', 'cloud_directory', 'cloud_sync',
   'connect', 'login', 'examine', 'search', 'fetch', 'identify', 'capability',
   'discover', 'balance', 'credential_read', 'credential_write', 'credential_remove', 'save_config', 'response', 'streaming', 'connecting', 'attachment', 'log',
   'PUT', 'MOVE', 'DELETE', 'GET', 'PROPFIND', 'MKCOL', 'local', 'remote'];
@@ -109,15 +113,15 @@ STRINGS.rpcMethod = ['initialize', 'tools/list', 'tools/call', 'notifications/in
 STRINGS.service = ['mcp', 'search', 'web', 'bing-browser'];
 STRINGS.reason = ['api_level', 'device_unsupported', 'construction_failed', 'capability_changed', 'supported',
   'user_control', 'idle_browser', 'user_handoff', 'task_acquired'];
-STRINGS.format = ['image', 'markdown', 'docx', 'xlsx', 'pptx'];
+STRINGS.format = ['image', 'markdown', 'docx', 'xlsx', 'pptx', 'image/png', 'image/jpeg', 'image/webp'];
 STRINGS.scriptSource = ['generated', 'host', 'frame', 'blank', 'data', 'other', 'unknown'];
 STRINGS.setting = ['search.provider', 'providerProfiles.protocol', 'extensions.browserPolicy', 'config.reasoning',
   'capabilities.reasoning', 'threads.agentMode', 'threads.disabledTools', 'threads.reasoningEffort', 'servers.authType',
   'feedback.seenReplies', 'feedback.pendingSubmission', 'feedback.uploadQueue'];
 STRINGS.change = ['cold', 'append', 'tools', 'system', 'history'];
-STRINGS.protocol = ['chat-completions', 'responses', 'anthropic-messages', 'gemini'];
+STRINGS.protocol = ['chat-completions', 'responses', 'anthropic-messages', 'gemini', 'openai-images', 'gemini-images', 'seedream-images', 'dashscope-images'];
 STRINGS.phase = ['idle', 'preparing', 'listening', 'complete', 'finishing', 'error', 'creating', 'playing', 'stopping', 'connecting', 'streaming', 'capture', 'compose', 'encode',
-  'login', 'state', 'storage', 'credential', 'identity', 'submit', 'query', 'upload',
+  'login', 'state', 'storage', 'credential', 'identity', 'submit', 'query', 'upload', 'generate', 'decode', 'download', 'draw', 'metadata',
   'page_show', 'privacy_event', 'subscription_ready', 'new_want', 'business', 'manual_retry', 'request_consent', 'initial', 'active'];
 STRINGS.action = ['send', 'cancel', 'edit', 'press', 'none', 'open', 'click', 'type', 'select', 'scroll', 'back', 'forward', 'reload', 'capture', 'wait'];
 STRINGS.policy = ['unset', 'enabled', 'disabled'];

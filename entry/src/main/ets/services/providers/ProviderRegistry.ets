@@ -7,6 +7,7 @@ import { Cancellation } from '../Cancellation';
 import { ContentGuardStream } from '../ContentGuardStream';
 import { OutputWordGuard, OutputWordMatcher } from '../OutputWordGuard';
 import { UsageOrigin } from '../../model/Usage';
+import { attachmentContext } from '../../model/AttachmentContext';
 import { CredentialReader, ModelProvider, ModelRequestOptions, ModelSession } from './Provider';
 
 class BoundModel implements ModelSession {
@@ -41,7 +42,24 @@ class BoundModel implements ModelSession {
     if (this.images === false) {
       messages = messages.map((message): ModelMessage => message.previewScreenshot ? {
         role: message.role, content: message.content + '\nThe current model is configured without image support; the screenshot was not sent. Do not claim to have visually inspected it.'
+      } : message.imageInspection ? {
+        role: message.role, content: message.content + '\nThe current model is configured without image support; the image was not sent. Do not claim to have visually inspected it.'
       } : message);
+    }
+    const canGenerate = tools.some((tool) => tool.function.name === 'image_gen');
+    if (canGenerate || (this.images !== false && tools.some((tool) => tool.function.name === 'view_image'))) {
+      messages = messages.map((message): ModelMessage => {
+        if (message.previewScreenshot || message.imageInspection) { return message; }
+        const photos = (message.attachments || []).filter((item) => !item.original && item.mime === 'image/jpeg');
+        if (!photos.length) { return message; }
+        const copy = JSON.parse(JSON.stringify(message)) as ModelMessage;
+        copy.content += photos.map(attachmentContext).join('');
+        if (this.images === false) {
+          copy.attachments = message.attachments?.filter((item) => !photos.includes(item));
+          copy.content += '\nThe current chat model cannot see these photos.';
+        }
+        return copy;
+      });
     }
     if (this.images === false && messages.some((message) => (message.attachments || []).some((item) => item.mime.startsWith('image/')))) {
       throw new Error(t("当前模型设置为不支持图片，请选择视觉模型或调整能力设置。"));
@@ -54,16 +72,13 @@ class BoundModel implements ModelSession {
     const origin: UsageOrigin = this.origin ? JSON.parse(JSON.stringify(this.origin)) as UsageOrigin : {};
     if (options?.usagePurpose) { origin.purpose = options.usagePurpose; }
     if (options?.usageStep !== undefined) { origin.step = options.usageStep; }
-    const answer = matcher ? new OutputWordGuard(matcher, 'answer', onText) : undefined;
-    const onReasoning = options?.onReasoning;
-    const reasoning = matcher && onReasoning ? new OutputWordGuard(matcher, 'reasoning', onReasoning) : undefined;
-    const guard = new ContentGuardStream(answer ? (text) => answer.push(text) : onText,
-      reasoning ? (text) => reasoning.push(text) : onReasoning);
+    const answer = matcher ? new OutputWordGuard(matcher, onText) : undefined;
+    const guard = new ContentGuardStream(answer ? (text) => answer.push(text) : onText);
     const response = await this.provider.stream({ baseUrl: this.baseUrl, model: this.model, apiKey: key,
       usageOrigin: origin,
       messages: messages, tools: tools, maxOutputTokens: options?.maxOutputTokens,
       reasoning: this.reasoning, requestUsage: this.requestUsage }, cancellation,
-      (text) => guard.pushText(text), (text) => guard.pushReasoning(text));
+      (text) => guard.pushText(text), options?.onReasoning);
     cancellation.check();
     if (guard.finish(response.content)) {
       if (origin.purpose === 'title' || origin.purpose === 'compaction') {
@@ -73,7 +88,6 @@ class BoundModel implements ModelSession {
       return { content: CONTENT_GUARD_REFUSAL, toolCalls: [], usage: response.usage };
     }
     answer?.finish(response.content);
-    reasoning?.finish(response.reasoningContent || '');
     return response;
   }
 }

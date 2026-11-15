@@ -1,5 +1,6 @@
 import { MessageDraftEditor } from './MessageDraftEditor';
 import { FileAnnotationList } from './FileAnnotationList';
+import { KeyCode } from '@kit.InputKit';
 import { ChatShortcut, ChatShortcutAction, NavigationShortcut, chatShortcuts, handleDraftEnter } from '../common/KeyboardShortcuts';
 import { AdaptiveUi } from '../model/AdaptiveUi';
 import { materialMenuContent, materialMenuHeader } from '../common/MaterialMenu';
@@ -14,6 +15,12 @@ import { AnswerSpeech } from '../services/AnswerSpeech';
 import { LaunchActions } from '../services/LaunchActions';
 import { isHighestReasoningEffort, reasoningEfforts } from '../model/ReasoningEffort';
 import { ProviderProfile } from '../model/ProviderProfiles';
+import { WorkspaceStore } from '../model/WorkspaceStore';
+import { NativeWorkspaceFiles } from '../services/NativeWorkspaceFiles';
+import { conversationPhoto, NativeImageWorkspace } from '../services/NativeImageWorkspace';
+import { Cancellation } from '../services/Cancellation';
+import { workspaceRelativePath } from '../services/WorkspaceTools';
+import { MAX_IMAGE_BYTES, rasterMime } from '../services/ImageGenerationTools';
 import { ComposerGlow } from '../common/ComposerGlow';
 import { ModelPickerPanel } from './ModelPickerPanel';
 import { ReasoningEffortPicker } from './ReasoningEffortPicker';
@@ -25,7 +32,7 @@ import { VoiceAction, VoiceTargetRect, voiceActionAtPoint } from '../model/Voice
 import { pasteboard } from '@kit.BasicServicesKit';
 import { ThreadReference, referenceQuery } from '../model/ThreadReferences';
 import { ThreadReferenceCard } from './ThreadReferenceCard';
-import { curves, FrameCallback, SymbolGlyphModifier } from '@kit.ArkUI';
+import { curves, FrameCallback, LengthMetrics, SymbolGlyphModifier } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { Attachment, MAX_MESSAGE_ATTACHMENTS } from '../model/Productivity';
 import { Attachments } from '../services/Attachments';
@@ -63,6 +70,10 @@ class ChatLayoutFrame extends FrameCallback {
   constructor(action: () => void) { super(); this.action = action; }
   onIdle(): void { this.action(); }
 }
+
+const ATTACHMENT_FOLDER_WIDTH: number = 104;
+const ATTACHMENT_FOLDER_HEIGHT: number = 66;
+const ATTACHMENT_FLAP_SPRING: ICurve = curves.interpolatingSpring(0, 1, 420, 33);
 
 @Component
 struct ChatViewportLayout {
@@ -122,12 +133,19 @@ export struct ChatPanel {
   }
   @Prop topInset: number = 0;
   @Prop workbench: boolean = false;
+  @Prop desktop: boolean = false;
+  @Prop commandSearch: boolean = false;
+  @State private completionIndex: number = 0;
+  @State private completionDismissed: string = '';
   @Prop shortcutsEnabled: boolean = false;
+  @Prop shortcutsCovered: boolean = false;
+  @Prop @Watch('messageSearchChanged') messageSearchRequest: number = 0;
   onNavigationShortcut: (action: NavigationShortcut) => void = () => {};
   @Prop @Watch('expandDraft') expandDraftRequest: number = 0;
+  @Prop @Watch('focusDraftRequested') focusDraftRequest: number = 0;
   @State private writingExpanded: boolean = false;
   private expandDraft(): void {
-    if (this.thread.archived || this.showDrawing || this.previewing || this.speechActive()) { return; }
+    if (this.thread.archived || this.showDrawing || this.previewing || this.showAttachments || this.speechActive()) { return; }
     this.getUIContext().getFocusController().clearFocus();
     this.writingExpanded = true;
   }
@@ -184,6 +202,7 @@ export struct ChatPanel {
   onHistoryDragCancel: () => void = () => {};
   onFiles: () => void = () => {};
   onOpenFile: (path: string) => void = () => {};
+  onOpenImage: (path: string) => void = () => {};
   @Prop previewInspectable: boolean = false;
   @Prop inspectedPreviewId: string = '';
   onInspectPreview: (messageId: string, previewId: string) => void = () => {};
@@ -195,6 +214,9 @@ export struct ChatPanel {
   private attachmentDrop: AttachmentDrop = new AttachmentDrop();
   private dropGeneration: number = 0;
   @State private showPlus: boolean = false;
+  @State private showAttachments: boolean = false;
+  @State private attachmentFolderLeft: number = 0;
+  @State private attachmentFolderTop: number = 0;
   private pendingPlusAction?: () => void;
   private plusActionThreadId: string = '';
   private plusMenuTimer: number = -1;
@@ -269,10 +291,20 @@ export struct ChatPanel {
     if (index >= 0) { this.followOutput = false; this.scroller.scrollToIndex(index + (this.thread.messages.length > this.app.visibleMessageCount ? 1 : 0), false, ScrollAlign.CENTER); }
   }
 
+  private messageSearchChanged(): void {
+    if (!this.app.searchMessageId) { return; }
+    const request = this.messageSearchRequest;
+    const threadId = this.app.active.id;
+    this.getUIContext().postFrameCallback(new ChatLayoutFrame(() => {
+      if (this.composerMounted && request === this.messageSearchRequest && this.app.active.id === threadId) { this.locate(); }
+    }));
+  }
+
   aboutToAppear(): void {
     this.lifecycle++;
     this.composerMounted = true;
     this.syncMessages();
+    this.messageSearchChanged();
     systemInsets(this.getUIContext()).then((insets: number[]) => { this.insetBottom = insets[1]; });
     this.viewport.onKeyboard = (shown: boolean): void => {
       this.keyboardVisibilityChanged(shown);
@@ -350,6 +382,7 @@ export struct ChatPanel {
     this.afterRender(() => {
       if (this.activeThreadId !== threadId) { return; }
       this.cancelPlusAction(); this.cancelAttachmentDrop();
+      if (this.showAttachments) { this.showAttachments = false; }
       if (this.composerSelectionStart !== -1) { this.composerSelectionStart = -1; }
       if (this.composerSelectionEnd !== -1) { this.composerSelectionEnd = -1; }
       if (this.showModelMenu) { this.showModelMenu = false; }
@@ -391,12 +424,18 @@ export struct ChatPanel {
     this.getUIContext().postFrameCallback(new ChatLayoutFrame(() => {
       if (request !== this.keyboardFocusRequest || this.thread.id !== threadId || this.app.active.id !== threadId ||
         !this.speechEnabled || !this.foreground || this.showPlus || this.showPlusMenu || this.showDrawing || this.previewing ||
-        this.showContext || this.showQueue || this.showSummary || this.showMemoryDraft || this.showModelMenu || this.showToolApprovalMode ||
+        this.showAttachments || this.showContext || this.showQueue || this.showSummary || this.showMemoryDraft ||
+        this.showModelMenu || this.showToolApprovalMode ||
         this.thread.archived || this.voiceMode || this.speechActive()) { return; }
       if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'voice', 'focus_requested', { request: request }); };
       this.getUIContext().getFocusController().requestFocus('composer');
       this.composerController.caretPosition(this.app.draft.length);
     }));
+  }
+
+  private focusDraftRequested(): void {
+    if (this.thread.archived) { return; }
+    this.showSpeechKeyboard();
   }
   private canRecordSpeech(): boolean {
     return this.app.ready && this.speechEnabled && !this.thread.archived && !this.app.saveError && !this.importing &&
@@ -589,12 +628,12 @@ export struct ChatPanel {
 
   private chatShortcutsAvailable(): boolean {
     return this.shortcutsEnabled && this.foreground && !this.writingExpanded && !this.showDrawing && !this.previewing &&
-      !this.showPlus && !this.showPlusMenu && !this.showContext && !this.showQueue && !this.showMemoryDraft &&
+      !this.showPlus && !this.showPlusMenu && !this.showAttachments && !this.showContext && !this.showQueue && !this.showMemoryDraft &&
       !this.showModelMenu && !this.showToolApprovalMode && !this.voiceOverlayVisible();
   }
 
   private runChatShortcut(action: ChatShortcutAction): void {
-    if (!this.chatShortcutsAvailable()) { return; }
+    if (!this.shortcutAvailable(action)) { return; }
     switch (action) {
       case 'focus':
         if (this.speechEnabled && !this.composerFocused && !this.thread.archived) { this.showSpeechKeyboard(); }
@@ -616,11 +655,15 @@ export struct ChatPanel {
     }
   }
 
+  private shortcutAvailable(action: ChatShortcutAction): boolean {
+    return this.chatShortcutsAvailable() && (!this.shortcutsCovered || (this.commandSearch && action === 'search'));
+  }
+
   @Builder
   shortcutBindings() {
     // ArkUI also dispatches to retained nodes, so disable the bindings while another surface owns the chat.
-    ForEach(chatShortcuts(), (shortcut: ChatShortcut) => {
-      Column().width(0).height(0).accessibilityLevel('no').enabled(this.chatShortcutsAvailable())
+    ForEach(chatShortcuts(this.commandSearch), (shortcut: ChatShortcut) => {
+      Column().width(0).height(0).accessibilityLevel('no').enabled(this.shortcutAvailable(shortcut.action))
         .keyboardShortcut(shortcut.key, shortcut.modifiers, () => this.runChatShortcut(shortcut.action))
     }, (shortcut: ChatShortcut) => shortcut.action)
   }
@@ -823,8 +866,22 @@ export struct ChatPanel {
       action();
     }, 250);
   }
-  private removeAttachment(id: string): void {
-    this.app.setAttachments(this.thread.attachments.filter((file: Attachment) => file.id !== id));
+  private async removeAttachment(id: string): Promise<void> {
+    const threadId = this.thread.id;
+    if (this.app.active.id !== threadId || !this.canAttach()) { return; }
+    const remaining = this.thread.attachments.filter((file: Attachment) => file.id !== id);
+    const saved = await this.app.setAttachments(remaining);
+    if (this.app.active.id !== threadId) { return; }
+    if (saved) {
+      if (remaining.length === 0) { this.showAttachments = false; }
+    } else if (this.showAttachments && (this.app.saveError || this.app.error)) {
+      this.getUIContext().getPromptAction().showToast({ message: this.app.saveError || this.app.error });
+    }
+  }
+
+  private previewAttachment(item: Attachment): void {
+    this.previewPath = Attachments.path(item);
+    this.previewing = true;
   }
 
   private contextRatio(): number {
@@ -951,6 +1008,31 @@ export struct ChatPanel {
     }
   }
 
+  private messageWorkspaceRoot(): string {
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    return new WorkspaceStore(context.getApplicationContext().filesDir).pathFor(this.app.activeWorkspaceId);
+  }
+
+  private imageAttachments(): Attachment[] {
+    return this.thread.messages.flatMap((message) =>
+      message.attachments.concat(...message.steps.map((step) => step.steering?.attachments || [])));
+  }
+
+  private openImageReference(path: string): void {
+    const photo = conversationPhoto(this.imageAttachments(), path);
+    if (photo) {
+      this.previewPath = Attachments.path(photo);
+      this.previewing = true;
+    } else { this.onOpenImage(path); }
+  }
+
+  private async readImageReference(root: string, path: string, signal: Cancellation): Promise<Uint8Array> {
+    const workspace = new NativeImageWorkspace(new NativeWorkspaceFiles(root), () => this.imageAttachments());
+    const bytes = await workspace.readJobInput(workspaceRelativePath(path, false), MAX_IMAGE_BYTES, signal);
+    if (!rasterMime(bytes)) { throw new Error('Invalid image reference.'); }
+    return bytes;
+  }
+
   @Builder
   messageList() {
     Stack({ alignContent: Alignment.Bottom }) {
@@ -964,6 +1046,9 @@ export struct ChatPanel {
         LazyForEach(this.messageSource, (message: MessageViewModel) => {
           ListItem() {
             MessageBubble({ message: message, latestPreviewIds: this.thread.latestPreviewIds, turnStatus: message.status, webEnabled: this.app.extensions.webEnabled, onOpenFile: this.onOpenFile,
+              workspaceRoot: this.messageWorkspaceRoot(),
+              readImageReference: (path: string, signal: Cancellation) => this.readImageReference(this.messageWorkspaceRoot(), path, signal),
+              onOpenImage: this.onOpenImage, onOpenImageReference: (path: string) => this.openImageReference(path),
               previewInspectable: this.previewInspectable, inspectedPreviewId: this.inspectedPreviewId, onInspectPreview: this.onInspectPreview, uiAvailable: !this.app.busy && !this.thread.archived,
               sendOrigin: this.sendingMessageId === message.id ? this.sendOrigin : undefined,
               onSendReady: (): void => { this.scroller.scrollEdge(Edge.Bottom); }, onSendFinish: (): void => { this.finishSendFlight(message.id); },
@@ -987,12 +1072,13 @@ export struct ChatPanel {
         }
       }
       .id('message-list').width('100%').height('100%').clip(!this.sendingMessageId)
-      .padding({ left: Space.page, right: Space.page })
+      .padding({ left: this.desktop ? 24 : Space.page, right: this.desktop ? 24 : Space.page })
       // Scroll the leading space away so messages can pass beneath the floating title bar.
       .contentStartOffset(this.topInset + Space.sm)
       // Only the end of the transcript clears the floating controls; messages scroll behind them.
-      .contentEndOffset(48)
-      .scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring)
+      .contentEndOffset(this.desktop ? 24 : 48)
+      .scrollBar(this.desktop ? BarState.Auto : BarState.Off)
+      .edgeEffect(this.desktop ? EdgeEffect.None : EdgeEffect.Spring)
       .cachedCount(1).maintainVisibleContentPosition(true)
       .onScrollStart(() => this.setScrollActivity(true))
       .onScrollStop(() => this.stopScrollActivity())
@@ -1123,7 +1209,7 @@ export struct ChatPanel {
       Divider().strokeWidth(0.5).color($r('app.color.divider')).margin({ left: 10, right: 10, top: 4, bottom: 4 })
       this.plusMenuRow($r('sys.symbol.link'), t('引用其他会话'), 'plus-menu-reference',
         this.canAttach() && this.thread.references.length < 4, false, () => this.dismissPlusMenu(() => this.addThreadReference()))
-      Text(this.thread.attachments.length >= MAX_MESSAGE_ATTACHMENTS ? t('已达到每条消息 {0} 个附件的上限', [MAX_MESSAGE_ATTACHMENTS]) : t('每条消息最多 {0} 个附件 · 图片需模型支持视觉输入', [MAX_MESSAGE_ATTACHMENTS]))
+      Text(this.thread.attachments.length >= MAX_MESSAGE_ATTACHMENTS ? t('已达到每条消息 {0} 个附件的上限', [MAX_MESSAGE_ATTACHMENTS]) : t('每条消息最多 {0} 个附件。', [MAX_MESSAGE_ATTACHMENTS]))
         .fontFamily(this.appearance.fontFamily).fontSize(11).lineHeight(16).fontColor($r('app.color.text_tertiary'))
         .width('100%').padding({ left: 10, right: 10, top: 6, bottom: 8 })
     }.width('100%')
@@ -1131,9 +1217,10 @@ export struct ChatPanel {
 
   @Builder
   plusMenu() {
-    Column() {
+    Scroll() {
       this.plusRootPane()
-    }.width(320).constraintSize({ maxHeight: 480 }).padding(4).borderRadius(20).clip(true)
+    }.width(320).constraintSize({ maxHeight: this.popupHeightLimit(this.composerWindowTop, 480) })
+      .scrollBar(BarState.Auto).align(Alignment.Top).padding(4).borderRadius(20).clip(true)
   }
 
   @Builder
@@ -1155,7 +1242,7 @@ export struct ChatPanel {
           this.plusTile($r('sys.symbol.folder'), t("工作区"), 'open-workspace', !this.app.busy,
             () => { this.showPlus = false; this.onFiles(); })
         }.width('100%').alignItems(VerticalAlign.Top)
-        Text(this.thread.attachments.length >= MAX_MESSAGE_ATTACHMENTS ? t('已达到每条消息 {0} 个附件的上限', [MAX_MESSAGE_ATTACHMENTS]) : t('每条消息最多 {0} 个附件 · 图片需模型支持视觉输入', [MAX_MESSAGE_ATTACHMENTS])).fontFamily(this.appearance.fontFamily)
+        Text(this.thread.attachments.length >= MAX_MESSAGE_ATTACHMENTS ? t('已达到每条消息 {0} 个附件的上限', [MAX_MESSAGE_ATTACHMENTS]) : t('每条消息最多 {0} 个附件。', [MAX_MESSAGE_ATTACHMENTS])).fontFamily(this.appearance.fontFamily)
           .fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).width('100%').textAlign(TextAlign.Center)
         Button(t('引用其他会话')).fontFamily(this.appearance.fontFamily).id('add-thread-reference').attributeModifier(Btn.tonal).width('100%')
           .enabled(this.canAttach() && this.thread.references.length < 4)
@@ -1165,44 +1252,185 @@ export struct ChatPanel {
   }
 
   @Builder
-  attachmentStrip() {
+  attachmentThumbnail(item: Attachment, size: number, radius: number) {
+    Stack() {
+      if (item.mime === 'image/jpeg') {
+        Image('file://' + Attachments.path(item)).width('100%').height('100%').objectFit(ImageFit.Cover)
+      } else {
+        SymbolGlyph($r('sys.symbol.doc_text')).fontSize(size < 32 ? 14 : 20).fontColor([this.appearance.accent])
+      }
+    }.width(size).height(size).borderRadius(radius).clip(true).backgroundColor($r('app.color.surface_variant'))
+  }
+
+  @Builder
+  singleAttachment(item: Attachment) {
+    Stack({ alignContent: Alignment.TopEnd }) {
+      if (item.mime === 'image/jpeg') {
+        Button({ type: ButtonType.Normal }) {
+          this.attachmentThumbnail(item, 64, Radius.md)
+        }.id('preview-draft-attachment').width(64).height(64).borderRadius(Radius.md).padding(0)
+          .backgroundColor(Color.Transparent).accessibilityText(item.name).onClick(() => this.previewAttachment(item))
+      } else {
+        Column({ space: 2 }) {
+          SymbolGlyph($r('sys.symbol.doc_text')).fontSize(18).fontColor([this.appearance.accent])
+          Text(item.name).fontFamily(this.appearance.fontFamily).fontSize(11).maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
+          Text(fileSize(item.size)).fontFamily(this.appearance.fontFamily).fontSize(10).fontColor($r('app.color.text_tertiary'))
+        }.width(112).height(64).padding({ left: 10, right: 14, top: 8, bottom: 8 })
+          .alignItems(HorizontalAlign.Start).borderRadius(Radius.md).backgroundColor($r('app.color.surface_variant'))
+      }
+      Button({ type: ButtonType.Circle }) {
+        SymbolGlyph($r('sys.symbol.xmark')).fontSize(10).fontColor([Color.White])
+      }.id('remove-attachment-' + item.id).width(20).height(20).backgroundColor('#99000000')
+        .margin({ top: 4, right: 4 }).accessibilityText(t('移除 ') + item.name)
+        .hitTestBehavior(HitTestMode.Block).responseRegion({ x: -10, y: -10, width: 40, height: 40 })
+        .enabled(this.canAttach()).onClick(() => this.removeAttachment(item.id))
+    }.enabled(!this.app.busy)
+  }
+
+  @Builder
+  attachmentFolder() {
+    Button({ type: ButtonType.Normal }) {
+      Stack({ alignContent: Alignment.TopStart }) {
+        Stack({ alignContent: Alignment.TopStart }) {
+          Row().width(37).height(17).borderRadius(8).backgroundColor(this.appearance.accentContainer)
+            .position({ x: 5, y: 10 })
+          Row().width(94).height(48).borderRadius(11).backgroundColor(this.appearance.accentContainer)
+            .position({ x: 5, y: 16 })
+          Row().width(86).height(28).borderRadius(8)
+            .linearGradient({ direction: GradientDirection.Bottom, colors: [
+              [this.appearance.accentOutline, 0], [this.appearance.accentContainer, 1]
+            ] }).position({ x: 9, y: 20 })
+        }.width('100%').height('100%').translate({ y: this.showAttachments ? -3 : 0 })
+          .animation({ duration: Motion.medium, curve: Motion.standard })
+        ForEach(this.thread.attachments.slice(0, 3), (item: Attachment, index: number) => {
+          Stack() {
+            this.attachmentThumbnail(item, 25, 4)
+          }.width(29).height(29).borderRadius(6).backgroundColor($r('app.color.surface'))
+            .border({ width: 0.5, color: $r('app.color.divider') })
+            .shadow({ radius: 3, color: '#20000000', offsetY: 2 })
+            .position({ x: 17 + index * 20, y: index === 1 ? 5 : 10 })
+            .translate({ x: this.showAttachments ? (index - 1) * 4 : 0, y: this.showAttachments ? -14 : 0 })
+            .rotate({ angle: (index - 1) * (this.showAttachments ? 14 : 8) })
+            .opacity(this.showAttachments ? 0 : 1)
+            .animation({ duration: this.showAttachments ? 150 : 160, delay: this.showAttachments ? index * 12 : 48,
+              curve: Motion.standard })
+        }, (item: Attachment, index: number) => item.id + ':' + index)
+        Row({ space: 6 }) {
+          Text(t('附件')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_primary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+          Text(String(this.thread.attachments.length)).fontFamily(this.appearance.fontFamily).fontSize(11)
+            .fontColor(this.appearance.onAccentContainer).padding({ left: 6, right: 6, top: 2, bottom: 2 })
+            .borderRadius(9).backgroundColor(this.appearance.accentTint)
+        }.width('100%').height(37).padding({ left: 11, right: 9 }).borderRadius(Radius.md)
+          .linearGradient({ direction: GradientDirection.Bottom, colors: [
+            [$r('app.color.surface'), 0], [$r('app.color.surface_variant'), 1]
+          ] }).border({ width: 0.5, color: $r('app.color.divider') })
+          .shadow({ radius: 7, color: '#21000000', offsetY: 3 })
+          .position({ x: 0, y: 29 })
+          .rotate({ x: 1, y: 0, z: 0, angle: this.showAttachments ? -31 : -6, centerY: '100%' })
+          .animation({ duration: Motion.medium, curve: ATTACHMENT_FLAP_SPRING })
+      }.width('100%').height('100%').accessibilityLevel('no-hide-descendants')
+    }.id('draft-attachment-folder').width(ATTACHMENT_FOLDER_WIDTH).height(ATTACHMENT_FOLDER_HEIGHT).padding(0)
+      .borderRadius(Radius.md)
+      .backgroundColor(Color.Transparent).clickEffect(Motion.press)
+      .accessibilityText(t('附件') + ' · ' + t('{0} 项', [this.thread.attachments.length]))
+      .enabled(!this.app.busy)
+      .onAreaChange((_old: Area, area: Area) => {
+        this.attachmentFolderLeft = Number(area.globalPosition.x);
+        this.attachmentFolderTop = Number(area.globalPosition.y);
+      })
+      .onClick(() => {
+        this.getUIContext().getFocusController().clearFocus();
+        this.showAttachments = !this.showAttachments;
+      })
+      .bindPopup(this.showAttachments, { builder: this.attachmentPopup, placement: Placement.TopLeft,
+        targetSpace: 0, offset: { x: 0, y: 5 }, avoidTarget: AvoidanceMode.AVOID_AROUND_TARGET, enableArrow: false,
+        popupColor: Color.Transparent, backgroundBlurStyle: BlurStyle.NONE, shadow: { radius: 0, color: Color.Transparent },
+        radius: 0, autoCancel: true, mask: true, focusable: true, followTransformOfTarget: true,
+        transition: this.attachmentPopupMotion(),
+        onStateChange: (event) => { if (!event.isVisible) { this.showAttachments = false; } } })
+  }
+
+  private attachmentPopupMotion(): TransitionEffect {
+    // The native popup runs its transition in window coordinates.
+    const centerX = this.attachmentFolderLeft + ATTACHMENT_FOLDER_WIDTH / 2;
+    const centerY = this.attachmentFolderTop + 16;
+    return TransitionEffect.asymmetric(
+      TransitionEffect.OPACITY.combine(TransitionEffect.scale({ x: 0.30, y: 0.30, centerX, centerY }))
+        .animation({ duration: 280, curve: Motion.enter }),
+      TransitionEffect.OPACITY.combine(TransitionEffect.scale({ x: 0.28, y: 0.28, centerX, centerY }))
+        .animation({ duration: 175, curve: Curve.EaseIn }))
+  }
+
+  private floatingAttachmentMotion(index: number): TransitionEffect {
+    return TransitionEffect.asymmetric(
+      TransitionEffect.OPACITY.combine(TransitionEffect.translate({ x: index % 2 === 0 ? 5 : -14, y: 22 }))
+        .combine(TransitionEffect.rotate({ angle: index % 2 === 0 ? -5 : 5, centerY: '100%' }))
+        .animation({ duration: 240, delay: Math.min(index, 4) * 25, curve: Motion.enter }),
+      TransitionEffect.OPACITY.combine(TransitionEffect.scale({ x: 0.94, y: 0.94 }))
+        .animation({ duration: Motion.fast, curve: Motion.standard }))
+  }
+
+  @Builder
+  floatingAttachment(item: Attachment, index: number) {
+    Row({ space: 6 }) {
+      if (item.mime === 'image/jpeg') {
+        Button({ type: ButtonType.Normal }) {
+          this.attachmentThumbnail(item, 32, Radius.sm)
+        }.id('preview-attachment-' + item.id).width(36).height(44).padding(0).borderRadius(Radius.sm)
+          .backgroundColor(Color.Transparent).accessibilityText(item.name).onClick(() => this.previewAttachment(item))
+      } else {
+        this.attachmentThumbnail(item, 32, Radius.sm)
+      }
+      Column({ space: 1 }) {
+        Text(item.name).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_primary')).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(fileSize(item.size)).fontFamily(this.appearance.fontFamily).fontSize(10)
+          .fontColor($r('app.color.text_secondary'))
+      }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+      IconButton({ icon: $r('sys.symbol.trash'), label: t('移除 ') + item.name, compId: 'remove-attachment-' + item.id,
+        iconSize: 15, fill: '#00000000', tint: $r('app.color.text_secondary'), disabled: !this.canAttach(),
+        onTap: () => this.removeAttachment(item.id) })
+    }.width(this.panelWidth >= 330 ? 'calc(50% - 4vp)' : '100%').constraintSize({ minHeight: 48 })
+      .padding({ left: 8, right: 2, top: 2, bottom: 2 }).backgroundColor($r('app.color.surface')).borderRadius(24)
+      .border({ width: 0.5, color: $r('app.color.divider') }).shadow({ radius: 12, color: '#1A000000', offsetY: 4 })
+      .rotate({ angle: index % 2 === 0 ? -1.5 : 1.5 })
+      .transition(this.floatingAttachmentMotion(index))
+  }
+
+  @Builder
+  attachmentPopup() {
     Scroll() {
-      Row({ space: Space.sm }) {
-        ForEach(this.thread.attachments, (item: Attachment) => {
-          Stack({ alignContent: Alignment.TopEnd }) {
-            if (item.mime === 'image/jpeg') {
-              Image('file://' + Attachments.path(item)).width(64).height(64).objectFit(ImageFit.Contain)
-                .borderRadius(Radius.md).backgroundColor($r('app.color.surface_variant'))
-                .accessibilityText(item.name)
-                .onClick(() => { this.previewPath = Attachments.path(item); this.previewing = true; })
-            } else {
-              Column({ space: 2 }) {
-                SymbolGlyph($r('sys.symbol.doc_text')).fontSize(18).fontColor([this.appearance.accent])
-                Text(item.name).fontFamily(this.appearance.fontFamily).fontSize(11).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                  .fontColor($r('app.color.text_primary'))
-                Text(fileSize(item.size)).fontFamily(this.appearance.fontFamily).fontSize(10).fontColor($r('app.color.text_tertiary'))
-              }.width(112).height(64).padding({ left: 10, right: 14, top: 8, bottom: 8 })
-              .alignItems(HorizontalAlign.Start).borderRadius(Radius.md)
-              .backgroundColor($r('app.color.surface_variant'))
-            }
-            Button({ type: ButtonType.Circle }) {
-              SymbolGlyph($r('sys.symbol.xmark')).fontSize(10).fontColor([Color.White])
-            }.fontFamily(this.appearance.fontFamily).id('remove-attachment-' + item.id).width(20).height(20).backgroundColor('#99000000')
-            .margin({ top: 4, right: 4 }).accessibilityText(t("移除 ") + item.name)
-            .hitTestBehavior(HitTestMode.Block).responseRegion({ x: -10, y: -10, width: 40, height: 40 })
-            .onClick(() => this.removeAttachment(item.id))
-          }
-          .transition(TransitionEffect.OPACITY.combine(TransitionEffect.scale({ x: 0.85, y: 0.85 }))
-            .animation({ duration: Motion.medium, curve: Motion.standard }))
+      Flex({ wrap: FlexWrap.Wrap, space: { main: LengthMetrics.vp(8), cross: LengthMetrics.vp(10) } }) {
+        ForEach(this.thread.attachments, (item: Attachment, index: number) => {
+          this.floatingAttachment(item, index)
         }, (item: Attachment) => item.id)
-        if (this.importing) {
-          Column() { LoadingProgress().width(24).height(24).color(this.appearance.accent) }
-            .width(64).height(64).justifyContent(FlexAlign.Center).borderRadius(Radius.md)
-            .backgroundColor($r('app.color.surface_variant'))
-        }
-      }.padding({ left: 4, right: 4, top: 4 })
-    }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).width('100%').align(Alignment.Start)
-    .enabled(!this.app.busy)
+      }.width('100%').padding({ left: 8, right: 8, top: 10, bottom: 12 })
+    }.id('draft-attachment-popup').width(Math.min(340, this.panelWidth - 36))
+      .constraintSize({ maxHeight: this.popupHeightLimit(this.attachmentFolderTop, 326) })
+      .scrollBar(BarState.Auto).align(Alignment.Top)
+  }
+
+  @Builder
+  attachmentStrip() {
+    Column() {
+      if (this.thread.attachments.length > 0 || this.importing) {
+        Row({ space: Space.sm }) {
+          if (this.thread.attachments.length > 1 || (this.thread.attachments.length === 1 && this.showAttachments)) {
+            this.attachmentFolder()
+          } else if (this.thread.attachments.length === 1) {
+            this.singleAttachment(this.thread.attachments[0])
+          }
+          if (this.importing) {
+            Column() { LoadingProgress().width(24).height(24).color(this.appearance.accent) }
+              .width(64).height(64).justifyContent(FlexAlign.Center).borderRadius(Radius.md)
+              .backgroundColor($r('app.color.surface_variant'))
+          }
+        }.width('100%').padding({ left: Space.md, top: Space.sm })
+      }
+    }.width('100%')
   }
 
   @Builder
@@ -1246,7 +1474,8 @@ export struct ChatPanel {
     this.getUIContext().postFrameCallback(new ChatLayoutFrame(() => {
       if (request !== this.keyboardFocusRequest || this.thread.id !== threadId || this.app.active.id !== threadId ||
         !this.speechEnabled || !this.foreground || this.showPlus || this.showPlusMenu || this.showDrawing || this.previewing ||
-        this.showContext || this.showQueue || this.showSummary || this.showMemoryDraft || this.showModelMenu || this.showToolApprovalMode ||
+        this.showAttachments || this.showContext || this.showQueue || this.showSummary || this.showMemoryDraft ||
+        this.showModelMenu || this.showToolApprovalMode ||
         this.app.draft !== next.text || this.thread.archived || this.voiceMode || this.speechActive()) { return; }
       this.getUIContext().getFocusController().requestFocus('composer');
       this.composerController.caretPosition(next.caret);
@@ -1254,10 +1483,36 @@ export struct ChatPanel {
   }
   private referenceMatches(): ThreadViewModel[] {
     const query = (referenceQuery(this.app.draft) || '').trim().toLowerCase();
-    return this.app.threads.filter((item) => item.id !== this.thread.id && item.messages.some((message) => message.role === 'assistant' && message.status === 'complete') &&
+    return this.app.threads.filter((item) => !item.sideChat && item.id !== this.thread.id && item.messages.some((message) => message.role === 'assistant' && message.status === 'complete') &&
       !this.thread.references.some((ref) => ref.threadId === item.id) && item.title.toLowerCase().includes(query))
       .sort((a, b) => Number(!!this.thread.projectId && b.projectId === this.thread.projectId) -
         Number(!!this.thread.projectId && a.projectId === this.thread.projectId) || b.updatedAt - a.updatedAt).slice(0, 6);
+  }
+
+  private completionCount(): number {
+    if (this.skillSuggested()) { return this.skillMatches().length; }
+    if (this.referenceSuggested()) { return this.referenceMatches().length; }
+    return Number(this.teamSuggested()) + Number(this.commandSuggested('/compact'));
+  }
+
+  private completionKey(event: KeyEvent): boolean {
+    if (!this.commandSearch || event.type !== KeyType.Down || this.composerHasPreview ||
+      this.completionDismissed === this.app.draft || event.getModifierKeyState?.(['Alt']) ||
+      event.getModifierKeyState?.(['Ctrl']) || event.getModifierKeyState?.(['Shift']) || event.metaKey) { return false; }
+    const count = this.completionCount();
+    if (!count) { return false; }
+    if (event.keyCode === KeyCode.KEYCODE_ESCAPE) { this.completionDismissed = this.app.draft; return true; }
+    if (event.keyCode === KeyCode.KEYCODE_DPAD_DOWN || event.keyCode === KeyCode.KEYCODE_DPAD_UP) {
+      this.completionIndex = (this.completionIndex + (event.keyCode === KeyCode.KEYCODE_DPAD_DOWN ? 1 : count - 1)) % count;
+      return true;
+    }
+    if (event.keyCode !== KeyCode.KEYCODE_ENTER && event.keyCode !== KeyCode.KEYCODE_NUMPAD_ENTER) { return false; }
+    const index = Math.min(this.completionIndex, count - 1);
+    if (this.skillSuggested()) { this.selectSkill(this.skillMatches()[index].name); }
+    else if (this.referenceSuggested()) { this.app.referenceThread(this.referenceMatches()[index].id); }
+    else if (index === 0 && this.teamSuggested()) { this.app.setTeamEnabled(true).then((ok) => { if (ok) { this.app.setDraft(''); } }); }
+    else { this.app.setDraft('/compact'); this.send(); }
+    return true;
   }
 
   @Builder
@@ -1271,7 +1526,7 @@ export struct ChatPanel {
       }
       Scroll() {
         Column() {
-          ForEach(this.skillMatches(), (skill: SkillData) => {
+          ForEach(this.skillMatches(), (skill: SkillData, index: number) => {
             Row({ space: 8 }) {
               SymbolGlyph($r('sys.symbol.wand_and_stars')).fontSize(16).fontColor([this.appearance.accent])
               Column({ space: 2 }) {
@@ -1281,6 +1536,7 @@ export struct ChatPanel {
                   .fontSize(12).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_secondary'))
               }.layoutWeight(1).alignItems(HorizontalAlign.Start)
             }.id('mention-skill-' + skill.name).height(56).width('100%').padding({ left: 12, right: 12 })
+              .backgroundColor(this.commandSearch && index === this.completionIndex ? $r('app.color.selection') : Color.Transparent)
               .onClick(() => this.selectSkill(skill.name))
           }, (skill: SkillData) => skill.name)
         }.width('100%')
@@ -1299,13 +1555,14 @@ export struct ChatPanel {
       }
       Scroll() {
         Column() {
-          ForEach(this.referenceMatches(), (item: ThreadViewModel) => {
+          ForEach(this.referenceMatches(), (item: ThreadViewModel, index: number) => {
             Row({ space: 8 }) {
               SymbolGlyph($r('sys.symbol.ellipsis_message')).fontSize(16).fontColor([this.appearance.accent])
               Text(item.displayTitle).fontFamily(this.appearance.fontFamily).fontSize(14).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                 .fontColor($r('app.color.text_primary')).layoutWeight(1)
               if (item.archived) { Text(t('已归档')).fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.text_tertiary')) }
             }.id('mention-thread-' + item.id).height(44).width('100%').padding({ left: 12, right: 12 })
+              .backgroundColor(this.commandSearch && index === this.completionIndex ? $r('app.color.selection') : Color.Transparent)
             .onClick(() => { this.app.referenceThread(item.id); })
           }, (item: ThreadViewModel) => item.id)
         }.width('100%')
@@ -1323,7 +1580,8 @@ export struct ChatPanel {
         Text('/compact').fontSize(14).fontWeight(FontWeight.Medium).fontFamily('monospace').fontColor($r('app.color.text_primary'))
         Text(t('压缩较早对话，保留完整记录')).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-    }.id('slash-compact').width('100%').padding(12).borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
+    }.id('slash-compact').width('100%').padding(12).borderRadius(Radius.lg)
+    .backgroundColor(this.commandSearch && this.completionIndex === Number(this.teamSuggested()) ? $r('app.color.selection') : $r('app.color.surface'))
     .border({ width: 0.5, color: $r('app.color.divider') })
     .onClick(() => { this.app.setDraft('/compact'); this.send(); })
   }
@@ -1366,7 +1624,7 @@ export struct ChatPanel {
       SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
     }
     .id('slash-team').width('100%').padding({ left: Space.md, right: Space.md, top: 10, bottom: 10 })
-    .borderRadius(Radius.lg).backgroundColor($r('app.color.surface'))
+    .borderRadius(Radius.lg).backgroundColor(this.commandSearch && this.completionIndex === 0 ? $r('app.color.selection') : $r('app.color.surface'))
     .border({ width: 0.5, color: $r('app.color.divider') }).shadow({ radius: 12, color: '#0F000000', offsetY: 2 })
     .clickEffect(Motion.press).accessibilityText(t("开启团队模式"))
     .transition(Motion.rise(0, 12))
@@ -1407,8 +1665,12 @@ export struct ChatPanel {
     const choices = this.app.modelChoices;
     const providerCount = new Set(choices.map((choice) => choice.providerId)).size;
     const height = choices.length === 0 ? 240 : 60 + providerCount * 26 + choices.length * 46;
-    const available = this.modelButtonTop > 0 ? Math.max(120, this.modelButtonTop - 16) : 380;
-    return Math.min(380, available, height + (this.app.error.length > 0 ? 56 : 0));
+    return Math.min(this.popupHeightLimit(this.modelButtonTop, 380), height + (this.app.error.length > 0 ? 56 : 0));
+  }
+
+  private popupHeightLimit(anchorTop: number, maxHeight: number): number {
+    // Global positions can include the area above the drawable content, such as a window title bar.
+    return anchorTop > this.panelTop ? Math.min(maxHeight, Math.max(120, anchorTop - this.panelTop - 16)) : maxHeight;
   }
 
   private highestEffort(): boolean {
@@ -1536,6 +1798,16 @@ export struct ChatPanel {
   }
 
   @Builder
+  pendingInputActions() {
+    Menu() {
+      MenuItem({ content: t('追加') }).id('pc-steer-message').enabled(this.app.acceptingSteering)
+        .onClick(() => this.app.enqueueInput('steer'))
+      MenuItem({ content: t('排队') }).id('pc-queue-message').enabled(this.app.canQueueInput)
+        .onClick(() => this.app.enqueueInput('followUp'))
+    }
+  }
+
+  @Builder
   contextUsageButton() {
     Button({ type: ButtonType.Circle }) {
       Progress({ value: this.contextRatio() * 100, total: 100, type: ProgressType.Ring })
@@ -1601,12 +1873,13 @@ export struct ChatPanel {
       TextArea({ text: this.app.draft, controller: this.composerController,
         placeholder: this.speechActive() ? t('请说出要输入的内容') : this.thread.archived ? t("已归档的对话无法继续") : this.app.generating ? t("补充要求，或排队下一项任务…")
           : !this.composerExpanded() ? t('输入消息…') : this.thread.teamEnabled ? t("描述目标，主 Agent 会按需组建团队…") : t('输入消息，/ 命令，$ 技能，@ 引用会话') }).fontFamily(this.appearance.fontFamily)
-        .id('composer').fontSize(Font.body).fontColor($r('app.color.text_primary'))
+        .id('composer').fontSize(this.desktop ? 15 : Font.body).fontColor($r('app.color.text_primary'))
         .allowDrop(ATTACHMENT_DROP_TYPES.concat(['general.plain-text', 'general.hyperlink', 'general.html']))
         .onDrop((event: DragEvent) => this.composerDrop(event))
         .placeholderColor($r('app.color.text_tertiary')).backgroundColor(Color.Transparent)
         .width('100%')
-        .constraintSize({ minHeight: this.workbench && !this.voiceMode ? 88 : this.workbench ? 44 : 52, maxHeight: this.composerExpanded() ? 160 : this.workbench ? 44 : 52 }).maxLength(24000)
+        .constraintSize({ minHeight: this.workbench && !this.voiceMode ? (this.desktop ? 64 : 88) : this.workbench ? 44 : 52,
+          maxHeight: this.composerExpanded() ? 160 : this.workbench ? 44 : 52 }).maxLength(24000)
         .padding({ left: this.composerExpanded() ? 6 : this.workbench ? 46 : 54, right: this.composerExpanded() ? 6 : this.workbench ? 42 : 50,
           top: 10, bottom: this.composerExpanded() ? 4 : 10 }).borderRadius(0)
         .align(this.composerExpanded() ? Alignment.TopStart : Alignment.Start)
@@ -1615,13 +1888,15 @@ export struct ChatPanel {
         .enabled(!this.thread.archived).focusable(!this.voiceMode && !this.speechActive()).enableKeyboardOnFocus(!this.voiceMode && !this.speechActive())
         .onWillChange((value: EditableTextChangeValue) => !this.speechActive() || value.content === this.app.draft)
         .onKeyPreIme((event: KeyEvent) => {
-          if (!this.chatShortcutsAvailable() || !this.speechEnabled || this.voiceMode || this.app.active.id !== threadId) { return false; }
+          if (!this.chatShortcutsAvailable() || this.shortcutsCovered || !this.speechEnabled || this.voiceMode || this.app.active.id !== threadId) { return false; }
+          if (this.completionKey(event)) { return true; }
           return handleDraftEnter(event, this.composerController, this.composerHasPreview, () => {
             if (!this.app.generating && this.canSend()) { this.send(); }
           });
         })
         .onChange((value: string, preview?: PreviewText) => {
           if (this.app.active.id === threadId) { this.composerHasPreview = !!preview?.value; }
+          if (value !== this.app.draft) { this.completionIndex = 0; this.completionDismissed = ''; }
           this.composerChanged(threadId, value);
         })
         .onTextSelectionChange((start: number, end: number) => this.composerSelectionChanged(threadId, start, end))
@@ -1657,9 +1932,7 @@ export struct ChatPanel {
           }.width('100%')
         }.width('100%').constraintSize({ maxHeight: 104 }).scrollBar(BarState.Auto)
       }
-      if (this.thread.attachments.length > 0 || this.importing) {
-        this.attachmentStrip()
-      }
+      this.attachmentStrip()
       Stack() {
         // The hidden editor still sizes the input when voice controls cover it.
         Column() {
@@ -1687,11 +1960,13 @@ export struct ChatPanel {
         if (this.thread.pendingInputs.length > 0) {
           Row({ space: 4 }) {
             SymbolGlyph($r('sys.symbol.clock')).fontSize(14).fontColor([this.appearance.onAccentContainer])
-            Text(`${this.thread.queuePaused ? t("已暂停") : t("待发送")} ${this.thread.pendingInputs.length}`).fontFamily(this.appearance.fontFamily)
+            Text(this.desktop && AdaptiveUi.compactComposer(this.panelWidth) ? String(this.thread.pendingInputs.length) :
+              `${this.thread.queuePaused ? t("已暂停") : t("待发送")} ${this.thread.pendingInputs.length}`).fontFamily(this.appearance.fontFamily)
               .fontSize(Font.caption).fontWeight(FontWeight.Medium).fontColor(this.appearance.onAccentContainer)
           }
           .id('toggle-input-queue').height(30).padding({ left: 10, right: 12 }).borderRadius(15)
           .backgroundColor(this.appearance.accentContainer)
+          .accessibilityText(`${this.thread.queuePaused ? t('已暂停') : t('待发送')} ${this.thread.pendingInputs.length}`)
           .onClick(() => { this.showQueue = true; })
           .bindSheet($$this.showQueue, this.queueSheet(), { radius: Radius.sheet,
             title: { title: t("待发送队列") }, detents: [SheetSize.MEDIUM, SheetSize.LARGE], dragBar: true,
@@ -1713,12 +1988,20 @@ export struct ChatPanel {
           .margin({ left: 4 })
         if (this.app.generating) {
           if (!this.speechActive() && this.hasDraft() && this.app.canQueueInput) {
-            Button(t("追加")).fontFamily(this.appearance.fontFamily).id('steer-message').attributeModifier(Btn.tonalSmall)
-              .margin({ left: 4 })
-              .enabled(this.app.acceptingSteering).onClick(() => this.app.enqueueInput('steer'))
-            Button(t("排队")).fontFamily(this.appearance.fontFamily).id('queue-message').attributeModifier(Btn.plainSmall)
-              .margin({ left: 4 })
-              .onClick(() => this.app.enqueueInput('followUp'))
+            if (this.desktop && AdaptiveUi.compactComposer(this.panelWidth)) {
+              Button({ type: ButtonType.Normal }) {
+                SymbolGlyph($r('sys.symbol.clock')).fontSize(16).fontColor([$r('app.color.text_primary')])
+              }.id('pc-pending-input-actions').width(36).height(36).padding(0).margin({ left: 4 }).borderRadius(Radius.sm)
+                .backgroundColor($r('app.color.surface_variant')).accessibilityText(t('追加') + ' / ' + t('排队'))
+                .bindMenu(this.pendingInputActions, { systemMaterial: this.appearance.menu, mask: false })
+            } else {
+              Button(t("追加")).fontFamily(this.appearance.fontFamily).id('steer-message').attributeModifier(Btn.tonalSmall)
+                .margin({ left: 4 })
+                .enabled(this.app.acceptingSteering).onClick(() => this.app.enqueueInput('steer'))
+              Button(t("排队")).fontFamily(this.appearance.fontFamily).id('queue-message').attributeModifier(Btn.plainSmall)
+                .margin({ left: 4 })
+                .onClick(() => this.app.enqueueInput('followUp'))
+            }
           }
           IconButton({ icon: $r('sys.symbol.square_fill'), label: t("停止"), compId: 'stop-generation', diameter: this.workbench ? 36 : 44,
             iconSize: 14, fill: $r('app.color.text_primary'), tint: $r('app.color.page_background'),
@@ -1750,13 +2033,14 @@ export struct ChatPanel {
         .animation({ duration: Motion.medium, curve: Motion.standard })
         .hitTestBehavior(this.composerExpanded() ? HitTestMode.Default : HitTestMode.Transparent)
       }
-    }.id('composer-shell').width('100%').borderRadius(this.composerExpanded() ? Radius.xl : 28).clip(true)
+    }.id('composer-shell').width('100%').borderRadius(this.desktop ? Radius.lg : this.composerExpanded() ? Radius.xl : 28).clip(true)
     .onAreaChange((_previous: Area, current: Area) => { this.composerWindowTop = Number(current.globalPosition.y); })
     .backgroundColor($r('app.color.surface'))
     .border({ width: this.composerActiveInLayout() ? 1 : 0.5,
       color: this.composerActiveInLayout() ? this.appearance.accentOutline : $r('app.color.divider') })
-    .shadow(this.composerActiveInLayout() ? { radius: 28, color: this.appearance.accentGlow, offsetY: 4 }
-      : { radius: 12, color: '#0A000000', offsetY: 2 })
+    .shadow(this.desktop ? { radius: 8, color: '#0A000000', offsetY: 2 }
+      : this.composerActiveInLayout() ? { radius: 28, color: this.appearance.accentGlow, offsetY: 4 }
+        : { radius: 12, color: '#0A000000', offsetY: 2 })
     .animation({ duration: Motion.medium, curve: Motion.standard })
     // Anchor the sheet to the stable shell, not an add button that moves when the composer expands.
     .bindSheet($$this.showPlus, this.plusSheet(), { radius: Radius.sheet,
@@ -1850,7 +2134,7 @@ export struct ChatPanel {
         .onActionEnd((event: GestureEvent) => this.onHistoryDragEnd(event))
         .onActionCancel(() => this.onHistoryDragCancel()))
       Column({ space: Space.sm }) {
-        if (this.app.searchMessageId) { Banner({ text: this.app.searchQuery ? t("匹配：") + this.app.searchQuery : t("历史节点"), danger: false, actionLabel: t("定位"), onAction: () => this.locate() }).onAppear(() => { setTimeout(() => this.locate(), 100); }) }
+        if (this.app.searchMessageId) { Banner({ text: this.app.searchQuery ? t("匹配：") + this.app.searchQuery : t("历史节点"), danger: false, actionLabel: t("定位"), onAction: () => this.locate() }) }
         if (this.browser.permissionPending || (this.browser.open && (this.browser.owner === 'agent' || this.browser.hasTask ||
           (this.browser.url !== '' && this.browser.url !== 'about:blank'))) || this.browser.error) {
           BrowserStatusCard({ browser: this.browser, onOpen: this.onBrowser })
@@ -1902,12 +2186,12 @@ export struct ChatPanel {
           }.fontFamily(this.appearance.fontFamily).id('retry-message').attributeModifier(Btn.tonalSmall).clickEffect(Motion.press)
           .transition(Motion.rise()).onClick(() => this.app.retryPrompt())
         }
-        if (this.teamSuggested()) {
-          this.commandSuggestion()
+        if (!this.commandSearch || this.completionDismissed !== this.app.draft) {
+          if (this.teamSuggested()) { this.commandSuggestion() }
+          if (this.commandSuggested('/compact')) { this.compactSuggestion() }
+          if (this.skillSuggested()) { this.skillSuggestions() }
+          if (this.referenceSuggested()) { this.referenceSuggestions() }
         }
-        if (this.commandSuggested('/compact')) { this.compactSuggestion() }
-        if (this.skillSuggested()) { this.skillSuggestions() }
-        if (this.referenceSuggested()) { this.referenceSuggestions() }
         // The latest turn's plan stays beside the composer, outside the scrolling transcript.
         ForEach(this.thread.messages.slice(-1).filter((message) => message.role === 'assistant'), (message: MessageViewModel) => {
           ChatPlanPanel({ plan: message.plan })

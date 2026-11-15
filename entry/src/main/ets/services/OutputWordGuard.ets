@@ -68,8 +68,6 @@ export class OutputWordMatcher {
 }
 
 interface WordHit { word: number; start: number; end: number; }
-type OutputChannel = 'answer' | 'reasoning';
-
 export class OutputWordGuardStop extends Error {
   constructor() { super(t('回复已因内容审核停止。')); }
 }
@@ -77,16 +75,14 @@ export class OutputWordGuardStop extends Error {
 export class OutputWordGuard {
   private readonly matcher: OutputWordMatcher;
   private readonly publish: (text: string) => void;
-  private readonly channel: OutputChannel;
   private readonly hits: WordHit[] = [];
   private state: number = 0;
   private position: number = 0;
   private published: number = 0;
   private received: string = '';
 
-  constructor(matcher: OutputWordMatcher, channel: OutputChannel, publish: (text: string) => void) {
+  constructor(matcher: OutputWordMatcher, publish: (text: string) => void) {
     this.matcher = matcher;
-    this.channel = channel;
     this.publish = publish;
   }
 
@@ -101,7 +97,7 @@ export class OutputWordGuard {
         const start = end - this.matcher.length(word);
         if (this.hits.some((hit) => hit.word !== word && hit.end <= start && hit.start >= cutoff)) {
           this.release(start);
-          Diagnostics.log('warn', 'moderation', 'output_words_stopped', { channel: this.channel, count: 2 });
+          Diagnostics.log('warn', 'moderation', 'output_words_stopped', { channel: 'answer', count: 2 });
           throw new OutputWordGuardStop();
         }
         this.hits.push({ word: word, start: start, end: end });

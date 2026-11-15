@@ -25,12 +25,16 @@ return group.execute(call, cancellation, context);
 SessionResources.tools()
 ├─ WorkspaceTools        find_files / list_files / read_file / search_file_content / write_file / edit_file
 ├─ AttachmentTools       read_attachment
+├─ ImageInspectionTools  view_image
 ├─ SkillTools            read_skill / list_skills
 ├─ InteractionTools      request_user_input / update_plan
 ├─ CodeExecutionTools    execute_code
-├─ MiniAppTools          list_mini_apps / publish_mini_app  （实验室开启时）
 ├─ PresentTools          present_files
 ├─ PreviewTools          publish_preview
+├─ ImageGenerationTools  image_gen             （已配置并选中图片模型时）
+├─ LifePanelTools        get_life_panel_catalog / list_life_panels / get_life_panel / publish_life_panel /
+│                        validate_life_panel / list_life_boards / get_life_board / manage_life_board / manage_life_panel_task
+├─ MailTools             list_mail_accounts / search_mail / read_mail   （始终提供，按已启用连接查询）
 ├─ WebTools              read_web              （允许联网时）
 ├─ BrowserTools          browser_*             （浏览器对象存在时）
 ├─ WebSearchTools        search_web            （联网且已配置搜索时）
@@ -57,15 +61,17 @@ SessionResources.tools()
 | --- | --- | --- |
 | `workspace-read` | 是 | `list_files` `find_files` `read_file` `search_file_content` |
 | `workspace-write` | 否 | `write_file` `edit_file` |
-| `context-read` | 是 | `read_attachment` `read_reference` |
+| `context-read` | 是 | `read_attachment` `read_reference` `view_image` |
 | `web` | 是 | `read_web` `search_web` |
+| `mail` | 是 | `list_mail_accounts` `search_mail` `read_mail` |
 | `browser` | 是 | `browser_open` `browser_snapshot` `browser_action` `browser_capture` `browser_wait` `browser_handoff` `browser_close` |
 | `calculation` | 是 | `execute_code` |
 | `orchestration` | 是 | `orchestrate` |
 | `interaction` | 是 | `request_user_input` `update_plan` |
 | `delivery` | 是 | `publish_preview` `present_files` |
-| `mini-app-read` | 是 | `list_mini_apps` |
-| `mini-app-write` | 否 | `publish_mini_app` |
+| `image-generation` | 否 | `image_gen` |
+| `life-panel-read` | 是 | `get_life_panel_catalog` `list_life_panels` `get_life_panel` `list_life_boards` `get_life_board` |
+| `life-panel-write` | 否 | `publish_life_panel` `validate_life_panel` `manage_life_board` `manage_life_panel_task` |
 | `skill-read` | 是 | `read_skill` `list_skills` |
 | `mcp-discovery` | 是 | `mcp_search_tools` `mcp_list_tools` |
 | `mcp-execution` | 否 | `mcp_call` |
@@ -74,26 +80,32 @@ SessionResources.tools()
 | `team-coordination` | 是 | `team_recruit` `team_wait` `team_inspect` `team_read_result` `team_control` `team_resume` |
 | `team-handoff` | 是 | `team_complete_task` `team_list_messages` `team_read_message` |
 
-面向用户的可选能力把上述分组重新打包为 12 项，界面按“资料与检索、执行与协作、预览与交付、MCP 服务”排列。6 个基础文件工具在自定义模式固定保留，4 个记忆/Skills 入口由专门设置控制，都不在这 12 项里。
+面向用户的可选能力把上述分组重新打包为 14 项，界面按“资料与检索、执行与协作、预览与交付、MCP 服务”排列。6 个基础文件工具在自定义模式固定保留，4 个记忆/Skills 入口由专门设置控制，都不在这 14 项里。
 
 | 能力 | 分区 | 包含工具 |
 | --- | --- | --- |
-| `context-read` | 资料与检索 | `read_attachment` `read_reference` |
+| `context-read` | 资料与检索 | `read_attachment` `read_reference` `view_image` |
 | `web` | 资料与检索 | `read_web` `search_web` |
+| `mail` | 资料与检索 | `list_mail_accounts` `search_mail` `read_mail` |
 | `browser` | 资料与检索 | 浏览器 7 个入口 |
 | `calculation` | 执行与协作 | `execute_code` |
 | `orchestration` | 执行与协作 | `orchestrate` |
 | `user-input` | 执行与协作 | `request_user_input` |
 | `plan` | 执行与协作 | `update_plan` |
 | `team` | 执行与协作 | 团队 9 个入口 |
-| `preview` | 预览与交付 | `publish_preview`、`list_mini_apps`、`publish_mini_app` |
+| `preview` | 预览与交付 | `publish_preview` 与看板 9 个入口 |
 | `file-delivery` | 预览与交付 | `present_files` |
+| `image-generation` | 预览与交付 | `image_gen` |
 | `mcp` | MCP 服务 | 发现与调用 3 个入口 |
 | `mcp-manage` | MCP 服务 | `mcp_manage` |
 
 完整版（`full`）在注册与只读过滤之后放行全部工具；自定义（`custom`）按能力整组关闭。`toolEnabled()` 对基础文件工具、记忆/Skills 工具始终返回真，其余名字按所属能力判断：能力内任一工具被禁用，整组都不再执行。保存的禁用列表会被 `normalizeDisabledTools()` 归一化为整组，旧配置只关闭部分成员时加载为整组关闭。同一限制同时作用于直接调用、编排子调用和团队员工。
 
-旧存档中已移除的 `generate_image`、`read_tool_result` 禁用记录会在加载时清除。`publish_data_view` 已移除；其旧禁用项迁移为 `publish_preview`，继续保留原有预览能力开关。旧工具发现记录不会恢复已移除入口；历史图表回执仍支持展示、CSV 导出及会话导出。
+### 旁聊的目录
+
+旁聊不受会话能力开关影响，而是在 `SessionService.chatTools()` 外层再包一层固定白名单：只放行 `list_files`、`find_files`、`read_file`、`search_file_content` 与 `read_reference`。会话服务同时把旁聊视为只读，`RuleTools` 会过滤掉其余非只读分组；因此模型即使尝试写文件、联网、生成图片或查看看板，也只会得到 `TOOL_UNAVAILABLE` 或 `PERMISSION_DENIED`。旁聊与主会话共用工作区，读取仍受路径与版本校验约束。
+
+旧存档中已移除的 `generate_image`、`read_tool_result` 禁用记录会在加载时清除。`image_gen` 是当前版本的图片工具，不受旧 `generate_image` 记录影响。`publish_data_view` 已移除，其旧禁用项迁移为 `publish_preview`，继续保留原有预览能力开关。旧小程序工具 `list_mini_apps`、`publish_mini_app` 与实验室开关已在 v1.3.1 下线，禁用记录同样不再生效。旧工具发现记录不会恢复已移除入口；历史图表回执仍支持展示、CSV 导出及会话导出。
 
 MCP 已接受的完整工具结果保存在会话回执中，并原样进入模型请求；框架不再生成首尾预览或提供 `read_tool_result` 分页补读。超大结果同时占用上下文、内存与磁盘，仍受网络层和远端服务自身限制。编排子回执保留在工具详情并参与压缩时的文件操作证据汇总。
 
@@ -110,7 +122,7 @@ MCP 已接受的完整工具结果保存在会话回执中，并原样进入模�
 | `promptSnippet` | 一行用途，进入运行时快照的工具清单 | 否 |
 | `promptGuidelines` | 使用规则，进入 `tool_guidelines` 片段 | 否 |
 
-`toolSchemas()` 在发送前只保留 `type` 与 `function`，提示字段不会混入 provider 请求。标记为 `sequential` 的工具会让**整批**调用串行：任一步出现写文件、编辑、交互与数据展示、预览发布、小程序发布、编排或任一 MCP 工具，该步其余调用都排在后面执行。
+`toolSchemas()` 在发送前只保留 `type` 与 `function`，提示字段不会混入 provider 请求。标记为 `sequential` 的工具会让**整批**调用串行：任一步出现写文件、编辑、交互与数据展示、预览发布、看板发布或调整、图片生成、编排或任一 MCP 工具，该步其余调用都排在后面执行。
 
 ## 执行流水线
 
@@ -135,7 +147,7 @@ MCP 已接受的完整工具结果保存在会话回执中，并原样进入模�
 
 ## 默认完整工具目录
 
-模型从首次请求起直接获得所有已启用、已配置且通过权限过滤的工具 schema 与使用说明，包括文件、计算、浏览器、交互、预览、小程序、文件交付、MCP 包装入口及当前角色允许的团队工具。目录按名称稳定排序，不再根据本轮调用或旧发现记录逐步扩展。`tool_search` 默认不提供。
+模型从首次请求起直接获得所有已启用、已配置且通过权限过滤的工具 schema 与使用说明，包括文件、计算、浏览器、交互、预览、图片、看板、邮件、文件交付、MCP 包装入口及当前角色允许的团队工具。目录按名称稳定排序，不再根据本轮调用或旧发现记录逐步扩展。`tool_search` 默认不提供。
 
 工具目录仍受只读、会话能力开关、角色、资源是否存在和服务配置约束。Skills 和记忆工具继续由对应设置控制。停用或撤销的工具不会因为旧消息调用过而重新出现；附件和引用入口只在有对应资源时加入。
 
@@ -145,7 +157,7 @@ MCP 已接受的完整工具结果保存在会话回执中，并原样进入模�
 
 ## 可视化与交付编排
 
-`orchestrate` 允许调用 `execute_code`、`publish_preview`、`publish_mini_app`、`list_mini_apps`、`present_files`，与文件、资料读取工具共用当前授权目录。可以顺序完成“读取 → 计算检查 → 写文件 → 发布 → 交付”，无需为每个依赖步骤重新请求模型。依赖步骤必须 `await`；未捕获的失败会停止脚本，禁止把已失败的写入当成发布依据。
+`orchestrate` 允许调用文件读写与检索、附件与引用、网页与搜索、Skills 读取、MCP 发现与调用、`execute_code`、`publish_preview` 与 `present_files` 共 17 个工具，与这些工具共用当前授权目录。可以顺序完成“读取 → 计算检查 → 写文件 → 发布 → 交付”，无需为每个依赖步骤重新请求模型。依赖步骤必须 `await`；未捕获的失败会停止脚本，禁止把已失败的写入当成发布依据。图片生成、图片检查、看板、邮件与团队工具不开放为嵌套工具。
 
 预览、图表与交付使用原来的子调用回执。`toolReceipts()` 统一读取顶层调用及当前工作区中的一层编排子调用，供聊天展示、截图回传、版本选择、文件交付、导出和备份使用。不会展开团队员工的独立工作区。源文件内容不复制进模型结果，编排应返回简短的发布回执和路径；截图作为独立图像消息送入下一次模型请求。
 
@@ -201,6 +213,7 @@ MCP 已接受的完整工具结果保存在会话回执中，并原样进入模�
 | 执行与预算 | `LIMIT_EXCEEDED` `TIMEOUT` `NOT_EXECUTED` `OUTCOME_UNKNOWN` `CANCELLED` |
 | 远端与网络 | `AUTH_REQUIRED` `RATE_LIMITED` `HTTP_ERROR` `NETWORK_ERROR` `REMOTE_ERROR` `REMOTE_TOOL_ERROR` `SCHEMA_REQUIRED` |
 | 预览 | `PREVIEW_INVALID` `UNSUPPORTED_PREVIEW_FORMAT` |
+| 图片 | `IMAGE_SERVICE_ERROR` `UNSUPPORTED_CONTENT` |
 | 通用 | `NOT_FOUND` `INVALID_RESPONSE` `UNSUPPORTED_PROTOCOL` |
 | 兜底 | `UNKNOWN_ERROR` |
 
@@ -223,5 +236,9 @@ HTTP 状态在适配层按数值分类：401 → `AUTH_REQUIRED`，403 → `PERM
 | `entry/src/main/ets/services/RepeatToolReminder.ets` | 连续调用计数与提醒文本 |
 | `entry/src/main/ets/services/McpTools.ets` | MCP 目录、检索、调用与审批 |
 | `entry/src/main/ets/services/McpClient.ets` | Streamable HTTP、会话、超时、取消与错误映射 |
+| `entry/src/main/ets/services/ImageGenerationTools.ets` | `image_gen` 参数、参考图读取、输出保存与单独审批 |
+| `entry/src/main/ets/services/ImageInspectionTools.ets` | `view_image`、视觉副本与图像消息注入 |
+| `entry/src/main/ets/services/LifePanelTools.ets` | 看板卡片、看板布局与刷新任务 |
+| `entry/src/main/ets/services/MailTools.ets` | 邮箱连接、查询与正文读取 |
 | `entry/src/main/ets/model/ToolFailure.ets` | 失败类型、HTTP 分类与回执错误构造 |
 | `entry/src/main/ets/services/OrchestrationTools.ets` | 嵌套工具目录、子调用并发与子回执 |

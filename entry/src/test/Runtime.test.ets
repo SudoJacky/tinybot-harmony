@@ -220,22 +220,22 @@ export default function runtimeTests(): void {
       const prefix = '前文甲乙事件。'; const blocked = prefix + '丙丁继续';
       for (let split = 0; split <= blocked.length; split++) {
         let visible = ''; let stopped = false;
-        const guard = new OutputWordGuard(matcher, 'answer', (text) => { visible += text; });
+        const guard = new OutputWordGuard(matcher, (text) => { visible += text; });
         try { guard.push(blocked.slice(0, split)); guard.push(blocked.slice(split)); guard.finish(blocked); }
         catch (error) { if (!(error instanceof OutputWordGuardStop)) { throw error as Error; } stopped = true; }
         expect(stopped).assertTrue(); expect(visible).assertEqual(prefix);
       }
       for (const content of ['甲乙事件。', '甲乙、甲乙。', '甲乙' + '。'.repeat(61) + '丙丁。', 'Ｐｒｏｊｅｃｔ－ｘ。']) {
         let visible = '';
-        const guard = new OutputWordGuard(matcher, 'answer', (text) => { visible += text; });
+        const guard = new OutputWordGuard(matcher, (text) => { visible += text; });
         guard.push(content);
         expect(visible).assertEqual(content);
         guard.finish(content);
         expect(visible).assertEqual(content);
       }
     });
-    it('showsOnlyTheGuardRefusalAndEndsTheTurnWithoutToolsOrContinuation', 0, async () => {
-      const guardStop = toolAnswer(); guardStop.content = ' ' + CONTENT_GUARD_REFUSAL + '\n'; guardStop.reasoningContent = '未公开的思考内容';
+    it('keepsOnlyTheGuardRefusalInHistoryAndEndsTheTurnWithoutToolsOrContinuation', 0, async () => {
+      const guardStop = toolAnswer(); guardStop.content = ' ' + CONTENT_GUARD_REFUSAL + '\n'; guardStop.reasoningContent = '思考片段';
       const provider = new TestProvider('test', [guardStop]);
       const agent = new AgentRuntime(registry(provider), new TestCredentials());
       const tools = new TestTools();
@@ -247,7 +247,7 @@ export default function runtimeTests(): void {
       expect(result.turn.content).assertEqual(CONTENT_GUARD_REFUSAL);
       expect(result.turn.steps[0].content).assertEqual(CONTENT_GUARD_REFUSAL);
       expect(result.turn.steps[0].reasoningContent === undefined).assertTrue();
-      expect(visible.join('')).assertEqual(CONTENT_GUARD_REFUSAL);
+      expect(visible.join('')).assertEqual('思考片段' + CONTENT_GUARD_REFUSAL);
       expect(tools.calls.length).assertEqual(0);
       expect(provider.inputs.length).assertEqual(1);
     });

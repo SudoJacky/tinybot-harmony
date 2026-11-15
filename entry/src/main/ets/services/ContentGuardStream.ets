@@ -1,17 +1,14 @@
 import { Diagnostics } from '../model/Diagnostics';
 import { CONTENT_GUARD_REFUSAL } from '../model/ContentGuard';
 
-// Hold the prefix and reasoning while the model may be producing a refusal.
+// Hold the answer prefix while it may still be the fixed refusal.
 export class ContentGuardStream {
   private text: string = '';
-  private reasoning: string = '';
   private open: boolean = false;
   private onText: (text: string) => void;
-  private onReasoning?: (text: string) => void;
 
-  constructor(onText: (text: string) => void, onReasoning?: (text: string) => void) {
+  constructor(onText: (text: string) => void) {
     this.onText = onText;
-    this.onReasoning = onReasoning;
   }
 
   pushText(text: string): void {
@@ -19,11 +16,6 @@ export class ContentGuardStream {
     this.text += text;
     const candidate = this.text.trim();
     if (!CONTENT_GUARD_REFUSAL.startsWith(candidate)) { this.release(); }
-  }
-
-  pushReasoning(text: string): void {
-    if (this.open) { this.onReasoning?.(text); }
-    else if (this.onReasoning) { this.reasoning += text; }
   }
 
   finish(answer: string): boolean {
@@ -37,7 +29,6 @@ export class ContentGuardStream {
 
   private release(): void {
     this.open = true;
-    if (this.reasoning) { this.onReasoning?.(this.reasoning); this.reasoning = ''; }
     if (this.text) { this.onText(this.text); this.text = ''; }
   }
 }

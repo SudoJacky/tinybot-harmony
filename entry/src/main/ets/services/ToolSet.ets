@@ -9,9 +9,11 @@ export class ToolSet implements AgentTools {
   private entries: Map<string, AgentTools> = new Map<string, AgentTools>();
   private catalog: ToolDefinition[] = [];
   private groups: AgentTools[];
+  private only?: string[];
 
-  constructor(groups: AgentTools[]) {
+  constructor(groups: AgentTools[], only?: string[]) {
     this.groups = groups.slice();
+    this.only = only;
     this.refresh();
   }
 
@@ -20,6 +22,7 @@ export class ToolSet implements AgentTools {
     for (const group of this.groups) {
       for (const definition of group.definitions()) {
         const name = definition.function.name;
+        if (this.only && !this.only.includes(name)) { continue; }
         if (this.entries.has(name)) { throw new ToolFailure('INTERNAL_ERROR', t("工具名称重复：") + name, 'inspect_error'); }
         this.entries.set(name, group);
         this.catalog.push(definition);

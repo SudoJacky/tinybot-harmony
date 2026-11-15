@@ -1,4 +1,5 @@
 import { materialMenuContent } from '../common/MaterialMenu';
+import { IS_PC } from '../common/DeviceForm';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { AnimatedIcon } from '../common/AnimatedIcon';
 import { ToolExecution } from '../model/Agent';
@@ -7,7 +8,9 @@ import { stepDisplayContent, stepPreviews, PublishedPreview, PublishedAnswerPart
 import { PublishedPreviewCard } from './PublishedPreviewCard';
 import { PublishedPanel } from '../model/PublishedPanel';
 import { PublishedPanelCard } from './PublishedPanelCard';
-import { PresentedFile, deliveredFiles } from '../model/Deliverables';
+import { ImageDelivery, PresentedFile, deliveredFiles, latestImageDelivery } from '../model/Deliverables';
+import { GeneratedImageCard } from './GeneratedImageCard';
+import { Cancellation } from '../services/Cancellation';
 import { turnFileChanges } from '../model/TurnFileChanges';
 import { TurnChangesCard } from './TurnChangesCard';
 import { pasteboard } from '@kit.BasicServicesKit';
@@ -69,7 +72,7 @@ function toolIcon(name: string): Resource {
   if (name === 'write_file' || name === 'edit_file') { return $r('sys.symbol.square_and_pencil'); }
   if (name === 'read_file' || name === 'read_file_lines' || name === 'read_attachment') { return $r('sys.symbol.doc_text'); }
   if (name === 'find_files' || name === 'search_file_content' || name === 'mcp_search_tools') { return $r('sys.symbol.magnifyingglass'); }
-  if (name === 'generate_image') { return $r('sys.symbol.picture'); }
+  if (name === 'generate_image' || name === 'image_gen' || name === 'view_image') { return $r('sys.symbol.picture'); }
   if (name === 'update_plan') { return $r('sys.symbol.list_bullet'); }
   if (name === 'request_user_input') { return $r('sys.symbol.questionmark_circle'); }
   if (name === 'publish_data_view') { return $r('sys.symbol.text_alignleft'); }
@@ -251,7 +254,11 @@ export struct MessageBubble {
   @Prop readingMessageId: string = '';
   onRead: (id: string) => void = () => {};
   @Prop webEnabled: boolean = false;
+  @Prop workspaceRoot: string = '';
+  readImageReference?: (path: string, signal: Cancellation) => Promise<Uint8Array>;
   onOpenFile: (path: string) => void = () => {};
+  onOpenImage: (path: string) => void = () => {};
+  onOpenImageReference: (path: string) => void = () => {};
   @Prop previewInspectable: boolean = false;
   @Prop inspectedPreviewId: string = '';
   onInspectPreview: (messageId: string, previewId: string) => void = () => {};
@@ -278,6 +285,21 @@ export struct MessageBubble {
 
   private timeline(): TimelineEntry[] { return this.message.timeline; }
   aboutToAppear(): void { this.settled = this.turnStatus === 'complete'; }
+
+  private generatedImages(): ImageDelivery[] {
+    const latest = latestImageDelivery(this.message.stepViews, this.turnStatus === 'generating');
+    return latest ? [latest] : [];
+  }
+
+  private generatedImagePath(delivery: ImageDelivery): string {
+    const latest = latestImageDelivery(this.message.stepViews, this.turnStatus === 'generating');
+    if (latest?.id === delivery.id) { return latest.path; }
+    if (delivery.path) { return delivery.path; }
+    // A card created as a placeholder may be leaving after its path has already been published.
+    const index = Number(delivery.id.slice(0, delivery.id.indexOf('-')));
+    const previous = latestImageDelivery(this.message.stepViews.slice(0, index + 1), false);
+    return previous?.id === delivery.id ? previous.path : '';
+  }
   private syncWorkflow(): void {
     this.getUIContext().animateTo({ duration: 280, curve: Motion.standard }, () => {
       this.settled = this.turnStatus === 'complete';
@@ -445,6 +467,13 @@ export struct MessageBubble {
         if (this.message.role === 'user') {
           this.actionButton($r('sys.symbol.square_and_pencil'), t('改写'), 'edit-' + this.message.id,
             () => this.onFork(this.message.id), () => this.actionsEnabled)
+          if (IS_PC && this.message.content.length > 0) {
+            Button({ type: ButtonType.Normal }) {
+              SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(18).fontColor([$r('app.color.text_secondary')])
+            }.id('message-actions-' + this.message.id).width(36).height(44).padding(0).borderRadius(8)
+              .backgroundColor(Color.Transparent).accessibilityText(t('更多操作'))
+              .bindMenu(this.actions, { systemMaterial: this.appearance.menu, mask: false })
+          }
         } else {
           this.actionButton($r('sys.symbol.arrow_clockwise'), t('重新生成（保留原回答）'), 'regenerate-' + this.message.id,
             () => this.onRegenerate(this.message.id), () => this.actionsEnabled)
@@ -666,17 +695,44 @@ export struct MessageBubble {
       if (this.hasExtra) {
         this.extra()
       }
-      ForEach(deliveredFiles(this.message.stepViews), (file: PresentedFile) => {
+      if (this.workspaceRoot) {
+        Stack({ alignContent: Alignment.TopStart }) {
+          ForEach(this.generatedImages(), (delivery: ImageDelivery) => {
+            Stack({ alignContent: Alignment.TopStart }) {
+              GeneratedImageCard({
+                path: this.generatedImagePath(delivery) ? this.workspaceRoot + '/' + this.generatedImagePath(delivery) : '',
+                ratio: delivery.ratio, cardId: 'generated-image-' + this.message.id + '-' + delivery.id,
+                references: delivery.references || [], readReference: this.readImageReference,
+                compareReference: delivery.compareReference || '',
+                takeReveal: () => this.message.takeImageReveal(delivery.id),
+                onOpen: () => {
+                  const path = this.generatedImagePath(delivery);
+                  if (path) { this.onOpenImage(path); }
+                },
+                onOpenReference: () => {
+                  if (delivery.compareReference) { this.onOpenImageReference(delivery.compareReference); }
+                }
+              })
+            }.width('100%').transition(this.appearance.effectStrength > 0 ?
+              TransitionEffect.asymmetric(TransitionEffect.OPACITY.animation({ duration: 180, curve: Motion.standard }),
+                TransitionEffect.OPACITY.animation({ duration: 220, curve: Motion.standard })) : TransitionEffect.IDENTITY)
+          }, (delivery: ImageDelivery) => delivery.id)
+        }.width('100%')
+      }
+      ForEach(deliveredFiles(this.message.stepViews).filter((file) => !file.generatedImage || !this.workspaceRoot), (file: PresentedFile) => {
         Button() {
-          Row({ space: 12 }) {
-            SymbolGlyph($r('sys.symbol.doc')).fontSize(24).fontColor([this.appearance.accent])
-            Column({ space: 4 }) {
-              Text(file.path).fontFamily(this.appearance.fontFamily).fontSize(14).fontColor($r('app.color.text_primary')).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-              if (file.description) { Text(file.description).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary')).maxLines(3) }
-              Text(t('打开文件 · 分享与导出')).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_tertiary'))
-            }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-            SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(12).fontColor([$r('app.color.text_secondary')])
-          }.width('100%').padding(14)
+          Column() {
+            Row({ space: 12 }) {
+              SymbolGlyph(file.generatedImage ? $r('sys.symbol.picture') : $r('sys.symbol.doc')).fontSize(24).fontColor([this.appearance.accent])
+              Column({ space: 4 }) {
+                Text(file.generatedImage ? t('生成图片') : file.path).fontFamily(this.appearance.fontFamily).fontSize(14)
+                  .fontColor($r('app.color.text_primary')).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+                if (file.description) { Text(file.description).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary')).maxLines(3) }
+                Text(t('打开文件 · 分享与导出')).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_tertiary'))
+              }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+              SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(12).fontColor([$r('app.color.text_secondary')])
+            }.width('100%').padding(14)
+          }.width('100%')
         }.fontFamily(this.appearance.fontFamily).width('100%').type(ButtonType.Normal).borderRadius(Radius.md).backgroundColor($r('app.color.surface_variant'))
         .id('deliverable-' + this.message.id + '-' + file.path).onClick(() => this.onOpenFile(file.path))
       }, (file: PresentedFile) => file.path)
@@ -707,7 +763,7 @@ export struct MessageBubble {
         } else {
           this.assistantMessage()
         }
-      }.width('100%').bindContextMenu(this.actions, ResponseType.LongPress, {
+      }.width('100%').bindContextMenu(this.actions, IS_PC ? ResponseType.RightClick : ResponseType.LongPress, {
         systemMaterial: this.appearance.menu, mask: false })
       .bindSheet($$this.documentOpen, this.documentViewer(), { radius: Radius.sheet, height: '90%', showClose: false, dragBar: true,
         backgroundColor: $r('app.color.page_background') })

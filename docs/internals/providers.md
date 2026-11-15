@@ -7,8 +7,9 @@
 | 概念 | 类型 | 含义 | 位置 |
 | --- | --- | --- | --- |
 | 预设 | `ProviderInfo` | 内置的 ID、名称、协议、默认地址、模型清单与密钥入口 | `model/Provider.ets` 的 `builtinProviderInfos()` |
-| 配置实例 | `ProviderProfile` | 用户保存的一份服务：协议、地址、密钥别名、模型列表、启用状态、窗口覆盖 | `model/ProviderProfiles.ets` |
+| 配置实例 | `ProviderProfile` | 用户保存的一份服务：协议、地址、密钥别名、模型列表、启用状态、窗口覆盖；聊天服务可附带 `imageModels` | `model/ProviderProfiles.ets` |
 | 运行时适配器 | `ModelProvider` | 负责端点规则、请求体、请求头与流解析 | `services/providers/*`，应用内统一实现为 `ProtocolProvider` |
+| 图片服务 | `ImageServiceAccess` | 从聊天服务的 `imageModels` 或独立的图片协议配置解析出协议、地址与凭据别名 | `imageService()`、`sharedImageBaseUrl()` |
 
 ```ts
 export interface ModelProvider {
@@ -35,7 +36,7 @@ export interface ModelProvider {
 | `google` | Google Gemini | `gemini` | `https://generativelanguage.googleapis.com/v1beta` | 空，手动填写 |
 | `anthropic` | Anthropic | `anthropic-messages` | `https://api.anthropic.com/v1` | 空，手动填写 |
 
-Ollama 预设标记 `noApiKey`，并使用端点占位符提示填写手机可访问的服务器地址。内置云端预设带 `apiKeyUrl`，编辑页据此显示官方密钥入口；该链接不随服务改名变化，自定义服务与启用“无需 API Key”的配置不显示。
+Ollama 预设标记 `noApiKey`，并使用端点占位符提示填写手机可访问的服务器地址。内置云端预设带 `apiKeyUrl`，编辑页据此显示官方密钥入口；该链接不随服务改名变化，自定义服务与启用“无需 API Key”的配置不显示。图片协议没有内置预设，在协议列表中直接选择；图片协议配置不注册为聊天模型。
 
 ## ProviderRegistry
 
@@ -96,6 +97,24 @@ API Key 保存在系统 Asset Store，写入属性为 `DEVICE_UNLOCKED` 且 `Syn
 
 作用域只比较协议、主机、端口与基础路径；同一基础地址下切换协议或修改名称、模型、上下文窗口都不会更换密钥，更换域名、端口或 HTTP/HTTPS 时需重新填写。
 
+## 图片服务
+
+图片请求不经过聊天绑定，由 `imageService()` 单独解析：
+
+```text
+保存配置 → ProviderProfile.imageModels 或独立的图片协议配置
+组装工具 → imageService(profiles, options.imageGeneration)
+            要求配置已启用、引用的模型仍在列表中
+            聊天服务附带图片模型时，地址由 sharedImageBaseUrl() 统一为聊天服务根地址
+            → { id, name, protocol, baseUrl, credentialAlias }
+发起请求 → NativeImageGenerator 读取凭据 → imageRequest() 编码 → 响应解析 → imageResponse()
+```
+
+- 只有 `imageGeneration` 能解析到可用服务时才注册 `image_gen`；服务或模型被停用、删除后，下一轮工具目录不再提供该工具。
+- 复用聊天服务密钥时，图片地址默认取聊天服务的基础地址；显式填写图片地址时必须与聊天服务同协议、同主机、同端口，否则保存与解析都会失败。
+- 独立图片协议配置使用自己的地址与凭据别名，密钥作用域与聊天服务一致：更换主机、端口或基础路径需要重新填写。
+- 图片协议没有流式响应，也不参与推理强度、用量与账号绑定；请求前仍读取凭据，网络失败、HTTP 状态与响应结构问题分别映射为 `NETWORK_ERROR`、`HTTP_ERROR`、`IMAGE_SERVICE_ERROR` 或 `INVALID_RESPONSE`。
+
 ## 华为账号校验注入
 
 首次使用引导的账号步骤复用同一个 `HuaweiAccount` 对象和原生登录流程，不另存账号资料。用户可稍后登录；模型请求仍必须经过下述统一校验。
@@ -119,12 +138,17 @@ API Key 保存在系统 Asset Store，写入属性为 `DEVICE_UNLOCKED` 且 `Syn
 | `responses` | `/responses` | 同上 |
 | `anthropic-messages` | `/messages` | 只有主机没有路径时补 `/v1/messages` |
 | `gemini` | `/models/<模型 ID>:streamGenerateContent?alt=sse` | 只有主机时补 `/v1beta`；地址含其他协议的接口路径或生成方法时报“接口路径与所选协议不一致” |
+| `openai-images` | `/images/generations`；带参考图时改为根地址下的 `/images/edits` | 参考图以 multipart 字段 `image[]` 上传；`size` 由比例换算 |
+| `gemini-images` | `/interactions` | 只有主机时补 `/v1/interactions`；比例写入 `response_format` |
+| `seedream-images` | `/images/generations` | `size` 按比例换算为 2048 级尺寸，参考图作为 `image` 字段 |
+| `dashscope-images` | `/services/aigc/multimodal-generation/generation` | 比例写成 `1024*1024` 形式，参考图作为 `data:` 图片块 |
 
 `chatRequest()` 的固定行为：
 
 - `stream: true`；有工具时传 `tools` 与 `tool_choice: 'auto'`，无工具时不传。
 - 只有调用方显式给出 `maxOutputTokens` 才写 `max_tokens`，正常聊天不主动设置输出上限。
 - 有图片时 `content` 转为内容块数组，仅在正文非空时添加 `text` 块，再按顺序添加 `image_url` 块；纯图片消息不附带文本块。Responses 对 `input_text` 与 `input_image` 采用相同规则。无图片时保持字符串。
+- 会话照片在 `image_gen` 或 `view_image` 可用时，以文本形式把附件的准确引用追加到消息，供图片工具选择参考图；聊天模型不支持图片输入时，图片附件会被移除并注明“模型看不到这些照片”，但引用仍可交给图片模型。
 - `reasoning_content` 仅在 `replayReasoning` 为真且角色为 assistant 时回传；OpenAI 与 Ollama 预设关闭该行为。
 - `requestUsage !== false` 时附加 `stream_options: { include_usage: true }`。
 
@@ -204,4 +228,6 @@ Gemini 适配（`GeminiProtocol.ets`、`GeminiStream.ets`）：
 | `entry/src/main/ets/services/providers/ProviderErrors.ets` | HTTP 错误、临时错误与上下文溢出分类 |
 | `entry/src/main/ets/services/CredentialStore.ets` | 系统安全存储读写 |
 | `entry/src/main/ets/services/ProfileSettings.ets` | 服务配置提交与密钥生命周期 |
+| `entry/src/main/ets/services/ImageGenerationProtocol.ets` | 图片协议请求体、端点与响应解析 |
+| `entry/src/main/ets/services/NativeImageGenerator.ets` | 图片请求、超时、下载与错误映射 |
 | `entry/src/main/ets/services/HuaweiAccount.ets` | 账号登录、状态校验与 `requireLogin()` |

@@ -22,13 +22,12 @@ const uiImage = new Proxy({}, { get: (_, property) => value => { painted[propert
 const scope = { exports: {}, Image: uiImage, ImageFit: { Cover: 'cover', Contain: 'contain' }, Radius: {},
   Attachments: { path: attachmentPath } };
 vm.runInNewContext(compile(`exports.preview = function(item) ${bubble.method('preview').body.getText(bubble.tree)};`), scope);
-function imageCallbacks(comp, method) {
+function callbacks(comp, method, matches) {
   const result = [];
   function visit(node) {
     if (ts.isCallExpression(node) && node.expression.getText(comp.tree) === 'this.observeComponentCreation2') {
       const callback = node.arguments[0];
-      if (ts.isArrowFunction(callback) && callback.body.statements.some(statement =>
-        statement.getText(comp.tree).startsWith('Image.create(') && statement.getText(comp.tree).includes('Attachments.path'))) {
+      if (ts.isArrowFunction(callback) && callback.body.statements.some(statement => matches(statement.getText(comp.tree)))) {
         result.push(callback.getText(comp.tree));
       }
     }
@@ -37,24 +36,41 @@ function imageCallbacks(comp, method) {
   visit(comp.method(method));
   return result;
 }
-const cases = [
-  ...imageCallbacks(bubble, 'userMessage').map(callback => ['sent attachment', callback]),
-  ...imageCallbacks(composer, 'attachmentStrip').map(callback => ['draft attachment', callback])
-];
-assert.ok(imageCallbacks(bubble, 'userMessage').length >= 2, 'Exercise single and multiple sent images');
-assert.equal(imageCallbacks(composer, 'attachmentStrip').length, 1, 'Exercise draft image thumbnails');
-const failures = [];
-for (const [label, callback] of cases) {
-  painted = {};
-  const view = { images: () => [image], preview: scope.exports.preview, previewing: false };
-  scope.exports.render = undefined;
+const imageCallbacks = (comp, method) => callbacks(comp, method, text => text.startsWith('Image.create(') && text.includes('Attachments.path'));
+function replay(callback, view) {
   vm.runInNewContext(compile(`exports.render = function(item) { (${callback})(1, true); };`), scope);
   scope.exports.render.call(view, image);
+}
+const sent = imageCallbacks(bubble, 'userMessage');
+assert.ok(sent.length >= 2, 'Exercise single and multiple sent images');
+const failures = [];
+for (const callback of sent) {
+  painted = {};
+  const view = { images: () => [image], preview: scope.exports.preview, previewing: false };
+  replay(callback, view);
   assert.equal(painted.create, 'file://' + attachmentPath(image));
   painted.onClick();
-  assert.equal(view.previewing, true, label + ' opens the preview');
+  assert.equal(view.previewing, true, 'Sent attachment opens the preview');
   assert.equal(view.previewPath, attachmentPath(image));
-  if (painted.objectFit !== 'contain') failures.push(label + ' crops ink with ' + painted.objectFit);
+  if (painted.objectFit !== 'contain') failures.push('Sent attachment crops ink with ' + painted.objectFit);
+}
+const thumbnails = imageCallbacks(composer, 'attachmentThumbnail');
+assert.equal(thumbnails.length, 1, 'Exercise the shared draft thumbnail');
+painted = {};
+replay(thumbnails[0], {});
+assert.equal(painted.create, 'file://' + attachmentPath(image));
+assert.equal(painted.objectFit, 'cover', 'Draft thumbnails fill the tile');
+Object.assign(scope, { Button: uiImage, ButtonType: {}, Color: {} });
+vm.runInNewContext(compile(`exports.previewDraft = function(item) ${composer.method('previewAttachment').body.getText(composer.tree)};`), scope);
+for (const method of ['singleAttachment', 'floatingAttachment']) {
+  const previews = callbacks(composer, method, text => text.startsWith('Button.onClick(') && text.includes('previewAttachment(item)'));
+  assert.equal(previews.length, 1, method + ' has a preview button');
+  const view = { previewAttachment: scope.exports.previewDraft, previewing: false };
+  painted = {};
+  replay(previews[0], view);
+  painted.onClick();
+  assert.equal(view.previewing, true);
+  assert.equal(view.previewPath, attachmentPath(image));
 }
 
 // API 26 removes an open cover when a closed sheet binds to the same native node.
@@ -73,7 +89,7 @@ const overlayUi = new Proxy({}, { get: (_, name) => (...args) => {
     else if (sheet?.owner === owner) sheet = undefined;
   }
 } });
-const overlays = { exports: {}, Radius: { sheet: {} }, Column: overlayUi, ModalTransition: {}, ResponseType: {} };
+const overlays = { exports: {}, Radius: { sheet: {} }, Column: overlayUi, ModalTransition: {}, ResponseType: {}, IS_PC: false };
 vm.runInNewContext(compile(`exports.bind = function() { ${bindings} };`), overlays);
 const view = { previewing: true, documentOpen: false, appearance: {}, actions() {},
   observeComponentCreation2(callback) { callback(++owner, false); } };
@@ -88,4 +104,4 @@ else {
   view.previewing = true; render(); assert.ok(cover, 'Image preview reopens after a document');
 }
 assert.deepEqual(failures, []);
-console.log('PASS full-ink thumbnails, image click paths, retained preview, back dismissal and document/image transitions');
+console.log('PASS full sent images, cropped draft thumbnails, both draft preview buttons and document/image transitions');

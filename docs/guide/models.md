@@ -20,9 +20,9 @@ Tinybot 自身不提供模型，它把对话内容发送给用户配置的模型
 
 预设只是填写入口，不代表账号已经开通对应模型。选择内置预设会带入默认地址与模型，自定义兼容服务保留当前草稿。可保存多份服务配置，每份独立管理协议、地址、密钥、模型列表、上下文窗口与启停状态。每段对话独立选择模型，也可设置新会话默认模型；删除或停用服务后会话会提示重新选择，不自动切换其他服务。
 
-平板上，对话输入区右下角的模型按钮会直接展开模型菜单：按服务分组列出可用模型，当前模型带勾选，模型较多时可在菜单内搜索；选择后立即生效并关闭菜单，草稿、附件和正在生成的回答都不受影响。推理强度仍在输入区的强度芯片中单独调整。手机上仍从标题栏进入“选择模型”页。
+平板与 2in1 上，对话输入区右下角的模型按钮会直接展开模型菜单：按服务分组列出可用模型，当前模型带勾选，模型较多时可在菜单内搜索；选择后立即生效并关闭菜单，草稿、附件和正在生成的回答都不受影响。推理强度仍在输入区的强度芯片中单独调整。手机上仍从标题栏进入“选择模型”页。
 
-四种流式协议对应不同的请求路径与认证方式：
+四种流式协议对应不同的请求路径与认证方式；图片生成另用四种独立协议，不参与对话流，见[图片生成服务](#图片生成服务)。
 
 | 协议 | 请求路径 | 认证 | 说明 |
 | --- | --- | --- | --- |
@@ -44,9 +44,30 @@ Tinybot 自身不提供模型，它把对话内容发送给用户配置的模型
 
 服务编辑页分“连接”“模型”“高级设置”三段。名称上限 80 字符；模型 ID 每行一个或用中英文逗号分隔，不能为空、不能重复、每个不超过 200 字符。
 
-**获取模型** 会把协议端点替换为服务基础地址下的 `/models` 并发送 GET：连接超时 15 秒、读取超时 30 秒、响应上限 1 MiB、不跟随重定向。只取 `data[].id`，去重后最多 200 个；HTTP 状态非 200、返回不是兼容列表或列表为空都会明确报错，此时仍可手动添加模型 ID。发现时若编辑页没有新密钥，会读取同凭据范围内的已保存密钥。
+**获取模型** 会把协议端点替换为服务基础地址下的 `/models` 并发送 GET：连接超时 15 秒、读取超时 30 秒、响应上限 1 MiB、不跟随重定向。只取 `data[].id`，去重后最多 200 个；HTTP 状态非 200、返回不是兼容列表或列表为空都会明确报错，此时仍可手动添加模型 ID。发现时若编辑页没有新密钥，会读取同凭据范围内的已保存密钥。图片协议不提供模型发现，需要手动填写图片模型 ID。
 
 **高级设置** 中可写服务级上下文窗口，留空表示按模型自动。单模型设置优先于服务设置。
+
+## 图片生成服务
+
+图片生成使用独立的协议与模型列表，不出现在会话的聊天模型选择里。有两种配置方式：
+
+1. **复用聊天服务**：在聊天服务的编辑页打开 **添加图片模型**，选择图片协议与图片模型 ID；图片服务地址留空时使用该服务的基础地址。这种配置复用聊天服务的 API Key，但要求图片服务地址与聊天服务同源——协议、主机和端口一致；不同源时保存失败，提示改用独立地址或单独的服务。
+2. **单独添加图片服务**：在 **添加模型服务** 的协议列表中选择 OpenAI Images、Gemini Image、Seedream 或 DashScope 图片协议，填写地址、密钥与图片模型 ID。这份配置只提供图片模型，不提供聊天模型。
+
+| 协议 | 请求路径 | 认证 | 备注 |
+| --- | --- | --- | --- |
+| `openai-images` | 基础地址 + `/images/generations`；带参考图时改为 `/images/edits`（multipart） | `Authorization: Bearer` | 支持透明背景；比例换算为 1024×1024、1536×1024、1024×1536 |
+| `gemini-images` | 基础地址 + `/interactions`（只填主机时补 `/v1`） | `x-goog-api-key` | 比例通过 `response_format.aspect_ratio` 传递 |
+| `seedream-images` | 基础地址 + `/images/generations` | `Authorization: Bearer` | 比例换算为 2048×2048、2496×1664、1664×2496 |
+| `dashscope-images` | 基础地址 + `/services/aigc/multimodal-generation/generation` | `Authorization: Bearer` | 比例写成 `1024*1024` 形式 |
+
+- 图片模型 ID 每行一个或用中英文逗号分隔，不能为空；每个 ID 不超过 200 字符。
+- 图片协议没有上下文窗口、推理强度与模型发现，编辑页不显示这些设置；地址后缀与所选协议不一致时保存失败。
+- 图片服务地址只影响图片请求，不会改变聊天服务地址与已有密钥；单独添加的图片服务使用自己的凭据别名。
+- 配置完成后，在 **设置 → 模型与服务 → 模型分工与能力 → 生成图片** 选择要用的图片模型。列表只包含已启用图片服务中的模型，可选项为“关闭图片生成”；未配置时显示“请先在模型服务中配置图片模型。”
+
+图片工具的参数、审批与保存位置见[生成与编辑图片](/guide/chat#生成与编辑图片)与[工具参考](/reference/tools#图片生成与检查)。
 
 ## 密钥与凭据
 
@@ -81,7 +102,7 @@ Tinybot 自身不提供模型，它把对话内容发送给用户配置的模型
 | 推理强度 | 默认 | 按协议与模型提供可选档位；“默认”是本地取值，不会发给服务 |
 | 上下文窗口 | 留空自动 | 覆盖服务级与模型默认值，占位文字显示自动取到的数值 |
 
-自动选择模型可分别指定快速任务、深度任务与图片理解使用哪份配置；记忆整理另有专用模型。路由只看是否有图片、问题是否超过 1000 字符或命中分析类关键词，未指定时回退当前会话选择，并且不改变会话的手动选择。
+自动选择模型可分别指定快速任务、深度任务与图片理解使用哪份配置；记忆整理另有专用模型。路由只看是否有图片、问题是否超过 1000 字符或命中分析类关键词，未指定时回退当前会话选择，并且不改变会话的手动选择。图片生成不参与自动路由，始终使用“生成图片”中选定的模型。
 
 ## 固定限制
 
@@ -98,6 +119,8 @@ Tinybot 自身不提供模型，它把对话内容发送给用户配置的模型
 | 单个工具参数 | 最多 96 KiB；代码沙箱工具另有自己的输入口径 |
 | 单步推理内容 | 最多 1 MiB |
 | 请求重试 | 仅在尚未派发工具时，对明确的临时传输错误或空闲超时重试 2 次，等待 1 秒、2 秒 |
+| 图片生成 | 单次一张，生成读取超时 180 秒、连接超时 15 秒；下载超时 60 秒，输入参考图与输出图片各不超过 16 MiB |
+| 图片检查 | JPEG 副本最长边缩到 1600 px；原图最多 8000 万像素 |
 | 推理强度发送位置 | Chat Completions 用 `reasoning_effort`；Responses 用 `reasoning.effort`；Anthropic 用 `output_config.effort`，部分模型另加 `thinking: adaptive`；Gemini 不提供推理强度档位 |
 
 ## 上下文统计与压缩
@@ -157,6 +180,13 @@ DeepSeek 官方
   服务地址  http://192.168.1.100:11434/v1
   模型      服务器上已安装且支持工具调用的模型
   密钥      打开“无需 API Key”
+
+OpenAI 图片（复用聊天服务）
+  服务      OpenAI
+  图片协议  openai-images
+  图片地址  留空，沿用 https://api.openai.com/v1
+  图片模型  gpt-image-1
+  密钥      与聊天服务相同
 ```
 
 | 场景 | 服务地址 | 协议 | 要点 |
@@ -167,6 +197,8 @@ DeepSeek 官方
 | OpenAI Responses | `https://api.openai.com/v1` | responses | 与 Chat Completions 共用同一密钥入口 |
 | Anthropic Messages | `https://api.anthropic.com/v1` | anthropic-messages | 模型 ID 需手动填写 |
 | Google Gemini | `https://generativelanguage.googleapis.com/v1beta` | gemini | 模型 ID 需手动填写；密钥走 `x-goog-api-key` |
+| 图片生成（复用聊天密钥） | 留空沿用聊天服务地址 | `openai-images`、`gemini-images`、`seedream-images`、`dashscope-images` | 必须与聊天服务同协议、同主机、同端口 |
+| 图片生成（独立服务） | 例如 `https://ark.cn-beijing.volces.com/api/v3` | 同上 | 使用独立地址与密钥，只提供图片模型 |
 
 Ollama 通过其 OpenAI 兼容接口连接服务器，不在手机内运行模型。`127.0.0.1` 指向手机本身，应填写手机能访问的实际服务器地址。使用受保护的代理时可关闭“无需 API Key”并填写密钥。
 
@@ -176,6 +208,10 @@ Ollama 通过其 OpenAI 兼容接口连接服务器，不在手机内运行模�
 | --- | --- |
 | 内置预设、协议与密钥入口 | `entry/src/main/ets/model/Provider.ets` |
 | 服务配置结构、校验与迁移 | `entry/src/main/ets/model/ProviderProfiles.ets` |
+| 图片服务选择与同源校验 | `entry/src/main/ets/model/ProviderProfiles.ets`、`entry/src/main/ets/model/ProviderEndpoint.ets` |
+| 图片协议请求编码与响应解析 | `entry/src/main/ets/services/ImageGenerationProtocol.ets` |
+| 图片生成与图片检查工具 | `entry/src/main/ets/services/ImageGenerationTools.ets`、`entry/src/main/ets/services/ImageInspectionTools.ets` |
+| 图片服务网络请求与下载 | `entry/src/main/ets/services/NativeImageGenerator.ets` |
 | 保存服务、密钥写入与清理 | `entry/src/main/ets/services/ProfileSettings.ets` |
 | Asset Store 读写 | `entry/src/main/ets/services/CredentialStore.ets` |
 | 请求地址、认证头与凭据范围 | `entry/src/main/ets/services/providers/WireProtocols.ets` |

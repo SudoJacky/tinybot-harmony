@@ -150,7 +150,11 @@ const PROTOCOL_NAMES: Record<string, string> = {
   'chat-completions': 'Chat Completions',
   'responses': 'OpenAI Responses',
   'anthropic-messages': 'Anthropic Messages',
-  'gemini': 'Google Gemini'
+  'gemini': 'Google Gemini',
+  'openai-images': 'OpenAI Images',
+  'gemini-images': 'Gemini Image',
+  'seedream-images': 'Seedream',
+  'dashscope-images': 'DashScope'
 };
 
 export function protocolName(protocol: string): string {

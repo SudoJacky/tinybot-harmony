@@ -38,6 +38,7 @@ function pad(value: number): string { return value < 10 ? '0' + value : value.to
 export struct WorkspacePanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop initialPath: string = '';
+  @Prop directImage: boolean = false;
   @Prop embedded: boolean = false;
   // The docked detail strip owns the title and close control; keep only the
   // file preview's own navigation inside the tab body.
@@ -100,7 +101,7 @@ export struct WorkspacePanel {
       this.directory = slash < 0 ? '' : this.initialPath.slice(0, slash);
       this.open({ name: this.initialPath.slice(slash + 1), kind: 'file' });
     }
-    this.refresh();
+    if (!this.directImage) { this.refresh(); }
   }
 
   private leave(action: () => void): void {
@@ -172,7 +173,7 @@ export struct WorkspacePanel {
     this.baseline = undefined; this.csv = []; this.selection = ''; this.officeSource = undefined;
     try {
       this.baseline = await this.files.baseline(path);
-      if (IMAGE_FILE.test(entry.name)) { this.imagePath = await this.files.checkedPath(path); }
+      if (this.directImage || IMAGE_FILE.test(path)) { this.imagePath = await this.files.checkedPath(path); }
       else if (office) {
         const bytes = await this.files.readJobInput(path, 20 * 1024 * 1024, new Cancellation());
         const hash = cryptoFramework.createMd('SHA256');
@@ -310,8 +311,11 @@ export struct WorkspacePanel {
     try {
       if (kind === 'delete') {
         await this.files.remove(path, version);
-        if (this.selected === path) { this.previewing = false; this.selected = ''; }
         this.toast(t("已删除"));
+        if (this.selected === path) {
+          if (this.directImage) { this.onClose(); }
+          else { this.previewing = false; this.selected = ''; }
+        }
         return;
       }
       const absolute = await this.files.checkedPath(path);
@@ -321,7 +325,7 @@ export struct WorkspacePanel {
       }
       if (kind === 'share') { await shareFile(context, absolute, this.fileName(path)); }
     } catch (error) { if (this.previewing) { this.previewError = this.mutationError(error as Error); } else { this.error = this.mutationError(error as Error); } }
-    finally { this.busy = false; await this.refresh(); }
+    finally { this.busy = false; if (!this.directImage) { await this.refresh(); } }
   }
 
   private async confirmDelete(path: string): Promise<void> {
@@ -340,6 +344,7 @@ export struct WorkspacePanel {
   }
 
   private closePreview(): void {
+    if (this.directImage) { this.requestClose(); return; }
     if (!this.dirty()) { this.previewing = false; this.editing = false; return; }
     this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t("放弃未保存的修改？"), message: this.fileName(this.selected),
       primaryButton: { value: t("继续编辑"), action: () => {} },
@@ -435,7 +440,8 @@ export struct WorkspacePanel {
       Row({ space: 4 }) {
         Button({ type: ButtonType.Circle }) {
           SymbolGlyph($r('sys.symbol.chevron_left')).fontSize(22).fontColor([$r('app.color.text_primary')])
-        }.fontFamily(this.appearance.fontFamily).width(44).height(44).backgroundColor(Color.Transparent).accessibilityText(t("返回")).onClick(() => this.closePreview())
+        }.id('workspace-preview-back').fontFamily(this.appearance.fontFamily).width(44).height(44).backgroundColor(Color.Transparent)
+          .accessibilityText(t("返回")).onClick(() => this.closePreview())
         Column({ space: 1 }) {
           Text(this.fileName(this.selected)).fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium).maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
@@ -597,7 +603,15 @@ export struct WorkspacePanel {
   }
 
   build() {
-    if (this.embedded) {
+    if (this.directImage) {
+      NavDestination() {
+        Stack() {
+          if (this.previewing) { this.preview() }
+          else { LoadingProgress().width(32).height(32).color(this.appearance.accent) }
+        }.width('100%').height('100%')
+      }.hideTitleBar(true).backgroundColor($r('app.color.page_background'))
+        .onBackPressed(() => this.previewing && this.busy)
+    } else if (this.embedded) {
       Stack() {
       Column() {
         if (!this.tabbed) {
