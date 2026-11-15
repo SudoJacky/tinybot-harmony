@@ -36,6 +36,9 @@ interface OfficePreviewLabels {
   placeholder: string;
   add: string;
   cancel: string;
+  previous: string;
+  next: string;
+  thumbnails: string;
 }
 
 @Component
@@ -77,7 +80,7 @@ export struct OfficePreview {
       }
       if (!this.mounted) { return; }
       const labels: OfficePreviewLabels = { annotate: t('批注'), placeholder: t('描述修改或提出问题…'),
-        add: t('添加批注'), cancel: t('取消') };
+        add: t('添加批注'), cancel: t('取消'), previous: t('上一页'), next: t('下一页'), thumbnails: t('幻灯片缩略图') };
       await this.controller.runJavaScript('window.renderOffice(' + JSON.stringify(this.source.format) + ',' + JSON.stringify(labels) + ')');
     } catch (error) { this.fail('load_failed', error as Error); }
   }
@@ -131,6 +134,8 @@ export struct OfficePreview {
       else {
         Stack() {
           Web({ src: HOST, controller: this.controller }).width('100%').height('100%')
+            .minFontSize(this.source.format === 'pptx' ? 1 : 8)
+            .minLogicalFontSize(this.source.format === 'pptx' ? 1 : 8)
             .javaScriptAccess(true).domStorageAccess(false).databaseAccess(false).fileAccess(false)
             .onlineImageAccess(false).blockNetwork(true).multiWindowAccess(false)
             .onLoadIntercept((event) => event.data.isMainFrame() && (this.loading || event.data.getRequestUrl() !== HOST))

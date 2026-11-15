@@ -23,16 +23,31 @@
     table { border-collapse: separate; border-spacing: 0; }
     .word table { width: 100%; }
     .word td { border: 1px solid #ccd4df; padding: 0 8px; }
-    .deck { display: flex; height: 100%; gap: 10px; padding: 8px; }
-    .slides { display: flex; flex: 0 0 clamp(64px, 18%, 142px); flex-direction: column; gap: 8px; overflow: auto; }
-    .slides button { padding: 3px; min-height: auto; font-size: 11px; }
-    .thumbnail { display: block; margin: 2px 0 0; box-shadow: none !important; }
-    .stage { display: grid; place-items: center; flex: 1; min-width: 0; }
-    .slide { position: relative; width: 100%; max-width: 1400px; overflow: hidden; container-type: inline-size; box-shadow: 0 1px 10px #14233c29; color: #263c51; }
+    .deck { display: grid; grid-template-columns: clamp(96px, 18%, 150px) minmax(0, 1fr); height: 100%; gap: 12px; padding: 8px; }
+    .slides { display: flex; flex-direction: column; gap: 6px; overflow: auto; min-height: 0; }
+    .slides button { flex: none; padding: 4px; font-size: 12px; }
+    .slide-frame { display: block; position: relative; overflow: hidden; }
+    .thumbnail { width: 100%; border-radius: 3px; background: #fff; }
+    .slide-number { display: block; padding: 2px 0 0; }
+    .stage { display: grid; place-items: center; min-height: 0; }
+    .stage .slide-frame { box-shadow: 0 2px 16px #14233c24; }
+    .slide { position: absolute; inset: 0 auto auto 0; overflow: hidden; container-type: inline-size; transform-origin: top left; color: #263c51; font: 16px system-ui, sans-serif; text-align: left; text-size-adjust: none; }
+    .slide-navigation { display: none; }
+    @media (max-width: 600px) {
+      .deck { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; gap: 8px; }
+      .deck.show-thumbnails { grid-template-rows: minmax(0, 1fr) auto auto; }
+      .stage { grid-row: 1; }
+      .slides { display: none; grid-row: 2; flex-direction: row; }
+      .show-thumbnails .slides { display: flex; }
+      .slides button { width: 106px; }
+      .slide-navigation { display: flex; justify-content: center; align-items: center; gap: 8px; }
+      .slide-navigation button { min-width: 44px; min-height: 44px; font-variant-numeric: tabular-nums; }
+      .slide-navigation button[aria-expanded] { min-width: 72px; }
+    }
     .shape { position: absolute; line-height: 1.16; }
     .shape img { width: 100%; height: 100%; object-fit: fill; }
     .shape svg { width: 100%; height: 100%; overflow: visible; display: block; }
-    .shape p { margin: 0 0 .9cqw; font-size: 2cqw; }
+    .shape p { margin: 0; }
     .annotating .stage .slide { cursor: crosshair; touch-action: none; user-select: none; }
     .annotating .shape:hover { outline: 2px dashed #3770e4; }
     .annotating .shape:focus-visible { outline: 2px dashed #3770e4; }
