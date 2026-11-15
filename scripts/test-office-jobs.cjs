@@ -204,6 +204,28 @@ async function main() {
   assert.equal(templated.result.edited.written, true);
   assert.match(parts(files.get('draft.pptx')).get('ppt/slides/slide2.xml'), /资本开支下降 25%/);
   failure(await run('return workspace.write("draft.pptx", office.pptx([{title:"Overwrite"}]), {replace:true});', {}), /before revising/);
+  const financialCheck = success(await run(`
+    const source = "https://www.sec.gov/Archives/edgar/data/1318605/000162828026003837/exhibit991.htm";
+    const f = office.financials({source, series:[{id:"fcf",label:"自由现金流",unit:"USD billion",
+      points:[7.561,4.357,3.581,6.220].map((value,i)=>({period:String(2022+i),value}))}]});
+    const claims = [{id:"fcf",period:"2025",kind:"value",expected:6.22},
+      {id:"fcf",period:"2025",kind:"yoy",expected:74,decimals:0},
+      {id:"fcf",period:"2025",kind:"record",expected:true}];
+    const wrong = f.verify(claims);
+    claims[2].expected = false;
+    return { rejected:wrong.failed, accepted:f.verify(claims), chart:f.chart(["fcf"],["2022","2025"]),
+      source:f.point("fcf","2025").source };
+  `, {})).result;
+  assert.equal(financialCheck.rejected[0].previousPeak.value, 7.561);
+  assert.equal(financialCheck.rejected[0].actual, false);
+  assert.deepEqual(financialCheck.accepted, { ok: true, checked: 3, failed: [] });
+  assert.deepEqual(financialCheck.chart.series[0].values, [7.561, 6.22]);
+  assert.match(financialCheck.source, /sec\.gov/);
+  failure(await run(`
+    const f = office.financials({source:"https://example.com/filing",series:[{id:"rev",label:"Revenue",unit:"USD",
+      points:[{period:"2022",value:10},{period:"2025",value:12}]}]});
+    return f.verify([{id:"rev",period:"2025",kind:"record",expected:true}]);
+  `, {}), /consecutive periods/);
   const get = (file, part) => parts(files.get(file)).get(part);
   assert.match(get('data.xlsx', 'xl/worksheets/sheet1.xml'), /<c r="B2" t="inlineStr">.*12.*<f>SUM\(B3:B3\)<\/f>/);
   assert.match(get('data-edited.xlsx', 'xl/worksheets/sheet1.xml'), /<c r="B2" t="n"><v>19<\/v>.*<c r="AA5" t="inlineStr">/);
