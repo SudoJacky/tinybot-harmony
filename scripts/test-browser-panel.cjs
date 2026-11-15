@@ -65,10 +65,11 @@ vm.runInNewContext(ts.transpileModule(`export function callbacks() {
 }
 export function back() ${back}
 export function navigate() ${navigate}`, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 } }).outputText,
-  { exports: compiled, t: value => value, validateWebAddress: value => value });
+  { exports: compiled, t: value => value, browserAddress: value => value });
 const browser = { url: 'https://example.com/', editingAddress: false, takeovers: 0, takeOver() { this.takeovers++; } };
 let navigated;
 const panel = { browser, address: '', addressDirty: false,
+  hasWebAddress() { return !browser.preview && /^https?:\/\//i.test(browser.url); },
   driver: { userNavigate(url) { navigated = url; }, pageEnd(url) { browser.url = url; } },
   getUIContext() { return { getFocusController() { return { clearFocus() { browser.editingAddress = false; } }; } }; } },
   events = compiled.callbacks.call(panel);

@@ -14,6 +14,8 @@ import { PreviewCaptureHost } from '../views/PreviewCaptureHost';
 import { BrowserPanel } from '../views/BrowserPanel';
 import { BrowserSession } from '../services/BrowserSession';
 import { AnnotationPage, browserAnnotationText } from '../model/BrowserAnnotation';
+import { BrowserStartPreview } from '../model/BrowserAddress';
+import { stepPreviews } from '../model/PublishedPreview';
 import { image } from '@kit.ImageKit';
 import { Attachments } from '../services/Attachments';
 import { MAX_MESSAGE_ATTACHMENTS } from '../model/Productivity';
@@ -660,6 +662,14 @@ struct Index {
   }
 
   private hasPreview(): boolean { return this.previewId.length > 0 && this.previewThreadId === this.app.active.id; }
+  private browserStartPreviews(): BrowserStartPreview[] {
+    if (!this.detailTabVisible('browser') || this.browser.url || this.browser.loading) { return []; }
+    const thread = this.app.active;
+    return thread.messages.slice(-12).flatMap((message) => message.stepViews.flatMap((step, index) =>
+      stepPreviews(message.id, step, index, thread.latestPreviewIds, true).filter((preview) => !preview.superseded)
+        .map((preview): BrowserStartPreview => ({ id: preview.id, title: preview.title, messageId: message.id }))))
+      .slice(-3).reverse();
+  }
   // The pane stays laid out through its exit animations: the reveal keeps an
   // empty launcher visible while it slides away, and the presence flags are
   // raised until AnimatedPage reports that an outgoing body is gone.
@@ -1997,6 +2007,7 @@ struct Index {
               BrowserPanel({ browser: this.browser, expanded: this.detailTabVisible('browser'), presented: this.browserPresent,
                 onPresent: () => { this.setBrowserExpanded(true); this.openDetailTab('browser'); },
                 tabbed: this.largeScreen || this.workbench().docked, threadId: this.app.active.id,
+                startPreviews: this.browserStartPreviews(), onOpenPreview: (messageId, previewId) => this.openPreview(messageId, previewId),
                 canAnnotate: this.app.canQueueInput && this.app.active.attachments.length < MAX_MESSAGE_ATTACHMENTS,
                 onAnnotation: (threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string) => this.addBrowserAnnotation(threadId, pixel, page, note),
                 onSettings: () => { this.hideBrowserTab(); this.openSettings(); },

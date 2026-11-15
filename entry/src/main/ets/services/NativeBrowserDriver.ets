@@ -30,6 +30,7 @@ export class NativeBrowserDriver implements BrowserDriver {
   private loading: boolean = false;
   private clearInitialHistory: boolean = false;
   private error: string = '';
+  private requestedUrl: string = '';
   private waiters: Set<() => void> = new Set<() => void>();
   private touchStart?: TouchObject;
   private touchMoved: boolean = false;
@@ -40,13 +41,31 @@ export class NativeBrowserDriver implements BrowserDriver {
     this.browser = browser; this.saveFrame = saveFrame; this.viewportWidth = viewportWidth;
     this.previewRuntime = new PreviewBrowserRuntime(() => this.browser.documentChanged());
   }
-  pageBegin(): void { this.browser.documentChanged(); this.browser.clearActionFeedback(); this.loading = true; this.error = ''; this.browser.error = ''; }
+  private startLoading(url: string = ''): void {
+    this.requestedUrl = url;
+    this.loading = true; this.error = '';
+    this.browser.loading = true; this.browser.progress = 0; this.browser.loadFailed = false; this.browser.error = '';
+  }
+  pageBegin(url: string): void {
+    this.browser.documentChanged(); this.browser.clearActionFeedback();
+    // The placeholder Web is also mounted when an agent has requested its first real URL.
+    if (url === 'about:blank') { return; }
+    // ArkWeb may report a main-document error before its page-begin callback.
+    if (url === this.requestedUrl && (this.loading || this.browser.loadFailed)) { return; }
+    this.startLoading(url);
+  }
+  progress(value: number): void {
+    if (this.browser.loading) { this.browser.progress = Math.min(99, Math.max(0, value)); }
+  }
   setFeedbackVisible(visible: boolean): void {
     this.feedbackVisible = visible;
     if (!visible) { this.browser.clearActionFeedback(); }
   }
   pageEnd(url: string): void {
+    if (url === 'about:blank' && this.requestedUrl && this.loading) { return; }
     this.initialized = true; this.loading = false;
+    this.browser.loading = false;
+    if (this.browser.loadFailed) { this.wake(); return; }
     if (this.clearInitialHistory && url !== 'about:blank') { this.controller.clearHistory(); this.clearInitialHistory = false; }
     this.browser.pageChanged(url, this.controller.getTitle()); this.historyChanged(); this.wake();
   }
@@ -74,10 +93,12 @@ export class NativeBrowserDriver implements BrowserDriver {
       if (event.touches.length <= 1) { this.touchStart = undefined; }
     } else if (event.type === TouchType.Cancel) { this.touchStart = undefined; }
   }
-  failed(error: Error | string): void {
+  failed(error: Error | string, url: string = ''): void {
+    if (url && url !== 'about:blank') { this.requestedUrl = url; }
     this.browser.clearActionFeedback();
     this.error = typeof error === 'string' ? error : error.message;
-    this.loading = false; this.browser.report(error); this.wake();
+    this.loading = false; this.browser.loading = false; this.browser.loadFailed = true;
+    this.browser.report(error); this.wake();
   }
   private wake(): void { for (const finish of Array.from(this.waiters)) { finish(); } }
   private async ready(): Promise<void> {
@@ -105,7 +126,7 @@ export class NativeBrowserDriver implements BrowserDriver {
       this.webController = new webview.WebviewController(); this.initialized = false; this.loading = false;
       this.browser.invalidateObservation();
     }
-    await this.ready();
+    if (!this.initialized) { await this.ready(); }
     this.navigate(url);
     await this.ready();
   }
@@ -113,6 +134,8 @@ export class NativeBrowserDriver implements BrowserDriver {
     const document = parseUiSurface(preview.content, '0');
     const nodes = document.nodes.filter((item) => item.kind === 'web');
     if (nodes.length !== 1) { throw new ToolFailure('PREVIEW_INVALID', 'Preview browser requires one web surface.', 'publish_preview'); }
+    this.loading = false; this.browser.loading = false; this.browser.loadFailed = false;
+    this.error = ''; this.browser.error = '';
     this.previewRuntime.detach(); this.previewRuntime.errors = [];
     this.browser.invalidateObservation(); this.browser.previewSpec = nodes[0].data || '';
     this.browser.preview = preview; this.browser.previewInstance++;
@@ -145,7 +168,7 @@ export class NativeBrowserDriver implements BrowserDriver {
   }
   private navigate(url: string): void {
     this.clearInitialHistory = this.clearInitialHistory || this.controller.getUrl() === 'about:blank';
-    this.loading = true; this.error = ''; this.controller.loadUrl(url);
+    this.startLoading(url); this.controller.loadUrl(url);
   }
   async capture(): Promise<NativeBrowserCapture> {
     if (this.browser.preview) {
@@ -232,7 +255,7 @@ export class NativeBrowserDriver implements BrowserDriver {
       if (action.action === 'back' && !this.controller.accessBackward() || action.action === 'forward' && !this.controller.accessForward()) {
         throw new ToolFailure('BROWSER_HISTORY_EMPTY', 'No page in this history direction.', 'inspect_browser');
       }
-      this.loading = true;
+      this.startLoading(this.browser.url);
       if (action.action === 'back') { this.controller.backward(); }
       else if (action.action === 'forward') { this.controller.forward(); }
       else { this.controller.refresh(); }
@@ -269,6 +292,7 @@ export class NativeBrowserDriver implements BrowserDriver {
     this.previewRuntime.detach(); this.browser.preview = undefined; this.browser.previewSpec = '';
     this.browser.clearActionFeedback();
     this.initialized = false; this.loading = false; this.clearInitialHistory = false; this.error = ''; this.wake();
+    this.requestedUrl = ''; this.browser.loading = false; this.browser.progress = 0; this.browser.loadFailed = false;
     this.touchStart = undefined;
     this.browser.canGoBack = false; this.browser.canGoForward = false;
     // Removing the mounted Web closes the renderer. Never run another page action here.
@@ -281,16 +305,26 @@ export class NativeBrowserDriver implements BrowserDriver {
   userBack(): boolean {
     if (this.browser.preview) { return false; }
     if (!this.controller.accessBackward()) { return false; }
-    this.browser.takeOver(); this.loading = true; this.error = ''; this.controller.backward(); return true;
+    this.browser.takeOver(); this.startLoading(this.browser.url); this.controller.backward(); return true;
   }
   userForward(): boolean {
     if (this.browser.preview) { return false; }
     if (!this.controller.accessForward()) { return false; }
-    this.browser.takeOver(); this.loading = true; this.error = ''; this.controller.forward(); return true;
+    this.browser.takeOver(); this.startLoading(this.browser.url); this.controller.forward(); return true;
   }
   userReload(): void {
     this.browser.takeOver();
     if (this.browser.preview) { this.openPreview(this.browser.preview).catch((error: Error) => this.failed(error)); return; }
-    this.loading = true; this.error = ''; this.controller.refresh();
+    if (this.browser.loadFailed && this.requestedUrl) { this.navigate(this.requestedUrl); return; }
+    if (!this.browser.url) { return; }
+    this.startLoading(this.browser.url); this.controller.refresh();
+  }
+  userStop(): void {
+    if (!this.loading || this.browser.preview) { return; }
+    this.browser.takeOver(); this.browser.documentChanged();
+    this.controller.stop();
+    this.loading = false; this.browser.loading = false;
+    this.browser.pageChanged(this.controller.getUrl(), this.controller.getTitle());
+    this.historyChanged(); this.wake();
   }
 }

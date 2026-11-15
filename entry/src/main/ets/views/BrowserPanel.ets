@@ -5,7 +5,10 @@ import { BrowserAnnotation, AnnotationPage } from '../model/BrowserAnnotation';
 import { BrowserAnnotationBoard } from './BrowserAnnotationBoard';
 import { image } from '@kit.ImageKit';
 import { validateWebAddress } from '../services/WebTools';
-import { Btn, Motion, Space } from '../common/Theme';
+import { browserAddress, BrowserStartPreview } from '../model/BrowserAddress';
+import { Btn, Font, Motion, Radius, Space } from '../common/Theme';
+import { common } from '@kit.AbilityKit';
+import { pasteboard } from '@kit.BasicServicesKit';
 import { IconButton } from '../common/Widgets';
 import { t } from '../model/I18n';
 import { KeyCode } from '@kit.InputKit';
@@ -31,16 +34,17 @@ struct BrowserPreviewPage {
 @Component
 export struct BrowserPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
-  @ObjectLink browser: BrowserSession;
+  @ObjectLink @Watch('resetClosedAddress') browser: BrowserSession;
   @StorageProp('tinybot.foreground') @Watch('syncBrowserVisibility') private foreground: boolean = true;
   @Prop @Watch('syncBrowserVisibility') expanded: boolean = false;
   @Prop presented: boolean = false;
   @Prop threadId: string = '';
   @Prop canAnnotate: boolean = false;
-  // The docked tab strip owns the page title, collapse and close controls; the
-  // browser keeps its address and navigation rows plus its settings shortcut.
+  // The docked tab strip owns the title and window controls.
   @Prop tabbed: boolean = false;
+  @Prop startPreviews: BrowserStartPreview[] = [];
   onAnnotation: (threadId: string, pixel: image.PixelMap, page: AnnotationPage, note: string) => Promise<void> = async () => {};
+  onOpenPreview: (messageId: string, previewId: string) => void = () => {};
   onDismiss: () => void = () => {};
   onClose: () => void = () => {};
   onSettings: () => void = () => {};
@@ -62,6 +66,9 @@ export struct BrowserPanel {
     this.browser.attach(this.driver, this.onPresent); this.syncBrowserVisibility();
   }
   aboutToDisappear(): void { this.mounted = false; if (this.driver) { this.browser.detach(this.driver); } }
+  private resetClosedAddress(): void {
+    if (!this.browser.open && this.addressDirty) { this.addressDirty = false; this.address = ''; }
+  }
   private syncBrowserVisibility(): void {
     this.driver?.setFeedbackVisible(this.expanded); this.browser.setPresentation(this.expanded, this.foreground);
   }
@@ -101,69 +108,198 @@ export struct BrowserPanel {
   }
   private navigate(): void {
     try {
-      this.driver?.userNavigate(validateWebAddress((this.browser.editingAddress || this.addressDirty ? this.address : this.browser.url).trim()));
+      const url = browserAddress(this.addressDirty || this.browser.editingAddress ? this.address : this.browser.url);
+      this.address = url; this.addressDirty = true;
       this.getUIContext().getFocusController().clearFocus();
+      this.driver?.userNavigate(url);
     }
     catch (error) { this.browser.report(error as Error); }
   }
+  private hasWebAddress(): boolean { return !this.browser.preview && /^https?:\/\//i.test(this.browser.url); }
+
+  private async useLink(external: boolean): Promise<void> {
+    if (!this.hasWebAddress()) { return; }
+    try {
+      const url = validateWebAddress(this.browser.url);
+      if (external) {
+        await (this.getUIContext().getHostContext() as common.UIAbilityContext)
+          .startAbility({ action: 'ohos.want.action.viewData', uri: url });
+      } else {
+        await pasteboard.getSystemPasteboard().setData(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, url));
+        this.getUIContext().getPromptAction().showToast({ message: t('已复制链接') });
+      }
+    } catch (error) { this.browser.report(error as Error); }
+  }
+
+  @Builder
+  browserMenu() {
+    Menu() {
+      MenuItem({ content: t('下一页') }).enabled(this.browser.canGoForward).onClick(() => this.driver?.userForward())
+      MenuItem({ content: t('复制链接') }).enabled(this.hasWebAddress()).onClick(() => this.useLink(false))
+      MenuItem({ content: t('在系统浏览器中打开') }).enabled(this.hasWebAddress()).onClick(() => this.useLink(true))
+      MenuItem({ content: t('设置') }).onClick(this.onSettings)
+    }
+  }
+
+  @Builder
+  moreButton(size: number) {
+    Button({ type: ButtonType.Circle }) {
+      SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(19).fontColor([$r('app.color.text_primary')])
+    }.id('browser-more').width(size).height(size).padding(0).backgroundColor(Color.Transparent)
+      .accessibilityText(t('更多'))
+      .bindMenu(this.browserMenu, { systemMaterial: this.appearance.menu, mask: false })
+  }
+
+  @Builder
+  controlButton() {
+    if (this.browser.owner === 'agent') {
+      Button(t('接管')).fontFamily(this.appearance.fontFamily).id('browser-takeover')
+        .accessibilityText(t('接管浏览器')).attributeModifier(Btn.tonalSmall).onClick(() => this.browser.takeOver())
+    } else if (this.browser.hasTask) {
+      Button(t('交还')).fontFamily(this.appearance.fontFamily).id('browser-handoff')
+        .accessibilityText(t('交还给 Tinybot')).attributeModifier(Btn.primarySmall)
+        .onClick(() => { this.getUIContext().getFocusController().clearFocus(); this.browser.handoff(); })
+    }
+  }
+
+  @Builder
+  phoneHeader() {
+    Row({ space: 4 }) {
+      IconButton({ icon: $r('sys.symbol.chevron_down'), label: t('收起浏览器'), compId: 'browser-collapse',
+        iconSize: 18, fill: '#00000000', onTap: this.onDismiss })
+      Column({ space: 1 }) {
+        Text(this.browser.url && this.browser.title ? this.browser.title : t('应用内浏览器'))
+          .fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontWeight(FontWeight.Medium)
+          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
+        if (this.browser.hasTask) {
+          Text(this.browser.owner === 'agent' ? t('Tinybot 正在使用浏览器') : t('浏览器由你控制 · 任务已暂停'))
+            .fontFamily(this.appearance.fontFamily).fontSize(11).maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_secondary'))
+        }
+      }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+      this.controlButton()
+      this.moreButton(44)
+      IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭浏览器'), compId: 'browser-close',
+        iconSize: 18, fill: '#00000000', onTap: this.onClose })
+    }.width('100%').height(48).padding({ left: 4, right: 4 }).enabled(!this.capturing)
+  }
+
+  @Builder
+  addressField() {
+    Row() {
+      TextInput({ text: this.browser.editingAddress || this.addressDirty ? this.address : this.hasWebAddress() ? this.browser.url : '',
+        placeholder: t('网页地址') }).fontFamily(this.appearance.fontFamily)
+        .id('browser-address').layoutWeight(1).height(36).fontSize(Font.small).backgroundColor(Color.Transparent)
+        .padding({ left: 10, right: 4 }).type(InputType.URL).enterKeyType(EnterKeyType.Go)
+        .onFocus(() => {
+          if (!this.addressDirty) { this.address = this.hasWebAddress() ? this.browser.url : ''; }
+          this.browser.editingAddress = true;
+        })
+        .onBlur(() => { this.browser.editingAddress = false; })
+        .onChange((value: string) => {
+          if (this.browser.editingAddress && value !== this.address) { this.browser.takeOver(); this.addressDirty = true; }
+          this.address = value;
+        })
+        .onSubmit(() => this.navigate())
+      if (this.addressDirty && this.address.trim().length > 0) {
+        IconButton({ icon: $r('sys.symbol.chevron_right'), label: t('打开'), compId: 'browser-go', diameter: 36,
+          fill: '#00000000', tint: this.appearance.accent, iconSize: 15, onTap: () => this.navigate() })
+      }
+    }.layoutWeight(1).backgroundColor($r('app.color.surface_variant')).borderRadius(Radius.lg)
+  }
+
+  @Builder
+  navigationToolbar() {
+    Row({ space: 2 }) {
+      IconButton({ icon: $r('sys.symbol.chevron_left'), label: t('上一页'), compId: 'browser-back',
+        diameter: this.tabbed ? 36 : 44, iconSize: 18, fill: '#00000000', disabled: !this.browser.canGoBack,
+        onTap: () => this.driver?.userBack() })
+      if (this.tabbed && this.webWidth >= 360) {
+        IconButton({ icon: $r('sys.symbol.chevron_right'), label: t('下一页'), compId: 'browser-forward',
+          diameter: 36, iconSize: 18, fill: '#00000000', disabled: !this.browser.canGoForward,
+          onTap: () => this.driver?.userForward() })
+      }
+      IconButton({ icon: this.browser.loading ? $r('sys.symbol.xmark') : $r('sys.symbol.arrow_clockwise'),
+        label: this.browser.loading ? t('停止加载') : t('重新加载'), compId: 'browser-reload',
+        diameter: this.tabbed ? 36 : 44, iconSize: 18, fill: '#00000000',
+        disabled: !this.browser.loading && !this.browser.url && !this.browser.loadFailed,
+        onTap: () => {
+          if (this.browser.loading) { this.driver?.userStop(); } else { this.driver?.userReload(); }
+        } })
+      this.addressField()
+      IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('批注当前页面'), compId: 'browser-annotate',
+        diameter: this.tabbed ? 36 : 44, iconSize: 18, fill: '#00000000',
+        disabled: !this.canAnnotate || this.browser.loading || this.browser.loadFailed || !this.browser.url,
+        onTap: () => this.annotate() })
+      if (this.tabbed) { this.moreButton(36) }
+    }.width('100%').height(this.tabbed ? 46 : 48).padding({ left: 4, right: 6 }).enabled(!this.capturing)
+  }
+
+  @Builder
+  startPage() {
+    Scroll() {
+      Column({ space: Space.md }) {
+        SymbolGlyph($r('sys.symbol.connection')).fontSize(30).fontColor([this.appearance.accent])
+          .backgroundColor(this.appearance.accentTint).borderRadius(Radius.lg).padding(14)
+        Text(t('打开网页或预览')).fontFamily(this.appearance.fontFamily).fontSize(20)
+          .fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
+        Text(t('在地址栏输入网址，或打开本会话已发布的预览。'))
+          .fontFamily(this.appearance.fontFamily).fontSize(Font.small).textAlign(TextAlign.Center)
+          .fontColor($r('app.color.text_secondary'))
+        Button(t('输入网址')).id('browser-start-address').attributeModifier(Btn.tonal)
+          .onClick(() => this.getUIContext().getFocusController().requestFocus('browser-address'))
+        if (this.startPreviews.length) {
+          Text(t('本会话的预览')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
+            .fontColor($r('app.color.text_secondary')).width('100%').margin({ top: Space.lg })
+          ForEach(this.startPreviews, (preview: BrowserStartPreview) => {
+            Button(preview.title).fontFamily(this.appearance.fontFamily).attributeModifier(Btn.tonal)
+              .width('100%').id('browser-start-preview-' + preview.id)
+              .onClick(() => this.onOpenPreview(preview.messageId, preview.id))
+          }, (preview: BrowserStartPreview) => preview.id)
+        }
+      }.width('100%').constraintSize({ maxWidth: 460 }).padding({ left: 20, right: 20, top: 52, bottom: 24 })
+    }.id('browser-start').width('100%').height('100%').align(Alignment.Top).backgroundColor($r('app.color.surface'))
+  }
+
+  @Builder
+  failurePage() {
+    Column({ space: Space.md }) {
+      SymbolGlyph($r('sys.symbol.arrow_clockwise')).fontSize(26).fontColor([this.appearance.accent])
+      Text(t('网页加载失败')).fontFamily(this.appearance.fontFamily).fontSize(Font.title).fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.text_primary'))
+      Text(this.browser.error).fontFamily(this.appearance.fontFamily).fontSize(Font.small)
+        .textAlign(TextAlign.Center).fontColor($r('app.color.text_secondary')).copyOption(CopyOptions.LocalDevice)
+      Button(t('重试')).id('browser-retry').attributeModifier(Btn.primary).onClick(() => this.driver?.userReload())
+    }.width('100%').height('100%').justifyContent(FlexAlign.Center).padding(Space.xl)
+      .backgroundColor($r('app.color.surface'))
+  }
   build() {
-    Column({ space: Space.sm }) {
+    Column() {
       if ((this.browser.open || this.presented) && this.driver) {
-        if (!this.tabbed) {
-        Row({ space: Space.sm }) {
-          IconButton({ icon: $r('sys.symbol.chevron_down'), label: t('收起浏览器'), compId: 'browser-collapse', onTap: this.onDismiss })
-          Column({ space: 2 }) {
-            Text(this.browser.title || t('应用内浏览器')).fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium).maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
-            Text(this.browser.owner === 'agent' ? t('Tinybot 正在使用浏览器') : this.browser.hasTask ? t('浏览器由你控制 · 任务已暂停') : t('浏览器由你控制')).fontFamily(this.appearance.fontFamily)
-              .fontSize(12).fontColor($r('app.color.text_secondary'))
-          }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-          IconButton({ icon: $r('sys.symbol.gearshape'), label: t('设置'), compId: 'browser-settings', onTap: this.onSettings })
-          IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭浏览器'), compId: 'browser-close',
-            onTap: this.onClose })
-        }.width('100%').height(56).padding({ left: Space.sm, right: Space.sm }).enabled(!this.capturing)
-          .border({ width: { bottom: 0.5 }, color: $r('app.color.divider') })
+        if (!this.tabbed) { this.phoneHeader() }
+        this.navigationToolbar()
+        if (this.tabbed && this.browser.hasTask) {
+          Row({ space: Space.sm }) {
+            Text(this.browser.owner === 'agent' ? t('Tinybot 正在使用浏览器') : t('浏览器由你控制 · 任务已暂停'))
+              .fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+              .maxLines(2).layoutWeight(1)
+            this.controlButton()
+          }.width('100%').padding({ left: Space.md, right: Space.md, bottom: Space.xs }).enabled(!this.capturing)
         }
-        Row({ space: Space.sm }) {
-          TextInput({ text: this.browser.editingAddress || this.addressDirty ? this.address : this.browser.url, placeholder: t('网页地址') }).fontFamily(this.appearance.fontFamily)
-            .id('browser-address').layoutWeight(1).type(InputType.URL).enterKeyType(EnterKeyType.Go)
-            .onFocus(() => { if (!this.addressDirty) { this.address = this.browser.url; } this.browser.editingAddress = true; })
-            .onBlur(() => { this.browser.editingAddress = false; })
-            .onChange((value: string) => {
-              if (this.browser.editingAddress && value !== this.address) { this.browser.takeOver(); this.addressDirty = true; }
-              this.address = value;
-            })
-            .onSubmit(() => this.navigate())
-          Button(t('打开')).fontFamily(this.appearance.fontFamily).id('browser-go').attributeModifier(Btn.textSmall).onClick(() => this.navigate())
-        }.padding({ left: Space.md, right: Space.md, top: this.tabbed ? Space.sm : 0 }).width('100%').enabled(!this.capturing)
-        Row({ space: Space.sm }) {
-          IconButton({ icon: $r('sys.symbol.chevron_left'), label: t('上一页'), compId: 'browser-back',
-            disabled: !this.browser.canGoBack, onTap: () => this.driver?.userBack() })
-          IconButton({ icon: $r('sys.symbol.chevron_right'), label: t('下一页'), compId: 'browser-forward',
-            disabled: !this.browser.canGoForward, onTap: () => this.driver?.userForward() })
-          IconButton({ icon: $r('sys.symbol.arrow_clockwise'), label: t('重新加载'), compId: 'browser-reload', onTap: () => this.driver?.userReload() })
-          if (this.tabbed) {
-            IconButton({ icon: $r('sys.symbol.gearshape'), label: t('设置'), compId: 'browser-settings-tabbed',
-              onTap: this.onSettings })
-          }
-          Blank()
-          IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: this.capturing ? t('截图中…') : t('批注当前页面'), compId: 'browser-annotate',
-            disabled: !this.canAnnotate || this.capturing || this.browser.url.length === 0, onTap: () => this.annotate() })
-          if (this.browser.owner === 'agent') {
-            Button(t('接管浏览器')).fontFamily(this.appearance.fontFamily).id('browser-takeover').attributeModifier(Btn.tonal).onClick(() => this.browser.takeOver())
-          }
-          if (this.browser.owner === 'user' && this.browser.hasTask) {
-            Button(t('交还给 Tinybot')).fontFamily(this.appearance.fontFamily).id('browser-handoff').attributeModifier(Btn.primarySmall)
-              .onClick(() => { this.getUIContext().getFocusController().clearFocus(); this.browser.handoff(); })
-          }
-        }.width('100%').padding({ left: Space.sm, right: Space.md }).enabled(!this.capturing)
         if (this.browser.handoffReason) {
-          Text(this.browser.handoffReason).fontFamily(this.appearance.fontFamily).id('browser-handoff-reason').fontSize(13).fontColor($r('app.color.text_secondary'))
-            .width('100%').padding({ left: Space.md, right: Space.md })
+          Text(this.browser.handoffReason).fontFamily(this.appearance.fontFamily).id('browser-handoff-reason').fontSize(Font.caption)
+            .fontColor($r('app.color.text_secondary')).width('100%').padding({ left: Space.md, right: Space.md, bottom: Space.sm })
         }
-        if (this.browser.error) {
-          Text(this.browser.error).fontFamily(this.appearance.fontFamily).id('browser-error').fontSize(13).fontColor($r('app.color.danger')).copyOption(CopyOptions.LocalDevice)
-            .width('100%').padding({ left: Space.md, right: Space.md })
+        if (this.browser.error && !this.browser.loadFailed) {
+          Text(this.browser.error).fontFamily(this.appearance.fontFamily).id('browser-error').fontSize(Font.caption)
+            .fontColor($r('app.color.danger')).copyOption(CopyOptions.LocalDevice)
+            .width('100%').padding({ left: Space.md, right: Space.md, bottom: Space.sm })
+        }
+        if (this.browser.loading) {
+          Progress({ value: this.browser.progress, total: 100, type: ProgressType.Linear }).id('browser-progress')
+            .width('100%').color(this.appearance.accent).style({ strokeWidth: 2 }).accessibilityText(t('正在加载网页'))
+        } else {
+          Divider().strokeWidth(0.5).color($r('app.color.divider'))
         }
         Stack({ alignContent: Alignment.TopStart }) {
         if (this.browser.preview) {
@@ -179,17 +315,26 @@ export struct BrowserPanel {
           .enabled(!this.capturing)
           .id('agent-browser-web').width('100%').height('100%').javaScriptAccess(true).domStorageAccess(true)
           .fileAccess(false).multiWindowAccess(false).blockNetwork(false)
-          .onPageBegin(() => this.driver?.pageBegin())
-          .onPageEnd((event) => { this.driver?.pageEnd(event.url); if (!this.browser.editingAddress) { this.addressDirty = false; } })
+          .onPageBegin((event) => this.driver?.pageBegin(event.url))
+          .onProgressChange((event) => this.driver?.progress(event.newProgress))
+          .onPageEnd((event) => { this.driver?.pageEnd(event.url); if (!this.browser.editingAddress && !this.browser.loadFailed && event.url !== 'about:blank') { this.addressDirty = false; } })
           .onNavigationEntryCommitted(() => this.driver?.historyChanged())
           .onLoadIntercept((event) => {
             const url = event.data.getRequestUrl();
             if (url === 'about:blank') { return false; }
             try { validateWebAddress(url); return false; }
-            catch (_) { this.driver?.failed(t('此浏览器仅支持 HTTP 和 HTTPS 网页。')); return true; }
+            catch (_) { this.browser.report(t('此浏览器仅支持 HTTP 和 HTTPS 网页。')); return true; }
           })
-          .onErrorReceive((event) => { if (event.request.isMainFrame()) { this.driver?.failed(t('浏览器加载失败（{0}）。', [event.error.getErrorCode()])); } })
-          .onHttpErrorReceive((event) => { if (event.request.isMainFrame()) { this.browser.report(t('浏览器返回 HTTP {0}。', [event.response.getResponseCode()])); } })
+          .onErrorReceive((event) => {
+            if (event.request.isMainFrame()) {
+              this.driver?.failed(t('浏览器加载失败（{0}）。', [event.error.getErrorCode()]), event.request.getRequestUrl());
+            }
+          })
+          .onHttpErrorReceive((event) => {
+            if (event.request.isMainFrame()) {
+              this.driver?.failed(t('浏览器返回 HTTP {0}。', [event.response.getResponseCode()]), event.request.getRequestUrl());
+            }
+          })
           .onRenderExited(() => { this.driver?.failed(t('浏览器渲染进程已退出，请关闭后重新打开。')); this.browser.close(); })
           .onPermissionRequest((event) => { event.request.deny(); this.browser.report(t('浏览器未授权摄像头、麦克风或位置访问。')); })
           .onTouch((event) => this.driver?.userTouch(event))
@@ -203,6 +348,11 @@ export struct BrowserPanel {
             return false;
           })
         }
+          if (this.browser.loadFailed) {
+            this.failurePage()
+          } else if (!this.browser.preview && !this.browser.url && !this.browser.loading) {
+            this.startPage()
+          }
           ForEach(this.expanded && this.browser.owner === 'agent' && this.browser.actionFeedback ? [this.browser.actionFeedback] : [],
             (feedback: BrowserActionFeedback) => {
               Stack() {
