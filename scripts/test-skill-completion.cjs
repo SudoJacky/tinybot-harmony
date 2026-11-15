@@ -50,7 +50,7 @@ const viewModel = viewTree.statements.find(node => ts.isClassDeclaration(node) &
 const use = viewModel.members.find(node => node.name?.getText(viewTree) === 'useSkill').getText(viewTree);
 const frames = [], focus = [], caret = [], nodes = []; let active;
 const scope = { exports: {}, skillQuery, skillDraft, matchingSkills, skillDisplayName, builtinSkillInfo, t: value => value,
-  FrameCallback: class {}, HorizontalAlign: {}, TextOverflow: {}, BarState: {}, Radius: {}, Font: {} };
+  FrameCallback: class {}, HorizontalAlign: {}, TextOverflow: {}, BarState: {}, Radius: {}, Font: {}, Color: { Transparent: 'transparent' } };
 for (const kind of ['Column', 'Row', 'Text', 'SymbolGlyph', 'Scroll', 'If', 'ForEach']) scope[kind] = new Proxy({}, {
   get: (_, name) => value => { if (['id', 'onClick'].includes(name)) active[name] = value; }
 });

@@ -398,13 +398,13 @@ const Header = probe('pages/Index', 'Index', ['phoneHeader'], {
   systemMaterialAttribute() {}, t: value => value
 });
 const header = Object.assign(new Header(), { appearance: {}, moreMenu() {}, drawerReveal: 0,
-  app: { ready: true, active: { messages: [] } },
+  app: { ready: true, active: { messages: [] } }, browser: { permissionSaving: false },
   observeComponentCreation2(callback) { callback(1, true); }, ifElseBranchUpdateFunction(_, builder) { builder(); }
 });
-header.phoneHeader(); assert.deepEqual(headerControls.splice(0), ['open-history']);
+header.phoneHeader(); assert.deepEqual(headerControls.splice(0), ['open-history', 'empty-open-browser']);
 header.app.active.messages.push({ role: 'user' });
 header.phoneHeader(); assert.deepEqual(headerControls, ['open-history', 'chat-more', 'new-chat']);
-console.log('PASS phone header renders history only until the first message');
+console.log('PASS empty phone header shows history and browser, then switches to conversation actions');
 
 // The tablet plus opens the add menu in place, while the phone opens a sheet.
 const addAt = chatSource.indexOf("'add-attachment'");
