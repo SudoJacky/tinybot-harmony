@@ -1,6 +1,7 @@
 import { CONTENT_TYPES, OFFICE_REL, PACKAGE_REL, children, elements, openPackage,
   part, related, relPath, root, saveXml, xml, xmlText, zip } from './package.mjs';
 import { replaceUnique } from './replace-text.mjs';
+import { layoutSlide } from './slide-layouts.mjs';
 import { deckTheme, DRAWING, inspectSlideElements, PRESENTATION as NS, renderSlideElements, setDeckTheme,
   slideRelationships, updateSlideElement } from './slide-elements.mjs';
 
@@ -42,7 +43,12 @@ export function pptx(input) {
   const slides = rich ? input?.slides : input;
   if (!Array.isArray(slides) || !slides.length || slides.length > 100) throw new Error('Expected 1–100 slides.');
   const { entries, main } = openPackage(Uint8Array.fromBase64(__SLIDE_TEMPLATE__), 'pptx');
-  if (rich) setDeckTheme(entries, input.theme);
+  if (rich) {
+    setDeckTheme(entries, input.theme);
+    if (slides.some((slide) => slide?.layout) && !input.theme?.fontFace) {
+      setDeckTheme(entries, { fontFace: 'Microsoft YaHei' });
+    }
+  }
   const presentation = xml(entries, main);
   const ids = children(root(presentation, NS, 'presentation'), NS, 'sldIdLst')[0];
   ids.removeChild(children(ids, NS, 'sldId')[0]);
@@ -71,7 +77,7 @@ export function pptx(input) {
     const name = 'slides/slide' + number + '.xml';
     const path = 'ppt/' + name;
     const relations = slideRels.cloneNode(true);
-    if (rich) renderSlideElements(slide, slides[index], entries, path, relations);
+    if (rich) renderSlideElements(slide, layoutSlide(slides[index]), entries, path, relations);
     else legacySlide(slide, slides[index]);
     elements(slide, NS, 'cSld')[0].setAttribute('name', 'Slide ' + number);
     saveXml(entries, path, slide);

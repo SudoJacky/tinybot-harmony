@@ -11,6 +11,7 @@ import { deliveredFiles, PresentedFile } from '../model/Deliverables';
 import { systemMaterialAttribute } from '../common/MaterialAttributes';
 import { WebUiPreflightHost } from '../views/WebUiPreflightHost';
 import { PreviewCaptureHost } from '../views/PreviewCaptureHost';
+import { OfficeReviewHost } from '../views/OfficeReviewHost';
 import { BrowserPanel } from '../views/BrowserPanel';
 import { BrowserSession } from '../services/BrowserSession';
 import { AnnotationPage, browserAnnotationText } from '../model/BrowserAnnotation';
@@ -1844,6 +1845,7 @@ struct Index {
       Stack() {
         // Render the capture card at chat width behind the opaque page.
         PreviewCaptureHost()
+        OfficeReviewHost()
         Column().width('100%').height('100%').backgroundColor(this.desktop || this.windowWidth >= 840 ? $r('app.color.surface') : $r('app.color.page_background'))
           .expandSafeArea([SafeAreaType.SYSTEM], this.desktop || this.windowWidth >= 840 ? [] : [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         Column() {

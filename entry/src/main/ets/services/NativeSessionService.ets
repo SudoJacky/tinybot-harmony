@@ -28,6 +28,7 @@ import { SkillInstaller } from './SkillInstaller';
 import { CodeExecutionTools } from './CodeExecutionTools';
 import { NativeCodeExecutor } from './NativeCodeExecutor';
 import { WorkspaceCode } from './WorkspaceCode';
+import { OfficeLayoutReview } from './OfficeLayoutReview';
 import { NativeOrchestrationExecutor } from './NativeOrchestrationExecutor';
 import { WebUiPreflight } from './WebUiPreflight';
 import { InteractionTools } from './InteractionTools';
@@ -153,7 +154,7 @@ export class NativeSessionResources implements SessionResources {
         this.officeLibrary = new util.TextDecoder('utf-8', { fatal: true }).decodeToString(bytes);
       }
       return this.officeLibrary;
-    }) : undefined;
+    }, (encoded, cancellation) => OfficeLayoutReview.check(encoded, cancellation)) : undefined;
     groups.push(new CodeExecutionTools(new NativeCodeExecutor(), workspaceCode));
     groups.push(new LifePanelTools(this.lifePanels, workspaceId || id, id, files, this.lifeBoards,
       (page, storage, context, cancellation, options) => WebUiPreflight.validatePanel(page, storage, context, cancellation, options)));

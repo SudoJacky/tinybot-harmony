@@ -22,6 +22,7 @@ let cellStart;
 let selectionTimer;
 let submitting = false;
 let submission;
+let slideResize;
 
 function element(tag, text, parent, className) {
   const node = document.createElement(tag);
@@ -168,18 +169,84 @@ selectionAction.onpointerdown = (event) => event.preventDefault();
 function renderSlides() {
   const deck = element('div', undefined, viewport, 'deck');
   const rail = element('nav', undefined, deck, 'slides');
+  rail.id = 'slide-thumbnails';
+  rail.setAttribute('aria-label', labels.thumbnails);
   const stage = element('section', undefined, deck, 'stage');
-  const slide = data.slides[active];
-  if (!slide) throw new Error('Presentation has no slides.');
+  const frame = element('div', undefined, stage, 'slide-frame');
+  const navigation = element('nav', undefined, deck, 'slide-navigation');
+  const previous = button('‹', navigation, () => show(active - 1));
+  previous.setAttribute('aria-label', labels.previous);
+  const pages = button('', navigation, () => {
+    const open = deck.classList.toggle('show-thumbnails');
+    pages.setAttribute('aria-expanded', String(open));
+    if (open) revealCurrent();
+  });
+  pages.setAttribute('aria-controls', rail.id);
+  pages.setAttribute('aria-expanded', 'false');
+  const next = button('›', navigation, () => show(active + 1));
+  next.setAttribute('aria-label', labels.next);
+  slideResize = new ResizeObserver((entries) => {
+    for (const { target, contentRect } of entries) {
+      target.resizeSlide(contentRect);
+    }
+  });
+  const thumbnails = [];
   for (let index = 0; index < data.slides.length; index++) {
-    const item = button(String(index + 1), rail, () => choose(index));
-    item.setAttribute('aria-current', index === active ? 'true' : 'false');
-    const miniature = element('span', undefined, item, 'thumbnail slide');
-    drawSlide(miniature, data.slides[index], index + 1, false);
+    const item = button('', rail, () => show(index));
+    const miniature = element('span', undefined, item, 'slide-frame thumbnail');
+    miniature.setAttribute('aria-hidden', 'true');
+    const canvas = element('span', undefined, miniature, 'slide');
+    drawSlide(canvas, data.slides[index], index + 1, false);
+    element('span', String(index + 1), item, 'slide-number');
+    thumbnails.push(item);
+    scaleSlide(miniature, canvas);
   }
-  rail.querySelector('[aria-current=true]').scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  const canvas = element('div', undefined, stage, 'slide');
-  drawSlide(canvas, slide, active + 1, true);
+  const canvas = element('div', undefined, frame, 'slide');
+  scaleSlide(stage, canvas, frame);
+
+  function revealCurrent() {
+    if (rail.clientWidth) thumbnails[active].scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+
+  function show(index) {
+    const slide = data.slides[index];
+    if (!slide || submitting) return;
+    clearTarget();
+    active = index;
+    thumbnails.forEach((item, i) => item.setAttribute('aria-current', String(i === index)));
+    pages.textContent = (index + 1) + ' / ' + data.slides.length;
+    pages.setAttribute('aria-label', labels.thumbnails + ' · ' + pages.textContent);
+    previous.disabled = index === 0;
+    next.disabled = index + 1 === data.slides.length;
+    canvas.replaceChildren();
+    drawSlide(canvas, slide, index + 1, true);
+    markers();
+    revealCurrent();
+  }
+
+  if (!data.slides.length) throw new Error('Presentation has no slides.');
+  show(active);
+  bindSlideAnnotations(canvas);
+}
+
+function scaleSlide(container, canvas, frame) {
+  const width = data.width / 9525;
+  const height = data.height / 9525;
+  canvas.style.width = width + 'px';
+  canvas.style.height = height + 'px';
+  if (!frame) container.style.aspectRatio = width + ' / ' + height;
+  container.resizeSlide = ({ width: availableWidth, height: availableHeight }) => {
+    const scale = frame ? Math.min(1, availableWidth / width, availableHeight / height) : availableWidth / width;
+    if (frame) {
+      frame.style.width = width * scale + 'px';
+      frame.style.height = height * scale + 'px';
+    }
+    canvas.style.transform = 'scale(' + scale + ')';
+  };
+  slideResize.observe(container);
+}
+
+function bindSlideAnnotations(canvas) {
   canvas.onkeydown = (event) => {
     if (!mode || (event.key !== 'Enter' && event.key !== ' ')) return;
     const anchor = event.target.closest('[data-element]');
@@ -199,10 +266,12 @@ function renderSlides() {
   };
   canvas.onpointermove = (event) => {
     if (!drag) return;
-    const x = Math.min(drag.x, event.clientX) - drag.bounds.left;
-    const y = Math.min(drag.y, event.clientY) - drag.bounds.top;
-    Object.assign(drag.outline.style, { left: x + 'px', top: y + 'px', width: Math.abs(drag.x - event.clientX) + 'px',
-      height: Math.abs(drag.y - event.clientY) + 'px' });
+    const { bounds } = drag;
+    const x = (Math.min(drag.x, event.clientX) - bounds.left) / bounds.width;
+    const y = (Math.min(drag.y, event.clientY) - bounds.top) / bounds.height;
+    Object.assign(drag.outline.style, { left: x * 100 + '%', top: y * 100 + '%',
+      width: Math.abs(drag.x - event.clientX) / bounds.width * 100 + '%',
+      height: Math.abs(drag.y - event.clientY) / bounds.height * 100 + '%' });
   };
   canvas.onpointercancel = () => { drag?.outline.remove(); drag = undefined; };
   canvas.onpointerup = (event) => {
@@ -259,7 +328,6 @@ function drawVector(box, shape) {
 }
 
 function drawSlide(canvas, slide, number, annotate) {
-  canvas.style.aspectRatio = data.width + ' / ' + data.height;
   canvas.style.backgroundColor = slide.background || '#fff';
   if (annotate) canvas.dataset.location = 'Slide ' + number;
   for (const shape of slide.shapes) {
@@ -295,6 +363,8 @@ function drawSlide(canvas, slide, number, annotate) {
     }
     for (const paragraph of shape.paragraphs) {
       const p = element('p', paragraph.bullet ? '• ' : '', box);
+      const fontSize = Math.max(0, ...paragraph.runs.map((run) => run.size));
+      if (fontSize) p.style.fontSize = (fontSize * 12700 / data.width * 100) + 'cqw';
       p.style.textAlign = { ctr: 'center', r: 'right', just: 'justify' }[paragraph.align] || 'left';
       for (const run of paragraph.runs) {
         const span = element('span', run.text, p);
@@ -303,6 +373,52 @@ function drawSlide(canvas, slide, number, annotate) {
       }
     }
   }
+}
+
+function slideIssues(canvas) {
+  const page = canvas.getBoundingClientRect();
+  const objects = [];
+  const issues = [];
+  const overflow = (box, boundary) => box.left < boundary.left - 2 || box.top < boundary.top - 2 ||
+    box.right > boundary.right + 2 || box.bottom > boundary.bottom + 2;
+  for (const node of canvas.children) {
+    const box = node.getBoundingClientRect();
+    const id = node.dataset.element || node.dataset.location;
+    const paragraph = node.querySelector('p');
+    const lines = [];
+    if (paragraph) {
+      const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+      const range = document.createRange();
+      while (walker.nextNode()) {
+        range.selectNodeContents(walker.currentNode);
+        lines.push(...[...range.getClientRects()].filter((rect) => rect.width && rect.height));
+      }
+    }
+    const text = node.textContent.trim();
+    if ((box.width > 0 && box.height > 0 && overflow(box, page)) || lines.some((line) => overflow(line, page))) {
+      issues.push({ kind: 'off-slide', element: id });
+    }
+    if (paragraph && ([...node.querySelectorAll('p')].some((p) => overflow(p.getBoundingClientRect(), box)) ||
+        lines.some((line) => line.left < box.left - 2 || line.right > box.right + 2))) {
+      issues.push({ kind: 'text-overflow', element: id });
+    }
+    if (paragraph && text.length > 24 && box.top < page.bottom - page.height * 0.1 &&
+      [...node.querySelectorAll('p span')].some((run) => parseFloat(getComputedStyle(run).fontSize) < 56 / 3)) {
+      issues.push({ kind: 'small-body-text', element: id });
+    }
+    if (paragraph || node.querySelector('img, svg text')) {
+      const rects = paragraph ? lines : [box];
+      for (const previous of objects) {
+        if (rects.some((a) => previous.rects.some((b) =>
+          Math.min(a.right, b.right) - Math.max(a.left, b.left) > 3 &&
+          Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 3))) {
+          issues.push({ kind: 'overlap', element: id, with: previous.id });
+        }
+      }
+      objects.push({ id, rects });
+    }
+  }
+  return { issues: issues.slice(0, 8), issueCount: issues.length };
 }
 
 function columnName(number) {
@@ -397,6 +513,7 @@ function choose(index) {
 
 function render() {
   clearTarget();
+  slideResize?.disconnect();
   toolbar.replaceChildren(modeButton);
   viewport.replaceChildren();
   if (format === 'docx') renderWord();
@@ -407,13 +524,41 @@ function render() {
 
 window.updateOfficeAnnotations = (annotations) => { marks = annotations; markers(); };
 window.appendOfficeBytes = (chunk) => { loaded.push(chunk); };
+function readLoadedOffice(type) {
+  const raw = atob(loaded.join(''));
+  loaded = [];
+  return readOfficePreview(Uint8Array.from(raw, (char) => char.charCodeAt(0)), type);
+}
+
+let officeReview;
+window.getOfficeReview = () => JSON.stringify(officeReview);
+window.reviewOfficeSlides = async () => {
+  try {
+    data = readLoadedOffice('pptx');
+    const frame = element('div', undefined, viewport, 'slide-frame review-frame');
+    const canvas = element('div', undefined, frame, 'slide');
+    canvas.style.width = data.width / 9525 + 'px';
+    canvas.style.height = data.height / 9525 + 'px';
+    drawSlide(canvas, data.slides[0], 1, true);
+    await document.fonts.ready;
+    const pages = data.slides.map((slide, index) => {
+      canvas.replaceChildren();
+      drawSlide(canvas, slide, index + 1, true);
+      return { page: index + 1, charts: slide.shapes.filter((shape) => shape.chart).length, ...slideIssues(canvas) };
+    });
+    officeReview = { engine: 'Tinybot PPT preview', slideCount: pages.length,
+      issueCount: pages.reduce((count, page) => count + page.issueCount, 0), pages };
+    frame.remove();
+    report('review', {});
+  } catch (error) {
+    report('error', { message: String(error.message || error).slice(0, 300) });
+  }
+};
 window.renderOffice = (type, strings) => {
   try {
     format = type;
     labels = strings;
-    const raw = atob(loaded.join(''));
-    loaded = [];
-    data = readOfficePreview(Uint8Array.from(raw, (char) => char.charCodeAt(0)), format);
+    data = readLoadedOffice(format);
     note.placeholder = labels.placeholder;
     note.setAttribute('aria-label', labels.placeholder);
     selectionAction.textContent = modeButton.textContent = labels.annotate;

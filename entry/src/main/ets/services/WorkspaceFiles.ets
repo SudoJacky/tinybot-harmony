@@ -16,7 +16,7 @@ export interface FileBaseline { path: string; existed: boolean; content: string;
 
 export interface FileJobWorkspace {
   readJobInput(path: string, maximum: number, cancellation: Cancellation): Promise<Uint8Array>;
-  createJobOutput(path: string, bytes: Uint8Array, cancellation: Cancellation): Promise<void>;
+  createJobOutput(path: string, bytes: Uint8Array, cancellation: Cancellation, expectedVersion?: string): Promise<void>;
 }
 
 // Native storage and in-memory adapters share typed results. Tool dispatch owns JSON encoding.
