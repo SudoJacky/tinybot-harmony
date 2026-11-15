@@ -1,4 +1,5 @@
 import { util } from '@kit.ArkTS';
+import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { ToolCall, ToolDefinition, ToolExecution, toolError } from '../model/Agent';
 import { parseToolArguments, ToolFailure, ToolResultError } from '../model/ToolFailure';
 import { AgentTools, ToolInvocationContext } from './AgentLoop';
@@ -10,9 +11,9 @@ import { WorkspaceTools, workspaceRelativePath } from './WorkspaceTools';
 
 const MAX_BYTES = 20 * 1024 * 1024;
 const OFFICE_EXTENSION = /\.(docx|xlsx|pptx)$/i;
-const BRIDGE_CATALOG = '[{"name":"read_bytes"},{"name":"read_text"},{"name":"write_text"},{"name":"write_office"}]';
+const BRIDGE_CATALOG = '[{"name":"read_bytes"},{"name":"read_text"},{"name":"write_text"},{"name":"write_office"},{"name":"review_pptx"}]';
 
-interface Arguments { path: string; data?: string; }
+interface Arguments { path: string; data?: string; replace?: boolean; }
 interface Receipt { path: string; bytes: number; written?: boolean; }
 interface FileOperation { path: string; operation: string; status: string; }
 interface FileIssue { path: string; receipt: Object; }
@@ -20,12 +21,15 @@ interface CodeResult { status: string; files?: FileOperation[]; issues?: FileIss
 
 const GUIDE = 'Use await workspace.read(path) for private-workspace bytes or await workspace.readText(path) for UTF-8 text. ' +
   'Use await workspace.write(path, textOrOfficeBytes); it returns a small file receipt. Overwrite text only after readText or read_file; ' +
-  'Office outputs require a new private workspace path. Permissions are checked on every call. ' +
+  'Office outputs normally require a new private workspace path. For your own existing PPTX draft, read with workspace.read in the same call, edit the bytes, then use workspace.write(path, bytes, {replace:true}); the observed version must still match. Permissions are checked on every call. ' +
   'The bundled office library supports office.text(bytes), office.xlsx([{name:"Sheet1",rows:[["Item",12],[null,{formula:"B1+1"}]]}]), ' +
   'office.docx([{heading:"Title",level:1},{text:"Paragraph"},{table:[["Item","Value"]]}]), office.pptx([{title:"Overview",body:["Point"]}]), ' +
   'office.editXlsx(bytes,[{sheet:"Sheet1",cell:"B2",value:15}]), office.editDocx(bytes,[{find:"old",replace:"new"}]), and ' +
   'office.editPptx(bytes,[{slide:1,find:"old",replace:"new"}]). Text replacement requires unique text within one paragraph. ' +
-  'For editable PowerPoint design use office.pptx({theme:{name,fontFace,background,text,muted,accent,accent2},slides:[{background,elements}]}). ' +
+  'For PPTX, start with office.pptx({theme:{name,fontFace,background,text,muted,accent,accent2},slides:[{layout:"cover"|"chart"|"summary",title,subtitle,source,points:["Short takeaway"],metrics:[{value:"12%",label:"Growth"}],charts:[{chart:"bar",categories:["2024","2025"],series:[{name:"Revenue",values:[10,12]}]}]}]}). ' +
+  'Cover takes metrics, summary takes up to four points and metrics, chart takes one chart and up to three brief points or two charts and one point. Omit unused fields. Use one takeaway per slide and keep detailed evidence in the appendix. ' +
+  'Before delivering a PPTX, call await workspace.reviewPptx(bytes). It renders every page using Tinybot preview and reports overlap, overflow, off-slide objects and small body text by page and element. Fix issues and rerun review on the revised bytes before saving. Return only compact results (e.g. review.pages.filter(p=>p.issueCount)). ' +
+  'For custom layouts use slides:[{background,elements}] instead. ' +
   'Each element needs a unique id per slide and x,y,w,h in inches on a 13⅓ × 7.5 slide. Array order is back to front. Optional rotate is in degrees. ' +
   'Types: text (text,fontSize in points,fontFace,color,bold,italic,align,verticalAlign); image (data: await workspace.read(path) for PNG/JPEG,alt); ' +
   'shape (shape: rect,roundRect,ellipse,triangle,diamond,hexagon,chevron,rightArrow,star5,line). Text and shapes accept fill,stroke,strokeWidth in points. ' +
@@ -49,13 +53,19 @@ export function workspaceCodeSource(library: string, code: string, inputJson: st
     'const workspace = Object.freeze({\n' +
     '  read: path => single(async () => Uint8Array.fromBase64(await bridge.read_bytes({path}))),\n' +
     '  readText: path => single(() => bridge.read_text({path})),\n' +
-    '  write: (path, data) => single(async () => {\n' +
+    '  reviewPptx: bytes => single(() => {\n' +
+    '    if (!(bytes instanceof Uint8Array) || bytes.byteLength > ' + MAX_BYTES + ') throw Error("Expected PPTX bytes up to 20 MiB.");\n' +
+    '    return bridge.review_pptx({data:bytes.toBase64()});\n' +
+    '  }),\n' +
+    '  write: (path, data, options) => single(async () => {\n' +
     '    if (typeof data === "string") return bridge.write_text({path, data});\n' +
     '    const format = typeof path === "string" && /\\.(docx|xlsx|pptx)$/i.exec(path);\n' +
     '    if (!format || !(data instanceof Uint8Array)) throw Error("Expected text or Office bytes with a matching filename.");\n' +
     '    if (data.byteLength > ' + MAX_BYTES + ') throw Error("Office output exceeds 20 MiB.");\n' +
     '    OfficeJob.verify(data, format[1].toLowerCase());\n' +
-    '    return bridge.write_office({path, data:data.toBase64()});\n' +
+    '    const replace = options?.replace === true;\n' +
+    '    if (replace && format[1].toLowerCase() !== "pptx") throw Error("Only PPTX drafts can be revised in place.");\n' +
+    '    return bridge.write_office({path, data:data.toBase64(), replace});\n' +
     '  })\n' +
     '});\n' +
     'const run = Object.getPrototypeOf(async function(){}).constructor("input", "workspace", "office", ' +
@@ -75,12 +85,15 @@ export class WorkspaceCode implements WorkspaceCodeExecutor {
   private textFiles: WorkspaceTools;
   private executor: OrchestrationExecutor;
   private loadLibrary: () => Promise<string>;
+  private reviewPptx?: (encoded: string, cancellation: Cancellation) => Promise<string>;
 
-  constructor(workspace: FileJobWorkspace, textFiles: WorkspaceTools, executor: OrchestrationExecutor, loadLibrary: () => Promise<string>) {
+  constructor(workspace: FileJobWorkspace, textFiles: WorkspaceTools, executor: OrchestrationExecutor, loadLibrary: () => Promise<string>,
+    reviewPptx?: (encoded: string, cancellation: Cancellation) => Promise<string>) {
     this.workspace = workspace;
     this.textFiles = textFiles;
     this.executor = executor;
     this.loadLibrary = loadLibrary;
+    this.reviewPptx = reviewPptx;
   }
 
   guide(): string { return GUIDE; }
@@ -91,16 +104,32 @@ export class WorkspaceCode implements WorkspaceCodeExecutor {
     const children: ToolExecution[] = [];
     let readRemaining = MAX_BYTES;
     let writeRemaining = MAX_BYTES;
+    const pptxVersions: Map<string, string> = new Map();
     let calls = 0;
     let tail: Promise<void> = Promise.resolve();
     let fatal: Error | undefined;
     const base64 = new util.Base64Helper();
+    const version = async (bytes: Uint8Array): Promise<string> => {
+      const hash = cryptoFramework.createMd('SHA256');
+      if (bytes.length) { await hash.update({ data: bytes }); }
+      return await base64.encodeToString((await hash.digest()).data);
+    };
     const byteLength = (text: string): number => text.length ? new util.TextEncoder().encodeInto(text).byteLength : 0;
     const limit = (): ToolFailure => new ToolFailure('LIMIT_EXCEEDED', 'Workspace script exceeded 20 MiB in one direction.', 'reduce_input');
     const invoke = (operation: string, json: string): Promise<string> => {
       signal.check();
       if (++calls > 32) { throw new ToolFailure('LIMIT_EXCEEDED', 'Workspace script exceeded 32 operations.', 'reduce_input'); }
       const args = parseToolArguments(json) as Arguments;
+      if (operation === 'review_pptx') {
+        if (!args || typeof args.data !== 'string' || args.data.length > Math.ceil(MAX_BYTES / 3) * 4) {
+          throw new ToolFailure('INVALID_ARGUMENTS', 'Expected PowerPoint bytes up to 20 MiB.', 'fix_arguments');
+        }
+        if (!this.reviewPptx) { throw new ToolFailure('TOOL_UNAVAILABLE', 'PowerPoint layout review is unavailable.', 'open_chat'); }
+        const review = this.reviewPptx;
+        const work = tail.then(() => review(args.data as string, signal));
+        tail = work.then(() => {}, () => {});
+        return work;
+      }
       const reading = operation === 'read_bytes' || operation === 'read_text';
       const office = operation === 'write_office';
       if ((!reading && !office && operation !== 'write_text') || !args || typeof args.path !== 'string' ||
@@ -125,6 +154,7 @@ export class WorkspaceCode implements WorkspaceCodeExecutor {
           if (operation === 'read_bytes') {
             const bytes = await this.workspace.readJobInput(path, readRemaining, current);
             receipt.bytes = bytes.byteLength;
+            if (/\.pptx$/i.test(path)) { pptxVersions.set(path, await version(bytes)); }
             response = JSON.stringify(bytes.byteLength ? await base64.encodeToString(bytes) : '');
           } else if (operation === 'read_text') {
             const text = await this.textFiles.readTextForCode(path, readRemaining, current);
@@ -139,7 +169,12 @@ export class WorkspaceCode implements WorkspaceCodeExecutor {
             if (!OFFICE_EXTENSION.test(path) || bytes[0] !== 0x50 || bytes[1] !== 0x4B || bytes[2] !== 3 || bytes[3] !== 4) {
               throw new ToolFailure('INVALID_ARGUMENTS', 'Expected a valid Office file and extension.', 'fix_arguments', { path: path });
             }
-            await this.workspace.createJobOutput(path, bytes, current);
+            const expected = args.replace ? pptxVersions.get(path) : undefined;
+            if (args.replace && (!/\.pptx$/i.test(path) || expected === undefined)) {
+              throw new ToolFailure('FS_NOT_OBSERVED', 'Read this PowerPoint draft with workspace.read before revising it.', 'read_file', { path: path });
+            }
+            await this.workspace.createJobOutput(path, bytes, current, expected);
+            if (expected !== undefined) { pptxVersions.set(path, await version(bytes)); }
             receipt.bytes = bytes.byteLength;
             receipt.written = true;
           } else {

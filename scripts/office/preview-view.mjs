@@ -375,6 +375,52 @@ function drawSlide(canvas, slide, number, annotate) {
   }
 }
 
+function slideIssues(canvas) {
+  const page = canvas.getBoundingClientRect();
+  const objects = [];
+  const issues = [];
+  const overflow = (box, boundary) => box.left < boundary.left - 2 || box.top < boundary.top - 2 ||
+    box.right > boundary.right + 2 || box.bottom > boundary.bottom + 2;
+  for (const node of canvas.children) {
+    const box = node.getBoundingClientRect();
+    const id = node.dataset.element || node.dataset.location;
+    const paragraph = node.querySelector('p');
+    const lines = [];
+    if (paragraph) {
+      const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+      const range = document.createRange();
+      while (walker.nextNode()) {
+        range.selectNodeContents(walker.currentNode);
+        lines.push(...[...range.getClientRects()].filter((rect) => rect.width && rect.height));
+      }
+    }
+    const text = node.textContent.trim();
+    if ((box.width > 0 && box.height > 0 && overflow(box, page)) || lines.some((line) => overflow(line, page))) {
+      issues.push({ kind: 'off-slide', element: id });
+    }
+    if (paragraph && ([...node.querySelectorAll('p')].some((p) => overflow(p.getBoundingClientRect(), box)) ||
+        lines.some((line) => line.left < box.left - 2 || line.right > box.right + 2))) {
+      issues.push({ kind: 'text-overflow', element: id });
+    }
+    if (paragraph && text.length > 24 && box.top < page.bottom - page.height * 0.1 &&
+      [...node.querySelectorAll('p span')].some((run) => parseFloat(getComputedStyle(run).fontSize) < 56 / 3)) {
+      issues.push({ kind: 'small-body-text', element: id });
+    }
+    if (paragraph || node.querySelector('img, svg text')) {
+      const rects = paragraph ? lines : [box];
+      for (const previous of objects) {
+        if (rects.some((a) => previous.rects.some((b) =>
+          Math.min(a.right, b.right) - Math.max(a.left, b.left) > 3 &&
+          Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 3))) {
+          issues.push({ kind: 'overlap', element: id, with: previous.id });
+        }
+      }
+      objects.push({ id, rects });
+    }
+  }
+  return { issues: issues.slice(0, 8), issueCount: issues.length };
+}
+
 function columnName(number) {
   let name = '';
   while (number > 0) {
@@ -478,13 +524,41 @@ function render() {
 
 window.updateOfficeAnnotations = (annotations) => { marks = annotations; markers(); };
 window.appendOfficeBytes = (chunk) => { loaded.push(chunk); };
+function readLoadedOffice(type) {
+  const raw = atob(loaded.join(''));
+  loaded = [];
+  return readOfficePreview(Uint8Array.from(raw, (char) => char.charCodeAt(0)), type);
+}
+
+let officeReview;
+window.getOfficeReview = () => JSON.stringify(officeReview);
+window.reviewOfficeSlides = async () => {
+  try {
+    data = readLoadedOffice('pptx');
+    const frame = element('div', undefined, viewport, 'slide-frame review-frame');
+    const canvas = element('div', undefined, frame, 'slide');
+    canvas.style.width = data.width / 9525 + 'px';
+    canvas.style.height = data.height / 9525 + 'px';
+    drawSlide(canvas, data.slides[0], 1, true);
+    await document.fonts.ready;
+    const pages = data.slides.map((slide, index) => {
+      canvas.replaceChildren();
+      drawSlide(canvas, slide, index + 1, true);
+      return { page: index + 1, charts: slide.shapes.filter((shape) => shape.chart).length, ...slideIssues(canvas) };
+    });
+    officeReview = { engine: 'Tinybot PPT preview', slideCount: pages.length,
+      issueCount: pages.reduce((count, page) => count + page.issueCount, 0), pages };
+    frame.remove();
+    report('review', {});
+  } catch (error) {
+    report('error', { message: String(error.message || error).slice(0, 300) });
+  }
+};
 window.renderOffice = (type, strings) => {
   try {
     format = type;
     labels = strings;
-    const raw = atob(loaded.join(''));
-    loaded = [];
-    data = readOfficePreview(Uint8Array.from(raw, (char) => char.charCodeAt(0)), format);
+    data = readLoadedOffice(format);
     note.placeholder = labels.placeholder;
     note.setAttribute('aria-label', labels.placeholder);
     selectionAction.textContent = modeButton.textContent = labels.annotate;

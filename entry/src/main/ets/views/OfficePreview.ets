@@ -46,6 +46,7 @@ export struct OfficePreview {
   source: OfficePreviewSource = { path: '', threadId: '', format: '', encoded: '', version: '' };
   @Prop @Watch('updateMarks') annotations: FileAnnotation[] = [];
   onAnnotation: (target: FileAnnotationTarget, comment: string) => Promise<void> = async () => {};
+  onReview?: (result: string, error?: Error) => void = undefined;
   @State private error: string = '';
   @State private ready: boolean = false;
   private controller: webview.WebviewController = new webview.WebviewController();
@@ -68,6 +69,7 @@ export struct OfficePreview {
     clearTimeout(this.timer);
     this.error = error.message;
     Diagnostics.log('error', 'office_preview', event, { format: this.source.format }, error);
+    this.onReview?.('', error);
   }
 
   private async load(): Promise<void> {
@@ -79,6 +81,10 @@ export struct OfficePreview {
         await this.controller.runJavaScript('window.appendOfficeBytes(' + JSON.stringify(chunk) + ')');
       }
       if (!this.mounted) { return; }
+      if (this.onReview) {
+        await this.controller.runJavaScript('window.reviewOfficeSlides(); void 0');
+        return;
+      }
       const labels: OfficePreviewLabels = { annotate: t('批注'), placeholder: t('描述修改或提出问题…'),
         add: t('添加批注'), cancel: t('取消'), previous: t('上一页'), next: t('下一页'), thumbnails: t('幻灯片缩略图') };
       await this.controller.runJavaScript('window.renderOffice(' + JSON.stringify(this.source.format) + ',' + JSON.stringify(labels) + ')');
@@ -101,7 +107,13 @@ export struct OfficePreview {
     if (!this.mounted || !title.startsWith('office:')) { return; }
     try {
       const event = JSON.parse(title.slice(7)) as OfficePreviewEvent;
-      if (event.type === 'ready') {
+      if (event.type === 'review' && this.onReview) {
+        clearTimeout(this.timer);
+        const result = await this.controller.runJavaScriptExt('window.getOfficeReview()');
+        if (!this.mounted) { return; }
+        if (result.getType() !== webview.JsMessageType.STRING) { throw new Error('Missing PowerPoint layout review result.'); }
+        this.onReview(JSON.parse(result.getString()) as string);
+      } else if (event.type === 'ready') {
         clearTimeout(this.timer);
         this.ready = true;
         await this.updateMarks();

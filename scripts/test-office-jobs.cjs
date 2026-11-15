@@ -20,6 +20,10 @@ function load(name) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021, experimentalDecorators: true },
   }).outputText;
   vm.runInNewContext(source, { exports, setTimeout, clearTimeout, Observed: (type) => type, require: (id) => {
+    if (id === '@kit.CryptoArchitectureKit') return { cryptoFramework: { createMd() {
+      const hash = createHash('sha256');
+      return { update({ data }) { hash.update(data); }, digest() { return { data: hash.digest() }; } };
+    } } };
     if (id === '@kit.ArkTS') return { util: { generateRandomUUID: randomUUID, TextEncoder: class {
       encodeInto(text) { return Buffer.from(text, 'utf8'); }
     }, Base64Helper: class {
@@ -108,9 +112,11 @@ async function main() {
   };
   const workspace = {
     async readJobInput(name, maximum) { return read(name, maximum); },
-    async createJobOutput(name, bytes, cancellation) {
+    async createJobOutput(name, bytes, cancellation, expectedVersion) {
       cancellation.check();
-      if (files.has(name)) throw new Error('Output exists');
+      if (expectedVersion !== undefined) {
+        if (!files.has(name) || createHash('sha256').update(read(name)).digest('base64') !== expectedVersion) throw new Error('Draft changed');
+      } else if (files.has(name)) throw new Error('Output exists');
       files.set(name, Buffer.from(bytes));
     },
     async read(name, _cancellation, maximum) {
@@ -140,7 +146,10 @@ async function main() {
       return JSON.stringify({ status: 'ok', result });
     } catch (error) { return JSON.stringify({ status: 'error', error: error.message }); }
   } };
-  const workspaceCode = new WorkspaceCode(workspace, new WorkspaceTools(workspace), executor, async () => library);
+  const workspaceCode = new WorkspaceCode(workspace, new WorkspaceTools(workspace), executor, async () => library, async (encoded) => {
+    const slideCount = [...parts(Buffer.from(encoded, 'base64')).keys()].filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name)).length;
+    return JSON.stringify({ slideCount });
+  });
   const codeTool = new CodeExecutionTools({ execute() { throw Error('Missing invocation context'); } }, workspaceCode);
   const readOnly = new RuleTools(codeTool, true);
   const research = {
@@ -182,6 +191,19 @@ async function main() {
   success(await write('data-edited.xlsx', 'office.editXlsx(await workspace.read(input.source),[{sheet:"数据",cell:"b2",value:19},{sheet:"数据",cell:"AA5",value:"完成"}])', { source: 'data.xlsx' }));
   success(await write('report-edited.docx', 'office.editDocx(await workspace.read(input.source),[{find:"收入 & 支出",replace:"净收入"}])', { source: 'report.docx' }));
   success(await write('deck-edited.pptx', 'office.editPptx(await workspace.read(input.source),[{slide:2,find:"报告 & 原始数据",replace:"修订版"}])', { source: 'deck.pptx' }));
+  const templated = success(await run(`
+    const slides = [{layout:"cover",title:"财报",metrics:[{value:"62.2 亿",label:"自由现金流"}]},
+      {layout:"chart",title:"自由现金流",points:["经营现金流稳定"],charts:[{chart:"bar",categories:["2024","2025"],series:[{name:"自由现金流",values:[3.581,6.220]}]}]}];
+    const bytes = office.pptx({slides});
+    await workspace.write("draft.pptx", bytes);
+    const original = await workspace.read("draft.pptx");
+    const revised = office.editPptx(original, [{slide:2,element:"point-1",changes:{text:"资本开支下降 25%"}}]);
+    return { review: await workspace.reviewPptx(revised), edited: await workspace.write("draft.pptx", revised, {replace:true}) };
+  `, {}));
+  assert.deepEqual(templated.result.review, { slideCount: 2 });
+  assert.equal(templated.result.edited.written, true);
+  assert.match(parts(files.get('draft.pptx')).get('ppt/slides/slide2.xml'), /资本开支下降 25%/);
+  failure(await run('return workspace.write("draft.pptx", office.pptx([{title:"Overwrite"}]), {replace:true});', {}), /before revising/);
   const get = (file, part) => parts(files.get(file)).get(part);
   assert.match(get('data.xlsx', 'xl/worksheets/sheet1.xml'), /<c r="B2" t="inlineStr">.*12.*<f>SUM\(B3:B3\)<\/f>/);
   assert.match(get('data-edited.xlsx', 'xl/worksheets/sheet1.xml'), /<c r="B2" t="n"><v>19<\/v>.*<c r="AA5" t="inlineStr">/);
