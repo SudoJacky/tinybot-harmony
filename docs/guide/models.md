@@ -14,6 +14,10 @@ Tinybot 自身不提供模型，它把对话内容发送给用户配置的模型
 | OpenAI Responses | responses | `https://api.openai.com/v1` | `gpt-4.1` |
 | Google Gemini | gemini | `https://generativelanguage.googleapis.com/v1beta` | 需手动填写 |
 | Z.ai · 智谱 | chat-completions | `https://open.bigmodel.cn/api/paas/v4` | `glm-5.3`、`glm-5.3-flash`、`glm-5.2` |
+| Kimi | chat-completions | `https://api.moonshot.cn/v1` | `kimi-k3.1-pro`、`kimi-k3` |
+| MiniMax | chat-completions | `https://api.minimax.cn/v1` | `MiniMax-M3.1-Flash` |
+| Xiaomi MiMo | chat-completions | `https://api.xiaomimimo.com/v1` | `mimo-v2.6-flash`、`mimo-v2.6-pro` |
+| 火山引擎 · 方舟 | chat-completions | `https://ark.cn-beijing.volces.com/api/v3` | `doubao-seed-2-1-lite-260915`、`doubao-seed-2-1-pro-260915` |
 | Anthropic | anthropic-messages | `https://api.anthropic.com/v1` | 需手动填写 |
 | Ollama | chat-completions | 需填写手机可访问的服务器地址 | 需填写服务器上已安装的模型 |
 | 自定义兼容服务 | chat-completions | 需填写 HTTPS 地址 | 需手动填写 |

@@ -262,6 +262,8 @@
   "MCP 服务需要名称和 HTTPS 地址（不含账号或片段）。": "MCP services require a name and HTTPS URL without credentials or fragments.",
   "DashScope · 阿里云百炼": "DashScope · Alibaba Cloud",
   "默认连接北京地域；其他地域或 Coding Plan 请填写对应的服务地址和密钥。": "Uses the Beijing region by default. For other regions or Coding Plan, enter the matching endpoint and key.",
+  "火山引擎 · 方舟": "Volcengine Ark",
+  "请先在方舟控制台开通模型服务。若使用自定义推理接入点，可将模型名称改为接入点 ID。": "Enable the model in the Ark console first. If you use a custom inference endpoint, enter its endpoint ID as the model name.",
   "Z.ai · 智谱": "Z.ai · Zhipu",
   "默认连接智谱通用 API；国际站或 Coding Plan 请填写对应的服务地址和密钥。": "Uses the standard Zhipu API by default. For the international service or Coding Plan, enter the matching endpoint and key.",
   "填写手机可访问的 Ollama 服务器地址和已安装的模型名称。127.0.0.1 指手机自身。HTTP 未加密，请在可信网络中使用。": "Enter an Ollama server URL reachable from this phone and an installed model name. 127.0.0.1 refers to the phone itself. HTTP is unencrypted; use a trusted network.",

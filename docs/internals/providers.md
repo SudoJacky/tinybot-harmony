@@ -30,6 +30,10 @@ export interface ModelProvider {
 | `dashscope` | DashScope · 阿里云百炼 | `chat-completions` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus`、`qwen-max`、`qwen-turbo` |
 | `openai` | OpenAI | `chat-completions` | `https://api.openai.com/v1` | `gpt-4.1` |
 | `zai` | Z.ai · 智谱 | `chat-completions` | `https://open.bigmodel.cn/api/paas/v4` | `glm-5.3`、`glm-5.3-flash`、`glm-5.2` |
+| `kimi` | Kimi | `chat-completions` | `https://api.moonshot.cn/v1` | `kimi-k3.1-pro`、`kimi-k3` |
+| `minimax` | MiniMax | `chat-completions` | `https://api.minimax.cn/v1` | `MiniMax-M3.1-Flash` |
+| `mimo` | Xiaomi MiMo | `chat-completions` | `https://api.xiaomimimo.com/v1` | `mimo-v2.6-flash`、`mimo-v2.6-pro` |
+| `volcengine` | 火山引擎 · 方舟 | `chat-completions` | `https://ark.cn-beijing.volces.com/api/v3` | `doubao-seed-2-1-lite-260915`、`doubao-seed-2-1-pro-260915` |
 | `ollama` | Ollama | `chat-completions` | 空，手动填写局域网地址 | 空，手动填写 |
 | `openai-compatible` | 自定义兼容服务 | `chat-completions` | 空 | 空 |
 | `openai-responses` | OpenAI Responses | `responses` | `https://api.openai.com/v1` | `gpt-4.1` |
