@@ -8,7 +8,7 @@ import { BrowserSession } from '../services/BrowserSession';
 import { ChatViewModel, SettingsViewModel } from '../viewmodel/ChatViewModel';
 import { SettingsToggle } from '../services/SessionContracts';
 import { ProviderInfo } from '../model/Provider';
-import { ProviderProfile } from '../model/ProviderProfiles';
+import { ProviderProfile, imageService } from '../model/ProviderProfiles';
 import { usesBalanceCredential } from '../model/BalanceSettings';
 import { supportsProviderBalance } from '../services/ProviderBalance';
 import { balanceProfileDraft } from '../services/ProviderBalanceCache';
@@ -39,6 +39,7 @@ export struct SettingsPanel {
   onUsage: () => void = () => {};
   onStorage: () => void = () => {};
   onModels: () => void = () => {};
+  onImageGeneration: () => void = () => {};
   onSearch: () => void = () => {};
   onMail: () => void = () => {};
   onBackup: () => void = () => {};
@@ -98,6 +99,13 @@ export struct SettingsPanel {
   private userDocumentPreview(): string {
     const document = (this.app.config.userDocument || '').trim();
     return document.replace(/\s+/g, ' ');
+  }
+
+  private imageGenerationSummary(): string {
+    const config = this.app.productivity.options?.imageGeneration;
+    if (!config) { return ''; }
+    const service = imageService(this.app.providerProfiles, config);
+    return service ? service.name + ' · ' + config.modelId : t('所选模型不可用');
   }
 
   private choosePreset(id: string): void {
@@ -176,6 +184,9 @@ export struct SettingsPanel {
             RowDivider()
             NavRow({ title: t('模型分工与能力'), compId: 'open-model-settings',
               icon: $r('sys.symbol.person_2'), disabled: !this.canEdit(), onTap: () => this.onModels() })
+            RowDivider()
+            NavRow({ title: t('图片生成'), subtitle: this.imageGenerationSummary(), compId: 'open-image-generation',
+              icon: $r('sys.symbol.picture'), disabled: !this.canEdit(), onTap: this.onImageGeneration })
           }
         }
         }

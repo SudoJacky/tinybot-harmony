@@ -16,7 +16,7 @@ import { TeamRun } from '../model/Team';
 import { Attachment, ProductivityData, defaultProductivity } from '../model/Productivity';
 import { AppData, ModelConfig, defaultConfig, copyModelConfig } from '../model/Conversation';
 import { contextSettings } from '../model/ContextSettings';
-import { ModelChoice, ProviderProfile, availableModels } from '../model/ProviderProfiles';
+import { ImageGenerationConfig, ModelChoice, ProviderProfile, availableModels } from '../model/ProviderProfiles';
 import { ProviderInfo, builtinProviderInfos } from '../model/Provider';
 import { ExtensionSettings, SkillData, defaultExtensions } from '../model/Skills';
 import { SkillQuery, skillDraft } from '../model/SkillCompletion';
@@ -235,6 +235,7 @@ export class ChatViewModel {
 
   changeMcp(request: McpSettingsCommand, cancellation: Cancellation): Promise<McpSettingsResult> { return this.requireSession().changeMcp(request, cancellation); }
   saveProductivity(value: ProductivityData): Promise<boolean> { return this.requireSession().saveProductivity(value); }
+  saveImageGeneration(value?: ImageGenerationConfig): Promise<boolean> { return this.requireSession().saveImageGeneration(value); }
   saveSearch(draft: SearchDraft): Promise<boolean> { return this.requireSession().saveSearch(draft); }
   refreshMemoryContext(): Promise<boolean> { return this.requireSession().refreshMemoryContext(); }
   proposeMemory(messageId: string): Promise<string[]> { return this.requireSession().proposeMemory(messageId); }

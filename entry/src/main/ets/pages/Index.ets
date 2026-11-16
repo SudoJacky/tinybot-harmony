@@ -25,6 +25,8 @@ import { agentModeName } from '../model/AgentMode';
 import { ToolScopePanel } from '../views/ToolScopePanel';
 import { ProductivityPanel, ProductivityEditorRoute, productivityEditorTitle } from '../views/ProductivityPanel';
 import { ModelSettingsPanel } from '../views/AssistantPanel';
+import { ImageGenerationPanel } from '../views/ImageGenerationPanel';
+import { ProviderProfile } from '../model/ProviderProfiles';
 import { BackupPanel } from '../views/BackupPanel';
 import { WebDavBackupPanel } from '../views/WebDavBackupPanel';
 import { UsagePanel } from '../views/UsagePanel';
@@ -1472,6 +1474,7 @@ struct Index {
       onUsage: () => { this.paths.pushPath({ name: 'usage' }); },
       onStorage: () => { this.paths.pushPath({ name: 'storage' }); },
       onModels: () => { this.paths.pushPath({ name: 'model-settings' }); },
+      onImageGeneration: () => { this.paths.pushPath({ name: 'image-generation' }); },
       onSearch: () => { this.paths.pushPath({ name: 'search-settings' }); },
       onMail: () => { this.paths.pushPath({ name: 'mail-settings' }); },
       onAppearance: () => { this.paths.pushPath({ name: 'appearance' }); },
@@ -1523,6 +1526,20 @@ struct Index {
         .backgroundColor($r('app.color.page_background'))
     } else if (name === 'model-settings') {
       NavDestination() { ModelSettingsPanel({ app: this.app }) }.title(t('模型分工与能力'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'image-generation') {
+      NavDestination() {
+        ImageGenerationPanel({ app: this.app, onSaved: () => { this.paths.pop(); },
+          onAddProvider: (protocol: string, onReturn: (provider: ProviderProfile) => void) => {
+            if (!this.app.beginProvider()) { return; }
+            const existing = new Set(this.app.providerProfiles.map((item) => item.id));
+            this.app.providerEditor.protocol = protocol;
+            this.paths.pushPath({ name: 'provider', onPop: (_info: PopInfo) => {
+              const added = this.app.providerProfiles.find((item) => !existing.has(item.id));
+              if (added?.enabled) { onReturn(added); }
+            } });
+          } })
+      }.title(t('图片生成'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
+        .backgroundColor($r('app.color.page_background'))
     } else if (name === 'backup') {
       NavDestination() {
         BackupPanel({ app: this.app, onWebDav: () => this.paths.pushPath({ name: 'webdav-backup' }),

@@ -2,9 +2,9 @@ import { t } from '../model/I18n';
 import { Diagnostics } from '../model/Diagnostics';
 import { contextualError } from '../model/DetailedError';
 import { AppData, copyModelConfig } from '../model/Conversation';
-import { ImageModelSettings, ProviderProfile, modelConfig, modelIds, validateProfile } from '../model/ProviderProfiles';
+import { ProviderProfile, modelConfig, modelIds, validateProfile } from '../model/ProviderProfiles';
 import { CredentialReader } from './providers/Provider';
-import { isSupportedProtocol, sameCredentialScope } from '../model/ProviderEndpoint';
+import { isSupportedProtocol, sameCredentialScope, sameProviderOrigin } from '../model/ProviderEndpoint';
 import { mergeSavedConfiguration } from '../model/SavedConfiguration';
 import { BalanceSettings, canKeepBalanceCredential, usesBalanceCredential } from '../model/BalanceSettings';
 
@@ -25,12 +25,9 @@ export interface ProviderDraft {
   enabled: boolean;
   models: string;
   contextWindow: string;
-  imageModels?: ImageModelDraft | null;
   balance?: BalanceSettings;
   balanceApiKey?: string;
 }
-
-export interface ImageModelDraft { protocol: string; baseUrl: string; models: string; }
 
 // Configuration commits and key lifecycle belong together, outside the editor and runtime.
 export class ProfileSettings {
@@ -55,10 +52,9 @@ export class ProfileSettings {
     if (!draft.noApiKey && key.length === 0 && (!previous?.credentialAlias || !sameScope)) {
       throw new Error(t("请填写 API Key；更换服务基础地址时需要重新填写，其他服务的密钥不会被复用。"));
     }
-    const image = draft.imageModels;
-    const imageModels = image ? mergeSavedConfiguration<ImageModelSettings>(previous?.imageModels,
-      { protocol: image.protocol, baseUrl: image.baseUrl.trim() || undefined, models: modelIds(image.models) }) :
-      image === null ? undefined : previous?.imageModels;
+    const legacyImages = previous?.imageModels;
+    const imageModels = isSupportedProtocol(draft.protocol) &&
+      (!legacyImages?.baseUrl || sameProviderOrigin(draft.baseUrl, legacyImages.baseUrl)) ? legacyImages : undefined;
     const edited: ProviderProfile = { id: previous?.id || 'provider-' + this.createId(), name: draft.name.trim(),
       presetId: draft.presetId, protocol: draft.protocol, baseUrl: draft.baseUrl.trim().replace(/\/+$/, ''),
       credentialAlias: draft.noApiKey ? '' : key.length > 0 ? 'pending-key' : previous?.credentialAlias || '',

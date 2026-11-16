@@ -37,7 +37,7 @@
 | `providerProfiles[].noApiKey` | 无需密钥（如本地 Ollama） | `false` | 下一次请求 |
 | `providerProfiles[].enabled` | 是否启用 | `true` | 保存后立即过滤可选模型 |
 | `providerProfiles[].models` | 该服务的模型 ID 列表；图片协议下为图片模型 | 预设列表 | 下一次请求 |
-| `providerProfiles[].imageModels` | 聊天服务下附带的图片模型：`protocol`、可选 `baseUrl`、`models` | 未设置 | 保存后重建图片模型列表 |
+| `providerProfiles[].imageModels` | 旧版聊天服务附带的图片模型，继续用于解析旧配置 | 未设置 | 下一次创建工具目录 |
 | `providerProfiles[].contextWindow` | 该服务的窗口覆盖 | 未设置 | 下一次请求 |
 
 - 图片协议服务没有 `contextWindow`、推理强度与模型发现入口；只有聊天协议下才出现 `imageModels`。复用聊天服务密钥时，图片服务地址必须与聊天服务同协议、同主机、同端口，否则保存失败。
@@ -120,7 +120,7 @@
 | 键 | 含义 | 默认 |
 | --- | --- | --- |
 | `options.fast`、`options.deep`、`options.vision`、`options.memory` | 快速、深入、图片、记忆整理分别使用的模型 | 未设置时沿用当前模型 |
-| `options.imageGeneration` | 图片生成使用的模型，取值为图片服务中的 `providerId` 与 `modelId` | 未设置时不提供 `image_gen` |
+| `options.imageGeneration` | 图片生成的 `providerId`、`modelId`、`protocol` 和可选 `baseUrl`。旧配置由对应服务解析协议和地址 | 未设置时不提供 `image_gen` |
 | `options.capabilities[]` | 每个模型的 `images`、`reasoning`、`contextWindow`、`requestUsage` 覆盖 | 空 |
 | `threads[].reasoningEffort` | 本会话推理强度，`default` 表示跟随服务 | 未设置 |
 

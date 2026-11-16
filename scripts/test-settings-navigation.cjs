@@ -98,6 +98,28 @@ function form(app, tab, entryId = '') {
   provider.aboutToDisappear(); assert.equal(editor.apiKey, ''); assert.equal(editor.balanceApiKey, '');
   console.log('PASS model subpages share the draft and clear its raw key only when leaving the service');
 
+  const Image = controller('ImageGenerationPanel', ['aboutToAppear', 'providers', 'locked', 'knownModels', 'chooseProvider', 'addProvider', 'save'],
+    model('model/ProviderEndpoint'));
+  const legacy = { id: 'chat', enabled: true, protocol: 'chat-completions', imageModels: {
+    protocol: 'seedream-images', baseUrl: 'https://example.com/images', models: ['legacy-first', 'legacy-selected'] } };
+  const imageApp = { providerProfiles: [legacy], productivity: { ...defaultProductivity(), options: {
+    imageGeneration: { providerId: legacy.id, modelId: 'legacy-selected' } } } };
+  let imageReturn, savedImage, imagePops = 0;
+  imageApp.saveImageGeneration = async value => { savedImage = value; return true; };
+  const image = Object.assign(new Image(), { app: imageApp, providerId: '', onSaved: () => imagePops++,
+    onAddProvider: (protocol, onReturn) => { assert.equal(protocol, 'seedream-images'); imageReturn = onReturn; } });
+  image.aboutToAppear();
+  assert.equal(image.modelId, 'legacy-selected'); assert.equal(image.baseUrl, legacy.imageModels.baseUrl);
+  image.addProvider();
+  const added = { id: 'new', enabled: true, protocol: 'openai-images', models: ['new-model'] };
+  imageApp.providerProfiles.push(added); imageReturn(added);
+  image.aboutToAppear();
+  assert.equal(image.modelId, 'new-model'); assert.equal(image.providerId, added.id); assert.equal(image.baseUrl, '');
+  assert.equal(imageApp.productivity.options.imageGeneration.providerId, legacy.id);
+  await image.save();
+  assert.equal(imagePops, 1); assert.equal(savedImage.providerId, 'new'); assert.equal(savedImage.protocol, 'openai-images');
+  console.log('PASS image settings load a legacy choice and preselect a newly added provider before saving');
+
   let writes = 0, pops = 0, reject = true;
   const Appearance = controller('AppearancePanel', ['save'], { AppearancePreferences: { select() {
     if (reject) throw Error('storage unavailable'); writes++;
