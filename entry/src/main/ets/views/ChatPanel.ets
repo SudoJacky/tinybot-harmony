@@ -34,6 +34,7 @@ import { ThreadReferenceCard } from './ThreadReferenceCard';
 import { curves, FrameCallback, LengthMetrics, SymbolGlyphModifier } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { Attachment, MAX_MESSAGE_ATTACHMENTS } from '../model/Productivity';
+import { BrowserAnnotationCard } from './BrowserAnnotationCard';
 import { Attachments } from '../services/Attachments';
 import { AttachmentDrop, ATTACHMENT_DROP_TYPES, importDroppedAttachments } from '../services/AttachmentDrop';
 import { image } from '@kit.ImageKit';
@@ -114,6 +115,10 @@ export struct ChatPanel {
     this.afterRender(() => {
       if (revision !== this.messageSyncRevision) { return; }
       this.messageSource.update(this.thread.id, this.app.visibleMessages);
+      if (this.showBrowserAnnotations && (this.positionedThreadId !== this.thread.id ||
+        !this.thread.attachments.some((item) => !!item.browserAnnotation))) {
+        this.showBrowserAnnotations = false;
+      }
       if (this.positionedThreadId === this.thread.id) { return; }
       this.positionedThreadId = this.thread.id;
       this.inspectingOutput = false;
@@ -207,6 +212,8 @@ export struct ChatPanel {
   private dropGeneration: number = 0;
   @State private showPlus: boolean = false;
   @State private showAttachments: boolean = false;
+  @State private showBrowserAnnotations: boolean = false;
+  @State private browserAnnotationHeight: number = 0;
   @State private attachmentFolderLeft: number = 0;
   @State private attachmentFolderTop: number = 0;
   private pendingPlusAction?: () => void;
@@ -1244,6 +1251,43 @@ export struct ChatPanel {
     }.width(size).height(size).borderRadius(radius).clip(true).backgroundColor($r('app.color.surface_variant'))
   }
 
+  private regularAttachments(): Attachment[] { return this.thread.attachments.filter((item) => !item.browserAnnotation); }
+
+  @Builder
+  browserAnnotations(items: Attachment[], threadId: string) {
+    Column() {
+      Scroll() {
+        Column({ space: Space.xs }) {
+          ForEach(items, (item: Attachment) => {
+            BrowserAnnotationCard({ item: item, editable: true, disabled: !this.app.canQueueInput || this.importing,
+              onPreview: () => this.previewAttachment(item),
+              onChange: (note?: string) => this.app.editBrowserAnnotation(threadId, item.id, note) })
+          }, (item: Attachment) => item.id + ':' + item.browserAnnotation?.note)
+        }.width('100%').onAreaChange((_previous: Area, area: Area) => {
+          const height = Math.min(180, Number(area.height));
+          if (height !== this.browserAnnotationHeight) { this.browserAnnotationHeight = height; }
+        })
+      }.width('100%').height(this.showBrowserAnnotations ? this.browserAnnotationHeight : 0)
+        .margin({ bottom: this.showBrowserAnnotations ? Space.xs : 0 }).clip(true).scrollBar(BarState.Auto)
+        .opacity(this.showBrowserAnnotations ? 1 : 0).enabled(this.showBrowserAnnotations)
+        .accessibilityLevel(this.showBrowserAnnotations ? 'auto' : 'no-hide-descendants')
+      Button({ type: ButtonType.Normal }) {
+        Row({ space: Space.xs }) {
+          Text(t('{0} 条网页批注', [items.length])).fontFamily(this.appearance.fontFamily)
+            .fontSize(Font.small).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
+          SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(10).fontColor([$r('app.color.text_secondary')])
+            .rotate({ angle: this.showBrowserAnnotations ? 0 : 180 }).accessibilityLevel('no')
+        }
+      }.id('draft-browser-annotations').attributeModifier(Btn.tonalSmall)
+        .accessibilityText((this.showBrowserAnnotations ? t('收起') : t('展开')) + ' ' + t('{0} 条网页批注', [items.length]))
+        .onClick(() => {
+          this.getUIContext().animateTo({ duration: Motion.medium, curve: Motion.standard }, () => {
+            this.showBrowserAnnotations = !this.showBrowserAnnotations;
+          });
+        })
+    }.width('100%').alignItems(HorizontalAlign.Start).padding({ top: 4, bottom: 4 }).clip(true)
+  }
+
   @Builder
   singleAttachment(item: Attachment) {
     Stack({ alignContent: Alignment.TopEnd }) {
@@ -1285,7 +1329,7 @@ export struct ChatPanel {
             ] }).position({ x: 9, y: 20 })
         }.width('100%').height('100%').translate({ y: this.showAttachments ? -3 : 0 })
           .animation({ duration: Motion.medium, curve: Motion.standard })
-        ForEach(this.thread.attachments.slice(0, 3), (item: Attachment, index: number) => {
+        ForEach(this.regularAttachments().slice(0, 3), (item: Attachment, index: number) => {
           Stack() {
             this.attachmentThumbnail(item, 25, 4)
           }.width(29).height(29).borderRadius(6).backgroundColor($r('app.color.surface'))
@@ -1302,7 +1346,7 @@ export struct ChatPanel {
           Text(t('附件')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontWeight(FontWeight.Medium)
             .fontColor($r('app.color.text_primary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1)
-          Text(String(this.thread.attachments.length)).fontFamily(this.appearance.fontFamily).fontSize(11)
+          Text(String(this.regularAttachments().length)).fontFamily(this.appearance.fontFamily).fontSize(11)
             .fontColor(this.appearance.onAccentContainer).padding({ left: 6, right: 6, top: 2, bottom: 2 })
             .borderRadius(9).backgroundColor(this.appearance.accentTint)
         }.width('100%').height(37).padding({ left: 11, right: 9 }).borderRadius(Radius.md)
@@ -1317,7 +1361,7 @@ export struct ChatPanel {
     }.id('draft-attachment-folder').width(ATTACHMENT_FOLDER_WIDTH).height(ATTACHMENT_FOLDER_HEIGHT).padding(0)
       .borderRadius(Radius.md)
       .backgroundColor(Color.Transparent).clickEffect(Motion.press)
-      .accessibilityText(t('附件') + ' · ' + t('{0} 项', [this.thread.attachments.length]))
+      .accessibilityText(t('附件') + ' · ' + t('{0} 项', [this.regularAttachments().length]))
       .enabled(!this.app.busy)
       .onAreaChange((_old: Area, area: Area) => {
         this.attachmentFolderLeft = Number(area.globalPosition.x);
@@ -1386,7 +1430,7 @@ export struct ChatPanel {
   attachmentPopup() {
     Scroll() {
       Flex({ wrap: FlexWrap.Wrap, space: { main: LengthMetrics.vp(8), cross: LengthMetrics.vp(10) } }) {
-        ForEach(this.thread.attachments, (item: Attachment, index: number) => {
+        ForEach(this.regularAttachments(), (item: Attachment, index: number) => {
           this.floatingAttachment(item, index)
         }, (item: Attachment) => item.id)
       }.width('100%').padding({ left: 8, right: 8, top: 10, bottom: 12 })
@@ -1398,12 +1442,12 @@ export struct ChatPanel {
   @Builder
   attachmentStrip() {
     Column() {
-      if (this.thread.attachments.length > 0 || this.importing) {
+      if (this.regularAttachments().length > 0 || this.importing) {
         Row({ space: Space.sm }) {
-          if (this.thread.attachments.length > 1 || (this.thread.attachments.length === 1 && this.showAttachments)) {
+          if (this.regularAttachments().length > 1 || (this.regularAttachments().length === 1 && this.showAttachments)) {
             this.attachmentFolder()
-          } else if (this.thread.attachments.length === 1) {
-            this.singleAttachment(this.thread.attachments[0])
+          } else if (this.regularAttachments().length === 1) {
+            this.singleAttachment(this.regularAttachments()[0])
           }
           if (this.importing) {
             Column() { LoadingProgress().width(24).height(24).color(this.appearance.accent) }
@@ -1896,6 +1940,9 @@ export struct ChatPanel {
       }
     // Keep the editor and toolbar mounted. Animate reserved space, never switch layout modes.
     Column() {
+      if (this.thread.attachments.some((item) => !!item.browserAnnotation)) {
+        this.browserAnnotations(this.thread.attachments.filter((item) => !!item.browserAnnotation), this.thread.id)
+      }
       if (this.thread.annotations.length > 0) {
         ForEach([this.thread.id], (threadId: string) => {
           Row() {

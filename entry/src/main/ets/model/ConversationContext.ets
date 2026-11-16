@@ -29,7 +29,10 @@ export function estimateContextTokens(messages: ModelMessage[], tools: ToolDefin
   let tokens = 3 + (tools.length > 0 ? estimateTextTokens(JSON.stringify(toolSchemas(tools))) : 0);
   for (const message of messages) {
     tokens += 8 + estimateTextTokens(message.content) + estimateTextTokens(message.reasoningContent || '');
-    for (const attachment of message.attachments || []) { tokens += attachment.mime === 'image/jpeg' ? 1800 : estimateTextTokens(attachmentContext(attachment)); }
+    for (const attachment of message.attachments || []) {
+      if (attachment.mime === 'image/jpeg') { tokens += 1800; }
+      if (attachment.mime !== 'image/jpeg' || attachment.browserAnnotation) { tokens += estimateTextTokens(attachmentContext(attachment)); }
+    }
     if (message.annotations?.length) { tokens += estimateTextTokens(fileAnnotationContext(message.annotations)); }
     if (message.toolCalls) { tokens += estimateTextTokens(JSON.stringify(message.toolCalls)); }
     if (message.toolCallId) { tokens += estimateTextTokens(message.toolCallId); }

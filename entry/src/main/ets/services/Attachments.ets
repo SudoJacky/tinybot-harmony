@@ -131,8 +131,8 @@ export class Attachments {
       const message = JSON.parse(JSON.stringify(original)) as ModelMessage;
       message.images = [];
       for (const item of message.attachments || []) {
-        if (item.original || item.mime === 'text/plain') { message.content += attachmentContext(item); }
-        else {
+        if (item.original || item.mime === 'text/plain' || item.browserAnnotation) { message.content += attachmentContext(item); }
+        if (!item.original && item.mime === 'image/jpeg') {
           const file = await fs.open(Attachments.path(item), fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
           try { message.images.push('data:image/jpeg;base64,' + new util.Base64Helper().encodeToStringSync(new Uint8Array(await readBounded(file.fd, 4 * 1024 * 1024)))); }
           finally { await fs.close(file); }

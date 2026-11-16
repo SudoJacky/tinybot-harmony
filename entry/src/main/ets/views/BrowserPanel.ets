@@ -2,7 +2,10 @@ import { AppearanceStyle } from '../common/AppearanceStyle';
 import { BrowserActionFeedback, BrowserSession } from '../services/BrowserSession';
 import { NativeBrowserDriver, NativeBrowserCapture } from '../services/NativeBrowserDriver';
 import { BrowserAnnotation, AnnotationPage } from '../model/BrowserAnnotation';
+import { BrowserElementSelection, BrowserInspectorCommand } from '../model/BrowserScripts';
 import { BrowserAnnotationBoard } from './BrowserAnnotationBoard';
+import { BrowserElementEditor } from './BrowserElementEditor';
+import { renderBrowserAnnotation } from '../services/BrowserAnnotationImage';
 import { image } from '@kit.ImageKit';
 import { validateWebAddress } from '../services/WebTools';
 import { browserAddress, BrowserStartPreview } from '../model/BrowserAddress';
@@ -35,7 +38,7 @@ struct BrowserPreviewPage {
 @Component
 export struct BrowserPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
-  @ObjectLink @Watch('resetClosedAddress') browser: BrowserSession;
+  @ObjectLink @Watch('syncBrowserState') browser: BrowserSession;
   @StorageProp('tinybot.foreground') @Watch('syncBrowserVisibility') private foreground: boolean = true;
   @Prop @Watch('syncBrowserVisibility') expanded: boolean = false;
   @Prop presented: boolean = false;
@@ -56,12 +59,20 @@ export struct BrowserPanel {
   @State private capturing: boolean = false;
   @State private showAnnotation: boolean = false;
   @State private pickingElement: boolean = false;
+  @State private elementSelection: BrowserElementSelection | undefined = undefined;
+  @State private inspectorWorking: boolean = false;
+  @State private editorAtTop: boolean = false;
+  @State private editorSpace: number = 0.58;
+  @State private showElementProperties: boolean = true;
   @State private recent: BrowserVisit[] = [];
   @State private annotation: BrowserAnnotation = new BrowserAnnotation();
   @State private webWidth: number = 0;
   @State private webHeight: number = 0;
   private annotationCapture?: NativeBrowserCapture;
   private annotationThreadId: string = '';
+  private selectionTimer: number = -1;
+  private selectionDocument: number = -1;
+  private selectionPreview: number = -1;
   private mounted: boolean = false;
   private driver?: NativeBrowserDriver;
   private recents?: BrowserRecents;
@@ -74,45 +85,145 @@ export struct BrowserPanel {
       this.recent = this.recents.read();
     } catch (error) { Diagnostics.log('error', 'browser', 'history_read_failed', undefined, error as Error); }
   }
-  aboutToDisappear(): void { this.mounted = false; if (this.driver) { this.browser.detach(this.driver); } }
-  private resetClosedAddress(): void {
+  aboutToDisappear(): void {
+    this.mounted = false; this.dropElementSelection();
+    if (this.driver) { this.browser.detach(this.driver); }
+  }
+  private syncBrowserState(): void {
     if (!this.browser.open && this.addressDirty) { this.addressDirty = false; this.address = ''; }
+    if (this.elementSelection && (!this.browser.open || this.browser.owner !== 'user' || !this.sameSelectionDocument())) {
+      this.dropElementSelection();
+    }
   }
   private syncBrowserVisibility(): void {
     if (!this.expanded || !this.foreground) { this.pickingElement = false; }
     this.driver?.setFeedbackVisible(this.expanded); this.browser.setPresentation(this.expanded, this.foreground);
+    this.scheduleElementRefresh();
   }
-  private async annotate(screenshotOnly: boolean = false, x?: number, y?: number): Promise<void> {
-    if (!this.driver || this.capturing || this.showAnnotation || !this.canAnnotate) { return; }
+  private async annotate(screenshotOnly: boolean = false, selectionId?: number, note: string = '', stage: boolean = false): Promise<boolean> {
+    if (!this.driver || this.capturing || this.inspectorWorking || this.showAnnotation || !this.canAnnotate) { return false; }
     this.capturing = true;
     const threadId = this.threadId;
     this.annotationThreadId = threadId;
-    this.getUIContext().getFocusController().clearFocus();
+    // Keep the selected Web viewport stable until the screenshot and its bounds have both been read.
+    if (selectionId === undefined) { this.getUIContext().getFocusController().clearFocus(); }
     let capture: NativeBrowserCapture | undefined;
+    let rendered: image.PixelMap | undefined;
     try {
       await this.browser.pauseForAnnotation();
-      capture = x === undefined || y === undefined ? await this.driver.capture() : await this.driver.captureElement(x, y);
-      if (!this.mounted || this.threadId !== threadId || !this.expanded || !this.foreground) { return; }
+      capture = selectionId === undefined ? await this.driver.capture() : await this.driver.captureElement(selectionId);
+      if (!this.mounted || this.threadId !== threadId || !this.expanded || !this.foreground) { return false; }
       if (screenshotOnly) {
         await this.onScreenshot(threadId, capture.pixel);
       } else {
-        this.annotationCapture = capture; this.annotation = new BrowserAnnotation();
+        this.annotation = new BrowserAnnotation(); this.annotation.note = note;
         if (capture.element) { this.annotation.markElement(capture.element); }
-        this.showAnnotation = true;
-        Diagnostics.log('info', 'browser', 'annotation_captured', { width: capture.width, height: capture.height });
-        capture = undefined; // The annotation board owns the captured pixel from here.
+        if (stage) {
+          rendered = await renderBrowserAnnotation(capture.pixel, this.annotation.strokes);
+          await this.onAnnotation(threadId, rendered, capture, note);
+        } else {
+          this.annotationCapture = capture; this.showAnnotation = true;
+          Diagnostics.log('info', 'browser', 'annotation_captured', { width: capture.width, height: capture.height });
+          capture = undefined; // The annotation board owns the captured pixel from here.
+        }
       }
-    } catch (error) { this.browser.report(error as Error); }
+      return true;
+    } catch (error) { this.browser.report(error as Error); return false; }
     finally {
       this.capturing = false;
+      await rendered?.release().catch((error: Error) => Diagnostics.log('error', 'browser', 'annotation_failed', undefined, error));
       await capture?.pixel.release().catch((error: Error) => Diagnostics.log('error', 'browser', 'annotation_failed', undefined, error));
     }
   }
-  private pickAt(event: ClickEvent): void {
-    if (!this.pickingElement || this.webWidth <= 0 || this.webHeight <= 0) { return; }
-    const width = Math.min(this.webWidth, this.browser.preview?.viewportWidth || this.webWidth);
+  private startElementPicking(): void {
+    this.getUIContext().getFocusController().clearFocus();
+    this.browser.takeOver(); this.pickingElement = true;
+    this.scheduleElementRefresh();
+  }
+  private cancelElementPicking(): void {
     this.pickingElement = false;
-    this.annotate(false, event.x / width, event.y / this.webHeight);
+    this.scheduleElementRefresh();
+  }
+  private sameSelectionDocument(): boolean {
+    return this.selectionDocument === this.browser.documentVersion && this.selectionPreview === this.browser.previewInstance;
+  }
+  private dropElementSelection(): void {
+    clearTimeout(this.selectionTimer); this.selectionTimer = -1;
+    this.elementSelection = undefined; this.pickingElement = false;
+  }
+  private async pickAt(event: ClickEvent): Promise<void> {
+    const driver = this.driver;
+    if (!driver || !this.pickingElement || this.inspectorWorking || this.webWidth <= 0 || this.webHeight <= 0) { return; }
+    const width = Math.min(this.webWidth, this.browser.preview?.viewportWidth || this.webWidth);
+    const x = event.x / width, y = event.y / this.webHeight;
+    this.inspectorWorking = true;
+    try {
+      await this.browser.pauseForAnnotation();
+      if (!this.pickingElement || !this.mounted) { return; }
+      const selection = await driver.inspectElement({ action: 'select', x: x, y: y });
+      if (!selection || !this.mounted) { return; }
+      this.selectionDocument = this.browser.documentVersion; this.selectionPreview = this.browser.previewInstance;
+      const above = selection.mark?.y ?? y;
+      const below = selection.mark ? 1 - selection.mark.y - selection.mark.height : 1 - y;
+      this.elementSelection = selection; this.editorAtTop = above > below;
+      this.editorSpace = Math.max(above, below); this.showElementProperties = true;
+      this.pickingElement = false; this.browser.error = '';
+    } catch (error) { this.browser.report(error as Error); }
+    finally { this.inspectorWorking = false; this.scheduleElementRefresh(); }
+  }
+  private scheduleElementRefresh(): void {
+    clearTimeout(this.selectionTimer); this.selectionTimer = -1;
+    if (this.elementSelection && !this.pickingElement && this.expanded && this.foreground && this.mounted) {
+      this.selectionTimer = setTimeout(() => this.refreshElementSelection(), 200);
+    }
+  }
+  private async refreshElementSelection(): Promise<void> {
+    const previous = this.elementSelection;
+    const driver = this.driver;
+    if (!previous || !driver || !this.expanded || !this.foreground || !this.mounted) { return; }
+    if (!this.sameSelectionDocument()) { this.dropElementSelection(); return; }
+    if (this.inspectorWorking || this.capturing) { this.scheduleElementRefresh(); return; }
+    try {
+      const current = await driver.inspectElement({ action: 'read', id: previous.id });
+      if (this.elementSelection === previous && !this.pickingElement && !this.inspectorWorking && !this.capturing) {
+        if (!current) {
+          this.dropElementSelection(); this.browser.report(t('选中的元素已失效，请重新选择。'));
+        } else if (current.viewport !== previous.viewport || JSON.stringify(current.mark) !== JSON.stringify(previous.mark)) {
+          this.elementSelection = current;
+        }
+      }
+      this.scheduleElementRefresh();
+    } catch (error) {
+      if (this.elementSelection === previous && this.sameSelectionDocument()) { this.browser.report(error as Error); }
+    }
+  }
+  private async editElement(command: BrowserInspectorCommand): Promise<boolean> {
+    const selected = this.elementSelection;
+    if (!selected || !this.driver || this.capturing || this.inspectorWorking || !this.sameSelectionDocument()) { return false; }
+    this.inspectorWorking = true;
+    try {
+      const selection = await this.driver.inspectElement({ action: command.action, id: selected.id, property: command.property, value: command.value });
+      this.browser.error = '';
+      if (selection) { this.elementSelection = selection; }
+      else {
+        this.dropElementSelection();
+        if (command.action !== 'clear') { this.browser.report(t('选中的元素已失效，请重新选择。')); }
+      }
+      return true;
+    } catch (error) { this.browser.report(error as Error); return false; }
+    finally { this.inspectorWorking = false; this.scheduleElementRefresh(); }
+  }
+  private async handoffBrowser(): Promise<void> {
+    this.getUIContext().getFocusController().clearFocus();
+    if (this.elementSelection && !await this.editElement({ action: 'clear' })) { return; }
+    this.pickingElement = false;
+    this.browser.handoff();
+  }
+  private async captureElementNote(note: string, draw: boolean): Promise<void> {
+    const selection = this.elementSelection;
+    if (selection && await this.annotate(false, selection.id, note, !draw) && !draw && this.elementSelection?.id === selection.id) {
+      await this.editElement({ action: 'clear' });
+    }
   }
   private closeAnnotation(): void {
     if (this.annotation.saving) { return; }
@@ -134,6 +245,7 @@ export struct BrowserPanel {
           if (!capture) { throw new Error(t('批注截图已失效，请重新截取。')); }
           await this.onAnnotation(this.annotationThreadId, pixel, capture, note);
           this.showAnnotation = false;
+          if (capture.element) { await this.editElement({ action: 'clear' }); }
         } })
     }
   }
@@ -148,7 +260,7 @@ export struct BrowserPanel {
   }
   private hasWebAddress(): boolean { return !this.browser.preview && /^https?:\/\//i.test(this.browser.url); }
   private canCapturePage(): boolean {
-    return this.canAnnotate && !this.browser.loading && !this.browser.loadFailed && !!this.browser.url && !this.capturing;
+    return this.canAnnotate && !this.browser.loading && !this.browser.loadFailed && !!this.browser.url && !this.capturing && !this.inspectorWorking;
   }
   private loadRecent(visit: BrowserVisit): void {
     this.address = visit.url; this.addressDirty = true; this.navigate();
@@ -192,10 +304,7 @@ export struct BrowserPanel {
       MenuItem({ content: t('复制链接') }).enabled(this.hasWebAddress()).onClick(() => this.useLink(false))
       MenuItem({ content: t('在系统浏览器中打开') }).enabled(this.hasWebAddress()).onClick(() => this.useLink(true))
       MenuItem({ content: t('截图到消息') }).id('browser-screenshot').enabled(this.canCapturePage()).onClick(() => this.annotate(true))
-      MenuItem({ content: t('选择网页元素') }).id('browser-pick-element').enabled(this.canCapturePage()).onClick(() => {
-        this.getUIContext().getFocusController().clearFocus();
-        this.browser.takeOver(); this.pickingElement = true;
-      })
+      MenuItem({ content: t('选择网页元素') }).id('browser-pick-element').enabled(this.canCapturePage()).onClick(() => this.startElementPicking())
       if (this.recent.length) { MenuItem({ content: t('最近访问'), builder: this.recentMenu }) }
       MenuItem({ content: t('设置') }).onClick(this.onSettings)
     }
@@ -218,7 +327,7 @@ export struct BrowserPanel {
     } else if (this.browser.hasTask) {
       Button(t('交还')).fontFamily(this.appearance.fontFamily).id('browser-handoff')
         .accessibilityText(t('交还给 Tinybot')).attributeModifier(Btn.primarySmall)
-        .onClick(() => { this.getUIContext().getFocusController().clearFocus(); this.browser.handoff(); })
+        .onClick(() => this.handoffBrowser())
     }
   }
 
@@ -291,9 +400,40 @@ export struct BrowserPanel {
         label: this.pickingElement ? t('取消选择') : t('批注当前页面'), compId: 'browser-annotate',
         diameter: this.tabbed ? 36 : 44, iconSize: 18, fill: '#00000000',
         disabled: !this.pickingElement && !this.canCapturePage(),
-        onTap: () => { if (this.pickingElement) { this.pickingElement = false; } else { this.annotate(); } } })
+        onTap: () => { if (this.pickingElement) { this.cancelElementPicking(); } else { this.annotate(); } } })
       if (this.tabbed) { this.moreButton(36) }
     }.width('100%').height(this.tabbed ? 46 : 48).padding({ left: 4, right: 6 }).enabled(!this.capturing)
+  }
+
+  private elementEditorHeight(): number {
+    const available = Math.min(this.webHeight * 0.58, this.webHeight * this.editorSpace - 2 * Space.lg);
+    return this.showElementProperties ? Math.max(178, Math.min(386, available)) : 126;
+  }
+
+  @Builder
+  elementEditor() {
+    Stack() {
+      BrowserElementEditor({ selection: this.elementSelection, capturing: this.capturing,
+        showProperties: this.showElementProperties, captureEnabled: this.canCapturePage() && !!this.elementSelection?.mark,
+        onToggleProperties: () => { this.showElementProperties = !this.showElementProperties; },
+        onStyle: (property: string, value: string) => this.editElement({ action: 'style', property: property, value: value }),
+        onReset: () => this.editElement({ action: 'reset' }),
+        onCancel: () => { this.editElement({ action: 'clear' }); },
+        onCapture: (note: string, draw: boolean) => this.captureElementNote(note, draw) })
+    }.width(Math.min(372, this.webWidth - 2 * Space.sm)).height(this.elementEditorHeight())
+      .position({ x: Math.max(Space.sm, this.webWidth - 372 - Space.sm),
+        y: this.editorAtTop ? Space.sm : Math.max(Space.sm, this.webHeight - this.elementEditorHeight() - Space.lg) })
+  }
+
+  @Builder
+  elementHighlight() {
+    Stack() {}
+      .id('browser-element-highlight')
+      .width((this.elementSelection?.mark?.width || 0) * Math.min(this.webWidth, this.browser.preview?.viewportWidth || this.webWidth))
+      .height((this.elementSelection?.mark?.height || 0) * this.webHeight).border({ width: 2, color: this.appearance.accent })
+      .position({ x: (this.elementSelection?.mark?.x || 0) * Math.min(this.webWidth, this.browser.preview?.viewportWidth || this.webWidth),
+        y: (this.elementSelection?.mark?.y || 0) * this.webHeight })
+      .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
   }
 
   @Builder
@@ -395,7 +535,7 @@ export struct BrowserPanel {
           .enabled(!this.capturing)
           .id('agent-browser-web').width('100%').height('100%').javaScriptAccess(true).domStorageAccess(true)
           .fileAccess(false).multiWindowAccess(false).blockNetwork(false)
-          .onPageBegin((event) => { this.pickingElement = false; this.driver?.pageBegin(event.url); })
+          .onPageBegin((event) => { this.dropElementSelection(); this.driver?.pageBegin(event.url); })
           .onProgressChange((event) => this.driver?.progress(event.newProgress))
           .onPageEnd((event) => {
             this.driver?.pageEnd(event.url);
@@ -437,15 +577,21 @@ export struct BrowserPanel {
           } else if (!this.browser.preview && !this.browser.url && !this.browser.loading) {
             this.startPage()
           }
+          if (this.elementSelection?.mark && !this.pickingElement && this.expanded && this.foreground) {
+            this.elementHighlight()
+          }
           if (this.pickingElement) {
             Stack({ alignContent: Alignment.Bottom }) {
-              Text(t('点按网页元素进行批注')).fontFamily(this.appearance.fontFamily).fontSize(Font.small)
+              Text(t('点按要检查的网页元素')).fontFamily(this.appearance.fontFamily).fontSize(Font.small)
                 .fontColor(this.appearance.onAccent).backgroundColor(this.appearance.accent)
                 .padding({ left: Space.md, right: Space.md, top: Space.sm, bottom: Space.sm })
                 .borderRadius(Radius.xl).margin({ bottom: Space.lg }).hitTestBehavior(HitTestMode.None)
             }.id('browser-pick-surface').width(this.browser.preview?.viewportWidth || '100%').constraintSize({ maxWidth: '100%' })
               .height('100%').backgroundColor('#01000000').hitTestBehavior(HitTestMode.Block)
               .onClick((event: ClickEvent) => this.pickAt(event))
+          }
+          if (!this.pickingElement && this.elementSelection && this.expanded && this.foreground && this.webWidth > 100) {
+            ForEach([this.elementSelection.id], (_id: number) => { this.elementEditor() }, (id: number) => String(id))
           }
           ForEach(this.expanded && this.browser.owner === 'agent' && this.browser.actionFeedback ? [this.browser.actionFeedback] : [],
             (feedback: BrowserActionFeedback) => {

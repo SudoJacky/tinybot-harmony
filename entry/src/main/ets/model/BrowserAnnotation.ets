@@ -1,9 +1,8 @@
-import { t } from './I18n';
-
 export interface AnnotationPoint { x: number; y: number; }
 export interface AnnotationStroke { points: AnnotationPoint[]; width: number; }
 export interface BrowserElementMark extends AnnotationPoint { width: number; height: number; label: string; location: string; }
-export interface AnnotationPage { url: string; title: string; element?: BrowserElementMark; }
+export interface BrowserPropertyChange { property: string; before: string; after: string; }
+export interface AnnotationPage { url: string; title: string; element?: BrowserElementMark; tag?: string; changes?: BrowserPropertyChange[]; }
 
 // Coordinates are relative to the captured image, so resizing never moves a mark.
 @Observed
@@ -27,10 +26,4 @@ export class BrowserAnnotation {
     this.end();
   }
   dirty(): boolean { return this.strokes.length > 0 || this.note.trim().length > 0; }
-}
-
-export function browserAnnotationText(page: AnnotationPage, note: string): string {
-  const element = page.element ? t('选中元素：{0}\n页面定位：{1}', [page.element.label || page.element.location, page.element.location]) : '';
-  return t('网页批注：{0}\n网址：{1}\n附件是批注时的当前可见区域截图，红色笔迹为用户标记。\n{2}',
-    [page.title || page.url, page.url, [element, note.trim()].filter((value) => !!value).join('\n')]);
 }

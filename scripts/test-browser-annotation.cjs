@@ -33,12 +33,19 @@ function load(file) {
   return exports;
 }
 const from = name => load(path.join(root, 'main/ets', name));
-const { BrowserAnnotation, browserAnnotationText } = from('model/BrowserAnnotation');
+const { BrowserAnnotation } = from('model/BrowserAnnotation');
+const { browserAnnotationContent, browserAnnotationText } = from('model/BrowserAnnotationContent');
+const { attachmentContext } = from('model/AttachmentContext');
 const { renderBrowserAnnotation } = from('services/BrowserAnnotationImage');
 const { requestHistory } = from('model/Conversation');
 const { threadEntries } = from('model/ContextProjection');
 const { Fixture, Gate } = load(path.join(root, 'test/SessionService.test'));
 const photo = id => ({ id, name: 'Web page annotation.jpg', mime: 'image/jpeg', path: id + '.jpg', size: 120 });
+const note = 'Make this larger';
+const reference = { title: 'Example', url: 'https://example.com/view', tag: 'button',
+  element: { label: 'User control test', location: '#human' },
+  changes: [{ property: 'border-width', before: '2px', after: '7px' }] };
+const annotationPhoto = id => ({ ...photo(id), browserAnnotation: browserAnnotationContent(reference, note) });
 const active = session => session.snapshot().threads.find(thread => thread.id === session.snapshot().activeThreadId);
 const deadline = setTimeout(() => { console.error('Annotation test stalled'); process.exit(1); }, 30000);
 (async () => {
@@ -56,8 +63,8 @@ const deadline = setTimeout(() => { console.error('Annotation test stalled'); pr
   assert.equal(raster.released, 2); raster.fail = false;
   draft.undo(); assert.equal(draft.dirty(), false); draft.note = 'Make this larger'; assert.equal(draft.dirty(), true);
   draft.begin(0.5, 0.5, 0.01); draft.clear(); assert.equal(draft.strokes.length, 0); assert.equal(draft.note, 'Make this larger');
-  const text = browserAnnotationText({ title: 'Example', url: 'https://example.com/view' }, draft.note);
-  assert.match(text, /https:\/\/example.com\/view/); assert.match(text, /Make this larger/);
+  const text = browserAnnotationText(annotationPhoto('reference').browserAnnotation);
+  assert.match(text, /https:\/\/example.com\/view/); assert.match(text, /Make this larger/); assert.match(text, /"after":"7px"/);
   console.log('PASS normalized annotation strokes, undo/clear, note context, full-image export and failed-export cleanup');
 
   const f = new Fixture(); await f.session.initialize();
@@ -65,23 +72,41 @@ const deadline = setTimeout(() => { console.error('Annotation test stalled'); pr
   f.provider.respond = async index => { if (index === 0) { entered.open(); await release.promise; } return { content: 'answer-' + index, toolCalls: [] }; };
   f.session.setDraft('initial'); const running = f.session.send(); await entered.promise;
   f.session.setDraft('Existing draft');
-  await f.session.appendDraftAttachment('thread-1', photo('annotation'), text);
+  await f.session.appendDraftAttachment('thread-1', annotationPhoto('annotation'));
   assert.equal(f.session.state.phase, 'running'); assert.equal(f.provider.requests.length, 1);
-  assert.match(active(f.session).draft, /^Existing draft\n\n/); assert.equal(active(f.session).attachments[0].id, 'annotation');
-  await assert.rejects(f.session.appendDraftAttachment('other', photo('wrong'), text), /对话已切换/);
+  assert.equal(active(f.session).draft, 'Existing draft'); assert.equal(active(f.session).attachments[0].id, 'annotation');
+  await f.session.editBrowserAnnotation('thread-1', 'annotation', 'Adjust the border');
+  assert.equal(active(f.session).attachments[0].browserAnnotation.note, 'Adjust the border');
+  await assert.rejects(f.session.appendDraftAttachment('other', annotationPhoto('wrong')), /对话已切换/);
   await f.session.enqueueInput('steer');
   assert.equal(active(f.session).pendingInputs[0].attachments[0].id, 'annotation');
   assert.equal(active(f.session).attachments.length, 0);
-  await f.session.appendDraftAttachment('thread-1', photo('queued'), text); await f.session.enqueueInput('followUp');
+  await f.session.appendDraftAttachment('thread-1', annotationPhoto('queued')); await f.session.enqueueInput('followUp');
+  assert.equal(active(f.session).pendingInputs.find(input => input.mode === 'followUp').text, '');
   f.session.setDraft('Keep this draft'); release.open(); await running;
   assert.equal(f.provider.requests.length, 3);
   assert.ok(f.provider.requests[1].messages.some(message => message.attachments?.[0]?.id === 'annotation'));
   assert.ok(f.provider.requests[2].messages.some(message => message.attachments?.[0]?.id === 'queued'));
   const thread = active(f.session);
   assert.equal(thread.draft, 'Keep this draft'); assert.equal(thread.messages[2].attachments[0].id, 'queued');
+  assert.equal(thread.messages[2].content, ''); assert.equal(thread.messages[2].attachments[0].browserAnnotation.changes[0].after, '7px');
   assert.ok(requestHistory(thread.messages, '').some(message => message.attachments?.[0]?.id === 'annotation'));
   assert.ok(threadEntries(thread).flatMap(entry => entry.messages).some(message => message.attachments?.[0]?.id === 'annotation'));
-  const saved = await f.repository.load(); assert.ok(saved.threads[0].messages[1].steps.some(step => step.steering?.attachments?.[0]?.id === 'annotation'));
+  const saved = await f.repository.load();
+  assert.ok(saved.threads[0].messages[1].steps.some(step => step.steering?.attachments?.[0]?.browserAnnotation.note === 'Adjust the border'));
+
+  const attachmentTree = ts.createSourceFile('Attachments.ets', fs.readFileSync(path.join(root, 'main/ets/services/Attachments.ets'), 'utf8'), ts.ScriptTarget.Latest, true);
+  const hydrate = attachmentTree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'Attachments')
+    .members.find(node => node.name?.getText(attachmentTree) === 'hydrate');
+  const hydration = { exports: {}, attachmentContext, Attachments: { path: item => item.path },
+    fs: { OpenMode: {}, open: async () => ({ fd: 1 }), close: async () => {} },
+    util: { Base64Helper: class { encodeToStringSync() { return 'AQ=='; } } }, readBounded: async () => new Uint8Array([1]) };
+  vm.runInNewContext(compile('export class Probe {' + hydrate.getText(attachmentTree) + '}'), hydration);
+  const prompt = { role: 'user', content: '', attachments: [annotationPhoto('hydrate')] };
+  const [hydrated] = await hydration.exports.Probe.hydrate([prompt]);
+  assert.equal(hydrated.content, '\n\n' + text);
+  assert.equal(hydrated.images[0], 'data:image/jpeg;base64,AQ==');
+  assert.equal(prompt.content, '');
   const backupTree = ts.createSourceFile('Backup.ets', fs.readFileSync(path.join(root, 'main/ets/services/Backup.ets'), 'utf8'), ts.ScriptTarget.Latest, true);
   const collect = backupTree.statements.find(node => ts.isFunctionDeclaration(node) && node.name.text === 'threadAttachments');
   const backupScope = { exports: {}, toolReceipts: from('model/Agent').toolReceipts };
@@ -98,19 +123,24 @@ const deadline = setTimeout(() => { console.error('Annotation test stalled'); pr
   console.log('PASS running-session annotation staging preserves drafts, requires explicit submission and delivers images in steering, follow-ups, replay and persisted history');
 
   const edit = new Fixture(); await edit.session.initialize();
-  await edit.session.appendDraftAttachment('thread-1', photo('edit'), text); await edit.session.enqueueInput('followUp');
+  await edit.session.appendDraftAttachment('thread-1', annotationPhoto('edit')); await edit.session.enqueueInput('followUp');
   const id = active(edit.session).pendingInputs[0].id;
   await edit.session.setAttachments([photo('unsent')]); await edit.session.removePendingInput(id, true);
   assert.equal(active(edit.session).pendingInputs.length, 1, 'Editing cannot overwrite an existing attachment draft');
   await edit.session.setAttachments([]); await edit.session.removePendingInput(id, true);
-  assert.equal(active(edit.session).attachments[0].id, 'edit'); assert.equal(active(edit.session).draft, text);
+  assert.equal(active(edit.session).attachments[0].id, 'edit'); assert.equal(active(edit.session).draft, '');
   edit.session.setDraft('x'.repeat(24000));
-  await assert.rejects(edit.session.appendDraftAttachment('thread-1', photo('overflow'), text), /24000/);
+  const invalid = annotationPhoto('invalid'); invalid.browserAnnotation.note = 'x'.repeat(4001);
+  await assert.rejects(edit.session.appendDraftAttachment('thread-1', invalid), /附件记录无效/);
+  assert.equal(active(edit.session).attachments.length, 1);
+  await edit.session.appendDraftAttachment('thread-1', annotationPhoto('extra'));
+  assert.equal(active(edit.session).draft.length, 24000);
+  await edit.session.editBrowserAnnotation('thread-1', 'extra');
   assert.equal(active(edit.session).attachments.length, 1);
   edit.session.setDraft(''); edit.repository.beforeSave = async () => { throw Error('annotation disk failed'); };
-  await assert.rejects(edit.session.appendDraftAttachment('thread-1', photo('retained'), text), /annotation disk failed/);
+  await assert.rejects(edit.session.appendDraftAttachment('thread-1', annotationPhoto('failed')), /annotation disk failed/);
   assert.match(edit.session.state.saveError, /annotation disk failed/);
-  assert.equal(active(edit.session).attachments.at(-1).id, 'retained', 'Failed saves retain an explicit unsaved draft');
+  assert.equal(active(edit.session).attachments.at(-1).id, 'edit', 'A failed editor submission can retry without staging a duplicate');
   console.log('PASS queue edit preserves attachment drafts, validates limits before mutation and exposes persistence failures');
 
   const files = new Fixture();
