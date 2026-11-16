@@ -1,4 +1,26 @@
 import { BrowserAction } from '../services/BrowserSession';
+import { BrowserElementMark } from './BrowserAnnotation';
+
+export const BROWSER_STYLE_PROPERTIES: string[] = ['color', 'background-color', 'font-size', 'font-weight', 'padding'];
+
+export interface BrowserInspectorCommand {
+  action: 'select' | 'read' | 'style' | 'reset' | 'clear';
+  id?: number;
+  x?: number;
+  y?: number;
+  property?: string;
+  value?: string;
+}
+
+export interface BrowserElementSelection {
+  id: number;
+  label: string;
+  location: string;
+  mark?: BrowserElementMark;
+  viewport: string;
+  values: string[];
+  edited: boolean;
+}
 
 // Fixed scripts only: the model never supplies JavaScript, selectors, native bridges or cookies.
 const SENSITIVE_INPUT: string = `const sensitive = node => node.matches('input[type="password"],input[type="hidden"],input[type="file"]') || /password|one-time-code|cc-number|cc-csc/.test(node.autocomplete || '') || /password|passwd|secret|token|otp|verification|验证码|密码/i.test((node.name || '') + ' ' + (node.id || ''));`;
@@ -91,45 +113,100 @@ export function browserActionScript(action: BrowserAction, preview: boolean = fa
   return actionScript(JSON.stringify(action), preview);
 }
 
-function elementScript(point: string): string {
+function inspectorScript(expression: string): string {
   return `(() => {
     ${SENSITIVE_INPUT}
-    const {x, y} = ${point};
+    const command = ${expression};
+    const properties = ${JSON.stringify(BROWSER_STYLE_PROPERTIES)};
     const viewport = window.visualViewport;
     const left = viewport?.offsetLeft ?? 0, top = viewport?.offsetTop ?? 0;
     const width = viewport?.width ?? innerWidth, height = viewport?.height ?? innerHeight;
-    const hit = document.elementFromPoint(left + x * width, top + y * height);
-    if (!hit || hit === document.documentElement || hit === document.body || hit.closest('iframe,frame')) return 'null';
-    const node = hit.closest('button,a,h1,h2,h3,h4,h5,h6,img,p,input,textarea,select,[role="button"],[contenteditable]') || hit;
+    const fail = code => JSON.stringify({code});
+    const restore = selection => {
+      const {node, originals, hadStyle} = selection;
+      for (const [property, previous] of originals) {
+        if (previous.value) node.style.setProperty(property, previous.value, previous.priority);
+        else node.style.removeProperty(property);
+      }
+      if (originals.size && !hadStyle && !node.style.length) node.removeAttribute('style');
+      originals.clear();
+    };
+    const state = globalThis.__tinybotElementInspector ??= {sequence: 0, selection: null};
+    const clear = () => {
+      if (state.selection) restore(state.selection);
+      state.selection = null;
+    };
+    if (state.sequence === 0 && !state.listening) {
+      addEventListener('pagehide', clear);
+      state.listening = true;
+    }
+    const describe = node => {
+      const path = [];
+      for (let part = node; part?.parentElement && part !== document.body; part = part.parentElement) {
+        if (part.id && !sensitive(part)) {
+          const id = '#' + CSS.escape(part.id);
+          if (document.querySelectorAll(id).length === 1) { path.unshift(id); break; }
+        }
+        const peers = [...part.parentElement.children].filter(peer => peer.localName === part.localName);
+        path.unshift(CSS.escape(part.localName) + ':nth-of-type(' + (peers.indexOf(part) + 1) + ')');
+      }
+      const label = sensitive(node) || node.isContentEditable ? '' :
+        (node.getAttribute('aria-label') || node.getAttribute('alt') ||
+          (node.matches('input,textarea,select') ? '' : node.innerText) || '').trim().slice(0, 160);
+      return {label, location: path.join(' > ').slice(0, 1000)};
+    };
+    if (command.action === 'select') {
+      if (![command.x, command.y].every(value => Number.isFinite(value) && value >= 0 && value <= 1)) return fail('NO_ELEMENT');
+      const hit = document.elementFromPoint(left + command.x * width, top + command.y * height);
+      if (!hit || hit === document.documentElement || hit === document.body || hit.closest('iframe,frame')) return fail('NO_ELEMENT');
+      const node = hit.closest('button,a,h1,h2,h3,h4,h5,h6,img,p,input,textarea,select,[role="button"],[contenteditable]') || hit;
+      const box = node.getBoundingClientRect();
+      if (!node.style || !box.width || !box.height) return fail('NO_ELEMENT');
+      clear();
+      state.selection = {id: ++state.sequence, node, ...describe(node), originals: new Map(), hadStyle: node.hasAttribute('style')};
+    } else if (!state.selection || state.selection.id !== command.id) {
+      return command.action === 'clear' ? '{}' : fail('STALE_ELEMENT');
+    }
+    const selection = state.selection;
+    const node = selection.node;
+    if (command.action === 'clear') { clear(); return '{}'; }
+    const computed = getComputedStyle(node);
+    if (!node.isConnected || computed.display === 'none' || computed.visibility !== 'visible' || !node.getClientRects().length) {
+      clear(); return fail('STALE_ELEMENT');
+    }
+    if (command.action === 'reset') restore(selection);
+    if (command.action === 'style') {
+      const {property, value} = command;
+      if (!properties.includes(property) || typeof value !== 'string' || !value.trim() || value.length > 120 || !CSS.supports(property, value)) {
+        return fail('INVALID_STYLE');
+      }
+      const affected = property === 'padding' ? ['padding-top', 'padding-right', 'padding-bottom', 'padding-left'] : [property];
+      for (const name of affected) {
+        if (!selection.originals.has(name)) {
+          selection.originals.set(name, {value: node.style.getPropertyValue(name), priority: node.style.getPropertyPriority(name)});
+        }
+      }
+      node.style.setProperty(property, value, 'important');
+    }
+    const {label, location} = selection;
     const box = node.getBoundingClientRect();
     const x0 = Math.max(box.left, left), y0 = Math.max(box.top, top);
     const x1 = Math.min(box.right, left + width), y1 = Math.min(box.bottom, top + height);
-    if (x1 <= x0 || y1 <= y0) return 'null';
-    const path = [];
-    for (let part = node; part?.parentElement && part !== document.body; part = part.parentElement) {
-      if (part.id && !sensitive(part)) {
-        const id = '#' + CSS.escape(part.id);
-        if (document.querySelectorAll(id).length === 1) { path.unshift(id); break; }
-      }
-      const peers = [...part.parentElement.children].filter(peer => peer.localName === part.localName);
-      path.unshift(CSS.escape(part.localName) + ':nth-of-type(' + (peers.indexOf(part) + 1) + ')');
-    }
-    const label = sensitive(node) || node.isContentEditable ? '' :
-      (node.getAttribute('aria-label') || node.getAttribute('alt') ||
-        (node.matches('input,textarea,select') ? '' : node.innerText) || '').trim().slice(0, 160);
-    return JSON.stringify({x:(x0-left)/width,y:(y0-top)/height,width:(x1-x0)/width,height:(y1-y0)/height,
-      label,location:path.join(' > ').slice(0, 1000)});
+    const mark = x1 > x0 && y1 > y0 ? {x:(x0-left)/width,y:(y0-top)/height,width:(x1-x0)/width,height:(y1-y0)/height,label,location} : undefined;
+    return JSON.stringify({selection: {id: selection.id, label, location, mark,
+      viewport: JSON.stringify([scrollX, scrollY, left, top, width, height, viewport?.scale]),
+      values: properties.map(property => computed.getPropertyValue(property).slice(0, 160)), edited: selection.originals.size > 0}});
   })()`;
 }
 
-export function browserElementScript(x: number, y: number): string { return elementScript(JSON.stringify({ x: x, y: y })); }
+export function browserInspectorScript(command: BrowserInspectorCommand): string { return inspectorScript(JSON.stringify(command)); }
 
 // Trusted code installed inside the opaque iframe; no eval or model-supplied scripts/selectors.
 export function browserAutomationScript(): string {
   return `(() => {
     const observe = inputId => ${snapshotScript('inputId')};
     const act = inputAction => ${actionScript('inputAction', false)};
-    const pick = point => ${elementScript('point')};
+    const inspect = inputCommand => ${inspectorScript('inputCommand')};
     addEventListener('message', event => {
       const data = event.data;
       if (event.source !== parent || data?.channel !== 'tinybot-host' || data.type !== 'browserCommand') return;
@@ -141,7 +218,7 @@ export function browserAutomationScript(): string {
           }));
         } else {
           const message = data.operation === 'snapshot' ? observe(args.snapshotId) :
-            data.operation === 'pick' ? pick(args) : act(args);
+            data.operation === 'inspect' ? inspect(args) : act(args);
           parent.postMessage({channel:'tinybot-frame',type:'browserResult',id:data.id,message}, '*');
         }
       } catch (error) {

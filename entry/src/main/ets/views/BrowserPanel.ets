@@ -2,6 +2,7 @@ import { AppearanceStyle } from '../common/AppearanceStyle';
 import { BrowserActionFeedback, BrowserSession } from '../services/BrowserSession';
 import { NativeBrowserDriver, NativeBrowserCapture } from '../services/NativeBrowserDriver';
 import { BrowserAnnotation, AnnotationPage } from '../model/BrowserAnnotation';
+import { BROWSER_STYLE_PROPERTIES, BrowserElementSelection, BrowserInspectorCommand } from '../model/BrowserScripts';
 import { BrowserAnnotationBoard } from './BrowserAnnotationBoard';
 import { image } from '@kit.ImageKit';
 import { validateWebAddress } from '../services/WebTools';
@@ -35,7 +36,7 @@ struct BrowserPreviewPage {
 @Component
 export struct BrowserPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
-  @ObjectLink @Watch('resetClosedAddress') browser: BrowserSession;
+  @ObjectLink @Watch('syncBrowserState') browser: BrowserSession;
   @StorageProp('tinybot.foreground') @Watch('syncBrowserVisibility') private foreground: boolean = true;
   @Prop @Watch('syncBrowserVisibility') expanded: boolean = false;
   @Prop presented: boolean = false;
@@ -56,12 +57,19 @@ export struct BrowserPanel {
   @State private capturing: boolean = false;
   @State private showAnnotation: boolean = false;
   @State private pickingElement: boolean = false;
+  @State private elementSelection: BrowserElementSelection | undefined = undefined;
+  @State private inspectorWorking: boolean = false;
+  @State private styleIndex: number = 0;
+  @State private styleValue: string = '';
   @State private recent: BrowserVisit[] = [];
   @State private annotation: BrowserAnnotation = new BrowserAnnotation();
   @State private webWidth: number = 0;
   @State private webHeight: number = 0;
   private annotationCapture?: NativeBrowserCapture;
   private annotationThreadId: string = '';
+  private selectionTimer: number = -1;
+  private selectionDocument: number = -1;
+  private selectionPreview: number = -1;
   private mounted: boolean = false;
   private driver?: NativeBrowserDriver;
   private recents?: BrowserRecents;
@@ -74,16 +82,23 @@ export struct BrowserPanel {
       this.recent = this.recents.read();
     } catch (error) { Diagnostics.log('error', 'browser', 'history_read_failed', undefined, error as Error); }
   }
-  aboutToDisappear(): void { this.mounted = false; if (this.driver) { this.browser.detach(this.driver); } }
-  private resetClosedAddress(): void {
+  aboutToDisappear(): void {
+    this.mounted = false; this.dropElementSelection();
+    if (this.driver) { this.browser.detach(this.driver); }
+  }
+  private syncBrowserState(): void {
     if (!this.browser.open && this.addressDirty) { this.addressDirty = false; this.address = ''; }
+    if (this.elementSelection && (!this.browser.open || this.browser.owner !== 'user' || !this.sameSelectionDocument())) {
+      this.dropElementSelection();
+    }
   }
   private syncBrowserVisibility(): void {
     if (!this.expanded || !this.foreground) { this.pickingElement = false; }
     this.driver?.setFeedbackVisible(this.expanded); this.browser.setPresentation(this.expanded, this.foreground);
+    this.scheduleElementRefresh();
   }
-  private async annotate(screenshotOnly: boolean = false, x?: number, y?: number): Promise<void> {
-    if (!this.driver || this.capturing || this.showAnnotation || !this.canAnnotate) { return; }
+  private async annotate(screenshotOnly: boolean = false, selectionId?: number): Promise<void> {
+    if (!this.driver || this.capturing || this.inspectorWorking || this.showAnnotation || !this.canAnnotate) { return; }
     this.capturing = true;
     const threadId = this.threadId;
     this.annotationThreadId = threadId;
@@ -91,7 +106,7 @@ export struct BrowserPanel {
     let capture: NativeBrowserCapture | undefined;
     try {
       await this.browser.pauseForAnnotation();
-      capture = x === undefined || y === undefined ? await this.driver.capture() : await this.driver.captureElement(x, y);
+      capture = selectionId === undefined ? await this.driver.capture() : await this.driver.captureElement(selectionId);
       if (!this.mounted || this.threadId !== threadId || !this.expanded || !this.foreground) { return; }
       if (screenshotOnly) {
         await this.onScreenshot(threadId, capture.pixel);
@@ -108,11 +123,94 @@ export struct BrowserPanel {
       await capture?.pixel.release().catch((error: Error) => Diagnostics.log('error', 'browser', 'annotation_failed', undefined, error));
     }
   }
-  private pickAt(event: ClickEvent): void {
-    if (!this.pickingElement || this.webWidth <= 0 || this.webHeight <= 0) { return; }
-    const width = Math.min(this.webWidth, this.browser.preview?.viewportWidth || this.webWidth);
+  private startElementPicking(): void {
+    this.getUIContext().getFocusController().clearFocus();
+    this.browser.takeOver(); this.pickingElement = true;
+    this.scheduleElementRefresh();
+  }
+  private cancelElementPicking(): void {
     this.pickingElement = false;
-    this.annotate(false, event.x / width, event.y / this.webHeight);
+    this.scheduleElementRefresh();
+  }
+  private sameSelectionDocument(): boolean {
+    return this.selectionDocument === this.browser.documentVersion && this.selectionPreview === this.browser.previewInstance;
+  }
+  private dropElementSelection(): void {
+    clearTimeout(this.selectionTimer); this.selectionTimer = -1;
+    this.elementSelection = undefined; this.pickingElement = false; this.styleValue = '';
+  }
+  private async pickAt(event: ClickEvent): Promise<void> {
+    const driver = this.driver;
+    if (!driver || !this.pickingElement || this.inspectorWorking || this.webWidth <= 0 || this.webHeight <= 0) { return; }
+    const width = Math.min(this.webWidth, this.browser.preview?.viewportWidth || this.webWidth);
+    const x = event.x / width, y = event.y / this.webHeight;
+    this.inspectorWorking = true;
+    try {
+      await this.browser.pauseForAnnotation();
+      if (!this.pickingElement || !this.mounted) { return; }
+      const selection = await driver.inspectElement({ action: 'select', x: x, y: y });
+      if (!selection || !this.mounted) { return; }
+      this.selectionDocument = this.browser.documentVersion; this.selectionPreview = this.browser.previewInstance;
+      this.elementSelection = selection; this.styleIndex = 0; this.styleValue = selection.values[0];
+      this.pickingElement = false; this.browser.error = '';
+    } catch (error) { this.browser.report(error as Error); }
+    finally { this.inspectorWorking = false; this.scheduleElementRefresh(); }
+  }
+  private scheduleElementRefresh(): void {
+    clearTimeout(this.selectionTimer); this.selectionTimer = -1;
+    if (this.elementSelection && !this.pickingElement && this.expanded && this.foreground && this.mounted) {
+      this.selectionTimer = setTimeout(() => this.refreshElementSelection(), 200);
+    }
+  }
+  private async refreshElementSelection(): Promise<void> {
+    const previous = this.elementSelection;
+    const driver = this.driver;
+    if (!previous || !driver || !this.expanded || !this.foreground || !this.mounted) { return; }
+    if (!this.sameSelectionDocument()) { this.dropElementSelection(); return; }
+    if (this.inspectorWorking || this.capturing) { this.scheduleElementRefresh(); return; }
+    try {
+      const current = await driver.inspectElement({ action: 'read', id: previous.id });
+      if (this.elementSelection === previous && !this.pickingElement && !this.inspectorWorking && !this.capturing) {
+        if (!current) {
+          this.dropElementSelection(); this.browser.report(t('选中的元素已失效，请重新选择。'));
+        } else if (current.viewport !== previous.viewport || JSON.stringify(current.mark) !== JSON.stringify(previous.mark)) {
+          this.elementSelection = current;
+        }
+      }
+      this.scheduleElementRefresh();
+    } catch (error) {
+      if (this.elementSelection === previous && this.sameSelectionDocument()) { this.browser.report(error as Error); }
+    }
+  }
+  private async editElement(command: BrowserInspectorCommand): Promise<boolean> {
+    const selected = this.elementSelection;
+    if (!selected || !this.driver || this.capturing || this.inspectorWorking || !this.sameSelectionDocument()) { return false; }
+    this.inspectorWorking = true;
+    try {
+      const selection = await this.driver.inspectElement({ action: command.action, id: selected.id, property: command.property, value: command.value });
+      this.browser.error = '';
+      if (selection) { this.elementSelection = selection; this.styleValue = selection.values[this.styleIndex]; }
+      else {
+        this.dropElementSelection();
+        if (command.action !== 'clear') { this.browser.report(t('选中的元素已失效，请重新选择。')); }
+      }
+      return true;
+    } catch (error) { this.browser.report(error as Error); return false; }
+    finally { this.inspectorWorking = false; this.scheduleElementRefresh(); }
+  }
+  private applyElementStyle(): void {
+    if (!this.styleValue.trim()) { return; }
+    this.editElement({ action: 'style', property: BROWSER_STYLE_PROPERTIES[this.styleIndex], value: this.styleValue.trim() });
+  }
+  private async handoffBrowser(): Promise<void> {
+    this.getUIContext().getFocusController().clearFocus();
+    if (this.elementSelection && !await this.editElement({ action: 'clear' })) { return; }
+    this.pickingElement = false;
+    this.browser.handoff();
+  }
+  private styleOptions(): SelectOption[] {
+    return [{ value: t('文字颜色') }, { value: t('背景颜色') }, { value: t('字号') },
+      { value: t('字重') }, { value: t('内边距') }];
   }
   private closeAnnotation(): void {
     if (this.annotation.saving) { return; }
@@ -148,7 +246,7 @@ export struct BrowserPanel {
   }
   private hasWebAddress(): boolean { return !this.browser.preview && /^https?:\/\//i.test(this.browser.url); }
   private canCapturePage(): boolean {
-    return this.canAnnotate && !this.browser.loading && !this.browser.loadFailed && !!this.browser.url && !this.capturing;
+    return this.canAnnotate && !this.browser.loading && !this.browser.loadFailed && !!this.browser.url && !this.capturing && !this.inspectorWorking;
   }
   private loadRecent(visit: BrowserVisit): void {
     this.address = visit.url; this.addressDirty = true; this.navigate();
@@ -192,10 +290,7 @@ export struct BrowserPanel {
       MenuItem({ content: t('复制链接') }).enabled(this.hasWebAddress()).onClick(() => this.useLink(false))
       MenuItem({ content: t('在系统浏览器中打开') }).enabled(this.hasWebAddress()).onClick(() => this.useLink(true))
       MenuItem({ content: t('截图到消息') }).id('browser-screenshot').enabled(this.canCapturePage()).onClick(() => this.annotate(true))
-      MenuItem({ content: t('选择网页元素') }).id('browser-pick-element').enabled(this.canCapturePage()).onClick(() => {
-        this.getUIContext().getFocusController().clearFocus();
-        this.browser.takeOver(); this.pickingElement = true;
-      })
+      MenuItem({ content: t('选择网页元素') }).id('browser-pick-element').enabled(this.canCapturePage()).onClick(() => this.startElementPicking())
       if (this.recent.length) { MenuItem({ content: t('最近访问'), builder: this.recentMenu }) }
       MenuItem({ content: t('设置') }).onClick(this.onSettings)
     }
@@ -218,7 +313,7 @@ export struct BrowserPanel {
     } else if (this.browser.hasTask) {
       Button(t('交还')).fontFamily(this.appearance.fontFamily).id('browser-handoff')
         .accessibilityText(t('交还给 Tinybot')).attributeModifier(Btn.primarySmall)
-        .onClick(() => { this.getUIContext().getFocusController().clearFocus(); this.browser.handoff(); })
+        .onClick(() => this.handoffBrowser())
     }
   }
 
@@ -291,9 +386,61 @@ export struct BrowserPanel {
         label: this.pickingElement ? t('取消选择') : t('批注当前页面'), compId: 'browser-annotate',
         diameter: this.tabbed ? 36 : 44, iconSize: 18, fill: '#00000000',
         disabled: !this.pickingElement && !this.canCapturePage(),
-        onTap: () => { if (this.pickingElement) { this.pickingElement = false; } else { this.annotate(); } } })
+        onTap: () => { if (this.pickingElement) { this.cancelElementPicking(); } else { this.annotate(); } } })
       if (this.tabbed) { this.moreButton(36) }
     }.width('100%').height(this.tabbed ? 46 : 48).padding({ left: 4, right: 6 }).enabled(!this.capturing)
+  }
+
+  @Builder
+  elementEditor() {
+    Column({ space: Space.xs }) {
+      Row({ space: Space.xs }) {
+        Text(t('选中元素：{0}', [this.elementSelection?.label || this.elementSelection?.location || ''])).fontFamily(this.appearance.fontFamily)
+          .fontSize(Font.small).fontColor($r('app.color.text_primary')).fontWeight(FontWeight.Medium)
+          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1).id('browser-selected-element')
+        IconButton({ icon: $r('sys.symbol.xmark'), label: t('清除选择'), compId: 'browser-clear-element',
+          diameter: 32, iconSize: 14, fill: '#00000000', onTap: () => this.editElement({ action: 'clear' }) })
+      }.width('100%')
+      Row({ space: Space.xs }) {
+        Select(this.styleOptions()).selected(this.styleIndex).value(this.styleOptions()[this.styleIndex].value)
+          .id('browser-style-property').height(36).onSelect((index: number) => {
+            this.styleIndex = index; this.styleValue = this.elementSelection?.values[index] || '';
+          })
+        TextInput({ text: this.styleValue, placeholder: t('样式值') }).id('browser-style-value')
+          .fontFamily(this.appearance.fontFamily).fontSize(Font.small).height(36).layoutWeight(1)
+          .enterKeyType(EnterKeyType.Go).maxLength(120).accessibilityText(t('样式值'))
+          .onChange((value: string) => { this.styleValue = value; }).onSubmit(() => this.applyElementStyle())
+        Button(t('应用样式')).id('browser-apply-style').attributeModifier(Btn.tonalSmall)
+          .enabled(this.styleValue.trim().length > 0).onClick(() => this.applyElementStyle())
+      }.width('100%')
+      Row({ space: Space.xs }) {
+        Button(t('重新选择')).id('browser-reselect-element').attributeModifier(Btn.textSmall).layoutWeight(1)
+          .onClick(() => this.startElementPicking())
+        Button(t('重置样式')).id('browser-reset-style').attributeModifier(Btn.textSmall).layoutWeight(1)
+          .enabled(!!this.elementSelection?.edited).onClick(() => this.editElement({ action: 'reset' }))
+        Button(t('批注元素')).id('browser-annotate-element').attributeModifier(Btn.primarySmall).layoutWeight(1)
+          .enabled(this.canCapturePage() && !!this.elementSelection?.mark).onClick(() => {
+            const id = this.elementSelection?.id;
+            if (id !== undefined) { this.annotate(false, id); }
+          })
+      }.width('100%')
+      if (!this.elementSelection?.mark) {
+        Text(t('选中元素不在可见区域，请滚动到该元素。')).fontFamily(this.appearance.fontFamily)
+          .fontSize(Font.caption).fontColor($r('app.color.text_secondary')).width('100%')
+      }
+    }.width('100%').padding({ left: Space.sm, right: Space.sm, bottom: Space.xs })
+      .backgroundColor($r('app.color.surface')).enabled(!this.capturing && !this.inspectorWorking && !this.pickingElement)
+  }
+
+  @Builder
+  elementHighlight() {
+    Stack() {}
+      .id('browser-element-highlight')
+      .width((this.elementSelection?.mark?.width || 0) * Math.min(this.webWidth, this.browser.preview?.viewportWidth || this.webWidth))
+      .height((this.elementSelection?.mark?.height || 0) * this.webHeight).border({ width: 2, color: this.appearance.accent })
+      .position({ x: (this.elementSelection?.mark?.x || 0) * Math.min(this.webWidth, this.browser.preview?.viewportWidth || this.webWidth),
+        y: (this.elementSelection?.mark?.y || 0) * this.webHeight })
+      .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
   }
 
   @Builder
@@ -375,6 +522,7 @@ export struct BrowserPanel {
             .fontColor($r('app.color.danger')).copyOption(CopyOptions.LocalDevice)
             .width('100%').padding({ left: Space.md, right: Space.md, bottom: Space.sm })
         }
+        if (this.elementSelection) { this.elementEditor() }
         if (this.browser.loading) {
           Progress({ value: this.browser.progress, total: 100, type: ProgressType.Linear }).id('browser-progress')
             .width('100%').color(this.appearance.accent).style({ strokeWidth: 2 }).accessibilityText(t('正在加载网页'))
@@ -395,7 +543,7 @@ export struct BrowserPanel {
           .enabled(!this.capturing)
           .id('agent-browser-web').width('100%').height('100%').javaScriptAccess(true).domStorageAccess(true)
           .fileAccess(false).multiWindowAccess(false).blockNetwork(false)
-          .onPageBegin((event) => { this.pickingElement = false; this.driver?.pageBegin(event.url); })
+          .onPageBegin((event) => { this.dropElementSelection(); this.driver?.pageBegin(event.url); })
           .onProgressChange((event) => this.driver?.progress(event.newProgress))
           .onPageEnd((event) => {
             this.driver?.pageEnd(event.url);
@@ -437,9 +585,12 @@ export struct BrowserPanel {
           } else if (!this.browser.preview && !this.browser.url && !this.browser.loading) {
             this.startPage()
           }
+          if (this.elementSelection?.mark && !this.pickingElement && this.expanded && this.foreground) {
+            this.elementHighlight()
+          }
           if (this.pickingElement) {
             Stack({ alignContent: Alignment.Bottom }) {
-              Text(t('点按网页元素进行批注')).fontFamily(this.appearance.fontFamily).fontSize(Font.small)
+              Text(t('点按要检查的网页元素')).fontFamily(this.appearance.fontFamily).fontSize(Font.small)
                 .fontColor(this.appearance.onAccent).backgroundColor(this.appearance.accent)
                 .padding({ left: Space.md, right: Space.md, top: Space.sm, bottom: Space.sm })
                 .borderRadius(Radius.xl).margin({ bottom: Space.lg }).hitTestBehavior(HitTestMode.None)

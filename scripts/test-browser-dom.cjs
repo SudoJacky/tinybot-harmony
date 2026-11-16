@@ -7,11 +7,12 @@ const source = fs.readFileSync(path.resolve(__dirname, '../entry/src/main/ets/mo
 const exported = {};
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 } }).outputText,
   { exports: exported, require: name => { throw Error('Unexpected runtime dependency ' + name); } });
-const { browserSnapshotScript, browserActionScript, browserElementScript } = exported;
+const { browserSnapshotScript, browserActionScript, browserInspectorScript } = exported;
 (async () => {
   const browser = await chromium.launch({ channel: 'msedge', headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 800, height: 900 } });
+    const inspect = async command => JSON.parse(await page.evaluate(browserInspectorScript(command)));
     await page.setContent(`<main><h1>Interactive page</h1>
       <label>Search<input name="search" value="existing"></label><textarea name="draft">Initial</textarea>
       <label>Password<input type="password" value="secret-password"></label><input name="otp" autocomplete="one-time-code" value="123456">
@@ -61,12 +62,12 @@ const { browserSnapshotScript, browserActionScript, browserElementScript } = exp
     const submit = snapshot.elements.find(item => item.label === 'Submit');
     const clickPreview = await preview({ action: 'click', elementId: submit.id });
     const rect = await page.locator('button').first().boundingBox();
-    const picked = JSON.parse(await page.evaluate(browserElementScript((rect.x + rect.width / 2) / 800, (rect.y + rect.height / 2) / 900)));
+    const { selection: picked } = await inspect({ action: 'select', x: (rect.x + rect.width / 2) / 800, y: (rect.y + rect.height / 2) / 900 });
     assert.equal(picked.label, 'Submit');
     assert.match(picked.location, /button:nth-of-type\(1\)$/);
-    assert.ok(Math.abs(picked.width - rect.width / 800) < 0.001);
+    assert.ok(Math.abs(picked.mark.width - rect.width / 800) < 0.001);
     const passwordBox = await page.locator('input[type=password]').boundingBox();
-    const protectedElement = JSON.parse(await page.evaluate(browserElementScript((passwordBox.x + 4) / 800, (passwordBox.y + 4) / 900)));
+    const { selection: protectedElement } = await inspect({ action: 'select', x: (passwordBox.x + 4) / 800, y: (passwordBox.y + 4) / 900 });
     assert.equal(protectedElement.label, '');
     assert.equal(JSON.stringify(protectedElement).includes('secret-password'), false);
     assert.ok(Math.abs(clickPreview.target.x - (rect.x + rect.width / 2) / 800) < 0.001);
@@ -117,5 +118,42 @@ const { browserSnapshotScript, browserActionScript, browserElementScript } = exp
     assert.equal(JSON.parse(await page.evaluate(browserActionScript(zoomAction))).code, 'STALE_BROWSER_ELEMENT');
     assert.equal(await page.evaluate('window.effects'), undefined, 'Revalidate after the cue before issuing any effect');
     console.log('PASS side-effect-free previews, normalized target positions, zoom/clipping and revalidation before committing an action');
+
+    await session.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
+    await page.setContent(`<main style="height:2000px">
+      <button id="styled" style="position:absolute;left:350px;top:100px;width:150px;height:60px;color:blue!important;padding-top:3px!important;padding-left:5px"
+        onclick="window.effects=(window.effects||0)+1">Edit me</button>
+      <p id="other" style="position:absolute;left:30px;top:200px">Another target</p>
+    </main>`);
+    const { selection } = await inspect({ action: 'select', x: 380 / 800, y: 130 / 900 });
+    const edit = (action, fields = {}) => inspect({ action, id: selection.id, ...fields });
+    const control = page.locator('#styled');
+    assert.equal(selection.label, 'Edit me');
+    assert.equal(await page.evaluate('window.effects'), undefined, 'Selecting must not activate the control');
+    assert.equal((await edit('style', { property: 'color', value: 'red; font-size: 99px' })).code, 'INVALID_STYLE');
+    assert.equal((await edit('style', { property: 'background-image', value: 'url(https://example.com)' })).code, 'INVALID_STYLE');
+    assert.equal((await edit('style', { property: 'color', value: 'red' })).selection.values[0], 'rgb(255, 0, 0)');
+    assert.equal((await edit('style', { property: 'padding', value: '12px' })).selection.edited, true);
+    assert.equal(await control.evaluate(node => getComputedStyle(node).paddingTop), '12px');
+    assert.equal((await edit('reset')).selection.edited, false);
+    assert.deepEqual(await control.evaluate(node => [node.style.color, node.style.getPropertyPriority('color'),
+      node.style.paddingTop, node.style.getPropertyPriority('padding-top'), node.style.paddingLeft]), ['blue', 'important', '3px', 'important', '5px']);
+    await edit('style', { property: 'font-size', value: '28px' });
+    await session.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
+    const zoomed = (await edit('read')).selection;
+    assert.equal(zoomed.id, selection.id);
+    assert.ok(Math.abs(zoomed.mark.width - 50 / 400) < 0.002, 'Zoom must use the clipped current viewport');
+    await session.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
+    await page.evaluate(() => scrollTo(0, 600));
+    assert.equal((await edit('read')).selection.mark, undefined, 'Scrolling out of view keeps the selection without an annotation box');
+    await page.evaluate(() => scrollTo(0, 0));
+    assert.equal((await edit('read')).selection.mark.label, 'Edit me');
+    const { selection: other } = await inspect({ action: 'select', x: 40 / 800, y: 230 / 900 });
+    assert.equal(other.location, '#other');
+    assert.equal(await control.evaluate(node => node.style.fontSize), '', 'Reselecting restores the old target');
+    assert.equal((await edit('read')).code, 'STALE_ELEMENT');
+    await page.locator('#other').evaluate(node => node.remove());
+    assert.equal((await inspect({ action: 'read', id: other.id })).code, 'STALE_ELEMENT');
+    console.log('PASS live style edits, exact reset of overwritten values, stable selection under scroll/zoom and detached target invalidation');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

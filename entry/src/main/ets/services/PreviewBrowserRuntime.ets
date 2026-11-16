@@ -1,6 +1,7 @@
 import { BrowserPage, BrowserAction } from './BrowserSession';
 import { ToolFailure } from '../model/ToolFailure';
 import { image } from '@kit.ImageKit';
+import { BrowserInspectorCommand } from '../model/BrowserScripts';
 
 interface PendingBrowserRequest { id: number; finish: (output?: string, error?: Error) => void; }
 
@@ -63,8 +64,8 @@ export class PreviewBrowserRuntime {
     const result = JSON.parse(await this.request('action', JSON.stringify(action))) as Record<string, string | boolean>;
     if (result.ok !== true) { throw new ToolFailure(result.code as string || 'BROWSER_ACTION_FAILED', result.message as string, 'read_browser_snapshot'); }
   }
-  pick(x: number, y: number): Promise<string> {
-    return this.request('pick', JSON.stringify({ x: x, y: y }));
+  inspectElement(command: BrowserInspectorCommand): Promise<string> {
+    return this.request('inspect', JSON.stringify(command));
   }
   async capture(): Promise<image.PixelMap> {
     if (!this.started || !this.surface) { throw new Error('Preview surface is not ready'); }

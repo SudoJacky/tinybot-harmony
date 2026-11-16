@@ -81,6 +81,7 @@ export class BrowserSession implements ExecutionGate {
 
   get paused(): boolean { return this.permissionPending || (!!this.lease && this.owner === 'user'); }
   get hasTask(): boolean { return this.lease !== undefined; }
+  get documentVersion(): number { return this.documentGeneration; }
   configure(savePolicy: (policy: BrowserPolicy) => Promise<void>, log: (event: string, fields?: LogFields, error?: Error | string) => void): void {
     this.savePolicy = savePolicy; this.log = log;
   }

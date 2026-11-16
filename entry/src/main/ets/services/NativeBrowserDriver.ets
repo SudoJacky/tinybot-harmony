@@ -1,9 +1,10 @@
 import { webview } from '@kit.ArkWeb';
 import { image } from '@kit.ImageKit';
-import { AnnotationPage, BrowserElementMark } from '../model/BrowserAnnotation';
+import { AnnotationPage } from '../model/BrowserAnnotation';
 import { t } from '../model/I18n';
 import { ToolFailure } from '../model/ToolFailure';
-import { browserActionScript, browserElementScript, browserSnapshotScript } from '../model/BrowserScripts';
+import { browserActionScript, browserInspectorScript, browserSnapshotScript, BrowserElementSelection,
+  BrowserInspectorCommand, BROWSER_STYLE_PROPERTIES } from '../model/BrowserScripts';
 import { bingSearchScript, BingSearchPage } from '../model/BingSearch';
 import { BrowserAction, BrowserDriver, BrowserPage, BrowserSession } from './BrowserSession';
 import { BrowserPreview } from '../model/BrowserPreview';
@@ -15,6 +16,7 @@ import { Cancellation } from './Cancellation';
 
 interface BrowserTarget { x: number; y: number; }
 interface BrowserScriptResult { ok?: boolean; code?: string; message?: string; target?: BrowserTarget; }
+interface BrowserInspectorResult { code?: string; selection?: BrowserElementSelection; }
 export interface NativeBrowserCapture extends AnnotationPage { pixel: image.PixelMap; width: number; height: number; }
 
 export class NativeBrowserDriver implements BrowserDriver {
@@ -199,28 +201,50 @@ export class NativeBrowserDriver implements BrowserDriver {
       return { pixel: pixel, url: url, title: title, width: info.size.width, height: info.size.height };
     } catch (error) { await pixel.release(); throw error as Error; }
   }
-  async captureElement(x: number, y: number): Promise<NativeBrowserCapture> {
-    if (!this.browser.open || this.browser.owner !== 'user' || ![x, y].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) {
-      throw new Error(t('未选中可批注的网页元素。'));
-    }
+  async inspectElement(command: BrowserInspectorCommand): Promise<BrowserElementSelection | undefined> {
+    const document = this.browser.documentVersion, preview = this.browser.previewInstance;
+    const check = (): void => {
+      if (!this.browser.open || this.browser.owner !== 'user' || this.browser.documentVersion !== document ||
+        this.browser.previewInstance !== preview) { throw new Error(t('页面已变化，请重新选择元素。')); }
+    };
+    check();
     if (!this.browser.preview) { await this.ready(); }
-    const instance = this.browser.createObservation().instanceId;
-    const locate = (): Promise<string> => this.browser.preview ? this.previewRuntime.pick(x, y) : this.script(browserElementScript(x, y));
-    const first = await locate();
-    const element = JSON.parse(first) as BrowserElementMark | null;
-    if (!element || typeof element.location !== 'string' || !element.location || element.location.length > 1000 ||
-      typeof element.label !== 'string' || element.label.length > 160 ||
-      ![element.x, element.y, element.width, element.height].every((value) => Number.isFinite(value) && value >= 0 && value <= 1) ||
-      element.width <= 0 || element.height <= 0 || element.x + element.width > 1.00001 || element.y + element.height > 1.00001) {
-      throw new Error(t('未选中可批注的网页元素。'));
+    check();
+    const output = this.browser.preview ? await this.previewRuntime.inspectElement(command) : await this.script(browserInspectorScript(command));
+    check();
+    const result = JSON.parse(output) as BrowserInspectorResult;
+    if (result?.code === 'STALE_ELEMENT') { return undefined; }
+    if (result?.code === 'NO_ELEMENT') { throw new Error(t('未选中可批注的网页元素。')); }
+    if (result?.code === 'INVALID_STYLE') { throw new Error(t('样式值无效，请检查格式。')); }
+    if (result && !result.code && command.action === 'clear') { return undefined; }
+    const selection = result?.selection;
+    const mark = selection?.mark;
+    if (!selection || !Number.isSafeInteger(selection.id) || selection.id <= 0 ||
+      (command.action !== 'select' && selection.id !== command.id) ||
+      typeof selection.location !== 'string' || !selection.location || selection.location.length > 1000 ||
+      typeof selection.label !== 'string' || selection.label.length > 160 || typeof selection.edited !== 'boolean' ||
+      typeof selection.viewport !== 'string' || selection.viewport.length > 200 || !Array.isArray(selection.values) ||
+      selection.values.length !== BROWSER_STYLE_PROPERTIES.length || selection.values.some((value) => typeof value !== 'string' || value.length > 160) ||
+      (mark && (mark.label !== selection.label || mark.location !== selection.location ||
+        ![mark.x, mark.y, mark.width, mark.height].every((value) => Number.isFinite(value) && value >= 0 && value <= 1) ||
+        mark.width <= 0 || mark.height <= 0 || mark.x + mark.width > 1.00001 || mark.y + mark.height > 1.00001))) {
+      throw new Error(t('无法读取选中元素，请重新选择。'));
     }
+    return selection;
+  }
+  async captureElement(id: number): Promise<NativeBrowserCapture> {
+    const docVersion = this.browser.documentVersion, preview = this.browser.previewInstance;
+    const first = await this.inspectElement({ action: 'read', id: id });
+    if (!first) { throw new Error(t('选中的元素已失效，请重新选择。')); }
+    if (!first.mark) { throw new Error(t('选中元素不在可见区域，请滚动到该元素。')); }
     const capture = await this.capture();
     try {
-      const second = await locate();
-      if (instance !== this.browser.createObservation().instanceId || this.browser.owner !== 'user' || first !== second) {
+      const second = await this.inspectElement({ action: 'read', id: id });
+      if (!second?.mark || docVersion !== this.browser.documentVersion || preview !== this.browser.previewInstance ||
+        first.viewport !== second.viewport || JSON.stringify(first.mark) !== JSON.stringify(second.mark)) {
         throw new Error(t('页面已变化，请重新选择元素。'));
       }
-      capture.element = element;
+      capture.element = first.mark;
       return capture;
     } catch (error) { await capture.pixel.release(); throw error as Error; }
   }

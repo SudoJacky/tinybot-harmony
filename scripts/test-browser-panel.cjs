@@ -10,14 +10,17 @@ function emitted(relative) {
   return ts.createSourceFile(built, fs.readFileSync(built, 'utf8'), ts.ScriptTarget.Latest, true);
 }
 const panelTree = emitted('views/BrowserPanel'), handlers = {};
-function visit(node) {
+const panelClass = panelTree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'BrowserPanel');
+function visit(node, names) {
   if (ts.isCallExpression(node)) {
     const name = node.expression.getText(panelTree);
-    if (['TextInput.onFocus', 'TextInput.onBlur', 'TextInput.onChange', 'TextInput.create', 'Web.onPageEnd'].includes(name)) handlers[name] = node.arguments[0].getText(panelTree);
+    if (names.includes(name)) handlers[name] = node.arguments[0].getText(panelTree);
   }
-  ts.forEachChild(node, visit);
+  ts.forEachChild(node, child => visit(child, names));
 }
-visit(panelTree);
+visit(panelClass.members.find(node => node.name?.getText(panelTree) === 'addressField'),
+  ['TextInput.onFocus', 'TextInput.onBlur', 'TextInput.onChange', 'TextInput.create']);
+visit(panelClass, ['Web.onPageEnd']);
 const indexTree = emitted('pages/Index');
 const index = indexTree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'Index');
 let presentCallback;
@@ -35,7 +38,6 @@ presentationExports.callback.call(presented)();
 assert.equal(presented.expanded, true); assert.equal(presented.tab, 'browser'); assert.equal(presented.owner, 'agent');
 console.log('PASS emitted preview presentation expands the browser and selects its tab without taking control');
 const back = index.members.find(n => n.name?.getText(indexTree) === 'onBackPress').body.getText(indexTree);
-const panelClass = panelTree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'BrowserPanel');
 const navigate = panelClass.members.find(n => n.name?.getText(panelTree) === 'navigate').body.getText(panelTree);
 const feedbackStatements = [];
 function feedback(node) {
@@ -211,7 +213,7 @@ const TouchType = { Down: 0, Move: 1, Up: 2, Cancel: 3 };
   console.log('PASS emitted annotation canvas: touch geometry, resize alignment, failed-save retry, duplicate-add guard and image release');
 
   const events = []; let unpause, dialog;
-  const panel = probe(panelTree, panelClass, ['annotate', 'closeAnnotation'], {
+  const panel = probe(panelTree, panelClass, ['pickAt', 'annotate', 'closeAnnotation'], {
     BrowserAnnotation: annotationExports.BrowserAnnotation, Diagnostics: { log() {} }
   });
   Object.assign(panel, { appearance: { surface: {} }, mounted: true, expanded: true, foreground: true,
@@ -237,14 +239,48 @@ const TouchType = { Down: 0, Move: 1, Up: 2, Cancel: 3 };
   await panel.annotate(true);
   assert.equal(screenshotReleased, 1); assert.equal(panel.showAnnotation, false);
   const element = { x: 0.2, y: 0.3, width: 0.2, height: 0.1, label: 'Submit', location: '#submit' };
-  panel.driver.captureElement = async (x, y) => {
-    assert.equal(x, 0.25); assert.equal(y, 0.35);
+  Object.assign(panel, { pickingElement: true, webWidth: 400, webHeight: 500, scheduleElementRefresh() {} });
+  Object.assign(panel.browser, { preview: { viewportWidth: 300 }, documentVersion: 1, previewInstance: 2 });
+  panel.driver.inspectElement = async command => {
+    assert.equal(command.action, 'select'); assert.equal(command.x, 0.25); assert.equal(command.y, 0.35);
+    return { id: 7, mark: element, values: ['rgb(0, 0, 0)'] };
+  };
+  await panel.pickAt({ x: 75, y: 175 });
+  assert.equal(panel.elementSelection.id, 7);
+  assert.equal(panel.pickingElement, false); assert.equal(panel.showAnnotation, false);
+  panel.driver.captureElement = async id => {
+    assert.equal(id, 7);
     return { pixel: {}, element, width: 900, height: 1200 };
   };
-  await panel.annotate(false, 0.25, 0.35);
+  await panel.annotate(false, panel.elementSelection.id);
   assert.equal(panel.showAnnotation, true);
   assert.equal(panel.annotation.strokes[0].points.length, 5);
-  console.log('PASS screenshot stages directly and element capture seeds an editable outline');
+  console.log('PASS selecting leaves the page open for editing, screenshot stages directly and element capture seeds an editable outline');
+
+  const highlight = probe(panelTree, panelClass, ['elementHighlight'], { Stack: markerUi, HitTestMode: { None: 'pass-through' } });
+  let updateHighlight;
+  Object.assign(highlight, { appearance: {}, webWidth: 400, webHeight: 500, browser: panel.browser,
+    elementSelection: { mark: element }, observeComponentCreation2(callback) { updateHighlight = callback; callback(1, true); } });
+  highlight.elementHighlight();
+  assert.equal(marker.position.x, 60); assert.equal(marker.position.y, 150);
+  assert.equal(marker.hitTestBehavior, 'pass-through');
+  highlight.elementSelection = { mark: { ...element, y: 0.5 } };
+  updateHighlight(1, false);
+  assert.equal(marker.position.y, 250, 'The ArkUI highlight must follow the current selection geometry');
+
+  const driverTree = emitted('services/NativeBrowserDriver');
+  const driverClass = driverTree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'NativeBrowserDriver');
+  const driver = probe(driverTree, driverClass, ['captureElement']);
+  let current = { mark: element, viewport: 'current' }, nativeReleases = 0;
+  const capture = { pixel: { release: async () => { nativeReleases++; } } };
+  driver.browser = { documentVersion: 1, previewInstance: 0 };
+  driver.inspectElement = async () => current;
+  driver.capture = async () => capture;
+  assert.equal((await driver.captureElement(7)).element, element);
+  driver.capture = async () => { current = { mark: element, viewport: 'changed' }; return capture; };
+  await assert.rejects(driver.captureElement(7), /页面已变化/);
+  assert.equal(nativeReleases, 1);
+  console.log('PASS element capture uses current coordinates and releases the screenshot if the viewport changes mid-capture');
 
   const draftEvents = [];
   const page = probe(indexTree, index, ['addBrowserAnnotation'], {
