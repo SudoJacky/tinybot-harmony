@@ -1,6 +1,6 @@
 import { AppData } from '../model/Conversation';
 import { Diagnostics } from '../model/Diagnostics';
-import { ModelReference, ProviderProfile, modelConfig } from '../model/ProviderProfiles';
+import { ImageGenerationConfig, ModelReference, ProviderProfile, modelConfig } from '../model/ProviderProfiles';
 import { isOnboardingCandidate } from '../model/Onboarding';
 import { t } from '../model/I18n';
 import { CredentialVault } from './ProfileSettings';
@@ -10,7 +10,12 @@ import { sameCredentialScope } from '../model/ProviderEndpoint';
 import { canKeepBalanceCredential } from '../model/BalanceSettings';
 
 export interface ProviderKey { profile: ProviderProfile; apiKey: string; balanceApiKey?: string; }
-export interface BackupKeyPayload { providers: ProviderKey[]; selected?: ModelReference; connections?: BackupConnections; }
+export interface BackupKeyPayload {
+  providers: ProviderKey[];
+  selected?: ModelReference;
+  imageGeneration?: ImageGenerationConfig;
+  connections?: BackupConnections;
+}
 // Secrets travel from the reader to the committing service in memory only, never in AppData.
 const restoredKeys = new WeakMap<AppData, BackupKeyPayload>();
 export function attachBackupKeys(data: AppData, payload: BackupKeyPayload): void { restoredKeys.set(data, payload); }

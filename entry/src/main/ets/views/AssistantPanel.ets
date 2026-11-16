@@ -6,7 +6,7 @@ import { defaultContextWindow } from '../model/ContextSettings';
 import { reasoningEfforts, reasoningEffortName } from '../model/ReasoningEffort';
 import { AssistantOptions, ModelCapability, defaultAssistantOptions } from '../model/AssistantOptions';
 import { mergeSavedConfiguration } from '../model/SavedConfiguration';
-import { ModelChoice, ModelReference, availableImageModels } from '../model/ProviderProfiles';
+import { ModelReference } from '../model/ProviderProfiles';
 import { ProductivityData } from '../model/Productivity';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { Btn, Font, Space } from '../common/Theme';
@@ -27,20 +27,6 @@ export struct ModelSettingsPanel {
   @State private error: string = '';
   aboutToAppear(): void { this.options = JSON.parse(JSON.stringify(this.app.productivity.options || defaultAssistantOptions())) as AssistantOptions; this.loadCapability(); }
   private choices(): string[] { return [t("跟随当前模型")].concat(this.app.modelChoices.map((item) => item.providerName + ' · ' + item.modelId)); }
-  private imageModels(): ModelChoice[] { return availableImageModels(this.app.providerProfiles); }
-  private imageChoices(): string[] { return [t('关闭图片生成')].concat(this.imageModels().map((item) => item.providerName + ' · ' + item.modelId)); }
-  private chosenImage(): number {
-    const reference = this.options.imageGeneration;
-    if (!reference) { return 0; }
-    const index = this.imageModels().findIndex((item) => item.providerId === reference.providerId && item.modelId === reference.modelId);
-    return index < 0 ? -1 : index + 1;
-  }
-  private setImageModel(index: number): void {
-    const options = JSON.parse(JSON.stringify(this.options)) as AssistantOptions;
-    const choice = this.imageModels()[index - 1];
-    options.imageGeneration = choice ? { providerId: choice.providerId, modelId: choice.modelId } : undefined;
-    this.options = options;
-  }
   private reference(index: number): ModelReference | undefined { const item = this.app.modelChoices[index - 1]; return item ? { providerId: item.providerId, modelId: item.modelId } : undefined; }
   private efforts(): string[] {
     const reference = this.reference(this.capabilityIndex + 1);
@@ -75,6 +61,7 @@ export struct ModelSettingsPanel {
       const saved = mergeSavedConfiguration(previous, capability);
       this.options.capabilities = this.options.capabilities.filter((item) => item.providerId !== reference.providerId || item.modelId !== reference.modelId).concat([saved]);
     }
+    this.options.imageGeneration = extras.options?.imageGeneration;
     extras.options = this.options;
     if (!await this.app.saveProductivity(extras)) { this.error = this.app.error; }
     else { this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t("模型设置已保存") }); }
@@ -105,10 +92,6 @@ export struct ModelSettingsPanel {
               ModelChoiceRow({ title: t('团队执行'), subtitle: t('用于执行团队任务的子 Agent。'),
                 options: this.choices(), selected: this.chosen(this.options.teamWorker),
                 onSelect: (index: number) => this.setDedicatedModel('teamWorker', index) })
-              RowDivider()
-              ModelChoiceRow({ title: t('生成图片'), subtitle: this.imageModels().length ? '' : t('请先在模型服务中配置图片模型。'),
-                options: this.imageChoices(), selected: this.chosenImage(),
-                onSelect: (index: number) => this.setImageModel(index) })
             }
           }
           SectionHeader({ title: t("模型能力") })

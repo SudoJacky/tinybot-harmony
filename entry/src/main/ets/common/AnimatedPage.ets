@@ -1,5 +1,6 @@
 import { FrameCallback } from '@kit.ArkUI';
 import { Motion } from './Theme';
+import { fullscreenTransitionDuration } from './FullscreenTransition';
 
 class PageEnterFrame extends FrameCallback {
   private action: () => void;
@@ -10,6 +11,7 @@ class PageEnterFrame extends FrameCallback {
 // Keep the outgoing page alive until its exit finishes. A new request invalidates old callbacks.
 @Component
 export struct AnimatedPage {
+  @Prop fullScreen: boolean = false;
   @Prop @Watch('visibilityChanged') visible: boolean = false;
   @Prop @Watch('retentionChanged') retained: boolean = false;
   @Prop vertical: boolean = false;
@@ -43,8 +45,10 @@ export struct AnimatedPage {
     else { this.renderContent = this.retained; }
   }
   private animate(show: boolean, generation: number): void {
-    this.getUIContext().animateTo({ duration: show ? Motion.medium : Motion.fast,
-      curve: show ? Motion.enter : Motion.standard, onFinish: () => {
+    const ui = this.getUIContext();
+    const duration = this.fullScreen ? fullscreenTransitionDuration(ui) : show ? Motion.medium : Motion.fast;
+    const curve = this.fullScreen ? Curve.EaseInOut : show ? Motion.enter : Motion.standard;
+    ui.animateTo({ duration: duration, curve: curve, onFinish: () => {
         if (generation !== this.generation || this.visible) { return; }
         this.present = false; this.renderContent = this.retained;
         this.onPresenceChanged(false);

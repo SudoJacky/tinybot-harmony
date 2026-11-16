@@ -2,7 +2,7 @@ import { KeyCode } from '@kit.InputKit';
 import { t } from '../model/I18n';
 
 export type NavigationShortcut = 'new-chat' | 'search' | 'history' | 'settings' | 'workspace' | 'help';
-export type ChatShortcutAction = NavigationShortcut | 'focus' | 'attach' | 'expand' | 'latest' | 'stop';
+export type ChatShortcutAction = NavigationShortcut | 'focus' | 'attach' | 'latest' | 'stop';
 
 type ShortcutCategory = 'chat' | 'navigation' | 'input';
 
@@ -36,7 +36,6 @@ export function chatShortcuts(desktop: boolean = false): ChatShortcut[] {
     { action: 'workspace', key: 'f', modifiers: ctrlShift, chord: 'Ctrl+Shift+F', category: 'navigation', label: t('工作区文件') },
     { action: 'focus', key: 'l', modifiers: ctrlShift, chord: 'Ctrl+Shift+L', category: 'input', label: t('聚焦消息输入框') },
     { action: 'attach', key: 'o', modifiers: ctrl, chord: 'Ctrl+O', category: 'input', label: t('添加文件附件') },
-    { action: 'expand', key: 'e', modifiers: ctrlShift, chord: 'Ctrl+Shift+E', category: 'input', label: t('展开输入') },
     { action: 'latest', key: 'j', modifiers: ctrlShift, chord: 'Ctrl+Shift+J', category: 'chat', label: t('查看最新消息') },
     { action: 'stop', key: 's', modifiers: ctrlShift, chord: 'Ctrl+Shift+S', category: 'chat', label: t('停止生成') },
     { action: 'help', key: FunctionKey.F1, modifiers: [], chord: 'F1', category: 'navigation', label: t('键盘快捷键') }

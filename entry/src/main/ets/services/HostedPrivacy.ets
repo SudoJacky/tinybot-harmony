@@ -142,6 +142,10 @@ export class HostedPrivacy {
     let consent: privacyManager.AppPrivacyResult | undefined;
     try {
       const link = this.policy();
+      const previousPolicy = this.currentPolicy;
+      if (previousPolicy && (previousPolicy.id !== link.id || previousPolicy.versionCode !== link.versionCode)) {
+        this.result = undefined;
+      }
       this.currentPolicy = link;
       operation = 'getAppPrivacyResult';
       const records = privacyManager.getAppPrivacyResult();
@@ -150,28 +154,22 @@ export class HostedPrivacy {
         record.result === privacyManager.AppPrivacyResultType.REQUIRE_RESIGNING_VERSION_UPDATE);
     } catch (error) {
       const failure = error as BusinessError;
-      if (retry && failure.code === 1006700003 && this.pageVisible && attempt <= QUERY_RETRY_DELAYS.length) {
+      if (!this.needsStartupPrompt()) { this.publish(true); }
+      if (retry && this.pageVisible && attempt <= QUERY_RETRY_DELAYS.length) {
         const delay = QUERY_RETRY_DELAYS[attempt - 1];
         Diagnostics.log('warn', 'privacy', 'query_retry', {
-          operation: operation, phase: source, round: attempt, code: failure.code,
+          operation: operation, phase: source, round: attempt, code: typeof failure.code === 'number' ? failure.code : 0,
           delayMs: delay, elapsedMs: Date.now() - this.initializedAt
         });
         this.retryTimer = setTimeout(() => {
           this.retryTimer = -1;
           this.query(source, attempt + 1, retry);
         }, delay);
-        // Let the UI start while AppGallery finishes making the upgrade state available.
-        if (!this.requiresAction()) { this.publish(true); }
         return;
       }
       const code = this.logFailure(failure, operation, source, attempt);
       this.checking = false;
-      if (this.requiresAction()) {
-        this.error = t('无法确认系统隐私授权（{0}），请重试。', [code]);
-      } else {
-        this.publish(true);
-      }
-      this.scheduleStartupPrompt();
+      if (!this.allowed) { this.error = t('无法确认系统隐私授权（{0}），请重试。', [code]); }
       return;
     }
     this.checking = false;
@@ -195,12 +193,13 @@ export class HostedPrivacy {
 
   private canRequest(): boolean {
     return !!this.context && this.pageVisible && !this.closing &&
-      this.result === privacyManager.AppPrivacyResultType.REQUIRE_RESIGNING_VERSION_UPDATE &&
+      !this.allowed && !this.simulatorDebug &&
       !this.busy && !this.checking;
   }
 
   private scheduleStartupPrompt(): void {
-    if (!this.gateFocused || this.requestedAtStartup || this.promptTimer !== -1 || !this.canRequest()) { return; }
+    if (!this.gateFocused || this.requestedAtStartup || this.promptTimer !== -1 ||
+      !this.needsStartupPrompt() || !this.canRequest()) { return; }
     // AppGallery can host its modal inside our window, where the window itself may retain focus.
     this.promptTimer = setTimeout(() => {
       this.promptTimer = -1;
@@ -214,7 +213,7 @@ export class HostedPrivacy {
       record.id === link.id && record.versionCode === link.versionCode);
   }
 
-  private requiresAction(): boolean {
+  private needsStartupPrompt(): boolean {
     return this.result === privacyManager.AppPrivacyResultType.DISAGREED ||
       this.result === privacyManager.AppPrivacyResultType.REQUIRE_RESIGNING_VERSION_UPDATE;
   }
@@ -226,12 +225,11 @@ export class HostedPrivacy {
       this.result = result;
     }
     this.error = '';
-    this.publish(!this.requiresAction());
-    if (this.result === privacyManager.AppPrivacyResultType.DISAGREED) { this.exit(); }
+    this.publish(!this.needsStartupPrompt());
   }
 
   requireConsent(): void {
-    // Recheck on access, including after a launch with an inconclusive result.
+    // Recheck on access so a new policy or withdrawal can block business.
     if (this.allowed) { this.refresh(); }
     if (!this.allowed) {
       throw new Error(this.error || (this.simulatorDebug ? t('请先确认模拟器调试隐私说明。') : t('请先在系统弹窗中同意隐私政策。')));
@@ -239,16 +237,15 @@ export class HostedPrivacy {
   }
 
   async requestConsent(source: string = 'request_consent'): Promise<void> {
-    if (this.result === privacyManager.AppPrivacyResultType.DISAGREED) { await this.exit(); return; }
     if (!this.context || !this.canRequest()) { return; }
     const context = this.context, generation = this.subscriptionGeneration;
     this.cancelPrompt();
     this.busy = true;
     try {
       this.check(source, false);
-      if (!this.pageVisible || this.closing ||
-        this.result !== privacyManager.AppPrivacyResultType.REQUIRE_RESIGNING_VERSION_UPDATE ||
-        (source === 'startup_prompt' && !this.gateFocused)) { return; }
+      const policy = this.currentPolicy;
+      if (!policy || this.error || this.allowed || !this.pageVisible || this.closing ||
+        (source === 'startup_prompt' && (!this.gateFocused || !this.needsStartupPrompt()))) { return; }
       this.requestedAtStartup = true;
       this.error = '';
       Diagnostics.log('info', 'privacy', 'request_started', { phase: source });
@@ -261,14 +258,15 @@ export class HostedPrivacy {
         return;
       }
       if (this.subscriptionGeneration !== generation || this.closing) { return; }
-      const policy = this.currentPolicy;
-      const consent = policy ? this.findConsent(response.results, policy) : undefined;
+      const consent = this.findConsent(response.results, policy);
+      Diagnostics.log('info', 'privacy', 'request_completed', { phase: source, eventCode: consent?.result });
       if (!consent) {
         // The dialog may have used a newer agreement. Ask the system for its current state.
         this.check('consent_result', false);
         return;
       }
       this.applyResult(consent.result);
+      if (consent.result === privacyManager.AppPrivacyResultType.DISAGREED) { await this.exit(); }
     } finally {
       if (this.subscriptionGeneration === generation) { this.busy = false; }
     }
@@ -284,8 +282,8 @@ export class HostedPrivacy {
     catch (error) {
       if (this.context !== context) { return; }
       this.closing = false;
-      const failure = error as BusinessError;
-      this.error = t('无法退出应用（{0}），请重试。', [typeof failure.code === 'number' ? failure.code : 0]);
+      const code = this.logFailure(error as BusinessError, 'terminateSelf', 'exit');
+      this.error = t('无法退出应用（{0}），请重试。', [code]);
     }
   }
 
@@ -341,7 +339,7 @@ export class HostedPrivacy {
 
   private publish(allowed: boolean): void {
     if (allowed && this.closing) { return; }
-    if (allowed) { this.cancelPrompt(); this.requestedAtStartup = false; }
+    if (allowed) { this.cancelPrompt(); }
     const changed = this.allowed !== allowed;
     this.allowed = allowed;
     // Activate native services before mounting the business UI.

@@ -13,7 +13,8 @@ const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
 const cls = tree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'Index');
 const methods = ['openTools', 'openSettings', 'createChat', 'revealChat',
   'openFiles', 'openDetailTab', 'openHistorySearch', 'toggleHistory', 'setHistoryCollapsed',
-  'confirmProviderDiscard', 'confirmRootNavigation', 'returnFromSettings', 'selectSettingsSection', 'swipeSettingsSection'];
+  'confirmProviderDiscard', 'confirmRootNavigation', 'returnFromSettings', 'selectSettingsSection', 'swipeSettingsSection',
+  'openSettingPage', 'openSettingsSearch', 'selectSettingsResult'];
 const body = methods.map(name => cls.members.find(node => node.name?.getText(tree) === name).getText(tree)).join('\n');
 const globals = { exports: {}, t: text => text, $r: value => value, LaunchMode: { POP_TO_SINGLETON: 2 }, Diagnostics: { log() {} }, Motion: {} };
 const categoryFile = path.join(__dirname, '../entry/src/main/ets/views/SettingsNavigation.ets');
@@ -40,7 +41,7 @@ function fixture() {
         if (options?.launchMode === 2 && at >= 0) routes.splice(at + 1);
         else routes.push(route);
       },
-      clear() { routes.length = 0; }
+      clear() { routes.length = 0; }, pop() { return routes.pop(); }
     },
     appearance: {}, detailTabs: [], workspaceRequest: 0, historySearchRequest: 0, historyCollapsed: false,
     toolsTab: 'memory', toolsTabRequest: 0,
@@ -81,6 +82,26 @@ test('repeated settings taps preserve the current settings draft', () => {
   for (let i = 0; i < 20; i++) page.openSettings();
   assert.equal(routes.length, 1);
   assert.equal(resets(), 1);
+});
+test('global settings search opens editors and can jump to a switch without changing it', () => {
+  const { page, routes, resets } = fixture();
+  page.openSettings();
+  page.openSettingsSearch(); page.openSettingsSearch();
+  assert.deepEqual(routes.map(route => route.name), ['settings', 'find-settings']);
+  page.selectSettingsResult({ id: 'open-image-generation', section: 'models', route: 'image-generation' });
+  assert.deepEqual(routes.map(route => route.name), ['settings', 'find-settings', 'image-generation']);
+  page.paths.pop();
+  let edited;
+  page.app.beginProvider = (preset, id) => { edited = { preset, id }; return true; };
+  page.selectSettingsResult({ id: 'edit-provider-kimi', section: 'models', route: 'provider', param: 'kimi' });
+  assert.deepEqual(edited, { preset: '', id: 'kimi' });
+  assert.equal(routes.at(-1).name, 'provider');
+  page.paths.pop();
+  page.selectSettingsResult({ id: 'browser-enabled', section: 'tools' });
+  assert.deepEqual(routes.map(route => route.name), ['settings']);
+  assert.equal(page.settingsSection, 'tools');
+  assert.equal(page.settingsSearchTarget, 'browser-enabled');
+  assert.equal(resets(), 1, 'Locating a switch does not reopen settings or reset drafts');
 });
 test('settings swipes move one category, stop at the ends and keep the settings route', () => {
   const { page, routes, resets } = fixture();

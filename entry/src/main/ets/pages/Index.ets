@@ -25,6 +25,8 @@ import { agentModeName } from '../model/AgentMode';
 import { ToolScopePanel } from '../views/ToolScopePanel';
 import { ProductivityPanel, ProductivityEditorRoute, productivityEditorTitle } from '../views/ProductivityPanel';
 import { ModelSettingsPanel } from '../views/AssistantPanel';
+import { ImageGenerationPanel } from '../views/ImageGenerationPanel';
+import { ProviderProfile } from '../model/ProviderProfiles';
 import { BackupPanel } from '../views/BackupPanel';
 import { WebDavBackupPanel } from '../views/WebDavBackupPanel';
 import { UsagePanel } from '../views/UsagePanel';
@@ -51,9 +53,10 @@ import { materialMenuContent, materialMenuHeader } from '../common/MaterialMenu'
 import { ShareInbox } from '../services/NativeActions';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { ChatPanel } from '../views/ChatPanel';
-import { SETTINGS_CATEGORY_SWIPE_DISTANCE, SettingsCategoryBar, SettingsNavigation,
-  settingsCategoryForSwipe, settingsCategoryTitle } from '../views/SettingsNavigation';
+import { SETTINGS_CATEGORY_SWIPE_DISTANCE, SettingsCategoryBar, SettingsNavigation, settingsCategoryForSwipe } from '../views/SettingsNavigation';
 import { SettingsPanel, UserDocumentPanel } from '../views/SettingsPanel';
+import { SettingsSearchPanel } from '../views/SettingsSearchPanel';
+import { SettingsSearchItem, settingsSectionTitle } from '../model/SettingsSearch';
 import { AppearancePanel, appearanceChoiceTitle } from '../views/AppearancePanel';
 import { LanguagePanel } from '../views/LanguagePanel';
 import { SupportPanel, supportTitle } from '../views/SupportPanel';
@@ -198,9 +201,9 @@ struct Index {
   @State private settingsActive: boolean = false;
   @State private rootSection: string = '';
   private toolsOrigin: string = 'productivity';
-  @State private expandDraftRequest: number = 0;
   @State private focusDraftRequest: number = 0;
   @State private settingsSection: string = 'models';
+  @State private settingsSearchTarget: string = '';
   @State private toolsTab: string = 'memory';
   @State private toolsTabRequest: number = 0;
 
@@ -805,8 +808,10 @@ struct Index {
 
   private compactDetailLauncher(): boolean {
     // Below this width the floating card would cover the centered composer.
+    // Keep the outgoing tab in the same layout until its exit completes.
+    const exitingTab = !this.detailPaneOpen && (this.workspacePresent || this.previewPresent || this.browserPresent);
     return this.largeScreen && this.windowWidth >= 1240 &&
-      (this.showDetailContext || !this.detailTabsAvailable().length);
+      (this.showDetailContext || (!exitingTab && !this.detailTabsAvailable().length));
   }
 
   @Builder
@@ -1269,6 +1274,7 @@ struct Index {
 
   private selectSettingsSection(section: string, confirmed: boolean = false): void {
     if (this.confirmRootNavigation('settings', confirmed, () => this.selectSettingsSection(section, true))) { return; }
+    this.settingsSearchTarget = '';
     this.settingsSection = section;
     this.openSettings(true);
   }
@@ -1276,7 +1282,7 @@ struct Index {
   private swipeSettingsSection(event: GestureEvent): void {
     if (!this.settingsActive || !this.foreground) { return; }
     const section = settingsCategoryForSwipe(this.settingsSection, event.offsetX, event.offsetY);
-    if (section !== undefined) { this.settingsSection = section; }
+    if (section !== undefined) { this.settingsSearchTarget = ''; this.settingsSection = section; }
   }
 
   private openSettings(discardConfirmed: boolean = false): void {
@@ -1291,6 +1297,26 @@ struct Index {
     if (!names.includes('settings')) { this.app.openSettings(); }
     this.paths.pushPath({ name: 'settings' }, { launchMode: LaunchMode.POP_TO_SINGLETON });
     Diagnostics.log('info', 'navigation', 'settings_opened', { count: names.length, total: this.paths.size() });
+  }
+
+  private openSettingPage(route: string, param: string = ''): void {
+    if (route === 'provider') {
+      if (this.app.beginProvider('', param)) { this.paths.pushPath({ name: route }); }
+    } else if (route === 'productivity') { this.openTools(param); }
+    else if (route === 'support') { this.openSupport(param); }
+    else { this.paths.pushPath({ name: route }); }
+  }
+
+  private openSettingsSearch(): void {
+    this.settingsSearchTarget = '';
+    this.paths.pushPath({ name: 'find-settings' }, { launchMode: LaunchMode.POP_TO_SINGLETON });
+  }
+
+  private selectSettingsResult(item: SettingsSearchItem): void {
+    if (item.route) { this.openSettingPage(item.route, item.param); return; }
+    this.settingsSection = item.section;
+    this.settingsSearchTarget = item.id;
+    this.paths.pop();
   }
 
   private async openSupport(page: string): Promise<void> {
@@ -1465,26 +1491,31 @@ struct Index {
   }
 
   @Builder
+  settingsTitleActions() {
+    IconButton({ icon: $r('sys.symbol.magnifyingglass'), label: t('搜索设置'), compId: 'open-settings-search', diameter: 44, iconSize: 20,
+      onTap: () => this.openSettingsSearch() }).margin({ right: Space.sm })
+  }
+
+  @Builder
   settingsContent() {
     SettingsPanel({ app: this.app, section: this.settingsSection, settings: this.app.settings, account: this.account, active: this.settingsActive && this.foreground,
-      onAccount: () => { this.paths.pushPath({ name: 'account' }); },
+      searchTarget: this.settingsSearchTarget, onAccount: () => this.openSettingPage('account'),
       browser: this.browser,
-      onAddProvider: () => { this.paths.pushPath({ name: 'provider-presets' }); },
-      onUsage: () => { this.paths.pushPath({ name: 'usage' }); },
-      onStorage: () => { this.paths.pushPath({ name: 'storage' }); },
-      onModels: () => { this.paths.pushPath({ name: 'model-settings' }); },
-      onSearch: () => { this.paths.pushPath({ name: 'search-settings' }); },
-      onMail: () => { this.paths.pushPath({ name: 'mail-settings' }); },
-      onAppearance: () => { this.paths.pushPath({ name: 'appearance' }); },
-      onLanguage: () => { this.paths.pushPath({ name: 'language' }); },
-      onBackup: () => { this.paths.pushPath({ name: 'backup' }); },
-      onSupport: (page: string) => this.openSupport(page),
-      onTools: (tab: string) => this.openTools(tab),
-      onSkills: () => { this.paths.pushPath({ name: 'skills' }); },
-      onUserDocument: () => { this.paths.pushPath({ name: 'user-document' }); },
-      onEditProvider: (id: string, preset: string) => {
-        if (this.app.beginProvider(preset, id)) { this.paths.pushPath({ name: 'provider' }); }
-      } }).layoutWeight(1)
+      onAddProvider: () => this.openSettingPage('provider-presets'),
+      onUsage: () => this.openSettingPage('usage'),
+      onStorage: () => this.openSettingPage('storage'),
+      onModels: () => this.openSettingPage('model-settings'),
+      onImageGeneration: () => this.openSettingPage('image-generation'),
+      onSearch: () => this.openSettingPage('search-settings'),
+      onMail: () => this.openSettingPage('mail-settings'),
+      onAppearance: () => this.openSettingPage('appearance'),
+      onLanguage: () => this.openSettingPage('language'),
+      onBackup: () => this.openSettingPage('backup'),
+      onSupport: (page: string) => this.openSettingPage('support', page),
+      onTools: (tab: string) => this.openSettingPage('productivity', tab),
+      onSkills: () => this.openSettingPage('skills'),
+      onUserDocument: () => this.openSettingPage('user-document'),
+      onEditProvider: (id: string, _preset: string) => this.openSettingPage('provider', id) }).layoutWeight(1)
       .gesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Horizontal,
         distance: SETTINGS_CATEGORY_SWIPE_DISTANCE }).onActionEnd((event: GestureEvent) => this.swipeSettingsSection(event)))
   }
@@ -1524,6 +1555,20 @@ struct Index {
         .backgroundColor($r('app.color.page_background'))
     } else if (name === 'model-settings') {
       NavDestination() { ModelSettingsPanel({ app: this.app }) }.title(t('模型分工与能力'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'image-generation') {
+      NavDestination() {
+        ImageGenerationPanel({ app: this.app, onSaved: () => { this.paths.pop(); },
+          onAddProvider: (protocol: string, onReturn: (provider: ProviderProfile) => void) => {
+            if (!this.app.beginProvider()) { return; }
+            const existing = new Set(this.app.providerProfiles.map((item) => item.id));
+            this.app.providerEditor.protocol = protocol;
+            this.paths.pushPath({ name: 'provider', onPop: (_info: PopInfo) => {
+              const added = this.app.providerProfiles.find((item) => !existing.has(item.id));
+              if (added?.enabled) { onReturn(added); }
+            } });
+          } })
+      }.title(t('图片生成'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
+        .backgroundColor($r('app.color.page_background'))
     } else if (name === 'backup') {
       NavDestination() {
         BackupPanel({ app: this.app, onWebDav: () => this.paths.pushPath({ name: 'webdav-backup' }),
@@ -1591,14 +1636,20 @@ struct Index {
         Column() {
           if (!this.workbench().expanded) {
             SettingsCategoryBar({ selected: this.settingsSection,
-              onSelect: (section: string) => { this.settingsSection = section; } })
+              onSelect: (section: string) => { this.settingsSearchTarget = ''; this.settingsSection = section; } })
           }
           this.settingsContent()
         }.width('100%').height('100%')
-      }.title(this.workbench().expanded ? settingsCategoryTitle(this.settingsSection) : t('设置'),
+      }.title(this.workbench().expanded ? settingsSectionTitle(this.settingsSection) : t('设置'),
         { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
+        .menus(this.settingsTitleActions)
         .backgroundColor($r('app.color.page_background'))
         .onShown(() => { this.settingsActive = true; this.rootSection = 'settings'; }).onHidden(() => { this.settingsActive = false; })
+    } else if (name === 'find-settings') {
+      NavDestination() {
+        SettingsSearchPanel({ app: this.app, onSelect: (item: SettingsSearchItem) => this.selectSettingsResult(item) })
+      }.title(t('搜索设置'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
+        .backgroundColor($r('app.color.page_background'))
     } else if (name === 'provider-presets') {
       NavDestination() {
         SettingsPanel({ app: this.app, section: this.windowWidth >= 840 ? this.settingsSection : '', settings: this.app.settings, account: this.account, browser: this.browser, presetsOnly: true,
@@ -1667,9 +1718,6 @@ struct Index {
           fill: $r('app.color.surface_variant'), disabled: !this.app.ready, onTap: () => this.toggleHistory() })
         Blank().layoutWeight(1)
         if (this.app.active.messages.length > 0) {
-          IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('展开输入'), compId: 'workbench-expand-draft',
-            animatedIcon: 'compose', fill: $r('app.color.surface_variant'), disabled: !this.app.ready || this.app.active.archived,
-            onTap: () => { this.expandDraftRequest++; } })
           Button({ type: ButtonType.Circle, stateEffect: true }) {
             SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(19).fontColor([$r('app.color.text_secondary')])
           }.id('workbench-chat-more').width(44).height(44).borderRadius(22)
@@ -1713,11 +1761,6 @@ struct Index {
       IconButton({ icon: $r('sys.symbol.magnifyingglass'), label: t('搜索对话或命令') + ' · Ctrl+K', compId: 'pc-open-commands',
         diameter: this.desktop ? 36 : 44, iconSize: 17, fill: $r('app.color.surface'), disabled: !this.canOpenDesktopCommands(),
         onTap: () => this.showDesktopCommands() })
-      if (this.app.active.messages.length > 0 && this.windowWidth >= 620) {
-        IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('展开输入'), compId: 'workbench-expand-draft',
-          animatedIcon: 'compose', diameter: this.desktop ? 36 : 44, iconSize: 18, fill: $r('app.color.surface'),
-          disabled: !this.app.ready || this.app.active.archived, onTap: () => { this.expandDraftRequest++; } })
-      }
       Button({ type: ButtonType.Normal }) {
         SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(18).fontColor([$r('app.color.text_secondary')])
       }.id('pc-chat-more').width(this.desktop ? 36 : 44).height(this.desktop ? 36 : 44).padding(0).borderRadius(Radius.sm)
@@ -1865,7 +1908,7 @@ struct Index {
         Column() {
           if (this.app.ready) {
             ChatPanel({ app: this.app, thread: this.app.active, workbench: this.desktop || this.windowWidth >= 840,
-                desktop: this.desktop, commandSearch: this.largeScreen, expandDraftRequest: this.expandDraftRequest, focusDraftRequest: this.focusDraftRequest,
+                desktop: this.desktop, commandSearch: this.largeScreen, focusDraftRequest: this.focusDraftRequest,
                 shortcutsEnabled: this.chatVisible && !this.rootSection && !this.onboardingActive && !this.showToolScope &&
                   !this.keyboardShortcutsOpen && !this.desktopCommandsOpen && !this.historyProjectSheetOpen,
                 shortcutsCovered: this.detailCoversChat(),
@@ -1992,14 +2035,14 @@ struct Index {
               onCollapse: () => { this.setDetailPane(false); } })
           }
           Stack() {
-            AnimatedPage({ visible: this.detailTabVisible('files'), retained: this.workspaceOpen,
+            AnimatedPage({ fullScreen: this.detailCoversChat(), visible: this.detailTabVisible('files'), retained: this.workspaceOpen,
               onPresenceChanged: (present: boolean) => { this.workspacePresent = present; } }) {
               WorkspacePanel({ app: this.app, embedded: true, tabbed: this.largeScreen || this.workbench().docked,
                 initialPath: this.workspacePath, requestId: this.workspaceRequest,
                 closeRequest: this.workspaceCloseRequest, tabCloseRequest: this.workspaceTabCloseRequest,
                 onClose: () => this.workspaceClosed() })
             }
-            AnimatedPage({ visible: this.detailTabVisible('preview') && this.hasPreview(),
+            AnimatedPage({ fullScreen: this.detailCoversChat(), visible: this.detailTabVisible('preview') && this.hasPreview(),
               retained: this.previewVisible && this.hasPreview(),
               onPresenceChanged: (present: boolean) => this.previewPresenceChanged(present) }) {
               PreviewPanel({ app: this.app, threadId: this.previewThreadId, messageId: this.previewMessageId,
@@ -2007,7 +2050,7 @@ struct Index {
             }
             // The Web host stays mounted even when its tab is closed: the browser
             // session opens against an attached view, and reopening a tab reuses it.
-            AnimatedPage({ visible: this.detailTabVisible('browser'), retained: true,
+            AnimatedPage({ fullScreen: this.detailCoversChat(), visible: this.detailTabVisible('browser'), retained: true,
               vertical: this.desktop ? !this.workbench().docked : this.windowWidth < 840,
               onPresenceChanged: (present: boolean) => this.browserPresenceChanged(present) }) {
               BrowserPanel({ browser: this.browser, expanded: this.detailTabVisible('browser'), presented: this.browserPresent,

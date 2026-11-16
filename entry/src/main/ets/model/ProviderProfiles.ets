@@ -2,7 +2,7 @@ import { t } from './I18n';
 import { ModelConfig } from './Conversation';
 import { builtinProviderInfos } from './Provider';
 import { contextSettings } from './ContextSettings';
-import { isImageProtocol, isProviderProtocol, isSupportedProtocol, protocolUrl, sharedImageBaseUrl } from './ProviderEndpoint';
+import { isImageProtocol, isProviderProtocol, isSupportedProtocol, protocolUrl, sameProviderOrigin, sharedImageBaseUrl } from './ProviderEndpoint';
 import { isConfigurationName } from './ConfigurationValue';
 import { BalanceSettings, validateBalanceSettings } from './BalanceSettings';
 
@@ -10,6 +10,9 @@ export interface ModelReference {
   providerId: string;
   modelId: string;
 }
+
+// Older selections use the image protocol and address stored on the provider.
+export interface ImageGenerationConfig extends ModelReference { protocol?: string; baseUrl?: string; }
 
 export interface ImageModelSettings { protocol: string; baseUrl?: string; models: string[]; }
 export interface ImageServiceAccess { id: string; name: string; protocol: string; baseUrl: string; credentialAlias: string; }
@@ -85,6 +88,16 @@ export function validateReference(reference: ModelReference): void {
   }
 }
 
+export function validateImageGeneration(config: ImageGenerationConfig): void {
+  validateReference(config);
+  if ((config.protocol !== undefined && !isConfigurationName(config.protocol)) ||
+    (config.baseUrl !== undefined && (!config.protocol || typeof config.baseUrl !== 'string' ||
+      !config.baseUrl.trim() || config.baseUrl.length > 1024))) {
+    throw new Error(t('图片生成服务配置无效。'));
+  }
+  if (config.baseUrl && config.protocol && isImageProtocol(config.protocol)) { protocolUrl(config.protocol, config.baseUrl, true); }
+}
+
 export function validateProviderProfiles(profiles: ProviderProfile[]): void {
   if (!Array.isArray(profiles)) { throw new Error(t("模型服务列表损坏。")); }
   const ids = new Set<string>();
@@ -125,10 +138,19 @@ function imageModelIds(profile: ProviderProfile): string[] {
   return image && isSupportedProtocol(profile.protocol) && isImageProtocol(image.protocol) ? image.models : [];
 }
 
-export function imageService(profiles: ProviderProfile[], reference?: ModelReference): ImageServiceAccess | undefined {
+export function imageService(profiles: ProviderProfile[], reference?: ImageGenerationConfig): ImageServiceAccess | undefined {
   if (!reference) { return undefined; }
-  const profile = profiles.find((item) => item.id === reference.providerId && item.enabled && imageModelIds(item).includes(reference.modelId));
+  const profile = profiles.find((item) => item.id === reference.providerId && item.enabled);
   if (!profile) { return undefined; }
+  if (reference.protocol !== undefined) {
+    // Changing the provider host can invalidate a saved address. Keep it visible in settings but never send a key there.
+    if (!isProviderProtocol(profile.protocol) || !isImageProtocol(reference.protocol) ||
+      (reference.baseUrl && !sameProviderOrigin(profile.baseUrl, reference.baseUrl))) { return undefined; }
+    return { id: profile.id, name: profile.name, credentialAlias: profile.credentialAlias,
+      protocol: reference.protocol,
+      baseUrl: sharedImageBaseUrl(profile.protocol, profile.baseUrl, reference.protocol, reference.baseUrl) };
+  }
+  if (!imageModelIds(profile).includes(reference.modelId)) { return undefined; }
   const image = profile.imageModels;
   return { id: profile.id, name: profile.name, credentialAlias: profile.credentialAlias,
     protocol: image?.protocol || profile.protocol,

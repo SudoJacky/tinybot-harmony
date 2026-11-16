@@ -52,7 +52,7 @@ EVENTS.appearance = ['material', 'material_support', 'material_unavailable', 'lo
 EVENTS.language = ['load_failed', 'save_failed'];
 EVENTS.camera = ['dismissed', 'imported', 'capture_failed'];
 EVENTS.account = ['restore_failed', 'response_invalid', 'state_changed', 'sign_in_cancelled', 'sign_in_failed', 'sign_out_failed', 'state_failed'];
-EVENTS.privacy = ['request_started', 'query_completed', 'query_retry', 'check_failed',
+EVENTS.privacy = ['request_started', 'request_completed', 'query_completed', 'query_retry', 'check_failed',
   'subscription_ready', 'subscription_cleanup_failed'];
 EVENTS.feedback = ['attachment_failed', 'log_failed', 'initialize_failed', 'save_failed', 'credential_failed', 'request_failed', 'submit_failed', 'list_failed',
   'detail_failed', 'upload_failed', 'cleanup_failed', 'reconcile_failed', 'delete_failed'];
@@ -69,7 +69,7 @@ EVENTS.composer = ['sheet_action_queued', 'sheet_action_dispatched', 'sheet_acti
 EVENTS.focus = ['search_requested', 'provider_requested', 'onboarding_requested'];
 EVENTS.navigation = ['tools_opened', 'tools_repeated', 'settings_opened', 'settings_repeated',
   'new_chat_blocked', 'new_chat_failed', 'new_chat_revealed', 'keyboard_shortcuts_open_failed',
-  'desktop_command_failed', 'desktop_layout_load_failed', 'desktop_layout_save_failed'];
+  'desktop_command_failed', 'desktop_layout_load_failed', 'desktop_layout_save_failed', 'transition_screen_failed'];
 EVENTS.web = ['storage_failed', 'engine_start', 'engine_ready', 'release', 'activate', 'failed', 'console_error', 'load_start', 'load_returned', 'host_ready', 'port_connected', 'ready', 'state_saved', 'attached', 'page_end', 'navigation_blocked', 'resource_failed'];
 EVENTS.office_preview = ['load_failed', 'update_annotations_failed', 'render_failed', 'annotation_failed', 'page_failed'];
 EVENTS.math = ['load_failed', 'render_failed', 'startup_timeout', 'process_exited', 'page_failed'];

@@ -30,6 +30,10 @@ export interface ModelProvider {
 | `dashscope` | DashScope · 阿里云百炼 | `chat-completions` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus`、`qwen-max`、`qwen-turbo` |
 | `openai` | OpenAI | `chat-completions` | `https://api.openai.com/v1` | `gpt-4.1` |
 | `zai` | Z.ai · 智谱 | `chat-completions` | `https://open.bigmodel.cn/api/paas/v4` | `glm-5.3`、`glm-5.3-flash`、`glm-5.2` |
+| `kimi` | Kimi | `chat-completions` | `https://api.moonshot.cn/v1` | `kimi-k3.1-pro`、`kimi-k3` |
+| `minimax` | MiniMax | `chat-completions` | `https://api.minimax.cn/v1` | `MiniMax-M3.1-Flash` |
+| `mimo` | Xiaomi MiMo | `chat-completions` | `https://api.xiaomimimo.com/v1` | `mimo-v2.6-flash`、`mimo-v2.6-pro` |
+| `volcengine` | 火山引擎 · 方舟 | `chat-completions` | `https://ark.cn-beijing.volces.com/api/v3` | `doubao-seed-2-1-lite-260915`、`doubao-seed-2-1-pro-260915` |
 | `ollama` | Ollama | `chat-completions` | 空，手动填写局域网地址 | 空，手动填写 |
 | `openai-compatible` | 自定义兼容服务 | `chat-completions` | 空 | 空 |
 | `openai-responses` | OpenAI Responses | `responses` | `https://api.openai.com/v1` | `gpt-4.1` |
@@ -102,15 +106,15 @@ API Key 保存在系统 Asset Store，写入属性为 `DEVICE_UNLOCKED` 且 `Syn
 图片请求不经过聊天绑定，由 `imageService()` 单独解析：
 
 ```text
-保存配置 → ProviderProfile.imageModels 或独立的图片协议配置
+保存配置 → options.imageGeneration 保存服务 ID、模型 ID、图片协议与可选地址
 组装工具 → imageService(profiles, options.imageGeneration)
-            要求配置已启用、引用的模型仍在列表中
-            聊天服务附带图片模型时，地址由 sharedImageBaseUrl() 统一为聊天服务根地址
+            要求所选服务已启用，sharedImageBaseUrl() 解析与服务同源的图片地址
+            旧版仅保存模型引用时，从对应服务的图片配置查找
             → { id, name, protocol, baseUrl, credentialAlias }
 发起请求 → NativeImageGenerator 读取凭据 → imageRequest() 编码 → 响应解析 → imageResponse()
 ```
 
-- 只有 `imageGeneration` 能解析到可用服务时才注册 `image_gen`；服务或模型被停用、删除后，下一轮工具目录不再提供该工具。
+- 只有 `imageGeneration` 能解析到可用服务时才注册 `image_gen`。停用或删除所选服务后，下一轮工具目录会移除该工具。
 - 复用聊天服务密钥时，图片地址默认取聊天服务的基础地址；显式填写图片地址时必须与聊天服务同协议、同主机、同端口，否则保存与解析都会失败。
 - 独立图片协议配置使用自己的地址与凭据别名，密钥作用域与聊天服务一致：更换主机、端口或基础路径需要重新填写。
 - 图片协议没有流式响应，也不参与推理强度、用量与账号绑定；请求前仍读取凭据，网络失败、HTTP 状态与响应结构问题分别映射为 `NETWORK_ERROR`、`HTTP_ERROR`、`IMAGE_SERVICE_ERROR` 或 `INVALID_RESPONSE`。

@@ -32,7 +32,8 @@ export class ProtocolProvider implements ModelProvider {
   constructor(info: ProviderInfo, effects: ProviderEffects, options: ChatCompletionsOptions = {}) {
     this.info = copyProviderInfo(info);
     this.effects = effects;
-    this.options = { allowHttp: options.allowHttp, replayReasoning: options.replayReasoning };
+    this.options = { allowHttp: options.allowHttp, replayReasoning: options.replayReasoning,
+      maxCompletionTokens: options.maxCompletionTokens, streamUsage: options.streamUsage };
   }
 
   endpoint(baseUrl: string): string {
@@ -68,7 +69,9 @@ export class ProtocolProvider implements ModelProvider {
       this.info.protocol === 'gemini' ? geminiRequest(messages, input.tools, input.maxOutputTokens) :
       this.info.protocol === 'anthropic-messages' ? anthropicRequest(input.model, messages, input.tools, input.maxOutputTokens, this.info.promptCaching === true) :
       chatRequest(input.model, messages, input.tools, this.options, input.maxOutputTokens);
-    if (input.requestUsage !== false && this.info.protocol === 'chat-completions') { (body as ChatRequest).stream_options = { include_usage: true }; }
+    if (input.requestUsage !== false && this.options.streamUsage !== false && this.info.protocol === 'chat-completions') {
+      (body as ChatRequest).stream_options = { include_usage: true };
+    }
     applyReasoningEffort(this.info.protocol, input.model, input.reasoning, body);
     const endTransfer = await NetworkTransfers.begin(cancellation);
     try {

@@ -10,6 +10,8 @@ export function profileProvider(profile: ProviderProfile, effects: ProviderEffec
       preset.id === profile.presetId && preset.promptCaching === true),
     defaultBaseUrl: profile.baseUrl, defaultModel: profile.models[0], models: profile.models,
     noApiKey: profile.noApiKey };
+  const mimo = profile.presetId === 'mimo';
   return new ProtocolProvider(info, effects, { allowHttp: true,
-    replayReasoning: profile.presetId !== 'openai' && profile.presetId !== 'ollama' });
+    replayReasoning: profile.presetId !== 'openai' && profile.presetId !== 'ollama',
+    maxCompletionTokens: mimo, streamUsage: !mimo });
 }

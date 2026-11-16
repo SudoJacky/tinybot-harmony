@@ -1,4 +1,5 @@
 import { PageStyles } from '../common/PageStyles';
+import { FrameCallback } from '@kit.ArkUI';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { HuaweiAccount } from '../services/HuaweiAccount';
 import { t } from '../model/I18n';
@@ -8,7 +9,7 @@ import { BrowserSession } from '../services/BrowserSession';
 import { ChatViewModel, SettingsViewModel } from '../viewmodel/ChatViewModel';
 import { SettingsToggle } from '../services/SessionContracts';
 import { ProviderInfo } from '../model/Provider';
-import { ProviderProfile } from '../model/ProviderProfiles';
+import { ProviderProfile, imageService } from '../model/ProviderProfiles';
 import { usesBalanceCredential } from '../model/BalanceSettings';
 import { supportsProviderBalance } from '../services/ProviderBalance';
 import { balanceProfileDraft } from '../services/ProviderBalanceCache';
@@ -18,13 +19,20 @@ import { Btn, Font, Space, Styles, protocolName } from '../common/Theme';
 import { monochromeProviderLogo, providerLogo } from '../common/ProviderBrand';
 import { Banner, BottomBar, GroupCard, NavRow, RowDivider, SectionHeader, SwitchRow } from '../common/Widgets';
 
+class SettingsRevealFrame extends FrameCallback {
+  private reveal: () => void;
+  constructor(reveal: () => void) { super(); this.reveal = reveal; }
+  onIdle(): void { this.reveal(); }
+}
+
 @Component
 export struct SettingsPanel {
   @StorageProp('tinybot.developer.enabled') private developerEnabled: boolean = false;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.language') private language: string = 'system';
   @Prop presetsOnly: boolean = false;
-  @Prop active: boolean = false;
+  @Prop @Watch('revealSearchTarget') active: boolean = false;
+  @Prop @Watch('revealSearchTarget') searchTarget: string = '';
   @Prop @Watch('resetScroll') section: string = '';
   @State private assistantDraft: AssistantOptions = defaultAssistantOptions();
   @ObjectLink app: ChatViewModel;
@@ -39,6 +47,7 @@ export struct SettingsPanel {
   onUsage: () => void = () => {};
   onStorage: () => void = () => {};
   onModels: () => void = () => {};
+  onImageGeneration: () => void = () => {};
   onSearch: () => void = () => {};
   onMail: () => void = () => {};
   onBackup: () => void = () => {};
@@ -54,11 +63,28 @@ export struct SettingsPanel {
     this.scroller.scrollTo({ xOffset: 0, yOffset: 0 });
   }
 
+  private revealSearchTarget(): void {
+    if (!this.active || !this.searchTarget) { return; }
+    const target = this.searchTarget;
+    const ui = this.getUIContext();
+    ui.postFrameCallback(new SettingsRevealFrame(() => {
+      if (!this.active || this.searchTarget !== target) { return; }
+      const rects = ui.getComponentUtils();
+      const item = rects.getRectangleById(target);
+      const viewport = rects.getRectangleById('settings-items');
+      if (item.size.height <= 0 || viewport.size.height <= 0) { return; }
+      const top = viewport.windowOffset.y + ui.vp2px(Space.md);
+      const bottom = viewport.windowOffset.y + viewport.size.height - ui.vp2px(Space.md);
+      const delta = item.windowOffset.y < top ? item.windowOffset.y - top : Math.max(0, item.windowOffset.y + item.size.height - bottom);
+      if (delta !== 0) { this.scroller.scrollBy(0, ui.px2vp(delta)); }
+    }));
+  }
+
   // A brief save leaves the page untouched; a reply, compaction or team run locks it with a notice.
   private blocked(): boolean { return this.app.sharedBusy && !this.app.saving; }
   // Editors need a mutable session; unsaved chat data must be resolved first.
   private canEdit(): boolean { return !this.blocked() && this.app.saveError.length === 0; }
-  aboutToAppear(): void { this.resetAssistantDraft(); }
+  aboutToAppear(): void { this.resetAssistantDraft(); this.revealSearchTarget(); }
 
   private resetAssistantDraft(): void {
     this.assistantDraft = JSON.parse(JSON.stringify(this.app.productivity.options || defaultAssistantOptions())) as AssistantOptions;
@@ -98,6 +124,13 @@ export struct SettingsPanel {
   private userDocumentPreview(): string {
     const document = (this.app.config.userDocument || '').trim();
     return document.replace(/\s+/g, ' ');
+  }
+
+  private imageGenerationSummary(): string {
+    const config = this.app.productivity.options?.imageGeneration;
+    if (!config) { return ''; }
+    const service = imageService(this.app.providerProfiles, config);
+    return service ? service.name + ' · ' + config.modelId : t('所选模型不可用');
   }
 
   private choosePreset(id: string): void {
@@ -176,6 +209,9 @@ export struct SettingsPanel {
             RowDivider()
             NavRow({ title: t('模型分工与能力'), compId: 'open-model-settings',
               icon: $r('sys.symbol.person_2'), disabled: !this.canEdit(), onTap: () => this.onModels() })
+            RowDivider()
+            NavRow({ title: t('图片生成'), subtitle: this.imageGenerationSummary(), compId: 'open-image-generation',
+              icon: $r('sys.symbol.picture'), disabled: !this.canEdit(), onTap: this.onImageGeneration })
           }
         }
         }
@@ -187,7 +223,7 @@ export struct SettingsPanel {
               icon: $r('sys.symbol.square_and_pencil'), disabled: !this.canEdit(), onTap: () => this.onUserDocument() })
             RowDivider()
             SwitchRow({ title: t('自动保存任务结果'), icon: $r('sys.symbol.archivebox'), subtitle: t('把成功的回答归档到工作区的“任务结果”目录。'), compId: 'save-summary',
-              isOn: this.assistantDraft.saveSummary, disabled: !this.canEdit(),
+              isOn: this.assistantDraft.saveSummary, disabled: !this.canEdit(), highlighted: this.searchTarget === 'save-summary',
               onChange: (value: boolean) => this.saveToggle('saveSummary', value) })
           }
         }
@@ -198,14 +234,14 @@ export struct SettingsPanel {
           Column() {
             SwitchRow({ title: t('自动提取长期记忆'), icon: $r('sys.symbol.wand_and_stars'), compId: 'auto-memory',
               subtitle: t('助手可在聊天中主动维护记忆，每 10 轮还会额外调用模型做后台整理。'),
-              isOn: this.assistantDraft.autoMemory, disabled: !this.canEdit(),
+              isOn: this.assistantDraft.autoMemory, disabled: !this.canEdit(), highlighted: this.searchTarget === 'auto-memory',
               onChange: (value: boolean) => this.saveToggle('autoMemory', value) })
             RowDivider()
             NavRow({ title: t('管理长期记忆'), compId: 'open-memory',
               icon: $r('sys.symbol.lightbulb'), disabled: !this.canEdit(), onTap: () => this.onTools('memory') })
             RowDivider()
             SwitchRow({ title: t("自动压缩历史"), icon: $r('sys.symbol.rectangle_stack'), compId: 'auto-compact', isOn: this.settings.autoCompact,
-              subtitle: t('接近上下文上限时生成摘要，完整记录保留。'), disabled: !this.canEdit(),
+              subtitle: t('接近上下文上限时生成摘要，完整记录保留。'), disabled: !this.canEdit(), highlighted: this.searchTarget === 'auto-compact',
               onChange: (value: boolean) => this.saveToggle('autoCompact', value) })
           }
         }
@@ -215,11 +251,11 @@ export struct SettingsPanel {
         GroupCard() {
           Column() {
             SwitchRow({ title: t('只读模式'), icon: $r('sys.symbol.lock'), subtitle: t('对所有对话生效，阻止修改文件和调用远程工具。'), compId: 'read-only',
-              isOn: this.assistantDraft.readOnly, disabled: !this.canEdit(),
+              isOn: this.assistantDraft.readOnly, disabled: !this.canEdit(), highlighted: this.searchTarget === 'read-only',
               onChange: (value: boolean) => this.saveToggle('readOnly', value) })
             RowDivider()
             SwitchRow({ title: t('允许网页读取与搜索'), icon: $r('sys.symbol.doc_text'), compId: 'web-enabled', isOn: this.settings.webEnabled,
-              subtitle: t('不影响模型服务与浏览器权限。'), disabled: !this.canEdit(),
+              subtitle: t('不影响模型服务与浏览器权限。'), disabled: !this.canEdit(), highlighted: this.searchTarget === 'web-enabled',
               onChange: (value: boolean) => this.saveToggle('webEnabled', value) })
             RowDivider()
             NavRow({ title: t('搜索服务'), icon: $r('sys.symbol.magnifyingglass'), subtitle: searchSettingsSummary(this.app.productivity.options?.search), compId: 'open-search-settings',
@@ -228,6 +264,7 @@ export struct SettingsPanel {
             NavRow({ title: t('邮箱连接'), icon: $r('sys.symbol.doc_text'), subtitle: t('只读访问邮件，为助手和卡片提供数据'), compId: 'open-mail-settings', onTap: this.onMail })
             RowDivider()
             SwitchRow({ title: t('应用内浏览器'), icon: $r('sys.symbol.link'), compId: 'browser-enabled', isOn: this.browser.policy === 'enabled',
+              highlighted: this.searchTarget === 'browser-enabled',
               subtitle: this.browser.policy === 'unset' ? t('尚未设置，首次使用时询问。') : this.browser.policy === 'disabled' ? t('已关闭，助手不会再次请求启用。') : t('允许助手操作网页；你可以随时接管。'),
               disabled: this.browser.permissionSaving || !this.app.ready || this.app.saveError.length > 0,
               onChange: async (value: boolean) => { try { await this.browser.setEnabled(value); }
@@ -291,7 +328,7 @@ export struct SettingsPanel {
         }
         }
       }.padding({ left: Space.page, right: Space.page, bottom: Space.xl }).width('100%').attributeModifier(PageStyles.form)
-    }.height('100%').width('100%').scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring).align(Alignment.Top)
+    }.id('settings-items').height('100%').width('100%').scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring).align(Alignment.Top)
   }
   build() {
     if (this.presetsOnly) { this.presetsPage() }

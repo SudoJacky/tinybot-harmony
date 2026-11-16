@@ -1,6 +1,6 @@
 import { t } from './I18n';
 import { SearchConfig, defaultSearchConfig, validateSearchConfig } from './WebSearch';
-import { ModelReference, validateReference } from './ProviderProfiles';
+import { ImageGenerationConfig, ModelReference, validateImageGeneration, validateReference } from './ProviderProfiles';
 import { isConfigurationName } from './ConfigurationValue';
 export interface ModelCapability extends ModelReference { images: boolean; reasoning: string; contextWindow?: number; requestUsage: boolean; }
 export interface AssistantOptions {
@@ -9,7 +9,7 @@ export interface AssistantOptions {
   memory?: ModelReference;
   title?: ModelReference;
   teamWorker?: ModelReference;
-  imageGeneration?: ModelReference;
+  imageGeneration?: ImageGenerationConfig;
   capabilities: ModelCapability[];
 }
 export function defaultAssistantOptions(): AssistantOptions {
@@ -20,9 +20,10 @@ export function validateAssistantOptions(value: AssistantOptions): void {
   if (!value || [value.autoMemory, value.saveSummary, value.readOnly].some((item) => typeof item !== 'boolean') ||
     !Array.isArray(value.capabilities) || value.capabilities.length > 200) { throw new Error(t("助手选项无效。")); }
   if (value.memory) { validateReference(value.memory); }
-  for (const reference of [value.title, value.teamWorker, value.imageGeneration]) {
+  for (const reference of [value.title, value.teamWorker]) {
     if (reference !== undefined) { validateReference(reference); }
   }
+  if (value.imageGeneration !== undefined) { validateImageGeneration(value.imageGeneration); }
   for (const item of value.capabilities) {
     validateReference(item);
     if (typeof item.images !== 'boolean' || typeof item.requestUsage !== 'boolean' || !isConfigurationName(item.reasoning) ||

@@ -35,7 +35,9 @@ export async function encryptBackupKeys(data: AppData, openID: string, vault: Cr
   }
   const selected: ModelReference | undefined = data.config.configured ? { providerId: data.config.providerId, modelId: data.config.model } : undefined;
   if (connections) { validateBackupConnections(connections); }
-  const payload: BackupKeyPayload = { providers: providers, selected: selected, connections: connections };
+  const image = data.productivity?.options?.imageGeneration;
+  const payload: BackupKeyPayload = { providers: providers, selected: selected,
+    imageGeneration: image?.protocol === undefined ? undefined : image, connections: connections };
   const random = cryptoFramework.createRandom();
   const salt = (await random.generateRandom(16)).data; const iv = (await random.generateRandom(12)).data;
   const key = await derive('tinybot-backup-openid-v2:' + openID, salt);
@@ -97,6 +99,10 @@ export async function decryptBackupKeys(value: EncryptedBackupKeys, credential: 
   if (payload.selected && (!ids.has(payload.selected.providerId) || typeof payload.selected.modelId !== 'string')) {
     throw new Error(t('备份密钥格式无效。'));
   }
+  const image = data.productivity?.options?.imageGeneration;
+  const visibleImage = image?.protocol === undefined ? undefined : image;
+  if (visibleImage?.providerId !== payload.imageGeneration?.providerId || visibleImage?.protocol !== payload.imageGeneration?.protocol ||
+    visibleImage?.baseUrl !== payload.imageGeneration?.baseUrl) { throw new Error(t('备份密钥与模型服务配置不一致。')); }
   if (payload.connections) {
     validateBackupConnections(payload.connections);
     for (const item of payload.connections.mcp || []) {

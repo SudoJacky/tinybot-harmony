@@ -30,6 +30,7 @@ const { McpTools } = from('services/McpTools');
 const { ToolApproval } = from('services/ToolApproval');
 const { Cancellation } = from('services/Cancellation');
 const { chatRequest } = from('services/providers/ChatCompletionsProtocol');
+const { reasoningEfforts } = from('model/ReasoningEffort');
 const { responsesRequest, anthropicRequest } = from('services/providers/WireProtocols');
 const { toolDetailContent } = from('model/ToolDetailContent');
 const { parseDataView, dataCsv } = from('model/RichArtifacts');
@@ -85,6 +86,13 @@ async function main() {
   check('edit_file', { path: 'a' }, false);
   assert.deepEqual(Object.keys(schemas.get('edit_file').properties), ['path', 'edits']);
   const chat = plain(chatRequest('test', [], definitions));
+  const mimo = plain(chatRequest('mimo-v2.6-flash', [], definitions, { maxCompletionTokens: true }, 1600));
+  assert.equal(mimo.max_completion_tokens, 1600);
+  assert.equal(mimo.max_tokens, undefined);
+  assert.equal(chatRequest('test', [], definitions, {}, 1600).max_tokens, 1600);
+  assert.deepEqual(plain(reasoningEfforts('chat-completions', 'kimi-k3.1-pro')), ['default', 'low', 'high', 'max']);
+  assert.deepEqual(plain(reasoningEfforts('chat-completions', 'MiniMax-M3.1-Flash')), ['default', 'low', 'medium', 'high', 'xhigh', 'max']);
+  assert.deepEqual(plain(reasoningEfforts('chat-completions', 'mimo-v2.6-pro')), ['default']);
   const responses = plain(responsesRequest('test', [], definitions));
   const anthropic = plain(anthropicRequest('test', [], definitions));
   for (let i = 0; i < definitions.length; i++) {

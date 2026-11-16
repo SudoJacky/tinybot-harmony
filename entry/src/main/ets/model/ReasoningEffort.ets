@@ -19,6 +19,11 @@ export function reasoningEfforts(protocol: string, model: string = ''): string[]
     return ['default', 'low', 'medium', 'high', 'xhigh', 'max'];
   }
   if (protocol !== 'chat-completions' && protocol !== 'responses') return ['default'];
+  if (protocol === 'chat-completions') {
+    if (/^kimi-k3(?:\.1-pro(?:-highspeed)?)?$/.test(name)) return ['default', 'low', 'high', 'max'];
+    if (name === 'minimax-m3.1-flash') return ['default', 'low', 'medium', 'high', 'xhigh', 'max'];
+    if (/^mimo-v2\.6-(?:flash|pro(?:-ultraspeed)?)$/.test(name)) return ['default'];
+  }
   if (/^gpt-6(?:\.|-)/.test(name)) {
     return /(?:astra|6\.1-sol)/.test(name) ? ['default', 'low', 'medium', 'high', 'xhigh', 'max'] :
       ['default', 'none', 'low', 'medium', 'high', 'xhigh', 'max'];

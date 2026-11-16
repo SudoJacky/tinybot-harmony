@@ -21,6 +21,7 @@ const model = name => load(path.join(root, 'entry/src/main/ets', name));
 const { t } = model('model/I18n');
 const { defaultProductivity, validateProductivity } = model('model/Productivity');
 const { ProviderEditorViewModel } = model('viewmodel/ProviderEditorViewModel');
+const { findSettings } = model('model/SettingsSearch');
 function controller(name, names, globals = {}) {
   const relative = 'entry/src/main/ets/views/' + name;
   const source = path.join(root, relative + '.ets');
@@ -45,6 +46,34 @@ function form(app, tab, entryId = '') {
   value.aboutToAppear(); return { value, closed };
 }
 (async () => {
+  const searchProfiles = [{ id: 'my-kimi', name: 'Work Kimi', presetId: 'kimi', protocol: 'chat-completions', enabled: false }];
+  assert.equal(findSettings('  ', searchProfiles, false).length, 0);
+  assert.equal(findSettings('ｍｉｍｏ不存在', searchProfiles, false).length, 0);
+  assert.equal(findSettings('生图', searchProfiles, false)[0].route, 'image-generation');
+  assert.equal(findSettings('dark mode', searchProfiles, false)[0].route, 'appearance');
+  assert.equal(findSettings('work  KIMI', searchProfiles, false)[0].param, 'my-kimi');
+  assert.equal(findSettings('浏览器', searchProfiles, false)[0].id, 'browser-enabled');
+  assert.equal(findSettings('开发者模式', searchProfiles, false).length, 0);
+  assert.equal(findSettings('开发者模式', searchProfiles, true)[0].id, 'open-developer');
+  console.log('PASS settings search matches bilingual titles, aliases and configured services across categories');
+
+  const Reveal = controller('SettingsPanel', ['revealSearchTarget'], {
+    Space: { md: 12 }, SettingsRevealFrame: class { constructor(onIdle) { this.onIdle = onIdle; } }
+  });
+  const frames = [], offsets = [];
+  const reveal = Object.assign(new Reveal(), { active: false, searchTarget: 'browser-enabled',
+    scroller: { scrollBy: (_x, y) => offsets.push(y) }, getUIContext: () => ({
+      postFrameCallback: frame => frames.push(frame), vp2px: value => value * 2, px2vp: value => value / 2,
+      getComponentUtils: () => ({ getRectangleById: id => id === 'settings-items' ?
+        { windowOffset: { y: 120 }, size: { height: 300 } } : { windowOffset: { y: 450 }, size: { height: 40 } } })
+    }) });
+  reveal.revealSearchTarget(); assert.equal(frames.length, 0);
+  reveal.active = true; reveal.revealSearchTarget(); frames.shift().onIdle();
+  assert.deepEqual(offsets, [47]);
+  reveal.revealSearchTarget(); reveal.searchTarget = ''; frames.shift().onIdle();
+  assert.deepEqual(offsets, [47], 'A stale frame cannot scroll after leaving the result');
+  console.log('PASS a switch result scrolls to its row after the settings page is shown');
+
   const app = { busy: false, active: { id: 'chat' }, productivity: defaultProductivity(), error: 'disk unavailable' };
   app.productivity.servers.push({ id: 'server', name: 'MCP', url: 'https://example.com/mcp', credentialAlias: 'saved-alias', enabled: true });
   let fail = true;
@@ -97,6 +126,28 @@ function form(app, tab, entryId = '') {
   assert.ok(editor.modelList.includes('manual-model'));
   provider.aboutToDisappear(); assert.equal(editor.apiKey, ''); assert.equal(editor.balanceApiKey, '');
   console.log('PASS model subpages share the draft and clear its raw key only when leaving the service');
+
+  const Image = controller('ImageGenerationPanel', ['aboutToAppear', 'providers', 'locked', 'knownModels', 'chooseProvider', 'addProvider', 'save'],
+    model('model/ProviderEndpoint'));
+  const legacy = { id: 'chat', enabled: true, protocol: 'chat-completions', imageModels: {
+    protocol: 'seedream-images', baseUrl: 'https://example.com/images', models: ['legacy-first', 'legacy-selected'] } };
+  const imageApp = { providerProfiles: [legacy], productivity: { ...defaultProductivity(), options: {
+    imageGeneration: { providerId: legacy.id, modelId: 'legacy-selected' } } } };
+  let imageReturn, savedImage, imagePops = 0;
+  imageApp.saveImageGeneration = async value => { savedImage = value; return true; };
+  const image = Object.assign(new Image(), { app: imageApp, providerId: '', onSaved: () => imagePops++,
+    onAddProvider: (protocol, onReturn) => { assert.equal(protocol, 'seedream-images'); imageReturn = onReturn; } });
+  image.aboutToAppear();
+  assert.equal(image.modelId, 'legacy-selected'); assert.equal(image.baseUrl, legacy.imageModels.baseUrl);
+  image.addProvider();
+  const added = { id: 'new', enabled: true, protocol: 'openai-images', models: ['new-model'] };
+  imageApp.providerProfiles.push(added); imageReturn(added);
+  image.aboutToAppear();
+  assert.equal(image.modelId, 'new-model'); assert.equal(image.providerId, added.id); assert.equal(image.baseUrl, '');
+  assert.equal(imageApp.productivity.options.imageGeneration.providerId, legacy.id);
+  await image.save();
+  assert.equal(imagePops, 1); assert.equal(savedImage.providerId, 'new'); assert.equal(savedImage.protocol, 'openai-images');
+  console.log('PASS image settings load a legacy choice and preselect a newly added provider before saving');
 
   let writes = 0, pops = 0, reject = true;
   const Appearance = controller('AppearancePanel', ['save'], { AppearancePreferences: { select() {

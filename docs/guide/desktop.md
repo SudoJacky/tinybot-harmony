@@ -94,7 +94,6 @@
 | Ctrl+Shift+F | 工作区文件 |
 | Ctrl+Shift+L | 聚焦消息输入框 |
 | Ctrl+O | 添加文件附件 |
-| Ctrl+Shift+E | 展开输入 |
 | Ctrl+Shift+J | 查看最新消息 |
 | Ctrl+Shift+S | 停止生成 |
 | F1 | 键盘快捷键说明 |

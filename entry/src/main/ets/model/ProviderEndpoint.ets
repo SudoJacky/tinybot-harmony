@@ -66,9 +66,14 @@ export function sharedImageBaseUrl(chatProtocol: string, chatUrl: string, imageP
   const chatRoot = providerEndpointRoot(protocolUrl(chatProtocol, chatUrl, true));
   const base = imageUrl || chatRoot;
   const endpoint = protocolUrl(imageProtocol, base, true);
-  const origin = /^https?:\/\/[^/]+/;
-  if (origin.exec(chatRoot)?.[0] !== origin.exec(endpoint)?.[0]) {
+  if (!sameProviderOrigin(chatRoot, endpoint)) {
     throw new Error(t('复用 API Key 时，图片服务的协议、主机和端口必须与聊天服务一致。'));
   }
   return base;
+}
+
+export function sameProviderOrigin(first: string, second: string): boolean {
+  const origin = /^https?:\/\/[^/]+/;
+  const source = origin.exec(first.trim())?.[0];
+  return source !== undefined && source === origin.exec(second.trim())?.[0];
 }

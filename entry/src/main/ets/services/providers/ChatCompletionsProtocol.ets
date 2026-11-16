@@ -14,6 +14,8 @@ export interface ChatWireMessage {
 export interface ChatCompletionsOptions {
   allowHttp?: boolean;
   replayReasoning?: boolean;
+  maxCompletionTokens?: boolean;
+  streamUsage?: boolean;
 }
 
 export interface ChatRequest {
@@ -25,13 +27,15 @@ export interface ChatRequest {
   tools?: ToolDefinition[];
   tool_choice?: string;
   max_tokens?: number;
+  max_completion_tokens?: number;
 }
 interface StreamOptions { include_usage: boolean; }
 
 export function chatRequest(model: string, messages: ModelMessage[], tools: ToolDefinition[],
   options: ChatCompletionsOptions = {}, maxOutputTokens?: number): ChatRequest {
   return { model: model, stream: true, tools: tools.length > 0 ? toolSchemas(tools) : undefined,
-    max_tokens: maxOutputTokens,
+    max_tokens: options.maxCompletionTokens ? undefined : maxOutputTokens,
+    max_completion_tokens: options.maxCompletionTokens ? maxOutputTokens : undefined,
     tool_choice: tools.length > 0 ? 'auto' : undefined,
     messages: messages.map((message: ModelMessage): ChatWireMessage => {
       const content: ChatContent[] = [];
