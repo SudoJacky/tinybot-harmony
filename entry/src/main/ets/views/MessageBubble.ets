@@ -20,6 +20,7 @@ import { InteractiveAnswer } from './InteractiveAnswer';
 import { UiValues } from '../model/InteractiveUi';
 import { DocumentPreview } from './DocumentPreview';
 import { FileAnnotationList } from './FileAnnotationList';
+import { BrowserAnnotationCard } from './BrowserAnnotationCard';
 import { DataViewCard } from './DataViewCard';
 import { Attachment } from '../model/Productivity';
 import { Attachments } from '../services/Attachments';
@@ -380,7 +381,7 @@ export struct MessageBubble {
     } catch (_) { this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t("复制失败，请长按文本选择复制。") }); }
   }
 
-  private images(): Attachment[] { return this.message.attachments.filter((item) => item.mime === 'image/jpeg'); }
+  private images(): Attachment[] { return this.message.attachments.filter((item) => item.mime === 'image/jpeg' && !item.browserAnnotation); }
   private files(): Attachment[] { return this.message.attachments.filter((item) => item.mime !== 'image/jpeg'); }
   private preview(item: Attachment): void { this.previewPath = Attachments.path(item); this.previewing = true; }
   private selectText(): void {
@@ -499,6 +500,9 @@ export struct MessageBubble {
       ForEach(this.message.references, (item: ThreadReference) => {
         ThreadReferenceCard({ reference: item })
       }, (item: ThreadReference) => item.threadId)
+      ForEach(this.message.attachments.filter((item) => !!item.browserAnnotation), (item: Attachment) => {
+        BrowserAnnotationCard({ item: item, onPreview: () => this.preview(item) })
+      }, (item: Attachment) => item.id)
       if (this.images().length === 1) {
         Image('file://' + Attachments.path(this.images()[0])).width(200).constraintSize({ maxHeight: 260 })
           .objectFit(ImageFit.Contain).borderRadius(Radius.lg).backgroundColor($r('app.color.surface_variant'))
@@ -552,7 +556,9 @@ export struct MessageBubble {
     Column({ space: 4 }) {
       Text(t("追加指令")).fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.text_secondary'))
       ForEach(this.message.stepViews[index]?.steering?.attachments || [], (item: Attachment) => {
-        if (item.mime === 'image/jpeg') {
+        if (item.browserAnnotation) {
+          BrowserAnnotationCard({ item: item, onPreview: () => this.preview(item) })
+        } else if (item.mime === 'image/jpeg') {
           Image('file://' + Attachments.path(item)).width(200).constraintSize({ maxHeight: 260 }).objectFit(ImageFit.Contain)
             .borderRadius(Radius.md).accessibilityText(item.name).onClick(() => this.preview(item))
         } else { Text(item.name).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary')) }

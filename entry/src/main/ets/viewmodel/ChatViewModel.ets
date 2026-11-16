@@ -246,7 +246,10 @@ export class ChatViewModel {
   importSnapshot(data: AppData): Promise<boolean> { return this.requireSession().importSnapshot(data); }
   setThreadMcp(id: string, enabled: boolean): Promise<boolean> { return this.requireSession().setThreadMcp(id, enabled); }
   setAttachments(items: Attachment[]): Promise<boolean> { return this.requireSession().setAttachments(items); }
-  appendDraftAttachment(threadId: string, item: Attachment, text: string): Promise<void> { return this.requireSession().appendDraftAttachment(threadId, item, text); }
+  appendDraftAttachment(threadId: string, item: Attachment): Promise<void> { return this.requireSession().appendDraftAttachment(threadId, item); }
+  editBrowserAnnotation(threadId: string, id: string, note?: string): Promise<void> {
+    return this.requireSession().editBrowserAnnotation(threadId, id, note);
+  }
   editFileAnnotation(threadId: string, id: string, comment?: string): Promise<void> {
     return this.requireSession().editFileAnnotation(threadId, id, comment);
   }

@@ -2,8 +2,10 @@ import { AppearanceStyle } from '../common/AppearanceStyle';
 import { BrowserActionFeedback, BrowserSession } from '../services/BrowserSession';
 import { NativeBrowserDriver, NativeBrowserCapture } from '../services/NativeBrowserDriver';
 import { BrowserAnnotation, AnnotationPage } from '../model/BrowserAnnotation';
-import { BROWSER_STYLE_PROPERTIES, BrowserElementSelection, BrowserInspectorCommand } from '../model/BrowserScripts';
+import { BrowserElementSelection, BrowserInspectorCommand } from '../model/BrowserScripts';
 import { BrowserAnnotationBoard } from './BrowserAnnotationBoard';
+import { BrowserElementEditor } from './BrowserElementEditor';
+import { renderBrowserAnnotation } from '../services/BrowserAnnotationImage';
 import { image } from '@kit.ImageKit';
 import { validateWebAddress } from '../services/WebTools';
 import { browserAddress, BrowserStartPreview } from '../model/BrowserAddress';
@@ -59,8 +61,9 @@ export struct BrowserPanel {
   @State private pickingElement: boolean = false;
   @State private elementSelection: BrowserElementSelection | undefined = undefined;
   @State private inspectorWorking: boolean = false;
-  @State private styleIndex: number = 0;
-  @State private styleValue: string = '';
+  @State private editorAtTop: boolean = false;
+  @State private editorSpace: number = 0.58;
+  @State private showElementProperties: boolean = true;
   @State private recent: BrowserVisit[] = [];
   @State private annotation: BrowserAnnotation = new BrowserAnnotation();
   @State private webWidth: number = 0;
@@ -97,29 +100,38 @@ export struct BrowserPanel {
     this.driver?.setFeedbackVisible(this.expanded); this.browser.setPresentation(this.expanded, this.foreground);
     this.scheduleElementRefresh();
   }
-  private async annotate(screenshotOnly: boolean = false, selectionId?: number): Promise<void> {
-    if (!this.driver || this.capturing || this.inspectorWorking || this.showAnnotation || !this.canAnnotate) { return; }
+  private async annotate(screenshotOnly: boolean = false, selectionId?: number, note: string = '', stage: boolean = false): Promise<boolean> {
+    if (!this.driver || this.capturing || this.inspectorWorking || this.showAnnotation || !this.canAnnotate) { return false; }
     this.capturing = true;
     const threadId = this.threadId;
     this.annotationThreadId = threadId;
-    this.getUIContext().getFocusController().clearFocus();
+    // Keep the selected Web viewport stable until the screenshot and its bounds have both been read.
+    if (selectionId === undefined) { this.getUIContext().getFocusController().clearFocus(); }
     let capture: NativeBrowserCapture | undefined;
+    let rendered: image.PixelMap | undefined;
     try {
       await this.browser.pauseForAnnotation();
       capture = selectionId === undefined ? await this.driver.capture() : await this.driver.captureElement(selectionId);
-      if (!this.mounted || this.threadId !== threadId || !this.expanded || !this.foreground) { return; }
+      if (!this.mounted || this.threadId !== threadId || !this.expanded || !this.foreground) { return false; }
       if (screenshotOnly) {
         await this.onScreenshot(threadId, capture.pixel);
       } else {
-        this.annotationCapture = capture; this.annotation = new BrowserAnnotation();
+        this.annotation = new BrowserAnnotation(); this.annotation.note = note;
         if (capture.element) { this.annotation.markElement(capture.element); }
-        this.showAnnotation = true;
-        Diagnostics.log('info', 'browser', 'annotation_captured', { width: capture.width, height: capture.height });
-        capture = undefined; // The annotation board owns the captured pixel from here.
+        if (stage) {
+          rendered = await renderBrowserAnnotation(capture.pixel, this.annotation.strokes);
+          await this.onAnnotation(threadId, rendered, capture, note);
+        } else {
+          this.annotationCapture = capture; this.showAnnotation = true;
+          Diagnostics.log('info', 'browser', 'annotation_captured', { width: capture.width, height: capture.height });
+          capture = undefined; // The annotation board owns the captured pixel from here.
+        }
       }
-    } catch (error) { this.browser.report(error as Error); }
+      return true;
+    } catch (error) { this.browser.report(error as Error); return false; }
     finally {
       this.capturing = false;
+      await rendered?.release().catch((error: Error) => Diagnostics.log('error', 'browser', 'annotation_failed', undefined, error));
       await capture?.pixel.release().catch((error: Error) => Diagnostics.log('error', 'browser', 'annotation_failed', undefined, error));
     }
   }
@@ -137,7 +149,7 @@ export struct BrowserPanel {
   }
   private dropElementSelection(): void {
     clearTimeout(this.selectionTimer); this.selectionTimer = -1;
-    this.elementSelection = undefined; this.pickingElement = false; this.styleValue = '';
+    this.elementSelection = undefined; this.pickingElement = false;
   }
   private async pickAt(event: ClickEvent): Promise<void> {
     const driver = this.driver;
@@ -151,7 +163,10 @@ export struct BrowserPanel {
       const selection = await driver.inspectElement({ action: 'select', x: x, y: y });
       if (!selection || !this.mounted) { return; }
       this.selectionDocument = this.browser.documentVersion; this.selectionPreview = this.browser.previewInstance;
-      this.elementSelection = selection; this.styleIndex = 0; this.styleValue = selection.values[0];
+      const above = selection.mark?.y ?? y;
+      const below = selection.mark ? 1 - selection.mark.y - selection.mark.height : 1 - y;
+      this.elementSelection = selection; this.editorAtTop = above > below;
+      this.editorSpace = Math.max(above, below); this.showElementProperties = true;
       this.pickingElement = false; this.browser.error = '';
     } catch (error) { this.browser.report(error as Error); }
     finally { this.inspectorWorking = false; this.scheduleElementRefresh(); }
@@ -189,7 +204,7 @@ export struct BrowserPanel {
     try {
       const selection = await this.driver.inspectElement({ action: command.action, id: selected.id, property: command.property, value: command.value });
       this.browser.error = '';
-      if (selection) { this.elementSelection = selection; this.styleValue = selection.values[this.styleIndex]; }
+      if (selection) { this.elementSelection = selection; }
       else {
         this.dropElementSelection();
         if (command.action !== 'clear') { this.browser.report(t('选中的元素已失效，请重新选择。')); }
@@ -198,19 +213,17 @@ export struct BrowserPanel {
     } catch (error) { this.browser.report(error as Error); return false; }
     finally { this.inspectorWorking = false; this.scheduleElementRefresh(); }
   }
-  private applyElementStyle(): void {
-    if (!this.styleValue.trim()) { return; }
-    this.editElement({ action: 'style', property: BROWSER_STYLE_PROPERTIES[this.styleIndex], value: this.styleValue.trim() });
-  }
   private async handoffBrowser(): Promise<void> {
     this.getUIContext().getFocusController().clearFocus();
     if (this.elementSelection && !await this.editElement({ action: 'clear' })) { return; }
     this.pickingElement = false;
     this.browser.handoff();
   }
-  private styleOptions(): SelectOption[] {
-    return [{ value: t('文字颜色') }, { value: t('背景颜色') }, { value: t('字号') },
-      { value: t('字重') }, { value: t('内边距') }];
+  private async captureElementNote(note: string, draw: boolean): Promise<void> {
+    const selection = this.elementSelection;
+    if (selection && await this.annotate(false, selection.id, note, !draw) && !draw && this.elementSelection?.id === selection.id) {
+      await this.editElement({ action: 'clear' });
+    }
   }
   private closeAnnotation(): void {
     if (this.annotation.saving) { return; }
@@ -232,6 +245,7 @@ export struct BrowserPanel {
           if (!capture) { throw new Error(t('批注截图已失效，请重新截取。')); }
           await this.onAnnotation(this.annotationThreadId, pixel, capture, note);
           this.showAnnotation = false;
+          if (capture.element) { await this.editElement({ action: 'clear' }); }
         } })
     }
   }
@@ -391,45 +405,24 @@ export struct BrowserPanel {
     }.width('100%').height(this.tabbed ? 46 : 48).padding({ left: 4, right: 6 }).enabled(!this.capturing)
   }
 
+  private elementEditorHeight(): number {
+    const available = Math.min(this.webHeight * 0.58, this.webHeight * this.editorSpace - 2 * Space.lg);
+    return this.showElementProperties ? Math.max(178, Math.min(386, available)) : 126;
+  }
+
   @Builder
   elementEditor() {
-    Column({ space: Space.xs }) {
-      Row({ space: Space.xs }) {
-        Text(t('选中元素：{0}', [this.elementSelection?.label || this.elementSelection?.location || ''])).fontFamily(this.appearance.fontFamily)
-          .fontSize(Font.small).fontColor($r('app.color.text_primary')).fontWeight(FontWeight.Medium)
-          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1).id('browser-selected-element')
-        IconButton({ icon: $r('sys.symbol.xmark'), label: t('清除选择'), compId: 'browser-clear-element',
-          diameter: 32, iconSize: 14, fill: '#00000000', onTap: () => this.editElement({ action: 'clear' }) })
-      }.width('100%')
-      Row({ space: Space.xs }) {
-        Select(this.styleOptions()).selected(this.styleIndex).value(this.styleOptions()[this.styleIndex].value)
-          .id('browser-style-property').height(36).onSelect((index: number) => {
-            this.styleIndex = index; this.styleValue = this.elementSelection?.values[index] || '';
-          })
-        TextInput({ text: this.styleValue, placeholder: t('样式值') }).id('browser-style-value')
-          .fontFamily(this.appearance.fontFamily).fontSize(Font.small).height(36).layoutWeight(1)
-          .enterKeyType(EnterKeyType.Go).maxLength(120).accessibilityText(t('样式值'))
-          .onChange((value: string) => { this.styleValue = value; }).onSubmit(() => this.applyElementStyle())
-        Button(t('应用样式')).id('browser-apply-style').attributeModifier(Btn.tonalSmall)
-          .enabled(this.styleValue.trim().length > 0).onClick(() => this.applyElementStyle())
-      }.width('100%')
-      Row({ space: Space.xs }) {
-        Button(t('重新选择')).id('browser-reselect-element').attributeModifier(Btn.textSmall).layoutWeight(1)
-          .onClick(() => this.startElementPicking())
-        Button(t('重置样式')).id('browser-reset-style').attributeModifier(Btn.textSmall).layoutWeight(1)
-          .enabled(!!this.elementSelection?.edited).onClick(() => this.editElement({ action: 'reset' }))
-        Button(t('批注元素')).id('browser-annotate-element').attributeModifier(Btn.primarySmall).layoutWeight(1)
-          .enabled(this.canCapturePage() && !!this.elementSelection?.mark).onClick(() => {
-            const id = this.elementSelection?.id;
-            if (id !== undefined) { this.annotate(false, id); }
-          })
-      }.width('100%')
-      if (!this.elementSelection?.mark) {
-        Text(t('选中元素不在可见区域，请滚动到该元素。')).fontFamily(this.appearance.fontFamily)
-          .fontSize(Font.caption).fontColor($r('app.color.text_secondary')).width('100%')
-      }
-    }.width('100%').padding({ left: Space.sm, right: Space.sm, bottom: Space.xs })
-      .backgroundColor($r('app.color.surface')).enabled(!this.capturing && !this.inspectorWorking && !this.pickingElement)
+    Stack() {
+      BrowserElementEditor({ selection: this.elementSelection, capturing: this.capturing,
+        showProperties: this.showElementProperties, captureEnabled: this.canCapturePage() && !!this.elementSelection?.mark,
+        onToggleProperties: () => { this.showElementProperties = !this.showElementProperties; },
+        onStyle: (property: string, value: string) => this.editElement({ action: 'style', property: property, value: value }),
+        onReset: () => this.editElement({ action: 'reset' }),
+        onCancel: () => { this.editElement({ action: 'clear' }); },
+        onCapture: (note: string, draw: boolean) => this.captureElementNote(note, draw) })
+    }.width(Math.min(372, this.webWidth - 2 * Space.sm)).height(this.elementEditorHeight())
+      .position({ x: Math.max(Space.sm, this.webWidth - 372 - Space.sm),
+        y: this.editorAtTop ? Space.sm : Math.max(Space.sm, this.webHeight - this.elementEditorHeight() - Space.lg) })
   }
 
   @Builder
@@ -522,7 +515,6 @@ export struct BrowserPanel {
             .fontColor($r('app.color.danger')).copyOption(CopyOptions.LocalDevice)
             .width('100%').padding({ left: Space.md, right: Space.md, bottom: Space.sm })
         }
-        if (this.elementSelection) { this.elementEditor() }
         if (this.browser.loading) {
           Progress({ value: this.browser.progress, total: 100, type: ProgressType.Linear }).id('browser-progress')
             .width('100%').color(this.appearance.accent).style({ strokeWidth: 2 }).accessibilityText(t('正在加载网页'))
@@ -597,6 +589,9 @@ export struct BrowserPanel {
             }.id('browser-pick-surface').width(this.browser.preview?.viewportWidth || '100%').constraintSize({ maxWidth: '100%' })
               .height('100%').backgroundColor('#01000000').hitTestBehavior(HitTestMode.Block)
               .onClick((event: ClickEvent) => this.pickAt(event))
+          }
+          if (!this.pickingElement && this.elementSelection && this.expanded && this.foreground && this.webWidth > 100) {
+            ForEach([this.elementSelection.id], (_id: number) => { this.elementEditor() }, (id: number) => String(id))
           }
           ForEach(this.expanded && this.browser.owner === 'agent' && this.browser.actionFeedback ? [this.browser.actionFeedback] : [],
             (feedback: BrowserActionFeedback) => {

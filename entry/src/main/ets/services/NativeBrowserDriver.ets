@@ -1,6 +1,7 @@
 import { webview } from '@kit.ArkWeb';
 import { image } from '@kit.ImageKit';
 import { AnnotationPage } from '../model/BrowserAnnotation';
+import { validBrowserPropertyChanges } from '../model/BrowserAnnotationContent';
 import { t } from '../model/I18n';
 import { ToolFailure } from '../model/ToolFailure';
 import { browserActionScript, browserInspectorScript, browserSnapshotScript, BrowserElementSelection,
@@ -223,6 +224,8 @@ export class NativeBrowserDriver implements BrowserDriver {
       (command.action !== 'select' && selection.id !== command.id) ||
       typeof selection.location !== 'string' || !selection.location || selection.location.length > 1000 ||
       typeof selection.label !== 'string' || selection.label.length > 160 || typeof selection.edited !== 'boolean' ||
+      typeof selection.tag !== 'string' || selection.tag.length > 80 || typeof selection.textEditable !== 'boolean' ||
+      !validBrowserPropertyChanges(selection.changes) || selection.changes.some((change) => !BROWSER_STYLE_PROPERTIES.includes(change.property)) ||
       typeof selection.viewport !== 'string' || selection.viewport.length > 200 || !Array.isArray(selection.values) ||
       selection.values.length !== BROWSER_STYLE_PROPERTIES.length || selection.values.some((value) => typeof value !== 'string' || value.length > 160) ||
       (mark && (mark.label !== selection.label || mark.location !== selection.location ||
@@ -241,10 +244,12 @@ export class NativeBrowserDriver implements BrowserDriver {
     try {
       const second = await this.inspectElement({ action: 'read', id: id });
       if (!second?.mark || docVersion !== this.browser.documentVersion || preview !== this.browser.previewInstance ||
-        first.viewport !== second.viewport || JSON.stringify(first.mark) !== JSON.stringify(second.mark)) {
+        first.viewport !== second.viewport || JSON.stringify(first.mark) !== JSON.stringify(second.mark) ||
+        JSON.stringify(first.changes) !== JSON.stringify(second.changes)) {
         throw new Error(t('页面已变化，请重新选择元素。'));
       }
       capture.element = first.mark;
+      capture.tag = first.tag; capture.changes = first.changes;
       return capture;
     } catch (error) { await capture.pixel.release(); throw error as Error; }
   }

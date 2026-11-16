@@ -1,6 +1,7 @@
 import { t } from './I18n';
 import { AssistantOptions, validateAssistantOptions } from './AssistantOptions';
 import { isConfigurationName } from './ConfigurationValue';
+import { BrowserAnnotationContent, validBrowserAnnotation } from './BrowserAnnotationContent';
 export const MAX_MESSAGE_ATTACHMENTS: number = 10;
 export interface Attachment {
   id: string;
@@ -9,6 +10,7 @@ export interface Attachment {
   path: string;
   size: number;
   text?: string;
+  browserAnnotation?: BrowserAnnotationContent;
   // Original files are staged until setAttachments binds them to a workspace.
   original?: boolean;
   workspaceId?: string;
@@ -62,6 +64,7 @@ export function validateAttachments(items: Attachment[]): void {
       typeof item.name !== 'string' || item.name.length > 200 || typeof item.path !== 'string' ||
       !validAttachmentStorage(item) || !Number.isSafeInteger(item.size) || item.size < 0 ||
       (item.mime === 'image/jpeg' && item.size > 4 * 1024 * 1024) ||
+      (item.browserAnnotation !== undefined && (item.original === true || item.mime !== 'image/jpeg' || !validBrowserAnnotation(item.browserAnnotation))) ||
       (item.text !== undefined && (typeof item.text !== 'string' || item.text.includes('\u0000')))) {
       throw new Error(t("附件记录无效。"));
     }

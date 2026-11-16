@@ -339,16 +339,38 @@ export class SessionService {
     if (!this.resources.prepareAttachments) { throw new Error('Workspace file attachment storage is unavailable.'); }
     return this.resources.prepareAttachments(items, thread.id, projectFor(this.data, thread)?.workspaceId);
   }
-  async appendDraftAttachment(threadId: string, item: Attachment, text: string): Promise<void> {
+  async appendDraftAttachment(threadId: string, item: Attachment): Promise<void> {
     if (this.active.id !== threadId) { throw new Error(t('对话已切换，请在当前对话重新添加附件。')); }
     if (!this.canQueueInput) { throw new Error(this.application.saveError || t('当前无法添加附件，请稍后重试。')); }
-    const attachments = (this.active.attachments || []).concat([item]);
+    const thread = this.active;
+    try { await this.setDraftAttachmentItems(thread, (thread.attachments || []).concat([item])); }
+    catch (error) {
+      if (thread.attachments?.includes(item)) {
+        thread.attachments = thread.attachments.filter((candidate) => candidate !== item);
+        this.draftRevision++; this.dirtyDrafts.add(thread.id); this.publish('snapshot');
+      }
+      throw error as Error;
+    }
+  }
+  async editBrowserAnnotation(threadId: string, id: string, note?: string): Promise<void> {
+    if (this.active.id !== threadId || !this.canQueueInput) { throw new Error(t('当前无法保存批注。')); }
+    const attachments = (this.active.attachments || []).slice();
+    const index = attachments.findIndex((item) => item.id === id);
+    const item = attachments[index], annotation = item?.browserAnnotation;
+    if (!annotation) { throw new Error(t('当前无法保存批注。')); }
+    if (note === undefined) { attachments.splice(index, 1); }
+    else {
+      attachments[index] = { id: item.id, name: item.name, mime: item.mime, path: item.path, size: item.size,
+        browserAnnotation: { url: annotation.url, title: annotation.title, element: annotation.element,
+          changes: annotation.changes, note: note.trim() } };
+    }
+    await this.setDraftAttachmentItems(this.active, attachments);
+  }
+  private async setDraftAttachmentItems(thread: ThreadData, attachments: Attachment[]): Promise<void> {
     validateAttachments(attachments);
-    const draft = [this.active.draft || '', text].filter((value) => value.length > 0).join('\n\n');
-    if (draft.length > MAX_INPUT_TEXT) { throw new Error(t('批注与现有草稿合计不能超过 24000 字符。')); }
-    this.active.attachments = attachments; this.setDraft(draft, threadId); this.publish('snapshot');
-    // Like typing, staging is allowed while the runtime is paused and uses its ordered save lane.
-    await this.persist(threadId); this.refreshContext(); this.publish('snapshot');
+    thread.attachments = attachments;
+    this.draftRevision++; this.dirtyDrafts.add(thread.id); this.publish('snapshot');
+    await this.persist(thread.id); this.refreshContext(thread.id);
   }
   private async setFileAnnotations(threadId: string, items: FileAnnotation[]): Promise<void> {
     if (this.active.id !== threadId || !this.canQueueInput) { throw new Error(t('当前无法保存批注。')); }
@@ -796,7 +818,7 @@ export class SessionService {
 
   async enqueueInput(mode: InputMode): Promise<void> {
     const thread = this.active; const status = this.status;
-    if (!this.canQueueInput || (!(thread.draft || '').trim() && !thread.annotations?.length)) { return; }
+    if (!this.canQueueInput || (!(thread.draft || '').trim() && !thread.annotations?.length && !thread.attachments?.length)) { return; }
     status.error = '';
     try {
       if ((thread.references || []).length > 0 || thread.panelContext) { throw new Error(t('会话引用请在当前任务完成后发送，或先移除引用再排队。')); }

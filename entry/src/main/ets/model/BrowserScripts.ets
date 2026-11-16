@@ -1,7 +1,9 @@
 import { BrowserAction } from '../services/BrowserSession';
-import { BrowserElementMark } from './BrowserAnnotation';
+import { BrowserElementMark, BrowserPropertyChange } from './BrowserAnnotation';
 
-export const BROWSER_STYLE_PROPERTIES: string[] = ['color', 'background-color', 'font-size', 'font-weight', 'padding'];
+export const BROWSER_STYLE_PROPERTIES: string[] = [
+  'color', 'background-color', 'font-size', 'font-weight', 'padding', 'border-width', 'opacity', 'font-family', 'text'
+];
 
 export interface BrowserInspectorCommand {
   action: 'select' | 'read' | 'style' | 'reset' | 'clear';
@@ -15,11 +17,14 @@ export interface BrowserInspectorCommand {
 export interface BrowserElementSelection {
   id: number;
   label: string;
+  tag: string;
   location: string;
   mark?: BrowserElementMark;
   viewport: string;
   values: string[];
   edited: boolean;
+  textEditable: boolean;
+  changes: BrowserPropertyChange[];
 }
 
 // Fixed scripts only: the model never supplies JavaScript, selectors, native bridges or cookies.
@@ -130,6 +135,10 @@ function inspectorScript(expression: string): string {
       }
       if (originals.size && !hadStyle && !node.style.length) node.removeAttribute('style');
       originals.clear();
+      if (selection.before.has('text') && selection.textNode?.parentNode === node) {
+        selection.textNode.data = selection.before.get('text');
+      }
+      selection.before.clear();
     };
     const state = globalThis.__tinybotElementInspector ??= {sequence: 0, selection: null};
     const clear = () => {
@@ -163,7 +172,11 @@ function inspectorScript(expression: string): string {
       const box = node.getBoundingClientRect();
       if (!node.style || !box.width || !box.height) return fail('NO_ELEMENT');
       clear();
-      state.selection = {id: ++state.sequence, node, ...describe(node), originals: new Map(), hadStyle: node.hasAttribute('style')};
+      const textNode = !sensitive(node) && !node.isContentEditable && !node.matches('input,textarea,select,script,style') &&
+        node.childNodes.length === 1 && node.firstChild.nodeType === Node.TEXT_NODE && node.firstChild.data.length <= 160
+        ? node.firstChild : null;
+      state.selection = {id: ++state.sequence, node, textNode, ...describe(node), originals: new Map(), before: new Map(),
+        hadStyle: node.hasAttribute('style')};
     } else if (!state.selection || state.selection.id !== command.id) {
       return command.action === 'clear' ? '{}' : fail('STALE_ELEMENT');
     }
@@ -174,28 +187,43 @@ function inspectorScript(expression: string): string {
     if (!node.isConnected || computed.display === 'none' || computed.visibility !== 'visible' || !node.getClientRects().length) {
       clear(); return fail('STALE_ELEMENT');
     }
+    const textEditable = !!selection.textNode && selection.textNode.parentNode === node && !node.isContentEditable && !sensitive(node);
+    const read = property => (property === 'text' ? (textEditable ? selection.textNode.data : '') :
+      computed.getPropertyValue(property)).slice(0, 160);
     if (command.action === 'reset') restore(selection);
     if (command.action === 'style') {
       const {property, value} = command;
-      if (!properties.includes(property) || typeof value !== 'string' || !value.trim() || value.length > 120 || !CSS.supports(property, value)) {
+      if (!properties.includes(property) || typeof value !== 'string' || value.includes(String.fromCharCode(0)) ||
+        (property === 'text' ? (!textEditable || value.length > 160) : (!value.trim() || value.length > 120 || !CSS.supports(property, value)))) {
         return fail('INVALID_STYLE');
       }
-      const affected = property === 'padding' ? ['padding-top', 'padding-right', 'padding-bottom', 'padding-left'] : [property];
-      for (const name of affected) {
-        if (!selection.originals.has(name)) {
-          selection.originals.set(name, {value: node.style.getPropertyValue(name), priority: node.style.getPropertyPriority(name)});
+      if (!selection.before.has(property)) selection.before.set(property, read(property));
+      if (property === 'text') selection.textNode.data = value;
+      else {
+        const sides = ['top', 'right', 'bottom', 'left'];
+        const affected = property === 'padding' ? sides.map(side => 'padding-' + side) :
+          property === 'border-width' ? sides.map(side => 'border-' + side + '-width') : [property];
+        for (const name of affected) {
+          if (!selection.originals.has(name)) {
+            selection.originals.set(name, {value: node.style.getPropertyValue(name), priority: node.style.getPropertyPriority(name)});
+          }
         }
+        node.style.setProperty(property, value, 'important');
       }
-      node.style.setProperty(property, value, 'important');
     }
     const {label, location} = selection;
     const box = node.getBoundingClientRect();
     const x0 = Math.max(box.left, left), y0 = Math.max(box.top, top);
     const x1 = Math.min(box.right, left + width), y1 = Math.min(box.bottom, top + height);
     const mark = x1 > x0 && y1 > y0 ? {x:(x0-left)/width,y:(y0-top)/height,width:(x1-x0)/width,height:(y1-y0)/height,label,location} : undefined;
-    return JSON.stringify({selection: {id: selection.id, label, location, mark,
+    const changes = [...selection.before]
+      .filter(([property, before]) => (property !== 'text' || textEditable) && before !== read(property))
+      .map(([property, before]) => ({property, before,
+        after: property === 'text' ? read(property) : node.style.getPropertyValue(property).slice(0, 160)}))
+      .filter(change => change.before !== change.after);
+    return JSON.stringify({selection: {id: selection.id, label, location, mark, tag: node.localName.slice(0, 80), textEditable, changes,
       viewport: JSON.stringify([scrollX, scrollY, left, top, width, height, viewport?.scale]),
-      values: properties.map(property => computed.getPropertyValue(property).slice(0, 160)), edited: selection.originals.size > 0}});
+      values: properties.map(read), edited: selection.before.size > 0}});
   })()`;
 }
 

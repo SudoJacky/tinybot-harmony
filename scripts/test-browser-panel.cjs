@@ -212,15 +212,18 @@ const TouchType = { Down: 0, Move: 1, Up: 2, Cancel: 3 };
   board.aboutToDisappear(); assert.equal(captureReleases, 1);
   console.log('PASS emitted annotation canvas: touch geometry, resize alignment, failed-save retry, duplicate-add guard and image release');
 
-  const events = []; let unpause, dialog;
-  const panel = probe(panelTree, panelClass, ['pickAt', 'annotate', 'closeAnnotation'], {
-    BrowserAnnotation: annotationExports.BrowserAnnotation, Diagnostics: { log() {} }
+  const events = []; let unpause, dialog, focusClears = 0;
+  let renderedReleases = 0;
+  const rendered = { release: async () => { renderedReleases++; } };
+  const panel = probe(panelTree, panelClass, ['pickAt', 'annotate', 'closeAnnotation', 'captureElementNote'], {
+    BrowserAnnotation: annotationExports.BrowserAnnotation, Diagnostics: { log() {} },
+    renderBrowserAnnotation: async (_pixel, strokes) => { assert.equal(strokes[0].points.length, 5); return rendered; }
   });
   Object.assign(panel, { appearance: { surface: {} }, mounted: true, expanded: true, foreground: true,
     capturing: false, showAnnotation: false, canAnnotate: true, threadId: 'original',
     browser: { pauseForAnnotation: () => new Promise(resolve => { events.push('pause'); unpause = resolve; }), report: error => events.push(error) },
     driver: { capture: async () => { events.push('capture'); return { pixel: {}, width: 900, height: 1200 }; } },
-    getUIContext: () => ({ getFocusController: () => ({ clearFocus() {} }), showAlertDialog: value => { dialog = value; } }) });
+    getUIContext: () => ({ getFocusController: () => ({ clearFocus() { focusClears++; } }), showAlertDialog: value => { dialog = value; } }) });
   const capturing = panel.annotate(); assert.equal(panel.capturing, true); assert.deepEqual(events, ['pause']);
   await panel.annotate(); unpause(); await capturing;
   assert.deepEqual(events, ['pause', 'capture']); assert.equal(panel.showAnnotation, true); assert.equal(panel.annotationThreadId, 'original');
@@ -255,6 +258,17 @@ const TouchType = { Down: 0, Move: 1, Up: 2, Cancel: 3 };
   await panel.annotate(false, panel.elementSelection.id);
   assert.equal(panel.showAnnotation, true);
   assert.equal(panel.annotation.strokes[0].points.length, 5);
+  panel.showAnnotation = false;
+  panel.driver.captureElement = async () => ({ pixel: screenshot, element, changes: [{ property: 'border-width', before: '2px', after: '7px' }] });
+  panel.onAnnotation = async (threadId, pixel, capture, note) => {
+    assert.equal(threadId, 'original'); assert.equal(pixel, rendered);
+    assert.equal(capture.changes[0].after, '7px'); assert.equal(note, 'test');
+  };
+  panel.editElement = async command => { assert.equal(command.action, 'clear'); return true; };
+  const focusBeforeCapture = focusClears;
+  await panel.captureElementNote('test', false);
+  assert.equal(panel.showAnnotation, false); assert.equal(screenshotReleased, 2); assert.equal(renderedReleases, 1);
+  assert.equal(focusClears, focusBeforeCapture, 'Dismissing the note keyboard before capture resizes the web viewport');
   console.log('PASS selecting leaves the page open for editing, screenshot stages directly and element capture seeds an editable outline');
 
   const highlight = probe(panelTree, panelClass, ['elementHighlight'], { Stack: markerUi, HitTestMode: { None: 'pass-through' } });
@@ -287,17 +301,19 @@ const TouchType = { Down: 0, Move: 1, Up: 2, Cancel: 3 };
     MAX_MESSAGE_ATTACHMENTS: 10,
     Attachments: { saveBrowserAnnotation: async () => { draftEvents.push('image'); return { id: 'capture' }; },
       saveBrowserScreenshot: async () => { draftEvents.push('screenshot'); return { id: 'screenshot' }; } },
-    browserAnnotationText: (page, note) => page.url + '\n' + note
+    browserAnnotationContent: (page, note) => ({ url: page.url, note })
   });
   Object.assign(page, { app: { active: { id: 'original', attachments: [] }, canQueueInput: true,
     appendDraftAttachment: async (...args) => draftEvents.push(args) }, paths: { clear() {} }, setDrawer() {},
     hideBrowserTab: () => draftEvents.push('browser hidden') });
   await page.addBrowserAnnotation('original', {}, { url: 'https://example.com' }, 'Change this');
-  assert.equal(draftEvents[1][0], 'original'); assert.equal(draftEvents[1][2], 'https://example.com\nChange this');
+  assert.equal(draftEvents[1][0], 'original');
+  assert.deepEqual(draftEvents[1][1].browserAnnotation, { url: 'https://example.com', note: 'Change this' });
+  assert.equal(draftEvents[1].length, 2);
   assert.equal(draftEvents.at(-1), 'browser hidden');
   await assert.rejects(page.addBrowserAnnotation('other', {}, {}, ''), /对话已切换/);
   assert.equal(draftEvents.filter(value => value === 'image').length, 1, 'Wrong-thread exports cannot write or attach an image');
   await page.addBrowserAnnotation('original', {}, undefined, '');
-  assert.deepEqual(draftEvents.at(-2), ['original', { id: 'screenshot' }, '']);
+  assert.deepEqual(draftEvents.at(-2), ['original', { id: 'screenshot' }]);
   console.log('PASS emitted annotation submission stages the captured URL and image in the original chat without sending or handing off');
 })().catch(error => { console.error(error); process.exitCode = 1; });

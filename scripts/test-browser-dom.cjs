@@ -121,7 +121,7 @@ const { browserSnapshotScript, browserActionScript, browserInspectorScript } = e
 
     await session.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await page.setContent(`<main style="height:2000px">
-      <button id="styled" style="position:absolute;left:350px;top:100px;width:150px;height:60px;color:blue!important;padding-top:3px!important;padding-left:5px"
+      <button id="styled" style="position:absolute;left:350px;top:100px;width:150px;height:60px;color:blue!important;padding-top:3px!important;padding-left:5px;border:2px solid;border-left-width:2px!important"
         onclick="window.effects=(window.effects||0)+1">Edit me</button>
       <p id="other" style="position:absolute;left:30px;top:200px">Another target</p>
     </main>`);
@@ -129,13 +129,29 @@ const { browserSnapshotScript, browserActionScript, browserInspectorScript } = e
     const edit = (action, fields = {}) => inspect({ action, id: selection.id, ...fields });
     const control = page.locator('#styled');
     assert.equal(selection.label, 'Edit me');
+    assert.equal(selection.tag, 'button'); assert.equal(selection.textEditable, true);
     assert.equal(await page.evaluate('window.effects'), undefined, 'Selecting must not activate the control');
     assert.equal((await edit('style', { property: 'color', value: 'red; font-size: 99px' })).code, 'INVALID_STYLE');
     assert.equal((await edit('style', { property: 'background-image', value: 'url(https://example.com)' })).code, 'INVALID_STYLE');
     assert.equal((await edit('style', { property: 'color', value: 'red' })).selection.values[0], 'rgb(255, 0, 0)');
     assert.equal((await edit('style', { property: 'padding', value: '12px' })).selection.edited, true);
     assert.equal(await control.evaluate(node => getComputedStyle(node).paddingTop), '12px');
-    assert.equal((await edit('reset')).selection.edited, false);
+    await edit('style', { property: 'border-width', value: '4px' });
+    const border = (await edit('style', { property: 'border-width', value: '7px' })).selection;
+    assert.deepEqual(border.changes.find(change => change.property === 'border-width'),
+      { property: 'border-width', before: '2px', after: '7px' });
+    assert.equal(await control.evaluate(node => getComputedStyle(node).borderLeftWidth), '7px');
+    await control.evaluate(node => { node.style.zoom = '0.875'; });
+    assert.equal((await edit('read')).selection.changes.find(change => change.property === 'border-width').after, '7px');
+    await control.evaluate(node => { node.style.removeProperty('zoom'); });
+    const editedText = (await edit('style', { property: 'text', value: '<b>Literal</b>' })).selection;
+    assert.equal(editedText.changes.find(change => change.property === 'text').after, '<b>Literal</b>');
+    assert.equal(await control.locator('b').count(), 0);
+    const reset = (await edit('reset')).selection;
+    assert.equal(reset.edited, false); assert.deepEqual(reset.changes, []);
+    assert.equal(await control.textContent(), 'Edit me');
+    assert.deepEqual(await control.evaluate(node => [node.style.borderLeftWidth, node.style.getPropertyPriority('border-left-width')]),
+      ['2px', 'important']);
     assert.deepEqual(await control.evaluate(node => [node.style.color, node.style.getPropertyPriority('color'),
       node.style.paddingTop, node.style.getPropertyPriority('padding-top'), node.style.paddingLeft]), ['blue', 'important', '3px', 'important', '5px']);
     await edit('style', { property: 'font-size', value: '28px' });

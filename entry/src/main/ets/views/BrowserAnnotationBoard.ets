@@ -3,6 +3,7 @@ import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Btn, Font, Space, systemInsets } from '../common/Theme';
 import { IconButton } from '../common/Widgets';
 import { BrowserAnnotation } from '../model/BrowserAnnotation';
+import { MAX_BROWSER_ANNOTATION_NOTE } from '../model/BrowserAnnotationContent';
 import { renderBrowserAnnotation } from '../services/BrowserAnnotationImage';
 import { t } from '../model/I18n';
 import { Diagnostics } from '../model/Diagnostics';
@@ -108,7 +109,7 @@ export struct BrowserAnnotationBoard {
             .enabled(!this.draft.saving && this.draft.strokes.length > 0).onClick(() => { this.draft.clear(); this.draw(); })
         }.width('100%')
         TextArea({ text: this.draft.note, placeholder: t('告诉 Tinybot 需要关注或修改什么…') }).fontFamily(this.appearance.fontFamily)
-          .id('annotation-note').height(88).maxLength(4000).enabled(!this.draft.saving).onChange((value: string) => { this.draft.note = value; })
+          .id('annotation-note').height(88).maxLength(MAX_BROWSER_ANNOTATION_NOTE).enabled(!this.draft.saving).onChange((value: string) => { this.draft.note = value; })
         if (this.error) { Text(this.error).id('annotation-error').fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.danger')).width('100%') }
       }.width('100%').height('100%')
     }.title({ builder: this.header, height: 52 }, { barStyle: BarStyle.STANDARD,

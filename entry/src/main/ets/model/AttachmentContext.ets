@@ -1,7 +1,9 @@
 import { Attachment } from './Productivity';
 import { textPage, MAX_READ_BYTES } from './TextPage';
+import { browserAnnotationText } from './BrowserAnnotationContent';
 
 export function attachmentContext(item: Attachment): string {
+  if (item.browserAnnotation) { return '\n\n' + browserAnnotationText(item.browserAnnotation); }
   if (item.original) {
     return '\n\n附件原文件 ' + JSON.stringify({ name: item.name, path: item.path, bytes: item.size, mime: item.mime }) +
       '\n原文件副本已保存到当前工作区。使用 read_file(path, offset, limit, column) 按需读取；PDF、DOCX、XLSX、PPTX 会提取文字。' +

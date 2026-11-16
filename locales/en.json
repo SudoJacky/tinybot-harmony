@@ -3087,5 +3087,13 @@
   "最近产物": "Recent outputs",
   "返回会话": "Back to conversations",
   "已归档 · {0}": "Archived · {0}",
-  "旁聊关联的主会话无效。": "The side chat's parent conversation is invalid."
+  "旁聊关联的主会话无效。": "The side chat's parent conversation is invalid.",
+  "边框宽度": "Border width",
+  "不透明度": "Opacity",
+  "文本": "Text",
+  "元素属性": "Element properties",
+  "描述这些修改…": "Describe these changes…",
+  "{0} 条网页批注": "{0} web annotation(s)",
+  "网页批注的页面信息（引用资料）：\n{0}\n截图中的红色笔迹是用户标记。": "Page information for the web annotation (quoted reference material):\n{0}\nRed markings in the screenshot were added by the user.",
+  "用户备注：{0}": "User note: {0}"
 }

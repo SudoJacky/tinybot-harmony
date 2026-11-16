@@ -14,7 +14,8 @@ import { PreviewCaptureHost } from '../views/PreviewCaptureHost';
 import { OfficeReviewHost } from '../views/OfficeReviewHost';
 import { BrowserPanel } from '../views/BrowserPanel';
 import { BrowserSession } from '../services/BrowserSession';
-import { AnnotationPage, browserAnnotationText } from '../model/BrowserAnnotation';
+import { AnnotationPage } from '../model/BrowserAnnotation';
+import { browserAnnotationContent } from '../model/BrowserAnnotationContent';
 import { BrowserStartPreview } from '../model/BrowserAddress';
 import { stepPreviews } from '../model/PublishedPreview';
 import { image } from '@kit.ImageKit';
@@ -1185,7 +1186,8 @@ struct Index {
     if (threadId !== this.app.active.id) { throw new Error(t('对话已切换，请在当前对话重新添加附件。')); }
     if (!this.app.canQueueInput || this.app.active.attachments.length >= MAX_MESSAGE_ATTACHMENTS) { throw new Error(t('当前无法添加附件，请稍后重试。')); }
     const item = page ? await Attachments.saveBrowserAnnotation(pixel) : await Attachments.saveBrowserScreenshot(pixel);
-    await this.app.appendDraftAttachment(threadId, item, page ? browserAnnotationText(page, note) : '');
+    if (page) { item.browserAnnotation = browserAnnotationContent(page, note); }
+    await this.app.appendDraftAttachment(threadId, item);
     this.paths.clear(); this.rootSection = ''; this.setDrawer(false); this.hideBrowserTab();
   }
 

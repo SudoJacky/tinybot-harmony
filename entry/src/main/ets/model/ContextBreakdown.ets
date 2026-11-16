@@ -16,7 +16,8 @@ export interface ContextTokenItem {
 }
 
 export function attachmentTokens(attachment: Attachment): number {
-  return attachment.mime === 'image/jpeg' ? 1800 : estimateTextTokens(attachmentContext(attachment));
+  return (attachment.mime === 'image/jpeg' ? 1800 : 0) +
+    (attachment.mime !== 'image/jpeg' || attachment.browserAnnotation ? estimateTextTokens(attachmentContext(attachment)) : 0);
 }
 
 export function contextBreakdown(messages: ModelMessage[], tools: ToolDefinition[], sections: PromptSection[],
