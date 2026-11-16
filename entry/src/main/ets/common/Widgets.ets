@@ -179,6 +179,7 @@ export struct SwitchRow {
   @Prop subtitle: string = '';
   @Prop isOn: boolean = false;
   @Prop disabled: boolean = false;
+  @Prop highlighted: boolean = false;
   icon?: Resource;
   compId: string = '';
   onChange: (value: boolean) => void = () => {};
@@ -199,6 +200,7 @@ export struct SwitchRow {
       LiquidToggle({ isOn: this.isOn, disabled: this.disabled, label: this.title, compId: this.compId,
         onChange: (value: boolean) => this.onChange(value) })
     }.width('100%').constraintSize({ minHeight: 56 }).padding({ left: Space.lg, right: Space.md, top: 10, bottom: 10 })
+    .backgroundColor(this.highlighted ? this.appearance.accentTint : Color.Transparent)
     .opacity(this.disabled ? 0.4 : 1)
   }
 }

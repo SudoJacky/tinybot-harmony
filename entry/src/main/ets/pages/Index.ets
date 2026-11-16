@@ -53,9 +53,10 @@ import { materialMenuContent, materialMenuHeader } from '../common/MaterialMenu'
 import { ShareInbox } from '../services/NativeActions';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { ChatPanel } from '../views/ChatPanel';
-import { SETTINGS_CATEGORY_SWIPE_DISTANCE, SettingsCategoryBar, SettingsNavigation,
-  settingsCategoryForSwipe, settingsCategoryTitle } from '../views/SettingsNavigation';
+import { SETTINGS_CATEGORY_SWIPE_DISTANCE, SettingsCategoryBar, SettingsNavigation, settingsCategoryForSwipe } from '../views/SettingsNavigation';
 import { SettingsPanel, UserDocumentPanel } from '../views/SettingsPanel';
+import { SettingsSearchPanel } from '../views/SettingsSearchPanel';
+import { SettingsSearchItem, settingsSectionTitle } from '../model/SettingsSearch';
 import { AppearancePanel, appearanceChoiceTitle } from '../views/AppearancePanel';
 import { LanguagePanel } from '../views/LanguagePanel';
 import { SupportPanel, supportTitle } from '../views/SupportPanel';
@@ -202,6 +203,7 @@ struct Index {
   private toolsOrigin: string = 'productivity';
   @State private focusDraftRequest: number = 0;
   @State private settingsSection: string = 'models';
+  @State private settingsSearchTarget: string = '';
   @State private toolsTab: string = 'memory';
   @State private toolsTabRequest: number = 0;
 
@@ -1272,6 +1274,7 @@ struct Index {
 
   private selectSettingsSection(section: string, confirmed: boolean = false): void {
     if (this.confirmRootNavigation('settings', confirmed, () => this.selectSettingsSection(section, true))) { return; }
+    this.settingsSearchTarget = '';
     this.settingsSection = section;
     this.openSettings(true);
   }
@@ -1279,7 +1282,7 @@ struct Index {
   private swipeSettingsSection(event: GestureEvent): void {
     if (!this.settingsActive || !this.foreground) { return; }
     const section = settingsCategoryForSwipe(this.settingsSection, event.offsetX, event.offsetY);
-    if (section !== undefined) { this.settingsSection = section; }
+    if (section !== undefined) { this.settingsSearchTarget = ''; this.settingsSection = section; }
   }
 
   private openSettings(discardConfirmed: boolean = false): void {
@@ -1294,6 +1297,26 @@ struct Index {
     if (!names.includes('settings')) { this.app.openSettings(); }
     this.paths.pushPath({ name: 'settings' }, { launchMode: LaunchMode.POP_TO_SINGLETON });
     Diagnostics.log('info', 'navigation', 'settings_opened', { count: names.length, total: this.paths.size() });
+  }
+
+  private openSettingPage(route: string, param: string = ''): void {
+    if (route === 'provider') {
+      if (this.app.beginProvider('', param)) { this.paths.pushPath({ name: route }); }
+    } else if (route === 'productivity') { this.openTools(param); }
+    else if (route === 'support') { this.openSupport(param); }
+    else { this.paths.pushPath({ name: route }); }
+  }
+
+  private openSettingsSearch(): void {
+    this.settingsSearchTarget = '';
+    this.paths.pushPath({ name: 'find-settings' }, { launchMode: LaunchMode.POP_TO_SINGLETON });
+  }
+
+  private selectSettingsResult(item: SettingsSearchItem): void {
+    if (item.route) { this.openSettingPage(item.route, item.param); return; }
+    this.settingsSection = item.section;
+    this.settingsSearchTarget = item.id;
+    this.paths.pop();
   }
 
   private async openSupport(page: string): Promise<void> {
@@ -1468,27 +1491,31 @@ struct Index {
   }
 
   @Builder
+  settingsTitleActions() {
+    IconButton({ icon: $r('sys.symbol.magnifyingglass'), label: t('搜索设置'), compId: 'open-settings-search', diameter: 44, iconSize: 20,
+      onTap: () => this.openSettingsSearch() }).margin({ right: Space.sm })
+  }
+
+  @Builder
   settingsContent() {
     SettingsPanel({ app: this.app, section: this.settingsSection, settings: this.app.settings, account: this.account, active: this.settingsActive && this.foreground,
-      onAccount: () => { this.paths.pushPath({ name: 'account' }); },
+      searchTarget: this.settingsSearchTarget, onAccount: () => this.openSettingPage('account'),
       browser: this.browser,
-      onAddProvider: () => { this.paths.pushPath({ name: 'provider-presets' }); },
-      onUsage: () => { this.paths.pushPath({ name: 'usage' }); },
-      onStorage: () => { this.paths.pushPath({ name: 'storage' }); },
-      onModels: () => { this.paths.pushPath({ name: 'model-settings' }); },
-      onImageGeneration: () => { this.paths.pushPath({ name: 'image-generation' }); },
-      onSearch: () => { this.paths.pushPath({ name: 'search-settings' }); },
-      onMail: () => { this.paths.pushPath({ name: 'mail-settings' }); },
-      onAppearance: () => { this.paths.pushPath({ name: 'appearance' }); },
-      onLanguage: () => { this.paths.pushPath({ name: 'language' }); },
-      onBackup: () => { this.paths.pushPath({ name: 'backup' }); },
-      onSupport: (page: string) => this.openSupport(page),
-      onTools: (tab: string) => this.openTools(tab),
-      onSkills: () => { this.paths.pushPath({ name: 'skills' }); },
-      onUserDocument: () => { this.paths.pushPath({ name: 'user-document' }); },
-      onEditProvider: (id: string, preset: string) => {
-        if (this.app.beginProvider(preset, id)) { this.paths.pushPath({ name: 'provider' }); }
-      } }).layoutWeight(1)
+      onAddProvider: () => this.openSettingPage('provider-presets'),
+      onUsage: () => this.openSettingPage('usage'),
+      onStorage: () => this.openSettingPage('storage'),
+      onModels: () => this.openSettingPage('model-settings'),
+      onImageGeneration: () => this.openSettingPage('image-generation'),
+      onSearch: () => this.openSettingPage('search-settings'),
+      onMail: () => this.openSettingPage('mail-settings'),
+      onAppearance: () => this.openSettingPage('appearance'),
+      onLanguage: () => this.openSettingPage('language'),
+      onBackup: () => this.openSettingPage('backup'),
+      onSupport: (page: string) => this.openSettingPage('support', page),
+      onTools: (tab: string) => this.openSettingPage('productivity', tab),
+      onSkills: () => this.openSettingPage('skills'),
+      onUserDocument: () => this.openSettingPage('user-document'),
+      onEditProvider: (id: string, _preset: string) => this.openSettingPage('provider', id) }).layoutWeight(1)
       .gesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Horizontal,
         distance: SETTINGS_CATEGORY_SWIPE_DISTANCE }).onActionEnd((event: GestureEvent) => this.swipeSettingsSection(event)))
   }
@@ -1609,14 +1636,20 @@ struct Index {
         Column() {
           if (!this.workbench().expanded) {
             SettingsCategoryBar({ selected: this.settingsSection,
-              onSelect: (section: string) => { this.settingsSection = section; } })
+              onSelect: (section: string) => { this.settingsSearchTarget = ''; this.settingsSection = section; } })
           }
           this.settingsContent()
         }.width('100%').height('100%')
-      }.title(this.workbench().expanded ? settingsCategoryTitle(this.settingsSection) : t('设置'),
+      }.title(this.workbench().expanded ? settingsSectionTitle(this.settingsSection) : t('设置'),
         { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
+        .menus(this.settingsTitleActions)
         .backgroundColor($r('app.color.page_background'))
         .onShown(() => { this.settingsActive = true; this.rootSection = 'settings'; }).onHidden(() => { this.settingsActive = false; })
+    } else if (name === 'find-settings') {
+      NavDestination() {
+        SettingsSearchPanel({ app: this.app, onSelect: (item: SettingsSearchItem) => this.selectSettingsResult(item) })
+      }.title(t('搜索设置'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
+        .backgroundColor($r('app.color.page_background'))
     } else if (name === 'provider-presets') {
       NavDestination() {
         SettingsPanel({ app: this.app, section: this.windowWidth >= 840 ? this.settingsSection : '', settings: this.app.settings, account: this.account, browser: this.browser, presetsOnly: true,

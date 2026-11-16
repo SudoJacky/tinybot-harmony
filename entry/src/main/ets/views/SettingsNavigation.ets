@@ -3,25 +3,22 @@ import { AppearanceStyle } from '../common/AppearanceStyle';
 import { SegmentFrame, SegmentedMotion } from '../common/SegmentedMotion';
 import { Btn, Space } from '../common/Theme';
 import { t } from '../model/I18n';
+import { settingsSectionTitle } from '../model/SettingsSearch';
 import { AnimatedIcon } from '../common/AnimatedIcon';
 import { AnimatedIconName } from '../common/IconArtwork';
 
-interface SettingsCategory { key: string; title: string; icon: AnimatedIconName; }
+interface SettingsCategory { key: string; icon: AnimatedIconName; }
 const CATEGORY_TRACK_RADIUS: number = 25;
 export const SETTINGS_CATEGORY_SWIPE_DISTANCE: number = 44;
 const CATEGORIES: SettingsCategory[] = [
-  { key: 'account', title: '账号', icon: 'account' },
-  { key: 'models', title: '模型与服务', icon: 'cloud' },
-  { key: 'assistant', title: '助手偏好', icon: 'compose' },
-  { key: 'tools', title: '工具与权限', icon: 'tools' },
-  { key: 'appearance', title: '界面与语言', icon: 'mountain' },
-  { key: 'data', title: '数据与用量', icon: 'data' },
-  { key: 'help', title: '帮助与关于', icon: 'help' }
+  { key: 'account', icon: 'account' },
+  { key: 'models', icon: 'cloud' },
+  { key: 'assistant', icon: 'compose' },
+  { key: 'tools', icon: 'tools' },
+  { key: 'appearance', icon: 'mountain' },
+  { key: 'data', icon: 'data' },
+  { key: 'help', icon: 'help' }
 ];
-
-export function settingsCategoryTitle(key: string): string {
-  return t(CATEGORIES.find((item: SettingsCategory) => item.key === key)?.title || '设置');
-}
 
 export function settingsCategoryForSwipe(key: string, offsetX: number, offsetY: number): string | undefined {
   const distance = Math.abs(offsetX);
@@ -137,13 +134,13 @@ export struct SettingsCategoryBar {
                     AnimatedIcon({ iconName: item.icon, selected: this.selected === item.key,
                       interacting: this.hoveredCategory === item.key,
                       tint: this.selected === item.key ? $r('app.color.text_primary') : $r('app.color.text_secondary') })
-                    Text(t(item.title)).fontSize(14).fontFamily(this.appearance.fontFamily).maxLines(1)
+                    Text(settingsSectionTitle(item.key)).fontSize(14).fontFamily(this.appearance.fontFamily).maxLines(1)
                       .fontWeight(this.selected === item.key ? FontWeight.Medium : FontWeight.Regular)
                       .fontColor(this.selected === item.key ? $r('app.color.text_primary') : $r('app.color.text_secondary'))
                   }
                 }.height(44).padding({ left: Space.md, right: Space.md }).borderRadius(22)
                   .backgroundColor(Color.Transparent)
-                  .accessibilityText(t(item.title)).accessibilitySelected(this.selected === item.key)
+                  .accessibilityText(settingsSectionTitle(item.key)).accessibilitySelected(this.selected === item.key)
                   .id('settings-open-' + item.key).onClick(() => this.onSelect(item.key))
                   .onHover((hovered: boolean) => {
                     if (hovered) { this.hoveredCategory = item.key; }
@@ -180,7 +177,7 @@ export struct SettingsNavigation {
             AnimatedIcon({ iconName: item.icon, iconSize: 20, selected: this.selected === item.key,
               interacting: this.hoveredCategory === item.key,
               tint: this.selected === item.key ? this.appearance.accent : $r('app.color.text_secondary') })
-            Text(t(item.title)).fontSize(15).layoutWeight(1).textAlign(TextAlign.Start)
+            Text(settingsSectionTitle(item.key)).fontSize(15).layoutWeight(1).textAlign(TextAlign.Start)
               .fontColor(this.selected === item.key ? this.appearance.onAccentContainer : $r('app.color.text_primary'))
           }.width('100%')
         }.fontFamily(this.appearance.fontFamily).id('settings-category-' + item.key)

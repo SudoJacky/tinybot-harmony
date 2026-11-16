@@ -1613,6 +1613,7 @@
   "交付文件": "Deliver files",
   "补读会话引用": "Read referenced snapshot",
   "搜索服务": "Search service",
+  "搜索设置": "Search settings",
   "密钥来源": "Credential source",
   "将复用 {0} 的密钥，无需重复填写。": "The key from {0} will be reused. No need to enter it again.",
   "edits 必须包含 1–32 项编辑。": "edits must contain 1–32 edits.",
