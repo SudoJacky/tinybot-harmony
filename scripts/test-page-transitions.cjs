@@ -18,14 +18,37 @@ function probe(file, name, methods, globals = {}, extra = []) {
   }).outputText, { exports, ...globals });
   return exports.Probe;
 }
+const screenExports = {};
+let displayId = 7;
+const displays = new Map([[7, { width: 1019, height: 1360, xDPI: 200, yDPI: 200 }]]);
+const fallbackScreen = { width: 1440, height: 1920, xDPI: 200, yDPI: 200 };
+const warnings = [];
+const screenSource = path.join(root, 'entry/src/main/ets/common/FullscreenTransition.ets');
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(screenSource, 'utf8'), { compilerOptions: {
+  module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021
+} }).outputText, { exports: screenExports, require(name) {
+  if (name === '../model/Diagnostics') { return { Diagnostics: { log: (...args) => warnings.push(args) } }; }
+  assert.equal(name, '@kit.ArkUI');
+  return { display: { getDisplayByIdSync(id) {
+    if (!displays.has(id)) { throw new Error('Display disconnected'); }
+    return displays.get(id);
+  }, getDefaultDisplaySync: () => fallbackScreen }, window: { findWindow(name) {
+    assert.equal(name, 'main');
+    return { getWindowProperties: () => ({ displayId }) };
+  } } };
+} }, { filename: screenSource });
+const { fullscreenTransitionDuration } = screenExports;
+const ui = { getWindowName: () => 'main' };
+
 const Page = probe('common/AnimatedPage', 'AnimatedPage',
   ['aboutToAppear', 'aboutToDisappear', 'retentionChanged', 'visibilityChanged', 'animate'],
-  { FrameCallback: class {}, Motion: { medium: 220, fast: 160, enter: 'enter', standard: 'exit' } }, ['PageEnterFrame']);
-function fixture(retained = false, immediate = false) {
+  { FrameCallback: class {}, Motion: { medium: 220, fast: 160, enter: 'enter', standard: 'exit' },
+    Curve: { EaseInOut: 'ease-in-out' }, fullscreenTransitionDuration }, ['PageEnterFrame']);
+function fixture(retained = false, immediate = false, fullScreen = false) {
   const frames = [], animations = [], presence = [];
-  const page = Object.assign(new Page(), { visible: false, retained, renderContent: false, present: false, progress: 0, generation: 0,
+  const page = Object.assign(new Page(), { visible: false, retained, fullScreen, renderContent: false, present: false, progress: 0, generation: 0,
     onPresenceChanged: value => presence.push(value),
-    getUIContext: () => ({ postFrameCallback: frame => frames.push(frame), animateTo(options, update) {
+    getUIContext: () => ({ ...ui, postFrameCallback: frame => frames.push(frame), animateTo(options, update) {
       update(); animations.push(options); if (immediate) options.onFinish();
     } }) });
   page.aboutToAppear();
@@ -41,6 +64,28 @@ assert.equal(f.page.renderContent, true); assert.equal(f.page.present, true, 'Ou
 f.animations.at(-1).onFinish(); assert.equal(f.page.renderContent, false); assert.equal(f.page.present, false);
 assert.deepEqual(f.presence, [true, false]);
 console.log('PASS actual enter/exit lifecycle paints an initial frame and defers outgoing disposal');
+
+for (const [width, height, duration] of [[1019, 1360, 220], [1020, 1360, 270], [1440, 1920, 270], [1441, 1920, 320]]) {
+  displays.set(7, { width, height, xDPI: 200, yDPI: 200 });
+  const full = fixture(true, false, true);
+  full.show(); full.frames.shift().onIdle();
+  assert.equal(full.animations.at(-1).duration, duration);
+  full.hide();
+  assert.equal(full.animations.at(-1).duration, duration);
+  assert.equal(full.animations.at(-1).curve, 'ease-in-out');
+  assert.equal(full.page.present, true);
+  full.animations.at(-1).onFinish();
+  assert.equal(full.page.present, false);
+  assert.equal(full.page.renderContent, true, 'The hidden Web host stays mounted');
+}
+displayId = undefined;
+assert.equal(fullscreenTransitionDuration(ui), 270);
+displayId = 8;
+assert.equal(fullscreenTransitionDuration(ui), 320, 'Unplugged displays use the longest duration');
+displays.set(8, { width: 500, height: 500, xDPI: 0, yDPI: 100 });
+assert.equal(fullscreenTransitionDuration(ui), 320, 'Missing physical density uses the longest duration');
+assert.deepEqual(warnings.map(args => args.slice(0, 3)), Array.from({ length: 2 }, () => ['warn', 'navigation', 'transition_screen_failed']));
+console.log('PASS full-screen entry and exit use the current display diagonal and report unavailable metrics');
 
 const interrupted = fixture(); interrupted.show(); interrupted.frames.shift().onIdle(); interrupted.hide();
 const staleExit = interrupted.animations.at(-1);
@@ -64,7 +109,7 @@ assert.equal(zero.page.present, false); assert.equal(zero.page.renderContent, fa
 console.log('PASS hidden retained editors/Web hosts survive, disposed callbacks are inert, synchronous completion releases correctly');
 
 const Browser = probe('pages/Index', 'Index', ['closeBrowser', 'browserPresenceChanged', 'setBrowserExpanded',
-  'removeDetailTab', 'detailTabPresent', 'detailTabsAvailable', 'setDetailPane'],
+  'removeDetailTab', 'detailTabPresent', 'detailTabsAvailable', 'setDetailPane', 'compactDetailLauncher', 'hideBrowserTab'],
   { Motion: { medium: 220, fast: 160 } });
 const calls = [];
 const browser = Object.assign(new Browser(), { browserExpanded: true, browserPresent: true, browserClosing: false,
@@ -82,3 +127,14 @@ console.log('PASS browser pauses immediately, closes after exit, and keeps a reo
 browser.browser.open = false; browser.browserExpanded = true; browser.browserPresenceChanged(false);
 assert.equal(browser.browserExpanded, false, 'Agent/policy closure also releases the visible inspector');
 console.log('PASS external browser closure cannot leave an empty inspector reserved');
+
+Object.assign(browser, { largeScreen: true, windowWidth: 1400, browserPresent: true, browserExpanded: true,
+  detailTabs: ['browser'], detailPaneOpen: true, activeDetailTab: 'browser' });
+browser.browser.open = true;
+browser.hideBrowserTab();
+assert.equal(browser.compactDetailLauncher(), false, 'A maximized tab cannot shrink to a floating card while exiting');
+browser.browserPresenceChanged(false);
+assert.equal(browser.compactDetailLauncher(), true, 'The compact launcher is available again after exit');
+assert.equal(browser.browser.open, true);
+assert.deepEqual(calls, ['pause', 'close', 'pause'], 'Collapse does not close the browser session');
+console.log('PASS a wide browser keeps its geometry through collapse without closing the session');

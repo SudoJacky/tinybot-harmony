@@ -806,8 +806,10 @@ struct Index {
 
   private compactDetailLauncher(): boolean {
     // Below this width the floating card would cover the centered composer.
+    // Keep the outgoing tab in the same layout until its exit completes.
+    const exitingTab = !this.detailPaneOpen && (this.workspacePresent || this.previewPresent || this.browserPresent);
     return this.largeScreen && this.windowWidth >= 1240 &&
-      (this.showDetailContext || !this.detailTabsAvailable().length);
+      (this.showDetailContext || (!exitingTab && !this.detailTabsAvailable().length));
   }
 
   @Builder
@@ -2000,14 +2002,14 @@ struct Index {
               onCollapse: () => { this.setDetailPane(false); } })
           }
           Stack() {
-            AnimatedPage({ visible: this.detailTabVisible('files'), retained: this.workspaceOpen,
+            AnimatedPage({ fullScreen: this.detailCoversChat(), visible: this.detailTabVisible('files'), retained: this.workspaceOpen,
               onPresenceChanged: (present: boolean) => { this.workspacePresent = present; } }) {
               WorkspacePanel({ app: this.app, embedded: true, tabbed: this.largeScreen || this.workbench().docked,
                 initialPath: this.workspacePath, requestId: this.workspaceRequest,
                 closeRequest: this.workspaceCloseRequest, tabCloseRequest: this.workspaceTabCloseRequest,
                 onClose: () => this.workspaceClosed() })
             }
-            AnimatedPage({ visible: this.detailTabVisible('preview') && this.hasPreview(),
+            AnimatedPage({ fullScreen: this.detailCoversChat(), visible: this.detailTabVisible('preview') && this.hasPreview(),
               retained: this.previewVisible && this.hasPreview(),
               onPresenceChanged: (present: boolean) => this.previewPresenceChanged(present) }) {
               PreviewPanel({ app: this.app, threadId: this.previewThreadId, messageId: this.previewMessageId,
@@ -2015,7 +2017,7 @@ struct Index {
             }
             // The Web host stays mounted even when its tab is closed: the browser
             // session opens against an attached view, and reopening a tab reuses it.
-            AnimatedPage({ visible: this.detailTabVisible('browser'), retained: true,
+            AnimatedPage({ fullScreen: this.detailCoversChat(), visible: this.detailTabVisible('browser'), retained: true,
               vertical: this.desktop ? !this.workbench().docked : this.windowWidth < 840,
               onPresenceChanged: (present: boolean) => this.browserPresenceChanged(present) }) {
               BrowserPanel({ browser: this.browser, expanded: this.detailTabVisible('browser'), presented: this.browserPresent,
