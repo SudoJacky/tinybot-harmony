@@ -198,7 +198,6 @@ struct Index {
   @State private settingsActive: boolean = false;
   @State private rootSection: string = '';
   private toolsOrigin: string = 'productivity';
-  @State private expandDraftRequest: number = 0;
   @State private focusDraftRequest: number = 0;
   @State private settingsSection: string = 'models';
   @State private toolsTab: string = 'memory';
@@ -1667,9 +1666,6 @@ struct Index {
           fill: $r('app.color.surface_variant'), disabled: !this.app.ready, onTap: () => this.toggleHistory() })
         Blank().layoutWeight(1)
         if (this.app.active.messages.length > 0) {
-          IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('展开输入'), compId: 'workbench-expand-draft',
-            animatedIcon: 'compose', fill: $r('app.color.surface_variant'), disabled: !this.app.ready || this.app.active.archived,
-            onTap: () => { this.expandDraftRequest++; } })
           Button({ type: ButtonType.Circle, stateEffect: true }) {
             SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(19).fontColor([$r('app.color.text_secondary')])
           }.id('workbench-chat-more').width(44).height(44).borderRadius(22)
@@ -1713,11 +1709,6 @@ struct Index {
       IconButton({ icon: $r('sys.symbol.magnifyingglass'), label: t('搜索对话或命令') + ' · Ctrl+K', compId: 'pc-open-commands',
         diameter: this.desktop ? 36 : 44, iconSize: 17, fill: $r('app.color.surface'), disabled: !this.canOpenDesktopCommands(),
         onTap: () => this.showDesktopCommands() })
-      if (this.app.active.messages.length > 0 && this.windowWidth >= 620) {
-        IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('展开输入'), compId: 'workbench-expand-draft',
-          animatedIcon: 'compose', diameter: this.desktop ? 36 : 44, iconSize: 18, fill: $r('app.color.surface'),
-          disabled: !this.app.ready || this.app.active.archived, onTap: () => { this.expandDraftRequest++; } })
-      }
       Button({ type: ButtonType.Normal }) {
         SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(18).fontColor([$r('app.color.text_secondary')])
       }.id('pc-chat-more').width(this.desktop ? 36 : 44).height(this.desktop ? 36 : 44).padding(0).borderRadius(Radius.sm)
@@ -1865,7 +1856,7 @@ struct Index {
         Column() {
           if (this.app.ready) {
             ChatPanel({ app: this.app, thread: this.app.active, workbench: this.desktop || this.windowWidth >= 840,
-                desktop: this.desktop, commandSearch: this.largeScreen, expandDraftRequest: this.expandDraftRequest, focusDraftRequest: this.focusDraftRequest,
+                desktop: this.desktop, commandSearch: this.largeScreen, focusDraftRequest: this.focusDraftRequest,
                 shortcutsEnabled: this.chatVisible && !this.rootSection && !this.onboardingActive && !this.showToolScope &&
                   !this.keyboardShortcutsOpen && !this.desktopCommandsOpen && !this.historyProjectSheetOpen,
                 shortcutsCovered: this.detailCoversChat(),

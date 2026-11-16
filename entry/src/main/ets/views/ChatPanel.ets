@@ -1,4 +1,3 @@
-import { MessageDraftEditor } from './MessageDraftEditor';
 import { FileAnnotationList } from './FileAnnotationList';
 import { KeyCode } from '@kit.InputKit';
 import { ChatShortcut, ChatShortcutAction, NavigationShortcut, chatShortcuts, handleDraftEnter } from '../common/KeyboardShortcuts';
@@ -141,14 +140,7 @@ export struct ChatPanel {
   @Prop shortcutsCovered: boolean = false;
   @Prop @Watch('messageSearchChanged') messageSearchRequest: number = 0;
   onNavigationShortcut: (action: NavigationShortcut) => void = () => {};
-  @Prop @Watch('expandDraft') expandDraftRequest: number = 0;
   @Prop @Watch('focusDraftRequested') focusDraftRequest: number = 0;
-  @State private writingExpanded: boolean = false;
-  private expandDraft(): void {
-    if (this.thread.archived || this.showDrawing || this.previewing || this.showAttachments || this.speechActive()) { return; }
-    this.getUIContext().getFocusController().clearFocus();
-    this.writingExpanded = true;
-  }
   @State private panelHeight: number = 0;
   @State private panelWidth: number = 0;
   @State private panelTop: number = 0;
@@ -627,7 +619,7 @@ export struct ChatPanel {
   }
 
   private chatShortcutsAvailable(): boolean {
-    return this.shortcutsEnabled && this.foreground && !this.writingExpanded && !this.showDrawing && !this.previewing &&
+    return this.shortcutsEnabled && this.foreground && !this.showDrawing && !this.previewing &&
       !this.showPlus && !this.showPlusMenu && !this.showAttachments && !this.showContext && !this.showQueue && !this.showMemoryDraft &&
       !this.showModelMenu && !this.showToolApprovalMode && !this.voiceOverlayVisible();
   }
@@ -640,9 +632,6 @@ export struct ChatPanel {
         break;
       case 'attach':
         if (this.speechEnabled) { this.attach('file'); }
-        break;
-      case 'expand':
-        if (this.speechEnabled) { this.expandDraft(); }
         break;
       case 'latest':
         if (this.speechEnabled && !this.atBottom) { this.scrollToLatest(); }
@@ -787,11 +776,7 @@ export struct ChatPanel {
   }
   @Builder
   chatCover() {
-    if (this.writingExpanded) {
-      MessageDraftEditor({ app: this.app, thread: this.thread, sendEnabled: this.canSend(),
-        onClose: () => { this.writingExpanded = false; },
-        onSend: () => { if (this.canSend()) { this.writingExpanded = false; this.send(); } } })
-    } else if (this.showDrawing) { this.drawingSheet() }
+    if (this.showDrawing) { this.drawingSheet() }
     else { this.imageViewer() }
   }
   @Builder
@@ -1227,9 +1212,6 @@ export struct ChatPanel {
   plusSheet() {
     Scroll() {
       Column({ space: Space.lg }) {
-        Button(t('展开输入')).fontFamily(this.appearance.fontFamily).id('phone-expand-draft')
-          .attributeModifier(Btn.tonal).width('100%').enabled(this.canAttach())
-          .onClick(() => this.fromSheet(() => this.expandDraft()))
         Row() {
           this.plusTile($r('sys.symbol.picture'), t("图片"), 'attach-photo',
             this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, () => this.fromSheet(() => this.attach('photo')))
@@ -2257,10 +2239,9 @@ export struct ChatPanel {
       .onDragLeave(() => { this.dropHover = false; })
       .onDrop((event: DragEvent) => { this.receiveAttachmentDrop(event); }, { disableDataPrefetch: true })
       .onAreaChange((_old: Area, area: Area) => this.updatePanelArea(area))
-      .bindContentCover(this.showDrawing || this.previewing || this.writingExpanded, this.chatCover(), { modalTransition: ModalTransition.ALPHA,
+      .bindContentCover(this.showDrawing || this.previewing, this.chatCover(), { modalTransition: ModalTransition.ALPHA,
         backgroundColor: $r('app.color.page_background'), onWillDismiss: () => {
-          if (this.writingExpanded) { this.writingExpanded = false; }
-          else if (this.showDrawing) { this.closeDrawing(); } else { this.previewing = false; }
+          if (this.showDrawing) { this.closeDrawing(); } else { this.previewing = false; }
         } })
   }
 }
