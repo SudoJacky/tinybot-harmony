@@ -4,7 +4,7 @@ import { Btn, Font, Space, systemInsets } from '../common/Theme';
 import { IconButton } from '../common/Widgets';
 import { BrowserAnnotation } from '../model/BrowserAnnotation';
 import { MAX_BROWSER_ANNOTATION_NOTE } from '../model/BrowserAnnotationContent';
-import { renderBrowserAnnotation } from '../services/BrowserAnnotationImage';
+import { releaseAnnotationPixel, submitBrowserAnnotation } from '../services/BrowserAnnotationImage';
 import { t } from '../model/I18n';
 import { Diagnostics } from '../model/Diagnostics';
 
@@ -33,7 +33,7 @@ export struct BrowserAnnotationBoard {
     systemInsets(this.getUIContext()).then((insets: number[]) => { this.insetTop = insets[0]; this.insetBottom = insets[1]; });
   }
   aboutToDisappear(): void {
-    this.pixel?.release().catch((error: Error) => Diagnostics.log('error', 'browser', 'annotation_failed', undefined, error));
+    releaseAnnotationPixel(this.pixel);
   }
   private draw(): void {
     if (!this.ready) { return; }
@@ -65,13 +65,12 @@ export struct BrowserAnnotationBoard {
   private async add(): Promise<void> {
     if (this.draft.saving) { return; }
     this.draft.end(); this.pointer = -1; this.draft.saving = true; this.error = '';
-    let pixel: image.PixelMap | undefined;
     try {
       if (!this.pixel) { throw new Error(t('批注截图已失效，请重新截取。')); }
-      pixel = await renderBrowserAnnotation(this.pixel, this.draft.strokes); await this.onAdd(pixel, this.draft.note);
+      await submitBrowserAnnotation(this.pixel, this.draft, this.onAdd);
     }
     catch (error) { this.error = (error as Error).message; Diagnostics.log('error', 'browser', 'annotation_failed', undefined, error as Error); }
-    finally { try { await pixel?.release(); } finally { this.draft.saving = false; } }
+    finally { this.draft.saving = false; }
   }
   @Builder
   private header() {

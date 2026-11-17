@@ -9,7 +9,8 @@ assert.ok(fs.statSync(built).mtimeMs >= fs.statSync(source).mtimeMs, 'Rebuild Ch
 const tree = ts.createSourceFile(built, fs.readFileSync(built, 'utf8'), ts.ScriptTarget.Latest, true);
 const cls = tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'ChatPanel');
 const names = ['fromSheet', 'dismissPlusMenu', 'finishPlusAction', 'cancelPlusAction', 'canAttach', 'endSpeech',
-  'addThreadReference', 'showSpeechKeyboard', 'speechActive', 'aboutToDisappear', 'speechAvailabilityChanged', 'speechThreadChanged', 'afterRender'];
+  'addThreadReference', 'showSpeechKeyboard', 'queueComposerFocus', 'composerActionCurrent', 'speechActive',
+  'aboutToDisappear', 'speechAvailabilityChanged', 'speechThreadChanged', 'focusForegroundChanged', 'afterRender'];
 const methods = cls.members.filter(n => names.includes(n.name?.getText(tree)));
 function find(node, predicate) {
   if (predicate(node)) return node;
@@ -71,6 +72,7 @@ function fixture() {
   f.render(); assert.deepEqual(f.focus, ['composer']); assert.equal(f.panel.app.draft, '@');
   f.dismiss(); f.render(); assert.equal(f.focus.length, 1, 'Consume the action once');
   for (const cancel of [p => p.aboutToDisappear(), p => { p.speechEnabled = false; p.speechAvailabilityChanged(); },
+    p => { p.foreground = false; p.focusForegroundChanged(); p.foreground = true; },
     p => { p.thread = { id: 'other' }; p.app.active = p.thread; p.activeThreadId = 'other'; p.speechThreadChanged(); }]) {
     const stale = fixture(); stale.click(); cancel(stale.panel); stale.dismiss(); stale.advanceTime(); stale.render();
     assert.equal(stale.panel.app.draft, ''); assert.deepEqual(stale.focus, []);

@@ -136,6 +136,13 @@ console.log('PASS obfuscated release initializes global Pen Kit context and pref
 
 // Follow the emitted dynamic import across the real release module/export boundary.
 // The platform WrappedBuilder is intercepted after module evaluation, without loading Pen Kit on the host.
+let drawingCheckFinished = false;
+process.once('beforeExit', () => {
+  if (!drawingCheckFinished && !process.exitCode) {
+    console.error('Release drawing builder check never completed');
+    process.exitCode = 1;
+  }
+});
 (async () => {
   const releaseFile = name => {
     const source = 'entry/src/main/ets/views/' + name + '.ets';
@@ -187,5 +194,6 @@ console.log('PASS obfuscated release initializes global Pen Kit context and pref
   await composer.openDrawing(); assert.equal(loads, 1, 'An open drawing must not load another screen');
   composer.showDrawing = false; await composer.openDrawing(); composer.drawingSheet();
   assert.equal(loads, 2); assert.equal(renders.length, 2);
+  drawingCheckFinished = true;
   console.log('PASS obfuscated release dynamically loads, renders and reopens the actual drawing builder');
 })().catch(error => { console.error(error); process.exitCode = 1; });

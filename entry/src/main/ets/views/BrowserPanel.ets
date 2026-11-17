@@ -5,7 +5,7 @@ import { BrowserAnnotation, AnnotationPage } from '../model/BrowserAnnotation';
 import { BrowserElementSelection, BrowserInspectorCommand } from '../model/BrowserScripts';
 import { BrowserAnnotationBoard } from './BrowserAnnotationBoard';
 import { BrowserElementEditor } from './BrowserElementEditor';
-import { renderBrowserAnnotation } from '../services/BrowserAnnotationImage';
+import { captureBrowserDraft } from '../services/BrowserAnnotationImage';
 import { image } from '@kit.ImageKit';
 import { validateWebAddress } from '../services/WebTools';
 import { browserAddress, BrowserStartPreview } from '../model/BrowserAddress';
@@ -101,39 +101,26 @@ export struct BrowserPanel {
     this.scheduleElementRefresh();
   }
   private async annotate(screenshotOnly: boolean = false, selectionId?: number, note: string = '', stage: boolean = false): Promise<boolean> {
-    if (!this.driver || this.capturing || this.inspectorWorking || this.showAnnotation || !this.canAnnotate) { return false; }
+    const driver = this.driver;
+    if (!driver || this.capturing || this.inspectorWorking || this.showAnnotation || !this.canAnnotate) { return false; }
     this.capturing = true;
     const threadId = this.threadId;
     this.annotationThreadId = threadId;
     // Keep the selected Web viewport stable until the screenshot and its bounds have both been read.
     if (selectionId === undefined) { this.getUIContext().getFocusController().clearFocus(); }
-    let capture: NativeBrowserCapture | undefined;
-    let rendered: image.PixelMap | undefined;
     try {
-      await this.browser.pauseForAnnotation();
-      capture = selectionId === undefined ? await this.driver.capture() : await this.driver.captureElement(selectionId);
-      if (!this.mounted || this.threadId !== threadId || !this.expanded || !this.foreground) { return false; }
-      if (screenshotOnly) {
-        await this.onScreenshot(threadId, capture.pixel);
-      } else {
-        this.annotation = new BrowserAnnotation(); this.annotation.note = note;
-        if (capture.element) { this.annotation.markElement(capture.element); }
-        if (stage) {
-          rendered = await renderBrowserAnnotation(capture.pixel, this.annotation.strokes);
-          await this.onAnnotation(threadId, rendered, capture, note);
-        } else {
-          this.annotationCapture = capture; this.showAnnotation = true;
-          Diagnostics.log('info', 'browser', 'annotation_captured', { width: capture.width, height: capture.height });
-          capture = undefined; // The annotation board owns the captured pixel from here.
-        }
-      }
-      return true;
+      return await captureBrowserDraft(async () => {
+        await this.browser.pauseForAnnotation();
+        return selectionId === undefined ? driver.capture() : driver.captureElement(selectionId);
+      }, () => this.mounted && this.threadId === threadId && this.expanded && this.foreground,
+      screenshotOnly ? 'screenshot' : stage ? 'note' : 'editor', note,
+      (pixel, page, text) => page ? this.onAnnotation(threadId, pixel, page, text) : this.onScreenshot(threadId, pixel),
+      (capture, draft) => {
+        this.annotation = draft; this.annotationCapture = capture; this.showAnnotation = true;
+        Diagnostics.log('info', 'browser', 'annotation_captured', { width: capture.width, height: capture.height });
+      });
     } catch (error) { this.browser.report(error as Error); return false; }
-    finally {
-      this.capturing = false;
-      await rendered?.release().catch((error: Error) => Diagnostics.log('error', 'browser', 'annotation_failed', undefined, error));
-      await capture?.pixel.release().catch((error: Error) => Diagnostics.log('error', 'browser', 'annotation_failed', undefined, error));
-    }
+    finally { this.capturing = false; }
   }
   private startElementPicking(): void {
     this.getUIContext().getFocusController().clearFocus();

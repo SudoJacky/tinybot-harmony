@@ -1,11 +1,10 @@
 // Run after a Debug build. Exercise emitted ArkUI methods at native callback boundaries.
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict');
-const root = path.resolve(__dirname, '..');
+const { debugArtifact } = require('./debug-artifact.cjs');
 const ts = require(path.join(process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio'),
   'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 function methods(relative, names, className = path.basename(relative)) {
-  const file = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets', relative + '.ts');
-  assert.ok(fs.statSync(file).mtimeMs >= fs.statSync(path.join(root, 'entry/src/main/ets', relative + '.ets')).mtimeMs, 'Rebuild ' + relative);
+  const file = debugArtifact(relative);
   const tree = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
   const cls = tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === className);
   return names.map(name => { const method = cls.members.find(n => n.name?.getText(tree) === name); assert.ok(method, name); return method.getText(tree); }).join('\n');

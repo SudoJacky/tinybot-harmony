@@ -56,7 +56,8 @@ for (const kind of ['Column', 'Row', 'Text', 'SymbolGlyph', 'Scroll', 'If', 'For
 });
 const helper = tree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'ChatLayoutFrame');
 vm.runInNewContext(compile(`${helper.getText(tree)}; class Model { ${use} } exports.Model = Model;
-class Panel { ${['speechActive','currentSkillQuery','skillSuggested','skillMatches','selectSkill','skillSuggestions'].map(method).join('\n')} } exports.Panel = Panel;`), scope);
+class Panel { ${['speechActive','currentSkillQuery','skillSuggested','skillMatches','selectSkill','queueComposerFocus',
+  'composerActionCurrent','skillSuggestions'].map(method).join('\n')} } exports.Panel = Panel;`), scope);
 const app = new scope.exports.Model(); let mutable = true;
 Object.assign(app, { extensions: settings, active: { id: 'chat', archived: false }, draft: '$随手', busy: false, saveError: '',
   requireSession: () => ({ canMutate: mutable }), setDraft(text) { this.draft = text; }, send() { throw Error('Picker must not send'); } });

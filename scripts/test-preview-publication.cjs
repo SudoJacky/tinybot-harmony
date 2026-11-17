@@ -121,10 +121,24 @@ async function main() {
   console.log('PASS legacy format and invalid options reject before I/O; startup failures retain every retry option');
 
   detach();
-  let pending; const stopProbe = WebUiPreflight.subscribe(items => { pending = items[0]; });
+  let pending;
+  const probeStarted = Promise.withResolvers();
+  const stopProbe = WebUiPreflight.subscribe(items => {
+    pending = items[0];
+    if (pending) probeStarted.resolve();
+  });
   const signal = new Cancellation(), cancelled = run(args, signal);
-  while (!pending) await new Promise(resolve => setTimeout(resolve, 0));
-  const cancelledCheck = assert.rejects(cancelled, /已停止/); signal.cancel(); await cancelledCheck; stopProbe();
+  try {
+    await Promise.race([
+      probeStarted.promise,
+      cancelled.then(() => assert.fail('Publication finished without a preflight probe to cancel'))
+    ]);
+    const cancelledCheck = assert.rejects(cancelled, /已停止/);
+    signal.cancel(); await cancelledCheck;
+    assert.equal(pending, undefined, 'Cancellation removes the pending preflight probe');
+  } finally {
+    stopProbe();
+  }
   const unavailable = await run(args);
   assert.equal(unavailable.receipt.previewContent, undefined); assert.match(unavailable.receipt.output, /unavailable/);
   console.log('PASS cancellation and unavailable render host never publish');
@@ -208,4 +222,5 @@ async function main() {
   assert.equal(repairFiles.get(sourcePath), correct + '\n'); assert.equal(writes, 2);
   console.log('PASS repair edits preserve files on stale, missing and ambiguous matches');
 }
-main().catch(error => { console.error(error); process.exitCode = 1; });
+const watchdog = setTimeout(() => { throw Error('Preview publication tests did not finish'); }, 45000);
+main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => clearTimeout(watchdog));

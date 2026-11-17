@@ -133,9 +133,11 @@ console.log(JSON.stringify({ iterations: 1000000, hostDurationMs: +(performance.
 const sessionFile = path.join(root, 'services/SessionService.ets');
 const sessionTree = ts.createSourceFile(sessionFile, fs.readFileSync(sessionFile, 'utf8'), ts.ScriptTarget.Latest, true);
 const sessionClass = sessionTree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'SessionService');
-const persist = sessionClass.members.find(node => node.name?.getText(sessionTree) === 'persist');
+const persistMethods = ['persist', 'draftWriteIds'].map(name =>
+  sessionClass.members.find(node => node.name?.getText(sessionTree) === name).getText(sessionTree)
+).join('\n');
 const persistScope = { exports: {}, t: text => text };
-vm.runInNewContext(ts.transpileModule(`class Probe { ${persist.getText(sessionTree)} } exports.Probe = Probe;`, {
+vm.runInNewContext(ts.transpileModule(`class Probe { ${persistMethods} } exports.Probe = Probe;`, {
   compilerOptions: { target: ts.ScriptTarget.ES2021 }
 }).outputText, persistScope);
 (async () => {

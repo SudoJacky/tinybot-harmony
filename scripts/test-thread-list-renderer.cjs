@@ -1,5 +1,6 @@
 // Run after devecocli build. Retain keyed groups and execute the actual emitted update callbacks.
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict');
+const { debugArtifact } = require('./debug-artifact.cjs');
 const root = path.resolve(__dirname, '..');
 const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio');
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
@@ -167,9 +168,7 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
   assert.equal(sidebar.query, 'Renamed chat', 'Editing a project must preserve filters');
   assert.equal(sidebar.archived, true);
   assert.equal(app.error, '');
-  const widgetSource = path.join(root, 'entry/src/main/ets/common/Widgets.ets');
-  const widgetEmitted = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/common/Widgets.ts');
-  assert.ok(fs.statSync(widgetEmitted).mtimeMs >= fs.statSync(widgetSource).mtimeMs, 'Build Widgets before testing');
+  const widgetEmitted = debugArtifact('common/Widgets');
   const widgetTree = ts.createSourceFile(widgetEmitted, fs.readFileSync(widgetEmitted, 'utf8'), ts.ScriptTarget.Latest, true);
   const icon = widgetTree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'IconButton');
   let accessibilityLabel, buttonBackground, buttonBorder, buttonAnimation, backgroundAnimation;

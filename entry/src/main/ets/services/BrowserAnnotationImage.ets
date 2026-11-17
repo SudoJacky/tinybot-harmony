@@ -1,7 +1,50 @@
 import { image } from '@kit.ImageKit';
 import { drawing } from '@kit.ArkGraphics2D';
-import { AnnotationStroke } from '../model/BrowserAnnotation';
+import { AnnotationPage, AnnotationStroke, BrowserAnnotation } from '../model/BrowserAnnotation';
+import { Diagnostics } from '../model/Diagnostics';
 import { createEmptyPixel } from './EmptyPixel';
+import { NativeBrowserCapture } from './NativeBrowserDriver';
+
+export type BrowserDraftDestination = 'screenshot' | 'note' | 'editor';
+
+export async function releaseAnnotationPixel(pixel?: image.PixelMap): Promise<void> {
+  if (!pixel) { return; }
+  try { await pixel.release(); }
+  catch (error) { Diagnostics.log('error', 'browser', 'annotation_failed', undefined, error as Error); }
+}
+
+export async function submitBrowserAnnotation(source: image.PixelMap, draft: BrowserAnnotation,
+  submit: (pixel: image.PixelMap, note: string) => Promise<void>): Promise<void> {
+  const note = draft.note;
+  const rendered = await renderBrowserAnnotation(source, draft.strokes);
+  try { await submit(rendered, note); }
+  finally { await releaseAnnotationPixel(rendered); }
+}
+
+// The capture is borrowed during submission and transferred only to the annotation editor.
+export async function captureBrowserDraft(captureAfterTakeover: () => Promise<NativeBrowserCapture>, isCurrent: () => boolean,
+  destination: BrowserDraftDestination, note: string,
+  submit: (pixel: image.PixelMap, page: AnnotationPage | undefined, note: string) => Promise<void>,
+  openEditor: (capture: NativeBrowserCapture, draft: BrowserAnnotation) => void): Promise<boolean> {
+  let capture: NativeBrowserCapture | undefined = await captureAfterTakeover();
+  try {
+    if (!isCurrent()) { return false; }
+    if (destination === 'screenshot') {
+      await submit(capture.pixel, undefined, '');
+      return true;
+    }
+    const draft = new BrowserAnnotation(); draft.note = note;
+    if (capture.element) { draft.markElement(capture.element); }
+    if (destination === 'note') {
+      const page = capture;
+      await submitBrowserAnnotation(page.pixel, draft, (pixel, text) => submit(pixel, page, text));
+      return true;
+    }
+    openEditor(capture, draft);
+    capture = undefined;
+    return true;
+  } finally { await releaseAnnotationPixel(capture?.pixel); }
+}
 
 export async function renderBrowserAnnotation(source: image.PixelMap, strokes: AnnotationStroke[]): Promise<image.PixelMap> {
   const info = await source.getImageInfo();
@@ -26,5 +69,5 @@ export async function renderBrowserAnnotation(source: image.PixelMap, strokes: A
       pen.setStrokeWidth(stroke.width * width); canvas.attachPen(pen); canvas.drawPath(path); canvas.detachPen();
     }
     return pixel;
-  } catch (error) { await pixel.release(); throw error as Error; }
+  } catch (error) { await releaseAnnotationPixel(pixel); throw error as Error; }
 }

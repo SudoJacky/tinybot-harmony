@@ -1,12 +1,11 @@
 // Build first. Exercise the emitted presence lifecycle, including interrupted and zero-duration animation.
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict');
+const { debugArtifact } = require('./debug-artifact.cjs');
 const root = path.resolve(__dirname, '..');
 const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio');
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 function probe(file, name, methods, globals = {}, extra = []) {
-  const source = path.join(root, 'entry/src/main/ets', file + '.ets');
-  const built = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets', file + '.ts');
-  assert.ok(fs.statSync(built).mtimeMs >= fs.statSync(source).mtimeMs, 'Build before testing ' + file);
+  const built = debugArtifact(file);
   const tree = ts.createSourceFile(built, fs.readFileSync(built, 'utf8'), ts.ScriptTarget.Latest, true);
   const classes = tree.statements.filter(ts.isClassDeclaration), cls = classes.find(n => n.name.text === name);
   const selected = cls.members.filter(n => methods.includes(n.name?.getText(tree)));

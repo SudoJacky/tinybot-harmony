@@ -168,6 +168,17 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(root, 'entry/src
 const TouchType = { Down: 0, Move: 1, Up: 2, Cancel: 3 };
 (async () => {
   const geometry = [], logs = [];
+  const workflowTree = emitted('services/BrowserAnnotationImage');
+  function annotationWorkflow(renderBrowserAnnotation, Diagnostics) {
+    const names = ['releaseAnnotationPixel', 'submitBrowserAnnotation', 'captureBrowserDraft'];
+    const methods = workflowTree.statements.filter(node => ts.isFunctionDeclaration(node) && names.includes(node.name?.text));
+    assert.equal(methods.length, names.length);
+    const exports = {};
+    vm.runInNewContext(ts.transpileModule(methods.map(node => node.getText(workflowTree)).join('\n'), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }
+    }).outputText, { exports, Diagnostics, renderBrowserAnnotation, BrowserAnnotation: annotationExports.BrowserAnnotation });
+    return exports;
+  }
   const areaHandlers = {};
   function areas(node) {
     if (ts.isCallExpression(node) && ['Canvas.onAreaChange', 'Stack.onAreaChange'].includes(node.expression.getText(annotationTree))) {
@@ -187,10 +198,12 @@ const TouchType = { Down: 0, Move: 1, Up: 2, Cancel: 3 };
   area.canvas({}, { width: 300, height: 400 }); assert.equal(layout.canvasWidth, 300);
   let outputReleases = 0, captureReleases = 0, adds = 0, finish;
   const output = { release: async () => { outputReleases++; } };
-  const board = probe(annotationTree, annotationClass, ['setInitiallyProvidedValue', 'draw', 'touch', 'add', 'aboutToDisappear'], {
-    TouchType, Diagnostics: { log: (...args) => logs.push(args) },
-    renderBrowserAnnotation: async (pixel, strokes) => { assert.equal(pixel, board.pixel); assert.equal(strokes, board.draft.strokes); return output; }
-  });
+  const boardDiagnostics = { log: (...args) => logs.push(args) };
+  const boardWorkflow = annotationWorkflow(async (pixel, strokes) => {
+    assert.equal(pixel, board.pixel); assert.equal(strokes, board.draft.strokes); return output;
+  }, boardDiagnostics);
+  const board = probe(annotationTree, annotationClass, ['setInitiallyProvidedValue', 'draw', 'touch', 'add', 'aboutToDisappear'],
+    { TouchType, Diagnostics: boardDiagnostics, ...boardWorkflow });
   Object.assign(board, { canvasWidth: 100, canvasHeight: 200, ready: true, pointer: -1, draft: new annotationExports.BrowserAnnotation(),
     __draft: { set() {} },
     canvas: { clearRect() {}, beginPath() {}, moveTo: (...point) => geometry.push(point), lineTo() {}, stroke() {} },
@@ -215,10 +228,11 @@ const TouchType = { Down: 0, Move: 1, Up: 2, Cancel: 3 };
   const events = []; let unpause, dialog, focusClears = 0;
   let renderedReleases = 0;
   const rendered = { release: async () => { renderedReleases++; } };
-  const panel = probe(panelTree, panelClass, ['pickAt', 'annotate', 'closeAnnotation', 'captureElementNote'], {
-    BrowserAnnotation: annotationExports.BrowserAnnotation, Diagnostics: { log() {} },
-    renderBrowserAnnotation: async (_pixel, strokes) => { assert.equal(strokes[0].points.length, 5); return rendered; }
-  });
+  const panelDiagnostics = { log() {} };
+  const panelWorkflow = annotationWorkflow(async (_pixel, strokes) => { assert.equal(strokes[0].points.length, 5); return rendered; },
+    panelDiagnostics);
+  const panel = probe(panelTree, panelClass, ['pickAt', 'annotate', 'closeAnnotation', 'captureElementNote'],
+    { Diagnostics: panelDiagnostics, ...panelWorkflow });
   Object.assign(panel, { appearance: { surface: {} }, mounted: true, expanded: true, foreground: true,
     capturing: false, showAnnotation: false, canAnnotate: true, threadId: 'original',
     browser: { pauseForAnnotation: () => new Promise(resolve => { events.push('pause'); unpause = resolve; }), report: error => events.push(error) },

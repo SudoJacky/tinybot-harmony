@@ -5,7 +5,7 @@ import { resolveBrowserPreview } from '../model/BrowserPreview';
 import { Diagnostics } from '../model/Diagnostics';
 import { FileAnnotation, FileAnnotationTarget, MAX_FILE_ANNOTATIONS, validateFileAnnotations } from '../model/FileAnnotation';
 import { configurationIssues } from '../model/ConfigurationCompatibility';
-import { isImageProtocol, isProviderProtocol, isSupportedProtocol, sharedImageBaseUrl } from '../model/ProviderEndpoint';
+import { isSupportedProtocol } from '../model/ProviderEndpoint';
 import { ToolExecution, toolReceipts } from '../model/Agent';
 import { projectFor, workspaceIdFor, validateProjects, projectContext } from '../model/Project';
 import { cloudSharedFolder, SharedFolder } from '../model/SharedFolders';
@@ -44,7 +44,7 @@ import { ToolSet } from './ToolSet';
 import { AppData, MessageData, ModelConfig, ThreadData, copyModelConfig, copyAppMetadata, emptyData } from '../model/Conversation';
 import { mergeSavedConfiguration } from '../model/SavedConfiguration';
 import { contextSettings } from '../model/ContextSettings';
-import { ImageGenerationConfig, ModelReference, ProviderProfile, migrateProfiles, modelConfig, validateImageGeneration } from '../model/ProviderProfiles';
+import { ImageGenerationConfig, ModelReference, ProviderProfile, migrateProfiles, modelConfig, prepareImageGeneration } from '../model/ProviderProfiles';
 import { defaultSearchConfig, isSupportedSearchProvider } from '../model/WebSearch';
 import { InputMode, MAX_INPUT_TEXT, PendingInput, nextPendingInput, validatePendingInputs } from '../model/PendingInput';
 import { BrowserPolicy, ExtensionSettings, SkillData, SkillFile, defaultExtensions, explicitSkill, expandSkillCommand, parseSkill, validateExtensions } from '../model/Skills';
@@ -712,7 +712,7 @@ export class SessionService {
           this.refreshCompatibility();
           this.emit({ kind: 'reasoning-effort', state: this.state,
             reasoningSelection: { threadIds: threadIds, value: value, config: updateDefault ? copyModelConfig(candidate.config) : undefined } });
-        }, threadIds.concat(Array.from(this.dirtyDrafts)), { threadId: active.id });
+        }, this.draftWriteIds(threadIds), { threadId: active.id });
       } finally { if (Diagnostics.recording) { Diagnostics.end('reasoning.effort.save', mark, { changed: threadIds.length }); } }
     }, 'state', 'thread');
   }
@@ -769,15 +769,7 @@ export class SessionService {
       const preferences = this.preferencesSnapshot();
       const options = preferences.productivity.options || defaultAssistantOptions();
       if (value) {
-        const profile = this.providerProfiles.find((item) => item.id === value.providerId && item.enabled);
-        if (!profile || !isProviderProtocol(profile.protocol) || !value.protocol || !isImageProtocol(value.protocol)) {
-          throw new Error(t('图片生成服务配置无效。'));
-        }
-        const config: ImageGenerationConfig = { providerId: value.providerId, modelId: value.modelId.trim(),
-          protocol: value.protocol, baseUrl: value.baseUrl?.trim() || undefined };
-        if (!config.modelId || /[\r\n,，]/.test(config.modelId)) { throw new Error(t('填写图片模型 ID。')); }
-        validateImageGeneration(config);
-        sharedImageBaseUrl(profile.protocol, profile.baseUrl, value.protocol, config.baseUrl);
+        const config = prepareImageGeneration(this.providerProfiles, value);
         options.imageGeneration = mergeSavedConfiguration(options.imageGeneration, config);
       } else { options.imageGeneration = undefined; }
       preferences.productivity.options = options;
@@ -1166,13 +1158,10 @@ export class SessionService {
           // A title changes one thread. Keep unrelated transcripts out of capture and UI projection.
           const candidate = copyAppMetadata(this.data);
           candidate.threads = this.data.threads.map((item) => item.id === threadId ? target : item);
-          let revision = this.draftRevision;
+          const revision = this.draftRevision;
           await this.commitCandidate(candidate, () => { thread.title = title; },
-            [threadId].concat(Array.from(this.dirtyDrafts)));
-          // Preserve typing that occurred during the metadata write, using the same save lane.
-          while (revision !== this.draftRevision) {
-            revision = this.draftRevision; await this.persist(threadId);
-          }
+            this.draftWriteIds([threadId]));
+          await this.persistDraftChanges(revision, threadId);
           this.publishThread(thread);
         });
       } finally { this.application.phase = 'idle'; this.publish('state'); }
@@ -1636,7 +1625,7 @@ export class SessionService {
       this.data.config = preferences.config; this.data.extensions = preferences.extensions;
       this.data.productivity = preferences.productivity;
       this.refreshCompatibility();
-    }, Array.from(this.dirtyDrafts));
+    }, this.draftWriteIds());
   }
   private async commitSettings(candidate: AppData, runningThreadIds: string[] = this.runningThreadIds): Promise<void> {
     const running = new Set(runningThreadIds);
@@ -1653,15 +1642,19 @@ export class SessionService {
       this.refreshCompatibility();
     });
   }
-  private async persistDraftChanges(revision: number): Promise<void> {
-    while (revision !== this.draftRevision) { revision = this.draftRevision; await this.persist(); }
+  private draftWriteIds(threadIds: string[] = []): string[] {
+    return Array.from(new Set(threadIds.concat(Array.from(this.dirtyDrafts))));
+  }
+  private async persistDraftChanges(revision: number, threadId?: string): Promise<void> {
+    // A draft can change during the follow-up save as well as during the original commit.
+    while (revision !== this.draftRevision) { revision = this.draftRevision; await this.persist(threadId); }
   }
   private async persist(threadId?: string, messageId?: string, submittedApprovalMode?: ToolApprovalMode): Promise<void> {
     // Draft autosaves and team checkpoints must capture resources after the transaction publishes them.
     if (this.pendingCommit) { await this.pendingCommit; }
     const preferences = this.syncEmptyThreadPreferences(this.data); const draftRevision = this.draftRevision;
     try {
-      const changed = threadId === undefined ? undefined : preferences.concat([threadId], Array.from(this.dirtyDrafts));
+      const changed = threadId === undefined ? undefined : this.draftWriteIds(preferences.concat([threadId]));
       const message: ThreadCheckpoint | undefined = threadId !== undefined && messageId !== undefined ?
         { threadId: threadId, messageId: messageId } : undefined;
       if (submittedApprovalMode !== undefined && this.data.lastToolApprovalMode !== submittedApprovalMode) {

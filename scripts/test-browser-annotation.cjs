@@ -36,7 +36,7 @@ const from = name => load(path.join(root, 'main/ets', name));
 const { BrowserAnnotation } = from('model/BrowserAnnotation');
 const { browserAnnotationContent, browserAnnotationText } = from('model/BrowserAnnotationContent');
 const { attachmentContext } = from('model/AttachmentContext');
-const { renderBrowserAnnotation } = from('services/BrowserAnnotationImage');
+const { renderBrowserAnnotation, captureBrowserDraft } = from('services/BrowserAnnotationImage');
 const { requestHistory } = from('model/Conversation');
 const { threadEntries } = from('model/ContextProjection');
 const { Fixture, Gate } = load(path.join(root, 'test/SessionService.test'));
@@ -66,6 +66,20 @@ const deadline = setTimeout(() => { console.error('Annotation test stalled'); pr
   const text = browserAnnotationText(annotationPhoto('reference').browserAnnotation);
   assert.match(text, /https:\/\/example.com\/view/); assert.match(text, /Make this larger/); assert.match(text, /"after":"7px"/);
   console.log('PASS normalized annotation strokes, undo/clear, note context, full-image export and failed-export cleanup');
+
+  let captureReleases = 0;
+  const snapshot = { ...reference, pixel: { ...source, release: async () => { captureReleases++; } } };
+  const openUnexpected = () => assert.fail('Unexpected editor');
+  const submitUnexpected = async () => assert.fail('Unexpected submission');
+  assert.equal(await captureBrowserDraft(async () => snapshot, () => false, 'screenshot', '', submitUnexpected, openUnexpected), false);
+  assert.equal(captureReleases, 1);
+  const previousReleases = raster.released;
+  await assert.rejects(captureBrowserDraft(async () => snapshot, () => true, 'note', note, async (_pixel, page, text) => {
+    assert.equal(page, snapshot); assert.equal(text, note);
+    throw Error('draft write failed');
+  }, openUnexpected), /draft write failed/);
+  assert.equal(captureReleases, 2); assert.equal(raster.released, previousReleases + 1);
+  console.log('PASS stale captures are dropped and failed note submission releases both images');
 
   const f = new Fixture(); await f.session.initialize();
   const entered = new Gate(), release = new Gate();
