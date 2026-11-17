@@ -1,12 +1,20 @@
-// Run with the production WebUi host and packaged definitions (see the companion source test).
-async (page, host, definitions, outputDirectory) => {
+// Driven by test-builtin-widgets-browser.cjs using the production host and packaged definitions.
+async (page, host, definitions, outputDirectory, balanceMotion) => {
   const failures=[],requests=[];
   page.on('pageerror',error=>failures.push(error.message));
   await page.route('**/*',route=>{requests.push(route.request().url());route.abort();});
   const check=(condition,message)=>{if(!condition)throw Error(message);};
+  const capture=async(frame,id)=>{
+    if(outputDirectory)await frame.locator('article').screenshot({path:outputDirectory+'/'+id+'.png'});
+  };
+  for(const id of ['ascii','balance','clock','focus','todo','countdown','guide-welcome','guide-move','guide-resize']){
+    check(definitions[id],'Missing packaged fixture: '+id);
+  }
   async function mount(spec,options={}){
-    await page.setViewportSize({width:options.width||page.viewportSize().width,height:spec.view.height});
+    const viewport={width:options.width||page.viewportSize().width,height:spec.view.height};
+    await page.setViewportSize(viewport);
     await page.goto('about:blank');await page.setContent(host);
+    await page.waitForFunction(({width,height})=>window.__tinybotHostReady===true&&innerWidth===width&&innerHeight===height,viewport);
     const context={data:spec.data,inputs:Object.fromEntries(Object.entries(spec.inputs||{}).map(([key,input])=>[key,input.default])),title:spec.title,status:'ready',canRefresh:!!spec.source,locale:options.locale||'zh-CN',theme:'light',tokens:{text:'#202822','text-secondary':'#788078',surface:'#ffffff',accent:'#286b56',border:'#e4e7e2'}};
     await page.evaluate(({spec,context,options})=>{
       window.messages=[];window.stored=options.stored||{value:null,revision:'initial'};window.failSave=false;window.seq=0;
@@ -23,39 +31,52 @@ async (page, host, definitions, outputDirectory) => {
           if(window.failSave||data.revision!==window.stored.revision)channel.port1.postMessage(JSON.stringify({type:'storageResult',id:data.id,error:'Test save conflict'}));
           else {window.stored={value:data.value,revision:'saved-'+ ++window.seq};channel.port1.postMessage(JSON.stringify({type:'storageResult',id:data.id,snapshot:window.stored}));}
         }
+        if(data.type==='panelRefresh'&&options.balanceMotion){
+          channel.port1.postMessage(JSON.stringify({type:'panelResult',id:data.id}));
+        }
       };
       window.postMessage('tinybot-web-port','*',[channel.port2]);
       const view={...spec.view,css:spec.view.css+'\nhtml{--tinybot-card-height:'+(options.autoHeight&&!options.fixedViewport?'auto':'100vh')+'}'};
       channel.port1.postMessage(JSON.stringify({type:'init',spec:view,values:{},active:true,preflight:!!options.probe,autoHeight:!!options.autoHeight,panel:context,
         panelProbe:options.probe?{width:options.width,height:spec.view.height,checks:spec.checks}:undefined}));
     },{spec,context,options});
-    await page.waitForFunction(()=>messages.some(message=>message.type==='ready'||message.type==='error'));
+    try { await page.waitForFunction(()=>messages.some(message=>message.type==='ready'||message.type==='error')); }
+    catch(error){
+      const observed=await page.evaluate(()=>messages.map(message=>message.type));
+      throw Error('Host did not complete '+spec.title+' startup at '+viewport.width+'px. Messages: '+JSON.stringify(observed),{cause:error});
+    }
     const errors=await page.evaluate(()=>messages.filter(message=>message.type==='error'));
-    check(!errors.length,spec.title+': '+JSON.stringify(errors));
-    const tap=await page.frames().find(frame=>frame.parentFrame()).evaluate(()=>getComputedStyle(document.documentElement).webkitTapHighlightColor);
+    const frame=page.frames().find(frame=>frame.parentFrame());
+    if(errors.length){
+      const layout=frame&&await frame.evaluate(()=>({width:innerWidth,height:innerHeight,controls:[...document.querySelectorAll('button')]
+        .map(button=>({id:button.id,width:button.getBoundingClientRect().width,height:button.getBoundingClientRect().height,
+          visibility:getComputedStyle(button).visibility}))}));
+      throw Error(spec.title+' at '+viewport.width+'px: '+JSON.stringify({errors,layout}));
+    }
+    const tap=await frame.evaluate(()=>getComputedStyle(document.documentElement).webkitTapHighlightColor);
     check(tap==='rgba(0, 0, 0, 0)','Default browser tap highlight must be transparent: '+tap);
-    return page.frames().find(frame=>frame.parentFrame());
+    return frame;
   }
   for(const width of [174,344]){
     await page.setViewportSize({width,height:600});
     for(const [id,spec]of Object.entries(definitions))if(id!=='guide-welcome'||width===344)await mount(spec,{probe:true,width});
   }
-  if(definitions.ascii){
+  {
     let ascii=await mount(definitions.ascii,{width:344});
     check(await ascii.locator('#mode').textContent()==='TINYBOT','ASCII starts with the Tinybot mascot');
     check(!(await ascii.locator('header').textContent()).includes('ASCII / 001'),'Remove the ASCII sequence label');
-    const first=await ascii.locator('#ascii').textContent();await page.waitForTimeout(600);
-    check(first!==(await ascii.locator('#ascii').textContent()),'ASCII field must animate, not display a static placeholder');
+    const first=await ascii.locator('#ascii').textContent();
+    await ascii.waitForFunction(previous=>document.getElementById('ascii').textContent!==previous,first);
     check((await ascii.locator('#ascii').textContent()).replace(/\s/g,'').length>80,'ASCII field must contain real generated geometry');
     check(Math.abs((await ascii.locator('article').boundingBox()).height-208)<1,'Banner fills the 12x5 viewport');
     check(!(await ascii.evaluate(()=>document.documentElement.scrollWidth>innerWidth||document.documentElement.scrollHeight>innerHeight)),'ASCII banner fits without scrolling');
-    await ascii.locator('article').screenshot({path:outputDirectory+'/ascii-mascot.png'});
+    await capture(ascii,'ascii-mascot');
     await ascii.locator('#warp').click();await ascii.locator('#mode').filter({hasText:'ORBITAL'}).waitFor();
-    const orbital=await ascii.locator('#ascii').textContent();await page.waitForTimeout(250);
-    check(orbital!==await ascii.locator('#ascii').textContent(),'Existing orbital scene still animates');
-    await ascii.locator('article').screenshot({path:outputDirectory+'/ascii-orbital.png'});
+    const orbital=await ascii.locator('#ascii').textContent();
+    await ascii.waitForFunction(previous=>document.getElementById('ascii').textContent!==previous,orbital);
+    await capture(ascii,'ascii-orbital');
     await ascii.locator('#warp').click();await ascii.locator('#mode').filter({hasText:'HYPERDRIVE'}).waitFor();
-    await ascii.locator('article').screenshot({path:outputDirectory+'/ascii-hyperdrive.png'});
+    await capture(ascii,'ascii-hyperdrive');
     await ascii.locator('#warp').click();await ascii.locator('#mode').filter({hasText:'TINYBOT'}).waitFor();
     check((await page.evaluate(()=>messages)).every(message=>!['storageLoad','storageSave','panelRefresh','panelMailRead'].includes(message.type)),'Animation runs locally without storage, source or model requests');
     await page.evaluate(()=>nativePort.postMessage(JSON.stringify({type:'state',values:{},active:false,panel:probePanel})));
@@ -78,39 +99,33 @@ async (page, host, definitions, outputDirectory) => {
   await page.evaluate(()=>{window.failSave=true;});await frame.locator('.remove').click();
   await frame.locator('#status').filter({hasText:'Test save conflict'}).waitFor();
   check(await frame.locator('.task').count()===1,'Save failures must retain persisted tasks');
-  await frame.locator('article').screenshot({path:outputDirectory+'/todo.png'});
-  frame=await mount(definitions.focus);await frame.locator('#toggle').click();await page.waitForFunction(()=>stored.value?.running===true);
-  const timer=await page.evaluate(()=>stored);timer.value.deadline=Date.now()+4200;
-  frame=await mount(definitions.focus,{stored:timer});
-  const value=await frame.locator('#remaining').textContent();check(value==='00:05'||value==='00:04','Timer must restore an absolute deadline: '+value);
-  await frame.locator('#toggle').click();await page.waitForFunction(()=>stored.value?.running===false);
-  await frame.locator('#mode-short').click();await page.waitForFunction(()=>stored.value.mode==='short');
-  check(await frame.locator('#remaining').textContent()==='05:00','Short break duration');
-  await frame.locator('article').screenshot({path:outputDirectory+'/focus.png'});
+  await capture(frame,'todo');
   frame=await mount(definitions.countdown);
   await frame.locator('#event-name').fill('下一次旅行');await frame.locator('#event-date').fill('2030-01-01');await frame.locator('#save-event').click();
   await frame.locator('#event-form').waitFor({state:'hidden'});check(await frame.locator('#event').textContent()==='下一次旅行','Countdown saved event');
-  await frame.locator('article').screenshot({path:outputDirectory+'/countdown.png'});
-  for(const id of ['clock','balance']){frame=await mount(definitions[id]);await frame.locator('article').screenshot({path:outputDirectory+'/'+id+'.png'});}
+  await capture(frame,'countdown');
+  if(outputDirectory)for(const id of ['clock','balance']){frame=await mount(definitions[id]);await capture(frame,id);}
   frame=await mount(definitions.clock,{locale:'en'});await frame.locator('#format').click();await page.waitForFunction(()=>stored.value?.hour12===true);
   await page.evaluate(()=>nativePort.postMessage(JSON.stringify({type:'state',values:{},active:true,panel:{data:{},inputs:{},locale:'en',theme:'dark',tokens:{text:'#eeeeee','text-secondary':'#a5ada7',surface:'#151b17',accent:'#8ac9ac',border:'#35443b'},canRefresh:false,status:'ready'}})));
-  check(await frame.locator('#time').evaluate(el=>getComputedStyle(el).color)==='rgb(238, 238, 238)','Theme must propagate live');
+  await frame.waitForFunction(()=>getComputedStyle(document.getElementById('time')).color==='rgb(238, 238, 238)');
   const overflow=await frame.evaluate(()=>document.documentElement.scrollWidth>innerWidth);check(!overflow,'English 12h clock overflow');
   const balance=definitions.balance;
   frame=await mount({...balance,data:{...balance.data,amounts:[{currency:'USD',label:'Account',kind:'account',total:'123.45'}],checkedAt:1}},
-    {stored:{value:{balanceHidden:true},revision:'legacy'}});
+    {stored:{value:{balanceHidden:true},revision:'legacy'},balanceMotion:true});
   check(await frame.locator('#privacy').count()===0,'Balance has no hide control');
   check(await frame.locator('#amount').getAttribute('aria-label')==='$123.45','USD amount includes its symbol and ignores old hide preferences');
   check((await page.evaluate(()=>messages)).every(message=>message.type!=='storageLoad'&&message.type!=='storageSave'),'Balance has no privacy storage dependency');
+  await frame.evaluate(balanceMotion);
+  check((await page.evaluate(()=>messages.filter(message=>message.type==='panelRefresh').length))===2,'Both refreshes cross the native port');
   frame=await mount({...balance,data:{...balance.data,amounts:[{currency:'CNY',label:'账户余额',kind:'account',total:'94.63'}],checkedAt:1}},{width:344});
   check(await frame.locator('#amount').getAttribute('aria-label')==='￥94.63','CNY balance includes the requested yuan symbol');
-  await frame.locator('article').screenshot({path:outputDirectory+'/balance-currency.png'});
+  await capture(frame,'balance-currency');
   for(const [row,expected] of [[{currency:'CNY',total:'0.00'},'￥0.00'],[{currency:'credits',total:'1234.56789'},'1,234.56789 credits'],[{currency:'CNY',unlimited:true},'无限额'],[{currency:'CNY'},'未返回额度']]){
     frame=await mount({...balance,data:{...balance.data,amounts:[{...row,label:'Balance',kind:'account'}],checkedAt:1}},{width:174});
     check(await frame.locator('#amount').getAttribute('aria-label')===expected,'Currency must preserve precision, zero and quota semantics: '+expected);
     check(!(await frame.evaluate(()=>document.documentElement.scrollWidth>innerWidth)),'Currency amount must fit a narrow card');
   }
-  if(definitions['guide-welcome']){
+  {
     for(const id of ['guide-welcome','guide-move','guide-resize']){
       for(const width of [174,344]){
         frame=await mount({...definitions[id],view:{...definitions[id].view,height:720}},{width,autoHeight:true});
@@ -131,7 +146,7 @@ async (page, host, definitions, outputDirectory) => {
       frame=await mount(definitions[id],{width:id==='guide-welcome'?344:166});
       check(!(await frame.locator('h1,h2').textContent()).includes('\\n'),'Guide line breaks must render');
       await frame.waitForFunction(()=>[...document.querySelectorAll('[data-reveal]')].every(element=>element.getAnimations().every(animation=>animation.playState==='finished')));
-      await frame.locator('article').screenshot({path:outputDirectory+'/'+id+'.png'});
+      await capture(frame,id);
     }
     frame=await mount(definitions['guide-move'],{width:166});
     await frame.waitForFunction(()=>document.querySelector('article').getAnimations({subtree:true}).some(animation=>animation.playState==='running'));
@@ -144,6 +159,20 @@ async (page, host, definitions, outputDirectory) => {
     check(await frame.locator('h1').evaluate(element=>getComputedStyle(element).webkitTextFillColor)!=='rgba(0, 0, 0, 0)','Reduced-motion headline must remain visible');
     await page.emulateMedia({reducedMotion:'no-preference'});
   }
+  const startedAt=Date.parse('2026-01-01T12:00:00Z');
+  await page.clock.setFixedTime(startedAt);
+  frame=await mount(definitions.focus,{width:344});
+  await frame.locator('#toggle').click();await page.waitForFunction(()=>stored.value?.running===true);
+  const timer=await page.evaluate(()=>stored);
+  check(timer.value.deadline===startedAt+25*60*1000,'Starting focus must store an absolute deadline');
+  await page.clock.setFixedTime(timer.value.deadline-2350);
+  frame=await mount(definitions.focus,{width:344,stored:timer});
+  const value=await frame.locator('#remaining').textContent();
+  check(value==='00:03','Restored focus must subtract elapsed time from the persisted deadline: '+value);
+  await frame.locator('#toggle').click();await page.waitForFunction(()=>stored.value?.running===false);
+  await frame.locator('#mode-short').click();await page.waitForFunction(()=>stored.value.mode==='short');
+  check(await frame.locator('#remaining').textContent()==='05:00','Short break duration');
+  await capture(frame,'focus');
   check(!failures.length,JSON.stringify(failures));check(!requests.length,'Built-ins must not fetch external resources');
   return {cards:Object.keys(definitions).length,probeWidths:[174,344],persistence:true,saveConflict:true,timerResume:true,themes:true,tapHighlight:'transparent',guideMotion:true,guideAutoHeight:true,networkRequests:requests.length};
 }

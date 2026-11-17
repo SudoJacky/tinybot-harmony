@@ -1,11 +1,9 @@
 // Build first. Exercise the emitted native component lifecycle with controllable animator frames.
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict');
-const root = path.resolve(__dirname, '..');
+const { debugArtifact } = require('./debug-artifact.cjs');
 const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio');
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
-const source = path.join(root, 'entry/src/main/ets/common/Widgets.ets');
-const emitted = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets/common/Widgets.ts');
-assert.ok(fs.statSync(emitted).mtimeMs >= fs.statSync(source).mtimeMs, 'Build before testing');
+const emitted = debugArtifact('common/Widgets');
 const tree = ts.createSourceFile(emitted, fs.readFileSync(emitted, 'utf8'), ts.ScriptTarget.Latest, true);
 const component = tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'ThinkingLine');
 const names = ['aboutToAppear','aboutToDisappear','stopLoop','stopSettle','syncMotion','syncState','visibilityChanged','sheenColor'];

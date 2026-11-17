@@ -137,6 +137,7 @@ Debug 和 Release 组要求已有相应构建产物；浏览器组不属于默�
 | `test-announcements.cjs` | 公告解析、原生传输与启动弹窗 |
 | `test-background-generation.cjs` | 后台长时任务所有权、取消与真实请求范围 |
 | `test-browser-dom.cjs` | 在真实浏览器中执行发布版浏览器脚本（Playwright） |
+| `test-builtin-widgets-browser.cjs` | Edge 中的内置卡片与引导，含存储冲突、计时恢复、余额刷新动效及离线渲染。直接运行时可传入截图目录 |
 | `test-browser-panel.cjs` | 编译后的地址回调与系统返回 |
 | `test-composer-dismissal.cjs` | 输入框引用按钮在原生关闭过程中的回调与重复触发 |
 | `test-config-compatibility.cjs` | 新版本快照回放、未知字段保留与降级提示 |

@@ -125,8 +125,12 @@ int main() {
     result = Run("await tools.read({}); while(true) {}", loops);
     Check(result.status == "timeout", "infinite loop after await interrupted");
     Host jobs;
-    result = Run("while(true) { await Promise.resolve(); }", jobs);
-    Check(result.status == "timeout", "infinite microtasks interrupted");
+    Budget microtaskBudget;
+    microtaskBudget.timeoutMs = 250;
+    result = Orchestrate("await Promise.resolve(); text('resumed'); while(true) { await Promise.resolve(); }",
+        "[]", microtaskBudget, jobs);
+    Check(result.status == "timeout" && result.stdoutText == "resumed\n" && result.durationMs < 1500,
+        "infinite microtasks interrupted after execution resumes");
     Host noHost;
     result = Run("return [typeof fetch,typeof require,typeof setTimeout,typeof tools.missing];", noHost);
     Check(result.status == "ok" && result.resultJson == "[\"undefined\",\"undefined\",\"undefined\",\"undefined\"]", "no ambient host capabilities");
@@ -145,5 +149,9 @@ int main() {
     result = Run("return {toJSON(){tools.read({}); return 1;}};", serialization);
     Check(result.status == "error" && serialization.count == 0, "serialization cannot start host effects");
     Host recovery;
-    for (int i = 0; i < 100; i++) { result = Run("return await tools.read({});", recovery); Check(result.status == "ok", "fresh runtime recovery"); }
+    for (int i = 0; i < 100; i++) {
+        result = Run("return await tools.read({});", recovery);
+        if (result.status != "ok" || result.resultJson != "7") { Check(false, "fresh runtime recovery"); }
+    }
+    Check(recovery.count == 100, "100 fresh runtimes recover after failures");
 }

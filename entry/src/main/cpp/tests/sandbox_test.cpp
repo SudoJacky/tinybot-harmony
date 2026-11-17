@@ -46,10 +46,13 @@ int main()
     Check(result.status == "error" && result.durationMs < 1500, "Atomics.wait cannot block");
     result = Run("while(true){}");
     Check(result.status == "timeout" && result.durationMs < 5000, "infinite loop interrupted");
-    result = Run("return {toJSON(){while(true){}}};");
-    Check(result.status == "timeout" && result.durationMs < 5000, "serialization shares deadline");
-    result = Run("throw {toString(){while(true){}}};");
-    Check(result.status == "timeout" && result.durationMs < 5000, "error coercion shares deadline");
+    for (const auto &scenario : {"return {toJSON(){console.log('entered'); while(true){}}};",
+             "throw {toString(){console.log('entered'); while(true){}}};"}) {
+        Budget shortBudget;
+        shortBudget.timeoutMs = 250;
+        result = ExecuteCode(scenario, "null", shortBudget);
+        Check(result.status == "timeout" && result.stdoutText == "entered\n" && result.durationMs < 1500, scenario);
+    }
     Budget cancelled;
     pthread_t stop;
     Check(pthread_create(&stop, nullptr, [](void *data) -> void * {

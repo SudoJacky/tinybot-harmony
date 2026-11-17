@@ -119,6 +119,7 @@ const suites = {
   browser: [
     'test-bing-search-dom.cjs',
     'test-browser-dom.cjs',
+    'test-builtin-widgets-browser.cjs',
     'test-markdown-mermaid.cjs',
     'test-web-ui-browser.cjs',
   ],
