@@ -456,6 +456,54 @@ async function main() {
     await ui.receiveAttachmentDrop(nativeEvent); assert.equal(nativeEvent.result, DragResult.DRAG_FAILED); assert.equal(commits, 1);
     ui.composerDrop({ getSummary: () => ({ summary: { 'general.plain-text': 4 } }), setResult() { assert.fail('Native text drop was intercepted'); } });
     console.log('PASS compiled ChatPanel callbacks: hover, attachment strip, current conversation, navigation cancellation, full draft and native text drop');
+
+    const annotationSource = path.join(source, 'views/FileAnnotationList.ets');
+    const annotationOutput = path.join(path.dirname(emitted), 'FileAnnotationList.ts');
+    assert.ok(fs.statSync(annotationOutput).mtimeMs >= fs.statSync(annotationSource).mtimeMs, 'Rebuild FileAnnotationList');
+    const annotationTree = ts.createSourceFile(annotationOutput, fs.readFileSync(annotationOutput, 'utf8'), ts.ScriptTarget.Latest, true);
+    const annotationList = annotationTree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'FileAnnotationList');
+    const editorMethods = ['toggleExpanded', 'edit', 'cancelEdit', 'change'].map(name =>
+      annotationList.members.find(member => member.name?.getText(annotationTree) === name).getText(annotationTree)
+    );
+    const annotationExports = {};
+    vm.runInNewContext(compile('class Editor { ' + editorMethods.join('\n') + ' } exports.Editor = Editor;'),
+      { exports: annotationExports });
+    const write = Promise.withResolvers();
+    const writes = [];
+    const editor = Object.assign(new annotationExports.Editor(), {
+      editable: true, disabled: false, expanded: false, saving: false, editing: '',
+      onChange: async (id, comment) => { writes.push([id, comment]); }
+    });
+    editor.toggleExpanded();
+    editor.edit({ id: 'first', comment: 'Original' });
+    editor.comment = 'Unsaved note';
+    editor.edit({ id: 'second', comment: 'Other' });
+    editor.toggleExpanded();
+    await editor.change('second');
+    await editor.change('first', ' ');
+    assert.equal(editor.expanded, true);
+    assert.equal(editor.editing, 'first');
+    assert.equal(editor.comment, 'Unsaved note');
+    assert.deepEqual(writes, []);
+    const save = editor.onChange;
+    editor.onChange = (id, comment) => { writes.push([id, comment]); return write.promise; };
+    const pending = editor.change('first', editor.comment);
+    editor.cancelEdit();
+    const duplicate = editor.change('first', editor.comment);
+    assert.deepEqual(writes, [['first', 'Unsaved note']]);
+    assert.equal(editor.editing, 'first');
+    write.reject(Error('Disk full'));
+    await Promise.all([pending, duplicate]);
+    assert.equal(editor.saveError, 'Disk full');
+    assert.equal(editor.comment, 'Unsaved note');
+    editor.onChange = save;
+    await editor.change('first', editor.comment);
+    assert.deepEqual(writes, [['first', 'Unsaved note'], ['first', 'Unsaved note']]);
+    assert.equal(editor.editing, '');
+    assert.equal(editor.saveError, '');
+    editor.toggleExpanded();
+    assert.equal(editor.expanded, false);
+    console.log('PASS compiled file annotation editor preserves drafts, prevents conflicting actions and retries a failed save');
   }
   }
 }
