@@ -3042,5 +3042,6 @@ async function test(name, run) {
     assert.equal(JSON.stringify(model.parseAppData(JSON.stringify(restored))), JSON.stringify(restored));
   });
   suiteCompleted = true;
+  assert.ok(completedTests > 0, 'No native adapter cases selected by TEST_FILTER=' + JSON.stringify(process.env.TEST_FILTER ?? ''));
   console.log(completedTests+' native adapter integration checks passed. Fixtures: '+fixture);
 })().catch(error=>{console.error(error);process.exitCode=1;});

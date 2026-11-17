@@ -3,6 +3,7 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio');
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 const root = path.resolve(__dirname, '../entry/src'), cache = new Map();
+let actionTimers;
 const nativeResult = { type: 3, value: '', controllers: 0 };
 const captureResult = { released: 0, before: async () => {} };
 const capturedPixel = { getImageInfo: async () => ({ size: { width: 900, height: 1200 } }), release: async () => { captureResult.released++; } };
@@ -36,7 +37,10 @@ function load(file) {
   if (file.endsWith('SessionService.test.ets')) source += '\nexport { Fixture, seed };';
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021, experimentalDecorators: true
-  } }).outputText, { exports, Observed: cls => cls, TouchType, setTimeout, clearTimeout, console, require: id => {
+  } }).outputText, { exports, Observed: cls => cls, TouchType, console,
+    setTimeout: (fn, delay) => actionTimers ? actionTimers.schedule(fn, delay) : setTimeout(fn, delay),
+    clearTimeout: id => actionTimers ? actionTimers.cancel(id) : clearTimeout(id),
+    require: id => {
     if (id === '@ohos/hypium') return {};
     if (id === '@kit.ArkWeb') return { webview: nativeWebview };
     if (id === '@kit.ImageKit') return { image: { createPixelMapFromSurface: async id => {
@@ -67,6 +71,31 @@ const { ToolSet } = load(path.join(root, 'main/ets/services/ToolSet'));
 const { Fixture, seed } = load(path.join(root, 'test/SessionService.test'));
 const gate = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+const nextTurn = () => new Promise(resolve => setImmediate(resolve));
+
+async function withActionTimers(test) {
+  const pending = new Map();
+  let sequence = 0;
+  actionTimers = {
+    schedule(fn, delay) { const id = ++sequence; pending.set(id, { fn, delay }); return id; },
+    cancel(id) { pending.delete(id); }
+  };
+  function fireNext(maxDelay = Infinity) {
+    const next = [...pending].sort(([, a], [, b]) => a.delay - b.delay)[0];
+    assert.ok(next, 'Expected an action timer');
+    const [id, { fn, delay }] = next;
+    assert.ok(delay > 0 && delay <= maxDelay, 'Expected a positive action delay within the allowed window');
+    pending.delete(id);
+    fn();
+  }
+  try {
+    await test(fireNext, pending);
+    assert.equal(pending.size, 0, 'Browser action timers must be released');
+  } finally {
+    actionTimers = undefined;
+  }
+}
+
 const call = (name, args = {}) => ({ id: name, type: 'function', function: { name, arguments: JSON.stringify(args) } });
 function fixture(policy = 'enabled') {
   const browser = new BrowserSession(), cancellation = new Cancellation();
@@ -87,6 +116,7 @@ async function acquired() {
   const f = fixture(); const receipt = await f.browser.acquire('thread', 'https://example.com', 'Interactive page', f.cancellation);
   return { ...f, receipt };
 }
+const watchdog = setTimeout(() => { throw Error('Browser session tests did not finish'); }, 30000);
 (async () => {
   {
     const { NativeBrowserDriver } = load(path.join(root, 'main/ets/services/NativeBrowserDriver'));
@@ -99,7 +129,7 @@ async function acquired() {
     assert.equal(driver.controller, controller, 'First browser use creates exactly one reusable controller');
     console.log('PASS retained browser driver defers native controller creation until first browser use');
   }
-  {
+  await withActionTimers(async (fireNext, pending) => {
     const { NativeBrowserDriver } = load(path.join(root, 'main/ets/services/NativeBrowserDriver'));
     const f = await acquired(), driver = new NativeBrowserDriver(f.browser), calls = [];
     driver.controller.url = 'https://example.com'; driver.pageEnd(driver.controller.url); driver.setFeedbackVisible(true);
@@ -108,15 +138,18 @@ async function acquired() {
       return JSON.stringify(preview ? { ok: true, target: { x: 0.25, y: 0.5 } } : { ok: true });
     };
     const action = { action: 'click', snapshotId: f.receipt.page.snapshotId, elementId: 1 };
-    const acting = driver.act(action); await settle();
+    const acting = driver.act(action); await nextTurn();
     assert.deepEqual(calls, ['preview']); assert.equal(f.browser.actionFeedback.x, 0.25); assert.equal(f.browser.actionFeedback.y, 0.5);
+    fireNext();
     await acting; assert.deepEqual(calls, ['preview', 'effect']);
+    assert.ok(f.browser.actionFeedback, 'Preview must reach the effect before its cue expires');
     driver.setFeedbackVisible(false); assert.equal(f.browser.actionFeedback, undefined);
     calls.length = 0; await driver.act(action); assert.deepEqual(calls, ['effect'], 'Collapsed browsing skips visual preview and its delay');
     driver.setFeedbackVisible(true); calls.length = 0;
-    const interrupted = driver.act(action); await settle();
+    const interrupted = assert.rejects(driver.act(action), error => error.code === 'STALE_BROWSER_SNAPSHOT');
+    await nextTurn(); assert.ok(f.browser.actionFeedback);
     f.browser.takeOver(); f.browser.handoff();
-    await assert.rejects(interrupted, error => error.code === 'STALE_BROWSER_SNAPSHOT');
+    fireNext(); await interrupted;
     assert.deepEqual(calls, ['preview'], 'Taking over and handing back during preview must not issue the old action');
     assert.equal(f.browser.actionFeedback, undefined);
     const fresh = await f.browser.snapshot(f.cancellation); calls.length = 0;
@@ -125,11 +158,12 @@ async function acquired() {
     assert.deepEqual(calls, ['invalid-preview']); assert.equal(f.browser.actionFeedback, undefined);
     f.browser.showActionFeedback(0.25, 0.5); const previousId = f.browser.actionFeedback.id;
     f.browser.showActionFeedback(0.75, 0.5); assert.ok(f.browser.actionFeedback.id > previousId);
-    await new Promise(resolve => setTimeout(resolve, 510)); assert.equal(f.browser.actionFeedback, undefined, 'Operation cues expire automatically');
+    assert.equal(pending.size, 1, 'Replacing an action cue must cancel its previous timer');
+    fireNext(510); assert.equal(f.browser.actionFeedback, undefined, 'Operation cues expire automatically');
     nativeResult.execute = undefined; f.browser.release(f.cancellation);
     console.log('PASS visible actions preview their target before a single effect, hidden browsing skips preview, and takeover invalidates pending clicks');
-  }
-  {
+  });
+  await withActionTimers(async fireNext => {
     const { NativeBrowserDriver } = load(path.join(root, 'main/ets/services/NativeBrowserDriver'));
     const f = await acquired(), driver = new NativeBrowserDriver(f.browser); let effects = 0;
     driver.controller.url = 'https://example.com'; driver.pageEnd(driver.controller.url); driver.setFeedbackVisible(true);
@@ -140,14 +174,16 @@ async function acquired() {
     f.driver.act = action => driver.act(action);
     const action = f.browser.act({ action: 'type', snapshotId: f.receipt.page.snapshotId, elementId: 1, text: 'edited' }, f.cancellation);
     const rejected = assert.rejects(action, error => error.code === 'STALE_BROWSER_SNAPSHOT');
-    await settle(); await f.browser.pauseForAnnotation();
+    await nextTurn(); assert.ok(f.browser.actionFeedback);
+    const annotation = f.browser.pauseForAnnotation();
     assert.equal(f.browser.owner, 'user'); assert.equal(effects, 0);
+    fireNext(); await annotation;
     f.browser.handoff(); await rejected;
     f.browser.showActionFeedback(0.5, 0.5); driver.pageBegin(); assert.equal(f.browser.actionFeedback, undefined);
     f.browser.showActionFeedback(0.5, 0.5); f.browser.close(); assert.equal(f.browser.actionFeedback, undefined);
     f.browser.release(f.cancellation); nativeResult.execute = undefined;
     console.log('PASS annotation takeover cancels the unissued preview action without blocking capture; page loads and close clear indicators');
-  }
+  });
   {
     const f = await acquired(); f.driver.hold = gate();
     let operationDone = false, annotationReady = false;
@@ -505,4 +541,4 @@ async function acquired() {
     assert.deepEqual(JSON.parse(JSON.stringify(saved.productivity.options.search)), { provider: 'bing-browser', enabled: true });
     console.log('PASS missing browser permission and search settings adopt enabled in-app browser and Bing search');
   }
-})().catch(error => { console.error(error); process.exitCode = 1; });
+})().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => clearTimeout(watchdog));

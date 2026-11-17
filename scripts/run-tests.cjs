@@ -152,6 +152,10 @@ function main(args) {
   // All legacy adapters receive the same SDK location, including those with an old D: default.
   const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio');
   const env = { ...process.env, DEVECO_STUDIO_HOME: studio };
+  // TEST_FILTER belongs to direct invocations of the native adapter test. Windows ignores its case.
+  for (const name of Object.keys(env)) {
+    if (name.toUpperCase() === 'TEST_FILTER') delete env[name];
+  }
   if (suite === 'debug' || suite === 'release') {
     const compiled = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule', suite);
     if (!fs.existsSync(compiled)) throw Error('Build the ' + suite + ' app before running this suite');

@@ -4,6 +4,7 @@ import { ProviderEditorViewModel } from '../main/ets/viewmodel/ProviderEditorVie
 import { describe, expect, it } from '@ohos/hypium';
 import { ModelMessage, ToolDefinition } from '../main/ets/model/Agent';
 import { builtinProviderInfos } from '../main/ets/model/Provider';
+import { protocolUrl } from '../main/ets/model/ProviderEndpoint';
 import { profileProvider } from '../main/ets/services/providers/DefaultProviders';
 import { chatRequest } from '../main/ets/services/providers/ChatCompletionsProtocol';
 
@@ -29,16 +30,25 @@ export default function providerTests(): void {
         expect(provider.endpoint(profile.baseUrl).startsWith(profile.baseUrl)).assertTrue();
       }
     });
-    it('allowsExplicitHttpProfilesAndRejectsMalformedEndpoints', 0, () => {
-      for (const info of builtinProviderInfos()) {
-        const profile: ProviderProfile = { id: 'saved-' + info.id, name: info.name, presetId: info.id,
-          protocol: info.protocol, baseUrl: 'http://192.168.1.10:11434/v1', models: ['local-model'],
+    it('routesExplicitHttpProfilesThroughEachChatProtocol', 0, () => {
+      const suffixes: Record<string, string> = {
+        'ollama': '/chat/completions', 'openai-responses': '/responses', 'anthropic': '/messages', 'google': ''
+      };
+      const baseUrl = 'http://192.168.1.10:11434/v1';
+      const presets = builtinProviderInfos();
+      for (const presetId of Object.keys(suffixes)) {
+        const preset = presets.find((info) => info.id === presetId)!;
+        const profile: ProviderProfile = { id: 'local', name: preset.name, presetId: presetId, protocol: preset.protocol,
+          baseUrl: baseUrl, models: ['local-model'],
           enabled: true, noApiKey: true, credentialAlias: '' };
         const provider = profileProvider(profile, effects);
-        expect(provider.endpoint(profile.baseUrl).startsWith(profile.baseUrl)).assertTrue();
-        for (const invalid of ['', 'ftp://host/v1', 'http://user:pass@host/v1', 'http://host/v1?key=x', 'http://host/v1#key']) {
-          rejects(() => { provider.endpoint(invalid); });
-        }
+        expect(provider.endpoint(baseUrl)).assertEqual(baseUrl + suffixes[presetId]);
+        rejects(() => { provider.endpoint('http://user:pass@host/v1'); });
+      }
+    });
+    it('rejectsMalformedAddressesInTheSharedUrlValidator', 0, () => {
+      for (const invalid of ['', 'ftp://host/v1', 'http://host/v1?key=x', 'http://host/v1#key']) {
+        rejects(() => { protocolUrl('chat-completions', invalid, true); });
       }
     });
     it('initializesTheProductionEditorFromPresets', 0, () => {
