@@ -71,6 +71,8 @@ class ChatLayoutFrame extends FrameCallback {
   onIdle(): void { this.action(); }
 }
 
+interface PendingComposerAction { owner: number; threadId: string; run: () => void; }
+
 const ATTACHMENT_FOLDER_WIDTH: number = 104;
 const ATTACHMENT_FOLDER_HEIGHT: number = 66;
 const ATTACHMENT_FLAP_SPRING: ICurve = curves.interpolatingSpring(0, 1, 420, 33);
@@ -216,8 +218,7 @@ export struct ChatPanel {
   @State private browserAnnotationHeight: number = 0;
   @State private attachmentFolderLeft: number = 0;
   @State private attachmentFolderTop: number = 0;
-  private pendingPlusAction?: () => void;
-  private plusActionThreadId: string = '';
+  private pendingPlusAction?: PendingComposerAction;
   private plusMenuTimer: number = -1;
   // Tablets open the add actions as a menu above the plus; phones keep the sheet.
   @State private showPlusMenu: boolean = false;
@@ -418,17 +419,27 @@ export struct ChatPanel {
   }
   private showSpeechKeyboard(): void {
     this.voiceMode = false;
+    this.queueComposerFocus();
+  }
+  private composerActionCurrent(owner: number, threadId: string): boolean {
+    return owner === this.focusOwner && this.speechEnabled && this.foreground &&
+      this.thread.id === threadId && this.app.active.id === threadId;
+  }
+  private queueComposerFocus(caret?: number, expectedDraft?: string): void {
+    const owner = this.focusOwner;
     const threadId = this.thread.id;
     const request = ++this.keyboardFocusRequest;
     this.getUIContext().postFrameCallback(new ChatLayoutFrame(() => {
-      if (request !== this.keyboardFocusRequest || this.thread.id !== threadId || this.app.active.id !== threadId ||
-        !this.speechEnabled || !this.foreground || this.showPlus || this.showPlusMenu || this.showDrawing || this.previewing ||
+      if (request !== this.keyboardFocusRequest || !this.composerActionCurrent(owner, threadId) ||
+        this.showPlus || this.showPlusMenu || this.showDrawing || this.previewing ||
         this.showAttachments || this.showContext || this.showQueue || this.showSummary || this.showMemoryDraft ||
-        this.showModelMenu || this.showToolApprovalMode ||
+        this.showModelMenu || this.showToolApprovalMode || (expectedDraft !== undefined && this.app.draft !== expectedDraft) ||
         this.thread.archived || this.voiceMode || this.speechActive()) { return; }
-      if (Diagnostics.acceptsLog('debug')) { Diagnostics.log('debug', 'voice', 'focus_requested', { request: request }); };
+      if (expectedDraft === undefined && Diagnostics.acceptsLog('debug')) {
+        Diagnostics.log('debug', 'voice', 'focus_requested', { request: request });
+      }
       this.getUIContext().getFocusController().requestFocus('composer');
-      this.composerController.caretPosition(this.app.draft.length);
+      this.composerController.caretPosition(caret ?? this.app.draft.length);
     }));
   }
 
@@ -800,8 +811,7 @@ export struct ChatPanel {
         const branchId = this.app.active.id;
         // The model switches before ArkUI applies the new thread prop and its Watch callback.
         this.getUIContext().postFrameCallback(new ChatLayoutFrame(() => {
-          if (owner === this.focusOwner && this.speechEnabled && this.foreground &&
-            this.thread.id === branchId && this.app.active.id === branchId) { this.showSpeechKeyboard(); }
+          if (this.composerActionCurrent(owner, branchId)) { this.showSpeechKeyboard(); }
         }));
       }
     }
@@ -817,28 +827,25 @@ export struct ChatPanel {
   // A fixed delay can expire while the native sheet still owns the focus scope.
   // Consume the action only from bindSheet's animation-complete onDisappear callback.
   private fromSheet(action: () => void): void {
-    this.pendingPlusAction = action;
-    this.plusActionThreadId = this.thread.id;
+    this.pendingPlusAction = { owner: this.focusOwner, threadId: this.thread.id, run: action };
     Diagnostics.log('info', 'composer', 'sheet_action_queued');
     this.showPlus = false;
   }
   private finishPlusAction(): void {
     const action = this.pendingPlusAction;
-    const threadId = this.plusActionThreadId;
-    this.pendingPlusAction = undefined; this.plusActionThreadId = '';
+    this.pendingPlusAction = undefined;
     if (!action) { return; }
-    if (this.showPlus || !this.speechEnabled || !this.foreground || this.thread.id !== threadId ||
-      this.app.active.id !== threadId || !this.canAttach()) {
+    if (this.showPlus || !this.composerActionCurrent(action.owner, action.threadId) || !this.canAttach()) {
       Diagnostics.log('info', 'composer', 'sheet_action_cancelled');
       return;
     }
     Diagnostics.log('info', 'composer', 'sheet_action_dispatched');
-    action();
+    action.run();
   }
   private cancelPlusAction(): void {
     clearTimeout(this.plusMenuTimer); this.plusMenuTimer = -1;
     if (this.pendingPlusAction) { Diagnostics.log('info', 'composer', 'sheet_action_cancelled'); }
-    this.pendingPlusAction = undefined; this.plusActionThreadId = '';
+    this.pendingPlusAction = undefined;
   }
   private addThreadReference(): void {
     if (referenceQuery(this.app.draft) === undefined) { this.app.setDraft(this.app.draft + (this.app.draft ? ' @' : '@')); }
@@ -853,8 +860,7 @@ export struct ChatPanel {
     this.showPlusMenu = false;
     this.plusMenuTimer = setTimeout(() => {
       this.plusMenuTimer = -1;
-      if (owner !== this.focusOwner || this.thread.id !== threadId || this.app.active.id !== threadId ||
-        !this.speechEnabled || !this.foreground || this.showPlusMenu || !this.canAttach()) { return; }
+      if (!this.composerActionCurrent(owner, threadId) || this.showPlusMenu || !this.canAttach()) { return; }
       action();
     }, 250);
   }
@@ -1495,17 +1501,7 @@ export struct ChatPanel {
     const next = skillDraft(this.app.draft, name, query);
     if (!this.app.useSkill(name, query)) { return; }
     this.composerSelectionStart = next.caret; this.composerSelectionEnd = next.caret;
-    const threadId = this.thread.id;
-    const request = ++this.keyboardFocusRequest;
-    this.getUIContext().postFrameCallback(new ChatLayoutFrame(() => {
-      if (request !== this.keyboardFocusRequest || this.thread.id !== threadId || this.app.active.id !== threadId ||
-        !this.speechEnabled || !this.foreground || this.showPlus || this.showPlusMenu || this.showDrawing || this.previewing ||
-        this.showAttachments || this.showContext || this.showQueue || this.showSummary || this.showMemoryDraft ||
-        this.showModelMenu || this.showToolApprovalMode ||
-        this.app.draft !== next.text || this.thread.archived || this.voiceMode || this.speechActive()) { return; }
-      this.getUIContext().getFocusController().requestFocus('composer');
-      this.composerController.caretPosition(next.caret);
-    }));
+    this.queueComposerFocus(next.caret, next.text);
   }
   private referenceMatches(): ThreadViewModel[] {
     const query = (referenceQuery(this.app.draft) || '').trim().toLowerCase();

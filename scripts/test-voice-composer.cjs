@@ -31,7 +31,8 @@ vm.runInNewContext(ts.transpileModule(`${layoutFrame.getText(tree)}; exports.Cha
 }).outputText, scope);
 scope.ChatLayoutFrame = scope.exports.ChatLayoutFrame;
 const names = ['aboutToAppear', 'messageSearchChanged', 'afterRender', 'speechActive', 'voiceOverlayVisible', 'canRecordSpeech', 'enterVoiceMode',
-  'showSpeechKeyboard', 'startSpeech', 'voiceTargetRect', 'moveSpeech', 'cancelSpeechHold', 'releaseSpeech', 'applySpeechDraft', 'completeSpeech', 'endSpeech'];
+  'showSpeechKeyboard', 'queueComposerFocus', 'composerActionCurrent', 'startSpeech', 'voiceTargetRect', 'moveSpeech',
+  'cancelSpeechHold', 'releaseSpeech', 'applySpeechDraft', 'completeSpeech', 'endSpeech'];
 const methods = names.map(name => component.members.find(n => n.name?.getText(tree) === name).getText(tree)).join('\n');
 vm.runInNewContext(ts.transpileModule(`class Panel { ${methods} } exports.Panel = Panel;`, {
   compilerOptions: { target: ts.ScriptTarget.ES2021 }
