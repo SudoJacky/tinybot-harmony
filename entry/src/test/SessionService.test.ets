@@ -1231,16 +1231,23 @@ export default function sessionServiceTests(): void {
 
     it('preservesTypingDuringSettingsCommitAndSerializesItAfterTheNewConfig', 0, async () => {
       const f = new Fixture(); await f.session.initialize();
-      const entered = new Gate(); const release = new Gate(); let blocked = false;
-      f.repository.beforeSave = async () => { if (!blocked) { blocked = true; entered.open(); await release.promise; } };
+      const entered = new Gate(); const release = new Gate();
+      const enteredFollowUp = new Gate(); const releaseFollowUp = new Gate(); let writes = 0;
+      f.repository.beforeSave = async () => {
+        writes++;
+        if (writes === 1) { entered.open(); await release.promise; }
+        else if (writes === 2) { enteredFollowUp.open(); await releaseFollowUp.promise; }
+      };
       const saving = f.session.saveSettings('new prompt', false, false); await entered.promise;
       f.session.setDraft('typed during save'); await f.session.flushDraft();
       expect(await f.session.newThread()).assertFalse();
-      release.open(); expect(await saving).assertTrue();
+      release.open(); await enteredFollowUp.promise;
+      f.session.setDraft('typed during follow-up'); releaseFollowUp.open();
+      expect(await saving).assertTrue();
       const saved = await f.repository.load();
       expect(saved.config.userDocument).assertEqual('new prompt'); expect(saved.extensions?.webEnabled).assertFalse();
-      expect(active(saved).draft).assertEqual('typed during save');
-      expect(active(f.session.snapshot()).draft).assertEqual('typed during save');
+      expect(active(saved).draft).assertEqual('typed during follow-up');
+      expect(active(f.session.snapshot()).draft).assertEqual('typed during follow-up');
     });
 
     it('routesLateComposerChangesToTheDisplayedThreadDuringASwitch', 0, async () => {

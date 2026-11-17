@@ -712,7 +712,7 @@ export class SessionService {
           this.refreshCompatibility();
           this.emit({ kind: 'reasoning-effort', state: this.state,
             reasoningSelection: { threadIds: threadIds, value: value, config: updateDefault ? copyModelConfig(candidate.config) : undefined } });
-        }, threadIds.concat(Array.from(this.dirtyDrafts)), { threadId: active.id });
+        }, this.draftWriteIds(threadIds), { threadId: active.id });
       } finally { if (Diagnostics.recording) { Diagnostics.end('reasoning.effort.save', mark, { changed: threadIds.length }); } }
     }, 'state', 'thread');
   }
@@ -1166,13 +1166,10 @@ export class SessionService {
           // A title changes one thread. Keep unrelated transcripts out of capture and UI projection.
           const candidate = copyAppMetadata(this.data);
           candidate.threads = this.data.threads.map((item) => item.id === threadId ? target : item);
-          let revision = this.draftRevision;
+          const revision = this.draftRevision;
           await this.commitCandidate(candidate, () => { thread.title = title; },
-            [threadId].concat(Array.from(this.dirtyDrafts)));
-          // Preserve typing that occurred during the metadata write, using the same save lane.
-          while (revision !== this.draftRevision) {
-            revision = this.draftRevision; await this.persist(threadId);
-          }
+            this.draftWriteIds([threadId]));
+          await this.persistDraftChanges(revision, threadId);
           this.publishThread(thread);
         });
       } finally { this.application.phase = 'idle'; this.publish('state'); }
@@ -1636,7 +1633,7 @@ export class SessionService {
       this.data.config = preferences.config; this.data.extensions = preferences.extensions;
       this.data.productivity = preferences.productivity;
       this.refreshCompatibility();
-    }, Array.from(this.dirtyDrafts));
+    }, this.draftWriteIds());
   }
   private async commitSettings(candidate: AppData, runningThreadIds: string[] = this.runningThreadIds): Promise<void> {
     const running = new Set(runningThreadIds);
@@ -1653,15 +1650,19 @@ export class SessionService {
       this.refreshCompatibility();
     });
   }
-  private async persistDraftChanges(revision: number): Promise<void> {
-    while (revision !== this.draftRevision) { revision = this.draftRevision; await this.persist(); }
+  private draftWriteIds(threadIds: string[] = []): string[] {
+    return Array.from(new Set(threadIds.concat(Array.from(this.dirtyDrafts))));
+  }
+  private async persistDraftChanges(revision: number, threadId?: string): Promise<void> {
+    // A draft can change during the follow-up save as well as during the original commit.
+    while (revision !== this.draftRevision) { revision = this.draftRevision; await this.persist(threadId); }
   }
   private async persist(threadId?: string, messageId?: string, submittedApprovalMode?: ToolApprovalMode): Promise<void> {
     // Draft autosaves and team checkpoints must capture resources after the transaction publishes them.
     if (this.pendingCommit) { await this.pendingCommit; }
     const preferences = this.syncEmptyThreadPreferences(this.data); const draftRevision = this.draftRevision;
     try {
-      const changed = threadId === undefined ? undefined : preferences.concat([threadId], Array.from(this.dirtyDrafts));
+      const changed = threadId === undefined ? undefined : this.draftWriteIds(preferences.concat([threadId]));
       const message: ThreadCheckpoint | undefined = threadId !== undefined && messageId !== undefined ?
         { threadId: threadId, messageId: messageId } : undefined;
       if (submittedApprovalMode !== undefined && this.data.lastToolApprovalMode !== submittedApprovalMode) {
