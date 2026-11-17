@@ -5,7 +5,7 @@ import { resolveBrowserPreview } from '../model/BrowserPreview';
 import { Diagnostics } from '../model/Diagnostics';
 import { FileAnnotation, FileAnnotationTarget, MAX_FILE_ANNOTATIONS, validateFileAnnotations } from '../model/FileAnnotation';
 import { configurationIssues } from '../model/ConfigurationCompatibility';
-import { isImageProtocol, isProviderProtocol, isSupportedProtocol, sharedImageBaseUrl } from '../model/ProviderEndpoint';
+import { isSupportedProtocol } from '../model/ProviderEndpoint';
 import { ToolExecution, toolReceipts } from '../model/Agent';
 import { projectFor, workspaceIdFor, validateProjects, projectContext } from '../model/Project';
 import { cloudSharedFolder, SharedFolder } from '../model/SharedFolders';
@@ -44,7 +44,7 @@ import { ToolSet } from './ToolSet';
 import { AppData, MessageData, ModelConfig, ThreadData, copyModelConfig, copyAppMetadata, emptyData } from '../model/Conversation';
 import { mergeSavedConfiguration } from '../model/SavedConfiguration';
 import { contextSettings } from '../model/ContextSettings';
-import { ImageGenerationConfig, ModelReference, ProviderProfile, migrateProfiles, modelConfig, validateImageGeneration } from '../model/ProviderProfiles';
+import { ImageGenerationConfig, ModelReference, ProviderProfile, migrateProfiles, modelConfig, prepareImageGeneration } from '../model/ProviderProfiles';
 import { defaultSearchConfig, isSupportedSearchProvider } from '../model/WebSearch';
 import { InputMode, MAX_INPUT_TEXT, PendingInput, nextPendingInput, validatePendingInputs } from '../model/PendingInput';
 import { BrowserPolicy, ExtensionSettings, SkillData, SkillFile, defaultExtensions, explicitSkill, expandSkillCommand, parseSkill, validateExtensions } from '../model/Skills';
@@ -769,15 +769,7 @@ export class SessionService {
       const preferences = this.preferencesSnapshot();
       const options = preferences.productivity.options || defaultAssistantOptions();
       if (value) {
-        const profile = this.providerProfiles.find((item) => item.id === value.providerId && item.enabled);
-        if (!profile || !isProviderProtocol(profile.protocol) || !value.protocol || !isImageProtocol(value.protocol)) {
-          throw new Error(t('图片生成服务配置无效。'));
-        }
-        const config: ImageGenerationConfig = { providerId: value.providerId, modelId: value.modelId.trim(),
-          protocol: value.protocol, baseUrl: value.baseUrl?.trim() || undefined };
-        if (!config.modelId || /[\r\n,，]/.test(config.modelId)) { throw new Error(t('填写图片模型 ID。')); }
-        validateImageGeneration(config);
-        sharedImageBaseUrl(profile.protocol, profile.baseUrl, value.protocol, config.baseUrl);
+        const config = prepareImageGeneration(this.providerProfiles, value);
         options.imageGeneration = mergeSavedConfiguration(options.imageGeneration, config);
       } else { options.imageGeneration = undefined; }
       preferences.productivity.options = options;

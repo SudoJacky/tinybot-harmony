@@ -127,8 +127,8 @@ function form(app, tab, entryId = '') {
   provider.aboutToDisappear(); assert.equal(editor.apiKey, ''); assert.equal(editor.balanceApiKey, '');
   console.log('PASS model subpages share the draft and clear its raw key only when leaving the service');
 
-  const Image = controller('ImageGenerationPanel', ['aboutToAppear', 'providers', 'locked', 'knownModels', 'chooseProvider', 'addProvider', 'save'],
-    model('model/ProviderEndpoint'));
+  const Image = controller('ImageGenerationPanel', ['aboutToAppear', 'providers', 'locked', 'knownModels', 'applySelection',
+    'chooseProvider', 'addProvider', 'save'], { ...model('model/ProviderEndpoint'), ...model('model/ProviderProfiles') });
   const legacy = { id: 'chat', enabled: true, protocol: 'chat-completions', imageModels: {
     protocol: 'seedream-images', baseUrl: 'https://example.com/images', models: ['legacy-first', 'legacy-selected'] } };
   const imageApp = { providerProfiles: [legacy], productivity: { ...defaultProductivity(), options: {
@@ -139,6 +139,13 @@ function form(app, tab, entryId = '') {
     onAddProvider: (protocol, onReturn) => { assert.equal(protocol, 'seedream-images'); imageReturn = onReturn; } });
   image.aboutToAppear();
   assert.equal(image.modelId, 'legacy-selected'); assert.equal(image.baseUrl, legacy.imageModels.baseUrl);
+  const unavailable = Object.assign(new Image(), { app: { providerProfiles: [], productivity: { options: {
+    imageGeneration: { providerId: 'removed', protocol: 'gemini-images', modelId: 'explicit', baseUrl: 'https://example.com/image' }
+  } } } });
+  unavailable.aboutToAppear();
+  assert.equal(unavailable.providers().length, 0);
+  assert.equal(unavailable.providerId, 'removed'); assert.equal(unavailable.protocol, 'gemini-images');
+  assert.equal(unavailable.modelId, 'explicit'); assert.equal(unavailable.baseUrl, 'https://example.com/image');
   image.addProvider();
   const added = { id: 'new', enabled: true, protocol: 'openai-images', models: ['new-model'] };
   imageApp.providerProfiles.push(added); imageReturn(added);
@@ -147,7 +154,7 @@ function form(app, tab, entryId = '') {
   assert.equal(imageApp.productivity.options.imageGeneration.providerId, legacy.id);
   await image.save();
   assert.equal(imagePops, 1); assert.equal(savedImage.providerId, 'new'); assert.equal(savedImage.protocol, 'openai-images');
-  console.log('PASS image settings load a legacy choice and preselect a newly added provider before saving');
+  console.log('PASS image settings load a legacy choice, show unavailable selections and preselect a newly added provider');
 
   let writes = 0, pops = 0, reject = true;
   const Appearance = controller('AppearancePanel', ['save'], { AppearancePreferences: { select() {

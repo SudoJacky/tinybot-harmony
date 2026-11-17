@@ -3,8 +3,9 @@ import { PageStyles } from '../common/PageStyles';
 import { Btn, Font, Space, Styles, protocolName } from '../common/Theme';
 import { Banner, BottomBar, GroupCard, NavRow, RowDivider } from '../common/Widgets';
 import { t } from '../model/I18n';
-import { IMAGE_PROTOCOLS, isImageProtocol, isProviderProtocol } from '../model/ProviderEndpoint';
-import { ImageGenerationConfig, ProviderProfile } from '../model/ProviderProfiles';
+import { IMAGE_PROTOCOLS, isImageProtocol } from '../model/ProviderEndpoint';
+import { ImageGenerationConfig, ImageGenerationDraft, ProviderProfile, imageGenerationDraft, imageModelsForProtocol,
+  imageProviders } from '../model/ProviderProfiles';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 
 @Component
@@ -25,19 +26,13 @@ export struct ImageGenerationPanel {
     if (this.initialized) { return; }
     const saved = this.app.productivity.options?.imageGeneration;
     if (saved) {
-      this.chooseProvider(this.providers().find((item) => item.id === saved.providerId));
-      this.providerId = saved.providerId;
-      this.modelId = saved.modelId;
-      if (saved.protocol !== undefined) {
-        this.protocol = saved.protocol;
-        this.baseUrl = saved.baseUrl || '';
-      }
+      this.applySelection(imageGenerationDraft(this.providers().find((item) => item.id === saved.providerId), saved));
     }
     this.initialized = true;
   }
 
   private providers(): ProviderProfile[] {
-    return this.app.providerProfiles.filter((item) => item.enabled && isProviderProtocol(item.protocol));
+    return imageProviders(this.app.providerProfiles);
   }
   private selectedProvider(): ProviderProfile | undefined { return this.providers().find((item) => item.id === this.providerId); }
   private locked(): boolean { return this.saving || this.app.sharedBusy || !!this.app.saveError; }
@@ -48,18 +43,18 @@ export struct ImageGenerationPanel {
     return index < 0 ? -1 : index + 1;
   }
   private knownModels(provider?: ProviderProfile): string[] {
-    if (!provider) { return []; }
-    if (isImageProtocol(provider.protocol)) { return provider.protocol === this.protocol ? provider.models : []; }
-    return provider.imageModels?.protocol === this.protocol ? provider.imageModels.models : [];
+    return imageModelsForProtocol(provider, this.protocol);
+  }
+  private applySelection(draft: ImageGenerationDraft): void {
+    this.providerId = draft.providerId;
+    this.protocol = draft.protocol;
+    this.modelId = draft.modelId;
+    this.baseUrl = draft.baseUrl;
+    this.error = '';
   }
   private chooseProvider(provider?: ProviderProfile): void {
     if (provider?.id && provider.id === this.providerId) { return; }
-    this.providerId = provider?.id || '';
-    const protocol = provider?.imageModels?.protocol || provider?.protocol || '';
-    this.protocol = isImageProtocol(protocol) ? protocol : protocol === 'gemini' ? 'gemini-images' : 'openai-images';
-    this.modelId = this.knownModels(provider)[0] || '';
-    this.baseUrl = provider?.imageModels?.baseUrl || '';
-    this.error = '';
+    this.applySelection(imageGenerationDraft(provider));
   }
   private addProvider(): void {
     if (this.locked()) { return; }

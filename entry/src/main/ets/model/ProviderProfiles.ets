@@ -13,6 +13,7 @@ export interface ModelReference {
 
 // Older selections use the image protocol and address stored on the provider.
 export interface ImageGenerationConfig extends ModelReference { protocol?: string; baseUrl?: string; }
+export interface ImageGenerationDraft extends ModelReference { protocol: string; baseUrl: string; }
 
 export interface ImageModelSettings { protocol: string; baseUrl?: string; models: string[]; }
 export interface ImageServiceAccess { id: string; name: string; protocol: string; baseUrl: string; credentialAlias: string; }
@@ -132,6 +133,48 @@ export function availableImageModels(profiles: ProviderProfile[]): ModelChoice[]
   return modelChoices(profiles, true);
 }
 
+function eligibleImageProvider(profile: ProviderProfile): boolean {
+  return profile.enabled && isProviderProtocol(profile.protocol);
+}
+
+export function imageProviders(profiles: ProviderProfile[]): ProviderProfile[] {
+  return profiles.filter(eligibleImageProvider);
+}
+
+function imageProvider(profiles: ProviderProfile[], providerId: string): ProviderProfile | undefined {
+  return profiles.find((profile) => profile.id === providerId && eligibleImageProvider(profile));
+}
+
+export function imageModelsForProtocol(provider: ProviderProfile | undefined, protocol: string): string[] {
+  if (!provider) { return []; }
+  if (isImageProtocol(provider.protocol)) { return provider.protocol === protocol ? provider.models : []; }
+  return provider.imageModels?.protocol === protocol ? provider.imageModels.models : [];
+}
+
+export function imageGenerationDraft(provider?: ProviderProfile, saved?: ImageGenerationConfig): ImageGenerationDraft {
+  const declared = provider?.imageModels?.protocol || provider?.protocol || '';
+  const defaultProtocol = isImageProtocol(declared) ? declared : declared === 'gemini' ? 'gemini-images' : 'openai-images';
+  const protocol = saved?.protocol ?? defaultProtocol;
+  return {
+    providerId: saved?.providerId ?? provider?.id ?? '',
+    protocol: protocol,
+    modelId: saved?.modelId ?? imageModelsForProtocol(provider, protocol)[0] ?? '',
+    baseUrl: saved?.protocol === undefined ? provider?.imageModels?.baseUrl || '' : saved.baseUrl || ''
+  };
+}
+
+export function prepareImageGeneration(profiles: ProviderProfile[], value: ImageGenerationConfig): ImageGenerationConfig {
+  const profile = imageProvider(profiles, value.providerId);
+  const protocol = value.protocol;
+  if (!profile || !protocol || !isImageProtocol(protocol)) { throw new Error(t('图片生成服务配置无效。')); }
+  const config: ImageGenerationConfig = { providerId: value.providerId, modelId: value.modelId.trim(),
+    protocol: protocol, baseUrl: value.baseUrl?.trim() || undefined };
+  if (!config.modelId || /[\r\n,，]/.test(config.modelId)) { throw new Error(t('填写图片模型 ID。')); }
+  validateImageGeneration(config);
+  sharedImageBaseUrl(profile.protocol, profile.baseUrl, protocol, config.baseUrl);
+  return config;
+}
+
 function imageModelIds(profile: ProviderProfile): string[] {
   if (isImageProtocol(profile.protocol)) { return profile.models; }
   const image = profile.imageModels;
@@ -140,11 +183,11 @@ function imageModelIds(profile: ProviderProfile): string[] {
 
 export function imageService(profiles: ProviderProfile[], reference?: ImageGenerationConfig): ImageServiceAccess | undefined {
   if (!reference) { return undefined; }
-  const profile = profiles.find((item) => item.id === reference.providerId && item.enabled);
+  const profile = imageProvider(profiles, reference.providerId);
   if (!profile) { return undefined; }
   if (reference.protocol !== undefined) {
     // Changing the provider host can invalidate a saved address. Keep it visible in settings but never send a key there.
-    if (!isProviderProtocol(profile.protocol) || !isImageProtocol(reference.protocol) ||
+    if (!isImageProtocol(reference.protocol) ||
       (reference.baseUrl && !sameProviderOrigin(profile.baseUrl, reference.baseUrl))) { return undefined; }
     return { id: profile.id, name: profile.name, credentialAlias: profile.credentialAlias,
       protocol: reference.protocol,

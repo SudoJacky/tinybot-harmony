@@ -2436,7 +2436,7 @@ async function test(name, run) {
     assert.equal(await session.saveImageGeneration({...selection,baseUrl:'https://other.invalid/images/v1'}),false);
     assert.match(session.state.error,/端口/);
     assert.equal(session.snapshot().productivity.options.imageGeneration.modelId,'old-image-model');
-    assert.equal(await session.saveImageGeneration(selection),true,session.state.error);
+    assert.equal(await session.saveImageGeneration({...selection,modelId:' new-image-model ',baseUrl:' https://shared.invalid/images/v1 '}),true,session.state.error);
     const saved=await repository.load();
     assert.deepEqual(JSON.parse(JSON.stringify(saved.productivity.options.imageGeneration)),selection);
     const protectedKeys=await encryptBackupKeys(saved,'image-test-account',vault);
