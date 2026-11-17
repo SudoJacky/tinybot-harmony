@@ -99,7 +99,7 @@ hdc rport tcp:18770 tcp:18770
 
 Hypium `ProjectFolders` 覆盖共享文件夹名称、数量、URI 去重、加载校验与模型上下文路径。`test-productivity-native.cjs` 还覆盖共享目录列表、嵌套创建、路径穿越与符号链接拒绝、不依赖重命名的直接写入、备份失败时禁止写入、部分写入后的备份保留与恢复，以及跨项目别名的版本竞争；系统选择器、持久化授权与设备重启后的激活需在 API 26 真机验证。
 
-测试分组由 `scripts/run-tests.cjs` 统一登记，新增 `test-*.cjs` 未登记或登记的文件缺失时，入口会直接失败。脚本串行执行。
+测试分组由 `scripts/run-tests.cjs` 统一登记，新增 `test-*.cjs` 未登记或登记的文件缺失时，入口会直接失败。Node 脚本默认最多并行跑 3 个，浏览器组默认串行。使用 `-Jobs 1` 可逐项查看实时输出。
 
 ```powershell
 .\scripts\test.ps1 -Suite source             # 直接读取源码的主机测试，无需先构建
@@ -108,6 +108,7 @@ Hypium `ProjectFolders` 覆盖共享文件夹名称、数量、URI 去重、加�
 .\scripts\test.ps1 -Suite browser            # 显式运行 Playwright 浏览器测试，需已安装依赖
 .\scripts\test.ps1 -Suite debug -List        # 只列出测试并校验登记完整性
 .\scripts\test.ps1 -Suite debug -SkipHypium # 只运行 Node 测试
+.\scripts\test.ps1 -Jobs 1                  # 串行运行 Node 测试
 ```
 
 Debug 和 Release 组要求已有相应构建产物；浏览器组不属于默认入口。完整清单以 `-List` 输出为准。以下为专项覆盖索引，也可直接运行单个脚本：

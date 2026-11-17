@@ -1,6 +1,7 @@
-// Every standalone test must declare its prerequisites. Tests run serially to limit HDD contention.
+// Every standalone test must declare its prerequisites.
 const fs = require('node:fs'), path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawn } = require('node:child_process');
+const { availableParallelism } = require('node:os');
 const root = path.resolve(__dirname, '..');
 const suites = {
   source: [
@@ -137,11 +138,53 @@ function selectedTests(suite) {
   return names.map(file => ({ file, args: suite === 'debug' && ['test-feedback.cjs', 'test-file-attachments.cjs', 'test-startup-backup.cjs', 'test-provider-balance.cjs', 'test-auto-cloud-backup.cjs'].includes(file) ? ['--ui'] : [] }));
 }
 
-function main(args) {
-  let suite = 'debug', list = false;
+function runTest(test, heading, env, groupedOutput) {
+  if (!groupedOutput) console.log(heading);
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [path.join(__dirname, test.file), ...test.args], {
+      cwd: root, env, stdio: groupedOutput ? ['ignore', 'pipe', 'pipe'] : 'inherit'
+    });
+    const output = [];
+    if (groupedOutput) {
+      child.stdout.on('data', chunk => output.push([process.stdout, chunk]));
+      child.stderr.on('data', chunk => output.push([process.stderr, chunk]));
+    }
+    child.once('error', error => reject(new Error('Could not run ' + test.file, { cause: error })));
+    child.once('close', (status, signal) => {
+      if (groupedOutput) {
+        console.log(heading);
+        for (const [stream, chunk] of output) stream.write(chunk);
+      }
+      if (status === 0) resolve();
+      else reject(new Error(test.file + ' failed: ' + (signal || status)));
+    });
+  });
+}
+
+async function runTests(tests, jobs, env) {
+  let next = 0, failure;
+  async function worker() {
+    while (!failure && next < tests.length) {
+      const index = next++;
+      const test = tests[index];
+      const heading = '[' + (index + 1) + '/' + tests.length + '] ' + test.file;
+      try { await runTest(test, heading, env, jobs > 1); }
+      catch (error) { failure ??= error; }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(jobs, tests.length) }, worker));
+  if (failure) throw failure;
+}
+
+async function main(args) {
+  let suite = 'debug', list = false, jobs;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--suite' && args[i + 1]) suite = args[++i];
     else if (args[i] === '--list') list = true;
+    else if (args[i] === '--jobs') {
+      jobs = Number(args[++i]);
+      if (!Number.isSafeInteger(jobs) || jobs < 1) throw Error('--jobs must be a positive integer');
+    }
     else throw Error('Unknown or incomplete argument: ' + args[i]);
   }
   const tests = selectedTests(suite);
@@ -161,17 +204,11 @@ function main(args) {
     const compiled = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule', suite);
     if (!fs.existsSync(compiled)) throw Error('Build the ' + suite + ' app before running this suite');
   }
-  for (const [index, test] of tests.entries()) {
-    console.log('[' + (index + 1) + '/' + tests.length + '] ' + test.file);
-    const result = spawnSync(process.execPath, [path.join(__dirname, test.file), ...test.args], { cwd: root, env, stdio: 'inherit' });
-    if (result.error) throw result.error;
-    if (result.status !== 0) throw Error(test.file + ' failed: ' + (result.signal || result.status));
-  }
+  await runTests(tests, jobs ?? (suite === 'browser' ? 1 : Math.min(3, availableParallelism())), env);
   console.log('PASS suite ' + suite + ': ' + tests.length + ' tests');
 }
 
 if (require.main === module) {
-  try { main(process.argv.slice(2)); }
-  catch (error) { console.error(error); process.exitCode = 1; }
+  main(process.argv.slice(2)).catch(error => { console.error(error); process.exitCode = 1; });
 }
 module.exports = { selectedTests };

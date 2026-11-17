@@ -2,7 +2,8 @@ param(
     [string]$StudioPath = $env:DEVECO_STUDIO_HOME,
     [ValidateSet('source', 'debug', 'release', 'browser')][string]$Suite = 'debug',
     [switch]$List,
-    [switch]$SkipHypium
+    [switch]$SkipHypium,
+    [ValidateRange(1, 2147483647)][int]$Jobs
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,8 +15,10 @@ if (-not (Test-Path -LiteralPath $nodePath)) {
     throw 'DevEco Studio not found. Set DEVECO_STUDIO_HOME or pass -StudioPath.'
 }
 $env:DEVECO_STUDIO_HOME = $StudioPath
+$runnerArgs = @('--suite', $Suite)
+if ($PSBoundParameters.ContainsKey('Jobs')) { $runnerArgs += @('--jobs', $Jobs) }
 if ($List) {
-    & $nodePath (Join-Path $PSScriptRoot 'run-tests.cjs') --suite $Suite --list
+    & $nodePath (Join-Path $PSScriptRoot 'run-tests.cjs') @runnerArgs --list
     if ($LASTEXITCODE -ne 0) { throw 'Test manifest validation failed.' }
     return
 }
@@ -23,7 +26,7 @@ foreach ($generator in @('build-locales.cjs', 'build-builtin-skills.cjs')) {
     & $nodePath (Join-Path $PSScriptRoot $generator) --check
     if ($LASTEXITCODE -ne 0) { throw "$generator validation failed." }
 }
-& $nodePath (Join-Path $PSScriptRoot 'run-tests.cjs') --suite $Suite
+& $nodePath (Join-Path $PSScriptRoot 'run-tests.cjs') @runnerArgs
 if ($LASTEXITCODE -ne 0) { throw "$Suite test suite failed." }
 if ($SkipHypium -or $Suite -in @('source', 'browser')) { return }
 if (-not (Test-Path -LiteralPath $hvigorPath)) { throw 'Hvigor was not found in the selected DevEco Studio.' }
