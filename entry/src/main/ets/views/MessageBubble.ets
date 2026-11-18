@@ -1,5 +1,4 @@
 import { materialMenuContent } from '../common/MaterialMenu';
-import { IS_PC } from '../common/DeviceForm';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { AnimatedIcon } from '../common/AnimatedIcon';
 import { ToolExecution } from '../model/Agent';
@@ -264,6 +263,9 @@ export struct MessageBubble {
   @Prop inspectedPreviewId: string = '';
   onInspectPreview: (messageId: string, previewId: string) => void = () => {};
   @Prop actionsEnabled: boolean = true;
+  @Prop desktop: boolean = false;
+  @State private actionsHovered: boolean = false;
+  @State private focusedAction: string = '';
   onRegenerate: (id: string) => void = () => {};
   @Prop uiAvailable: boolean = false;
   onUi: (key: string, values: UiValues, action: string) => Promise<UiValues> = async () => { throw new Error('Interactive UI handler is not connected'); };
@@ -435,8 +437,14 @@ export struct MessageBubble {
         SymbolGlyph(iconKind === 'reading' && this.readingMessageId === this.message.id ? $r('sys.symbol.stop_circle_fill') : icon)
           .fontSize(18).fontColor([$r('app.color.text_secondary')])
       }
-    }.fontFamily(this.appearance.fontFamily).id(compId).width(36).height(44).padding(0).borderRadius(8).enabled(enabled())
+    }.fontFamily(this.appearance.fontFamily).id(compId).width(36).height(this.desktop ? 34 : 44).padding(0).borderRadius(8).enabled(enabled())
       .backgroundColor(Color.Transparent).clickEffect(Motion.pressSmall)
+      .opacity(!this.desktop || this.actionsHovered || this.focusedAction === compId ? 1 : 0)
+      .hitTestBehavior(!this.desktop || this.actionsHovered ? HitTestMode.Default : HitTestMode.None)
+      .animation({ duration: this.appearance.effectStrength > 0 ? Motion.desktop : 0, curve: Motion.standard })
+      .onFocus(() => { this.focusedAction = compId; })
+      .onBlur(() => { if (this.focusedAction === compId) { this.focusedAction = ''; } })
+      .bindTips(iconKind === 'reading' && this.readingMessageId === this.message.id ? t('停止朗读') : label, { appearingTime: 550 })
       .onHover((hovered: boolean) => { if (iconKind === 'branch') { this.branchInteracting = hovered; } })
       .onTouch((event: TouchEvent) => {
         if (iconKind !== 'branch') { return; }
@@ -468,13 +476,6 @@ export struct MessageBubble {
         if (this.message.role === 'user') {
           this.actionButton($r('sys.symbol.square_and_pencil'), t('改写'), 'edit-' + this.message.id,
             () => this.onFork(this.message.id), () => this.actionsEnabled)
-          if (IS_PC && this.message.content.length > 0) {
-            Button({ type: ButtonType.Normal }) {
-              SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(18).fontColor([$r('app.color.text_secondary')])
-            }.id('message-actions-' + this.message.id).width(36).height(44).padding(0).borderRadius(8)
-              .backgroundColor(Color.Transparent).accessibilityText(t('更多操作'))
-              .bindMenu(this.actions, { systemMaterial: this.appearance.menu, mask: false })
-          }
         } else {
           this.actionButton($r('sys.symbol.arrow_clockwise'), t('重新生成（保留原回答）'), 'regenerate-' + this.message.id,
             () => this.onRegenerate(this.message.id), () => this.actionsEnabled)
@@ -484,6 +485,13 @@ export struct MessageBubble {
         if (this.message.role === 'assistant' && this.message.content.length > 0) {
           this.actionButton($r('sys.symbol.lightbulb'), t('提炼为记忆…'), 'remember-' + this.message.id,
             () => this.onRemember(this.message.id), () => this.actionsEnabled)
+        }
+        if (this.desktop) {
+          Button({ type: ButtonType.Normal }) {
+            SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_secondary')])
+          }.id('message-actions-' + this.message.id).width(36).height(36).padding(0).borderRadius(8)
+            .backgroundColor(Color.Transparent).accessibilityText(t('更多操作')).bindTips(t('更多操作'), { appearingTime: 550 })
+            .bindMenu(this.actions, { systemMaterial: this.appearance.menu, mask: false })
         }
       }.layoutWeight(1).margin({ left: this.message.role === 'user' ? 0 : -2 })
       if (this.message.role === 'assistant') {
@@ -771,11 +779,12 @@ export struct MessageBubble {
         } else {
           this.assistantMessage()
         }
-      }.width('100%').bindContextMenu(this.actions, IS_PC ? ResponseType.RightClick : ResponseType.LongPress, {
+      }.width('100%').bindContextMenu(this.actions, ResponseType.LongPress, {
         systemMaterial: this.appearance.menu, mask: false })
       .bindSheet($$this.documentOpen, this.documentViewer(), { radius: Radius.sheet, height: '90%', showClose: false, dragBar: true,
         backgroundColor: $r('app.color.page_background') })
-    }.width('100%')
+    }.width('100%').onHover((hovered: boolean) => { if (this.desktop) { this.actionsHovered = hovered; } })
+    .bindContextMenu(this.actions, ResponseType.RightClick, { systemMaterial: this.appearance.menu, mask: false })
     // A closed sheet on the cover's node can dismiss the image preview on API 26.
     .bindContentCover($$this.previewing, this.viewer(), { modalTransition: ModalTransition.ALPHA })
   }

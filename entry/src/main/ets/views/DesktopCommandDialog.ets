@@ -18,6 +18,7 @@ export struct DesktopCommandDialog {
   private scroller: Scroller = new Scroller();
   private accepted: boolean = false;
   private composing: boolean = false;
+  private visibleResults: number = 1;
 
   aboutToAppear(): void { this.updateQuery(''); }
 
@@ -44,10 +45,17 @@ export struct DesktopCommandDialog {
       this.controller?.close();
       return true;
     }
-    if (event.keyCode !== KeyCode.KEYCODE_DPAD_UP && event.keyCode !== KeyCode.KEYCODE_DPAD_DOWN) { return false; }
-    if (this.results.length === 0 || event.getModifierKeyState?.(['Shift'])) { return false; }
-    this.selected = Math.max(0, Math.min(this.results.length - 1,
-      this.selected + (event.keyCode === KeyCode.KEYCODE_DPAD_DOWN ? 1 : -1)));
+    if (this.results.length === 0 || event.getModifierKeyState?.(['Shift']) || event.getModifierKeyState?.(['Ctrl']) ||
+      event.getModifierKeyState?.(['Alt']) || event.metaKey) { return false; }
+    let step = 0;
+    switch (event.keyCode) {
+      case KeyCode.KEYCODE_DPAD_UP: step = -1; break;
+      case KeyCode.KEYCODE_DPAD_DOWN: step = 1; break;
+      case KeyCode.KEYCODE_PAGE_UP: step = -this.visibleResults; break;
+      case KeyCode.KEYCODE_PAGE_DOWN: step = this.visibleResults; break;
+      default: return false;
+    }
+    this.selected = Math.max(0, Math.min(this.results.length - 1, this.selected + step));
     this.scroller.scrollToIndex(this.selected, false, ScrollAlign.AUTO);
     event.stopPropagation();
     return true;
@@ -71,6 +79,11 @@ export struct DesktopCommandDialog {
           Text(item.detail).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).maxLines(1)
             .constraintSize({ maxWidth: '38%' }).textOverflow({ overflow: TextOverflow.Ellipsis })
             .fontColor($r('app.color.text_secondary'))
+        }
+        if (item.shortcut) {
+          Text(item.shortcut).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).maxLines(1)
+            .fontColor($r('app.color.text_secondary')).padding({ left: 6, right: 6, top: 2, bottom: 2 })
+            .border({ width: 0.5, color: $r('app.color.divider') }).borderRadius(4)
         }
       }.width('100%')
     }.id('desktop-command-' + item.action + '-' + item.id).width('100%').height(item.excerpt ? 52 : 40)
@@ -109,6 +122,7 @@ export struct DesktopCommandDialog {
             ListItem() { this.result(item, index) }
           }, (item: DesktopCommandItem, index: number) => item.action + ':' + item.id + ':' + item.messageId + ':' + item.query + ':' + index)
         }.width('100%').layoutWeight(1).scrollBar(BarState.Auto).edgeEffect(EdgeEffect.None)
+          .onScrollIndex((first: number, last: number) => { this.visibleResults = Math.max(1, last - first + 1); })
       }
       Text(t('↑↓ 选择 · Enter 打开 · 输入 > 只看命令')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
         .fontColor($r('app.color.text_secondary')).width('100%').padding({ left: 8, right: 8 })

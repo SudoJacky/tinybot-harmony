@@ -1,3 +1,4 @@
+import { ColorMetrics, LengthMetrics } from '@kit.ArkUI';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { Motion, Radius, Space } from '../common/Theme';
@@ -27,18 +28,20 @@ export struct DetailLauncher {
 
   @Builder
   option(icon: AnimatedIconName, label: string, compId: string, action: () => void) {
+    Button({ type: ButtonType.Normal }) {
     Row({ space: Space.md }) {
-      AnimatedIcon({ iconName: icon, iconSize: 22, tint: this.appearance.accent, interacting: this.hovered === compId })
-      Text(label).fontFamily(this.appearance.fontFamily).fontSize(15).fontWeight(FontWeight.Medium)
+      AnimatedIcon({ iconName: icon, iconSize: this.compact ? 17 : 22, tint: this.appearance.accent, interacting: this.hovered === compId })
+      Text(label).fontFamily(this.appearance.fontFamily).fontSize(this.compact ? 14 : 15).fontWeight(FontWeight.Medium)
         .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         .fontColor($r('app.color.text_primary'))
       SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(14).fontColor([$r('app.color.text_tertiary')])
-    }
-    .id(compId).width('100%').height(this.workbench ? 44 : 64).padding({ left: Space.lg, right: Space.md })
-    .borderRadius(Radius.md).backgroundColor($r('app.color.page_background'))
-    .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) },
-      normal: { .backgroundColor($r('app.color.page_background')) } })
-    .clickEffect(Motion.press).onClick(action)
+    }.width('100%').accessibilityLevel('no-hide-descendants')
+    }.id(compId).width('100%').height(this.workbench ? 44 : 64).padding({ left: Space.md, right: Space.md })
+    .borderRadius(Radius.sm).backgroundColor(this.hovered === compId ? $r('app.color.surface_variant') : $r('app.color.page_background'))
+    .animation({ duration: this.appearance.effectStrength > 0 ? Motion.desktop : 0, curve: Motion.standard })
+    .focusBox({ strokeWidth: LengthMetrics.vp(2), strokeColor: ColorMetrics.resourceColor(this.appearance.accent),
+          margin: LengthMetrics.vp(-2) })
+    .accessibilityText(label).onClick(action)
     .onHover((hovered: boolean) => {
       if (hovered) { this.hovered = compId; }
       else if (this.hovered === compId) { this.hovered = ''; }
@@ -53,7 +56,7 @@ export struct DetailLauncher {
         if (this.showCollapse) {
           IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭'), compId: 'detail-launcher-close', onTap: this.onClose })
         }
-      }.width('100%').height(56).padding({ left: Space.page, right: 6 })
+      }.width('100%').height(this.compact ? 48 : 56).padding({ left: Space.page, right: 6 })
         .border({ width: { bottom: 0.5 }, color: $r('app.color.divider') })
       Scroll() {
         Column({ space: this.workbench ? 6 : 10 }) {

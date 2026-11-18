@@ -91,11 +91,11 @@ for (const name of ['Alignment','Space','Font','FontWeight','TextOverflow','Colo
   uiGlobals[name] = {};
 }
 const Toolbar = probe('views/ThreadList', 'ThreadList', ['historyToolbar','scopeMenu','searchControl','searchRequested','closeSearch',
-  'updateQuery','filtered','threadProject','setScope','endSelection','selectThread','selectAll','allSelected'], uiGlobals);
+  'updateQuery','filtered','threadProject','setScope','endSelection','selectThread','selectAll','allSelected','searchHeight','modifySelection'], uiGlobals);
 const focus = [], newChats = [];
 let boardOpens = 0;
 const toolbar = Object.assign(new Toolbar(), {
-  active: true, mounted: true, foreground: true, searchOpen: false, toolbarWidth: 280,
+  active: true, mounted: true, foreground: true, searchOpen: false, toolbarWidth: 280, workbench: true,
   query: '', visibleCounts: {}, focusRequest: 0, selecting: false, selectedIds: [], archived: false, projectFilter: null,
   appearance: {}, app: { ready: true, activeProject: { id: 'current' }, projects: [{ id: 'project', name: 'Project' }], filteredThreads: () => [
     { id: 'one', projectId: 'project' }, { id: 'two' }, { id: 'old', projectId: 'deleted' }
@@ -154,6 +154,13 @@ toolbar.selectAll();
 assert.deepEqual(Array.from(toolbar.selectedIds), ['two','old']);
 toolbar.selectAll();
 assert.equal(toolbar.selectedIds.length, 0);
+toolbar.modifySelection('two', false, true, []);
+assert.deepEqual(Array.from(toolbar.selectedIds), ['two']);
+toolbar.modifySelection('old', true, false, ['one', 'two', 'old']);
+assert.deepEqual(Array.from(toolbar.selectedIds), ['two', 'old']);
+toolbar.modifySelection('two', false, true, []);
+assert.deepEqual(Array.from(toolbar.selectedIds), ['old']);
+toolbar.endSelection();
 icons.get('thread-selection-cancel').onTap();
 assert.equal(toolbar.selecting, false);
 console.log('PASS search morph, focus and close, project scope, scoped new chat and multiselect');

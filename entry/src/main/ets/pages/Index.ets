@@ -1,7 +1,7 @@
 import { ConversationShareData, sharingMessages } from '../model/ConversationShare';
 import { ConversationSharePanel } from '../views/ConversationSharePanel';
 import { AppearanceStyle } from '../common/AppearanceStyle';
-import { NavigationShortcut } from '../common/KeyboardShortcuts';
+import { chatShortcuts, NavigationShortcut } from '../common/KeyboardShortcuts';
 import { KeyboardShortcutsDialog } from '../views/KeyboardShortcutsDialog';
 import { DesktopCommandDialog } from '../views/DesktopCommandDialog';
 import { DesktopCommandItem } from '../model/DesktopCommandPalette';
@@ -86,11 +86,11 @@ import { AnnouncementDialog } from '../views/AnnouncementDialog';
 import { Diagnostics } from '../model/Diagnostics';
 import { WorkbenchLayout } from '../model/WorkbenchLayout';
 import { DesktopLayoutPreferences } from '../services/DesktopLayoutPreferences';
+import { KeyCode } from '@kit.InputKit';
 import { PreviewPanel } from '../views/PreviewPanel';
 import { AnimatedPage } from '../common/AnimatedPage';
 import { HistoryRail } from '../views/HistoryRail';
 import { PaneDivider } from '../common/PaneDivider';
-import { IS_LARGE_SCREEN, IS_PC } from '../common/DeviceForm';
 import { DetailLauncher } from '../views/DetailLauncher';
 import { DetailTabItem, DetailTabs } from '../views/DetailTabs';
 
@@ -107,11 +107,11 @@ struct Index {
   @StorageProp('tinybot.pcWindowVisible') @Watch('pcWindowVisibilityChanged') private pcWindowVisible: boolean = true;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
+  @StorageProp('tinybot.freeWindow') @Watch('desktopModeChanged') private desktop: boolean = false;
   @State private app: ChatViewModel = new ChatViewModel();
   @State private account: HuaweiAccount = huaweiAccount;
   @State private windowWidth: number = 0;
-  private readonly desktop: boolean = IS_PC;
-  private readonly largeScreen: boolean = IS_LARGE_SCREEN;
+  @State private largeScreen: boolean = false;
   @State private windowHeight: number = 0;
   @State private workspaceOpen: boolean = false;
   @State private workspacePresent: boolean = false;
@@ -227,6 +227,7 @@ struct Index {
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     announcements.checkOnStartup(context).then(() => this.offerAnnouncement());
     this.account.initialize(context).then(() => this.account.refresh());
+    const starting = !this.session;
     if (!this.session) {
       if (this.desktop) { this.restoreDesktopLayout(context); }
       try { this.startupBackup = new StartupBackup(context); }
@@ -255,6 +256,7 @@ struct Index {
         this.unsubscribeLaunch = LaunchActions.subscribe(() => this.receiveLaunch());
       }
       this.offerOnboarding();
+      if (starting && this.app.ready && !this.onboardingActive && this.paths.size() === 0) { this.restoreDetailSelection(); }
       this.offerStartupBackup();
       this.offerAnnouncement();
     });
@@ -668,6 +670,10 @@ struct Index {
   private hasPreview(): boolean { return this.previewId.length > 0 && this.previewThreadId === this.app.active.id; }
   private browserStartPreviews(): BrowserStartPreview[] {
     if (!this.detailTabVisible('browser') || this.browser.url || this.browser.loading) { return []; }
+    return this.recentPreviews();
+  }
+
+  private recentPreviews(): BrowserStartPreview[] {
     const thread = this.app.active;
     return thread.messages.slice(-12).flatMap((message) => message.stepViews.flatMap((step, index) =>
       stepPreviews(message.id, step, index, thread.latestPreviewIds, true).filter((preview) => !preview.superseded)
@@ -698,10 +704,12 @@ struct Index {
     this.detailClosing = !open;
     this.detailClosingLauncher = !open && fromLauncher;
     const target = open ? 1 : 0;
-    this.getUIContext().animateTo({ duration: open ? Motion.medium : Motion.fast, curve: Motion.standard,
+    this.getUIContext().animateTo({ duration: this.appearance.effectStrength <= 0 ? 0 :
+      this.desktop ? Motion.desktop : open ? Motion.medium : Motion.fast, curve: Motion.standard,
       onFinish: () => { if (token === this.detailAnim) { this.detailClosing = false; this.detailClosingLauncher = false; } } }, () => {
         this.detailReveal = target;
       });
+    this.saveDetailSelection();
   }
 
   private toggleDetailMaximized(): void {
@@ -761,12 +769,19 @@ struct Index {
     this.setDrawer(false);
   }
 
+  private selectDetailTab(tab: string): void {
+    if (this.currentDetailTab() === tab || !this.detailTabsAvailable().includes(tab)) { return; }
+    this.activeDetailTab = tab;
+    this.saveDetailSelection();
+  }
+
   private removeDetailTab(tab: string): void {
     const remaining = this.detailTabs.filter((item: string) => item !== tab);
     this.detailTabs = remaining;
     const available = remaining.filter((item: string) => this.detailTabPresent(item));
     if (this.activeDetailTab === tab) { this.activeDetailTab = available.length > 0 ? available[0] : ''; }
     if (available.length === 0) { this.setDetailPane(false); }
+    else { this.saveDetailSelection(); }
   }
 
   private closeDetailTab(tab: string): void {
@@ -810,8 +825,13 @@ struct Index {
     // Below this width the floating card would cover the centered composer.
     // Keep the outgoing tab in the same layout until its exit completes.
     const exitingTab = !this.detailPaneOpen && (this.workspacePresent || this.previewPresent || this.browserPresent);
-    return this.largeScreen && this.windowWidth >= 1240 &&
+    return (this.desktop || this.windowWidth >= 1240) &&
       (this.showDetailContext || (!exitingTab && !this.detailTabsAvailable().length));
+  }
+
+  private compactDetailHeight(): number {
+    const hasContent = this.app.active.messages.length > 0 || this.app.sideChats().length > 0;
+    return Math.min(Math.max(160, this.windowHeight - 72), hasContent ? 424 : 208);
   }
 
   @Builder
@@ -828,6 +848,13 @@ struct Index {
       ForEach(this.recentDetailFiles(), (file: PresentedFile) => {
         Button(file.path).attributeModifier(Btn.textSmall).width('100%').onClick(() => this.openFiles(file.path))
       }, (file: PresentedFile) => file.path)
+    }
+    if (this.desktop && this.recentPreviews().length) {
+      Text(t('预览')).fontSize(13).fontWeight(FontWeight.Medium).padding({ top: Space.md, bottom: Space.xs })
+      ForEach(this.recentPreviews(), (preview: BrowserStartPreview) => {
+        Button(preview.title || t('预览')).attributeModifier(Btn.textSmall).width('100%')
+          .onClick(() => this.openPreview(preview.messageId, preview.id))
+      }, (preview: BrowserStartPreview) => preview.id)
     }
   }
 
@@ -903,7 +930,8 @@ struct Index {
 
   private setHistoryCollapsed(collapsed: boolean): void {
     if (this.historyCollapsed === collapsed) { return; }
-    this.getUIContext().animateTo({ duration: Motion.medium, curve: Motion.standard }, () => {
+    this.getUIContext().animateTo({ duration: this.appearance.effectStrength <= 0 ? 0 :
+      this.desktop ? Motion.desktop : Motion.medium, curve: Motion.standard }, () => {
       this.historyCollapsed = collapsed;
     });
     if (this.desktop) {
@@ -919,6 +947,42 @@ struct Index {
       this.historyPreferredWidth = preferences.paneWidth(false);
       this.detailPreferredWidth = preferences.paneWidth(true);
       this.desktopLayoutPreferences = preferences;
+    } catch (error) { Diagnostics.log('error', 'navigation', 'desktop_layout_load_failed', undefined, error as Error); }
+  }
+
+  private desktopModeChanged(): void {
+    this.largeScreen = this.desktop || this.windowWidth >= WorkbenchLayout.WORKBENCH_MIN;
+    if (this.desktop && this.session && !this.desktopLayoutPreferences) {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      this.restoreDesktopLayout(context);
+    }
+  }
+
+  private saveDetailSelection(): void {
+    const preferences = this.desktopLayoutPreferences;
+    if (!this.desktop || !preferences) { return; }
+    const tab = this.currentDetailTab();
+    try {
+      if (this.detailPaneOpen && (tab === 'files' || tab === 'preview' || tab.startsWith('side:'))) {
+        preferences.savePanelSelection({ threadId: this.app.active.id, tab: tab,
+          messageId: tab === 'preview' ? this.previewMessageId : undefined,
+          previewId: tab === 'preview' ? this.previewId : undefined });
+      } else { preferences.savePanelSelection(); }
+    } catch (error) { Diagnostics.log('error', 'navigation', 'desktop_layout_save_failed', undefined, error as Error); }
+  }
+
+  private restoreDetailSelection(): void {
+    try {
+      const selection = this.desktopLayoutPreferences?.panelSelection();
+      if (!selection || selection.threadId !== this.app.active.id || this.detailPaneOpen) { return; }
+      if (selection.tab === 'files') { this.addFilesTab(); }
+      else if (selection.tab === 'preview' && selection.messageId && selection.previewId) {
+        const message = this.app.active.messages.find(item => item.id === selection.messageId);
+        if (message && message.stepViews.some((step, index) => stepPreviews(message.id, step, index,
+          this.app.active.latestPreviewIds, true).some(preview => preview.id === selection.previewId))) {
+          this.openPreview(selection.messageId, selection.previewId);
+        }
+      } else if (selection.tab.startsWith('side:') && this.detailTabPresent(selection.tab)) { this.openDetailTab(selection.tab); }
     } catch (error) { Diagnostics.log('error', 'navigation', 'desktop_layout_load_failed', undefined, error as Error); }
   }
 
@@ -980,11 +1044,11 @@ struct Index {
     }
   }
 
-  private canOpenDesktopCommands(): boolean {
+  private desktopCommandsAvailable(): boolean {
     return this.largeScreen && this.foreground && this.app.ready && this.privacyAllowed && this.paths.size() === 0 &&
       !this.onboardingActive && !this.showToolScope && !this.keyboardShortcutsOpen && !this.historyProjectSheetOpen &&
       !this.startupBackupDialog && !this.startupBackupRestoring && !this.announcementDialog && !this.reviewDialog &&
-      !this.ratingOpen && !this.drawerDragging && !this.desktopCommandsOpen;
+      !this.ratingOpen && !this.drawerDragging;
   }
 
   private desktopCommands(): DesktopCommandItem[] {
@@ -1002,11 +1066,19 @@ struct Index {
       new DesktopCommandItem('life-panels', t('生活看板')), new DesktopCommandItem('settings', t('设置')),
       new DesktopCommandItem('help', t('键盘快捷键')));
     if (this.canCreateSideChat()) { items.push(new DesktopCommandItem('side-chat', t('新建旁聊'))); }
+    const shortcuts = chatShortcuts(true);
+    for (const item of items) {
+      if (item.action === 'files' || item.action === 'new-chat' || item.action === 'settings' || item.action === 'help') {
+        const action = item.action === 'files' ? 'workspace' : item.action;
+        item.shortcut = shortcuts.find(shortcut => shortcut.action === action)?.chord || '';
+      }
+    }
     return items;
   }
 
   private showDesktopCommands(): void {
-    if (!this.canOpenDesktopCommands()) { return; }
+    // Keep the launcher focusable while the modal manages focus and blocks clicks behind it.
+    if (this.desktopCommandsOpen || !this.desktopCommandsAvailable()) { return; }
     this.desktopCommandsOpen = true;
     this.chosenDesktopCommand = undefined;
     const width = Math.min(560, WorkbenchLayout.dialogWidth(this.windowWidth));
@@ -1021,7 +1093,7 @@ struct Index {
           this.chosenDesktopCommand = undefined;
           this.desktopCommandsDialog = undefined;
           this.desktopCommandsOpen = false;
-          if (command && this.canOpenDesktopCommands()) {
+          if (command && this.desktopCommandsAvailable()) {
             this.runDesktopCommand(command).catch((error: Error) => this.desktopCommandFailed(error));
           } else { this.offerAnnouncement(); }
         }
@@ -1124,11 +1196,20 @@ struct Index {
   private windowChanged(width: number): void {
     if (width <= 0 || width === this.windowWidth) { return; }
     this.windowWidth = width;
+    this.largeScreen = this.desktop || width >= WorkbenchLayout.WORKBENCH_MIN;
     if (this.desktop ? this.workbench().expanded : this.workbench().historyWidth > 0) {
       // Invalidate any closing animation; the same history host becomes the sidebar.
       this.drawerAnimation++; this.drawerOpen = false; this.drawerDragging = false;
       this.drawerReveal = 0; this.drawerContentActive = false;
     }
+  }
+
+  private handleWorkbenchEscape(event: KeyEvent): void {
+    if (event.type !== KeyType.Down || event.keyCode !== KeyCode.KEYCODE_ESCAPE || this.paths.size() > 0) { return; }
+    if (this.drawerOpen) { this.setDrawer(false); }
+    else if (this.detailPaneOpen) { this.setDetailPane(false, this.showDetailContext || !this.currentDetailTab()); }
+    else { return; }
+    event.stopPropagation();
   }
   private openPreview(messageId: string, previewId: string): void {
     this.previewThreadId = this.app.active.id; this.previewMessageId = messageId; this.previewId = previewId; this.previewVisible = true;
@@ -1759,9 +1840,22 @@ struct Index {
           animatedIcon: 'compose', diameter: this.desktop ? 36 : 44, iconSize: 18, fill: $r('app.color.surface'),
           disabled: !this.app.canNavigate, onTap: () => { this.createChat(this.app.activeProject?.id); } })
       }
-      IconButton({ icon: $r('sys.symbol.magnifyingglass'), label: t('搜索对话或命令') + ' · Ctrl+K', compId: 'pc-open-commands',
-        diameter: this.desktop ? 36 : 44, iconSize: 17, fill: $r('app.color.surface'), disabled: !this.canOpenDesktopCommands(),
-        onTap: () => this.showDesktopCommands() })
+      if (this.desktop && this.workbench().chatWidth >= 620) {
+        Button({ type: ButtonType.Normal }) {
+          Row({ space: Space.sm }) {
+            SymbolGlyph($r('sys.symbol.magnifyingglass')).fontSize(15).fontColor([$r('app.color.text_secondary')])
+            Text(t('搜索对话或命令')).fontSize(13).fontColor($r('app.color.text_primary'))
+            Text('Ctrl+K').fontSize(11).fontColor($r('app.color.text_secondary')).padding({ left: 4, right: 4 })
+              .border({ width: 0.5, color: $r('app.color.divider') }).borderRadius(4)
+          }.accessibilityLevel('no-hide-descendants')
+        }.id('pc-open-commands').height(34).padding({ left: 10, right: 8 }).borderRadius(Radius.sm)
+          .backgroundColor($r('app.color.surface_variant')).enabled(this.desktopCommandsAvailable())
+          .accessibilityText(t('搜索对话或命令') + ' · Ctrl+K').onClick(() => this.showDesktopCommands())
+      } else {
+        IconButton({ icon: $r('sys.symbol.magnifyingglass'), label: t('搜索对话或命令') + ' · Ctrl+K', compId: 'pc-open-commands',
+          diameter: this.desktop ? 36 : 44, iconSize: 17, fill: $r('app.color.surface'), disabled: !this.desktopCommandsAvailable(),
+          onTap: () => this.showDesktopCommands() })
+      }
       Button({ type: ButtonType.Normal }) {
         SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(18).fontColor([$r('app.color.text_secondary')])
       }.id('pc-chat-more').width(this.desktop ? 36 : 44).height(this.desktop ? 36 : 44).padding(0).borderRadius(Radius.sm)
@@ -1821,7 +1915,7 @@ struct Index {
           SettingsNavigation({ selected: this.settingsSection, onSelect: (key: string) => this.selectSettingsSection(key),
             onChat: () => this.returnFromSettings() })
         } else {
-        ThreadList({ app: this.app, selectedSection: this.rootSection, workbench: this.desktop || this.windowWidth >= 840,
+        ThreadList({ app: this.app, selectedSection: this.rootSection, workbench: this.largeScreen, desktop: this.desktop,
           onLifePanels: () => { this.setDrawer(false); this.openLifePanels(); },
           searchRequest: this.historySearchRequest,
           onProjectSheetVisibility: (visible) => { this.historyProjectSheetOpen = visible; },
@@ -2030,7 +2124,7 @@ struct Index {
               showMaximize: this.largeScreen && this.windowWidth >= 840,
               sideChatAvailable: this.canCreateSideChat(),
               maximized: this.detailMaximized, onMaximize: () => this.toggleDetailMaximized(),
-              onSelect: (id: string) => { this.activeDetailTab = id; },
+              onSelect: (id: string) => this.selectDetailTab(id),
               onClose: (id: string) => this.closeDetailTab(id),
               onAddFiles: () => this.addFilesTab(),
               onAddBrowser: () => this.addBrowserTab(),
@@ -2078,7 +2172,7 @@ struct Index {
                 workbench: this.largeScreen, project: this.app.activeProject?.name || t('普通聊天'),
                 sideChatAvailable: this.canCreateSideChat(), onSideChat: () => this.createSideChat(),
                 context: () => { this.detailContext() }, compact: !this.workbench().docked || this.compactDetailLauncher(),
-                showCollapse: this.detailCoversChat(),
+                showCollapse: this.detailCoversChat() || this.compactDetailLauncher(),
                 onClose: () => { this.setDetailPane(false, true); } })
             }
           }.width('100%').layoutWeight(1)
@@ -2086,7 +2180,7 @@ struct Index {
         .height('100%')
         .backgroundColor(this.detailOpen() ? $r('app.color.surface') : Color.Transparent)
       }.width(this.compactDetailLauncher() ? 320 : this.workbench().docked ? Math.max(0, this.detailGeometry().detailWidth * this.detailReveal - (this.desktop ? 0 : 6)) : '100%')
-        .height(this.compactDetailLauncher() ? Math.max(160, Math.min(480, this.windowHeight - 72)) : !this.desktop && this.windowWidth >= 840 ? 'calc(100% - 12vp)' : '100%')
+        .height(this.compactDetailLauncher() ? this.compactDetailHeight() : !this.desktop && this.windowWidth >= 840 ? 'calc(100% - 12vp)' : '100%')
         .borderRadius(this.compactDetailLauncher() || !this.desktop && this.windowWidth >= 840 ? Radius.xl : 0).clip(true)
         .position({ x: this.compactDetailLauncher() ? this.windowWidth - 332 : this.workbench().docked ? this.windowWidth - this.detailGeometry().detailWidth * this.detailReveal : 0,
           y: this.compactDetailLauncher() ? 56 : !this.desktop && this.windowWidth >= 840 ? 6 : 0 })
@@ -2102,6 +2196,7 @@ struct Index {
     }.width('100%').height('100%')
     .backgroundColor($r('app.color.page_background'))
     .onTouch((event: TouchEvent) => { if (event.type === TouchType.Down) { this.cancelReviewOffer(); } })
+    .onKeyEvent((event: KeyEvent) => this.handleWorkbenchEscape(event))
     .onAreaChange((_old: Area, area: Area) => { this.windowHeight = Number(area.height); this.windowChanged(Number(area.width)); })
     .bindSheet($$this.showToolScope, this.toolScopeSheet(), { radius: Radius.sheet, title: { title: t('工具范围') },
       height: this.app.active.agentMode === 'custom' ? SheetSize.LARGE : SheetSize.FIT_CONTENT,

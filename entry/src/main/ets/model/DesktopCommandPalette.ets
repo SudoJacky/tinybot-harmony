@@ -12,6 +12,7 @@ export class DesktopCommandItem {
   messageId: string;
   query: string;
   excerpt: string = '';
+  shortcut: string = '';
 
   constructor(action: DesktopCommand, label: string, detail: string = '', threadId: string = '', messageId: string = '', query: string = '') {
     this.id = threadId || action;
@@ -29,8 +30,10 @@ export function desktopCommandResults(commands: DesktopCommandItem[], query: str
   threads: ThreadViewModel[], projects: ProjectData[], ordinaryLabel: string): DesktopCommandItem[] {
   const commandsOnly = query.trimStart().startsWith('>');
   const needle = (commandsOnly ? query.trimStart().slice(1) : query).trim().toLocaleLowerCase();
+  const shortcutNeedle = needle.replace(/\s+/g, '');
   const matchingCommands = commands.filter((command) =>
-    (command.label + ' ' + command.detail).toLocaleLowerCase().includes(needle));
+    (command.label + ' ' + command.detail).toLocaleLowerCase().includes(needle) ||
+    command.shortcut.toLocaleLowerCase().includes(shortcutNeedle));
   if (commandsOnly) { return matchingCommands; }
 
   const threadResults: DesktopCommandItem[] = [];

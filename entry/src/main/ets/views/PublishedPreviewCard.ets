@@ -12,12 +12,14 @@ import { Btn, codeTokenColor, Font, Motion, Radius, Space } from '../common/Them
 import { UiPresentation } from '../model/UiPresentation';
 import { PreviewFullscreen } from './PreviewFullscreen';
 import { PreviewSurface, PreviewSurfaceOptions } from './PreviewSurface';
+import { IconButton } from '../common/Widgets';
 
 const MODE_TARGET: number = 44;
 
 @Component
 export struct PublishedPreviewCard {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
+  @StorageProp('tinybot.freeWindow') private desktop: boolean = false;
   presentation?: UiPresentation;
   @Prop @Watch('revisionChanged') preview: PublishedPreview;
   @Prop @Watch('surfaceChanged') available: boolean = false;
@@ -131,6 +133,11 @@ export struct PublishedPreviewCard {
     Row() {
       this.previewModeControl()
       Blank()
+      if (this.desktop && this.inspectable) {
+        IconButton({ icon: $r('sys.symbol.close_sidebar'), label: t('在侧栏打开预览'),
+          compId: 'dock-preview-' + this.preview.id, diameter: 40, iconSize: 17,
+          fill: $r('app.color.surface_variant'), tint: $r('app.color.text_secondary'), onTap: this.onInspect })
+      }
       Button({ type: ButtonType.Normal }) {
         Row({ space: Space.xs }) {
           SymbolGlyph($r('sys.symbol.full_screen')).fontSize(16).fontColor([$r('app.color.text_secondary')])

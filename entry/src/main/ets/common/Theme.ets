@@ -13,6 +13,7 @@ export function gradientColor(resource: ResourceColor, opacity: number): string 
 // "animation scale" setting (including turning animations off) applies to every curve below.
 export class Motion {
   static readonly fast: number = 160;
+  static readonly desktop: number = 120;
   static readonly medium: number = 220;
   static readonly drawer: number = 280;
   // Settles quickly without overshoot; the default for state changes.

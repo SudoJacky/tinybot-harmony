@@ -122,10 +122,11 @@ assert.equal(zero.page.present, false); assert.equal(zero.page.renderContent, fa
 console.log('PASS hidden retained editors/Web hosts survive, disposed callbacks are inert, synchronous completion releases correctly');
 
 const Browser = probe('pages/Index', 'Index', ['closeBrowser', 'browserPresenceChanged', 'setBrowserExpanded',
-  'removeDetailTab', 'detailTabPresent', 'detailTabsAvailable', 'setDetailPane', 'compactDetailLauncher', 'hideBrowserTab'],
+  'removeDetailTab', 'detailTabPresent', 'detailTabsAvailable', 'setDetailPane', 'compactDetailLauncher', 'hideBrowserTab', 'saveDetailSelection'],
   { Motion: { medium: 220, fast: 160 } });
 const calls = [];
 const browser = Object.assign(new Browser(), { browserExpanded: true, browserPresent: true, browserClosing: false,
+  appearance: { effectStrength: 1 },
   detailTabs: ['browser'], activeDetailTab: 'browser', detailPaneOpen: true, detailReveal: 1,
   detailClosing: false, detailClosingLauncher: false, detailAnim: 0,
   browser: { open: true, takeOver: () => calls.push('pause'), close: () => calls.push('close') },

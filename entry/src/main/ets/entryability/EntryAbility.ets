@@ -35,7 +35,7 @@ import { AbilityConstant, common, Configuration, UIAbility, Want } from '@kit.Ab
 import { window } from '@kit.ArkUI';
 
 const PC_MIN_WINDOW_WIDTH: number = 360;
-const PC_MIN_WINDOW_HEIGHT: number = 420;
+const PC_MIN_WINDOW_HEIGHT: number = 360;
 
 // Required by Pen Kit's system-provided handwriting component.
 declare namespace globalThis {
@@ -76,6 +76,18 @@ export default class EntryAbility extends UIAbility {
         { width: PC_MIN_WINDOW_WIDTH, height: PC_MIN_WINDOW_HEIGHT, unit: 'vp' }, error as Error);
     }
   }
+
+  private refreshFreeWindow = (): void => {
+    const mainWindow = this.mainWindow;
+    if (!mainWindow) { return; }
+    try {
+      const freeWindow = ApiLevel.sdk >= 22 ? mainWindow.isInFreeWindowMode() :
+        mainWindow.getWindowStatus() === window.WindowStatusType.FLOATING;
+      AppStorage.setOrCreate('tinybot.freeWindow', freeWindow);
+    } catch (error) {
+      Diagnostics.log('warn', 'navigation', 'free_window_query_failed', undefined, error as Error);
+    }
+  };
 
   // Pages extend their backgrounds under the system bars, so match the status bar text to the theme.
   private applySystemBars(): void {
@@ -161,20 +173,28 @@ export default class EntryAbility extends UIAbility {
       catch (error) { Diagnostics.log('error', 'app', 'pc_window_observe_failed', undefined, error as Error); }
     }
 
+    this.mainWindow = windowStage.getMainWindowSync();
+    AppStorage.setOrCreate('tinybot.freeWindow', false);
+    this.refreshFreeWindow();
+    try { this.mainWindow.on('windowStatusChange', this.refreshFreeWindow); }
+    catch (error) { Diagnostics.log('warn', 'navigation', 'free_window_observe_failed', undefined, error as Error); }
     windowStage.loadContent('pages/Index', (err) => {
       if (err.code) {
         Diagnostics.log('error', 'app', 'window_failed', undefined, err);
         return;
       }
       Diagnostics.log('info', 'app', 'window_loaded');
-      this.mainWindow = windowStage.getMainWindowSync();
-      if (IS_PC) { this.setPcWindowLimits(this.mainWindow); }
+      if (this.mainWindow && (IS_PC || AppStorage.get<boolean>('tinybot.freeWindow') === true)) {
+        this.setPcWindowLimits(this.mainWindow);
+      }
       AppearancePreferences.activate();
       this.applySystemBars();
     });
   }
 
   onWindowStageWillDestroy(windowStage: window.WindowStage): void {
+    try { this.mainWindow?.off('windowStatusChange', this.refreshFreeWindow); }
+    catch (error) { Diagnostics.log('warn', 'navigation', 'free_window_unobserve_failed', undefined, error as Error); }
     if (IS_PC) {
       try { windowStage.off('windowStageLifecycleEvent', this.windowLifecycle); }
       catch (error) { Diagnostics.log('error', 'app', 'pc_window_unobserve_failed', undefined, error as Error); }

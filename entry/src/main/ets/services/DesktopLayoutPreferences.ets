@@ -1,6 +1,13 @@
 import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 
+export interface DesktopPanelSelection {
+  threadId: string;
+  tab: string;
+  messageId?: string;
+  previewId?: string;
+}
+
 export class DesktopLayoutPreferences {
   private store: preferences.Preferences;
 
@@ -19,8 +26,17 @@ export class DesktopLayoutPreferences {
 
   saveWidth(detail: boolean, value: number): void { this.save(detail ? 'pc.detailWidth' : 'pc.historyWidth', value); }
 
-  private save(key: string, value: number | boolean): void {
-    const previous = this.store.getSync(key, typeof value === 'boolean' ? false : 0);
+  panelSelection(): DesktopPanelSelection | undefined {
+    const data = this.store.getSync('pc.panelSelection', '');
+    return typeof data === 'string' && data !== '' ? JSON.parse(data) as DesktopPanelSelection : undefined;
+  }
+
+  savePanelSelection(value?: DesktopPanelSelection): void {
+    this.save('pc.panelSelection', value ? JSON.stringify(value) : '');
+  }
+
+  private save(key: string, value: number | boolean | string): void {
+    const previous = this.store.getSync(key, typeof value === 'string' ? '' : typeof value === 'boolean' ? false : 0);
     if (previous === value) { return; }
     try {
       this.store.putSync(key, value);

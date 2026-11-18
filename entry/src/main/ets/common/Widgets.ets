@@ -51,6 +51,7 @@ export struct IconButton {
       else if (event.type === TouchType.Up || event.type === TouchType.Cancel) { this.iconInteracting = false; }
     })
     .enabled(!this.disabled).accessibilityText(this.label).onClick(() => this.onTap())
+    .bindTips(this.label, { appearingTime: 550, disappearingTime: 80 })
     .borderRadius(this.diameter / 2)
     .attributeModifier(systemMaterialAttribute<ButtonAttribute>(this.material))
   }

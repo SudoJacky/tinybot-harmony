@@ -1043,7 +1043,7 @@ export struct ChatPanel {
         }
         LazyForEach(this.messageSource, (message: MessageViewModel) => {
           ListItem() {
-            MessageBubble({ message: message, latestPreviewIds: this.thread.latestPreviewIds, turnStatus: message.status, webEnabled: this.app.extensions.webEnabled, onOpenFile: this.onOpenFile,
+            MessageBubble({ message: message, latestPreviewIds: this.thread.latestPreviewIds, turnStatus: message.status, webEnabled: this.app.extensions.webEnabled, desktop: this.desktop, onOpenFile: this.onOpenFile,
               workspaceRoot: this.messageWorkspaceRoot(),
               readImageReference: (path: string, signal: Cancellation) => this.readImageReference(this.messageWorkspaceRoot(), path, signal),
               onOpenImage: this.onOpenImage, onOpenImageReference: (path: string) => this.openImageReference(path),
