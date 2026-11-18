@@ -85,8 +85,10 @@ export class DeviceSyncStore {
     const predicates = new relationalStore.RdbPredicates(TABLE);
     predicates.inDevices([device]);
     const result = await this.db.sync(relationalStore.SyncMode.SYNC_MODE_PUSH, predicates);
-    const status = result.find(item => item[0] === device);
-    if (!status || status[1] !== 0) { throw new Error('ArkData device sync failed: ' + (status ? status[1] : 'missing acknowledgement')); }
+    // ArkData can report a different device identifier than DeviceManager's network ID.
+    // The predicate targets one peer, so require exactly one successful acknowledgement.
+    if (result.length !== 1) { throw new Error('ArkData device sync returned ' + result.length + ' acknowledgements'); }
+    if (result[0][1] !== 0) { throw new Error('ArkData device sync failed: ' + result[0][1]); }
   }
 
   async receive(device: string): Promise<Map<string, string>> {

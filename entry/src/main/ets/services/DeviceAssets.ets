@@ -1,5 +1,5 @@
 import { common } from '@kit.AbilityKit';
-import { fileIo as fs } from '@kit.CoreFileKit';
+import { fileIo as fs, fileUri } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { AppData } from '../model/Conversation';
 import { WorkspaceStore } from '../model/WorkspaceStore';
@@ -171,12 +171,13 @@ export class DeviceAssets {
           }
           if (version !== previous) { updates.push({ scope: baseline, id: id, text: version }); }
         } else {
-          const changed = await files.receiveDeviceFile(asset.path, asset.digest, [previous || '', asset.base || ''], !owner || asset.path.startsWith('attachments/'), async () => {
+          const changed = await files.receiveDeviceFile(asset.path, asset.digest, [previous || '', asset.base || ''], !owner || asset.path.startsWith('attachments/'), async (temporary) => {
             if (owner && owner !== asset.workspace) {
               const sourceRoot = this.workspaces.pathFor(asset.workspace);
               const local = new NativeWorkspaceFiles(sourceRoot);
               if (await fs.access(sourceRoot + '/' + asset.path) && await local.binaryVersion(asset.path) === asset.digest) {
-                return fs.open(await local.checkedPath(asset.path), fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
+                await copyFileBytes(await local.checkedPath(asset.path), temporary);
+                return;
               }
             }
             if (!connected) {
@@ -185,7 +186,8 @@ export class DeviceAssets {
               } });
               connected = true;
             }
-            return fs.open(this.context.distributedFilesDir + '/' + sharedName(origin, asset.digest), fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
+            const source = this.context.distributedFilesDir + '/' + sharedName(origin, asset.digest);
+            await fs.copy(fileUri.getUriFromPath(source), fileUri.getUriFromPath(temporary));
           });
           if (changed.written) { count++; }
           if (changed.matches && previous !== asset.digest) { updates.push({ scope: baseline, id: id, text: asset.digest }); }

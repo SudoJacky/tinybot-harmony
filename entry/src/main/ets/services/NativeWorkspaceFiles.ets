@@ -6,7 +6,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { Cancellation } from './Cancellation';
 import { workspaceRelativePath } from './WorkspaceTools';
 import { readUtf8File } from './TextFiles';
-import { copyFileBytes, copyOpenFileBytes, readBounded } from './FileBytes';
+import { copyFileBytes, readBounded } from './FileBytes';
 import { isDocumentPath, readDocumentFile } from './DocumentFiles';
 import { TextEdit, applyTextEdits, validateEdits } from '../model/WorkspaceEdit';
 import { withFileMutation } from './FileMutationQueue';
@@ -112,7 +112,7 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
   // Read and verify the peer bytes only when the local content differs. Resolve inside
   // the same mutation lane used by tools so an intervening edit cannot be overwritten.
   async receiveDeviceFile(path: string, digest: string, bases: string[], immutable: boolean,
-    openSource: () => Promise<fs.File>): Promise<DeviceFileResult> {
+    copySource: (temporary: string) => Promise<void>): Promise<DeviceFileResult> {
     workspaceRelativePath(path, false);
     if (this.isShared(path) || this.cloudMount(path) || this.managed(path)) { throw new Error('Invalid device file destination'); }
     return withFileMutation(this.root + '/' + path, async (): Promise<DeviceFileResult> => {
@@ -133,13 +133,12 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
         }
       }
       const temporary = target.slice(0, target.lastIndexOf('/') + 1) + '.tinybot-' + util.generateRandomUUID() + '.tmp';
-      const source = await openSource();
       try {
-        await copyOpenFileBytes(source.fd, temporary);
+        await copySource(temporary);
         if (await this.fileDigest(temporary) !== digest) { throw new Error('Device file checksum mismatch'); }
         await fs.rename(temporary, destination); NativeWorkspaceFiles.contentRevision++;
       } finally {
-        try { await fs.close(source); } finally { if (await fs.access(temporary)) { await fs.unlink(temporary); } }
+        if (await fs.access(temporary)) { await fs.unlink(temporary); }
       }
       return { written: true, matches: destination === target };
     });

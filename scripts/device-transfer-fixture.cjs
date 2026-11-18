@@ -7,7 +7,7 @@ const fs = require('node:fs');
 module.exports = async function deviceTransferFixture({ load, kits, fileIo, nativePath, model }) {
   const rdb = kits['@kit.ArkData'], previous = rdb.relationalStore;
   const systems = new Map(), peers = new Map(), deliveries = new Map();
-  let localId = '', downloads = 0, failExchange = false, corruptRead = false, changedRows = 0;
+  let localId = '', downloads = 0, failExchange = false, missingAck = false, corruptRead = false, changedRows = 0;
   const makeContext = id => {
     const root = '/sandbox/device-transfer/' + id;
     fs.mkdirSync(nativePath(root), { recursive: true });
@@ -52,7 +52,7 @@ module.exports = async function deviceTransferFixture({ load, kits, fileIo, nati
             select.setReturnArrays(true);
             deliveries.set(p.device + '/' + context.id, select.all());
           }
-          return [[p.device, failExchange ? 1 : 0]];
+          return missingAck ? [] : [['arkdata-' + p.device, failExchange ? 1 : 0]];
         },
         createTransaction: async () => {
           sql.exec('BEGIN');
@@ -70,6 +70,9 @@ module.exports = async function deviceTransferFixture({ load, kits, fileIo, nati
   } };
   fileIo.connectDfs = async () => { downloads++; };
   fileIo.disconnectDfs = async () => {};
+  fileIo.copy = async (source, destination) => {
+    await fs.promises.copyFile(nativePath(new URL(source).pathname), nativePath(new URL(destination).pathname));
+  };
   const A = makeContext('A'), B = makeContext('B');
   fs.mkdirSync(nativePath(A.distributedFilesDir), { recursive: true });
   const { DeviceSyncStore } = load('services/DeviceSyncStore');
@@ -93,6 +96,9 @@ module.exports = async function deviceTransferFixture({ load, kits, fileIo, nati
     const initialWrites = changedRows;
     await sendDeviceData(A, a, 'B', app);
     assert.equal(changedRows, initialWrites, 'unchanged rows never enter the native change log');
+    missingAck = true;
+    await assert.rejects(sendDeviceData(A, a, 'B', app), /returned 0 acknowledgements/);
+    missingAck = false;
     localId = 'B'; failExchange = true;
     await assert.rejects(sendDeviceData(A, a, 'B', app), /sync failed/);
     failExchange = false; corruptRead = true;
@@ -137,6 +143,6 @@ module.exports = async function deviceTransferFixture({ load, kits, fileIo, nati
   } finally {
     await a.close(); await b.close();
     for (const sql of systems.values()) sql.close();
-    rdb.relationalStore = previous; delete fileIo.connectDfs; delete fileIo.disconnectDfs;
+    rdb.relationalStore = previous; delete fileIo.connectDfs; delete fileIo.disconnectDfs; delete fileIo.copy;
   }
 };
