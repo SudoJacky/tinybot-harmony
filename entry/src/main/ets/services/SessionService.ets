@@ -1,4 +1,5 @@
 import { commitBackupKeys } from './BackupKeyRestore';
+import { cloudConfiguration } from '../model/CloudConfiguration';
 import { prepareBackupImport, finishBackupImport, discardBackupImport, rollbackBackupFailure } from '../model/BackupImport';
 import { SessionImportCandidate } from './SessionCandidates';
 import { resolveBrowserPreview } from '../model/BrowserPreview';
@@ -104,6 +105,13 @@ export class SessionService {
     this.profiles = new ProfileSettings(credentials, () => resources.createId());
   }
 
+  async receiveFromDevice(apply: (snapshot: AppData) => Promise<AppData>): Promise<boolean> {
+    return this.mutate(t('导入失败：'), async () => {
+      const candidate = await apply(this.snapshot());
+      await this.commitSettings(candidate);
+    });
+  }
+  configurationSnapshot(): AppData { return JSON.parse(JSON.stringify(cloudConfiguration(this.data))) as AppData; }
   snapshot(): AppData { return JSON.parse(JSON.stringify(this.data)) as AppData; }
   get workspaceId(): string { return workspaceIdFor(this.data, this.active); }
   attributeUsage(records: RequestUsage[]): RequestUsage[] { return attributeLegacyUsage(records, this.data.threads); }

@@ -8,6 +8,7 @@ import { BackupLoginRequired } from '../services/HuaweiAccount';
 export struct StartupBackupDialog {
   controller?: CustomDialogController;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
+  configurationOnly: boolean = false;
   date: string = '';
   onRestore: () => Promise<void> = async () => {};
   onLogin: () => Promise<void> = async () => {};
@@ -32,7 +33,8 @@ export struct StartupBackupDialog {
     Column({ space: Space.md }) {
       Text(t('检测到云备份')).fontFamily(this.appearance.fontFamily).fontSize(Font.title)
         .fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary')).width('100%')
-      Text(t('发现 {0} 的备份。是否恢复到这台设备？', [this.date])).fontFamily(this.appearance.fontFamily)
+      Text(this.configurationOnly ? t('发现 {0} 的配置备份。会话和文件需从其他设备接收。', [this.date]) :
+        t('发现 {0} 的备份。是否恢复到这台设备？', [this.date])).fontFamily(this.appearance.fontFamily)
         .fontSize(Font.body).fontColor($r('app.color.text_secondary')).width('100%')
       Text(t('恢复 API Key 时需登录创建备份时使用的华为账号。')).fontFamily(this.appearance.fontFamily)
         .fontSize(Font.body).fontColor($r('app.color.text_secondary')).width('100%')

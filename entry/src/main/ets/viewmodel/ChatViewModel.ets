@@ -241,6 +241,10 @@ export class ChatViewModel {
   proposeMemory(messageId: string): Promise<string[]> { return this.requireSession().proposeMemory(messageId); }
   cancelMemoryDraft(): void { this.requireSession().cancelMemoryDraft(); }
   saveMemoryDraft(threadId: string, messageId: string, items: string[], global: boolean): Promise<number> { return this.requireSession().saveMemoryDraft(threadId, messageId, items, global); }
+  receiveFromDevice(apply: (snapshot: AppData) => Promise<AppData>): Promise<boolean> {
+    return this.requireSession().receiveFromDevice(apply);
+  }
+  configurationSnapshot(): AppData { return this.requireSession().configurationSnapshot(); }
   exportSnapshot(): AppData { return this.requireSession().snapshot(); }
   attributeUsage(records: RequestUsage[]): RequestUsage[] { return this.requireSession().attributeUsage(records); }
   importSnapshot(data: AppData): Promise<boolean> { return this.requireSession().importSnapshot(data); }

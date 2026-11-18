@@ -91,7 +91,7 @@ function panel(cloud) {
     huaweiAccount: account, NativeData: { forFilesDir: () => ({ allowAutoBackup() {} }) } });
   return Object.assign(new exports.Probe(), { visible: true, foreground: true, busy: false,
     error: '', status: '', statusError: false, backupDate: '', account,
-    app: { busy: false, get sharedBusy(){return this.busy;}, exportSnapshot: () => ({}) }, automatic: { confirmUploaded() {} }, context: () => ({}), getUIContext: () => ({}) });
+    app: { busy: false, get sharedBusy(){return this.busy;}, configurationSnapshot: () => ({}), exportSnapshot: () => ({}) }, automatic: { confirmUploaded() {} }, context: () => ({}), getUIContext: () => ({}) });
 }
 
 test('version selection requires login, excludes pending snapshots, and never reuses a stale listing',async()=>{

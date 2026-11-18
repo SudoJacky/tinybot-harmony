@@ -20,6 +20,8 @@
       { "name": "ohos.fileshare.supportPreservePersistentPermission" }
     ],
     "requestPermissions": [
+      { "name": "ohos.permission.DISTRIBUTED_DATASYNC", "reason": "$string:device_sync_reason",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
       { "name": "ohos.permission.INTERNET" },
       { "name": "ohos.permission.GET_NETWORK_INFO" },
       { "name": "ohos.permission.KEEP_BACKGROUND_RUNNING" },

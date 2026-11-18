@@ -6,7 +6,7 @@ import { rcp } from '@kit.RemoteCommunicationKit';
 import { AppData } from '../model/Conversation';
 import { Diagnostics } from '../model/Diagnostics';
 import { t } from '../model/I18n';
-import { BackupConflictMode, createBackupFile, readBackupFile, withBackupOperation } from './Backup';
+import { BackupConflictMode, createConfigurationFile, readBackupFile, withBackupOperation } from './Backup';
 import { requireWebDavConnection, webDavSession } from './WebDavConnection';
 import { huaweiAccount } from './HuaweiAccount';
 import { BackupSnapshot, backupSnapshot, expiredBackupSnapshots } from '../model/BackupSnapshots';
@@ -119,7 +119,7 @@ export class WebDavBackup {
     return withBackupOperation(async () => {
       const openID = await huaweiAccount.backupOpenID(context);
       const saved = await requireWebDavConnection(connectionId);
-      const source = await createBackupFile(context, data, undefined, openID);
+      const source = await createConfigurationFile(context, data, openID);
       try {
         const session = webDavSession(saved);
         let temporary = '';

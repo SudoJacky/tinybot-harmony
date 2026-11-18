@@ -9,9 +9,10 @@ import { t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
 import { fileIo as fs, picker } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
+import { cloudConfiguration } from '../model/CloudConfiguration';
 import { AppData, ThreadData, parseAppData } from '../model/Conversation';
 import { Attachment } from '../model/Productivity';
-import { toolReceipts } from '../model/Agent';
+import { threadAttachments } from '../model/ThreadAttachments';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { workspaceRelativePath } from './WorkspaceTools';
 import { Attachments, writeBytes } from './Attachments';
@@ -92,19 +93,6 @@ async function writePayload(value: string, path: string, archive?: OpenBackupArc
   if (archive) { await copyFileBytes(archive.files[blobIndex(value, archive)], path); }
   else { await writeBytes(path, new util.Base64Helper().decodeSync(value).buffer as ArrayBuffer); }
 }
-function threadAttachments(thread: ThreadData): Attachment[] {
-  const result = (thread.attachments || []).concat(...thread.messages.map((message) => message.attachments || []));
-  result.push(...(thread.pendingInputs || []).flatMap((input) => input.attachments || []));
-  for (const message of thread.messages) {
-    for (const step of message.steps || []) {
-      result.push(...step.steering?.attachments || []);
-      for (const tool of toolReceipts(step.tools)) { if (tool.previewScreenshot) { result.push(tool.previewScreenshot.image); }
-        if (tool.inspectedImage) { result.push(tool.inspectedImage); }
-        for (const frame of tool.browserObservation?.frames || []) { result.push(frame.image); } }
-    }
-  }
-  return result;
-}
 function allAttachments(data: AppData): Attachment[] {
   const result = new Map<string, Attachment>();
   for (const thread of data.threads) { for (const item of threadAttachments(thread)) { result.set(item.id, item); } }
@@ -117,6 +105,34 @@ export async function withBackupOperation<T>(action: () => Promise<T>): Promise<
   if (operating) { throw new Error(t('另一项备份操作正在进行，请稍后再试。')); }
   operating = true;
   try { return await action(); } finally { operating = false; }
+}
+
+function redactBackupSettings(data: AppData): void {
+  data.config.credentialAlias = ''; data.config.configured = false;
+  for (const profile of data.providerProfiles || []) { profile.credentialAlias = ''; profile.balanceCredentialAlias = undefined; profile.noApiKey = true; profile.enabled = false; }
+  for (const server of data.productivity?.servers || []) { server.enabled = server.enabled && !server.credentialAlias && !server.authType; server.credentialAlias = ''; server.authType = undefined; }
+  if (data.productivity?.options?.search) {
+    data.productivity.options.search = backupSearchConfig(data.productivity.options.search);
+  }
+}
+
+// Cloud writers have no access to an archive builder that enumerates workspace files.
+export async function createConfigurationFile(context: common.UIAbilityContext, source: AppData, openID: string,
+  cancellation?: Cancellation): Promise<string> {
+  cancellation?.check();
+  const settings = cloudConfiguration(source);
+  const data = JSON.parse(JSON.stringify(settings)) as AppData;
+  redactBackupSettings(data);
+  const connections = await captureBackupConnections(settings, context.getApplicationContext().filesDir, [], false);
+  const envelope: BackupEnvelope = { format: 'tinybot-harmony.config.v1', data: data, attachments: [], files: [],
+    deviceState: await captureBackupDeviceState(context, true) };
+  if (settings.providerProfiles?.length || connections.mcp?.length || connections.mail?.length ||
+    connections.search?.key || connections.search?.tavilyKey) {
+    envelope.protectedKeys = await encryptBackupKeys(settings, openID, new CredentialStore(), connections);
+  }
+  const path = context.cacheDir + '/backup-' + util.generateRandomUUID() + '.tinybot';
+  await writeBackupArchive(path, JSON.stringify(envelope), [], cancellation);
+  return path;
 }
 
 // All destinations share one archive; API keys only appear in the encrypted section.
@@ -133,12 +149,7 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
     if (project.sharedFolders) { project.sharedFolders = project.sharedFolders.filter((folder) => folder.webDavConnectionId === undefined); }
   }
   cancellation?.check();
-  data.config.credentialAlias = ''; data.config.configured = false;
-  for (const profile of data.providerProfiles || []) { profile.credentialAlias = ''; profile.balanceCredentialAlias = undefined; profile.noApiKey = true; profile.enabled = false; }
-  for (const server of data.productivity?.servers || []) { server.enabled = server.enabled && !server.credentialAlias && !server.authType; server.credentialAlias = ''; server.authType = undefined; }
-  if (data.productivity?.options?.search) {
-    data.productivity.options.search = backupSearchConfig(data.productivity.options.search);
-  }
+  redactBackupSettings(data);
   const sources: BackupBlob[] = [];
   const originals = new Set<string>();
   for (const thread of data.threads) {
@@ -268,13 +279,23 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
       finally { await fs.close(file); }
     }
     const envelope = JSON.parse(text) as BackupEnvelope;
-    const formats = archive ? ['tinybot-harmony.backup.v3', 'tinybot-harmony.backup.v4'] : ['tinybot-harmony.backup.v1', 'tinybot-harmony.backup.v2'];
+    const formats = archive ? ['tinybot-harmony.backup.v3', 'tinybot-harmony.backup.v4', 'tinybot-harmony.config.v1'] : ['tinybot-harmony.backup.v1', 'tinybot-harmony.backup.v2'];
     if (!envelope || !formats.includes(envelope.format) || !Array.isArray(envelope.attachments) || !Array.isArray(envelope.files)) { throw new Error(t('备份格式无效。')); }
     if (!archive) { await unlock(envelope); }
     if (envelope.deviceState !== undefined) { validateBackupDeviceState(envelope.deviceState); }
     const importedPanels: RestoredPanelFile[] = [], importedWorkspaces = new Map<string, string>();
     const report: BackupRestoreReport = { added: 0, skipped: 0, copied: 0 };
-    const result = await restoreEnvelope(context, local, envelope, archive, importedPanels, importedWorkspaces, preparedFiles, conflicts, report);
+    let result: AppData;
+    if (envelope.format === 'tinybot-harmony.config.v1') {
+      if (archive?.files.length || envelope.files.length || envelope.attachments.length || envelope.data.threads.length ||
+        envelope.data.projects?.length || envelope.deviceState?.usage.length || keys?.connections?.panels?.length) {
+        throw new Error(t('备份格式无效。'));
+      }
+      result = parseAppData(JSON.stringify(cloudConfiguration(envelope.data)));
+      report.configurationOnly = true;
+    } else {
+      result = await restoreEnvelope(context, local, envelope, archive, importedPanels, importedWorkspaces, preparedFiles, conflicts, report);
+    }
     attachBackupRestoreReport(result, report);
     for (const file of preparedFiles) { file.version = await file.files.removalVersion(file.path); }
     if (keys) { attachBackupKeys(result, keys); }

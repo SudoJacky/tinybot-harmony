@@ -145,7 +145,7 @@ export struct WebDavBackupPanel {
         if (!await this.app.importSnapshot(restored)) { throw new Error(this.app.error || this.app.saveError); }
         this.status = t('备份已恢复，已保留本机已有数据。');
       } else {
-        await WebDavBackup.create(context, this.app.exportSnapshot(), saved.id);
+        await WebDavBackup.create(context, this.app.configurationSnapshot(), saved.id);
         this.status = t('备份已上传到 WebDAV。');
       }
     } catch (error) {
@@ -254,7 +254,7 @@ export struct WebDavBackupPanel {
             t('使用连接「{0}」。', [this.saved.name]) })
         GroupCard() {
           Column() {
-            NavRow({ title: t('备份'), subtitle: t('每台设备独立保存最近 3 个备份版本'),
+            NavRow({ title: t('备份'), subtitle: t('只上传配置与加密连接凭据，保留最近 3 个配置版本'),
               compId: 'create-webdav-backup', icon: $r('sys.symbol.cloud'), disabled: this.locked(), onTap: () => this.transfer(false) })
             RowDivider()
             NavRow({ title: t('恢复备份'), subtitle: t('下载 WebDAV 备份并合并到本机'),
@@ -263,7 +263,7 @@ export struct WebDavBackupPanel {
         }
         ForEach(this.versions, (item: BackupSnapshot) => {
           NavRow({ title: item.createdAt ? new Date(item.createdAt).toLocaleString(getLocale()) : t('旧版备份'),
-            subtitle: item.deviceId ? t('设备 {0}', [item.deviceId.slice(0, 8)]) : t('旧版备份'), icon: $r('sys.symbol.clock'),
+            subtitle: item.name.startsWith('tinybot-config-') ? t('配置备份 · 设备 {0}', [item.deviceId?.slice(0, 8) || '']) : t('旧版备份'), icon: $r('sys.symbol.clock'),
             disabled: this.locked(), onTap: () => this.transfer(true, item.name) })
         }, (item: BackupSnapshot) => item.name)
         if (this.transferFeedback) { this.feedback() }

@@ -60,6 +60,7 @@ EVENTS.backup = ['started', 'restored', 'restore_prepared', 'key_decrypt_failed'
   'restore_completed', 'restore_failed', 'startup_capture_failed', 'startup_marker_failed', 'startup_lookup_failed',
   'cloud_retry_finished', 'cloud_failed', 'cloud_retry', 'cloud_sync_progress', 'cloud_sync_finished', 'cloud_list_failed', 'cloud_settings_failed', 'auto_failed', 'auto_settings_failed', 'auto_task_failed', 'auto_expired', 'auto_release_failed',
   'webdav_failed', 'webdav_cleanup_failed', 'webdav_uploaded', 'webdav_settings_failed'];
+EVENTS.sync = ['device_discovery_failed', 'device_store_close_failed', 'device_published', 'device_transfer_failed', 'dfs_status'];
 EVENTS['life-panel'] = ['published', 'refresh_skipped', 'refresh_started', 'refresh_complete', 'refresh_cancelled', 'refresh_failed', 'manifest_failed', 'action_failed', 'expiry_failed', 'connection_failed', 'api_response', 'api_failed', 'transform_started', 'transform_complete', 'transform_failed'];
 EVENTS.background = ['acquired', 'released', 'cancelled', 'suspended', 'release_failed', 'stop_failed', 'transition_failed', 'window_expired'];
 EVENTS.notification = ['authorization_checked', 'authorization_denied', 'authorization_failed', 'disabled', 'published', 'publish_failed'];

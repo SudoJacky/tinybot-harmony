@@ -22,11 +22,11 @@ function checkCompiledPanel(f) {
     SectionHeader: Child, GroupCard: Child, SwitchRow: Child, NavRow: Child, RowDivider: Child, Banner: Child, IconButton: Child,
     ViewPU: { create() {} }, Space: {}, Radius: {}, BarState: { Off: 0 }, Alignment: { Top: 0 }, VerticalAlign: { Top: 0 } });
   const actions = [];
-  const panel = Object.assign(new exports.Probe(), { automatic: f.service, app: { sharedBusy: false }, busy: false, status: '', error: '', backupDate: '', cloud: value => actions.push(value), chooseRestore:()=>actions.push('versions'), appearance: {},
+  const panel = Object.assign(new exports.Probe(), { devices: [], automatic: f.service, app: { sharedBusy: false }, busy: false, status: '', error: '', backupDate: '', cloud: value => actions.push(value), chooseRestore:()=>actions.push('versions'), appearance: {},
     observeComponentCreation2: callback => callback(1, true), ifElseBranchUpdateFunction: (_branch, callback) => callback(),
     forEachUpdateFunction: (_element, items, callback) => items.forEach(callback) });
   panel.backupTab();
-  assert.deepEqual([...nodes.keys()].sort(), ['create-cloud-backup', 'restore-cloud-backup', 'webdav-backup-settings']); assert.ok(texts.includes(f.service.status));
+  assert.deepEqual([...nodes.keys()].sort(), ['create-cloud-backup', 'device-sync-receive', 'device-sync-send', 'restore-cloud-backup', 'webdav-backup-settings']); assert.ok(texts.includes(f.service.status));
   assert.equal(nodes.get('create-cloud-backup').title, '备份'); assert.equal(nodes.get('restore-cloud-backup').title, '恢复备份');
   nodes.get('create-cloud-backup').onTap(); nodes.get('restore-cloud-backup').onTap(); assert.deepEqual(actions, [false, 'versions']);
   panel.busy = true; panel.backupTab(); assert.equal(nodes.get('create-cloud-backup').disabled, true); assert.equal(nodes.get('restore-cloud-backup').disabled, true);
@@ -54,7 +54,7 @@ function fixture() {
     target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS
   } }).outputText, { exports: cancelExports, require: () => ({ ToolFailure: class extends Error { constructor(code, message) { super(message); this.code = code; } } }) });
   const imports = {
-    './BackupSnapshotNames': { newBackupSnapshot: () => 'tinybot-device-' + id + '-' + Date.now() + '-' + id + '.tinybot' },
+    './BackupSnapshotNames': { newBackupSnapshot: () => 'tinybot-config-' + id + '-' + Date.now() + '-' + id + '.tinybot' },
     '../model/BackupChanges': { BackupChanges: changes },
     '@kit.ArkData': { preferences: { getPreferencesSync: () => store } }, '@kit.ArkTS': { util: { generateRandomUUID: () => id } },
     '@kit.BackgroundTasksKit': { backgroundTaskManager: {
@@ -84,7 +84,7 @@ function fixture() {
     async leave() { service.onBackground(); await tick(); } };
 }
 (async () => {
-  for (const blocked of ['login', 'revoked', 'privacy', 'cloud', 'restoration', 'busy', 'empty']) {
+  for (const blocked of ['login', 'revoked', 'privacy', 'cloud', 'restoration', 'busy']) {
     const f = fixture();
     if (blocked === 'login') f.account.signedIn = false;
     if (blocked === 'revoked') f.account.revoked = true;
@@ -92,29 +92,28 @@ function fixture() {
     if (blocked === 'cloud') f.usable = false;
     if (blocked === 'restoration') f.prefs.set('startupBackupState', 'pending');
     if (blocked === 'busy') f.ready = false;
-    if (blocked === 'empty') f.data = { config: {}, threads: [], providerProfiles: [], productivity: {} };
     await f.leave(); assert.equal(f.writes, 0, blocked); assert.equal(f.leases.length, f.released.length, blocked + ' releases any acquired task');
-    if (blocked === 'login' || blocked === 'revoked') { assert.equal(f.snapshots, 0); assert.equal(f.service.state, 'waiting_login'); }
+    if (blocked === 'login' || blocked === 'revoked') { if (blocked === 'login') assert.equal(f.snapshots, 0); assert.equal(f.service.state, 'waiting_login'); }
     f.service.dispose();
   }
-  let f = fixture(); assert.equal(f.service.enabled, true); f.service.changed(); await tick();
+  let f = fixture(); assert.equal(f.service.enabled, true); await tick();
   assert.equal(f.writes, 0); assert.equal(f.leases.length, 0, 'Startup, foreground and edits do not start a backup');
   f.service.onBackground(); assert.equal(f.leases.length, 1, 'Lease is acquired synchronously before any async preparation'); await tick();
   assert.equal(f.writes, 1); assert.equal(f.service.state, 'pending'); assert.deepEqual(f.released, [1]);
-  assert.equal(f.calls[0].options.openID, 'fixture-openid'); assert.match(f.calls[0].options.name, /^tinybot-device-/, 'Automatic saves use a device-owned snapshot');
+  assert.equal(f.calls[0].options.openID, 'fixture-openid'); assert.match(f.calls[0].options.name, /^tinybot-config-/, 'Automatic saves use a device-owned snapshot');
   f.location = 3; await f.leave(); assert.equal(f.uploads, 1); assert.equal(f.writes, 1, 'Pending upload retries do not reserialize unchanged data');
   assert.equal(f.service.state, 'uploaded'); const leases = f.leases.length; await f.leave(); assert.equal(f.leases.length, leases, 'Unchanged uploaded data needs no task');
-  f.workspace.contentRevision++; await f.leave(); assert.equal(f.writes, 2, 'Workspace writes also invalidate the snapshot');
-  f.service.changed(); await tick(); assert.equal(f.writes, 2); await f.leave(); assert.equal(f.writes, 3);
-  f.service.setEnabled(false); assert.equal(f.saved.get('autoCloudBackupEnabled'), false); await f.leave(); assert.equal(f.writes, 3);
+  f.workspace.contentRevision++; await f.leave(); assert.equal(f.writes, 1, 'Workspace writes do not publish cloud settings');
+  f.changes.revision++; await tick(); assert.equal(f.writes, 1); await f.leave(); assert.equal(f.writes, 2);
+  f.service.setEnabled(false); assert.equal(f.saved.get('autoCloudBackupEnabled'), false); await f.leave(); assert.equal(f.writes, 2);
   f.service.dispose(); f.initialize(); assert.equal(f.service.enabled, false, 'An explicit opt-out survives restart');
   f.failFlush = true; assert.throws(() => f.service.setEnabled(true), /disk full/); assert.equal(f.prefs.get('autoCloudBackupEnabled'), false); f.service.dispose();
   f = fixture(); f.location = 3; await f.leave(); assert.equal(f.writes, 1);
-  f.changes.revision++; await f.leave(); assert.equal(f.writes, 2, 'Credential and usage-only changes invalidate automatic snapshots');
+  f.changes.revision++; await f.leave(); assert.equal(f.writes, 2, 'Credential changes invalidate automatic snapshots');
   f.prefs.set('language', 'en'); await f.leave(); assert.equal(f.writes, 3, 'Language-only edits invalidate automatic snapshots');
   f.prefs.set('appearance', '{"accent":"blue"}'); await f.leave(); assert.equal(f.writes, 4, 'Appearance-only edits invalidate automatic snapshots');
-  f.prefs.set('seenReplies', '{"reply":"read"}'); await f.leave(); assert.equal(f.writes, 5, 'Feedback read state invalidates automatic snapshots');
-  await f.leave(); assert.equal(f.writes, 5, 'Unchanged additional data does not serialize again'); f.service.dispose();
+  f.prefs.set('seenReplies', '{"reply":"read"}'); await f.leave(); assert.equal(f.writes, 4, 'Feedback read state stays on device');
+  await f.leave(); assert.equal(f.writes, 4, 'Unchanged additional data does not serialize again'); f.service.dispose();
   f = fixture(); f.prefs.set('startupBackupState', 'pending'); f.prefs.set('onboardingComplete', true); await f.leave(); assert.equal(f.writes, 1); f.service.dispose();
   f = fixture(); f.leaseError = Error('quota exhausted'); await f.leave(); assert.equal(f.writes, 0); assert.equal(f.service.state, 'failed');
   f.leaseError = undefined; f.location = 3; await f.leave(); assert.equal(f.service.state, 'uploaded'); f.service.dispose();

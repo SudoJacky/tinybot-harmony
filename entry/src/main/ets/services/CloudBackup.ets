@@ -5,7 +5,7 @@ import { cloudSync, fileIo as fs, fileUri } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { AppData } from '../model/Conversation';
 import { t } from '../model/I18n';
-import { BackupConflictMode, backupBusy, createBackupFile, readBackupFile, withBackupOperation } from './Backup';
+import { BackupConflictMode, backupBusy, createConfigurationFile, readBackupFile, withBackupOperation } from './Backup';
 import { copyFileBytes } from './FileBytes';
 import { Cancellation } from './Cancellation';
 import { huaweiAccount } from './HuaweiAccount';
@@ -286,7 +286,7 @@ export class CloudBackup {
       const name = options?.name || newBackupSnapshot(context);
       if (backupSnapshot(name)?.deviceId !== backupDeviceId(context)) { throw new Error('Invalid backup snapshot owner'); }
       const directory = await backupDirectory(context);
-      const source = await createBackupFile(context, data, undefined, openID, cancellation);
+      const source = await createConfigurationFile(context, data, openID, cancellation);
       const target = directory + '/' + name;
       const temporary = directory + '/tinybot-' + util.generateRandomUUID() + '.partial';
       try {

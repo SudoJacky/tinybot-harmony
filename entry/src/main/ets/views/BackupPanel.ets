@@ -11,6 +11,9 @@ import { Btn, Space } from '../common/Theme';
 import { Banner, GroupCard, NavRow, RowDivider, SectionHeader } from '../common/Widgets';
 import { BackupLoginRequired, huaweiAccount } from '../services/HuaweiAccount';
 import { NativeData } from '../services/NativeData';
+import { DeviceSyncStore, SyncDevice, trustedDevices } from '../services/DeviceSyncStore';
+import { sendDeviceData, receiveDeviceData } from '../services/DeviceTransfer';
+import { withBackupOperation } from '../services/Backup';
 
 @Component
 export struct BackupPanel {
@@ -29,6 +32,10 @@ export struct BackupPanel {
   @State private versions: CloudBackupItem[] = [];
   @State private showVersions: boolean = false;
   private visible: boolean = false;
+  @State private devices: SyncDevice[] = [];
+  @State private sending: boolean = false;
+  private deviceStore?: DeviceSyncStore;
+  private transferring: boolean = false;
   private reading?: Promise<void>;
   private statusError: boolean = false;
 
@@ -37,7 +44,17 @@ export struct BackupPanel {
     this.recoveryPending = NativeData.forFilesDir(this.context().filesDir)?.autoBackupReady() === false;
     this.refreshStatus();
   }
-  aboutToDisappear(): void { this.visible = false; }
+  aboutToDisappear(): void {
+    this.visible = false;
+    if (!this.transferring) { this.closeDeviceStore(); }
+  }
+  private async closeDeviceStore(): Promise<void> {
+    const store = this.deviceStore; this.deviceStore = undefined;
+    if (store) {
+      try { await store.close(); }
+      catch (error) { Diagnostics.log('error', 'sync', 'device_store_close_failed', undefined, error as Error); }
+    }
+  }
   private async foregroundChanged(): Promise<void> {
     if (!this.foreground || !this.visible || this.busy) { return; }
     await this.reading;
@@ -93,7 +110,7 @@ export struct BackupPanel {
         this.recoveryPending = false;
         if (this.visible) { this.status = t('备份已恢复，已保留本机已有数据。'); }
       } else {
-        const completed = await CloudBackup.create(context, this.app.exportSnapshot());
+        const completed = await CloudBackup.create(context, this.app.configurationSnapshot());
         if (completed) { NativeData.forFilesDir(context.filesDir)?.allowAutoBackup(); this.recoveryPending = false; }
         if (this.visible) { this.status = completed ? t('备份已上传到云端。') : t('备份已保存在本机，等待上传。请联网后再次备份。'); }
       }
@@ -108,10 +125,66 @@ export struct BackupPanel {
     }
   }
 
+  private async discover(sending: boolean): Promise<void> {
+    if (this.locked()) { return; }
+    this.busy = true; this.error = ''; this.status = ''; this.needsLogin = false; this.devices = [];
+    try {
+      const context = this.context(), devices = await trustedDevices(context);
+      if (!this.deviceStore) { this.deviceStore = await DeviceSyncStore.open(context); }
+      this.sending = sending; this.devices = devices;
+      if (!devices.length) { this.status = t('未发现可信设备，请确认两端已组网并安装 Tinybot。'); }
+    } catch (error) {
+      this.error = (error as Error).message;
+      Diagnostics.log('error', 'sync', 'device_discovery_failed', undefined, error as Error);
+    }
+    finally { this.busy = false; if (!this.visible) { await this.closeDeviceStore(); } }
+  }
+
+  private async transfer(device: SyncDevice): Promise<void> {
+    if (this.locked()) { return; }
+    this.transferring = true; this.busy = true; this.devices = []; this.error = ''; this.status = t('正在传输设备数据…');
+    try {
+      await withBackupOperation(async () => {
+        const context = this.context(), store = this.deviceStore;
+        if (!store) { throw new Error('Device transfer session is closed'); }
+        if (this.sending) {
+          await sendDeviceData(context, store, device.id, this.app.exportSnapshot());
+          this.status = t('数据已发送。请在对方设备选择从本机接收。');
+        } else {
+          let summary = '';
+          const imported = await this.app.receiveFromDevice(async (snapshot) => {
+            const result = await receiveDeviceData(context, store, device.id, snapshot);
+            summary = t('已合并 {0} 个会话，其中 {1} 个分支，已写入 {2} 个文件。', [result.threads, result.branches, result.files]);
+            return result.data;
+          });
+          if (!imported) { throw new Error(this.app.error || this.app.saveError || t('当前无法导入数据。')); }
+          this.status = summary;
+        }
+      });
+    } catch (error) {
+      this.error = (error as Error).message; this.status = '';
+      Diagnostics.log('error', 'sync', 'device_transfer_failed', undefined, error as Error);
+    } finally { this.transferring = false; this.busy = false; if (!this.visible) { await this.closeDeviceStore(); } }
+  }
+
   @Builder
   backupTab() {
     Scroll() {
       Column({ space: Space.md }) {
+        SectionHeader({ title: t('设备间数据同步'), caption: t('两端分别点发送和接收。发送完成后，在接收端点选发送设备。') })
+        GroupCard() {
+          Column() {
+            NavRow({ title: t('发送到其他设备'), icon: $r('sys.symbol.arrow_up'), compId: 'device-sync-send',
+              disabled: this.locked(), onTap: () => this.discover(true) })
+            RowDivider()
+            NavRow({ title: t('从其他设备接收'), icon: $r('sys.symbol.arrow_down'), compId: 'device-sync-receive',
+              disabled: this.locked(), onTap: () => this.discover(false) })
+            ForEach(this.devices, (device: SyncDevice) => {
+              NavRow({ title: device.name, icon: $r('sys.symbol.arrow_clockwise'), disabled: this.locked(),
+                onTap: () => this.transfer(device) })
+            }, (device: SyncDevice) => device.id)
+          }
+        }
         SectionHeader({ title: t('第三方备份位置') })
         GroupCard() {
           NavRow({ title: t('WebDAV'), subtitle: t('使用自己的 WebDAV 服务器手动备份和恢复'),
@@ -120,7 +193,7 @@ export struct BackupPanel {
         SectionHeader({ title: t('华为云空间') })
         GroupCard() {
           Column() {
-            NavRow({ title: t('备份'), subtitle: t('每台设备独立保存最近 3 个备份版本'),
+            NavRow({ title: t('备份'), subtitle: t('只上传配置与加密连接凭据，保留最近 3 个配置版本'),
               compId: 'create-cloud-backup', icon: $r('sys.symbol.cloud'), disabled: this.locked(), onTap: () => this.cloud(false) })
             RowDivider()
             NavRow({ title: t('恢复备份'), subtitle: t('选择设备与版本，确认恢复内容'),
@@ -132,7 +205,7 @@ export struct BackupPanel {
             Column() {
               ForEach(this.versions, (item: CloudBackupItem) => {
                 NavRow({ title: new Date(item.createdAt).toLocaleString(getLocale()),
-                  subtitle: item.deviceId ? t('设备 {0}', [item.deviceId.slice(0, 8)]) : t('旧版备份'),
+                  subtitle: item.name.startsWith('tinybot-config-') ? t('配置备份 · 设备 {0}', [item.deviceId?.slice(0, 8) || '']) : t('旧版备份'),
                   icon: $r('sys.symbol.clock'), disabled: this.locked(), onTap: () => this.cloud(true, item.name) })
               }, (item: CloudBackupItem) => item.name)
             }
