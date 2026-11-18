@@ -314,7 +314,8 @@ const TouchType = { Down: 0, Move: 1, Up: 2, Cancel: 3 };
   const page = probe(indexTree, index, ['addBrowserAnnotation'], {
     MAX_MESSAGE_ATTACHMENTS: 10,
     Attachments: { saveBrowserAnnotation: async () => { draftEvents.push('image'); return { id: 'capture' }; },
-      saveBrowserScreenshot: async () => { draftEvents.push('screenshot'); return { id: 'screenshot' }; } },
+      saveBrowserScreenshot: async () => { draftEvents.push('screenshot'); return { id: 'screenshot' }; },
+      discardStaged: async items => draftEvents.push(['discard', ...items]) },
     browserAnnotationContent: (page, note) => ({ url: page.url, note })
   });
   Object.assign(page, { app: { active: { id: 'original', attachments: [] }, canQueueInput: true,
@@ -329,5 +330,11 @@ const TouchType = { Down: 0, Move: 1, Up: 2, Cancel: 3 };
   assert.equal(draftEvents.filter(value => value === 'image').length, 1, 'Wrong-thread exports cannot write or attach an image');
   await page.addBrowserAnnotation('original', {}, undefined, '');
   assert.deepEqual(draftEvents.at(-2), ['original', { id: 'screenshot' }]);
+  page.app.appendDraftAttachment = async () => { throw new Error('Draft save failed'); };
+  await assert.rejects(page.addBrowserAnnotation('original', {}, undefined, ''), /Draft save failed/);
+  assert.equal(draftEvents.at(-1)[0], 'discard');
+  assert.equal(draftEvents.at(-1)[1].id, 'screenshot');
+  await assert.rejects(page.addBrowserAnnotation('original', {}, { url: 'https://example.com' }, 'Change this'), /Draft save failed/);
+  assert.deepEqual(draftEvents.at(-1), ['discard', { id: 'capture', browserAnnotation: undefined }]);
   console.log('PASS emitted annotation submission stages the captured URL and image in the original chat without sending or handing off');
 })().catch(error => { console.error(error); process.exitCode = 1; });

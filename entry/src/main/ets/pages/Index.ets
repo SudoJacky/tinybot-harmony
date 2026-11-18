@@ -187,6 +187,8 @@ struct Index {
   private reviewAfterDismiss: boolean = false;
   private reviewDisposed: boolean = false;
   private unsubscribeLaunch?: () => void;
+  private unsubscribeShare?: () => void;
+  private unsubscribeSession?: () => void;
   private launching: boolean = false;
   @State private voiceRequest: string = '';
   private startupBackup?: StartupBackup;
@@ -232,14 +234,16 @@ struct Index {
       try { this.startupBackup = new StartupBackup(context); }
       catch (error) { Diagnostics.log('warn', 'backup', 'startup_capture_failed', undefined, error as Error); }
       this.session = createNativeSessionService(context, this.approval, this.browser);
-      this.session.subscribe((event) => {
+    }
+    if (!this.unsubscribeSession) {
+      this.unsubscribeSession = this.session.subscribe((event) => {
         if (event.kind !== 'state') { autoCloudBackup.changed(); }
         if (event.state.canNavigate && ShareInbox.peek()) { this.receiveShare(); }
         if (event.kind === 'task-complete' && event.threadId) { this.taskCompleted(event.threadId); }
       });
     }
     this.app.initialize(this.session).then(() => {
-      if (!this.privacy.allowed) { return; }
+      if (!this.privacy.allowed || this.reviewDisposed) { return; }
       const data = NativeData.forFilesDir(context.filesDir);
       this.recoveryNeeded = !this.app.ready && data?.needsRecovery === true;
       if (this.recoveryNeeded && data) { this.findRecoverySources(context, data); }
@@ -251,7 +255,8 @@ struct Index {
           this.app.ready && (data?.autoBackupReady() ?? true) && !this.app.saving && !this.app.saveError && !this.startupBackupChecking &&
           !this.startupBackupRestoring && !this.startupBackupDialog);
       } catch (error) { Diagnostics.log('warn', 'backup', 'auto_settings_failed', undefined, error as Error); }
-      ShareInbox.subscribe(() => this.receiveShare());
+      if (!this.unsubscribeShare) { this.unsubscribeShare = ShareInbox.subscribe(() => this.receiveShare()); }
+      else if (ShareInbox.peek()) { this.receiveShare(); }
       if (this.app.ready && !this.unsubscribeLaunch) {
         this.unsubscribeLaunch = LaunchActions.subscribe(() => this.receiveLaunch());
       }
@@ -1185,9 +1190,15 @@ struct Index {
   private async addBrowserAnnotation(threadId: string, pixel: image.PixelMap, page: AnnotationPage | undefined, note: string): Promise<void> {
     if (threadId !== this.app.active.id) { throw new Error(t('对话已切换，请在当前对话重新添加附件。')); }
     if (!this.app.canQueueInput || this.app.active.attachments.length >= MAX_MESSAGE_ATTACHMENTS) { throw new Error(t('当前无法添加附件，请稍后重试。')); }
+    const annotation = page ? browserAnnotationContent(page, note) : undefined;
     const item = page ? await Attachments.saveBrowserAnnotation(pixel) : await Attachments.saveBrowserScreenshot(pixel);
-    if (page) { item.browserAnnotation = browserAnnotationContent(page, note); }
-    await this.app.appendDraftAttachment(threadId, item);
+    if (annotation) { item.browserAnnotation = annotation; }
+    try { await this.app.appendDraftAttachment(threadId, item); }
+    catch (error) {
+      // The rejected annotation itself may be invalid. Discard the original staged image.
+      item.browserAnnotation = undefined;
+      await Attachments.discardStaged([item]); throw error as Error;
+    }
     this.paths.clear(); this.rootSection = ''; this.setDrawer(false); this.hideBrowserTab();
   }
 
@@ -1201,6 +1212,8 @@ struct Index {
     this.chosenDesktopCommand = undefined;
     this.desktopCommandsDialog?.close();
     this.unsubscribeLaunch?.(); this.unsubscribeLaunch = undefined;
+    this.unsubscribeShare?.(); this.unsubscribeShare = undefined;
+    this.unsubscribeSession?.(); this.unsubscribeSession = undefined;
     this.app.stop();
     this.app.flushDraft();
     this.app.providerEditor.apiKey = '';

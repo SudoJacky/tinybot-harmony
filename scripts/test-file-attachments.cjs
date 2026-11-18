@@ -144,6 +144,30 @@ async function attach(name, bytes, id = 'chat') {
 }
 async function main() {
   fs.mkdirSync(disk(root + '/cache'), { recursive: true }); Attachments.configure(root);
+  const { readBounded } = load('services/FileBytes');
+  const realRead = fileIo.read, realStat = fileIo.stat;
+  async function bounded(bytes, reportedSize, maximum, readSize) {
+    let offset = 0;
+    const buffers = [];
+    fileIo.stat = async () => ({ isFile: () => true, size: reportedSize });
+    fileIo.read = async (_fd, buffer) => {
+      buffers.push(buffer.byteLength);
+      const count = Math.min(bytes.length - offset, buffer.byteLength, readSize);
+      new Uint8Array(buffer).set(bytes.subarray(offset, offset + count));
+      offset += count;
+      return count;
+    };
+    try {
+      assert.deepEqual(Buffer.from(await readBounded(1, maximum)), bytes);
+      return buffers;
+    } finally { fileIo.read = realRead; fileIo.stat = realStat; }
+  }
+  const sample = Buffer.from('sample');
+  assert.deepEqual(await bounded(sample, 6, 20 * 1024 * 1024, 6), [6, 1]);
+  await bounded(sample, 3, 6, 2);
+  await bounded(sample, 8, 8, 2);
+  await bounded(Buffer.alloc(0), 0, 0, 1);
+  await assert.rejects(bounded(sample, 3, 5, 2), /文件超出读取上限/);
   const raw = Buffer.from('\uFEFFalpha\r\n中文🙂\r\nEND');
   const item = await attach('资料.txt', raw);
   assert.deepEqual(fs.readFileSync(disk(Attachments.path(item))), raw);
@@ -355,6 +379,14 @@ async function main() {
   assert.equal(await reopened.setAttachments(documents), true);
   assert.equal(await reopened.setAttachments(documents.slice(0, 5).concat(photos.slice(0, 5))), true);
   await assert.rejects(selectAttachments({}, false, 0), /10/);
+  const staging = disk(root + '/attachments');
+  const stagedFiles = () => fs.readdirSync(staging, { recursive: true }).sort();
+  const beforeFailure = stagedFiles();
+  for (const photo of [false, true]) {
+    selectedUris = [root + '/session.txt', root + '/missing'];
+    await assert.rejects(selectAttachments({}, photo, 2), /ENOENT/);
+    assert.deepEqual(stagedFiles(), beforeFailure);
+  }
   console.log('PASS ten images, ten files and mixed attachments persist and reload; ten images reach model input and an eleventh cannot replace the draft');
 
   for (const photo of [false, true]) {
@@ -367,6 +399,23 @@ async function main() {
   sharedRecords.push(sharedRecords[0]);
   await ShareInbox.receive({ action: 'ohos.want.action.sendData' }, root);
   const overflow = ShareInbox.take(); assert.match(overflow.error, /10/); assert.equal(overflow.attachments.length, 0);
+  const beforeShareFailure = stagedFiles();
+  sharedRecords = [{ utd: 'general.text', uri: 'file://' + root + '/session.txt' },
+    { utd: 'general.text', uri: 'file://' + root + '/missing' }];
+  let deliveries = 0;
+  const oldListener = ShareInbox.subscribe(() => assert.fail('Disposed page received a share'));
+  const currentListener = ShareInbox.subscribe(() => { deliveries++; });
+  oldListener();
+  await ShareInbox.receive({ action: 'ohos.want.action.sendData' }, root);
+  const failedShare = ShareInbox.take();
+  assert.match(failedShare.error, /ENOENT/); assert.equal(failedShare.attachments.length, 0);
+  assert.deepEqual(stagedFiles(), beforeShareFailure); assert.equal(deliveries, 1);
+  currentListener();
+  sharedRecords = [{ content: 'queued' }];
+  await ShareInbox.receive({ action: 'ohos.want.action.sendData' }, root);
+  assert.equal(deliveries, 1);
+  ShareInbox.subscribe(() => { deliveries++; })();
+  assert.equal(deliveries, 2); assert.equal(ShareInbox.take().text, 'queued');
   const manifest = fs.readFileSync(path.resolve(source, '../module.json5'), 'utf8');
   const limits = [...manifest.matchAll(/"maxFileSupported":\s*(\d+)/g)].map(match => Number(match[1]));
   assert.equal(limits.length, 7); assert.ok(limits.every(limit => limit === MAX_MESSAGE_ATTACHMENTS));
@@ -631,4 +680,6 @@ async function encryptedBackupTest() {
   const noKeyPath=await createBackupFile(context,noKey,vault);assert.equal(legacyBackupFixture(fs.readFileSync(disk(noKeyPath))).protectedKeys.version,2);
   console.log('PASS encrypted API keys, fresh nonces, no plaintext secrets, account/tamper rejection, secure-store restore, transactional rollback and local-key preservation');
 }
-main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => console.log('Fixtures: ' + fixture));
+main().then(() => fs.promises.rm(fixture, { recursive: true })).catch(error => {
+  console.error(error, 'Fixtures:', fixture); process.exitCode = 1;
+});

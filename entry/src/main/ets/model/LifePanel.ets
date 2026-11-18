@@ -41,7 +41,6 @@ export interface PanelSummary {
 }
 export interface PanelListPage { items: PanelSummary[]; nextCursor?: string; }
 export interface PanelItem { id: string; label: string; value?: string; done?: boolean; }
-export interface PanelCell { column: number; row: number; columns: number; rows: number; }
 const KINDS: string[] = ['Row', 'Column', 'Text', 'Metric', 'Progress', 'ItemList', 'Checklist', 'Sparkline', 'ActionButton'];
 const TONES: string[] = ['accent', 'neutral', 'positive', 'warning', 'negative'];
 export function panelId(id: string): string {
@@ -191,24 +190,4 @@ export function parsePanelRecord(content: string, id: string): PanelRecord {
 export function panelDue(record: PanelRecord, now: number): boolean {
   return !record.archived && !record.paused && !!record.definition.source && !!record.definition.refreshMinutes &&
     now >= Math.max(record.refreshedAt, record.attemptedAt) + record.definition.refreshMinutes! * 60000;
-}
-// First-fit placement preserves S=1x1, M=2x1, L=2x2 without holes caused by row height.
-export function panelCells(sizes: string[], columns: number): PanelCell[] {
-  const occupied: Set<number> = new Set<number>(), result: PanelCell[] = [];
-  for (const size of sizes) {
-    const width = size === 'S' ? 1 : Math.min(2, columns), height = size === 'L' ? 2 : 1;
-    let offset = 0;
-    while (true) {
-      const column = offset % columns, row = Math.floor(offset / columns);
-      let fits = column + width <= columns;
-      for (let y = 0; y < height; y++) { for (let x = 0; x < width; x++) { if (occupied.has((row + y) * columns + column + x)) { fits = false; } } }
-      if (fits) {
-        result.push({ column: column, row: row, columns: width, rows: height });
-        for (let y = 0; y < height; y++) { for (let x = 0; x < width; x++) { occupied.add((row + y) * columns + column + x); } }
-        break;
-      }
-      offset++;
-    }
-  }
-  return result;
 }

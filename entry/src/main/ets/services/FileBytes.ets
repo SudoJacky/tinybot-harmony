@@ -4,13 +4,24 @@ import { t } from '../model/I18n';
 export async function readBounded(fd: number, maximum: number): Promise<ArrayBuffer> {
   const stat = await fs.stat(fd);
   if (!stat.isFile() || stat.size > maximum) { throw new Error(t('文件超出读取上限。')); }
-  const bytes = new Uint8Array(maximum + 1); let length = 0;
-  while (length < bytes.length) {
-    const buffer = new ArrayBuffer(bytes.length - length); const count = await fs.read(fd, buffer);
-    if (count === 0) { break; } bytes.set(new Uint8Array(buffer, 0, count), length); length += count;
+  const first = new ArrayBuffer(stat.size);
+  let length = stat.size > 0 ? await fs.read(fd, first) : 0;
+  const parts: Uint8Array[] = [new Uint8Array(first, 0, length)];
+  // A short read is not EOF. Probe even after reaching the reported size, since files can grow.
+  while (true) {
+    const size = length === stat.size ? 1 : Math.min(64 * 1024, maximum - length + 1);
+    const buffer = new ArrayBuffer(size);
+    const count = await fs.read(fd, buffer);
+    if (count === 0) { break; }
+    length += count;
+    if (length > maximum) { throw new Error(t('文件超出读取上限。')); }
+    parts.push(new Uint8Array(count === size ? buffer : buffer.slice(0, count)));
   }
-  if (length > maximum) { throw new Error(t('文件超出读取上限。')); }
-  return bytes.buffer.slice(0, length);
+  if (parts.length === 1 && length === first.byteLength) { return first; }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const part of parts) { bytes.set(part, offset); offset += part.length; }
+  return bytes.buffer;
 }
 
 export async function writeBytes(path: string, bytes: ArrayBuffer): Promise<void> {
@@ -18,7 +29,7 @@ export async function writeBytes(path: string, bytes: ArrayBuffer): Promise<void
   try {
     let offset = 0;
     while (offset < bytes.byteLength) {
-      const count = await fs.write(file.fd, bytes.slice(offset), { offset: offset });
+      const count = await fs.write(file.fd, offset === 0 ? bytes : bytes.slice(offset), { offset: offset });
       if (count <= 0) { throw new Error(t('文件写入未完成。')); } offset += count;
     }
     await fs.fsync(file.fd);

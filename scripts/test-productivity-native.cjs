@@ -3043,5 +3043,6 @@ async function test(name, run) {
   });
   suiteCompleted = true;
   assert.ok(completedTests > 0, 'No native adapter cases selected by TEST_FILTER=' + JSON.stringify(process.env.TEST_FILTER ?? ''));
-  console.log(completedTests+' native adapter integration checks passed. Fixtures: '+fixture);
-})().catch(error=>{console.error(error);process.exitCode=1;});
+  await fs.promises.rm(fixture, { recursive: true });
+  console.log(completedTests+' native adapter integration checks passed.');
+})().catch(error=>{console.error(error, 'Fixtures:', fixture);process.exitCode=1;});

@@ -153,7 +153,7 @@
             const eventually = async assertion => {
               const deadline = Date.now() + 2000;
               for (;;) {
-                try { await assertion(); return; }
+                try { return await assertion(); }
                 catch (error) { if (failed || Date.now() >= deadline) throw error; await pause(); }
               }
             };
@@ -168,18 +168,22 @@
                     if (JSON.stringify(actual) !== JSON.stringify(check.expected)) throw Error('Saved value does not match expected value at ' + check.path);
                   });
                 } else {
-                  const nodes = document.querySelectorAll(check.selector);
-                  if (nodes.length !== 1) throw Error('Selector must match exactly one element, found ' + nodes.length);
-                  const element = nodes[0], rect = element.getBoundingClientRect();
-                  if (!rect.width || !rect.height || getComputedStyle(element).visibility === 'hidden') throw Error('Element is not visible');
-                  if (['click', 'input', 'select'].includes(check.action) && element.disabled) throw Error('Control is disabled');
+                  const element = await eventually(() => {
+                    const nodes = document.querySelectorAll(check.selector);
+                    if (nodes.length !== 1) throw Error('Selector must match exactly one element, found ' + nodes.length);
+                    const target = nodes[0], rect = target.getBoundingClientRect();
+                    if (!rect.width || !rect.height || getComputedStyle(target).visibility === 'hidden') {
+                      throw Error('Element is not visible (' + rect.width + 'x' + rect.height + ', viewport ' + innerWidth + 'x' + innerHeight + ')');
+                    }
+                    if (['click', 'input', 'select'].includes(check.action) && target.disabled) throw Error('Control is disabled');
+                    if (check.action === 'text' && !target.textContent.includes(check.value)) throw Error('Expected text not found: ' + check.value);
+                    return target;
+                  });
                   if (['click', 'input', 'select'].includes(check.action)) checking = true;
                   if (check.action === 'click') element.click();
                   else if (check.action === 'input' || check.action === 'select') {
                     element.value = check.value; element.dispatchEvent(new Event('input', {bubbles:true})); element.dispatchEvent(new Event('change', {bubbles:true}));
-                  } else if (check.action === 'text') await eventually(() => {
-                    if (!element.textContent.includes(check.value)) throw Error('Expected text not found: ' + check.value);
-                  });
+                  }
                   await pause();
                 }
               } catch (error) { throw Error('check[' + index + '] ' + check.action + ' ' + (check.selector || check.path) + ': ' + error.message); }

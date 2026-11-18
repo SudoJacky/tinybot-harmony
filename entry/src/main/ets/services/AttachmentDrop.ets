@@ -1,5 +1,4 @@
 import { unifiedDataChannel, uniformDataStruct, uniformTypeDescriptor } from '@kit.ArkData';
-import { fileIo as fs } from '@kit.CoreFileKit';
 import { Attachment, MAX_MESSAGE_ATTACHMENTS } from '../model/Productivity';
 import { t } from '../model/I18n';
 import { Attachments } from './Attachments';
@@ -54,7 +53,7 @@ export async function importDroppedAttachments(data: unifiedDataChannel.UnifiedD
     await commit(items);
   } finally {
     if (!handedOff) {
-      for (const item of items) { await fs.unlink(Attachments.path(item)); }
+      await Attachments.discardStaged(items);
     }
   }
 }

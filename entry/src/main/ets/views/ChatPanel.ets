@@ -736,7 +736,10 @@ export struct ChatPanel {
       const items = source === 'camera' ? await captureAttachment(context) :
         await selectAttachments(context, source === 'photo', MAX_MESSAGE_ATTACHMENTS - this.thread.attachments.length);
       if (!items.length) { return; }
-      if (id !== this.app.active.id) { throw new Error(t("对话已切换，请在当前对话重新添加附件。")); }
+      if (id !== this.app.active.id) {
+        await Attachments.discardStaged(items);
+        throw new Error(t("对话已切换，请在当前对话重新添加附件。"));
+      }
       if (!await this.app.setAttachments(this.thread.attachments.concat(items))) {
         throw new Error(this.app.saveError || this.app.error || t('添加附件失败，请重试。'));
       }
@@ -778,7 +781,10 @@ export struct ChatPanel {
     this.importing = true;
     try {
       const item = await Attachments.saveDrawing(pixel);
-      if (this.drawingThreadId !== this.app.active.id) { throw new Error(t('对话已切换，请在当前对话重新添加附件。')); }
+      if (this.drawingThreadId !== this.app.active.id) {
+        await Attachments.discardStaged([item]);
+        throw new Error(t('对话已切换，请在当前对话重新添加附件。'));
+      }
       if (!await this.app.setAttachments(this.thread.attachments.concat([item]))) {
         throw new Error(this.app.saveError || this.app.error || t('添加附件失败，请重试。'));
       }

@@ -140,7 +140,11 @@ export class UsageLedger {
       if (UsageLedger.database) {
         const db = await UsageLedger.database();
         while (UsageLedger.dirty.size > 0) {
-          const positions = Array.from(UsageLedger.dirty).slice(0, PAGE_SIZE);
+          const positions: number[] = [];
+          for (const position of UsageLedger.dirty) {
+            positions.push(position);
+            if (positions.length === PAGE_SIZE) { break; }
+          }
           const records = positions.map((position: number): StoredRecord => ({ scope: USAGE_SCOPE,
             id: usageRecordId(position), text: JSON.stringify(UsageLedger.records[position]) }));
           positions.forEach((position) => { UsageLedger.dirty.delete(position); });

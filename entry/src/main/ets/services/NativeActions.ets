@@ -13,7 +13,8 @@ export async function selectAttachments(context: common.UIAbilityContext, photo:
   const uris = photo ? (await new photoAccessHelper.PhotoViewPicker().select({ MIMEType: photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE,
     maxSelectNumber: maximum })).photoUris : await new picker.DocumentViewPicker(context).select({ maxSelectNumber: maximum, fileSuffixFilters: [t('资料|.txt,.md,.csv,.tsv,.json,.log,.pdf,.docx,.xlsx,.pptx')] });
   const result: Attachment[] = [];
-  for (const uri of uris) { result.push(await Attachments.import(uri, photo)); }
+  try { for (const uri of uris) { result.push(await Attachments.import(uri, photo)); } }
+  catch (error) { await Attachments.discardStaged(result); throw error as Error; }
   return result;
 }
 
@@ -48,7 +49,11 @@ export interface SharedInput { text: string; attachments: Attachment[]; error: s
 export class ShareInbox {
   private static queue: SharedInput[] = [];
   private static listener?: () => void;
-  static subscribe(listener: () => void): void { ShareInbox.listener = listener; if (ShareInbox.queue.length) { listener(); } }
+  static subscribe(listener: () => void): () => void {
+    ShareInbox.listener = listener;
+    if (ShareInbox.queue.length) { listener(); }
+    return () => { if (ShareInbox.listener === listener) { ShareInbox.listener = undefined; } };
+  }
   static peek(): SharedInput | undefined { return ShareInbox.queue[0]; }
   static take(): SharedInput | undefined { return ShareInbox.queue.shift(); }
   static async receive(want: Want, filesDir: string): Promise<void> {
@@ -69,7 +74,10 @@ export class ShareInbox {
         }
       }
       if (input.text.length > 24000) { throw new Error(t("分享文本超过 24000 字符，请缩小内容。")); }
-    } catch (error) { input.error = t('接收分享失败：') + (error as Error).message; }
+    } catch (error) {
+      await Attachments.discardStaged(input.attachments);
+      input.attachments = []; input.text = ''; input.error = t('接收分享失败：') + (error as Error).message;
+    }
     ShareInbox.queue.push(input); if (ShareInbox.listener) { ShareInbox.listener(); }
   }
 }

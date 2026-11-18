@@ -57,9 +57,13 @@ assert.throws(()=>parseWebUiMessage('{"type":"resize","height":"200"}'));
   const cardProbe={version:1,library:'none',height:320,html:'<button id="reset">Reset</button><output id="count">9</output>',css:'',js:`
     document.querySelector('#reset').onclick=async()=>{await new Promise(r=>setTimeout(r,450));const s=await tinybot.storage.load();await tinybot.storage.save({count:0},s.revision);document.querySelector('#count').textContent='0';};`};
   const checks=[{action:'click',selector:'#reset'},{action:'text',selector:'#count',value:'0'},{action:'stored',path:'/count',expected:0}];
+  const delayedLayout = { ...cardProbe, js: cardProbe.js + `
+    const button = document.querySelector('#reset');
+    button.hidden = true;
+    setTimeout(() => { button.hidden = false; }, 500);` };
   for(const width of [174,360]){
     await page.setViewportSize({width,height:600});
-    await mount({},cardProbe,'',true,false,false,{width,checks});
+    await mount({},width === 174 ? delayedLayout : cardProbe,'',true,false,false,{width,checks});
     assert.equal(await page.evaluate(()=>probeState.value.count),0,'Declared delayed interaction uses detached test storage');
   }
   await mount({},cardProbe,'check[0] click #missing',true,false,false,{width:360,checks:[{action:'click',selector:'#missing'}]});

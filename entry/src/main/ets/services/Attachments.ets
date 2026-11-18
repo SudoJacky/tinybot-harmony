@@ -5,6 +5,7 @@ import { drawing } from '@kit.ArkGraphics2D';
 import { util } from '@kit.ArkTS';
 import { Attachment, validateAttachments } from '../model/Productivity';
 import { ModelMessage } from '../model/Agent';
+import { Diagnostics } from '../model/Diagnostics';
 import { copyFileBytes, readBounded, writeBytes } from './FileBytes';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { NativeWorkspaceFiles } from './NativeWorkspaceFiles';
@@ -19,6 +20,17 @@ export class Attachments {
     validateAttachments([item]);
     return item.original && item.workspaceId ? new WorkspaceStore(Attachments.filesDir).pathFor(item.workspaceId) + '/' + item.path :
       Attachments.root + '/' + item.path;
+  }
+  // Only freshly imported files whose ownership has not passed to a draft may be discarded.
+  static async discardStaged(items: Attachment[]): Promise<void> {
+    for (const item of items) {
+      if (item.workspaceId) { throw new Error('Cannot discard a workspace attachment'); }
+      const path = Attachments.path(item);
+      try {
+        if (item.original) { await fs.rmdir(path.slice(0, path.lastIndexOf('/'))); }
+        else if (await fs.access(path)) { await fs.unlink(path); }
+      } catch (error) { Diagnostics.log('warn', 'storage', 'cleanup_failed', { operation: 'attachment' }, error as Error); }
+    }
   }
   static async inWorkspace(items: Attachment[], workspaceId: string): Promise<Attachment[]> {
     validateAttachments(items);
@@ -78,29 +90,35 @@ export class Attachments {
     let bytes: ArrayBuffer;
     try { bytes = await packer.packing(pixel, { format: 'image/jpeg', quality: 85 }); }
     finally { await packer.release(); }
+    return Attachments.storeJpeg(bytes, name);
+  }
+  private static async storeJpeg(bytes: ArrayBuffer, name: string): Promise<Attachment> {
     if (bytes.byteLength > 4 * 1024 * 1024) { throw new Error(t('压缩后图片仍超过 4 MB。')); }
     const id = util.generateRandomUUID();
     const item: Attachment = { id: id, name: name, mime: 'image/jpeg', path: id + '.jpg', size: bytes.byteLength };
-    await writeBytes(Attachments.path(item), bytes);
+    try { await writeBytes(Attachments.path(item), bytes); }
+    catch (error) { await Attachments.discardStaged([item]); throw error as Error; }
     return item;
   }
   static async import(uri: string, photo: boolean): Promise<Attachment> {
     if (!Attachments.root) { throw new Error(t("附件存储尚未就绪。")); }
     if (!await fs.access(Attachments.root)) { await fs.mkdir(Attachments.root); }
-    const id = util.generateRandomUUID();
     let name = uri.slice(uri.lastIndexOf('/') + 1).split('?')[0];
     try { name = decodeURIComponent(name); } catch (_) { /* Keep literal URI name. */ }
     name = name.replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '_').slice(-200);
     if (!name || ['.', '..'].includes(name) || name.startsWith('.tinybot-')) { name = 'file'; }
     if (!photo) {
+      const id = util.generateRandomUUID();
       const relative = 'attachments/' + id + '/' + name;
-      await fs.mkdir(Attachments.root + '/attachments/' + id, true);
-      const size = await copyFileBytes(uri, Attachments.root + '/' + relative);
       const mime = /\.pdf$/i.test(name) ? 'application/pdf' : /\.docx$/i.test(name) ?
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : /\.xlsx$/i.test(name) ?
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : /\.pptx$/i.test(name) ?
         'application/vnd.openxmlformats-officedocument.presentationml.presentation' : 'application/octet-stream';
-      return { id: id, name: name, mime: mime, path: relative, size: size, original: true };
+      const item: Attachment = { id: id, name: name, mime: mime, path: relative, size: 0, original: true };
+      await fs.mkdir(Attachments.root + '/attachments/' + id, true);
+      try { item.size = await copyFileBytes(uri, Attachments.path(item)); }
+      catch (error) { await Attachments.discardStaged([item]); throw error as Error; }
+      return item;
     }
     const file = await fs.open(uri, fs.OpenMode.READ_ONLY);
     try {
@@ -115,14 +133,13 @@ export class Attachments {
         const scale = Math.min(1, 1600 / Math.max(info.size.width, info.size.height));
         const pixel = await source.createPixelMap({ desiredSize: {
           width: Math.max(1, Math.round(info.size.width * scale)), height: Math.max(1, Math.round(info.size.height * scale)) } });
-        const packer = image.createImagePacker();
-        try { bytes = await packer.packing(pixel, { format: 'image/jpeg', quality: 85 }); }
-        finally { await packer.release(); await pixel.release(); }
+        try {
+          const packer = image.createImagePacker();
+          try { bytes = await packer.packing(pixel, { format: 'image/jpeg', quality: 85 }); }
+          finally { await packer.release(); }
+        } finally { await pixel.release(); }
       } finally { await source.release(); }
-      if (bytes.byteLength > 4 * 1024 * 1024) { throw new Error(t("压缩后图片仍超过 4 MB。")); }
-      const item: Attachment = { id: id, name: name,
-        mime: 'image/jpeg', path: id + '.jpg', size: bytes.byteLength };
-      await writeBytes(Attachments.path(item), bytes); return item;
+      return await Attachments.storeJpeg(bytes, name);
     } finally { await fs.close(file); }
   }
   static async hydrate(messages: ModelMessage[]): Promise<ModelMessage[]> {
