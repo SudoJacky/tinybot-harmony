@@ -9,7 +9,7 @@ function load(name) {
   }).outputText, { exports }, { filename: file });
   return exports;
 }
-const { highlightCode } = load('CodeHighlight');
+const { highlightCode, highlightCodeBlocks } = load('CodeHighlight');
 const { StreamReveal } = load('StreamReveal');
 const has = (spans, text, kind) => assert.ok(spans.some(s => s.text.includes(text) && s.kind === 'syntax-' + kind), `${text}: ${kind}`);
 const cases = [
@@ -46,6 +46,19 @@ const comment = highlightCode('/* const fake = "hi";\nreturn 12; */', 'ts');
 assert.equal(comment.length, 1); has(comment, 'return 12', 'comment');
 const string = highlightCode('"// not a comment, const 12"', 'ts');
 assert.equal(string.length, 1); has(string, '// not a comment', 'string');
+
+// Partition after lexing so lazy code rows retain colors across block boundaries.
+const multiline = '/* opening\n' + '\n'.repeat(10) + 'end of comment */\n' +
+  'const template = `opening\r\n' + '  你好🙂\r\n'.repeat(13) + 'last`;\r\n';
+const longSource = multiline + 'let a = 1;\n'.repeat(640);
+const blocks = highlightCodeBlocks(longSource, 'js');
+const blockText = block => block.map(span => span.text).join('');
+assert.equal(blocks.map(blockText).join('\n'), longSource);
+assert.ok(blocks.every(block => blockText(block).split('\n').length <= 8));
+has(blocks[1], 'end of comment', 'comment');
+has(blocks[2], '你好🙂', 'string');
+assert.equal(blockText(highlightCodeBlocks('', 'js')[0]), '');
+
 // Preview and expansion run through emitted MarkdownChunkView in test-markdown-performance.cjs.
 const reveal = new StreamReveal();
 reveal.update('code', 'const x = ', 1000, false);

@@ -33,10 +33,10 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync(screenSource, 'utf8'), { c
     return displays.get(id);
   }, getDefaultDisplaySync: () => fallbackScreen }, window: { findWindow(name) {
     assert.equal(name, 'main');
-    return { getWindowProperties: () => ({ displayId }) };
+    return { getWindowProperties: () => ({ displayId, windowRect: { width: 1000, height: 1800 } }) };
   } } };
 } }, { filename: screenSource });
-const { fullscreenTransitionDuration } = screenExports;
+const { fullscreenTransitionDuration, previewFullscreenMotion } = screenExports;
 const ui = { getWindowName: () => 'main' };
 
 const Page = probe('common/AnimatedPage', 'AnimatedPage',
@@ -85,6 +85,20 @@ displays.set(8, { width: 500, height: 500, xDPI: 0, yDPI: 100 });
 assert.equal(fullscreenTransitionDuration(ui), 320, 'Missing physical density uses the longest duration');
 assert.deepEqual(warnings.map(args => args.slice(0, 3)), Array.from({ length: 2 }, () => ['warn', 'navigation', 'transition_screen_failed']));
 console.log('PASS full-screen entry and exit use the current display diagonal and report unavailable metrics');
+
+displayId = 7;
+displays.set(7, { width: 1019, height: 1360, xDPI: 200, yDPI: 200 });
+const previewUi = { ...ui, px2vp: px => px / 2, getComponentUtils: () => ({ getRectangleById(id) {
+  if (id === 'message-list') { return { windowOffset: { x: 0, y: 100 }, size: { width: 1000, height: 1200 } }; }
+  assert.equal(id, 'preview-card');
+  return { windowOffset: { x: 80, y: 540 }, size: { width: 640, height: 1200 } };
+} }) };
+const preview = previewFullscreenMotion(previewUi, 'preview-card', true);
+assert.equal(preview.duration, 220);
+assert.equal(preview.x, -50); assert.equal(preview.y, 10);
+assert.equal(preview.scale, 0.72);
+assert.equal(previewFullscreenMotion({}, 'preview-card', false), undefined);
+console.log('PASS preview cover scales proportionally around the visible card and supports instant transitions');
 
 const interrupted = fixture(); interrupted.show(); interrupted.frames.shift().onIdle(); interrupted.hide();
 const staleExit = interrupted.animations.at(-1);

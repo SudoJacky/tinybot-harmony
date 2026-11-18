@@ -63,6 +63,7 @@ const sandbox = { Diagnostics: load('model/Diagnostics').Diagnostics, exports: {
   hasMath: load('model/MathContent').hasMath,
   markdownSpans: text => { parseCalls++; return load('model/Markdown').markdownSpans(text); },
   highlightCode: (text, language) => { highlightChars += text.length; return highlightCode(text, language); },
+  codeTokenColor: kind => kind,
   NBSP: '\u00a0', CODE_PREVIEW_LINES: 18, Date: { now: () => clock },
   setTimeout: fn => { const id = ++nextTimer; timers.set(id, fn); return id; }, clearTimeout: id => timers.delete(id) };
 const areaCallbacks = [], visibilityCallbacks = [], placeholderHeights = [];
@@ -79,7 +80,7 @@ Object.assign(sandbox, { Text: noop, ForEach: noop, Column: column, Blank: blank
   Image: imageNode, ImageViewer: noop, ModalTransition: { ALPHA: 0 }, IMAGE_HEIGHT: 220, t: text => text, TextOverflow: {}, ImageFit: {}, FlexAlign: {},
   CopyOptions: { LocalDevice: 1, None: 0 }, Space: {}, Radius: {}, Alignment: {}, BarState: {}, ScrollDirection: {}, Color: {}, FontWeight: {}, FontStyle: {}, TextDecorationType: {} });
 const source = methods('MarkdownView', 'DocumentView', ['refresh', 'syncChunks', 'aboutToAppear', 'aboutToDisappear']) + '\n' +
-  methods('MarkdownChunkView', 'BlockView', ['refresh', 'refreshCode', 'inlineSpans', 'proseText', 'prose', 'initialRender', 'invalidateMeasure', 'codeBlock', 'codeShown', 'codeLines', 'codeColor', 'revealColor', 'columnWidths', 'scheduleReveal', 'afterRender', 'image', 'imageAlt', 'imageUrl', 'imagePreviewBuilder', 'aboutToAppear', 'aboutToDisappear']) + '\n' + methods('ChatPanel', 'ChatLayout', ['messageAreaChanged']);
+  methods('MarkdownChunkView', 'BlockView', ['refresh', 'refreshCode', 'inlineSpans', 'proseText', 'prose', 'initialRender', 'invalidateMeasure', 'codeBlock', 'codeShown', 'codeLines', 'revealColor', 'columnWidths', 'scheduleReveal', 'afterRender', 'image', 'imageAlt', 'imageUrl', 'imagePreviewBuilder', 'aboutToAppear', 'aboutToDisappear']) + '\n' + methods('ChatPanel', 'ChatLayout', ['messageAreaChanged']);
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, sandbox);
 const makeBlock = (block, animate = false) => Object.assign(new sandbox.exports.BlockView(), {
   model: new MarkdownChunkModel([block], animate), streaming: true, index: 0, mounted: false, disposed: false, generation: 0, visible: true,

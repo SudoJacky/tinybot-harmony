@@ -667,7 +667,7 @@ export struct MessageBubble {
                   PublishedPreviewCard({ preview: this.answerParts(entry.step)[partIndex].preview as PublishedPreview, inline: true,
                     inspectable: this.previewInspectable, inspected: this.inspectedPreviewId === this.answerParts(entry.step)[partIndex].preview?.id,
                     onInspect: () => this.onInspectPreview(this.message.id, (this.answerParts(entry.step)[partIndex].preview as PublishedPreview).id),
-                    onOpenSource: this.onOpenFile, saved: this.message.uiStates,
+                    saved: this.message.uiStates,
                     presentation: this.message.uiPresentation, available: this.uiAvailable, onInteract: this.onUi })
                 } else if (this.answerParts(entry.step)[partIndex].kind === 'panel') {
                   PublishedPanelCard({ reference: this.answerParts(entry.step)[partIndex].panel as PublishedPanel })
@@ -680,7 +680,7 @@ export struct MessageBubble {
                     PublishedPreviewCard({ preview: stepPreviews(this.message.id, this.message.stepViews[entry.step], entry.step, this.latestPreviewIds).find((item) => item.id === preview.id) as PublishedPreview,
                       inspectable: this.previewInspectable, inspected: this.inspectedPreviewId === preview.id,
                       onInspect: () => this.onInspectPreview(this.message.id, preview.id),
-                      onOpenSource: this.onOpenFile, saved: this.message.uiStates,
+                      saved: this.message.uiStates,
                       presentation: this.message.uiPresentation, available: this.uiAvailable, onInteract: this.onUi })
                   }, (preview: PublishedPreview) => preview.id)
               } else {

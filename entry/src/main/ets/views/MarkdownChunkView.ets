@@ -6,7 +6,7 @@ import { ColorMetrics } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { isMermaidBlock, MarkdownBlock, MarkdownSpan, markdownSpans } from '../model/Markdown';
 import { highlightCode } from '../model/CodeHighlight';
-import { Radius, Space } from '../common/Theme';
+import { codeTokenColor, Radius, Space } from '../common/Theme';
 import { RevealSpan, StreamReveal } from '../model/StreamReveal';
 import { MarkdownChunkModel } from '../viewmodel/MarkdownChunkModel';
 import { ImageViewer } from './ImageViewer';
@@ -173,18 +173,6 @@ export struct MarkdownChunkView {
     }
     return block.text.slice(0, end);
   }
-  private codeColor(kind: string): ResourceColor {
-    switch (kind) {
-      case 'syntax-keyword': return $r('app.color.code_keyword');
-      case 'syntax-string': return $r('app.color.code_string');
-      case 'syntax-number': return $r('app.color.code_number');
-      case 'syntax-comment': return $r('app.color.code_comment');
-      case 'syntax-function': return $r('app.color.code_function');
-      case 'syntax-property': return $r('app.color.code_property');
-      case 'syntax-punctuation': return $r('app.color.code_punctuation');
-      default: return $r('app.color.text_primary');
-    }
-  }
   // Cells share one width per column so rows line up; sized from the longest cell (CJK glyphs count double).
   private columnWidths(block: MarkdownBlock): number[] {
     const mark = Diagnostics.begin(this.perfId);
@@ -267,7 +255,7 @@ export struct MarkdownChunkView {
       Scroll() {
         Text() {
           ForEach(this.reveal.spans(`${index}`, this.codeTokens[index], this.revealTime), (span: RevealSpan) => {
-            Span(span.text).fontColor(this.revealColor(this.codeColor(span.kind), span.opacity))
+            Span(span.text).fontColor(this.revealColor(codeTokenColor(span.kind), span.opacity))
           })
         }.fontSize(13).lineHeight(20).fontFamily('monospace')
           .copyOption(this.selectable ? CopyOptions.LocalDevice : CopyOptions.None).fontColor($r('app.color.text_primary'))

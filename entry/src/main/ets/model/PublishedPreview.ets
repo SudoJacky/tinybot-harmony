@@ -1,5 +1,6 @@
 import { AgentStep, PreviewScreenshot, toolReceipts } from './Agent';
-import { uiParts } from './InteractiveUi';
+import { parseUiSurface, uiParts } from './InteractiveUi';
+import { parseWebUi } from './WebUi';
 import { referencePreviewId, previewReferenceTargets } from './PreviewReferences';
 import { answerReferenceParts } from './AnswerReferences';
 import { PublishedPanel, publishedPanels } from './PublishedPanel';
@@ -25,6 +26,22 @@ export interface PublishedPreview {
   screenshot?: PreviewScreenshot;
 }
 export interface PublishedAnswerPart { kind: string; content: string; key: string; preview?: PublishedPreview; panel?: PublishedPanel; }
+
+export interface PublishedPreviewSource { text: string; language: string; }
+
+export function publishedPreviewSource(preview: PublishedPreview): PublishedPreviewSource {
+  const language = preview.path.slice(preview.path.lastIndexOf('.') + 1).toLowerCase();
+  // Legacy publications saved JSONL directly inside the UI fence.
+  if (language === 'jsonl') {
+    const part = uiParts(preview.content, false).find(item => item.kind === 'ui');
+    if (!part?.closed) { throw new Error('Published JSONL source is missing'); }
+    return { text: part.content.slice(0, -1), language: 'json' };
+  }
+  const node = parseUiSurface(preview.content, '0').nodes.find(item => item.kind === 'web');
+  if (!node?.data) { throw new Error('Published web source is missing'); }
+  const spec = parseWebUi(node.data);
+  return { text: language === 'js' ? spec.js : spec.html, language: language };
+}
 
 export function publishedAnswerParts(messageId: string, steps: AgentStep[], index: number, status: string, latest: string[]): PublishedAnswerPart[] {
   const step = steps[index];

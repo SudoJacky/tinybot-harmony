@@ -1,5 +1,5 @@
 export type AnimatedIconName = 'account' | 'cloud' | 'compose' | 'tools' | 'mountain' | 'data' | 'help' |
-  'history' | 'search' | 'folder' | 'settings' | 'browser' | 'document' | 'branch' | 'plus' | 'announcement';
+  'history' | 'search' | 'folder' | 'settings' | 'browser' | 'document' | 'branch' | 'plus' | 'announcement' | 'code' | 'preview';
 
 function pulse(progress: number, from: number, to: number): number {
   if (progress <= from || progress >= to) { return 0; }
@@ -94,6 +94,17 @@ export function iconPath(name: AnimatedIconName, progress: number, strength: num
       const tilt = 2.8 * release - 1.2 * anticipation;
       return `${ellipse(12, 12, 8.75)} M12 3.25 C${5.75 + tilt} 6 ${5.75 - tilt} 18 12 20.75
         C${18.25 + tilt} 18 ${18.25 - tilt} 6 12 3.25 Z M3.25 12 Q12 ${12 + 2.1 * release} 20.75 12`;
+    }
+    case 'code': {
+      const spread = 1.55 * release - 0.6 * anticipation;
+      return `M${7.45 - spread} 7.75 L${3.1 - spread} 12 L${7.45 - spread} 16.25
+        M${16.55 + spread} 7.75 L${20.9 + spread} 12 L${16.55 + spread} 16.25 M13.85 5.9 L10.15 18.1`;
+    }
+    case 'preview': {
+      const open = 1.2 * release - 0.85 * anticipation;
+      return `M2.5 12 C7.2 ${4.1 - open} 16.8 ${4.1 - open} 21.5 12
+        C16.8 ${19.9 + open} 7.2 ${19.9 + open} 2.5 12 Z
+        ${ellipse(12, 12, 2.55, 2.55 + 0.35 * open)}`;
     }
     case 'document':
       return `M6 3.8 H14.4 L18.3 7.7 V18.6 Q18.3 20.2 16.7 20.2 H7.5 Q5.9 20.2 5.9 18.6 V5.5 Q5.9 3.8 7.5 3.8
