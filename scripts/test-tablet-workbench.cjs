@@ -583,41 +583,60 @@ assert.equal(interaction[0], 'owner-thread'); assert.equal(interaction[1], 'owne
 assert.equal(interaction[2], 'surface'); assert.equal(interaction[3].count, 2);
 console.log('PASS emitted side-preview interactions keep original conversation, message and surface identity');
 // Run the actual emitted card render branches: an inspected preview has only one live surface.
-let surfaces = 0, clicked, label, fullscreenButton, fullscreenCover, fullscreenBounds;
+let surfaces = 0, label, fullscreenCover, fullscreenBounds, buttonId, menuAction;
+const toolbarButtons = new Map(), menuItems = new Map();
 const noopUi = new Proxy({}, { get: () => () => {} });
+const captureButton = (props) => Object.assign(toolbarButtons.get(buttonId), props);
 const cardGlobals = { Column: new Proxy({}, { get: (_, name) => name === 'bindContentCover' ? (...args) => { fullscreenCover = args; } : () => {} }),
-  Stack: new Proxy({}, { get: (_, name) => name === 'onAreaChange' ? callback => { fullscreenBounds = callback; } : () => {} }),
-  __Common__: noopUi,
+  Row: noopUi, Text: noopUi, Blank: noopUi, SymbolGlyph: noopUi, Menu: noopUi,
+  MenuItem: new Proxy({}, { get: (_, name) => name === 'create' ? ({ content }) => { menuAction = content; } :
+    name === 'onClick' ? callback => { menuItems.set(menuAction, callback); } : () => {} }),
   If: new Proxy({}, { get: (_, name) => name === 'canRetake' ? () => false : () => {} }),
-  Button: new Proxy({}, { get: (_, name) => name === 'onClick' ? callback => { clicked = callback; } :
-    name === 'createWithLabel' ? value => { label = value; } : () => {} }),
-  Btn: {}, Space: {}, Radius: { sm: 10 }, HorizontalAlign: {}, Alignment: { TopEnd: 'top-right' }, ModalTransition: { ALPHA: 0 }, $r: value => value,
-  IconButton: class { constructor(_parent, props) { fullscreenButton = props; } },
-  t: value => value, ViewPU: { create() {} },
-  NodeContainer: new Proxy({}, { get: (_, name) => name === 'create' ? () => { surfaces++; } : () => {} }),
+  Button: new Proxy({}, { get: (_, name) => ({
+    createWithLabel: value => { label = value; },
+    id: value => { buttonId = value; toolbarButtons.set(value, {}); },
+    onClick: onClick => captureButton({ onClick }),
+    accessibilityText: text => captureButton({ text }),
+    bindMenu: ({ builder }) => captureButton({ openMenu: builder }),
+    enabled: enabled => captureButton({ enabled })
+  })[name] || (() => {}) }),
+  Btn: {}, Font: {}, Space: {}, Radius: {}, HorizontalAlign: {}, ButtonType: {}, Color: {}, ModalTransition: { ALPHA: 0 }, $r: value => value,
+  t: value => value,
+  NodeContainer: new Proxy({}, { get: (_, name) => name === 'create' ? () => { surfaces++; } :
+    name === 'onAreaChange' ? callback => { fullscreenBounds = callback; } : () => {} }),
   InteractiveAnswer: class { constructor() { throw Error('A preview card must host the existing node, not create another page'); } } };
-const Card = probe('views/PublishedPreviewCard', 'PublishedPreviewCard', ['initialRender', 'openFullscreen', 'closeFullscreen'], cardGlobals);
+const Card = probe('views/PublishedPreviewCard', 'PublishedPreviewCard',
+  ['initialRender', 'previewToolbar', 'previewMenu', 'openFullscreen', 'closeFullscreen'], cardGlobals);
+let sourcePath;
 const card = Object.assign(new Card(), { inspectable: true, inspected: false, expanded: true,
-  fullscreen: false, inlineHeight: 400, fullscreenView() {},
+  fullscreen: false, inlineHeight: 400, fullscreenView() {}, appearance: {},
   surface: { inlineMount: {}, entered: 0, exited: 0, enterFullscreen() { this.entered++; }, exitFullscreen() { this.exited++; } },
   preview: { id: 'preview', path: 'demo.html', content: 'demo', superseded: false },
-  onInspect() { this.inspected = true; },
+  onInspect: () => { card.inspected = true; }, onOpenSource: path => { sourcePath = path; },
   observeComponentCreation2(callback) { callback(1, true); }, ifElseBranchUpdateFunction(_branch, render) { render(); } });
-card.initialRender(); assert.equal(surfaces, 1); assert.equal(label, '打开预览');
-clicked.call(card); surfaces = 0; card.initialRender(); assert.equal(surfaces, 0); assert.equal(label, '查看预览');
+card.initialRender(); assert.equal(surfaces, 1);
+assert.deepEqual([...toolbarButtons.keys()], ['preview-more-preview', 'fullscreen-preview-preview']);
+toolbarButtons.get('preview-more-preview').openMenu();
+menuItems.get('打开源文件')(); assert.equal(sourcePath, 'demo.html');
+menuItems.get('打开预览')(); surfaces = 0; card.initialRender(); assert.equal(surfaces, 0); assert.equal(label, '查看预览');
 card.inspected = false; card.initialRender(); assert.equal(surfaces, 1);
 console.log('PASS emitted preview card detaches the inline surface while inspected and restores it on close');
 
 card.inline = true; card.expanded = false;
 surfaces = 0; card.initialRender(); assert.equal(surfaces, 1);
-clicked.call(card); surfaces = 0; card.initialRender(); assert.equal(surfaces, 0);
+toolbarButtons.get('preview-more-preview').openMenu();
+menuItems.get('打开预览')(); surfaces = 0; card.initialRender(); assert.equal(surfaces, 0);
 card.inspected = false; card.initialRender(); assert.equal(surfaces, 1);
 console.log('PASS final-answer inline preview transfers its live surface to the side panel and restores it on close');
 
 card.inspectable = false; card.inspected = false; surfaces = 0; card.initialRender();
-assert.equal(fullscreenButton.label, '全屏预览', 'Fullscreen must be available on phones without the side-panel entry');
+menuItems.clear();
+toolbarButtons.get('preview-more-preview').openMenu();
+assert.deepEqual([...menuItems.keys()], ['打开源文件']);
+const fullscreenButton = toolbarButtons.get('fullscreen-preview-preview');
+assert.equal(fullscreenButton.text, '全屏预览', 'Fullscreen must be available on phones without the side-panel entry');
 fullscreenBounds({}, { height: 420 }); assert.equal(card.inlineHeight, 420);
-fullscreenButton.onTap(); assert.equal(card.fullscreen, true);
+fullscreenButton.onClick(); assert.equal(card.fullscreen, true);
 surfaces = 0; card.initialRender(); assert.equal(surfaces, 1, 'The inline host must remain mounted while its page moves to fullscreen');
 assert.equal(card.surface.entered, 1);
 fullscreenBounds({}, { height: 900 }); assert.equal(card.inlineHeight, 420, 'The inline placeholder must keep the chat row stable');
@@ -663,12 +682,14 @@ const inlineExports = {};
 vm.runInNewContext(ts.transpileModule('exports.bind = function(entry, partIndex) { return (' + inlineArguments + '); };', {
   compilerOptions: { target: ts.ScriptTarget.ES2021 }
 }).outputText, { exports: inlineExports });
-let inspectedTarget;
+let inspectedTarget, openedSource;
 const inlineBubble = { message: { id: 'answer' }, previewInspectable: true, inspectedPreviewId: 'final-preview',
-  answerParts: () => [{ preview: { id: 'final-preview' } }], onInspectPreview: (...args) => { inspectedTarget = args; } };
+  answerParts: () => [{ preview: { id: 'final-preview' } }], onInspectPreview: (...args) => { inspectedTarget = args; },
+  onOpenFile: path => { openedSource = path; } };
 const inlineProps = inlineExports.bind.call(inlineBubble, { step: 0 }, 0);
 assert.equal(inlineProps.inline, true); assert.equal(inlineProps.inspectable, true); assert.equal(inlineProps.inspected, true);
 inlineProps.onInspect(); assert.deepEqual(inspectedTarget, ['answer', 'final-preview']);
+inlineProps.onOpenSource('demo.html'); assert.equal(openedSource, 'demo.html');
 console.log('PASS emitted final-answer preview wires side-panel availability, active identity and inspect action');
 
 

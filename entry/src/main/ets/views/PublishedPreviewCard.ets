@@ -4,9 +4,8 @@ import { t } from '../model/I18n';
 import { PublishedPreview } from '../model/PublishedPreview';
 import { UiSavedState, UiValues } from '../model/InteractiveUi';
 import { Attachments } from '../services/Attachments';
-import { Btn, Radius, Space } from '../common/Theme';
+import { Btn, Font, Radius, Space } from '../common/Theme';
 import { UiPresentation } from '../model/UiPresentation';
-import { IconButton } from '../common/Widgets';
 import { PreviewFullscreen } from './PreviewFullscreen';
 import { PreviewSurface, PreviewSurfaceOptions } from './PreviewSurface';
 
@@ -19,6 +18,7 @@ export struct PublishedPreviewCard {
   @Prop inspectable: boolean = false;
   @Prop inspected: boolean = false;
   onInspect: () => void = () => {};
+  onOpenSource: (path: string) => void = () => {};
   @Prop inline: boolean = false;
   saved: UiSavedState[] = [];
   onInteract: (key: string, values: UiValues, action: string) => Promise<UiValues> = async () => { throw new Error('Preview interaction handler missing'); };
@@ -61,9 +61,40 @@ export struct PublishedPreviewCard {
   fullscreenView() {
     PreviewFullscreen({ title: this.preview.title, surface: this.surface, onClose: () => this.closeFullscreen() })
   }
+  @Builder
+  private previewMenu() {
+    Menu() {
+      if (this.inspectable) {
+        MenuItem({ content: t('打开预览') }).id('inspect-preview-' + this.preview.id).onClick(this.onInspect)
+      }
+      MenuItem({ content: t('打开源文件') }).onClick(() => this.onOpenSource(this.preview.path))
+    }
+  }
+
+  @Builder
+  private previewToolbar() {
+    Row() {
+      Button({ type: ButtonType.Normal }) {
+        Text('•••').fontSize(13).letterSpacing(2).fontColor($r('app.color.text_secondary'))
+      }.id('preview-more-' + this.preview.id).width(44).height(44).padding(0)
+        .backgroundColor(Color.Transparent).accessibilityText(t('更多操作'))
+        .bindMenu(this.previewMenu, { systemMaterial: this.appearance.menu, mask: false })
+      Blank()
+      Button({ type: ButtonType.Normal }) {
+        Row({ space: Space.xs }) {
+          SymbolGlyph($r('sys.symbol.full_screen')).fontSize(16).fontColor([$r('app.color.text_secondary')])
+            .rotate({ angle: 90 })
+          Text(t('全屏')).fontFamily(this.appearance.fontFamily).fontSize(Font.small).fontColor($r('app.color.text_secondary'))
+        }
+      }.id('fullscreen-preview-' + this.preview.id).height(44).padding({ left: 6, right: 6 })
+        .backgroundColor(Color.Transparent).accessibilityText(t('全屏预览'))
+        .enabled(!this.fullscreenClosing).onClick(() => this.openFullscreen())
+    }.width('100%').padding({ left: Space.sm, right: Space.sm }).backgroundColor($r('app.color.surface_variant'))
+  }
+
   build() {
     Column({ space: Space.sm }) {
-      if (this.inspectable || this.inspected) {
+      if (this.inspected || (this.inspectable && !this.inline && !this.expanded)) {
         Button(this.inspected ? t('查看预览') : t('打开预览')).attributeModifier(Btn.textSmall)
           .id('inspect-preview-' + this.preview.id).onClick(this.onInspect)
       }
@@ -87,17 +118,13 @@ export struct PublishedPreviewCard {
         }.width('100%').padding(12).borderRadius(Radius.md).backgroundColor($r('app.color.surface'))
       }
       if ((this.inline || this.expanded) && !this.inspected) {
-        Stack({ alignContent: Alignment.TopEnd }) {
-        NodeContainer(this.surface.inlineMount).width('100%').height(this.fullscreen ? this.inlineHeight : undefined)
-          .borderRadius(this.inline ? Radius.sm : 0).clip(this.inline)
-        IconButton({ icon: $r('sys.symbol.arrow_up_left_and_arrow_down_right'), label: t('全屏预览'),
-          fill: $r('app.color.surface'), tint: $r('app.color.text_primary'),
-          disabled: this.fullscreenClosing,
-          compId: 'fullscreen-preview-' + this.preview.id, onTap: () => this.openFullscreen() })
-          .margin({ top: 6, right: 6 })
-        }.width('100%').onAreaChange((_old: Area, next: Area) => {
-          if (!this.fullscreen) { this.inlineHeight = Number(next.height); }
-        })
+        Column() {
+          this.previewToolbar()
+          NodeContainer(this.surface.inlineMount).width('100%').height(this.fullscreen ? this.inlineHeight : undefined)
+            .onAreaChange((_old: Area, next: Area) => {
+              if (!this.fullscreen) { this.inlineHeight = Number(next.height); }
+            })
+        }.width('100%').borderRadius(Radius.lg).clip(true)
       }
     }.width('100%').alignItems(HorizontalAlign.Start)
       .bindContentCover($$this.fullscreen, this.fullscreenView(), { modalTransition: ModalTransition.ALPHA,
