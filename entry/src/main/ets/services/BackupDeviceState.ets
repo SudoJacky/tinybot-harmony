@@ -32,12 +32,13 @@ export function validateBackupDeviceState(state: BackupDeviceState): void {
 interface ReviewHistory { completedTasks: number; lastAskedAt: number; stopped: boolean; }
 let refreshPreferences: () => void = () => {};
 export function configureBackupPreferenceRefresh(refresh: () => void): void { refreshPreferences = refresh; }
-export async function captureBackupDeviceState(context: common.UIAbilityContext): Promise<BackupDeviceState> {
+export async function captureBackupDeviceState(context: common.UIAbilityContext, settingsOnly: boolean = false): Promise<BackupDeviceState> {
   const store = preferences.getPreferencesSync(context, { name: 'tinybot-ui' });
-  const state: BackupDeviceState = { usage: await UsageLedger.backup(context.filesDir) };
+  const state: BackupDeviceState = { usage: settingsOnly ? [] : await UsageLedger.backup(context.filesDir) };
   const appearance = store.getSync('appearance', '') as string, language = store.getSync('language', '') as string;
   if (appearance) { state.appearance = JSON.parse(appearance) as AppearanceOptions; }
   if (language) { state.language = languagePreference(language); }
+  if (settingsOnly) { validateBackupDeviceState(state); return state; }
   const review = store.getSync('reviewInvitation', '') as string;
   if (review) { state.reviewHistory = review; }
   state.seenAnnouncements = store.getSync('seenAnnouncementIds', []) as string[];

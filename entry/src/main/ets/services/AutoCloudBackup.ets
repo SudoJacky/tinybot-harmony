@@ -5,10 +5,8 @@ import { AppData } from '../model/Conversation';
 import { BackupChanges } from '../model/BackupChanges';
 import { Diagnostics } from '../model/Diagnostics';
 import { getLocale, t } from '../model/I18n';
-import { isOnboardingCandidate } from '../model/Onboarding';
 import { CloudBackup, CloudBackupItem, cloudBackupError, CLOUD_BACKUP_NAME } from './CloudBackup';
 import { Cancellation } from './Cancellation';
-import { NativeWorkspaceFiles } from './NativeWorkspaceFiles';
 import { hostedPrivacy } from './HostedPrivacy';
 import { BackupLoginRequired, huaweiAccount } from './HuaweiAccount';
 import { newBackupSnapshot } from './BackupSnapshotNames';
@@ -28,9 +26,6 @@ export class AutoCloudBackup {
   private snapshot: () => AppData = () => { throw new Error('Backup source unavailable'); };
   private ready: () => boolean = () => false;
   private generation: number = 0;
-  private revision: number = 0;
-  private savedRevision: number = -1;
-  private savedFiles: number = -1;
   private savedChanges: string = '';
   private name: string = '';
   private task?: BackupTask;
@@ -41,7 +36,7 @@ export class AutoCloudBackup {
     const store = preferences.getPreferencesSync(context, { name: 'tinybot-ui' });
     this.enabled = store.getSync('autoCloudBackupEnabled', true) as boolean;
     this.context = context; this.store = store; this.snapshot = snapshot; this.ready = ready;
-    this.revision = 0; this.savedRevision = -1; this.savedFiles = -1; this.savedChanges = ''; this.name = CLOUD_BACKUP_NAME; this.error = ''; this.lastUploadedAt = 0;
+    this.savedChanges = ''; this.name = CLOUD_BACKUP_NAME; this.error = ''; this.lastUploadedAt = 0;
     this.state = this.enabled ? 'waiting' : 'disabled';
   }
 
@@ -55,15 +50,12 @@ export class AutoCloudBackup {
       throw error as Error;
     }
     this.enabled = value; this.state = value ? 'waiting' : 'disabled'; this.error = '';
-    if (value) { this.changed(); }
+    if (value) { this.savedChanges = ''; }
     else if (this.task) { this.task.cancellation.cancel(); this.release(this.task); }
   }
 
-  changed(): void { this.revision++; }
-  private changes(context: common.UIAbilityContext): string {
-    const feedback = preferences.getPreferencesSync(context, { name: 'tinybot-feedback' });
-    return JSON.stringify([BackupChanges.revision, this.store?.getSync('appearance', ''), this.store?.getSync('language', ''),
-      this.store?.getSync('reviewInvitation', ''), this.store?.getSync('seenAnnouncementIds', []), feedback.getSync('seenReplies', '{}')]);
+  private changes(data: AppData): string {
+    return JSON.stringify([data, BackupChanges.revision, this.store?.getSync('appearance', ''), this.store?.getSync('language', '')]);
   }
 
   confirmUploaded(items: CloudBackupItem[]): void {
@@ -89,13 +81,13 @@ export class AutoCloudBackup {
       const startupComplete = this.store?.getSync('startupBackupState', '') === 'done' ||
         this.store?.getSync('onboardingComplete', false) === true;
       if (!this.ready() || !startupComplete || CloudBackup.busy) { return; }
-      if (this.revision === this.savedRevision && NativeWorkspaceFiles.contentRevision === this.savedFiles &&
-        this.changes(context) === this.savedChanges && this.state === 'uploaded') { return; }
+      const data = this.snapshot(), changes = this.changes(data);
+      if (changes === this.savedChanges && this.state === 'uploaded') { return; }
       const task: BackupTask = { requestId: -1, generation: this.generation, cancellation: new Cancellation(), running: true };
       // Must remain synchronous: a page watcher can run too late to request this lease.
       const info = backgroundTaskManager.requestSuspendDelay(t('自动云备份'), () => this.expire(task));
       task.requestId = info.requestId; this.task = task;
-      this.run(context, task);
+      this.run(context, task, data, changes);
     } catch (error) {
       this.state = 'failed'; this.error = cloudBackupError(error as Error);
       Diagnostics.log('warn', 'backup', 'auto_task_failed', undefined, error as Error);
@@ -121,29 +113,23 @@ export class AutoCloudBackup {
     }
   }
 
-  private async run(context: common.UIAbilityContext, task: BackupTask): Promise<void> {
+  private async run(context: common.UIAbilityContext, task: BackupTask, data: AppData, changes: string): Promise<void> {
     try {
       const openID = await huaweiAccount.backupOpenID(context);
       task.cancellation.check();
       if (!await CloudBackup.available(context)) { if (task.generation === this.generation) { this.state = 'waiting'; } return; }
       task.cancellation.check();
       if (task.generation !== this.generation || !this.enabled || !hostedPrivacy.allowed || !this.ready()) { return; }
-      const changes = this.changes(context);
-      if (this.revision !== this.savedRevision || NativeWorkspaceFiles.contentRevision !== this.savedFiles || changes !== this.savedChanges) {
-        const data = this.snapshot();
-        if (isOnboardingCandidate(data) && !(data.config.userDocument || '').trim() &&
-          !(data.productivity?.memories || []).length) { this.state = 'waiting'; return; }
-        const revision = this.revision;
-        const files = NativeWorkspaceFiles.contentRevision;
+      if (changes !== this.savedChanges) {
         this.state = 'creating'; this.error = '';
         this.name = newBackupSnapshot(context);
         await CloudBackup.create(context, data, { openID: openID, cancellation: task.cancellation, name: this.name,
           onStaged: () => {
             if (task.generation !== this.generation) { return; }
-            this.savedRevision = revision; this.savedFiles = files; this.savedChanges = changes;
+            this.savedChanges = changes;
           } });
         if (task.generation !== this.generation) { return; }
-        this.savedRevision = revision; this.savedFiles = files; this.savedChanges = changes;
+        this.savedChanges = changes;
       } else { await CloudBackup.retryUpload(context, { openID: openID, cancellation: task.cancellation, name: this.name }); }
       task.cancellation.check();
       const items = await CloudBackup.list(context);

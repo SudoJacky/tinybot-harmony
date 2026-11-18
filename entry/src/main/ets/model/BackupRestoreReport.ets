@@ -1,5 +1,6 @@
 import { AppData } from './Conversation';
 export interface BackupRestoreReport {
+  configurationOnly?: boolean;
   added: number;
   skipped: number;
   copied: number;

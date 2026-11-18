@@ -10,5 +10,5 @@ export function backupDeviceId(context: common.UIAbilityContext): string {
   return id;
 }
 export function newBackupSnapshot(context: common.UIAbilityContext): string {
-  return 'tinybot-device-' + backupDeviceId(context) + '-' + Date.now() + '-' + util.generateRandomUUID() + '.tinybot';
+  return 'tinybot-config-' + backupDeviceId(context) + '-' + Date.now() + '-' + util.generateRandomUUID() + '.tinybot';
 }

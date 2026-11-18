@@ -94,6 +94,8 @@ export interface ThreadData extends ContextState, ToolSelection {
   draft?: string;
   attachments?: Attachment[];
   parentThreadId?: string;
+  // Stable family for histories that diverged during device sync.
+  syncRootId?: string;
   // Bounded parent transcript captured when creating a side chat.
   sideChatContext?: string;
   parentMessageId?: string;

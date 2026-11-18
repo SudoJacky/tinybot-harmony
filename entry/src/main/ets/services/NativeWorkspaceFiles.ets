@@ -6,7 +6,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { Cancellation } from './Cancellation';
 import { workspaceRelativePath } from './WorkspaceTools';
 import { readUtf8File } from './TextFiles';
-import { copyFileBytes, readBounded } from './FileBytes';
+import { copyFileBytes, copyOpenFileBytes, readBounded } from './FileBytes';
 import { isDocumentPath, readDocumentFile } from './DocumentFiles';
 import { TextEdit, applyTextEdits, validateEdits } from '../model/WorkspaceEdit';
 import { withFileMutation } from './FileMutationQueue';
@@ -24,6 +24,8 @@ async function contentVersion(content: string): Promise<string> {
   if (content.length > 0) { await hash.update({ data: new util.TextEncoder().encodeInto(content) }); }
   return new util.Base64Helper().encodeToStringSync((await hash.digest()).data);
 }
+
+export interface DeviceFileResult { written: boolean; matches: boolean; }
 
 export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
   static contentRevision: number = 0;
@@ -104,6 +106,42 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
         cancellation.check();
         return new Uint8Array(bytes);
       } finally { await fs.close(file); }
+    });
+  }
+
+  // Read and verify the peer bytes only when the local content differs. Resolve inside
+  // the same mutation lane used by tools so an intervening edit cannot be overwritten.
+  async receiveDeviceFile(path: string, digest: string, bases: string[], immutable: boolean,
+    openSource: () => Promise<fs.File>): Promise<DeviceFileResult> {
+    workspaceRelativePath(path, false);
+    if (this.isShared(path) || this.cloudMount(path) || this.managed(path)) { throw new Error('Invalid device file destination'); }
+    return withFileMutation(this.root + '/' + path, async (): Promise<DeviceFileResult> => {
+      const target = await this.resolve(path, true, new Cancellation());
+      const stat = await this.optionalStat(target);
+      if (stat && (!stat.isFile() || stat.isSymbolicLink())) { throw new Error('Invalid device file destination'); }
+      const current = stat ? await this.fileDigest(target) : '';
+      if (current === digest) { return { written: false, matches: true }; }
+      let destination = target;
+      if (current && !bases.includes(current)) {
+        if (immutable) { throw new Error('Device attachment content conflicts with its identity'); }
+        const leaf = target.lastIndexOf('/') + 1;
+        destination = target.slice(0, leaf) + 'sync-' + digest.replace(/[^A-Za-z0-9]/g, '').slice(0, 20) + '-' + target.slice(leaf, leaf + 100);
+        const other = await this.optionalStat(destination);
+        if (other) {
+          if (!other.isFile() || other.isSymbolicLink() || await this.fileDigest(destination) !== digest) { throw new Error('Device conflict copy has changed'); }
+          return { written: false, matches: false };
+        }
+      }
+      const temporary = target.slice(0, target.lastIndexOf('/') + 1) + '.tinybot-' + util.generateRandomUUID() + '.tmp';
+      const source = await openSource();
+      try {
+        await copyOpenFileBytes(source.fd, temporary);
+        if (await this.fileDigest(temporary) !== digest) { throw new Error('Device file checksum mismatch'); }
+        await fs.rename(temporary, destination); NativeWorkspaceFiles.contentRevision++;
+      } finally {
+        try { await fs.close(source); } finally { if (await fs.access(temporary)) { await fs.unlink(temporary); } }
+      }
+      return { written: true, matches: destination === target };
     });
   }
 

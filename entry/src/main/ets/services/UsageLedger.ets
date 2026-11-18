@@ -3,7 +3,6 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import { RequestUsage, UsageToolActivity } from '../model/Usage';
 import { writeBytes } from './Attachments';
 import { util } from '@kit.ArkTS';
-import { BackupChanges } from '../model/BackupChanges';
 import { Diagnostics } from '../model/Diagnostics';
 import { withFileMutation } from './FileMutationQueue';
 import { ArkDataRecords, StoredRecord } from './ArkDataRecords';
@@ -197,7 +196,7 @@ export class UsageLedger {
     if (index === undefined) { index = UsageLedger.records.length; UsageLedger.positions.set(item.id, index); UsageLedger.records.push(item); }
     else { UsageLedger.records[index] = item; }
     UsageLedger.dirty.add(UsageLedger.database ? index : Math.floor(index / PAGE_SIZE));
-    UsageLedger.revision++; BackupChanges.revision++; UsageLedger.notify();
+    UsageLedger.revision++; UsageLedger.notify();
     if (!UsageLedger.path || UsageLedger.scheduled) { return; }
     UsageLedger.scheduled = true;
     UsageLedger.queue = UsageLedger.queue.catch(() => {}).then(async () => {

@@ -17,7 +17,7 @@ import { rollbackBackupActions, rollbackBackupFailure } from '../model/BackupImp
 
 export interface RestoredPanelFile { workspaceId: string; path: string; }
 interface ChangedPanel { files: NativeWorkspaceFiles; path: string; before: string; version: string; }
-export async function captureBackupConnections(data: AppData, root: string, inventory: WorkspaceOwnership[]): Promise<BackupConnections> {
+export async function captureBackupConnections(data: AppData, root: string, inventory: WorkspaceOwnership[], includeIdentity: boolean = true): Promise<BackupConnections> {
   const vault = new CredentialStore(), result: BackupConnections = { mcp: [], mail: [], panels: [] };
   for (const server of data.productivity?.servers || []) {
     if (!server.credentialAlias) { continue; }
@@ -40,7 +40,7 @@ export async function captureBackupConnections(data: AppData, root: string, inve
       if (secret) { result.panels!.push({ workspaceId: owner.id, panelId: id, source: source, secret: secret.secret, oauth: secret.oauth }); }
     }
   }
-  result.feedbackIdentity = await vault.readOptional('tinybot.feedback.identity.v1');
+  if (includeIdentity) { result.feedbackIdentity = await vault.readOptional('tinybot.feedback.identity.v1'); }
   return result;
 }
 

@@ -233,7 +233,6 @@ struct Index {
       catch (error) { Diagnostics.log('warn', 'backup', 'startup_capture_failed', undefined, error as Error); }
       this.session = createNativeSessionService(context, this.approval, this.browser);
       this.session.subscribe((event) => {
-        if (event.kind !== 'state') { autoCloudBackup.changed(); }
         if (event.state.canNavigate && ShareInbox.peek()) { this.receiveShare(); }
         if (event.kind === 'task-complete' && event.threadId) { this.taskCompleted(event.threadId); }
       });
@@ -247,7 +246,7 @@ struct Index {
       this.updateLifePanelActivity();
       this.panelLinkChanged();
       try {
-        autoCloudBackup.initialize(context, () => this.app.exportSnapshot(), () =>
+        autoCloudBackup.initialize(context, () => this.app.configurationSnapshot(), () =>
           this.app.ready && (data?.autoBackupReady() ?? true) && !this.app.saving && !this.app.saveError && !this.startupBackupChecking &&
           !this.startupBackupRestoring && !this.startupBackupDialog);
       } catch (error) { Diagnostics.log('warn', 'backup', 'auto_settings_failed', undefined, error as Error); }
@@ -488,7 +487,7 @@ struct Index {
       if (!item || !this.canOfferStartupBackup()) { return; }
       const width = WorkbenchLayout.dialogWidth(this.windowWidth);
       this.startupBackupDialog = new CustomDialogController({
-        builder: StartupBackupDialog({ date: new Date(item.createdAt).toLocaleString(getLocale()),
+        builder: StartupBackupDialog({ configurationOnly: item.name.startsWith('tinybot-config-'), date: new Date(item.createdAt).toLocaleString(getLocale()),
           onRestore: () => this.restoreStartupBackup(item),
           onLogin: async () => {
             await this.account.signIn();
@@ -1955,6 +1954,8 @@ struct Index {
                     Text(this.recoveryCloudStatus).id('storage-recovery-cloud-status')
                       .fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
                   }
+                  Button(t('从其他设备接收')).id('storage-recover-device').attributeModifier(Btn.tonal)
+                    .enabled(!this.recoveryBusy).onClick(() => this.recoverStorage(false))
                   if (this.recoveryLegacy) {
                     Text(t('升级前副本 · {0} 个会话 · {1}', [this.recoveryLegacy.threads,
                       new Date(this.recoveryLegacy.savedAt).toLocaleString(getLocale())]))
