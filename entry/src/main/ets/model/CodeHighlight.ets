@@ -89,3 +89,28 @@ export function highlightCode(text: string, info: string): MarkdownSpan[] {
   append(spans, text.slice(offset), 'text');
   return spans;
 }
+
+// Lex the entire source so a comment or string keeps its color across rendered blocks.
+export function highlightCodeBlocks(text: string, info: string): MarkdownSpan[][] {
+  const blocks: MarkdownSpan[][] = [];
+  let block: MarkdownSpan[] = [];
+  let lines = 0;
+  for (const span of highlightCode(text, info)) {
+    let start = 0;
+    let newline = span.text.indexOf('\n');
+    while (newline >= 0) {
+      lines++;
+      if (lines === 8) {
+        append(block, span.text.slice(start, newline), span.kind);
+        blocks.push(block);
+        block = [];
+        start = newline + 1;
+        lines = 0;
+      }
+      newline = span.text.indexOf('\n', newline + 1);
+    }
+    append(block, span.text.slice(start), span.kind);
+  }
+  blocks.push(block);
+  return blocks;
+}

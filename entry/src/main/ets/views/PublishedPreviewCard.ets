@@ -1,13 +1,19 @@
 import { Diagnostics } from '../model/Diagnostics';
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { AnimatedIcon } from '../common/AnimatedIcon';
+import { PreviewFullscreenMotion, previewFullscreenMotion } from '../common/FullscreenTransition';
 import { t } from '../model/I18n';
-import { PublishedPreview } from '../model/PublishedPreview';
+import { highlightCodeBlocks } from '../model/CodeHighlight';
+import { MarkdownSpan } from '../model/Markdown';
+import { PublishedPreview, publishedPreviewSource } from '../model/PublishedPreview';
 import { UiSavedState, UiValues } from '../model/InteractiveUi';
 import { Attachments } from '../services/Attachments';
-import { Btn, Font, Radius, Space } from '../common/Theme';
+import { Btn, codeTokenColor, Font, Motion, Radius, Space } from '../common/Theme';
 import { UiPresentation } from '../model/UiPresentation';
 import { PreviewFullscreen } from './PreviewFullscreen';
 import { PreviewSurface, PreviewSurfaceOptions } from './PreviewSurface';
+
+const MODE_TARGET: number = 44;
 
 @Component
 export struct PublishedPreviewCard {
@@ -18,7 +24,6 @@ export struct PublishedPreviewCard {
   @Prop inspectable: boolean = false;
   @Prop inspected: boolean = false;
   onInspect: () => void = () => {};
-  onOpenSource: (path: string) => void = () => {};
   @Prop inline: boolean = false;
   saved: UiSavedState[] = [];
   onInteract: (key: string, values: UiValues, action: string) => Promise<UiValues> = async () => { throw new Error('Preview interaction handler missing'); };
@@ -26,7 +31,12 @@ export struct PublishedPreviewCard {
   @State private imageError: boolean = false;
   @State private fullscreen: boolean = false;
   @State private fullscreenClosing: boolean = false;
+  private fullscreenMotion?: PreviewFullscreenMotion;
   @State private inlineHeight: number = 0;
+  @State private showCode: boolean = false;
+  @State private codeBlocks: MarkdownSpan[][] = [];
+  @State private codeError: boolean = false;
+  private highlightedContent?: string;
   private superseded: boolean = false;
   private surface: PreviewSurface = new PreviewSurface();
   aboutToAppear(): void { this.superseded = this.preview.superseded; this.expanded = !this.superseded; this.surfaceChanged(); }
@@ -38,18 +48,41 @@ export struct PublishedPreviewCard {
     this.surface.setOptions(options);
   }
   private openFullscreen(): void {
-    if (this.fullscreenClosing) { return; }
+    if (this.fullscreen || this.fullscreenClosing) { return; }
+    this.fullscreenMotion = previewFullscreenMotion(this.getUIContext(), 'preview-card-' + this.preview.id,
+      this.appearance.effectStrength > 0);
     this.surface.enterFullscreen(); this.fullscreen = true;
   }
   private closeFullscreen(): void {
-    this.surface.exitFullscreen();
     if (this.fullscreen) { this.fullscreenClosing = true; }
-    this.fullscreen = false;
+  }
+  private fullscreenDidClose(): void {
+    this.surface.exitFullscreen();
+    this.fullscreenClosing = false;
   }
   private revisionChanged(): void {
     if (this.preview.superseded && !this.superseded) { this.expanded = false; }
     this.superseded = this.preview.superseded;
     this.surfaceChanged();
+    if (this.showCode) { this.loadCode(); }
+  }
+  private loadCode(): void {
+    if (this.highlightedContent === this.preview.content) { return; }
+    this.highlightedContent = this.preview.content;
+    try {
+      const source = publishedPreviewSource(this.preview);
+      this.codeBlocks = highlightCodeBlocks(source.text, source.language);
+      this.codeError = false;
+    } catch (error) {
+      this.codeBlocks = [];
+      this.codeError = true;
+      Diagnostics.log('error', 'preview', 'failed', { previewId: this.preview.id }, error as Error);
+    }
+  }
+  private selectMode(code: boolean): void {
+    if (this.showCode === code) { return; }
+    if (code) { this.loadCode(); }
+    this.showCode = code;
   }
   private thumbnailSize(): ImageSourceSize {
     const screenshot = this.preview.screenshot;
@@ -59,26 +92,44 @@ export struct PublishedPreviewCard {
   }
   @Builder
   fullscreenView() {
-    PreviewFullscreen({ title: this.preview.title, surface: this.surface, onClose: () => this.closeFullscreen() })
+    PreviewFullscreen({ title: this.preview.title, surface: this.surface, motion: this.fullscreenMotion,
+      closing: this.fullscreenClosing, onClose: () => this.closeFullscreen(), onClosed: () => { this.fullscreen = false; } })
   }
   @Builder
-  private previewMenu() {
-    Menu() {
-      if (this.inspectable) {
-        MenuItem({ content: t('打开预览') }).id('inspect-preview-' + this.preview.id).onClick(this.onInspect)
+  private modeButton(code: boolean) {
+    Button({ type: ButtonType.Normal }) {
+      AnimatedIcon({ iconName: code ? 'code' : 'preview', selected: this.showCode === code, iconSize: 21,
+        tint: this.showCode === code ? this.appearance.accent : $r('app.color.text_secondary') })
+    }.id((code ? 'preview-mode-code-' : 'preview-mode-live-') + this.preview.id)
+      .width(MODE_TARGET).height(MODE_TARGET).padding(0).borderRadius(MODE_TARGET / 2).backgroundColor(Color.Transparent)
+      .accessibilityText((code ? t('代码') : t('预览')) + (this.showCode === code ? t('，已选中') : ''))
+      .enabled(!code || this.inlineHeight > 0).clickEffect(this.appearance.effectStrength > 0 ? Motion.pressSmall : null)
+      .onClick(() => this.selectMode(code))
+  }
+
+  @Builder
+  private previewModeControl() {
+    Stack() {
+      Row().width(MODE_TARGET * 2).height(34).borderRadius(17).backgroundColor($r('app.color.divider'))
+        .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+      Divider().vertical(true).height(14).color($r('app.color.surface_variant'))
+        .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+      Row() {
+        Row().width(MODE_TARGET - 4).height(28).borderRadius(14).backgroundColor($r('app.color.surface'))
+          .translate({ x: this.showCode ? 0 : MODE_TARGET })
+          .animation({ duration: this.appearance.effectStrength > 0 ? Motion.fast : 0, curve: Motion.standard })
+      }.width(MODE_TARGET * 2).padding({ left: 2 }).hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+      Row() {
+        this.modeButton(true)
+        this.modeButton(false)
       }
-      MenuItem({ content: t('打开源文件') }).onClick(() => this.onOpenSource(this.preview.path))
-    }
+    }.width(MODE_TARGET * 2).height(MODE_TARGET)
   }
 
   @Builder
   private previewToolbar() {
     Row() {
-      Button({ type: ButtonType.Normal }) {
-        Text('•••').fontSize(13).letterSpacing(2).fontColor($r('app.color.text_secondary'))
-      }.id('preview-more-' + this.preview.id).width(44).height(44).padding(0)
-        .backgroundColor(Color.Transparent).accessibilityText(t('更多操作'))
-        .bindMenu(this.previewMenu, { systemMaterial: this.appearance.menu, mask: false })
+      this.previewModeControl()
       Blank()
       Button({ type: ButtonType.Normal }) {
         Row({ space: Space.xs }) {
@@ -90,6 +141,36 @@ export struct PublishedPreviewCard {
         .backgroundColor(Color.Transparent).accessibilityText(t('全屏预览'))
         .enabled(!this.fullscreenClosing).onClick(() => this.openFullscreen())
     }.width('100%').padding({ left: Space.sm, right: Space.sm }).backgroundColor($r('app.color.surface_variant'))
+  }
+
+  @Builder
+  private codeView() {
+    List() {
+      if (this.codeError) {
+        ListItem() {
+          Text(t('无法读取预览源代码。')).fontSize(Font.small).fontColor($r('app.color.danger'))
+            .fontFamily(this.appearance.fontFamily).width('100%')
+        }
+      } else {
+        Repeat<MarkdownSpan[]>(this.codeBlocks)
+          .each((block: RepeatItem<MarkdownSpan[]>) => {
+            ListItem() {
+              Text() {
+                ForEach(block.item, (span: MarkdownSpan) => {
+                  Span(span.text).fontColor(codeTokenColor(span.kind))
+                })
+              }.width('100%').constraintSize({ minHeight: 20 }).fontSize(13).lineHeight(20).fontFamily('monospace')
+                .wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
+            }
+          })
+          .key((_block: MarkdownSpan[], index: number) => String(index))
+          .virtualScroll()
+      }
+    }.id('preview-code-' + this.preview.id).position({ x: 0, y: 0 }).width('100%').height(this.inlineHeight)
+      .padding({ left: Space.md, right: Space.md }).contentStartOffset(Space.md).contentEndOffset(Space.md)
+      .cachedCount(1).scrollBar(BarState.Auto).edgeEffect(EdgeEffect.None)
+      .nestedScroll({ scrollForward: NestedScrollMode.SELF_FIRST, scrollBackward: NestedScrollMode.SELF_FIRST })
+      .backgroundColor($r('app.color.surface'))
   }
 
   build() {
@@ -119,16 +200,28 @@ export struct PublishedPreviewCard {
       }
       if ((this.inline || this.expanded) && !this.inspected) {
         Column() {
-          this.previewToolbar()
-          NodeContainer(this.surface.inlineMount).width('100%').height(this.fullscreen ? this.inlineHeight : undefined)
-            .onAreaChange((_old: Area, next: Area) => {
-              if (!this.fullscreen) { this.inlineHeight = Number(next.height); }
-            })
-        }.width('100%').borderRadius(Radius.lg).clip(true)
+          Column() {
+            this.previewToolbar()
+            Stack({ alignContent: Alignment.TopStart }) {
+              // Keep the live page mounted while code covers its measured viewport.
+              NodeContainer(this.surface.inlineMount).width('100%')
+                .height(this.fullscreen || this.fullscreenClosing || this.showCode ? this.inlineHeight : undefined)
+                .opacity(this.showCode ? 0 : 1)
+                .hitTestBehavior(this.showCode ? HitTestMode.None : HitTestMode.Default)
+                .accessibilityLevel(this.showCode ? 'no-hide-descendants' : 'auto')
+                .onAreaChange((_old: Area, next: Area) => {
+                  if (!this.fullscreen && !this.fullscreenClosing && !this.showCode && Number(next.height) > 0) {
+                    this.inlineHeight = Number(next.height);
+                  }
+                })
+              if (this.showCode) { this.codeView() }
+            }.width('100%')
+          }.id('preview-card-' + this.preview.id).width('100%').borderRadius(Radius.lg).clip(true)
+        }.width('100%').padding({ left: Space.md, right: Space.md })
       }
     }.width('100%').alignItems(HorizontalAlign.Start)
-      .bindContentCover($$this.fullscreen, this.fullscreenView(), { modalTransition: ModalTransition.ALPHA,
-        backgroundColor: $r('app.color.surface'), onWillDismiss: () => this.closeFullscreen(),
-        onDisappear: () => { this.fullscreenClosing = false; } })
+      .bindContentCover($$this.fullscreen, this.fullscreenView(), { modalTransition: ModalTransition.NONE,
+        backgroundColor: Color.Transparent, onWillDismiss: () => this.closeFullscreen(),
+        onDisappear: () => this.fullscreenDidClose() })
   }
 }

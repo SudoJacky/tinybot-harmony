@@ -20,7 +20,7 @@ const { WebUiPreflight } = from('services/WebUiPreflight');
 const { Cancellation } = from('services/Cancellation');
 const { runAgentLoop } = from('services/AgentLoop');
 const { parseUiSurface } = from('model/InteractiveUi');
-const { stepDisplayContent, publishedAnswerParts } = from('model/PublishedPreview');
+const { stepDisplayContent, publishedAnswerParts, publishedPreviewSource } = from('model/PublishedPreview');
 const { buildTimeline } = from('model/ProcessPresentation');
 const { validateSteps } = from('model/Agent');
 const { parseAppData, requestHistory } = from('model/Conversation');
@@ -54,7 +54,11 @@ async function main() {
   assert.equal(JSON.parse(published.receipt.output).published, true);
   assert.ok(!JSON.stringify(published.inputs).includes('<svg'));
   const specOf = result => JSON.parse(parseUiSurface(result.receipt.previewContent, '0').nodes[0].data);
+  const sourceOf = result => publishedPreviewSource({
+    path: JSON.parse(result.receipt.output).path, content: result.receipt.previewContent
+  });
   assert.equal(specOf(published).html, svg); assert.equal(specOf(published).autoHeight, true);
+  assert.equal(sourceOf(published).text, svg); assert.equal(sourceOf(published).language, 'svg');
   assert.ok(!buildTimeline(published.turn.steps).some(x => x.kind === 'text' && x.step === 0), 'Tool publication does not create a preview entry');
   assert.ok(published.checkpoints.some(x => x.steps[0].tools[0]?.previewContent === published.receipt.previewContent));
   const js = 'const text = "</script> and \\"quotes\\"";\nawait Promise.resolve();\ndocument.body.textContent = text;';
@@ -64,6 +68,7 @@ async function main() {
   assert.equal(scene.receipt.status, 'complete'); assert.equal(spec.js, js); assert.equal(spec.html, '');
   assert.equal(spec.library, 'three'); assert.equal(spec.height, 560); assert.equal(spec.autoHeight, false);
   files.set('scene.js', 'changed'); files.delete('scene.js');
+  assert.equal(sourceOf(scene).text, js); assert.equal(sourceOf(scene).language, 'js');
   assert.equal(stepDisplayContent(scene.turn.steps[0]), '');
   const content = scene.receipt.previewContent;
   assert.equal(JSON.parse(parseUiSurface(content, '0').nodes[0].data).js, js);
@@ -90,9 +95,14 @@ async function main() {
   const plain = specOf(await run({ path: 'plain.JS' }));
   assert.equal(plain.library, 'none'); assert.equal(plain.height, 400); assert.equal(plain.autoHeight, false);
   files.set('page.html', '<h1>Preview</h1>');
-  const html = specOf(await run({ path: 'page.html', library: 'three', height: 300 }));
+  const page = await run({ path: 'page.html', library: 'three', height: 300 });
+  const html = specOf(page);
   assert.equal(html.library, 'three'); assert.equal(html.height, 300); assert.equal(html.autoHeight, false);
+  assert.equal(sourceOf(page).text, files.get('page.html')); assert.equal(sourceOf(page).language, 'html');
   assert.equal(specOf(await run({ path: 'page.html' })).autoHeight, true);
+  const jsonl = '{"op":"begin","version":1,"title":"Legacy"}\r\n{"op":"end"}\r\n';
+  const legacy = publishedPreviewSource({ path: 'legacy.JSONL', content: '```tinybot-ui\n' + jsonl + '\n```' });
+  assert.equal(legacy.text, jsonl); assert.equal(legacy.language, 'json');
   console.log('PASS JS/Three.js, plain JS defaults, HTML library/height, SVG sizing, exact immutable source and live projection');
 
   const before = reads, beforeProbes = probes;

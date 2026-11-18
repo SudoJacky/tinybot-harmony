@@ -68,6 +68,19 @@ export class Font {
   static readonly headline: number = 24;
 }
 
+export function codeTokenColor(kind: string): ResourceColor {
+  switch (kind) {
+    case 'syntax-keyword': return $r('app.color.code_keyword');
+    case 'syntax-string': return $r('app.color.code_string');
+    case 'syntax-number': return $r('app.color.code_number');
+    case 'syntax-comment': return $r('app.color.code_comment');
+    case 'syntax-function': return $r('app.color.code_function');
+    case 'syntax-property': return $r('app.color.code_property');
+    case 'syntax-punctuation': return $r('app.color.code_punctuation');
+    default: return $r('app.color.text_primary');
+  }
+}
+
 export type ButtonKind = 'primary' | 'tonal' | 'text' | 'danger' | 'plain';
 
 export class AppButton implements AttributeModifier<ButtonAttribute> {
