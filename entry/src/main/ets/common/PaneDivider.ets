@@ -46,12 +46,11 @@ export struct PaneDivider {
       // hover pass to reveal the seam; a pointer, focus or a held finger strengthens it.
       Column().width(this.collapseArmed ? 5 : 3).height(56).borderRadius(3).backgroundColor(this.appearance.accent)
         .opacity(this.collapseArmed ? 1 : this.active || this.focused ? 0.9 : this.hover ? 0.5 : 0.16)
-        .animation({ duration: Motion.fast, curve: Motion.standard })
+        .animation({ duration: this.appearance.effectStrength > 0 ? Motion.desktop : 0, curve: Motion.standard })
     }.id(this.compId).width(12).height('100%')
     .backgroundColor(Color.Transparent)
     .onHover((hover: boolean) => {
       this.hover = hover;
-      if (!this.desktop) { return; }
       const cursor = this.getUIContext().getCursorController();
       if (hover) { cursor.setCursor(pointer.PointerStyle.WEST_EAST); }
       else if (!this.active) { cursor.restoreDefault(); }

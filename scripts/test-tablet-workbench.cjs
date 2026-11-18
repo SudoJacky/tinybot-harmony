@@ -153,17 +153,22 @@ assert.equal(restoredPrefs.paneWidth(true), 420);
 assert.equal(restoredPrefs.historyCollapsed(), true);
 restoredPrefs.saveWidth(false, 0);
 assert.equal(new DesktopLayoutPreferences({}).paneWidth(false), 0, 'Reset restores the default geometry on restart');
+desktopPrefs.savePanelSelection({ threadId: 'thread', tab: 'preview', messageId: 'message', previewId: 'preview' });
+assert.equal(restoredPrefs.panelSelection().previewId, 'preview');
+restoredPrefs.savePanelSelection();
+assert.equal(desktopPrefs.panelSelection(), undefined);
 
 
 const Page = probe('pages/Index', 'Index', ['hasPreview', 'detailOpen', 'compactDetailLauncher', 'workbench', 'windowChanged', 'openFiles', 'openImageFile', 'openPreview', 'closePreview', 'previewPresenceChanged', 'onBackPress',
   'beginResize', 'resizeHistory', 'resizeDetail', 'endResize', 'openDetailTab', 'removeDetailTab', 'closeDetailTab',
   'workspaceClosed', 'toggleDetailPane', 'currentDetailTab', 'detailTabVisible', 'detailTabsAvailable',
-  'detailTabPresent', 'hideBrowserTab', 'setDetailPane', 'detailGeometry', 'toggleDetailMaximized', 'setHistoryCollapsed', 'saveDesktopPaneWidth'],
-  { WorkbenchLayout, Motion: { medium: 220, fast: 160 } });
+  'detailTabPresent', 'hideBrowserTab', 'setDetailPane', 'detailGeometry', 'toggleDetailMaximized', 'setHistoryCollapsed', 'saveDesktopPaneWidth',
+  'saveDetailSelection', 'restoreDetailSelection', 'addFilesTab', 'handleWorkbenchEscape', 'selectDetailTab'],
+  { WorkbenchLayout, Motion: { desktop: 120, medium: 220, fast: 160 }, KeyType: { Down: 'down' }, KeyCode: { KEYCODE_ESCAPE: 2070 } });
 assert.equal(typeof Page.prototype.detailTabsAvailable, 'function', 'Tab availability is part of the emitted page');
 const draft = { text: 'unsent input', attachments: ['image'] }, active = { id: 'thread', draft, messages: [] };
 const session = {}, browser = {};
-const page = Object.assign(new Page(), { app: { active }, session, browser, windowWidth: 0,
+const page = Object.assign(new Page(), { app: { active }, session, browser, windowWidth: 0, appearance: { effectStrength: 1 },
   workspaceOpen: false, workspaceRequest: 0, workspaceCloseRequest: 0,
   detailTabs: [], activeDetailTab: '', detailPaneOpen: false, detailReveal: 0,
   detailClosing: false, detailClosingLauncher: false, detailAnim: 0, workspaceTabCloseRequest: 0,
@@ -269,6 +274,29 @@ desktopPage.toggleDetailMaximized();
 assert.equal(desktopPage.workbench().docked, true);
 assert.equal(desktopPage.workbench().detailWidth, 400);
 assert.equal(desktopPage.workspaceRequest, 1, 'Maximizing and restoring keep the editor mounted');
+const restoredPage = Object.assign(new Page(), page, { desktop: true, windowWidth: 1080, detailPaneOpen: false,
+  detailTabs: [], activeDetailTab: '', workspaceOpen: false, workspaceRequest: 0, appearance: { effectStrength: 0 },
+  desktopLayoutPreferences: desktopPrefs, paths: { size: () => 0 } });
+desktopPrefs.savePanelSelection({ threadId: 'other', tab: 'files' });
+restoredPage.restoreDetailSelection();
+assert.equal(restoredPage.workspaceOpen, false, 'Another conversation’s panel is never restored');
+desktopPrefs.savePanelSelection({ threadId: active.id, tab: 'files' });
+restoredPage.restoreDetailSelection();
+assert.equal(restoredPage.currentDetailTab(), 'files');
+assert.equal(restoredPage.workspaceRequest, 1);
+restoredPage.app = { ...restoredPage.app, sideChats: () => [{ id: 'notes' }] };
+restoredPage.detailTabs = ['files', 'side:notes'];
+restoredPage.selectDetailTab('side:notes');
+assert.equal(desktopPrefs.panelSelection().tab, 'side:notes', 'Switching mounted tabs updates the cold-start selection');
+restoredPage.selectDetailTab('missing');
+assert.equal(restoredPage.currentDetailTab(), 'side:notes');
+restoredPage.selectDetailTab('files');
+let stopped = false;
+restoredPage.handleWorkbenchEscape({ type: 'down', keyCode: 2070, stopPropagation: () => { stopped = true; } });
+assert.equal(stopped, true);
+assert.equal(restoredPage.detailPaneOpen, false);
+assert.equal(restoredPage.workspaceOpen, true, 'Esc collapses the sidebar without closing the editor');
+assert.equal(desktopPrefs.panelSelection(), undefined);
 
 // Docked panes are tabs: opening a second pane keeps the first, the active tab
 // falls back on close, collapsing retains tabs, and the last tab closes the pane.
@@ -469,6 +497,13 @@ for (const token of ["'detail-tab-' + tab.id", "'detail-tab-close-' + tab.id", "
   "'detail-add-browser'", "'detail-collapse'", "'detail-switch-tab'", "'detail-close-active'"]) {
   assert.ok(tabsSource.includes(token), 'The strip keeps ' + token);
 }
+const Tabs = probe('views/DetailTabs', 'DetailTabs', ['useTabPicker', 'tabFocus'], { TAB_LABEL_WIDTH: 150 });
+const tabs = Object.assign(new Tabs(), { tabs: [{ id: 'files' }, { id: 'preview' }], stripWidth: 320, showMaximize: true });
+assert.equal(tabs.useTabPicker(), true, 'A narrow dock shows an explicit picker even when the window is wide');
+tabs.stripWidth = 720;
+assert.equal(tabs.useTabPicker(), false);
+assert.equal(tabs.tabFocus('files').right, 'detail-tab-preview');
+assert.equal(tabs.tabFocus('preview').left, 'detail-tab-files');
 const launcherSource = fs.readFileSync(path.join(compiledRoot, 'views/DetailLauncher.ts'), 'utf8');
 assert.ok(launcherSource.includes("'detail-launcher-files'"));
 assert.ok(launcherSource.includes("'detail-launcher-browser'"));
@@ -481,7 +516,7 @@ assert.match(toolScopeSource, /Scroll\.create\(\)/, 'The tool scope has one oute
 assert.match(indexSource, /detailReveal/, 'The column reveal drives one shared animation');
 assert.match(indexSource, /this\.detailGeometry\(\)\.detailWidth \* this\.detailReveal/, 'The chat spacer follows the column reveal');
 assert.match(indexSource, /this\.windowWidth - this\.detailGeometry\(\)\.detailWidth \* this\.detailReveal/, 'The panel slides from the right edge');
-assert.match(indexSource, /duration: open \? Motion\.medium : Motion\.fast/, 'Opening and closing share the pane body timing');
+assert.match(indexSource, /this\.desktop \? Motion\.desktop : open \? Motion\.medium : Motion\.fast/, 'The free window uses a short pane transition');
 assert.match(indexSource, /detailClosingLauncher/, 'The empty launcher stays visible while the column closes');
 
 // Both long sheets are modal cards: a visible mask dismisses on an outside tap,
@@ -498,6 +533,7 @@ console.log('PASS emitted side-panel tabs, launcher entries and modal inset-safe
 
 const { DesktopCommandItem, desktopCommandResults } = sourceModule('entry/src/main/ets/model/DesktopCommandPalette.ets');
 const commands = [new DesktopCommandItem('files', 'Workspace files'), new DesktopCommandItem('settings', 'Settings')];
+commands[0].shortcut = 'Ctrl+Shift+F';
 const threads = [
   { id: 'older', displayTitle: 'Earlier chat', updatedAt: 1, messages: [{ id: 'first', content: 'Workspace notes' }] },
   { id: 'current', displayTitle: 'Workspace plan', updatedAt: 2, projectId: 'project', messages: [{ id: 'second', content: 'Workspace plan' }] }
@@ -506,6 +542,7 @@ const projects = [{ id: 'project', name: 'Tinybot' }];
 const results = query => desktopCommandResults(commands, query, threads, projects, 'Standalone');
 assert.deepEqual(Array.from(results(''), item => item.id), ['current', 'older', 'files', 'settings']);
 assert.deepEqual(Array.from(results(' >  work'), item => item.id), ['files']);
+assert.deepEqual(Array.from(results('> ctrl + shift + f'), item => item.id), ['files']);
 const matches = results('Workspace');
 assert.deepEqual(Array.from(matches, item => item.id), ['files', 'current', 'older']);
 assert.equal(matches[1].detail, 'Tinybot');
@@ -514,12 +551,12 @@ assert.equal(matches[2].messageId, 'first', 'Content matches jump to the message
 assert.equal(matches[2].query, 'workspace');
 assert.equal(matches[2].excerpt, 'Workspace notes');
 
-const paletteKey = { KEYCODE_ESCAPE: 1, KEYCODE_DPAD_UP: 2, KEYCODE_DPAD_DOWN: 3 };
+const paletteKey = { KEYCODE_ESCAPE: 1, KEYCODE_DPAD_UP: 2, KEYCODE_DPAD_DOWN: 3, KEYCODE_PAGE_UP: 4, KEYCODE_PAGE_DOWN: 5 };
 const Palette = probe('views/DesktopCommandDialog', 'DesktopCommandDialog', ['handleKey', 'choose'],
   { KeyCode: paletteKey, KeyType: { Down: 'down' }, ScrollAlign: { AUTO: 'auto' } });
 const chosen = [], scrolled = [];
 let paletteClosed = 0;
-const palette = Object.assign(new Palette(), { results: matches, selected: 0, onChoose: item => chosen.push(item.id),
+const palette = Object.assign(new Palette(), { results: matches, selected: 0, visibleResults: 2, onChoose: item => chosen.push(item.id),
   controller: { close() { paletteClosed++; } }, scroller: { scrollToIndex(index) { scrolled.push(index); } } });
 const press = keyCode => palette.handleKey({ type: 'down', keyCode, stopPropagation() {} });
 palette.composing = true;
@@ -529,10 +566,41 @@ assert.equal(press(paletteKey.KEYCODE_DPAD_DOWN), true);
 assert.equal(press(paletteKey.KEYCODE_DPAD_DOWN), true);
 assert.equal(press(paletteKey.KEYCODE_DPAD_DOWN), true);
 assert.deepEqual(scrolled, [1, 2, 2]);
+assert.equal(press(paletteKey.KEYCODE_PAGE_UP), true);
+assert.equal(palette.selected, 0);
+assert.equal(press(paletteKey.KEYCODE_PAGE_DOWN), true);
+assert.equal(palette.selected, 2);
 palette.choose(palette.results[palette.selected]);
 palette.choose(palette.results[palette.selected]);
 assert.deepEqual(chosen, ['older']);
 assert.equal(paletteClosed, 1, 'Submitting the same result twice closes and dispatches once');
+
+const PaletteHost = probe('pages/Index', 'Index', ['desktopCommandsAvailable', 'showDesktopCommands'], {
+  WorkbenchLayout, DialogAlignment: { Center: 'center' }, Radius: {},
+  CustomDialogController: class {
+    constructor(options) { this.options = options; }
+    open() {}
+    dismiss() { this.options.onDidDisappear(); }
+  }
+});
+let announcementsOffered = 0;
+const paletteHost = Object.assign(new PaletteHost(), { largeScreen: true, foreground: true, windowWidth: 1100,
+  app: { ready: true }, privacyAllowed: true, paths: { size: () => 0 }, appearance: {},
+  desktopCommands: () => commands, offerAnnouncement: () => { announcementsOffered++; },
+  getUIContext() { throw Error('The detached dialog cannot transfer focus to its host'); }
+});
+paletteHost.showDesktopCommands();
+const openedDialog = paletteHost.desktopCommandsDialog;
+assert.ok(openedDialog.options.autoCancel, 'Tapping outside can dismiss the modal');
+assert.equal(paletteHost.desktopCommandsAvailable(), true, 'The launcher stays focusable during the modal');
+paletteHost.showDesktopCommands();
+assert.equal(paletteHost.desktopCommandsDialog, openedDialog, 'Repeated activation cannot open another modal');
+openedDialog.dismiss();
+assert.equal(paletteHost.desktopCommandsOpen, false);
+assert.equal(paletteHost.desktopCommandsDialog, undefined);
+assert.equal(announcementsOffered, 1);
+paletteHost.showDesktopCommands();
+assert.notEqual(paletteHost.desktopCommandsDialog, openedDialog, 'The toolbar can reopen search after outside dismissal');
 
 const frames = [];
 const SearchProbe = probe('views/ChatPanel', 'ChatPanel', ['messageSearchChanged'], {

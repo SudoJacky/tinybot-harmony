@@ -34,11 +34,12 @@ const exportsObject = {};
 const compiled = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: {
   module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021
 } }).outputText;
-vm.runInNewContext(compiled, { AppStorage: { get: () => dark, setOrCreate: (key, value) => storage.set(key, value) },
+vm.runInNewContext(compiled, { AppStorage: { get: key => storage.get(key) ?? dark, setOrCreate: (key, value) => storage.set(key, value) },
   exports: exportsObject, require: id => kits[id] }, { filename: file });
 const ability = new exportsObject.default();
 const backgrounds = [];
-const nativeWindow = { setWindowBackgroundColor: color => backgrounds.push(color), setWindowSystemBarProperties: properties => {
+const nativeWindow = { isInFreeWindowMode: () => false, on: noOp, off: noOp,
+  setWindowBackgroundColor: color => backgrounds.push(color), setWindowSystemBarProperties: properties => {
   colors.push(properties.statusBarContentColor);
   return Promise.resolve();
 } };
@@ -60,20 +61,26 @@ console.log('PASS light/dark startup and both theme transitions while context.co
 
 async function checkPcWindow() {
   pc = true;
-  let listener, limits;
+  let listener, statusListener, limits, freeWindow = true;
   const pcStage = {
     ...stage,
     on(event, callback) { assert.equal(event, 'windowStageLifecycleEvent'); listener = callback; },
     off(event, callback) { assert.equal(event, 'windowStageLifecycleEvent'); assert.equal(callback, listener); listener = undefined; },
     getMainWindowSync: () => ({
       ...nativeWindow,
+      isInFreeWindowMode: () => freeWindow,
+      on(event, callback) { assert.equal(event, 'windowStatusChange'); statusListener = callback; },
+      off(event, callback) { assert.equal(event, 'windowStatusChange'); assert.equal(callback, statusListener); statusListener = undefined; },
       async setWindowLimits(value) { limits = { ...value }; return value; }
     })
   };
   ability.onWindowStageCreate(pcStage);
   ability.onForeground();
   await Promise.resolve();
-  assert.deepEqual(limits, { minWidth: 360, minHeight: 420, pixelUnit: 1 });
+  assert.deepEqual(limits, { minWidth: 360, minHeight: 360, pixelUnit: 1 });
+  assert.equal(storage.get('tinybot.freeWindow'), true);
+  freeWindow = false; statusListener();
+  assert.equal(storage.get('tinybot.freeWindow'), false);
   listener(windowEvents.HIDDEN);
   assert.equal(storage.get('tinybot.pcWindowVisible'), false);
   assert.equal(storage.get('tinybot.foreground'), true);
@@ -84,6 +91,7 @@ async function checkPcWindow() {
   assert.deepEqual(transferForeground, [true], 'Window visibility must not put active transfers in the background');
   ability.onWindowStageWillDestroy(pcStage);
   assert.equal(listener, undefined);
+  assert.equal(statusListener, undefined);
   console.log('PASS PC window limits, visibility, completion notification routing, and listener teardown');
 }
 checkPcWindow().catch(error => { console.error(error); process.exitCode = 1; });

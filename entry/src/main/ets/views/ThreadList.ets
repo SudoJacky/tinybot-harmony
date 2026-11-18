@@ -1,8 +1,7 @@
 import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
-import { IS_LARGE_SCREEN, IS_PC } from '../common/DeviceForm';
 import { t } from '../model/I18n';
-import { FrameCallback, SymbolGlyphModifier } from '@kit.ArkUI';
+import { ColorMetrics, FrameCallback, LengthMetrics, SymbolGlyphModifier } from '@kit.ArkUI';
 import { KeyCode } from '@kit.InputKit';
 import { Diagnostics } from '../model/Diagnostics';
 import { common } from '@kit.AbilityKit';
@@ -18,10 +17,8 @@ import { listWebDavDirectory, WebDavDirectoryEntry } from '../services/WebDavWor
 import { Btn, Font, Motion, Radius, Space, Styles } from '../common/Theme';
 import { Banner, BottomBar, EmptyState, GroupCard, IconButton, NavRow, RowDivider, SectionHeader } from '../common/Widgets';
 
-const SEARCH_HEIGHT: number = IS_PC ? 36 : 44;
-const THREAD_ROW_HEIGHT: number = IS_PC ? 34 : 38;
+const ROW_MENU_SIZE: number = 32;
 const RENAME_CONTROL_HEIGHT: number = 36;
-const ROW_MENU_SIZE: number = IS_PC ? 28 : 32;
 const ROW_MENU_RIGHT_INSET: number = 4;
 
 class ThreadSection {
@@ -39,19 +36,37 @@ struct ThreadRow {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop query: string = '';
   @Prop workbench: boolean = false;
+  @Prop desktop: boolean = false;
   @Prop lastBranch: boolean = false;
   @Prop activePath: boolean = false;
   @Prop conversationActive: boolean = true;
   @Prop selecting: boolean = false;
   @Prop selected: boolean = false;
-  @State private rowHeight: number = THREAD_ROW_HEIGHT;
+  @State private rowHeight: number = 40;
   @ObjectLink thread: ThreadViewModel;
   @ObjectLink app: ChatViewModel;
   onSelected: () => void = () => {};
   onSelectionChanged: (selected: boolean) => void = () => {};
+  onModifiedSelection: (range: boolean, additive: boolean) => void = () => {};
   @State private editing: boolean = false;
   @State private name: string = '';
   @State private hovered: boolean = false;
+  @State private focused: boolean = false;
+  @State private actionsFocused: boolean = false;
+  @State private keyboardMenu: boolean = false;
+
+  private rowMinHeight(): number { return this.desktop ? 36 : 38; }
+
+  private rowKeyEvent(event: KeyEvent): void {
+    if (event.type !== KeyType.Down || this.selecting || this.locked() || this.editing) { return; }
+    if (event.keyCode === KeyCode.KEYCODE_F2) {
+      this.name = this.thread.title; this.editing = true;
+    } else if (event.keyCode === KeyCode.KEYCODE_MENU ||
+      (event.keyCode === KeyCode.KEYCODE_F10 && event.getModifierKeyState?.(['Shift']))) {
+      this.keyboardMenu = true;
+    } else { return; }
+    event.stopPropagation();
+  }
 
   private locked(): boolean {
     return !this.app.canNavigate;
@@ -103,13 +118,18 @@ struct ThreadRow {
         .layoutWeight(1).height(RENAME_CONTROL_HEIGHT)
         .fontSize(15).backgroundColor($r('app.color.surface')).defaultFocus(true)
         .onChange((value: string) => { this.name = value; })
+        .onKeyEvent((event: KeyEvent) => {
+          if (event.type === KeyType.Down && event.keyCode === KeyCode.KEYCODE_ESCAPE) {
+            this.editing = false; event.stopPropagation();
+          }
+        })
         .onSubmit(async () => { if (await this.app.renameThread(this.thread.id, this.name)) { this.editing = false; } })
       IconButton({ icon: $r('sys.symbol.xmark'), label: t("取消"), diameter: RENAME_CONTROL_HEIGHT, iconSize: 18,
         tint: $r('app.color.text_secondary'), onTap: () => { this.editing = false; } })
       IconButton({ icon: $r('sys.symbol.checkmark'), label: t("保存名称"), diameter: RENAME_CONTROL_HEIGHT, iconSize: 18,
         tint: this.appearance.accent, disabled: this.locked(),
         onTap: async () => { if (await this.app.renameThread(this.thread.id, this.name)) { this.editing = false; } } })
-    }.width('100%').padding({ left: Space.sm, right: 4, top: 1, bottom: 1 }).constraintSize({ minHeight: THREAD_ROW_HEIGHT })
+    }.width('100%').padding({ left: Space.sm, right: 4, top: 1, bottom: 1 }).constraintSize({ minHeight: this.rowMinHeight() })
   }
 
   build() {
@@ -138,11 +158,11 @@ struct ThreadRow {
               SymbolGlyph($r('sys.symbol.pin_fill')).fontSize(13).fontColor([this.appearance.accent])
             }
             Column({ space: 2 }) {
-            Text(this.thread.displayTitle).fontFamily(this.appearance.fontFamily).fontSize(IS_PC ? 13 : 15).maxLines(1).width('100%')
+            Text(this.thread.displayTitle).fontFamily(this.appearance.fontFamily).fontSize(this.desktop ? 13 : 15).maxLines(1).width('100%')
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .fontWeight(this.active() ? FontWeight.Medium : FontWeight.Normal)
               .fontColor(this.workbench ? $r('app.color.text_primary') : this.active() ? this.appearance.onAccentContainer : $r('app.color.text_primary'))
-            if (IS_LARGE_SCREEN && this.matchExcerpt()) {
+            if (this.workbench && this.matchExcerpt()) {
               Text(this.matchExcerpt()).fontSize(12).fontColor($r('app.color.text_secondary')).width('100%').maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
             }
@@ -152,28 +172,43 @@ struct ThreadRow {
             Button({ type: ButtonType.Circle }) {
               SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
             }.id('thread-actions-' + this.thread.id).fontFamily(this.appearance.fontFamily)
-            .width(ROW_MENU_SIZE).height(ROW_MENU_SIZE).margin({ left: Space.sm })
+            .width(32).height(32).margin({ left: Space.xs })
             .backgroundColor(Color.Transparent).accessibilityText(t("对话管理"))
+            .bindTips(t('对话管理') + ' · Shift+F10', { appearingTime: 550 })
+            .opacity(!this.desktop || this.active() || this.hovered || this.focused || this.actionsFocused ? 1 : 0)
+            .hitTestBehavior(!this.desktop || this.active() || this.hovered ? HitTestMode.Default : HitTestMode.None)
+            .onFocus(() => { this.actionsFocused = true; }).onBlur(() => { this.actionsFocused = false; })
             .enabled(!this.locked()).bindMenu(this.actions, {
               systemMaterial: this.appearance.menu, mask: false })
           }
         }
         .width('100%').padding({ left: this.workbench && !this.thread.parentThreadId ? 28 : Space.md, right: ROW_MENU_RIGHT_INSET,
-          top: 3, bottom: 3 }).constraintSize({ minHeight: THREAD_ROW_HEIGHT })
+          top: this.desktop ? 2 : 3, bottom: this.desktop ? 2 : 3 }).constraintSize({ minHeight: this.rowMinHeight() })
         .focusable(!this.locked())
-        .onClick(async () => {
+        .accessibilitySelected(this.selecting ? this.selected : this.active())
+        .focusOnTouch(false).focusBox({ strokeWidth: LengthMetrics.vp(2), strokeColor: ColorMetrics.resourceColor(this.appearance.accent),
+          margin: LengthMetrics.vp(-2) })
+        .onFocus(() => { this.focused = true; }).onBlur(() => { this.focused = false; })
+        .onKeyEvent((event: KeyEvent) => this.rowKeyEvent(event))
+        .onClick(async (event: ClickEvent) => {
           if (this.locked()) { return; }
+          const range = event?.getModifierKeyState?.(['Shift']) === true;
+          const additive = event?.getModifierKeyState?.(['Ctrl']) === true;
+          if (range || additive) { this.onModifiedSelection(range, additive); return; }
           if (this.selecting) { this.onSelectionChanged(!this.selected); return; }
           if (this.query.trim() ? await this.app.openMessage(this.thread.id, this.matchId(), this.query.trim()) : await this.app.selectThread(this.thread.id)) { this.onSelected(); }
         })
-        .bindContextMenu(this.actions, IS_PC ? ResponseType.RightClick : ResponseType.LongPress, {
+        .bindContextMenu(this.actions, ResponseType.LongPress, {
           systemMaterial: this.appearance.menu, mask: false })
       }
     }
     .width(this.workbench && !this.thread.parentThreadId ? '100%' : 'calc(100% - 28vp)').borderRadius(this.workbench ? 10 : Radius.md)
     .backgroundColor((this.selecting ? this.selected : this.active()) ? $r('app.color.selection')
-      : IS_PC && this.hovered && !this.locked() ? $r('app.color.surface_variant') : Color.Transparent)
-    .onHover((hovered: boolean) => { if (IS_PC) { this.hovered = hovered; } })
+      : this.hovered && !this.locked() ? $r('app.color.surface_variant') : Color.Transparent)
+    .animation({ duration: this.appearance.effectStrength > 0 ? Motion.desktop : 0, curve: Motion.standard })
+    .onHover((hovered: boolean) => { this.hovered = hovered; })
+    .bindMenu(this.keyboardMenu, this.actions, { systemMaterial: this.appearance.menu, mask: false,
+      onDisappear: () => { this.keyboardMenu = false; } })
     .opacity(this.locked() && !this.active() ? 0.6 : 1)
     .onAreaChange((_old: Area, area: Area) => { this.rowHeight = Number(area.height); })
     Shape() {
@@ -189,6 +224,7 @@ struct ThreadRow {
       .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
       .visibility(this.workbench && !this.thread.parentThreadId ? Visibility.None : Visibility.Visible)
     }.id('thread-row-' + this.thread.id).width('100%')
+      .bindContextMenu(this.actions, ResponseType.RightClick, { systemMaterial: this.appearance.menu, mask: false })
   }
 }
 
@@ -205,9 +241,10 @@ export struct ThreadList {
   @Prop @Watch('searchAvailabilityChanged') active: boolean = true;
   @StorageProp('tinybot.foreground') @Watch('searchAvailabilityChanged') private foreground: boolean = true;
   @Prop workbench: boolean = false;
+  @Prop desktop: boolean = false;
   @Prop @Watch('searchRequested') searchRequest: number = 0;
   @State @Watch('searchVisibilityChanged') private searchOpen: boolean = false;
-  @State private toolbarWidth: number = SEARCH_HEIGHT;
+  @State private toolbarWidth: number = 44;
   private mounted: boolean = false;
   private focusRequest: number = 0;
   onNewChat: (projectId?: string) => void = () => {};
@@ -222,6 +259,7 @@ export struct ThreadList {
   @State private archived: boolean = false;
   @State private projectFilter: string | null = null;
   @State private selecting: boolean = false;
+  private selectionAnchor: string = '';
   @State private selectedIds: string[] = [];
   @State private visibleCounts: Record<string, number> = {};
   @State private collapsedProjects: string[] = [];
@@ -274,6 +312,7 @@ export struct ThreadList {
     this.query = query;
     this.visibleCounts = {};
     this.selectedIds = [];
+    this.selectionAnchor = '';
   }
 
   private setScope(archived: boolean, project: string | null): void {
@@ -282,6 +321,7 @@ export struct ThreadList {
     this.projectFilter = project;
     this.visibleCounts = {};
     this.selectedIds = [];
+    this.selectionAnchor = '';
   }
 
   private filtered(): ThreadViewModel[] {
@@ -297,11 +337,28 @@ export struct ThreadList {
     return projects.has(project) ? project : '';
   }
   private locked(): boolean { return !this.app.canNavigate; }
-  private endSelection(): void { this.selecting = false; this.selectedIds = []; }
+  private endSelection(): void { this.selecting = false; this.selectedIds = []; this.selectionAnchor = ''; }
   private selectThread(id: string, selected: boolean): void {
     if (this.locked()) { return; }
+    this.selectionAnchor = id;
     this.selectedIds = this.selectedIds.filter((item) => item !== id);
     if (selected) { this.selectedIds = this.selectedIds.concat(id); }
+  }
+
+  private modifySelection(id: string, range: boolean, additive: boolean, visible: string[]): void {
+    if (this.locked()) { return; }
+    this.selecting = true;
+    if (!range) { this.selectThread(id, !this.selectedIds.includes(id)); return; }
+    const end = visible.indexOf(id);
+    const start = visible.indexOf(this.selectionAnchor || this.app.active.id);
+    const ids = start < 0 || end < 0 ? [id] : visible.slice(Math.min(start, end), Math.max(start, end) + 1);
+    if (!this.selectionAnchor || start < 0) { this.selectionAnchor = start < 0 ? id : visible[start]; }
+    this.selectedIds = additive ? Array.from(new Set(this.selectedIds.concat(ids))) : ids;
+  }
+
+  private visibleThreadIds(): string[] {
+    return this.sections(this.filtered()).filter(section => this.groupOpen(section.id)).flatMap(section =>
+      this.sectionThreads(section.id).slice(0, this.visibleCount(section.id)).map(thread => thread.id));
   }
   private allSelected(): boolean {
     const threads = this.filtered();
@@ -673,7 +730,7 @@ export struct ThreadList {
   @Builder
   projectActions(id: string) {
     Menu() {
-      if (IS_PC && !this.archived) {
+      if (this.desktop && !this.archived) {
         MenuItem(() => materialMenuContent.bind(this)({ label: t('在此项目中新建对话'), icon: $r('sys.symbol.square_and_pencil') }))
           .enabled(!this.locked()).onClick(() => this.onNewChat(id))
       }
@@ -689,7 +746,7 @@ export struct ThreadList {
     Menu() {
       MenuItem(() => materialMenuContent.bind(this)({ label: t('对话'), selected: !this.archived }))
         .id('active-threads').onClick(() => this.setScope(false, this.projectFilter))
-      MenuItem(() => materialMenuContent.bind(this)({ label: IS_LARGE_SCREEN ?
+      MenuItem(() => materialMenuContent.bind(this)({ label: this.workbench ?
         t('已归档 · {0}', [this.app.filteredThreads('', true).length]) : t('已归档'), selected: this.archived }))
         .id('archived-threads').onClick(() => this.setScope(true, this.projectFilter))
       MenuItemGroup() {
@@ -713,6 +770,8 @@ export struct ThreadList {
     }
   }
 
+  private searchHeight(): number { return this.desktop ? 36 : 44; }
+
   @Builder
   searchControl() {
     Row() {
@@ -720,13 +779,13 @@ export struct ThreadList {
         SymbolGlyph($r('sys.symbol.magnifyingglass')).fontSize(19)
           .fontColor([$r('app.color.text_secondary')]).accessibilityLevel('no')
         if (!this.searchOpen) {
-          Button({ type: ButtonType.Circle }).id('thread-search-toggle').width(SEARCH_HEIGHT).height(SEARCH_HEIGHT)
+          Button({ type: ButtonType.Circle }).id('thread-search-toggle').width(this.searchHeight()).height(this.searchHeight())
             .backgroundColor(Color.Transparent).accessibilityText(t('搜索对话')).enabled(!this.locked())
             .onClick(() => this.searchRequested())
         }
-      }.width(SEARCH_HEIGHT).height(SEARCH_HEIGHT).flexShrink(0)
+      }.width(this.searchHeight()).height(this.searchHeight()).flexShrink(0)
       TextInput({ text: this.query, placeholder: t('搜索对话') })
-        .id('search-threads').layoutWeight(1).height(SEARCH_HEIGHT).padding(0)
+        .id('search-threads').layoutWeight(1).height(this.searchHeight()).padding(0)
         .fontFamily(this.appearance.fontFamily).fontSize(15).placeholderColor($r('app.color.text_tertiary'))
         .backgroundColor(Color.Transparent).enabled(this.searchOpen && !this.locked())
         .focusable(this.searchOpen)
@@ -740,10 +799,10 @@ export struct ThreadList {
         })
       if (this.searchOpen) {
         IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭搜索'), compId: 'close-thread-search',
-          diameter: SEARCH_HEIGHT, iconSize: 15, onTap: () => this.closeSearch() })
+          diameter: this.searchHeight(), iconSize: 15, onTap: () => this.closeSearch() })
       }
-    }.id('thread-search-pill').width(this.searchOpen ? this.toolbarWidth : SEARCH_HEIGHT).height(SEARCH_HEIGHT)
-      .borderRadius(SEARCH_HEIGHT / 2).clip(true).backgroundColor($r('app.color.surface_variant'))
+    }.id('thread-search-pill').width(this.searchOpen ? this.toolbarWidth : this.searchHeight()).height(this.searchHeight())
+      .borderRadius(this.searchHeight() / 2).clip(true).backgroundColor($r('app.color.surface_variant'))
       .animation({ duration: Motion.fast, curve: Motion.standard })
   }
 
@@ -753,30 +812,30 @@ export struct ThreadList {
       Row({ space: Space.sm }) {
         Text(t('已选中 {0} 个会话', [this.selectedIds.length])).fontFamily(this.appearance.fontFamily).id('thread-selection-count')
           .fontSize(Font.small).fontColor($r('app.color.text_secondary')).layoutWeight(1)
-        IconButton({ icon: $r('sys.symbol.xmark'), label: t('取消'), compId: 'thread-selection-cancel', diameter: SEARCH_HEIGHT,
+        IconButton({ icon: $r('sys.symbol.xmark'), label: t('取消'), compId: 'thread-selection-cancel', diameter: this.searchHeight(),
           iconSize: 17, onTap: () => this.endSelection() })
-      }.width('100%').height(SEARCH_HEIGHT)
+      }.width('100%').height(this.searchHeight())
     } else {
       Stack({ alignContent: Alignment.Start }) {
         Row() {
           Blank().layoutWeight(1)
           IconButton({ icon: $r('sys.symbol.square_grid_2x2'), label: t('生活看板'), compId: 'open-life-panels',
-            diameter: SEARCH_HEIGHT, iconSize: 19, disabled: !this.app.ready, onTap: this.onLifePanels })
+            diameter: this.searchHeight(), iconSize: 19, disabled: !this.app.ready, onTap: this.onLifePanels })
           Button({ type: ButtonType.Circle }) {
             SymbolGlyph($r('sys.symbol.list_bullet')).fontSize(18)
               .fontColor([this.archived || this.projectFilter !== null ? this.appearance.accent : $r('app.color.text_secondary')])
-          }.id('thread-scope-menu').width(SEARCH_HEIGHT).height(SEARCH_HEIGHT)
+          }.id('thread-scope-menu').width(this.searchHeight()).height(this.searchHeight())
             .backgroundColor(this.archived || this.projectFilter !== null ? this.appearance.accentContainer : Color.Transparent)
             .accessibilityText(t('筛选对话')).enabled(!this.locked())
             .bindMenu(this.scopeMenu, { systemMaterial: this.appearance.menu, mask: false })
           IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('新建对话'), compId: 'workbench-new-chat',
-            diameter: SEARCH_HEIGHT, iconSize: 19, disabled: this.locked(), onTap: () => this.onNewChat(
-              this.projectFilter === null && IS_LARGE_SCREEN ? this.app.activeProject?.id : this.projectFilter || undefined) })
-        }.width('100%').height(SEARCH_HEIGHT).enabled(!this.searchOpen)
+            diameter: this.searchHeight(), iconSize: 19, disabled: this.locked(), onTap: () => this.onNewChat(
+              this.projectFilter === null && this.workbench ? this.app.activeProject?.id : this.projectFilter || undefined) })
+        }.width('100%').height(this.searchHeight()).enabled(!this.searchOpen)
           .accessibilityLevel(this.searchOpen ? 'no-hide-descendants' : 'auto')
         this.searchControl()
-      }.width('100%').height(SEARCH_HEIGHT)
-        .onAreaChange((_oldArea: Area, area: Area) => { this.toolbarWidth = Math.max(SEARCH_HEIGHT, Number(area.width)); })
+      }.width('100%').height(this.searchHeight())
+        .onAreaChange((_oldArea: Area, area: Area) => { this.toolbarWidth = Math.max(this.searchHeight(), Number(area.width)); })
     }
   }
 
@@ -794,16 +853,16 @@ export struct ThreadList {
           Text(this.sectionTitle(id)).fontFamily(this.appearance.fontFamily).fontSize(14).fontWeight(FontWeight.Medium).maxLines(1).layoutWeight(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .fontColor((this.app.active.projectId || '') === id ? this.appearance.accent : $r('app.color.text_secondary'))
-          if (IS_PC) {
+          if (this.desktop) {
             SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(10).fontColor([$r('app.color.text_tertiary')])
               .rotate({ angle: this.groupOpen(id) ? 0 : -90 }).accessibilityLevel('no')
           }
         }.width('100%')
-      }.fontFamily(this.appearance.fontFamily).id('project-group-' + (id || 'ordinary')).layoutWeight(1).height(THREAD_ROW_HEIGHT).padding({ right: 4 })
+      }.fontFamily(this.appearance.fontFamily).id('project-group-' + (id || 'ordinary')).layoutWeight(1).height((this.desktop ? 36 : 38)).padding({ right: 4 })
         .backgroundColor(Color.Transparent).borderRadius(10).onClick(() => this.toggleGroup(id))
         .accessibilityText(this.sectionTitle(id) + '，' + (this.groupOpen(id) ? t('收起') : t('展开')))
       if (!this.selecting) {
-        if (IS_PC && id && !this.archived) {
+        if (this.desktop && id && !this.archived) {
           Button({ type: ButtonType.Normal }) {
             SymbolGlyph($r('sys.symbol.plus')).fontSize(14).fontColor([$r('app.color.text_secondary')])
           }.id('pc-new-chat-in-' + id).width(ROW_MENU_SIZE).height(ROW_MENU_SIZE).padding(0).borderRadius(8)
@@ -859,9 +918,11 @@ export struct ThreadList {
               ListItemGroup({ header: this.sectionHeader(id), space: 0 }) {
                 if (this.groupOpen(id)) {
                   ForEach(this.sectionThreads(id).slice(0, this.visibleCount(id)), (thread: ThreadViewModel) => {
-                    ListItem() { ThreadRow({ thread: thread, app: this.app, conversationActive: this.selectedSection === '', workbench: this.workbench, query: this.query, onSelected: () => { this.closeSearch(); this.onSelected(); },
+                    ListItem() { ThreadRow({ thread: thread, app: this.app, conversationActive: this.selectedSection === '', workbench: this.workbench, desktop: this.desktop, query: this.query, onSelected: () => { this.closeSearch(); this.onSelected(); },
                       selecting: this.selecting, selected: this.selectedIds.includes(thread.id),
                       onSelectionChanged: (selected: boolean) => this.selectThread(thread.id, selected),
+                      onModifiedSelection: (range: boolean, additive: boolean) => this.modifySelection(thread.id, range, additive,
+                        range ? this.visibleThreadIds() : []),
                       lastBranch: this.lastBranch(id, thread.id),
                       activePath: this.onActivePath(id, thread.id) }) }
                       .transition(TransitionEffect.OPACITY.animation({ duration: Motion.fast, curve: Motion.standard }))
@@ -879,8 +940,8 @@ export struct ThreadList {
                 }
               }
             }, (id: string) => id || 'ordinary')
-        }.id('project-thread-tree').layoutWeight(1).width('100%').scrollBar(IS_PC ? BarState.Auto : BarState.Off)
-        .edgeEffect(IS_PC ? EdgeEffect.None : EdgeEffect.Spring)
+        }.id('project-thread-tree').layoutWeight(1).width('100%').scrollBar(this.desktop ? BarState.Auto : BarState.Off)
+        .edgeEffect(this.desktop ? EdgeEffect.None : EdgeEffect.Spring)
       }
       if (this.app.saveError.length > 0) {
         Banner({ text: this.app.saveError, actionLabel: t("重试"), actionEnabled: !this.app.sharedBusy,
@@ -904,18 +965,23 @@ export struct ThreadList {
           SymbolGlyph($r('sys.symbol.gearshape')).fontSize(20).fontColor([$r('app.color.text_secondary')])
           Text(t('设置')).fontFamily(this.appearance.fontFamily).fontSize(15).layoutWeight(1)
             .fontColor($r('app.color.text_primary')).maxLines(1)
-          if (!IS_LARGE_SCREEN) {
+          if (!this.workbench) {
             Text(t('已配置 {0} 个模型服务', [this.app.providerProfiles.length])).fontFamily(this.appearance.fontFamily)
               .fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
             SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(14).fontColor([$r('app.color.text_tertiary')])
           }
-        }.id('open-settings').width('100%').height(IS_PC ? 36 : 48).padding({ left: Space.sm, right: Space.sm }).borderRadius(Radius.md)
+        }.id('open-settings').width('100%').height(this.desktop ? 36 : 48).padding({ left: Space.sm, right: Space.sm }).borderRadius(Radius.md)
           .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
           .onClick(this.onSettings)
       }
     }
     .padding({ left: Space.md, right: Space.md, top: Space.sm, bottom: Space.sm })
     .height('100%').width('100%').backgroundColor($r('app.color.page_background'))
+    .onKeyEvent((event: KeyEvent) => {
+      if (this.selecting && event.type === KeyType.Down && event.keyCode === KeyCode.KEYCODE_ESCAPE) {
+        this.endSelection(); event.stopPropagation();
+      }
+    })
     .bindSheet($$this.projectEditing, this.projectEditor(), { radius: Radius.sheet, title: {
       title: this.cloudPath.length > 0 ? t('选择云端文件夹') : this.choosingCloudConnection ? t('选择 WebDAV 连接') :
         this.projectId ? t('编辑项目') : t('新建项目') },

@@ -77,6 +77,8 @@
   "点选页面元素": "Select an element on the page",
   "查看预览": "View preview",
   "打开预览": "Open preview",
+  "在侧栏打开预览": "Open preview in sidebar",
+  "切换侧栏页签": "Switch sidebar tab",
   "添加批注": "Add annotation",
   "编辑批注": "Edit annotation",
   "删除批注": "Delete annotation",

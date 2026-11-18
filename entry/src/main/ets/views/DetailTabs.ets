@@ -1,3 +1,4 @@
+import { ColorMetrics, LengthMetrics } from '@kit.ArkUI';
 import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
@@ -5,6 +6,8 @@ import { Motion, Radius, Space } from '../common/Theme';
 import { IconButton } from '../common/Widgets';
 import { AnimatedIcon } from '../common/AnimatedIcon';
 import { AnimatedIconName } from '../common/IconArtwork';
+
+const TAB_LABEL_WIDTH: number = 150;
 
 export class DetailTabItem {
   id: string;
@@ -32,6 +35,7 @@ export struct DetailTabs {
   @Prop sideChatAvailable: boolean = false;
   @Prop touch: boolean = false;
   @State private hoveredTab: string = '';
+  @State private stripWidth: number = 0;
   onSelect: (id: string) => void = () => {};
   onClose: (id: string) => void = () => {};
   onAddFiles: () => void = () => {};
@@ -39,6 +43,20 @@ export struct DetailTabs {
   onAddSideChat: () => void = () => {};
   onCollapse: () => void = () => {};
   onMaximize: () => void = () => {};
+
+  private useTabPicker(): boolean {
+    const controlCount = 1 + (this.showMaximize ? 1 : 0) + (this.showCollapse ? 1 : 0);
+    const controlWidth = this.touch ? 44 : 32;
+    const fullWidth = this.tabs.length * (TAB_LABEL_WIDTH + 41) + controlWidth + controlCount * (controlWidth + 4) + 12;
+    return this.compact || (this.stripWidth > 0 && this.tabs.length > 1 && this.stripWidth < fullWidth);
+  }
+
+  private tabFocus(id: string): FocusMovement {
+    const index = this.tabs.findIndex(tab => tab.id === id);
+    const left = this.tabs[index - 1];
+    const right = this.tabs[index + 1];
+    return { left: left ? 'detail-tab-' + left.id : '', right: right ? 'detail-tab-' + right.id : '' };
+  }
 
   @Builder
   addMenu() {
@@ -56,31 +74,39 @@ export struct DetailTabs {
 
   @Builder
   chip(tab: DetailTabItem) {
-    Row({ space: 6 }) {
-      AnimatedIcon({ iconName: tab.icon, iconSize: 15, selected: this.active === tab.id,
-        interacting: this.hoveredTab === tab.id,
-        tint: this.active === tab.id ? this.appearance.accent : $r('app.color.text_secondary') })
-      Text(tab.label).fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis }).constraintSize({ maxWidth: 150 })
-        .fontColor(this.active === tab.id ? $r('app.color.text_primary') : $r('app.color.text_secondary'))
+    Row() {
+      Button({ type: ButtonType.Normal }) {
+        Row({ space: 6 }) {
+          AnimatedIcon({ iconName: tab.icon, iconSize: 15, selected: this.active === tab.id,
+            interacting: this.hoveredTab === tab.id,
+            tint: this.active === tab.id ? this.appearance.accent : $r('app.color.text_secondary') })
+          Text(tab.label).fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis }).constraintSize({ maxWidth: TAB_LABEL_WIDTH })
+            .fontColor(this.active === tab.id ? $r('app.color.text_primary') : $r('app.color.text_secondary'))
+        }.accessibilityLevel('no-hide-descendants')
+      }.id('detail-tab-' + tab.id).height(this.touch ? 44 : 32).padding({ left: 10, right: this.active === tab.id ? 4 : 10 })
+        .borderRadius(Radius.sm).backgroundColor(Color.Transparent).focusOnTouch(false).nextFocus(this.tabFocus(tab.id))
+        .focusBox({ strokeWidth: LengthMetrics.vp(2), strokeColor: ColorMetrics.resourceColor(this.appearance.accent),
+          margin: LengthMetrics.vp(-2) })
+        .accessibilityText(tab.label).accessibilitySelected(this.active === tab.id)
+        .bindTips(tab.label, { appearingTime: 550 }).onClick(() => this.onSelect(tab.id))
       if (this.active === tab.id) {
         Button({ type: ButtonType.Circle }) {
           SymbolGlyph($r('sys.symbol.xmark')).fontSize(12).fontColor([$r('app.color.text_secondary')])
-        }.id('detail-tab-close-' + tab.id).width(this.touch ? 40 : 20).height(this.touch ? 40 : 20).padding(0).backgroundColor(Color.Transparent)
+        }.id('detail-tab-close-' + tab.id).width(this.touch ? 40 : 26).height(this.touch ? 40 : 26).padding(0).backgroundColor(Color.Transparent)
           .accessibilityText(t('关闭') + ' · ' + tab.label)
+          .bindTips(t('关闭') + ' · ' + tab.label, { appearingTime: 550 })
           .onClick(() => this.onClose(tab.id))
       }
     }
-    .id('detail-tab-' + tab.id).height(this.touch ? 44 : 32).padding({ left: 10, right: this.active === tab.id ? 4 : 10 })
-    .borderRadius(Radius.sm).backgroundColor(this.active === tab.id ? $r('app.color.surface') : Color.Transparent)
+    .height(this.touch ? 44 : 32).padding({ right: this.active === tab.id ? 4 : 0 })
+    .borderRadius(Radius.sm).backgroundColor(this.active === tab.id ? $r('app.color.surface') :
+      this.hoveredTab === tab.id ? $r('app.color.surface_variant') : Color.Transparent)
     .border({ width: this.active === tab.id ? 0.5 : 0, color: $r('app.color.divider') })
-    .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) },
-      normal: { .backgroundColor(this.active === tab.id ? $r('app.color.surface') : Color.Transparent) } })
     .onHover((hovered: boolean) => {
       if (hovered) { this.hoveredTab = tab.id; }
       else if (this.hoveredTab === tab.id) { this.hoveredTab = ''; }
     })
-    .onClick(() => this.onSelect(tab.id))
   }
 
   @Builder
@@ -101,10 +127,14 @@ export struct DetailTabs {
           Text(this.tabs.find((tab: DetailTabItem) => tab.id === this.active)?.label || t('详情'))
             .fontFamily(this.appearance.fontFamily).fontSize(14).maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary')).layoutWeight(1)
-          SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(12).fontColor([$r('app.color.text_secondary')])
+          if (this.tabs.length > 1) {
+            SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(12).fontColor([$r('app.color.text_secondary')])
+          }
         }.width('100%')
       }.id('detail-switch-tab').height(40).layoutWeight(1).borderRadius(Radius.sm)
         .backgroundColor(Color.Transparent).enabled(this.tabs.length > 1)
+        .accessibilityText(t('切换侧栏页签') + ' · ' + (this.tabs.find(tab => tab.id === this.active)?.label || t('详情')))
+        .bindTips(t('切换侧栏页签'), { appearingTime: 550 })
         .bindMenu(this.switchMenu, { systemMaterial: this.appearance.menu, mask: false })
       IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭') + ' · ' +
         (this.tabs.find((tab: DetailTabItem) => tab.id === this.active)?.label || t('详情')), compId: 'detail-close-active',
@@ -119,6 +149,7 @@ export struct DetailTabs {
       SymbolGlyph($r('sys.symbol.plus')).fontSize(16).fontColor([$r('app.color.text_secondary')])
     }.id('detail-add-tab').width(this.touch ? 44 : 32).height(this.touch ? 44 : 32).padding(0).backgroundColor(Color.Transparent)
       .clickEffect(Motion.pressSmall).accessibilityText(t('添加侧栏面板'))
+      .bindTips(t('添加侧栏面板'), { appearingTime: 550 })
       .bindMenu(this.addMenu, { systemMaterial: this.appearance.menu, mask: false })
     if (this.showMaximize) {
       IconButton({ icon: this.maximized ? $r('sys.symbol.close_sidebar') : $r('sys.symbol.arrow_up_left_and_arrow_down_right'),
@@ -134,18 +165,20 @@ export struct DetailTabs {
     Row({ space: 4 }) {
       Scroll() {
         Row({ space: 4 }) {
-          ForEach(this.tabs, (tab: DetailTabItem) => { this.chip(tab) }, (tab: DetailTabItem) => tab.id + ':' + tab.label)
+          ForEach(this.tabs, (tab: DetailTabItem) => { this.chip(tab) },
+            (tab: DetailTabItem) => tab.id + ':' + tab.label)
         }.padding({ left: Space.sm })
       }.layoutWeight(1).scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).align(Alignment.Start)
       this.trailingControls()
-    }.width('100%').height(48).padding({ right: 4 })
+    }.width('100%').height(this.touch ? 48 : 42).padding({ right: 4 })
   }
 
   build() {
     Column() {
-      if (this.compact) { this.compactBar() }
+      if (this.useTabPicker()) { this.compactBar() }
       else { this.dockedBar() }
       Divider().strokeWidth(0.5).color($r('app.color.divider'))
     }.width('100%').backgroundColor($r('app.color.page_background'))
+      .onAreaChange((_old: Area, area: Area) => { this.stripWidth = Number(area.width); })
   }
 }

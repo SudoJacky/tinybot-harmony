@@ -144,6 +144,7 @@ export struct SwipeRow {
       }
         .width('100%').translate({ x: -this.reveal })
         .onAreaChange((_old: Area, area: Area) => { this.rowHeight = Number(area.height); })
+        .bindContextMenu(this.actionsMenu, ResponseType.LongPress, { systemMaterial: this.appearance.menu, mask: false })
       // Add a tap-to-close cover only after release. Changing the content's hit test
       // during the pan would cancel the recognizer which owns that gesture.
       if (!this.dragging && this.reveal > 1) {
@@ -158,7 +159,7 @@ export struct SwipeRow {
       this.rowWidth = width;
     })
     .onVisibleAreaChange([0], (visible: boolean) => { if (!visible) { this.stop(); this.reveal = 0; this.dragging = false; } })
-    .bindContextMenu(this.actionsMenu, IS_PC ? ResponseType.RightClick : ResponseType.LongPress, {
+    .bindContextMenu(this.actionsMenu, ResponseType.RightClick, {
       systemMaterial: this.appearance.menu, mask: false })
     .priorityGesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Horizontal, distance: 12 })
       .onActionStart((event: GestureEvent) => this.start(event))
