@@ -133,7 +133,10 @@ export struct BackupPanel {
       if (!this.deviceStore) { this.deviceStore = await DeviceSyncStore.open(context); }
       this.sending = sending; this.devices = devices;
       if (!devices.length) { this.status = t('未发现可信设备，请确认两端已组网并安装 Tinybot。'); }
-    } catch (error) { this.error = (error as Error).message; }
+    } catch (error) {
+      this.error = (error as Error).message;
+      Diagnostics.log('error', 'sync', 'device_discovery_failed', undefined, error as Error);
+    }
     finally { this.busy = false; if (!this.visible) { await this.closeDeviceStore(); } }
   }
 

@@ -39,6 +39,7 @@ const { attachmentContext } = from('model/AttachmentContext');
 const { renderBrowserAnnotation, captureBrowserDraft } = from('services/BrowserAnnotationImage');
 const { requestHistory } = from('model/Conversation');
 const { threadEntries } = from('model/ContextProjection');
+const { threadAttachments } = from('model/ThreadAttachments');
 const { Fixture, Gate } = load(path.join(root, 'test/SessionService.test'));
 const photo = id => ({ id, name: 'Web page annotation.jpg', mime: 'image/jpeg', path: id + '.jpg', size: 120 });
 const note = 'Make this larger';
@@ -121,17 +122,13 @@ const deadline = setTimeout(() => { console.error('Annotation test stalled'); pr
   assert.equal(hydrated.content, '\n\n' + text);
   assert.equal(hydrated.images[0], 'data:image/jpeg;base64,AQ==');
   assert.equal(prompt.content, '');
-  const backupTree = ts.createSourceFile('Backup.ets', fs.readFileSync(path.join(root, 'main/ets/services/Backup.ets'), 'utf8'), ts.ScriptTarget.Latest, true);
-  const collect = backupTree.statements.find(node => ts.isFunctionDeclaration(node) && node.name.text === 'threadAttachments');
-  const backupScope = { exports: {}, toolReceipts: from('model/Agent').toolReceipts };
-  vm.runInNewContext(compile(collect.getText(backupTree) + '\nexports.collect = threadAttachments;'), backupScope);
   thread.pendingInputs = [{ id: 'pending-image', mode: 'followUp', text, attachments: [photo('pending-backup')] }];
   thread.messages[1].steps.push({ content: '', tools: [{ call: { id: 'backup-orchestrate', type: 'function',
     function: { name: 'orchestrate', arguments: '{}' } }, status: 'failed', output: '{}', children: [{
       call: { id: 'backup-preview', type: 'function', function: { name: 'publish_preview', arguments: '{}' } },
       status: 'complete', output: '{}', previewScreenshot: { image: photo('nested-preview'), width: 360, height: 240, viewportWidth: 360 }
     }] }] });
-  const backupImages = backupScope.exports.collect(thread).map(item => item.id);
+  const backupImages = threadAttachments(thread).map(item => item.id);
   assert.ok(backupImages.includes('annotation')); assert.ok(backupImages.includes('pending-backup')); assert.ok(backupImages.includes('queued'));
   assert.ok(backupImages.includes('nested-preview'), 'Committed child screenshots are included even if their orchestration failed');
   console.log('PASS running-session annotation staging preserves drafts, requires explicit submission and delivers images in steering, follow-ups, replay and persisted history');
